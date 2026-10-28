@@ -7413,7 +7413,7 @@ mod components {
                 EventKind::NativeEvent,
                 EventPayload::Native {
                     name: "innerTap".into(),
-                    data: json!(1)
+                    data: json!({ "value": 1 })
                 }
             )]
         );
@@ -11184,7 +11184,7 @@ mod views {
         let events = js_events(&mut c);
         assert!(events.iter().any(|(id, kind, payload)| *id == 2
             && *kind == EventKind::NativeEvent
-            && matches!(payload, EventPayload::Native { name, data } if &**name == "tap" && *data == json!(1))));
+            && matches!(payload, EventPayload::Native { name, data } if &**name == "tap" && *data == json!({ "value": 1 }))));
     }
 
     /// Shows one branch or the other.

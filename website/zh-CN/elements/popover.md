@@ -67,12 +67,12 @@ function Details() {
 
 ## 打开状态
 
-没有 `open` 时，弹出框自己保存状态，初始值为 `defaultOpen`。有 `open` 时，状态由应用持有：在 `onOpenChange(open, reason)` 中修改它，每次打开或关闭的请求都会带着原因（`"triggerPress"`、`"pressOutside"`、`"cancel"`）报告给它。
+没有 `open` 时，弹出框自己保存状态，初始值为 `defaultOpen`。有 `open` 时，状态由应用持有：在 `onOpenChange({ open, reason })` 中修改它，每次打开或关闭的请求都会带着原因（`"triggerPress"`、`"pressOutside"`、`"cancel"`）报告给它。
 
 ```tsx
 const open = signal(false);
 
-<Popover open={open()} onOpenChange={(next) => open.set(next)} trigger={<Text>Filters</Text>}>
+<Popover open={open()} onOpenChange={(e) => open.set(e.open)} trigger={<Text>Filters</Text>}>
   <FilterForm onApply={() => open.set(false)} />
 </Popover>
 ```

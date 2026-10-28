@@ -256,17 +256,14 @@ pub struct PropSpec {
 pub struct EventSpec {
     /// Its name (`press`: the handler is `onPress`).
     pub name: &'static str,
-    /// The name of the handler's argument in TypeScript (`value`, or what
-    /// `#[args(..)]` on the variant says; unused without data).
+    /// The name of the handler's one argument in TypeScript (`event`;
+    /// unused without data).
     pub arg: &'static str,
-    /// The TypeScript type of its data (`void` for none).
+    /// The TypeScript type of its data (`void` for none), one object
+    /// (`docs/dev/api-naming.md` "Payloads").
     pub data: String,
     /// Documentation.
     pub doc: &'static str,
-    /// The handler takes several arguments (`#[args(open, reason)]` on a
-    /// variant of as many fields): `data` is their list (`open: boolean,
-    /// reason: …`), the data a JS array of them.
-    pub spread: bool,
 }
 
 /// A component's props. Derive it: `#[derive(Props)]`.
@@ -358,12 +355,6 @@ pub trait Event: 'static {
 
     /// Its data as a JS value of `host` (converted when JS hears it).
     fn data_js<'a>(&self, host: &'a dyn JsHost) -> Result<JsOwned<'a>, PropError>;
-
-    /// The handler takes the items of the data (an array) as its
-    /// arguments ([`EventSpec::spread`]).
-    fn spread(&self) -> bool {
-        false
-    }
 }
 
 /// The events of a component that has none.
@@ -1309,8 +1300,6 @@ pub fn declarations(registry: &Registry, omit: &[&str]) -> String {
             let handler = handler_name(e.name);
             let arg = if e.data == "void" {
                 String::new()
-            } else if e.spread {
-                e.data.clone()
             } else {
                 format!("{}: {}", e.arg, e.data)
             };
@@ -1607,7 +1596,7 @@ mod tests {
             "  /** Above the control. */\n  label?: JSX.Element;",
             "  children?: JSX.Element;",
             "  /** The value changed. */\n  onChange?: (event: { newValue: number }) => void;",
-            "  onLimit?: (limit: number) => void;",
+            "  onLimit?: (event: { limit: number }) => void;",
             "  onReset?: () => void;",
             "/** Picks a number. */",
             "export interface StepperRef {",
@@ -1649,7 +1638,10 @@ mod tests {
             data(&StepperEvent::Change { new_value: 2.5 }),
             Some(serde_json::json!({ "newValue": 2.5 }))
         );
-        assert_eq!(data(&StepperEvent::Limit(3)), Some(serde_json::json!(3)));
+        assert_eq!(
+            data(&StepperEvent::Limit(3)),
+            Some(serde_json::json!({ "limit": 3 }))
+        );
         assert_eq!(data(&StepperEvent::Reset), None);
         assert_eq!(StepperEvent::Reset.name(), "reset");
     }

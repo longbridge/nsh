@@ -19,7 +19,7 @@ function Option(props: { label: string; checked: boolean; onChange: (next: boole
   return (
     <Switch
       checked={props.checked}
-      onChange={props.onChange}
+      onChange={({ checked }) => props.onChange(checked)}
       class={row}
       hoverStyle={hoverFill()}
       focusStyle={focusRing()}
@@ -111,7 +111,7 @@ function App() {
             value={code()}
             masked={masked()}
             disabled={disabled()}
-            onChange={(next) => {
+            onChange={({ value: next }) => {
               code.set(next);
               status.set("typing");
               log(`onChange “${next}”`);

@@ -756,7 +756,7 @@ export function Chat() {
           >
             <Input
               value={draft()}
-              onChange={(v) => draft.set(v)}
+              onChange={({ value }) => draft.set(value)}
               multiline
               // Return sends on desktops, as in chat apps there (Shift+Return
               // adds a line); phones keep return for line breaks.
@@ -766,7 +766,7 @@ export function Chat() {
               }}
               placeholder={`Message ${native ? provider() : model()}`}
               onFocus={() => menu.set(false)}
-              onContentSizeChange={(e) => inputHeight.set(Math.min(100, Math.max(20, e.height)))}
+              onContentSizeChange={({ size }) => inputHeight.set(Math.min(100, Math.max(20, size.height)))}
               style={{ placeholderColor: colors.faint, caretColor: colors.accent, selectionColor: colors.accent, height: inputHeight() + 20, fontSize: 15, lineHeight: 20, color: colors.text, paddingHorizontal: 10, paddingVertical: 10 }}
             />
             <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>

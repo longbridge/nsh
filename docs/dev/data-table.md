@@ -120,7 +120,7 @@ methods the ref's. Deliberate differences:
   keyless, once at the end).
 - `onLoadMore` fires once per number of rows and waits while `loading` (gpui-component's `load_more` comes again on
   every range change, for the delegate to guard).
-- One `onSelectionChange` with a `{ row?, column? }` value replaces `SelectRow` / `SelectColumn` / `SelectCell` /
+- One `onSelectionChange` with `{ selection }`, a `{ row?, column? }` or `null`, replaces `SelectRow` / `SelectColumn` / `SelectCell` /
   `ClearSelection`; the arrow keys skip columns that do not select (gpui-component's land on them).
 - No strings and no fixed look: the empty and loading slots are the app's, and every part (the sort button
   among them) takes the app's classes for its appearance (gpui-component draws an inbox icon, a skeleton

@@ -45,7 +45,7 @@ function App() {
   return (
     <View style={{ flex: 1, padding: 8, gap: 8 }}>
       <Square style={{ width: 40, height: 20 }} />
-      <Input autoFocus value={text()} onChange={(t) => text.set(t)} style={{ height: 30 }} />
+      <Input autoFocus value={text()} onChange={({ value }) => text.set(value)} style={{ height: 30 }} />
     </View>
   );
 }
@@ -68,7 +68,7 @@ function App() {
       <Input
         autoFocus
         value={text()}
-        onChange={(t) => {
+        onChange={({ value: t }) => {
           log.push("change " + t);
           text.set(t);
         }}
@@ -293,12 +293,12 @@ function App() {
       <Input
         autoFocus
         value={first()}
-        onChange={(t) => first.set(t)}
+        onChange={({ value }) => first.set(value)}
         onSubmit={go}
         submitBehavior="submit"
         style={{ height: 30 }}
       />
-      <Input ref={next} value={second()} onChange={(t) => second.set(t)} style={{ height: 30 }} />
+      <Input ref={next} value={second()} onChange={({ value }) => second.set(value)} style={{ height: 30 }} />
     </View>
   );
 }
@@ -542,7 +542,7 @@ function App() {
   setTimeout(async () => text.set(`${Whose.now()} ${await Whose.later()}`), 0);
   return (
     <View style={{ flex: 1 }}>
-      <Input autoFocus value={text()} onChange={(t) => text.set(t)} style={{ height: 30 }} />
+      <Input autoFocus value={text()} onChange={({ value }) => text.set(value)} style={{ height: 30 }} />
     </View>
   );
 }
@@ -865,7 +865,7 @@ function App() {
     },
   ]);
   return (
-    <View style={{ flex: 1 }} onLayout={(e) => height.set(Math.round(e.size.height))}>
+    <View style={{ flex: 1 }} onLayout={({ bounds }) => height.set(Math.round(bounds.size.height))}>
       <Input autoFocus value={`h ${height()}${chosen()}`} style={{ height: 30 }} />
     </View>
   );
@@ -948,7 +948,7 @@ function App() {
     { label: "File", submenu: [{ label: "New", onSelect: () => chosen.set(" new") }] },
   ]);
   return (
-    <View style={{ flex: 1 }} onLayout={(e) => height.set(Math.round(e.size.height))}>
+    <View style={{ flex: 1 }} onLayout={({ bounds }) => height.set(Math.round(bounds.size.height))}>
       <Input autoFocus value={`h ${height()}${chosen()}`} style={{ height: 30 }} />
     </View>
   );
@@ -1022,17 +1022,17 @@ function App() {
     <View style={{ flex: 1 }}>
       <Image
         src="asset:/app.png"
-        onLoad={(e) => report("app", `${e.width}x${e.height}`)}
+        onLoad={({ size }) => report("app", `${size.width}x${size.height}`)}
         onError={(e) => report("app", e.message)}
         style={{ width: 10, height: 10 }}
       />
       <Image
         src="asset:/bytes/cover.png"
-        onLoad={(e) => report("cover", `${e.width}x${e.height}`)}
+        onLoad={({ size }) => report("cover", `${size.width}x${size.height}`)}
         onError={(e) => report("cover", e.message)}
         style={{ width: 10, height: 10 }}
       />
-      <Input autoFocus value={text()} onChange={(t) => text.set(t)} style={{ height: 30 }} />
+      <Input autoFocus value={text()} onChange={({ value }) => text.set(value)} style={{ height: 30 }} />
     </View>
   );
 }
@@ -1124,7 +1124,7 @@ function App() {
         autoFocus
         submitBehavior="submit"
         value={text()}
-        onChange={(t) => text.set(t)}
+        onChange={({ value }) => text.set(value)}
         style={{ height: 30 }}
       />
     </View>
@@ -1214,7 +1214,7 @@ function App() {
         }
         style={{ height: 40 }}
       />
-      <Input autoFocus value={text()} onChange={(t) => text.set(t)} style={{ height: 30 }} />
+      <Input autoFocus value={text()} onChange={({ value }) => text.set(value)} style={{ height: 30 }} />
     </View>
   );
 }

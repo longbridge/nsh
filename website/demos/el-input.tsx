@@ -13,7 +13,7 @@ function App() {
     <Input
       {...field()}
       value={name()}
-      onChange={(text) => name.set(text)}
+      onChange={({ value }) => name.set(value)}
       placeholder="Ada Lovelace"
       autoCapitalize="words"
       maxLength={20}
@@ -27,7 +27,7 @@ function App() {
       ref={passwordInput}
       {...field()}
       value={password()}
-      onChange={(text) => password.set(text)}
+      onChange={({ value }) => password.set(value)}
       masked
       autoComplete="current-password"
       returnKeyType="done"
@@ -39,7 +39,7 @@ function App() {
       {...field({ style: { height: wide() ? 80 : 100 } })}
       multiline
       value={notes()}
-      onChange={(text) => notes.set(text)}
+      onChange={({ value }) => notes.set(value)}
       placeholder="Anything else?"
     />
   );

@@ -235,7 +235,7 @@ export function Controls(props: { show: Control }) {
         <Switch
           checked={props.on}
           disabled={props.disabled}
-          onChange={(on) => {
+          onChange={({ checked: on }) => {
             props.set(on);
             last.set(`${props.label}: ${on ? "on" : "off"}`);
           }}
@@ -289,7 +289,7 @@ export function Controls(props: { show: Control }) {
           <Checkbox
             checked={all()}
             indeterminate={mark() === "dash"}
-            onChange={(on) => {
+            onChange={({ checked: on }) => {
               shown.set(on ? KINDS.map((k) => k.name) : []);
               last.set(`Select all: ${on}`);
             }}
@@ -306,7 +306,7 @@ export function Controls(props: { show: Control }) {
             {(kind) => (
               <Checkbox
                 checked={has(kind().name)}
-                onChange={(on) => {
+                onChange={({ checked: on }) => {
                   shown.set(on ? KINDS.map((k) => k.name).filter((n) => n === kind().name || has(n)) : shown().filter((n) => n !== kind().name));
                   last.set(`${kind().name}: ${on}`);
                 }}
@@ -515,7 +515,7 @@ export function Controls(props: { show: Control }) {
         </Text>
       );
     }
-    const opened = (set: (open: boolean) => void) => (open: boolean) => set(open);
+    const opened = (set: (open: boolean) => void) => ({ open }: { open: boolean }) => set(open);
     return (
       <Card icon="controls" title="Select" subtitle="A choice from a list: the app owns the value">
         <View>
@@ -524,7 +524,7 @@ export function Controls(props: { show: Control }) {
             <Select
               items={SORTS}
               value={sort()}
-              onChange={(next) => {
+              onChange={({ value: next }) => {
                 sort.set(next);
                 last.set(`Sort by: ${titleOf(SORTS, next)}`);
               }}
@@ -546,7 +546,7 @@ export function Controls(props: { show: Control }) {
             <Select
               items={FONTS}
               value={font()}
-              onChange={(next) => {
+              onChange={({ value: next }) => {
                 font.set(next);
                 last.set(next === null ? "Font: cleared" : `Font: ${titleOf(FONTS, next)}`);
               }}
@@ -649,7 +649,7 @@ export function Controls(props: { show: Control }) {
             content={
               <Switch
                 checked={originals()}
-                onChange={(on) => {
+                onChange={({ checked: on }) => {
                   originals.set(on);
                   last.set(`Keep originals: ${on ? "on" : "off"}`);
                 }}
@@ -801,8 +801,8 @@ export function Controls(props: { show: Control }) {
               value={volume()}
               step={5}
               accessibilityLabel="Volume"
-              onChange={(next) => volume.set(next as number)}
-              onChangeEnd={(next) => last.set(`Volume: ${next}`)}
+              onChange={({ value }) => volume.set(value as number)}
+              onChangeEnd={({ value }) => last.set(`Volume: ${value}`)}
               disabled={muted()}
               rangeStyle={sliderFill(0, volume() / 100)}
               {...sliderLook({ value: true })}
@@ -818,8 +818,8 @@ export function Controls(props: { show: Control }) {
               step={10}
               startAccessibilityLabel="Minimum price"
               accessibilityLabel="Maximum price"
-              onChange={(next) => price.set(next as [number, number])}
-              onChangeEnd={(next) => last.set(`Price: ${(next as [number, number]).join(" to ")}`)}
+              onChange={({ value }) => price.set(value as [number, number])}
+              onChangeEnd={({ value }) => last.set(`Price: ${(value as [number, number]).join(" to ")}`)}
               rangeStyle={sliderFill(price()[0] / 500, price()[1] / 500)}
               {...sliderLook()}
             />
@@ -889,7 +889,7 @@ export function Controls(props: { show: Control }) {
               max={8}
               disabled={locked()}
               accessibilityLabel="Seats"
-              onChange={(next) => {
+              onChange={({ value: next }) => {
                 seats.set(next);
                 last.set(`Seats: ${show(next)}`);
               }}
@@ -909,7 +909,7 @@ export function Controls(props: { show: Control }) {
               placeholder="Free"
               accessibilityLabel="Price"
               controlsRight
-              onChange={(next) => {
+              onChange={({ value: next }) => {
                 price.set(next);
                 last.set(`Price: ${show(next)}`);
               }}
@@ -959,7 +959,7 @@ export function Controls(props: { show: Control }) {
             length={6}
             groups={2}
             value={code()}
-            onChange={(next) => {
+            onChange={({ value: next }) => {
               code.set(next);
               verdict.set("");
               last.set(`Code: ${next || "empty"}`);

@@ -6,9 +6,10 @@
 //! (a pie one per slice), and its [`PlotAxis`]es label its edges with the
 //! ticks of its scales, natively: the rows are read once when the app
 //! sets them, scaled, recorded and drawn in Rust, so no JS runs per point,
-//! and the pointer, the hover's glide and fade and the appear run in Rust
-//! and on the platform's animator (the app hears of a new index, nothing
-//! more). Marks paint with SVG's paint properties, CSS's on any element
+//! and the pointer, the hover's glide and fade, the appear and the scales'
+//! moves to new domains (`tween.rs`) run in Rust and on the platform's
+//! animator (the app hears of a new index, nothing more). Marks paint with
+//! SVG's paint properties, CSS's on any element
 //! (`fill-*`, `stroke-*`, `strokeWidth`, `strokeDasharray`),
 //! `currentColor` where the app sets none, and an `Area` shows the app's
 //! background (a gradient) inside its shape; the hover's cross line, dots
@@ -27,11 +28,13 @@ mod line;
 mod pie;
 mod scale;
 mod series;
+mod tween;
 
 use std::rc::Rc;
 
 use nsh_core::{
     AccessibilityActionDef, AccessibilityValue,
+    canvas::{CanvasOp, Num},
     element::{Registry, RowAccessor, Rows, Spring, Style, Timing},
     prelude::*,
 };
@@ -52,6 +55,7 @@ use self::{
     bar::{BarEntry, BarLayout},
     scale::{AxisMap, Band, Linear, extent},
     series::{HoverDot, Mark},
+    tween::Tween,
 };
 
 /// The JS module apps import the plot parts as.
@@ -97,7 +101,11 @@ pub struct PlotMotion {
     /// How marks move to a new shape when the app changes it, as d3's
     /// update transitions do between `enter` and `exit`: a pie's or an
     /// arc's radii (a donut's hole opening or closing) and angles (a
-    /// slice or a gauge sweeping round to its new value, d3's `arcTween`).
+    /// slice or a gauge sweeping round to its new value, d3's `arcTween`),
+    /// and a linear scale's domain (the app's `domain`, or the extent of
+    /// the marks' values as rows come), interpolated as d3 transitions a
+    /// scale's domain, so the marks keep their shapes, the grid lines, the
+    /// axes' ticks and labels and the hover's parts move with them, and new rows come in with the rest.
     /// None by default: the new shape shows at once. `gpui-base` has no
     /// such motion.
     pub update: Option<Timing>,
@@ -178,8 +186,9 @@ pub struct PlotProps {
     /// is decided when the plot is made.
     #[prop(default = true)]
     pub interactive: Prop<bool>,
-    /// The timing of its motion: the appear, the hover's fade and the
-    /// pointer's spring; none by default, so everything shows at once.
+    /// The timing of its motion: the appear, the moves to new shapes and
+    /// domains (`update`), the hover's fade and the pointer's spring; none
+    /// by default, so everything shows at once.
     pub motion: Prop<Option<PlotMotion>>,
     /// Opts in to the appear (`gpui-base`'s `Plot::appear_generation`):
     /// the marks draw in over `motion.appear` when the plot is first shown,
@@ -305,6 +314,9 @@ struct PlotContext {
     xs: Memo<std::sync::Arc<[f32]>>,
     /// Where values go along the y axis.
     y_map: Memo<AxisMap>,
+    /// The moves of the linear axes to new domains (`motion.update`).
+    x_tween: Tween,
+    y_tween: Tween,
     /// The plot's size.
     size: Signal<Size<Points>>,
     /// Its marks that count in a domain and may show a hover dot.
@@ -435,6 +447,36 @@ impl PlotContext {
             .line_to(-bleed, size.height.0 + bleed)
             .close_path()
             .clip()
+    }
+
+    /// Records what `trace` adds to the path where the moving scales show
+    /// it (along x if `x`, along y if `y`): through the moves' transform
+    /// while one runs, as it is otherwise. The path keeps its points after
+    /// the transform is undone, so its stroke is not scaled.
+    fn traced(
+        &self,
+        p: Painter,
+        x: bool,
+        y: bool,
+        trace: impl FnOnce(Painter) -> Painter,
+    ) -> Painter {
+        let x = x && self.x_tween.moving.get();
+        let y = y && self.y_tween.moving.get();
+        if !(x || y) {
+            return trace(p);
+        }
+        let mut p = p.save();
+        let mut along = |tween: Tween, moving: bool| match moving {
+            true => {
+                let (scale, offset) = tween.transform();
+                (p.num(&scale), p.num(&offset))
+            }
+            false => (Num::Const(1.0), Num::Const(0.0)),
+        };
+        let ((sx, ox), (sy, oy)) = (along(self.x_tween, x), along(self.y_tween, y));
+        let none = Num::Const(0.0);
+        let p = p.op(CanvasOp::Transform([sx, none, none, sy, ox, oy]));
+        trace(p).restore()
     }
 }
 
@@ -580,6 +622,12 @@ pub fn Plot(props: PlotProps, cx: Scope<PlotEvent>) -> impl IntoElement {
         }
     });
 
+    // The linear axes' moves to new domains, over `motion.update`.
+    let (x_tween, y_tween) = (Tween::new(), Tween::new());
+    let update = move || untracked(|| motion.get().and_then(|m| m.update));
+    effect(move || x_tween.follow(x_map.get(), update()));
+    effect(move || y_tween.follow(y_map.get(), update()));
+
     // The hover: the row under the pointer, where its parts are and how
     // far they have faded in.
     let cross = point(animated_value(0.0), animated_value(0.0));
@@ -593,6 +641,8 @@ pub fn Plot(props: PlotProps, cx: Scope<PlotEvent>) -> impl IntoElement {
         x_map,
         xs,
         y_map,
+        x_tween,
+        y_tween,
         size,
         marks,
         next: stored(0),
@@ -609,7 +659,7 @@ pub fn Plot(props: PlotProps, cx: Scope<PlotEvent>) -> impl IntoElement {
         band_axis,
     });
 
-    let place = TooltipPlace::new(cross.x, props.tooltip_placement, props.tooltip_offset);
+    let place = TooltipPlace::new(props.tooltip_placement, props.tooltip_offset);
     // `pointer_x`: a radial mark found the row, and the parts follow the
     // pointer rather than the row (`gpui-base`'s pie puts the cross line at
     // the cursor, and `gpui-component`'s pie tooltip follows it).
@@ -677,6 +727,39 @@ pub fn Plot(props: PlotProps, cx: Scope<PlotEvent>) -> impl IntoElement {
             }
         }
     };
+    // The hovered row's parts stay on it as the rows or the scales change
+    // (at once: a domain's move carries them with the marks). Over a
+    // radial mark or across, they follow the pointer instead.
+    effect(move || {
+        rows_at.with(|_| ());
+        marks.with(|all| {
+            for mark in all {
+                let _ = mark.points.try_get();
+            }
+        });
+        let Some(index) = hovered.get_untracked() else {
+            return;
+        };
+        if hover_axis.get_untracked() != Axis::X || hits.with_untracked(|all| !all.is_empty()) {
+            return;
+        }
+        let Some(at) = rows_at
+            .with_untracked(|rows| rows.get(index as usize).copied())
+            .filter(|at| at.is_finite())
+        else {
+            return;
+        };
+        place.row_at(at);
+        cross.x.set(at);
+        marks.with_untracked(|all| {
+            for mark in all {
+                if let Some(p) = mark.near(at) {
+                    mark.dot_x.set(p.x.0);
+                    mark.dot_y.set(p.y.0);
+                }
+            }
+        });
+    });
     let interactive = props.interactive;
     // The keyboard (`keys.rs`): the same hover, a row at a time, while the
     // plot has the focus.
@@ -852,7 +935,7 @@ pub fn Plot(props: PlotProps, cx: Scope<PlotEvent>) -> impl IntoElement {
                 when(
                     move || hover_axis.get() == Axis::X,
                     move || {
-                        anchor(&cross.x, &fade)
+                        anchor(&x_tween.shown(&cross.x), &fade)
                             .top(px(0.0))
                             .bottom(px(0.0))
                             .style_with(move |s| s.w(px(band())))
@@ -894,7 +977,8 @@ pub fn Plot(props: PlotProps, cx: Scope<PlotEvent>) -> impl IntoElement {
                         when(
                             move || own.is_some_and(|o| has_dots() || o.is_set()),
                             move || {
-                                dot_anchor(&m.dot_x, &m.dot_y, &fade).child(
+                                let (x, y) = (x_tween.shown(&m.dot_x), y_tween.shown(&m.dot_y));
+                                dot_anchor(&x, &y, &fade).child(
                                     view()
                                         .flex_none()
                                         .app_class(move || {
@@ -912,9 +996,17 @@ pub fn Plot(props: PlotProps, cx: Scope<PlotEvent>) -> impl IntoElement {
                 )
             },
         ))
+        // Along the row's x (moving with the x scale's domain), or across,
+        // the pointer's.
         .child(when(
             move || interactive.get() && tooltip.get().is_some(),
-            move || place.view(&fade, tooltip.place(|t| t)),
+            move || {
+                when(
+                    move || hover_axis.get() == Axis::X,
+                    move || place.view(&x_tween.shown(&cross.x), &fade, tooltip.place(|t| t)),
+                )
+                .otherwise(move || place.view(&cross.x, &fade, tooltip.place(|t| t)))
+            },
         ))
 }
 
@@ -931,9 +1023,9 @@ pub fn Plot(props: PlotProps, cx: Scope<PlotEvent>) -> impl IntoElement {
 struct TooltipPlace {
     placement: Prop<TooltipPlacement>,
     offset: Prop<Points>,
-    /// Where the point goes along each axis before the clamp: the cross
-    /// line, and the pointer for `"pointer"` (the top edge for `"top"`).
-    x: AnimatedValue,
+    /// Where the point goes along y before the clamp: the pointer for
+    /// `"pointer"` (the top edge for `"top"`); along x it goes to the cross
+    /// line ([`Self::view`]'s `x`).
     y: AnimatedValue,
     plot: Size<AnimatedValue>,
     tooltip: Size<AnimatedValue>,
@@ -947,12 +1039,11 @@ struct TooltipPlace {
 }
 
 impl TooltipPlace {
-    fn new(x: AnimatedValue, placement: Prop<TooltipPlacement>, offset: Prop<Points>) -> Self {
+    fn new(placement: Prop<TooltipPlacement>, offset: Prop<Points>) -> Self {
         let value = || animated_value(0.0);
         let place = Self {
             placement,
             offset,
-            x,
             y: value(),
             plot: size(value(), value()),
             tooltip: size(value(), value()),
@@ -1041,10 +1132,11 @@ impl TooltipPlace {
     }
 
     /// The tooltip, faded by `fade`, holding `content`: a point with no
-    /// size the animator places, the content on its side of it.
-    fn view(self, fade: &AnimatedValue, content: impl IntoElement) -> View {
+    /// size the animator places (along x at `x`, the cross line), the
+    /// content on its side of it.
+    fn view(self, x: &impl Animated, fade: &AnimatedValue, content: impl IntoElement) -> View {
         let [shift, share_x, off_x, share_y, off_y, pointer] = self.terms;
-        let want_x = self.x.add(&self.tooltip.width.mul(&shift));
+        let want_x = x.animated_node().add(&self.tooltip.width.mul(&shift));
         let x = Self::clamped(&want_x, self.plot.width, self.tooltip.width, share_x, off_x);
         // At the top edge for `"top"`: its offset there is the app's.
         let y = Self::clamped(
@@ -1111,7 +1203,7 @@ impl TooltipPlace {
 /// The cross line's anchor: a column with its middle at `x` (as wide as
 /// its caller makes it: none, or a band), faded by `fade`, its content
 /// centered in it; it takes no pointer.
-fn anchor(x: &AnimatedValue, fade: &AnimatedValue) -> View {
+fn anchor(x: &impl Animated, fade: &AnimatedValue) -> View {
     view()
         .absolute()
         .left(px(0.0))
@@ -1127,7 +1219,7 @@ fn anchor(x: &AnimatedValue, fade: &AnimatedValue) -> View {
 /// A hover dot's place: a box the size of the dot it holds, its center at
 /// (`x`, `y`) (moved back by half its size, then by the animated point),
 /// faded by `fade`; it takes no pointer.
-fn dot_anchor(x: &AnimatedValue, y: &AnimatedValue, fade: &AnimatedValue) -> View {
+fn dot_anchor(x: &impl Animated, y: &impl Animated, fade: &AnimatedValue) -> View {
     view()
         .absolute()
         .left(px(0.0))

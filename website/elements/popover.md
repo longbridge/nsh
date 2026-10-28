@@ -70,13 +70,13 @@ starts fresh.
 ## Open state
 
 Without `open`, the popover keeps its own state, starting from `defaultOpen`. With `open`, the app owns it: change it
-in `onOpenChange(open, reason)`, which reports every request to open or close with its reason (`"triggerPress"`,
+in `onOpenChange({ open, reason })`, which reports every request to open or close with its reason (`"triggerPress"`,
 `"pressOutside"`, `"cancel"`).
 
 ```tsx
 const open = signal(false);
 
-<Popover open={open()} onOpenChange={(next) => open.set(next)} trigger={<Text>Filters</Text>}>
+<Popover open={open()} onOpenChange={(e) => open.set(e.open)} trigger={<Text>Filters</Text>}>
   <FilterForm onApply={() => open.set(false)} />
 </Popover>
 ```

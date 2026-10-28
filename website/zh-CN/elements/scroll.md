@@ -141,9 +141,9 @@ let photo!: YNode;
 | 事件 | Rust | 载荷 | 触发时机 |
 |---|---|---|---|
 | `onScroll` | `.on_scroll` | `ScrollEvent` | 偏移量变化（每帧最多一次，且不比 `scrollEventThrottle` 更频繁）。 |
-| `onScrollDragStart` / `onScrollDragEnd` | `.on_scroll_drag_start` / `.on_scroll_drag_end` | `{ x, y }`（`Point<Points>`） | 用户开始 / 停止拖动。 |
-| `onMomentumStart` / `onMomentumEnd` | `.on_momentum_start` / `.on_momentum_end` | `{ x, y }` | 拖动后的惯性滑动开始 / 停止。被新一次拖动打断的滑动同样以 `onMomentumEnd` 结束。 |
-| `onScrollEnd` | `.on_scroll_end` | `{ x, y }` | 滚动停了下来。 |
+| `onScrollDragStart` / `onScrollDragEnd` | `.on_scroll_drag_start` / `.on_scroll_drag_end` | `{ offset }`（`Point<Points>`） | 用户开始 / 停止拖动。 |
+| `onMomentumStart` / `onMomentumEnd` | `.on_momentum_start` / `.on_momentum_end` | `{ offset }` | 拖动后的惯性滑动开始 / 停止。被新一次拖动打断的滑动同样以 `onMomentumEnd` 结束。 |
+| `onScrollEnd` | `.on_scroll_end` | `{ offset }` | 滚动停了下来。 |
 | `onRefresh` | `.on_refresh` | 无 | 触发了下拉刷新。 |
 
 `ScrollEvent` 为 `{ offset: Point; contentSize: Size; size: Size; zoomScale }`（Rust 中为 `offset`、`content_size`、`size`、`zoom_scale`）：偏移量、（缩放后的）内容尺寸、视口尺寸和缩放比例（不缩放时为 1）。

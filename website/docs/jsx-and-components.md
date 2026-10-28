@@ -379,7 +379,7 @@ function Field(props: InputProps & { label: string }) {
   );
 }
 
-<Field label="Email" value={email()} onChange={(t) => email.set(t)} keyboardType="email-address" />
+<Field label="Email" value={email()} onChange={({ value }) => email.set(value)} keyboardType="email-address" />
 ```
 
 `split(props, keys)` returns `[picked, rest]`, both still reading through to the original props (destructuring `{ label, ...rest } = props` would read every prop once). Element props that come later in the JSX win over earlier ones.

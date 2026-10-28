@@ -305,7 +305,7 @@ function Events() {
           onLoadStart={() => log("onLoadStart")}
           onLoad={(e) => {
             log("onLoad");
-            loaded.set(`${e.width}×${e.height}`);
+            loaded.set(`${e.size.width}×${e.size.height}`);
           }}
           onError={(e) => loaded.set(e.message)}
           onLoadEnd={() => log("onLoadEnd")}

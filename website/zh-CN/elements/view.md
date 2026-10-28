@@ -146,15 +146,15 @@ view()
 
 | 事件 | Rust | 载荷 | 触发时机 |
 |---|---|---|---|
-| `onPress` | `.on_press` | 无 | 在视图内完成一次点击。 |
-| `onLongPress` | `.on_long_press` | 无 | 手指按住达到 `delayLongPress`（500 ms）。 |
-| `onPressDown` / `onPressUp` | `.on_press_down` / `.on_press_up` | 无 | 手指按下 / 抬起或移出。 |
+| `onPress` | `.on_press` | `PressEvent`（Rust 中无） | 在视图内完成一次点击。 |
+| `onLongPress` | `.on_long_press` | `PressEvent`（Rust 中无） | 手指按住达到 `delayLongPress`（500 ms）。 |
+| `onPressDown` / `onPressUp` | `.on_press_down` / `.on_press_up` | `PressEvent`（Rust 中无） | 手指按下 / 抬起或移出。 |
 | `onMouseEnter` / `onMouseLeave` | `.on_mouse_enter` / `.on_mouse_leave` | `MouseEvent` | 鼠标移到视图（或其内部的视图）上 / 离开视图或窗口（见[悬停](./index.md#悬停)）；`onMouseLeave` 的位置是鼠标最后所在之处。 |
 | `onMouseMove` | `.on_mouse_move` | `MouseEvent` | 鼠标在视图（或其内部的视图）上移动，无论是否按着按键；或鼠标停在那里、没有按键按下时按下或松开了修饰键：`position`、`pagePosition`（`Point`）、`modifiers` 和 `pressedButton`（`"left"`、`"right"`、`"middle"`、`"back"`、`"forward"` 或 `null`）；每帧最多一次。 |
 | `onContextMenu` | `.on_context_menu` | `ContextMenuEvent` | 辅助按钮在视图上按下（见[上下文菜单](./index.md#上下文菜单)）。 |
 | `onFileDragEnter` / `onFileDragLeave` | `.on_file_drag_enter` / `.on_file_drag_leave` | 无 | 本地文件拖入 / 离开当前桌面拖放目标。 |
 | `onFileDrop` | `.on_file_drop` | `{ uris: string[] }`（`FileDropEvent`） | 本地文件或目录被放到桌面拖放目标。 |
-| `onLayout` | `.on_layout` | `Bounds`（`Bounds<Points>`） | 相对父视图的 frame 发生变化。 |
+| `onLayout` | `.on_layout` | `{ bounds }`（`Bounds<Points>`） | 相对父视图的 frame 发生变化。 |
 | `onPanStart` / `onPanEnd` | `.on_pan_start` / `.on_pan_end` | `PanEvent` | 通过 `pan` 绑定的拖动开始 / 结束；系统取消时 `cancelled` 为 true。 |
 | `onPinchStart` / `onPinchEnd` | `.on_pinch_start` / `.on_pinch_end` | `{ scale, velocity }` | 通过 `pinch` 绑定的捏合开始 / 结束。 |
 | `onRotationStart` / `onRotationEnd` | `.on_rotation_start` / `.on_rotation_end` | `{ rotation, velocity }` | 通过 `rotation` 绑定的旋转开始 / 结束。 |

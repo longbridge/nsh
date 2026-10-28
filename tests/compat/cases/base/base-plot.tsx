@@ -27,6 +27,8 @@
 // `PlotAxis`es (`placement`, `labelPlacement`, `ticks`, `tickValues`,
 // `format`, the `label`, `tick` and `line` parts) lay their labels out
 // along a plot's edges.
+// A sparkline's y domain, the extent of its rows, moves to a new one with
+// `motion.update` as rows come.
 import { Text, View, signal } from "nsh";
 import { Arc, Area, Bar, Grid, Line, Pie, Plot, PlotAxis } from "nsh/base/plot";
 
@@ -69,7 +71,7 @@ function App() {
         }
         tooltipPlacement={placement()}
         tooltipOffset={6}
-        onHoverChange={(index) => hovered.set(index)}
+        onHoverChange={({ index }) => hovered.set(index)}
         class="h-[100px] w-[200px] stroke-current"
         style={{ color: "#3366ff" }}
         focusStyle={{ opacity: 0.9 }}
@@ -93,8 +95,9 @@ function App() {
       <View testID="pointer-tip" onPress={() => placement.set("pointer")} style={{ height: 20 }} />
       <View testID="more" onPress={() => rows.set([...rows(), { t: 20, price: 35, avg: 25 }])} style={{ height: 20 }} />
       <Text>{`rows ${rows().length}`}</Text>
-      {/* A sparkline: no pointer. */}
-      <Plot testID="spark" data={rows()} y="price" interactive={false} accessibilityLabel="Spark" onHoverChange={(index) => hovered.set(index)} style={{ width: 100, height: 20 }}>
+      {/* A sparkline: no pointer; its y domain, the extent of its rows,
+          glides to a new one as rows come (`motion.update`). */}
+      <Plot testID="spark" data={rows()} y="price" interactive={false} motion={{ update: { duration: 200, easing: "easeInOut" } }} accessibilityLabel="Spark" onHoverChange={({ index }) => hovered.set(index)} style={{ width: 100, height: 20 }}>
         <Line />
       </Plot>
       {/* A band: its bottom edge a value of each row (a field, a function). */}
@@ -110,7 +113,7 @@ function App() {
         yScale={{ type: "linear", domain: [-20, 60] }}
         crossLineClass="w-full h-full bg-[#eeeeee]"
         tooltipContent={<View testID="bar-tip" style={{ width: 10, height: 10 }} />}
-        onHoverChange={(index) => barHovered.set(index)}
+        onHoverChange={({ index }) => barHovered.set(index)}
         style={{ width: 400, height: 80 }}
       >
         <Bar
@@ -153,7 +156,7 @@ function PieCase() {
         data={[{ share: 1 }, { share: 1 }, { share: 2 }]}
         accessibilityLabel="Shares"
         motion={{ update: { duration: 200, easing: "easeInOut" } }}
-        onHoverChange={(index) => slice.set(index)}
+        onHoverChange={({ index }) => slice.set(index)}
         style={{ width: 100, height: 100 }}
       >
         <Arc innerRadius={hole() ? "40%" : 0} outerRadius="80%" class="fill-[#eeeeee]" />

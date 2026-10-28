@@ -55,7 +55,7 @@ function App() {
         y="visitors"
         yScale={{ type: "linear", domain: [0, 3000] }}
         accessibilityLabel="每天的访客数，周四最多"
-        onHoverChange={(index) => hovered.set(index)}
+        onHoverChange={({ index }) => hovered.set(index)}
         crossLineClass="w-px h-full bg-border"
         dotClass="size-2.5 rounded-full border-2 border-background bg-chart-1"
         class="h-40"
@@ -97,7 +97,7 @@ mount(App);
 
 | 事件 | Rust | 参数 | 触发时机 |
 |---|---|---|---|
-| `onHoverChange` | `.on_hover_change(..)` | `index: number \| null` | 指针移到另一行上：沿 x 轴（只有 y 轴有条带时沿 y 轴）离指针最近的那一行的序号，或指针下[饼图](#pie-and-arc)扇区所在行的序号；指针离开 plot（在饼图上为离开它的扇区）后为 `null`。 |
+| `onHoverChange` | `.on_hover_change(..)` | `{ index: number \| null }` | 指针移到另一行上：沿 x 轴（只有 y 轴有条带时沿 y 轴）离指针最近的那一行的序号，或指针下[饼图](#pie-and-arc)扇区所在行的序号；指针离开 plot（在饼图上为离开它的扇区）后为 `null`。 |
 
 `Scale` 是 `{ type: "point" } | { type: "linear"; domain?: [number, number] } | { type: "band"; paddingInner?; paddingOuter?; maxBandWidth?; bandCount?; groupPadding? }`。`domain` 取两个值构成的范围，顺序不限；只有一个值的定义域会把它放在中间。`band` 比例尺的选项见 [Bar](#bar)。
 
@@ -225,7 +225,7 @@ export function Seats(props: { plans: Plan[] }) {
         accessibilityValue={{ text: shown() && `${shown()!.name}，${shown()!.seats} 个席位，${share(shown()!.seats)}` }}
         appearGeneration={1}
         motion={{ appear: { duration: 900, easing: "easeOut" }, enter: { duration: 120 }, exit: { duration: 160 }, pointer: { stiffness: 400, damping: 32 } }}
-        onHoverChange={(index) => hovered.set(index)}
+        onHoverChange={({ index }) => hovered.set(index)}
         class="size-44"
       >
         {/* 扇区之间留 2 点的间隙（外缘 80 点处为一圈的 0.025）。 */}
@@ -347,12 +347,14 @@ const rows = [
 | 键 | 类型 | 作用 |
 |---|---|---|
 | `appear` | timing | 有 `appearGeneration` 时图形逐渐绘出：折线和区域从起始边缘绘出，柱子从 `base` 长出（柱子设置 `stagger` 时依次长出）；饼图和 arc 的圆环从起点顺时针扫出。 |
-| `update` | timing | 应用改变图形时，图形过渡到新形状：饼图和 arc 的半径，比如 donut 的空洞张开和合拢；以及它们的角度，比如仪表或扇区扫到新的数值（同 d3 的 `arcTween`：过渡的是角度而不是轮廓；新出现的扇区从前一个扇区的结束处展开）。 |
+| `update` | timing | 应用改变图形时，图形过渡到新形状：饼图和 arc 的半径，比如 donut 的空洞张开和合拢；它们的角度，比如仪表或扇区扫到新的数值（同 d3 的 `arcTween`：过渡的是角度而不是轮廓；新出现的扇区从前一个扇区的结束处展开）；以及线性比例尺的 domain（应用给的 `domain`，或随数据行到来而变化的图形数值范围），从旧 domain 平滑过渡到新 domain，图形、网格线和 `PlotAxis` 一起移动。 |
 | `enter` | timing | 指针移到 plot 上时，悬停部件淡入。 |
 | `exit` | timing | 指针离开后，悬停部件淡出。 |
 | `pointer` | spring | 指针在 plot 上移动时，悬停部件从一行滑到下一行；饼图的扇区也按它抬起。 |
 
 动效在平台的动画器上运行，不需要每帧运行 JS；对偏好减少动态效果的用户立即完成。列表为回到视野的行重新创建 plot 时，图形会再绘出一次；可以把行的键名作为它的 `appearGeneration`。
+
+domain 的过渡与 d3 过渡比例尺 domain 的方式相同：每个数值都由过渡中的比例尺定位，所以图形保持各自的形状，网格线和悬停部件随之移动，柱子保持圆角，和新 domain 一起到来的数据行也随其他部分一起移动。实时图表不时按数据行重新拟合 y 比例尺（留出一些余量，两次拟合之间网格保持不动），设置 `update` 时间参数后，每次重新拟合都会平滑过渡。plot 尺寸变化时，图形立即采用新尺寸。
 
 这是 plot 自己的动效，用来设置图表里动的部分（图形的裁剪区域和悬停部件）的时间参数。视图的入场、离场和强调效果使用 [`createMotion`](../modules/nsh.md#createmotion) 的预设和关键帧，应用仍然可以把它们用在 plot 的视图或周围的元素上。
 
@@ -407,7 +409,7 @@ export function PriceChart(props: { rows: Row[]; low: number; high: number }) {
             <Text class="text-xs tabular-nums text-popover-foreground">{shown().price.toFixed(2)}</Text>
           </View>
         }
-        onHoverChange={(index) => hovered.set(index)}
+        onHoverChange={({ index }) => hovered.set(index)}
         class="mr-10 mb-6 h-48"
       >
         <Grid y={[middle(), props.high]} class="stroke-border" />
@@ -460,7 +462,7 @@ export function SalesChart(props: { rows: Sale[]; stacked: boolean }) {
         appearGeneration={props.stacked ? 1 : 0}
         motion={{ appear: { duration: 600, easing: "easeOut" }, enter: { duration: 150 }, exit: { duration: 150 }, pointer: { stiffness: 320, damping: 32 } }}
         crossLineClass="w-full h-full bg-foreground/5"
-        onHoverChange={(index) => hovered.set(index)}
+        onHoverChange={({ index }) => hovered.set(index)}
         class="mb-6 h-44"
       >
         <Grid y={[40, 80, 120]} class="stroke-border" />

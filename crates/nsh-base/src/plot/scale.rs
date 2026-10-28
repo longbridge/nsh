@@ -193,6 +193,11 @@ impl Linear {
     pub(crate) fn domain(&self) -> [f64; 2] {
         [self.start, self.start + self.diff]
     }
+
+    /// Its range.
+    pub(crate) fn range(&self) -> [f32; 2] {
+        self.range
+    }
 }
 
 /// Bands laid out across a range (`ScaleBand`, over row indices), as

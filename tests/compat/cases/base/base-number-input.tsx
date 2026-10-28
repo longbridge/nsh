@@ -34,7 +34,7 @@ function App() {
     <View style={{ flex: 1, paddingTop: 20, gap: 4 }}>
       <NumberInput
         value={quantity()}
-        onChange={next => quantity.set(next)}
+        onChange={({ value }) => quantity.set(value)}
         min={0}
         max={10}
         step={0.5}
@@ -49,10 +49,10 @@ function App() {
         max={10}
         placeholder="Amount"
         accessibilityLabel="Amount"
-        onChange={next => amount.set(String(next))}
+        onChange={({ value }) => amount.set(String(value))}
         onFocus={() => log("focus")}
         onBlur={() => log("blur")}
-        onSubmit={next => log(`submit ${next}`)}
+        onSubmit={({ value }) => log(`submit ${value}`)}
         controlsRight
         class="flex-row"
         inputClass="w-[100px] h-[30px]"

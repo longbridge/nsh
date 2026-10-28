@@ -149,7 +149,7 @@ function App() {
   const locked = signal(false);
   const events = signal<string[]>([]);
   const log = (line: string) => events.set([line, ...events()].slice(0, 8));
-  const opened = (name: string, open: (next: boolean) => void) => (next: boolean, reason: OpenChangeReason) => {
+  const opened = (name: string, open: (next: boolean) => void) => ({ open: next, reason }: { open: boolean; reason: OpenChangeReason }) => {
     open(next);
     log(`${name} ${next ? "opened" : "closed"} · ${reason}`);
   };
@@ -176,7 +176,7 @@ function App() {
               </Button>
               <Switch
                 checked={locked()}
-                onChange={(next) => locked.set(next)}
+                onChange={({ checked }) => locked.set(checked)}
                 class={`-mx-2 mt-1 flex-row-reverse items-center justify-between gap-3 rounded-lg px-2 ${desktop ? "py-1" : "py-2"} active:opacity-70`}
                 hoverStyle={hoverFill()}
                 focusStyle={focusRing()}
@@ -197,7 +197,7 @@ function App() {
             <Select
               items={LANGUAGES}
               value={language()}
-              onChange={(next) => {
+              onChange={({ value: next }) => {
                 language.set(next);
                 log(`Language → ${titleOf(LANGUAGES, next)}`);
               }}
@@ -216,7 +216,7 @@ function App() {
             <Select
               items={REGIONS}
               value={region()}
-              onChange={(next) => {
+              onChange={({ value: next }) => {
                 region.set(next);
                 log(next === null ? "Region cleared" : `Region → ${titleOf(REGIONS, next)}`);
               }}

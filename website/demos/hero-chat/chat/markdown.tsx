@@ -43,7 +43,7 @@ export function Markdown(props: {
           link: { color: colors.accent },
         }}
         codeBlockActions={[{ id: "copy", label: "Copy code" }]}
-        onImagePress={(image) => {
+        onImagePress={({ image }) => {
           used.set(true);
           viewing.set(image);
         }}

@@ -54,7 +54,7 @@ function App() {
       length={6}
       groups={2}
       value={code()}
-      onChange={(next) => code.set(next)}
+      onChange={({ value }) => code.set(value)}
       onComplete={({ value }) => verify(value)}
       accessibilityLabel="验证码，6 位数字"
       class="flex-row gap-3"
@@ -107,7 +107,7 @@ mount(App);
 
 | 事件 | Rust | 参数 | 时机 |
 |---|---|---|---|
-| `onChange` | `.on_change(\|value: &SharedString\| ..)` | `(value: string)` | 用户改变了验证码：输入、删除、粘贴或自动填充。 |
+| `onChange` | `.on_change(\|value: &SharedString\| ..)` | `(e: { value: string })` | 用户改变了验证码：输入、删除、粘贴或自动填充。 |
 | `onComplete` | `.on_complete(\|e: &OtpInputCompleteEvent\| ..)` | `{ value }` | 用户的改动填满了最后一个格子，在它的 `onChange` 之后。 |
 | `onFocus` / `onBlur` | `.on_focus` / `.on_blur` | 无 | 输入框获得 / 失去键盘焦点。 |
 

@@ -124,7 +124,7 @@ listens id:synced onCancel
 frame id:synced-body 20 20 350 30
 event text:"Synced dialog" onOpen
 expect Log: synced opened
-# Escape / back: onCancel, then onOpenChange(false, "cancel").
+# Escape / back: onCancel, then onOpenChange({ open: false, reason: "cancel" }).
 event text:"Synced dialog" onCancel reason=cancel
 expect Log: synced opened, synced cancel, synced change false cancel
 absent Synced dialog
@@ -1508,7 +1508,9 @@ expect hovered 0
 event id:plot onMouseLeave
 expect hovered null
 # A sparkline follows no pointer: it reports nothing, even once a press
-# that comes after the pointer has been handled.
+# that comes after the pointer has been handled. Its new row (35) widens
+# its y domain, which moves over `motion.update` (on the animator; the
+# layout and what it reports stay the same).
 prop id:spark accessibilityLabel Spark
 noprop id:spark focusable
 noprop id:spark accessibilityActions

@@ -219,7 +219,7 @@ export interface DialogProps extends DialogHostProps {
    * close): it closes whatever `open` says, so keep `open` in sync (set it
    * to false here); while `open` stays true it stays closed, and it opens
    * again when `open` goes from false to true. */
-  onOpenChange?: (open: boolean, reason: DialogChangeReason) => void;
+  onOpenChange?: (event: { open: boolean; reason: DialogChangeReason }) => void;
   /** The popup's style: the view holding the children. The dialog itself
    * has no look: on the desktops and the web it is a transparent layer over
    * the window (`presentation` is ignored there). */
@@ -1353,8 +1353,8 @@ unsafe extern "C" fn on_cancel(
 }
 
 /// The user tried to close a dialog: `onCancel`, then, when the
-/// `closeOn*` flag of what they did lets it close, `onOpenChange(false,
-/// reason)` and the dialog closes (a platform that closed it natively
+/// `closeOn*` flag of what they did lets it close, `onOpenChange({ open:
+/// false, reason })` and the dialog closes (a platform that closed it natively
 /// already reports `onClose`; otherwise removing it does).
 fn close_attempt(
     cx: *mut JsContext,
@@ -1395,10 +1395,18 @@ fn close_attempt(
         return UNDEFINED;
     }
     reactive::batch_with(cx, || {
-        // SAFETY: a new string, freed after the call.
-        let reason = unsafe { qjs::JS_NewStringLen(cx, reason.as_ptr().cast(), reason.len() as _) };
-        let r = call(c"onOpenChange", &mut [qjs::JS_FALSE, reason]);
-        free(cx, reason);
+        // One object, as every event (`api-naming.md` "Payloads").
+        // SAFETY: a new object owning a new string (`JS_SetPropertyStr`
+        // takes it), freed after the call.
+        let event = unsafe {
+            let event = qjs::JS_NewObject(cx);
+            qjs::JS_SetPropertyStr(cx, event, c"open".as_ptr(), qjs::JS_FALSE);
+            let reason = qjs::JS_NewStringLen(cx, reason.as_ptr().cast(), reason.len() as _);
+            qjs::JS_SetPropertyStr(cx, event, c"reason".as_ptr(), reason);
+            event
+        };
+        let r = call(c"onOpenChange", &mut [event]);
+        free(cx, event);
         // SAFETY: an inline tag check.
         if unsafe { qjs::JS_IsException(r) } {
             return r;

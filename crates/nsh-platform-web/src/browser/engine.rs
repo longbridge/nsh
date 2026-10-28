@@ -71,7 +71,32 @@ impl Host for Runtime {
                     } else {
                         event.handler_name()
                     })?,
-                    events::payload(&self.bindings, payload)?,
+                    // `onChange({ value })` (`api-naming.md` "Payloads"), as
+                    // nsh-js builds it.
+                    match (event, payload) {
+                        (EventKind::ChangeText, EventPayload::Text { text, .. }) => {
+                            events::value(text)?
+                        }
+                        // `onContentSizeChange({ size })`.
+                        (EventKind::ContentSizeChange, EventPayload::Map(_)) => {
+                            events::wrap("size", events::payload(&self.bindings, payload)?)?
+                        }
+                        // Presses always pass their event, as nsh-js's do.
+                        (
+                            EventKind::Press
+                            | EventKind::LongPress
+                            | EventKind::PressDown
+                            | EventKind::PressUp,
+                            EventPayload::None,
+                        ) => events::payload(
+                            &self.bindings,
+                            &EventPayload::Press(nsh_core::PressEvent {
+                                clicks: 1,
+                                ..Default::default()
+                            }),
+                        )?,
+                        _ => events::payload(&self.bindings, payload)?,
+                    },
                 ])
             })(),
         );
@@ -107,7 +132,6 @@ impl Host for Runtime {
                         Value::number(host.into()),
                         Value::string(event.name())?,
                         Value(event.data_js(&*self.bindings)?.into_raw().0[0] as u32),
-                        Value(if event.spread() { 3 } else { 2 }),
                     ])
                 })(),
             ),

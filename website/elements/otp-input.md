@@ -60,7 +60,7 @@ function App() {
       length={6}
       groups={2}
       value={code()}
-      onChange={(next) => code.set(next)}
+      onChange={({ value }) => code.set(value)}
       onComplete={({ value }) => verify(value)}
       accessibilityLabel="Verification code, 6 digits"
       class="flex-row gap-3"
@@ -117,7 +117,7 @@ so the app verifies the code there.
 
 | Event | Rust | Payload | When |
 |---|---|---|---|
-| `onChange` | `.on_change(\|value: &SharedString\| ..)` | `(value: string)` | The user changed the code: typed, deleted, pasted or autofilled. |
+| `onChange` | `.on_change(\|value: &SharedString\| ..)` | `(e: { value: string })` | The user changed the code: typed, deleted, pasted or autofilled. |
 | `onComplete` | `.on_complete(\|e: &OtpInputCompleteEvent\| ..)` | `{ value }` | The user's change filled the last cell, after its `onChange`. |
 | `onFocus` / `onBlur` | `.on_focus` / `.on_blur` | none | The input took / lost the keyboard focus. |
 

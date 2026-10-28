@@ -237,8 +237,8 @@ fn send(cx: Ctx) -> R<()> {
     crate::dom::push_op(cx, op).map_err(|_| js::Throw)
 }
 
-/// The root's `onKeyCommand(id)`: runs the binding's handler with its
-/// keystroke (as written).
+/// The root's `onKeyCommand(id)`: runs the binding's handler with
+/// `{ keystroke }` (as written; one object, as every event).
 unsafe extern "C" fn on_key_command(
     cx: Ctx,
     _this: Raw,
@@ -259,8 +259,9 @@ unsafe extern "C" fn on_key_command(
         let Some((handler, text)) = found else {
             return Ok(V::undefined());
         };
-        let text = js::string(cx, &text)?;
-        js::call(cx, handler.raw(), UNDEFINED, &[text.raw()])
+        let event = js::new_object(cx)?;
+        js::define(cx, event.raw(), "keystroke", js::string(cx, &text)?, true)?;
+        js::call(cx, handler.raw(), UNDEFINED, &[event.raw()])
     };
     run().map_or(qjs::JS_EXCEPTION, V::take)
 }
@@ -304,15 +305,15 @@ pub(crate) const TYPES: &str = r#"export interface KeyBindingOptions {
  * binding; when several bindings have its keystroke, the newest that may
  * fire runs. */
 export interface Keymap {
-  /** Runs `handler` when `keystroke` is pressed (it gets the keystroke as
-   * written, in its case); returns a function that removes the binding. A binding made while a component renders is removed
+  /** Runs `handler` when `keystroke` is pressed (it gets `{ keystroke }`,
+   * the keystroke as written, in its case); returns a function that removes the binding. A binding made while a component renders is removed
    * with the component. Throws on an invalid keystroke, or one the platform
    * keeps (Command+Q, Command+H, Command+M, Control+Command+F on Apple
    * platforms; Control+Q, Alt+F4, F11 elsewhere). */
-  bind(keystroke: string, handler: (keystroke: string) => void, options?: KeyBindingOptions): () => void;
-  /** Binds each keystroke of `bindings` to its handler, which gets the
-   * keystroke as written; returns a function that removes them all. */
-  bind(bindings: Record<string, (keystroke: string) => void>, options?: KeyBindingOptions): () => void;
+  bind(keystroke: string, handler: (e: { keystroke: string }) => void, options?: KeyBindingOptions): () => void;
+  /** Binds each keystroke of `bindings` to its handler, which gets
+   * `{ keystroke }` as written; returns a function that removes them all. */
+  bind(bindings: Record<string, (e: { keystroke: string }) => void>, options?: KeyBindingOptions): () => void;
   /** `keystroke` as menus and hints show it where the app runs: `"⇧⌘L"` on
    * Apple platforms (and in a browser on one), `"Ctrl+Shift+L"` elsewhere,
    * for `"mod+shift+l"`. Throws on an invalid keystroke. */

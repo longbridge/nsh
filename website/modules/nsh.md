@@ -403,7 +403,7 @@ mount(App);
 ```
 
 > [!NOTE]
-> An animated value lives on the UI thread and changes there every frame, so the app reads it asynchronously: `await value.getValue()` (or the promise `stop()` returns) gives the value at that moment, and in Rust `value.value().await` in a task. Keep the target in a variable or a signal when your code needs it right away, as above. Gesture events report the values at their end (`PanEvent.valueX` / `valueY`).
+> An animated value lives on the UI thread and changes there every frame, so the app reads it asynchronously: `await value.getValue()` (or the promise `stop()` returns) gives the value at that moment, and in Rust `value.value().await` in a task. Keep the target in a variable or a signal when your code needs it right away, as above. Gesture events report the values at their end (`PanEvent.value`).
 
 ### AnimatedValue
 
@@ -2009,8 +2009,8 @@ import { keymap } from "nsh";
 
 ```ts
 const keymap: {
-  bind(keystroke: string, handler: (keystroke: string) => void, options?: KeyBindingOptions): () => void;
-  bind(bindings: Record<string, (keystroke: string) => void>, options?: KeyBindingOptions): () => void;
+  bind(keystroke: string, handler: (e: { keystroke: string }) => void, options?: KeyBindingOptions): () => void;
+  bind(bindings: Record<string, (e: { keystroke: string }) => void>, options?: KeyBindingOptions): () => void;
   label(keystroke: string): string;
 };
 
@@ -2034,10 +2034,10 @@ Shortcuts work on macOS, Windows, Linux and in browsers (the browser's own keys,
 ### keymap.bind
 
 ```ts
-bind(keystroke: string, handler: (keystroke: string) => void, options?: KeyBindingOptions): () => void;
+bind(keystroke: string, handler: (e: { keystroke: string }) => void, options?: KeyBindingOptions): () => void;
 ```
 
-Runs `handler` when `keystroke` is pressed and returns a function that removes the binding. The handler gets the keystroke as you wrote it, in its case. Rust: `on_key(keystroke, handler)`.
+Runs `handler` when `keystroke` is pressed and returns a function that removes the binding. The handler gets `{ keystroke }`: the keystroke as you wrote it, in its case. Rust: `on_key(keystroke, handler)`, whose handler gets the keystroke itself.
 
 ```rust tabs
 use nsh_core::prelude::*;
@@ -2504,7 +2504,7 @@ function Saved() {
 | `ViewProps`, `TextProps`, `ImageProps`, `ScrollProps`, `CommonProps`, `TouchProps` | Props of host elements |
 | `ViewStyle`, `TextStyle`, `InputStyle`, `ImageStyle`, `LayoutStyle`, `StyleProp<T>` | Style objects; see the [style reference](./style-reference.md) |
 | `ColorValue`, `DimensionValue`, `LengthValue`, `TransformStep` | Values inside styles |
-| `GestureResponderEvent`, `MouseEvent`, `MouseButton`, `ContextMenuEvent`, `ScrollEvent`, `PanEvent`, `TouchPoint` | Event payloads |
+| `GestureResponderEvent`, `MouseEvent`, `MouseButton`, `ContextMenuEvent`, `PressEvent`, `ScrollEvent`, `PanEvent`, `TouchPoint` | Event payloads |
 | `Point`, `Size`, `Bounds`, `Edges`, `Modifiers` | The shapes payloads and props are made of, with GPUI's fields (`nsh_core::geometry`) |
 | `PixelSize` | An image's or a video's own size in pixels (`onLoad`, `Image.getSize`, the clipboard's and the picker's images), where `Size` is points |
 | `ImageAsset` | What importing an image file gives (`{ url, size: Size, scales? }`; `scales` lists its [pixel-density variants](../docs/images-and-assets.md#pixel-densities)) |

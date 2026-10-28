@@ -121,7 +121,7 @@ function SalesCard(props: { mode: Mode; onHover: (index: number | null) => void 
           // The month under the pointer: a faint band over its bars.
           crossLineClass="w-full h-full"
           crossLineStyle={{ backgroundColor: tint(ui().text, 0.05) }}
-          onHoverChange={(index) => {
+          onHoverChange={({ index }) => {
             hovered.set(index);
             props.onHover(index);
           }}
@@ -279,7 +279,7 @@ function App() {
                     <Text style={{ fontSize: 11, color: ui().text, ...num }}>{RANGES[range()].time(Math.min(tipRow(), rows().length - 1))}</Text>
                   </View>
                 }
-                onHoverChange={(index) => {
+                onHoverChange={({ index }) => {
                   hovered.set(index);
                   if (index != null) tipRow.set(index);
                   const line = index == null ? "null: left the chart" : `${index}: ${rows()[index].price.toFixed(2)}`;

@@ -614,8 +614,13 @@ enum Piece {
         marks: Vec<Mark>,
         classes: Vec<String>,
     },
-    /// An inline leaf node at `offset` of the content.
-    Leaf { node: Node, offset: usize },
+    /// An inline leaf node at `offset` of the content, drawn as `text`
+    /// where it has one ([`Rv::leaf_text`]).
+    Leaf {
+        node: Node,
+        offset: usize,
+        text: Option<String>,
+    },
     /// A widget decoration (its `class`).
     Widget { class: Option<String> },
     /// What keeps an empty textblock a line high.
@@ -630,8 +635,13 @@ struct Inline {
 }
 
 /// The pieces of textblock `node` whose content starts at `start`, under
-/// `decorations`.
-fn inline_of(node: &Node, start: usize, decorations: &[Decoration]) -> Inline {
+/// `decorations`; `leaf_text` is the text an inline leaf is drawn as.
+fn inline_of(
+    node: &Node,
+    start: usize,
+    decorations: &[Decoration],
+    leaf_text: impl Fn(&Node) -> Option<String>,
+) -> Inline {
     let size = node.content().size();
     let end = start + size;
     // Where inline decorations start and end, and widgets sit.
@@ -724,17 +734,20 @@ fn inline_of(node: &Node, start: usize, decorations: &[Decoration]) -> Inline {
             }
             None => {
                 emit_widgets(&mut out, &mut text_at, offset, true);
+                let text = leaf_text(child);
+                let units = text.as_deref().map_or(len, utf16_len) as u32;
                 out.map.runs.push(Run {
                     doc: offset,
                     doc_len: len,
                     text: text_at,
-                    text_len: len as u32,
+                    text_len: units,
                     side: 0,
                 });
-                text_at += len as u32;
+                text_at += units;
                 out.pieces.push(Piece::Leaf {
                     node: child.clone(),
                     offset,
+                    text,
                 });
             }
         }
@@ -773,7 +786,7 @@ fn text_block(rv: Rv, item: ReadSignal<BlockItem>, owner: u64) -> impl IntoEleme
         let it = item.get();
         let start = it.pos + 1;
         let decorations = inline_rv.decorations_in(start, start + it.node.content().size());
-        let inline = inline_of(&it.node, start, &decorations);
+        let inline = inline_of(&it.node, start, &decorations, |n| inline_rv.leaf_text(n));
         if let Some(geo) = inline_rv.geo.borrow_mut().texts.get_mut(&id) {
             geo.map = inline.map.clone();
         }
@@ -886,7 +899,7 @@ fn spans(rv: &Rv, pieces: Vec<Piece>, start: usize) -> Vec<AnyElement> {
                     })
                     .into_element()
             }
-            Piece::Leaf { node, offset } => leaf(rv, node, start + offset),
+            Piece::Leaf { node, offset, text } => leaf(rv, node, start + offset, text),
             Piece::Widget { class } => view()
                 .app_class(class.map(SharedString::from))
                 .into_element(),
@@ -896,8 +909,9 @@ fn spans(rv: &Rv, pieces: Vec<Piece>, start: usize) -> Vec<AnyElement> {
 }
 
 /// An inline leaf: its one-character text (a line break), its node view,
-/// else a box of its part.
-fn leaf(rv: &Rv, node: Node, pos: usize) -> AnyElement {
+/// the text it is drawn as (`drawn`, [`Rv::leaf_text`]), else a box of its
+/// part.
+fn leaf(rv: &Rv, node: Node, pos: usize, drawn: Option<String>) -> AnyElement {
     let props = rv.props;
     let classes_node = node.clone();
     let styled = move |el: View| {
@@ -930,6 +944,21 @@ fn leaf(rv: &Rv, node: Node, pos: usize) -> AnyElement {
     }
     if render_kind(&node) == Some("image") {
         return styled(view_box()).child(image_of(&node)).into_element();
+    }
+    if let Some(drawn) = drawn {
+        let (class_node, style_node) = (node.clone(), node);
+        return text(drawn)
+            .app_class(move || {
+                props
+                    .classes
+                    .with(|c| parts::join(parts::node_classes(c, &class_node)))
+            })
+            .inline_style(move || {
+                props
+                    .styles
+                    .with(|s| parts::merge(&parts::node_styles(s, &style_node)))
+            })
+            .into_element();
     }
     match node.ty().spec().leaf_text.as_deref() {
         Some(t) if utf16_len(t) == 1 => {
@@ -1263,6 +1292,24 @@ fn sink(rv: Rv) -> impl IntoElement {
 }
 
 impl Rv {
+    /// The text inline leaf `node` is drawn as: its type's `render_text` (a
+    /// mention's `@name`), unless its node view, an image or a
+    /// one-character `leaf_text` draws it. It stays one position, however
+    /// many characters it shows.
+    fn leaf_text(&self, node: &Node) -> Option<String> {
+        let spec = node.ty().spec();
+        if self.node_view(node.ty().name()).is_some()
+            || render_kind(node) == Some("image")
+            || spec.leaf_text.as_deref().is_some_and(|t| utf16_len(t) == 1)
+        {
+            return None;
+        }
+        spec.render_text
+            .as_ref()
+            .map(|render| render.text(node))
+            .filter(|t| !t.is_empty())
+    }
+
     /// Block (or slot) `id`'s frame in box `parent` (`None`: the content
     /// box).
     pub(crate) fn set_frame(&self, id: u64, parent: Option<u64>, frame: Bounds<Points>) {
@@ -1357,7 +1404,7 @@ mod tests {
             Decoration::inline(2, 4, attrs),
             Decoration::widget(4, "w", -1),
         ];
-        let inline = inline_of(&p, 1, &decorations);
+        let inline = inline_of(&p, 1, &decorations, |_| None);
         let texts: Vec<_> = inline
             .pieces
             .iter()
@@ -1379,7 +1426,7 @@ mod tests {
         let p = schema
             .node("paragraph", None, Default::default(), vec![])
             .unwrap();
-        let inline = inline_of(&p, 1, &[]);
+        let inline = inline_of(&p, 1, &[], |_| None);
         assert_eq!(inline.pieces, [Piece::Filler]);
         assert_eq!(inline.map.to_text(0), 1);
     }

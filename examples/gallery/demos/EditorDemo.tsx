@@ -442,7 +442,7 @@ export function EditorDemo() {
             <Input
               ref={(node: YNode) => node.focus()}
               value={query()}
-              onChange={(value) => query.set(value)}
+              onChange={({ value }) => query.set(value)}
               onSubmit={() => editor?.run("findNext")}
               submitBehavior="submit"
               placeholder="Find"
@@ -464,7 +464,7 @@ export function EditorDemo() {
           <View class="flex-row items-center gap-0.5">
             <Input
               value={replacement()}
-              onChange={(value) => replacement.set(value)}
+              onChange={({ value }) => replacement.set(value)}
               onSubmit={() => editor?.replace(replacement())}
               submitBehavior="submit"
               placeholder="Replace"
@@ -511,17 +511,17 @@ export function EditorDemo() {
               completion={lsp}
               completionTriggerCharacters={["."]}
               inlineCompletionDelay={150}
-              onChange={(value) => {
+              onChange={({ value }) => {
                 texts[lang] = value;
                 if (lsp) changed(value);
               }}
-              onSelectionChange={(value) => selections.set(value)}
-              onSearchChange={(value) => result.set(value)}
-              onFindWithSelection={(value) => {
+              onSelectionChange={({ selections: value }) => selections.set(value)}
+              onSearchChange={({ result: value }) => result.set(value)}
+              onFindWithSelection={({ query: value }) => {
                 query.set(value);
                 finding.set(true);
               }}
-              onLineNumberPress={(line) => last.set(`Line ${line + 1} pressed`)}
+              onLineNumberPress={({ line }) => last.set(`Line ${line + 1} pressed`)}
               onContextMenu={(e) => void contextMenu(e.position, e.x, e.y)}
               onHover={async (e) => {
                 clearTimeout(closeTimer);
@@ -607,7 +607,7 @@ export function EditorDemo() {
           margin={8}
           popupClass={popup}
           backdropClass="bg-black/40"
-          onOpenChange={(open) => menuOpen.set(open ? "language" : null)}
+          onOpenChange={({ open }) => menuOpen.set(open ? "language" : null)}
           trigger={
             <View
               accessibilityLabel="Language"
@@ -640,7 +640,7 @@ export function EditorDemo() {
           margin={8}
           popupClass={popup}
           backdropClass="bg-black/40"
-          onOpenChange={(open) => menuOpen.set(open ? "options" : null)}
+          onOpenChange={({ open }) => menuOpen.set(open ? "options" : null)}
           trigger={
             <View
               accessibilityLabel="Editor options"
@@ -677,7 +677,7 @@ export function EditorDemo() {
             { id: "editor", closable: false },
             { id: "problems", closable: false },
           ]}
-          onDockOpenChange={(placement, open) => placement === "bottom" && problemsShown.set(open)}
+          onDockOpenChange={({ placement, open }) => placement === "bottom" && problemsShown.set(open)}
           groupClass="flex-1 bg-card"
           tabBarClass="flex-row border-b border-border"
           contentClass="flex-1"

@@ -236,16 +236,16 @@ export function Dock() {
             ref={area}
             class="flex-1"
             layout={layout()}
-            onLayoutChange={(next) => layout.set(next)}
-            onPanelRemove={(panel) => last.set(`Closed ${title(panel)}`)}
-            onPanelActiveChange={(panel, active) => {
+            onLayoutChange={({ layout: next }) => layout.set(next)}
+            onPanelRemove={({ panel }) => last.set(`Closed ${title(panel)}`)}
+            onPanelActiveChange={({ panel, active }) => {
               if (!active) return;
               current = panel;
               last.set(`Showing ${title(panel)}`);
             }}
-            onZoomChange={(panel) => zoomed.set(panel)}
+            onZoomChange={({ panel }) => zoomed.set(panel)}
             panels={closing() ? [] : Object.keys(TITLES).map((id) => ({ id, closable: false }))}
-            onDockOpenChange={(placement, open) => shown.set({ ...shown(), [placement]: open })}
+            onDockOpenChange={({ placement, open }) => shown.set({ ...shown(), [placement]: open })}
             locked={locked()}
             groupClass="flex-1 bg-inset"
             tabBarClass="flex-row gap-1 border-b border-line"

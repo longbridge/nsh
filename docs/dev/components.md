@@ -161,11 +161,13 @@ reasons: `reactive-components.md`.
   defaults, and the TypeScript types (doc comments included: the fields' and variants', while the component's is
   its `#[component] fn`'s, `Component::DOC`; the props struct's and the event enum's own stay Rust's, and so does
   any part of a doc comment from its first heading on, `# Rust` for notes meant for Rust callers). Field and variant names become camel case in JS. An
-  event handler's argument is `value` in TS (`event` for a variant with named fields); `#[args(index)]` on the
-  variant names it (`onSelect?: (index: number) => void`). A variant of several unnamed fields names each
-  (`#[args(open, reason)] OpenChange(bool, OpenChangeReason)`): the handler takes them as its arguments
-  (`onOpenChange?: (open: boolean, reason: OpenChangeReason) => void`; `Event::spread`, the data a JS array the JS face
-  spreads). Value types
+  event handler gets one object (`docs/dev/api-naming.md` "Payloads"): a variant with named fields an object of
+  them; a variant of one unnamed field an object with that value as `value`, which `#[args(index)]` on the variant
+  renames (`onSelect?: (event: { index: number }) => void`); a variant of several unnamed fields names each
+  (`#[args(open, reason)] OpenChange(bool, OpenChangeReason)`:
+  `onOpenChange?: (event: { open: boolean; reason: OpenChangeReason }) => void`). `#[args(event)]` on a variant of one
+  field says its value is the event object itself, passed as it is (`#[args(event)] RowPress(DataTablePress)`); a
+  unit variant passes nothing. Value types
   implement `JsValue` (numbers, `bool`, strings, `Hsla` (a CSS color string, as `Color`), `Option`, `Vec`, `JsonValue`, `element::Style` (an inline
   `StyleProp<ViewStyle>`, decoded as a host element's `style` is: transforms, shadow offsets and native animated
   values included; Rust builds one with `Style::from_decls` / `with`), `PropEnum`s, `JsObject` structs). A field that can change is a `Prop<T>` (`Copy`): in the
@@ -904,7 +906,7 @@ Their callbacks are one set, as `Dialog`'s (`popup.rs`: `OpenState`, `lifecycle`
 - **`open` / `defaultOpen`**: the open state is controlled when the app sets `open` (`Prop<Option<bool>>`), the
   popup's own (`OpenState`'s signal, from `defaultOpen`) otherwise. A user's request changes the own state at once
   when there is one; a controlled popup waits for the app to change `open`.
-- **`onOpenChange(open, reason)`**: every request to open or close (`OpenState::request`; not a request for what it
+- **`onOpenChange({ open, reason })`**: every request to open or close (`OpenState::request`; not a request for what it
   already is), whether controlled or not, with why: `OpenChangeReason`: `"triggerPress"`, `"pressOutside"`,
   `"backdropPress"`, `"cancel"` (Escape or back), `"select"` (a menu's item), `"hover"`, `"longPress"`,
   `"contextMenu"`, `"swipe"`. The app changing `open` itself is not reported here.
@@ -954,7 +956,7 @@ reports that root’s presentation size independently of the app, so both the ba
 
 `Sheet` opts into downward dragging with `closeOnSwipe` (default false, bottom side). Its pan updates
 `SheetMotion.drag_y` on the platform's animation graph; a clamped fraction of the measured panel height drives both
-translation and backdrop opacity. Release past 30% or 800 points/second requests `onOpenChange(false, "swipe")`
+translation and backdrop opacity. Release past 30% or 800 points/second requests `onOpenChange({ open: false, reason: "swipe" })`
 after `onCancel`; a shorter, cancelled or declined gesture returns the panel. Reduced motion snaps the release.
 `Interactive::pan_enabled` filters the mounted pan values and event mask together, retaining the listeners and
 children while a sheet enters, exits or changes permission. `pan_scroll_handoff` asks UIKit to share the touched
@@ -998,7 +1000,7 @@ as `gpui-component`'s notifications are, and is never part of NSH (the gallery's
 | `ToastTransitionStatus` (`Starting`, `Present`, `Ending`) | the same (`PropEnum`) | `"starting" \| "present" \| "ending"` |
 | `Toast::new(id).transition_status(..)`, role alert | the component `Toast` (`toast.rs`) | `<Toast transitionStatus>` |
 | `ToastStack::new(id, state).item(id, child).motion(..).placement(Anchor).focus_handle(..)` | the component `ToastStack` (`stack.rs`): its children are the items (`children_each`, keyed by node), `Anchor` an enum of the same eight edges, `.state(ToastStackState)` | `<ToastStack motion placement onExpandedChange>` |
-| `ToastStackState::is_expanded()` | the same, a signal the stack's `ExpandedChange` writes | `onExpandedChange(expanded)` |
+| `ToastStackState::is_expanded()` | the same, a signal the stack's `ExpandedChange` writes | `onExpandedChange({ expanded })` |
 
 The manager is a class rather than a reactive helper because it is `gpui-base`'s data structure, not a view: the app
 keeps it, renders `visible(limit)` (a signal of its own) and calls `advance` on a timer while anything is mounted,

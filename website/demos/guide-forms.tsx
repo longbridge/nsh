@@ -24,7 +24,7 @@ function App() {
     <Input
       {...field({ style })}
       value={name()}
-      onChange={(t) => name.set(t)}
+      onChange={({ value }) => name.set(value)}
       placeholder="Ada Lovelace"
       autoCapitalize="words"
       autoComplete="name"
@@ -39,7 +39,7 @@ function App() {
       ref={emailInput}
       {...field({ style })}
       value={email()}
-      onChange={(t) => email.set(t.trim().toLowerCase())}
+      onChange={({ value }) => email.set(value.trim().toLowerCase())}
       placeholder="ada@example.com"
       keyboardType="email-address"
       autoCapitalize="none"
@@ -68,7 +68,7 @@ function App() {
     <Input
       {...field({ style })}
       value={code()}
-      onChange={(t) => code.set(t.replace(/[^0-9]/g, ""))}
+      onChange={({ value }) => code.set(value.replace(/[^0-9]/g, ""))}
       keyboardType="number-pad"
       autoComplete="one-time-code"
       maxLength={6}
@@ -81,8 +81,8 @@ function App() {
       multiline
       maxLength={200}
       value={notes()}
-      onChange={(t) => notes.set(t)}
-      onContentSizeChange={(e) => notesHeight.set(Math.min(e.height, 120))}
+      onChange={({ value }) => notes.set(value)}
+      onContentSizeChange={({ size }) => notesHeight.set(Math.min(size.height, 120))}
       placeholder="Return adds a line"
       {...field({ style })}
       onFocus={() => focused.set("notes")}

@@ -49,7 +49,7 @@ function App() {
   return (
     <NumberInput
       value={tickets()}
-      onChange={(next) => tickets.set(next)}
+      onChange={({ value }) => tickets.set(value)}
       min={1}
       max={10}
       accessibilityLabel="Tickets"
@@ -97,8 +97,8 @@ const price = signal<number | null>(19.95);
 
 <NumberInput
   value={price()}
-  onChange={(next) => price.set(next)}
-  onSubmit={(next) => save(next)}
+  onChange={({ value }) => price.set(value)}
+  onSubmit={({ value }) => save(value)}
   min={0}
   step={0.05}
   placeholder="Price"
@@ -142,8 +142,8 @@ The field takes:
 
 | Event | Rust | Payload | When |
 |---|---|---|---|
-| `onChange` | `.on_change(\|value: &Option<f64>\| ..)` | `number \| null` | The number the field reads as changed (typing, a step, a screen reader's increment or decrement, the field left with a value out of range). |
-| `onSubmit` | `.on_submit(\|value: &Option<f64>\| ..)` | `number \| null` | Return / Enter in the field: the value, held to `min` and `max`. |
+| `onChange` | `.on_change(\|value: &Option<f64>\| ..)` | `{ value: number \| null }` | The number the field reads as changed (typing, a step, a screen reader's increment or decrement, the field left with a value out of range). |
+| `onSubmit` | `.on_submit(\|value: &Option<f64>\| ..)` | `{ value: number \| null }` | Return / Enter in the field: the value, held to `min` and `max`. |
 | `onFocus` | `.on_focus(..)` | none | The field took the keyboard focus. |
 | `onBlur` | `.on_blur(..)` | none | The field lost the keyboard focus (its value held to `min` and `max` first). |
 

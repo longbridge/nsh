@@ -19,8 +19,8 @@ function App() {
       pagingEnabled
       scrollbar={false}
       style={style}
-      onLayout={(e) => width.set(e.size.width)}
-      onMomentumEnd={(e) => page.set(Math.round(e.x / width()))}
+      onLayout={({ bounds }) => width.set(bounds.size.width)}
+      onMomentumEnd={({ offset }) => page.set(Math.round(offset.x / width()))}
     >
       <Each of={colors()}>
         {(color, index) => (

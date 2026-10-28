@@ -359,7 +359,7 @@ function EditNote() {
   };
   return (
     <NavPage title="Edit" popOnBack={text().length === 0} onBackPress={() => text().length > 0 && confirm()}>
-      <Input value={text()} onChange={(v) => text.set(v)} placeholder="A note" />
+      <Input value={text()} onChange={({ value }) => text.set(value)} placeholder="A note" />
     </NavPage>
   );
 }

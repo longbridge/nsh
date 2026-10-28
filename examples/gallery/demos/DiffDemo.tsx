@@ -110,7 +110,7 @@ export function DiffDemo() {
   let diff: DiffViewRef | undefined;
 
   // The counts follow the texts: the view reports them as it diffs.
-  const counted = (s: DiffStats) => {
+  const counted = ({ stats: s }: { stats: DiffStats }) => {
     stats.set(s);
     current.set(Math.min(current(), Math.max(0, s.hunks - 1)));
   };
@@ -199,12 +199,12 @@ export function DiffDemo() {
                   </Button>
                 </View>
               )}
-              onChange={(change) => {
+              onChange={({ change }) => {
                 oldValue.set(change.oldValue);
                 newValue.set(change.newValue);
                 last.set("Changed");
               }}
-              onLineNumberPress={(line) => last.set(`Comment on ${line.side} line ${line.line + 1}`)}
+              onLineNumberPress={({ line }) => last.set(`Comment on ${line.side} line ${line.line + 1}`)}
               class="flex-1"
             />
           ) : (
@@ -218,7 +218,7 @@ export function DiffDemo() {
                   <Text class="font-mono text-[11px] text-muted-foreground">{sep.header ? `@@ ${sep.header.trim()}` : `${sep.lines} lines`}</Text>
                 </View>
               )}
-              onLineNumberPress={(line) => last.set(`Comment on ${line.side} line ${line.line + 1}`)}
+              onLineNumberPress={({ line }) => last.set(`Comment on ${line.side} line ${line.line + 1}`)}
               class="flex-1"
             />
           )

@@ -192,20 +192,24 @@ pub fn Area(props: AreaProps, _cx: Scope<NoEvent>) -> impl IntoElement {
         STROKE_ROOM + swing.max(past).ceil()
     };
     // Its shape: the top edge, down to the baseline or the bottom edge, and
-    // back.
+    // back. Both edges of a band and a baseline at a value move with the y
+    // scale's domain; the plot's bottom edge stays.
     let shape =
         move |p: Painter, plot: PlotContext, points: &[Point<Points>], lows: &[Point<Points>]| {
             let (first, last) = (points[0], points[points.len() - 1]);
-            let p = trace(
-                p.begin_path().move_to(first.x, first.y),
-                points,
-                curve.get(),
-            );
+            let p = plot.traced(p.begin_path(), true, true, |p| {
+                trace(p.move_to(first.x, first.y), points, curve.get())
+            });
             let p = match lows.last() {
-                Some(end) => trace_back(p.line_to(end.x, end.y), lows, curve.get()),
+                Some(end) => plot.traced(p, true, true, |p| {
+                    trace_back(p.line_to(end.x, end.y), lows, curve.get())
+                }),
                 None => {
                     let base = base(plot);
-                    p.line_to(last.x, px(base)).line_to(first.x, px(base))
+                    let at_value = y0.with(|y0| y0.as_ref().and_then(AreaY0::value).is_some());
+                    plot.traced(p, true, at_value, |p| {
+                        p.line_to(last.x, px(base)).line_to(first.x, px(base))
+                    })
                 }
             };
             p.close_path()
@@ -273,11 +277,9 @@ pub fn Area(props: AreaProps, _cx: Scope<NoEvent>) -> impl IntoElement {
                 .stroke_style_from_view(SvgPaint::None)
                 .line_width_from_view()
                 .line_dash_from_view();
-            trace(
-                p.begin_path().move_to(first.x, first.y),
-                &points,
-                curve.get(),
-            )
+            plot.traced(p.begin_path(), true, true, |p| {
+                trace(p.move_to(first.x, first.y), &points, curve.get())
+            })
             .stroke()
         }))
 }

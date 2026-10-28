@@ -29,7 +29,7 @@ function Api(props: { label: string; api: string }) {
 /** The width of a track, measured once laid out (the dots move by it). */
 function useWidth() {
   const width = signal(0);
-  return [width, (bounds: Bounds) => width.set(bounds.size.width)] as const;
+  return [width, ({ bounds }: { bounds: Bounds }) => width.set(bounds.size.width)] as const;
 }
 
 // --- Hero -------------------------------------------------------------------

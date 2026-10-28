@@ -97,9 +97,9 @@ function Pager() {
         scrollbar={false}
         scrollValue={x}
         style={{ height: 160, borderRadius: radius.control, backgroundColor: colors.surface, ...finish.card, borderWidth: 1, borderColor: colors.line }}
-        onLayout={(e) => width.set(e.size.width)}
-        onMomentumEnd={(e) => page.set(Math.round(e.x / width()))}
-        onScrollEnd={(e) => page.set(Math.round(e.x / width()))}
+        onLayout={({ bounds }) => width.set(bounds.size.width)}
+        onMomentumEnd={({ offset }) => page.set(Math.round(offset.x / width()))}
+        onScrollEnd={({ offset }) => page.set(Math.round(offset.x / width()))}
       >
         <View style={{ flexDirection: "row" }}>
           <Each of={pages}>
@@ -218,7 +218,7 @@ function Events() {
   const bounces = signal(true);
   const inset = signal(false);
   const throttle = signal<"0" | "100" | "500">("100");
-  const note = (name: string, tone: Tone) => (e: { y: number }) => log.update((l) => [{ name, y: Math.round(e.y), tone }, ...l].slice(0, 5));
+  const note = (name: string, tone: Tone) => ({ offset }: { offset: { y: number } }) => log.update((l) => [{ name, y: Math.round(offset.y), tone }, ...l].slice(0, 5));
   const progress = () => {
     const o = offset();
     return o && o.contentSize.height > o.size.height ? o.offset.y / (o.contentSize.height - o.size.height) : 0;

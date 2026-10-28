@@ -178,7 +178,7 @@ mount(() => (
         </NavPage>
       )}
     </NavStack>
-    <Dialog open={open()} onOpenChange={(o) => open.set(o)}>
+    <Dialog open={open()} onOpenChange={({ open: o }) => open.set(o)}>
       <Text>in modal</Text>
     </Dialog>
   </View>
@@ -722,7 +722,7 @@ mount(() => (
     <Input
       placeholder="A much longer placeholder"
       style={{ width: 300, height: 40 }}
-      onContentSizeChange={(e) => size.set(`${e.width}x${e.height}`)}
+      onContentSizeChange={({ size: e }) => size.set(`${e.width}x${e.height}`)}
     />
     <Text>{`size ${size()}`}</Text>
   </View>
@@ -861,7 +861,7 @@ mount(() => (
       backdropClass="bg-black/50"
       onOpen={() => add("open")}
       onCancel={() => add("cancel")}
-      onOpenChange={(o, reason) => { add(`change ${o} ${reason}`); open.set(o); }}
+      onOpenChange={({ open: o, reason }) => { add(`change ${o} ${reason}`); open.set(o); }}
     >
       <Text>in dialog</Text>
     </Dialog>
@@ -979,7 +979,7 @@ mount(() => (
       class="bg-white p-4"
       backdropStyle={backdrop() ? { backgroundColor: "#00000080" } : undefined}
       onCancel={() => add("cancel")}
-      onOpenChange={(o, reason) => add(`change ${o} ${reason}`)}
+      onOpenChange={({ open: o, reason }) => add(`change ${o} ${reason}`)}
       onClose={() => add("close")}
     >
       <Text>in dialog</Text>
@@ -1224,7 +1224,7 @@ mount(() => (
     <Text>{log()}</Text>
     <Input
       testID="field"
-      onChange={(text) => log.set(`change ${text}`)}
+      onChange={({ value: text }) => log.set(`change ${text}`)}
       onSubmit={(e) => log.set(`submit ${e.text}`)}
     />
     <Text onPress={() => items.set([1, 2])}>fill</Text>

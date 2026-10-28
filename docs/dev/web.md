@@ -690,7 +690,7 @@ browsers' touches into what phones report:
   `Command::Announce` writes into a polite live region, `Command::AccessibilityFocus` focuses the view.
 - **Going back** (`back`) is decided from what is mounted, as on Android and the desktops: a stack inside the newest
   dialog pops, else the dialog gets the close attempt (`onCancel`, reason `"cancel"`) and closes natively when
-  `closeOnEscape` (the default), reporting `onOpenChange(false, "cancel")` and `onClose`; without a dialog the root's
+  `closeOnEscape` (the default), reporting `onOpenChange({ open: false, reason: "cancel" })` and `onClose`; without a dialog the root's
   `onBackPress` hears it when the app listens, else the innermost stack's top page gets `onBackPress` when it listens
   and pops unless its `popOnBack` is false (`goBack`). `Command::Back` goes back as without the app's listeners.
 - **Dialogs** (`Dialog`) are children of the root above the app's views (`present` / `dismiss`), transparent layers

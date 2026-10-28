@@ -247,7 +247,8 @@ define_class!(
         fn did_select(&self, _bar: &UITabBar, item: &UITabBarItem) {
             self.ivars()
                 .context
-                // The index itself: `onChange(index)`.
+                // The index itself (the core's `TabBarEvent::Change`; JS hears
+                // `onChange({ index })`).
                 .emit("change", serde_json::json!(item.tag() as u32));
         }
     }

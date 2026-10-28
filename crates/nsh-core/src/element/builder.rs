@@ -152,10 +152,6 @@ impl<E: Event> super::EventToJs for E {
     fn data_js<'a>(&self, host: &'a dyn super::JsHost) -> Result<super::JsOwned<'a>, PropError> {
         Event::data_js(self, host)
     }
-
-    fn spread(&self) -> bool {
-        Event::spread(self)
-    }
 }
 
 impl<E: Event> AnyEvent for E {

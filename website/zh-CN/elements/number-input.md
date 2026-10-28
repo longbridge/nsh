@@ -46,7 +46,7 @@ function App() {
   return (
     <NumberInput
       value={tickets()}
-      onChange={(next) => tickets.set(next)}
+      onChange={({ value }) => tickets.set(value)}
       min={1}
       max={10}
       accessibilityLabel="Tickets"
@@ -87,8 +87,8 @@ const price = signal<number | null>(19.95);
 
 <NumberInput
   value={price()}
-  onChange={(next) => price.set(next)}
-  onSubmit={(next) => save(next)}
+  onChange={({ value }) => price.set(value)}
+  onSubmit={({ value }) => save(value)}
   min={0}
   step={0.05}
   placeholder="Price"
@@ -129,8 +129,8 @@ const price = signal<number | null>(19.95);
 
 | 事件 | Rust | 参数 | 触发时机 |
 |---|---|---|---|
-| `onChange` | `.on_change(\|value: &Option<f64>\| ..)` | `number \| null` | 输入框读出的数字变化了（输入、步进、屏幕阅读器的增加或减少、离开输入框时值超出范围）。 |
-| `onSubmit` | `.on_submit(\|value: &Option<f64>\| ..)` | `number \| null` | 在输入框里按 Return / Enter：被限制在 `min` 和 `max` 之间的值。 |
+| `onChange` | `.on_change(\|value: &Option<f64>\| ..)` | `{ value: number \| null }` | 输入框读出的数字变化了（输入、步进、屏幕阅读器的增加或减少、离开输入框时值超出范围）。 |
+| `onSubmit` | `.on_submit(\|value: &Option<f64>\| ..)` | `{ value: number \| null }` | 在输入框里按 Return / Enter：被限制在 `min` 和 `max` 之间的值。 |
 | `onFocus` | `.on_focus(..)` | 无 | 输入框获得了键盘焦点。 |
 | `onBlur` | `.on_blur(..)` | 无 | 输入框失去了键盘焦点（先把值限制在 `min` 和 `max` 之间）。 |
 

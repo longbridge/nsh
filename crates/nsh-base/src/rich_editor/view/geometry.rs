@@ -77,6 +77,10 @@ impl InlineMap {
                 }
                 return if run.doc_len == 0 {
                     run.doc
+                } else if run.text_len as usize != run.doc_len {
+                    // A leaf drawn as text (a mention): the nearer side, the
+                    // caret never stands inside it.
+                    run.doc + usize::from(2 * (t - run.text) >= run.text_len) * run.doc_len
                 } else {
                     run.doc + ((t - run.text) as usize).min(run.doc_len)
                 };
@@ -514,5 +518,28 @@ mod tests {
         assert_eq!(m.to_doc(3), 3);
         assert_eq!(m.to_doc(5), 4);
         assert_eq!(m.to_doc(6), 5);
+    }
+
+    #[test]
+    fn a_leaf_drawn_as_text_is_one_position() {
+        // "ab", a mention drawn as "@Alice", "c".
+        let run = |doc, doc_len, text, text_len| Run {
+            doc,
+            doc_len,
+            text,
+            text_len,
+            side: 0,
+        };
+        let m = InlineMap {
+            runs: vec![run(0, 2, 0, 2), run(2, 1, 2, 6), run(3, 1, 8, 1)],
+            size: 4,
+            len: 9,
+        };
+        assert_eq!(m.to_text(2), 2);
+        assert_eq!(m.to_text(3), 8);
+        // Inside its text: the nearer side.
+        assert_eq!(m.to_doc(4), 2);
+        assert_eq!(m.to_doc(5), 3);
+        assert_eq!(m.to_doc(8), 3);
     }
 }

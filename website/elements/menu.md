@@ -109,7 +109,7 @@ cancels the hold.
 ## Open state
 
 Without `open`, a menu keeps its own state (from `defaultOpen` for `Menu`). With `open`, the app owns it and changes
-it in `onOpenChange(open, reason)`: `"triggerPress"`, `"select"`, `"pressOutside"`, `"backdropPress"`, `"cancel"`,
+it in `onOpenChange({ open, reason })`: `"triggerPress"`, `"select"`, `"pressOutside"`, `"backdropPress"`, `"cancel"`,
 `"contextMenu"` or `"longPress"`.
 
 ## Props

@@ -137,9 +137,9 @@ virtual_list(move || messages.with(|m| m.len()), move |at| {
 | 事件 | Rust | 载荷 | 时机 |
 |---|---|---|---|
 | `onScroll` | `.on_scroll` | `ScrollEvent` | 偏移发生变化。 |
-| `onScrollDragStart` / `onScrollDragEnd` | `.on_scroll_drag_start` / `.on_scroll_drag_end` | `{ x, y }` | 开始 / 结束拖动。 |
-| `onMomentumStart` / `onMomentumEnd` | `.on_momentum_start` / `.on_momentum_end` | `{ x, y }` | 惯性滑动开始 / 结束。 |
-| `onScrollEnd` | `.on_scroll_end` | `{ x, y }` | 滚动停止。 |
+| `onScrollDragStart` / `onScrollDragEnd` | `.on_scroll_drag_start` / `.on_scroll_drag_end` | `{ offset }` | 开始 / 结束拖动。 |
+| `onMomentumStart` / `onMomentumEnd` | `.on_momentum_start` / `.on_momentum_end` | `{ offset }` | 惯性滑动开始 / 结束。 |
+| `onScrollEnd` | `.on_scroll_end` | `{ offset }` | 滚动停止。 |
 | `onLoadMore` | `.on_load_more` | 无 | 距末端不足 `loadMoreThreshold` 个视口。 |
 | `onLoadMoreAtStart` | `.on_load_more_at_start` | 无 | 滚动后距开头不足 `loadMoreAtStartThreshold` 个视口，每次接近触发一次。 |
 | `onViewableItemsChange` | `.on_viewable_items_change` | `{ viewableItems, changed }`（`ViewableItems`） | 可见性变化。 |

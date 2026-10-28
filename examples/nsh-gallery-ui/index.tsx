@@ -461,7 +461,7 @@ export function Toggle(props: { value: boolean; onChange: (value: boolean) => vo
   return (
     <Switch
       checked={props.value}
-      onChange={props.onChange}
+      onChange={({ checked }) => props.onChange(checked)}
       accessibilityLabel={props.label}
       // 8 pt more to press on every side (a hit slop around the small
       // track), without taking more room.
@@ -560,7 +560,7 @@ export function Sheet(props: { open: boolean; onClose: () => void; children: JSX
   return (
     <BaseSheet
       open={props.open}
-      onOpenChange={(open) => !open && props.onClose()}
+      onOpenChange={({ open }) => !open && props.onClose()}
       backdropStyle={{ backgroundColor: "rgba(0,0,0,0.4)" }}
       popupStyle={{
         gap: 12,
