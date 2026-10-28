@@ -305,7 +305,7 @@ again for the echo of a controlled `value`. Building it is the one cost of an ed
 Unicode case folding, linear time whatever the query, `^` / `$` at every line's start and end, whole words by word
 boundaries. `findNext` / `findPrevious` (commands) select the next / previous match from the primary selection,
 wrapping; `replace(text)` replaces the current match and selects the next, `replaceAll(text)` replaces every match as
-one edit and returns how many. Replacements expand `$1` and `${name}` for regular expressions. `inSelection` keeps
+one edit and returns `{ count }` (`EditorReplaceAll`), how many. Replacements expand `$1` and `${name}` for regular expressions. `inSelection` keeps
 the matches inside a scope: what was selected when the search turned to the selection (the carets' lines when nothing
 was), kept while it stays on and carried through edits as marks are (`State::set_search`). The find bar is the app's;
 `findWithSelection` (`cmd+e`) reports the selected text (a caret: its word) with `onFindWithSelection` for it to take

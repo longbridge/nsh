@@ -36,7 +36,7 @@ async function fixture() {
     const dom = createDom(invoke, values, api, () => live, () => {});
     const components = createComponents(invoke, values, api, dom);
     const close = () => { if (live) { wasm.nsh_browser_dispose(); live = false; values.dispose(); } };
-    return { api, values, invoke, dom, components, mouseEvents: () => values.result(wasm.nsh_browser_test_mouse_events()), fileDropEvents: () => values.result(wasm.nsh_browser_test_file_drop_events()), modules: () => createModules(invoke, values, () => live, () => {}, components.make), close,
+    return { api, values, invoke, dom, components, mouseEvents: () => values.result(wasm.nsh_browser_test_mouse_events()), fileDropEvents: () => values.result(wasm.nsh_browser_test_file_drop_events()), videoLoadEvent: () => values.result(wasm.nsh_browser_test_video_load_event()), modules: () => createModules(invoke, values, () => live, () => {}, components.make), close,
       restart() { close(); return start(); } };
   };
   return start();
@@ -283,7 +283,7 @@ test("native animation samples and derived-node identity use the Rust graph prot
   let finished;
   const composite=Animated.sequence([Animated.timing(a,{toValue:3}),Animated.delay(5)]);
   const end=composite.start(value=>{finished=value.finished;});animation.finished([[4,true]]);
-  assert.equal(await end,true);assert.equal(finished,true);
+  assert.deepEqual(await end,{finished:true});assert.equal(finished,true);
   animation.dispose();f.close();
 });
 
@@ -629,5 +629,13 @@ test("native file drops preserve URIs and optional page position", { skip: !path
       { uris },
       { uris, pagePosition: { x: 30, y: 40 } },
     ]);
+  } finally { f.close(); }
+});
+
+
+test("native video loads nest their size as the native JS host does", { skip: !path }, async () => {
+  const f = await fixture();
+  try {
+    assert.deepEqual(f.videoLoadEvent(), { duration: 12.5, size: { width: 1920, height: 1080 } });
   } finally { f.close(); }
 });

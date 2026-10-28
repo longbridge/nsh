@@ -1,4 +1,4 @@
-import { type JSX, signal, Text, View, type YNode } from "nsh";
+import { type InputRef, type JSX, signal, Text, View, type ViewRef } from "nsh";
 import { announce, reduceMotion, screenReaderEnabled, setAccessibilityFocus } from "nsh";
 import { LayoutAnimation } from "nsh";
 import { locale, pixelRatio, platform } from "nsh";
@@ -204,7 +204,7 @@ function PressFeedback() {
 
 function Accessory() {
   const text = signal("");
-  let input: YNode | undefined;
+  let input: InputRef | undefined;
   return (
     <Card icon="text" title="Input accessory" subtitle="A bar over the iOS keyboard" right={<Badge label="nsh/ios" />}>
       <Field
@@ -340,7 +340,7 @@ function PlatformInfo() {
     ["locale()", locale()],
   ];
   const announced = signal(0);
-  let target: YNode | undefined;
+  let target: ViewRef | undefined;
   return (
     <Card icon="spark" title="Platform" subtitle="platform, pixelRatio, announce" right={<Badge label={platform.os} tone="accent" />}>
       <View>

@@ -6,6 +6,7 @@ mod measure;
 mod overlay;
 mod parent_viewport;
 mod renders;
+mod scrollbars;
 mod services;
 mod slots;
 mod sticky;
@@ -13,6 +14,7 @@ mod sticky;
 mod tests;
 mod touch;
 mod views;
+mod watch;
 
 use std::{rc::Rc, sync::Arc};
 
@@ -45,6 +47,10 @@ use crate::{
 /// Slab index of a node. Internal links use keys, never ids, to avoid the
 /// id -> key indirection on hot paths.
 type Key = u32;
+
+/// A view's built-in scroll bar (`scrollbars.rs`) and the theme of its own
+/// it was made with.
+type Bar = (NodeId, Option<Arc<crate::JsonValue>>);
 
 const NO_KEY: Key = Key::MAX;
 
@@ -308,7 +314,9 @@ impl ComponentState {
 #[derive(Debug)]
 struct ScrollState {
     horizontal: bool,
-    scrollbar_visible: bool,
+    scrollbar: crate::ScrollbarSetting,
+    /// Its built-in bar ([`Core::sync_scrollbars`]).
+    bar: Option<Bar>,
     refreshing: bool,
     scroll_value: Option<crate::animation::NodeId>,
     pull_value: Option<crate::animation::NodeId>,
@@ -352,7 +360,8 @@ impl Default for ScrollState {
         Self {
             horizontal: false,
             // React Native shows scroll indicators by default.
-            scrollbar_visible: true,
+            scrollbar: crate::ScrollbarSetting::Shown,
+            bar: None,
             refreshing: false,
             scroll_value: None,
             pull_value: None,
@@ -392,6 +401,21 @@ struct InputState {
     /// by the placeholder text's `layout_hash`: what `onContentSizeChange`
     /// reports for an empty input.
     empty_line: Option<(u64, Size<Points>)>,
+    /// `scrollbar`: a multiline input's bar.
+    scrollbar: crate::ScrollbarSetting,
+    /// Its built-in bar ([`Core::sync_scrollbars`]), beside it.
+    bar: Option<Bar>,
+    /// How far the platform scrolled its text, while it has a built-in
+    /// bar ([`Core::set_input_scroll`]).
+    scroll: Option<InputScroll>,
+}
+
+/// A multiline input's scrolling, as its platform reports it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct InputScroll {
+    offset: Point<Points>,
+    content: Size<Points>,
+    viewport: Size<Points>,
 }
 
 /// A shader node's props and the layer they make.
@@ -474,6 +498,13 @@ struct Node {
     wants_fixed: bool,
     /// A view made an overlay by `position: fixed` (`overlay.rs` `fix_view`).
     fixed_view: bool,
+    /// The built-in bar of the scroll view it is in (`scrollbars.rs`): laid
+    /// out on its own over the viewport, not one of the view's children
+    /// for their classes.
+    decoration: bool,
+    /// The multiline input a built-in bar is beside, at its frame and just
+    /// above it (a bar of a scroll view draws above all of its children).
+    beside: Key,
     /// What its view takes from the `pointer-events-*` classes around it
     /// (`classes.rs` `update_pointer_events`); an explicit prop wins.
     class_pointer: crate::props::PointerEvents,
@@ -559,7 +590,34 @@ impl Node {
     }
 
     fn is_layout_root(&self) -> bool {
-        self.kind.is_root() || self.fixed_view
+        self.kind.is_root() || self.fixed_view || self.decoration
+    }
+
+    /// Its `scrollbar`, for a view that may show a built-in bar.
+    fn scrollbar_setting(&self) -> Option<&crate::ScrollbarSetting> {
+        match (&self.scroll, &self.input) {
+            (Some(scroll), _) => Some(&scroll.scrollbar),
+            (None, Some(input)) => Some(&input.scrollbar),
+            _ => None,
+        }
+    }
+
+    /// Its built-in bar.
+    fn bar(&self) -> Option<&Bar> {
+        match (&self.scroll, &self.input) {
+            (Some(scroll), _) => scroll.bar.as_ref(),
+            (None, Some(input)) => input.bar.as_ref(),
+            _ => None,
+        }
+    }
+
+    /// Where its built-in bar is kept, for a view that may show one.
+    fn bar_slot(&mut self) -> Option<&mut Option<Bar>> {
+        match (&mut self.scroll, &mut self.input) {
+            (Some(scroll), _) => Some(&mut scroll.bar),
+            (None, Some(input)) => Some(&mut input.bar),
+            _ => None,
+        }
     }
 
     /// The listeners as platforms take them: a `disabled` view takes no
@@ -590,8 +648,12 @@ impl Node {
 
     /// Where its native view goes among its siblings': by `zIndex`, then a
     /// sticky view above the others (as above a page's in-flow boxes),
-    /// then in order.
+    /// then in order; a built-in scroll bar above all of them (a list's
+    /// sticky headers included), as it draws over the viewport.
     fn stack_rank(&self) -> (i32, bool) {
+        if self.decoration && self.beside == NO_KEY {
+            return (i32::MAX, true);
+        }
         (self.z_index, self.sticky.is_some())
     }
 
@@ -679,6 +741,8 @@ impl Node {
             color_queued: false,
             wants_fixed: false,
             fixed_view: false,
+            decoration: false,
+            beside: NO_KEY,
             class_pointer: crate::props::PointerEvents::Auto,
             pointer_auto_inside: false,
             sticky: None,
@@ -870,6 +934,14 @@ pub struct Core<M: TextEngine> {
     sticky_nodes: Vec<Key>,
     /// The scroll views their ranges were last sent to.
     sticky_scrollers: Vec<Key>,
+    /// What makes the views' bars when the app draws them with the
+    /// built-in one ([`Core::set_builtin_scrollbars`]).
+    builtin_scrollbars: Option<(crate::element::ScrollbarSource, crate::element::AnyValue)>,
+    /// Scroll views and lists whose built-in bar may come or go
+    /// ([`Core::sync_scrollbars`]).
+    scrollbars_pending: Vec<Key>,
+    /// Scroll views and lists that show a built-in bar.
+    decorated: Vec<Key>,
     /// Sticky views came, went or moved: their ranges are worked out
     /// again.
     sticky_changed: bool,
@@ -1031,6 +1103,9 @@ impl<M: TextEngine> Core<M> {
             sticky_views: Vec::new(),
             sticky_nodes: Vec::new(),
             sticky_scrollers: Vec::new(),
+            builtin_scrollbars: None,
+            scrollbars_pending: Vec::new(),
+            decorated: Vec::new(),
             sticky_changed: false,
             sticky_warned: false,
             inset_warned: false,
@@ -1264,6 +1339,26 @@ impl<M: TextEngine> Core<M> {
         }
         if dependents {
             self.dependents_dirty(key);
+        }
+    }
+
+    /// The platform scrolled the text of multiline input `id` to `offset`,
+    /// its text `content` large in a `viewport` (reported while a built-in
+    /// bar takes the place of its indicator, `InputConfig::replaced`).
+    pub fn set_input_scroll(
+        &mut self,
+        id: NodeId,
+        offset: Point<Points>,
+        content: Size<Points>,
+        viewport: Size<Points>,
+    ) {
+        let Ok(key) = self.key(id) else { return };
+        if let Some(input) = self.nodes[key as usize].input.as_mut() {
+            input.scroll = Some(InputScroll {
+                offset,
+                content,
+                viewport,
+            });
         }
     }
 
@@ -1692,8 +1787,17 @@ impl<M: TextEngine> Core<M> {
         // here, and lay out again (JS's lists ask JS, through the engine);
         // a list in its parent's viewport that changed length lays the
         // page out again, so it settles in this batch.
+        // Views watching scroll views they did not make hear what this
+        // round moved, and what they change goes out in this batch too.
         for _ in 0..MAX_VIRTUAL_ROUNDS {
-            if !self.bind_virtual_lists() && !std::mem::take(&mut self.extent_changed) {
+            let watched = self.sync_watches();
+            // A built-in bar asked for while this round rendered (the app
+            // set its theme) is made in this batch too.
+            if !self.bind_virtual_lists()
+                && !std::mem::take(&mut self.extent_changed)
+                && !watched
+                && self.scrollbars_pending.is_empty()
+            {
                 break;
             }
             self.commit_round();
@@ -1715,6 +1819,10 @@ impl<M: TextEngine> Core<M> {
     /// One round of a commit: views, layout, lists, commands, into the
     /// mount items.
     fn commit_round(&mut self) {
+        // The built-in scroll bars that come, rendered with the rest.
+        if !self.scrollbars_pending.is_empty() {
+            self.sync_scrollbars();
+        }
         // The views' patches and the views to make first.
         self.render_components();
         self.sync_colors();
@@ -1756,6 +1864,9 @@ impl<M: TextEngine> Core<M> {
             }
         }
         self.update_lists(relayout);
+        if !self.decorated.is_empty() {
+            self.layout_scrollbars();
+        }
         if !self.overlays.is_empty() {
             self.place_overlays();
         }
@@ -2012,6 +2123,11 @@ impl<M: TextEngine> Core<M> {
         }
         if kind == Kind::List {
             self.lists.push(key);
+        }
+        if matches!(kind, Kind::Scroll | Kind::List | Kind::Input)
+            && self.builtin_scrollbars.is_some()
+        {
+            self.scrollbars_pending.push(key);
         }
         if kind.is_root() {
             self.roots.push(key);
@@ -2840,7 +2956,9 @@ impl<M: TextEngine> Core<M> {
                     KeyboardDismissMode::OnDrag | KeyboardDismissMode::Interactive,
                 )
                 | Prop::Native(NativeProp::Scrollable(false)) => list::ignored::BEHAVIOR,
-                Prop::Scrollbar(false) => list::ignored::SCROLLBAR,
+                Prop::Scrollbar(
+                    crate::ScrollbarSetting::Hidden | crate::ScrollbarSetting::Themed(_),
+                ) => list::ignored::SCROLLBAR,
                 Prop::Refreshing(true) => list::ignored::REFRESH,
                 Prop::ScrollValue(Some(_)) => list::ignored::SCROLL_VALUE,
                 _ => 0,
@@ -2908,10 +3026,15 @@ impl<M: TextEngine> Core<M> {
                     }
                 }
             }
-            Prop::Scrollbar(shows) => {
+            Prop::Scrollbar(setting) => {
                 if let Some(scroll) = node.scroll.as_mut() {
-                    scroll.scrollbar_visible = shows;
+                    scroll.scrollbar = setting;
                     flags |= dirty::SCROLL;
+                    self.scrollbars_pending.push(key);
+                } else if let Some(input) = node.input.as_mut() {
+                    input.scrollbar = setting;
+                    flags |= dirty::INPUT;
+                    self.scrollbars_pending.push(key);
                 }
             }
             Prop::Scroll(prop) => {
@@ -3625,6 +3748,8 @@ impl<M: TextEngine> Core<M> {
                     }
                     Prop::Multiline(multiline) => {
                         c.multiline = multiline;
+                        // Only a multiline input shows a built-in bar.
+                        self.scrollbars_pending.push(key);
                         true
                     }
                     Prop::PlaceholderColor(color) => {
@@ -3727,7 +3852,21 @@ impl<M: TextEngine> Core<M> {
     ) -> Result<(), ApplyError> {
         let parent = self.key(parent_id)?;
         let child = self.key(child_id)?;
-        let before = before.map(|b| self.key(b)).transpose()?;
+        if self.nodes[child as usize].parent != NO_KEY {
+            self.input_bar_moves(child);
+        }
+        let mut before = before.map(|b| self.key(b)).transpose()?;
+        // Appended below the built-in bar, which stays on top.
+        if before.is_none()
+            && let Some((bar, _)) = self.nodes[parent as usize]
+                .scroll
+                .as_ref()
+                .and_then(|s| s.bar.as_ref())
+            && let Ok(bar) = self.key(*bar)
+            && bar != child
+        {
+            before = Some(bar);
+        }
         if child == self.root || self.is_ancestor(child, parent) {
             return Err(ApplyError::Cycle(child_id));
         }
@@ -3851,7 +3990,18 @@ impl<M: TextEngine> Core<M> {
 
     /// Detaches `key` from its parent (Remove op).
     fn detach(&mut self, key: Key) {
+        self.input_bar_moves(key);
         self.unlink(key, true);
+    }
+
+    /// A multiline input with a built-in bar beside it leaves its place:
+    /// the bar goes, and is made again beside it where it goes.
+    fn input_bar_moves(&mut self, key: Key) {
+        let node = &self.nodes[key as usize];
+        if node.input.as_ref().is_some_and(|i| i.bar.is_some()) {
+            self.release_scrollbar(key);
+            self.scrollbars_pending.push(key);
+        }
     }
 
     /// Unlinks `key` from its parent's children, layout and (optionally)
@@ -3981,6 +4131,10 @@ impl<M: TextEngine> Core<M> {
         // What the core made for its `tooltip` goes first, out of it.
         if !self.overlay_state.tooltips.is_empty() {
             self.tooltip_released(id);
+        }
+        // So does its built-in bar.
+        if self.nodes[key as usize].bar().is_some() {
+            self.release_scrollbar(key);
         }
         if self.nodes[key as usize].parent != NO_KEY {
             // Deleting the view also detaches it natively.
@@ -4430,7 +4584,10 @@ impl<M: TextEngine> Core<M> {
                     self.mount.push(MountItem::ScrollConfig {
                         id,
                         horizontal: scroll.horizontal,
-                        scrollbar_visible: scroll.scrollbar_visible,
+                        // A built-in bar takes the indicator's place.
+                        scrollbar_visible: scroll.scrollbar != crate::ScrollbarSetting::Hidden
+                            && scroll.bar.is_none(),
+                        replaced: scroll.bar.is_some(),
                         scroll_value: scroll.scroll_value,
                         pull_value: scroll.pull_value,
                         keyboard_dismiss: scroll.keyboard_dismiss,
@@ -4641,6 +4798,10 @@ impl<M: TextEngine> Core<M> {
                         node.rtl && !node.text_style.text_align_physical,
                     );
                     config.rtl = node.text_style.writing_direction.unwrap_or(node.rtl);
+                    // A built-in bar takes the indicator's place.
+                    config.scrollbar_visible =
+                        input.scrollbar != crate::ScrollbarSetting::Hidden && input.bar.is_none();
+                    config.replaced = input.bar.is_some();
                     self.mount.push(MountItem::Input {
                         id,
                         config: Box::new(config),
@@ -5522,7 +5683,8 @@ impl<M: TextEngine> Core<M> {
             let cells = std::mem::take(&mut self.nodes[key as usize].children);
             for &cell in &cells {
                 let node = &self.nodes[cell as usize];
-                let Some(cell_layout) = node.layout else {
+                // Its built-in bar: laid out by `layout_scrollbars`.
+                let (Some(cell_layout), false) = (node.layout, node.decoration) else {
                     continue;
                 };
                 let c = match node.slot {
@@ -5847,8 +6009,9 @@ impl<M: TextEngine> Core<M> {
             l.size.height,
         );
         // Children of a right-to-left horizontal scroll view: mirrored in
-        // its content.
+        // its content (not its bar, over the viewport).
         if let Some(parent) = self.nodes.get(node.parent as usize)
+            && !node.decoration
             && parent.rtl
             && let Some(ScrollState {
                 horizontal: true,
@@ -5861,6 +6024,11 @@ impl<M: TextEngine> Core<M> {
         }
         if node.is_overlay() {
             frame.origin = self.overlay_origin(key, frame);
+        }
+        // A multiline input's bar: over it, laid out on its own.
+        let beside = self.nodes[key as usize].beside;
+        if beside != NO_KEY {
+            frame.origin = self.nodes[beside as usize].frame.origin;
         }
         self.set_frame(key, frame);
         let kind = self.nodes[key as usize].kind;
@@ -6048,7 +6216,10 @@ impl<M: TextEngine> Core<M> {
                 self.update_list(key, relayout, Some(outer));
             }
         }
-        if !self.sticky_nodes.is_empty() || !self.sticky_scrollers.is_empty() {
+        if !self.sticky_nodes.is_empty()
+            || !self.sticky_scrollers.is_empty()
+            || !self.decorated.is_empty()
+        {
             self.update_sticky_views(relayout);
         }
         if !self.sticky_views.is_empty() {

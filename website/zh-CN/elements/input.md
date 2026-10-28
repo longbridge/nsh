@@ -68,6 +68,7 @@ function NameField() {
 | `defaultValue` | `.default_value(..)` | `string` | | 初始文本。 |
 | `placeholder` | `.placeholder(..)` | `string` | | 输入框为空时显示的提示。 |
 | `multiline` | `.multiline(..)` | `boolean` | `false` | 多行；回车插入换行（`submitBehavior` 另有设置时除外）。 |
+| `scrollbar` | `.scrollbar(..)` | `boolean \| ScrollbarTheme` | `true` | 多行输入框的滚动条：平台的滚动指示器，应用设置主题后则是内置滚动条（见 [Scrollbar](./scrollbar.md#built-in-bars)）；对象是它自己的主题，`false` 表示不显示。 |
 | `maxLength` | `.max_length(..)` | `number` | | 用户最多能输入的字符数。 |
 | `readonly` | `.readonly(..)` | `boolean` | `false` | 用户可以选择和复制文本，但不能修改。 |
 | `masked` | `.masked(..)` | `boolean` | `false` | 隐藏文本（密码）。 |
@@ -195,7 +196,7 @@ view()
 ```
 
 ```tsx tabs
-let password!: YNode;
+let password!: InputRef;
 <>
   <Input returnKeyType="next" onSubmit={() => password.focus()} />
   <Input ref={password} masked autoComplete="current-password" />

@@ -1,7 +1,7 @@
-import { cleanup, computed, type JSX, signal, Text, View } from "nsh";
-import { Checkbox, Collapsible, NumberInput, OtpInput, Progress, Radio, RadioGroup, Select, type SelectGroup, type SelectItemState, Slider, Switch, Tab, Tabs } from "nsh/base";
+import { cleanup, computed, type JSX, signal, Text, token, View } from "nsh";
+import { type CalendarItemState, Checkbox, Collapsible, Combobox, DatePicker, type DateRangePreset, NumberInput, OtpInput, Progress, Radio, RadioGroup, Select, type SelectGroup, type SelectItemState, Slider, Switch, Tab, Tabs } from "nsh/base";
 import { reduceMotion } from "nsh";
-import { platform } from "nsh";
+import { platform, windowSize } from "nsh";
 import { Icon } from "../icons";
 import { alpha, Badge, Button, Caption, Card, colors, DemoPage, finish, focusRing, hovered, mono, radius, sliderFill, sliderLook, sliderValueClass, sliderValueStyle, switchLook, tints, toneColor } from "../ui";
 
@@ -200,6 +200,34 @@ const LANGUAGES = [
   { value: "de", title: "Deutsch" },
 ];
 
+const TOPICS = [
+  { value: "layout", title: "Layout", group: "Core" },
+  { value: "text", title: "Text", group: "Core" },
+  { value: "animation", title: "Animation", group: "Core" },
+  { value: "ios", title: "iOS", group: "Platforms" },
+  { value: "android", title: "Android", group: "Platforms" },
+  { value: "desktop", title: "Desktop", group: "Platforms" },
+  { value: "web", title: "Web", group: "Platforms" },
+  { value: "legacy", title: "Legacy", group: "Platforms", disabled: true },
+];
+
+const REVIEWERS = [
+  { value: "ada", title: "Ada" },
+  { value: "grace", title: "Grace" },
+  { value: "linus", title: "Linus" },
+];
+
+const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+const WEEKDAYS = ["S", "M", "T", "W", "T", "F", "S"];
+
+/** A day's ISO date (`"2026-10-28"`), in local time as the calendar's days are. */
+const iso = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+const addDays = (d: Date, days: number) => new Date(d.getFullYear(), d.getMonth(), d.getDate() + days);
+/** An ISO date's month and day as a trigger shows them: `Oct 28`. */
+const monthDay = (value: string) => `${MONTHS[Number(value.slice(5, 7)) - 1].slice(0, 3)} ${Number(value.slice(8, 10))}`;
+/** An ISO date (and time) as a trigger shows it: `Oct 28, 2026`, `Oct 28, 2026 · 09:30`. */
+const shortDate = (value: string) => `${monthDay(value)}, ${value.slice(0, 4)}${value.length > 10 ? ` · ${value.slice(11, 16)}` : ""}`;
+
 const titleOf = (items: { value: string; title: string }[], value: string | null) => items.find((i) => i.value === value)?.title ?? "None";
 
 /** The controls, one demo each in the sidebar. */
@@ -209,6 +237,8 @@ export type Control =
   | "Radio"
   | "Tabs"
   | "Select"
+  | "Combobox"
+  | "DatePicker"
   | "Collapsible"
   | "Progress"
   | "Slider"
@@ -217,7 +247,7 @@ export type Control =
 
 /**
  * One of `nsh/base`'s controls (`Switch`, `Checkbox`, `Radio` and
- * `RadioGroup`, `Tab` and `Tabs`, `Select`, `Collapsible`, `Progress`, `Slider`) in
+ * `RadioGroup`, `Tab` and `Tabs`, `Select`, `Combobox`, `DatePicker`, `Collapsible`, `Progress`, `Slider`) in
  * the settings, filters, pickers, section switchers, choices and disclosures apps use
  * it for, above the last event it reported.
  */
@@ -427,95 +457,98 @@ export function Controls(props: { show: Control }) {
     );
   }
 
+  // The lists' look, shared by the select's and the combobox's cards.
+  /** The list: a popup at the trigger with a pointer, as the menus'; a sheet at the bottom on a touch screen. */
+  const surface = () =>
+    pointer
+      ? { backgroundColor: colors.raised, borderRadius: radius.inset, borderWidth: 1, borderColor: colors.border, padding: 6, ...finish.raised }
+      : { backgroundColor: colors.surface, borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingHorizontal: 10, paddingTop: 10, paddingBottom: 34, maxHeight: "70%" as const };
+  const backdrop = { backgroundColor: "rgba(0,0,0,0.45)" };
+  /** The clear button's inset from the trigger's end: centered where the chevron's lane is. The button is in the
+      select's view, outside the trigger, so its inset counts the trigger's 1 pt border too. */
+  const clearInset = 1 + 10 + size.check / 4 - size.clear / 2;
+  /** The trigger: the chosen title and a chevron that turns while the list is open, its border lit then. */
+  function Picker(props: { title: string; open: boolean; disabled?: boolean; placeholder?: boolean; clearable?: boolean }) {
+    return (
+      <View
+        style={{
+          flexDirection: "row",
+          alignItems: "center",
+          gap: 8,
+          height: size.line,
+          paddingLeft: 10,
+          // Room for the clear button, which goes over the trigger's end in place of the chevron.
+          paddingRight: props.clearable ? clearInset + size.clear + 8 : 10,
+          borderRadius: radius.control,
+          borderWidth: 1,
+          borderColor: props.open ? colors.faint : colors.border,
+          backgroundColor: colors.raised,
+          ...finish.raised,
+          // Dimmed while the select is: the app knows, as it passes `disabled`.
+          opacity: props.disabled ? dimmed.opacity : 1,
+        }}
+        hoverStyle={props.disabled ? undefined : { borderColor: colors.faint }}
+        activeStyle={pressed}
+        focusStyle={focusRing()}
+        disabledStyle={dimmed}
+      >
+        <Text style={{ numberOfLines: 1, fontSize: size.label, color: props.placeholder ? colors.faint : colors.text }}>{props.title}</Text>
+        {/* The chevron's icon box, taking only the room of its stroke (half the box) in the row, so it turns
+            about its own center; it points down, and up while open. */}
+        <View
+          class="transition-transform duration-150 motion-reduce:transition-none"
+          style={{ display: props.clearable ? "none" : "flex", marginHorizontal: -size.check / 4, transform: [{ rotate: props.open ? "-90deg" : "90deg" }] }}
+        >
+          <Icon name="chevron" size={size.check} tint={colors.muted} />
+        </View>
+      </View>
+    );
+  }
+  /** A row of the list: lit while highlighted (the keys or the pointer), bolder with a check while chosen. */
+  function Option(props: { item: SelectItemState; note?: string }) {
+    return (
+      <View
+        style={{
+          flexDirection: "row",
+          alignItems: "center",
+          gap: 8,
+          height: pointer ? 32 : 46,
+          paddingHorizontal: 8,
+          borderRadius: 7,
+          borderWidth: 1,
+          borderColor: props.item.highlighted ? alpha(colors.accent, 0.3) : "transparent",
+          backgroundColor: props.item.highlighted ? tints.accent : "transparent",
+          opacity: props.item.disabled ? 0.35 : 1,
+        }}
+      >
+        <Text style={{ numberOfLines: 1, flex: 1, fontSize: 14, fontWeight: props.item.selected ? "600" : "400", color: colors.text }}>
+          {props.item.title}
+        </Text>
+        <If when={props.note}>
+          <Text style={{ fontSize: 12, color: colors.faint }}>{props.note}</Text>
+        </If>
+        <View style={{ width: 16, alignItems: "center" }}>
+          <If when={props.item.selected}>
+            <Icon name="check" size={14} tint={colors.accent} />
+          </If>
+        </View>
+      </View>
+    );
+  }
+  function Header(props: { group: SelectGroup }) {
+    return (
+      <Text style={{ fontSize: 11, fontWeight: "600", letterSpacing: 0.6, color: colors.faint, paddingHorizontal: 9, paddingTop: 8, paddingBottom: 4 }}>
+        {props.group.title.toUpperCase()}
+      </Text>
+    );
+  }
+  const opened = (set: (open: boolean) => void) => ({ open }: { open: boolean }) => set(open);
+
   function Choices() {
     const sort = signal<string | null>("newest");
     const font = signal<string | null>("inter");
     const sortOpen = signal(false);
     const fontOpen = signal(false);
-    /** The list: a popup at the trigger with a pointer, as the menus'; a sheet at the bottom on a touch screen. */
-    const surface = () =>
-      pointer
-        ? { backgroundColor: colors.raised, borderRadius: radius.inset, borderWidth: 1, borderColor: colors.border, padding: 6, ...finish.raised }
-        : { backgroundColor: colors.surface, borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingHorizontal: 10, paddingTop: 10, paddingBottom: 34, maxHeight: "70%" as const };
-    const backdrop = { backgroundColor: "rgba(0,0,0,0.45)" };
-    /** The clear button's inset from the trigger's end: centered where the chevron's lane is. */
-    const clearInset = 10 + size.check / 4 - size.clear / 2;
-    /** The trigger: the chosen title and a chevron that turns while the list is open, its border lit then. */
-    function Picker(props: { title: string; open: boolean; disabled?: boolean; placeholder?: boolean; clearable?: boolean }) {
-      return (
-        <View
-          style={{
-            flexDirection: "row",
-            alignItems: "center",
-            gap: 8,
-            height: size.line,
-            paddingLeft: 10,
-            // Room for the clear button, which goes over the trigger's end in place of the chevron.
-            paddingRight: props.clearable ? clearInset + size.clear + 8 : 10,
-            borderRadius: radius.control,
-            borderWidth: 1,
-            borderColor: props.open ? colors.faint : colors.border,
-            backgroundColor: colors.raised,
-            ...finish.raised,
-            // Dimmed while the select is: the app knows, as it passes `disabled`.
-            opacity: props.disabled ? dimmed.opacity : 1,
-          }}
-          hoverStyle={props.disabled ? undefined : { borderColor: colors.faint }}
-          activeStyle={pressed}
-          focusStyle={focusRing()}
-          disabledStyle={dimmed}
-        >
-          <Text style={{ numberOfLines: 1, fontSize: size.label, color: props.placeholder ? colors.faint : colors.text }}>{props.title}</Text>
-          {/* The chevron's icon box, taking only the room of its stroke (half the box) in the row, so it turns
-              about its own center; it points down, and up while open. */}
-          <View
-            class="transition-transform duration-150 motion-reduce:transition-none"
-            style={{ display: props.clearable ? "none" : "flex", marginHorizontal: -size.check / 4, transform: [{ rotate: props.open ? "-90deg" : "90deg" }] }}
-          >
-            <Icon name="chevron" size={size.check} tint={colors.muted} />
-          </View>
-        </View>
-      );
-    }
-    /** A row of the list: lit while highlighted (the keys or the pointer), bolder with a check while chosen. */
-    function Option(props: { item: SelectItemState; note?: string }) {
-      return (
-        <View
-          style={{
-            flexDirection: "row",
-            alignItems: "center",
-            gap: 8,
-            height: pointer ? 32 : 46,
-            paddingHorizontal: 8,
-            borderRadius: 7,
-            borderWidth: 1,
-            borderColor: props.item.highlighted ? alpha(colors.accent, 0.3) : "transparent",
-            backgroundColor: props.item.highlighted ? tints.accent : "transparent",
-            opacity: props.item.disabled ? 0.35 : 1,
-          }}
-        >
-          <Text style={{ numberOfLines: 1, flex: 1, fontSize: 14, fontWeight: props.item.selected ? "600" : "400", color: colors.text }}>
-            {props.item.title}
-          </Text>
-          <If when={props.note}>
-            <Text style={{ fontSize: 12, color: colors.faint }}>{props.note}</Text>
-          </If>
-          <View style={{ width: 16, alignItems: "center" }}>
-            <If when={props.item.selected}>
-              <Icon name="check" size={14} tint={colors.accent} />
-            </If>
-          </View>
-        </View>
-      );
-    }
-    function Header(props: { group: SelectGroup }) {
-      return (
-        <Text style={{ fontSize: 11, fontWeight: "600", letterSpacing: 0.6, color: colors.faint, paddingHorizontal: 9, paddingTop: 8, paddingBottom: 4 }}>
-          {props.group.title.toUpperCase()}
-        </Text>
-      );
-    }
-    const opened = (set: (open: boolean) => void) => ({ open }: { open: boolean }) => set(open);
     return (
       <Card icon="controls" title="Select" subtitle="A choice from a list: the app owns the value">
         <View>
@@ -585,6 +618,347 @@ export function Controls(props: { show: Control }) {
           <View style={row(false)}>
             <Label label="Language" detail="Set by your organization" />
             <Select items={LANGUAGES} value="en" disabled accessibilityLabel="Language" trigger={<Picker title="English" open={false} disabled />} />
+          </View>
+        </View>
+      </Card>
+    );
+  }
+
+  function Tags() {
+    const topics = signal<string[]>(["layout", "ios"]);
+    const reviewer = signal<string[]>([]);
+    const topicsOpen = signal(false);
+    const reviewerOpen = signal(false);
+    const names = (items: { value: string; title: string }[], values: string[]) => values.map((v) => titleOf(items, v));
+    const topicsTitle = () => {
+      const all = names(TOPICS, topics());
+      return all.length <= 2 ? all.join(", ") : `${all.length} topics`;
+    };
+    return (
+      <Card icon="controls" title="Combobox" subtitle="Several values from a list: the app owns them">
+        <View>
+          <View style={row(true)}>
+            <Label label="Topics" detail="Several at once, with search; the list stays open" />
+            <Combobox
+              items={TOPICS}
+              multiple
+              value={topics()}
+              onChange={({ value }) => {
+                topics.set(value);
+                last.set(`Topics: ${names(TOPICS, value).join(", ") || "none"}`);
+              }}
+              onConfirm={({ value }) => last.set(`Topics confirmed: ${value.length}`)}
+              onOpenChange={opened((open) => topicsOpen.set(open))}
+              accessibilityLabel="Topics"
+              searchable
+              searchPlaceholder="Search topics"
+              searchClass={`${pointer ? "text-sm" : "text-base"} text-foreground placeholder:text-faint`}
+              searchStyle={{
+                height: pointer ? 32 : 40,
+                paddingHorizontal: 9,
+                marginBottom: 6,
+                borderRadius: radius.control,
+                borderWidth: 1,
+                borderColor: colors.fieldBorder,
+                backgroundColor: colors.field,
+                ...finish.field,
+              }}
+              empty={<Text style={{ paddingVertical: 20, textAlign: "center", fontSize: 14, color: colors.muted }}>No topic matches</Text>}
+              offset={4}
+              margin={8}
+              align="end"
+              popupStyle={pointer ? { ...surface(), width: 240 } : surface()}
+              backdropStyle={backdrop}
+              itemClass="active:opacity-70"
+              cleanable
+              clearButtonAccessibilityLabel="Clear the topics"
+              clearButtonClass="items-center justify-center rounded-full enabled:hover:bg-accent active:bg-track"
+              clearButtonStyle={{ position: "absolute", top: (size.line - size.clear) / 2, right: clearInset, width: size.clear, height: size.clear }}
+              clearButton={<Icon name="close" size={size.clear - 6} tint={colors.muted} />}
+              footerStyle={{ marginTop: 6, paddingTop: 6, paddingHorizontal: 9, borderTopWidth: 1, borderColor: colors.border }}
+              footer={<Text style={{ fontSize: 12, color: colors.muted }}>{`${topics().length} selected`}</Text>}
+              trigger={<Picker title={topics().length ? topicsTitle() : "Add topics"} open={topicsOpen()} placeholder={!topics().length} clearable={topics().length > 0} />}
+              renderItem={(item) => <Option item={item} note={item.disabled ? "Archived" : undefined} />}
+              renderGroup={(group) => <Header group={group} />}
+            />
+          </View>
+          <View style={row(false)}>
+            <Label label="Reviewer" detail="One person: a choice replaces the last" />
+            <Combobox
+              items={REVIEWERS}
+              value={reviewer()}
+              onChange={({ value }) => {
+                reviewer.set(value);
+                last.set(`Reviewer: ${names(REVIEWERS, value)[0] ?? "none"}`);
+              }}
+              onOpenChange={opened((open) => reviewerOpen.set(open))}
+              accessibilityLabel="Reviewer"
+              offset={4}
+              margin={8}
+              align="end"
+              popupStyle={pointer ? { ...surface(), width: 200 } : surface()}
+              backdropStyle={backdrop}
+              itemClass="active:opacity-70"
+              trigger={<Picker title={names(REVIEWERS, reviewer())[0] ?? "Nobody"} open={reviewerOpen()} placeholder={!reviewer().length} />}
+              renderItem={(item) => <Option item={item} />}
+            />
+          </View>
+        </View>
+      </Card>
+    );
+  }
+
+  // The calendar's look, the date picker's card's.
+  /** A day's cell: seven across the popup with a pointer, across a phone's sheet otherwise. */
+  const cell = pointer ? 30 : 42;
+  /** The gap between the months of a calendar of two. */
+  const monthGap = 16;
+  /**
+   * An item of the calendar (`renderItem`): Previous and Next as chevrons, the month and year toggles
+   * (or each month's title) by name, the weekdays' initials, and the days: today on the theme's quiet `accent`
+   * fill (gpui-component's), the selected ones on the accent's, the days of a complete range on a band from end to end (`range` says where it
+   * starts and ends), the other months' days and the disabled ones faint.
+   */
+  function CalendarItem(props: { item: CalendarItemState; range?: [string | null, string | null] | null }) {
+    const kind = props.item.kind;
+    if (kind === "previous" || kind === "next") {
+      return (
+        <View style={{ width: cell, height: cell, alignItems: "center", justifyContent: "center", opacity: props.item.disabled ? 0.3 : 1 }}>
+          <View style={{ transform: [{ rotate: kind === "previous" ? "180deg" : "0deg" }] }}>
+            <Icon name="chevron" size={size.check} tint={colors.muted} />
+          </View>
+        </View>
+      );
+    }
+    if (kind === "monthToggle" || kind === "yearToggle") {
+      // A month's title in a calendar of several takes no press: the month and its year, over the month.
+      const title = kind === "monthToggle" && props.item.disabled;
+      return (
+        <Text
+          style={{
+            width: title ? 6 * cell + monthGap / 2 : kind === "monthToggle" ? 3 * cell : 2 * cell,
+            paddingHorizontal: 3,
+            textAlign: title ? "center" : kind === "monthToggle" ? "right" : "left",
+            fontSize: size.label,
+            fontWeight: "600",
+            color: props.item.active ? colors.accent : colors.text,
+          }}
+        >
+          {title ? `${MONTHS[props.item.value - 1]} ${props.item.year}` : kind === "monthToggle" ? MONTHS[props.item.value - 1] : String(props.item.value)}
+        </Text>
+      );
+    }
+    if (kind === "weekday") {
+      return <Text style={{ width: cell, paddingVertical: 4, textAlign: "center", fontSize: 11, fontWeight: "600", color: colors.faint }}>{WEEKDAYS[props.item.value]}</Text>;
+    }
+    if (kind === "month" || kind === "year") {
+      // The month view's months (rows of 3) and the year view's years (rows of 5), as wide as a month.
+      return (
+        <View
+          style={{
+            width: (7 * cell) / (kind === "month" ? 3 : 5),
+            height: cell + 6,
+            alignItems: "center",
+            justifyContent: "center",
+            borderRadius: radius.control,
+            backgroundColor: props.item.active ? colors.accentFill : "transparent",
+          }}
+        >
+          <Text style={{ fontSize: size.label, color: props.item.active ? colors.onAccent : colors.text }}>
+            {kind === "month" ? MONTHS[props.item.value - 1].slice(0, 3) : String(props.item.value)}
+          </Text>
+        </View>
+      );
+    }
+    // A day. The band reaches from the start's middle to the end's.
+    const band = () => {
+      const r = props.range;
+      if (!props.item.inRange || !r || r[0] === r[1]) return null;
+      return { left: props.item.date === r[0] ? cell / 2 : 0, right: props.item.date === r[1] ? cell / 2 : 0 };
+    };
+    return (
+      <View style={{ width: cell, height: cell, alignItems: "center", justifyContent: "center" }}>
+        <View style={{ position: "absolute", top: 2, bottom: 2, left: band()?.left ?? 0, right: band()?.right ?? 0, backgroundColor: band() ? tints.accent : "transparent" }} />
+        <View
+          style={{
+            width: cell - 4,
+            height: cell - 4,
+            borderRadius: (cell - 4) / 2,
+            alignItems: "center",
+            justifyContent: "center",
+            borderWidth: 1.5,
+            // The keyboard's day ringed.
+            borderColor: props.item.focused ? colors.accent : "transparent",
+            backgroundColor: props.item.active ? colors.accentFill : props.item.today ? token("accent") : "transparent",
+          }}
+        >
+          <Text
+            style={{
+              fontSize: pointer ? 13 : 15,
+              fontVariant: ["tabular-nums"],
+              fontWeight: props.item.active || props.item.today ? "600" : "400",
+              color: props.item.active ? colors.onAccent : props.item.muted ? colors.faint : colors.text,
+              opacity: props.item.disabled ? 0.5 : 1,
+            }}
+          >
+            {String(props.item.value)}
+          </Text>
+        </View>
+      </View>
+    );
+  }
+  /** The time field's segments (`renderSegment`): the selected one filled while the field has the keys. */
+  function Segment(props: { label: string; selected: boolean }) {
+    return (
+      <Text
+        style={{
+          paddingHorizontal: 3,
+          borderRadius: 4,
+          fontSize: size.label,
+          fontVariant: ["tabular-nums"],
+          color: props.selected ? colors.onAccent : colors.text,
+          backgroundColor: props.selected ? colors.accentFill : "transparent",
+        }}
+      >
+        {props.label}
+      </Text>
+    );
+  }
+  /** The popup's layout: the presets beside the calendar with a pointer, above it on a phone. */
+  const content = pointer ? { flexDirection: "row" as const, gap: 10 } : { gap: 12 };
+  const presets = pointer
+    ? { gap: 2, minWidth: 110, paddingRight: 10, borderRightWidth: 1, borderColor: colors.border }
+    : { flexDirection: "row" as const, flexWrap: "wrap" as const, gap: 6 };
+  const preset = pointer
+    ? { height: 28, paddingHorizontal: 8, borderRadius: radius.control, justifyContent: "center" as const, fontSize: 13, color: colors.text }
+    : { height: 34, paddingHorizontal: 12, borderRadius: 17, borderWidth: 1, borderColor: colors.border, justifyContent: "center" as const, fontSize: 14, color: colors.text };
+  const header = { marginBottom: 4 };
+  const calendar = pointer ? { padding: 4 } : { alignSelf: "center" as const };
+  /** The time's row under a hairline, its label at the start and the field at the end, on the calendar's edges. */
+  const time = { gap: 10, marginTop: 8, paddingTop: 8, borderTopWidth: 1, borderColor: colors.border, ...(pointer ? { paddingHorizontal: 4 } : { alignSelf: "center" as const, width: 7 * cell }) };
+  /** The time's field: a recessed well as the number inputs', with their hover and the keyboard's ring while it edits. */
+  const timeField = [
+    pointer ? "h-8 rounded-md px-2" : "h-11 rounded-lg px-3",
+    "items-center border border-input bg-field",
+    "enabled:hover:border-faint focus-within:outline-2 focus-within:outline-info",
+  ].join(" ");
+
+  function Dates() {
+    const due = signal<string | null>(null);
+    const trip = signal<[string | null, string | null] | null>(null);
+    const meeting = signal<string | null>(null);
+    const dueOpen = signal(false);
+    const tripOpen = signal(false);
+    const meetingOpen = signal(false);
+    // Two months side by side when the window has room for them and the presets.
+    const twoMonths = () => pointer && windowSize().width >= 600;
+    // The presets from today: the coming weekend, the next week and month.
+    const today = new Date();
+    const saturday = addDays(today, (6 - today.getDay() + 7) % 7);
+    const trips: DateRangePreset[] = [
+      { label: "Weekend", value: [iso(saturday), iso(addDays(saturday, 1))] },
+      { label: "Next 7 days", value: [iso(today), iso(addDays(today, 6))] },
+      { label: "Next 30 days", value: [iso(today), iso(addDays(today, 29))] },
+    ];
+    const tripTitle = () => {
+      const r = trip();
+      return r && r[0] && r[1] ? `${monthDay(r[0])} – ${monthDay(r[1])}` : "Pick dates";
+    };
+    return (
+      <Card icon="controls" title="DatePicker" subtitle="A date, a range or a date and time: the app owns the value">
+        <View>
+          <View style={row(true)}>
+            <Label label="Due date" detail="Weekdays only; clear it to have none" />
+            <DatePicker
+              value={due()}
+              onChange={({ value }) => {
+                const next = typeof value === "string" ? value : null;
+                due.set(next);
+                last.set(`Due: ${next ?? "none"}`);
+              }}
+              onOpenChange={opened((open) => dueOpen.set(open))}
+              accessibilityLabel="Due date"
+              disabledMatcher={[0, 6]}
+              offset={4}
+              margin={8}
+              align="end"
+              popupStyle={surface()}
+              backdropStyle={backdrop}
+              calendarStyle={calendar}
+              headerStyle={header}
+              itemClass="active:opacity-70"
+              renderItem={(item) => <CalendarItem item={item} />}
+              cleanable
+              clearButtonAccessibilityLabel="Clear the due date"
+              clearButtonClass="items-center justify-center rounded-full enabled:hover:bg-accent active:bg-track"
+              clearButtonStyle={{ position: "absolute", top: (size.line - size.clear) / 2, right: clearInset, width: size.clear, height: size.clear }}
+              clearButton={<Icon name="close" size={size.clear - 6} tint={colors.muted} />}
+              trigger={<Picker title={due() ? shortDate(due()!) : "No due date"} open={dueOpen()} placeholder={!due()} clearable={due() !== null} />}
+            />
+          </View>
+          <View style={row(false)}>
+            <Label label="Trip" detail={twoMonths() ? "Two months; a press starts the range, the next ends it" : "A press starts the range, the next ends it"} />
+            <DatePicker
+              range
+              value={trip()}
+              onChange={({ value }) => {
+                const next = Array.isArray(value) ? value : null;
+                trip.set(next);
+                last.set(next ? `Trip: ${next[0]} → ${next[1]}` : "Trip: none");
+              }}
+              onOpenChange={opened((open) => tripOpen.set(open))}
+              accessibilityLabel="Trip"
+              numberOfMonths={twoMonths() ? 2 : 1}
+              presets={trips}
+              offset={4}
+              margin={8}
+              align="end"
+              popupStyle={surface()}
+              backdropStyle={backdrop}
+              contentStyle={content}
+              presetsStyle={presets}
+              presetStyle={preset}
+              presetClass="enabled:hover:bg-accent active:opacity-70"
+              calendarStyle={calendar}
+              headerStyle={header}
+              bodyStyle={{ gap: monthGap }}
+              itemClass="active:opacity-70"
+              renderItem={(item) => <CalendarItem item={item} range={trip()} />}
+              trigger={<Picker title={tripTitle()} open={tripOpen()} placeholder={!trip()} />}
+            />
+          </View>
+          <View style={row(false)}>
+            <Label label="Meeting" detail="A day, then its time; the day again closes" />
+            <DatePicker
+              value={meeting()}
+              onChange={({ value }) => {
+                const next = typeof value === "string" ? value : null;
+                meeting.set(next);
+                last.set(`Meeting: ${next ?? "none"}`);
+              }}
+              onOpenChange={opened((open) => meetingOpen.set(open))}
+              accessibilityLabel="Meeting"
+              timePrecision="minute"
+              hourCycle="h23"
+              defaultTime="09:00"
+              offset={4}
+              margin={8}
+              align="end"
+              popupStyle={surface()}
+              backdropStyle={backdrop}
+              calendarStyle={calendar}
+              headerStyle={header}
+              itemClass="active:opacity-70"
+              renderItem={(item) => <CalendarItem item={item} />}
+              timeStyle={time}
+              timeLabel={<Text style={{ fontSize: size.label, color: colors.muted }}>Time</Text>}
+              timeAccessibilityLabel="Meeting time"
+              timeFieldClass={timeField}
+              segmentClass="active:opacity-70"
+              separatorStyle={{ color: colors.faint, fontSize: size.label }}
+              renderSegment={(segment) => <Segment label={segment.label} selected={segment.selected} />}
+              trigger={<Picker title={meeting() ? shortDate(meeting()!) : "Not scheduled"} open={meetingOpen()} placeholder={!meeting()} />}
+            />
           </View>
         </View>
       </Card>
@@ -1003,7 +1377,7 @@ export function Controls(props: { show: Control }) {
     );
   }
 
-  const cards = { Switch: Settings, Checkbox: Filter, Radio: Plans, Tabs: Sections, Select: Choices, Collapsible: Disclosure, Progress: Transfers, Slider: Levels, NumberInput: Quantities, OtpInput: Verify };
+  const cards = { Switch: Settings, Checkbox: Filter, Radio: Plans, Tabs: Sections, Select: Choices, Combobox: Tags, DatePicker: Dates, Collapsible: Disclosure, Progress: Transfers, Slider: Levels, NumberInput: Quantities, OtpInput: Verify };
   return <DemoPage cards={[cards[props.show], Last]} />;
 }
 
@@ -1012,6 +1386,8 @@ export const CheckboxDemo = () => <Controls show="Checkbox" />;
 export const RadioDemo = () => <Controls show="Radio" />;
 export const TabsDemo = () => <Controls show="Tabs" />;
 export const SelectDemo = () => <Controls show="Select" />;
+export const ComboboxDemo = () => <Controls show="Combobox" />;
+export const DatePickerDemo = () => <Controls show="DatePicker" />;
 export const CollapsibleDemo = () => <Controls show="Collapsible" />;
 export const ProgressDemo = () => <Controls show="Progress" />;
 export const SliderDemo = () => <Controls show="Slider" />;

@@ -329,7 +329,7 @@ impl Dom {
 
 /// The methods of nodes (`ref` objects): each sends a command to the
 /// node's view, in order with the ops before it. Name, `length`, signature
-/// and documentation (the declaration of `YNode`).
+/// and documentation (declared on the refs of `declarations::REFS`).
 pub(crate) const NODE_METHODS: &[(&str, c_int, &str, &str)] = &[
     (
         "focus",

@@ -179,7 +179,7 @@ keymap.bind({
 
 ## 查找与替换
 
-`search` 是要查找的内容：`{ query, caseSensitive?, wholeWord?, regex?, inSelection? }`。它的匹配项会被高亮，选区所在的那一项更醒目，`onSearchChange` 报告 `{ result }`，即 `{ count, current, error }`：匹配项的数量、选区所在的是哪一项（从 0 开始），以及正则表达式无效的原因。`findNext` 和 `findPrevious` 选中下一个和上一个匹配项，到头后绕回；`replace(text)` 替换当前匹配项并选中下一个，`replaceAll(text)` 把所有匹配项作为一次编辑替换，并返回替换的数量。正则表达式的替换文本用 `$1` 和 `${name}` 引用它的分组。
+`search` 是要查找的内容：`{ query, caseSensitive?, wholeWord?, regex?, inSelection? }`。它的匹配项会被高亮，选区所在的那一项更醒目，`onSearchChange` 报告 `{ result }`，即 `{ count, current, error }`：匹配项的数量、选区所在的是哪一项（从 0 开始），以及正则表达式无效的原因。`findNext` 和 `findPrevious` 选中下一个和上一个匹配项，到头后绕回；`replace(text)` 替换当前匹配项并选中下一个，`replaceAll(text)` 把所有匹配项作为一次编辑替换，并返回 `{ count }`，即替换的数量。正则表达式的替换文本用 `$1` 和 `${name}` 引用它的分组。
 
 `inSelection` 只在它打开时选中的内容里查找（没有选中内容时为光标所在的行）：只要它保持打开，这个范围就一直保留，随编辑移动，选区从一个匹配项移到另一个时也不变。`findWithSelection`（macOS 上为 `cmd+e`）用 `onFindWithSelection` 报告选中的文本或光标处的单词，供查找栏作为查询内容。
 
@@ -205,7 +205,7 @@ function Find(props: { source: string; onChange: (value: string) => void }) {
         <Button onPress={() => editor.run("findNext")} class="px-2"><Text>↓</Text></Button>
         <Input value={replacement()} onChange={({ value }) => replacement.set(value)} placeholder="Replace" class="flex-1" />
         <Button onPress={() => editor.replace(replacement())} class="px-2"><Text>Replace</Text></Button>
-        <Button onPress={async () => console.log("replaced", await editor.replaceAll(replacement()))} class="px-2"><Text>All</Text></Button>
+        <Button onPress={async () => console.log("replaced", (await editor.replaceAll(replacement())).count)} class="px-2"><Text>All</Text></Button>
       </View>
       <Editor
         ref={editor}
@@ -478,7 +478,7 @@ let editor!: EditorRef;
 | `setSelections(selections)` | 设置选区（最后一个为主选区），并把主选区滚动到视野中。 |
 | `run(command)` | 执行一个命令，与它的按键效果相同（[命令](#commands)）。 |
 | `replace(text)` | 替换当前匹配项并选中下一个。 |
-| `replaceAll(text)` | `Promise<number>`：把所有匹配项作为一次编辑替换；返回数量。 |
+| `replaceAll(text)` | `Promise<EditorReplaceAll>`：把所有匹配项作为一次编辑替换；返回 `{ count }`，即数量。 |
 | `fold(line)`、`unfold(line)` | 折叠第 `line` 行（从 0 开始）下面的行，或展开它。 |
 | `foldRecursive(line)`、`unfoldRecursive(line)` | 折叠第 `line` 行的折叠及其中的每个折叠，或把它们全部展开。 |
 | `foldLevel(level)` | 折叠嵌套层级为 `level` 的每个折叠（1：最外层）。 |

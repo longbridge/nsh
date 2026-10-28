@@ -21,7 +21,7 @@ the list, the rows, the sections' headers and the search field, or draws the row
 
 ```rust tabs
 use nsh_base::{SelectItem, SelectItemState, select, theme};
-use nsh_core::ui::prelude::*;
+use nsh_core::prelude::*;
 
 const FRUITS: [(&str, &str); 5] = [
     ("apple", "Apple"),

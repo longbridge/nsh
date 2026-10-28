@@ -1,4 +1,4 @@
-import { Overlay, signal, Text, View, type YNode } from "nsh";
+import { Overlay, signal, Text, View, type ViewRef } from "nsh";
 import { Popover, Sheet, Tooltip } from "nsh/base";
 import { dismissToast, toast } from "../toast";
 import { platform } from "nsh";
@@ -70,7 +70,7 @@ export function Overlays(props: { show: OverlayKind }) {
   function Primitive() {
     const open = signal(false);
     const placement = signal<"bottom" | "top">("bottom");
-    let anchor: YNode | undefined;
+    let anchor: ViewRef | undefined;
     return (
       <Card icon="components" title="Overlay" subtitle="A box that clips its content, with an overlay anchored inside it" right={<Badge label="nsh" />}>
         <View style={{ height: platform.idiom === "desktop" ? 48 : 56, overflow: "hidden", borderRadius: radius.inset, backgroundColor: colors.inset, justifyContent: "center", paddingHorizontal: 10 }}>

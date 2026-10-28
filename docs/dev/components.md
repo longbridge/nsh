@@ -10,7 +10,7 @@ the styled layer, GPUI Kit's `gpui-component`, is never part of NSH. The look of
 come from two places:
 
 - **`nsh/base`**: unstyled base components of `gpui-base`'s scope, the crate `nsh-base` (`crates/nsh-base`,
-  `nsh_base::registry()`): `Button`, `Checkbox`, `Radio`, `RadioGroup`, `Switch`, `Tab`, `Tabs`, `Select` (one value from a list: "Popups" below), `Collapsible`, `Progress`, `Slider`, `NumberInput`, `OtpInput`, `Table` with `TableHeader`, `TableBody`, `TableFooter`, `TableRow`, `TableHead`, `TableCell` and `TableCaption` (a table's accessibility roles around the app's rows), `TextView` (`text-view.md`), `ResizablePanelGroup` and `ResizablePanel`, `DockArea`
+  `nsh_base::registry()`): `Button`, `Checkbox`, `Radio`, `RadioGroup`, `Switch`, `Tab`, `Tabs`, `Select` (one value from a list: "Popups" below), `Combobox` (one value or several from the same list), `Calendar` (a date or a range from months of days), `TimeField` (a time of day by segments), `DatePicker` (a calendar and a time field in a popup: "Popups" below), `Collapsible`, `Progress`, `Slider`, `Scrollbar` ("Scroll bars" below), `NumberInput`, `OtpInput`, `Table` with `TableHeader`, `TableBody`, `TableFooter`, `TableRow`, `TableHead`, `TableCell` and `TableCaption` (a table's accessibility roles around the app's rows), `TextView` (`text-view.md`), `ResizablePanelGroup` and `ResizablePanel`, `DockArea`
   (`dock.md`), `Editor` (a code editor, `editor.md`), `DiffView` (the changes between two texts, `diff.md`), `DataTable` (a table over any number of rows and columns, `data-table.md`), the popups on the core's overlays (`Popover`,
   `Menu` with `MenuItem`, `MenuSeparator` and `Submenu`, `ContextMenu`, `Tooltip`, `Sheet`: "Popups" below), toasts
   (`Toast`, `ToastStack` and the class `ToastManager`: "Toasts" below) and the
@@ -90,10 +90,10 @@ Visual rules are changed in the shared layer; `nsh-base` supplies the components
 - **The surface is free functions** whose reads subscribe: `window()`, `safe_area()`, `keyboard_height()`, `dark()`,
   `font_scale()`, `locale()`, `cx.insets()`, `global::<G>()`, `provide_context(v)` / `use_context::<T>()`.
 - **Modules are functions without a component**: `#[module] impl AlertDialog { pub async fn show(options:
-  AlertDialogOptions) -> Result<Option<SharedString>, String> }` is `await AlertDialog.show({ … })` in JS (`nsh-base`
+  AlertDialogOptions) -> Result<AlertDialogResult, String> }` is `await AlertDialog.show({ … })` in JS (`nsh-base`
   `alert_dialog.rs`). A module named like a component adds static functions to it.
 - **System UI**: `nsh_base::alert_dialog().title(..).cancel(..).destructive(..).show()` (TSX's `AlertDialog.show({ … })`:
-  await the label of the action chosen, `None` when closed without one), `dismiss_keyboard()`, a screen's
+  await an `AlertDialogResult`, whose `action` is the chosen action's id, `None` when closed without one), `dismiss_keyboard()`, a screen's
   or modal's `.status_bar(..)` (as a view controller's `preferredStatusBarStyle`; a `StatusBarStyle` alone, a
   `StatusBarSetting` or a closure of one), `ModuleCx::set_status_bar(patch)`
   for the default under them; `.inset_padding(..)` / `.inset_margin(..)` on an element; the safe area and the keyboard as styles: `.pt_safe_area()`, `.pb_keyboard()` (`styles.md` "Environment variables").
@@ -218,16 +218,17 @@ reasons: `reactive-components.md`.
     are unique among a component's renders of one prop.
   - `data: Prop<Rows>`: rows of data the component reads by key, `data: T[]` in TS with `#[props(generic)]` on the
     props (the props generic over `T = any`, as a component with rows is, the default for a component given no rows
-    of its own). `Rows` reads each row's number fields once, when JS sets the prop, into a column per key
-    (`Rows::column(key)`, `NaN` where a row has no number), so the component scales and draws them without calling
+    of its own). `Rows` reads each row's number and string fields once, when JS sets the prop, into a column per
+    key (`Rows::column(key)`, `NaN` where a row has no number), so the component scales and draws them without calling
     into JS again (`nsh/base/plot`). A `RowAccessor` prop reads a value of each row: a field name TS checks against
     the rows' type (`Extract<keyof T, string>`), read natively, or the app's function `(d: T, index) => number`,
     which `RowAccessor::values` calls once per row in the next JS turn whenever the rows or the function change
     (`Rows` keeps the JS array for it, `JsHost::retain`; each call gets the app's own row object, `RowRef`), never
     while the component draws; Rust passes `RowAccessor::key` or `RowAccessor::from_fn`. A `RowText` prop reads a
-    text of each row the same way, for what the component shows as text (a value beside a bar): a field name, its
-    numbers written as JS's `String(n)` writes them, or the app's function `(d: T, index) => string` for text the app
-    formats (`RowText::texts`).
+    text of each row the same way, for what the component shows as text (a value beside a bar) or reads as a
+    category (a plot's `colorScale`): a field name, its strings as they are and its numbers written as JS's
+    `String(n)` writes them, or the app's function `(d: T, index) => string` for text the app formats
+    (`RowText::texts`).
   - `items: Items`: virtualized rows. In JS the component takes `List`'s data props (`each`, the row renderer as
     children, `keyExtractor`, `onLoadMore`, `header`, ... : `ListItemsProps<T>`, so the component is
     generic over the row type). `.list(props.items, |l| l.flex_1().estimated_item_size(px(48.0)), |row, at|
@@ -317,7 +318,7 @@ reasons: `reactive-components.md`.
   | `fetch(url)` | `fetch(url).await` / `fetch(HttpRequest::post(url, body).header(..)).await` in a task: an `HttpResponse` (`status()`, `ok()`, `header(..)`, `text()`, `body`) or the error; the engine's network stack and capability checks, as JS's, so it works on the web too; the request is cancelled with its task |
   | `cleanup` | `cleanup(f)` (runs before the owner runs again or goes) |
   | `windowSize()`, `safeArea()`, `keyboardFrame()`, `colorScheme()`, ... | `window()`, `safe_area()`, `keyboard_height()`, `dark()`, `font_scale()`, `reduce_motion()`, `screen_reader()`, `rtl()`: reading subscribes |
-  | `Window.setTitleBar(style, height)`, `titleBar()`, `Window.close()` (`nsh/desktop`) | `element::desktop::set_title_bar(style, height)`, `title_bar()`, `close_window()`; the same root commands and native controls, with title-bar insets forwarded through `element::Environment`; `.window_drag(bool)` on any interactive element marks or excludes a native drag region |
+  | `Window.setTitleBar({ style, height })`, `titleBar()`, `Window.close()` (`nsh/desktop`) | `element::desktop::set_title_bar(style, height)`, `title_bar()`, `close_window()`; the same root commands and native controls, with title-bar insets forwarded through `element::Environment`; `.window_drag(bool)` on any interactive element marks or excludes a native drag region |
   | `pixelRatio()`, `Math.round(x * pixelRatio()) / pixelRatio()`, `platform.os` / `version` / `idiom` (`"desktop"`) | `pixel_ratio()`, `round_to_nearest_pixel(v)`, `os()`, `os_version()`, `idiom()`, `is_desktop()` |
   | `Intl.NumberFormat()`, `toLocaleString()` (the user's locale) | `locale()` (a `Locale`: `de-DE`; reading subscribes), formatted with a Rust crate: `Intl` and the locale-aware `toLocale*String`s are JS globals of TS apps |
   | `requestAnimationFrame(cb)`, `cancelAnimationFrame` | `request_animation_frame(\|at\| ..)` returns a `Spawned`; in a task `next_frame().await` (an `Instant`), once per frame in a loop |
@@ -330,9 +331,10 @@ reasons: `reactive-components.md`.
   | `safeAreaInsets()` | `cx.insets()`: the insets where the component is (the nearest screen's or modal's, else the surface's safe area) |
   | a signal or store at module level | `global::<G>()`: a `Signal<G>` of the surface, made with `Default` (shared by its components and modules) |
   | `context(default)` / `<Ctx.Provider value>` / `Ctx()` | `provide_context(value)` in the body; `use_context::<T>()` below it (through the app's elements too: a component JS made among another's JS children is under where that one places them); provide a signal to change what readers see |
-  | `createAnimatedValue`, `Animated.spring`, `interpolate` | `animated_value(0.0)` (`Copy`, kept by the current owner); `.bind_translate_y(&v)` / `.bind_opacity(..)` / `.bind_background(..)` / `.bind_border_color(..)` / `.bind_color(..)` / `.bind_scale(..)` / `.bind_rotate(..)`, `.pan_values(..)` (drags move it natively), `.pinch_value(&scale)` / `.rotation_value(&angle)` (TS `pinch={{ scale }}`, `rotation={{ angle }}`), `scroll().scroll_value(&v)`, canvas arguments (`Painter::new().fill_rect(0.0, 0.0, &v, 4.0)`); `v.spring(to, Spring::default())` / `.timing(to, ms, easing)` / `.timing_with(to, Timing { delay_ms, .. })` / `.decay(..)` / `.decay_within(.., (min, max), bounce)` return an `AnimationEnd` to await; `v.value()` (`getValue()`; after `v.stop()`, `stop()`'s promise) an `Answer<f32>`; `v.set_offset(..)` / `.flatten_offset()` / `.extract_offset()`; `element::sample_easing` / `sample_spring` / `sample_decay` (`Easing.sample`, `Animated.sampleSpring` / `sampleDecay`) the curves, to draw them; `v.interpolate(..)`, `.interpolate_with(.., Interpolation { extrapolate_left, extrapolate_right, easing })`, `.add(..)`, `.diff_clamp(..)` derive nodes |
+  | `createAnimatedValue`, `Animated.spring`, `interpolate` | `animated_value(0.0)` (`Copy`, kept by the current owner); `.bind_translate_y(&v)` / `.bind_opacity(..)` / `.bind_background(..)` / `.bind_border_color(..)` / `.bind_color(..)` / `.bind_scale(..)` / `.bind_rotate(..)`, `.pan_values(..)` (drags move it natively), `.pinch_value(&scale)` / `.rotation_value(&angle)` (TS `pinch={{ scale }}`, `rotation={{ angle }}`), `scroll().scroll_value(&v)`, canvas arguments (`Painter::new().fill_rect(0.0, 0.0, &v, 4.0)`); `v.spring(to, Spring::default())` / `.timing(to, ms, easing)` / `.timing_with(to, Timing { delay_ms, .. })` / `.decay(..)` / `.decay_within(.., (min, max), bounce)` return an `AnimationEnd` to await; `v.value()` (`getValue()`; after `v.stop()`, the `{ value }` of `stop()`'s promise) an `Answer<f32>`; `v.set_offset(..)` / `.flatten_offset()` / `.extract_offset()`; `element::sample_easing` / `sample_spring` / `sample_decay` (`Easing.sample`, `Animated.sampleSpring` / `sampleDecay`) the curves, to draw them; `v.interpolate(..)`, `.interpolate_with(.., Interpolation { extrapolate_left, extrapolate_right, easing })`, `.add(..)`, `.diff_clamp(..)` derive nodes |
   | `Animated.sequence / parallel / stagger / delay / loop`, `.start(cb)` / `.stop()` / `.reset()` | `Animation::sequence([Animation::timing(&v, to, Timing::new(ms, easing)), Animation::delay(ms), Animation::spring(..)])`, `::parallel(..)` (`.stop_together(false)`), `::stagger(ms, ..)`, `.looped(iterations)` (`.reset_before_iteration(false)`); `a.start()` returns an `AnimationEnd`, `a.stop()`, `a.reset()` |
   | `keymap.bind("mod+k", f, { when, repeat })`, `keymap.label("mod+k")` (`nsh`'s `keymap`) | `on_key("mod+k", \|keystroke\| ..)` / `on_key_with(k, KeyOptions { when, repeat }, f)`, bound while the current owner lives; `key_label("mod+k")` (`⌘K`, `Ctrl+K`). The core joins the views' bindings to JS's in the root's one table (a view's after JS's: it wins on the same keystroke) and runs a view's handler itself when the root's `KeyCommand` reports it; their ids start at 2^31, above JS's (`element/keys.rs`) |
+  | (none: a JS app's scroll view or list is its own; Rust views watch one they did not make) | `watch_scroll(target, \|e: &ScrollEvent\| ..)` (offset, content size and viewport, when first found and on every change, whoever listens to its `on_scroll`), while the current owner lives; `target` (`\|\| r.node()`) is resolved again in every commit, so a ref set later in the render is found; `NodeRef(id).scroll_to(offset, animated)` scrolls a node such a target names. The core runs a scroll watch at the end of the commit round that changed what it reports, and another round sends what it changed; a hover watch has the node listen to the pointer, as a hint's anchor (`element/watch.rs`, `core/watch.rs`; `nsh_base::Scrollbar`) |
   | `BackHandler.onBackPress(f)`, the function it returns | `on_back_press(\|\| -> bool)`: registered while the current owner lives (only while a signal holds: inside an `effect`). After modals and before stacks, the views' listeners run newest first, then JS's; when none returns true the core sends `Command::Back`: the top stack pops, else the app exits (`element/back.rs`) |
   | `<ErrorBoundary fallback>` | `catch_error(\|\| view, \|error, reset\| fallback)` |
   | a class TS uses (`new Tally(3)`, `tally.add(2)`, `tally.count`, `await tally.save(p)`) | `#[class]` on the struct and its `impl`, `registry.class::<Tally>()`: synchronous members run in the call, `async fn`s return promises |
@@ -394,7 +396,7 @@ reasons: `reactive-components.md`.
   `Component::element(props)` (the props struct whole) and `ComponentElement::on_event` (every event, typed) remain
   for components implemented by hand (`impl Component for X`, which get no constructor) and code generic over
   components; Rust views use the constructors.
-- **Platform services** are free functions (`element/ambient.rs`): `dialog(Dialog)` (deprecated for apps in favor of
+- **Platform services** are free functions (`element/ambient.rs`, exported from `element` and the prelude): `dialog(Dialog)` (deprecated for apps in favor of
   `nsh_base::alert_dialog()`, which calls it) shows an alert or action sheet and returns a future of the index
   chosen (-1: dismissed; the answer is the root's `Dialog` event, which the core resolves; JS never sees it); `dismiss_keyboard()`, `animate_layout(..)`, `announce_for_accessibility(..)`,
   `set_color_scheme(..)`, the clipboard (`set_clipboard`, `clipboard_string`,
@@ -507,7 +509,7 @@ module's object in JS (the type's name otherwise); a module named like a functio
 is merged into it as into a component: its functions and constants are the function's properties (`test.skip(..)`,
 `describe.only(..)`: `Registry::function_members`; TS declares a namespace of the function's name, and the module is
 no export of its own). A function returning `Result` rejects
-the promise with the error (throws, when it runs in the call); a `NodeRef` parameter is a `YNode` in TS (the node's
+the promise with the error (throws, when it runs in the call); a `NodeRef` parameter is a `ViewRef` in TS (the node's
 id, and its object again as a result).
 
 ## Classes
@@ -698,7 +700,7 @@ view is made and has `token()` read its tokens at once (`Core::theme_tokens`, gi
 op reaches the core only after the turn of the first render, which reads them already); the core makes tokens of it
 with what a UI set brings (`Registry::tokens_from`: `nsh/base`'s `tokens_of`, which also gives the defaults when the
 engine starts). A Rust app's root carries them (`Root::tokens`). `nsh_base::theme()` reads the tokens from a signal of
-the surface (`element::ambient::tokens`): new tokens run again the bindings that read them. An embedding app can give a
+the surface (`element::tokens`): new tokens run again the bindings that read them. An embedding app can give a
 surface its own (`Core::set_host_tokens`, `EngineControl::set_tokens`; sent from `Engine::start_with`'s `setup` they
 are in the first frame and JS's first render): they win over the app's until cleared, and the app's names they lack
 stay, so an embedded app looks like its host (`embedding.md`, "GPUI and GPUI Kit apps").
@@ -898,8 +900,8 @@ compositions of primitives in the core.
 
 ## Popups
 
-`nsh/base`'s popups (`crates/nsh-base`: `popup.rs`, `popover.rs`, `menu.rs`, `tooltip.rs`, `sheet.rs`, and
-`Select`'s list, `listbox.rs`) are made of the core's overlays (`elements.md` "Overlays"), which place them and
+`nsh/base`'s popups (`crates/nsh-base`: `popup.rs`, `popover.rs`, `menu.rs`, `tooltip.rs`, `sheet.rs`,
+`Select`'s list, `listbox.rs`, and `DatePicker`'s calendar, `date_picker.rs`) are made of the core's overlays (`elements.md` "Overlays"), which place them and
 report presses outside, Escape and back; the components decide to close. They draw nothing: the app styles each
 part (`popupClass` / `popupStyle`, `backdropClass` / `backdropStyle`) and its content.
 
@@ -931,9 +933,9 @@ is for, never by replacing one popup with another everywhere:
 | `ContextMenu` | the secondary button opens it at the pointer (`onContextMenu`'s `page`) | a finger held 400 ms on the trigger opens it as the menu's sheet (observed touches: the trigger's own presses and the scroll views around it go on; 10 points of movement cancel) |
 | `Tooltip` | after the pointer rests on the trigger for `delay` (500 ms); leaving or pressing hides it | only when the app opens it (`open`, `defaultOpen`): no pointer to rest |
 | `Sheet` | an edge panel (`side`) over a backdrop | the same |
-| `Select` | a popup at its trigger (`placement`, `align`, `offset`, `margin`), at least as wide as the trigger and never taller than the room on its side (`onPosition`'s `available`); a press outside closes it and goes on, leaving the keyboard focus where it went (any other close gives it back to the trigger) | a sheet at the bottom over a backdrop, below the status bar at most, with `Menu`'s motion; its search field takes the keyboard only when pressed |
+| `Select`, `Combobox`, `DatePicker` | a popup at its trigger (`placement`, `align`, `offset`, `margin`), at least as wide as the trigger and never taller than the room on its side (`onPosition`'s `available`); a press outside closes it and goes on, leaving the keyboard focus where it went (any other close gives it back to the trigger) | a sheet at the bottom over a backdrop, below the status bar at most, with `Menu`'s motion; its search field takes the keyboard only when pressed |
 
-`Select`'s list (`listbox.rs`, shared with the coming `Combobox`) is a state machine of its own, since `gpui-base`'s
+`Select`'s and `Combobox`'s list (`listbox.rs`) is a state machine of its own, since `gpui-base`'s
 `Select` root leaves it to `gpui-component`'s styled `SearchableList` (`api-naming.md`): the rows for the query
 (search: a case-insensitive substring of the titles; adjacent items of one `group` under a header, a section with no
 match dropped), the highlight (Up / Down around the ends over the enabled items, Home / End, Page Up / Down by the
@@ -951,6 +953,32 @@ down, so the search field keeps the keyboard focus. The trigger's role, states, 
 `trigger` slot, so in a TSX app they are the app's element's ("Named slots"): the popup is placed against it
 (`Overlay::anchor`), at least as wide as its layout reports, and waits for that first layout (open at first, it would
 be made before the slot is filled).
+
+`Combobox` (`combobox.rs`) is the same list with an array value. `Hooks::selected` says which rows are selected (the
+select's one value, the combobox's set); with `multiple` its `choose` toggles the item and leaves the list open,
+without it replaces the value and closes. It keeps the value as the user last left it (`latest`): the app's value
+reaches the props a turn after its `onChange` handler set it, so toggles in a row start from what the user did and
+`onConfirm`, sent on every close, reports it. The query is a `listbox::Query`: the search field's own, each opening
+starting from `defaultQuery`, or the app's `query`, whose changes highlight the first match as typing does. The
+footer is a part of the popup after the rows (`listbox::Footer`). Mod+Return closes it with `"select"`.
+
+`DatePicker` (`date_picker.rs`) is `Select`'s popup (`popup::dropdown`, at least as wide as the trigger, a sheet on
+touch screens) around presets, a calendar and, with `timePrecision`, a time field. Its calendar is `calendar.rs`'s grid
+with every prop of `Calendar` passed on (`calendar::Config`); opening it on the desktops puts the keyboard on the
+days (`Grid::focus_days`). A complete date is the value and closes it with `"select"`; with a time the popup stays
+open, each edit reported, until the selected day is pressed again. The trigger's keys are bound while it has the
+focus: Return opens and closes (`gpui-base`'s `Confirm`), Delete and Backspace clear while it is closed. The value
+crosses to JS in the HTML inputs' forms (`date`, `datetime-local`), at the precision of `timePrecision`
+(`PickedDate`).
+
+`Calendar` (`calendar.rs`) is a grid of items (`Grid`: the shown page, the view, the cursor) over `gpui-base`'s
+`Date` and `Matcher`. Its days are one Tab stop: only the cursor's day (`stop`) is focusable, and the arrow, Home / End and
+Page keys move the cursor, turning the months past the shown ones (`gpui-base`'s days take presses only). A
+JS function (`Matcher::Js`, as `gpui-base`'s `Matcher::Custom`) is asked for the shown days in a spawned task (the
+next JS turn), its answers kept as a set; a newer page's answers replace an older one's. `TimeField` (`time_field.rs`) is `gpui-base`'s `SegmentEditor` over one
+transparent native text field, as `OtpInput`'s (its `diff` / `echoed`): what the field gains or loses goes to the
+selected segment, then the field holds the time again; a value the app sets is shown unless it is the user's change
+coming back.
 
 On the web, `Sheet` wraps its two overlays in a modal root with no platform animation. The embedding player
 reports that root’s presentation size independently of the app, so both the backdrop and panel follow
@@ -988,6 +1016,50 @@ the requests) decides, as `hint_open`. The tooltip itself is the bubble (the app
 what it says; it never takes the pointer (`pointer_events(None)`). An element's `tooltip` prop (`Interactive::tooltip`,
 `Prop::Tooltip`) takes any other element too, shown as it is in a hint overlay the core makes itself
 (`Core::set_tooltip`); it takes no text, so every tooltip's look is the app's.
+
+## Scroll bars
+
+`Scrollbar` (`crates/nsh-base/src/scrollbar.rs`) is `gpui-base`'s `Scrollbar` as `gpui-shell` places it: a view the
+app puts where it wants (over the target's edge, beside a fixed header) that names the scroll view or list it moves
+(`scroll`: TS a `ref`, Rust a `ScrollbarTarget` of an `ElementRef`). It watches the target (`watch_scroll`): the
+platforms report every scroll view's offset and the core lays out its content, so the thumb follows the offset, the
+content (a list's extent as it grows) and the viewport with nothing in JS. The thumb's length is the viewport's share
+of the content along the rail (the track's content box, measured), no shorter than `minThumbLength`; its place the
+offset's share of the scroll range, held to the ends while the target overscrolls (a `translate` along the axis, so
+the track's padding and the app's alignment place it across). The length and the place are on a view of the bar's own
+around the thumb part, which the app's transitions never reach: a `transition-all` on the thumb (for a thumb that
+widens) would otherwise animate its place and make it trail the content. A press on the thumb drags it by the
+pointer's offset; a press on the track puts the thumb's middle there and a drag goes on from there, both as
+`ScrollTo` commands to the target. A drag moves the thumb in the batch that sends the command, not when the platform
+reports the scroll a frame or two later, and while it goes on the reports of earlier commands do not move it back.
+`mode` decides when it shows, as `gpui-base`'s: `scrolling` (a move of the target, until `motion.idle` after; the
+pointer on the bar while it shows keeps it), `hover` (also while the pointer is over the bar, which a hidden bar
+follows with a mouse) or `always`; a drag keeps it, and it never shows while the content fits. Its fades are
+`gpui-base`'s `VisibilityAnimation`: two animated values bound natively, the track's opacity and the rail's slide
+(across the axis by the track's thickness, which the track clips), started with `motion.enter` / `exit` scaled by
+the distance still to cover (the bar samples its fade to know where the native one is), linear / cubic out in and
+cubic in out, none for `always` or reduced motion, so the first state snaps. Hidden, the track takes no presses. Its
+look, and the thumb's motion (a width growing on `hover:`), are the app's. The target's own indicator stays the app's
+to turn off (`scrollbar={false}`).
+
+**Built-in bars.** A view needs no bar placed for one: `set_scrollbar_theme` (TS `Scrollbar.setTheme`, a module
+function: an `Action::BuiltInScrollbars` that carries the theme as an `AnyValue` and the UI set's maker, so a Rust app
+that never registered `nsh-base` gets bars too) has the core draw the bar of every view whose `scrollbar` is `true`,
+and a view's own theme is its `scrollbar` prop (`ScrollbarSetting::Themed`, kept as JSON; the registry's
+`scrollbars_from` names the UI set that makes its bars). The maker returns no bar for an axis the theme has no look
+for, and the view keeps the platform's indicator. The core (`core/scrollbars.rs`) makes the bar as a component of
+its own, a child of the view marked `decoration`: last among the children, so it draws above them and what JS
+appends goes before it; out of what counts as the view's children (`first:`, `last:`, `space-*`); a layout root of
+its own, sized to the view's frame after the views' and the lists' layout; and pinned over the viewport by a sticky
+range across all of the content, which the platforms apply on the main thread as they pin sticky cells, so it never
+waits for the engine while the content scrolls. The view's `ScrollConfig` turns the indicator off and says the bar
+`replaced` it, so the desktop backends' horizontal views do not keep theirs beside it. A new theme makes every bar
+made for `true` again. A component's given class (`app_class`) now reaches its root, which the bar's size relies on.
+A multiline input scrolls its text natively, so its bar is a sibling instead (`Node::beside`): inserted just after the
+input in its parent, stacked with it, laid out at its frame and made again where the input moves. Its
+`InputConfig` turns the text view's indicator off (`scrollbar_visible`) and asks the platform to report its scrolling
+(`replaced`: `EngineControl::input_scroll`, the offset, the text's size and the viewport's, `Core::set_input_scroll`),
+which the bar's `watch_scroll` reads as a scroll view's; the bar's `ScrollTo` commands scroll the text.
 
 ## Toasts
 

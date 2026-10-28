@@ -5,7 +5,8 @@
 use std::sync::Arc;
 
 use nsh_core::{
-    element::{JsHost, JsIn, JsOwned, JsValue, PropError, TsTypes},
+    Color, Hsla,
+    element::{JsHost, JsIn, JsOwned, JsValue, PropError, SharedString, TsTypes},
     geometry::{Percentage, Points},
 };
 
@@ -16,23 +17,49 @@ use nsh_core::{
 /// domain, the extent of `[min, max]` (`ScaleLinear`; the extent of what
 /// the plot draws when it has none); and `{ type: "band", … }` gives each
 /// row a band of the axis, in order, for the bars drawn in it
-/// (`ScaleBand`).
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
+/// (`ScaleBand`). Each takes `reverse` (visx's scale option, d3's range
+/// written the other way round): the axis runs from its other edge.
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Scale {
     /// One position per row, evenly spaced, the first and last at the
     /// edges (one row: the middle).
-    #[default]
-    Point,
+    Point {
+        /// The rows run the other way: from the right edge leftward on the
+        /// x axis, from the bottom edge up on the y axis.
+        reverse: bool,
+    },
     /// Values in proportion, the domain's smallest at the start of the
     /// range and its largest at the end.
     Linear {
         /// The values at the two ends (in either order); `None`: the
         /// extent of what the plot draws.
         domain: Option<[f64; 2]>,
+        /// The domain runs the other way: its smallest value at the right
+        /// edge on the x axis, at the top edge on the y axis
+        /// (`gpui-base`'s `BarAlignment::Right` and `Top`: bars grow from
+        /// there).
+        reverse: bool,
     },
     /// One band per row, in order, with gaps between them and at the ends
     /// (`ScaleBand`).
     Band(BandScale),
+}
+
+impl Default for Scale {
+    /// `{ type: "point" }`.
+    fn default() -> Self {
+        Scale::Point { reverse: false }
+    }
+}
+
+impl Scale {
+    /// The axis runs from its other edge (`reverse`).
+    pub(crate) fn reversed(&self) -> bool {
+        match *self {
+            Scale::Point { reverse } | Scale::Linear { reverse, .. } => reverse,
+            Scale::Band(band) => band.reverse,
+        }
+    }
 }
 
 /// The options of a band scale (`gpui-base`'s `ScaleBand` builders): the
@@ -59,29 +86,46 @@ pub struct BandScale {
     /// the bars inside a band, as d3's grouped bars nest one (0 by
     /// default).
     pub group_padding: Percentage,
+    /// The bands run the other way (`reverse`): the first row's at the
+    /// right edge on the x axis, at the bottom edge on the y axis.
+    pub reverse: bool,
 }
 
 impl JsValue for Scale {
     fn ts_type(types: &mut TsTypes) -> String {
         types.declare("Scale", |_| {
-            "/** How an axis of a `Plot` places values: `point` places the rows in order, evenly from one edge to the other; `linear` places a number in proportion to where it lies in its `domain` (the extent of the two values; without one, the extent of what the plot draws); `band` gives each row a band of the axis, in order, for the bars drawn in it: `paddingInner` is the gap between bands and `paddingOuter` the gap at the ends (shares of a band, 0 by default), `maxBandWidth` the widest a band may be (points), `bandCount` the bands the axis is laid out for when more than the rows, and `groupPadding` the gap between the bars side by side in a band (a share of a bar's place). */\nexport type Scale = { type: \"point\" } | { type: \"linear\"; domain?: [number, number] } | { type: \"band\"; paddingInner?: number; paddingOuter?: number; maxBandWidth?: number; bandCount?: number; groupPadding?: number };\n".to_owned()
+            "/** How an axis of a `Plot` places values: `point` places the rows in order, evenly from one edge to the other; `linear` places a number in proportion to where it lies in its `domain` (the extent of the two values; without one, the extent of what the plot draws); `band` gives each row a band of the axis, in order, for the bars drawn in it: `paddingInner` is the gap between bands and `paddingOuter` the gap at the ends (shares of a band, 0 by default), `maxBandWidth` the widest a band may be (points), `bandCount` the bands the axis is laid out for when more than the rows, and `groupPadding` the gap between the bars side by side in a band (a share of a bar's place). `reverse` runs the axis from its other edge (false by default): the first row or the domain's smallest value at the right edge of the x axis, and on the y axis the domain's smallest value at the top edge (bars grow down from it) and the first row at the bottom edge. */\nexport type Scale = { type: \"point\"; reverse?: boolean } | { type: \"linear\"; domain?: [number, number]; reverse?: boolean } | { type: \"band\"; paddingInner?: number; paddingOuter?: number; maxBandWidth?: number; bandCount?: number; groupPadding?: number; reverse?: boolean };\n".to_owned()
         })
     }
 
     fn from_js(value: JsIn<'_>) -> Result<Self, PropError> {
         let kind = value.field("type")?;
+        let reverse = {
+            let field = value.field("reverse")?;
+            let field = field.get();
+            match field.is_nullish() {
+                true => false,
+                false => field
+                    .as_bool()
+                    .ok_or_else(|| field.expected("`reverse`: a boolean"))?,
+            }
+        };
         match kind.get().as_string().as_deref() {
-            Some("point") => Ok(Scale::Point),
+            Some("point") => Ok(Scale::Point { reverse }),
             Some("linear") => {
                 let domain = value.field("domain")?;
                 let domain = domain.get();
                 if domain.is_nullish() {
-                    return Ok(Scale::Linear { domain: None });
+                    return Ok(Scale::Linear {
+                        domain: None,
+                        reverse,
+                    });
                 }
                 let ends = Vec::<f64>::from_js(domain)?;
                 match ends[..] {
                     [a, b] if a.is_finite() && b.is_finite() => Ok(Scale::Linear {
                         domain: Some([a, b]),
+                        reverse,
                     }),
                     _ => Err(PropError(
                         "`domain`: two finite numbers, `[min, max]`".to_owned(),
@@ -111,6 +155,7 @@ impl JsValue for Scale {
                     group_padding: Percentage(
                         number("groupPadding")?.unwrap_or(0.0).min(1.0) as f32
                     ),
+                    reverse,
                 }))
             }
             _ => Err(value
@@ -122,7 +167,7 @@ impl JsValue for Scale {
         let object = JsOwned::new(host, host.new_object()?);
         let raw = object.get().raw();
         let kind = match self {
-            Scale::Point => "point",
+            Scale::Point { .. } => "point",
             Scale::Linear { .. } => "linear",
             Scale::Band(_) => "band",
         };
@@ -130,6 +175,7 @@ impl JsValue for Scale {
         match self {
             Scale::Linear {
                 domain: Some([a, b]),
+                ..
             } => {
                 let ends = vec![*a, *b].to_js(host)?;
                 host.set_field(raw, "domain", ends.into_raw())?;
@@ -149,6 +195,9 @@ impl JsValue for Scale {
                 }
             }
             _ => {}
+        }
+        if self.reversed() {
+            host.set_field(raw, "reverse", host.new_bool(true))?;
         }
         Ok(object)
     }
@@ -216,6 +265,8 @@ pub(crate) struct Band {
     max_width: Option<f32>,
     /// The gap between the bars side by side in a band.
     group_padding: f32,
+    /// The first band at the end of the range (`reverse`).
+    reverse: bool,
 }
 
 impl Band {
@@ -229,6 +280,7 @@ impl Band {
             padding_outer: options.padding_outer.0,
             max_width: options.max_band_width.map(|w| w.0),
             group_padding: options.group_padding.0,
+            reverse: options.reverse,
         }
     }
 
@@ -244,6 +296,7 @@ impl Band {
             padding_outer: 0.0,
             max_width: None,
             group_padding: 0.0,
+            reverse: false,
         }
     }
 
@@ -282,16 +335,21 @@ impl Band {
     }
 
     /// Where band `index` starts (`ScaleBand::tick`), a band narrowed by
-    /// `max_width` in the middle of its place.
+    /// `max_width` in the middle of its place; from the end of the range
+    /// when reversed, as d3's band scale over a range written backwards.
     pub(crate) fn start(&self, index: usize) -> Option<f32> {
         if index >= self.len {
             return None;
         }
+        let place = match self.reverse {
+            true => self.len - 1 - index,
+            false => index,
+        };
         let step = self.step();
         // The bands and their inner gaps, in the middle of the range.
         let first = self.start + (self.diff - step * (self.len as f32 - self.padding_inner)) / 2.0;
         let full = self.full_width();
-        Some(first + index as f32 * step + (full - self.width()) / 2.0)
+        Some(first + place as f32 * step + (full - self.width()) / 2.0)
     }
 
     /// The middle of band `index`.
@@ -306,7 +364,16 @@ impl Band {
             return None;
         }
         let first = self.center(0)?;
-        Some(first + value as f32 * self.step())
+        let step = match self.reverse {
+            true => -self.step(),
+            false => self.step(),
+        };
+        Some(first + value as f32 * step)
+    }
+
+    /// The first band is at the end of the range.
+    pub(crate) fn reversed(&self) -> bool {
+        self.reverse
     }
 }
 
@@ -353,6 +420,17 @@ impl AxisMap {
             _ => None,
         }
     }
+
+    /// Its places run back along the axis, toward smaller coordinates as
+    /// the rows or values grow: a reversed scale along x (right to left),
+    /// and along y a linear scale unless reversed (bottom up).
+    pub(crate) fn backward(&self) -> bool {
+        match *self {
+            AxisMap::Point { range, .. } => range[1] < range[0],
+            AxisMap::Linear(map) => map.range()[1] < map.range()[0],
+            AxisMap::Band(band) => band.reversed(),
+        }
+    }
 }
 
 /// Where row `index` of `len` goes on a point scale over `range`
@@ -375,6 +453,130 @@ pub(crate) fn extent(values: impl IntoIterator<Item = f64>) -> Option<[f64; 2]> 
             None => Some([v, v]),
             Some([lo, hi]) => Some([lo.min(v), hi.max(v)]),
         })
+}
+
+/// The colors of a [`Plot`](super::Plot)'s categories (TS `OrdinalScale`,
+/// `{ type: "ordinal", domain?, range, unknown? }`), as `gpui-base`'s
+/// `ScaleOrdinal` (`scale/ordinal.rs`) and d3's `scaleOrdinal` map a
+/// discrete domain to a discrete range: the `domain`'s `i`th category
+/// takes the `range`'s `i % range.len()`th color, so the range repeats
+/// over a longer domain. A category outside the domain takes `unknown`
+/// where it is set; otherwise, as d3's implicit domain, the plot adds it
+/// after the domain the first time a mark meets it (marks in order, rows
+/// in order) and it takes the next color. The marks' `color` reads each
+/// row's category; its color is the mark's `fill` (a line's `stroke`)
+/// where nothing sets one, in place of `currentColor`.
+#[derive(Debug, Clone, PartialEq, Default)]
+#[non_exhaustive]
+pub struct OrdinalScale {
+    /// The categories, in order (`ScaleOrdinal::domain`); a category
+    /// written twice keeps its first place.
+    pub domain: Vec<SharedString>,
+    /// The colors, in order (`ScaleOrdinal::range`), CSS colors in TS;
+    /// none: no category takes a color.
+    pub range: Vec<Hsla>,
+    /// The color of every category outside the domain
+    /// (`ScaleOrdinal::unknown`); none: each takes the next color.
+    pub unknown: Option<Hsla>,
+}
+
+impl OrdinalScale {
+    /// The scale of `domain` to `range` (`ScaleOrdinal::new`).
+    pub fn new(
+        domain: impl IntoIterator<Item = impl Into<SharedString>>,
+        range: impl IntoIterator<Item = impl Into<Hsla>>,
+    ) -> Self {
+        Self {
+            domain: domain.into_iter().map(Into::into).collect(),
+            range: range.into_iter().map(Into::into).collect(),
+            unknown: None,
+        }
+    }
+
+    /// The same scale, with `color` for the categories outside its domain
+    /// (`ScaleOrdinal::unknown`).
+    pub fn unknown(mut self, color: impl Into<Hsla>) -> Self {
+        self.unknown = Some(color.into());
+        self
+    }
+
+    /// The color of `category`, its place in the domain and then among
+    /// `met`, the categories outside the domain met so far (d3's implicit
+    /// domain), where it goes when new; `unknown` instead when set. An
+    /// empty category (a row without one) has none.
+    pub(crate) fn color(&self, met: &mut Vec<SharedString>, category: &str) -> Option<Hsla> {
+        if category.is_empty() || self.range.is_empty() {
+            return None;
+        }
+        let mut known = 0;
+        for (i, d) in self.domain.iter().enumerate() {
+            if self.domain[..i].contains(d) {
+                continue;
+            }
+            if d == category {
+                return Some(self.range[known % self.range.len()]);
+            }
+            known += 1;
+        }
+        if let Some(unknown) = self.unknown {
+            return Some(unknown);
+        }
+        let at = match met.iter().position(|m| m == category) {
+            Some(at) => at,
+            None => {
+                met.push(SharedString::from(category.to_owned()));
+                met.len() - 1
+            }
+        };
+        Some(self.range[(known + at) % self.range.len()])
+    }
+}
+
+impl JsValue for OrdinalScale {
+    fn ts_type(types: &mut TsTypes) -> String {
+        types.declare("OrdinalScale", |_| {
+            "/** The colors of a `Plot`'s categories, as d3's `scaleOrdinal`: the `domain`'s categories in order take the `range`'s colors in order (CSS colors), the range repeating over a longer domain. A category outside the domain takes `unknown`; without one, it joins the domain the first time a mark meets it and takes the next color. A mark's `color` names each row's category. */\nexport type OrdinalScale = { type: \"ordinal\"; domain?: string[]; range: string[]; unknown?: string };\n".to_owned()
+        })
+    }
+
+    fn from_js(value: JsIn<'_>) -> Result<Self, PropError> {
+        let kind = value.field("type")?;
+        if kind.get().as_string().as_deref() != Some("ordinal") {
+            return Err(value.expected("`{ type: \"ordinal\", range }`"));
+        }
+        let domain = value.field("domain")?;
+        let domain = match domain.get().is_nullish() {
+            true => Vec::new(),
+            false => Vec::<SharedString>::from_js(domain.get())?,
+        };
+        let range = value.field("range")?;
+        let range = Vec::<Color>::from_js(range.get())?;
+        let unknown = value.field("unknown")?;
+        let unknown = match unknown.get().is_nullish() {
+            true => None,
+            false => Some(Color::from_js(unknown.get())?.into()),
+        };
+        Ok(OrdinalScale {
+            domain,
+            range: range.into_iter().map(Hsla::from).collect(),
+            unknown,
+        })
+    }
+
+    fn to_js<'a>(&self, host: &'a dyn JsHost) -> Result<JsOwned<'a>, PropError> {
+        let object = JsOwned::new(host, host.new_object()?);
+        let raw = object.get().raw();
+        host.set_field(raw, "type", host.new_string("ordinal")?)?;
+        let domain = self.domain.to_js(host)?;
+        host.set_field(raw, "domain", domain.into_raw())?;
+        let range: Vec<Color> = self.range.iter().map(|&c| c.into()).collect();
+        host.set_field(raw, "range", range.to_js(host)?.into_raw())?;
+        if let Some(unknown) = self.unknown {
+            let unknown = Color::from(unknown).to_js(host)?;
+            host.set_field(raw, "unknown", unknown.into_raw())?;
+        }
+        Ok(object)
+    }
 }
 
 #[cfg(test)]
@@ -507,5 +709,98 @@ mod tests {
         let end = gapped.start(2).unwrap() + gapped.width();
         assert!((end - 30.0).abs() < 1e-4, "{end}");
         assert!(gapped.start(1).unwrap() - gapped.width() > 0.0);
+    }
+
+    fn colors(scale: &OrdinalScale, met: &mut Vec<SharedString>, of: &[&str]) -> Vec<Option<Hsla>> {
+        of.iter().map(|c| scale.color(met, c)).collect()
+    }
+
+    /// d3's `scaleOrdinal` (and `gpui-base`'s `ScaleOrdinal` tests,
+    /// `scale/ordinal.rs:70-104`): the domain's order, the range repeating
+    /// over a longer domain, a category written twice keeping its first
+    /// place, and no color without a range or for a row without a
+    /// category.
+    #[test]
+    fn an_ordinal_scale_maps_its_domain_in_order_and_repeats_its_range() {
+        let [red, green, blue] = [0xff0000ff, 0x00ff00ff, 0x0000ffff].map(|c| Hsla::from(Color(c)));
+        let scale = OrdinalScale::new(["a", "b", "c", "d", "e"], [red, green, blue]);
+        let mut met = Vec::new();
+        assert_eq!(
+            colors(&scale, &mut met, &["a", "b", "c", "d", "e"]),
+            [Some(red), Some(green), Some(blue), Some(red), Some(green)]
+        );
+        // The domain's order, not the rows'.
+        assert_eq!(
+            colors(&scale, &mut met, &["e", "a"]),
+            [Some(green), Some(red)]
+        );
+        assert!(met.is_empty());
+        let twice = OrdinalScale::new(["a", "a", "b"], [red, green, blue]);
+        assert_eq!(colors(&twice, &mut met, &["b"]), [Some(green)]);
+        assert_eq!(colors(&scale, &mut met, &[""]), [None]);
+        let empty = OrdinalScale::new(["a"], Vec::<Hsla>::new());
+        assert_eq!(colors(&empty, &mut met, &["a", "z"]), [None, None]);
+        assert!(met.is_empty());
+    }
+
+    /// A category outside the domain: `unknown` where it is set
+    /// (`ScaleOrdinal::unknown`); otherwise d3's implicit domain, the
+    /// category added after the domain the first time it is met, taking
+    /// the next color and keeping it.
+    #[test]
+    fn an_ordinal_scale_takes_unknown_categories_as_d3_does() {
+        let [red, green, blue, gray] =
+            [0xff0000ff, 0x00ff00ff, 0x0000ffff, 0x999999ff].map(|c| Hsla::from(Color(c)));
+        let fixed = OrdinalScale::new(["a"], [red, green, blue]).unknown(gray);
+        let mut met = Vec::new();
+        assert_eq!(
+            colors(&fixed, &mut met, &["z", "a", "y"]),
+            [Some(gray), Some(red), Some(gray)]
+        );
+        assert!(met.is_empty());
+
+        let implicit = OrdinalScale::new(["a"], [red, green, blue]);
+        assert_eq!(
+            colors(&implicit, &mut met, &["z", "a", "y", "z", "x"]),
+            [Some(green), Some(red), Some(blue), Some(green), Some(red)]
+        );
+        assert_eq!(met, ["z", "y", "x"].map(SharedString::from));
+        // Met before, the same color, whatever comes first now.
+        assert_eq!(
+            colors(&implicit, &mut met, &["x", "y"]),
+            [Some(red), Some(blue)]
+        );
+        // No domain at all: the order the categories are met in.
+        let mut met = Vec::new();
+        let none = OrdinalScale::new(Vec::<SharedString>::new(), [red, green]);
+        assert_eq!(
+            colors(&none, &mut met, &["q", "p", "q", "r"]),
+            [Some(red), Some(green), Some(red), Some(red)]
+        );
+    }
+
+    /// A reversed band scale (`reverse`, d3's range written backwards):
+    /// the first band at the end of the range, the same widths and gaps,
+    /// and the values between bands running back with them.
+    #[test]
+    fn a_reversed_band_scale_starts_at_the_end() {
+        let reversed = band(3, [0.0, 90.0], |o| o.reverse = true);
+        assert_eq!(reversed.start(0), Some(60.0));
+        assert_eq!(reversed.start(2), Some(0.0));
+        assert_eq!(reversed.center(0), Some(75.0));
+        assert_eq!(reversed.tick(0.5), Some(60.0));
+        assert_eq!(reversed.tick(2.0), Some(15.0));
+        assert!(AxisMap::Band(reversed).backward());
+        // Narrowed bands stay in the middle of their places.
+        let capped = band(2, [0.0, 200.0], |o| {
+            o.max_band_width = Some(Points(30.0));
+            o.reverse = true;
+        });
+        assert_eq!(capped.start(0), Some(135.0));
+        // A reversed range of the other scales runs back too.
+        let x = Linear::new([0.0, 100.0], [200.0, 0.0]);
+        assert!(AxisMap::Linear(x).backward());
+        assert!(!AxisMap::Linear(Linear::new([0.0, 100.0], [0.0, 200.0])).backward());
+        assert_eq!(point_tick(0, 3, [100.0, 0.0]), Some(100.0));
     }
 }

@@ -1635,6 +1635,27 @@ pub extern "C" fn nsh_scroll(id: u32, x: f32, y: f32, applied: u32) -> f64 {
     })
 }
 
+/// The text of multiline input `id` scrolled to `y`, or its height
+/// (`content`) or its viewport's changed, while a built-in bar takes the
+/// place of its indicator.
+#[unsafe(no_mangle)]
+pub extern "C" fn nsh_input_scroll(
+    id: u32,
+    y: f32,
+    width: f32,
+    content: f32,
+    viewport: f32,
+) -> f64 {
+    send(|app| {
+        app.control.input_scroll(
+            id,
+            point(px(0.0), px(y)),
+            size(px(width), px(content.max(viewport))),
+            size(px(width), px(viewport)),
+        );
+    })
+}
+
 /// Vertical scroll view `id` is pulled `distance` past its top: its pull
 /// value (`pullValue`) follows.
 #[unsafe(no_mangle)]

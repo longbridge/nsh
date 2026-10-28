@@ -1589,6 +1589,33 @@ extern "system" fn Java_com_longbridge_nsh_Native_scroll(
     floats(&env, &ui.outputs())
 }
 
+/// A multiline input's text scrolled, or its text or size changed, while a
+/// built-in bar replaces its indicator (`InputConfig::replaced`): the engine
+/// learns the offset, the text's size and the viewport's (points).
+#[unsafe(no_mangle)]
+extern "system" fn Java_com_longbridge_nsh_Native_inputScroll(
+    _: JNIEnv<'_>,
+    _: JClass<'_>,
+    handle: jlong,
+    id: jint,
+    y: jfloat,
+    content_width: jfloat,
+    content_height: jfloat,
+    width: jfloat,
+    height: jfloat,
+) {
+    // SAFETY: Java passes its live handle.
+    let host = unsafe { host(handle) };
+    if let Some(control) = host.control() {
+        control.input_scroll(
+            id as NodeId,
+            point(px(0.0), px(y)),
+            size(px(content_width), px(content_height)),
+            size(px(width), px(height)),
+        );
+    }
+}
+
 /// A vertical scroll view is pulled `distance` (points) past its top: its
 /// pull value learns it. Returns bound values when one changed, else null.
 #[unsafe(no_mangle)]

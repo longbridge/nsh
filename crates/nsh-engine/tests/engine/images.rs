@@ -205,7 +205,8 @@ const shown = signal("waiting");
 setTimeout(async () => {
   const size = await Image.getSize(icon);
   const plain = await Image.getSize({ url: "asset:/single.png", size: { width: 999, height: 999 } });
-  const ready = await Image.prefetch(icon);
+  // Resolves once loaded (rejects with the error when it cannot).
+  const ready = await Image.prefetch(icon).then(() => true, () => false);
   shown.set(`${size.width}x${size.height} ${plain.width}x${plain.height} ${ready}`);
 }, 0);
 

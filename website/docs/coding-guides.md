@@ -913,7 +913,8 @@ as they are. Apply the same discipline to what an app or a component library exp
 props and events, its crate's exports, the functions a host app's native components and modules receive):
 
 - inputs gain optional members only; types only widen; defaults and behavior stay (new behavior is opt-in);
-- options are one object (`scrollTo({ x, y, animated })`), never a third positional parameter;
+- a function whose parameters may grow takes its options as one object (`scrollTo({ x, y, animated })`), never a
+  further positional parameter; parameters that never will, such as a range's start and end, stay positional;
 - a mode is a string union, which can gain values, rather than a boolean that later needs a third state;
 - a value has one type: `version: string`, never `string | number`;
 - what a function returns is an object, which can gain a field, rather than a tuple or a bare value;

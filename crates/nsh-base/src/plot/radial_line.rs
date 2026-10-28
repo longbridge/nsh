@@ -21,7 +21,7 @@ use super::{
     PlotContext, STROKE_ROOM, dot_anchor, layer,
     line::Curve,
     mark_canvas, mark_canvas_with,
-    pie::{Ring, Update, Var},
+    pie::{Pose, Radius, Ring, Update, Var},
     scale::{AxisMap, Linear, extent},
     series::{HoverDot, Mark, values},
 };
@@ -78,8 +78,43 @@ struct Spoke {
 struct Polar {
     spokes: Shared<[Spoke]>,
     domain: Option<[f64; 2]>,
-    inner: DefiniteLength,
-    outer: DefiniteLength,
+    inner: Radius,
+    outer: Radius,
+}
+
+/// `t` of the way from `a` to `b`, `b` without `a`.
+fn lerp_domain(a: Option<[f64; 2]>, b: Option<[f64; 2]>, t: f32) -> Option<[f64; 2]> {
+    let t = f64::from(t);
+    match (a, b) {
+        (Some([a0, a1]), Some([b0, b1])) => Some([a0 + (b0 - a0) * t, a1 + (b1 - a1) * t]),
+        _ => b,
+    }
+}
+
+impl Pose for Polar {
+    /// Each row's angle and value `t` of the way to `to`'s (a row new in
+    /// `to` where `to` has it), the domain and the radii too: where the
+    /// line is drawn when a change stops a move part way.
+    fn lerp(&self, to: &Self, t: f32) -> Self {
+        let spokes = to
+            .spokes
+            .iter()
+            .map(|s| match self.spokes.iter().find(|f| f.row == s.row) {
+                Some(f) => Spoke {
+                    row: s.row,
+                    angle: f.angle + (s.angle - f.angle) * t,
+                    value: f.value + (s.value - f.value) * f64::from(t),
+                },
+                None => *s,
+            })
+            .collect();
+        Polar {
+            spokes,
+            domain: lerp_domain(self.domain, to.domain, t),
+            inner: self.inner.lerp(to.inner, t),
+            outer: self.outer.lerp(to.outer, t),
+        }
+    }
 }
 
 impl Polar {
@@ -495,8 +530,8 @@ pub fn RadialLine(props: RadialLineProps, _cx: Scope<NoEvent>) -> impl IntoEleme
         Polar {
             spokes,
             domain: domain.get(),
-            inner: inner.get(),
-            outer: outer.get(),
+            inner: Radius::of(inner.get()),
+            outer: Radius::of(outer.get()),
         }
     });
     // Its values, and the center's 0, in the y domain; its hover dot is
@@ -514,8 +549,10 @@ pub fn RadialLine(props: RadialLineProps, _cx: Scope<NoEvent>) -> impl IntoEleme
         dot_y: animated_value(0.0),
         dot: None,
     });
-    let rest = computed(move || polar.with(|p| p.frame(plot.size.get())));
+    // Where it draws at rest: the pose its motion moves to, which holds
+    // still while the animator tells how far a stopped move had gone.
     let update = Update::new(plot, move || polar.get());
+    let rest = computed(move || update.shown().0.frame(plot.size.get()));
     plot.add_hit(
         move |at| rest.with_untracked(|f| f.row_at(at)),
         move |row| rest.with_untracked(|f| f.point_of(row)),
@@ -526,7 +563,7 @@ pub fn RadialLine(props: RadialLineProps, _cx: Scope<NoEvent>) -> impl IntoEleme
         if plot.appearing.get() {
             return Some((rest.grown(), plot.appear.progress()));
         }
-        let (before, t) = update.from()?;
+        let (before, t) = update.shown().1?;
         Some((before.frame(plot.size.get()).toward(rest), t))
     };
     // Its outlines now: at rest, or the two a motion moves between, with
@@ -646,7 +683,7 @@ impl Dot {
             let appearing = plot.appearing.get();
             let grown = appearing.then(|| rest.with(|f| f.grown().point_of(row)));
             off(grown.flatten(), (ax, ay));
-            let before = update.from().and_then(|(before, _)| {
+            let before = update.shown().1.and_then(|(before, _)| {
                 let size = plot.size.get();
                 rest.with(|f| before.frame(size).toward(f).point_of(row))
             });
@@ -763,8 +800,18 @@ pub struct RadialGridProps {
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct GridShape {
     domain: Option<[f64; 2]>,
-    inner: DefiniteLength,
-    outer: DefiniteLength,
+    inner: Radius,
+    outer: Radius,
+}
+
+impl Pose for GridShape {
+    fn lerp(&self, to: &Self, t: f32) -> Self {
+        GridShape {
+            domain: lerp_domain(self.domain, to.domain, t),
+            inner: self.inner.lerp(to.inner, t),
+            outer: self.outer.lerp(to.outer, t),
+        }
+    }
 }
 
 /// A radar's grid in a [`Plot`](super::Plot) (`gpui-component`'s radar
@@ -789,12 +836,16 @@ pub fn RadialGrid(props: RadialGridProps, _cx: Scope<NoEvent>) -> impl IntoEleme
     let domain = radial_domain(plot);
     let shape = computed(move || GridShape {
         domain: domain.get(),
-        inner: inner.get(),
-        outer: outer.get(),
+        inner: Radius::of(inner.get()),
+        outer: Radius::of(outer.get()),
     });
     let update = Update::new(plot, move || shape.get());
     let bleed = move || {
-        let ring = Ring::of(plot.size.get(), inner.get(), outer.get());
+        let ring = Ring::of(
+            plot.size.get(),
+            Radius::of(inner.get()),
+            Radius::of(outer.get()),
+        );
         let half = plot.size.with(|s| s.width.0.min(s.height.0)) / 2.0;
         STROKE_ROOM + (ring.outer.max(ring.inner) - half).max(0.0).ceil()
     };
@@ -805,11 +856,11 @@ pub fn RadialGrid(props: RadialGridProps, _cx: Scope<NoEvent>) -> impl IntoEleme
             .line_dash_from_view()
             .begin_path();
         let size = plot.size.get();
-        let to = shape.get();
+        // What it draws: the shape it moves to (still while the animator
+        // tells how far a stopped move had gone) and the one it moves from.
+        let (to, from) = update.shown();
         let ring = Ring::of(size, to.inner, to.outer);
-        let from = update
-            .from()
-            .map(|(f, t)| (f, Ring::of(size, f.inner, f.outer), t));
+        let from = from.map(|(f, t)| (f, Ring::of(size, f.inner, f.outer), t));
         let t = from.map(|(.., t)| t);
         let map = |s: GridShape, r: Ring| s.domain.map(|d| Linear::new(d, [r.inner, r.outer]));
         let (to_map, from_map) = (map(to, ring), from.and_then(|(f, r, _)| map(f, r)));

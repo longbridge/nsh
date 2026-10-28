@@ -128,7 +128,7 @@ impl<M: TextEngine> Core<M> {
     }
 
     /// The appearance the app asks for (`nsh.json` `"appearance"`, TS
-    /// `setColorScheme`, [`crate::element::ambient::set_color_scheme`]): what
+    /// `setColorScheme`, [`crate::element::set_color_scheme`]): what
     /// `dark:` variants and the components' theme follow in place of the
     /// system's; the platform applies it to its own controls
     /// ([`MountItem::Appearance`]).
@@ -863,9 +863,7 @@ impl<M: TextEngine> Core<M> {
             .children
             .iter()
             .copied()
-            .filter(|&c| {
-                self.nodes[c as usize].kind != Kind::RawText && !self.is_tooltip_overlay(c)
-            })
+            .filter(|&c| self.is_element_child(c))
             .collect();
         let i = siblings.iter().position(|&c| c == key).unwrap_or(0);
         let n = siblings.len();
@@ -925,9 +923,10 @@ impl<M: TextEngine> Core<M> {
     }
 
     /// A child that counts among its siblings (`:last-child`, `first:`):
-    /// not a raw text, not a tooltip's overlay.
+    /// not a raw text, a tooltip's overlay or a scroll view's built-in bar.
     fn is_element_child(&self, key: Key) -> bool {
-        self.nodes[key as usize].kind != Kind::RawText && !self.is_tooltip_overlay(key)
+        let node = &self.nodes[key as usize];
+        node.kind != Kind::RawText && !node.decoration && !self.is_tooltip_overlay(key)
     }
 
     /// `parent`'s children changed (`moved` joined it, or one left): the

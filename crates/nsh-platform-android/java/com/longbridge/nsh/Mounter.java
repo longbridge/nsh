@@ -1896,8 +1896,10 @@ final class Mounter {
         boolean inputRtl = b.getInt() != 0;
         boolean caretHidden = b.getInt() != 0;
         boolean pasteInserts = b.getInt() != 0;
+        boolean scrollbarVisible = b.getInt() != 0, replaced = b.getInt() != 0;
         if (!(v instanceof InputBox)) return;
         ((InputBox) v).pasteInserts = pasteInserts;
+        ((InputBox) v).setScrollbar(scrollbarVisible, replaced);
         ((InputBox) v).edit.setCursorVisible(!caretHidden);
         ((InputBox) v).setAutofill(autofill);
         ((InputBox) v).edit.setLayoutDirection(inputRtl ? View.LAYOUT_DIRECTION_RTL : View.LAYOUT_DIRECTION_LTR);
@@ -1930,6 +1932,7 @@ final class Mounter {
                 float x = b.getFloat(), y = b.getFloat();
                 boolean animated = b.getInt() != 0;
                 if (v instanceof ScrollBox) ((ScrollBox) v).scrollToPx(px(x), px(y), animated);
+                else if (v instanceof InputBox) ((InputBox) v).scrollTextTo(y);
                 break;
             }
             case 3: host.exitApp(); break;
@@ -2313,6 +2316,10 @@ final class Mounter {
 
     void scroll(int id, float x, float y, int applied) {
         outputs(Native.scroll(handle(), id, x, y, applied));
+    }
+
+    void inputScroll(int id, float y, float contentWidth, float contentHeight, float width, float height) {
+        Native.inputScroll(handle(), id, y, contentWidth, contentHeight, width, height);
     }
 
     void pull(int id, float distance) {

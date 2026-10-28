@@ -410,7 +410,9 @@ impl ListConfig {
             out.push(Prop::Inverted(self.inverted.unwrap_or(false)));
         }
         if self.scrollbar_visible != old.scrollbar_visible {
-            out.push(Prop::Scrollbar(self.scrollbar_visible.unwrap_or(true)));
+            out.push(Prop::Scrollbar(
+                self.scrollbar_visible.unwrap_or(true).into(),
+            ));
         }
         if self.content != old.content {
             out.push(Prop::ListContent(self.content.unwrap_or_default()));
