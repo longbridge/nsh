@@ -96,3 +96,18 @@ pub(crate) extern "C" fn nsh_browser_test_file_drop_events() -> u32 {
         .unwrap()
         .into_raw()
 }
+
+/// A video's `onLoad` keeps the `{ duration, size }` of the native JS host.
+#[unsafe(no_mangle)]
+pub(crate) extern "C" fn nsh_browser_test_video_load_event() -> u32 {
+    use nsh_core::PayloadValue;
+
+    use super::events;
+    events::video_load(&[
+        ("duration", PayloadValue::Number(12.5)),
+        ("width", PayloadValue::Number(1920.0)),
+        ("height", PayloadValue::Number(1080.0)),
+    ])
+    .unwrap()
+    .into_raw()
+}
