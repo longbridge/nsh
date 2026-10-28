@@ -1,4 +1,4 @@
-import { Canvas, type CanvasRenderingContext2D } from "nsh";
+import { Canvas, Image, type CanvasRenderingContext2D } from "nsh";
 
 /** Line glyphs drawn in a 20 × 20 box with the tint as stroke. */
 export type IconName =
@@ -580,4 +580,16 @@ export function Icon(props: { name: IconName; size?: number; tint: string; weigh
       }}
     />
   );
+}
+
+/** The check mark as an SVG in one color, recolored by `tintColor`: the same stroke as the `check` glyph. */
+const checkSvg = (weight: number) =>
+  `data:image/svg+xml,${encodeURIComponent(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 20 20"><path d="M4.5 10.5 8.5 14 15.5 6" fill="none" stroke="#000" stroke-width="${weight}" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+  )}`;
+
+/** A check mark drawn as SVG, in `tint`; `weight` is the stroke in its 20-unit box (2 by default). */
+export function CheckMark(props: { size?: number; tint: string; weight?: number }) {
+  const size = props.size ?? 20;
+  return <Image src={checkSvg(props.weight ?? 2)} style={{ pointerEvents: "none", width: size, height: size, tintColor: props.tint }} />;
 }
