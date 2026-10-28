@@ -6082,12 +6082,13 @@ fn base_plot_sankey_moves_to_new_flows() {
             "{got:?} is not {want:?}"
         )
     };
-    let rect = |id: u32| {
-        drawing(id).ops.iter().find_map(|op| match op {
+    let rect_of = |d: &nsh_core::canvas::Drawing| {
+        d.ops.iter().find_map(|op| match op {
             CanvasOp::Path(PathOp::Rect(r)) => Some(*r),
             _ => None,
         })
     };
+    let rect = |id: u32| rect_of(drawing(id));
     let ends = |id: u32| {
         let ops = &drawing(id).ops;
         let line = ops.iter().find_map(|op| match op {
@@ -6113,9 +6114,10 @@ fn base_plot_sankey_moves_to_new_flows() {
     near(at(to_b, t_bottom), [72.0, 48.0, 24.0]);
     near(at(to_b, s_bottom), [76.0, 52.0, 28.0]);
     // Its node `c`: from 80, 24 tall to 32, 72 tall.
+    // (Where it was before the change: its drawing then.)
     let c = before
         .iter()
-        .find(|(id, _)| rect(*id).is_some_and(|r| r[1] == Num::Const(80.0)))
+        .find(|(_, d)| rect_of(d).is_some_and(|r| r[1] == Num::Const(80.0)))
         .map(|(id, _)| *id)
         .expect("node c");
     let r = rect(c).unwrap();
@@ -6143,6 +6145,105 @@ fn base_plot_sankey_moves_to_new_flows() {
     let mut all = until(&rx, |b| shows(b, "late"));
     all.extend(until(&rx, |_| false));
     assert!(!all.iter().any(updates));
+}
+
+const BASE_PLOT_SANKEY_RETARGET: &str = r##"import { mount, signal, Text, View } from "nsh";
+import { Plot, Sankey } from "nsh/base/plot";
+
+function App() {
+  const step = signal(0);
+  setTimeout(() => step.set(1), 50);
+  setTimeout(() => step.set(2), 150);
+  const flows = [
+    [36, 12],
+    [12, 36],
+    [30, 18],
+  ];
+  return (
+    <View>
+      <Plot data={[{ n: 0 }, { n: 1 }, { n: 2 }]} motion={{ update: { duration: 1000 } }} style={{ width: 200, height: 104 }}>
+        <Sankey
+          links={[
+            { source: 0, target: 1, value: flows[step()][0] },
+            { source: 0, target: 2, value: flows[step()][1] },
+          ]}
+          nodeWidth={10}
+          iterations={0}
+        />
+      </Plot>
+      <Text>{`step ${step()}`}</Text>
+    </View>
+  );
+}
+
+mount(App);
+"##;
+
+/// New flows while a `Sankey` moves (`motion.update`): the move stops, the
+/// animator is asked how far it had gone, and the next move starts from
+/// the layout drawn there, not from the first move's target, as a pie's
+/// does.
+#[test]
+fn base_plot_sankey_moves_on_from_where_it_is_drawn() {
+    use nsh_core::{
+        animation::{AnimationOp, Finished},
+        canvas::{CanvasOp, Num, PathOp},
+    };
+    let near = |a: f32, b: f32| (a - b).abs() < 1e-3;
+    let reads = |all: &[MountBatch]| -> Vec<u32> {
+        all.iter()
+            .flat_map(|b| b.items.iter())
+            .filter_map(|i| match i {
+                MountItem::Animation(AnimationOp::Read { request, .. }) => Some(*request),
+                _ => None,
+            })
+            .collect()
+    };
+    let (engine, rx) = start(BASE_PLOT_SANKEY_RETARGET);
+    let mut all = until(&rx, |b| shows(b, "step 2"));
+    if reads(&all).is_empty() {
+        all.extend(until(&rx, |b| {
+            b.items
+                .iter()
+                .any(|i| matches!(i, MountItem::Animation(AnimationOp::Read { .. })))
+        }));
+    }
+    // One move, and it asks where it is.
+    let asked = reads(&all);
+    assert_eq!(asked.len(), 1, "{asked:?}");
+    // Halfway, as the platform answers: node `c` drawn from 80, 24 tall
+    // halfway to 32, 72 tall, so at 56, 48 tall.
+    engine.control().animations_finished(
+        asked
+            .iter()
+            .map(|&request| Finished {
+                animation: request,
+                finished: true,
+                value: Some(0.5),
+            })
+            .collect(),
+    );
+    let answered = all.len();
+    all.extend(until(&rx, |_| false));
+    // From there, not from the first move's target (32, 72 tall), to the
+    // last flows' 68, 36 tall.
+    let c = plot_drawings(&all[answered..])
+        .into_iter()
+        .find_map(|(id, d)| {
+            d.ops.iter().find_map(|op| match op {
+                CanvasOp::Path(PathOp::Rect([_, Num::Slot(y), _, Num::Slot(h)])) => {
+                    Some((id, *y, *h))
+                }
+                _ => None,
+            })
+        });
+    let Some((c, y, h)) = c else {
+        panic!("node c, moving: {:?}", plot_drawings(&all[answered..]))
+    };
+    let ys = slot_at(&all, c, y, &[1.0, 3.0]);
+    assert!(near(ys[0], 56.0) && near(ys[1], 68.0), "{ys:?}");
+    let hs = slot_at(&all, c, h, &[1.0, 3.0]);
+    assert!(near(hs[0], 48.0) && near(hs[1], 36.0), "{hs:?}");
 }
 
 const BASE_PLOT_ARC_TWEEN: &str = r##"import { mount, signal, Text, View } from "nsh";

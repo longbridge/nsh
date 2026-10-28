@@ -4,6 +4,7 @@
 
 mod label;
 mod layout;
+mod pose;
 
 use std::{fmt, rc::Rc, sync::Arc as Shared};
 
@@ -18,7 +19,10 @@ use nsh_core::{
     prelude::*,
 };
 
-use self::layout::{Error, Generator, Graph, Link, LinkLayout, NodeLayout, Ribbon};
+use self::{
+    layout::{Error, Generator, Graph, Link, LinkLayout, NodeLayout, Ribbon},
+    pose::{Moves, Pose},
+};
 use super::{
     PlotContext, STROKE_ROOM,
     bar::texts,
@@ -406,56 +410,6 @@ fn throughput(count: usize, links: &[Link]) -> Vec<f64> {
     into.iter().zip(&out).map(|(a, b)| a.max(*b)).collect()
 }
 
-/// A sankey's moves to new flows (`motion.update`, d3's transitions of
-/// a sankey's attributes): the layout it moves from while one runs, and
-/// how far it has gone, on the platform's animator. Every number it draws
-/// is linear in the layout's, so each moves on the animator from its old
-/// value to its new one. The plot's size changing moves nothing.
-#[derive(Clone, Copy)]
-struct Moves {
-    from: Signal<Option<Shared<Graph>>>,
-    progress: AnimatedValue,
-}
-
-impl Moves {
-    fn new(plot: PlotContext, graph: Memo<Option<Shared<Graph>>>) -> Self {
-        let from = signal(None::<Shared<Graph>>);
-        let progress = animated_value(1.0);
-        let last = stored(None::<(Shared<Graph>, Size<Points>)>);
-        effect(move || {
-            let to = graph.get();
-            let size = plot.size.get_untracked();
-            let before = last.replace(to.clone().map(|g| (g, size)));
-            let (Some(to), Some((before, was))) = (to, before) else {
-                from.set(None);
-                return;
-            };
-            if before == to {
-                return;
-            }
-            match update_timing(plot).filter(|_| was == size) {
-                Some(timing) => {
-                    from.set(Some(before));
-                    progress.set(0.0);
-                    spawn(async move {
-                        // Stopped by a newer change: that one ends it.
-                        if progress.timing_with(1.0, timing).await {
-                            from.set(None);
-                        }
-                    });
-                }
-                None => from.set(None),
-            }
-        });
-        Moves { from, progress }
-    }
-
-    /// The layout it moves from, and how far it has gone, while it runs.
-    fn from(&self) -> Option<(Shared<Graph>, AnimatedValue)> {
-        Some((self.from.get()?, self.progress))
-    }
-}
-
 /// The plot's `motion.update`, unless it moves at once (none, no
 /// duration, or reduced motion).
 fn update_timing(plot: PlotContext) -> Option<Timing> {
@@ -510,29 +464,12 @@ fn ribbon_box(r: &Ribbon) -> Bounds<Points> {
     )
 }
 
-/// Link `key`'s ribbon in the layout, and where it moves from while an
-/// update runs: its ribbon in the layout before, or for a link new to it
-/// the same ribbon at no width.
-fn ribbons(
-    graph: Memo<Option<Shared<Graph>>>,
-    moves: Moves,
-    key: LinkKey,
-    min: f32,
-) -> Option<(Ribbon, Option<(Ribbon, AnimatedValue)>)> {
-    let (to, thin) = graph.with(|g| {
-        let g = g.as_ref()?;
-        let link = find(g, key)?;
-        let none = LinkLayout {
-            source_width: 0.0,
-            target_width: 0.0,
-            ..link.clone()
-        };
-        Some((Ribbon::of(g, link, min), Ribbon::of(g, &none, min)))
-    })?;
-    let from = moves.from().map(|(before, t)| {
-        let was = find(&before, key).map(|l| Ribbon::of(&before, l, min));
-        (was.unwrap_or(thin), t)
-    });
+/// Link `key`'s ribbon as drawn, and where it moves from while a move
+/// runs ([`Pose::ribbon_from`]).
+fn ribbons(moves: Moves, key: LinkKey) -> Option<(Ribbon, Option<(Ribbon, AnimatedValue)>)> {
+    let (pose, from) = moves.shown()?;
+    let to = pose.ribbon(key)?;
+    let from = from.map(|(f, t)| (f.ribbon_from(key, &to, pose.min()), t));
     Some((to, from))
 }
 
@@ -684,7 +621,9 @@ pub fn Sankey(props: SankeyProps, _cx: Scope<NoEvent>) -> impl IntoElement {
             }
         }
     });
-    let moves = Moves::new(plot, graph);
+    let min = move || min_link_width.get().0.max(0.0);
+    let pose = computed(move || graph.with(|g| g.as_ref().map(|g| Pose::of(g, min()))));
+    let moves = Moves::new(plot, pose);
     // The pointer over a node finds its row (`gpui-component`'s
     // `tooltip_state`); the keys go to the middle of each node with
     // something through it.
@@ -714,7 +653,6 @@ pub fn Sankey(props: SankeyProps, _cx: Scope<NoEvent>) -> impl IntoElement {
         })
     });
     let node_count = computed(move || graph.with(|g| g.as_ref().map_or(0, |g| g.nodes.len())));
-    let min = move || min_link_width.get().0.max(0.0);
     // A ribbon `minLinkWidth` thick on the extent's edge reaches past it
     // by half that.
     let bleed = move || STROKE_ROOM + (min() / 2.0).ceil();
@@ -779,7 +717,7 @@ pub fn Sankey(props: SankeyProps, _cx: Scope<NoEvent>) -> impl IntoElement {
                         Some(plot),
                         bleed,
                         move || nothing(Painter::new()),
-                        move |p, bleed| match ribbons(graph, moves, key, min()) {
+                        move |p, bleed| match ribbons(moves, key) {
                             Some((to, from)) => trace(plot.clip(p, bleed), &to, from)
                                 .fill_background_from_view(ribbon_box(&to)),
                             None => nothing(p),
@@ -803,7 +741,7 @@ pub fn Sankey(props: SankeyProps, _cx: Scope<NoEvent>) -> impl IntoElement {
                         false => SvgPaint::CurrentColor,
                     };
                     let p = painted(p, initial);
-                    match ribbons(graph, moves, key, min()) {
+                    match ribbons(moves, key) {
                         Some((to, from)) => trace(plot.clip(p, bleed), &to, from).fill().stroke(),
                         None => p,
                     }
@@ -825,19 +763,13 @@ pub fn Sankey(props: SankeyProps, _cx: Scope<NoEvent>) -> impl IntoElement {
                     || STROKE_ROOM,
                     move |p, bleed| {
                         let p = painted(p, SvgPaint::CurrentColor);
-                        let Some(to) = graph.with(|g| g.as_ref()?.nodes.get(i).map(node_rect))
-                        else {
+                        let Some((pose, from)) = moves.shown() else {
                             return p;
                         };
-                        let from = moves.from().map(|(before, t)| {
-                            let was = before.nodes.get(i).map(node_rect).unwrap_or_else(|| {
-                                Bounds::new(
-                                    point(to.origin.x, to.origin.y + to.size.height / 2.0),
-                                    size(to.size.width, px(0.0)),
-                                )
-                            });
-                            (was, t)
-                        });
+                        let Some(to) = pose.node(i).map(|n| n.rect) else {
+                            return p;
+                        };
+                        let from = from.map(|(f, t)| (f.node_from(i, to), t));
                         let mut p = plot.clip(p, bleed).begin_path();
                         let t = from.map(|f| f.1);
                         let a = from.map_or(to, |f| f.0);
@@ -865,7 +797,7 @@ pub fn Sankey(props: SankeyProps, _cx: Scope<NoEvent>) -> impl IntoElement {
             let values = label::values(move || plot.rows.get(), raw, move || value_label.get());
             label::labels(
                 plot,
-                graph,
+                moves,
                 node_count,
                 names,
                 values,

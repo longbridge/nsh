@@ -365,7 +365,7 @@ them; a label beside a node stays between the plot's top and bottom, and one pas
 app leaves around it (its margin). The `nodeLabel` part's padding is the gap to its node and its classes its text
 (`max-w-20 truncate` cuts a long name short); the labels fade in with the appear. When the app changes the flows, every
 node and ribbon moves from its old place to its new one with the plot's `motion.update`, its label with it: a node new
-to the flows grows from its middle, a link new to them from its least width, and the ones that go leave at once. Links
+to the flows grows from its middle, a link new to them from its least width, and the ones that go leave at once; a change while they move goes on from where they are drawn. Links
 are told apart by their source and target, so reordering `links` moves nothing.
 
 ```tsx

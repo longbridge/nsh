@@ -814,6 +814,23 @@ impl Ribbon {
     pub(super) fn mx(&self) -> f32 {
         (self.sx + self.tx) / 2.
     }
+
+    /// The same ribbon at its least width, `min`: each end around its
+    /// middle, as a link that carries nothing draws.
+    pub(super) fn thin(&self, min: f32) -> Self {
+        let half = min.max(0.) / 2.;
+        let (s, t) = (
+            (self.s_top + self.s_bottom) / 2.,
+            (self.t_top + self.t_bottom) / 2.,
+        );
+        Ribbon {
+            s_top: s - half,
+            s_bottom: s + half,
+            t_top: t - half,
+            t_bottom: t + half,
+            ..*self
+        }
+    }
 }
 
 #[cfg(test)]

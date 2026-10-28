@@ -13,18 +13,10 @@ use nsh_core::{
     prelude::*,
 };
 
-use super::{PlotContext, SankeyValueLabel, layout::Graph, update_timing};
-
-/// Where a node's label goes.
-#[derive(Debug, Clone, Copy, PartialEq)]
-enum Side {
-    /// Left of a node in the first column, at its middle.
-    Before,
-    /// Right of a node in the last column, at its middle.
-    After,
-    /// Centered above a node between them.
-    Above,
-}
+use super::{
+    PlotContext, SankeyValueLabel,
+    pose::{Moves, Side},
+};
 
 /// The app's styles of the labels.
 #[derive(Clone, Copy)]
@@ -82,7 +74,7 @@ pub(super) fn values(
 #[allow(clippy::too_many_arguments)]
 pub(super) fn labels(
     plot: PlotContext,
-    graph: Memo<Option<Shared<Graph>>>,
+    moves: Moves,
     count: Memo<usize>,
     names: Signal<Option<Shared<[SharedString]>>>,
     values: Signal<Option<Shared<[SharedString]>>>,
@@ -102,7 +94,7 @@ pub(super) fn labels(
                         .unwrap_or_default()
                 }
             };
-            label(plot, graph, i, parts, |content| {
+            label(plot, moves, i, parts, |content| {
                 content
                     .child(when(has_value, move || {
                         text(text_of(values))
@@ -117,51 +109,41 @@ pub(super) fn labels(
 }
 
 /// Node `i`'s label: its place beside the node, and the box `lines` fills.
-/// It rides its node through `motion.update`
-/// (from its old place, on the animator, with the node's timing) and fades
-/// in with the plot's appear. It takes no pointer.
+/// It rides its node through `motion.update` (from where it is drawn, on
+/// the animator, with the node's move) and fades in with the plot's
+/// appear. It takes no pointer.
 fn label(
     plot: PlotContext,
-    graph: Memo<Option<Shared<Graph>>>,
+    moves: Moves,
     i: usize,
     parts: Parts,
     lines: impl FnOnce(View) -> View,
 ) -> View {
     let place = computed(move || {
-        graph.with(|g| {
-            let g = g.as_ref()?;
-            let n = g.nodes.get(i)?;
-            let last = g.layer_count().saturating_sub(1);
-            let middle = (n.y0 + n.y1) / 2.0;
-            Some(match n.layer {
-                0 => (Side::Before, n.x0, middle),
-                l if l == last => (Side::After, n.x1, middle),
-                _ => (Side::Above, (n.x0 + n.x1) / 2.0, n.y0),
-            })
-        })
+        let (pose, _) = moves.shown()?;
+        let n = pose.node(i)?;
+        let (x, y) = n.side.anchor(n.rect);
+        Some((n.side, x, y))
     });
-    // How far it is from its place while it moves there.
-    let offset = point(animated_value(0.0), animated_value(0.0));
-    let last = stored(None::<((f32, f32), Size<Points>)>);
+    // How far it is from its place while its node moves there: the
+    // distance at the move's start, less as the move goes.
+    let away = point(animated_value(0.0), animated_value(0.0));
     effect(move || {
-        let Some((_, x, y)) = place.get() else {
-            return;
-        };
-        let size = plot.size.get_untracked();
-        let before = last.replace(Some(((x, y), size)));
-        match (before, update_timing(plot)) {
-            (Some(((bx, by), was)), Some(timing)) if was == size && (bx, by) != (x, y) => {
-                offset.x.set(bx - x);
-                offset.y.set(by - y);
-                drop(offset.x.timing_with(0.0, timing));
-                drop(offset.y.timing_with(0.0, timing));
-            }
-            _ => {
-                offset.x.set(0.0);
-                offset.y.set(0.0);
-            }
-        }
+        let (dx, dy) = moves
+            .shown()
+            .and_then(|(pose, from)| {
+                let n = pose.node(i)?;
+                let (from, _) = from?;
+                let (x, y) = n.side.anchor(from.node_from(i, n.rect));
+                let (to_x, to_y) = n.side.anchor(n.rect);
+                Some((x - to_x, y - to_y))
+            })
+            .unwrap_or((0.0, 0.0));
+        away.x.set(dx);
+        away.y.set(dy);
     });
+    let left = moves.progress().mul(-1.0).add(1.0);
+    let offset = point(left.mul(&away.x), left.mul(&away.y));
     let height = signal(0.0_f32);
     let side = move || place.get().map_or(Side::After, |p| p.0);
     let content = view()
