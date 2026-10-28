@@ -3330,6 +3330,85 @@ fn layout_animation_leads_the_batch() {
     );
 }
 
+/// A region (2) over a view after it (4) and a fixed board (6) whose row
+/// (8) changes too: what each frame item of `batch` animates with.
+fn scoped_layout_commit(root_too: bool) -> Vec<(NodeId, Option<crate::LayoutTransition>)> {
+    let mut c = core();
+    let mut ops = Vec::new();
+    for (id, parent, height) in [(2, 1, 10.0), (4, 1, 10.0), (6, 1, 40.0), (8, 6, 10.0)] {
+        ops.push(Op::Create { id, tag: Tag::View });
+        ops.push(style_op(id, &[("height", StyleValue::Number(height))]));
+        ops.push(Op::Insert {
+            parent,
+            child: id,
+            before: None,
+        });
+    }
+    apply(&mut c, ops);
+    c.commit().unwrap();
+    let spring = crate::LayoutTransition::new(crate::LayoutCurve::Spring { damping: 1.0 }, 265.0);
+    let mut ops = vec![
+        style_op(2, &[("height", StyleValue::Number(30.0))]),
+        style_op(8, &[("height", StyleValue::Number(20.0))]),
+        Op::Command {
+            id: 2,
+            command: Command::LayoutAnimation(crate::LayoutAnimation {
+                update: Some(spring),
+                ..Default::default()
+            }),
+        },
+    ];
+    if root_too {
+        ops.push(Op::Command {
+            id: 1,
+            command: Command::LayoutAnimation(crate::LayoutAnimation::EASE_IN_EASE_OUT),
+        });
+    }
+    apply(&mut c, ops);
+    let batch = c.commit().unwrap();
+    let mut current = None;
+    let mut frames = Vec::new();
+    for item in &batch.items {
+        match item {
+            MountItem::LayoutAnimation(a) => current = a.update,
+            MountItem::Frame { id, .. } => frames.push((*id, current)),
+            _ => {}
+        }
+    }
+    frames
+}
+
+#[test]
+fn a_layout_animation_on_a_node_animates_the_frames_it_moves() {
+    let frames = scoped_layout_commit(false);
+    let animated = |id| {
+        frames
+            .iter()
+            .find(|f| f.0 == id)
+            .unwrap_or_else(|| panic!("no frame of {id}: {frames:?}"))
+            .1
+            .is_some()
+    };
+    assert!(animated(2), "the region grows: {frames:?}");
+    assert!(animated(4), "what follows it moves along");
+    assert!(animated(6), "and the board after it");
+    assert!(
+        !animated(8),
+        "the board's row changed in the same commit, at once: {frames:?}"
+    );
+}
+
+#[test]
+fn a_layout_animation_on_the_root_still_animates_every_frame() {
+    let frames = scoped_layout_commit(true);
+    assert!(
+        frames
+            .iter()
+            .all(|f| f.1 == crate::LayoutAnimation::EASE_IN_EASE_OUT.update),
+        "{frames:?}"
+    );
+}
+
 #[test]
 fn view_props_and_gestures_reach_the_platform() {
     let mut c = core();

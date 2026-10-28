@@ -1,8 +1,10 @@
-//! `Collapsible`: with `reveal`, opening and closing animate the commit's
-//! frames natively (a clipped region springing between zero and the
-//! content's height), and the content stays in the tree until the region
-//! has closed; without it, or with reduced motion, the content comes and
-//! goes at once. On a manual clock, so time moves only when the test says.
+//! `Collapsible`: with `reveal`, opening and closing animate the frames the
+//! region moves natively (a clipped region springing between zero and the
+//! content's height, what follows it moving along; the commit's other
+//! frames change at once), and the content stays in the tree until the
+//! region has closed; without it, or with reduced motion, the content comes
+//! and goes at once. On a manual clock, so time moves only when the test
+//! says.
 
 use std::sync::{Arc, Mutex};
 
@@ -14,6 +16,9 @@ use nsh_testing::Headless;
 #[derive(Clone, PartialEq, Props)]
 struct HarnessProps {
     reveal: bool,
+    /// A board of fixed height after it, whose row the trigger's press
+    /// grows too (live data landing in the same commit).
+    board: bool,
 }
 
 /// A 20-point trigger over a 30-point content, in a region; a view after
@@ -21,6 +26,8 @@ struct HarnessProps {
 #[component]
 fn Harness(props: HarnessProps) -> impl IntoElement {
     let open = signal(false);
+    let tick = signal(false);
+    let board = props.board;
     view()
         .child(
             view().test_id("region").child(
@@ -32,12 +39,25 @@ fn Harness(props: HarnessProps) -> impl IntoElement {
                         view()
                             .test_id("trigger")
                             .h(px(20.0))
-                            .on_press(move || open.update(|o| *o = !*o))
+                            .on_press(move || {
+                                open.update(|o| *o = !*o);
+                                tick.update(|t| *t = !*t);
+                            })
                             .child(text("Summary")),
                     ),
             ),
         )
         .child(view().test_id("after").h(px(20.0)).child(text("After")))
+        .child(when(
+            move || board,
+            move || {
+                view().test_id("board").h(px(40.0)).child(
+                    view()
+                        .test_id("row")
+                        .style_with(move |s| s.h(px(if tick.get() { 20.0 } else { 10.0 }))),
+                )
+            },
+        ))
 }
 
 /// The items of each step's batches, by step.
@@ -49,10 +69,14 @@ struct App {
 }
 
 fn start(reveal: bool, reduce_motion: bool) -> App {
+    start_with(reveal, reduce_motion, false)
+}
+
+fn start_with(reveal: bool, reduce_motion: bool, board: bool) -> App {
     let mut config = EngineConfig {
         viewport: Size::new(px(390.0), px(844.0)),
         clock: nsh_engine::Clock::manual(std::time::SystemTime::now()),
-        ..EngineConfig::new(Root::new::<Harness>(move || HarnessProps { reveal }))
+        ..EngineConfig::new(Root::new::<Harness>(move || HarnessProps { reveal, board }))
     };
     config.environment.reduce_motion = reduce_motion;
     let mut app = Headless::start(config).expect("the engine starts");
@@ -74,6 +98,18 @@ impl App {
         self.seen.lock().unwrap().clear();
         self.app.press("id:trigger").unwrap();
         self.items()
+    }
+
+    /// Presses the trigger and returns the batches that came.
+    fn toggle_batches(&mut self) -> Vec<Vec<MountItem>> {
+        self.seen.lock().unwrap().clear();
+        self.app.press("id:trigger").unwrap();
+        self.seen
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|(_, items)| items.clone())
+            .collect()
     }
 
     /// The items that came since the last toggle.
@@ -139,6 +175,24 @@ fn detaches(items: &[MountItem], inserts: &[MountItem], id: NodeId) -> bool {
     items.iter().any(
         |i| matches!(i, MountItem::Remove { id } | MountItem::Delete { id } if chain.contains(id)),
     )
+}
+
+/// Whether the last frame `batches` give `id` animates (`None`: they give
+/// it none): the platforms animate a frame with the last layout animation
+/// before it in its batch.
+fn frame_motion(batches: &[Vec<MountItem>], id: NodeId) -> Option<bool> {
+    let mut found = None;
+    for items in batches {
+        let mut animated = false;
+        for item in items {
+            match item {
+                MountItem::LayoutAnimation(a) => animated = a.update.is_some(),
+                MountItem::Frame { id: at, .. } if *at == id => found = Some(animated),
+                _ => {}
+            }
+        }
+    }
+    found
 }
 
 fn any_layout_animation(items: &[MountItem]) -> bool {
@@ -223,6 +277,35 @@ fn a_reveal_keeps_the_content_until_the_region_has_closed() {
         !any_layout_animation(&removed),
         "taking it out animates nothing"
     );
+}
+
+#[test]
+fn a_reveal_animates_only_the_frames_it_moves() {
+    let mut app = start_with(true, false, true);
+    let first = app.items();
+    let (after, board, row) = (
+        app.id(&first, "after"),
+        app.id(&first, "board"),
+        app.id(&first, "row"),
+    );
+    for step in ["open", "close"] {
+        let batches = app.toggle_batches();
+        assert_eq!(
+            frame_motion(&batches, after),
+            Some(true),
+            "{step}: moved along"
+        );
+        assert_eq!(
+            frame_motion(&batches, board),
+            Some(true),
+            "{step}: moved along"
+        );
+        assert_eq!(
+            frame_motion(&batches, row),
+            Some(false),
+            "{step}: a row of the board changed in the same commit, at once: {batches:#?}"
+        );
+    }
 }
 
 #[test]

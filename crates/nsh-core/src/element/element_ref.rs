@@ -27,7 +27,7 @@ use super::{
     task::{Action, Executor},
 };
 use crate::{
-    Command, JsonValue, Measurement, NodeId,
+    Command, JsonValue, LayoutAnimation, LayoutTransition, Measurement, NodeId,
     geometry::{Percentage, Point, Points},
 };
 
@@ -134,6 +134,21 @@ impl ElementRef {
     /// `setAccessibilityFocus(ref)`).
     pub fn set_accessibility_focus(&self) {
         self.send(Command::AccessibilityFocus);
+    }
+
+    /// Animates with `transition` the frames that the element's change
+    /// moves in the next commit: its own and its subtree's, its siblings'
+    /// and those of its ancestors' siblings, which its size pushes along
+    /// (and the content of those that change size). The commit's other
+    /// frames change at once, as do its insertions and removals: a region
+    /// that grows (a reveal) springs, while a list updating in the same
+    /// commit elsewhere does not. [`super::animate_layout`] animates the
+    /// whole commit instead, and wins when both are asked for.
+    pub fn animate_layout(&self, transition: LayoutTransition) {
+        self.send(Command::LayoutAnimation(LayoutAnimation {
+            update: Some(transition),
+            ..LayoutAnimation::default()
+        }));
     }
 
     /// Selects `start..end` of an input (UTF-16 units; a caret when equal).

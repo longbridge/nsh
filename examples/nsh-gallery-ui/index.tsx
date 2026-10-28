@@ -1,7 +1,7 @@
 import type { JSX, ViewStyle } from "nsh";
 import { effect, Text, token, View } from "nsh";
 import { reduceMotion } from "nsh";
-import { type AnimatedValue, createAnimatedValue, LayoutAnimation } from "nsh";
+import { type AnimatedValue, createAnimatedValue } from "nsh";
 import { platform } from "nsh";
 import { keymap } from "nsh";
 import { Button as BaseButton, Sheet as BaseSheet, Switch, Tooltip } from "nsh/base";
@@ -374,7 +374,10 @@ const buttonSizes = pointer
  * fills it with that color instead. Under the pointer a raised button
  * lightens, pressed it sinks (an inner shade, and 3% smaller). `busy`
  * puts a spinner in the icon's place and takes no presses; a new icon or
- * the spinner grows in, and the width the new label needs is animated.
+ * the spinner grows in. Its width follows the label at once: a layout
+ * animation would move every frame of the update, app-wide (a list
+ * refreshing beside it too), so the motion stays on the glyph's own
+ * opacity and scale.
  */
 export function Button(props: {
   label: string;
@@ -398,8 +401,7 @@ export function Button(props: {
   // role); the look below is the gallery's own.
   const scale = createAnimatedValue(1);
   // The leading glyph (the icon, or the spinner while busy) grows in each
-  // time it changes, and the label's new width eases in with it; both at
-  // once with reduced motion.
+  // time it changes; at once with reduced motion.
   const glyph = createAnimatedValue(1);
   let shownGlyph = props.busy ? "busy" : props.icon;
   effect(() => {
@@ -407,7 +409,6 @@ export function Button(props: {
     if (next === shownGlyph) return;
     shownGlyph = next;
     if (reduceMotion()) return;
-    LayoutAnimation.configureNext({ duration: 220, update: { type: "spring", springDamping: 0.85 } });
     glyph.set(0);
     glyph.spring(1, motion.control);
   });

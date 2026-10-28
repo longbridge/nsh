@@ -247,16 +247,18 @@ pub struct AccordionPanelProps {
 /// region for screen readers, hidden from them while closed. Its `class`
 /// and `style` lay out and style it; with `reveal` it opens and closes
 /// with a springing height, run natively as a layout animation of the
-/// commit that opens or closes it (as `Collapsible`'s), so no JS runs
-/// while it moves.
+/// frames it moves in the commit that opens or closes it (as
+/// `Collapsible`'s), so no JS runs while it moves.
 #[component]
 pub fn AccordionPanel(props: AccordionPanelProps, _cx: Scope<NoEvent>) -> impl IntoElement {
     let open = use_context::<ItemContext>()
         .map(|item| item.open)
         .unwrap_or_else(|| computed(|| false));
     let (reveal, keep) = (props.reveal, props.keep_mounted);
-    let mounted = follow_open(open.into_reactive(), reveal.into_reactive());
+    let region = element_ref();
+    let mounted = follow_open(open.into_reactive(), reveal.into_reactive(), region);
     view()
+        .element_ref(&region)
         .role(AccessibilityRole::Region)
         .optional_label(props.accessibility_label)
         .accessibility_elements_hidden(move || !open.get())

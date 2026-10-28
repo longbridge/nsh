@@ -1,5 +1,6 @@
 mod classes;
 mod components;
+mod layout_scope;
 mod layout_tree;
 mod list;
 mod measure;
@@ -1004,6 +1005,11 @@ pub struct Core<M: TextEngine> {
     commands: Vec<(NodeId, Command)>,
     /// Animates the layout changes of the next commit.
     layout_animation: Option<LayoutAnimation>,
+    /// Nodes whose change animates the frames it moves in the next commit
+    /// (`layout_scope.rs`).
+    scoped_layout: Vec<(NodeId, crate::LayoutTransition)>,
+    /// Nodes that changed size while `scoped_layout` waits.
+    resized: Vec<Key>,
     /// The nodes whose padding or margin uses `env()` (`Node::env`).
     env_styled: rustc_hash::FxHashSet<NodeId>,
     /// Scratch of [`Core::sync_env`].
@@ -1143,6 +1149,8 @@ impl<M: TextEngine> Core<M> {
             batches: 0,
             commands: Vec::new(),
             layout_animation: None,
+            scoped_layout: Vec::new(),
+            resized: Vec::new(),
             env_styled: Default::default(),
             env_scratch: Vec::new(),
             status_bar_nodes: Vec::new(),
@@ -1750,10 +1758,21 @@ impl<M: TextEngine> Core<M> {
                 Ok(())
             }
             Op::Command {
+                id: crate::ROOT_ID,
                 command: Command::LayoutAnimation(animation),
-                ..
             } => {
                 self.layout_animation = Some(animation);
+                Ok(())
+            }
+            // Sent to a node: the frames its change moves.
+            Op::Command {
+                id,
+                command: Command::LayoutAnimation(animation),
+            } => {
+                self.key(id)?;
+                if let Some(transition) = animation.update {
+                    self.scope_layout_animation(id, transition);
+                }
                 Ok(())
             }
             Op::Command {
@@ -1822,6 +1841,7 @@ impl<M: TextEngine> Core<M> {
         if !self.outer_asked.is_empty() {
             self.send_outer_scrolls();
         }
+        self.split_scoped_frames();
         if self.mount.is_empty() || matches!(self.mount[..], [MountItem::LayoutAnimation(_)]) {
             self.mount.clear();
             None
@@ -6143,7 +6163,10 @@ impl<M: TextEngine> Core<M> {
     fn set_frame(&mut self, key: Key, frame: Bounds<Points>) {
         let node = &mut self.nodes[key as usize];
         if node.frame != frame {
+            let resized = node.frame.size != frame.size;
             node.frame = frame;
+            self.note_resized(key, resized);
+            let node = &self.nodes[key as usize];
             let (id, is_text) = (node.id, node.kind == Kind::Text);
             if node.events.contains(EventKind::Layout) {
                 self.events.push(crate::element::JsEvent::Event(
