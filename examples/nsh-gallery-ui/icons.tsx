@@ -41,6 +41,8 @@ export type IconName =
   | "sidebar"
   | "sun"
   | "moon"
+  | "volume-low"
+  | "volume-high"
   | "code"
   | "sliders"
   | "stepper"
@@ -90,6 +92,15 @@ const circle = (cx: CanvasRenderingContext2D, x: number, y: number, r: number, f
   cx.arc(x, y, r, 0, Math.PI * 2);
   if (fill) cx.fill();
   else cx.stroke();
+};
+
+/** A speaker's cone, facing right, its waves from (9.5, 10). */
+const speaker = (cx: CanvasRenderingContext2D) => line(cx, [3, 8, 6, 8, 9.5, 4.5, 9.5, 15.5, 6, 12, 3, 12, 3, 8]);
+/** A sound wave of radius `r` out of the speaker. */
+const wave = (cx: CanvasRenderingContext2D, r: number) => {
+  cx.beginPath();
+  cx.arc(9.5, 10, r, -0.9, 0.9);
+  cx.stroke();
 };
 
 const glyphs: Record<IconName, Draw> = {
@@ -445,6 +456,15 @@ const glyphs: Record<IconName, Draw> = {
   close: (c) => {
     line(c, [5.5, 5.5, 14.5, 14.5]);
     line(c, [14.5, 5.5, 5.5, 14.5]);
+  },
+  "volume-low": (c) => {
+    speaker(c);
+    wave(c, 3.2);
+  },
+  "volume-high": (c) => {
+    speaker(c);
+    wave(c, 3.2);
+    wave(c, 6.2);
   },
   moon: (c) => {
     // A disc less the one up and to its right: the arcs meet where the circles cross.
