@@ -143,8 +143,8 @@ pub(crate) enum FileAnswer {
     OpenDialog(AnswerSlot<Result<Option<Vec<std::path::PathBuf>>, String>>),
     /// The path chosen in the save dialog, none when cancelled.
     SaveDialog(AnswerSlot<Result<Option<std::path::PathBuf>, String>>),
-    /// Whether the path opened or showed in the file manager.
-    Done(AnswerSlot<bool>),
+    /// The path opened or showed in the file manager, or why not.
+    Done(AnswerSlot<Result<(), String>>),
     /// Where the trashed item went, or why it was not.
     Trash(AnswerSlot<Result<Option<std::path::PathBuf>, String>>),
 }
@@ -162,7 +162,10 @@ impl FileAnswer {
                 Some(error) => Err(error),
                 None => Ok((!paths.is_empty()).then(|| paths.swap_remove(0))),
             }),
-            FileAnswer::Done(slot) => slot.borrow_mut().deliver(error.is_none()),
+            FileAnswer::Done(slot) => slot.borrow_mut().deliver(match error {
+                Some(error) => Err(error),
+                None => Ok(()),
+            }),
             FileAnswer::Trash(slot) => slot.borrow_mut().deliver(match error {
                 Some(error) => Err(error),
                 None => Ok((!paths.is_empty()).then(|| paths.swap_remove(0))),

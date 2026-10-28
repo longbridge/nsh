@@ -183,8 +183,8 @@ with a `SaveDialog`, `open_path` (the file's default app), `reveal_path` (the it
 selected in Finder, File Explorer or the file manager) and `move_to_trash` (where the
 item went, when macOS says). The dialogs answer `Ok(None)` when the user cancels and
 an error when they cannot show (on Linux without a file chooser portal, and on iOS,
-Android and the web, where `open_path` and `reveal_path` answer `false` and
-`move_to_trash` an error).
+Android and the web, where `open_path`, `reveal_path` and `move_to_trash` answer
+an error too). Every request that fails answers its error, never `false`.
 
 ```rust
 use nsh_core::{

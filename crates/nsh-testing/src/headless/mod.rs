@@ -2429,7 +2429,7 @@ mod tests {
                         Ok(None) => return saved.set("cancelled".into()),
                         Err(_) => return saved.set("unavailable".into()),
                     };
-                    let shown = reveal_path(path.clone()).await;
+                    let shown = reveal_path(path.clone()).await.is_ok();
                     saved.set(format!("{} {shown}", path.display()));
                 });
             }))

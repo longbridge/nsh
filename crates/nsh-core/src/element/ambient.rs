@@ -520,10 +520,11 @@ pub fn pick_save_path(
 }
 
 /// Opens the local file or folder at `path` (absolute) in its default app
-/// (GPUI's `open_with_system`), to await in a task or drop: whether it
-/// opened, `false` for a relative path or on a platform that opens no
-/// local paths. [`open_url`] opens no `file:` URLs; this is their way.
-pub fn open_path(path: impl Into<PathBuf>) -> Answer<bool> {
+/// (GPUI's `open_with_system`), to await in a task or drop: `Ok` once it
+/// opened, the error when it did not (no app for it, a relative path, a
+/// platform that opens no local paths). [`open_url`] opens no `file:`
+/// URLs; this is their way.
+pub fn open_path(path: impl Into<PathBuf>) -> Answer<Result<(), String>> {
     file_request(
         crate::file_dialog::FileRequest::OpenPath(path.into()),
         FileAnswer::Done,
@@ -532,8 +533,10 @@ pub fn open_path(path: impl Into<PathBuf>) -> Answer<bool> {
 
 /// Shows the item at `path` (absolute) selected in the file manager
 /// (Finder, File Explorer, the desktop's file manager; GPUI's
-/// `reveal_path`), to await in a task or drop: whether it showed.
-pub fn reveal_path(path: impl Into<PathBuf>) -> Answer<bool> {
+/// `reveal_path`), to await in a task or drop: `Ok` once it showed, the
+/// error when it did not (it does not exist, a relative path, a platform
+/// without a file manager).
+pub fn reveal_path(path: impl Into<PathBuf>) -> Answer<Result<(), String>> {
     file_request(
         crate::file_dialog::FileRequest::RevealPath(path.into()),
         FileAnswer::Done,

@@ -9839,7 +9839,7 @@ mod components {
                         None => None,
                     };
                     let opened = open_path("notes.md").await;
-                    shown.set(format!("{picked:?} {trashed:?} {opened}"));
+                    shown.set(format!("{picked:?} {trashed:?} {opened:?}"));
                 });
             }))
     }
@@ -9916,7 +9916,7 @@ mod components {
         let shown = run_until(&mut c, |s| s.iter().any(|t| t.starts_with("paths O")));
         assert_eq!(
             shown.last().unwrap(),
-            r#"paths Ok(Some(["/notes/a.md", "/notes/b.md"])) Some(Err("no trash on this volume")) false"#
+            r#"paths Ok(Some(["/notes/a.md", "/notes/b.md"])) Some(Err("no trash on this volume")) Err("`notes.md` is not an absolute path")"#
         );
     }
 
@@ -9937,7 +9937,10 @@ mod components {
             &EventPayload::file_answer(pick, Vec::new())
         ));
         let shown = run_until(&mut c, |s| s.iter().any(|t| t.starts_with("paths O")));
-        assert_eq!(shown.last().unwrap(), "paths Ok(None) None false");
+        assert_eq!(
+            shown.last().unwrap(),
+            r#"paths Ok(None) None Err("`notes.md` is not an absolute path")"#
+        );
     }
 
     #[test]
@@ -9951,7 +9954,7 @@ mod components {
         let shown = run_until(&mut c, |s| s.iter().any(|t| t.starts_with("paths E")));
         assert_eq!(
             shown.last().unwrap(),
-            r#"paths Err("this platform has no file dialogs, file manager or trash") None false"#
+            r#"paths Err("this platform has no file dialogs, file manager or trash") None Err("this platform has no file dialogs, file manager or trash")"#
         );
     }
 

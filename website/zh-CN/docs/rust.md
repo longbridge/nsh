@@ -170,7 +170,8 @@ fn window_bar() -> impl IntoElement {
 （在访达、文件资源管理器或文件管理器中选中该项）和 `move_to_trash`
 （macOS 告知时返回该项移到的位置）。用户取消时对话框返回 `Ok(None)`，
 无法显示时返回错误（Linux 上没有文件选择 portal 时，以及 iOS、Android 和 Web 上；
-在这些平台上 `open_path` 和 `reveal_path` 返回 `false`，`move_to_trash` 返回错误）。
+在这些平台上 `open_path`、`reveal_path` 和 `move_to_trash` 也返回错误）。
+请求失败时一律返回错误，不返回 `false`。
 
 ```rust
 use nsh_core::{

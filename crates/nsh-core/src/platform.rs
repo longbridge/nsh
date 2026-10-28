@@ -183,7 +183,7 @@ pub struct Environment {
     /// The platform shows the system's open and save dialogs and opens,
     /// reveals and trashes local paths ([`crate::Command::FileRequest`],
     /// the desktops); without it, those requests answer at once with an
-    /// error (or `false`).
+    /// error.
     pub file_requests: bool,
 }
 

@@ -23,7 +23,7 @@
 //! [`Environment::file_requests`](crate::platform::Environment::file_requests)
 //! is set get these commands (the desktops: AppKit, GTK, Win32, GPUI); on
 //! the others (iOS, Android, the web) every request answers at once with
-//! an error (or `false`).
+//! an error.
 //!
 //! These services are Rust's only: no module of the runtime exposes them to
 //! an app's JS, so only native code (an app's own crate, `nsh-base`) asks,
