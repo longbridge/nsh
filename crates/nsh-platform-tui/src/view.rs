@@ -3,6 +3,7 @@ use nsh_core::{Bounds, EventMask, NodeId, Points, TextLayout, ViewKind, ViewProp
 use crate::NativeComponent;
 
 pub(crate) struct NshView {
+    pub(crate) tree_order: usize,
     pub(crate) kind: ViewKind,
     pub(crate) concealed: bool,
     pub(crate) stack: Option<Box<nsh_core::navigation::Stack>>,
@@ -31,6 +32,7 @@ pub(crate) struct NshView {
 impl NshView {
     pub(crate) fn new(kind: ViewKind) -> Self {
         Self {
+            tree_order: usize::MAX,
             kind,
             concealed: matches!(kind, ViewKind::Screen | ViewKind::HeaderItem),
             stack: (kind == ViewKind::Stack).then(Default::default),

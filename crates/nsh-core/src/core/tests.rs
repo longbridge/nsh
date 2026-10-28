@@ -3104,6 +3104,104 @@ fn z_index_orders_native_views() {
 }
 
 #[test]
+fn tracked_tree_order_follows_logical_moves_without_following_stacking() {
+    let mut c = core();
+    c.set_tree_order_tracking(true);
+    let order = |batch: &MountBatch| {
+        batch.items.iter().find_map(|item| match item {
+            MountItem::TreeOrder(nodes) => Some(nodes.clone()),
+            _ => None,
+        })
+    };
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 2,
+                tag: Tag::View,
+            },
+            Op::Create {
+                id: 3,
+                tag: Tag::View,
+            },
+            Op::Create {
+                id: 4,
+                tag: Tag::View,
+            },
+            Op::SetStyle {
+                id: 2,
+                style: style(&[("zIndex", StyleValue::Number(5.0))]),
+                patch: StylePatch::default(),
+            },
+            Op::Insert {
+                parent: 2,
+                child: 4,
+                before: None,
+            },
+            Op::Insert {
+                parent: ROOT_ID,
+                child: 2,
+                before: None,
+            },
+            Op::Insert {
+                parent: ROOT_ID,
+                child: 3,
+                before: None,
+            },
+        ],
+    );
+    let batch = c.commit().unwrap();
+    assert!(insert_items(&batch).contains(&(ROOT_ID, 3, Some(2))));
+    assert_eq!(order(&batch), Some(vec![ROOT_ID, 2, 4, 3]));
+    c.apply(Op::SetStyle {
+        id: 3,
+        style: style(&[("zIndex", StyleValue::Number(9.0))]),
+        patch: StylePatch::default(),
+    })
+    .unwrap();
+    let batch = c.commit().unwrap();
+    assert_eq!(insert_items(&batch), vec![(ROOT_ID, 3, None)]);
+    assert_eq!(order(&batch), None, "restacking preserves logical order");
+    for (op, expected) in [
+        (
+            Op::Insert {
+                parent: ROOT_ID,
+                child: 3,
+                before: Some(2),
+            },
+            vec![ROOT_ID, 3, 2, 4],
+        ),
+        (
+            Op::Insert {
+                parent: 3,
+                child: 4,
+                before: None,
+            },
+            vec![ROOT_ID, 3, 4, 2],
+        ),
+        (
+            Op::Remove {
+                parent: ROOT_ID,
+                child: 3,
+            },
+            vec![ROOT_ID, 2],
+        ),
+    ] {
+        c.apply(op).unwrap();
+        assert_eq!(order(&c.commit().unwrap()), Some(expected));
+    }
+    assert!(c.commit().is_none());
+    c.set_tree_order_tracking(false);
+    c.apply(Op::Insert {
+        parent: ROOT_ID,
+        child: 3,
+        before: None,
+    })
+    .unwrap();
+    assert_eq!(order(&c.commit().unwrap()), None);
+}
+
+#[test]
 fn layout_events_carry_frames_and_late_listeners_get_one() {
     let mut c = core();
     apply(

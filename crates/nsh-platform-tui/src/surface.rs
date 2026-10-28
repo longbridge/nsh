@@ -68,6 +68,10 @@ impl Sink {
 }
 
 impl MountSink for Sink {
+    fn needs_tree_order(&self) -> bool {
+        true
+    }
+
     fn submit(&self, batch: MountBatch) {
         self.send(Message::Batch(batch));
     }

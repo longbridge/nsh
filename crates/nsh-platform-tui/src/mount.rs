@@ -399,6 +399,13 @@ impl Mounter {
                     }
                 }
                 // Text, layout and accessibility already have their core representation.
+                MountItem::TreeOrder(nodes) => {
+                    for (order, id) in nodes.into_iter().enumerate() {
+                        if let Some(view) = self.get_mut(id) {
+                            view.tree_order = order;
+                        }
+                    }
+                }
                 MountItem::Overflow { .. } | MountItem::LayoutDirection { .. } => {}
                 other => {
                     if self.unhandled.insert(discriminant(&other)) {

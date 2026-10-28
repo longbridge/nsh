@@ -87,7 +87,10 @@ The Unix session saves the descriptor flags and enables nonblocking input/output
 reading zero bytes or EIO forever, never returning to the host's signal check. The event parsing and conversion
 remain crossterm's. On non-macOS Unix, the reader's millisecond poll truncation can spin over a fractional
 millisecond; decoding is capped at 50 microseconds and `run_app` sleeps the remainder of its 16 ms wait.
-On macOS the reader uses select with microsecond waits. Neither path retries a failed host poll.
+On macOS the reader uses select with microsecond waits. Every Unix decode poll gets at least 50 microseconds,
+including when another frame is already due: crossterm's `use-dev-tty` reader skips its input and parser queue
+entirely at zero timeout. Continuous frames therefore retain an input opportunity between draws. Neither path
+retries a failed host poll.
 
 Terminal and OSC 52 writes share the cancellable output path, with buffered frame encoding. Output backpressure
 waits for writability in 16 ms slices and checks shutdown between waits; errors propagate. Once the loop ends,
@@ -333,7 +336,7 @@ Modal focus restoration takes precedence over page history and retains its separ
 
 Modals cover the surface and paint above the page. A batch's new modals follow the completed tree's order (core
 sibling insertions may arrive in reverse); a modal presented in a later batch goes above the existing ones.
-Presenting a modal saves the previous focus and moves focus to its first focusable view in reading order; an
+Presenting a modal saves the previous focus and moves focus to its first focusable view in tree order; an
 empty modal has no focus. Keyboard traversal stays inside the newest modal, including when it has no controls.
 Closing a modal, natively or through an app update, restores the saved view only if it still exists, is focusable
 and has visible Cells. Otherwise focus is cleared, rather than moved to another page control. Nested modals keep
@@ -456,18 +459,24 @@ it owns keys and the app's field caret is hidden; closing it restores the caret 
 
 | Keys | Action |
 |---|---|
-| Ctrl+N, Down, Tab | Next focusable view |
-| Ctrl+P, Up, Shift+Tab | Previous focusable view |
+| Ctrl+N, Down, Tab | Next focusable view in tree order |
+| Ctrl+P, Up, Shift+Tab | Previous focusable view in tree order |
 | Ctrl+F, Right / Ctrl+B, Left | Nearest focusable view to the right / left on the same row |
 | Enter | Press the focused view, reporting PressDown, PressUp and Press in order, at its middle |
 | Esc, Ctrl+G | Leave the focused field; otherwise go back through the app handler, stack or newest modal |
 | Ctrl+V, PageDown / Alt+V, PageUp | Scroll one viewport down / up |
-| Alt+<, Home / Alt+>, End | Focus the first / last control and reveal it; scroll to the endpoint when there are none |
+| Alt+<, Home / Alt+>, End | Focus the first / last control in the Scroll's tree order and reveal it; scroll to the endpoint when there are none |
 | Ctrl+S / Ctrl+R | Search the text on screen forward / backward in the Minibuffer |
 | Ctrl+C | Quit |
 
-Focus visits pressable and editable views, honoring `focusable` and disabled state, in top-to-bottom and
-left-to-right Cell order. Traversal wraps at the ends; horizontal movement stays on overlapping row ranges.
+Focus visits pressable and editable views, honoring `focusable` and disabled state, in depth-first document
+order within the focus scope, as NSH's other platforms do. A sidebar's stops stay together before the next
+panel's stops, regardless of their Cell positions. Traversal wraps at the ends; horizontal movement stays
+spatial, choosing the nearest control on overlapping row ranges.
+The sink opts into `MountItem::TreeOrder`: the core supplies logical document order in the same batch as
+structural changes. `Insert` retains native paint order, including `zIndex`; raising a sidebar changes its
+stacking while its focus stops retain their document order. Ordinary text and style updates keep the stored
+order. The backend filters that order through the completed frame's geometry and current focus scope.
 Concealed screens supply no candidates. When a modal is open, candidates come only from the newest modal.
 Focus and focus-within states are reported through TrackStates and `EngineControl::set_states`, so the app's
 focus styles apply. Pressable views have no platform focus marker: their app-defined focus styles are the
@@ -716,7 +725,11 @@ during and after the search.
 The animation module at the AppView seam checks completion, cancellation, active-frame and idle scheduling,
 app replacement, binding removal, page backgrounds, transform geometry and presses, and canvas slots. The
 `animation` host fixture checks final Cells and callbacks through `nsh test --target tui`.
-The host's unit checks cover crossterm conversion; its two ignored lifecycle checks require a real terminal.
+The host's unit checks cover crossterm conversion and busy-frame input. The latter runs the real `run_app`,
+parser and AppView in an isolated process on a private PTY. Each backend flush requests an app update and waits
+for its engine wakeup, forcing a due frame at every input poll without timing sleeps. Queued Ctrl+N keys must
+focus four controls in order and Enter must activate the fourth. The two ignored lifecycle checks require a
+real terminal; the ignored input worker is launched automatically by its supervising test.
 
 ```sh
 cargo test -p nsh-platform-tui --features dev,run-app --test tui

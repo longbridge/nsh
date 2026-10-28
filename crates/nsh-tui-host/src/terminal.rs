@@ -12,13 +12,16 @@ use ratatui_crossterm::crossterm::{cursor, event, execute, style::Print, termina
 
 const ENABLE_ALTERNATE_SCROLL: &str = "\x1b[?1007h";
 const DISABLE_ALTERNATE_SCROLL: &str = "\x1b[?1007l";
-// filedescriptor's non-macOS Unix poll rounds down to milliseconds and spins
-// through the fractional remainder. Let run_app sleep instead of paying that tail.
-#[cfg(all(unix, not(target_os = "macos")))]
+// Crossterm's use-dev-tty reader skips both input and buffered parser events at
+// zero timeout. Give it a positive budget even when another frame is already due.
+#[cfg(unix)]
 const DECODE_POLL: Duration = Duration::from_micros(50);
 
 #[cfg(unix)]
 mod unix;
+
+#[cfg(all(test, unix))]
+mod input_tests;
 
 pub(crate) struct Session {
     active: Arc<AtomicBool>,
@@ -119,6 +122,10 @@ pub(crate) fn poll(timeout: Duration) -> io::Result<RunEvent> {
     if unix::disconnected()? {
         return Ok(RunEvent::Exit);
     }
+    #[cfg(unix)]
+    let timeout = timeout.max(DECODE_POLL);
+    // filedescriptor's non-macOS poll truncates milliseconds and spins through
+    // the remainder. Bound decoding and let run_app sleep the rest of its wait.
     #[cfg(all(unix, not(target_os = "macos")))]
     let timeout = timeout.min(DECODE_POLL);
     let available = event::poll(timeout)?;
