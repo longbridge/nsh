@@ -28,14 +28,16 @@ const price = () => {
  * Tabs on, pressing Right at each stop, until `shown` is on screen: the
  * first plot that reads it out has the focus. With reduced motion: in a
  * desktop window a step waits for the page to settle, which the live
- * price's pulse never does. A desktop window's sidebar comes first in
- * its Tab order, so the walk there is long.
+ * price's pulse never does. The sidebar's stops (its toggle, its search,
+ * its demos as one stop, the appearance) come after the page among the
+ * views, which stack the sidebar above it; AppKit orders its key view
+ * loop by position, which mixes them in with the page's.
  */
 const tabTo = async (shown: string) => {
   await start(true);
   let tabs = 0;
   while (!app.shows(shown)) {
-    expect(++tabs).toBeLessThan(80);
+    expect(++tabs).toBeLessThan(30);
     await app.keyboard.press("tab");
     await app.keyboard.press("right");
     await app.wait(50);
