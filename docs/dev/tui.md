@@ -290,6 +290,11 @@ Text measurement still counts the whole Cells that fit within a point width, sep
 A compact canvas or rounded control (less than one and a half Cells tall) occupies its center row, so a centered icon and a
 one-line label share a row even when their point heights differ.
 
+Selection accents keep their authored dimensions. The gallery's sidebar accent is 3 × 18 points; its watchlist
+accent is 3 × 36 points (a 64-point row with 14 points above and below). Their different Cell heights follow
+those dimensions and edge rounding. Inspect Cell foreground/background colors as well as symbols when checking
+these markers; a colored background Cell can have a space as its symbol.
+
 A drawn border owns one Cell on each side. Child boxes fit inside those reserved Cells, with any displacement
 carried into their contents. When reservation shortens a child box, its vertical point offsets contract into
 that box while text keeps terminal glyphs; vertical text stacks reserve one Cell per measured line,

@@ -419,3 +419,98 @@ fn a_focused_slider_handles_arrows_pages_and_endpoints_then_releases_them_on_tab
     draw_until(&mut view, &mut terminal, &rx, "value 0 ended 0 presses 1");
     assert_eq!(view.handle(key("Home")), Handled::Ignored);
 }
+
+#[component]
+fn SelectedAccentBars() -> impl IntoElement {
+    let selected = signal(0usize);
+    let accent = nsh_core::color::rgb(0xc8f26d);
+    view()
+        .flex_1()
+        .bg(nsh_core::color::rgb(0x101113))
+        .children((0..2).map(|index| {
+            view()
+                .absolute()
+                .left(px(16.0))
+                .top(px(16.0 + index as f32 * 48.0))
+                .w(px(160.0))
+                .h(px(36.0))
+                .rounded(px(8.0))
+                .bg(nsh_core::color::rgb(0x24262a))
+                .flex_row()
+                .items_center()
+                .px(px(10.0))
+                .on_press(move |_: &()| selected.set(index))
+                .child(
+                    view()
+                        .absolute()
+                        .left(px(0.0))
+                        .top(px(9.0))
+                        .w(px(3.0))
+                        .h(px(18.0))
+                        .rounded(px(1.5))
+                        .bg(accent)
+                        .opacity(move || if selected.get() == index { 1.0 } else { 0.0 }),
+                )
+                .child(text(format!("Sidebar {index}")))
+        }))
+        .child(
+            view()
+                .absolute()
+                .left(px(216.0))
+                .top(px(16.0))
+                .w(px(160.0))
+                .h(px(64.0))
+                .bg(nsh_core::color::rgb(0x24262a))
+                .flex_row()
+                .items_center()
+                .px(px(16.0))
+                .child(
+                    view()
+                        .absolute()
+                        .left(px(0.0))
+                        .top(px(14.0))
+                        .bottom(px(14.0))
+                        .w(px(3.0))
+                        .rounded(px(1.5))
+                        .bg(accent),
+                )
+                .child(text("Watchlist")),
+        )
+        .child(
+            view()
+                .absolute()
+                .top(px(128.0))
+                .child(text(move || format!("active {}", selected.get()))),
+        )
+}
+
+#[test]
+fn sidebar_and_watchlist_accents_remain_visible_with_their_authored_heights() {
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(60, 12)).unwrap();
+    view.load(App::Rust(Root::new::<SelectedAccentBars>(|| ())))
+        .unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "active 0");
+    let accent = Color::Rgb(0xc8, 0xf2, 0x6d);
+    let marked = |cell: &ratatui_core::buffer::Cell| {
+        cell.bg == accent || (cell.fg == accent && cell.symbol() == "│")
+    };
+    let buffer = terminal.backend().buffer();
+    assert!(marked(&buffer[(2, 2)]));
+    assert!(!marked(&buffer[(2, 1)]));
+    assert!(!marked(&buffer[(2, 3)]));
+    assert!(!marked(&buffer[(2, 5)]));
+    assert!(marked(&buffer[(27, 2)]));
+    assert!(marked(&buffer[(27, 3)]));
+    assert!(!marked(&buffer[(27, 1)]));
+    assert!(!marked(&buffer[(27, 4)]));
+    view.handle(key("Tab"));
+    view.handle(key("Tab"));
+    view.handle(key("Enter"));
+    draw_until(&mut view, &mut terminal, &rx, "active 1");
+    let buffer = terminal.backend().buffer();
+    assert!(!marked(&buffer[(2, 2)]));
+    assert!(marked(&buffer[(2, 5)]));
+    assert!(marked(&buffer[(27, 2)]));
+    assert!(marked(&buffer[(27, 3)]));
+}
