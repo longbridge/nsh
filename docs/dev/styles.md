@@ -247,7 +247,10 @@
   and `blur`, applied while decoding); iOS texts draw no gradients or inset shadows; Android has no backdrop blur, `blur` or
   `drop-shadow` before API 31; Linux and GPUI draw no backdrop filter, GPUI no `blur()` or `mixBlendMode`; iOS, macOS and Android draw one `drop-shadow()`,
   the widest of the chain's (the last of equals; the web, Linux, Windows and GPUI draw every layer a class or
-  style gives); a text shadow is one layer everywhere (`text-shadow-*` keep the theme's widest).
+  style gives); a text shadow is one layer everywhere (`text-shadow-*` keep the theme's widest); a text's `color`
+  transitions (`transition-colors`) on the desktops when the whole text is one color before and after (a text of
+  several colors, and spans with their own `transition`, take the new colors at once), and not yet on iOS, Android
+  and the web (their transitions animate the view's layer, and the web builds a text's runs again).
 - **View styles**: `backgroundColor`, `borderWidth` / `borderColor` (also per side: `borderTopWidth`, `borderLeftColor`, ...),
   `borderStyle` (`solid` / `dashed` / `dotted`; `none` / `hidden` zero the used widths in layout and paint whatever
   order the widths come in, as `outlineStyle: "none"` does, `Pending`), `borderRadius` + the four `borderTopLeftRadius`-style corners, `borderCurve`

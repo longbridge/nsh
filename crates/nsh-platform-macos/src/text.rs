@@ -1163,10 +1163,14 @@ pub(crate) fn draw(cx: &CGContext, state: &crate::view::ViewState) {
             Some(&cg_color(shadow.color)),
         );
     }
-    // An animated color: the text (decorations too) drawn as is into a
-    // layer, then painted over in the color where it drew, so its
-    // antialiasing stays; the layer casts the shadow.
-    let color = state.anim.color;
+    // An animated color, or a transition of the text's color: the text
+    // (decorations too) drawn as is into a layer, then painted over in the
+    // color where it drew, so its antialiasing stays; the layer casts the
+    // shadow.
+    let color = state
+        .anim
+        .color
+        .or_else(|| state.live.as_ref()?.text_color());
     if color.is_some() {
         // SAFETY: no auxiliary info.
         unsafe { CGContext::begin_transparency_layer(c, None) };
