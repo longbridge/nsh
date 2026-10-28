@@ -860,7 +860,8 @@ function Factors() {
   const lead = FACTORS.reduce((a, b) => (b.ours > a.ours ? b : a));
   return (
     <Card icon="stocks" title="Factor exposure" subtitle="A portfolio against its benchmark on six factors">
-      <View style={{ flexDirection: pointer ? "row" : "column", alignItems: "center", gap: pointer ? 20 : 12 }}>
+      {/* The readout beside the radar where the card has room for it, below where it has not. */}
+      <View style={{ flexDirection: pointer ? "row" : "column", flexWrap: "wrap", justifyContent: "center", alignItems: "center", gap: pointer ? 20 : 12 }}>
         <Plot
           data={FACTORS}
           yScale={{ type: "linear", domain: [0, 100] }}
@@ -915,7 +916,7 @@ function Factors() {
             );
           })}
         </Plot>
-        <View style={{ alignSelf: "stretch", flex: pointer ? 1 : undefined, justifyContent: "center", gap: 12 }}>
+        <View style={{ alignSelf: "stretch", flexGrow: 1, flexBasis: pointer ? 200 : undefined, justifyContent: "center", gap: 12 }}>
           <View style={{ gap: 2 }}>
             <Text style={tipTitle}>{shown()?.name.toUpperCase() ?? "ALL SIX FACTORS"}</Text>
             <View style={{ flexDirection: "row", alignItems: "baseline", gap: 8 }}>

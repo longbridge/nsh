@@ -5836,7 +5836,13 @@ fn base_plot_radial_line_draws_a_radar_and_follows_the_pointer_by_angle() {
         }
         let mut out = Vec::new();
         animator.write(Some, |_, values, _| {
-            if let [x, y] = values.transform.iter().flatten().copied().collect::<Vec<_>>()[..] {
+            if let [x, y] = values
+                .transform
+                .iter()
+                .flatten()
+                .copied()
+                .collect::<Vec<_>>()[..]
+            {
                 out.push((x, y));
             }
         });
