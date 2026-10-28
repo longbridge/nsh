@@ -338,6 +338,11 @@ const CODE_CHARS = {
   Quote: "'", Comma: ",", Period: ".", Slash: "/", Backquote: "`", Space: " ",
 };
 
+/** The offset of local time at `ms` (since the epoch) in seconds east of UTC. */
+function localOffset(ms) {
+  return 0 - new Date(ms).getTimezoneOffset() * 60;
+}
+
 /** The browser's time zone (`Asia/Shanghai`), Intl's default; "" when unknown. */
 function timeZoneName() {
   return new Intl.DateTimeFormat().resolvedOptions().timeZone ?? "";
@@ -859,6 +864,8 @@ class Player {
       nsh: {
         now_ms: () => performance.now(),
         date_now_ms: () => Date.now(),
+        // Today where the app runs (`nsh-base`'s calendars).
+        local_offset: localOffset,
         // Intl's default zone.
         time_zone: (p, cap) => {
           const zone = encoder.encode(timeZoneName());
