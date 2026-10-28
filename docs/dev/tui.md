@@ -251,7 +251,7 @@ and host channel. `TerminalCapabilities` starts with the terminal background; ca
 renderers. Embedding defaults to bounded limits; the Development host explicitly selects standalone limits.
 `register_component` creates per-node widgets with ordered property updates, commands and buffer rendering;
 reserved `nsh/` names are rejected. Native component input, sizing and richer context belong to the native
-component ticket. The terminal idiom and the Release runner are separate slices. The current environment uses desktop behavior and reports the machine's operating system (macOS, Windows or Linux), as the desktop development hosts do, so `fs/promises` and `process` run under the app's declared capabilities and `platform.os` names the real system.
+component ticket. The terminal idiom and the Release runner are separate slices. The current environment uses desktop behavior and reports the machine's operating system (macOS, Windows or Linux), as the desktop development hosts do, so `fs/promises` and `process` run under the app's declared capabilities and `platform.os` names the real system. `nsh/desktop`'s `isAvailable` follows the OS, so an app that draws its own window chrome there (the gallery's `TitleBar`) draws it in the terminal too, as the app's own content. This is the real-OS part of the Terminal idiom ticket; the idiom itself (`Idiom::Terminal`) is still that ticket's, and the surface reports the desktop idiom until then.
 
 ## Points per Cell
 

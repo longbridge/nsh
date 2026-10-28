@@ -521,3 +521,29 @@ fn the_surface_reports_the_machines_operating_system() {
         .unwrap();
     draw_until(&mut view, &mut terminal, &rx, expected);
 }
+
+#[cfg(feature = "js")]
+#[test]
+fn apps_read_the_real_os_and_the_desktop_module() {
+    let expected = if cfg!(target_os = "macos") {
+        "macos desktop true"
+    } else if cfg!(target_os = "windows") {
+        "windows desktop true"
+    } else {
+        "linux desktop true"
+    };
+    let code = nsh_bundler::compile_module(
+        "App.tsx",
+        r#"
+        import { mount, platform, Text } from "nsh";
+        import { isAvailable } from "nsh/desktop";
+        mount(() => <Text>{`${platform.os} ${platform.idiom} ${isAvailable}`}</Text>);
+    "#,
+        &[],
+    )
+    .unwrap();
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(40, 4)).unwrap();
+    view.load(nsh_platform_tui::Bundle::source(code)).unwrap();
+    draw_until(&mut view, &mut terminal, &rx, expected);
+}
