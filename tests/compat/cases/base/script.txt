@@ -1118,6 +1118,10 @@ prop label:Amount placeholder Amount
 # Its prefix and suffix around the field.
 expect about
 expect kg
+# The app's element in a slot lays out in the component's row (300 wide,
+# the field 100): `flex: 1` takes what is left, a percentage is of the row.
+frame id:weight-prefix 0 0 170 10
+frame id:weight-suffix 0 0 30 10
 frame parent:text:Up 0 0 30 15
 frame parent:text:Down 0 15 30 15
 style parent:parent:text:Up backgroundColor #0000ffff
@@ -1266,6 +1270,137 @@ covers [props] Scrollbar.minThumbLength
 covers [props] Scrollbar.thumbClass
 covers [props] Scrollbar.thumbStyle
 covers [props] accessibilityLabel
+
+# base-date-picker
+tap id:case-base-date-picker
+# The trigger is a combobox named by `accessibilityLabel`, collapsed;
+# screen readers hear the app's value in its `dateFormat`.
+prop label:Due role combobox
+prop label:Due accessibilityState expanded=false
+prop label:Due accessibilityValue text=09.10.2026
+# A press opens the calendar, a sheet on a phone: every item the app's
+# (`renderItem`), the selected day marked and selected for screen
+# readers, the weeks starting on Monday (`firstDayOfWeek`: the 5th, a
+# Monday, first in its row), each item as wide as `itemStyle` says.
+tap id:due
+expect Open: true triggerPress
+prop label:Due accessibilityState expanded=true
+expect M10
+expect Y2026
+expect D9*
+prop label:2026-10-09 role button
+prop label:2026-10-09 accessibilityState selected=true
+frame label:2026-10-05 0 0 20 20
+# Weekends take no press (`disabledMatcher`).
+prop label:2026-10-10 accessibilityState disabled=true
+prop label:2026-10-11 accessibilityState disabled=true
+# Previous and Next turn the month, named for screen readers.
+tap label:NextMonth
+expect M11
+absent M10
+tap label:PrevMonth
+expect M10
+# A day is the value: `onChange` with its ISO date, which the app sets;
+# the popup closes with "select".
+tap label:2026-10-15
+expect Due: 2026-10-15
+expect Open: false select
+absent M10
+prop label:Due accessibilityValue text=15.10.2026
+# `cleanable`: a button screen readers name while there is a value; a
+# press clears it, reported as `null`, and the popup stays closed.
+expect X
+prop label:ClearDue role button
+frame label:ClearDue 0 30 20 20
+tap label:ClearDue
+expect Due: null
+absent X
+absent M10
+noprop label:Due accessibilityValue
+covers [nsh/base] DatePicker
+covers [props] value
+covers [props] accessibilityLabel
+covers [props] DatePicker.dateFormat
+covers [props] DatePicker.trigger
+covers [props] DatePicker.renderItem
+covers [props] DatePicker.itemStyle
+covers [props] DatePicker.firstDayOfWeek
+covers [props] DatePicker.disabledMatcher
+covers [props] DatePicker.previousAccessibilityLabel
+covers [props] DatePicker.nextAccessibilityLabel
+covers [props] DatePicker.cleanable
+covers [props] DatePicker.clearButton
+covers [props] DatePicker.clearButtonStyle
+covers [props] DatePicker.clearButtonAccessibilityLabel
+covers [events] onChange
+covers [events] DatePicker.onOpenChange
+# A range of the picker's own (`defaultValue`), heard as its ends; two
+# months side by side (`numberOfMonths`), the days inside the range in
+# it, its ends selected.
+prop label:Trip accessibilityValue text=2026/10/05 - 2026/10/07
+tap id:trip
+expect M10
+expect M11
+expect D5*~
+expect D6~
+expect D7*~
+# The first press starts a range, shown but not reported until the
+# second ends it; then the popup closes.
+tap label:2026-10-12
+expect D12*
+absent D6~
+expect Trip: none
+tap label:2026-10-14
+expect Trip: ["2026-10-12","2026-10-14"]
+absent M11
+prop label:Trip accessibilityValue text=2026/10/12 - 2026/10/14
+# A preset is a button in the app's look, in a column of the app's look;
+# a press sets its value and closes the popup.
+tap id:trip
+expect Week
+prop label:Week role button
+style label:Week backgroundColor #00ff00ff
+style parent:label:Week backgroundColor #0000ffff
+tap label:Week
+expect Trip: ["2026-10-19","2026-10-25"]
+absent Week
+covers [props] defaultValue
+covers [props] DatePicker.range
+covers [props] DatePicker.numberOfMonths
+covers [props] DatePicker.presets
+covers [props] DatePicker.presetsStyle
+covers [props] DatePicker.presetStyle
+# A date and time (`timePrecision`) on a 12-hour clock (`hourCycle`):
+# heard with the time; the popup holds the app's label of the time and
+# the field's segments (`renderSegment`, `segmentStyle`).
+prop label:Meet accessibilityValue text=2026/10/09 09:30 AM
+tap id:meet
+expect TimeLabel
+expect S09
+expect S30
+expect SAM
+style parent:text:S09 backgroundColor #ff0000ff
+# Picking a day keeps the popup open, reported with the time.
+tap label:2026-10-12
+expect Meet: 2026-10-12T09:30
+expect TimeLabel
+# The field (named by `timeAccessibilityLabel`) edits the selected
+# segment, the hour first: a 2 fits no second digit and moves on.
+type label:MeetTime 2
+expect Meet: 2026-10-12T02:30
+expect S02
+type label:MeetTime 45
+expect Meet: 2026-10-12T02:45
+# A press on the selected day again closes the popup.
+tap label:2026-10-12
+absent TimeLabel
+prop label:Meet accessibilityValue text=2026/10/12 02:45 AM
+covers [props] DatePicker.timePrecision
+covers [props] DatePicker.hourCycle
+covers [props] DatePicker.timeLabel
+covers [props] DatePicker.timeAccessibilityLabel
+covers [props] DatePicker.renderSegment
+covers [props] DatePicker.segmentStyle
 
 # base-select
 tap id:case-base-select
@@ -1795,6 +1930,15 @@ covers [props] PlotAxis.tickClass
 covers [props] PlotAxis.tickStyle
 covers [props] PlotAxis.lineClass
 covers [props] PlotAxis.lineStyle
+# Bars colored by their rows' regions through the plot's ordinal
+# `colorScale` (their canvas, the sibling below the first bar's label):
+# EU takes the domain's second color, US its first, and APAC, past the
+# domain, the next one, the range repeating from its first.
+expect r10
+drawing below:parent:text:r10 fillStyle #00ff00ff
+drawing below:parent:text:r10 fillStyle #ff0000ff
+covers [props] Plot.colorScale
+covers [props] Bar.color
 # Reversed scales: bands from the right edge (middles 250, 150 and 50)
 # and a y scale of 0 to 40 from the top edge (2 points a value), so the
 # bars hang from the top, each label below its bar's end.

@@ -79,7 +79,9 @@
 - **Desktop backends** (Windows, GPUI, Linux, macOS): one platform-free copy of what they animate. `nsh_core::transition`
   holds a view's layout animation, style transition and keyframes (`Live`: curves, springs, interpolation of frames,
   colors, transforms, shadows and corner radii, timing), which each backend steps on its frame clock and applies to its
-  own views; `nsh_core::animation::Animator` holds the graph with its bindings to views, gestures and scroll views
+  own views; a text's color, which lives in its typeset runs rather than its style, transitions as a color the backend
+  draws the whole text in over its runs (`Live::text_color`, `transition::recolor`: when the text is one color before
+  and after), the way it draws an animated `color`, so no frame typesets the text again; `nsh_core::animation::Animator` holds the graph with its bindings to views, gestures and scroll views
   and hands each bound view its `AnimValues`.
 - **Web**: animated values run in Rust as elsewhere; layout animations, transitions, keyframes and screen transitions
   are Web Animations and CSS made to match the Linux backend (`web.md` "Animation").

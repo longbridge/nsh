@@ -394,7 +394,8 @@ pub struct OpenOptions {
     pub platform: Option<Platform>,
     /// A manual clock for the app (none: the system's): its time moves only
     /// as the test moves it (`app.clock`), steps finish native animations
-    /// at once, and `app.wait` moves it.
+    /// at once (one looping forever moves with the clock instead), and
+    /// `app.wait` moves it.
     pub clock: Option<ClockOptions>,
     /// The embedding app the test plays for the app (`nsh/host`): the
     /// launch parameters it reads as `host.params` and the handlers of its

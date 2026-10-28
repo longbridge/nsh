@@ -53,7 +53,7 @@ use nsh_core::{
 };
 
 use crate::{
-    popup::{OpenChangeReason, SheetMotion, lifecycle},
+    popup::{self, DropdownFrame, OpenChangeReason, Presence},
     select::{SelectGroup, SelectItem, SelectItemState},
 };
 
@@ -652,14 +652,8 @@ impl Listbox {
 /// The parts and placement the list takes from its component's props.
 #[derive(Clone, Copy)]
 pub(crate) struct Parts {
-    pub(crate) placement: Prop<Placement>,
-    pub(crate) align: Prop<Align>,
-    pub(crate) offset: Prop<Points>,
-    pub(crate) margin: Prop<Points>,
-    pub(crate) popup_class: Prop<Option<SharedString>>,
-    pub(crate) popup_style: Prop<Style>,
-    pub(crate) backdrop_class: Prop<Option<SharedString>>,
-    pub(crate) backdrop_style: Prop<Style>,
+    /// Where the popup goes and its parts.
+    pub(crate) frame: DropdownFrame,
     pub(crate) list_class: Prop<Option<SharedString>>,
     pub(crate) list_style: Prop<Style>,
     pub(crate) item_class: Prop<Option<SharedString>>,
@@ -703,9 +697,8 @@ pub(crate) struct Hooks {
     pub(crate) shown: Rc<dyn Fn(bool)>,
 }
 
-/// The list while it is open, on the desktops a popup anchored to the
-/// trigger `anchor` names, at least `width` wide (its width, once it is
-/// laid out), on touch screens a sheet at the bottom over a backdrop.
+/// The list while it is open, in its component's dropdown
+/// ([`popup::dropdown`]).
 pub(crate) fn present(
     lb: Listbox,
     anchor: ElementRef,
@@ -713,93 +706,19 @@ pub(crate) fn present(
     parts: Parts,
     hooks: Hooks,
 ) -> AnyElement {
-    let sheet = !is_desktop();
-    let open = hooks.open.clone();
-    let motion = SheetMotion::new(move || sheet && open(), || Placement::Bottom);
-    // The popup waits for the trigger's first layout: open at first
-    // (`defaultOpen`), it would be made before the trigger is (a slot is
-    // filled after the first render) and placed against nothing.
-    let shown = {
-        let open = hooks.open.clone();
-        move || {
-            if sheet {
-                motion.shown.get()
-            } else {
-                open() && width.with(Option::is_some)
-            }
-        }
+    let frame = parts.frame;
+    let presence = Presence {
+        open: hooks.open.clone(),
+        dismiss: hooks.dismiss.clone(),
+        shown: hooks.shown.clone(),
     };
-    {
-        let open = hooks.open.clone();
-        let (opened, closed) = (hooks.shown.clone(), hooks.shown.clone());
-        lifecycle(
-            move || {
-                if sheet {
-                    motion.there()
-                } else {
-                    open() && width.with(Option::is_some)
-                }
-            },
-            move || opened(true),
-            move || closed(false),
-        );
-    }
-    when(shown, move || {
-        let content = content(lb, sheet, parts, hooks.clone());
-        let cancel = {
-            let dismiss = hooks.dismiss.clone();
-            move || dismiss(OpenChangeReason::Cancel)
-        };
-        if sheet {
-            let dismiss = hooks.dismiss.clone();
-            let backdrop = overlay()
-                .inset_0()
-                .bind_opacity(&motion.fade)
-                .focusable(false)
-                .app_class(parts.backdrop_class)
-                .inline_style(parts.backdrop_style)
-                .on_press(move || dismiss(OpenChangeReason::BackdropPress));
-            let panel = overlay()
-                .left_0()
-                .right_0()
-                .bottom_0()
-                // Below the status bar, whatever the rows.
-                .max_h(move || Length::from(window().height - safe_area().top))
-                .app_class(parts.popup_class)
-                .inline_style(parts.popup_style)
-                .bind_translate_y(&motion.y)
-                .on_layout(move |frame: &Bounds<Points>| motion.laid_out(frame.size))
-                .on_cancel(cancel)
-                .children(content);
-            return vec![backdrop.into_element(), panel.into_element()];
-        }
-        let room = signal(None::<Points>);
-        let dismiss = hooks.dismiss.clone();
-        let popup = overlay()
-            // The trigger itself: in a TSX app the app's element, whose
-            // box is what shows (not the slot's view, which a column
-            // stretches).
-            .anchor(&anchor)
-            .placement(parts.placement)
-            .align(parts.align)
-            .offset(parts.offset)
-            .margin(parts.margin)
-            .min_w(move || Length::from(width.get().unwrap_or_default()))
-            // Never past the room on its side: its rows scroll. Until
-            // the core says where it went, the window bounds it, so the
-            // first layout already gives the rows a viewport to
-            // virtualize against (unbounded, a list of thousands would
-            // make every row).
-            .max_h(move || Length::from(room.get().unwrap_or_else(|| window().height)))
-            .app_class(parts.popup_class)
-            .inline_style(parts.popup_style)
-            .on_position(move |p: &OverlayPosition| room.set(Some(p.available.height)))
-            .on_press_outside(move |_: &Point<Points>| dismiss(OpenChangeReason::PressOutside))
-            .on_cancel(cancel)
-            .children(content);
-        vec![popup.into_element()]
-    })
-    .into_element()
+    popup::dropdown(
+        anchor,
+        width,
+        frame,
+        presence,
+        Rc::new(move |sheet| content(lb, sheet, parts, hooks.clone())),
+    )
 }
 
 /// What the popup or sheet holds: the search field, the rows, the `empty`

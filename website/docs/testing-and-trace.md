@@ -315,7 +315,8 @@ are `nsh test`'s; `Headless` has each of them (`run_for`, `fast_forward`, `set_s
 
 `Date`, `performance.now()` and `Intl`'s default date follow the clock. Steps finish what is running without waiting
 for it: while the app asks for frames or a native animation runs, frames come one after another, each a frame's time
-(1/60 s) later on the clock. A 300 ms transition takes a few milliseconds, and a timer due during it runs. `app.wait(ms)`
+(1/60 s) later on the clock. A 300 ms transition takes a few milliseconds, and a timer due during it runs. An
+animation that loops forever (a spinner) runs along with the clock: it turns as the test moves the clock. `app.wait(ms)`
 and a long press move the clock by their time. A timer that comes due later runs only when the test moves the clock
 there. `waitFor`'s timeout stays real time, as it also waits for what comes from outside (a route's function, the
 network). The gallery's tests run this way (`examples/gallery/tests`): its twelve tests that wait for animations
@@ -385,10 +386,11 @@ one: a selector matching several fails the step, and the error says how to narro
 | `await app.setColorScheme(scheme)` | Switches the system's appearance to `"light"` or `"dark"`, as the user does. |
 | `await app.screenshot(path?)` | A picture of the app's window as a PNG (a `Uint8Array`), also saved at `path` on this machine when given (relative to the current directory). Only a real platform draws the app: see [On a real platform](#on-a-real-platform). |
 
-A step resolves once the app rendered nothing for 100 ms and no native animation runs (2 s at most, for apps that
-render all the time; on a manual clock, also 2 s of the app's time), so what it changed is on screen when the next
-line runs; use `waitFor` for what comes later (a
-response, a timer). A step rejects, failing the test, when nothing matches its selector (the error lists the texts on
+A step resolves once the app rendered nothing for 100 ms and no native animation runs that ends by itself (2 s at
+most, for apps that render all the time; on a manual clock, also 2 s of the app's time), so what it changed is on
+screen when the next line runs; use `waitFor` for what comes later (a response, a timer). An animation that loops
+forever, such as a loading spinner, keeps running in the background while steps and `waitFor` go on, as an infinite
+CSS animation does in a browser's tests. A step rejects, failing the test, when nothing matches its selector (the error lists the texts on
 screen), when the app threw an exception meanwhile, and when the app asked for what only a real platform answers.
 
 `app.spanStyle("id:guide")` reads a nested `<Text testID="guide">`; `text:word` reads the first character
@@ -402,7 +404,7 @@ A headless run has the real runtime and no platform. It plays the platform's par
 that only a real platform can do:
 
 - **Native animations run** frame by frame, to their end: `start(callback)` callbacks run, and so does what waits for
-  them.
+  them. Loops without an end run until the app stops them.
 - **Going back** pops screens and closes modals as a platform does (`app.back()`).
 - **Dialogs are answered**: by the test's `onDialog`, else by their cancel button, else they are closed when they can
   be; a dialog that only its other buttons answer fails the step that showed it until the test says which to press.

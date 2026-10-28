@@ -593,6 +593,102 @@ fn slots_children_and_events() {
     );
 }
 
+const SLOT_LAYOUT: &str = r#"import { mount, Text, View } from "nsh";
+import { Field } from "test/ui";
+
+mount(() => (
+  <View>
+    <Field label={<Text style={{ flex: 1 }}>Grow</Text>} />
+    <Field label={<Text style={{ marginLeft: "auto" }}>End</Text>} />
+    <Field label={<Text style={{ alignSelf: "flex-end" }}>Low</Text>} />
+    <Field label={<Text style={{ width: "50%" }}>Half</Text>} />
+    <Field label={<><Text>One</Text><Text>Two</Text></>} hint={<Text style={{ flex: 1 }}>Hint</Text>} />
+  </View>
+));
+"#;
+
+/// The app's element in a slot the component places as it is lays out as
+/// an item of the component's layout, as its own child would (`Field`'s
+/// label in a 300 × 40 row before a 50 × 20 control): `flex: 1` grows
+/// along the row, `marginLeft: "auto"` pushes it to the control,
+/// `alignSelf` aligns it in the row, a percentage is of the row. Its holder
+/// takes its box and it sits at the holder's origin. A slot the component
+/// styles (`hint`, padded) and a slot of several elements stay boxes of
+/// their own, laid out as columns.
+#[test]
+fn slot_content_lays_out_in_the_components_layout() {
+    let (_engine, rx) = start(SLOT_LAYOUT);
+    let mut batches = vec![
+        rx.recv_timeout(Duration::from_secs(5))
+            .expect("first frame"),
+    ];
+    while let Ok(batch) = rx.recv_timeout(Duration::from_millis(200)) {
+        batches.push(batch);
+    }
+    let id = |wanted| {
+        batches
+            .iter()
+            .find_map(|b| text_ids(b, wanted))
+            .unwrap_or_else(|| panic!("{wanted} rendered"))
+    };
+    let parent_of = |child| {
+        batches
+            .iter()
+            .find_map(|b| {
+                b.items.iter().find_map(|i| match i {
+                    MountItem::Insert {
+                        parent, child: c, ..
+                    } if *c == child => Some(*parent),
+                    _ => None,
+                })
+            })
+            .expect("inserted")
+    };
+    let frame = |id| frame_of(&batches, id).expect("a frame");
+    // (x, y, width, height) of the holder of `wanted`, and its own frame.
+    let boxes = |wanted| {
+        let text = id(wanted);
+        let b = |f: nsh_core::Bounds<Points>| {
+            (f.origin.x.0, f.origin.y.0, f.size.width.0, f.size.height.0)
+        };
+        (b(frame(parent_of(text))), b(frame(text)))
+    };
+
+    let (holder, text) = boxes("Grow");
+    assert_eq!((holder.0, holder.2), (0.0, 250.0), "grows to the control");
+    assert_eq!((text.0, text.1, text.2), (0.0, 0.0, 250.0));
+    let close = |a: f32, b: f32| (a - b).abs() < 0.01;
+    let (holder, text) = boxes("End");
+    assert!(holder.0 > 0.0, "{holder:?}");
+    assert!(
+        close(holder.0 + holder.2, 250.0),
+        "pushed to the control: {holder:?}"
+    );
+    assert_eq!((text.0, text.1), (0.0, 0.0));
+    let (holder, _) = boxes("Low");
+    assert!(
+        close(holder.1 + holder.3, 40.0),
+        "at the row's bottom: {holder:?}"
+    );
+    let (holder, text) = boxes("Half");
+    assert_eq!((holder.2, text.2), (150.0, 150.0), "half the row");
+
+    // Several elements: a column of their own.
+    let (one, _) = boxes("One");
+    let (two, _) = boxes("Two");
+    assert_eq!(one, two, "one holder");
+    let (one, two) = (frame(id("One")), frame(id("Two")));
+    assert_eq!(two.origin.y.0, one.origin.y.0 + one.size.height.0);
+    // Styled by the component: its padded box, after the control.
+    let (holder, text) = boxes("Hint");
+    let label = one.size.width.0.max(two.size.width.0);
+    assert!(
+        close(holder.0, label + 50.0),
+        "after the control: {holder:?}"
+    );
+    assert_eq!(text.0, 8.0, "in the holder's padding");
+}
+
 const METHODS: &str = r#"import { mount, signal, Text, View } from "nsh";
 import { Stepper, type StepperRef } from "test/ui";
 
@@ -3017,6 +3113,110 @@ fn a_popovers_trigger_is_styled_while_open() {
     assert_eq!(style(&closed).unwrap().background_color.0, 0xffff_ffff);
 }
 
+const TOGGLE: &str = r##"import { mount, signal, Text, View } from "nsh";
+
+const bold = signal(false);
+
+mount(() => (
+  <View role="toolbar">
+    <View role="group" accessibilityLabel="Text style">
+      <View
+        testID="bold"
+        role="button"
+        accessibilityState={{ pressed: bold() }}
+        class="bg-white aria-pressed:bg-black"
+        pressedStyle={{ opacity: 0.5 }}
+        onPress={() => bold.set(!bold())}
+      >
+        <Text>{bold() ? "Bold on" : "Bold off"}</Text>
+      </View>
+    </View>
+    <View testID="heading" role="header" accessibilityLevel={2}>
+      <Text>Details</Text>
+    </View>
+    <View testID="pages" role="navigation">
+      <View testID="page" role="link" accessibilityState={{ current: "page" }} />
+    </View>
+    <View testID="item" role="treeitem" accessibilityLevel={0} />
+  </View>
+));
+"##;
+
+/// A toggle button's `aria-pressed:` classes and `pressedStyle` follow its
+/// `accessibilityState.pressed`, which the platform gets with the new
+/// roles, a heading's level and a page's current state; a level that is
+/// no whole number from 1 is none.
+#[test]
+fn a_toggle_is_styled_while_pressed() {
+    use nsh_core::{AccessibilityCurrent, AccessibilityRole, Checked};
+    let (engine, rx) = start(TOGGLE);
+    let first = rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("first frame");
+    let props = |batches: &[MountBatch], test_id: &str| {
+        batches
+            .iter()
+            .rev()
+            .flat_map(|b| b.items.iter().rev())
+            .find_map(|i| match i {
+                MountItem::ViewProps { id, props } if props.test_id.as_deref() == Some(test_id) => {
+                    Some((*id, props.accessibility.clone()))
+                }
+                _ => None,
+            })
+            .expect(test_id)
+    };
+    let first = std::slice::from_ref(&first);
+    let (bold, a) = props(first, "bold");
+    assert_eq!(a.role, AccessibilityRole::Button);
+    assert_eq!(a.state.pressed, Some(Checked::False));
+    let (_, heading) = props(first, "heading");
+    assert_eq!(
+        (heading.role, heading.level),
+        (AccessibilityRole::Header, Some(2))
+    );
+    assert_eq!(props(first, "pages").1.role, AccessibilityRole::Navigation);
+    let (_, page) = props(first, "page");
+    assert_eq!(page.state.current, Some(AccessibilityCurrent::Page));
+    let (_, item) = props(first, "item");
+    assert_eq!((item.role, item.level), (AccessibilityRole::TreeItem, None));
+    let style = |batches: &[MountBatch]| {
+        batches
+            .iter()
+            .rev()
+            .flat_map(|b| b.items.iter().rev())
+            .find_map(|i| match i {
+                MountItem::ViewStyle { id, style } if *id == bold => Some(style.clone()),
+                _ => None,
+            })
+    };
+    let off = style(first).expect("styled");
+    assert_eq!(off.background_color.0, 0xffff_ffff);
+    assert_eq!(off.opacity, 1.0);
+    // The core sets the state: the platform is not asked to report it.
+    assert!(!first.iter().flat_map(|b| &b.items).any(|i| matches!(
+        i,
+        MountItem::TrackStates { id, states }
+            if *id == bold && states & nsh_core::tailwind::state::ARIA_PRESSED != 0
+    )));
+    let press = || {
+        engine
+            .control()
+            .dispatch_event(bold, EventKind::Press, EventPayload::None)
+    };
+    press();
+    let pressed = until(&rx, |b| shows(b, "Bold on"));
+    assert_eq!(props(&pressed, "bold").1.state.pressed, Some(Checked::True));
+    let on = style(&pressed).expect("restyled");
+    assert_eq!(on.background_color.0, 0x0000_00ff);
+    assert_eq!(on.opacity, 0.5);
+    press();
+    let released = until(&rx, |b| shows(b, "Bold off"));
+    let off = style(&released).expect("restyled");
+    assert_eq!(off.background_color.0, 0xffff_ffff);
+    assert_eq!(off.opacity, 1.0);
+}
+
 /// A popup reports a change of its open state before its lifecycle
 /// follows it: `onOpenChange`, then `onOpen` / `onClose` once it is all
 /// there or all gone, also where that is at once (no motion).
@@ -3636,6 +3836,110 @@ fn a_base_combobox_toggles_the_apps_array_and_confirms_it_on_close() {
     until(&rx, |b| shows(b, "Confirmed: go,swift"));
 }
 
+const BASE_DATE_PICKER: &str = r##"import { mount, signal, Text, View } from "nsh";
+import { DatePicker } from "nsh/base";
+
+function App() {
+  const value = signal<string | null>("2026-10-10");
+  const range = signal<[string | null, string | null] | null>(null);
+  return (
+    <View>
+      <DatePicker
+        value={value()}
+        onChange={({ value: next }) => value.set(next as string | null)}
+        disabledMatcher={(date) => date.endsWith("-14")}
+        accessibilityLabel="Due"
+        trigger={<View><Text>Pick</Text></View>}
+        renderItem={(item) => <Text>{item.kind === "day" ? `${item.date}${item.active ? "*" : ""}` : `${item.kind}`}</Text>}
+      />
+      <DatePicker
+        range
+        value={range()}
+        onChange={({ value: next }) => range.set(next as [string | null, string | null])}
+        presets={[{ label: "Week", value: ["2026-10-19", "2026-10-25"] }]}
+        accessibilityLabel="Trip"
+        trigger={<View><Text>Trip</Text></View>}
+      />
+      <Text>{`Value: ${value()}`}</Text>
+      <Text>{`Range: ${JSON.stringify(range())}`}</Text>
+    </View>
+  );
+}
+
+mount(App);
+"##;
+
+/// `nsh/base`'s `DatePicker` through its JS face: an ISO date the app owns
+/// (`onChange({ value })` with the string), the app's function of a date
+/// disabling days in the next turn, `renderItem`'s state with the day's
+/// date; a range picker's preset reporting `[start, end]`.
+#[test]
+fn a_base_date_picker_reports_iso_dates_and_asks_the_apps_matcher() {
+    use nsh_core::AccessibilityRole;
+    let (engine, rx) = start(BASE_DATE_PICKER);
+    let find = |batches: &[MountBatch], label: &str, role: AccessibilityRole| {
+        batches
+            .iter()
+            .rev()
+            .flat_map(|b| b.items.iter().rev())
+            .find_map(|i| match i {
+                MountItem::ViewProps { id, props }
+                    if props.accessibility.role == role
+                        && props.accessibility.label.as_deref() == Some(label) =>
+                {
+                    Some((*id, (**props).clone()))
+                }
+                _ => None,
+            })
+    };
+    let first = until(&rx, |b| {
+        find(std::slice::from_ref(b), "Trip", AccessibilityRole::Combobox).is_some()
+    });
+    let (due, props) = find(&first, "Due", AccessibilityRole::Combobox).unwrap();
+    assert_eq!(
+        props
+            .accessibility
+            .value
+            .and_then(|v| v.text.map(|t| t.to_string()))
+            .as_deref(),
+        Some("2026/10/10")
+    );
+    let (trip, _) = find(&first, "Trip", AccessibilityRole::Combobox).unwrap();
+
+    engine
+        .control()
+        .dispatch_event(due, EventKind::Press, EventPayload::None);
+    let opened = until(&rx, |b| shows(b, "2026-10-10*"));
+    // The app's function disables the 14th, a turn later.
+    let disabled = until(&rx, |b| {
+        find(
+            std::slice::from_ref(b),
+            "2026-10-14",
+            AccessibilityRole::Button,
+        )
+        .is_some_and(|(_, p)| p.accessibility.state.disabled)
+    });
+    let (fifteenth, _) = find(&opened, "2026-10-15", AccessibilityRole::Button)
+        .or_else(|| find(&disabled, "2026-10-15", AccessibilityRole::Button))
+        .expect("a day");
+    engine
+        .control()
+        .dispatch_event(fifteenth, EventKind::Press, EventPayload::None);
+    until(&rx, |b| shows(b, "Value: 2026-10-15"));
+
+    engine
+        .control()
+        .dispatch_event(trip, EventKind::Press, EventPayload::None);
+    let open = until(&rx, |b| {
+        find(std::slice::from_ref(b), "Week", AccessibilityRole::Button).is_some()
+    });
+    let (week, _) = find(&open, "Week", AccessibilityRole::Button).unwrap();
+    engine
+        .control()
+        .dispatch_event(week, EventKind::Press, EventPayload::None);
+    until(&rx, |b| shows(b, r#"Range: ["2026-10-19","2026-10-25"]"#));
+}
+
 const BASE_SELECT_DESKTOP: &str = r##"import { mount, Text, View } from "nsh";
 import { Select } from "nsh/base";
 
@@ -3661,8 +3965,8 @@ mount(() => (
 "##;
 
 /// On a desktop, a TSX `Select`'s trigger is the app's element: the
-/// combobox, and what the popup is placed against and as wide as (not the
-/// slot's view, which the column stretches); open at first (`defaultOpen`),
+/// combobox, and what the popup is placed against and as wide as (its
+/// slot's view lays it out through, taking its box); open at first (`defaultOpen`),
 /// the popup shows its rows once the trigger is laid out.
 #[test]
 fn a_base_select_on_a_desktop_places_its_popup_at_the_apps_trigger() {
@@ -6326,6 +6630,142 @@ fn base_plot_bars_grow_and_fade_natively() {
     let drawings = plot_drawings(&batches);
     assert!(drawings.iter().all(|(_, d)| !grows(d)));
     assert_eq!(bar_rects(&drawings[0].1.ops).len(), 3);
+}
+
+const BASE_PLOT_COLOR_SCALE: &str = r##"import { mount, View } from "nsh";
+import { Area, Bar, Line, Pie, Plot } from "nsh/base/plot";
+
+type Row = { region: string; v: number };
+
+const rows: Row[] = [
+  { region: "EU", v: 1 },
+  { region: "US", v: 2 },
+  { region: "APAC", v: 3 },
+  { region: "EU", v: 4 },
+  { region: "LATAM", v: 5 },
+];
+
+function App() {
+  return (
+    <View>
+      {/* The domain's order, the categories past it in the order met, the
+          range repeating; the last slice's class over its color. */}
+      <Plot data={rows} colorScale={{ type: "ordinal", domain: ["US", "EU"], range: ["#ff0000", "#00ff00", "#0000ff"] }} style={{ width: 200, height: 100 }}>
+        <Pie value="v" color="region" sliceClass={(_, i) => (i === 4 ? "fill-[#999999]" : "")} />
+      </Plot>
+      {/* Bars by the app's function of a row; a style over the scale. */}
+      <Plot data={rows} y="v" xScale={{ type: "band" }} colorScale={{ type: "ordinal", domain: ["low", "high"], range: ["#ff0000", "#00ff00"] }} style={{ width: 200, height: 100 }}>
+        <Bar color={(d: Row) => (d.v > 2 ? "high" : "low")} />
+        <Bar color="region" style={{ fill: "#999999" }} />
+      </Plot>
+      {/* A series' first row: rows of its own outside the domain take
+          `unknown`; without a color, `currentColor` (the plot's text). */}
+      <Plot data={rows} y="v" class="text-[#333333]" colorScale={{ type: "ordinal", domain: ["EU"], range: ["#00ff00"], unknown: "#0000ff" }} style={{ width: 200, height: 100 }}>
+        <Line data={[{ region: "US", v: 1 }, { region: "US", v: 2 }]} color="region" />
+        <Line color="region" />
+        <Line />
+        <Area color="region" />
+      </Plot>
+    </View>
+  );
+}
+
+mount(App);
+"##;
+
+/// A plot's `colorScale` (`gpui-base`'s `ScaleOrdinal`, d3's
+/// `scaleOrdinal`) colors its marks by the category their `color` reads
+/// of each row (a field, or the app's function a turn later): a pie's
+/// slices and the bars by their rows, a line and an area by their first
+/// row. The domain's categories take the range in order, the others the
+/// next colors as they are met (d3's implicit domain) or `unknown`; the
+/// range repeats. The color is the paint where nothing sets one: the
+/// app's classes and styles win.
+#[test]
+fn base_plot_colors_marks_through_an_ordinal_scale() {
+    use nsh_core::{
+        Color,
+        canvas::{CanvasOp, Paint},
+    };
+    let (red, green, blue, gray) = (
+        Color(0xff00_00ff),
+        Color(0x00ff_00ff),
+        Color(0x0000_ffff),
+        Color(0x9999_99ff),
+    );
+    let (_engine, rx) = start(BASE_PLOT_COLOR_SCALE);
+    // The bars' function answers a turn after the rows.
+    let mut all = until_drawn(&rx, |d| {
+        !bar_rects(&d.ops).is_empty()
+            && d.ops
+                .contains(&CanvasOp::FillStyle(Paint::Color(Color(0x00ff_00ff))))
+    });
+    all.extend(until(&rx, |_| false));
+    let drawings = plot_drawings(&all);
+    let fills = |d: &nsh_core::canvas::Drawing| -> Vec<Color> {
+        d.ops
+            .iter()
+            .filter_map(|op| match op {
+                CanvasOp::FillStyle(Paint::Color(c)) => Some(*c),
+                _ => None,
+            })
+            .collect()
+    };
+    let stroke = |d: &nsh_core::canvas::Drawing| {
+        d.ops.iter().find_map(|op| match op {
+            CanvasOp::StrokeStyle(Paint::Color(c)) => Some(*c),
+            _ => None,
+        })
+    };
+
+    // The slices, in the rows' order: EU (the domain's second), US (its
+    // first), APAC and LATAM met after it (the third color, then the
+    // first again), the last one's class over its color.
+    let slices: Vec<_> = drawings
+        .iter()
+        .filter(|(_, d)| !drawn_arcs(&d.ops).is_empty())
+        .map(|(_, d)| fills(d))
+        .collect();
+    assert_eq!(
+        slices,
+        [vec![green], vec![red], vec![blue], vec![green], vec![gray]]
+    );
+
+    // Each bar its row's color; the style's fill over every one.
+    let bars: Vec<_> = drawings
+        .iter()
+        .filter(|(_, d)| !bar_rects(&d.ops).is_empty())
+        .collect();
+    let [(_, by_value), (_, styled)] = &bars[..] else {
+        panic!("two bars: {bars:?}")
+    };
+    assert_eq!(fills(by_value), [red, red, green, green, green]);
+    assert_eq!(fills(styled), [gray; 5]);
+
+    // A line of its own rows (US: unknown), one of the plot's (EU first),
+    // one without a color; the area of the plot's rows.
+    let lines: Vec<_> = drawings
+        .iter()
+        .filter(|(_, d)| {
+            d.ops.iter().any(|op| matches!(op, CanvasOp::Stroke(_)))
+                && !d.ops.iter().any(|op| matches!(op, CanvasOp::Fill(..)))
+        })
+        .filter_map(|(_, d)| stroke(d))
+        .collect();
+    let [own, plots, plain] = lines[..] else {
+        panic!("three lines: {lines:?}")
+    };
+    assert_eq!((own, plots), (blue, green));
+    assert_eq!(plain, Color(0x3333_33ff));
+    let area = drawings
+        .iter()
+        .find(|(_, d)| {
+            drawn_arcs(&d.ops).is_empty()
+                && bar_rects(&d.ops).is_empty()
+                && d.ops.iter().any(|op| matches!(op, CanvasOp::Fill(..)))
+        })
+        .map(|(_, d)| fills(d));
+    assert_eq!(area, Some(vec![green]));
 }
 
 const BASE_PLOT_AXIS: &str = r##"import { mount, signal, View } from "nsh";

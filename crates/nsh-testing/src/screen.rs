@@ -13,9 +13,9 @@ use std::{
 };
 
 use nsh_core::{
-    AccessibilityRole, Bounds, Command, Dialog, EventKind, EventMask, GestureValues, InputConfig,
-    MountBatch, MountItem, NodeId, PanActivation, Point, PointerEvents, Points, Size, ViewKind,
-    element::PropEnum,
+    AccessibilityRole, AccessibilityState, Bounds, Command, Dialog, EventKind, EventMask,
+    GestureValues, InputConfig, MountBatch, MountItem, NodeId, PanActivation, Point, PointerEvents,
+    Points, Size, ViewKind, element::PropEnum,
 };
 
 use crate::selector::{Matcher, Selector, TextMatch};
@@ -194,6 +194,10 @@ struct View {
     /// It is selected (`selected`, its accessibility state; a canvas node's
     /// `selected`).
     selected: bool,
+    /// Its `accessibilityState`.
+    accessibility_state: AccessibilityState,
+    /// Its `accessibilityLevel`.
+    level: Option<u32>,
     /// How long a press must last to be a long one (`delayLongPress`), in
     /// milliseconds.
     long_press_delay: Option<f32>,
@@ -387,6 +391,8 @@ impl Screen {
                 view.disabled = props.accessibility.state.disabled;
                 view.focusable = props.focusable;
                 view.selected = props.accessibility.state.selected;
+                view.accessibility_state = props.accessibility.state;
+                view.level = props.accessibility.level;
                 view.long_press_delay = props.long_press_delay;
                 view.selectable_view = props.selectable_view;
                 view.pan_activation = props.pan_activation;
@@ -1167,6 +1173,34 @@ impl Screen {
         let parsed = Selector::parse(selector)?;
         match self.resolve(&parsed)[..] {
             [id] => Ok(self.nodes.get(&id).is_some_and(|v| v.selected)),
+            [] => Err(format!("no view matches `{selector}`")),
+            ref all => Err(format!("`{selector}` matches {} views", all.len())),
+        }
+    }
+
+    /// The accessibility state of the view `selector` names (its
+    /// `accessibilityState`: a toggle button's `pressed`, a page's
+    /// `current`, ...); an error when none or several match.
+    pub fn accessibility_state(&self, selector: &str) -> Result<AccessibilityState, String> {
+        let parsed = Selector::parse(selector)?;
+        match self.resolve(&parsed)[..] {
+            [id] => Ok(self
+                .nodes
+                .get(&id)
+                .map(|v| v.accessibility_state)
+                .unwrap_or_default()),
+            [] => Err(format!("no view matches `{selector}`")),
+            ref all => Err(format!("`{selector}` matches {} views", all.len())),
+        }
+    }
+
+    /// The level of the view `selector` names (its `accessibilityLevel`:
+    /// a heading's, a tree item's depth); an error when none or several
+    /// match.
+    pub fn accessibility_level(&self, selector: &str) -> Result<Option<u32>, String> {
+        let parsed = Selector::parse(selector)?;
+        match self.resolve(&parsed)[..] {
+            [id] => Ok(self.nodes.get(&id).and_then(|v| v.level)),
             [] => Err(format!("no view matches `{selector}`")),
             ref all => Err(format!("`{selector}` matches {} views", all.len())),
         }

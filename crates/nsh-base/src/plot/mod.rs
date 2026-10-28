@@ -51,7 +51,7 @@ pub use self::{
     pie::{
         Arc, ArcElement, ArcProps, Pie, PieElement, PieLabelStyle, PieProps, SliceClass, arc, pie,
     },
-    scale::{BandScale, Scale},
+    scale::{BandScale, OrdinalScale, Scale},
 };
 use self::{
     bar::{BarEntry, BarLayout},
@@ -244,6 +244,14 @@ pub struct PlotProps {
     /// the pointer for `"pointer"`; 0 by default.
     #[prop(default)]
     pub tooltip_offset: Prop<Points>,
+    /// The colors of the categories the marks' `color` reads of their
+    /// rows (`gpui-base`'s `ScaleOrdinal`, d3's `scaleOrdinal`): `{ type:
+    /// "ordinal", domain?, range, unknown? }`. A slice's or a bar's color
+    /// is its row's, a line's or an area's its first row's; it is the
+    /// mark's `fill` (a line's `stroke`) where nothing sets one, so the
+    /// app's classes and styles, the mark's or inherited from the plot,
+    /// win over it. None by default: the marks take no color of a scale.
+    pub color_scale: Prop<Option<OrdinalScale>>,
     /// The marks, drawn in order over each other (each fills the plot),
     /// and whatever the app lays over them.
     pub children: Prop<Children>,
@@ -358,6 +366,12 @@ struct PlotContext {
     interactive: Prop<bool>,
     /// The axis with bands (the x axis when both have them).
     band_axis: Memo<Option<Axis>>,
+    /// The colors of the marks' categories.
+    color_scale: Prop<Option<OrdinalScale>>,
+    /// The categories outside `color_scale`'s domain the marks have met,
+    /// in order, and the scale they were met for (d3's implicit domain:
+    /// they keep their colors while the scale stays).
+    met: Stored<(Option<OrdinalScale>, Vec<SharedString>)>,
 }
 
 /// A radial mark's test of the row under a point of the plot
@@ -490,6 +504,20 @@ impl PlotContext {
         let none = Num::Const(0.0);
         let p = p.op(CanvasOp::Transform([sx, none, none, sy, ox, oy]));
         trace(p).restore()
+    }
+
+    /// The colors `colorScale` gives `categories` (`None`: the plot has no
+    /// scale), a category met first taking the next color (d3's implicit
+    /// domain).
+    fn colors(&self, categories: &[SharedString]) -> Option<std::sync::Arc<[Option<Hsla>]>> {
+        let scale = self.color_scale.get()?;
+        Some(self.met.with(|(of, met)| {
+            if of.as_ref() != Some(&scale) {
+                *of = Some(scale.clone());
+                met.clear();
+            }
+            categories.iter().map(|c| scale.color(met, c)).collect()
+        }))
     }
 }
 
@@ -681,6 +709,8 @@ pub fn Plot(props: PlotProps, cx: Scope<PlotEvent>) -> impl IntoElement {
         hits,
         interactive: props.interactive,
         band_axis,
+        color_scale: props.color_scale,
+        met: stored((None, Vec::new())),
     });
 
     let place = TooltipPlace::new(props.tooltip_placement, props.tooltip_offset);

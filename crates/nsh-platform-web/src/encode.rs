@@ -753,11 +753,8 @@ fn props_json(p: &ViewProps) -> String {
     if let Some(h) = &a.hint {
         let _ = write!(s, ",\"hint\":{}", json_str(h));
     }
-    let _ = write!(
-        s,
-        ",\"role\":{}",
-        json_str(&kebab(&format!("{:?}", a.role)))
-    );
+    // The role's JS name, which is ARIA's (`columnheader`, `treeitem`).
+    let _ = write!(s, ",\"role\":{}", json_str(enum_name(&a.role)));
     if a.state.disabled {
         s.push_str(",\"disabled\":true");
     }
@@ -772,6 +769,15 @@ fn props_json(p: &ViewProps) -> String {
     }
     if let Some(e) = a.state.expanded {
         let _ = write!(s, ",\"expanded\":{e}");
+    }
+    if let Some(p) = a.state.pressed {
+        let _ = write!(s, ",\"pressed\":{}", json_str(&kebab(&format!("{p:?}"))));
+    }
+    if let Some(c) = a.state.current {
+        let _ = write!(s, ",\"current\":{}", json_str(&kebab(&format!("{c:?}"))));
+    }
+    if let Some(l) = a.level {
+        let _ = write!(s, ",\"level\":{l}");
     }
     if let Some(v) = &a.value {
         let n = |v: Option<f32>| v.map_or("null".to_owned(), |v| v.to_string());

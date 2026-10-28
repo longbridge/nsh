@@ -98,10 +98,11 @@ impl Host {
         self.density.get()
     }
 
-    /// Whether the native animation graph animates.
+    /// Whether the native animation graph runs an animation that ends by
+    /// itself (not one looping forever, which no test step waits for).
     #[cfg(feature = "dev")]
     pub(crate) fn animating(&self) -> bool {
-        self.ui.lock().is_ok_and(|ui| ui.animating())
+        self.ui.lock().is_ok_and(|ui| ui.finishing())
     }
 
     fn control(&self) -> Option<EngineControl> {

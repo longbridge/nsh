@@ -17,11 +17,14 @@
 //!
 //! On a manual clock (`EngineConfig::clock`) the app's time moves only as
 //! the driver moves it: display frames come at once, one frame's time
-//! apart, while the app asks for them or a native animation runs (so steps
-//! finish animations without waiting for them), [`Headless::wait`] and a
-//! long press move the clock by their time, and [`Headless::run_for`] /
-//! [`Headless::fast_forward`] move it as a test says. What the driver
-//! waits for (a step's quiet, a `waitFor`'s timeout) stays real time.
+//! apart, while the app asks for them or a native animation that ends by
+//! itself runs (so steps finish animations without waiting for them),
+//! [`Headless::wait`] and a long press move the clock by their time, and
+//! [`Headless::run_for`] / [`Headless::fast_forward`] move it as a test
+//! says. What the driver waits for (a step's quiet, a `waitFor`'s timeout)
+//! stays real time. Native animations that loop forever (a spinner) run in
+//! the background on either clock: their values move with the app's time,
+//! and no step or wait waits for them (nor moves a manual clock for them).
 //!
 //! `nsh test` runs apps this way (feature `js`: [`crate::run_file`]),
 //! printing the batches under their steps with `--trace`; so do Rust tests
@@ -228,8 +231,8 @@ const CLICK_INTERVAL: Duration = Duration::from_millis(500);
 /// A step takes the batches that came since the last one first (they
 /// belong to it), then names itself the step of the batches that follow:
 /// what [`Headless::observe`] sees. Steps that act on the app return once
-/// it rendered nothing for 100 ms and no native animation runs (2 s at
-/// most), and fail when the app threw meanwhile (an exception that
+/// it rendered nothing for 100 ms and no native animation runs that ends
+/// by itself (2 s at most), and fail when the app threw meanwhile (an exception that
 /// escaped a callback, a bundle that did not load, a VM that was stopped)
 /// or asked what only a real platform answers (an image from the
 /// clipboard).
@@ -395,12 +398,13 @@ impl Headless {
     }
 
     /// Whether, on a manual clock, the app wants frames: it asked for one,
-    /// or a native animation runs.
+    /// or a native animation that ends by itself runs (one looping forever
+    /// would move the clock for as long as the driver waits).
     fn wants_frames(&self) -> bool {
         self.wanted
             .as_ref()
             .is_some_and(|w| w.load(Ordering::Relaxed))
-            || (self.clock.is_manual() && self.animator.running())
+            || (self.clock.is_manual() && self.animator.finishing())
     }
 
     /// Lets the app's time pass by `time`: real time on the system's clock,
@@ -758,7 +762,8 @@ impl Headless {
     }
 
     /// Applies batches until none comes for `quiet` and no native
-    /// animation runs, or for `limit` at most: false if the limit ended it.
+    /// animation that ends by itself runs, or for `limit` at most: false if
+    /// the limit ended it.
     fn quiet(&mut self, quiet: Duration, limit: Duration) -> bool {
         let end = Instant::now() + limit;
         // Frames on a manual clock come at once: the limit is its time too.
@@ -773,7 +778,7 @@ impl Headless {
                 Pumped::Error | Pumped::Exited => return true,
                 Pumped::Timeout => {
                     let now = Instant::now();
-                    if !self.animator.running() && now >= last + quiet {
+                    if !self.animator.finishing() && now >= last + quiet {
                         return true;
                     }
                     if now >= end {
@@ -785,8 +790,8 @@ impl Headless {
     }
 
     /// Applies batches until none comes for 100 ms and no native animation
-    /// runs, or for 2 s at most (an app updating all the time never goes
-    /// quiet): false if the limit ended it.
+    /// that ends by itself runs, or for 2 s at most (an app updating all
+    /// the time never goes quiet): false if the limit ended it.
     pub fn settle(&mut self) -> bool {
         self.quiet(QUIET, SETTLE)
     }
@@ -1861,6 +1866,79 @@ mod tests {
             "{:?}",
             app.screen().texts()
         );
+    }
+
+    /// A toolbar's group of a toggle button, a heading with its level and
+    /// a pagination's current page.
+    #[component]
+    fn Formatting() -> impl IntoElement {
+        let bold = signal(false);
+        view()
+            .child(
+                view()
+                    .role(AccessibilityRole::Group)
+                    .label("Text style")
+                    .child(
+                        view()
+                            .test_id("bold")
+                            .role(AccessibilityRole::Button)
+                            .label("Bold")
+                            .accessibility_state(move || AccessibilityState {
+                                pressed: Some(if bold.get() {
+                                    nsh_core::Checked::True
+                                } else {
+                                    nsh_core::Checked::False
+                                }),
+                                ..AccessibilityState::default()
+                            })
+                            .on_press(move || bold.update(|b| *b = !*b))
+                            .child(text("B")),
+                    ),
+            )
+            .child(
+                text("Details")
+                    .test_id("details")
+                    .role(AccessibilityRole::Header)
+                    .accessibility_level(2_u32),
+            )
+            .child(
+                view()
+                    .role(AccessibilityRole::Navigation)
+                    .label("Pages")
+                    .child(
+                        view()
+                            .test_id("page-2")
+                            .role(AccessibilityRole::Link)
+                            .accessibility_state(AccessibilityState {
+                                current: Some(nsh_core::AccessibilityCurrent::Page),
+                                ..AccessibilityState::default()
+                            })
+                            .child(text("2")),
+                    ),
+            )
+    }
+
+    #[test]
+    fn roles_find_groups_and_states_follow_a_toggle() {
+        let mut app = Headless::start(EngineConfig::new(Root::of::<Formatting>())).unwrap();
+        app.first_render().unwrap();
+        let screen = app.screen();
+        assert_eq!(screen.count("role:group[Text style]"), Ok(1));
+        assert_eq!(screen.count("role:navigation[Pages] >> role:link"), Ok(1));
+        assert_eq!(screen.accessibility_level("id:details"), Ok(Some(2)));
+        assert_eq!(
+            screen.accessibility_state("id:page-2").map(|s| s.current),
+            Ok(Some(nsh_core::AccessibilityCurrent::Page))
+        );
+        let pressed = |app: &Headless| {
+            app.screen()
+                .accessibility_state("role:button[Bold]")
+                .map(|s| s.pressed)
+        };
+        assert_eq!(pressed(&app), Ok(Some(nsh_core::Checked::False)));
+        app.press("role:button[Bold]").unwrap();
+        app.wait(Duration::from_millis(50)).unwrap();
+        assert_eq!(pressed(&app), Ok(Some(nsh_core::Checked::True)));
     }
 
     /// The metrics of a line of text in a canvas font.

@@ -21,7 +21,10 @@ use nsh_core::{
     prelude::*,
 };
 
-use super::{PlotContext, STROKE_ROOM, mark_canvas, series::values};
+use super::{
+    PlotContext, STROKE_ROOM, mark_canvas,
+    series::{self, values},
+};
 
 /// Below this, a radius or an angle is none (`gpui-base`'s `EPSILON`,
 /// `shape/arc.rs:9`, at `f32`'s precision).
@@ -979,11 +982,12 @@ impl Edges {
     }
 }
 
-/// Fills `sector` with the view's `fill` (`currentColor` where none is
-/// set) and strokes it with its `stroke` (none where none is set): a
-/// slice's edge in the surface's color draws the gaps between slices.
-fn paint(p: Painter, sector: impl FnOnce(Painter) -> Option<Painter>) -> Painter {
-    let p = p.fill_style_from_view(SvgPaint::CurrentColor);
+/// Fills `sector` with the view's `fill` (`fill` where none is set:
+/// `currentColor`, or a slice's category's color) and strokes it with its
+/// `stroke` (none where none is set): a slice's edge in the surface's
+/// color draws the gaps between slices.
+fn paint(p: Painter, fill: SvgPaint, sector: impl FnOnce(Painter) -> Option<Painter>) -> Painter {
+    let p = p.fill_style_from_view(fill);
     let p = p
         .stroke_style_from_view(SvgPaint::None)
         .line_width_from_view()
@@ -1082,6 +1086,13 @@ pub struct PieProps {
     /// `chart/pie_chart.rs:30`), with the hover's fade; 0 by default.
     #[prop(default)]
     pub hover_dim: Prop<Percentage>,
+    /// The category of each slice, which the plot's `colorScale` gives a
+    /// color (d3's `scaleOrdinal` of a field): a field name (its text, a
+    /// number as JS writes it) or a function of the row and its index.
+    /// That color is the slice's `fill` where nothing sets one, in place
+    /// of `currentColor`, so `sliceClass`'s `fill-*`, `sliceStyle`'s `fill`
+    /// and the pie's own win.
+    pub color: Prop<Option<RowText>>,
     /// The text beside each slice, the `label` part (`gpui-component`'s
     /// `PieChart::label`): a field name (its number) or a function of the
     /// row and its index returning the text, outside the ring toward the
@@ -1123,7 +1134,8 @@ pub struct PieProps {
 /// apart. Each slice is a canvas of its own, the `slice` part, so each
 /// paints with its own classes (`sliceClass`, a function of its row) over
 /// the pie's, as CSS inherits `fill` and `stroke`: `fill` (`currentColor`
-/// where none is set) and `stroke` (none). Over a pie, the plot reports
+/// where none is set; with `color`, its category's color of the plot's
+/// `colorScale`) and `stroke` (none). Over a pie, the plot reports
 /// the row of the slice under the pointer, none in the hole or outside,
 /// and its tooltip follows the pointer; that slice grows by `hoverLift`
 /// and the others fade by `hoverDim`, on the platform's animator with the
@@ -1180,6 +1192,7 @@ pub fn Pie(props: PieProps, _cx: Scope<NoEvent>) -> impl IntoElement {
         },
     );
     let classes = slice_classes(move || plot.rows.get(), move || props.slice_class.get());
+    let colors = series::colors(plot, move || plot.rows.get(), props.color);
     let slice_style = props.slice_style;
     // Whether the hover moves the slices: their lift drawn, their
     // opacity bound to how much the others fade (part of their keys, so
@@ -1218,7 +1231,9 @@ pub fn Pie(props: PieProps, _cx: Scope<NoEvent>) -> impl IntoElement {
                 let to = slice.shape(size);
                 let from = from.map(|(from, t)| (from.slice_from(row, pose.start).shape(size), t));
                 let motion = Motion::of(plot, to, pose.start, from);
-                paint(p, |p| {
+                let color = colors.with(|c| c.as_ref().and_then(|c| c.get(row as usize).copied()));
+                let fill = series::paint_of(color.flatten(), SvgPaint::CurrentColor);
+                paint(p, fill, |p| {
                     sector(
                         p,
                         ring.center,
@@ -1254,7 +1269,7 @@ pub fn Pie(props: PieProps, _cx: Scope<NoEvent>) -> impl IntoElement {
     let labels = when(
         move || label.with(Option::is_some),
         move || {
-            let texts = super::bar::texts(move || plot.rows.get(), move || label.get());
+            let texts = series::texts(move || plot.rows.get(), move || label.get());
             let line_classes = slice_classes(move || plot.rows.get(), move || line_class.get());
             let text_of = move |row: u32| {
                 texts.with(|t| {
@@ -1602,7 +1617,7 @@ pub fn Arc(props: ArcProps, _cx: Scope<NoEvent>) -> impl IntoElement {
             let from = from.map(|(from, t)| (from.shape(size), t));
             let motion = Motion::of(plot, to, start.get().0, from);
             let center = ring(plot).center;
-            paint(p, |p| {
+            paint(p, SvgPaint::CurrentColor, |p| {
                 sector(p, center, to, None, 0.0, corner.get().0, motion)
             })
         },

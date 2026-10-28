@@ -87,6 +87,8 @@ mount(App);
 prop 一个 setter（`.scroll(..)`、`.thumb_style(..)`），滚动条本身用类型化的样式方法；它的 `scroll` 接受 `ElementRef`（或
 `ScrollbarTarget`）。
 
+<a id="built-in-bars"></a>
+
 ## 内置滚动条
 
 每个滚动视图和列表都可以用 `Scrollbar` 代替平台的滚动指示器，无需自己放置滚动条：在应用启动的地方调用一次 `Scrollbar.setTheme`，

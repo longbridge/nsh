@@ -18,12 +18,12 @@
 
 use jni::objects::GlobalRef;
 use nsh_core::{
-    AccessibilityRole, AudioSession, AutoCapitalize, AutoFill, BorderStyle, Checked, Color,
-    Command, DialogButtonStyle, InputConfig, KeyboardDismissMode, KeyboardTaps, KeyboardType,
-    LayoutCurve, LayoutProperty, LayoutTransition, LiveRegion, ModalAnimation, ModalPresentation,
-    MountBatch, MountItem, NativeProps, PointerEvents, ResizeMode, ReturnKeyType, ScreenAnimation,
-    ScreenConfig, SnapAlignment, StatusBarStyle, SubmitBehavior, TextAlign, ViewKind, ViewProps,
-    ViewStyle, WebSource,
+    AccessibilityCurrent, AccessibilityRole, AudioSession, AutoCapitalize, AutoFill, BorderStyle,
+    Checked, Color, Command, DialogButtonStyle, InputConfig, KeyboardDismissMode, KeyboardTaps,
+    KeyboardType, LayoutCurve, LayoutProperty, LayoutTransition, LiveRegion, ModalAnimation,
+    ModalPresentation, MountBatch, MountItem, NativeProps, PointerEvents, ResizeMode,
+    ReturnKeyType, ScreenAnimation, ScreenConfig, SnapAlignment, StatusBarStyle, SubmitBehavior,
+    TextAlign, ViewKind, ViewProps, ViewStyle, WebSource,
     geometry::{DefiniteLength, REM_SIZE},
 };
 
@@ -1039,6 +1039,23 @@ fn view_props(e: &mut Encoded, p: &ViewProps) {
         Some(true) => flags |= 64 | 128,
         None => {}
     }
+    match s.pressed {
+        Some(Checked::False) => flags |= 256,
+        Some(Checked::True) => flags |= 256 | 512,
+        Some(Checked::Mixed) => flags |= 256 | 1024,
+        None => {}
+    }
+    // The current item's kind, in bits 11 to 13 (`A11y.java`
+    // `CURRENT_DESCRIPTIONS`).
+    flags |= match s.current {
+        None => 0,
+        Some(AccessibilityCurrent::True) => 1,
+        Some(AccessibilityCurrent::Page) => 2,
+        Some(AccessibilityCurrent::Step) => 3,
+        Some(AccessibilityCurrent::Location) => 4,
+        Some(AccessibilityCurrent::Date) => 5,
+        Some(AccessibilityCurrent::Time) => 6,
+    } << 11;
     e.int(flags);
     match &a.value {
         Some(v) => {
@@ -1128,6 +1145,13 @@ fn role_index(role: AccessibilityRole) -> i32 {
         RowGroup => 33,
         Listbox => 34,
         Option => 35,
+        Group => 36,
+        Region => 37,
+        Navigation => 38,
+        Tree => 39,
+        TreeItem => 40,
+        MenuItemCheckbox => 41,
+        MenuItemRadio => 42,
     }
 }
 

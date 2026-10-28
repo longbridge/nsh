@@ -634,11 +634,12 @@ impl Surface {
         self.invalidate();
     }
 
-    /// Whether a native animation runs: the graph's, or the platform's own
+    /// Whether a native animation runs: the graph's (not one looping
+    /// forever, which no test step waits for), or the platform's own
     /// (scroll glides).
     #[cfg(feature = "dev")]
     pub(crate) fn animating(&self) -> bool {
-        self.anim.borrow().animating() || !self.frame_clients.borrow().is_empty()
+        self.anim.borrow().finishing() || !self.frame_clients.borrow().is_empty()
     }
 
     /// Keeps the model `nsh test --target` steps see of the app

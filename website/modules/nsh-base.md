@@ -1,6 +1,6 @@
 ---
 title: nsh/base
-description: "Unstyled base components for an app's UI: buttons, checkboxes, radios, switches, tabs, selects, comboboxes, resizable panels, dockable workspaces, Markdown and HTML documents, a code editor, diffs, text inputs, navigation stacks and dialogs, system alert dialogs and the status bar of pages and dialogs."
+description: "Unstyled base components for an app's UI: buttons, checkboxes, radios, switches, tabs, selects, comboboxes, calendars, date pickers, time fields, resizable panels, dockable workspaces, Markdown and HTML documents, a code editor, diffs, text inputs, navigation stacks and dialogs, system alert dialogs and the status bar of pages and dialogs."
 order: 2.5
 demo: ui-navigation
 ---
@@ -10,7 +10,7 @@ demo: ui-navigation
 `nsh/base` is the base component layer of an app's UI: unstyled components that own behavior, state, focus and
 accessibility, on every platform. It sits between the primitives (`nsh`, `nsh/mobile` and `nsh/desktop`) and the
 app's own component library, as `gpui-base` sits between `gpui` and a styled library in GPUI Kit (see
-[Modules](./index.md#three-layers)). It provides controls (`Button`, `Checkbox`, `NumberInput`, `Radio` in a `RadioGroup`, `Slider`, `Switch`, `Tab` in `Tabs`, `Select`, `Combobox`), scroll bars of the app's own look (`Scrollbar`), regions that expand and collapse (`Collapsible`), a progress bar (`Progress`), one-time codes (`OtpInput`), the parts charts are built from (`Plot` with `Line`, `Area`, `Bar`, `Grid`, `Pie` and `Arc`, in `nsh/base/plot`), workspaces the user arranges (`ResizablePanel`s in a
+[Modules](./index.md#three-layers)). It provides controls (`Button`, `Checkbox`, `NumberInput`, `Radio` in a `RadioGroup`, `Slider`, `Switch`, `Tab` in `Tabs`, `Select`, `Combobox`, `Calendar`, `TimeField`, `DatePicker`), scroll bars of the app's own look (`Scrollbar`), regions that expand and collapse (`Collapsible`), a progress bar (`Progress`), one-time codes (`OtpInput`), the parts charts are built from (`Plot` with `Line`, `Area`, `Bar`, `Grid`, `Pie` and `Arc`, in `nsh/base/plot`), workspaces the user arranges (`ResizablePanel`s in a
 `ResizablePanelGroup`, and `DockArea`'s splits, tab groups and docks), documents of Markdown or HTML (`TextView`), a code editor (`Editor`) the changes between texts (`DiffView`) and tables of rows and columns (`Table` and its parts, `DataTable`), text inputs
 (`Input`), popups shown on top of everything (`Popover`, `Menu` and `ContextMenu` with their `MenuItem`,
 `MenuSeparator` and `Submenu`, `Tooltip`, `Sheet`), toasts (`Toast` in a `ToastStack`, their lifecycle in a `ToastManager`), navigation (a `NavStack` of `NavPage`s driven
@@ -26,7 +26,7 @@ from the `nsh-base` crate (`nsh_base::{button, dialog, …}`).
 ```rust tabs
 use nsh_base::{
     MarkdownExtension, MarkdownOptions, alert_dialog, button, checkbox, dialog, diff_view, dock_area, editor,
-    combobox, h_resizable, nav_page, nav_stack, radio, radio_group, resizable_panel, select, switch, tab, tabs, text_view, theme, toast, toast_stack, v_resizable,
+    calendar, combobox, date_picker, h_resizable, nav_page, nav_stack, radio, radio_group, resizable_panel, select, switch, tab, tabs, text_view, theme, time_field, toast, toast_stack, v_resizable,
 };
 ```
 
@@ -58,6 +58,9 @@ import {
   Scrollbar,
   Select,
   Combobox,
+  Calendar,
+  TimeField,
+  DatePicker,
   Sheet,
   NumberInput,
   Slider,
@@ -130,6 +133,9 @@ import type {
   SelectItemState,
   SelectProps,
   ComboboxProps,
+  CalendarProps,
+  TimeFieldProps,
+  DatePickerProps,
   ScrollbarEntrance,
   ScrollbarLook,
   ScrollbarMode,
@@ -168,6 +174,9 @@ walkthroughs, see the [Navigation guide](../docs/navigation.md) and [Forms and k
 | [`Tab`](../elements/tabs.md), [`Tabs`](../elements/tabs.md) | `tab()`, `tabs()` | One tab of a tab list, and the list; the app owns which one is selected and shows its content. |
 | [`Select`](../elements/select.md) | `select()` | One value from a list of items: a popup at the trigger on desktops, a sheet on phones; the app owns `value` and draws the trigger. |
 | [`Combobox`](../elements/combobox.md) | `combobox()` | One value or several (`multiple`) from a searchable list of items, as a select's; the app owns `value` and draws the trigger. |
+| [`Calendar`](../elements/calendar.md) | `calendar()` | A date or a range of dates picked from months of days, with month and year views and the keyboard; the app owns `value` and draws the items. |
+| [`TimeField`](../elements/time-field.md) | `time_field()` | A time of day edited segment by segment (hour, minute, second, AM/PM); the app owns `value`. |
+| [`DatePicker`](../elements/date-picker.md) | `date_picker()` | A date, a range or a date and time from a calendar in a popup at the trigger on desktops, a sheet on phones; the app owns `value` and draws the trigger. |
 | [`Collapsible`](../elements/collapsible.md) | `collapsible()` | A region whose content expands and collapses; the app owns `open` and its trigger. |
 | [`OtpInput`](../elements/otp-input.md) | `otp_input()` | A one-time code in cells the app styles; the app owns `value`, `onComplete` tells when it is full. |
 | [`Progress`](../elements/progress.md) | `progress()` | A progress bar; the app owns `value` (0 to 100) and `indeterminate`. |
@@ -250,6 +259,29 @@ toggling the item while the list stays open. The value is an array the app owns 
 the combobox (`defaultValue`); `onConfirm` tells it as the list closes. The query can be the app's (`query`,
 `onQueryChange`), a footer shows below the rows and a clear button empties the value. See
 [Combobox](../elements/combobox.md).
+
+### Calendar
+
+A date, or with `range` a range of dates, picked from months of days, with no look. One month or several
+(`numberOfMonths`) show side by side; the header turns them and opens a view of the months or a page of years. The
+value is an ISO date (`"2026-10-28"`) or `[start, end]` the app owns (`value`, `onChange`) or leaves to the calendar
+(`defaultValue`); `disabledMatcher` keeps days from being picked, and the days take the keyboard as one stop of Tab.
+The app styles the parts and draws the items (`renderItem`). See [Calendar](../elements/calendar.md).
+
+### TimeField
+
+A time of day edited a segment at a time, with no look: the hour, the minute, the second (`precision`) and AM/PM
+(`hourCycle="h12"`), by stepping, typing or a phone's number pad. The value is `"HH:MM"` (`"HH:MM:SS"`) on a
+24-hour clock, the app's (`value`, `onChange`) or the field's own (`defaultValue`). See
+[TimeField](../elements/time-field.md).
+
+### DatePicker
+
+A date picked from a calendar that opens from the app's trigger, as a select's list does: a popup on desktops, a
+sheet on phones. The value is in the forms of the HTML inputs, an ISO date, `[start, end]` with `range` or a date and
+time with `timePrecision` (a time field under the calendar), the app's (`value`, `onChange`) or the picker's own
+(`defaultValue`). Presets set it, a clear button clears it, and every prop of `Calendar` passes on. See
+[DatePicker](../elements/date-picker.md).
 
 ### Collapsible
 
@@ -504,7 +536,7 @@ launch screen.
 
 - [Navigation guide](../docs/navigation.md).
 - [Forms and keyboard](../docs/forms-and-keyboard.md).
-- [Button](../elements/button.md), [Checkbox](../elements/checkbox.md), [Radio](../elements/radio.md), [Switch](../elements/switch.md), [Tabs](../elements/tabs.md), [Select](../elements/select.md), [Combobox](../elements/combobox.md), [Collapsible](../elements/collapsible.md), [Progress](../elements/progress.md), [Slider](../elements/slider.md), [Scrollbar](../elements/scrollbar.md), [NumberInput](../elements/number-input.md), [OtpInput](../elements/otp-input.md), [Plot](../elements/plot.md), [NavStack](../elements/nav-stack.md), [Dialog](../elements/dialog.md),
+- [Button](../elements/button.md), [Checkbox](../elements/checkbox.md), [Radio](../elements/radio.md), [Switch](../elements/switch.md), [Tabs](../elements/tabs.md), [Select](../elements/select.md), [Combobox](../elements/combobox.md), [Calendar](../elements/calendar.md), [TimeField](../elements/time-field.md), [DatePicker](../elements/date-picker.md), [Collapsible](../elements/collapsible.md), [Progress](../elements/progress.md), [Slider](../elements/slider.md), [Scrollbar](../elements/scrollbar.md), [NumberInput](../elements/number-input.md), [OtpInput](../elements/otp-input.md), [Plot](../elements/plot.md), [NavStack](../elements/nav-stack.md), [Dialog](../elements/dialog.md),
   [AlertDialog](../elements/alert-dialog.md), [TextView](../elements/text-view.md), [Editor](../elements/editor.md), [DiffView](../elements/diff-view.md), [Table](../elements/table.md), [DataTable](../elements/data-table.md),
   [Text](../elements/text.md) and
   [Input](../elements/input.md).

@@ -862,10 +862,11 @@ impl Mounter {
         true
     }
 
-    /// Whether a native animation runs.
+    /// Whether a native animation runs that ends by itself (not one
+    /// looping forever, which no test step waits for).
     #[cfg(feature = "dev")]
     pub(crate) fn animating(&self) -> bool {
-        self.animator.animating()
+        self.animator.finishing()
     }
 
     #[inline]
