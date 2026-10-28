@@ -2796,7 +2796,10 @@ impl<M: TextEngine> Core<M> {
         cursor: &mut usize,
     ) {
         // A slot a view fills: placed as it is (`Filled`), or in a node of
-        // this view's own when the view styles it.
+        // this view's own when the view gives it anything, which lays its
+        // one node out through while it styles none of its layout (as JS's
+        // holders: `lay_out_through`).
+        let mut wrapper = false;
         if let ElKind::Slot(name) = el.kind
             && inst.fills.iter().any(|f| f.name == name)
         {
@@ -2808,6 +2811,7 @@ impl<M: TextEngine> Core<M> {
                 filled.kind = ElKind::Filled(name);
                 el.children = vec![filled];
                 el.key.get_or_insert_with(|| format!("slot:{name}").into());
+                wrapper = true;
             }
         }
         match std::mem::replace(&mut el.kind, ElKind::Plain) {
@@ -2977,7 +2981,11 @@ impl<M: TextEngine> Core<M> {
                     }
                 };
                 let prev = at.and_then(|j| old[j].take());
-                out.push(self.reconcile_node(prev, el, part, host, inst));
+                let e = self.reconcile_node(prev, el, part, host, inst);
+                if wrapper && let Ok(key) = self.key(e.id) {
+                    self.lay_out_through(key);
+                }
+                out.push(e);
             }
         }
     }

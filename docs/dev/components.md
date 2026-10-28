@@ -778,7 +778,14 @@ what changed.
   prop's JSX. `Prop<Option<Slot>>` is `Some` while the holder has children (the core sets it when it fills or
   empties); `place(..)` is a region of it, and the slot's element is the holder: the core places it but never
   releases it (it is JS's). Its bound parts are bindings (`Patch`es), as on the view's own nodes. The element's styles
-  (and what shapes the holder's box) apply to the holder; everything else it gives (accessibility, `disabled`,
+  (and what shapes the holder's box) apply to the holder. A holder the place does not style (its layout style a
+  view's that nothing styles, `place(|s| s)` or listeners and props only) holding one node is laid out through, as a
+  Rust fill placed as it is: that node is an item of the holder's parent in its place (`layout_tree.rs`, "holders
+  laid out through", `LayoutTree::set_holder`), so the app's `flex: 1`, `alignSelf`, `margin-left: auto` or a
+  percentage on its element act in the component's layout as on the component's own child; the holder takes the
+  node's box and the node sits at its origin, so the native views keep their tree. A holder the place styles, or
+  holding several nodes, is a box of its own (a column, as any view). A render's holder (`componentRender`) follows
+  the same rule in its placeholder. Everything else the element gives (accessibility, `disabled`,
   `focusable` and other host props, listeners, touch responder, element ref: `core/slots.rs` `split`) goes to the
   slot's target: the app's element when the holder holds exactly one (not raw text, a component's host or a list),
   else the holder. So the app's `active:` / `focus:` / `disabled:` classes and state styles on its own element follow
@@ -796,7 +803,8 @@ what changed.
   nodes of that view (an element, or a region whose nodes come and go), which the nested component keeps as the
   slot's `Fill` and its view places where it places the slot, as JS children are placed (`Placement`). A place that
   only places it (`place(|s| s)`) puts the nodes there as they are (`ElKind::Filled`); a place that styles it
-  (`place(|h| h.px_4())`) makes a node of the nested view's own with those styles around them. The slot's prop is
+  (`place(|h| h.px_4())`) or gives it props or listeners makes a node of the nested view's own with them around them,
+  which lays one node out through while the place styles none of its layout, as JS's holders. The slot's prop is
   `Some` while the fill has nodes. The fill is the placing view's content: reconciled whenever that view reconciles
   the nested element (a new element replaces the old in its place), released with it, and taken out of a place that
   goes before that place's node is deleted. A view passes a slot it is given on to a nested component's slot by

@@ -1988,8 +1988,7 @@ impl<M: TextEngine> Core<M> {
     fn create(&mut self, id: NodeId, tag: Tag) -> Result<(), ApplyError> {
         let kind = Kind::of(tag);
         let key = self.alloc(id, kind)?;
-        let mut style = Style::default().layout;
-        crate::style::resolve_normal_alignment(&mut style);
+        let style = crate::style::unstyled_layout();
         let layout = match leaf_context(kind) {
             Some(context) => self.layout.new_leaf_with_context(style.clone(), context),
             None => self.layout.new_leaf(style.clone()),
@@ -2138,6 +2137,22 @@ impl<M: TextEngine> Core<M> {
             text.push("\u{200b}", style);
         }
         text
+    }
+
+    /// `key` holds a slot's content in a Rust component's tree (JS's holder
+    /// of a slot or a render, or the node a view wraps its fill in): while
+    /// nothing styles its layout and it holds one node, that node is laid
+    /// out in its place, as the component's own child (`layout_tree`'s
+    /// "holders laid out through"). A list's holder (an `Items` slot) is a
+    /// list, laid out as one.
+    pub(super) fn lay_out_through(&mut self, key: Key) {
+        let node = &self.nodes[key as usize];
+        if node.kind == Kind::View
+            && let Some(layout) = node.layout
+        {
+            self.layout.set_holder(layout);
+            self.needs_layout = true;
+        }
     }
 
     /// Pushes the effective taffy style of `key`: the JS style, adjusted
@@ -2788,10 +2803,12 @@ impl<M: TextEngine> Core<M> {
             }
             Prop::ComponentSlot(name) => {
                 self.set_slot_name(id, name);
+                self.lay_out_through(key);
                 return Ok(());
             }
             Prop::ComponentRender(slot) => {
                 self.set_render_holder(id, slot);
+                self.lay_out_through(key);
                 return Ok(());
             }
             Prop::RustProp(name, value) => {

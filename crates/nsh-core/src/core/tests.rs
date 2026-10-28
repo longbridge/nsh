@@ -13133,6 +13133,78 @@ mod views {
         assert_eq!(native_children(&c, corners[1]).len(), 2);
     }
 
+    /// A row 300 × 40: its label slot made a button (no styles), then a 50 ×
+    /// 20 box.
+    #[derive(Default)]
+    struct LabeledRow;
+
+    #[derive(Clone, PartialEq, Props)]
+    struct LabeledRowProps {
+        label: crate::element::Prop<Option<Slot>>,
+    }
+
+    impl Component for LabeledRow {
+        type Props = LabeledRowProps;
+        type Event = NoEvent;
+
+        fn view(props: LabeledRowProps, _: Scope<NoEvent>) -> impl IntoElement {
+            view()
+                .flex_row()
+                .items_center()
+                .w(px(300.0))
+                .h(px(40.0))
+                .child(
+                    props
+                        .label
+                        .place(|c| c.role(crate::AccessibilityRole::Button)),
+                )
+                .child(view().w(px(50.0)).h(px(20.0)))
+        }
+    }
+
+    /// Fills a row's label with a text that grows.
+    #[derive(Default)]
+    struct GrowingLabel;
+
+    #[derive(Clone, PartialEq, Props)]
+    struct GrowingLabelProps {}
+
+    impl Component for GrowingLabel {
+        type Props = GrowingLabelProps;
+        type Event = NoEvent;
+
+        fn view(_: GrowingLabelProps, _: Scope<NoEvent>) -> impl IntoElement {
+            LabeledRow::element(LabeledRowProps::default()).fill("label", text("grow").flex_1())
+        }
+    }
+
+    /// The node a view wraps its fill of a slot in when the place gives it
+    /// props but no styles lays the fill out through: the fill grows along
+    /// the row as the component's own child would, the wrapper takes its
+    /// box and the fill sits at its origin.
+    #[test]
+    fn a_fill_in_a_wrapper_lays_out_in_the_components_layout() {
+        let mut c = core();
+        c.mount_root(&Root::new::<GrowingLabel>(|| GrowingLabelProps {}));
+        let batch = c.commit().unwrap();
+        let grow = text_node(&batch, "grow");
+        let wrapper = native_parent(&c, grow).expect("placed");
+        let row = native_parent(&c, wrapper).expect("placed");
+        assert_eq!(native_children(&c, row).len(), 2, "the wrapper and the box");
+        let wrapped = frame_of(&batch, wrapper).expect("a frame");
+        assert_eq!(
+            (wrapped.origin.x.0, wrapped.size.width.0),
+            (0.0, 250.0),
+            "grows to the box"
+        );
+        let grown = frame_of(&batch, grow).expect("a frame");
+        assert_eq!(
+            (grown.origin.x.0, grown.origin.y.0, grown.size.width.0),
+            (0.0, 0.0, 250.0)
+        );
+        assert_eq!(grown.size.height, wrapped.size.height);
+    }
+
     #[derive(Clone, PartialEq, Props)]
     struct MidProps {
         corner: crate::element::Prop<Option<Slot>>,

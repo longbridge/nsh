@@ -1118,6 +1118,10 @@ prop label:Amount placeholder Amount
 # Its prefix and suffix around the field.
 expect about
 expect kg
+# The app's element in a slot lays out in the component's row (300 wide,
+# the field 100): `flex: 1` takes what is left, a percentage is of the row.
+frame id:weight-prefix 0 0 170 10
+frame id:weight-suffix 0 0 30 10
 frame parent:text:Up 0 0 30 15
 frame parent:text:Down 0 15 30 15
 style parent:parent:text:Up backgroundColor #0000ffff
