@@ -31,13 +31,29 @@ struct Host {
 
 impl Host {
     fn spawn(controlling: bool, fps: bool, terminal_input: bool) -> Self {
-        let directory = supervise::fixture();
-        let code = nsh_bundler::compile_module(
-            "Idle.tsx",
+        Self::spawn_source(
+            controlling,
+            fps,
+            terminal_input,
             "import { mount, Text } from 'nsh'; mount(() => <Text>PTY ready</Text>);",
             &[],
         )
-        .unwrap();
+    }
+
+    fn spawn_source(
+        controlling: bool,
+        fps: bool,
+        terminal_input: bool,
+        source: &str,
+        assets: &[(&str, &[u8])],
+    ) -> Self {
+        let directory = supervise::fixture();
+        for (name, bytes) in assets {
+            let path = directory.join("assets").join(name);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, bytes).unwrap();
+        }
+        let code = nsh_bundler::compile_module("Idle.tsx", source, &[]).unwrap();
         fs::write(directory.join("bundle.js"), code).unwrap();
         let (mut master, mut slave) = (-1, -1);
         let mut size = libc::winsize {
@@ -475,6 +491,55 @@ fn failed_scenario_reaps_its_host() {
             let host = Host::start(false, false);
             fs::write("host.pid", host.process.child().id().to_string()).unwrap();
             panic!("intentional lifecycle failure");
+        },
+    );
+}
+
+#[test]
+fn bundled_fonts_leave_the_host_running() {
+    supervise::run(
+        "bundled_fonts_leave_the_host_running",
+        ExpectedExit::Success,
+        || {
+            let mut host = Host::spawn_source(
+                false,
+                false,
+                true,
+                r#"
+            import { mount, Text } from 'nsh';
+            import { font } from 'nsh:rt';
+            const family = font('asset:/fonts/Pacifico-Regular.ttf', 'Pacifico');
+            setTimeout(() => mount(() => <Text style={{ fontFamily: family }}>Font ready</Text>), 100);
+        "#,
+                &[(
+                    "fonts/Pacifico-Regular.ttf",
+                    include_bytes!("../../../../examples/gallery/fonts/Pacifico-Regular.ttf"),
+                )],
+            );
+            let deadline = Instant::now() + STARTUP_TIMEOUT;
+            let mut output = Vec::new();
+            loop {
+                host.drain(&mut output);
+                assert!(
+                    host.process.child().try_wait().unwrap().is_none(),
+                    "host exited: {}",
+                    String::from_utf8_lossy(&output)
+                );
+                if output
+                    .windows(b"Font ready".len())
+                    .any(|part| part == b"Font ready")
+                {
+                    break;
+                }
+                assert!(
+                    Instant::now() < deadline,
+                    "font specimen did not draw: {}",
+                    String::from_utf8_lossy(&output)
+                );
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            host.signal(libc::SIGTERM);
+            assert!(host.wait(true, EXIT_TIMEOUT).0.success());
         },
     );
 }

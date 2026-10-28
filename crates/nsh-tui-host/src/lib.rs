@@ -10,6 +10,7 @@ use ratatui_core::{
 };
 use ratatui_crossterm::CrosstermBackend;
 
+mod assets;
 mod clipboard;
 mod logging;
 mod shutdown;
@@ -68,6 +69,15 @@ pub fn main_with_options(mut options: AppOptions) -> io::Result<()> {
         .then(|| std::sync::Arc::new(clipboard::TerminalClipboard::default()));
     if let Some(clipboard) = &terminal_clipboard {
         options.clipboard = Some(clipboard.clone());
+    }
+    if options.assets.is_none()
+        && let Some(path) = &args.bundle
+    {
+        options.assets = Some(std::sync::Arc::new(assets::Directory(
+            path.parent()
+                .unwrap_or_else(|| std::path::Path::new("."))
+                .join("assets"),
+        )));
     }
     let mut view = AppView::new(options);
     view.set_dev_log_path(log_file);

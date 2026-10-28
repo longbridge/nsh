@@ -37,7 +37,9 @@ A source bundle can also be loaded directly:
 ./target/debug/nsh-tui-host --dev-server ws://127.0.0.1:8790/ws
 ```
 
-`--bundle` reads the adjacent source map and capability metadata. Bytecode files require the trusted-resource
+`--bundle` reads the adjacent source map and capability metadata. Its `asset:/` resources resolve inside the
+adjacent `assets/` directory; bundled fonts load successfully while text uses the terminal font. An embedding
+app can supply its own `AppOptions::assets` reader. Bytecode files require the trusted-resource
 or verified-package path, owned by the packaging work. Direct hosts without `--log-file` keep diagnostics in
 `nsh-tui-host-<pid>.log` in the system temporary directory, visible through the same panel. `--trace` includes
 the engine's timing logs; app `console.log` output is recorded with or without it. `--data-dir` selects persistent
@@ -676,7 +678,7 @@ permit clipboard writes; `nsh test` uses memory and never writes to the machine'
 | Searching the screen | The Minibuffer over the bottom row and the match's Cells reversed, only while searching |
 | Input-method composition | Terminal emulator composition, committed text delivered to the field |
 | Clipboard | OSC 52 writes, desktop reads when available and an in-process copy |
-| Font size, family, line height and letter spacing | Terminal font, display width and one row per line |
+| Font size, family, line height and letter spacing | Terminal font, display width and one row per line; direct bundles read imported fonts from adjacent `assets/` |
 | Shadows, blur, materials, gradients, 3D transforms and blend modes | Decorative features left out silently in this slice |
 | Native animated values | Host-frame opacity, background/border/text colors, transforms and canvas slots; completion and cancellation reported |
 | 2D view transforms | Composed positions and axis-aligned Cell extents; upright terminal glyphs and Cell-aligned borders |
