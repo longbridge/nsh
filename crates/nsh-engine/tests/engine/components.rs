@@ -5826,7 +5826,9 @@ fn base_plot_radial_line_draws_a_radar_and_follows_the_pointer_by_angle() {
             )),
         )
     };
-    // Where the animator puts the views it moves.
+    // Where the animator puts the views it moves: their bound translations
+    // (a hover dot's come after the half-size ones that center it, so
+    // they are its transform list's third and fourth entries).
     let moved = |all: &[MountBatch]| {
         let mut animator = Animator::default();
         for item in all.iter().flat_map(|b| b.items.iter()) {
@@ -5834,7 +5836,7 @@ fn base_plot_radial_line_draws_a_radar_and_follows_the_pointer_by_angle() {
         }
         let mut out = Vec::new();
         animator.write(Some, |_, values, _| {
-            if let (Some(x), Some(y)) = (values.transform[0], values.transform[1]) {
+            if let [x, y] = values.transform.iter().flatten().copied().collect::<Vec<_>>()[..] {
                 out.push((x, y));
             }
         });

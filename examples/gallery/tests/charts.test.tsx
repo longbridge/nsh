@@ -141,13 +141,14 @@ test("bars stand in bands side by side or stacked, a value over each", async () 
 });
 
 test("the radar reads out the factor nearest the pointer and changes its benchmark", async () => {
-  // Nothing hovered: the means of all six, the portfolio's against the index's.
+  // Nothing hovered: the means of all six, the portfolio's (362 / 6) a
+  // figure of its own, and its spread over the index's (327 / 6 = 54.5).
   expect(app.texts()).toContain("ALL SIX FACTORS");
-  expect(app.texts()).toContain("54.5");
-  // Against the peers: their mean.
+  expect(app.texts()).toContain("60.3");
+  expect(app.texts()).toContain("+5.8");
+  // Against the peers (371 / 6): the spread turns negative.
   await app.press("role:tab[vs Peers]");
-  await app.waitFor("61.8");
-  expect(app.texts()).toContain("Peers");
+  await app.waitFor("−1.5");
   // The middle of the radar: the factor whose spoke is nearest the pointer's
   // angle there (which one depends on where the pointer lands within a point
   // of it), its name read out.
