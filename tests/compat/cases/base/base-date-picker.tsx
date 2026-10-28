@@ -5,8 +5,9 @@
 // (`renderItem`, `itemStyle`), weekends that take no press
 // (`disabledMatcher`), the week's first day, Previous and Next; a range
 // of the picker's own (`defaultValue`) over two months with a preset; and
-// a date and time whose popup stays open while the time is edited
-// (`timePrecision`, `hourCycle`, the time's label and segments). The
+// a date and time whose sheet a tap on a day closes and which opens
+// again for the time (`timePrecision`, `hourCycle`, the time's label and
+// segments). The
 // dates are fixed, so nothing depends on today. Its script checks each.
 import { Text, View, signal } from "nsh";
 import { type CalendarItemState, DatePicker, type DatePickerValue } from "nsh/base";

@@ -16,7 +16,7 @@ come from two places:
   (`Toast`, `ToastStack` and the class `ToastManager`: "Toasts" below) and the
   module `AlertDialog`, beside the navigation `nsh-js` makes for it (`NavStack`, `NavPage`, `Dialog`, `createNavStack`); controls
   (toggles, sliders, selects, popovers, sheets, ...) join as their behavior is written. It is a UI set
-  (`Registry::ui_set("nsh/base")`), with the charts' parts `Plot`, `Line`, `Area`, `Bar`, `Grid`, `Pie`, `Arc`, `RadialLine`, `RadialGrid`, `PlotAxis` and `PlotLabel` in its submodule `nsh/base/plot` (`Registry::submodule`, `js-modules.md`), every host serves by default (`set_ui_sets`' default; embedders with a list of their
+  (`Registry::ui_set("nsh/base")`), with the charts' parts `Plot`, `Line`, `Area`, `Bar`, `Grid`, `Pie`, `Arc`, `RadialLine`, `RadialGrid`, `Sankey`, `PlotAxis` and `PlotLabel` in its submodule `nsh/base/plot` (`Registry::submodule`, `js-modules.md`), every host serves by default (`set_ui_sets`' default; embedders with a list of their
   own add `nsh_base::registry()` to it). `nsh_base::registry_of` makes it of some of its parts only
   (`nsh_base::parts`: `core`, the controls, popups, toasts and alerts every app has, and one part per larger
   component, `text_view`, `editor`, `diff`, `rich_editor`, `data_table`, `table`, `dock`, `resizable`, `plot`): a
@@ -465,7 +465,10 @@ implements `Api`, the view registers it with `cx.methods(CounterApi { .. })` for
 `#[component(methods = CounterApi)]` (`Component::METHODS = Methods::of::<CounterApi>()`) names it in the spec, so the
 JS face builds the ref (`CounterRef`: `node` and the methods, typed from the Rust signatures and docs) with no TS
 written. A call converts its arguments in the JS call into a closure an op carries (`RustCall::Method`), so it runs
-in order with the props JS set before it, with the API the view registered. Its return type decides what TS gets:
+in order with the props JS set before it, with the API the view registered. JS gets the ref as the component is
+made, before its view is (that waits for the commit, and for the host to be in the tree): a call made then, from
+the ref callback, waits in the core for the view and runs right after it is made (one whose host goes first fails
+with its host). Its return type decides what TS gets:
 a method returning `()` gives `void`, with no reply (JS calls it and moves on, a wrong argument throws in the call);
 one returning `Result<(), E>` gives `Promise<void>` (rejected with the `Err`'s message: the method runs at the
 commit, after the JS call returned, so it cannot throw); one returning a value gives `Promise<T>` (a wrong argument
@@ -1006,7 +1009,9 @@ footer is a part of the popup after the rows (`listbox::Footer`). Mod+Return clo
 touch screens) around presets, a calendar and, with `timePrecision`, a time field. Its calendar is `calendar.rs`'s grid
 with every prop of `Calendar` passed on (`calendar::Config`); opening it on the desktops puts the keyboard on the
 days (`Grid::focus_days`). A complete date is the value and closes it with `"select"`; with a time the popup stays
-open, each edit reported, until the selected day is pressed again. The trigger's keys are bound while it has the
+open on the desktops, each edit reported, until the selected day is pressed again (`gpui-component`'s double click),
+while in a sheet (touch screens, the `sheet` the content is made for) a tap on a day picks it at its time and closes,
+as a single date does: a touch has no double click (`api-naming.md`). The trigger's keys are bound while it has the
 focus: Return opens and closes (`gpui-base`'s `Confirm`), Delete and Backspace clear while it is closed. The value
 crosses to JS in the HTML inputs' forms (`date`, `datetime-local`), at the precision of `timePrecision`
 (`PickedDate`).
@@ -1015,7 +1020,11 @@ crosses to JS in the HTML inputs' forms (`date`, `datetime-local`), at the preci
 `Date` and `Matcher`. Its days are one Tab stop: only the cursor's day (`stop`) is focusable, and the arrow, Home / End and
 Page keys move the cursor, turning the months past the shown ones (`gpui-base`'s days take presses only). A
 JS function (`Matcher::Js`, as `gpui-base`'s `Matcher::Custom`) is asked for the shown days in a spawned task (the
-next JS turn), its answers kept as a set; a newer page's answers replace an older one's. `TimeField` (`time_field.rs`) is `gpui-base`'s `SegmentEditor` over one
+next JS turn), its answers kept as a set; a newer page's answers replace an older one's. The grid fills the width it
+is given, as a table's columns do: the months share the body and the items of a row (weekdays, days, the months and
+years to pick) share it equally (`flex: 1`; a short last row of years is padded), so a calendar in a phone's sheet
+spans it while one in a popup that fits its content keeps its items' widths; the header's items keep their own.
+`TimeField` (`time_field.rs`) is `gpui-base`'s `SegmentEditor` over one
 transparent native text field, as `OtpInput`'s (its `diff` / `echoed`): what the field gains or loses goes to the
 selected segment, then the field holds the time again; a value the app sets is shown unless it is the user's change
 coming back.

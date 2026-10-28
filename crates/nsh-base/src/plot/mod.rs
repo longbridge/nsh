@@ -1,13 +1,13 @@
 //! `nsh/base/plot`: the parts charts are built from, as `gpui-base`'s
 //! `plot` module, with no look of their own. A [`Plot`] holds the rows of
 //! data, the scales of its two axes, the pointer over it and its motion;
-//! its marks ([`Line`], [`Area`], [`Bar`], [`Grid`], and the radial
-//! [`Pie`], [`Arc`], [`RadialLine`] and [`RadialGrid`]) draw what it
-//! holds, each a canvas filling the plot (a pie one per slice), its
-//! [`PlotAxis`]es label its edges with the ticks of its scales and its
-//! [`PlotLabel`]s write texts at values of them, natively: the rows are
-//! read once when the app sets them, scaled, recorded and drawn in Rust,
-//! so no JS runs per point,
+//! its marks ([`Line`], [`Area`], [`Bar`], [`Grid`], the radial [`Pie`],
+//! [`Arc`], [`RadialLine`] and [`RadialGrid`], and the [`Sankey`] of
+//! flows) draw what it holds, each a canvas filling the plot (a pie one
+//! per slice, a sankey one per node and ribbon), its [`PlotAxis`]es label
+//! its edges with the ticks of its scales and its [`PlotLabel`]s write
+//! texts at values of them, natively: the rows are read once when the app
+//! sets them, scaled, recorded and drawn in Rust, so no JS runs per point,
 //! and the pointer, the hover's glide and fade, the appear and the scales'
 //! moves to new domains (`tween.rs`) run in Rust and on the platform's
 //! animator (the app hears of a new index, nothing more). Marks paint with
@@ -24,12 +24,14 @@
 mod area;
 mod axis;
 mod bar;
+mod class;
 mod grid;
 mod keys;
 mod label;
 mod line;
 mod pie;
 mod radial_line;
+mod sankey;
 mod scale;
 mod series;
 mod tween;
@@ -50,6 +52,7 @@ pub use self::{
         PlotAxisProps, TickFormat, plot_axis,
     },
     bar::{Bar, BarCornerRadii, BarElement, BarLabelStyle, BarProps, bar},
+    class::RowClass,
     grid::{Grid, GridElement, GridProps, grid},
     label::{PlotLabel, PlotLabelElement, PlotLabelProps, PlotText, PlotTextAlign, plot_label},
     line::{Curve, Line, LineElement, LineProps, line},
@@ -59,6 +62,10 @@ pub use self::{
     radial_line::{
         RadialGrid, RadialGridElement, RadialGridProps, RadialLine, RadialLineElement,
         RadialLineProps, radial_grid, radial_line,
+    },
+    sankey::{
+        Sankey, SankeyAlign, SankeyElement, SankeyLinkClass, SankeyLinks, SankeyProps,
+        SankeyValueLabel, SankeyValueScale, sankey,
     },
     scale::{BandScale, OrdinalScale, Scale},
 };
@@ -87,7 +94,8 @@ pub fn registry() -> Registry {
         .register::<RadialLine>()
         .register::<RadialGrid>()
         .register::<PlotAxis>()
-        .register::<PlotLabel>();
+        .register::<PlotLabel>()
+        .register::<Sankey>();
     registry
 }
 

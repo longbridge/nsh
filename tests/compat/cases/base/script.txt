@@ -1446,18 +1446,23 @@ expect S09
 expect S30
 expect SAM
 style parent:text:S09 backgroundColor #ff0000ff
-# Picking a day keeps the popup open, reported with the time.
+# On a touch screen (as here) a tap on a day picks it at its time and
+# closes the sheet; the desktops keep the popup open for the time until
+# the selected day is pressed again.
 tap label:2026-10-12
 expect Meet: 2026-10-12T09:30
+absent TimeLabel
+# Open again for the time: the field (named by `timeAccessibilityLabel`)
+# edits the selected segment, the hour first: a 2 fits no second digit
+# and moves on.
+tap id:meet
 expect TimeLabel
-# The field (named by `timeAccessibilityLabel`) edits the selected
-# segment, the hour first: a 2 fits no second digit and moves on.
 type label:MeetTime 2
 expect Meet: 2026-10-12T02:30
 expect S02
 type label:MeetTime 45
 expect Meet: 2026-10-12T02:45
-# A press on the selected day again closes the popup.
+# A tap on the day closes the sheet again, the time kept.
 tap label:2026-10-12
 absent TimeLabel
 prop label:Meet accessibilityValue text=2026/10/12 02:45 AM
@@ -2226,6 +2231,60 @@ frame parent:text:lab-top 50 0 0 0
 frame text:lab-top 0 0 20 10
 covers [nsh/base/plot] PlotLabel
 covers [props] PlotLabel.texts
+# A sankey fills its plot (its nodes and ribbons are canvases over all
+# of it). Its first column is one node, `visits`, 8 wide down the plot's
+# middle: the pointer over it reports its row, over the ribbons right of
+# it none. A screen reader steps through the nodes in the rows' order.
+# Each node is labelled with its value (its most in or out, 100 for
+# `visits`) over its name. New flows move in; their labels follow. A
+# plot whose links make a cycle lays out as any other, drawing nothing.
+prop id:flows role image
+prop id:flows accessibilityLabel Flows
+frame id:sankey 0 0 200 100
+expect flow null
+event id:flows onMouseMove position.x=4 position.y=50
+expect flow 0
+event id:flows onMouseMove position.x=30 position.y=50
+expect flow null
+event id:flows onMouseLeave
+event id:flows onAccessibilityAction actionName=increment
+expect flow 0
+event id:flows onAccessibilityAction actionName=increment
+expect flow 1
+event id:flows onMouseLeave
+expect flow null
+expect visits
+expect v100
+expect trials
+expect v60
+expect paid
+expect v25
+tap id:more-flows
+expect v70
+expect v35
+prop id:cycle accessibilityLabel Cycle
+covers [nsh/base/plot] Sankey
+covers [props] Sankey.links
+covers [props] Sankey.nodeWidth
+covers [props] Sankey.nodePadding
+covers [props] Sankey.nodeAlign
+covers [props] Sankey.iterations
+covers [props] Sankey.valueScale
+covers [props] Sankey.minLinkWidth
+covers [props] Sankey.nodeCornerRadius
+covers [props] Sankey.nodeClass
+covers [props] Sankey.nodeStyle
+covers [props] Sankey.linkClass
+covers [props] Sankey.linkStyle
+covers [props] Sankey.linkBackgroundClass
+covers [props] Sankey.linkBackgroundStyle
+covers [props] Sankey.hoverDim
+covers [props] Sankey.nodeLabel
+covers [props] Sankey.valueLabel
+covers [props] Sankey.nodeLabelClass
+covers [props] Sankey.nodeLabelStyle
+covers [props] Sankey.valueLabelClass
+covers [props] Sankey.valueLabelStyle
 
 # The app's design tokens: shadcn's `neutral` with the app's theme over it.
 tap id:case-base-token

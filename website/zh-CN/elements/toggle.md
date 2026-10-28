@@ -169,5 +169,5 @@ mount(App);
 ## 平台说明
 
 - iOS、Android 和 Mac Catalyst：按压是在开关按钮上（包括它的内容）结束的一次轻点。
-- 桌面（macOS、Windows、Linux、GPUI）和 Web：按压是一次点击。在 macOS 和 Web 上，Space 和 Return 也会按下拥有键盘焦点的开关按钮，方向键、Home 和 End 移动焦点（见[键盘](#keyboard)）。
+- 桌面（macOS、Windows、Linux、GPUI）和 Web：按压是一次点击。在 macOS 和 Web 上，Space 和 Return 也会按下拥有键盘焦点的开关按钮，方向键、Home 和 End 移动焦点（见[键盘](#键盘)）。
 - 每个平台都绘制应用设定的样式：开关按钮、已按下的那些的表面，以及这一组的轨道。

@@ -456,7 +456,8 @@ mod tests {
                 "PlotAxis",
                 "PlotLabel",
                 "RadialGrid",
-                "RadialLine"
+                "RadialLine",
+                "Sankey"
             ]
         );
     }

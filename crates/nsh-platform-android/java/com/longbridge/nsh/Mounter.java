@@ -1447,6 +1447,7 @@ final class Mounter {
             Box box = (Box) v;
             box.pointerEvents = pointerEvents;
         }
+        if (v instanceof InputBox) ((InputBox) v).pointerEvents = pointerEvents;
         if (v instanceof TextBox) ((TextBox) v).a11y = a;
         a11y.put(id, a);
         a.apply(v);

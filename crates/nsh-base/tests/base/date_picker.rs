@@ -1,9 +1,11 @@
 //! `DatePicker`: the trigger opens a calendar in a popup (a sheet on touch
 //! screens); a complete date is the value and closes it; a range takes two
 //! days; with a time precision the popup stays open for the time and a
-//! press on the selected day again closes it; presets set the value; the
+//! press on the selected day again closes it on a desktop, while on a phone
+//! a tap on a day closes it; presets set the value; the
 //! clear button and Delete clear it; Return opens and Escape closes;
-//! screen readers hear the value in the display format. Today is
+//! screen readers hear the value in the display format; on a phone one
+//! tap on a day closes the sheet, and the calendar spans it. Today is
 //! 2026-10-28 (the engine's manual clock).
 
 use std::{
@@ -264,7 +266,7 @@ fn a_range_takes_two_days() {
 }
 
 #[test]
-fn with_a_time_the_popup_stays_open_and_the_selected_day_again_closes_it() {
+fn on_a_desktop_with_a_time_the_popup_stays_open_and_the_selected_day_again_closes_it() {
     for controlled in [false, true] {
         let mut app = start(HarnessProps {
             controlled,
@@ -415,13 +417,115 @@ fn return_opens_on_the_days_and_escape_closes() {
 }
 
 #[test]
-fn on_a_phone_the_calendar_is_a_sheet() {
-    let mut app = start_on(Os::Ios, props());
+fn on_a_phone_one_tap_on_a_day_picks_it_and_closes_the_sheet() {
+    for os in [Os::Ios, Os::Android] {
+        let mut app = start_on(os, props());
+        app.open();
+        app.press("label:2026-10-14").unwrap();
+        app.closed();
+        assert_eq!(
+            app.log(),
+            "open:true:TriggerPress 2026-10-14 open:false:Select",
+            "{os:?}"
+        );
+        assert_eq!(app.heard().as_deref(), Some("2026/10/14"), "{os:?}");
+    }
+    // A range closes on the tap on its second end.
+    let mut app = start_on(Os::Ios, HarnessProps {
+        range: true,
+        ..props()
+    });
     app.open();
-    app.press("label:2026-10-14").unwrap();
+    app.press("label:2026-10-20").unwrap();
+    app.see("10-20*");
+    app.press("label:2026-10-22").unwrap();
     app.closed();
     assert_eq!(
         app.log(),
-        "open:true:TriggerPress 2026-10-14 open:false:Select"
+        "open:true:TriggerPress 2026-10-20..2026-10-22 open:false:Select"
+    );
+}
+
+#[test]
+fn on_a_phone_with_a_time_one_tap_on_a_day_picks_it_at_its_time_and_closes_the_sheet() {
+    for controlled in [false, true] {
+        let mut app = start_on(Os::Ios, HarnessProps {
+            controlled,
+            time: true,
+            ..props()
+        });
+        app.open();
+        app.see("Time");
+        app.press("label:2026-10-14").unwrap();
+        app.closed();
+        assert_eq!(
+            app.log(),
+            "open:true:TriggerPress 2026-10-14T00:00 open:false:Select"
+        );
+        // Open again for the time: the field edits the picked day's.
+        app.open();
+        app.see("10-14*");
+        // The keyboard's digits: the hour, then the minute.
+        app.type_text("label:Due time", "0900").unwrap();
+        app.see("seg09");
+        assert!(
+            app.log().ends_with(" 2026-10-14T09:00"),
+            "{}",
+            app.log()
+        );
+        // Another day keeps the time.
+        app.press("label:2026-10-15").unwrap();
+        app.closed();
+        assert!(
+            app.log()
+                .ends_with("2026-10-14T09:00 2026-10-15T09:00 open:false:Select"),
+            "{}",
+            app.log()
+        );
+        assert_eq!(app.heard().as_deref(), Some("2026/10/15 09:00"));
+    }
+}
+
+#[test]
+fn on_a_phone_the_calendar_spans_the_sheet() {
+    let mut app = start_on(Os::Ios, props());
+    // The frames and parents of the views the sheet makes.
+    #[derive(Default)]
+    struct Seen {
+        parents: HashMap<NodeId, NodeId>,
+        frames: HashMap<NodeId, Bounds<Points>>,
+    }
+    let seen = Arc::new(Mutex::new(Seen::default()));
+    let into = seen.clone();
+    app.observe(move |_, batch| {
+        let mut seen = into.lock().unwrap();
+        for item in &batch.items {
+            match item {
+                MountItem::Insert { parent, child, .. } => {
+                    seen.parents.insert(*child, *parent);
+                }
+                MountItem::Frame { id, frame } => {
+                    seen.frames.insert(*id, *frame);
+                }
+                _ => {}
+            }
+        }
+    });
+    app.open();
+    app.wait(Duration::from_millis(100)).unwrap();
+    let day = app
+        .screen()
+        .press_target("label:2026-10-14")
+        .unwrap()
+        .expect("the day's view");
+    let seen = seen.lock().unwrap();
+    // The sheet is as wide as the 800 pt screen, and so is a week: its
+    // seven days share it, not their own widths.
+    let week = seen.parents[&day];
+    assert_eq!(seen.frames[&week].size.width, px(800.0));
+    let width = seen.frames[&day].size.width;
+    assert!(
+        (width.0 - 800.0 / 7.0).abs() <= 1.0,
+        "a day {width:?} wide"
     );
 }

@@ -11,15 +11,14 @@ test("the sidebar's demos are one stop of Tab, whose Up and Down select the demo
   const app = await open("../App.tsx", { platform: "macos", width: 1200, height: 800, clock: {} });
   await app.press("role:button[Checkbox]");
   await app.waitFor("Select all");
-  // Tab on to the demos, past the page's checkboxes (the sidebar, stacked
-  // above the page, comes after it among the views): Down there selects
-  // Collapsible, the demo after Checkbox (components go by name).
-  let tabs = 0;
-  while (!app.shows(COLLAPSIBLE)) {
-    expect(++tabs).toBeLessThan(60);
-    await app.keyboard.press("tab");
-    await app.keyboard.press("down");
-  }
+  // From the search field above them (`mod+k`), one Tab reaches the demos
+  // (the page's stops come before or after the sidebar's by the
+  // platform's order, so the test starts beside the list): Down there
+  // selects Collapsible, the demo after Checkbox (components go by name).
+  await app.keyboard.press("mod+k");
+  await app.keyboard.press("tab");
+  await app.keyboard.press("down");
+  await app.waitFor(COLLAPSIBLE);
   await app.keyboard.press("down");
   await app.waitFor(COLOR_PICKER);
   await app.keyboard.press("up");

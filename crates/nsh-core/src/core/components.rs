@@ -536,6 +536,10 @@ pub(super) struct Components {
     virtual_lists: FxHashMap<NodeId, VirtualListState>,
     /// Views JS made, waiting to be in the tree to make their view.
     waiting: Vec<NodeId>,
+    /// Calls of components' methods made before their view was (a ref is
+    /// given as its component is made, and the view registers what the
+    /// methods act on): host, promise, call; run once the view is made.
+    parked_methods: Vec<(NodeId, u32, crate::element::MethodCall)>,
     /// The row counts the cells of views' lists read (their positions), by
     /// list, each under a root of its own that goes with the list.
     list_counts: FxHashMap<NodeId, (crate::element::Owner, crate::element::Signal<usize>)>,
@@ -625,6 +629,7 @@ impl Default for Components {
             virtual_lists: FxHashMap::default(),
             list_counts: FxHashMap::default(),
             waiting: Vec::new(),
+            parked_methods: Vec::new(),
             list_layouts: FxHashMap::default(),
             insets: FxHashMap::default(),
             js_back: false,
@@ -1385,6 +1390,11 @@ impl<M: TextEngine> Core<M> {
                 }
                 Err(message) => self.settle(call, Err(message.into())),
             },
+            RustCall::Method(host, method) if self.view_pending(host) => {
+                // Called from its ref, which the app gets as the component
+                // is made, before its view is (`render_components`).
+                self.components.parked_methods.push((host, call, method));
+            }
             RustCall::Method(host, method) => {
                 let mut failed = None;
                 let result = match self
@@ -1564,7 +1574,8 @@ impl<M: TextEngine> Core<M> {
             let rendered = self.render_dirty();
             let failed = self.report_failures();
             let woke = self.wake_waiting();
-            if !changed && !rendered && !failed && !woke {
+            let called = self.run_parked_methods();
+            if !changed && !rendered && !failed && !woke && !called {
                 break;
             }
         }
@@ -1764,6 +1775,36 @@ impl<M: TextEngine> Core<M> {
             }
         }
         woke
+    }
+
+    /// Runs the calls of methods parked for components whose view is now
+    /// made; whether any ran.
+    fn run_parked_methods(&mut self) -> bool {
+        if self.components.parked_methods.is_empty() {
+            return false;
+        }
+        let parked = std::mem::take(&mut self.components.parked_methods);
+        let mut ran = false;
+        for (host, call, method) in parked {
+            if self.view_pending(host) {
+                self.components.parked_methods.push((host, call, method));
+            } else {
+                ran = true;
+                self.run_rust(RustOp {
+                    call,
+                    run: RustCall::Method(host, method),
+                });
+            }
+        }
+        ran
+    }
+
+    /// Whether `host` hosts a component whose view is not made yet.
+    fn view_pending(&self, host: NodeId) -> bool {
+        self.components
+            .instances
+            .get(&host)
+            .is_some_and(|i| matches!(&i.inner, Inner::Component(inner) if inner.owner().is_none()))
     }
 
     /// The owner of the nearest component above `host` in the tree (its
@@ -4276,6 +4317,24 @@ impl<M: TextEngine> Core<M> {
         let Some(mut inst) = self.components.instances.remove(&host) else {
             return;
         };
+        if self
+            .components
+            .parked_methods
+            .iter()
+            .any(|(h, ..)| *h == host)
+        {
+            let (gone, kept) = std::mem::take(&mut self.components.parked_methods)
+                .into_iter()
+                .partition(|(h, ..)| *h == host);
+            self.components.parked_methods = kept;
+            for (_, call, method) in gone {
+                drop_caught(method);
+                self.settle(
+                    call,
+                    Err(format!("node {host} hosts no Rust component").into()),
+                );
+            }
+        }
         // Its root's (a render or classes of the app's) on the host.
         self.forget_node_extras(host);
         if let Inner::Component(inner) = &mut inst.inner {

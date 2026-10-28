@@ -15,7 +15,9 @@ Previous and Next, and switches to a view of the year's months or a page of year
 The calendar owns the behavior: the value (the app's, or its own), the shown month, the views, the days that cannot
 be picked, the keyboard and what screen readers hear. The look is the app's: it styles the header, the body, each
 month, each row and each item, and draws the items' content (the months' and weekdays' names, today's mark, the
-range's band).
+range's band). The grid fills the width it is given, as a table's columns do: the months share it and the items of a
+row share the row equally, so a calendar in a phone's sheet spans the screen and one in a popup sized to its content
+keeps its items' widths (`flex-none` in `itemClass` or `monthClass` keeps an item or a month at its own width).
 
 ```rust tabs
 use nsh_base::{CalendarItemKind, CalendarItemState, Date, Matcher, calendar, theme};

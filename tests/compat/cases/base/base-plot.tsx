@@ -43,8 +43,15 @@
 // pointer by angle, none outside their outer radius, and step through the
 // rows with a screen reader's increment; `RadialGrid`s draw circular
 // `rings` and `spokes` between their radii.
+// A `Sankey` (`links`, `nodeWidth`, `nodePadding`, `nodeAlign`,
+// `iterations`, `valueScale`, `minLinkWidth`, `nodeCornerRadius`,
+// `hoverDim`, its `node`, `link` and `linkBackground` parts, and its
+// labels: `nodeLabel`, `valueLabel` and their parts) fills its plot with
+// flows between the plot's rows, reports the node under the pointer and
+// steps through its nodes with a screen reader's increment, and moves to
+// new flows with `motion.update`; links that make a cycle draw nothing.
 import { Text, View, signal } from "nsh";
-import { Arc, Area, Bar, Grid, Line, Pie, Plot, PlotAxis, PlotLabel, RadialGrid, RadialLine } from "nsh/base/plot";
+import { Arc, Area, Bar, Grid, Line, Pie, Plot, PlotAxis, PlotLabel, RadialGrid, RadialLine, Sankey } from "nsh/base/plot";
 
 type Row = { t: number; price: number; avg: number };
 type Sale = { v: number; w: number };
@@ -157,6 +164,7 @@ function App() {
       <ReverseCase />
       <RadarCase />
       <LabelCase />
+      <SankeyCase />
     </View>
   );
 }
@@ -355,6 +363,71 @@ function LabelCase() {
         ]}
       />
     </Plot>
+  );
+}
+
+type Stage = { name: string };
+const STAGES: Stage[] = [{ name: "visits" }, { name: "trials" }, { name: "gone" }, { name: "paid" }];
+const FLOWS = [
+  { source: 0, target: 1, value: 60 },
+  { source: 0, target: 2, value: 40 },
+  { source: 1, target: 3, value: 25 },
+];
+const MORE_FLOWS = [
+  { source: 0, target: 2, value: 30 },
+  { source: 0, target: 1, value: 70 },
+  { source: 1, target: 3, value: 35 },
+];
+const FILLS = ["fill-[#3366ff]", "fill-[#33aa66]", "fill-[#999999]", "fill-[#ffaa00]"];
+
+/** Flows from visits to trials and away, trials to paid: four nodes in
+ * three columns, a ribbon per link, each node its row's fill, each ribbon
+ * a gradient from its source's color; and a plot whose links make a
+ * cycle. */
+function SankeyCase() {
+  const flow = signal<number | null>(null);
+  const more = signal(false);
+  return (
+    <View>
+      <Plot
+        testID="flows"
+        data={STAGES}
+        accessibilityLabel="Flows"
+        motion={{ update: { duration: 200 } }}
+        onHoverChange={({ index }) => flow.set(index)}
+        style={{ width: 200, height: 100, marginHorizontal: 40 }}
+      >
+        <Sankey
+          testID="sankey"
+          links={more() ? MORE_FLOWS : FLOWS}
+          nodeWidth={8}
+          nodePadding={10}
+          nodeAlign="left"
+          iterations={4}
+          valueScale="sqrt"
+          minLinkWidth={2}
+          nodeCornerRadius={2}
+          nodeClass={(_: Stage, i: number) => FILLS[i]}
+          nodeStyle={{ stroke: "#ffffff", strokeWidth: 1 }}
+          linkClass="fill-none"
+          linkStyle={{ opacity: 0.8 }}
+          linkBackgroundClass={(link) => `bg-linear-to-r ${FILLS[link.source].replace("fill-", "from-")}/40 to-transparent`}
+          linkBackgroundStyle={{ opacity: 0.9 }}
+          hoverDim={0.6}
+          nodeLabel={(d: Stage) => d.name}
+          valueLabel={(_: Stage, value: number) => `v${Math.round(value)}`}
+          nodeLabelClass="px-1"
+          nodeLabelStyle={{ fontSize: 10 }}
+          valueLabelClass="font-semibold"
+          valueLabelStyle={{ color: "#333333" }}
+        />
+      </Plot>
+      <Text>{`flow ${flow()}`}</Text>
+      <View testID="more-flows" onPress={() => more.set(true)} style={{ height: 20 }} />
+      <Plot testID="cycle" data={STAGES} accessibilityLabel="Cycle" style={{ width: 100, height: 50 }}>
+        <Sankey links={[{ source: 0, target: 1, value: 1 }, { source: 1, target: 0, value: 1 }]} />
+      </Plot>
+    </View>
   );
 }
 

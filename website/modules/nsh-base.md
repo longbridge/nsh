@@ -377,7 +377,7 @@ groups and the caret. See [OtpInput](../elements/otp-input.md).
 ### Plot (`nsh/base/plot`)
 
 The parts charts are built from, as `gpui-base`'s `plot`, in a module of their own: `import { Plot, Line, Area, Bar,
-Grid, Pie, Arc } from "nsh/base/plot"`. A `Plot` holds the app's rows (`data`, generic over their type, so `x` and `y`
+Grid, Pie, Arc, Sankey } from "nsh/base/plot"`. A `Plot` holds the app's rows (`data`, generic over their type, so `x` and `y`
 are checked keys or functions of a row), the `point`, `linear` or `band` scales of its axes, the row under the pointer
 (`onHoverChange`) and its motion (`motion`: the appear, the hover's fade and glide); its marks draw natively from the
 rows, with no JS per point, and paint with the SVG paint properties (`stroke-*`, `fill-*`), `currentColor` where none
@@ -388,7 +388,8 @@ with `hoverDotClass`) and tooltip (`tooltipPlacement`, kept inside the plot) are
 natively; axis labels are the app's own elements. A `Pie` splits the turn into a slice per row (a donut with an
 `innerRadius`), each painted with its own classes (`sliceClass`, a function of its row), and an `Arc` draws one sector
 between two angles (a gauge's track and value); over a pie the plot reports the slice under the pointer, which lifts
-(`hoverLift`) while the others fade (`hoverDim`). See [Plot](../elements/plot.md).
+(`hoverLift`) while the others fade (`hoverDim`). A `Sankey` draws flows between the rows (`links`), laid out as
+d3-sankey lays them out, each node and ribbon painted with its own classes, its nodes labelled, hovered and moving to new flows. See [Plot](../elements/plot.md).
 
 ## Workspaces
 

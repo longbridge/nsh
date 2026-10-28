@@ -12,8 +12,10 @@
 //!   (`time_field.rs`) under it.
 //! - **Picking** (`DatePickerState::select_date`): a complete date (a day,
 //!   a range's end) is the value and closes the popup; with `timePrecision`
-//!   the popup stays open for the time, every change is reported, and a
-//!   press on the selected day again closes it. A preset is the value and
+//!   the popup stays open for the time on the desktops, every change is
+//!   reported, and a press on the selected day again closes it, while on
+//!   touch screens (the sheet) a tap on a day picks it at its time and
+//!   closes the sheet, as without a time. A preset is the value and
 //!   closes it. The clear button (`cleanable`) and Delete / Backspace on
 //!   the trigger clear it.
 //! - **The value** is `value` and `onChange({ value })`: ISO dates, as
@@ -345,7 +347,9 @@ pub struct DatePickerProps {
     pub date_format: Prop<Option<SharedString>>,
     /// Edit the time of day too, down to this (`gpui-component`'s
     /// `time_precision`): a time field under the calendar of a single
-    /// date. Picking a day then keeps the popup open.
+    /// date. Picking a day then keeps the popup open on the desktops (the
+    /// selected day again closes it); on touch screens a tap on a day
+    /// still closes the sheet, which opens again for the time.
     pub time_precision: Prop<Option<TimePrecision>>,
     /// How the time field counts the hours (default `"h23"`).
     #[prop(default)]
@@ -494,7 +498,7 @@ pub struct DatePickerProps {
 pub enum DatePickerEvent {
     /// The user changed the value (a day, a range's end, a preset, the
     /// time, the clear button). With `timePrecision`, every edit while the
-    /// popup stays open.
+    /// popup is open.
     #[args(value)]
     Change(PickedDate),
     /// The popup opened or closed, with why: set `open` to follow it.
@@ -522,9 +526,11 @@ fn display_format(precision: Option<TimePrecision>, cycle: HourCycle) -> String 
 /// popup at the app's `trigger` (`gpui-component`'s `DatePicker`): on the
 /// desktops at the trigger, on phones and tablets a sheet at the bottom.
 /// Picking a complete date sets the value and closes it; with
-/// `timePrecision` a time field under the calendar edits the time and the
-/// popup stays open. `presets` add buttons that set the value, `cleanable`
-/// a button that clears it. The value is `value` and `onChange` (or the
+/// `timePrecision` a time field under the calendar edits the time, and on
+/// the desktops the popup stays open after a day is picked (the selected
+/// day again closes it), while on touch screens a tap on a day closes it.
+/// `presets` add buttons that set the value, `cleanable` a button that
+/// clears it. The value is `value` and `onChange` (or the
 /// picker's own, from `defaultValue`). Every prop of `Calendar` passes on
 /// to its calendar. It looks like nothing: the app styles every part.
 #[component]
@@ -697,8 +703,13 @@ pub fn DatePicker(props: DatePickerProps, cx: Scope<DatePickerEvent>) -> impl In
             let picked: Rc<dyn Fn(Date)> = {
                 let change = change.clone();
                 Rc::new(move |d: Date| {
-                    if edits_time.get_untracked() {
-                        // A press on the selected day again confirms it.
+                    // On the desktops the popup stays for the time and a
+                    // press on the selected day again confirms it
+                    // (`gpui-component`'s double click). A touch screen
+                    // has no double click to close with: a tap picks the
+                    // day at its time and closes the sheet, which opens
+                    // again for the time.
+                    if edits_time.get_untracked() && !sheet {
                         if d == date.get_untracked() {
                             change(false, OpenChangeReason::Select);
                             return;

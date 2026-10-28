@@ -1,6 +1,6 @@
 import { type JSX, mount, signal, Text, View } from "nsh";
 import { ContextMenu, Menu, MenuItem, MenuSeparator, type OpenChangeReason, Submenu } from "nsh/base";
-import { button, buttonText, desktop, Inspector, Panel, PopIn, type PopupSide, Stage, tint, ui, wide } from "./palette";
+import { button, buttonText, CheckMark, desktop, Inspector, Panel, PopIn, type PopupSide, Stage, tint, ui, wide } from "./palette";
 
 /** A sheet at the bottom on phones; on desktops the popup's box keeps no
  * look, its `Items` have it. */
@@ -36,7 +36,11 @@ function Item(props: { label: string; onSelect?: () => void; checked?: boolean; 
       <Text style={{ flex: 1, fontSize: 14, color: props.danger ? ui().down : ui().text }}>{props.label}</Text>
       {/* The check at the trailing edge. */}
       <If when={props.checked !== undefined}>
-        <Text style={{ width: 14, fontSize: 13, textAlign: "right", color: ui().accent }}>{props.checked ? "✓" : ""}</Text>
+        <View style={{ width: 16 }}>
+          <If when={props.checked}>
+            <CheckMark size={16} tint={ui().accent} />
+          </If>
+        </View>
       </If>
     </MenuItem>
   );

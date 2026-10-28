@@ -1997,7 +1997,9 @@ impl Mounter {
     }
 
     /// A JS responder took the touches on `id`: with `block`, the scroll
-    /// views around it stop scrolling until it lets go.
+    /// views around it stop scrolling until it lets go, and the presses of
+    /// the views around it end without a press (the finger is the
+    /// responder's: a drag of a selection handle is no tap on the text).
     fn set_js_responder(&mut self, id: NodeId, block: bool) {
         self.clear_js_responder();
         if !block {
@@ -2006,6 +2008,14 @@ impl Mounter {
         let Some(s) = self.slot(id) else { return };
         let mut current = s.native.view().superview();
         while let Some(v) = current {
+            for recognizer in v.gestureRecognizers().iter().flat_map(|r| r.iter()) {
+                if recognizer.downcast_ref::<PressRecognizer>().is_some() && recognizer.isEnabled()
+                {
+                    // Turning a recognizer off cancels its gesture.
+                    recognizer.setEnabled(false);
+                    recognizer.setEnabled(true);
+                }
+            }
             if let Some(scroll) = v.downcast_ref::<UIScrollView>() {
                 let pan = scroll.panGestureRecognizer();
                 if pan.isEnabled() {
@@ -3312,6 +3322,16 @@ impl Mounter {
                     .map(objc2_foundation::NSString::from_str);
                 view.setAccessibilityLabel(label.as_deref(), mtm);
                 view.setAccessibilityElementsHidden(props.accessibility.hidden, mtm);
+                // An input that is no target lets touches through to the
+                // views below it (an editor's hidden input at its caret,
+                // over the selection's handles); it stays able to become
+                // the first responder and take typed text.
+                if matches!(s.native, Native::Input(_)) {
+                    view.setUserInteractionEnabled(!matches!(
+                        props.pointer_events,
+                        nsh_core::PointerEvents::None | nsh_core::PointerEvents::BoxNone
+                    ));
+                }
             }
         }
         // After the props: the texts below read whether they are in an area.

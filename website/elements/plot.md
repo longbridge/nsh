@@ -1,6 +1,6 @@
 ---
 title: Plot
-description: "The Plot component of nsh/base/plot, its marks Line, Area, Bar, Grid, Pie, Arc, RadialLine and RadialGrid, its PlotAxis and PlotLabel: charts drawn natively from the app's rows, with the scales of the axes and their labels, texts at data points, the row or slice under the pointer, motion and no look of their own."
+description: "The Plot component of nsh/base/plot, its marks Line, Area, Bar, Grid, Pie, Arc, RadialLine, RadialGrid and Sankey, its PlotAxis and PlotLabel: charts drawn natively from the app's rows, with the scales of the axes and their labels, texts at data points, the row or slice under the pointer, motion and no look of their own."
 group: base
 demo: el-plot
 ---
@@ -11,7 +11,7 @@ A plot is the frame of a chart: the rows of data it shows, the scales of its x a
 motion. Its marks draw what it holds: a `Line` through a series, an `Area` between a series and a baseline, a `Bar`
 per row in the bands of a band scale, a `Grid` of lines across, a `Pie` of the rows' shares (a donut with a hole), an
 `Arc` between two angles, and a `RadialLine` around the center with the rings and spokes of a `RadialGrid` behind it (a
-radar); a `PlotAxis` labels an edge with the ticks of its scale, and a `PlotLabel` writes texts at
+radar), and a `Sankey` of flows between the rows; a `PlotAxis` labels an edge with the ticks of its scale, and a `PlotLabel` writes texts at
 points of the scales. Each mark is one canvas filling the plot, drawn natively from the rows: the app's rows are read once when
 it sets them, then scaled, recorded and drawn in Rust, so a chart of a thousand points runs no JS per point. The pointer
 is followed in Rust too: the hover's cross line, dots and tooltip move and fade on the platform's animator, and the app
@@ -81,7 +81,7 @@ function App() {
 mount(App);
 ```
 
-`Plot`, `Line`, `Area`, `Bar`, `Grid`, `Pie`, `Arc`, `RadialLine`, `RadialGrid`, `PlotAxis` and `PlotLabel` come from `nsh/base/plot`, a module of [`nsh/base`](../modules/nsh-base.md) of their
+`Plot`, `Line`, `Area`, `Bar`, `Grid`, `Pie`, `Arc`, `RadialLine`, `RadialGrid`, `Sankey`, `PlotAxis` and `PlotLabel` come from `nsh/base/plot`, a module of [`nsh/base`](../modules/nsh-base.md) of their
 own (in Rust, `nsh_base::plot`). In TypeScript a plot's props are generic over the type of its rows: field names are
 checked against them, and a function of a row gets the row's type. In Rust, `plot()` makes one with a setter per prop,
 the rows a `Rows` (columns of numbers by key), the values a `RowAccessor` (a key or a function of the row's index), and
@@ -541,6 +541,134 @@ fn compare(ours: Vec<f64>, theirs: Vec<f64>) -> impl IntoElement {
 }
 ```
 
+## Sankey
+
+A `Sankey` draws flows between the plot's rows: each row is a node and `links` names the flows between them, `{
+source, target, value }` with the indices of two rows in the plot's `data`. It lays them out as d3-sankey does, in the
+plot's size: the nodes in columns (`nodeAlign`), each as tall as the most that flows into or out of it, the nodes of a
+column `nodePadding` apart, relaxed toward their flows over `iterations` passes; and a ribbon per link from its
+source's right edge to its target's left edge, as wide at each end as its share of that node's side, so both sides of
+every node are covered even where its flows in and out differ. Each column is centered in the plot, and a run of equal
+single-node columns is staggered a little so the ribbons between them curve. `valueScale="sqrt"` sizes by the square
+root of the values, so one dominant flow does not dwarf the small ones.
+
+Each node and each ribbon is a canvas of its own, the `node` and `link` parts, so each paints with its own classes:
+`nodeClass` is the same classes on every node or a function of the node's row, and `linkClass` the same on every
+ribbon or a function of the link. The `linkBackground` part shows a background inside each ribbon, a box from its
+source to its target: a function of the link gives each ribbon a gradient from its source's color to its target's.
+The ribbons draw under the nodes, and both draw in from the leading edge with the plot's appear.
+
+Over a sankey, the plot reports the node under the pointer (`onHoverChange`, the node's row; none over a ribbon), its
+tooltip follows the pointer, and the links not attached to that node fade by `hoverDim`, on the platform's animator
+with the plot's `motion`. The keys step through the nodes in the rows' order, the tooltip beside each node's middle.
+`nodeLabel` names each node and `valueLabel` gives its value, the value over the name when both are set: left of a node
+in the first column, right of one in the last, centered above one between them, as `gpui-component`'s chart places
+them; a label beside a node stays between the plot's top and bottom, and one past the plot's edge sits in the room the
+app leaves around it (its margin). The `nodeLabel` part's padding is the gap to its node and its classes its text
+(`max-w-20 truncate` cuts a long name short); the labels fade in with the appear. When the app changes the flows, every
+node and ribbon moves from its old place to its new one with the plot's `motion.update`, its label with it: a node new
+to the flows grows from its middle, a link new to them from its least width, and the ones that go leave at once; a change while they move goes on from where they are drawn. Links
+are told apart by their source and target, so reordering `links` moves nothing.
+
+```tsx
+import { signal } from "nsh";
+import { Plot, Sankey } from "nsh/base/plot";
+
+type Step = { name: string };
+
+const steps: Step[] = [{ name: "Visits" }, { name: "Sign-ups" }, { name: "Bounced" }, { name: "Trials" }, { name: "Paid" }, { name: "Churned" }];
+const flows = [
+  { source: 0, target: 1, value: 4200 },
+  { source: 0, target: 2, value: 5800 },
+  { source: 1, target: 3, value: 2600 },
+  { source: 3, target: 4, value: 1100 },
+  { source: 3, target: 5, value: 1500 },
+];
+// Each step's color: its node's fill, and its ribbons' gradient ends.
+const FILLS = ["fill-chart-1", "fill-chart-2", "fill-muted", "fill-chart-3", "fill-chart-4", "fill-muted"];
+const FROM = ["from-chart-1/40", "from-chart-2/40", "from-muted/40", "from-chart-3/40", "from-chart-4/40", "from-muted/40"];
+const TO = ["to-chart-1/40", "to-chart-2/40", "to-muted/40", "to-chart-3/40", "to-chart-4/40", "to-muted/40"];
+
+export function Funnel() {
+  const hovered = signal<number | null>(null);
+  return (
+    <Plot
+      data={steps}
+      accessibilityLabel="Visits to paid: 10,000 visits, 1,100 paid"
+      accessibilityValue={{ text: hovered() == null ? undefined : steps[hovered()!].name }}
+      onHoverChange={({ index }) => hovered.set(index)}
+      appearGeneration={1}
+      motion={{ appear: { duration: 900, easing: "easeOut" }, update: { duration: 500 }, enter: { duration: 120 }, exit: { duration: 160 } }}
+      class="mx-20 h-64"
+    >
+      <Sankey
+        links={flows}
+        nodeWidth={8}
+        nodePadding={16}
+        nodeCornerRadius={2}
+        nodeClass={(_, i) => FILLS[i]}
+        linkBackgroundClass={(link) => `bg-linear-to-r ${FROM[link.source]} ${TO[link.target]}`}
+        hoverDim={0.7}
+        nodeLabel={(d: Step) => d.name}
+        valueLabel={(_: Step, value: number) => value.toLocaleString("en-US")}
+        nodeLabelClass="px-2 py-1 text-xs text-muted-foreground"
+        valueLabelClass="font-medium text-foreground"
+      />
+    </Plot>
+  );
+}
+```
+
+```rust
+use nsh_base::plot::{RowClass, SankeyLinkClass, SankeyLinks, plot, sankey};
+use nsh_core::{element::Rows, prelude::*};
+
+fn funnel() -> impl IntoElement {
+    plot()
+        .data(Rows::from_columns(4, []))
+        .accessibility_label("Visits to paid")
+        .h(px(256.0))
+        .child(
+            sankey()
+                .links(SankeyLinks::new([(0, 1, 4200.0), (1, 2, 2600.0), (2, 3, 1100.0)]))
+                .node_width(px(8.0))
+                .node_class(RowClass::from_fn(|i| format!("fill-chart-{}", i + 1).into()))
+                .link_class(SankeyLinkClass::from("fill-foreground/10")),
+        )
+}
+```
+
+| Prop | Rust | Type | Default | Description |
+|---|---|---|---|---|
+| `links` | `.links(..)` | `SankeyLink[]` (`{ source: number; target: number; value: number }`) | required | The flows: from the row `source` to the row `target` (their indices in the plot's `data`), `value` its size. A value that is no number or below zero carries nothing and draws no ribbon. |
+| `nodeWidth` | `.node_width(..)` | `number` | `24` | The width of each node, in points. |
+| `nodePadding` | `.node_padding(..)` | `number` | `8` | The gap between the nodes of a column, in points; less in a column too crowded for it. |
+| `nodeAlign` | `.node_align(..)` | `"justify" \| "left" \| "right" \| "center"` | `"justify"` | Which column each node goes in, as d3-sankey's: its depth from the first column (`"left"`), as far right as its flows let it (`"right"`), its depth with a node that only starts flows next to its targets (`"center"`), or its depth with the nodes that end flows in the last column (`"justify"`). |
+| `iterations` | `.iterations(..)` | `number` | `6` | How many passes relax the nodes toward their flows. |
+| `valueScale` | `.value_scale(..)` | `"linear" \| "sqrt"` | `"linear"` | Heights and widths in proportion to the values, or to their square roots. |
+| `minLinkWidth` | `.min_link_width(..)` | `number` | `1` | The thinnest a ribbon draws, in points, so a small flow stays visible. |
+| `nodeCornerRadius` | `.node_corner_radius(..)` | `number` | `0` | The radius of each node's corners, in points. |
+| `nodeClass` | `.node_class(..)` | `string \| (d: T, index: number) => string` | none | The classes of each node (`fill-*`, `stroke-*`): the same on every node, or a function of the node's row and its index, called once per row when the rows or the function change. |
+| `nodeStyle` | `.node_style(..)` | `StyleProp<ViewStyle>` | none | The style of every node, over its classes. |
+| `linkClass` | `.link_class(..)` | `string \| (link: SankeyLink, index: number) => string` | none | The classes of each ribbon: the same on every ribbon, or a function of the link and its index in `links`. |
+| `linkStyle` | `.link_style(..)` | `StyleProp<ViewStyle>` | none | The style of every ribbon, over its classes. |
+| `linkBackgroundClass` | `.link_background_class(..)` | `string \| (link: SankeyLink, index: number) => string` | none | The classes of each ribbon's background (`bg-*`, a gradient: `bg-linear-to-r from-… to-…`), shown inside the ribbon over a box from its source to its target, under its `fill`. With a background, a ribbon's `fill` is `none` where none is set. |
+| `linkBackgroundStyle` | `.link_background_style(..)` | `StyleProp<ViewStyle>` | none | The style of every ribbon's background, over its classes. |
+| `hoverDim` | `.hover_dim(..)` | `number` (0 to 1) | `0` | How much the links not attached to the node under the pointer fade, as a share of their opacity, on the plot's `pointer` spring and with the hover's fade. |
+| `nodeLabel` | `.node_label(..)` | `keyof T \| (d: T, index: number) => string` | none | The name beside each node: a field, or a function of the node's row and its index. |
+| `valueLabel` | `.value_label(..)` | `(d: T, value: number, index: number) => string` | none | The value beside each node, over its name: a function of its row and the most that flows into or out of it (in the links' values, whatever the `valueScale`). |
+| `nodeLabelClass` | `.node_label_class(..)` | `string` | none | The classes of each label, the `nodeLabel` part: its padding the gap to its node, its text styles both lines'. |
+| `nodeLabelStyle` | `.node_label_style(..)` | `StyleProp<TextStyle>` | none | The style of each label, over its classes. |
+| `valueLabelClass` | `.value_label_class(..)` | `string` | none | The classes of the value line, the `valueLabel` part, over the label's. |
+| `valueLabelStyle` | `.value_label_style(..)` | `StyleProp<TextStyle>` | none | The style of the value line, over its classes. |
+
+A node and a ribbon fill with `fill` (`currentColor` where none is set) and stroke with `stroke` (none where none is
+set), their own over the sankey's and the plot's as CSS inherits them. A node with nothing through it is a point tall.
+The layout runs again only when the links, the options or the plot's size change, never for the pointer or the
+appear; the plot's size changing moves nothing. Links that make a cycle, or name a row the plot does not have, draw nothing and log a warning. Its values take
+no part in the plot's scales.
+
+
 ## PlotAxis
 
 A `PlotAxis` labels an edge of the plot with the ticks of the scale that edge carries: the bottom and top edges the x
@@ -660,8 +788,8 @@ Motion is the app's, and none by default: everything shows at once. `motion` tak
 
 | Key | Type | What moves |
 |---|---|---|
-| `appear` | timing | The marks draw in, with an `appearGeneration`: lines and areas from the leading edge, bars growing out of their base (one after another with a bar's `stagger`); a pie's and an arc's ring sweeps in clockwise from its start; a radial line grows out of its inner radius, its dots with it. |
-| `update` | timing | Marks move to the new shape when the app changes it: a pie's and an arc's radii, so a donut's hole opens and closes, and their angles, so a gauge or a slice sweeps round to its new value (d3's `arcTween`: the angles move, not the outline; a new slice opens from where the one before it ends; a change while one moves goes on from where it is drawn); a radial line's points to their new values, angles and radii (a new row growing out of the inner radius), a radial grid's rings with them; and a linear scale's domain, the app's `domain` or the extent of the marks' values as rows come, which glides from the old one to the new one, the marks, the grid lines, the `PlotAxis`es and the `PlotLabel`s with it. |
+| `appear` | timing | The marks draw in, with an `appearGeneration`: lines and areas from the leading edge, bars growing out of their base (one after another with a bar's `stagger`); a pie's and an arc's ring sweeps in clockwise from its start; a radial line grows out of its inner radius, its dots with it; a sankey's nodes and ribbons from the leading edge, its labels fading in. |
+| `update` | timing | Marks move to the new shape when the app changes it: a pie's and an arc's radii, so a donut's hole opens and closes, and their angles, so a gauge or a slice sweeps round to its new value (d3's `arcTween`: the angles move, not the outline; a new slice opens from where the one before it ends; a change while one moves goes on from where it is drawn); a radial line's points to their new values, angles and radii (a new row growing out of the inner radius), a radial grid's rings with them; and a linear scale's domain, the app's `domain` or the extent of the marks' values as rows come, which glides from the old one to the new one, the marks, the grid lines, the `PlotAxis`es and the `PlotLabel`s with it; and a sankey's nodes, ribbons and labels, from the old flows' layout to the new one, a change while they move going on from where they are drawn. |
 | `enter` | timing | The hover's parts fade in when the pointer comes over the plot. |
 | `exit` | timing | They fade out after it leaves. |
 | `pointer` | spring | They glide from one row to the next while the pointer moves over the plot; a pie's slice lifts on it, and a radial line's hover dot glides on it from one row's point to the next. |
@@ -689,7 +817,7 @@ is the app's: a `focus-visible:` class or a `focusStyle` (`focus-visible:outline
 
 | Keys | What they do |
 |---|---|
-| Right, Left | Move to the row on that side: the next or the previous row, the other way round on a reversed x scale, whose first row is at the right (over a pie, its slices in the rows' order); with no row hovered, Right starts at the row at the left end and Left at the one at the right end (over a pie, the first and the last slice). |
+| Right, Left | Move to the row on that side: the next or the previous row, the other way round on a reversed x scale, whose first row is at the right (over a pie, its slices in the rows' order; over a sankey, its nodes); with no row hovered, Right starts at the row at the left end and Left at the one at the right end (over a pie, the first and the last slice). |
 | Home, End | Move to the first or the last row. |
 | Escape | Clears the hover. |
 
