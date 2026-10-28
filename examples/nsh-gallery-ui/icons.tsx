@@ -53,6 +53,16 @@ export type IconName =
   | "replace-all"
   | "diagnostics"
   | "close"
+  | "copy"
+  | "trash"
+  | "share"
+  | "download"
+  | "link"
+  | "eye"
+  | "eye-off"
+  | "mail"
+  | "lock"
+  | "merge"
   | "checkbox"
   | "radio"
   | "switch"
@@ -463,6 +473,76 @@ const glyphs: Record<IconName, Draw> = {
   close: (c) => {
     line(c, [5.5, 5.5, 14.5, 14.5]);
     line(c, [14.5, 5.5, 5.5, 14.5]);
+  },
+  copy: (c) => {
+    rect(c, 7, 7, 10, 10, 2);
+    line(c, [13, 4.5, 13, 4, 12, 3, 4, 3, 3, 4, 3, 12, 4, 13, 4.5, 13]);
+  },
+  trash: (c) => {
+    line(c, [3.5, 5.5, 16.5, 5.5]);
+    line(c, [8, 5.5, 8, 3.5, 12, 3.5, 12, 5.5]);
+    line(c, [5, 5.5, 6, 16.5, 14, 16.5, 15, 5.5]);
+    line(c, [8.5, 8.5, 8.5, 13.5]);
+    line(c, [11.5, 8.5, 11.5, 13.5]);
+  },
+  share: (c) => {
+    line(c, [10, 12, 10, 3]);
+    line(c, [6.5, 6.5, 10, 3, 13.5, 6.5]);
+    line(c, [7, 9, 4.5, 9, 4.5, 17, 15.5, 17, 15.5, 9, 13, 9]);
+  },
+  download: (c) => {
+    line(c, [10, 3, 10, 12.5]);
+    line(c, [6, 8.5, 10, 12.5, 14, 8.5]);
+    line(c, [3.5, 13, 3.5, 16.5, 16.5, 16.5, 16.5, 13]);
+  },
+  link: (c) => {
+    // Two links of a chain, across the box.
+    c.save();
+    c.translate(10, 10);
+    c.rotate(-Math.PI / 4);
+    rect(c, -8, -3, 9, 6, 3);
+    rect(c, -1, -3, 9, 6, 3);
+    c.restore();
+  },
+  eye: (c) => {
+    c.beginPath();
+    c.moveTo(2.5, 10);
+    c.quadraticCurveTo(10, 2, 17.5, 10);
+    c.quadraticCurveTo(10, 18, 2.5, 10);
+    c.stroke();
+    circle(c, 10, 10, 2.5);
+  },
+  "eye-off": (c) => {
+    c.beginPath();
+    c.moveTo(2.5, 10);
+    c.quadraticCurveTo(10, 2, 17.5, 10);
+    c.quadraticCurveTo(10, 18, 2.5, 10);
+    c.stroke();
+    circle(c, 10, 10, 2.5);
+    line(c, [4, 16, 16, 4]);
+  },
+  mail: (c) => {
+    rect(c, 2.5, 4.5, 15, 11, 2.5);
+    line(c, [3.5, 6, 10, 11, 16.5, 6]);
+  },
+  lock: (c) => {
+    rect(c, 4, 9, 12, 8.5, 2);
+    line(c, [6.5, 9, 6.5, 6.5]);
+    c.beginPath();
+    c.arc(10, 6.5, 3.5, Math.PI, 0);
+    c.stroke();
+    line(c, [13.5, 6.5, 13.5, 9]);
+  },
+  merge: (c) => {
+    // Two branches joining into one.
+    circle(c, 5.5, 4.5, 1.8);
+    circle(c, 5.5, 15.5, 1.8);
+    circle(c, 14.5, 10, 1.8);
+    line(c, [5.5, 6.3, 5.5, 13.7]);
+    c.beginPath();
+    c.moveTo(5.5, 6.3);
+    c.quadraticCurveTo(5.5, 10, 12.7, 10);
+    c.stroke();
   },
   "volume-low": (c) => {
     speaker(c);
