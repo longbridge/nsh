@@ -3008,6 +3008,71 @@ fn multiline_inputs_grow_with_their_text() {
 }
 
 #[test]
+fn multiline_inputs_measure_long_runs_in_pieces() {
+    let mut c = input_core();
+    c.apply(Op::SetProp {
+        id: 2,
+        prop: Prop::Multiline(true),
+    })
+    .unwrap();
+    c.commit();
+    let key = c.key(2).unwrap();
+    let measured = |c: &Core<FakeEngine>, content: &str| c.input_text(key, content).text;
+    // A run without white space as long as minified JSON or Base64 is
+    // measured with a line break after every 1024 characters (platform
+    // line breakers take quadratic time on one long run)...
+    let run = "é".repeat(2500);
+    let pieces: Vec<String> = measured(&c, &run).split('\n').map(String::from).collect();
+    assert_eq!(
+        pieces,
+        ["é".repeat(1024), "é".repeat(1024), "é".repeat(452)]
+    );
+    // ... counted from the last white space, never ending the text with one.
+    let words = format!("{} {}", "a".repeat(1500), "b".repeat(1024));
+    assert_eq!(
+        measured(&c, &words),
+        format!(
+            "{}\n{} {}",
+            "a".repeat(1024),
+            "a".repeat(476),
+            "b".repeat(1024)
+        )
+    );
+    // Existing breaks are not duplicated, and non-breaking spaces do not
+    // let a long unbreakable run evade the limit.
+    let ending = format!("{}\n", "a".repeat(1024));
+    assert_eq!(measured(&c, &ending), format!("{ending}\u{200b}"));
+    let nbsp = "a\u{a0}".repeat(1200);
+    assert!(measured(&c, &nbsp).contains('\n'));
+    let cjk = "漢".repeat(2500);
+    assert_eq!(measured(&c, &cjk), cjk);
+    // Text without such runs, and a single line, measure as they are.
+    let prose = "lorem ipsum ".repeat(500);
+    assert_eq!(measured(&c, &prose), prose);
+    c.apply(Op::SetProp {
+        id: 2,
+        prop: Prop::Multiline(false),
+    })
+    .unwrap();
+    assert_eq!(measured(&c, &run), run);
+    // The input itself keeps its value.
+    c.apply(Op::SetProp {
+        id: 2,
+        prop: Prop::Multiline(true),
+    })
+    .unwrap();
+    c.input_changed(2, &run, 1);
+    c.commit();
+    assert_eq!(
+        c.nodes[key as usize]
+            .input
+            .as_ref()
+            .map(|i| i.value.as_str()),
+        Some(run.as_str())
+    );
+}
+
+#[test]
 fn commands_reach_created_views_only() {
     let mut c = input_core();
     c.apply(Op::Command {
@@ -6541,6 +6606,82 @@ mod components {
                 json!({ "c": 1, "v": 3 }),
                 json!({ "c": 2, "e": "stuck at 3" }),
                 json!({ "c": 3, "e": "node 40 hosts no Rust component" }),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_method_called_before_the_view_is_made_waits_for_it() {
+        use crate::element::{RustCall, RustOp, json_host::JsonHost};
+        let mut c = core();
+        let mut registry = Registry::new();
+        registry.register::<Knob>();
+        c.set_components(registry);
+        let methods = <KnobApi as crate::element::Api>::METHODS;
+        let turn = |by: i32| {
+            let Ok(run) = (methods[0].call)(&JsonHost::with_args(vec![json!(by)])) else {
+                panic!("converts")
+            };
+            run
+        };
+        // As a ref callback calls it: the component is made, its view is
+        // not yet (it is not in the tree).
+        apply(
+            &mut c,
+            vec![
+                Op::Create {
+                    id: 2,
+                    tag: Tag::View,
+                },
+                Op::SetProp {
+                    id: 2,
+                    prop: Prop::Component(std::any::type_name::<Knob>().into()),
+                },
+                Op::Rust(RustOp {
+                    call: 1,
+                    run: RustCall::Method(2, turn(2)),
+                }),
+                Op::Insert {
+                    parent: ROOT_ID,
+                    child: 2,
+                    before: None,
+                },
+            ],
+        );
+        assert_eq!(texts(&c.commit().unwrap()), ["at 2"]);
+        // One that never gets its view fails as its host goes.
+        apply(
+            &mut c,
+            vec![
+                Op::Create {
+                    id: 4,
+                    tag: Tag::View,
+                },
+                Op::SetProp {
+                    id: 4,
+                    prop: Prop::Component(std::any::type_name::<Knob>().into()),
+                },
+                Op::Rust(RustOp {
+                    call: 2,
+                    run: RustCall::Method(4, turn(1)),
+                }),
+            ],
+        );
+        let _ = c.commit();
+        apply(&mut c, vec![Op::Release { id: 4 }]);
+        let _ = c.commit();
+        let replies: Vec<_> = js_events(&mut c)
+            .into_iter()
+            .map(|(_, _, payload)| match payload {
+                EventPayload::Native { data, .. } => data,
+                other => panic!("{other:?}"),
+            })
+            .collect();
+        assert_eq!(
+            replies,
+            [
+                json!({ "c": 1, "v": 2 }),
+                json!({ "c": 2, "e": "node 4 hosts no Rust component" }),
             ]
         );
     }

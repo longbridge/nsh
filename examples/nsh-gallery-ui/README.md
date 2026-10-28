@@ -11,7 +11,7 @@ and NSH's elements; it is maintained with these examples, rather than published 
 | `index.tsx` | Shared buttons, cards, insets, badges, rows, switches, sheets and presentation helpers |
 | `popup.tsx` | The popup families' one surface and their enter motion (`PopIn`, `createPresence` for tooltips) |
 | `segmented.tsx` | The segmented control shared by the gallery and demo inspectors |
-| `icons.tsx` | The common line icon set |
+| `icons.tsx` | The common line icon set, and `CheckMark`: the check of checkboxes, selects and menus as an SVG image |
 | `data-table.ts` | Compact table spacing, resize separators, sort chevrons and selection feedback |
 | `scroll-area.tsx` | The scroll bar's track and thumb, and `ScrollArea`: a scroll view with that bar in place of the platform's indicator |
 | `slider.ts` | The slider's rail, gradient fill, pill thumb, value column and state feedback |

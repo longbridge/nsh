@@ -1,7 +1,6 @@
 ---
 title: DataTable
 description: "The DataTable component: a table of rows and columns that scrolls both ways over any number of either, with fixed, resizable, movable and sortable columns, row, column and cell selection, rows the app serves a page at a time, group labels, keyboard navigation and cells the app draws."
-order: 26.4
 group: base
 demo: el-data-table
 ---

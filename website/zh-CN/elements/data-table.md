@@ -1,7 +1,6 @@
 ---
 title: DataTable
 description: DataTable 组件：向两个方向滚动、行数和列数不限的表格，列可以固定、调整宽度、移动和排序，支持按行、列、单元格选择，行由应用分页提供，带分组标签、键盘导航和由应用绘制的单元格。
-order: 26.4
 group: base
 demo: el-data-table
 ---

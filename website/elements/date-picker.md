@@ -1,7 +1,6 @@
 ---
 title: DatePicker
 description: "The DatePicker component: a date, a range of dates or a date and time picked from a calendar in a popup at its trigger on desktops and a sheet on phones, styled by the app."
-order: 20.67
 group: base
 demo: el-date-picker
 ---

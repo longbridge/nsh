@@ -1,7 +1,6 @@
 ---
 title: ColorPicker
 description: "The ColorPicker component and its parts: a color picked on a saturation and brightness area, on sliders of any channel of RGB, HSL, HSB or OKLCH and of the alpha, typed in any CSS form, chosen from swatches or picked on the screen with an eyedropper, with WAI-ARIA's keys and adjustable elements for screen readers, laid out and styled by the app."
-order: 20.86
 group: base
 demo: el-color-picker
 ---

@@ -1,7 +1,6 @@
 ---
 title: Menu
 description: Menu 和 ContextMenu，配合 MenuItem、MenuSeparator 和 Submenu：桌面上是带级联子菜单的弹出层，手机上是就地展开子菜单的 sheet，样式由应用决定。
-order: 27
 group: base
 demo: el-menu
 ---

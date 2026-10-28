@@ -1,7 +1,6 @@
 ---
 title: Tabs
 description: Tab 与 Tabs：标签列表中的标签页，以及这个列表。每个标签页负责按压、键盘激活、禁用状态以及屏幕阅读器的角色和选中状态；列表就是这一组；外观、值以及每个标签页显示的内容都属于应用。
-order: 20.6
 group: base
 demo: el-tabs
 ---

@@ -6,8 +6,10 @@
 // ones with counts, collapsible sections whose content is kept while
 // collapsed and an accordion, progress bars of a transfer the app drives, of
 // one of unknown size and of several uploads, sliders of a level and of a
-// price range, number inputs of seats and a price, a one-time code typed or
-// pasted into its cells.
+// price range, number inputs of seats and a price, of a cart's quantities
+// and of units in their wells, a one-time code typed or pasted into its
+// cells, a sign-in code sent with a countdown to resend it, and a PIN entered
+// twice.
 // Every row is the control, its label included; on a desktop the plans
 // and the tabs are one stop of Tab each, moved through with the arrow
 // keys. Also the
@@ -293,7 +295,7 @@ test("an equalizer's presets set its vertical bands", async () => {
 
 test("a number input steps with the keys, holds a typed number to its range, and a locked one takes neither", async () => {
   await show("NumberInput", "Seats");
-  expect(app.count("role:spinbutton")).toBe(2);
+  expect(app.count("role:spinbutton")).toBe(9);
   await app.type("label:Seats", "");
   await app.keyboard.press("up");
   await app.waitFor("Seats: 3");
@@ -340,6 +342,73 @@ test("a one-time code takes digits up to its length, and a pasted code fills it"
   await app.wait(50);
   expect(app.texts()).toContain("Code complete: 246810");
   expect(app.texts()).not.toContain("9");
+});
+
+test("a cart's quantities hold to the stock and roll the totals, and units sit in their wells", async () => {
+  await show("NumberInput", "Linen shirt");
+  expect(app.texts()).toContain("$134.00");
+  expect(app.texts()).toContain("Add $16.00 more for free shipping");
+  await app.type("label:Quantity of Canvas tote", "");
+  await app.keyboard.press("up");
+  await app.waitFor("Canvas tote: 3");
+  await app.waitFor("Only 3 left");
+  // 48 + 3 × 22 + 3 × 14: past the free shipping.
+  await app.waitFor("Free shipping unlocked");
+  expect(app.texts()).toContain("$156.00");
+  // Typed past the balance (still within the input's range): the transfer says so.
+  await app.type("label:Transfer amount", "0");
+  await app.waitFor("Transfer: 2500");
+  await app.waitFor("More than your balance of $1,200.00");
+  await app.type("label:Thermostat", "");
+  await app.keyboard.press("up");
+  await app.waitFor("Thermostat: 22");
+  await app.type("label:Tip", "");
+  await app.keyboard.press("up");
+  await app.waitFor("Tip: 20%");
+  await app.waitFor("$16.80");
+});
+
+test("a sign-in code is sent, counts down to a resend, shakes off a wrong code and signs in", async () => {
+  await show("OtpInput", "We will text a code to +1 555 010 2299");
+  const code = "label:Sign-in code, 6 digits";
+  expect(app.enabled(code)).toBe(false);
+  await app.press("role:button[Send code]");
+  await app.waitFor("Resend code in");
+  expect(app.texts()).toContain("0:30");
+  await app.wait(1000);
+  await app.waitFor("0:29");
+  // A wrong code: checked a moment later, then emptied, with two tries left.
+  await app.type(code, "111111");
+  await app.waitFor("Sign-in code: 111111");
+  await app.wait(700);
+  await app.waitFor("That code is wrong: 2 tries left");
+  // Once the countdown ends, a new code can be sent.
+  await app.clock.runFor(30_000);
+  await app.waitFor("role:button[Resend code]");
+  await app.paste(code, { text: "135 790" });
+  await app.waitFor("Sign-in code: 135790");
+  await app.wait(700);
+  await app.waitFor("Signed in");
+  await app.waitFor("Sign-in: verified");
+  expect(app.enabled(code)).toBe(false);
+});
+
+test("a PIN is entered twice, masked: a mismatch starts over, a match sets it", async () => {
+  await show("OtpInput", "Choose a 4-digit PIN");
+  const pin = "label:PIN, 4 digits";
+  await app.type(pin, "25");
+  expect(app.texts()).toContain("•");
+  await app.type(pin, "80");
+  await app.waitFor("Enter it again");
+  await app.type(pin, "2581");
+  await app.waitFor("The PINs do not match: choose one again");
+  await app.type(pin, "1379");
+  await app.waitFor("Enter it again");
+  await app.type(pin, "1379");
+  await app.waitFor("PIN set");
+  expect(app.enabled(pin)).toBe(false);
+  await app.press("role:button[Change PIN]");
+  await app.waitFor("Choose a 4-digit PIN");
 });
 
 test("the gallery's segmented control is a tab list", async () => {

@@ -1,6 +1,6 @@
 import { type JSX, mount, signal, Text, View } from "nsh";
 import { Button, type OpenChangeReason, Select, type SelectGroup, type SelectItemState, Switch } from "nsh/base";
-import { button, buttonText, desktop, focusRing, hoverFill, Log, Panel, size, Split, tint, ui } from "./palette";
+import { button, buttonText, CheckMark, desktop, focusRing, hoverFill, Log, Panel, size, Split, tint, ui } from "./palette";
 
 // Two selects in a settings card: a plain one (typeahead jumps by letter)
 // and a searchable one with sections, a disabled item and an empty state.
@@ -115,7 +115,11 @@ function Row(props: { item: SelectItemState; detail?: string }) {
       <If when={props.detail}>
         <Text style={{ fontSize: 12, color: ui().faint }}>{props.detail}</Text>
       </If>
-      <Text style={{ width: 12, fontSize: 12, textAlign: "right", color: ui().accent }}>{props.item.selected ? "✓" : ""}</Text>
+      <View style={{ width: 16 }}>
+        <If when={props.item.selected}>
+          <CheckMark size={16} tint={ui().accent} />
+        </If>
+      </View>
     </View>
   );
 }

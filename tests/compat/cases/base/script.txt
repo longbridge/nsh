@@ -968,6 +968,72 @@ covers [props] disabled
 covers [props] accessibilityLabel
 covers [events] onPress
 
+# base-toggle
+tap id:case-base-toggle
+# The group is a toolbar for screen readers; each toggle is a button of
+# its own, pressed while the app says so: `pressedStyle`, and
+# `group-aria-pressed:` of the app's marker (30 wide, a margin of 8) puts
+# the label at 38.
+expect Marks: italic
+expect Changes: 0
+prop id:marks role toolbar
+prop id:bold role button
+prop id:italic role button
+style id:italic backgroundColor #00ff00ff
+frame text:Italic 38 2 47 17
+nostyle id:bold backgroundColor
+frame text:Bold 28 2 31 17
+listens id:bold onPress
+# The group is one stop of the keyboard focus: the pressed toggle.
+prop id:italic focusable true
+prop id:bold focusable false
+# A press reports the next value; the app sets it, either way, any number
+# of toggles at once.
+tap text:Bold
+expect Changes: 1
+expect Marks: bold,italic
+style id:bold backgroundColor #00ff00ff
+frame text:Bold 38 2 31 17
+tap id:italic
+expect Changes: 2
+expect Marks: bold
+nostyle id:italic backgroundColor
+frame text:Italic 28 2 47 17
+# The stop follows the first pressed toggle.
+prop id:bold focusable true
+prop id:italic focusable false
+# A toggle outside a group: a button of its own.
+prop id:favorite role button
+prop id:favorite accessibilityLabel Favorite
+tap label:Favorite
+expect Favorite: true
+tap label:Favorite
+expect Favorite: false
+# `disabled`: dimmed for screen readers, `group-disabled:` on the marker
+# (10 wide), presses do nothing; `accessibilityLabel` names it.
+prop id:underline accessibilityLabel Underline text
+prop id:underline accessibilityState disabled=true
+frame text:Underline 18 2 70 17
+tap id:enable
+frame text:Underline 28 2 70 17
+tap label:Underline text
+expect Changes: 3
+expect Marks: bold,underline
+# A disabled group disables every toggle in it: no stop of the focus.
+tap id:lock
+frame text:Bold 18 2 31 17
+frame text:Italic 18 2 47 17
+prop id:bold focusable false
+tap id:lock
+frame text:Bold 38 2 31 17
+covers [nsh/base] Toggle
+covers [nsh/base] ToggleGroup
+covers [props] Toggle.pressed
+covers [props] pressedStyle
+covers [props] disabled
+covers [props] accessibilityLabel
+covers [events] onChange
+
 # A collapsible: the summary always, the details only while the app's
 # `open` holds. Collapsed, the region is the trigger's 20 points.
 tap id:case-base-collapsible

@@ -1,7 +1,6 @@
 ---
 title: Editor
 description: Editor 组件：代码编辑器，带语法高亮、行号、多光标、折叠、软换行、查找与替换、诊断和装饰，以及代码编辑器的按键。
-order: 26.2
 group: base
 demo: el-editor
 ---

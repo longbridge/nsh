@@ -89,6 +89,11 @@ demo: guide-getting-started     # optional; a demo from demos/<name>.tsx
   (`group:`, a key of `GROUPS` in `src/lib/sections.ts`; the Guide uses
   them). A group is a run of consecutive pages, so keep a group's `order`
   values together.
+- **Elements** list the primitives (`group: primitives`), then the base
+  components (`group: base`), as the gallery's Elements does. A primitive
+  takes an `order` (steps of 10, from the simplest); a base component takes
+  none and lists by name. `tests/elements.test.ts` holds the gallery's
+  Elements (`examples/gallery/App.tsx`) to the same order.
 - **The heading comes from `title`.** A leading `# Title` in the body is
   removed, so pages may keep one for GitHub. The first paragraph is shown as
   the page's standfirst.

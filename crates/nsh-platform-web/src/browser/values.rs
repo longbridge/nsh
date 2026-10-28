@@ -110,7 +110,7 @@ impl Value {
         Self::checked(invoke(8, self.0, i as u32, 0, 0.0))
     }
     pub(super) fn keys(&self) -> Result<Vec<String>, PropError> {
-        let joined = Self::checked(invoke(48, self.0, 0, 0, 0.0))?;
+        let joined = Self::checked(invoke(50, self.0, 0, 0, 0.0))?;
         if let Some(joined) = joined.as_string() {
             if joined.is_empty() {
                 return Ok(Vec::new());

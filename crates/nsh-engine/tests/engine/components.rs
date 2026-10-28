@@ -2678,6 +2678,298 @@ fn base_tabs_and_radio_groups_rove_the_keyboard_focus() {
     assert!(after.iter().any(|batch| shows(batch, log)));
 }
 
+const BASE_TOGGLE: &str = r##"import { mount, signal, Text, View } from "nsh";
+import { Toggle, ToggleGroup } from "nsh/base";
+
+function App() {
+  const marks = signal<string[]>(["b"]);
+  const locked = signal(false);
+  const log = signal<string[]>([]);
+  const toggle = (value: string, label: string, disabled = false) => (
+    <Toggle
+      testID={value}
+      pressed={marks().includes(value)}
+      disabled={disabled}
+      accessibilityLabel={label}
+      class="group flex-row disabled:opacity-50"
+      pressedStyle={{ backgroundColor: "#0000ff" }}
+      onChange={({ pressed: next }) => {
+        log.set([...log(), `${value}:${next}`]);
+        marks.set(next ? [...marks(), value] : marks().filter((m) => m !== value));
+      }}
+    >
+      <View class="w-[20px] group-aria-pressed:bg-[#00ff00]" />
+      <Text>{label}</Text>
+    </Toggle>
+  );
+  return (
+    <View>
+      <ToggleGroup testID="marks" class="flex-row" disabled={locked()}>
+        {toggle("a", "Bold")}
+        {toggle("b", "Italic")}
+        {toggle("c", "Strikethrough", true)}
+        {toggle("d", "Underline")}
+      </ToggleGroup>
+      <View testID="lock" onPress={() => locked.set(!locked())} />
+      <Text>{`Log: ${log().join(",")}`}</Text>
+    </View>
+  );
+}
+
+mount(App);
+"##;
+
+/// `nsh/base`'s `Toggle` in a `ToggleGroup`: the toolbar role on the
+/// group, the button role with its pressed state on each toggle alone, a
+/// press asking for the other value while the app owns which are pressed,
+/// `pressedStyle` and the app's mark inside following the toggle with
+/// `group-aria-pressed:`, a disabled toggle (or group) reporting nothing,
+/// and the toolbar's roving focus: one stop, at the pressed toggle, the
+/// arrow keys moving the focus past the disabled toggle without pressing.
+#[test]
+fn a_base_toggle_reports_the_next_value_and_its_group_roves_without_pressing() {
+    use std::sync::Arc;
+
+    use nsh_core::{
+        AccessibilityRole, Checked,
+        keymap::{KeyMatch, Keymap, Keystroke},
+    };
+
+    let (engine, rx) = start_in(
+        BASE_TOGGLE,
+        Environment {
+            os: nsh_engine::Os::MacOs,
+            ..Environment::default()
+        },
+    );
+    let mut batches = until(&rx, |batch| shows(batch, "Log: "));
+    let id = |batches: &[MountBatch], test_id: &str| {
+        batches
+            .iter()
+            .flat_map(|b| b.items.iter())
+            .find_map(|i| match i {
+                MountItem::ViewProps { id, props } if props.test_id.as_deref() == Some(test_id) => {
+                    Some(*id)
+                }
+                _ => None,
+            })
+            .expect(test_id)
+    };
+    let [group, a, b, c, d, lock] = ["marks", "a", "b", "c", "d", "lock"].map(|t| id(&batches, t));
+    let props = |batches: &[MountBatch], view| {
+        batches
+            .iter()
+            .rev()
+            .flat_map(|b| b.items.iter().rev())
+            .find_map(|i| match i {
+                MountItem::ViewProps { id, props } if *id == view => Some(props.clone()),
+                _ => None,
+            })
+    };
+    let style = |batches: &[MountBatch], view| {
+        batches
+            .iter()
+            .rev()
+            .flat_map(|b| b.items.iter().rev())
+            .find_map(|i| match i {
+                MountItem::ViewStyle { id, style } if *id == view => Some(style.clone()),
+                _ => None,
+            })
+            .unwrap_or_default()
+    };
+    // The first view inside `parent`: the app's mark.
+    let mark = |batches: &[MountBatch], parent: u32| {
+        let views: Vec<u32> = batches
+            .iter()
+            .flat_map(|b| b.items.iter())
+            .filter_map(|i| match i {
+                MountItem::Create {
+                    id,
+                    kind: nsh_core::ViewKind::View,
+                } => Some(*id),
+                _ => None,
+            })
+            .collect();
+        batches
+            .iter()
+            .flat_map(|b| b.items.iter())
+            .find_map(|i| match i {
+                MountItem::Insert {
+                    parent: p, child, ..
+                } if *p == parent && views.contains(child) => Some(*child),
+                _ => None,
+            })
+            .expect("the mark")
+    };
+    let pressed =
+        |batches: &[MountBatch], view| props(batches, view).unwrap().accessibility.state.pressed;
+    let stops = |batches: &[MountBatch], views: &[u32]| -> Vec<u32> {
+        views
+            .iter()
+            .copied()
+            .filter(|&view| props(batches, view).and_then(|p| p.focusable) == Some(true))
+            .collect()
+    };
+    let keymap = |batches: &[MountBatch]| -> Option<Arc<Keymap>> {
+        batches
+            .iter()
+            .rev()
+            .flat_map(|b| b.items.iter().rev())
+            .find_map(|i| match i {
+                MountItem::Keymap(keymap) => Some(keymap.clone()),
+                _ => None,
+            })
+    };
+    let bound = |keymap: &Keymap, keystroke: &str| {
+        let stroke = Keystroke::parse(keystroke, nsh_engine::Os::MacOs).unwrap();
+        match keymap.find(stroke, false, false) {
+            KeyMatch::Fire(id) => Some(id),
+            _ => None,
+        }
+    };
+    let focus_calls = |batches: &[MountBatch]| -> Vec<u32> {
+        batches
+            .iter()
+            .flat_map(|b| b.items.iter())
+            .filter_map(|i| match i {
+                MountItem::Command {
+                    id,
+                    command: Command::Focus,
+                } => Some(*id),
+                _ => None,
+            })
+            .collect()
+    };
+    let has_keymap = |batch: &MountBatch| {
+        batch
+            .items
+            .iter()
+            .any(|i| matches!(i, MountItem::Keymap(_)))
+    };
+
+    // The group: a toolbar for screen readers, laid out by the app.
+    let toolbar = props(&batches, group).unwrap();
+    assert_eq!(toolbar.accessibility.role, AccessibilityRole::Toolbar);
+    assert_eq!(toolbar.accessibility.label, None);
+
+    // Each toggle: a button with its pressed state, its `pressedStyle` and
+    // the app's mark `group-aria-pressed:` while pressed.
+    let italic = props(&batches, b).unwrap();
+    assert_eq!(italic.accessibility.role, AccessibilityRole::Button);
+    assert_eq!(italic.accessibility.label.as_deref(), Some("Italic"));
+    assert_eq!(pressed(&batches, b), Some(Checked::True));
+    assert_eq!(pressed(&batches, a), Some(Checked::False));
+    assert_eq!(style(&batches, b).background_color.0, 0x0000_ffff);
+    assert_eq!(style(&batches, a).background_color.0, 0);
+    let (mark_a, mark_b) = (mark(&batches, a), mark(&batches, b));
+    assert_eq!(style(&batches, mark_b).background_color.0, 0x00ff_00ff);
+    assert_eq!(style(&batches, mark_a).background_color.0, 0);
+    // The mark is a part of the toggle, no second element.
+    assert!(props(&batches, mark_a).is_none());
+
+    // A press asks for the other value; the app passes it back and the
+    // states and styles follow, either way.
+    engine
+        .control()
+        .dispatch_event(a, EventKind::Press, EventPayload::None);
+    batches.extend(until(&rx, |batch| shows(batch, "Log: a:true")));
+    assert_eq!(pressed(&batches, a), Some(Checked::True));
+    assert_eq!(style(&batches, a).background_color.0, 0x0000_ffff);
+    assert_eq!(style(&batches, mark_a).background_color.0, 0x00ff_00ff);
+    engine
+        .control()
+        .dispatch_event(b, EventKind::Press, EventPayload::None);
+    batches.extend(until(&rx, |batch| shows(batch, "Log: a:true,b:false")));
+    assert_eq!(pressed(&batches, b), Some(Checked::False));
+    assert_eq!(style(&batches, mark_b).background_color.0, 0);
+
+    // Disabled: no presses, dimmed for screen readers.
+    let disabled = props(&batches, c).unwrap();
+    assert!(disabled.accessibility.state.disabled);
+    assert!(
+        !batches
+            .iter()
+            .flat_map(|b| b.items.iter())
+            .any(|i| matches!(
+                i,
+                MountItem::Events { id, events } if *id == c && events.contains(EventKind::Press)
+            ))
+    );
+    assert_eq!(style(&batches, c).opacity, 0.5);
+
+    // One stop: the first pressed toggle (a, after the presses).
+    assert_eq!(stops(&batches, &[a, b, c, d]), [a]);
+    engine
+        .control()
+        .dispatch_event(a, EventKind::Focus, EventPayload::None);
+    batches.extend(until(&rx, has_keymap));
+    let keys = keymap(&batches).expect("the toolbar's keys");
+    for keystroke in ["left", "right", "up", "down", "home", "end"] {
+        assert!(bound(&keys, keystroke).is_some(), "{keystroke}");
+    }
+    let press = |keymap: &Keymap, keystroke: &str| {
+        let id = bound(keymap, keystroke).unwrap_or_else(|| panic!("{keystroke} is not bound"));
+        engine.control().dispatch_event(
+            ROOT_ID,
+            EventKind::KeyCommand,
+            EventPayload::Value(PayloadValue::Number(f64::from(id))),
+        );
+    };
+    // Right: b gets the focus and becomes the stop; nothing is pressed.
+    press(&keys, "right");
+    let after = until(&rx, |batch| {
+        batch.items.iter().any(|i| {
+            matches!(
+                i,
+                MountItem::Command {
+                    command: Command::Focus,
+                    ..
+                }
+            )
+        })
+    });
+    assert_eq!(focus_calls(&after), [b]);
+    batches.extend(after);
+    assert_eq!(stops(&batches, &[a, b, c, d]), [b]);
+    // Right again passes the disabled toggle.
+    press(&keys, "right");
+    let after = until(&rx, |batch| {
+        batch.items.iter().any(|i| {
+            matches!(
+                i,
+                MountItem::Command {
+                    command: Command::Focus,
+                    ..
+                }
+            )
+        })
+    });
+    assert_eq!(focus_calls(&after), [d]);
+    batches.extend(after);
+    assert!(
+        !batches
+            .iter()
+            .any(|batch| shows(batch, "Log: a:true,b:false,"))
+    );
+
+    // A disabled group disables every toggle.
+    engine
+        .control()
+        .dispatch_event(lock, EventKind::Press, EventPayload::None);
+    batches.extend(until(&rx, |batch| {
+        batch.items.iter().any(|i| {
+            matches!(
+                i,
+                MountItem::ViewProps { id, props } if *id == a && props.accessibility.state.disabled
+            )
+        })
+    }));
+    for view in [a, b, d] {
+        assert!(props(&batches, view).unwrap().accessibility.state.disabled);
+    }
+    assert!(stops(&batches, &[a, b, c, d]).is_empty());
+}
+
 const BASE_COLLAPSIBLE: &str = r##"import { mount, signal, Text, View } from "nsh";
 import { Collapsible } from "nsh/base";
 

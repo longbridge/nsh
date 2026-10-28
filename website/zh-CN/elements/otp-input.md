@@ -1,7 +1,6 @@
 ---
 title: OtpInput
 description: OtpInput 组件：定长的数字一次性验证码，输入、粘贴或由系统自动填充到一个原生输入框中，显示在由应用设置样式的格子、分组和光标里。
-order: 20.15
 group: base
 demo: el-otp-input
 ---

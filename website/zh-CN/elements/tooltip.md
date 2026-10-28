@@ -1,7 +1,6 @@
 ---
 title: Tooltip
 description: Tooltip 组件：关于它所在元素的提示，在桌面上指针停留时出现，样式由应用决定。
-order: 28
 group: base
 demo: el-tooltip
 ---

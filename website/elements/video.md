@@ -1,7 +1,7 @@
 ---
 title: Video
 description: "The Video element: native video playback with your own or the system's controls."
-order: 10
+order: 90
 group: primitives
 demo: el-video
 ---

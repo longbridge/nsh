@@ -1,7 +1,6 @@
 ---
 title: Popover
 description: Popover 组件：锚定在触发元素上、显示在一切之上的内容，触发元素、外部按压、Escape 和返回键都会关闭它，样式由应用决定。
-order: 26
 group: base
 demo: el-popover
 ---

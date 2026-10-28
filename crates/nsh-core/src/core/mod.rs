@@ -56,6 +56,10 @@ const NO_KEY: Key = Key::MAX;
 
 /// Rounds of binding the components' own lists per commit, at most.
 const MAX_VIRTUAL_ROUNDS: u32 = 8;
+/// The longest run without a line-break opportunity a multiline input's value is
+/// measured with unbroken (`broken_runs`): longer than a line of any input,
+/// so ordinary text measures as it is shown.
+const MEASURED_RUN: usize = 1024;
 /// Dirty flags, processed once per commit.
 mod dirty {
     /// Emit [`crate::MountItem::ViewStyle`].
@@ -2263,7 +2267,11 @@ impl<M: TextEngine> Core<M> {
             self.inherited_text_style(key).inherit(&node.text_style),
             node.paragraph.font_multiplier(self.font_scale),
         );
-        text.push(content, style);
+        if multiline {
+            text.push(&broken_runs(content), style);
+        } else {
+            text.push(content, style);
+        }
         // An empty last line still takes space (a trailing line break, or no
         // text at all).
         if content.is_empty() || (multiline && content.ends_with('\n')) {
@@ -7244,6 +7252,46 @@ fn span_background(style: &ViewStyle, node: NodeId) -> Option<crate::text::TextB
 /// Whether a span with `events` takes presses (a link in its text block).
 fn pressable(events: EventMask) -> bool {
     PRESSES.iter().any(|&e| events.contains(e))
+}
+
+/// `content` with a line break after every [`MEASURED_RUN`] characters of
+/// a run without a line-break opportunity, as a multiline input's value is measured.
+///
+/// Line breakers search back over the whole run for a break opportunity
+/// at the end of every line they lay out (CoreText through ICU), so one
+/// long run (minified JSON, Base64) costs time quadratic in its length:
+/// 13 s to measure a 474 KB minified JSON on an Apple silicon Mac, on the
+/// engine thread, at every edit. Broken into runs of 1024 it takes 47 ms. The
+/// input shows and reports its own text; the measured height can only
+/// grow by a line per break, and text without such runs is measured as is.
+fn broken_runs(content: &str) -> std::borrow::Cow<'_, str> {
+    let mut broken: Option<String> = None;
+    let (mut start, mut from) = (0, 0);
+    for (end, _) in unicode_linebreak::linebreaks(content) {
+        let mut run = 0;
+        for (offset, c) in content[start..end].char_indices() {
+            let i = start + offset;
+            // The final character may itself provide the break (space or
+            // newline). Do not introduce another line immediately before it.
+            if run == MEASURED_RUN && i + c.len_utf8() < end {
+                let broken = broken.get_or_insert_with(|| {
+                    String::with_capacity(content.len() + content.len() / MEASURED_RUN)
+                });
+                broken.push_str(&content[from..i]);
+                broken.push('\n');
+                (run, from) = (0, i);
+            }
+            run += 1;
+        }
+        start = end;
+    }
+    match broken {
+        Some(mut broken) => {
+            broken.push_str(&content[from..]);
+            broken.into()
+        }
+        None => content.into(),
+    }
 }
 
 /// What a leaf of `kind` measures with, if anything: texts and inputs (an

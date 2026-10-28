@@ -1,6 +1,6 @@
 import { mount, signal, Text, View } from "nsh";
 import { Checkbox } from "nsh/base";
-import { desktop, focusRing, hoverFill, Log, Panel, size, Split, ui } from "./palette";
+import { CheckMark, desktop, focusRing, hoverFill, Log, Panel, size, Split, ui } from "./palette";
 
 // The parts: geometry and motion in classes (`disabled:` dims the row,
 // following the checkbox; `group-checked:` / `group-indeterminate:` fade in
@@ -21,9 +21,7 @@ const layer = "absolute inset-0 items-center justify-center opacity-0 scale-75 t
 const mark = () => (
   <>
     <View class={`${layer} group-checked:opacity-100 group-checked:scale-100`}>
-      <Text class="text-xs font-bold" style={{ color: ui().onAccent }}>
-        ✓
-      </Text>
+      <CheckMark size={14} weight={2.5} tint={ui().onAccent} />
     </View>
     <View class={`${layer} group-indeterminate:opacity-100 group-indeterminate:scale-100`}>
       <View class="h-0.5 w-2.5 rounded-full" style={{ backgroundColor: ui().onAccent }} />
