@@ -10,12 +10,12 @@ import { Scrollbar } from "nsh/base";
 export const scrollTrack = "absolute inset-y-0 right-0 w-3 items-end px-0.5 py-1 transition-opacity duration-200 motion-reduce:transition-none";
 
 /**
- * The thumb of the gallery's scroll bar (`<Scrollbar thumbClass>`): a quiet
- * 6-point pill that widens and darkens as the pointer comes near, solid
- * while dragged.
+ * The thumb of the gallery's scroll bar (`<Scrollbar thumbClass>`): a thin
+ * 3-point line at rest that widens to an 8-point pill and darkens as the
+ * pointer comes near, solid while dragged.
  */
 export const scrollThumb =
-  "w-1.5 rounded-full bg-muted-foreground opacity-40 transition-all duration-150 group-hover:w-2 group-hover:opacity-70 active:w-2 active:opacity-90 motion-reduce:transition-none";
+  "w-[3px] rounded-full bg-muted-foreground opacity-40 transition-all duration-150 group-hover:w-2 group-hover:opacity-70 active:w-2 active:opacity-90 motion-reduce:transition-none";
 
 /**
  * A vertical scroll view with the gallery's own scroll bar in place of the
