@@ -1,5 +1,5 @@
 import { cleanup, computed, type JSX, signal, Text, View } from "nsh";
-import { Checkbox, Collapsible, NumberInput, OtpInput, Progress, Radio, RadioGroup, Select, type SelectGroup, type SelectItemState, Slider, Switch, Tab, Tabs } from "nsh/base";
+import { Checkbox, Collapsible, Combobox, NumberInput, OtpInput, Progress, Radio, RadioGroup, Select, type SelectGroup, type SelectItemState, Slider, Switch, Tab, Tabs } from "nsh/base";
 import { reduceMotion } from "nsh";
 import { platform } from "nsh";
 import { Icon } from "../icons";
@@ -200,6 +200,23 @@ const LANGUAGES = [
   { value: "de", title: "Deutsch" },
 ];
 
+const TOPICS = [
+  { value: "layout", title: "Layout", group: "Core" },
+  { value: "text", title: "Text", group: "Core" },
+  { value: "animation", title: "Animation", group: "Core" },
+  { value: "ios", title: "iOS", group: "Platforms" },
+  { value: "android", title: "Android", group: "Platforms" },
+  { value: "desktop", title: "Desktop", group: "Platforms" },
+  { value: "web", title: "Web", group: "Platforms" },
+  { value: "legacy", title: "Legacy", group: "Platforms", disabled: true },
+];
+
+const REVIEWERS = [
+  { value: "ada", title: "Ada" },
+  { value: "grace", title: "Grace" },
+  { value: "linus", title: "Linus" },
+];
+
 const titleOf = (items: { value: string; title: string }[], value: string | null) => items.find((i) => i.value === value)?.title ?? "None";
 
 /** The controls, one demo each in the sidebar. */
@@ -209,6 +226,7 @@ export type Control =
   | "Radio"
   | "Tabs"
   | "Select"
+  | "Combobox"
   | "Collapsible"
   | "Progress"
   | "Slider"
@@ -217,7 +235,7 @@ export type Control =
 
 /**
  * One of `nsh/base`'s controls (`Switch`, `Checkbox`, `Radio` and
- * `RadioGroup`, `Tab` and `Tabs`, `Select`, `Collapsible`, `Progress`, `Slider`) in
+ * `RadioGroup`, `Tab` and `Tabs`, `Select`, `Combobox`, `Collapsible`, `Progress`, `Slider`) in
  * the settings, filters, pickers, section switchers, choices and disclosures apps use
  * it for, above the last event it reported.
  */
@@ -427,95 +445,97 @@ export function Controls(props: { show: Control }) {
     );
   }
 
+  // The lists' look, shared by the select's and the combobox's cards.
+  /** The list: a popup at the trigger with a pointer, as the menus'; a sheet at the bottom on a touch screen. */
+  const surface = () =>
+    pointer
+      ? { backgroundColor: colors.raised, borderRadius: radius.inset, borderWidth: 1, borderColor: colors.border, padding: 6, ...finish.raised }
+      : { backgroundColor: colors.surface, borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingHorizontal: 10, paddingTop: 10, paddingBottom: 34, maxHeight: "70%" as const };
+  const backdrop = { backgroundColor: "rgba(0,0,0,0.45)" };
+  /** The clear button's inset from the trigger's end: centered where the chevron's lane is. */
+  const clearInset = 10 + size.check / 4 - size.clear / 2;
+  /** The trigger: the chosen title and a chevron that turns while the list is open, its border lit then. */
+  function Picker(props: { title: string; open: boolean; disabled?: boolean; placeholder?: boolean; clearable?: boolean }) {
+    return (
+      <View
+        style={{
+          flexDirection: "row",
+          alignItems: "center",
+          gap: 8,
+          height: size.line,
+          paddingLeft: 10,
+          // Room for the clear button, which goes over the trigger's end in place of the chevron.
+          paddingRight: props.clearable ? clearInset + size.clear + 8 : 10,
+          borderRadius: radius.control,
+          borderWidth: 1,
+          borderColor: props.open ? colors.faint : colors.border,
+          backgroundColor: colors.raised,
+          ...finish.raised,
+          // Dimmed while the select is: the app knows, as it passes `disabled`.
+          opacity: props.disabled ? dimmed.opacity : 1,
+        }}
+        hoverStyle={props.disabled ? undefined : { borderColor: colors.faint }}
+        activeStyle={pressed}
+        focusStyle={focusRing()}
+        disabledStyle={dimmed}
+      >
+        <Text style={{ numberOfLines: 1, fontSize: size.label, color: props.placeholder ? colors.faint : colors.text }}>{props.title}</Text>
+        {/* The chevron's icon box, taking only the room of its stroke (half the box) in the row, so it turns
+            about its own center; it points down, and up while open. */}
+        <View
+          class="transition-transform duration-150 motion-reduce:transition-none"
+          style={{ display: props.clearable ? "none" : "flex", marginHorizontal: -size.check / 4, transform: [{ rotate: props.open ? "-90deg" : "90deg" }] }}
+        >
+          <Icon name="chevron" size={size.check} tint={colors.muted} />
+        </View>
+      </View>
+    );
+  }
+  /** A row of the list: lit while highlighted (the keys or the pointer), bolder with a check while chosen. */
+  function Option(props: { item: SelectItemState; note?: string }) {
+    return (
+      <View
+        style={{
+          flexDirection: "row",
+          alignItems: "center",
+          gap: 8,
+          height: pointer ? 32 : 46,
+          paddingHorizontal: 8,
+          borderRadius: 7,
+          borderWidth: 1,
+          borderColor: props.item.highlighted ? alpha(colors.accent, 0.3) : "transparent",
+          backgroundColor: props.item.highlighted ? tints.accent : "transparent",
+          opacity: props.item.disabled ? 0.35 : 1,
+        }}
+      >
+        <Text style={{ numberOfLines: 1, flex: 1, fontSize: 14, fontWeight: props.item.selected ? "600" : "400", color: colors.text }}>
+          {props.item.title}
+        </Text>
+        <If when={props.note}>
+          <Text style={{ fontSize: 12, color: colors.faint }}>{props.note}</Text>
+        </If>
+        <View style={{ width: 16, alignItems: "center" }}>
+          <If when={props.item.selected}>
+            <Icon name="check" size={14} tint={colors.accent} />
+          </If>
+        </View>
+      </View>
+    );
+  }
+  function Header(props: { group: SelectGroup }) {
+    return (
+      <Text style={{ fontSize: 11, fontWeight: "600", letterSpacing: 0.6, color: colors.faint, paddingHorizontal: 9, paddingTop: 8, paddingBottom: 4 }}>
+        {props.group.title.toUpperCase()}
+      </Text>
+    );
+  }
+  const opened = (set: (open: boolean) => void) => ({ open }: { open: boolean }) => set(open);
+
   function Choices() {
     const sort = signal<string | null>("newest");
     const font = signal<string | null>("inter");
     const sortOpen = signal(false);
     const fontOpen = signal(false);
-    /** The list: a popup at the trigger with a pointer, as the menus'; a sheet at the bottom on a touch screen. */
-    const surface = () =>
-      pointer
-        ? { backgroundColor: colors.raised, borderRadius: radius.inset, borderWidth: 1, borderColor: colors.border, padding: 6, ...finish.raised }
-        : { backgroundColor: colors.surface, borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingHorizontal: 10, paddingTop: 10, paddingBottom: 34, maxHeight: "70%" as const };
-    const backdrop = { backgroundColor: "rgba(0,0,0,0.45)" };
-    /** The clear button's inset from the trigger's end: centered where the chevron's lane is. */
-    const clearInset = 10 + size.check / 4 - size.clear / 2;
-    /** The trigger: the chosen title and a chevron that turns while the list is open, its border lit then. */
-    function Picker(props: { title: string; open: boolean; disabled?: boolean; placeholder?: boolean; clearable?: boolean }) {
-      return (
-        <View
-          style={{
-            flexDirection: "row",
-            alignItems: "center",
-            gap: 8,
-            height: size.line,
-            paddingLeft: 10,
-            // Room for the clear button, which goes over the trigger's end in place of the chevron.
-            paddingRight: props.clearable ? clearInset + size.clear + 8 : 10,
-            borderRadius: radius.control,
-            borderWidth: 1,
-            borderColor: props.open ? colors.faint : colors.border,
-            backgroundColor: colors.raised,
-            ...finish.raised,
-            // Dimmed while the select is: the app knows, as it passes `disabled`.
-            opacity: props.disabled ? dimmed.opacity : 1,
-          }}
-          hoverStyle={props.disabled ? undefined : { borderColor: colors.faint }}
-          activeStyle={pressed}
-          focusStyle={focusRing()}
-          disabledStyle={dimmed}
-        >
-          <Text style={{ numberOfLines: 1, fontSize: size.label, color: props.placeholder ? colors.faint : colors.text }}>{props.title}</Text>
-          {/* The chevron's icon box, taking only the room of its stroke (half the box) in the row, so it turns
-              about its own center; it points down, and up while open. */}
-          <View
-            class="transition-transform duration-150 motion-reduce:transition-none"
-            style={{ display: props.clearable ? "none" : "flex", marginHorizontal: -size.check / 4, transform: [{ rotate: props.open ? "-90deg" : "90deg" }] }}
-          >
-            <Icon name="chevron" size={size.check} tint={colors.muted} />
-          </View>
-        </View>
-      );
-    }
-    /** A row of the list: lit while highlighted (the keys or the pointer), bolder with a check while chosen. */
-    function Option(props: { item: SelectItemState; note?: string }) {
-      return (
-        <View
-          style={{
-            flexDirection: "row",
-            alignItems: "center",
-            gap: 8,
-            height: pointer ? 32 : 46,
-            paddingHorizontal: 8,
-            borderRadius: 7,
-            borderWidth: 1,
-            borderColor: props.item.highlighted ? alpha(colors.accent, 0.3) : "transparent",
-            backgroundColor: props.item.highlighted ? tints.accent : "transparent",
-            opacity: props.item.disabled ? 0.35 : 1,
-          }}
-        >
-          <Text style={{ numberOfLines: 1, flex: 1, fontSize: 14, fontWeight: props.item.selected ? "600" : "400", color: colors.text }}>
-            {props.item.title}
-          </Text>
-          <If when={props.note}>
-            <Text style={{ fontSize: 12, color: colors.faint }}>{props.note}</Text>
-          </If>
-          <View style={{ width: 16, alignItems: "center" }}>
-            <If when={props.item.selected}>
-              <Icon name="check" size={14} tint={colors.accent} />
-            </If>
-          </View>
-        </View>
-      );
-    }
-    function Header(props: { group: SelectGroup }) {
-      return (
-        <Text style={{ fontSize: 11, fontWeight: "600", letterSpacing: 0.6, color: colors.faint, paddingHorizontal: 9, paddingTop: 8, paddingBottom: 4 }}>
-          {props.group.title.toUpperCase()}
-        </Text>
-      );
-    }
-    const opened = (set: (open: boolean) => void) => ({ open }: { open: boolean }) => set(open);
     return (
       <Card icon="controls" title="Select" subtitle="A choice from a list: the app owns the value">
         <View>
@@ -585,6 +605,90 @@ export function Controls(props: { show: Control }) {
           <View style={row(false)}>
             <Label label="Language" detail="Set by your organization" />
             <Select items={LANGUAGES} value="en" disabled accessibilityLabel="Language" trigger={<Picker title="English" open={false} disabled />} />
+          </View>
+        </View>
+      </Card>
+    );
+  }
+
+  function Tags() {
+    const topics = signal<string[]>(["layout", "ios"]);
+    const reviewer = signal<string[]>([]);
+    const topicsOpen = signal(false);
+    const reviewerOpen = signal(false);
+    const names = (items: { value: string; title: string }[], values: string[]) => values.map((v) => titleOf(items, v));
+    const topicsTitle = () => {
+      const all = names(TOPICS, topics());
+      return all.length <= 2 ? all.join(", ") : `${all.length} topics`;
+    };
+    return (
+      <Card icon="controls" title="Combobox" subtitle="Several values from a list: the app owns them">
+        <View>
+          <View style={row(true)}>
+            <Label label="Topics" detail="Several at once, with search; the list stays open" />
+            <Combobox
+              items={TOPICS}
+              multiple
+              value={topics()}
+              onChange={({ value }) => {
+                topics.set(value);
+                last.set(`Topics: ${names(TOPICS, value).join(", ") || "none"}`);
+              }}
+              onConfirm={({ value }) => last.set(`Topics confirmed: ${value.length}`)}
+              onOpenChange={opened((open) => topicsOpen.set(open))}
+              accessibilityLabel="Topics"
+              searchable
+              searchPlaceholder="Search topics"
+              searchClass={`${pointer ? "text-sm" : "text-base"} text-foreground placeholder:text-faint`}
+              searchStyle={{
+                height: pointer ? 32 : 40,
+                paddingHorizontal: 9,
+                marginBottom: 6,
+                borderRadius: radius.control,
+                borderWidth: 1,
+                borderColor: colors.fieldBorder,
+                backgroundColor: colors.field,
+                ...finish.field,
+              }}
+              empty={<Text style={{ paddingVertical: 20, textAlign: "center", fontSize: 14, color: colors.muted }}>No topic matches</Text>}
+              offset={4}
+              margin={8}
+              align="end"
+              popupStyle={pointer ? { ...surface(), width: 240 } : surface()}
+              backdropStyle={backdrop}
+              itemClass="active:opacity-70"
+              cleanable
+              clearButtonAccessibilityLabel="Clear the topics"
+              clearButtonClass="items-center justify-center rounded-full enabled:hover:bg-accent active:bg-track"
+              clearButtonStyle={{ position: "absolute", top: (size.line - size.clear) / 2, right: clearInset, width: size.clear, height: size.clear }}
+              clearButton={<Icon name="close" size={size.clear - 6} tint={colors.muted} />}
+              footerStyle={{ marginTop: 6, paddingTop: 6, paddingHorizontal: 9, borderTopWidth: 1, borderColor: colors.border }}
+              footer={<Text style={{ fontSize: 12, color: colors.muted }}>{`${topics().length} selected`}</Text>}
+              trigger={<Picker title={topics().length ? topicsTitle() : "Add topics"} open={topicsOpen()} placeholder={!topics().length} clearable={topics().length > 0} />}
+              renderItem={(item) => <Option item={item} note={item.disabled ? "Archived" : undefined} />}
+              renderGroup={(group) => <Header group={group} />}
+            />
+          </View>
+          <View style={row(false)}>
+            <Label label="Reviewer" detail="One person: a choice replaces the last" />
+            <Combobox
+              items={REVIEWERS}
+              value={reviewer()}
+              onChange={({ value }) => {
+                reviewer.set(value);
+                last.set(`Reviewer: ${names(REVIEWERS, value)[0] ?? "none"}`);
+              }}
+              onOpenChange={opened((open) => reviewerOpen.set(open))}
+              accessibilityLabel="Reviewer"
+              offset={4}
+              margin={8}
+              align="end"
+              popupStyle={pointer ? { ...surface(), width: 200 } : surface()}
+              backdropStyle={backdrop}
+              itemClass="active:opacity-70"
+              trigger={<Picker title={names(REVIEWERS, reviewer())[0] ?? "Nobody"} open={reviewerOpen()} placeholder={!reviewer().length} />}
+              renderItem={(item) => <Option item={item} />}
+            />
           </View>
         </View>
       </Card>
@@ -1003,7 +1107,7 @@ export function Controls(props: { show: Control }) {
     );
   }
 
-  const cards = { Switch: Settings, Checkbox: Filter, Radio: Plans, Tabs: Sections, Select: Choices, Collapsible: Disclosure, Progress: Transfers, Slider: Levels, NumberInput: Quantities, OtpInput: Verify };
+  const cards = { Switch: Settings, Checkbox: Filter, Radio: Plans, Tabs: Sections, Select: Choices, Combobox: Tags, Collapsible: Disclosure, Progress: Transfers, Slider: Levels, NumberInput: Quantities, OtpInput: Verify };
   return <DemoPage cards={[cards[props.show], Last]} />;
 }
 
@@ -1012,6 +1116,7 @@ export const CheckboxDemo = () => <Controls show="Checkbox" />;
 export const RadioDemo = () => <Controls show="Radio" />;
 export const TabsDemo = () => <Controls show="Tabs" />;
 export const SelectDemo = () => <Controls show="Select" />;
+export const ComboboxDemo = () => <Controls show="Combobox" />;
 export const CollapsibleDemo = () => <Controls show="Collapsible" />;
 export const ProgressDemo = () => <Controls show="Progress" />;
 export const SliderDemo = () => <Controls show="Slider" />;
