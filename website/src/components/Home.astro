@@ -59,9 +59,9 @@ const copy = zh
         ['gauge', 'Retained Mode', '只更新变化的视图，120 FPS，静止时几乎不占 CPU'],
         ['spark', 'AI-Friendly', '一套模型、一个 nsh 命令行；发布后还能下发 AI 生成的签名界面'],
       ],
-      start: '阅读简介',
+      start: '快速开始',
       try: '在线试用',
-      gallery: '打开示例应用',
+      gallery: '示例',
       meta: [
         ['scale', '开源 · Apache-2.0'],
         ['building', '由长桥（Longbridge）构建'],
@@ -115,9 +115,9 @@ const copy = zh
         ['gauge', 'Retained views', 'only what changed is updated: 120 FPS, near-idle CPU at rest'],
         ['spark', 'AI-friendly', 'one app model, one nsh command line, and signed AI-generated UI delivered after release'],
       ],
-      start: 'Read the introduction',
-      try: 'Try the playground',
-      gallery: 'Open the gallery',
+      start: 'Get started',
+      try: 'Playground',
+      gallery: 'Gallery',
       meta: [
         ['scale', 'Open source · Apache-2.0'],
         ['building', 'Built at Longbridge'],
@@ -267,7 +267,7 @@ const snippets: Record<string, string> = {
     `${cm('# ios · android · macos · windows · linux · gpui · web')}`,
   ].join('\n'),
 };
-const heroSnippet = `nsh init my-app ${k('--template')} ${st('rust')}`;
+const heroSnippet = 'nsh init my-app';
 
 // The same counter in both languages, Rust first.
 const langs = [

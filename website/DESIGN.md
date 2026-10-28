@@ -148,16 +148,20 @@ motion only, 620ms `cubic-bezier(.16, 1, .3, 1)`. The copied chat imports
 `./clipboard`, a no-op, because this runtime has no `Clipboard` yet;
 the playground lists every demo but this one (it compiles single files).
 
-Behind the hero, `HeroField.astro` draws the dot grid on a 2D canvas, mostly
-dark and quiet: every dot has a seeded size, brightness and twinkle, and a
-slowly drifting value-noise field decides where the grid shimmers. Near the
-pointer (or the last touch) a few dots light up more than their
-neighbours inside a noise-perturbed reach that trails the pointer a little,
-over a small faint halo (140 px, peak alpha 0.06); the field is faint over
-the copy. It pauses off
-screen and in hidden tabs, draws one static frame with reduced motion,
-never takes pointer events, and costs about 0.2 ms a frame (`?fieldperf`
-logs it).
+Behind the hero, `HeroField.astro` draws the dot grid with a fragment
+shader (WebGL, two passes: the flow field into a texture of a texel every
+11 px, then the dots and the aurora per pixel, sampling it). A slowly
+flowing, domain-warped noise field runs through the grid as bands of light:
+the dots swell in a band, and on its crest take the accent, teal or violet
+as a second, slower field weaves the three hues; a faint aurora of the same
+hues glows under them. The field gathers beside the device, so that stage
+never goes dark, and fades over the copy and the caption. A press gathers
+light where it is held; released, it sends a wave whose size, reach and
+life grow with the hold, varied a little by chance (up to four at once).
+The colors are the `--hero-*` tokens. It pauses off screen and in hidden
+tabs, draws one still frame and takes no presses with reduced motion,
+never takes pointer events itself, and draws nothing without WebGL
+(`?fieldperf` logs its frame time).
 
 ## Demo frames
 

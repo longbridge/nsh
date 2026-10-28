@@ -1,29 +1,40 @@
 ---
-// The home hero's background: the site's dot grid drawn on a 2D canvas.
-// Each dot has its own seeded size, brightness and twinkle, and a slowly
-// drifting value-noise field decides where the grid shimmers, so the field
-// is irregular and mostly dark. Near the pointer a few dots light up more
-// than their neighbours and swell into the accent, inside a noise-perturbed
-// reach that trails the pointer a little, over a small faint halo. The
-// canvas never takes input: the listeners are on the hero, passive. It
-// fades toward the copy, so text keeps its contrast. Colors are the
-// `--hero-*` tokens below, read again when the theme changes.
+// The home hero's background: the site's dot grid, drawn by a fragment
+// shader (WebGL). A slowly flowing, domain-warped noise field runs through
+// the grid like bands of light: where a band passes the dots swell and, on
+// its crest, take the accent, or the teal or violet the hues weave there;
+// a faint aurora of the same field glows under them in those three hues. A
+// press on the hero gathers light where it is held and, released, sends a
+// wave out from there: the longer the hold, the larger, wider and longer
+// the wave, each a little different; the dots it passes swell into the
+// accent and settle back. The canvas never takes input:
+// the listeners are on the hero and the window, passive. It fades toward the copy, so text
+// keeps its contrast, and holds still under reduced motion.
+// Colors are the `--hero-*` tokens below, read again when the theme changes.
 //
-// `?fieldperf` logs the mean draw time every 120 frames.
+// `?fieldperf` logs the mean frame time every 120 frames.
 ---
 <canvas class="hero-field" aria-hidden="true"></canvas>
 
 <style is:global>
   :root {
-    --hero-dot: rgba(255, 255, 255, 0.18);
+    --hero-dot: rgba(255, 255, 255, 0.2);
     --hero-dot-hot: var(--citrus, #c8f26d);
-    --hero-glow: rgba(200, 242, 109, 0.06);
+    --hero-glow: rgba(200, 242, 109, 0.18);
+    --hero-glow-cool: rgba(92, 196, 186, 0.2);
+    --hero-glow-violet: rgba(150, 128, 255, 0.22);
+    --hero-dot-cool: #7fd8cc;
+    --hero-dot-violet: #b4a6ff;
   }
   html.light,
   html:not(.dark) {
-    --hero-dot: rgba(22, 23, 26, 0.26);
+    --hero-dot: rgba(22, 23, 26, 0.3);
     --hero-dot-hot: #5a7a12;
-    --hero-glow: rgba(90, 122, 18, 0.05);
+    --hero-glow: rgba(150, 196, 40, 0.16);
+    --hero-glow-cool: rgba(60, 160, 150, 0.14);
+    --hero-glow-violet: rgba(120, 96, 230, 0.13);
+    --hero-dot-cool: #23887c;
+    --hero-dot-violet: #6a52d6;
   }
   .hero-field {
     position: absolute;
@@ -37,125 +48,308 @@
 </style>
 
 <script>
-  const SPACING = 26; // CSS px between dots
-  const MAX_DOTS = 2500;
-  const REACH = 150; // the pointer's mean reach, CSS px
-  const GLOW = 140; // the halo's radius, CSS px
-  const BASE_LEVELS = 6;
-  const HOT_LEVELS = 6;
+  const SPACING = 22; // CSS px between dots
+  const FIELD_STEP = 11; // CSS px per texel of the flow field
   const STACKED = 1080; // under this width the hero stacks: copy above, device below
-  const NOISE = 32; // the value-noise lattice, NOISE × NOISE, wrapping
+  const MAX_DPR = 2;
+  const WAVES = 4; // presses whose waves can run at once
+  const WAVE_LIFE = 2.4; // seconds the smallest wave runs; a larger one runs longer
+  const FULL_HOLD = 1.2; // seconds of holding that make the largest wave
 
-  const smooth = (a: number, b: number, x: number) => {
-    const t = Math.min(1, Math.max(0, (x - a) / (b - a)));
-    return t * t * (3 - 2 * t);
-  };
+  const VERTEX = `
+    attribute vec2 position;
+    void main() { gl_Position = vec4(position, 0.0, 1.0); }
+  `;
 
-  // A seeded PRNG, so the field looks the same on every load.
-  let seed = 0x9e3779b9;
-  const rand = () => {
-    seed ^= seed << 13;
-    seed ^= seed >>> 17;
-    seed ^= seed << 5;
-    return (seed >>> 0) / 4294967296;
-  };
-  const lattice = new Float32Array(NOISE * NOISE);
-  for (let i = 0; i < lattice.length; i++) lattice[i] = rand();
-  /** Smooth value noise in [0, 1], wrapping every NOISE units. */
-  const noise = (x: number, y: number) => {
-    const fx = Math.floor(x), fy = Math.floor(y);
-    const ux = x - fx, uy = y - fy;
-    const sx = ux * ux * (3 - 2 * ux), sy = uy * uy * (3 - 2 * uy);
-    const x0 = ((fx % NOISE) + NOISE) % NOISE, y0 = ((fy % NOISE) + NOISE) % NOISE;
-    const x1 = (x0 + 1) % NOISE, y1 = (y0 + 1) % NOISE;
-    const a = lattice[y0 * NOISE + x0], b = lattice[y0 * NOISE + x1];
-    const c = lattice[y1 * NOISE + x0], d = lattice[y1 * NOISE + x1];
-    return a + (b - a) * sx + (c - a) * sy + (a - b - c + d) * sx * sy;
-  };
+  const NOISE = `
+    float hash(vec2 p) {
+      p = fract(p * vec2(123.34, 456.21));
+      p += dot(p, p + 45.32);
+      return fract(p.x * p.y);
+    }
+    float noise(vec2 p) {
+      vec2 i = floor(p), f = fract(p);
+      vec2 u = f * f * (3.0 - 2.0 * f);
+      return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), u.x),
+                 mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), u.x), u.y);
+    }
+    float fbm(vec2 p) {
+      float v = 0.0, a = 0.5;
+      for (int i = 0; i < 4; i++) {
+        v += a * noise(p);
+        p = mat2(1.6, 1.2, -1.2, 1.6) * p;
+        a *= 0.5;
+      }
+      return v;
+    }
+  `;
+
+  // The first pass: the flow field, a texel every FIELD_STEP CSS px (its
+  // features are hundreds of px wide, so the dots and the aurora sample it
+  // with linear filtering instead of evaluating the noise per pixel). Red is
+  // the flow, green and blue the weave of its three hues (citrus, teal,
+  // violet).
+  const FIELD = `
+    precision highp float;
+    uniform vec2 size;      // the hero, CSS px
+    uniform vec2 grid;      // the texture, texels
+    uniform float time;     // seconds
+    uniform float stacked;  // 1 when the copy is above the device
+    ${NOISE}
+    // Noise warped by noise, drifting.
+    float flow(vec2 p) {
+      vec2 q = p / 420.0;
+      float t = time * 0.045;
+      vec2 w = vec2(fbm(q + vec2(0.0, t)), fbm(q + vec2(5.2, 1.3) - t * 0.8));
+      return fbm(q * 1.4 + 2.2 * w + vec2(t * 0.6, -t * 0.3));
+    }
+    // Where the field gathers whatever the noise does: beside the device
+    // (below the copy when stacked), so that stage never goes dark.
+    float stage(vec2 p) {
+      vec2 at = stacked > 0.5 ? vec2(0.5, 0.78) * size : vec2(0.57, 0.44) * size;
+      vec2 d = (p - at) / vec2(0.34, 0.5) / max(size.x, 1.0) * 1.6;
+      return exp(-dot(d, d));
+    }
+    void main() {
+      vec2 p = vec2(gl_FragCoord.x / grid.x, 1.0 - gl_FragCoord.y / grid.y) * size;
+      float f = clamp(flow(p) + 0.3 * stage(p), 0.0, 1.0);
+      float cool = smoothstep(0.32, 0.68, fbm(p / 640.0 + vec2(-time * 0.02, time * 0.015)));
+      float violet = smoothstep(0.4, 0.72, fbm(p / 760.0 + vec2(9.1, 3.7) + vec2(time * 0.016, time * 0.011)));
+      gl_FragColor = vec4(f, cool, violet, 1.0);
+    }
+  `;
+
+  // The second pass, per pixel. Everything is in CSS px with the origin at
+  // the top left; each dot reads the field at its cell's center, so it
+  // stays a crisp disc.
+  const DOTS = `
+    precision highp float;
+    uniform sampler2D field;
+    uniform vec2 size;      // the hero, CSS px
+    uniform float dpr;
+    uniform float time;     // seconds
+    uniform float spacing;
+    uniform float stacked;
+    uniform vec4 waves[${WAVES}]; // released presses: x, y, the time (negative: none), the size
+    uniform vec4 charge;          // a press being held: x, y, the time it began, 1 while held
+    uniform vec4 dotColor;  // straight alpha
+    uniform vec4 hotColor;
+    uniform vec4 glowColor;
+    uniform vec4 coolColor;
+    uniform vec4 violetColor;
+    uniform vec3 dotCool;         // the crests' other hues
+    uniform vec3 dotViolet;
+    ${NOISE}
+    vec4 sampleField(vec2 p) { return texture2D(field, vec2(p.x / size.x, 1.0 - p.y / size.y)); }
+
+    void main() {
+      vec2 p = vec2(gl_FragCoord.x, size.y * dpr - gl_FragCoord.y) / dpr;
+      vec2 cell = floor(p / spacing);
+      vec2 c = (cell + 0.5) * spacing;
+
+      // How far the copy's side keeps the field down: faint over the copy,
+      // full around the device; a little softer at the hero's edges.
+      vec2 n = c / size;
+      float side = stacked > 0.5 ? smoothstep(0.32, 0.72, n.y) : smoothstep(0.3, 0.6, n.x);
+      side = 0.03 + 0.97 * side;
+      // The device's caption sits along the bottom: the field thins out there.
+      side *= smoothstep(0.0, 0.08, n.y) * smoothstep(0.95, 0.7, n.y);
+
+      float f = sampleField(c).r;
+      float band = smoothstep(0.36, 0.72, f);
+      float crest = smoothstep(0.6, 0.84, f);
+      float grain = hash(cell);
+      float twinkle = 0.5 + 0.5 * sin(time * (0.6 + grain * 1.6) + grain * 40.0);
+
+      // The presses' waves: a ring running out from where each was
+      // released, fading as it goes, after a flash there. Its size (from
+      // the hold, with a little chance) sets how fast and far it runs, how
+      // wide its ring is and how long it lasts; the dots it passes swell,
+      // light up and are pushed outward a little.
+      float wave = 0.0, flash = 0.0;
+      vec2 push = vec2(0.0);
+      for (int i = 0; i < ${WAVES}; i++) {
+        vec4 w = waves[i];
+        float age = time - w.z;
+        float span = ${WAVE_LIFE.toFixed(1)} * (0.75 + 0.45 * w.w);
+        if (w.z < 0.0 || age < 0.0 || age > span) continue;
+        float life = 1.0 - age / span;
+        float d = distance(c, w.xy);
+        float front = age * 300.0 * (0.7 + 0.5 * w.w);
+        float width = (26.0 + age * 30.0) * (0.7 + 0.45 * w.w);
+        float ring = exp(-pow((d - front) / width, 2.0)) * life * life;
+        // Fainter rings behind the first, more of them for a larger wave,
+        // spaced as its own chance says.
+        float gap = 0.55 + 0.2 * fract(w.z * 7.31);
+        ring += 0.45 * exp(-pow((d - front * gap) / (width * 0.85), 2.0)) * life * life * life;
+        ring += 0.25 * step(1.4, w.w) * exp(-pow((d - front * gap * gap) / (width * 0.7), 2.0)) * life * life * life;
+        wave += ring * min(1.0, 0.65 + 0.3 * w.w);
+        flash += exp(-pow(d / (70.0 + 40.0 * w.w), 2.0)) * exp(-age * 5.0);
+        if (d > 0.5) push += (c - w.xy) / d * ring * (0.7 + 0.4 * w.w);
+      }
+      // The light gathering under a held press, swelling with the hold and
+      // pulsing.
+      if (charge.w > 0.5) {
+        float held = clamp((time - charge.z) / ${FULL_HOLD.toFixed(1)}, 0.0, 1.0);
+        float d = distance(c, charge.xy);
+        float reach = 40.0 + 110.0 * held;
+        float pulse = 0.85 + 0.15 * sin(time * (8.0 + 10.0 * held));
+        flash += exp(-pow(d / reach, 2.0)) * (0.35 + 0.65 * held) * pulse;
+        // Drawn in a little, as a breath before the wave.
+        if (d > 0.5) push -= (c - charge.xy) / d * exp(-pow(d / reach, 2.0)) * held * 0.6;
+      }
+      float hit = clamp(wave + flash, 0.0, 1.0);
+      float hot = clamp(crest * (0.55 + 0.45 * twinkle) + hit * (0.6 + 0.6 * grain), 0.0, 1.0);
+
+      float r = spacing * (0.045 + 0.085 * band + 0.075 * hot + 0.05 * hit) * (0.85 + 0.3 * grain);
+      vec2 local = p - c - push * 4.0;
+      float disc = smoothstep(r + 0.7 / dpr, r - 0.7 / dpr, length(local));
+
+      float level = (0.2 + 0.8 * band) * (0.55 + 0.45 * twinkle) * mix(0.35 + 0.65 * grain, 1.0, hot);
+      // The crests take the hue the weave gives that cell, and the other dots
+      // a tint of it within the bands; a wave's light is the accent.
+      vec4 hues = sampleField(c);
+      vec3 crestRgb = mix(mix(hotColor.rgb, dotCool, hues.g * 0.85), dotViolet, hues.b * 0.85);
+      vec4 base = vec4(mix(dotColor.rgb, crestRgb, 0.45 * band), dotColor.a * level * (1.0 + 0.4 * band));
+      vec4 lit = vec4(mix(crestRgb, hotColor.rgb, clamp(hit * 1.5, 0.0, 1.0)), hotColor.a * (0.35 + 0.65 * hot));
+      vec4 dotC = mix(base, lit, smoothstep(0.08, 0.6, hot));
+      float a = dotC.a * disc * side;
+
+      // The aurora under the dots: the same field, smooth, its three hues
+      // weaving, brighter where a wave passes.
+      vec4 here = sampleField(p);
+      float aurora = smoothstep(0.3, 0.8, here.r) * side;
+      vec4 glow = mix(mix(glowColor, coolColor, here.g), violetColor, here.b);
+      float lift = clamp(hit, 0.0, 1.0);
+      float g = clamp(glow.a * aurora + glowColor.a * lift * 0.9, 0.0, 1.0);
+      vec3 glowRgb = mix(glow.rgb, glowColor.rgb, lift);
+
+      // Premultiplied: the dot over the glow.
+      vec3 rgb = dotC.rgb * a + glowRgb * g * (1.0 - a);
+      gl_FragColor = vec4(rgb, a + g * (1.0 - a));
+    }
+  `;
+
+  /** A CSS color as straight-alpha RGBA in [0, 1] (the 2D canvas parses it). */
+  const parse = (() => {
+    const cx = document.createElement('canvas').getContext('2d', { willReadFrequently: true });
+    return (color: string, fallback: number[]) => {
+      if (!cx || !color) return fallback;
+      cx.clearRect(0, 0, 1, 1);
+      cx.fillStyle = '#000';
+      cx.fillStyle = color;
+      cx.fillRect(0, 0, 1, 1);
+      const [r, g, b, a] = cx.getImageData(0, 0, 1, 1).data;
+      if (!a) return [0, 0, 0, 0];
+      return [r / 255, g / 255, b / 255, a / 255];
+    };
+  })();
+
+  function link(gl: WebGLRenderingContext, fragment: string) {
+    const program = gl.createProgram()!;
+    for (const [type, source] of [[gl.VERTEX_SHADER, VERTEX], [gl.FRAGMENT_SHADER, fragment]] as const) {
+      const s = gl.createShader(type)!;
+      gl.shaderSource(s, source);
+      gl.compileShader(s);
+      if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s) ?? 'shader');
+      gl.attachShader(program, s);
+    }
+    gl.bindAttribLocation(program, 0, 'position');
+    gl.linkProgram(program);
+    if (!gl.getProgramParameter(program, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(program) ?? 'link');
+    const uniforms = new Map<string, WebGLUniformLocation | null>();
+    return {
+      program,
+      u: (name: string) => {
+        if (!uniforms.has(name)) uniforms.set(name, gl.getUniformLocation(program, name));
+        return uniforms.get(name)!;
+      },
+    };
+  }
 
   function mount(canvas: HTMLCanvasElement) {
     const hero = (canvas.closest('.hero') as HTMLElement | null) ?? canvas.parentElement!;
-    const cx = canvas.getContext('2d');
-    if (!cx) return;
+    const gl = canvas.getContext('webgl', { alpha: true, premultipliedAlpha: true, antialias: false });
+    if (!gl) return;
+    let fieldPass: ReturnType<typeof link>, dotsPass: ReturnType<typeof link>;
+    try {
+      fieldPass = link(gl, FIELD);
+      dotsPass = link(gl, DOTS);
+    } catch (err) {
+      console.warn('[hero-field]', err);
+      return;
+    }
+    // One triangle over the viewport.
+    gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer());
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
+    gl.enableVertexAttribArray(0);
+    gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+    // The flow field's texture and framebuffer.
+    const texture = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, texture);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    const framebuffer = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+
     const root = document.documentElement;
     const reduced = matchMedia('(prefers-reduced-motion: reduce)');
     const perf = location.search.includes('fieldperf');
 
-    let w = 0, h = 0, dpr = 1, n = 0;
-    let bx = new Float32Array(0), by = new Float32Array(0), side = new Float32Array(0);
-    // Per dot: size, brightness, twinkle phase and speed, how much the pointer lights it.
-    let size = new Float32Array(0), bright = new Float32Array(0), tphase = new Float32Array(0);
-    let tspeed = new Float32Array(0), pick = new Float32Array(0);
-    let baseBuckets = new Uint16Array(0), hotBuckets = new Uint16Array(0);
-    let hotF = new Float32Array(0), dxs = new Float32Array(0), dys = new Float32Array(0);
-    const baseCount = new Uint32Array(BASE_LEVELS);
-    const hotCount = new Uint32Array(HOT_LEVELS);
-
-    let dot = '', hot = '';
-    const glow = document.createElement('canvas');
-    const glowCtx = glow.getContext('2d')!;
-
-    // Pointer: the target, the eased head, a slower trail, the eased strength.
-    let tx = 0, ty = 0, px = 0, py = 0, qx = 0, qy = 0, strength = 0, active = false;
-    let visible = true, running = false, frame = 0, last = 0, t = 0;
+    let w = 0, h = 0, gw = 1, gh = 1;
+    // The released presses' waves: x, y, the time each was released
+    // (negative: none) and its size; the oldest replaced first. A press
+    // being held: x, y, the time it began, 1 while held.
+    const waves = new Float32Array(WAVES * 4);
+    for (let i = 0; i < WAVES; i++) waves[i * 4 + 2] = -1;
+    let nextWave = 0;
+    const charge = new Float32Array(4);
+    let pressId = -1;
+    let visible = true, running = false, frame = 0, last = 0;
+    // A fixed moment for the still frame: the bands already well formed.
+    let t = 40;
     let perfSum = 0, perfFrames = 0;
 
     function readColors() {
       const style = getComputedStyle(root);
-      dot = style.getPropertyValue('--hero-dot').trim() || 'rgba(255,255,255,.16)';
-      hot = style.getPropertyValue('--hero-dot-hot').trim() || style.getPropertyValue('--citrus').trim() || '#c8f26d';
-      const glowColor = style.getPropertyValue('--hero-glow').trim() || 'rgba(200,242,109,.06)';
-      const px2 = Math.ceil(GLOW * 2 * dpr);
-      glow.width = glow.height = px2;
-      const g = glowCtx.createRadialGradient(px2 / 2, px2 / 2, 0, px2 / 2, px2 / 2, px2 / 2);
-      g.addColorStop(0, glowColor);
-      g.addColorStop(0.45, glowColor.replace(/[\d.]+\)$/, (m) => `${parseFloat(m) * 0.45})`));
-      g.addColorStop(1, 'rgba(0,0,0,0)');
-      glowCtx.clearRect(0, 0, px2, px2);
-      glowCtx.fillStyle = g;
-      glowCtx.fillRect(0, 0, px2, px2);
+      const { program, u } = dotsPass;
+      gl!.useProgram(program);
+      gl!.uniform4fv(u('dotColor'), parse(style.getPropertyValue('--hero-dot').trim(), [1, 1, 1, 0.2]));
+      gl!.uniform4fv(u('hotColor'), parse(style.getPropertyValue('--hero-dot-hot').trim(), [0.78, 0.95, 0.43, 1]));
+      gl!.uniform4fv(u('glowColor'), parse(style.getPropertyValue('--hero-glow').trim(), [0.78, 0.95, 0.43, 0.13]));
+      gl!.uniform4fv(u('coolColor'), parse(style.getPropertyValue('--hero-glow-cool').trim(), [0.36, 0.77, 0.73, 0.11]));
+      gl!.uniform4fv(u('violetColor'), parse(style.getPropertyValue('--hero-glow-violet').trim(), [0.59, 0.5, 1, 0.11]));
+      gl!.uniform3fv(u('dotCool'), parse(style.getPropertyValue('--hero-dot-cool').trim(), [0.5, 0.85, 0.8, 1]).slice(0, 3));
+      gl!.uniform3fv(u('dotViolet'), parse(style.getPropertyValue('--hero-dot-violet').trim(), [0.7, 0.65, 1, 1]).slice(0, 3));
     }
 
     function layout() {
       const rect = hero.getBoundingClientRect();
       w = Math.max(1, Math.round(rect.width));
       h = Math.max(1, Math.round(rect.height));
-      dpr = Math.min(2, window.devicePixelRatio || 1);
+      const dpr = Math.min(MAX_DPR, window.devicePixelRatio || 1);
       canvas.width = Math.round(w * dpr);
       canvas.height = Math.round(h * dpr);
-      cx!.setTransform(dpr, 0, 0, dpr, 0, 0);
-
-      let s = SPACING;
-      if ((w / s + 2) * (h / s + 2) > MAX_DOTS) s = Math.sqrt((w * h) / MAX_DOTS) + 1;
-      const cols = Math.ceil(w / s) + 2;
-      const rows = Math.ceil(h / s) + 2;
-      n = Math.min(MAX_DOTS, cols * rows);
-      bx = new Float32Array(n); by = new Float32Array(n); side = new Float32Array(n);
-      size = new Float32Array(n); bright = new Float32Array(n); tphase = new Float32Array(n);
-      tspeed = new Float32Array(n); pick = new Float32Array(n);
-      hotF = new Float32Array(n); dxs = new Float32Array(n); dys = new Float32Array(n);
-      baseBuckets = new Uint16Array(BASE_LEVELS * n);
-      hotBuckets = new Uint16Array(HOT_LEVELS * n);
-      const stacked = w < STACKED;
-      const ox = (w - (cols - 1) * s) / 2, oy = (h - (rows - 1) * s) / 2;
-      seed = 0x2545f491;
-      let i = 0;
-      for (let r = 0; r < rows && i < n; r++) {
-        for (let c = 0; c < cols && i < n; c++, i++) {
-          const x = ox + c * s, y = oy + r * s;
-          bx[i] = x; by[i] = y;
-          // Faint over the copy (left, or top when stacked), full around the device.
-          side[i] = 0.12 + 0.88 * (stacked ? smooth(0.3, 0.75, y / h) : smooth(0.12, 0.62, x / w));
-          size[i] = 0.7 + rand() * 0.75;
-          bright[i] = 0.35 + rand() * 0.65;
-          tphase[i] = rand() * Math.PI * 2;
-          tspeed[i] = 0.4 + rand() * 1.4;
-          // Most dots barely react; a few light up well above their neighbours.
-          const p = rand();
-          pick[i] = 0.25 + p * p * 1.35;
-        }
-      }
-      if (!active) { px = qx = tx = w * 0.72; py = qy = ty = h * 0.5; }
+      gw = Math.ceil(w / FIELD_STEP) + 1;
+      gh = Math.ceil(h / FIELD_STEP) + 1;
+      gl!.bindTexture(gl!.TEXTURE_2D, texture);
+      gl!.texImage2D(gl!.TEXTURE_2D, 0, gl!.RGBA, gw, gh, 0, gl!.RGBA, gl!.UNSIGNED_BYTE, null);
+      const stacked = w < STACKED ? 1 : 0;
+      gl!.useProgram(fieldPass.program);
+      gl!.uniform2f(fieldPass.u('size'), w, h);
+      gl!.uniform2f(fieldPass.u('grid'), gw, gh);
+      gl!.uniform1f(fieldPass.u('stacked'), stacked);
+      const { program, u } = dotsPass;
+      gl!.useProgram(program);
+      gl!.uniform1i(u('field'), 0);
+      gl!.uniform2f(u('size'), w, h);
+      gl!.uniform1f(u('dpr'), canvas.width / w);
+      gl!.uniform1f(u('spacing'), SPACING);
+      gl!.uniform1f(u('stacked'), stacked);
       readColors();
       if (!running) draw(0);
     }
@@ -163,104 +357,31 @@
     function draw(dt: number) {
       const start = perf ? performance.now() : 0;
       t += dt;
-      // Ease the pointer, its trail (slower) and its strength, frame-rate independent.
-      const k = 1 - Math.exp(-dt * 6);
-      px += (tx - px) * k;
-      py += (ty - py) * k;
-      const kt = 1 - Math.exp(-dt * 2.2);
-      qx += (px - qx) * kt;
-      qy += (py - qy) * kt;
-      strength += ((active ? 1 : 0) - strength) * (1 - Math.exp(-dt * (active ? 4 : 1.6)));
 
-      const c = cx!;
-      c.clearRect(0, 0, w, h);
+      const g = gl!;
+      g.bindFramebuffer(g.FRAMEBUFFER, framebuffer);
+      g.viewport(0, 0, gw, gh);
+      g.useProgram(fieldPass.program);
+      g.uniform1f(fieldPass.u('time'), t);
+      g.drawArrays(g.TRIANGLES, 0, 3);
 
-      // A small, faint halo under the dots.
-      if (strength > 0.01) {
-        c.globalAlpha = strength;
-        c.drawImage(glow, px - GLOW, py - GLOW, GLOW * 2, GLOW * 2);
-      }
-
-      const nt = t * 0.035;
-      baseCount.fill(0);
-      hotCount.fill(0);
-      for (let i = 0; i < n; i++) {
-        let x = bx[i], y = by[i];
-        // Where the grid shimmers: a drifting noise field, sharpened so most
-        // of it stays quiet; each dot twinkles on its own clock.
-        const field = noise(x * 0.006 + nt, y * 0.006 - nt * 0.7);
-        const lit = field * field * field;
-        const twinkle = 0.5 + 0.5 * Math.sin(tphase[i] + t * tspeed[i]);
-        const a = side[i] * bright[i] * (0.18 + 0.82 * lit) * (0.45 + 0.55 * twinkle);
-        x += (noise(x * 0.02 + 7.1, y * 0.02 + nt * 2) - 0.5) * 1.6;
-        y += (noise(x * 0.02 + 3.3 + nt * 2, y * 0.02) - 0.5) * 1.6;
-
-        let f = 0;
-        if (strength > 0.01) {
-          // The reach wobbles with the noise; the trail keeps a weaker reach.
-          const reach = REACH * (0.7 + 0.6 * noise(x * 0.012 + nt * 3, y * 0.012));
-          const r2 = reach * reach;
-          const ex = x - px, ey = y - py, d2 = ex * ex + ey * ey;
-          const fx = x - qx, fy = y - qy, e2 = fx * fx + fy * fy;
-          let head = 0, trail = 0;
-          if (d2 < r2) { const q = 1 - d2 / r2; head = q * q; }
-          if (e2 < r2 * 0.6) { const q = 1 - e2 / (r2 * 0.6); trail = q * q * 0.5; }
-          f = Math.min(1, Math.max(head, trail) * pick[i] * (0.6 + 0.4 * twinkle)) * strength;
-          if (f > 0.02 && d2 > 1) {
-            const len = Math.sqrt(d2);
-            x += (ex / len) * f * 4;
-            y += (ey / len) * f * 4;
-          }
-        }
-        dxs[i] = x; dys[i] = y; hotF[i] = f;
-        const level = Math.min(BASE_LEVELS - 1, (a * BASE_LEVELS) | 0);
-        baseBuckets[level * n + baseCount[level]++] = i;
-        if (f > 0.06) {
-          const hl = Math.min(HOT_LEVELS - 1, (f * HOT_LEVELS) | 0);
-          hotBuckets[hl * n + hotCount[hl]++] = i;
-        }
-      }
-
-      // Base dots: one path per alpha level, each at its own size.
-      c.fillStyle = dot;
-      for (let l = 0; l < BASE_LEVELS; l++) {
-        const count = baseCount[l];
-        if (!count) continue;
-        c.globalAlpha = (l + 0.5) / BASE_LEVELS;
-        c.beginPath();
-        const off = l * n;
-        for (let j = 0; j < count; j++) {
-          const i = baseBuckets[off + j];
-          const r = 0.8 * size[i];
-          c.rect(dxs[i] - r, dys[i] - r, r * 2, r * 2);
-        }
-        c.fill();
-      }
-
-      // Lit dots near the pointer: round, a little larger, in the accent.
-      c.fillStyle = hot;
-      for (let l = 0; l < HOT_LEVELS; l++) {
-        const count = hotCount[l];
-        if (!count) continue;
-        const level = (l + 1) / HOT_LEVELS;
-        c.beginPath();
-        const off = l * n;
-        for (let j = 0; j < count; j++) {
-          const i = hotBuckets[off + j];
-          const x = dxs[i], y = dys[i];
-          const r = size[i] * (0.9 + 1.5 * level);
-          c.moveTo(x + r, y);
-          c.arc(x, y, r, 0, Math.PI * 2);
-        }
-        c.globalAlpha = 0.25 + 0.75 * level;
-        c.fill();
-      }
-      c.globalAlpha = 1;
+      g.bindFramebuffer(g.FRAMEBUFFER, null);
+      g.viewport(0, 0, canvas.width, canvas.height);
+      g.useProgram(dotsPass.program);
+      g.activeTexture(g.TEXTURE0);
+      g.bindTexture(g.TEXTURE_2D, texture);
+      g.uniform1f(dotsPass.u('time'), t);
+      g.uniform4fv(dotsPass.u('waves'), waves);
+      g.uniform4fv(dotsPass.u('charge'), charge);
+      g.clearColor(0, 0, 0, 0);
+      g.clear(g.COLOR_BUFFER_BIT);
+      g.drawArrays(g.TRIANGLES, 0, 3);
 
       if (perf) {
+        g.finish();
         perfSum += performance.now() - start;
         if (++perfFrames === 120) {
-          console.info('[hero-field]', `mean draw ${(perfSum / perfFrames).toFixed(3)} ms over ${perfFrames} frames, ${n} dots`);
+          console.info('[hero-field]', `mean frame ${(perfSum / perfFrames).toFixed(3)} ms over ${perfFrames} frames, ${canvas.width}×${canvas.height}, field ${gw}×${gh}`);
           perfSum = 0;
           perfFrames = 0;
         }
@@ -275,7 +396,7 @@
     }
 
     function update() {
-      const should = visible && !document.hidden && !reduced.matches;
+      const should = visible && !document.hidden && !reduced.matches && !gl!.isContextLost();
       if (should && !running) {
         running = true;
         last = 0;
@@ -284,29 +405,47 @@
         running = false;
         cancelAnimationFrame(frame);
       }
-      if (reduced.matches) {
-        active = false;
-        strength = 0;
-        draw(0);
-      }
+      if (reduced.matches) draw(0);
     }
 
-    const aim = (clientX: number, clientY: number) => {
-      if (reduced.matches) return;
+    // A press anywhere on the hero (a primary button or a touch) gathers
+    // light while it is held and, released, sends a wave from where it is
+    // then: its size grows with the hold, and chance varies it a little.
+    // None while motion is reduced.
+    const at = (e: PointerEvent) => {
       const rect = hero.getBoundingClientRect();
-      tx = clientX - rect.left;
-      ty = clientY - rect.top;
-      active = true;
+      return [e.clientX - rect.left, e.clientY - rect.top];
     };
-    const release = () => { active = false; };
-    hero.addEventListener('pointermove', (e) => aim(e.clientX, e.clientY), { passive: true });
-    hero.addEventListener('pointerdown', (e) => aim(e.clientX, e.clientY), { passive: true });
-    hero.addEventListener('pointerleave', release, { passive: true });
-    hero.addEventListener('pointerup', (e) => { if (e.pointerType !== 'mouse') release(); }, { passive: true });
-    hero.addEventListener('pointercancel', release, { passive: true });
-    // Scrolling cancels touch pointers; touch events keep following the finger.
-    hero.addEventListener('touchmove', (e) => { const p = e.touches[0]; if (p) aim(p.clientX, p.clientY); }, { passive: true });
-    hero.addEventListener('touchend', release, { passive: true });
+    hero.addEventListener('pointerdown', (e) => {
+      if (reduced.matches || !e.isPrimary || e.button !== 0) return;
+      pressId = e.pointerId;
+      [charge[0], charge[1]] = at(e);
+      charge[2] = t;
+      charge[3] = 1;
+    }, { passive: true });
+    hero.addEventListener('pointermove', (e) => {
+      if (e.pointerId === pressId) [charge[0], charge[1]] = at(e);
+    }, { passive: true });
+    const release = (e: PointerEvent, send: boolean) => {
+      if (e.pointerId !== pressId) return;
+      pressId = -1;
+      charge[3] = 0;
+      if (!send) return;
+      const held = Math.min(1, (t - charge[2]) / FULL_HOLD);
+      const i = nextWave * 4;
+      waves[i] = charge[0];
+      waves[i + 1] = charge[1];
+      waves[i + 2] = t;
+      waves[i + 3] = (0.6 + 1.4 * held) * (0.8 + 0.4 * Math.random());
+      nextWave = (nextWave + 1) % WAVES;
+    };
+    // Released anywhere: the wave starts where the press last was on the hero.
+    window.addEventListener('pointerup', (e) => release(e, true), { passive: true });
+    // A press the browser takes for scrolling or a gesture sends nothing.
+    window.addEventListener('pointercancel', (e) => release(e, false), { passive: true });
+
+    // A lost context (the GPU reset) stops the field until the page reloads.
+    canvas.addEventListener('webglcontextlost', (e) => { e.preventDefault(); update(); });
 
     new ResizeObserver(layout).observe(hero);
     new IntersectionObserver((entries) => {
