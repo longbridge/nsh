@@ -136,13 +136,18 @@ fn wrap(glyphs: &[Glyph], columns: usize) -> Vec<Vec<Glyph>> {
         let mut end = start;
         let mut width = 0;
         let mut space = None;
+        let mut has_content = false;
         while end < glyphs.len() && !glyphs[end].text.contains('\n') {
             if width + glyphs[end].width > columns && end > start {
                 break;
             }
             width += glyphs[end].width;
             if glyphs[end].attachment.is_none() && glyphs[end].text.as_ref() == " " {
-                space = Some(end);
+                if has_content {
+                    space = Some(end);
+                }
+            } else {
+                has_content = true;
             }
             end += 1;
         }

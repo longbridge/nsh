@@ -293,7 +293,8 @@ fit within a point width; that capacity calculation is separate from positioning
 Ordinary text occupies one row at any font size. Inline attachments reserve their width in whole Cells
 and grow the line to hold their height; baseline, text-top, text-bottom and middle alignment use Cell font metrics.
 Their child views draw and receive input in the reserved space, and attachments removed by truncation stay hidden.
-Wrapping prefers spaces, then breaks inside a word. Explicit newlines
+Wrapping prefers spaces after content, then breaks inside a word. Leading indentation stays with the first part
+of the word instead of becoming a separate whitespace-only row. Explicit newlines
 preserve empty rows. A grapheme wider than the available line remains whole and is clipped by drawing.
 `numberOfLines` limits the rows; tail, head and middle ellipses reserve one Cell, while clip adds no marker.
 Alignment becomes a whole-Cell indent. Line geometry reports UTF-16 offsets and point dimensions, as the core's

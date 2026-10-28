@@ -229,6 +229,23 @@ fn text_view_code_fences_draw_distinct_syntax_token_colors() {
 }
 
 #[test]
+fn wrapping_indented_code_keeps_content_on_the_first_visual_row() {
+    let engine = CellTextEngine::default();
+    let mut text = AttributedText::default();
+    text.push("    hopper::run(App::default());", Default::default());
+    let prepared = engine.prepare(&text);
+    let size = engine.measure(&prepared, Some(Points(160.0)));
+    let lines = engine.lines(&engine.layout(&prepared, size));
+    assert_eq!(
+        lines
+            .iter()
+            .map(|line| (line.start, line.end))
+            .collect::<Vec<_>>(),
+        [(0, 20), (20, 32)]
+    );
+}
+
+#[test]
 fn aligned_attachments_grow_the_line_above_and_below_its_cell_baseline() {
     use nsh_core::{AttachmentAlignments, Point, Size, VerticalAlign};
     let engine = CellTextEngine::default();
