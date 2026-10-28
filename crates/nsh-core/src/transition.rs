@@ -18,7 +18,8 @@
 //! new color replaces (laid out again, not measured again): while its
 //! transition runs, the backend draws the text in [`Live::text_color`]
 //! over the runs' colors, as it does an animated color, so no frame
-//! typesets it again.
+//! typesets it again. iOS, whose other transitions are Core Animation's,
+//! steps the same [`TextColor`] on a display link of its own.
 //!
 //! Appearing / disappearing views and keyframes do not touch the style:
 //! they multiply the opacity ([`Live::opacity`]) and add a transform to the
@@ -45,7 +46,7 @@ pub struct Live {
     /// Style values moving to the new style's.
     style: Option<StyleTrack>,
     /// A text's color moving to its new one.
-    color: Option<ColorTrack>,
+    color: TextColor,
     /// Appearing or disappearing.
     presence: Option<Presence>,
     /// A keyframe animation.
@@ -64,7 +65,7 @@ impl Default for Live {
             ticking: false,
             frame: None,
             style: None,
-            color: None,
+            color: TextColor::default(),
             presence: None,
             keyframes: None,
             dying: false,
@@ -110,14 +111,14 @@ impl Live {
     /// its runs' own: a text view draws all of it (decoration lines
     /// included) in this color while it is `Some`.
     pub fn text_color(&self) -> Option<Color> {
-        self.color.as_ref().map(|c| c.value)
+        self.color.value()
     }
 
     /// True when nothing animates.
     pub fn idle(&self) -> bool {
         self.frame.is_none()
             && self.style.is_none()
-            && self.color.is_none()
+            && !self.color.running()
             && self.presence.is_none()
             && self.keyframes.is_none()
     }
@@ -211,26 +212,9 @@ impl Live {
     }
 
     /// Starts, keeps or stops a text color transition, as [`recolor`]
-    /// found. A new one starts from the color on screen, mid-transition
-    /// included.
+    /// found ([`TextColor::recolor`]).
     pub fn recolor(&mut self, recolor: Recolor) {
-        match recolor.0 {
-            Recoloring::Start { from, to, timing } => {
-                let from = self.text_color().unwrap_or(from);
-                self.color = Some(ColorTrack {
-                    from,
-                    to,
-                    value: from,
-                    timing,
-                });
-            }
-            Recoloring::Keep(to) => {
-                if self.color.as_ref().is_some_and(|c| c.to != to) {
-                    self.color = None;
-                }
-            }
-            Recoloring::Stop => self.color = None,
-        }
+        self.color.recolor(recolor);
     }
 
     /// True if the view is removed and has not begun to animate out: a
@@ -289,15 +273,8 @@ impl Live {
             }
         }
 
-        if let Some(track) = &mut self.color
-            && let Some((p, done)) = track.timing.at(now)
-        {
+        if self.color.step(now) {
             step.restyled = true;
-            if done {
-                self.color = None;
-            } else {
-                track.value = lerp_color(track.from, track.to, p);
-            }
         }
 
         let (mut opacity, mut extra) = (1.0, Extra::NONE);
@@ -389,7 +366,7 @@ pub fn restyle(
 }
 
 /// What a text's new content does to a transition of its color, from
-/// [`recolor`] for [`Live::recolor`].
+/// [`recolor`] for [`Live::recolor`] or [`TextColor::recolor`].
 #[non_exhaustive]
 pub struct Recolor(Recoloring);
 
@@ -419,6 +396,70 @@ impl Recolor {
     /// already has.
     pub fn starts(&self) -> bool {
         matches!(self.0, Recoloring::Start { .. })
+    }
+}
+
+/// A text's color moving to a new one, as [`recolor`] found: what
+/// [`Live`] steps for the desktop backends, and what a backend that keeps
+/// no [`Live`] (iOS) steps on its own frame clock. While it runs, the
+/// text view draws all of its text in [`TextColor::value`] over its runs'
+/// own colors, so no frame lays the text out again.
+#[non_exhaustive]
+#[derive(Default)]
+pub struct TextColor(Option<ColorTrack>);
+
+impl TextColor {
+    /// The color to draw the whole text in (decoration lines included)
+    /// while the transition runs; `None` draws the runs' own colors.
+    pub fn value(&self) -> Option<Color> {
+        self.0.as_ref().map(|c| c.value)
+    }
+
+    /// True while a transition runs: something steps it on every frame.
+    pub fn running(&self) -> bool {
+        self.0.is_some()
+    }
+
+    /// Starts, keeps or stops the transition. A new one starts from the
+    /// color on screen, mid-transition included, as CSS reverses a
+    /// transition from where it is.
+    pub fn recolor(&mut self, recolor: Recolor) {
+        match recolor.0 {
+            Recoloring::Start { from, to, timing } => {
+                let from = self.value().unwrap_or(from);
+                self.0 = Some(ColorTrack {
+                    from,
+                    to,
+                    value: from,
+                    timing,
+                });
+            }
+            Recoloring::Keep(to) => {
+                if self.0.as_ref().is_some_and(|c| c.to != to) {
+                    self.0 = None;
+                }
+            }
+            Recoloring::Stop => self.0 = None,
+        }
+    }
+
+    /// One frame at `now` (ms, any clock that only goes forward; the
+    /// first frame starts the transition): true if [`TextColor::value`]
+    /// changed, the text is drawn again. A transition that ends stops
+    /// running, and the runs' own colors (the new ones) draw again.
+    pub fn step(&mut self, now: f64) -> bool {
+        let Some(track) = &mut self.0 else {
+            return false;
+        };
+        let Some((p, done)) = track.timing.at(now) else {
+            return false;
+        };
+        if done {
+            self.0 = None;
+        } else {
+            track.value = lerp_color(track.from, track.to, p);
+        }
+        true
     }
 }
 
@@ -1303,5 +1344,26 @@ mod tests {
         live.recolor(recolor(&text(&[red]), &text(&[blue]), &colors, false));
         live.recolor(recolor(&text(&[blue]), &text(&[red, blue]), &colors, false));
         assert!(live.idle() && live.text_color().is_none());
+    }
+
+    #[test]
+    fn a_text_color_steps_without_a_live() {
+        // iOS steps a `TextColor` on a display link of its own.
+        let (red, blue) = (Color::rgba(255, 0, 0, 255), Color::rgba(0, 0, 255, 255));
+        let mut style = transitioning(TransitionProps::COLORS);
+        style.transition.as_mut().unwrap().delay = 50.0;
+        let mut color = TextColor::default();
+        assert!(!color.running() && !color.step(0.0));
+        color.recolor(recolor(&text(&[red]), &text(&[blue]), &style, false));
+        assert!(color.running());
+        // Delayed: the old color shows, nothing to draw again.
+        assert!(!color.step(1000.0) && !color.step(1040.0));
+        assert_eq!(color.value(), Some(red));
+        assert!(color.step(1110.0));
+        assert_eq!(color.value(), Some(Color::rgba(153, 0, 102, 255)));
+        // The end draws once more, in the runs' own color.
+        assert!(color.step(1200.0));
+        assert!(!color.running() && color.value().is_none());
+        assert!(!color.step(1216.0));
     }
 }

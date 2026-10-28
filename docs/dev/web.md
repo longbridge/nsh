@@ -524,7 +524,11 @@ measured against it frame by frame (`requestAnimationFrame` samplers of computed
   `requestAnimationFrame` time (ms) by 1000; passing milliseconds ended every `timing` / `spring` / `decay` on its
   first frame.
 - **Style transitions** are CSS transitions of the properties `TransitionProps` names (outline included); the
-  border overlay gets its own for border colors, widths and radii, since it draws the border.
+  border overlay gets its own for border colors, widths and radii, since it draws the border. A text drawn in one
+  color (`AttributedText::uniform_color`) has it on its element (`setTextColor`) and its runs' classes leave it out,
+  so the runs `op_t` makes again inherit it and a change is a CSS transition of the element's `color`
+  (`transition-colors`), from the color on screen; a text of several colors keeps them in its runs and changes at
+  once, as does one that becomes one color (`web/text-browser.test.mjs`).
 - **Keyframes** (`animate-spin|ping|pulse|bounce`) are CSS animations with `animation-composition: add`: their
   transforms follow the view's own (and the animated values bound to it), as the native backends apply them after
   the style's. Opacity is multiplied, not replaced: a view with keyframes writes `opacity: calc(<opacity> *
