@@ -5999,8 +5999,8 @@ impl<M: TextEngine> Core<M> {
         let ratio = self.pixel_ratio();
         let l = rounded(unrounded, containing, ratio);
         let mut frame = rect(
-            l.location.x + round(containing.x, ratio) - round(origin.x, ratio),
-            l.location.y + round(containing.y, ratio) - round(origin.y, ratio),
+            l.location.x + span(origin.x, containing.x, ratio),
+            l.location.y + span(origin.y, containing.y, ratio),
             l.size.width,
             l.size.height,
         );
@@ -6709,7 +6709,28 @@ const HIDDEN: f32 = 1.0e6;
 /// would make a child a pixel taller than its parent (a scroll view then cuts
 /// its last row of pixels off).
 fn round(value: f32, ratio: f32) -> f32 {
-    (value * ratio + 0.5).floor() / ratio
+    (pixel(value, ratio) / f64::from(ratio)) as f32
+}
+
+/// The device pixel [`round`] puts `value` on, counted from the root's
+/// origin. `value` is an `f32` sum of offsets, a hair off the position it
+/// stands for, and `/ ratio` is never exact at a fractional ratio: snapped
+/// to a 64th of a pixel first, an edge on a half pixel (a 28 point row at
+/// 2.625 is 73.5 pixels) always rounds the same way, wherever a scroll put
+/// it, instead of taking one pixel or the next by that hair.
+fn pixel(value: f32, ratio: f32) -> f64 {
+    let p = f64::from(value) * f64::from(ratio);
+    ((p * 64.0).round() / 64.0 + 0.5).floor()
+}
+
+/// The distance in points from `from` to `to`, each rounded to a device
+/// pixel ([`round`]): computed from the whole pixels between them, so the
+/// same pixels give the same `f32` wherever they are. The difference of two
+/// rounded points (`round(to) - round(from)`) would differ in its last bits
+/// as a scroll moves the edges, and every frame in a scrolled region would
+/// be sent again unchanged.
+fn span(from: f32, to: f32, ratio: f32) -> f32 {
+    ((pixel(to, ratio) - pixel(from, ratio)) / f64::from(ratio)) as f32
 }
 
 /// `value` rounded up to a device pixel of `ratio` pixels per point. A
@@ -6730,29 +6751,41 @@ fn ceil_to_pixel(value: Points, ratio: f32) -> Points {
 fn rounded(layout: &taffy::Layout, origin: taffy::Point<f32>, ratio: f32) -> taffy::Layout {
     let mut out = *layout;
     let (x, y) = (origin.x + layout.location.x, origin.y + layout.location.y);
-    out.location.x = round(x, ratio) - round(origin.x, ratio);
-    out.location.y = round(y, ratio) - round(origin.y, ratio);
-    out.size.width = round(x + layout.size.width, ratio) - round(x, ratio);
-    out.size.height = round(y + layout.size.height, ratio) - round(y, ratio);
+    out.location.x = span(origin.x, x, ratio);
+    out.location.y = span(origin.y, y, ratio);
+    out.size.width = span(x, x + layout.size.width, ratio);
+    out.size.height = span(y, y + layout.size.height, ratio);
     out.scrollbar_size.width = round(layout.scrollbar_size.width, ratio);
     out.scrollbar_size.height = round(layout.scrollbar_size.height, ratio);
-    out.border.left = round(x + layout.border.left, ratio) - round(x, ratio);
-    out.border.right = round(x + layout.size.width, ratio)
-        - round(x + layout.size.width - layout.border.right, ratio);
-    out.border.top = round(y + layout.border.top, ratio) - round(y, ratio);
-    out.border.bottom = round(y + layout.size.height, ratio)
-        - round(y + layout.size.height - layout.border.bottom, ratio);
-    out.padding.left = round(x + layout.padding.left, ratio) - round(x, ratio);
-    out.padding.right = round(x + layout.size.width, ratio)
-        - round(x + layout.size.width - layout.padding.right, ratio);
-    out.padding.top = round(y + layout.padding.top, ratio) - round(y, ratio);
-    out.padding.bottom = round(y + layout.size.height, ratio)
-        - round(y + layout.size.height - layout.padding.bottom, ratio);
+    out.border.left = span(x, x + layout.border.left, ratio);
+    out.border.right = span(
+        x + layout.size.width - layout.border.right,
+        x + layout.size.width,
+        ratio,
+    );
+    out.border.top = span(y, y + layout.border.top, ratio);
+    out.border.bottom = span(
+        y + layout.size.height - layout.border.bottom,
+        y + layout.size.height,
+        ratio,
+    );
+    out.padding.left = span(x, x + layout.padding.left, ratio);
+    out.padding.right = span(
+        x + layout.size.width - layout.padding.right,
+        x + layout.size.width,
+        ratio,
+    );
+    out.padding.top = span(y, y + layout.padding.top, ratio);
+    out.padding.bottom = span(
+        y + layout.size.height - layout.padding.bottom,
+        y + layout.size.height,
+        ratio,
+    );
     let o = layout.scrollable_overflow_rect;
-    out.scrollable_overflow_rect.left = round(x + o.left, ratio) - round(x, ratio);
-    out.scrollable_overflow_rect.right = round(x + o.right, ratio) - round(x, ratio);
-    out.scrollable_overflow_rect.top = round(y + o.top, ratio) - round(y, ratio);
-    out.scrollable_overflow_rect.bottom = round(y + o.bottom, ratio) - round(y, ratio);
+    out.scrollable_overflow_rect.left = span(x, x + o.left, ratio);
+    out.scrollable_overflow_rect.right = span(x, x + o.right, ratio);
+    out.scrollable_overflow_rect.top = span(y, y + o.top, ratio);
+    out.scrollable_overflow_rect.bottom = span(y, y + o.bottom, ratio);
     out
 }
 
