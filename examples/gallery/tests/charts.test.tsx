@@ -5,7 +5,9 @@
 // arrow keys is read out over both of its plots, capacity rings by period,
 // a donut of revenue that reports the slice under the pointer (none in its
 // hole) or the arrow keys and closes into a pie with its shares written
-// outside, and sales as bars side by side or stacked.
+// outside, sales as bars side by side or stacked, and a radar of factor
+// exposure that reads out the factor nearest the pointer and changes its
+// benchmark.
 import { beforeEach, expect, open, test } from "nsh/test";
 import type { App } from "nsh/test";
 
@@ -28,14 +30,16 @@ const price = () => {
  * Tabs on, pressing Right at each stop, until `shown` is on screen: the
  * first plot that reads it out has the focus. With reduced motion: in a
  * desktop window a step waits for the page to settle, which the live
- * price's pulse never does. A desktop window's sidebar comes first in
- * its Tab order, so the walk there is long.
+ * price's pulse never does. The sidebar's stops (its toggle, its search,
+ * its demos as one stop, the appearance) come after the page among the
+ * views, which stack the sidebar above it; AppKit orders its key view
+ * loop by position, which mixes them in with the page's.
  */
 const tabTo = async (shown: string) => {
   await start(true);
   let tabs = 0;
   while (!app.shows(shown)) {
-    expect(++tabs).toBeLessThan(80);
+    expect(++tabs).toBeLessThan(30);
     await app.keyboard.press("tab");
     await app.keyboard.press("right");
     await app.wait(50);
@@ -151,4 +155,20 @@ test("bars stand in bands side by side or stacked, a value over each", async () 
   await app.press("role:tab[Stacked]");
   await app.waitFor("96");
   expect(app.texts()).not.toContain("63");
+});
+
+test("the radar reads out the factor nearest the pointer and changes its benchmark", async () => {
+  // Nothing hovered: the means of all six, the portfolio's (362 / 6) a
+  // figure of its own, and its spread over the index's (327 / 6 = 54.5).
+  expect(app.texts()).toContain("ALL SIX FACTORS");
+  expect(app.texts()).toContain("60.3");
+  expect(app.texts()).toContain("+5.8");
+  // Against the peers (371 / 6): the spread turns negative.
+  await app.press("role:tab[vs Peers]");
+  await app.waitFor("−1.5");
+  // The middle of the radar: the factor whose spoke is nearest the pointer's
+  // angle there (which one depends on where the pointer lands within a point
+  // of it), its name read out.
+  await app.hover("label:/^Factor exposure against the peers/");
+  await app.waitFor("text:/^(VALUE|MOMENTUM|QUALITY|SIZE|LOW VOL|YIELD)$/");
 });

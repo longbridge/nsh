@@ -2106,6 +2106,45 @@ frame parent:text:l20 0 50 0 0
 frame text:l20 -30 -7 30 14
 frame parent:text:l10 50 30 0 0
 frame parent:text:l5 75 10 0 0
+# A radar on 0 to 10 round (50, 50). The smooth line's rows at its own
+# angles, an eighth of a turn apart from 12 o'clock: near 6 o'clock, 20
+# out (within its 30), the fourth row's at 135° is the nearest.
+expect axis null
+event id:radar onMouseMove position.x=53 position.y=70
+expect axis 3
+# Past the smooth line's 30 but within the closed one's 40 (`outerRadius`
+# 80%): its rows from 9 o'clock to 3 (`startAngle`, `endAngle`), 60°
+# apart; up and left at -45° the second's (-30°), up and right at 50°
+# the third's (30°).
+event id:radar onMouseMove position.x=25 position.y=25
+expect axis 1
+event id:radar onMouseMove position.x=77 position.y=27
+expect axis 2
+# Past both outer radii: none.
+event id:radar onMouseMove position.x=50 position.y=5
+expect axis null
+# A screen reader steps through the rows, from the first.
+event id:radar onAccessibilityAction actionName=increment
+expect axis 0
+event id:radar onMouseLeave
+expect axis null
+# The grids: a circular ring at 5 (20 out of 40) from 3 o'clock, and a
+# spoke per row from 6 out to 40, the first at 12 o'clock.
+drawing id:rings stroke path(moveTo 70 50, arc 50 50 20 0...
+drawing id:spokes stroke path(moveTo 50 44, lineTo 50 10...
+covers [nsh/base/plot] RadialLine
+covers [nsh/base/plot] RadialGrid
+covers [props] RadialLine.radius
+covers [props] RadialLine.angle
+covers [props] RadialLine.startAngle
+covers [props] RadialLine.endAngle
+covers [props] RadialLine.outerRadius
+covers [props] RadialGrid.rings
+covers [props] RadialGrid.circular
+covers [props] RadialGrid.startAngle
+covers [props] RadialGrid.outerRadius
+covers [props] RadialGrid.spokes
+covers [props] RadialGrid.innerRadius
 
 # The app's design tokens: shadcn's `neutral` with the app's theme over it.
 tap id:case-base-token
@@ -2657,9 +2696,9 @@ expect Empty: true
 expect Page: null null ab
 expect Error: thrown
 expect Keys: none
-# The subscriber hears the changes in JS's next turn.
+# The `revision` listener hears the changes in JS's next turn.
 wait 50
-expect Updates: true
+expect Updates: true true function
 covers [nsh/base] RichEditorSession
 covers [nsh/base] RichEditorPlugin
 covers [nsh/base] RichSchema

@@ -2,7 +2,7 @@
 // whose menus are sheets, submenus three levels deep in place of their
 // items, checkable items and a choice of one that keep the menu open,
 // undo and redo following what was done, row menus that change the list,
-// a scrolling menu, a menu the app opens.
+// a scrolling menu, a menu the app opens, a command whose toast reports it.
 import { beforeEach, expect, open, test } from "nsh/test";
 import type { App } from "nsh/test";
 
@@ -80,4 +80,12 @@ test("a long menu scrolls, and the app opens a menu itself", async () => {
   await app.waitFor("Sync now");
   await app.press("Sync now");
   await app.waitFor("ran Sync now");
+});
+
+test("a command that takes a while shows a toast that becomes its result", async () => {
+  await app.press("Open the commands");
+  await app.press("Sync now");
+  await app.waitFor("Syncing…");
+  await app.wait(1300);
+  await app.waitFor("Up to date");
 });

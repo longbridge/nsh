@@ -992,7 +992,7 @@ pub fn key_label(keystroke: &str) -> String {
 }
 
 /// Listens to the Android back button while the current owner lives (TS:
-/// `BackHandler.onBackPress(f)`): when no modal is
+/// `BackHandler.on("press", f)`): when no modal is
 /// shown, `f` runs before the stack pops, newest listener first, and returns
 /// true when it handled the press. While one listens, a back gesture does
 /// not preview the pop.

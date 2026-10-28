@@ -17697,6 +17697,53 @@ fn frames_stay_on_device_pixels_at_fractional_ratios() {
 }
 
 #[test]
+fn frames_moved_by_whole_pixels_are_not_sent_again() {
+    // Rows of 28 points at 2.625 (73.5 pixels, every other edge on a half
+    // pixel) in a box a scroll moves by one pixel at a time, as DataTable's
+    // body moves: the rows keep their pixels, so only the box's frame is
+    // sent, never the rows' again with another last bit or the other pixel.
+    let ratio = 2.625;
+    let mut c = core();
+    at_ratio(&mut c, ratio);
+    let mut ops = vec![
+        Op::Create {
+            id: 2,
+            tag: Tag::View,
+        },
+        Op::Insert {
+            parent: ROOT_ID,
+            child: 2,
+            before: None,
+        },
+    ];
+    for id in 3..43 {
+        ops.push(Op::Create { id, tag: Tag::View });
+        ops.push(Op::Insert {
+            parent: 2,
+            child: id,
+            before: None,
+        });
+        ops.push(style_op(id, &[("height", StyleValue::Number(28.0))]));
+    }
+    apply(&mut c, ops);
+    c.commit().unwrap();
+    for pixel in 1..400 {
+        let top = (f64::from(pixel) / f64::from(ratio)) as f32;
+        apply(
+            &mut c,
+            vec![style_op(2, &[("marginTop", StyleValue::Number(top))])],
+        );
+        let batch = c.commit().unwrap();
+        let rows = batch
+            .items
+            .iter()
+            .filter(|i| matches!(i, MountItem::Frame { id, .. } if *id != 2))
+            .count();
+        assert_eq!(rows, 0, "{pixel} pixels down: {:?}", batch.items);
+    }
+}
+
+#[test]
 fn image_scales_change_nothing_without_scales() {
     let mut c = core();
     at_ratio(&mut c, 3.0);

@@ -386,7 +386,7 @@ export function Navigation() {
   effect(() => {
     if (!intercept()) return;
     // Removed with the effect when it runs again.
-    BackHandler.onBackPress(() => {
+    BackHandler.on("press", () => {
       backs.set(backs() + 1);
       return true;
     });

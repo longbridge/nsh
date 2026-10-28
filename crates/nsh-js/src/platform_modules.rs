@@ -1,5 +1,5 @@
 //! The small runtime modules: `nsh/android`
-//! (`isAvailable`, `BackHandler.onBackPress` over the registry's module),
+//! (`isAvailable`, `BackHandler.on("press", …)` over the registry's module),
 //! `nsh/ios` (`isAvailable`, `InputAccessoryView`), `nsh/mobile`
 //! (`isAvailable`, with the registry's `TabBar`), `nsh/webview` and
 //! `nsh/video` (their host elements as components, which the compiler
@@ -32,7 +32,7 @@ const UNDEFINED: JsValue = qjs::JS_UNDEFINED;
 /// The modules' part of a context's state.
 #[derive(Default)]
 pub(crate) struct PlatformModules {
-    /// `BackHandler.onBackPress` listeners, in order (id, owned
+    /// `BackHandler.on("press", …)` listeners, in order (id, owned
     /// function).
     back: RefCell<Vec<(u32, JsValue)>>,
     /// `host.on` listeners, in order (id, event, owned function).
@@ -115,13 +115,13 @@ fn back_handler(cx: *mut JsContext) -> JsValue {
     let handler = crate::components::runtime_module(cx, "nsh/mobile", "BackHandler")
         // SAFETY: a new object when the runtime has none.
         .unwrap_or_else(|| unsafe { qjs::JS_NewObject(cx) });
-    let add = reactive::new_function(cx, c"onBackPress", add_back_listener, 1);
+    let add = reactive::new_function(cx, c"on", add_back_listener, 2);
     // SAFETY: the object takes the function.
-    unsafe { qjs::JS_SetPropertyStr(cx, handler, c"onBackPress".as_ptr(), add) };
+    unsafe { qjs::JS_SetPropertyStr(cx, handler, c"on".as_ptr(), add) };
     handler
 }
 
-/// `BackHandler.onBackPress(f)`: a function that removes the listener,
+/// `BackHandler.on("press", f)`: a function that removes the listener,
 /// which goes by itself with the owner it was added under (the component
 /// rendering), or when hot module replacement runs the module that added
 /// it again.
@@ -131,10 +131,16 @@ unsafe extern "C" fn add_back_listener(
     argc: c_int,
     argv: *mut JsValue,
 ) -> JsValue {
-    let f = arg(argc, argv, 0);
+    if dom::string_arg(cx, arg(argc, argv, 0)).as_deref() != Some("press") {
+        // SAFETY: throws on a live context.
+        return unsafe {
+            qjs::JS_ThrowTypeError(cx, c"BackHandler.on: the event is \"press\"".as_ptr())
+        };
+    }
+    let f = arg(argc, argv, 1);
     // SAFETY: an inline check.
     if !unsafe { qjs::JS_IsFunction(cx, f) } {
-        return unsafe { qjs::JS_ThrowTypeError(cx, c"onBackPress: a function".as_ptr()) };
+        return unsafe { qjs::JS_ThrowTypeError(cx, c"BackHandler.on: a function".as_ptr()) };
     }
     let m = modules(cx);
     let id = m.next.get() + 1;
@@ -257,12 +263,12 @@ pub(crate) const ANDROID_EXPORTS: &[Item] = &[(
 /// `nsh/android`'s types (with the runtime registry's modules).
 pub(crate) const ANDROID_TYPES: &str = r#"/** The back button's listeners. */
 export interface BackListeners {
-  /** Listens to the back button: `listener` returns true when it handled
-   * the press; the most recently added listener runs first, after modals
-   * and before stacks. Without a listener that handles it, the top stack
-   * pops, else the app exits. The returned function stops listening; a
-   * listener added while a component renders stops with the component. */
-  onBackPress(listener: () => boolean | void): () => void;
+  /** Listens to the back button's `press`: `listener` returns true when it
+   * handled the press; the most recently added listener runs first, after
+   * modals and before stacks. Without a listener that handles it, the top
+   * stack pops, else the app exits. The returned function stops listening;
+   * a listener added while a component renders stops with the component. */
+  on(event: "press", listener: () => boolean | void): () => void;
 }
 "#;
 
@@ -297,7 +303,8 @@ unsafe extern "C" fn host_available(
     boolean(crate::env::current(ctx).host || crate::host_channel::available(ctx))
 }
 
-/// `host.on(event, listener)`: `{ remove() }`.
+/// `host.on(event, listener)`: a function that stops listening (the
+/// SDK's `on` over it ties both to the owner, `host_channel::extend`).
 unsafe extern "C" fn add_host_listener(
     ctx: *mut JsContext,
     _this: JsValue,
@@ -331,18 +338,12 @@ unsafe extern "C" fn add_host_listener(
             return e;
         }
     }
-    let remove = native(
+    native(
         ctx,
         remove_host_listener,
         0,
         &mut [qjs::JS_NewFloat64(id as f64)],
-    );
-    // SAFETY: a new object taking the function.
-    unsafe {
-        let o = qjs::JS_NewObject(ctx);
-        qjs::JS_SetPropertyStr(ctx, o, c"remove".as_ptr(), remove);
-        o
-    }
+    )
 }
 
 unsafe extern "C" fn remove_host_listener(

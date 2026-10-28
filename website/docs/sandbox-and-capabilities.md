@@ -211,8 +211,8 @@ import { host } from "nsh";
 
 if (host.available()) {
   const user = await host.call("getUserInfo");
-  const sub = host.on("loginChanged", (payload) => console.log(payload));
-  sub.remove();
+  const stop = host.on("loginChanged", (payload) => console.log(payload));
+  stop();
 }
 ```
 

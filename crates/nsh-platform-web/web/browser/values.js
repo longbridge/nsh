@@ -19,6 +19,7 @@ export class Values {
     this.symbols = new Map();
     this.nextIdentity = 1;
     this.wrap = null;
+    this.makeFunction = null;
     this.classPeers = new Map();
     this.accessors = new Map();
     this.signals = new WeakSet();
@@ -158,6 +159,7 @@ export class Values {
     this.nodeIds = new WeakMap();
     this.instances = new WeakMap();
     this.wrap = null;
+    this.makeFunction = null;
     this.settle = null;
     this.after = null;
     this.identities = new WeakMap();
@@ -221,6 +223,7 @@ export class Values {
           case 27: { const error = this.error; this.error = null; this.hasError = false; return this.put(error); }
           case 28: return this.put(this.wrap(a, b));
           case 29: return this.instances.get(this.get(a)) ?? 0;
+          case 48: return this.put(this.makeFunction(a));
           case 31: if (!this.hasError) { this.error = new TypeError(text(b, c)); this.hasError = true; } return EXCEPTION;
           case 32: return Number(this.get(a) === this.get(b));
           case 33: {

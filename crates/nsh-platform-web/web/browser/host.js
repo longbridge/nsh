@@ -30,7 +30,8 @@ export function createHost(invoke, reactive, dom, environment, live, platform = 
       nameOf(name); if (typeof fn !== "function") throw new TypeError("host.on: a function is required");
       const entries = listeners.get(name) ?? new Set(); listeners.set(name, entries);
       const entry = { fn, owner: reactive.getOwner() }; entries.add(entry);
-      const off = () => { entries.delete(entry); if (!entries.size) listeners.delete(name); }; off.remove = off;
+      // Its owner runs it again after a call: the name may have new listeners by then.
+      const off = () => { entries.delete(entry); if (!entries.size && listeners.get(name) === entries) listeners.delete(name); };
       if (entry.owner) reactive.cleanup(off);
       queueMicrotask(() => {
         if (!live()) return;

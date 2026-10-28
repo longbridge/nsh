@@ -436,6 +436,31 @@ function swapClass(el, slot, name) {
 /** Fills a run with `text`, the characters of links (`parts`: `[from, to,
  * link]`, UTF-16) in spans inside it that name their link (`links`):
  * inline, they keep the run's shaping and bidi order. */
+/**
+ * The one color text view `el` is drawn in (null: several, which its runs
+ * carry): on the element, which the runs inherit it from, so a change of it
+ * transitions as CSS's `color` does (`transition-colors`, from the color on
+ * screen, whatever runs are made meanwhile). A text that was several colors
+ * takes its one color at once, as on the native backends.
+ */
+function setTextColor(el, color) {
+  const shown = el._textColor;
+  if (color === shown) return;
+  el._textColor = color;
+  if (color == null) {
+    el.style.color = "";
+  } else if (shown === null) {
+    // From several colors: no transition from the element's stale color.
+    const transition = el.style.transition;
+    el.style.transition = "none";
+    el.style.color = color;
+    void getComputedStyle(el).color;
+    el.style.transition = transition;
+  } else {
+    el.style.color = color;
+  }
+}
+
 function fillRun(run, text, parts, links) {
   if (!parts) {
     run.textContent = text;
@@ -1941,9 +1966,10 @@ class Player {
     el.style.setProperty(prop, value);
   }
 
-  op_t([, id, cx, cy, , , runs, styles, selectable, selection, backgrounds, links]) {
+  op_t([, id, cx, cy, , , runs, styles, selectable, selection, color, backgrounds, links]) {
     const el = this.view(id);
     if (!el) return;
+    setTextColor(el, color ?? null);
     const frag = document.createDocumentFragment();
     // Span backgrounds, behind the runs: one box per span and line.
     for (const [x, y, w, h, r, color] of backgrounds ?? []) {
@@ -3410,6 +3436,8 @@ class Player {
     field.readOnly = !config.editable;
     field.autocapitalize = config.autoCapitalize === "none" ? "off" : config.autoCapitalize;
     field.spellcheck = config.autoCorrect;
+    if (config.autoComplete != null) field.setAttribute("autocomplete", config.autoComplete);
+    else field.removeAttribute("autocomplete");
     if (config.maxLength != null) field.maxLength = config.maxLength;
     else field.removeAttribute("maxlength");
     el._config = config;

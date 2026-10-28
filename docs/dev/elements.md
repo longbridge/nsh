@@ -250,7 +250,7 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   down performs them (an `image`, `Plot`'s role, stays an image), Android offers scroll forward / backward, Windows
   makes its range value writable.
 - **Frames**: `requestAnimationFrame` / `cancelAnimationFrame` follow the display (CADisplayLink / Choreographer).
-- **Back button** (`nsh/mobile`): `BackHandler.onBackPress(listener)` (returns the function that removes it; a
+- **Back button** (`nsh/mobile`): `BackHandler.on("press", listener)` (returns the function that removes it; a
   listener added while a component renders goes with it, as `keymap.bind`'s bindings do), after modals, the top
   overlay listening to `onCancel` and stacks; the app exits when nothing handles it. Rust components listen with `cx.on_back_press(..)`, before JS's listeners; the root wants
   the button while either side listens (`docs/dev/components.md`).

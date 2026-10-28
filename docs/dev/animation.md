@@ -26,7 +26,9 @@
   `decay` takes `clamp: [min, max]` and `bounce`: at a bound it stops, or a new segment of the closed form starts from the
   bound at the exact time it got there with `-bounce` of its speed (frame-rate independent, several per frame if need be).
   Values have an offset (`setOffset` / `flattenOffset` / `extractOffset`, React Native's): they evaluate to value +
-  offset; drivers, `set` and gestures move the value. JS reads a node back with `getValue()` (and `stop()`'s promise):
+  offset; drivers, `set` and gestures move the value. A node is evaluated once for each state of the graph
+  (`Graph::eval` keeps its value until an op, a `set`, a settling or a frame changes the graph), so a node many read
+  (the time, a shared track) costs one evaluation a frame. JS reads a node back with `getValue()` (and `stop()`'s promise):
   `AnimationOp::Read` answers with a `Finished` carrying `value`, through the same path as animation ends (Rust
   components: `AnimatedValue::value()`, its request id odd, answered in `Core::animations_finished`).
   `Easing.sample`, `Animated.sampleSpring` / `sampleDecay` return the curves from `nsh_core::animation::sample_easing` /
@@ -83,8 +85,15 @@
   draws the whole text in over its runs (`Live::text_color`, `transition::recolor`: when the text is one color before
   and after), the way it draws an animated `color`, so no frame typesets the text again; `nsh_core::animation::Animator` holds the graph with its bindings to views, gestures and scroll views
   and hands each bound view its `AnimValues`.
+- **Mobile backends**: style transitions are the platform's (Core Animation on iOS, `ValueAnimator`s in
+  `Mounter.java` on Android). A text's color follows the same rules as on the desktops and is drawn the same way,
+  over the laid-out lines in an in-between color, as an animated `color` is: iOS steps a `transition::TextColor` per
+  text (`transition::recolor` decides) on a display link that runs only while one moves (`interaction.rs`
+  `TextColors`); on Android the `TEXT` item carries the text's one color (`uniform_color`) and `TextBox.recolor`
+  runs a `ValueAnimator` on the view's transition (reduced motion: animators off, at once).
 - **Web**: animated values run in Rust as elsewhere; layout animations, transitions, keyframes and screen transitions
-  are Web Animations and CSS made to match the Linux backend (`web.md` "Animation").
+  are Web Animations and CSS made to match the Linux backend (`web.md` "Animation"); a text's color is a CSS
+  transition of its element's `color`, which its runs inherit.
 
 ## Compared with gpui-base's motion
 

@@ -104,7 +104,7 @@ TSX 的这些对象和其他属性一样是响应式的；从对象中移除的�
 
 | Rust | TSX | 说明 |
 |---|---|---|
-| `on_back_press(listener)` | `BackHandler.onBackPress(listener)` | 在对话框之后、导航栈之前监听返回键；处理了就返回 `true`。监听器随添加它的组件（或 effect）一起结束；在 TSX 中，调用还会返回一个函数，用来提前停止监听。 |
+| `on_back_press(listener)` | `BackHandler.on("press", listener)` | 在对话框之后、导航栈之前监听返回键；处理了就返回 `true`。监听器随添加它的组件（或 effect）一起结束；在 TSX 中，调用还会返回一个函数，用来提前停止监听。 |
 | | `BackHandler.exitApp()` | 退出应用。 |
 
 ```rust tabs
@@ -129,7 +129,7 @@ import { BackHandler } from "nsh/mobile";
 
 function Player() {
   // 返回键先退出全屏，再离开页面。监听器随组件一起结束。
-  BackHandler.onBackPress(() => {
+  BackHandler.on("press", () => {
     if (!fullScreen()) return false;
     fullScreen.set(false);
     return true;

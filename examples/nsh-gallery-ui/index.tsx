@@ -1,16 +1,18 @@
 import type { JSX, ViewStyle } from "nsh";
 import { effect, Text, token, View } from "nsh";
 import { reduceMotion } from "nsh";
-import { createAnimatedValue } from "nsh";
+import { type AnimatedValue, createAnimatedValue } from "nsh";
 import { platform } from "nsh";
 import { keymap } from "nsh";
 import { Button as BaseButton, Sheet as BaseSheet, Switch, Tooltip } from "nsh/base";
 import { safeArea } from "nsh";
 import { Icon, type IconName } from "./icons";
+import { createPresence, type PopupSide } from "./popup";
 import { alpha, colors, finish, focusRing, hovered, isDark, mono, motion, radius, tints, toneColor, toneTint, type Tone } from "./theme";
 
 export * from "./theme";
 export { Segmented } from "./segmented";
+export * from "./popup";
 export * from "./data-table";
 export * from "./slider";
 export * from "./scrollbar-theme";
@@ -106,6 +108,25 @@ export function Appear(props: { index?: number; flex?: boolean; children: JSX.El
       {props.children}
     </View>
   );
+}
+
+/**
+ * An animated value that springs to `target` each time it changes (a
+ * control's state: 1 while on, 0 while off), natively: JS only starts each
+ * spring. A change mid-way turns it from where it is, with its velocity;
+ * with reduced motion it lands at once.
+ */
+export function follow(target: () => number, spring: { stiffness: number; damping: number } = motion.control): AnimatedValue {
+  const v = createAnimatedValue(target());
+  let shown = target();
+  effect(() => {
+    const next = target();
+    if (next === shown) return;
+    shown = next;
+    if (reduceMotion()) v.set(next);
+    else v.spring(next, spring);
+  });
+  return v;
 }
 
 /** A rounded icon tile. */
@@ -485,17 +506,10 @@ export function switchLook(on: () => boolean, size: "small" | "regular" = "regul
   // The track's size and inset, and the knob: it travels what is left inside
   // the border and the padding.
   const [width, height, inset, knob] = pointer ? [28, 16, 1, 12] : size === "small" ? [34, 20, 1, 16] : [42, 24, 1, 20];
-  const t = createAnimatedValue(on() ? 1 : 0);
+  // The knob travels as gpui-kit's does (`spring_move`), the track's color
+  // with it; with reduced motion both change in place.
+  const t = follow(() => (on() ? 1 : 0), motion.move);
   const x = t.interpolate({ inputRange: [0, 1], outputRange: [0, width - 2 - 2 * inset - knob] });
-  let shown = on();
-  effect(() => {
-    const next = on();
-    if (next === shown) return;
-    shown = next;
-    // Reduced motion: the knob and the track change in place.
-    if (reduceMotion()) t.set(next ? 1 : 0);
-    else t.spring(next ? 1 : 0, motion.settle);
-  });
   return {
     get trackStyle(): ViewStyle {
       return {
@@ -581,12 +595,24 @@ export function Sheet(props: { open: boolean; onClose: () => void; children: JSX
 
 export { Icon, type IconName } from "./icons";
 
-/** A short text as an element's `tooltip`: a `Tooltip` of `nsh/base` in a
- * small bubble of the theme's `popover` tokens. */
-export function Tip(props: { label: string }) {
+/**
+ * A short text as an element's `tooltip`: a `Tooltip` of `nsh/base` in a
+ * small bubble of the theme's `popover` tokens that comes in with `popIn`
+ * from its side (`placement`, default above), with the keys of a
+ * `shortcut` after the text.
+ */
+export function Tip(props: { label: string; shortcut?: string; placement?: PopupSide; delay?: number }) {
+  const presence = createPresence(props.placement ?? "top");
   return (
-    <Tooltip class="rounded-md border border-border bg-popover px-2 py-1">
-      <Text class="text-xs text-popover-foreground">{props.label}</Text>
+    <Tooltip placement={props.placement} delay={props.delay} onOpen={presence.show} onClose={presence.hide}>
+      <View class="flex-row items-center gap-2 rounded-md border border-border bg-popover px-2 py-1" style={presence.style}>
+        <Text class="text-xs text-popover-foreground">{props.label}</Text>
+        <If when={props.shortcut}>
+          <Text class="text-xs text-muted-foreground" style={{ fontVariant: ["tabular-nums"] }}>
+            {props.shortcut}
+          </Text>
+        </If>
+      </View>
     </Tooltip>
   );
 }

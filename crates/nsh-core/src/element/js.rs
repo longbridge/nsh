@@ -138,6 +138,13 @@ pub trait JsHost {
         let _ = (data, mime, name, last_modified);
         Err(PropError("a `File` cannot be made here".into()))
     }
+    /// A function taking nothing and returning `undefined` that runs `f`
+    /// each time it is called ([`super::Stop`]'s). A host without
+    /// functions refuses.
+    fn new_function(&self, f: Box<dyn Fn()>) -> Result<JsRaw, PropError> {
+        drop(f);
+        Err(PropError("a function cannot be made here".into()))
+    }
     /// The JS object of `instance`: the one it has, or a new one of its
     /// class.
     fn wrap(&self, instance: Rc<dyn ClassInstance>) -> Result<JsRaw, PropError>;
