@@ -1,7 +1,6 @@
 ---
 title: Tooltip
 description: "The Tooltip component: a hint about the element it is in, shown on the desktops when the pointer rests on it, styled by the app."
-order: 28
 group: base
 demo: el-tooltip
 ---

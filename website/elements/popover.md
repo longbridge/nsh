@@ -1,7 +1,6 @@
 ---
 title: Popover
 description: "The Popover component: content anchored to a trigger, on top of everything, that the trigger, a press outside, Escape and back close, styled by the app."
-order: 26
 group: base
 demo: el-popover
 ---

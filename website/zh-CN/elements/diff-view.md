@@ -1,7 +1,6 @@
 ---
 title: DiffView
 description: DiffView 组件：两段文本之间或一个补丁中的改动，并排或合并显示，高亮行内改动的单词，未改动的行折叠成可以展开的分隔行，带语法高亮、自动换行、针对每处改动的操作、行选择和评审批注。
-order: 26.3
 group: base
 demo: el-diff-view
 ---

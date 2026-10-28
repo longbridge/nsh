@@ -1,7 +1,6 @@
 ---
 title: Editor
 description: "The Editor component: a code editor with syntax highlighting, line numbers, several carets, folding, soft wrap, find and replace, diagnostics and decorations, and the keys of code editors."
-order: 26.2
 group: base
 demo: el-editor
 ---

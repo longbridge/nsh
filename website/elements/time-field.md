@@ -1,7 +1,6 @@
 ---
 title: TimeField
 description: "The TimeField component: a time of day edited segment by segment, hours, minutes and seconds, with the keyboard or a phone's number pad, styled by the app."
-order: 20.69
 group: base
 demo: el-date-picker
 ---

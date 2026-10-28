@@ -1,7 +1,6 @@
 ---
 title: Collapsible
 description: "The Collapsible component: a region whose content expands and collapses, shown after its children while the app has it open, with the trigger and every look the app's."
-order: 20.7
 group: base
 demo: el-collapsible
 ---

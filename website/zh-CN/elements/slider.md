@@ -1,7 +1,6 @@
 ---
 title: Slider
 description: "Slider 组件：沿轨道选取一个值或两个值组成的范围；支持触摸屏和鼠标的按压与拖动、WAI-ARIA 的滑块按键，每个滑块向屏幕阅读器报告自己的数值；轨道、指示条、范围和滑块由应用设置样式。"
-order: 20.85
 group: base
 demo: el-slider
 ---

@@ -1,7 +1,6 @@
 ---
 title: DatePicker
 description: DatePicker 组件：从弹出的日历中选出一个日期、一段日期或一个日期和时间，桌面上是触发元素处的弹出层，手机上是 sheet，样式由应用决定。
-order: 20.67
 group: base
 demo: el-date-picker
 ---

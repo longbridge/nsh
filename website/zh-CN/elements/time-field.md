@@ -1,7 +1,6 @@
 ---
 title: TimeField
 description: TimeField 组件：逐段编辑一天中的时间，时、分、秒，使用键盘或手机的数字键盘，样式由应用决定。
-order: 20.69
 group: base
 demo: el-date-picker
 ---

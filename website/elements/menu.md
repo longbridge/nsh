@@ -1,7 +1,6 @@
 ---
 title: Menu
 description: "Menu and ContextMenu with MenuItem, MenuSeparator and Submenu: a popup with cascading submenus on desktops, a sheet with submenus in place on phones, styled by the app."
-order: 27
 group: base
 demo: el-menu
 ---

@@ -1,7 +1,6 @@
 ---
 title: Calendar
 description: Calendar 组件：从按周排列的月份中选出一个日期或一段日期，带月份和年份视图与键盘操作，样式由应用决定。
-order: 20.68
 group: base
 demo: el-date-picker
 ---

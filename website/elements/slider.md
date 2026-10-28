@@ -1,7 +1,6 @@
 ---
 title: Slider
 description: "The Slider component: a value, or a range of two, picked along a track, with presses and drags on touch screens and with a mouse, WAI-ARIA's slider keys and a value for screen readers on each thumb, and a track, an indicator, a range and thumbs the app styles."
-order: 20.85
 group: base
 demo: el-slider
 ---

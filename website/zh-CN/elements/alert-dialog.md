@@ -1,7 +1,6 @@
 ---
 title: AlertDialog
 description: AlertDialog：平台自己的警告框或操作表，在原生侧显示，并以用户选择的操作作为结果。
-order: 25
 group: base
 demo: el-alert-dialog
 ---

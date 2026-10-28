@@ -1,7 +1,7 @@
 ---
 title: WebView
 description: "The WebView element: web pages and inline HTML inside an app, with messaging both ways."
-order: 9
+order: 80
 group: primitives
 demo: el-web-view
 ---
