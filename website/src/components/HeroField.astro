@@ -25,9 +25,8 @@
     --hero-star-blue: #8fb2ff;
     --hero-star-teal: #6fd6a8;
     --hero-star-red: #ff7a6e;
-    --hero-star-orange: #ffb066;
+    --hero-star-orange: #ff8a5c;
     --hero-star-violet: #b49cff;
-    --hero-star-gold: #e2f6a4;
     --hero-glow: rgba(200, 242, 109, 0.14);
     --hero-nebula-lime: rgba(200, 242, 109, 0.5);
     --hero-nebula-slate: rgba(126, 168, 255, 0.26);
@@ -43,9 +42,8 @@
     --hero-star-blue: #2f55b0;
     --hero-star-teal: #1d8a62;
     --hero-star-red: #b8382c;
-    --hero-star-orange: #b8661a;
+    --hero-star-orange: #b8501f;
     --hero-star-violet: #6a4cc0;
-    --hero-star-gold: #4f6e0c;
     --hero-glow: rgba(150, 196, 40, 0.16);
     --hero-nebula-lime: rgba(96, 146, 12, 0.6);
     --hero-nebula-slate: rgba(60, 90, 170, 0.2);
@@ -153,7 +151,6 @@
     uniform vec3 starRed;
     uniform vec3 starOrange;
     uniform vec3 starViolet;
-    uniform vec3 starGold;
     uniform vec4 glowColor;
     uniform vec4 nebula[5];       // the clouds' hues, the accent's family: lime, green, teal (most clouds), gold, bright citrus (a few) (straight alpha)
     uniform vec4 deepColor;       // darkens the hero's sky toward the night
@@ -227,10 +224,9 @@
       float d = length(v);
       float twinkle = 0.82 + 0.18 * sin(time * (0.5 + 1.2 * pick) + pick * 60.0);
       float hue = hash(id + seed + 3.3);
-      // Their colors: blue, citrus, teal, red, orange and violet, a rare few
-      // in the accent, about half white.
-      rgb = hue < 0.16 ? starBlue : hue < 0.24 ? starGold : hue < 0.31 ? starTeal : hue < 0.36 ? starRed
-        : hue < 0.43 ? starOrange : hue < 0.49 ? starViolet : hue < 0.52 ? hotColor : starColor.rgb;
+      // Their colors: blue, teal, red, orange and violet, about half white.
+      rgb = hue < 0.2 ? starBlue : hue < 0.27 ? starTeal : hue < 0.32 ? starRed
+        : hue < 0.38 ? starOrange : hue < 0.46 ? starViolet : starColor.rgb;
       rgb = mix(rgb, starColor.rgb, 0.05);
       // A crisp disc with a narrow glow; most stars faint, a few bright, the
       // brightest a little larger.
@@ -240,7 +236,8 @@
         float reach = cell * 0.3;
         float fade = 1.0 - smoothstep(0.0, reach, max(abs(v.x), abs(v.y)));
         float thin = 0.45 / dpr + 0.15;
-        light = light * 1.6 + 0.7 * fade * (exp(-abs(v.y) / thin) * exp(-abs(v.x) / (reach * 0.5))
+        rgb = hue < 0.5 ? mix(starBlue, starColor.rgb, 0.5) : starColor.rgb;
+        light = light * 1.2 + 0.6 * fade * (exp(-abs(v.y) / thin) * exp(-abs(v.x) / (reach * 0.5))
           + exp(-abs(v.x) / thin) * exp(-abs(v.y) / (reach * 0.5)));
         twinkle = 0.7 + 0.3 * twinkle;
       }
@@ -295,7 +292,7 @@
       float s0 = stars(qc, 14.0, 47.0, 2.0, 2.1, 0.45 * clusters(qc + drift * 2.0) * filled, 0.0, 0.0, c0) * 0.75;
       float s1 = stars(mix(p, q, 0.6), 52.0, 1.0, 1.5, 3.6, (0.12 + 0.5 * thick) * filled, 0.0, 0.0, c1) * 0.8;
       float s2 = stars(mix(p, q, 0.8), 120.0, 9.0, 3.0, 5.0, (0.12 + 0.4 * thick) * filled, 0.0, 0.0, c2);
-      float s3 = stars(q, 260.0, 23.0, 6.0, 7.0, (0.18 + 0.3 * thick) * mix(0.3, 1.0, filled), 0.15, 0.35, c3);
+      float s3 = stars(q, 260.0, 23.0, 6.0, 4.6, (0.18 + 0.3 * thick) * mix(0.3, 1.0, filled), 0.15, 0.35, c3);
       // The galaxy's unresolved stars: a faint grain where it is thick.
       vec3 cg;
       float grain = stars(mix(p, q, 0.5), 9.0, 61.0, 1.0, 1.0, 0.3 * thick * filled, 0.0, 0.0, cg) * 0.32;
@@ -530,9 +527,8 @@
       gl!.uniform3fv(u('starBlue'), color('--hero-star-blue', [0.71, 0.8, 1, 1]).slice(0, 3));
       gl!.uniform3fv(u('starTeal'), color('--hero-star-teal', [0.44, 0.84, 0.66, 1]).slice(0, 3));
       gl!.uniform3fv(u('starRed'), color('--hero-star-red', [1, 0.48, 0.43, 1]).slice(0, 3));
-      gl!.uniform3fv(u('starOrange'), color('--hero-star-orange', [1, 0.69, 0.4, 1]).slice(0, 3));
+      gl!.uniform3fv(u('starOrange'), color('--hero-star-orange', [1, 0.54, 0.36, 1]).slice(0, 3));
       gl!.uniform3fv(u('starViolet'), color('--hero-star-violet', [0.71, 0.61, 1, 1]).slice(0, 3));
-      gl!.uniform3fv(u('starGold'), color('--hero-star-gold', [0.95, 0.9, 0.6, 1]).slice(0, 3));
       gl!.uniform4fv(u('glowColor'), color('--hero-glow', [0.78, 0.95, 0.43, 0.16]));
       gl!.uniform4fv(u('nebula'), [
         ...color('--hero-nebula-lime', [0.75, 0.94, 0.39, 0.42]),
