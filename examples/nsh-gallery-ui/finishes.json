@@ -11,15 +11,15 @@
       "boxShadow": "inset 0 1px 1px rgba(0,0,0,0.3), 0 1px 0 rgba(255,255,255,0.04)"
     },
     "raised": {
-      "backgroundColor": "#3a3b3f",
-      "backgroundImage": "linear-gradient(180deg, #3f4044 0%, #36373b 100%)",
-      "boxShadow": "inset 0 1px 0 rgba(255,255,255,0.16), inset 0 -1px 0 rgba(0,0,0,0.2), 0 1px 3px rgba(0,0,0,0.3)",
+      "backgroundColor": "#3c3d41",
+      "backgroundImage": "linear-gradient(180deg, #3e3f43 0%, #3a3b3f 100%)",
+      "boxShadow": "inset 0 1px 0 rgba(255,255,255,0.16), inset 0 -1px 0 rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.25)",
       "borderColor": "#2a2b2f"
     },
     "hover": {
-      "backgroundColor": "#3f4044",
-      "backgroundImage": "linear-gradient(180deg, #444549 0%, #3b3c40 100%)",
-      "boxShadow": "inset 0 1px 0 rgba(255,255,255,0.18), inset 0 -1px 0 rgba(0,0,0,0.2), 0 1px 3px rgba(0,0,0,0.3)",
+      "backgroundColor": "#414246",
+      "backgroundImage": "linear-gradient(180deg, #434448 0%, #3f4044 100%)",
+      "boxShadow": "inset 0 1px 0 rgba(255,255,255,0.18), inset 0 -1px 0 rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.25)",
       "borderColor": "#2a2b2f"
     },
     "pressed": {
@@ -56,9 +56,9 @@
       "borderColor": "#8a8d93"
     },
     "pill": {
-      "backgroundColor": "#3a3b3f",
-      "backgroundImage": "linear-gradient(180deg, #3f4044 0%, #36373b 100%)",
-      "boxShadow": "inset 0 1px 0 rgba(255,255,255,0.16), inset 0 -1px 0 rgba(0,0,0,0.2), 0 1px 3px rgba(0,0,0,0.3)",
+      "backgroundColor": "#3c3d41",
+      "backgroundImage": "linear-gradient(180deg, #3e3f43 0%, #3a3b3f 100%)",
+      "boxShadow": "inset 0 1px 0 rgba(255,255,255,0.16), inset 0 -1px 0 rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.25)",
       "borderColor": "#2a2b2f"
     },
     "chip": {
