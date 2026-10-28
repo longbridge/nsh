@@ -283,7 +283,7 @@ test("native animation samples and derived-node identity use the Rust graph prot
   let finished;
   const composite=Animated.sequence([Animated.timing(a,{toValue:3}),Animated.delay(5)]);
   const end=composite.start(value=>{finished=value.finished;});animation.finished([[4,true]]);
-  assert.equal(await end,true);assert.equal(finished,true);
+  assert.deepEqual(await end,{finished:true});assert.equal(finished,true);
   animation.dispose();f.close();
 });
 

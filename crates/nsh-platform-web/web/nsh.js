@@ -436,6 +436,31 @@ function swapClass(el, slot, name) {
 /** Fills a run with `text`, the characters of links (`parts`: `[from, to,
  * link]`, UTF-16) in spans inside it that name their link (`links`):
  * inline, they keep the run's shaping and bidi order. */
+/**
+ * The one color text view `el` is drawn in (null: several, which its runs
+ * carry): on the element, which the runs inherit it from, so a change of it
+ * transitions as CSS's `color` does (`transition-colors`, from the color on
+ * screen, whatever runs are made meanwhile). A text that was several colors
+ * takes its one color at once, as on the native backends.
+ */
+function setTextColor(el, color) {
+  const shown = el._textColor;
+  if (color === shown) return;
+  el._textColor = color;
+  if (color == null) {
+    el.style.color = "";
+  } else if (shown === null) {
+    // From several colors: no transition from the element's stale color.
+    const transition = el.style.transition;
+    el.style.transition = "none";
+    el.style.color = color;
+    void getComputedStyle(el).color;
+    el.style.transition = transition;
+  } else {
+    el.style.color = color;
+  }
+}
+
 function fillRun(run, text, parts, links) {
   if (!parts) {
     run.textContent = text;
@@ -1589,6 +1614,7 @@ class Player {
       keyboard: this.keyboardHeight(),
       appleKeyboard: APPLE,
       host: Boolean(this.options.host),
+      screenColor: typeof window.EyeDropper === "function",
     };
   }
 
@@ -1940,9 +1966,10 @@ class Player {
     el.style.setProperty(prop, value);
   }
 
-  op_t([, id, cx, cy, , , runs, styles, selectable, selection, backgrounds, links]) {
+  op_t([, id, cx, cy, , , runs, styles, selectable, selection, color, backgrounds, links]) {
     const el = this.view(id);
     if (!el) return;
+    setTextColor(el, color ?? null);
     const frag = document.createDocumentFragment();
     // Span backgrounds, behind the runs: one box per span and line.
     for (const [x, y, w, h, r, color] of backgrounds ?? []) {
@@ -2091,6 +2118,9 @@ class Player {
     set("aria-checked", p.checked);
     set("aria-busy", p.busy && "true");
     set("aria-expanded", p.expanded);
+    set("aria-pressed", p.pressed);
+    set("aria-current", p.current);
+    set("aria-level", p.level);
     const [min, max, now, text] = p.value ?? [];
     set("aria-valuemin", min);
     set("aria-valuemax", max);
@@ -2581,11 +2611,12 @@ class Player {
 
   // Scroll views
 
-  op_sc([, id, horizontal, indicator]) {
+  op_sc([, id, horizontal, indicator, , replaced]) {
     const el = this.view(id);
     if (!el) return;
     el._horizontal = horizontal;
     el._indicator = indicator;
+    el._replaced = replaced;
     this.scrollOverflow(el);
     el.classList.toggle("nsh-noindicator", !indicator);
     if (el._bar && !this.barShown(el)) this.showBar(el);
@@ -2798,9 +2829,10 @@ class Player {
 
   /** Whether `el` has a bar: a scroll view along one axis with its
    * indicator, and horizontal ones always (a mouse without a horizontal
-   * wheel has no other way to move them, as mouse drags do not scroll). */
+   * wheel has no other way to move them, as mouse drags do not scroll),
+   * unless a built-in bar of the app's takes their place. */
   barShown(el) {
-    return this.desktopUI && el._kind === "scroll" && !this.zooms(el) && el._behavior?.enabled !== false && !!(el._indicator || el._horizontal);
+    return this.desktopUI && el._kind === "scroll" && !this.zooms(el) && el._behavior?.enabled !== false && !!(el._indicator || (el._horizontal && !el._replaced));
   }
 
   /** `el`'s thumb along its axis: `[start, length, travel, max offset]`, or null when the content fits. */
@@ -3408,6 +3440,9 @@ class Player {
     else field.removeAttribute("maxlength");
     el._config = config;
     field.classList.toggle("nsh-ph", !!config.placeholderColor);
+    // A built-in bar of the app's takes the textarea's indicator's place.
+    field.classList.toggle("nsh-noindicator", !!config.noIndicator);
+    this.inputScrolled(el, field);
     if (config.autoFocus && !el._autoFocused) {
       el._autoFocused = true;
       setTimeout(() => field.focus(), 0);
@@ -3416,6 +3451,10 @@ class Player {
 
   wireInput(el, field) {
     field.addEventListener("input", () => this.textChanged(el, field));
+    field.addEventListener("scroll", () => this.inputScrolled(el, field), { passive: true });
+    if (typeof ResizeObserver === "function") {
+      new ResizeObserver(() => this.inputScrolled(el, field)).observe(field);
+    }
     // An input method's composition: the app's value is held while it
     // lasts (`op_iv`), since setting a field's value ends the composition
     // and commits its text as typed (pinyin letters instead of the
@@ -3470,7 +3509,18 @@ class Player {
     field.addEventListener("paste", (e) => this.pasted(el, e));
   }
 
+  /** Reports how far `el`'s textarea scrolled, and its text's height and
+   * its viewport's, while a built-in bar takes its indicator's place. */
+  inputScrolled(el, field) {
+    if (!el._config?.replaced || field.tagName !== "TEXTAREA") return;
+    const now = [field.scrollTop, field.clientWidth, field.scrollHeight, field.clientHeight];
+    if (field._scrolled?.every((v, i) => v === now[i])) return;
+    field._scrolled = now;
+    this.call((w) => w.nsh_input_scroll(el._id, ...now));
+  }
+
   textChanged(el, field) {
+    this.inputScrolled(el, field);
     if (field.value === field._known) return;
     field._known = field.value;
     field._count++;
@@ -4311,6 +4361,11 @@ class Player {
       case "setSelection": el?._field?.setSelectionRange(args[0], args[1]); break;
       case "scrollTo":
         if (!el) break;
+        // A textarea's text (a built-in bar's drags).
+        if (el._field) {
+          el._field.scrollTo({ top: args[1], behavior: args[2] ? "smooth" : "instant" });
+          break;
+        }
         el._applied++;
         this.stopGlide(el, args[0], args[1]);
         el._smooth = args[2] ? [args[0], args[1]] : null;
@@ -4353,6 +4408,7 @@ class Player {
       case "readClipboardImage": this.readClipboardImage(args[0], args[1]); break;
       // Pages see no local paths: never any files.
       case "readClipboardFiles": this.event(ROOT_ID, "onClipboard", { id: args[0], has: false, files: "" }); break;
+      case "pickScreenColor": this.pickScreenColor(args[0]); break;
       case "pickImages": this.pickImages(args[0], args[1], args[2], args[3], args[4]); break;
       case "hostCall": this.hostCall(args[0], args[1], args[2]); break;
       case "imageInfo": this.imageInfo(args[0], args[1]); break;
@@ -4410,6 +4466,18 @@ class Player {
    * show a paste button), and fails in an insecure context. `hasText`
    * reads too: there is no way to ask without reading.
    */
+  // `pickScreenColor`: the browser's eyedropper (`EyeDropper`, which the
+  // environment's `screenColor` reports). The color packed as 0xRRGGBBAA;
+  // none when the user pressed Escape.
+  async pickScreenColor(request) {
+    let color;
+    try {
+      const { sRGBHex } = await new EyeDropper().open();
+      color = parseInt(sRGBHex.slice(1, 7), 16) * 256 + 255;
+    } catch {}
+    this.event(ROOT_ID, "onScreenColor", color === undefined ? { id: request } : { id: request, color });
+  }
+
   // `openUrl` (the URL passed nsh_core::open_url's check): a web page in a
   // new tab, another scheme (mailto:, tel:, ...) through the browser's
   // handler. Whether the browser let it open (a blocked pop-up is false).

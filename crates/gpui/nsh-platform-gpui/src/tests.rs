@@ -279,13 +279,13 @@ fn an_embedded_surface_takes_the_keyboard_when_its_app_focuses_a_field(cx: &mut 
 /// focus the second. Text typed before the engine has handled that key
 /// belongs to the second field.
 const TWO_FIELDS: &str = r#"
-import { keymap, mount, signal, View, type YNode } from "nsh";
+import { keymap, mount, signal, View, type InputRef } from "nsh";
 import { Input } from "nsh/base";
 
 function App() {
   const first = signal("A");
   const second = signal("");
-  let next!: YNode;
+  let next!: InputRef;
   const go = () => next.focus();
   keymap.bind("mod+n", go, { when: "always" });
   return (

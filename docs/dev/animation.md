@@ -16,7 +16,7 @@
   (`nsh_core::animation::Easing::Curve`), never a JS function: the curves, their parameters and defaults are one table
   (`nsh_core::js::animation`), which decodes them, declares their types (`animation::declarations`) and gives `nsh`'s `Easing` its curves (`animation::tables`). `Animated.timing` / `spring` / `decay` / `sequence` / `parallel` / `stagger` /
   `delay` / `loop` build a `Composite` tree that runs entirely natively (`AnimationOp::StartComposite`): each step starts at the exact end
-  time of the previous one (no frame gaps), `stop()` / `reset()` (back to the values at start) / `start(cb)` report `finished` once
+  time of the previous one (no frame gaps), `stop()` / `reset()` (back to the values at start) / `start(cb)` report `{ finished }` once
   for the whole tree; leaf animations get internal ids (`LEAF_IDS`) that never reach JS. Composites are released when JS
   lets go of them (their finalizers queue `ReleaseComposite`); a run goes on after that. A run does not keep its
   composite (or the values it animates) alive: `nsh-js` remembers live composites by key (`Animations::composites`),
@@ -79,10 +79,19 @@
 - **Desktop backends** (Windows, GPUI, Linux, macOS): one platform-free copy of what they animate. `nsh_core::transition`
   holds a view's layout animation, style transition and keyframes (`Live`: curves, springs, interpolation of frames,
   colors, transforms, shadows and corner radii, timing), which each backend steps on its frame clock and applies to its
-  own views; `nsh_core::animation::Animator` holds the graph with its bindings to views, gestures and scroll views
+  own views; a text's color, which lives in its typeset runs rather than its style, transitions as a color the backend
+  draws the whole text in over its runs (`Live::text_color`, `transition::recolor`: when the text is one color before
+  and after), the way it draws an animated `color`, so no frame typesets the text again; `nsh_core::animation::Animator` holds the graph with its bindings to views, gestures and scroll views
   and hands each bound view its `AnimValues`.
+- **Mobile backends**: style transitions are the platform's (Core Animation on iOS, `ValueAnimator`s in
+  `Mounter.java` on Android). A text's color follows the same rules as on the desktops and is drawn the same way,
+  over the laid-out lines in an in-between color, as an animated `color` is: iOS steps a `transition::TextColor` per
+  text (`transition::recolor` decides) on a display link that runs only while one moves (`interaction.rs`
+  `TextColors`); on Android the `TEXT` item carries the text's one color (`uniform_color`) and `TextBox.recolor`
+  runs a `ValueAnimator` on the view's transition (reduced motion: animators off, at once).
 - **Web**: animated values run in Rust as elsewhere; layout animations, transitions, keyframes and screen transitions
-  are Web Animations and CSS made to match the Linux backend (`web.md` "Animation").
+  are Web Animations and CSS made to match the Linux backend (`web.md` "Animation"); a text's color is a CSS
+  transition of its element's `color`, which its runs inherit.
 
 ## Compared with gpui-base's motion
 

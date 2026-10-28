@@ -1,4 +1,4 @@
-import { batch, cleanup, computed, effect, List, Scroll, signal, Text, View, type ViewStyle, type YNode } from "nsh";
+import { batch, cleanup, computed, effect, List, type ListRef, Scroll, signal, Text, View, type ViewStyle } from "nsh";
 import { createAnimatedValue, LayoutAnimation } from "nsh";
 import { Clipboard } from "nsh";
 import { platform } from "nsh";
@@ -75,7 +75,7 @@ export function Chat() {
   /** Whether the user is at the bottom (the list then follows the stream
    * natively, `maintainVisibleContentPosition`); scrolling up clears it. */
   const following = signal(true);
-  let list: YNode | undefined;
+  let list: ListRef | undefined;
   let dragging = false;
 
   type Run = { id: string; model: Model; script: string; cancelled: boolean; md: string; reason: string; thinkStart: number; thinkSeconds: number | null };

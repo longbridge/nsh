@@ -1163,10 +1163,14 @@ pub(crate) fn draw(cx: &CGContext, state: &crate::view::ViewState) {
             Some(&cg_color(shadow.color)),
         );
     }
-    // An animated color: the text (decorations too) drawn as is into a
-    // layer, then painted over in the color where it drew, so its
-    // antialiasing stays; the layer casts the shadow.
-    let color = state.anim.color;
+    // An animated color, or a transition of the text's color: the text
+    // (decorations too) drawn as is into a layer, then painted over in the
+    // color where it drew, so its antialiasing stays; the layer casts the
+    // shadow.
+    let color = state
+        .anim
+        .color
+        .or_else(|| state.live.as_ref()?.text_color());
     if color.is_some() {
         // SAFETY: no auxiliary info.
         unsafe { CGContext::begin_transparency_layer(c, None) };
@@ -1377,7 +1381,7 @@ impl<'a> LineBox<'a> {
         let past = b > self.end;
         let (a, b) = (a.max(self.start), b.min(self.end));
         let (mut text_left, mut text_right) = (CGFloat::INFINITY, CGFloat::NEG_INFINITY);
-        let (mut first_rtl, mut last_rtl) = (false, false);
+        let (mut first_rtl, mut last_rtl, mut any_rtl) = (false, false, false);
         // SAFETY: the line's own run array (of CTRuns).
         let runs = unsafe { self.line.glyph_runs() };
         for i in 0..runs.count() {
@@ -1416,6 +1420,7 @@ impl<'a> LineBox<'a> {
             };
             let (left, right) = (self.x + origin.x, self.x + origin.x + width);
             let rtl = status.contains(CTRunStatus::RightToLeft);
+            any_rtl |= rtl;
             text_left = text_left.min(left);
             text_right = text_right.max(right);
             let run_end = range.location + range.length;
@@ -1458,9 +1463,11 @@ impl<'a> LineBox<'a> {
             }
         }
         // `dedup_by` hands each span with the last one kept: touching spans
-        // join into it.
+        // join into it. Left-to-right, the characters of a range sit side by
+        // side, so its spans join whatever room the runs leave between them
+        // (a font's side bearings where a fallback font takes over).
         spans.dedup_by(|(left, right), kept| {
-            let joins = *left <= kept.1 + 0.01;
+            let joins = !any_rtl || *left <= kept.1 + 0.01;
             if joins {
                 kept.1 = kept.1.max(*right);
             }
@@ -2336,6 +2343,62 @@ mod hit_regressions {
             );
         }
     }
+    /// A selection over lines set further apart than their glyphs (a line
+    /// height) is one band, not stripes with the line spacing between.
+    #[test]
+    fn selected_lines_touch_across_the_line_height() {
+        let engine = CoreTextEngine::default();
+        let mut text = AttributedText::default();
+        let text_style = ResolvedTextStyle {
+            font_size: Points(16.0),
+            line_height: Points(32.0),
+            ..Default::default()
+        };
+        text.push("one two three four five six seven eight nine ten", text_style);
+        let prepared = engine.prepare(&text);
+        let size = engine.measure(&prepared, Some(Points(80.0)));
+        let layout = engine.layout(&prepared, size);
+        assert!(engine.lines(&layout).len() >= 3);
+        let mut rects = Vec::new();
+        engine.range_rects(&layout, 0..48, &mut rects);
+        assert!(rects.len() >= 3, "{rects:?}");
+        for pair in rects.windows(2) {
+            let bottom = pair[0].origin.y + pair[0].size.height;
+            assert!(
+                (bottom.0 - pair[1].origin.y.0).abs() < 0.01,
+                "a gap between lines: {pair:?}"
+            );
+        }
+        assert!(rects[0].origin.y.0 <= 0.01, "{rects:?}");
+        let last = rects.last().unwrap();
+        assert!(
+            (last.origin.y + last.size.height).0 >= size.height.0 - 0.01,
+            "{rects:?} {size:?}"
+        );
+    }
+
+    /// A range of left-to-right text on one line is one rectangle, even
+    /// where runs of other fonts leave room between them (Chinese next to
+    /// Latin punctuation).
+    #[test]
+    fn a_left_to_right_range_is_one_rectangle_per_line() {
+        let engine = CoreTextEngine::default();
+        let mut text = AttributedText::default();
+        let style = ResolvedTextStyle {
+            font_size: Points(17.0),
+            font_family: Some(nsh_core::FontFamily::new("Seravek")),
+            line_height: Points(17.0 * 1.7),
+            ..Default::default()
+        };
+        text.push("\u{8bbe}\u{8ba1}\u{ff09}\u{ff0c}\u{6539}\u{540d}/\u{88c1}\u{526a}\u{5fc5}\u{987b}", style);
+        let prepared = engine.prepare(&text);
+        let size = engine.measure(&prepared, None);
+        let layout = engine.layout(&prepared, size);
+        let mut rects = Vec::new();
+        engine.range_rects(&layout, 0..11, &mut rects);
+        assert_eq!(rects.len(), 1, "{rects:?}");
+    }
+
     #[test]
     fn head_ellipsis_does_not_highlight_omitted_characters() {
         let (engine, layout) = layout("abcdefghijklmnopqrstuvwxyz", Some(EllipsizeMode::Head));

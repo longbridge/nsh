@@ -1437,7 +1437,7 @@ pub(crate) const EXPORTS: &[Item] = &[
         Export::Function(canvas, 1),
         Ts::function(
             "A view drawn with a 2D context (HTML Canvas 2D API). `draw` records the\ndrawing in one go; the platform replays it natively (CGContext, Android\nCanvas), at the screen's resolution.",
-            &["(props: CanvasProps): YNode"],
+            &["(props: CanvasProps): JSX.Element"],
         ),
     ),
     (

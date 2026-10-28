@@ -15,26 +15,30 @@ use nsh_core::{
     SvgPaint,
     element::{
         Arg, CanvasArg, JsHost, JsIn, JsKind, JsOwned, JsValue, PropError, RowAccessor, RowRef,
-        Rows, Style, Timing, TsTypes,
+        RowText, Rows, Style, Timing, TsTypes,
     },
     geometry::{DefiniteLength, Percentage, REM_SIZE, Radians},
     prelude::*,
 };
 
-use super::{PlotContext, STROKE_ROOM, mark_canvas, series::values};
+use super::{
+    PlotContext, STROKE_ROOM, mark_canvas,
+    series::{self, values},
+};
 
 /// Below this, a radius or an angle is none (`gpui-base`'s `EPSILON`,
 /// `shape/arc.rs:9`, at `f32`'s precision).
 const EPSILON: f32 = 1e-6;
 
-/// The classes of a [`Pie`]'s slices, the `slice` part (TS `string | ((d:
-/// T, index: number) => string)`): the same on every slice, or the app's
-/// function of a slice's row and its index, as `gpui-component`'s
-/// `PieChart::color` takes a function of the datum
-/// (`chart/pie_chart.rs:206`), called once per row when the rows or the
-/// function change, in the next JS turn, never while the pie draws or
-/// follows the pointer (so the function is pure: the same row, the same
-/// classes).
+/// The classes of a [`Pie`]'s slices, the `slice` part, or of its labels'
+/// leader lines, the `labelLine` part (TS `string | ((d: T, index:
+/// number) => string)`): the same on every slice, or the app's function
+/// of a slice's row and its index, as `gpui-component`'s
+/// `PieChart::color` and `label_line_color` take a function of the datum
+/// (`chart/pie_chart.rs:206`, `:224`), called once per row when the rows
+/// or the function change, in the next JS turn, never while the pie draws
+/// or follows the pointer (so the function is pure: the same row, the
+/// same classes).
 #[derive(Clone)]
 pub enum SliceClass {
     /// The same classes on every slice.
@@ -606,53 +610,70 @@ impl From<&Var> for CanvasArg {
     }
 }
 
-/// The outlines of a slice over its motion (one at rest): each number of
-/// its drawing is a constant, or the animator's piecewise-linear map of
-/// the motion's progress through the numbers of the sampled outlines, so
-/// angles, radii and corners move together and no JS runs per frame.
-struct Outlines {
+/// What a radial mark draws over its motion (one at rest), `T` of each
+/// sampled shape: each number of its drawing is a constant, or the
+/// animator's piecewise-linear map of the motion's progress through the
+/// numbers of the samples, so angles, radii and corners (and a label with
+/// its slice) move together and no JS runs per frame.
+struct Samples<T> {
     progress: Option<AnimatedNode>,
     ts: Vec<f32>,
-    all: Vec<Outline>,
+    all: Vec<T>,
 }
 
-impl Outlines {
-    /// The outline of `to`, or of its moves under `motion`, sampled
-    /// densely near the start where a sweep opens a slice from nothing
-    /// (`None`: nothing to draw at rest).
-    fn new(to: Shape, pad: f32, corner: f32, motion: Option<Motion>) -> Option<Self> {
-        Some(match motion {
-            None => Outlines {
+/// The outlines of a slice over its motion.
+type Outlines = Samples<Outline>;
+
+impl<T> Samples<T> {
+    /// `f` of `to`, or of its moves under `motion`, sampled densely near
+    /// the start where a sweep opens a slice from nothing.
+    fn of(to: Shape, motion: Option<Motion>, f: impl Fn(Shape) -> T) -> Self {
+        match motion {
+            None => Samples {
                 progress: None,
                 ts: vec![1.0],
-                all: vec![Outline::new(to, pad, corner)?],
+                all: vec![f(to)],
             },
             Some(Motion { progress, from }) => {
                 let (ts, all) = (0..=MOTION_SAMPLES)
                     .map(|i| {
                         let t = (i as f32 / MOTION_SAMPLES as f32).powi(2);
-                        let shape = from.lerp(&to, t);
-                        let outline = Outline::new(shape, pad, corner)
-                            .unwrap_or_else(|| Outline::point(shape));
-                        (t, outline)
+                        (t, f(from.lerp(&to, t)))
                     })
                     .unzip();
-                Outlines {
+                Samples {
                     progress: Some(progress),
                     ts,
                     all,
                 }
             }
-        })
+        }
     }
 
-    /// `f` of the outlines: a constant where it does not move.
-    fn num(&self, f: impl Fn(&Outline) -> f32) -> Var {
+    /// `f` of the samples: a constant where it does not move.
+    fn num(&self, f: impl Fn(&T) -> f32) -> Var {
         let out: Vec<f32> = self.all.iter().map(f).collect();
         match self.progress {
             Some(t) if out.iter().any(|v| *v != out[0]) => Var::Node(t.interpolate(&self.ts, &out)),
             _ => Var::Const(out[0]),
         }
+    }
+}
+
+impl Outlines {
+    /// The outline of `to`, or of its moves under `motion` (`None`:
+    /// nothing to draw at rest).
+    fn new(to: Shape, pad: f32, corner: f32, motion: Option<Motion>) -> Option<Self> {
+        let outline = |shape| Outline::new(shape, pad, corner);
+        Some(match motion {
+            None => {
+                let at = outline(to)?;
+                Samples::of(to, None, |_| at)
+            }
+            Some(_) => Samples::of(to, motion, |shape| {
+                outline(shape).unwrap_or_else(|| Outline::point(shape))
+            }),
+        })
     }
 
     /// An arc's start and its end `len` past it (`len` never below 0, so
@@ -961,11 +982,12 @@ impl Edges {
     }
 }
 
-/// Fills `sector` with the view's `fill` (`currentColor` where none is
-/// set) and strokes it with its `stroke` (none where none is set): a
-/// slice's edge in the surface's color draws the gaps between slices.
-fn paint(p: Painter, sector: impl FnOnce(Painter) -> Option<Painter>) -> Painter {
-    let p = p.fill_style_from_view(SvgPaint::CurrentColor);
+/// Fills `sector` with the view's `fill` (`fill` where none is set:
+/// `currentColor`, or a slice's category's color) and strokes it with its
+/// `stroke` (none where none is set): a slice's edge in the surface's
+/// color draws the gaps between slices.
+fn paint(p: Painter, fill: SvgPaint, sector: impl FnOnce(Painter) -> Option<Painter>) -> Painter {
+    let p = p.fill_style_from_view(fill);
     let p = p
         .stroke_style_from_view(SvgPaint::None)
         .line_width_from_view()
@@ -973,6 +995,33 @@ fn paint(p: Painter, sector: impl FnOnce(Painter) -> Option<Painter>) -> Painter
     match sector(p.clone()) {
         Some(p) => p.fill().stroke(),
         None => p,
+    }
+}
+
+/// The inline style of a [`Pie`]'s labels: a [`Style`] whose TypeScript
+/// type takes text styles too (`StyleProp<TextStyle>`), since a label is a
+/// text.
+#[derive(Debug, Clone, Default, PartialEq)]
+#[non_exhaustive]
+pub struct PieLabelStyle(pub Style);
+
+impl From<Style> for PieLabelStyle {
+    fn from(style: Style) -> Self {
+        Self(style)
+    }
+}
+
+impl JsValue for PieLabelStyle {
+    fn ts_type(_types: &mut TsTypes) -> String {
+        "StyleProp<TextStyle>".into()
+    }
+
+    fn from_js(value: JsIn<'_>) -> Result<Self, PropError> {
+        <Style as JsValue>::from_js(value).map(Self)
+    }
+
+    fn to_js<'a>(&self, host: &'a dyn JsHost) -> Result<JsOwned<'a>, PropError> {
+        self.0.to_js(host)
     }
 }
 
@@ -1037,6 +1086,44 @@ pub struct PieProps {
     /// `chart/pie_chart.rs:30`), with the hover's fade; 0 by default.
     #[prop(default)]
     pub hover_dim: Prop<Percentage>,
+    /// The category of each slice, which the plot's `colorScale` gives a
+    /// color (d3's `scaleOrdinal` of a field): a field name (its text, a
+    /// number as JS writes it) or a function of the row and its index.
+    /// That color is the slice's `fill` where nothing sets one, in place
+    /// of `currentColor`, so `sliceClass`'s `fill-*`, `sliceStyle`'s `fill`
+    /// and the pie's own win.
+    pub color: Prop<Option<RowText>>,
+    /// The text beside each slice, the `label` part (`gpui-component`'s
+    /// `PieChart::label`): a field name (its number) or a function of the
+    /// row and its index returning the text, outside the ring toward the
+    /// slice's middle (`gpui-base`'s `Arc::centroid` at the label's
+    /// radius), `labelGap` past the rim, then across to that radius on
+    /// the slice's side of the pie: the text starts there on the right
+    /// half and ends there on the left. A row whose text is empty, or a
+    /// slice narrower than half a degree, has no label.
+    pub label: Prop<Option<RowText>>,
+    /// The Tailwind classes of its labels: a text centered vertically on
+    /// the end of its leader line, its size, color and padding (its
+    /// distance from the line's end) the app's.
+    pub label_class: Prop<Option<SharedString>>,
+    /// The style of its labels, over `labelClass` (text styles too).
+    #[prop(default)]
+    pub label_style: Prop<PieLabelStyle>,
+    /// How far past the rim its labels sit, in points (`gpui-component`'s
+    /// `PieChart::label_gap`): 15 by default, as there.
+    #[prop(default = Points(15.0))]
+    pub label_gap: Prop<Points>,
+    /// The Tailwind classes of each label's leader line, the `labelLine`
+    /// part (`gpui-component`'s `PieChart::label_line_color`): from the
+    /// slice's rim out to the label's radius, then across to the text.
+    /// The same on every line, or a function of the slice's row and its
+    /// index that gives each its own: its `stroke-*` (`currentColor` where
+    /// none is set) and stroke width. Drawn only with a class or a style.
+    pub label_line_class: Prop<Option<SliceClass>>,
+    /// The style of the leader lines, over `labelLineClass` (`stroke`,
+    /// `strokeWidth`, `strokeDasharray`).
+    #[prop(default)]
+    pub label_line_style: Prop<Style>,
 }
 
 /// A pie of a [`Plot`](super::Plot)'s rows (`gpui-base`'s `Pie`, its
@@ -1047,15 +1134,18 @@ pub struct PieProps {
 /// apart. Each slice is a canvas of its own, the `slice` part, so each
 /// paints with its own classes (`sliceClass`, a function of its row) over
 /// the pie's, as CSS inherits `fill` and `stroke`: `fill` (`currentColor`
-/// where none is set) and `stroke` (none). Over a pie, the plot reports
+/// where none is set; with `color`, its category's color of the plot's
+/// `colorScale`) and `stroke` (none). Over a pie, the plot reports
 /// the row of the slice under the pointer, none in the hole or outside,
 /// and its tooltip follows the pointer; that slice grows by `hoverLift`
 /// and the others fade by `hoverDim`, on the platform's animator with the
 /// plot's motion. The ring sweeps in from its first slice with the plot's
 /// appear, and when the values or the radii change each slice moves from
 /// its old angles to its new ones with the plot's `motion.update` (d3's
-/// `arcTween`); `cornerRadius` rounds each slice's corners. Its values
-/// take no part in the plot's scales.
+/// `arcTween`); `cornerRadius` rounds each slice's corners. With a
+/// `label`, each slice has a text outside the ring and, styled, a leader
+/// line to it (`gpui-component`'s pie labels); they follow their slices'
+/// motion and lift. Its values take no part in the plot's scales.
 #[component]
 pub fn Pie(props: PieProps, _cx: Scope<NoEvent>) -> impl IntoElement {
     let plot = PlotContext::of("Pie");
@@ -1063,7 +1153,7 @@ pub fn Pie(props: PieProps, _cx: Scope<NoEvent>) -> impl IntoElement {
     let (inner, outer, corner) = (props.inner_radius, props.outer_radius, props.corner_radius);
     let (lift, dim) = (props.hover_lift, props.hover_dim);
     let Some(plot) = plot else {
-        return layer_of(None);
+        return super::layer();
     };
     let ys = values(
         move || plot.rows.get(),
@@ -1102,6 +1192,7 @@ pub fn Pie(props: PieProps, _cx: Scope<NoEvent>) -> impl IntoElement {
         },
     );
     let classes = slice_classes(move || plot.rows.get(), move || props.slice_class.get());
+    let colors = series::colors(plot, move || plot.rows.get(), props.color);
     let slice_style = props.slice_style;
     // Whether the hover moves the slices: their lift drawn, their
     // opacity bound to how much the others fade (part of their keys, so
@@ -1112,7 +1203,7 @@ pub fn Pie(props: PieProps, _cx: Scope<NoEvent>) -> impl IntoElement {
         let reach = ring.get().reach(plot.size.get(), lift.get().0.max(0.0));
         STROKE_ROOM + reach.ceil()
     };
-    layer_of(Some(each(
+    let slices_view = each(
         move || {
             let (lifts, dims) = (lifts(), dims());
             slices.with(|all| {
@@ -1125,28 +1216,10 @@ pub fn Pie(props: PieProps, _cx: Scope<NoEvent>) -> impl IntoElement {
         move |key, _| {
             let (row, lifts, dims) = key.get_untracked();
             let dim = f32::from_bits(dims);
-            // How far this slice has lifted, 0 to 1: on the pointer
-            // spring while the plot moves, at once without one or with
-            // reduced motion; it shows as far as the hover has faded in.
-            let lifted = animated_value(0.0);
-            if lifts || dim > 0.0 {
-                let target = stored(0.0_f32);
-                effect(move || {
-                    let to = match plot.hovered.get() == Some(row) {
-                        true => 1.0,
-                        false => 0.0,
-                    };
-                    if target.get() == to {
-                        return;
-                    }
-                    target.replace(to);
-                    let spring = untracked(|| plot.motion.get().and_then(|m| m.pointer));
-                    match spring.filter(|_| !reduce_motion()) {
-                        Some(spring) => drop(lifted.spring(to, spring)),
-                        None => lifted.set(to),
-                    }
-                });
-            }
+            let lifted = match lifts || dim > 0.0 {
+                true => hover_lift(plot, row),
+                false => animated_value(0.0),
+            };
             let view = mark_canvas(Some(plot), bleed, move |p, _| {
                 let (pose, from) = update.shown();
                 let Some(slice) = pose.slice(row) else {
@@ -1158,7 +1231,9 @@ pub fn Pie(props: PieProps, _cx: Scope<NoEvent>) -> impl IntoElement {
                 let to = slice.shape(size);
                 let from = from.map(|(from, t)| (from.slice_from(row, pose.start).shape(size), t));
                 let motion = Motion::of(plot, to, pose.start, from);
-                paint(p, |p| {
+                let color = colors.with(|c| c.as_ref().and_then(|c| c.get(row as usize).copied()));
+                let fill = series::paint_of(color.flatten(), SvgPaint::CurrentColor);
+                paint(p, fill, |p| {
                     sector(
                         p,
                         ring.center,
@@ -1183,16 +1258,289 @@ pub fn Pie(props: PieProps, _cx: Scope<NoEvent>) -> impl IntoElement {
                 false => view,
             }
         },
-    )))
+    );
+    let (label, label_class, label_style) = (props.label, props.label_class, props.label_style);
+    let (gap, line_class, line_style) = (
+        props.label_gap,
+        props.label_line_class,
+        props.label_line_style,
+    );
+    // The label part: a label per slice whose text is not empty.
+    let labels = when(
+        move || label.with(Option::is_some),
+        move || {
+            let texts = series::texts(move || plot.rows.get(), move || label.get());
+            let line_classes = slice_classes(move || plot.rows.get(), move || line_class.get());
+            let text_of = move |row: u32| {
+                texts.with(|t| {
+                    t.as_ref()
+                        .and_then(|t| t.get(row as usize).cloned())
+                        .unwrap_or_default()
+                })
+            };
+            each(
+                move || {
+                    let lifts = lifts();
+                    slices.with(|all| {
+                        all.iter()
+                            .filter(|s| !text_of(s.index).is_empty())
+                            .map(|s| (s.index, lifts))
+                            .collect::<Vec<_>>()
+                    })
+                },
+                |key| *key,
+                move |key, _| {
+                    let (row, lifts) = key.get_untracked();
+                    slice_label(SliceLabel {
+                        plot,
+                        update,
+                        ring,
+                        row,
+                        gap,
+                        lift: lifts.then(|| (hover_lift(plot, row), lift)),
+                        text: move || text_of(row),
+                        class: label_class,
+                        style: label_style,
+                        line_class,
+                        line_classes,
+                        line_style,
+                    })
+                },
+            )
+        },
+    );
+    super::layer().child(slices_view).child(labels)
 }
 
-/// A radial mark's layer: it fills the plot and holds its slices.
-fn layer_of(slices: Option<AnyElement>) -> View {
-    let layer = super::layer();
-    match slices {
-        Some(slices) => layer.child(slices),
-        None => layer,
+/// How far row `row`'s slice has lifted, 0 to 1 (`gpui-component`'s
+/// `PieHover::lift`): on the pointer spring while the plot moves, at once
+/// without one or with reduced motion; it shows as far as the hover has
+/// faded in.
+fn hover_lift(plot: PlotContext, row: u32) -> AnimatedValue {
+    let lifted = animated_value(0.0);
+    let target = stored(0.0_f32);
+    effect(move || {
+        let to = match plot.hovered.get() == Some(row) {
+            true => 1.0,
+            false => 0.0,
+        };
+        if target.get() == to {
+            return;
+        }
+        target.replace(to);
+        let spring = untracked(|| plot.motion.get().and_then(|m| m.pointer));
+        match spring.filter(|_| !reduce_motion()) {
+            Some(spring) => drop(lifted.spring(to, spring)),
+            None => lifted.set(to),
+        }
+    });
+    lifted
+}
+
+/// How far into the appear a pie's labels start fading in
+/// (`gpui-component`'s `LABEL_APPEAR_START`, `chart/pie_chart.rs:33`):
+/// once their slices are mostly drawn.
+const LABEL_APPEAR_START: f32 = 0.7;
+
+/// A slice narrower than this has no label (`gpui-component`'s half a
+/// degree, `chart/pie_chart.rs:384`): too thin to point at.
+const LABEL_MIN_SPAN: f32 = PI / 360.0;
+
+/// Where a slice's label goes (`gpui-component`'s pie labels,
+/// `chart/pie_chart.rs:388-449`): its leader line runs from the rim at
+/// the slice's middle out to the label's radius, `gap` past the rim
+/// (there it passes the slice's centroid at that radius, `gpui-base`'s
+/// `Arc::centroid`), then across to that radius on the label's side,
+/// where the text is anchored.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct LabelPlace {
+    /// The direction of the slice's middle from the center: a lift moves
+    /// the label along it.
+    dir: (f32, f32),
+    rim: (f32, f32),
+    elbow: (f32, f32),
+    end: (f32, f32),
+    /// The right half (1) or the left (-1).
+    side: f32,
+}
+
+impl LabelPlace {
+    /// The label of a slice of `shape` around `center`, `gap` past its
+    /// rim, on `side`.
+    fn new(center: Point<Points>, shape: Shape, gap: f32, side: f32) -> Self {
+        let middle = (shape.lo + shape.hi) / 2.0;
+        let dir = (middle.sin(), -middle.cos());
+        let (cx, cy) = (center.x.0, center.y.0);
+        let at = |r: f32| (cx + r * dir.0, cy + r * dir.1);
+        let r = shape.outer + gap;
+        let elbow = at(r);
+        LabelPlace {
+            dir,
+            rim: at(shape.outer),
+            elbow,
+            end: (cx + side * r, elbow.1),
+            side,
+        }
     }
+
+    /// The side a slice of `shape` is labeled on: the right where its
+    /// middle is right of the center, else the left (`gpui-component`'s
+    /// `centroid.x > 0`).
+    fn side(shape: Shape) -> f32 {
+        match ((shape.lo + shape.hi) / 2.0).sin() > 0.0 {
+            true => 1.0,
+            false => -1.0,
+        }
+    }
+}
+
+impl Samples<LabelPlace> {
+    /// `at` of the label places, moved out by `lift` along the slice's
+    /// middle.
+    fn point(
+        &self,
+        at: impl Fn(&LabelPlace) -> (f32, f32),
+        lift: Option<AnimatedNode>,
+    ) -> (Var, Var) {
+        let (x, y) = (self.num(|l| at(l).0), self.num(|l| at(l).1));
+        match lift {
+            None => (x, y),
+            Some(lift) => {
+                let lift = Var::Node(lift);
+                let (dx, dy) = (self.num(|l| l.dir.0), self.num(|l| l.dir.1));
+                (x.add(&lift.mul(&dx)), y.add(&lift.mul(&dy)))
+            }
+        }
+    }
+}
+
+/// What a slice's label needs.
+struct SliceLabel<F> {
+    plot: PlotContext,
+    update: Update<PiePose>,
+    ring: Memo<Ring>,
+    row: u32,
+    gap: Prop<Points>,
+    /// How far its slice has lifted (0 to 1), and the pie's `hoverLift`.
+    lift: Option<(AnimatedValue, Prop<Points>)>,
+    text: F,
+    class: Prop<Option<SharedString>>,
+    style: Prop<PieLabelStyle>,
+    line_class: Prop<Option<SliceClass>>,
+    /// The leader lines' classes, by row.
+    line_classes: Signal<Option<Shared<[SharedString]>>>,
+    line_style: Prop<Style>,
+}
+
+/// The label of row `row`'s slice, in a layer of its own: its leader line
+/// (the `labelLine` part, drawn only when styled), and a point with no
+/// size where the line ends, the text beside it on the label's side,
+/// centered on it. It follows its slice's appear and `motion.update` and
+/// its lift, fades in over the end of the appear and takes no pointer.
+fn slice_label(label: SliceLabel<impl Fn() -> SharedString + Copy + 'static>) -> View {
+    let SliceLabel {
+        plot,
+        update,
+        ring,
+        row,
+        gap,
+        lift,
+        text: content,
+        class,
+        style,
+        line_class,
+        line_classes,
+        line_style,
+    } = label;
+    // Where it rests, and where it goes over its slice's motion (`None`:
+    // the slice has no label).
+    let places = move || -> Option<(LabelPlace, Samples<LabelPlace>)> {
+        let (pose, from) = update.shown();
+        let slice = pose.slice(row)?;
+        if slice.hi - slice.lo < LABEL_MIN_SPAN {
+            return None;
+        }
+        let size = plot.size.get();
+        let to = slice.shape(size);
+        let from = from.map(|(from, t)| (from.slice_from(row, pose.start).shape(size), t));
+        let motion = Motion::of(plot, to, pose.start, from);
+        let (center, gap, side) = (ring.get().center, gap.get().0, LabelPlace::side(to));
+        let place = |shape| LabelPlace::new(center, shape, gap, side);
+        Some((place(to), Samples::of(to, motion, place)))
+    };
+    let lifted = move || lift.map(|(lifted, by)| lifted.mul(&plot.fade).mul(by.get().0));
+    let has_line =
+        move || line_class.with(Option::is_some) || line_style.with(|s| *s != Style::default());
+    let bleed = move || {
+        let by = lift.map_or(0.0, |(_, by)| by.get().0.max(0.0));
+        let reach = ring.get().reach(plot.size.get(), by + gap.get().0.max(0.0));
+        STROKE_ROOM + reach.ceil()
+    };
+    let line = when(has_line, move || {
+        mark_canvas(Some(plot), bleed, move |p, _| {
+            let Some((_, places)) = places() else {
+                return p;
+            };
+            let lift = lifted();
+            let (x0, y0) = places.point(|l| l.rim, lift);
+            let (x1, y1) = places.point(|l| l.elbow, lift);
+            let (x2, y2) = places.point(|l| l.end, lift);
+            p.stroke_style_from_view(SvgPaint::CurrentColor)
+                .line_width_from_view()
+                .line_dash_from_view()
+                .begin_path()
+                .move_to(&x0, &y0)
+                .line_to(&x1, &y1)
+                .line_to(&x2, &y2)
+                .stroke()
+        })
+        .app_class(move || {
+            line_classes.with(|c| c.as_ref().and_then(|c| c.get(row as usize).cloned()))
+        })
+        .inline_style(line_style)
+    });
+    // Made again for each move: laid out where it rests and moved from
+    // there by the animator.
+    let anchor = dynamic(move || {
+        let (rest, places) = places()?;
+        let (x, y) = places.point(|l| l.end, lifted());
+        let anchor = view()
+            .absolute()
+            .left(px(rest.end.0))
+            .top(px(rest.end.1))
+            .w(px(0.0))
+            .h(px(0.0))
+            .flex_row()
+            .items_center()
+            .pointer_events(PointerEvents::None);
+        let anchor = match rest.side > 0.0 {
+            true => anchor.justify_start(),
+            false => anchor.justify_end(),
+        };
+        let anchor = match x {
+            Var::Node(x) => anchor.bind_translate_x(&x.sub(rest.end.0)),
+            Var::Const(_) => anchor,
+        };
+        let anchor = match y {
+            Var::Node(y) => anchor.bind_translate_y(&y.sub(rest.end.1)),
+            Var::Const(_) => anchor,
+        };
+        Some(
+            anchor.child(
+                text(content)
+                    .flex_none()
+                    .app_class(class)
+                    .inline_style(move || style.get().0),
+            ),
+        )
+    });
+    let fade_in =
+        untracked(|| plot.appear.progress()).interpolate(&[LABEL_APPEAR_START, 1.0], &[0.0, 1.0]);
+    super::layer()
+        .pointer_events(PointerEvents::None)
+        .bind_opacity(&fade_in)
+        .child(line)
+        .child(anchor)
 }
 
 /// The props of [`Arc`].
@@ -1269,7 +1617,7 @@ pub fn Arc(props: ArcProps, _cx: Scope<NoEvent>) -> impl IntoElement {
             let from = from.map(|(from, t)| (from.shape(size), t));
             let motion = Motion::of(plot, to, start.get().0, from);
             let center = ring(plot).center;
-            paint(p, |p| {
+            paint(p, SvgPaint::CurrentColor, |p| {
                 sector(p, center, to, None, 0.0, corner.get().0, motion)
             })
         },

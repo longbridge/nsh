@@ -753,12 +753,12 @@ fn on_the_desktops_the_popup_is_at_the_trigger_as_wide_and_within_the_window() {
     assert_eq!(frame.origin.x, px(40.0));
     assert_eq!(frame.origin.y, px(130.0));
     // As wide as the trigger: filled from Rust, the combobox is the view
-    // the select makes around the app's element, which its column
-    // stretches to the select's 200 (a TSX trigger is the app's element
-    // itself: the engine's `a_base_select_on_a_desktop_…`). Its rows have
-    // no width of their own.
-    assert_eq!(seen.frames[&trigger].size.width, px(200.0));
-    assert_eq!(frame.size.width, px(200.0), "{frame:?}");
+    // the select makes around the app's element, which lays that element
+    // out through and takes its 160 (a TSX trigger is the app's element
+    // itself, as wide: the engine's `a_base_select_on_a_desktop_…`). Its
+    // rows have no width of their own.
+    assert_eq!(seen.frames[&trigger].size.width, px(160.0));
+    assert_eq!(frame.size.width, px(160.0), "{frame:?}");
     // Never past the window: its rows scroll.
     assert!(frame.origin.y + frame.size.height <= px(844.0), "{frame:?}");
 }

@@ -510,6 +510,9 @@ pub(super) struct Components {
     /// Those not handed to the engine yet ([`Core::take_url_opens`]).
     url_requests: Vec<(u32, String)>,
     next_url_open: u32,
+    /// Colors being picked on the screen, by request id: their answers.
+    screen_colors: FxHashMap<u32, AnswerSlot<Option<crate::Hsla>>>,
+    next_screen_color: u32,
     /// HTTP requests of tasks (`ui::fetch`), by request id: what arrived
     /// so far and the answer.
     fetches: FxHashMap<u32, PendingFetch>,
@@ -597,6 +600,8 @@ impl Default for Components {
             url_opens: FxHashMap::default(),
             url_requests: Vec::new(),
             next_url_open: 0,
+            screen_colors: FxHashMap::default(),
+            next_screen_color: 1,
             next_clipboard_read: 1,
             picks: FxHashMap::default(),
             next_pick: 1,
@@ -803,18 +808,9 @@ impl<M: TextEngine> Core<M> {
             self.components.status_bars.set_base(setting);
         }
         let _entered = self.components.runtime.enter();
-        let mut el = root.element().0;
-        let ElKind::Component(c) = std::mem::replace(&mut el.kind, ElKind::Plain) else {
+        let Some(id) = self.make_component(root.element(), |_, _| {}) else {
             return log::error!("the root is not a component");
         };
-        let id = self.components.alloc();
-        let _ = self.apply_op(Op::Create { id, tag: el.tag });
-        self.create_instance_of(id, c.name, c.make, c.spec);
-        if let Some(inst) = self.components.instances.get_mut(&id)
-            && let Inner::Component(inner) = &mut inst.inner
-        {
-            inner.set_props(c.props.as_any());
-        }
         let _ = self.apply_op(Op::Insert {
             parent: ROOT_ID,
             child: id,
@@ -823,7 +819,36 @@ impl<M: TextEngine> Core<M> {
         self.own_direction();
     }
 
-    /// The environment components read ([`crate::element::ambient::window`]
+    /// Makes the host of component element `el` (`None`: `el` is not a
+    /// component), out of the tree; `made` sees its node first, before it
+    /// renders.
+    pub(super) fn make_component(
+        &mut self,
+        el: crate::element::AnyElement,
+        made: impl FnOnce(&mut Self, NodeId),
+    ) -> Option<NodeId> {
+        let mut el = el.0;
+        let ElKind::Component(c) = std::mem::replace(&mut el.kind, ElKind::Plain) else {
+            return None;
+        };
+        let id = self.components.alloc();
+        let _ = self.apply_op(Op::Create { id, tag: el.tag });
+        made(self, id);
+        self.create_instance_of(id, c.name, c.make, c.spec);
+        if let Some(inst) = self.components.instances.get_mut(&id)
+            && let Inner::Component(inner) = &mut inst.inner
+        {
+            inner.set_props(c.props.as_any());
+        }
+        Some(id)
+    }
+
+    /// How the sets make the views' built-in scroll bars.
+    pub(super) fn scrollbar_source(&self) -> Option<crate::element::ScrollbarSource> {
+        self.components.registry.scrollbar_source()
+    }
+
+    /// The environment components read ([`crate::element::window`]
     /// and the like), as the platform reports it: what read a part that
     /// changed runs again. `dark` is the system's: the app's
     /// appearance wins over it ([`Core::set_appearance`]).
@@ -2232,6 +2257,12 @@ impl<M: TextEngine> Core<M> {
         if let Some(given) = &inst.given {
             take(&mut cx, given);
         }
+        // The classes the element was given in Rust (`app_class`), as the
+        // app's `class` on its host.
+        if let Some(class) = inst.given.as_ref().and_then(|g| g.class.clone()) {
+            let given = self.app_class_list(&class);
+            cx.user = self.merge_user(cx.user.take(), Some(given));
+        }
         let mut app = inst.app_style.clone();
         let mut at = inst.above;
         while let Some(id) = at {
@@ -2246,6 +2277,10 @@ impl<M: TextEngine> Core<M> {
                 take(&mut cx, given);
             }
             cx.user = self.merge_user(cx.user.take(), outer);
+            if let Some(class) = given.and_then(|g| g.class.clone()) {
+                let given = self.app_class_list(&class);
+                cx.user = self.merge_user(cx.user.take(), Some(given));
+            }
         }
         if let Some(app) = &app {
             decls.extend(app.decls().iter().cloned());
@@ -2796,7 +2831,10 @@ impl<M: TextEngine> Core<M> {
         cursor: &mut usize,
     ) {
         // A slot a view fills: placed as it is (`Filled`), or in a node of
-        // this view's own when the view styles it.
+        // this view's own when the view gives it anything, which lays its
+        // one node out through while it styles none of its layout (as JS's
+        // holders: `lay_out_through`).
+        let mut wrapper = false;
         if let ElKind::Slot(name) = el.kind
             && inst.fills.iter().any(|f| f.name == name)
         {
@@ -2808,6 +2846,7 @@ impl<M: TextEngine> Core<M> {
                 filled.kind = ElKind::Filled(name);
                 el.children = vec![filled];
                 el.key.get_or_insert_with(|| format!("slot:{name}").into());
+                wrapper = true;
             }
         }
         match std::mem::replace(&mut el.kind, ElKind::Plain) {
@@ -2977,7 +3016,11 @@ impl<M: TextEngine> Core<M> {
                     }
                 };
                 let prev = at.and_then(|j| old[j].take());
-                out.push(self.reconcile_node(prev, el, part, host, inst));
+                let e = self.reconcile_node(prev, el, part, host, inst);
+                if wrapper && let Ok(key) = self.key(e.id) {
+                    self.lay_out_through(key);
+                }
+                out.push(e);
             }
         }
     }
@@ -4198,7 +4241,7 @@ impl<M: TextEngine> Core<M> {
 
     /// Frees what a component made (not its host nor its JS children,
     /// which leave its view).
-    fn release_instance(&mut self, host: NodeId) {
+    pub(super) fn release_instance(&mut self, host: NodeId) {
         self.release_component(host, &[]);
     }
 
@@ -4545,6 +4588,9 @@ impl<M: TextEngine> Core<M> {
             Action::Hint(overlay) => self.hint_due(overlay),
             Action::Frame(answer) => self.wait_frame(answer),
             Action::Appearance(appearance) => self.set_appearance(appearance),
+            Action::BuiltInScrollbars(source, theme) => {
+                self.set_builtin_scrollbars(theme.map(|theme| (source, theme)))
+            }
             Action::Measure(id, answer) => self.components.measures.push((id, answer)),
             Action::ImageInfo(uri, answer) => {
                 let id = self.components.next_image_info;
@@ -4657,6 +4703,19 @@ impl<M: TextEngine> Core<M> {
                 self.components.next_url_open = id.wrapping_add(1);
                 self.components.url_opens.insert(id, answer);
                 self.components.url_requests.push((id, url));
+            }
+            Action::PickScreenColor(answer) => {
+                if !self.components.environment.screen_color {
+                    answer.borrow_mut().deliver(None);
+                    return;
+                }
+                let id = self.components.next_screen_color;
+                self.components.next_screen_color = id.wrapping_add(1);
+                self.components.screen_colors.insert(id, answer);
+                let _ = self.apply_op(Op::Command {
+                    id: crate::ROOT_ID,
+                    command: Command::PickScreenColor { id },
+                });
             }
         }
     }
@@ -4918,6 +4977,16 @@ impl<M: TextEngine> Core<M> {
                     _ => false,
                 };
                 self.answer_open_url(request as u32, opened);
+                true
+            }
+            EventKind::ScreenColor if id == crate::ROOT_ID => {
+                let Some(request) = number("id") else {
+                    return false;
+                };
+                let color = number("color").map(|packed| crate::Color(packed as u32).into());
+                if let Some(answer) = self.components.screen_colors.remove(&(request as u32)) {
+                    answer.borrow_mut().deliver(color);
+                }
                 true
             }
             EventKind::Clipboard if id == crate::ROOT_ID => {

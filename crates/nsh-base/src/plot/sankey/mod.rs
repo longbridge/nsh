@@ -25,9 +25,9 @@ use self::{
 };
 use super::{
     PlotContext, STROKE_ROOM,
-    bar::texts,
     class::{RowClass, row_classes},
     layer, mark_canvas, mark_canvas_with,
+    series::texts,
 };
 
 /// Which column a [`Sankey`]'s node goes in (`gpui-base`'s `SankeyAlign`,

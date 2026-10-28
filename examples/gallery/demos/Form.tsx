@@ -1,4 +1,4 @@
-import { effect, type JSX, Scroll, signal, split, Text, View, type YNode } from "nsh";
+import { effect, type InputRef, type JSX, Scroll, signal, split, Text, View } from "nsh";
 import { Animated, createAnimatedValue, LayoutAnimation } from "nsh";
 import { Dialog, Input, type InputProps, NavPage } from "nsh/base";
 import { Keyboard, keyboardFrame, platform, safeAreaInsets } from "nsh";
@@ -15,7 +15,7 @@ const pointer = platform.idiom === "desktop";
  * and shakes the field. `next` focuses another input on return.
  */
 function Field(
-  props: InputProps & { label: string; api?: string; hint?: string; error?: string; prefix?: string; next?: () => YNode | undefined },
+  props: InputProps & { label: string; api?: string; hint?: string; error?: string; prefix?: string; next?: () => InputRef | undefined },
 ) {
   const [own, input] = split(props, ["label", "api", "hint", "error", "prefix", "next", "onFocus", "onBlur", "style"]);
   const focus = createAnimatedValue(0);
@@ -174,9 +174,9 @@ export function Form() {
   const touched = signal<Record<string, boolean>>({});
   const touch = (key: string) => () => touched.update((t) => ({ ...t, [key]: true }));
   // Inputs in return-key order.
-  const refs: YNode[] = [];
+  const refs: InputRef[] = [];
   const next = (i: number) => () => refs[i + 1];
-  const ref = (i: number) => (node: YNode) => (refs[i] = node);
+  const ref = (i: number) => (node: InputRef) => (refs[i] = node);
 
   const nameError = () => (touched().name && !name().trim() ? "Enter your name" : undefined);
   const emailError = () =>
@@ -546,7 +546,7 @@ function SelectionDemo() {
   const range = signal({ start: 0, end: 0 });
   const keys = signal<string[]>([]);
   const selection = signal<{ start: number; end?: number } | undefined>(undefined);
-  let input: YNode | undefined;
+  let input: InputRef | undefined;
   return (
     <View style={{ gap: 12 }}>
       <Field

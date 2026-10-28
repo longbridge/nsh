@@ -222,7 +222,7 @@ keymap.bind({
 selection is on more strongly, and `onSearchChange` reports `{ result }`, a `{ count, current, error }`: how many matches, which one
 the selection is on (from 0), and why a regular expression is not valid. `findNext` and `findPrevious` select the next
 and previous match, wrapping around; `replace(text)` replaces the current match and selects the next one, and
-`replaceAll(text)` replaces every match as one edit and returns how many. A regular expression's replacement refers to
+`replaceAll(text)` replaces every match as one edit and returns `{ count }`, how many. A regular expression's replacement refers to
 its groups as `$1` and `${name}`.
 
 `inSelection` finds only inside what was selected when it turned on (the carets' lines when nothing was): the scope
@@ -252,7 +252,7 @@ function Find(props: { source: string; onChange: (value: string) => void }) {
         <Button onPress={() => editor.run("findNext")} class="px-2"><Text>↓</Text></Button>
         <Input value={replacement()} onChange={({ value }) => replacement.set(value)} placeholder="Replace" class="flex-1" />
         <Button onPress={() => editor.replace(replacement())} class="px-2"><Text>Replace</Text></Button>
-        <Button onPress={async () => console.log("replaced", await editor.replaceAll(replacement()))} class="px-2"><Text>All</Text></Button>
+        <Button onPress={async () => console.log("replaced", (await editor.replaceAll(replacement())).count)} class="px-2"><Text>All</Text></Button>
       </View>
       <Editor
         ref={editor}
@@ -577,7 +577,7 @@ them: `const text = await editor.value()`.
 | `setSelections(selections)` | Sets the selections (the last one primary) and scrolls the primary one into view. |
 | `run(command)` | Runs a command, as its keys would ([Commands](#commands)). |
 | `replace(text)` | Replaces the current match and selects the next. |
-| `replaceAll(text)` | `Promise<number>`: replaces every match as one edit; how many. |
+| `replaceAll(text)` | `Promise<EditorReplaceAll>`: replaces every match as one edit; `{ count }`, how many. |
 | `fold(line)`, `unfold(line)` | Folds the lines under line `line` (from 0), or unfolds it. |
 | `foldRecursive(line)`, `unfoldRecursive(line)` | Folds the fold on line `line` and every fold inside it, or unfolds them all. |
 | `foldLevel(level)` | Folds every fold at nesting level `level` (1: the outermost). |
