@@ -29,6 +29,8 @@
 // along a plot's edges.
 // A sparkline's y domain, the extent of its rows, moves to a new one with
 // `motion.update` as rows come.
+// Bars take their colors from their rows' regions through the plot's
+// `colorScale` (`color` on the mark, an ordinal scale on the plot).
 import { Text, View, signal } from "nsh";
 import { Arc, Area, Bar, Grid, Line, Pie, Plot, PlotAxis } from "nsh/base/plot";
 
@@ -138,6 +140,7 @@ function App() {
       </Plot>
       <PieCase />
       <AxisCase />
+      <ColorCase />
     </View>
   );
 }
@@ -199,6 +202,28 @@ function AxisCase() {
       <PlotAxis ticks={2} format={(v, i) => `m${v}i${i}`} labelClass="h-[10px]" labelStyle={{ width: 20 }} tickClass="h-[4px] w-px" lineStyle={{ height: 1 }} />
       <PlotAxis placement="left" tickValues={[0, 50, 100]} labelStyle={{ width: 20, height: 10 }} tickStyle={{ width: 4, height: 1 }} lineClass="w-px" />
       <PlotAxis placement="right" labelPlacement="inside" tickValues={[50]} format={(v) => `in${v}`} labelStyle={{ width: 30, height: 10 }} />
+    </Plot>
+  );
+}
+
+type Region = { region: string; v: number };
+
+/** Bars colored by region through the plot's ordinal `colorScale`: EU
+ * and US in the domain, APAC past it. */
+function ColorCase() {
+  return (
+    <Plot
+      data={[
+        { region: "EU", v: 10 },
+        { region: "US", v: 20 },
+        { region: "APAC", v: 30 },
+      ]}
+      y="v"
+      xScale={{ type: "band" }}
+      colorScale={{ type: "ordinal", domain: ["US", "EU"], range: ["#ff0000", "#00ff00"] }}
+      style={{ width: 150, height: 50 }}
+    >
+      <Bar color="region" label={(d: Region) => `r${d.v}`} labelStyle={{ width: 20, height: 10 }} />
     </Plot>
   );
 }

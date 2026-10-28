@@ -1670,6 +1670,15 @@ covers [props] PlotAxis.tickClass
 covers [props] PlotAxis.tickStyle
 covers [props] PlotAxis.lineClass
 covers [props] PlotAxis.lineStyle
+# Bars colored by their rows' regions through the plot's ordinal
+# `colorScale` (their canvas, the sibling below the first bar's label):
+# EU takes the domain's second color, US its first, and APAC, past the
+# domain, the next one, the range repeating from its first.
+expect r10
+drawing below:parent:text:r10 fillStyle #00ff00ff
+drawing below:parent:text:r10 fillStyle #ff0000ff
+covers [props] Plot.colorScale
+covers [props] Bar.color
 
 # The app's design tokens: shadcn's `neutral` with the app's theme over it.
 tap id:case-base-token

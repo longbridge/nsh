@@ -5959,6 +5959,148 @@ fn base_plot_bars_grow_and_fade_natively() {
     assert_eq!(bar_rects(&drawings[0].1.ops).len(), 3);
 }
 
+const BASE_PLOT_COLOR_SCALE: &str = r##"import { mount, View } from "nsh";
+import { Area, Bar, Line, Pie, Plot } from "nsh/base/plot";
+
+type Row = { region: string; v: number };
+
+const rows: Row[] = [
+  { region: "EU", v: 1 },
+  { region: "US", v: 2 },
+  { region: "APAC", v: 3 },
+  { region: "EU", v: 4 },
+  { region: "LATAM", v: 5 },
+];
+
+function App() {
+  return (
+    <View>
+      {/* The domain's order, the categories past it in the order met, the
+          range repeating; the last slice's class over its color. */}
+      <Plot data={rows} colorScale={{ type: "ordinal", domain: ["US", "EU"], range: ["#ff0000", "#00ff00", "#0000ff"] }} style={{ width: 200, height: 100 }}>
+        <Pie value="v" color="region" sliceClass={(_, i) => (i === 4 ? "fill-[#999999]" : "")} />
+      </Plot>
+      {/* Bars by the app's function of a row; a style over the scale. */}
+      <Plot data={rows} y="v" xScale={{ type: "band" }} colorScale={{ type: "ordinal", domain: ["low", "high"], range: ["#ff0000", "#00ff00"] }} style={{ width: 200, height: 100 }}>
+        <Bar color={(d: Row) => (d.v > 2 ? "high" : "low")} />
+        <Bar color="region" style={{ fill: "#999999" }} />
+      </Plot>
+      {/* A series' first row: rows of its own outside the domain take
+          `unknown`; without a color, `currentColor` (the plot's text). */}
+      <Plot data={rows} y="v" class="text-[#333333]" colorScale={{ type: "ordinal", domain: ["EU"], range: ["#00ff00"], unknown: "#0000ff" }} style={{ width: 200, height: 100 }}>
+        <Line data={[{ region: "US", v: 1 }, { region: "US", v: 2 }]} color="region" />
+        <Line color="region" />
+        <Line />
+        <Area color="region" />
+      </Plot>
+    </View>
+  );
+}
+
+mount(App);
+"##;
+
+/// A plot's `colorScale` (`gpui-base`'s `ScaleOrdinal`, d3's
+/// `scaleOrdinal`) colors its marks by the category their `color` reads
+/// of each row (a field, or the app's function a turn later): a pie's
+/// slices and the bars by their rows, a line and an area by their first
+/// row. The domain's categories take the range in order, the others the
+/// next colors as they are met (d3's implicit domain) or `unknown`; the
+/// range repeats. The color is the paint where nothing sets one: the
+/// app's classes and styles win.
+#[test]
+fn base_plot_colors_marks_through_an_ordinal_scale() {
+    use nsh_core::{
+        Color,
+        canvas::{CanvasOp, Paint},
+    };
+    let (red, green, blue, gray) = (
+        Color(0xff00_00ff),
+        Color(0x00ff_00ff),
+        Color(0x0000_ffff),
+        Color(0x9999_99ff),
+    );
+    let (_engine, rx) = start(BASE_PLOT_COLOR_SCALE);
+    // The bars' function answers a turn after the rows.
+    let mut all = until_drawn(&rx, |d| {
+        !bar_rects(&d.ops).is_empty()
+            && d.ops
+                .contains(&CanvasOp::FillStyle(Paint::Color(Color(0x00ff_00ff))))
+    });
+    all.extend(until(&rx, |_| false));
+    let drawings = plot_drawings(&all);
+    let fills = |d: &nsh_core::canvas::Drawing| -> Vec<Color> {
+        d.ops
+            .iter()
+            .filter_map(|op| match op {
+                CanvasOp::FillStyle(Paint::Color(c)) => Some(*c),
+                _ => None,
+            })
+            .collect()
+    };
+    let stroke = |d: &nsh_core::canvas::Drawing| {
+        d.ops.iter().find_map(|op| match op {
+            CanvasOp::StrokeStyle(Paint::Color(c)) => Some(*c),
+            _ => None,
+        })
+    };
+
+    // The slices, in the rows' order: EU (the domain's second), US (its
+    // first), APAC and LATAM met after it (the third color, then the
+    // first again), the last one's class over its color.
+    let slices: Vec<_> = drawings
+        .iter()
+        .filter(|(_, d)| !drawn_arcs(&d.ops).is_empty())
+        .map(|(_, d)| fills(d))
+        .collect();
+    assert_eq!(
+        slices,
+        [
+            vec![green],
+            vec![red],
+            vec![blue],
+            vec![green],
+            vec![gray]
+        ]
+    );
+
+    // Each bar its row's color; the style's fill over every one.
+    let bars: Vec<_> = drawings
+        .iter()
+        .filter(|(_, d)| !bar_rects(&d.ops).is_empty())
+        .collect();
+    let [(_, by_value), (_, styled)] = &bars[..] else {
+        panic!("two bars: {bars:?}")
+    };
+    assert_eq!(fills(by_value), [red, red, green, green, green]);
+    assert_eq!(fills(styled), [gray; 5]);
+
+    // A line of its own rows (US: unknown), one of the plot's (EU first),
+    // one without a color; the area of the plot's rows.
+    let lines: Vec<_> = drawings
+        .iter()
+        .filter(|(_, d)| {
+            d.ops.iter().any(|op| matches!(op, CanvasOp::Stroke(_)))
+                && !d.ops.iter().any(|op| matches!(op, CanvasOp::Fill(..)))
+        })
+        .filter_map(|(_, d)| stroke(d))
+        .collect();
+    let [own, plots, plain] = lines[..] else {
+        panic!("three lines: {lines:?}")
+    };
+    assert_eq!((own, plots), (blue, green));
+    assert_eq!(plain, Color(0x3333_33ff));
+    let area = drawings
+        .iter()
+        .find(|(_, d)| {
+            drawn_arcs(&d.ops).is_empty()
+                && bar_rects(&d.ops).is_empty()
+                && d.ops.iter().any(|op| matches!(op, CanvasOp::Fill(..)))
+        })
+        .map(|(_, d)| fills(d));
+    assert_eq!(area, Some(vec![green]));
+}
+
 const BASE_PLOT_AXIS: &str = r##"import { mount, signal, View } from "nsh";
 import { Bar, Line, Plot, PlotAxis } from "nsh/base/plot";
 

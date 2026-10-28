@@ -92,6 +92,7 @@ mount(App);
 | `tooltipContent` | `.tooltip_content(..)` | `JSX.Element` | 无 | 应用的提示框，按 `tooltipPlacement` 放置，随十字线移动和淡入淡出。 |
 | `tooltipPlacement` | `.tooltip_placement(..)` | `"top" \| "pointer"` | `"top"` | 提示框的位置：在 plot 顶部、以十字线为中心；或在指针旁边，位于十字线朝 plot 中间的一侧，指针在上半部时在它下方，在下半部时在它上方。在顶部时，提示框留在 plot 的左右边缘之间（与顶边的距离由应用决定：放在 plot 下方的标签取 plot 的高度再多一些）；在指针旁边时，提示框留在 plot 内。用键盘时，提示框在该行第一个折线或区域的点旁边（柱状图在柱带中间，饼图在扇区中间）。 |
 | `tooltipOffset` | `.tooltip_offset(..)` | `number` | `0` | 提示框与定位依据之间的距离：`"top"` 时是顶边，`"pointer"` 时是十字线和指针。 |
+| `colorScale` | `.color_scale(..)` | `OrdinalScale` | 无 | 图形的 `color` 读出的类别所对应的颜色，同 d3 的 `scaleOrdinal`：`{ type: "ordinal", domain?, range, unknown? }`（见[按类别着色](#colors-by-category)）。 |
 | `children` | `.child(..)` | `JSX.Element` | 无 | 图形，按顺序叠加绘制，以及应用放在它们上面的内容。 |
 | `class`、`style` | 样式方法 | `string`、`StyleProp<ViewStyle>` | 无 | plot 的尺寸和外观；图形会像 CSS 那样继承它的绘制属性。`focus:` / `focus-visible:` 类和 `focusStyle` 绘制它的焦点环。 |
 
@@ -117,6 +118,7 @@ mount(App);
 | `Area` | `y0` | `number \| string \| (d, index) => number` | 底边 | 它的底边：数字是 y 比例尺上的一条基线；字段名或函数为每一行给出自己的底值，area 由此成为一条带（一天的最低价到最高价、预测的区间）。任一边没有值的行会跳过。 |
 | `Grid` | `x` | `number[]` | 无 | 竖线的位置，取 x 比例尺上的值（`point` 比例尺上是行的序号）。 |
 | `Grid` | `y` | `number[]` | 无 | 横线的位置，取 y 比例尺上的值。 |
+| `Line`、`Area` | `color` | `string \| (d, index) => string` | 无 | 它的数据行的类别，颜色来自 plot 的 `colorScale`：第一个有类别的行决定 line 的 `stroke`（area 的 `fill`），在没有任何设置时使用（见[按类别着色](#colors-by-category)）。 |
 
 每个图形都铺满 plot，使用自己的 [SVG 绘制属性](../modules/style-reference.md#svg-绘制) 绘制；像 CSS 的继承一样，自己设置的值优先于 plot 上的值：
 
@@ -179,9 +181,10 @@ const sales = [
 | `cornerRadii` | `number \| { topLeft?, topRight?, bottomRight?, bottomLeft? }` | `0` | 柱子每个角的半径；`{ topLeft: 4, topRight: 4 }` 让竖立的柱子顶端变圆。超过柱子一半的半径会缩小以适应柱子。 |
 | `stagger` | `number` | `0` | plot 出现时，柱子按行依次开始生长，开始时间分布在出现动效的这一比例内（0 到 0.95），每根柱子用剩下的时间长完；为 0 时一起生长。 |
 | `inactiveOpacity` | `number` | 无 | 指针在 plot 上时，指针下那一行以外的柱子的不透明度，让那一行突出：随悬停淡入淡出，并随悬停的滑动从一根柱子交给下一根。 |
-| `label` | `string \| (d, index) => string` | 无 | 每根柱子数值末端的文字：字段（它的数字），或返回应用格式化后文字的函数。 |
+| `label` | `string \| (d, index) => string` | 无 | 每根柱子数值末端的文字：字段（它的文字或数字），或返回应用格式化后文字的函数。 |
 | `labelClass`、`labelStyle` | `string`、`StyleProp<TextStyle>` | 无 | `label` 部件：以柱子为中心的文字，位于竖立柱子末端的上方（向下生长时在下方），横放柱子末端之后（向回生长时在之前）。它的内边距就是与柱子的距离。 |
 | `backgroundClass`、`backgroundStyle` | `string`、`StyleProp<ViewStyle>` | 无 | 它的背景：每根柱子的盒子，盒子的背景（`bg-linear-to-t from-… to-…`，从柱子底部到顶部）只在柱子内显示，位于 `fill` 之下。设置背景后，`fill` 没有设置时为 `none`。 |
+| `color` | `string \| (d, index) => string` | 无 | 每根柱子的类别，颜色来自 plot 的 `colorScale`：在没有任何设置时作为柱子的 `fill`（见[按类别着色](#colors-by-category)）。 |
 
 band 比例尺像 d3 的 `scaleBand` 一样，按顺序为 plot 的每一行布置一个条带：
 
@@ -193,7 +196,7 @@ band 比例尺像 d3 的 `scaleBand` 一样，按顺序为 plot 的每一行布�
 | `bandCount` | 行数 | 条带多于行数时布置的条带数：各行占据前面的条带，数据行增加时保持宽度和位置。 |
 | `groupPadding` | `0` | 同一条带里并排的柱子之间的间隙，占每根柱子位置的比例。 |
 
-柱子使用自己的 `fill` 着色（`fill-*`；像 CSS 那样从 plot 继承），没有设置时为 `currentColor`，没有悬停圆点。在 band 比例尺上，悬停会找到指针下的条带，plot 的十字线位于这个条带里、与条带等宽：`crossLineClass="w-full h-full bg-foreground/5"` 给条带上色，`w-px` 则在条带中间保留一条线。plot 没有设置定义域时，柱子的数值和 `base` 构成数值比例尺的定义域。plot 出现时，每根柱子从它所在堆叠的 `base` 长出；动效、变淡和滑动都在平台的动画器上运行，指针从不让柱子重绘。
+柱子使用自己的 `fill` 着色（`fill-*`；像 CSS 那样从 plot 继承），没有设置时为 `currentColor`（设置 `color` 时为它的类别的颜色），没有悬停圆点。在 band 比例尺上，悬停会找到指针下的条带，plot 的十字线位于这个条带里、与条带等宽：`crossLineClass="w-full h-full bg-foreground/5"` 给条带上色，`w-px` 则在条带中间保留一条线。plot 没有设置定义域时，柱子的数值和 `base` 构成数值比例尺的定义域。plot 出现时，每根柱子从它所在堆叠的 `base` 长出；动效、变淡和滑动都在平台的动画器上运行，指针从不让柱子重绘。
 
 <a id="pie-and-arc"></a>
 
@@ -290,10 +293,41 @@ fn seats(seats: Vec<f64>) -> impl IntoElement {
 | `Pie` | `sliceStyle` | `.slice_style(..)` | `StyleProp<ViewStyle>` | 无 | 所有扇区的样式，优先于它们的类（`fill`、`stroke`、`strokeWidth`）。 |
 | `Pie` | `hoverLift` | `.hover_lift(..)` | `number` | `0` | 指针下的扇区比其他扇区大出的距离，单位为点：按 plot 的 `pointer` 弹簧变化，随悬停淡入淡出。 |
 | `Pie` | `hoverDim` | `.hover_dim(..)` | `number`（0 到 1） | `0` | 有扇区位于指针下时，其他扇区变淡的程度，即不透明度降低的比例，随悬停淡入淡出。 |
+| `Pie` | `color` | `.color(..)` | `keyof T \| (d: T, index: number) => string` | 无 | 每个扇区的类别，颜色来自 plot 的 `colorScale`：在没有任何设置时作为扇区的 `fill`（见[按类别着色](#colors-by-category)）。 |
 
-扇区和 arc 用 `fill` 填充（没有设置时为 `currentColor`），用 `stroke` 描边（没有设置时不描边）；像 CSS 的继承一样，自己设置的值优先于饼图和 plot 上的值：使用界面背景色的描边（`stroke-card stroke-2`）同样可以在扇区之间切出间隙。它们的数值不计入 plot 的比例尺。饼图的扇区只在数据行、数值、角度、半径或 plot 的尺寸变化时重绘；指针只通过动画器推动抬起和变淡。
+扇区和 arc 用 `fill` 填充（没有设置时为 `currentColor`，设置 `color` 的扇区为它的类别的颜色），用 `stroke` 描边（没有设置时不描边）；像 CSS 的继承一样，自己设置的值优先于饼图和 plot 上的值：使用界面背景色的描边（`stroke-card stroke-2`）同样可以在扇区之间切出间隙。它们的数值不计入 plot 的比例尺。饼图的扇区只在数据行、数值、角度、半径或 plot 的尺寸变化时重绘；指针只通过动画器推动抬起和变淡。
 
 饼图的数据行在坐标轴上没有位置，所以带饼图的 plot 通常把提示框放在指针旁边（`tooltipPlacement="pointer"`）：十字线和提示框跟随指针，没有悬停圆点。环形图中间的内容是应用自己叠放在 plot 上的元素（悬停扇区的数值或总数），图例也是，每个色块使用对应扇区的颜色。
+
+<a id="colors-by-category"></a>
+
+## 按类别着色
+
+plot 的 `colorScale` 为类别分配颜色，同 d3 的 `scaleOrdinal`；图形的 `color` 给出每一行的类别：字段（它的文字或数字），或行的函数。`domain` 中的类别按顺序取 `range` 中的颜色；定义域比值域长时，值域从第一个颜色重新开始。定义域之外的类别取 `unknown`；没有设置时，它在第一次被图形遇到时加入定义域（图形按顺序，每个图形的行按顺序），取下一个颜色，所以完全没有 `domain` 时，各类别按数据行带来它们的顺序取色。颜色由应用决定：CSS 颜色，包括主题的 token。
+
+```tsx
+import { Pie, Plot } from "nsh/base/plot";
+import { token } from "nsh";
+
+const regions = [
+  { name: "北美", revenue: 482 },
+  { name: "欧洲、中东和非洲", revenue: 312 },
+  { name: "亚太", revenue: 268 },
+];
+
+<Plot data={regions} colorScale={{ type: "ordinal", range: [token("chart-1"), token("chart-2"), token("chart-3")] }} class="size-44">
+  <Pie value="revenue" color="name" innerRadius="62%" />
+</Plot>
+```
+
+扇区和柱子取自己所在行的颜色；`Line` 和 `Area` 各是一个系列，取第一行的颜色，所以使用自己数据行（`data`）的折线就是这些行的类别的颜色，同一个比例尺让一个类别在饼图、柱子和折线上保持同一种颜色。这个颜色在没有任何设置时作为图形的 `fill`（折线的 `stroke`），取代 `currentColor`：应用的类和样式优先，包括部件的（`sliceClass`、`sliceStyle`）、图形自己的以及它从 plot 继承的，所以 `sliceClass={(d) => (d.name === "其他" ? "fill-muted" : "")}` 能让一个扇区与众不同，其余扇区仍由比例尺着色。有 `background` 部件时，柱子和区域的 `fill` 保持为 `none`。
+
+| `OrdinalScale` | 类型 | 默认值 | 说明 |
+|---|---|---|---|
+| `type` | `"ordinal"` | （必填） | 比例尺的种类。 |
+| `domain` | `string[]` | 无 | 类别，按顺序排列。重复出现的类别保留第一次的位置。 |
+| `range` | `string[]` | （必填） | 颜色，按顺序排列（CSS 颜色）；第 `i` 个类别取第 `i % range.length` 个颜色。 |
+| `unknown` | `string` | 无 | 定义域之外每个类别的颜色；没有设置时，每个类别取下一个颜色。 |
 
 ## PlotAxis
 
