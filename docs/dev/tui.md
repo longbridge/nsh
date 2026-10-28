@@ -177,7 +177,7 @@ The private `TuiNative` posts requests to the view and wakes it. Rendering appli
 services requests; a screenshot serializes that completed buffer. Input requests call `AppView::handle`, exactly
 as the host's terminal input does. Pointer coordinates convert from content-relative points to absolute Cells,
 including the embedding area's origin. `Native::bounds` uses the renderer's unclipped Cell geometry, including
-rounded parent origins, transforms and scroll offsets. Mounted controls outside a Scroll keep their bounds,
+absolute edge rounding, transforms and scroll offsets. Mounted controls outside a Scroll keep their bounds,
 including negative coordinates above its viewport, so the shared agent can scroll them into view before pressing.
 Concealed or hidden views have no rendered geometry. Pointer input still uses clipped hit regions, and text-span
 bounds describe visible characters. The agent drives press/release, motion, wheel events, individual keys and
@@ -278,17 +278,51 @@ progress rails, slider thumbs and partial indicators visible and operable: the o
 occupies one Cell row at the default 16-point Cell height. It changes only the Cell projection; layout, app styles
 and the control's numeric value remain the core's.
 
-A box first snaps its origin relative to its parent's snapped origin. Its right and bottom edges are then computed
-from that snapped origin plus its point width and height, using the same rounding rule. Children and content use
-this snapped origin, including when the parent is partly off screen; clipping happens afterward. Hit regions reuse
-the resulting visible rectangles, with the right and bottom edges exclusive. They never convert points again.
+Each edge rounds from its **absolute, unrounded point coordinate**, after composing ancestor transforms and
+scroll offsets. Parent rounding is never added to a child's point position. The right and bottom edges are
+exclusive. Equal whole-Cell gaps stay equal and nested padding accumulates before rounding; a moving view's Cell
+width or height can vary by one Cell. For example, a box at y = 216pt with height 40pt covers rows 14 and 15;
+its bottom at 256pt rounds to edge 16. A text row after 12pt of padding begins at 228pt, on row 14.
+A positive point gap between sibling one-line texts reserves at least one Cell of separation, including reverse rows;
+a zero gap keeps the texts adjacent. Canvas text calls apply the same minimum gap as whole runs, independently
+of draw order. Existing ancestor and canvas clipping still apply.
+Text measurement still counts the whole Cells that fit within a point width, separately from positioning edges.
+A compact canvas or rounded control (less than one and a half Cells tall) occupies its center row, so a centered icon and a
+one-line label share a row even when their point heights differ.
 
-For example, a box at y = 216pt snaps to row 14 (224pt). Its 40pt height places the bottom at 264pt, which rounds
-up to row 17: rows 14, 15 and 16 draw. With 12pt padding above and below one 16pt text row, the text starts at
-236pt and rounds to row 15, the middle row. Keeping an unrounded parent origin for text would instead put that
-label on row 14. This projection also keeps a box's Cell dimensions stable as its origin crosses a half Cell;
-it can change a sub-Cell gap, while layout remains the core's. Text measurement still counts the whole Cells that
-fit within a point width; that capacity calculation is separate from positioning edges.
+Selection accents keep their authored dimensions. The gallery's sidebar accent is 3 × 18 points; its watchlist
+accent is 3 × 36 points (a 64-point row with 14 points above and below). Their different Cell heights follow
+those dimensions and edge rounding. Inspect Cell foreground/background colors as well as symbols when checking
+these markers; a colored background Cell can have a space as its symbol.
+
+A drawn border owns one Cell on each side. Child boxes fit inside those reserved Cells, with any displacement
+carried into their contents. When reservation shortens a child box, its vertical point offsets contract into
+that box while text keeps terminal glyphs; vertical text stacks reserve one Cell per measured line,
+so contraction reduces quantized gaps without collapsing two labels onto one row. A following inset
+starts below already-painted sibling text. Ordinary descendants remain clipped by inherited border limits. Scroll content
+keeps its offset and clips rather than moving back into the viewport. A view's own text, field and canvas use
+its inner Cell rect. `overflow: hidden` clips descendants to that rect and masks rounded corners. A box with
+only one row, or two rows holding content, uses side bars; an empty two-row box keeps its closed border when no sibling text or content is drawn through it. A box
+with only one or two columns omits vertical strokes, preserving
+space for labels and tiny value indicators. Border corners follow each resolved corner radius independently.
+A childless plain View fill thinner than half a Cell draws `─` or `│` in its fill color, preserving the
+background beneath it. Its opacity blends the stroke over that background (or the known page color); gradient
+layers blend over the preceding stroke color. A fill at
+exactly half a Cell remains a background fill. When both dimensions are thin, the longer normalized Cell extent
+chooses the line direction. Hairlines use absolute edges; rounded controls and compact canvases keep their
+center-row rule. Containers retain background fills for their contents.
+A sub-Cell fill preserves already-painted glyphs that it does not overlap in point space, even when both
+quantize to the same Cell; fills that overlap text in points keep their normal paint order.
+Rounded fills sample the Cell centers against circular corner arcs; continuous curves use the same coarse
+approximation. Positive tiny fills still occupy a Cell.
+
+Outlines paint after the content of their surface. Edges that cross glyphs move outward when possible. A stroke
+is drawn only when its entire closed perimeter fits the clip and is free; otherwise the view's own edge Cells
+keep their symbols and take the outline color. An outline never leaves isolated L-shaped fragments.
+Text painting, search highlights, selection and the test agent share the projected text content rectangle.
+Anchored overlays use the resolved side and anchor from `ViewProps::overlay_anchor`. Their nearest edge moves
+out to the anchor's Cell boundary when needed, including anchors smaller than one Cell. The core's placement,
+flip decisions and point-layout events remain unchanged.
 
 `CellTextEngine` counts Unicode display width: wide characters take two Cells and grapheme clusters stay whole.
 Ordinary text occupies one row at any font size. Inline attachments reserve their width in whole Cells
@@ -684,14 +718,17 @@ permit clipboard writes; `nsh test` uses memory and never writes to the machine'
 | Test screenshots | Versioned UTF-8 JSON of Cell symbols, foreground/background/underline colors and modifiers |
 | Development errors | Dismissible panel, with the mapped message and stack; cleared by the next update |
 | Page background | Terminal default background (`Color::Reset`), including every fill of exactly the same RGBA color |
-| Other view fills | RGB Cell backgrounds, alpha and view opacity blended over the existing background (the page color where the terminal's shows); nothing below 3% opacity |
-| Borders | One Cell per visible side; each side keeps its color; positive radius selects rounded corners |
-| Outlines, including control focus outlines | Single-Cell strokes in the app's color, rounded offset, clipped to ancestors, outside layout; edges crossing the view's glyphs move outward to free Cells |
+| Other view fills | RGB Cell backgrounds with rounded coverage sampled at Cell centers; alpha and view opacity blended over the existing background (the page color where the terminal's shows); nothing below 3% opacity |
+| Borders | Reserved inner Cell rect; per-side colors and per-corner glyphs; compact boxes omit horizontal or vertical strokes to keep room for content |
+| Outlines, including control focus outlines | A complete single-Cell stroke in free Cells, or recoloring the view's own edge Cells while retaining their symbols |
+| Anchored overlays | Snapped outside the anchor's Cell rect on the core-resolved placement side |
+| Gaps between texts | Positive point gaps between one-line sibling texts or canvas text runs retain at least one Cell; zero gaps keep adjacent text |
+| Childless hairline fills | Below half a Cell, horizontal or vertical line glyphs in the fill color; the background remains visible |
 | Positive sub-Cell extents | At least one Cell; zero-width progress indicators remain empty |
 | Base control value states and projected part states | Core-resolved checked, mixed, selected and disabled styles |
 | Slider keyboard input | Component-owned arrows, page and endpoint keys while its thumb has focus |
 | Slider dragging and control hover | Ticket-09 pointer follow-up |
-| Border width, dashes, dots, corner curves | Solid single-Cell strokes; widths still participate in core layout |
+| Border width, dashes, dots, corner curves | Solid single-Cell strokes; circular and continuous corners share a Cell approximation; widths still participate in core layout |
 | Text | Styled Paragraphs: RGB foreground, bold at weight 600 and above, italic, underline and strikethrough |
 | Hover and pressed states | App-defined state styles and hover events on the Cell hit regions |
 | Mouse drags | Native pan values, responder moves and bounded content scrolling |

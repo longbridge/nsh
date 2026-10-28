@@ -111,28 +111,31 @@ fn OutlinedRow() -> impl IntoElement {
 }
 
 #[test]
-fn an_inset_outline_moves_off_its_content_and_keeps_neighbouring_glyphs() {
+fn an_outline_blocked_by_neighbouring_text_recolors_its_own_edges() {
     let (mut view, rx) = surface();
     let mut terminal = Terminal::new(TestBackend::new(30, 8)).unwrap();
     view.load(App::Rust(Root::new::<OutlinedRow>(|| ())))
         .unwrap();
     draw_until(&mut view, &mut terminal, &rx, "below");
     assert_eq!(view.handle(key("Tab")), Handled::Yes);
-    draw_until(&mut view, &mut terminal, &rx, "┘");
-    let buffer = terminal.backend().buffer();
     let outline = Color::Rgb(0x12, 0x34, 0x56);
-    // The row's box is Cells (2, 2)..(12, 4) with its text on row 3: the top
-    // edge keeps the free padding row, the bottom and left edges step outward.
-    assert_eq!(buffer[(5, 2)].symbol(), "─");
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        terminal
+            .draw(|frame| view.render(frame, frame.area()))
+            .unwrap();
+        if terminal.backend().buffer()[(2, 3)].fg == outline {
+            break;
+        }
+        rx.recv_deadline(deadline).unwrap();
+    }
+    let buffer = terminal.backend().buffer();
+    assert_eq!(buffer[(5, 2)].symbol(), " ");
     assert_eq!(buffer[(5, 2)].fg, outline);
-    assert_eq!(buffer[(9, 3)].symbol(), " ");
     assert_eq!(buffer[(2, 3)].symbol(), "S");
-    assert_eq!(buffer[(1, 3)].symbol(), "│");
-    assert_eq!(buffer[(1, 4)].symbol(), "└");
-    assert_eq!(buffer[(11, 4)].symbol(), "┘");
-    assert_eq!(buffer[(9, 4)].symbol(), "─");
-    assert_eq!(buffer[(9, 4)].fg, outline);
-    // The stroke passes behind the neighbour's text instead of erasing it.
+    assert_eq!(buffer[(1, 3)].symbol(), " ");
+    assert_eq!(buffer[(1, 4)].symbol(), " ");
+    assert_eq!(buffer[(11, 4)].symbol(), " ");
     assert_eq!(buffer[(2, 4)].symbol(), "b");
     assert_ne!(buffer[(2, 4)].fg, outline);
 }
@@ -170,12 +173,18 @@ fn a_subcell_progress_rail_is_visible_and_zero_progress_stays_empty() {
         terminal.backend().buffer()[(0, 0)].bg,
         Color::Rgb(0x12, 0x34, 0x56)
     );
+    assert_eq!(terminal.backend().buffer()[(0, 0)].symbol(), " ");
     view.handle(key("Tab"));
     view.handle(key("Enter"));
     draw_until(&mut view, &mut terminal, &rx, "progress 50");
     assert_eq!(
-        terminal.backend().buffer()[(9, 0)].bg,
+        terminal.backend().buffer()[(9, 0)].fg,
         Color::Rgb(0xab, 0xcd, 0xef)
+    );
+    assert_eq!(terminal.backend().buffer()[(9, 0)].symbol(), "─");
+    assert_eq!(
+        terminal.backend().buffer()[(9, 0)].bg,
+        Color::Rgb(0x12, 0x34, 0x56)
     );
     assert_eq!(
         terminal.backend().buffer()[(10, 0)].bg,
@@ -415,4 +424,105 @@ fn a_focused_slider_handles_arrows_pages_and_endpoints_then_releases_them_on_tab
     view.handle(key("Enter"));
     draw_until(&mut view, &mut terminal, &rx, "value 0 ended 0 presses 1");
     assert_eq!(view.handle(key("Home")), Handled::Ignored);
+}
+
+#[component]
+fn SelectedAccentBars() -> impl IntoElement {
+    let selected = signal(0usize);
+    let accent = nsh_core::color::rgb(0xc8f26d);
+    view()
+        .flex_1()
+        .bg(nsh_core::color::rgb(0x101113))
+        .children((0..2).map(|index| {
+            view()
+                .absolute()
+                .left(px(16.0))
+                .top(px(16.0 + index as f32 * 48.0))
+                .w(px(160.0))
+                .h(px(36.0))
+                .rounded(px(8.0))
+                .bg(nsh_core::color::rgb(0x24262a))
+                .flex_row()
+                .items_center()
+                .px(px(10.0))
+                .on_press(move |_: &()| selected.set(index))
+                .child(
+                    view()
+                        .absolute()
+                        .left(px(0.0))
+                        .top(px(9.0))
+                        .w(px(3.0))
+                        .h(px(18.0))
+                        .rounded(px(1.5))
+                        .bg(accent)
+                        .opacity(move || {
+                            if selected.get() == index {
+                                1.0_f32
+                            } else {
+                                0.0_f32
+                            }
+                        }),
+                )
+                .child(text(format!("Sidebar {index}")))
+        }))
+        .child(
+            view()
+                .absolute()
+                .left(px(216.0))
+                .top(px(16.0))
+                .w(px(160.0))
+                .h(px(64.0))
+                .bg(nsh_core::color::rgb(0x24262a))
+                .flex_row()
+                .items_center()
+                .px(px(16.0))
+                .child(
+                    view()
+                        .absolute()
+                        .left(px(0.0))
+                        .top(px(14.0))
+                        .bottom(px(14.0))
+                        .w(px(3.0))
+                        .rounded(px(1.5))
+                        .bg(accent),
+                )
+                .child(text("Watchlist")),
+        )
+        .child(
+            view()
+                .absolute()
+                .top(px(128.0))
+                .child(text(move || format!("active {}", selected.get()))),
+        )
+}
+
+#[test]
+fn sidebar_and_watchlist_accents_remain_visible_with_their_authored_heights() {
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(60, 12)).unwrap();
+    view.load(App::Rust(Root::new::<SelectedAccentBars>(|| ())))
+        .unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "active 0");
+    let accent = Color::Rgb(0xc8, 0xf2, 0x6d);
+    let marked = |cell: &ratatui_core::buffer::Cell| {
+        cell.bg == accent || (cell.fg == accent && cell.symbol() == "│")
+    };
+    let buffer = terminal.backend().buffer();
+    assert!(marked(&buffer[(2, 2)]));
+    assert!(!marked(&buffer[(2, 1)]));
+    assert!(!marked(&buffer[(2, 3)]));
+    assert!(!marked(&buffer[(2, 5)]));
+    assert!(marked(&buffer[(27, 2)]));
+    assert!(marked(&buffer[(27, 3)]));
+    assert!(!marked(&buffer[(27, 1)]));
+    assert!(!marked(&buffer[(27, 4)]));
+    view.handle(key("Tab"));
+    view.handle(key("Tab"));
+    view.handle(key("Enter"));
+    draw_until(&mut view, &mut terminal, &rx, "active 1");
+    let buffer = terminal.backend().buffer();
+    assert!(!marked(&buffer[(2, 2)]));
+    assert!(marked(&buffer[(2, 5)]));
+    assert!(marked(&buffer[(27, 2)]));
+    assert!(marked(&buffer[(27, 3)]));
 }

@@ -93,6 +93,7 @@ pub(super) struct OverlayState {
     pub(super) host: Option<NodeId>,
     /// Where it was placed last, as `onPosition` reported it.
     pub(super) placed: Option<(Placed, Bounds<Points>)>,
+    pub(super) native_anchor: Option<crate::overlay::PlacedAnchor>,
     /// A hint: the pointer rested on its anchor, and has not left or
     /// pressed it since.
     pub(super) hinted: bool,
@@ -130,6 +131,7 @@ impl<M: TextEngine> Core<M> {
                 wrapper,
                 host: None,
                 placed: None,
+                native_anchor: None,
                 hinted: false,
                 waiting: None,
             }));
@@ -205,6 +207,7 @@ impl<M: TextEngine> Core<M> {
     /// Overlay `key`, a view `position: fixed` made one, is a view again:
     /// out of its root view, laid out in its parent.
     fn unfix_view(&mut self, key: Key) {
+        self.set_native_overlay_anchor(key, None);
         let (id, created) = (
             self.nodes[key as usize].id,
             self.nodes[key as usize].created,
@@ -937,7 +940,8 @@ impl<M: TextEngine> Core<M> {
         let (config, Some(host)) = (state.config, state.host) else {
             return frame.origin;
         };
-        let anchor = match self.resolved_anchor(key) {
+        let resolved_anchor = self.resolved_anchor(key);
+        let anchor = match resolved_anchor {
             OverlayAnchor::None => None,
             OverlayAnchor::Point(p) => Some(Bounds {
                 origin: p,
@@ -951,6 +955,7 @@ impl<M: TextEngine> Core<M> {
             OverlayAnchor::Content(id) => self.content_bounds(id),
         };
         let Some(anchor) = anchor else {
+            self.set_native_overlay_anchor(key, None);
             return frame.origin;
         };
         let Some((size, insets)) = self.overlay_host_size(host) else {
@@ -997,7 +1002,39 @@ impl<M: TextEngine> Core<M> {
                 ));
             }
         }
+        self.set_native_overlay_anchor(
+            key,
+            Some(crate::overlay::PlacedAnchor {
+                bounds: anchor,
+                node: match resolved_anchor {
+                    OverlayAnchor::Node(id) => Some(id),
+                    _ => None,
+                },
+                placement: placed.placement,
+            }),
+        );
         placed.origin
+    }
+
+    fn set_native_overlay_anchor(
+        &mut self,
+        key: Key,
+        anchor: Option<crate::overlay::PlacedAnchor>,
+    ) {
+        let Some(state) = self.overlay_mut(key) else {
+            return;
+        };
+        if state.native_anchor == anchor {
+            return;
+        }
+        state.native_anchor = anchor;
+        let node = &self.nodes[key as usize];
+        if node.created {
+            self.mount.push(MountItem::ViewProps {
+                id: node.id,
+                props: node.mounted_props(),
+            });
+        }
     }
 
     /// The box around what view `id` draws in its root view: around its
@@ -1039,6 +1076,9 @@ impl<M: TextEngine> Core<M> {
             let anchored = self.overlay(key).is_some_and(|s| s.host.is_some())
                 && self.resolved_anchor(key) != OverlayAnchor::None;
             let frame = self.nodes[key as usize].frame;
+            if !anchored {
+                self.set_native_overlay_anchor(key, None);
+            }
             if !anchored || !self.nodes[key as usize].created || frame.size.width.0.is_nan() {
                 continue;
             }

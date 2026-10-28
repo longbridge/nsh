@@ -398,7 +398,7 @@ fn PaddedLabel() -> impl IntoElement {
 }
 
 #[test]
-fn equal_padding_centers_the_label_and_the_drawn_cells_take_presses() {
+fn absolute_edges_define_the_padded_box_and_its_hit_cells() {
     use nsh_platform_tui::{Handled, MouseButton, MouseKind};
     use ratatui_core::style::Color;
 
@@ -408,15 +408,15 @@ fn equal_padding_centers_the_label_and_the_drawn_cells_take_presses() {
         .unwrap();
     draw_until(&mut view, &mut terminal, &rx, "Tap 0");
     let buffer = terminal.backend().buffer();
-    for row in 14..17 {
+    for row in 14..16 {
         for column in 1..6 {
             assert_eq!(buffer[(column, row)].bg, Color::Rgb(0x12, 0x34, 0x56));
         }
     }
-    assert_eq!(buffer[(1, 14)].symbol(), " ");
-    assert_eq!(buffer[(1, 15)].symbol(), "T");
+    assert_eq!(buffer[(1, 14)].symbol(), "T");
+    assert_eq!(buffer[(1, 15)].symbol(), " ");
     assert_eq!(buffer[(1, 16)].symbol(), " ");
-    for (column, row) in [(1, 13), (1, 17), (0, 15), (6, 15)] {
+    for (column, row) in [(1, 13), (1, 16), (0, 15), (6, 15)] {
         assert_eq!(buffer[(column, row)].bg, Color::Reset);
         assert_eq!(
             view.handle(mouse(MouseKind::Down(MouseButton::Left), column, row)),
@@ -427,7 +427,7 @@ fn equal_padding_centers_the_label_and_the_drawn_cells_take_presses() {
             Handled::Ignored
         );
     }
-    for (count, row) in [(1, 14), (2, 15), (3, 16)] {
+    for (count, row) in [(1, 14), (2, 15)] {
         assert_eq!(
             view.handle(mouse(MouseKind::Down(MouseButton::Left), 1, row)),
             Handled::Yes
@@ -454,18 +454,18 @@ fn PaddedTextContent() -> impl IntoElement {
 }
 
 #[test]
-fn text_content_padding_uses_the_same_cell_origin_as_its_view() {
+fn text_content_padding_uses_the_unrounded_absolute_origin() {
     let (mut view, rx) = surface();
     let mut terminal = Terminal::new(TestBackend::new(100, 34)).unwrap();
     view.load(App::Rust(Root::new::<PaddedTextContent>(|| ())))
         .unwrap();
     draw_until(&mut view, &mut terminal, &rx, "Label");
     let buffer = terminal.backend().buffer();
-    assert_eq!(buffer[(1, 14)].symbol(), " ");
-    assert_eq!(buffer[(1, 15)].symbol(), "L");
+    assert_eq!(buffer[(1, 14)].symbol(), "L");
+    assert_eq!(buffer[(1, 15)].symbol(), " ");
     assert_eq!(buffer[(1, 16)].symbol(), " ");
     assert_eq!(
-        buffer[(1, 16)].bg,
+        buffer[(1, 15)].bg,
         ratatui_core::style::Color::Rgb(0x12, 0x34, 0x56)
     );
 }

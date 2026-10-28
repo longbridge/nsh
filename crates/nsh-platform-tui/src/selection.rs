@@ -81,15 +81,7 @@ impl SelectionTexts for Texts<'_> {
             .text
     }
     fn frame(&self, i: usize) -> Bounds<Points> {
-        let content = self
-            .tree
-            .get(self.geometry[i].id)
-            .unwrap()
-            .text
-            .as_ref()
-            .unwrap()
-            .1;
-        Bounds::new(self.geometry[i].frame.origin + content.origin, content.size)
+        self.geometry[i].text_frame.expect("text geometry")
     }
     fn offset_at(&self, i: usize, point: Point<Points>) -> u32 {
         let point = point - self.frame(i).origin;

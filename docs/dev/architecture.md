@@ -36,6 +36,9 @@ Input                        native gestures -> EngineControl::dispatch_event ->
 - Mount `Insert` items describe native stacking order, including `zIndex`. A sink that needs logical document
   order opts in with `MountSink::needs_tree_order`; the core includes `TreeOrder` in the completed batch when
   nodes are mounted, moved or detached. The terminal uses it for focus traversal independently of paint order.
+- Anchored overlays include their resolved anchor bounds, optional anchor node and final placement side in
+  `ViewProps::overlay_anchor`. The terminal uses this to keep a popup outside the anchor's occupied Cells;
+  other native backends continue using the core's point frames.
 - **Android**: the engine thread typesets with `StaticLayout` through JNI; each commit is one `byte[]` plus an object
   table handed to `Mounter.java` on the UI thread, and animation items stay in Rust (the flow, the units and the JNI
   rules: `crates/nsh-platform-android/src/encode.rs`).
