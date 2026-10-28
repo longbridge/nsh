@@ -170,6 +170,9 @@ fn window_bar() -> impl IntoElement {
 
 `set_title_bar(TitleBarStyle::Default, None)` restores the system title bar.
 `close_window()` follows the embedding host's normal window-close behavior.
+The module has the window's other functions (`set_title`, `minimize`,
+`toggle_full_screen`, ...) and the menus (`set_application_menu`,
+`popup_menu`) too: [nsh/desktop](../modules/nsh-desktop.md).
 
 ## Files and folders
 

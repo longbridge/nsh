@@ -158,6 +158,8 @@ fn window_bar() -> impl IntoElement {
 
 `set_title_bar(TitleBarStyle::Default, None)` 恢复系统标题栏。
 `close_window()` 遵循宿主的正常窗口关闭行为。
+这个模块还有窗口的其他函数（`set_title`、`minimize`、`toggle_full_screen`……）
+和菜单（`set_application_menu`、`popup_menu`）：见 [nsh/desktop](../modules/nsh-desktop.md)。
 
 ## 文件和文件夹
 

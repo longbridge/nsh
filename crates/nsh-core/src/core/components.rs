@@ -4954,6 +4954,33 @@ impl<M: TextEngine> Core<M> {
                 }
                 true
             }
+            // A view's menu item runs here; JS's go to JS. A context menu
+            // closing settles the one either side showed, so both hear it.
+            EventKind::Menu if id == crate::ROOT_ID => {
+                let menus = self.components.executor.menus.clone();
+                let closed = matches!(payload, EventPayload::Map(entries)
+                    if entries.iter().any(|(k, v)| *k == "closed" && *v == crate::PayloadValue::Bool(true)));
+                if closed {
+                    menus.borrow_mut().settle_popup();
+                    return false;
+                }
+                let Some(item) = number("id").map(|n| n as u32) else {
+                    return false;
+                };
+                if item < crate::element::menus::FIRST_ID {
+                    return false;
+                }
+                let handler = menus.borrow().handler(item);
+                // An item of a menu replaced since the platform showed it.
+                if let Some(handler) = handler {
+                    let result = caught(|| handler());
+                    self.apply_actions();
+                    if let Err(message) = result {
+                        log::error!(target: "js", "a menu item failed: {message}");
+                    }
+                }
+                true
+            }
             EventKind::BackPress if id == crate::ROOT_ID => {
                 // The top overlay listening takes it first.
                 if self.overlay_cancel() {

@@ -12,7 +12,7 @@ use super::{
 use crate::{
     AccessibilityProp, AccessibilityRole, AccessibilityState, AccessibilityValue, Bounds,
     ContextMenuEvent, EdgeInsets, EventKind, EventPayload, Hsla, ImageSource, ListContentStyle,
-    MouseEvent, NativeProp, NodeId, PointerEvents, Points, Prop, Size, Tag, TouchEvent,
+    MouseEvent, NativeProp, NodeId, PointerEvents, Points, PressEvent, Prop, Size, Tag, TouchEvent,
     geometry::{DevicePixels, Radians},
     style::Color,
 };
@@ -89,7 +89,8 @@ impl<E: ?Sized + 'static, F: Fn(&E) + 'static> From<F> for Listener<E> {
 /// What a listener method takes (`on_press`, `on_change`,
 /// `on_event`, ...): a closure of the event, `move |text: &str| ..`; for an
 /// event without data also one without arguments, `move || ..` (or
-/// `move |_: &()| ..`); or a [`Listener`]. `M` tells them apart: it is
+/// `move |_: &()| ..`), and so for a press, whose [`PressEvent`] such a
+/// closure leaves out; or a [`Listener`]. `M` tells them apart: it is
 /// inferred, never written. (One conversion could not take both closures:
 /// a type may implement `Fn()` and `Fn(&())`.)
 #[diagnostic::on_unimplemented(
@@ -126,6 +127,32 @@ impl<E: ?Sized + 'static, F: Fn(&E) + 'static> IntoListener<E, OfEvent> for F {
 impl<F: Fn() + 'static> IntoListener<(), WithoutEvent> for F {
     fn into_listener(self) -> Listener<()> {
         Listener::new(Rc::new(move |_: &()| self()))
+    }
+}
+
+/// How a closure of `&()` is a listener of a press, which reports a
+/// [`PressEvent`] ([`IntoListener`]).
+#[doc(hidden)]
+pub struct OfUnit(());
+
+/// A press's listener may leave its [`PressEvent`] out: `move || ..`.
+impl<F: Fn() + 'static> IntoListener<PressEvent, WithoutEvent> for F {
+    fn into_listener(self) -> Listener<PressEvent> {
+        Listener::new(Rc::new(move |_: &PressEvent| self()))
+    }
+}
+
+/// A press's listener may leave its [`PressEvent`] out: `move |_: &()| ..`.
+impl<F: Fn(&()) + 'static> IntoListener<PressEvent, OfUnit> for F {
+    fn into_listener(self) -> Listener<PressEvent> {
+        Listener::new(Rc::new(move |_: &PressEvent| self(&())))
+    }
+}
+
+/// A listener of `()` listens to presses too, without their [`PressEvent`].
+impl IntoListener<PressEvent, ()> for Listener<()> {
+    fn into_listener(self) -> Listener<PressEvent> {
+        self.map(|_: &PressEvent| ())
     }
 }
 
@@ -1361,35 +1388,39 @@ pub trait Interactive: Element {
         )
     }
 
-    /// Handles presses.
-    fn on_press<M>(self, listener: impl IntoListener<(), M>) -> Self {
+    /// Handles presses: `move || ..`, or `move |e: &PressEvent| ..` for
+    /// where the pointer was, the modifier keys held and the click count
+    /// (`e.modifiers.shift` for a Shift-click). A press from the keyboard or
+    /// an assistive technology, and backends that do not report one, give
+    /// [`PressEvent::default`].
+    fn on_press<M>(self, listener: impl IntoListener<PressEvent, M>) -> Self {
         self.on(
             EventKind::Press,
-            events::typed(listener.into_listener(), events::unit),
+            events::typed(listener.into_listener(), events::press),
         )
     }
 
     /// Handles presses held for about half a second.
-    fn on_long_press<M>(self, listener: impl IntoListener<(), M>) -> Self {
+    fn on_long_press<M>(self, listener: impl IntoListener<PressEvent, M>) -> Self {
         self.on(
             EventKind::LongPress,
-            events::typed(listener.into_listener(), events::unit),
+            events::typed(listener.into_listener(), events::press),
         )
     }
 
     /// A finger went down on the element.
-    fn on_press_down<M>(self, listener: impl IntoListener<(), M>) -> Self {
+    fn on_press_down<M>(self, listener: impl IntoListener<PressEvent, M>) -> Self {
         self.on(
             EventKind::PressDown,
-            events::typed(listener.into_listener(), events::unit),
+            events::typed(listener.into_listener(), events::press),
         )
     }
 
     /// The press ended, inside or outside the element.
-    fn on_press_up<M>(self, listener: impl IntoListener<(), M>) -> Self {
+    fn on_press_up<M>(self, listener: impl IntoListener<PressEvent, M>) -> Self {
         self.on(
             EventKind::PressUp,
-            events::typed(listener.into_listener(), events::unit),
+            events::typed(listener.into_listener(), events::press),
         )
     }
 

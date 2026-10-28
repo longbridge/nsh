@@ -51,6 +51,7 @@ mod js;
 pub(crate) mod json_host;
 mod keyboard;
 pub(crate) mod keys;
+pub(crate) mod menus;
 pub(crate) mod module;
 mod once;
 pub mod palette;

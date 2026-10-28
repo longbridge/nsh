@@ -1004,6 +1004,11 @@ pub(crate) fn title_bar() -> crate::geometry::Edges<crate::geometry::Points> {
     env(|e| e.title_bar)
 }
 
+/// The views' menu handlers.
+pub(crate) fn view_menus() -> Rc<std::cell::RefCell<super::menus::ViewMenus>> {
+    executor().menus.clone()
+}
+
 pub(crate) fn desktop_command(command: crate::desktop::DesktopCommand) {
     act(Action::Command(
         crate::ROOT_ID,

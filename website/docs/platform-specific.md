@@ -94,7 +94,7 @@ Something two or more platforms do is a top-level prop (in Rust a method of the 
 
 ## Platform modules
 
-In Rust, the APIs only one platform has are functions of `nsh_core::prelude` (`on_back_press`, `input_accessory_view`) and of `nsh_core::element::desktop` (`set_title_bar`, `title_bar`, `close_window`); elsewhere they do nothing. In TSX, `nsh/mobile` holds the APIs of iOS and Android (some of them one platform's), `nsh/desktop` those of the desktops. Both can be imported on every platform, so one bundle runs everywhere: on other platforms their functions return at once and their components take no room. Each exports `isAvailable`, which is `true` on its own platforms; `platform.os` tells them apart.
+In Rust, the APIs only one platform has are functions of `nsh_core::prelude` (`on_back_press`, `input_accessory_view`) and of `nsh_core::element::desktop` (the window: `set_title`, `set_title_bar`, `title_bar`, `minimize`, `toggle_maximize`, `toggle_full_screen`, `set_frame`, `set_level`, `order_front`, `close_window`; menus: `set_application_menu`, `popup_menu`); elsewhere they do nothing. In TSX, `nsh/mobile` holds the APIs of iOS and Android (some of them one platform's), `nsh/desktop` those of the desktops. Both can be imported on every platform, so one bundle runs everywhere: on other platforms their functions return at once and their components take no room. Each exports `isAvailable`, which is `true` on its own platforms; `platform.os` tells them apart.
 
 ### nsh/mobile
 
