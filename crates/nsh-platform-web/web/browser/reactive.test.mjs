@@ -108,9 +108,13 @@ test("registry functions use Rust conversions and preserve error classes", { ski
     assert.equal(os.arch(), "wasm32");
     assert.equal(os.default, os);
     assert.equal(os.EOL, "\n");
-    assert.throws(() => os.homedir(), error => error instanceof Error && /home directory/.test(error.message));
+    assert.throws(() => os.homedir(), error => error instanceof Error && error.code === "ERR_FEATURE_UNAVAILABLE_ON_PLATFORM");
     const process = fixture.modules.exports.get("process");
-    assert.throws(() => process.run(42), TypeError);
+    // A function returning a promise never throws: a wrong argument rejects.
+    let thrown = false, run;
+    try { run = process.run(42); } catch { thrown = true; }
+    assert.equal(thrown, false);
+    await assert.rejects(run, TypeError);
     assert.equal(process.platform, os.platform());
   } finally { fixture.modules.dispose(); fixture.close(); }
 });
