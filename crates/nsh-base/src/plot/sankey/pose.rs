@@ -164,7 +164,8 @@ impl Pose {
 /// from where the sankey is drawn then, as `Pie`'s `Update` does: the move
 /// stops, the animator tells how far it had gone, and the next one starts
 /// from the pose drawn there (the sankey holds still until the animator
-/// answers). The plot's size changing moves nothing.
+/// answers). The changes of one turn make one move. The plot's size
+/// changing moves nothing.
 #[derive(Clone, Copy)]
 pub(super) struct Moves {
     /// The pose it moves to, and the one it moves from while a move runs.
@@ -185,39 +186,44 @@ impl Moves {
         let last = stored(None::<(Pose, Size<Points>)>);
         let changes = stored(0_u32);
         effect(move || {
-            let to = pose.get();
-            let size = plot.size.get_untracked();
-            let before = last.replace(to.clone().map(|p| (p, size)));
-            let Some(to) = to else {
-                if shown.with_untracked(Option::is_some) {
-                    shown.set(None);
-                }
-                return;
-            };
-            let Some((before, was)) = before else {
-                return shown.set(Some((to, None)));
-            };
-            if before == to {
-                return;
-            }
-            let change = changes.with(|c| {
-                *c = c.wrapping_add(1);
-                *c
-            });
-            let Some(timing) = update_timing(plot).filter(|_| was == size) else {
-                return shown.set(Some((to, None)));
-            };
-            let (at, moving) = shown.with_untracked(|s| match s {
-                Some((at, from)) => (at.clone(), from.is_some()),
-                None => (before.clone(), false),
-            });
-            if !moving {
-                return Self::run(shown, progress, at, to, timing);
-            }
-            progress.stop();
-            let read = progress.value();
+            pose.with(|_| ());
+            // Decided once the turn's changes are all in (a task runs
+            // after the code that spawned it, and a newer run of this
+            // effect cancels the one before): an app changing the rows
+            // and the links together makes one move, not a move to the
+            // rows with the old links first.
             spawn(async move {
-                let t = read.await;
+                let to = pose.get_untracked();
+                let size = plot.size.get_untracked();
+                let before = last.replace(to.clone().map(|p| (p, size)));
+                let Some(to) = to else {
+                    if shown.with_untracked(Option::is_some) {
+                        shown.set(None);
+                    }
+                    return;
+                };
+                let Some((before, was)) = before else {
+                    return shown.set(Some((to, None)));
+                };
+                if before == to {
+                    return;
+                }
+                let change = changes.with(|c| {
+                    *c = c.wrapping_add(1);
+                    *c
+                });
+                let Some(timing) = update_timing(plot).filter(|_| was == size) else {
+                    return shown.set(Some((to, None)));
+                };
+                let (at, moving) = shown.with_untracked(|s| match s {
+                    Some((at, from)) => (at.clone(), from.is_some()),
+                    None => (before.clone(), false),
+                });
+                if !moving {
+                    return Self::run(shown, progress, at, to, timing);
+                }
+                progress.stop();
+                let t = progress.value().await;
                 if changes.get() != change {
                     // A newer change asks again.
                     return;

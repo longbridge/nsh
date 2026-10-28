@@ -434,8 +434,8 @@ impl Generator {
         beta: f32,
         py: f32,
     ) {
-        for i in 1..columns.len() {
-            for &target in &columns[i] {
+        for column in columns.iter_mut().skip(1) {
+            for &target in column.iter() {
                 let mut y = 0.;
                 let mut w = 0.;
                 for &link_index in &graph.nodes[target].target_links {
@@ -454,8 +454,8 @@ impl Generator {
                 graph.nodes[target].y1 += dy;
                 reorder_node_links(graph, target);
             }
-            sort_column(graph, &mut columns[i]);
-            self.resolve_collisions(graph, &columns[i], beta, py);
+            sort_column(graph, column);
+            self.resolve_collisions(graph, column, beta, py);
         }
     }
 
@@ -468,8 +468,9 @@ impl Generator {
         beta: f32,
         py: f32,
     ) {
-        for i in (0..columns.len().saturating_sub(1)).rev() {
-            for &source in &columns[i] {
+        // Every column but the last, from right to left.
+        for column in columns.iter_mut().rev().skip(1) {
+            for &source in column.iter() {
                 let mut y = 0.;
                 let mut w = 0.;
                 for &link_index in &graph.nodes[source].source_links {
@@ -488,8 +489,8 @@ impl Generator {
                 graph.nodes[source].y1 += dy;
                 reorder_node_links(graph, source);
             }
-            sort_column(graph, &mut columns[i]);
-            self.resolve_collisions(graph, &columns[i], beta, py);
+            sort_column(graph, column);
+            self.resolve_collisions(graph, column, beta, py);
         }
     }
 
