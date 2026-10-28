@@ -83,30 +83,69 @@ fn SpatialSearch() -> impl IntoElement {
 }
 
 #[test]
-fn search_and_traversal_from_plain_text_keep_spatial_order() {
-    for (next, expected) in [("n", "C"), ("p", "B")] {
+fn search_matches_keep_spatial_order() {
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(40, 10)).unwrap();
+    view.load(App::Rust(Root::new::<SpatialSearch>(|| ())))
+        .unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "focus none");
+    view.handle(ctrl("s"));
+    type_text(&mut view, &mut terminal, "match");
+    draw_until(&mut view, &mut terminal, &rx, "focus B");
+    for label in ["C", "A"] {
+        view.handle(ctrl("s"));
+        draw_until(&mut view, &mut terminal, &rx, &format!("focus {label}"));
+    }
+}
+
+#[component]
+fn SidebarSearch() -> impl IntoElement {
+    let focused = signal("none");
+    let control = move |label: &'static str, x, y| {
+        view()
+            .absolute()
+            .left(px(x))
+            .top(px(y))
+            .w(px(64.0))
+            .h(px(16.0))
+            .on_press(|_: &()| {})
+            .on_focus(move |_: &()| focused.set(label))
+            .child(text(format!("go {label}")))
+    };
+    view()
+        .flex_1()
+        .child(
+            view()
+                .child(control("S0", 0.0, 0.0))
+                .child(control("S1", 0.0, 32.0))
+                .child(control("S2", 0.0, 64.0)),
+        )
+        .child(
+            view()
+                .child(control("P0", 160.0, 16.0))
+                .child(text("plain note").absolute().left(px(160.0)).top(px(48.0)))
+                .child(control("P1", 160.0, 80.0)),
+        )
+        .child(
+            text(move || format!("focus {}", focused.get()))
+                .absolute()
+                .top(px(128.0)),
+        )
+}
+
+#[test]
+fn traversal_from_a_plain_text_match_continues_in_tree_order() {
+    for (next, expected) in [("n", "P1"), ("p", "P0")] {
         let (mut view, rx) = surface();
         let mut terminal = Terminal::new(TestBackend::new(40, 10)).unwrap();
-        view.load(App::Rust(Root::new::<SpatialSearch>(|| ())))
+        view.load(App::Rust(Root::new::<SidebarSearch>(|| ())))
             .unwrap();
         draw_until(&mut view, &mut terminal, &rx, "focus none");
-        view.handle(ctrl("s"));
-        type_text(&mut view, &mut terminal, "match");
-        draw_until(&mut view, &mut terminal, &rx, "focus B");
-        for label in ["C", "A"] {
-            view.handle(ctrl("s"));
-            draw_until(&mut view, &mut terminal, &rx, &format!("focus {label}"));
-        }
-        view.handle(ctrl("g"));
         view.handle(ctrl("s"));
         type_text(&mut view, &mut terminal, "note");
         view.handle(key("Enter"));
         view.handle(ctrl(next));
         draw_until(&mut view, &mut terminal, &rx, &format!("focus {expected}"));
-        if next == "n" {
-            view.handle(ctrl("n"));
-            draw_until(&mut view, &mut terminal, &rx, "focus A");
-        }
     }
 }
 

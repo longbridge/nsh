@@ -538,7 +538,8 @@ A match moves keyboard focus to the nearest focusable view around it (a button's
 reveals the match's row in its surrounding Scrolls, innermost first, keeping the core's reveal margin (one row
 at the default scale) as focus traversal does. A match in other text clears focus and
 becomes the search point: Next / Previous (Ctrl+N, Ctrl+P, Tab, Shift+Tab) then continue from it to the nearest
-control after or before it in reading order.
+control after or before it in tree order, so a match in a page panel moves within that panel rather than to a
+sidebar beside it on the same rows.
 
 While searching, the platform draws the Minibuffer over the bottom row of the surface's area, in the terminal's
 default colors: `/` (forward) or `?` (backward), after less and vim, then as much of the query's end as fits,
