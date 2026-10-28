@@ -1225,7 +1225,7 @@ pub(crate) fn encode(out: &mut Out, item: &MountItem) {
         MountItem::Shader { id, layer } => {
             out.item("sh")
                 .num(*id)
-                .raw(&crate::shader::encode(layer.as_deref()))
+                .raw(&crate::shader::encode_layer(layer.as_deref()))
                 .end();
         }
         MountItem::Gestures { id, values } => {

@@ -94,7 +94,7 @@ TSX 的这些对象和其他属性一样是响应式的；从对象中移除的�
 
 ## 平台模块
 
-在 Rust 中，只有一个平台才有的 API 是 `nsh_core::prelude` 的函数（`on_back_press`、`input_accessory_view`）和 `nsh_core::element::desktop` 的函数（`set_title_bar`、`title_bar`、`close_window`）；在其他平台上它们什么都不做。在 TSX 中，`nsh/mobile` 存放 iOS 和 Android 的 API（其中一些只属于其中一个平台），`nsh/desktop` 存放桌面的 API。两者在所有平台上都可以导入，因此同一个包可以到处运行：在其他平台上，它们的函数会立即返回，组件不占空间。每个模块都导出 `isAvailable`，在自己的平台上为 `true`；`platform.os` 区分具体平台。
+在 Rust 中，只有一个平台才有的 API 是 `nsh_core::prelude` 的函数（`on_back_press`、`input_accessory_view`）和 `nsh_core::element::desktop` 的函数（窗口：`set_title`、`set_title_bar`、`title_bar`、`minimize`、`toggle_maximize`、`toggle_full_screen`、`set_frame`、`set_level`、`order_front`、`close_window`；菜单：`set_application_menu`、`popup_menu`）；在其他平台上它们什么都不做。在 TSX 中，`nsh/mobile` 存放 iOS 和 Android 的 API（其中一些只属于其中一个平台），`nsh/desktop` 存放桌面的 API。两者在所有平台上都可以导入，因此同一个包可以到处运行：在其他平台上，它们的函数会立即返回，组件不占空间。每个模块都导出 `isAvailable`，在自己的平台上为 `true`；`platform.os` 区分具体平台。
 
 ### nsh/mobile
 

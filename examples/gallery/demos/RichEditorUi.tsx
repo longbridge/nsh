@@ -1,7 +1,7 @@
 // The Rich Editor demo's toolbar controls, with Lucide's icons, on the
 // shared gallery UI's colors and finishes.
 import { View } from "nsh";
-import { Button as BaseButton } from "nsh/base";
+import { Button as BaseButton, Toggle as BaseToggle, ToggleGroup as BaseToggleGroup } from "nsh/base";
 import { colors, finish, focusRing } from "../ui";
 import { LucideIcon, type LucideIconName } from "../icons";
 
@@ -12,8 +12,10 @@ export type ToggleItem<T extends string> = { value: T; icon: LucideIconName; lab
 
 /**
  * A row of icon toggles on one track (shadcn's toggle group): `single` keeps
- * at most one pressed, `multiple` any. Each toggle is `nsh/base`'s `Button`,
- * selected while pressed, so screen readers (and tests) read its state.
+ * at most one pressed, `multiple` any. The track is `nsh/base`'s
+ * `ToggleGroup` (a toolbar, one Tab stop whose arrow keys move the focus)
+ * and each item its `Toggle`, so screen readers (and tests) read its pressed
+ * state.
  */
 export function ToggleGroup<T extends string>(props: {
   type: "single" | "multiple";
@@ -25,7 +27,7 @@ export function ToggleGroup<T extends string>(props: {
   testID?: string;
 }) {
   return (
-    <View
+    <BaseToggleGroup
       testID={props.testID}
       style={{ flexDirection: "row", padding: 2, gap: 2, borderRadius: 9, backgroundColor: colors.inset, borderWidth: 1, borderColor: colors.border }}
     >
@@ -34,11 +36,11 @@ export function ToggleGroup<T extends string>(props: {
           const pressed = () => props.value.includes(item().value);
           return (
             <View tooltip={item().label}>
-              <BaseButton
-                selected={pressed()}
+              <BaseToggle
+                pressed={pressed()}
                 disabled={item().disabled}
                 accessibilityLabel={item().label}
-                onPress={() => props.onToggle(item().value, !pressed())}
+                onChange={({ pressed: next }) => props.onToggle(item().value, next)}
                 hoverStyle={item().disabled || pressed() ? undefined : { backgroundColor: colors.raised }}
                 focusStyle={focusRing(1)}
                 style={{
@@ -52,12 +54,12 @@ export function ToggleGroup<T extends string>(props: {
                 }}
               >
                 <LucideIcon name={item().icon} size={16} tint={pressed() ? colors.text : colors.muted} />
-              </BaseButton>
+              </BaseToggle>
             </View>
           );
         }}
       </Each>
-    </View>
+    </BaseToggleGroup>
   );
 }
 

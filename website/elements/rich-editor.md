@@ -1,7 +1,6 @@
 ---
 title: RichEditor
 description: "The rich text editor of nsh/base: documents defined by the app's schema, commands, plugins, history, keymaps, input rules and Markdown, after ProseMirror's architecture, with its state in Rust."
-order: 26.25
 group: base
 demo: el-rich-editor
 ---

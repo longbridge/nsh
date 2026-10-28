@@ -210,29 +210,23 @@ test("a browser-cancelled pan reports cancellation rather than a release", () =>
   }
 });
 
-test("run stages static source and bytecode chunks before starting the entry", () => {
+test("compileAndRun hands the compiled module to runSource, or returns the compile error", async () => {
   const { player } = fakePlayer();
-  const calls = [];
-  const text = (ptr, len) => new TextDecoder().decode(new Uint8Array(player.wasm.memory.buffer, ptr, len));
-  player.reset = () => [800, 600];
-  player.begin = () => calls.push(["start"]);
-  player.wasm.nsh_bundle_options = () => calls.push(["options"]);
-  player.wasm.nsh_bundle_chunk = (np, nl, cp, cl, bytecode) => {
-    calls.push([text(np, nl), bytecode, [...new Uint8Array(player.wasm.memory.buffer, cp, cl)]]);
-  };
-  player.run("entry", {
-    chunkBase: "https://example.test/",
-    preloadedChunks: {
-      "source.js": "export {}",
-      "bytecode.js": new Uint8Array([1, 2, 3]).buffer,
-    },
-  });
-  assert.deepEqual(calls, [
-    ["options"],
-    ["source.js", 0, [...new TextEncoder().encode("export {}")]],
-    ["bytecode.js", 1, [1, 2, 3]],
-    ["start"],
-  ]);
+  const ran = [];
+  player.compile = (source) => (source === "bad" ? { error: "1 | bad" } : { code: `compiled ${source}` });
+  player.browserHost = { runSource: async (code, options) => { ran.push([code, options]); } };
+  assert.equal(await player.compileAndRun("bad"), "1 | bad");
+  assert.equal(await player.compileAndRun("good", "Demo.tsx", { appId: "demo" }), null);
+  assert.deepEqual(ran, [["compiled good", { appId: "demo", capabilities: "", sourceMap: "", name: "Demo.tsx" }]]);
+});
+
+test("hotUpdate goes to the browser host, and is not applied without one", async () => {
+  const { player } = fakePlayer();
+  assert.equal(await player.hotUpdate("__nsh_hot.update({});"), false);
+  const updates = [];
+  player.browserHost = { hotUpdate: async (...args) => { updates.push(args); return true; } };
+  assert.equal(await player.hotUpdate("code", "hot-2.js", null), true);
+  assert.deepEqual(updates, [["code", "hot-2.js", ""]]);
 });
 
 /** A view element as `updateFocusable` and `keyDown` see it. */

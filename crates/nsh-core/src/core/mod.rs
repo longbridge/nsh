@@ -56,6 +56,10 @@ const NO_KEY: Key = Key::MAX;
 
 /// Rounds of binding the components' own lists per commit, at most.
 const MAX_VIRTUAL_ROUNDS: u32 = 8;
+/// The longest run without a line-break opportunity a multiline input's value is
+/// measured with unbroken (`broken_runs`): longer than a line of any input,
+/// so ordinary text measures as it is shown.
+const MEASURED_RUN: usize = 1024;
 /// Dirty flags, processed once per commit.
 mod dirty {
     /// Emit [`crate::MountItem::ViewStyle`].
@@ -568,6 +572,17 @@ struct Node {
     text_queued: bool,
     /// A list cell whose subtree was laid out again this commit.
     relaid: bool,
+    /// Where its layout root had the origin of the view around it (its
+    /// containing block), unrounded, and the pixel ratio, when its frame and
+    /// its subtree's were last emitted: while nothing in the subtree is laid
+    /// out anew, a move of that origin by whole device pixels leaves every
+    /// frame in it as it was ([`Core::emit_frames_in`]). `None` until
+    /// emitted, or once they must be emitted again.
+    emitted: Option<(taffy::Point<f32>, f32)>,
+    /// A view in its subtree is placed in a containing block above it (a
+    /// fixed one, or an absolute one in a static parent), so a move of the
+    /// subtree can move it in its parent.
+    escapes: bool,
     /// A list cell without an item, until the list places it again: it
     /// still shows its last row, so it is hidden from sight, touches and
     /// assistive technology ([`Core::set_spare`]).
@@ -784,6 +799,8 @@ impl Node {
             queued: false,
             text_queued: false,
             relaid: false,
+            emitted: None,
+            escapes: false,
             spare: false,
         }
     }
@@ -1881,6 +1898,10 @@ impl<M: TextEngine> Core<M> {
         for (id, answer) in std::mem::take(&mut self.components.measures) {
             answer.borrow_mut().deliver(self.measure(id));
         }
+        // And their transitions' time, with this commit's styles.
+        for (id, answer) in std::mem::take(&mut self.components.transition_times) {
+            answer.borrow_mut().deliver(self.transition_time(id));
+        }
         // On laid out views; dropped for views that were never shown.
         let mut kept = Vec::new();
         for (id, mut command) in std::mem::take(&mut self.commands) {
@@ -2246,7 +2267,11 @@ impl<M: TextEngine> Core<M> {
             self.inherited_text_style(key).inherit(&node.text_style),
             node.paragraph.font_multiplier(self.font_scale),
         );
-        text.push(content, style);
+        if multiline {
+            text.push(&broken_runs(content), style);
+        } else {
+            text.push(content, style);
+        }
         // An empty last line still takes space (a trailing line break, or no
         // text at all).
         if content.is_empty() || (multiline && content.ends_with('\n')) {
@@ -2853,7 +2878,7 @@ impl<M: TextEngine> Core<M> {
                         })
                         .cloned();
                     let compiled = compiled.unwrap_or_else(|| {
-                        let compiled = crate::shader::Shader::compile(source);
+                        let compiled = crate::shader::compile_source(source);
                         // Bounded: an app making sources on the fly does not
                         // keep them all.
                         if self.shaders.len() >= 64 {
@@ -4403,6 +4428,11 @@ impl<M: TextEngine> Core<M> {
         let node = &mut self.nodes[key as usize];
         let kind = node.kind;
         node.frame = Bounds::UNSET;
+        node.emitted = None;
+        if let Some(layout) = node.layout {
+            self.layout.mark_stale(layout);
+        }
+        let node = &mut self.nodes[key as usize];
         // A list in its parent's viewport is a plain view clipping its
         // cells (`Node::mounted_view_style`), with no scroll view's config.
         let parent_list = node.list.as_ref().is_some_and(|l| l.parent);
@@ -5040,15 +5070,8 @@ impl<M: TextEngine> Core<M> {
             // final layout, laid out again with the rest.
             let attachments =
                 !cx.alignments.is_empty() || !self.nodes[key as usize].attached.is_empty();
-            let engine = &self.text_engine;
-            let cache = &mut self.measure_cache;
-            if attachments
-                || !self
-                    .layout
-                    .measures_as_before(layout, |input, _, cx, style| {
-                        measure_leaf(engine, cache, input, cx, style)
-                    })
-            {
+            let measure = leaf_measure(&self.text_engine, &mut self.measure_cache);
+            if attachments || !self.layout.measures_as_before(layout, measure) {
                 self.layout.mark_dirty(layout);
                 self.needs_layout = true;
             }
@@ -5698,23 +5721,17 @@ impl<M: TextEngine> Core<M> {
 
     /// Lays out the tree under `root` within `available`.
     fn layout_root(&mut self, root: LayoutId, available: taffy::Size<AvailableSpace>) {
-        let engine = &self.text_engine;
-        let cache = &mut self.measure_cache;
+        let measure = leaf_measure(&self.text_engine, &mut self.measure_cache);
         self.layout
-            .compute_layout_with_measure(root, available, |input, _, cx, style| {
-                measure_leaf(engine, cache, input, cx, style)
-            });
+            .compute_layout_with_measure(root, available, measure);
     }
 
     /// Lays out the relayout boundaries a change inside made dirty
     /// (`LayoutTree::relayout_boundaries`), returning those laid out on
     /// their own: their subtrees' frames are new.
     fn relayout_boundaries(&mut self) -> Vec<Key> {
-        let engine = &self.text_engine;
-        let cache = &mut self.measure_cache;
-        self.layout.relayout_boundaries(|input, _, cx, style| {
-            measure_leaf(engine, cache, input, cx, style)
-        })
+        let measure = leaf_measure(&self.text_engine, &mut self.measure_cache);
+        self.layout.relayout_boundaries(measure)
     }
 
     /// Whether `key` is out of the layout: `display: none` on it or on a
@@ -5973,6 +5990,8 @@ impl<M: TextEngine> Core<M> {
         }
         let hidden = hidden || self.layout.style(layout).display == taffy::Display::None;
         if hidden {
+            self.layout.emitted(layout);
+            self.nodes[key as usize].emitted = None;
             self.set_frame(key, Bounds::default());
             if self.nodes[key as usize].kind.is_container() {
                 let children = std::mem::take(&mut self.nodes[key as usize].children);
@@ -5986,8 +6005,42 @@ impl<M: TextEngine> Core<M> {
             return;
         }
         let node = &self.nodes[key as usize];
-        let unrounded = self.layout.unrounded_layout(layout);
-        let containing = if self.layout.style(layout).position.is_out_of_flow() {
+        let unrounded = *self.layout.unrounded_layout(layout);
+        // An absolute view in a positioned parent (React Native's default
+        // `relative`) is placed in that parent, whose origin is `origin`,
+        // summed in the same order as `layout_origin` sums it: only one
+        // placed further up walks there (every cell of a table would walk to
+        // the root, each frame the tree is laid out).
+        let position = self.layout.style(layout).position;
+        let escaping = position == Position::Fixed
+            || (position == Position::Absolute
+                && !self
+                    .layout
+                    .parent(layout)
+                    .is_some_and(|p| self.layout.style(p).position.is_positioned()));
+        let ratio = self.pixel_ratio();
+        // Nothing in the subtree was laid out anew and its origin moved by
+        // whole device pixels (or not at all): every frame in it, relative to
+        // its parent, rounds as it did. A scroll that moves a table's rows
+        // walks the rows' origin, not each cell.
+        if !self.layout.stale(layout)
+            && !node.escapes
+            && !node.is_overlay()
+            && node.beside == NO_KEY
+            && !self.nodes.get(node.parent as usize).is_some_and(|p| p.rtl)
+            && node.emitted.is_some_and(|(at, r)| {
+                let moved = |a: f32, b: f32| {
+                    let d = (a - b) * ratio;
+                    d == d.round()
+                };
+                r == ratio && moved(origin.x, at.x) && moved(origin.y, at.y)
+            })
+        {
+            self.nodes[key as usize].emitted = Some((origin, ratio));
+            return;
+        }
+        self.layout.emitted(layout);
+        let containing = if escaping {
             self.layout_origin(layout)
         } else {
             origin
@@ -5996,8 +6049,7 @@ impl<M: TextEngine> Core<M> {
             x: containing.x + unrounded.location.x,
             y: containing.y + unrounded.location.y,
         };
-        let ratio = self.pixel_ratio();
-        let l = rounded(unrounded, containing, ratio);
+        let l = rounded(&unrounded, containing, ratio);
         let mut frame = rect(
             l.location.x + span(origin.x, containing.x, ratio),
             l.location.y + span(origin.y, containing.y, ratio),
@@ -6058,16 +6110,21 @@ impl<M: TextEngine> Core<M> {
         }
         // List cells are positioned by `update_lists`, roots by
         // `layout_roots`.
+        let mut escapes = escaping;
         if kind.is_container() && kind != Kind::List {
             let children = std::mem::take(&mut self.nodes[key as usize].children);
             for &child in &children {
                 if !self.nodes[child as usize].is_layout_root() {
                     self.emit_frames_in(child, false, inner);
+                    escapes |= self.nodes[child as usize].escapes;
                 }
             }
             self.nodes[key as usize].children = children;
             self.update_overflow(key);
         }
+        let node = &mut self.nodes[key as usize];
+        node.escapes = escapes;
+        node.emitted = Some((origin, ratio));
     }
 
     /// Queues node `key`'s frame for its layout listeners once it was laid
@@ -6957,6 +7014,22 @@ fn min_content_width<M: TextEngine>(
     width
 }
 
+/// What measures the leaves in every layout pass ([`measure_leaf`]): one
+/// closure type for all of them, so Taffy's algorithms, generic over it,
+/// are made once.
+fn leaf_measure<'a, M: TextEngine>(
+    engine: &'a M,
+    cache: &'a mut MeasureCache,
+) -> impl FnMut(
+    taffy::LayoutInput,
+    LayoutId,
+    Option<&mut LeafContext<M::Prepared>>,
+    &taffy::Style,
+) -> taffy::LayoutOutput
++ 'a {
+    move |input, _, cx, style| measure_leaf(engine, cache, input, cx, style)
+}
+
 /// A leaf's layout (`taffy::compute_leaf_layout`): Taffy resolves its
 /// style's sizes, padding, border, minimums, maximums and aspect ratio;
 /// only its content (a text, an image's natural size, a native
@@ -7179,6 +7252,46 @@ fn span_background(style: &ViewStyle, node: NodeId) -> Option<crate::text::TextB
 /// Whether a span with `events` takes presses (a link in its text block).
 fn pressable(events: EventMask) -> bool {
     PRESSES.iter().any(|&e| events.contains(e))
+}
+
+/// `content` with a line break after every [`MEASURED_RUN`] characters of
+/// a run without a line-break opportunity, as a multiline input's value is measured.
+///
+/// Line breakers search back over the whole run for a break opportunity
+/// at the end of every line they lay out (CoreText through ICU), so one
+/// long run (minified JSON, Base64) costs time quadratic in its length:
+/// 13 s to measure a 474 KB minified JSON on an Apple silicon Mac, on the
+/// engine thread, at every edit. Broken into runs of 1024 it takes 47 ms. The
+/// input shows and reports its own text; the measured height can only
+/// grow by a line per break, and text without such runs is measured as is.
+fn broken_runs(content: &str) -> std::borrow::Cow<'_, str> {
+    let mut broken: Option<String> = None;
+    let (mut start, mut from) = (0, 0);
+    for (end, _) in unicode_linebreak::linebreaks(content) {
+        let mut run = 0;
+        for (offset, c) in content[start..end].char_indices() {
+            let i = start + offset;
+            // The final character may itself provide the break (space or
+            // newline). Do not introduce another line immediately before it.
+            if run == MEASURED_RUN && i + c.len_utf8() < end {
+                let broken = broken.get_or_insert_with(|| {
+                    String::with_capacity(content.len() + content.len() / MEASURED_RUN)
+                });
+                broken.push_str(&content[from..i]);
+                broken.push('\n');
+                (run, from) = (0, i);
+            }
+            run += 1;
+        }
+        start = end;
+    }
+    match broken {
+        Some(mut broken) => {
+            broken.push_str(&content[from..]);
+            broken.into()
+        }
+        None => content.into(),
+    }
 }
 
 /// What a leaf of `kind` measures with, if anything: texts and inputs (an

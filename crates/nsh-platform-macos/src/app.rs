@@ -431,6 +431,7 @@ fn initial_environment() -> Environment {
         os: Os::MacOs,
         idiom: Idiom::Desktop,
         screen_color: true,
+        file_requests: true,
         ..Environment::default()
     }
 }

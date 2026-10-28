@@ -1,7 +1,7 @@
 //! `nsh/base`: the behavior and infrastructure foundation of NSH apps' UI,
 //! written in Rust, with no look of its own (as `gpui-base` is GPUI Kit's):
 //! controls (`Button`, `Checkbox`, a color picker: `ColorPicker` and its parts, `NumberInput`, `Radio` in a
-//! `RadioGroup`, `Slider`, `Switch`, a scroll bar of the app's own look (`Scrollbar`), `Tab` in `Tabs`, `Select`, `Combobox`, a one-time code: `OtpInput`), a progress bar (`Progress`), disclosure (`Collapsible`),
+//! `RadioGroup`, `Slider`, `Switch`, `Toggle` in a `ToggleGroup`, a scroll bar of the app's own look (`Scrollbar`), `Tab` in `Tabs`, `Select`, `Combobox`, a one-time code: `OtpInput`), a progress bar (`Progress`), disclosure (`Collapsible`),
 //! the parts of charts (`plot`: `nsh/base/plot`), navigation (stacks and pages), dialogs, popups on the core's overlays
 //! (`Popover`, `Menu`, `ContextMenu`, `Tooltip`, `Sheet`), a code editor
 //! (`Editor`), the changes between two texts (`DiffView`), tables over any number of rows and columns (`DataTable`) and static tables
@@ -47,6 +47,7 @@ mod scrollbar;
 mod select;
 mod sheet;
 mod slider;
+mod sort;
 mod switch;
 mod syntax;
 mod table;
@@ -55,6 +56,7 @@ pub mod text_view;
 mod theme;
 mod time_field;
 mod toast;
+mod toggle;
 mod tooltip;
 mod window;
 
@@ -178,6 +180,10 @@ pub use crate::{
         ToastMotion, ToastOptions, ToastProps, ToastStack, ToastStackElement, ToastStackEvent,
         ToastStackProps, ToastStackState, ToastTransitionStatus, toast, toast_stack,
     },
+    toggle::{
+        Toggle, ToggleElement, ToggleEvent, ToggleGroup, ToggleGroupElement, ToggleGroupProps,
+        ToggleProps, toggle, toggle_group,
+    },
     tooltip::{Tooltip, TooltipElement, TooltipEvent, TooltipProps, tooltip},
 };
 
@@ -222,7 +228,7 @@ pub mod parts {
         OtpInput, Popover, Progress, Radio, RadioGroup, ResizablePanel, ResizablePanelGroup,
         Scrollbar, Select, Sheet, Slider, Submenu, Switch, Tab, Table, TableBody, TableCaption,
         TableCell, TableFooter, TableHead, TableHeader, TableRow, Tabs, TextView, TimeField, Toast,
-        ToastStack, Tooltip, plot, rich_editor, toast,
+        ToastStack, Toggle, ToggleGroup, Tooltip, plot, rich_editor, toast,
     };
 
     /// What a part does: registers its components, classes and modules.
@@ -243,7 +249,7 @@ pub mod parts {
     ];
 
     /// The controls, popups, toasts and dialogs every app may use: buttons,
-    /// checkboxes, color pickers, radios, switches, sliders, scroll bars, number inputs, one-time code inputs, selects, comboboxes, tabs, collapsibles, progress,
+    /// checkboxes, color pickers, radios, switches, toggles, sliders, scroll bars, number inputs, one-time code inputs, selects, comboboxes, tabs, collapsibles, progress,
     /// menus, popovers, sheets, tooltips, toasts and system alerts.
     pub fn core(registry: &mut Registry) {
         registry
@@ -280,6 +286,8 @@ pub mod parts {
             .register::<Progress>()
             .register::<Tab>()
             .register::<Tabs>()
+            .register::<Toggle>()
+            .register::<ToggleGroup>()
             .register::<TimeField>()
             .register::<Toast>()
             .register::<ToastStack>()
@@ -411,6 +419,8 @@ mod tests {
                 "TimeField",
                 "Toast",
                 "ToastStack",
+                "Toggle",
+                "ToggleGroup",
                 "Tooltip"
             ]
         );

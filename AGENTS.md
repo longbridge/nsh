@@ -4,8 +4,9 @@ Native Shell (NSH for short in prose; crates, the CLI, the JS module and Java pa
 AI-generated, dynamically delivered native UI: native apps embed it (`NshAppView` on iOS, `NshView` on Android,
 `AppView` on macOS, Windows and Linux) and load TSX modules at run time — signed, sandboxed by the host, rendered with
 each platform's own UI. Embedding comes first; plugins for native apps and standalone apps use the same machinery.
-Module code runs in QuickJS on a native runtime (the reactive graph, the renderer and every module apps import are
-Rust); layout uses Taffy; embedding native components such as maps or web views has no layering problems. The
+Module code runs in QuickJS (on the web, the browser's own JavaScript engine) on a native runtime (the reactive graph,
+the renderer and every module apps import are Rust); layout uses Taffy; embedding native components such as maps or
+web views has no layering problems. The
 toolchain is pure Rust and does not need Node.js; app developers get a prebuilt distribution (`cargo xtask dist`) and
 never need Rust either. Every platform has a native backend: iOS with UIKit views (`nsh-platform-ios`), Android with
 Android views (`nsh-platform-android`), macOS with AppKit views (`nsh-platform-macos`), Windows in Win32 windows drawn
@@ -48,7 +49,7 @@ crates/
                        the standard modules among them (`runtime/fs.rs`: `fs/promises`, `runtime/process.rs`, `runtime/net.rs`,
                        `runtime/websocket.rs`, `runtime/os.rs`) on the `System` their calls get (capabilities, data directory, quotas, per-VM state)
   nsh-base/            `nsh/base`, NSH's `gpui-base`: unstyled base components (behavior, state, focus, accessibility; the look is the
-                       app's): navigation (`NavStack`, `NavPage`), `Dialog`, `AlertDialog`, `Button`, `Checkbox`, `Radio` / `RadioGroup`, `Switch`, `Tab` / `Tabs`, `Select` and `Combobox` (`select.rs`, `combobox.rs` on `listbox.rs`, the list's state machine they share), `Calendar` (`calendar.rs`: views, disabled dates, the days' keys), `TimeField` (`time_field.rs`: segments over one native text field), `DatePicker` (`date_picker.rs`: a calendar and time field in a popup; `popup.rs`'s `dropdown` is the popup `Select`, `Combobox` and `DatePicker` share), `Collapsible`, `Progress`, `Slider` (a value or a range along a track: `slider.rs`, numbers' rules in `numeric.rs`, a focused control's keys in `keys.rs`), `Scrollbar` (a bar of the app's own over a scroll view or list it names: `scrollbar.rs`, on the core's `watch_scroll`), `NumberInput` (a number typed or stepped: `number_input.rs`), `ColorPicker` and its parts `ColorArea`, `ColorSlider`, `ColorField`, `ColorSwatch`, `ColorEyeDropper` (a color in RGB, HSL, HSB or OKLCH: `color_picker/`), `OtpInput`, `Table` and its parts (`table.rs`: a table's roles, the look the app's), the charts' parts in the submodule `nsh/base/plot` (`Plot`, `Line`, `Area`, `Grid`, `Pie`, `Arc`), `Input` (a native text input, made by `nsh-js`), the status
+                       app's): navigation (`NavStack`, `NavPage`), `Dialog`, `AlertDialog`, `Button`, `Checkbox`, `Radio` / `RadioGroup`, `Switch`, `Tab` / `Tabs`, `Toggle` / `ToggleGroup` (a toggle button and a toolbar of them: `toggle.rs`; `roving.rs` the roving focus `Tabs`, `RadioGroup` and `ToggleGroup` share), `Select` and `Combobox` (`select.rs`, `combobox.rs` on `listbox.rs`, the list's state machine they share), `Calendar` (`calendar.rs`: views, disabled dates, the days' keys), `TimeField` (`time_field.rs`: segments over one native text field), `DatePicker` (`date_picker.rs`: a calendar and time field in a popup; `popup.rs`'s `dropdown` is the popup `Select`, `Combobox` and `DatePicker` share), `Collapsible`, `Progress`, `Slider` (a value or a range along a track: `slider.rs`, numbers' rules in `numeric.rs`, a focused control's keys in `keys.rs`), `Scrollbar` (a bar of the app's own over a scroll view or list it names: `scrollbar.rs`, on the core's `watch_scroll`), `NumberInput` (a number typed or stepped: `number_input.rs`), `ColorPicker` and its parts `ColorArea`, `ColorSlider`, `ColorField`, `ColorSwatch`, `ColorEyeDropper` (a color in RGB, HSL, HSB or OKLCH: `color_picker/`), `OtpInput`, `Table` and its parts (`table.rs`: a table's roles, the look the app's), the charts' parts in the submodule `nsh/base/plot` (`Plot`, `Line`, `Area`, `Grid`, `Pie`, `Arc`), `Input` (a native text input, made by `nsh-js`), the status
                        bar, `TextView` (Markdown / HTML documents: `text_view/`, docs/dev/text-view.md), `ResizablePanelGroup` / `ResizablePanel` (`resizable/`), `DockArea` (a dockable workspace: splits, tab groups and edge docks whose layout is
                        data, `dock/`, docs/dev/dock.md), `Editor` (a code editor: highlighting, several carets, folds, search, diagnostics;
                        `editor/`, docs/dev/editor.md), `DiffView` (the changes between two texts or of a patch, split or unified: `diff/`,
@@ -105,9 +106,10 @@ crates/
   nsh-platform-web/    WebAssembly backend (published web apps, `nsh run --target web`, the website's live demos): the engine on
                        the page's main thread (`LocalEngine`), text laid out with browser font metrics, batches as JSON + CSS
                        for the DOM runtime in `web/nsh.js`, the animator on requestAnimationFrame, fetch over the browser's
-                       (`net.rs`); feature `bytecode-only`: published apps' runtime (`nsh.wasm`, no QuickJS parser), feature
-                       `dev`: the development host's (`nsh-dev.wasm`, source and hot updates, the model `nsh test --target web`
-                       asks about); `web/index.html` is the demo
+                       (`net.rs`); app code runs on the browser's own JavaScript engine (feature `browser`: `src/browser/`
+                       and `web/browser/`, no QuickJS in WebAssembly), feature `dev`: the development host's (`nsh-dev.wasm`,
+                       development bundles with hot updates, `web/browser/hot.js`, the model `nsh test --target web` asks
+                       about); `web/index.html` is the demo
                        player (`cargo xtask web`); feature `compiler`: the playground's TSX compiler (`nsh-playground.wasm`)
                        (docs/dev/web.md)
   nsh-platform-linux/  GTK 4 backend (Linux): one `NshView` widget per node drawn with GSK, Pango text engine (typeset on the engine

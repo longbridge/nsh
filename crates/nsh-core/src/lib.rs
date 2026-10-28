@@ -22,6 +22,7 @@ pub mod desktop;
 mod effects;
 pub mod element;
 mod fenwick;
+pub mod file_dialog;
 pub mod filesystem;
 pub mod geometry;
 mod grid;

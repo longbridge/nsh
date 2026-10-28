@@ -25,6 +25,8 @@ async function fixture() {
   }
   imports.nsh_browser = { value: (...args) => bridge.value(...args) };
   const raw = (await WebAssembly.instantiate(module, imports)).exports;
+  // As `nsh.js` does: link every part, standard module and feature the runtime kept.
+  for (const name of Object.keys(raw)) if (/^nsh_(part|std|feature)_/.test(name)) raw[name]();
   const start = () => {
     const values = new Values();
     bridge = values.imports(() => raw.memory);
@@ -558,6 +560,25 @@ test("error boundaries deliver the first failure after a batch unwinds", { skip:
   dispose(); close();
 });
 
+test("a listener whose owner went runs unowned, as QuickJS runs it", { skip: !path }, async () => {
+  const { api, values, dom, close } = await fixture();
+  const heard = [];
+  let owner, node, dispose;
+  api.root(stop => {
+    dispose = stop;
+    owner = api.getOwner();
+    node = dom.rt.element("view");
+    dom.rt.prop(node, "onPress", payload => heard.push([payload, api.getOwner()]));
+  });
+  // The view outlives the owner it was made under (a popup leaving with
+  // its exit motion still reports its events).
+  dispose();
+  assert.equal(api.runWithOwner(owner, () => api.getOwner()), null);
+  assert.doesNotThrow(() => dom.event(values.nodeIds.get(node), "onPress", 1));
+  assert.deepEqual(heard, [[1, null]]);
+  close();
+});
+
 test("host events preserve order, owner cleanup and platform calls", { skip: !path }, async () => {
   const { createHost } = await import("./host.js");
   const { api, invoke, dom, close } = await fixture();
@@ -651,6 +672,15 @@ test("native file drops preserve URIs and optional page position", { skip: !path
   } finally { f.close(); }
 });
 
+test("merged props answer `in` from their sources, getters included", { skip: !path }, async () => {
+  const { dom, close } = await fixture();
+  const props = dom.rt.merge({ onPress() {} }, () => ({ style: {} }), { get children() { return "label"; } });
+  assert.ok("children" in props);
+  assert.ok("style" in props);
+  assert.ok(!("missing" in props));
+  assert.equal(props.children, "label");
+  close();
+});
 
 test("native video loads nest their size as the native JS host does", { skip: !path }, async () => {
   const f = await fixture();

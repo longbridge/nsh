@@ -51,6 +51,7 @@ mod js;
 pub(crate) mod json_host;
 mod keyboard;
 pub(crate) mod keys;
+pub(crate) mod menus;
 pub(crate) mod module;
 mod once;
 pub mod palette;
@@ -144,7 +145,7 @@ pub use self::{
         Video, WebView, canvas, input, input_accessory_view, native, overlay, scroll, shader,
         video, web_view, web_view_html,
     },
-    js::{JsHost, JsIn, JsKind, JsOwned, JsRaw},
+    js::{JsHost, JsIn, JsKind, JsOwned, JsPrimitive, JsRaw},
     json_host::from_json,
     keyboard::Keyboard,
     module::{
@@ -182,7 +183,7 @@ pub(crate) use self::{
     back::BackListener,
     builder::{ElKind, PlaceFn},
     component::{AnyInstance, caught},
-    task::{Action, AnswerSlot, ClipboardRead, Executor},
+    task::{Action, AnswerSlot, ClipboardRead, Executor, FileAnswer},
 };
 /// The geometry Rust components style with (`crate::geometry`).
 pub use crate::geometry::{
@@ -250,7 +251,12 @@ pub mod __private {
         fn pick(event: &Self) -> Option<&Self::Data>;
     }
 
-    pub use super::{callback::NamedArgs, class::__private::*, value::object_field};
+    pub use super::{
+        callback::NamedArgs,
+        class::__private::*,
+        prop::{set_held, set_plain},
+        value::object_field,
+    };
 
     /// Implemented by nothing: what the generated workspace of an app
     /// calls when a crate of the app has no `#[native_module]`

@@ -1,7 +1,6 @@
 ---
 title: OtpInput
 description: "The OtpInput component: a fixed-length numeric one-time code typed, pasted or autofilled into one native field, shown in cells, groups and a caret the app styles."
-order: 20.15
 group: base
 demo: el-otp-input
 ---

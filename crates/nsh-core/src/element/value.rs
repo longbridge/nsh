@@ -891,6 +891,59 @@ mod tests {
         assert!(error.starts_with("`count`: "), "{error}");
     }
 
+    /// Fields of one `Option` type in a row are read and written in a
+    /// loop: as each would be on its own.
+    #[derive(Debug, Default, PartialEq, JsObject)]
+    struct Runs {
+        first: Option<u32>,
+        a: Option<String>,
+        b: Option<String>,
+        c: Option<String>,
+        d: Option<String>,
+        #[prop(skip_none)]
+        e: Option<u32>,
+        #[prop(skip_none)]
+        f: Option<u32>,
+        #[prop(skip_none)]
+        g: Option<u32>,
+        #[prop(skip_none)]
+        h: Option<u32>,
+        #[prop(default = Some(1))]
+        last: Option<u32>,
+    }
+
+    #[test]
+    fn runs_of_option_fields_read_and_write_as_fields() {
+        let host = JsonHost::default();
+        let read = |json| Runs::from_js(JsIn::new(&host, host.value(json)));
+        let runs = read(serde_json::json!({
+            "first": 1, "a": "a", "c": null, "d": "d", "f": 6, "h": 8,
+        }))
+        .unwrap();
+        assert_eq!(
+            runs,
+            Runs {
+                first: Some(1),
+                a: Some("a".into()),
+                d: Some("d".into()),
+                f: Some(6),
+                h: Some(8),
+                last: Some(1),
+                ..Runs::default()
+            }
+        );
+        assert_eq!(
+            host.read(runs.to_js(&host).unwrap()),
+            Some(serde_json::json!({
+                "first": 1, "a": "a", "b": null, "c": null, "d": "d", "f": 6, "h": 8, "last": 1,
+            }))
+        );
+        let error = read(serde_json::json!({ "a": "a", "c": 3, "g": "bad" }))
+            .unwrap_err()
+            .0;
+        assert!(error.starts_with("`c`: "), "{error}");
+    }
+
     /// A percentage as CSS writes it; anything else is not one.
     #[test]
     fn percentages_read_as_css_writes_them() {

@@ -119,50 +119,6 @@ pub struct Host {
     entry_depth: Cell<usize>,
 }
 
-/// A context with `JS_NewContext`'s intrinsics. With feature
-/// `bytecode-only` without the one that compiles source (`eval`, the
-/// function constructors, `Module::declare`): nothing then reaches QuickJS'
-/// parser and compiler, which the linker leaves out, and the VM runs
-/// bytecode only (the web runtime of published apps).
-fn new_context(rt: &AsyncRuntime, scheduler: Rc<Scheduler>) -> rquickjs::Result<Context> {
-    #[cfg(test)]
-    if tests::SOURCELESS.get() {
-        return sourceless_context(rt, scheduler);
-    }
-    #[cfg(not(feature = "bytecode-only"))]
-    {
-        Context::full(rt, scheduler)
-    }
-    #[cfg(feature = "bytecode-only")]
-    {
-        sourceless_context(rt, scheduler)
-    }
-}
-
-/// The context of `bytecode-only` runtimes, without the intrinsic that
-/// compiles source; tests make one in any build, so a VM setup that needs
-/// QuickJS' parser fails them, not only the web runtime.
-#[cfg(any(feature = "bytecode-only", test))]
-fn sourceless_context(rt: &AsyncRuntime, scheduler: Rc<Scheduler>) -> rquickjs::Result<Context> {
-    use rquickjs::context::intrinsic::{
-        Date, Json, MapSet, Performance, Promise, Proxy, RegExp, TypedArrays, WeakRef,
-    };
-    let cx = Context::custom::<(
-        Date,
-        RegExp,
-        Json,
-        Proxy,
-        MapSet,
-        TypedArrays,
-        Promise,
-        WeakRef,
-        Performance,
-    )>(rt, scheduler)?;
-    // SAFETY: a new, live context; rquickjs has no intrinsic for it.
-    cx.with(|cx| unsafe { rquickjs::qjs::JS_AddIntrinsicAToB(cx.as_raw().as_ptr()) });
-    Ok(cx)
-}
-
 /// How a VM is set up.
 #[derive(Debug, Clone, Default)]
 pub struct HostOptions {
@@ -171,11 +127,6 @@ pub struct HostOptions {
     /// Removes `eval` and the function constructors and freezes the shared
     /// prototypes (see `sandbox`). Off for development bundles.
     pub harden: bool,
-    /// The hardening as bytecode ([`crate::compile_harden`]), run instead
-    /// of compiling it: a runtime without QuickJS' parser
-    /// (`bytecode-only`) needs it to harden. Trusted input, like a bundle's
-    /// bytecode: only from the CLI that compiled the app.
-    pub harden_bytecode: Option<std::sync::Arc<Vec<u8>>>,
     /// The UI sets apps import as native modules
     /// (`nsh_base::registry()`, served as `nsh/base`, and an app's own).
     pub ui_sets: Vec<nsh_core::element::Registry>,
@@ -211,7 +162,7 @@ impl Host {
         scheduler.ready(rt.set_max_stack_size(limits.stack_bytes));
         let budget = Budget::new(limits);
         scheduler.ready(rt.set_interrupt_handler(Some(budget.interrupt_handler(None))));
-        let cx = new_context(&rt, scheduler.clone())?;
+        let cx = Context::full(&rt, scheduler.clone())?;
         let shared = Rc::new(Shared {
             limits,
             scheduler: Rc::downgrade(&scheduler),
@@ -237,11 +188,7 @@ impl Host {
             // Before hardening freezes the globals.
             crate::clock::install(&cx)?;
             if options.harden {
-                match &options.harden_bytecode {
-                    // SAFETY: trusted, per the option's contract.
-                    Some(bytecode) => unsafe { sandbox::harden_from(&cx, bytecode)? },
-                    None => sandbox::harden(&cx)?,
-                }
+                sandbox::harden(&cx)?;
             }
             Ok(())
         })
@@ -372,7 +319,6 @@ impl Host {
 
     /// Actual native module exports for declaration generation. This evaluates
     /// trusted module initializers only, without running user bundles or jobs.
-    #[cfg(not(feature = "bytecode-only"))]
     pub(crate) fn standard_exports(&self) -> Result<Vec<(String, Vec<String>)>, JsError> {
         self.guarded(Phase::Load, || {
             self.cx
@@ -403,11 +349,6 @@ impl Host {
                 .map_err(|error| self.classify(error))
         })
         .unwrap_or_else(|| Err(self.stopped()))
-    }
-
-    #[cfg(feature = "bytecode-only")]
-    pub(crate) fn standard_exports(&self) -> Result<Vec<(String, Vec<String>)>, JsError> {
-        Ok(Vec::new())
     }
 
     /// Sets the handler for unhandled promise rejections: promises still
@@ -1283,6 +1224,8 @@ fn payload_object<'js>(cx: &Ctx<'js>, payload: &EventPayload) -> rquickjs::Resul
         }
         // The core answers picks; JS never gets their files this way.
         EventPayload::Picked { id, .. } => obj.set("id", *id)?,
+        // The core answers these too.
+        EventPayload::FileRequest { id, .. } => obj.set("id", *id)?,
         EventPayload::Native { name, data } => {
             obj.set("name", &**name)?;
             obj.set("data", json_value(cx, data)?)?;
@@ -1647,59 +1590,6 @@ mod tests {
     };
 
     use super::*;
-
-    thread_local! {
-        /// Makes this thread's new VMs as `bytecode-only` runtimes make
-        /// theirs ([`sourceless_context`]).
-        pub(super) static SOURCELESS: Cell<bool> = const { Cell::new(false) };
-    }
-
-    /// A published web app's VM compiles no source: hardening comes as
-    /// bytecode and the standard modules and globals are native. Its
-    /// runtime cannot compile source at all (`bytecode-only`), so a setup
-    /// step or first use that needs QuickJS' parser would stop every
-    /// published app from starting.
-    #[test]
-    fn bytecode_only_vms_start_and_use_the_standard_apis_without_source() {
-        let imports: String = crate::standard::NAMES
-            .iter()
-            .enumerate()
-            .map(|(i, name)| format!("import * as m{i} from {name:?};\n"))
-            .collect();
-        let source = format!(
-            r#"{imports}
-            import {{ text }} from "nsh:rt";
-            for (const m of [{modules}]) if (typeof m !== "object") throw Error("module");
-            if (Buffer.from("nsh").toString("base64") !== "bnNo") throw Error("Buffer");
-            if (crypto.randomUUID().length !== 36 || typeof crypto.subtle !== "object") throw Error("crypto");
-            if (typeof process.platform !== "string" || typeof process.nextTick !== "function") throw Error("process");
-            if (typeof process.run !== "function" || typeof process.env !== "object") throw Error("process");
-            if (new URL("https://a.b/c").pathname !== "/c") throw Error("URL");
-            const socket = new WebSocket("ws://127.0.0.1:9/");
-            if (!(socket instanceof EventTarget) || socket.readyState !== WebSocket.CONNECTING) throw Error("WebSocket");
-            socket.close();
-            text("started");
-            "#,
-            modules = (0..crate::standard::NAMES.len())
-                .map(|i| format!("m{i}"))
-                .collect::<Vec<_>>()
-                .join(", ")
-        );
-        let bytecode = crate::compile_bytecode(&source, true).unwrap();
-        let harden = crate::compile_harden().unwrap();
-        SOURCELESS.set(true);
-        let host = Host::with_options(HostOptions {
-            harden: true,
-            harden_bytecode: Some(Arc::new(harden)),
-            ..HostOptions::default()
-        });
-        SOURCELESS.set(false);
-        let host = host.unwrap();
-        let error = host.eval_source("export {};").unwrap_err();
-        assert!(error.message.contains("eval is not supported"), "{error}");
-        host.eval_bytecode(&bytecode).unwrap();
-        assert_eq!(reported(&host), ["started"]);
-    }
 
     #[test]
     fn strings_outside_a_text_are_reported_once_per_element() {
@@ -2568,17 +2458,7 @@ const report = (v) => text(String(v));
 
     #[test]
     fn hardened_vms_run_no_code_from_strings() {
-        // Hardened from source, and from the bytecode the CLI ships to
-        // runtimes without a parser.
-        let from_bytecode = Host::with_options(HostOptions {
-            harden: true,
-            harden_bytecode: Some(crate::compile_harden().unwrap().into()),
-            ..HostOptions::default()
-        })
-        .unwrap();
-        for host in [sandboxed(Limits::default()), from_bytecode] {
-            hardened_vm_runs_no_code_from_strings(&host);
-        }
+        hardened_vm_runs_no_code_from_strings(&sandboxed(Limits::default()));
     }
 
     fn hardened_vm_runs_no_code_from_strings(host: &Host) {

@@ -93,6 +93,8 @@ flate2 = "1"
 brotli = { version = "9", default-features = false, features = ["std"] }
 zstd = { version = "0.14", default-features = false }
 tar = { version = "0.4", default-features = false }
+# Pruning the web runtime to what an app uses (`nsh package --target web`).
+wasmparser = { version = "0.262", default-features = false, features = ["std", "validate", "simd"] }
 base64 = "0.22"
 getrandom = "0.3"
 slab = "0.4"
@@ -494,13 +496,10 @@ opt-level = 3
 [profile.dev.package.usvg]
 opt-level = 3
 
-# The web runtime (`nsh.wasm`): what pages download, so Rust is optimized for
-# size (3.7 MB instead of 5.0, 1.0 MB with brotli); QuickJS keeps `-O3`, as
-# the interpreter is the slowest link (it is 0.45 MB of the difference).
+# The web runtime (`nsh.wasm`): what pages download, so it is optimized for
+# size.
 [profile.web]
 inherits = "release"
 opt-level = "z"
 strip = true
 panic = "abort"
-[profile.web.package.quickjs-jit-sys]
-opt-level = 3

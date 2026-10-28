@@ -642,6 +642,25 @@ impl<M: TextEngine> Core<M> {
         }
     }
 
+    /// How long the transitions of view `id` run, its delay included, with
+    /// its styles now (a component waiting for its exit,
+    /// [`crate::element::ElementRef::transition_time`]); zero for a view
+    /// with none, or gone.
+    pub(super) fn transition_time(&self, id: NodeId) -> std::time::Duration {
+        let Ok(key) = self.key(id) else {
+            return std::time::Duration::ZERO;
+        };
+        self.nodes[key as usize]
+            .view_style
+            .transition
+            .filter(|t| t.properties.0 != 0)
+            .map_or(std::time::Duration::ZERO, |t| {
+                std::time::Duration::from_secs_f32(
+                    (t.duration.max(0.0) + t.delay.max(0.0)) / 1000.0,
+                )
+            })
+    }
+
     /// Replaces the theme: every class is resolved again.
     pub(super) fn set_tailwind_theme(&mut self, json: &str) {
         let theme = match Theme::from_json(json) {

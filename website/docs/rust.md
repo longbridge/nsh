@@ -14,7 +14,7 @@ own UI. What differs is the language of your own code, and with it whether the a
 | | Rust | TSX | Rust with TSX |
 |---|---|---|---|
 | Your UI, state and handlers | Rust | TSX on QuickJS | Rust components and modules, TSX screens that use them |
-| The app runs | the engine and your crate only, on every platform and in the browser | QuickJS and the engine | QuickJS and the engine, with your crate |
+| The app runs | the engine and your crate only, on every platform and in the browser | QuickJS and the engine (in the browser, its JavaScript engine) | QuickJS and the engine, with your crate (in the browser, its JavaScript engine) |
 | Suits | Medium and large apps with demanding business logic | Apps and modules delivered at run time, quick iteration | A Rust core with parts that change often |
 | Edits | Rebuild and restart | Hot updates | Hot updates for TSX, rebuild and restart for Rust |
 | Start | `nsh init my-app --template rust` | `nsh init my-app --template ts` | `nsh init my-app --template mixed` |
@@ -170,6 +170,48 @@ fn window_bar() -> impl IntoElement {
 
 `set_title_bar(TitleBarStyle::Default, None)` restores the system title bar.
 `close_window()` follows the embedding host's normal window-close behavior.
+The module has the window's other functions (`set_title`, `minimize`,
+`toggle_full_screen`, ...) and the menus (`set_application_menu`,
+`popup_menu`) too: [nsh/desktop](../modules/nsh-desktop.md).
+
+## Files and folders
+
+On the desktops, Rust code shows the system's file dialogs and hands local paths to
+the system, each answer awaited in a task: `pick_paths` with an `OpenDialog`
+(`OpenDialog::files()`, `::folders()` or `::files_and_folders()`), `pick_save_path`
+with a `SaveDialog`, `open_path` (the file's default app), `reveal_path` (the item
+selected in Finder, File Explorer or the file manager) and `move_to_trash` (where the
+item went, when macOS says). The dialogs answer `Ok(None)` when the user cancels and
+an error when they cannot show (on Linux without a file chooser portal, and on iOS,
+Android and the web, where `open_path`, `reveal_path` and `move_to_trash` answer
+an error too). Every request that fails answers its error, never `false`.
+
+```rust
+use nsh_core::{
+    file_dialog::{FileFilter, OpenDialog},
+    prelude::*,
+};
+
+fn open_notes() {
+    let picked = pick_paths(
+        OpenDialog::files()
+            .multiple(true)
+            .filter(FileFilter::new("Markdown", ["md", "markdown"]))
+            .button_label("Open"),
+    );
+    spawn(async move {
+        match picked.await {
+            Ok(Some(paths)) => {
+                for path in paths {
+                    let _ = reveal_path(path).await;
+                }
+            }
+            Ok(None) => {} // Cancelled.
+            Err(error) => log::warn!("no file dialog: {error}"),
+        }
+    });
+}
+```
 
 ## Extending a Rust app with TSX
 

@@ -492,6 +492,9 @@ pub(crate) fn command(surface: &Rc<Surface>, _id: NodeId, command: &Command) {
         Command::ReadClipboardFiles { id } => read_clipboard_files(surface, *id),
         Command::PickImages { id, request } => pick_images(surface, *id, *request),
         Command::OpenUrl { id, url } => open_url(surface, *id, url),
+        Command::FileRequest { id, request } => {
+            crate::file_requests::request(surface, *id, request)
+        }
         Command::Back => crate::navigation::default_back(surface),
         Command::ExitApp => {
             // Closing destroys the window, whose handler stops the surface:

@@ -1,7 +1,6 @@
 ---
 title: Dock
 description: "DockArea: a dockable workspace of splits, tab groups and docks on the left, right and bottom edges, whose layout is data the app owns. The area owns tab drags and drops, resizing, docks, zoom and the lock, keeps each panel's content as it moves, and adapts to phones; the look and the panels' content are the app's."
-order: 29.6
 group: base
 demo: el-dock
 ---

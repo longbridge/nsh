@@ -42,6 +42,9 @@ pub struct Services {
     pub tokens: Arc<Tokens>,
     /// The initial theme.
     pub theme: ThemeTokens,
+    /// The engine's clock, which the host's timers and `Date` read: a
+    /// test's manual one moves only when the test moves it.
+    pub clock: nsh_core::time::Clock,
 }
 
 impl Default for Services {
@@ -55,6 +58,7 @@ impl Default for Services {
             environment: Default::default(),
             tokens: Default::default(),
             theme: Default::default(),
+            clock: Default::default(),
         }
     }
 }
@@ -109,6 +113,24 @@ pub trait Host {
     fn host_event(&self, name: &str, data: nsh_core::JsonValue);
     /// Complete an embedding host call.
     fn host_reply(&self, id: u64, result: Result<nsh_core::JsonValue, String>);
+    /// When the earliest timer the host keeps on the engine's clock is
+    /// due. A host whose timers run in the browser's event loop keeps none.
+    fn next_timer(&self) -> Option<Instant> {
+        None
+    }
+    /// Run the timers due at `now`.
+    fn run_timers(&self, now: Instant) {
+        let _ = now;
+    }
+    /// Move what JavaScript asked of the requests it routes through the
+    /// engine's network (`fetch` in a test session) into `out`, in order.
+    fn take_network(&self, out: &mut Vec<(u32, crate::FetchOp)>) {
+        let _ = out;
+    }
+    /// Deliver what happened to request `id`.
+    fn fetch_event(&self, id: u32, event: FetchEvent) {
+        let _ = (id, event);
+    }
     /// The reason the host stopped, if it did.
     fn fatal(&self) -> Option<String>;
     /// Stop the host and cancel pending callbacks and promises.
@@ -204,6 +226,8 @@ impl Script {
                 environment: *environment,
                 tokens,
                 theme,
+                // Startup runs on the engine's clock.
+                clock: nsh_core::time::current(),
             })?;
             Ok((script, 0))
         })();
@@ -261,12 +285,14 @@ impl Script {
     pub(crate) fn has_posted(&self) -> bool {
         self.0.has_posted()
     }
-    // Browser timers and promise jobs run in the browser event loop. Each
-    // callback schedules the local engine; no second timer queue is kept.
+    // Browser timers and promise jobs run in the browser event loop, except
+    // those of a realm on a manual clock, which the host keeps.
     pub(crate) fn next_timer(&self) -> Option<Instant> {
-        None
+        self.0.next_timer()
     }
-    pub(crate) fn run_timers(&self, _: Instant) {}
+    pub(crate) fn run_timers(&self, now: Instant) {
+        self.0.run_timers(now);
+    }
     pub(crate) fn run_system(&self) {}
     pub(crate) fn wants_frame(&self) -> bool {
         self.0.wants_frame()
@@ -286,8 +312,12 @@ impl Script {
     pub(crate) fn take_fonts(&self, out: &mut Vec<String>) {
         self.0.take_fonts(out);
     }
-    pub(crate) fn take_network(&self, _: &mut NetworkQueue) {}
-    pub(crate) fn fetch_event(&self, _: u32, _: FetchEvent) {}
+    pub(crate) fn take_network(&self, out: &mut NetworkQueue) {
+        self.0.take_network(&mut out.ops);
+    }
+    pub(crate) fn fetch_event(&self, id: u32, event: FetchEvent) {
+        self.0.fetch_event(id, event);
+    }
     pub(crate) fn collect_garbage(&self) {}
     pub(crate) fn fatal(&self) -> Option<String> {
         self.0.fatal()

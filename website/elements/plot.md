@@ -1,7 +1,6 @@
 ---
 title: Plot
 description: "The Plot component of nsh/base/plot, its marks Line, Area, Bar, Grid, Pie, Arc, RadialLine, RadialGrid and Sankey, its PlotAxis and PlotLabel: charts drawn natively from the app's rows, with the scales of the axes and their labels, texts at data points, the row or slice under the pointer, motion and no look of their own."
-order: 20.9
 group: base
 demo: el-plot
 ---

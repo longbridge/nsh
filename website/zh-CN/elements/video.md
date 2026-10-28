@@ -1,7 +1,7 @@
 ---
 title: Video
 description: Video 元素：原生视频播放，可使用自定义控件或系统控件。
-order: 10
+order: 90
 group: primitives
 demo: el-video
 ---

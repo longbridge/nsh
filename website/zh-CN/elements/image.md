@@ -1,7 +1,7 @@
 ---
 title: Image
 description: 显示打包资源或远程图片的元素，支持占位图、模糊、淡入、着色和加载事件。
-order: 4
+order: 30
 group: primitives
 demo: el-image
 ---

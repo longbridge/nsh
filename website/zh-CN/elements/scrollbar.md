@@ -1,7 +1,6 @@
 ---
 title: Scrollbar
 description: "Scrollbar 组件：为所有滚动视图和列表（设置一次主题）或单个滚动视图提供应用自己外观的滚动条，也可放在应用想放的位置；滑块跟随内容，拖动和按压会滚动内容，可在滚动时、悬停时或始终显示，按应用给的时长淡入淡出。"
-order: 20.86
 group: base
 demo: el-scrollbar
 ---

@@ -12,7 +12,7 @@ use std::{
 
 use super::{
     Answer, ImageSize,
-    task::{Action, AnswerSlot, ClipboardImage, ClipboardRead},
+    task::{Action, AnswerSlot, ClipboardImage, ClipboardRead, FileAnswer},
 };
 use crate::{
     Command, ROOT_ID,
@@ -164,6 +164,16 @@ pub(crate) fn host_call(
 pub(crate) fn open_url(url: String) -> (Answer<bool>, Action) {
     let (answer, slot) = Answer::new();
     (answer, Action::OpenUrl(url, slot))
+}
+
+/// Carries out `request` on local paths; `answer` takes the platform's
+/// answer.
+pub(crate) fn file_request<T>(
+    request: crate::file_dialog::FileRequest,
+    answer: impl FnOnce(AnswerSlot<T>) -> FileAnswer,
+) -> (Answer<T>, Action) {
+    let (result, slot) = Answer::new();
+    (result, Action::FileRequest(request, answer(slot)))
 }
 
 /// The color the user picks on the screen (none when cancelled).

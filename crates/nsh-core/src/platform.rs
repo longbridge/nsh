@@ -180,6 +180,11 @@ pub struct Environment {
     /// ([`crate::Command::PickScreenColor`]); without it, a pick answers
     /// no color at once.
     pub screen_color: bool,
+    /// The platform shows the system's open and save dialogs and opens,
+    /// reveals and trashes local paths ([`crate::Command::FileRequest`],
+    /// the desktops); without it, those requests answer at once with an
+    /// error.
+    pub file_requests: bool,
 }
 
 impl Environment {
@@ -212,6 +217,7 @@ impl Default for Environment {
             locale: Locale::EN_US,
             host: false,
             screen_color: false,
+            file_requests: false,
         }
     }
 }

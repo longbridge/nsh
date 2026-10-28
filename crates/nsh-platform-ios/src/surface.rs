@@ -346,6 +346,9 @@ impl RootView {
             host: false,
             // UIKit has no screen color sampler.
             screen_color: false,
+            // No file dialogs, file manager or trash (Catalyst included):
+            // the default, so the core answers those requests.
+            ..Environment::default()
         };
         // The embedding app's settings over the system's.
         self.ivars().host.get().apply(&mut env);

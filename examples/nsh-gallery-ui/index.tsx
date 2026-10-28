@@ -1,7 +1,7 @@
 import type { JSX, ViewStyle } from "nsh";
 import { effect, Text, token, View } from "nsh";
 import { reduceMotion } from "nsh";
-import { type AnimatedValue, createAnimatedValue } from "nsh";
+import { type AnimatedValue, createAnimatedValue, LayoutAnimation } from "nsh";
 import { platform } from "nsh";
 import { keymap } from "nsh";
 import { Button as BaseButton, Sheet as BaseSheet, Switch, Tooltip } from "nsh/base";
@@ -338,14 +338,41 @@ export function Row(props: { first?: boolean; onPress?: () => void; children: JS
 
 export type ButtonVariant = "primary" | "secondary" | "accent" | "ghost" | "danger";
 
+/** A ring turning with its top arc in `tint`: work going on. */
+export function Spinner(props: { size: number; tint: string }) {
+  return (
+    <View
+      style={{
+        width: props.size,
+        height: props.size,
+        borderRadius: props.size / 2,
+        borderWidth: Math.max(1.5, props.size / 8),
+        borderColor: alpha(props.tint, 0.25),
+        borderTopColor: props.tint,
+        animationName: "spin",
+        animationDuration: 800,
+        animationTimingFunction: "linear",
+        animationIterationCount: "infinite",
+      }}
+    />
+  );
+}
+
+/** A button's heights and label sizes, by size: compact with a pointer, roomier on a touch screen. */
+const buttonSizes = pointer
+  ? { small: { height: 24, font: 12, icon: 12, pad: 8 }, regular: { height: 28, font: 13, icon: 14, pad: 12 }, large: { height: 34, font: 14, icon: 15, pad: 16 } }
+  : { small: { height: 36, font: 14, icon: 14, pad: 12 }, regular: { height: 40, font: 15, icon: 16, pad: 16 }, large: { height: 48, font: 17, icon: 18, pad: 20 } };
+
 /**
- * A button: 28 pt tall on a desktop, 40 on a touch screen (`small`: 36).
- * `primary` and `accent` are the citrus fill (the main action), `secondary`
- * a raised neutral, `ghost` bare until the pointer is over it, `danger` a
- * destructive action: the danger tone's tint, edge and text on the raised
- * finish's drop, as quiet as `secondary`. A `color`
+ * A button: 28 pt tall on a desktop, 40 on a touch screen (`small` 24 / 36,
+ * `large` 34 / 48). `primary` and `accent` are the citrus fill (the main
+ * action), `secondary` a raised neutral, `ghost` bare until the pointer is
+ * over it, `danger` a destructive action: the danger tone's tint, edge and
+ * text on the raised finish's drop, as quiet as `secondary`. A `color`
  * fills it with that color instead. Under the pointer a raised button
- * lightens, pressed it sinks (an inner shade, and 3% smaller).
+ * lightens, pressed it sinks (an inner shade, and 3% smaller). `busy`
+ * puts a spinner in the icon's place and takes no presses; a new icon or
+ * the spinner grows in, and the width the new label needs is animated.
  */
 export function Button(props: {
   label: string;
@@ -353,22 +380,38 @@ export function Button(props: {
   color?: string;
   icon?: IconName;
   disabled?: boolean;
+  /** Work started by it is going on: a spinner, no presses (not dimmed). */
+  busy?: boolean;
   /** Grows to share a row with its siblings. */
   flex?: number;
-  size?: "small" | "regular";
+  size?: "small" | "regular" | "large";
   /** Shown as chosen: what it opens is open (a menu's or a popover's
    * trigger), or it is on. A ghost button keeps the hover's `accent` fill, a
    * raised one its pressed look, a filled one its pressed shade. */
   selected?: boolean;
   onPress: () => void;
 }) {
-  const small = () => props.size === "small";
+  const dims = () => buttonSizes[props.size ?? "regular"];
   // `nsh/base`'s Button gives the behavior (presses, disabled, the button
   // role); the look below is the gallery's own.
   const scale = createAnimatedValue(1);
+  // The leading glyph (the icon, or the spinner while busy) grows in each
+  // time it changes, and the label's new width eases in with it; both at
+  // once with reduced motion.
+  const glyph = createAnimatedValue(1);
+  let shownGlyph = props.busy ? "busy" : props.icon;
+  effect(() => {
+    const next = props.busy ? "busy" : props.icon;
+    if (next === shownGlyph) return;
+    shownGlyph = next;
+    if (reduceMotion()) return;
+    LayoutAnimation.configureNext({ duration: 220, update: { type: "spring", springDamping: 0.85 } });
+    glyph.set(0);
+    glyph.spring(1, motion.control);
+  });
   const variant = () => props.variant ?? "primary";
   const filled = () => !props.color && (variant() === "primary" || variant() === "accent");
-  const height = () => (pointer ? 28 : small() ? 36 : 40);
+  const height = () => dims().height;
   const danger = () => !props.color && variant() === "danger";
   const fg = () => (props.color ? "#ffffff" : filled() ? colors.onAccent : danger() ? colors.danger : colors.text);
   const look = (): ViewStyle =>
@@ -390,19 +433,20 @@ export function Button(props: {
             : finish.raised;
   return (
     <BaseButton
-      onPress={props.onPress}
-      onPressDown={() => scale.spring(0.97, motion.press)}
+      // Busy, it keeps its focus and its look and takes no second press.
+      onPress={() => !props.busy && props.onPress()}
+      onPressDown={() => !props.busy && scale.spring(0.97, motion.press)}
       onPressUp={() => scale.spring(1, motion.press)}
       disabled={props.disabled}
       accessibilityLabel={props.label}
       selected={props.selected}
-      hoverStyle={props.disabled || props.selected ? undefined : props.color || filled() ? { opacity: 0.94 } : danger() ? { backgroundColor: alpha(colors.danger, 0.16) } : variant() === "ghost" ? hovered() : finish.hover}
-      activeStyle={props.disabled ? undefined : props.color || filled() ? { opacity: 0.88 } : danger() ? { backgroundColor: alpha(colors.danger, 0.22), boxShadow: "none" } : finish.pressed}
+      hoverStyle={props.disabled || props.selected || props.busy ? undefined : props.color || filled() ? { opacity: 0.94 } : danger() ? { backgroundColor: alpha(colors.danger, 0.16) } : variant() === "ghost" ? hovered() : finish.hover}
+      activeStyle={props.disabled || props.busy ? undefined : props.color || filled() ? { opacity: 0.88 } : danger() ? { backgroundColor: alpha(colors.danger, 0.22), boxShadow: "none" } : finish.pressed}
       focusStyle={focusRing()}
       style={{
         flex: props.flex,
         height: height(),
-        paddingHorizontal: pointer ? 12 : 16,
+        paddingHorizontal: dims().pad,
         borderRadius: radius.control,
         borderCurve: "continuous",
         borderWidth: 1,
@@ -417,10 +461,14 @@ export function Button(props: {
         transitionDuration: 120,
       }}
     >
-      <If when={props.icon}>
-        <Icon name={props.icon!} size={pointer ? 14 : 16} tint={fg()} />
+      <If when={props.busy || props.icon}>
+        <View style={{ opacity: glyph, transform: [{ scale: glyph.interpolate({ inputRange: [0, 1], outputRange: [0.5, 1] }) }] }}>
+          <If when={props.busy} else={<Icon name={props.icon!} size={dims().icon} tint={fg()} />}>
+            <Spinner size={dims().icon} tint={fg()} />
+          </If>
+        </View>
       </If>
-      <Text style={{ fontSize: pointer ? 13 : 15, fontWeight: "500", color: fg() }}>{props.label}</Text>
+      <Text style={{ fontSize: dims().font, fontWeight: "500", color: fg() }}>{props.label}</Text>
     </BaseButton>
   );
 }

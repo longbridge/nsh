@@ -78,6 +78,7 @@ final class Native {
     static final int CARET_MOVE = 66;
     static final int PASTE = 67;
     static final int SCREEN_COLOR = 68;
+    static final int FILE_REQUEST = 69;
 
     /**
      * Draws the SVG {@code bytes} for a view {@code maxPx} pixels on its longer side, with its shorter side that long

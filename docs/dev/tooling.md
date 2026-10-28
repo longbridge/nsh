@@ -378,6 +378,11 @@ Headless runs play the platform's part NSH's protocol defines, and refuse what o
 - the platform has no eyedropper (`Environment::screen_color` false) until a Rust test calls
   `Headless::on_screen_color(color)`: then `Command::PickScreenColor` is answered with `onScreenColor`, that color (or
   none, a cancel);
+- the platform has no file dialogs, file manager or trash (`Environment::file_requests` false: every request fails
+  at once) until a Rust test calls `Headless::on_pick_paths(paths)` or `Headless::on_pick_save_path(path)`: then each
+  `Command::FileRequest` is recorded (`Screen::file_requests`), never carried out, and answered with `onFileRequest`:
+  the open dialog with those paths,
+  the save dialog with that path (none, a cancel), opening, revealing and trashing with success;
 - the embedding app is the test's (`EngineConfig::host`, `Headless::host`): `open`'s `host.params` are the launch
   parameters, `host.handlers` the channel's handlers (`module.rs` `host_setup`: a value answers at once, a function's
   calls go over a channel to `RouteServer`, which `serve` answers on the test file's VM while a step runs, as a route's
@@ -593,7 +598,8 @@ The web (`--target web`, `nsh-cli/src/test_web.rs`): the agent runs in the CLI, 
 Chromium browser (Chrome, Edge or Chromium; `--browser <PATH>`, else the one installed where `cdp.rs` looks; nsh never
 fetches one and fails saying so when there is none). One browser serves the run; each `open` gets a page in a browser
 context of its own (storage apart) on a dev server of its own that also serves the web host's page
-(`DevServer::serve_web`). The development runtime (`nsh-dev.wasm`, feature `dev` of `nsh-platform-web`) keeps the
+(`DevServer::serve_web`). The development runtime (`nsh-dev.wasm`, feature `dev` of `nsh-platform-web`, the app on the
+browser's JavaScript engine, its timers, clock and `fetch` through the engine while the test runs) keeps the
 `Model` once the server's hello says `test`, and answers the steps' questions about it (`TestStep::Scene` with a
 `SceneQuery`: `nsh_testing::agent::answer`; where views are, the viewport, inputs' text and dialogs' buttons from the
 DOM, in `nsh.js`'s `testPage`). The CLI's agent sees the app through `RemoteScene`, which asks those questions

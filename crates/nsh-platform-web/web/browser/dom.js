@@ -2,7 +2,7 @@
 // decoding and layout operations to Rust.
 export function createDom(invoke, values, reactive, live, wake) {
   const handlers = new WeakMap(), owners = new WeakMap(), heldProps = new WeakMap();
-  let touches, measure;
+  let touches, measure, hot;
   const prototype = Object.create(null);
   for (const name of ["focus", "blur", "scrollTo", "zoomTo", "scrollToIndex", "scrollToEnd", "reload", "goBack", "goForward", "stopLoading", "injectJavaScript", "postMessage", "seek"]) {
     prototype[name] = function (argument) { const id = values.nodeIds.get(this); if (id === undefined) throw new TypeError("nsh: not a node"); return call(314, [id, name, argument]); };
@@ -97,6 +97,14 @@ export function createDom(invoke, values, reactive, live, wake) {
         if (source && name in source) return source[name];
       }
     },
+    // `"children" in props` (components with a children slot) asks the
+    // sources, not the empty target.
+    has(_, name) {
+      return sources.some(source => {
+        const value = typeof source === "function" ? source() : source;
+        return value != null && name in value;
+      });
+    },
     ownKeys() { return [...new Set(sources.flatMap(source => Reflect.ownKeys((typeof source === "function" ? source() : source) ?? {})))]; },
     getOwnPropertyDescriptor(_, name) { return { enumerable: true, configurable: true }; },
   });
@@ -113,6 +121,7 @@ export function createDom(invoke, values, reactive, live, wake) {
   return {
     setMeasure(value) { measure = value; },
     setTouches(value) { touches = value; },
+    setHot(value) { hot = value; },
     rootProp: (name, value) => prop(root, name, value),
     listen(node, name, value) {
       let events = handlers.get(node);
@@ -125,10 +134,24 @@ export function createDom(invoke, values, reactive, live, wake) {
       metaUrl: path => new URL(path, document.baseURI).href,
       ref,
     },
-    mount(App, props = {}) {
+    mount(App, props) {
+      // A hot update running the module again keeps what it mounted.
+      const kept = hot?.reuse(App, props);
+      if (kept) return kept;
       dispose?.();
-      reactive.root(stop => { dispose = stop; insert(root, component(App, props)); });
-      return () => { const stop = dispose; dispose = null; stop?.(); };
+      let stop;
+      // Undoes this mount only: hot updates undo a module's earlier mounts
+      // after it mounted anew.
+      const unmount = () => {
+        const release = stop;
+        stop = null;
+        if (dispose === unmount) dispose = null;
+        release?.();
+      };
+      const input = props !== null && (typeof props === "object" || typeof props === "function") ? props : {};
+      reactive.root(release => { stop = release; dispose = unmount; insert(root, component(App, input)); });
+      hot?.rendered(App, unmount);
+      return unmount;
     },
     event(id, name, payload) {
       if (name === "onTouch" && touches) return touches.dispatch(payload);

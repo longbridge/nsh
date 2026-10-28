@@ -1,7 +1,6 @@
 ---
 title: Input
 description: "The native text field: controlled and uncontrolled text, keyboards, autofill, selection, multiline inputs and focus."
-order: 20.1
 group: base
 demo: el-input
 ---

@@ -1,7 +1,6 @@
 ---
 title: DiffView
 description: "The DiffView component: the changes between two texts or of a patch, side by side or unified, with the words changed within lines highlighted, unchanged lines collapsed into separators that expand, syntax highlighting, soft wrap, per-change actions, line selection and review annotations."
-order: 26.3
 group: base
 demo: el-diff-view
 ---

@@ -1,7 +1,6 @@
 ---
 title: Calendar
 description: "The Calendar component: a date or a range of dates picked from months of days, with month and year views and the keyboard, styled by the app."
-order: 20.68
 group: base
 demo: el-date-picker
 ---

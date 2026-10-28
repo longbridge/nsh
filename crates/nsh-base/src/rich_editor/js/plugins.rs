@@ -207,10 +207,11 @@ pub(crate) fn transaction_json(tr: &Transaction, id: Option<u64>) -> Transaction
             }),
         );
     }
-    let meta: Map<String, Value> = tr
-        .meta_entries()
-        .map(|(key, value)| (key.to_owned(), value.clone()))
-        .collect();
+    let meta: Map<String, Value> = crate::rich_editor::model::json_object(
+        &mut tr
+            .meta_entries()
+            .map(|(key, value)| (key.to_owned(), value.clone())),
+    );
     if !meta.is_empty() {
         out.insert("meta".into(), Value::Object(meta));
     }
@@ -814,7 +815,7 @@ fn decoration_from_json(item: &Value) -> Option<Decoration> {
     let attrs = |key: &str| -> Attrs {
         item.get(key)
             .and_then(Value::as_object)
-            .map(|m| m.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
+            .map(crate::rich_editor::model::object_attrs)
             .unwrap_or_default()
     };
     let decoration = match item.get("kind").and_then(Value::as_str).unwrap_or("inline") {

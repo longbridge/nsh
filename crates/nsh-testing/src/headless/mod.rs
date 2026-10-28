@@ -262,6 +262,12 @@ pub struct Headless {
     picks: Picks,
     /// The color the user picks on the screen ([`Headless::on_screen_color`]).
     screen_color: Option<nsh_core::Hsla>,
+    /// The paths the user picks in the open dialog
+    /// ([`Headless::on_pick_paths`]).
+    picked_paths: Vec<std::path::PathBuf>,
+    /// The path the user chooses in the save dialog
+    /// ([`Headless::on_pick_save_path`]).
+    save_path: Option<std::path::PathBuf>,
     step: String,
     applied: u64,
     /// The app left (`process.exit`, `Command::ExitApp`): no more batches
@@ -313,6 +319,8 @@ impl Headless {
             dialogs: Dialogs::Default,
             picks: Picks::Default,
             screen_color: None,
+            picked_paths: Vec::new(),
+            save_path: None,
             step: "open".to_owned(),
             applied: 0,
             exited: false,
@@ -380,7 +388,11 @@ impl Headless {
         self.engine.control().advance_clock(by, move || {
             let _ = tx.send(());
         });
-        let _ = rx.recv_timeout(MAX_IDLE);
+        // A gone engine never moves the clock: the steps that wait for it
+        // to move would wait for good.
+        if let Err(crossbeam_channel::RecvTimeoutError::Disconnected) = rx.recv_timeout(MAX_IDLE) {
+            panic!("the engine stopped (its thread panicked?): the manual clock cannot move");
+        }
     }
 
     /// One display frame on the manual clock, `by` after the last: the
@@ -539,6 +551,24 @@ impl Headless {
         self.set_environment("onScreenColor", |env| env.screen_color = true)
     }
 
+    /// The platform has file dialogs, a file manager and a trash
+    /// ([`nsh_core::platform::Environment::file_requests`]), and the user
+    /// picks `paths` whenever the app shows the open dialog (`pick_paths`;
+    /// none cancels). Opening, revealing and trashing paths then succeed
+    /// without touching them (trashing says nowhere they went); every
+    /// request is in [`Screen::file_requests`].
+    pub fn on_pick_paths(&mut self, paths: Vec<std::path::PathBuf>) -> Result<(), String> {
+        self.picked_paths = paths;
+        self.set_environment("onPickPaths", |env| env.file_requests = true)
+    }
+
+    /// As [`Headless::on_pick_paths`], for the save dialog
+    /// (`pick_save_path`): the user chooses `path`; `None` cancels.
+    pub fn on_pick_save_path(&mut self, path: Option<std::path::PathBuf>) -> Result<(), String> {
+        self.save_path = path;
+        self.set_environment("onPickSavePath", |env| env.file_requests = true)
+    }
+
     /// Leaves the picks steps ask for to the caller: a step returns with
     /// one asked ([`Headless::pending_pick`]) until [`Headless::answer_pick`]
     /// answers it.
@@ -692,6 +722,19 @@ impl Headless {
                 fields.push(("color", PayloadValue::Number(f64::from(packed))));
             }
             control.dispatch_event(ROOT_ID, EventKind::ScreenColor, EventPayload::Map(fields));
+        }
+        for (id, request) in self.screen.take_file_answers() {
+            use nsh_core::file_dialog::FileRequest;
+            let paths = match request {
+                FileRequest::OpenDialog(_) => self.picked_paths.clone(),
+                FileRequest::SaveDialog(_) => self.save_path.clone().into_iter().collect(),
+                _ => Vec::new(),
+            };
+            control.dispatch_event(
+                ROOT_ID,
+                EventKind::FileRequest,
+                EventPayload::file_answer(id, paths),
+            );
         }
         if self.screen.take_back_asked() {
             self.go_back(false);
@@ -2373,5 +2416,50 @@ mod tests {
         app.wait(Duration::from_secs(5)).unwrap();
         assert!(app.screen().sent(&Command::ExitApp));
         assert!(started.elapsed() < Duration::from_secs(2));
+    }
+
+    /// Saves to the path the user chooses and shows it in the file manager.
+    #[component]
+    fn SaveAs() -> impl IntoElement {
+        let saved = signal(String::from("none"));
+        view()
+            .child(text(move || format!("Saved {}", saved.get())))
+            .child(text("Save").on_press(move |_: &()| {
+                let dialog = nsh_core::file_dialog::SaveDialog::new().file_name("Untitled.md");
+                let path = pick_save_path(dialog);
+                spawn(async move {
+                    let path = match path.await {
+                        Ok(Some(path)) => path,
+                        Ok(None) => return saved.set("cancelled".into()),
+                        Err(_) => return saved.set("unavailable".into()),
+                    };
+                    let shown = reveal_path(path.clone()).await.is_ok();
+                    saved.set(format!("{} {shown}", path.display()));
+                });
+            }))
+    }
+
+    #[test]
+    fn the_save_dialog_answers_with_the_path_the_test_chose() {
+        use nsh_core::file_dialog::FileRequest;
+        let mut app = Headless::start(EngineConfig::new(Root::of::<SaveAs>())).unwrap();
+        app.first_render().unwrap();
+        // No file dialogs on this platform: unavailable at once.
+        app.press("Save").unwrap();
+        app.wait_for("Saved unavailable").unwrap();
+        assert!(app.screen().file_requests().is_empty());
+        app.on_pick_save_path(None).unwrap();
+        app.press("Save").unwrap();
+        app.wait_for("Saved cancelled").unwrap();
+        app.on_pick_save_path(Some("/docs/a.md".into())).unwrap();
+        app.press("Save").unwrap();
+        app.wait_for("Saved /docs/a.md true").unwrap();
+        let requests = app.screen().file_requests();
+        assert_eq!(requests.len(), 3);
+        assert!(matches!(
+            &requests[1],
+            FileRequest::SaveDialog(save) if save.file_name.as_deref() == Some("Untitled.md")
+        ));
+        assert_eq!(requests[2], FileRequest::RevealPath("/docs/a.md".into()));
     }
 }

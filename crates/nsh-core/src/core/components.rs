@@ -21,8 +21,8 @@ use crate::{
     Tag, TextEngine,
     element::{
         Action, AnswerSlot, AnyInstance, AnyValue, Attrs, Child, ClipboardRead, ComponentError,
-        ComponentSpec, ElKind, ElNode, Environment, Executor, ImageSize, IntoElement, JsEvent,
-        JsResult, ListConfig, Listener, ModuleCx, ParentElement, PlaceFn, Position, Posts,
+        ComponentSpec, ElKind, ElNode, Environment, Executor, FileAnswer, ImageSize, IntoElement,
+        JsEvent, JsResult, ListConfig, Listener, ModuleCx, ParentElement, PlaceFn, Position, Posts,
         Reactive, Registry, Root, RustCall, RustOp, SharedString, StyleRefinement, Task, Tokens,
         caught,
         responder::ResponderEl,
@@ -513,6 +513,10 @@ pub(super) struct Components {
     /// Colors being picked on the screen, by request id: their answers.
     screen_colors: FxHashMap<u32, AnswerSlot<Option<crate::Hsla>>>,
     next_screen_color: u32,
+    /// Requests on local paths (`pick_paths`, `open_path`, ...), by
+    /// request id: their answers.
+    file_requests: FxHashMap<u32, FileAnswer>,
+    next_file_request: u32,
     /// HTTP requests of tasks (`ui::fetch`), by request id: what arrived
     /// so far and the answer.
     fetches: FxHashMap<u32, PendingFetch>,
@@ -525,10 +529,17 @@ pub(super) struct Components {
     /// Elements to measure once this commit is laid out
     /// ([`crate::element::ElementRef::measure`]).
     pub(super) measures: Vec<(NodeId, AnswerSlot<Option<crate::Measurement>>)>,
+    /// Elements whose transitions' time to tell once this commit is
+    /// styled ([`crate::element::ElementRef::transition_time`]).
+    pub(super) transition_times: Vec<(NodeId, AnswerSlot<std::time::Duration>)>,
     /// The components' own lists, by node.
     virtual_lists: FxHashMap<NodeId, VirtualListState>,
     /// Views JS made, waiting to be in the tree to make their view.
     waiting: Vec<NodeId>,
+    /// Calls of components' methods made before their view was (a ref is
+    /// given as its component is made, and the view registers what the
+    /// methods act on): host, promise, call; run once the view is made.
+    parked_methods: Vec<(NodeId, u32, crate::element::MethodCall)>,
     /// The row counts the cells of views' lists read (their positions), by
     /// list, each under a root of its own that goes with the list.
     list_counts: FxHashMap<NodeId, (crate::element::Owner, crate::element::Signal<usize>)>,
@@ -602,6 +613,8 @@ impl Default for Components {
             next_url_open: 0,
             screen_colors: FxHashMap::default(),
             next_screen_color: 1,
+            file_requests: FxHashMap::default(),
+            next_file_request: 1,
             next_clipboard_read: 1,
             picks: FxHashMap::default(),
             next_pick: 1,
@@ -612,9 +625,11 @@ impl Default for Components {
             next_fetch: 1,
             animations: FxHashMap::default(),
             measures: Vec::new(),
+            transition_times: Vec::new(),
             virtual_lists: FxHashMap::default(),
             list_counts: FxHashMap::default(),
             waiting: Vec::new(),
+            parked_methods: Vec::new(),
             list_layouts: FxHashMap::default(),
             insets: FxHashMap::default(),
             js_back: false,
@@ -1375,6 +1390,11 @@ impl<M: TextEngine> Core<M> {
                 }
                 Err(message) => self.settle(call, Err(message.into())),
             },
+            RustCall::Method(host, method) if self.view_pending(host) => {
+                // Called from its ref, which the app gets as the component
+                // is made, before its view is (`render_components`).
+                self.components.parked_methods.push((host, call, method));
+            }
             RustCall::Method(host, method) => {
                 let mut failed = None;
                 let result = match self
@@ -1554,7 +1574,8 @@ impl<M: TextEngine> Core<M> {
             let rendered = self.render_dirty();
             let failed = self.report_failures();
             let woke = self.wake_waiting();
-            if !changed && !rendered && !failed && !woke {
+            let called = self.run_parked_methods();
+            if !changed && !rendered && !failed && !woke && !called {
                 break;
             }
         }
@@ -1754,6 +1775,36 @@ impl<M: TextEngine> Core<M> {
             }
         }
         woke
+    }
+
+    /// Runs the calls of methods parked for components whose view is now
+    /// made; whether any ran.
+    fn run_parked_methods(&mut self) -> bool {
+        if self.components.parked_methods.is_empty() {
+            return false;
+        }
+        let parked = std::mem::take(&mut self.components.parked_methods);
+        let mut ran = false;
+        for (host, call, method) in parked {
+            if self.view_pending(host) {
+                self.components.parked_methods.push((host, call, method));
+            } else {
+                ran = true;
+                self.run_rust(RustOp {
+                    call,
+                    run: RustCall::Method(host, method),
+                });
+            }
+        }
+        ran
+    }
+
+    /// Whether `host` hosts a component whose view is not made yet.
+    fn view_pending(&self, host: NodeId) -> bool {
+        self.components
+            .instances
+            .get(&host)
+            .is_some_and(|i| matches!(&i.inner, Inner::Component(inner) if inner.owner().is_none()))
     }
 
     /// The owner of the nearest component above `host` in the tree (its
@@ -2368,10 +2419,15 @@ impl<M: TextEngine> Core<M> {
             inst.children_wanted = wanted;
             match self.components.owners.get(&host).copied() {
                 // A view's: what passes them follows (a view that passes
-                // none made no signal).
+                // none made no signal). The run of the view that passed
+                // them may be gone already, in this commit, before what it
+                // made is released: a region of this component and the one
+                // passing its children changed together (a menu and its
+                // submenu ending their exits at once). Nothing reads its
+                // signal then.
                 Some(_) => {
                     if let Some(signal) = inst.lazy_wanted {
-                        signal.set(wanted);
+                        signal.try_set(wanted);
                     }
                 }
                 None => self.events.push(JsEvent::Children { host, wanted }),
@@ -2386,9 +2442,17 @@ impl<M: TextEngine> Core<M> {
         let Some(inst) = self.components.instances.get_mut(&nested) else {
             return crate::element::signal(false);
         };
-        *inst
-            .lazy_wanted
-            .get_or_insert_with(|| crate::element::signal(inst.children_wanted))
+        // Made again under this owner when the one that made it is gone
+        // (the run that passed them before was disposed while the
+        // component stayed).
+        match inst.lazy_wanted {
+            Some(signal) if signal.is_live() => signal,
+            _ => {
+                let signal = crate::element::signal(inst.children_wanted);
+                inst.lazy_wanted = Some(signal);
+                signal
+            }
+        }
     }
 
     /// JS child `child`, placed at `place`, leaves the tree (and the
@@ -4253,6 +4317,24 @@ impl<M: TextEngine> Core<M> {
         let Some(mut inst) = self.components.instances.remove(&host) else {
             return;
         };
+        if self
+            .components
+            .parked_methods
+            .iter()
+            .any(|(h, ..)| *h == host)
+        {
+            let (gone, kept) = std::mem::take(&mut self.components.parked_methods)
+                .into_iter()
+                .partition(|(h, ..)| *h == host);
+            self.components.parked_methods = kept;
+            for (_, call, method) in gone {
+                drop_caught(method);
+                self.settle(
+                    call,
+                    Err(format!("node {host} hosts no Rust component").into()),
+                );
+            }
+        }
         // Its root's (a render or classes of the app's) on the host.
         self.forget_node_extras(host);
         if let Inner::Component(inner) = &mut inst.inner {
@@ -4592,6 +4674,9 @@ impl<M: TextEngine> Core<M> {
                 self.set_builtin_scrollbars(theme.map(|theme| (source, theme)))
             }
             Action::Measure(id, answer) => self.components.measures.push((id, answer)),
+            Action::TransitionTime(id, answer) => {
+                self.components.transition_times.push((id, answer))
+            }
             Action::ImageInfo(uri, answer) => {
                 let id = self.components.next_image_info;
                 self.components.next_image_info += 1;
@@ -4715,6 +4800,36 @@ impl<M: TextEngine> Core<M> {
                 let _ = self.apply_op(Op::Command {
                     id: crate::ROOT_ID,
                     command: Command::PickScreenColor { id },
+                });
+            }
+            Action::FileRequest(request, answer) => {
+                use crate::file_dialog::FileRequest;
+                if !self.components.environment.file_requests {
+                    answer.deliver(
+                        Vec::new(),
+                        Some("this platform has no file dialogs, file manager or trash".into()),
+                    );
+                    return;
+                }
+                if let FileRequest::OpenPath(path)
+                | FileRequest::RevealPath(path)
+                | FileRequest::MoveToTrash(path) = &request
+                    && !path.is_absolute()
+                {
+                    let refused = format!("`{}` is not an absolute path", path.display());
+                    log::warn!("{refused}");
+                    answer.deliver(Vec::new(), Some(refused));
+                    return;
+                }
+                let id = self.components.next_file_request;
+                self.components.next_file_request = id.wrapping_add(1);
+                self.components.file_requests.insert(id, answer);
+                let _ = self.apply_op(Op::Command {
+                    id: crate::ROOT_ID,
+                    command: Command::FileRequest {
+                        id,
+                        request: Box::new(request),
+                    },
                 });
             }
         }
@@ -4913,6 +5028,33 @@ impl<M: TextEngine> Core<M> {
                 }
                 true
             }
+            // A view's menu item runs here; JS's go to JS. A context menu
+            // closing settles the one either side showed, so both hear it.
+            EventKind::Menu if id == crate::ROOT_ID => {
+                let menus = self.components.executor.menus.clone();
+                let closed = matches!(payload, EventPayload::Map(entries)
+                    if entries.iter().any(|(k, v)| *k == "closed" && *v == crate::PayloadValue::Bool(true)));
+                if closed {
+                    menus.borrow_mut().settle_popup();
+                    return false;
+                }
+                let Some(item) = number("id").map(|n| n as u32) else {
+                    return false;
+                };
+                if item < crate::element::menus::FIRST_ID {
+                    return false;
+                }
+                let handler = menus.borrow().handler(item);
+                // An item of a menu replaced since the platform showed it.
+                if let Some(handler) = handler {
+                    let result = caught(|| handler());
+                    self.apply_actions();
+                    if let Err(message) = result {
+                        log::error!(target: "js", "a menu item failed: {message}");
+                    }
+                }
+                true
+            }
             EventKind::BackPress if id == crate::ROOT_ID => {
                 // The top overlay listening takes it first.
                 if self.overlay_cancel() {
@@ -4986,6 +5128,20 @@ impl<M: TextEngine> Core<M> {
                 let color = number("color").map(|packed| crate::Color(packed as u32).into());
                 if let Some(answer) = self.components.screen_colors.remove(&(request as u32)) {
                     answer.borrow_mut().deliver(color);
+                }
+                true
+            }
+            EventKind::FileRequest if id == crate::ROOT_ID => {
+                let EventPayload::FileRequest {
+                    id: request,
+                    paths,
+                    error,
+                } = payload
+                else {
+                    return false;
+                };
+                if let Some(answer) = self.components.file_requests.remove(request) {
+                    answer.deliver(paths.clone(), error.clone());
                 }
                 true
             }

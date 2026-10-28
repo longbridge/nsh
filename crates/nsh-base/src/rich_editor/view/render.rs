@@ -672,7 +672,7 @@ fn inline_of(
             _ => {}
         }
     }
-    widgets.sort_by_key(|w| (w.0, w.1));
+    crate::sort::sort_by_key(&mut widgets, |w| (w.0, w.1));
     let mut out = Inline::default();
     let mut text_at = 0u32;
     let mut emitted = 0usize;
@@ -828,7 +828,10 @@ fn text_block(rv: Rv, item: ReadSignal<BlockItem>, owner: u64) -> impl IntoEleme
 /// The placeholder of an empty textblock that shows one (Tiptap's
 /// placeholder extension: `placeholders` by type, else `placeholder`;
 /// while editable, in the anchor's block, at the top level, unless the
-/// flags say otherwise).
+/// flags say otherwise). The block an input method composes in shows
+/// none: the composition, drawn at the caret before the document holds
+/// it, would sit over it (a native input hides its placeholder once it
+/// has marked text).
 fn placeholder_text(rv: &Rv, it: &BlockItem) -> Option<String> {
     let props = rv.props;
     if !it.node.is_textblock() || it.node.content().size() != 0 {
@@ -843,18 +846,20 @@ fn placeholder_text(rv: &Rv, it: &BlockItem) -> Option<String> {
         .or_else(|| props.placeholder.get().map(|s| s.to_string()))?;
     let include_children = props.include_children.get();
     let only_current = props.show_only_current.get();
-    if only_current {
+    let composing = rv.composition.with(Option::is_some);
+    if only_current || composing {
         rv.sel_rev.get();
     }
     let state = rv.st.borrow();
     if !include_children && state.doc().resolve(it.pos).ok()?.depth != 0 {
         return None;
     }
-    if only_current {
-        let anchor = state.selection().anchor();
-        if anchor < it.pos || anchor > it.pos + it.node.node_size() {
-            return None;
-        }
+    let inside = |pos: usize| pos >= it.pos && pos <= it.pos + it.node.node_size();
+    if only_current && !inside(state.selection().anchor()) {
+        return None;
+    }
+    if composing && inside(state.selection().head()) {
+        return None;
     }
     Some(label)
 }

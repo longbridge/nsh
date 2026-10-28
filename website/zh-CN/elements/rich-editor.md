@@ -1,7 +1,6 @@
 ---
 title: RichEditor
 description: nsh/base 的富文本编辑器：由应用的 schema 定义的文档、命令、插件、历史、键位、输入规则和 Markdown，按 ProseMirror 的架构构建，状态在 Rust 中。
-order: 26.25
 group: base
 demo: el-rich-editor
 ---

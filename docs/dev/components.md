@@ -10,7 +10,7 @@ the styled layer, GPUI Kit's `gpui-component`, is never part of NSH. The look of
 come from two places:
 
 - **`nsh/base`**: unstyled base components of `gpui-base`'s scope, the crate `nsh-base` (`crates/nsh-base`,
-  `nsh_base::registry()`): `Button`, `Checkbox`, `Radio`, `RadioGroup`, `Switch`, `Tab`, `Tabs`, `Select` (one value from a list: "Popups" below), `Combobox` (one value or several from the same list), `Calendar` (a date or a range from months of days), `TimeField` (a time of day by segments), `DatePicker` (a calendar and a time field in a popup: "Popups" below), `Collapsible`, `Progress`, `Slider`, `Scrollbar` ("Scroll bars" below), `ColorPicker` with `ColorArea`, `ColorSlider`, `ColorField`, `ColorSwatch` and `ColorEyeDropper` (a color in RGB, HSL, HSB or OKLCH, its parts laid out by the app), `NumberInput`, `OtpInput`, `Table` with `TableHeader`, `TableBody`, `TableFooter`, `TableRow`, `TableHead`, `TableCell` and `TableCaption` (a table's accessibility roles around the app's rows), `TextView` (`text-view.md`), `ResizablePanelGroup` and `ResizablePanel`, `DockArea`
+  `nsh_base::registry()`): `Button`, `Checkbox`, `Radio`, `RadioGroup`, `Switch`, `Tab`, `Tabs`, `Toggle`, `ToggleGroup`, `Select` (one value from a list: "Popups" below), `Combobox` (one value or several from the same list), `Calendar` (a date or a range from months of days), `TimeField` (a time of day by segments), `DatePicker` (a calendar and a time field in a popup: "Popups" below), `Collapsible`, `Progress`, `Slider`, `Scrollbar` ("Scroll bars" below), `ColorPicker` with `ColorArea`, `ColorSlider`, `ColorField`, `ColorSwatch` and `ColorEyeDropper` (a color in RGB, HSL, HSB or OKLCH, its parts laid out by the app), `NumberInput`, `OtpInput`, `Table` with `TableHeader`, `TableBody`, `TableFooter`, `TableRow`, `TableHead`, `TableCell` and `TableCaption` (a table's accessibility roles around the app's rows), `TextView` (`text-view.md`), `ResizablePanelGroup` and `ResizablePanel`, `DockArea`
   (`dock.md`), `Editor` (a code editor, `editor.md`), `DiffView` (the changes between two texts, `diff.md`), `DataTable` (a table over any number of rows and columns, `data-table.md`), the popups on the core's overlays (`Popover`,
   `Menu` with `MenuItem`, `MenuSeparator` and `Submenu`, `ContextMenu`, `Tooltip`, `Sheet`: "Popups" below), toasts
   (`Toast`, `ToastStack` and the class `ToastManager`: "Toasts" below) and the
@@ -247,7 +247,7 @@ reasons: `reactive-components.md`.
   pass it content and a slot's setter (`.header(..)`) fills the slot, as JSX children and slot props do: the content is nodes of
   this view, placed where the nested component's view places the app's; regions in it join its children in place).
   Their abilities are traits: `Styled`, `Accessible`, `Interactive` (`active` / `hover` / `focus` styles, `disabled`,
-  `hit_slop`, and the typed events every element has: `on_press`, `on_long_press`, `on_layout(Bounds<Points>)`,
+  `hit_slop`, and the typed events every element has: `on_press` / `on_long_press` / `on_press_down` / `on_press_up` (`move || ..` or `move |e: &PressEvent| ..`: position, modifiers, clicks), `on_layout(Bounds<Points>)`,
   `on_touch(TouchEvent)`, `on_pan_start`, ..., the touch responder: below), `ParentElement`, `FluentBuilder` (`when`,
   `when_some`, `map`: decided once, when the view is made). Each host element has its own props and typed events
   (every option takes a value, a signal or a closure, `impl IntoReactive<T>`, as TSX's props take a value or an
@@ -318,7 +318,8 @@ reasons: `reactive-components.md`.
   | `fetch(url)` | `fetch(url).await` / `fetch(HttpRequest::post(url, body).header(..)).await` in a task: an `HttpResponse` (`status()`, `ok()`, `header(..)`, `text()`, `body`) or the error; the engine's network stack and capability checks, as JS's, so it works on the web too; the request is cancelled with its task |
   | `cleanup` | `cleanup(f)` (runs before the owner runs again or goes) |
   | `windowSize()`, `safeArea()`, `keyboardFrame()`, `colorScheme()`, ... | `window()`, `safe_area()`, `keyboard_height()`, `dark()`, `font_scale()`, `reduce_motion()`, `screen_reader()`, `rtl()`: reading subscribes |
-  | `Window.setTitleBar({ style, height })`, `titleBar()`, `Window.close()` (`nsh/desktop`) | `element::desktop::set_title_bar(style, height)`, `title_bar()`, `close_window()`; the same root commands and native controls, with title-bar insets forwarded through `element::Environment`; `.window_drag(bool)` on any interactive element marks or excludes a native drag region |
+  | `Window.setTitleBar({ style, height })`, `titleBar()`, `Window.close()`, `Window.setTitle(..)`, `minimize()`, ... (`nsh/desktop`) | `element::desktop::set_title_bar(style, height)`, `title_bar()`, `close_window()`, `set_title(..)`, `minimize()`, `toggle_maximize()`, `toggle_full_screen()`, `set_frame(..)`, `set_level(..)`, `order_front()`, `set_menu_bar_visibility(..)`; the same root commands and native controls, with title-bar insets forwarded through `element::Environment`; `.window_drag(bool)` on any interactive element marks or excludes a native drag region |
+  | `Menu.setApplicationMenu(items)`, `Menu.popup(items, at)` (`nsh/desktop`) | `element::desktop::set_application_menu(vec![MenuItem::submenu(..)])` (`None`: the default menu), `popup_menu(items)` / `popup_menu_at(items, at)` (an `Answer<()>` once it closes); `MenuItem::new(label).shortcut("mod+n").on_select(f)`, `::role(..)`, `::separator()`, `::submenu(..)`. The same `DesktopCommand`s as JS's; a view's item ids start at 2^31, above JS's, and the core runs a view's handler (under the owner that set the menu, while it lives) when the root's `Menu` event reports it; a context menu closing goes to both sides (`element/menus.rs`) |
   | `pixelRatio()`, `Math.round(x * pixelRatio()) / pixelRatio()`, `platform.os` / `version` / `idiom` (`"desktop"`) | `pixel_ratio()`, `round_to_nearest_pixel(v)`, `os()`, `os_version()`, `idiom()`, `is_desktop()` |
   | `Intl.NumberFormat()`, `toLocaleString()` (the user's locale) | `locale()` (a `Locale`: `de-DE`; reading subscribes), formatted with a Rust crate: `Intl` and the locale-aware `toLocale*String`s are JS globals of TS apps |
   | `requestAnimationFrame(cb)`, `cancelAnimationFrame` | `request_animation_frame(\|at\| ..)` returns a `Spawned`; in a task `next_frame().await` (an `Instant`), once per frame in a loop |
@@ -464,7 +465,10 @@ implements `Api`, the view registers it with `cx.methods(CounterApi { .. })` for
 `#[component(methods = CounterApi)]` (`Component::METHODS = Methods::of::<CounterApi>()`) names it in the spec, so the
 JS face builds the ref (`CounterRef`: `node` and the methods, typed from the Rust signatures and docs) with no TS
 written. A call converts its arguments in the JS call into a closure an op carries (`RustCall::Method`), so it runs
-in order with the props JS set before it, with the API the view registered. Its return type decides what TS gets:
+in order with the props JS set before it, with the API the view registered. JS gets the ref as the component is
+made, before its view is (that waits for the commit, and for the host to be in the tree): a call made then, from
+the ref callback, waits in the core for the view and runs right after it is made (one whose host goes first fails
+with its host). Its return type decides what TS gets:
 a method returning `()` gives `void`, with no reply (JS calls it and moves on, a wrong argument throws in the call);
 one returning `Result<(), E>` gives `Promise<void>` (rejected with the `Err`'s message: the method runs at the
 commit, after the JS call returned, so it cannot throw); one returning a value gives `Promise<T>` (a wrong argument
@@ -865,12 +869,14 @@ what changed.
 - Keys while the control has the keyboard focus: a signal of the focus (`on_focus` / `on_blur`), and
   `keys::bind_while(focused, keys, handler)`, which binds them in an effect that returns early while it is false,
   so the bindings of the global keymap come and go with the focus (`DataTable` does the same by hand).
-- Roving focus (`roving.rs`, WAI-ARIA's tab list and radio group): `Tabs` and `RadioGroup` provide a `Roving` through
-  context, and each `Tab` / `Radio` under one registers its ref, its current state (`selected`, `checked`), its
-  `disabled` and what moving to it does (a press, `Change(true)`); an item outside a group stays a stop of its own.
+- Roving focus (`roving.rs`, WAI-ARIA's tab list, radio group and toolbar): `Tabs`, `RadioGroup` and `ToggleGroup`
+  provide a `Roving` through context, and each `Tab` / `Radio` / `Toggle` under one registers its ref, its current
+  state (`selected`, `checked`, `pressed`), its `disabled` (a toggle's or its group's) and what moving to it does (a
+  press, `Change(true)`, nothing for a toolbar's toggle: the toolbar pattern only moves the focus); an item outside a
+  group stays a stop of its own.
   Only the stop is `focusable`: the item the focus is on, else the current one, else the first enabled, so Tab
-  passes the group in one step. While an item has the focus the group binds its arrows (and Home / End for tabs);
-  a key sets the target as the focused item first, which makes it the stop (its `focusable` mounts before the
+  passes the group in one step. While an item has the focus the group binds its arrows (and Home / End for tabs and
+  toolbars); a key sets the target as the focused item first, which makes it the stop (its `focusable` mounts before the
   `focus()` command of the same batch, as a ref's `focus()` only moves to stops), focuses it and activates it.
   Items are in the order they registered: the order the app's children were made.
 
@@ -923,13 +929,39 @@ Their callbacks are one set, as `Dialog`'s (`popup.rs`: `OpenState`, `lifecycle`
   `"backdropPress"`, `"cancel"` (Escape or back), `"select"` (a menu's item), `"hover"`, `"longPress"`,
   `"contextMenu"`, `"swipe"`. The app changing `open` itself is not reported here.
 - **`onOpen` / `onClose`**: after it is all there and after it is all gone (a sheet, or a menu as a sheet, once its
-  motion is over; a popup at once), whoever opened or closed it, the app's `open` included (`lifecycle`, an effect on
-  what is shown). `Tooltip` has these two and `onOpenChange`.
+  motion is over; a popup as it is made, and once its exit ran: at once without an ending look), whoever opened or
+  closed it, the app's `open` included (`lifecycle`, an effect on what is shown). `Tooltip` has these two and
+  `onOpenChange`.
+- **`onPosition({ placement, bounds, available })`** (`Popover`, and `Menu` / `ContextMenu` on the desktops): the
+  popup's overlay was placed (the core's `onPosition`, `elements.md` "Overlays"): the side it went on (the other side
+  of `placement` when only that one had room), its frame in the root view, the room on that side, so an app points
+  an arrow or an entrance at its trigger.
 - **`onCancel`**: each attempt of the user to close it without choosing: Escape or back, a press outside, a press on
   the backdrop. It is emitted before `onOpenChange`, whether or not a `closeOn<Trigger>` flag (`closeOnEscape`,
   `closeOnPressOutside`, `closeOnBackdropPress`, read natively when the user acts) let it close, so an app with a flag
   set to `false` can ask first and close itself. A menu's chosen item is no cancel (`"select"`); Escape in a
   sheet's submenu goes back a level and is none either.
+
+**Presence.** A popup's entrance and exit are the app's transitions between its look and its states' looks, as a
+toast's `transitionStatus` and Base UI's `data-starting-style` / `data-ending-style` (gpui-kit's popups have no exit):
+`Popover`'s, `Menu`'s and `ContextMenu`'s `popupStartingClass` / `popupStartingStyle` and `popupEndingClass` /
+`popupEndingStyle` (a desktop menu's `Submenu`s take its menu's), `Tooltip`'s `startingClass` / `startingStyle` and
+`endingClass` / `endingStyle` (its own `class` / `style` are the bubble's). `popup.rs`' `PopupPresence` follows the
+open state: opened, the popup is made with its starting look, which it keeps until the next display frame (or 50 ms
+where none comes, as `Toast`'s), so `transition-*` classes run from it; closed, it stays mounted with its ending look
+and `pointer-events-none`, while the touch screens' backdrop goes and presses outside and Escape are no attempts any more,
+for as long as its transitions then run: the platforms run transitions without reporting their end, so it asks the
+core (`ElementRef::transition_time`, an `Action::TransitionTime` the commit answers from the node's resolved
+`transition`, the app's `class`, `style` and theme included: the longest duration plus delay, two seconds at most),
+waits that long, then unmounts, and `onClose` follows. A generation counter keeps a stale frame or exit from acting on
+a newer change: opened again on its way out, the popup goes back to its look (its transitions run back) and was
+never gone, so neither `onClose` nor `onOpen` fires. Without a look for a state, or while the user asks for less
+motion, it skips that state: a popup with no ending look is gone in the turn that closed it, and nothing more is sent
+for one with no looks. The state's classes are important (`!`) over the part's `class` and `style`, as a toast's; its
+style comes after the part's (`Style::then`), applied with `Element::state_inline_style`, which follows the typed
+styles a Rust app's state style has even when the part's has none. Closing a desktop menu closes its submenus, and
+closing a submenu its own, each with its exit. A sheet (`Sheet`, menus on touch screens, `Select`'s list) keeps
+`SheetMotion`.
 
 How a popup presents itself follows the device (`is_desktop()`; one presentation, `auto`, for now), by what the popup
 is for, never by replacing one popup with another everywhere:
@@ -939,7 +971,7 @@ is for, never by replacing one popup with another everywhere:
 | `Popover` | anchored to its trigger; a press outside closes it and goes on to what is under the pointer | anchored to its trigger (what it shows belongs next to it); a press outside only closes it (a transparent backdrop overlay takes it) |
 | `Menu` | a popup at its trigger (`placement`, `align`, `offset`, `margin`); `Submenu`s cascade beside their item, on hover or press | a sheet at the bottom over a backdrop; a `Submenu` shows its items in place of its menu's, with its `back` row (the app's: no built-in strings); Escape / back return a level |
 | `ContextMenu` | the secondary button opens it at the pointer (`onContextMenu`'s `page`) | a finger held 400 ms on the trigger opens it as the menu's sheet (observed touches: the trigger's own presses and the scroll views around it go on; 10 points of movement cancel) |
-| `Tooltip` | after the pointer rests on the trigger for `delay` (500 ms); leaving or pressing hides it | only when the app opens it (`open`, `defaultOpen`): no pointer to rest |
+| `Tooltip` | after the pointer rests on the trigger for `delay` (500 ms); leaving or pressing hides it (resting on it again while it goes takes it back) | only when the app opens it (`open`, `defaultOpen`): no pointer to rest |
 | `Sheet` | an edge panel (`side`) over a backdrop | the same |
 | `Select`, `Combobox`, `DatePicker` | a popup at its trigger (`placement`, `align`, `offset`, `margin`), at least as wide as the trigger and never taller than the room on its side (`onPosition`'s `available`); a press outside closes it and goes on, leaving the keyboard focus where it went (any other close gives it back to the trigger) | a sheet at the bottom over a backdrop, below the status bar at most, with `Menu`'s motion; its search field takes the keyboard only when pressed |
 

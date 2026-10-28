@@ -148,11 +148,12 @@ apart: a position at a wrap shows at the upper line's end with `Affinity::Upstre
 
 Input (`controller.rs`): as the code `Editor`, an invisible native input at the caret (the sink) takes typed text
 and input methods. Typed text goes to plugins' `handle_text_input` (input rules), else is inserted with the stored
-marks (origin `Input`). While an input method composes, its text shows at the caret and the document waits; the
-commit is one transaction tagged with the composition's id (`composition` meta, which the history groups). Keys: the
-view binds, while focused, every keystroke a keymap could use (`keys.rs`) and offers each as a `KeyEvent` to the
-selected node's view, the plugins' `handle_key_down`, the base keymap, then copy / cut / select all and the caret
-movement (graphemes, words, line ends, lines and pages by geometry, keeping the goal x, the document's ends).
+marks (origin `Input`). While an input method composes, its text shows at the caret in place of its block's
+placeholder and the document waits; the commit is one transaction tagged with the composition's id (`composition`
+meta, which the history groups). Keys: the view binds, while focused, every keystroke a keymap could use (`keys.rs`)
+and offers each as a `KeyEvent` to the selected node's view, the plugins' `handle_key_down`, the base keymap, then
+copy / cut / select all and the caret movement (graphemes, words, line ends, lines and pages by geometry, keeping the
+goal x, the document's ends).
 Presses: a node view's `handle_event`, the plugins' click hooks (`handle_click_on` per ancestor, then
 `handle_click`, double and triple likewise), then a caret (Shift extends), a word, the textblock or a node selection;
 a drag extends through `create_selection_between`, and past the viewport's top or bottom it scrolls the view on a timer (the code `Editor`'s `AutoScroll` and `edge_speed`) and extends again at each step. Paste: `transform_pasted_text`, `clipboard_text_parser` (else

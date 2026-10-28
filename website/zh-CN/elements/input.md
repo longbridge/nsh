@@ -1,7 +1,6 @@
 ---
 title: Input
 description: 原生文本输入框：受控与非受控文本、键盘、自动填充、选区、多行输入和焦点。
-order: 20.1
 group: base
 demo: el-input
 ---

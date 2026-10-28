@@ -7,7 +7,12 @@
 // engine events.
 //
 //   const player = await createPlayer(container, { wasm: "nsh.wasm" });
-//   player.run(await (await fetch("app.js")).text());
+//   await player.runModule("app.js");
+//
+// Apps run on the browser's own JavaScript engine, in a realm of their
+// own (`browser/runtime.js`): `runModule` runs a module by URL,
+// `runSource` one given as source text (the development host's bundles),
+// `hotUpdate` applies the dev server's hot updates in place.
 //
 // Options: `wasm` (its URL, or a `Response` promise), `glue` (the URL of
 // the wasm-bindgen glue of a runtime whose crates call JS through
@@ -18,8 +23,8 @@
 // once, a font: a `Uint8Array` or null), `data` (the URLs of the files the
 // runtime fetches when it first needs them, by name, as `nsh package
 // --target web` writes them: `{ syntaxes: "nsh-syntaxes.<digest>.bin" }`;
-// by default `nsh-<name>.bin` next to this file), `chunks` / `chunkBase`
-// (see `run`), `prepareChunk(id)` (a promise for what chunk `id` needs once it
+// by default `nsh-<name>.bin` next to this file), `prepareChunk(id)` (a
+// promise for what chunk `id` needs once it
 // runs, such as fonts for `readAsset`; awaited with the chunk's download),
 // `dark`, `idiom` ("phone", "pad" or "desktop" instead of the one the
 // pointer and the viewport suggest), `dialogs` ("viewport": `Dialog`,
@@ -36,9 +41,9 @@
 //
 // A split bundle (`nsh build --split`) loads its chunks on demand: from
 // `chunks[id]` when given (`app.<digest>.js` on a CDN), else `id` relative
-// to `chunkBase` (default: the page):
+// to the entry:
 //
-//   player.run(code, { chunks: { "Screen.js": "/app.3f2a.js" }, chunkBase });
+//   await player.runModule("app.js", { chunks: { "Screen.js": "/app.3f2a.js" } });
 
 const ROOT_ID = 1;
 const PRESSED = 1;
@@ -333,16 +338,6 @@ const CODE_CHARS = {
   Quote: "'", Comma: ",", Period: ".", Slash: "/", Backquote: "`", Space: " ",
 };
 
-/**
- * The browser's offset of local time from UTC at `ms` (ms since the epoch),
- * in seconds east, as `struct tm`'s `tm_gmtoff` holds it (`local_time.rs`):
- * daylight saving time included; 0 for a time the browser cannot place.
- */
-function localOffset(ms) {
-  const west = new Date(ms).getTimezoneOffset();
-  return Number.isFinite(west) ? 0 - west * 60 : 0;
-}
-
 /** The browser's time zone (`Asia/Shanghai`), Intl's default; "" when unknown. */
 function timeZoneName() {
   return new Intl.DateTimeFormat().resolvedOptions().timeZone ?? "";
@@ -628,12 +623,12 @@ export function hostPlayerFrame(frame) {
   const win = frame.ownerDocument.defaultView, leases = new Set();
   const closeAll = () => { for (const close of [...leases]) close(); };
   const message = (event) => {
-    if (event.source !== frame.contentWindow || event.data !== "nsh:viewport" || !event.ports[0]) return;
+    if (event.source !== frame.contentWindow || event.data?.type !== "nsh:viewport" || !event.ports[0]) return;
     const port = event.ports[0];
     let release;
     const close = () => { release?.(); release = null; port.close(); leases.delete(close); };
     try {
-      const lease = frameViewport(frame);
+      const lease = frameViewport(frame, event.data.colorScheme === "dark" ? "dark" : "light");
       release = lease.release;
       leases.add(close);
       port.onmessage = (e) => { if (e.data === "release") close(); };
@@ -652,6 +647,18 @@ export function hostPlayerFrame(frame) {
     win.removeEventListener("message", message);
     frame.removeEventListener("load", closeAll);
   };
+}
+
+/** The color scheme `doc` is drawn with: `"dark"` or `"light"`. An iframe
+ * whose scheme differs from its document's is painted opaque, so a frame
+ * lifted over its page takes its document's. */
+function usedColorScheme(doc) {
+  const win = doc.defaultView;
+  let value = win.getComputedStyle(doc.documentElement).colorScheme;
+  if (!value || value === "normal") value = doc.querySelector('meta[name="color-scheme"]')?.content ?? "";
+  const words = value.split(/\s+/);
+  if (words.includes("dark") && words.includes("light")) return win.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  return words.includes("dark") ? "dark" : "light";
 }
 
 /** A modal owns the page around its branch until the last lease ends. */
@@ -685,7 +692,7 @@ function lockViewportPage(branch) {
 
 /** Elevate the iframe itself without moving/reloading its document. Its
  * popovers can then cover the host viewport while the app keeps its size. */
-function frameViewport(frame) {
+function frameViewport(frame, colorScheme) {
   if (frame._nshViewport) {
     const state = frame._nshViewport;
     state.users++;
@@ -701,7 +708,7 @@ function frameViewport(frame) {
     // A same-origin ancestor chain is lifted all the way to its outer page.
     const parentFrame = win.frameElement;
     if (!parentFrame) throw new Error("install hostPlayerFrame in the outer embedding page");
-    outer = frameViewport(parentFrame);
+    outer = frameViewport(parentFrame, usedColorScheme(doc));
     rect = { left: outer.rect.left + rect.left * outer.rect.sx, top: outer.rect.top + rect.top * outer.rect.sy,
       sx: sx * outer.rect.sx, sy: sy * outer.rect.sy };
   }
@@ -717,7 +724,8 @@ function frameViewport(frame) {
   frame.setAttribute("popover", "manual");
   for (const [name, value] of Object.entries({ position: "fixed", inset: "0", width: "100%", height: "100%",
     "min-width": "0", "min-height": "0", "max-width": "none", "max-height": "none",
-    "border-radius": "0", "clip-path": "none", background: "transparent", margin: "0", border: "0", padding: "0", transform: "none", "box-sizing": "border-box" })) {
+    "border-radius": "0", "clip-path": "none", background: "transparent", margin: "0", border: "0", padding: "0", transform: "none", "box-sizing": "border-box",
+    "color-scheme": colorScheme })) {
     frame.style.setProperty(name, value, "important");
   }
   try { frame.showPopover(); } catch (error) {
@@ -838,7 +846,6 @@ class Player {
     glueLoad?.catch(() => {});
     const imports = {
       env: {
-        __rquickjs_host_now_us: () => Date.now() * 1000,
         __nsh_random_fill: (ptr, len) => {
           try {
             const bytes = this.bytes(ptr, len);
@@ -852,8 +859,7 @@ class Player {
       nsh: {
         now_ms: () => performance.now(),
         date_now_ms: () => Date.now(),
-        // QuickJS' local time (`local_time.rs`) and Intl's default zone.
-        local_offset: (ms) => localOffset(ms),
+        // Intl's default zone.
         time_zone: (p, cap) => {
           const zone = encoder.encode(timeZoneName());
           if (zone.length <= cap) this.bytes(p, cap).set(zone);
@@ -955,7 +961,6 @@ class Player {
         }),
         websocket_buffered: (id) => this.websockets.get(id)?.bufferedAmount ?? 0,
         websocket_cancel: (id) => this.websocketCancel(id),
-        load_chunk: (p, l) => this.loadChunk(this.str(p, l)),
         load_data: (p, l) => this.loadData(this.str(p, l)),
         // The app's storage (`nsh/storage`): the entries of `localStorage`
         // under the app's prefix. 1 when done, 0 when the browser refused
@@ -1025,6 +1030,12 @@ class Player {
     // The glue's own setup (its view of the memory, wasm-bindgen's tables)
     // before any of the app's code runs.
     glue?.__nsh_finalize(instance, module);
+    // The parts of `nsh/base`, the standard modules and the features
+    // (shaders) this runtime has:
+    // one linked for an app (`nsh package`) exports only those it uses.
+    for (const name of Object.keys(instance.exports)) {
+      if (/^nsh_(part|std|feature)_/.test(name)) instance.exports[name]();
+    }
     // An app's own runtime (Rust components: nsh.json "rust") registers
     // its UI sets before anything starts.
     this.wasm.nsh_app_init?.();
@@ -1045,6 +1056,9 @@ class Player {
    * model of the app its agent asks about, from the next bundle on.
    */
   testStart() {
+    // The apps started from now on send their requests to the test
+    // (`web/browser/testing.js`).
+    this.testing = true;
     this.wasm.nsh_test_start?.();
   }
 
@@ -1249,57 +1263,29 @@ class Player {
   // Running -------------------------------------------------------------
 
   /**
-   * Runs `code` (a bundle from `nsh build`: `bundle.js` as a string, or its
-   * bytecode `bundle.nshc` as an `ArrayBuffer` / `Uint8Array`, the only
-   * form the runtime of published apps runs), replacing what ran. Options:
-   * `release` (hardened, as packaged apps run; default: development
-   * settings), `harden` (with bytecode: the hardening's bytecode the CLI
-   * ships, `harden.nshc`), `capabilities` (the app's `capabilities.json`),
-   * `sourceMap` (JSON), `appId` (`nsh.json` `"id"`: the app's storage is
-   * kept under it; without one, under the page's path), `limits` (the VM
-   * limits the page runs the app with, as an app embedding it sets them:
-   * `"memory=128MB,call=2s"`, `""` for the embedding defaults; without it
-   * the app runs on its own, with none), and where a split bundle's chunks are: `chunks[id]`
-   * (a URL), else `id` relative to `chunkBase` (default: the page); the
-   * chunks of a bytecode bundle are bytecode too. Static entry dependencies
-   * are supplied as preloadedChunks[id] (source or bytecode).
+   * Runs the app whose entry module is at `entry` (a URL, relative to the
+   * page) with the browser's ES module loader, replacing what ran; settles
+   * once the entry module ran. Options: `appId` (`nsh.json` `"id"`: the
+   * app's storage is kept under it; without one, under the page's path),
+   * `capabilities` (the app's `capabilities.json`), `chunks` (a split
+   * bundle's chunk ids, relative to the entry, to their URLs) and
+   * `imports` (more import map entries).
    */
-  run(code, {
-    release = false,
-    harden = null,
-    capabilities = "",
-    sourceMap = "",
-    appId = "",
-    limits = null,
-    preloadedChunks = {},
-    chunks = this.options.chunks,
-    chunkBase = this.options.chunkBase,
-  } = {}) {
-    if (code instanceof ArrayBuffer) code = new Uint8Array(code);
-    const bytecode = typeof code !== "string";
-    const [width, height] = this.reset();
-    this.chunks = { map: chunks ?? {}, base: chunkBase ?? document.baseURI, bytecode };
-    this.call(() => this.withStrings([capabilities ?? "", sourceMap ?? "", appId ?? ""], (cp, cl, mp, ml, ip, il) =>
-      this.wasm.nsh_bundle_options(release ? 1 : 0, cp, cl, mp, ml, ip, il)));
-    for (const [id, source] of Object.entries(preloadedChunks)) {
-      const bytes = source instanceof ArrayBuffer ? new Uint8Array(source) : source;
-      this.call(() => this.withStrings([id, bytes], (np, nl, cp, cl) =>
-        this.wasm.nsh_bundle_chunk(np, nl, cp, cl, typeof bytes === "string" ? 0 : 1)));
-    }
-    if (harden) this.call(() => this.withStrings([new Uint8Array(harden)], (p, l) => this.wasm.nsh_bundle_harden(p, l)));
-    if (limits != null) this.call(() => this.withStrings([limits], (p, l) => this.wasm.nsh_bundle_limits(p, l)));
-    this.begin(width, (environment) => {
-      this.withStrings([environment], (p, l) => this.wasm.nsh_environment(p, l));
-      const start = bytecode ? this.wasm.nsh_start_bytecode : this.wasm.nsh_start;
-      return this.withStrings([code], (p, l) =>
-        start(p, l, width, height, this.dark ? 1 : 0, devicePixelRatio || 1));
-    });
+  runModule(entry, options) {
+    if (!this.browserHost) return Promise.reject(new Error("this runtime has no browser JavaScript host"));
+    return this.browserHost.run(entry, options);
   }
 
-  /** Runs a trusted standalone app with the browser ES module loader. */
-  runModule(entry, options) {
-    if (!this.browserHost) throw new Error("this runtime has no browser JavaScript host");
-    return this.browserHost.run(entry, options);
+  /**
+   * Runs `code`, an ES module given as source text (a development bundle
+   * from the dev server, a compiled playground module), as `runModule`
+   * does; settles once it ran. Options: `appId` and `capabilities` (as in
+   * `runModule`), `sourceMap` (JSON: inlined, so DevTools shows the
+   * original sources) and `name` (what DevTools calls the module).
+   */
+  runSource(code, { appId = "", capabilities = "", sourceMap = "", name = "" } = {}) {
+    if (!this.browserHost) return Promise.reject(new Error("this runtime has no browser JavaScript host"));
+    return this.browserHost.runSource(code, { appId, capabilities, sourceMap, name });
   }
 
   /**
@@ -1310,7 +1296,6 @@ class Player {
   runRust() {
     if (!this.wasm.nsh_start_rust) throw new Error("this runtime has no Rust app");
     const [width, height] = this.reset();
-    this.chunks = { map: {}, base: document.baseURI, bytecode: false };
     this.begin(width, (environment) => {
       this.withStrings([environment], (p, l) => this.wasm.nsh_environment(p, l));
       return this.wasm.nsh_start_rust(width, height, this.dark ? 1 : 0, devicePixelRatio || 1);
@@ -1369,29 +1354,6 @@ class Player {
     for (const json of events) this.eventJson(ROOT_ID, "onHost", json);
   }
 
-  /** Fetches chunk `id` of the running bundle and hands it to the engine. */
-  async loadChunk(id) {
-    const { map, base, bytecode } = this.chunks;
-    const app = this.app;
-    let code;
-    let ok = bytecode ? 2 : 1;
-    // `nsh build --split` writes a chunk's bytecode next to it: `Screen.nshc`.
-    const url = map[id] ?? (bytecode ? id.replace(/\.js$/, ".nshc") : id);
-    try {
-      // What the chunk needs synchronously once it runs (its fonts), from
-      // the page, alongside it.
-      const [response] = await Promise.all([fetch(new URL(url, base)), this.options.prepareChunk?.(id)]);
-      if (!response.ok) throw new Error(`${response.status} ${response.statusText}`.trim());
-      code = bytecode ? new Uint8Array(await response.arrayBuffer()) : await response.text();
-    } catch (err) {
-      code = `${err.message ?? err} (${url})`;
-      ok = 0;
-    }
-    // A chunk of an app that was replaced meanwhile is dropped.
-    if (app !== this.app) return;
-    this.call((w) => this.withStrings([id, code], (ip, il, cp, cl) => w.nsh_chunk(ip, il, cp, cl, ok)));
-  }
-
   /**
    * Fetches the runtime's data `name` (`nsh-<name>.bin`, or the URL
    * `data[name]` names) and hands it to the engine; a file that is missing
@@ -1413,8 +1375,9 @@ class Player {
   }
 
   /**
-   * Compiles one TSX module to what `run` takes, in the page (only with
-   * `nsh-playground.wasm`): `{ code }` or `{ error }` (with a code frame).
+   * Compiles one TSX module to what `runSource` takes, in the page (only
+   * with `nsh-playground.wasm`): `{ code }` or `{ error }` (with a code
+   * frame).
    */
   compile(source, name = "App.tsx") {
     if (!this.wasm.nsh_compile) return { error: "this runtime has no compiler (load nsh-playground.wasm)" };
@@ -1423,28 +1386,29 @@ class Player {
     return ok ? { code: text } : { error: text };
   }
 
-  /** Compiles and runs `source` (with `run`'s `options`); the compile error, or null. */
-  runSource(source, name = "App.tsx", options = {}) {
+  /**
+   * Compiles `source` (one TSX module named `name`) and runs it with
+   * `runSource`'s `options`: a promise of the compile error (with a code
+   * frame), or of null once the module ran. An error the module throws as
+   * it runs is shown as the app's errors are, and rejects the promise.
+   */
+  async compileAndRun(source, name = "App.tsx", options = {}) {
     const result = this.compile(source, name);
     if (result.error) return result.error;
-    this.run(result.code, options);
+    await this.runSource(result.code, { name, ...options });
     return null;
   }
 
   /**
    * Applies a hot update from the dev server (a script replacing changed
-   * modules) to the running app. Returns false when it could not be
-   * applied in place: run the new bundle instead.
+   * modules) to the running development bundle: a promise of whether it
+   * was applied in place (false: run the new bundle instead). An update
+   * whose code throws is shown as the app's errors are; the app keeps the
+   * modules that ran, and the next update can fix the rest.
    */
   hotUpdate(code, name = "hot.js", sourceMap = "") {
-    let applied = true;
-    this.call(() => {
-      const delay = this.withStrings([name, code, sourceMap ?? ""], (np, nl, cp, cl, mp, ml) =>
-        this.wasm.nsh_hot_update(np, nl, cp, cl, mp, ml));
-      applied = !this.wasm.nsh_hot_failed();
-      return delay;
-    });
-    return applied;
+    if (!this.browserHost) return Promise.resolve(false);
+    return this.browserHost.hotUpdate(code, name, sourceMap ?? "");
   }
 
   stop() {
@@ -1873,6 +1837,7 @@ class Player {
     const from = update && el._frame && !el._track && !this.navigated(el, el.parentNode) ? this.shownFrame(el) : null;
     el._frameAnimation?.cancel();
     el._frameAnimation = null;
+    const resized = !el._frame || el._frame[2] !== w || el._frame[3] !== h;
     el._frame = [x, y, w, h];
     this.placeFrame(el);
     if (from && from.some((v, i) => v !== el._frame[i])) {
@@ -1881,7 +1846,8 @@ class Player {
       a.onfinish = () => { if (el._frameAnimation === a) el._frameAnimation = null; };
       el._frameAnimation = a;
     }
-    if (el._kind === "canvas") this.drawSoon(el);
+    // A canvas moved keeps its pixels (rows of a table move every scroll).
+    if (el._kind === "canvas" && resized) this.drawSoon(el);
     if (el._shader) this.shaderDirty(el);
     if (el._kind === "stack") for (const screen of el.children) if (screen._kind === "screen") this.reportRoot(screen, w, h, this.screenInsets(screen));
   }
@@ -1940,7 +1906,12 @@ class Player {
       return;
     }
     if (prop.startsWith("canvas:")) {
-      el._slots[Number(prop.slice(7))] = isNaN(Number(value)) ? value : Number(value);
+      const slot = Number(prop.slice(7));
+      const v = isNaN(Number(value)) ? value : Number(value);
+      // The animator sends every bound value with each batch: a value
+      // that stayed draws nothing again.
+      if (el._slots[slot] === v) return;
+      el._slots[slot] = v;
       this.drawSoon(el);
       return;
     }
@@ -1952,6 +1923,11 @@ class Player {
       if (el._track) this.placeTrack(el);
       return;
     }
+    // The animator sends every bound value with each batch. Compared with
+    // what the view shows, not what was last sent: navigation and modals'
+    // motions write a view's transform and opacity too.
+    const shown = prop === "border-color" || prop === "color" ? el._animation[prop] : el.style.getPropertyValue(prop);
+    if (shown === value) return;
     el._animation[prop] = value;
     if (prop === "border-color") {
       // Borders are drawn by an overlay.
@@ -1970,6 +1946,54 @@ class Player {
     const el = this.view(id);
     if (!el) return;
     setTextColor(el, color ?? null);
+    if (!this.updateRuns(el, cx, cy, runs, styles, backgrounds, links)) this.replaceRuns(el, cx, cy, runs, styles, backgrounds, links);
+    el.classList.toggle("nsh-selectable", !!selectable);
+    el.classList.toggle("nsh-autoselect", selectable == null);
+    el.classList.toggle("nsh-noselect", selectable === false);
+    // Its `--nsh-selection`.
+    swapClass(el, "_selection", this.styleClass(selection));
+    el._textLabel = runs.map((r) => r[2]).join("");
+    if (el._props?.label == null) el.setAttribute("aria-label", el._textLabel);
+  }
+
+  /**
+   * A text whose plain runs are as many as before (a cell's new value, a
+   * counter): its spans take the new texts and places in place, so a text
+   * that changes often makes and removes no nodes. False when the runs
+   * cannot be updated so (backgrounds, links, another count).
+   */
+  updateRuns(el, cx, cy, runs, styles, backgrounds, links) {
+    if (backgrounds?.length || links?.length || !runs.length) return false;
+    const spans = [];
+    for (const child of el.children) {
+      if (child.classList.contains("nsh-run-bg")) return false;
+      if (child.classList.contains("nsh-run")) spans.push(child);
+    }
+    if (spans.length !== runs.length) return false;
+    for (let i = 0; i < runs.length; i++) {
+      const [, , text, , , parts] = runs[i];
+      const node = spans[i].firstChild;
+      // Only a span holding one text node, as `fillRun` leaves plain text.
+      if (parts || !text || !node || node.nodeType !== 3 || node.nextSibling) return false;
+    }
+    runs.forEach(([x, y, text, style, start, , after], i) => {
+      const span = spans[i];
+      const name = this.styleClass(styles[style]);
+      const className = name ? `nsh-run ${name}` : "nsh-run";
+      if (span.className !== className) span.className = className;
+      const left = `${cx + x}px`, top = `${cy + y}px`;
+      if (span.style.left !== left) span.style.left = left;
+      if (span.style.top !== top) span.style.top = top;
+      if (span.firstChild.data !== text) span.firstChild.data = text;
+      span._start = start;
+      if (after) span._after = after;
+      else delete span._after;
+    });
+    return true;
+  }
+
+  /** The runs of a text made again: its spans and their backgrounds. */
+  replaceRuns(el, cx, cy, runs, styles, backgrounds, links) {
     const frag = document.createDocumentFragment();
     // Span backgrounds, behind the runs: one box per span and line.
     for (const [x, y, w, h, r, color] of backgrounds ?? []) {
@@ -1996,14 +2020,8 @@ class Player {
     }
     for (const span of [...el.querySelectorAll(":scope > .nsh-run, :scope > .nsh-run-bg")]) span.remove();
     el.insertBefore(frag, el.firstChild);
-    el.classList.toggle("nsh-selectable", !!selectable);
-    el.classList.toggle("nsh-autoselect", selectable == null);
-    el.classList.toggle("nsh-noselect", selectable === false);
-    // Its `--nsh-selection`.
-    swapClass(el, "_selection", this.styleClass(selection));
-    el._textLabel = runs.map((r) => r[2]).join("");
-    if (el._props?.label == null) el.setAttribute("aria-label", el._textLabel);
   }
+
 
   op_e([, id, events]) {
     const el = this.view(id);
@@ -3988,8 +4006,13 @@ class Player {
   placeModal(el) {
     const viewport = this.viewportDialogs;
     const [w, h] = viewport ? [el.clientWidth, el.clientHeight] : this.size;
-    const box = viewport ? { left: 0, top: 0, right: w, bottom: h } : undefined;
-    const insets = this.safeProbe ? this.safeArea(box) : [0, 0, 0, 0];
+    // The safe area is measured in the window's pixels; a layer at the
+    // app's scale (`scaleLayer`) is laid out in the app's.
+    const [sx, sy] = (viewport && this.frameScale) || [1, 1];
+    const box = viewport ? { left: 0, top: 0, right: w * sx, bottom: h * sy } : undefined;
+    const insets = this.safeProbe
+      ? this.safeArea(box).map((inset, i) => Math.round(inset / (i % 2 ? sx : sy)))
+      : [0, 0, 0, 0];
     const frame = [0, 0, w, h];
     el._frame = frame;
     if (!viewport) this.placeFrame(el);
@@ -4108,17 +4131,25 @@ class Player {
       for (const [p, value, priority] of saved) root.style.setProperty(p, value, priority);
       for (const [node, value, priority] of backgrounds) node.style.setProperty("background", value, priority);
       release?.();
-      if (this.frameSession === session) this.frameSession = null;
+      if (this.frameSession === session) {
+        this.frameSession = null;
+        this.frameScale = null;
+        for (const layer of layers) this.scaleLayer(layer);
+      }
     };
     window.addEventListener("pagehide", close, { once: true });
     const ready = (lease) => {
       if (cancelled) { lease.release(); return; }
       release = lease.release; pin(lease.rect);
-      for (const layer of layers) if (layer._kind === "modal") this.placeModal(layer);
+      this.frameScale = [lease.rect.sx, lease.rect.sy];
+      for (const layer of layers) {
+        this.scaleLayer(layer);
+        if (layer._kind === "modal") this.placeModal(layer);
+      }
     };
     try {
       if (window.frameElement) {
-        ready(frameViewport(window.frameElement));
+        ready(frameViewport(window.frameElement, usedColorScheme(document)));
         return;
       }
     } catch (error) {
@@ -4135,7 +4166,7 @@ class Player {
     // is private to this request, and its host checks the source window.
     const request = () => {
       if (cancelled) return;
-      window.parent.postMessage("nsh:viewport", "*", [channel.port2]);
+      window.parent.postMessage({ type: "nsh:viewport", colorScheme: usedColorScheme(document) }, "*", [channel.port2]);
       timer = setTimeout(() => {
         console.warn("[nsh] install hostPlayerFrame(iframe) on the embedding page for viewport dialogs");
         close();
@@ -4167,6 +4198,22 @@ class Player {
     }
     if (el.matches(":popover-open")) el.hidePopover();
     el.showPopover();
+    this.scaleLayer(el);
+  }
+
+  /** Draws layer `el` over the window at the app's scale: the website
+   * shows its phone and desktop frames scaled down, and a dialog over the
+   * page keeps the size it has in the app. It is laid out as large as the
+   * window divided by that scale, then scaled to cover the window. */
+  scaleLayer(el) {
+    const [sx, sy] = this.frameScale ?? [1, 1];
+    const scaled = sx !== 1 || sy !== 1;
+    if (!scaled && !el._scaled) return;
+    el._scaled = scaled;
+    el.style.width = scaled ? `${100 / sx}%` : "";
+    el.style.height = scaled ? `${100 / sy}%` : "";
+    el.style.scale = scaled ? `${sx} ${sy}` : "";
+    el.style.transformOrigin = scaled ? "0 0" : "";
   }
 
   /** Going back or Escape on a modal: it asks to close (`onRequestClose`,
@@ -5120,11 +5167,17 @@ class Player {
   mousePoint(el, e) {
     let a = 1, b = 0, c = 0, d = 1;
     for (let node = el; node; node = node.parentElement) {
-      const transform = getComputedStyle(node).transform;
-      if (transform !== "none") {
-        const m = new DOMMatrix(transform);
+      const style = getComputedStyle(node);
+      if (style.transform !== "none") {
+        const m = new DOMMatrix(style.transform);
         [a, b, c, d] = [m.a * a + m.c * b, m.b * a + m.d * b,
           m.a * c + m.c * d, m.b * c + m.d * d];
+      }
+      // `scale` applies after `transform` (a layer at the app's scale,
+      // `scaleLayer`).
+      if (style.scale && style.scale !== "none") {
+        const [sx, sy = sx] = style.scale.split(" ").map(Number);
+        [a, b, c, d] = [sx * a, sy * b, sx * c, sy * d];
       }
       // Top-layer views ignore their DOM ancestors' transforms (including
       // the preserved app scale inside an elevated iframe).
@@ -5694,7 +5747,22 @@ class Player {
    * or `layer`, a dialog over the window. */
   point(e, layer = this.windowLayer(e.target)) {
     const [left, top] = this.origin(layer);
-    return [e.clientX - left, e.clientY - top];
+    const [sx, sy] = this.layerScale(layer);
+    return [e.clientX / sx - left, e.clientY / sy - top];
+  }
+
+  /** The scale layer `layer` is drawn at (`scaleLayer`): its points are
+   * the window's divided by it. */
+  layerScale(layer) {
+    return (layer && this.frameScale) || [1, 1];
+  }
+
+  /** The top left of `el` in the coordinates `point` gives for `layer`. */
+  corner(el, layer) {
+    const r = el.getBoundingClientRect();
+    const [left, top] = this.origin(layer);
+    const [sx, sy] = this.layerScale(layer);
+    return [r.left / sx - left, r.top / sy - top];
   }
 
   /** The dialog over the window (`viewportDialogs`) that `node` is in, if
@@ -5717,13 +5785,13 @@ class Player {
     for (const [id, p] of this.pointers) {
       if (!p.touchPath.length) continue;
       const target = p.touchPath[0];
-      const rect = this.view(target)?.getBoundingClientRect();
-      const [left, top] = this.origin(p.layer);
+      const view = this.view(target);
+      const [left, top] = view ? this.corner(view, p.layer) : [0, 0];
       points.push({
         id, target, path: p.touchPath,
         pageX: p.x, pageY: p.y,
-        x: rect ? p.x + left - rect.left : p.x,
-        y: rect ? p.y + top - rect.top : p.y,
+        x: p.x - left,
+        y: p.y - top,
         changed: id === changedId,
       });
     }
@@ -5830,10 +5898,9 @@ class Player {
    * keyboard (`keyPress`), which has no pointer. */
   pressPayload(p) {
     if (p.x === undefined) return null;
-    const r = p.press.getBoundingClientRect();
-    const [left, top] = this.origin(p.layer);
+    const [left, top] = this.corner(p.press, p.layer);
     return {
-      position: { x: p.x + left - r.left, y: p.y + top - r.top },
+      position: { x: p.x - left, y: p.y - top },
       pagePosition: { x: p.x, y: p.y },
       modifiers: p.modifiers,
       clicks: p.clicks,
@@ -6067,10 +6134,9 @@ class Player {
   startPinchZoom(el, a, b) {
     for (const p of [a, b]) this.pressOut(p, false);
     cancelAnimationFrame(el._zoomAnimation);
-    const r = el.getBoundingClientRect();
-    const [left, top] = this.origin(a.layer);
-    const fx = (a.x + b.x) / 2 + left - r.left;
-    const fy = (a.y + b.y) / 2 + top - r.top;
+    const [left, top] = this.corner(el, a.layer);
+    const fx = (a.x + b.x) / 2 - left;
+    const fy = (a.y + b.y) / 2 - top;
     this.twoFinger = { zoom: el, dist: Math.hypot(a.x - b.x, a.y - b.y), scale: el._zoom, point: this.contentPoint(el, fx, fy) };
   }
 
@@ -6079,9 +6145,8 @@ class Player {
     if (t.zoom) {
       const [a, b] = [...this.pointers.values()];
       if (!a || !b) return;
-      const r = t.zoom.getBoundingClientRect();
-      const [left, top] = this.origin(a.layer);
-      t.focus = [(a.x + b.x) / 2 + left - r.left, (a.y + b.y) / 2 + top - r.top];
+      const [left, top] = this.corner(t.zoom, a.layer);
+      t.focus = [(a.x + b.x) / 2 - left, (a.y + b.y) / 2 - top];
       const scale = this.limitZoom(t.zoom, (t.scale * Math.hypot(a.x - b.x, a.y - b.y)) / Math.max(1, t.dist), true);
       this.zoomContent(t.zoom, scale, t.point[0], t.point[1], t.focus[0], t.focus[1]);
       return;

@@ -1,7 +1,6 @@
 ---
 title: Collapsible
 description: Collapsible 组件：内容可展开和收起的区域，应用让它展开时内容显示在子元素之后，触发控件和全部外观都由应用决定。
-order: 20.7
 group: base
 demo: el-collapsible
 ---

@@ -1,7 +1,6 @@
 ---
 title: ColorPicker
 description: "ColorPicker 组件及其部件：在饱和度与明度区域上、在 RGB、HSL、HSB 或 OKLCH 任一通道及透明度的滑块上选取颜色，以任意 CSS 形式输入、从色板中挑选，或用吸管在屏幕上取色；支持 WAI-ARIA 按键，对屏幕阅读器是可调节元素；布局和样式由应用决定。"
-order: 20.86
 group: base
 demo: el-color-picker
 ---
