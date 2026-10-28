@@ -2,7 +2,7 @@
 // The home hero's background: the site's dot grid, drawn by a fragment
 // shader (WebGL). A slowly flowing, domain-warped noise field runs through
 // the grid like bands of light: where a band passes the dots swell and, on
-// its crest, take the accent, or the amber or coral the hues weave there;
+// its crest, take the accent, or the mint or gold the hues weave there;
 // a faint aurora of the same field glows under them in those three hues. A
 // press on the hero gathers light where it is held and, released, sends a
 // wave out from there: the longer the hold, the larger, wider and longer
@@ -20,21 +20,21 @@
   :root {
     --hero-dot: rgba(255, 255, 255, 0.2);
     --hero-dot-hot: var(--citrus, #c8f26d);
-    --hero-glow: rgba(200, 242, 109, 0.14);
-    --hero-glow-amber: rgba(255, 170, 90, 0.18);
-    --hero-glow-coral: rgba(255, 112, 112, 0.16);
-    --hero-dot-amber: #ffb766;
-    --hero-dot-coral: #ff8f86;
+    --hero-glow: rgba(200, 242, 109, 0.15);
+    --hero-glow-mint: rgba(84, 214, 156, 0.15);
+    --hero-glow-gold: rgba(236, 222, 120, 0.12);
+    --hero-dot-mint: #74e0ab;
+    --hero-dot-gold: #e8dc7c;
   }
   html.light,
   html:not(.dark) {
     --hero-dot: rgba(22, 23, 26, 0.3);
     --hero-dot-hot: #5a7a12;
     --hero-glow: rgba(150, 196, 40, 0.16);
-    --hero-glow-amber: rgba(226, 136, 40, 0.15);
-    --hero-glow-coral: rgba(226, 84, 92, 0.12);
-    --hero-dot-amber: #b8680f;
-    --hero-dot-coral: #c8464f;
+    --hero-glow-mint: rgba(30, 160, 104, 0.12);
+    --hero-glow-gold: rgba(184, 160, 20, 0.12);
+    --hero-dot-mint: #1d8f5c;
+    --hero-dot-gold: #9a8410;
   }
   .hero-field {
     position: absolute;
@@ -87,8 +87,8 @@
   // The first pass: the flow field, a texel every FIELD_STEP CSS px (its
   // features are hundreds of px wide, so the dots and the aurora sample it
   // with linear filtering instead of evaluating the noise per pixel). Red is
-  // the flow, green and blue the weave of its three hues (citrus, amber,
-  // coral).
+  // the flow, green and blue the weave of its three hues (citrus, mint,
+  // gold).
   const FIELD = `
     precision highp float;
     uniform vec2 size;      // the hero, CSS px
@@ -113,9 +113,9 @@
     void main() {
       vec2 p = vec2(gl_FragCoord.x / grid.x, 1.0 - gl_FragCoord.y / grid.y) * size;
       float f = clamp(flow(p) + 0.3 * stage(p), 0.0, 1.0);
-      float amber = smoothstep(0.32, 0.68, fbm(p / 640.0 + vec2(-time * 0.02, time * 0.015)));
-      float coral = smoothstep(0.4, 0.72, fbm(p / 760.0 + vec2(9.1, 3.7) + vec2(time * 0.016, time * 0.011)));
-      gl_FragColor = vec4(f, amber, coral, 1.0);
+      float mint = smoothstep(0.32, 0.68, fbm(p / 640.0 + vec2(-time * 0.02, time * 0.015)));
+      float gold = smoothstep(0.4, 0.72, fbm(p / 760.0 + vec2(9.1, 3.7) + vec2(time * 0.016, time * 0.011)));
+      gl_FragColor = vec4(f, mint, gold, 1.0);
     }
   `;
 
@@ -130,15 +130,16 @@
     uniform float time;     // seconds
     uniform float spacing;
     uniform float stacked;
+    uniform vec4 copy;      // the hero's copy: left, top, right, bottom, CSS px
     uniform vec4 waves[${WAVES}]; // released presses: x, y, the time (negative: none), the size
     uniform vec4 charge;          // a press being held: x, y, the time it began, 1 while held
     uniform vec4 dotColor;  // straight alpha
     uniform vec4 hotColor;
     uniform vec4 glowColor;
-    uniform vec4 amberColor;
-    uniform vec4 coralColor;
-    uniform vec3 dotAmber;         // the crests' other hues
-    uniform vec3 dotCoral;
+    uniform vec4 mintColor;
+    uniform vec4 goldColor;
+    uniform vec3 dotMint;         // the crests' other hues
+    uniform vec3 dotGold;
     ${NOISE}
     vec4 sampleField(vec2 p) { return texture2D(field, vec2(p.x / size.x, 1.0 - p.y / size.y)); }
 
@@ -152,6 +153,10 @@
       vec2 n = c / size;
       float side = stacked > 0.5 ? smoothstep(0.32, 0.72, n.y) : smoothstep(0.3, 0.6, n.x);
       side = 0.03 + 0.97 * side;
+      // Clear around the copy itself, wherever the layout puts it.
+      vec2 dd = max(copy.xy - c, c - copy.zw);
+      float outside = length(max(dd, 0.0)) + min(max(dd.x, dd.y), 0.0);
+      side *= 0.04 + 0.96 * smoothstep(10.0, 90.0, outside);
       // The device's caption sits along the bottom: the field thins out there.
       side *= smoothstep(0.0, 0.08, n.y) * smoothstep(0.95, 0.7, n.y);
 
@@ -201,15 +206,15 @@
       float hit = clamp(wave + flash, 0.0, 1.0);
       float hot = clamp(crest * (0.55 + 0.45 * twinkle) + hit * (0.6 + 0.6 * grain), 0.0, 1.0);
 
-      float r = spacing * (0.045 + 0.085 * band + 0.075 * hot + 0.05 * hit) * (0.85 + 0.3 * grain);
+      float r = spacing * (0.045 + 0.06 * band + 0.045 * hot + 0.07 * hit) * (0.92 + 0.16 * grain);
       vec2 local = p - c - push * 4.0;
       float disc = smoothstep(r + 0.7 / dpr, r - 0.7 / dpr, length(local));
 
-      float level = (0.2 + 0.8 * band) * (0.55 + 0.45 * twinkle) * mix(0.35 + 0.65 * grain, 1.0, hot);
+      float level = (0.2 + 0.8 * band) * (0.7 + 0.3 * twinkle) * mix(0.7 + 0.3 * grain, 1.0, hot);
       // The crests take the hue the weave gives that cell, and the other dots
       // a tint of it within the bands; a wave's light is the accent.
       vec4 hues = sampleField(c);
-      vec3 crestRgb = mix(mix(hotColor.rgb, dotAmber, hues.g * 0.85), dotCoral, hues.b * 0.85);
+      vec3 crestRgb = mix(mix(hotColor.rgb, dotMint, hues.g * 0.85), dotGold, hues.b * 0.85);
       vec4 base = vec4(mix(dotColor.rgb, crestRgb, 0.45 * band), dotColor.a * level * (1.0 + 0.4 * band));
       vec4 lit = vec4(mix(crestRgb, hotColor.rgb, clamp(hit * 1.5, 0.0, 1.0)), hotColor.a * (0.35 + 0.65 * hot));
       vec4 dotC = mix(base, lit, smoothstep(0.08, 0.6, hot));
@@ -219,7 +224,7 @@
       // weaving, brighter where a wave passes.
       vec4 here = sampleField(p);
       float aurora = smoothstep(0.3, 0.8, here.r) * side;
-      vec4 glow = mix(mix(glowColor, amberColor, here.g), coralColor, here.b);
+      vec4 glow = mix(mix(glowColor, mintColor, here.g), goldColor, here.b);
       float lift = clamp(hit, 0.0, 1.0);
       float g = clamp(glow.a * aurora + glowColor.a * lift * 0.9, 0.0, 1.0);
       vec3 glowRgb = mix(glow.rgb, glowColor.rgb, lift);
@@ -321,10 +326,10 @@
       gl!.uniform4fv(u('dotColor'), parse(style.getPropertyValue('--hero-dot').trim(), [1, 1, 1, 0.2]));
       gl!.uniform4fv(u('hotColor'), parse(style.getPropertyValue('--hero-dot-hot').trim(), [0.78, 0.95, 0.43, 1]));
       gl!.uniform4fv(u('glowColor'), parse(style.getPropertyValue('--hero-glow').trim(), [0.78, 0.95, 0.43, 0.13]));
-      gl!.uniform4fv(u('amberColor'), parse(style.getPropertyValue('--hero-glow-amber').trim(), [1, 0.67, 0.35, 0.18]));
-      gl!.uniform4fv(u('coralColor'), parse(style.getPropertyValue('--hero-glow-coral').trim(), [1, 0.44, 0.44, 0.16]));
-      gl!.uniform3fv(u('dotAmber'), parse(style.getPropertyValue('--hero-dot-amber').trim(), [1, 0.72, 0.4, 1]).slice(0, 3));
-      gl!.uniform3fv(u('dotCoral'), parse(style.getPropertyValue('--hero-dot-coral').trim(), [1, 0.56, 0.53, 1]).slice(0, 3));
+      gl!.uniform4fv(u('mintColor'), parse(style.getPropertyValue('--hero-glow-mint').trim(), [0.33, 0.84, 0.61, 0.15]));
+      gl!.uniform4fv(u('goldColor'), parse(style.getPropertyValue('--hero-glow-gold').trim(), [0.93, 0.87, 0.47, 0.12]));
+      gl!.uniform3fv(u('dotMint'), parse(style.getPropertyValue('--hero-dot-mint').trim(), [0.45, 0.88, 0.67, 1]).slice(0, 3));
+      gl!.uniform3fv(u('dotGold'), parse(style.getPropertyValue('--hero-dot-gold').trim(), [0.91, 0.86, 0.49, 1]).slice(0, 3));
     }
 
     function layout() {
@@ -350,6 +355,9 @@
       gl!.uniform1f(u('dpr'), canvas.width / w);
       gl!.uniform1f(u('spacing'), SPACING);
       gl!.uniform1f(u('stacked'), stacked);
+      const copy = hero.querySelector('.hero__copy')?.getBoundingClientRect();
+      if (copy) gl!.uniform4f(u('copy'), copy.left - rect.left, copy.top - rect.top, copy.right - rect.left, copy.bottom - rect.top);
+      else gl!.uniform4f(u('copy'), -1e4, -1e4, -1e4, -1e4);
       readColors();
       if (!running) draw(0);
     }

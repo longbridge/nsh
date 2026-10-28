@@ -152,10 +152,12 @@ Behind the hero, `HeroField.astro` draws the dot grid with a fragment
 shader (WebGL, two passes: the flow field into a texture of a texel every
 11 px, then the dots and the aurora per pixel, sampling it). A slowly
 flowing, domain-warped noise field runs through the grid as bands of light:
-the dots swell in a band, and on its crest take the accent, amber or coral
-as a second, slower field weaves the three hues; a faint aurora of the same
-hues glows under them. The field gathers beside the device, so that stage
-never goes dark, and fades over the copy and the caption. A press gathers
+the dots swell in a band, and on its crest take the accent, mint or pale
+gold (its neighbors, so the field stays one green family) as a second,
+slower field weaves the three hues; a faint aurora of the same hues glows
+under them. The field gathers beside the device, so that stage never goes
+dark, and clears around the copy (the distance to its box) and under the
+caption. A press gathers
 light where it is held; released, it sends a wave whose size, reach and
 life grow with the hold, varied a little by chance (up to four at once).
 The colors are the `--hero-*` tokens. It pauses off screen and in hidden
