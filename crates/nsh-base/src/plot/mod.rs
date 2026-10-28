@@ -23,6 +23,7 @@ mod area;
 mod axis;
 mod bar;
 mod grid;
+mod keys;
 mod line;
 mod pie;
 mod scale;
@@ -32,7 +33,7 @@ mod tween;
 use std::rc::Rc;
 
 use nsh_core::{
-    AccessibilityValue,
+    AccessibilityActionDef, AccessibilityValue,
     canvas::{CanvasOp, Num},
     element::{Registry, RowAccessor, Rows, Spring, Style, Timing},
     prelude::*,
@@ -47,7 +48,9 @@ pub use self::{
     bar::{Bar, BarCornerRadii, BarElement, BarLabelStyle, BarProps, bar},
     grid::{Grid, GridElement, GridProps, grid},
     line::{Curve, Line, LineElement, LineProps, line},
-    pie::{Arc, ArcElement, ArcProps, Pie, PieElement, PieProps, SliceClass, arc, pie},
+    pie::{
+        Arc, ArcElement, ArcProps, Pie, PieElement, PieLabelStyle, PieProps, SliceClass, arc, pie,
+    },
     scale::{BandScale, Scale},
 };
 use self::{
@@ -166,18 +169,28 @@ pub struct PlotProps {
     /// rows in order, evenly from the left edge to the right one), `{
     /// type: "linear", domain? }`, or `{ type: "band", … }` (a band per
     /// row, for bars); with a band y scale it defaults to linear, for
-    /// bars across.
+    /// bars across. `reverse: true` runs it from the right edge: the first
+    /// row, or the domain's smallest value, at the right (bars across
+    /// grow leftward from it, `gpui-base`'s `BarAlignment::Right`).
     pub x_scale: Prop<Option<Scale>>,
     /// How the y axis places values: `{ type: "linear", domain? }` (the
     /// default; without a domain, the extent of what the marks draw), the
     /// domain's smallest value at the bottom edge and its largest at the
     /// top one; or `{ type: "band", … }`, a band per row from the top edge
     /// down, for bars across (the x scale then `linear`, its domain the
-    /// extent of the bars' values without one).
+    /// extent of the bars' values without one). `reverse: true` runs it
+    /// the other way: the domain's smallest value at the top edge (bars
+    /// grow down from it, `gpui-base`'s `BarAlignment::Top`), the rows
+    /// from the bottom edge up.
     pub y_scale: Prop<Option<Scale>>,
     /// The plot follows the pointer (`gpui-base`'s `Plot::interactive`;
     /// default true): it reports the row under it and shows the hover's
-    /// parts. False draws the marks only (a sparkline in a list).
+    /// parts. It is also a stop of the keyboard focus whose keys move the
+    /// hover (Left / Right, Home / End, Escape), and screen readers'
+    /// increment and decrement step through the rows. False draws the
+    /// marks only (a sparkline in a list): no focus, and presses go to the
+    /// views around it. Whether it offers the focus and the actions at all
+    /// is decided when the plot is made.
     #[prop(default = true)]
     pub interactive: Prop<bool>,
     /// The timing of its motion: the appear, the moves to new shapes and
@@ -348,11 +361,14 @@ struct PlotContext {
 }
 
 /// A radial mark's test of the row under a point of the plot
-/// (`gpui-base`'s `Arc::contains`, `shape/arc.rs:191`), while it lives.
+/// (`gpui-base`'s `Arc::contains`, `shape/arc.rs:191`), while it lives,
+/// and where a row's slice is for the keys (its middle; `None`: the row
+/// has no slice).
 #[derive(Clone)]
 struct Hit {
     key: u64,
     at: Rc<dyn Fn(Point<Points>) -> Option<u32>>,
+    center: Rc<dyn Fn(u32) -> Option<Point<Points>>>,
 }
 
 impl PartialEq for Hit {
@@ -395,8 +411,13 @@ impl PlotContext {
     }
 
     /// Tests what is under the pointer with `at` while the current owner
-    /// lives (a radial mark's slices).
-    fn add_hit(&self, at: impl Fn(Point<Points>) -> Option<u32> + 'static) {
+    /// lives (a radial mark's slices), `center` placing a row's slice for
+    /// the keys.
+    fn add_hit(
+        &self,
+        at: impl Fn(Point<Points>) -> Option<u32> + 'static,
+        center: impl Fn(u32) -> Option<Point<Points>> + 'static,
+    ) {
         let key = self.next.get();
         self.next.replace(key + 1);
         let hits = self.hits;
@@ -404,6 +425,7 @@ impl PlotContext {
             all.push(Hit {
                 key,
                 at: Rc::new(at),
+                center: Rc::new(center),
             })
         });
         cleanup(move || {
@@ -415,21 +437,27 @@ impl PlotContext {
     }
 
     /// Records the clip of the appear while it runs (before what a mark
-    /// draws): the marks show from the leading edge to the appear's
+    /// draws): the marks show from the leading edge, where the x scale
+    /// starts (the right one when it is reversed), to the appear's
     /// progress of the plot's width.
     fn clip(&self, p: Painter, bleed: f32) -> Painter {
         if !self.appearing.get() {
             return p;
         }
         let size = self.size.get();
-        let edge = self.appear.progress().mul(size.width.0);
+        let (w, h) = (size.width.0, size.height.0);
+        let shown = self.appear.progress().mul(w);
         // What the mark draws past the plot's edges (`bleed`) is revealed
         // with the rest, from the leading edge.
+        let (lead, edge) = match self.x_map.get().backward() {
+            true => (w + bleed, shown.mul(-1.0).add(w)),
+            false => (-bleed, shown),
+        };
         p.begin_path()
-            .move_to(-bleed, -bleed)
+            .move_to(lead, -bleed)
             .line_to(&edge, -bleed)
-            .line_to(&edge, size.height.0 + bleed)
-            .line_to(-bleed, size.height.0 + bleed)
+            .line_to(&edge, h + bleed)
+            .line_to(lead, h + bleed)
             .close_path()
             .clip()
     }
@@ -474,9 +502,14 @@ impl PlotContext {
 /// shows the hover's parts the app styles (`crossLineClass`, `dotClass` or
 /// a mark's `hoverDotClass`, `tooltipContent`), moved and faded natively
 /// with `motion`, the tooltip placed by `tooltipPlacement` and kept inside
-/// the plot on the platform's animator. It is one
-/// element for screen readers, with the image role, the app's
-/// `accessibilityLabel` and `accessibilityValue`. The app's `class` and
+/// the plot on the platform's animator. The keyboard drives the same
+/// hover: the plot is a stop of the focus (the app's `focus:` classes or
+/// `focusStyle` draw its ring), and while it has it Left / Right move to
+/// the row on that side (the row before / after; the other way round on
+/// a reversed x scale), Home / End to the first / last, Escape clears
+/// it (`keys.rs`). It is one element for screen readers, with the image
+/// role, the app's `accessibilityLabel` and `accessibilityValue`, and
+/// increment / decrement step through the rows. The app's `class` and
 /// `style` size and style it; the marks' paint inherits from it as CSS
 /// inherits `fill` and `stroke`.
 #[component]
@@ -507,17 +540,26 @@ pub fn Plot(props: PlotProps, cx: Scope<PlotEvent>) -> impl IntoElement {
         })
     };
     let x_map = computed(move || {
-        let range = [0.0, size.get().width.0];
+        let width = size.get().width.0;
         let len = data.with(|rows| rows.len());
         // Bars across a band y axis put their values along x.
         let fallback = match y_scale.get() {
-            Some(Scale::Band(_)) => Scale::Linear { domain: None },
-            _ => Scale::Point,
+            Some(Scale::Band(_)) => Scale::Linear {
+                domain: None,
+                reverse: false,
+            },
+            _ => Scale::Point { reverse: false },
         };
-        match x_scale.get().unwrap_or(fallback) {
-            Scale::Point => AxisMap::Point { len, range },
+        let scale = x_scale.get().unwrap_or(fallback);
+        // Left to right; reversed, from the right edge.
+        let range = match scale.reversed() {
+            true => [width, 0.0],
+            false => [0.0, width],
+        };
+        match scale {
+            Scale::Point { .. } => AxisMap::Point { len, range },
             Scale::Band(band) => AxisMap::Band(Band::new(len, range, band)),
-            Scale::Linear { domain } => {
+            Scale::Linear { domain, .. } => {
                 // The rows' `x`, or the values of bars across the plot.
                 let domain = domain
                     .or_else(|| match x_values.get() {
@@ -537,20 +579,21 @@ pub fn Plot(props: PlotProps, cx: Scope<PlotEvent>) -> impl IntoElement {
     let y_map = computed(move || {
         let height = size.get().height.0;
         let len = data.with(|rows| rows.len());
-        match y_scale.get() {
-            // Rows from the top edge down.
-            Some(Scale::Point) => AxisMap::Point {
-                len,
-                range: [0.0, height],
-            },
-            Some(Scale::Band(band)) => AxisMap::Band(Band::new(len, [0.0, height], band)),
+        let scale = y_scale.get();
+        // Rows from the top edge down, values from the bottom edge up;
+        // reversed, the other way.
+        let (down, up) = match scale.is_some_and(|s| s.reversed()) {
+            true => ([height, 0.0], [0.0, height]),
+            false => ([0.0, height], [height, 0.0]),
+        };
+        match scale {
+            Some(Scale::Point { .. }) => AxisMap::Point { len, range: down },
+            Some(Scale::Band(band)) => AxisMap::Band(Band::new(len, down, band)),
             Some(Scale::Linear {
                 domain: Some(domain),
-            }) => AxisMap::Linear(Linear::new(domain, [height, 0.0])),
-            _ => AxisMap::Linear(Linear::new(
-                extent_on(Axis::Y).unwrap_or([0.0, 0.0]),
-                [height, 0.0],
-            )),
+                ..
+            }) => AxisMap::Linear(Linear::new(domain, up)),
+            _ => AxisMap::Linear(Linear::new(extent_on(Axis::Y).unwrap_or([0.0, 0.0]), up)),
         }
     });
     let hover_axis = computed(move || match band_axis.get() {
@@ -742,6 +785,79 @@ pub fn Plot(props: PlotProps, cx: Scope<PlotEvent>) -> impl IntoElement {
         });
     });
     let interactive = props.interactive;
+    // The keyboard (`keys.rs`): the same hover, a row at a time, while the
+    // plot has the focus.
+    let focused = signal(false);
+    let pointer_over = stored(false);
+    // Where a radial mark has row `i`'s slice: the parts go to its middle,
+    // as the pointer there would put them.
+    let radial = move || hits.with_untracked(|all| !all.is_empty());
+    let slice_at =
+        move |i: u32| hits.with_untracked(|all| all.iter().rev().find_map(|h| (h.center)(i)));
+    let placed = move |i: usize| match radial() {
+        true => slice_at(i as u32).is_some(),
+        false => rows_at.with_untracked(|rows| rows.get(i).is_some_and(|x| x.is_finite())),
+    };
+    let step_to = move |step: keys::Step| {
+        let len = data.with_untracked(|rows| rows.len());
+        keys::step(len, placed, hovered.get_untracked(), step)
+    };
+    let key_to = move |index: Option<u32>| {
+        let Some(i) = index else {
+            return follow(None, None);
+        };
+        if radial() {
+            if let Some(p) = slice_at(i) {
+                place.pointer_at(p.y.0);
+                follow(Some(i), Some(p.x.0));
+            }
+            return;
+        }
+        // No pointer to follow: a tooltip beside it goes beside the first
+        // series' point at the row, else the plot's middle (bars).
+        let Some(at) = rows_at.with_untracked(|rows| rows.get(i as usize).copied()) else {
+            return;
+        };
+        let size = size.get_untracked();
+        match hover_axis.get_untracked() {
+            Axis::X => {
+                let y = marks
+                    .with_untracked(|all| all.iter().find_map(|m| m.near(at)))
+                    .map_or(size.height.0 / 2.0, |p| p.y.0);
+                place.pointer_at(y);
+            }
+            Axis::Y => {
+                let x = size.width.0 / 2.0;
+                cross.x.set(x);
+                place.row_at(x);
+                place.pointer_at(at);
+            }
+        }
+        follow(Some(i), None);
+    };
+    // Left and Right follow the screen: the rows along a reversed x scale
+    // run right to left (a pie's slices keep the rows' order).
+    let mirrored = move || {
+        !radial()
+            && hover_axis.get_untracked() == Axis::X
+            && x_map.with_untracked(AxisMap::backward)
+    };
+    keys::bind(
+        move || focused.get() && interactive.get(),
+        mirrored,
+        hovered,
+        step_to,
+        key_to,
+    );
+    // Decided when the plot is made: a sparkline offers none of it and
+    // mounts nothing more.
+    let actions = interactive.get_untracked().then(|| {
+        let action = |name: &str| AccessibilityActionDef {
+            name: name.into(),
+            label: None,
+        };
+        vec![action("increment"), action("decrement")]
+    });
     let (cross_class, cross_style) = (props.cross_line_class, props.cross_line_style);
     let (dot_class, dot_style) = (props.dot_class, props.dot_style);
     let has_cross = move || cross_class.get().is_some() || cross_style.get() != Style::default();
@@ -761,6 +877,34 @@ pub fn Plot(props: PlotProps, cx: Scope<PlotEvent>) -> impl IntoElement {
                 text: v.text.map(|t| std::sync::Arc::from(&*t)),
             })
         })
+        .map(|root| match actions {
+            // A stop of the keyboard focus that takes no presses: a
+            // pressable around it (a card that opens a page) keeps them.
+            // Screen readers step through the rows as the arrow keys do.
+            Some(actions) => root
+                .focusable(move || interactive.get())
+                .on_focus(move || focused.set(true))
+                .on_blur(move || {
+                    focused.set(false);
+                    // The keys' hover goes with the focus; the pointer's
+                    // stays.
+                    if !pointer_over.get() {
+                        follow(None, None);
+                    }
+                })
+                .accessibility_actions(actions)
+                .on_accessibility_action(move |action: &str| {
+                    let step = match action {
+                        "increment" => keys::Step::Next,
+                        "decrement" => keys::Step::Previous,
+                        _ => return,
+                    };
+                    if interactive.get_untracked() {
+                        key_to(step_to(step));
+                    }
+                }),
+            None => root,
+        })
         .on_layout(move |b: &Bounds<Points>| {
             size.set(b.size);
             place.plot_is(b.size);
@@ -770,6 +914,7 @@ pub fn Plot(props: PlotProps, cx: Scope<PlotEvent>) -> impl IntoElement {
             if !interactive.get_untracked() || e.pressed_button.is_some() {
                 return;
             }
+            pointer_over.replace(true);
             place.pointer_at(e.position.y.0);
             // Over a radial mark: the slice under the pointer, if any.
             let found = hits.with_untracked(|all| {
@@ -799,7 +944,10 @@ pub fn Plot(props: PlotProps, cx: Scope<PlotEvent>) -> impl IntoElement {
             });
             follow(nearest, None);
         })
-        .on_mouse_leave(move |_: &MouseEvent| follow(None, None))
+        .on_mouse_leave(move |_: &MouseEvent| {
+            pointer_over.replace(false);
+            follow(None, None);
+        })
         .child(props.children)
         // The hover's parts, over the marks; they take no pointer, so the
         // plot keeps the hover.

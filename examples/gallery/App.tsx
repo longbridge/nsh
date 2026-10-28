@@ -1,4 +1,4 @@
-import { computed, effect, mount, Scroll, signal, Text, untracked, View, type YNode } from "nsh";
+import { computed, effect, type InputRef, mount, Scroll, signal, Text, untracked, View } from "nsh";
 import { Animated, createAnimatedValue, Easing } from "nsh";
 import { platform, windowSize } from "nsh";
 import { isAvailable as hasWindow, titleBar, Window } from "nsh/desktop";
@@ -42,6 +42,7 @@ const groups: { title: string; demos: DemoEntry[] }[] = [
       { name: "Switch", detail: "Settings that take effect at once, one that needs another on", icon: "switch", screen: lazy(() => import("./demos/Controls").then((m) => m.SwitchDemo)) },
       { name: "Tabs", detail: "A section switcher, a disabled tab", icon: "tabs", screen: lazy(() => import("./demos/Controls").then((m) => m.TabsDemo)) },
       { name: "Select", detail: "A sort order, fonts in sections with search, a disabled language", icon: "select", screen: lazy(() => import("./demos/Controls").then((m) => m.SelectDemo)) },
+      { name: "Combobox", detail: "Topics picked several at once with search, a reviewer picked alone", icon: "select", screen: lazy(() => import("./demos/Controls").then((m) => m.ComboboxDemo)) },
       { name: "Collapsible", detail: "Details under a summary, kept while collapsed", icon: "collapsible", screen: lazy(() => import("./demos/Controls").then((m) => m.CollapsibleDemo)) },
       { name: "Progress", detail: "A transfer the app drives, and one of unknown size", icon: "progress", screen: lazy(() => import("./demos/Controls").then((m) => m.ProgressDemo)) },
       { name: "NumberInput", detail: "Quantities typed or stepped, within a range, in steps", icon: "stepper", screen: lazy(() => import("./demos/Controls").then((m) => m.NumberInputDemo)) },
@@ -247,7 +248,7 @@ function SidebarToggle() {
 /** The sidebar's search: filters the demos by name or group as you type
  * (Ctrl+K / Cmd+K focuses it, Escape clears it). */
 function Search() {
-  let input: YNode | undefined;
+  let input: InputRef | undefined;
   keymap.bind("mod+k", () => input?.focus());
   return (
     <View style={{ paddingHorizontal: 12, paddingBottom: 8 }}>
@@ -255,7 +256,7 @@ function Search() {
         ref={(node) => (input = node)}
         {...field({ style: { paddingLeft: 26 } })}
         value={query()}
-        onChange={(v) => query.set(v)}
+        onChange={({ value }) => query.set(value)}
         onKeyPress={(e) => e.key === "Escape" && query.set("")}
         placeholder={`Search demos  ${keymap.label("mod+k")}`}
         accessibilityLabel="Search demos"
@@ -444,7 +445,7 @@ function rememberDemo() {
 function App() {
   if (hasWindow) {
     Window.setTitle("Gallery");
-    Window.setTitleBar("hidden", 44);
+    Window.setTitleBar({ style: "hidden", height: 44 });
   }
   rememberDemo();
   // Every scroll view and list draws the gallery's bar.

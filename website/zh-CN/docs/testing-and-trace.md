@@ -331,7 +331,7 @@ expect(app.texts()).toContain("Saved at 09:00:10");
 | `await app.scroll(selector, distance)` | 沿滚动视图或列表（该视图、它外层的滚动视图，或它内部的第一个）的方向拖动 `distance` 点，每帧 10 点，不超出内容范围，前提是用户可以滚动它（`scrollable`）。负数表示往回滚。 |
 | `await app.hover(selector)` | 把鼠标移到视图中央：鼠标离开的视图收到 `onMouseLeave`，移入的视图收到 `onMouseEnter` 并应用 `hover:` 样式，监听的视图收到带位置、没有按下按键的 `onMouseMove`。用于桌面和任意宽度的 web，包括手机形态的浏览器（headless 时使用桌面或 `"web"` `platform`）；iOS 和 Android 手机没有鼠标，在那里会 reject。 |
 | `await app.rightClick(selector)` | 在视图中央按下鼠标右键：该视图或其外层最近的监听视图收到 `onContextMenu`。用于桌面和 web（headless 时使用桌面 `platform`）；手机没有鼠标，在那里会 reject。 |
-| `await app.paste(selector, { text?, html?, files?, uris? })` | 像剪贴板上有这些内容时用户粘贴一样粘贴到输入框：输入框获得焦点并收到 `onPaste`（`html` 是带格式的同一内容，`files` 是文件路径，其字节以 `File` 交给它，`uris` 是 `file:` URL），然后按 `pasteBehavior` 插入文本。支持 headless、macOS 和 iOS；本机剪贴板保持不变。 |
+| `await app.paste(selector, { text?, html?, files?, uris? })` | 像剪贴板上有这些内容时用户粘贴一样粘贴到输入框：输入框获得焦点并收到 `onPaste`（`html` 是带格式的同一内容，`files` 是文件路径，其字节以 `File` 交给它，`uris` 是 `file:` URL），然后按 `pasteBehavior` 插入文本。支持 headless、macOS、iOS 和 web；本机剪贴板保持不变。 |
 | `app.menu()` | 应用显示的上下文菜单（`Menu.popup`）中的操作：`label`（子菜单中的项写在子菜单名之后，如 `"Share > Mail"`）、`disabled`，可勾选项还有 `checked`；没有打开的菜单时为 `null`。 |
 | `await app.chooseMenuItem(label)` | 选择已打开上下文菜单中的操作，如同点击它：应用收到 `onMenu`（其 `onSelect` 运行），然后菜单关闭。该项被禁用或不存在时 reject。 |
 | `await app.closeMenu()` | 关闭已打开的上下文菜单，不选择任何项，如同按下 Escape。 |
@@ -348,7 +348,7 @@ expect(app.texts()).toContain("Saved at 09:00:10");
 | `app.enabled(selector)` | 视图是否接受输入：它本身和外层视图都没有被禁用，输入框还要求不是 `readonly`。 |
 | `app.texts()` | 当前屏幕上的文字，按顺序排列。 |
 | `app.value(selector)` | 输入框的内容，没有匹配时为 `null`。 |
-| `app.spanStyle(selector)` | 在无界面测试中，返回匹配到的第一个字符的解析样式：`color`、可选的 `backgroundColor`、`fontSize`、`fontWeight`、`italic`、`underline` 和 `lineThrough`。颜色为 `#rrggbbaa`，字号单位为 pt。 |
+| `app.spanStyle(selector)` | 返回匹配到的第一个字符的解析样式（无界面测试和各个 `--target` 都支持）：`color`、可选的 `backgroundColor`、`fontSize`、`fontWeight`、`italic`、`underline` 和 `lineThrough`。颜色为 `#rrggbbaa`，字号单位为 pt。 |
 | `app.storage()` | 应用存储当前保存的内容。 |
 | `await app.back()` | 像用户那样返回（导航栏的返回按钮、下滑关闭弹出页）：最新的模态窗口里（没有模态窗口时就在整个屏幕上）最内层的导航栈弹出栈顶页面（`onDismiss`），栈顶页面设置了 `preventBack` 时改为询问它（`onBackRequest`）；没有可返回的栈时，最新的模态窗口请求关闭（`onRequestClose`）。没有可返回的内容时 reject。 |
 | `app.onDialog(handler)` | 回答应用之后弹出的对话框（`Alert.alert`、操作表）：`handler` 接收对话框（`title`、`message`、`buttons`、`cancelable`、`sheet`），返回要按的按钮文字，返回 `null` 则不按按钮直接关闭。 |

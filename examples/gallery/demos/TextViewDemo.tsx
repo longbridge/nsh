@@ -251,7 +251,7 @@ function Markdown() {
         codeBlockActions={[{ id: "copy", label: "Copy code" }]}
         renderMath={(math) => <Tex tex={math.tex} display={math.display} />}
         onLinkPress={({ url }) => pressed.set(url)}
-        onImagePress={(image) => viewing.set(image)}
+        onImagePress={({ image }) => viewing.set(image)}
       />
       <Caption label="Link pressed" note={pressed()} />
       <ImageViewer image={viewing()} onClose={() => viewing.set(null)} />
@@ -263,7 +263,7 @@ function Html() {
   const viewing = signal<TextViewImage | null>(null);
   return (
     <Card icon="text" title="HTML" subtitle="An article page: sections, figures, lists, tables, code">
-      <TextView html={HTML} selectable classes={links} onImagePress={(image) => viewing.set(image)} />
+      <TextView html={HTML} selectable classes={links} onImagePress={({ image }) => viewing.set(image)} />
       <ImageViewer image={viewing()} onClose={() => viewing.set(null)} />
     </Card>
   );

@@ -64,7 +64,7 @@ function App() {
         y="visitors"
         yScale={{ type: "linear", domain: [0, 3000] }}
         accessibilityLabel="Visitors per day, highest on Thursday"
-        onHoverChange={(index) => hovered.set(index)}
+        onHoverChange={({ index }) => hovered.set(index)}
         crossLineClass="w-px h-full bg-border"
         dotClass="size-2.5 rounded-full border-2 border-background bg-chart-1"
         class="h-40"
@@ -93,9 +93,9 @@ the marks take the typed paint methods (`.stroke_color(..)`, `.fill_color(..)`, 
 | `data` | `.data(..)` | `T[]` | (required) | The rows, one object per point. The marks read their values once, when the app sets the rows; a row without a value (a field that is not a number, `null`) is skipped. |
 | `x` | `.x(..)` | `keyof T \| (d: T, index: number) => number` | the row's index | What places a row along the x axis on a `linear` x scale. A `point` scale places the rows in order. |
 | `y` | `.y(..)` | `keyof T \| (d: T, index: number) => number` | none | What the marks draw unless they name their own. |
-| `xScale` | `.x_scale(..)` | `Scale` | `{ type: "point" }` | How the x axis places rows: `point` (in order, evenly from the left edge to the right one; one row in the middle), `linear` with an optional `domain`, or `band` (a band per row, for bars; [Bar](#bar)). With a `band` y scale it defaults to `linear`, for bars across. |
-| `yScale` | `.y_scale(..)` | `Scale` | `{ type: "linear" }` | How the y axis places values: the domain's smallest value at the bottom edge, its largest at the top. Without a `domain`, the extent of what the marks draw. `band` lays a band per row from the top edge down, for bars across. |
-| `interactive` | `.interactive(..)` | `boolean` | `true` | The plot follows the pointer: it reports the row under it and shows the hover's parts. `false` draws the marks only (a sparkline in a list). |
+| `xScale` | `.x_scale(..)` | `Scale` | `{ type: "point" }` | How the x axis places rows: `point` (in order, evenly from the left edge to the right one; one row in the middle), `linear` with an optional `domain`, or `band` (a band per row, for bars; [Bar](#bar)). With a `band` y scale it defaults to `linear`, for bars across. `reverse: true` runs it from the right edge ([Reversed scales](#reversed-scales)). |
+| `yScale` | `.y_scale(..)` | `Scale` | `{ type: "linear" }` | How the y axis places values: the domain's smallest value at the bottom edge, its largest at the top. Without a `domain`, the extent of what the marks draw. `band` lays a band per row from the top edge down, for bars across. `reverse: true` runs it the other way: the smallest value at the top edge, the rows from the bottom edge up ([Reversed scales](#reversed-scales)). |
+| `interactive` | `.interactive(..)` | `boolean` | `true` | The plot follows the pointer and the keyboard: it reports the row under it and shows the hover's parts, and it is a stop of Tab whose arrow keys move the hover ([Keyboard](#keyboard)). `false` draws the marks only (a sparkline in a list), and presses on it go to the views around it. Whether the plot offers the keyboard at all is set when it is made. |
 | `motion` | `.motion(..)` | `PlotMotion` | none | The timing of the appear, the hover's fade in and out, and the spring the hover follows the pointer with (below). |
 | `appearGeneration` | `.appear_generation(..)` | `number` | none | Opts in to the appear: the marks draw in when the plot is first shown, and again whenever this changes (another symbol, another period). |
 | `accessibilityLabel` | `.accessibility_label(..)` | `string` | none | What screen readers say of the chart: what it shows and what stands out. |
@@ -103,22 +103,47 @@ the marks take the typed paint methods (`.stroke_color(..)`, `.fill_color(..)`, 
 | `crossLineClass`, `crossLineStyle` | `.cross_line_class(..)`, `.cross_line_style(..)` | `string`, `StyleProp<ViewStyle>` | none | The cross line: a view as tall as the plot, centered on the row under the pointer. On a band scale it sits in the row's band, as wide as the band (across the plot on a band y scale). |
 | `dotClass`, `dotStyle` | `.dot_class(..)`, `.dot_style(..)` | `string`, `StyleProp<ViewStyle>` | none | The hover's dots: a view per `Line` and `Area`, centered on its point at the row under the pointer. A mark's `hoverDotClass` / `hoverDotStyle` replace them for its own dot. |
 | `tooltipContent` | `.tooltip_content(..)` | `JSX.Element` | none | The app's tooltip, placed by `tooltipPlacement` and moved and faded with the cross line. |
-| `tooltipPlacement` | `.tooltip_placement(..)` | `"top" \| "pointer"` | `"top"` | Where the tooltip goes: at the top of the plot, centered on the cross line; or beside the pointer, on the side of the cross line toward the plot's middle and below the pointer in the upper half, above it in the lower one. At the top it stays between the plot's left and right edges (its offset from the top edge is the app's: a tag under the plot takes the plot's height and more); beside the pointer it stays inside the plot. |
+| `tooltipPlacement` | `.tooltip_placement(..)` | `"top" \| "pointer"` | `"top"` | Where the tooltip goes: at the top of the plot, centered on the cross line; or beside the pointer, on the side of the cross line toward the plot's middle and below the pointer in the upper half, above it in the lower one. At the top it stays between the plot's left and right edges (its offset from the top edge is the app's: a tag under the plot takes the plot's height and more); beside the pointer it stays inside the plot. With the keyboard, it goes beside the first line's or area's point at the row (the middle of a bar's band, the middle of a pie's slice). |
 | `tooltipOffset` | `.tooltip_offset(..)` | `number` | `0` | The distance between the tooltip and what places it: the top edge for `"top"`, the cross line and the pointer for `"pointer"`. |
 | `children` | `.child(..)` | `JSX.Element` | none | The marks, drawn in order over each other, and whatever the app lays over them. |
-| `class`, `style` | style methods | `string`, `StyleProp<ViewStyle>` | none | The plot's size and look; the marks inherit its paint properties, as CSS inherits them. |
+| `class`, `style` | style methods | `string`, `StyleProp<ViewStyle>` | none | The plot's size and look; the marks inherit its paint properties, as CSS inherits them. `focus:` / `focus-visible:` classes and `focusStyle` draw its focus ring. |
 
 | Event | Rust | Payload | When |
 |---|---|---|---|
-| `onHoverChange` | `.on_hover_change(..)` | `index: number \| null` | The pointer came over another row: the index of the row nearest to it along the x axis (along the y axis when only it has bands), or of the [pie](#pie-and-arc)'s slice under it; `null` once it leaves the plot (over a pie, its slices). |
+| `onHoverChange` | `.on_hover_change(..)` | `{ index: number \| null }` | The pointer came over another row: the index of the row nearest to it along the x axis (along the y axis when only it has bands), or of the [pie](#pie-and-arc)'s slice under it; `null` once it leaves the plot (over a pie, its slices). |
 
-`Scale` is `{ type: "point" } | { type: "linear"; domain?: [number, number] } | { type: "band"; paddingInner?;
-paddingOuter?; maxBandWidth?; bandCount?; groupPadding? }`. A `domain` is the extent of its two values, in either
-order; a domain of one value puts it in the middle. A `band` scale's options are in [Bar](#bar).
+`Scale` is `{ type: "point"; reverse? } | { type: "linear"; domain?: [number, number]; reverse? } | { type: "band";
+paddingInner?; paddingOuter?; maxBandWidth?; bandCount?; groupPadding?; reverse? }`. A `domain` is the extent of its
+two values, in either order; a domain of one value puts it in the middle. A `band` scale's options are in [Bar](#bar).
 
 A function of a row (`y={(d) => d.high - d.low}`) is called once per row when the rows or the function change, in the
 next turn, never while the plot draws or follows the pointer: keep it pure (the same row, the same number). A field
 name is read with no JS at all.
+
+### Reversed scales
+
+`reverse: true` runs a scale from its other edge, as visx's scales take `reverse` and d3's take a range written
+backwards. On the x axis the first row, or the domain's smallest value, is at the right edge; on the y axis the
+domain's smallest value is at the top edge and the rows run from the bottom edge up. Everything placed on the scale
+follows it: the marks, the bars' base and the way they grow, an area's baseline, the grid lines, the `PlotAxis` ticks,
+the row the hover finds, the arrow keys ([Keyboard](#keyboard)) and the moves to a new domain. Bars hang from the top
+edge on a reversed `linear` y scale, and bars across grow leftward from the right edge on a reversed `linear` x
+scale:
+
+```tsx
+<Plot
+  data={depths}
+  y="depth"
+  xScale={{ type: "band", paddingInner: 0.2 }}
+  yScale={{ type: "linear", domain: [0, 40], reverse: true }}
+  class="h-32"
+>
+  <Bar class="fill-chart-2" cornerRadii={{ bottomLeft: 3, bottomRight: 3 }} />
+</Plot>
+```
+
+With the plot's appear, lines and areas draw in from the edge the x scale starts at, the right one when it is
+reversed.
 
 ## Line, Area and Grid
 
@@ -131,7 +156,7 @@ name is read with no JS at all.
 | `Line`, `Area` | `hoverDotClass`, `hoverDotStyle` | `string`, `StyleProp<ViewStyle>` | the plot's `dotClass`, `dotStyle` | Its hover dot, on its point at the row under the pointer: each series' dot in its own color. Each replaces the plot's for this mark (a mark's color over the plot's size and ring); `hidden` shows none. |
 | `Area` | `backgroundClass`, `backgroundStyle` | `string`, `StyleProp<ViewStyle>` | none | Its background: a box around its shape (from its first point to its last, from its highest point to its baseline, or to its bottom edge's lowest point on a band) whose background (`bg-*`, `bg-linear-to-b from-… to-…`, `backgroundImage`) shows only inside the shape, under its `fill`. With one, `fill` is `none` where none is set. |
 | `Area` | `y1` | `string \| (d, index) => number` | the plot's `y` | What makes its top edge. |
-| `Area` | `y0` | `number \| string \| (d, index) => number` | the bottom edge | Its bottom edge: a number is a baseline on the y scale; a field or a function gives each row its own bottom value, which makes the area a band (a day's low to its high, a forecast's range). A row without a value at either edge is skipped. |
+| `Area` | `y0` | `number \| string \| (d, index) => number` | the y scale's low edge | Its bottom edge: a number is a baseline on the y scale; a field or a function gives each row its own bottom value, which makes the area a band (a day's low to its high, a forecast's range). Without one, the area closes to the edge where the y scale's smallest values are: the bottom edge, the top one on a reversed scale (an area hanging from the top). A row without a value at either edge is skipped. |
 | `Grid` | `x` | `number[]` | none | Where its vertical lines go, as values of the x scale (row indices on a `point` scale). |
 | `Grid` | `y` | `number[]` | none | Where its horizontal lines go, as values of the y scale. |
 
@@ -168,7 +193,9 @@ colors like any view's background.
 
 A `Bar` draws a bar per row in the row's band of a `band` scale: upright on a band x scale, across on a band y scale
 (the x scale then `linear`). Each bar runs from `base` to the row's value on the other scale, so a negative value
-grows the other way, and a row without a value has no bar.
+grows the other way, and a row without a value has no bar. On a reversed value scale the bars grow down from the top
+edge or leftward from the right one, and a reversed band scale puts the first row's band at the right or the bottom
+([Reversed scales](#reversed-scales)).
 
 ```tsx
 import { Bar, Grid, Plot } from "nsh/base/plot";
@@ -220,6 +247,7 @@ The band scale lays out a band per row of the plot, in order, as d3's `scaleBand
 | `maxBandWidth` | none | The widest a band may be, in points: a few bands across a wide plot stay narrow, each in the middle of its place. |
 | `bandCount` | the rows | The bands the axis is laid out for when more than the rows: the rows take the leading ones and keep their width and place as rows come. |
 | `groupPadding` | `0` | The gap between the bars side by side in a band, a share of each bar's place. |
+| `reverse` | `false` | The bands run from the other edge: the first row's at the right of the x axis, at the bottom of the y axis; the bars side by side in a band keep their order. |
 
 A bar paints with its `fill` (`fill-*`; inherited from the plot as CSS inherits it), `currentColor` where none is set,
 and shows no hover dot. On a band scale, the hover finds the band under the pointer, and the plot's cross line sits in
@@ -262,7 +290,7 @@ export function Seats(props: { plans: Plan[] }) {
         accessibilityValue={{ text: shown() && `${shown()!.name}, ${shown()!.seats} seats, ${share(shown()!.seats)}` }}
         appearGeneration={1}
         motion={{ appear: { duration: 900, easing: "easeOut" }, enter: { duration: 120 }, exit: { duration: 160 }, pointer: { stiffness: 400, damping: 32 } }}
-        onHoverChange={(index) => hovered.set(index)}
+        onHoverChange={({ index }) => hovered.set(index)}
         class="size-44"
       >
         {/* A donut with 2-point gaps (0.025 of a turn at its 80-point rim). */}
@@ -327,6 +355,10 @@ fn seats(seats: Vec<f64>) -> impl IntoElement {
 | `Pie` | `sliceStyle` | `.slice_style(..)` | `StyleProp<ViewStyle>` | none | The style of every slice, over its classes (`fill`, `stroke`, `strokeWidth`). |
 | `Pie` | `hoverLift` | `.hover_lift(..)` | `number` | `0` | How far the slice under the pointer grows past the others, in points: on the plot's `pointer` spring, faded in and out with the hover. |
 | `Pie` | `hoverDim` | `.hover_dim(..)` | `number` (0 to 1) | `0` | How much the other slices fade while one is under the pointer, as a share of their opacity, with the hover's fade. |
+| `Pie` | `label` | `.label(..)` | `string \| (d: T, index: number) => string` | none | The text beside each slice: a field (its number) or a function returning the text the app formats. A row whose text is empty, or a slice narrower than half a degree, has none. |
+| `Pie` | `labelClass`, `labelStyle` | `.label_class(..)`, `.label_style(..)` | `string`, `StyleProp<TextStyle>` | none | The `label` part: a text outside the ring at the end of its leader line, centered on it, after it on the right half of the pie and before it on the left. Its padding is its distance from the line's end. |
+| `Pie` | `labelGap` | `.label_gap(..)` | `number` | `15` | How far past the rim the labels sit, in points. |
+| `Pie` | `labelLineClass`, `labelLineStyle` | `.label_line_class(..)`, `.label_line_style(..)` | `string \| (d: T, index: number) => string`, `StyleProp<ViewStyle>` | none | The `labelLine` part: each label's leader line, from the rim at the slice's middle out to the label's radius, then across to the text. Its `stroke` (`currentColor` where none is set), `strokeWidth` and `strokeDasharray`, the same on every line or a function of the slice's row; shown once styled. |
 
 A slice and an arc fill with `fill` (`currentColor` where none is set) and stroke their edges with `stroke` (none where
 none is set), their own over the pie's and the plot's as CSS inherits them: a stroke in the surface's color
@@ -338,6 +370,25 @@ Plots with a pie usually place the tooltip by the pointer (`tooltipPlacement="po
 place along an axis: the cross line and the tooltip follow the pointer over it, and it shows no hover dots. A donut's
 center is the app's own element laid over the plot (the hovered slice's value, or the total), and so is its legend,
 with each key in its slice's color.
+
+A pie's labels name its slices outside the ring: each text sits `labelGap` past the rim toward its slice's middle (the
+slice's centroid at that radius), then across to that radius on the slice's side of the pie, and a styled leader line
+joins it to the rim. The labels sweep in with their slices on the plot's appear and fade in over its end, move with
+them on `motion.update`, and lift with the hovered slice; all of it runs on the platform's animator. Give the plot
+room for them: an `outerRadius` below `"100%"`, or space around the plot. Content of the app's own at a slice is an
+element laid over the plot, as a donut's center is.
+
+```tsx
+<Pie
+  value="seats"
+  outerRadius="64%"
+  sliceClass={(_, i) => FILLS[i % FILLS.length]}
+  label={(d) => share(d.seats)}
+  labelGap={12}
+  labelClass="px-1 text-xs tabular-nums text-muted-foreground"
+  labelLineClass="stroke-border"
+/>
+```
 
 ## PlotAxis
 
@@ -403,7 +454,7 @@ Motion is the app's, and none by default: everything shows at once. `motion` tak
 | Key | Type | What moves |
 |---|---|---|
 | `appear` | timing | The marks draw in, with an `appearGeneration`: lines and areas from the leading edge, bars growing out of their base (one after another with a bar's `stagger`); a pie's and an arc's ring sweeps in clockwise from its start. |
-| `update` | timing | Marks move to the new shape when the app changes it: a pie's and an arc's radii, so a donut's hole opens and closes, and their angles, so a gauge or a slice sweeps round to its new value (d3's `arcTween`: the angles move, not the outline; a new slice opens from where the one before it ends); and a linear scale's domain, the app's `domain` or the extent of the marks' values as rows come, which glides from the old one to the new one, the marks, the grid lines and the `PlotAxis`es with it. |
+| `update` | timing | Marks move to the new shape when the app changes it: a pie's and an arc's radii, so a donut's hole opens and closes, and their angles, so a gauge or a slice sweeps round to its new value (d3's `arcTween`: the angles move, not the outline; a new slice opens from where the one before it ends; a change while one moves goes on from where it is drawn); and a linear scale's domain, the app's `domain` or the extent of the marks' values as rows come, which glides from the old one to the new one, the marks, the grid lines and the `PlotAxis`es with it. |
 | `enter` | timing | The hover's parts fade in when the pointer comes over the plot. |
 | `exit` | timing | They fade out after it leaves. |
 | `pointer` | spring | They glide from one row to the next while the pointer moves over the plot; a pie's slice lifts on it. |
@@ -421,6 +472,25 @@ take the new size at once.
 It is the plot's own motion, the timings of what a chart moves: its marks' clip and its hover's parts. A view's
 entrances, exits and attention seekers are [`createMotion`](../modules/nsh.md#createmotion)'s presets and
 keyframes, which an app can still play on the plot's view or on the elements around it.
+
+## Keyboard
+
+An interactive plot is a stop of Tab (macOS, the web), and while it has the keyboard focus its keys move the same hover
+the pointer does: the cross line, the dots and the tooltip glide on the `pointer` spring, a pie's slice lifts,
+`onHoverChange` reports the row, and screen readers read the `accessibilityValue` the app gives for it. Its focus ring
+is the app's: a `focus-visible:` class or a `focusStyle` (`focus-visible:outline-2 focus-visible:outline-ring`).
+
+| Keys | What they do |
+|---|---|
+| Right, Left | Move to the row on that side: the next or the previous row, the other way round on a reversed x scale, whose first row is at the right (over a pie, its slices in the rows' order); with no row hovered, Right starts at the row at the left end and Left at the one at the right end (over a pie, the first and the last slice). |
+| Home, End | Move to the first or the last row. |
+| Escape | Clears the hover. |
+
+The plot answers its keys while it has the focus, and Escape while a row is hovered; the rest of the time they go to
+the app and the views around it. Moving the focus away clears a hover the keys made. The plot takes no presses, so a
+plot inside a pressable card leaves the card its presses. Screen readers step through the rows too: VoiceOver's
+swipe up and down, TalkBack's scroll forward and back, and every screen reader that offers an element's `increment` and
+`decrement` actions move to the next and the previous row, in the rows' order on a reversed scale as well.
 
 ## Building charts
 
@@ -467,7 +537,7 @@ export function PriceChart(props: { rows: Row[]; low: number; high: number }) {
             <Text class="text-xs tabular-nums text-popover-foreground">{shown().price.toFixed(2)}</Text>
           </View>
         }
-        onHoverChange={(index) => hovered.set(index)}
+        onHoverChange={({ index }) => hovered.set(index)}
         class="mr-10 mb-6 h-48"
       >
         <Grid y={[middle(), props.high]} class="stroke-border" />
@@ -525,7 +595,7 @@ export function SalesChart(props: { rows: Sale[]; stacked: boolean }) {
         appearGeneration={props.stacked ? 1 : 0}
         motion={{ appear: { duration: 600, easing: "easeOut" }, enter: { duration: 150 }, exit: { duration: 150 }, pointer: { stiffness: 320, damping: 32 } }}
         crossLineClass="w-full h-full bg-foreground/5"
-        onHoverChange={(index) => hovered.set(index)}
+        onHoverChange={({ index }) => hovered.set(index)}
         class="mb-6 h-44"
       >
         <Grid y={[40, 80, 120]} class="stroke-border" />
@@ -570,7 +640,9 @@ A sparkline in a list row is a plot with `interactive={false}`: it draws its mar
   offer the rows as text or a list where the numbers matter.
 - Over a pie the row reported is the slice's under the pointer: give `accessibilityValue` its name, value and share
   (`"Team, 340 seats, 34.0%"`), and say the total and the largest share in the label.
-- A plot takes no presses and no keyboard focus.
+- An interactive plot is a stop of the keyboard focus whose arrow keys move the hover ([Keyboard](#keyboard)), and it
+  offers screen readers `increment` and `decrement` to step through the rows (VoiceOver reads it as adjustable); a plot
+  with `interactive={false}` is neither, and it takes no presses either way.
 
 See [Accessibility](../docs/accessibility.md) for labels and roles in general.
 

@@ -88,6 +88,15 @@ test("the zoom gives the editor the whole window, and the document stays", async
   expect(app.count("text:▪")).toBe(2);
 });
 
+test("Backspace after the caret moves deletes one character", async () => {
+  const app = await openDemo();
+  await app.press(ITEM);
+  await app.keyboard.press("home");
+  for (let i = 0; i < 3; i++) await app.keyboard.press("right");
+  await app.keyboard.press("backspace");
+  await app.waitFor("Ta indents an item, Shift-Tab outdents it");
+});
+
 /** The words the line under the editor counts. */
 function words(app: { texts(): string[] }): number {
   const line = app.texts().find((t) => /^\d+ words · \d+ characters$/.test(t)) ?? "";

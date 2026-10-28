@@ -17,7 +17,7 @@ demo: el-select
 
 ```rust tabs
 use nsh_base::{SelectItem, SelectItemState, select, theme};
-use nsh_core::ui::prelude::*;
+use nsh_core::prelude::*;
 
 const FRUITS: [(&str, &str); 5] = [
     ("apple", "苹果"),
@@ -107,7 +107,7 @@ function App() {
     <Select
       items={FRUITS}
       value={fruit()}
-      onChange={(next) => fruit.set(next)}
+      onChange={({ value }) => fruit.set(value)}
       accessibilityLabel="水果"
       offset={4}
       popupClass="rounded-lg border border-border bg-popover p-1 text-popover-foreground shadow-md"
@@ -153,15 +153,15 @@ mount(App);
 
 ## 值
 
-有 `value` 时，选中的条目由应用持有：选择框显示该值对应的条目，并用 `onChange(value)` 报告一次选择；应用把 `value` 设为它以跟随这次选择，或者保留自己的值。`value={null}` 表示没有选中任何条目。省略 `value` 时，选择框自己保存值，初始为 `defaultValue`。`onChange` 只报告变化：再次选择已选中的条目会关闭列表。
+有 `value` 时，选中的条目由应用持有：选择框显示该值对应的条目，并用 `onChange({ value })` 报告一次选择；应用把 `value` 设为它以跟随这次选择，或者保留自己的值。`value={null}` 表示没有选中任何条目。省略 `value` 时，选择框自己保存值，初始为 `defaultValue`。`onChange` 只报告变化：再次选择已选中的条目会关闭列表。
 
-`cleanable` 会在有选中条目时加一个清除按钮：按下它会清空值，以 `onChange(null)` 报告，列表保持关闭。这个按钮在选择框的视图里、触发元素之后，不在触发元素里面，所以按它不会打开列表；由应用摆放它（用 `absolute` 盖在触发元素末端、原本放箭头的位置）并填充内容：
+`cleanable` 会在有选中条目时加一个清除按钮：按下它会清空值，以 `onChange({ value: null })` 报告，列表保持关闭。这个按钮在选择框的视图里、触发元素之后，不在触发元素里面，所以按它不会打开列表；由应用摆放它（用 `absolute` 盖在触发元素末端、原本放箭头的位置）并填充内容：
 
 ```tsx
 <Select
   items={fonts}
   value={font()}
-  onChange={(next) => font.set(next)}
+  onChange={({ value }) => font.set(value)}
   cleanable
   clearButtonAccessibilityLabel="清除字体"
   clearButtonClass="absolute right-2 top-2 size-5 items-center justify-center rounded-full hover:bg-accent"
@@ -176,7 +176,7 @@ mount(App);
 
 ## 打开状态
 
-没有 `open` 时，选择框自己保存打开状态（初始为 `defaultOpen`）。有 `open` 时，状态由应用持有，并在 `onOpenChange(open, reason)` 中修改它，原因为 `"triggerPress"`（按下触发元素，或它的某个按键）、`"select"`（一次选择）、`"pressOutside"`、`"backdropPress"` 或 `"cancel"`（Escape 或返回）。`onOpen` 和 `onClose` 表示列表已显示和已消失（sheet 在完全进入和完全离开之后），`onCancel` 表示用户没有选择就关闭了它。
+没有 `open` 时，选择框自己保存打开状态（初始为 `defaultOpen`）。有 `open` 时，状态由应用持有，并在 `onOpenChange({ open, reason })` 中修改它，原因为 `"triggerPress"`（按下触发元素，或它的某个按键）、`"select"`（一次选择）、`"pressOutside"`、`"backdropPress"` 或 `"cancel"`（Escape 或返回）。`onOpen` 和 `onClose` 表示列表已显示和已消失（sheet 在完全进入和完全离开之后），`onCancel` 表示用户没有选择就关闭了它。
 
 <a id="search"></a>
 
@@ -231,7 +231,7 @@ mount(App);
 | `defaultOpen` | `.default_open(..)` | `boolean` | `false` | 没有 `open` 时，初始是否打开。 |
 | `searchable` | `.searchable(..)` | `boolean` | `false` | 条目上方的搜索框按标题筛选条目。 |
 | `searchPlaceholder` | `.search_placeholder(..)` | `string` | 无 | 搜索框的占位文字。 |
-| `cleanable` | `.cleanable(..)` | `boolean` | `false` | 有选中条目时显示清除按钮；按下会清空值（`onChange(null)`）。 |
+| `cleanable` | `.cleanable(..)` | `boolean` | `false` | 有选中条目时显示清除按钮；按下会清空值（`onChange({ value: null })`）。 |
 | `disabled` | `.disabled(..)` | `boolean` | `false` | 保持关闭：触发元素不接受按压和键盘焦点，并应用 `disabled:` 样式。 |
 | `accessibilityLabel` | `.accessibility_label(..)` | `string` | 无 | 屏幕阅读器对它的称呼：这次选择是关于什么的。 |
 | `placement` | `.placement(..)` | `"top" \| "bottom" \| "left" \| "right"` | `"bottom"` | 桌面：列表位于触发元素的哪一侧；只有另一侧放得下时放在另一侧。 |
@@ -241,9 +241,9 @@ mount(App);
 | `popupClass`、`popupStyle` | `.popup_class(..)`、`.popup_style(..)` | `string`、`StyleProp<ViewStyle>` | 无 | 列表所在的弹出层（桌面）或 sheet（触摸屏）。 |
 | `backdropClass`、`backdropStyle` | `.backdrop_class(..)`、`.backdrop_style(..)` | `string`、`StyleProp<ViewStyle>` | 无 | 触摸屏：sheet 后面的背景层。 |
 | `listClass`、`listStyle` | `.list_class(..)`、`.list_style(..)` | `string`、`StyleProp<ViewStyle>` | 无 | 列表，即这些行所在的滚动视图。 |
-| `itemClass`、`itemStyle` | `.item_class(..)`、`.item_style(..)` | `string`、`StyleProp<ViewStyle>` | 无 | 每个条目的行：高亮时应用 `focus:`，选中时应用 `selected:`，禁用时应用 `disabled:`。 |
+| `itemClass`、`itemStyle` | `.item_class(..)`、`.item_style(..)` | `string`、`StyleProp<TextStyle>` | 无 | 每个条目的行（文字样式由条目标题继承）：高亮时应用 `focus:`，选中时应用 `selected:`，禁用时应用 `disabled:`。 |
 | `groupClass`、`groupStyle` | `.group_class(..)`、`.group_style(..)` | `string`、`StyleProp<ViewStyle>` | 无 | 每个分组的标题。 |
-| `searchClass`、`searchStyle` | `.search_class(..)`、`.search_style(..)` | `string`、`StyleProp<ViewStyle>` | 无 | 搜索框。 |
+| `searchClass`、`searchStyle` | `.search_class(..)`、`.search_style(..)` | `string`、`StyleProp<InputStyle>` | 无 | 搜索框：它的盒子和文字（`color`、`fontSize`、`placeholderColor`）。 |
 | `clearButtonClass`、`clearButtonStyle` | `.clear_button_class(..)`、`.clear_button_style(..)` | `string`、`StyleProp<ViewStyle>` | 无 | 清除按钮（`cleanable`）；`disabled:` 跟随选择框。 |
 | `clearButton` | `.clear_button(..)` | `JSX.Element` | 无 | 清除按钮的内容：一个叉号、一个图标。 |
 | `clearButtonAccessibilityLabel` | `.clear_button_accessibility_label(..)` | `string` | 无 | 屏幕阅读器对清除按钮的称呼。 |

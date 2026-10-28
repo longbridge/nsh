@@ -22,7 +22,7 @@ function App() {
         length={4}
         groups={2}
         value={code()}
-        onChange={next => code.set(next)}
+        onChange={({ value }) => code.set(value)}
         onComplete={({ value }) => done.set(value)}
         onFocus={() => focused.set("yes")}
         onBlur={() => focused.set("no")}

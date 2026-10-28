@@ -158,12 +158,16 @@ only hears about it afterwards. Only the innermost pressable view responds; insi
 
 | Prop | Rust | Type | Default | Description |
 |---|---|---|---|---|
-| `onPress` | `.on_press(..)` | `() => void` | | A tap ended inside the view. |
-| `onLongPress` | `.on_long_press(..)` | `() => void` | | The finger stayed down for `delayLongPress`. |
-| `onPressDown` | `.on_press_down(..)` | `() => void` | | A finger went down on the view. |
-| `onPressUp` | `.on_press_up(..)` | `() => void` | | The finger lifted or left. |
+| `onPress` | `.on_press(..)` | `(e: PressEvent) => void` | | A tap ended inside the view. |
+| `onLongPress` | `.on_long_press(..)` | `(e: PressEvent) => void` | | The finger stayed down for `delayLongPress`. |
+| `onPressDown` | `.on_press_down(..)` | `(e: PressEvent) => void` | | A finger went down on the view. |
+| `onPressUp` | `.on_press_up(..)` | `(e: PressEvent) => void` | | The finger lifted or left. |
 | `delayLongPress` | `.long_press_delay(ms)` | `number` | `500` | Milliseconds before a press becomes a long press. |
 | `hitSlop` | `.hit_slop(EdgeInsets::all(px(8.0)))` | `number \| Partial<Edges>` | | Extends the touch area beyond the bounds, in points. |
+
+`PressEvent` is `{ position, pagePosition, modifiers, clickCount }`: where the pointer was in the view and in its root
+view (`Point`s), the modifier keys held when the press began and the consecutive clicks (2 for a double click). Where
+the platform reports no pointer, it is the view's origin with no keys and one click.
 
 The style key `pointerEvents` (`.pointer_events(PointerEvents::BoxNone)` in Rust, the classes `pointer-events-*`)
 decides which touches the view and the views in it receive: `"none"` neither (a view inside that sets `"auto"` takes
@@ -403,8 +407,8 @@ view().on_press(open_page).child(
 
 | Prop | Rust | Type | Description |
 |---|---|---|---|
-| `onLayout` | `.on_layout(\|frame: &Bounds<Points>\| ..)` | `(bounds: Bounds) => void` | The view's frame relative to its parent, `{ origin, size }`, after each layout that changes it. |
-| `ref` | `.element_ref(&handle)` | `YNode \| (node: YNode) => void` | The native node (see [ref methods](#ref-methods)). `ref={el}` assigns a variable, `ref={fn}` calls a function. |
+| `onLayout` | `.on_layout(\|frame: &Bounds<Points>\| ..)` | `(e: { bounds: Bounds }) => void` | `bounds` is the view's frame relative to its parent, `{ origin, size }`, after each layout that changes it. |
+| `ref` | `.element_ref(&handle)` | `ViewRef \| (node: ViewRef) => void` | The element's ref (see [ref methods](#ref-methods)): `ViewRef`, or the element's own type over it. `ref={el}` assigns a variable, `ref={fn}` calls a function. |
 | `nativeID` | `.native_id(id)` | `string` | Names the view for others, e.g. the `InputAccessoryView` an input refers to. |
 | `testID` | `.test_id(id)` | `string` | An identifier for UI tests (on Android, the view's resource id). |
 | `key` | `.key(key)` | `string` | The element's identity among its siblings. |
@@ -424,9 +428,10 @@ work in the app's code per frame. See [touch and gestures](../docs/touch-and-ges
 | `rotation` | `.rotation_value(&angle)` | `{ angle?: AnimatedValue }` | Two-finger rotations drive `angle` (degrees). |
 | `onRotationStart` / `onRotationEnd` | `.on_rotation_start(..)` / `.on_rotation_end(..)` | `(e: { rotation: number; velocity: number }) => void` | A rotation started / ended. |
 
-`PanEvent` is `{ translationX, translationY, velocityX, velocityY, valueX?, valueY? }` (in Rust `translation`,
-`velocity_x`, `velocity_y`, `value_x`, `value_y`): the translation since the start, the velocity in points per second,
-and the bound values at that moment (a drag can grab a value mid-animation).
+`PanEvent` is `{ cancelled, translation, velocity, value? }` (in Rust `cancelled`, `translation`, `velocity_x`,
+`velocity_y`, `value_x`, `value_y`): whether the system cancelled the drag, the translation since the start and the
+velocity in points per second (`Point`s), and the bound values at that moment, `{ x?, y? }` for the axes `pan` binds
+(a drag can grab a value mid-animation).
 
 ### Raw touches and the responder system
 
@@ -508,22 +513,28 @@ See [platform-specific code](../docs/platform-specific.md).
 
 ## Ref methods
 
-`ref` receives a `YNode` in TSX; in Rust, `element_ref()` makes an `ElementRef` handle that `.element_ref(&handle)`
-attaches. Their methods send commands to the native view, in order with the changes made before them in the same turn.
-Each element page says which apply to it.
+In TSX, `ref` receives the element's ref, whose type is the element's own: `ViewRef` (`focus`, `blur`, `measure`) for
+`View`, `Text`, `Image`, `Canvas`, `Overlay` and `Shader`, and a type over `ViewRef` with the element's methods for the
+others: `InputRef` (`Input`), `ScrollRef` (`Scroll`), `ListRef` (`List`), `WebViewRef` (`WebView`), `VideoRef`
+(`Video`) and `NativeComponentRef` (native components). In Rust, `element_ref()` makes an `ElementRef` handle that
+`.element_ref(&handle)` attaches. Their methods send commands to the native view, in order with the changes made
+before them in the same turn. Each element page says which apply to it. Type a ref variable with its element's own
+type (`let field!: InputRef` for an `<Input>`): a variable typed `ViewRef` does not fit an element whose ref has methods
+of its own.
 
-| Method | Rust | Applies to | Description |
+| Method | Rust | Ref | Description |
 |---|---|---|---|
-| `focus()` / `blur()` | `focus()` / `blur()` | `<Input>` | Focuses (shows the keyboard) / unfocuses. |
-| `setSelection(start, end?)` | `set_selection(start, end)` | `<Input>` | Selects `start..end` in UTF-16 units; a caret without `end`. |
-| `scrollTo({ x?, y?, animated? })` | `scroll_to(point, animated)` | `<Scroll>`, `List` | Scrolls to an offset. |
-| `zoomTo({ scale, x?, y?, animated? })` | `zoom_to(scale, center, animated)` | zoomable `<Scroll>` | Zooms to `scale` around a content point. |
-| `scrollToOffset({ offset, animated? })` | `scroll_to_offset(offset, animated)` | `List` | Scrolls to an offset along the list's axis. |
-| `scrollToIndex({ index, animated?, viewPosition?, viewOffset? })` | `scroll_to_index(index, position, offset, animated)` | `List` | Scrolls an item into view. |
-| `scrollToEnd({ animated? })` | `scroll_to_end(animated)` | `List` | Scrolls to the end of the content. |
-| `reload()`, `goBack()`, `goForward()`, `stopLoading()`, `injectJavaScript(script)`, `postMessage(data)` | `reload()`, `go_back()`, `go_forward()`, `stop_loading()`, `inject_java_script(..)`, `post_message(..)` | `WebView` | Controls the page. |
-| `seek(seconds)` | `seek(seconds)` | `Video` | Jumps to a time. |
-| `command(name, args?)` | `command(name, args)` | native components | Calls a command of a registered native component ([`nativeComponent`](../modules/nsh.md#nativecomponent-and-nativemodule)). |
+| `focus()` / `blur()` | `focus()` / `blur()` | `ViewRef` | Focuses an `<Input>` (shows the keyboard), or gives a view that takes presses the keyboard focus / unfocuses. |
+| `measure()` | `measure()` | `ViewRef` | [Where the view is](../docs/touch-and-gestures.md#where-a-view-is-measure). |
+| `setSelection(start, end?)` | `set_selection(start, end)` | `InputRef` | Selects `start..end` in UTF-16 units; a caret without `end`. |
+| `scrollTo({ x?, y?, animated? })` | `scroll_to(point, animated)` | `ScrollRef`, `ListRef` | Scrolls to an offset. |
+| `zoomTo({ scale, x?, y?, animated? })` | `zoom_to(scale, center, animated)` | `ScrollRef` (a zoomable `<Scroll>`) | Zooms to `scale` around a content point. |
+| `scrollToOffset({ offset, animated? })` | `scroll_to_offset(offset, animated)` | `ListRef` | Scrolls to an offset along the list's axis. |
+| `scrollToIndex({ index, animated?, viewPosition?, viewOffset? })` | `scroll_to_index(index, position, offset, animated)` | `ListRef` | Scrolls an item into view. |
+| `scrollToEnd({ animated? })` | `scroll_to_end(animated)` | `ScrollRef`, `ListRef` | Scrolls to the end of the content. |
+| `reload()`, `goBack()`, `goForward()`, `stopLoading()`, `injectJavaScript(script)`, `postMessage(data)` | `reload()`, `go_back()`, `go_forward()`, `stop_loading()`, `inject_java_script(..)`, `post_message(..)` | `WebViewRef` | Controls the page. |
+| `seek(seconds)` | `seek(seconds)` | `VideoRef` | Jumps to a time. |
+| `command(name, args?)` | `command(name, args)` | `NativeComponentRef` | Calls a command of a registered native component ([`nativeComponent`](../modules/nsh.md#nativecomponent-and-nativemodule)). |
 
 ```rust tabs
 let field = element_ref();
@@ -534,10 +545,10 @@ view()
 ```
 
 ```tsx tabs
-import { View, type YNode } from "nsh";
+import { type InputRef, View } from "nsh";
 import { Input } from "nsh/base";
 
-let input!: YNode;
+let input!: InputRef;
 <View onPress={() => input.focus()}>
   <Input ref={input} placeholder="Tap the row to type" />
 </View>;

@@ -114,9 +114,14 @@ pub(crate) fn press(surface: &Rc<Surface>, vk: u16, modifiers: Modifiers) {
                 0x20 => Some(' '),
                 0x0D => Some('\r'),
                 0x09 => Some('\t'),
-                0x30..=0x39 => char::from_u32(vk as u32),
-                0x41..=0x5A => char::from_u32(if modifiers.shift { vk } else { vk + 32 } as u32),
-                _ => None,
+                // The US layout's character, Shift's for `shift+8` (`*`).
+                _ => match nsh_core::keymap::Key::from_virtual_key(vk) {
+                    Some(nsh_core::keymap::Key::Char(c)) if modifiers.shift => {
+                        Some(nsh_core::keymap::shifted(c))
+                    }
+                    Some(nsh_core::keymap::Key::Char(c)) => Some(c),
+                    _ => None,
+                },
             };
             if let Some(ch) = ch {
                 crate::text_input::char_input(surface, &ch.to_string());

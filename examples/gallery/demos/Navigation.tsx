@@ -198,10 +198,10 @@ function Unsaved() {
   const text = signal("");
   const focused = signal(false);
   const confirm = async () => {
-    const action = await AlertDialog.show({
+    const { action } = await AlertDialog.show({
       title: "Discard your changes?",
       actions: [
-        { label: "Keep editing", role: "cancel" },
+        { label: "Keep editing", role: "cancel", id: "keep" },
         { label: "Discard", role: "destructive", id: "discard" },
       ],
     });
@@ -224,7 +224,7 @@ function Unsaved() {
         <Card icon="form" title="Draft" subtitle="popOnBack + onBackPress" right={<Badge label={text().length > 0 ? "Guarded" : "Empty"} tone={text().length > 0 ? "warn" : "neutral"} />}>
           <Input
             value={text()}
-            onChange={(v) => text.set(v)}
+            onChange={({ value }) => text.set(value)}
             onFocus={() => focused.set(true)}
             onBlur={() => focused.set(false)}
             placeholder="A draft"
@@ -452,7 +452,7 @@ export function Navigation() {
         open={sheet() === "fullScreen" || sheet() === "pageSheet" || sheet() === "formSheet" || sheet() === "fade"}
         presentation={sheet() === "pageSheet" ? "pageSheet" : sheet() === "formSheet" ? "formSheet" : "fullScreen"}
         animation={sheet() === "fade" ? "fade" : "slide"}
-        onOpenChange={(open) => !open && close()}
+        onOpenChange={({ open }) => !open && close()}
         style={{ flex: 1 }}
       >
         <ModalBody
@@ -482,7 +482,7 @@ export function Navigation() {
           onClose={close}
         />
       </Dialog>
-      <Dialog open={sheet() === "dialog"} animation="fade" onOpenChange={(open) => !open && close()} style={{ flex: 1 }}>
+      <Dialog open={sheet() === "dialog"} animation="fade" onOpenChange={({ open }) => !open && close()} style={{ flex: 1 }}>
         <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.62)", alignItems: "center", justifyContent: "center", padding: 16 }}>
           <View
             style={{

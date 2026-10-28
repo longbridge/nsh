@@ -615,11 +615,40 @@ impl Host {
                     return;
                 }
                 let payload = match (event, payload) {
-                    // `onChange` receives the text itself, as in React Native.
+                    // `onChange({ value })`: the text, in one object as every
+                    // event (`api-naming.md` "Payloads").
                     (EventKind::ChangeText, EventPayload::Text { text, .. }) => {
-                        rquickjs::String::from_str(cx.clone(), text).map(|s| s.into_value())
+                        rquickjs::Object::new(cx.clone()).and_then(|o| {
+                            o.set("value", text.as_str())?;
+                            Ok(o.into_value())
+                        })
                     }
                     (_, EventPayload::Value(value)) => payload_value(&cx, value),
+                    // `onContentSizeChange({ size })`.
+                    (EventKind::ContentSizeChange, EventPayload::Map(fields)) => {
+                        rquickjs::Object::new(cx.clone()).and_then(|o| {
+                            o.set(
+                                "size",
+                                payload_object(&cx, &EventPayload::Map(fields.clone()))?,
+                            )?;
+                            Ok(o.into_value())
+                        })
+                    }
+                    // Presses always pass their event: where the backend
+                    // does not know the pointer, at the view's origin.
+                    (
+                        EventKind::Press
+                        | EventKind::LongPress
+                        | EventKind::PressDown
+                        | EventKind::PressUp,
+                        EventPayload::None,
+                    ) => payload_object(
+                        &cx,
+                        &EventPayload::Press(nsh_core::PressEvent {
+                            clicks: 1,
+                            ..Default::default()
+                        }),
+                    ),
                     // A video's `onLoad`: `{ duration, size }` of the
                     // platforms' `duration`, `width` and `height`.
                     (EventKind::Load, EventPayload::Map(fields))
@@ -1277,7 +1306,7 @@ fn payload_object<'js>(cx: &Ctx<'js>, payload: &EventPayload) -> rquickjs::Resul
             }
             obj.set("lines", list)?;
         }
-        EventPayload::Layout(frame) => return Ok(bounds_object(cx, *frame)?.into_value()),
+        EventPayload::Layout(frame) => obj.set("bounds", bounds_object(cx, *frame)?)?,
         EventPayload::Pan {
             translation,
             velocity_x,
@@ -1296,25 +1325,30 @@ fn payload_object<'js>(cx: &Ctx<'js>, payload: &EventPayload) -> rquickjs::Resul
                 "cancelled",
                 matches!(payload, EventPayload::PanCancelled { .. }),
             )?;
-            obj.set("translationX", translation.x.0)?;
-            obj.set("translationY", translation.y.0)?;
-            obj.set("velocityX", *velocity_x)?;
-            obj.set("velocityY", *velocity_y)?;
-            if let Some(v) = value_x {
-                obj.set("valueX", v.0)?;
-            }
-            if let Some(v) = value_y {
-                obj.set("valueY", v.0)?;
+            obj.set("translation", point_object(cx, *translation)?)?;
+            let velocity = rquickjs::Object::new(cx.clone())?;
+            velocity.set("x", *velocity_x)?;
+            velocity.set("y", *velocity_y)?;
+            obj.set("velocity", velocity)?;
+            // The bound values, those of the axes `pan` binds.
+            if value_x.is_some() || value_y.is_some() {
+                let value = rquickjs::Object::new(cx.clone())?;
+                if let Some(v) = value_x {
+                    value.set("x", v.0)?;
+                }
+                if let Some(v) = value_y {
+                    value.set("y", v.0)?;
+                }
+                obj.set("value", value)?;
             }
         }
-        EventPayload::Scroll(offset) => {
-            obj.set("x", offset.x.0)?;
-            obj.set("y", offset.y.0)?;
-        }
+        EventPayload::Scroll(offset) => obj.set("offset", point_object(cx, *offset)?)?,
         // The numbers JS always got (pixels are whole).
         EventPayload::Image(size) => {
-            obj.set("width", size.width.0 as f32)?;
-            obj.set("height", size.height.0 as f32)?;
+            let pixels = rquickjs::Object::new(cx.clone())?;
+            pixels.set("width", size.width.0 as f32)?;
+            pixels.set("height", size.height.0 as f32)?;
+            obj.set("size", pixels)?;
         }
         EventPayload::Error { message } => obj.set("message", message.as_str())?,
         EventPayload::Text { text, .. } => obj.set("text", text.as_str())?,

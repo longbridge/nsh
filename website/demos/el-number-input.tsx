@@ -63,7 +63,7 @@ function App() {
   const temperature = signal<number | null>(null);
   const disabled = signal(false);
   const events = signal<string[]>([]);
-  const change = (name: string, value: { set: (v: number | null) => void }) => (next: number | null) => {
+  const change = (name: string, value: { set: (v: number | null) => void }) => ({ value: next }: { value: number | null }) => {
     value.set(next);
     events.set([`${name} → ${show(next)}`, ...events()].slice(0, 5));
   };
@@ -95,7 +95,7 @@ function App() {
               </Text>
               <Switch
                 checked={disabled()}
-                onChange={(next) => disabled.set(next)}
+                onChange={({ checked }) => disabled.set(checked)}
                 class={`-mx-2 flex-row-reverse items-center justify-between gap-3 rounded-lg px-2 ${desktop ? "py-1" : "py-2"} active:opacity-70`}
                 hoverStyle={hoverFill()}
                 focusStyle={focusRing()}
@@ -107,7 +107,7 @@ function App() {
                 <Text style={{ flex: 1, fontSize: size.label, color: ui().text }}>Disabled</Text>
               </Switch>
             </Panel>
-            <Log title="onChange(value)" lines={events()} minHeight={92} />
+            <Log title="onChange({ value })" lines={events()} minHeight={92} />
           </>
         }
       >

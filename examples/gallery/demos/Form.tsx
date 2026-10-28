@@ -1,4 +1,4 @@
-import { effect, type JSX, Scroll, signal, split, Text, View, type YNode } from "nsh";
+import { effect, type InputRef, type JSX, Scroll, signal, split, Text, View } from "nsh";
 import { Animated, createAnimatedValue, LayoutAnimation } from "nsh";
 import { Dialog, Input, type InputProps, NavPage } from "nsh/base";
 import { Keyboard, keyboardFrame, platform, safeAreaInsets } from "nsh";
@@ -15,7 +15,7 @@ const pointer = platform.idiom === "desktop";
  * and shakes the field. `next` focuses another input on return.
  */
 function Field(
-  props: InputProps & { label: string; api?: string; hint?: string; error?: string; prefix?: string; next?: () => YNode | undefined },
+  props: InputProps & { label: string; api?: string; hint?: string; error?: string; prefix?: string; next?: () => InputRef | undefined },
 ) {
   const [own, input] = split(props, ["label", "api", "hint", "error", "prefix", "next", "onFocus", "onBlur", "style"]);
   const focus = createAnimatedValue(0);
@@ -174,9 +174,9 @@ export function Form() {
   const touched = signal<Record<string, boolean>>({});
   const touch = (key: string) => () => touched.update((t) => ({ ...t, [key]: true }));
   // Inputs in return-key order.
-  const refs: YNode[] = [];
+  const refs: InputRef[] = [];
   const next = (i: number) => () => refs[i + 1];
-  const ref = (i: number) => (node: YNode) => (refs[i] = node);
+  const ref = (i: number) => (node: InputRef) => (refs[i] = node);
 
   const nameError = () => (touched().name && !name().trim() ? "Enter your name" : undefined);
   const emailError = () =>
@@ -217,7 +217,7 @@ export function Form() {
               next={next(0)}
               label="Name"
               value={name()}
-              onChange={(v) => name.set(v)}
+              onChange={({ value }) => name.set(value)}
               onBlur={touch("name")}
               error={nameError()}
               autoCapitalize="words"
@@ -230,7 +230,7 @@ export function Form() {
               label="E-mail"
               api="email-address"
               value={email()}
-              onChange={(v) => email.set(v)}
+              onChange={({ value }) => email.set(value)}
               onBlur={touch("email")}
               error={emailError()}
               keyboardType="email-address"
@@ -246,7 +246,7 @@ export function Form() {
                 label="Password"
                 api="masked"
                 value={password()}
-                onChange={(v) => {
+                onChange={({ value: v }) => {
                   if (strength(v) !== score()) LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
                   password.set(v);
                 }}
@@ -299,7 +299,7 @@ export function Form() {
               testID="code"
               hint={`${code().length}/6`}
               value={code()}
-              onChange={(v) => code.set(v)}
+              onChange={({ value }) => code.set(value)}
               keyboardType="number-pad"
               maxLength={6}
               placeholder="······"
@@ -331,7 +331,7 @@ export function Form() {
               testID="shout"
               hint="Uppercased as you type"
               value={shout()}
-              onChange={(t) => shout.set(t.toUpperCase())}
+              onChange={({ value }) => shout.set(value.toUpperCase())}
               placeholder="TYPE IN LOWER CASE"
             />
             <Field label="Read only" api="readonly" value="Not editable" readonly />
@@ -351,7 +351,7 @@ export function Form() {
                 multiline
                 maxLength={280}
                 value={notes()}
-                onChange={(v) => notes.set(v)}
+                onChange={({ value }) => notes.set(value)}
                 placeholder="Return adds a line"
                 style={{ minHeight: 100 }}
               />
@@ -399,7 +399,7 @@ export function Form() {
         ),
       ]}
     >
-      <Dialog open={sheet()} presentation="pageSheet" onOpenChange={(open) => sheet.set(open)} style={{ flex: 1 }}>
+      <Dialog open={sheet()} presentation="pageSheet" onOpenChange={({ open }) => sheet.set(open)} style={{ flex: 1 }}>
         <View
           style={{
             flex: 1,
@@ -443,8 +443,8 @@ function AutoGrow() {
       multiline
       placeholder="Type several lines"
       onContentSizeChange={(e) => {
-        size.set(`${Math.round(e.width)}×${Math.round(e.height)}`);
-        height.set(Math.min(e.height, 110));
+        size.set(`${Math.round(e.size.width)}×${Math.round(e.size.height)}`);
+        height.set(Math.min(e.size.height, 110));
       }}
       style={{ height: Math.max(height(), 20) + 26 }}
     />
@@ -512,7 +512,7 @@ function MessageBar() {
         >
           <Input
             value={draft()}
-            onChange={(v) => draft.set(v)}
+            onChange={({ value }) => draft.set(value)}
             onSubmit={send}
             submitBehavior="submit"
             placeholder="Message"
@@ -546,7 +546,7 @@ function SelectionDemo() {
   const range = signal({ start: 0, end: 0 });
   const keys = signal<string[]>([]);
   const selection = signal<{ start: number; end?: number } | undefined>(undefined);
-  let input: YNode | undefined;
+  let input: InputRef | undefined;
   return (
     <View style={{ gap: 12 }}>
       <Field
@@ -554,7 +554,7 @@ function SelectionDemo() {
         label="Text"
         hint={`${range().start}–${range().end}`}
         value={text()}
-        onChange={(v) => text.set(v)}
+        onChange={({ value }) => text.set(value)}
         selectedRange={selection()}
         onSelectionChange={(v) => range.set(v)}
         onKeyPress={(e) => keys.update((k) => [...k, e.key].slice(-8))}

@@ -70,7 +70,7 @@ function Transformable() {
           pan={{ x, y }}
           pinch={{ scale }}
           rotation={{ angle }}
-          onPanEnd={(e) => last.set({ ...last(), drag: Math.round(Math.hypot(e.translationX, e.translationY)) })}
+          onPanEnd={(e) => last.set({ ...last(), drag: Math.round(Math.hypot(e.translation.x, e.translation.y)) })}
           onPinchEnd={(e) => last.set({ ...last(), scale: e.scale })}
           onRotationEnd={(e) => last.set({ ...last(), angle: e.rotation })}
           style={{

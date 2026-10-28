@@ -54,7 +54,7 @@ function App() {
       length={6}
       groups={2}
       value={code()}
-      onChange={(next) => code.set(next)}
+      onChange={({ value }) => code.set(value)}
       onComplete={({ value }) => verify(value)}
       accessibilityLabel="验证码，6 位数字"
       class="flex-row gap-3"
@@ -98,7 +98,7 @@ mount(App);
 | `disabled` | `.disabled(..)` | `boolean` | `false` | 不能获得焦点，不能编辑；`disabled:` 样式作用于输入框和它的部件，屏幕阅读器读出它不可用。 |
 | `groups` | `.groups(..)` | `number` | `1` | 格子尽量平均地分成几组（六位分两组是 3 + 3）；至少一组，最多每个格子一组。 |
 | `accessibilityLabel` | `.accessibility_label(..)` | `string` | 无 | 屏幕阅读器为输入框读出的内容：验证码的用途和位数。 |
-| `cellClass`、`cellStyle` | `.cell_class(..)`、`.cell_style(\|s\| ..)` | `string`、`StyleProp<ViewStyle>` | 无 | 每个格子：尺寸、边框和文字。 |
+| `cellClass`、`cellStyle` | `.cell_class(..)`、`.cell_style(\|s\| ..)` | `string`、`StyleProp<TextStyle>` | 无 | 每个格子：尺寸、边框和文字（`color`、`fontSize`，由格子里的数字继承）。 |
 | `groupClass`、`groupStyle` | `.group_class(..)`、`.group_style(\|s\| ..)` | `string`、`StyleProp<ViewStyle>` | 无 | 每组格子（`flex-row gap-2`）。 |
 | `caretClass`、`caretStyle` | `.caret_class(..)`、`.caret_style(\|s\| ..)` | `string`、`StyleProp<ViewStyle>` | 无 | 光标：宽度、高度和颜色。 |
 | `class`、`style` | 样式方法 | `string`、`StyleProp<ViewStyle>` | 无 | 输入框本身：包住各组的行（或列）。 |
@@ -107,7 +107,7 @@ mount(App);
 
 | 事件 | Rust | 参数 | 时机 |
 |---|---|---|---|
-| `onChange` | `.on_change(\|value: &SharedString\| ..)` | `(value: string)` | 用户改变了验证码：输入、删除、粘贴或自动填充。 |
+| `onChange` | `.on_change(\|value: &SharedString\| ..)` | `(e: { value: string })` | 用户改变了验证码：输入、删除、粘贴或自动填充。 |
 | `onComplete` | `.on_complete(\|e: &OtpInputCompleteEvent\| ..)` | `{ value }` | 用户的改动填满了最后一个格子，在它的 `onChange` 之后。 |
 | `onFocus` / `onBlur` | `.on_focus` / `.on_blur` | 无 | 输入框获得 / 失去键盘焦点。 |
 

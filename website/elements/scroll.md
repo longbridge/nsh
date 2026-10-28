@@ -136,7 +136,7 @@ scroll()
 ```
 
 ```tsx tabs
-let photo!: YNode;
+let photo!: ScrollRef;
 <Scroll ref={photo} maximumZoomScale={4} centerContent style={{ flex: 1, backgroundColor: "#000" }}>
   <Image src={picture} style={{ width: 390, height: 520 }} onPress={() => photo.zoomTo({ scale: 1, animated: true })} />
 </Scroll>;
@@ -147,9 +147,9 @@ let photo!: YNode;
 | Event | Rust | Payload | When |
 |---|---|---|---|
 | `onScroll` | `.on_scroll` | `ScrollEvent` | The offset changed (at most once per frame, and no more often than `scrollEventThrottle`). |
-| `onScrollDragStart` / `onScrollDragEnd` | `.on_scroll_drag_start` / `.on_scroll_drag_end` | `{ x, y }` (`Point<Points>`) | The user started / stopped dragging. |
-| `onMomentumStart` / `onMomentumEnd` | `.on_momentum_start` / `.on_momentum_end` | `{ x, y }` | A glide after the drag started / stopped. A glide caught by a new drag still ends with `onMomentumEnd`. |
-| `onScrollEnd` | `.on_scroll_end` | `{ x, y }` | Scrolling came to rest. |
+| `onScrollDragStart` / `onScrollDragEnd` | `.on_scroll_drag_start` / `.on_scroll_drag_end` | `{ offset }` (`Point<Points>`) | The user started / stopped dragging. |
+| `onMomentumStart` / `onMomentumEnd` | `.on_momentum_start` / `.on_momentum_end` | `{ offset }` | A glide after the drag started / stopped. A glide caught by a new drag still ends with `onMomentumEnd`. |
+| `onScrollEnd` | `.on_scroll_end` | `{ offset }` | Scrolling came to rest. |
 | `onRefresh` | `.on_refresh` | none | Pulled to refresh. |
 
 `ScrollEvent` is `{ offset: Point; contentSize: Size; size: Size; zoomScale }` (in Rust `offset`, `content_size`,
@@ -176,7 +176,7 @@ scroller.scroll_to(point(px(0.0), px(0.0)), true);
 ```
 
 ```tsx tabs
-let scroller!: YNode;
+let scroller!: ScrollRef;
 <Scroll ref={scroller}>…</Scroll>;
 scroller.scrollTo({ y: 0, animated: true });
 ```

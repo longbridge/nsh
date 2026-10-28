@@ -116,7 +116,7 @@ virtual_list(move || messages.with(|m| m.len()), move |at| {
 | `keyboardDismissMode` | `.keyboard_dismiss_mode(..)` | `"none" \| "on-drag" \| "interactive"` | `"none"` | 拖动时是否收起键盘。 |
 | `style` | `Styled` 方法 | `StyleProp<ViewStyle>` | | 列表自身的样式（需要有确定的尺寸：`flex: 1` 或高度）。 |
 | `testID` | `.test_id(id)` | `string` | | UI 测试查找列表滚动视图所用的 id（`nsh test` 的 `id:`、XCUITest、UI Automator）。 |
-| `ref` | `.element_ref(&handle)` | `YNode \| (node: YNode) => void` | | 列表的节点（见 [ref 方法](#ref-方法)）。 |
+| `ref` | `.element_ref(&handle)` | `ListRef \| (node: ListRef) => void` | | 列表的 ref（见 [ref 方法](#ref-方法)）。 |
 
 列表同样支持 [`Scroll`](./scroll.md#滚动) 的滚动属性（Rust 中为 `Scrollable` 方法）：`pagingEnabled`、`snapToInterval`、`snapToOffsets`、`snapToAlignment`、`disableIntervalMomentum`、`decelerationRate`、`bounces`、`contentInset`、`contentOffset`、`keyboardShouldPersistTaps`、`scrollEventThrottle` 和 `scrollable`。列表保持原有比例。
 
@@ -137,9 +137,9 @@ virtual_list(move || messages.with(|m| m.len()), move |at| {
 | 事件 | Rust | 载荷 | 时机 |
 |---|---|---|---|
 | `onScroll` | `.on_scroll` | `ScrollEvent` | 偏移发生变化。 |
-| `onScrollDragStart` / `onScrollDragEnd` | `.on_scroll_drag_start` / `.on_scroll_drag_end` | `{ x, y }` | 开始 / 结束拖动。 |
-| `onMomentumStart` / `onMomentumEnd` | `.on_momentum_start` / `.on_momentum_end` | `{ x, y }` | 惯性滑动开始 / 结束。 |
-| `onScrollEnd` | `.on_scroll_end` | `{ x, y }` | 滚动停止。 |
+| `onScrollDragStart` / `onScrollDragEnd` | `.on_scroll_drag_start` / `.on_scroll_drag_end` | `{ offset }` | 开始 / 结束拖动。 |
+| `onMomentumStart` / `onMomentumEnd` | `.on_momentum_start` / `.on_momentum_end` | `{ offset }` | 惯性滑动开始 / 结束。 |
+| `onScrollEnd` | `.on_scroll_end` | `{ offset }` | 滚动停止。 |
 | `onLoadMore` | `.on_load_more` | 无 | 距末端不足 `loadMoreThreshold` 个视口。 |
 | `onLoadMoreAtStart` | `.on_load_more_at_start` | 无 | 滚动后距开头不足 `loadMoreAtStartThreshold` 个视口，每次接近触发一次。 |
 | `onViewableItemsChange` | `.on_viewable_items_change` | `{ viewableItems, changed }`（`ViewableItems`） | 可见性变化。 |
@@ -184,7 +184,7 @@ virtual_list(move || photos.with(|p| p.len()), move |at| {
 
 ```tsx tabs
 const visible = signal("");
-let list!: YNode;
+let list!: ListRef;
 
 <List
   ref={list}

@@ -3445,7 +3445,10 @@ class Player {
       if (pending) this.op_iv([, el._id, ...pending]);
     });
     field.addEventListener("keydown", (e) => {
-      if (el._events.has("onKeyPress")) {
+      // A key a shortcut takes (`keyDown`, after this) is the shortcut's
+      // alone, as on the native platforms, where the field never sees it: a
+      // RichEditor would delete twice on Backspace.
+      if (el._events.has("onKeyPress") && this.shortcut(e, true) === -1) {
         const key = e.key === "Backspace" || e.key === "Enter" || e.key === "Escape" ? e.key : e.key.length === 1 ? e.key : null;
         if (key) this.event(el._id, "onKeyPress", { key });
       }
@@ -5256,24 +5259,32 @@ class Player {
     }
   }
 
+  /**
+   * The app's shortcut (`nsh/keymap`) key `e` fires, matched natively
+   * against the mounted table: its binding, -2 for a held key whose binding
+   * does not repeat, -1 for none.
+   */
+  shortcut(e, editing) {
+    const code = e.isComposing ? -1 : keyCode(e);
+    if (code < 0) return -1;
+    const mods = (e.ctrlKey ? 1 : 0) | (e.altKey ? 2 : 0) | (e.shiftKey ? 4 : 0) | (e.metaKey ? 8 : 0);
+    return this.wasm.nsh_key(code, mods, editing ? 1 : 0, e.repeat ? 1 : 0);
+  }
+
   keyDown(e) {
     if (this.wasm) this.modifiersChanged(e);
     if (!this.wasm || !this.takesKeys()) return;
     const focus = document.activeElement;
     const inRoot = focus && this.root.contains(focus);
     const editing = inRoot && !!focus.closest(".nsh-field, iframe");
-    // The app's shortcuts first, where the focus is (`nsh/keymap`): matched
-    // natively against the mounted table, then reported.
-    const code = e.isComposing ? -1 : keyCode(e);
-    if (code >= 0) {
-      const mods = (e.ctrlKey ? 1 : 0) | (e.altKey ? 2 : 0) | (e.shiftKey ? 4 : 0) | (e.metaKey ? 8 : 0);
-      const found = this.wasm.nsh_key(code, mods, editing ? 1 : 0, e.repeat ? 1 : 0);
-      if (found !== -1) {
-        e.preventDefault();
-        e.stopPropagation();
-        if (found >= 0) this.call((w) => w.nsh_key_command(found));
-        return;
-      }
+    // The app's shortcuts first, where the focus is (`nsh/keymap`), then
+    // reported.
+    const found = this.shortcut(e, editing);
+    if (found !== -1) {
+      e.preventDefault();
+      e.stopPropagation();
+      if (found >= 0) this.call((w) => w.nsh_key_command(found));
+      return;
     }
     if (e.defaultPrevented || e.isComposing) return;
     const plain = !e.ctrlKey && !e.altKey && !e.metaKey;

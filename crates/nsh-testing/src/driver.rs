@@ -585,8 +585,26 @@ impl Driver for Remote {
             selector: selector.into(),
         })
     }
-    fn span_style(&mut self, _: &str) -> Result<ResolvedTextStyle, String> {
-        Err(headless_only("Reading a span's style (`app.spanStyle`)"))
+    fn span_style(&mut self, selector: &str) -> Result<ResolvedTextStyle, String> {
+        let span: nsh_dev::protocol::SpanStyle = self.query(TestStep::SpanStyle {
+            selector: selector.into(),
+        })?;
+        Ok(ResolvedTextStyle {
+            color: nsh_core::Color(span.color),
+            font_size: nsh_core::Points(span.font_size),
+            font_weight: span.font_weight,
+            italic: span.italic,
+            decoration: nsh_core::TextDecoration {
+                underline: span.underline,
+                line_through: span.line_through,
+            },
+            background: span.background.map(|color| nsh_core::TextBackground {
+                color: nsh_core::Color(color),
+                radius: nsh_core::Points::ZERO,
+                node: 0,
+            }),
+            ..ResolvedTextStyle::default()
+        })
     }
     fn dialogs(&mut self) -> Result<Vec<Dialog>, String> {
         self.query(TestStep::Dialogs)

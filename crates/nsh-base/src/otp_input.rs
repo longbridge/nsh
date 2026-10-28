@@ -30,7 +30,11 @@
 
 use std::time::Duration;
 
-use nsh_core::{AutoFill, element::Style, prelude::*};
+use nsh_core::{
+    AutoFill,
+    element::{Style, TextPartStyle},
+    prelude::*,
+};
 
 use crate::input;
 
@@ -76,9 +80,10 @@ pub struct OtpInputProps {
     /// `focus:` styles the cell that takes the next digit while the input
     /// has the focus, `disabled:` follows the input.
     pub cell_class: Prop<Option<SharedString>>,
-    /// The style of each cell, over `cellClass`.
+    /// The style of each cell, over `cellClass`: its text styles too
+    /// (`color`, `fontSize`), which its digit inherits.
     #[prop(default)]
-    pub cell_style: Prop<Style>,
+    pub cell_style: Prop<TextPartStyle>,
     /// The Tailwind classes of each group of cells (`flex-row gap-2`).
     /// `disabled:` follows the input.
     pub group_class: Prop<Option<SharedString>>,
@@ -408,7 +413,7 @@ struct Cells {
     masked: Prop<bool>,
     disabled: Prop<bool>,
     class: Prop<Option<SharedString>>,
-    style: Prop<Style>,
+    style: Prop<TextPartStyle>,
     caret_class: Prop<Option<SharedString>>,
     caret_style: Prop<Style>,
     code: Code,
@@ -438,7 +443,7 @@ impl Cells {
             })
             .project_disabled(self.disabled)
             .app_class(self.class)
-            .inline_style(self.style)
+            .inline_style(move || self.style.get())
             .child(
                 when(
                     move || digit().is_some(),

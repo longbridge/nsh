@@ -53,12 +53,12 @@ function App() {
         value={value()}
         defaultValue="rice"
         open={open()}
-        onChange={(next) => {
+        onChange={({ value: next }) => {
           value.set(next);
           changes.set(changes() + 1);
           changed.set(`Changed: ${next} ${changes()}`);
         }}
-        onOpenChange={(next, reason) => {
+        onOpenChange={({ open: next, reason }) => {
           open.set(next);
           opened.set(`Open: ${next} ${reason}`);
         }}
@@ -82,7 +82,7 @@ function App() {
       <Select
         items={FOOD}
         value="rice"
-        onChange={(next) => asked.set(`Asked: ${next}`)}
+        onChange={({ value: next }) => asked.set(`Asked: ${next}`)}
         accessibilityLabel="Pinned"
         trigger={<View testID="pinned" style={{ height: 30 }}><Text>PinnedTrigger</Text></View>}
       />
@@ -92,7 +92,7 @@ function App() {
         accessibilityLabel="Own"
         groupClass="bg-[#ffff00]"
         groupStyle={{ opacity: 0.5 }}
-        onChange={(next) => cleared.set(`Own: ${next}`)}
+        onChange={({ value: next }) => cleared.set(`Own: ${next}`)}
         cleanable
         clearButtonAccessibilityLabel="ClearOwn"
         clearButtonClass="w-[20px]"
@@ -113,7 +113,7 @@ function App() {
         searchClass="bg-[#abcdef]"
         searchStyle={{ borderRadius: 4 }}
         empty={<Text>Nothing found</Text>}
-        onOpenChange={(next, reason) => found.set(`Find: ${next} ${reason}`)}
+        onOpenChange={({ open: next, reason }) => found.set(`Find: ${next} ${reason}`)}
         accessibilityLabel="Find"
         trigger={<View testID="find" style={{ height: 30 }}><Text>FindTrigger</Text></View>}
       />

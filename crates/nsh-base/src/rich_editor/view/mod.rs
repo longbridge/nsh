@@ -237,8 +237,9 @@ impl RichEditorApi {
     }
 
     /// Replaces the document with `doc` (ProseMirror's JSON), as a change
-    /// undo takes back: whether the schema allowed it.
-    pub fn set_doc_json(&self, doc: Value) -> bool {
+    /// undo takes back; an error (a rejection in TSX) when `doc` is not a
+    /// document of the editor's schema.
+    pub fn set_doc_json(&self, doc: Value) -> Result<(), String> {
         self.rv.set_doc_json(&doc)
     }
 

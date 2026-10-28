@@ -130,7 +130,8 @@ placed in the indent before the item (`•`, `◦`, `▪` by bulleted depth, or 
 `extra.listMarkerStart` attribute, `order` by default), as TextView places its markers; it is not in the document and
 takes no positions; a textblock is one text whose spans are its texts with
 their marks' parts (`classes.marks`), split at inline decorations (their `class`); inline leaves are their one-unit
-`leafText` (a line break) or attachments (their node view, else a box of their part); widget decorations are
+`leafText` (a line break), attachments (their node view), their `renderText` as a span of their part (a mention's
+`@name`, still one position: a press inside it lands on its nearer side), else a box of their part; widget decorations are
 attachments with their spec's `class`. A node view (`node_view.rs`: `NodeView`, registered in `NodeViews` or a
 plugin's `node_views` as an `Arc<dyn NodeView>`) renders a node type's blocks: `create` makes the element, which
 follows `cx.node()` while `update` returns true; `editable_content_slot` puts the editor's rendering of the content

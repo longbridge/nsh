@@ -35,17 +35,19 @@
 use std::rc::Rc;
 
 use nsh_core::{
-    element::{JsHost, JsIn, JsKind, JsOwned, PropError, Style, TsTypes},
+    element::{
+        InputPartStyle, JsHost, JsIn, JsKind, JsOwned, PropError, Style, TextPartStyle, TsTypes,
+    },
     keymap::When,
     prelude::*,
 };
 
 use crate::{
-    listbox::{self, Hooks, Listbox, Move, Parts, Row},
+    listbox::{self, Hooks, Listbox, Move, Parts, Query, Row},
     popup::{OpenChangeReason, OpenState},
 };
 
-/// An item of a [`Select`]'s list.
+/// An item of a [`Select`]'s or a `Combobox`'s list.
 #[derive(Debug, Clone, Default, PartialEq, JsObject)]
 #[non_exhaustive]
 pub struct SelectItem {
@@ -99,7 +101,7 @@ pub struct SelectItemState {
     pub title: SharedString,
     /// The item cannot be chosen.
     pub disabled: bool,
-    /// It is the chosen item (the select's value).
+    /// It is selected: the select's value, one of the combobox's.
     pub selected: bool,
     /// The keys or the pointer are on it: Return or a press chooses it.
     pub highlighted: bool,
@@ -249,9 +251,10 @@ pub struct SelectProps {
     /// or the pointer are on it), `selected:` while chosen, `disabled:`
     /// while it cannot be.
     pub item_class: Prop<Option<SharedString>>,
-    /// The inline style of each item's row, over its classes.
+    /// The inline style of each item's row, over its classes: its text
+    /// styles too (`color`, `fontSize`), which its title inherits.
     #[prop(default)]
-    pub item_style: Prop<Style>,
+    pub item_style: Prop<TextPartStyle>,
     /// The classes of each section's header.
     pub group_class: Prop<Option<SharedString>>,
     /// The inline style of each section's header, over its classes.
@@ -259,9 +262,10 @@ pub struct SelectProps {
     pub group_style: Prop<Style>,
     /// The classes of the search field.
     pub search_class: Prop<Option<SharedString>>,
-    /// The inline style of the search field, over its classes.
+    /// The inline style of the search field, over its classes: its text
+    /// styles too (`color`, `fontSize`, `placeholderColor`).
     #[prop(default)]
-    pub search_style: Prop<Style>,
+    pub search_style: Prop<InputPartStyle>,
     /// The classes of the clear button (with `cleanable`, while an item is
     /// chosen); `disabled:` with the select. It comes after the trigger,
     /// which it is not part of: the app places it, over the trigger's end
@@ -386,7 +390,7 @@ pub fn Select(props: SelectProps, cx: Scope<SelectEvent>) -> impl IntoElement {
     let open = OpenState::new(props.open, props.default_open);
     let value = ValueState::new(props.value, props.default_value);
     let current = computed(move || value.get());
-    let lb = Listbox::new(props.items, props.searchable);
+    let lb = Listbox::new(props.items, props.searchable, Query::own());
     // The app's element in the slot (or the view around what a Rust parent
     // fills it with): the combobox, what takes the keyboard, and what the
     // list is placed against.
@@ -528,8 +532,10 @@ pub fn Select(props: SelectProps, cx: Scope<SelectEvent>) -> impl IntoElement {
 
     let hooks = Hooks {
         open: Rc::new(move || open.get()),
-        value: current,
+        selected: Rc::new(move |v| current.with(|c| c.as_ref() == Some(v))),
         choose,
+        // Its query is the search field's own.
+        query_changed: Rc::new(|_| {}),
         dismiss,
         shown: Rc::new(move |shown| {
             if shown {
@@ -565,6 +571,7 @@ pub fn Select(props: SelectProps, cx: Scope<SelectEvent>) -> impl IntoElement {
         render_item: props.render_item,
         render_group: props.render_group,
         empty: props.empty,
+        footer: None,
     };
     let toggle = change;
     // Bound on the slot: in a TSX app they go to the app's element in it
@@ -586,7 +593,7 @@ pub fn Select(props: SelectProps, cx: Scope<SelectEvent>) -> impl IntoElement {
                 current.with(|v| {
                     props
                         .items
-                        .with(|items| listbox::chosen_title(items, v.as_deref()))
+                        .with(|items| listbox::selected_titles(items, v.as_slice()))
                 })
             })
             .on_layout(move |frame: &Bounds<Points>| width.set(Some(frame.size.width)))

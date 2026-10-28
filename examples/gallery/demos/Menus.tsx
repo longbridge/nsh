@@ -176,7 +176,7 @@ export function Menus() {
   // The menu shown: its trigger shows as selected while it is open.
   const shown = signal<string | null>(null);
   const isOpen = (menu: string) => shown() === menu;
-  const changed = (menu: string) => (open: boolean, reason: OpenChangeReason) => {
+  const changed = (menu: string) => ({ open, reason }: { open: boolean; reason: OpenChangeReason }) => {
     if (open) shown.set(menu);
     else if (shown() === menu) shown.set(null);
     log(`${menu} ${open ? "opened" : "closed"} · ${reason}`);
@@ -389,7 +389,7 @@ export function Menus() {
       <Card icon="spark" title="Opened by the app" subtitle="A controlled menu: a button or a shortcut opens it" right={platform.idiom === "desktop" ? <Badge label={keymap.label("mod+shift+p")} /> : undefined}>
         <Menu
           open={open()}
-          onOpenChange={(next, reason) => {
+          onOpenChange={({ open: next, reason }) => {
             open.set(next);
             log(`commands ${next ? "opened" : "closed"} · ${reason}`);
           }}

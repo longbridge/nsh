@@ -60,7 +60,7 @@ function App() {
       length={6}
       groups={2}
       value={code()}
-      onChange={(next) => code.set(next)}
+      onChange={({ value }) => code.set(value)}
       onComplete={({ value }) => verify(value)}
       accessibilityLabel="Verification code, 6 digits"
       class="flex-row gap-3"
@@ -108,7 +108,7 @@ so the app verifies the code there.
 | `disabled` | `.disabled(..)` | `boolean` | `false` | No focus and no editing; `disabled:` styles apply to the input and its parts, and screen readers say it is dimmed. |
 | `groups` | `.groups(..)` | `number` | `1` | How many groups the cells are split into, as evenly as they go (3 + 3 for six digits in two); at least one, at most one per cell. |
 | `accessibilityLabel` | `.accessibility_label(..)` | `string` | none | What screen readers say for the field: what the code is for and how many digits it has. |
-| `cellClass`, `cellStyle` | `.cell_class(..)`, `.cell_style(\|s\| ..)` | `string`, `StyleProp<ViewStyle>` | none | Each cell: its size, border and text. |
+| `cellClass`, `cellStyle` | `.cell_class(..)`, `.cell_style(\|s\| ..)` | `string`, `StyleProp<TextStyle>` | none | Each cell: its size, border and text (`color`, `fontSize`, which its digit inherits). |
 | `groupClass`, `groupStyle` | `.group_class(..)`, `.group_style(\|s\| ..)` | `string`, `StyleProp<ViewStyle>` | none | Each group of cells (`flex-row gap-2`). |
 | `caretClass`, `caretStyle` | `.caret_class(..)`, `.caret_style(\|s\| ..)` | `string`, `StyleProp<ViewStyle>` | none | The caret: its width, height and color. |
 | `class`, `style` | style methods | `string`, `StyleProp<ViewStyle>` | none | The input itself: the row (or column) around its groups. |
@@ -117,7 +117,7 @@ so the app verifies the code there.
 
 | Event | Rust | Payload | When |
 |---|---|---|---|
-| `onChange` | `.on_change(\|value: &SharedString\| ..)` | `(value: string)` | The user changed the code: typed, deleted, pasted or autofilled. |
+| `onChange` | `.on_change(\|value: &SharedString\| ..)` | `(e: { value: string })` | The user changed the code: typed, deleted, pasted or autofilled. |
 | `onComplete` | `.on_complete(\|e: &OtpInputCompleteEvent\| ..)` | `{ value }` | The user's change filled the last cell, after its `onChange`. |
 | `onFocus` / `onBlur` | `.on_focus` / `.on_blur` | none | The input took / lost the keyboard focus. |
 

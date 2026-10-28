@@ -7,7 +7,7 @@
   (the UI sets as data: `nsh_core::element::description::SetDescription`, each with its generated declarations)
   makes the declarations of everything NSH serves (`nsh-js` `declarations.rs`), and `nsh_bundler::type_definitions()`
   the asset imports. The files: `nsh/index.d.ts` (`nsh`), one per module (`nsh/base.d.ts`, `nsh/mobile.d.ts`,
-  an app's set's `app/native.d.ts`, ...), `nsh/types.d.ts` (the styles, the elements' props and events, `YNode`, the JSX namespace; `nsh` exports them),
+  an app's set's `app/native.d.ts`, ...), `nsh/types.d.ts` (the styles, the elements' props and events, the refs (`ViewRef` and each element's own over it), the JSX namespace; `nsh` exports them),
   `nsh/jsx-runtime.d.ts` (where `jsxImportSource` finds `JSX`: no intrinsic elements, so every tag is checked as the
   component it names and generic ones are inferred: `native-pipeline.md`), `nsh/globals.d.ts` (console, timers,
   frames, the web APIs and the control flow components `If` / `Each`), and from the bundler `nsh/assets.d.ts` (what
@@ -257,7 +257,7 @@ the span around them), found by their characters (`text:`, a bare string) and pr
 the events go to the span's node; they are not texts of their own (`texts()` lists the text view's).
 `Screen::span_style` reads the resolved style of characters a selector names (`id:<testID>` a nested text's test id,
 `text:<text>` where the text reads it), the first character's, including a nested text's background. `app.spanStyle`
-returns that style. A span's test id is listed on its block's text (`AttributedText::test_ids`). Setting the id
+returns that style; on a real host the agent's model answers it (`TestStep::SpanStyle`, a `protocol::SpanStyle`). A span's test id is listed on its block's text (`AttributedText::test_ids`). Setting the id
 later updates the block's metadata and remounts its existing final layout, including fitted font sizes, without
 preparing or laying out the text again or reporting `onTextLayout`. Empty spans have no first character:
 queries report an error, including bare selectors whose test id matches an empty span. Steps acting on a view are strict, as Playwright's: the matches
@@ -498,7 +498,8 @@ chosen item carried out after; GTK's popover with the item's action's work done 
 menus of its own; the web, whose `Menu.popup` is the app's own UI, has none), the mouse's hover (`hover`, when
 `Native::mouse`: macOS hands the move to the surface's input, as AppKit gives posted
 moves to the first responder only), keystrokes (`press_keys`: macOS's posted key events, Windows' and GPUI's key entry points with
-`keymap::Key::virtual_key`, the web's CDP key events, Linux's bindings fired as its shortcut controller would, as GTK
+`keymap::Key::virtual_key`, the web's CDP key events (printable keys carry their physical code, modifiers and US-layout
+text, so shortcuts get the key before a field types it), Linux's bindings fired as its shortcut controller would, as GTK
 takes no made-up keys; iOS's IOHID keyboard events (`synth::key`, modifiers down first) that UIKit takes as a
 real keyboard's, Android's `KeyEvent`s handed to the window's root view as its input stage hands them over),
 `back`, dialogs, screenshots, the window's size and appearance),

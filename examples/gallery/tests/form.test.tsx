@@ -18,6 +18,13 @@ describe("the Input demo", () => {
     expect(app.value("id:shout")).toBe("");
   });
 
+  test("Shift with a key types its shifted character", async () => {
+    await app.type("id:shout", "a");
+    await app.keyboard.press("shift+8");
+    await app.keyboard.press("shift+2");
+    expect(app.value("id:shout")).toBe("A*@");
+  });
+
   test("an input stops at its maxLength", async () => {
     await app.type("id:code", "12345678");
     expect(app.value("id:code")).toBe("123456");

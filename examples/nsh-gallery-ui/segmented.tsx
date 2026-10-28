@@ -84,7 +84,7 @@ export function Segmented<T extends string>(props: {
                 props.onChange(value);
               }, 0);
             }}
-            onLayout={(b) => measure(i(), b.origin.x, b.size.width)}
+            onLayout={({ bounds }) => measure(i(), bounds.origin.x, bounds.size.width)}
             style={{
               ...(spread ? { flex: 1, paddingHorizontal: 8 } : { paddingHorizontal: 10 }),
               flexDirection: "row",

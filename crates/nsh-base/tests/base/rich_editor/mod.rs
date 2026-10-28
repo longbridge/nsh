@@ -16,7 +16,7 @@ mod view_features;
 use std::sync::Arc;
 
 use nsh_base::rich_editor::{
-    extensions::{markdown::markdown, starter},
+    extensions::{markdown::markdown, starter, suggestion::mention_node},
     model::{Node, NodeSpec, Schema},
     state::{EditorState, EditorStateConfig},
     view::{EditorSession, NodeView, NodeViewCx, NodeViews, rich_editor},
@@ -45,7 +45,7 @@ impl NodeView for StockCard {
     }
 }
 
-/// The starter schema with a block atom `stock`.
+/// The starter schema with a block atom `stock` and Tiptap's `mention`.
 fn schema() -> Schema {
     let mut spec = starter::schema_spec();
     let mut stock = NodeSpec::default();
@@ -55,6 +55,7 @@ fn schema() -> Schema {
     symbol.default = Some(json!(""));
     stock.attrs = vec![("symbol".into(), symbol)];
     spec.nodes.push(("stock".into(), stock));
+    spec.nodes.push(mention_node("mention", "@"));
     Schema::new(spec).unwrap()
 }
 

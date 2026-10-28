@@ -124,7 +124,7 @@ listens id:synced onCancel
 frame id:synced-body 20 20 350 30
 event text:"Synced dialog" onOpen
 expect Log: synced opened
-# Escape / back: onCancel, then onOpenChange(false, "cancel").
+# Escape / back: onCancel, then onOpenChange({ open: false, reason: "cancel" }).
 event text:"Synced dialog" onCancel reason=cancel
 expect Log: synced opened, synced cancel, synced change false cancel
 absent Synced dialog
@@ -1165,6 +1165,53 @@ covers [events] onChange
 covers [events] onFocus
 covers [events] onBlur
 covers [events] onSubmit
+# base-combobox
+tap id:case-base-combobox
+# The trigger is a combobox whose value is the selected titles.
+prop label:Tags role combobox
+prop label:Tags accessibilityValue text=Red
+prop label:One accessibilityValue text=Blue
+# With `multiple`, a press toggles the item and the list stays open; the
+# footer shows below the rows, in the app's look.
+tap id:tags
+expect TagFooter
+style parent:text:TagFooter backgroundColor #ff0000ff
+frame parent:text:TagFooter 0 0 390 20
+tap label:Green
+expect Tags: red,green
+expect TagFooter
+prop label:Green accessibilityState selected=true
+tap label:Red
+expect Tags: green
+# The app's query: typing is reported, and the app's query filters.
+type text:FindTag bl
+expect Query: bl
+absent label:Green
+# Closing confirms the value as it is.
+event label:FindTag onCancel
+expect Confirmed: green
+absent TagFooter
+# Without `multiple`, a choice replaces the value and closes the list.
+tap id:one
+tap label:Red
+expect One: red
+absent label:Green
+covers [nsh/base] Combobox
+covers [props] Combobox.items
+covers [props] Combobox.multiple
+covers [props] value
+covers [props] defaultValue
+covers [props] Combobox.searchable
+covers [props] Combobox.searchPlaceholder
+covers [props] Combobox.query
+covers [props] Combobox.footer
+covers [props] Combobox.footerClass
+covers [props] Combobox.footerStyle
+covers [props] Combobox.trigger
+covers [props] accessibilityLabel
+covers [events] onChange
+covers [events] Combobox.onConfirm
+covers [events] Combobox.onQueryChange
 # base-scrollbar
 tap id:case-base-scrollbar
 # Always shown, where the app places its track; a press in its middle
@@ -1542,11 +1589,33 @@ event id:plot onMouseMove position.x=60 position.y=10
 expect hovered 1
 event id:plot onMouseLeave
 expect hovered null
+# The keyboard: a stop of the focus that takes no presses, its ring the
+# app's `focusStyle`; its arrow keys are bound while it has the focus.
+# A screen reader's increment and decrement step through the rows as
+# Right and Left do, the first from the first row.
+prop id:plot focusable true
+listens id:plot onFocus
+listens id:plot onBlur
+state id:plot focused
+style id:plot opacity 0.9
+state id:plot none
+prop id:plot accessibilityActions increment, decrement
+event id:plot onAccessibilityAction actionName=increment
+expect hovered 0
+prop id:plot accessibilityValue text=row0
+event id:plot onAccessibilityAction actionName=increment
+expect hovered 1
+event id:plot onAccessibilityAction actionName=decrement
+expect hovered 0
+event id:plot onMouseLeave
+expect hovered null
 # A sparkline follows no pointer: it reports nothing, even once a press
 # that comes after the pointer has been handled. Its new row (35) widens
 # its y domain, which moves over `motion.update` (on the animator; the
 # layout and what it reports stay the same).
 prop id:spark accessibilityLabel Spark
+noprop id:spark focusable
+noprop id:spark accessibilityActions
 event id:spark onMouseMove position.x=90 position.y=10
 tap id:more
 expect rows 5
@@ -1558,6 +1627,13 @@ prop id:band accessibilityLabel Band
 # clockwise from 12 o'clock: from 3 o'clock (`startAngle`) to 9
 # (`endAngle`), the third row's share the half after 6 o'clock, the
 # second's the quarter before it.
+expect slice null
+# A screen reader steps through the slices in the rows' order.
+event id:pie onAccessibilityAction actionName=increment
+expect slice 0
+event id:pie onAccessibilityAction actionName=increment
+expect slice 1
+event id:pie onMouseLeave
 expect slice null
 event id:pie onMouseMove position.x=55 position.y=80
 expect slice 1
@@ -1596,6 +1672,29 @@ covers [props] Pie.innerRadius
 covers [props] Pie.outerRadius
 covers [props] Pie.cornerRadius
 covers [props] Arc.cornerRadius
+# A pie's labels: each slice's text at the end of its leader line, 10
+# past the rim (30) toward the slice's middle, then across to that
+# radius; after the end on the right half, before it on the left,
+# centered on it (the app's 20 by 10). A row worth nothing has none.
+expect east
+frame parent:text:east 90 50 0 0
+frame text:east 0 -5 20 10
+frame parent:text:west 10 50 0 0
+frame text:west -20 -5 20 10
+absent south
+# The leader lines (the `labelLine` part), each in its own classes, the
+# style's width over them, from the rim out to the label.
+drawing below:parent:text:east strokeStyle #ff0000ff
+drawing below:parent:text:west strokeStyle #0000ffff
+drawing below:parent:text:east lineWidth 2
+drawing below:parent:text:east stroke path(moveTo 80 50, lineTo 90 50...
+drawing below:parent:text:west stroke path(moveTo 20 50, lineTo 10 50...
+covers [props] Pie.label
+covers [props] Pie.labelClass
+covers [props] Pie.labelStyle
+covers [props] Pie.labelGap
+covers [props] Pie.labelLineClass
+covers [props] Pie.labelLineStyle
 covers [props] Plot.motion
 covers [nsh/base/plot] Plot
 covers [nsh/base/plot] Line
@@ -1696,6 +1795,33 @@ covers [props] PlotAxis.tickClass
 covers [props] PlotAxis.tickStyle
 covers [props] PlotAxis.lineClass
 covers [props] PlotAxis.lineStyle
+# Reversed scales: bands from the right edge (middles 250, 150 and 50)
+# and a y scale of 0 to 40 from the top edge (2 points a value), so the
+# bars hang from the top, each label below its bar's end.
+expect h20
+frame parent:text:h20 250 40 0 0
+frame text:h20 -15 0 30 14
+frame parent:text:h10 150 20 0 0
+frame parent:text:h5 50 10 0 0
+# The axis under it: the first band's text at the right.
+frame parent:parent:parent:text:rev0 200 80 100 10
+frame parent:parent:parent:text:rev2 0 80 100 10
+# The row nearest the pointer, the last one at the left; a screen
+# reader's decrement steps to the row before, in the rows' order.
+expect reversed null
+event id:hanging onMouseMove position.x=40 position.y=10
+expect reversed 2
+event id:hanging onAccessibilityAction actionName=decrement
+expect reversed 1
+event id:hanging onMouseLeave
+expect reversed null
+# Bars across from the right edge of an x scale of 0 to 20 (5 points a
+# value), the bands from the bottom edge up (middles 50, 30 and 10), each
+# label before its bar's end.
+frame parent:text:l20 0 50 0 0
+frame text:l20 -30 -7 30 14
+frame parent:text:l10 50 30 0 0
+frame parent:text:l5 75 10 0 0
 
 # The app's design tokens: shadcn's `neutral` with the app's theme over it.
 tap id:case-base-token

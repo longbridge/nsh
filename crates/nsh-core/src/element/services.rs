@@ -20,17 +20,17 @@ use crate::{
     time::Instant,
 };
 
-/// Whether an image loaded ahead ([`super::prefetch_image`]): true
-/// once its bytes are in memory.
+/// Whether an image loaded ahead ([`super::prefetch_image`]): `Ok`
+/// once its bytes are in memory, else the error.
 #[must_use = "an answer does nothing unless awaited"]
 #[derive(Debug)]
 pub struct Prefetch(Answer<Result<ImageSize, String>>);
 
 impl Future for Prefetch {
-    type Output = bool;
+    type Output = Result<(), String>;
 
-    fn poll(mut self: Pin<&mut Self>, cx: &mut TaskContext<'_>) -> Poll<bool> {
-        Pin::new(&mut self.0).poll(cx).map(|size| size.is_ok())
+    fn poll(mut self: Pin<&mut Self>, cx: &mut TaskContext<'_>) -> Poll<Self::Output> {
+        Pin::new(&mut self.0).poll(cx).map(|size| size.map(|_| ()))
     }
 }
 
