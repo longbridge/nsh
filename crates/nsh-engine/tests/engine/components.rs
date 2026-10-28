@@ -6614,7 +6614,10 @@ fn base_plot_reversed_scales_run_from_the_other_edge() {
     );
     // The grid line at 10, 20 down (on the middle of a device pixel).
     let at = path_points(&grid.ops);
-    assert!(at.len() == 2 && at.iter().all(|&(_, y)| (y - 20.0).abs() <= 0.5), "{at:?}");
+    assert!(
+        at.len() == 2 && at.iter().all(|&(_, y)| (y - 20.0).abs() <= 0.5),
+        "{at:?}"
+    );
     // A reversed x (0 to 40 over 200, from the right): bars across grow
     // leftward from the right edge.
     assert_eq!(
@@ -6629,7 +6632,10 @@ fn base_plot_reversed_scales_run_from_the_other_edge() {
         .collect::<Vec<_>>();
     assert_eq!(starts, [(200.0, 100.0), (100.0, 100.0), (0.0, 100.0)]);
     let at = path_points(&row_grid.ops);
-    assert!(at.len() == 2 && at.iter().all(|&(x, _)| (x - 200.0).abs() <= 0.5), "{at:?}");
+    assert!(
+        at.len() == 2 && at.iter().all(|&(x, _)| (x - 200.0).abs() <= 0.5),
+        "{at:?}"
+    );
     // Points from the right edge, revealed from there (the appear's clip
     // starts past the right edge, by the canvas's bleed).
     assert_eq!(
