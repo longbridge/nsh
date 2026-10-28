@@ -1,6 +1,6 @@
 ---
 title: Scrollbar
-description: "The Scrollbar component: a scroll bar of the app's own look for a scroll view or a list, placed where the app wants it, whose thumb follows the content and whose drags and presses scroll it, shown while scrolling, on hover or always, fading in and out by the app's timing."
+description: "The Scrollbar component: a scroll bar of the app's own look for every scroll view and list (a theme set once) or for one, placed where the app wants it, whose thumb follows the content and whose drags and presses scroll it, shown while scrolling, on hover or always, fading in and out by the app's timing."
 order: 20.86
 group: base
 demo: el-scrollbar
@@ -9,8 +9,9 @@ demo: el-scrollbar
 # Scrollbar
 
 A scrollbar gives a scroll view or a list a bar in the app's own look: a thin pill that widens under the pointer, a
-track in the brand's tone, a bar beside a fixed header or along two panes. It names the scroll view it moves and sits
-wherever the app places it. It owns its behavior: the thumb's length and place follow the content, the viewport and
+track in the brand's tone, a bar beside a fixed header or along two panes. Set once as the app's theme, every scroll
+view and list draws one in place of the platform's indicator ([Built-in bars](#built-in-bars)); placed by the app, it
+names the scroll view it moves and sits wherever the app puts it. It owns its behavior: the thumb's length and place follow the content, the viewport and
 the offset (also while a list grows or the window resizes); dragging the thumb scrolls the content, and a press on the
 track brings the thumb's middle there; it shows while the content scrolls, while the pointer is over it, or always,
 and fades in and out natively. The look and the timing are the app's: a `Scrollbar` has no colors, sizes or radii of
@@ -89,6 +90,64 @@ mount(App);
 `Scrollbar` comes from [`nsh/base`](../modules/nsh-base.md), the `nsh-base` crate in Rust. In Rust, `scrollbar()` makes
 one with a setter per prop (`.scroll(..)`, `.thumb_style(..)`) and the typed style methods for the bar itself; its
 `scroll` takes an `ElementRef` (or a `ScrollbarTarget`).
+
+## Built-in bars
+
+Every scroll view and list can draw a `Scrollbar` in place of the platform's indicator, with no bar to place:
+`Scrollbar.setTheme` gives the app's look to the bar of each view whose `scrollbar` is `true`, once, wherever the
+app starts. Each view gets its own bar over its viewport, which stays there as the content scrolls (on the main
+thread, as sticky views do) and draws above the content; it follows, scrolls and fades as a placed `Scrollbar` does.
+
+```rust tabs
+use nsh_base::{ScrollbarLook, ScrollbarMode, ScrollbarTheme, set_scrollbar_theme};
+
+fn use_app_scrollbars() {
+    let mut vertical = ScrollbarLook::default();
+    vertical.class = Some("absolute inset-y-0 right-0 w-4 items-end p-1".into());
+    vertical.thumb_class = Some("w-1.5 rounded-full bg-muted-foreground opacity-60 hover:w-2".into());
+    let mut horizontal = ScrollbarLook::default();
+    horizontal.class = Some("absolute inset-x-0 bottom-0 h-4 items-end p-1".into());
+    horizontal.thumb_class = Some("h-1.5 rounded-full bg-muted-foreground opacity-60 hover:h-2".into());
+    let mut theme = ScrollbarTheme::default();
+    theme.mode = ScrollbarMode::Hover;
+    theme.motion.enter = 300.0;
+    theme.motion.exit = 500.0;
+    theme.vertical = Some(vertical);
+    theme.horizontal = Some(horizontal);
+    set_scrollbar_theme(Some(theme));
+}
+```
+
+```tsx tabs
+import { Scrollbar } from "nsh/base";
+
+Scrollbar.setTheme({
+  mode: "hover",
+  motion: { enter: 300, exit: 500 },
+  vertical: {
+    class: "absolute inset-y-0 right-0 w-4 items-end p-1",
+    thumbClass: "w-1.5 rounded-full bg-muted-foreground opacity-60 transition-all duration-300 hover:w-2",
+  },
+  horizontal: {
+    class: "absolute inset-x-0 bottom-0 h-4 items-end p-1",
+    thumbClass: "h-1.5 rounded-full bg-muted-foreground opacity-60 transition-all duration-300 hover:h-2",
+  },
+});
+```
+
+A `ScrollbarTheme` has the props of a bar that are the same for every view, and the look of each axis:
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `mode` | `"scrolling" \| "hover" \| "always"` | `"scrolling"` | When the bars show: [When it shows](#when-it-shows). |
+| `motion` | `ScrollbarMotion` | snaps, `idle` `2000` | How they show and hide: [Motion](#motion). |
+| `minThumbLength` | `number` | `48` | The shortest a thumb gets. |
+| `vertical`, `horizontal` | `ScrollbarLook` | none | The look of the bars of vertical and of horizontal views: `class` and `style` for the track, placed in the view's viewport; `thumbClass` and `thumbStyle`; `accessibilityLabel`. A view whose axis has no look keeps the platform's indicator. |
+
+A later `setTheme` restyles the bars, and `Scrollbar.setTheme(null)` gives the views the platform's indicator back. One
+view takes a theme of its own as its `scrollbar` prop (`<Scroll scrollbar={{ mode: "always", vertical: { … } }}>`),
+whether or not the app set one; `scrollbar={false}` leaves a view without a bar. A list laid out in its parent's
+viewport (`viewport="parent"`) scrolls with that view and its bar.
 
 ## The scroll view it moves
 

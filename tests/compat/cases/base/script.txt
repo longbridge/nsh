@@ -1194,6 +1194,20 @@ style label:Feed pointerEvents none
 touch start label:Strip 100 3
 touch end
 prop id:strip contentOffset x=300
+# A theme of the view's own: its bar over its viewport, in place of the
+# platform's indicator, the thumb 48 long (the default shortest) of 100
+# on 1000; a press at 50 puts its start at 26 of 52, half of 900.
+frame label:Own 290 0 10 100
+touch start label:Own 5 50
+touch end
+prop id:own contentOffset y=450
+# The app's theme (`Scrollbar.setTheme`) gives the bar to a scroll view
+# that keeps `scrollbar`.
+frame label:App 290 0 10 100
+touch start label:App 5 50
+touch end
+prop id:app contentOffset y=450
+covers [props] scrollbar
 covers [nsh/base] Scrollbar
 covers [props] Scrollbar.scroll
 covers [props] Scrollbar.axis

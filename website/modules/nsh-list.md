@@ -114,7 +114,7 @@ interface ViewabilityConfig {
 
 | Prop | Type | Default | Description |
 |---|---|---|---|
-| `scrollbar` | `boolean` | `true` | The scroll indicator shows. |
+| `scrollbar` | `boolean \| ScrollbarTheme` | `true` | The scroll indicator shows: the platform's, or the app's [built-in bar](../elements/scrollbar.md#built-in-bars); an object is a theme of the view's own. |
 | `scrollable` | `boolean` | `true` | The user can scroll it. |
 | `bounces` | `boolean` | `true` | Overscroll past the edges. |
 | `pagingEnabled` | `boolean` | `false` | Stops at multiples of the viewport. |

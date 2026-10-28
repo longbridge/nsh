@@ -48,7 +48,6 @@ mod events;
 pub(crate) mod flow;
 pub(crate) mod host;
 mod js;
-#[cfg(test)]
 pub(crate) mod json_host;
 mod keyboard;
 pub(crate) mod keys;
@@ -127,9 +126,9 @@ pub use self::{
         MemberCall, MemberKind, MemberSpec, Ret, Thrown,
     },
     component::{
-        Api, Component, ComponentError, ComponentSpec, Event, EventSpec, Method, MethodSpec,
-        Methods, NoEvent, Param, PropDecode, PropKind, PropSpec, Props, Registry, Root,
-        declarations,
+        Api, BuiltInScrollbar, Component, ComponentError, ComponentSpec, Event, EventSpec, Method,
+        MethodSpec, Methods, NoEvent, Param, PropDecode, PropKind, PropSpec, Props, Registry, Root,
+        ScrollbarSource, declarations,
     },
     element_ref::{ComponentRef, ElementRef},
     engine_context::{EngineContext, EngineContextGuard, engine_context},
@@ -146,6 +145,7 @@ pub use self::{
         video, web_view, web_view_html,
     },
     js::{JsHost, JsIn, JsKind, JsOwned, JsRaw},
+    json_host::from_json,
     keyboard::Keyboard,
     module::{
         Constant, ConstantValue, Function, FunctionCall, FunctionKind, FunctionSpec, Module,

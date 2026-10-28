@@ -528,6 +528,17 @@ pub fn set_color_scheme(appearance: Appearance) {
     act(Action::Appearance(appearance));
 }
 
+/// Draws the bar of every scroll view and list whose `scrollbar` is `true`
+/// with the built-in bar `source` makes of `theme` (the UI set's, which
+/// `source` gets back: [`BuiltInScrollbar::app_theme`](super::BuiltInScrollbar::app_theme)),
+/// or (`None`, the default) with the platform's indicator. A view whose `scrollbar` is a theme shows the bar
+/// of the UI set that makes one
+/// ([`Registry::scrollbars_from`](super::Registry::scrollbars_from)).
+/// `nsh-base`'s `set_scrollbar_theme` calls it.
+pub fn set_builtin_scrollbars(source: super::ScrollbarSource, theme: Option<super::AnyValue>) {
+    act(Action::BuiltInScrollbars(source, theme));
+}
+
 // --- Tasks and timers --------------------------------------------------------
 
 /// A running task ([`spawn`]): it ends with the owner it was made under, or

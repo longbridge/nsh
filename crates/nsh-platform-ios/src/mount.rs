@@ -1187,6 +1187,7 @@ impl Mounter {
                 pull_value,
                 keyboard_dismiss,
                 mirrored,
+                ..
             } => {
                 // A node that stops being vertical drops the width narrowed
                 // while it was: the extent it holds is measured the other way.

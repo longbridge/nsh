@@ -648,6 +648,29 @@ struct ClassType {
     type_name: &'static str,
 }
 
+/// The bar of one scroll view or list that the core asks a UI set to make
+/// ([`Registry::scrollbars_from`]).
+#[derive(Debug, Clone, Default)]
+#[non_exhaustive]
+pub struct BuiltInScrollbar {
+    /// The scroll view or list it scrolls.
+    pub target: crate::NodeId,
+    /// Whether that view scrolls sideways.
+    pub horizontal: bool,
+    /// The view's own theme (its `scrollbar` object, as JSON); `None`: the
+    /// app's.
+    pub theme: Option<Arc<crate::JsonValue>>,
+    /// The app's theme, as the set gave it
+    /// ([`set_builtin_scrollbars`](super::set_builtin_scrollbars)).
+    pub app_theme: Option<super::AnyValue>,
+}
+
+/// Makes the built-in bar of a scroll view or list: a component element,
+/// which the core lays out over the view's viewport and keeps there as
+/// it scrolls; `None` leaves the view the platform's indicator
+/// ([`Registry::scrollbars_from`]).
+pub type ScrollbarSource = fn(&BuiltInScrollbar) -> Option<super::AnyElement>;
+
 /// What a UI set exports to JS: its components and modules, and what it
 /// passes on from the runtime. Cheap to clone.
 #[derive(Clone, Default)]
@@ -671,6 +694,8 @@ pub struct Registry {
     assets: Arc<Vec<&'static [super::AssetFile]>>,
     /// Makes the design tokens of a theme ([`Registry::tokens_from`]).
     tokens: Option<super::TokenSource>,
+    /// Makes the views' built-in scroll bars ([`Registry::scrollbars_from`]).
+    scrollbars: Option<ScrollbarSource>,
     /// The UI sets served under paths of this one's specifier
     /// ([`Registry::submodule`]).
     submodules: Arc<Vec<Registry>>,
@@ -867,6 +892,7 @@ impl Registry {
         let mut out = Self::default();
         for set in sets.iter().flat_map(Registry::sets) {
             out.tokens = out.tokens.or(set.tokens);
+            out.scrollbars = out.scrollbars.or(set.scrollbars);
             Arc::make_mut(&mut out.setups).extend(set.setups.iter().cloned());
             let types = Arc::make_mut(&mut out.types);
             for (name, ty) in set.types.iter() {
@@ -960,6 +986,21 @@ impl Registry {
     pub fn tokens_from(&mut self, source: super::TokenSource) -> &mut Self {
         self.tokens = Some(source);
         self
+    }
+
+    /// Makes the built-in bar of the scroll views and lists that show one
+    /// ([`set_builtin_scrollbars`](super::set_builtin_scrollbars), or a
+    /// theme as their `scrollbar`) with `source`. Of the sets a host
+    /// serves, the first that has one makes them.
+    pub fn scrollbars_from(&mut self, source: ScrollbarSource) -> &mut Self {
+        self.scrollbars = Some(source);
+        self
+    }
+
+    /// How the set makes the views' built-in scroll bars
+    /// ([`Registry::scrollbars_from`]).
+    pub(crate) fn scrollbar_source(&self) -> Option<ScrollbarSource> {
+        self.scrollbars
     }
 
     /// Runs `f` once on each engine that serves the set, in its reactive

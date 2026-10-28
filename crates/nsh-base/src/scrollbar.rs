@@ -14,7 +14,8 @@ use std::time::Duration;
 use nsh_core::{
     NodeId,
     element::{
-        ElementRef, JsHost, JsIn, JsOwned, JsValue, NodeRef, PropError, ScrollEvent, Style, TsTypes,
+        AnyValue, BuiltInScrollbar, ElementRef, JsHost, JsIn, JsOwned, JsValue, ModuleCx, NodeRef,
+        PropError, ScrollEvent, Style, TsTypes, from_json, set_builtin_scrollbars,
     },
     geometry::{Along, Axis},
     prelude::*,
@@ -644,4 +645,162 @@ pub fn Scrollbar(props: ScrollbarProps, _cx: Scope<NoEvent>) -> impl IntoElement
             }
         })
         .child(rail)
+}
+
+/// The look of the built-in bars of one axis ([`ScrollbarTheme`]): what
+/// `class`, `style`, `thumbClass` and `thumbStyle` are to a [`Scrollbar`],
+/// placed in the view's viewport (`absolute inset-y-0 right-0 w-4 p-1`
+/// for a vertical bar).
+#[derive(Debug, Clone, Default, PartialEq, JsObject)]
+#[non_exhaustive]
+pub struct ScrollbarLook {
+    /// The Tailwind classes of the bar, its track.
+    pub class: Option<SharedString>,
+    /// The style of the bar, over `class`.
+    #[prop(default)]
+    pub style: Style,
+    /// The Tailwind classes of the thumb.
+    pub thumb_class: Option<SharedString>,
+    /// The style of the thumb, over `thumbClass`.
+    #[prop(default)]
+    pub thumb_style: Style,
+    /// What screen readers say of the bar.
+    pub accessibility_label: Option<SharedString>,
+}
+
+/// The built-in scroll bars of scroll views and lists: a [`Scrollbar`] the
+/// core puts over each view's viewport in place of the platform's
+/// indicator, for every view once the app sets it ([`set_scrollbar_theme`],
+/// TS `Scrollbar.setTheme`), or for one view as its `scrollbar` prop. The
+/// look is the app's, per axis: a view whose axis has no look keeps the
+/// platform's indicator.
+#[derive(Debug, Clone, PartialEq, JsObject)]
+#[non_exhaustive]
+pub struct ScrollbarTheme {
+    /// When the bars show (default `"scrolling"`).
+    #[prop(default)]
+    pub mode: ScrollbarMode,
+    /// How they show and hide.
+    #[prop(default)]
+    pub motion: ScrollbarMotion,
+    /// The shortest a thumb gets (default `48`).
+    #[prop(default = px(48.0))]
+    pub min_thumb_length: Points,
+    /// The look of the bars of vertical views.
+    pub vertical: Option<ScrollbarLook>,
+    /// The look of the bars of horizontal views.
+    pub horizontal: Option<ScrollbarLook>,
+}
+
+impl Default for ScrollbarTheme {
+    fn default() -> Self {
+        Self {
+            mode: ScrollbarMode::default(),
+            motion: ScrollbarMotion::default(),
+            min_thumb_length: px(48.0),
+            vertical: None,
+            horizontal: None,
+        }
+    }
+}
+
+impl ScrollbarTheme {
+    /// The look of the bars of `horizontal` views, if it has one.
+    fn look(&self, horizontal: bool) -> Option<&ScrollbarLook> {
+        if horizontal {
+            self.horizontal.as_ref()
+        } else {
+            self.vertical.as_ref()
+        }
+    }
+}
+
+/// `theme` as the core keeps it for the built-in bars.
+fn kept(theme: Option<ScrollbarTheme>) -> Option<AnyValue> {
+    theme.map(AnyValue::new)
+}
+
+/// Draws the bar of every scroll view and list whose `scrollbar` is `true`
+/// with a [`Scrollbar`] of `theme` in place of the platform's indicator
+/// (TS `Scrollbar.setTheme`); `None` gives the views the platform's back.
+/// A later theme restyles the bars. A view whose `scrollbar` is a theme of
+/// its own keeps it.
+pub fn set_scrollbar_theme(theme: Option<ScrollbarTheme>) {
+    set_builtin_scrollbars(built_in, kept(theme));
+}
+
+#[module]
+impl Scrollbar {
+    /// Draws the bar of every scroll view and list whose `scrollbar` is
+    /// `true` with a `Scrollbar` of `theme` in place of the platform's
+    /// indicator; `null` gives the views the platform's back. A later
+    /// theme restyles the bars; a view whose `scrollbar` is a theme of its
+    /// own keeps it.
+    pub fn set_theme(theme: Option<ScrollbarTheme>, cx: &mut ModuleCx) {
+        cx.set_builtin_scrollbars(built_in, kept(theme));
+    }
+}
+
+/// Makes the built-in bar the core asks for, of the view's theme or the
+/// app's (`Registry::scrollbars_from`, [`set_scrollbar_theme`]): `None`
+/// when that theme has no look for the view's axis.
+pub(crate) fn built_in(of: &BuiltInScrollbar) -> Option<AnyElement> {
+    let theme = match &of.theme {
+        Some(json) => match from_json::<ScrollbarTheme>(json) {
+            Ok(theme) => theme,
+            Err(e) => {
+                log::warn!(target: "js", "`scrollbar`: {}", e.0);
+                return None;
+            }
+        },
+        None => of.app_theme.clone()?.take::<ScrollbarTheme>()?,
+    };
+    theme.look(of.horizontal)?;
+    Some(
+        view_scrollbar()
+            .target(ScrollbarTarget::Node(NodeRef(of.target)))
+            .horizontal(of.horizontal)
+            .theme(theme)
+            .into_element(),
+    )
+}
+
+/// The props of [`ViewScrollbar`].
+#[derive(Debug, Clone, PartialEq, Props)]
+struct ViewScrollbarProps {
+    /// The view it is the bar of.
+    #[prop(default)]
+    target: ScrollbarTarget,
+    /// Whether that view scrolls sideways.
+    #[prop(default)]
+    horizontal: bool,
+    /// What it is drawn with.
+    #[prop(default)]
+    theme: ScrollbarTheme,
+}
+
+/// A view's built-in bar: as large as the view's viewport (the core lays
+/// it out there), the pointer going through to the view but where the
+/// bar takes it.
+#[component]
+fn ViewScrollbar(props: ViewScrollbarProps) -> impl IntoElement {
+    let theme = props.theme;
+    let look = theme.look(props.horizontal).cloned().unwrap_or_default();
+    let bar = Scrollbar::element(ScrollbarProps {
+        scroll: Prop::from(props.target),
+        axis: Prop::from(if props.horizontal {
+            Axis::Horizontal
+        } else {
+            Axis::Vertical
+        }),
+        mode: Prop::from(theme.mode),
+        motion: Prop::from(theme.motion),
+        min_thumb_length: Prop::from(theme.min_thumb_length),
+        thumb_class: Prop::from(look.thumb_class),
+        thumb_style: Prop::from(look.thumb_style),
+        accessibility_label: Prop::from(look.accessibility_label),
+    })
+    .app_class(look.class)
+    .inline_style(look.style);
+    view().pointer_events(PointerEvents::BoxNone).child(bar)
 }

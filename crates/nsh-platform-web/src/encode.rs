@@ -1138,6 +1138,7 @@ pub(crate) fn encode(out: &mut Out, item: &MountItem) {
             id,
             horizontal,
             scrollbar_visible,
+            replaced,
             mirrored,
             ..
         } => {
@@ -1146,6 +1147,7 @@ pub(crate) fn encode(out: &mut Out, item: &MountItem) {
                 .bool(*horizontal)
                 .bool(*scrollbar_visible)
                 .bool(*mirrored)
+                .bool(*replaced)
                 .end();
         }
         MountItem::ScrollContent { id, size } => {

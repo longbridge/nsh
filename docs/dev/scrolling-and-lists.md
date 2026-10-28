@@ -18,7 +18,9 @@
   app places that names a scroll view or a list (`scroll={ref}`), with its look (`class`, `thumbClass`) and `mode`;
   the target's own indicator off with `scrollbar={false}`. It follows the target through the core
   (`element::watch_scroll`: the offset every platform reports, the content size the layout sends), so it
-  works on every backend, and scrolls it with `ScrollTo`.
+  works on every backend, and scrolls it with `ScrollTo`. With an app theme (`Scrollbar.setTheme`) or a view's own
+  (`scrollbar={{ … }}`) the core draws one over every such view in place of its indicator (`ScrollConfig.replaced`,
+  which also hides the horizontal views' kept indicator on the desktops); `docs/dev/components.md` "Scroll bars".
 - **Content container** (`<Scroll>`): `contentStyle` / `contentClass` are the renderer's
   (`dom.rs` `scroll_content`): the first one set makes a view the scroll view's children move into (also the ones
   already there; later inserts and removals go to it), and styles it. The core lays a scroll view's children out in

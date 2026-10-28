@@ -121,8 +121,9 @@ pub use crate::{
         resize_handle, v_resizable,
     },
     scrollbar::{
-        Scrollbar, ScrollbarElement, ScrollbarEntrance, ScrollbarMode, ScrollbarMotion,
-        ScrollbarProps, ScrollbarTarget, scrollbar,
+        Scrollbar, ScrollbarElement, ScrollbarEntrance, ScrollbarLook, ScrollbarMode,
+        ScrollbarMotion, ScrollbarProps, ScrollbarTarget, ScrollbarTheme, scrollbar,
+        set_scrollbar_theme,
     },
     select::{
         Select, SelectElement, SelectEvent, SelectGroup, SelectItem, SelectItemState, SelectProps,
@@ -237,6 +238,8 @@ pub mod parts {
             .register::<RadioGroup>()
             .register::<Slider>()
             .register::<Scrollbar>()
+            .module::<Scrollbar>()
+            .scrollbars_from(crate::scrollbar::built_in)
             .register::<Switch>()
             .register::<Progress>()
             .register::<Tab>()
@@ -372,6 +375,7 @@ mod tests {
                 "RichEditorApi",
                 "RichExtensionApi",
                 "RichTableApi",
+                "Scrollbar",
                 "TextView"
             ]
         );

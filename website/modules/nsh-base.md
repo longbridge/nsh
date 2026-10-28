@@ -127,9 +127,11 @@ import type {
   SelectItemState,
   SelectProps,
   ScrollbarEntrance,
+  ScrollbarLook,
   ScrollbarMode,
   ScrollbarMotion,
   ScrollbarProps,
+  ScrollbarTheme,
   SliderProps,
   SliderScale,
   SliderValue,
@@ -275,7 +277,9 @@ A scroll bar of the app's own look for a scroll view or a list, placed where the
 (the bar's `class`) and a thumb in it (`thumbClass`). It names its scroll view (`scroll`, its `ref`) and follows its
 offset, content and viewport; a drag of the thumb scrolls the content, a press on the track brings the thumb's middle
 there. `mode` shows it while the content scrolls (until `motion.idle` after), while the pointer is over the bar,
-or always; `axis` makes it horizontal. See [Scrollbar](../elements/scrollbar.md).
+or always; `axis` makes it horizontal. `Scrollbar.setTheme` gives every scroll view and list a bar of the app's look
+over its viewport, with none to place, and a view takes a theme of its own as its `scrollbar` prop. See
+[Scrollbar](../elements/scrollbar.md).
 
 ### OtpInput
 

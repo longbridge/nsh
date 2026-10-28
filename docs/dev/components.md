@@ -1011,6 +1011,20 @@ cubic in out, none for `always` or reduced motion, so the first state snaps. Hid
 look, and the thumb's motion (a width growing on `hover:`), are the app's. The target's own indicator stays the app's
 to turn off (`scrollbar={false}`).
 
+**Built-in bars.** A view needs no bar placed for one: `set_scrollbar_theme` (TS `Scrollbar.setTheme`, a module
+function: an `Action::BuiltInScrollbars` that carries the theme as an `AnyValue` and the UI set's maker, so a Rust app
+that never registered `nsh-base` gets bars too) has the core draw the bar of every view whose `scrollbar` is `true`,
+and a view's own theme is its `scrollbar` prop (`ScrollbarSetting::Themed`, kept as JSON; the registry's
+`scrollbars_from` names the UI set that makes its bars). The maker returns no bar for an axis the theme has no look
+for, and the view keeps the platform's indicator. The core (`core/scrollbars.rs`) makes the bar as a component of
+its own, a child of the view marked `decoration`: last among the children, so it draws above them and what JS
+appends goes before it; out of what counts as the view's children (`first:`, `last:`, `space-*`); a layout root of
+its own, sized to the view's frame after the views' and the lists' layout; and pinned over the viewport by a sticky
+range across all of the content, which the platforms apply on the main thread as they pin sticky cells, so it never
+waits for the engine while the content scrolls. The view's `ScrollConfig` turns the indicator off and says the bar
+`replaced` it, so the desktop backends' horizontal views do not keep theirs beside it. A new theme makes every bar
+made for `true` again. A component's given class (`app_class`) now reaches its root, which the bar's size relies on.
+
 ## Toasts
 
 `nsh/base`'s toasts (`crates/nsh-base/src/toast/`) are `gpui-base`'s three pieces, with its names and semantics; the

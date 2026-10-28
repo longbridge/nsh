@@ -803,24 +803,44 @@ impl<M: TextEngine> Core<M> {
             self.components.status_bars.set_base(setting);
         }
         let _entered = self.components.runtime.enter();
-        let mut el = root.element().0;
-        let ElKind::Component(c) = std::mem::replace(&mut el.kind, ElKind::Plain) else {
+        let Some(id) = self.make_component(root.element(), |_, _| {}) else {
             return log::error!("the root is not a component");
         };
-        let id = self.components.alloc();
-        let _ = self.apply_op(Op::Create { id, tag: el.tag });
-        self.create_instance_of(id, c.name, c.make, c.spec);
-        if let Some(inst) = self.components.instances.get_mut(&id)
-            && let Inner::Component(inner) = &mut inst.inner
-        {
-            inner.set_props(c.props.as_any());
-        }
         let _ = self.apply_op(Op::Insert {
             parent: ROOT_ID,
             child: id,
             before: None,
         });
         self.own_direction();
+    }
+
+    /// Makes the host of component element `el` (`None`: `el` is not a
+    /// component), out of the tree; `made` sees its node first, before it
+    /// renders.
+    pub(super) fn make_component(
+        &mut self,
+        el: crate::element::AnyElement,
+        made: impl FnOnce(&mut Self, NodeId),
+    ) -> Option<NodeId> {
+        let mut el = el.0;
+        let ElKind::Component(c) = std::mem::replace(&mut el.kind, ElKind::Plain) else {
+            return None;
+        };
+        let id = self.components.alloc();
+        let _ = self.apply_op(Op::Create { id, tag: el.tag });
+        made(self, id);
+        self.create_instance_of(id, c.name, c.make, c.spec);
+        if let Some(inst) = self.components.instances.get_mut(&id)
+            && let Inner::Component(inner) = &mut inst.inner
+        {
+            inner.set_props(c.props.as_any());
+        }
+        Some(id)
+    }
+
+    /// How the sets make the views' built-in scroll bars.
+    pub(super) fn scrollbar_source(&self) -> Option<crate::element::ScrollbarSource> {
+        self.components.registry.scrollbar_source()
     }
 
     /// The environment components read ([`crate::element::window`]
@@ -2232,6 +2252,12 @@ impl<M: TextEngine> Core<M> {
         if let Some(given) = &inst.given {
             take(&mut cx, given);
         }
+        // The classes the element was given in Rust (`app_class`), as the
+        // app's `class` on its host.
+        if let Some(class) = inst.given.as_ref().and_then(|g| g.class.clone()) {
+            let given = self.app_class_list(&class);
+            cx.user = self.merge_user(cx.user.take(), Some(given));
+        }
         let mut app = inst.app_style.clone();
         let mut at = inst.above;
         while let Some(id) = at {
@@ -2246,6 +2272,10 @@ impl<M: TextEngine> Core<M> {
                 take(&mut cx, given);
             }
             cx.user = self.merge_user(cx.user.take(), outer);
+            if let Some(class) = given.and_then(|g| g.class.clone()) {
+                let given = self.app_class_list(&class);
+                cx.user = self.merge_user(cx.user.take(), Some(given));
+            }
         }
         if let Some(app) = &app {
             decls.extend(app.decls().iter().cloned());
@@ -4198,7 +4228,7 @@ impl<M: TextEngine> Core<M> {
 
     /// Frees what a component made (not its host nor its JS children,
     /// which leave its view).
-    fn release_instance(&mut self, host: NodeId) {
+    pub(super) fn release_instance(&mut self, host: NodeId) {
         self.release_component(host, &[]);
     }
 
@@ -4545,6 +4575,9 @@ impl<M: TextEngine> Core<M> {
             Action::Hint(overlay) => self.hint_due(overlay),
             Action::Frame(answer) => self.wait_frame(answer),
             Action::Appearance(appearance) => self.set_appearance(appearance),
+            Action::BuiltInScrollbars(source, theme) => {
+                self.set_builtin_scrollbars(theme.map(|theme| (source, theme)))
+            }
             Action::Measure(id, answer) => self.components.measures.push((id, answer)),
             Action::ImageInfo(uri, answer) => {
                 let id = self.components.next_image_info;

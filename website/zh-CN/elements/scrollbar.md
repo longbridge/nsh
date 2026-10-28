@@ -1,6 +1,6 @@
 ---
 title: Scrollbar
-description: "Scrollbar 组件：为滚动视图或列表提供应用自己外观的滚动条，放在应用想放的位置；滑块跟随内容，拖动和按压会滚动内容，可在滚动时、悬停时或始终显示，按应用给的时长淡入淡出。"
+description: "Scrollbar 组件：为所有滚动视图和列表（设置一次主题）或单个滚动视图提供应用自己外观的滚动条，也可放在应用想放的位置；滑块跟随内容，拖动和按压会滚动内容，可在滚动时、悬停时或始终显示，按应用给的时长淡入淡出。"
 order: 20.86
 group: base
 demo: el-scrollbar
@@ -8,8 +8,9 @@ demo: el-scrollbar
 
 # Scrollbar
 
-滚动条为滚动视图或列表提供应用自己外观的滚动条：鼠标靠近时变宽的细胶囊、品牌色的轨道、固定表头旁边或横跨两个面板的滚动条。它指明
-自己滚动的滚动视图，放在应用放置的任何位置。它负责行为：滑块的长度和位置跟随内容、视口和偏移（列表变长、窗口缩放时也一样）；拖动滑块
+滚动条为滚动视图或列表提供应用自己外观的滚动条：鼠标靠近时变宽的细胶囊、品牌色的轨道、固定表头旁边或横跨两个面板的滚动条。设置一次
+应用的主题后，每个滚动视图和列表都会用它代替平台的滚动指示器（见[内置滚动条](#内置滚动条)）；由应用放置时，它指明自己滚动的滚动视图，
+放在应用放置的任何位置。它负责行为：滑块的长度和位置跟随内容、视口和偏移（列表变长、窗口缩放时也一样）；拖动滑块
 会滚动内容，按压轨道会让滑块中点移到那里；它在内容滚动时、指针悬停时或始终显示，并以原生动画淡入淡出。外观和时长属于应用：
 `Scrollbar` 没有自己的颜色、尺寸或圆角，应用不给时长时，它的淡入淡出不占时间。
 
@@ -85,6 +86,62 @@ mount(App);
 `Scrollbar` 来自 [`nsh/base`](../modules/nsh-base.md)，在 Rust 中是 `nsh-base` crate。在 Rust 中，`scrollbar()` 创建一个滚动条，每个
 prop 一个 setter（`.scroll(..)`、`.thumb_style(..)`），滚动条本身用类型化的样式方法；它的 `scroll` 接受 `ElementRef`（或
 `ScrollbarTarget`）。
+
+## 内置滚动条
+
+每个滚动视图和列表都可以用 `Scrollbar` 代替平台的滚动指示器，无需自己放置滚动条：在应用启动的地方调用一次 `Scrollbar.setTheme`，
+所有 `scrollbar` 为 `true` 的视图的滚动条就都采用应用的外观。每个视图在自己的视口上得到一个滚动条，内容滚动时它停在原处（与 sticky
+视图一样在主线程上完成），绘制在内容之上；它跟随、滚动和淡入淡出的方式与应用自己放置的 `Scrollbar` 相同。
+
+```rust tabs
+use nsh_base::{ScrollbarLook, ScrollbarMode, ScrollbarTheme, set_scrollbar_theme};
+
+fn use_app_scrollbars() {
+    let mut vertical = ScrollbarLook::default();
+    vertical.class = Some("absolute inset-y-0 right-0 w-4 items-end p-1".into());
+    vertical.thumb_class = Some("w-1.5 rounded-full bg-muted-foreground opacity-60 hover:w-2".into());
+    let mut horizontal = ScrollbarLook::default();
+    horizontal.class = Some("absolute inset-x-0 bottom-0 h-4 items-end p-1".into());
+    horizontal.thumb_class = Some("h-1.5 rounded-full bg-muted-foreground opacity-60 hover:h-2".into());
+    let mut theme = ScrollbarTheme::default();
+    theme.mode = ScrollbarMode::Hover;
+    theme.motion.enter = 300.0;
+    theme.motion.exit = 500.0;
+    theme.vertical = Some(vertical);
+    theme.horizontal = Some(horizontal);
+    set_scrollbar_theme(Some(theme));
+}
+```
+
+```tsx tabs
+import { Scrollbar } from "nsh/base";
+
+Scrollbar.setTheme({
+  mode: "hover",
+  motion: { enter: 300, exit: 500 },
+  vertical: {
+    class: "absolute inset-y-0 right-0 w-4 items-end p-1",
+    thumbClass: "w-1.5 rounded-full bg-muted-foreground opacity-60 transition-all duration-300 hover:w-2",
+  },
+  horizontal: {
+    class: "absolute inset-x-0 bottom-0 h-4 items-end p-1",
+    thumbClass: "h-1.5 rounded-full bg-muted-foreground opacity-60 transition-all duration-300 hover:h-2",
+  },
+});
+```
+
+`ScrollbarTheme` 包含所有视图共用的滚动条属性，以及每个方向的外观：
+
+| 字段 | 类型 | 默认值 | 说明 |
+|---|---|---|---|
+| `mode` | `"scrolling" \| "hover" \| "always"` | `"scrolling"` | 滚动条何时显示：见[何时显示](#何时显示)。 |
+| `motion` | `ScrollbarMotion` | 立即出现，`idle` 为 `2000` | 如何显示和隐藏：见[动效](#动效)。 |
+| `minThumbLength` | `number` | `48` | 滑块的最短长度。 |
+| `vertical`、`horizontal` | `ScrollbarLook` | 无 | 纵向视图和横向视图的滚动条外观：轨道的 `class` 和 `style`（放在视图的视口中）、`thumbClass` 和 `thumbStyle`、`accessibilityLabel`。没有对应方向外观的视图保留平台的滚动指示器。 |
+
+之后再调用 `setTheme` 会重新设置这些滚动条的样式，`Scrollbar.setTheme(null)` 让视图恢复平台的滚动指示器。单个视图可以用
+`scrollbar` 属性设置自己的主题（`<Scroll scrollbar={{ mode: "always", vertical: { … } }}>`），无论应用是否设置了主题；
+`scrollbar={false}` 让视图没有滚动条。在父视图视口中布局的列表（`viewport="parent"`）随那个视图及其滚动条一起滚动。
 
 ## 它滚动的滚动视图
 

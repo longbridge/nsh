@@ -7,12 +7,23 @@
 // the target scrolls, until `motion.idle` after), hidden taking no presses,
 // and
 // is labelled for screen readers (`accessibilityLabel`). The app's look of
-// its track (`class`) and thumb (`thumbClass`, `thumbStyle`). Where the
-// target is told to scroll is how its script sees the presses.
-import { Scroll, View, type YNode } from "nsh";
-import { Scrollbar } from "nsh/base";
+// its track (`class`) and thumb (`thumbClass`, `thumbStyle`). Built in: a
+// scroll view whose `scrollbar` is a theme of its own (`ScrollbarTheme`)
+// shows that bar over its viewport, and `Scrollbar.setTheme` gives every
+// scroll view whose `scrollbar` is `true` the app's (`null` takes it back).
+// Where the target is told to scroll is how its script sees the presses.
+import { cleanup, Scroll, View, type YNode } from "nsh";
+import { Scrollbar, type ScrollbarLook } from "nsh/base";
+
+const look = (label: string): ScrollbarLook => ({
+  class: "absolute inset-y-0 right-0 w-[10px]",
+  thumbClass: "w-full",
+  accessibilityLabel: label,
+});
 
 function App() {
+  Scrollbar.setTheme({ mode: "always", vertical: look("App") });
+  cleanup(() => Scrollbar.setTheme(null));
   let pages: YNode | undefined;
   let feed: YNode | undefined;
   let strip: YNode | undefined;
@@ -56,6 +67,16 @@ function App() {
           class="absolute inset-x-0 bottom-0 h-[6px]"
           thumbClass="h-full"
         />
+      </View>
+      <View style={{ width: 300, height: 100 }}>
+        <Scroll testID="own" scrollbar={{ mode: "always", vertical: look("Own") }} style={{ flex: 1 }}>
+          <View style={{ height: 1000 }} />
+        </Scroll>
+      </View>
+      <View style={{ width: 300, height: 100 }}>
+        <Scroll testID="app" style={{ flex: 1 }}>
+          <View style={{ height: 1000 }} />
+        </Scroll>
       </View>
     </View>
   );

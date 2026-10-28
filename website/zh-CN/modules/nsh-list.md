@@ -113,7 +113,7 @@ interface ViewabilityConfig {
 
 | 属性 | 类型 | 默认值 | 说明 |
 |---|---|---|---|
-| `scrollbar` | `boolean` | `true` | 显示滚动条。 |
+| `scrollbar` | `boolean \| ScrollbarTheme` | `true` | 显示滚动条：平台的滚动指示器，或应用的[内置滚动条](../elements/scrollbar.md#内置滚动条)；对象是该视图自己的主题。 |
 | `scrollable` | `boolean` | `true` | 用户可以滚动。 |
 | `bounces` | `boolean` | `true` | 允许越过边缘回弹。 |
 | `pagingEnabled` | `boolean` | `false` | 按视口长度的整数倍停靠。 |

@@ -11,7 +11,10 @@ use std::{
     time::Duration,
 };
 
-use nsh_base::{ScrollbarEntrance, ScrollbarMode, ScrollbarMotion, scrollbar};
+use nsh_base::{
+    ScrollbarEntrance, ScrollbarLook, ScrollbarMode, ScrollbarMotion, ScrollbarTheme, scrollbar,
+    set_scrollbar_theme,
+};
 use nsh_core::{
     MountItem, NodeId, Size, Transform,
     animation::{AnimationOp, AnimationProp, Driver},
@@ -310,4 +313,93 @@ fn an_always_bar_never_fades() {
 fn it_never_shows_while_the_content_fits() {
     let (_, seen) = start(ScrollbarMode::Always, 150.0);
     assert!(!seen.shown());
+}
+
+#[derive(Clone, PartialEq, Props)]
+struct BuiltInProps {
+    /// A list rather than a scroll view.
+    list: bool,
+}
+
+/// A scroll view (or a list of 20 rows of 50) 300 by 200 of 1000 points,
+/// in an app that draws every bar: an `always` bar 10 wide over the right
+/// edge, labelled `Bar`; the offset it last reported.
+#[component]
+fn BuiltIn(props: BuiltInProps) -> impl IntoElement {
+    let mut look = ScrollbarLook::default();
+    look.class = Some("absolute top-0 right-0 bottom-0 w-[10px]".into());
+    look.thumb_class = Some("w-full".into());
+    look.accessibility_label = Some("Bar".into());
+    let mut theme = ScrollbarTheme::default();
+    theme.mode = ScrollbarMode::Always;
+    theme.min_thumb_length = px(24.0);
+    theme.vertical = Some(look);
+    set_scrollbar_theme(Some(theme));
+    let offset = signal(0.0_f32);
+    let on_scroll = move |e: &ScrollEvent| offset.set(e.offset.y.0);
+    let view_of = if props.list {
+        virtual_list(20, |_| view().h(px(50.0)))
+            .test_id("content")
+            .w(px(300.0))
+            .h(px(200.0))
+            .on_scroll(on_scroll)
+            .into_element()
+    } else {
+        scroll()
+            .test_id("content")
+            .w(px(300.0))
+            .h(px(200.0))
+            .on_scroll(on_scroll)
+            .child(view().w_full().h(px(1000.0)))
+            .into_element()
+    };
+    view()
+        .child(view_of)
+        .child(text(move || format!("Offset {}", offset.get().round())))
+}
+
+/// [`BuiltIn`] headless; whether each scroll view's platform indicator
+/// shows, as last sent.
+fn start_built_in(list: bool) -> (Headless, Arc<Mutex<HashMap<NodeId, bool>>>) {
+    let mut config = EngineConfig {
+        viewport: Size::new(px(400.0), px(844.0)),
+        ..EngineConfig::new(Root::new::<BuiltIn>(move || BuiltInProps { list }))
+    };
+    config.environment.os = Os::MacOs;
+    let mut app = Headless::start(config).expect("the engine starts");
+    let indicators = Arc::new(Mutex::new(HashMap::new()));
+    let record = indicators.clone();
+    app.observe(move |_, batch| {
+        for item in &batch.items {
+            if let MountItem::ScrollConfig {
+                id,
+                scrollbar_visible,
+                ..
+            } = item
+            {
+                record.lock().unwrap().insert(*id, *scrollbar_visible);
+            }
+        }
+    });
+    app.wait_for("text:Offset 0").unwrap();
+    (app, indicators)
+}
+
+#[test]
+fn a_built_in_bar_scrolls_its_view_in_place_of_the_indicator() {
+    let (mut app, indicators) = start_built_in(false);
+    // The thumb is 40 of the track's 200 and travels 160 over 800 points.
+    app.drag("label:Bar", point(px(0.0), px(40.0))).unwrap();
+    app.wait_for("text:Offset 600").unwrap();
+    let indicators = indicators.lock().unwrap();
+    assert_eq!(indicators.values().copied().collect::<Vec<_>>(), [false]);
+}
+
+#[test]
+fn a_list_has_its_built_in_bar_too() {
+    let (mut app, indicators) = start_built_in(true);
+    app.drag("label:Bar", point(px(0.0), px(40.0))).unwrap();
+    app.wait_for("text:Offset 600").unwrap();
+    let indicators = indicators.lock().unwrap();
+    assert_eq!(indicators.values().copied().collect::<Vec<_>>(), [false]);
 }

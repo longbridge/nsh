@@ -704,7 +704,7 @@ impl Scroll {
 
     /// Whether the scroll indicator shows (default yes).
     pub fn scrollbar(self, shows: impl IntoReactive<bool>) -> Self {
-        self.bind_prop(shows, |shows: bool| Prop::Scrollbar(shows))
+        self.bind_prop(shows, |shows: bool| Prop::Scrollbar(shows.into()))
     }
 
     /// Pinch zoom between `min` and `max`.
