@@ -137,8 +137,8 @@ so the app verifies the code there.
 | The caret | the empty cell that takes the next digit, while the input has the focus | `caretClass`, `caretStyle` |
 
 The cell that takes the next digit is the one after the last digit, or the last cell once the code is full. The
-caret blinks as a text field's does (half a second on, half off, and steady for a moment after each edit); with
-reduced motion it stays still. A press anywhere on the input focuses it: the field lies over the cells.
+caret blinks as a text field's does (half a second on, half off, and steady for a moment after each edit), by its
+opacity, natively, while it keeps its place in the layout; with reduced motion it stays still. A press anywhere on the input focuses it: the field lies over the cells.
 
 ## Accessibility
 

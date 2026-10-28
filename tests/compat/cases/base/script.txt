@@ -1083,12 +1083,13 @@ type label:Code 12a
 expect Code [12]
 prop label:Code value 12
 # The focus: the caret (50 high, 4 below the cell's top) in the cell that
-# takes the next digit, gone while it blinks off.
+# takes the next digit; it stays while it blinks (its opacity moves
+# natively), so the layout holds still.
 event label:Code onFocus
 expect Focused yes
 frame id:otp 0 20 390 60
 wait 600
-frame id:otp 0 20 390 26
+frame id:otp 0 20 390 60
 # Up to the length: complete, the last cell `focus:`.
 type label:Code 345
 expect Code [1234]

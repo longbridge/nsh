@@ -504,74 +504,58 @@ pub(crate) fn field(
         }
     };
 
-    // The keys while the field has the focus.
+    // The keys while the field has the focus: bound again only when the
+    // focus or `disabled` change, not on every edit.
     let keys_edit = edit.clone();
     effect(move || {
         if !focused.get() || config.disabled.get() {
             return;
         }
-        let bind = |key: &str, repeat: bool, f: Rc<dyn Fn()>| {
-            on_key_with(
-                key,
-                KeyOptions {
-                    when: When::Always,
-                    repeat,
-                },
-                move |_| f(),
-            );
-        };
         let up = keys_edit.clone();
-        bind("up", true, Rc::new(move || up(&|e| e.step(1))));
+        bind_key("up", true, move || up(&|e| e.step(1)));
         let down = keys_edit.clone();
-        bind("down", true, Rc::new(move || down(&|e| e.step(-1))));
-        bind(
-            "left",
-            true,
-            Rc::new(move || {
-                editor.update(|e| {
-                    e.move_segment(-1);
-                })
-            }),
-        );
-        bind(
-            "right",
-            true,
-            Rc::new(move || {
-                editor.update(|e| {
-                    e.move_segment(1);
-                })
-            }),
-        );
-        // Tab walks the segments, and leaves the field from the last one
-        // (the first one for Shift+Tab): unbound there.
-        let (first, last) = editor.with(|e| {
+        bind_key("down", true, move || down(&|e| e.step(-1)));
+        bind_key("left", true, move || {
+            editor.update(|e| {
+                e.move_segment(-1);
+            })
+        });
+        bind_key("right", true, move || {
+            editor.update(|e| {
+                e.move_segment(1);
+            })
+        });
+    });
+    // Tab walks the segments, and leaves the field from the last one (the
+    // first one for Shift+Tab): unbound there. Bound again only when the
+    // selection reaches or leaves an end.
+    let ends = computed(move || {
+        editor.with(|e| {
             let segments = e.segments();
             (
                 segments.first() == Some(&e.segment),
                 segments.last() == Some(&e.segment),
             )
-        });
+        })
+    });
+    effect(move || {
+        if !focused.get() || config.disabled.get() {
+            return;
+        }
+        let (first, last) = ends.get();
         if !last {
-            bind(
-                "tab",
-                false,
-                Rc::new(move || {
-                    editor.update(|e| {
-                        e.move_segment(1);
-                    })
-                }),
-            );
+            bind_key("tab", false, move || {
+                editor.update(|e| {
+                    e.move_segment(1);
+                })
+            });
         }
         if !first {
-            bind(
-                "shift+tab",
-                false,
-                Rc::new(move || {
-                    editor.update(|e| {
-                        e.move_segment(-1);
-                    })
-                }),
-            );
+            bind_key("shift+tab", false, move || {
+                editor.update(|e| {
+                    e.move_segment(-1);
+                })
+            });
         }
     });
 
@@ -602,9 +586,12 @@ pub(crate) fn field(
         .on_blur(move || focused.set(false))
         .into_element();
 
+    // The segments change with the precision and the hour cycle only: an
+    // edit updates their texts, it makes no views.
+    let list = computed(move || editor.with(|e| e.segments()));
     let segments = dynamic(move || {
         let edit = edit.clone();
-        let list = editor.with(|e| e.segments());
+        let list = list.get();
         let mut out = Vec::with_capacity(list.len() * 2);
         for (ix, &segment) in list.iter().enumerate() {
             if ix > 0 && segment != TimeSegment::Period {
@@ -629,6 +616,18 @@ pub(crate) fn field(
         out
     });
     vec![native, segments]
+}
+
+/// Binds `key` while the current owner lives, firing on any focus.
+fn bind_key(key: &str, repeat: bool, f: impl Fn() + 'static) {
+    on_key_with(
+        key,
+        KeyOptions {
+            when: When::Always,
+            repeat,
+        },
+        move |_| f(),
+    );
 }
 
 /// A segment: the app's `renderSegment`, else its label.
