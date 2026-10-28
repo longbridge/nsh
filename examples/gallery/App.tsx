@@ -1,4 +1,4 @@
-import { type Bounds, computed, effect, type InputRef, mount, Scroll, signal, Text, untracked, View, type YNode } from "nsh";
+import { type Bounds, computed, effect, type InputRef, mount, Scroll, signal, Text, untracked, View, type ScrollRef } from "nsh";
 import { Animated, createAnimatedValue, Easing } from "nsh";
 import { platform, windowSize } from "nsh";
 import { isAvailable as hasWindow, titleBar, Window } from "nsh/desktop";
@@ -281,7 +281,7 @@ function Search() {
  */
 function DemoList() {
   const focused = signal(false);
-  let scroller: YNode | undefined;
+  let scroller: ScrollRef | undefined;
   // The offset and the height the list shows, and where each group and
   // each demo in its group is: what scrolls the selected demo into view.
   let offset = 0;
