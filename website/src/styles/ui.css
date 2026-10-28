@@ -67,7 +67,9 @@
   border-color: var(--nsh-gallery-finish-pressed-border-color);
   background-color: var(--nsh-gallery-finish-pressed-background-color);
   background-image: var(--nsh-gallery-finish-pressed-background-image);
-  @apply shadow-(--nsh-gallery-finish-pressed-box-shadow);
+  /* A pointer's press only shades and shrinks it (`[data-slot="button"]`),
+     the primary's as well; an inner shadow would sink it too far. */
+  @apply shadow-(--nsh-gallery-finish-raised-box-shadow);
 }
 @utility finish-primary {
   border-color: var(--nsh-gallery-finish-light-border-color);
@@ -108,7 +110,7 @@
    -------------------------------------------------------------------- */
 
 [data-slot="button"] {
-  @apply inline-flex shrink-0 cursor-pointer items-center justify-center gap-2 rounded-md border border-transparent text-sm font-medium whitespace-nowrap no-underline transition-[color,background-color,border-color,box-shadow,opacity] duration-150 select-none focus-ring disabled:pointer-events-none disabled:opacity-50 aria-disabled:pointer-events-none aria-disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4;
+  @apply inline-flex shrink-0 cursor-pointer items-center justify-center gap-2 rounded-md border border-transparent text-sm font-medium whitespace-nowrap no-underline transition-[color,background-color,border-color,box-shadow,opacity,scale] duration-150 select-none active:scale-[0.97] focus-ring disabled:pointer-events-none disabled:opacity-50 aria-disabled:pointer-events-none aria-disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4;
   font-family: inherit;
   line-height: 1;
   color: var(--foreground);
