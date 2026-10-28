@@ -129,12 +129,12 @@ fn paste_is_one_edit_and_selection_uses_utf16_while_cells_use_display_width() {
     let (mut view, mut terminal, rx) = field("maxLength={7}");
     view.handle(Input::Paste("界🙂e\u{301}abc".into()));
     draw_until(&mut view, &mut terminal, &rx, "changes:1 sel:7-7");
-    terminal.backend_mut().assert_cursor_position((7, 0));
+    terminal.backend_mut().assert_cursor_position((7, 1));
     view.handle(modified("Left", false, false, true));
     view.handle(modified("Left", false, false, true));
     draw_until(&mut view, &mut terminal, &rx, "sel:5-7");
     assert!(
-        terminal.backend().buffer()[(5, 0)]
+        terminal.backend().buffer()[(5, 1)]
             .modifier
             .contains(ratatui_core::style::Modifier::REVERSED)
     );
@@ -164,17 +164,17 @@ fn placeholder_and_masked_text_draw_in_the_content_box_and_click_places_the_care
     let (mut view, mut terminal, rx) = field("placeholder=\"Password\" masked");
     draw_until(&mut view, &mut terminal, &rx, "Password");
     assert_eq!(
-        terminal.backend().buffer()[(0, 0)].fg,
+        terminal.backend().buffer()[(0, 1)].fg,
         ratatui_core::style::Color::Rgb(0x12, 0x34, 0x56)
     );
     view.handle(Input::Paste("界🙂abc".into()));
     draw_until(&mut view, &mut terminal, &rx, "•••••");
-    terminal.backend_mut().assert_cursor_position((5, 0));
+    terminal.backend_mut().assert_cursor_position((5, 1));
     for kind in [
         nsh_platform_tui::MouseKind::Down(nsh_platform_tui::MouseButton::Left),
         nsh_platform_tui::MouseKind::Up(nsh_platform_tui::MouseButton::Left),
     ] {
-        view.handle(super::app::mouse(kind, 2, 0));
+        view.handle(super::app::mouse(kind, 2, 1));
     }
     view.handle(key("X"));
     draw_until_text(&mut view, &mut terminal, &rx, "\"界🙂Xabc\"");
@@ -185,14 +185,14 @@ fn a_long_field_scrolls_the_caret_into_view_and_home_reveals_the_start() {
     let (mut view, mut terminal, rx) = field("");
     view.handle(Input::Paste("01234567890123456789012345".into()));
     draw_until(&mut view, &mut terminal, &rx, "changes:1");
-    terminal.backend_mut().assert_cursor_position((19, 0));
-    assert_eq!(terminal.backend().buffer()[(0, 0)].symbol(), "7");
+    terminal.backend_mut().assert_cursor_position((19, 1));
+    assert_eq!(terminal.backend().buffer()[(0, 1)].symbol(), "7");
     view.handle(key("Home"));
     terminal
         .draw(|frame| view.render(frame, frame.area()))
         .unwrap();
-    terminal.backend_mut().assert_cursor_position((0, 0));
-    assert_eq!(terminal.backend().buffer()[(0, 0)].symbol(), "0");
+    terminal.backend_mut().assert_cursor_position((0, 1));
+    assert_eq!(terminal.backend().buffer()[(0, 1)].symbol(), "0");
 }
 
 #[test]
@@ -207,7 +207,7 @@ fn dragging_selects_text_and_replacing_it_is_one_edit() {
         (MouseKind::Move, 4),
         (MouseKind::Up(Left), 4),
     ] {
-        view.handle(super::app::mouse(kind, column, 0));
+        view.handle(super::app::mouse(kind, column, 1));
     }
     draw_until(&mut view, &mut terminal, &rx, "sel:1-4");
     view.handle(Input::Paste("X".into()));
@@ -369,10 +369,10 @@ fn wide_input_glyphs_do_not_emit_spaces_over_their_continuation_cells() {
     draw_until(&mut view, &mut terminal, &rx, "changes:1");
     let buffer = terminal.backend().buffer();
     let mut previous = ratatui_core::buffer::Buffer::empty(buffer.area);
-    previous.set_string(0, 0, "abcdef", ratatui_core::style::Style::default());
+    previous.set_string(0, 1, "abcdef", ratatui_core::style::Style::default());
     let updates: Vec<_> = previous
         .diff_iter(buffer)
-        .filter(|(_, y, _)| *y == 0)
+        .filter(|(_, y, _)| *y == 1)
         .map(|(x, _, cell)| (x, cell.symbol().to_owned()))
         .collect();
     assert!(updates.contains(&(0, "界".to_owned())));
@@ -400,4 +400,45 @@ fn readline_words_and_whitespace_kills_keep_their_distinct_boundaries() {
     view.handle(modified("w", true, false, false));
     view.handle(modified("w", true, false, false));
     draw_until(&mut view, &mut terminal, &rx, "\"\"");
+}
+
+#[test]
+fn single_line_text_and_caret_stay_inside_the_form_focus_border() {
+    let code = nsh_bundler::compile_module("Form.tsx", r##"
+        import { mount, signal, View, Text } from 'nsh';
+        import { Input } from 'nsh/base';
+        const focused = signal(false);
+        mount(() => <View style={{ padding: 16 }}>
+            <View style={{ width: 240, flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: '#888888' }}>
+                <Input placeholder="Name" onFocus={() => focused.set(true)} onBlur={() => focused.set(false)}
+                    style={{ flex: 1, height: 46, paddingHorizontal: 14 }} />
+                <View style={{ position: 'absolute', top: -1, left: -1, right: -1, bottom: -1,
+                    borderWidth: 2, borderColor: '#123456', pointerEvents: 'none', opacity: focused() ? 1 : 0 }} />
+            </View>
+            <Text>{focused() ? 'focused' : 'blurred'}</Text>
+        </View>);
+    "##, &[]).unwrap();
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(40, 10)).unwrap();
+    view.load(Bundle::source(code)).unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "blurred");
+    assert_eq!(terminal.backend().buffer()[(4, 2)].symbol(), "N");
+    view.handle(key("Tab"));
+    draw_until(&mut view, &mut terminal, &rx, "focused");
+    terminal.backend_mut().assert_cursor_position((4, 2));
+    view.handle(Input::Paste("Audit".into()));
+    draw_until(&mut view, &mut terminal, &rx, "Audit");
+    terminal.backend_mut().assert_cursor_position((9, 2));
+    for kind in [
+        nsh_platform_tui::MouseKind::Down(nsh_platform_tui::MouseButton::Left),
+        nsh_platform_tui::MouseKind::Up(nsh_platform_tui::MouseButton::Left),
+    ] {
+        view.handle(super::app::mouse(kind, 6, 2));
+    }
+    view.handle(key("X"));
+    draw_until(&mut view, &mut terminal, &rx, "AuXdit");
+    terminal.backend_mut().assert_cursor_position((7, 2));
+    view.handle(key("Escape"));
+    draw_until(&mut view, &mut terminal, &rx, "blurred");
+    assert_eq!(terminal.backend().buffer()[(4, 2)].symbol(), "A");
 }

@@ -37,7 +37,9 @@ A source bundle can also be loaded directly:
 ./target/debug/nsh-tui-host --dev-server ws://127.0.0.1:8790/ws
 ```
 
-`--bundle` reads the adjacent source map and capability metadata. Bytecode files require the trusted-resource
+`--bundle` reads the adjacent source map and capability metadata. Its `asset:/` resources resolve inside the
+adjacent `assets/` directory; bundled fonts load successfully while text uses the terminal font. An embedding
+app can supply its own `AppOptions::assets` reader. Bytecode files require the trusted-resource
 or verified-package path, owned by the packaging work. Direct hosts without `--log-file` keep diagnostics in
 `nsh-tui-host-<pid>.log` in the system temporary directory, visible through the same panel. `--trace` includes
 the engine's timing logs; app `console.log` output is recorded with or without it. `--data-dir` selects persistent
@@ -288,7 +290,11 @@ it can change a sub-Cell gap, while layout remains the core's. Text measurement 
 fit within a point width; that capacity calculation is separate from positioning edges.
 
 `CellTextEngine` counts Unicode display width: wide characters take two Cells and grapheme clusters stay whole.
-Every line is one row at any font size. Wrapping prefers spaces, then breaks inside a word. Explicit newlines
+Ordinary text occupies one row at any font size. Inline attachments reserve their width in whole Cells
+and grow the line to hold their height; baseline, text-top, text-bottom and middle alignment use Cell font metrics.
+Their child views draw and receive input in the reserved space, and attachments removed by truncation stay hidden.
+Wrapping prefers spaces after content, then breaks inside a word. Leading indentation stays with the first part
+of the word instead of becoming a separate whitespace-only row. Explicit newlines
 preserve empty rows. A grapheme wider than the available line remains whole and is clipped by drawing.
 `numberOfLines` limits the rows; tail, head and middle ellipses reserve one Cell, while clip adds no marker.
 Alignment becomes a whole-Cell indent. Line geometry reports UTF-16 offsets and point dimensions, as the core's
@@ -586,6 +592,11 @@ The layout retains each painted grapheme's UTF-16 range, including wide characte
 uses original text and joins paragraphs with newlines. Highlights stay within clipped text Cells and below
 covering views. Removed text endpoints clear the selection through the shared model.
 
+## Syntax highlighting
+
+The terminal runtime enables `nsh-base`'s built-in highlighting, as the desktop backends do.
+Editor, DiffView and TextView code blocks retain their language token colors in both appearances.
+
 ## Text fields
 
 `text_input.rs` keeps one `nsh_core::text_edit::Model` per Input. The core model owns the text, byte selection,
@@ -631,7 +642,9 @@ C-w treats punctuation within a whitespace-delimited word as part of that word. 
 core's character boundaries, then use the core Model for selection and deletion.
 
 The app's `InputContent` box defines padding and border offsets. Text is a Paragraph with the app's text style;
-empty fields show the placeholder and its color. Graphemes stay whole; wide graphemes occupy their display width,
+empty fields show the placeholder and its color. Single-line fields center their text and caret vertically
+in that content box; drawing, selection and pointer placement use the same row. Multiline fields begin at its top.
+Graphemes stay whole; wide graphemes occupy their display width,
 multiline fields wrap at Cell boundaries, and single-line fields scroll horizontally. The field scrolls its caret
 into sight vertically and horizontally. Selected glyphs are reversed. Masked fields show one `•` per grapheme and
 do not export their selection through copy/cut. `AppView::render` places the terminal cursor at the caret;
@@ -672,11 +685,13 @@ permit clipboard writes; `nsh test` uses memory and never writes to the machine'
 | Mouse drags | Native pan values, responder moves and bounded content scrolling |
 | Selectable text | Reversed grapheme Cells; copies use the shared clipboard and OSC 52 |
 | Pointer precision | One terminal Cell, converted to its center in points |
-| Input | Editable Paragraph, reversed selection and terminal caret; masked text is dots |
+| Input | Editable Paragraph, reversed selection and terminal caret; single-line text and caret centered in the content box; masked text is dots |
 | Searching the screen | The Minibuffer over the bottom row and the match's Cells reversed, only while searching |
 | Input-method composition | Terminal emulator composition, committed text delivered to the field |
 | Clipboard | OSC 52 writes, desktop reads when available and an in-process copy |
-| Font size, family, line height and letter spacing | Terminal font, display width and one row per line |
+| Syntax highlighting | The built-in Editor, DiffView and TextView token colors |
+| Inline attachments, mentions and inline math | Measured child content placed in whole Cells, wrapping with the surrounding text |
+| Font size, family, line height and letter spacing | Terminal font, display width and one row per line; direct bundles read imported fonts from adjacent `assets/` |
 | Shadows, blur, materials, gradients, 3D transforms and blend modes | Decorative features left out silently in this slice |
 | Native animated values | Host-frame opacity, background/border/text colors, transforms and canvas slots; completion and cancellation reported |
 | 2D view transforms | Composed positions and axis-aligned Cell extents; upright terminal glyphs and Cell-aligned borders |
