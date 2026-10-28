@@ -1,13 +1,14 @@
 // The Charts demo: charts an app builds from `nsh/base/plot`'s parts and
 // its own views. A live price streamed a tick a second that pauses and
-// resumes, an order book's depth whose side under the pointer is read out
+// resumes, its window's high written over it and its last price tagged, an order book's depth whose side under the pointer is read out
 // and whose range changes, a drawdown whose day under the pointer or the
 // arrow keys is read out over both of its plots, capacity rings by period,
 // a donut of revenue that reports the slice under the pointer (none in its
 // hole) or the arrow keys and closes into a pie with its shares written
-// outside, sales as bars side by side or stacked, and a quarter's income
-// as flows between its accounts, read out under the arrow keys and moving
-// into the next quarter's.
+// outside, sales as bars side by side or stacked, a radar of factor
+// exposure that reads out the factor nearest the pointer and changes its
+// benchmark, and a quarter's income as flows between its accounts, read
+// out under the arrow keys and moving into the next quarter's.
 import { beforeEach, expect, open, test } from "nsh/test";
 import type { App } from "nsh/test";
 
@@ -61,6 +62,20 @@ test("the live price ticks every second until it is paused", async () => {
   expect(price()).toBe(paused);
   await app.press("Resume");
   await app.waitFor("LIVE");
+});
+
+test("the live price writes its window's high over it and tags its last price", async () => {
+  const after = (label: string) => {
+    const texts = app.texts();
+    return texts[texts.indexOf(label) + 1];
+  };
+  // Over the line, the high the figures under it read; at the line's end,
+  // the price the card's figure reads.
+  expect(app.texts()).toContain(`High ${after("HIGH")}`);
+  expect(app.texts().filter((t) => t === price()).length).toBeGreaterThanOrEqual(2);
+  await app.clock.runFor(3000);
+  expect(app.texts()).toContain(`High ${after("HIGH")}`);
+  expect(app.texts().filter((t) => t === price()).length).toBeGreaterThanOrEqual(2);
 });
 
 test("the depth reads out the side under the pointer and changes its range", async () => {
@@ -155,6 +170,22 @@ test("bars stand in bands side by side or stacked, a value over each", async () 
   await app.press("role:tab[Stacked]");
   await app.waitFor("96");
   expect(app.texts()).not.toContain("63");
+});
+
+test("the radar reads out the factor nearest the pointer and changes its benchmark", async () => {
+  // Nothing hovered: the means of all six, the portfolio's (362 / 6) a
+  // figure of its own, and its spread over the index's (327 / 6 = 54.5).
+  expect(app.texts()).toContain("ALL SIX FACTORS");
+  expect(app.texts()).toContain("60.3");
+  expect(app.texts()).toContain("+5.8");
+  // Against the peers (371 / 6): the spread turns negative.
+  await app.press("role:tab[vs Peers]");
+  await app.waitFor("−1.5");
+  // The middle of the radar: the factor whose spoke is nearest the pointer's
+  // angle there (which one depends on where the pointer lands within a point
+  // of it), its name read out.
+  await app.hover("label:/^Factor exposure against the peers/");
+  await app.waitFor("text:/^(VALUE|MOMENTUM|QUALITY|SIZE|LOW VOL|YIELD)$/");
 });
 
 test("a quarter's income flows from its segments to net income, and into the next quarter's", async () => {
