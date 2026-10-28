@@ -750,7 +750,11 @@ browsers' touches into what phones report:
   (`windowSize()`) and `env(keyboard-inset-height)` stay the container's.
   In an iframe the player elevates the iframe itself to a manual popover in its host document, preserving
   its DOM and running engine. It pins the app at its original size and scaled position while the modal root
-  fills the enlarged iframe. Same-origin ancestor frames are elevated together; a cross-origin immediate
+  fills the enlarged iframe. When the host shows the iframe scaled (the website's phone and desktop frames), each
+  layer keeps the app's scale (`scaleLayer`): it is laid out at the window's size divided by that scale and drawn
+  with CSS `scale`, so a dialog is as large as in the app; its safe area and pointer positions are divided by the
+  scale too (`layerScale`, `corner`). The lifted iframe takes its document's color scheme (`usedColorScheme`,
+  sent with the request): a browser paints an iframe whose scheme differs from its document's opaque. Same-origin ancestor frames are elevated together; a cross-origin immediate
   host registers `hostPlayerFrame(iframe)` and accepts requests only from that frame's window through a
   transferred MessagePort. Install this host before loading the player. The last layer's removal, stop,
   navigation or frame removal releases the host's size, focus, inert state and scroll lock. A host that

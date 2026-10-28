@@ -465,7 +465,10 @@ implements `Api`, the view registers it with `cx.methods(CounterApi { .. })` for
 `#[component(methods = CounterApi)]` (`Component::METHODS = Methods::of::<CounterApi>()`) names it in the spec, so the
 JS face builds the ref (`CounterRef`: `node` and the methods, typed from the Rust signatures and docs) with no TS
 written. A call converts its arguments in the JS call into a closure an op carries (`RustCall::Method`), so it runs
-in order with the props JS set before it, with the API the view registered. Its return type decides what TS gets:
+in order with the props JS set before it, with the API the view registered. JS gets the ref as the component is
+made, before its view is (that waits for the commit, and for the host to be in the tree): a call made then, from
+the ref callback, waits in the core for the view and runs right after it is made (one whose host goes first fails
+with its host). Its return type decides what TS gets:
 a method returning `()` gives `void`, with no reply (JS calls it and moves on, a wrong argument throws in the call);
 one returning `Result<(), E>` gives `Promise<void>` (rejected with the `Err`'s message: the method runs at the
 commit, after the JS call returned, so it cannot throw); one returning a value gives `Promise<T>` (a wrong argument

@@ -340,7 +340,7 @@ export class Values {
           case 46: this.edges?.push([a, b, c, number >>> 0]); return 0;
           // An object's keys as one string, apart by NUL (null when a key
           // holds one): a row of many fields crosses once.
-          case 48: { const keys = Object.keys(this.get(a)); return this.put(keys.some(k => k.includes("\0")) ? null : keys.join("\0")); }
+          case 50: { const keys = Object.keys(this.get(a)); return this.put(keys.some(k => k.includes("\0")) ? null : keys.join("\0")); }
           case 49: {
             const v = this.get(a);
             if (!number && !Array.isArray(v)) return NaN;

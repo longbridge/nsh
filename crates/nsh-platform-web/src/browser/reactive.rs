@@ -292,11 +292,19 @@ impl Runtime {
                 }
             }
             111 => {
+                // As QuickJS's `runWithOwner` (and Solid's): an owner that
+                // went runs `func` unowned. A view's listeners run under the
+                // owner it was made under, which may be gone while the view
+                // still reports events (a popup leaving with its exit
+                // motion, a component's view made under a render effect).
                 let handle = args.index(0)?;
                 let owner = if handle.is_nullish() {
                     r::UNOWNED
                 } else {
-                    self.node(&handle)?
+                    match self.node(&handle) {
+                        Ok(id) if !unsafe { h.graph() }.disposed(id) => id,
+                        _ => r::UNOWNED,
+                    }
                 };
                 let func = args.index(1)?;
                 r::with_owner(h, owner, || func.call(&Value(0), &Value::array([])?))

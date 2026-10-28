@@ -6610,6 +6610,82 @@ mod components {
         );
     }
 
+    #[test]
+    fn a_method_called_before_the_view_is_made_waits_for_it() {
+        use crate::element::{RustCall, RustOp, json_host::JsonHost};
+        let mut c = core();
+        let mut registry = Registry::new();
+        registry.register::<Knob>();
+        c.set_components(registry);
+        let methods = <KnobApi as crate::element::Api>::METHODS;
+        let turn = |by: i32| {
+            let Ok(run) = (methods[0].call)(&JsonHost::with_args(vec![json!(by)])) else {
+                panic!("converts")
+            };
+            run
+        };
+        // As a ref callback calls it: the component is made, its view is
+        // not yet (it is not in the tree).
+        apply(
+            &mut c,
+            vec![
+                Op::Create {
+                    id: 2,
+                    tag: Tag::View,
+                },
+                Op::SetProp {
+                    id: 2,
+                    prop: Prop::Component(std::any::type_name::<Knob>().into()),
+                },
+                Op::Rust(RustOp {
+                    call: 1,
+                    run: RustCall::Method(2, turn(2)),
+                }),
+                Op::Insert {
+                    parent: ROOT_ID,
+                    child: 2,
+                    before: None,
+                },
+            ],
+        );
+        assert_eq!(texts(&c.commit().unwrap()), ["at 2"]);
+        // One that never gets its view fails as its host goes.
+        apply(
+            &mut c,
+            vec![
+                Op::Create {
+                    id: 4,
+                    tag: Tag::View,
+                },
+                Op::SetProp {
+                    id: 4,
+                    prop: Prop::Component(std::any::type_name::<Knob>().into()),
+                },
+                Op::Rust(RustOp {
+                    call: 2,
+                    run: RustCall::Method(4, turn(1)),
+                }),
+            ],
+        );
+        let _ = c.commit();
+        apply(&mut c, vec![Op::Release { id: 4 }]);
+        let _ = c.commit();
+        let replies: Vec<_> = js_events(&mut c)
+            .into_iter()
+            .map(|(_, _, payload)| match payload {
+                EventPayload::Native { data, .. } => data,
+                other => panic!("{other:?}"),
+            })
+            .collect();
+        assert_eq!(
+            replies,
+            [
+                json!({ "c": 1, "v": 2 }),
+                json!({ "c": 2, "e": "node 4 hosts no Rust component" }),
+            ]
+        );
+    }
+
     thread_local! {
         /// The runs of `Echo`'s text binding.
         static ECHOES: Cell<usize> = const { Cell::new(0) };

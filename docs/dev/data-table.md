@@ -22,15 +22,17 @@ supplies padding, colors, borders and state feedback through `classes` and `styl
 
 ## Layers
 
-The table is a hit layer, a body and a header (`view.rs`):
+The table is a body, a hit layer over it and a header (`view.rs`), from the bottom:
 
-- the *hit layer* is a vertical scroll view of a horizontal one of an empty box of the content's size. The platforms
-  scroll it as they scroll any scroll view (inertia, scroll bars, wheel, touch), and its box takes presses, hovers and
-  the context menu;
-- the *body* over it receives no pointer and draws the cells of the rows and columns in view, placed where the table
-  last scrolled to. Its regions are the row headers, the fixed columns (which move with the rows only) and the scrolling
+- the *body* receives no pointer and draws the cells of the rows and columns in view, placed where the table last
+  scrolled to. Its regions are the row headers, the fixed columns (which move with the rows only) and the scrolling
   columns (which move both ways). The cells a scroll needs come with the next commit, which moves the body with them;
-- the *header* above it is interactive: group labels, titles, resize handles and the drop line of a column being moved.
+- the *hit layer* over it is a vertical scroll view of a horizontal one of an empty box of the content's size. The
+  platforms scroll it as they scroll any scroll view (inertia, scroll bars, wheel, touch), and its box takes presses,
+  hovers and the context menu. It draws nothing but its scroll bars (the platform's indicator, or the built-in
+  `Scrollbar` of the app's theme, both the scroll view's own), which lie over the rows' backgrounds this way: with
+  the body above, a striped, hovered or selected row would cover the bar;
+- the *header* above them is interactive: group labels, titles, resize handles and the drop line of a column being moved.
 
 The fixed-column separator sits above each row background and below its cells, so app-supplied cell borders
 remain visible at the fixed boundary.
