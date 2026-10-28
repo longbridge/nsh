@@ -5752,6 +5752,167 @@ fn base_plot_arc_and_pie_move_on_from_the_angles_drawn() {
     assert!(near(ends[0], FRAC_PI_4) && near(ends[1], PI), "{ends:?}");
 }
 
+const BASE_PLOT_PIE_LABELS: &str = r##"import { mount, signal, Text, View } from "nsh";
+import { Pie, Plot } from "nsh/base/plot";
+
+type Row = { v: number; n: string };
+
+function App() {
+  const late = signal(false);
+  setTimeout(() => late.set(true), 100);
+  const rows = (): Row[] =>
+    late()
+      ? [{ v: 1, n: "a" }, { v: 1, n: "b" }, { v: 0, n: "c" }]
+      : [{ v: 1, n: "a" }, { v: 3, n: "b" }, { v: 0, n: "c" }];
+  return (
+    <View>
+      <Plot data={rows()} y="v" motion={{ update: { duration: 250 } }} style={{ width: 100, height: 100 }}>
+        <Pie
+          outerRadius={40}
+          label={(d: Row) => d.n}
+          labelGap={10}
+          labelClass="h-[10px] w-[20px]"
+          labelLineClass={(_: Row, i: number) => (i === 0 ? "stroke-[#ff0000]" : "stroke-[#0000ff]")}
+        />
+      </Plot>
+      <Plot data={[{ v: 1 }, { v: 3 }]} y="v" style={{ width: 100, height: 100 }}>
+        <Pie outerRadius={40} label="v" hoverLift={6} labelLineStyle={{ stroke: "#00ff00" }} />
+      </Plot>
+      <Text>{late() ? "late" : "early"}</Text>
+    </View>
+  );
+}
+
+mount(App);
+"##;
+
+/// A pie's labels (`gpui-component`'s `PieChart::label`): a text per
+/// slice whose text is not empty, outside the ring toward the slice's
+/// middle, `labelGap` past the rim, then across to that radius on the
+/// slice's side, the text after the line's end on the right half and
+/// before it on the left; the leader line, the app's `labelLine` part,
+/// from the rim to there, each in its own classes. The lines lift with
+/// their slices (`hoverLift`) and move with them over `motion.update`.
+#[test]
+fn base_plot_pie_labels_sit_outside_the_ring_with_leader_lines() {
+    use std::f32::consts::FRAC_1_SQRT_2;
+
+    use nsh_core::{
+        Color,
+        canvas::{CanvasOp, Num, Paint, PathOp},
+    };
+    let near = |a: f32, b: f32| (a - b).abs() < 1e-3;
+    // The leader lines of the plots' drawings: the view and the drawing
+    // of the one stroked in `color`.
+    let line = |all: &[MountBatch], color: u32| {
+        plot_drawings(all)
+            .into_iter()
+            .find(|(_, d)| {
+                drawn_arcs(&d.ops).is_empty()
+                    && d.ops
+                        .contains(&CanvasOp::StrokeStyle(Paint::Color(Color(color))))
+            })
+            .unwrap_or_else(|| panic!("a line stroked in {color:#x}"))
+    };
+    let starts = |d: &nsh_core::canvas::Drawing| {
+        d.ops.iter().find_map(|op| match op {
+            CanvasOp::Path(PathOp::MoveTo(x, y)) => Some((*x, *y)),
+            _ => None,
+        })
+    };
+
+    let (_engine, rx) = start(BASE_PLOT_PIE_LABELS);
+    let mut all = until(&rx, |b| shows(b, "late"));
+    let late = all.len() - 1;
+    all.extend(until(&rx, |_| false));
+    let before = &all[..late];
+    // Slice `a`, 12 to 3 o'clock: its middle up and right, the rim 40 out,
+    // the elbow 50, then across to 50 right of the center. Slice `b`, the
+    // rest: down and left, across to 50 left of it.
+    let (r, e) = (40.0 * FRAC_1_SQRT_2, 50.0 * FRAC_1_SQRT_2);
+    let same = |got: Vec<(f32, f32)>, want: [(f32, f32); 3]| {
+        got.len() == 3
+            && got
+                .iter()
+                .zip(want)
+                .all(|(g, w)| near(g.0, w.0) && near(g.1, w.1))
+    };
+    let (_, a) = line(before, 0xff00_00ff);
+    let got = path_points(&a.ops);
+    assert!(
+        same(
+            got.clone(),
+            [
+                (50.0 + r, 50.0 - r),
+                (50.0 + e, 50.0 - e),
+                (100.0, 50.0 - e)
+            ]
+        ),
+        "{got:?}"
+    );
+    let (_, b) = line(before, 0x0000_ffff);
+    let got = path_points(&b.ops);
+    assert!(
+        same(
+            got.clone(),
+            [(50.0 - r, 50.0 + r), (50.0 - e, 50.0 + e), (0.0, 50.0 + e)]
+        ),
+        "{got:?}"
+    );
+    // The texts at the lines' ends, centered on them: after the end on the
+    // right, before it on the left. Row `c` has no slice, so no label.
+    let parent_of = |child: u32| {
+        all.iter()
+            .flat_map(|b| b.items.iter())
+            .find_map(|i| match i {
+                MountItem::Insert {
+                    parent, child: c, ..
+                } if *c == child => Some(*parent),
+                _ => None,
+            })
+            .unwrap()
+    };
+    let frame = |id: u32| {
+        let f = frame_of(&all, id).expect("a frame");
+        (f.origin.x.0, f.origin.y.0, f.size.width.0, f.size.height.0)
+    };
+    let label = |text: &str| all.iter().find_map(|b| text_ids(b, text)).expect(text);
+    // Layout rounds frames to whole points.
+    let close = |(x, y, w, h): (f32, f32, f32, f32), want: (f32, f32, f32, f32)| {
+        (x - want.0).abs() <= 0.5
+            && (y - want.1).abs() <= 0.5
+            && (w - want.2).abs() <= 0.5
+            && (h - want.3).abs() <= 0.5
+    };
+    let (a, b) = (label("a"), label("b"));
+    assert!(close(frame(parent_of(a)), (100.0, 50.0 - e, 0.0, 0.0)));
+    assert!(close(frame(a), (0.0, -5.0, 20.0, 10.0)), "{:?}", frame(a));
+    assert!(close(frame(parent_of(b)), (0.0, 50.0 + e, 0.0, 0.0)));
+    assert!(close(frame(b), (-20.0, -5.0, 20.0, 10.0)), "{:?}", frame(b));
+    assert!(!all.iter().any(|b| shows(b, "c")));
+
+    // With `hoverLift`, the line moves out with its slice: the animator
+    // places it, at rest where it is without one.
+    let (lifted, l) = line(&all, 0x00ff_00ff);
+    let Some((Num::Slot(x), Num::Slot(y))) = starts(&l) else {
+        panic!("the lifted line's start animated: {:?}", l.ops)
+    };
+    let at = [
+        slot_at(&all, lifted, x, &[1.0])[0],
+        slot_at(&all, lifted, y, &[1.0])[0],
+    ];
+    assert!(near(at[0], 50.0 + r) && near(at[1], 50.0 - r), "{at:?}");
+
+    // The values change (`motion.update`): slice `a` grows to half the
+    // pie, its line moving with it to 3 o'clock.
+    let (moved, a) = line(&all[late..], 0xff00_00ff);
+    let Some((Num::Slot(x), _)) = starts(&a) else {
+        panic!("the line's start animated: {:?}", a.ops)
+    };
+    let xs = slot_at(&all, moved, x, &[1.0, 1.3]);
+    assert!(near(xs[0], 50.0 + r) && near(xs[1], 90.0), "{xs:?}");
+}
+
 const BASE_PLOT_BARS: &str = r##"import { mount, signal, Text, View } from "nsh";
 import { Bar, Plot } from "nsh/base/plot";
 

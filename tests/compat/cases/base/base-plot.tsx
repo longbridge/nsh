@@ -24,6 +24,9 @@
 // the pointer finding the new ring at once. A gauge `Arc` draws round
 // corners (`cornerRadius`) and sweeps back to its new end with
 // `motion.update`.
+// A `Pie`'s labels (`label`, `labelClass`, `labelStyle`, `labelGap`) sit
+// outside its ring toward each slice's middle, with leader lines
+// (`labelLineClass`, `labelLineStyle`).
 // `PlotAxis`es (`placement`, `labelPlacement`, `ticks`, `tickValues`,
 // `format`, the `label`, `tick` and `line` parts) lay their labels out
 // along a plot's edges.
@@ -137,6 +140,7 @@ function App() {
         <Bar value="w" label={(d: Sale) => `x${d.w}`} labelClass="h-[14px] w-[30px]" cornerRadii={2} />
       </Plot>
       <PieCase />
+      <PieLabelCase />
       <AxisCase />
     </View>
   );
@@ -178,6 +182,34 @@ function PieCase() {
       <Text>{`slice ${slice()}`}</Text>
       <View testID="hole" onPress={() => hole.set(false)} style={{ height: 20 }} />
     </View>
+  );
+}
+
+/** Two equal slices of a ring 30 out in a 100 by 100 plot, from 12
+ * o'clock: the first's middle at 3 o'clock, the second's at 9, each label
+ * 10 past the rim; a row worth nothing has none. */
+function PieLabelCase() {
+  type Region = { share: number; name: string };
+  return (
+    <Plot
+      data={[
+        { share: 1, name: "east" },
+        { share: 1, name: "west" },
+        { share: 0, name: "south" },
+      ]}
+      style={{ width: 100, height: 100 }}
+    >
+      <Pie
+        value="share"
+        outerRadius={30}
+        label={(d: Region) => d.name}
+        labelClass="h-[10px]"
+        labelStyle={{ width: 20 }}
+        labelGap={10}
+        labelLineClass={(_: Region, i: number) => (i === 0 ? "stroke-[#ff0000]" : "stroke-[#0000ff]")}
+        labelLineStyle={{ strokeWidth: 2 }}
+      />
+    </Plot>
   );
 }
 
