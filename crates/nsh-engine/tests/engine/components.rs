@@ -5654,6 +5654,277 @@ fn base_plot_arc_and_pie_angles_move_with_the_update_motion() {
     );
 }
 
+const BASE_PLOT_RADAR: &str = r##"import { mount, signal, Text, View } from "nsh";
+import { Plot, RadialGrid, RadialLine } from "nsh/base/plot";
+
+type Row = { a: number; b: number };
+
+function App() {
+  const hovered = signal<number | null>(null);
+  const more = signal(false);
+  const rows = (): Row[] => [
+    { a: 10, b: 5 },
+    { a: more() ? 10 : 5, b: 10 },
+    { a: 10, b: 5 },
+    { a: 0, b: 10 },
+  ];
+  return (
+    <View>
+      <Plot
+        testID="plot"
+        data={rows()}
+        yScale={{ type: "linear", domain: [0, 10] }}
+        motion={{ update: { duration: 250 } }}
+        onHoverChange={({ index }) => hovered.set(index)}
+        style={{ width: 200, height: 100 }}
+      >
+        <RadialGrid rings={[5, 10]} spokes class="stroke-[#00ff00]" />
+        <RadialLine radius="a" closed class="fill-[#ff000080] stroke-[#ff0000]" />
+        <RadialLine radius="b" innerRadius={10} outerRadius="80%" curve="natural" hoverDotClass="size-2" />
+      </Plot>
+      <Text>{`hover ${hovered()}`}</Text>
+      <View testID="more" onPress={() => more.set(true)} style={{ height: 20 }} />
+    </View>
+  );
+}
+
+mount(App);
+"##;
+
+/// The ops of a radial line's drawing from its stroke on: its line, after
+/// its area.
+fn line_ops(ops: &[nsh_core::canvas::CanvasOp]) -> &[nsh_core::canvas::CanvasOp] {
+    use nsh_core::canvas::CanvasOp;
+    let at = ops
+        .iter()
+        .position(|op| matches!(op, CanvasOp::StrokeStyle(_)))
+        .expect("a stroke");
+    &ops[at..]
+}
+
+/// `nsh/base/plot`'s `RadialLine` and `RadialGrid` (`gpui-base`'s
+/// `RadialLine`, d3's `lineRadial` / `areaRadial`), a radar: the rows
+/// evenly round the turn from 12 o'clock, each as far out as the y scale
+/// puts its value between the radii (the center to the largest circle
+/// the plot holds by default); `closed` back to the first point, its area
+/// filled; a smooth open line from an inner radius; the grid's polygon
+/// rings at values of the y scale and a spoke per row. The pointer finds
+/// the row nearest by angle within a line's outer radius, the line's
+/// hover dot on that row's point, and new values move the points over
+/// `motion.update`.
+#[test]
+fn base_plot_radial_line_draws_a_radar_and_follows_the_pointer_by_angle() {
+    use nsh_core::{
+        Color,
+        animation::Animator,
+        canvas::{CanvasOp, Num, Paint, PathOp},
+        geometry::point,
+    };
+    let near = |got: &[(f32, f32)], want: &[(f32, f32)]| {
+        assert!(
+            got.len() == want.len()
+                && got
+                    .iter()
+                    .zip(want)
+                    .all(|(a, b)| (a.0 - b.0).abs() < 1e-3 && (a.1 - b.1).abs() < 1e-3),
+            "{got:?} is not {want:?}"
+        )
+    };
+    let (engine, rx) = start(BASE_PLOT_RADAR);
+    let mut all = until_drawn(&rx, |d| {
+        d.ops
+            .iter()
+            .filter(|op| matches!(op, CanvasOp::Path(PathOp::CubicTo(_))))
+            .count()
+            >= 3
+    });
+    all.extend(until(&rx, |_| false));
+    assert_eq!(plot_bleeds(&all), [8.0; 3]);
+    let latest = plot_drawings(&all);
+    let [(_, grid), (a_id, a), (_, b)] = &latest[..] else {
+        panic!("a grid and two lines: {latest:?}")
+    };
+    // The grid: rings at 5 and 10 of 0 to 10 (25 and 50 out from the
+    // center, 100 by 50), squares through the four rows' angles, and a
+    // spoke out from the center at each.
+    assert_eq!(
+        grid.ops[0],
+        CanvasOp::StrokeStyle(Paint::Color(Color(0x00ff_00ff)))
+    );
+    let rings = path_points(&grid.ops);
+    near(
+        &rings[..8],
+        &[
+            (100.0, 25.0),
+            (125.0, 50.0),
+            (100.0, 75.0),
+            (75.0, 50.0),
+            (100.0, 0.0),
+            (150.0, 50.0),
+            (100.0, 100.0),
+            (50.0, 50.0),
+        ],
+    );
+    near(&rings[8..10], &[(100.0, 50.0), (100.0, 0.0)]);
+    assert_eq!(rings.len(), 16);
+    // The closed line: its fill, then its stroke from 12 o'clock round
+    // (10, 5, 10 and 0 of 0 to 10) and back to its first point.
+    assert_eq!(
+        a.ops[0],
+        CanvasOp::FillStyle(Paint::Color(Color(0xff00_0080)))
+    );
+    let line = line_ops(&a.ops);
+    assert_eq!(line[0], CanvasOp::StrokeStyle(Paint::Color(Color(0xff00_00ff))));
+    near(
+        &path_points(line),
+        &[
+            (100.0, 0.0),
+            (125.0, 50.0),
+            (100.0, 100.0),
+            (100.0, 50.0),
+            (100.0, 0.0),
+        ],
+    );
+    assert!(line.contains(&CanvasOp::Path(PathOp::Close)));
+    assert!(a.ops.contains(&CanvasOp::Fill(None, nsh_core::canvas::FillRule::NonZero)));
+    // The smooth one: from 10 out (5 of 0 to 10 at 25) to 40 (80% of 50),
+    // a cubic to each next row, open.
+    let line = line_ops(&b.ops);
+    near(
+        &path_points(line),
+        &[(100.0, 25.0), (140.0, 50.0), (100.0, 75.0), (60.0, 50.0)],
+    );
+    assert!(!line.contains(&CanvasOp::Path(PathOp::Close)));
+
+    let plot = test_view(&all, "plot");
+    let hover = |x: f32, y: f32| {
+        engine.control().dispatch_event(
+            plot,
+            EventKind::MouseMove,
+            EventPayload::Mouse(nsh_core::MouseEvent::new(
+                point(px(x), px(y)),
+                point(px(x), px(y)),
+                Default::default(),
+                None,
+            )),
+        )
+    };
+    // Where the animator puts the views it moves.
+    let moved = |all: &[MountBatch]| {
+        let mut animator = Animator::default();
+        for item in all.iter().flat_map(|b| b.items.iter()) {
+            animator.apply(item);
+        }
+        let mut out = Vec::new();
+        animator.write(Some, |_, values, _| {
+            if let (Some(x), Some(y)) = (values.transform[0], values.transform[1]) {
+                out.push((x, y));
+            }
+        });
+        out
+    };
+    // Near 12 o'clock, past the smooth line's outer radius but within the
+    // closed one's: the first row.
+    hover(110.0, 10.0);
+    all.extend(until(&rx, |b| shows(b, "hover 0")));
+    // Near 3 o'clock: the second row, the smooth line's hover dot on its
+    // point there.
+    hover(140.0, 55.0);
+    all.extend(until(&rx, |b| shows(b, "hover 1")));
+    all.extend(until(&rx, |_| false));
+    let dots = moved(&all);
+    assert!(
+        dots.iter()
+            .any(|(x, y)| (x - 140.0).abs() < 1e-3 && (y - 50.0).abs() < 1e-3),
+        "{dots:?}"
+    );
+    // Below 9 o'clock, nearer it than 6: the last row.
+    hover(70.0, 60.0);
+    all.extend(until(&rx, |b| shows(b, "hover 3")));
+    // Outside every line's outer radius: none.
+    hover(195.0, 5.0);
+    all.extend(until(&rx, |b| shows(b, "hover null")));
+
+    // A new value: the closed line's second point moves from 25 out to
+    // 50 at 3 o'clock over the update, on the animator.
+    let more = test_view(&all, "more");
+    engine
+        .control()
+        .dispatch_event(more, EventKind::Press, EventPayload::None);
+    let redrawn = until_drawn(&rx, |d| {
+        d.ops
+            .iter()
+            .any(|op| matches!(op, CanvasOp::Path(PathOp::LineTo(Num::Slot(_), _))))
+    });
+    all.extend(redrawn);
+    all.extend(until(&rx, |_| false));
+    let drawn = plot_drawings(&all);
+    let (_, a) = drawn.iter().find(|(id, _)| id == a_id).unwrap();
+    // The first point that moves: the second row's, at 3 o'clock.
+    let slot = line_ops(&a.ops)
+        .iter()
+        .find_map(|op| match op {
+            CanvasOp::Path(PathOp::LineTo(Num::Slot(x), _)) => Some(*x),
+            _ => None,
+        })
+        .expect("the moving point");
+    let xs = slot_at(&all, *a_id, slot, &[1.0, 1.125, 1.3]);
+    assert!((xs[0] - 125.0).abs() < 1e-3, "{xs:?}");
+    assert!(xs[1] > 126.0 && xs[1] < 149.0, "{xs:?}");
+    assert!((xs[2] - 150.0).abs() < 1e-3, "{xs:?}");
+}
+
+const BASE_PLOT_RADAR_APPEAR: &str = r##"import { mount, View } from "nsh";
+import { Plot, RadialLine } from "nsh/base/plot";
+
+function App() {
+  return (
+    <View>
+      <Plot
+        data={[{ v: 2 }, { v: 1 }, { v: 2 }]}
+        y="v"
+        appearGeneration={1}
+        motion={{ appear: { duration: 300 } }}
+        style={{ width: 100, height: 100 }}
+      >
+        <RadialLine closed />
+      </Plot>
+    </View>
+  );
+}
+
+mount(App);
+"##;
+
+/// A radial line grows out of its inner radius as the plot appears
+/// (`gpui-component`'s radar), its points animated values on the
+/// platform's animator: the first, at 12 o'clock, from the center up to
+/// the plot's top edge (the y domain 0 to 2, the plot's own extent).
+#[test]
+fn base_plot_radial_line_grows_out_as_the_plot_appears() {
+    use nsh_core::canvas::{CanvasOp, Num, PathOp};
+    let (_engine, rx) = start(BASE_PLOT_RADAR_APPEAR);
+    let mut all = until_drawn(&rx, |d| {
+        d.ops
+            .iter()
+            .any(|op| matches!(op, CanvasOp::Path(PathOp::MoveTo(_, Num::Slot(_)))))
+    });
+    all.extend(until(&rx, |_| false));
+    let drawn = plot_drawings(&all);
+    let (id, line) = &drawn[0];
+    let slot = line_ops(&line.ops)
+        .iter()
+        .find_map(|op| match op {
+            CanvasOp::Path(PathOp::MoveTo(Num::Const(x), Num::Slot(y))) if *x == 50.0 => Some(*y),
+            _ => None,
+        })
+        .expect("its first point, moving up");
+    let ys = slot_at(&all, *id, slot, &[1.0, 1.15, 1.3]);
+    assert!((ys[0] - 50.0).abs() < 1e-3, "{ys:?}");
+    assert!(ys[1] > 1.0 && ys[1] < 49.0, "{ys:?}");
+    assert!(ys[2].abs() < 1e-3, "{ys:?}");
+}
+
 const BASE_PLOT_BARS: &str = r##"import { mount, signal, Text, View } from "nsh";
 import { Bar, Plot } from "nsh/base/plot";
 

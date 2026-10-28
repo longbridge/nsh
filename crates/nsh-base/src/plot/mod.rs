@@ -2,8 +2,9 @@
 //! `plot` module, with no look of their own. A [`Plot`] holds the rows of
 //! data, the scales of its two axes, the pointer over it and its motion;
 //! its marks ([`Line`], [`Area`], [`Bar`], [`Grid`], and the radial
-//! [`Pie`] and [`Arc`]) draw what it holds, each a canvas filling the plot
-//! (a pie one per slice), and its [`PlotAxis`]es label its edges with the
+//! [`Pie`], [`Arc`], [`RadialLine`] and [`RadialGrid`]) draw what it
+//! holds, each a canvas filling the plot (a pie one per slice), and its
+//! [`PlotAxis`]es label its edges with the
 //! ticks of its scales, natively: the rows are read once when the app
 //! sets them, scaled, recorded and drawn in Rust, so no JS runs per point,
 //! and the pointer, the hover's glide and fade, the appear and the scales'
@@ -26,6 +27,7 @@ mod grid;
 mod keys;
 mod line;
 mod pie;
+mod radial_line;
 mod scale;
 mod series;
 mod tween;
@@ -49,6 +51,10 @@ pub use self::{
     grid::{Grid, GridElement, GridProps, grid},
     line::{Curve, Line, LineElement, LineProps, line},
     pie::{Arc, ArcElement, ArcProps, Pie, PieElement, PieProps, SliceClass, arc, pie},
+    radial_line::{
+        RadialGrid, RadialGridElement, RadialGridProps, RadialLine, RadialLineElement,
+        RadialLineProps, radial_grid, radial_line,
+    },
     scale::{BandScale, Scale},
 };
 use self::{
@@ -73,6 +79,8 @@ pub fn registry() -> Registry {
         .register::<Grid>()
         .register::<Pie>()
         .register::<Arc>()
+        .register::<RadialLine>()
+        .register::<RadialGrid>()
         .register::<PlotAxis>();
     registry
 }
@@ -247,9 +255,10 @@ pub struct PlotProps {
 pub enum PlotEvent {
     /// The pointer came over another row (`gpui-base`'s
     /// `TooltipState::index`): the index of the row nearest to it along
-    /// the x axis (the y axis when only that one has bands), or of the
-    /// slice of a `Pie` under it; `null` once it leaves the plot (or, over
-    /// a pie, its slices).
+    /// the x axis (the y axis when only that one has bands), of the slice
+    /// of a `Pie` under it, or of a `RadialLine`'s row nearest to it by
+    /// angle; `null` once it leaves the plot (or, over a pie, its slices;
+    /// over a radial line, its outer radius).
     #[args(index)]
     HoverChange(Option<u32>),
 }
@@ -349,6 +358,10 @@ struct PlotContext {
     hits: Signal<Vec<Hit>>,
     /// The plot follows the pointer.
     interactive: Prop<bool>,
+    /// The plot's own hover dot (`dotClass` / `dotStyle`), for the marks
+    /// that place their hover dot themselves (a radial line's, at the
+    /// hovered row's vertex).
+    dot: HoverDot,
     /// The axis with bands (the x axis when both have them).
     band_axis: Memo<Option<Axis>>,
 }
@@ -483,9 +496,10 @@ impl PlotContext {
 /// A plot (`gpui-base`'s `Plot`): the rows of data a chart shows, the
 /// scales of its x and y axes, its size as their range, the pointer over
 /// it and its motion. It draws nothing itself: its marks, the children
-/// (`Line`, `Area`, `Bar`, `Grid`, `Pie`, `Arc`), each fill it and draw in
-/// order over each other. It reports the row nearest to the pointer, or the
-/// slice of a pie under it (`onHoverChange`), and
+/// (`Line`, `Area`, `Bar`, `Grid`, `Pie`, `Arc`, `RadialLine`,
+/// `RadialGrid`), each fill it and draw in order over each other. It
+/// reports the row nearest to the pointer, the slice of a pie under it, or
+/// a radial line's row nearest to it by angle (`onHoverChange`), and
 /// shows the hover's parts the app styles (`crossLineClass`, `dotClass` or
 /// a mark's `hoverDotClass`, `tooltipContent`), moved and faded natively
 /// with `motion`, the tooltip placed by `tooltipPlacement` and kept inside
@@ -656,6 +670,10 @@ pub fn Plot(props: PlotProps, cx: Scope<PlotEvent>) -> impl IntoElement {
         hovered,
         hits,
         interactive: props.interactive,
+        dot: HoverDot {
+            class: props.dot_class,
+            style: props.dot_style,
+        },
         band_axis,
     });
 

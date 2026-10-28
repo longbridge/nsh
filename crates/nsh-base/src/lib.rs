@@ -377,7 +377,16 @@ mod tests {
         assert_eq!(
             plot,
             [
-                "Arc", "Area", "Bar", "Grid", "Line", "Pie", "Plot", "PlotAxis"
+                "Arc",
+                "Area",
+                "Bar",
+                "Grid",
+                "Line",
+                "Pie",
+                "Plot",
+                "PlotAxis",
+                "RadialGrid",
+                "RadialLine"
             ]
         );
     }

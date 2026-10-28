@@ -4,8 +4,9 @@
 // and whose range changes, a drawdown whose day under the pointer or the
 // arrow keys is read out over both of its plots, capacity rings by period,
 // a donut of revenue that reports the slice under the pointer (none in its
-// hole) or the arrow keys and closes into a pie, and sales as bars side by
-// side or stacked.
+// hole) or the arrow keys and closes into a pie, sales as bars side by
+// side or stacked, and a radar of factor exposure that reads out the
+// factor nearest the pointer and changes its benchmark.
 import { beforeEach, expect, open, test } from "nsh/test";
 import type { App } from "nsh/test";
 
@@ -137,4 +138,19 @@ test("bars stand in bands side by side or stacked, a value over each", async () 
   await app.press("role:tab[Stacked]");
   await app.waitFor("96");
   expect(app.texts()).not.toContain("63");
+});
+
+test("the radar reads out the factor nearest the pointer and changes its benchmark", async () => {
+  // Nothing hovered: the means of all six, the portfolio's against the index's.
+  expect(app.texts()).toContain("ALL SIX FACTORS");
+  expect(app.texts()).toContain("54.5");
+  // Against the peers: their mean.
+  await app.press("role:tab[vs Peers]");
+  await app.waitFor("61.8");
+  expect(app.texts()).toContain("Peers");
+  // The middle of the radar: the factor whose spoke is nearest the pointer's
+  // angle there (which one depends on where the pointer lands within a point
+  // of it), its name read out.
+  await app.hover("label:/^Factor exposure against the peers/");
+  await app.waitFor("text:/^(VALUE|MOMENTUM|QUALITY|SIZE|LOW VOL|YIELD)$/");
 });

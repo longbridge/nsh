@@ -189,10 +189,10 @@ fn arcs(values: &[f64], start: f32, end: f32) -> Vec<Slice> {
 
 /// Where a radial mark draws: the plot's center and its radii, in points.
 #[derive(Debug, Clone, Copy, PartialEq)]
-struct Ring {
-    center: Point<Points>,
-    inner: f32,
-    outer: f32,
+pub(super) struct Ring {
+    pub(super) center: Point<Points>,
+    pub(super) inner: f32,
+    pub(super) outer: f32,
 }
 
 impl Ring {
@@ -200,7 +200,7 @@ impl Ring {
     /// of the bounds, `shape/arc.rs:105`), its radii in points or as a
     /// share of the largest circle the plot holds (half its smaller side,
     /// as d3's and Recharts' percentages are).
-    fn of(size: Size<Points>, inner: DefiniteLength, outer: DefiniteLength) -> Self {
+    pub(super) fn of(size: Size<Points>, inner: DefiniteLength, outer: DefiniteLength) -> Self {
         let half = size.width.0.min(size.height.0) / 2.0;
         let r = |l: DefiniteLength| {
             l.to_points(AbsoluteLength::Points(px(half)), REM_SIZE)
@@ -442,7 +442,7 @@ impl Outline {
 
 /// A number of a drawing: a constant, or one the animator moves.
 #[derive(Clone, Copy)]
-enum Var {
+pub(super) enum Var {
     Const(f32),
     Node(AnimatedNode),
 }
@@ -679,9 +679,9 @@ fn sector(
 /// hole opens. A change while one runs moves on from the shape that one
 /// was moving to. The plot's size changing moves nothing: only the app's
 /// shape.
-struct Update<S> {
+pub(super) struct Update<S> {
     from: Signal<Option<S>>,
-    progress: AnimatedValue,
+    pub(super) progress: AnimatedValue,
 }
 
 impl<S> Clone for Update<S> {
@@ -695,7 +695,7 @@ impl<S> Copy for Update<S> {}
 impl<S: Clone + PartialEq + 'static> Update<S> {
     /// Follows `shape`, moving to each new one with the plot's
     /// `motion.update` (at once without one or with reduced motion).
-    fn new(plot: PlotContext, shape: impl Fn() -> S + 'static) -> Self {
+    pub(super) fn new(plot: PlotContext, shape: impl Fn() -> S + 'static) -> Self {
         let from = signal(None);
         let progress = animated_value(1.0);
         let last = stored(None::<S>);
@@ -728,7 +728,7 @@ impl<S: Clone + PartialEq + 'static> Update<S> {
     }
 
     /// The shape it moves from, and how far it has gone, while it runs.
-    fn from(&self) -> Option<(S, AnimatedNode)> {
+    pub(super) fn from(&self) -> Option<(S, AnimatedNode)> {
         Some((self.from.get()?, *self.progress.node()))
     }
 }

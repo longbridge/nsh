@@ -29,8 +29,13 @@
 // along a plot's edges.
 // A sparkline's y domain, the extent of its rows, moves to a new one with
 // `motion.update` as rows come.
+// A radar: `RadialLine`s (`radius` as a field and as a function, `angle`,
+// `startAngle`, `endAngle`, `outerRadius`) report the row nearest the
+// pointer by angle, none outside their outer radius, and step through the
+// rows with a screen reader's increment; `RadialGrid`s draw circular
+// `rings` and `spokes` between their radii.
 import { Text, View, signal } from "nsh";
-import { Arc, Area, Bar, Grid, Line, Pie, Plot, PlotAxis } from "nsh/base/plot";
+import { Arc, Area, Bar, Grid, Line, Pie, Plot, PlotAxis, RadialGrid, RadialLine } from "nsh/base/plot";
 
 type Row = { t: number; price: number; avg: number };
 type Sale = { v: number; w: number };
@@ -138,6 +143,7 @@ function App() {
       </Plot>
       <PieCase />
       <AxisCase />
+      <RadarCase />
     </View>
   );
 }
@@ -200,6 +206,43 @@ function AxisCase() {
       <PlotAxis placement="left" tickValues={[0, 50, 100]} labelStyle={{ width: 20, height: 10 }} tickStyle={{ width: 4, height: 1 }} lineClass="w-px" />
       <PlotAxis placement="right" labelPlacement="inside" tickValues={[50]} format={(v) => `in${v}`} labelStyle={{ width: 30, height: 10 }} />
     </Plot>
+  );
+}
+
+type Spoke = { a: number; b: number };
+
+/** A radar of four rows on 0 to 10 in a 100 by 100 plot (center 50, 50):
+ * a closed line over the half turn from 9 o'clock to 3 (its rows 60°
+ * apart) out to 40, and a smooth one at angles of its own (an eighth of a
+ * turn apart from 12 o'clock) from 6 out to 30, which the pointer finds
+ * first; a circular ring at 5 (20 out) from 3 o'clock, and a spoke per row
+ * from 6 out. */
+function RadarCase() {
+  const axis = signal<number | null>(null);
+  return (
+    <View>
+      <Plot
+        testID="radar"
+        data={[{ a: 10, b: 5 }, { a: 5, b: 10 }, { a: 10, b: 5 }, { a: 0, b: 10 }] as Spoke[]}
+        yScale={{ type: "linear", domain: [0, 10] }}
+        accessibilityLabel="Radar"
+        onHoverChange={({ index }) => axis.set(index)}
+        style={{ width: 100, height: 100 }}
+      >
+        <RadialGrid testID="rings" rings={[5]} circular startAngle={Math.PI / 2} outerRadius="80%" class="stroke-[#dddddd]" />
+        <RadialGrid testID="spokes" spokes innerRadius={6} outerRadius="80%" />
+        <RadialLine radius="a" startAngle={-Math.PI / 2} endAngle={Math.PI / 2} outerRadius="80%" closed class="fill-[#3366ff]/20 stroke-[#3366ff]" />
+        <RadialLine
+          radius={(d: Spoke) => d.b}
+          angle={(_, i) => (i * Math.PI) / 4}
+          innerRadius={6}
+          outerRadius="60%"
+          curve="natural"
+          hoverDotClass="size-2"
+        />
+      </Plot>
+      <Text>{`axis ${axis()}`}</Text>
+    </View>
   );
 }
 
