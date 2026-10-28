@@ -1,7 +1,7 @@
 use nsh_core::{Bounds, NodeId, Point, PointerEvents, Points, ROOT_ID, ViewKind};
 use ratatui_core::{
-    buffer::{Buffer, Cell},
-    layout::{Position, Rect},
+    buffer::Buffer,
+    layout::Rect,
     style::{Color, Style},
     widgets::Widget,
 };
@@ -39,7 +39,6 @@ struct Painter<'a> {
     area: Rect,
     cells: CellSize,
     page_backgrounds: &'a [nsh_core::Color],
-    outlines: Outlines,
 }
 
 pub(crate) fn draw(
@@ -63,7 +62,6 @@ pub(crate) fn draw(
         area,
         cells,
         page_backgrounds: &page_backgrounds,
-        outlines: Outlines::new(clip),
     };
     painter.view(ROOT_ID, Projection::IDENTITY, clip, 1.0, true, None);
     let modals = painter.tree.modals.clone();
@@ -148,7 +146,6 @@ impl Painter<'_> {
                 .background
                 .unwrap_or(view.style.background_color);
             if !fill.is_transparent() {
-                self.outlines.clear(visible);
                 let page_background = self.page_backgrounds.contains(&fill);
                 if page_background || (fill.0 & 255 == 255 && opacity >= 1.0) {
                     let background = if page_background {
@@ -252,8 +249,35 @@ impl Painter<'_> {
                     self.cells,
                     self.area,
                 );
-                self.outlines
-                    .draw(outline_bounds, clip, outline.color, opacity, self.buffer);
+                let outline_area = outline_bounds.clipped(clip);
+                let mut sides = Borders::NONE;
+                if outline_bounds.top == i32::from(outline_area.y) {
+                    sides |= Borders::TOP;
+                }
+                if outline_bounds.bottom == i32::from(outline_area.bottom()) {
+                    sides |= Borders::BOTTOM;
+                }
+                if outline_bounds.left == i32::from(outline_area.x) {
+                    sides |= Borders::LEFT;
+                }
+                if outline_bounds.right == i32::from(outline_area.right()) {
+                    sides |= Borders::RIGHT;
+                }
+                Block::default()
+                    .borders(sides)
+                    .render(outline_area, self.buffer);
+                for y in outline_area.y..outline_area.bottom() {
+                    for x in outline_area.x..outline_area.right() {
+                        if (y == outline_area.y && sides.contains(Borders::TOP))
+                            || (y + 1 == outline_area.bottom() && sides.contains(Borders::BOTTOM))
+                            || (x == outline_area.x && sides.contains(Borders::LEFT))
+                            || (x + 1 == outline_area.right() && sides.contains(Borders::RIGHT))
+                        {
+                            let cell = &mut self.buffer[(x, y)];
+                            cell.set_fg(blend(outline.color, opacity, cell.bg));
+                        }
+                    }
+                }
             }
             if let Some((layout, content)) = &view.text
                 && let Some(layout) = layout.downcast::<CellLayout>()
@@ -261,7 +285,6 @@ impl Painter<'_> {
                 let text_bounds =
                     CellBounds::new(projection.bounds(*content), self.cells, self.area);
                 let text_area = text_bounds.clipped(visible);
-                self.outlines.protect(text_area, self.buffer);
                 let scroll = (
                     (i32::from(text_area.y) - text_bounds.top).clamp(0, u16::MAX as i32) as u16,
                     (i32::from(text_area.x) - text_bounds.left).clamp(0, u16::MAX as i32) as u16,
@@ -293,7 +316,6 @@ impl Painter<'_> {
             if let (Some(field), Some(config)) = (&mut view.field, &view.input) {
                 let content =
                     CellBounds::new(projection.bounds(field.content), self.cells, self.area);
-                self.outlines.protect(content.clipped(visible), self.buffer);
                 field.draw(
                     config,
                     content,
@@ -304,7 +326,6 @@ impl Painter<'_> {
                 );
             }
             if let Some(canvas) = &view.canvas {
-                self.outlines.protect(visible, self.buffer);
                 crate::canvas::draw(
                     canvas,
                     self.buffer,
@@ -316,7 +337,6 @@ impl Painter<'_> {
                 );
             }
             if let Some(component) = &mut view.component {
-                self.outlines.protect(visible, self.buffer);
                 component.render(visible, self.buffer);
             } else if !matches!(
                 view.kind,
@@ -330,7 +350,6 @@ impl Painter<'_> {
                     | ViewKind::HeaderItem
                     | ViewKind::Modal
             ) {
-                self.outlines.protect(visible, self.buffer);
                 let title = view
                     .component_name
                     .clone()
@@ -377,97 +396,4 @@ pub(crate) fn blend(color: nsh_core::Color, opacity: f32, background: Color) -> 
         (((packed >> shift) & 255) as f32 * alpha + f32::from(base) * (1.0 - alpha)).round() as u8
     };
     Color::Rgb(channel(24, r), channel(16, g), channel(8, b))
-}
-
-struct Outlines {
-    area: Rect,
-    content: Vec<bool>,
-    strokes: Vec<(Position, Cell, Cell)>,
-}
-
-impl Outlines {
-    fn new(area: Rect) -> Self {
-        Self {
-            area,
-            content: vec![false; usize::from(area.width) * usize::from(area.height)],
-            strokes: Vec::new(),
-        }
-    }
-
-    fn set_content(&mut self, area: Rect, content: bool) {
-        for y in area.y..area.bottom() {
-            let start = usize::from(y - self.area.y) * usize::from(self.area.width)
-                + usize::from(area.x - self.area.x);
-            self.content[start..start + usize::from(area.width)].fill(content);
-        }
-    }
-
-    fn clear(&mut self, area: Rect) {
-        self.set_content(area, false);
-        self.strokes
-            .retain(|(position, _, _)| !area.contains(*position));
-    }
-
-    fn protect(&mut self, area: Rect, buffer: &mut Buffer) {
-        if area.is_empty() {
-            return;
-        }
-        // Paragraphs and canvases leave some Cells untouched. Restore the background
-        // under an outline there, without undoing anything painted since the stroke.
-        self.strokes.retain(|(position, before, painted)| {
-            if !area.contains(*position) {
-                return true;
-            }
-            if buffer[*position] == *painted {
-                buffer[*position] = before.clone();
-            }
-            false
-        });
-        self.set_content(area, true);
-    }
-
-    fn draw(
-        &mut self,
-        bounds: CellBounds,
-        clip: Rect,
-        color: nsh_core::Color,
-        opacity: f32,
-        buffer: &mut Buffer,
-    ) {
-        let area = bounds.clipped(clip);
-        let symbols = ratatui_core::symbols::border::PLAIN;
-        for y in area.y..area.bottom() {
-            let top = i32::from(y) == bounds.top;
-            let bottom = i32::from(y) + 1 == bounds.bottom;
-            for x in area.x..area.right() {
-                let left = i32::from(x) == bounds.left;
-                let right = i32::from(x) + 1 == bounds.right;
-                let symbol = match (top, bottom, left, right) {
-                    (_, true, _, true) => symbols.bottom_right,
-                    (_, true, true, _) => symbols.bottom_left,
-                    (true, _, _, true) => symbols.top_right,
-                    (true, _, true, _) => symbols.top_left,
-                    (_, true, _, _) => symbols.horizontal_bottom,
-                    (true, _, _, _) => symbols.horizontal_top,
-                    (_, _, true, _) => symbols.vertical_left,
-                    (_, _, _, true) => symbols.vertical_right,
-                    _ => continue,
-                };
-                let position = Position::new(x, y);
-                let index = usize::from(y - self.area.y) * usize::from(self.area.width)
-                    + usize::from(x - self.area.x);
-                if self.content[index] {
-                    continue;
-                }
-                let cell = &mut buffer[position];
-                if cell.symbol() != " " {
-                    continue;
-                }
-                let before = cell.clone();
-                let foreground = blend(color, opacity, cell.bg);
-                cell.set_symbol(symbol).set_fg(foreground);
-                self.strokes.push((position, before, cell.clone()));
-            }
-        }
-    }
 }

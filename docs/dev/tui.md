@@ -479,9 +479,7 @@ above; unfocused surfaces ignore keys.
 Focus changes clear the old focused state before setting the new one, so the core's derived `focus-within`
 state stays on a shared ancestor when moving backward between its controls. App-defined outlines draw as
 single-Cell strokes in the app's color, transformed with the control before Cell rounding and ancestor clipping.
-They take no layout space. Text, fields, canvases and native components reserve their complete content rectangles,
-including blank and wide-character Cells: outline strokes yield to those rectangles in either paint order.
-Other painted glyphs also keep their Cells. The remaining strokes show around the content. This is a
+They take no layout space; text and children draw above the stroke when they share its Cells. This is a
 rendering rule for outlines the app sets, including focus outlines; the backend adds no outline of its own.
 The app and shared example UI own the appearance, while the backend projects their styles onto Cells.
 
@@ -652,7 +650,7 @@ permit clipboard writes; `nsh test` uses memory and never writes to the machine'
 | Page background | Terminal default background (`Color::Reset`), including every fill of exactly the same RGBA color |
 | Other view fills | RGB Cell backgrounds, alpha and view opacity blended over the existing background |
 | Borders | One Cell per visible side; each side keeps its color; positive radius selects rounded corners |
-| Outlines, including control focus outlines | Single-Cell strokes in the app's color, rounded offset, clipped to ancestors, outside layout and content rectangles |
+| Outlines, including control focus outlines | Single-Cell strokes in the app's color, rounded offset, clipped to ancestors, outside layout |
 | Positive sub-Cell extents | At least one Cell; zero-width progress indicators remain empty |
 | Base control value states and projected part states | Core-resolved checked, mixed, selected and disabled styles |
 | Slider keyboard input | Component-owned arrows, page and endpoint keys while its thumb has focus |
@@ -713,10 +711,6 @@ The `controls` fixture imports `examples/gallery/demos/Controls.tsx` unchanged, 
 controls with terminal keys, exercises ordinary mouse presses, and reads Cell screenshots. AppView controls
 tests cover focus outlines, backward focus-within transitions, projected value/disabled styles, sub-Cell
 progress rails and focused Slider keys. These tests do not exercise hover or Slider drags yet.
-The `gallery` fixture loads the official gallery unchanged at 200 × 50 Cells. It traverses from the live Stocks
-demo to Photos with C-n and Enter, checks the sidebar's visible focus and intact label Cells, and checks Escape
-from a page pushed by the Navigation demo. AppView regressions cover compact outlined rows and wide text with
-trailing blank Cells in both paint orders.
 The search fixture searches forward and backward through a Scroll's rows and checks the Minibuffer row before,
 during and after the search.
 The animation module at the AppView seam checks completion, cancellation, active-frame and idle scheduling,
@@ -734,7 +728,6 @@ cargo build -p nsh-cli -p nsh-tui-host
 ./target/debug/nsh test crates/nsh-tui-host/tests/fixtures/pointer --target tui < /dev/null
 ./target/debug/nsh test crates/nsh-tui-host/tests/fixtures/agent --target tui < /dev/null
 ./target/debug/nsh test crates/nsh-tui-host/tests/fixtures/controls --target tui < /dev/null
-./target/debug/nsh test crates/nsh-tui-host/tests/fixtures/gallery --target tui < /dev/null
 ./target/debug/nsh test crates/nsh-tui-host/tests/fixtures/search --target tui < /dev/null
 ./target/debug/nsh test crates/nsh-tui-host/tests/fixtures/animation --target tui < /dev/null
 cargo test -p nsh-cli --test cli

@@ -1,6 +1,0 @@
-{
-  "name": "Gallery keyboard acceptance",
-  "id": "com.longbridge.nsh.tests.gallery",
-  "version": "1.0.0",
-  "theme": "../../../../../examples/nsh-gallery-ui/theme.json"
-}
