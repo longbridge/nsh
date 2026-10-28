@@ -1,9 +1,8 @@
 ---
 // The home hero's background: the sky from close up, inside a galaxy, drawn
-// by a fragment shader (WebGL). A nebula fills the hero in many hues along
-// one arc from the accent's lime round to violet, each region a hue of its
-// own, lying in belts as Jupiter's clouds do, around a core where the copy
-// gives way to the device. Four layers of stars of different temperatures
+// by a fragment shader (WebGL). The galaxy's milky light, white leaning a
+// little cool or warm by region, lying in belts as Jupiter's clouds do, around a core where the copy
+// gives way to the device. Three layers of stars of different temperatures
 // drift at their depth's pace and twinkle; the brightest wear diffraction
 // spikes, and now and then a meteor crosses. Presses act on gravity: a held
 // press is a small mass that bends the starlight toward it; released, it
@@ -27,11 +26,11 @@
     --hero-star-rose: #ffb49a;
     --hero-star-gold: #f2e69a;
     --hero-glow: rgba(200, 242, 109, 0.14);
-    --hero-nebula-lime: rgba(150, 200, 92, 0.2);
-    --hero-nebula-teal: rgba(60, 176, 160, 0.21);
-    --hero-nebula-azure: rgba(62, 140, 210, 0.22);
-    --hero-nebula-indigo: rgba(90, 104, 220, 0.22);
-    --hero-nebula-violet: rgba(134, 98, 206, 0.2);
+    --hero-milk-cool: rgba(196, 206, 230, 0.22);
+    --hero-milk-pale: rgba(214, 220, 232, 0.2);
+    --hero-milk-silver: rgba(222, 224, 228, 0.2);
+    --hero-milk-warm: rgba(232, 224, 208, 0.2);
+    --hero-milk-mist: rgba(204, 212, 228, 0.22);
   }
   html.light,
   html:not(.dark) {
@@ -41,11 +40,11 @@
     --hero-star-rose: #b0503a;
     --hero-star-gold: #9a8410;
     --hero-glow: rgba(150, 196, 40, 0.16);
-    --hero-nebula-lime: rgba(110, 160, 40, 0.12);
-    --hero-nebula-teal: rgba(20, 140, 125, 0.12);
-    --hero-nebula-azure: rgba(30, 110, 190, 0.12);
-    --hero-nebula-indigo: rgba(70, 84, 200, 0.12);
-    --hero-nebula-violet: rgba(110, 76, 190, 0.11);
+    --hero-milk-cool: rgba(70, 82, 110, 0.07);
+    --hero-milk-pale: rgba(80, 88, 104, 0.06);
+    --hero-milk-silver: rgba(86, 88, 94, 0.06);
+    --hero-milk-warm: rgba(104, 94, 76, 0.06);
+    --hero-milk-mist: rgba(76, 84, 104, 0.07);
   }
   .hero-field {
     position: absolute;
@@ -130,6 +129,7 @@
     uniform float time;     // seconds
     uniform float stacked;  // 1 when the copy is above the device
     uniform vec4 copy;      // the hero's copy: left, top, right, bottom, CSS px
+    uniform vec4 frame;     // the hero's content column: left, top, right, bottom, CSS px
     uniform vec2 centre;    // the galaxy's heart: in the open space between the copy and the device
     uniform vec4 waves[${WAVES}]; // released presses: x, y, the time (negative: none), the size
     uniform vec4 charge;          // a press being held: x, y, the time it began, 1 while held
@@ -140,7 +140,7 @@
     uniform vec3 starRose;
     uniform vec3 starGold;
     uniform vec4 glowColor;
-    uniform vec4 nebula[5];       // the nebula's hues, from the accent's lime round to violet (straight alpha)
+    uniform vec4 nebula[5];       // the galaxy's milky light, white leaning a little cool or warm (straight alpha)
     ${NOISE}
     vec4 sampleField(vec2 p) { return texture2D(field, vec2(p.x / size.x, 1.0 - p.y / size.y)); }
 
@@ -197,15 +197,19 @@
       vec2 spot = (id + 0.3 + 0.4 * vec2(hash(id + seed), hash(id + seed + 17.3))) * cell;
       float pick = hash(id + seed + 41.7);
       float show = smoothstep(pick, pick + 0.12, density);
-      float r = max(big * (0.3 + 0.7 * pow(hash(id + seed + 7.1), 3.0)), 0.55 / dpr);
+      float r = max(big * (0.6 + 0.4 * pow(hash(id + seed + 7.1), 3.0)), 0.6 / dpr);
       vec2 v = q - spot;
       float d = length(v);
-      float twinkle = 0.55 + 0.45 * sin(time * (0.9 + 2.4 * pick) + pick * 60.0);
+      float twinkle = 0.82 + 0.18 * sin(time * (0.5 + 1.2 * pick) + pick * 60.0);
       float hue = hash(id + seed + 3.3);
       // Their temperatures: blue-white, white, yellow, orange-red, and a
       // rare few in the accent.
       rgb = hue < 0.22 ? starBlue : hue < 0.34 ? starGold : hue < 0.42 ? starRose : hue < 0.45 ? hotColor : starColor.rgb;
-      float light = exp(-d * d / (r * r)) + 0.08 * exp(-d / (r * 2.0));
+      rgb = mix(rgb, starColor.rgb, 0.45);
+      // A crisp disc with a narrow glow; most stars faint, a few bright, the
+      // brightest a little larger.
+      float aa = 0.6 / dpr;
+      float light = (smoothstep(r + aa, r - aa, d) + 0.18 * exp(-d / (r * 1.2))) * (0.45 + 0.9 * pow(hash(id + seed + 7.1), 3.0));
       if (hash(id + seed + 5.9) > 1.0 - spiky) {
         float reach = cell * 0.28;
         float fade = 1.0 - smoothstep(0.0, reach, max(abs(v.x), abs(v.y)));
@@ -217,17 +221,34 @@
       return show * twinkle * light;
     }
 
-    // The four layers of stars, far to near: the nearer, the
-    // larger, faster and fewer, and bent more by gravity (q); the galaxy is
-    // thick with star dust.
+    // The three layers of stars, far to near: the nearer, the
+    // larger, faster and fewer, and bent more by gravity (q); the galaxy
+    // holds a few more.
+    // Star clusters, as the sky holds them: in some cells of a coarse grid
+    // over the stars' own coordinates (so they drift with them), a tight
+    // round group, densest at its middle.
+    float clusters(vec2 q) {
+      vec2 id = floor(q / 520.0);
+      if (hash(id + 71.3) > 0.4) return 0.0;
+      vec2 at = (id + 0.3 + 0.4 * vec2(hash(id + 3.7), hash(id + 9.2))) * 520.0;
+      float r = 40.0 + 40.0 * hash(id + 5.5);
+      return exp(-dot(q - at, q - at) / (r * r));
+    }
+
     float starfield(vec2 p, vec2 q, float thick, float band, float detail, out vec3 rgb) {
+      // Not scattered evenly: the stars crowd where the clouds are, are few
+      // between them, and gather in clusters.
       vec3 c0, c1, c2, c3;
-      float s0 = stars(mix(p, q, 0.5), 14.0, 31.0, 3.5, 1.2, 0.95 * thick * (0.4 + 0.6 * smoothstep(0.3, 0.7, detail)), 0.0, c0) * 0.4;
-      float s1 = stars(mix(p, q, 0.6), 34.0, 1.0, 7.0, 2.2, 0.05 + 0.75 * thick, 0.0, c1) * 0.55;
-      float s2 = stars(mix(p, q, 0.8), 90.0, 9.0, 14.0, 3.6, 0.08 + 0.55 * thick, 0.0, c2) * 0.85;
-      float s3 = stars(q, 220.0, 23.0, 28.0, 6.0, 0.1 + 0.35 * band, 0.12, c3);
-      float sum = s0 + s1 + s2 + s3;
-      rgb = (c0 * s0 + c1 * s1 + c2 * s2 + c3 * s3) / max(sum, 1e-4);
+      vec2 qc = mix(p, q, 0.7);
+      float s0 = stars(qc, 12.0, 47.0, 2.0, 1.3, 0.9 * clusters(qc + drift * 2.0), 0.0, c0) * 0.75;
+      float s1 = stars(mix(p, q, 0.6), 40.0, 1.0, 1.5, 2.2, 0.12 + 0.5 * thick, 0.0, c1) * 0.8;
+      float s2 = stars(mix(p, q, 0.8), 90.0, 9.0, 3.0, 2.9, 0.12 + 0.4 * thick, 0.0, c2);
+      float s3 = stars(q, 200.0, 23.0, 6.0, 3.8, 0.18 + 0.3 * thick, 0.15, c3);
+      // The galaxy's unresolved stars: a faint grain where it is thick.
+      vec3 cg;
+      float grain = stars(mix(p, q, 0.5), 7.0, 61.0, 1.0, 0.6, 0.85 * thick, 0.0, cg) * 0.22;
+      float sum = s0 + s1 + s2 + s3 + grain;
+      rgb = (c0 * s0 + c1 * s1 + c2 * s2 + c3 * s3 + cg * grain) / max(sum, 1e-4);
       return sum;
     }
 
@@ -284,7 +305,7 @@
       // The stars, the same ones all along: a press's wave pushes them out
       // as it passes and they settle back, and the press turns their drift.
       // A faint few stay over the copy.
-      float thick = band;
+      float thick = smoothstep(0.35, 0.8, f.r) * band;
       float seen = sky;
       vec3 starRgb;
       float sum = starfield(p, q, thick, band, detail, starRgb);
@@ -312,11 +333,14 @@
       // The nebula under the stars: the clouds inside the band and the core,
       // their hues weaving, lying in belts as Jupiter's do, brighter where a
       // wave passes.
-      float cloud = smoothstep(0.2, 0.68, f.r);
+      float cloud = smoothstep(0.32, 0.75, f.r);
       float fine = smoothstep(0.55, 0.92, detail);
-      float clear = sky;
-      // Many hues, each region keeping one of its own, all along one arc
-      // from the accent's lime round to violet, so they sit with the site:
+      // The light gathers within the content column, fading out over a
+      // couple of hundred px beyond it.
+      vec2 fd = max(frame.xy - p, p - frame.zw);
+      float clear = sky * (1.0 - smoothstep(0.0, 220.0, length(max(fd, 0.0))));
+      // Milky light, as a galaxy's unresolved stars give: white leaning a
+      // little cool or warm by region, so it sits with the site's greys:
       // the place on the arc follows where the clouds lie, shifts belt to
       // belt and slowly sways.
       float belt = belts(p, f.r, detail);
@@ -326,7 +350,7 @@
       hue = mix(hue, nebula[2], clamp(x - 1.0, 0.0, 1.0));
       hue = mix(hue, nebula[3], clamp(x - 2.0, 0.0, 1.0));
       hue = mix(hue, nebula[4], clamp(x - 3.0, 0.0, 1.0));
-      float gn = hue.a * (band * (0.3 + cloud * (0.45 + 0.9 * fine)) * 1.2 + gx.z * (0.35 + 0.65 * cloud) * 0.7) * (0.45 + 0.75 * belt) * clear;
+      float gn = hue.a * (band * (0.12 + cloud * (0.45 + 0.9 * fine)) * 1.2 + gx.z * (0.35 + 0.65 * cloud) * 0.7) * (0.45 + 0.75 * belt) * clear;
       float gw = glowColor.a * hit * 0.35 * seen;
       float g = clamp(gn + gw, 0.0, 1.0);
       vec3 glowRgb = (hue.rgb * gn + glowColor.rgb * gw) / max(gn + gw, 1e-4);
@@ -443,11 +467,11 @@
       gl!.uniform3fv(u('starGold'), color('--hero-star-gold', [0.95, 0.9, 0.6, 1]).slice(0, 3));
       gl!.uniform4fv(u('glowColor'), color('--hero-glow', [0.78, 0.95, 0.43, 0.16]));
       gl!.uniform4fv(u('nebula'), [
-        ...color('--hero-nebula-lime', [0.59, 0.78, 0.36, 0.2]),
-        ...color('--hero-nebula-teal', [0.24, 0.69, 0.63, 0.21]),
-        ...color('--hero-nebula-azure', [0.24, 0.55, 0.82, 0.22]),
-        ...color('--hero-nebula-indigo', [0.35, 0.41, 0.86, 0.22]),
-        ...color('--hero-nebula-violet', [0.53, 0.38, 0.81, 0.2]),
+        ...color('--hero-milk-cool', [0.77, 0.81, 0.9, 0.13]),
+        ...color('--hero-milk-pale', [0.84, 0.86, 0.91, 0.12]),
+        ...color('--hero-milk-silver', [0.87, 0.88, 0.89, 0.12]),
+        ...color('--hero-milk-warm', [0.91, 0.88, 0.82, 0.12]),
+        ...color('--hero-milk-mist', [0.8, 0.83, 0.89, 0.13]),
       ]);
     }
 
@@ -475,6 +499,9 @@
       const copy = hero.querySelector('.hero__copy')?.getBoundingClientRect();
       if (copy) gl!.uniform4f(u('copy'), copy.left - rect.left, copy.top - rect.top, copy.right - rect.left, copy.bottom - rect.top);
       else gl!.uniform4f(u('copy'), -1e4, -1e4, -1e4, -1e4);
+      const frame = hero.querySelector('.hero__inner')?.getBoundingClientRect();
+      if (frame) gl!.uniform4f(u('frame'), frame.left - rect.left, frame.top - rect.top, frame.right - rect.left, frame.bottom - rect.top);
+      else gl!.uniform4f(u('frame'), 0, 0, w, h);
       // The galaxy's heart where the copy gives way to the device, level with
       // the device; between them once stacked.
       const device = hero.querySelector('.device')?.getBoundingClientRect();
