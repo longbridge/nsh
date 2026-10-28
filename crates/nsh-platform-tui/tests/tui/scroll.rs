@@ -1,5 +1,5 @@
 use nsh_core::prelude::*;
-use nsh_platform_tui::{App, Root};
+use nsh_platform_tui::{App, AppView, Handled, Input, Modifiers, Root};
 use ratatui_core::{backend::TestBackend, style::Color, terminal::Terminal};
 
 use super::app::{draw_until, surface};
@@ -97,8 +97,9 @@ fn CommandScrollPage() -> impl IntoElement {
 
 #[test]
 fn core_scroll_commands_move_content_and_its_clipped_hit_areas() {
-    use super::app::mouse;
     use nsh_platform_tui::{Handled, MouseButton, MouseKind};
+
+    use super::app::mouse;
     let (mut view, rx) = surface();
     let mut terminal = Terminal::new(TestBackend::new(30, 8)).unwrap();
     view.load(App::Rust(Root::new::<CommandScrollPage>(|| ())))
@@ -170,4 +171,151 @@ fn initial_offsets_clip_text_on_both_axes() {
     assert_eq!(buffer[(1, 3)].symbol(), "t");
     assert_eq!(buffer[(1, 4)].symbol(), "e");
     assert_eq!(buffer[(1, 5)].symbol(), " ");
+}
+
+#[component]
+fn SearchPanels() -> impl IntoElement {
+    scroll_panels(false)
+}
+
+#[component]
+fn FocusPanels() -> impl IntoElement {
+    scroll_panels(true)
+}
+
+fn scroll_panels(controls: bool) -> impl IntoElement {
+    let sidebar_offset = signal(0);
+    let panel_offset = signal(0);
+    let focused = signal(-1);
+    view()
+        .flex_1()
+        .child(
+            text(move || {
+                format!(
+                    "sidebar {} panel {} focus {}",
+                    sidebar_offset.get(),
+                    panel_offset.get(),
+                    focused.get()
+                )
+            })
+            .h(px(16.0)),
+        )
+        .child(
+            view()
+                .flex_row()
+                .child(
+                    scroll()
+                        .w(px(120.0))
+                        .h(px(112.0))
+                        .on_scroll(move |event: &ScrollEvent| {
+                            sidebar_offset.set(event.offset.y.0 as i32)
+                        })
+                        .child(text("watchlist").h(px(320.0)).flex_shrink_0()),
+                )
+                .child(
+                    view()
+                        .w(px(200.0))
+                        .h(px(112.0))
+                        .child(
+                            scroll()
+                                .w_full()
+                                .h_full()
+                                .on_scroll(move |event: &ScrollEvent| {
+                                    panel_offset.set(event.offset.y.0 as i32)
+                                })
+                                .children((0..20).map(|index| {
+                                    view()
+                                        .h(px(16.0))
+                                        .flex_shrink_0()
+                                        .focusable(controls)
+                                        .on_focus(move |_: &()| focused.set(index))
+                                        .on_press(|_: &()| {})
+                                        .child(text(format!("detail {index:02}")))
+                                })),
+                        )
+                        .child(
+                            view()
+                                .absolute()
+                                .bottom(px(0.0))
+                                .w_full()
+                                .h(px(32.0))
+                                .bg(nsh_core::color::rgb(0x884422))
+                                .child(text("trade bar")),
+                        ),
+                ),
+        )
+}
+
+fn panel_key(view: &mut AppView, name: &str, ctrl: bool, alt: bool) {
+    assert_eq!(
+        view.handle(Input::Key {
+            key: name.into(),
+            modifiers: Modifiers {
+                ctrl,
+                alt,
+                ..Default::default()
+            },
+            release: false,
+        }),
+        Handled::Yes
+    );
+}
+
+fn search_panel(view: &mut AppView, terminal: &mut Terminal<TestBackend>, query: &str) {
+    panel_key(view, "s", true, false);
+    assert_eq!(view.handle(Input::Paste(query.into())), Handled::Yes);
+    terminal
+        .draw(|frame| view.render(frame, frame.area()))
+        .unwrap();
+}
+
+#[test]
+fn page_and_endpoint_keys_follow_the_plain_text_search_point_in_its_panel() {
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(60, 12)).unwrap();
+    view.load(App::Rust(Root::new::<SearchPanels>(|| ())))
+        .unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "sidebar 0 panel 0 focus -1");
+    search_panel(&mut view, &mut terminal, "detail 00");
+    for (name, ctrl, alt, offset) in [
+        ("v", true, false, 112),
+        ("v", false, true, 0),
+        ("PageDown", false, false, 112),
+        ("PageUp", false, false, 0),
+        (">", false, true, 208),
+        ("<", false, true, 0),
+    ] {
+        panel_key(&mut view, name, ctrl, alt);
+        draw_until(
+            &mut view,
+            &mut terminal,
+            &rx,
+            &format!("sidebar 0 panel {offset} focus -1"),
+        );
+    }
+}
+
+#[test]
+fn page_keys_follow_the_focused_control_in_its_panel() {
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(60, 12)).unwrap();
+    view.load(App::Rust(Root::new::<FocusPanels>(|| ())))
+        .unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "sidebar 0 panel 0 focus -1");
+    panel_key(&mut view, "Tab", false, false);
+    draw_until(&mut view, &mut terminal, &rx, "sidebar 0 panel 0 focus 0");
+    for (name, ctrl, alt, offset, focused) in [
+        ("v", true, false, 112, 7),
+        ("v", false, true, 0, 0),
+        ("PageDown", false, false, 112, 7),
+        ("PageUp", false, false, 0, 0),
+    ] {
+        panel_key(&mut view, name, ctrl, alt);
+        draw_until(
+            &mut view,
+            &mut terminal,
+            &rx,
+            &format!("sidebar 0 panel {offset} focus {focused}"),
+        );
+    }
 }

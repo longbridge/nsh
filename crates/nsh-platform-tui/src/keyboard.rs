@@ -662,6 +662,11 @@ impl Keyboard {
             Action::PageDown | Action::PageUp | Action::Start | Action::End => {
                 let target = self
                     .focused
+                    .or(self.search_point)
+                    .filter(|&id| {
+                        geometry.iter().any(|g| g.id == id)
+                            && input_scope(tree, id) == crate::navigation::focus_scope(tree)
+                    })
                     .and_then(|id| scroll_ancestor(tree, id))
                     .or_else(|| {
                         geometry
