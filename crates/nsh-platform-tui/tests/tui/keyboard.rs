@@ -52,18 +52,18 @@ fn FocusPage() -> impl IntoElement {
 }
 
 #[test]
-fn terminal_keys_move_focus_in_reading_order_and_enter_presses_it() {
+fn terminal_keys_follow_tree_order_and_horizontal_keys_stay_spatial() {
     let (mut view, rx) = surface();
     let mut terminal = Terminal::new(TestBackend::new(40, 10)).unwrap();
     view.load(App::Rust(Root::new::<FocusPage>(|| ()))).unwrap();
     draw_until(&mut view, &mut terminal, &rx, "focus none");
     for (input, focused, cursor) in [
-        (ctrl("n"), "A", (0, 1)),
-        (key("Right", Default::default()), "B", (10, 1)),
-        (key("Down", Default::default()), "C", (0, 3)),
-        (ctrl("p"), "B", (10, 1)),
+        (ctrl("n"), "B", (10, 1)),
         (key("Left", Default::default()), "A", (0, 1)),
-        (key("Tab", Default::default()), "B", (10, 1)),
+        (key("Down", Default::default()), "C", (0, 3)),
+        (ctrl("p"), "A", (0, 1)),
+        (key("Right", Default::default()), "B", (10, 1)),
+        (key("Tab", Default::default()), "A", (0, 1)),
         (
             key(
                 "Tab",
@@ -72,8 +72,8 @@ fn terminal_keys_move_focus_in_reading_order_and_enter_presses_it() {
                     ..Default::default()
                 },
             ),
-            "A",
-            (0, 1),
+            "B",
+            (10, 1),
         ),
     ] {
         assert_eq!(view.handle(input), Handled::Yes);
@@ -685,7 +685,7 @@ fn the_diagnostics_panel_owns_repeated_keys_and_preserves_app_focus() {
     view.load(App::Rust(Root::new::<FocusPage>(|| ()))).unwrap();
     draw_until(&mut view, &mut terminal, &rx, "focus none");
     view.handle(ctrl("n"));
-    draw_until(&mut view, &mut terminal, &rx, "focus A");
+    draw_until(&mut view, &mut terminal, &rx, "focus B");
     view.handle(ctrl("h"));
     view.handle(key("e", Default::default()));
     draw_until(&mut view, &mut terminal, &rx, "Logs and errors");
@@ -705,10 +705,10 @@ fn the_diagnostics_panel_owns_repeated_keys_and_preserves_app_focus() {
         "Log01"
     );
     view.handle(key("Escape", Default::default()));
-    draw_until(&mut view, &mut terminal, &rx, "focus A");
+    draw_until(&mut view, &mut terminal, &rx, "focus B");
     assert!(!terminal.backend().cursor_visible());
     assert_eq!(
-        terminal.backend().buffer()[(0, 1)].bg,
+        terminal.backend().buffer()[(10, 1)].bg,
         Color::Rgb(0x12, 0x34, 0x56)
     );
     view.stop();

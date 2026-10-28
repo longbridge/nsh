@@ -880,6 +880,8 @@ pub struct Core<M: TextEngine> {
     root: Key,
     viewport: Size<Points>,
     mount: Vec<MountItem>,
+    track_tree_order: bool,
+    tree_order_changed: bool,
     /// Batches handed out so far: tells this batch's mount indexes from
     /// earlier ones'.
     batches: u64,
@@ -1019,6 +1021,8 @@ impl<M: TextEngine> Core<M> {
             root,
             viewport,
             mount: Vec::new(),
+            track_tree_order: false,
+            tree_order_changed: false,
             batches: 0,
             commands: Vec::new(),
             layout_animation: None,
@@ -1623,6 +1627,18 @@ impl<M: TextEngine> Core<M> {
         if !self.outer_asked.is_empty() {
             self.send_outer_scrolls();
         }
+        if std::mem::take(&mut self.tree_order_changed) {
+            let mut order = Vec::new();
+            let mut pending = vec![self.root];
+            while let Some(key) = pending.pop() {
+                let node = &self.nodes[key as usize];
+                if node.created {
+                    order.push(node.id);
+                }
+                pending.extend(node.children.iter().rev().copied());
+            }
+            self.mount.push(MountItem::TreeOrder(order));
+        }
         if self.mount.is_empty() || matches!(self.mount[..], [MountItem::LayoutAnimation(_)]) {
             self.mount.clear();
             None
@@ -1632,6 +1648,13 @@ impl<M: TextEngine> Core<M> {
                 items: std::mem::take(&mut self.mount),
             })
         }
+    }
+
+    /// Include logical document order in mount batches for a platform's focus traversal.
+    /// Native sibling insertions describe paint order and can differ because of `zIndex`.
+    pub fn set_tree_order_tracking(&mut self, enabled: bool) {
+        self.track_tree_order = enabled;
+        self.tree_order_changed = enabled;
     }
 
     /// One round of a commit: views, layout, lists, commands, into the
@@ -3578,6 +3601,7 @@ impl<M: TextEngine> Core<M> {
         self.set_inline(child, inline);
         self.nodes[child as usize].parent = parent;
         self.nodes[parent as usize].children.insert(pos, child);
+        self.tree_order_changed |= self.track_tree_order;
         self.ch_changed(child);
         self.status_bars_moved |= !self.status_bar_nodes.is_empty();
         self.outer_moved |= !self.parent_lists.is_empty() && self.may_hold_page_list(child);
@@ -3682,6 +3706,7 @@ impl<M: TextEngine> Core<M> {
             .position(|&c| c == key)
             .expect("child of parent");
         siblings.remove(pos);
+        self.tree_order_changed |= self.track_tree_order;
         if let Some(list) = self.nodes[parent as usize].list.as_mut() {
             list.remove_cell(key);
         }
@@ -3998,6 +4023,7 @@ impl<M: TextEngine> Core<M> {
             return;
         }
         node.created = true;
+        self.tree_order_changed |= self.track_tree_order;
         node.frame = Bounds::UNSET;
         if let Some(scroll) = node.scroll.as_mut() {
             scroll.content = None;

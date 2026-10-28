@@ -56,6 +56,61 @@ fn reversed(terminal: &Terminal<TestBackend>) -> String {
 }
 
 #[component]
+fn SpatialSearch() -> impl IntoElement {
+    let focused = signal("none");
+    let control = move |label: &'static str, x, y| {
+        view()
+            .absolute()
+            .left(px(x))
+            .top(px(y))
+            .w(px(64.0))
+            .h(px(16.0))
+            .on_press(|_: &()| {})
+            .on_focus(move |_: &()| focused.set(label))
+            .child(text(format!("match {label}")))
+    };
+    view()
+        .flex_1()
+        .child(control("A", 0.0, 32.0))
+        .child(control("B", 80.0, 0.0))
+        .child(control("C", 80.0, 16.0))
+        .child(text("plain note").absolute().top(px(16.0)))
+        .child(
+            text(move || format!("focus {}", focused.get()))
+                .absolute()
+                .top(px(64.0)),
+        )
+}
+
+#[test]
+fn search_and_traversal_from_plain_text_keep_spatial_order() {
+    for (next, expected) in [("n", "C"), ("p", "B")] {
+        let (mut view, rx) = surface();
+        let mut terminal = Terminal::new(TestBackend::new(40, 10)).unwrap();
+        view.load(App::Rust(Root::new::<SpatialSearch>(|| ())))
+            .unwrap();
+        draw_until(&mut view, &mut terminal, &rx, "focus none");
+        view.handle(ctrl("s"));
+        type_text(&mut view, &mut terminal, "match");
+        draw_until(&mut view, &mut terminal, &rx, "focus B");
+        for label in ["C", "A"] {
+            view.handle(ctrl("s"));
+            draw_until(&mut view, &mut terminal, &rx, &format!("focus {label}"));
+        }
+        view.handle(ctrl("g"));
+        view.handle(ctrl("s"));
+        type_text(&mut view, &mut terminal, "note");
+        view.handle(key("Enter"));
+        view.handle(ctrl(next));
+        draw_until(&mut view, &mut terminal, &rx, &format!("focus {expected}"));
+        if next == "n" {
+            view.handle(ctrl("n"));
+            draw_until(&mut view, &mut terminal, &rx, "focus A");
+        }
+    }
+}
+
+#[component]
 fn SearchPage() -> impl IntoElement {
     let focused = signal(-1);
     let offset = signal(0);

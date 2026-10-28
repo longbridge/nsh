@@ -79,7 +79,7 @@ fn FocusFlow() -> impl IntoElement {
                 .child(
                     view()
                         .absolute()
-                        .top(px(96.0))
+                        .top(px(112.0))
                         .w(px(160.0))
                         .h(px(16.0))
                         .on_focus(move |_: &()| focused.set("first"))
@@ -90,7 +90,7 @@ fn FocusFlow() -> impl IntoElement {
                 .child(
                     view()
                         .absolute()
-                        .top(px(112.0))
+                        .top(px(96.0))
                         .w(px(160.0))
                         .h(px(16.0))
                         .on_focus(move |_: &()| focused.set("second"))
@@ -138,7 +138,7 @@ fn open_modal() -> (
 }
 
 #[test]
-fn presenting_a_modal_focuses_its_first_control_and_closing_restores_the_opener() {
+fn presenting_a_modal_focuses_its_first_tree_stop_and_closing_restores_the_opener() {
     let (mut view, mut terminal, rx) = open_modal();
     assert!(!terminal.backend().cursor_visible());
     key(&mut view, "Tab", false);

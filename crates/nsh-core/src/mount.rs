@@ -633,6 +633,10 @@ pub struct ImageOptions {
 /// created by the preceding items.
 #[derive(Debug, Clone)]
 pub enum MountItem {
+    /// Mounted nodes in depth-first logical tree order, independent of native
+    /// stacking (`Insert`). Opt-in through `Core::set_tree_order_tracking`;
+    /// emitted after structural changes in the same batch as the affected views.
+    TreeOrder(Vec<NodeId>),
     /// Create a native view. It starts detached and invisible.
     Create {
         /// Node id, used to address the view in later items.

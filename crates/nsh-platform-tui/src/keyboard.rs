@@ -83,7 +83,7 @@ impl Keyboard {
                     })
             })
             .collect();
-        candidates.sort_by_key(|g| (g.bounds.top, g.bounds.left));
+        candidates.sort_by_key(|g| tree.get(g.id).unwrap().tree_order);
         candidates
     }
 
@@ -555,7 +555,7 @@ impl Keyboard {
         match action {
             Action::Next | Action::Previous | Action::Left | Action::Right => {
                 self.pending_scroll_focus = None;
-                let candidates = self.candidates(tree, geometry);
+                let mut candidates = self.candidates(tree, geometry);
                 if candidates.is_empty() {
                     return if crate::navigation::focus_scope(tree) == ROOT_ID {
                         Handled::Ignored
@@ -568,6 +568,10 @@ impl Keyboard {
                     .search_point
                     .and_then(|id| geometry.iter().find(|g| g.id == id))
                     .map(|g| (g.bounds.top, g.bounds.left));
+                if point.is_some() && current.is_none() {
+                    // A plain-text search point continues spatially to its nearest control.
+                    candidates.sort_by_key(|g| (g.bounds.top, g.bounds.left));
+                }
                 let next = match (action, point) {
                     (Action::Next, Some(point)) if current.is_none() => candidates
                         .iter()

@@ -336,7 +336,7 @@ Modal focus restoration takes precedence over page history and retains its separ
 
 Modals cover the surface and paint above the page. A batch's new modals follow the completed tree's order (core
 sibling insertions may arrive in reverse); a modal presented in a later batch goes above the existing ones.
-Presenting a modal saves the previous focus and moves focus to its first focusable view in reading order; an
+Presenting a modal saves the previous focus and moves focus to its first focusable view in tree order; an
 empty modal has no focus. Keyboard traversal stays inside the newest modal, including when it has no controls.
 Closing a modal, natively or through an app update, restores the saved view only if it still exists, is focusable
 and has visible Cells. Otherwise focus is cleared, rather than moved to another page control. Nested modals keep
@@ -459,18 +459,24 @@ it owns keys and the app's field caret is hidden; closing it restores the caret 
 
 | Keys | Action |
 |---|---|
-| Ctrl+N, Down, Tab | Next focusable view |
-| Ctrl+P, Up, Shift+Tab | Previous focusable view |
+| Ctrl+N, Down, Tab | Next focusable view in tree order |
+| Ctrl+P, Up, Shift+Tab | Previous focusable view in tree order |
 | Ctrl+F, Right / Ctrl+B, Left | Nearest focusable view to the right / left on the same row |
 | Enter | Press the focused view, reporting PressDown, PressUp and Press in order, at its middle |
 | Esc, Ctrl+G | Leave the focused field; otherwise go back through the app handler, stack or newest modal |
 | Ctrl+V, PageDown / Alt+V, PageUp | Scroll one viewport down / up |
-| Alt+<, Home / Alt+>, End | Focus the first / last control and reveal it; scroll to the endpoint when there are none |
+| Alt+<, Home / Alt+>, End | Focus the first / last control in the Scroll's tree order and reveal it; scroll to the endpoint when there are none |
 | Ctrl+S / Ctrl+R | Search the text on screen forward / backward in the Minibuffer |
 | Ctrl+C | Quit |
 
-Focus visits pressable and editable views, honoring `focusable` and disabled state, in top-to-bottom and
-left-to-right Cell order. Traversal wraps at the ends; horizontal movement stays on overlapping row ranges.
+Focus visits pressable and editable views, honoring `focusable` and disabled state, in depth-first document
+order within the focus scope, as NSH's other platforms do. A sidebar's stops stay together before the next
+panel's stops, regardless of their Cell positions. Traversal wraps at the ends; horizontal movement stays
+spatial, choosing the nearest control on overlapping row ranges.
+The sink opts into `MountItem::TreeOrder`: the core supplies logical document order in the same batch as
+structural changes. `Insert` retains native paint order, including `zIndex`; raising a sidebar changes its
+stacking while its focus stops retain their document order. Ordinary text and style updates keep the stored
+order. The backend filters that order through the completed frame's geometry and current focus scope.
 Concealed screens supply no candidates. When a modal is open, candidates come only from the newest modal.
 Focus and focus-within states are reported through TrackStates and `EngineControl::set_states`, so the app's
 focus styles apply. Pressable views have no platform focus marker: their app-defined focus styles are the

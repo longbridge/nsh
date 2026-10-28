@@ -16,6 +16,119 @@ fn key(view: &mut AppView, name: &str, ctrl: bool) -> Handled {
 }
 
 #[component]
+fn SidebarAndPanel() -> impl IntoElement {
+    let focused = signal("none");
+    let button = move |label: &'static str| {
+        view()
+            .h(px(16.0))
+            .on_focus(move |_: &()| focused.set(label))
+            .on_press(|_: &()| {})
+            .child(text(label))
+    };
+    view()
+        .flex_1()
+        .child(
+            scroll().w(px(320.0)).h(px(64.0)).child(
+                view()
+                    .flex_row()
+                    .child(
+                        view()
+                            .w(px(96.0))
+                            .z_index(1)
+                            .child(button("Stocks"))
+                            .child(button("AI Chat"))
+                            .child(button("Photos")),
+                    )
+                    .child(
+                        view()
+                            .w(px(96.0))
+                            .child(button("Market"))
+                            .child(button("Pause")),
+                    ),
+            ),
+        )
+        .child(text(move || format!("focused {}", focused.get())))
+}
+
+#[test]
+fn traversal_finishes_the_sidebar_before_entering_the_panel_in_both_directions() {
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(60, 12)).unwrap();
+    view.load(App::Rust(Root::new::<SidebarAndPanel>(|| ())))
+        .unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "focused none");
+    for (name, ctrl, shift, expected) in [
+        ("n", true, false, "Stocks"),
+        ("Tab", false, false, "AI Chat"),
+        ("n", true, false, "Photos"),
+        ("Tab", false, false, "Market"),
+        ("n", true, false, "Pause"),
+        ("Tab", false, false, "Stocks"),
+        ("Tab", false, true, "Pause"),
+        ("p", true, false, "Market"),
+        ("Tab", false, true, "Photos"),
+        ("p", true, false, "AI Chat"),
+        ("Tab", false, true, "Stocks"),
+        ("p", true, false, "Pause"),
+    ] {
+        assert_eq!(
+            view.handle(Input::Key {
+                key: name.into(),
+                modifiers: Modifiers {
+                    ctrl,
+                    shift,
+                    ..Default::default()
+                },
+                release: false,
+            }),
+            Handled::Yes
+        );
+        draw_until(
+            &mut view,
+            &mut terminal,
+            &rx,
+            &format!("focused {expected}"),
+        );
+    }
+}
+
+#[test]
+fn endpoints_use_tree_order_while_horizontal_keys_move_between_columns() {
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(60, 12)).unwrap();
+    view.load(App::Rust(Root::new::<SidebarAndPanel>(|| ())))
+        .unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "focused none");
+    for (name, ctrl, alt, expected) in [
+        ("End", false, false, "Pause"),
+        ("Home", false, false, "Stocks"),
+        ("f", true, false, "Market"),
+        ("b", true, false, "Stocks"),
+        (">", false, true, "Pause"),
+        ("<", false, true, "Stocks"),
+    ] {
+        assert_eq!(
+            view.handle(Input::Key {
+                key: name.into(),
+                modifiers: Modifiers {
+                    ctrl,
+                    alt,
+                    ..Default::default()
+                },
+                release: false,
+            }),
+            Handled::Yes
+        );
+        draw_until(
+            &mut view,
+            &mut terminal,
+            &rx,
+            &format!("focused {expected}"),
+        );
+    }
+}
+
+#[component]
 fn ReturningPage() -> impl IntoElement {
     let detail = signal(false);
     let focused = signal("none");
