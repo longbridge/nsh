@@ -422,6 +422,159 @@ fn a_border_adjacent_text_group_keeps_both_lines_inside_the_box() {
 }
 
 #[component]
+fn AnchoredTooltip() -> impl IntoElement {
+    let anchor = element_ref();
+    view()
+        .flex_1()
+        .child(
+            view()
+                .absolute()
+                .left(px(16.0))
+                .top(px(216.0))
+                .w(px(80.0))
+                .h(px(40.0))
+                .bg(nsh_core::color::rgb(0x123456))
+                .element_ref(&anchor),
+        )
+        .child(
+            overlay()
+                .anchor(&anchor)
+                .placement(nsh_core::overlay::Placement::Bottom)
+                .align(nsh_core::overlay::Align::Start)
+                .offset(px(4.0))
+                .child(text("tooltip")),
+        )
+        .child(view().absolute().top(px(400.0)).child(text("ready")))
+}
+
+#[test]
+fn a_bottom_tooltip_starts_after_the_anchors_last_cell_row() {
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(30, 32)).unwrap();
+    view.load(App::Rust(Root::new::<AnchoredTooltip>(|| ())))
+        .unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "tooltip");
+    let buffer = terminal.backend().buffer();
+    assert_eq!(buffer[(2, 15)].bg, Color::Rgb(0x12, 0x34, 0x56));
+    assert_eq!(buffer[(2, 15)].symbol(), " ");
+    assert_eq!(buffer[(2, 16)].symbol(), "t");
+    assert_ne!(buffer[(2, 16)].bg, Color::Rgb(0x12, 0x34, 0x56));
+}
+
+#[component]
+fn ThinAnchor() -> impl IntoElement {
+    let anchor = element_ref();
+    view()
+        .flex_1()
+        .child(
+            view()
+                .absolute()
+                .left(px(16.0))
+                .top(px(8.0))
+                .w(px(80.0))
+                .h(px(4.0))
+                .bg(nsh_core::color::rgb(0x123456))
+                .element_ref(&anchor),
+        )
+        .child(
+            overlay()
+                .anchor(&anchor)
+                .placement(nsh_core::overlay::Placement::Bottom)
+                .align(nsh_core::overlay::Align::Start)
+                .offset(px(0.0))
+                .h(px(4.0))
+                .w(px(80.0))
+                .rounded(px(2.0))
+                .bg(nsh_core::color::rgb(0xabcdef)),
+        )
+        .child(view().absolute().top(px(96.0)).child(text("ready")))
+}
+
+#[test]
+fn even_a_subcell_anchor_keeps_its_row_when_a_tooltip_opens_below() {
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(30, 12)).unwrap();
+    view.load(App::Rust(Root::new::<ThinAnchor>(|| ())))
+        .unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "ready");
+    let buffer = terminal.backend().buffer();
+    assert_eq!(buffer[(2, 1)].symbol(), " ");
+    assert_eq!(buffer[(2, 1)].bg, Color::Rgb(0x12, 0x34, 0x56));
+    assert_eq!(buffer[(2, 2)].bg, Color::Rgb(0xab, 0xcd, 0xef));
+}
+
+#[component]
+fn ThinAnchorsOnEverySide() -> impl IntoElement {
+    use nsh_core::overlay::{Align, Placement};
+    let moved = signal(false);
+    view()
+        .flex_1()
+        .children(
+            [
+                Placement::Top,
+                Placement::Bottom,
+                Placement::Left,
+                Placement::Right,
+            ]
+            .into_iter()
+            .enumerate()
+            .map(|(index, side)| {
+                let anchor = element_ref();
+                view()
+                    .child(
+                        view()
+                            .absolute()
+                            .left(px(40.0 + index as f32 * 80.0))
+                            .top(move || px(if moved.get() { 96.0 } else { 64.0 }))
+                            .w(px(4.0))
+                            .h(px(4.0))
+                            .element_ref(&anchor),
+                    )
+                    .child(
+                        overlay()
+                            .anchor(&anchor)
+                            .placement(side)
+                            .align(Align::Start)
+                            .offset(px(0.0))
+                            .child(text("X")),
+                    )
+            }),
+        )
+        .child(
+            view()
+                .absolute()
+                .top(px(160.0))
+                .on_press(move |_: &()| moved.set(true))
+                .child(text(move || if moved.get() { "moved" } else { "move" })),
+        )
+}
+
+#[test]
+fn overlays_follow_moving_subcell_anchors_on_all_four_sides() {
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(50, 16)).unwrap();
+    view.load(App::Rust(Root::new::<ThinAnchorsOnEverySide>(|| ())))
+        .unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "move");
+    for row in [4, 6] {
+        let buffer = terminal.backend().buffer();
+        for (x, y) in [(5, row - 1), (15, row + 1), (24, row), (36, row)] {
+            assert_eq!(buffer[(x, y)].symbol(), "X", "overlay {x},{y}");
+        }
+        if row == 4 {
+            for key in ["Tab", "Enter"] {
+                view.handle(nsh_platform_tui::Input::Key {
+                    key: key.into(),
+                    modifiers: Default::default(),
+                    release: false,
+                });
+            }
+            draw_until(&mut view, &mut terminal, &rx, "moved");
+        }
+    }
+}
+
+#[component]
 fn CrowdedCard() -> impl IntoElement {
     let phase = signal(0u32);
     view()

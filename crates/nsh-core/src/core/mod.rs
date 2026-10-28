@@ -610,6 +610,11 @@ impl Node {
     /// screen readers skip a spare list cell.
     fn mounted_props(&self) -> Box<ViewProps> {
         let mut props = self.props.clone().unwrap_or_default();
+        props.overlay_anchor = self
+            .root
+            .as_ref()
+            .and_then(|root| root.overlay.as_ref())
+            .and_then(|overlay| overlay.native_anchor);
         if props.pointer_events == crate::props::PointerEvents::Auto {
             props.pointer_events = self.class_pointer;
         }

@@ -261,6 +261,8 @@ pub struct Ripple {
 /// Non-style properties of a view that only the platform needs.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct ViewProps {
+    /// Resolved overlay placement for native grid projection; ordinary views have none.
+    pub overlay_anchor: Option<crate::overlay::PlacedAnchor>,
     /// Which touches the view and its subtree receive.
     pub pointer_events: PointerEvents,
     /// Extends the touch area beyond the view's bounds.

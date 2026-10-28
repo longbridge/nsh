@@ -145,6 +145,27 @@ impl Painter<'_> {
         };
         let mut projection = parent.view(view);
         let local_frame = Bounds::new(Point::default(), view.frame.size);
+        if let Some(anchor) = view.props.overlay_anchor {
+            let anchor_bounds = anchor
+                .node
+                .and_then(|node| self.geometry.iter().find(|geometry| geometry.id == node))
+                .map(|geometry| geometry.bounds)
+                .unwrap_or_else(|| {
+                    CellBounds::new(parent.bounds(anchor.bounds), self.cells, self.area)
+                });
+            let popup = project(projection.bounds(local_frame));
+            use nsh_core::overlay::Placement;
+            let (columns, rows) = match anchor.placement {
+                Placement::Bottom => (0, (anchor_bounds.bottom - popup.top).max(0)),
+                Placement::Top => (0, (anchor_bounds.top - popup.bottom).min(0)),
+                Placement::Right => ((anchor_bounds.right - popup.left).max(0), 0),
+                Placement::Left => ((anchor_bounds.left - popup.right).min(0), 0),
+            };
+            projection = projection.snapped(Point::new(
+                self.cells.width() * columns as f32,
+                self.cells.height() * rows as f32,
+            ));
+        }
         let frame = projection.bounds(local_frame);
         let bounds = project(frame);
         let content_projection = projection;

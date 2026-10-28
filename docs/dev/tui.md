@@ -306,7 +306,9 @@ Outlines paint after the content of their surface. Edges that cross glyphs move 
 is drawn only when its entire closed perimeter fits the clip and is free; otherwise the view's own edge Cells
 keep their symbols and take the outline color. An outline never leaves isolated L-shaped fragments.
 Text painting, search highlights, selection and the test agent share the projected text content rectangle.
-
+Anchored overlays use the resolved side and anchor from `ViewProps::overlay_anchor`. Their nearest edge moves
+out to the anchor's Cell boundary when needed, including anchors smaller than one Cell. The core's placement,
+flip decisions and point-layout events remain unchanged.
 
 `CellTextEngine` counts Unicode display width: wide characters take two Cells and grapheme clusters stay whole.
 Ordinary text occupies one row at any font size. Inline attachments reserve their width in whole Cells
@@ -705,6 +707,7 @@ permit clipboard writes; `nsh test` uses memory and never writes to the machine'
 | Other view fills | RGB Cell backgrounds with rounded coverage sampled at Cell centers; alpha and view opacity blended over the existing background (the page color where the terminal's shows); nothing below 3% opacity |
 | Borders | Reserved inner Cell rect; per-side colors and per-corner glyphs; compact boxes omit horizontal or vertical strokes to keep room for content |
 | Outlines, including control focus outlines | A complete single-Cell stroke in free Cells, or recoloring the view's own edge Cells while retaining their symbols |
+| Anchored overlays | Snapped outside the anchor's Cell rect on the core-resolved placement side |
 | Positive sub-Cell extents | At least one Cell; zero-width progress indicators remain empty |
 | Base control value states and projected part states | Core-resolved checked, mixed, selected and disabled styles |
 | Slider keyboard input | Component-owned arrows, page and endpoint keys while its thumb has focus |
