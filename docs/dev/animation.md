@@ -113,7 +113,7 @@ maps to what:
 | `Sequence` | `Animated.sequence` / `Animation::sequence` (each step starts at the exact end of the one before) |
 | `Stagger` / `StaggerOrigin` (first, last, center, index) | `Animated.stagger(ms, list, { from })` / `Animation::stagger_from`, `StaggerFrom` |
 | `Presence` / `PresencePhase` (keeps content mounted while it exits) | `createMotion({ enter })` / `motion().entering(..)` for entrances, `await play(exit)` then removing the view for exits. Gap: no presence component that keeps a removed view mounted through its exit |
-| `MotionReveal` (measured vertical reveal, clipped) | Gap: not provided; buildable with an animated `maskImage`-style fade or `scaleY` on a clipped view, or a layout animation of the height (heights are not bindable to animated values) |
+| `MotionReveal` (measured vertical reveal, clipped) | `nsh/base`'s `Collapsible` `reveal`: a clip view between zero and the content's height whose change is a layout animation of its commit (a critically damped spring of `spring_control`'s time), the content kept until it has closed (`docs/dev/components.md` "Children, slots and rows"). Heights are not bindable to animated values, so a reveal is a layout animation, not a progress the app drives; no reveal element of its own yet |
 | Reduced motion (transitions and springs snap) | Motions land at their end; the low-level `Animated` / `timing` / `keyframes` play as written and apps choose with `reduce_motion()` |
 | `MotionTransform` (translation, scale, rotation, opacity bundle) | A `Motion`'s channels (opacity, translate X / Y, rotate, rotate X / Y, scale, scale X / Y), bound with `style={m.style}` / `bind_motion` |
 

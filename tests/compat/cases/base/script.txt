@@ -994,6 +994,29 @@ covers [nsh/base] Collapsible
 covers [props] Collapsible.open
 covers [props] Collapsible.content
 
+# base-collapsible-reveal
+# With `reveal`: the clipping region is there while closed, zero high, so
+# the gap (4) comes before it: the collapsible is 24 high.
+tap id:case-base-collapsible-reveal
+expect Summary
+absent Details
+frame id:region 0 20 390 24
+frame id:after 0 44 390 20
+# Open: the details in the region, the view after it below them (the
+# frames are where the reveal ends; the platform springs them there).
+tap id:trigger
+expect Details
+frame id:region 0 20 390 54
+frame id:details 0 0 390 30
+frame id:after 0 74 390 20
+# Closed: the frames at once, the details out once the region has closed.
+tap id:trigger
+frame id:region 0 20 390 24
+frame id:after 0 44 390 20
+wait 400
+absent Details
+covers [props] Collapsible.reveal
+
 # base-otp-input
 tap id:case-base-otp-input
 # One field over the cells for the keyboard and screen readers: the

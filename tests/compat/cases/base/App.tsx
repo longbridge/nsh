@@ -9,6 +9,7 @@ import BaseButton from "./base-button";
 import BaseCheckbox from "./base-checkbox";
 import BaseCollapsible from "./base-collapsible";
 import BaseColorPicker from "./base-color-picker";
+import BaseCollapsibleReveal from "./base-collapsible-reveal";
 import BaseDialog from "./base-dialog";
 import BaseDialogBackdrop from "./base-dialog-backdrop";
 import BaseDataTable from "./base-data-table";
@@ -73,6 +74,7 @@ const cases: Record<string, () => JSX.Element> = {
   "base-tabs": BaseTabs,
   "base-collapsible": BaseCollapsible,
   "base-color-picker": BaseColorPicker,
+  "base-collapsible-reveal": BaseCollapsibleReveal,
   "base-plot": BasePlot,
   "base-progress": BaseProgress,
   "base-combobox": BaseCombobox,

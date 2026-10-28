@@ -262,7 +262,7 @@ import type {
 
 ### Collapsible
 
-内容可展开和收起的区域，没有外观：子元素始终显示（摘要、触发控件），`content` 在 `open` 时显示在它们之后。`open` 和切换它的触发控件由应用持有，应用也在触发控件上向屏幕阅读器报告展开状态。内容只创建一次，收起时保留，所以里面的状态不会丢。见 [Collapsible](../elements/collapsible.md)。
+内容可展开和收起的区域，没有外观：子元素始终显示（摘要、触发控件），`content` 在 `open` 时显示在它们之后。`open` 和切换它的触发控件由应用持有，应用也在触发控件上向屏幕阅读器报告展开状态。内容只创建一次，收起时保留，所以里面的状态不会丢。设置 `reveal` 后，它以原生运行的弹簧高度展开和收起。见 [Collapsible](../elements/collapsible.md)。
 
 ### Progress
 

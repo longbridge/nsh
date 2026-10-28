@@ -303,8 +303,8 @@ time with `timePrecision` (a time field under the calendar), the app's (`value`,
 
 A region whose content expands and collapses, with no look: its children show always (a summary, the trigger), its
 `content` after them while `open`. The app owns `open` and the trigger that flips it, and says the expanded state to
-screen readers there. The content is made once and kept while collapsed, so what is inside keeps its state. See
-[Collapsible](../elements/collapsible.md).
+screen readers there. The content is made once and kept while collapsed, so what is inside keeps its state. With
+`reveal` it opens and closes with a springing height, natively. See [Collapsible](../elements/collapsible.md).
 
 ### Progress
 

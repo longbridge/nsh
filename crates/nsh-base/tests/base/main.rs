@@ -3,6 +3,7 @@
 
 mod calendar;
 mod color_picker;
+mod collapsible;
 mod combobox;
 mod date_picker;
 mod diff;
