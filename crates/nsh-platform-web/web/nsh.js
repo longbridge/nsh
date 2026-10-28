@@ -3436,6 +3436,8 @@ class Player {
     field.readOnly = !config.editable;
     field.autocapitalize = config.autoCapitalize === "none" ? "off" : config.autoCapitalize;
     field.spellcheck = config.autoCorrect;
+    if (config.autoComplete != null) field.setAttribute("autocomplete", config.autoComplete);
+    else field.removeAttribute("autocomplete");
     if (config.maxLength != null) field.maxLength = config.maxLength;
     else field.removeAttribute("maxlength");
     el._config = config;

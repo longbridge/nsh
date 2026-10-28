@@ -1837,7 +1837,7 @@ const host: {
   post(name: string, data?: unknown): void;
   available(): boolean;
   call(name: string, args?: unknown, options?: { timeout?: number }): Promise<unknown>;
-  on(event: string, listener: (payload: unknown) => void): (() => void) & { remove(): void };
+  on(event: string, listener: (payload: unknown) => void): () => void;
 };
 ```
 
@@ -1874,15 +1874,15 @@ const quote = await host.call("quote.refresh", { symbol: "AAPL" }, { timeout: 50
 ### host.on
 
 ```ts
-on(event: string, listener: (payload: unknown) => void): (() => void) & { remove(): void };
+on(event: string, listener: (payload: unknown) => void): () => void;
 ```
 
-平台事件中，宿主每发送一次 `event`，就以它的数据调用 `listener`，直到调用 `remove()`。宿主在应用启动前发送的事件会在应用启动后送达，应用顶层注册的监听器能收到；监听器注册之前发送的事件不会补发给它。应用启动时的状态用 `host.call` 读取，之后的变化用 `host.on` 跟进。
+平台事件中，宿主每发送一次 `event`，就以它的数据调用 `listener`，直到调用 `host.on` 返回的函数；在组件渲染期间添加的监听器随组件一起停止。宿主在应用启动前发送的事件会在应用启动后送达，应用顶层注册的监听器能收到；监听器注册之前发送的事件不会补发给它。应用启动时的状态用 `host.call` 读取，之后的变化用 `host.on` 跟进。
 
 ```ts
-const sub = host.on("loginChanged", (payload) => console.log(payload));
+const stop = host.on("loginChanged", (payload) => console.log(payload));
 // 之后
-sub.remove();
+stop();
 ```
 
 ### 能力
@@ -1923,7 +1923,7 @@ mount(() => (conversation ? <Conversation id={conversation} /> : <Inbox />));
 
 ### 原生 SDK 通道
 
-原生 SDK 的 `send` 会保留尚未监听的事件，最多 256 条。最后一个监听器在接收过程中取消订阅时，其余事件仍按原顺序等待；重载停机期间发送的事件交给下一次加载的应用。`host.on` 返回的订阅既可作为清理函数调用，也提供 `remove()`。`host.post(name, data)` 向原生 SDK 的处理函数投递数据，处理函数可用 `isPost` 区分投递与调用。
+原生 SDK 的 `send` 会保留尚未监听的事件，最多 256 条。最后一个监听器在接收过程中停止监听时，其余事件仍按原顺序等待；重载停机期间发送的事件交给下一次加载的应用。`host.post(name, data)` 向原生 SDK 的处理函数投递数据，处理函数可用 `isPost` 区分投递与调用。
 
 ### 嵌入方的一侧
 
@@ -2306,17 +2306,20 @@ function nativeModule<T extends object>(specifier: string): T;
 返回嵌入应用以 `specifier` 注册的套件的导出：其中的模块、类、函数和 Rust 组件，合成一个对象。类型 `T` 由应用自己声明，因此构建应用时不需要了解宿主。与宿主的 crate 一起构建的 Rust 代码直接以 Rust 调用这些函数；`nativeModule` 是 TSX 访问它们的方式。
 
 ```ts
-import { nativeModule } from "nsh";
+import { nativeModule, signal } from "nsh";
 
 interface TradingApi {
   quote(symbol: string): number;
   placeOrder(symbol: string, quantity: number, side: "Buy" | "Sell"): Promise<Order>;
-  subscribe(onChange: (state: Desk) => void): Promise<void>;
+  on(event: "change", listener: (desk: Desk) => void): () => void;
 }
 
 const { Trading } = nativeModule<{ Trading: TradingApi }>("host/trading");
 
 const price = Trading.quote("AAPL");
+
+const desk = signal<Desk | null>(null);
+Trading.on("change", (d) => desk.set(d));
 ```
 
 - 调用方式与导入套件时相同：普通 Rust 函数立即返回结果，`async` 函数返回 Promise，传入的函数是 Rust 之后可以调用的回调。Rust 检查每个参数，参数类型不对时抛出 `TypeError`。
@@ -2326,6 +2329,8 @@ const price = Trading.quote("AAPL");
 宿主用 Rust 注册套件：在创建视图之前调用平台 crate 的 `set_ui_sets`（与 NSH 自己的套件放在一起），或使用 `EngineConfig::ui_sets`：
 
 ```rust
+use std::{cell::RefCell, rc::Rc};
+
 use nsh_core::prelude::*;
 
 pub struct Trading;
@@ -2335,15 +2340,26 @@ impl Trading {
     /// A sample price.
     pub fn quote(symbol: String) -> Result<f64, String> { /* ... */ }
 
-    /// Calls `on_change` with the desk now and on every change.
-    pub async fn subscribe(on_change: Callback<Desk>) {
-        let mut desk = DESK.subscribe(); // a tokio watch channel the host keeps
-        loop {
-            on_change.post(desk.borrow_and_update().clone());
-            if desk.changed().await.is_err() {
-                return;
-            }
+    /// Calls `listener` with the desk now and after every change
+    /// (`change`, the one event), until the returned function is called
+    /// or what called `on` goes.
+    pub fn on(event: String, listener: Callback<Desk>, cx: CallCx<'_>) -> Result<Stop, String> {
+        if event != "change" {
+            return Err(format!("no Trading event `{event}`"));
         }
+        let listener = Rc::new(RefCell::new(Some(listener)));
+        let held = listener.clone();
+        cx.start(async move {
+            let mut desk = DESK.subscribe(); // a tokio watch channel the host keeps
+            loop {
+                let Some(listener) = held.borrow().clone() else { return };
+                listener.post(desk.borrow_and_update().clone());
+                if desk.changed().await.is_err() {
+                    return;
+                }
+            }
+        });
+        Ok(Stop::new(move || drop(listener.take())))
     }
 }
 
@@ -2352,7 +2368,7 @@ trading.module::<Trading>();
 nsh_platform_gpui::set_ui_sets(vec![nsh_base::registry(), trading]);
 ```
 
-`subscribe` 让宿主的数据与每个应用保持同步：它的任务等待宿主的变化，并把每次变化发送给应用；因此宿主自己做出的修改，或任一应用通过其他函数做出的修改，都会到达所有订阅了的应用。
+`on` 让宿主的数据与每个应用保持同步：它启动的任务等待宿主的变化，并把每次变化发送给应用；因此宿主自己做出的修改，或任一应用通过其他函数做出的修改，都会到达所有在监听的应用。它返回的 `Stop` 就是 TSX 中 `Trading.on` 返回的函数：它只运行一次，在应用调用它时，或在调用 `on` 的一方（组件，或热重载下模块的这次运行）消失时；这里它丢弃监听器，任务随之结束。
 
 > [!NOTE]
 > 属性、事件和命令参数都以 JSON 形式传到原生侧。注册的组件和函数是宿主应用自己的代码：NSH 的[沙箱限制与权限](../docs/sandbox-and-capabilities.md)不约束它们的行为。

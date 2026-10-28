@@ -275,7 +275,7 @@ JS describes.
   closure: one would run QuickJS on the input path. App crates add extensions, and so commands, plugins and node views
   in Rust, through their UI set (`#[native_module]`), which registers them by name for JS to use.
 - **Queries** are native: `isActive(name, attrs)`, `getAttributes`, `getMarkRange`, `findParentNode`, `coordsAtPos`,
-  `posAtCoords`, `selectionRect`; JS reads them on the revision it subscribes to. The three geometry queries answer
+  `posAtCoords`, `selectionRect`; JS reads them on the revision it listens to (`on("revision", …)`). The three geometry queries answer
   in points of the editor's content box (the box that scrolls, so its scroll offset is already in them) from the
   last view that mounted the session (`ViewGeometry`, registered by the controller); with no view they answer
   nothing. `pageCoordsAtPos` / `posAtPageCoords` answer the same in page (root) points, for UI an app places
@@ -290,7 +290,7 @@ JS describes.
   across (the handle sits in the gutter); off every block, beside the nearest block that takes it, so a list item
   dropped below its list stays in it. A selection dragged with Mod held across blocks covers them whole on release
   (Tiptap's NodeRange), ready for the handle to carry. The view tells the session its focus (`isFocused`, `focus` / `blur` events) and honors `setEditable`.
-- **Events**: `create`, `update`, `selectionUpdate`, `transaction` (a summary), `focus`, `blur`, `paste`, `drop`,
+- **Events**: `revision` (the session's subscribers: `{ revision }` after every change, from any source), `create`, `update`, `selectionUpdate`, `transaction` (a summary), `focus`, `blur`, `paste`, `drop`,
   `delete`, `destroy`, posted to JS after the fact.
 - **Formats**: JSON (Tiptap's document JSON loads as is), Markdown (each type's form declared by its extension), HTML
   (parse rules and `toDOM` per type, `DomParser` / `DomSerializer`), text (`renderText` per type).

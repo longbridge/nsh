@@ -9,6 +9,7 @@ and NSH's elements; it is maintained with these examples, rather than published 
 | `finishes.json` | Surface gradients, shadows and glass finishes used by NSH and HTML |
 | `theme.ts` | Reactive palette roles, finish accessors, radii, focus/hover feedback and motion |
 | `index.tsx` | Shared buttons, cards, insets, badges, rows, switches, sheets and presentation helpers |
+| `popup.tsx` | The popup families' one surface and their enter motion (`PopIn`, `createPresence` for tooltips) |
 | `segmented.tsx` | The segmented control shared by the gallery and demo inspectors |
 | `icons.tsx` | The common line icon set |
 | `data-table.ts` | Compact table spacing, resize separators, sort chevrons and selection feedback |

@@ -23,6 +23,8 @@ use rustc_hash::FxHashMap;
 
 use crate::text::{WebLayout, css_font, font_variant_numeric};
 
+mod input;
+
 /// JSON output.
 pub(crate) struct Out {
     pub(crate) s: String,
@@ -845,6 +847,7 @@ fn input_json(c: &InputConfig) -> String {
     if let Some(m) = c.max_length {
         let _ = write!(s, ",\"maxLength\":{m}");
     }
+    input::auto_complete(&mut s, c.auto_fill);
     if c.paste_behavior != nsh_core::PasteBehavior::Insert {
         s.push_str(",\"pasteInserts\":false");
     }

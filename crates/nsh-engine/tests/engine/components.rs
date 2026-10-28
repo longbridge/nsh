@@ -1471,7 +1471,7 @@ const BACK: &str = r#"import { mount, signal, Text } from "nsh";
 import { BackHandler } from "nsh/mobile";
 
 const presses = signal(0);
-BackHandler.onBackPress(() => {
+BackHandler.on("press", () => {
   presses.update((p) => p + 1);
   // The first press is handled, the second one leaves the app.
   return presses() === 1;

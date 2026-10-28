@@ -119,11 +119,18 @@ go elsewhere under these rules rather than into them.
   field must not land on `TextViewImage`). An event with nothing to report passes nothing; it can gain an object
   later. Only the responder callbacks keep React Native's `(e, gestureState)`. The elements' events, the
   components' and `keymap.bind`'s handlers follow it (2026-10-27, item 3 of the API review).
-- **Listening**: a function that starts listening returns a function that stops it (`() => void`), and what is
-  registered while a component renders goes away with the component (`keymap.bind`); never React Native's
-  `{ remove() }`. An app reads a setting of the system through its accessor (`reduceMotion()`), which is also how it
-  follows the changes: no listeners or `Promise` getters beside it. `addEventListener` is only the DOM's, on the web
-  globals.
+- **Listening**: the function that registers a listener is `on(event, listener)` in everything TSX calls
+  (`BackHandler.on("press", l)`, `host.on(name, l)`, a RichEditor session's `on("revision", l)`), and it returns a
+  function that stops it (`() => void`); a listener added while a component renders (or at a module's top level,
+  under hot module replacement) stops with it. Never React Native's `{ remove() }`, an id with an `off` /
+  `unsubscribe` beside it, a `subscribe` or `addListener`, or an `on<Event>(l)` per event. Rust's own API keeps
+  GPUI's `on_<event>` methods (`on_back_press`, `on_key`) and its subscriptions. A Rust function or method gives JS that
+  stop function by returning `Stop` (`nsh_core::prelude`), which runs once: when JS calls it or when the JS owner of
+  the call goes. `keymap.bind` keeps `bind` (binding a shortcut is not listening to an event); it also returns
+  `() => void` and goes with its owner. The standard modules keep Node's shape: `ChildProcess.on(event, handler)`
+  returns the child, as Node's emitters do (2026-10-28, item 4 of the API review). An app reads a setting of the
+  system through its accessor (`reduceMotion()`), which is also how it follows the changes: no listeners or
+  `Promise` getters beside it. `addEventListener` is only the DOM's, on the web globals.
 - **Addresses**: what shows a resource takes it as `src` (`Image`, `Video`, `WebView`, `TextViewImage.src`, as HTML's
   `img`, `video` and `iframe`), any other address is a `url` (`ImageAsset.url`, `WebViewNavigation.url`); never
   `source` or `{ uri }` wrappers. `onFileDrop({ uris })` keeps its name (decided by the user, 2026-10-21). Inline content has its own prop (`html`,
@@ -280,7 +287,7 @@ them yet (`compatibility.md`). The frozen RN-shaped modules keep their names. A 
 | `AccessibilityInfo.announceForAccessibility(message)` | `announce(message)` | Environment | A function of the module |
 | `AccessibilityInfo.setAccessibilityFocus(node)` | `setAccessibilityFocus(node)` | Environment | A function of the module; `focus()` is the keyboard's |
 | **`nsh/mobile`: `BackHandler`** | | | |
-| `BackHandler.addEventListener("hardwareBackPress", l)` → `{ remove() }` | `BackHandler.onBackPress(l)` → `() => void` | Listening | Removed with the component it was added in; `l` returns `true` when it handled the press. As `NavPage`'s `onBackPress` |
+| `BackHandler.addEventListener("hardwareBackPress", l)` → `{ remove() }` | `BackHandler.on("press", l)` → `() => void` | Listening | Removed with the component it was added in; `l` returns `true` when it handled the press. As `NavPage`'s `onBackPress` |
 | **`nsh`: `Clipboard`** | | | |
 | `getString`, `setString`, `hasString` | `readText()`, `writeText(text): Promise<void>`, `hasText()` | Where names come from | The DOM's `navigator.clipboard`; GPUI's `read_from_clipboard` / `write_to_clipboard` |
 | `getImage`, `setImage`, `hasImage`, `getFiles` | `readImage()`, `writeImage(src)`, `hasImage()`, `readFiles()` | Where names come from | |

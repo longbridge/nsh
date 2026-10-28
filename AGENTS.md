@@ -405,8 +405,12 @@ repository's `target/`; dependencies only it uses are declared in `crates/gpui/C
   - Identifiers an app matches on are the app's and required, never derived from a label (`AlertDialogAction.id`).
   - Refs: each element has a ref type of its own (`InputRef`, `ScrollRef`, `VideoRef`, ... over a common `ViewRef`),
     never one type carrying every element's methods.
-  - Listening: a function that starts listening returns a function that stops it, and what is registered while a
-    component renders goes with the component.
+  - Listening: the function that registers a listener is `on(event, listener)` in everything TSX calls
+    (`BackHandler.on("press", l)`, `host.on(name, l)`; Rust's own API keeps GPUI's `on_<event>`), never an
+    `on<Event>(l)`, `subscribe` or `addListener`; it returns a function that stops it (`() => void`, a Rust
+    function's `Stop`), never `{ remove() }` or an id for an `off`, and what is registered while a component renders
+    goes with the component. `keymap.bind` keeps `bind` (a shortcut is not an event); the standard modules keep
+    Node's `on`, which returns its object.
 - **Components are Rust.** Rust components live in `crates/nsh-base` or in an app's own crate (its UI set,
   `#[native_module("…")]`), run in the core and render primitives with typed styles (GPUI-style `Styled` methods,
   never class strings); props and events are derived types, their JS face is made from the specs (`nsh-js`

@@ -642,6 +642,11 @@ the root; `<Image>` elements are `<img>` elements, loaded by the browser.
 
 ## Input
 
+`autoComplete` reaches both `<input>` and `<textarea>` as HTML's `autocomplete` attribute.
+`src/encode/input.rs` maps every `AutoFill` variant to its HTML token (`Password` to
+`current-password`, `Birthdate` to `bday`, `Off` to `off`). `Default` leaves the attribute unset;
+returning to it removes an earlier hint. The browser decides which autofill suggestions to offer.
+
 `nsh.js` turns browser input into what the desktop backends report (`docs/dev/linux.md` is the reference), and phone
 browsers' touches into what phones report:
 

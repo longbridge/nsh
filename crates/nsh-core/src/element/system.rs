@@ -211,6 +211,72 @@ impl fmt::Debug for Cleanup {
     }
 }
 
+/// What stops something JS started, returned to JS as a function that
+/// stops it (`() => void`): what every `on(…)` of Rust returns. It runs
+/// once, when JS calls the function or when what owns the call in JS goes
+/// (the reactive owner it runs under, or the module's run under hot
+/// reload; [`CallCx::on_cleanup`]), whichever comes first, so a listener a
+/// component adds goes with the component. Returned from a synchronous
+/// call: a task's or an op's result reaches JS when nothing owns the call.
+/// What `f` holds stays alive as long as the JS function does, so it holds
+/// instances weakly.
+#[derive(Default)]
+#[non_exhaustive]
+pub struct Stop {
+    run: Rc<StopOnce>,
+}
+
+/// What a [`Stop`] runs, until it ran.
+type StopOnce = RefCell<Option<Box<dyn FnOnce()>>>;
+
+impl Stop {
+    /// Stops with `f`.
+    pub fn new(f: impl FnOnce() + 'static) -> Self {
+        Self {
+            run: Rc::new(RefCell::new(Some(Box::new(f)))),
+        }
+    }
+
+    fn run(run: &StopOnce) {
+        // Taken before it runs: what it does may call the function again.
+        let f = run.borrow_mut().take();
+        if let Some(f) = f {
+            f();
+        }
+    }
+}
+
+impl fmt::Debug for Stop {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("Stop")
+    }
+}
+
+impl Ret for Stop {
+    fn ts_type(_types: &mut super::TsTypes) -> String {
+        "() => void".into()
+    }
+
+    fn into_js<'a>(self, host: &'a dyn JsHost) -> Result<super::JsOwned<'a>, super::PropError> {
+        let run = self.run;
+        let release = host.on_cleanup(Box::new({
+            let run = run.clone();
+            move || Self::run(&run)
+        }));
+        let release = RefCell::new(Some(release));
+        let stop = host.new_function(Box::new(move || {
+            // Unregistered first: an owner that lives long does not
+            // collect stopped listeners.
+            let release = release.borrow_mut().take();
+            if let Some(release) = release {
+                release();
+            }
+            Self::run(&run);
+        }))?;
+        Ok(super::JsOwned::new(host, stop))
+    }
+}
+
 impl fmt::Debug for System {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("System")
@@ -558,6 +624,11 @@ mod tests {
             cx.start(async {});
         }
 
+        /// Listens until the returned function is called.
+        pub(crate) fn listen() -> Stop {
+            Stop::new(|| {})
+        }
+
         /// Where the files are.
         #[getter]
         pub(crate) fn root(sys: System) -> Option<String> {
@@ -602,6 +673,7 @@ mod tests {
             "{d}"
         );
         assert!(d.contains("function watch(path: string): void;"), "{d}");
+        assert!(d.contains("function listen(): () => void;"), "{d}");
         assert!(
             d.contains("  on(event: string, f: (index: number, label: string) => void): Handle;"),
             "{d}"
@@ -620,6 +692,26 @@ mod tests {
         assert_eq!(host.read(out), Some(serde_json::json!([0, 7, 255])));
         let bad = host.value(JsonValue::from("x"));
         assert!(<Vec<u8>>::from_js(crate::element::JsIn::new(&host, bad)).is_err());
+    }
+
+    #[test]
+    fn a_stop_is_a_function_that_runs_once() {
+        use crate::element::Ret;
+        let host = json_host::JsonHost::default();
+        let runs = std::rc::Rc::new(std::cell::Cell::new(0));
+        let stop = Stop::new({
+            let runs = runs.clone();
+            move || runs.set(runs.get() + 1)
+        });
+        let f = stop.into_js(&host).unwrap().into_raw();
+        assert_eq!(
+            crate::element::JsHost::kind(&host, f),
+            crate::element::JsKind::Function
+        );
+        assert_eq!(runs.get(), 0);
+        host.call(f);
+        host.call(f);
+        assert_eq!(runs.get(), 1);
     }
 
     #[derive(Debug, JsObject)]
