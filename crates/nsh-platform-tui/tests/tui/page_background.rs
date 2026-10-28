@@ -158,3 +158,39 @@ fn modal_fills_and_their_matches_use_the_terminal_background() {
     assert_eq!(buffer[(0, 0)].bg, Color::Reset);
     assert_eq!(buffer[(1, 1)].bg, Color::Rgb(0x88, 0x44, 0x22));
 }
+
+#[component]
+fn OverlayPage() -> impl IntoElement {
+    view()
+        .flex_1()
+        .bg(nsh_core::color::rgb(0x112233))
+        .child(
+            view()
+                .w(px(80.0))
+                .h(px(16.0))
+                .bg(nsh_core::color::rgb(0x24262a))
+                .child(text("chip")),
+        )
+        .child(
+            overlay()
+                .top(px(32.0))
+                .left(px(0.0))
+                .w(px(80.0))
+                .h(px(16.0))
+                .bg(nsh_core::color::rgb(0x24262a))
+                .child(text("popup")),
+        )
+}
+
+#[test]
+fn overlay_fills_keep_their_color_and_do_not_reset_the_page() {
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(20, 8)).unwrap();
+    view.load(App::Rust(Root::new::<OverlayPage>(|| ())))
+        .unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "popup");
+    let buffer = terminal.backend().buffer();
+    assert_eq!(buffer[(12, 0)].bg, Color::Reset);
+    assert_eq!(buffer[(0, 0)].bg, Color::Rgb(0x24, 0x26, 0x2a), "page chip");
+    assert_eq!(buffer[(0, 2)].bg, Color::Rgb(0x24, 0x26, 0x2a), "overlay");
+}

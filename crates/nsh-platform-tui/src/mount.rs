@@ -419,16 +419,26 @@ impl Mounter {
 
     pub(crate) fn collect_page_backgrounds(&mut self) {
         self.page_backgrounds.clear();
-        collect_page_backgrounds(&self.views, ROOT_ID, &mut self.page_backgrounds);
+        // The core shows overlays in the root view after the app's top-level
+        // view, so only the root's first child is the app's page.
+        let app_root = self
+            .get(ROOT_ID)
+            .and_then(|root| root.children.first().copied());
+        collect_page_backgrounds(&self.views, ROOT_ID, app_root, &mut self.page_backgrounds);
     }
 }
 
-fn collect_page_backgrounds(views: &[Option<NshView>], id: NodeId, colors: &mut Vec<Color>) {
+fn collect_page_backgrounds(
+    views: &[Option<NshView>],
+    id: NodeId,
+    app_root: Option<NodeId>,
+    colors: &mut Vec<Color>,
+) {
     let Some(view) = views.get(id as usize).and_then(Option::as_ref) else {
         return;
     };
     if id == ROOT_ID
-        || view.parent == Some(ROOT_ID)
+        || Some(id) == app_root
         || matches!(view.kind, ViewKind::Screen | ViewKind::Modal)
     {
         let fill = view
@@ -440,6 +450,6 @@ fn collect_page_backgrounds(views: &[Option<NshView>], id: NodeId, colors: &mut 
         }
     }
     for &child in &view.children {
-        collect_page_backgrounds(views, child, colors);
+        collect_page_backgrounds(views, child, app_root, colors);
     }
 }

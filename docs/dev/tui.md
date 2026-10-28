@@ -300,6 +300,9 @@ A **Page background** is the fill of the surface root, an app's top-level view, 
 view fill of exactly the same RGBA color. These fills draw `Color::Reset`, so the terminal supplies its own
 background. A matching fill resets the background even when it lies over a colored card; it does not inherit that
 card's color. Other fills keep the app's colors, including colors that differ by a single channel value.
+The app's top-level view is the surface root's first child: the core shows overlays (popovers, tooltips, fixed
+views) in the root after it, and their fills are ordinary fills, so a popup and the page views sharing its color
+keep that color.
 
 The attached tree's page colors are collected before drawing, after complete mount batches and animated values
 have been applied. This makes matching independent of paint order and follows style changes, animation frames,
