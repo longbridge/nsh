@@ -103,8 +103,8 @@ pub(crate) enum Action {
     /// cancelled or not supported) resolves the slot.
     PickScreenColor(AnswerSlot<Option<crate::Hsla>>),
     /// A request on local paths for the platform
-    /// ([`crate::system_paths`]); its answer resolves the slot.
-    SystemPath(crate::system_paths::PathRequest, PathAnswer),
+    /// ([`crate::file_dialog`]); its answer resolves the slot.
+    FileRequest(crate::file_dialog::FileRequest, FileAnswer),
     /// An operation on the native animation graph.
     Animation(crate::animation::AnimationOp),
     /// Starts an animation; its end resolves the slot.
@@ -137,32 +137,33 @@ pub(crate) enum Action {
 }
 
 /// A request on local paths waiting for the platform's answer
-/// ([`Action::SystemPath`]).
-pub(crate) enum PathAnswer {
-    /// The paths picked in the open dialog.
-    Pick(AnswerSlot<Vec<std::path::PathBuf>>),
-    /// The path chosen in the save dialog.
-    Save(AnswerSlot<Option<std::path::PathBuf>>),
+/// ([`Action::FileRequest`]).
+pub(crate) enum FileAnswer {
+    /// The paths picked in the open dialog, none when cancelled.
+    OpenDialog(AnswerSlot<Result<Option<Vec<std::path::PathBuf>>, String>>),
+    /// The path chosen in the save dialog, none when cancelled.
+    SaveDialog(AnswerSlot<Result<Option<std::path::PathBuf>, String>>),
     /// Whether the path opened or showed in the file manager.
     Done(AnswerSlot<bool>),
     /// Where the trashed item went, or why it was not.
     Trash(AnswerSlot<Result<Option<std::path::PathBuf>, String>>),
 }
 
-impl PathAnswer {
-    /// Answers with the platform's `paths`, or its `error`.
+impl FileAnswer {
+    /// Answers with the platform's `paths` (none: cancelled), or its
+    /// `error`.
     pub(crate) fn deliver(self, mut paths: Vec<std::path::PathBuf>, error: Option<String>) {
         match self {
-            PathAnswer::Pick(slot) => {
-                slot.borrow_mut()
-                    .deliver(if error.is_some() { Vec::new() } else { paths })
-            }
-            PathAnswer::Save(slot) => slot.borrow_mut().deliver(match error {
-                Some(_) => None,
-                None => (!paths.is_empty()).then(|| paths.swap_remove(0)),
+            FileAnswer::OpenDialog(slot) => slot.borrow_mut().deliver(match error {
+                Some(error) => Err(error),
+                None => Ok((!paths.is_empty()).then_some(paths)),
             }),
-            PathAnswer::Done(slot) => slot.borrow_mut().deliver(error.is_none()),
-            PathAnswer::Trash(slot) => slot.borrow_mut().deliver(match error {
+            FileAnswer::SaveDialog(slot) => slot.borrow_mut().deliver(match error {
+                Some(error) => Err(error),
+                None => Ok((!paths.is_empty()).then(|| paths.swap_remove(0))),
+            }),
+            FileAnswer::Done(slot) => slot.borrow_mut().deliver(error.is_none()),
+            FileAnswer::Trash(slot) => slot.borrow_mut().deliver(match error {
                 Some(error) => Err(error),
                 None => Ok((!paths.is_empty()).then(|| paths.swap_remove(0))),
             }),

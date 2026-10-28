@@ -34,6 +34,7 @@ mod decor;
 #[cfg(feature = "dev")]
 pub mod dev;
 mod file_drop;
+mod file_requests;
 mod fps;
 mod geom;
 mod gfx;
@@ -52,7 +53,6 @@ mod surface;
 #[cfg(feature = "dev")]
 mod synth;
 mod system;
-mod system_paths;
 mod text;
 mod text_input;
 mod transition;

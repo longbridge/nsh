@@ -164,23 +164,36 @@ fn window_bar() -> impl IntoElement {
 ## 文件和文件夹
 
 在桌面平台上，Rust 代码可以显示系统的文件对话框，并把本地路径交给系统处理，
-每个结果都在任务中等待：`pick_paths`（选择文件，设置 `folders` 时选择文件夹）、
-`pick_save_path`、`open_path`（用文件的默认应用打开）、`reveal_path`
-（在访达、文件资源管理器或文件管理器中选中该项）和 `trash_path`
-（macOS 告知时返回该项移到的位置）。在其他平台上，选择返回空列表，
-`open_path` 和 `reveal_path` 返回 `false`，`trash_path` 返回错误。
+每个结果都在任务中等待：`pick_paths` 接受 `OpenDialog`
+（`OpenDialog::files()`、`::folders()` 或 `::files_and_folders()`），`pick_save_path`
+接受 `SaveDialog`，`open_path`（用文件的默认应用打开）、`reveal_path`
+（在访达、文件资源管理器或文件管理器中选中该项）和 `move_to_trash`
+（macOS 告知时返回该项移到的位置）。用户取消时对话框返回 `Ok(None)`，
+无法显示时返回错误（Linux 上没有文件选择 portal 时，以及 iOS、Android 和 Web 上；
+在这些平台上 `open_path` 和 `reveal_path` 返回 `false`，`move_to_trash` 返回错误）。
 
 ```rust
-use nsh_core::{prelude::*, system_paths::PathPickRequest};
+use nsh_core::{
+    file_dialog::{FileFilter, OpenDialog},
+    prelude::*,
+};
 
 fn open_notes() {
-    let mut request = PathPickRequest::default();
-    request.multiple = true;
-    request.extensions = vec!["md".into()];
-    let picked = pick_paths(request);
+    let picked = pick_paths(
+        OpenDialog::files()
+            .multiple(true)
+            .filter(FileFilter::new("Markdown", ["md", "markdown"]))
+            .button_label("打开"),
+    );
     spawn(async move {
-        for path in picked.await {
-            let _ = reveal_path(path).await;
+        match picked.await {
+            Ok(Some(paths)) => {
+                for path in paths {
+                    let _ = reveal_path(path).await;
+                }
+            }
+            Ok(None) => {} // 用户取消。
+            Err(error) => log::warn!("no file dialog: {error}"),
         }
     });
 }

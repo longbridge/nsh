@@ -129,8 +129,8 @@ reach the app's own data rather than another app; a web address needs a host) an
 module's call (a `TypeError`) and again in the core for Rust callers (`false`, logged once). The embedding app's URL
 handler sees only URLs that passed both (`embedding.md` "The host channel").
 
-The system's file services for local paths (`nsh_core::system_paths`: `pick_paths`, `pick_save_path`, `open_path`,
-`reveal_path`, `trash_path`) are Rust's only: no runtime module gives them to an app's JS, so their callers are
+The system's file dialogs and file manager for local paths (`nsh_core::file_dialog`: `pick_paths`, `pick_save_path`,
+`open_path`, `reveal_path`, `move_to_trash`) are Rust's only: no runtime module gives them to an app's JS, so their callers are
 native code that reaches the filesystem anyway, and no capability gates them. The dialogs give only what the user
 chose; the core refuses relative paths before the platform sees them. A JS face added later checks a capability in
 its module call, as `openUrl` does.

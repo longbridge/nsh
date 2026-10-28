@@ -348,7 +348,7 @@ impl RootView {
             screen_color: false,
             // No file dialogs, file manager or trash for an app's paths
             // here (Catalyst included): the core answers those requests.
-            system_paths: false,
+            file_requests: false,
         };
         // The embedding app's settings over the system's.
         self.ivars().host.get().apply(&mut env);

@@ -808,7 +808,7 @@ fn initial_environment() -> Environment {
             Os::Linux
         },
         idiom: Idiom::Desktop,
-        system_paths: true,
+        file_requests: true,
         ..Environment::default()
     }
 }

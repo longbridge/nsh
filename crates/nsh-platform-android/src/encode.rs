@@ -649,9 +649,9 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
                     // No eyedropper (`Environment::screen_color`): the core
                     // answers no color first.
                     | Command::PickScreenColor { .. }
-                    // No file dialogs (`Environment::system_paths`): the
+                    // No file dialogs (`Environment::file_requests`): the
                     // core answers first.
-                    | Command::SystemPath { .. } => e.int(-1),
+                    | Command::FileRequest { .. } => e.int(-1),
                 }
             }
         }

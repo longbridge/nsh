@@ -145,9 +145,9 @@ pub struct Screen {
     screen_colors: Vec<u32>,
     /// The requests on local paths that reached the platform
     /// (`pick_paths`, `open_path`, ...), in order.
-    path_requests: Vec<nsh_core::system_paths::PathRequest>,
+    file_requests: Vec<nsh_core::file_dialog::FileRequest>,
     /// Those to answer.
-    path_answers: Vec<(u32, nsh_core::system_paths::PathRequest)>,
+    file_answers: Vec<(u32, nsh_core::file_dialog::FileRequest)>,
     /// What the app asked that only a real platform answers, since the
     /// last call.
     unsupported: Vec<&'static str>,
@@ -539,9 +539,9 @@ impl Screen {
             Command::PickScreenColor { id } => self.screen_colors.push(*id),
             // Recorded, never carried out: a test's machine opens, shows
             // and trashes nothing.
-            Command::SystemPath { id, request } => {
-                self.path_requests.push((**request).clone());
-                self.path_answers.push((*id, (**request).clone()));
+            Command::FileRequest { id, request } => {
+                self.file_requests.push((**request).clone());
+                self.file_answers.push((*id, (**request).clone()));
             }
             Command::Back => self.back_asked = true,
             Command::Desktop(desktop) => {
@@ -1007,15 +1007,15 @@ impl Screen {
 
     /// The requests on local paths that reached the platform, in order
     /// (`pick_paths`, `pick_save_path`, `open_path`, `reveal_path`,
-    /// `trash_path`; only once the environment has
-    /// [`nsh_core::platform::Environment::system_paths`]).
-    pub fn path_requests(&self) -> &[nsh_core::system_paths::PathRequest] {
-        &self.path_requests
+    /// `move_to_trash`; only once the environment has
+    /// [`nsh_core::platform::Environment::file_requests`]).
+    pub fn file_requests(&self) -> &[nsh_core::file_dialog::FileRequest] {
+        &self.file_requests
     }
 
     /// The requests on local paths to answer since the last call.
-    pub(crate) fn take_path_answers(&mut self) -> Vec<(u32, nsh_core::system_paths::PathRequest)> {
-        std::mem::take(&mut self.path_answers)
+    pub(crate) fn take_file_answers(&mut self) -> Vec<(u32, nsh_core::file_dialog::FileRequest)> {
+        std::mem::take(&mut self.file_answers)
     }
 
     /// The screen color requests to answer since the last call.

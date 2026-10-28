@@ -50,8 +50,8 @@ pub struct Environment {
     /// ([`crate::platform::Environment::screen_color`]).
     pub screen_color: bool,
     /// The platform shows file dialogs and opens, reveals and trashes local
-    /// paths ([`crate::platform::Environment::system_paths`]).
-    pub system_paths: bool,
+    /// paths ([`crate::platform::Environment::file_requests`]).
+    pub file_requests: bool,
 }
 
 impl Default for Environment {
@@ -75,7 +75,7 @@ impl Default for Environment {
             apple_keyboard: false,
             host: false,
             screen_color: false,
-            system_paths: false,
+            file_requests: false,
         }
     }
 }

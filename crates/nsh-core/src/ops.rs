@@ -229,7 +229,7 @@ events! {
     CaretMove = "onCaretMove": "An input's caret moved: with its selection, or as its text scrolled or wrapped again (payload: `bounds`, the caret in the input; the core adds `pageBounds`, in the root view).",
     Paste = "onPaste": "The user pasted into an input (payload: [`EventPayload::Paste`]: the text, files with their bytes such as a screenshot, local files' URLs), before the `onChangeText` of the text it inserts.",
     ScreenColor = "onScreenColor": "A [`Command::PickScreenColor`] request finished (root only; payload: `id`, `color`: the color picked, packed `0xRRGGBBAA`, absent when cancelled).",
-    SystemPath = "onSystemPath": "A [`Command::SystemPath`] request finished (root only; payload: [`EventPayload::SystemPath`]).",
+    FileRequest = "onFileRequest": "A [`Command::FileRequest`] finished (root only; payload: [`EventPayload::FileRequest`]).",
 
 }
 
@@ -765,9 +765,9 @@ pub enum EventPayload {
         /// The files, in the order picked; none when cancelled.
         files: Vec<crate::picker::PickedFile>,
     },
-    /// The answer to a [`Command::SystemPath`] ([`EventKind::SystemPath`],
-    /// [`crate::system_paths`]).
-    SystemPath {
+    /// The answer to a [`Command::FileRequest`] ([`EventKind::FileRequest`],
+    /// [`crate::file_dialog`]).
+    FileRequest {
         /// The request.
         id: u32,
         /// The paths picked, the path chosen to save to or where a trashed
@@ -1724,16 +1724,16 @@ pub enum Command {
         id: u32,
     },
     /// Carry out `request` on local paths (on the root;
-    /// [`crate::system_paths`]): show the open or save dialog, open a file
+    /// [`crate::file_dialog`]): show the open or save dialog, open a file
     /// in its app, show it in the file manager or move it to the trash.
-    /// Report it as [`EventKind::SystemPath`] `id`
-    /// ([`EventPayload::SystemPath`]). Sent only on platforms whose
-    /// [`crate::platform::Environment::system_paths`] is set.
-    SystemPath {
+    /// Report it as [`EventKind::FileRequest`] `id`
+    /// ([`EventPayload::FileRequest`]). Sent only on platforms whose
+    /// [`crate::platform::Environment::file_requests`] is set.
+    FileRequest {
         /// The request.
         id: u32,
         /// What to do.
-        request: Box<crate::system_paths::PathRequest>,
+        request: Box<crate::file_dialog::FileRequest>,
     },
     /// A desktop command (on the root; `nsh/desktop`): the window, its
     /// title bar, menus. Mobile platforms ignore it.

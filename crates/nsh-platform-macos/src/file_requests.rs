@@ -1,17 +1,17 @@
-//! Local paths ([`nsh_core::system_paths`]): an open or save panel as a
+//! Local paths ([`nsh_core::file_dialog`]): an open or save panel as a
 //! sheet of the surface's window (`NSOpenPanel`, `NSSavePanel`), opening a
 //! file in its app (`NSWorkspace openURL:`), showing it selected in Finder
 //! (`activateFileViewerSelectingURLs:`) and the trash (`NSFileManager
 //! trashItemAtURL:resultingItemURL:error:`, which says where the item
-//! went). The panels answer as a root `SystemPath` event when they close,
+//! went). The panels answer as a root `FileRequest` event when they close,
 //! the rest at once.
 
 use std::{path::PathBuf, rc::Rc};
 
 use block2::RcBlock;
 use nsh_core::{
-    EventKind, ROOT_ID,
-    system_paths::{self, PathPickRequest, PathRequest, SavePathRequest},
+    EventKind, EventPayload, ROOT_ID,
+    file_dialog::{self, FileFilter, FileRequest, OpenDialog, SaveDialog},
 };
 use nsh_engine::EngineControl;
 use objc2::{
@@ -25,38 +25,38 @@ use objc2_foundation::{NSArray, NSError, NSString, NSURL};
 use crate::surface::Surface;
 
 /// Carries out request `id`.
-pub(crate) fn request(surface: &Rc<Surface>, id: u32, request: &PathRequest) {
+pub(crate) fn request(surface: &Rc<Surface>, id: u32, request: &FileRequest) {
     let answer = match request {
-        PathRequest::Pick(pick) => return pick_paths(surface, id, pick),
-        PathRequest::Save(save) => return pick_save_path(surface, id, save),
-        PathRequest::Open(path) => {
+        FileRequest::OpenDialog(dialog) => return pick_paths(surface, id, dialog),
+        FileRequest::SaveDialog(dialog) => return pick_save_path(surface, id, dialog),
+        FileRequest::OpenPath(path) => {
             if NSWorkspace::sharedWorkspace().openURL(&file_url(path)) {
-                system_paths::answer(id, Vec::new())
+                EventPayload::file_answer(id, Vec::new())
             } else {
-                system_paths::failed(id, format!("no app opened `{}`", path.display()))
+                EventPayload::file_failed(id, format!("no app opened `{}`", path.display()))
             }
         }
-        PathRequest::Reveal(path) => {
+        FileRequest::RevealPath(path) => {
             // Finder reports nothing back: an item that is not there is
             // the only failure known here.
             if path.exists() {
                 let urls = NSArray::from_retained_slice(&[file_url(path)]);
                 NSWorkspace::sharedWorkspace().activateFileViewerSelectingURLs(&urls);
-                system_paths::answer(id, Vec::new())
+                EventPayload::file_answer(id, Vec::new())
             } else {
-                system_paths::failed(id, format!("`{}` does not exist", path.display()))
+                EventPayload::file_failed(id, format!("`{}` does not exist", path.display()))
             }
         }
-        PathRequest::Trash(path) => match trash(path) {
-            Ok(went) => system_paths::answer(id, went.into_iter().collect()),
-            Err(error) => system_paths::failed(id, error),
+        FileRequest::MoveToTrash(path) => match trash(path) {
+            Ok(went) => EventPayload::file_answer(id, went.into_iter().collect()),
+            Err(error) => EventPayload::file_failed(id, error),
         },
         other => {
-            log::debug!("macos: path request {other:?} is not supported");
-            system_paths::failed(id, "not supported")
+            log::debug!("macos: file request {other:?} is not supported");
+            EventPayload::file_failed(id, "not supported")
         }
     };
-    surface.event(ROOT_ID, EventKind::SystemPath, answer);
+    surface.event(ROOT_ID, EventKind::FileRequest, answer);
 }
 
 fn file_url(path: &std::path::Path) -> Retained<NSURL> {
@@ -98,8 +98,9 @@ fn control(surface: &Surface) -> Option<EngineControl> {
 unsafe fn configure(
     panel: &AnyObject,
     title: Option<&str>,
+    button_label: Option<&str>,
     directory: Option<&PathBuf>,
-    extensions: &[String],
+    filters: &[FileFilter],
 ) {
     // SAFETY: AppKit's documented NSSavePanel API, as the caller promises.
     unsafe {
@@ -107,9 +108,14 @@ unsafe fn configure(
         if let Some(title) = title {
             let _: () = msg_send![panel, setMessage: &*NSString::from_str(title)];
         }
+        if let Some(label) = button_label {
+            let _: () = msg_send![panel, setPrompt: &*NSString::from_str(label)];
+        }
         if let Some(directory) = directory {
             let _: () = msg_send![panel, setDirectoryURL: &*file_url(directory)];
         }
+        // The panels show no filter names: they take every extension.
+        let extensions = file_dialog::extensions(filters);
         if !extensions.is_empty() {
             let types: Vec<Retained<NSString>> =
                 extensions.iter().map(|e| NSString::from_str(e)).collect();
@@ -142,35 +148,36 @@ unsafe fn begin(surface: &Surface, panel: &AnyObject, handler: impl Fn(isize) + 
     }
 }
 
-fn pick_paths(surface: &Rc<Surface>, id: u32, request: &PathPickRequest) {
+fn pick_paths(surface: &Rc<Surface>, id: u32, request: &OpenDialog) {
     let Some(control) = control(surface) else {
         return;
     };
     let Some(class) = AnyClass::get(c"NSOpenPanel") else {
         control.dispatch_event(
             ROOT_ID,
-            EventKind::SystemPath,
-            system_paths::answer(id, Vec::new()),
+            EventKind::FileRequest,
+            EventPayload::file_failed(id, "no NSOpenPanel"),
         );
         return;
     };
-    let extensions: &[String] = if request.folders {
-        &[]
+    let filters: &[FileFilter] = if request.picks_files() {
+        &request.filters
     } else {
-        &request.extensions
+        &[]
     };
     // SAFETY: AppKit's documented NSOpenPanel API, on the main thread.
     unsafe {
         let panel: Retained<AnyObject> = msg_send![class, openPanel];
-        let _: () = msg_send![&panel, setCanChooseFiles: !request.folders];
-        let _: () = msg_send![&panel, setCanChooseDirectories: request.folders];
-        let _: () = msg_send![&panel, setCanCreateDirectories: request.folders];
+        let _: () = msg_send![&panel, setCanChooseFiles: request.picks_files()];
+        let _: () = msg_send![&panel, setCanChooseDirectories: request.picks_folders()];
+        let _: () = msg_send![&panel, setCanCreateDirectories: request.picks_folders()];
         let _: () = msg_send![&panel, setAllowsMultipleSelection: request.multiple];
         configure(
             &panel,
             request.title.as_deref(),
+            request.button_label.as_deref(),
             request.directory.as_ref(),
-            extensions,
+            filters,
         );
         let chosen = panel.clone();
         begin(surface, &panel, move |response| {
@@ -183,22 +190,22 @@ fn pick_paths(surface: &Rc<Surface>, id: u32, request: &PathPickRequest) {
             };
             control.dispatch_event(
                 ROOT_ID,
-                EventKind::SystemPath,
-                system_paths::answer(id, paths),
+                EventKind::FileRequest,
+                EventPayload::file_answer(id, paths),
             );
         });
     }
 }
 
-fn pick_save_path(surface: &Rc<Surface>, id: u32, request: &SavePathRequest) {
+fn pick_save_path(surface: &Rc<Surface>, id: u32, request: &SaveDialog) {
     let Some(control) = control(surface) else {
         return;
     };
     let Some(class) = AnyClass::get(c"NSSavePanel") else {
         control.dispatch_event(
             ROOT_ID,
-            EventKind::SystemPath,
-            system_paths::answer(id, Vec::new()),
+            EventKind::FileRequest,
+            EventPayload::file_failed(id, "no NSSavePanel"),
         );
         return;
     };
@@ -206,14 +213,15 @@ fn pick_save_path(surface: &Rc<Surface>, id: u32, request: &SavePathRequest) {
     unsafe {
         let panel: Retained<AnyObject> = msg_send![class, savePanel];
         let _: () = msg_send![&panel, setCanCreateDirectories: true];
-        if let Some(name) = &request.name {
+        if let Some(name) = &request.file_name {
             let _: () = msg_send![&panel, setNameFieldStringValue: &*NSString::from_str(name)];
         }
         configure(
             &panel,
             request.title.as_deref(),
+            request.button_label.as_deref(),
             request.directory.as_ref(),
-            &request.extensions,
+            &request.filters,
         );
         let chosen = panel.clone();
         begin(surface, &panel, move |response| {
@@ -225,8 +233,8 @@ fn pick_save_path(surface: &Rc<Surface>, id: u32, request: &SavePathRequest) {
             };
             control.dispatch_event(
                 ROOT_ID,
-                EventKind::SystemPath,
-                system_paths::answer(id, path.into_iter().collect()),
+                EventKind::FileRequest,
+                EventPayload::file_answer(id, path.into_iter().collect()),
             );
         });
     }

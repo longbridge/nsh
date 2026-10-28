@@ -9823,15 +9823,19 @@ mod components {
         view()
             .child(text(move || format!("paths {}", shown.get())))
             .child(view().h(px(10.0)).on_press(move |_: &()| {
-                let picked = pick_paths(crate::system_paths::PathPickRequest {
-                    multiple: true,
-                    extensions: vec![".MD".into(), "markdown".into()],
-                    ..Default::default()
-                });
+                let picked = pick_paths(
+                    crate::file_dialog::OpenDialog::files()
+                        .multiple(true)
+                        .filter(crate::file_dialog::FileFilter::new(
+                            "Markdown",
+                            [".MD", "markdown"],
+                        )),
+                );
                 spawn(async move {
                     let picked = picked.await;
-                    let trashed = match picked.first() {
-                        Some(first) => Some(trash_path(first.clone()).await),
+                    let paths = picked.as_ref().ok().cloned().flatten().unwrap_or_default();
+                    let trashed = match paths.first() {
+                        Some(first) => Some(move_to_trash(first.clone()).await),
                         None => None,
                     };
                     let opened = open_path("notes.md").await;
@@ -9855,13 +9859,13 @@ mod components {
         c.commit().map(|b| b.items).unwrap_or_default()
     }
 
-    fn path_requests(items: Vec<MountItem>) -> Vec<(u32, crate::system_paths::PathRequest)> {
+    fn file_requests(items: Vec<MountItem>) -> Vec<(u32, crate::file_dialog::FileRequest)> {
         items
             .into_iter()
             .filter_map(|i| match i {
                 MountItem::Command {
                     id: ROOT_ID,
-                    command: Command::SystemPath { id, request },
+                    command: Command::FileRequest { id, request },
                 } => Some((id, *request)),
                 _ => None,
             })
@@ -9869,31 +9873,29 @@ mod components {
     }
 
     #[test]
-    fn the_platform_answers_path_requests() {
-        use crate::system_paths::{self, PathPickRequest, PathRequest};
+    fn the_platform_answers_file_requests() {
+        use crate::file_dialog::{FileFilter, FileRequest, OpenDialog};
         let mut c = core();
         c.set_environment(crate::element::Environment {
-            system_paths: true,
+            file_requests: true,
             ..Default::default()
         });
-        let requests = path_requests(press_path_actions(&mut c));
+        let requests = file_requests(press_path_actions(&mut c));
         // The dialog gets the extensions as it takes them.
-        let expected = PathPickRequest {
-            multiple: true,
-            extensions: vec!["md".into(), "markdown".into()],
-            ..Default::default()
-        };
+        let expected = OpenDialog::files()
+            .multiple(true)
+            .filter(FileFilter::new("Markdown", ["md", "markdown"]));
         assert_eq!(requests.len(), 1);
         let (pick, request) = requests.into_iter().next().unwrap();
-        assert_eq!(request, PathRequest::Pick(expected));
+        assert_eq!(request, FileRequest::OpenDialog(expected));
         let picked = vec![
             std::path::PathBuf::from("/notes/a.md"),
             std::path::PathBuf::from("/notes/b.md"),
         ];
         assert!(c.component_event(
             ROOT_ID,
-            EventKind::SystemPath,
-            &system_paths::answer(pick, picked)
+            EventKind::FileRequest,
+            &EventPayload::file_answer(pick, picked)
         ));
         // The task goes on to the trash.
         let mut trash = None;
@@ -9901,33 +9903,56 @@ mod components {
         while trash.is_none() && std::time::Instant::now() < end {
             c.run_component_tasks();
             let items = c.commit().map(|b| b.items).unwrap_or_default();
-            trash = path_requests(items).into_iter().next();
+            trash = file_requests(items).into_iter().next();
         }
         let (trash, request) = trash.expect("the trash request");
-        assert_eq!(request, PathRequest::Trash("/notes/a.md".into()));
+        assert_eq!(request, FileRequest::MoveToTrash("/notes/a.md".into()));
         assert!(c.component_event(
             ROOT_ID,
-            EventKind::SystemPath,
-            &system_paths::failed(trash, "no trash on this volume")
+            EventKind::FileRequest,
+            &EventPayload::file_failed(trash, "no trash on this volume")
         ));
         // A relative path never reaches the platform.
-        let shown = run_until(&mut c, |s| s.iter().any(|t| t.starts_with("paths [")));
+        let shown = run_until(&mut c, |s| s.iter().any(|t| t.starts_with("paths O")));
         assert_eq!(
             shown.last().unwrap(),
-            r#"paths ["/notes/a.md", "/notes/b.md"] Some(Err("no trash on this volume")) false"#
+            r#"paths Ok(Some(["/notes/a.md", "/notes/b.md"])) Some(Err("no trash on this volume")) false"#
         );
     }
 
     #[test]
-    fn path_requests_answer_at_once_without_file_dialogs() {
+    fn a_cancelled_dialog_is_no_error() {
+        let mut c = core();
+        c.set_environment(crate::element::Environment {
+            file_requests: true,
+            ..Default::default()
+        });
+        let (pick, _) = file_requests(press_path_actions(&mut c))
+            .into_iter()
+            .next()
+            .expect("the dialog");
+        assert!(c.component_event(
+            ROOT_ID,
+            EventKind::FileRequest,
+            &EventPayload::file_answer(pick, Vec::new())
+        ));
+        let shown = run_until(&mut c, |s| s.iter().any(|t| t.starts_with("paths O")));
+        assert_eq!(shown.last().unwrap(), "paths Ok(None) None false");
+    }
+
+    #[test]
+    fn file_requests_fail_at_once_without_file_dialogs() {
         let mut c = core();
         let items = press_path_actions(&mut c);
         assert!(
-            path_requests(items).is_empty(),
+            file_requests(items).is_empty(),
             "nothing reaches the platform"
         );
-        let shown = run_until(&mut c, |s| s.iter().any(|t| t.starts_with("paths [")));
-        assert_eq!(shown.last().unwrap(), "paths [] None false");
+        let shown = run_until(&mut c, |s| s.iter().any(|t| t.starts_with("paths E")));
+        assert_eq!(
+            shown.last().unwrap(),
+            r#"paths Err("this platform has no file dialogs, file manager or trash") None false"#
+        );
     }
 
     /// Shows a fallback while a component below it failed; a press tries
@@ -14790,7 +14815,7 @@ mod rust_menus {
         desktop::{DesktopCommand, MenuItem as Item, MenuRole},
         element::{
             Root,
-            desktop::{MenuItem, popup_menu, set_application_menu, set_title},
+            desktop::{MenuItem, popup_menu_at, set_application_menu, set_title},
         },
         keymap::Modifiers,
         platform::Os,
@@ -14822,12 +14847,12 @@ mod rust_menus {
             .child(text(move || log.get()))
             .child(text("More").on_press(move |e: &PressEvent| {
                 let shift = e.modifiers.shift;
-                let closed = popup_menu(
+                let closed = popup_menu_at(
                     vec![
                         MenuItem::new("Rename")
                             .on_select(move || log.set(format!("rename {shift}"))),
                     ],
-                    Some(e.page_position),
+                    e.page_position,
                 );
                 spawn(async move {
                     closed.await;

@@ -58,7 +58,7 @@ Rust 列给出 `nsh_core::element::desktop` 中的函数。
 |---|---|---|
 | `setTitle(title)` | `set_title(title)` | 窗口的标题：标题栏、任务栏或 Dock、窗口切换器里显示的名字。 |
 | `setTitleBar({ style, height? })` | `set_title_bar(TitleBarStyle::Hidden, Some(px(height)))` | `style: "hidden"` 去掉系统标题栏：应用一直铺到窗口顶边，自己绘制标题栏。系统的窗口按钮保留（macOS 的红绿灯、Windows 的最小化 / 最大化 / 关闭按钮、GTK 的窗口按钮）。`height` 是你的标题栏高度（单位为点）：窗口按钮在其中垂直居中（Windows 的标题栏按钮撑满这个高度；在 macOS 上，`height` 选择紧凑样式（44 点及以下）或标准样式（44 点以上）；应用根据 `titleBar().height` 返回的实际高度布局，实时缩放时由 AppKit 布置红绿灯。嵌入应用已有的工具栏保留自身的样式和高度）；省略时使用平台的高度。`style: "default"` 恢复系统标题栏（Rust：`set_title_bar(TitleBarStyle::Default, None)`）。 |
-| `setMenuBar(mode)` | `set_menu_bar(mode)` | 在 GPUI 应用的 Windows 和 Linux 上，窗口把应用菜单绘制成应用上方的菜单栏：`"shown"`（默认）始终显示；`"autoHide"` 在单独按下并松开 Alt 后显示，再次单独按 Alt 时隐藏，与 Windows 和 GNOME 应用一致。两种模式下 F10 和 Alt 加菜单首字母都会打开菜单，菜单打开期间菜单栏显示。macOS 的菜单栏是系统的。 |
+| `setMenuBar(mode)` | `set_menu_bar_visibility(mode)` | 在 GPUI 应用的 Windows 和 Linux 上，窗口把应用菜单绘制成应用上方的菜单栏：`"shown"`（默认）始终显示；`"autoHide"` 在单独按下并松开 Alt 后显示，再次单独按 Alt 时隐藏，与 Windows 和 GNOME 应用一致。两种模式下 F10 和 Alt 加菜单首字母都会打开菜单，菜单打开期间菜单栏显示。macOS 的菜单栏是系统的。 |
 | `minimize()` | `minimize()` | 最小化窗口。 |
 | `toggleMaximize()` | `toggle_maximize()` | 最大化窗口，已最大化时还原。 |
 | `toggleFullScreen()` | `toggle_full_screen()` | 进入或退出全屏。 |
@@ -163,7 +163,7 @@ const Menu: {
 | `setApplicationMenu(items)` | 设置应用菜单：每个顶层项是一个子菜单（`File`、`Edit`……）。在 macOS 上是菜单栏，第一个菜单是应用菜单（AppKit 以应用名作为标题）。在 Windows 和 Linux 上是窗口的菜单栏，隐藏标题栏时不显示；它的快捷键仍然有效，自定义标题栏可以用 `Menu.popup` 打开这些菜单。`null` 恢复平台默认菜单。 |
 | `popup(items, at?)` | 显示右键菜单，左上角在 `at`（窗口坐标，单位为点：`onContextMenu` 的 `e.pagePosition`），省略时在指针处。菜单关闭时（无论是否选中了菜单项）返回的 Promise 会 resolve：打开它的按钮可以在此之前一直保持按下样式。 |
 
-在 Rust 中，`set_application_menu(items)` 接受 `Vec<MenuItem>`（`None` 恢复平台默认菜单），`popup_menu(items, at)` 返回一个 `Answer<()>`，菜单关闭时得到结果（可以不 await）。菜单项的处理函数在设置菜单的 owner 下运行，只在该 owner 存活期间有效。
+在 Rust 中，`set_application_menu(items)` 接受 `Vec<MenuItem>`（`None` 恢复平台默认菜单），`popup_menu(items)`（在指针处）和 `popup_menu_at(items, at)` 返回一个 `Answer<()>`，菜单关闭时得到结果（可以不 await）。菜单项的处理函数在设置菜单的 owner 下运行，只在该 owner 存活期间有效。
 
 再次调用 `setApplicationMenu` 即可修改菜单。放在 `effect` 里时，它会跟随读取的 signal：依赖应用状态的勾选或可用状态始终保持最新。
 
@@ -197,7 +197,7 @@ type MenuItem =
 
 `null`、`undefined` 和 `false` 项会被忽略，因此可以在列表中写 `cond && { … }`。
 
-在 Rust 中，菜单项是 `MenuItem::new(label)`、`MenuItem::role(role)`、`MenuItem::separator()` 或 `MenuItem::submenu(label, items)`，字段对应同名方法：`.shortcut("mod+n")`（快捷键无效时 panic，并给出正确写法）、`.when(When::Auto)`、`.disabled(true)`、`.checked(on)`、`.on_select(f)`，以及给 role 菜单项设置文字的 `.label(..)`。
+在 Rust 中，菜单项是 `MenuItem::new(label)`、`MenuItem::role(role)`、`MenuItem::separator()` 或 `MenuItem::submenu(label, items)`，字段对应同名方法：`.shortcut("mod+n")`（快捷键无效时 panic，并给出正确写法）、`.shortcut_when(When::Auto)`、`.disabled(true)`、`.checked(on)`、`.on_select(f)`，以及给 role 菜单项设置文字的 `.label(..)`。
 
 修饰键：
 
@@ -321,15 +321,12 @@ effect(() => {
 
 ```rust tabs
 text("更多").on_press(|| {
-    let _ = popup_menu(
-        vec![
-            MenuItem::new("重命名").on_select(rename),
-            MenuItem::new("复制一份").on_select(duplicate),
-            MenuItem::separator(),
-            MenuItem::new("删除").on_select(remove),
-        ],
-        None,
-    );
+    let _ = popup_menu(vec![
+        MenuItem::new("重命名").on_select(rename),
+        MenuItem::new("复制一份").on_select(duplicate),
+        MenuItem::separator(),
+        MenuItem::new("删除").on_select(remove),
+    ]);
 })
 ```
 

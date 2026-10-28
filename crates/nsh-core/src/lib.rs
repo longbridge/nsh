@@ -22,6 +22,7 @@ pub mod desktop;
 mod effects;
 pub mod element;
 mod fenwick;
+pub mod file_dialog;
 pub mod filesystem;
 pub mod geometry;
 mod grid;
@@ -52,7 +53,6 @@ pub mod storage;
 mod style;
 #[cfg(feature = "svg")]
 pub mod svg;
-pub mod system_paths;
 pub mod tailwind;
 mod text;
 pub mod text_edit;

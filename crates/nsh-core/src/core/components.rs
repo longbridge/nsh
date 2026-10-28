@@ -21,8 +21,8 @@ use crate::{
     Tag, TextEngine,
     element::{
         Action, AnswerSlot, AnyInstance, AnyValue, Attrs, Child, ClipboardRead, ComponentError,
-        ComponentSpec, ElKind, ElNode, Environment, Executor, ImageSize, IntoElement, JsEvent,
-        JsResult, ListConfig, Listener, ModuleCx, ParentElement, PathAnswer, PlaceFn, Position,
+        ComponentSpec, ElKind, ElNode, Environment, Executor, FileAnswer, ImageSize, IntoElement,
+        JsEvent, JsResult, ListConfig, Listener, ModuleCx, ParentElement, PlaceFn, Position,
         Posts, Reactive, Registry, Root, RustCall, RustOp, SharedString, StyleRefinement, Task,
         Tokens, caught,
         responder::ResponderEl,
@@ -515,8 +515,8 @@ pub(super) struct Components {
     next_screen_color: u32,
     /// Requests on local paths (`pick_paths`, `open_path`, ...), by
     /// request id: their answers.
-    system_paths: FxHashMap<u32, PathAnswer>,
-    next_system_path: u32,
+    file_requests: FxHashMap<u32, FileAnswer>,
+    next_file_request: u32,
     /// HTTP requests of tasks (`ui::fetch`), by request id: what arrived
     /// so far and the answer.
     fetches: FxHashMap<u32, PendingFetch>,
@@ -606,8 +606,8 @@ impl Default for Components {
             next_url_open: 0,
             screen_colors: FxHashMap::default(),
             next_screen_color: 1,
-            system_paths: FxHashMap::default(),
-            next_system_path: 1,
+            file_requests: FxHashMap::default(),
+            next_file_request: 1,
             next_clipboard_read: 1,
             picks: FxHashMap::default(),
             next_pick: 1,
@@ -4723,36 +4723,31 @@ impl<M: TextEngine> Core<M> {
                     command: Command::PickScreenColor { id },
                 });
             }
-            Action::SystemPath(mut request, answer) => {
-                use crate::system_paths::PathRequest;
-                if !self.components.environment.system_paths {
+            Action::FileRequest(request, answer) => {
+                use crate::file_dialog::FileRequest;
+                if !self.components.environment.file_requests {
                     answer.deliver(
                         Vec::new(),
                         Some("this platform has no file dialogs, file manager or trash".into()),
                     );
                     return;
                 }
-                match &mut request {
-                    PathRequest::Pick(pick) => pick.normalize(),
-                    PathRequest::Save(save) => save.normalize(),
-                    PathRequest::Open(path)
-                    | PathRequest::Reveal(path)
-                    | PathRequest::Trash(path)
-                        if !path.is_absolute() =>
-                    {
-                        let refused = format!("`{}` is not an absolute path", path.display());
-                        log::warn!("{refused}");
-                        answer.deliver(Vec::new(), Some(refused));
-                        return;
-                    }
-                    _ => {}
+                if let FileRequest::OpenPath(path)
+                | FileRequest::RevealPath(path)
+                | FileRequest::MoveToTrash(path) = &request
+                    && !path.is_absolute()
+                {
+                    let refused = format!("`{}` is not an absolute path", path.display());
+                    log::warn!("{refused}");
+                    answer.deliver(Vec::new(), Some(refused));
+                    return;
                 }
-                let id = self.components.next_system_path;
-                self.components.next_system_path = id.wrapping_add(1);
-                self.components.system_paths.insert(id, answer);
+                let id = self.components.next_file_request;
+                self.components.next_file_request = id.wrapping_add(1);
+                self.components.file_requests.insert(id, answer);
                 let _ = self.apply_op(Op::Command {
                     id: crate::ROOT_ID,
-                    command: Command::SystemPath {
+                    command: Command::FileRequest {
                         id,
                         request: Box::new(request),
                     },
@@ -5057,8 +5052,8 @@ impl<M: TextEngine> Core<M> {
                 }
                 true
             }
-            EventKind::SystemPath if id == crate::ROOT_ID => {
-                let EventPayload::SystemPath {
+            EventKind::FileRequest if id == crate::ROOT_ID => {
+                let EventPayload::FileRequest {
                     id: request,
                     paths,
                     error,
@@ -5066,7 +5061,7 @@ impl<M: TextEngine> Core<M> {
                 else {
                     return false;
                 };
-                if let Some(answer) = self.components.system_paths.remove(request) {
+                if let Some(answer) = self.components.file_requests.remove(request) {
                     answer.deliver(paths.clone(), error.clone());
                 }
                 true

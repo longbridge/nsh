@@ -1,11 +1,11 @@
-//! Local paths ([`nsh_core::system_paths`]): the shell's file dialogs
+//! Local paths ([`nsh_core::file_dialog`]): the shell's file dialogs
 //! (`IFileOpenDialog`, with `FOS_PICKFOLDERS` for folders, and
 //! `IFileSaveDialog`) owned by the surface's window, opening a file in its
 //! app (`ShellExecuteW`), showing it selected in File Explorer
 //! (`SHOpenFolderAndSelectItems`) and the Recycle Bin (`IFileOperation`
 //! with `FOFX_RECYCLEONDELETE`). Each request runs on a thread of its own
 //! (a single-threaded COM apartment), so the surface's message loop never
-//! waits in it, and answers as a root `SystemPath` event.
+//! waits in it, and answers as a root `FileRequest` event.
 
 use std::{
     path::{Path, PathBuf},
@@ -14,11 +14,11 @@ use std::{
 
 use nsh_core::{
     EventKind, EventPayload, ROOT_ID,
-    system_paths::{self, PathPickRequest, PathRequest, SavePathRequest},
+    file_dialog::{FileFilter, FileRequest, OpenDialog, SaveDialog},
 };
 use windows::{
     Win32::{
-        Foundation::HWND,
+        Foundation::{ERROR_CANCELLED, HWND},
         System::Com::{
             CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED, CoCreateInstance, CoInitializeEx,
             CoTaskMemFree, CoUninitialize,
@@ -35,13 +35,13 @@ use windows::{
             WindowsAndMessaging::SW_SHOWNORMAL,
         },
     },
-    core::{HSTRING, PCWSTR, w},
+    core::{HRESULT, HSTRING, PCWSTR, w},
 };
 
 use crate::surface::Surface;
 
 /// Carries out request `id`.
-pub(crate) fn request(surface: &Rc<Surface>, id: u32, request: &PathRequest) {
+pub(crate) fn request(surface: &Rc<Surface>, id: u32, request: &FileRequest) {
     let mut control = None;
     surface.control(|c| control = Some(c.clone()));
     let Some(control) = control else { return };
@@ -53,11 +53,11 @@ pub(crate) fn request(surface: &Rc<Surface>, id: u32, request: &PathRequest) {
         .name("nsh-paths".into())
         .spawn(move || {
             let answer = with_com(|| answer(id, HWND(owner as *mut _), &request))
-                .unwrap_or_else(|e| system_paths::failed(id, e.message()));
-            control.dispatch_event(ROOT_ID, EventKind::SystemPath, answer);
+                .unwrap_or_else(|e| EventPayload::file_failed(id, e.message()));
+            control.dispatch_event(ROOT_ID, EventKind::FileRequest, answer);
         });
     if let Err(e) = spawned {
-        log::warn!("cannot carry out a path request: {e}");
+        log::warn!("cannot carry out a file request: {e}");
     }
 }
 
@@ -73,25 +73,30 @@ fn with_com<T>(f: impl FnOnce() -> T) -> windows::core::Result<T> {
     }
 }
 
-fn answer(id: u32, owner: HWND, request: &PathRequest) -> EventPayload {
+fn answer(id: u32, owner: HWND, request: &FileRequest) -> EventPayload {
     let result = match request {
-        PathRequest::Pick(pick) => pick_paths(owner, pick),
-        PathRequest::Save(save) => pick_save_path(owner, save).map(|p| p.into_iter().collect()),
-        PathRequest::Open(path) => open(path).map(|()| Vec::new()),
-        PathRequest::Reveal(path) => reveal(path).map(|()| Vec::new()),
-        PathRequest::Trash(path) => trash(path).map(|()| Vec::new()),
+        FileRequest::OpenDialog(dialog) => pick_paths(owner, dialog),
+        FileRequest::SaveDialog(dialog) => {
+            pick_save_path(owner, dialog).map(|p| p.into_iter().collect())
+        }
+        FileRequest::OpenPath(path) => open(path).map(|()| Vec::new()),
+        FileRequest::RevealPath(path) => reveal(path).map(|()| Vec::new()),
+        FileRequest::MoveToTrash(path) => trash(path).map(|()| Vec::new()),
         other => {
-            log::debug!("windows: path request {other:?} is not supported");
-            return system_paths::failed(id, "not supported");
+            log::debug!("windows: file request {other:?} is not supported");
+            return EventPayload::file_failed(id, "not supported");
         }
     };
     match result {
-        Ok(paths) => system_paths::answer(id, paths),
+        Ok(paths) => EventPayload::file_answer(id, paths),
         Err(e) => {
-            if matches!(request, PathRequest::Pick(_) | PathRequest::Save(_)) {
+            if matches!(
+                request,
+                FileRequest::OpenDialog(_) | FileRequest::SaveDialog(_)
+            ) {
                 log::warn!("the file dialog failed: {e}");
             }
-            system_paths::failed(id, e.message())
+            EventPayload::file_failed(id, e.message())
         }
     }
 }
@@ -115,8 +120,9 @@ fn item_path(item: &IShellItem) -> windows::core::Result<Option<PathBuf>> {
 fn configure(
     dialog: &IFileDialog,
     title: Option<&str>,
+    button_label: Option<&str>,
     directory: Option<&PathBuf>,
-    extensions: &[String],
+    filters: &[FileFilter],
 ) -> windows::core::Result<()> {
     // SAFETY: COM calls on a dialog of this thread; the strings outlive
     // the calls that read them (the dialog copies them).
@@ -124,36 +130,70 @@ fn configure(
         if let Some(title) = title {
             dialog.SetTitle(&HSTRING::from(title))?;
         }
+        if let Some(label) = button_label {
+            dialog.SetOkButtonLabel(&HSTRING::from(label))?;
+        }
         if let Some(folder) = directory.and_then(|d| item(d).ok()) {
             dialog.SetFolder(&folder)?;
         }
-        if !extensions.is_empty() {
-            // No label of NSH's own: the filter shows its patterns.
-            let pattern = extensions
+        if !filters.is_empty() {
+            // Each filter as the shell's dialogs show them:
+            // `Markdown (*.md;*.markdown)`.
+            let strings: Vec<(HSTRING, HSTRING)> = filters
                 .iter()
-                .map(|e| format!("*.{e}"))
-                .collect::<Vec<_>>()
-                .join(";");
-            let pattern = HSTRING::from(pattern);
-            let spec = [COMDLG_FILTERSPEC {
-                pszName: PCWSTR(pattern.as_ptr()),
-                pszSpec: PCWSTR(pattern.as_ptr()),
-            }];
-            dialog.SetFileTypes(&spec)?;
-            dialog.SetDefaultExtension(&HSTRING::from(extensions[0].as_str()))?;
+                .map(|filter| {
+                    let pattern = filter
+                        .extensions
+                        .iter()
+                        .map(|e| format!("*.{e}"))
+                        .collect::<Vec<_>>()
+                        .join(";");
+                    let name = format!("{} ({pattern})", filter.name);
+                    (HSTRING::from(name), HSTRING::from(pattern))
+                })
+                .collect();
+            let specs: Vec<COMDLG_FILTERSPEC> = strings
+                .iter()
+                .map(|(name, pattern)| COMDLG_FILTERSPEC {
+                    pszName: PCWSTR(name.as_ptr()),
+                    pszSpec: PCWSTR(pattern.as_ptr()),
+                })
+                .collect();
+            dialog.SetFileTypes(&specs)?;
+            if let Some(extension) = filters[0].extensions.first() {
+                dialog.SetDefaultExtension(&HSTRING::from(extension.as_str()))?;
+            }
         }
     }
     Ok(())
 }
 
-/// The paths picked in the dialog; none when it was cancelled.
-fn pick_paths(owner: HWND, request: &PathPickRequest) -> windows::core::Result<Vec<PathBuf>> {
+/// Shows `dialog` owned by `owner`: whether the user confirmed it (`false`
+/// when cancelled).
+///
+/// # Safety
+///
+/// `dialog` belongs to this thread's COM apartment.
+unsafe fn show(dialog: &IFileDialog, owner: HWND) -> windows::core::Result<bool> {
+    // SAFETY: as the caller promises.
+    match unsafe { dialog.Show(Some(owner)) } {
+        Ok(()) => Ok(true),
+        Err(e) if e.code() == HRESULT::from_win32(ERROR_CANCELLED.0) => Ok(false),
+        Err(e) => Err(e),
+    }
+}
+
+/// The paths picked in the dialog; none when it was cancelled. The
+/// shell's dialog picks files or folders, not both: files and folders pick
+/// files.
+fn pick_paths(owner: HWND, request: &OpenDialog) -> windows::core::Result<Vec<PathBuf>> {
     // SAFETY: COM calls on a dialog this thread owns until it returns.
     unsafe {
         let dialog: IFileOpenDialog =
             CoCreateInstance(&FileOpenDialog, None, CLSCTX_INPROC_SERVER)?;
         let mut options = dialog.GetOptions()? | FOS_FORCEFILESYSTEM;
-        options |= if request.folders {
+        let folders = !request.picks_files();
+        options |= if folders {
             FOS_PICKFOLDERS
         } else {
             FOS_FILEMUSTEXIST
@@ -162,19 +202,15 @@ fn pick_paths(owner: HWND, request: &PathPickRequest) -> windows::core::Result<V
             options |= FOS_ALLOWMULTISELECT;
         }
         dialog.SetOptions(options)?;
-        let extensions: &[String] = if request.folders {
-            &[]
-        } else {
-            &request.extensions
-        };
+        let filters: &[FileFilter] = if folders { &[] } else { &request.filters };
         configure(
             &dialog,
             request.title.as_deref(),
+            request.button_label.as_deref(),
             request.directory.as_ref(),
-            extensions,
+            filters,
         )?;
-        if dialog.Show(Some(owner)).is_err() {
-            // Cancelled.
+        if !show(&dialog, owner)? {
             return Ok(Vec::new());
         }
         let items = dialog.GetResults()?;
@@ -189,7 +225,7 @@ fn pick_paths(owner: HWND, request: &PathPickRequest) -> windows::core::Result<V
 /// The path chosen in the dialog; none when it was cancelled.
 fn pick_save_path(
     owner: HWND,
-    request: &SavePathRequest,
+    request: &SaveDialog,
 ) -> windows::core::Result<Option<PathBuf>> {
     // SAFETY: COM calls on a dialog this thread owns until it returns; the
     // name outlives the call that reads it.
@@ -197,16 +233,17 @@ fn pick_save_path(
         let dialog: IFileSaveDialog =
             CoCreateInstance(&FileSaveDialog, None, CLSCTX_INPROC_SERVER)?;
         dialog.SetOptions(dialog.GetOptions()? | FOS_FORCEFILESYSTEM)?;
-        if let Some(name) = &request.name {
+        if let Some(name) = &request.file_name {
             dialog.SetFileName(&HSTRING::from(name.as_str()))?;
         }
         configure(
             &dialog,
             request.title.as_deref(),
+            request.button_label.as_deref(),
             request.directory.as_ref(),
-            &request.extensions,
+            &request.filters,
         )?;
-        if dialog.Show(Some(owner)).is_err() {
+        if !show(&dialog, owner)? {
             return Ok(None);
         }
         item_path(&dialog.GetResult()?)

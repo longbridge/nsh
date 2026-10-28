@@ -345,7 +345,9 @@ pub(crate) fn command(surface: &Rc<Surface>, _id: NodeId, command: &Command) {
         Command::ReadClipboardFiles { id } => read_clipboard_files(surface, *id),
         Command::PickImages { id, request } => crate::picker::pick_images(surface, *id, *request),
         Command::PickScreenColor { id } => crate::screen_color::pick_screen_color(surface, *id),
-        Command::SystemPath { id, request } => crate::system_paths::request(surface, *id, request),
+        Command::FileRequest { id, request } => {
+            crate::file_requests::request(surface, *id, request)
+        }
         Command::OpenUrl { id, url } => {
             let opened = open_url(url);
             surface.event(

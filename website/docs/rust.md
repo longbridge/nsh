@@ -177,23 +177,37 @@ The module has the window's other functions (`set_title`, `minimize`,
 ## Files and folders
 
 On the desktops, Rust code shows the system's file dialogs and hands local paths to
-the system, each answer awaited in a task: `pick_paths` (files, or folders with
-`folders`), `pick_save_path`, `open_path` (the file's default app), `reveal_path`
-(the item selected in Finder, File Explorer or the file manager) and `trash_path`
-(where the item went, when macOS says). Elsewhere a pick answers with no paths,
-`open_path` and `reveal_path` with `false` and `trash_path` with an error.
+the system, each answer awaited in a task: `pick_paths` with an `OpenDialog`
+(`OpenDialog::files()`, `::folders()` or `::files_and_folders()`), `pick_save_path`
+with a `SaveDialog`, `open_path` (the file's default app), `reveal_path` (the item
+selected in Finder, File Explorer or the file manager) and `move_to_trash` (where the
+item went, when macOS says). The dialogs answer `Ok(None)` when the user cancels and
+an error when they cannot show (on Linux without a file chooser portal, and on iOS,
+Android and the web, where `open_path` and `reveal_path` answer `false` and
+`move_to_trash` an error).
 
 ```rust
-use nsh_core::{prelude::*, system_paths::PathPickRequest};
+use nsh_core::{
+    file_dialog::{FileFilter, OpenDialog},
+    prelude::*,
+};
 
 fn open_notes() {
-    let mut request = PathPickRequest::default();
-    request.multiple = true;
-    request.extensions = vec!["md".into()];
-    let picked = pick_paths(request);
+    let picked = pick_paths(
+        OpenDialog::files()
+            .multiple(true)
+            .filter(FileFilter::new("Markdown", ["md", "markdown"]))
+            .button_label("Open"),
+    );
     spawn(async move {
-        for path in picked.await {
-            let _ = reveal_path(path).await;
+        match picked.await {
+            Ok(Some(paths)) => {
+                for path in paths {
+                    let _ = reveal_path(path).await;
+                }
+            }
+            Ok(None) => {} // Cancelled.
+            Err(error) => log::warn!("no file dialog: {error}"),
         }
     });
 }

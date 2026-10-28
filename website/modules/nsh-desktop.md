@@ -58,7 +58,7 @@ The Rust column names the functions of `nsh_core::element::desktop`.
 |---|---|---|
 | `setTitle(title)` | `set_title(title)` | The window's title: the title bar, the taskbar or Dock, the window switcher. |
 | `setTitleBar({ style, height? })` | `set_title_bar(TitleBarStyle::Hidden, Some(px(height)))` | `style: "hidden"` removes the system's title bar: the app fills the window up to its top edge and draws a title bar of its own. The system's window controls stay (macOS's traffic lights, Windows' minimize / maximize / close buttons, GTK's window buttons). `height` is your bar's height in points: the controls are centered in it (Windows' caption buttons fill it; on macOS `height` selects compact chrome up to 44 points and regular chrome above; size your bar using the actual height from `titleBar().height`, and AppKit places the traffic lights during live resizing. An embedding app's existing toolbar keeps its own style and height); without it they take the platform's height. `style: "default"` brings the system's title bar back (Rust: `set_title_bar(TitleBarStyle::Default, None)`). |
-| `setMenuBar(mode)` | `set_menu_bar(mode)` | On Windows and Linux in GPUI apps, where the window draws the application menu as a bar above the app: `"shown"` (the default) shows it always; `"autoHide"` shows it after Alt is pressed and released alone, until Alt alone hides it again, as in Windows and GNOME apps. F10 and Alt with a menu's initial open a menu either way, and the bar shows while it is open. macOS's menu bar is the system's. |
+| `setMenuBar(mode)` | `set_menu_bar_visibility(mode)` | On Windows and Linux in GPUI apps, where the window draws the application menu as a bar above the app: `"shown"` (the default) shows it always; `"autoHide"` shows it after Alt is pressed and released alone, until Alt alone hides it again, as in Windows and GNOME apps. F10 and Alt with a menu's initial open a menu either way, and the bar shows while it is open. macOS's menu bar is the system's. |
 | `minimize()` | `minimize()` | Minimizes the window. |
 | `toggleMaximize()` | `toggle_maximize()` | Maximizes the window, or restores it when it is maximized. |
 | `toggleFullScreen()` | `toggle_full_screen()` | Enters or leaves full screen. |
@@ -163,7 +163,7 @@ const Menu: {
 | `setApplicationMenu(items)` | Sets the application menu: one submenu per top-level item (`File`, `Edit`, ...). On macOS it is the menu bar, whose first menu is the app menu (AppKit titles it with the app's name). On Windows and Linux it is the window's menu bar, which is not shown while the title bar is hidden; its shortcuts still work, and a title bar of the app's own can open its menus with `Menu.popup`. `null` restores the platform's default menu. |
 | `popup(items, at?)` | Shows a context menu with its top left corner at `at` (the window's coordinates, in points: an `onContextMenu`'s `e.pagePosition`), or at the pointer. The promise resolves once the menu closes, whether an item was chosen or not: a button that opened it can stay pressed until then. |
 
-In Rust, `set_application_menu(items)` takes a `Vec<MenuItem>` (`None` restores the platform's default menu), and `popup_menu(items, at)` returns an `Answer<()>` that comes once the menu closes (awaiting it is optional). An item's handler runs under the owner that set the menu, while that owner lives.
+In Rust, `set_application_menu(items)` takes a `Vec<MenuItem>` (`None` restores the platform's default menu), and `popup_menu(items)` (at the pointer) and `popup_menu_at(items, at)` return an `Answer<()>` that comes once the menu closes (awaiting it is optional). An item's handler runs under the owner that set the menu, while that owner lives.
 
 Call `setApplicationMenu` again to change the menu. Inside an `effect` it follows the signals it reads: a check mark or a disabled state that depends on app state stays current.
 
@@ -197,7 +197,7 @@ type MenuItem =
 
 `null`, `undefined` and `false` items are left out, so `cond && { … }` works in a list.
 
-In Rust, an item is `MenuItem::new(label)`, `MenuItem::role(role)`, `MenuItem::separator()` or `MenuItem::submenu(label, items)`, with the fields as methods: `.shortcut("mod+n")` (it panics on an invalid shortcut, with the right spelling), `.when(When::Auto)`, `.disabled(true)`, `.checked(on)`, `.on_select(f)`, and `.label(..)` for a role's item.
+In Rust, an item is `MenuItem::new(label)`, `MenuItem::role(role)`, `MenuItem::separator()` or `MenuItem::submenu(label, items)`, with the fields as methods: `.shortcut("mod+n")` (it panics on an invalid shortcut, with the right spelling), `.shortcut_when(When::Auto)`, `.disabled(true)`, `.checked(on)`, `.on_select(f)`, and `.label(..)` for a role's item.
 
 Modifiers:
 
@@ -321,15 +321,12 @@ A context menu, from a button's press:
 
 ```rust tabs
 text("More").on_press(|| {
-    let _ = popup_menu(
-        vec![
-            MenuItem::new("Rename").on_select(rename),
-            MenuItem::new("Duplicate").on_select(duplicate),
-            MenuItem::separator(),
-            MenuItem::new("Delete").on_select(remove),
-        ],
-        None,
-    );
+    let _ = popup_menu(vec![
+        MenuItem::new("Rename").on_select(rename),
+        MenuItem::new("Duplicate").on_select(duplicate),
+        MenuItem::separator(),
+        MenuItem::new("Delete").on_select(remove),
+    ]);
 })
 ```
 

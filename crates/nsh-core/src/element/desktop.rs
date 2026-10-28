@@ -63,7 +63,7 @@ pub fn set_title(title: impl Into<String>) {
 /// again. F10 and Alt with a menu's initial open a menu either way, and the
 /// bar shows while it is open. macOS's menu bar is the system's (TS:
 /// `Window.setMenuBar`).
-pub fn set_menu_bar(mode: MenuBarMode) {
+pub fn set_menu_bar_visibility(mode: MenuBarMode) {
     super::desktop_command(DesktopCommand::SetMenuBar(mode));
 }
 
@@ -215,7 +215,7 @@ impl MenuItem {
 
     /// When its shortcut chooses it while a text field has the keyboard
     /// focus ([`When::Always`] by default), on the GPUI backend.
-    pub fn when(mut self, when: When) -> Self {
+    pub fn shortcut_when(mut self, when: When) -> Self {
         self.when = when;
         self
     }
@@ -362,15 +362,24 @@ pub fn set_application_menu(items: impl Into<Option<Vec<MenuItem>>>) {
     super::desktop_command(DesktopCommand::SetMenu(Some(items.into())));
 }
 
-/// Shows a context menu of `items` with its top left corner at `at` (the
+/// Shows a context menu of `items` at the pointer (TS: `Menu.popup`). The
+/// chosen item's [`MenuItem::on_select`] runs under the current owner. The
+/// answer comes once the menu closes, chosen or dismissed (at once off
+/// desktops), so a button that opened it can look pressed until then; it
+/// need not be awaited.
+pub fn popup_menu(items: Vec<MenuItem>) -> Answer<()> {
+    popup(items, None)
+}
+
+/// As [`popup_menu`], with the menu's top left corner at `at` (the
 /// window's coordinates, in points: an
 /// [`on_context_menu`](super::Interactive::on_context_menu)'s
-/// `page_position`), else at the pointer (TS: `Menu.popup`). The chosen
-/// item's [`MenuItem::on_select`] runs under the current owner. The answer
-/// comes once the menu closes, chosen or dismissed (at once off desktops),
-/// so a button that opened it can look pressed until then; it need not be
-/// awaited.
-pub fn popup_menu(items: Vec<MenuItem>, at: Option<Point<Points>>) -> Answer<()> {
+/// `page_position`; TS: `Menu.popup(items, at)`).
+pub fn popup_menu_at(items: Vec<MenuItem>, at: Point<Points>) -> Answer<()> {
+    popup(items, Some(at))
+}
+
+fn popup(items: Vec<MenuItem>, at: Option<Point<Points>>) -> Answer<()> {
     let (answer, slot) = Answer::new();
     if !desktop_os() {
         slot.borrow_mut().deliver(());

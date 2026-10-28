@@ -138,7 +138,7 @@ pub(super) fn payload(host: &Bindings, payload: &EventPayload) -> Result<Value, 
                 ("uris", strings(&paste.uris)?),
             ])?
         }
-        EventPayload::Picked { id, .. } | EventPayload::SystemPath { id, .. } => {
+        EventPayload::Picked { id, .. } | EventPayload::FileRequest { id, .. } => {
             object([("id", number(*id))])?
         }
         EventPayload::Native { name, data } => object([
