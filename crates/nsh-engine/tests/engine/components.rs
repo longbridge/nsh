@@ -5546,11 +5546,12 @@ fn base_plot_moves_natively_with_its_motion() {
         MountItem::ViewProps { id, props } if *id == plot
             && props.accessibility.value.as_ref().and_then(|v| v.text.as_deref()) == Some("row 1")
     )));
-    // Over the plot: the next row on the pointer spring.
+    // Over the plot: the next row under the pointer in the same frame, with
+    // no spring (the pointer spring is the keys'), and no mark drawn again.
     hover(190.0);
-    let glided = until(&rx, |b| shows(b, "hover 2"));
-    assert!(springs(&glided) > 0);
-    assert!(plot_drawings(&glided).is_empty());
+    let moved = until(&rx, |b| shows(b, "hover 2"));
+    assert_eq!(springs(&moved), 0);
+    assert!(plot_drawings(&moved).is_empty());
     // Leaving: faded out over 80 ms.
     engine.control().dispatch_event(
         plot,

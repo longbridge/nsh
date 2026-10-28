@@ -94,7 +94,9 @@ style methods for the slider itself and `.child(..)` for its label. Its value is
 
 The value is a number, or `[start, end]` for a range with two thumbs; the shape of the value decides how many thumbs
 there are. The app owns it with `value` and sets the one `onChange` reports, as for every control of `nsh/base`; or it
-leaves the value to the slider with `defaultValue`, and hears the changes all the same.
+leaves the value to the slider with `defaultValue`, and hears the changes all the same. During a drag the thumbs and the
+range follow the pointer in the same frame, natively, and the app's `value` shows again when the pointer lifts; screen
+readers hear the drag's values as it goes while one runs, and its end value otherwise.
 
 ```tsx
 const price = signal<[number, number]>([200, 800]);

@@ -511,8 +511,9 @@ pub fn Bar(props: BarProps, _cx: Scope<NoEvent>) -> impl IntoElement {
             .staggered(row, g.rows, stagger.get().0.clamp(0.0, 0.95))
     };
     // The opacity of row `row`'s bars: `inactiveOpacity` away from the
-    // hover's row, by the distance of the hover's band (gliding on the
-    // pointer spring) in bands, as far as the hover has faded in.
+    // hover's row, by the distance of the hover's band (on the row under
+    // the pointer at once, gliding on the pointer spring when the keys step)
+    // in bands, as far as the hover has faded in.
     let opacity = move |g: &Geometry, bar: &BarRect| -> Option<AnimatedNode> {
         let dim = 1.0 - inactive.get()?.0.clamp(0.0, 1.0);
         if dim <= 0.0 || g.step <= 0.0 || !plot.interactive.get() {

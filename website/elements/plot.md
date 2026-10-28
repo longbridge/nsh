@@ -97,7 +97,7 @@ the marks take the typed paint methods (`.stroke_color(..)`, `.fill_color(..)`, 
 | `xScale` | `.x_scale(..)` | `Scale` | `{ type: "point" }` | How the x axis places rows: `point` (in order, evenly from the left edge to the right one; one row in the middle), `linear` with an optional `domain`, or `band` (a band per row, for bars; [Bar](#bar)). With a `band` y scale it defaults to `linear`, for bars across. `reverse: true` runs it from the right edge ([Reversed scales](#reversed-scales)). |
 | `yScale` | `.y_scale(..)` | `Scale` | `{ type: "linear" }` | How the y axis places values: the domain's smallest value at the bottom edge, its largest at the top. Without a `domain`, the extent of what the marks draw. `band` lays a band per row from the top edge down, for bars across. `reverse: true` runs it the other way: the smallest value at the top edge, the rows from the bottom edge up ([Reversed scales](#reversed-scales)). |
 | `interactive` | `.interactive(..)` | `boolean` | `true` | The plot follows the pointer and the keyboard: it reports the row under it and shows the hover's parts, and it is a stop of Tab whose arrow keys move the hover ([Keyboard](#keyboard)). `false` draws the marks only (a sparkline in a list), and presses on it go to the views around it. Whether the plot offers the keyboard at all is set when it is made. |
-| `motion` | `.motion(..)` | `PlotMotion` | none | The timing of the appear, the hover's fade in and out, and the spring the hover follows the pointer with (below). |
+| `motion` | `.motion(..)` | `PlotMotion` | none | The timing of the appear, the hover's fade in and out, and the spring the hover glides on when the keys move it (below). |
 | `appearGeneration` | `.appear_generation(..)` | `number` | none | Opts in to the appear: the marks draw in when the plot is first shown, and again whenever this changes (another symbol, another period). |
 | `accessibilityLabel` | `.accessibility_label(..)` | `string` | none | What screen readers say of the chart: what it shows and what stands out. |
 | `accessibilityValue` | `.accessibility_value(..)` | `{ min?, max?, now?, text? }` | none | What screen readers hear as its value: the app's words for the row under the pointer. |
@@ -236,7 +236,7 @@ each row's bar starting where the one before it in the stack ends:
 | `stack` | `string` | none | The stack it joins: the bars with the same `stack` pile up in order (a row without a value adds nothing). |
 | `cornerRadii` | `number \| { topLeft?, topRight?, bottomRight?, bottomLeft? }` | `0` | The radius of each corner of its bars; `{ topLeft: 4, topRight: 4 }` rounds the tips of upright bars. A radius larger than half a bar fits it. |
 | `stagger` | `number` | `0` | With the plot's appear, the bars start one after another, row by row, over this share of it (0 to 0.95), each growing for the rest; 0 grows them together. |
-| `inactiveOpacity` | `number` | none | The opacity of its bars away from the row under the pointer while the pointer is over the plot, so that row stands out: it fades in and out with the hover and passes from bar to bar as the hover glides. |
+| `inactiveOpacity` | `number` | none | The opacity of its bars away from the row under the pointer while the pointer is over the plot, so that row stands out: it fades in and out with the hover and passes from bar to bar with it. |
 | `label` | `string \| (d, index) => string` | none | The text at each bar's value end: a field (its text, or its number) or a function returning the text the app formats. |
 | `labelClass`, `labelStyle` | `string`, `StyleProp<TextStyle>` | none | The `label` part: a text centered on the bar, above an upright bar's end (below one growing down), after a bar across (before one growing back). Its padding is its distance from the bar. |
 | `backgroundClass`, `backgroundStyle` | `string`, `StyleProp<ViewStyle>` | none | Its background: each bar's box, whose background (`bg-linear-to-t from-… to-…`, from the bottom of the bar to its top) shows only inside the bar, under its `fill`. With one, `fill` is `none` where none is set. |
@@ -507,7 +507,7 @@ export function Compare(props: { metrics: Metric[] }) {
 | `RadialLine` | `closed` | `.closed(..)` | `boolean` | `false` | It goes on from its last point back to its first: a radar's polygon. Open, its area closes to the center (or along its inner edge). |
 | `RadialLine` | `dot`, `dotClass`, `dotStyle` | `.dot(..)`, `.dot_class(..)`, `.dot_style(..)` | `boolean`, `string`, `StyleProp<ViewStyle>` | `false` | A dot on every point: a view centered on it, its size, background and border the app's. The dots grow out and move with the line. |
 | `RadialLine` | `backgroundClass`, `backgroundStyle` | `.background_class(..)`, `.background_style(..)` | `string`, `StyleProp<ViewStyle>` | none | Its background: a box around its outer circle whose background (`bg-*`, a gradient) shows only inside its area, under its `fill`, as an area's. |
-| `RadialLine` | `hoverDotClass`, `hoverDotStyle` | `.hover_dot_class(..)`, `.hover_dot_style(..)` | `string`, `StyleProp<ViewStyle>` | the plot's `dotClass`, `dotStyle` | Its hover dot, on its point of the row under the pointer, gliding to the next row on the plot's `pointer` spring; `hidden` shows none. |
+| `RadialLine` | `hoverDotClass`, `hoverDotStyle` | `.hover_dot_class(..)`, `.hover_dot_style(..)` | `string`, `StyleProp<ViewStyle>` | the plot's `dotClass`, `dotStyle` | Its hover dot, on its point of the row under the pointer, with the pointer in the same frame and gliding to the next row on the plot's `pointer` spring when the keys step; `hidden` shows none. |
 | `RadialGrid` | `rings` | `.rings(..)` | `number[]` | none | Where its rings go, as values of the y scale: each as far out as a radial line puts that value. |
 | `RadialGrid` | `spokes` | `.spokes(..)` | `boolean` | `false` | A line from `innerRadius` to `outerRadius` at each row's angle. |
 | `RadialGrid` | `circular` | `.circular(..)` | `boolean` | `false` | Its rings are circles (arcs over a part of a turn). By default they are polygons through the rows' angles, and circles while the plot has fewer than three rows. |
@@ -792,7 +792,10 @@ Motion is the app's, and none by default: everything shows at once. `motion` tak
 | `update` | timing | Marks move to the new shape when the app changes it: a pie's and an arc's radii, so a donut's hole opens and closes, and their angles, so a gauge or a slice sweeps round to its new value (d3's `arcTween`: the angles move, not the outline; a new slice opens from where the one before it ends; a change while one moves goes on from where it is drawn); a radial line's points to their new values, angles and radii (a new row growing out of the inner radius), a radial grid's rings with them; and a linear scale's domain, the app's `domain` or the extent of the marks' values as rows come, which glides from the old one to the new one, the marks, the grid lines, the `PlotAxis`es and the `PlotLabel`s with it; and a sankey's nodes, ribbons and labels, from the old flows' layout to the new one, a change while they move going on from where they are drawn. |
 | `enter` | timing | The hover's parts fade in when the pointer comes over the plot. |
 | `exit` | timing | They fade out after it leaves. |
-| `pointer` | spring | They glide from one row to the next while the pointer moves over the plot; a pie's slice lifts on it, and a radial line's hover dot glides on it from one row's point to the next. |
+| `pointer` | spring | They glide from one row to the next when the keys or a screen reader step the hover; a pie's slice lifts on it. |
+
+The hover's parts follow the pointer in the same frame: as it moves, the cross line, the dots and the tooltip are on
+the row under it at once, so they track the hand, while their fade in and out (`enter`, `exit`) still animates.
 
 The motion runs on the platform's animator, with no JS per frame, and is complete at once for people who ask for
 reduced motion. A plot that a list makes again for a row that comes back draws in again; give it the row's key as its
@@ -997,7 +1000,7 @@ See [Accessibility](../docs/accessibility.md) for labels and roles in general.
   radii, its lift is a radius and the others' fade an opacity the animator moves, and the appear's sweep moves the
   slices' angles the same way, so neither records a drawing again.
 - A radial line's row under the pointer is found in Rust from its points' angles; its hover dot is a view the animator
-  moves on the `pointer` spring, and while it appears or moves to new values its points are numbers the animator moves
+  places on the row under the pointer (gliding on the `pointer` spring as the keys step), and while it appears or moves to new values its points are numbers the animator moves
   from where they were, so the line is recorded once per change.
 - An axis' labels, tick marks and line are the platform's own texts and views, placed by the layout in Rust from the
   plot's size and scales: they move with the marks when the plot's size changes, and a new domain writes the labels

@@ -714,7 +714,8 @@ impl Dot {
 }
 
 /// A radial line's hover dot: on the hovered row's point, taking the first
-/// row at once and gliding to the next on the plot's pointer spring, faded
+/// row at once, gliding to the next on the plot's pointer spring when the
+/// keys step there and moving with the pointer in the same frame, faded
 /// with the hover; styled by the line (`hoverDotClass`) or the plot
 /// (`dotClass`), none where neither styles one.
 fn hover_dot_view(plot: PlotContext, rest: Memo<Frame>, own: HoverDot) -> impl IntoElement {
@@ -728,7 +729,7 @@ fn hover_dot_view(plot: PlotContext, rest: Memo<Frame>, own: HoverDot) -> impl I
         };
         let was = on.get();
         on.replace(hovered);
-        let glide = was.is_some() && was != hovered && !reduce_motion();
+        let glide = was.is_some() && was != hovered && plot.keyed.get() && !reduce_motion();
         let spring = untracked(|| plot.motion.get().and_then(|m| m.pointer));
         match spring.filter(|_| glide) {
             Some(spring) => {

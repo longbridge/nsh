@@ -369,6 +369,10 @@ repository's `target/`; dependencies only it uses are declared in `crates/gpui/C
   `active:`), no built-in strings (every label comes from the app); system UI keeps the platform's look (iOS / Android
   headers; `AlertDialog`, drawn in the platform's dialog style where the system has no dialog to show). React Native and
   UIKit are references for which capabilities exist, not APIs to be compatible with.
+- **Pointer-driven motion follows the pointer in the same frame; transitions and springs are for discrete
+  changes.** A hover's cross line, a dragged thumb, a scroll bar, a resizer, a swipe track the pointer 1:1 and are
+  set, never eased toward it; keyboard steps, snaps on enter / leave, releases, fades and data changes animate
+  (`docs/dev/animation.md` "Pointer-driven motion follows the pointer"), in components and demos alike.
 - **Styles: native first, in the forms people write.** One set of properties written three ways (Rust `Styled`,
   `style` keys, Tailwind classes) means the same in each; the names are CSS's but for a few common forms. Each key takes the form most used and
   easiest to write, CSS's by default: where common use and CSS differ, the common form wins (a `lineHeight` number is

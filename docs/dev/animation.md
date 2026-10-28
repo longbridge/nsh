@@ -95,6 +95,20 @@
   are Web Animations and CSS made to match the Linux backend (`web.md` "Animation"); a text's color is a CSS
   transition of its element's `color`, which its runs inherit.
 
+## Pointer-driven motion follows the pointer
+
+What the pointer drives follows it in the same frame: a hover's cross line, dots and tooltip, a dragged thumb, a
+scroll bar's thumb, a resize handle, a color area's knob, a dragged column, a dock's drag preview, a swiped toast or
+sheet. The component sets it (`AnimatedValue::set`, a style, `pan_values`) from the event, never eases or springs it
+toward the pointer: a position that trails the hand reads as dropped frames. Transitions and springs are for discrete
+changes: a step of the keys (a plot's hover glides to the next row on `motion.pointer`), snapping to a row or a slot
+as the pointer enters or leaves it, the app setting a value, a release (a swipe settles or flies off), entering and
+exiting (the hover's fade), and data changes. "Follows the hand and still animates" is that split: a plot's cross
+line snaps to the row under the pointer at once while its fade in and out animate. The app's transitions on a part
+the component moves (`transition-all` on a scroll bar's thumb) must not reach the moving property: the component
+moves a wrapper of its own (`scrollbar.rs`'s holder). Tests assert it: a pointer move starts no animation
+(`nsh-base/tests/base/plot.rs`).
+
 ## Compared with gpui-base's motion
 
 gpui-base (`gpui-kit/crates/base/src/motion.rs`, `motion/*.rs`, `docs/STYLING-AND-MOTION.md`) samples motion on the
