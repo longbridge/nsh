@@ -193,10 +193,10 @@ fn arcs(values: &[f64], start: f32, end: f32) -> Vec<Slice> {
 
 /// Where a radial mark draws: the plot's center and its radii, in points.
 #[derive(Debug, Clone, Copy, PartialEq)]
-struct Ring {
-    center: Point<Points>,
-    inner: f32,
-    outer: f32,
+pub(super) struct Ring {
+    pub(super) center: Point<Points>,
+    pub(super) inner: f32,
+    pub(super) outer: f32,
 }
 
 /// A radius as a plot's size resolves it: points, and a share of the
@@ -204,13 +204,13 @@ struct Ring {
 /// Recharts' percentages are), so a radius on its way from a percentage to
 /// points resolves at any size.
 #[derive(Debug, Clone, Copy, PartialEq)]
-struct Radius {
+pub(super) struct Radius {
     points: f32,
     share: f32,
 }
 
 impl Radius {
-    fn of(length: DefiniteLength) -> Self {
+    pub(super) fn of(length: DefiniteLength) -> Self {
         match length {
             DefiniteLength::Absolute(a) => Radius {
                 points: a.to_points(REM_SIZE).0,
@@ -229,7 +229,7 @@ impl Radius {
     }
 
     /// The radius `t` of the way to `to`.
-    fn lerp(self, to: Radius, t: f32) -> Radius {
+    pub(super) fn lerp(self, to: Radius, t: f32) -> Radius {
         Radius {
             points: self.points + (to.points - self.points) * t,
             share: self.share + (to.share - self.share) * t,
@@ -240,7 +240,7 @@ impl Radius {
 impl Ring {
     /// The ring of a plot of `size` (`gpui-base`'s `Arc::path`: the center
     /// of the bounds, `shape/arc.rs:105`) between `inner` and `outer`.
-    fn of(size: Size<Points>, inner: Radius, outer: Radius) -> Self {
+    pub(super) fn of(size: Size<Points>, inner: Radius, outer: Radius) -> Self {
         let half = size.width.0.min(size.height.0) / 2.0;
         Ring {
             center: point(size.width / 2.0, size.height / 2.0),
@@ -324,7 +324,7 @@ impl Shape {
 
 /// What a radial mark's update moves (`motion.update`): its shape as the
 /// app gives it, apart from the plot's size.
-trait Pose: Clone + PartialEq + 'static {
+pub(super) trait Pose: Clone + PartialEq + 'static {
     /// The pose drawn `t` of the way from `self` to `to`.
     fn lerp(&self, to: &Self, t: f32) -> Self;
 }
@@ -569,7 +569,7 @@ impl Outline {
 
 /// A number of a drawing: a constant, or one the animator moves.
 #[derive(Clone, Copy)]
-enum Var {
+pub(super) enum Var {
     Const(f32),
     Node(AnimatedNode),
 }
@@ -826,10 +826,10 @@ fn sector(
 /// how far it had gone, and the next one starts from the pose drawn there
 /// (the mark holds still until the animator answers). The plot's size
 /// changing moves nothing: only the app's pose.
-struct Update<P> {
+pub(super) struct Update<P> {
     /// The pose it moves to, and the one it moves from while a move runs.
     shown: Signal<(P, Option<P>)>,
-    progress: AnimatedValue,
+    pub(super) progress: AnimatedValue,
 }
 
 impl<P> Clone for Update<P> {
@@ -843,7 +843,7 @@ impl<P> Copy for Update<P> {}
 impl<P: Pose> Update<P> {
     /// Follows `pose`, moving to each new one with the plot's
     /// `motion.update` (at once without one or with reduced motion).
-    fn new(plot: PlotContext, pose: impl Fn() -> P + 'static) -> Self {
+    pub(super) fn new(plot: PlotContext, pose: impl Fn() -> P + 'static) -> Self {
         let shown = signal((untracked(&pose), None::<P>));
         let progress = animated_value(1.0);
         // The app's last pose (none before the first run, which only
@@ -910,7 +910,7 @@ impl<P: Pose> Update<P> {
 
     /// The pose it moves to and, while a move runs, the pose it moves
     /// from and how far it has gone.
-    fn shown(&self) -> (P, Option<(P, AnimatedNode)>) {
+    pub(super) fn shown(&self) -> (P, Option<(P, AnimatedNode)>) {
         let progress = *self.progress.node();
         self.shown
             .with(|(to, from)| (to.clone(), from.clone().map(|from| (from, progress))))

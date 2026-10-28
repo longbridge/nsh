@@ -444,7 +444,9 @@ mod tests {
                 "Pie",
                 "Plot",
                 "PlotAxis",
-                "PlotLabel"
+                "PlotLabel",
+                "RadialGrid",
+                "RadialLine"
             ]
         );
     }
