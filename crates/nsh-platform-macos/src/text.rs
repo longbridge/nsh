@@ -2354,10 +2354,7 @@ mod hit_regressions {
             line_height: Points(32.0),
             ..Default::default()
         };
-        text.push(
-            "one two three four five six seven eight nine ten",
-            text_style,
-        );
+        text.push("one two three four five six seven eight nine ten", text_style);
         let prepared = engine.prepare(&text);
         let size = engine.measure(&prepared, Some(Points(80.0)));
         let layout = engine.layout(&prepared, size);
@@ -2393,10 +2390,7 @@ mod hit_regressions {
             line_height: Points(17.0 * 1.7),
             ..Default::default()
         };
-        text.push(
-            "\u{8bbe}\u{8ba1}\u{ff09}\u{ff0c}\u{6539}\u{540d}/\u{88c1}\u{526a}\u{5fc5}\u{987b}",
-            style,
-        );
+        text.push("\u{8bbe}\u{8ba1}\u{ff09}\u{ff0c}\u{6539}\u{540d}/\u{88c1}\u{526a}\u{5fc5}\u{987b}", style);
         let prepared = engine.prepare(&text);
         let size = engine.measure(&prepared, None);
         let layout = engine.layout(&prepared, size);
