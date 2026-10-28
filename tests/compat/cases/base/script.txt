@@ -2373,9 +2373,9 @@ expect Empty: true
 expect Page: null null ab
 expect Error: thrown
 expect Keys: none
-# The subscriber hears the changes in JS's next turn.
+# The `revision` listener hears the changes in JS's next turn.
 wait 50
-expect Updates: true
+expect Updates: true true function
 covers [nsh/base] RichEditorSession
 covers [nsh/base] RichEditorPlugin
 covers [nsh/base] RichSchema

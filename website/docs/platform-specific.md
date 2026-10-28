@@ -104,7 +104,7 @@ In Rust, the APIs only one platform has are functions of `nsh_core::prelude` (`o
 
 | Rust | TSX | Description |
 |---|---|---|
-| `on_back_press(listener)` | `BackHandler.onBackPress(listener)` | Listens to the back button after dialogs, before stacks; return `true` when handled. The listener goes with the component (or effect) that added it; in TSX the call also returns a function that stops it earlier. |
+| `on_back_press(listener)` | `BackHandler.on("press", listener)` | Listens to the back button after dialogs, before stacks; return `true` when handled. The listener goes with the component (or effect) that added it; in TSX the call also returns a function that stops it earlier. |
 | | `BackHandler.exitApp()` | Leaves the app. |
 
 ```rust tabs
@@ -131,7 +131,7 @@ import { BackHandler } from "nsh/mobile";
 function Player() {
   // Back leaves full screen before it leaves the page. The listener goes
   // with the component.
-  BackHandler.onBackPress(() => {
+  BackHandler.on("press", () => {
     if (!fullScreen()) return false;
     fullScreen.set(false);
     return true;

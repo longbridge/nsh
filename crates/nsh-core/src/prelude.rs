@@ -157,6 +157,7 @@ pub use crate::element::{
     StatusBarSetting,
     StatusBarStyle,
     StepPosition,
+    Stop,
     Styled,
     SubmitBehavior,
     System,

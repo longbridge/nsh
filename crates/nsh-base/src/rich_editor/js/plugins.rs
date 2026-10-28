@@ -94,7 +94,6 @@ pub(crate) struct Hooks {
     pub(crate) append: Option<AppendHook>,
     pub(crate) keys: Option<Callback<String>>,
     pub(crate) dispatch: Option<Callback<TransactionJson>>,
-    pub(crate) update: Option<Callback<f64>>,
 }
 
 thread_local! {
@@ -891,7 +890,7 @@ pub(crate) fn decorations_json(decorations: &[RichDecoration]) -> Result<Value, 
 /// `appendTransaction` for the transactions the app's own calls make.
 /// Typing never waits for JS: captured keys are consumed natively and
 /// reported after, and the transaction hooks are not asked about the
-/// platform's input (an editor's `subscribe` hears every change).
+/// platform's input (an editor's `on("revision", …)` hears every change).
 #[class]
 pub(crate) struct RichEditorPlugin {
     key: PluginKey,

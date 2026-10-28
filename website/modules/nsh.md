@@ -1861,7 +1861,7 @@ const host: {
   post(name: string, data?: unknown): void;
   available(): boolean;
   call(name: string, args?: unknown, options?: { timeout?: number }): Promise<unknown>;
-  on(event: string, listener: (payload: unknown) => void): (() => void) & { remove(): void };
+  on(event: string, listener: (payload: unknown) => void): () => void;
 };
 ```
 
@@ -1898,15 +1898,15 @@ const quote = await host.call("quote.refresh", { symbol: "AAPL" }, { timeout: 50
 ### host.on
 
 ```ts
-on(event: string, listener: (payload: unknown) => void): (() => void) & { remove(): void };
+on(event: string, listener: (payload: unknown) => void): () => void;
 ```
 
-Platform events call `listener` with the payload of every `event` the host sends, until `remove()`. Events the host sends before the app starts arrive once it does, so listeners registered at the top level of the app receive them; an event sent before a listener registers is not replayed to it. Read the state the app starts with through `host.call`, and follow its changes with `host.on`.
+Platform events call `listener` with the payload of every `event` the host sends, until the function `host.on` returns is called; a listener added while a component renders stops with the component. Events the host sends before the app starts arrive once it does, so listeners registered at the top level of the app receive them; an event sent before a listener registers is not replayed to it. Read the state the app starts with through `host.call`, and follow its changes with `host.on`.
 
 ```ts
-const sub = host.on("loginChanged", (payload) => console.log(payload));
+const stop = host.on("loginChanged", (payload) => console.log(payload));
 // later
-sub.remove();
+stop();
 ```
 
 ### Capability
@@ -1947,7 +1947,7 @@ mount(() => (conversation ? <Conversation id={conversation} /> : <Inbox />));
 
 ### Native SDK channel
 
-The native SDK's `send` keeps events until the app listens, up to 256. When the last listener unsubscribes during delivery, remaining events keep waiting in order; events sent during shutdown wait for the next loaded app. The subscription returned by `host.on` is both a cleanup function and an object with `remove()`. `host.post(name, data)` delivers data to the native SDK handler, whose `isPost` distinguishes posts from calls.
+The native SDK's `send` keeps events until the app listens, up to 256. When the last listener stops during delivery, remaining events keep waiting in order; events sent during shutdown wait for the next loaded app. `host.post(name, data)` delivers data to the native SDK handler, whose `isPost` distinguishes posts from calls.
 
 ### The embedding app's side
 
@@ -2330,17 +2330,20 @@ function nativeModule<T extends object>(specifier: string): T;
 Returns the exports of the set the embedding app registered as `specifier`: its modules, classes, functions and Rust components, as one object. The app writes the type `T` itself, so nothing about the host is needed when it is built. Rust code built together with the host's crate calls those functions as Rust; `nativeModule` is how TSX reaches them.
 
 ```ts
-import { nativeModule } from "nsh";
+import { nativeModule, signal } from "nsh";
 
 interface TradingApi {
   quote(symbol: string): number;
   placeOrder(symbol: string, quantity: number, side: "Buy" | "Sell"): Promise<Order>;
-  subscribe(onChange: (state: Desk) => void): Promise<void>;
+  on(event: "change", listener: (desk: Desk) => void): () => void;
 }
 
 const { Trading } = nativeModule<{ Trading: TradingApi }>("host/trading");
 
 const price = Trading.quote("AAPL");
+
+const desk = signal<Desk | null>(null);
+Trading.on("change", (d) => desk.set(d));
 ```
 
 - Calls work as they do through an import of a set: a plain Rust function returns its value at once, an `async` one returns a promise, and a function you pass is a callback Rust can call later. Rust checks every argument and throws a `TypeError` for a wrong one.
@@ -2350,6 +2353,8 @@ const price = Trading.quote("AAPL");
 The host registers the set from Rust, with the platform crate's `set_ui_sets` (next to NSH's own sets) before it starts its views, or `EngineConfig::ui_sets`:
 
 ```rust
+use std::{cell::RefCell, rc::Rc};
+
 use nsh_core::prelude::*;
 
 pub struct Trading;
@@ -2359,15 +2364,26 @@ impl Trading {
     /// A sample price.
     pub fn quote(symbol: String) -> Result<f64, String> { /* ... */ }
 
-    /// Calls `on_change` with the desk now and on every change.
-    pub async fn subscribe(on_change: Callback<Desk>) {
-        let mut desk = DESK.subscribe(); // a tokio watch channel the host keeps
-        loop {
-            on_change.post(desk.borrow_and_update().clone());
-            if desk.changed().await.is_err() {
-                return;
-            }
+    /// Calls `listener` with the desk now and after every change
+    /// (`change`, the one event), until the returned function is called
+    /// or what called `on` goes.
+    pub fn on(event: String, listener: Callback<Desk>, cx: CallCx<'_>) -> Result<Stop, String> {
+        if event != "change" {
+            return Err(format!("no Trading event `{event}`"));
         }
+        let listener = Rc::new(RefCell::new(Some(listener)));
+        let held = listener.clone();
+        cx.start(async move {
+            let mut desk = DESK.subscribe(); // a tokio watch channel the host keeps
+            loop {
+                let Some(listener) = held.borrow().clone() else { return };
+                listener.post(desk.borrow_and_update().clone());
+                if desk.changed().await.is_err() {
+                    return;
+                }
+            }
+        });
+        Ok(Stop::new(move || drop(listener.take())))
     }
 }
 
@@ -2376,7 +2392,7 @@ trading.module::<Trading>();
 nsh_platform_gpui::set_ui_sets(vec![nsh_base::registry(), trading]);
 ```
 
-`subscribe` is how the host keeps every app in step with its own data: its task waits for the host's changes and posts each one to the app, so a change made by the host, or by any app through another function, reaches every app that subscribed.
+`on` is how the host keeps every app in step with its own data: the task it starts waits for the host's changes and posts each one to the app, so a change made by the host, or by any app through another function, reaches every app that listens. The `Stop` it returns is the function `Trading.on` returns in TSX: it runs once, when the app calls it or when what called `on` goes (a component, or the module's run under hot reload), and here drops the listener, so the task ends.
 
 > [!NOTE]
 > Props, events and command arguments cross to the native side as JSON. Registered components and functions are the host app's own code: NSH's [sandbox limits and capabilities](../docs/sandbox-and-capabilities.md) do not apply to what they do.

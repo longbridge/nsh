@@ -17,7 +17,7 @@ function App() {
   const markdown = signal(editor.getMarkdown());
   const events = signal<string[]>([]);
   const log = (line: string) => events.set([line, ...events()].slice(0, 4));
-  editor.subscribe(() => markdown.set(editor.getMarkdown()));
+  editor.on("revision", () => markdown.set(editor.getMarkdown()));
   editor.on("focus", () => log("focus"));
   editor.on("blur", () => log("blur"));
 

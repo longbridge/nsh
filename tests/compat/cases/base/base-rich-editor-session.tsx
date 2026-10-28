@@ -53,6 +53,7 @@ function App() {
   const lines = signal<string[]>([]);
   const keys = signal("Keys: none");
   const updates = signal(0);
+  const revised = signal("");
 
   const run = () => {
     const out: string[] = [];
@@ -97,7 +98,10 @@ function App() {
         watch,
       ],
     });
-    editor.subscribe(() => updates.set(updates() + 1));
+    const stopRevisions = editor.on("revision", ({ revision }) => {
+      updates.set(updates() + 1);
+      revised.set(`${revision === editor.revision} ${typeof stopRevisions}`);
+    });
 
     step("Plugin", () => `${watch.key} ${watch.capturing}`);
     step("Classes", () => `${schema instanceof RichSchema} ${editor instanceof RichEditorSession}`);
@@ -209,7 +213,7 @@ function App() {
     <View style={{ flex: 1, paddingTop: 60, paddingLeft: 20, gap: 4 }}>
       <View onPress={run}><Text>RunSession</Text></View>
       <Text>{keys()}</Text>
-      <Text>{`Updates: ${updates() > 0}`}</Text>
+      <Text>{`Updates: ${updates() > 0} ${revised()}`}</Text>
       {() => lines().map((line) => <Text>{line}</Text>)}
     </View>
   );

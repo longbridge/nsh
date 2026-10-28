@@ -177,4 +177,9 @@ tap id:call
 expect Host call: rejected nsh/host: this platform has no host
 event id:heard onHost type=event event=tick payload=1
 expect Host heard: [1]
+# Stopped, the listener hears no more.
+tap id:stop
+event id:heard onHost type=event event=tick payload=2
+wait 50
+expect Host heard: [1]
 covers [nsh] host

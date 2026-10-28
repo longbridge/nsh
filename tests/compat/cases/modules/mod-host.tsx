@@ -8,7 +8,7 @@ import { host } from "nsh";
 function App() {
   const called = signal("not called");
   const heard = signal<unknown[]>([]);
-  const sub = host.on("tick", (payload) => heard.update((h) => [...h, payload]));
+  const stop = host.on("tick", (payload) => heard.update((h) => [...h, payload]));
   return (
     <View style={{ flex: 1, paddingTop: 64 }}>
       <Text>{`Host available: ${host.available()}`}</Text>
@@ -25,8 +25,8 @@ function App() {
       >
         <Text>Call</Text>
       </View>
-      <View testID="remove" onPress={() => sub.remove()}>
-        <Text>Remove</Text>
+      <View testID="stop" onPress={() => stop()}>
+        <Text>Stop</Text>
       </View>
     </View>
   );

@@ -82,6 +82,8 @@ or bottom of the editor scrolls the document along, faster the further the point
 overlay that follows the text as it scrolls. The app passes it while it wants it shown, from the session's state:
 
 ```tsx
+const revision = signal(editor.revision);
+editor.on("revision", ({ revision: r }) => revision.set(r));
 const inLink = () => (revision(), editor.isActive("link"));
 
 <RichEditor
@@ -163,7 +165,7 @@ const canIndent = editor.can(sinkListItem("listItem"));
 | `insertContent(content, format?)` | Inserts content over the selection |
 | `getJSON()`, `getMarkdown()`, `getText()`, `textBetween(from?, to?, separator?)` | The document in a format |
 | `dispatch(tr)` | Applies a transaction given as JSON (its steps against the current document) |
-| `subscribe(listener)` / `unsubscribe(id)` | Hears every change, from any source, with the new revision |
+| `on(event, listener)` | Calls `listener` with the payload of every `event`, in JS's next turn: `revision` (`{ revision }`, after every change, from any source), `update`, `selectionUpdate`, `transaction`, `focus`, `blur`, `delete`. Returns a function that stops it; a listener added while a component renders stops with the component |
 | `focus()`, `blur()` | Moves the keyboard focus to or from the views showing the editor |
 
 Positions count as ProseMirror's do: a text counts its UTF-16 code units, a leaf node one, a node with content its
@@ -303,7 +305,7 @@ editor.setDecorations("suggestions", [{ from: 5, to: 9, kind: "inline", attrs: {
   document without changing it. They follow every change until set again.
 - `filterTransaction(hook)` and `appendTransaction(hook)` see the transactions the app's own calls make (`run`,
   `dispatch`, `setContent`, …) in that call: `filterTransaction` may drop one, `appendTransaction` may return one
-  more to apply with it. `subscribe` hears every change, typing included.
+  more to apply with it. `on("revision", …)` hears every change, typing included.
 
 ## Links, character counts and suggestions
 
