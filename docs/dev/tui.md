@@ -641,7 +641,9 @@ C-w treats punctuation within a whitespace-delimited word as part of that word. 
 core's character boundaries, then use the core Model for selection and deletion.
 
 The app's `InputContent` box defines padding and border offsets. Text is a Paragraph with the app's text style;
-empty fields show the placeholder and its color. Graphemes stay whole; wide graphemes occupy their display width,
+empty fields show the placeholder and its color. Single-line fields center their text and caret vertically
+in that content box; drawing, selection and pointer placement use the same row. Multiline fields begin at its top.
+Graphemes stay whole; wide graphemes occupy their display width,
 multiline fields wrap at Cell boundaries, and single-line fields scroll horizontally. The field scrolls its caret
 into sight vertically and horizontally. Selected glyphs are reversed. Masked fields show one `•` per grapheme and
 do not export their selection through copy/cut. `AppView::render` places the terminal cursor at the caret;
@@ -682,7 +684,7 @@ permit clipboard writes; `nsh test` uses memory and never writes to the machine'
 | Mouse drags | Native pan values, responder moves and bounded content scrolling |
 | Selectable text | Reversed grapheme Cells; copies use the shared clipboard and OSC 52 |
 | Pointer precision | One terminal Cell, converted to its center in points |
-| Input | Editable Paragraph, reversed selection and terminal caret; masked text is dots |
+| Input | Editable Paragraph, reversed selection and terminal caret; single-line text and caret centered in the content box; masked text is dots |
 | Searching the screen | The Minibuffer over the bottom row and the match's Cells reversed, only while searching |
 | Input-method composition | Terminal emulator composition, committed text delivered to the field |
 | Clipboard | OSC 52 writes, desktop reads when available and an in-process copy |
