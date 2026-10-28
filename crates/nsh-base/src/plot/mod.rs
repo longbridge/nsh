@@ -23,6 +23,7 @@
 //! A module of its own (`nsh/base/plot`, a submodule of the `nsh/base`
 //! set) because its marks only make sense inside a plot.
 
+mod appear;
 mod area;
 mod axis;
 mod bar;
@@ -48,6 +49,9 @@ use nsh_core::{
 };
 
 pub use self::{
+    appear::{
+        AppearKey, PlotAppearScope, PlotAppearScopeElement, PlotAppearScopeProps, plot_appear_scope,
+    },
     area::{Area, AreaElement, AreaProps, AreaY0, area},
     axis::{
         AxisLabelPlacement, AxisLabelStyle, AxisPlacement, PlotAxis, PlotAxisElement,
@@ -87,6 +91,7 @@ pub fn registry() -> Registry {
     let mut registry = Registry::ui_set(SPECIFIER);
     registry
         .register::<Plot>()
+        .register::<PlotAppearScope>()
         .register::<Line>()
         .register::<Area>()
         .register::<Bar>()
@@ -226,8 +231,11 @@ pub struct PlotProps {
     pub motion: Prop<Option<PlotMotion>>,
     /// Opts in to the appear (`gpui-base`'s `Plot::appear_generation`):
     /// the marks draw in over `motion.appear` when the plot is first shown,
-    /// and again whenever this changes (another symbol, another period).
-    pub appear_generation: Prop<Option<f64>>,
+    /// and again whenever this changes (another symbol, another period):
+    /// a number or a string (`gpui-component`'s `appear_key`). Inside a
+    /// [`PlotAppearScope`], a generation that finished there shows whole
+    /// at once.
+    pub appear_generation: Prop<Option<AppearKey>>,
     /// What screen readers say of the plot: what it shows and what stands
     /// out (it is one element to them, its marks are not).
     pub accessibility_label: Prop<Option<SharedString>>,
@@ -673,7 +681,9 @@ pub fn Plot(props: PlotProps, cx: Scope<PlotEvent>) -> impl IntoElement {
 
     // The appear: from the first frame with a size, and again for each new
     // generation, over `motion.appear`; at once without one or with reduced
-    // motion. Its time runs linearly; the marks ease it.
+    // motion; whole at once for a generation the plot's
+    // `PlotAppearScope` saw finish. Its time runs linearly; the marks ease
+    // it.
     let appear = Appear {
         time: animated_value(1.0),
         easing: signal(Easing::Linear),
@@ -681,15 +691,17 @@ pub fn Plot(props: PlotProps, cx: Scope<PlotEvent>) -> impl IntoElement {
     let appearing = signal(false);
     let shown = computed(move || size.get().width.0 > 0.0);
     let generation = props.appear_generation;
+    let memory = appear::AppearMemory::new();
     effect(move || {
-        let Some(_) = generation.get() else { return };
+        let Some(key) = generation.get() else { return };
         if !shown.get() {
             return;
         }
+        let finished = memory.finished(&key);
         let timing = untracked(|| motion.get().and_then(|m| m.appear));
         let time = appear.time;
         match timing {
-            Some(timing) if timing.duration_ms > 0.0 && !reduce_motion() => {
+            Some(timing) if timing.duration_ms > 0.0 && !reduce_motion() && !finished => {
                 appear.easing.set(timing.easing);
                 time.set(0.0);
                 appearing.set(true);
@@ -697,9 +709,11 @@ pub fn Plot(props: PlotProps, cx: Scope<PlotEvent>) -> impl IntoElement {
                     easing: Easing::Linear,
                     ..timing
                 };
+                let memory = memory.clone();
                 spawn(async move {
                     // Stopped by a newer generation: that one ends it.
                     if time.timing_with(1.0, linear).await {
+                        memory.finish(&key);
                         appearing.set(false);
                     }
                 });
@@ -707,6 +721,9 @@ pub fn Plot(props: PlotProps, cx: Scope<PlotEvent>) -> impl IntoElement {
             _ => {
                 time.set(1.0);
                 appearing.set(false);
+                if !finished {
+                    memory.finish(&key);
+                }
             }
         }
     });

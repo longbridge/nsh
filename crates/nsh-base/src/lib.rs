@@ -476,6 +476,7 @@ mod tests {
                 "Line",
                 "Pie",
                 "Plot",
+                "PlotAppearScope",
                 "PlotAxis",
                 "PlotLabel",
                 "RadialGrid",

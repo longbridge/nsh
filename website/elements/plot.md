@@ -98,7 +98,7 @@ the marks take the typed paint methods (`.stroke_color(..)`, `.fill_color(..)`, 
 | `yScale` | `.y_scale(..)` | `Scale` | `{ type: "linear" }` | How the y axis places values: the domain's smallest value at the bottom edge, its largest at the top. Without a `domain`, the extent of what the marks draw. `band` lays a band per row from the top edge down, for bars across. `reverse: true` runs it the other way: the smallest value at the top edge, the rows from the bottom edge up ([Reversed scales](#reversed-scales)). |
 | `interactive` | `.interactive(..)` | `boolean` | `true` | The plot follows the pointer and the keyboard: it reports the row under it and shows the hover's parts, and it is a stop of Tab whose arrow keys move the hover ([Keyboard](#keyboard)). `false` draws the marks only (a sparkline in a list), and presses on it go to the views around it. Whether the plot offers the keyboard at all is set when it is made. |
 | `motion` | `.motion(..)` | `PlotMotion` | none | The timing of the appear, the hover's fade in and out, and the spring the hover glides on when the keys move it (below). |
-| `appearGeneration` | `.appear_generation(..)` | `number` | none | Opts in to the appear: the marks draw in when the plot is first shown, and again whenever this changes (another symbol, another period). |
+| `appearGeneration` | `.appear_generation(..)` | `number \| string` | none | Opts in to the appear: the marks draw in when the plot is first shown, and again whenever this changes (another symbol, another period). Inside a [`PlotAppearScope`](#plotappearscope), a generation that finished there shows whole at once. |
 | `accessibilityLabel` | `.accessibility_label(..)` | `string` | none | What screen readers say of the chart: what it shows and what stands out. |
 | `accessibilityValue` | `.accessibility_value(..)` | `{ min?, max?, now?, text? }` | none | What screen readers hear as its value: the app's words for the row under the pointer. |
 | `crossLineClass`, `crossLineStyle` | `.cross_line_class(..)`, `.cross_line_style(..)` | `string`, `StyleProp<ViewStyle>` | none | The cross line: a view as tall as the plot, centered on the row under the pointer. On a band scale it sits in the row's band, as wide as the band (across the plot on a band y scale). |
@@ -798,8 +798,8 @@ The hover's parts follow the pointer in the same frame: as it moves, the cross l
 the row under it at once, so they track the hand, while their fade in and out (`enter`, `exit`) still animates.
 
 The motion runs on the platform's animator, with no JS per frame, and is complete at once for people who ask for
-reduced motion. A plot that a list makes again for a row that comes back draws in again; give it the row's key as its
-`appearGeneration`.
+reduced motion. A plot that a list makes again for a row that comes back draws in again, unless a
+[`PlotAppearScope`](#plotappearscope) around the list saw its appear finish.
 
 A domain moves as d3 transitions a scale's domain: the scale in between places every value, so the marks keep their
 shapes, the grid lines and the hover's parts move with them, bars keep their corners, and a row that comes in with the
@@ -810,6 +810,48 @@ take the new size at once.
 It is the plot's own motion, the timings of what a chart moves: its marks' clip and its hover's parts. A view's
 entrances, exits and attention seekers are [`createMotion`](../modules/nsh.md#createmotion)'s presets and
 keyframes, which an app can still play on the plot's view or on the elements around it.
+
+## PlotAppearScope
+
+A list makes a row's plot again each time the row comes back into view, so a sparkline with an appear draws in again
+whenever the list scrolls back to it. A `PlotAppearScope` around the list remembers the appears that have finished in
+it: a plot made again there whose `appearGeneration` finished shows its marks whole at once.
+A plot is remembered by its generation, so each row's plot gets its own, the row's key with whatever should replay it
+(`` `${symbol} ${period}` ``).
+
+```tsx
+import { List } from "nsh";
+import { Line, Plot, PlotAppearScope } from "nsh/base/plot";
+
+<PlotAppearScope id={watchlist().id} class="flex-1">
+  <List each={watchlist().rows} keyExtractor={(row) => row.symbol} estimatedItemSize={48} class="flex-1">
+    {(row) => (
+      <Plot
+        data={row().closes}
+        y="close"
+        interactive={false}
+        appearGeneration={`${row().symbol} ${period()}`}
+        motion={{ appear: { duration: 400, easing: "easeOut" } }}
+        class="h-8 w-24"
+      >
+        <Line class="stroke-chart-1 stroke-[1.5]" />
+      </Plot>
+    )}
+  </List>
+</PlotAppearScope>
+```
+
+| Prop | Rust | Type | Default | Description |
+|---|---|---|---|---|
+| `id` | `.id(..)` | `number \| string` | none | What the scope remembers for: when it changes, the scope forgets and its plots draw in afresh, where they are. Name it after the content, such as a watchlist or a conversation; without one, the scope remembers for as long as it is shown. |
+| `children` | `.child(..)` | `JSX.Element` | none | What it holds: the list, or whatever makes its plots again as they come and go. |
+
+A new generation still draws the plot in, and so does a plot taken away before its appear finished, from the start.
+Once a plot has finished a new generation, its scope forgets the one before, so switching back to an earlier period
+draws the plot in again. The memory goes with the scope: a scope that is no longer shown, or one with a new `id`,
+draws its plots in afresh, and a plot remembers in the innermost scope around it. Its look is the app's: `class` and
+`style` lay it out as any view's (`flex-1` around a list that fills the screen). In Rust,
+`plot_appear_scope()` makes one.
 
 ## Keyboard
 

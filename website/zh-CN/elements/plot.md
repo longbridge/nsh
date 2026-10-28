@@ -83,7 +83,7 @@ mount(App);
 | `yScale` | `.y_scale(..)` | `Scale` | `{ type: "linear" }` | y 轴如何放置数值：定义域的最小值在底边，最大值在顶边。没有 `domain` 时取各图形所绘制数值的范围。`band` 从顶边向下每行布置一个条带，用于横放的柱子。`reverse: true` 让它反过来：最小值在顶边，各行从底边向上排列（[反向比例尺](#反向比例尺)）。 |
 | `interactive` | `.interactive(..)` | `boolean` | `true` | plot 跟随指针和键盘：报告指针下的行并显示悬停部件；它也是 Tab 的一个停靠点，方向键移动悬停的行（[键盘](#键盘)）。为 `false` 时只绘制图形（例如列表中的迷你图），在它上面的点按交给周围的视图。plot 是否提供键盘操作，在创建时确定。 |
 | `motion` | `.motion(..)` | `PlotMotion` | 无 | 出现动效、悬停淡入淡出的时间，以及按键移动悬停时所用的弹簧（见下文）。 |
-| `appearGeneration` | `.appear_generation(..)` | `number` | 无 | 启用出现动效：plot 第一次显示时图形逐渐绘出，此值每次变化时再播放一次（换一支股票、换一个周期）。 |
+| `appearGeneration` | `.appear_generation(..)` | `number \| string` | 无 | 启用出现动效：plot 第一次显示时图形逐渐绘出，此值每次变化时再播放一次（换一支股票、换一个周期）。在 [`PlotAppearScope`](#plotappearscope) 里，已经在其中播放完的 generation 立即完整显示。 |
 | `accessibilityLabel` | `.accessibility_label(..)` | `string` | 无 | 屏幕阅读器对图表读出的内容：图表显示了什么，以及值得注意的地方。 |
 | `accessibilityValue` | `.accessibility_value(..)` | `{ min?, max?, now?, text? }` | 无 | 屏幕阅读器读出的数值：应用对指针下那一行的描述。 |
 | `crossLineClass`、`crossLineStyle` | `.cross_line_class(..)`、`.cross_line_style(..)` | `string`、`StyleProp<ViewStyle>` | 无 | 十字线：与 plot 等高的视图，以指针下的行为中心。在 band 比例尺上它位于该行的条带里，与条带等宽（band 在 y 轴时横跨 plot）。 |
@@ -668,11 +668,44 @@ const [peak, last] = [3, rows.length - 1];
 
 悬停部件与指针在同一帧移动：指针移动时，十字线、圆点和提示框立即落在指针下的那一行，紧跟手的移动，它们的淡入淡出（`enter`、`exit`）仍然带有动画。
 
-动效在平台的动画器上运行，不需要每帧运行 JS；对偏好减少动态效果的用户立即完成。列表为回到视野的行重新创建 plot 时，图形会再绘出一次；可以把行的键名作为它的 `appearGeneration`。
+动效在平台的动画器上运行，不需要每帧运行 JS；对偏好减少动态效果的用户立即完成。列表为回到视野的行重新创建 plot 时，图形会再绘出一次，除非包住列表的 [`PlotAppearScope`](#plotappearscope) 已经见过它的出现动效播放完。
 
 domain 的过渡与 d3 过渡比例尺 domain 的方式相同：每个数值都由过渡中的比例尺定位，所以图形保持各自的形状，网格线和悬停部件随之移动，柱子保持圆角，和新 domain 一起到来的数据行也随其他部分一起移动。实时图表不时按数据行重新拟合 y 比例尺（留出一些余量，两次拟合之间网格保持不动），设置 `update` 时间参数后，每次重新拟合都会平滑过渡。plot 尺寸变化时，图形立即采用新尺寸。
 
 这是 plot 自己的动效，用来设置图表里动的部分（图形的裁剪区域和悬停部件）的时间参数。视图的入场、离场和强调效果使用 [`createMotion`](../modules/nsh.md#createmotion) 的预设和关键帧，应用仍然可以把它们用在 plot 的视图或周围的元素上。
+
+## PlotAppearScope
+
+列表在行每次回到视野时都会重新创建该行的 plot，所以带出现动效的迷你图在列表滚回来时会再绘出一次。用 `PlotAppearScope` 包住列表，它会记住在其中已经播放完的出现动效：在它里面重新创建的 plot，如果它的 `appearGeneration` 已经在这里播放完，就立即完整显示图形。plot 按它的 generation 记住，所以每一行的 plot 要有自己的 generation：行的键名，加上应当让它重播的内容（`` `${symbol} ${period}` ``）。
+
+```tsx
+import { List } from "nsh";
+import { Line, Plot, PlotAppearScope } from "nsh/base/plot";
+
+<PlotAppearScope id={watchlist().id} class="flex-1">
+  <List each={watchlist().rows} keyExtractor={(row) => row.symbol} estimatedItemSize={48} class="flex-1">
+    {(row) => (
+      <Plot
+        data={row().closes}
+        y="close"
+        interactive={false}
+        appearGeneration={`${row().symbol} ${period()}`}
+        motion={{ appear: { duration: 400, easing: "easeOut" } }}
+        class="h-8 w-24"
+      >
+        <Line class="stroke-chart-1 stroke-[1.5]" />
+      </Plot>
+    )}
+  </List>
+</PlotAppearScope>
+```
+
+| 属性 | Rust | 类型 | 默认值 | 说明 |
+|---|---|---|---|---|
+| `id` | `.id(..)` | `number \| string` | 无 | scope 为什么内容记忆：它变化时，scope 忘掉记住的内容，其中的 plot 在原处重新绘出。按内容命名，比如一个自选列表或一段对话；没有它时，scope 在显示期间一直记住。 |
+| `children` | `.child(..)` | `JSX.Element` | 无 | 它包含的内容：列表，或任何随显示和移除重新创建其中 plot 的内容。 |
+
+新的 generation 仍然会让 plot 绘出；出现动效还没播放完就被移除的 plot，也会从头再绘出一次。plot 播放完一个新的 generation 后，scope 会忘掉它之前的那个，所以切回之前的周期时 plot 会再绘出一次。记忆随 scope 一起消失：不再显示的 scope，或者 `id` 变化的 scope，其中的 plot 都会重新绘出；plot 在包住它的最内层 scope 中记忆。scope 的外观由应用决定：`class` 和 `style` 像对任何视图一样为它布局（包住铺满屏幕的列表时用 `flex-1`）。在 Rust 中，用 `plot_appear_scope()` 创建。
 
 ## 键盘
 

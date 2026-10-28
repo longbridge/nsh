@@ -50,8 +50,11 @@
 // flows between the plot's rows, reports the node under the pointer and
 // steps through its nodes with a screen reader's increment, and moves to
 // new flows with `motion.update`; links that make a cycle draw nothing.
+// A `PlotAppearScope` (`id`) remembers the appears that finished in it: a
+// plot made again there shows whole at once, a new `appearGeneration` (a
+// string) and a new `id` draw it in again.
 import { Text, View, signal } from "nsh";
-import { Arc, Area, Bar, Grid, Line, Pie, Plot, PlotAxis, PlotLabel, RadialGrid, RadialLine, Sankey } from "nsh/base/plot";
+import { Arc, Area, Bar, Grid, Line, Pie, Plot, PlotAppearScope, PlotAxis, PlotLabel, RadialGrid, RadialLine, Sankey } from "nsh/base/plot";
 
 type Row = { t: number; price: number; avg: number };
 type Sale = { v: number; w: number };
@@ -165,6 +168,7 @@ function App() {
       <RadarCase />
       <LabelCase />
       <SankeyCase />
+      <ScopeCase />
     </View>
   );
 }
@@ -427,6 +431,37 @@ function SankeyCase() {
       <Plot testID="cycle" data={STAGES} accessibilityLabel="Cycle" style={{ width: 100, height: 50 }}>
         <Sankey links={[{ source: 0, target: 1, value: 1 }, { source: 1, target: 0, value: 1 }]} />
       </Plot>
+    </View>
+  );
+}
+
+/** A sparkline a row of a list would make again: shown and taken away,
+ * its period changed, and the scope's `id` changed, over an appear of
+ * 100 ms. */
+function ScopeCase() {
+  const shown = signal(false);
+  const period = signal("1D");
+  const list = signal("watch");
+  return (
+    <View>
+      <PlotAppearScope id={list()}>
+        <If when={shown()}>
+          <Plot
+            data={[{ v: 1 }, { v: 3 }, { v: 2 }]}
+            y="v"
+            interactive={false}
+            appearGeneration={`AAPL ${period()}`}
+            motion={{ appear: { duration: 100 } }}
+            style={{ width: 100, height: 20 }}
+          >
+            <Line testID="scoped-line" />
+          </Plot>
+        </If>
+      </PlotAppearScope>
+      <Text>{`scoped ${shown()} ${period()} ${list()}`}</Text>
+      <View testID="scope-toggle" onPress={() => shown.set(!shown())} style={{ height: 20 }} />
+      <View testID="scope-period" onPress={() => period.set("1W")} style={{ height: 20 }} />
+      <View testID="scope-rename" onPress={() => list.set("hot")} style={{ height: 20 }} />
     </View>
   );
 }

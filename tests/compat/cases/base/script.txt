@@ -2439,6 +2439,31 @@ covers [props] Sankey.nodeLabelClass
 covers [props] Sankey.nodeLabelStyle
 covers [props] Sankey.valueLabelClass
 covers [props] Sankey.valueLabelStyle
+# A plot inside a `PlotAppearScope`: it draws in (its line clipped to the
+# appear) the first time it is shown; made again once that finished, it
+# is whole at once. A new `appearGeneration` draws it in again, and so
+# does a new `id` of the scope, which forgets what it saw.
+tap id:scope-toggle
+expect scoped true 1D watch
+drawing id:scoped-line clip...
+wait 300
+nodrawing id:scoped-line clip...
+tap id:scope-toggle
+expect scoped false 1D watch
+tap id:scope-toggle
+expect scoped true 1D watch
+nodrawing id:scoped-line clip...
+tap id:scope-period
+expect scoped true 1W watch
+drawing id:scoped-line clip...
+wait 300
+nodrawing id:scoped-line clip...
+tap id:scope-rename
+expect scoped true 1W hot
+drawing id:scoped-line clip...
+covers [nsh/base/plot] PlotAppearScope
+covers [props] PlotAppearScope.id
+covers [props] Plot.appearGeneration
 
 # The app's design tokens: shadcn's `neutral` with the app's theme over it.
 tap id:case-base-token

@@ -8823,6 +8823,148 @@ fn base_plot_label_moves_with_the_domain() {
     assert!(x.abs() < 0.01 && y.abs() < 0.01, "({x}, {y})");
 }
 
+const BASE_PLOT_APPEAR_SCOPE: &str = r##"import { mount, signal, Text, View } from "nsh";
+import { Line, Plot, PlotAppearScope } from "nsh/base/plot";
+
+function App() {
+  const shown = signal(true);
+  const key = signal("a");
+  const scope = signal(1);
+  const rows = [{ v: 1 }, { v: 2 }, { v: 3 }];
+  return (
+    <View>
+      <PlotAppearScope id={scope()}>
+        <If when={shown()}>
+          <Plot data={rows} y="v" interactive={false} appearGeneration={`row ${key()}`} motion={{ appear: { duration: 300 } }} style={{ width: 100, height: 40 }}>
+            <Line />
+          </Plot>
+        </If>
+      </PlotAppearScope>
+      {/* Outside a scope: made again, it draws in again. */}
+      <If when={shown()}>
+        <Plot data={rows} y="v" interactive={false} appearGeneration={1} motion={{ appear: { duration: 200 } }} style={{ width: 100, height: 40 }}>
+          <Line />
+        </Plot>
+      </If>
+      <Text>{`state ${shown()} ${key()} ${scope()}`}</Text>
+      <View testID="toggle" onPress={() => shown.set(!shown())} style={{ height: 20 }} />
+      <View testID="key" onPress={() => key.set(key() === "a" ? "b" : "a")} style={{ height: 20 }} />
+      <View testID="rename" onPress={() => scope.set(scope() + 1)} style={{ height: 20 }} />
+    </View>
+  );
+}
+
+mount(App);
+"##;
+
+/// `PlotAppearScope` (`gpui-base`'s): a plot made again inside it (a row
+/// a list brings back) whose generation finished there shows whole at
+/// once and starts no appear, where one outside a scope draws in again;
+/// a new generation replays, one taken away before it finished draws in
+/// again, a plot's last generation is forgotten once it finishes another,
+/// and a new `id` draws the scope's plots in afresh while they stay.
+#[test]
+fn base_plot_appear_scope_remembers_the_appears_that_finished() {
+    use nsh_core::{
+        animation::{AnimationOp, Driver, Finished},
+        canvas::CanvasOp,
+    };
+    // The last appear of `ms` started (its time, 0 to 1).
+    let started = |batches: &[MountBatch], ms: f32| {
+        batches
+            .iter()
+            .rev()
+            .flat_map(|b| b.items.iter().rev())
+            .find_map(|i| match i {
+                MountItem::Animation(AnimationOp::Start {
+                    animation,
+                    driver:
+                        Driver::Timing {
+                            to, duration_ms, ..
+                        },
+                    ..
+                }) if *to == 1.0 && *duration_ms == ms => Some(*animation),
+                _ => None,
+            })
+    };
+    let clipped = |batches: &[MountBatch]| {
+        plot_drawings(batches)
+            .iter()
+            .filter(|(_, d)| d.ops.iter().any(|op| matches!(op, CanvasOp::Clip(..))))
+            .count()
+    };
+    let (engine, rx) = start(BASE_PLOT_APPEAR_SCOPE);
+    let settled = |batches: &mut Vec<MountBatch>| batches.extend(until(&rx, |_| false));
+    let mut first = until(&rx, |b| shows(b, "state true a 1"));
+    settled(&mut first);
+    let (Some(inside), Some(outside)) = (started(&first, 300.0), started(&first, 200.0)) else {
+        panic!("both plots draw in")
+    };
+    let finish = |animations: &[u32]| {
+        engine.control().animations_finished(
+            animations
+                .iter()
+                .map(|&animation| Finished::new(animation, true))
+                .collect(),
+        );
+        until(&rx, |_| false)
+    };
+    let done = finish(&[inside, outside]);
+    assert_eq!(plot_drawings(&done).len(), 2);
+    assert_eq!(clipped(&done), 0);
+
+    let press = |id: &str| {
+        engine
+            .control()
+            .dispatch_event(test_view(&first, id), EventKind::Press, EventPayload::None)
+    };
+    let after = |id: &str, state: &str| {
+        press(id);
+        let mut batches = until(&rx, |b| shows(b, state));
+        settled(&mut batches);
+        batches
+    };
+    // Made again: whole at once inside the scope, drawn in again outside.
+    after("toggle", "state false a 1");
+    let back = after("toggle", "state true a 1");
+    assert_eq!(started(&back, 300.0), None);
+    let Some(outside) = started(&back, 200.0) else {
+        panic!("the plot outside the scope draws in again")
+    };
+    assert_eq!(clipped(&back), 1);
+    finish(&[outside]);
+
+    // A new generation replays, the other plot stays.
+    let replayed = after("key", "state true b 1");
+    assert!(started(&replayed, 300.0).is_some());
+    assert_eq!(started(&replayed, 200.0), None);
+    // Taken away before it finished: drawn in again from the start.
+    after("toggle", "state false b 1");
+    let back = after("toggle", "state true b 1");
+    let (Some(inside), Some(outside)) = (started(&back, 300.0), started(&back, 200.0)) else {
+        panic!("an unfinished appear replays")
+    };
+    finish(&[inside, outside]);
+    // Its last generation was forgotten when this one finished.
+    let again = after("key", "state true a 1");
+    let Some(inside) = started(&again, 300.0) else {
+        panic!("going back replays")
+    };
+    finish(&[inside]);
+    after("toggle", "state false a 1");
+    let back = after("toggle", "state true a 1");
+    let Some(outside) = started(&back, 200.0) else {
+        panic!("the plot outside the scope draws in again")
+    };
+    assert_eq!(started(&back, 300.0), None);
+    finish(&[outside]);
+
+    // A new id forgets: the plot in the scope draws in again where it is.
+    let renamed = after("rename", "state true a 2");
+    assert!(started(&renamed, 300.0).is_some());
+    assert_eq!(started(&renamed, 200.0), None);
+}
+
 const BASE_PLOT_KEYS: &str = r##"import { mount, signal, Text, View } from "nsh";
 import { Line, Pie, Plot } from "nsh/base/plot";
 

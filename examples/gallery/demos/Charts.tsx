@@ -1,6 +1,6 @@
 import type { JSX } from "nsh";
-import { cleanup, LayoutAnimation, reduceMotion, signal, Text, View } from "nsh";
-import { Arc, Area, Bar, Grid, Line, Pie, Plot, PlotAxis, PlotLabel, RadialGrid, RadialLine, Sankey } from "nsh/base/plot";
+import { cleanup, LayoutAnimation, List, reduceMotion, signal, Text, View } from "nsh";
+import { Arc, Area, Bar, Grid, Line, Pie, Plot, PlotAppearScope, PlotAxis, PlotLabel, RadialGrid, RadialLine, Sankey } from "nsh/base/plot";
 import { platform } from "nsh";
 import { alpha, Button, Card, chart, colors, DemoPage, finish, focusRing, Legend, mono, Segmented, toneColor, type Tone } from "../ui";
 
@@ -1091,6 +1091,107 @@ function Flows() {
   );
 }
 
+/** A watchlist's symbols. */
+const SYMBOLS = [
+  ["AAPL", "Apple"],
+  ["MSFT", "Microsoft"],
+  ["NVDA", "NVIDIA"],
+  ["AMZN", "Amazon"],
+  ["GOOGL", "Alphabet"],
+  ["META", "Meta Platforms"],
+  ["TSLA", "Tesla"],
+  ["AVGO", "Broadcom"],
+  ["ORCL", "Oracle"],
+  ["AMD", "Advanced Micro Devices"],
+  ["NFLX", "Netflix"],
+  ["ADBE", "Adobe"],
+  ["CRM", "Salesforce"],
+  ["QCOM", "Qualcomm"],
+  ["INTC", "Intel"],
+  ["IBM", "IBM"],
+  ["UBER", "Uber"],
+  ["SHOP", "Shopify"],
+] as const;
+/** The watchlist's periods and the closes each shows. */
+const SPANS = [
+  { value: "1D", label: "1D", points: 39 },
+  { value: "1W", label: "1W", points: 35 },
+  { value: "1M", label: "1M", points: 22 },
+] as const;
+type Span = (typeof SPANS)[number]["value"];
+type Close = { close: number };
+/** A walk of `n` closes from 100, repeatable for its seed. */
+function walk(seed: number, n: number): Close[] {
+  const next = random(seed);
+  let v = 100;
+  return Array.from({ length: n }, () => ({ close: (v *= 1 + (next() - 0.49) * 0.024) }));
+}
+const WATCH = SYMBOLS.map(([symbol, name], i) => ({
+  symbol,
+  name,
+  last: 40 + random(97 * (i + 1))() * 460,
+  closes: Object.fromEntries(SPANS.map((p, j) => [p.value, walk(7919 * (i + 1) + 104729 * j, p.points)])) as Record<Span, Close[]>,
+}));
+type Watch = (typeof WATCH)[number];
+/** A row's height; five show at once. */
+const WATCH_ROW = 52;
+
+/**
+ * A watchlist whose rows a list makes as they scroll in: each row's
+ * sparkline draws in from the left the first time it shows for a period,
+ * and stays whole when the row scrolls away and back, as the
+ * `PlotAppearScope` around the list remembers it; a new period draws the
+ * rows in again. The line and its wash in the day's tone, the open a
+ * dotted hairline.
+ */
+function Watchlist() {
+  const span = signal<Span>("1D");
+  const change = (w: Watch) => {
+    const closes = w.closes[span()];
+    return (closes[closes.length - 1].close / closes[0].close - 1) * 100;
+  };
+  return (
+    <Card icon="stocks" title="Watchlist" subtitle="Sparklines that draw in once and stay whole as their rows scroll back">
+      <PlotAppearScope id="watchlist">
+        <List testID="watchlist" each={WATCH} keyExtractor={(w) => w.symbol} estimatedItemSize={WATCH_ROW} style={{ height: WATCH_ROW * 5 }}>
+          {(w) => {
+            const tone = (): Tone => (change(w()) >= 0 ? "up" : "down");
+            const closes = () => w().closes[span()];
+            return (
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 12, height: WATCH_ROW, borderBottomWidth: 1, borderColor: colors.line }}>
+                <View style={{ flex: 1, gap: 2 }}>
+                  <Text style={{ fontSize: 13, fontWeight: "600", fontFamily: mono, color: colors.text }}>{w().symbol}</Text>
+                  <Text style={{ numberOfLines: 1, fontSize: 11.5, color: colors.faint }}>{w().name}</Text>
+                </View>
+                <Plot
+                  data={closes()}
+                  y="close"
+                  interactive={false}
+                  appearGeneration={`${w().symbol} ${span()}`}
+                  motion={{ appear: { duration: 700, easing: "easeOut" } }}
+                  accessibilityLabel={`${w().symbol}, ${span()}: ${signed(change(w()))}%`}
+                  style={{ width: pointer ? 112 : 88, height: 28 }}
+                >
+                  <Grid y={[closes()[0].close]} style={{ stroke: colors.line, strokeDasharray: "1 3" }} />
+                  <Area backgroundStyle={wash(toneColor(tone()), 0.16)} hoverDotClass="hidden" />
+                  <Line style={{ stroke: toneColor(tone()), strokeWidth: 1.5 }} />
+                </Plot>
+                <View style={{ width: 72, alignItems: "flex-end", gap: 2 }}>
+                  <Text style={{ fontSize: 13, fontWeight: "500", color: colors.text, fontVariant: ["tabular-nums"] }}>{fixed(w().last)}</Text>
+                  <Text style={{ fontSize: 11.5, color: toneColor(tone()), fontVariant: ["tabular-nums"] }}>{`${signed(change(w()))}%`}</Text>
+                </View>
+              </View>
+            );
+          }}
+        </List>
+      </PlotAppearScope>
+      <View style={{ marginTop: size.gap + 4, alignSelf: pointer ? "flex-start" : "stretch", width: pointer ? 180 : undefined }}>
+        <Segmented options={SPANS} value={span()} size={size.switch} onChange={(next) => span.set(next)} />
+      </View>
+    </Card>
+  );
+}
+
 /**
  * Charts: what an app builds from `nsh/base/plot`'s parts and its own
  * views, with no chart component in between. A live price streamed a tick
@@ -1101,11 +1202,11 @@ function Flows() {
  * sweep in for each period; revenue as a donut whose hovered slice lifts;
  * sales as bars side by side or stacked; a portfolio's factor exposure
  * as a radar against a benchmark, the factor under the pointer read out;
- * and a quarter's income as flows from its segments to net income.
- * Values on the axes are small
+ * a quarter's income as flows from its segments to net income; and a
+ * watchlist of sparklines that draw in once. Values on the axes are small
  * monospaced figures the plots' `PlotAxis` parts lay along their edges,
  * grids hairlines, tooltips floating cards with a caps title.
  */
 export function Charts() {
-  return <DemoPage cards={[Live, Depth, Drawdown, Capacity, Revenue, Sales, Factors, Flows]} />;
+  return <DemoPage cards={[Live, Depth, Drawdown, Capacity, Revenue, Sales, Factors, Flows, Watchlist]} />;
 }
