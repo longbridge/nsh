@@ -132,6 +132,33 @@ CI sets `NSH_REQUIRE_PLAY=1`, so a failed player build fails the deployment
 instead of publishing pages without their live demos. Pull requests build and
 test without deploying.
 
+## App Stories
+
+`/apps` (`src/components/Apps.astro`, `src/pages/apps/`) presents apps built
+with Native Shell from the reviewed catalog in
+[`longbridge/nsh-showcases`](https://github.com/longbridge/nsh-showcases):
+one folder per app with its manifest, screenshots and an optional README,
+which becomes the app's page at `/apps/<id>`. `src/lib/showcases.ts` reads the
+catalog and runs the catalog's own `validate.ts` and `readme.ts`; the site
+serves each app's screenshots and media from its own build
+(`src/pages/apps/[id]/[file].ts`). Search, sorting and pages are
+`src/lib/showcase-browser.ts`.
+
+For a local preview, clone the catalog next to this repository and install
+its locked dependencies:
+
+```sh
+git clone https://github.com/longbridge/nsh-showcases ../nsh-showcases
+bun install --frozen-lockfile --cwd ../nsh-showcases
+```
+
+`SHOWCASES_DIR` points at a checkout elsewhere. Without one the site builds
+with an empty App Stories page; `NSH_REQUIRE_SHOWCASES=1` (the deployment's)
+requires the catalog. CI checks it out into `.showcases` with the
+`SHOWCASES_TOKEN` secret, and the catalog's workflow dispatches
+`website.yml` after each merge and its weekly star refresh, with its
+`DOCS_DISPATCH_TOKEN` secret.
+
 ## Playground
 
 `/playground` (`src/components/Playground.astro`, `src/lib/playground-client.ts`)
@@ -224,6 +251,7 @@ player, or editing a demo, invalidates Astro's content cache automatically
 | `src/lib/remark-*.js`, `rehype-heading-anchors.js` | Title removal, callouts, code tabs, `.md` links, demo insertion, heading anchors |
 | `src/lib/code-tabs-client.ts` | Switches code tabs, page-wide, and remembers the choice |
 | `src/lib/demo.js` | Demo sources, the demo frame and the demo panel markup |
+| `src/lib/showcases.ts`, `showcase-browser.ts` | App Stories: the catalog, its READMEs and media; search, sorting and pages |
 | `src/lib/markdown-endpoint.ts`, `llms.ts` | `<page>.md`, `llms.txt`, `llms-full.txt` |
 | `src/pages/[section]/[...slug].astro` | Content pages (and `zh-CN/`); `[section].md.ts` / `[...slug].md.ts` the Markdown |
 | `src/components/Home.astro` | The home page in both languages |

@@ -2,7 +2,9 @@ name: Website
 
 # Builds the documentation site with its live demos (the WebAssembly runtime,
 # `cargo xtask web`) and publishes it to GitHub Pages at nsh.dev
-# (`website/public/CNAME`).
+# (`website/public/CNAME`). App Stories (/apps) come from the reviewed
+# catalog in longbridge/nsh-showcases, whose own workflow dispatches this one
+# after each merge and its weekly star refresh.
 
 on:
   push:
@@ -95,6 +97,25 @@ jobs:
           CHROME=$("$RUNNER_TEMP/nsh-browser-tests/bin/python" -c 'from playwright.sync_api import sync_playwright; p=sync_playwright().start(); print(p.chromium.executable_path); p.stop()')
           "$RUNNER_TEMP/nsh-browser-tests/bin/python" crates/nsh-platform-web/web/browser/browser-check.py --chrome "$CHROME" --wasm target/wasm32-unknown-unknown/web/nsh_platform_web.wasm
 
+      # The catalog is private for now: `SHOWCASES_TOKEN` reads it (Contents:
+      # read on nsh-showcases). Pull requests without the secret build the
+      # site with no apps; the published site requires them.
+      - name: Check out the App Stories catalog
+        id: showcases
+        uses: actions/checkout@v4
+        continue-on-error: ${{ github.event_name == 'pull_request' }}
+        with:
+          repository: longbridge/nsh-showcases
+          ref: main
+          path: .showcases
+          token: ${{ secrets.SHOWCASES_TOKEN || github.token }}
+          persist-credentials: false
+
+      - name: Install the catalog's dependencies
+        if: steps.showcases.outcome == 'success'
+        working-directory: .showcases
+        run: bun install --frozen-lockfile
+
       - name: Install website dependencies
         working-directory: website
         run: bun install
@@ -106,11 +127,15 @@ jobs:
         working-directory: website
         env:
           NSH_REQUIRE_PLAY: "1"
+          NSH_REQUIRE_SHOWCASES: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && '1' || '' }}
+          SHOWCASES_DIR: ${{ github.workspace }}/.showcases
           AR_wasm32_unknown_unknown: llvm-ar
         run: bun run build
 
       - name: Test website
         working-directory: website
+        env:
+          SHOWCASES_DIR: ${{ github.workspace }}/.showcases
         run: bun run test
 
       - name: Check standalone Gallery code size
