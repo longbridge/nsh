@@ -7,6 +7,7 @@ mod compat;
 mod dom;
 mod engine;
 mod events;
+mod fetch;
 #[cfg(feature = "browser-tests")]
 mod fixtures;
 mod gesture;
@@ -17,6 +18,7 @@ mod reactive;
 mod resource;
 mod rows;
 mod standard;
+mod timers;
 mod values;
 
 use std::{cell::RefCell, rc::Rc};
@@ -34,6 +36,8 @@ struct Runtime {
     standard: standard::Standard,
     animation: animation::Animations,
     gestures: gesture::Gestures,
+    timers: timers::Timers,
+    fetches: fetch::Fetches,
     listener: RefCell<Option<Value>>,
     registries: RefCell<Vec<nsh_core::element::Registry>>,
     tokens: RefCell<Option<std::sync::Arc<nsh_core::element::Tokens>>>,
@@ -57,6 +61,8 @@ impl Default for Runtime {
             standard: standard::Standard::default(),
             animation: animation::Animations::default(),
             gestures: gesture::Gestures::default(),
+            timers: timers::Timers::default(),
+            fetches: fetch::Fetches::default(),
             listener: RefCell::default(),
             registries: RefCell::default(),
             tokens: RefCell::default(),
@@ -72,6 +78,8 @@ impl Default for Runtime {
 impl Runtime {
     fn call(&self, op: u32, args: &Value) -> Result<Value, nsh_core::element::PropError> {
         match op {
+            1000..=1006 => self.timers.call(op, args),
+            1007..=1009 => self.fetches.call(op, args),
             800..=807 => self.resources.call(op, args),
             900..=906 => self.standard.call(op, args),
             700..=702 => self.gestures.call(&self.bindings, op, args),

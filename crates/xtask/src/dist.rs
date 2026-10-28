@@ -11,7 +11,7 @@
 //! dist/nsh/runtime/gpui/nsh-gpui-host[.exe]                   development host (GPUI; apps embed it, never package it)
 //! dist/nsh/runtime/android/{release,dev}/                      classes.dex, lib/<abi>/libnsh.so (stripped),
 //!                                                              symbols/<abi>/libnsh.so (with symbols)
-//! dist/nsh/runtime/web/{nsh.wasm,nsh-browser-lite.wasm,nsh-dev.wasm,nsh.js}  the web runtimes (published apps', the dev host's)
+//! dist/nsh/runtime/web/{nsh-browser.wasm,nsh-browser-lite.wasm,nsh-dev.wasm,nsh.js,browser/}  the web runtimes (published apps', the dev host's)
 //! dist/nsh/runtime/web/nsh-syntaxes.bin                       the syntaxes they fetch to highlight code
 //! dist/nsh/embed/ios/{NativeShell,NativeShellDev}.xcframework  embedding in iOS apps
 //! dist/nsh/embed/android/{nsh,nsh-dev}.aar                     embedding in Android apps
@@ -132,13 +132,12 @@ pub(crate) fn dist() -> anyhow::Result<()> {
         )?;
     }
 
-    // The web runtimes: the same files on every machine. Published apps'
-    // (no QuickJS parser: bytecode only), the lite one for those that use
-    // only `nsh/base`'s core and neither `zlib` nor `crypto`, and the
-    // development host's (JS source and hot updates). They build to the same
-    // file, copied in turn.
+    // The web runtimes, the same files on every machine, all running TSX on
+    // the browser's JavaScript engine: published apps', the lite one for
+    // those that use only `nsh/base`'s core and neither `zlib` nor `crypto`,
+    // and the development host's (hot updates, `nsh test --target web`).
+    // They build to the same file, copied in turn.
     for (features, file) in [
-        (&["--features", "bytecode-only"][..], "nsh.wasm"),
         (
             &["--no-default-features", "--features", "browser"][..],
             "nsh-browser.wasm",
@@ -147,7 +146,10 @@ pub(crate) fn dist() -> anyhow::Result<()> {
             &["--no-default-features", "--features", "browser-core"][..],
             "nsh-browser-lite.wasm",
         ),
-        (&["--features", "dev"][..], "nsh-dev.wasm"),
+        (
+            &["--no-default-features", "--features", "dev"][..],
+            "nsh-dev.wasm",
+        ),
     ] {
         let mut web = Command::new(env::var_os("CARGO").unwrap_or_else(|| "cargo".into()));
         web.current_dir(&root)

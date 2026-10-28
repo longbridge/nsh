@@ -193,10 +193,11 @@ The rules every demo follows, now and for the ones to come:
 
 The player in `public/play/` is the WebAssembly build of the nsh runtime
 (`crates/nsh-platform-web`, rendering to the DOM) with every demo bundled by
-`nsh build`; it is generated, not checked in:
+`nsh build` as an ES module, which the browser's JavaScript engine runs; it is
+generated, not checked in:
 
 ```sh
-bun run play       # = cargo xtask web: nsh.wasm, nsh.js, index.html, demos/*.nshc (dev and build run it)
+bun run play       # = cargo xtask web: nsh.wasm, nsh.js, browser/, index.html, demos/*.js (dev and build run it)
 ```
 
 Run it again after changing the runtime. Gallery and website demos share the internal

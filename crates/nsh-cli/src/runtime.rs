@@ -325,7 +325,8 @@ pub(crate) enum WebKind {
     /// Browser runtime with the core base components only.
     Lite,
     /// The development host's (`nsh dev`, `nsh run --target web`): it runs
-    /// JS source and hot updates. `nsh-dev.wasm`.
+    /// development bundles on the browser's JavaScript engine, with hot
+    /// updates. `nsh-dev.wasm`.
     Dev,
 }
 
@@ -345,7 +346,7 @@ impl WebKind {
         match self {
             WebKind::Browser => &["--no-default-features", "--features", "browser"],
             WebKind::Lite => &["--no-default-features", "--features", "browser-core"],
-            WebKind::Dev => &["--features", "dev"],
+            WebKind::Dev => &["--no-default-features", "--features", "dev"],
         }
     }
 }
@@ -446,7 +447,8 @@ pub(crate) fn web(kind: WebKind, build: bool) -> anyhow::Result<Option<WebRuntim
             .args(["--target", WASM])
             .current_dir(&root);
         web_build_flags(&mut command);
-        // QuickJS' archive needs an `ar` that knows WebAssembly objects.
+        // The C code of the dependencies (zstd) needs an `ar` that knows
+        // WebAssembly objects.
         let ar = format!("AR_{}", WASM.replace('-', "_"));
         if env::var_os(&ar).is_none() && env::var_os("AR").is_none() {
             command.env(&ar, "llvm-ar");

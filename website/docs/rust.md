@@ -14,7 +14,7 @@ own UI. What differs is the language of your own code, and with it whether the a
 | | Rust | TSX | Rust with TSX |
 |---|---|---|---|
 | Your UI, state and handlers | Rust | TSX on QuickJS | Rust components and modules, TSX screens that use them |
-| The app runs | the engine and your crate only, on every platform and in the browser | QuickJS and the engine | QuickJS and the engine, with your crate |
+| The app runs | the engine and your crate only, on every platform and in the browser | QuickJS and the engine (in the browser, its JavaScript engine) | QuickJS and the engine, with your crate (in the browser, its JavaScript engine) |
 | Suits | Medium and large apps with demanding business logic | Apps and modules delivered at run time, quick iteration | A Rust core with parts that change often |
 | Edits | Rebuild and restart | Hot updates | Hot updates for TSX, rebuild and restart for Rust |
 | Start | `nsh init my-app --template rust` | `nsh init my-app --template ts` | `nsh init my-app --template mixed` |

@@ -4,6 +4,10 @@
 //! the page reports the idiom (phone, tablet or desktop browser), locale
 //! and the user's settings ([`nsh_environment`]).
 //!
+//! - The app's TSX runs on the browser's own JavaScript engine (feature
+//!   `browser`): the page imports its ES modules, which reach the Rust
+//!   engine, reactive graph and components through `src/browser/`. The
+//!   module has no JS interpreter of its own.
 //! - The engine runs on the page's main thread ([`nsh_engine::LocalEngine`]):
 //!   the JS runtime (`web/nsh.js`) calls [`nsh_pump`] after input and when
 //!   the deadline it returned is reached.
@@ -24,7 +28,7 @@
 
 #![cfg(target_arch = "wasm32")]
 
-#[cfg(all(feature = "browser-core", not(feature = "js")))]
+#[cfg(feature = "browser-core")]
 mod browser;
 
 mod animation;
@@ -32,8 +36,6 @@ mod canvas;
 mod encode;
 mod ffi;
 mod filesystem;
-#[cfg(feature = "js")]
-mod local_time;
 mod net;
 mod shader;
 mod storage;
@@ -54,8 +56,6 @@ use nsh_engine::{
     App, Assets, ColorScheme, EngineConfig, EngineControl, Environment, Idiom, Limits, LocalEngine,
     MountSink, Os,
 };
-#[cfg(feature = "js")]
-use nsh_engine::{Bundle, BundleCode, Chunk, HotUpdate, Policy};
 
 use crate::{animation::UiAnimation, encode::Out, text::WebTextEngine};
 pub use crate::{
@@ -83,12 +83,6 @@ thread_local! {
     static TEST_ANSWER: RefCell<String> = const { RefCell::new(String::new()) };
     /// The page's URL, which relative request URLs resolve against.
     static BASE_URL: RefCell<Option<String>> = const { RefCell::new(None) };
-    /// How the next [`nsh_start`] runs its bundle ([`nsh_bundle_options`]).
-    #[cfg(feature = "js")]
-    static OPTIONS: RefCell<BundleOptions> = RefCell::new(BundleOptions::default());
-    /// A hot update could not be applied in place ([`nsh_hot_failed`]).
-    #[cfg(feature = "js")]
-    static HOT_FAILED: Cell<bool> = const { Cell::new(false) };
     /// What the page reported last ([`nsh_environment`]), kept for the
     /// next [`nsh_start`].
     static PAGE: Cell<Option<Environment>> = const { Cell::new(None) };
@@ -176,29 +170,6 @@ macro_rules! rust_app {
     };
 }
 
-/// What [`nsh_bundle_options`] set for the next [`nsh_start`].
-#[cfg(feature = "js")]
-#[derive(Default)]
-struct BundleOptions {
-    /// Run as a release: hardened, as packaged apps run (default:
-    /// development settings, for the player and the dev server).
-    release: bool,
-    /// What the app declares (`capabilities.json`).
-    capabilities: Option<String>,
-    /// The bundle's source map (JSON).
-    source_map: Option<String>,
-    /// The hardening as bytecode ([`nsh_bundle_harden`]).
-    harden: Option<Vec<u8>>,
-    /// The app's id (`nsh.json` `"id"`): it names where the app keeps its
-    /// data ([`storage::LocalStorage`]).
-    app_id: Option<String>,
-    /// The VM limits the page runs the app with ([`nsh_bundle_limits`]);
-    /// `None`: none, as an app on its own.
-    limits: Option<String>,
-    /// Static chunks staged before the entry starts.
-    chunks: Vec<nsh_engine::Chunk>,
-}
-
 struct Running {
     engine: LocalEngine<Rc<WebTextEngine>>,
     /// The core's text engine, whose measurements go stale when a font
@@ -240,16 +211,6 @@ impl MountSink for Sink {
 
     fn request_frame(&self) {
         FRAME_REQUESTED.with(|f| f.set(true));
-    }
-
-    #[cfg(feature = "js")]
-    fn hot_update_failed(&self) {
-        HOT_FAILED.with(|f| f.set(true));
-    }
-
-    fn load_chunk(&self, id: &str) -> bool {
-        ffi::load_chunk(id);
-        true
     }
 }
 
@@ -429,51 +390,6 @@ pub unsafe extern "C" fn nsh_environment(ptr: *const u8, len: usize) -> f64 {
     })
 }
 
-/// Starts the app in `bundle` (JS source, an ES module as `nsh build`
-/// writes it) in a `width` × `height` surface. Returns the delay (ms) until
-/// [`nsh_pump`] is due, or -1.
-///
-/// # Safety
-///
-/// `ptr..ptr + len` is memory from [`nsh_alloc`].
-#[cfg(feature = "js")]
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn nsh_start(
-    ptr: *const u8,
-    len: usize,
-    width: f32,
-    height: f32,
-    dark: u32,
-    pixel_ratio: f32,
-) -> f64 {
-    // SAFETY: guaranteed by the caller.
-    let code = unsafe { string(ptr, len) };
-    start(BundleCode::Source(code), width, height, dark, pixel_ratio)
-}
-
-/// [`nsh_start`] for a bundle compiled to QuickJS bytecode (`bundle.nshc`
-/// from `nsh build`; what `nsh package --target web` ships). The runtime of
-/// published apps (feature `bytecode-only`) runs nothing else.
-///
-/// # Safety
-///
-/// `ptr..ptr + len` is memory from [`nsh_alloc`] holding bytecode the CLI
-/// of this runtime's `nsh_js::BYTECODE_VERSION` wrote: QuickJS trusts it.
-#[cfg(feature = "js")]
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn nsh_start_bytecode(
-    ptr: *const u8,
-    len: usize,
-    width: f32,
-    height: f32,
-    dark: u32,
-    pixel_ratio: f32,
-) -> f64 {
-    // SAFETY: guaranteed by the caller.
-    let code = unsafe { bytes(ptr, len) }.to_vec();
-    start(BundleCode::Bytecode(code), width, height, dark, pixel_ratio)
-}
-
 /// Starts the Rust app this module was built for ([`rust_app!`]) in a
 /// `width` × `height` surface: its root component, with no bundle. Returns
 /// the delay (ms) until [`nsh_pump`] is due, or -1 (no app is registered).
@@ -529,50 +445,6 @@ pub unsafe extern "C" fn nsh_data(
     let (name, data) = unsafe { (string(name, name_len), bytes(ptr, len)) };
     nsh_core::runtime_data::deliver(&name, (ok != 0).then(|| data.to_vec()));
     pump()
-}
-
-#[cfg(feature = "js")]
-fn start(code: BundleCode, width: f32, height: f32, dark: u32, pixel_ratio: f32) -> f64 {
-    init();
-    APP.with(|a| a.borrow_mut().take());
-    let environment = environment(width, height, dark != 0, pixel_ratio);
-    let options = OPTIONS.with(|o| std::mem::take(&mut *o.borrow_mut()));
-    let policy = if options.release {
-        Policy::default()
-    } else {
-        Policy::development()
-    };
-    let mut bundle = match code {
-        BundleCode::Source(code) => Bundle::source(code),
-        // SAFETY: trusted, per `nsh_start_bytecode`'s contract.
-        BundleCode::Bytecode(bytes) => unsafe { Bundle::bytecode(bytes) },
-    }
-    .with_policy(policy)
-    .with_chunks(options.chunks);
-    if let Some(harden) = options.harden {
-        // SAFETY: trusted, per `nsh_bundle_harden`'s contract.
-        bundle = unsafe { bundle.with_harden_bytecode(harden) };
-    }
-    if let Some(map) = options.source_map {
-        bundle = bundle.with_source_map(map);
-    }
-    let mut bundle = match bundle.with_capabilities_json(options.capabilities.as_deref()) {
-        Ok(bundle) => bundle,
-        Err(err) => {
-            ffi::report_error(&err);
-            return -1.0;
-        }
-    };
-    let limits = match Limits::development(options.limits.as_deref()) {
-        Ok(limits) => limits,
-        Err(err) => {
-            ffi::report_error(&format!("invalid limits: {err}"));
-            return -1.0;
-        }
-    };
-    bundle.base_url = BASE_URL.with(|b| b.borrow().as_deref().map(Into::into));
-    let bundle = bundle.with_app_id(options.app_id.as_deref());
-    run(App::Js(bundle), width, height, environment, limits)
 }
 
 /// Starts `app` in the page's surface.
@@ -657,187 +529,6 @@ pub unsafe extern "C" fn nsh_set_base_url(ptr: *const u8, len: usize) {
     // SAFETY: guaranteed by the caller.
     let url = unsafe { string(ptr, len) };
     BASE_URL.with(|b| *b.borrow_mut() = Some(url));
-}
-
-/// Sets how the next [`nsh_start`] runs its bundle: as a release
-/// (`release` 1: hardened, as `nsh package --target web` ships apps) or
-/// with development settings (0, the default), under the capabilities the
-/// app declares (`capabilities.json`; empty: no declaration), with the
-/// bundle's source map (empty: none) and the app's id (`nsh.json` `"id"`,
-/// which names where it keeps its data; empty: none, its page's path does).
-///
-/// # Safety
-///
-/// The three ranges are memory from [`nsh_alloc`].
-#[cfg(feature = "js")]
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn nsh_bundle_options(
-    release: u32,
-    capabilities: *const u8,
-    capabilities_len: usize,
-    map: *const u8,
-    map_len: usize,
-    app_id: *const u8,
-    app_id_len: usize,
-) {
-    // SAFETY: guaranteed by the caller.
-    let (capabilities, map, app_id) = unsafe {
-        (
-            string(capabilities, capabilities_len),
-            string(map, map_len),
-            string(app_id, app_id_len),
-        )
-    };
-    OPTIONS.with(|o| {
-        *o.borrow_mut() = BundleOptions {
-            release: release != 0,
-            capabilities: (!capabilities.is_empty()).then_some(capabilities),
-            source_map: (!map.is_empty()).then_some(map),
-            harden: None,
-            app_id: (!app_id.is_empty()).then_some(app_id),
-            limits: None,
-            chunks: Vec::new(),
-        }
-    });
-}
-
-/// Stages a static dependency for the next app, after [`nsh_bundle_options`].
-///
-/// # Safety
-///
-/// Both ranges are memory from [`nsh_alloc`]. Bytecode must be trusted output
-/// from the matching CLI, as required by [`nsh_start_bytecode`].
-#[cfg(feature = "js")]
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn nsh_bundle_chunk(
-    name: *const u8,
-    name_len: usize,
-    code: *const u8,
-    code_len: usize,
-    bytecode: u32,
-) {
-    // SAFETY: the caller provides allocated ranges and trusted bytecode.
-    let chunk = unsafe {
-        let name = string(name, name_len);
-        if bytecode != 0 {
-            nsh_engine::Chunk::bytecode(name, std::slice::from_raw_parts(code, code_len).to_vec())
-        } else {
-            nsh_engine::Chunk::source(name, string(code, code_len))
-        }
-    };
-    OPTIONS.with(|o| o.borrow_mut().chunks.push(chunk));
-}
-
-/// Sets the VM limits the next [`nsh_start`] / [`nsh_start_bytecode`]
-/// (after [`nsh_bundle_options`]) runs the app with, as an embedding app
-/// sets them (`nsh_core::js::HostLimits`' syntax, `memory=128MB,call=2s`;
-/// empty: the embedding defaults): the page decides, as the playground
-/// does for the code it runs. Without a call: none, as an app on its own.
-///
-/// # Safety
-///
-/// `ptr..ptr + len` is memory from [`nsh_alloc`].
-#[cfg(feature = "js")]
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn nsh_bundle_limits(ptr: *const u8, len: usize) {
-    // SAFETY: guaranteed by the caller.
-    let limits = unsafe { string(ptr, len) };
-    OPTIONS.with(|o| o.borrow_mut().limits = Some(limits));
-}
-
-/// Sets the hardening the next [`nsh_start`] / [`nsh_start_bytecode`] of a
-/// release ([`nsh_bundle_options`]) runs, as bytecode
-/// (`nsh_js::compile_harden`, which `nsh package` ships with the app): the
-/// runtime of published apps cannot compile it.
-///
-/// # Safety
-///
-/// `ptr..ptr + len` is memory from [`nsh_alloc`] holding what the CLI of
-/// this runtime's `nsh_js::BYTECODE_VERSION` compiled.
-#[cfg(feature = "js")]
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn nsh_bundle_harden(ptr: *const u8, len: usize) {
-    // SAFETY: guaranteed by the caller.
-    let harden = unsafe { bytes(ptr, len) }.to_vec();
-    OPTIONS.with(|o| o.borrow_mut().harden = Some(harden));
-}
-
-/// Applies a development update (a script from the dev server's hot
-/// updates, named `name` in stack traces, with its source map or none)
-/// to the running app. Returns the pump delay; [`nsh_hot_failed`] then
-/// tells whether the app must be loaded again instead.
-///
-/// # Safety
-///
-/// The three ranges are memory from [`nsh_alloc`].
-#[cfg(feature = "js")]
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn nsh_hot_update(
-    name: *const u8,
-    name_len: usize,
-    code: *const u8,
-    code_len: usize,
-    map: *const u8,
-    map_len: usize,
-) -> f64 {
-    // SAFETY: guaranteed by the caller.
-    let (name, code, map) = unsafe {
-        (
-            string(name, name_len),
-            string(code, code_len),
-            string(map, map_len),
-        )
-    };
-    HOT_FAILED.with(|f| f.set(false));
-    let update = HotUpdate {
-        name,
-        code,
-        source_map: (!map.is_empty()).then(|| map.into()),
-    };
-    send(|app| app.control.hot_update(update))
-}
-
-/// Whether the last [`nsh_hot_update`] could not be applied in place (1):
-/// the app must be started again with the new bundle.
-#[cfg(feature = "js")]
-#[unsafe(no_mangle)]
-pub extern "C" fn nsh_hot_failed() -> u32 {
-    HOT_FAILED.with(|f| f.replace(false)) as u32
-}
-
-/// Hands over chunk `id` of a split bundle that the page fetched after
-/// `load_chunk` (`ok` 1: `code` is its source; 2: its bytecode, from the
-/// CLI as for [`nsh_start_bytecode`]; 0: `code` says why it could not be
-/// loaded). Returns the pump delay.
-///
-/// # Safety
-///
-/// Both ranges are memory from [`nsh_alloc`]; bytecode (`ok` 2) is
-/// trusted as in [`nsh_start_bytecode`].
-#[cfg(feature = "js")]
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn nsh_chunk(
-    id: *const u8,
-    id_len: usize,
-    code: *const u8,
-    code_len: usize,
-    ok: u32,
-) -> f64 {
-    // SAFETY: guaranteed by the caller.
-    let (id, code) = unsafe { (string(id, id_len), bytes(code, code_len)) };
-    let chunk = match ok {
-        0 => Err(String::from_utf8_lossy(code).into_owned()),
-        // SAFETY: trusted, per the contract.
-        2 => Ok(unsafe { Chunk::bytecode(id.clone(), code.to_vec()) }),
-        _ => Ok(Chunk::source(
-            id.clone(),
-            String::from_utf8_lossy(code).into_owned(),
-        )),
-    };
-    send(|app| match chunk {
-        Ok(chunk) => app.control.chunk_loaded(chunk),
-        Err(why) => app.control.chunk_failed(id, why),
-    })
 }
 
 /// Compiles one module (`name`'s extension says TSX, TS, JSX or JS) to the

@@ -25,8 +25,9 @@
 //! fonts are fetched before the app starts, as text is measured with them
 //! synchronously.
 //!
-//! Published standalone TSX runs as browser ES modules. Its Wasm runtime
-//! has no QuickJS; the existing embedded/development players retain it.
+//! The app's TSX runs as browser ES modules on the browser's JavaScript
+//! engine; the development host's page does the same with development
+//! bundles and hot updates.
 
 use std::{
     collections::BTreeSet,
@@ -133,15 +134,12 @@ pub(crate) fn package(
         .as_deref()
         .map(|path| publish_glue(&site, path))
         .transpose()?;
-    // A Rust app has no code of its own besides its runtime (no QuickJS):
-    // the page mounts its root.
-    let (code, harden) = if built.rust_root {
-        (String::new(), String::new())
+    // A Rust app has no code of its own besides its runtime: the page
+    // mounts its root.
+    let code = if built.rust_root {
+        String::new()
     } else {
-        let code = site.add("app.js", built.code.as_bytes())?;
-        // The runtime cannot compile its hardening: it comes compiled by
-        // the QuickJS that compiled the app.
-        (code, String::new())
+        site.add("app.js", built.code.as_bytes())?
     };
     // Chunk id -> URL: the page hands the map to the runtime, which fetches
     // lazy chunks on demand. Static entry dependencies are staged before startup.
@@ -185,10 +183,8 @@ pub(crate) fn package(
         "id": id,
         "wasm": wasm,
         "code": code,
-        "harden": harden,
         "capabilities": built.capabilities_json(),
         "rust": built.rust_root,
-        "browser": !built.rust_root,
         "assets": assets,
         "data": data,
         "fonts": fonts,
@@ -208,7 +204,6 @@ pub(crate) fn package(
         wasm: &wasm,
         glue: glue.as_deref(),
         code: &code,
-        harden: &harden,
         fonts: &fonts
             .iter()
             .map(|path| assets[path].as_str().unwrap_or_default().to_owned())
@@ -297,10 +292,16 @@ fn serve(dir: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Version the complete facade directory together so relative ES imports
-/// remain valid, and every public file keeps immutable cache semantics.
-fn publish_browser_host(site: &Site, root: &Path) -> anyhow::Result<String> {
-    let mut paths = fs::read_dir(root.join("browser"))?
+/// The browser host's modules and their licenses next to `nsh.js` in
+/// `root` (its `browser/`), by name: what the page imports them as. None
+/// without the directory (a runtime that only runs a Rust app).
+fn browser_host_paths(root: &Path) -> anyhow::Result<Vec<PathBuf>> {
+    let dir = root.join("browser");
+    if !dir.is_dir() {
+        return Ok(Vec::new());
+    }
+    let mut paths = fs::read_dir(&dir)
+        .with_context(|| format!("read {}", dir.display()))?
         .map(|entry| entry.map(|e| e.path()))
         .collect::<Result<Vec<_>, _>>()?;
     paths.retain(|path| {
@@ -308,9 +309,32 @@ fn publish_browser_host(site: &Site, root: &Path) -> anyhow::Result<String> {
             .is_some_and(|ext| ext == "js" || ext == "txt")
     });
     paths.sort();
+    Ok(paths)
+}
+
+/// The dev host's copies of the browser host's files ([`browser_host_paths`]),
+/// served under `browser/`.
+fn browser_host_files(root: &Path) -> anyhow::Result<Vec<(String, Vec<u8>)>> {
+    browser_host_paths(root)?
+        .into_iter()
+        .map(|path| {
+            let name = path
+                .file_name()
+                .context("host file has no name")?
+                .to_string_lossy()
+                .into_owned();
+            let bytes = fs::read(&path).with_context(|| format!("read {}", path.display()))?;
+            Ok((format!("browser/{name}"), bytes))
+        })
+        .collect()
+}
+
+/// Version the complete facade directory together so relative ES imports
+/// remain valid, and every public file keeps immutable cache semantics.
+fn publish_browser_host(site: &Site, root: &Path) -> anyhow::Result<String> {
     let mut files = Vec::new();
     let mut content = Vec::new();
-    for path in paths {
+    for path in browser_host_paths(root)? {
         let name = path
             .file_name()
             .context("host file has no name")?
@@ -406,7 +430,14 @@ pub(crate) fn dev_host(runtime: &WebRuntime, rust: bool) -> anyhow::Result<(Stri
             .collect::<anyhow::Result<Vec<_>>>()?,
         None => Vec::new(),
     };
+    // The browser host's modules, which `nsh.js` imports from `./browser/`.
+    let browser = browser_host_files(runtime.js.parent().context("runtime has no parent")?)?;
     let mut parts = vec![digest(&js), digest(&wasm)];
+    parts.extend(
+        browser
+            .iter()
+            .map(|(name, bytes)| digest(&[name.as_bytes(), bytes].concat())),
+    );
     parts.extend(glue.as_deref().map(digest));
     parts.extend(
         snippets
@@ -435,6 +466,7 @@ pub(crate) fn dev_host(runtime: &WebRuntime, rust: bool) -> anyhow::Result<(Stri
         ("nsh.wasm".to_owned(), wasm),
         ("nsh.version".to_owned(), version.into_bytes()),
     ];
+    files.extend(browser);
     if let Some(glue) = glue {
         files.push((crate::bindgen::GLUE.to_owned(), glue));
     }
@@ -757,7 +789,6 @@ struct PageParts<'a> {
     /// URL of the wasm-bindgen glue, if the runtime has one.
     glue: Option<&'a str>,
     code: &'a str,
-    harden: &'a str,
     /// URLs of the fonts fetched before the app starts.
     fonts: &'a [String],
     /// What the page's script reads.
@@ -821,7 +852,7 @@ fn page(parts: &PageParts<'_>) -> String {
     // before then from being logged as unhandled). Not `<link rel=preload>`:
     // WebKit does not hand a preload still in flight to the `fetch` of the
     // same URL, which downloads the file again.
-    let urls: Vec<&str> = [parts.wasm, parts.code, parts.harden]
+    let urls: Vec<&str> = [parts.wasm, parts.code]
         .into_iter()
         .filter(|url| !url.is_empty())
         .chain(parts.fonts.iter().map(String::as_str))
@@ -1191,8 +1222,7 @@ mod tests {
             runtime: "nsh.0123456789.js",
             wasm: "nsh.0123456789.wasm",
             glue,
-            code: "app.1.nshc",
-            harden: "harden.2.nshc",
+            code: "app.1.js",
             fonts: &[],
             app: &app,
             connect: None,
@@ -1217,7 +1247,7 @@ mod tests {
 
     #[test]
     fn the_page_names_the_files_and_cannot_be_broken_out_of() {
-        let app = serde_json::json!({ "code": "app.1.nshc", "x": "</script><b>" });
+        let app = serde_json::json!({ "code": "app.1.js", "x": "</script><b>" });
         let html = page(&PageParts {
             name: "A <b> & \"c\"",
             appearance: Appearance::System,
@@ -1225,8 +1255,7 @@ mod tests {
             runtime: "nsh.0123456789.js",
             wasm: "nsh.0123456789.wasm",
             glue: None,
-            code: "app.1.nshc",
-            harden: "harden.2.nshc",
+            code: "app.1.js",
             fonts: &["assets/f.1.ttf".to_owned()],
             app: &app,
             connect: Some("'self' api.example.com:*"),
@@ -1237,12 +1266,7 @@ mod tests {
             .lines()
             .find(|line| line.starts_with("<script>const fetches = "))
             .unwrap_or_default();
-        for url in [
-            "nsh.0123456789.wasm",
-            "app.1.nshc",
-            "harden.2.nshc",
-            "assets/f.1.ttf",
-        ] {
+        for url in ["nsh.0123456789.wasm", "app.1.js", "assets/f.1.ttf"] {
             assert!(fetches.contains(&format!("\"{url}\"")), "{fetches}");
         }
         assert!(html.contains("wasm: take(app.wasm)"));

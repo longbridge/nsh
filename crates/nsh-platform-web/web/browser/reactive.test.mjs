@@ -631,3 +631,13 @@ test("native file drops preserve URIs and optional page position", { skip: !path
     ]);
   } finally { f.close(); }
 });
+
+test("merged props answer `in` from their sources, getters included", { skip: !path }, async () => {
+  const { dom, close } = await fixture();
+  const props = dom.rt.merge({ onPress() {} }, () => ({ style: {} }), { get children() { return "label"; } });
+  assert.ok("children" in props);
+  assert.ok("style" in props);
+  assert.ok(!("missing" in props));
+  assert.equal(props.children, "label");
+  close();
+});

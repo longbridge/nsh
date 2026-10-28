@@ -14,7 +14,7 @@ JavaScript 虚拟机。
 | | Rust | TSX | Rust + TSX |
 |---|---|---|---|
 | 你的 UI、状态和事件处理 | Rust | TSX，运行在 QuickJS 上 | Rust 组件和模块，TSX 页面使用它们 |
-| 应用运行的内容 | 只有引擎和你的 crate，所有平台和浏览器都一样 | QuickJS 和引擎 | QuickJS 和引擎，加上你的 crate |
+| 应用运行的内容 | 只有引擎和你的 crate，所有平台和浏览器都一样 | QuickJS 和引擎（浏览器里是它的 JavaScript 引擎） | QuickJS 和引擎，加上你的 crate（浏览器里是它的 JavaScript 引擎） |
 | 适合 | 业务复杂度高的中大型应用 | 运行时下发的应用和模块、快速迭代 | Rust 核心加上经常变化的部分 |
 | 修改代码 | 重新构建并重启 | 热更新 | TSX 热更新，Rust 重新构建并重启 |
 | 创建 | `nsh init my-app --template rust` | `nsh init my-app --template ts` | `nsh init my-app --template mixed` |

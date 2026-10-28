@@ -4,8 +4,9 @@ Native Shell (NSH for short in prose; crates, the CLI, the JS module and Java pa
 AI-generated, dynamically delivered native UI: native apps embed it (`NshAppView` on iOS, `NshView` on Android,
 `AppView` on macOS, Windows and Linux) and load TSX modules at run time — signed, sandboxed by the host, rendered with
 each platform's own UI. Embedding comes first; plugins for native apps and standalone apps use the same machinery.
-Module code runs in QuickJS on a native runtime (the reactive graph, the renderer and every module apps import are
-Rust); layout uses Taffy; embedding native components such as maps or web views has no layering problems. The
+Module code runs in QuickJS (on the web, the browser's own JavaScript engine) on a native runtime (the reactive graph,
+the renderer and every module apps import are Rust); layout uses Taffy; embedding native components such as maps or
+web views has no layering problems. The
 toolchain is pure Rust and does not need Node.js; app developers get a prebuilt distribution (`cargo xtask dist`) and
 never need Rust either. Every platform has a native backend: iOS with UIKit views (`nsh-platform-ios`), Android with
 Android views (`nsh-platform-android`), macOS with AppKit views (`nsh-platform-macos`), Windows in Win32 windows drawn
@@ -105,9 +106,10 @@ crates/
   nsh-platform-web/    WebAssembly backend (published web apps, `nsh run --target web`, the website's live demos): the engine on
                        the page's main thread (`LocalEngine`), text laid out with browser font metrics, batches as JSON + CSS
                        for the DOM runtime in `web/nsh.js`, the animator on requestAnimationFrame, fetch over the browser's
-                       (`net.rs`); feature `bytecode-only`: published apps' runtime (`nsh.wasm`, no QuickJS parser), feature
-                       `dev`: the development host's (`nsh-dev.wasm`, source and hot updates, the model `nsh test --target web`
-                       asks about); `web/index.html` is the demo
+                       (`net.rs`); app code runs on the browser's own JavaScript engine (feature `browser`: `src/browser/`
+                       and `web/browser/`, no QuickJS in WebAssembly), feature `dev`: the development host's (`nsh-dev.wasm`,
+                       development bundles with hot updates, `web/browser/hot.js`, the model `nsh test --target web` asks
+                       about); `web/index.html` is the demo
                        player (`cargo xtask web`); feature `compiler`: the playground's TSX compiler (`nsh-playground.wasm`)
                        (docs/dev/web.md)
   nsh-platform-linux/  GTK 4 backend (Linux): one `NshView` widget per node drawn with GSK, Pango text engine (typeset on the engine

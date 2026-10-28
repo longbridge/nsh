@@ -150,7 +150,11 @@ WebPKI trust roots; opening a connection leaves the process-wide provider unchan
 and grant no file access. On WebAssembly, `os.homedir()` returns a typed error and `process.env` an empty object;
 both avoid `std::env`, whose accessors panic on `wasm32-unknown-unknown`.
 
-QuickJS and the LLRT modules come through `quickjs-jit` and `quickjs-jit-stdlib` on native and WebAssembly targets. The WebAssembly build uses the interpreter and pregenerated bindings; the portable standard-library implementation supplies `buffer`, `crypto`, `path`, `url`, `zlib` and `zlib-zstd`, including synchronous hashing and compression. Browser entropy reaches Rust through the player's `crypto.getRandomValues` import (`standard/random.rs`); wasm builds select getrandom's custom backend. All eleven catalog modules load on both targets, with `Buffer` and `crypto` globals. On WebAssembly, `path` uses POSIX separators and a virtual `/` working directory. The crates are
+QuickJS and the LLRT modules come through `quickjs-jit` and `quickjs-jit-stdlib` on the native targets. On the web,
+app code runs on the browser's JavaScript engine, and the browser host supplies the same modules (`docs/dev/web.md`
+"Standard modules in the browser"): `buffer` and `path` in JS, synchronous hashing and compression in Rust in the
+module, entropy from the browser's `crypto.getRandomValues`. All eleven catalog modules load on both, with `Buffer`
+and `crypto` globals. On the web, `path` uses POSIX separators and a virtual `/` working directory. The crates are
 published together at one version and pinned exactly (`=0.14.1`), with no git dependency or patch. `standard/declarations.rs` projects their actual exports from checksummed upstream assets in
 `crates/nsh-js/third_party/llrt-types`. `zlib` bounds each decompression (64 MiB, or the heap limit when smaller). NSH's WHATWG constructors (URL, Blob, streams, events)
 keep their identity. `console` declares the global `console`'s type next to its implementation. The

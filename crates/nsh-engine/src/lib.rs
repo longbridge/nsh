@@ -159,8 +159,8 @@ pub struct Bundle {
     /// [`MountSink::load_chunk`]. Shared by the bundle's clones.
     pub chunks: Arc<Vec<Chunk>>,
     /// The sandbox's hardening as bytecode (`nsh_js::compile_harden`),
-    /// for a runtime without QuickJS' parser (the web runtime of published
-    /// apps); `None`: compiled when the policy hardens. Set it with
+    /// for a runtime without QuickJS' parser; `None`: compiled when the
+    /// policy hardens. Set it with
     /// [`Bundle::with_harden_bytecode`].
     pub harden_bytecode: Option<Arc<Vec<u8>>>,
     /// The app's id (`nsh.json` `"id"`; a signed package's verified one):

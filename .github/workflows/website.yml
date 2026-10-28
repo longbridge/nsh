@@ -51,8 +51,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # QuickJS is C: clang compiles it for wasm32 (llvm-ar archives it), and
-      # bindgen needs libclang for the host build of the nsh CLI.
+      # The web runtime's C code (zstd): clang compiles it for wasm32 (llvm-ar
+      # archives it); bindgen needs libclang for the host build of the nsh CLI.
       - name: Install clang and LLVM
         run: sudo apt-get update && sudo apt-get install -y clang llvm libclang-dev
 

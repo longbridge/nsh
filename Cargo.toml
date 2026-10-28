@@ -492,13 +492,10 @@ opt-level = 3
 [profile.dev.package.usvg]
 opt-level = 3
 
-# The web runtime (`nsh.wasm`): what pages download, so Rust is optimized for
-# size (3.7 MB instead of 5.0, 1.0 MB with brotli); QuickJS keeps `-O3`, as
-# the interpreter is the slowest link (it is 0.45 MB of the difference).
+# The web runtime (`nsh.wasm`): what pages download, so it is optimized for
+# size.
 [profile.web]
 inherits = "release"
 opt-level = "z"
 strip = true
 panic = "abort"
-[profile.web.package.quickjs-jit-sys]
-opt-level = 3
