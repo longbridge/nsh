@@ -347,8 +347,15 @@ mod tests {
             .filter(filter)
             .filter(FileFilter::new("Nothing", [".", ""]))
             .filter(FileFilter::new("Text", ["TXT", "log"]));
-        assert_eq!(dialog.filters.len(), 2, "a filter without extensions is left out");
-        assert_eq!(extensions(&dialog.filters), ["md", "markdown", "txt", "log"]);
+        assert_eq!(
+            dialog.filters.len(),
+            2,
+            "a filter without extensions is left out"
+        );
+        assert_eq!(
+            extensions(&dialog.filters),
+            ["md", "markdown", "txt", "log"]
+        );
         assert!(passes(&dialog.filters, Path::new("/a/b.log")));
         assert!(!passes(&dialog.filters, Path::new("/a/b")));
         assert!(passes(&[], Path::new("/a/b")));

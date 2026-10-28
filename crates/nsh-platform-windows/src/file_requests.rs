@@ -223,10 +223,7 @@ fn pick_paths(owner: HWND, request: &OpenDialog) -> windows::core::Result<Vec<Pa
 }
 
 /// The path chosen in the dialog; none when it was cancelled.
-fn pick_save_path(
-    owner: HWND,
-    request: &SaveDialog,
-) -> windows::core::Result<Option<PathBuf>> {
+fn pick_save_path(owner: HWND, request: &SaveDialog) -> windows::core::Result<Option<PathBuf>> {
     // SAFETY: COM calls on a dialog this thread owns until it returns; the
     // name outlives the call that reads it.
     unsafe {
