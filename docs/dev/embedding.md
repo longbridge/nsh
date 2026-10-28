@@ -30,6 +30,11 @@
   library, which APKs store uncompressed; the dynamic symbols JNI needs stay), and checked again; `symbols/<abi>/`
   keeps the linked library for `ndk-stack` and Play Console. The AARs carry the linked libraries: Gradle strips what
   it packages and extracts the symbols itself.
+- The AARs carry `proguard.txt` (`AAR_KEEP_RULES` in `crates/xtask/src/dist.rs`), which an app's minified build
+  applies: `libnsh.so` finds `TextLayouts`, `NshView`, `Net` and `TestAgent` and their members by name over JNI
+  (`JNI_OnLoad` fails without them) and binds the `native` methods of `Native`, `Net` and `SelectableView` by name,
+  while Java code names few of them, so R8 removed or renamed them (`ClassNotFoundException: TextLayouts`). The rule
+  keeps the whole package rather than a list that a new JNI lookup would have to extend.
 - Embedding: iOS apps link `NativeShell.xcframework` and `import NativeShell` (Swift: `NshAppView`, a `UIView`;
   `NshTrust`, `NshPackage`, `NshLimits`, `NshError`); Android apps add `nsh.aar` and use `com.longbridge.nsh.NshView`.
   `*Dev` / `-dev` variants can also load from a dev server. See `examples/embed-*`. Rust desktop apps use the platform

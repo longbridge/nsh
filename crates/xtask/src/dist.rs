@@ -273,7 +273,19 @@ fn ios_runtimes(release: &Path, out: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// An Android library archive: the Java runtime and `libnsh.so` per ABI.
+/// R8 rules the archive carries (`proguard.txt`), which an app's Gradle
+/// build applies when it shrinks the app: `libnsh.so` finds the runtime's
+/// classes, methods and fields by name over JNI (`TextLayouts` in
+/// `JNI_OnLoad`) and binds `native` methods by their Java names, which R8
+/// would remove or rename, Java code never naming most of them.
+const AAR_KEEP_RULES: &str = "\
+# Native Shell: libnsh.so finds these classes and members by name over JNI
+# and binds native methods by their Java names.
+-keep class com.longbridge.nsh.** { *; }
+";
+
+/// An Android library archive: the Java runtime and `libnsh.so` per ABI,
+/// with the R8 rules that keep the runtime ([`AAR_KEEP_RULES`]).
 ///
 /// The development library allows cleartext HTTP (merged into the app's
 /// manifest): it loads assets from the `nsh dev` server over plain HTTP.
@@ -301,6 +313,7 @@ fn make_aar(built: &Path, abis: &[String], dev: bool, aar: &Path) -> anyhow::Res
         ),
     )?;
     fs::write(work.join("R.txt"), "")?;
+    fs::write(work.join("proguard.txt"), AAR_KEEP_RULES)?;
     copy(&built.join("classes.jar"), &work.join("classes.jar"))?;
     // With their symbols: the app's Gradle build strips what it packages
     // and keeps them for its crash reports.
@@ -404,4 +417,32 @@ pub(crate) fn copy(from: &Path, to: &Path) -> anyhow::Result<()> {
     }
     fs::copy(from, to).with_context(|| format!("copy {} -> {}", from.display(), to.display()))?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{fs, io::Read as _};
+
+    use super::{AAR_KEEP_RULES, make_aar};
+
+    #[test]
+    fn an_aar_carries_the_rules_that_keep_the_runtime() {
+        let dir = std::env::temp_dir().join(format!("nsh-aar-test-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let built = dir.join("built");
+        fs::create_dir_all(built.join("symbols/arm64-v8a")).unwrap();
+        fs::write(built.join("classes.jar"), b"jar").unwrap();
+        fs::write(built.join("symbols/arm64-v8a/libnsh.so"), b"so").unwrap();
+        let aar = dir.join("nsh.aar");
+        make_aar(&built, &["arm64-v8a".to_string()], false, &aar).unwrap();
+        let mut zip = zip::ZipArchive::new(fs::File::open(&aar).unwrap()).unwrap();
+        let mut rules = String::new();
+        zip.by_name("proguard.txt")
+            .unwrap()
+            .read_to_string(&mut rules)
+            .unwrap();
+        assert_eq!(rules, AAR_KEEP_RULES);
+        assert!(rules.contains("-keep class com.longbridge.nsh.** { *; }"));
+        fs::remove_dir_all(&dir).unwrap();
+    }
 }
