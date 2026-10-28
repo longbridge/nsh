@@ -118,8 +118,9 @@ const KEYFRAMES = `
   touch-action: none; }
 .nsh-root * { box-sizing: border-box; }
 .nsh-v { position: absolute; margin: 0; padding: 0; min-width: 0; min-height: 0; }
+/* The keyboard focus shows as the app draws it (focus: styles), as
+   on the desktop backends: no ring of the browser's or the runtime's. */
 .nsh-v:focus { outline: none; }
-.nsh-v:focus-visible { outline: 2px solid var(--nsh-focus-ring, #0a84ff); outline-offset: -2px; }
 .nsh-scroll { overflow: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
 .nsh-scroll { touch-action: pan-x pan-y; }
 /* In an iframe, swipes the app does not take scroll the embedding page. */
