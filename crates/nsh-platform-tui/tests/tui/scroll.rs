@@ -175,15 +175,20 @@ fn initial_offsets_clip_text_on_both_axes() {
 
 #[component]
 fn SearchPanels() -> impl IntoElement {
-    scroll_panels(false)
+    scroll_panels(|_| false)
 }
 
 #[component]
 fn FocusPanels() -> impl IntoElement {
-    scroll_panels(true)
+    scroll_panels(|_| true)
 }
 
-fn scroll_panels(controls: bool) -> impl IntoElement {
+#[component]
+fn EndpointPanels() -> impl IntoElement {
+    scroll_panels(|index| index == 5 || index == 14)
+}
+
+fn scroll_panels(is_control: fn(i32) -> bool) -> impl IntoElement {
     let sidebar_offset = signal(0);
     let panel_offset = signal(0);
     let focused = signal(-1);
@@ -227,7 +232,7 @@ fn scroll_panels(controls: bool) -> impl IntoElement {
                                     view()
                                         .h(px(16.0))
                                         .flex_shrink_0()
-                                        .focusable(controls)
+                                        .focusable(is_control(index))
                                         .on_focus(move |_: &()| focused.set(index))
                                         .on_press(|_: &()| {})
                                         .child(text(format!("detail {index:02}")))
@@ -318,4 +323,180 @@ fn page_keys_follow_the_focused_control_in_its_panel() {
             &format!("sidebar 0 panel {offset} focus {focused}"),
         );
     }
+}
+
+#[test]
+fn search_reveals_a_hidden_row_in_the_middle_above_the_panel_overlay() {
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(60, 12)).unwrap();
+    view.load(App::Rust(Root::new::<SearchPanels>(|| ())))
+        .unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "sidebar 0 panel 0 focus -1");
+    for (query, offset) in [("detail 10", 112), ("detail 11", 112), ("detail 02", 0)] {
+        search_panel(&mut view, &mut terminal, query);
+        panel_key(&mut view, "Enter", false, false);
+        draw_until(
+            &mut view,
+            &mut terminal,
+            &rx,
+            &format!("sidebar 0 panel {offset} focus -1"),
+        );
+        draw_until(&mut view, &mut terminal, &rx, query);
+        if query == "detail 10" {
+            let buffer = terminal.backend().buffer();
+            let row: String = (15..24).map(|x| buffer[(x, 4)].symbol()).collect();
+            assert_eq!(row, "detail 10");
+            assert_eq!(
+                buffer[(15, 6)].symbol(),
+                "t",
+                "the trade bar stays fixed below the match"
+            );
+        }
+    }
+}
+
+#[test]
+fn traversal_centers_only_when_the_focused_row_leaves_the_panel_viewport() {
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(60, 12)).unwrap();
+    view.load(App::Rust(Root::new::<FocusPanels>(|| ())))
+        .unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "sidebar 0 panel 0 focus -1");
+    for focused in 0..8 {
+        panel_key(&mut view, "n", true, false);
+        let offset = if focused == 7 { 64 } else { 0 };
+        draw_until(
+            &mut view,
+            &mut terminal,
+            &rx,
+            &format!("sidebar 0 panel {offset} focus {focused}"),
+        );
+    }
+    let buffer = terminal.backend().buffer();
+    let row: String = (15..24).map(|x| buffer[(x, 4)].symbol()).collect();
+    assert_eq!(row, "detail 07");
+    for focused in (3..7).rev() {
+        panel_key(&mut view, "p", true, false);
+        let offset = if focused == 3 { 0 } else { 64 };
+        draw_until(
+            &mut view,
+            &mut terminal,
+            &rx,
+            &format!("sidebar 0 panel {offset} focus {focused}"),
+        );
+    }
+}
+
+#[test]
+fn endpoints_center_the_panels_first_and_last_controls_above_its_overlay() {
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(60, 12)).unwrap();
+    view.load(App::Rust(Root::new::<EndpointPanels>(|| ())))
+        .unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "sidebar 0 panel 0 focus -1");
+    search_panel(&mut view, &mut terminal, "detail 05");
+    panel_key(&mut view, "Enter", false, false);
+    draw_until(&mut view, &mut terminal, &rx, "sidebar 0 panel 0 focus 5");
+    for (name, alt, focused, offset) in [
+        (">", true, 14, 176),
+        ("<", true, 5, 32),
+        ("End", false, 14, 176),
+        ("Home", false, 5, 32),
+    ] {
+        panel_key(&mut view, name, false, alt);
+        draw_until(
+            &mut view,
+            &mut terminal,
+            &rx,
+            &format!("sidebar 0 panel {offset} focus {focused}"),
+        );
+        let buffer = terminal.backend().buffer();
+        let row: String = (15..24).map(|x| buffer[(x, 4)].symbol()).collect();
+        assert_eq!(row, format!("detail {focused:02}"));
+        assert_eq!(buffer[(15, 6)].symbol(), "t");
+    }
+}
+
+#[component]
+fn MarginReveals() -> impl IntoElement {
+    let horizontal = signal(0);
+    let vertical = signal(0);
+    let focused = signal("none");
+    view()
+        .flex_1()
+        .child(
+            text(move || {
+                format!(
+                    "horizontal {} vertical {} focus {}",
+                    horizontal.get(),
+                    vertical.get(),
+                    focused.get()
+                )
+            })
+            .h(px(16.0)),
+        )
+        .child(
+            scroll()
+                .horizontal()
+                .w(px(96.0))
+                .h(px(32.0))
+                .on_scroll(move |event: &ScrollEvent| horizontal.set(event.offset.x.0 as i32))
+                .child(view().w(px(144.0)).flex_shrink_0())
+                .child(
+                    view()
+                        .w(px(16.0))
+                        .flex_shrink_0()
+                        .on_focus(move |_: &()| focused.set("horizontal"))
+                        .on_press(|_: &()| {})
+                        .child(text("H")),
+                )
+                .child(view().w(px(160.0)).flex_shrink_0()),
+        )
+        .child(
+            scroll()
+                .w(px(160.0))
+                .h(px(64.0))
+                .on_scroll(move |event: &ScrollEvent| vertical.set(event.offset.y.0 as i32))
+                .child(view().h(px(80.0)).flex_shrink_0())
+                .child(
+                    view()
+                        .h(px(128.0))
+                        .flex_shrink_0()
+                        .on_focus(move |_: &()| focused.set("vertical"))
+                        .on_press(|_: &()| {})
+                        .child(text("tall control")),
+                )
+                .child(view().h(px(160.0)).flex_shrink_0()),
+        )
+}
+
+#[test]
+fn horizontal_and_oversized_reveals_keep_the_core_margin_and_leading_edge() {
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(60, 12)).unwrap();
+    view.load(App::Rust(Root::new::<MarginReveals>(|| ())))
+        .unwrap();
+    draw_until(
+        &mut view,
+        &mut terminal,
+        &rx,
+        "horizontal 0 vertical 0 focus none",
+    );
+    panel_key(&mut view, "Tab", false, false);
+    draw_until(
+        &mut view,
+        &mut terminal,
+        &rx,
+        "horizontal 80 vertical 0 focus horizontal",
+    );
+    panel_key(&mut view, "Tab", false, false);
+    draw_until(
+        &mut view,
+        &mut terminal,
+        &rx,
+        "horizontal 80 vertical 64 focus vertical",
+    );
+    let buffer = terminal.backend().buffer();
+    assert_eq!(buffer[(8, 1)].symbol(), "H");
+    assert_eq!(buffer[(0, 4)].symbol(), "t");
 }
