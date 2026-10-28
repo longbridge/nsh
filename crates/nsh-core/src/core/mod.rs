@@ -48,6 +48,10 @@ use crate::{
 /// id -> key indirection on hot paths.
 type Key = u32;
 
+/// A view's built-in scroll bar (`scrollbars.rs`) and the theme of its own
+/// it was made with.
+type Bar = (NodeId, Option<Arc<crate::JsonValue>>);
+
 const NO_KEY: Key = Key::MAX;
 
 /// Rounds of binding the components' own lists per commit, at most.
@@ -311,9 +315,8 @@ impl ComponentState {
 struct ScrollState {
     horizontal: bool,
     scrollbar: crate::ScrollbarSetting,
-    /// Its built-in bar ([`Core::sync_scrollbars`]) and the theme it was
-    /// made with.
-    bar: Option<(NodeId, Option<Arc<crate::JsonValue>>)>,
+    /// Its built-in bar ([`Core::sync_scrollbars`]).
+    bar: Option<Bar>,
     refreshing: bool,
     scroll_value: Option<crate::animation::NodeId>,
     pull_value: Option<crate::animation::NodeId>,
@@ -398,6 +401,21 @@ struct InputState {
     /// by the placeholder text's `layout_hash`: what `onContentSizeChange`
     /// reports for an empty input.
     empty_line: Option<(u64, Size<Points>)>,
+    /// `scrollbar`: a multiline input's bar.
+    scrollbar: crate::ScrollbarSetting,
+    /// Its built-in bar ([`Core::sync_scrollbars`]), beside it.
+    bar: Option<Bar>,
+    /// How far the platform scrolled its text, while it has a built-in
+    /// bar ([`Core::set_input_scroll`]).
+    scroll: Option<InputScroll>,
+}
+
+/// A multiline input's scrolling, as its platform reports it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct InputScroll {
+    offset: Point<Points>,
+    content: Size<Points>,
+    viewport: Size<Points>,
 }
 
 /// A shader node's props and the layer they make.
@@ -484,6 +502,9 @@ struct Node {
     /// out on its own over the viewport, not one of the view's children
     /// for their classes.
     decoration: bool,
+    /// The multiline input a built-in bar is beside, at its frame and just
+    /// above it (a bar of a scroll view draws above all of its children).
+    beside: Key,
     /// What its view takes from the `pointer-events-*` classes around it
     /// (`classes.rs` `update_pointer_events`); an explicit prop wins.
     class_pointer: crate::props::PointerEvents,
@@ -572,6 +593,33 @@ impl Node {
         self.kind.is_root() || self.fixed_view || self.decoration
     }
 
+    /// Its `scrollbar`, for a view that may show a built-in bar.
+    fn scrollbar_setting(&self) -> Option<&crate::ScrollbarSetting> {
+        match (&self.scroll, &self.input) {
+            (Some(scroll), _) => Some(&scroll.scrollbar),
+            (None, Some(input)) => Some(&input.scrollbar),
+            _ => None,
+        }
+    }
+
+    /// Its built-in bar.
+    fn bar(&self) -> Option<&Bar> {
+        match (&self.scroll, &self.input) {
+            (Some(scroll), _) => scroll.bar.as_ref(),
+            (None, Some(input)) => input.bar.as_ref(),
+            _ => None,
+        }
+    }
+
+    /// Where its built-in bar is kept, for a view that may show one.
+    fn bar_slot(&mut self) -> Option<&mut Option<Bar>> {
+        match (&mut self.scroll, &mut self.input) {
+            (Some(scroll), _) => Some(&mut scroll.bar),
+            (None, Some(input)) => Some(&mut input.bar),
+            _ => None,
+        }
+    }
+
     /// The listeners as platforms take them: a `disabled` view takes no
     /// presses (React Native's `Pressable` / touchables), so it shows no
     /// press feedback either, and opens no context menu: a secondary click
@@ -600,8 +648,12 @@ impl Node {
 
     /// Where its native view goes among its siblings': by `zIndex`, then a
     /// sticky view above the others (as above a page's in-flow boxes),
-    /// then in order.
+    /// then in order; a built-in scroll bar above all of them (a list's
+    /// sticky headers included), as it draws over the viewport.
     fn stack_rank(&self) -> (i32, bool) {
+        if self.decoration && self.beside == NO_KEY {
+            return (i32::MAX, true);
+        }
         (self.z_index, self.sticky.is_some())
     }
 
@@ -690,6 +742,7 @@ impl Node {
             wants_fixed: false,
             fixed_view: false,
             decoration: false,
+            beside: NO_KEY,
             class_pointer: crate::props::PointerEvents::Auto,
             pointer_auto_inside: false,
             sticky: None,
@@ -1286,6 +1339,26 @@ impl<M: TextEngine> Core<M> {
         }
         if dependents {
             self.dependents_dirty(key);
+        }
+    }
+
+    /// The platform scrolled the text of multiline input `id` to `offset`,
+    /// its text `content` large in a `viewport` (reported while a built-in
+    /// bar takes the place of its indicator, `InputConfig::replaced`).
+    pub fn set_input_scroll(
+        &mut self,
+        id: NodeId,
+        offset: Point<Points>,
+        content: Size<Points>,
+        viewport: Size<Points>,
+    ) {
+        let Ok(key) = self.key(id) else { return };
+        if let Some(input) = self.nodes[key as usize].input.as_mut() {
+            input.scroll = Some(InputScroll {
+                offset,
+                content,
+                viewport,
+            });
         }
     }
 
@@ -2051,7 +2124,9 @@ impl<M: TextEngine> Core<M> {
         if kind == Kind::List {
             self.lists.push(key);
         }
-        if matches!(kind, Kind::Scroll | Kind::List) && self.builtin_scrollbars.is_some() {
+        if matches!(kind, Kind::Scroll | Kind::List | Kind::Input)
+            && self.builtin_scrollbars.is_some()
+        {
             self.scrollbars_pending.push(key);
         }
         if kind.is_root() {
@@ -2956,6 +3031,10 @@ impl<M: TextEngine> Core<M> {
                     scroll.scrollbar = setting;
                     flags |= dirty::SCROLL;
                     self.scrollbars_pending.push(key);
+                } else if let Some(input) = node.input.as_mut() {
+                    input.scrollbar = setting;
+                    flags |= dirty::INPUT;
+                    self.scrollbars_pending.push(key);
                 }
             }
             Prop::Scroll(prop) => {
@@ -3669,6 +3748,8 @@ impl<M: TextEngine> Core<M> {
                     }
                     Prop::Multiline(multiline) => {
                         c.multiline = multiline;
+                        // Only a multiline input shows a built-in bar.
+                        self.scrollbars_pending.push(key);
                         true
                     }
                     Prop::PlaceholderColor(color) => {
@@ -3771,6 +3852,9 @@ impl<M: TextEngine> Core<M> {
     ) -> Result<(), ApplyError> {
         let parent = self.key(parent_id)?;
         let child = self.key(child_id)?;
+        if self.nodes[child as usize].parent != NO_KEY {
+            self.input_bar_moves(child);
+        }
         let mut before = before.map(|b| self.key(b)).transpose()?;
         // Appended below the built-in bar, which stays on top.
         if before.is_none()
@@ -3906,7 +3990,18 @@ impl<M: TextEngine> Core<M> {
 
     /// Detaches `key` from its parent (Remove op).
     fn detach(&mut self, key: Key) {
+        self.input_bar_moves(key);
         self.unlink(key, true);
+    }
+
+    /// A multiline input with a built-in bar beside it leaves its place:
+    /// the bar goes, and is made again beside it where it goes.
+    fn input_bar_moves(&mut self, key: Key) {
+        let node = &self.nodes[key as usize];
+        if node.input.as_ref().is_some_and(|i| i.bar.is_some()) {
+            self.release_scrollbar(key);
+            self.scrollbars_pending.push(key);
+        }
     }
 
     /// Unlinks `key` from its parent's children, layout and (optionally)
@@ -4038,11 +4133,7 @@ impl<M: TextEngine> Core<M> {
             self.tooltip_released(id);
         }
         // So does its built-in bar.
-        if self.nodes[key as usize]
-            .scroll
-            .as_ref()
-            .is_some_and(|s| s.bar.is_some())
-        {
+        if self.nodes[key as usize].bar().is_some() {
             self.release_scrollbar(key);
         }
         if self.nodes[key as usize].parent != NO_KEY {
@@ -4707,6 +4798,10 @@ impl<M: TextEngine> Core<M> {
                         node.rtl && !node.text_style.text_align_physical,
                     );
                     config.rtl = node.text_style.writing_direction.unwrap_or(node.rtl);
+                    // A built-in bar takes the indicator's place.
+                    config.scrollbar_visible =
+                        input.scrollbar != crate::ScrollbarSetting::Hidden && input.bar.is_none();
+                    config.replaced = input.bar.is_some();
                     self.mount.push(MountItem::Input {
                         id,
                         config: Box::new(config),
@@ -5929,6 +6024,11 @@ impl<M: TextEngine> Core<M> {
         }
         if node.is_overlay() {
             frame.origin = self.overlay_origin(key, frame);
+        }
+        // A multiline input's bar: over it, laid out on its own.
+        let beside = self.nodes[key as usize].beside;
+        if beside != NO_KEY {
+            frame.origin = self.nodes[beside as usize].frame.origin;
         }
         self.set_frame(key, frame);
         let kind = self.nodes[key as usize].kind;

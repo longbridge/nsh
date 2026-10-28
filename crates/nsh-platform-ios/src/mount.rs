@@ -1560,6 +1560,9 @@ impl Mounter {
                 self.target.scroll_applied(id);
                 scroll.setContentOffset_animated(offset, animated);
             }
+            (Command::ScrollTo { y, animated, .. }, Native::Input(input)) => {
+                input.scroll_to(y, animated);
+            }
             (
                 Command::ZoomTo {
                     scale,

@@ -11,10 +11,14 @@
 //! and stays over its viewport as it scrolls: a sticky range across all
 //! of the content, which the platforms pin on the main thread as they pin
 //! sticky views, so scrolling never waits for the engine.
+//!
+//! A multiline input scrolls its text natively, so its bar is a sibling
+//! just above it instead, at its frame: the platform reports how far the
+//! text scrolled ([`Core::set_input_scroll`]) and takes the bar's scrolls.
 
 use std::sync::Arc;
 
-use super::{Core, Key, Kind, list::StickyRange};
+use super::{Core, Key, Kind, NO_KEY, dirty, list::StickyRange};
 use crate::{NodeId, ScrollbarSetting, element::BuiltInScrollbar, text::TextEngine};
 
 /// How far a bar's sticky range reaches: past any content.
@@ -31,14 +35,14 @@ impl<M: TextEngine> Core<M> {
     ) {
         self.builtin_scrollbars = bars;
         let views: Vec<Key> = (self.nodes.iter())
-            .filter(|(_, node)| node.scroll.is_some())
+            .filter(|(_, node)| node.scrollbar_setting().is_some())
             .map(|(key, _)| key as Key)
             .collect();
         for key in views {
-            let scroll = self.nodes[key as usize].scroll.as_ref().expect("scroll");
-            if scroll.bar.is_some() && scroll.scrollbar == ScrollbarSetting::Shown {
+            let node = &self.nodes[key as usize];
+            if node.bar().is_some() && node.scrollbar_setting() == Some(&ScrollbarSetting::Shown) {
                 self.release_scrollbar(key);
-                self.mark(key, super::dirty::SCROLL);
+                self.bar_changed(key);
             }
             self.scrollbars_pending.push(key);
         }
@@ -56,13 +60,23 @@ impl<M: TextEngine> Core<M> {
             let Some(node) = self.nodes.get(key as usize) else {
                 continue;
             };
-            let Some(scroll) = node.scroll.as_ref() else {
+            let Some(setting) = node.scrollbar_setting() else {
                 continue;
             };
-            // A list in its parent's viewport scrolls with that view.
-            let own = matches!(node.kind, Kind::Scroll | Kind::List)
-                && node.list.as_ref().is_none_or(|l| !l.parent);
-            let (wanted, source) = match &scroll.scrollbar {
+            let own = match node.kind {
+                // A list in its parent's viewport scrolls with that view.
+                Kind::Scroll | Kind::List => node.list.as_ref().is_none_or(|l| !l.parent),
+                // A multiline input's bar is its sibling, among a view's
+                // children (not a text's, nor a list's cells).
+                Kind::Input => {
+                    node.input.as_ref().is_some_and(|i| i.config.multiline)
+                        && !node.inline
+                        && (self.nodes.get(node.parent as usize))
+                            .is_some_and(|p| p.kind.is_container() && p.kind != Kind::List)
+                }
+                _ => false,
+            };
+            let (wanted, source) = match setting {
                 _ if !own => (None, None),
                 ScrollbarSetting::Shown => {
                     (Some(None), self.builtin_scrollbars.as_ref().map(|b| b.0))
@@ -71,7 +85,7 @@ impl<M: TextEngine> Core<M> {
                 ScrollbarSetting::Hidden => (None, None),
             };
             let wanted = wanted.filter(|_| source.is_some());
-            let had = scroll.bar.as_ref().map(|(_, theme)| theme.clone());
+            let had = node.bar().map(|(_, theme)| theme.clone());
             if had == wanted {
                 continue;
             }
@@ -82,8 +96,19 @@ impl<M: TextEngine> Core<M> {
                 self.make_scrollbar(key, own, source);
             }
             // The platform's indicator shows, or no longer does.
-            self.mark(key, super::dirty::SCROLL);
+            self.bar_changed(key);
         }
+    }
+
+    /// View `key`'s built-in bar came or went: what the platform shows in
+    /// its place is sent again.
+    fn bar_changed(&mut self, key: Key) {
+        let flag = if self.nodes[key as usize].kind == Kind::Input {
+            dirty::INPUT
+        } else {
+            dirty::SCROLL
+        };
+        self.mark(key, flag);
     }
 
     /// Makes the built-in bar of view `key` of theme `own`, the view's, or
@@ -97,6 +122,17 @@ impl<M: TextEngine> Core<M> {
         let node = &self.nodes[key as usize];
         let target = node.id;
         let horizontal = node.scroll.as_ref().is_some_and(|s| s.horizontal);
+        // Where it goes: last in the view, or just after the input.
+        let input = node.kind == Kind::Input;
+        let (parent, before) = if input {
+            let parent = &self.nodes[node.parent as usize];
+            let at = parent.children.iter().position(|&c| c == key);
+            let next = at.and_then(|i| parent.children.get(i + 1));
+            (parent.id, next.map(|&k| self.nodes[k as usize].id))
+        } else {
+            (target, None)
+        };
+        let z_index = node.z_index;
         let _entered = self.components.runtime.enter();
         let Some(el) = source(&BuiltInScrollbar {
             target,
@@ -109,39 +145,43 @@ impl<M: TextEngine> Core<M> {
         // A bar from its first render: never one of the view's children.
         let made = self.make_component(el, |core, id| {
             if let Ok(bar) = core.key(id) {
-                core.nodes[bar as usize].decoration = true;
+                let bar = &mut core.nodes[bar as usize];
+                bar.decoration = true;
+                if input {
+                    bar.beside = key;
+                    bar.z_index = z_index;
+                }
             }
         });
         let Some(id) = made else {
             return log::error!("the built-in scroll bar is not a component");
         };
-        if let Err(e) = self.insert(target, id, None) {
+        if let Err(e) = self.insert(parent, id, before) {
             log::error!("the built-in scroll bar is not made: {e:?}");
             self.release_instance(id);
             let _ = self.release(id);
             return;
         }
-        self.nodes[key as usize]
-            .scroll
-            .as_mut()
-            .expect("scroll")
-            .bar = Some((id, own));
+        *self.nodes[key as usize]
+            .bar_slot()
+            .expect("a view with a bar") = Some((id, own));
         self.decorated.push(key);
-        self.sticky_changed = true;
+        self.sticky_changed |= !input;
         self.needs_layout = true;
     }
 
     /// Releases the built-in bar of view `key`.
     pub(super) fn release_scrollbar(&mut self, key: Key) {
-        let Some((id, _)) = self.nodes[key as usize]
-            .scroll
-            .as_mut()
-            .and_then(|s| s.bar.take())
-        else {
+        let node = &mut self.nodes[key as usize];
+        let input = node.kind == Kind::Input;
+        let Some((id, _)) = node.bar_slot().and_then(Option::take) else {
             return;
         };
+        if let Some(input) = node.input.as_mut() {
+            input.scroll = None;
+        }
         self.decorated.retain(|&k| k != key);
-        self.sticky_changed = true;
+        self.sticky_changed |= !input;
         self.release_instance(id);
         let _ = self.release(id);
     }
@@ -152,8 +192,8 @@ impl<M: TextEngine> Core<M> {
         for i in 0..self.decorated.len() {
             let key = self.decorated[i];
             let node = &self.nodes[key as usize];
-            let size = node.frame.size;
-            let Some((id, _)) = node.scroll.as_ref().and_then(|s| s.bar.as_ref()) else {
+            let (size, origin) = (node.frame.size, node.frame.origin);
+            let Some((id, _)) = node.bar() else {
                 continue;
             };
             let Ok(bar) = self.key(*id) else { continue };
@@ -174,7 +214,10 @@ impl<M: TextEngine> Core<M> {
                 style.position = taffy::Position::Relative;
                 self.layout.set_style(layout, style);
             }
-            if restyled || self.layout.dirty(layout) {
+            // An input's bar follows the input where it moves.
+            let bar_node = &self.nodes[bar as usize];
+            let moved = bar_node.beside != NO_KEY && bar_node.frame.origin != origin;
+            if restyled || moved || self.layout.dirty(layout) {
                 self.layout_root(
                     layout,
                     taffy::Size {
@@ -188,7 +231,7 @@ impl<M: TextEngine> Core<M> {
     }
 
     /// The sticky ranges that keep the built-in bars over their views'
-    /// viewports, by view.
+    /// viewports, by view (an input's bar is beside it, not in it).
     pub(super) fn scrollbar_ranges(&self) -> impl Iterator<Item = (Key, StickyRange)> + '_ {
         self.decorated.iter().filter_map(|&key| {
             let (cell, _): &(NodeId, _) = self.nodes[key as usize].scroll.as_ref()?.bar.as_ref()?;

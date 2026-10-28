@@ -147,7 +147,8 @@ A `ScrollbarTheme` has the props of a bar that are the same for every view, and 
 A later `setTheme` restyles the bars, and `Scrollbar.setTheme(null)` gives the views the platform's indicator back. One
 view takes a theme of its own as its `scrollbar` prop (`<Scroll scrollbar={{ mode: "always", vertical: { … } }}>`),
 whether or not the app set one; `scrollbar={false}` leaves a view without a bar. A list laid out in its parent's
-viewport (`viewport="parent"`) scrolls with that view and its bar.
+viewport (`viewport="parent"`) scrolls with that view and its bar. A multiline `Input` gets the bar of its vertical look
+too, over its text, which it scrolls as the text view's own indicator does.
 
 ## The scroll view it moves
 

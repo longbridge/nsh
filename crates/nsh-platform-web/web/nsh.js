@@ -3410,6 +3410,9 @@ class Player {
     else field.removeAttribute("maxlength");
     el._config = config;
     field.classList.toggle("nsh-ph", !!config.placeholderColor);
+    // A built-in bar of the app's takes the textarea's indicator's place.
+    field.classList.toggle("nsh-noindicator", !!config.noIndicator);
+    this.inputScrolled(el, field);
     if (config.autoFocus && !el._autoFocused) {
       el._autoFocused = true;
       setTimeout(() => field.focus(), 0);
@@ -3418,6 +3421,10 @@ class Player {
 
   wireInput(el, field) {
     field.addEventListener("input", () => this.textChanged(el, field));
+    field.addEventListener("scroll", () => this.inputScrolled(el, field), { passive: true });
+    if (typeof ResizeObserver === "function") {
+      new ResizeObserver(() => this.inputScrolled(el, field)).observe(field);
+    }
     // An input method's composition: the app's value is held while it
     // lasts (`op_iv`), since setting a field's value ends the composition
     // and commits its text as typed (pinyin letters instead of the
@@ -3469,7 +3476,18 @@ class Player {
     field.addEventListener("paste", (e) => this.pasted(el, e));
   }
 
+  /** Reports how far `el`'s textarea scrolled, and its text's height and
+   * its viewport's, while a built-in bar takes its indicator's place. */
+  inputScrolled(el, field) {
+    if (!el._config?.replaced || field.tagName !== "TEXTAREA") return;
+    const now = [field.scrollTop, field.clientWidth, field.scrollHeight, field.clientHeight];
+    if (field._scrolled?.every((v, i) => v === now[i])) return;
+    field._scrolled = now;
+    this.call((w) => w.nsh_input_scroll(el._id, ...now));
+  }
+
   textChanged(el, field) {
+    this.inputScrolled(el, field);
     if (field.value === field._known) return;
     field._known = field.value;
     field._count++;
@@ -4310,6 +4328,11 @@ class Player {
       case "setSelection": el?._field?.setSelectionRange(args[0], args[1]); break;
       case "scrollTo":
         if (!el) break;
+        // A textarea's text (a built-in bar's drags).
+        if (el._field) {
+          el._field.scrollTo({ top: args[1], behavior: args[2] ? "smooth" : "instant" });
+          break;
+        }
         el._applied++;
         this.stopGlide(el, args[0], args[1]);
         el._smooth = args[2] ? [args[0], args[1]] : null;

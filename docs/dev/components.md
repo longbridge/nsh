@@ -1024,6 +1024,11 @@ range across all of the content, which the platforms apply on the main thread as
 waits for the engine while the content scrolls. The view's `ScrollConfig` turns the indicator off and says the bar
 `replaced` it, so the desktop backends' horizontal views do not keep theirs beside it. A new theme makes every bar
 made for `true` again. A component's given class (`app_class`) now reaches its root, which the bar's size relies on.
+A multiline input scrolls its text natively, so its bar is a sibling instead (`Node::beside`): inserted just after the
+input in its parent, stacked with it, laid out at its frame and made again where the input moves. Its
+`InputConfig` turns the text view's indicator off (`scrollbar_visible`) and asks the platform to report its scrolling
+(`replaced`: `EngineControl::input_scroll`, the offset, the text's size and the viewport's, `Core::set_input_scroll`),
+which the bar's `watch_scroll` reads as a scroll view's; the bar's `ScrollTo` commands scroll the text.
 
 ## Toasts
 

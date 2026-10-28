@@ -271,6 +271,14 @@ final class Native {
     static native float[] scroll(long handle, int id, float x, float y, int applied);
 
     /**
+     * How far a multiline input's text scrolled ({@code y}), the size of that
+     * text and of the input's viewport, in points; sent while a built-in bar
+     * replaces its scroll indicator.
+     */
+    static native void inputScroll(long handle, int id, float y, float contentWidth, float contentHeight,
+                                   float width, float height);
+
+    /**
      * How far (points) a vertical scroll view is pulled past its top.
      * Returns bound values when a pull value changed, else null.
      */

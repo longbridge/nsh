@@ -573,6 +573,12 @@ impl Input {
         self.bind_prop(multiline, |multiline: bool| Prop::Multiline(multiline))
     }
 
+    /// Whether a multiline input's scroll bar shows (default yes): the
+    /// platform's indicator, or the app's built-in bar once it set one.
+    pub fn scrollbar(self, shows: impl IntoReactive<bool>) -> Self {
+        self.bind_prop(shows, |shows: bool| Prop::Scrollbar(shows.into()))
+    }
+
     /// At most `length` characters.
     pub fn max_length(self, length: impl IntoReactive<u32>) -> Self {
         self.bind_prop(length, |length: u32| Prop::MaxLength(Some(length)))

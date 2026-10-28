@@ -1207,6 +1207,8 @@ frame label:App 290 0 10 100
 touch start label:App 5 50
 touch end
 prop id:app contentOffset y=450
+# A multiline input's own theme: its bar over its text, beside it.
+frame label:Notes 290 0 10 100
 covers [props] scrollbar
 covers [nsh/base] Scrollbar
 covers [props] Scrollbar.scroll

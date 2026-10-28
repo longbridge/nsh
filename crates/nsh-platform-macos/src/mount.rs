@@ -435,6 +435,11 @@ impl Mounter {
                     crate::text_input::set_selection(view, *start, *end);
                 }
             }
+            Command::ScrollTo { y, animated, .. }
+                if view.is_some_and(|v| v.kind() == ViewKind::Input) =>
+            {
+                crate::text_input::scroll_to(view.expect("an input"), *y, *animated);
+            }
             Command::ScrollTo { .. }
             | Command::ScrollToEnd { .. }
             | Command::ScrollToIndex { .. }

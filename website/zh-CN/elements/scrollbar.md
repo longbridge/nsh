@@ -141,7 +141,7 @@ Scrollbar.setTheme({
 
 之后再调用 `setTheme` 会重新设置这些滚动条的样式，`Scrollbar.setTheme(null)` 让视图恢复平台的滚动指示器。单个视图可以用
 `scrollbar` 属性设置自己的主题（`<Scroll scrollbar={{ mode: "always", vertical: { … } }}>`），无论应用是否设置了主题；
-`scrollbar={false}` 让视图没有滚动条。在父视图视口中布局的列表（`viewport="parent"`）随那个视图及其滚动条一起滚动。
+`scrollbar={false}` 让视图没有滚动条。在父视图视口中布局的列表（`viewport="parent"`）随那个视图及其滚动条一起滚动。多行 `Input` 也会在文本上显示纵向外观的滚动条，像文本视图自己的指示器一样滚动文本。
 
 ## 它滚动的滚动视图
 

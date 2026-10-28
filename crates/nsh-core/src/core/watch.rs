@@ -69,14 +69,24 @@ impl<M: TextEngine> Core<M> {
         }
     }
 
-    /// What `on_scroll` would report of scroll view (or list) `id` now;
-    /// none for a node that is not one, or not made yet.
-    fn scroll_report(&self, id: NodeId) -> Option<ScrollEvent> {
+    /// What `on_scroll` would report of scroll view (or list) `id` now, or
+    /// of a multiline input whose platform reports its scrolling; none for
+    /// a node that is not one, or not made yet.
+    pub(super) fn scroll_report(&self, id: NodeId) -> Option<ScrollEvent> {
         let node = &self.nodes[self.key(id).ok()? as usize];
-        let scroll = node.scroll.as_ref()?;
         if !node.created {
             return None;
         }
+        if let Some(input) = node.input.as_ref() {
+            let s = input.scroll?;
+            return Some(ScrollEvent {
+                offset: s.offset,
+                content_size: s.content,
+                size: s.viewport,
+                zoom_scale: 1.0,
+            });
+        }
+        let scroll = node.scroll.as_ref()?;
         let frame = node.frame.size;
         let content = scroll.content.unwrap_or(frame);
         let (x, y) = scroll.offset;
