@@ -99,6 +99,46 @@ covers [events] onPressUp
 covers [events] onPress
 covers [props] Button.selected
 covers [props] selectedStyle
+# base-link
+tap id:case-base-link
+# The link role on the link alone, no look of its own: the app's
+# `hoverStyle` while the platform reports it hovered.
+prop id:docs role link
+prop id:docs accessibilityState {}
+listens id:docs onPress
+nostyle id:docs backgroundColor
+state id:docs hovered
+style id:docs opacity 0.5
+state id:docs none
+style id:docs opacity 1
+# A press reports where it goes (`onOpen` with its `href`), then the
+# press.
+tap text:Docs
+expect Log: open https://example.com/docs, press
+# `accessibilityLabel`: what screen readers say, and what a label finds;
+# `openWith="app"` leaves the opening to `onOpen`.
+prop id:order role link
+prop id:order accessibilityLabel Order 42
+tap label:Order 42
+expect Log: open https://example.com/docs, press, route /orders/42
+# `disabled`: screen readers say so, `disabledStyle` applies, presses do
+# nothing (the platform gets no press to report).
+prop id:archived accessibilityState disabled=true
+style id:archived opacity 0.25
+tap id:enable
+prop id:archived accessibilityState {}
+style id:archived opacity 1
+listens id:archived onPress
+tap text:Archived
+expect Log: open https://example.com/docs, press, route /orders/42, route /archive
+covers [nsh/base] Link
+covers [props] Link.href
+covers [props] accessibilityLabel
+covers [props] disabled
+covers [props] disabledStyle
+covers [props] hoverStyle
+covers [events] Link.onOpen
+covers [events] onPress
 # base-dialog
 tap id:case-base-dialog
 # (appearing, going away, Escape / back and swipes) are events here: the
@@ -3096,7 +3136,7 @@ covers [nsh/base] Highlight
 covers [nsh/base] History
 covers [nsh/base] HorizontalRule
 covers [nsh/base] Italic
-covers [nsh/base] Link
+covers [nsh/base] RichLink
 covers [nsh/base] ListItem
 covers [nsh/base] ListKeymap
 covers [nsh/base] OrderedList
