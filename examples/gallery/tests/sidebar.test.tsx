@@ -3,29 +3,33 @@
 // it has the keyboard focus; Tab moves on to the rest of the window.
 import { expect, open, test } from "nsh/test";
 
+// The leads of the demos after Checkbox.
+const COLLAPSIBLE = "Details under a summary, kept while collapsed";
+const COLOR_PICKER = "An area, sliders of RGB, HSL, HSB or OKLCH, a field and swatches";
+
 test("the sidebar's demos are one stop of Tab, whose Up and Down select the demos", async () => {
   const app = await open("../App.tsx", { platform: "macos", width: 1200, height: 800, clock: {} });
   await app.press("role:button[Checkbox]");
   await app.waitFor("Select all");
   // Tab on to the demos, past the page's checkboxes (the sidebar, stacked
   // above the page, comes after it among the views): Down there selects
-  // Radio, the demo after Checkbox.
+  // Collapsible, the demo after Checkbox (components go by name).
   let tabs = 0;
-  while (!app.shows("Continue with Plus")) {
+  while (!app.shows(COLLAPSIBLE)) {
     expect(++tabs).toBeLessThan(20);
     await app.keyboard.press("tab");
     await app.keyboard.press("down");
   }
   await app.keyboard.press("down");
-  await app.waitFor("Notifications");
+  await app.waitFor(COLOR_PICKER);
   await app.keyboard.press("up");
-  await app.waitFor("Continue with Plus");
+  await app.waitFor(COLLAPSIBLE);
   // One stop: one Tab leaves the demos, so Down no longer selects the next
   // one, and one Shift+Tab comes back to them.
   await app.keyboard.press("tab");
   await app.keyboard.press("down");
   await app.wait(100);
-  expect(app.shows("Notifications")).toBe(false);
+  expect(app.shows(COLOR_PICKER)).toBe(false);
   await app.keyboard.press("shift+tab");
   await app.keyboard.press("up");
   await app.waitFor("Select all");
