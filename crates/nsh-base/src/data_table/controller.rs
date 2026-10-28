@@ -149,8 +149,8 @@ impl Dt {
             strip: element_ref(),
             // Rows are short, columns wide: a window of columns reaches
             // less far.
-            rows_window: RowWindow::default(),
-            cols_window: RowWindow::reaching(1, 3),
+            rows_window: RowWindow::following(4),
+            cols_window: RowWindow::following(1),
             resizing: Rc::default(),
             handle_tap: Rc::default(),
         };

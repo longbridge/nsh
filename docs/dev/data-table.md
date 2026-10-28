@@ -35,8 +35,10 @@ The table is a hit layer, a body and a header (`view.rs`):
 The fixed-column separator sits above each row background and below its cells, so app-supplied cell borders
 remain visible at the fixed boundary.
 
-Rows come from `RowWindow` (`window.rs`, `reaching(margin, ahead)`), columns from the same with a reach of 1 and 3, so
-a scroll inside the window made commits a few mount items only.
+Rows come from `RowWindow::following` (`window.rs`): the rows in view and 4 past each edge, moved with every row a
+scroll crosses; columns the same with 1 past each edge. A scroll makes as many rows as it brings into reach, each frame
+alike: a window that jumped a viewport and a half ahead (as `List`'s does) made several hundred cells' texts at once,
+~20 ms on a Pixel 10 Pro, a stall of several frames while the scroll view moved on.
 
 The rows' and the scrolling columns' origins move by whole device pixels (`region`, `on_pixel`, `view.rs`), as layout
 rounds frames: at a fraction, the cells' texts would round to another pixel in their cells as the origin moves, and every
@@ -88,9 +90,11 @@ show keep the quote they opened with, computed from their id.
 ## Performance
 
 Headless, debug build, the gallery's demo (`nsh test examples/gallery/App.tsx --trace`, 390 × 844): a scroll frame
-inside the window made commits 4 mount items in ~1.2 ms; a window shift (row slots taking other rows) ~340 items in
-~4 ms, with no views made (before the slots: ~2000 items in ~14 ms, every row of the window rebuilt); the first window
-~4000 items. A tick commits ~33 items in a median 1.7 ms (at most 2.7 ms); scrolling while it ticks, a frame with a
+that crosses no row commits 4 mount items in ~1.2 ms; one that crosses a few rows (10 points of scroll bar, three rows
+of the scaled million) ~35–50 items in ~2 ms, with no views made (before the slots: ~2000 items in ~14 ms, every row
+of the window rebuilt; with a window jumping a viewport and a half ahead, ~340 items at each jump). On a Pixel 10 Pro
+(release, scripted swipes) the table holds ~870 views instead of ~2350, commits take 3 ms at the median and 7 ms at
+the 90th percentile, and no frame misses its deadline. A tick commits ~33 items in a median 1.7 ms (at most 2.7 ms); scrolling while it ticks, a frame with a
 tick ~44 items in ~3 ms. Before the origins moved in whole points, a scroll frame at a fraction sent ~470 items: every
 cell text's frame.
 
