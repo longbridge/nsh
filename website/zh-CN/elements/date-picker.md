@@ -86,7 +86,7 @@ function App() {
       headerClass="flex-row items-center justify-between"
       rowClass="flex-row justify-between"
       itemClass="h-8 min-w-8 items-center justify-center rounded-md text-sm focus:ring-2 focus:ring-ring selected:bg-primary selected:text-primary-foreground disabled:opacity-50"
-      timeClass="mt-2 flex-row items-center justify-between"
+      timeClass="mt-2 gap-3"
       timeLabel={<Text class="text-sm">Time</Text>}
       timeAccessibilityLabel="Due time"
       timeFieldClass="flex-row rounded-md border border-input px-2 py-1"
@@ -129,7 +129,7 @@ mount(App);
 
 [Calendar](./calendar.md) 除值以外的每个属性都会传给选择器的日历：`numberOfMonths`、`firstDayOfWeek`、`disabledMatcher`、`yearRange`、`previousAccessibilityLabel`、`nextAccessibilityLabel`、各部件（从 `headerClass` 到 `itemStyle`）和 `renderItem`。`calendarClass` 和 `calendarStyle` 为日历本身设置样式。它的视图和按键与日历的相同。
 
-时间行（`timeClass`、`timeStyle`）包含 `timeLabel`，即应用为它写的文字（"时间"），以及时间输入框（`timeFieldClass`、`timeFieldStyle`、`timeAccessibilityLabel`），其各段与 [TimeField](./time-field.md) 的相同（`segmentClass`、`separatorClass`、`renderSegment`）。
+时间行（`timeClass`、`timeStyle`）是一行，其中各项垂直居中、两端分布（`flex-row items-center justify-between`，与 `gpui-component` 的相同）：开头是 `timeLabel`，即应用为它写的文字（"时间"），末尾是时间输入框（`timeFieldClass`、`timeFieldStyle`、`timeAccessibilityLabel`），其各段与 [TimeField](./time-field.md) 的相同（`segmentClass`、`separatorClass`、`renderSegment`）。
 
 <a id="props"></a>
 
@@ -160,7 +160,7 @@ mount(App);
 | `calendarClass`、`calendarStyle` | `.calendar_class(..)`、`.calendar_style(..)` | `string`、`StyleProp<ViewStyle>` | 无 | 日历。 |
 | `headerClass` … `itemStyle` | 同 `Calendar` | 同 `Calendar` | 无 | 日历的头部、主体、各月、各行和各条目。 |
 | `renderItem` | `.render_item(..)` | `(item: CalendarItemState) => JSX.Element` | 无 | 由应用绘制的日历条目。 |
-| `timeClass`、`timeStyle` | `.time_class(..)`、`.time_style(..)` | `string`、`StyleProp<ViewStyle>` | 无 | 时间行：它的标签和输入框。 |
+| `timeClass`、`timeStyle` | `.time_class(..)`、`.time_style(..)` | `string`、`StyleProp<ViewStyle>` | 无 | 时间行：开头是它的标签，末尾是输入框。 |
 | `timeLabel` | `.time_label(..)` | `JSX.Element` | 无 | 时间行在输入框前显示的内容。 |
 | `timeFieldClass`、`timeFieldStyle` | `.time_field_class(..)`、`.time_field_style(..)` | `string`、`StyleProp<ViewStyle>` | 无 | 时间输入框。 |
 | `timeAccessibilityLabel` | `.time_accessibility_label(..)` | `string` | 无 | 屏幕阅读器对时间输入框的称呼。 |

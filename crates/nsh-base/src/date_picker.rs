@@ -447,7 +447,8 @@ pub struct DatePickerProps {
     pub item_style: Prop<TextPartStyle>,
     /// Draws each item of the calendar.
     pub render_item: Prop<Option<Renderer<CalendarItemState>>>,
-    /// The classes of the time's row: its label and the field.
+    /// The classes of the time's row: its label at the start and the field
+    /// at the end (`flex-row items-center justify-between`, `gpui-component`'s).
     pub time_class: Prop<Option<SharedString>>,
     /// The inline style of the time's row, over its classes.
     #[prop(default)]
@@ -767,6 +768,7 @@ pub fn DatePicker(props: DatePickerProps, cx: Scope<DatePickerEvent>) -> impl In
                     view()
                         .flex_row()
                         .items_center()
+                        .justify_between()
                         .app_class(props.time_class)
                         .inline_style(props.time_style)
                         .child(props.time_label.place(|l| l))

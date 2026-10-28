@@ -7,6 +7,7 @@
 //! 2026-10-28 (the engine's manual clock).
 
 use std::{
+    collections::HashMap,
     sync::{Arc, Mutex},
     time::{Duration, SystemTime},
 };
@@ -17,7 +18,8 @@ use nsh_base::{
     TimeFieldSegmentState, TimePrecision, date_picker,
 };
 use nsh_core::{
-    AccessibilityRole, MountItem, Size, element::Root, platform::Os, prelude::*, time::Clock,
+    AccessibilityRole, MountItem, NodeId, Size, ViewKind, element::Root, platform::Os, prelude::*,
+    time::Clock,
 };
 use nsh_engine::EngineConfig;
 use nsh_testing::Headless;
@@ -286,6 +288,64 @@ fn with_a_time_the_popup_stays_open_and_the_selected_day_again_closes_it() {
         app.closed();
         assert_eq!(app.heard().as_deref(), Some("2026/10/14 09:00"));
     }
+}
+
+#[test]
+fn the_time_row_has_its_label_at_the_start_and_the_field_at_the_end() {
+    let mut app = start(HarnessProps {
+        time: true,
+        ..props()
+    });
+    // The views the popup makes: the time field's (the parent of its
+    // native input), their parents and frames.
+    #[derive(Default)]
+    struct Seen {
+        input: Option<NodeId>,
+        parents: HashMap<NodeId, NodeId>,
+        children: HashMap<NodeId, Vec<NodeId>>,
+        frames: HashMap<NodeId, Bounds<Points>>,
+    }
+    let seen = Arc::new(Mutex::new(Seen::default()));
+    let into = seen.clone();
+    app.observe(move |_, batch| {
+        let mut seen = into.lock().unwrap();
+        for item in &batch.items {
+            match item {
+                MountItem::Create {
+                    id,
+                    kind: ViewKind::Input,
+                } => seen.input = Some(*id),
+                MountItem::Insert { parent, child, .. } => {
+                    seen.parents.insert(*child, *parent);
+                    seen.children.entry(*parent).or_default().push(*child);
+                }
+                MountItem::Frame { id, frame } => {
+                    seen.frames.insert(*id, *frame);
+                }
+                _ => {}
+            }
+        }
+    });
+    app.open();
+    app.see("Time");
+    app.wait(Duration::from_millis(100)).unwrap();
+    let seen = seen.lock().unwrap();
+    let field = seen.parents[&seen.input.expect("the time field's input")];
+    let row = seen.parents[&field];
+    let (row_frame, field_frame) = (seen.frames[&row], seen.frames[&field]);
+    // The row is as wide as the calendar, far wider than its label and
+    // field: the field ends where the row does, the label starts it.
+    assert_eq!(
+        field_frame.origin.x + field_frame.size.width,
+        row_frame.size.width,
+        "{field_frame:?} in {row_frame:?}"
+    );
+    let label = seen.children[&row]
+        .iter()
+        .find(|&&c| c != field)
+        .expect("the label");
+    assert_eq!(seen.frames[label].origin.x, px(0.0));
+    assert!(seen.frames[label].size.height > px(0.0));
 }
 
 #[test]

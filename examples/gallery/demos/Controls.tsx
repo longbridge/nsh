@@ -1,4 +1,4 @@
-import { cleanup, computed, type JSX, signal, Text, View } from "nsh";
+import { cleanup, computed, type JSX, signal, Text, token, View } from "nsh";
 import { type CalendarItemState, Checkbox, Collapsible, Combobox, DatePicker, type DateRangePreset, NumberInput, OtpInput, Progress, Radio, RadioGroup, Select, type SelectGroup, type SelectItemState, Slider, Switch, Tab, Tabs } from "nsh/base";
 import { reduceMotion } from "nsh";
 import { platform, windowSize } from "nsh";
@@ -715,8 +715,8 @@ export function Controls(props: { show: Control }) {
   const monthGap = 16;
   /**
    * An item of the calendar (`renderItem`): Previous and Next as chevrons, the month and year toggles
-   * (or each month's title) by name, the weekdays' initials, and the days: today marked with a dot, the
-   * selected ones filled, the days of a complete range on a band from end to end (`range` says where it
+   * (or each month's title) by name, the weekdays' initials, and the days: today on the theme's quiet `accent`
+   * fill (gpui-component's), the selected ones on the accent's, the days of a complete range on a band from end to end (`range` says where it
    * starts and ends), the other months' days and the disabled ones faint.
    */
   function CalendarItem(props: { item: CalendarItemState; range?: [string | null, string | null] | null }) {
@@ -789,7 +789,7 @@ export function Controls(props: { show: Control }) {
             borderWidth: 1.5,
             // The keyboard's day ringed.
             borderColor: props.item.focused ? colors.accent : "transparent",
-            backgroundColor: props.item.active ? colors.accentFill : "transparent",
+            backgroundColor: props.item.active ? colors.accentFill : props.item.today ? token("accent") : "transparent",
           }}
         >
           <Text
@@ -803,16 +803,6 @@ export function Controls(props: { show: Control }) {
           >
             {String(props.item.value)}
           </Text>
-          <View
-            style={{
-              position: "absolute",
-              bottom: pointer ? 3 : 5,
-              width: 4,
-              height: 4,
-              borderRadius: 2,
-              backgroundColor: props.item.today ? (props.item.active ? colors.onAccent : colors.accent) : "transparent",
-            }}
-          />
         </View>
       </View>
     );
@@ -844,6 +834,14 @@ export function Controls(props: { show: Control }) {
     : { height: 34, paddingHorizontal: 12, borderRadius: 17, borderWidth: 1, borderColor: colors.border, justifyContent: "center" as const, fontSize: 14, color: colors.text };
   const header = { marginBottom: 4 };
   const calendar = pointer ? { padding: 4 } : { alignSelf: "center" as const };
+  /** The time's row under a hairline, its label at the start and the field at the end, on the calendar's edges. */
+  const time = { gap: 10, marginTop: 8, paddingTop: 8, borderTopWidth: 1, borderColor: colors.border, ...(pointer ? { paddingHorizontal: 4 } : { alignSelf: "center" as const, width: 7 * cell }) };
+  /** The time's field: a recessed well as the number inputs', with their hover and the keyboard's ring while it edits. */
+  const timeField = [
+    pointer ? "h-8 rounded-md px-2" : "h-11 rounded-lg px-3",
+    "items-center border border-input bg-field",
+    "enabled:hover:border-faint focus-within:outline-2 focus-within:outline-info",
+  ].join(" ");
 
   function Dates() {
     const due = signal<string | null>(null);
@@ -952,19 +950,10 @@ export function Controls(props: { show: Control }) {
               headerStyle={header}
               itemClass="active:opacity-70"
               renderItem={(item) => <CalendarItem item={item} />}
-              timeStyle={{ gap: 10, marginTop: 8, paddingTop: 8, paddingHorizontal: 4, borderTopWidth: 1, borderColor: colors.border }}
-              timeLabel={<Text style={{ flex: 1, fontSize: size.label, color: colors.muted }}>Time</Text>}
+              timeStyle={time}
+              timeLabel={<Text style={{ fontSize: size.label, color: colors.muted }}>Time</Text>}
               timeAccessibilityLabel="Meeting time"
-              timeFieldStyle={{
-                alignItems: "center",
-                height: pointer ? 30 : 40,
-                paddingHorizontal: 6,
-                borderRadius: radius.control,
-                borderWidth: 1,
-                borderColor: colors.fieldBorder,
-                backgroundColor: colors.field,
-                ...finish.field,
-              }}
+              timeFieldClass={timeField}
               segmentClass="active:opacity-70"
               separatorStyle={{ color: colors.faint, fontSize: size.label }}
               renderSegment={(segment) => <Segment label={segment.label} selected={segment.selected} />}

@@ -1,4 +1,4 @@
-import { type JSX, mount, signal, Text, View } from "nsh";
+import { type JSX, mount, signal, Text, token, View } from "nsh";
 import { type CalendarItemState, DatePicker, type DatePickerValue, type DateRangePreset, type HourCycle, type OpenChangeReason, type TimeFieldSegmentState } from "nsh/base";
 import { button, desktop, Log, Panel, Segmented, size, Split, tint, ui, wide } from "./palette";
 
@@ -8,9 +8,10 @@ import { button, desktop, Log, Panel, Segmented, size, Split, tint, ui, wide } f
 // on the clock the inspector picks. The trigger is the shared button look
 // with the value and a chevron that turns while the calendar is open; the
 // calendar is a popup at the trigger, a sheet on a touch screen. Every
-// item is drawn by `renderItem` (month names, weekday initials, today's
-// dot, the selected days filled, a range's band) and every segment of the
-// time by `renderSegment`.
+// item is drawn by `renderItem` (month names, weekday initials, today on a
+// quiet fill, the selected days filled, a range's band) and every segment
+// of the time by `renderSegment`; the time's label starts its row and the
+// field, a well as the number inputs', ends it.
 
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const WEEKDAYS = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
@@ -54,6 +55,21 @@ const preset = () =>
     ? { height: 28, paddingHorizontal: 8, borderRadius: 6, justifyContent: "center" as const, fontSize: 13, color: ui().text }
     : { height: 34, paddingHorizontal: 12, borderRadius: 17, borderWidth: 1, borderColor: ui().border, justifyContent: "center" as const, fontSize: 14, color: ui().text };
 const calendar = desktop ? { padding: 2 } : { alignSelf: "center" as const };
+/** The time's row under a hairline, its label at the start and the field at the end, on the calendar's edges. */
+const time = () => ({
+  gap: 10,
+  marginTop: 8,
+  paddingTop: 8,
+  borderTopWidth: 1,
+  borderColor: ui().border,
+  ...(desktop ? { paddingHorizontal: 2 } : { alignSelf: "center" as const, width: 7 * cell }),
+});
+/** The time's field: a recessed well as the number inputs', with their hover and the keyboard's ring while it edits. */
+const timeField = [
+  desktop ? "h-8 rounded-lg px-2" : "h-11 rounded-xl px-3",
+  "items-center border border-input bg-field",
+  "enabled:hover:border-faint focus-within:outline-2 focus-within:outline-info",
+].join(" ");
 
 /** The trigger: the shared button's look, the value at the start and a chevron in a lane as wide as it. */
 function Trigger(props: { title?: string; placeholder: string; open: boolean; clearable?: boolean }) {
@@ -91,7 +107,8 @@ function Trigger(props: { title?: string; placeholder: string; open: boolean; cl
 
 /**
  * An item of the calendar: Previous and Next as arrows, the month and year toggles (or each month's
- * title) by name, the weekdays' initials, and the days: today with a dot, the selected ones filled,
+ * title) by name, the weekdays' initials, and the days: today on the theme's quiet `accent` fill
+ * (gpui-component's), the selected ones filled,
  * the days of a complete range on a band from end to end (`range` says where it starts and ends), the
  * other months' days and the disabled ones faint.
  */
@@ -163,7 +180,7 @@ function Item(props: { item: CalendarItemState; range?: DatePickerValue }) {
           borderWidth: 1.5,
           // The keyboard's day ringed.
           borderColor: props.item.focused ? ui().info : "transparent",
-          backgroundColor: props.item.active ? ui().accentFill.backgroundColor : "transparent",
+          backgroundColor: props.item.active ? ui().accentFill.backgroundColor : props.item.today ? token("accent") : "transparent",
         }}
       >
         <Text
@@ -177,16 +194,6 @@ function Item(props: { item: CalendarItemState; range?: DatePickerValue }) {
         >
           {String(props.item.value)}
         </Text>
-        <View
-          style={{
-            position: "absolute",
-            bottom: desktop ? 3 : 5,
-            width: 4,
-            height: 4,
-            borderRadius: 2,
-            backgroundColor: props.item.today ? (props.item.active ? ui().onAccent : ui().accent) : "transparent",
-          }}
-        />
       </View>
     </View>
   );
@@ -357,10 +364,10 @@ function App() {
               headerStyle={{ marginBottom: 4 }}
               itemClass="active:opacity-70"
               renderItem={(item) => <Item item={item} />}
-              timeStyle={{ gap: 10, marginTop: 8, paddingTop: 8, paddingHorizontal: 4, borderTopWidth: 1, borderColor: ui().border }}
-              timeLabel={<Text style={{ flex: 1, fontSize: controlText, color: ui().muted }}>Time</Text>}
+              timeStyle={time()}
+              timeLabel={<Text style={{ fontSize: controlText, color: ui().muted }}>Time</Text>}
               timeAccessibilityLabel="Meeting time"
-              timeFieldStyle={{ ...ui().inset, alignItems: "center", height: size.controlSm, paddingHorizontal: 6, borderRadius: 8 }}
+              timeFieldClass={timeField}
               segmentClass="rounded active:opacity-70"
               separatorStyle={{ fontSize: controlText, color: ui().faint }}
               renderSegment={(segment) => <Segment segment={segment} />}

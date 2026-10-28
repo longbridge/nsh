@@ -90,7 +90,7 @@ function App() {
       headerClass="flex-row items-center justify-between"
       rowClass="flex-row justify-between"
       itemClass="h-8 min-w-8 items-center justify-center rounded-md text-sm focus:ring-2 focus:ring-ring selected:bg-primary selected:text-primary-foreground disabled:opacity-50"
-      timeClass="mt-2 flex-row items-center justify-between"
+      timeClass="mt-2 gap-3"
       timeLabel={<Text class="text-sm">Time</Text>}
       timeAccessibilityLabel="Due time"
       timeFieldClass="flex-row rounded-md border border-input px-2 py-1"
@@ -146,9 +146,10 @@ Every prop of [Calendar](./calendar.md) but its value passes on to the picker's:
 `itemStyle`) and `renderItem`. `calendarClass` and `calendarStyle` style the calendar itself. Its views and keys are a
 calendar's.
 
-The time row (`timeClass`, `timeStyle`) holds `timeLabel`, the app's words for it ("Time"), and the time field
-(`timeFieldClass`, `timeFieldStyle`, `timeAccessibilityLabel`), whose segments are a [TimeField](./time-field.md)'s
-(`segmentClass`, `separatorClass`, `renderSegment`).
+The time row (`timeClass`, `timeStyle`) holds `timeLabel`, the app's words for it ("Time"), at its start and the time
+field (`timeFieldClass`, `timeFieldStyle`, `timeAccessibilityLabel`) at its end: a row with its items centered and
+spread apart (`flex-row items-center justify-between`, as `gpui-component`'s). The field's segments are a
+[TimeField](./time-field.md)'s (`segmentClass`, `separatorClass`, `renderSegment`).
 
 ## Props
 
@@ -177,7 +178,7 @@ The time row (`timeClass`, `timeStyle`) holds `timeLabel`, the app's words for i
 | `calendarClass`, `calendarStyle` | `.calendar_class(..)`, `.calendar_style(..)` | `string`, `StyleProp<ViewStyle>` | none | The calendar. |
 | `headerClass` … `itemStyle` | as `Calendar`'s | as `Calendar`'s | none | The calendar's header, body, months, rows and items. |
 | `renderItem` | `.render_item(..)` | `(item: CalendarItemState) => JSX.Element` | none | Each item of the calendar, drawn by the app. |
-| `timeClass`, `timeStyle` | `.time_class(..)`, `.time_style(..)` | `string`, `StyleProp<ViewStyle>` | none | The time's row: its label and the field. |
+| `timeClass`, `timeStyle` | `.time_class(..)`, `.time_style(..)` | `string`, `StyleProp<ViewStyle>` | none | The time's row: its label at the start, the field at the end. |
 | `timeLabel` | `.time_label(..)` | `JSX.Element` | none | What the time's row shows before the field. |
 | `timeFieldClass`, `timeFieldStyle` | `.time_field_class(..)`, `.time_field_style(..)` | `string`, `StyleProp<ViewStyle>` | none | The time field. |
 | `timeAccessibilityLabel` | `.time_accessibility_label(..)` | `string` | none | What screen readers call the time field. |
