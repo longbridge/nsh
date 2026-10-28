@@ -174,3 +174,60 @@ fn an_eyedropper_picks_a_color_on_the_screen_where_the_platform_has_one() {
     assert!(app.shows("Ends #22c55e"));
     assert!(!app.shows("#22c55e, "));
 }
+
+/// A picker whose app sets the colors back late, as their text: they
+/// wait until `catch-up` is pressed, as events reach a JS app after the
+/// user's next keys may have.
+#[component]
+fn Late() -> impl IntoElement {
+    let color = signal(Hsla::from(rgb(0x3b82f6)));
+    let queued = stored(Vec::<String>::new());
+    let ends = signal(Vec::<String>::new());
+    view()
+        .child(
+            color_picker()
+                .value(move || Some(color.get()))
+                .format(ColorFormat::Oklch)
+                .on_change(move |e: &ColorPickerEvent| {
+                    if let ColorPickerEvent::Change(_, formatted) = e {
+                        queued.with(|queued| queued.push(formatted.to_string()));
+                    }
+                })
+                .on_change_end(move |e: &ColorPickerEvent| {
+                    if let ColorPickerEvent::ChangeEnd(_, formatted) = e {
+                        ends.update(|log| log.push(formatted.to_string()));
+                    }
+                })
+                .child(
+                    color_field()
+                        .color_space(ColorSpace::Oklch)
+                        .channel(ColorChannel::Lightness)
+                        .accessibility_label("Lightness")
+                        .w(px(200.0))
+                        .h(px(30.0)),
+                ),
+        )
+        .child(view().test_id("catch-up").size(px(20.0)).on_press(move || {
+            for formatted in queued.replace(Vec::new()) {
+                color.set(formatted.parse().unwrap());
+            }
+        }))
+        .child(text(move || format!("Ends {}", ends.get().join(", "))))
+}
+
+#[test]
+fn colors_the_app_sets_back_late_keep_the_channels_set_since() {
+    let config = EngineConfig {
+        viewport: Size::new(px(400.0), px(844.0)),
+        ..EngineConfig::new(Root::of::<Late>())
+    };
+    let mut app = Headless::start(config).expect("the engine starts");
+    app.wait_for("text:Ends").unwrap();
+    app.clear("label:Lightness").unwrap();
+    app.type_text("label:Lightness", "7").unwrap();
+    app.type_text("label:Lightness", "0").unwrap();
+    // 7% then 70%, set back after both.
+    app.press("id:catch-up").unwrap();
+    app.submit("label:Lightness").unwrap();
+    app.wait_for("text:Ends oklch(70% 0.188 259.8)").unwrap();
+}

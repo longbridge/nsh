@@ -23,6 +23,10 @@ use crate::keys::bind_while;
 /// ([`model::segments`]).
 const MAX_SEGMENTS: usize = 12;
 
+/// The most colors reported that the app has not set back yet
+/// ([`Picker::reported`]).
+const MAX_REPORTED: usize = 32;
+
 /// What the parts of a [`ColorPicker`] share through context: its color,
 /// as each space's channels have it.
 #[derive(Clone, Copy)]
@@ -31,6 +35,12 @@ struct Picker {
     disabled: Option<Prop<bool>>,
     format: Option<Prop<ColorFormat>>,
     cx: Option<Scope<ColorPickerEvent>>,
+    /// The colors reported, oldest first, until the app sets them back as
+    /// `value`. Events reach the app after the user's next changes may
+    /// have, so the app sets back a color the picker has moved on from
+    /// (a key typed after another): that is no color of the app's, and
+    /// following it would drop the channels the user set since.
+    reported: Stored<Vec<(u32, Option<u32>)>>,
 }
 
 impl Picker {
@@ -44,6 +54,7 @@ impl Picker {
                 disabled: None,
                 format: None,
                 cx: None,
+                reported: stored(Vec::new()),
             }
         })
     }
@@ -86,6 +97,15 @@ impl Picker {
         let model = self.now();
         let format = self.format.map(|f| f.get_untracked()).unwrap_or_default();
         let formatted = SharedString::from(model.format(format));
+        // The app sets back either: the color, or its text read again,
+        // which the text's rounding may move off the color.
+        let read = Color::parse(&formatted).map(|c| c.0);
+        self.reported.with(|reported| {
+            if reported.len() == MAX_REPORTED {
+                reported.remove(0);
+            }
+            reported.push((Color::from(model.hsla()).0, read));
+        });
         cx.emit(if end {
             ColorPickerEvent::ChangeEnd(model.hsla(), formatted)
         } else {
@@ -150,12 +170,26 @@ pub fn ColorPicker(props: ColorPickerProps, cx: Scope<ColorPickerEvent>) -> impl
         .get_untracked()
         .unwrap_or_else(|| props.default_value.get_untracked());
     let model = signal(Model::from_hsla(first));
+    let reported = stored(Vec::<(u32, Option<u32>)>::new());
     effect(move || {
         let Some(value) = props.value.get() else {
             return;
         };
+        let packed = Color::from(value).0;
+        // A color reported: the app following the user, maybe behind.
+        let echo = reported.with(|reported| {
+            let at = reported
+                .iter()
+                .position(|&(color, read)| packed == color || Some(packed) == read)?;
+            reported.drain(..=at);
+            Some(())
+        });
+        if echo.is_some() {
+            return;
+        }
+        reported.with(Vec::clear);
         let now = model.get_untracked();
-        if Color::from(value).0 != Color::from(now.hsla()).0 {
+        if packed != Color::from(now.hsla()).0 {
             model.set(now.follow(value));
         }
     });
@@ -164,6 +198,7 @@ pub fn ColorPicker(props: ColorPickerProps, cx: Scope<ColorPickerEvent>) -> impl
         disabled: Some(props.disabled),
         format: Some(props.format),
         cx: Some(cx),
+        reported,
     });
     view().disabled(props.disabled).child(props.children)
 }
