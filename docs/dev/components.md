@@ -391,7 +391,7 @@ reasons: `reactive-components.md`.
   `Component::element(props)` (the props struct whole) and `ComponentElement::on_event` (every event, typed) remain
   for components implemented by hand (`impl Component for X`, which get no constructor) and code generic over
   components; Rust views use the constructors.
-- **Platform services** are free functions (`element/ambient.rs`): `dialog(Dialog)` (deprecated for apps in favor of
+- **Platform services** are free functions (`element/ambient.rs`, exported from `element` and the prelude): `dialog(Dialog)` (deprecated for apps in favor of
   `nsh_base::alert_dialog()`, which calls it) shows an alert or action sheet and returns a future of the index
   chosen (-1: dismissed; the answer is the root's `Dialog` event, which the core resolves; JS never sees it); `dismiss_keyboard()`, `animate_layout(..)`, `announce_for_accessibility(..)`,
   `set_color_scheme(..)`, the clipboard (`set_clipboard`, `clipboard_string`,
@@ -695,7 +695,7 @@ view is made and has `token()` read its tokens at once (`Core::theme_tokens`, gi
 op reaches the core only after the turn of the first render, which reads them already); the core makes tokens of it
 with what a UI set brings (`Registry::tokens_from`: `nsh/base`'s `tokens_of`, which also gives the defaults when the
 engine starts). A Rust app's root carries them (`Root::tokens`). `nsh_base::theme()` reads the tokens from a signal of
-the surface (`element::ambient::tokens`): new tokens run again the bindings that read them. An embedding app can give a
+the surface (`element::tokens`): new tokens run again the bindings that read them. An embedding app can give a
 surface its own (`Core::set_host_tokens`, `EngineControl::set_tokens`; sent from `Engine::start_with`'s `setup` they
 are in the first frame and JS's first render): they win over the app's until cleared, and the app's names they lack
 stay, so an embedded app looks like its host (`embedding.md`, "GPUI and GPUI Kit apps").

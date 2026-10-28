@@ -362,7 +362,7 @@ server greets it; the dev session publishes no bundles (`DevSession::rust_root`)
 `nsh_app_<package>_rust_web.wasm`, copied to `.nsh/rust/web-runtime/nsh-rust.wasm`.
 
 Rust code meant for the web too uses the engine's services rather than threads and the standard clock: `fetch`
-(`nsh_core::element::ambient::fetch`, below), the executor's timers, `nsh_core::time`. `examples/gallery-rs` does. As a
+(`nsh_core::element::fetch`, below), the executor's timers, `nsh_core::time`. `examples/gallery-rs` does. As a
 Rust app (2026-10) its `nsh.wasm` is 3.31 MB (1.06 MB gzipped, 0.75 MB with brotli): no QuickJS, so smaller than the
 prebuilt runtime, which a TSX entry (QuickJS) needs: the gallery under one was 5.26 MB (1.75 / 1.27 MB).
 

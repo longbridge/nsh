@@ -588,7 +588,7 @@ pub trait MountSink: Send + 'static {
     }
 
     /// JS or a component's task asked for a display frame
-    /// (`requestAnimationFrame`, `ui::ambient::next_frame`), or lists have
+    /// (`requestAnimationFrame`, `nsh_core::element::next_frame`), or lists have
     /// overscan cells left to bind: call [`EngineControl::frame`] at the
     /// next vsync. Requests are not repeated until that call.
     fn request_frame(&self) {}

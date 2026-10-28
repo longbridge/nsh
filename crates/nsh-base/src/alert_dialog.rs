@@ -176,7 +176,7 @@ impl AlertDialogOptions {
             let sheet = self.presentation == AlertDialogPresentation::ActionSheet;
             let cancelable = self.close_on_escape.unwrap_or(sheet)
                 || self.close_on_backdrop_press.unwrap_or(sheet);
-            nsh_core::element::ambient::dialog(Dialog {
+            nsh_core::element::dialog(Dialog {
                 id: 0,
                 title: self.title.as_ref().map(|t| t.to_string()),
                 message: self.description.as_ref().map(|m| m.to_string()),

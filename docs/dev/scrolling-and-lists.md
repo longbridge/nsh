@@ -17,7 +17,7 @@
 - **Scroll bars of the app's own** (`nsh/base`'s `Scrollbar`, `docs/dev/components.md` "Scroll bars"): a view the
   app places that names a scroll view or a list (`scroll={ref}`), with its look (`class`, `thumbClass`) and `mode`;
   the target's own indicator off with `scrollbar={false}`. It follows the target through the core
-  (`element::ambient::watch_scroll`: the offset every platform reports, the content size the layout sends), so it
+  (`element::watch_scroll`: the offset every platform reports, the content size the layout sends), so it
   works on every backend, and scrolls it with `ScrollTo`.
 - **Content container** (`<Scroll>`): `contentStyle` / `contentClass` are the renderer's
   (`dom.rs` `scroll_content`): the first one set makes a view the scroll view's children move into (also the ones

@@ -566,7 +566,7 @@ impl Root {
     }
 
     /// Shows the app in `appearance` whatever the system's (`nsh.json`
-    /// `"appearance"`; later [`super::ambient::set_color_scheme`] calls
+    /// `"appearance"`; later [`super::set_color_scheme`] calls
     /// change it).
     pub fn appearance(mut self, appearance: crate::platform::Appearance) -> Self {
         self.appearance = Some(appearance);

@@ -1,5 +1,5 @@
-//! Views watching an element they did not make ([`super::ambient::watch_scroll`],
-//! [`super::ambient::watch_hover`]): a scroll bar of the app's own following a
+//! Views watching an element they did not make ([`super::watch_scroll`],
+//! [`super::watch_hover`]): a scroll bar of the app's own following a
 //! scroll view or a list elsewhere in the tree, as `gpui-base`'s `Scrollbar`
 //! follows its scroll handle.
 //!

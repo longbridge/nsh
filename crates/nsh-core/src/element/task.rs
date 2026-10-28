@@ -569,7 +569,7 @@ pub(crate) fn act_after(
     let id = executor.spawn(
         host,
         Box::pin(async move {
-            super::ambient::timer_until(at).await;
+            super::timer_until(at).await;
             if let Some(executor) = acting.upgrade() {
                 executor.act(action);
             }

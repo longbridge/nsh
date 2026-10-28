@@ -628,7 +628,7 @@ fn line_row(
 /// The highlight of the code's selected text: the lines' selection color.
 fn selection_color() -> Hsla {
     let color = theme().selection();
-    if nsh_core::element::ambient::dark() {
+    if nsh_core::element::dark() {
         color.dark
     } else {
         color.light

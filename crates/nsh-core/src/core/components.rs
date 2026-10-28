@@ -823,7 +823,7 @@ impl<M: TextEngine> Core<M> {
         self.own_direction();
     }
 
-    /// The environment components read ([`crate::element::ambient::window`]
+    /// The environment components read ([`crate::element::window`]
     /// and the like), as the platform reports it: what read a part that
     /// changed runs again. `dark` is the system's: the app's
     /// appearance wins over it ([`Core::set_appearance`]).

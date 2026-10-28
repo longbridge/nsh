@@ -1,7 +1,7 @@
 //! The platform's services for components, modules and tasks beyond
 //! dialogs and the keyboard: screen reader announcements, the
 //! clipboard, image information, display frames and the layout direction
-//! ([`super::ambient`]'s functions, [`super::ModuleCx`]). Each is an
+//! ([`super`]'s free functions, [`super::ModuleCx`]). Each is an
 //! [`Action`] the core applies in order with the component's other changes.
 
 use std::{
@@ -20,7 +20,7 @@ use crate::{
     time::Instant,
 };
 
-/// Whether an image loaded ahead ([`super::ambient::prefetch_image`]): true
+/// Whether an image loaded ahead ([`super::prefetch_image`]): true
 /// once its bytes are in memory.
 #[must_use = "an answer does nothing unless awaited"]
 #[derive(Debug)]
@@ -34,7 +34,7 @@ impl Future for Prefetch {
     }
 }
 
-/// The response to a [`super::ambient::fetch`]: its status line, headers
+/// The response to a [`super::fetch`]: its status line, headers
 /// and whole body.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct HttpResponse {
@@ -70,7 +70,7 @@ impl HttpResponse {
     }
 }
 
-/// A request in flight ([`super::ambient::fetch`]): awaited, its response,
+/// A request in flight ([`super::fetch`]): awaited, its response,
 /// or why there is none (the network failed, or the app's capabilities do
 /// not grant the host).
 #[must_use = "a request does nothing unless awaited"]

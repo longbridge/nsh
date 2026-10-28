@@ -553,7 +553,7 @@ struct Node {
     /// for an overlay's `onPressOutside`, the pointer for a hint's.
     overlay_watched: u8,
     /// A view's hover watch has it listen to the mouse entering and leaving
-    /// ([`crate::element::ambient::watch_hover`]).
+    /// ([`crate::element::watch_hover`]).
     hover_watched: bool,
 }
 

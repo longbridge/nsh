@@ -1472,7 +1472,7 @@ impl<A: super::Animated> From<&A> for CanvasPaint {
 /// may be animated values (the canvas draws again natively as they move);
 /// operations without a method here are built by hand with
 /// [`Painter::num`], [`Painter::paint`] and [`Painter::op`]. Text is
-/// measured with [`super::ambient::measure_text`].
+/// measured with [`super::measure_text`].
 #[derive(Debug, Clone, Default)]
 pub struct Painter {
     drawing: Drawing,

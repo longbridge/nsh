@@ -13,10 +13,10 @@
 //! effect whose runs patch that part alone, and a region ([`dynamic`],
 //! [`when`], [`each`], [`catch_error`]) makes its own elements again. State
 //! is signals the view makes (under the component's owner: they go with
-//! it), changed by listeners, timers and tasks ([`ambient::spawn`]); the
+//! it), changed by listeners, timers and tasks ([`spawn`]); the
 //! component's listeners hear its elements' events first and decide what
 //! reaches JS ([`Scope::emit`]). The environment and the design tokens are
-//! signals too ([`ambient::window`], [`ambient::tokens`]): reading one in a binding
+//! signals too ([`window`], [`tokens`]): reading one in a binding
 //! subscribes it.
 //!
 //! Props are a struct (`#[derive(Props)]`), events an enum
@@ -30,7 +30,7 @@
 //! expands, so both stay dense. How the core runs components:
 //! `docs/dev/components.md`.
 
-pub mod ambient;
+mod ambient;
 pub(crate) mod animated;
 mod asset;
 mod back;
@@ -101,7 +101,7 @@ pub use nsh_macros::{
 #[doc(hidden)]
 pub use self::host::{modal, screen, stack};
 pub use self::{
-    ambient::text_measurer,
+    ambient::*,
     animated::{
         Animated, AnimatedNode, AnimatedValue, Animation, AnimationEnd, AnimationOperand,
         DiffClamp, Interpolation, Motion, Spring, Timing, sample_decay, sample_decay_within,
