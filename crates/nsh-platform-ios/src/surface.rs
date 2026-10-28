@@ -344,6 +344,8 @@ impl RootView {
             // No host answers `nsh/host` here: an embedding app talks to its
             // apps through its own UI sets (`nsh/native`).
             host: false,
+            // UIKit has no screen color sampler.
+            screen_color: false,
         };
         // The embedding app's settings over the system's.
         self.ivars().host.get().apply(&mut env);

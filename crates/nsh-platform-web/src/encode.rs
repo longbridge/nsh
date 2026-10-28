@@ -544,7 +544,8 @@ pub(crate) fn view_css(s: &ViewStyle) -> (String, Option<String>) {
         let mut props = Vec::new();
         let p = t.properties;
         if p.has(TransitionProps::COLORS) {
-            props.extend(["background-color", "outline-color"]);
+            // `color`: a text's, on its element (`op_t`).
+            props.extend(["background-color", "outline-color", "color"]);
         }
         if p.has(TransitionProps::OPACITY) {
             props.push("opacity");
@@ -671,8 +672,18 @@ fn resize_mode(m: ResizeMode) -> &'static str {
     }
 }
 
-fn text_css(style: &nsh_core::ResolvedTextStyle, shadow: Option<&nsh_core::TextShadow>) -> String {
-    let mut css = format!("font:{};color:{};", css_font(style), css_color(style.color));
+/// The CSS of a run of `style`; `inherit_color`: without its color (and a
+/// decoration color, which is the same), which the run takes from its text's
+/// element, drawn in one color.
+fn text_css(
+    style: &nsh_core::ResolvedTextStyle,
+    shadow: Option<&nsh_core::TextShadow>,
+    inherit_color: bool,
+) -> String {
+    let mut css = format!("font:{};", css_font(style));
+    if !inherit_color {
+        let _ = write!(css, "color:{};", css_color(style.color));
+    }
     if style.letter_spacing.0 != 0.0 {
         let _ = write!(css, "letter-spacing:{}px;", style.letter_spacing.0);
     }
@@ -688,7 +699,7 @@ fn text_css(style: &nsh_core::ResolvedTextStyle, shadow: Option<&nsh_core::TextS
             "text-decoration:{lines} {};",
             kebab(&format!("{:?}", style.decoration_style))
         );
-        if let Some(c) = style.decoration_color {
+        if let Some(c) = style.decoration_color.filter(|_| !inherit_color) {
             let _ = write!(css, "text-decoration-color:{};", css_color(c));
         }
         if let Some(t) = style.decoration_thickness.map(|t| t.0) {
@@ -753,11 +764,8 @@ fn props_json(p: &ViewProps) -> String {
     if let Some(h) = &a.hint {
         let _ = write!(s, ",\"hint\":{}", json_str(h));
     }
-    let _ = write!(
-        s,
-        ",\"role\":{}",
-        json_str(&kebab(&format!("{:?}", a.role)))
-    );
+    // The role's JS name, which is ARIA's (`columnheader`, `treeitem`).
+    let _ = write!(s, ",\"role\":{}", json_str(enum_name(&a.role)));
     if a.state.disabled {
         s.push_str(",\"disabled\":true");
     }
@@ -772,6 +780,15 @@ fn props_json(p: &ViewProps) -> String {
     }
     if let Some(e) = a.state.expanded {
         let _ = write!(s, ",\"expanded\":{e}");
+    }
+    if let Some(p) = a.state.pressed {
+        let _ = write!(s, ",\"pressed\":{}", json_str(&kebab(&format!("{p:?}"))));
+    }
+    if let Some(c) = a.state.current {
+        let _ = write!(s, ",\"current\":{}", json_str(&kebab(&format!("{c:?}"))));
+    }
+    if let Some(l) = a.level {
+        let _ = write!(s, ",\"level\":{l}");
     }
     if let Some(v) = &a.value {
         let n = |v: Option<f32>| v.map_or("null".to_owned(), |v| v.to_string());
@@ -844,7 +861,7 @@ fn input_json(c: &InputConfig) -> String {
 /// The CSS of a field's text: its style, alignment, line height, the
 /// placeholder's color (`--ph`) and the caret's.
 fn field_css(c: &InputConfig) -> String {
-    let mut css = text_css(&c.style, None);
+    let mut css = text_css(&c.style, None, false);
     match c.align {
         nsh_core::TextAlign::Center => css.push_str("text-align:center;"),
         nsh_core::TextAlign::Right => css.push_str("text-align:right;"),
@@ -1003,6 +1020,11 @@ pub(crate) fn encode(out: &mut Out, item: &MountItem) {
             content,
         } => {
             let layout = layout.downcast::<WebLayout>();
+            // A text drawn in one color has it on its element and the runs
+            // inherit it: a change of it is a change of the element's
+            // `color`, which the browser transitions (`transition-colors`)
+            // from the color on screen while the runs are made again.
+            let color = text.uniform_color();
             // Defined before the item that uses them. A line box as tall
             // as the font: the baseline sits at the run's top plus its
             // ascent, where layout put it.
@@ -1014,7 +1036,7 @@ pub(crate) fn encode(out: &mut Out, item: &MountItem) {
                     .map(|(i, s)| {
                         let css = format!(
                             "{}line-height:{}px;",
-                            text_css(&s.style, text.shadow.as_ref()),
+                            text_css(&s.style, text.shadow.as_ref(), color.is_some()),
                             s.ascent + s.descent
                         );
                         out.class(*id, Part::Text(i), &css)
@@ -1085,6 +1107,10 @@ pub(crate) fn encode(out: &mut Out, item: &MountItem) {
                 None => out.raw("null"),
             };
             out.class_arg(selection);
+            match color {
+                Some(c) => out.str(&css_color(c)),
+                None => out.raw("null"),
+            };
             if !layout.backgrounds.is_empty() || !text.links.is_empty() {
                 // Span backgrounds: `[x, y, width, height, radius, color]`.
                 out.s.push_str(",[");
@@ -1402,6 +1428,12 @@ fn encode_command(out: &mut Out, id: u32, command: &Command) {
             .str("openUrl")
             .num(*request)
             .str(url)
+            .end(),
+        Command::PickScreenColor { id: request } => out
+            .item("cmd")
+            .num(id)
+            .str("pickScreenColor")
+            .num(*request)
             .end(),
         Command::ReadClipboard {
             id: request,

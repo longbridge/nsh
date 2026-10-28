@@ -593,6 +593,102 @@ fn slots_children_and_events() {
     );
 }
 
+const SLOT_LAYOUT: &str = r#"import { mount, Text, View } from "nsh";
+import { Field } from "test/ui";
+
+mount(() => (
+  <View>
+    <Field label={<Text style={{ flex: 1 }}>Grow</Text>} />
+    <Field label={<Text style={{ marginLeft: "auto" }}>End</Text>} />
+    <Field label={<Text style={{ alignSelf: "flex-end" }}>Low</Text>} />
+    <Field label={<Text style={{ width: "50%" }}>Half</Text>} />
+    <Field label={<><Text>One</Text><Text>Two</Text></>} hint={<Text style={{ flex: 1 }}>Hint</Text>} />
+  </View>
+));
+"#;
+
+/// The app's element in a slot the component places as it is lays out as
+/// an item of the component's layout, as its own child would (`Field`'s
+/// label in a 300 × 40 row before a 50 × 20 control): `flex: 1` grows
+/// along the row, `marginLeft: "auto"` pushes it to the control,
+/// `alignSelf` aligns it in the row, a percentage is of the row. Its holder
+/// takes its box and it sits at the holder's origin. A slot the component
+/// styles (`hint`, padded) and a slot of several elements stay boxes of
+/// their own, laid out as columns.
+#[test]
+fn slot_content_lays_out_in_the_components_layout() {
+    let (_engine, rx) = start(SLOT_LAYOUT);
+    let mut batches = vec![
+        rx.recv_timeout(Duration::from_secs(5))
+            .expect("first frame"),
+    ];
+    while let Ok(batch) = rx.recv_timeout(Duration::from_millis(200)) {
+        batches.push(batch);
+    }
+    let id = |wanted| {
+        batches
+            .iter()
+            .find_map(|b| text_ids(b, wanted))
+            .unwrap_or_else(|| panic!("{wanted} rendered"))
+    };
+    let parent_of = |child| {
+        batches
+            .iter()
+            .find_map(|b| {
+                b.items.iter().find_map(|i| match i {
+                    MountItem::Insert {
+                        parent, child: c, ..
+                    } if *c == child => Some(*parent),
+                    _ => None,
+                })
+            })
+            .expect("inserted")
+    };
+    let frame = |id| frame_of(&batches, id).expect("a frame");
+    // (x, y, width, height) of the holder of `wanted`, and its own frame.
+    let boxes = |wanted| {
+        let text = id(wanted);
+        let b = |f: nsh_core::Bounds<Points>| {
+            (f.origin.x.0, f.origin.y.0, f.size.width.0, f.size.height.0)
+        };
+        (b(frame(parent_of(text))), b(frame(text)))
+    };
+
+    let (holder, text) = boxes("Grow");
+    assert_eq!((holder.0, holder.2), (0.0, 250.0), "grows to the control");
+    assert_eq!((text.0, text.1, text.2), (0.0, 0.0, 250.0));
+    let close = |a: f32, b: f32| (a - b).abs() < 0.01;
+    let (holder, text) = boxes("End");
+    assert!(holder.0 > 0.0, "{holder:?}");
+    assert!(
+        close(holder.0 + holder.2, 250.0),
+        "pushed to the control: {holder:?}"
+    );
+    assert_eq!((text.0, text.1), (0.0, 0.0));
+    let (holder, _) = boxes("Low");
+    assert!(
+        close(holder.1 + holder.3, 40.0),
+        "at the row's bottom: {holder:?}"
+    );
+    let (holder, text) = boxes("Half");
+    assert_eq!((holder.2, text.2), (150.0, 150.0), "half the row");
+
+    // Several elements: a column of their own.
+    let (one, _) = boxes("One");
+    let (two, _) = boxes("Two");
+    assert_eq!(one, two, "one holder");
+    let (one, two) = (frame(id("One")), frame(id("Two")));
+    assert_eq!(two.origin.y.0, one.origin.y.0 + one.size.height.0);
+    // Styled by the component: its padded box, after the control.
+    let (holder, text) = boxes("Hint");
+    let label = one.size.width.0.max(two.size.width.0);
+    assert!(
+        close(holder.0, label + 50.0),
+        "after the control: {holder:?}"
+    );
+    assert_eq!(text.0, 8.0, "in the holder's padding");
+}
+
 const METHODS: &str = r#"import { mount, signal, Text, View } from "nsh";
 import { Stepper, type StepperRef } from "test/ui";
 
@@ -3017,6 +3113,110 @@ fn a_popovers_trigger_is_styled_while_open() {
     assert_eq!(style(&closed).unwrap().background_color.0, 0xffff_ffff);
 }
 
+const TOGGLE: &str = r##"import { mount, signal, Text, View } from "nsh";
+
+const bold = signal(false);
+
+mount(() => (
+  <View role="toolbar">
+    <View role="group" accessibilityLabel="Text style">
+      <View
+        testID="bold"
+        role="button"
+        accessibilityState={{ pressed: bold() }}
+        class="bg-white aria-pressed:bg-black"
+        pressedStyle={{ opacity: 0.5 }}
+        onPress={() => bold.set(!bold())}
+      >
+        <Text>{bold() ? "Bold on" : "Bold off"}</Text>
+      </View>
+    </View>
+    <View testID="heading" role="header" accessibilityLevel={2}>
+      <Text>Details</Text>
+    </View>
+    <View testID="pages" role="navigation">
+      <View testID="page" role="link" accessibilityState={{ current: "page" }} />
+    </View>
+    <View testID="item" role="treeitem" accessibilityLevel={0} />
+  </View>
+));
+"##;
+
+/// A toggle button's `aria-pressed:` classes and `pressedStyle` follow its
+/// `accessibilityState.pressed`, which the platform gets with the new
+/// roles, a heading's level and a page's current state; a level that is
+/// no whole number from 1 is none.
+#[test]
+fn a_toggle_is_styled_while_pressed() {
+    use nsh_core::{AccessibilityCurrent, AccessibilityRole, Checked};
+    let (engine, rx) = start(TOGGLE);
+    let first = rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("first frame");
+    let props = |batches: &[MountBatch], test_id: &str| {
+        batches
+            .iter()
+            .rev()
+            .flat_map(|b| b.items.iter().rev())
+            .find_map(|i| match i {
+                MountItem::ViewProps { id, props } if props.test_id.as_deref() == Some(test_id) => {
+                    Some((*id, props.accessibility.clone()))
+                }
+                _ => None,
+            })
+            .expect(test_id)
+    };
+    let first = std::slice::from_ref(&first);
+    let (bold, a) = props(first, "bold");
+    assert_eq!(a.role, AccessibilityRole::Button);
+    assert_eq!(a.state.pressed, Some(Checked::False));
+    let (_, heading) = props(first, "heading");
+    assert_eq!(
+        (heading.role, heading.level),
+        (AccessibilityRole::Header, Some(2))
+    );
+    assert_eq!(props(first, "pages").1.role, AccessibilityRole::Navigation);
+    let (_, page) = props(first, "page");
+    assert_eq!(page.state.current, Some(AccessibilityCurrent::Page));
+    let (_, item) = props(first, "item");
+    assert_eq!((item.role, item.level), (AccessibilityRole::TreeItem, None));
+    let style = |batches: &[MountBatch]| {
+        batches
+            .iter()
+            .rev()
+            .flat_map(|b| b.items.iter().rev())
+            .find_map(|i| match i {
+                MountItem::ViewStyle { id, style } if *id == bold => Some(style.clone()),
+                _ => None,
+            })
+    };
+    let off = style(first).expect("styled");
+    assert_eq!(off.background_color.0, 0xffff_ffff);
+    assert_eq!(off.opacity, 1.0);
+    // The core sets the state: the platform is not asked to report it.
+    assert!(!first.iter().flat_map(|b| &b.items).any(|i| matches!(
+        i,
+        MountItem::TrackStates { id, states }
+            if *id == bold && states & nsh_core::tailwind::state::ARIA_PRESSED != 0
+    )));
+    let press = || {
+        engine
+            .control()
+            .dispatch_event(bold, EventKind::Press, EventPayload::None)
+    };
+    press();
+    let pressed = until(&rx, |b| shows(b, "Bold on"));
+    assert_eq!(props(&pressed, "bold").1.state.pressed, Some(Checked::True));
+    let on = style(&pressed).expect("restyled");
+    assert_eq!(on.background_color.0, 0x0000_00ff);
+    assert_eq!(on.opacity, 0.5);
+    press();
+    let released = until(&rx, |b| shows(b, "Bold off"));
+    let off = style(&released).expect("restyled");
+    assert_eq!(off.background_color.0, 0xffff_ffff);
+    assert_eq!(off.opacity, 1.0);
+}
+
 /// A popup reports a change of its open state before its lifecycle
 /// follows it: `onOpenChange`, then `onOpen` / `onClose` once it is all
 /// there or all gone, also where that is at once (no motion).
@@ -3765,8 +3965,8 @@ mount(() => (
 "##;
 
 /// On a desktop, a TSX `Select`'s trigger is the app's element: the
-/// combobox, and what the popup is placed against and as wide as (not the
-/// slot's view, which the column stretches); open at first (`defaultOpen`),
+/// combobox, and what the popup is placed against and as wide as (its
+/// slot's view lays it out through, taking its box); open at first (`defaultOpen`),
 /// the popup shows its rows once the trigger is laid out.
 #[test]
 fn a_base_select_on_a_desktop_places_its_popup_at_the_apps_trigger() {

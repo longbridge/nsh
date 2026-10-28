@@ -24,6 +24,7 @@ export type IconName =
   | "stocks"
   | "chat"
   | "chevron"
+  | "pipette"
   | "chevron-up"
   | "chevron-down"
   | "back"
@@ -441,6 +442,12 @@ const glyphs: Record<IconName, Draw> = {
     line(c, [10, 3.5, 17, 16, 3, 16, 10, 3.5]);
     line(c, [10, 8, 10, 11.5]);
     circle(c, 10, 13.8, 0.7, true);
+  },
+  // An eyedropper: the bulb up right, the glass down to its tip.
+  pipette: (c) => {
+    line(c, [11.5, 5.5, 14.5, 8.5]);
+    line(c, [13, 7, 5, 15, 4, 16, 4.5, 15.5]);
+    line(c, [13.2, 4.3, 14.6, 2.9, 17.1, 5.4, 15.7, 6.8]);
   },
   close: (c) => {
     line(c, [5.5, 5.5, 14.5, 14.5]);

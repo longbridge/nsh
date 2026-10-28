@@ -366,6 +366,11 @@ impl Handle {
 pub(crate) struct Node(Handle);
 
 impl Node {
+    /// Whether its owner is still live (it was not disposed).
+    pub(crate) fn is_live(self) -> bool {
+        self.0.live()
+    }
+
     /// `f` of its value, subscribing the running computation (`what` names
     /// it if it is gone).
     #[track_caller]

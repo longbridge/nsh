@@ -695,7 +695,8 @@ pub enum SceneQuery {
         /// The view.
         id: u32,
     },
-    /// Whether a native animation runs.
+    /// Whether a native animation runs that ends by itself (not one
+    /// looping forever).
     Animating,
     /// Where to press to answer the dialog shown: its button `button`, or
     /// outside it (`None`).

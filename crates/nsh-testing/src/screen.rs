@@ -13,9 +13,9 @@ use std::{
 };
 
 use nsh_core::{
-    AccessibilityRole, Bounds, Command, Dialog, EventKind, EventMask, GestureValues, InputConfig,
-    MountBatch, MountItem, NodeId, PanActivation, Point, PointerEvents, Points, Size, ViewKind,
-    element::PropEnum,
+    AccessibilityRole, AccessibilityState, Bounds, Command, Dialog, EventKind, EventMask,
+    GestureValues, InputConfig, MountBatch, MountItem, NodeId, PanActivation, Point, PointerEvents,
+    Points, Size, ViewKind, element::PropEnum,
 };
 
 use crate::selector::{Matcher, Selector, TextMatch};
@@ -141,6 +141,8 @@ pub struct Screen {
     opened_urls: Vec<String>,
     /// The `openUrl` requests to answer.
     url_opens: Vec<u32>,
+    /// The screen colors asked for (`pick_screen_color`), to answer.
+    screen_colors: Vec<u32>,
     /// What the app asked that only a real platform answers, since the
     /// last call.
     unsupported: Vec<&'static str>,
@@ -194,6 +196,10 @@ struct View {
     /// It is selected (`selected`, its accessibility state; a canvas node's
     /// `selected`).
     selected: bool,
+    /// Its `accessibilityState`.
+    accessibility_state: AccessibilityState,
+    /// Its `accessibilityLevel`.
+    level: Option<u32>,
     /// How long a press must last to be a long one (`delayLongPress`), in
     /// milliseconds.
     long_press_delay: Option<f32>,
@@ -387,6 +393,8 @@ impl Screen {
                 view.disabled = props.accessibility.state.disabled;
                 view.focusable = props.focusable;
                 view.selected = props.accessibility.state.selected;
+                view.accessibility_state = props.accessibility.state;
+                view.level = props.accessibility.level;
                 view.long_press_delay = props.long_press_delay;
                 view.selectable_view = props.selectable_view;
                 view.pan_activation = props.pan_activation;
@@ -523,6 +531,7 @@ impl Screen {
                 self.opened_urls.push(url.clone());
                 self.url_opens.push(*id);
             }
+            Command::PickScreenColor { id } => self.screen_colors.push(*id),
             Command::Back => self.back_asked = true,
             Command::Desktop(desktop) => {
                 if let nsh_core::desktop::DesktopCommand::PopupMenu { items, .. } = &**desktop {
@@ -985,6 +994,11 @@ impl Screen {
         &self.opened_urls
     }
 
+    /// The screen color requests to answer since the last call.
+    pub(crate) fn take_screen_colors(&mut self) -> Vec<u32> {
+        std::mem::take(&mut self.screen_colors)
+    }
+
     /// The `openUrl` requests to answer since the last call.
     pub(crate) fn take_url_opens(&mut self) -> Vec<u32> {
         std::mem::take(&mut self.url_opens)
@@ -1167,6 +1181,34 @@ impl Screen {
         let parsed = Selector::parse(selector)?;
         match self.resolve(&parsed)[..] {
             [id] => Ok(self.nodes.get(&id).is_some_and(|v| v.selected)),
+            [] => Err(format!("no view matches `{selector}`")),
+            ref all => Err(format!("`{selector}` matches {} views", all.len())),
+        }
+    }
+
+    /// The accessibility state of the view `selector` names (its
+    /// `accessibilityState`: a toggle button's `pressed`, a page's
+    /// `current`, ...); an error when none or several match.
+    pub fn accessibility_state(&self, selector: &str) -> Result<AccessibilityState, String> {
+        let parsed = Selector::parse(selector)?;
+        match self.resolve(&parsed)[..] {
+            [id] => Ok(self
+                .nodes
+                .get(&id)
+                .map(|v| v.accessibility_state)
+                .unwrap_or_default()),
+            [] => Err(format!("no view matches `{selector}`")),
+            ref all => Err(format!("`{selector}` matches {} views", all.len())),
+        }
+    }
+
+    /// The level of the view `selector` names (its `accessibilityLevel`:
+    /// a heading's, a tree item's depth); an error when none or several
+    /// match.
+    pub fn accessibility_level(&self, selector: &str) -> Result<Option<u32>, String> {
+        let parsed = Selector::parse(selector)?;
+        match self.resolve(&parsed)[..] {
+            [id] => Ok(self.nodes.get(&id).and_then(|v| v.level)),
             [] => Err(format!("no view matches `{selector}`")),
             ref all => Err(format!("`{selector}` matches {} views", all.len())),
         }

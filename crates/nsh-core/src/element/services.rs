@@ -166,6 +166,12 @@ pub(crate) fn open_url(url: String) -> (Answer<bool>, Action) {
     (answer, Action::OpenUrl(url, slot))
 }
 
+/// The color the user picks on the screen (none when cancelled).
+pub(crate) fn pick_screen_color() -> (Answer<Option<crate::Hsla>>, Action) {
+    let (answer, slot) = Answer::new();
+    (answer, Action::PickScreenColor(slot))
+}
+
 /// The size of the image at `uri`, its bytes loaded.
 pub(crate) fn image_size(uri: String) -> (Answer<Result<ImageSize, String>>, Action) {
     let (answer, slot) = Answer::new();

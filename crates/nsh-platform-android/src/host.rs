@@ -98,10 +98,11 @@ impl Host {
         self.density.get()
     }
 
-    /// Whether the native animation graph animates.
+    /// Whether the native animation graph runs an animation that ends by
+    /// itself (not one looping forever, which no test step waits for).
     #[cfg(feature = "dev")]
     pub(crate) fn animating(&self) -> bool {
-        self.ui.lock().is_ok_and(|ui| ui.animating())
+        self.ui.lock().is_ok_and(|ui| ui.finishing())
     }
 
     fn control(&self) -> Option<EngineControl> {
@@ -730,7 +731,7 @@ extern "system" fn Java_com_longbridge_nsh_Native_imageCacheLookup<'local>(
                 .iter()
                 .flat_map(|(name, value)| [*name, value.as_str()])
                 .collect();
-            string_array(&mut env, &strings).unwrap_or_else(|| JObject::null())
+            string_array(&mut env, &strings).unwrap_or_default()
         }
         Lookup::Miss => JObject::null(),
     }
@@ -789,8 +790,10 @@ extern "system" fn Java_com_longbridge_nsh_Native_imageCacheComplete<'local>(
             }
         }
         let pairs = strings
-            .chunks_exact(2)
-            .map(|pair| (pair[0].as_str(), pair[1].as_str()));
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|[name, value]| (name.as_str(), value.as_str()));
         let body = if body.is_null() {
             Vec::new()
         } else {

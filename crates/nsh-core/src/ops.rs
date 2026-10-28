@@ -228,6 +228,7 @@ events! {
     OpenUrl = "onOpenUrl": "A [`Command::OpenUrl`] request finished (root only; payload: `id`, `opened`: whether the platform opened the URL).",
     CaretMove = "onCaretMove": "An input's caret moved: with its selection, or as its text scrolled or wrapped again (payload: `bounds`, the caret in the input; the core adds `pageBounds`, in the root view).",
     Paste = "onPaste": "The user pasted into an input (payload: [`EventPayload::Paste`]: the text, files with their bytes such as a screenshot, local files' URLs), before the `onChangeText` of the text it inserts.",
+    ScreenColor = "onScreenColor": "A [`Command::PickScreenColor`] request finished (root only; payload: `id`, `color`: the color picked, packed `0xRRGGBBAA`, absent when cancelled).",
 
 }
 
@@ -1699,6 +1700,16 @@ pub enum Command {
         /// The URL ([`crate::open_url::check_url`] passed it).
         url: String,
     },
+    /// Let the user pick a color anywhere on the screen (on the root; a
+    /// color picker's eyedropper, [`crate::element::ambient::pick_screen_color`]):
+    /// the system's color sampler or the browser's `EyeDropper`. Report it
+    /// as [`EventKind::ScreenColor`] `id`, with no `color` when the user
+    /// cancelled. Sent only on platforms whose
+    /// [`crate::platform::Environment::screen_color`] is set.
+    PickScreenColor {
+        /// The request.
+        id: u32,
+    },
     /// A desktop command (on the root; `nsh/desktop`): the window, its
     /// title bar, menus. Mobile platforms ignore it.
     Desktop(Box<crate::desktop::DesktopCommand>),
@@ -2158,6 +2169,10 @@ pub enum Prop {
     /// `Popover`'s or `Menu`'s trigger while its popup is open), and not
     /// disabled.
     ExpandedStyle(Option<std::rc::Rc<StylePatch>>),
+    /// `pressedStyle`: the style while `accessibilityState.pressed` (true,
+    /// not mixed: a toggle button that is on), and not disabled. Not
+    /// `activeStyle`, a press in progress.
+    PressedStyle(Option<std::rc::Rc<StylePatch>>),
     /// The states a part of a control shows its classes and state styles
     /// as its control has them ([`crate::tailwind::state`] bits: `checked`,
     /// `indeterminate`, `disabled`): a switch's thumb styled `checked:`
