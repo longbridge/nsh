@@ -153,6 +153,7 @@ impl Mounter {
                             | ViewKind::Screen
                             | ViewKind::HeaderItem
                             | ViewKind::Modal
+                            | ViewKind::InputAccessory
                     ) && self.placeholders.insert(format!("{kind:?}"))
                     {
                         log::warn!("terminal: {kind:?} shown as a placeholder");
@@ -164,6 +165,13 @@ impl Mounter {
                     child,
                     before,
                 } => {
+                    // There is no software keyboard to show it over, as on the desktops.
+                    if self
+                        .get(child)
+                        .is_some_and(|view| view.kind == ViewKind::InputAccessory)
+                    {
+                        continue;
+                    }
                     let was_attached = self.get(child).is_some_and(|v| v.parent.is_some());
                     let modal_position = self.modals.iter().position(|&id| id == child);
                     self.detach(child);

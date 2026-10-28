@@ -401,3 +401,35 @@ fn readline_words_and_whitespace_kills_keep_their_distinct_boundaries() {
     view.handle(modified("w", true, false, false));
     draw_until(&mut view, &mut terminal, &rx, "\"\"");
 }
+
+#[test]
+fn input_accessories_stay_unmounted_as_on_the_desktops() {
+    let code = nsh_bundler::compile_module(
+        "App.tsx",
+        r#"
+        import { mount, View, Text } from "nsh";
+        import { InputAccessoryView } from "nsh/mobile";
+        mount(() => <View>
+            <Text>page</Text>
+            <InputAccessoryView nativeID="bar" style={{ backgroundColor: "blue" }}>
+                <View focusable onPress={() => {}}><Text>accessory</Text></View>
+            </InputAccessoryView>
+        </View>);
+    "#,
+        &[],
+    )
+    .unwrap();
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(40, 8)).unwrap();
+    view.load(Bundle::source(code)).unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "page");
+    let contents: String = terminal
+        .backend()
+        .buffer()
+        .content
+        .iter()
+        .map(|cell| cell.symbol())
+        .collect();
+    assert_eq!(contents.trim(), "page");
+    assert_eq!(view.handle(key("Tab")), Handled::Ignored);
+}

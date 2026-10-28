@@ -678,6 +678,7 @@ permit clipboard writes; `nsh test` uses memory and never writes to the machine'
 | Input | Editable Paragraph, reversed selection and terminal caret; masked text is dots |
 | Searching the screen | The Minibuffer over the bottom row and the match's Cells reversed, only while searching |
 | Input-method composition | Terminal emulator composition, committed text delivered to the field |
+| Input accessories (`InputAccessoryView`) | Left unmounted, as on the desktops: no software keyboard to show them over |
 | Clipboard | OSC 52 writes, desktop reads when available and an in-process copy |
 | Font size, family, line height and letter spacing | Terminal font, display width and one row per line |
 | Shadows, blur, materials, gradients, 3D transforms and blend modes | Decorative features left out silently in this slice |
