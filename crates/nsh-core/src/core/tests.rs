@@ -9815,6 +9815,121 @@ mod components {
         assert_eq!(shown.last().unwrap(), "picked 0 []");
     }
 
+    /// Picks Markdown files, then trashes the first one picked and opens a
+    /// relative path, when pressed; shows what each answered.
+    #[component]
+    fn PathActions() -> impl IntoElement {
+        let shown = signal(String::new());
+        view()
+            .child(text(move || format!("paths {}", shown.get())))
+            .child(view().h(px(10.0)).on_press(move |_: &()| {
+                let picked = pick_paths(crate::system_paths::PathPickRequest {
+                    multiple: true,
+                    extensions: vec![".MD".into(), "markdown".into()],
+                    ..Default::default()
+                });
+                spawn(async move {
+                    let picked = picked.await;
+                    let trashed = match picked.first() {
+                        Some(first) => Some(trash_path(first.clone()).await),
+                        None => None,
+                    };
+                    let opened = open_path("notes.md").await;
+                    shown.set(format!("{picked:?} {trashed:?} {opened}"));
+                });
+            }))
+    }
+
+    fn press_path_actions(c: &mut Core<FakeEngine>) -> Vec<MountItem> {
+        c.mount_root(&crate::element::Root::new::<PathActions>(|| ()));
+        let batch = c.commit().unwrap();
+        let button = batch
+            .items
+            .iter()
+            .find_map(|i| match i {
+                MountItem::Events { id, events } if events.contains(EventKind::Press) => Some(*id),
+                _ => None,
+            })
+            .expect("the button");
+        assert!(c.component_event(button, EventKind::Press, &EventPayload::None));
+        c.commit().map(|b| b.items).unwrap_or_default()
+    }
+
+    fn path_requests(items: Vec<MountItem>) -> Vec<(u32, crate::system_paths::PathRequest)> {
+        items
+            .into_iter()
+            .filter_map(|i| match i {
+                MountItem::Command {
+                    id: ROOT_ID,
+                    command: Command::SystemPath { id, request },
+                } => Some((id, *request)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn the_platform_answers_path_requests() {
+        use crate::system_paths::{self, PathPickRequest, PathRequest};
+        let mut c = core();
+        c.set_environment(crate::element::Environment {
+            system_paths: true,
+            ..Default::default()
+        });
+        let requests = path_requests(press_path_actions(&mut c));
+        // The dialog gets the extensions as it takes them.
+        let expected = PathPickRequest {
+            multiple: true,
+            extensions: vec!["md".into(), "markdown".into()],
+            ..Default::default()
+        };
+        assert_eq!(requests.len(), 1);
+        let (pick, request) = requests.into_iter().next().unwrap();
+        assert_eq!(request, PathRequest::Pick(expected));
+        let picked = vec![
+            std::path::PathBuf::from("/notes/a.md"),
+            std::path::PathBuf::from("/notes/b.md"),
+        ];
+        assert!(c.component_event(
+            ROOT_ID,
+            EventKind::SystemPath,
+            &system_paths::answer(pick, picked)
+        ));
+        // The task goes on to the trash.
+        let mut trash = None;
+        let end = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while trash.is_none() && std::time::Instant::now() < end {
+            c.run_component_tasks();
+            let items = c.commit().map(|b| b.items).unwrap_or_default();
+            trash = path_requests(items).into_iter().next();
+        }
+        let (trash, request) = trash.expect("the trash request");
+        assert_eq!(request, PathRequest::Trash("/notes/a.md".into()));
+        assert!(c.component_event(
+            ROOT_ID,
+            EventKind::SystemPath,
+            &system_paths::failed(trash, "no trash on this volume")
+        ));
+        // A relative path never reaches the platform.
+        let shown = run_until(&mut c, |s| s.iter().any(|t| t.starts_with("paths [")));
+        assert_eq!(
+            shown.last().unwrap(),
+            r#"paths ["/notes/a.md", "/notes/b.md"] Some(Err("no trash on this volume")) false"#
+        );
+    }
+
+    #[test]
+    fn path_requests_answer_at_once_without_file_dialogs() {
+        let mut c = core();
+        let items = press_path_actions(&mut c);
+        assert!(
+            path_requests(items).is_empty(),
+            "nothing reaches the platform"
+        );
+        let shown = run_until(&mut c, |s| s.iter().any(|t| t.starts_with("paths [")));
+        assert_eq!(shown.last().unwrap(), "paths [] None false");
+    }
+
     /// Shows a fallback while a component below it failed; a press tries
     /// again.
     #[component]

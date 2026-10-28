@@ -648,7 +648,10 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
                     | Command::HostCall { .. }
                     // No eyedropper (`Environment::screen_color`): the core
                     // answers no color first.
-                    | Command::PickScreenColor { .. } => e.int(-1),
+                    | Command::PickScreenColor { .. }
+                    // No file dialogs (`Environment::system_paths`): the
+                    // core answers first.
+                    | Command::SystemPath { .. } => e.int(-1),
                 }
             }
         }

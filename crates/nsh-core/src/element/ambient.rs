@@ -10,6 +10,7 @@
 use std::{
     any::{Any, TypeId},
     future::Future,
+    path::PathBuf,
     rc::Rc,
     sync::Arc,
     time::Duration,
@@ -21,7 +22,7 @@ use super::{
     AdaptiveColor, Environment, Memo, Owner, Signal, SignalEquals, Tokens, cleanup, computed,
     reactive::with_data,
     signal_with,
-    task::{self, Action, Answer, ClipboardImage, DialogAnswer, Executor, ImageSize},
+    task::{self, Action, Answer, ClipboardImage, DialogAnswer, Executor, ImageSize, PathAnswer},
 };
 use crate::{
     Command, Dialog, EdgeInsets, LayoutAnimation, NodeId, Points, Size,
@@ -485,6 +486,72 @@ pub fn pick_screen_color() -> Answer<Option<crate::Hsla>> {
 /// copied in a file manager; TS: `Clipboard.readFiles`), to await in a task.
 pub fn clipboard_files() -> Answer<Vec<String>> {
     let (answer, action) = super::services::clipboard_files();
+    act(action);
+    answer
+}
+
+/// Shows the system's open dialog and gives the files (or, with
+/// [`PathPickRequest::folders`](crate::system_paths::PathPickRequest::folders),
+/// the folders) the user picked, to await in a task: none when cancelled
+/// or on a platform without file dialogs (iOS, Android, the web;
+/// [`crate::platform::Environment::system_paths`]). GPUI's
+/// `prompt_for_paths`.
+pub fn pick_paths(request: crate::system_paths::PathPickRequest) -> Answer<Vec<PathBuf>> {
+    let (answer, action) = super::services::system_path(
+        crate::system_paths::PathRequest::Pick(request),
+        PathAnswer::Pick,
+    );
+    act(action);
+    answer
+}
+
+/// Shows the system's save dialog and gives the path the user chose to
+/// save to, to await in a task: `None` when cancelled or on a platform
+/// without file dialogs. The file is not created. GPUI's
+/// `prompt_for_new_path`.
+pub fn pick_save_path(request: crate::system_paths::SavePathRequest) -> Answer<Option<PathBuf>> {
+    let (answer, action) = super::services::system_path(
+        crate::system_paths::PathRequest::Save(request),
+        PathAnswer::Save,
+    );
+    act(action);
+    answer
+}
+
+/// Opens the local file or folder at `path` (absolute) in its default app
+/// (GPUI's `open_with_system`), to await in a task or drop: whether it
+/// opened, `false` for a relative path or on a platform that opens no
+/// local paths. [`open_url`] opens no `file:` URLs; this is their way.
+pub fn open_path(path: impl Into<PathBuf>) -> Answer<bool> {
+    let (answer, action) = super::services::system_path(
+        crate::system_paths::PathRequest::Open(path.into()),
+        PathAnswer::Done,
+    );
+    act(action);
+    answer
+}
+
+/// Shows the item at `path` (absolute) selected in the file manager
+/// (Finder, File Explorer, the desktop's file manager; GPUI's
+/// `reveal_path`), to await in a task or drop: whether it showed.
+pub fn reveal_path(path: impl Into<PathBuf>) -> Answer<bool> {
+    let (answer, action) = super::services::system_path(
+        crate::system_paths::PathRequest::Reveal(path.into()),
+        PathAnswer::Done,
+    );
+    act(action);
+    answer
+}
+
+/// Moves the item at `path` (absolute) to the trash (the Recycle Bin on
+/// Windows), to await in a task: where it went when the platform says
+/// (macOS), else `None`; the error when it could not (it does not exist,
+/// the volume has no trash, the platform has none).
+pub fn trash_path(path: impl Into<PathBuf>) -> Answer<Result<Option<PathBuf>, String>> {
+    let (answer, action) = super::services::system_path(
+        crate::system_paths::PathRequest::Trash(path.into()),
+        PathAnswer::Trash,
+    );
     act(action);
     answer
 }

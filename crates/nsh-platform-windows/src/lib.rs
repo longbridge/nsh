@@ -52,6 +52,7 @@ mod surface;
 #[cfg(feature = "dev")]
 mod synth;
 mod system;
+mod system_paths;
 mod text;
 mod text_input;
 mod transition;

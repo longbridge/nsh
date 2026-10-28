@@ -366,6 +366,7 @@ fn initial_environment() -> Environment {
         color_scheme: ColorScheme::Light,
         os: Os::Linux,
         idiom: Idiom::Desktop,
+        system_paths: true,
         ..Environment::default()
     }
 }

@@ -52,6 +52,7 @@ pub mod storage;
 mod style;
 #[cfg(feature = "svg")]
 pub mod svg;
+pub mod system_paths;
 pub mod tailwind;
 mod text;
 pub mod text_edit;

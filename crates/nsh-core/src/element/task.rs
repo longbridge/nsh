@@ -102,6 +102,9 @@ pub(crate) enum Action {
     /// Lets the user pick a color on the screen; the color (none when
     /// cancelled or not supported) resolves the slot.
     PickScreenColor(AnswerSlot<Option<crate::Hsla>>),
+    /// A request on local paths for the platform
+    /// ([`crate::system_paths`]); its answer resolves the slot.
+    SystemPath(crate::system_paths::PathRequest, PathAnswer),
     /// An operation on the native animation graph.
     Animation(crate::animation::AnimationOp),
     /// Starts an animation; its end resolves the slot.
@@ -131,6 +134,40 @@ pub(crate) enum Action {
     /// Measures the node with the layout of the commit the action goes out
     /// with; the measurement resolves the slot.
     Measure(NodeId, AnswerSlot<Option<crate::Measurement>>),
+}
+
+/// A request on local paths waiting for the platform's answer
+/// ([`Action::SystemPath`]).
+pub(crate) enum PathAnswer {
+    /// The paths picked in the open dialog.
+    Pick(AnswerSlot<Vec<std::path::PathBuf>>),
+    /// The path chosen in the save dialog.
+    Save(AnswerSlot<Option<std::path::PathBuf>>),
+    /// Whether the path opened or showed in the file manager.
+    Done(AnswerSlot<bool>),
+    /// Where the trashed item went, or why it was not.
+    Trash(AnswerSlot<Result<Option<std::path::PathBuf>, String>>),
+}
+
+impl PathAnswer {
+    /// Answers with the platform's `paths`, or its `error`.
+    pub(crate) fn deliver(self, mut paths: Vec<std::path::PathBuf>, error: Option<String>) {
+        match self {
+            PathAnswer::Pick(slot) => {
+                slot.borrow_mut()
+                    .deliver(if error.is_some() { Vec::new() } else { paths })
+            }
+            PathAnswer::Save(slot) => slot.borrow_mut().deliver(match error {
+                Some(_) => None,
+                None => (!paths.is_empty()).then(|| paths.swap_remove(0)),
+            }),
+            PathAnswer::Done(slot) => slot.borrow_mut().deliver(error.is_none()),
+            PathAnswer::Trash(slot) => slot.borrow_mut().deliver(match error {
+                Some(error) => Err(error),
+                None => Ok((!paths.is_empty()).then(|| paths.swap_remove(0))),
+            }),
+        }
+    }
 }
 
 /// A clipboard read waiting for the platform's answer.

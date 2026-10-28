@@ -262,6 +262,12 @@ pub struct Headless {
     picks: Picks,
     /// The color the user picks on the screen ([`Headless::on_screen_color`]).
     screen_color: Option<nsh_core::Hsla>,
+    /// The paths the user picks in the open dialog
+    /// ([`Headless::on_pick_paths`]).
+    picked_paths: Vec<std::path::PathBuf>,
+    /// The path the user chooses in the save dialog
+    /// ([`Headless::on_pick_save_path`]).
+    save_path: Option<std::path::PathBuf>,
     step: String,
     applied: u64,
     /// The app left (`process.exit`, `Command::ExitApp`): no more batches
@@ -313,6 +319,8 @@ impl Headless {
             dialogs: Dialogs::Default,
             picks: Picks::Default,
             screen_color: None,
+            picked_paths: Vec::new(),
+            save_path: None,
             step: "open".to_owned(),
             applied: 0,
             exited: false,
@@ -539,6 +547,24 @@ impl Headless {
         self.set_environment("onScreenColor", |env| env.screen_color = true)
     }
 
+    /// The platform has file dialogs, a file manager and a trash
+    /// ([`nsh_core::platform::Environment::system_paths`]), and the user
+    /// picks `paths` whenever the app shows the open dialog (`pick_paths`;
+    /// none cancels). Opening, revealing and trashing paths then succeed
+    /// without touching them (trashing says nowhere they went); every
+    /// request is in [`Screen::path_requests`].
+    pub fn on_pick_paths(&mut self, paths: Vec<std::path::PathBuf>) -> Result<(), String> {
+        self.picked_paths = paths;
+        self.set_environment("onPickPaths", |env| env.system_paths = true)
+    }
+
+    /// As [`Headless::on_pick_paths`], for the save dialog
+    /// (`pick_save_path`): the user chooses `path`; `None` cancels.
+    pub fn on_pick_save_path(&mut self, path: Option<std::path::PathBuf>) -> Result<(), String> {
+        self.save_path = path;
+        self.set_environment("onPickSavePath", |env| env.system_paths = true)
+    }
+
     /// Leaves the picks steps ask for to the caller: a step returns with
     /// one asked ([`Headless::pending_pick`]) until [`Headless::answer_pick`]
     /// answers it.
@@ -692,6 +718,19 @@ impl Headless {
                 fields.push(("color", PayloadValue::Number(f64::from(packed))));
             }
             control.dispatch_event(ROOT_ID, EventKind::ScreenColor, EventPayload::Map(fields));
+        }
+        for (id, request) in self.screen.take_path_answers() {
+            use nsh_core::system_paths::{self, PathRequest};
+            let paths = match request {
+                PathRequest::Pick(_) => self.picked_paths.clone(),
+                PathRequest::Save(_) => self.save_path.clone().into_iter().collect(),
+                _ => Vec::new(),
+            };
+            control.dispatch_event(
+                ROOT_ID,
+                EventKind::SystemPath,
+                system_paths::answer(id, paths),
+            );
         }
         if self.screen.take_back_asked() {
             self.go_back(false);
@@ -2373,5 +2412,45 @@ mod tests {
         app.wait(Duration::from_secs(5)).unwrap();
         assert!(app.screen().sent(&Command::ExitApp));
         assert!(started.elapsed() < Duration::from_secs(2));
+    }
+
+    /// Saves to the path the user chooses and shows it in the file manager.
+    #[component]
+    fn SaveAs() -> impl IntoElement {
+        let saved = signal(String::from("none"));
+        view()
+            .child(text(move || format!("Saved {}", saved.get())))
+            .child(text("Save").on_press(move |_: &()| {
+                let mut request = nsh_core::system_paths::SavePathRequest::default();
+                request.name = Some("Untitled.md".into());
+                let path = pick_save_path(request);
+                spawn(async move {
+                    let Some(path) = path.await else {
+                        return saved.set("cancelled".into());
+                    };
+                    let shown = reveal_path(path.clone()).await;
+                    saved.set(format!("{} {shown}", path.display()));
+                });
+            }))
+    }
+
+    #[test]
+    fn the_save_dialog_answers_with_the_path_the_test_chose() {
+        use nsh_core::system_paths::PathRequest;
+        let mut app = Headless::start(EngineConfig::new(Root::of::<SaveAs>())).unwrap();
+        app.first_render().unwrap();
+        // No file dialogs on this platform: cancelled at once.
+        app.press("Save").unwrap();
+        app.wait_for("Saved cancelled").unwrap();
+        assert!(app.screen().path_requests().is_empty());
+        app.on_pick_save_path(Some("/docs/a.md".into())).unwrap();
+        app.press("Save").unwrap();
+        app.wait_for("Saved /docs/a.md true").unwrap();
+        let requests = app.screen().path_requests();
+        assert_eq!(requests.len(), 2);
+        assert!(
+            matches!(&requests[0], PathRequest::Save(save) if save.name.as_deref() == Some("Untitled.md"))
+        );
+        assert_eq!(requests[1], PathRequest::Reveal("/docs/a.md".into()));
     }
 }

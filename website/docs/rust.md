@@ -171,6 +171,31 @@ fn window_bar() -> impl IntoElement {
 `set_title_bar(TitleBarStyle::Default, None)` restores the system title bar.
 `close_window()` follows the embedding host's normal window-close behavior.
 
+## Files and folders
+
+On the desktops, Rust code shows the system's file dialogs and hands local paths to
+the system, each answer awaited in a task: `pick_paths` (files, or folders with
+`folders`), `pick_save_path`, `open_path` (the file's default app), `reveal_path`
+(the item selected in Finder, File Explorer or the file manager) and `trash_path`
+(where the item went, when macOS says). Elsewhere a pick answers with no paths,
+`open_path` and `reveal_path` with `false` and `trash_path` with an error.
+
+```rust
+use nsh_core::{prelude::*, system_paths::PathPickRequest};
+
+fn open_notes() {
+    let mut request = PathPickRequest::default();
+    request.multiple = true;
+    request.extensions = vec!["md".into()];
+    let picked = pick_paths(request);
+    spawn(async move {
+        for path in picked.await {
+            let _ = reveal_path(path).await;
+        }
+    });
+}
+```
+
 ## Extending a Rust app with TSX
 
 The crate's `#[native_module("app/native")]` function names what TSX may import: components

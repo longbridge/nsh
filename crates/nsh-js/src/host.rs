@@ -1283,6 +1283,8 @@ fn payload_object<'js>(cx: &Ctx<'js>, payload: &EventPayload) -> rquickjs::Resul
         }
         // The core answers picks; JS never gets their files this way.
         EventPayload::Picked { id, .. } => obj.set("id", *id)?,
+        // The core answers these too.
+        EventPayload::SystemPath { id, .. } => obj.set("id", *id)?,
         EventPayload::Native { name, data } => {
             obj.set("name", &**name)?;
             obj.set("data", json_value(cx, data)?)?;

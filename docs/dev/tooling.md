@@ -378,6 +378,10 @@ Headless runs play the platform's part NSH's protocol defines, and refuse what o
 - the platform has no eyedropper (`Environment::screen_color` false) until a Rust test calls
   `Headless::on_screen_color(color)`: then `Command::PickScreenColor` is answered with `onScreenColor`, that color (or
   none, a cancel);
+- the platform has no file dialogs, file manager or trash (`Environment::system_paths` false) until a Rust test calls
+  `Headless::on_pick_paths(paths)` or `Headless::on_pick_save_path(path)`: then each `Command::SystemPath` is recorded
+  (`Screen::path_requests`), never carried out, and answered with `onSystemPath`: the open dialog with those paths,
+  the save dialog with that path (none, a cancel), opening, revealing and trashing with success;
 - the embedding app is the test's (`EngineConfig::host`, `Headless::host`): `open`'s `host.params` are the launch
   parameters, `host.handlers` the channel's handlers (`module.rs` `host_setup`: a value answers at once, a function's
   calls go over a channel to `RouteServer`, which `serve` answers on the test file's VM while a step runs, as a route's

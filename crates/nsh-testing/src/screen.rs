@@ -143,6 +143,11 @@ pub struct Screen {
     url_opens: Vec<u32>,
     /// The screen colors asked for (`pick_screen_color`), to answer.
     screen_colors: Vec<u32>,
+    /// The requests on local paths that reached the platform
+    /// (`pick_paths`, `open_path`, ...), in order.
+    path_requests: Vec<nsh_core::system_paths::PathRequest>,
+    /// Those to answer.
+    path_answers: Vec<(u32, nsh_core::system_paths::PathRequest)>,
     /// What the app asked that only a real platform answers, since the
     /// last call.
     unsupported: Vec<&'static str>,
@@ -532,6 +537,12 @@ impl Screen {
                 self.url_opens.push(*id);
             }
             Command::PickScreenColor { id } => self.screen_colors.push(*id),
+            // Recorded, never carried out: a test's machine opens, shows
+            // and trashes nothing.
+            Command::SystemPath { id, request } => {
+                self.path_requests.push((**request).clone());
+                self.path_answers.push((*id, (**request).clone()));
+            }
             Command::Back => self.back_asked = true,
             Command::Desktop(desktop) => {
                 if let nsh_core::desktop::DesktopCommand::PopupMenu { items, .. } = &**desktop {
@@ -992,6 +1003,19 @@ impl Screen {
     /// the `openUrl` capability and the embedding app's URL handler.
     pub fn opened_urls(&self) -> &[String] {
         &self.opened_urls
+    }
+
+    /// The requests on local paths that reached the platform, in order
+    /// (`pick_paths`, `pick_save_path`, `open_path`, `reveal_path`,
+    /// `trash_path`; only once the environment has
+    /// [`nsh_core::platform::Environment::system_paths`]).
+    pub fn path_requests(&self) -> &[nsh_core::system_paths::PathRequest] {
+        &self.path_requests
+    }
+
+    /// The requests on local paths to answer since the last call.
+    pub(crate) fn take_path_answers(&mut self) -> Vec<(u32, nsh_core::system_paths::PathRequest)> {
+        std::mem::take(&mut self.path_answers)
     }
 
     /// The screen color requests to answer since the last call.

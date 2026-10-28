@@ -22,9 +22,9 @@ use crate::{
     element::{
         Action, AnswerSlot, AnyInstance, AnyValue, Attrs, Child, ClipboardRead, ComponentError,
         ComponentSpec, ElKind, ElNode, Environment, Executor, ImageSize, IntoElement, JsEvent,
-        JsResult, ListConfig, Listener, ModuleCx, ParentElement, PlaceFn, Position, Posts,
-        Reactive, Registry, Root, RustCall, RustOp, SharedString, StyleRefinement, Task, Tokens,
-        caught,
+        JsResult, ListConfig, Listener, ModuleCx, ParentElement, PathAnswer, PlaceFn, Position,
+        Posts, Reactive, Registry, Root, RustCall, RustOp, SharedString, StyleRefinement, Task,
+        Tokens, caught,
         responder::ResponderEl,
         view,
         virtual_list::{self, RowFn, SeparatorFn, VirtualListEl},
@@ -513,6 +513,10 @@ pub(super) struct Components {
     /// Colors being picked on the screen, by request id: their answers.
     screen_colors: FxHashMap<u32, AnswerSlot<Option<crate::Hsla>>>,
     next_screen_color: u32,
+    /// Requests on local paths (`pick_paths`, `open_path`, ...), by
+    /// request id: their answers.
+    system_paths: FxHashMap<u32, PathAnswer>,
+    next_system_path: u32,
     /// HTTP requests of tasks (`ui::fetch`), by request id: what arrived
     /// so far and the answer.
     fetches: FxHashMap<u32, PendingFetch>,
@@ -602,6 +606,8 @@ impl Default for Components {
             next_url_open: 0,
             screen_colors: FxHashMap::default(),
             next_screen_color: 1,
+            system_paths: FxHashMap::default(),
+            next_system_path: 1,
             next_clipboard_read: 1,
             picks: FxHashMap::default(),
             next_pick: 1,
@@ -4717,6 +4723,41 @@ impl<M: TextEngine> Core<M> {
                     command: Command::PickScreenColor { id },
                 });
             }
+            Action::SystemPath(mut request, answer) => {
+                use crate::system_paths::PathRequest;
+                if !self.components.environment.system_paths {
+                    answer.deliver(
+                        Vec::new(),
+                        Some("this platform has no file dialogs, file manager or trash".into()),
+                    );
+                    return;
+                }
+                match &mut request {
+                    PathRequest::Pick(pick) => pick.normalize(),
+                    PathRequest::Save(save) => save.normalize(),
+                    PathRequest::Open(path)
+                    | PathRequest::Reveal(path)
+                    | PathRequest::Trash(path)
+                        if !path.is_absolute() =>
+                    {
+                        let refused = format!("`{}` is not an absolute path", path.display());
+                        log::warn!("{refused}");
+                        answer.deliver(Vec::new(), Some(refused));
+                        return;
+                    }
+                    _ => {}
+                }
+                let id = self.components.next_system_path;
+                self.components.next_system_path = id.wrapping_add(1);
+                self.components.system_paths.insert(id, answer);
+                let _ = self.apply_op(Op::Command {
+                    id: crate::ROOT_ID,
+                    command: Command::SystemPath {
+                        id,
+                        request: Box::new(request),
+                    },
+                });
+            }
         }
     }
 
@@ -4986,6 +5027,20 @@ impl<M: TextEngine> Core<M> {
                 let color = number("color").map(|packed| crate::Color(packed as u32).into());
                 if let Some(answer) = self.components.screen_colors.remove(&(request as u32)) {
                     answer.borrow_mut().deliver(color);
+                }
+                true
+            }
+            EventKind::SystemPath if id == crate::ROOT_ID => {
+                let EventPayload::SystemPath {
+                    id: request,
+                    paths,
+                    error,
+                } = payload
+                else {
+                    return false;
+                };
+                if let Some(answer) = self.components.system_paths.remove(request) {
+                    answer.deliver(paths.clone(), error.clone());
                 }
                 true
             }

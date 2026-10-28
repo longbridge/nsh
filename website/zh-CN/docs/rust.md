@@ -159,6 +159,31 @@ fn window_bar() -> impl IntoElement {
 `set_title_bar(TitleBarStyle::Default, None)` 恢复系统标题栏。
 `close_window()` 遵循宿主的正常窗口关闭行为。
 
+## 文件和文件夹
+
+在桌面平台上，Rust 代码可以显示系统的文件对话框，并把本地路径交给系统处理，
+每个结果都在任务中等待：`pick_paths`（选择文件，设置 `folders` 时选择文件夹）、
+`pick_save_path`、`open_path`（用文件的默认应用打开）、`reveal_path`
+（在访达、文件资源管理器或文件管理器中选中该项）和 `trash_path`
+（macOS 告知时返回该项移到的位置）。在其他平台上，选择返回空列表，
+`open_path` 和 `reveal_path` 返回 `false`，`trash_path` 返回错误。
+
+```rust
+use nsh_core::{prelude::*, system_paths::PathPickRequest};
+
+fn open_notes() {
+    let mut request = PathPickRequest::default();
+    request.multiple = true;
+    request.extensions = vec!["md".into()];
+    let picked = pick_paths(request);
+    spawn(async move {
+        for path in picked.await {
+            let _ = reveal_path(path).await;
+        }
+    });
+}
+```
+
 ## 用 TSX 扩展 Rust 应用
 
 crate 的 `#[native_module("app/native")]` 函数声明 TSX 可以导入的内容：组件（`registry.register::<Chart>()`）、函数模块
