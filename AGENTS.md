@@ -519,7 +519,8 @@ Details and examples: "Commits and pull requests" in `CONTRIBUTING.md`.
   workflow. A request to release or push changes does not authorize a direct push to `main`.
 
 - Subjects and PR titles are `<area>: <What the change does>`: the area in lower case (a crate without `nsh-`:
-  `core`, `js`, `engine`, `bundler`, `cli`, `base`, ...; one platform: `ios`, `android`, `macos`, `windows`,
+  `core`, `js`, `engine`, `bundler`, `cli`, ...; never `base`: a change to `nsh-base` names its component in snake
+  case, `rich_editor`, `editor`, `input`, `data_table`, ...; one platform: `ios`, `android`, `macos`, `windows`,
   `linux`; `desktop` for macOS, Windows and Linux together, `mobile` for iOS and Android together; `runtime`, a module;
   `tailwind`, `text`, `docs`, `examples`, `gallery`). One area only, never several separated by commas: for a change
   that spans parts, judge it as a whole and name the part it is mostly about (a feature the core adds and the platforms
