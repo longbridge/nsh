@@ -489,7 +489,7 @@ cryptographic entropy comes from the browser's `crypto.getRandomValues`. The `pa
 
 `filesystem.rs` implements `FileSystem` through the player's Origin Private File System bridge. Rust checks the app's file grants, normalizes paths relative to its configured data directory and enforces quotas before sending an operation. OPFS persists files in an app-specific namespace within the page's origin and requires a secure context. File modification time comes from browser metadata; unknown access/birth times and modes are zero. `rename` uses the browser handle's atomic `move` operation, reporting `ENOTSUP` when that operation is unavailable. OPFS entries are files and directories; `readlink` reports `EINVAL`.
 
-`websocket.rs` implements the shared `WebSocketTransport` with browser WebSocket. Both the global constructor and `websocket.WebSocket.connect` use it, with HTTP capability checks, Rust queue/message/connection limits, deadlines and cancellation. Custom handshake headers report an explicit unsupported-option error. NSH checks the initial normalized URL; browser policy controls WebSocket redirects, mixed content and connection access. Native WebSocket handshakes reject redirects. Raw TCP and subprocess calls return typed platform errors; their modules and metadata exports still load.
+`websocket.rs` implements the shared `WebSocketTransport` with browser WebSocket. Both the global constructor and the `websocket` module's `connect` use it, with HTTP capability checks, Rust queue/message/connection limits, deadlines and cancellation. The browser's WebSocket API has no flow control, so while the module's unread queue is full the task is paused (`WebSocketTask::pause`, `websocket_pause`) and `web/nsh.js` holds the socket's events in the page, in order, delivering them again as the app reads; the browser's `error` event carries no reason and rejects with `ERR_SOCKET_CLOSED`. Custom handshake headers report an explicit unsupported-option error. NSH checks the initial normalized URL; browser policy controls WebSocket redirects, mixed content and connection access. Native WebSocket handshakes reject redirects. Raw TCP and subprocess calls return typed platform errors; their modules and metadata exports still load.
 
 A granted `process.exit(code?)` follows the engine's `ExitApp` command to the player. The player queues `Player.reset()` in a microtask after the current mount batch returns, stopping the app and clearing its surface while retaining the host page. Deferring disposal avoids reentering and freeing the VM during its batch callback; the queued action checks the app identity so it cannot reset a replacement app.
 
@@ -859,7 +859,9 @@ scroll events postpone it, and the browser's `scrollend` cancels it.
   and action sheet; their keys and focus are under Input. Only clicks pressed inside the dialog count: a tap's
   compatibility click, which lands after the press that opened it, must not dismiss it.
 - **The clipboard**: `navigator.clipboard`, with a copy command as the fallback for writes. Reading (also for
-  `hasText`, since browsers cannot tell without reading) needs a secure context and may ask the user.
+  `hasText`, since browsers cannot tell without reading) needs a secure context and may ask the user. An image read
+  is the first image item as a `data:` URI the player encodes itself; the core measures it against
+  `MAX_IMAGE_BYTES` (`readImage` rejects with `ERR_NSH_QUOTA_EXCEEDED` past it).
 - **Images**: `<img>` with `object-fit` (`center` is `scale-down`; SVG files too: the browser draws them, so the
   runtime links no SVG renderer and `tintColor`'s mask works on them as on bitmaps), `placeholder` as a second
   image until the load (faded over `fadeDuration`), `blurRadius` as a CSS blur, a failed image hidden
