@@ -268,7 +268,7 @@ them yet (`compatibility.md`). The frozen RN-shaped modules keep their names. A 
 | `TextLayoutLine` `{ text, x, y, width, height, ... }` | `{ text; bounds: Bounds; ... }` | Geometry | `ascender` / `descender` / `capHeight` / `xHeight` stay |
 | `Insets` (type) | `Edges` | Geometry | `safeArea()`, `safeAreaInsets()`; `hitSlop` / `contentInset` take `number \| Partial<Edges>` / `Partial<Edges>` |
 | `contentOffset`, `Overlay` `anchor`, `Menu.popup`'s `at` | typed `Partial<Point>` / `Point` | Geometry | Same fields |
-| `nsh/desktop` `WindowFrame` `{ x, y, width, height, animated, anchorTop }` | `{ origin?: Partial<Point>; size?: Partial<Size>; animated; anchorTop }` | Geometry | |
+| `nsh/desktop` `WindowFrame` `{ x, y, width, height, animated, anchorTop }` | `{ origin?: Partial<Point>; size?: Partial<Size>; animated }` | Geometry | 2026-10-29: `origin` is the top left corner on every platform (macOS's too, from the primary screen's top), so a height without a `y` always keeps the top edge and `anchorTop` is gone |
 | `windowSize()`, `ImageSize`, Image `onLoad`, `onContentSizeChange` | typed `Size` (the events' as `{ size }`) | Geometry | Same fields; pixel sizes are `PixelSize` (next row); Image `onLoad({ size })` and `onContentSizeChange({ size })` since 2026-10-27 (below) |
 | `ImageSize`, Image and Video `onLoad`'s, `ClipboardImage`'s and `PickedImage`'s `Size` (pixels) | `PixelSize` | Units | Same fields; `Size` is points |
 | `PanResponder` `vx` / `vy` (points per millisecond), `keyboardFrame().duration` (seconds) | points per second, milliseconds | Units | |
