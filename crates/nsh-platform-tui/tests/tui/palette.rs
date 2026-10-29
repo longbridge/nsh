@@ -352,3 +352,45 @@ fn neutral_text_is_read_against_the_opaque_fill_it_was_designed_on() {
         "the fill is still not drawn"
     );
 }
+
+#[component]
+fn SelectedChartRow() -> impl IntoElement {
+    view().flex_1().child(
+        view()
+            .w(px(160.0))
+            .h(px(16.0))
+            .flex_row()
+            .accessibility_state(AccessibilityState {
+                selected: true,
+                ..Default::default()
+            })
+            .child(text("ORBX").w(px(48.0)))
+            .child(
+                canvas(
+                    Painter::new()
+                        .fill_color(nsh_core::color::rgb(0xef4444))
+                        .fill_rect(0.0, 0.0, 16.0, 16.0),
+                )
+                .label("trend")
+                .w(px(16.0))
+                .h(px(16.0)),
+            ),
+    )
+}
+
+#[test]
+fn canvas_cells_inside_a_reversed_view_keep_their_palette_color_unreversed() {
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(20, 2)).unwrap();
+    view.load(App::Rust(Root::new::<SelectedChartRow>(|| ())))
+        .unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "ORBX");
+    let buffer = terminal.backend().buffer();
+    assert!(reversed(buffer, 0, 0), "the row's text");
+    assert!(reversed(buffer, 9, 0), "the row's empty Cells");
+    for x in 6..8 {
+        assert_eq!(buffer[(x, 0)].symbol(), "⣿");
+        assert_eq!(buffer[(x, 0)].fg, Color::Red);
+        assert!(!reversed(buffer, x, 0), "the chart at {x}");
+    }
+}

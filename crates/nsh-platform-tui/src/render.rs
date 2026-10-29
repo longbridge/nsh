@@ -89,6 +89,9 @@ struct Painter<'a> {
     /// The opaque fill of the nearest view drawn so far that has one: what
     /// the app drew the current view on.
     background: Option<nsh_core::Color>,
+    /// The Cells a canvas drew, by buffer index: a reversed view around them
+    /// leaves them as drawn.
+    canvas_cells: Vec<bool>,
 }
 
 /// Below this opacity, multiplied through its ancestors, a view draws
@@ -116,6 +119,7 @@ pub(crate) fn draw(
         borders: CellBounds::UNBOUNDED,
         fit: false,
     };
+    let canvas_cells = vec![false; buffer.area.area() as usize];
     let mut painter = Painter {
         text_runs: HashMap::new(),
         tree,
@@ -127,6 +131,7 @@ pub(crate) fn draw(
         scheme,
         focused,
         background: None,
+        canvas_cells,
     };
     painter.view(ROOT_ID, Projection::IDENTITY, clip, 1.0, true, None);
     let modals = painter.tree.modals.clone();
@@ -534,7 +539,14 @@ impl Painter<'_> {
                             + usize::from(x - visible.x)])
             };
             if let Some(fill) = fill {
-                fill_cells(self.buffer, visible, fill, covered);
+                fill_cells(self.buffer, visible, fill, &covered);
+                for y in visible.y..visible.bottom() {
+                    for x in visible.x..visible.right() {
+                        if covered(x, y) {
+                            self.canvas_cells[self.buffer.index_of(x, y)] = false;
+                        }
+                    }
+                }
             }
             let mut borders = Borders::NONE;
             if sides[0] && bounds.top == i32::from(visible.y) {
@@ -620,6 +632,8 @@ impl Painter<'_> {
                 );
             }
             if let Some(canvas) = &view.canvas {
+                let buffer_area = self.buffer.area;
+                let canvas_cells = &mut self.canvas_cells;
                 crate::canvas::draw(
                     canvas,
                     self.buffer,
@@ -628,6 +642,11 @@ impl Painter<'_> {
                     self.cells,
                     projection.snapped(Point::new(-origin.x, -origin.y)),
                     ground,
+                    |x, y| {
+                        let index = usize::from(y - buffer_area.y) * usize::from(buffer_area.width)
+                            + usize::from(x - buffer_area.x);
+                        canvas_cells[index] = true;
+                    },
                 );
             }
             if let Some(component) = &mut view.component {
@@ -693,7 +712,9 @@ impl Painter<'_> {
         if reversed && visible_drawn {
             for y in visible.y..visible.bottom() {
                 for x in visible.x..visible.right() {
-                    self.buffer[(x, y)].modifier.insert(Modifier::REVERSED);
+                    if !self.canvas_cells[self.buffer.index_of(x, y)] {
+                        self.buffer[(x, y)].modifier.insert(Modifier::REVERSED);
+                    }
                 }
             }
         }

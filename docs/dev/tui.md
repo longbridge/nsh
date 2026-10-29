@@ -361,8 +361,9 @@ dot) draws its Cells reversed in the fill's palette color; one thinner than half
 above. Gradients are left out.
 
 Views whose accessibility state is selected or checked (`checked: true`; mixed is not), and the focused control,
-draw their content reversed over their Cell box, after their descendants. A focused text field shows the
-terminal cursor at its caret instead. Outlines, including the app's focus outlines, are not drawn: focus is the
+draw their content reversed over their Cell box, after their descendants. Cells a canvas drew stay as drawn,
+in their palette color on the terminal background (a sparkline in a selected row), unless a later fill covered
+them. A focused text field shows the terminal cursor at its caret instead. Outlines, including the app's focus outlines, are not drawn: focus is the
 reversed box. A view whose opacity, multiplied through its ancestors, is below 3% draws nothing and keeps its hit
 regions; any other opacity is drawn as opaque.
 

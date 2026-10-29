@@ -87,7 +87,9 @@ impl CanvasView {
 }
 
 /// Draws `canvas` into the `visible` Cells of a view whose Cells are
-/// `bounds`, in the palette on `ground`.
+/// `bounds`, in the palette on `ground`, and calls `drawn` with each Cell it
+/// writes.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn draw(
     canvas: &CanvasView,
     buffer: &mut Buffer,
@@ -96,6 +98,7 @@ pub(crate) fn draw(
     cells: CellSize,
     projection: crate::animation::Projection,
     ground: Ground,
+    mut drawn: impl FnMut(u16, u16),
 ) {
     if visible.is_empty() {
         return;
@@ -132,6 +135,7 @@ pub(crate) fn draw(
                 let symbol = dot.symbol().to_owned();
                 let cell = &mut buffer[(visible.x + x, visible.y + y)];
                 cell.set_symbol(&symbol);
+                drawn(visible.x + x, visible.y + y);
                 if let Some((style, _)) =
                     inks[usize::from(y) * usize::from(visible.width) + usize::from(x)]
                 {
@@ -184,13 +188,16 @@ pub(crate) fn draw(
             if label.italic {
                 style = style.add_modifier(Modifier::ITALIC);
             }
-            buffer.set_stringn(
+            let (end, _) = buffer.set_stringn(
                 visible.x + column,
                 visible.y + row,
                 grapheme,
                 usize::from(visible.width - column),
                 style,
             );
+            for x in visible.x + column..end {
+                drawn(x, visible.y + row);
+            }
         }
     }
 }
