@@ -846,62 +846,79 @@ impl Painter<'_> {
         }
     }
 
-    /// Draws a toggle's glyph: from its indicator's left column on its middle
-    /// row, extending right only into blank Cells, else its short form, else
-    /// nothing; without an indicator, in the blank Cells before its label with
-    /// one Cell between them.
+    /// Draws a toggle's glyph on its label's first row (else its indicator's
+    /// middle row). Before the label it ends one Cell from the label's first
+    /// glyph, reaching left into the control's blank Cells, else its short
+    /// form does, else it sits flush with the label. An indicator after the
+    /// label (a trailing switch) takes the glyph from its left column,
+    /// extending right only into blank Cells, else the short form.
     fn toggle_glyph(&mut self, visible: Rect, toggle: Toggle, texts: usize) {
+        let label = self.text_extent(visible, texts);
+        let indicator = toggle.indicator.and_then(|indicator| {
+            let bounds = self.geometry[texts..]
+                .iter()
+                .find(|geometry| geometry.id == indicator)?
+                .bounds;
+            Some((indicator, bounds))
+        });
+        let style = match (indicator, label) {
+            (Some((indicator, _)), _) => self
+                .tree
+                .get(indicator)
+                .map_or_else(Style::reset, |view| self.indicator_ink(view)),
+            (None, Some((y, left, _))) => self.buffer[(left, y)].style(),
+            (None, None) => return,
+        };
         let blank = |buffer: &Buffer, x: u16, y: u16| {
             visible.contains(ratatui_core::layout::Position::new(x, y))
                 && buffer[(x, y)].symbol() == " "
         };
-        if let Some(indicator) = toggle.indicator {
-            let Some(geometry) = self.geometry[texts..].iter().find(|g| g.id == indicator) else {
-                return;
-            };
-            let bounds = geometry.bounds;
-            let (Ok(x), Ok(y)) = (
-                u16::try_from(bounds.left),
-                u16::try_from(bounds.top + (bounds.bottom - bounds.top - 1).max(0) / 2),
-            ) else {
-                return;
-            };
-            if !visible.contains(ratatui_core::layout::Position::new(x, y)) {
-                return;
-            }
-            let own = u16::try_from(bounds.right - bounds.left)
-                .unwrap_or(0)
-                .min(visible.right() - x);
-            let room = own
-                + (x + own..visible.right())
-                    .take_while(|&column| blank(self.buffer, column, y))
-                    .count() as u16;
-            let Some(glyph) = [toggle.glyph, toggle.short]
+        let glyphs = [toggle.glyph, toggle.short];
+        match (indicator, label) {
+            (indicator, Some((y, left, _)))
+                if indicator.is_none_or(|(_, bounds)| bounds.left < i32::from(left)) =>
+            {
+                let placed = [
+                    (glyphs[0], 1),
+                    (glyphs[1], 1),
+                    (glyphs[0], 0),
+                    (glyphs[1], 0),
+                ]
                 .into_iter()
-                .find(|glyph| glyph.width() as u16 <= room)
-            else {
-                return;
-            };
-            let style = self
-                .tree
-                .get(indicator)
-                .map_or_else(Style::reset, |view| self.indicator_ink(view));
-            self.buffer.set_string(x, y, glyph, style);
-            return;
-        }
-        let Some((y, left, _)) = self.text_extent(visible, texts) else {
-            return;
-        };
-        let style = self.buffer[(left, y)].style();
-        for glyph in [toggle.glyph, toggle.short] {
-            let width = glyph.width() as u16;
-            let Some(start) = left.checked_sub(width + 1) else {
-                continue;
-            };
-            if (start..left).all(|x| blank(self.buffer, x, y)) {
-                self.buffer.set_string(start, y, glyph, style);
-                return;
+                .find_map(|(glyph, gap)| {
+                    let start = left.checked_sub(glyph.width() as u16 + gap)?;
+                    (start..left)
+                        .all(|x| blank(self.buffer, x, y))
+                        .then_some((start, glyph))
+                });
+                if let Some((start, glyph)) = placed {
+                    self.buffer.set_string(start, y, glyph, style);
+                }
             }
+            (Some((_, bounds)), label) => {
+                let row = label.map_or(
+                    bounds.top + (bounds.bottom - bounds.top - 1).max(0) / 2,
+                    |(y, ..)| i32::from(y),
+                );
+                let (Ok(x), Ok(y)) = (u16::try_from(bounds.left), u16::try_from(row)) else {
+                    return;
+                };
+                if !visible.contains(ratatui_core::layout::Position::new(x, y)) {
+                    return;
+                }
+                let room = (x..visible.right())
+                    .take_while(|&column| {
+                        i32::from(column) < bounds.right || blank(self.buffer, column, y)
+                    })
+                    .count() as u16;
+                if let Some(glyph) = glyphs
+                    .into_iter()
+                    .find(|glyph| glyph.width() as u16 <= room)
+                {
+                    self.buffer.set_string(x, y, glyph, style);
+                }
+            }
+            (None, _) => {}
         }
     }
 

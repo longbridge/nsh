@@ -406,12 +406,13 @@ Decorations are plain, and each is a documented Decorative feature:
   instead of reverse: a checkbox `[x]`, `[ ]` or `[-]` (mixed), a radio `(•)` or `( )`, a switch `[on ]` or
   `[off]`. The glyph takes the place of the indicator, the first view inside the control that the app drew as a
   box (a border or an opaque fill, not a hairline rule) holding no text; the indicator and everything in it (its
-  border, fill, mark or thumb) are not drawn. The glyph starts at the indicator's left column on its middle row,
-  so equal controls in a list put their glyphs in one column, and takes the palette ink of the indicator's fill,
-  else its border. When the indicator is narrower, the glyph extends right only into blank Cells; without room
-  it shortens (`x`, `-`, `•`, `on`, `off`), and without room for that it is left out. A control without an
-  indicator draws its glyph in the blank Cells before its label, one Cell from it, or its short form, or
-  nothing. Keyboard focus still reverses the control.
+  border, fill, mark or thumb) are not drawn. The glyph takes the label's first row (the title of a two-line
+  label) and the palette ink of the indicator's fill, else its border. Before the label it ends one Cell from the
+  label's first glyph, reaching left into the control's blank Cells, so a list whose labels share a column puts
+  its glyphs in one column; without room its short form (`x`, `-`, `•`, `on`, `off`) does, then the glyph sits
+  flush with the label, else it is left out. An indicator after the label (a trailing switch) takes the glyph
+  from its left column, extending right only into blank Cells, else the short form. A control without an
+  indicator places its glyph before its label the same way. Keyboard focus still reverses the control.
 - **Shadows, gradients and opacity** are ignored (opacity below 3% still hides).
 
 ## Navigation stacks
@@ -793,7 +794,7 @@ permit clipboard writes; `nsh test` uses memory and never writes to the machine'
 | Childless hairline fills | Below half a Cell, horizontal or vertical line glyphs in the fill's palette color, moved to the nearest row (column) inside their parent that holds no text, or left out |
 | Positive sub-Cell extents | At least one Cell; zero-width progress indicators remain empty |
 | Base control value states and projected part states | Core-resolved checked, mixed, selected and disabled styles; selected tabs reversed |
-| Checkbox, radio and switch states | Decorative: `[x]` / `[ ]` / `[-]`, `(•)` / `( )`, `[on ]` / `[off]` in place of the indicator (short forms `x`, `-`, `•`, `on`, `off`), or before the label without one; only focus reverses them |
+| Checkbox, radio and switch states | Decorative: `[x]` / `[ ]` / `[-]`, `(•)` / `( )`, `[on ]` / `[off]` on the label's first row, one Cell before the label (or from a trailing indicator's column), short forms `x`, `-`, `•`, `on`, `off` without room; only focus reverses them |
 | Slider keyboard input | Component-owned arrows, page and endpoint keys while its thumb has focus |
 | Slider dragging and control hover | Ticket-09 pointer follow-up |
 | Border width, dashes, dots, corner radii | Decorative: solid single-Cell strokes with square corners; radii shape fill coverage only; widths still participate in core layout |

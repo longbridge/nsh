@@ -47,7 +47,8 @@ fn Checkboxes() -> impl IntoElement {
             .indeterminate(mixed)
             .flex_row()
             .items_center()
-            .gap(px(16.0))
+            .pl(px(8.0))
+            .gap(px(8.0))
             .h(px(16.0))
             .indicator_class("w-4 h-4 border border-[#8d9198] checked:bg-[#c8f26d]")
             .child(text(match (checked, mixed) {
@@ -66,8 +67,8 @@ fn checkboxes_draw_their_state_in_place_of_the_indicator() {
         .unwrap();
     draw_until(&mut view, &mut terminal, &rx, "Select all");
     let buffer = terminal.backend().buffer();
-    // The 2-Cell indicator box extends into the blank Cells before the label;
-    // the label keeps its column.
+    // The glyph ends one Cell before the label, moving left into the
+    // control's blank padding; the label keeps its column.
     assert_eq!(rows(buffer), ["[ ] Videos", "[x] Photos", "[-] Select all"]);
     assert!(
         !reversed_anywhere(buffer),
@@ -90,7 +91,7 @@ fn Radios() -> impl IntoElement {
             .flex_row()
             .items_center()
             .gap(px(16.0))
-            .h(px(16.0))
+            .h(px(32.0))
             .child(
                 view()
                     .size(px(16.0))
@@ -107,7 +108,7 @@ fn Radios() -> impl IntoElement {
                             .opacity(move || if plan.get() == name { 1.0_f32 } else { 0.0 }),
                     ),
             )
-            .child(text(name))
+            .child(view().child(text(name)).child(text("detail")))
     };
     nsh_base::radio_group()
         .child(option("Free"))
@@ -118,17 +119,27 @@ fn Radios() -> impl IntoElement {
 #[test]
 fn radios_put_their_glyphs_in_one_column_and_focus_stays_reversed() {
     let (mut view, rx) = surface();
-    let mut terminal = Terminal::new(TestBackend::new(20, 3)).unwrap();
+    let mut terminal = Terminal::new(TestBackend::new(20, 6)).unwrap();
     view.load(App::Rust(Root::new::<Radios>(|| ()))).unwrap();
     draw_until(&mut view, &mut terminal, &rx, "Team");
     let buffer = terminal.backend().buffer();
-    assert_eq!(rows(buffer), ["( ) Free", "(•) Plus", "( ) Team"]);
+    // The ring is centred on its two-line label; the glyph takes the label's
+    // first row.
+    let titles = [
+        "( ) Free",
+        "    detail",
+        "(•) Plus",
+        "    detail",
+        "( ) Team",
+        "    detail",
+    ];
+    assert_eq!(rows(buffer), titles);
     assert!(!reversed_anywhere(buffer));
     assert_eq!(view.handle(key("Tab")), Handled::Yes);
     assert_eq!(view.handle(key("Enter")), Handled::Yes);
     draw_until(&mut view, &mut terminal, &rx, "(•) Free");
     let buffer = terminal.backend().buffer();
-    assert_eq!(rows(buffer), ["(•) Free", "( ) Plus", "( ) Team"]);
+    assert_eq!(rows(buffer)[0..3], ["(•) Free", "    detail", "( ) Plus"]);
     assert!(
         buffer[(4, 0)].modifier.contains(Modifier::REVERSED),
         "keyboard focus is still reversed"
@@ -142,6 +153,7 @@ fn Switches() -> impl IntoElement {
             .checked(on)
             .flex_row()
             .items_center()
+            .gap(px(if track > 16.0 { 16.0 } else { 0.0 }))
             .h(px(16.0))
             .track_class(if track > 16.0 {
                 "w-[32px] h-4 bg-[#2c2e33] checked:bg-[#45d49a]"
@@ -153,8 +165,8 @@ fn Switches() -> impl IntoElement {
     };
     view()
         .flex_1()
-        .child(switch(true, 32.0, " Wi-Fi"))
-        .child(switch(false, 32.0, " Bluetooth"))
+        .child(switch(true, 32.0, "Wi-Fi"))
+        .child(switch(false, 32.0, "Bluetooth"))
         .child(switch(true, 16.0, " Tight"))
 }
 
@@ -165,9 +177,9 @@ fn switches_read_on_and_off_and_shorten_without_room() {
     view.load(App::Rust(Root::new::<Switches>(|| ()))).unwrap();
     draw_until(&mut view, &mut terminal, &rx, "Tight");
     let buffer = terminal.backend().buffer();
-    // A 4-Cell track extends into the label's leading blank; a 2-Cell track
-    // with one blank after it shows the short form.
-    assert_eq!(rows(buffer), ["[on ]Wi-Fi", "[off]Bluetooth", "on Tight"]);
+    // A 4-Cell track 2 Cells before its label holds the full glyph and a
+    // blank; a 2-Cell track one blank before it, only the short form.
+    assert_eq!(rows(buffer), ["[on ] Wi-Fi", "[off] Bluetooth", "on Tight"]);
     assert_eq!(buffer[(1, 0)].fg, Color::Green);
     assert!(!reversed_anywhere(buffer));
 }
