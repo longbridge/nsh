@@ -944,3 +944,59 @@ fn childless_hairline_fills_draw_rules_in_their_palette_color() {
     assert_eq!(buffer[(16, 7)].fg, Color::Red, "gradients are left out");
     assert_eq!(buffer[(28, 7)].symbol(), " ");
 }
+
+#[component]
+fn SidebarRows() -> impl IntoElement {
+    view()
+        .flex_1()
+        .child(text("APPS").h(px(20.0)))
+        .child(view().gap(px(2.0)).children(
+            ["Stocks", "AI Chat", "Photos", "Lists", "Scrolling"].map(|name| {
+                view()
+                    .h(px(36.0))
+                    .flex_row()
+                    .items_center()
+                    .px(px(10.0))
+                    .on_press(|_: &()| {})
+                    .child(text(name))
+            }),
+        ))
+        .child(text("ready").absolute().top(px(240.0)))
+}
+
+#[test]
+fn equal_rows_stacked_in_a_column_keep_one_cell_pitch() {
+    use nsh_platform_tui::{Handled, MouseButton, MouseKind};
+
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(20, 16)).unwrap();
+    view.load(App::Rust(Root::new::<SidebarRows>(|| ())))
+        .unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "ready");
+    let buffer = terminal.backend().buffer();
+    let rows: Vec<u16> = ["S", "A", "P", "L", "S"]
+        .iter()
+        .scan(0, |from, first| {
+            let row = (*from..16).find(|&y| buffer[(1, y)].symbol() == *first)?;
+            *from = row + 1;
+            Some(row)
+        })
+        .collect();
+    // 36-point rows 2 points apart start 20 points down: absolute edges alone
+    // would put them 2, 3, 2 and 3 rows apart.
+    assert_eq!(rows.len(), 5, "{rows:?}");
+    assert!(
+        rows.windows(2).all(|pair| pair[1] - pair[0] == 2),
+        "{rows:?}"
+    );
+    for kind in [
+        MouseKind::Down(MouseButton::Left),
+        MouseKind::Up(MouseButton::Left),
+    ] {
+        assert_eq!(
+            view.handle(super::app::mouse(kind, 1, rows[4])),
+            Handled::Yes,
+            "the last row takes presses where it is drawn"
+        );
+    }
+}

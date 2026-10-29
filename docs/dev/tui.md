@@ -283,6 +283,11 @@ scroll offsets. Parent rounding is never added to a child's point position. The 
 exclusive. Equal whole-Cell gaps stay equal and nested padding accumulates before rounding; a moving view's Cell
 width or height can vary by one Cell. For example, a box at y = 216pt with height 40pt covers rows 14 and 15;
 its bottom at 256pt rounds to edge 16. A text row after 12pt of padding begins at 228pt, on row 14.
+Consecutive siblings of equal height stacked in one column at an equal point pitch (a list's rows) keep one Cell
+pitch and one Cell height: the first keeps its rounded row, each next one starts the pitch's rounded rows below
+the one before, on a Cell edge, and its content moves with it. The gallery's 36-point sidebar rows 2 points apart
+are 2 rows apart each, where absolute edges alone would space them 2, 3, 2, 3 rows apart. Other views keep their
+absolute edges.
 A positive point gap between sibling one-line texts reserves at least one Cell of separation, including reverse rows;
 a zero gap keeps the texts adjacent. Canvas text calls apply the same minimum gap as whole runs, independently
 of draw order. Existing ancestor and canvas clipping still apply.

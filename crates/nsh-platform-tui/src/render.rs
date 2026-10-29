@@ -676,8 +676,8 @@ impl Painter<'_> {
             .map_or_else(Point::default, |scroll| scroll.origin());
         let child_projection =
             projection.translated(Point::new(-scroll_origin.x, -scroll_origin.y));
-        let children = view.children.len();
-        for index in 0..children {
+        let pitch = even_pitch(self.tree, id, child_projection, self.cells);
+        for (index, delta) in pitch.into_iter().enumerate() {
             let child = self.tree.get(id).unwrap().children[index];
             if self
                 .tree
@@ -688,7 +688,7 @@ impl Painter<'_> {
             }
             self.view(
                 child,
-                child_projection,
+                child_projection.snapped(Point::new(Points::ZERO, delta)),
                 children_clip,
                 opacity,
                 children_pointer,
@@ -914,6 +914,68 @@ fn text_rows(
     view.children
         .iter()
         .all(|&child| rows.len() > 1 || text_rows(tree, child, projection, cells, area, rows))
+}
+
+/// How far each child of `id` moves down so that consecutive siblings of
+/// equal height stacked in a column, at an equal point pitch, keep one Cell
+/// pitch and one Cell height: the first keeps its rounded row, and each
+/// next one starts the pitch's rounded rows below it, on a Cell edge. Others
+/// keep their absolute edges.
+fn even_pitch(tree: &Mounter, id: NodeId, projection: Projection, cells: CellSize) -> Vec<Points> {
+    const SAME: f32 = 0.01;
+    let Some(view) = tree.get(id) else {
+        return Vec::new();
+    };
+    let frames: Vec<_> = view
+        .children
+        .iter()
+        .map(|&child| {
+            tree.get(child)
+                .filter(|child| {
+                    !child.concealed && !child.style.hidden && child.kind != ViewKind::Modal
+                })
+                .map(|child| {
+                    projection
+                        .view(child)
+                        .bounds(Bounds::new(Point::default(), child.frame.size))
+                })
+                .filter(|frame| frame.size.height > Points::ZERO)
+        })
+        .collect();
+    let mut deltas = vec![Points::ZERO; frames.len()];
+    let height = cells.height();
+    let mut start = 0;
+    while start < frames.len() {
+        let Some(first) = frames[start] else {
+            start += 1;
+            continue;
+        };
+        let mut pitch = None;
+        let mut end = start + 1;
+        while let Some(Some(next)) = frames.get(end) {
+            let previous = frames[end - 1].expect("a frame of the run");
+            let step = next.top() - previous.top();
+            if (next.size.height - first.size.height).abs().0 > SAME
+                || (next.left() - first.left()).abs().0 > SAME
+                || next.top() < previous.bottom() - Points(SAME)
+                || pitch.is_some_and(|pitch: Points| (step - pitch).abs().0 > SAME)
+            {
+                break;
+            }
+            pitch = Some(step);
+            end += 1;
+        }
+        if let Some(pitch) = pitch {
+            let first_row = (first.top() / height + 0.5).floor();
+            let pitch_rows = (pitch / height + 0.5).floor();
+            for (offset, index) in (start..end).enumerate() {
+                let top = frames[index].expect("a frame of the run").top();
+                deltas[index] = height * (first_row + offset as f32 * pitch_rows) - top;
+            }
+        }
+        start = end;
+    }
+    deltas
 }
 
 fn hairline_fill(
