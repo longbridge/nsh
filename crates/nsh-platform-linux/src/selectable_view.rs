@@ -175,23 +175,21 @@ fn collect(area: &NshView) -> Texts {
             }
         }
         // In reading order: a virtual list's recycled cells are mounted
-        // in no particular order.
-        let children = view.child_views();
-        let frames: Vec<_> = children
-            .iter()
-            .map(|child| {
-                child
-                    .compute_bounds(view)
-                    .map_or_else(Bounds::default, |r| {
-                        Bounds::new(
-                            Point::new(Points(r.x()), Points(r.y())),
-                            nsh_core::geometry::Size::new(Points(r.width()), Points(r.height())),
-                        )
-                    })
+        // in no particular order. Only children with texts count: a spare
+        // cell left where it was may overlap the shown ones.
+        let mut parts: Vec<(Bounds<Points>, Vec<Item>)> = view
+            .child_views()
+            .into_iter()
+            .filter_map(|child| {
+                let mut items = Vec::new();
+                walk(area, &child, &mut items);
+                let frame = child.state().frame;
+                (!items.is_empty()).then_some((frame, items))
             })
             .collect();
+        let frames: Vec<_> = parts.iter().map(|(frame, _)| *frame).collect();
         for i in sibling_order(&frames) {
-            walk(area, &children[i], out);
+            out.append(&mut parts[i].1);
         }
     }
     let mut items = Vec::new();
