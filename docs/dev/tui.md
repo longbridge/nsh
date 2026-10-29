@@ -397,6 +397,8 @@ Decorations are plain, and each is a documented Decorative feature:
   keeps the app's box. The label stays in the Cells the layout gave it; the brackets take the button's own Cells
   with the same gap on both sides, one Cell when the box has room, else none (`[Sell]`), both or neither: a label
   flush with its box stays bare. The button draws no border or fill.
+  With mouse capture (opt-in), a hover or pressed fill on a list row makes it a box while it lasts, so the row
+  shows brackets while hovered: the rendering sees the resolved fill, not whether a state set it.
 - **Icons and decorative images** are not drawn: canvases with role `image` or without an accessibility label, and
   image placeholders narrower than 3 Cells or shorter than 2. A button whose content is only icons shows its
   accessibility label as `[ label ]` on its box's middle row, cut with `…` to the box (`[L…]`).
