@@ -20,6 +20,8 @@ use std::{rc::Rc, time::Duration};
 
 use nsh_core::{element::Style, prelude::*};
 
+use crate::roving::leave_bar;
+
 /// Why a popup opened or closed (`onOpenChange`'s `reason`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PropEnum)]
 pub enum OpenChangeReason {
@@ -627,6 +629,8 @@ pub(crate) fn dropdown(
         );
     }
     when(shown, move || {
+        // The trigger may be a toolbar's item; the content is not.
+        leave_bar();
         let content = content(sheet);
         let cancel = {
             let dismiss = presence.dismiss.clone();

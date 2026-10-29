@@ -402,6 +402,28 @@ impl SelectionModel {
 /// U+FFFC, which stands for an attachment in a text's content.
 const OBJECT_REPLACEMENT: char = '\u{FFFC}';
 
+/// The order in which a backend walks sibling views for an area's texts,
+/// given their frames: by their tops when they stack (no two share a row,
+/// as a virtual list's cells, which recycling leaves in mount order, not
+/// their items' order), otherwise as given (mount order).
+pub fn sibling_order(frames: &[Bounds<Points>]) -> Vec<usize> {
+    let mut order: Vec<usize> = (0..frames.len()).collect();
+    let stacked = frames.iter().enumerate().all(|(i, a)| {
+        frames[i + 1..]
+            .iter()
+            .all(|b| a.bottom() <= b.top() || b.bottom() <= a.top())
+    });
+    if stacked {
+        order.sort_by(|&a, &b| {
+            frames[a]
+                .top()
+                .partial_cmp(&frames[b].top())
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+    }
+    order
+}
+
 /// The position under `point` ([module docs](self): the hit-testing rule),
 /// `None` without texts.
 fn hit(texts: &impl SelectionTexts, point: Point<Points>) -> Option<TextPosition> {
@@ -1032,5 +1054,28 @@ mod tests {
         );
         assert!(model.texts_changed(&gone));
         assert!(model.bounds().is_none());
+    }
+
+    #[test]
+    fn stacked_siblings_go_by_their_tops_and_rows_stay_in_mount_order() {
+        let frame = |x: f32, y: f32, h: f32| bounds(point(px(x), px(y)), size(px(100.0), px(h)));
+        // Recycled cells: mounted 0, 1, 2 but showing rows 2, 0, 1.
+        assert_eq!(
+            sibling_order(&[
+                frame(0.0, 200.0, 100.0),
+                frame(0.0, 0.0, 100.0),
+                frame(0.0, 100.0, 100.0)
+            ]),
+            [1, 2, 0]
+        );
+        // A row (and an overlay over a sibling) keeps mount order.
+        assert_eq!(
+            sibling_order(&[frame(200.0, 0.0, 20.0), frame(0.0, 0.0, 20.0)]),
+            [0, 1]
+        );
+        assert_eq!(
+            sibling_order(&[frame(0.0, 50.0, 100.0), frame(0.0, 0.0, 100.0)]),
+            [0, 1]
+        );
     }
 }

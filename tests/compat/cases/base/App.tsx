@@ -47,6 +47,7 @@ import BaseTabs from "./base-tabs";
 import BaseTextView from "./base-text-view";
 import BaseToast from "./base-toast";
 import BaseToggle from "./base-toggle";
+import BaseToolbar from "./base-toolbar";
 import BaseToken from "./base-token";
 
 const cases: Record<string, () => JSX.Element> = {
@@ -82,6 +83,7 @@ const cases: Record<string, () => JSX.Element> = {
   "base-rich-editor-tables": BaseRichEditorTables,
   "base-tabs": BaseTabs,
   "base-toggle": BaseToggle,
+  "base-toolbar": BaseToolbar,
   "base-collapsible": BaseCollapsible,
   "base-color-picker": BaseColorPicker,
   "base-collapsible-reveal": BaseCollapsibleReveal,

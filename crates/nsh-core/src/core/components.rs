@@ -13,7 +13,7 @@
 
 use std::{any::Any, cell::RefCell, rc::Rc, sync::Arc};
 
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use super::{Core, Kind, NO_KEY, views::Anchor};
 use crate::{
@@ -491,6 +491,10 @@ pub(super) struct Components {
     pub(super) slot_targets: FxHashMap<NodeId, super::slots::SlotTarget>,
     /// The app's elements a slot's props go to -> their slot node.
     pub(super) adopted: FxHashMap<NodeId, NodeId>,
+    /// The nodes views wrap a slot's fill in (the place gives it more than
+    /// itself): slot nodes as JS's are, their props going to the fill's one
+    /// element ([`Core::reconcile_wrapper`]).
+    pub(super) fill_holders: FxHashSet<NodeId>,
     styles: FxHashMap<StyleRefinement, std::rc::Rc<ClassList>>,
     /// The styles a component on another's host gets from each above it,
     /// merged (by the lists', which the entry keeps).
@@ -498,6 +502,9 @@ pub(super) struct Components {
     /// While a view's slot content is matched: the nested component's host
     /// and the slot (its regions are the slot's).
     pub(super) filling: Option<(NodeId, &'static str)>,
+    /// A node moved in the tree since the order watches last looked
+    /// (`core/watch.rs`): an app's keyed reorder of their elements.
+    pub(super) moved: bool,
     /// The lists components place (the glue's, of `Items` props) -> the
     /// row function the component's view gave last, and the number of rows
     /// its wrappers last saw.
@@ -622,9 +629,11 @@ impl Default for Components {
             slot_hosts: FxHashMap::default(),
             slot_targets: FxHashMap::default(),
             adopted: FxHashMap::default(),
+            fill_holders: FxHashSet::default(),
             styles: FxHashMap::default(),
             merges: FxHashMap::default(),
             filling: None,
+            moved: false,
             lists: FxHashMap::default(),
             environment: Environment::default(),
             executor: Rc::new(Executor::default()),
@@ -2672,8 +2681,10 @@ impl<M: TextEngine> Core<M> {
             mask.set(EventKind::Touch, true);
             inst.responders.push((id, responder.clone()));
         }
-        // Only the events that changed.
-        let mut changed = mask.bits() ^ old.bits();
+        // Only the events that changed (with a slot's own when the node
+        // takes a slot's props: they stay).
+        let own = self.target_events(id, mask);
+        let mut changed = (mask.bits() ^ old.bits()) & !own.bits();
         while changed != 0 {
             let kind = EventKind::ALL[changed.trailing_zeros() as usize];
             changed &= changed - 1;
@@ -3123,10 +3134,11 @@ impl<M: TextEngine> Core<M> {
                     }
                 };
                 let prev = at.and_then(|j| old[j].take());
-                let e = self.reconcile_node(prev, el, part, host, inst);
-                if wrapper && let Ok(key) = self.key(e.id) {
-                    self.lay_out_through(key);
-                }
+                let e = if wrapper {
+                    self.reconcile_wrapper(prev, el, host, inst)
+                } else {
+                    self.reconcile_node(prev, el, part, host, inst)
+                };
                 out.push(e);
             }
         }
@@ -3584,6 +3596,10 @@ impl<M: TextEngine> Core<M> {
                     }
                     before = Some(child);
                 }
+                // In a holder: the slot's props follow its one element.
+                if self.components.fill_holders.contains(&parent) {
+                    self.retarget_slot(parent, None);
+                }
             }
             Placement::Nested(other, anchor) => {
                 let mut before = self.anchor_node(anchor);
@@ -3665,6 +3681,45 @@ impl<M: TextEngine> Core<M> {
             part: Part::Slot,
             children: Vec::new(),
         }
+    }
+
+    /// The node of `host`'s view element `el` wraps a slot's fill in (its
+    /// one child places the fill): a slot node as JS's holders are. Its
+    /// styles are its own, and it lays the fill's one node out through
+    /// while they style none of its layout; the rest of what the place
+    /// gives goes to that node when the fill is one element
+    /// ([`super::slots`]), so its focus, keys and presses reach the
+    /// component's listeners as a JS app's element's do.
+    fn reconcile_wrapper(
+        &mut self,
+        mut prev: Option<Expanded>,
+        mut el: ElNode,
+        host: NodeId,
+        inst: &mut Instance,
+    ) -> Expanded {
+        let (id, old_children) = match &mut prev {
+            Some(p) => (p.id, std::mem::take(&mut p.children)),
+            None => {
+                let id = self.components.alloc();
+                let _ = self.apply_op(Op::Create { id, tag: el.tag });
+                self.components.owners.insert(id, host);
+                (id, Vec::new())
+            }
+        };
+        self.components.fill_holders.insert(id);
+        // The fill first: its one element is where the rest goes.
+        let children = std::mem::take(&mut el.children);
+        let children = self.reconcile_children(id, old_children, children, host, inst);
+        let (tag, key) = (el.tag, el.key.clone());
+        let mut e = self.reconcile_slot(prev, id, el, host, inst);
+        if let Ok(k) = self.key(id) {
+            self.lay_out_through(k);
+        }
+        e.tag = tag;
+        e.key = key;
+        e.part = Part::Node;
+        e.children = children;
+        e
     }
 
     pub(super) fn reconcile_node(
@@ -3838,7 +3893,9 @@ impl<M: TextEngine> Core<M> {
                 children,
             };
         }
-        self.apply_attrs(id, &el.attrs, &old_attrs);
+        if !self.apply_target_attrs(id, &el.attrs, &old_attrs) {
+            self.apply_attrs(id, &el.attrs, &old_attrs);
+        }
         let classes = self.apply_el_styles(
             id,
             &el.style,
@@ -4289,7 +4346,21 @@ impl<M: TextEngine> Core<M> {
             self.unalias(id);
             return;
         }
+        // A fill's node in a holder: the slot's props follow what is left.
+        let holder = if self.components.fill_holders.is_empty() {
+            None
+        } else {
+            self.key(id)
+                .ok()
+                .map(|k| self.nodes[k as usize].parent)
+                .filter(|&p| p != NO_KEY)
+                .map(|p| self.nodes[p as usize].id)
+                .filter(|p| self.components.fill_holders.contains(p))
+        };
         let _ = self.apply_op(Op::Release { id });
+        if let Some(holder) = holder {
+            self.retarget_slot(holder, None);
+        }
     }
 
     /// Frees an expanded element and what it rendered (a slot's node is
@@ -4332,7 +4403,14 @@ impl<M: TextEngine> Core<M> {
                 return;
             }
             Part::VirtualList => self.release_virtual_list(e.id),
-            Part::Node => {}
+            // A fill's holder: its element gets its own props back.
+            Part::Node => {
+                if !self.components.fill_holders.is_empty()
+                    && self.components.fill_holders.remove(&e.id)
+                {
+                    self.drop_slot_target(e.id);
+                }
+            }
         }
         if let Some(r) = &e.attrs.element_ref {
             r.detach(e.id);

@@ -14311,6 +14311,158 @@ mod views {
         }
     }
 
+    #[derive(Clone, PartialEq, Props)]
+    struct FocusCornerProps {
+        corner: crate::element::Prop<Option<Slot>>,
+    }
+
+    /// Counts the focus its corner gets and loses: listeners the place
+    /// gives the slot.
+    #[component]
+    fn FocusCorner(props: FocusCornerProps) -> impl IntoElement {
+        let (focused, blurred) = (signal(0), signal(0));
+        view()
+            .child(text(move || {
+                format!("focus {} blur {}", focused.get(), blurred.get())
+            }))
+            .child(props.corner.place(move |c| {
+                c.on_focus(move || focused.update(|n| *n += 1))
+                    .on_blur(move || blurred.update(|n| *n += 1))
+            }))
+    }
+
+    /// Fills a focus corner with a focusable view it counts the presses
+    /// of, then (pressing "switch") with a focusable text in its place.
+    #[component]
+    fn FocusTop() -> impl IntoElement {
+        let (presses, second) = (signal(0), signal(false));
+        let press = move || presses.update(|n| *n += 1);
+        view()
+            .child(text(move || format!("pressed {}", presses.get())))
+            .child(focus_corner().corner(dynamic(move || {
+                if second.get() {
+                    text("second").focusable(true).into_element()
+                } else {
+                    view()
+                        .focusable(true)
+                        .on_press(press)
+                        .child(text("first"))
+                        .into_element()
+                }
+            })))
+            .child(
+                view()
+                    .on_press(move || second.set(true))
+                    .child(text("switch")),
+            )
+    }
+
+    /// A slot a Rust view fills with one element, whose place gives it
+    /// listeners: they go to that element as to a TSX app's in its holder
+    /// (the node around the fill keeps none), so the focus, which only the
+    /// focused element hears, reaches the component; the element's own
+    /// listeners run too, and an element made in its place takes them.
+    #[test]
+    fn a_fills_one_element_hears_the_listeners_its_place_gives() {
+        let events = |c: &Core<FakeEngine>, id: NodeId| c.nodes[c.key(id).unwrap() as usize].events;
+        let mut c = core();
+        c.mount_root(&Root::new::<FocusTop>(|| ()));
+        let batch = c.commit().unwrap();
+        let switch = native_parent(&c, text_node(&batch, "switch")).expect("placed");
+        let first = native_parent(&c, text_node(&batch, "first")).expect("placed");
+        let holder = native_parent(&c, first).expect("in the node around the fill");
+        assert!(events(&c, first).contains(EventKind::Focus));
+        assert!(events(&c, first).contains(EventKind::Blur));
+        assert!(events(&c, first).contains(EventKind::Press), "its own");
+        assert!(!events(&c, holder).contains(EventKind::Focus));
+        assert!(c.component_event(first, EventKind::Focus, &EventPayload::None));
+        assert!(c.component_event(first, EventKind::Blur, &EventPayload::None));
+        assert!(c.component_event(first, EventKind::Press, &EventPayload::None));
+        let shown = texts(&c.commit().unwrap());
+        assert!(shown.contains(&"focus 1 blur 1".into()), "{shown:?}");
+        assert!(shown.contains(&"pressed 1".into()), "{shown:?}");
+        // Another element in its place: the listeners follow it.
+        assert!(c.component_event(switch, EventKind::Press, &EventPayload::None));
+        let batch = c.commit().unwrap();
+        let second = text_node(&batch, "second");
+        assert!(c.key(first).is_err(), "released");
+        assert_eq!(native_parent(&c, second), Some(holder));
+        assert!(events(&c, second).contains(EventKind::Focus));
+        assert!(!events(&c, holder).contains(EventKind::Focus));
+        assert!(c.component_event(second, EventKind::Focus, &EventPayload::None));
+        let shown = texts(&c.commit().unwrap());
+        assert!(shown.contains(&"focus 2 blur 1".into()), "{shown:?}");
+    }
+
+    #[derive(Clone, PartialEq, Props)]
+    struct AnchoredCornerProps {
+        corner: crate::element::Prop<Option<Slot>>,
+        #[prop(default)]
+        open: crate::element::Prop<bool>,
+    }
+
+    /// Gives its corner a ref and, while `open`, shows a 40 × 20 overlay
+    /// 4 points below what the corner draws, from its start (a popover's).
+    #[component]
+    fn AnchoredCorner(props: AnchoredCornerProps) -> impl IntoElement {
+        let anchor = element_ref();
+        view()
+            .child(props.corner.place(move |c| c.element_ref(&anchor)))
+            .child(when(
+                move || props.open.get(),
+                move || {
+                    overlay()
+                        .anchor_content(&anchor)
+                        .placement(Placement::Bottom)
+                        .align(Align::Start)
+                        .offset(px(4.0))
+                        .w(px(40.0))
+                        .h(px(20.0))
+                        .child(text("pop"))
+                },
+            ))
+    }
+
+    /// Fills an anchored corner, 100 points down, with an 80 × 30 view
+    /// around a 50 × 10 box; a press on the root opens its overlay.
+    #[component]
+    fn AnchoredTop() -> impl IntoElement {
+        let open = signal(false);
+        view().pt(px(100.0)).on_press(move || open.set(true)).child(
+            anchored_corner().open(open).corner(
+                view()
+                    .w(px(80.0))
+                    .h(px(30.0))
+                    .child(view().w(px(50.0)).h(px(10.0)).child(text("box"))),
+            ),
+        )
+    }
+
+    /// The ref a component gives a slot a Rust view fills is the filled
+    /// element's, not its child's, and an overlay placed against what the
+    /// slot draws goes by the element's own box (its size, not its
+    /// content's), as it did while the ref was on the node around it.
+    #[test]
+    fn a_fills_element_takes_the_slots_ref_with_its_own_box() {
+        let mut c = core();
+        c.mount_root(&Root::new::<AnchoredTop>(|| ()));
+        let batch = c.commit().unwrap();
+        let top = root_host(&batch);
+        let inner = native_parent(&c, text_node(&batch, "box")).expect("placed");
+        let element = native_parent(&c, inner).expect("placed");
+        let holder = native_parent(&c, element).expect("in the node around the fill");
+        assert_eq!(
+            c.components.adopted.get(&element),
+            Some(&holder),
+            "the element takes the slot's props"
+        );
+        assert!(c.component_event(top, EventKind::Press, &EventPayload::None));
+        let batch = c.commit().unwrap();
+        let pop = native_parent(&c, text_node(&batch, "pop")).expect("shown");
+        // Below the element (0, 100, 80 × 30), not its 10-point box.
+        assert_eq!(frame_of(&batch, pop), Some(rect(0.0, 134.0, 40.0, 20.0)));
+    }
+
     /// Rows of a list, each with a filled corner, a holder of a text and a
     /// plaque.
     #[component]

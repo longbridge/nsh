@@ -1139,6 +1139,63 @@ covers [props] disabled
 covers [props] accessibilityLabel
 covers [events] onChange
 
+# base-toolbar
+tap id:case-base-toolbar
+expect Pressed: none
+# A toolbar for screen readers, named; its runs are groups, a toggle group
+# inside it one of them; the separator is no element.
+prop id:bar role toolbar
+prop id:bar accessibilityLabel Formatting
+prop id:history role group
+prop id:history accessibilityLabel History
+prop id:marks role group
+prop id:undo role button
+prop id:help role link
+prop id:sep focusable false
+# A row by default: the group's items side by side, then the separator,
+# the toggle group, the disabled group and the link.
+frame id:undo 0 0 20 20
+frame id:redo 20 0 20 20
+frame id:sep 40 0 2 20
+frame id:marks 42 0 20 20
+frame id:help 82 0 20 20
+# `axis="vertical"`: a column.
+prop id:tools role toolbar
+frame id:pen 0 20 20 20
+# One stop of the keyboard focus: its first enabled item.
+prop id:undo focusable true
+prop id:redo focusable false
+prop id:bold focusable false
+prop id:help focusable false
+prop id:select focusable true
+prop id:pen focusable false
+# Its items take presses; a disabled item and a disabled group's do not.
+prop id:redo accessibilityState disabled=true
+prop id:send accessibilityState disabled=true
+tap id:undo
+expect Pressed: undo
+tap id:bold
+expect Bold: true
+tap id:help
+expect Pressed: help
+# A disabled toolbar disables every item in it: no stop of the focus.
+tap id:lock
+prop id:undo accessibilityState disabled=true
+prop id:bold accessibilityState disabled=true
+prop id:help accessibilityState disabled=true
+prop id:undo focusable false
+tap id:lock
+prop id:undo focusable true
+tap id:select
+expect Pressed: select
+covers [nsh/base] Toolbar
+covers [nsh/base] ToolbarGroup
+covers [nsh/base] ToolbarSeparator
+covers [props] Toolbar.axis
+covers [props] disabled
+covers [props] accessibilityLabel
+covers [events] onPress
+
 # A collapsible: the summary always, the details only while the app's
 # `open` holds. Collapsed, the region is the trigger's 20 points.
 tap id:case-base-collapsible

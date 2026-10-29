@@ -3129,7 +3129,7 @@ pub(crate) fn handler(cx: *mut JsContext, id: NodeId, event: EventKind) -> Optio
 // --- The primitives as components -----------------------------------------------------
 
 /// A component rendering host element `tag` with its props (children too
-/// when `children`): what `nsh`'s `View`, `nsh/webview`'s `WebView`, ...
+/// when `children`): what `nsh`'s `View`, `WebView`, ...
 /// are as values. Their tags are made in place by the compiler; this is
 /// the path of `<C />` where `C` holds one.
 pub(crate) fn host_component(cx: *mut JsContext, tag: &str, children: bool) -> JsValue {
