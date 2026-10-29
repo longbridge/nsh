@@ -672,7 +672,7 @@ pub struct Dialog {
 
 /// A pick the app asked for (`Picker.pickImages`), as a test reads it.
 #[derive(Debug, Clone, PartialEq, JsObject)]
-pub struct Pick {
+pub struct PickRequest {
     /// The user may pick several.
     pub multiple: bool,
     /// At most this many.
@@ -686,9 +686,9 @@ pub struct Pick {
     pub format: String,
 }
 
-impl From<&nsh_core::picker::PickRequest> for Pick {
+impl From<&nsh_core::picker::PickRequest> for PickRequest {
     fn from(request: &nsh_core::picker::PickRequest) -> Self {
-        Pick {
+        PickRequest {
             multiple: request.multiple(),
             limit: request.limit,
             max_dimension: request.max_dimension.map(|d| d.0.max(0) as u32),
@@ -1394,7 +1394,7 @@ struct Steps {
 }
 
 /// A test's answer to the picks (`app.onPick`).
-type PickCallback = Callback<Pick, Option<Vec<PickFile>>>;
+type PickCallback = Callback<PickRequest, Option<Vec<PickFile>>>;
 
 /// A test's answer to the dialogs (`app.onDialog`).
 type DialogCallback = Callback<Dialog, Option<String>>;
@@ -1752,13 +1752,13 @@ impl App {
     /// picks, given as they are (no scaling or conversion), or `null` to
     /// cancel. Without a handler, every pick is cancelled. Headless runs
     /// only: a real platform shows its picker.
-    pub fn on_pick(&mut self, #[args(pick)] handler: Callback<Pick, Option<Vec<PickFile>>>) {
+    pub fn on_pick(&mut self, #[args(pick)] handler: Callback<PickRequest, Option<Vec<PickFile>>>) {
         *self.steps.pick.borrow_mut() = Some(handler);
     }
 
     /// The picks the app asked for, in order.
-    pub fn picks(&self) -> Result<Vec<Pick>, JsError> {
-        self.with(|app| Ok(app.picks()?.iter().map(Pick::from).collect()))
+    pub fn picks(&self) -> Result<Vec<PickRequest>, JsError> {
+        self.with(|app| Ok(app.picks()?.iter().map(PickRequest::from).collect()))
     }
 
     /// The dialogs the app showed, in order.
@@ -1929,7 +1929,7 @@ impl Steps {
                 let handler = pick.borrow().clone();
                 let files = match handler {
                     Some(handler) => handler
-                        .call_async(Pick::from(&asked))
+                        .call_async(PickRequest::from(&asked))
                         .await?
                         .unwrap_or_default()
                         .into_iter()
