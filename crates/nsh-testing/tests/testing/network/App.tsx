@@ -1,6 +1,6 @@
 import { mount, signal, Text, View } from "nsh";
 import { connect } from "net";
-import { WebSocket as Client } from "websocket";
+import { connect as connectWebSocket } from "websocket";
 
 // Port 9 of this machine: granted, and nothing listens there, so a
 // connection that reaches the network fails with the OS's code.
@@ -34,7 +34,7 @@ function closed(url: string) {
 
 function App() {
   const socket = outcome(() => connect({ host: HOST, port: PORT }));
-  const client = outcome(() => Client.connect(`ws://${HOST}:${PORT}/feed`));
+  const client = outcome(() => connectWebSocket(`ws://${HOST}:${PORT}/feed`));
   const global = closed(`ws://${HOST}:${PORT}/feed`);
   return (
     <View>
