@@ -416,8 +416,13 @@ resolved `scrollToEnd`, moves immediately within the content limits in this redu
 applies the core's anchoring delta without clamping it. After applying pending batches, the surface reports each
 changed scroll view's final offset and applied-command count to the engine, which delivers scroll events and
 updates its view of the content. Keyboard movement reveals the focused control in its surrounding Scroll,
-innermost first. Paging and endpoint keys act on the nearest Scroll around focus, or the page's Scroll when there
-is none. Paging moves focus to the visible control nearest its old relative row in the viewport (relative column
+innermost first. A reveal leaves a fully visible target in place. When vertical scrolling is needed, it centers
+the target in the viewport, clamped to the content limits, keeping it away from app overlays at the edges.
+Horizontal reveals and targets too large to center retain the core's reveal margin (16 points, capped at a
+quarter of the viewport) and favor the target's start when it does not fit.
+Paging and endpoint keys act on the innermost Scroll around focus, or around the search point
+when a plain-text match holds it. With neither in a Scroll, they use the first Scroll in the active focus scope.
+Paging moves focus to the visible control nearest its old relative row in the viewport (relative column
 for horizontal scrolling). Home/End and Alt+< / Alt+> choose the Scroll's first/last focusable control and reveal
 it, even when nonfocusable content precedes or follows the controls. With no focusable controls, these keys only
 scroll, to the content endpoints for Home/End. Page selection uses the next completed frame's geometry, and Enter
@@ -515,15 +520,16 @@ it owns keys and the app's field caret is hidden; closing it restores the caret 
 | Ctrl+F, Right / Ctrl+B, Left | Nearest focusable view to the right / left on the same row |
 | Enter | Press the focused view, reporting PressDown, PressUp and Press in order, at its middle |
 | Esc, Ctrl+G | Leave the focused field; otherwise go back through the app handler, stack or newest modal |
-| Ctrl+V, PageDown / Alt+V, PageUp | Scroll one viewport down / up |
-| Alt+<, Home / Alt+>, End | Focus the first / last control in the Scroll's tree order and reveal it; scroll to the endpoint when there are none |
+| Ctrl+V, PageDown / Alt+V, PageUp | Scroll one viewport down / up in the innermost Scroll around focus or the search point |
+| Alt+<, Home / Alt+>, End | In that Scroll, focus the first / last control in tree order; center it when a vertical reveal must scroll, or scroll to the endpoint when there are no controls |
 | Ctrl+S / Ctrl+R | Search the text on screen forward / backward in the Minibuffer |
 | Ctrl+C | Quit |
 
 Focus visits pressable and editable views, honoring `focusable` and disabled state, in depth-first document
 order within the focus scope, as NSH's other platforms do. A sidebar's stops stay together before the next
 panel's stops, regardless of their Cell positions. Traversal wraps at the ends; horizontal movement stays
-spatial, choosing the nearest control on overlapping row ranges.
+spatial, choosing the nearest control on overlapping row ranges. Traversal centers a control vertically when
+revealing it requires scrolling, and leaves fully visible controls in place (see Scroll content).
 The sink opts into `MountItem::TreeOrder`: the core supplies logical document order in the same batch as
 structural changes. `Insert` retains native paint order, including `zIndex`; raising a sidebar changes its
 stacking while its focus stops retain their document order. Ordinary text and style updates keep the stored
@@ -576,11 +582,13 @@ position, top to bottom and left to right, and the order wraps at both ends. A s
 control (inclusive), at the search point, or at the first / last match when there is neither.
 
 A match moves keyboard focus to the nearest focusable view around it (a button's label focuses the button) and
-reveals the match's row in its surrounding Scrolls, innermost first, keeping the core's reveal margin (one row
-at the default scale) as focus traversal does. A match in other text clears focus and
-becomes the search point: Next / Previous (Ctrl+N, Ctrl+P, Tab, Shift+Tab) then continue from it to the nearest
+reveals the match's row in its surrounding Scrolls, innermost first. As with focus traversal, a vertical reveal
+that must scroll centers the row in the viewport, within the content limits; an already fully visible row stays
+in place. Horizontal reveals retain the margin described under Scroll content. A match in other text clears
+focus and becomes the search point: Next / Previous (Ctrl+N, Ctrl+P, Tab, Shift+Tab) then continue from it to the nearest
 control after or before it in tree order, so a match in a page panel moves within that panel rather than to a
-sidebar beside it on the same rows.
+sidebar beside it on the same rows. Paging and endpoint keys use the innermost Scroll around that search point,
+including after the Minibuffer closes.
 
 While searching, the platform draws the Minibuffer over the bottom row of the surface's area, in the terminal's
 default colors: `/` (forward) or `?` (backward), after less and vim, then as much of the query's end as fits,
@@ -736,6 +744,8 @@ permit clipboard writes; `nsh test` uses memory and never writes to the machine'
 | Pointer precision | One terminal Cell, converted to its center in points |
 | Input | Editable Paragraph, reversed selection and terminal caret; single-line text and caret centered in the content box; masked text is dots |
 | Searching the screen | The Minibuffer over the bottom row and the match's Cells reversed, only while searching |
+| Keyboard paging and endpoints | The innermost Scroll around focus or a plain-text search point; otherwise the first Scroll in the active scope |
+| Focus and search reveals | Fully visible targets stay in place; vertical scrolling centers the target within the content limits, with core margins for horizontal or oversized targets |
 | Input-method composition | Terminal emulator composition, committed text delivered to the field |
 | Input accessories (`InputAccessoryView`) | Left unmounted, as on the desktops: no software keyboard to show them over |
 | Clipboard | OSC 52 writes, desktop reads when available and an in-process copy |
