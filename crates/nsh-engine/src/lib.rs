@@ -874,6 +874,11 @@ impl std::fmt::Debug for EngineConfig {
 /// leaves room for a long run of 60 Hz intervals).
 const MAX_ADVANCE_ROUNDS: usize = 100_000;
 
+/// How many times [`EngineControl::flush`] runs what is queued again when
+/// running it queued more (a task woken by another, a request answered at
+/// once): a task that keeps waking itself leaves the engine busy.
+const MAX_FLUSH_ROUNDS: usize = 64;
+
 enum Message {
     Event(NodeId, EventKind, EventPayload),
     Scroll(NodeId, Point<Points>, u32),
@@ -916,6 +921,9 @@ enum Message {
     },
     /// Moves a manual clock forward by this much, then calls back.
     Advance(std::time::Duration, Box<dyn FnOnce() + Send>),
+    /// Runs what is queued and due now, then calls back with whether the
+    /// engine is idle ([`EngineControl::flush`]).
+    Flush(Box<dyn FnOnce(bool) + Send>),
     /// Sent by a dropped [`Engine`] (there is none in WebAssembly).
     #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     Shutdown,
@@ -1065,6 +1073,19 @@ impl EngineControl {
     /// system's clock it only runs `done`.
     pub fn advance_clock(&self, by: std::time::Duration, done: impl FnOnce() + Send + 'static) {
         let _ = self.tx.send(Message::Advance(by, Box::new(done)));
+    }
+
+    /// Runs everything sent to the engine before it and everything due on
+    /// its clock now (timers, woken tasks, answers that came at once), with
+    /// what they queue in turn, without moving the clock. Then `done` runs,
+    /// after the batches of what ran were submitted, with whether the
+    /// engine is idle: nothing is left to run and no request waits for
+    /// the network. False when work keeps coming (a task that keeps waking
+    /// itself) or a request is in flight, whose answer comes later from
+    /// elsewhere. A headless driver on a manual clock settles a step with
+    /// it, instead of waiting for the batches to stop for a while.
+    pub fn flush(&self, done: impl FnOnce(bool) + Send + 'static) {
+        let _ = self.tx.send(Message::Flush(Box::new(done)));
     }
 
     /// Reports the interaction states of view `id` that the core asked to
@@ -1628,7 +1649,7 @@ impl<M: TextEngine + 'static> Driver<M> {
             .into_iter()
             .chain(std::iter::from_fn(|| rx.try_recv().ok()));
         for message in pending {
-            if let Message::Advance(..) = message {
+            if let Message::Advance(..) | Message::Flush(..) = message {
                 moves.push(message);
             } else if !handle(script, state, message) {
                 return None;
@@ -1700,6 +1721,11 @@ impl<M: TextEngine + 'static> Driver<M> {
                 done();
                 running
             }
+            Message::Flush(done) => {
+                let running = self.flush(rx);
+                done(running && self.idle(rx));
+                running
+            }
             // A test's clock on a real platform: the display's frame moves it
             // to the frame's time first (a frame after the last, else now),
             // as a headless run's frames do.
@@ -1762,6 +1788,43 @@ impl<M: TextEngine + 'static> Driver<M> {
             }
         }
         true
+    }
+
+    /// Runs what is queued and what is due now ([`EngineControl::flush`]),
+    /// again while that queues more, [`MAX_FLUSH_ROUNDS`] times at most.
+    /// False on shutdown.
+    fn flush(&mut self, rx: &Receiver<Message>) -> bool {
+        let frames = self.clock.moves_with_frames();
+        for _ in 0..MAX_FLUSH_ROUNDS {
+            while let Ok(message) = rx.try_recv() {
+                if !self.handle(message, rx) {
+                    return false;
+                }
+            }
+            // A manual clock stays where it is: what is due now runs.
+            if !self.advance(std::time::Duration::ZERO, rx, frames) {
+                return false;
+            }
+            // What a turn queued (a task's wake, a response answered at
+            // once) runs too, as long as it stops coming.
+            if rx.is_empty() {
+                break;
+            }
+        }
+        true
+    }
+
+    /// Whether nothing is left to run: no message queued, nothing due at
+    /// the clock's time (a timer that keeps scheduling another at once
+    /// outlasts a flush's rounds) and no request in flight.
+    fn idle(&self, rx: &Receiver<Message>) -> bool {
+        let now = self.clock.now();
+        rx.is_empty()
+            && self.state.net.idle()
+            && [self.due(), self.clock.next_alarm()]
+                .into_iter()
+                .flatten()
+                .all(|at| at > now)
     }
 
     /// When the next display frame of a clock that moves with the
@@ -1982,6 +2045,11 @@ struct Inflight {
 }
 
 impl Net {
+    /// Whether no request waits for the network.
+    fn idle(&self) -> bool {
+        self.inflight.is_empty()
+    }
+
     /// Hands what JS and the components' tasks asked of their requests to
     /// the network.
     fn pump<M: TextEngine>(&mut self, script: Option<&Script>, core: &mut Core<M>) {
@@ -2679,7 +2747,7 @@ fn handle<M: TextEngine>(script: Option<&Script>, state: &mut State<M>, message:
         }
         // The driver handles it ([`Driver::handle`]), and keeps the ones
         // sent before it started for after the first frame.
-        Message::Advance(..) => unreachable!("the driver moves the clock"),
+        Message::Advance(..) | Message::Flush(..) => unreachable!("the driver moves the clock"),
         Message::Shutdown => return false,
     }
     true

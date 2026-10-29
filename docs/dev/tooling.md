@@ -321,7 +321,8 @@ report it:
   of its JS condition), `idle` (until quiet for a while).
 
 A step first applies the batches that came since the last one (they belong to it), then waits until the app is quiet
-for 100 ms and no native animation runs that ends by itself (2 s at most). Native animations that loop forever (a
+for 100 ms and no native animation runs that ends by itself (2 s at most); on a manual clock it asks instead of
+waiting (below). Native animations that loop forever (a
 spinner: a loop without `iterations`, `Graph::is_finishing`) run in the background: their values move with the app's
 time, and no step or wait waits for them, as a browser's test runner does not wait for an infinite CSS animation. It fails, with the texts on screen, when it cannot be taken, and when the app threw meanwhile
 (`MountSink::report`: an exception that escaped a callback, a bundle that did not load, a stopped VM; an asset's
@@ -336,7 +337,14 @@ sleeping thread, and while it is set or a native animation that ends by itself r
 a long press's hold and scroll frames move the clock by their time; `run_for` / `fast_forward` / `set_system_time` are
 the test's (`app.clock`); a loop that never ends takes no frames of its own (it would move the clock for as long as
 a step or `waitFor` waits), its values move as the clock does; the settle limit is also 2 s of the clock's time; `StubNetwork::with_clock` holds delayed
-responses back as the clock's alarms. Quiet detection and `waitFor` timeouts stay real time. `Headless::set_viewport` and
+responses back as the clock's alarms. A step settles without waiting for quiet (`Headless::idle_on_manual_clock`):
+`EngineControl::flush` has the engine run what was sent to it and what is due at the clock's time, again while that
+queues more (a task's wake, a response answered at once), then answer, after the batches of what ran, whether it is
+idle (nothing left queued or due now, no request in flight); the step returns once that answer is idle, the batches applied
+brought none, and no frame is wanted. While a request is in flight (its answer comes from another thread: a handler,
+the test's JS) or work keeps coming, it waits for 100 ms of quiet as on the system's clock. Work the app hands to
+other threads that has not woken the engine yet (file I/O, a task awaiting a thread) is not waited for: `waitFor` what
+it shows. The 2 s limits stay. `waitFor` timeouts stay real time. `Headless::set_viewport` and
 `set_environment` change the window and the environment while the app runs, as a rotation or a system setting does.
 
 Headless runs play the platform's part NSH's protocol defines, and refuse what only a real platform does
