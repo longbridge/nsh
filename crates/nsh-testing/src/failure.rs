@@ -21,6 +21,11 @@ pub(crate) const NO_BACK: &str = "ERR_NSH_TEST_NO_BACK";
 /// render).
 #[cfg(feature = "js")]
 pub(crate) const TIMED_OUT: &str = nsh_core::element::codes::TIMED_OUT;
+/// `open` was given an option the platform of `nsh test --target` cannot
+/// honor (a size on a device's screen, a platform of another kind of
+/// device, the embedding app's handlers).
+#[cfg(feature = "js")]
+pub(crate) const UNSUPPORTED: &str = "ERR_NSH_TEST_UNSUPPORTED";
 
 /// No `what` (`"view"`, `"pressable view"`, `"input"`, ...) matches
 /// `selector`.
@@ -58,6 +63,32 @@ pub(crate) fn rendered_nothing(timeout: Duration) -> String {
     format!("the app rendered nothing in {} s", timeout.as_secs())
 }
 
+/// `open(entry)` was given `option`, which `--target target` cannot
+/// honor: `why`.
+#[cfg(feature = "js")]
+pub(crate) fn unsupported(entry: &str, option: &str, target: &str, why: &str) -> String {
+    format!("open({entry:?}): `{option}` is unsupported on --target {target}: {why}")
+}
+
+/// What a test app's sockets and WebSockets fail with (`net.connect`,
+/// `WebSocket.connect`; the global `WebSocket` fires `error` and `close`)
+/// while its test keeps it off the network: `open`'s `network` other than
+/// `"live"`, under which a request no route answers fails too.
+#[cfg(any(feature = "js", feature = "agent"))]
+pub(crate) const NETWORK: &str = "ERR_NSH_TEST_NETWORK";
+
+/// Refuses a test app's connections with [`NETWORK`]
+/// (`EngineConfig::refuse_connections`), naming what it connected to.
+#[cfg(any(feature = "js", feature = "agent"))]
+pub(crate) fn refuse_connections() -> nsh_core::element::RefuseConnections {
+    std::sync::Arc::new(|target: &str| {
+        nsh_core::element::JsError::Error(format!(
+            "{target}: a test's app reaches the network only with `open(entry, {{ network: \"live\" }})`"
+        ))
+        .with_code(NETWORK)
+    })
+}
+
 /// `back()` with nothing to go back from.
 #[cfg(any(feature = "js", not(target_arch = "wasm32")))]
 pub(crate) const NOTHING_TO_GO_BACK_FROM: &str = "nothing to go back from";
@@ -86,6 +117,8 @@ pub(crate) fn code_of(message: &str) -> Option<&'static str> {
         Some(TIMED_OUT)
     } else if message.starts_with(NOTHING_TO_GO_BACK_FROM) {
         Some(NO_BACK)
+    } else if message.starts_with("open(") && message.contains("` is unsupported on --target ") {
+        Some(UNSUPPORTED)
     } else {
         None
     }
@@ -121,6 +154,16 @@ mod tests {
                 format!("{NOTHING_TO_GO_BACK_FROM}{on_screen}"),
                 Some(NO_BACK),
             ),
+            (
+                unsupported(
+                    "./App.tsx",
+                    "width",
+                    "ios",
+                    "the device's screen has its own size",
+                ),
+                Some(UNSUPPORTED),
+            ),
+            ("open(\"./App.tsx\"): the engine did not start".into(), None),
             ("`Pay` matches 2 pressable views".into(), None),
             (
                 "the app threw: no view matches `x` is disabled".into(),

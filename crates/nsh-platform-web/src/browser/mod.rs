@@ -92,6 +92,17 @@ impl Runtime {
         match op {
             1000..=1006 => self.timers.call(op, args),
             1007..=1009 => self.fetches.call(op, args),
+            // Why the engine refuses a WebSocket to the URL before it
+            // reaches the network (a test's: `System::refuse_connections`),
+            // or `undefined`: the realm's `WebSocket` (`testing.js`).
+            1010 => {
+                let url = args.index(0)?.as_string().unwrap_or_default();
+                let refused = self.bindings.system.borrow().check_connection(&url);
+                match refused {
+                    Ok(()) => Ok(Value(0)),
+                    Err(error) => Value::string(error.message()),
+                }
+            }
             800..=807 => self.resources.call(op, args),
             900..=906 => self.standard.call(op, args),
             700..=702 => self.gestures.call(&self.bindings, op, args),

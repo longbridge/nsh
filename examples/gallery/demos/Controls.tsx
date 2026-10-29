@@ -19,10 +19,10 @@ import { alpha, Badge, Button, Caption, Card, colors, DemoPage, finish, focusRin
  * use: smaller controls, rows and type, whatever the window's width.
  */
 const size =
-  platform.idiom === "desktop"
+  platform.desktop
     ? { row: 40, padding: 6, gap: 10, label: 14, detail: 12, control: 16, corner: 5, check: 12, dot: 6, tabs: 30, line: 32, clear: 16, switch: "small" as const }
     : { row: 56, padding: 8, gap: 12, label: 15, detail: 13, control: 22, corner: 7, check: 16, dot: 8, tabs: 40, line: 44, clear: 20, switch: "regular" as const };
-const pointer = platform.idiom === "desktop";
+const pointer = platform.desktop;
 
 /** A control's row: the control and its label, the whole row pressable. */
 const row = (first: boolean) => ({

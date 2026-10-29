@@ -29,7 +29,7 @@ function LinkRow(props: { icon: IconName; title: string; note: string; first?: b
       <View
         hoverStyle={hovered()}
         style={{
-          minHeight: density.row + (platform.idiom === "desktop" ? 8 : 12),
+          minHeight: density.row + (platform.desktop ? 8 : 12),
           flexDirection: "row",
           alignItems: "center",
           gap: 12,

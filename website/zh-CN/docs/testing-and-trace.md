@@ -148,19 +148,20 @@ describe("the cart", () => {
 ### 打开应用
 
 `open(entry, options?)` 构建 `entry` 处的应用（路径相对于测试文件；每次运行中每个入口只构建一次），以 390×844 的视口
-启动它，并在它完成渲染且空闲后 resolve。
+启动它，并在它完成渲染且空闲后 resolve。使用 `--target` 时，应用按测试给出的每个选项运行；目标平台无法满足的选项会让
+`open` 以 `ERR_NSH_TEST_UNSUPPORTED` reject，并在消息中指出该选项（见[在真实平台上运行](#在真实平台上运行)）。
 
 | 选项 | 默认值 | 说明 |
 |---|---|---|
 | `storage` | 空 | `Storage` 初始保存的内容：`{ todos: "[]" }`。 |
-| `network` | 无 | 应用的请求按路由得到的结果，见[模拟网络](#模拟网络)。`"live"`：使用真实网络。 |
-| `width`、`height` | 390、844 | 视口大小，单位为点。 |
+| `network` | 无 | 应用的请求按路由得到的结果，见[模拟网络](#模拟网络)。`"live"`：请求、socket 和 WebSocket 都使用真实网络。 |
+| `width`、`height` | 390、844 | 视口大小，单位为点：headless、桌面平台的窗口、web 的页面。在 iOS 和 Android 上应用占满设备屏幕。 |
 | `safeArea` | 0 | 安全区域内边距，单位为点：`{ top: 47, bottom: 34 }`。 |
 | `clipboard` | 空 | 剪贴板初始的文字。 |
 | `colorScheme` | `"light"` | 系统外观：`"light"` 或 `"dark"`（`colorScheme()`、`dark:` 类）。 |
 | `locale` | `"en-US"` | 设备的区域设置，BCP 47 标签（`locale()`、`Intl` 的默认值）。 |
 | `reducedMotion` | `false` | 用户要求减少动态效果（`reduceMotion()`）。 |
-| `platform` | `"ios"` | headless 时应用运行所在的平台：`"ios"`、`"android"`，或桌面平台 `"macos"`、`"windows"`、`"linux"`，以及桌面形态的 `"web"`（`platform.os`、`ios={{…}}` / `android={{…}}` / `desktop={{…}}` 属性、键盘快捷键）。在真实平台上就是该平台。 |
+| `platform` | `"ios"` | headless 时应用运行所在的平台：`"ios"`、`"android"`，或桌面平台 `"macos"`、`"windows"`、`"linux"`，以及桌面形态的 `"web"`（`platform.os`、`ios={{…}}` / `android={{…}}` / `desktop={{…}}` 属性、键盘快捷键）。使用 `--target` 时，应用以目标平台运行：桌面平台的 `platform` 可用于任何桌面目标和 web，`"ios"` 和 `"android"` 只用于各自的目标。 |
 | `clock` | 系统时钟 | 手动时钟，它的时间只随测试推进：`{}`，或者用 `{ time }` 从某个 `Date`（或自 Unix 纪元起的毫秒数）开始。见[控制时间](#控制时间)。 |
 | `host` | 无 | 由测试扮演的宿主应用：`{ params, handlers }`。见[扮演宿主应用](#扮演宿主应用)。 |
 
@@ -256,11 +257,17 @@ expect(app.requests().map((r) => r.method)).toEqual(["GET", "POST"]);
 路由的函数接收请求（`method`、`url`、`headers`，以及文字形式的 `body`），在测试文件中运行，所以可以统计请求次数，或者根据
 测试准备好的数据作答。函数抛出异常时，请求失败，发出该请求的步骤也随之失败。`app.requests()` 以同样的形式按顺序列出应用发出的请求。
 
+连接同样留在测试之内：除非 `network` 为 `"live"`，应用的 socket（`net`）和 WebSocket（全局 `WebSocket` 和 `websocket` 模块）
+不会建立连接。在应用自身的能力检查通过之后，`net.connect` 和 `websocket` 模块的 `connect` 以 `code` 为 `ERR_NSH_TEST_NETWORK` 的错误
+reject，全局 `WebSocket` 先触发 `error`，再触发 `close`（1006，非正常关闭），与网络拒绝连接时一样。使用 `"live"` 时，它们和应用的请求一起
+连接真实网络。在 Rust 中，`EngineConfig::refuse_connections` 对 `Headless` 应用做同样的事：它是一个函数，接收应用要连接的目标
+（WebSocket 的 URL、socket 的 `host:port`），返回这次调用失败时的错误。
+
 ### 控制时间
 
 在系统时钟上，应用的定时器和原生动画与在设备上耗时相同，等待它们的测试也一样慢。使用手动时钟（Rust 中的
 `EngineConfig::clock`，TypeScript 中 `open` 的 `clock`）时，应用改在手动时钟上运行，就像 Jest 的假定时器或 Playwright 的
-`page.clock`：时间只随测试推进，并且立即推进：
+`page.clock`：时间只随测试推进，并且立即推进。`app.clock` 就是这个时钟，应用使用系统时钟时它为 `null`：
 
 ```rust tabs
 use std::time::{Duration, SystemTime};
@@ -282,7 +289,7 @@ fn autosaves() {
 ```tsx tabs
 const app = await open("./App.tsx", { clock: { time: new Date("2026-01-01T09:00:00Z") } });
 await app.type("label:Note", "Milk");
-await app.clock.runFor(10_000);            // 十秒后的自动保存
+await app.clock!.runFor(10_000);           // 十秒后的自动保存
 expect(app.texts()).toContain("Saved at 09:00:10");
 ```
 
@@ -298,7 +305,9 @@ expect(app.texts()).toContain("Saved at 09:00:10");
 `Date`、`performance.now()` 和 `Intl` 的默认日期都跟随这个时钟。步骤不再等待正在进行的内容：只要应用在请求帧或有原生
 动画在运行，帧就一帧接一帧地立即到来，每帧在时钟上相隔一帧的时间（1/60 s）；300 ms 的转场只需几毫秒，期间到期的
 定时器也会执行。无限循环的动画（加载指示器）随时钟运行：测试推进时钟时它跟着转动。`app.wait(ms)` 和长按会把时钟推进它们各自的时长。更晚到期的定时器只有在测试把时钟推进到那里时才会执行。
-`waitFor` 的超时仍按真实时间计算，因为它也在等待来自外部的内容（路由的函数、网络）。gallery 的测试就是这样运行的
+`waitFor` 和 `waitUntil` 在等待时推进时钟，每次一个显示帧，每帧之后检查一次，所以定时器显示的内容会在等待中很快出现：
+`waitFor("Saved", { timeout: 15_000 })` 最多把时钟推进十五秒。它们的超时同时按两个时钟计算：等待最多把应用的时钟推进这么久，
+并且在真实时间也过去这么久之后才 reject，所以来自应用外部的内容（路由的函数、网络）和在系统时钟上一样有足够的时间到达。gallery 的测试就是这样运行的
 （`examples/gallery/tests`）：其中十二个要等动画的测试用 6 s，而不是 28 s。
 
 ### 操作步骤
@@ -346,8 +355,8 @@ expect(app.texts()).toContain("Saved at 09:00:10");
 | `await app.dropFiles(selector, uris)` | 把本地文件（`file:` URL，如同从文件管理器拖来）放到视图中央：它或外层最近一个监听的视图收到 `onFileDrop`。桌面平台，目前在 headless 和 Linux 上可用。 |
 | `await app.drag(selector, { x, y })` | 手指落在视图中央，停留 100 ms，再移动 `x`、`y` 点（每帧 10 点）后抬起，由平台的输入系统处理：pan 跟随手指（`pan={{ x, y }}`、`onPanStart`，以及带松手速度的 `onPanEnd`），监听触摸的视图会收到触摸事件（`onTouchStart`、`PanResponder`），滚动视图随手指滚动，拉过顶部足够远时触发刷新（`onRefresh`），手指移开后其下的按压会被取消。在桌面和 web 上由鼠标完成。 |
 | `await app.wait(ms)` | 让应用运行 `ms` 毫秒：定时器、动画、请求。在手动时钟上，把时钟推进 `ms`（`app.clock.runFor`）。 |
-| `await app.waitFor(selector, options?)` | 有视图匹配时 resolve；传 `{ state: "gone" }` 时，等到没有视图匹配才 resolve；`timeout` 毫秒（5000）后 reject。 |
-| `await app.waitUntil(condition, options?)` | 应用每发生一次变化就重新检查，`condition()` 返回 true 时 resolve：用于选择器表达不了的条件（`() => app.storage().note === "Milk"`）。 |
+| `await app.waitFor(selector, options?)` | 有视图匹配时 resolve；传 `{ state: "gone" }` 时，等到没有视图匹配才 resolve；`timeout` 毫秒（5000）后 reject。在手动时钟上，等待时每次把时钟推进一个显示帧，最多推进 `timeout`。 |
+| `await app.waitUntil(condition, options?)` | 应用每发生一次变化就重新检查，`condition()` 返回 true 时 resolve：用于选择器表达不了的条件（`() => app.storage().note === "Milk"`）。在手动时钟上，两次检查之间把时钟推进一个显示帧，最多推进 `timeout`。 |
 | `app.shows(selector)` | 当前是否有视图匹配。 |
 | `app.count(selector)` | 当前匹配的视图个数。 |
 | `app.enabled(selector)` | 视图是否接受输入：它本身和外层视图都没有被禁用，输入框还要求不是 `readonly`。 |
@@ -383,6 +392,7 @@ expect(app.texts()).toContain("Saved at 09:00:10");
 | `ERR_NSH_TEST_DISABLED` | 选择器指向的视图已禁用（用户不能滚动的滚动视图、已禁用的菜单项）。 |
 | `ETIMEDOUT` | `waitFor` 或 `waitUntil` 超时，或者应用在 `open` 之后没有渲染任何内容。 |
 | `ERR_NSH_TEST_NO_BACK` | `back()` 没有可以返回的地方。 |
+| `ERR_NSH_TEST_UNSUPPORTED` | 使用 `--target` 时，`open` 收到了目标平台无法满足的选项：iOS 和 Android 上的 `width` 或 `height`、桌面或 web 上的手机 `platform`、iOS 或 Android 上的桌面平台或另一种手机的 `platform`、`host.handlers`。消息会指出是哪一个。 |
 
 ```tsx
 await expect(app.press("Pay")).rejects.toMatchObject({ code: "ERR_NSH_TEST_DISABLED" });
@@ -486,14 +496,19 @@ nsh test --target web                         # 在 headless 的 Chrome、Edge �
 nsh test tests/form.test.tsx --target macos   # 只运行一个文件
 ```
 
-窗口按视口大小打开（除非 `open` 指定，否则为 390 × 844），并且不会超出屏幕。手动 `clock` 和 headless 时一样：`app.clock.runFor`、
-`fastForward` 和 `setSystemTime` 立即推进应用的时间（计时器、每隔一帧的 `requestAnimationFrame`、`Date`），`app.wait(ms)` 也会推进它；
+窗口按视口大小打开（除非 `open` 指定，否则为 390 × 844），并且不会超出屏幕；在 iOS 和 Android 上，应用以设备的尺寸占满屏幕。应用以目标平台运行（`platform.os`）。
+手动 `clock` 和 headless 时一样：`app.clock.runFor`、
+`fastForward` 和 `setSystemTime` 立即推进应用的时间（计时器、每隔一帧的 `requestAnimationFrame`、`Date`），`app.wait(ms)`、`waitFor` 和 `waitUntil` 也会推进它；
 平台每显示一帧，时钟前进一帧（1/60 秒），所以应用在动画时时间照常流逝。平台自身的动画和路由的 `delay` 按真实时间进行。应用的请求和 headless
 时一样交给测试：由 `network` 路由应答，没有路由匹配的请求会失败，`"live"` 则放行到 host 的真实网络；`app.requests()` 列出全部请求。
-`storage` 在应用启动时就已写入应用存储，`app.storage()` 从应用中读取。`locale`、`reducedMotion` 和 `safeArea` 不随平台上报的值变化；
+使用 `"live"` 时，socket 和 WebSocket 在 host 的网络上连接，否则和 headless 时一样被拒绝。
+`storage` 在应用启动时就已写入应用存储，`app.storage()` 从应用中读取。`open` 给出的 `locale`、`reducedMotion` 和 `safeArea`（包括取默认值时）不随平台上报的值变化，给出的 `colorScheme` 会切换系统外观（`"light"` 也一样），没有给出的则沿用平台自己的；
 应用的剪贴板调用由测试自己的剪贴板应答（`clipboard` 是它的初始文本，`app.clipboard()` 读取它），机器的剪贴板保持不变；文本输入框自身的复制和
 粘贴使用系统剪贴板。`host.params` 会传给应用，`app.host.send` 发送事件，应用打开的 URL 被记录下来供 `app.openedUrls()` 读取，而不会真正打开。
-`host.handlers` 只在 headless 运行：开发 host 不回答任何调用，在那里 `open` 会拒绝 handlers。带有自己 Rust crate 的应用运行在 NSH 为该平台用这些 crate 构建的开发 host 中；
+`host.handlers` 在 headless 运行，由测试回答应用的调用。`open` 会按目标检查它的选项：iOS 和 Android 上的 `width` 与
+`height`、属于另一类设备的 `platform`（桌面或 web 上的手机平台，iOS 或 Android 上的桌面平台或另一种手机）以及 `host.handlers` 会以
+`ERR_NSH_TEST_UNSUPPORTED` reject，这样测试要么按写的那样运行，要么说明它需要什么。桌面平台的 `platform`（例如用 `"macos"` 获得桌面的鼠标和按键）
+可以在任何桌面目标和 web 上运行，应用以该目标的平台运行。带有自己 Rust crate 的应用运行在 NSH 为该平台用这些 crate 构建的开发 host 中；
 Rust 应用的 host 运行它的 root，所以 `open(".")` 在那里启动它，和 headless 时一样。
 
 在 web 上，应用运行在 headless 的 Chrome、Edge 或 Chromium 打开的开发 host 页面里：使用本机安装的浏览器，或

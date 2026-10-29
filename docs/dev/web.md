@@ -520,8 +520,9 @@ The idiom is fixed at start, as `Environment::idiom` is everywhere: `desktop` fo
 container at least 600 wide (headless Chromium reports no pointer and measures as a tablet or phone unless launched
 with a fine, hovering one, as `nsh test --target web` does), `pad` for a screen whose short side is at least 600, else
 `phone`; the player's `idiom` option overrides it. `Environment::desktop()`
-(desktop OS, or the web in the desktop idiom) decides `desktop={{…}}` props, `platform.select`'s `desktop` key and
-`platform.idiom`; `Os::is_desktop()` stays the desktop backends' OSes (`nsh/desktop`'s windows and menus). Like the
+(desktop OS, or the web in the desktop idiom) decides `desktop={{…}}` props, `platform.select`'s `desktop` key,
+`platform.desktop` and `platform.idiom` (`Environment::reported_idiom()`; the page's `browser/environment.js`
+gets both from the engine's environment); `Os::is_desktop()` stays the desktop backends' OSes (`nsh/desktop`'s windows and menus). Like the
 desktop backends, the web gives the core no header heights (`NO_NATIVE_HEADER`): a page's `header` slot is all
 there is at its top. The browser's bars are the browser's: the web ignores `Command::StatusBar` (pages' and dialogs' `statusBar`).
 

@@ -480,7 +480,10 @@ pub(crate) const EXPORTS: &[Item] = &[
                 qjs::JS_FALSE
             }
         }),
-        Ts::value("True on desktops (macOS, Windows, Linux).", "boolean"),
+        Ts::value(
+            "True where this module's window and menu APIs work: macOS, Windows and\nLinux. `platform.desktop` (desktop behavior) also holds in browsers in the\ndesktop idiom, where the browser keeps its own window and menus.",
+            "boolean",
+        ),
     ),
     (
         "titleBar",

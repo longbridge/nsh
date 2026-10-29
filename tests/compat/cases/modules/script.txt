@@ -90,6 +90,7 @@ tap id:case-mod-device
 # iOS phone at 1 pixel per point, in the light scheme.
 expect OS: ios
 expect Idiom: phone
+expect Desktop: false
 expect Catalyst: false
 expect Version: 0.0
 expect Select: ios

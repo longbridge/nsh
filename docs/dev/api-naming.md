@@ -161,6 +161,14 @@ go elsewhere under these rules rather than into them.
   `desktop={{…}}`: iOS, macOS, Windows and Linux have the swipes, Android and the web none; decided by the user,
   2026-10-29). Each object is typed (`IOSProps`, `AndroidProps`, `DesktopProps`, an element's own extending them),
   so a key no platform has fails the type check.
+- **One definition of desktop**: desktop is a desktop OS (macOS, Windows, Linux) or the web in the desktop idiom
+  (`Idiom::desktop_on`, `Environment::desktop()`); everything else is mobile, Mac Catalyst included (it runs the iOS
+  backend: `ios={{…}}` applies). `desktop={{…}}` props, `platform.select({ desktop, mobile })`, `platform.desktop`,
+  `platform.idiom === "desktop"` (`Idiom::reported_on`), Rust's `is_desktop()` and `nsh-base`'s per-device
+  presentation all follow it; nothing apps see defines desktop otherwise. `"mac"` stays UIKit's Mac idiom under
+  Catalyst (mobile), `platform.catalyst` is Catalyst in either idiom (`Os::is_catalyst`). The one narrower check is
+  `nsh/desktop`'s `isAvailable` (`Os::is_desktop`): where its window and menu APIs work, the desktop OSes (decided by
+  the user, 2026-10-29).
 - **Accessors** are named after what they read (`safeArea()`, `windowSize()`, `titleBar()`); they never differ from
   a module's name by case only.
 - **Navigation verbs** are `gpui-base`'s: `push`, `pop`, `popToRoot`, `replace` (`NavStackState`); replacing all is
@@ -212,7 +220,8 @@ release (item 3 of the API review); where code differs from one, the rule wins a
     error), and Node's codes for I/O (`ENOENT`, `EACCES`:
     the OS refused, never NSH's capabilities) and its own (`ERR_FS_FILE_TOO_LARGE`, `ERR_OUT_OF_RANGE`). Never
     `EACCES` or a code-less message for a capability denial. `nsh/test`'s steps fail with codes of their own
-    (`ERR_NSH_TEST_NOT_FOUND`, `ERR_NSH_TEST_DISABLED`, `ERR_NSH_TEST_NO_BACK`, `ETIMEDOUT`).
+    (`ERR_NSH_TEST_NOT_FOUND`, `ERR_NSH_TEST_DISABLED`, `ERR_NSH_TEST_NO_BACK`, `ETIMEDOUT`;
+    `ERR_NSH_TEST_UNSUPPORTED` for an `open` option the `--target` cannot honor).
   - Never a sentinel (`false`, `-1`, `""`, `[]`) or silence for a failure: the clipboard and the picker reject when
     not granted. `null` stays an answer to a query with nothing there (`groupOf`, `posAtCoords` over nothing,
     `Storage.getItem` of an absent key, `ViewRef.measure()` of a view not in the tree), and a cancel resolves empty.
@@ -303,7 +312,7 @@ them yet (`compatibility.md`). The frozen RN-shaped modules keep their names. A 
 | `net.connect(host, port)` | `net.connect({ host, port })` (`ConnectOptions`) | Shapes that can grow | 2026-10-28: Node's `net.connect(options)`, so a timeout or TLS can join them |
 | **`nsh`: the environment** | | | |
 | `Platform.OS`, `Platform.Version`, `Platform.constants` | `platform.os`, `platform.version: string` | Environment | A constant object; Android's version is its API level as a string (`"35"`) |
-| `Platform.isPad`, `isTV`, `isDesktop`, `isMacCatalyst`, `constants.interfaceIdiom` | `platform.idiom: "phone" \| "pad" \| "mac" \| "tv" \| "desktop"`, `platform.catalyst` | Environment | `isDesktop` is `platform.idiom === "desktop"` |
+| `Platform.isPad`, `isTV`, `isDesktop`, `isMacCatalyst`, `constants.interfaceIdiom` | `platform.idiom: "phone" \| "pad" \| "mac" \| "tv" \| "desktop"`, `platform.desktop`, `platform.catalyst` | Environment | `isDesktop` is `platform.desktop` ("One definition of desktop") |
 | `Platform.select(spec)` | `platform.select(spec)` | Environment | Same spec |
 | `PixelRatio.get()` | `pixelRatio(): number` (accessor, reactive) | Environment | Follows the window to another screen |
 | `PixelRatio.getFontScale()` | `fontScale()` | Environment | Already exists |

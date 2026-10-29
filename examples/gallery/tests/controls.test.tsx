@@ -383,7 +383,7 @@ test("a sign-in code is sent, counts down to a resend, shakes off a wrong code a
   await app.wait(700);
   await app.waitFor("That code is wrong: 2 tries left");
   // Once the countdown ends, a new code can be sent.
-  await app.clock.runFor(30_000);
+  await app.clock!.runFor(30_000);
   await app.waitFor("role:button[Resend code]");
   await app.paste(code, { text: "135 790" });
   await app.waitFor("Sign-in code: 135790");

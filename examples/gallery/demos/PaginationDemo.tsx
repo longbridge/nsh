@@ -14,7 +14,7 @@ import { Appear, Button, Caption, Card, colors, DemoPage, density, Icon, mono, P
 // The rows of a page fade in when it changes. Nothing moves with reduced
 // motion.
 
-const pointer = platform.idiom === "desktop";
+const pointer = platform.desktop;
 
 /** Every item's look: the current page `selected:`, the ends `disabled:`. */
 const itemClass =

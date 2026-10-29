@@ -322,7 +322,9 @@ report it:
   Escape goes back when there is something to go back from;
 - `wait`, `wait_for` / `wait_for_gone` / `wait_until` (until a selector matches, matches no more, a condition on the
   screen holds), `next_change` (one batch or animation frame: what `nsh/test`'s `waitUntil` waits for between calls
-  of its JS condition), `idle` (until quiet for a while).
+  of its JS condition), `next_frame` (on a manual clock: one frame of the clock, `wait_frame`, then a moment for a
+  batch; what `waitUntil` waits for between calls there until the frames' time reaches its timeout), `idle`
+  (until quiet for a while).
 
 A step first applies the batches that came since the last one (they belong to it), then waits until the app is quiet
 for 100 ms and no native animation runs that ends by itself (2 s at most). Native animations that loop forever (a
@@ -340,7 +342,13 @@ sleeping thread, and while it is set or a native animation that ends by itself r
 a long press's hold and scroll frames move the clock by their time; `run_for` / `fast_forward` / `set_system_time` are
 the test's (`app.clock`); a loop that never ends takes no frames of its own (it would move the clock for as long as
 a step or `waitFor` waits), its values move as the clock does; the settle limit is also 2 s of the clock's time; `StubNetwork::with_clock` holds delayed
-responses back as the clock's alarms. Quiet detection and `waitFor` timeouts stay real time. `Headless::set_viewport` and
+responses back as the clock's alarms. A wait for the screen (`wait_until`, so `waitFor`) moves the clock too, a frame
+at a time (`Headless::wait_frame`: the frame, the batches it brought, then `FRAME_LOOK`, 1 ms of real time, for what
+the clock does not bring, a route's JS function), looking after each frame, by its timeout at most: a timer's result
+shows as the test waits for it, in a moment of real time. It fails once the clock moved by the timeout and as much
+real time passed (then it waits as on the system's clock, `pump`), so what comes from outside the app keeps the time
+it had. Quiet detection stays real time.
+`Headless::set_viewport` and
 `set_environment` change the window and the environment while the app runs, as a rotation or a system setting does.
 
 Headless runs play the platform's part NSH's protocol defines, and refuse what only a real platform does
@@ -424,13 +432,15 @@ Only the engine of a test file serves it: an app's bundle cannot import it (the 
   bounded by its timeout (30 s unless given). A failing `beforeAll` fails its block's tests, an `afterAll` is reported
   as `<block> › afterAll`; `.only` anywhere in the file skips the tests outside the `.only`s. The apps are closed by
   marks (`Session::close_apps_since`): a test's after its `afterEach` hooks, a block's (opened in `beforeAll`) after
-  its `afterAll`. Each result (`TestStatus`: passed, failed, skipped, todo; named after its blocks, `a › b`) goes over a
+  its `afterAll`. `app.clock` is `null` without a manual clock. Each result (`TestStatus`: passed, failed, skipped, todo; named after its blocks, `a › b`) goes over a
   channel to the caller, who symbolicates the stack with the test file's map.
 - The VM's calls reach the run through the process's current `Session` (one test file at a time in a process, under a
   lock): the test file's directory, the app's sets, the compiler and the apps the running test opened.
 - `open(entry, options)` builds the entry (`Entry::App`, once per run) and starts it on a `headless::Headless` of its
   own (`StubNetwork` from `options.network`, or `UreqNetwork` for `"live"`, behind a `RecordingNetwork` for
-  `app.requests()`; `MemoryStorage` seeded with `options.storage`; the viewport, safe area, color scheme, locale,
+  `app.requests()`; `EngineConfig::refuse_connections` set to `failure::refuse_connections` unless `"live"`, so `net`
+  sockets and both WebSocket APIs fail with `ERR_NSH_TEST_NETWORK` after their capability checks, as `System::
+  check_connection` says; `MemoryStorage` seeded with `options.storage`; the viewport, safe area, color scheme, locale,
   reduced motion and OS), on a blocking thread; `App`'s async methods are the driver's steps, run there too, and its
   synchronous ones (`texts`, `shows`, `value`) read the screen after `catch_up`. A route's JS function stays on the
   VM: its `StubHandler` sends the request and its `StubReply` over a channel (`RouteServer`), and `serve` answers them
@@ -540,22 +550,37 @@ test's setup (`TestEnvironment::clock`, its start in Unix milliseconds): `Model:
 `Clock::manual(start).with_frames()`, and the host hands the started engine back (`Model::engine_started`). The
 test's `clock` steps are `TestStep::Clock` (`ClockChange::RunFor`, `FastForward`, `SetSystemTime`; the web's
 `SceneQuery::Clock`, after which the page pumps its engine), which `Model::move_clock` takes as the headless driver
-does, through `EngineControl::advance_clock`; `wait` moves the clock by its time too (`driver.rs`'s `Remote`). A
+does, through `EngineControl::advance_clock`; `wait` moves the clock by its time too (`driver.rs`'s `Remote`), and
+the agent's waits move it as the headless driver's do: `TestStep::WaitFor` a frame (16 ms) at a time between its
+looks (`Agent::next_frame`: `Scene::move_clock`, then `FRAME_LOOK`, 2 ms, for a batch), by its timeout at most,
+failing once as much real time passed too, and `waitUntil` takes `TestStep::NextFrame` between calls of its
+condition (`Remote::next_frame`), counting the frames against its timeout the same way. `Scene::manual_clock` tells the agent: the model knows its setup, the web's
+`RemoteScene` is told by `nsh` (`RemoteScene::with_manual_clock`, from the test's environment). A
 clock that moves with frames (`Clock::moves_with_frames`) is the display's pace on a real platform: each frame the
 platform shows moves it to a frame after the last (`nsh_core::time::FRAME`, 1/60 s) before it runs, and while the
 engine moves it (`Driver::advance` with `frames`) the frames the app waits for run on the way, a frame apart, as a
 headless display's do; the platform's own animations run in real time, as do stubbed responses' delays (the test's
-side holds them, outside the app's clock). `open`'s locale, reduced motion and safe area reach the
+side holds them, outside the app's clock). `open`'s locale, reduced motion and safe area, when it gives them (a
+default value too: `Launch` keeps them optional, so a test's `reducedMotion: false` or zero insets hold on a device
+set otherwise), reach the
 host in the test's setup (`TestEnvironment`, `DevServer::set_test_environment`) and its engine pins them
-(`EngineConfig::pinned`, `EnvironmentPins`: applied to every environment the platform reports); its clipboard is the
+(`EngineConfig::pinned`, `EnvironmentPins`: applied to every environment the platform reports), and a color scheme
+it gives (light too) is a `TestStep::SetColorScheme` once the app rendered; its clipboard is the
 test's (`EngineConfig::clipboard`: the core serves the app's clipboard commands from a `ClipboardBackend`, here a
 `MemoryClipboard` the agent's model keeps, which `app.clipboard()` reads), so the machine's is never touched. The
 test plays the embedding app there too, through the view's own channel (`Model::set_up_engine` on `config.host`):
 `open`'s `host.params` arrive in the setup (`TestEnvironment::host_params`), `app.host.send` is
 `TestStep::HostSend` (the model's `send_host_event`, then the agent settles; the web's page answers
 `SceneQuery::HostSend`), and the channel's URL handler records each URL the app opens and takes it, so nothing
-opens (`TestStep::OpenedUrls`, `SceneQuery::OpenedUrls`). `host.handlers` runs headless only (`open` rejects them):
-the calls would need the test's functions over the dev server.
+opens (`TestStep::OpenedUrls`, `SceneQuery::OpenedUrls`). `host.handlers` runs headless only: the calls would need
+the test's functions over the dev server. `open` checks its options against the target before it starts a host
+(`run.rs`'s `check_launch`, against `TestRun::target`, a `HostTarget` the CLI makes: `test_host::host_target`), so
+no option is dropped: `width` / `height` where the app fills a device's screen (iOS, Android: `HostTarget::sized`
+false), a `platform` of another kind of device than the target's (`HostTarget::platform`, GPUI's the machine's
+desktop: a desktop's `platform`, the way a test asks for a mouse and keys headless, runs on every desktop and the web
+as the target's; `ios` and `android` only on their own) and `host.handlers` reject with `ERR_NSH_TEST_UNSUPPORTED`
+(`failure::unsupported`), naming the option and the target.
+Every other option reaches the host (storage, routes, the environment, the clipboard, a manual clock, `host.params`).
 
 Routes and storage reach the host through the dev server (`HostOptions`, `DevServer::set_test_storage` and
 `set_test_network`). Before the first bundle, the server sends the test host a `ServerMessage::TestSetup` with the
@@ -565,7 +590,11 @@ request the app makes goes back as a `ClientMessage::Fetch` with an id (`FetchCa
 test's side answers it from its routes (`protocol::TestNetwork`, `run.rs`'s `HostRoutes` over the same
 `StubNetwork` headless runs use, recording every request for `app.requests()`) with `ServerMessage::Fetch` replies:
 `Head`, `Data` (base64) and `End`, or `Failed`, or `Pass` for `network: "live"`, when the host's own network makes
-the request. `app.storage()` asks the host (`SceneQuery::Storage`). The web's page takes both through `dev.html`
+the request. Sockets and WebSockets never cross: `TestEnvironment::live_network` says whether the test lets the app
+reach the network, and without it `set_up_engine` sets `EngineConfig::refuse_connections` as headless runs do. On the
+web the realm's global `WebSocket` is the browser's, so `testing.js` puts one in its place that asks the engine first
+(operation 1010, `System::check_connection`) and, refused, fires `error` and `close` (1006) as nsh-js' does.
+`app.storage()` asks the host (`SceneQuery::Storage`). The web's page takes both through `dev.html`
 (`player.testSetup`, `testFetchReply`, and `onTestSend` for its requests).
 
 macOS (`nsh-platform-macos`, feature `dev`): `agent.rs` implements `Native` with `synth.rs`'s posted mouse, trackpad
