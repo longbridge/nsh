@@ -227,6 +227,16 @@ pub trait JsHost {
         drop(task);
     }
 
+    /// The image `blob:` URL `url` names in this VM (`URL.createObjectURL`):
+    /// the key it goes by and its bytes, as `<Image>`'s `src` resolves one,
+    /// so an image prop of a Rust component shows what `<Image>` would.
+    /// `None` for a URL no blob has (revoked, never made) or a host without
+    /// blobs: the image then fails to load.
+    fn image_blob(&self, url: &str) -> Option<(std::sync::Arc<str>, crate::ImageData)> {
+        let _ = url;
+        None
+    }
+
     /// Runs `f` when what owns the call in JS goes (`CallCx::on_cleanup`);
     /// a host without owners keeps it until it goes itself. Returns what
     /// unregisters `f` without running it.

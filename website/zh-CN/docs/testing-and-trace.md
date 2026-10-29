@@ -317,6 +317,10 @@ expect(app.texts()).toContain("Saved at 09:00:10");
 | `view:<id>` | `--trace` 输出中该 id 的视图。 |
 | 其他写法 | 依次按 `testID`、标签、文字匹配。 |
 
+以小写单词加冒号开头的部分表示前缀（`id`、`label`、`role`、`text`、`view`），所以 `tapped: solo` 会让步骤报错，错误信息列出这些前缀。
+以这种形式开头的文字、标签或 test id 写上它的前缀，前缀之后的内容按原样匹配：`text:tapped: solo`、`label:note: draft`、`id:row:2`。
+以后新增前缀时，已有选择器的含义保持不变。
+
 `label:`、`text:` 和角色的名称也可以写正则：`text:/^Buy/i`。` >> ` 在前一部分匹配到的视图内部继续查找
 （`id:cart >> role:button[Remove]`），`nth=<n>` 只保留第 n 个匹配，从 0 开始（`text:Delete >> nth=1`）。选择器找到的是用户
 最先会看到的视图：先在最上层的模态窗口中找，再在屏幕上找；对于导航栈只看最上面的页面。它只匹配用户看得见的视图：有面积、不在

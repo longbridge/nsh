@@ -416,9 +416,9 @@ test("the gallery's segmented control is a tab list", async () => {
   await app.waitFor("Status bar");
   expect(app.texts()).toContain('foreground: "dark"');
   await app.press("role:tab[Light]");
-  await app.waitFor('foreground: "light"');
+  await app.waitFor('text:foreground: "light"');
   await app.press("role:tab[Auto]");
-  await app.waitFor('foreground: "auto"');
+  await app.waitFor('text:foreground: "auto"');
 });
 
 test("the gallery's toggle is a switch", async () => {
@@ -426,9 +426,9 @@ test("the gallery's toggle is a switch", async () => {
   await app.waitFor("Clipping and layers");
   expect(app.texts()).toContain("overflow: hidden");
   await app.press("role:switch[Clip]");
-  await app.waitFor("overflow: visible");
+  await app.waitFor("text:overflow: visible");
   await app.press("label:Clip");
-  await app.waitFor("overflow: hidden");
+  await app.waitFor("text:overflow: hidden");
 });
 
 test("the keyboard moves through the plans and the tabs, each one stop of Tab", async () => {

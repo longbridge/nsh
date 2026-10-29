@@ -21,7 +21,7 @@ test("the Text View demo shows Markdown, HTML and extensions, and streams", asyn
   await app.waitFor("Native Shell");
   // A link is a span of its paragraph, pressed by its characters.
   await app.press("the guide");
-  await app.waitFor("https://github.com/longbridge/nsh");
+  await app.waitFor("text:https://github.com/longbridge/nsh");
   // One document at a time, a tab each.
   await app.press("role:tab[HTML]");
   await app.waitFor("NSH 0.1.0: native UI from TSX");

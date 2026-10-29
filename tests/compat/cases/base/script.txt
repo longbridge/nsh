@@ -45,6 +45,77 @@ wait 300
 expect Alert: pending
 expect Sheet: pending
 covers [nsh/base] AlertDialog
+# base-avatar
+tap id:case-base-avatar
+# Ada's image loads: the initials in the fallback (the app's look, as
+# large as the avatar) and the image over it, transparent, as large too.
+expect Ada: loading
+expect AL
+prop id:ada role image
+prop id:ada accessibilityLabel Ada Lovelace
+frame id:ada 0 20 40 40
+frame parent:text:AL 0 0 40 40
+style parent:text:AL backgroundColor #336699ff
+style parent:text:AL opacity 0.5
+frame below:id:ada-dot 0 0 40 40
+style below:id:ada-dot opacity 0
+style below:id:ada-dot borderRadius 20
+style below:id:ada-dot borderWidth 2
+# The avatar says the name once: the fallback and the image are hidden.
+prop parent:text:AL accessibilityElementsHidden true
+prop below:id:ada-dot accessibilityElementsHidden true
+# Loaded: the fallback goes and the image shows.
+event below:id:ada-dot onLoad width=96 height=96
+expect Ada: loaded
+absent AL
+style below:id:ada-dot opacity 1
+# Failed: the fallback is back.
+event below:id:ada-dot onError message="not found"
+expect Ada: error
+expect AL
+style below:id:ada-dot opacity 0
+# Grace's fallback waits 300 ms while her image loads.
+absent GH
+wait 400
+expect GH
+# Edsger has no image: the app's fallback at once, in place of the
+# initials, and the app's label.
+expect ?
+absent ED
+prop id:edsger role image
+prop id:edsger accessibilityLabel Edsger, away
+# A group of three shows two, then its overflow (30 wide, 60 high).
+prop id:team role group
+prop id:team accessibilityLabel Team
+expect AT
+expect BL
+absent CS
+expect +1
+prop label:1 more person accessibilityLabel 1 more person
+frame id:team 0 152 110 60
+# A group of the first two of four: the overflow stands for the others.
+expect DK
+expect FA
+expect +2
+covers [nsh/base] Avatar
+covers [nsh/base] AvatarGroup
+covers [props] src
+covers [props] Avatar.name
+covers [props] accessibilityLabel
+covers [props] Avatar.fallbackDelay
+covers [props] Avatar.imageClass
+covers [props] Avatar.imageStyle
+covers [props] Avatar.fallbackClass
+covers [props] Avatar.fallbackStyle
+covers [props] Avatar.fallback
+covers [events] Avatar.onStatusChange
+covers [props] AvatarGroup.limit
+covers [props] AvatarGroup.total
+covers [props] AvatarGroup.overflowClass
+covers [props] AvatarGroup.overflowStyle
+covers [props] AvatarGroup.overflow
+covers [props] AvatarGroup.overflowAccessibilityLabel
+
 # base-button
 tap id:case-base-button
 # events the platform reports.

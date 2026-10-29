@@ -43,7 +43,7 @@ fn start<C: Component<Props = ()>>() -> Headless {
 /// text saying `name` was pressed last.
 fn press_focused(app: &mut Headless, name: &str) {
     app.press_key("space").unwrap();
-    app.wait_for(&format!("pressed:{name}")).unwrap();
+    app.wait_for(&format!("text:pressed:{name}")).unwrap();
 }
 
 /// A text editor's formatting bar between two buttons: a history group
@@ -204,9 +204,9 @@ fn right_and_left_move_along_a_row_past_disabled_items_and_around_the_ends() {
     // toolbar's items. Moving presses nothing.
     app.press_key("right").unwrap();
     app.wait(Duration::from_millis(50)).unwrap();
-    app.wait_for("presses:0").unwrap();
+    app.wait_for("text:presses:0").unwrap();
     press_focused(&mut app, "Bold");
-    app.wait_for("marks:BI").unwrap();
+    app.wait_for("text:marks:BI").unwrap();
     for name in ["Italic", "Left", "Center", "Right", "Help"] {
         app.press_key("right").unwrap();
         press_focused(&mut app, name);
@@ -269,7 +269,7 @@ fn a_disabled_toolbar_disables_every_item_and_is_no_stop() {
     // Enabled again, its items take presses.
     app.press("text:Lock").unwrap();
     app.press("role:button[Center]").unwrap();
-    app.wait_for("align:1").unwrap();
+    app.wait_for("text:align:1").unwrap();
 }
 
 #[test]
@@ -387,7 +387,7 @@ fn what_a_popup_of_an_item_shows_is_no_part_of_the_toolbar() {
         app.press_key("tab").unwrap();
         app.press_key("enter").unwrap();
     }
-    app.wait_for("reached:After,Apply,More").unwrap();
+    app.wait_for("text:reached:After,Apply,More").unwrap();
 }
 
 #[test]
@@ -399,10 +399,10 @@ fn a_popups_trigger_is_an_item_of_the_toolbar() {
     app.press_key("tab").unwrap();
     app.press_key("right").unwrap();
     app.press_key("enter").unwrap();
-    app.wait_for("reached:Bold").unwrap();
+    app.wait_for("text:reached:Bold").unwrap();
     app.press_key("left").unwrap();
     app.press_key("enter").unwrap();
-    app.wait_for("reached:Bold,More").unwrap();
+    app.wait_for("text:reached:Bold,More").unwrap();
 }
 
 /// A toolbar of three buttons the app keeps in a keyed list, and a view
@@ -489,7 +489,7 @@ fn items_per_key(count: usize) -> usize {
     app.idle(Duration::from_millis(50)).unwrap();
     let sent = items.load(Ordering::Relaxed);
     app.press_key("space").unwrap();
-    app.wait_for("pressed:2").unwrap();
+    app.wait_for("text:pressed:2").unwrap();
     assert_eq!(made.load(Ordering::Relaxed), 0, "a key press makes no view");
     sent
 }

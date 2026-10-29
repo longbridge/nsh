@@ -128,7 +128,9 @@
   (`ImageSource::with_bytes`; SHA-256, 128 bits, hex), so cache keys and coalescing hash a few dozen bytes, the
   shadow tree keeps no base64 text, equal bytes share one decode whatever URL named them, and no app can make a
   key another surface's image uses (the caches are per process). The access check lets `data:` and `blob:` through
-  (bytes the app has); only `Image`'s `src` and `placeholder` resolve a `blob:` URL, and a video, a canvas image or
+  (bytes the app has); only `Image`'s `src` and `placeholder` and Rust components' image props (an `ImageSrc`,
+  whose decoding asks `JsHost::image_blob`, which `nsh-js` answers with the same `blob::resolve_image_url`, so an
+  `Avatar`'s `src` and an `<Image>`'s of one URL share their key and bytes) resolve a `blob:` URL, and a video, a canvas image or
   `getSize` / `prefetch` given one report the platform's error. A `data:` URI that does not decode becomes `data:,`
   (shows nothing, `onError`): an app writing a key itself never reaches another surface's cache entry. A `blob:`
   URL keeps the key and bytes it resolved to (`BlobUrls`), so setting it again hashes nothing and sends nothing new.

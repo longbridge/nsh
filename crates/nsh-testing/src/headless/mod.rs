@@ -1827,9 +1827,9 @@ mod tests {
         let mut app = Headless::start(EngineConfig::new(Root::of::<PressPoint>())).unwrap();
         app.first_render().unwrap();
         app.press_at("id:pad", point(px(10.0), px(12.0))).unwrap();
-        app.wait_for("seen: at 10 12 in 10 22").unwrap();
+        app.wait_for("text:seen: at 10 12 in 10 22").unwrap();
         app.press("id:pad").unwrap();
-        app.wait_for("seen: at 40 20 in 40 30").unwrap();
+        app.wait_for("text:seen: at 40 20 in 40 30").unwrap();
     }
 
     #[component]
@@ -1993,14 +1993,14 @@ mod tests {
         assert_eq!(app.screen().selected("id:cell-b1"), Ok(true));
         assert_eq!(app.screen().selected("id:cell-a1"), Ok(false));
         app.press("id:cell-b1").unwrap();
-        app.wait_for("pressed: 1").unwrap();
+        app.wait_for("text:pressed: 1").unwrap();
         assert!(
             app.shows("touch x: 150 local x: 150"),
             "{:?}",
             app.screen().texts()
         );
         app.press("text:12").unwrap();
-        app.wait_for("pressed: 2").unwrap();
+        app.wait_for("text:pressed: 2").unwrap();
         assert!(
             app.shows("touch x: 50 local x: 50"),
             "{:?}",
