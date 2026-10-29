@@ -18,6 +18,7 @@ mod link;
 mod menu;
 mod number_input;
 mod otp_input;
+mod pagination;
 mod plot;
 mod popups;
 mod radio;

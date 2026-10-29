@@ -1343,6 +1343,104 @@ covers [events] OtpInput.onChange
 covers [events] OtpInput.onComplete
 covers [events] OtpInput.onFocus
 covers [events] OtpInput.onBlur
+# base-pagination
+tap id:case-base-pagination
+# A navigation landmark named by `accessibilityLabel`; page 5 of 20 with
+# seven pages shown (`visiblePages`): the first and the last, two on each
+# side of the current one, an ellipsis for each run left out.
+expect Page 5 of 20
+prop id:pager role navigation
+prop id:pager accessibilityLabel Results
+expect 1
+expect 3
+expect 7
+expect 20
+absent 2
+absent 8
+# Each item is as wide as `itemClass` says, in a row with the app's gap:
+# the current page after Previous, 1, the ellipsis, 3 and 4.
+frame parent:text:5 160 0 30 30
+style text:5 fontSize 12
+# The current page is selected for screen readers (`selected:` styles
+# it); every page is a button that takes presses, and so are Previous
+# and Next, named by their accessibility labels.
+prop parent:text:5 role button
+prop parent:text:5 accessibilityState selected=true
+style parent:text:5 backgroundColor #00ff00ff
+prop parent:text:6 role button
+prop parent:text:6 accessibilityState {}
+nostyle parent:text:6 backgroundColor
+listens parent:text:6 onPress
+prop label:Previous role button
+prop label:Next role button
+listens label:Next onPress
+# A press reports the page; the app sets it and the pages move with it.
+tap text:6
+expect Log: 6
+expect Page 6 of 20
+expect 8
+absent 3
+prop parent:text:6 accessibilityState selected=true
+prop parent:text:5 accessibilityState {}
+# Previous and Next report the pages around the current one.
+tap label:Next
+expect Log: 6, 7
+expect Page 7 of 20
+tap label:Previous
+expect Log: 6, 7, 6
+expect Page 6 of 20
+# On the last page Next is disabled (`disabled:` applies): it takes no
+# press.
+tap text:20
+expect Page 20 of 20
+prop label:Next accessibilityState disabled=true
+style label:Next opacity 0.5
+prop label:Previous accessibilityState {}
+tap label:Next
+expect Log: 6, 7, 6, 20
+# `compact`: Previous, the children and Next only.
+tap id:compact
+absent 20
+absent 1
+expect Page 20 of 20
+tap label:Previous
+expect Page 19 of 20
+tap id:compact
+expect 19
+expect 20
+# `disabled`: every item dimmed for screen readers, none takes a press.
+tap id:disable
+prop parent:text:19 accessibilityState disabled=true selected=true
+prop label:Previous accessibilityState disabled=true
+style label:Previous opacity 0.5
+tap id:disable
+prop label:Previous accessibilityState {}
+# `renderItem` draws every item from its state: its kind and page, the
+# current one, what takes no press, the pages an ellipsis leaves out.
+expect previous 1 off
+expect page 1 now
+expect page 3
+expect 4-9999 hidden
+expect page 10000
+expect next 2
+tap text:page 10000
+expect page 10000 now
+expect 2-9997 hidden
+expect next 10000 off
+expect previous 9999
+covers [nsh/base] Pagination
+covers [props] Pagination.page
+covers [props] Pagination.totalPages
+covers [props] Pagination.visiblePages
+covers [props] Pagination.compact
+covers [props] Pagination.previousAccessibilityLabel
+covers [props] Pagination.nextAccessibilityLabel
+covers [props] Pagination.itemClass
+covers [props] Pagination.itemStyle
+covers [props] Pagination.renderItem
+covers [props] accessibilityLabel
+covers [props] disabled
+covers [events] onChange
 # base-progress
 tap id:case-base-progress
 # The progress bar role, its label, range and value for screen readers;
