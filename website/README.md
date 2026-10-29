@@ -214,7 +214,7 @@ The rules every demo follows, now and for the ones to come:
   `Panel`, `Log` and `Segmented`; buttons and text fields are never styled by hand: spread `button(kind)` and
   `field()` and give the label `buttonText(kind)`, so every demo shares one size, radius, hover, pressed, focus and
   disabled treatment). With a pointer (`desktop`, from
-  `platform.idiom === "desktop"`) it has desktop density (`size`: controls
+  `platform.desktop`) it has desktop density (`size`: controls
   of 28 and 32 points, rows of 32 and 40): buttons as wide as their labels,
   never as wide as the stage, comparable numbers in tabular figures at the
   end, one content inset for the whole demo. Where the element behaves

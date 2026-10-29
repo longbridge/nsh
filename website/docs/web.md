@@ -363,7 +363,7 @@ The module is copied as it is, so it imports other code by absolute URL. The app
 
 `platform.os` is `"web"`. What kind of device the browser is on decides how the app behaves, as `platform.idiom`:
 
-- `"desktop"`: a mouse (a fine pointer that hovers) and a container at least 600 points wide. `platform.select` picks `desktop` and `desktop={{…}}` props apply.
+- `"desktop"`: a mouse (a fine pointer that hovers) and a container at least 600 points wide. `platform.desktop` is `true`, `platform.select` picks `desktop` and `desktop={{…}}` props apply.
 - `"pad"`: a touch screen whose short side is at least 600 points; `"phone"` otherwise. These are mobile: `platform.select` picks `mobile`.
 
 The idiom is decided when the app starts and stays the same while it runs, as on every platform; a narrow desktop window is still a desktop, laid out for its `windowSize()`. `web={{…}}` props, `platform.select({ web })` and `web:` classes apply in browsers only; `ios={{…}}`, `native` and `ios:` do not apply there.
