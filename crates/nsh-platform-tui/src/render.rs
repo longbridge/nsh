@@ -539,7 +539,7 @@ impl Painter<'_> {
                             + usize::from(x - visible.x)])
             };
             if let Some(fill) = fill {
-                fill_cells(self.buffer, visible, fill, &covered);
+                fill_cells(self.buffer, visible, fill, covered);
                 for y in visible.y..visible.bottom() {
                     for x in visible.x..visible.right() {
                         if covered(x, y) {
