@@ -55,7 +55,7 @@ describe("the sign-up form", () => {
     await app.type("id:password", "Analytical1!");
     await app.press("label:Create account");
     await app.waitFor("label:Creating…");
-    await app.clock.runFor(1000);
+    await app.clock!.runFor(1000);
     await app.waitFor("text:/^Account created for Ada Lovelace/");
   });
 
@@ -83,7 +83,7 @@ describe("the search field", () => {
     // A step settles the app's timers, so the pause before the results
     // is the demo's to show; the test checks what comes after it.
     await app.type("id:search", "lon");
-    await app.clock.runFor(400);
+    await app.clock!.runFor(400);
     await app.waitFor("id:results >> text:/^London/");
     await app.waitFor("2 found");
     await app.press("label:Clear the search");
@@ -93,7 +93,7 @@ describe("the search field", () => {
 
   test("a search without a match says so", async () => {
     await app.type("id:search", "zzz");
-    await app.clock.runFor(400);
+    await app.clock!.runFor(400);
     await app.waitFor("text:/^No city or country matches/");
   });
 });

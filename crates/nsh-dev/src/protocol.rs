@@ -495,7 +495,10 @@ pub enum TestStep {
         /// How.
         change: ClockChange,
     },
-    /// Waits until a view matches, or none does (`app.waitFor`).
+    /// Waits until a view matches, or none does (`app.waitFor`). On a
+    /// manual clock ([`TestEnvironment::clock`]) the wait moves it, a
+    /// display frame at a time, looking after each frame, by `timeout_ms`
+    /// at most, and fails once as much real time passed too.
     WaitFor {
         /// The view.
         selector: String,
@@ -509,6 +512,14 @@ pub enum TestStep {
     NextChange {
         /// Milliseconds at most.
         timeout_ms: u64,
+    },
+    /// What polling a condition waits for between looks on a manual clock
+    /// (`app.waitUntil`): moves the clock by `ms` (a display frame), then
+    /// waits for the next batch a moment; as [`TestStep::NextChange`] on
+    /// the system's clock.
+    NextFrame {
+        /// Milliseconds the clock moves by.
+        ms: u64,
     },
     /// The texts on screen, in order: a list of strings.
     Texts,

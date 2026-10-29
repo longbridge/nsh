@@ -250,7 +250,11 @@ impl Testing {
     /// on a phone-sized headless engine of its own, with what `options`
     /// set up, and resolves once it rendered and is quiet. Its requests
     /// fail unless `options.network` lists them; its storage starts with
-    /// `options.storage`.
+    /// `options.storage`. With `nsh test --target`, an option the target's
+    /// platform cannot honor rejects (`ERR_NSH_TEST_UNSUPPORTED`, naming
+    /// it): `width` and `height` on iOS and Android, a `platform` the
+    /// target is not (a phone's on a desktop, a desktop's on a phone, the
+    /// other phone), `host.handlers`.
     pub async fn open(entry: String, options: Option<OpenOptions>) -> Result<App, JsError> {
         let session = Session::current().map_err(JsError::Error)?;
         let options = options.unwrap_or_default();
@@ -261,17 +265,18 @@ impl Testing {
             .and_then(|h| h.handlers.as_ref())
             .is_some_and(|h| !h.0.is_empty());
         let (host, record) = host_setup(options.host, &mut server);
+        let manual_clock = options.clock.is_some();
         let launch = Launch {
             storage: options.storage.unwrap_or_default(),
             network,
             width: options.width,
             height: options.height,
-            safe_area: options.safe_area.unwrap_or_default(),
+            safe_area: options.safe_area,
             clipboard: options.clipboard,
-            color_scheme: options.color_scheme.unwrap_or_default(),
+            color_scheme: options.color_scheme,
             locale: options.locale,
-            reduced_motion: options.reduced_motion.unwrap_or(false),
-            platform: options.platform.unwrap_or_default(),
+            reduced_motion: options.reduced_motion,
+            platform: options.platform,
             clock: options
                 .clock
                 .map(|c| c.time.map_or_else(std::time::SystemTime::now, |t| t.0)),
@@ -294,6 +299,7 @@ impl Testing {
             storage,
             requests,
             host: record,
+            manual_clock,
         })
     }
 
@@ -382,9 +388,11 @@ pub struct OpenOptions {
     /// `*` matches any text): a response, or a function of the request that
     /// returns one; a request not listed fails. `"live"`: the network.
     pub network: Option<NetworkOption>,
-    /// The viewport's width (390 points).
+    /// The viewport's width (390 points). With `--target ios` or
+    /// `android` the app fills the device's screen: giving it rejects with
+    /// `ERR_NSH_TEST_UNSUPPORTED`.
     pub width: Option<Points>,
-    /// The viewport's height (844 points).
+    /// The viewport's height (844 points), as `width`.
     pub height: Option<Points>,
     /// The safe area insets in points (none).
     pub safe_area: Option<SafeArea>,
@@ -397,13 +405,15 @@ pub struct OpenOptions {
     /// The user asked for less motion (false).
     pub reduced_motion: Option<bool>,
     /// The platform the app believes it runs on headless (`"ios"`; a
-    /// desktop's: `"macos"`, `"windows"`, `"linux"`, `"web"`). On a real
-    /// platform it is that one.
+    /// desktop's: `"macos"`, `"windows"`, `"linux"`, `"web"`). With
+    /// `--target`, the app runs on the target's platform: a desktop's runs
+    /// on any desktop and the web, `"ios"` and `"android"` on their own,
+    /// and another rejects with `ERR_NSH_TEST_UNSUPPORTED`.
     pub platform: Option<Platform>,
     /// A manual clock for the app (none: the system's): its time moves only
     /// as the test moves it (`app.clock`), steps finish native animations
     /// at once (one looping forever moves with the clock instead), and
-    /// `app.wait` moves it.
+    /// `app.wait`, `app.waitFor` and `app.waitUntil` move it.
     pub clock: Option<ClockOptions>,
     /// The embedding app the test plays for the app (`nsh/host`): the
     /// launch parameters it reads as `host.params` and the handlers of its
@@ -1068,12 +1078,15 @@ pub(crate) struct Launch {
     pub(crate) network: NetworkSetup,
     pub(crate) width: Option<Points>,
     pub(crate) height: Option<Points>,
-    pub(crate) safe_area: SafeArea,
+    /// What the test gives of the environment: a real platform's host pins
+    /// it, defaults included, and keeps its own for what it leaves out.
+    pub(crate) safe_area: Option<SafeArea>,
     pub(crate) clipboard: Option<String>,
-    pub(crate) color_scheme: ColorScheme,
+    pub(crate) color_scheme: Option<ColorScheme>,
     pub(crate) locale: Option<String>,
-    pub(crate) reduced_motion: bool,
-    pub(crate) platform: Platform,
+    pub(crate) reduced_motion: Option<bool>,
+    /// The platform `open` named (headless: iOS when it named none).
+    pub(crate) platform: Option<Platform>,
     /// A manual clock's start.
     pub(crate) clock: Option<std::time::SystemTime>,
     /// The embedding app's channel with the app: the test's launch
@@ -1321,6 +1334,7 @@ fn stub_response(value: &JsonValue) -> Result<StubResponse, PropError> {
 /// `ERR_NSH_TEST_NOT_FOUND` (nothing matches the selector),
 /// `ERR_NSH_TEST_DISABLED` (what it names is disabled), `ETIMEDOUT` (a wait
 /// ran out of time), `ERR_NSH_TEST_NO_BACK` (nothing to go back from).
+/// The app closes when the test that opened it ends.
 #[class]
 pub struct App {
     steps: Steps,
@@ -1330,6 +1344,8 @@ pub struct App {
     requests: Option<Arc<RecordingNetwork>>,
     /// The calls and posts the handlers of `open`'s `host` got.
     host: HostRecord,
+    /// It runs on a manual clock (`open`'s `clock`).
+    manual_clock: bool,
 }
 
 /// The embedding app the test plays for an app (`app.host`, after
@@ -1608,7 +1624,12 @@ impl App {
     }
 
     /// Resolves once a view on screen matches `selector`; rejects
-    /// (`ETIMEDOUT`) after `timeout` milliseconds (5000).
+    /// (`ETIMEDOUT`) after `timeout` milliseconds (5000). On a manual clock
+    /// the wait moves it, a display frame at a time, looking after each
+    /// frame (the timers due run on the way, as with `clock.runFor`), by
+    /// `timeout` at most: it rejects once the clock moved that far and as
+    /// much real time passed, which what comes from outside the app (a
+    /// route's function, the network) has.
     pub async fn wait_for(
         this: Instance<Self>,
         selector: String,
@@ -1628,7 +1649,9 @@ impl App {
     /// change of the app (a render, an animation frame); rejects
     /// (`ETIMEDOUT`) after `options.timeout` milliseconds (5000): for what
     /// no selector says
-    /// (`app.storage().note === "Milk"`).
+    /// (`app.storage().note === "Milk"`). On a manual clock it moves the
+    /// clock as `waitFor` does, a display frame between two looks, by the
+    /// timeout at most, and rejects as `waitFor` does.
     pub async fn wait_until(
         this: Instance<Self>,
         condition: Callback<(), bool>,
@@ -1638,6 +1661,9 @@ impl App {
         let deadline = std::time::Instant::now() + timeout;
         let app = this.with(|a| a.steps.app.clone());
         let server = this.with(|a| a.steps.server.clone());
+        // On a manual clock: how far the wait moved it, which the timeout
+        // measures.
+        let mut moved = this.with(|a| a.manual_clock).then_some(Duration::ZERO);
         on_app(&app, |a| {
             a.step("waitUntil");
             Ok(())
@@ -1648,8 +1674,12 @@ impl App {
             if condition.call_async(()).await.map_err(JsError::Error)? {
                 return Ok(());
             }
+            // The clock moves by the timeout at most; then the wait goes on
+            // for what comes from outside the app, until as much real time
+            // passed.
+            let clock_left = moved.map(|moved| timeout.saturating_sub(moved));
             let left = deadline.saturating_duration_since(std::time::Instant::now());
-            if left.is_zero() {
+            if left.is_zero() && clock_left.is_none_or(|l| l.is_zero()) {
                 let screen = on_app(&app, |a| Ok(format!("{:?}", a.texts()?)))
                     .await
                     .map_err(step_error)?;
@@ -1658,6 +1688,19 @@ impl App {
                     timeout.as_millis()
                 ))
                 .with_code(failure::TIMED_OUT));
+            }
+            if let (Some(moved), Some(clock_left)) = (&mut moved, clock_left)
+                && !clock_left.is_zero()
+            {
+                let by = serve(
+                    server.as_deref(),
+                    on_app(&app, move |a| a.next_frame(clock_left)),
+                )
+                .await
+                .and_then(|framed| framed)
+                .map_err(step_error)?;
+                *moved += by;
+                continue;
             }
             let wait = left.min(Duration::from_millis(50));
             serve(
@@ -1725,7 +1768,7 @@ impl App {
         }
         // On a real host: as the host's app keeps it.
         let mut app = self.steps.app.lock().unwrap_or_else(|e| e.into_inner());
-        let driver = app.as_mut().ok_or("the app is closed")?;
+        let driver = app.as_mut().ok_or(CLOSED)?;
         Ok(Entries(driver.storage()?))
     }
 
@@ -1792,12 +1835,15 @@ impl App {
         }
     }
 
-    /// The app's manual clock (`open`'s `clock`), which the test moves.
+    /// The app's manual clock (`open`'s `clock`), which the test moves;
+    /// `null` when the app runs on the system's clock.
     #[getter]
-    pub fn clock(&self) -> Clock {
-        Clock {
-            steps: self.steps.clone(),
-        }
+    pub fn clock(&self) -> Option<Instance<Clock>> {
+        self.manual_clock.then(|| {
+            Instance::new(Clock {
+                steps: self.steps.clone(),
+            })
+        })
     }
 
     /// The embedding app the test plays (`open`'s `host`): its events to

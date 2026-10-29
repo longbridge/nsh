@@ -55,12 +55,12 @@ test("each chart is one image for screen readers", async () => {
 
 test("the live price ticks every second until it is paused", async () => {
   const first = price();
-  await app.clock.runFor(3000);
+  await app.clock!.runFor(3000);
   expect(price()).not.toBe(first);
   await app.press("Pause");
   await app.waitFor("PAUSED");
   const paused = price();
-  await app.clock.runFor(3000);
+  await app.clock!.runFor(3000);
   expect(price()).toBe(paused);
   await app.press("Resume");
   await app.waitFor("LIVE");
@@ -75,7 +75,7 @@ test("the live price writes its window's high over it and tags its last price", 
   // the price the card's figure reads.
   expect(app.texts()).toContain(`High ${after("HIGH")}`);
   expect(app.texts().filter((t) => t === price()).length).toBeGreaterThanOrEqual(2);
-  await app.clock.runFor(3000);
+  await app.clock!.runFor(3000);
   expect(app.texts()).toContain(`High ${after("HIGH")}`);
   expect(app.texts().filter((t) => t === price()).length).toBeGreaterThanOrEqual(2);
 });
@@ -193,7 +193,7 @@ test("the radar reads out the factor nearest the pointer and changes its benchma
 test("a quarter's income flows from its segments to net income, and into the next quarter's", async () => {
   // The flows are one image, named with what they show; each account named beside its node (once they have drawn in), the margins under them.
   expect(app.count("role:image[Income flows, Q3: $85.5B revenue, $19.9B net income, a net margin of 23.3%]")).toBe(1);
-  await app.clock.runFor(1500);
+  await app.clock!.runFor(1500);
   for (const name of ["Products", "Gross profit", "Net income"]) expect(app.texts()).toContain(name);
   expect(app.texts()).toContain("46.4%");
   // The next quarter's flows: the readout and the margins follow.

@@ -35,17 +35,17 @@ test("a function the app does not declare is refused", async () => {
 test("a call the host does not answer times out on the app's clock", async () => {
   const app = await open("./App.tsx", { clock: {} });
   await app.press("label:slow");
-  await app.clock.runFor(900);
+  await app.clock!.runFor(900);
   expect(app.shows("result: (none)")).toBe(true);
-  await app.clock.runFor(200);
+  await app.clock!.runFor(200);
   await app.waitFor("text:/result: rejected: ETIMEDOUT /");
 });
 
 test("the host's timers run on the app's clock", async () => {
   const app = await open("./App.tsx", { clock: {} });
   await app.press("label:later");
-  await app.clock.runFor(400);
+  await app.clock!.runFor(400);
   expect(app.shows("result: (none)")).toBe(true);
-  await app.clock.runFor(200);
+  await app.clock!.runFor(200);
   await app.waitFor('text:result: "late"');
 });

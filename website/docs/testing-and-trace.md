@@ -157,19 +157,21 @@ test declared inside a test or a hook throws.
 ### Opening the app
 
 `open(entry, options?)` builds the app at `entry` (relative to the test file; each entry is built once per run),
-starts it on a 390×844 viewport and resolves once it rendered and is quiet.
+starts it on a 390×844 viewport and resolves once it rendered and is quiet. With `--target`, the app runs with the
+options as the test gives them: one the target's platform cannot honor makes `open` reject with
+`ERR_NSH_TEST_UNSUPPORTED`, naming it (see [On a real platform](#on-a-real-platform)).
 
 | Option | Default | Description |
 |---|---|---|
 | `storage` | empty | What `Storage` holds at the start: `{ todos: "[]" }`. |
 | `network` | none | What the app's requests get, by route: see [Stubbing the network](#stubbing-the-network). `"live"`: the real network. |
-| `width`, `height` | 390, 844 | The viewport in points. |
+| `width`, `height` | 390, 844 | The viewport in points: headless, the desktops' window, the web's page. On iOS and Android the app fills the device's screen. |
 | `safeArea` | 0 | The safe area insets in points: `{ top: 47, bottom: 34 }`. |
 | `clipboard` | empty | The text on the clipboard at the start. |
 | `colorScheme` | `"light"` | The system's appearance: `"light"` or `"dark"` (`colorScheme()`, `dark:` classes). |
 | `locale` | `"en-US"` | The device's locale, a BCP 47 tag (`locale()`, `Intl`'s default). |
 | `reducedMotion` | `false` | The user asked for less motion (`reduceMotion()`). |
-| `platform` | `"ios"` | The platform the app runs as headless: `"ios"`, `"android"`, or a desktop's, `"macos"`, `"windows"`, `"linux"`, or `"web"` in the desktop idiom (`platform.os`, `ios={{…}}` / `android={{…}}` / `desktop={{…}}` props, keyboard shortcuts). On a real platform the app runs as that one. |
+| `platform` | `"ios"` | The platform the app runs as headless: `"ios"`, `"android"`, or a desktop's, `"macos"`, `"windows"`, `"linux"`, or `"web"` in the desktop idiom (`platform.os`, `ios={{…}}` / `android={{…}}` / `desktop={{…}}` props, keyboard shortcuts). With `--target`, the app runs as the target's platform: a desktop's `platform` on any desktop and the web, `"ios"` and `"android"` on their own. |
 | `clock` | the system's | A manual clock, whose time moves only as the test moves it: `{}`, or `{ time }` to start at a `Date` (or milliseconds since the Unix epoch). See [Controlling time](#controlling-time). |
 | `host` | none | The embedding app's part, which the test plays: `{ params, handlers }`. See [Playing the host app](#playing-the-host-app). |
 
@@ -278,7 +280,7 @@ it. `app.requests()` lists the requests the app made, in order, the same way.
 On the system's clock, an app's timers and native animations take as long as on a device, and so do the tests that
 wait for them. With a manual clock (`EngineConfig::clock` in Rust, `open`'s `clock` in TypeScript), the app runs on a
 clock whose time moves only as the test moves it, and at once, as with Jest's fake timers or Playwright's
-`page.clock`:
+`page.clock`. `app.clock` is that clock, and `null` when the app runs on the system's:
 
 ```rust tabs
 use std::time::{Duration, SystemTime};
@@ -300,7 +302,7 @@ fn autosaves() {
 ```tsx tabs
 const app = await open("./App.tsx", { clock: { time: new Date("2026-01-01T09:00:00Z") } });
 await app.type("label:Note", "Milk");
-await app.clock.runFor(10_000);            // the autosave, ten seconds later
+await app.clock!.runFor(10_000);           // the autosave, ten seconds later
 expect(app.texts()).toContain("Saved at 09:00:10");
 ```
 
@@ -318,8 +320,11 @@ for it: while the app asks for frames or a native animation runs, frames come on
 (1/60 s) later on the clock. A 300 ms transition takes a few milliseconds, and a timer due during it runs. An
 animation that loops forever (a spinner) runs along with the clock: it turns as the test moves the clock. `app.wait(ms)`
 and a long press move the clock by their time. A timer that comes due later runs only when the test moves the clock
-there. `waitFor`'s timeout stays real time, as it also waits for what comes from outside (a route's function, the
-network). The gallery's tests run this way (`examples/gallery/tests`): its twelve tests that wait for animations
+there. `waitFor` and `waitUntil` move the clock while they wait, a display frame at a time, looking after each frame,
+so what a timer shows comes as they wait for it, in a moment: `waitFor("Saved", { timeout: 15_000 })` moves the clock
+by up to fifteen seconds. Their timeout counts on both clocks: a wait moves the app's clock by it at most, and rejects
+once as much real time passed too, so what comes from outside the app (a route's function, the network) has as long
+as on the system's clock. The gallery's tests run this way (`examples/gallery/tests`): its twelve tests that wait for animations
 take 6 s instead of 28 s.
 
 ### Steps
@@ -363,8 +368,8 @@ one: a selector matching several fails the step, and the error says how to narro
 | `await app.dropFiles(selector, uris)` | Drops local files (`file:` URLs, as a file manager drags them) on the middle of the view: it, or the nearest view around it listening, hears `onFileDrop`. Desktops, headless and on Linux for now. |
 | `await app.drag(selector, { x, y })` | A finger lands on the middle of the view, rests for 100 ms, moves by `x`, `y` points, 10 per frame, and lifts, as the platform's input takes it: a pan follows it (`pan={{ x, y }}`, `onPanStart`, `onPanEnd` with the release velocity), the views listening to touches hear it (`onTouchStart`, `PanResponder`), a scroll view scrolls with it and, pulled far enough past its top, refreshes (`onRefresh`), and a press under it is cancelled once it moves away. On the desktops and the web it is the mouse. |
 | `await app.wait(ms)` | Lets the app run for `ms` milliseconds: timers, animations, requests. On a manual clock, moves it by `ms` (`app.clock.runFor`). |
-| `await app.waitFor(selector, options?)` | Resolves once a view matches, or with `{ state: "gone" }` once none does; rejects after `timeout` ms (5000). |
-| `await app.waitUntil(condition, options?)` | Resolves once `condition()` returns true, looking again after each change of the app: for what no selector says (`() => app.storage().note === "Milk"`). |
+| `await app.waitFor(selector, options?)` | Resolves once a view matches, or with `{ state: "gone" }` once none does; rejects after `timeout` ms (5000). On a manual clock, moves it a display frame at a time while it waits, by `timeout` at most. |
+| `await app.waitUntil(condition, options?)` | Resolves once `condition()` returns true, looking again after each change of the app: for what no selector says (`() => app.storage().note === "Milk"`). On a manual clock, moves it a display frame between two looks, by `timeout` at most. |
 | `app.shows(selector)` | Whether a view matches now. |
 | `app.count(selector)` | How many views match now. |
 | `app.enabled(selector)` | Whether the view takes input: neither it nor a view around it is disabled, and an input is not `readonly`. |
@@ -402,6 +407,7 @@ a test matches the code:
 | `ERR_NSH_TEST_DISABLED` | The view the selector names is disabled (a scroll view the user cannot scroll, a disabled menu item). |
 | `ETIMEDOUT` | `waitFor` or `waitUntil` ran out of time, or the app rendered nothing after `open`. |
 | `ERR_NSH_TEST_NO_BACK` | `back()` found nothing to go back from. |
+| `ERR_NSH_TEST_UNSUPPORTED` | `open` with `--target` was given an option the target's platform cannot honor: `width` or `height` on iOS and Android, a phone's `platform` on a desktop or the web, a desktop's or the other phone's on iOS or Android, `host.handlers`. The message names it. |
 
 ```tsx
 await expect(app.press("Pay")).rejects.toMatchObject({ code: "ERR_NSH_TEST_DISABLED" });
@@ -511,18 +517,24 @@ nsh test --target web                         # in a headless Chrome, Edge or Ch
 nsh test tests/form.test.tsx --target macos   # one file
 ```
 
-The window opens at the viewport's size (390 × 844 unless `open` says), within the screen. A manual `clock` works as
+The window opens at the viewport's size (390 × 844 unless `open` says), within the screen; on iOS and Android the app
+fills the device's screen, at the device's size. The app runs as the target's platform (`platform.os`). A manual `clock` works as
 it does headless: `app.clock.runFor`, `fastForward` and `setSystemTime` move the app's time at once (timers,
-`requestAnimationFrame` a frame apart, `Date`), `app.wait(ms)` moves it too, and each frame the platform shows moves
-it a frame (1/60 s), so the app's time passes while it animates. The platform's own animations, and a route's
+`requestAnimationFrame` a frame apart, `Date`), `app.wait(ms)`, `waitFor` and `waitUntil` move it too, and each frame
+the platform shows moves it a frame (1/60 s), so the app's time passes while it animates. The platform's own animations, and a route's
 `delay`, take real time. The app's requests come to the test as they do headless: `network` routes answer them,
 a request no route matches fails, and `"live"` lets them through to the host's network; `app.requests()` lists them
 all. `storage` is in the app's storage when it starts, and `app.storage()` reads it from the app. `locale`,
-`reducedMotion` and `safeArea` hold whatever the platform reports, and the app's clipboard calls are served from the
+`reducedMotion` and `safeArea`, when `open` gives them (a default value included), hold whatever the platform reports,
+and a `colorScheme` it gives switches the system's appearance (`"light"` too); what it leaves out is the platform's, and the app's clipboard calls are served from the
 test's own clipboard (`clipboard` is its text at first, `app.clipboard()` reads it), so the machine's clipboard stays
 as it was; a text input's own copy and paste use the system's. `host.params` reaches the app, `app.host.send` sends
 events, and the URLs the app opens are recorded for `app.openedUrls()` instead of being opened. `host.handlers` runs
-headless: the development host answers no calls, and `open` rejects handlers there. An app with Rust crates of its own runs in a development host built with its crates, which NSH
+headless, where the test answers the app's calls. `open` checks its options against the target: `width` and
+`height` on iOS and Android, a `platform` of another kind of device (a phone's on a desktop or the web, a desktop's or
+the other phone's on iOS or Android) and `host.handlers` reject with `ERR_NSH_TEST_UNSUPPORTED`, so a test runs as it
+is written or says what it needs. A desktop's `platform` (`"macos"` for a desktop's mouse and keys) runs on every
+desktop target and the web, as that target's platform. An app with Rust crates of its own runs in a development host built with its crates, which NSH
 builds for the platform; a Rust app's host runs its root, so `open(".")` starts it there as it does headless.
 
 On the web, the apps run in the development host's page in a headless Chrome, Edge or Chromium: the one installed

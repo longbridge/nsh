@@ -212,7 +212,8 @@ release (item 3 of the API review); where code differs from one, the rule wins a
     error), and Node's codes for I/O (`ENOENT`, `EACCES`:
     the OS refused, never NSH's capabilities) and its own (`ERR_FS_FILE_TOO_LARGE`, `ERR_OUT_OF_RANGE`). Never
     `EACCES` or a code-less message for a capability denial. `nsh/test`'s steps fail with codes of their own
-    (`ERR_NSH_TEST_NOT_FOUND`, `ERR_NSH_TEST_DISABLED`, `ERR_NSH_TEST_NO_BACK`, `ETIMEDOUT`).
+    (`ERR_NSH_TEST_NOT_FOUND`, `ERR_NSH_TEST_DISABLED`, `ERR_NSH_TEST_NO_BACK`, `ETIMEDOUT`;
+    `ERR_NSH_TEST_UNSUPPORTED` for an `open` option the `--target` cannot honor).
   - Never a sentinel (`false`, `-1`, `""`, `[]`) or silence for a failure: the clipboard and the picker reject when
     not granted. `null` stays an answer to a query with nothing there (`groupOf`, `posAtCoords` over nothing,
     `Storage.getItem` of an absent key, `ViewRef.measure()` of a view not in the tree), and a cancel resolves empty.

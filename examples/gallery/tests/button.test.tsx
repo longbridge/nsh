@@ -14,27 +14,27 @@ beforeEach(async () => {
 test("a busy button shows its progress, then a check, then its label again", async () => {
   await app.press("label:Save changes");
   await app.waitFor("label:Saving…");
-  await app.clock.runFor(1300);
+  await app.clock!.runFor(1300);
   await app.waitFor("label:Saved");
-  await app.clock.runFor(2000);
+  await app.clock!.runFor(2000);
   await app.waitFor("label:Save changes");
 });
 
 test("an upload fills its button and ends uploaded", async () => {
   await app.press("id:upload");
   await app.waitFor("text:/^Uploading \\d+%$/");
-  await app.clock.runFor(3000);
+  await app.clock!.runFor(3000);
   await app.waitFor("Uploaded");
 });
 
 test("the split button merges the way its menu chose", async () => {
   await app.press("label:Merge options");
   await app.press("Rebase and merge");
-  await app.clock.runFor(500);
+  await app.clock!.runFor(500);
   await app.waitFor("role:button[Rebase and merge]");
   await app.press("role:button[Rebase and merge]");
   await app.waitFor("label:Merging…");
-  await app.clock.runFor(1300);
+  await app.clock!.runFor(1300);
   await app.waitFor("label:Rebased");
   await app.press("label:Reopen");
   await app.waitFor("role:button[Rebase and merge]");
@@ -44,7 +44,7 @@ test("copy puts the text on the clipboard and shows a check for a moment", async
   await app.press("label:Copy the command");
   expect(app.clipboard()).toBe("nsh init my-app --template ts");
   await app.waitFor("label:Copied");
-  await app.clock.runFor(1700);
+  await app.clock!.runFor(1700);
   await app.waitFor("label:Copy the command");
 });
 
