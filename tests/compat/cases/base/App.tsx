@@ -48,6 +48,7 @@ import BaseTextView from "./base-text-view";
 import BaseToast from "./base-toast";
 import BaseToggle from "./base-toggle";
 import BaseToolbar from "./base-toolbar";
+import BaseTree from "./base-tree";
 import BaseToken from "./base-token";
 
 const cases: Record<string, () => JSX.Element> = {
@@ -84,6 +85,7 @@ const cases: Record<string, () => JSX.Element> = {
   "base-tabs": BaseTabs,
   "base-toggle": BaseToggle,
   "base-toolbar": BaseToolbar,
+  "base-tree": BaseTree,
   "base-collapsible": BaseCollapsible,
   "base-color-picker": BaseColorPicker,
   "base-collapsible-reveal": BaseCollapsibleReveal,

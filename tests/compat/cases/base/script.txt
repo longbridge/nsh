@@ -1196,6 +1196,75 @@ covers [props] disabled
 covers [props] accessibilityLabel
 covers [events] onPress
 
+# base-tree
+tap id:case-base-tree
+expect Selected: none
+expect Changes: 0
+# A tree of tree items for screen readers, named; `src` is expanded as the
+# app says, so its children show and `ui`'s do not.
+prop id:files role tree
+prop id:files accessibilityLabel Files
+prop label:src role treeitem
+prop label:src accessibilityState expanded=true
+prop label:ui accessibilityState expanded=false
+prop label:lib.rs role treeitem
+expect lib.rs
+absent tree.rs
+# A disabled item, dimmed: it shows what `expanded` says.
+prop label:docs accessibilityState disabled=true expanded=false
+absent guide.md
+# A press selects a row (`selected:`) and expands a folder: the app hears
+# the selection, the expanded items and the item expanded.
+tap label:ui
+expect Selected: src/ui
+expect Expanded: src,src/ui
+expect Heard: expand src/ui
+expect Changes: 1
+expect tree.rs
+prop label:ui accessibilityState selected=true expanded=true
+style label:ui backgroundColor #00ff00ff
+nostyle label:src backgroundColor
+# Again: it collapses.
+tap label:ui
+expect Expanded: src
+expect Heard: collapse src/ui
+expect Changes: 2
+absent tree.rs
+# A leaf is selected only.
+tap label:lib.rs
+expect Selected: src/lib.rs
+prop label:ui accessibilityState expanded=false
+nostyle label:ui backgroundColor
+style label:lib.rs backgroundColor #00ff00ff
+# The disabled item takes no press.
+tap text:docs
+expect Selected: src/lib.rs
+expect Changes: 2
+absent guide.md
+# The tree's own state, from `defaultExpanded` and `defaultSelected`;
+# `renderItem` draws the rows, given each item's depth.
+prop id:notes role tree
+expect +notes@0
+expect a.md@1
+expect todo.md@0
+prop label:a.md accessibilityState selected=true
+tap label:notes
+absent a.md@1
+prop label:notes accessibilityState selected=true expanded=false
+covers [nsh/base] Tree
+covers [props] Tree.items
+covers [props] Tree.expanded
+covers [props] Tree.defaultExpanded
+covers [props] Tree.selected
+covers [props] Tree.defaultSelected
+covers [props] Tree.itemClass
+covers [props] Tree.renderItem
+covers [props] accessibilityLabel
+covers [events] Tree.onExpandedChange
+covers [events] Tree.onSelectedChange
+covers [events] Tree.onExpand
+covers [events] Tree.onCollapse
+
 # A collapsible: the summary always, the details only while the app's
 # `open` holds. Collapsed, the region is the trigger's 20 points.
 tap id:case-base-collapsible

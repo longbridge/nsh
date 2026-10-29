@@ -119,6 +119,7 @@ and take their look from the app.
 | `<NumberInput>` | `nsh_base::number_input()` | A number typed in a field or stepped with buttons and keys | [NumberInput](./number-input.md) |
 | `<OtpInput>` | `nsh_base::otp_input()` | A one-time code of a fixed number of digits, typed, pasted or autofilled into cells | [OtpInput](./otp-input.md) |
 | `<Pagination>` | `nsh_base::pagination()` | The pages of a set: Previous, the pages around the current one, ellipses and Next | [Pagination](./pagination.md) |
+| `<Tree>` | `nsh_base::tree()` | Items that hold items, expanded and collapsed, one selected: virtualized, one stop of the keyboard focus | [Tree](./tree.md) |
 | `<Plot>`, `<Line>`, `<Area>`, `<Bar>`, `<Grid>`, `<Pie>`, `<Arc>` (`nsh/base/plot`) | `nsh_base::plot::{plot, line, area, bar, grid, pie, arc}` | A chart's frame and its marks, drawn natively from the app's rows | [Plot](./plot.md) |
 | `<Popover>` | `nsh_base::popover()` | Content anchored to a trigger, on top of everything | [Popover](./popover.md) |
 | `<Progress>` | `nsh_base::progress()` | A progress bar: how far a task is, or that it is under way | [Progress](./progress.md) |
