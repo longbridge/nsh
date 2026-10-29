@@ -90,11 +90,11 @@ What exists today:
 
 In TSX, `desktop={{…}}` and `web={{…}}` are accepted everywhere. The types (`IOSProps`, `AndroidProps`, `DesktopProps` and their per-element forms) tell your editor what each element takes.
 
-Something two or more platforms do is a top-level prop (in Rust a method of the same name), applied where it means something: `NavPage`'s `title`, `headerStyle`, `headerLargeTitle` and `headerBackTitle` set up the system header of iOS and Android, its `header` slot is the header of the desktops and the web, and `Dialog`'s `presentation` picks iOS's sheets. `AlertDialog.show`'s `closeOnBackdropPress`, `pagingEnabled`, `refreshing`, `hitSlop` and the rest work on every platform.
+What an element means on every platform is a top-level prop (in Rust a method of the same name), applied where it means something: `NavPage`'s `title`, `headerStyle`, `headerLargeTitle` and `headerBackTitle` set up the system header of iOS and Android, its `header` slot is the header of the desktops and the web, and `Dialog`'s `presentation` picks iOS's sheets. `AlertDialog.show`'s `closeOnBackdropPress`, `pagingEnabled`, `refreshing`, `hitSlop` and the rest work on every platform. A platform's own system feature goes in its object, and when several platforms have it, in each of theirs under the same name: `WebView`'s `allowsBackForwardNavigationGestures`, the system's swipes through the page history, is in `ios={{…}}` and `desktop={{…}}`.
 
 ## Platform modules
 
-In Rust, the APIs only one platform has are functions of `nsh_core::prelude` (`on_back_press`, `input_accessory_view`) and of `nsh_core::element::desktop` (`set_title_bar`, `title_bar`, `close_window`); elsewhere they do nothing. In TSX, `nsh/mobile` holds the APIs of iOS and Android (some of them one platform's), `nsh/desktop` those of the desktops. Both can be imported on every platform, so one bundle runs everywhere: on other platforms their functions return at once and their components take no room. Each exports `isAvailable`, which is `true` on its own platforms; `platform.os` tells them apart.
+In Rust, the APIs only one platform has are functions of `nsh_core::prelude` (`on_back_press`, `input_accessory_view`) and of `nsh_core::element::desktop` (the window: `set_title`, `set_title_bar`, `title_bar`, `minimize`, `toggle_maximize`, `toggle_full_screen`, `set_frame`, `set_level`, `order_front`, `close_window`; menus: `set_application_menu`, `popup_menu`); elsewhere they do nothing. In TSX, `nsh/mobile` holds the APIs of iOS and Android (some of them one platform's), `nsh/desktop` those of the desktops. Both can be imported on every platform, so one bundle runs everywhere: on other platforms their functions return at once and their components take no room. Each exports `isAvailable`, which is `true` on its own platforms; `platform.os` tells them apart.
 
 ### nsh/mobile
 
@@ -104,7 +104,7 @@ In Rust, the APIs only one platform has are functions of `nsh_core::prelude` (`o
 
 | Rust | TSX | Description |
 |---|---|---|
-| `on_back_press(listener)` | `BackHandler.onBackPress(listener)` | Listens to the back button after dialogs, before stacks; return `true` when handled. The listener goes with the component (or effect) that added it; in TSX the call also returns a function that stops it earlier. |
+| `on_back_press(listener)` | `BackHandler.on("press", listener)` | Listens to the back button after dialogs, before stacks; return `true` when handled. The listener goes with the component (or effect) that added it; in TSX the call also returns a function that stops it earlier. |
 | | `BackHandler.exitApp()` | Leaves the app. |
 
 ```rust tabs
@@ -131,7 +131,7 @@ import { BackHandler } from "nsh/mobile";
 function Player() {
   // Back leaves full screen before it leaves the page. The listener goes
   // with the component.
-  BackHandler.onBackPress(() => {
+  BackHandler.on("press", () => {
     if (!fullScreen()) return false;
     fullScreen.set(false);
     return true;
@@ -156,7 +156,7 @@ Rust apps draw their own title bars with `nsh_core::element::desktop` ([Building
 
 | Export | Description |
 |---|---|
-| `Window` | The window: `setTitle`, `setTitleBar("hidden")` for a title bar of the app's own, `minimize`, `toggleMaximize`, `toggleFullScreen`, `close`. |
+| `Window` | The window: `setTitle`, `setTitleBar({ style: "hidden" })` for a title bar of the app's own, `minimize`, `toggleMaximize`, `toggleFullScreen`, `close`. |
 | `titleBar` | The hidden title bar's height and the room the system's window controls take (reactive). |
 | `Menu` | `setApplicationMenu(items)` (the menu bar, with shortcuts) and `popup(items, at?)` (context menus). |
 | `isAvailable` | `true` on macOS, Windows and Linux. |

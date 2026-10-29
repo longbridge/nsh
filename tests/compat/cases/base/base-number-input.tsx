@@ -11,7 +11,9 @@
 // and controls column (`inputClass`, `inputStyle`, `decrementButtonClass`,
 // `decrementButtonStyle`, `incrementButtonClass`, `incrementButtonStyle`,
 // `controlsClass`, `controlsStyle`), whose `disabled:` classes follow the
-// input. The parts' frames are how its script sees them.
+// input. The parts' frames are how its script sees them; the app's element
+// in `prefix` and `suffix` lays out in the component's row as its own child
+// would (`flex: 1` takes what the row leaves, a percentage is of the row).
 import { Text, View, signal } from "nsh";
 import { NumberInput } from "nsh/base";
 
@@ -34,7 +36,7 @@ function App() {
     <View style={{ flex: 1, paddingTop: 20, gap: 4 }}>
       <NumberInput
         value={quantity()}
-        onChange={next => quantity.set(next)}
+        onChange={({ value }) => quantity.set(value)}
         min={0}
         max={10}
         step={0.5}
@@ -49,10 +51,10 @@ function App() {
         max={10}
         placeholder="Amount"
         accessibilityLabel="Amount"
-        onChange={next => amount.set(String(next))}
+        onChange={({ value }) => amount.set(String(value))}
         onFocus={() => log("focus")}
         onBlur={() => log("blur")}
-        onSubmit={next => log(`submit ${next}`)}
+        onSubmit={({ value }) => log(`submit ${value}`)}
         controlsRight
         class="flex-row"
         inputClass="w-[100px] h-[30px]"
@@ -76,6 +78,15 @@ function App() {
         {...parts}
       />
       <NumberInput value={5} readonly accessibilityLabel="Fixed" {...parts} />
+      <View style={{ width: 300 }}>
+        <NumberInput
+          accessibilityLabel="Weight"
+          class="flex-row"
+          inputClass="w-[100px] h-[30px]"
+          prefix={<View testID="weight-prefix" style={{ flex: 1, height: 10 }} />}
+          suffix={<View testID="weight-suffix" style={{ width: "10%", height: 10 }} />}
+        />
+      </View>
     </View>
   );
 }

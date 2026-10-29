@@ -599,9 +599,7 @@ impl Rv {
         let (deleted, inserted, composed) = {
             let mut sink = self.sink.borrow_mut();
             let base = match sink.emptied.take() {
-                // Platforms report only changes: the old text again was typed
-                // into the emptied sink.
-                Some(old) if text != old && text.starts_with(old.as_str()) => old,
+                Some(old) if text.starts_with(old.as_str()) => old,
                 Some(_) => String::new(),
                 None => std::mem::take(&mut sink.text),
             };
@@ -1184,7 +1182,15 @@ impl Rv {
         let state = self.session.state();
         let doc = state.doc();
         let size = doc.content().size();
-        let (Ok(a), Ok(h)) = (doc.resolve(anchor.min(size)), doc.resolve(head.min(size))) else {
+        // A ref's command runs at the commit and cannot throw: positions
+        // outside the document leave the selection as it is, logged.
+        if anchor > size || head > size {
+            log::warn!(
+                "RichEditor.setSelection: {anchor}..{head} out of range (the document's positions are 0 to {size})"
+            );
+            return;
+        }
+        let (Ok(a), Ok(h)) = (doc.resolve(anchor), doc.resolve(head)) else {
             return;
         };
         let selection = if anchor == head
@@ -1199,19 +1205,23 @@ impl Rv {
         self.set_selection(selection, true);
     }
 
-    /// Replaces the document (the ref's `setDocJson`).
-    pub(crate) fn set_doc_json(&self, json: &Value) -> bool {
+    /// Replaces the document (the ref's `setDocJson`): why not, when it
+    /// cannot.
+    pub(crate) fn set_doc_json(&self, json: &Value) -> Result<(), String> {
         let state = self.session.state();
-        let Ok(doc) = state.schema().node_from_json(json) else {
-            return false;
-        };
+        let doc = state
+            .schema()
+            .node_from_json(json)
+            .map_err(|e| format!("setDocJson: not a document of the editor's schema: {e}"))?;
         let mut tr = state.tr();
         let size = state.doc().content().size();
-        if tr.replace_with(0, size, doc.content().clone()).is_err() {
-            return false;
-        }
+        tr.replace_with(0, size, doc.content().clone())
+            .map_err(|e| format!("setDocJson: the document does not fit: {e}"))?;
         tr.set_origin(TransactionOrigin::Api);
-        self.session.dispatch(tr).is_ok()
+        self.session
+            .dispatch(tr)
+            .map(|_| ())
+            .map_err(|e| format!("setDocJson: {e}"))
     }
 
     // The clipboard.

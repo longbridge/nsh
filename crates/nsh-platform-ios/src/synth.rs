@@ -367,8 +367,7 @@ fn layers_animating(window: &UIWindow) -> bool {
             for key in keys.iter() {
                 // SAFETY: a key the layer just listed.
                 if let Some(a) = unsafe { layer.animationForKey(&key) }
-                    && a.repeatCount().is_finite()
-                    && a.duration().is_finite()
+                    && !forever(&a)
                 {
                     return true;
                 }
@@ -379,6 +378,16 @@ fn layers_animating(window: &UIWindow) -> bool {
         subs.is_some_and(|subs| subs.iter().any(|l| walk(&l)))
     }
     walk(&window.layer())
+}
+
+/// Whether `animation` repeats forever: an infinite count, duration or
+/// repeat duration, or a count of `FLT_MAX`, Core Animation's own way to
+/// say forever, which UIKit's loops use (a focused input's blinking
+/// caret: an input with the focus would hold every step for its 2 s).
+fn forever(animation: &objc2_quartz_core::CAAnimation) -> bool {
+    animation.repeatCount() >= f32::MAX
+        || !animation.duration().is_finite()
+        || !animation.repeatDuration().is_finite()
 }
 
 /// A picture of the window as it shows (`drawViewHierarchyInRect:`), as

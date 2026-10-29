@@ -1,19 +1,21 @@
 //! Roving focus: a group whose items are one stop of the keyboard focus
-//! (Tab), between which the arrow keys move it, as WAI-ARIA's tab list and
-//! radio group patterns have it. `Tabs` and `RadioGroup` provide a group
-//! through context; each `Tab` / `Radio` under one registers with it. An
-//! item outside a group stays a stop of its own.
+//! (Tab), between which the arrow keys move it, as WAI-ARIA's tab list,
+//! radio group and toolbar patterns have it. `Tabs`, `RadioGroup` and
+//! `ToggleGroup` provide a group through context; each `Tab` / `Radio` /
+//! `Toggle` under one registers with it. An item outside a group stays a
+//! stop of its own.
 //!
-//! The stop is the item the focus is on, else the current one (the
-//! selected tab, the checked radio), else the first enabled one: only that
-//! item is `focusable`, so Tab enters and leaves the group in one step. An
-//! arrow key makes the item it moves to the stop and focuses it (a ref's
-//! `focus()` only moves to stops; the `focusable` change mounts before the
-//! command in the same batch), then activates it: a tab reports a press, a
-//! radio asks to be checked, so the app selects it as focus moves, the
-//! pattern's automatic activation. Disabled items are skipped, as they are
-//! no stops. The items are in the order they were rendered, which is the
-//! order of the app's children unless it inserts one between others later.
+//! The stop is the item the focus is on, else the current one (the selected
+//! tab, the checked radio, the first pressed toggle), else the first enabled
+//! one: only that item is `focusable`, so Tab enters and leaves the group in
+//! one step. An arrow key makes the item it moves to the stop and focuses it
+//! (a ref's `focus()` only moves to stops; the `focusable` change mounts
+//! before the command in the same batch), then activates it: a tab reports a
+//! press, a radio asks to be checked, so the app selects it as focus moves,
+//! the pattern's automatic activation (a toolbar's toggle does nothing: the
+//! focus only moves). Disabled items are skipped, as they are no stops. The
+//! items are in the order they were rendered, which is the order of the
+//! app's children unless it inserts one between others later.
 
 use std::{
     cell::{Cell, RefCell},
@@ -33,6 +35,9 @@ pub(crate) enum Pattern {
     Tabs,
     /// A radio group: Up / Left the previous radio, Down / Right the next.
     Radios,
+    /// A toolbar: the keys of a tab list (the toolbar's axis is the app's
+    /// layout, so both pairs move; Home and End the first and last item).
+    Toolbar,
 }
 
 /// A group's keys: each keystroke, whether a held key repeats it, and where
@@ -122,7 +127,7 @@ impl Roving {
         }));
         let focused = computed(move || focus.get().is_some());
         let keys = match pattern {
-            Pattern::Tabs => TAB_KEYS,
+            Pattern::Tabs | Pattern::Toolbar => TAB_KEYS,
             Pattern::Radios => RADIO_KEYS,
         };
         let moved = group.clone();

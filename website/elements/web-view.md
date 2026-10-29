@@ -1,7 +1,7 @@
 ---
 title: WebView
 description: "The WebView element: web pages and inline HTML inside an app, with messaging both ways."
-order: 9
+order: 80
 group: primitives
 demo: el-web-view
 ---
@@ -79,7 +79,7 @@ A web view takes the props of a [view](./view.md) (it has no children) plus:
 |---|---|---|---|
 | `onLoadStart` | `.on_load_start` | `WebViewNavigation` | A page started loading. |
 | `onLoad` | `.on_load` | `WebViewNavigation` | A page finished loading. |
-| `onError` | `.on_error` | `{ message }` (`&str`) | Loading failed. |
+| `onError` | `.on_error` | `{ message, code? }` (`&str`, the message) | Loading failed; `code` is `"ERR_ACCESS_DENIED"` for a page or `html` the app's capabilities do not grant. |
 | `onNavigationStateChange` | `.on_navigation_state_change` | `WebViewNavigation` | The URL, title, loading state or history changed. |
 | `onMessage` | `.on_message` | `{ data: string }` (`&str`) | The page called `window.nsh.postMessage(data)`. |
 
@@ -131,7 +131,7 @@ fn bridge() -> impl IntoElement {
 ```
 
 ```tsx tabs
-import { signal, Text, View, WebView, type YNode } from "nsh";
+import { signal, Text, View, WebView, type WebViewRef } from "nsh";
 
 const page = `<!doctype html>
 <meta name="viewport" content="width=device-width">
@@ -143,7 +143,7 @@ const page = `<!doctype html>
 
 function Bridge() {
   const message = signal("");
-  let web!: YNode;
+  let web!: WebViewRef;
   return (
     <View style={{ gap: 12 }}>
       <WebView ref={web} html={page} style={{ height: 200 }} onMessage={(e) => message.set(e.data)} />
@@ -156,8 +156,9 @@ function Bridge() {
 ## Capabilities
 
 When the app declares [capabilities](../docs/sandbox-and-capabilities.md) in `nsh.json`, a web view shows and
-navigates to the hosts listed under `webview`. A `src` on another host shows an empty view; a top-level navigation
-to one (a link the user taps) is cancelled natively.
+navigates to the hosts listed under `webview`. A `src` on another host, or `html` in an app without `webview`, shows an
+empty view; a top-level navigation to another host (a link the user taps) is cancelled natively. Each reports
+`onError` with `code` `"ERR_ACCESS_DENIED"`.
 
 ```json
 {

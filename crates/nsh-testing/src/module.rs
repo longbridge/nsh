@@ -16,7 +16,10 @@ use std::{
 
 use nsh_core::{
     JsonValue,
-    element::{Arg, JsHost, JsIn, JsKind, JsOwned, JsValue, PropError, Registry, TsTypes},
+    element::{
+        Arg, Exception, JsError, JsHost, JsIn, JsKind, JsOwned, JsValue, PropError, Registry,
+        TsTypes,
+    },
     prelude::*,
 };
 use nsh_engine::{HostCall, HostChannel, HttpBody, HttpRequest};
@@ -24,6 +27,7 @@ use nsh_engine::{HostCall, HostChannel, HttpBody, HttpRequest};
 use crate::{
     MemoryStorage,
     driver::{Driver, headless_only},
+    failure,
     headless::{self, RecordingNetwork, StubReply, StubResponse, StubRoute, default_answer},
     run::{OpenApp, Session},
 };
@@ -46,7 +50,8 @@ pub fn registry() -> Registry {
         .class::<App>()
         .class::<Clock>()
         .class::<Expectation>()
-        .class::<Rejection>();
+        .class::<Rejection>()
+        .class::<Resolution>();
     registry
 }
 
@@ -246,8 +251,8 @@ impl Testing {
     /// set up, and resolves once it rendered and is quiet. Its requests
     /// fail unless `options.network` lists them; its storage starts with
     /// `options.storage`.
-    pub async fn open(entry: String, options: Option<OpenOptions>) -> Result<App, String> {
-        let session = Session::current()?;
+    pub async fn open(entry: String, options: Option<OpenOptions>) -> Result<App, JsError> {
+        let session = Session::current().map_err(JsError::Error)?;
         let options = options.unwrap_or_default();
         let (network, mut server) = network_setup(options.network);
         let host_handlers = options
@@ -275,8 +280,10 @@ impl Testing {
         };
         let opening = blocking(move || session.open(&entry, launch));
         let (app, storage, requests) = serve(server.as_ref(), opening)
-            .await?
-            .map_err(|e| e.to_string())??;
+            .await
+            .map_err(step_error)?
+            .map_err(|e| step_error(e.to_string()))?
+            .map_err(step_error)?;
         Ok(App {
             steps: Steps {
                 app,
@@ -292,20 +299,21 @@ impl Testing {
 
     /// What to expect of `value`, compared as JSON is (`undefined` is
     /// `null`): `expect(app.texts()).toContain("Saved")`. Given a function,
-    /// what it throws: `expect(() => parse("x")).toThrow("not a number")`,
-    /// and with `rejects` what the promise it returns rejects with.
+    /// what it throws: `expect(() => parse("x")).toThrow("not a number")`;
+    /// given a promise (or a function returning one), with `rejects` and
+    /// `resolves` what it settles to:
+    /// `await expect(app.press("Pay")).rejects.toMatchObject({ code: "ERR_NSH_TEST_DISABLED" })`.
     pub fn expect(value: Subject) -> Expectation {
-        match value {
-            Subject::Value(value) => Expectation {
-                value,
-                run: None,
-                not: false,
-            },
-            Subject::Function(run) => Expectation {
-                value: JsonValue::Null,
-                run: Some(run),
-                not: false,
-            },
+        let (value, run, promise) = match value {
+            Subject::Value(value) => (value, None, false),
+            Subject::Function(run) => (JsonValue::Null, Some(run), false),
+            Subject::Promise(run) => (JsonValue::Null, Some(run), true),
+        };
+        Expectation {
+            value,
+            run,
+            promise,
+            not: false,
         }
     }
 }
@@ -394,7 +402,8 @@ pub struct OpenOptions {
     pub platform: Option<Platform>,
     /// A manual clock for the app (none: the system's): its time moves only
     /// as the test moves it (`app.clock`), steps finish native animations
-    /// at once, and `app.wait` moves it.
+    /// at once (one looping forever moves with the clock instead), and
+    /// `app.wait` moves it.
     pub clock: Option<ClockOptions>,
     /// The embedding app the test plays for the app (`nsh/host`): the
     /// launch parameters it reads as `host.params` and the handlers of its
@@ -1307,7 +1316,11 @@ fn stub_response(value: &JsonValue) -> Result<StubResponse, PropError> {
 /// `text:<text>`, `view:<id>` or a bare string (a test id, a label, then a
 /// text), where a user would look first (the top modal, the top screen of
 /// a stack). A step resolves once the app is quiet and rejects, with what
-/// is on screen, when it cannot be taken or the app threw.
+/// is on screen, when it cannot be taken or the app threw. The failures a
+/// test may expect carry a `code` to match (messages may change):
+/// `ERR_NSH_TEST_NOT_FOUND` (nothing matches the selector),
+/// `ERR_NSH_TEST_DISABLED` (what it names is disabled), `ETIMEDOUT` (a wait
+/// ran out of time), `ERR_NSH_TEST_NO_BACK` (nothing to go back from).
 #[class]
 pub struct App {
     steps: Steps,
@@ -1337,7 +1350,7 @@ impl AppHost {
         this: Instance<Self>,
         name: String,
         data: Option<JsonValue>,
-    ) -> Result<(), String> {
+    ) -> Result<(), JsError> {
         let steps = this.with(|h| h.steps.clone());
         let data = data.unwrap_or(JsonValue::Null);
         steps.run(move |app| app.send_host_event(&name, data)).await
@@ -1399,8 +1412,8 @@ impl Clock {
     /// Moves the clock by `ms` milliseconds, a display frame at a time:
     /// timers, frames and native animations run as they come due, in order;
     /// resolves once the app is quiet.
-    pub async fn run_for(this: Instance<Self>, ms: f64) -> Result<(), String> {
-        let time = duration(ms)?;
+    pub async fn run_for(this: Instance<Self>, ms: f64) -> Result<(), JsError> {
+        let time = duration(ms).map_err(JsError::Range)?;
         let steps = this.with(|c| c.steps.clone());
         steps.run(move |app| app.run_for(time)).await
     }
@@ -1408,8 +1421,8 @@ impl Clock {
     /// Moves the clock by `ms` milliseconds at once, as a device waking from
     /// sleep: the timers due meanwhile run once each; resolves once the app
     /// is quiet.
-    pub async fn fast_forward(this: Instance<Self>, ms: f64) -> Result<(), String> {
-        let time = duration(ms)?;
+    pub async fn fast_forward(this: Instance<Self>, ms: f64) -> Result<(), JsError> {
+        let time = duration(ms).map_err(JsError::Range)?;
         let steps = this.with(|c| c.steps.clone());
         steps.run(move |app| app.fast_forward(time)).await
     }
@@ -1435,7 +1448,7 @@ impl Keyboard {
     /// `"shift+/"`, `"escape"`; `mod` is the platform's command key): the
     /// app's shortcut of it hears it (`onKeyCommand`), else the focused
     /// input takes it, else Escape goes back.
-    pub async fn press(this: Instance<Self>, keys: String) -> Result<(), String> {
+    pub async fn press(this: Instance<Self>, keys: String) -> Result<(), JsError> {
         let steps = this.with(|k| k.steps.clone());
         steps.run(move |app| app.press_key(&keys)).await
     }
@@ -1443,13 +1456,13 @@ impl Keyboard {
     /// Holds modifier keys down (`"mod"`, `"shift"`, `"alt"`, `"ctrl"`,
     /// `"meta"`, joined by `+`) until `up`: the presses, drags and hovers
     /// meanwhile carry them (a Mod-click, a Shift-drag). Headless and on Linux.
-    pub async fn down(this: Instance<Self>, keys: String) -> Result<(), String> {
+    pub async fn down(this: Instance<Self>, keys: String) -> Result<(), JsError> {
         let steps = this.with(|k| k.steps.clone());
         steps.run(move |app| app.hold_keys(&keys, true)).await
     }
 
     /// Lets go of modifier keys `down` held.
-    pub async fn up(this: Instance<Self>, keys: String) -> Result<(), String> {
+    pub async fn up(this: Instance<Self>, keys: String) -> Result<(), JsError> {
         let steps = this.with(|k| k.steps.clone());
         steps.run(move |app| app.hold_keys(&keys, false)).await
     }
@@ -1471,7 +1484,7 @@ const CLOSED: &str = "the app is closed: the test that opened it ended";
 impl App {
     /// Presses what `selector` names (or the nearest view around it that
     /// hears presses, as a tap on a button's text does).
-    pub async fn press(this: Instance<Self>, selector: String) -> Result<(), String> {
+    pub async fn press(this: Instance<Self>, selector: String) -> Result<(), JsError> {
         step(&this, move |app| app.press(&selector)).await
     }
 
@@ -1482,13 +1495,13 @@ impl App {
         this: Instance<Self>,
         selector: String,
         text: String,
-    ) -> Result<(), String> {
+    ) -> Result<(), JsError> {
         step(&this, move |app| app.type_text(&selector, &text)).await
     }
 
     /// The return key in the input `selector` names, as its
     /// `submitBehavior` says.
-    pub async fn submit(this: Instance<Self>, selector: String) -> Result<(), String> {
+    pub async fn submit(this: Instance<Self>, selector: String) -> Result<(), JsError> {
         step(&this, move |app| app.submit(&selector)).await
     }
 
@@ -1499,7 +1512,7 @@ impl App {
         this: Instance<Self>,
         selector: String,
         distance: f64,
-    ) -> Result<(), String> {
+    ) -> Result<(), JsError> {
         step(&this, move |app| {
             app.scroll(&selector, nsh_core::geometry::px(distance as f32))
         })
@@ -1511,7 +1524,7 @@ impl App {
     /// (`onPanStart`, `onPanEnd`), the views listening to touches hear them,
     /// a scroll view scrolls (pulled past its top, it refreshes), and the
     /// press under the finger is cancelled.
-    pub async fn drag(this: Instance<Self>, selector: String, by: DragBy) -> Result<(), String> {
+    pub async fn drag(this: Instance<Self>, selector: String, by: DragBy) -> Result<(), JsError> {
         let by = nsh_core::geometry::point(by.x, by.y);
         step(&this, move |app| app.drag(&selector, by)).await
     }
@@ -1523,7 +1536,7 @@ impl App {
         this: Instance<Self>,
         selector: String,
         by: DragBy,
-    ) -> Result<(), String> {
+    ) -> Result<(), JsError> {
         let by = nsh_core::geometry::point(by.x, by.y);
         step(&this, move |app| app.drag_and_hold(&selector, by)).await
     }
@@ -1535,12 +1548,12 @@ impl App {
         this: Instance<Self>,
         selector: String,
         uris: Vec<String>,
-    ) -> Result<(), String> {
+    ) -> Result<(), JsError> {
         step(&this, move |app| app.drop_files(&selector, uris)).await
     }
 
     /// Lifts the finger `dragAndHold` left down, where it is.
-    pub async fn drop(this: Instance<Self>) -> Result<(), String> {
+    pub async fn drop(this: Instance<Self>) -> Result<(), JsError> {
         step(&this, move |app| app.drop_held()).await
     }
 
@@ -1548,7 +1561,7 @@ impl App {
     /// names: it, or the nearest view around it listening, hears
     /// `onContextMenu`, whose handler shows a menu (`Menu.popup`: read it
     /// with `menu()`). Desktops and the web only: a phone has no mouse.
-    pub async fn right_click(this: Instance<Self>, selector: String) -> Result<(), String> {
+    pub async fn right_click(this: Instance<Self>, selector: String) -> Result<(), JsError> {
         step(&this, move |app| app.right_click(&selector)).await
     }
 
@@ -1561,20 +1574,20 @@ impl App {
         this: Instance<Self>,
         selector: String,
         content: PasteContent,
-    ) -> Result<(), String> {
-        let content = content.read()?;
+    ) -> Result<(), JsError> {
+        let content = content.read().map_err(JsError::Error)?;
         step(&this, move |app| app.paste(&selector, &content)).await
     }
 
     /// Chooses the open context menu's action labelled `label` (a
     /// submenu's: `"Share > Mail"`), as a click on it: the app hears
     /// `onMenu`, then the menu closes.
-    pub async fn choose_menu_item(this: Instance<Self>, label: String) -> Result<(), String> {
+    pub async fn choose_menu_item(this: Instance<Self>, label: String) -> Result<(), JsError> {
         step(&this, move |app| app.choose_menu_item(&label)).await
     }
 
     /// Closes the open context menu with nothing chosen, as Escape does.
-    pub async fn close_menu(this: Instance<Self>) -> Result<(), String> {
+    pub async fn close_menu(this: Instance<Self>) -> Result<(), JsError> {
         step(&this, move |app| app.close_menu()).await
     }
 
@@ -1583,24 +1596,24 @@ impl App {
     /// take their `hover:` styles and hear `onMouseMove`, with no button
     /// down. Desktops and the web (at any width: a browser has a mouse)
     /// only: an iOS or Android phone has none.
-    pub async fn hover(this: Instance<Self>, selector: String) -> Result<(), String> {
+    pub async fn hover(this: Instance<Self>, selector: String) -> Result<(), JsError> {
         step(&this, move |app| app.hover(&selector)).await
     }
 
     /// Lets the app run for `ms` milliseconds (timers and animations): on a
     /// manual clock, moves it by `ms` (`clock.runFor`).
-    pub async fn wait(this: Instance<Self>, ms: f64) -> Result<(), String> {
+    pub async fn wait(this: Instance<Self>, ms: f64) -> Result<(), JsError> {
         let time = Duration::from_secs_f64(ms.max(0.0) / 1000.0);
         step(&this, move |app| app.wait(time)).await
     }
 
-    /// Resolves once a view on screen matches `selector`; rejects after
-    /// `timeout` milliseconds (5000).
+    /// Resolves once a view on screen matches `selector`; rejects
+    /// (`ETIMEDOUT`) after `timeout` milliseconds (5000).
     pub async fn wait_for(
         this: Instance<Self>,
         selector: String,
         options: Option<WaitOptions>,
-    ) -> Result<(), String> {
+    ) -> Result<(), JsError> {
         let options = options.unwrap_or_default();
         let timeout = options.timeout();
         match options.state.unwrap_or_default() {
@@ -1612,14 +1625,15 @@ impl App {
     }
 
     /// Resolves once `condition` returns true, looking again after each
-    /// change of the app (a render, an animation frame); rejects after
-    /// `options.timeout` milliseconds (5000): for what no selector says
+    /// change of the app (a render, an animation frame); rejects
+    /// (`ETIMEDOUT`) after `options.timeout` milliseconds (5000): for what
+    /// no selector says
     /// (`app.storage().note === "Milk"`).
     pub async fn wait_until(
         this: Instance<Self>,
         condition: Callback<(), bool>,
         options: Option<WaitOptions>,
-    ) -> Result<(), String> {
+    ) -> Result<(), JsError> {
         let timeout = options.unwrap_or_default().timeout();
         let deadline = std::time::Instant::now() + timeout;
         let app = this.with(|a| a.steps.app.clone());
@@ -1628,64 +1642,70 @@ impl App {
             a.step("waitUntil");
             Ok(())
         })
-        .await?;
+        .await
+        .map_err(step_error)?;
         loop {
-            if condition.call_async(()).await? {
+            if condition.call_async(()).await.map_err(JsError::Error)? {
                 return Ok(());
             }
             let left = deadline.saturating_duration_since(std::time::Instant::now());
             if left.is_zero() {
-                let screen = on_app(&app, |a| Ok(format!("{:?}", a.texts()?))).await?;
-                return Err(format!(
+                let screen = on_app(&app, |a| Ok(format!("{:?}", a.texts()?)))
+                    .await
+                    .map_err(step_error)?;
+                return Err(JsError::Error(format!(
                     "the condition never held in {} ms; on screen: {screen}",
                     timeout.as_millis()
-                ));
+                ))
+                .with_code(failure::TIMED_OUT));
             }
             let wait = left.min(Duration::from_millis(50));
             serve(
                 server.as_deref(),
                 on_app(&app, move |a| a.next_change(wait)),
             )
-            .await??;
+            .await
+            .and_then(|changed| changed)
+            .map_err(step_error)?;
         }
     }
 
     /// Holds a finger on what `selector` names (or the nearest view around
     /// it that hears long presses or presses) for its `delayLongPress`
     /// (500 ms): `onPressDown`, `onLongPress`, `onPressUp`.
-    pub async fn long_press(this: Instance<Self>, selector: String) -> Result<(), String> {
+    pub async fn long_press(this: Instance<Self>, selector: String) -> Result<(), JsError> {
         step(&this, move |app| app.long_press(&selector)).await
     }
 
     /// Empties the input `selector` names, as selecting all and deleting
     /// does.
-    pub async fn clear(this: Instance<Self>, selector: String) -> Result<(), String> {
+    pub async fn clear(this: Instance<Self>, selector: String) -> Result<(), JsError> {
         step(&this, move |app| app.clear(&selector)).await
     }
 
     /// How many views on screen match `selector` now.
-    pub fn count(&self, selector: String) -> Result<u32, String> {
+    pub fn count(&self, selector: String) -> Result<u32, JsError> {
         self.with(|app| Ok(app.count(&selector)? as u32))
     }
 
     /// Whether the view `selector` names takes input now: neither it nor a
     /// view around it is disabled, and an input is not `readonly`.
-    pub fn enabled(&self, selector: String) -> Result<bool, String> {
+    pub fn enabled(&self, selector: String) -> Result<bool, JsError> {
         self.with(|app| app.enabled(&selector))
     }
 
     /// Whether a view on screen matches `selector` now.
-    pub fn shows(&self, selector: String) -> Result<bool, String> {
+    pub fn shows(&self, selector: String) -> Result<bool, JsError> {
         self.with(|app| app.shows(&selector))
     }
 
     /// The texts on screen now, in order.
-    pub fn texts(&self) -> Result<Vec<String>, String> {
+    pub fn texts(&self) -> Result<Vec<String>, JsError> {
         self.with(|app| app.texts())
     }
 
     /// The text of the input `selector` names, `null` when none matches.
-    pub fn value(&self, selector: String) -> Result<Option<String>, String> {
+    pub fn value(&self, selector: String) -> Result<Option<String>, JsError> {
         self.with(|app| app.value(&selector))
     }
 
@@ -1694,7 +1714,7 @@ impl App {
     /// where the text reads it. The parts before the last name the views
     /// to look in (`id:note >> text:here`). Headless tests read this style;
     /// an empty span reports an error because it has no first character.
-    pub fn span_style(&self, selector: String) -> Result<SpanStyle, String> {
+    pub fn span_style(&self, selector: String) -> Result<SpanStyle, JsError> {
         self.with(|app| app.span_style(&selector).map(SpanStyle::from))
     }
 
@@ -1712,9 +1732,9 @@ impl App {
     /// Goes back as the user does (a header's back button, swiping a sheet
     /// down): the innermost stack of the newest modal (else of the screen)
     /// pops its top screen, or asks it when it prevents going back; without
-    /// one, the newest modal asks to close. Rejects when there is nothing
-    /// to go back from.
-    pub async fn back(this: Instance<Self>) -> Result<(), String> {
+    /// one, the newest modal asks to close. Rejects (`ERR_NSH_TEST_NO_BACK`)
+    /// when there is nothing to go back from.
+    pub async fn back(this: Instance<Self>) -> Result<(), JsError> {
         step(&this, |app| app.back()).await
     }
 
@@ -1737,19 +1757,19 @@ impl App {
     }
 
     /// The picks the app asked for, in order.
-    pub fn picks(&self) -> Result<Vec<Pick>, String> {
+    pub fn picks(&self) -> Result<Vec<Pick>, JsError> {
         self.with(|app| Ok(app.picks()?.iter().map(Pick::from).collect()))
     }
 
     /// The dialogs the app showed, in order.
-    pub fn dialogs(&self) -> Result<Vec<Dialog>, String> {
+    pub fn dialogs(&self) -> Result<Vec<Dialog>, JsError> {
         self.with(|app| Ok(app.dialogs()?.iter().map(Dialog::from).collect()))
     }
 
     /// The actions of the context menu the app shows (`Menu.popup`), a
     /// submenu's after its label (`"Share > Mail"`); `null` when none is
     /// open.
-    pub fn menu(&self) -> Result<Option<Vec<MenuEntry>>, String> {
+    pub fn menu(&self) -> Result<Option<Vec<MenuEntry>>, JsError> {
         self.with(|app| {
             Ok(app.menu()?.map(|entries| {
                 entries
@@ -1793,7 +1813,7 @@ impl App {
     /// The URLs the app opened (`openUrl` of `nsh/device`, a `TextView`'s
     /// links), in order: recorded, never opened, and reported opened to
     /// the app.
-    pub fn opened_urls(&self) -> Result<Vec<String>, String> {
+    pub fn opened_urls(&self) -> Result<Vec<String>, JsError> {
         self.with(|app| app.opened_urls())
     }
 
@@ -1826,25 +1846,36 @@ impl App {
 
     /// Makes the viewport `width` × `height` points (a rotation, a resized
     /// window) and resolves once the app laid itself out again.
-    pub async fn set_viewport(this: Instance<Self>, width: f64, height: f64) -> Result<(), String> {
+    pub async fn set_viewport(
+        this: Instance<Self>,
+        width: f64,
+        height: f64,
+    ) -> Result<(), JsError> {
         let size = nsh_core::Size::new(Points(width as f32), Points(height as f32));
         step(&this, move |app| app.set_viewport(size)).await
     }
 
     /// Switches the system's appearance to `scheme`, as the user does.
-    pub async fn set_color_scheme(this: Instance<Self>, scheme: ColorScheme) -> Result<(), String> {
+    pub async fn set_color_scheme(
+        this: Instance<Self>,
+        scheme: ColorScheme,
+    ) -> Result<(), JsError> {
         step(&this, move |app| app.set_color_scheme(scheme.into())).await
     }
 
     /// The text on the clipboard now, `null` when it holds none.
-    pub fn clipboard(&self) -> Result<Option<String>, String> {
+    pub fn clipboard(&self) -> Result<Option<String>, JsError> {
         self.with(|app| app.clipboard())
     }
 
-    /// `f` with the app as it is now (the batches that came applied).
-    fn with<R>(&self, f: impl FnOnce(&mut dyn Driver) -> Result<R, String>) -> Result<R, String> {
+    /// `f` with the app as it is now (the batches that came applied); a
+    /// failure has the `code` it says ([`step_error`]).
+    fn with<R>(&self, f: impl FnOnce(&mut dyn Driver) -> Result<R, String>) -> Result<R, JsError> {
         let mut app = self.steps.app.lock().unwrap_or_else(|e| e.into_inner());
-        f(app.as_deref_mut().ok_or(CLOSED)?)
+        let Some(app) = app.as_deref_mut() else {
+            return Err(JsError::Error(CLOSED.to_owned()));
+        };
+        f(app).map_err(step_error)
     }
 }
 
@@ -1854,14 +1885,30 @@ impl App {
 async fn step(
     this: &Instance<App>,
     f: impl FnOnce(&mut dyn Driver) -> Result<(), String> + Send + 'static,
-) -> Result<(), String> {
+) -> Result<(), JsError> {
     this.with(|a| a.steps.clone()).run(f).await
+}
+
+/// A step's failure as JS gets it: an `Error` with the `code` its message
+/// says ([`failure::code_of`]), which tests match instead of the message.
+fn step_error(message: String) -> JsError {
+    match failure::code_of(&message) {
+        Some(code) => JsError::Error(message).with_code(code),
+        None => JsError::Error(message),
+    }
 }
 
 impl Steps {
     /// Runs the step `f` on a blocking thread, then answers the dialogs it
-    /// showed ([`step`]).
+    /// showed ([`step`]); a failure has the `code` it says ([`step_error`]).
     async fn run(
+        &self,
+        f: impl FnOnce(&mut dyn Driver) -> Result<(), String> + Send + 'static,
+    ) -> Result<(), JsError> {
+        self.run_step(f).await.map_err(step_error)
+    }
+
+    async fn run_step(
         &self,
         f: impl FnOnce(&mut dyn Driver) -> Result<(), String> + Send + 'static,
     ) -> Result<(), String> {
@@ -1933,8 +1980,11 @@ async fn on_app<R: Send + 'static>(
 #[class]
 pub struct Expectation {
     value: JsonValue,
-    /// The function `expect` was given, for `toThrow` and `rejects`.
+    /// The function `expect` was given, for `toThrow`, `rejects` and
+    /// `resolves`; with `promise`, the stand-in of the promise it was given.
     run: Option<Callback<(), JsonValue>>,
+    /// `expect` was given a promise.
+    promise: bool,
     not: bool,
 }
 
@@ -1946,19 +1996,38 @@ impl Expectation {
         Expectation {
             value: self.value.clone(),
             run: self.run.clone(),
+            promise: self.promise,
             not: !self.not,
         }
     }
 
-    /// The checks of what the promise the function returns rejects with:
-    /// `await expect(() => app.press("Pay")).rejects.toThrow("declined")`.
+    /// The checks of what the promise rejects with (given a function, the
+    /// promise it returns):
+    /// `await expect(app.press("Pay")).rejects.toMatchObject({ code: "ERR_NSH_TEST_DISABLED" })`.
     #[getter]
     pub fn rejects(&self) -> Result<Rejection, String> {
-        let run = self
-            .run
-            .clone()
-            .ok_or("`rejects` checks a function: `expect(() => promise).rejects`")?;
-        Ok(Rejection { run, not: self.not })
+        let run = self.run.clone().ok_or(
+            "`rejects` checks a promise, or a function returning one: `expect(promise).rejects`",
+        )?;
+        Ok(Rejection {
+            run,
+            promise: self.promise,
+            not: self.not,
+        })
+    }
+
+    /// The checks of what the promise resolves to (given a function, the
+    /// promise it returns): `await expect(load()).resolves.toEqual({ ok: true })`.
+    #[getter]
+    pub fn resolves(&self) -> Result<Resolution, String> {
+        let run = self.run.clone().ok_or(
+            "`resolves` checks a promise, or a function returning one: `expect(promise).resolves`",
+        )?;
+        Ok(Resolution {
+            run,
+            promise: self.promise,
+            not: self.not,
+        })
     }
 
     /// The value matches `pattern`: contains it (a string), or matches it (a
@@ -2011,14 +2080,32 @@ impl Expectation {
         self.compare(n, "to be less than or equal to", |a| a <= n)
     }
 
-    /// The function throws, with a message matching `message` when given
-    /// (contains a string, matches a `RegExp`).
-    pub fn to_throw(&self, message: Option<Pattern>) -> Result<(), String> {
-        let run = self
-            .run
-            .as_ref()
-            .ok_or("`toThrow` checks a function: `expect(() => parse(text)).toThrow()`")?;
-        thrown(run.call(()).err(), message.as_ref(), self.not, "to throw")
+    /// The function throws; given `expected`, an error that matches it: a
+    /// message containing a string or matching a `RegExp`, an error class
+    /// (the error's `name` is the class's, `TypeError`; `Error` matches
+    /// every error), or an error with the same message.
+    pub fn to_throw(&self, expected: Option<ErrorMatch>) -> Result<(), String> {
+        let run = match &self.run {
+            Some(run) if !self.promise => run,
+            Some(_) => {
+                return Err("`toThrow` checks a function; what a promise rejects with: \
+                     `await expect(promise).rejects.toThrow()`"
+                    .into());
+            }
+            None => {
+                return Err(
+                    "`toThrow` checks a function: `expect(() => parse(text)).toThrow()`".into(),
+                );
+            }
+        };
+        let error = run.call_traced(()).err();
+        thrown(
+            error.as_ref(),
+            expected.as_ref(),
+            self.not,
+            "the function",
+            "to throw",
+        )
     }
 
     fn compare(&self, n: f64, what: &str, holds: impl Fn(f64) -> bool) -> Result<(), String> {
@@ -2034,6 +2121,19 @@ impl Expectation {
     /// The value equals `expected`, member by member.
     pub fn to_equal(&self, expected: JsonValue) -> Result<(), String> {
         self.check(same(&self.value, &expected), "to equal", Some(&expected))
+    }
+
+    /// The value has every property of `subset`, each equal to it and an
+    /// object matching it in turn, as Jest's `toMatchObject`; other
+    /// properties are not looked at (arrays match item by item, all of
+    /// them): `expect(app.dialogs()[0]).toMatchObject({ title: "Delete?" })`.
+    pub fn to_match_object(&self, subset: JsonValue) -> Result<(), String> {
+        subset_of(&subset)?;
+        self.check(
+            matches_object(&self.value, &subset),
+            "to match object",
+            Some(&subset),
+        )
     }
 
     /// The value (an array) holds `item`, or (a string) contains it.
@@ -2057,6 +2157,11 @@ impl Expectation {
     }
 
     fn check(&self, holds: bool, what: &str, expected: Option<&JsonValue>) -> Result<(), String> {
+        if self.promise {
+            return Err(format!(
+                "`{what}` checks a value, and `expect` was given a promise: check what it resolves to (`await expect(promise).resolves`)"
+            ));
+        }
         if self.run.is_some() {
             return Err(format!(
                 "`{what}` checks a value, and `expect` was given a function: call it, or check what it throws (`toThrow`)"
@@ -2076,31 +2181,167 @@ impl Expectation {
 /// What a promise rejects with ([`Expectation::rejects`]).
 #[class]
 pub struct Rejection {
+    /// The promise's stand-in, or the function returning it.
     run: Callback<(), JsonValue>,
+    promise: bool,
     not: bool,
 }
 
 #[class]
 impl Rejection {
-    /// The promise rejects, with a message matching `message` when given
-    /// (contains a string, matches a `RegExp`).
-    pub async fn to_throw(this: Instance<Self>, message: Option<Pattern>) -> Result<(), String> {
-        let (run, not) = this.with(|r| (r.run.clone(), r.not));
-        let error = run.call_async_traced(()).await.err().map(|e| e.message);
-        thrown(error, message.as_ref(), not, "to reject")
+    /// The opposite checks: `await expect(save()).rejects.not.toThrow(TypeError)`.
+    #[getter]
+    pub fn not(&self) -> Rejection {
+        Rejection {
+            run: self.run.clone(),
+            promise: self.promise,
+            not: !self.not,
+        }
+    }
+
+    /// The promise rejects; given `expected`, with an error that matches it,
+    /// as `toThrow` says.
+    pub async fn to_throw(
+        this: Instance<Self>,
+        expected: Option<ErrorMatch>,
+    ) -> Result<(), String> {
+        let (run, promise, not) = this.with(|r| (r.run.clone(), r.promise, r.not));
+        let error = run.call_async_traced(()).await.err();
+        thrown(
+            error.as_ref(),
+            expected.as_ref(),
+            not,
+            subject(promise),
+            "to reject",
+        )
+    }
+
+    /// The promise rejects with a value that matches `subset` as
+    /// `toMatchObject` says: an error's own properties (its `code`, ...)
+    /// with its `name` and `message`. Codes, unlike messages, stay as they
+    /// are: `await expect(app.back()).rejects.toMatchObject({ code: "ERR_NSH_TEST_NO_BACK" })`.
+    pub async fn to_match_object(this: Instance<Self>, subset: JsonValue) -> Result<(), String> {
+        subset_of(&subset)?;
+        let (run, promise, not) = this.with(|r| (r.run.clone(), r.promise, r.not));
+        let error = run
+            .call_async_traced(())
+            .await
+            .err()
+            .map(|e| error_json(&e));
+        let holds = error.as_ref().is_some_and(|e| matches_object(e, &subset));
+        if holds != not {
+            return Ok(());
+        }
+        let not_ = if not { "not " } else { "" };
+        let subject = subject(promise);
+        Err(match error {
+            Some(error) => format!(
+                "expected {subject} {not_}to reject with a value matching {subset}; it rejected with {error}"
+            ),
+            None => format!(
+                "expected {subject} {not_}to reject with a value matching {subset}; it resolved"
+            ),
+        })
     }
 }
 
-/// Checks what a function threw (`error`, its message; `None`: nothing)
-/// against `message`.
-fn thrown(
-    error: Option<String>,
-    message: Option<&Pattern>,
+/// What a promise resolves to ([`Expectation::resolves`]).
+#[class]
+pub struct Resolution {
+    /// The promise's stand-in, or the function returning it.
+    run: Callback<(), JsonValue>,
+    promise: bool,
     not: bool,
+}
+
+#[class]
+impl Resolution {
+    /// The opposite checks: `await expect(load()).resolves.not.toBe(null)`.
+    #[getter]
+    pub fn not(&self) -> Resolution {
+        Resolution {
+            run: self.run.clone(),
+            promise: self.promise,
+            not: !self.not,
+        }
+    }
+
+    /// The promise resolves to `expected`.
+    pub async fn to_be(this: Instance<Self>, expected: JsonValue) -> Result<(), String> {
+        resolved(this).await?.to_be(expected)
+    }
+
+    /// The promise resolves to a value equal to `expected`, member by
+    /// member.
+    pub async fn to_equal(this: Instance<Self>, expected: JsonValue) -> Result<(), String> {
+        resolved(this).await?.to_equal(expected)
+    }
+
+    /// The promise resolves to a value that matches `subset`, as
+    /// `toMatchObject` says.
+    pub async fn to_match_object(this: Instance<Self>, subset: JsonValue) -> Result<(), String> {
+        resolved(this).await?.to_match_object(subset)
+    }
+}
+
+/// The value the promise of `this` resolves to, to check; an error when it
+/// rejects.
+async fn resolved(this: Instance<Resolution>) -> Result<Expectation, String> {
+    let (run, promise, not) = this.with(|r| (r.run.clone(), r.promise, r.not));
+    match run.call_async_traced(()).await {
+        Ok(value) => Ok(Expectation {
+            value,
+            run: None,
+            promise: false,
+            not,
+        }),
+        Err(error) => Err(format!(
+            "expected {} to resolve; it rejected with {:?}",
+            subject(promise),
+            error.message
+        )),
+    }
+}
+
+/// What failure messages call what `expect` was given.
+fn subject(promise: bool) -> &'static str {
+    if promise {
+        "the promise"
+    } else {
+        "the function"
+    }
+}
+
+/// `subset` as `toMatchObject` takes it: an object (or an array).
+fn subset_of(subset: &JsonValue) -> Result<(), String> {
+    match subset {
+        JsonValue::Object(_) | JsonValue::Array(_) => Ok(()),
+        other => Err(format!(
+            "`toMatchObject` takes an object of the properties to match, not {other}"
+        )),
+    }
+}
+
+/// What JS threw, as checks see it: the value thrown as JSON
+/// ([`Exception::thrown`]), else (an error Rust made) its message.
+fn error_json(error: &Exception) -> JsonValue {
+    error
+        .thrown
+        .clone()
+        .unwrap_or_else(|| serde_json::json!({ "name": "Error", "message": error.message }))
+}
+
+/// Checks what a function threw or a promise rejected with (`error`;
+/// `None`: nothing) against `expected`; `subject` names what was checked.
+fn thrown(
+    error: Option<&Exception>,
+    expected: Option<&ErrorMatch>,
+    not: bool,
+    subject: &str,
     what: &str,
 ) -> Result<(), String> {
-    let holds = match (&error, message) {
-        (Some(error), Some(pattern)) => pattern.matches(error),
+    let holds = match (error, expected) {
+        (Some(error), Some(expected)) => expected.matches(error),
         (Some(_), None) => true,
         (None, _) => false,
     };
@@ -2108,19 +2349,41 @@ fn thrown(
         return Ok(());
     }
     let not_ = if not { "not " } else { "" };
-    let wanted = message.map_or(String::new(), |p| format!(" {}", p.describe()));
+    let wanted = expected.map_or(String::new(), |e| format!(" {}", e.describe()));
     Err(match error {
-        Some(error) => format!("expected the function {not_}{what}{wanted}; it threw {error:?}"),
-        None => format!("expected the function {not_}{what}{wanted}; it did not"),
+        Some(error) => format!(
+            "expected {subject} {not_}{what}{wanted}; it threw {}",
+            describe_error(error)
+        ),
+        None => format!("expected {subject} {not_}{what}{wanted}; it did not"),
     })
 }
 
-/// What `expect` checks: a value, or a function (for `toThrow`, `rejects`).
+/// `error` as failure messages say it: its class, message and `code`
+/// (`TypeError "not a number"`, `Error "denied" (code "ERR_ACCESS_DENIED")`).
+fn describe_error(error: &Exception) -> String {
+    let json = error_json(error);
+    let field = |key: &str| json.get(key).and_then(JsonValue::as_str);
+    let mut text = match field("name") {
+        Some(name) => format!("{name} {:?}", error.message),
+        None => format!("{:?}", error.message),
+    };
+    if let Some(code) = field("code") {
+        text.push_str(&format!(" (code {code:?})"));
+    }
+    text
+}
+
+/// What `expect` checks: a value, a function (for `toThrow`, `rejects`,
+/// `resolves`) or a promise (`rejects`, `resolves`).
 pub enum Subject {
     /// A value, as JSON.
     Value(JsonValue),
     /// A function.
     Function(Callback<(), JsonValue>),
+    /// A promise, as a stand-in that answers what it settles to
+    /// ([`Callback::settling`]).
+    Promise(Callback<(), JsonValue>),
 }
 
 impl Arg for Subject {
@@ -2129,10 +2392,106 @@ impl Arg for Subject {
     }
 
     fn from_js(value: JsIn<'_>) -> Result<Self, PropError> {
-        if value.kind() == JsKind::Function {
-            return <Callback<(), JsonValue> as Arg>::from_js(value).map(Subject::Function);
+        match value.kind() {
+            JsKind::Function => {
+                <Callback<(), JsonValue> as Arg>::from_js(value).map(Subject::Function)
+            }
+            JsKind::Object if is_thenable(value) => Callback::settling(value)
+                .map(Subject::Promise)
+                .ok_or_else(|| value.expected("a value, a function or a promise")),
+            _ => <JsonValue as JsValue>::from_js(value).map(Subject::Value),
         }
-        <JsonValue as JsValue>::from_js(value).map(Subject::Value)
+    }
+}
+
+/// Whether `value` is a promise (has a `then` method).
+fn is_thenable(value: JsIn<'_>) -> bool {
+    value
+        .field("then")
+        .is_ok_and(|then| then.get().kind() == JsKind::Function)
+}
+
+/// What error a check wants (`toThrow`): its message containing a string
+/// or matching a `RegExp`, an error class, or an error with the same
+/// message.
+pub enum ErrorMatch {
+    /// The message matches this.
+    Message(Pattern),
+    /// The error's `name` is this class's (`TypeError`); `Error` matches
+    /// every error.
+    Class(String),
+    /// The message is this one (an error given).
+    Error(String),
+}
+
+impl ErrorMatch {
+    fn matches(&self, error: &Exception) -> bool {
+        match self {
+            ErrorMatch::Message(pattern) => pattern.matches(&error.message),
+            ErrorMatch::Error(message) => error.message == *message,
+            ErrorMatch::Class(class) => {
+                let json = error_json(error);
+                let field = |key: &str| json.get(key).and_then(JsonValue::as_str);
+                match (field("name"), field("message")) {
+                    (Some(name), Some(_)) => name == class || class == "Error",
+                    (Some(name), None) => name == class,
+                    _ => false,
+                }
+            }
+        }
+    }
+
+    fn describe(&self) -> String {
+        match self {
+            ErrorMatch::Message(pattern) => pattern.describe().to_string(),
+            ErrorMatch::Class(class) => class.clone(),
+            ErrorMatch::Error(message) => format!("an error {}", JsonValue::from(message.as_str())),
+        }
+    }
+}
+
+impl JsValue for ErrorMatch {
+    fn ts_type(_types: &mut TsTypes) -> String {
+        "string | RegExp | (abstract new (...args: any[]) => Error) | Error".into()
+    }
+
+    fn from_js(value: JsIn<'_>) -> Result<Self, PropError> {
+        let text = |key: &str| value.field(key).ok().and_then(|v| v.get().as_string());
+        if value.kind() == JsKind::Function {
+            return text("name")
+                .filter(|name| !name.is_empty())
+                .map(ErrorMatch::Class)
+                .ok_or_else(|| value.expected("a named error class"));
+        }
+        if value.kind() == JsKind::Object
+            && text("source").is_none()
+            && let Some(message) = text("message")
+        {
+            return Ok(ErrorMatch::Error(message));
+        }
+        <Pattern as JsValue>::from_js(value)
+            .map(ErrorMatch::Message)
+            .map_err(|_| value.expected("a string, a RegExp, an error class or an error"))
+    }
+
+    fn to_js<'a>(&self, host: &'a dyn JsHost) -> Result<JsOwned<'a>, PropError> {
+        Ok(JsOwned::new(host, host.new_string(&self.describe())?))
+    }
+}
+
+/// Whether `value` matches `subset` as Jest's `toMatchObject` says: an
+/// object has each of its properties, matching; an array as many items,
+/// each matching; anything else is the same value.
+fn matches_object(value: &JsonValue, subset: &JsonValue) -> bool {
+    match (value, subset) {
+        (JsonValue::Object(value), JsonValue::Object(subset)) => subset
+            .iter()
+            .all(|(key, want)| value.get(key).is_some_and(|v| matches_object(v, want))),
+        (JsonValue::Array(value), JsonValue::Array(subset)) => {
+            value.len() == subset.len()
+                && value.iter().zip(subset).all(|(v, w)| matches_object(v, w))
+        }
+        _ => same(value, subset),
     }
 }
 
@@ -2266,16 +2625,108 @@ mod tests {
             value(json!("Saved at 9:41")).to_match(Pattern::Contains("Saved".into())),
             Ok(())
         );
-        assert_eq!(thrown(Some("boom".into()), None, false, "to throw"), Ok(()));
+        let boom = Exception::from("boom".to_owned());
+        assert_eq!(
+            thrown(Some(&boom), None, false, "the function", "to throw"),
+            Ok(())
+        );
         assert_eq!(
             thrown(
                 None,
-                Some(&Pattern::Contains("x".into())),
+                Some(&ErrorMatch::Message(Pattern::Contains("x".into()))),
                 false,
+                "the function",
                 "to throw"
             ),
             Err(r#"expected the function to throw "x"; it did not"#.into())
         );
+    }
+
+    /// An error as `nsh-js` reports one thrown: `thrown` holds its own
+    /// properties with its `name` and `message`.
+    fn error(name: &str, message: &str, code: Option<&str>) -> Exception {
+        let mut thrown = json!({ "name": name, "message": message });
+        if let Some(code) = code {
+            thrown["code"] = json!(code);
+        }
+        let mut exception = Exception::from(message.to_owned());
+        exception.thrown = Some(thrown);
+        exception
+    }
+
+    #[test]
+    fn errors_match_by_message_class_and_properties() {
+        let denied = error("Error", "fs is not granted", Some("ERR_ACCESS_DENIED"));
+        let type_error = error("TypeError", "not a number", None);
+        let class = |name: &str| ErrorMatch::Class(name.into());
+        assert!(class("TypeError").matches(&type_error));
+        assert!(class("Error").matches(&type_error));
+        assert!(!class("RangeError").matches(&type_error));
+        assert!(class("Error").matches(&denied));
+        assert!(ErrorMatch::Error("not a number".into()).matches(&type_error));
+        assert!(!ErrorMatch::Error("not a".into()).matches(&type_error));
+        // A string thrown is no error of any class.
+        let mut text = Exception::from("x".to_owned());
+        text.thrown = Some(json!("x"));
+        assert!(!class("Error").matches(&text));
+        // An error Rust made is an `Error`.
+        assert!(class("Error").matches(&Exception::from("lost".to_owned())));
+        assert_eq!(
+            thrown(
+                Some(&denied),
+                Some(&class("TypeError")),
+                false,
+                "the promise",
+                "to reject"
+            ),
+            Err(r#"expected the promise to reject TypeError; it threw Error "fs is not granted" (code "ERR_ACCESS_DENIED")"#.into())
+        );
+
+        let thrown = error_json(&denied);
+        assert!(matches_object(
+            &thrown,
+            &json!({ "code": "ERR_ACCESS_DENIED" })
+        ));
+        assert!(matches_object(
+            &thrown,
+            &json!({ "name": "Error", "code": "ERR_ACCESS_DENIED" })
+        ));
+        assert!(!matches_object(&thrown, &json!({ "code": "ENOENT" })));
+        assert!(!matches_object(&thrown, &json!({ "path": "/x" })));
+        assert_eq!(
+            error_json(&Exception::from("lost".to_owned())),
+            json!({ "name": "Error", "message": "lost" })
+        );
+    }
+
+    #[test]
+    fn objects_match_a_subset_of_their_properties() {
+        let value = json!({ "a": 1, "b": { "c": [1, { "d": 2, "e": 3 }], "f": null } });
+        assert!(matches_object(&value, &json!({})));
+        assert!(matches_object(&value, &json!({ "a": 1.0 })));
+        assert!(matches_object(
+            &value,
+            &json!({ "b": { "c": [1, { "d": 2 }] } })
+        ));
+        // Arrays match item by item, all of them.
+        assert!(!matches_object(&value, &json!({ "b": { "c": [1] } })));
+        assert!(!matches_object(&value, &json!({ "a": 2 })));
+        assert!(!matches_object(&value, &json!({ "g": null })));
+        assert!(matches_object(&value, &json!({ "b": { "f": null } })));
+        let expect = |v: JsonValue| Testing::expect(Subject::Value(v));
+        assert_eq!(
+            expect(value.clone()).to_match_object(json!({ "a": 1 })),
+            Ok(())
+        );
+        assert_eq!(
+            expect(value.clone()).to_match_object(json!({ "a": 2 })),
+            Err(format!("expected {value} to match object {{\"a\":2}}"))
+        );
+        assert_eq!(
+            expect(json!(1)).not().to_match_object(json!({ "a": 1 })),
+            Ok(())
+        );
+        assert!(expect(value).to_match_object(json!("a")).is_err());
     }
 
     #[test]

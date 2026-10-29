@@ -1,7 +1,6 @@
 ---
 title: OtpInput
 description: OtpInput 组件：定长的数字一次性验证码，输入、粘贴或由系统自动填充到一个原生输入框中，显示在由应用设置样式的格子、分组和光标里。
-order: 20.15
 group: base
 demo: el-otp-input
 ---
@@ -54,7 +53,7 @@ function App() {
       length={6}
       groups={2}
       value={code()}
-      onChange={(next) => code.set(next)}
+      onChange={({ value }) => code.set(value)}
       onComplete={({ value }) => verify(value)}
       accessibilityLabel="验证码，6 位数字"
       class="flex-row gap-3"
@@ -98,7 +97,7 @@ mount(App);
 | `disabled` | `.disabled(..)` | `boolean` | `false` | 不能获得焦点，不能编辑；`disabled:` 样式作用于输入框和它的部件，屏幕阅读器读出它不可用。 |
 | `groups` | `.groups(..)` | `number` | `1` | 格子尽量平均地分成几组（六位分两组是 3 + 3）；至少一组，最多每个格子一组。 |
 | `accessibilityLabel` | `.accessibility_label(..)` | `string` | 无 | 屏幕阅读器为输入框读出的内容：验证码的用途和位数。 |
-| `cellClass`、`cellStyle` | `.cell_class(..)`、`.cell_style(\|s\| ..)` | `string`、`StyleProp<ViewStyle>` | 无 | 每个格子：尺寸、边框和文字。 |
+| `cellClass`、`cellStyle` | `.cell_class(..)`、`.cell_style(\|s\| ..)` | `string`、`StyleProp<TextStyle>` | 无 | 每个格子：尺寸、边框和文字（`color`、`fontSize`，由格子里的数字继承）。 |
 | `groupClass`、`groupStyle` | `.group_class(..)`、`.group_style(\|s\| ..)` | `string`、`StyleProp<ViewStyle>` | 无 | 每组格子（`flex-row gap-2`）。 |
 | `caretClass`、`caretStyle` | `.caret_class(..)`、`.caret_style(\|s\| ..)` | `string`、`StyleProp<ViewStyle>` | 无 | 光标：宽度、高度和颜色。 |
 | `class`、`style` | 样式方法 | `string`、`StyleProp<ViewStyle>` | 无 | 输入框本身：包住各组的行（或列）。 |
@@ -107,7 +106,7 @@ mount(App);
 
 | 事件 | Rust | 参数 | 时机 |
 |---|---|---|---|
-| `onChange` | `.on_change(\|value: &SharedString\| ..)` | `(value: string)` | 用户改变了验证码：输入、删除、粘贴或自动填充。 |
+| `onChange` | `.on_change(\|value: &SharedString\| ..)` | `(e: { value: string })` | 用户改变了验证码：输入、删除、粘贴或自动填充。 |
 | `onComplete` | `.on_complete(\|e: &OtpInputCompleteEvent\| ..)` | `{ value }` | 用户的改动填满了最后一个格子，在它的 `onChange` 之后。 |
 | `onFocus` / `onBlur` | `.on_focus` / `.on_blur` | 无 | 输入框获得 / 失去键盘焦点。 |
 
@@ -127,7 +126,7 @@ mount(App);
 | 数字 | 已填的格子内 | 格子的文字样式（`text-xl`、`font-semibold`）；`masked` 时为 `•` |
 | 光标 | 输入框有焦点时，接收下一位数字的空格子内 | `caretClass`、`caretStyle` |
 
-接收下一位数字的格子是最后一位数字之后的格子，验证码填满后是最后一个格子。光标像文本框的光标一样闪烁（亮半秒、灭半秒，每次编辑后保持亮一会儿）；偏好减少动态效果时保持不动。按下输入框的任何位置都会让它获得焦点：输入框覆盖在格子之上。
+接收下一位数字的格子是最后一位数字之后的格子，验证码填满后是最后一个格子。光标像文本框的光标一样闪烁（亮半秒、灭半秒，每次编辑后保持亮一会儿），由原生动画改变它的不透明度，它在布局中的位置不变；偏好减少动态效果时保持不动。按下输入框的任何位置都会让它获得焦点：输入框覆盖在格子之上。
 
 ## 无障碍
 

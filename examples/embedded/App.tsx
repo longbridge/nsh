@@ -9,7 +9,7 @@
 // host app's part.
 // The theme pill takes the host's brand through setThemeOverrides.
 
-import { mount, signal, Text, View, type YNode } from "nsh";
+import { mount, type NativeComponentRef, signal, Text, View } from "nsh";
 import { nativeComponent } from "nsh";
 import { host } from "nsh";
 import { openUrl } from "nsh";
@@ -29,7 +29,7 @@ function App() {
   const taps = signal(0);
   const message = signal("No message from the host yet");
   const answer = signal("");
-  let badge: YNode | undefined;
+  let badge: NativeComponentRef | undefined;
   // The host app's `send("message", { text })`.
   host.on<{ text: string }>("message", ({ text }) => message.set(text));
   const ask = async () => {
@@ -37,7 +37,9 @@ function App() {
       const { time } = await host.call<{ time: string }>("time");
       answer.set(`The host says it is ${time}`);
     } catch (e) {
-      answer.set(`The host did not answer: ${(e as Error).message}`);
+      // Branch on the error's `code`; its message is for people.
+      const { code } = e as Error & { code?: string };
+      answer.set(code === "ERR_FEATURE_UNAVAILABLE_ON_PLATFORM" ? "No host app here" : `The host did not answer (${code})`);
     }
   };
   return (

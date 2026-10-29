@@ -268,10 +268,10 @@ effect(() => console.log("primary is", token("primary"), "radius", token("radius
 ## View、Text、Scroll、Overlay
 
 ```ts
-function View(props: ViewProps): YNode;
-function Text(props: TextProps): YNode;
-function Scroll(props: ScrollProps): YNode;
-function Overlay(props: OverlayProps): YNode;
+function View(props: ViewProps): JSX.Element;
+function Text(props: TextProps): JSX.Element;
+function Scroll(props: ScrollProps): JSX.Element;
+function Overlay(props: OverlayProps): JSX.Element;
 ```
 
 `nsh` 导出的宿主元素，写作标签：`<View>`、`<Text>`、`<Scroll>`、`<Overlay>`（把子元素显示在窗口之上，相对锚点放置：[Overlay](../elements/overlay.md)）。当标签通过导入（包括别名）指向它们之一时，编译器会就地创建原生视图，所以导入它们在运行时没有任何开销。它们也是普通的组件，可以作为值传递（`const Tag = inline ? Text : View`）。`nsh` 以同样的方式导出其他原语：[`List`](./nsh-list.md)、[`Image`](./nsh-image.md)、[`Canvas`](./nsh-canvas.md)、[`WebView`](./nsh-webview.md) 和 [`Video`](./nsh-video.md)，各有自己的参考页面。它们的属性见[元素](../elements/index.md)。文本输入框 `Input` 来自 [`nsh/base`](./nsh-base.md#input)。
@@ -392,7 +392,7 @@ mount(App);
 ```
 
 > [!NOTE]
-> 动画值存在于 UI 线程，每帧都在那里变化，所以应用异步读取它：`await value.getValue()`（或 `stop()` 返回的 Promise）给出那一刻的值，Rust 中在任务里 `value.value().await`。如果代码需要立刻知道目标值，请像上例一样用变量或 signal 自己记录。手势事件会在结束时报告这些值（`PanEvent.valueX` / `valueY`）。
+> 动画值存在于 UI 线程，每帧都在那里变化，所以应用异步读取它：`await value.getValue()`（或 `stop()` resolve 的 `{ value }`）给出那一刻的值，Rust 中在任务里 `value.value().await`。如果代码需要立刻知道目标值，请像上例一样用变量或 signal 自己记录。手势事件会在结束时报告这些值（`PanEvent.value`）。
 
 ### AnimatedValue
 
@@ -400,22 +400,22 @@ mount(App);
 class AnimatedValue extends AnimatedNode {
   constructor(value: number);
   set(value: number): void;
-  stop(): Promise<number>;
+  stop(): Promise<{ value: number }>;
   getValue(): Promise<number>;
   setOffset(offset: number): void;
   flattenOffset(): void;
   extractOffset(): void;
-  timing(to: number, options?: { duration?: number; easing?: Easing; delay?: number }): Promise<boolean>;
-  spring(to: number, options?: { stiffness?: number; damping?: number; mass?: number; velocity?: number }): Promise<boolean>;
-  decay(options?: { velocity?: number; deceleration?: number; clamp?: [number, number]; bounce?: number }): Promise<boolean>;
-  keyframes(keyframes: KeyframeValue[], options?: KeyframeTiming): Promise<boolean>;
+  timing(to: number, options?: { duration?: number; easing?: Easing; delay?: number }): Promise<{ finished: boolean }>;
+  spring(to: number, options?: { stiffness?: number; damping?: number; mass?: number; velocity?: number }): Promise<{ finished: boolean }>;
+  decay(options?: { velocity?: number; deceleration?: number; clamp?: [number, number]; bounce?: number }): Promise<{ finished: boolean }>;
+  keyframes(keyframes: KeyframeValue[], options?: KeyframeTiming): Promise<{ finished: boolean }>;
 }
 ```
 
 | 方法 | Rust | 说明 |
 |---|---|---|
 | `set(value)` | `set(value)` | 直接跳到 `value`，并停止正在运行的动画。 |
-| `stop()` | `stop()`，然后 `value().await` | 让正在运行的动画停在当前位置；resolve 为停下处的值。 |
+| `stop()` | `stop()`，然后 `value().await` | 让正在运行的动画停在当前位置；resolve 为 `{ value }`，即停下处的值。 |
 | `getValue()` | `value().await` | resolve 为当前值（含偏移），在 UI 线程上读取。 |
 | `setOffset(offset)` | `set_offset(offset)` | 加到值上的偏移：绑定看到的是值 + 偏移；`set`、动画和拖动改变的是值本身。 |
 | `flattenOffset()` | `flatten_offset()` | 把偏移加到值上，并把偏移归 0。 |
@@ -425,7 +425,7 @@ class AnimatedValue extends AnimatedNode {
 | `decay(options)` | `decay(velocity, deceleration)`、`decay_within(velocity, deceleration, (min, max), bounce)` | 以 `velocity`（单位/秒）为初速度滑行并逐渐减速，每毫秒保留 `deceleration`（默认 0.998）的速度。适合在快速滑动后使用 `onPanEnd` 给出的速度。设置 `clamp: [min, max]` 时，它在边界处停下，或以 `bounce`（0..1，默认 0）比例的速度反弹。 |
 | `keyframes(frames, options)` | `keyframes(frames, KeyframeTiming)` | 像 CSS 关键帧那样播放[关键帧](#关键帧)：每段有自己的缓动，按 `direction` 播放 `iterations` 次。 |
 
-每个动画方法都返回一个 Promise：动画完成时 resolve 为 `true`，被停止（`stop`、`set` 或同一个值上的另一个动画）时为 `false`。在 Rust 中返回 `AnimationEnd`，在任务中 await 它得到同样的 `bool`。
+每个动画方法都返回一个 Promise，resolve 为 `{ finished }`：动画完成时为 `true`，被停止（`stop`、`set` 或同一个值上的另一个动画）时为 `false`。在 Rust 中返回 `AnimationEnd`，在任务中 await 它得到同样的 `bool`。
 
 ```rust tabs
 let opacity = animated_value(1.0);
@@ -438,7 +438,7 @@ spawn(async move {
 
 ```tsx tabs
 const opacity = createAnimatedValue(1);
-const finished = await opacity.timing(0, { duration: 200 });
+const { finished } = await opacity.timing(0, { duration: 200 });
 if (finished) visible.set(false);
 ```
 
@@ -523,7 +523,7 @@ interface KeyframeTiming {
 }
 ```
 
-`value.keyframes(frames, options)` 让一个值走过一组关键帧，并以是否播放完成兑现；`Animated.keyframes(value, { keyframes, ...options })` 是同样的东西，作为组合动画的一步。Rust：`value.keyframes(frames, KeyframeTiming)` 和 `Animation::keyframes(&value, frames, KeyframeTiming)`，关键帧用 `Keyframe::new(value)`（均匀分布）、`Keyframe::at(offset, value)` 和 `.ease(easing)`，时间参数用 `KeyframeTiming::new(ms)` 配合 `.delay(ms)`、`.easing(e)`、`.iterations(Some(n))`、`.infinite()` 和 `.direction(PlaybackDirection::…)`。
+`value.keyframes(frames, options)` 让一个值走过一组关键帧，并以 `{ finished }`（是否播放完成）兑现；`Animated.keyframes(value, { keyframes, ...options })` 是同样的东西，作为组合动画的一步。Rust：`value.keyframes(frames, KeyframeTiming)` 和 `Animation::keyframes(&value, frames, KeyframeTiming)`，关键帧用 `Keyframe::new(value)`（均匀分布）、`Keyframe::at(offset, value)` 和 `.ease(easing)`，时间参数用 `KeyframeTiming::new(ms)` 配合 `.delay(ms)`、`.easing(e)`、`.iterations(Some(n))`、`.infinite()` 和 `.direction(PlaybackDirection::…)`。
 
 它们的播放方式与 CSS 关键帧一致：缓动作用于一段（关键帧的缓动决定从它开始的那一段，时间参数的缓动决定其余各段）；关键帧缺省的 offset 均匀分布，第一个为 0、最后一个为 1；每次迭代先跳到它的第一个关键帧，没有 offset 为 0 的关键帧时，值从当前位置出发；在 `delay` 期间，值停在第一个关键帧上（CSS `animation-fill-mode: backwards`）；反向的迭代倒着播放各段，曲线也随之反转；值停在最后一次迭代结束的位置。
 
@@ -566,7 +566,7 @@ interface Motion {
   readonly scaleY: AnimatedValue;
   readonly style: { opacity: AnimatedValue; transform: MotionTransform };
   readonly transform: MotionTransform;
-  play(motion: MotionName | MotionSpec, options?: MotionPlayOptions): Promise<boolean>;
+  play(motion: MotionName | MotionSpec, options?: MotionPlayOptions): Promise<{ finished: boolean }>;
   animation(motion: MotionName | MotionSpec, options?: MotionPlayOptions): CompositeAnimation;
   stop(): void;
   reset(): void;
@@ -579,7 +579,7 @@ interface Motion {
 |---|---|---|
 | `opacity`、`translateX`、... `scaleY` | `value(MotionChannel::Opacity)`、... | 各通道的动画值。 |
 | `style`、`transform` | 元素上的 `.bind_motion(&m)` | 绑定。 |
-| `play(motion, options?)` | `play(spec)`、`play_ignoring_reduce_motion(spec)` | 在各通道上播放按名称指定的预设或一个 [`MotionSpec`](#motions)；新的动效会打断正在播放的那个。`options` 修改它的时间参数。播放完成时以 `true` 兑现，被打断时为 `false`（Rust 中为 `AnimationEnd`）。 |
+| `play(motion, options?)` | `play(spec)`、`play_ignoring_reduce_motion(spec)` | 在各通道上播放按名称指定的预设或一个 [`MotionSpec`](#motions)；新的动效会打断正在播放的那个。`options` 修改它的时间参数。以 `{ finished }` 兑现：播放完成时为 `true`，被打断时为 `false`（Rust 中为 `AnimationEnd`）。 |
 | `animation(motion, options?)` | `animation(spec)` | 同一个动效，作为尚未启动的 [`CompositeAnimation`](#animated)，用于组合：`Animated.stagger(60, cards.map((m) => m.animation("fadeInUp")), { from: "center" })`（Rust：`Animation::stagger_from(60.0, StaggerFrom::Center, cards.iter().map(\|m\| m.animation(MotionPreset::FadeInUp)))`）。是否减少动态效果在创建时决定。 |
 | `stop()` | `stop()` | 停在当前位置。 |
 | `reset()` | `reset()` | 停止，并把所有通道放回静止状态。 |
@@ -655,7 +655,7 @@ const Animated: {
 };
 
 interface CompositeAnimation {
-  start(callback?: (result: { finished: boolean }) => void): Promise<boolean>;
+  start(callback?: (result: { finished: boolean }) => void): Promise<{ finished: boolean }>;
   stop(): void;
   reset(): void;
 }
@@ -679,7 +679,7 @@ interface CompositeAnimation {
 
 | 方法 | Rust（`Animation`） | 说明 |
 |---|---|---|
-| `start(callback?)` | `start()`，返回可 await 的 `AnimationEnd` | 运行（或再次运行）。整棵动画树只会 resolve 一次（并调用 `callback`），结果表示它是正常完成还是被停止。 |
+| `start(callback?)` | `start()`，返回可 await 的 `AnimationEnd` | 运行（或再次运行）。整棵动画树只会 resolve 一次（并调用 `callback`），结果为 `{ finished }`，表示它是正常完成还是被停止。 |
 | `stop()` | `stop()` | 停在当前位置。 |
 | `reset()` | `reset()` | 停止，并把各个值恢复到启动时的值。 |
 
@@ -1016,10 +1016,14 @@ const hairline = () => 1 / pixelRatio();
 ### openUrl
 
 ```ts
-function openUrl(url: string): Promise<boolean>;
+function openUrl(url: string): Promise<OpenUrlResult>;
+
+interface OpenUrlResult {
+  opened: boolean;
+}
 ```
 
-在应用之外打开 `url`：网页在浏览器中打开，`mailto:` 链接在邮件应用中打开，`tel:` 链接在电话应用中打开，其他应用注册的 scheme（`maps:`、宿主应用自己的 `lb://` 链接）交给对应的应用。结果表示是否有应用打开了它：没有应用处理该 scheme 时为 `false`。Rust：`nsh_core::prelude` 的 `open_url(url)`，返回可在任务中等待（或直接丢弃）的回答。
+在应用之外打开 `url`：网页在浏览器中打开，`mailto:` 链接在邮件应用中打开，`tel:` 链接在电话应用中打开，其他应用注册的 scheme（`maps:`、宿主应用自己的 `lb://` 链接）交给对应的应用。结果是 `{ opened }`，表示是否有应用打开了它：没有应用处理该 scheme 时为 `false`。Rust：`nsh_core::prelude` 的 `open_url(url)`，返回可在任务中等待（或直接丢弃）的回答，即同样的 `bool`。
 
 ```rust tabs
 button()
@@ -1036,7 +1040,8 @@ button()
 ```tsx tabs
 <Button
   onPress={async () => {
-    if (!(await openUrl("mailto:help@example.com"))) {
+    const { opened } = await openUrl("mailto:help@example.com");
+    if (!opened) {
       console.warn("no mail app");
     }
   }}
@@ -1045,9 +1050,9 @@ button()
 </Button>
 ```
 
-- URL 必须是绝对地址（带 scheme）。会执行代码或访问应用自身数据的 URL，即 `javascript:`、`data:`、`blob:`、`file:`、`about:` 和 `asset:`，以及相对地址，会抛出 `TypeError`。
-- 声明了能力的应用需要 `openUrl`：`"openUrl": true` 允许所有 scheme，`"openUrl": { "schemes": ["https", "mailto"] }` 只允许列出的 scheme；其他 URL 抛出 `TypeError`（见[沙箱与能力](../docs/sandbox-and-capabilities.md)）。
-- 嵌入它的应用先看到这个 URL，可以改由自己的路由处理（Swift `NshAppView.onOpenURL`、Java `NshView.setOpenUrlHandler`、Rust `AppView::host().handle_open_url`；见 [iOS](../docs/ios.md#应用打开的链接) 和 [Android](../docs/android.md#应用打开的链接)），此时结果为 `true`。
+- URL 必须是绝对地址（带 scheme）。会执行代码或访问应用自身数据的 URL，即 `javascript:`、`data:`、`blob:`、`file:`、`about:` 和 `asset:`，以及相对地址，会让 Promise 以 `TypeError` reject。`openUrl` 从不抛出：所有失败都以 reject 报告。
+- 声明了能力的应用需要 `openUrl`：`"openUrl": true` 允许所有 scheme，`"openUrl": { "schemes": ["https", "mailto"] }` 只允许列出的 scheme；其他 URL 以一个 `Error` reject，其 `code` 为 `"ERR_ACCESS_DENIED"`，`permission` 为 `"openUrl"`，`resource` 为该 URL（见[沙箱与能力](../docs/sandbox-and-capabilities.md)）。在 Rust 中，`open_url` 对这些 URL 回答 `false`，并在日志中说明原因。
+- 嵌入它的应用先看到这个 URL，可以改由自己的路由处理（Swift `NshAppView.onOpenURL`、Java `NshView.setOpenUrlHandler`、Rust `AppView::host().handle_open_url`；见 [iOS](../docs/ios.md#应用打开的链接) 和 [Android](../docs/android.md#应用打开的链接)），此时 `opened` 为 `true`。
 - 各平台用自己的方式打开：iOS 用 `UIApplication.open`（嵌入时是宿主应用的 application），Android 用 `ACTION_VIEW` Intent，macOS 用 `NSWorkspace`，Windows 用 `ShellExecuteW`，Linux 用 `GtkUriLauncher`，GPUI 用它的 `open_url`，Web 在新标签页中打开。`nsh test` 记录这些 URL，而不真正打开。
 - [`TextView`](../elements/text-view.md) 设置 `links="open"` 后，以同样的方式打开其中的链接。
 
@@ -1505,7 +1510,16 @@ const names = files.map((url) => decodeURIComponent(new URL(url).pathname.split(
 ```
 
 > [!NOTE]
-> 如果应用在 `nsh.json` 中声明了 `capabilities`，必须用 `"clipboard": true` 授予剪贴板。否则 `writeText` 和 `writeImage` 不做任何事，`readText` 返回 `""`，`readImage` 返回 `null`，`readFiles` 返回 `[]`，`hasText` 和 `hasImage` 返回 `false`，Rust 与 TSX 都是如此。见[沙箱与能力](../docs/sandbox-and-capabilities.md)。
+> 如果应用在 `nsh.json` 中声明了 `capabilities`，必须用 `"clipboard": true` 授予剪贴板。否则 `Clipboard` 的每个函数都以一个 `Error` reject，其 `code` 为 `"ERR_ACCESS_DENIED"`，`permission` 为 `"clipboard"`，`resource` 为 `""`，系统剪贴板不会被访问。在 Rust 中，写入保持剪贴板不变，读取得到空剪贴板的回答（`""`、`None`、空列表、`false`），拒绝会记录在日志中。见[沙箱与能力](../docs/sandbox-and-capabilities.md)。
+>
+> ```tsx
+> try {
+>   await Clipboard.writeText(code());
+> } catch (error) {
+>   if (error.code === "ERR_ACCESS_DENIED") showHint("此应用已关闭复制");
+>   else throw error;
+> }
+> ```
 
 ## Picker
 
@@ -1560,8 +1574,9 @@ pickImages(options?: PickImagesOptions): Promise<PickedImage[]>;
 ```
 
 显示选择器，按选中的顺序 resolve 为用户选中的图片；用户取消时 resolve 为 `[]`。Rust：`pick_images(request)`，在任务里
-（`spawn`，或 `async` 模块函数）await 它的结果。超出范围的选项（`limit: 0`、不在 0 到 1 之间的 `quality`）会在调用时抛出
-`RangeError`。
+（`spawn`，或 `async` 模块函数）await 它的结果。`pickImages` 从不抛出：超出范围的选项（`limit: 0`、不在 0 到 1 之间的
+`quality`）让 Promise 以 `RangeError` reject，应用的能力不允许的选取以 `ERR_ACCESS_DENIED` reject（见下文）。取消是用户的
+回答而不是失败：resolve 为 `[]`。
 
 图片拿到手就可以发送：
 
@@ -1666,8 +1681,9 @@ photos.set([...photos(), ...images.map((image) => URL.createObjectURL(image.file
 选取会被取消。见[测试](../docs/testing-and-trace.md)。
 
 > [!NOTE]
-> 应用在 `nsh.json` 中声明了 `capabilities` 时，需要用 `"picker": true` 授予选择器。没有授予时 `pickImages` resolve 为
-> `[]`，什么也不显示，Rust 和 TSX 都一样。见[沙箱与能力](../docs/sandbox-and-capabilities.md)。
+> 应用在 `nsh.json` 中声明了 `capabilities` 时，需要用 `"picker": true` 授予选择器。没有授予时 `pickImages` 什么也不显示，
+> 并以一个 `Error` reject，其 `code` 为 `"ERR_ACCESS_DENIED"`，`permission` 为 `"picker"`，`resource` 为 `""`。在 Rust
+> 中，`pick_images` 回答没有文件，拒绝会记录在日志中。见[沙箱与能力](../docs/sandbox-and-capabilities.md)。
 
 ## Storage
 
@@ -1738,7 +1754,7 @@ const theme = (await Storage.getItem("theme")) ?? "system";
 setItem(key: string, value: string): Promise<void>;
 ```
 
-把 `key` 设为 `value`，替换原有的值。如果存储会超过 5 MB，则 Promise 被拒绝，值不会被保存。Rust：`Storage::set_item(key, value)`，此时返回 `Err(StorageFull)`。值都是字符串：结构化数据保存为 JSON（Rust 用 `serde_json::to_string`，TSX 用 `JSON.stringify`），再读回（`serde_json::from_str`、`JSON.parse`）。
+把 `key` 设为 `value`，替换原有的值。如果存储会超过 5 MB，则 Promise 以一个 `code` 为 `"ERR_NSH_QUOTA_EXCEEDED"` 的 `Error` 拒绝，值不会被保存。Rust：`Storage::set_item(key, value)`，此时返回 `Err(StorageFull)`。值都是字符串：结构化数据保存为 JSON（Rust 用 `serde_json::to_string`，TSX 用 `JSON.stringify`），再读回（`serde_json::from_str`、`JSON.parse`）。
 
 ```rust tabs
 let draft = serde_json::json!({ "title": title.get(), "body": body.get() });
@@ -1832,7 +1848,7 @@ const host: {
   post(name: string, data?: unknown): void;
   available(): boolean;
   call(name: string, args?: unknown, options?: { timeout?: number }): Promise<unknown>;
-  on(event: string, listener: (payload: unknown) => void): (() => void) & { remove(): void };
+  on(event: string, listener: (payload: unknown) => void): () => void;
 };
 ```
 
@@ -1857,32 +1873,45 @@ import { host } from "nsh";
 call(name: string, args?: unknown, options?: { timeout?: number }): Promise<unknown>;
 ```
 
-以 `args`（任意 JSON 值；不传时为 `null`）调用宿主的函数 `name`，resolve 为它的返回值。函数失败时以宿主给出的错误消息拒绝；`host.available()` 为 `false` 时以 `nsh/host: this platform has no host` 拒绝；`name` 不在应用的 [`host` 能力](#能力)中，或不是合法名字（由 `A`–`Z`、`a`–`z`、`0`–`9`、`_`、`.`、`:`、`-` 组成，长度 1 到 128，不含 `..`）时也会拒绝。
+以 `args`（任意 JSON 值；不传时为 `null`）调用宿主的函数 `name`，resolve 为它的返回值。`host.call` 从不抛出：每种失败都让 Promise 以一个 `Error` 拒绝，它的 `code` 说明发生了什么（消息是写给人看的，可能变化）：
 
-调用最多等待宿主应答 30 秒，之后以 `nsh/host: <name> timed out after 30000 ms` 拒绝，之后才到的应答会被丢弃。`options.timeout` 以毫秒设置等待时间，`0` 表示不限时；大到时钟永远走不到的值（约 1e22 毫秒）同样不限时，负数、`NaN` 或无穷大则以 `nsh/host: invalid timeout <value>` 拒绝调用。计时用的是应用的时间，与它的定时器一致：在使用手动时钟的 `nsh test` 中随时钟推进。
+| `code` | 何时 |
+|---|---|
+| `ERR_NSH_HOST_ERROR` | 宿主的函数失败，或宿主没有名为 `name` 的函数；消息是宿主给出的 |
+| `ERR_ACCESS_DENIED` | `name` 不在应用的 [`host` 能力](#能力)中；`permission` 为 `"host"`，`resource` 为该名字 |
+| `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` | 平台没有宿主：`host.available()` 为 `false` |
+| `ETIMEDOUT` | 宿主没有及时应答 |
+| `ERR_NSH_QUOTA_EXCEEDED` | 已有 1024 个调用在等待嵌入应用的应答 |
+
+不是合法名字（由 `A`–`Z`、`a`–`z`、`0`–`9`、`_`、`.`、`:`、`-` 组成，长度 1 到 128，不含 `..`）的 `name` 以 `TypeError` 拒绝。
+
+调用最多等待宿主应答 30 秒，之后以 `ETIMEDOUT` 拒绝，之后才到的应答会被丢弃。`options.timeout` 以毫秒设置等待时间，`0` 表示不限时；大到时钟永远走不到的值（约 1e22 毫秒）同样不限时，负数、`NaN` 或无穷大则以 `RangeError` 拒绝调用。计时用的是应用的时间，与它的定时器一致：在使用手动时钟的 `nsh test` 中随时钟推进。
 
 ```ts
 const user = (await host.call("getUserInfo")) as { name: string };
-const quote = await host.call("quote.refresh", { symbol: "AAPL" }, { timeout: 5000 });
+const quote = await host.call("quote.refresh", { symbol: "AAPL" }, { timeout: 5000 }).catch((error) => {
+  if (error.code === "ETIMEDOUT" || error.code === "ERR_FEATURE_UNAVAILABLE_ON_PLATFORM") return null;
+  throw error;
+});
 ```
 
 ### host.on
 
 ```ts
-on(event: string, listener: (payload: unknown) => void): (() => void) & { remove(): void };
+on(event: string, listener: (payload: unknown) => void): () => void;
 ```
 
-平台事件中，宿主每发送一次 `event`，就以它的数据调用 `listener`，直到调用 `remove()`。宿主在应用启动前发送的事件会在应用启动后送达，应用顶层注册的监听器能收到；监听器注册之前发送的事件不会补发给它。应用启动时的状态用 `host.call` 读取，之后的变化用 `host.on` 跟进。
+平台事件中，宿主每发送一次 `event`，就以它的数据调用 `listener`，直到调用 `host.on` 返回的函数；在组件渲染期间添加的监听器随组件一起停止。宿主在应用启动前发送的事件会在应用启动后送达，应用顶层注册的监听器能收到；监听器注册之前发送的事件不会补发给它。应用启动时的状态用 `host.call` 读取，之后的变化用 `host.on` 跟进。
 
 ```ts
-const sub = host.on("loginChanged", (payload) => console.log(payload));
+const stop = host.on("loginChanged", (payload) => console.log(payload));
 // 之后
-sub.remove();
+stop();
 ```
 
 ### 能力
 
-应用调用的每个函数都必须列在 `nsh.json` 的 `capabilities.host` 中：精确的名字、以 `*` 结尾的前缀，或者用 `true` 允许全部。所有应用都是如此，没有声明其他 `capabilities` 的应用也一样：宿主的函数从不默认授予。未授权的调用会被拒绝并记录日志；构建从 `nsh` 导入了 `host` 却没有声明 `capabilities.host` 的应用时会给出警告。事件无需授权。参见[沙箱与能力](../docs/sandbox-and-capabilities.md#host)。
+应用调用的每个函数都必须列在 `nsh.json` 的 `capabilities.host` 中：精确的名字、以 `*` 结尾的前缀，或者用 `true` 允许全部。所有应用都是如此，没有声明其他 `capabilities` 的应用也一样：宿主的函数从不默认授予。未授权的调用会以 `ERR_ACCESS_DENIED` 拒绝并记录日志，向嵌入应用 `host.post` 这样的名字会抛出同样的错误；构建从 `nsh` 导入了 `host` 却没有声明 `capabilities.host` 的应用时会给出警告。事件无需授权。参见[沙箱与能力](../docs/sandbox-and-capabilities.md#host)。
 
 ```json
 { "capabilities": { "host": ["getUserInfo", "bridge.*"] } }
@@ -1918,7 +1947,7 @@ mount(() => (conversation ? <Conversation id={conversation} /> : <Inbox />));
 
 ### 原生 SDK 通道
 
-原生 SDK 的 `send` 会保留尚未监听的事件，最多 256 条。最后一个监听器在接收过程中取消订阅时，其余事件仍按原顺序等待；重载停机期间发送的事件交给下一次加载的应用。`host.on` 返回的订阅既可作为清理函数调用，也提供 `remove()`。`host.post(name, data)` 向原生 SDK 的处理函数投递数据，处理函数可用 `isPost` 区分投递与调用。
+原生 SDK 的 `send` 会保留尚未监听的事件，最多 256 条。最后一个监听器在接收过程中停止监听时，其余事件仍按原顺序等待；重载停机期间发送的事件交给下一次加载的应用。`host.post(name, data)` 向原生 SDK 的处理函数投递数据，处理函数可用 `isPost` 区分投递与调用。
 
 ### 嵌入方的一侧
 
@@ -1985,8 +2014,8 @@ import { keymap } from "nsh";
 
 ```ts
 const keymap: {
-  bind(keystroke: string, handler: (keystroke: string) => void, options?: KeyBindingOptions): () => void;
-  bind(bindings: Record<string, (keystroke: string) => void>, options?: KeyBindingOptions): () => void;
+  bind(keystroke: string, handler: (e: { keystroke: string }) => void, options?: KeyBindingOptions): () => void;
+  bind(bindings: Record<string, (e: { keystroke: string }) => void>, options?: KeyBindingOptions): () => void;
   label(keystroke: string): string;
 };
 
@@ -2010,10 +2039,10 @@ Rust 绑定与创建它的组件（所有者）同生命周期；处理函数收
 ### keymap.bind
 
 ```ts
-bind(keystroke: string, handler: (keystroke: string) => void, options?: KeyBindingOptions): () => void;
+bind(keystroke: string, handler: (e: { keystroke: string }) => void, options?: KeyBindingOptions): () => void;
 ```
 
-按下 `keystroke` 时运行 `handler`，并返回一个移除该绑定的函数。处理函数收到的是你写下的按键组合字符串，大小写保持原样。Rust：`on_key(keystroke, handler)`。
+按下 `keystroke` 时运行 `handler`，并返回一个移除该绑定的函数。处理函数收到 `{ keystroke }`：你写下的按键组合字符串，大小写保持原样。Rust：`on_key(keystroke, handler)`，其处理函数直接收到按键组合。
 
 ```rust tabs
 use nsh_core::prelude::*;
@@ -2185,7 +2214,7 @@ import { nativeComponent, nativeModule } from "nsh";
 function nativeComponent<P extends object = {}, E extends object = {}>(
   name: string,
   spec: NativeComponentSpec<P, E>,
-): (props: NativeComponentProps<P, E>) => YNode;
+): (props: NativeComponentProps<P, E>) => JSX.Element;
 
 interface NativeComponentSpec<P, E> {
   /** 组件自己的属性：发送给组件（任意 JSON 值），每个属性在变化时发送。 */
@@ -2212,7 +2241,7 @@ type NativeEventHandlers<E> = { [K in keyof E & string as `on${Capitalize<K>}`]?
 
 #### 命令
 
-它的 `ref` 拿到一个 `YNode`；`ref.command(name, args)` 调用原生组件的 `name` 命令，参数 `args` 为任意 JSON 值。Rust：`ElementRef::command(name, args)`。
+它的 `ref` 拿到一个 `NativeComponentRef`；`ref.command(name, args)` 调用原生组件的 `name` 命令，参数 `args` 为任意 JSON 值。Rust：`ElementRef::command(name, args)`。
 
 ```rust tabs
 map.command("zoomTo", json!({ "level": 3 }));
@@ -2262,7 +2291,7 @@ pub fn App() -> impl IntoElement {
 ```
 
 ```tsx tabs
-import { mount, signal, type YNode, View } from "nsh";
+import { mount, type NativeComponentRef, signal, View } from "nsh";
 import { nativeComponent } from "nsh";
 
 const Badge = nativeComponent<{ text: string; color?: string }, { tap: { count: number } }>("embed.badge", {
@@ -2272,7 +2301,7 @@ const Badge = nativeComponent<{ text: string; color?: string }, { tap: { count: 
 
 function App() {
   const taps = signal(0);
-  let badge: YNode | undefined;
+  let badge: NativeComponentRef | undefined;
   return (
     <View style={{ flex: 1, padding: 20, paddingTop: "calc(env(safe-area-inset-top) + 20px)", gap: 16 }}>
       <Badge
@@ -2301,17 +2330,20 @@ function nativeModule<T extends object>(specifier: string): T;
 返回嵌入应用以 `specifier` 注册的套件的导出：其中的模块、类、函数和 Rust 组件，合成一个对象。类型 `T` 由应用自己声明，因此构建应用时不需要了解宿主。与宿主的 crate 一起构建的 Rust 代码直接以 Rust 调用这些函数；`nativeModule` 是 TSX 访问它们的方式。
 
 ```ts
-import { nativeModule } from "nsh";
+import { nativeModule, signal } from "nsh";
 
 interface TradingApi {
   quote(symbol: string): number;
   placeOrder(symbol: string, quantity: number, side: "Buy" | "Sell"): Promise<Order>;
-  subscribe(onChange: (state: Desk) => void): Promise<void>;
+  on(event: "change", listener: (desk: Desk) => void): () => void;
 }
 
 const { Trading } = nativeModule<{ Trading: TradingApi }>("host/trading");
 
 const price = Trading.quote("AAPL");
+
+const desk = signal<Desk | null>(null);
+Trading.on("change", (d) => desk.set(d));
 ```
 
 - 调用方式与导入套件时相同：普通 Rust 函数立即返回结果，`async` 函数返回 Promise，传入的函数是 Rust 之后可以调用的回调。Rust 检查每个参数，参数类型不对时抛出 `TypeError`。
@@ -2321,6 +2353,8 @@ const price = Trading.quote("AAPL");
 宿主用 Rust 注册套件：在创建视图之前调用平台 crate 的 `set_ui_sets`（与 NSH 自己的套件放在一起），或使用 `EngineConfig::ui_sets`：
 
 ```rust
+use std::{cell::RefCell, rc::Rc};
+
 use nsh_core::prelude::*;
 
 pub struct Trading;
@@ -2330,15 +2364,26 @@ impl Trading {
     /// A sample price.
     pub fn quote(symbol: String) -> Result<f64, String> { /* ... */ }
 
-    /// Calls `on_change` with the desk now and on every change.
-    pub async fn subscribe(on_change: Callback<Desk>) {
-        let mut desk = DESK.subscribe(); // a tokio watch channel the host keeps
-        loop {
-            on_change.post(desk.borrow_and_update().clone());
-            if desk.changed().await.is_err() {
-                return;
-            }
+    /// Calls `listener` with the desk now and after every change
+    /// (`change`, the one event), until the returned function is called
+    /// or what called `on` goes.
+    pub fn on(event: String, listener: Callback<Desk>, cx: CallCx<'_>) -> Result<Stop, String> {
+        if event != "change" {
+            return Err(format!("no Trading event `{event}`"));
         }
+        let listener = Rc::new(RefCell::new(Some(listener)));
+        let held = listener.clone();
+        cx.start(async move {
+            let mut desk = DESK.subscribe(); // a tokio watch channel the host keeps
+            loop {
+                let Some(listener) = held.borrow().clone() else { return };
+                listener.post(desk.borrow_and_update().clone());
+                if desk.changed().await.is_err() {
+                    return;
+                }
+            }
+        });
+        Ok(Stop::new(move || drop(listener.take())))
     }
 }
 
@@ -2347,7 +2392,7 @@ trading.module::<Trading>();
 nsh_platform_gpui::set_ui_sets(vec![nsh_base::registry(), trading]);
 ```
 
-`subscribe` 让宿主的数据与每个应用保持同步：它的任务等待宿主的变化，并把每次变化发送给应用；因此宿主自己做出的修改，或任一应用通过其他函数做出的修改，都会到达所有订阅了的应用。
+`on` 让宿主的数据与每个应用保持同步：它启动的任务等待宿主的变化，并把每次变化发送给应用；因此宿主自己做出的修改，或任一应用通过其他函数做出的修改，都会到达所有在监听的应用。它返回的 `Stop` 就是 TSX 中 `Trading.on` 返回的函数：它只运行一次，在应用调用它时，或在调用 `on` 的一方（组件，或热重载下模块的这次运行）消失时；这里它丢弃监听器，任务随之结束。
 
 > [!NOTE]
 > 属性、事件和命令参数都以 JSON 形式传到原生侧。注册的组件和函数是宿主应用自己的代码：NSH 的[沙箱限制与权限](../docs/sandbox-and-capabilities.md)不约束它们的行为。
@@ -2419,7 +2464,7 @@ function announce(message: string): void;
 ### setAccessibilityFocus
 
 ```ts
-function setAccessibilityFocus(node: YNode): void;
+function setAccessibilityFocus(node: ViewRef): void;
 ```
 
 把屏幕阅读器的焦点移到 `node`（某个元素的 `ref`）。Rust：`ElementRef::set_accessibility_focus()`。
@@ -2444,11 +2489,11 @@ fn Saved() -> impl IntoElement {
 ```
 
 ```tsx tabs
-import { effect, Text, View, type YNode } from "nsh";
+import { effect, Text, View, type ViewRef } from "nsh";
 import { announce, screenReaderEnabled, setAccessibilityFocus } from "nsh";
 
 function Saved() {
-  let note!: YNode;
+  let note!: ViewRef;
   const save = () => {
     announce("Saved");
     setAccessibilityFocus(note);
@@ -2476,11 +2521,11 @@ function Saved() {
 | `Context<T>` | `context` 的返回值 |
 | `Component<P>` | `(props: P) => JSX.Element` |
 | `JSX` | JSX 命名空间（`JSX.Element`） |
-| `YNode` | `ref` 拿到的对象：聚焦、滚动等命令。见[元素](../elements/index.md) |
+| `ViewRef`、`InputRef`、`ScrollRef`、`ListRef`、`WebViewRef`、`VideoRef`、`NativeComponentRef` | `ref` 拿到的对象，每个元素有自己的类型（`ViewRef` 及基于它的类型）：聚焦、滚动等命令。`ViewRef` 也是元素本身的类型（`JSX.Element`）。见 [ref 方法](../elements/index.md#ref-方法) |
 | `ViewProps`、`TextProps`、`ImageProps`、`ScrollProps`、`CommonProps`、`TouchProps` | 宿主元素的属性 |
 | `ViewStyle`、`TextStyle`、`InputStyle`、`ImageStyle`、`LayoutStyle`、`StyleProp<T>` | 样式对象；见[样式参考](./style-reference.md) |
 | `ColorValue`、`DimensionValue`、`LengthValue`、`TransformStep` | 样式中的值 |
-| `GestureResponderEvent`、`MouseEvent`、`MouseButton`、`ContextMenuEvent`、`ScrollEvent`、`PanEvent`、`TouchPoint` | 事件数据 |
+| `GestureResponderEvent`、`MouseEvent`、`MouseButton`、`ContextMenuEvent`、`PressEvent`、`ScrollEvent`、`PanEvent`、`TouchPoint` | 事件数据 |
 | `Point`、`Size`、`Bounds`、`Edges`、`Modifiers` | 事件数据和属性所用的形状，字段与 GPUI 相同（`nsh_core::geometry`） |
 | `PixelSize` | 图片或视频自身的像素尺寸（`onLoad`、`Image.getSize`、剪贴板和照片选择器的图片）；`Size` 的单位是点 |
 | `ImageAsset` | 导入图片文件得到的对象（`{ url, size: Size, scales? }`；`scales` 列出它的[像素密度变体](../docs/images-and-assets.md#像素密度)） |
@@ -2488,9 +2533,9 @@ function Saved() {
 | `AccessibilityRole`、`AccessibilityState` | 无障碍属性 |
 
 ```tsx
-import { type GestureResponderEvent, type YNode, signal } from "nsh";
+import { type GestureResponderEvent, type InputRef, signal } from "nsh";
 
-let field: YNode | undefined;
+let field: InputRef | undefined;
 const onPress = (e: GestureResponderEvent) => field?.focus();
 ```
 

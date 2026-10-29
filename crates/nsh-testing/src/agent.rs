@@ -10,8 +10,9 @@
 //! [`Agent`] on a thread of its own, which resolves the selector on the
 //! model, asks the platform ([`Native`]) where the view is on screen and
 //! acts there (a click or a tap, a drag, typed keys), then waits until the
-//! app is quiet: no batch and no native animation for 100 ms, 2 s at
-//! most. [`Native`]'s calls come from that thread; implementations do
+//! app is quiet: no batch and no native animation that ends by itself for
+//! 100 ms, 2 s at most (one that loops forever, a spinner, is not waited
+//! for). [`Native`]'s calls come from that thread; implementations do
 //! their work on the main thread and return when it is done.
 
 use std::{
@@ -26,7 +27,7 @@ use nsh_core::{
     MountBatch, NodeId,
     geometry::{Bounds, Point, Points, Size, point},
 };
-use nsh_dev::protocol::{PickTarget, SceneQuery, StepOutcome, TestStep};
+use nsh_dev::protocol::{PickTarget, SceneQuery, SpanStyle, StepOutcome, TestStep};
 
 mod forward;
 
@@ -411,6 +412,8 @@ pub trait Scene: Send + Sync {
     fn matches(&self, selector: &str) -> Result<bool, String>;
     /// Whether the view `selector` names takes input.
     fn enabled(&self, selector: &str) -> Result<bool, String>;
+    /// The resolved style of the first character `selector` names.
+    fn span_style(&self, selector: &str) -> Result<SpanStyle, String>;
     /// The input `selector` names.
     fn input_id(&self, selector: &str) -> Result<Option<NodeId>, String>;
     /// The dialogs the app showed.
@@ -524,6 +527,18 @@ impl Scene for Model {
     }
     fn enabled(&self, selector: &str) -> Result<bool, String> {
         self.lock().screen.enabled(selector)
+    }
+    fn span_style(&self, selector: &str) -> Result<SpanStyle, String> {
+        let style = self.lock().screen.span_style(selector)?;
+        let mut span = SpanStyle::default();
+        span.color = style.color.0;
+        span.background = style.background.map(|b| b.color.0);
+        span.font_size = style.font_size.0;
+        span.font_weight = style.font_weight;
+        span.italic = style.italic;
+        span.underline = style.decoration.underline;
+        span.line_through = style.decoration.line_through;
+        Ok(span)
     }
     fn input_id(&self, selector: &str) -> Result<Option<NodeId>, String> {
         self.lock().screen.input_id(selector)
@@ -687,6 +702,9 @@ pub fn answer(model: &Model, step: &TestStep) -> Option<Result<serde_json::Value
         TestStep::Count { selector } => model.count(selector).map(Value::from),
         TestStep::Shows { selector } => model.matches(selector).map(Value::from),
         TestStep::Enabled { selector } => model.enabled(selector).map(Value::from),
+        TestStep::SpanStyle { selector } => {
+            model.span_style(selector).and_then(|s| json(to_value(s)))
+        }
         TestStep::Dialogs => model.dialogs().and_then(|d| json(to_value(d))),
         TestStep::PendingDialog => model.pending_dialog().and_then(|d| json(to_value(d))),
         TestStep::Scene { query } => match query {
@@ -823,6 +841,11 @@ impl Scene for RemoteScene {
             selector: selector.into(),
         })
     }
+    fn span_style(&self, selector: &str) -> Result<SpanStyle, String> {
+        self.get(TestStep::SpanStyle {
+            selector: selector.into(),
+        })
+    }
     fn input_id(&self, selector: &str) -> Result<Option<NodeId>, String> {
         self.query(SceneQuery::InputId {
             selector: selector.into(),
@@ -948,7 +971,7 @@ pub trait Native: Send + Sync {
         let _ = content;
         Err(
             "pasting in tests is not supported on this platform yet: run the test headless, \
-             or on macOS or iOS"
+             or on macOS, iOS or the web"
                 .into(),
         )
     }
@@ -1008,7 +1031,8 @@ pub trait Native: Send + Sync {
     /// Answers the dialog the app shows now (the oldest): presses its
     /// button with the text `button`, or closes it without one.
     fn answer_dialog(&self, button: Option<&str>) -> Result<(), String>;
-    /// Whether a native animation runs now.
+    /// Whether a native animation runs now that ends by itself: one that
+    /// loops forever (a spinner) does not count, or no step would settle.
     fn animating(&self) -> bool;
     /// A picture of the window, as a PNG.
     fn screenshot(&self) -> Result<Vec<u8>, String>;
@@ -1309,6 +1333,9 @@ impl Agent {
             TestStep::Count { selector } => Ok(Value::from(self.scene.count(&selector)?)),
             TestStep::Shows { selector } => Ok(Value::from(self.scene.matches(&selector)?)),
             TestStep::Enabled { selector } => Ok(Value::from(self.scene.enabled(&selector)?)),
+            TestStep::SpanStyle { selector } => {
+                serde_json::to_value(self.scene.span_style(&selector)?).map_err(|e| e.to_string())
+            }
             TestStep::Value { selector } => {
                 let id = self.scene.input_id(&selector)?;
                 Ok(id
@@ -1427,10 +1454,7 @@ impl Agent {
         let rendered = self.scene.activity()?.batches > 0;
         self.check()?;
         if !rendered {
-            return Err(format!(
-                "the app rendered nothing in {} s",
-                timeout.as_secs()
-            ));
+            return Err(crate::failure::rendered_nothing(timeout));
         }
         self.settled()
     }
@@ -1440,7 +1464,8 @@ impl Agent {
         match pick {
             Pick::One(id) => Ok(id),
             Pick::None => Err(format!(
-                "no {what} matches `{selector}`; {}",
+                "{}; {}",
+                crate::failure::not_found(what, selector),
                 self.on_screen()
             )),
             Pick::Many(n) => Err(format!(
@@ -1448,8 +1473,8 @@ impl Agent {
                  a view around it (`id:list >> {selector}`)"
             )),
             Pick::Disabled => Err(format!(
-                "`{selector}` {}; {}",
-                crate::screen::disabled(what),
+                "{}; {}",
+                crate::failure::disabled(selector, what),
                 self.on_screen()
             )),
         }
@@ -1814,8 +1839,8 @@ impl Agent {
             if left.is_zero() {
                 let what = if gone { "gone" } else { "showing" };
                 return Err(format!(
-                    "`{selector}` {what} never happened in {} ms; {}",
-                    timeout.as_millis(),
+                    "{}; {}",
+                    crate::failure::never_happened(&format!("`{selector}` {what}"), timeout),
                     self.on_screen()
                 ));
             }
@@ -1823,8 +1848,9 @@ impl Agent {
         }
     }
 
-    /// Waits until the app is quiet ([`QUIET`], no native animation),
-    /// [`SETTLE`] at most, then fails if it threw meanwhile.
+    /// Waits until the app is quiet ([`QUIET`], no native animation that
+    /// ends by itself), [`SETTLE`] at most, then fails if it threw
+    /// meanwhile.
     fn settled(&self) -> Result<(), String> {
         let start = Instant::now();
         // When an animation last ran: what it ends with (a screen popped

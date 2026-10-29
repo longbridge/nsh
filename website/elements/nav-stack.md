@@ -1,7 +1,6 @@
 ---
 title: NavStack
 description: "Native navigation stacks: NavStack, NavPage and createNavStack, pushing and popping pages, header slots, leaving a page and how each platform shows a stack."
-order: 22
 group: base
 demo: ui-navigation
 ---
@@ -313,11 +312,11 @@ fn edit_note(routes: Signal<Vec<u32>>) -> Screen {
         spawn(async move {
             let choice = alert_dialog()
                 .title("Discard your changes?")
-                .cancel("Keep editing")
-                .destructive("Discard")
+                .cancel("keep", "Keep editing")
+                .destructive("discard", "Discard")
                 .show()
                 .await;
-            if choice.ok().flatten().as_deref() == Some("Discard") {
+            if choice.is_ok_and(|r| r.action.as_deref() == Some("discard")) {
                 routes.update(|r| {
                     r.pop();
                 });
@@ -348,18 +347,18 @@ import { AlertDialog, NavPage, Input } from "nsh/base";
 function EditNote() {
   const text = signal("");
   const confirm = async () => {
-    const choice = await AlertDialog.show({
+    const { action } = await AlertDialog.show({
       title: "Discard your changes?",
       actions: [
-        { label: "Keep editing", role: "cancel" },
+        { label: "Keep editing", role: "cancel", id: "keep" },
         { label: "Discard", role: "destructive", id: "discard" },
       ],
     });
-    if (choice === "discard") nav.pop();
+    if (action === "discard") nav.pop();
   };
   return (
     <NavPage title="Edit" popOnBack={text().length === 0} onBackPress={() => text().length > 0 && confirm()}>
-      <Input value={text()} onChange={(v) => text.set(v)} placeholder="A note" />
+      <Input value={text()} onChange={({ value }) => text.set(value)} placeholder="A note" />
     </NavPage>
   );
 }

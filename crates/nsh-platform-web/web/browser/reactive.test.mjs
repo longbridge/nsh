@@ -25,6 +25,8 @@ async function fixture() {
   }
   imports.nsh_browser = { value: (...args) => bridge.value(...args) };
   const raw = (await WebAssembly.instantiate(module, imports)).exports;
+  // As `nsh.js` does: link every part, standard module and feature the runtime kept.
+  for (const name of Object.keys(raw)) if (/^nsh_(part|std|feature)_/.test(name)) raw[name]();
   const start = () => {
     const values = new Values();
     bridge = values.imports(() => raw.memory);
@@ -36,7 +38,7 @@ async function fixture() {
     const dom = createDom(invoke, values, api, () => live, () => {});
     const components = createComponents(invoke, values, api, dom);
     const close = () => { if (live) { wasm.nsh_browser_dispose(); live = false; values.dispose(); } };
-    return { api, values, invoke, dom, components, mouseEvents: () => values.result(wasm.nsh_browser_test_mouse_events()), fileDropEvents: () => values.result(wasm.nsh_browser_test_file_drop_events()), modules: () => createModules(invoke, values, () => live, () => {}, components.make), close,
+    return { api, values, invoke, dom, components, mouseEvents: () => values.result(wasm.nsh_browser_test_mouse_events()), fileDropEvents: () => values.result(wasm.nsh_browser_test_file_drop_events()), videoLoadEvent: () => values.result(wasm.nsh_browser_test_video_load_event()), modules: () => createModules(invoke, values, () => live, () => {}, components.make), close,
       restart() { close(); return start(); } };
   };
   return start();
@@ -106,9 +108,13 @@ test("registry functions use Rust conversions and preserve error classes", { ski
     assert.equal(os.arch(), "wasm32");
     assert.equal(os.default, os);
     assert.equal(os.EOL, "\n");
-    assert.throws(() => os.homedir(), error => error instanceof Error && /home directory/.test(error.message));
+    assert.throws(() => os.homedir(), error => error instanceof Error && error.code === "ERR_FEATURE_UNAVAILABLE_ON_PLATFORM");
     const process = fixture.modules.exports.get("process");
-    assert.throws(() => process.run(42), TypeError);
+    // A function returning a promise never throws: a wrong argument rejects.
+    let thrown = false, run;
+    try { run = process.run(42); } catch { thrown = true; }
+    assert.equal(thrown, false);
+    await assert.rejects(run, TypeError);
     assert.equal(process.platform, os.platform());
   } finally { fixture.modules.dispose(); fixture.close(); }
 });
@@ -248,6 +254,25 @@ test("class cycles collect, escaped callbacks stay live, and old callbacks are i
 });
 
 
+test("a Rust stop function runs once and goes with its owner", { skip: !path }, async () => {
+  const f = await fixture();
+  const modules = f.modules();
+  const Box = modules.exports.get("test/browser").CallbackBox;
+  const stop = Box.listen(() => 1);
+  assert.equal(typeof stop, "function");
+  assert.equal(Box.listening(), 1);
+  stop();
+  stop();
+  assert.equal(Box.listening(), 0);
+  let dispose;
+  f.api.root(d => { dispose = d; Box.listen(() => 2); Box.listen(() => 3)(); });
+  assert.equal(Box.listening(), 1);
+  dispose();
+  assert.equal(Box.listening(), 0);
+  modules.dispose();
+  f.close();
+});
+
 test("active memo payloads survive accessor collection until their owner is disposed", { skip: !path || !global.gc }, async () => {
   const { api, close } = await fixture();
   let dispose, payload;
@@ -283,7 +308,7 @@ test("native animation samples and derived-node identity use the Rust graph prot
   let finished;
   const composite=Animated.sequence([Animated.timing(a,{toValue:3}),Animated.delay(5)]);
   const end=composite.start(value=>{finished=value.finished;});animation.finished([[4,true]]);
-  assert.equal(await end,true);assert.equal(finished,true);
+  assert.deepEqual(await end,{finished:true});assert.equal(finished,true);
   animation.dispose();f.close();
 });
 
@@ -296,7 +321,7 @@ test("canvas records paths and gradients through the shared Rust decoder", { ski
     const gradient=cx.createLinearGradient(0,0,10,10);gradient.addColorStop(0,"red");gradient.addColorStop(1,"blue");
     cx.fillStyle=gradient;cx.fill(path);hit=cx.isPointInPath(path,5,5);cx.save();cx.lineWidth=4;cx.restore();
   }});});
-  f.dom.event(f.values.nodeIds.get(node),"onLayout",{size:{width:20,height:20}});
+  f.dom.event(f.values.nodeIds.get(node),"onLayout",{bounds:{origin:{x:0,y:0},size:{width:20,height:20}}});
   assert.equal(f.invoke(602,[[999],null,0,0,undefined,false]),false);
   assert.equal(hit,true);assert.equal(context.lineWidth,1);assert.equal(context.canvas.width,20);
   assert.ok(context instanceof canvas.CanvasRenderingContext2D);
@@ -539,6 +564,25 @@ test("error boundaries deliver the first failure after a batch unwinds", { skip:
   dispose(); close();
 });
 
+test("a listener whose owner went runs unowned, as QuickJS runs it", { skip: !path }, async () => {
+  const { api, values, dom, close } = await fixture();
+  const heard = [];
+  let owner, node, dispose;
+  api.root(stop => {
+    dispose = stop;
+    owner = api.getOwner();
+    node = dom.rt.element("view");
+    dom.rt.prop(node, "onPress", payload => heard.push([payload, api.getOwner()]));
+  });
+  // The view outlives the owner it was made under (a popup leaving with
+  // its exit motion still reports its events).
+  dispose();
+  assert.equal(api.runWithOwner(owner, () => api.getOwner()), null);
+  assert.doesNotThrow(() => dom.event(values.nodeIds.get(node), "onPress", 1));
+  assert.deepEqual(heard, [[1, null]]);
+  close();
+});
+
 test("host events preserve order, owner cleanup and platform calls", { skip: !path }, async () => {
   const { createHost } = await import("./host.js");
   const { api, invoke, dom, close } = await fixture();
@@ -572,7 +616,7 @@ test("Rust component event callbacks retain their error boundary owner", { skip:
       return node;
     } });
   });
-  components.component(values.nodeIds.get(node), "change", 1, false);
+  components.component(values.nodeIds.get(node), "change", 1);
   const read = value => typeof value === "function" ? read(value()) : value;
   assert.equal(read(output), "component event");
   dispose(); close();
@@ -629,5 +673,22 @@ test("native file drops preserve URIs and optional page position", { skip: !path
       { uris },
       { uris, pagePosition: { x: 30, y: 40 } },
     ]);
+  } finally { f.close(); }
+});
+
+test("merged props answer `in` from their sources, getters included", { skip: !path }, async () => {
+  const { dom, close } = await fixture();
+  const props = dom.rt.merge({ onPress() {} }, () => ({ style: {} }), { get children() { return "label"; } });
+  assert.ok("children" in props);
+  assert.ok("style" in props);
+  assert.ok(!("missing" in props));
+  assert.equal(props.children, "label");
+  close();
+});
+
+test("native video loads nest their size as the native JS host does", { skip: !path }, async () => {
+  const f = await fixture();
+  try {
+    assert.deepEqual(f.videoLoadEvent(), { duration: 12.5, size: { width: 1920, height: 1080 } });
   } finally { f.close(); }
 });

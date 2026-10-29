@@ -648,6 +648,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "chrono"
+version = "0.4.45"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1aa79e62e7697b8e29b513a68abacf485adcd1fe8284a4316c5ae868e6633327"
+dependencies = [
+ "iana-time-zone",
+ "num-traits",
+ "windows-link",
+]
+
+[[package]]
 name = "cipher"
 version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -804,6 +815,12 @@ checksum = "1af709f1f33454bf52eadfc8c78b3b9ef9cb26fb54d16dc9cd9a7299f899fd1b"
 dependencies = [
  "unicode-segmentation",
 ]
+
+[[package]]
+name = "core-foundation-sys"
+version = "0.8.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "773648b94d0e5d620f64f280777445740e61fe701025087ec8b57f45c791888b"
 
 [[package]]
 name = "cow-utils"
@@ -2278,6 +2295,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "iana-time-zone"
+version = "0.1.65"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e31bc9ad994ba00e440a8aa5c9ef0ec67d5cb5e5cb0cc7f8b744a35b389cc470"
+dependencies = [
+ "android_system_properties",
+ "core-foundation-sys",
+ "iana-time-zone-haiku",
+ "js-sys",
+ "log",
+ "wasm-bindgen",
+ "windows-core",
+]
+
+[[package]]
+name = "iana-time-zone-haiku"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f31827a206f56af32e590ba56d5d2d085f558508192593743f16b2306495269f"
+dependencies = [
+ "cc",
+]
+
+[[package]]
 name = "icu_collections"
 version = "2.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2440,6 +2481,8 @@ dependencies = [
  "moxcms",
  "num-traits",
  "png 0.18.1",
+ "zune-core",
+ "zune-jpeg",
 ]
 
 [[package]]
@@ -3120,6 +3163,7 @@ dependencies = [
 name = "nsh-base"
 version = "0.3.0"
 dependencies = [
+ "chrono",
  "html5ever",
  "imara-diff",
  "log",
@@ -3193,6 +3237,7 @@ dependencies = [
  "tar",
  "tungstenite 0.30.0",
  "ureq",
+ "wasmparser",
  "windows-sys 0.61.2",
  "zip",
 ]
@@ -3214,6 +3259,7 @@ dependencies = [
  "ordered-float",
  "resvg",
  "rustc-hash 2.1.3",
+ "rustls",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -3223,7 +3269,9 @@ dependencies = [
  "tokio",
  "tokio-tungstenite 0.28.0",
  "unicode-linebreak",
+ "ureq",
  "url",
+ "webpki-roots 1.0.9",
  "windows-sys 0.61.2",
 ]
 
@@ -3432,7 +3480,6 @@ dependencies = [
  "rustc-hash 2.1.3",
  "serde_json",
  "ttf-parser",
- "ureq",
  "webkit6",
 ]
 
@@ -3479,9 +3526,7 @@ dependencies = [
  "nsh-core",
  "nsh-dev",
  "nsh-engine",
- "nsh-js",
  "nsh-testing",
- "quickjs-jit",
  "rustc-hash 2.1.3",
  "serde_json",
  "sha1 0.10.7",
@@ -3507,7 +3552,6 @@ dependencies = [
  "rustc-hash 2.1.3",
  "serde_json",
  "ttf-parser",
- "ureq",
  "url",
  "webview2-com",
  "windows",
@@ -7060,6 +7104,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "wasmparser"
+version = "0.262.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "974d643b125b272607e2fff8012ea14a8328acd7621e4bafa7afb32500052b1b"
+dependencies = [
+ "bitflags 2.13.2",
+ "indexmap",
+]
+
+[[package]]
 name = "wayland-sys"
 version = "0.31.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7951,4 +8005,19 @@ checksum = "481ada9c543b2323cbb7bbdbb5249177fbf0188ed959ed2c15e4b22421c84ed3"
 dependencies = [
  "cc",
  "pkg-config",
+]
+
+[[package]]
+name = "zune-core"
+version = "0.5.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d56377fd46368984a170bc5aac5567e52ca5da874caa60bea39fcbca78fb658b"
+
+[[package]]
+name = "zune-jpeg"
+version = "0.5.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "27bc9d5b815bc103f142aa054f561d9187d191692ec7c2d1e2b4737f8dbd7296"
+dependencies = [
+ "zune-core",
 ]

@@ -1,9 +1,11 @@
 //! `net`: TCP client sockets, only to the `host:port` pairs
-//! `capabilities.network.sockets` grants. Calls check their limits in the
-//! JS call (a `TypeError` or `RangeError` there); the connection and its
-//! reads and writes are tasks of the core, on its tokio runtime.
+//! `capabilities.network.sockets` grants. Calls check their grant and
+//! limits in the JS call and reject at once (`ERR_ACCESS_DENIED`,
+//! `ERR_NSH_QUOTA_EXCEEDED`, a `RangeError` with `ERR_OUT_OF_RANGE`); the
+//! connection and its reads and writes are tasks of the core, on its tokio
+//! runtime.
 
-use crate::element::{JsError, Later, System, class, module};
+use crate::element::{JsError, JsObject, Later, System, class, codes, module};
 
 /// The most one read returns and one write sends.
 const IO_LIMIT: usize = 1024 * 1024;
@@ -23,11 +25,26 @@ const TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 #[module]
 pub(crate) struct Net;
 
+/// `connect`'s options, as Node's `net.connect(options)`: one object, so
+/// a timeout or TLS can join them.
+#[derive(Debug, Clone, Default, PartialEq, JsObject)]
+pub(crate) struct ConnectOptions {
+    /// The host name or address.
+    pub(crate) host: String,
+    /// The port.
+    pub(crate) port: u16,
+}
+
 #[module(flat, default)]
 impl Net {
-    /// Connects only to `host:port` pairs granted by
-    /// capabilities.network.sockets; at most 32 sockets per VM.
-    pub(crate) fn connect(host: String, port: u16, sys: System) -> Result<Later<Socket>, JsError> {
+    /// Connects to `{ host, port }`, only to pairs granted by
+    /// capabilities.network.sockets (`ERR_ACCESS_DENIED`, `permission`
+    /// `"network"`, `resource` `"host:port"`, otherwise); at most 32
+    /// sockets per VM (`ERR_NSH_QUOTA_EXCEEDED`). A failed connection
+    /// rejects with the OS's code (`ECONNREFUSED`, `ENOTFOUND`,
+    /// `ETIMEDOUT`).
+    pub(crate) fn connect(options: ConnectOptions, sys: System) -> Result<Later<Socket>, JsError> {
+        let ConnectOptions { host, port } = options;
         if !sys.access.allows_socket(&host, port) {
             let host = host.to_ascii_lowercase();
             let host = if host.contains(':') && !host.starts_with('[') {
@@ -35,17 +52,22 @@ impl Net {
             } else {
                 host
             };
-            return Err(JsError::Type(format!(
-                "a socket to `{host}:{port}` is not granted; add \"{host}:{port}\" to capabilities.network.sockets"
-            )));
+            return Err(JsError::access_denied(
+                format!(
+                    "a socket to `{host}:{port}` is not granted; add \"{host}:{port}\" to capabilities.network.sockets"
+                ),
+                "network",
+                format!("{host}:{port}"),
+            ));
         }
         if cfg!(target_arch = "wasm32") {
-            return Err(JsError::Type("TCP sockets require a native host".into()));
+            return Err(unavailable());
         }
         let held = sys.quotas.take(SOCKETS, MAX_SOCKETS).ok_or_else(|| {
-            JsError::Range(format!(
+            JsError::Error(format!(
                 "At most {MAX_SOCKETS} concurrent sockets are allowed per VM"
             ))
+            .with_code(codes::QUOTA_EXCEEDED)
         })?;
         Ok(Later::new(Socket::open(host, port, held)))
     }
@@ -60,40 +82,46 @@ pub(crate) struct Socket {
 
 #[class]
 impl Socket {
-    /// Reads at most 1 MiB; resolves null after the peer closes.
+    /// Reads at most 1 MiB; resolves null after the peer closes (or after
+    /// `close`).
     pub(crate) fn read(&self, size: Option<usize>) -> Result<Later<Option<Vec<u8>>>, JsError> {
         let size = size.unwrap_or(64 * 1024);
         if size > IO_LIMIT {
-            return Err(JsError::Range(format!(
-                "socket read exceeded the {IO_LIMIT} byte limit"
-            )));
+            return Err(
+                JsError::Range(format!("socket read exceeded the {IO_LIMIT} byte limit"))
+                    .with_code("ERR_OUT_OF_RANGE"),
+            );
         }
         #[cfg(not(target_arch = "wasm32"))]
         return Ok(Later::new(native::read(self.inner.clone(), size)));
         #[cfg(target_arch = "wasm32")]
-        Err(JsError::Type("TCP sockets require a native host".into()))
+        Err(unavailable())
     }
 
-    /// Writes at most 1 MiB of UTF-8 data; at most 4 MiB may wait to be sent.
+    /// Writes at most 1 MiB of UTF-8 data; at most 4 MiB may wait to be sent
+    /// (`ERR_NSH_QUOTA_EXCEEDED` past it). A write `close` interrupts
+    /// rejects with `ERR_SOCKET_CLOSED`.
     pub(crate) fn write(&self, data: String) -> Result<Later<()>, JsError> {
         if data.len() > IO_LIMIT {
-            return Err(JsError::Range(format!(
-                "socket write exceeded the {IO_LIMIT} byte limit"
-            )));
+            return Err(
+                JsError::Range(format!("socket write exceeded the {IO_LIMIT} byte limit"))
+                    .with_code("ERR_OUT_OF_RANGE"),
+            );
         }
         #[cfg(not(target_arch = "wasm32"))]
         {
             let queued = self.inner.pending.get() + data.len();
             if queued > PENDING_WRITE_LIMIT {
-                return Err(JsError::Range(format!(
+                return Err(JsError::Error(format!(
                     "socket writes waiting to be sent exceeded the {PENDING_WRITE_LIMIT} byte limit"
-                )));
+                ))
+                .with_code(codes::QUOTA_EXCEEDED));
             }
             self.inner.pending.set(queued);
             Ok(Later::new(native::write(self.inner.clone(), data)))
         }
         #[cfg(target_arch = "wasm32")]
-        Err(JsError::Type("TCP sockets require a native host".into()))
+        Err(unavailable())
     }
 
     /// Interrupts pending reads and writes and closes the native socket.
@@ -101,6 +129,11 @@ impl Socket {
         #[cfg(not(target_arch = "wasm32"))]
         self.inner.close();
     }
+}
+
+/// What a platform without TCP sockets fails with.
+fn unavailable() -> JsError {
+    JsError::Error("TCP sockets require a native host".into()).with_code(codes::UNAVAILABLE)
 }
 
 impl Socket {
@@ -111,7 +144,7 @@ impl Socket {
 
     #[cfg(target_arch = "wasm32")]
     async fn open(_: String, _: u16, _: crate::element::Held) -> Result<Socket, JsError> {
-        Err(JsError::Type("TCP sockets require a native host".into()))
+        Err(unavailable())
     }
 }
 
@@ -146,7 +179,7 @@ mod native {
     }
 
     fn timed_out(message: String, syscall: &'static str) -> JsError {
-        failed(message, None, "ETIMEDOUT", syscall)
+        failed(message, None, crate::element::codes::TIMED_OUT, syscall)
     }
 
     fn closed() -> JsError {

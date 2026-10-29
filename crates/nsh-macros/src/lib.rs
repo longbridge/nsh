@@ -38,7 +38,7 @@ mod native_module;
 
 use proc_macro::TokenStream;
 use proc_macro2::{Span, TokenStream as TokenStream2};
-use quote::{format_ident, quote};
+use quote::{ToTokens, format_ident, quote};
 use syn::{
     Attribute, Data, DeriveInput, Expr, Fields, FnArg, GenericArgument, Ident, ImplItem,
     ImplItemFn, ItemFn, ItemImpl, LitStr, Pat, PathArguments, ReturnType, Token, Type, bracketed,
@@ -201,11 +201,11 @@ fn is_number(ty: &Type) -> bool {
     )
 }
 
-/// Whether `ty` is a style (`nsh_core::element::Style`, or `TextPartStyle`
-/// for a part that shows text), whose setter takes the typed styles'
-/// closure.
+/// Whether `ty` is a style (`nsh_core::element::Style`, `TextPartStyle`
+/// for a part that shows text, `InputPartStyle` for one that edits it),
+/// whose setter takes the typed styles' closure.
 fn is_style(ty: &Type) -> bool {
-    matches!(last_segment(ty), Some((id, None)) if id == "Style" || id == "TextPartStyle")
+    matches!(last_segment(ty), Some((id, None)) if id == "Style" || id == "TextPartStyle" || id == "InputPartStyle")
 }
 
 /// `PressDown` -> `press_down`, `HTMLView` -> `html_view`.
@@ -657,6 +657,19 @@ fn props(input: DeriveInput) -> syn::Result<TokenStream2> {
                 }}
             }
         };
+        // A value's or a render prop's arm of `set`: a call of the
+        // function for the field's type, so the code is made once per type
+        // rather than per field.
+        let set_arm = |ty: &Type| {
+            let set = if is_held {
+                quote!(#ui::__private::set_held::<#ty>)
+            } else {
+                quote!(#ui::__private::set_plain::<#ty>)
+            };
+            quote! {
+                #js => #set(&mut self.#ident, value, #js, || #init),
+            }
+        };
         if is_held {
             initial.push(quote!(#ident: #ui::Prop::new(#init)));
         } else {
@@ -677,18 +690,7 @@ fn props(input: DeriveInput) -> syn::Result<TokenStream2> {
                         }),
                     }
                 });
-                let take = assign(quote!(value));
-                set_arms.push(quote! {
-                    #js => {
-                        let value: #ty = match value {
-                            ::core::option::Option::Some(v) => v.take::<#ty>().ok_or_else(|| {
-                                #ui::PropError(::std::format!("`{}`: a value of another type", #js))
-                            })?,
-                            ::core::option::Option::None => #init,
-                        };
-                        ::core::result::Result::Ok(#take)
-                    }
-                });
+                set_arms.push(set_arm(ty));
             }
             Kind::Renderer(t) => {
                 specs.push(quote! {
@@ -709,18 +711,7 @@ fn props(input: DeriveInput) -> syn::Result<TokenStream2> {
                         }),
                     }
                 });
-                let take = assign(quote!(value));
-                set_arms.push(quote! {
-                    #js => {
-                        let value: #ty = match value {
-                            ::core::option::Option::Some(v) => v.take::<#ty>().ok_or_else(|| {
-                                #ui::PropError(::std::format!("`{}`: a value of another type", #js))
-                            })?,
-                            ::core::option::Option::None => #init,
-                        };
-                        ::core::result::Result::Ok(#take)
-                    }
-                });
+                set_arms.push(set_arm(ty));
             }
             Kind::Slot => {
                 specs.push(quote! {
@@ -1036,12 +1027,16 @@ fn prop_enum(input: DeriveInput) -> syn::Result<TokenStream2> {
 }
 
 /// `#[derive(Event)]`: a component's events. Each variant is an event in
-/// camel case (`Press` is `onPress` in JS): a unit variant carries no
+/// camel case (`Press` is `onPress` in JS), and every handler gets one
+/// object (`docs/dev/api-naming.md` "Payloads"): a unit variant carries no
 /// data, a variant with named fields an object of them (camel case), a
-/// variant with one unnamed field that value. Doc comments document the
-/// handlers. The handler's argument is `value` (one field) or `event`
-/// (named fields) in TypeScript; `#[args(index)]` on the variant names it
-/// (`onSelect?: (index: number) => void`).
+/// variant with unnamed fields an object with a field for each, named by
+/// `#[args(..)]` on the variant (`#[args(open, reason)]` is
+/// `onOpenChange?: (event: { open: boolean; reason: … }) => void`; one
+/// field without `#[args]` is `value`). `#[args(event)]` on a variant of
+/// one field says its value is the event object itself, passed as it is
+/// (`#[args(event)] RowPress(DataTablePress)`). Doc comments document the
+/// handlers.
 ///
 /// In Rust, the element of a `#[component]` emitting them (`button()`)
 /// gets a listener method per event, named as its handler in snake case
@@ -1073,7 +1068,6 @@ fn event(input: DeriveInput) -> syn::Result<TokenStream2> {
     let mut data_arms = Vec::new();
     // The listener methods: (variant docs, method, data type, pick arm).
     let mut listeners = Vec::new();
-    let mut spread_arms = Vec::new();
     for v in &data.variants {
         let ident = &v.ident;
         let js = camel(&ident.to_string());
@@ -1085,7 +1079,7 @@ fn event(input: DeriveInput) -> syn::Result<TokenStream2> {
             .collect();
         let doc = decl(&docs(&v.attrs));
         let args = args_attr(&v.attrs)?;
-        // Several unnamed fields: the handler's arguments, one name each.
+        // Several unnamed fields: the event object's fields, one name each.
         if let (Fields::Unnamed(f), Some((names, span))) = (&v.fields, &args)
             && f.unnamed.len() > 1
         {
@@ -1099,30 +1093,31 @@ fn event(input: DeriveInput) -> syn::Result<TokenStream2> {
             let vars: Vec<_> = (0..tys.len())
                 .map(|i| syn::Ident::new(&format!("a{i}"), Span::call_site()))
                 .collect();
+            let keys: Vec<_> = names.iter().map(|n| camel(n)).collect();
             specs.push(quote! {
                 #ui::EventSpec {
                     name: #js,
-                    arg: "",
+                    arg: "event",
                     data: if #ui::DECLARATIONS {
-                        let params: ::std::vec::Vec<::std::string::String> = ::std::vec![
-                            #(::std::format!("{}: {}", #names, <#tys as #ui::JsValue>::ts_type(types))),*
+                        let fields: ::std::vec::Vec<::std::string::String> = ::std::vec![
+                            #(::std::format!("{}: {}", #keys, <#tys as #ui::JsValue>::ts_type(types))),*
                         ];
-                        params.join(", ")
+                        ::std::format!("{{ {} }}", fields.join("; "))
                     } else {
                         ::std::string::String::new()
                     },
                     doc: #doc,
-                    spread: true,
                 }
             });
             name_arms.push(quote!(Self::#ident(..) => #js));
             data_arms.push(quote! {
                 Self::#ident(#(#vars),*) => {
-                    let items = ::std::vec![#(#ui::JsValue::to_js(#vars, host)?.into_raw()),*];
-                    ::core::result::Result::Ok(#ui::JsOwned::new(host, host.new_array(items)?))
+                    let owned = #ui::JsOwned::new(host, host.new_object()?);
+                    let object = owned.get().raw();
+                    #(host.set_field(object, #keys, #ui::JsValue::to_js(#vars, host)?.into_raw())?;)*
+                    ::core::result::Result::Ok(owned)
                 }
             });
-            spread_arms.push(quote!(Self::#ident(..) => true));
             // Its listener gets the event, as one of named fields does.
             listeners.push((
                 variant_docs,
@@ -1154,7 +1149,7 @@ fn event(input: DeriveInput) -> syn::Result<TokenStream2> {
         match &v.fields {
             Fields::Unit => {
                 specs.push(quote! {
-                    #ui::EventSpec { name: #js, arg: #arg, data: ::std::string::String::from("void"), doc: #doc, spread: false }
+                    #ui::EventSpec { name: #js, arg: #arg, data: ::std::string::String::from("void"), doc: #doc }
                 });
                 name_arms.push(quote!(Self::#ident => #js));
                 data_arms.push(quote!(Self::#ident => ::core::result::Result::Ok(#ui::JsOwned::new(host, host.undefined()))));
@@ -1165,13 +1160,45 @@ fn event(input: DeriveInput) -> syn::Result<TokenStream2> {
                     quote!(#name::#ident => ::core::option::Option::Some(&())),
                 ));
             }
-            Fields::Unnamed(f) if f.unnamed.len() == 1 => {
+            // The event object itself.
+            Fields::Unnamed(f) if f.unnamed.len() == 1 && arg == "event" => {
                 let ty = &f.unnamed[0].ty;
                 specs.push(quote! {
-                    #ui::EventSpec { name: #js, arg: #arg, data: #ui::ts_of::<#ty>()(types), doc: #doc, spread: false }
+                    #ui::EventSpec { name: #js, arg: "event", data: #ui::ts_of::<#ty>()(types), doc: #doc }
                 });
                 name_arms.push(quote!(Self::#ident(..) => #js));
                 data_arms.push(quote!(Self::#ident(v) => #ui::JsValue::to_js(v, host)));
+                listeners.push((
+                    variant_docs,
+                    method,
+                    quote!(#ty),
+                    quote!(#name::#ident(v) => ::core::option::Option::Some(v)),
+                ));
+            }
+            // A value: one field of the event object, named by `#[args]`.
+            Fields::Unnamed(f) if f.unnamed.len() == 1 => {
+                let ty = &f.unnamed[0].ty;
+                let key = camel(&arg);
+                specs.push(quote! {
+                    #ui::EventSpec {
+                        name: #js,
+                        arg: "event",
+                        data: if #ui::DECLARATIONS {
+                            ::std::format!("{{ {}: {} }}", #key, <#ty as #ui::JsValue>::ts_type(types))
+                        } else {
+                            ::std::string::String::new()
+                        },
+                        doc: #doc,
+                    }
+                });
+                name_arms.push(quote!(Self::#ident(..) => #js));
+                data_arms.push(quote! {
+                    Self::#ident(v) => {
+                        let owned = #ui::JsOwned::new(host, host.new_object()?);
+                        host.set_field(owned.get().raw(), #key, #ui::JsValue::to_js(v, host)?.into_raw())?;
+                        ::core::result::Result::Ok(owned)
+                    }
+                });
                 listeners.push((
                     variant_docs,
                     method,
@@ -1200,7 +1227,6 @@ fn event(input: DeriveInput) -> syn::Result<TokenStream2> {
                             ::std::string::String::new()
                         },
                         doc: #doc,
-                        spread: false,
                     }
                 });
                 name_arms.push(quote!(Self::#ident { .. } => #js));
@@ -1298,14 +1324,6 @@ fn event(input: DeriveInput) -> syn::Result<TokenStream2> {
             ) -> ::core::result::Result<#ui::JsOwned<'a>, #ui::PropError> {
                 match self {
                     #(#data_arms,)*
-                }
-            }
-
-            fn spread(&self) -> bool {
-                #[allow(unreachable_patterns)]
-                match self {
-                    #(#spread_arms,)*
-                    _ => false,
                 }
             }
         }
@@ -1887,9 +1905,19 @@ fn js_object(input: DeriveInput) -> syn::Result<TokenStream2> {
         })?;
     }
     let mut ts = Vec::new();
-    let mut from_js = Vec::new();
-    let mut to_js = Vec::new();
     let mut keys = Vec::new();
+    // Each field as its decoding and encoding need it.
+    struct Field<'a> {
+        ident: &'a Ident,
+        ty: &'a Type,
+        js: String,
+        missing: TokenStream2,
+        is_option: bool,
+        // An `Option` with no default of its own: absent is `None`.
+        plain_option: bool,
+        skip_none: bool,
+    }
+    let mut all = Vec::new();
     for field in &fields.named {
         let ident = field.ident.as_ref().expect("named");
         let ty = &field.ty;
@@ -1918,31 +1946,103 @@ fn js_object(input: DeriveInput) -> syn::Result<TokenStream2> {
                 return ::core::result::Result::Err(#ui::PropError(::std::format!("`{}` is missing", #js)))
             },
         };
-        from_js.push(quote! {
-            #ident: {
-                match #ui::__private::object_field::<#ty>(value, #js, #is_option)? {
-                    ::core::option::Option::Some(value) => value,
-                    ::core::option::Option::None => { #missing }
-                }
-            }
-        });
         if attr.skip_none && !is_option {
             return Err(syn::Error::new(
                 field.span(),
                 "`skip_none` is for an `Option` field",
             ));
         }
-        to_js.push(if attr.skip_none {
-            quote! {
-                if let ::core::option::Option::Some(value) = &self.#ident {
-                    host.set_field(object, #js, #ui::JsValue::to_js(value, host)?.into_raw())?;
+        all.push(Field {
+            ident,
+            ty,
+            js,
+            missing,
+            is_option,
+            plain_option: is_option && attr.default.is_none(),
+            skip_none: attr.skip_none,
+        });
+    }
+    // Runs of fields of one `Option` type (a style's parts, an event's
+    // optional values) go through loops: code per field, with its early
+    // returns dropping the fields before it, adds up in objects of many.
+    const RUN: usize = 4;
+    let mut from_js = Vec::new();
+    let mut to_js = Vec::new();
+    let mut locals = Vec::new();
+    let same = |a: &Field, b: &Field| {
+        a.plain_option
+            && b.plain_option
+            && a.skip_none == b.skip_none
+            && a.ty.to_token_stream().to_string() == b.ty.to_token_stream().to_string()
+    };
+    let mut at = 0;
+    while at < all.len() {
+        let mut end = at + 1;
+        while end < all.len() && same(&all[at], &all[end]) {
+            end += 1;
+        }
+        if end - at < RUN {
+            end = at + 1;
+        }
+        let run = &all[at..end];
+        let names: Vec<Ident> = (at..end).map(|i| format_ident!("__field{}", i)).collect();
+        locals.extend(run.iter().zip(&names).map(|(f, local)| {
+            let ident = f.ident;
+            quote!(#ident: #local)
+        }));
+        let first = &run[0];
+        let ty = first.ty;
+        if run.len() == 1 {
+            let (js, missing, local) = (&first.js, &first.missing, &names[0]);
+            let is_option = first.is_option;
+            from_js.push(quote! {
+                let #local: #ty = match #ui::__private::object_field::<#ty>(value, #js, #is_option)? {
+                    ::core::option::Option::Some(value) => value,
+                    ::core::option::Option::None => { #missing }
+                };
+            });
+        } else {
+            let len = run.len();
+            let run_keys: Vec<&String> = run.iter().map(|f| &f.js).collect();
+            from_js.push(quote! {
+                let [#(#names),*] = {
+                    let mut out: [#ty; #len] = ::core::array::from_fn(|_| ::core::option::Option::None);
+                    for (slot, key) in out.iter_mut().zip([#(#run_keys),*]) {
+                        if let ::core::option::Option::Some(value) = #ui::__private::object_field::<#ty>(value, key, true)? {
+                            *slot = value;
+                        }
+                    }
+                    out
+                };
+            });
+        }
+        let idents: Vec<&Ident> = run.iter().map(|f| f.ident).collect();
+        let run_keys: Vec<&String> = run.iter().map(|f| &f.js).collect();
+        let set = |key: TokenStream2, field: TokenStream2, skip_none: bool| {
+            if skip_none {
+                quote! {
+                    if let ::core::option::Option::Some(value) = #field {
+                        host.set_field(object, #key, #ui::JsValue::to_js(value, host)?.into_raw())?;
+                    }
+                }
+            } else {
+                quote! {
+                    host.set_field(object, #key, #ui::JsValue::to_js(#field, host)?.into_raw())?;
                 }
             }
+        };
+        to_js.push(if run.len() == 1 {
+            let (js, ident) = (&first.js, first.ident);
+            set(quote!(#js), quote!(&self.#ident), first.skip_none)
         } else {
+            let body = set(quote!(key), quote!(field), first.skip_none);
             quote! {
-                host.set_field(object, #js, #ui::JsValue::to_js(&self.#ident, host)?.into_raw())?;
+                for (key, field) in [#((#run_keys, &self.#idents)),*] {
+                    #body
+                }
             }
         });
+        at = end;
     }
     let check = exact.then(|| {
         quote! {
@@ -1977,7 +2077,8 @@ fn js_object(input: DeriveInput) -> syn::Result<TokenStream2> {
                     return ::core::result::Result::Err(value.expected("an object"));
                 }
                 #check
-                ::core::result::Result::Ok(Self { #(#from_js),* })
+                #(#from_js)*
+                ::core::result::Result::Ok(Self { #(#locals),* })
             }
 
             fn to_js<'a>(

@@ -13,10 +13,10 @@
 //! effect whose runs patch that part alone, and a region ([`dynamic`],
 //! [`when`], [`each`], [`catch_error`]) makes its own elements again. State
 //! is signals the view makes (under the component's owner: they go with
-//! it), changed by listeners, timers and tasks ([`ambient::spawn`]); the
+//! it), changed by listeners, timers and tasks ([`spawn`]); the
 //! component's listeners hear its elements' events first and decide what
 //! reaches JS ([`Scope::emit`]). The environment and the design tokens are
-//! signals too ([`ambient::window`], [`ambient::tokens`]): reading one in a binding
+//! signals too ([`window`], [`tokens`]): reading one in a binding
 //! subscribes it.
 //!
 //! Props are a struct (`#[derive(Props)]`), events an enum
@@ -30,7 +30,7 @@
 //! expands, so both stay dense. How the core runs components:
 //! `docs/dev/components.md`.
 
-pub mod ambient;
+mod ambient;
 pub(crate) mod animated;
 mod asset;
 mod back;
@@ -48,10 +48,10 @@ mod events;
 pub(crate) mod flow;
 pub(crate) mod host;
 mod js;
-#[cfg(test)]
 pub(crate) mod json_host;
 mod keyboard;
 pub(crate) mod keys;
+pub(crate) mod menus;
 pub(crate) mod module;
 mod once;
 pub mod palette;
@@ -70,6 +70,7 @@ pub(crate) mod task;
 pub mod tokens;
 mod value;
 pub(crate) mod virtual_list;
+pub(crate) mod watch;
 
 /// Whether this build carries the text of declarations: the documentation
 /// and TypeScript of the specs, which only make `.nsh/types`. The
@@ -100,7 +101,7 @@ pub use nsh_macros::{
 #[doc(hidden)]
 pub use self::host::{modal, screen, stack};
 pub use self::{
-    ambient::text_measurer,
+    ambient::*,
     animated::{
         Animated, AnimatedNode, AnimatedValue, Animation, AnimationEnd, AnimationOperand,
         DiffClamp, Interpolation, Motion, Spring, Timing, sample_decay, sample_decay_within,
@@ -109,10 +110,10 @@ pub use self::{
     asset::{AssetFile, AssetKind, FileAsset, FontAsset, ImageAsset, ImageSrc},
     builder::{
         __hint_tooltip, Accessible, AnyElement, Attrs, BoundListConfig, Child, Children,
-        ComponentBuilder, ComponentElement, ElNode, Element, FluentBuilder, Image, Interactive,
-        IntoChild, IntoElement, IntoListener, IntoTooltip, Items, ListConfig, ListElement,
-        Listener, ParentElement, Position, Slot, SlotElement, Style, Text, TextPartStyle, View,
-        image, text, view,
+        ComponentBuilder, ComponentElement, ElNode, Element, FluentBuilder, Image, InputPartStyle,
+        Interactive, IntoChild, IntoElement, IntoListener, IntoTooltip, Items, ListConfig,
+        ListElement, Listener, ParentElement, Position, Slot, SlotElement, Style, Text,
+        TextPartStyle, View, image, text, view,
     },
     call::{
         AnyValue, EventToJs, JsEvent, JsResult, MethodCall, OpCall, ParkedPost, Posts, RustCall,
@@ -126,9 +127,9 @@ pub use self::{
         MemberCall, MemberKind, MemberSpec, Ret, Thrown,
     },
     component::{
-        Api, Component, ComponentError, ComponentSpec, Event, EventSpec, Method, MethodSpec,
-        Methods, NoEvent, Param, PropDecode, PropKind, PropSpec, Props, Registry, Root,
-        declarations,
+        Api, BuiltInScrollbar, Component, ComponentError, ComponentSpec, Event, EventSpec, Method,
+        MethodSpec, Methods, NoEvent, Param, PropDecode, PropKind, PropSpec, Props, Registry, Root,
+        ScrollbarSource, declarations,
     },
     element_ref::{ComponentRef, ElementRef},
     engine_context::{EngineContext, EngineContextGuard, engine_context},
@@ -140,11 +141,12 @@ pub use self::{
     flow::{Each, If, IntoElements, Reset, catch_error, dynamic, each, when},
     host::{
         CanvasArg, CanvasPaint, CanvasView, Input, InputAccessoryView, IntoUniform, Modal,
-        NativeView, Orientation, Overlay, Painter, Screen, Scroll, ShaderView, Stack, Uniform,
-        Video, WebView, canvas, input, input_accessory_view, native, overlay, scroll, shader,
+        NativeView, Orientation, Overlay, Painter, Screen, Scroll, ShaderView, Stack, Svg, Uniform,
+        Video, WebView, canvas, input, input_accessory_view, native, overlay, scroll, shader, svg,
         video, web_view, web_view_html,
     },
-    js::{JsHost, JsIn, JsKind, JsOwned, JsRaw},
+    js::{JsHost, JsIn, JsKind, JsOwned, JsPrimitive, JsRaw},
+    json_host::from_json,
     keyboard::Keyboard,
     module::{
         Constant, ConstantValue, Function, FunctionCall, FunctionKind, FunctionSpec, Module,
@@ -169,7 +171,7 @@ pub use self::{
     },
     system::{
         CallCx, Cleanup, ErrorClass, ErrorFields, Held, IntoThrown, JsError, Later, Local, Locals,
-        Quotas, System, io_code,
+        Quotas, Stop, System, codes, io_code,
     },
     task::{Answer, ClipboardImage, DialogAnswer, ImageSize, Task},
     tokens::{FONT_MONO, FONT_SANS, ThemeTokens, Token, TokenSource, Tokens},
@@ -181,7 +183,7 @@ pub(crate) use self::{
     back::BackListener,
     builder::{ElKind, PlaceFn},
     component::{AnyInstance, caught},
-    task::{Action, AnswerSlot, ClipboardRead, Executor},
+    task::{Action, AnswerSlot, ClipboardRead, Executor, FileAnswer},
 };
 /// The geometry Rust components style with (`crate::geometry`).
 pub use crate::geometry::{
@@ -249,7 +251,12 @@ pub mod __private {
         fn pick(event: &Self) -> Option<&Self::Data>;
     }
 
-    pub use super::{callback::NamedArgs, class::__private::*, value::object_field};
+    pub use super::{
+        callback::NamedArgs,
+        class::__private::*,
+        prop::{set_held, set_plain},
+        value::object_field,
+    };
 
     /// Implemented by nothing: what the generated workspace of an app
     /// calls when a crate of the app has no `#[native_module]`

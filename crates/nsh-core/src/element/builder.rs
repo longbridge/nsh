@@ -12,7 +12,7 @@ use super::{
 use crate::{
     AccessibilityProp, AccessibilityRole, AccessibilityState, AccessibilityValue, Bounds,
     ContextMenuEvent, EdgeInsets, EventKind, EventPayload, Hsla, ImageSource, ListContentStyle,
-    MouseEvent, NativeProp, NodeId, PointerEvents, Points, Prop, Size, Tag, TouchEvent,
+    MouseEvent, NativeProp, NodeId, PointerEvents, Points, PressEvent, Prop, Size, Tag, TouchEvent,
     geometry::{DevicePixels, Radians},
     style::Color,
 };
@@ -89,7 +89,8 @@ impl<E: ?Sized + 'static, F: Fn(&E) + 'static> From<F> for Listener<E> {
 /// What a listener method takes (`on_press`, `on_change`,
 /// `on_event`, ...): a closure of the event, `move |text: &str| ..`; for an
 /// event without data also one without arguments, `move || ..` (or
-/// `move |_: &()| ..`); or a [`Listener`]. `M` tells them apart: it is
+/// `move |_: &()| ..`), and so for a press, whose [`PressEvent`] such a
+/// closure leaves out; or a [`Listener`]. `M` tells them apart: it is
 /// inferred, never written. (One conversion could not take both closures:
 /// a type may implement `Fn()` and `Fn(&())`.)
 #[diagnostic::on_unimplemented(
@@ -129,6 +130,32 @@ impl<F: Fn() + 'static> IntoListener<(), WithoutEvent> for F {
     }
 }
 
+/// How a closure of `&()` is a listener of a press, which reports a
+/// [`PressEvent`] ([`IntoListener`]).
+#[doc(hidden)]
+pub struct OfUnit(());
+
+/// A press's listener may leave its [`PressEvent`] out: `move || ..`.
+impl<F: Fn() + 'static> IntoListener<PressEvent, WithoutEvent> for F {
+    fn into_listener(self) -> Listener<PressEvent> {
+        Listener::new(Rc::new(move |_: &PressEvent| self()))
+    }
+}
+
+/// A press's listener may leave its [`PressEvent`] out: `move |_: &()| ..`.
+impl<F: Fn(&()) + 'static> IntoListener<PressEvent, OfUnit> for F {
+    fn into_listener(self) -> Listener<PressEvent> {
+        Listener::new(Rc::new(move |_: &PressEvent| self(&())))
+    }
+}
+
+/// A listener of `()` listens to presses too, without their [`PressEvent`].
+impl IntoListener<PressEvent, ()> for Listener<()> {
+    fn into_listener(self) -> Listener<PressEvent> {
+        self.map(|_: &PressEvent| ())
+    }
+}
+
 impl<E: ?Sized> Clone for Listener<E> {
     fn clone(&self) -> Self {
         Self {
@@ -151,10 +178,6 @@ impl<E: Event> super::EventToJs for E {
 
     fn data_js<'a>(&self, host: &'a dyn super::JsHost) -> Result<super::JsOwned<'a>, PropError> {
         Event::data_js(self, host)
-    }
-
-    fn spread(&self) -> bool {
-        Event::spread(self)
     }
 }
 
@@ -414,7 +437,9 @@ impl ListConfig {
             out.push(Prop::Inverted(self.inverted.unwrap_or(false)));
         }
         if self.scrollbar_visible != old.scrollbar_visible {
-            out.push(Prop::Scrollbar(self.scrollbar_visible.unwrap_or(true)));
+            out.push(Prop::Scrollbar(
+                self.scrollbar_visible.unwrap_or(true).into(),
+            ));
         }
         if self.content != old.content {
             out.push(Prop::ListContent(self.content.unwrap_or_default()));
@@ -834,6 +859,21 @@ pub trait Element: IntoElement + Sized {
         self
     }
 
+    /// [`Self::inline_style`] for a style that changes with the
+    /// component's own state (a popup's `popupEndingStyle` over its
+    /// `popupStyle`, [`Style::then`]): the typed styles it has at any time
+    /// apply, also those it has only later.
+    fn state_inline_style(mut self, style: impl Fn() -> Style + 'static) -> Self {
+        Style::apply_bound(
+            self.node(),
+            Rc::new(style),
+            Variant::default(),
+            true,
+            |a, patch| a.inline = patch,
+        );
+        self
+    }
+
     /// Makes the texts in the view select together, as a browser page's
     /// do (TSX `<View selectable>`): a selection runs from text to text,
     /// across views and `TextView`s; texts that are not selectable stay
@@ -905,6 +945,29 @@ impl Style {
         style
     }
 
+    /// This style with `over` after it: where both set a property,
+    /// `over`'s declarations and typed styles win (a state's style over a
+    /// part's).
+    pub fn then(&self, over: &Style) -> Self {
+        if over.0.is_none() && over.1.is_empty() {
+            return self.clone();
+        }
+        if self.0.is_none() && self.1.is_empty() {
+            return over.clone();
+        }
+        let mut style = if self.0.is_none() {
+            Self(over.0.clone(), StyleRefinement::default())
+        } else if over.0.is_none() {
+            Self(self.0.clone(), StyleRefinement::default())
+        } else {
+            Self::from_decls(self.decls().iter().chain(over.decls()).cloned())
+        };
+        let mut typed = self.1.clone();
+        typed.extend_as(Variant::default(), over.1.clone());
+        style.1 = typed;
+        style
+    }
+
     /// Its declarations, in order (not its typed styles').
     pub fn decls(&self) -> &[crate::StyleDecl] {
         self.0.as_deref().map_or(&[], crate::StylePatch::decls)
@@ -928,17 +991,27 @@ impl Style {
                     node.style.extend_as(variant, typed);
                 }
             }
-            Reactive::Bound(f) => {
-                let typed = super::untracked(|| !f().1.is_empty());
-                let patch = f.clone();
-                node.bind_attr(move || patch().0, attr);
-                if typed {
-                    // Resolved here: the bound parts of what it adds would
-                    // not run in this resolution.
-                    node.style
-                        .bind(move |s| s.extend_as(variant, f().1.resolved()));
-                }
-            }
+            Reactive::Bound(f) => Self::apply_bound(node, f, variant, false, attr),
+        }
+    }
+
+    /// [`Style::apply`] of a bound style; `typed_later`: its typed styles
+    /// are followed even when it has none as the element is made.
+    pub(crate) fn apply_bound(
+        node: &mut ElNode,
+        f: Rc<dyn Fn() -> Style>,
+        variant: Variant,
+        typed_later: bool,
+        attr: impl Fn(&mut Attrs, Option<std::rc::Rc<crate::StylePatch>>) + 'static,
+    ) {
+        let typed = typed_later || super::untracked(|| !f().1.is_empty());
+        let patch = f.clone();
+        node.bind_attr(move || patch().0, attr);
+        if typed {
+            // Resolved here: the bound parts of what it adds would not run
+            // in this resolution.
+            node.style
+                .bind(move |s| s.extend_as(variant, f().1.resolved()));
         }
     }
 }
@@ -975,10 +1048,11 @@ impl JsValue for Style {
     }
 }
 
-/// The style of a component's part that shows or edits text (a number
-/// input's field): a [`Style`] whose TypeScript type takes the text styles
-/// too (`StyleProp<TextStyle>`: `color`, `fontSize`, `textAlign`,
-/// `placeholderColor`), as the part is a text or an input. Its setter takes
+/// The style of a component's part that shows text (a select's rows, a
+/// one-time code's cells): a [`Style`] whose TypeScript type takes the text
+/// styles too (`StyleProp<TextStyle>`: `color`, `fontSize`, `textAlign`),
+/// which the part's texts inherit. A part that edits text takes an
+/// [`InputPartStyle`]. Its setter takes
 /// the typed styles' closure, as a `Style`'s does; the part applies it with
 /// [`Element::inline_style`] (it is `Into<Style>`).
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -1006,6 +1080,47 @@ impl From<TextPartStyle> for Style {
 impl JsValue for TextPartStyle {
     fn ts_type(_types: &mut super::TsTypes) -> String {
         "StyleProp<TextStyle>".into()
+    }
+
+    fn from_js(value: super::JsIn<'_>) -> Result<Self, PropError> {
+        Style::from_js(value).map(Self)
+    }
+
+    fn to_js<'a>(&self, host: &'a dyn super::JsHost) -> Result<super::JsOwned<'a>, PropError> {
+        self.0.to_js(host)
+    }
+}
+
+/// The style of a component's part that edits text (a number input's
+/// field, a select's search field): a [`Style`] whose TypeScript type takes
+/// the input styles too (`StyleProp<InputStyle>`: the text styles and
+/// `placeholderColor`, `caretColor`, `selectionColor`). As
+/// [`TextPartStyle`], its setter takes the typed styles' closure.
+#[derive(Debug, Clone, Default, PartialEq)]
+#[non_exhaustive]
+pub struct InputPartStyle(pub Style);
+
+impl From<Style> for InputPartStyle {
+    fn from(style: Style) -> Self {
+        Self(style)
+    }
+}
+
+impl From<StyleRefinement> for InputPartStyle {
+    fn from(style: StyleRefinement) -> Self {
+        Self(Style::from(style))
+    }
+}
+
+impl From<InputPartStyle> for Style {
+    fn from(style: InputPartStyle) -> Self {
+        style.0
+    }
+}
+
+impl JsValue for InputPartStyle {
+    fn ts_type(_types: &mut super::TsTypes) -> String {
+        "StyleProp<InputStyle>".into()
     }
 
     fn from_js(value: super::JsIn<'_>) -> Result<Self, PropError> {
@@ -1130,6 +1245,19 @@ pub trait Accessible: Element {
                 disabled: a.state.disabled,
                 ..state
             };
+        });
+        self
+    }
+
+    /// Its level for screen readers (TS: `accessibilityLevel`): a
+    /// heading's (1 the top; `gpui-base`'s `aria_level`), a tree item's
+    /// depth (1 at the top); 0 has none.
+    fn accessibility_level(mut self, level: impl IntoReactive<u32>) -> Self {
+        self.node().bind_attr(level, |a, level| {
+            super::host::set_in(
+                &mut a.props,
+                Prop::Accessibility(AccessibilityProp::Level((level > 0).then_some(level))),
+            )
         });
         self
     }
@@ -1308,35 +1436,39 @@ pub trait Interactive: Element {
         )
     }
 
-    /// Handles presses.
-    fn on_press<M>(self, listener: impl IntoListener<(), M>) -> Self {
+    /// Handles presses: `move || ..`, or `move |e: &PressEvent| ..` for
+    /// where the pointer was, the modifier keys held and the click count
+    /// (`e.modifiers.shift` for a Shift-click). A press from the keyboard or
+    /// an assistive technology, and backends that do not report one, give
+    /// [`PressEvent::default`].
+    fn on_press<M>(self, listener: impl IntoListener<PressEvent, M>) -> Self {
         self.on(
             EventKind::Press,
-            events::typed(listener.into_listener(), events::unit),
+            events::typed(listener.into_listener(), events::press),
         )
     }
 
     /// Handles presses held for about half a second.
-    fn on_long_press<M>(self, listener: impl IntoListener<(), M>) -> Self {
+    fn on_long_press<M>(self, listener: impl IntoListener<PressEvent, M>) -> Self {
         self.on(
             EventKind::LongPress,
-            events::typed(listener.into_listener(), events::unit),
+            events::typed(listener.into_listener(), events::press),
         )
     }
 
     /// A finger went down on the element.
-    fn on_press_down<M>(self, listener: impl IntoListener<(), M>) -> Self {
+    fn on_press_down<M>(self, listener: impl IntoListener<PressEvent, M>) -> Self {
         self.on(
             EventKind::PressDown,
-            events::typed(listener.into_listener(), events::unit),
+            events::typed(listener.into_listener(), events::press),
         )
     }
 
     /// The press ended, inside or outside the element.
-    fn on_press_up<M>(self, listener: impl IntoListener<(), M>) -> Self {
+    fn on_press_up<M>(self, listener: impl IntoListener<PressEvent, M>) -> Self {
         self.on(
             EventKind::PressUp,
-            events::typed(listener.into_listener(), events::unit),
+            events::typed(listener.into_listener(), events::press),
         )
     }
 
@@ -1705,6 +1837,16 @@ pub trait Interactive: Element {
     fn expanded_style(mut self, style: impl IntoReactive<Style>) -> Self {
         Style::apply(self.node(), style, Variant::EXPANDED, |a, patch| {
             super::host::set_in(&mut a.props, Prop::ExpandedStyle(patch))
+        });
+        self
+    }
+
+    /// An app's style while a toggle button is on (`accessibility_state`
+    /// `pressed`, not mixed), as `aria-pressed:` classes apply. Not
+    /// `.active(..)`, a press in progress.
+    fn pressed_style(mut self, style: impl IntoReactive<Style>) -> Self {
+        Style::apply(self.node(), style, Variant::ARIA_PRESSED, |a, patch| {
+            super::host::set_in(&mut a.props, Prop::PressedStyle(patch))
         });
         self
     }

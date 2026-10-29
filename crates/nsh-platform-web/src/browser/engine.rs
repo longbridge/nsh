@@ -54,6 +54,7 @@ impl Host for Runtime {
         *self.theme.borrow_mut() = Some(services.theme);
         *self.host.borrow_mut() = Some(services.host);
         *self.wake.borrow_mut() = Some(services.wake);
+        self.timers.set_clock(services.clock);
         self.set_environment(&services.environment);
         Ok(())
     }
@@ -71,7 +72,39 @@ impl Host for Runtime {
                     } else {
                         event.handler_name()
                     })?,
-                    events::payload(&self.bindings, payload)?,
+                    // `onChange({ value })` (`api-naming.md` "Payloads"), as
+                    // nsh-js builds it.
+                    match (event, payload) {
+                        (EventKind::ChangeText, EventPayload::Text { text, .. }) => {
+                            events::value(text)?
+                        }
+                        // `onContentSizeChange({ size })`.
+                        (EventKind::ContentSizeChange, EventPayload::Map(_)) => {
+                            events::wrap("size", events::payload(&self.bindings, payload)?)?
+                        }
+                        // Presses always pass their event, as nsh-js's do.
+                        (
+                            EventKind::Press
+                            | EventKind::LongPress
+                            | EventKind::PressDown
+                            | EventKind::PressUp,
+                            EventPayload::None,
+                        ) => events::payload(
+                            &self.bindings,
+                            &EventPayload::Press(nsh_core::PressEvent {
+                                clicks: 1,
+                                ..Default::default()
+                            }),
+                        )?,
+                        // A video's `onLoad`: `{ duration, size }`, as nsh-js
+                        // builds it (a web view's has no `duration`).
+                        (EventKind::Load, EventPayload::Map(fields))
+                            if fields.iter().any(|(k, _)| *k == "duration") =>
+                        {
+                            events::video_load(fields)?
+                        }
+                        _ => events::payload(&self.bindings, payload)?,
+                    },
                 ])
             })(),
         );
@@ -107,7 +140,6 @@ impl Host for Runtime {
                         Value::number(host.into()),
                         Value::string(event.name())?,
                         Value(event.data_js(&*self.bindings)?.into_raw().0[0] as u32),
-                        Value(if event.spread() { 3 } else { 2 }),
                     ])
                 })(),
             ),
@@ -204,11 +236,36 @@ impl Host for Runtime {
     fn take_fonts(&self, out: &mut Vec<String>) {
         out.append(&mut self.fonts.borrow_mut());
     }
+    // On the system's clock requestAnimationFrame is the browser's, run in
+    // the app realm; on a manual one the engine's frames run it.
     fn wants_frame(&self) -> bool {
-        false
+        !self.bindings.stopped.get() && self.timers.wants_frame()
     }
     fn run_frame(&self) {
-        // Browser requestAnimationFrame callbacks run in the app realm.
+        if !self.bindings.stopped.get() {
+            self.timers.run_frame();
+        }
+    }
+    fn next_timer(&self) -> Option<nsh_core::time::Instant> {
+        self.timers.next_deadline()
+    }
+    fn run_timers(&self, now: nsh_core::time::Instant) {
+        if !self.bindings.stopped.get() {
+            self.timers.run(now);
+        }
+    }
+    fn take_network(&self, out: &mut Vec<(u32, nsh_core::platform::FetchOp)>) {
+        self.fetches.take(out);
+    }
+    fn fetch_event(&self, id: u32, event: nsh_core::platform::FetchEvent) {
+        if !self.bindings.stopped.get() {
+            self.fetches.event(id, event);
+        }
+    }
+    fn fetch_refused(&self, id: u32, message: &str, url: &str) {
+        if !self.bindings.stopped.get() {
+            self.fetches.refused(id, message, url);
+        }
     }
     fn animations_finished(&self, finished: &[nsh_core::animation::Finished]) {
         self.event(
@@ -260,6 +317,8 @@ impl Host for Runtime {
         None
     }
     fn stop(&self, _reason: String) {
+        self.timers.clear();
+        self.fetches.clear();
         self.bindings.stop();
     }
 }

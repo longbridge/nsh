@@ -1,7 +1,6 @@
 ---
 title: Slider
 description: "Slider 组件：沿轨道选取一个值或两个值组成的范围；支持触摸屏和鼠标的按压与拖动、WAI-ARIA 的滑块按键，每个滑块向屏幕阅读器报告自己的数值；轨道、指示条、范围和滑块由应用设置样式。"
-order: 20.85
 group: base
 demo: el-slider
 ---
@@ -66,7 +65,7 @@ function App() {
   return (
     <Slider
       value={strength()}
-      onChange={(next) => strength.set(next as number)}
+      onChange={({ value }) => strength.set(value as number)}
       accessibilityLabel="选项强度"
       class="flex-row items-center gap-2"
       trackClass="h-2 flex-1 px-2 rounded-full bg-muted focus-within:ring-2 focus-within:ring-primary/36 focus-within:ring-offset-2 focus-within:ring-offset-background disabled:opacity-35"
@@ -90,15 +89,16 @@ mount(App);
 ## 值
 
 值是一个数字，或两个滑块的范围 `[start, end]`；值的形状决定有几个滑块。应用用 `value` 持有它，并设置 `onChange` 报告的值，和 `nsh/base`
-的每个控件一样；也可以用 `defaultValue` 把值交给滑块自己保存，修改照样会报告给应用。
+的每个控件一样；也可以用 `defaultValue` 把值交给滑块自己保存，修改照样会报告给应用。拖动时，滑块和范围由原生层与指针在同一帧移动，
+指针抬起后重新显示应用的 `value`；屏幕阅读器运行时随拖动读出每个值，否则在拖动结束时得到最终的值。
 
 ```tsx
 const price = signal<[number, number]>([200, 800]);
 
 <Slider
   value={price()}
-  onChange={(next) => price.set(next as [number, number])}
-  onChangeEnd={(next) => save(next)}
+  onChange={({ value }) => price.set(value as [number, number])}
+  onChangeEnd={({ value }) => save(value)}
   min={0}
   max={1000}
   step={10}
@@ -139,8 +139,8 @@ const price = signal<[number, number]>([200, 800]);
 
 | 事件 | Rust | 参数 | 何时 |
 |---|---|---|---|
-| `onChange` | `.on_change(\|value: &SliderValue\| ..)` | `number \| [number, number]` | 用户要一个新值：按压轨道、拖动的一步、按键、屏幕阅读器的增加或减少。 |
-| `onChangeEnd` | `.on_change_end(\|value: &SliderValue\| ..)` | `number \| [number, number]` | 修改结束：指针抬起，一次按键或屏幕阅读器的步进完成。每次修改一次。 |
+| `onChange` | `.on_change(\|value: &SliderValue\| ..)` | `{ value: number \| [number, number] }` | 用户要一个新值：按压轨道、拖动的一步、按键、屏幕阅读器的增加或减少。 |
+| `onChangeEnd` | `.on_change_end(\|value: &SliderValue\| ..)` | `{ value: number \| [number, number] }` | 修改结束：指针抬起，一次按键或屏幕阅读器的步进完成。每次修改一次。 |
 
 ## 部件
 

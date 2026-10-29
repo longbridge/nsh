@@ -130,7 +130,8 @@ placed in the indent before the item (`•`, `◦`, `▪` by bulleted depth, or 
 `extra.listMarkerStart` attribute, `order` by default), as TextView places its markers; it is not in the document and
 takes no positions; a textblock is one text whose spans are its texts with
 their marks' parts (`classes.marks`), split at inline decorations (their `class`); inline leaves are their one-unit
-`leafText` (a line break) or attachments (their node view, else a box of their part); widget decorations are
+`leafText` (a line break), attachments (their node view), their `renderText` as a span of their part (a mention's
+`@name`, still one position: a press inside it lands on its nearer side), else a box of their part; widget decorations are
 attachments with their spec's `class`. A node view (`node_view.rs`: `NodeView`, registered in `NodeViews` or a
 plugin's `node_views` as an `Arc<dyn NodeView>`) renders a node type's blocks: `create` makes the element, which
 follows `cx.node()` while `update` returns true; `editable_content_slot` puts the editor's rendering of the content
@@ -147,11 +148,12 @@ apart: a position at a wrap shows at the upper line's end with `Affinity::Upstre
 
 Input (`controller.rs`): as the code `Editor`, an invisible native input at the caret (the sink) takes typed text
 and input methods. Typed text goes to plugins' `handle_text_input` (input rules), else is inserted with the stored
-marks (origin `Input`). While an input method composes, its text shows at the caret and the document waits; the
-commit is one transaction tagged with the composition's id (`composition` meta, which the history groups). Keys: the
-view binds, while focused, every keystroke a keymap could use (`keys.rs`) and offers each as a `KeyEvent` to the
-selected node's view, the plugins' `handle_key_down`, the base keymap, then copy / cut / select all and the caret
-movement (graphemes, words, line ends, lines and pages by geometry, keeping the goal x, the document's ends).
+marks (origin `Input`). While an input method composes, its text shows at the caret in place of its block's
+placeholder and the document waits; the commit is one transaction tagged with the composition's id (`composition`
+meta, which the history groups). Keys: the view binds, while focused, every keystroke a keymap could use (`keys.rs`)
+and offers each as a `KeyEvent` to the selected node's view, the plugins' `handle_key_down`, the base keymap, then
+copy / cut / select all and the caret movement (graphemes, words, line ends, lines and pages by geometry, keeping the
+goal x, the document's ends).
 Presses: a node view's `handle_event`, the plugins' click hooks (`handle_click_on` per ancestor, then
 `handle_click`, double and triple likewise), then a caret (Shift extends), a word, the textblock or a node selection;
 a drag extends through `create_selection_between`, and past the viewport's top or bottom it scrolls the view on a timer (the code `Editor`'s `AutoScroll` and `edge_speed`) and extends again at each step. Paste: `transform_pasted_text`, `clipboard_text_parser` (else
@@ -274,12 +276,15 @@ JS describes.
   closure: one would run QuickJS on the input path. App crates add extensions, and so commands, plugins and node views
   in Rust, through their UI set (`#[native_module]`), which registers them by name for JS to use.
 - **Queries** are native: `isActive(name, attrs)`, `getAttributes`, `getMarkRange`, `findParentNode`, `coordsAtPos`,
-  `posAtCoords`, `selectionRect`; JS reads them on the revision it subscribes to. The three geometry queries answer
+  `posAtCoords`, `selectionRect`; JS reads them on the revision it listens to (`on("revision", …)`). The three geometry queries answer
   in points of the editor's content box (the box that scrolls, so its scroll offset is already in them) from the
   last view that mounted the session (`ViewGeometry`, registered by the controller); with no view they answer
   nothing. `pageCoordsAtPos` / `posAtPageCoords` answer the same in page (root) points, for UI an app places
   outside the editor (a block handle): the view keeps the content's page offset, measured after each layout of the
   content and as a handle drag starts, and moved by the scroll since.
+  A query's position outside `0..=doc.content.size` throws a `RangeError` (ProseMirror's `resolve`;
+  `RichEditorSession::check_pos`), never a `null`: `null` is an answer (no node after the position, no view, no
+  such parent). `run` / `can` throw a `TypeError` for a command, node or mark type the editor does not know.
 - **Handle drags** (Tiptap's drag handle, ProseMirror's `view.dragging`): `dragBlock(pos, page)` selects the block
   at `pos` (a table too, though a press does not select one) and carries it closed, or, pressed inside a selection over
   several of its siblings, all of them, `dragTo(page)` moves the drop
@@ -289,7 +294,7 @@ JS describes.
   across (the handle sits in the gutter); off every block, beside the nearest block that takes it, so a list item
   dropped below its list stays in it. A selection dragged with Mod held across blocks covers them whole on release
   (Tiptap's NodeRange), ready for the handle to carry. The view tells the session its focus (`isFocused`, `focus` / `blur` events) and honors `setEditable`.
-- **Events**: `create`, `update`, `selectionUpdate`, `transaction` (a summary), `focus`, `blur`, `paste`, `drop`,
+- **Events**: `revision` (the session's subscribers: `{ revision }` after every change, from any source), `create`, `update`, `selectionUpdate`, `transaction` (a summary), `focus`, `blur`, `paste`, `drop`,
   `delete`, `destroy`, posted to JS after the fact.
 - **Formats**: JSON (Tiptap's document JSON loads as is), Markdown (each type's form declared by its extension), HTML
   (parse rules and `toDOM` per type, `DomParser` / `DomSerializer`), text (`renderText` per type).
@@ -297,7 +302,7 @@ JS describes.
   [1, 2, 3] } }), Underline], content, editable })`. The built-in extensions are classes whose statics make them
   (`configure`, `extend`); a class itself in `extensions` is the extension with its defaults (`ExtensionEntry` reads a
   function's `name`). `RichExtension` (what they make) has `name`, `type`, `priority`, `options`, `configure` and
-  `extend`. Tiptap's `Image` is `RichImage` (`Image` is the core's), `TextStyle` is `RichTextStyle` (`TextStyle` is the style type; a test of `nsh-js`'s declarations keeps exports from shadowing shared types) and `Text` is `richExtension("text")`.
+  `extend`. Tiptap's `Image` is `RichImage` (`Image` is the core's), `Link` is `RichLink` (`Link` is `nsh/base`'s component), `TextStyle` is `RichTextStyle` (`TextStyle` is the style type; a test of `nsh-js`'s declarations keeps exports from shadowing shared types) and `Text` is `richExtension("text")`.
   `defineExtension({ name, priority, node | mark, topNode, addOptions, addKeyboardShortcuts, addCommands,
   addInputRules, addPasteRules, addProseMirrorPlugins, addGlobalAttributes, addStorage })` declares the app's: its
   functions run once, in `createRichEditor` (a synchronous call, where JS runs anyway), with the extension's options,

@@ -1,7 +1,6 @@
 ---
 title: Checkbox
 description: Checkbox 组件：一个勾选、未勾选或半选的控件，负责按压、键盘激活、禁用状态以及屏幕阅读器的角色和值，指示器及其中的标记由应用设置样式。
-order: 20.25
 group: base
 demo: el-checkbox
 ---
@@ -46,7 +45,7 @@ function App() {
   return (
     <Checkbox
       checked={on()}
-      onChange={(next) => on.set(next)}
+      onChange={({ checked }) => on.set(checked)}
       class="flex-row items-center gap-2"
       indicatorClass="size-5 items-center justify-center rounded-md border-2 border-border transition-colors checked:border-primary checked:bg-primary"
       indicator={<Text class="text-primary-foreground">{on() ? "✓" : ""}</Text>}
@@ -86,7 +85,7 @@ mount(App);
 
 | 事件 | Rust | 说明 |
 |---|---|---|
-| `onChange` | `.on_change(\|checked: &bool\| ..)` | 复选框被按下：轻点、点击、拥有键盘焦点时按 Space 或 Return，或屏幕阅读器的激活。它报告复选框请求的值：从未勾选和半选时为 `true`，从勾选时为 `false`。 |
+| `onChange` | `.on_change(\|checked: &bool\| ..)` | 复选框被按下：轻点、点击、拥有键盘焦点时按 Space 或 Return，或屏幕阅读器的激活。它以 `checked` 报告复选框请求的值：从未勾选和半选时为 `true`，从勾选时为 `false`。 |
 
 禁用的复选框不报告任何事件。
 
@@ -117,7 +116,7 @@ const some = () => selected().length > 0 && !all();
 <Checkbox
   checked={all()}
   indeterminate={some()}
-  onChange={(next) => selected.set(next ? items.map((i) => i.id) : [])}
+  onChange={({ checked }) => selected.set(checked ? items.map((i) => i.id) : [])}
   class="flex-row items-center gap-2"
   indicatorClass="group size-5 items-center justify-center rounded-md border-2 border-border checked:border-primary checked:bg-primary indeterminate:border-primary indeterminate:bg-primary"
   indicator={
@@ -141,7 +140,7 @@ const some = () => selected().length > 0 && !all();
 <Checkbox
   checked={on()}
   disabled={locked()}
-  onChange={(next) => on.set(next)}
+  onChange={({ checked }) => on.set(checked)}
   class="flex-row items-center gap-2 disabled:opacity-50"
   indicatorClass="size-5 rounded-md border-2 border-border checked:border-primary checked:bg-primary disabled:border-border disabled:bg-muted"
 >

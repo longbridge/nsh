@@ -1,7 +1,6 @@
 ---
 title: Editor
 description: "The Editor component: a code editor with syntax highlighting, line numbers, several carets, folding, soft wrap, find and replace, diagnostics and decorations, and the keys of code editors."
-order: 26.2
 group: base
 demo: el-editor
 ---
@@ -48,7 +47,7 @@ const MAIN = `fn main() {
 
 function App() {
   const source = signal(MAIN);
-  return <Editor value={source()} onChange={(value) => source.set(value)} language="rust" class="flex-1" />;
+  return <Editor value={source()} onChange={({ value }) => source.set(value)} language="rust" class="flex-1" />;
 }
 
 mount(App);
@@ -82,7 +81,7 @@ YAML, TOML, INI, Dockerfile, Makefile, CMake, Dart, Scala, Elixir, Erlang, Haske
 Julia, Nix, Terraform, Protocol Buffers, GraphQL and Diff.
 
 ```tsx
-<Editor value={source()} onChange={(v) => source.set(v)} language={file().name} tabSize={2} softWrap class="flex-1" />
+<Editor value={source()} onChange={({ value }) => source.set(value)} language={file().name} tabSize={2} softWrap class="flex-1" />
 ```
 
 ### Your own languages
@@ -120,7 +119,7 @@ fn native(registry: &mut Registry) {
 ```
 
 ```tsx
-<Editor value={source()} onChange={(v) => source.set(v)} language="build.nb" class="flex-1" />
+<Editor value={source()} onChange={({ value }) => source.set(value)} language="build.nb" class="flex-1" />
 ```
 
 ## Editing
@@ -219,10 +218,10 @@ keymap.bind({
 ## Find and replace
 
 `search` is what to find: `{ query, caseSensitive?, wholeWord?, regex?, inSelection? }`. Its matches are highlighted, the one the
-selection is on more strongly, and `onSearchChange` reports `{ count, current, error }`: how many matches, which one
+selection is on more strongly, and `onSearchChange` reports `{ result }`, a `{ count, current, error }`: how many matches, which one
 the selection is on (from 0), and why a regular expression is not valid. `findNext` and `findPrevious` select the next
 and previous match, wrapping around; `replace(text)` replaces the current match and selects the next one, and
-`replaceAll(text)` replaces every match as one edit and returns how many. A regular expression's replacement refers to
+`replaceAll(text)` replaces every match as one edit and returns `{ count }`, how many. A regular expression's replacement refers to
 its groups as `$1` and `${name}`.
 
 `inSelection` finds only inside what was selected when it turned on (the carets' lines when nothing was): the scope
@@ -246,21 +245,21 @@ function Find(props: { source: string; onChange: (value: string) => void }) {
   return (
     <View class="flex-1">
       <View class="flex-row items-center gap-2 border-b border-border p-2">
-        <Input value={query()} onChange={(q) => query.set(q)} onSubmit={() => editor.run("findNext")} placeholder="Find" class="flex-1" />
+        <Input value={query()} onChange={({ value }) => query.set(value)} onSubmit={() => editor.run("findNext")} placeholder="Find" class="flex-1" />
         <Text class="text-sm text-muted-foreground">{status()}</Text>
         <Button onPress={() => editor.run("findPrevious")} class="px-2"><Text>↑</Text></Button>
         <Button onPress={() => editor.run("findNext")} class="px-2"><Text>↓</Text></Button>
-        <Input value={replacement()} onChange={(r) => replacement.set(r)} placeholder="Replace" class="flex-1" />
+        <Input value={replacement()} onChange={({ value }) => replacement.set(value)} placeholder="Replace" class="flex-1" />
         <Button onPress={() => editor.replace(replacement())} class="px-2"><Text>Replace</Text></Button>
-        <Button onPress={async () => console.log("replaced", await editor.replaceAll(replacement()))} class="px-2"><Text>All</Text></Button>
+        <Button onPress={async () => console.log("replaced", (await editor.replaceAll(replacement())).count)} class="px-2"><Text>All</Text></Button>
       </View>
       <Editor
         ref={editor}
         value={props.source}
-        onChange={props.onChange}
+        onChange={(e) => props.onChange(e.value)}
         language="ts"
         search={query() ? { query: query() } : undefined}
-        onSearchChange={(r) => result.set(r)}
+        onSearchChange={(e) => result.set(e.result)}
         class="flex-1"
       />
     </View>
@@ -292,9 +291,9 @@ async function lint(text: string) {
 
 <Editor
   value={source()}
-  onChange={(v) => {
-    source.set(v);
-    lint(v);
+  onChange={({ value }) => {
+    source.set(value);
+    lint(value);
   }}
   language="ts"
   diagnostics={problems()}
@@ -338,7 +337,7 @@ const kinds: Record<string, EditorToken> = { keyword: "keyword", function: "titl
 
 <Editor
   value={source()}
-  onChange={(v) => source.set(v)}
+  onChange={({ value }) => source.set(value)}
   language="ts"
   highlighting={false}
   decorations={semanticTokens().map((t) => ({ range: range(t.line, t.start, t.end), token: kinds[t.type] }))}
@@ -368,7 +367,7 @@ const folded = new Map<string, EditorFoldRange[]>();
   value={file().text}
   language={file().name}
   foldRanges={ranges()} // from the language server's textDocument/foldingRange
-  onFoldChange={(folds) => folded.set(file().name, folds)}
+  onFoldChange={({ folds }) => folded.set(file().name, folds)}
   class="flex-1"
 />
 <Button onPress={() => editor.foldLevel(2)}><Text>Fold the methods</Text></Button>
@@ -376,7 +375,7 @@ const folded = new Map<string, EditorFoldRange[]>();
 
 ## Breakpoints and context menus
 
-A press on a line number reports `onLineNumberPress(line)`, the place for a breakpoint the app draws as a decoration.
+A press on a line number reports `onLineNumberPress({ line })`, the place for a breakpoint the app draws as a decoration.
 The secondary button (a right click, Control-click on a Mac) reports `onContextMenu({ position, x, y })`: the
 position in the text under the pointer and the point in the root view, where the app opens its own menu. On touch
 screens a long press, a double tap, a handle let go and a tap on the selection report it too, with `selection`: the
@@ -397,7 +396,7 @@ const breakpoints = signal<number[]>([]);
 <Editor
   value={source()}
   language="py"
-  onLineNumberPress={(line) =>
+  onLineNumberPress={({ line }) =>
     breakpoints.set(breakpoints().includes(line) ? breakpoints().filter((l) => l !== line) : [...breakpoints(), line])
   }
   decorations={breakpoints().map((line) => ({ range: range(line, 0, 0), lineClass: "bg-red-500/15" }))}
@@ -449,7 +448,7 @@ let editor!: EditorRef;
 <Editor
   ref={(r) => (editor = r)}
   value={source()}
-  onChange={(v) => source.set(v)}
+  onChange={({ value }) => source.set(value)}
   language="ts"
   completion
   completionTriggerCharacters={["."]}
@@ -521,7 +520,7 @@ let editor!: EditorRef;
 <Editor
   ref={(r) => (editor = r)}
   value={source()}
-  onChange={(v) => source.set(v)}
+  onChange={({ value }) => source.set(value)}
   language="ts"
   onDefinitionRequest={async (e) => {
     const target = await server.definition(e.position);
@@ -564,7 +563,8 @@ line at each of its columns (the `ruler` part), as guides of a line's length.
 
 `ref={editor}` gives the editor's methods (`EditorRef`), for the app's buttons, menus and keys. Methods that return a
 value (`value()`, `selections()`, `replaceAll()`, `canUndo()`, `caretBounds()`, `folds()`, ...) return a `Promise` of it in JS, so `await`
-them: `const text = await editor.value()`.
+them: `const text = await editor.value()`. A method given a line past the text (`fold`, `scrollToLine`, `goToLine`,
+...) changes nothing and logs a warning naming the method and the line.
 
 | Method | Description |
 |---|---|
@@ -577,7 +577,7 @@ them: `const text = await editor.value()`.
 | `setSelections(selections)` | Sets the selections (the last one primary) and scrolls the primary one into view. |
 | `run(command)` | Runs a command, as its keys would ([Commands](#commands)). |
 | `replace(text)` | Replaces the current match and selects the next. |
-| `replaceAll(text)` | `Promise<number>`: replaces every match as one edit; how many. |
+| `replaceAll(text)` | `Promise<EditorReplaceAll>`: replaces every match as one edit; `{ count }`, how many. |
 | `fold(line)`, `unfold(line)` | Folds the lines under line `line` (from 0), or unfolds it. |
 | `foldRecursive(line)`, `unfoldRecursive(line)` | Folds the fold on line `line` and every fold inside it, or unfolds them all. |
 | `foldLevel(level)` | Folds every fold at nesting level `level` (1: the outermost). |
@@ -609,7 +609,7 @@ let editor!: EditorRef;
 <Button onPress={() => editor.setSelections([{ anchor: { line: 0, column: 0 }, head: { line: 0, column: 0 } }])}>
   <Text>Go to the top</Text>
 </Button>
-<Editor ref={editor} value={source()} onChange={(v) => source.set(v)} language="rs" class="flex-1" />
+<Editor ref={editor} value={source()} onChange={({ value }) => source.set(value)} language="rs" class="flex-1" />
 ```
 
 ### Commands
@@ -654,7 +654,7 @@ is set with `fontFamily`, `fontSize` and `lineHeight`, which the editor measures
 ```tsx
 <Editor
   value={source()}
-  onChange={(v) => source.set(v)}
+  onChange={({ value }) => source.set(value)}
   language="tsx"
   fontFamily="JetBrains Mono"
   fontSize={14}
@@ -753,17 +753,17 @@ is set with `fontFamily`, `fontSize` and `lineHeight`, which the editor measures
 
 | Event | Rust | Description |
 |---|---|---|
-| `onChange` | `.on_change(\|value: &SharedString\| ..)` | The text changed: the whole new text. |
-| `onSelectionChange` | `.on_selection_change(\|selections: &Vec<EditorSelection>\| ..)` | The selections changed: every one, the primary last. |
+| `onChange` | `.on_change(\|value: &SharedString\| ..)` | The text changed: `{ value }`, the whole new text. |
+| `onSelectionChange` | `.on_selection_change(\|selections: &Vec<EditorSelection>\| ..)` | The selections changed: `{ selections }`, every one, the primary last. |
 | `onFocus`, `onBlur` | `.on_focus(\|\| ..)`, `.on_blur(\|\| ..)` | The editor took or lost the focus. |
-| `onSearchChange` | `.on_search_change(\|result: &EditorSearchResult\| ..)` | The search's matches changed: `{ count, current, error }`. |
-| `onLineNumberPress` | `.on_line_number_press(\|line: &u32\| ..)` | A line number was pressed: the line, from 0. |
+| `onSearchChange` | `.on_search_change(\|result: &EditorSearchResult\| ..)` | The search's matches changed: `{ result }`, a `{ count, current, error }`. |
+| `onLineNumberPress` | `.on_line_number_press(\|line: &u32\| ..)` | A line number was pressed: `{ line }`, the line, from 0. |
 | `onContextMenu` | `.on_context_menu(\|event: &EditorContextMenuEvent\| ..)` | The secondary button was pressed over the text, or a touch selected text: `{ position, x, y, selection? }`. |
 | `onHover` | `.on_hover(\|event: &EditorHoverEvent\| ..)` | The mouse rests over a character ([Language features](#language-features)). |
 | `onHoverEnd` | `.on_hover_end(\|\| ..)` | The hover ended. |
 | `onTextPress` | `.on_text_press(\|event: &EditorTextPressEvent\| ..)` | A character was pressed: with its word, the modifiers and the clicks. |
-| `onFindWithSelection` | `.on_find_with_selection(\|query: &String\| ..)` | `findWithSelection` ran: the text for the find bar's query. |
-| `onFoldChange` | `.on_fold_change(\|folds: &Vec<EditorFoldRange>\| ..)` | The folded ranges changed: every one, nested ones included. |
+| `onFindWithSelection` | `.on_find_with_selection(\|query: &String\| ..)` | `findWithSelection` ran: `{ query }`, the text for the find bar's query. |
+| `onFoldChange` | `.on_fold_change(\|folds: &Vec<EditorFoldRange>\| ..)` | The folded ranges changed: `{ folds }`, every one, nested ones included. |
 | `onCompletionRequest` | `.on_completion_request(\|event: &EditorCompletionRequest\| ..)` | The editor asks for completions: `{ id, offset, position, query, queryStart, trigger, character? }` ([Completion](#completion)). |
 | `onCompletionAccept` | `.on_completion_accept(\|event: &EditorCompletionAcceptEvent\| ..)` | An item was accepted and inserted: `{ item }`. |
 | `onInlineCompletionRequest` | `.on_inline_completion_request(\|event: &EditorInlineCompletionRequest\| ..)` | Typing paused: `{ id, offset, position }`, for an inline completion. |

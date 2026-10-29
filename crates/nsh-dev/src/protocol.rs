@@ -319,6 +319,27 @@ impl TestFile {
     }
 }
 
+/// A character's resolved style, as [`TestStep::SpanStyle`] answers it.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[non_exhaustive]
+pub struct SpanStyle {
+    /// Its text color, `0xRRGGBBAA`.
+    pub color: u32,
+    /// The color of the background a nested text's `backgroundColor` gives
+    /// it.
+    pub background: Option<u32>,
+    /// Its font size, in points.
+    pub font_size: f32,
+    /// Its font weight (400 regular, 700 bold).
+    pub font_weight: u16,
+    /// Whether it is italic.
+    pub italic: bool,
+    /// Whether it is underlined.
+    pub underline: bool,
+    /// Whether it is struck through.
+    pub line_through: bool,
+}
+
 /// A step of a test on a host's app, named as `nsh/test` names them: views
 /// are found by selectors (`id:save`, `text:Add`, `role:button[Save]`), and
 /// actions are native input at the view the selector names.
@@ -511,6 +532,12 @@ pub enum TestStep {
         /// The selector.
         selector: String,
     },
+    /// The style of the first character `selector` names
+    /// (`app.spanStyle`): a [`SpanStyle`].
+    SpanStyle {
+        /// The selector.
+        selector: String,
+    },
     /// The dialogs the app showed, in order (`app.dialogs`): a list of
     /// `nsh_core::Dialog`s.
     Dialogs,
@@ -668,7 +695,8 @@ pub enum SceneQuery {
         /// The view.
         id: u32,
     },
-    /// Whether a native animation runs.
+    /// Whether a native animation runs that ends by itself (not one
+    /// looping forever).
     Animating,
     /// Where to press to answer the dialog shown: its button `button`, or
     /// outside it (`None`).

@@ -254,6 +254,28 @@ pub fn PlotAxis(props: PlotAxisProps, _cx: Scope<NoEvent>) -> impl IntoElement {
         map().tick(value).filter(|t| t.is_finite())
     };
     let indices = move || (0..labels.with(|l| l.len())).collect::<Vec<usize>>();
+    // While the axis's domain glides (`motion.update`), tick `i` moves with
+    // the marks from where the layout puts it (its place on the new scale)
+    // to where the domain shown puts it, as d3's axis transitions: the
+    // offset the tick's view is translated by along its edge.
+    let glide = move |i: usize, s: View| {
+        let along_x = placement.get_untracked().along_x();
+        let tween = match along_x {
+            true => plot.x_tween,
+            false => plot.y_tween,
+        };
+        let place = animated_value(0.0);
+        effect(move || {
+            if let Some(t) = at(i).filter(|_| tween.moving.get()) {
+                place.set(t);
+            }
+        });
+        let moved = tween.moved(&place);
+        match along_x {
+            true => s.bind_translate_x(&moved),
+            false => s.bind_translate_y(&moved),
+        }
+    };
     let has_line =
         move || line_class.with(Option::is_some) || line_style.with(|s| *s != Style::default());
     let has_ticks =
@@ -284,6 +306,7 @@ pub fn PlotAxis(props: PlotAxisProps, _cx: Scope<NoEvent>) -> impl IntoElement {
                         .h(px(0.0))
                         .items_center()
                         .style_with(move |s| side().tick(s, at(i)))
+                        .map(|s| glide(i, s))
                         .child(
                             view()
                                 .flex_none()
@@ -317,6 +340,7 @@ pub fn PlotAxis(props: PlotAxisProps, _cx: Scope<NoEvent>) -> impl IntoElement {
                     view()
                         .absolute()
                         .style_with(move |s| side().anchor(s, at(i)))
+                        .map(|s| glide(i, s))
                         .child(
                             view().style_with(move |s| side().window(s, at(i))).child(
                                 view()

@@ -29,7 +29,7 @@ function Api(props: { label: string; api: string }) {
 /** The width of a track, measured once laid out (the dots move by it). */
 function useWidth() {
   const width = signal(0);
-  return [width, (bounds: Bounds) => width.set(bounds.size.width)] as const;
+  return [width, ({ bounds }: { bounds: Bounds }) => width.set(bounds.size.width)] as const;
 }
 
 // --- Hero -------------------------------------------------------------------
@@ -167,7 +167,7 @@ function PresetTile(props: { name: MotionName; tone: string; onPlay: (status: st
       return;
     }
     props.onPlay(props.name);
-    const finished = await m.play(props.name);
+    const { finished } = await m.play(props.name);
     if (kind !== "exit" || !finished) return;
     await pause(450);
     if (mine !== turn) return;
@@ -362,7 +362,7 @@ function Keyframes() {
       duration: 900,
       easing: Easing.out(Easing.quad),
     });
-    if (await heart.play("popIn", { duration: 360 })) heart.play("heartbeat");
+    if ((await heart.play("popIn", { duration: 360 })).finished) heart.play("heartbeat");
   };
 
   const charge = createAnimatedValue(0);
@@ -847,7 +847,7 @@ function Composition() {
   cleanup(() => all.forEach((a) => a.stop()));
   const run = (name: string, a: CompositeAnimation) => () => {
     state.set({ label: `${name} running`, tone: "info" });
-    a.start().then((finished) => state.set({ label: `${name} ${finished ? "finished" : "stopped"}`, tone: finished ? "accent" : "warn" }));
+    a.start().then(({ finished }) => state.set({ label: `${name} ${finished ? "finished" : "stopped"}`, tone: finished ? "accent" : "warn" }));
   };
   return (
     <Card icon="components" title="Composition" subtitle="Each step starts as the last one ends" right={<Badge label={state().label} tone={state().tone} />}>

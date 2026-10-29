@@ -1,7 +1,6 @@
 ---
 title: Slider
 description: "The Slider component: a value, or a range of two, picked along a track, with presses and drags on touch screens and with a mouse, WAI-ARIA's slider keys and a value for screen readers on each thumb, and a track, an indicator, a range and thumbs the app styles."
-order: 20.85
 group: base
 demo: el-slider
 ---
@@ -69,7 +68,7 @@ function App() {
   return (
     <Slider
       value={strength()}
-      onChange={(next) => strength.set(next as number)}
+      onChange={({ value }) => strength.set(value as number)}
       accessibilityLabel="Option strength"
       class="flex-row items-center gap-2"
       trackClass="h-2 flex-1 px-2 rounded-full bg-muted focus-within:ring-2 focus-within:ring-primary/36 focus-within:ring-offset-2 focus-within:ring-offset-background disabled:opacity-35"
@@ -95,15 +94,17 @@ style methods for the slider itself and `.child(..)` for its label. Its value is
 
 The value is a number, or `[start, end]` for a range with two thumbs; the shape of the value decides how many thumbs
 there are. The app owns it with `value` and sets the one `onChange` reports, as for every control of `nsh/base`; or it
-leaves the value to the slider with `defaultValue`, and hears the changes all the same.
+leaves the value to the slider with `defaultValue`, and hears the changes all the same. During a drag the thumbs and the
+range follow the pointer in the same frame, natively, and the app's `value` shows again when the pointer lifts; screen
+readers hear the drag's values as it goes while one runs, and its end value otherwise.
 
 ```tsx
 const price = signal<[number, number]>([200, 800]);
 
 <Slider
   value={price()}
-  onChange={(next) => price.set(next as [number, number])}
-  onChangeEnd={(next) => save(next)}
+  onChange={({ value }) => price.set(value as [number, number])}
+  onChangeEnd={({ value }) => save(value)}
   min={0}
   max={1000}
   step={10}
@@ -149,8 +150,8 @@ const price = signal<[number, number]>([200, 800]);
 
 | Event | Rust | Payload | When |
 |---|---|---|---|
-| `onChange` | `.on_change(\|value: &SliderValue\| ..)` | `number \| [number, number]` | The user asked for a new value: a press on the track, a step of a drag, a key, a screen reader's increment or decrement. |
-| `onChangeEnd` | `.on_change_end(\|value: &SliderValue\| ..)` | `number \| [number, number]` | The change ended: the pointer lifted, a key or a screen reader's step was done. Once per change. |
+| `onChange` | `.on_change(\|value: &SliderValue\| ..)` | `{ value: number \| [number, number] }` | The user asked for a new value: a press on the track, a step of a drag, a key, a screen reader's increment or decrement. |
+| `onChangeEnd` | `.on_change_end(\|value: &SliderValue\| ..)` | `{ value: number \| [number, number] }` | The change ended: the pointer lifted, a key or a screen reader's step was done. Once per change. |
 
 ## Parts
 

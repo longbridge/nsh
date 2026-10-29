@@ -228,6 +228,8 @@ events! {
     OpenUrl = "onOpenUrl": "A [`Command::OpenUrl`] request finished (root only; payload: `id`, `opened`: whether the platform opened the URL).",
     CaretMove = "onCaretMove": "An input's caret moved: with its selection, or as its text scrolled or wrapped again (payload: `bounds`, the caret in the input; the core adds `pageBounds`, in the root view).",
     Paste = "onPaste": "The user pasted into an input (payload: [`EventPayload::Paste`]: the text, files with their bytes such as a screenshot, local files' URLs), before the `onChangeText` of the text it inserts.",
+    ScreenColor = "onScreenColor": "A [`Command::PickScreenColor`] request finished (root only; payload: `id`, `color`: the color picked, packed `0xRRGGBBAA`, absent when cancelled).",
+    FileRequest = "onFileRequest": "A [`Command::FileRequest`] finished (root only; payload: [`EventPayload::FileRequest`]).",
 
 }
 
@@ -763,6 +765,18 @@ pub enum EventPayload {
         /// The files, in the order picked; none when cancelled.
         files: Vec<crate::picker::PickedFile>,
     },
+    /// The answer to a [`Command::FileRequest`] ([`EventKind::FileRequest`],
+    /// [`crate::file_dialog`]).
+    FileRequest {
+        /// The request.
+        id: u32,
+        /// The paths picked, the path chosen to save to or where a trashed
+        /// item went; none when cancelled, failed or not known.
+        paths: Vec<std::path::PathBuf>,
+        /// Why the request failed; `None` when it was carried out (or the
+        /// dialog cancelled).
+        error: Option<String>,
+    },
     /// An event of a registered native component: its name and data (any
     /// JSON value), handed to JS as `{ name, data }`.
     Native {
@@ -1186,6 +1200,27 @@ pub enum KeyboardTaps {
     Handled,
 }
 
+/// Which scroll bar a scroll view or list shows (`scrollbar`).
+#[derive(Debug, Clone, PartialEq, Default)]
+pub enum ScrollbarSetting {
+    /// Its scroll bar (`true`, the default): the platform's indicator, or
+    /// the app's built-in bar once the app set a theme for every view
+    /// (`nsh/base`'s `Scrollbar.setTheme`).
+    #[default]
+    Shown,
+    /// None (`false`).
+    Hidden,
+    /// The app's built-in bar drawn as this theme says (an object): the
+    /// `ScrollbarTheme` of `nsh/base`, which reads it.
+    Themed(Arc<crate::JsonValue>),
+}
+
+impl From<bool> for ScrollbarSetting {
+    fn from(shows: bool) -> Self {
+        if shows { Self::Shown } else { Self::Hidden }
+    }
+}
+
 /// How an `<image>` is shown, besides its source.
 #[derive(Debug, Clone, PartialEq, HostProps)]
 pub enum ImageProp {
@@ -1486,7 +1521,7 @@ pub enum OverlayProp {
     /// root view, as an input's caret `pageBounds`) it is placed against,
     /// following a view as it moves; without one it is laid out as a
     /// `position: fixed` box of its root view.
-    #[prop(js = "anchor", with = crate::js::host_values::overlay_anchor, reset = OverlayProp::Anchor(OverlayAnchor::None), ts = "YNode | Point | Bounds | null", on = OVERLAY)]
+    #[prop(js = "anchor", with = crate::js::host_values::overlay_anchor, reset = OverlayProp::Anchor(OverlayAnchor::None), ts = "ViewRef | Point | Bounds | null", on = OVERLAY)]
     Anchor(OverlayAnchor),
     /// `placement`: the side of the anchor it goes on (default `"bottom"`);
     /// the other side when only that one has room.
@@ -1531,7 +1566,9 @@ pub enum Command {
         /// Animate the change.
         animated: bool,
     },
-    /// Animate the layout changes of the next commit (on the root).
+    /// Animate the layout changes of the next commit. On the root, all of
+    /// them; on a node, with its `update`, only the frames that node's
+    /// change moves (`ElementRef::animate_layout`, `core/layout_scope.rs`).
     LayoutAnimation(LayoutAnimation),
     /// Leave the app (Android back handling; on the root).
     ExitApp,
@@ -1583,6 +1620,11 @@ pub enum Command {
     },
     /// Set the status bar (on the root): what the platform shows.
     StatusBar(StatusBarConfig),
+    /// The design tokens the app is drawn with (on the root), sent when
+    /// they change ([`crate::Core::tokens`]): what the platform's own
+    /// controls (menus) take their colors from, by the tokens' names
+    /// (`popover`, `accent`, `border`, ...).
+    Tokens(std::sync::Arc<crate::element::Tokens>),
     /// Change what functions set for the status bar (on the root): the
     /// core merges it under the settings components render and sends
     /// [`Command::StatusBar`] when the result changes.
@@ -1677,6 +1719,28 @@ pub enum Command {
         id: u32,
         /// The URL ([`crate::open_url::check_url`] passed it).
         url: String,
+    },
+    /// Let the user pick a color anywhere on the screen (on the root; a
+    /// color picker's eyedropper, [`crate::element::ambient::pick_screen_color`]):
+    /// the system's color sampler or the browser's `EyeDropper`. Report it
+    /// as [`EventKind::ScreenColor`] `id`, with no `color` when the user
+    /// cancelled. Sent only on platforms whose
+    /// [`crate::platform::Environment::screen_color`] is set.
+    PickScreenColor {
+        /// The request.
+        id: u32,
+    },
+    /// Carry out `request` on local paths (on the root;
+    /// [`crate::file_dialog`]): show the open or save dialog, open a file
+    /// in its app, show it in the file manager or move it to the trash.
+    /// Report it as [`EventKind::FileRequest`] `id`
+    /// ([`EventPayload::FileRequest`]). Sent only on platforms whose
+    /// [`crate::platform::Environment::file_requests`] is set.
+    FileRequest {
+        /// The request.
+        id: u32,
+        /// What to do.
+        request: Box<crate::file_dialog::FileRequest>,
     },
     /// A desktop command (on the root; `nsh/desktop`): the window, its
     /// title bar, menus. Mobile platforms ignore it.
@@ -1914,10 +1978,12 @@ pub enum Prop {
     /// Scrolling behavior of a scroll view or list.
     #[prop(nested)]
     Scroll(ScrollProp),
-    /// `scrollbar`: the scroll indicator shows (default true). On the
-    /// desktop a horizontal view keeps it: it is the mouse's scroll bar.
-    #[prop(js = "scrollbar", default = true, on = SCROLL | LIST)]
-    Scrollbar(bool),
+    /// `scrollbar`: the scroll indicator shows (default true), or the
+    /// app's built-in bar of a theme (an object, `nsh/base`'s
+    /// `ScrollbarTheme`). On the desktop a horizontal view keeps it: it is
+    /// the mouse's scroll bar. A multiline input's is its text's.
+    #[prop(js = "scrollbar", with = crate::js::host_values::scrollbar, reset = Prop::Scrollbar(ScrollbarSetting::Shown), ts = "boolean | import(\"nsh/base\").ScrollbarTheme", on = SCROLL | LIST | INPUT)]
+    Scrollbar(ScrollbarSetting),
     /// `refreshing`: the pull-to-refresh spinner shows.
     #[prop(js = "refreshing", on = SCROLL | LIST)]
     Refreshing(bool),
@@ -2135,6 +2201,10 @@ pub enum Prop {
     /// `Popover`'s or `Menu`'s trigger while its popup is open), and not
     /// disabled.
     ExpandedStyle(Option<std::rc::Rc<StylePatch>>),
+    /// `pressedStyle`: the style while `accessibilityState.pressed` (true,
+    /// not mixed: a toggle button that is on), and not disabled. Not
+    /// `activeStyle`, a press in progress.
+    PressedStyle(Option<std::rc::Rc<StylePatch>>),
     /// The states a part of a control shows its classes and state styles
     /// as its control has them ([`crate::tailwind::state`] bits: `checked`,
     /// `indeterminate`, `disabled`): a switch's thumb styled `checked:`

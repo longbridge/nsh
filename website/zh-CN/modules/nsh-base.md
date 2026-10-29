@@ -1,29 +1,42 @@
 ---
 title: nsh/base
-description: 应用界面的无样式基础组件：按钮、复选框、单选框、开关、标签页、选择框、可调整大小的面板、可停靠的工作区、Markdown 与 HTML 文档、代码编辑器、diff、文本输入框、导航栈与对话框、系统警告对话框，以及页面和对话框的状态栏。
+description: 应用界面的无样式基础组件：按钮、链接、复选框、单选框、开关、标签页、开关按钮、选择框、组合框、日历、日期选择器、时间输入框、可调整大小的面板、可停靠的工作区、Markdown 与 HTML 文档、代码编辑器、diff、文本输入框、导航栈与对话框、系统警告对话框，以及页面和对话框的状态栏。
 order: 2.5
 demo: ui-navigation
 ---
 
 # nsh/base
 
-`nsh/base` 是应用界面的基础组件层：不带样式、负责行为、状态、焦点和无障碍的组件，各平台通用。它位于基础元素（`nsh`、`nsh/mobile` 和 `nsh/desktop`）与应用自己的组件库之间，就像 GPUI Kit 中 `gpui-base` 位于 `gpui` 与带样式的组件库之间（见[模块](./index.md#three-layers)）。它提供控件（`Button`、`Checkbox`、`NumberInput`、放在 `RadioGroup` 里的 `Radio`、`Slider`、`Switch`、放在 `Tabs` 里的 `Tab`、`Select`）、可展开和收起的区域（`Collapsible`）、进度条（`Progress`）、一次性验证码（`OtpInput`）、构建图表的部件（`nsh/base/plot` 中的 `Plot` 及 `Line`、`Area`、`Bar`、`Grid`、`Pie`、`Arc`）、由用户自行安排的工作区（放在 `ResizablePanelGroup` 里的 `ResizablePanel`，以及 `DockArea` 的分栏、标签组和停靠区）、Markdown 或 HTML 文档（`TextView`）、代码编辑器（`Editor`）、文本之间的改动（`DiffView`）、表格（`Table` 及其部件、`DataTable`）、文本输入框（`Input`）、显示在一切之上的弹出层（`Popover`，`Menu` 和 `ContextMenu` 及其 `MenuItem`、`MenuSeparator` 和 `Submenu`，`Tooltip`，`Sheet`）、toast（放在 `ToastStack` 中的 `Toast`，生命周期由 `ToastManager` 管理）、导航（由 `createNavStack` 创建的状态驱动、由多个 `NavPage` 组成的 `NavStack`，以及在所有内容之上展示内容的 `Dialog`）和系统警告对话框（`AlertDialog`）。页面和对话框还决定状态栏（`statusBar`）。
+`nsh/base` 是应用界面的基础组件层：不带样式、负责行为、状态、焦点和无障碍的组件，各平台通用。它位于基础元素（`nsh`、`nsh/mobile` 和 `nsh/desktop`）与应用自己的组件库之间，就像 GPUI Kit 中 `gpui-base` 位于 `gpui` 与带样式的组件库之间（见[模块](./index.md#three-layers)）。它提供控件（`Button`、`Link`、`Checkbox`、带 `ColorArea`、`ColorSlider`、`ColorField`、`ColorSwatch` 和 `ColorEyeDropper` 部件的 `ColorPicker`、`NumberInput`、放在 `RadioGroup` 里的 `Radio`、`Slider`、`Switch`、放在 `Tabs` 里的 `Tab`、放在 `ToggleGroup` 里的 `Toggle`、`Select`、`Combobox`、`Calendar`、`TimeField`、`DatePicker`）、应用自己外观的滚动条（`Scrollbar`）、可展开和收起的区域（`Collapsible`，以及带 `AccordionItem`、`AccordionHeader`、`AccordionTrigger` 和 `AccordionPanel` 部件的 `Accordion`）、进度条（`Progress`）、一次性验证码（`OtpInput`）、构建图表的部件（`nsh/base/plot` 中的 `Plot` 及 `Line`、`Area`、`Bar`、`Grid`、`Pie`、`Arc`）、由用户自行安排的工作区（放在 `ResizablePanelGroup` 里的 `ResizablePanel`，以及 `DockArea` 的分栏、标签组和停靠区）、Markdown 或 HTML 文档（`TextView`）、代码编辑器（`Editor`）、文本之间的改动（`DiffView`）、表格（`Table` 及其部件、`DataTable`）、文本输入框（`Input`）、显示在一切之上的弹出层（`Popover`，`Menu` 和 `ContextMenu` 及其 `MenuItem`、`MenuSeparator` 和 `Submenu`，`Tooltip`，`Sheet`）、toast（放在 `ToastStack` 中的 `Toast`，生命周期由 `ToastManager` 管理）、导航（由 `createNavStack` 创建的状态驱动、由多个 `NavPage` 组成的 `NavStack`，以及在所有内容之上展示内容的 `Dialog`）和系统警告对话框（`AlertDialog`）。页面和对话框还决定状态栏（`statusBar`）。
 
 外观由应用决定：页面、对话框或标题栏里的内容都是你自己的 JSX，用基础元素配合样式、[Tailwind](../docs/tailwind.md) 类和主题绘制；或者是[你自己的 crate](../docs/rust.md) 中的 Rust 组件；也可以是社区基于 `nsh/base` 构建的组件库。每个宿主都提供 `nsh/base`；Rust 应用通过 `nsh-base` crate 使用同一套 API（`nsh_base::{button, dialog, …}`）。
 
 ```rust tabs
 use nsh_base::{
-    MarkdownExtension, MarkdownOptions, alert_dialog, button, checkbox, dialog, diff_view, dock_area, editor,
-    h_resizable, nav_page, nav_stack, radio, radio_group, resizable_panel, select, switch, tab, tabs, text_view, theme, toast, toast_stack, v_resizable,
+    MarkdownExtension, MarkdownOptions, accordion, accordion_header, accordion_item, accordion_panel, accordion_trigger,
+    alert_dialog, button, checkbox, color_area, color_field, color_picker,
+    color_slider, color_swatch, dialog, diff_view, dock_area, editor, link,
+    calendar, combobox, date_picker, h_resizable, nav_page, nav_stack, radio, radio_group, resizable_panel, select, switch, tab, tabs, text_view, theme, time_field, toast, toast_stack, toggle, toggle_group, v_resizable,
 };
 ```
 
 ```tsx tabs
 import {
+  Accordion,
+  AccordionHeader,
+  AccordionItem,
+  AccordionPanel,
+  AccordionTrigger,
   AlertDialog,
   Button,
   Checkbox,
   Collapsible,
+  ColorArea,
+  ColorEyeDropper,
+  ColorField,
+  ColorPicker,
+  ColorSlider,
+  ColorSwatch,
   ContextMenu,
   createNavStack,
   DataTable,
@@ -31,6 +44,7 @@ import {
   DiffView,
   DockArea,
   Editor,
+  Link,
   Menu,
   OtpInput,
   Progress,
@@ -43,7 +57,12 @@ import {
   RadioGroup,
   ResizablePanel,
   ResizablePanelGroup,
+  Scrollbar,
   Select,
+  Combobox,
+  Calendar,
+  TimeField,
+  DatePicker,
   Sheet,
   NumberInput,
   Slider,
@@ -63,16 +82,32 @@ import {
   Toast,
   ToastManager,
   ToastStack,
+  Toggle,
+  ToggleGroup,
   Tooltip,
 } from "nsh/base";
 import type {
+  AccordionHeaderProps,
+  AccordionItemProps,
+  AccordionPanelProps,
+  AccordionProps,
+  AccordionTriggerProps,
   AlertDialogAction,
   AlertDialogOptions,
   AlertDialogPresentation,
+  AlertDialogResult,
   AlertDialogRole,
   ButtonProps,
   CheckboxProps,
   CollapsibleProps,
+  ColorAreaProps,
+  ColorChannel,
+  ColorFieldProps,
+  ColorFormat,
+  ColorPickerProps,
+  ColorSliderProps,
+  ColorSpace,
+  ColorSwatchProps,
   DialogChangeReason,
   DataTableColumn,
   DataTableProps,
@@ -95,11 +130,14 @@ import type {
   EditorDiagnostic,
   EditorProps,
   EditorRef,
+  EditorReplaceAll,
   EditorSearch,
   EditorSearchResult,
   EditorSelection,
   Edges,
   HeaderStyle,
+  LinkOpenWith,
+  LinkProps,
   NavPageProps,
   NavStackProps,
   NavStackState,
@@ -112,7 +150,17 @@ import type {
   SelectItem,
   SelectItemState,
   SelectProps,
+  ComboboxProps,
+  CalendarProps,
+  TimeFieldProps,
+  DatePickerProps,
   NumberInputProps,
+  ScrollbarEntrance,
+  ScrollbarLook,
+  ScrollbarMode,
+  ScrollbarMotion,
+  ScrollbarProps,
+  ScrollbarTheme,
   SliderProps,
   SliderScale,
   SliderValue,
@@ -130,6 +178,8 @@ import type {
   ToastProps,
   ToastStackProps,
   ToastTransitionStatus,
+  ToggleGroupProps,
+  ToggleProps,
 } from "nsh/base";
 ```
 
@@ -138,16 +188,25 @@ import type {
 | TSX | Rust | 是什么 |
 |---|---|---|
 | [`Button`](../elements/button.md) | `button()` | 带禁用和选中状态、面向屏幕阅读器有角色的按压目标。 |
+| [`Link`](../elements/link.md) | `link()` | 指向某处的按压目标：由系统打开它的 `href`，或由应用打开（`openWith="app"`、`onOpen`）。 |
 | [`Checkbox`](../elements/checkbox.md) | `checkbox()` | 勾选 / 未勾选 / 半选控件，指示器及其中的标记由应用设置。 |
 | [`Radio`](../elements/radio.md)、[`RadioGroup`](../elements/radio.md) | `radio()`、`radio_group()` | 一组只能选一个的选项中的一项，以及这一组；勾选哪一个由应用持有。 |
 | [`Switch`](../elements/switch.md) | `switch()` | 开 / 关控件，轨道和滑块由应用设置样式。 |
 | [`Tab`](../elements/tabs.md)、[`Tabs`](../elements/tabs.md) | `tab()`、`tabs()` | 标签列表中的一个标签页，以及这个列表；选中哪一个由应用持有，内容也由应用显示。 |
+| [`Toggle`](../elements/toggle.md)、[`ToggleGroup`](../elements/toggle.md) | `toggle()`、`toggle_group()` | 一个处于开或关的按钮，以及由它们组成的工具栏；哪些按下由应用持有。 |
 | [`Select`](../elements/select.md) | `select()` | 从一组条目中选出一个值：桌面上是触发元素处的弹出层，手机上是 sheet；`value` 由应用持有，触发元素由应用绘制。 |
+| [`Combobox`](../elements/combobox.md) | `combobox()` | 从可搜索的一组条目中选出一个或多个（`multiple`）值，列表与选择框的相同；`value` 由应用持有，触发元素由应用绘制。 |
+| [`Calendar`](../elements/calendar.md) | `calendar()` | 从按周排列的月份中选出一个日期或一段日期，带月份和年份视图与键盘操作；`value` 由应用持有，条目由应用绘制。 |
+| [`TimeField`](../elements/time-field.md) | `time_field()` | 逐段编辑一天中的时间（时、分、秒、上午/下午）；`value` 由应用持有。 |
+| [`DatePicker`](../elements/date-picker.md) | `date_picker()` | 从日历中选出一个日期、一段日期或一个日期和时间：桌面上是触发元素处的弹出层，手机上是 sheet；`value` 由应用持有，触发元素由应用绘制。 |
 | [`Collapsible`](../elements/collapsible.md) | `collapsible()` | 内容可展开和收起的区域；`open` 和触发它的控件由应用持有。 |
+| [`Accordion`](../elements/accordion.md)、[`AccordionItem`](../elements/accordion.md)、[`AccordionHeader`](../elements/accordion.md)、[`AccordionTrigger`](../elements/accordion.md)、[`AccordionPanel`](../elements/accordion.md) | `accordion()`、`accordion_item()`、`accordion_header()`、`accordion_trigger()`、`accordion_panel()` | 在各自标题下展开和收起的一组分区，一次一个或同时多个（`multiple`）；`value`（展开项）由应用持有。 |
 | [`OtpInput`](../elements/otp-input.md) | `otp_input()` | 显示在应用设置样式的格子里的一次性验证码；`value` 由应用持有，填满时 `onComplete` 通知应用。 |
 | [`Progress`](../elements/progress.md) | `progress()` | 进度条；`value`（0 到 100）和 `indeterminate` 由应用持有。 |
 | [`NumberInput`](../elements/number-input.md) | `number_input()` | 在输入框里输入、或用按钮和按键步进的数字；`value` 由应用持有（或由输入框从 `defaultValue` 起自己保存）。 |
+| [`Scrollbar`](../elements/scrollbar.md) | `scrollbar()` | 为它指明的滚动视图或列表（`scroll`）提供应用自己外观的滚动条；滑块跟随内容，拖动和按压会滚动内容。 |
 | [`Slider`](../elements/slider.md) | `slider()` | 沿轨道选取一个值或两个值组成的范围；`value` 由应用持有（或由滑块从 `defaultValue` 起自己保存）。 |
+| [`ColorPicker`、`ColorArea`、`ColorSlider`、`ColorField`、`ColorSwatch`、`ColorEyeDropper`](../elements/color-picker.md) | `color_picker()`、`color_area()`、`color_slider()`、`color_field()`、`color_swatch()`、`color_eye_dropper()` | 颜色选择器及其部件：饱和度与明度区域、RGB、HSL、HSB 或 OKLCH 任一通道及透明度的滑块、颜色或通道的输入框、色板、吸管；应用持有 `value`（或由选择器从 `defaultValue` 自己保存）。 |
 | [`ResizablePanelGroup`、`ResizablePanel`](../elements/resizable.md) | `h_resizable()`、`v_resizable()`、`resizable_panel()` | 并排或上下排列的面板，用户拖动它们之间的手柄调整大小。 |
 | [`DockArea`](../elements/dock.md) | `dock_area()` | 由分栏、标签组和边缘停靠区组成、用户自行安排的工作区；它的布局是应用的数据。 |
 | [`NavStack`、`NavPage`、`createNavStack`](../elements/nav-stack.md) | `nav_stack()`、`nav_page()` | 原生导航栈及其页面。 |
@@ -178,6 +237,12 @@ import type {
 
 一个只负责行为、没有外观的按压目标：处理按压、禁用和选中状态，并向屏幕阅读器报告它的角色。它的外观是应用的 `class` 和 `style` 加上状态变体，内容是它的子元素。见 [Button](../elements/button.md)。
 
+<a id="link"></a>
+
+### Link
+
+一个指向某处、没有外观的按压目标：处理按压、获得键盘焦点时的 Return 和 Space、禁用状态，并向屏幕阅读器报告链接角色和导航中的当前页（`current`）。`href` 是它指向的地方，不会显示出来：按压先报告它（`onOpen`），再在应用之外打开网页或其他应用的链接；设置 `openWith="app"` 时，由应用用自己的路由打开。见 [Link](../elements/link.md)。
+
 <a id="checkbox"></a>
 
 ### Checkbox
@@ -202,13 +267,39 @@ import type {
 
 标签列表中的标签页，以及包住它们的列表。标签页只负责行为、没有外观：处理按压、键盘激活、禁用状态，并向屏幕阅读器报告标签页角色和选中状态。列表是屏幕阅读器播报的标签列表，本身不持有值：应用告诉每个标签页是否选中（`selected`），接收按压（`onPress`），并自己显示选中部分的内容。应用的标签是标签页的子元素，它们的 `group-selected:` 类跟随标签页。见 [Tabs](../elements/tabs.md)。
 
+<a id="toggle-and-togglegroup"></a>
+
+### Toggle 与 ToggleGroup
+
+一个处于开或关的按钮（加粗、收藏、一个视图选项），以及由它们组成的工具栏。开关按钮只负责行为、没有外观：处理按压、键盘激活、禁用状态，并向屏幕阅读器报告按钮角色和它的按下状态。这一组是屏幕阅读器播报的工具栏，在键盘焦点里只占一站，方向键在其中的开关按钮之间移动而不按下它们，本身不持有值：应用告诉每个开关按钮是否按下（`pressed`），接收它想要的值（`onChange`），并让任意多个或恰好一个保持按下。组上的 `disabled` 禁用其中每个开关按钮。应用的图标或标签是开关按钮的子元素，它们的 `group-aria-pressed:` 类跟随开关按钮。见 [Toggle](../elements/toggle.md)。
+
 ### Select
 
 从以数据形式给出的一组条目（`items`：每个条目有值和标题，可以禁用或归入分组）中选出一个值，本身没有外观。应用的触发元素打开列表：在桌面平台上是触发元素处的弹出层，在手机和平板上是屏幕底部的 sheet。选择框负责键盘（Up、Down、Home、End、Page Up 和 Page Down、输入跳转、Return 和 Escape）、搜索（`searchable`）、高亮的行（`itemClass` 上的 `focus:`，`renderItem` 中的 `highlighted`），以及屏幕阅读器读到的组合框、列表框和选项角色。值由应用持有（`value`、`onChange`），或交给选择框自己保存（`defaultValue`）；应用为每个部件设置样式，或者自己绘制行。见 [Select](../elements/select.md)。
 
+### Combobox
+
+从一组条目中选出值，列表与选择框的相同，本身没有外观：选一个，或者在 `multiple` 时选多个，这时一次选择会切换该条目，列表保持打开。值是一个数组，由应用持有（`value`、`onChange`），或交给组合框自己保存（`defaultValue`）；`onConfirm` 在列表关闭时告知它。搜索词可以由应用持有（`query`、`onQueryChange`），行下方可以显示底部区域，清除按钮会清空值。见 [Combobox](../elements/combobox.md)。
+
+### Calendar
+
+从按周排列的月份中选出一个日期，或在 `range` 时选出一段日期，本身没有外观。并排显示一个或几个月（`numberOfMonths`）；头部翻月，并能打开月份视图或一页年份。值是一个 ISO 日期（`"2026-10-28"`）或 `[start, end]`，由应用持有（`value`、`onChange`），或交给日历自己保存（`defaultValue`）；`disabledMatcher` 让某些日期不能被选中，所有日期作为 Tab 的一站接受键盘操作。应用为各部件设置样式并绘制条目（`renderItem`）。见 [Calendar](../elements/calendar.md)。
+
+### TimeField
+
+逐段编辑一天中的时间，本身没有外观：小时、分钟、秒（`precision`）和上午/下午（`hourCycle="h12"`），通过步进、输入或手机的数字键盘。值是 24 小时制的 `"HH:MM"`（`"HH:MM:SS"`），由应用持有（`value`、`onChange`），或交给输入框自己保存（`defaultValue`）。见 [TimeField](../elements/time-field.md)。
+
+### DatePicker
+
+从应用的触发元素打开的日历中选出日期，打开方式与选择框的列表相同：桌面上是弹出层，手机上是 sheet。值采用 HTML 输入框的格式，一个 ISO 日期、在 `range` 时为 `[start, end]`、在 `timePrecision` 时为日期和时间（日历下方有时间输入框），由应用持有（`value`、`onChange`），或交给选择器自己保存（`defaultValue`）。预设设置值，清除按钮清除值，`Calendar` 的每个属性都会传入。见 [DatePicker](../elements/date-picker.md)。
+
 ### Collapsible
 
-内容可展开和收起的区域，没有外观：子元素始终显示（摘要、触发控件），`content` 在 `open` 时显示在它们之后。`open` 和切换它的触发控件由应用持有，应用也在触发控件上向屏幕阅读器报告展开状态。内容只创建一次，收起时保留，所以里面的状态不会丢。见 [Collapsible](../elements/collapsible.md)。
+内容可展开和收起的区域，没有外观：子元素始终显示（摘要、触发控件），`content` 在 `open` 时显示在它们之后。`open` 和切换它的触发控件由应用持有，应用也在触发控件上向屏幕阅读器报告展开状态。内容只创建一次，收起时保留，所以里面的状态不会丢。设置 `reveal` 后，它以原生运行的弹簧高度展开和收起。见 [Collapsible](../elements/collapsible.md)。
+
+### Accordion
+
+在各自标题下展开和收起的一组分区，没有外观：`Accordion` 包含多个 `AccordionItem`，每个分区由包住 `AccordionTrigger` 的 `AccordionHeader` 和一个 `AccordionPanel` 组成。`value`（展开项的值）由应用持有，按下触发器时应用设置 `onChange` 报告的值：一次一项，或设置 `multiple` 后同时多项。屏幕阅读器读到一组标题，其中的按钮报告分区是否已展开，展开的面板是一个区域。设置 `reveal` 后，面板以原生运行的弹簧高度展开和收起；设置 `keepMounted` 后，收起时内容仍留在树中。见 [Accordion](../elements/accordion.md)。
 
 ### Progress
 
@@ -230,6 +321,16 @@ import type {
 `onChangeEnd`；`scale` 让数值线性分布或按数量级分布，`axis` 决定轨道水平还是垂直。每个滑块对屏幕阅读器都是带自己数值的可调节元素，是键盘焦点的一站，
 并按 WAI-ARIA 的滑块按键移动。见 [Slider](../elements/slider.md)。
 
+### Scrollbar
+
+为滚动视图或列表提供应用自己外观的滚动条，放在应用想放的位置，没有外观：轨道（滚动条的 `class`）和其中的滑块（`thumbClass`）。它指明自己的
+滚动视图（`scroll`，即它的 `ref`），跟随其偏移、内容和视口；拖动滑块会滚动内容，按压轨道会让滑块中点移到那里。`mode` 让它在内容滚动时（直到
+之后的 `motion.idle`）、指针在滚动条上时或始终显示；`axis` 让它变成横向。`Scrollbar.setTheme` 让每个滚动视图和列表在视口上显示应用外观的
+滚动条，无需逐个放置；单个视图可以通过 `scrollbar` 属性使用自己的主题。见 [Scrollbar](../elements/scrollbar.md)。
+### ColorPicker
+
+不带外观的颜色选择器：根组件持有颜色，内部部件显示并修改它，布局由应用决定。`ColorArea` 是 HSB 的饱和度与明度，`ColorSlider` 调节 RGB、HSL、HSB 或 OKLCH 的任一通道或透明度（水平或垂直），`ColorField` 以任意 CSS 形式接受颜色或以数字接受一个通道，`ColorSwatch` 是按下即选中的预设颜色或当前颜色的预览，`ColorEyeDropper` 是在屏幕上取色的按钮（macOS、Web）。应用持有 `value`（或由选择器从 `defaultValue` 自己保存），`onChange` 和 `onChangeEnd` 报告颜色及按 `format` 写出的文本；颜色在每个空间中的通道值按用户设置保留。滑块和区域的拇指是屏幕阅读器的可调节元素，也是键盘焦点的一站。见 [ColorPicker](../elements/color-picker.md)。
+
 ### OtpInput
 
 定长的数字一次性验证码，没有外观：一个原生文本框覆盖在格子之上接收键盘输入，因此打字、粘贴、数字键盘和系统的验证码自动填充
@@ -239,7 +340,7 @@ import type {
 
 ### Plot（`nsh/base/plot`）
 
-构建图表的部件，对应 `gpui-base` 的 `plot`，位于单独的模块中：`import { Plot, Line, Area, Bar, Grid, Pie, Arc } from "nsh/base/plot"`。`Plot` 持有应用的数据行（`data`，对行的类型是泛型的，所以 `x` 和 `y` 是经过检查的键名或行的函数）、坐标轴的 `point`、`linear` 或 `band` 比例尺、指针下的行（`onHoverChange`）以及动效（`motion`：出现动效、悬停的淡入淡出和滑动）；它的图形根据数据行原生绘制，不为每个点运行 JS，使用 SVG 绘制属性（`stroke-*`、`fill-*`）着色，没有设置时使用 `currentColor`；`Area` 和 `Bar` 可以在形状内显示背景（渐变，`bg-linear-*`）。柱子立在 `band` 比例尺的条带里，并排或用 `stack` 堆叠，随 plot 出现时长出，指针下那一行以外的柱子会变淡，每根柱子末端可以有 `label` 部件。悬停的十字线、圆点（每个图形可用 `hoverDotClass` 设置自己的圆点）和提示框（`tooltipPlacement`，留在 plot 内）是由应用设置样式和内容的部件，原生移动；坐标轴标签是应用自己的元素。`Pie` 按每一行把一整圈分成扇区（设置 `innerRadius` 即为环形图），每个扇区用自己的类着色（`sliceClass`，行的函数）；`Arc` 绘制两个角度之间的一段扇形（仪表的轨道和数值）；在饼图上，plot 报告指针下的扇区，它会抬起（`hoverLift`），其他扇区变淡（`hoverDim`）。见 [Plot](../elements/plot.md)。
+构建图表的部件，对应 `gpui-base` 的 `plot`，位于单独的模块中：`import { Plot, Line, Area, Bar, Grid, Pie, Arc, Sankey } from "nsh/base/plot"`。`Plot` 持有应用的数据行（`data`，对行的类型是泛型的，所以 `x` 和 `y` 是经过检查的键名或行的函数）、坐标轴的 `point`、`linear` 或 `band` 比例尺、指针下的行（`onHoverChange`）以及动效（`motion`：出现动效、悬停的淡入淡出和滑动）；它的图形根据数据行原生绘制，不为每个点运行 JS，使用 SVG 绘制属性（`stroke-*`、`fill-*`）着色，没有设置时使用 `currentColor`；`Area` 和 `Bar` 可以在形状内显示背景（渐变，`bg-linear-*`）。柱子立在 `band` 比例尺的条带里，并排或用 `stack` 堆叠，随 plot 出现时长出，指针下那一行以外的柱子会变淡，每根柱子末端可以有 `label` 部件。悬停的十字线、圆点（每个图形可用 `hoverDotClass` 设置自己的圆点）和提示框（`tooltipPlacement`，留在 plot 内）是由应用设置样式和内容的部件，原生移动；坐标轴标签是应用自己的元素。`Pie` 按每一行把一整圈分成扇区（设置 `innerRadius` 即为环形图），每个扇区用自己的类着色（`sliceClass`，行的函数）；`Arc` 绘制两个角度之间的一段扇形（仪表的轨道和数值）；在饼图上，plot 报告指针下的扇区，它会抬起（`hoverLift`），其他扇区变淡（`hoverDim`）。`Sankey` 绘制各行之间的流（`links`），按 d3-sankey 的方式布局，每个节点和流带用自己的类着色；节点可以带标签、可以悬停，流变化时平滑移动。见 [Plot](../elements/plot.md)。
 
 <a id="workspaces"></a>
 
@@ -315,7 +416,7 @@ import type {
 
 ### AlertDialog
 
-`AlertDialog.show(options)` 显示平台自己的警告框或操作表，并以用户选择的操作作为结果。见 [AlertDialog](../elements/alert-dialog.md)。
+`AlertDialog.show(options)` 显示平台自己的警告框或操作表，结果是 `{ action }`：用户所选操作的 `id`。见 [AlertDialog](../elements/alert-dialog.md)。
 
 <a id="input"></a>
 
@@ -428,6 +529,6 @@ nav_page()
 
 - [导航指南](../docs/navigation.md)。
 - [表单与键盘](../docs/forms-and-keyboard.md)。
-- [Button](../elements/button.md)、[Checkbox](../elements/checkbox.md)、[Radio](../elements/radio.md)、[Switch](../elements/switch.md)、[Tabs](../elements/tabs.md)、[Select](../elements/select.md)、[Collapsible](../elements/collapsible.md)、[Progress](../elements/progress.md)、[Slider](../elements/slider.md)、[NumberInput](../elements/number-input.md)、[OtpInput](../elements/otp-input.md)、[Plot](../elements/plot.md)、[NavStack](../elements/nav-stack.md)、[Dialog](../elements/dialog.md)、[AlertDialog](../elements/alert-dialog.md)、[TextView](../elements/text-view.md)、[Editor](../elements/editor.md)、[DiffView](../elements/diff-view.md)、[Table](../elements/table.md)、[DataTable](../elements/data-table.md)、[Text](../elements/text.md) 与 [Input](../elements/input.md)。
+- [Button](../elements/button.md)、[Link](../elements/link.md)、[Checkbox](../elements/checkbox.md)、[Radio](../elements/radio.md)、[Switch](../elements/switch.md)、[Tabs](../elements/tabs.md)、[Toggle](../elements/toggle.md)、[Select](../elements/select.md)、[Combobox](../elements/combobox.md)、[Calendar](../elements/calendar.md)、[TimeField](../elements/time-field.md)、[DatePicker](../elements/date-picker.md)、[Collapsible](../elements/collapsible.md)、[Accordion](../elements/accordion.md)、[Progress](../elements/progress.md)、[Slider](../elements/slider.md)、[NumberInput](../elements/number-input.md)、[OtpInput](../elements/otp-input.md)、[Plot](../elements/plot.md)、[NavStack](../elements/nav-stack.md)、[Dialog](../elements/dialog.md)、[AlertDialog](../elements/alert-dialog.md)、[TextView](../elements/text-view.md)、[Editor](../elements/editor.md)、[DiffView](../elements/diff-view.md)、[Table](../elements/table.md)、[DataTable](../elements/data-table.md)、[Text](../elements/text.md)[Button](../elements/button.md)、[Checkbox](../elements/checkbox.md)、[Radio](../elements/radio.md)、[Switch](../elements/switch.md)、[Tabs](../elements/tabs.md)、[Select](../elements/select.md)、[Combobox](../elements/combobox.md)、[Collapsible](../elements/collapsible.md)、[Progress](../elements/progress.md)、[Slider](../elements/slider.md)、[ColorPicker](../elements/color-picker.md)、[Scrollbar](../elements/scrollbar.md)、[NumberInput](../elements/number-input.md)、[OtpInput](../elements/otp-input.md)、[Plot](../elements/plot.md)、[NavStack](../elements/nav-stack.md)、[Dialog](../elements/dialog.md)、[AlertDialog](../elements/alert-dialog.md)、[TextView](../elements/text-view.md)、[Editor](../elements/editor.md)、[DiffView](../elements/diff-view.md)、[Table](../elements/table.md)、[DataTable](../elements/data-table.md)、[Text](../elements/text.md) 与 [Input](../elements/input.md)。
 - [设备与环境](../docs/device-and-environment.md)。
 - [`BackHandler`](./nsh-mobile.md#backhandler)：`BackHandler` 及其他 Android 专用 API。

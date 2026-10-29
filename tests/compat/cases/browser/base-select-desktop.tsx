@@ -18,7 +18,7 @@ function App() {
         offset={7}
         margin={5}
         popupStyle={{ width: 120, height: 600 }}
-        onOpenChange={(open, reason) => log.set(`Desk: ${open} ${reason}`)}
+        onOpenChange={({ open, reason }) => log.set(`Desk: ${open} ${reason}`)}
         trigger={<View style={{ width: 100, height: 30 }}><Text>SideSelect</Text></View>}
       />
       <Select

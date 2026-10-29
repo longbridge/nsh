@@ -32,6 +32,7 @@ mod decor;
 #[cfg(feature = "dev")]
 pub mod dev;
 mod file_drop;
+mod file_requests;
 mod fps;
 mod gpu;
 mod image;
@@ -42,6 +43,7 @@ mod native;
 mod navigation;
 mod net;
 mod picker;
+mod screen_color;
 mod scroll;
 mod selectable_view;
 mod shader;

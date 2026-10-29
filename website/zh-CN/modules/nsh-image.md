@@ -15,9 +15,9 @@ import { Image, type PixelSize } from "nsh";
 `Image` 是一个带有两个函数的组件：`<Image src=…>` 渲染原生图片视图（编译器像处理 `<View>` 一样就地创建它），`Image.getSize` / `Image.prefetch` 则直接在它上面调用。
 
 ```ts
-const Image: ((props: ImageProps) => YNode) & {
+const Image: ((props: ImageProps) => JSX.Element) & {
   getSize(src: string | ImageAsset): Promise<PixelSize>;
-  prefetch(src: string | ImageAsset): Promise<boolean>;
+  prefetch(src: string | ImageAsset): Promise<void>;
 };
 ```
 
@@ -50,14 +50,14 @@ Image.getSize(url).then(({ width, height }) => ratio.set(width / height));
 ## Image.prefetch
 
 ```ts
-prefetch(src: string | ImageAsset): Promise<boolean>;
+prefetch(src: string | ImageAsset): Promise<void>;
 ```
 
-在显示之前预先加载图片。数据进入内存后 resolve 为 `true`（无法加载时为 `false`）。对于带有像素密度变体的导入图片，它加载视图在当前屏幕上加载的那个变体。适合用于相册的下一页，或点击后才会显示的图片。
+在显示之前预先加载图片。数据进入内存后 resolve，无法加载时以错误 reject。对于带有像素密度变体的导入图片，它加载视图在当前屏幕上加载的那个变体。适合用于相册的下一页，或点击后才会显示的图片。
 
 ```ts
 const next = photos.slice(index + 1, index + 4);
-next.forEach((p) => Image.prefetch(p.url));
+next.forEach((p) => Image.prefetch(p.url).catch(() => {})); // 之后由 <Image> 报告它自己的错误
 ```
 
 ## 相关内容
@@ -66,4 +66,4 @@ next.forEach((p) => Image.prefetch(p.url));
 - 导入图片文件（`import logo from "./logo.png"`）会得到一个 `ImageAsset`（`{ url, size, scales? }`，尺寸单位为点），`<Image src>` 和画布的 `drawImage` 都接受它。
 
 > [!NOTE]
-> 如果应用在 `nsh.json` 中声明了 `capabilities`，对远程 URL 调用 `getSize` 和 `prefetch` 需要像 `fetch` 一样在 `network` 中允许。见[沙箱与权限](../docs/sandbox-and-capabilities.md)。
+> 如果应用在 `nsh.json` 中声明了 `capabilities`，对远程 URL 调用 `getSize` 和 `prefetch` 需要像 `fetch` 一样在 `network` 中允许。范围之外的 URL 不会被请求：Promise 以一个 `Error` reject，其 `code` 为 `"ERR_ACCESS_DENIED"`，`permission` 为 `"network"`，`resource` 为该 URL。见[沙箱与权限](../docs/sandbox-and-capabilities.md)。

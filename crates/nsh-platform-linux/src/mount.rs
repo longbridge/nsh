@@ -181,6 +181,10 @@ impl Mounter {
                 match view.kind() {
                     ViewKind::Stack => crate::navigation::stack_resized(surface, view),
                     ViewKind::Canvas => view.changed(),
+                    ViewKind::Image => {
+                        crate::shader::resized(view);
+                        crate::image::resized(surface, view);
+                    }
                     _ => crate::shader::resized(view),
                 }
             }
@@ -199,7 +203,11 @@ impl Mounter {
                 content,
             } => {
                 if let Some(view) = self.get(*id) {
+                    let old = view.state().text.as_ref().map(|t| t.text.clone());
                     crate::text::set(view, text, layout, *content);
+                    if let Some(old) = old {
+                        crate::transition::text_changed(surface, view, &old, text);
+                    }
                     crate::selectable_view::touched(surface, view);
                     crate::access::text_changed(view);
                 }
@@ -226,6 +234,7 @@ impl Mounter {
                 id,
                 horizontal,
                 scrollbar_visible,
+                replaced,
                 mirrored,
                 ..
             } => {
@@ -235,6 +244,7 @@ impl Mounter {
                         view,
                         *horizontal,
                         *scrollbar_visible,
+                        *replaced,
                         *mirrored,
                     );
                 }
@@ -383,6 +393,9 @@ impl Mounter {
                 if let Some(view) = view {
                     crate::text_input::set_selection(view, *start, *end);
                 }
+            }
+            Command::ScrollTo { y, .. } if view.is_some_and(|v| v.kind() == ViewKind::Input) => {
+                crate::text_input::scroll_to(view.expect("an input"), *y);
             }
             Command::ScrollTo { .. }
             | Command::ScrollToEnd { .. }

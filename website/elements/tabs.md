@@ -1,7 +1,6 @@
 ---
 title: Tabs
 description: "Tab and Tabs: the tabs of a tab list and the list. Each tab owns presses, keyboard activation, the disabled state and its role and selected state for screen readers; the list is the set; the look, the value and the content each tab shows are the app's."
-order: 20.6
 group: base
 demo: el-tabs
 ---

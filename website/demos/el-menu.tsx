@@ -1,12 +1,22 @@
-import { mount, signal, Text, View } from "nsh";
+import { type JSX, mount, signal, Text, View } from "nsh";
 import { ContextMenu, Menu, MenuItem, MenuSeparator, type OpenChangeReason, Submenu } from "nsh/base";
-import { button, buttonText, desktop, Inspector, Panel, Stage, tint, ui, wide } from "./palette";
+import { button, buttonText, CheckMark, desktop, Inspector, Panel, PopIn, type PopupSide, Stage, tint, ui, wide } from "./palette";
 
-/** A popup at the trigger on desktops, a sheet at the bottom on phones. */
+/** A sheet at the bottom on phones; on desktops the popup's box keeps no
+ * look, its `Items` have it. */
 const surface = () =>
-  desktop
-    ? { ...ui().card, borderRadius: 12, padding: 5, minWidth: 210 }
-    : { ...ui().card, borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingHorizontal: 10, paddingTop: 10, paddingBottom: 30 };
+  desktop ? undefined : { ...ui().card, borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingHorizontal: 10, paddingTop: 10, paddingBottom: 30 };
+
+/** A menu's items: on desktops on a surface that grows out of the trigger's
+ * side each time it opens (`PopIn`), on phones in the sheet that slides up. */
+function Items(props: { side?: PopupSide; children: JSX.Element }) {
+  if (!desktop) return props.children;
+  return (
+    <PopIn side={props.side} style={{ ...ui().card, borderRadius: 12, padding: 5, minWidth: 210 }}>
+      {props.children}
+    </PopIn>
+  );
+}
 
 const backdrop = { backgroundColor: "rgba(0,0,0,0.45)" };
 const rowHeight = () => (desktop ? 32 : 46);
@@ -26,7 +36,11 @@ function Item(props: { label: string; onSelect?: () => void; checked?: boolean; 
       <Text style={{ flex: 1, fontSize: 14, color: props.danger ? ui().down : ui().text }}>{props.label}</Text>
       {/* The check at the trailing edge. */}
       <If when={props.checked !== undefined}>
-        <Text style={{ width: 14, fontSize: 13, textAlign: "right", color: ui().accent }}>{props.checked ? "✓" : ""}</Text>
+        <View style={{ width: 16 }}>
+          <If when={props.checked}>
+            <CheckMark size={16} tint={ui().accent} />
+          </If>
+        </View>
       </If>
     </MenuItem>
   );
@@ -51,9 +65,11 @@ function Share(props: { onSelect: (what: string) => void }) {
         </View>
       }
     >
-      <Item label="Mail" onSelect={() => props.onSelect("Mail")} />
-      <Item label="Messages" onSelect={() => props.onSelect("Messages")} />
-      <Item label="Copy link" onSelect={() => props.onSelect("Copy link")} />
+      <Items side="right">
+        <Item label="Mail" onSelect={() => props.onSelect("Mail")} />
+        <Item label="Messages" onSelect={() => props.onSelect("Messages")} />
+        <Item label="Copy link" onSelect={() => props.onSelect("Copy link")} />
+      </Items>
     </Submenu>
   );
 }
@@ -62,7 +78,7 @@ function App() {
   const last = signal("—");
   const reasons = signal<string[]>([]);
   const hidden = signal(false);
-  const changed = (name: string) => (open: boolean, reason: OpenChangeReason) =>
+  const changed = (name: string) => ({ open, reason }: { open: boolean; reason: OpenChangeReason }) =>
     reasons.set([`${name} ${open ? "opened" : "closed"} · ${reason}`, ...reasons()].slice(0, 8));
   const choose = (what: string) => last.set(what);
   const menu = () => (
@@ -78,14 +94,16 @@ function App() {
         </View>
       }
     >
-      <Item label="New" onSelect={() => choose("New")} />
-      <Item label="Open…" onSelect={() => choose("Open…")} />
-      <Item label="Paste" disabled />
-      <Separator />
-      <Share onSelect={(what) => choose(`Share › ${what}`)} />
-      <Item label="Show hidden files" checked={hidden()} keepOpen onSelect={() => hidden.set(!hidden())} />
-      <Separator />
-      <Item label="Delete" danger onSelect={() => choose("Delete")} />
+      <Items>
+        <Item label="New" onSelect={() => choose("New")} />
+        <Item label="Open…" onSelect={() => choose("Open…")} />
+        <Item label="Paste" disabled />
+        <Separator />
+        <Share onSelect={(what) => choose(`Share › ${what}`)} />
+        <Item label="Show hidden files" checked={hidden()} keepOpen onSelect={() => hidden.set(!hidden())} />
+        <Separator />
+        <Item label="Delete" danger onSelect={() => choose("Delete")} />
+      </Items>
     </Menu>
   );
   const context = () => (
@@ -112,11 +130,13 @@ function App() {
         </View>
       }
     >
-      <Item label="Copy" onSelect={() => choose("Copy")} />
-      <Item label="Rename" onSelect={() => choose("Rename")} />
-      <Share onSelect={(what) => choose(`Share › ${what}`)} />
-      <Separator />
-      <Item label="Delete" danger onSelect={() => choose("Delete")} />
+      <Items>
+        <Item label="Copy" onSelect={() => choose("Copy")} />
+        <Item label="Rename" onSelect={() => choose("Rename")} />
+        <Share onSelect={(what) => choose(`Share › ${what}`)} />
+        <Separator />
+        <Item label="Delete" danger onSelect={() => choose("Delete")} />
+      </Items>
     </ContextMenu>
   );
   const panels = () => (
@@ -126,7 +146,7 @@ function App() {
           {last()} · hidden files {hidden() ? "shown" : "hidden"}
         </Text>
       </Panel>
-      <Panel title="onOpenChange(open, reason)" grow>
+      <Panel title="onOpenChange({ open, reason })" grow>
         <View style={{ gap: 2 }}>
           <Each of={reasons()}>{(e, i) => <Text style={{ fontSize: 12, color: i() === 0 ? ui().text : ui().faint }}>{e()}</Text>}</Each>
         </View>

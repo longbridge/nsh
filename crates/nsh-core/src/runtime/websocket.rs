@@ -1,6 +1,15 @@
 //! The explicit WebSocket client: capability and quota checks run in the
 //! call, then either the host transport (the browser's WebSocket API) or
 //! the native socket drives I/O. Both enforce bounded messages and queues.
+//!
+//! Every call returns a promise, and every failure rejects it: a URL the
+//! app's network capabilities do not grant with `ERR_ACCESS_DENIED`
+//! (`permission` `"network"`, `resource` the URL), a used-up quota (32
+//! connections per VM, 8 MiB of writes waiting, unread messages) with
+//! `ERR_NSH_QUOTA_EXCEEDED`, a deadline with `ETIMEDOUT`, a connection
+//! that is closed (by the app, the peer or a failure) with
+//! `ERR_SOCKET_CLOSED`, a protocol violation with `EPROTO`, a socket error
+//! with the OS's code.
 use std::{
     cell::RefCell,
     collections::VecDeque,
@@ -14,7 +23,7 @@ use crate::{
     JsonValue,
     element::{
         Held, JsError, JsHost, JsIn, JsOwned, JsValue, Later, PropError, System, TsTypes, class,
-        module,
+        codes, module,
     },
     websocket::{WebSocketData, WebSocketEvent, WebSocketRequest, WebSocketTask},
 };
@@ -22,6 +31,41 @@ use crate::{
 mod native;
 const LIMIT: usize = 8 * 1024 * 1024;
 const UNREAD: usize = 8;
+
+/// The connection is closed: by the app, by the peer, or after a failure.
+fn closed(message: impl Into<String>) -> JsError {
+    JsError::Error(message.into()).with_code("ERR_SOCKET_CLOSED")
+}
+
+/// `operation` ran out of time.
+fn timed_out(operation: &str) -> JsError {
+    JsError::Error(format!("{operation} timed out")).with_code(codes::TIMED_OUT)
+}
+
+/// A quota of the connection or the VM is used up.
+fn exceeded(message: String) -> JsError {
+    JsError::Error(message).with_code(codes::QUOTA_EXCEEDED)
+}
+
+/// What the app's capabilities do not grant: a WebSocket to `url`.
+fn denied(url: &str) -> JsError {
+    JsError::access_denied(
+        format!(
+            "a WebSocket to `{url}` is not granted; add its host to capabilities.network.hosts or a GET rule in capabilities.network.http"
+        ),
+        "network",
+        url,
+    )
+}
+
+/// The VM's place for one more WebSocket.
+fn slot(sys: &System) -> Result<Held, JsError> {
+    sys.quotas.take(WEBSOCKETS, MAX_WEBSOCKETS).ok_or_else(|| {
+        exceeded(format!(
+            "At most {MAX_WEBSOCKETS} concurrent WebSockets are allowed per VM"
+        ))
+    })
+}
 
 /// `WebSocket.connect`'s options.
 #[derive(Debug, Default)]
@@ -146,7 +190,11 @@ pub(crate) struct WebSocket;
 #[module]
 impl WebSocket {
     /// Connects to a ws/wss URL allowed by capabilities.network; up to 32
-    /// connections are shared with the global WebSocket constructor.
+    /// connections are shared with the global WebSocket constructor. A bad
+    /// URL or option rejects with a `TypeError`, a URL not granted with
+    /// `ERR_ACCESS_DENIED`, the 33rd connection with
+    /// `ERR_NSH_QUOTA_EXCEEDED`, a failed handshake with the OS's code or
+    /// `EPROTO`, a slow one with `ETIMEDOUT`.
     pub(crate) fn connect(
         url: String,
         options: Option<ConnectOptions>,
@@ -163,9 +211,10 @@ impl WebSocket {
                 }));
             }
             #[cfg(target_arch = "wasm32")]
-            return Err(JsError::Type(
-                "The host has no WebSocket transport configured".into(),
-            ));
+            return Err(
+                JsError::Error("The host has no WebSocket transport configured".into())
+                    .with_code(codes::UNAVAILABLE),
+            );
         };
         let parsed = url::Url::parse(&url)
             .map_err(|error| JsError::Type(format!("invalid WebSocket URL: {error}")))?;
@@ -178,7 +227,7 @@ impl WebSocket {
             return Err(JsError::Type("WebSocket.connect(url) expects a ws:// or wss:// URL without credentials or fragment".into()));
         }
         if !sys.access.allows_websocket(parsed.as_str()) {
-            return Err(JsError::Type("WebSocket network capability denied".into()));
+            return Err(denied(parsed.as_str()));
         }
         let headers = options.map(|options| options.headers).unwrap_or_default();
         if !headers.is_empty() && !transport.supports_headers() {
@@ -186,11 +235,7 @@ impl WebSocket {
                 "The browser WebSocket API does not support custom handshake headers".into(),
             ));
         }
-        let held = sys.quotas.take(WEBSOCKETS, MAX_WEBSOCKETS).ok_or_else(|| {
-            JsError::Range(format!(
-                "At most {MAX_WEBSOCKETS} concurrent WebSockets are allowed per VM"
-            ))
-        })?;
+        let held = slot(&sys)?;
         let state = Rc::new(RefCell::new(HostState {
             held: Some(held),
             ..HostState::default()
@@ -207,7 +252,8 @@ impl WebSocket {
             Box::new(move |event| HostState::event(&events, event)),
         );
         Ok(Later::new(async move {
-            let task = Rc::new(RefCell::new(Some(task?)));
+            let task = task.map_err(JsError::Error)?;
+            let task = Rc::new(RefCell::new(Some(task)));
             state.borrow_mut().task = Rc::downgrade(&task);
             let host = HostConnection { task, state };
             let opening = host.state.clone();
@@ -216,7 +262,7 @@ impl WebSocket {
                 poll_fn(move |cx| {
                     let mut state = opening.borrow_mut();
                     if state.open {
-                        Poll::Ready(Ok::<_, String>(()))
+                        Poll::Ready(Ok(()))
                     } else if let Some(error) = &state.error {
                         Poll::Ready(Err(error.clone()))
                     } else {
@@ -226,7 +272,7 @@ impl WebSocket {
                 }),
             )
             .await?;
-            Ok::<_, String>(WebSocketConnection {
+            Ok::<_, JsError>(WebSocketConnection {
                 inner: Connection::Host(host),
             })
         }))
@@ -247,7 +293,9 @@ pub(crate) struct WebSocketConnection {
 
 #[class]
 impl WebSocketConnection {
-    /// Sends a string or Uint8Array of at most 8 MiB; queued bytes are bounded.
+    /// Sends a string or Uint8Array of at most 8 MiB (a `RangeError` with
+    /// `ERR_OUT_OF_RANGE` past it); at most 8 MiB may wait to be sent
+    /// (`ERR_NSH_QUOTA_EXCEEDED`).
     pub(crate) fn write(&self, data: Data) -> Result<Later<()>, JsError> {
         match &self.inner {
             #[cfg(not(target_arch = "wasm32"))]
@@ -258,27 +306,25 @@ impl WebSocketConnection {
                     Data::Bytes(bytes) => WebSocketData::Bytes(bytes),
                 };
                 if data.len() > LIMIT {
-                    return Err(JsError::Range(format!(
-                        "WebSocket write exceeded the {LIMIT} byte limit"
-                    )));
+                    return Err(too_long(data.len()));
                 }
                 let mut task = host.task.borrow_mut();
                 let result = match task.as_mut() {
-                    None => Err("WebSocket connection is closed".to_owned()),
+                    None => Err(closed("WebSocket connection is closed")),
                     Some(task) => {
                         if task.buffered_amount().saturating_add(data.len()) > LIMIT {
-                            return Err(JsError::Range(format!(
+                            return Err(exceeded(format!(
                                 "WebSocket writes waiting to be sent exceeded the {LIMIT} byte limit"
                             )));
                         }
-                        task.send(data)
+                        task.send(data).map_err(JsError::Error)
                     }
                 };
                 let state = host.state.clone();
                 let task = host.task.clone();
                 Ok(Later::new(async move {
                     if let Err(error) = result {
-                        HostState::event(&state, WebSocketEvent::Error(error.clone()));
+                        HostState::fail(&state, error.clone());
                         return Err(error);
                     }
                     let sent = timeout("WebSocket write", async {
@@ -289,20 +335,19 @@ impl WebSocketConnection {
                                 }
                                 let task = task.borrow();
                                 let Some(task) = task.as_ref() else {
-                                    return Err("WebSocket connection is closed".into());
+                                    return Err(closed("WebSocket connection is closed"));
                                 };
                                 if task.buffered_amount() == 0 {
                                     return Ok(());
                                 }
                             }
                             // Browsers expose pending bytes but no drain event.
-                            crate::element::ambient::timer(std::time::Duration::from_millis(10))
-                                .await;
+                            crate::element::timer(std::time::Duration::from_millis(10)).await;
                         }
                     })
                     .await;
                     if let Err(error) = &sent {
-                        HostState::event(&state, WebSocketEvent::Error(error.clone()));
+                        HostState::fail(&state, error.clone());
                     }
                     sent
                 }))
@@ -310,16 +355,16 @@ impl WebSocketConnection {
         }
     }
 
-    /// Reads the next string or Uint8Array, in arrival order.
+    /// Reads the next string or Uint8Array, in arrival order. Once the
+    /// connection is closed, what arrived before is still read; then it
+    /// rejects with `ERR_SOCKET_CLOSED`.
     pub(crate) fn read(&self) -> Result<Later<Data>, JsError> {
         match &self.inner {
             #[cfg(not(target_arch = "wasm32"))]
             Connection::Native(connection) => connection.read(),
             Connection::Host(host) => {
                 if host.state.borrow_mut().reading.replace(true) {
-                    return Err(JsError::Type(
-                        "WebSocket.read() already has an outstanding read".into(),
-                    ));
+                    return Err(busy());
                 }
                 let reading = Reading(host.state.clone());
                 let task = host.task.clone();
@@ -358,14 +403,14 @@ impl WebSocketConnection {
                     .task
                     .borrow_mut()
                     .as_mut()
-                    .map(|task| task.close(1000, ""))
+                    .map(|task| task.close(1000, "").map_err(JsError::Error))
                     .unwrap_or(Ok(()));
                 let state = host.state.clone();
                 let task = host.task.clone();
                 Later::new(async move {
                     let _transport = task;
                     if let Err(error) = result {
-                        HostState::event(&state, WebSocketEvent::Error(error.clone()));
+                        HostState::fail(&state, error.clone());
                         return Err(error);
                     }
                     let closed = timeout(
@@ -373,7 +418,7 @@ impl WebSocketConnection {
                         poll_fn(|cx| {
                             let mut state = state.borrow_mut();
                             if state.error.is_some() {
-                                Poll::Ready(Ok::<_, String>(()))
+                                Poll::Ready(Ok(()))
                             } else {
                                 if !state
                                     .close_wakers
@@ -388,7 +433,7 @@ impl WebSocketConnection {
                     )
                     .await;
                     if let Err(error) = &closed {
-                        HostState::event(&state, WebSocketEvent::Error(error.clone()));
+                        HostState::fail(&state, error.clone());
                     }
                     closed
                 })
@@ -397,21 +442,32 @@ impl WebSocketConnection {
     }
 }
 
+/// A write of `len` bytes, past the one-message limit.
+fn too_long(len: usize) -> JsError {
+    JsError::Range(format!(
+        "WebSocket write of {len} bytes exceeded the {LIMIT} byte limit"
+    ))
+    .with_code("ERR_OUT_OF_RANGE")
+}
+
+/// A second read while one waits: a wrong use.
+fn busy() -> JsError {
+    JsError::Type("WebSocket.read() already has an outstanding read".into())
+}
+
 async fn timeout<T>(
     operation: &str,
-    work: impl Future<Output = Result<T, String>>,
-) -> Result<T, String> {
+    work: impl Future<Output = Result<T, JsError>>,
+) -> Result<T, JsError> {
     use std::future::Future;
     let mut work = std::pin::pin!(work);
-    let mut timer = std::pin::pin!(crate::element::ambient::timer(
-        std::time::Duration::from_secs(30)
-    ));
+    let mut timer = std::pin::pin!(crate::element::timer(std::time::Duration::from_secs(30)));
     poll_fn(|cx| {
         if let Poll::Ready(result) = work.as_mut().poll(cx) {
             return Poll::Ready(result);
         }
         if timer.as_mut().poll(cx).is_ready() {
-            return Poll::Ready(Err(format!("{operation} timed out")));
+            return Poll::Ready(Err(timed_out(operation)));
         }
         Poll::Pending
     })
@@ -430,10 +486,7 @@ impl Drop for HostConnection {
         if Rc::strong_count(&self.task) > 1 {
             return;
         }
-        HostState::event(
-            &self.state,
-            WebSocketEvent::Error("WebSocket connection is closed".into()),
-        );
+        HostState::fail(&self.state, closed("WebSocket connection is closed"));
         self.task.borrow_mut().take();
         self.state.borrow_mut().held.take();
     }
@@ -448,7 +501,9 @@ impl Drop for Reading {
 #[derive(Default)]
 struct HostState {
     open: bool,
-    error: Option<String>,
+    /// Why the connection ended, which reads reject with once the
+    /// messages before it are read.
+    error: Option<JsError>,
     messages: VecDeque<WebSocketData>,
     bytes: usize,
     reading: std::cell::Cell<bool>,
@@ -458,28 +513,41 @@ struct HostState {
     task: std::rc::Weak<RefCell<Option<Box<dyn WebSocketTask>>>>,
 }
 impl HostState {
+    /// Ends the connection with `error`, as a transport event would.
+    fn fail(shared: &Rc<RefCell<Self>>, error: JsError) {
+        Self::apply(shared, Err(error));
+    }
+
     fn event(shared: &Rc<RefCell<Self>>, event: WebSocketEvent) {
+        Self::apply(shared, Ok(event));
+    }
+
+    fn apply(shared: &Rc<RefCell<Self>>, event: Result<WebSocketEvent, JsError>) {
         let mut state = shared.borrow_mut();
         if state.error.is_some() {
             return;
         }
         match event {
-            WebSocketEvent::Open { .. } => state.open = true,
-            WebSocketEvent::Message(message) => {
+            Err(error) => state.error = Some(error),
+            Ok(WebSocketEvent::Open { .. }) => state.open = true,
+            Ok(WebSocketEvent::Message(message)) => {
                 if message.len() > LIMIT
                     || state.messages.len() >= UNREAD
                     || state.bytes.saturating_add(message.len()) > LIMIT
                 {
-                    state.error = Some(format!(
+                    state.error = Some(exceeded(format!(
                         "WebSocket closed: more than {UNREAD} messages or {LIMIT} bytes arrived unread"
-                    ));
+                    )));
                 } else {
                     state.bytes += message.len();
                     state.messages.push_back(message);
                 }
             }
-            WebSocketEvent::Error(error) => state.error = Some(error),
-            WebSocketEvent::Close { .. } => state.error = Some("WebSocket closed by peer".into()),
+            // The browser reports no reason: the connection failed.
+            Ok(WebSocketEvent::Error(error)) => state.error = Some(JsError::Error(error)),
+            Ok(WebSocketEvent::Close { .. }) => {
+                state.error = Some(closed("WebSocket closed by peer"))
+            }
         }
         let task = if state.error.is_some() {
             state.held.take();
@@ -564,6 +632,38 @@ mod tests {
         future.poll(&mut std::task::Context::from_waker(Waker::noop()))
     }
 
+    // Android has no other dependency selecting a TLS provider. A peer closing
+    // at once must produce a handshake error, not a missing-provider panic.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[tokio::test]
+    async fn native_wss_has_a_tls_provider() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            for stream in listener.incoming().take(1) {
+                drop(stream);
+            }
+        });
+        let sys = System {
+            access: Arc::new(Access::all()),
+            ..System::default()
+        };
+        let connect = WebSocket::connect(format!("wss://127.0.0.1:{port}"), None, sys).unwrap();
+        let result = std::panic::AssertUnwindSafe(connect.into_future());
+        let outcome = futures_util::FutureExt::catch_unwind(result).await;
+        let message = match outcome {
+            Ok(Ok(_)) => panic!("a peer that closes at once cannot complete a TLS handshake"),
+            Ok(Err(error)) => error.to_string(),
+            Err(panic) => panic
+                .downcast_ref::<String>()
+                .cloned()
+                .or_else(|| panic.downcast_ref::<&str>().map(|s| (*s).to_owned()))
+                .unwrap_or_default(),
+        };
+        assert!(!message.contains("CryptoProvider"), "{message}");
+        assert!(message.contains("WebSocket handshake failed"), "{message}");
+    }
+
     #[tokio::test]
     async fn host_connect_waits_for_open_and_releases_its_slot_on_drop() {
         DROPS.with(|drops| drops.set(0));
@@ -592,7 +692,10 @@ mod tests {
             declared: crate::access::Capabilities::default(),
             granted: None,
         });
-        assert!(WebSocket::connect("ws://example.com".into(), None, denied).is_err());
+        let Err(error) = WebSocket::connect("ws://example.com".into(), None, denied) else {
+            panic!("an ungranted URL connected")
+        };
+        assert_eq!(error.code(), Some(codes::ACCESS_DENIED));
         let sys = system();
         let headers = ConnectOptions {
             headers: vec![("x-test".into(), "test".into())],
@@ -602,7 +705,10 @@ mod tests {
             .quotas
             .reserve(WEBSOCKETS, MAX_WEBSOCKETS, MAX_WEBSOCKETS)
             .unwrap();
-        assert!(WebSocket::connect("ws://example.com".into(), None, sys).is_err());
+        let Err(error) = WebSocket::connect("ws://example.com".into(), None, sys) else {
+            panic!("the 33rd WebSocket connected")
+        };
+        assert_eq!(error.code(), Some(codes::QUOTA_EXCEEDED));
     }
 
     fn host(buffered: usize) -> WebSocketConnection {
@@ -659,13 +765,9 @@ mod tests {
         }
         assert!(host.task.borrow().is_none());
         assert_eq!(host.state.borrow().messages.len(), UNREAD);
-        assert!(
-            host.state
-                .borrow()
-                .error
-                .as_ref()
-                .unwrap()
-                .contains("arrived unread")
+        assert_eq!(
+            host.state.borrow().error.as_ref().unwrap().code(),
+            Some(codes::QUOTA_EXCEEDED)
         );
     }
 

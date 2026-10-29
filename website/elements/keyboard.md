@@ -1,7 +1,7 @@
 ---
 title: Keyboard
 description: "The keyboard-inset-height environment variable, Keyboard.dismiss and the keyboard's height: content kept above the software keyboard, moving with it."
-order: 10.7
+order: 120
 group: primitives
 demo: el-keyboard
 ---
@@ -58,7 +58,7 @@ function App() {
       <View style={{ flexDirection: "row", gap: 8, padding: 8, borderTopWidth: 1, borderTopColor: "#e5e5e5" }}>
         <Input
           value={draft()}
-          onChange={(v) => draft.set(v)}
+          onChange={({ value }) => draft.set(value)}
           placeholder="Message"
           style={{ flex: 1, fontSize: 16, padding: 8 }}
         />

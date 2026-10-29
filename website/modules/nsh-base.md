@@ -1,6 +1,6 @@
 ---
 title: nsh/base
-description: "Unstyled base components for an app's UI: buttons, checkboxes, radios, switches, tabs, selects, resizable panels, dockable workspaces, Markdown and HTML documents, a code editor, diffs, text inputs, navigation stacks and dialogs, system alert dialogs and the status bar of pages and dialogs."
+description: "Unstyled base components for an app's UI: buttons, links, checkboxes, radios, switches, tabs, toggles, selects, comboboxes, calendars, date pickers, time fields, resizable panels, dockable workspaces, Markdown and HTML documents, a code editor, diffs, text inputs, navigation stacks and dialogs, system alert dialogs and the status bar of pages and dialogs."
 order: 2.5
 demo: ui-navigation
 ---
@@ -10,7 +10,7 @@ demo: ui-navigation
 `nsh/base` is the base component layer of an app's UI: unstyled components that own behavior, state, focus and
 accessibility, on every platform. It sits between the primitives (`nsh`, `nsh/mobile` and `nsh/desktop`) and the
 app's own component library, as `gpui-base` sits between `gpui` and a styled library in GPUI Kit (see
-[Modules](./index.md#three-layers)). It provides controls (`Button`, `Checkbox`, `NumberInput`, `Radio` in a `RadioGroup`, `Slider`, `Switch`, `Tab` in `Tabs`, `Select`), regions that expand and collapse (`Collapsible`), a progress bar (`Progress`), one-time codes (`OtpInput`), the parts charts are built from (`Plot` with `Line`, `Area`, `Bar`, `Grid`, `Pie` and `Arc`, in `nsh/base/plot`), workspaces the user arranges (`ResizablePanel`s in a
+[Modules](./index.md#three-layers)). It provides controls (`Button`, `Link`, `Checkbox`, `ColorPicker` with its `ColorArea`, `ColorSlider`, `ColorField`, `ColorSwatch` and `ColorEyeDropper`, `NumberInput`, `Radio` in a `RadioGroup`, `Slider`, `Switch`, `Tab` in `Tabs`, `Toggle` in a `ToggleGroup`, `Select`, `Combobox`, `Calendar`, `TimeField`, `DatePicker`), scroll bars of the app's own look (`Scrollbar`), regions that expand and collapse (`Collapsible`, and `Accordion` with its `AccordionItem`, `AccordionHeader`, `AccordionTrigger` and `AccordionPanel`), a progress bar (`Progress`), one-time codes (`OtpInput`), the parts charts are built from (`Plot` with `Line`, `Area`, `Bar`, `Grid`, `Pie` and `Arc`, in `nsh/base/plot`), workspaces the user arranges (`ResizablePanel`s in a
 `ResizablePanelGroup`, and `DockArea`'s splits, tab groups and docks), documents of Markdown or HTML (`TextView`), a code editor (`Editor`) the changes between texts (`DiffView`) and tables of rows and columns (`Table` and its parts, `DataTable`), text inputs
 (`Input`), popups shown on top of everything (`Popover`, `Menu` and `ContextMenu` with their `MenuItem`,
 `MenuSeparator` and `Submenu`, `Tooltip`, `Sheet`), toasts (`Toast` in a `ToastStack`, their lifecycle in a `ToastManager`), navigation (a `NavStack` of `NavPage`s driven
@@ -25,17 +25,30 @@ from the `nsh-base` crate (`nsh_base::{button, dialog, …}`).
 
 ```rust tabs
 use nsh_base::{
-    MarkdownExtension, MarkdownOptions, alert_dialog, button, checkbox, dialog, diff_view, dock_area, editor,
-    h_resizable, nav_page, nav_stack, radio, radio_group, resizable_panel, select, switch, tab, tabs, text_view, theme, toast, toast_stack, v_resizable,
+    MarkdownExtension, MarkdownOptions, accordion, accordion_header, accordion_item, accordion_panel, accordion_trigger,
+    alert_dialog, button, checkbox, color_area, color_field, color_picker,
+    color_slider, color_swatch, dialog, diff_view, dock_area, editor, link,
+    calendar, combobox, date_picker, h_resizable, nav_page, nav_stack, radio, radio_group, resizable_panel, select, switch, tab, tabs, text_view, theme, time_field, toast, toast_stack, toggle, toggle_group, v_resizable,
 };
 ```
 
 ```tsx tabs
 import {
+  Accordion,
+  AccordionHeader,
+  AccordionItem,
+  AccordionPanel,
+  AccordionTrigger,
   AlertDialog,
   Button,
   Checkbox,
   Collapsible,
+  ColorArea,
+  ColorEyeDropper,
+  ColorField,
+  ColorPicker,
+  ColorSlider,
+  ColorSwatch,
   ContextMenu,
   createNavStack,
   DataTable,
@@ -43,6 +56,7 @@ import {
   DiffView,
   DockArea,
   Editor,
+  Link,
   Menu,
   OtpInput,
   Progress,
@@ -55,7 +69,12 @@ import {
   RadioGroup,
   ResizablePanel,
   ResizablePanelGroup,
+  Scrollbar,
   Select,
+  Combobox,
+  Calendar,
+  TimeField,
+  DatePicker,
   Sheet,
   NumberInput,
   Slider,
@@ -75,16 +94,32 @@ import {
   Toast,
   ToastManager,
   ToastStack,
+  Toggle,
+  ToggleGroup,
   Tooltip,
 } from "nsh/base";
 import type {
+  AccordionHeaderProps,
+  AccordionItemProps,
+  AccordionPanelProps,
+  AccordionProps,
+  AccordionTriggerProps,
   AlertDialogAction,
   AlertDialogOptions,
   AlertDialogPresentation,
+  AlertDialogResult,
   AlertDialogRole,
   ButtonProps,
   CheckboxProps,
   CollapsibleProps,
+  ColorAreaProps,
+  ColorChannel,
+  ColorFieldProps,
+  ColorFormat,
+  ColorPickerProps,
+  ColorSliderProps,
+  ColorSpace,
+  ColorSwatchProps,
   DialogChangeReason,
   DataTableColumn,
   DataTableProps,
@@ -107,11 +142,14 @@ import type {
   EditorDiagnostic,
   EditorProps,
   EditorRef,
+  EditorReplaceAll,
   EditorSearch,
   EditorSearchResult,
   EditorSelection,
   Edges,
   HeaderStyle,
+  LinkOpenWith,
+  LinkProps,
   NavPageProps,
   NavStackProps,
   NavStackState,
@@ -125,6 +163,16 @@ import type {
   SelectItem,
   SelectItemState,
   SelectProps,
+  ComboboxProps,
+  CalendarProps,
+  TimeFieldProps,
+  DatePickerProps,
+  ScrollbarEntrance,
+  ScrollbarLook,
+  ScrollbarMode,
+  ScrollbarMotion,
+  ScrollbarProps,
+  ScrollbarTheme,
   SliderProps,
   SliderScale,
   SliderValue,
@@ -142,6 +190,8 @@ import type {
   ToastProps,
   ToastStackProps,
   ToastTransitionStatus,
+  ToggleGroupProps,
+  ToggleProps,
 } from "nsh/base";
 ```
 
@@ -151,16 +201,25 @@ walkthroughs, see the [Navigation guide](../docs/navigation.md) and [Forms and k
 | TSX | Rust | What it is |
 |---|---|---|
 | [`Button`](../elements/button.md) | `button()` | A press target with the disabled and selected states and a role for screen readers. |
+| [`Link`](../elements/link.md) | `link()` | A press target that goes somewhere: it opens its `href` through the system, or the app opens it (`openWith="app"`, `onOpen`). |
 | [`Checkbox`](../elements/checkbox.md) | `checkbox()` | A checked, unchecked or indeterminate control with an indicator the app styles and marks. |
 | [`Radio`](../elements/radio.md), [`RadioGroup`](../elements/radio.md) | `radio()`, `radio_group()` | One option of a set the user picks one of, and the set; the app owns which one is checked. |
 | [`Switch`](../elements/switch.md) | `switch()` | An on / off control with a track and a thumb the app styles. |
 | [`Tab`](../elements/tabs.md), [`Tabs`](../elements/tabs.md) | `tab()`, `tabs()` | One tab of a tab list, and the list; the app owns which one is selected and shows its content. |
+| [`Toggle`](../elements/toggle.md), [`ToggleGroup`](../elements/toggle.md) | `toggle()`, `toggle_group()` | A button that is on or off, and a toolbar of them; the app owns which ones are pressed. |
 | [`Select`](../elements/select.md) | `select()` | One value from a list of items: a popup at the trigger on desktops, a sheet on phones; the app owns `value` and draws the trigger. |
+| [`Combobox`](../elements/combobox.md) | `combobox()` | One value or several (`multiple`) from a searchable list of items, as a select's; the app owns `value` and draws the trigger. |
+| [`Calendar`](../elements/calendar.md) | `calendar()` | A date or a range of dates picked from months of days, with month and year views and the keyboard; the app owns `value` and draws the items. |
+| [`TimeField`](../elements/time-field.md) | `time_field()` | A time of day edited segment by segment (hour, minute, second, AM/PM); the app owns `value`. |
+| [`DatePicker`](../elements/date-picker.md) | `date_picker()` | A date, a range or a date and time from a calendar in a popup at the trigger on desktops, a sheet on phones; the app owns `value` and draws the trigger. |
 | [`Collapsible`](../elements/collapsible.md) | `collapsible()` | A region whose content expands and collapses; the app owns `open` and its trigger. |
+| [`Accordion`](../elements/accordion.md), [`AccordionItem`](../elements/accordion.md), [`AccordionHeader`](../elements/accordion.md), [`AccordionTrigger`](../elements/accordion.md), [`AccordionPanel`](../elements/accordion.md) | `accordion()`, `accordion_item()`, `accordion_header()`, `accordion_trigger()`, `accordion_panel()` | Stacked sections that expand and collapse under their headings, one at a time or several (`multiple`); the app owns `value`, the open items. |
 | [`OtpInput`](../elements/otp-input.md) | `otp_input()` | A one-time code in cells the app styles; the app owns `value`, `onComplete` tells when it is full. |
 | [`Progress`](../elements/progress.md) | `progress()` | A progress bar; the app owns `value` (0 to 100) and `indeterminate`. |
 | [`NumberInput`](../elements/number-input.md) | `number_input()` | A number typed in a field or stepped with buttons and keys; the app owns `value` (or the input keeps its own from `defaultValue`). |
+| [`Scrollbar`](../elements/scrollbar.md) | `scrollbar()` | A scroll bar of the app's own look for the scroll view or list it names (`scroll`); its thumb follows the content and its drags and presses scroll it. |
 | [`Slider`](../elements/slider.md) | `slider()` | A value, or a range of two, picked along a track; the app owns `value` (or the slider keeps its own from `defaultValue`). |
+| [`ColorPicker`, `ColorArea`, `ColorSlider`, `ColorField`, `ColorSwatch`, `ColorEyeDropper`](../elements/color-picker.md) | `color_picker()`, `color_area()`, `color_slider()`, `color_field()`, `color_swatch()`, `color_eye_dropper()` | A color picker and its parts: a saturation and brightness area, sliders of any channel of RGB, HSL, HSB or OKLCH and of the alpha, fields of the color or a channel, swatches, an eyedropper; the app owns `value` (or the picker keeps its own from `defaultValue`). |
 | [`ResizablePanelGroup`, `ResizablePanel`](../elements/resizable.md) | `h_resizable()`, `v_resizable()`, `resizable_panel()` | Panels side by side or stacked, with handles the user drags to resize them. |
 | [`DockArea`](../elements/dock.md) | `dock_area()` | A workspace of splits, tab groups and edge docks the user arranges; its layout is the app's data. |
 | [`NavStack`, `NavPage`, `createNavStack`](../elements/nav-stack.md) | `nav_stack()`, `nav_page()` | A native navigation stack and its pages. |
@@ -189,6 +248,13 @@ TSX's [theme classes](../docs/tailwind.md#theme-tokens) use.
 A press target that owns its behavior and has no look: presses, the disabled and selected states and its role for
 screen readers. Its look is the app's `class` and `style` with state variants, its content is its children. See
 [Button](../elements/button.md).
+
+### Link
+
+A press target that goes somewhere and has no look: presses, Return and Space while it has the keyboard focus, the
+disabled state, the link role for screen readers and the current page of a navigation (`current`). `href` is where it
+goes, never shown: a press reports it (`onOpen`), then opens a web page or another app's link outside the app, or,
+with `openWith="app"`, leaves the opening to the app's own routes. See [Link](../elements/link.md).
 
 ### Checkbox
 
@@ -221,6 +287,16 @@ screen readers announce and holds no value: the app tells each tab whether it is
 presses (`onPress`) and shows the selected section's content itself. The app's label is the tab's children, whose
 `group-selected:` classes follow it. See [Tabs](../elements/tabs.md).
 
+### Toggle and ToggleGroup
+
+A button that is on or off (bold, a favorite, a view option), and a toolbar of them. A toggle owns its behavior and
+has no look: presses, keyboard activation, the disabled state and the button role with its pressed state for screen
+readers. The group is the toolbar screen readers announce, one stop of the keyboard focus whose arrow keys move
+between its toggles without pressing them, and holds no value: the app tells each toggle whether it is pressed
+(`pressed`), hears the value it asks for (`onChange`), and keeps any number pressed or exactly one. `disabled` on the
+group disables every toggle in it. The app's icon or label is the toggle's children, whose `group-aria-pressed:`
+classes follow it. See [Toggle](../elements/toggle.md).
+
 ### Select
 
 One value chosen from a list of items given as data (`items`: a value and a title each, optionally disabled or in a
@@ -230,12 +306,52 @@ and Escape), search (`searchable`), the highlighted row (`focus:` on `itemClass`
 the combobox, listbox and option roles for screen readers. The app owns the value (`value`, `onChange`) or leaves it
 to the select (`defaultValue`), and styles each part or draws the rows. See [Select](../elements/select.md).
 
+### Combobox
+
+Values chosen from a list of items, as a select's list, with no look: one, or with `multiple` several, a choice then
+toggling the item while the list stays open. The value is an array the app owns (`value`, `onChange`) or leaves to
+the combobox (`defaultValue`); `onConfirm` tells it as the list closes. The query can be the app's (`query`,
+`onQueryChange`), a footer shows below the rows and a clear button empties the value. See
+[Combobox](../elements/combobox.md).
+
+### Calendar
+
+A date, or with `range` a range of dates, picked from months of days, with no look. One month or several
+(`numberOfMonths`) show side by side; the header turns them and opens a view of the months or a page of years. The
+value is an ISO date (`"2026-10-28"`) or `[start, end]` the app owns (`value`, `onChange`) or leaves to the calendar
+(`defaultValue`); `disabledMatcher` keeps days from being picked, and the days take the keyboard as one stop of Tab.
+The app styles the parts and draws the items (`renderItem`). See [Calendar](../elements/calendar.md).
+
+### TimeField
+
+A time of day edited a segment at a time, with no look: the hour, the minute, the second (`precision`) and AM/PM
+(`hourCycle="h12"`), by stepping, typing or a phone's number pad. The value is `"HH:MM"` (`"HH:MM:SS"`) on a
+24-hour clock, the app's (`value`, `onChange`) or the field's own (`defaultValue`). See
+[TimeField](../elements/time-field.md).
+
+### DatePicker
+
+A date picked from a calendar that opens from the app's trigger, as a select's list does: a popup on desktops, a
+sheet on phones. The value is in the forms of the HTML inputs, an ISO date, `[start, end]` with `range` or a date and
+time with `timePrecision` (a time field under the calendar), the app's (`value`, `onChange`) or the picker's own
+(`defaultValue`). Presets set it, a clear button clears it, and every prop of `Calendar` passes on. See
+[DatePicker](../elements/date-picker.md).
+
 ### Collapsible
 
 A region whose content expands and collapses, with no look: its children show always (a summary, the trigger), its
 `content` after them while `open`. The app owns `open` and the trigger that flips it, and says the expanded state to
-screen readers there. The content is made once and kept while collapsed, so what is inside keeps its state. See
-[Collapsible](../elements/collapsible.md).
+screen readers there. The content is made once and kept while collapsed, so what is inside keeps its state. With
+`reveal` it opens and closes with a springing height, natively. See [Collapsible](../elements/collapsible.md).
+
+### Accordion
+
+Stacked sections that expand and collapse under their headings, with no look: an `Accordion` of `AccordionItem`s, each
+an `AccordionHeader` around its `AccordionTrigger` and an `AccordionPanel`. The app owns `value`, the open items'
+values, and sets the one `onChange` reports when a trigger is pressed: one item at a time, or several with `multiple`.
+Screen readers hear a group of headings whose buttons say whether their item is expanded, and each open panel as a
+region. With `reveal` a panel opens and closes with a springing height, natively; with `keepMounted` its content stays
+in the tree while closed. See [Accordion](../elements/accordion.md).
 
 ### Progress
 
@@ -263,6 +379,25 @@ inside it that the values map onto, the range and one thumb per value on it. The
 `axis` lays the track out horizontally or vertically. Each thumb is an adjustable element for screen readers with its
 own value, a stop of the keyboard focus, and moves with WAI-ARIA's slider keys. See [Slider](../elements/slider.md).
 
+### Scrollbar
+
+A scroll bar of the app's own look for a scroll view or a list, placed where the app wants it, with no look: a track
+(the bar's `class`) and a thumb in it (`thumbClass`). It names its scroll view (`scroll`, its `ref`) and follows its
+offset, content and viewport; a drag of the thumb scrolls the content, a press on the track brings the thumb's middle
+there. `mode` shows it while the content scrolls (until `motion.idle` after), while the pointer is over the bar,
+or always; `axis` makes it horizontal. `Scrollbar.setTheme` gives every scroll view and list a bar of the app's look
+over its viewport, with none to place, and a view takes a theme of its own as its `scrollbar` prop. See
+[Scrollbar](../elements/scrollbar.md).
+### ColorPicker
+
+A color picker with no look: the root holds the color and the parts inside it show and change it, laid out by the app.
+`ColorArea` is HSB's saturation and brightness, `ColorSlider` any channel of RGB, HSL, HSB or OKLCH or the alpha
+(horizontal or vertical), `ColorField` the color in any CSS form or a channel's number, `ColorSwatch` a preset a press
+picks or a preview of the color, `ColorEyeDropper` a button picking a color on the screen (macOS, the web). The app owns `value` (or the picker keeps its own from `defaultValue`) and hears
+`onChange` and `onChangeEnd` with the color and its text as `format` writes it; the picker keeps each space's
+channels as the user set them. The thumbs are adjustable elements for screen readers and stops of the keyboard focus.
+See [ColorPicker](../elements/color-picker.md).
+
 ### OtpInput
 
 A fixed-length numeric one-time code, with no look: one native text field over the cells takes the keyboard, so
@@ -274,7 +409,7 @@ groups and the caret. See [OtpInput](../elements/otp-input.md).
 ### Plot (`nsh/base/plot`)
 
 The parts charts are built from, as `gpui-base`'s `plot`, in a module of their own: `import { Plot, Line, Area, Bar,
-Grid, Pie, Arc } from "nsh/base/plot"`. A `Plot` holds the app's rows (`data`, generic over their type, so `x` and `y`
+Grid, Pie, Arc, Sankey } from "nsh/base/plot"`. A `Plot` holds the app's rows (`data`, generic over their type, so `x` and `y`
 are checked keys or functions of a row), the `point`, `linear` or `band` scales of its axes, the row under the pointer
 (`onHoverChange`) and its motion (`motion`: the appear, the hover's fade and glide); its marks draw natively from the
 rows, with no JS per point, and paint with the SVG paint properties (`stroke-*`, `fill-*`), `currentColor` where none
@@ -285,7 +420,8 @@ with `hoverDotClass`) and tooltip (`tooltipPlacement`, kept inside the plot) are
 natively; axis labels are the app's own elements. A `Pie` splits the turn into a slice per row (a donut with an
 `innerRadius`), each painted with its own classes (`sliceClass`, a function of its row), and an `Arc` draws one sector
 between two angles (a gauge's track and value); over a pie the plot reports the slice under the pointer, which lifts
-(`hoverLift`) while the others fade (`hoverDim`). See [Plot](../elements/plot.md).
+(`hoverLift`) while the others fade (`hoverDim`). A `Sankey` draws flows between the rows (`links`), laid out as
+d3-sankey lays them out, each node and ribbon painted with its own classes, its nodes labelled, hovered and moving to new flows. See [Plot](../elements/plot.md).
 
 ## Workspaces
 
@@ -354,8 +490,8 @@ popup and backdrop are styled by the app. See [Dialog](../elements/dialog.md).
 
 ### AlertDialog
 
-`AlertDialog.show(options)` shows the platform's own alert or action sheet and resolves with the action the user
-chose. See [AlertDialog](../elements/alert-dialog.md).
+`AlertDialog.show(options)` shows the platform's own alert or action sheet and resolves with `{ action }`, the `id`
+of the action the user chose. See [AlertDialog](../elements/alert-dialog.md).
 
 ## Input
 
@@ -473,7 +609,7 @@ launch screen.
 
 - [Navigation guide](../docs/navigation.md).
 - [Forms and keyboard](../docs/forms-and-keyboard.md).
-- [Button](../elements/button.md), [Checkbox](../elements/checkbox.md), [Radio](../elements/radio.md), [Switch](../elements/switch.md), [Tabs](../elements/tabs.md), [Select](../elements/select.md), [Collapsible](../elements/collapsible.md), [Progress](../elements/progress.md), [Slider](../elements/slider.md), [NumberInput](../elements/number-input.md), [OtpInput](../elements/otp-input.md), [Plot](../elements/plot.md), [NavStack](../elements/nav-stack.md), [Dialog](../elements/dialog.md),
+- [Button](../elements/button.md), [Link](../elements/link.md), [Checkbox](../elements/checkbox.md), [Radio](../elements/radio.md), [Switch](../elements/switch.md), [Tabs](../elements/tabs.md), [Toggle](../elements/toggle.md), [Select](../elements/select.md), [Combobox](../elements/combobox.md), [Calendar](../elements/calendar.md), [TimeField](../elements/time-field.md), [DatePicker](../elements/date-picker.md), [Collapsible](../elements/collapsible.md), [Accordion](../elements/accordion.md), [Progress](../elements/progress.md), [Slider](../elements/slider.md), [ColorPicker](../elements/color-picker.md), [Scrollbar](../elements/scrollbar.md), [NumberInput](../elements/number-input.md), [OtpInput](../elements/otp-input.md), [Plot](../elements/plot.md), [NavStack](../elements/nav-stack.md), [Dialog](../elements/dialog.md),
   [AlertDialog](../elements/alert-dialog.md), [TextView](../elements/text-view.md), [Editor](../elements/editor.md), [DiffView](../elements/diff-view.md), [Table](../elements/table.md), [DataTable](../elements/data-table.md),
   [Text](../elements/text.md) and
   [Input](../elements/input.md).

@@ -197,7 +197,7 @@ export function Inspector(props: { children?: __JSX.Element }) {
 export function Split(props: { children?: __JSX.Element; inspector?: __JSX.Element; gap?: number; width?: number; grow?: boolean }) {
   return __View({
     get style() {
-      return wide() ? { flex: 1, flexDirection: "row" as const, gap: 16 } : { flex: props.grow ? 1 : 0, gap: props.gap ?? 14 };
+      return wide() ? { flex: 1, flexDirection: "row" as const, gap: 16 } : { flex: props.grow ? 1 : undefined, gap: props.gap ?? 14 };
     },
     get children() {
       if (!wide()) return [props.children, props.inspector];
@@ -236,7 +236,7 @@ export function Panel(props: { title: string; children?: __JSX.Element; minHeigh
   });
   return __View({
     get style() {
-      return { ...ui().inset, borderRadius: 12, padding: 12, gap: 4, minHeight: props.minHeight, flex: props.grow ? 1 : 0 };
+      return { ...ui().inset, borderRadius: 12, padding: 12, gap: 4, minHeight: props.minHeight, flex: props.grow ? 1 : undefined };
     },
     get children() {
       return [title, props.children];

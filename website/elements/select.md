@@ -1,7 +1,6 @@
 ---
 title: Select
 description: "The Select component: one value chosen from a list of items, a popup at its trigger on desktops and a sheet on phones, with the keyboard, typeahead, search and sections, styled by the app."
-order: 20.65
 group: base
 demo: el-select
 ---
@@ -21,7 +20,7 @@ the list, the rows, the sections' headers and the search field, or draws the row
 
 ```rust tabs
 use nsh_base::{SelectItem, SelectItemState, select, theme};
-use nsh_core::ui::prelude::*;
+use nsh_core::prelude::*;
 
 const FRUITS: [(&str, &str); 5] = [
     ("apple", "Apple"),
@@ -111,7 +110,7 @@ function App() {
     <Select
       items={FRUITS}
       value={fruit()}
-      onChange={(next) => fruit.set(next)}
+      onChange={({ value }) => fruit.set(value)}
       accessibilityLabel="Fruit"
       offset={4}
       popupClass="rounded-lg border border-border bg-popover p-1 text-popover-foreground shadow-md"
@@ -159,11 +158,11 @@ and the popup scrolls when its rows are taller than the room it has.
 ## Value
 
 With `value`, the app owns the chosen item: the select shows the item of that value and reports a choice with
-`onChange(value)`; the app sets `value` to follow it, or keeps its own. `value={null}` is nothing chosen. Left out, the
+`onChange({ value })`; the app sets `value` to follow it, or keeps its own. `value={null}` is nothing chosen. Left out, the
 select keeps its own value, from `defaultValue` at first. `onChange` reports changes: choosing the chosen item again
 closes the list.
 
-`cleanable` adds a clear button while an item is chosen: a press clears the value, reported as `onChange(null)`, and
+`cleanable` adds a clear button while an item is chosen: a press clears the value, reported as `onChange({ value: null })`, and
 the list stays closed. The button comes after the trigger in the select's view, not inside it, so a press on it never
 opens the list; the app places it (over the trigger's end with `absolute`, where a chevron would be) and fills it:
 
@@ -171,7 +170,7 @@ opens the list; the app places it (over the trigger's end with `absolute`, where
 <Select
   items={fonts}
   value={font()}
-  onChange={(next) => font.set(next)}
+  onChange={({ value }) => font.set(value)}
   cleanable
   clearButtonAccessibilityLabel="Clear the font"
   clearButtonClass="absolute right-2 top-2 size-5 items-center justify-center rounded-full hover:bg-accent"
@@ -188,7 +187,7 @@ follow the select, its own `onPress` runs too, and the list is placed against it
 ## Open state
 
 Without `open`, the select keeps its own open state (from `defaultOpen`). With `open`, the app owns it and changes it
-in `onOpenChange(open, reason)`: `"triggerPress"` (a press of the trigger, or one of its keys), `"select"` (a choice),
+in `onOpenChange({ open, reason })`: `"triggerPress"` (a press of the trigger, or one of its keys), `"select"` (a choice),
 `"pressOutside"`, `"backdropPress"` or `"cancel"` (Escape or back). `onOpen` and `onClose` tell when the list is
 shown and gone (a sheet once it came in and once it went), `onCancel` that the user closed it without choosing.
 
@@ -245,7 +244,7 @@ in view. `renderGroup` draws a section's header the same way:
 | `defaultOpen` | `.default_open(..)` | `boolean` | `false` | Open at first, without `open`. |
 | `searchable` | `.searchable(..)` | `boolean` | `false` | A search field above the items filters them by title. |
 | `searchPlaceholder` | `.search_placeholder(..)` | `string` | none | The search field's placeholder. |
-| `cleanable` | `.cleanable(..)` | `boolean` | `false` | A clear button while an item is chosen; a press clears the value (`onChange(null)`). |
+| `cleanable` | `.cleanable(..)` | `boolean` | `false` | A clear button while an item is chosen; a press clears the value (`onChange({ value: null })`). |
 | `disabled` | `.disabled(..)` | `boolean` | `false` | It stays closed: the trigger takes no presses and no keyboard focus, and `disabled:` styles apply to it. |
 | `accessibilityLabel` | `.accessibility_label(..)` | `string` | none | What screen readers call it: what the choice is about. |
 | `placement` | `.placement(..)` | `"top" \| "bottom" \| "left" \| "right"` | `"bottom"` | Desktops: the side of the trigger the list goes on, the other side when only that one has room. |
@@ -255,9 +254,9 @@ in view. `renderGroup` draws a section's header the same way:
 | `popupClass`, `popupStyle` | `.popup_class(..)`, `.popup_style(..)` | `string`, `StyleProp<ViewStyle>` | none | The popup (desktops) or the sheet (touch screens) the list is in. |
 | `backdropClass`, `backdropStyle` | `.backdrop_class(..)`, `.backdrop_style(..)` | `string`, `StyleProp<ViewStyle>` | none | Touch screens: the backdrop behind the sheet. |
 | `listClass`, `listStyle` | `.list_class(..)`, `.list_style(..)` | `string`, `StyleProp<ViewStyle>` | none | The list, the scroll view of the rows. |
-| `itemClass`, `itemStyle` | `.item_class(..)`, `.item_style(..)` | `string`, `StyleProp<ViewStyle>` | none | Each item's row: `focus:` while highlighted, `selected:` while chosen, `disabled:` while it cannot be. |
+| `itemClass`, `itemStyle` | `.item_class(..)`, `.item_style(..)` | `string`, `StyleProp<TextStyle>` | none | Each item's row, its text styles inherited by its title: `focus:` while highlighted, `selected:` while chosen, `disabled:` while it cannot be. |
 | `groupClass`, `groupStyle` | `.group_class(..)`, `.group_style(..)` | `string`, `StyleProp<ViewStyle>` | none | Each section's header. |
-| `searchClass`, `searchStyle` | `.search_class(..)`, `.search_style(..)` | `string`, `StyleProp<ViewStyle>` | none | The search field. |
+| `searchClass`, `searchStyle` | `.search_class(..)`, `.search_style(..)` | `string`, `StyleProp<InputStyle>` | none | The search field: its box and its text (`color`, `fontSize`, `placeholderColor`). |
 | `clearButtonClass`, `clearButtonStyle` | `.clear_button_class(..)`, `.clear_button_style(..)` | `string`, `StyleProp<ViewStyle>` | none | The clear button (`cleanable`); `disabled:` with the select. |
 | `clearButton` | `.clear_button(..)` | `JSX.Element` | none | The content of the clear button: a cross, an icon. |
 | `clearButtonAccessibilityLabel` | `.clear_button_accessibility_label(..)` | `string` | none | What screen readers call the clear button. |

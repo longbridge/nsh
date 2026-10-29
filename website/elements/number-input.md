@@ -1,7 +1,6 @@
 ---
 title: NumberInput
 description: "The NumberInput component: a number typed in a field or stepped with buttons, the arrow keys and screen readers, kept to its step's decimals and to min and max, with a field, buttons and a controls column the app styles."
-order: 20.87
 group: base
 demo: el-number-input
 ---
@@ -49,7 +48,7 @@ function App() {
   return (
     <NumberInput
       value={tickets()}
-      onChange={(next) => tickets.set(next)}
+      onChange={({ value }) => tickets.set(value)}
       min={1}
       max={10}
       accessibilityLabel="Tickets"
@@ -97,8 +96,8 @@ const price = signal<number | null>(19.95);
 
 <NumberInput
   value={price()}
-  onChange={(next) => price.set(next)}
-  onSubmit={(next) => save(next)}
+  onChange={({ value }) => price.set(value)}
+  onSubmit={({ value }) => save(value)}
   min={0}
   step={0.05}
   placeholder="Price"
@@ -129,7 +128,7 @@ The field takes:
 | `placeholder` | `.placeholder(..)` | `string` | none | Shown while the field is empty. |
 | `accessibilityLabel` | `.accessibility_label(..)` | `string` | none | What screen readers say for the field, when no visible label names it. |
 | `controlsRight` | `.controls_right(..)` | `boolean` | `false` | Both buttons in a column on the right of the field, the increment over the decrement. Read when the input is made. |
-| `inputClass`, `inputStyle` | `.input_style(\|s\| ..)` | `string`, `StyleProp<TextStyle>` | none | The field: its box and its text (`color`, `fontSize`, `textAlign`, `placeholderColor`). |
+| `inputClass`, `inputStyle` | `.input_style(\|s\| ..)` | `string`, `StyleProp<InputStyle>` | none | The field: its box and its text (`color`, `fontSize`, `textAlign`, `placeholderColor`, `caretColor`). |
 | `decrementButtonClass`, `decrementButtonStyle` | `.decrement_button_style(\|s\| ..)` | `string`, `StyleProp<ViewStyle>` | none | The decrement button. |
 | `incrementButtonClass`, `incrementButtonStyle` | `.increment_button_style(\|s\| ..)` | `string`, `StyleProp<ViewStyle>` | none | The increment button. |
 | `decrementButton`, `incrementButton` | `.decrement_button(..)`, `.increment_button(..)` | `JSX.Element` | none | The content of the buttons: a sign, an icon. |
@@ -142,8 +141,8 @@ The field takes:
 
 | Event | Rust | Payload | When |
 |---|---|---|---|
-| `onChange` | `.on_change(\|value: &Option<f64>\| ..)` | `number \| null` | The number the field reads as changed (typing, a step, a screen reader's increment or decrement, the field left with a value out of range). |
-| `onSubmit` | `.on_submit(\|value: &Option<f64>\| ..)` | `number \| null` | Return / Enter in the field: the value, held to `min` and `max`. |
+| `onChange` | `.on_change(\|value: &Option<f64>\| ..)` | `{ value: number \| null }` | The number the field reads as changed (typing, a step, a screen reader's increment or decrement, the field left with a value out of range). |
+| `onSubmit` | `.on_submit(\|value: &Option<f64>\| ..)` | `{ value: number \| null }` | Return / Enter in the field: the value, held to `min` and `max`. |
 | `onFocus` | `.on_focus(..)` | none | The field took the keyboard focus. |
 | `onBlur` | `.on_blur(..)` | none | The field lost the keyboard focus (its value held to `min` and `max` first). |
 

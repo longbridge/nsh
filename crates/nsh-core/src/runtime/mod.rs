@@ -18,7 +18,7 @@ mod clipboard;
 mod desktop;
 mod device;
 mod fs;
-pub(crate) mod host;
+mod host;
 mod image;
 mod net;
 mod os;

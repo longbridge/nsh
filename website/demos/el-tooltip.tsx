@@ -1,6 +1,6 @@
 import { mount, signal, Text, View } from "nsh";
 import { type OpenChangeReason, Tooltip } from "nsh/base";
-import { button, buttonText, desktop, Inspector, Log, Panel, Stage, ui, wide } from "./palette";
+import { button, buttonText, createPresence, desktop, Inspector, Log, Panel, Stage, ui, wide } from "./palette";
 
 /** An icon button with a hint of the app's look, above or below it. */
 function Tool(props: {
@@ -10,9 +10,11 @@ function Tool(props: {
   placement: "top" | "bottom";
   pinned: boolean;
   onPress: () => void;
-  onOpenChange: (open: boolean, reason: OpenChangeReason) => void;
+  onOpenChange: (e: { open: boolean; reason: OpenChangeReason }) => void;
 }) {
   const hovered = signal(false);
+  // The bubble stays made between showings: it comes in from its side as it shows.
+  const presence = createPresence(props.placement);
   return (
     <View style={{ alignItems: "center", gap: 6 }}>
       <View
@@ -26,13 +28,16 @@ function Tool(props: {
             offset={8}
             margin={8}
             delay={400}
-            onOpenChange={(open, reason) => {
-              hovered.set(open);
-              props.onOpenChange(open, reason);
+            onOpenChange={(e) => {
+              hovered.set(e.open);
+              props.onOpenChange(e);
             }}
-            style={{ backgroundColor: ui().text, borderRadius: 7, paddingHorizontal: 10, paddingVertical: 6 }}
+            onOpen={presence.show}
+            onClose={presence.hide}
           >
-            <Text style={{ fontSize: 13, color: ui().page }}>{props.hint}</Text>
+            <View style={{ backgroundColor: ui().text, borderRadius: 7, paddingHorizontal: 10, paddingVertical: 6, ...presence.style }}>
+              <Text style={{ fontSize: 13, color: ui().page }}>{props.hint}</Text>
+            </View>
           </Tooltip>
         }
       >
@@ -47,7 +52,7 @@ function App() {
   const events = signal<string[]>([]);
   const pressed = signal("—");
   const pinned = signal(false);
-  const log = (name: string) => (open: boolean, reason: OpenChangeReason) =>
+  const log = (name: string) => ({ open, reason }: { open: boolean; reason: OpenChangeReason }) =>
     events.set([`${name} ${open ? "shown" : "hidden"} · ${reason}`, ...events()].slice(0, 6));
   const tools = () => (
     <>
@@ -77,7 +82,7 @@ function App() {
       <Text style={{ fontSize: 13, color: ui().text }}>{pressed()}</Text>
     </Panel>
   );
-  const changes = () => <Log title="onOpenChange(open, reason)" lines={events()} minHeight={130} />;
+  const changes = () => <Log title="onOpenChange({ open, reason })" lines={events()} minHeight={130} />;
 
   return (
     <View style={{ flex: 1, backgroundColor: ui().page, padding: 20, paddingTop: 24, gap: 14 }}>

@@ -53,6 +53,33 @@ const failing = () => {
 const events = (sent) =>
   sent.filter(([name, p]) => name === "onHost" && p.type === "event").map(([, p]) => p.event);
 
+test("input autofill hints are set, changed and cleared on both field kinds", () => {
+  const { player } = fakePlayer();
+  const attrs = new Map();
+  const field = {
+    classList: { toggle() {} },
+    setAttribute: (name, value) => attrs.set(name, value),
+    removeAttribute: (name) => attrs.delete(name),
+  };
+  const el = { _field: field };
+  player.view = () => el;
+  for (const multiline of [false, true]) {
+    field.tagName = multiline ? "TEXTAREA" : "INPUT";
+    const config = { multiline };
+    const update = () => player.op_in(["in", 1, config, null]);
+    update();
+    assert.equal(attrs.has("autocomplete"), false, "the browser decides by default");
+    for (const token of ["username", "current-password", "new-password", "one-time-code", "off"]) {
+      config.autoComplete = token;
+      update();
+      assert.equal(attrs.get("autocomplete"), token);
+    }
+    delete config.autoComplete;
+    update();
+    assert.equal(attrs.has("autocomplete"), false, "returning to default clears the hint");
+  }
+});
+
 test("events sent before the app runs reach it in order once it starts, later ones at once", () => {
   const { player, sent } = fakePlayer();
   player.hostEvent("a", 1);
@@ -183,29 +210,23 @@ test("a browser-cancelled pan reports cancellation rather than a release", () =>
   }
 });
 
-test("run stages static source and bytecode chunks before starting the entry", () => {
+test("compileAndRun hands the compiled module to runSource, or returns the compile error", async () => {
   const { player } = fakePlayer();
-  const calls = [];
-  const text = (ptr, len) => new TextDecoder().decode(new Uint8Array(player.wasm.memory.buffer, ptr, len));
-  player.reset = () => [800, 600];
-  player.begin = () => calls.push(["start"]);
-  player.wasm.nsh_bundle_options = () => calls.push(["options"]);
-  player.wasm.nsh_bundle_chunk = (np, nl, cp, cl, bytecode) => {
-    calls.push([text(np, nl), bytecode, [...new Uint8Array(player.wasm.memory.buffer, cp, cl)]]);
-  };
-  player.run("entry", {
-    chunkBase: "https://example.test/",
-    preloadedChunks: {
-      "source.js": "export {}",
-      "bytecode.js": new Uint8Array([1, 2, 3]).buffer,
-    },
-  });
-  assert.deepEqual(calls, [
-    ["options"],
-    ["source.js", 0, [...new TextEncoder().encode("export {}")]],
-    ["bytecode.js", 1, [1, 2, 3]],
-    ["start"],
-  ]);
+  const ran = [];
+  player.compile = (source) => (source === "bad" ? { error: "1 | bad" } : { code: `compiled ${source}` });
+  player.browserHost = { runSource: async (code, options) => { ran.push([code, options]); } };
+  assert.equal(await player.compileAndRun("bad"), "1 | bad");
+  assert.equal(await player.compileAndRun("good", "Demo.tsx", { appId: "demo" }), null);
+  assert.deepEqual(ran, [["compiled good", { appId: "demo", capabilities: "", sourceMap: "", name: "Demo.tsx" }]]);
+});
+
+test("hotUpdate goes to the browser host, and is not applied without one", async () => {
+  const { player } = fakePlayer();
+  assert.equal(await player.hotUpdate("__nsh_hot.update({});"), false);
+  const updates = [];
+  player.browserHost = { hotUpdate: async (...args) => { updates.push(args); return true; } };
+  assert.equal(await player.hotUpdate("code", "hot-2.js", null), true);
+  assert.deepEqual(updates, [["code", "hot-2.js", ""]]);
 });
 
 /** A view element as `updateFocusable` and `keyDown` see it. */

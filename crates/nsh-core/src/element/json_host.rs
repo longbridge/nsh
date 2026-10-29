@@ -1,7 +1,9 @@
 //! A JS host over JSON values, for the core's tests: it reads and makes
 //! values as `nsh-js` does with QuickJS's, in an arena of JSON values
 //! (`undefined` apart), so props, events and results convert as they do
-//! for an app.
+//! for an app; and for UI sets that read values the core keeps as JSON
+//! ([`from_json`]).
+#![cfg_attr(not(test), allow(dead_code))]
 
 use std::{cell::RefCell, rc::Rc};
 
@@ -15,6 +17,7 @@ use crate::{JsonValue, NodeId};
 enum Val {
     Undefined,
     Json(JsonValue),
+    Function(Rc<dyn Fn()>),
 }
 
 /// The host: its values live as long as it does.
@@ -45,9 +48,17 @@ impl JsonHost {
 
     fn json_of(&self, v: JsRaw) -> Option<JsonValue> {
         match self.val(v) {
-            Val::Undefined => None,
+            Val::Undefined | Val::Function(_) => None,
             Val::Json(json) => Some(json),
         }
+    }
+
+    /// Calls function `v` ([`JsHost::new_function`]'s).
+    pub(crate) fn call(&self, v: JsRaw) {
+        let Val::Function(f) = self.val(v) else {
+            panic!("not a function")
+        };
+        f();
     }
 
     /// `json` as a value of the host.
@@ -66,6 +77,15 @@ pub(crate) fn decode(decode: PropDecode, json: JsonValue) -> Result<AnyValue, Pr
     let host = JsonHost::default();
     let raw = host.value(json);
     decode(JsIn::new(&host, raw))
+}
+
+/// JSON value `json` read as a JS value of type `T` is: what a UI set
+/// reads an object of the app's with when the core kept it as JSON (a
+/// view's `scrollbar` theme, [`super::BuiltInScrollbar::theme`]).
+pub fn from_json<T: super::JsValue>(json: &JsonValue) -> Result<T, PropError> {
+    let host = JsonHost::default();
+    let raw = host.value(json.clone());
+    T::from_js(JsIn::new(&host, raw))
 }
 
 /// The data JS hears with `event` (`None`: none).
@@ -103,6 +123,7 @@ impl JsHost for JsonHost {
             Val::Json(JsonValue::String(_)) => JsKind::String,
             Val::Json(JsonValue::Array(_)) => JsKind::Array,
             Val::Json(JsonValue::Object(_)) => JsKind::Object,
+            Val::Function(_) => JsKind::Function,
         }
     }
 
@@ -161,6 +182,7 @@ impl JsHost for JsonHost {
         match self.val(v) {
             Val::Undefined => "undefined".to_owned(),
             Val::Json(json) => json.to_string(),
+            Val::Function(_) => "[Function]".to_owned(),
         }
     }
 
@@ -282,6 +304,10 @@ impl JsHost for JsonHost {
 
     fn json(&self, v: &JsonValue) -> Result<JsRaw, PropError> {
         Ok(self.value(v.clone()))
+    }
+
+    fn new_function(&self, f: Box<dyn Fn()>) -> Result<JsRaw, PropError> {
+        Ok(self.put(Val::Function(f.into())))
     }
 
     fn wrap(&self, _instance: Rc<dyn ClassInstance>) -> Result<JsRaw, PropError> {

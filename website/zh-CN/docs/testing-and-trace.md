@@ -297,7 +297,7 @@ expect(app.texts()).toContain("Saved at 09:00:10");
 
 `Date`、`performance.now()` 和 `Intl` 的默认日期都跟随这个时钟。步骤不再等待正在进行的内容：只要应用在请求帧或有原生
 动画在运行，帧就一帧接一帧地立即到来，每帧在时钟上相隔一帧的时间（1/60 s）；300 ms 的转场只需几毫秒，期间到期的
-定时器也会执行。`app.wait(ms)` 和长按会把时钟推进它们各自的时长。更晚到期的定时器只有在测试把时钟推进到那里时才会执行。
+定时器也会执行。无限循环的动画（加载指示器）随时钟运行：测试推进时钟时它跟着转动。`app.wait(ms)` 和长按会把时钟推进它们各自的时长。更晚到期的定时器只有在测试把时钟推进到那里时才会执行。
 `waitFor` 的超时仍按真实时间计算，因为它也在等待来自外部的内容（路由的函数、网络）。gallery 的测试就是这样运行的
 （`examples/gallery/tests`）：其中十二个要等动画的测试用 6 s，而不是 28 s。
 
@@ -331,7 +331,7 @@ expect(app.texts()).toContain("Saved at 09:00:10");
 | `await app.scroll(selector, distance)` | 沿滚动视图或列表（该视图、它外层的滚动视图，或它内部的第一个）的方向拖动 `distance` 点，每帧 10 点，不超出内容范围，前提是用户可以滚动它（`scrollable`）。负数表示往回滚。 |
 | `await app.hover(selector)` | 把鼠标移到视图中央：鼠标离开的视图收到 `onMouseLeave`，移入的视图收到 `onMouseEnter` 并应用 `hover:` 样式，监听的视图收到带位置、没有按下按键的 `onMouseMove`。用于桌面和任意宽度的 web，包括手机形态的浏览器（headless 时使用桌面或 `"web"` `platform`）；iOS 和 Android 手机没有鼠标，在那里会 reject。 |
 | `await app.rightClick(selector)` | 在视图中央按下鼠标右键：该视图或其外层最近的监听视图收到 `onContextMenu`。用于桌面和 web（headless 时使用桌面 `platform`）；手机没有鼠标，在那里会 reject。 |
-| `await app.paste(selector, { text?, html?, files?, uris? })` | 像剪贴板上有这些内容时用户粘贴一样粘贴到输入框：输入框获得焦点并收到 `onPaste`（`html` 是带格式的同一内容，`files` 是文件路径，其字节以 `File` 交给它，`uris` 是 `file:` URL），然后按 `pasteBehavior` 插入文本。支持 headless、macOS 和 iOS；本机剪贴板保持不变。 |
+| `await app.paste(selector, { text?, html?, files?, uris? })` | 像剪贴板上有这些内容时用户粘贴一样粘贴到输入框：输入框获得焦点并收到 `onPaste`（`html` 是带格式的同一内容，`files` 是文件路径，其字节以 `File` 交给它，`uris` 是 `file:` URL），然后按 `pasteBehavior` 插入文本。支持 headless、macOS、iOS 和 web；本机剪贴板保持不变。 |
 | `app.menu()` | 应用显示的上下文菜单（`Menu.popup`）中的操作：`label`（子菜单中的项写在子菜单名之后，如 `"Share > Mail"`）、`disabled`，可勾选项还有 `checked`；没有打开的菜单时为 `null`。 |
 | `await app.chooseMenuItem(label)` | 选择已打开上下文菜单中的操作，如同点击它：应用收到 `onMenu`（其 `onSelect` 运行），然后菜单关闭。该项被禁用或不存在时 reject。 |
 | `await app.closeMenu()` | 关闭已打开的上下文菜单，不选择任何项，如同按下 Escape。 |
@@ -348,7 +348,7 @@ expect(app.texts()).toContain("Saved at 09:00:10");
 | `app.enabled(selector)` | 视图是否接受输入：它本身和外层视图都没有被禁用，输入框还要求不是 `readonly`。 |
 | `app.texts()` | 当前屏幕上的文字，按顺序排列。 |
 | `app.value(selector)` | 输入框的内容，没有匹配时为 `null`。 |
-| `app.spanStyle(selector)` | 在无界面测试中，返回匹配到的第一个字符的解析样式：`color`、可选的 `backgroundColor`、`fontSize`、`fontWeight`、`italic`、`underline` 和 `lineThrough`。颜色为 `#rrggbbaa`，字号单位为 pt。 |
+| `app.spanStyle(selector)` | 返回匹配到的第一个字符的解析样式（无界面测试和各个 `--target` 都支持）：`color`、可选的 `backgroundColor`、`fontSize`、`fontWeight`、`italic`、`underline` 和 `lineThrough`。颜色为 `#rrggbbaa`，字号单位为 pt。 |
 | `app.storage()` | 应用存储当前保存的内容。 |
 | `await app.back()` | 像用户那样返回（导航栏的返回按钮、下滑关闭弹出页）：最新的模态窗口里（没有模态窗口时就在整个屏幕上）最内层的导航栈弹出栈顶页面（`onDismiss`），栈顶页面设置了 `preventBack` 时改为询问它（`onBackRequest`）；没有可返回的栈时，最新的模态窗口请求关闭（`onRequestClose`）。没有可返回的内容时 reject。 |
 | `app.onDialog(handler)` | 回答应用之后弹出的对话框（`Alert.alert`、操作表）：`handler` 接收对话框（`title`、`message`、`buttons`、`cancelable`、`sheet`），返回要按的按钮文字，返回 `null` 则不按按钮直接关闭。 |
@@ -364,10 +364,24 @@ expect(app.texts()).toContain("Saved at 09:00:10");
 | `await app.setColorScheme(scheme)` | 像用户那样把系统外观切换为 `"light"` 或 `"dark"`。 |
 | `await app.screenshot(path?)` | 应用窗口的 PNG 截图（`Uint8Array`）；给出 `path` 时同时保存到本机的这个路径（相对当前目录）。只有真实平台会绘制应用：见[在真实平台上运行](#在真实平台上运行)。 |
 
-步骤会等到应用连续 100 ms 没有渲染、并且没有正在运行的原生动画（对一直在渲染的应用最多等 2 s；在手动时钟上，同时最多等应用时间的 2 s）后才 resolve，所以下一行
-代码运行时，这一步带来的变化已经在屏幕上；之后才出现的内容（响应、定时器）用 `waitFor` 等待。选择器没有匹配到任何视图
+步骤会等到应用连续 100 ms 没有渲染、并且没有正在运行的、会自行结束的原生动画（对一直在渲染的应用最多等 2 s；在手动时钟上，同时最多等应用时间的 2 s）后才 resolve，所以下一行
+代码运行时，这一步带来的变化已经在屏幕上；之后才出现的内容（响应、定时器）用 `waitFor` 等待。无限循环的动画（比如加载
+指示器）在后台持续运行，步骤和 `waitFor` 照常进行，就像浏览器测试中的无限 CSS 动画一样。选择器没有匹配到任何视图
 （错误信息会列出屏幕上的文字）、应用在此期间抛出了异常，或者应用请求了只有真实平台才能回答的内容时，步骤会 reject，
 测试随之失败。
+
+测试可能要预期的失败都带有一个 `code`，它保持不变；错误消息是给人看的，可能会变，所以测试匹配 code：
+
+| `code` | 步骤或查询 |
+|---|---|
+| `ERR_NSH_TEST_NOT_FOUND` | 屏幕上没有视图匹配选择器，或者打开的菜单没有这一项。 |
+| `ERR_NSH_TEST_DISABLED` | 选择器指向的视图已禁用（用户不能滚动的滚动视图、已禁用的菜单项）。 |
+| `ETIMEDOUT` | `waitFor` 或 `waitUntil` 超时，或者应用在 `open` 之后没有渲染任何内容。 |
+| `ERR_NSH_TEST_NO_BACK` | `back()` 没有可以返回的地方。 |
+
+```tsx
+await expect(app.press("Pay")).rejects.toMatchObject({ code: "ERR_NSH_TEST_DISABLED" });
+```
 
 `app.spanStyle("id:guide")` 读取嵌套的 `<Text testID="guide">`；`text:word` 读取匹配文字的第一个字符。
 用 `id:note >> text:word` 限定范围，用 `>> nth=0` 选择重复匹配中的一个。
@@ -377,7 +391,7 @@ expect(app.texts()).toContain("Saved at 09:00:10");
 
 无界面运行有真实的运行时，但没有平台。它只扮演 NSH 协议规定的平台角色，不模拟只有真实平台才能做的事：
 
-- **原生动画会运行**，逐帧跑到结束：`start(callback)` 的回调会执行，等待动画结束的逻辑也会继续。
+- **原生动画会运行**，逐帧跑到结束：`start(callback)` 的回调会执行，等待动画结束的逻辑也会继续。没有终点的循环一直运行，直到应用停止它。
 - **返回**会像平台那样弹出页面、关闭模态窗口（`app.back()`）。
 - **对话框会被回答**：由测试的 `onDialog` 回答，否则按它的取消按钮，否则在可以关闭时直接关闭；只能用其他按钮回答的对话框，
   会让弹出它的步骤失败，直到测试指定要按哪个按钮。
@@ -416,7 +430,9 @@ test("calls reach the page's host", async () => {
 ### 断言
 
 `expect(value)` 按 JSON 的方式比较值（`undefined` 视为 `null`，数字按数值比较），每个检查不成立时都会抛出异常。
-`.not` 把检查反过来：`expect(app.texts()).not.toContain("Error")`。
+`.not` 把检查反过来：`expect(app.texts()).not.toContain("Error")`。给出函数时，`toThrow` 检查调用它抛出的异常；
+给出 promise 或返回 promise 的函数时，`rejects` 和 `resolves` 检查它的结果，与 Jest 相同：
+`await expect(save()).rejects.toMatchObject({ code: "ERR_ACCESS_DENIED" })`。
 
 | 检查 | 成立条件 |
 |---|---|
@@ -427,8 +443,13 @@ test("calls reach the page's host", async () => {
 | `toHaveLength(n)` | 数组有 `n` 项，或者字符串有 `n` 个 UTF-16 单元。 |
 | `toBeNull()` | 值为 `null`（或 `undefined`）。 |
 | `toBeGreaterThan(n)`、`toBeGreaterThanOrEqual(n)`、`toBeLessThan(n)`、`toBeLessThanOrEqual(n)` | 数字与 `n` 满足相应的大小关系。 |
-| `toThrow(message?)` | `expect(fn)`：调用 `fn` 会抛出异常；给了 `message` 时，异常消息要匹配它。 |
-| `rejects.toThrow(message?)` | `expect(fn)`：`fn` 返回的 promise 会 reject：`await expect(() => app.press("Pay")).rejects.toThrow("is disabled")`。 |
+| `toMatchObject(subset)` | 值具有 `subset` 的每个属性，且各自相等，其中的对象也依次匹配；不看其他属性，数组逐项匹配，项数相同。 |
+| `toThrow(expected?)` | `expect(fn)`：调用 `fn` 会抛出异常。给了 `expected` 时，异常要匹配它：消息包含字符串或匹配 `RegExp`；错误类（`TypeError`、应用自己的类）要与异常的 `name` 相同，`Error` 匹配所有错误；错误对象要消息相同。 |
+| `rejects.toThrow(expected?)` | `expect(promise)`：promise 会 reject，异常按 `toThrow` 的规则匹配 `expected`。 |
+| `rejects.toMatchObject(subset)` | `expect(promise)`：promise 会 reject，reject 的值按 `toMatchObject` 的规则匹配 `subset`：错误自身的属性（`code`、`permission` 等），加上它的 `name` 和 `message`。 |
+| `resolves.toBe(expected)`、`resolves.toEqual(expected)`、`resolves.toMatchObject(subset)` | `expect(promise)`：promise resolve 的值满足相应的检查。 |
+
+`rejects` 和 `resolves` 也有自己的 `.not`：`await expect(load()).resolves.not.toBe(null)`。
 
 ### 在真实平台上运行
 

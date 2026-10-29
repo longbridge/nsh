@@ -1,12 +1,12 @@
 //! `websocket`: an explicit WebSocket client (`WebSocket.connect(url)`),
 //! allowed by the HTTP grants a GET of its URL needs
 //! ([`crate::access::Access::allows_websocket`]). Calls check their URL,
-//! options, grant and limits in the JS call (a `TypeError` or `RangeError`
-//! there); the handshake is a task of the core, and each connection's
-//! socket is driven by a task of its own on the engine's tokio runtime,
-//! which answers pings and keeps up to eight unread messages.
+//! options, grant and limits in the JS call and reject at once (the codes
+//! are the parent module's); the handshake is a task of the core, and each
+//! connection's socket is driven by a task of its own on the engine's tokio
+//! runtime, which answers pings and keeps up to eight unread messages.
 
-use std::{cell::Cell, collections::VecDeque, rc::Rc, time::Duration};
+use std::{cell::Cell, collections::VecDeque, rc::Rc, sync::Arc, time::Duration};
 
 use futures_util::{SinkExt, StreamExt};
 use tokio::sync::{mpsc, oneshot};
@@ -17,14 +17,8 @@ use tokio_tungstenite::tungstenite::{
     protocol::WebSocketConfig,
 };
 
-use super::{
-    super::{MAX_WEBSOCKETS, WEBSOCKETS},
-    ConnectOptions, Data,
-};
-use crate::element::{
-    Held, JsError, Later, System,
-    ambient::{Spawned, spawn},
-};
+use super::{ConnectOptions, Data, busy, closed, denied, exceeded, slot, timed_out, too_long};
+use crate::element::{Held, JsError, Later, Spawned, System, io_code, spawn};
 
 /// The largest message one write sends or one read returns.
 const LIMIT: usize = 8 * 1024 * 1024;
@@ -37,7 +31,7 @@ const UNREAD: usize = 8;
 /// connection. Native memory the heap limit does not cover.
 const UNREAD_BYTES: usize = LIMIT;
 /// Bytes of writes not sent yet, per connection (the global `WebSocket`'s
-/// `bufferedAmount` limit); a write past it throws.
+/// `bufferedAmount` limit); a write past it rejects.
 const PENDING_WRITES: usize = LIMIT;
 
 /// WebSocket client connections to the hosts the HTTP grants allow (native
@@ -51,7 +45,7 @@ impl WebSocket {
         url: String,
         options: Option<ConnectOptions>,
         sys: System,
-    ) -> Result<impl Future<Output = Result<WebSocketConnection, String>>, JsError> {
+    ) -> Result<impl Future<Output = Result<WebSocketConnection, JsError>>, JsError> {
         let parsed = url::Url::parse(&url)
             .map_err(|error| JsError::Type(format!("invalid WebSocket URL: {error}")))?;
         if !matches!(parsed.scheme(), "ws" | "wss") {
@@ -77,15 +71,9 @@ impl WebSocket {
         })?;
         // Checked on the parsed URL, which is the one the handshake uses.
         if !sys.access.allows_websocket(parsed.as_str()) {
-            return Err(JsError::Type(format!(
-                "network access to `{host}` is not granted; add it to capabilities.network.hosts or a GET rule in capabilities.network.http"
-            )));
+            return Err(denied(parsed.as_str()));
         }
-        let held = sys.quotas.take(WEBSOCKETS, MAX_WEBSOCKETS).ok_or_else(|| {
-            JsError::Range(format!(
-                "At most {MAX_WEBSOCKETS} concurrent WebSockets are allowed per VM"
-            ))
-        })?;
+        let held = slot(&sys)?;
         let headers = options
             .map(|o| o.headers)
             .unwrap_or_default()
@@ -102,7 +90,7 @@ impl WebSocket {
     }
 }
 
-type Reply<T> = oneshot::Sender<Result<T, String>>;
+type Reply<T> = oneshot::Sender<Result<T, JsError>>;
 
 enum Command {
     Read(Reply<Message>),
@@ -131,13 +119,11 @@ impl WebSocketConnection {
         };
         let length = message.len();
         if length > LIMIT {
-            return Err(JsError::Range(format!(
-                "WebSocket write exceeded the {LIMIT} byte limit"
-            )));
+            return Err(too_long(length));
         }
         let queued = self.pending.get() + length;
         if queued > PENDING_WRITES {
-            return Err(JsError::Range(format!(
+            return Err(exceeded(format!(
                 "WebSocket writes waiting to be sent exceeded the {PENDING_WRITES} byte limit"
             )));
         }
@@ -160,9 +146,7 @@ impl WebSocketConnection {
     /// The next message: a string for text, a Uint8Array for bytes.
     pub(super) fn read(&self) -> Result<Later<Data>, JsError> {
         if self.reading.replace(true) {
-            return Err(JsError::Type(
-                "WebSocket.read() already has an outstanding read".into(),
-            ));
+            return Err(busy());
         }
         struct Reading(Rc<Cell<bool>>);
         impl Drop for Reading {
@@ -175,7 +159,7 @@ impl WebSocketConnection {
         let message = enqueue(&self.commands, Command::Read(send), receive);
         Ok(Later::new(async move {
             let _reading = reading;
-            Ok::<_, String>(match message.await? {
+            Ok::<_, JsError>(match message.await? {
                 Message::Text(text) => Data::Text(text.as_str().to_owned()),
                 Message::Binary(bytes) => Data::Bytes(bytes.to_vec()),
                 _ => unreachable!("the driver returns data messages only"),
@@ -195,19 +179,41 @@ impl WebSocketConnection {
 fn enqueue<T: 'static>(
     commands: &mpsc::Sender<Command>,
     command: Command,
-    reply: oneshot::Receiver<Result<T, String>>,
-) -> impl Future<Output = Result<T, String>> + 'static {
+    reply: oneshot::Receiver<Result<T, JsError>>,
+) -> impl Future<Output = Result<T, JsError>> + 'static {
     let queued = commands.try_send(command).map_err(|error| match error {
-        mpsc::error::TrySendError::Full(_) => {
-            "WebSocket command queue is full; wait for an outstanding operation".to_owned()
-        }
-        mpsc::error::TrySendError::Closed(_) => "WebSocket connection is closed".to_owned(),
+        mpsc::error::TrySendError::Full(_) => exceeded(
+            "WebSocket command queue is full; wait for an outstanding operation".to_owned(),
+        ),
+        mpsc::error::TrySendError::Closed(_) => closed("WebSocket connection is closed"),
     });
     async move {
         queued?;
         reply
             .await
-            .map_err(|_| "WebSocket connection is closed".to_owned())?
+            .map_err(|_| closed("WebSocket connection is closed"))?
+    }
+}
+
+/// A failure of the socket or the protocol, `context` first in its
+/// message: the OS's code for an I/O error, `ERR_SOCKET_CLOSED` for a
+/// closed connection, `EMSGSIZE` for a message past the limit, `EPROTO`
+/// (and the HTTP `status` of a refused handshake) for the rest.
+fn failure(context: &str, error: tokio_tungstenite::tungstenite::Error) -> JsError {
+    use tokio_tungstenite::tungstenite::Error as E;
+    let message = format!("{context}: {error}");
+    match error {
+        E::Io(ref io) => match io_code(io) {
+            Some(code) => JsError::Error(message).with_code(code),
+            None => JsError::Error(message),
+        },
+        E::ConnectionClosed | E::AlreadyClosed => closed(message),
+        E::Capacity(_) => JsError::Error(message).with_code("EMSGSIZE"),
+        E::WriteBufferFull(_) => exceeded(message),
+        E::Http(ref response) => JsError::Error(message)
+            .with_code("EPROTO")
+            .with("status", response.status().as_u16()),
+        _ => JsError::Error(message).with_code("EPROTO"),
     }
 }
 
@@ -221,11 +227,11 @@ async fn open(
     port: u16,
     headers: Vec<(HeaderName, HeaderValue)>,
     held: Held,
-) -> Result<WebSocketConnection, String> {
+) -> Result<WebSocketConnection, JsError> {
     let mut request = url
         .as_str()
         .into_client_request()
-        .map_err(|error| format!("WebSocket handshake failed: {error}"))?;
+        .map_err(|error| failure("WebSocket handshake failed", error))?;
     request.headers_mut().extend(headers);
     request
         .headers_mut()
@@ -242,36 +248,59 @@ async fn open(
     let addresses =
         tokio::time::timeout_at(deadline, tokio::net::lookup_host((host.as_str(), port)))
             .await
-            .map_err(|_| format!("WebSocket connection failed: resolving {operation} timed out"))?
+            .map_err(|_| {
+                timed_out(&format!(
+                    "WebSocket connection failed: resolving {operation}"
+                ))
+            })?
+            // A failed lookup names no OS error: Node calls it ENOTFOUND.
             .map_err(|error| {
-                format!("WebSocket connection failed: resolving {operation} failed: {error}")
+                JsError::Error(format!(
+                    "WebSocket connection failed: resolving {operation} failed: {error}"
+                ))
+                .with_code("ENOTFOUND")
             })?;
     let mut connected = None;
-    let mut last_error = "host resolved to no addresses".to_owned();
+    let mut last_error = None;
     for address in addresses {
         match tokio::time::timeout_at(deadline, tokio::net::TcpStream::connect(address)).await {
             Ok(Ok(stream)) => {
                 connected = Some(stream);
                 break;
             }
-            Ok(Err(error)) => last_error = error.to_string(),
+            Ok(Err(error)) => last_error = Some(error),
             Err(_) => {
-                return Err(format!(
-                    "WebSocket connection failed: connecting to {operation} timed out"
-                ));
+                return Err(timed_out(&format!(
+                    "WebSocket connection failed: connecting to {operation}"
+                )));
             }
         }
     }
     let stream = connected.ok_or_else(|| {
-        format!("WebSocket connection failed: connecting to {operation} failed: {last_error}")
+        let message = format!(
+            "WebSocket connection failed: connecting to {operation} failed: {}",
+            last_error
+                .as_ref()
+                .map(|error| error.to_string())
+                .unwrap_or_else(|| "host resolved to no addresses".into())
+        );
+        let code = last_error.as_ref().and_then(io_code).unwrap_or("ENOTFOUND");
+        JsError::Error(message).with_code(code)
     })?;
+    let connector = if url.scheme() == "wss" {
+        Some(tokio_tungstenite::Connector::Rustls(
+            Arc::new(tls_config()?),
+        ))
+    } else {
+        None
+    };
     let (socket, _) = tokio::time::timeout_at(
         deadline,
-        tokio_tungstenite::client_async_tls_with_config(request, stream, Some(config), None),
+        tokio_tungstenite::client_async_tls_with_config(request, stream, Some(config), connector),
     )
     .await
-    .map_err(|_| "WebSocket handshake timed out".to_owned())?
-    .map_err(|error| format!("WebSocket handshake failed: {error}"))?;
+    .map_err(|_| timed_out("WebSocket handshake"))?
+    .map_err(|error| failure("WebSocket handshake failed", error))?;
     let (commands, receiver) = mpsc::channel(UNREAD);
     let driver = spawn(drive(socket, receiver, held));
     Ok(WebSocketConnection {
@@ -280,6 +309,19 @@ async fn open(
         pending: Rc::default(),
         _driver: driver,
     })
+}
+
+/// Respect the embedding host's provider; otherwise ring is local to this
+/// connection. Selecting a fallback must not configure the host's other TLS clients.
+fn tls_config() -> Result<rustls::ClientConfig, JsError> {
+    let provider = rustls::crypto::CryptoProvider::get_default()
+        .cloned()
+        .unwrap_or_else(|| Arc::new(rustls::crypto::ring::default_provider()));
+    let roots = rustls::RootCertStore::from_iter(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+    rustls::ClientConfig::builder_with_provider(provider)
+        .with_safe_default_protocol_versions()
+        .map_err(|error| JsError::Error(format!("WebSocket TLS configuration failed: {error}")))
+        .map(|builder| builder.with_root_certificates(roots).with_no_client_auth())
 }
 
 /// Runs the connection's commands and keeps what arrives until it is read.
@@ -296,7 +338,7 @@ async fn drive(mut socket: Socket, mut commands: mpsc::Receiver<Command>, held: 
             command = commands.recv() => match command {
                 None => {
                     messages.clear();
-                    break "WebSocket connection is closed".to_owned();
+                    break closed("WebSocket connection is closed");
                 }
                 Some(Command::Read(reply)) => match messages.pop_front() {
                     Some(message) => {
@@ -308,8 +350,8 @@ async fn drive(mut socket: Socket, mut commands: mpsc::Receiver<Command>, held: 
                 Some(Command::Write(message, reply)) => {
                     let result = tokio::time::timeout(TIMEOUT, socket.send(message))
                         .await
-                        .map_err(|_| "WebSocket write timed out".to_owned())
-                        .and_then(|result| result.map_err(|error| format!("WebSocket write failed: {error}")));
+                        .map_err(|_| timed_out("WebSocket write"))
+                        .and_then(|result| result.map_err(|error| failure("WebSocket write failed", error)));
                     let failure = result.as_ref().err().cloned();
                     let _ = reply.send(result);
                     if let Some(error) = failure {
@@ -319,12 +361,12 @@ async fn drive(mut socket: Socket, mut commands: mpsc::Receiver<Command>, held: 
                 Some(Command::Close(reply)) => {
                     let result = tokio::time::timeout(TIMEOUT, socket.close(None))
                         .await
-                        .map_err(|_| "WebSocket close timed out".to_owned())
-                        .and_then(|result| result.map_err(|error| format!("WebSocket close failed: {error}")));
+                        .map_err(|_| timed_out("WebSocket close"))
+                        .and_then(|result| result.map_err(|error| failure("WebSocket close failed", error)));
                     let _ = reply.send(result);
                     // Closed by the app: what was not read goes with it.
                     messages.clear();
-                    break "WebSocket connection is closed".to_owned();
+                    break closed("WebSocket connection is closed");
                 }
             },
             incoming = socket.next() => match incoming {
@@ -338,23 +380,23 @@ async fn drive(mut socket: Socket, mut commands: mpsc::Receiver<Command>, held: 
                         // The app reads slower than the peer sends: closing
                         // bounds the memory instead of buffering without end.
                         let _ = tokio::time::timeout(TIMEOUT, socket.close(None)).await;
-                        break format!(
+                        break exceeded(format!(
                             "WebSocket closed: more than {UNREAD} messages or {UNREAD_BYTES} bytes arrived unread"
-                        );
+                        ));
                     }
                 }
                 Some(Ok(Message::Ping(_))) => {
                     if let Err(error) = socket.flush().await {
-                        break format!("WebSocket pong failed: {error}");
+                        break failure("WebSocket pong failed", error);
                     }
                 }
                 Some(Ok(Message::Close(_))) => {
                     let _ = socket.flush().await;
-                    break "WebSocket closed by peer".to_owned();
+                    break closed("WebSocket closed by peer");
                 }
                 Some(Ok(_)) => {}
-                Some(Err(error)) => break format!("WebSocket read failed: {error}"),
-                None => break "WebSocket connection is closed".to_owned(),
+                Some(Err(error)) => break failure("WebSocket read failed", error),
+                None => break closed("WebSocket connection is closed"),
             }
         }
     };
@@ -369,12 +411,74 @@ async fn drive(mut socket: Socket, mut commands: mpsc::Receiver<Command>, held: 
                 let _ = reply.send(messages.pop_front().ok_or_else(|| error.clone()));
             }
             Command::Write(_, reply) => {
-                let _ = reply.send(Err("WebSocket connection is closed".to_owned()));
+                let _ = reply.send(Err(closed("WebSocket connection is closed")));
             }
             Command::Close(reply) => {
                 messages.clear();
                 let _ = reply.send(Ok(()));
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::access::Access;
+
+    #[test]
+    fn tls_provider_is_scoped_to_the_connection() {
+        // The default provider is a process-wide OnceLock. Exercise both its
+        // empty and installed states in a fresh process, apart from other tests.
+        let result = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "runtime::websocket::native::tests::tls_provider_in_fresh_process",
+                "--ignored",
+                "--nocapture",
+            ])
+            .output()
+            .unwrap();
+        assert!(
+            result.status.success(),
+            "{}\n{}",
+            String::from_utf8_lossy(&result.stdout),
+            String::from_utf8_lossy(&result.stderr)
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "run by tls_provider_is_scoped_to_the_connection in a fresh process"]
+    async fn tls_provider_in_fresh_process() {
+        use rustls::crypto::CryptoProvider;
+        assert!(CryptoProvider::get_default().is_none());
+        for scheme in ["ws", "wss"] {
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            let port = listener.local_addr().unwrap().port();
+            let peer = std::thread::spawn(move || {
+                drop(listener.accept().unwrap());
+            });
+            let sys = System {
+                access: Arc::new(Access::all()),
+                ..System::default()
+            };
+            let result = WebSocket::connect(format!("{scheme}://127.0.0.1:{port}"), None, sys)
+                .unwrap()
+                .await;
+            assert!(
+                matches!(result, Err(ref error) if error.message().contains("WebSocket handshake failed"))
+            );
+            peer.join().unwrap();
+            assert!(
+                CryptoProvider::get_default().is_none(),
+                "{scheme} selected the host's provider"
+            );
+        }
+        let mut host = rustls::crypto::ring::default_provider();
+        host.cipher_suites.truncate(1);
+        host.install_default().unwrap();
+        let host = CryptoProvider::get_default().unwrap();
+        let config = tls_config().unwrap();
+        assert!(Arc::ptr_eq(config.crypto_provider(), host));
     }
 }

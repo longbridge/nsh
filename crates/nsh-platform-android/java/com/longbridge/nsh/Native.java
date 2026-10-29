@@ -77,6 +77,8 @@ final class Native {
     static final int OPEN_URL = 65;
     static final int CARET_MOVE = 66;
     static final int PASTE = 67;
+    static final int SCREEN_COLOR = 68;
+    static final int FILE_REQUEST = 69;
 
     /**
      * Draws the SVG {@code bytes} for a view {@code maxPx} pixels on its longer side, with its shorter side that long
@@ -269,6 +271,14 @@ final class Native {
      * else null.
      */
     static native float[] scroll(long handle, int id, float x, float y, int applied);
+
+    /**
+     * How far a multiline input's text scrolled ({@code y}), the size of that
+     * text and of the input's viewport, in points; sent while a built-in bar
+     * replaces its scroll indicator.
+     */
+    static native void inputScroll(long handle, int id, float y, float contentWidth, float contentHeight,
+                                   float width, float height);
 
     /**
      * How far (points) a vertical scroll view is pulled past its top.

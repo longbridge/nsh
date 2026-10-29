@@ -158,11 +158,6 @@ pub struct Bundle {
     /// them without asking the platform); those missing are asked of
     /// [`MountSink::load_chunk`]. Shared by the bundle's clones.
     pub chunks: Arc<Vec<Chunk>>,
-    /// The sandbox's hardening as bytecode (`nsh_js::compile_harden`),
-    /// for a runtime without QuickJS' parser (the web runtime of published
-    /// apps); `None`: compiled when the policy hardens. Set it with
-    /// [`Bundle::with_harden_bytecode`].
-    pub harden_bytecode: Option<Arc<Vec<u8>>>,
     /// The app's id (`nsh.json` `"id"`; a signed package's verified one):
     /// it names where the app keeps its data (`nsh/storage`).
     pub app_id: Option<String>,
@@ -294,7 +289,6 @@ impl Bundle {
             policy: Policy::default(),
             base_url: None,
             chunks: Arc::default(),
-            harden_bytecode: None,
             app_id: None,
             system_paths: nsh_core::access::TrustedPaths::default(),
             package: None,
@@ -309,7 +303,6 @@ impl Bundle {
             policy: Policy::default(),
             base_url: None,
             chunks: Arc::default(),
-            harden_bytecode: None,
             app_id: None,
             system_paths: nsh_core::access::TrustedPaths::default(),
             package: None,
@@ -343,17 +336,6 @@ impl Bundle {
     /// Sets the URL relative request URLs resolve against.
     pub fn with_base_url(mut self, url: impl Into<Arc<str>>) -> Self {
         self.base_url = Some(url.into());
-        self
-    }
-
-    /// Hardens with `bytes` ([`Bundle::harden_bytecode`]).
-    ///
-    /// # Safety
-    ///
-    /// As [`Bundle::bytecode`]: `bytes` comes from `nsh_js::compile_harden`
-    /// of this runtime's `BYTECODE_VERSION`, from a trusted source.
-    pub unsafe fn with_harden_bytecode(mut self, bytes: Vec<u8>) -> Self {
-        self.harden_bytecode = Some(Arc::new(bytes));
         self
     }
 
@@ -588,7 +570,7 @@ pub trait MountSink: Send + 'static {
     }
 
     /// JS or a component's task asked for a display frame
-    /// (`requestAnimationFrame`, `ui::ambient::next_frame`), or lists have
+    /// (`requestAnimationFrame`, `nsh_core::element::next_frame`), or lists have
     /// overscan cells left to bind: call [`EngineControl::frame`] at the
     /// next vsync. Requests are not repeated until that call.
     fn request_frame(&self) {}
@@ -653,6 +635,17 @@ pub trait Network: Send + Sync + 'static {
 pub trait Assets: Send + Sync + 'static {
     /// The bytes of `uri`. Blocking; called on the engine thread.
     fn read(&self, uri: &str) -> Result<Vec<u8>, String>;
+
+    /// Where `asset:/` URIs resolve, when it is a directory or a URL the
+    /// image loader can read itself: the core's image loads ([`svg`]s)
+    /// then share the platform's cache entries. `None`: through
+    /// [`Assets::read`].
+    ///
+    /// [`svg`]: nsh_core::element::svg
+    #[cfg(not(target_arch = "wasm32"))]
+    fn base(&self) -> Option<nsh_core::image::loader::AssetBase> {
+        None
+    }
 }
 
 /// Engine settings.
@@ -884,6 +877,7 @@ const MAX_ADVANCE_ROUNDS: usize = 100_000;
 enum Message {
     Event(NodeId, EventKind, EventPayload),
     Scroll(NodeId, Point<Points>, u32),
+    InputScroll(NodeId, Point<Points>, Size<Points>, Size<Points>),
     Zoom(NodeId, f32),
     ComponentSize(NodeId, Size<Points>),
     AnimationsFinished(Vec<nsh_core::animation::Finished>),
@@ -973,6 +967,22 @@ impl EngineControl {
     /// engine frame.
     pub fn scroll(&self, id: NodeId, offset: Point<Points>, applied: u32) {
         let _ = self.tx.send(Message::Scroll(id, offset, applied));
+    }
+
+    /// Reports how far a multiline input's text scrolled: its offset, the
+    /// size of the text it scrolls and of its viewport. Sent while a
+    /// built-in bar takes the place of its indicator
+    /// (`InputConfig::replaced`), on every change.
+    pub fn input_scroll(
+        &self,
+        id: NodeId,
+        offset: Point<Points>,
+        content: Size<Points>,
+        viewport: Size<Points>,
+    ) {
+        let _ = self
+            .tx
+            .send(Message::InputScroll(id, offset, content, viewport));
     }
 
     /// Reports the zoom scale of a zoomable scroll view (before the offset
@@ -1412,6 +1422,18 @@ impl<M: TextEngine + 'static> Driver<M> {
             core.set_max_nodes(config.limits.max_nodes);
         }
         core.set_access(access.clone());
+        #[cfg(not(target_arch = "wasm32"))]
+        core.set_image_context(nsh_core::image::loader::Context {
+            asset_base: config.assets.as_ref().and_then(|a| a.base()),
+            read_asset: config.assets.clone().map(|assets| {
+                Arc::new(move |uri: &str| assets.read(uri)) as nsh_core::image::loader::ReadAsset
+            }),
+            access: access.clone(),
+            // The same cache as the platform's ([`Engine::image_cache`]).
+            disk: config.cache.open_images(config.app.app_id()),
+            // The platform's, if it set one ([`nsh_core::image::loader::set_transport`]).
+            transport: None,
+        });
         core.set_storage(app_storage(&config));
         core.set_clipboard(config.clipboard.clone());
         core.set_picker(config.picker.clone());
@@ -1964,7 +1986,7 @@ impl Net {
         let mut tasks = std::mem::take(&mut self.tasks);
         for (id, request) in tasks.drain(..) {
             if let Err(refused) = self.request(Requester::Task(id), request) {
-                core.fetch_event(id, FetchEvent::Failed(refused));
+                core.fetch_event(id, FetchEvent::Failed(refused.message));
             }
         }
         self.tasks = tasks;
@@ -1975,7 +1997,7 @@ impl Net {
             match op {
                 FetchOp::Start(request) => {
                     if let Err(refused) = self.request(who, request) {
-                        script.fetch_event(id, FetchEvent::Failed(refused));
+                        script.fetch_refused(id, &refused.message, &refused.url);
                     }
                 }
                 FetchOp::Send(chunk) => {
@@ -2006,7 +2028,7 @@ impl Net {
     }
 
     /// Makes `who`'s request, if the app may (else why not).
-    fn request(&mut self, who: Requester, request: HttpRequest) -> Result<(), String> {
+    fn request(&mut self, who: Requester, request: HttpRequest) -> Result<(), access::Refused> {
         if self.access.is_unrestricted() {
             self.start(who, request, None);
         } else if !self.access.allows_http(&request.method, &request.url) {
@@ -2047,24 +2069,35 @@ impl Net {
 
     /// An event of hop `hop` of request `id`: what JS is told, if anything
     /// (`None` for events of hops left behind, and redirects the engine
-    /// follows).
-    fn event(&mut self, id: Requester, hop: u64, event: FetchEvent) -> Option<FetchEvent> {
+    /// follows; `Err` for a redirect the app may not follow).
+    fn event(
+        &mut self,
+        id: Requester,
+        hop: u64,
+        event: FetchEvent,
+    ) -> Option<Result<FetchEvent, access::Refused>> {
         if self.network.is_none() {
-            return Some(event);
+            return Some(Ok(event));
         }
         let inflight = self.inflight.get_mut(&id).filter(|i| i.hop == hop)?;
         match event {
             FetchEvent::Head(head) => {
                 let Some(followed) = &mut inflight.followed else {
-                    return Some(FetchEvent::Head(head));
+                    return Some(Ok(FetchEvent::Head(head)));
                 };
                 match access::next(&self.access, followed, head) {
-                    access::Next::Done(head) => Some(FetchEvent::Head(head)),
+                    access::Next::Done(head) => Some(Ok(FetchEvent::Head(head))),
                     access::Next::Fail(message) => {
                         if let Some(i) = self.inflight.remove(&id) {
                             i.task.cancel();
                         }
-                        Some(FetchEvent::Failed(message))
+                        Some(Ok(FetchEvent::Failed(message)))
+                    }
+                    access::Next::Refused(refused) => {
+                        if let Some(i) = self.inflight.remove(&id) {
+                            i.task.cancel();
+                        }
+                        Some(Err(refused))
                     }
                     access::Next::Hop(request) => {
                         let i = self.inflight.remove(&id)?;
@@ -2077,9 +2110,9 @@ impl Net {
             }
             FetchEvent::End | FetchEvent::Failed(_) => {
                 self.inflight.remove(&id);
-                Some(event)
+                Some(Ok(event))
             }
-            event => Some(event),
+            event => Some(Ok(event)),
         }
     }
 }
@@ -2444,6 +2477,8 @@ fn ui_environment(env: &Environment, window: Size<Points>) -> nsh_core::element:
         locale: env.locale,
         apple_keyboard: env.apple_keyboard,
         host: env.host,
+        screen_color: env.screen_color,
+        file_requests: env.file_requests,
     }
 }
 
@@ -2542,6 +2577,9 @@ fn handle<M: TextEngine>(script: Option<&Script>, state: &mut State<M>, message:
                 event.pending = true;
             }
         }
+        Message::InputScroll(id, offset, content, viewport) => {
+            state.core.set_input_scroll(id, offset, content, viewport);
+        }
         Message::Zoom(id, scale) => state.core.set_zoom(id, scale),
         Message::ComponentSize(id, size) => state.core.set_component_size(id, size),
         Message::AnimationsFinished(mut finished) => {
@@ -2579,22 +2617,23 @@ fn handle<M: TextEngine>(script: Option<&Script>, state: &mut State<M>, message:
         Message::States(id, states) => state.core.set_states(id, states),
         Message::FontsChanged => state.core.fonts_changed(),
         Message::Remount => state.core.remount(),
-        Message::Fetch(who, hop, event) => {
-            if let Some(event) = state.net.event(who, hop, event) {
-                match who {
-                    Requester::Js(id) => {
-                        if let Some(script) = script {
-                            script.fetch_event(id, event);
-                        }
-                    }
-                    Requester::Task(id) => {
-                        if !state.core.fetch_event(id, event) {
-                            state.net.cancel(who);
-                        }
+        Message::Fetch(who, hop, event) => match (who, state.net.event(who, hop, event)) {
+            (_, None) => {}
+            (Requester::Js(id), Some(event)) => {
+                if let Some(script) = script {
+                    match event {
+                        Ok(event) => script.fetch_event(id, event),
+                        Err(refused) => script.fetch_refused(id, &refused.message, &refused.url),
                     }
                 }
             }
-        }
+            (Requester::Task(id), Some(event)) => {
+                let event = event.unwrap_or_else(|refused| FetchEvent::Failed(refused.message));
+                if !state.core.fetch_event(id, event) {
+                    state.net.cancel(who);
+                }
+            }
+        },
         Message::Hot(update) => state.hot.push(update),
         Message::Chunk(chunk) => {
             if let Some(script) = script {

@@ -1,7 +1,6 @@
 ---
 title: Sheet
 description: Sheet 组件：位于屏幕一侧边缘、覆盖在背景层之上的面板，点击背景层、Escape 和返回键会关闭它，样式由应用决定。
-order: 29
 group: base
 demo: el-sheet
 ---
@@ -45,7 +44,7 @@ function Filters() {
       <View onPress={() => open.set(true)}><Text>Filters</Text></View>
       <Sheet
         open={open()}
-        onOpenChange={(next) => open.set(next)}
+        onOpenChange={(e) => open.set(e.open)}
         popupClass="gap-3 rounded-t-2xl bg-white p-6"
         backdropClass="bg-black/40"
       >
@@ -65,7 +64,7 @@ function Filters() {
 
 ## 打开状态
 
-没有 `open` 时，sheet 自己保存状态，初始值为 `defaultOpen`。有 `open` 时，状态由应用持有：在 `onOpenChange(open, reason)` 中修改它，每次关闭的请求都会带着原因（`"backdropPress"`、`"cancel"`、`"swipe"`）报告给它。无论是谁打开或关闭了它，`onOpen` 和 `onClose` 都会在它进入和离开后触发。
+没有 `open` 时，sheet 自己保存状态，初始值为 `defaultOpen`。有 `open` 时，状态由应用持有：在 `onOpenChange({ open, reason })` 中修改它，每次关闭的请求都会带着原因（`"backdropPress"`、`"cancel"`、`"swipe"`）报告给它。无论是谁打开或关闭了它，`onOpen` 和 `onClose` 都会在它进入和离开后触发。
 
 `closeOnEscape={false}` 让它在 Escape 和返回键时保持打开，`closeOnBackdropPress={false}` 让它在按下背景层时保持打开；`onCancel` 仍会收到这些操作，可以先询问用户。
 

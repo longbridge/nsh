@@ -443,14 +443,12 @@ export interface OverlayPosition {
 export interface PanEvent {
   /** The system cancelled the drag rather than releasing it. */
   cancelled: boolean;
-  translationX: number;
-  translationY: number;
-  velocityX: number;
-  velocityY: number;
-  /** The `pan.x` value now (with one). */
-  valueX?: number;
-  /** The `pan.y` value now (with one). */
-  valueY?: number;
+  /** How far the finger moved since the drag started. */
+  translation: Point;
+  /** How fast it moves, in points per second. */
+  velocity: Point;
+  /** The values `pan` binds now, those of the axes it binds (`pan.x`, `pan.y`). */
+  value?: Partial<Point>;
 }
 
 /** Where the pointer was at a press, the modifier keys held when it began and its click count: the payload of `onPress`, `onLongPress`, `onPressDown` and `onPressUp` on backends that know it. */
@@ -547,26 +545,26 @@ pub const EVENTS: &[(EventKind, u32, &str, &str)] = &[
     (
         EventKind::Press,
         on::ALL,
-        "(e?: PressEvent) => void",
-        "A tap. `e` is where the pointer was, with the modifier keys and the click count, on backends that know it.",
+        "(e: PressEvent) => void",
+        "A tap. `e` is where the pointer was, with the modifier keys and the click count (at the view's origin, with no keys and one click, on backends that do not know the pointer).",
     ),
     (
         EventKind::LongPress,
         on::ALL,
-        "(e?: PressEvent) => void",
-        "A press held for about half a second. `e` is where the pointer was, with the modifier keys and the click count, on backends that know it.",
+        "(e: PressEvent) => void",
+        "A press held for about half a second. `e` is where the pointer was, with the modifier keys and the click count (at the view's origin, with no keys and one click, on backends that do not know the pointer).",
     ),
     (
         EventKind::PressDown,
         on::ALL,
-        "(e?: PressEvent) => void",
-        "A press went down. `e` is where the pointer was, with the modifier keys and the click count, on backends that know it.",
+        "(e: PressEvent) => void",
+        "A press went down. `e` is where the pointer was, with the modifier keys and the click count (at the view's origin, with no keys and one click, on backends that do not know the pointer).",
     ),
     (
         EventKind::PressUp,
         on::ALL,
-        "(e?: PressEvent) => void",
-        "The press ended. `e` is where the pointer was, with the modifier keys and the click count, on backends that know it.",
+        "(e: PressEvent) => void",
+        "The press ended. `e` is where the pointer was, with the modifier keys and the click count (at the view's origin, with no keys and one click, on backends that do not know the pointer).",
     ),
     (
         EventKind::MouseEnter,
@@ -613,7 +611,7 @@ pub const EVENTS: &[(EventKind, u32, &str, &str)] = &[
     (
         EventKind::Layout,
         on::ALL,
-        "(bounds: Bounds) => void",
+        "(e: { bounds: Bounds }) => void",
         "The frame changed: its bounds in the parent.",
     ),
     (EventKind::PanStart, on::ALL, "(e: PanEvent) => void", ""),
@@ -686,7 +684,7 @@ pub const EVENTS: &[(EventKind, u32, &str, &str)] = &[
     (
         EventKind::Load,
         on::IMAGE,
-        "(e: PixelSize) => void",
+        "(e: { size: PixelSize }) => void",
         "The source image's size in pixels (not the decoded, downsampled one).",
     ),
     (
@@ -704,8 +702,8 @@ pub const EVENTS: &[(EventKind, u32, &str, &str)] = &[
     (
         EventKind::Error,
         on::IMAGE | on::WEBVIEW | on::VIDEO,
-        "(e: { message: string }) => void",
-        "",
+        "(e: { message: string; code?: string }) => void",
+        "The source failed to load. `code` is `\"ERR_ACCESS_DENIED\"` when the app's capabilities do not grant it (an image's or video's URL: `network`; a web view's page or `html`: `webview`).",
     ),
     (
         EventKind::LoadEnd,
@@ -722,31 +720,31 @@ pub const EVENTS: &[(EventKind, u32, &str, &str)] = &[
     (
         EventKind::ScrollDragStart,
         on::SCROLLING,
-        "(e: Point) => void",
+        "(e: { offset: Point }) => void",
         "",
     ),
     (
         EventKind::ScrollDragEnd,
         on::SCROLLING,
-        "(e: Point) => void",
+        "(e: { offset: Point }) => void",
         "",
     ),
     (
         EventKind::MomentumStart,
         on::SCROLLING,
-        "(e: Point) => void",
+        "(e: { offset: Point }) => void",
         "",
     ),
     (
         EventKind::MomentumEnd,
         on::SCROLLING,
-        "(e: Point) => void",
+        "(e: { offset: Point }) => void",
         "",
     ),
     (
         EventKind::ScrollEnd,
         on::SCROLL | on::LIST,
-        "(e: Point) => void",
+        "(e: { offset: Point }) => void",
         "",
     ),
     (EventKind::Refresh, on::SCROLL | on::LIST, "() => void", ""),
@@ -760,8 +758,8 @@ pub const EVENTS: &[(EventKind, u32, &str, &str)] = &[
     (
         EventKind::ChangeText,
         on::INPUT,
-        "(text: string) => void",
-        "",
+        "(e: { value: string }) => void",
+        "The user edited the text: `value` is the text now.",
     ),
     (
         EventKind::SubmitEditing,
@@ -814,7 +812,7 @@ pub const EVENTS: &[(EventKind, u32, &str, &str)] = &[
     (
         EventKind::ContentSizeChange,
         on::INPUT,
-        "(e: Size) => void",
+        "(e: { size: Size }) => void",
         "The size of the text (at the input's width when `multiline`; one empty line's while it is empty, whatever its placeholder): grow a multiline input with it.",
     ),
     (
@@ -871,6 +869,8 @@ pub const INTERNAL_EVENTS: &[EventKind] = &[
     EventKind::Host,
     EventKind::Pick,
     EventKind::OpenUrl,
+    EventKind::ScreenColor,
+    EventKind::FileRequest,
     EventKind::KeyCommand,
     EventKind::Menu,
     EventKind::ViewableItemsChange,

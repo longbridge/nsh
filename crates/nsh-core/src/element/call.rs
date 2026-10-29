@@ -133,10 +133,6 @@ pub trait EventToJs {
     fn name(&self) -> &'static str;
     /// Its data as a JS value of `host`.
     fn data_js<'a>(&self, host: &'a dyn JsHost) -> Result<JsOwned<'a>, PropError>;
-    /// The handler takes the items of the data as its arguments.
-    fn spread(&self) -> bool {
-        false
-    }
 }
 
 /// What the core hands JS after a commit, in order: the platform's and the

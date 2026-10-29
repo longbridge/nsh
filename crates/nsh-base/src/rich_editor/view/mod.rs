@@ -70,7 +70,8 @@ pub struct RichEditorProps {
     /// one the selection is in, at the document's top level, while the
     /// document can be edited (`showOnlyCurrent`, `includeChildren`,
     /// `showOnlyWhenEditable`), in the block's own typography and the
-    /// `placeholder` part.
+    /// `placeholder` part. The block an input method composes in shows
+    /// the composition instead.
     pub placeholder: Prop<Option<SharedString>>,
     /// Placeholders by node type name (`{ heading: "Heading", paragraph:
     /// "Write…" }`), over `placeholder` for the blocks of those types.
@@ -237,8 +238,9 @@ impl RichEditorApi {
     }
 
     /// Replaces the document with `doc` (ProseMirror's JSON), as a change
-    /// undo takes back: whether the schema allowed it.
-    pub fn set_doc_json(&self, doc: Value) -> bool {
+    /// undo takes back; an error (a rejection in TSX) when `doc` is not a
+    /// document of the editor's schema.
+    pub fn set_doc_json(&self, doc: Value) -> Result<(), String> {
         self.rv.set_doc_json(&doc)
     }
 

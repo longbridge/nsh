@@ -22,6 +22,7 @@ pub mod desktop;
 mod effects;
 pub mod element;
 mod fenwick;
+pub mod file_dialog;
 pub mod filesystem;
 pub mod geometry;
 mod grid;
@@ -89,15 +90,15 @@ pub use crate::{
         KeyboardTaps, KeyboardType, ListContentStyle, ListViewport, ModalAnimation,
         ModalPresentation, ModalProp, MouseButton, MouseEvent, NativeProp, NodeId, Op, OverlayProp,
         PasteBehavior, PasteEvent, PastedFile, PayloadValue, PressEvent, Prop, ROOT_ID, ResizeMode,
-        ReturnKeyType, ScreenAnimation, ScreenProp, ScrollProp, SnapAlignment, StatusBarConfig,
-        StatusBarSetting, StatusBarStyle, SubmitBehavior, Tag, TouchEvent, TouchPhase, TouchPoint,
-        Viewability, WebSource,
+        ReturnKeyType, ScreenAnimation, ScreenProp, ScrollProp, ScrollbarSetting, SnapAlignment,
+        StatusBarConfig, StatusBarSetting, StatusBarStyle, SubmitBehavior, Tag, TouchEvent,
+        TouchPhase, TouchPoint, Viewability, WebSource,
     },
     props::{
-        Accessibility, AccessibilityActionDef, AccessibilityProp, AccessibilityRole,
-        AccessibilityState, AccessibilityValue, Checked, EdgeInsets, GestureValues,
-        LayoutAnimation, LayoutCurve, LayoutProperty, LayoutTransition, LiveRegion, PanActivation,
-        PointerEvents, Ripple, ViewProps,
+        Accessibility, AccessibilityActionDef, AccessibilityCurrent, AccessibilityProp,
+        AccessibilityRole, AccessibilityState, AccessibilityValue, Checked, EdgeInsets,
+        GestureValues, LayoutAnimation, LayoutCurve, LayoutProperty, LayoutTransition, LiveRegion,
+        PanActivation, PointerEvents, Ripple, ViewProps,
     },
     style::{
         BorderStyle, Borders, Color, CornerRadii, DecorationStyle, EllipsizeMode, EnvVar,

@@ -315,7 +315,8 @@ are `nsh test`'s; `Headless` has each of them (`run_for`, `fast_forward`, `set_s
 
 `Date`, `performance.now()` and `Intl`'s default date follow the clock. Steps finish what is running without waiting
 for it: while the app asks for frames or a native animation runs, frames come one after another, each a frame's time
-(1/60 s) later on the clock. A 300 ms transition takes a few milliseconds, and a timer due during it runs. `app.wait(ms)`
+(1/60 s) later on the clock. A 300 ms transition takes a few milliseconds, and a timer due during it runs. An
+animation that loops forever (a spinner) runs along with the clock: it turns as the test moves the clock. `app.wait(ms)`
 and a long press move the clock by their time. A timer that comes due later runs only when the test moves the clock
 there. `waitFor`'s timeout stays real time, as it also waits for what comes from outside (a route's function, the
 network). The gallery's tests run this way (`examples/gallery/tests`): its twelve tests that wait for animations
@@ -352,7 +353,7 @@ one: a selector matching several fails the step, and the error says how to narro
 | `await app.scroll(selector, distance)` | Drags the scroll view or list (the view, the one around it, or the first inside it) by `distance` points along its axis, 10 points per frame, within its content, as the user may (`scrollable`). Negative scrolls back. |
 | `await app.hover(selector)` | Moves the mouse over the middle of the view: the views under it that it left hear `onMouseLeave`, those it came over `onMouseEnter` and take their `hover:` styles, and those listening hear `onMouseMove` with where it is and no button down. The desktops and the web at any width, a browser in the phone idiom included (headless: a desktop or `"web"` `platform`); an iOS or Android phone has no mouse: there it rejects. |
 | `await app.rightClick(selector)` | The mouse's secondary button over the middle of the view: it, or the nearest view around it listening, hears `onContextMenu`. The desktops and the web (headless: a desktop `platform`); a phone has no mouse: there it rejects. |
-| `await app.paste(selector, { text?, html?, files?, uris? })` | Pastes into the input as the user does with that on the clipboard: it takes the focus and hears `onPaste` (`html` the same content with its formatting, `files` are paths whose bytes it gets as `File`s, `uris` `file:` URLs), then its text goes in as `pasteBehavior` says. Headless, on macOS and on iOS; the machine's clipboard stays as it was. |
+| `await app.paste(selector, { text?, html?, files?, uris? })` | Pastes into the input as the user does with that on the clipboard: it takes the focus and hears `onPaste` (`html` the same content with its formatting, `files` are paths whose bytes it gets as `File`s, `uris` `file:` URLs), then its text goes in as `pasteBehavior` says. Headless, on macOS, on iOS and on the web; the machine's clipboard stays as it was. |
 | `app.menu()` | The actions of the context menu the app shows (`Menu.popup`): `label` (a submenu's after its own, `"Share > Mail"`), `disabled`, and `checked` for a checkable item; `null` when none is open. |
 | `await app.chooseMenuItem(label)` | Chooses the open context menu's action, as a click on it does: the app hears `onMenu` (its `onSelect` runs), then the menu closes. Rejects when the item is disabled or missing. |
 | `await app.closeMenu()` | Closes the open context menu with nothing chosen, as Escape does. |
@@ -369,7 +370,7 @@ one: a selector matching several fails the step, and the error says how to narro
 | `app.enabled(selector)` | Whether the view takes input: neither it nor a view around it is disabled, and an input is not `readonly`. |
 | `app.texts()` | The texts on screen now, in order. |
 | `app.value(selector)` | The text of an input, `null` when none matches. |
-| `app.spanStyle(selector)` | In headless tests, the first matched character’s resolved style: `color`, optional `backgroundColor`, `fontSize`, `fontWeight`, `italic`, `underline`, and `lineThrough`. Colors are `#rrggbbaa`; sizes are in points. |
+| `app.spanStyle(selector)` | The first matched character’s resolved style, headless and on every `--target`: `color`, optional `backgroundColor`, `fontSize`, `fontWeight`, `italic`, `underline`, and `lineThrough`. Colors are `#rrggbbaa`; sizes are in points. |
 | `app.storage()` | What the app's storage holds now. |
 | `await app.back()` | Goes back as the user does (a header's back button, swiping a sheet down): the innermost stack of the newest modal, else of the screen, pops its top screen (`onDismiss`), or asks it (`onBackRequest`) when it has `preventBack`; without one, the newest modal asks to close (`onRequestClose`). Rejects when there is nothing to go back from. |
 | `app.onDialog(handler)` | Answers the dialogs the app shows from now on (`Alert.alert`, action sheets): `handler` gets the dialog (`title`, `message`, `buttons`, `cancelable`, `sheet`) and returns the text of the button to press, or `null` to close it without one. |
@@ -385,11 +386,26 @@ one: a selector matching several fails the step, and the error says how to narro
 | `await app.setColorScheme(scheme)` | Switches the system's appearance to `"light"` or `"dark"`, as the user does. |
 | `await app.screenshot(path?)` | A picture of the app's window as a PNG (a `Uint8Array`), also saved at `path` on this machine when given (relative to the current directory). Only a real platform draws the app: see [On a real platform](#on-a-real-platform). |
 
-A step resolves once the app rendered nothing for 100 ms and no native animation runs (2 s at most, for apps that
-render all the time; on a manual clock, also 2 s of the app's time), so what it changed is on screen when the next
-line runs; use `waitFor` for what comes later (a
-response, a timer). A step rejects, failing the test, when nothing matches its selector (the error lists the texts on
+A step resolves once the app rendered nothing for 100 ms and no native animation runs that ends by itself (2 s at
+most, for apps that render all the time; on a manual clock, also 2 s of the app's time), so what it changed is on
+screen when the next line runs; use `waitFor` for what comes later (a response, a timer). An animation that loops
+forever, such as a loading spinner, keeps running in the background while steps and `waitFor` go on, as an infinite
+CSS animation does in a browser's tests. A step rejects, failing the test, when nothing matches its selector (the error lists the texts on
 screen), when the app threw an exception meanwhile, and when the app asked for what only a real platform answers.
+
+The failures a test may expect carry a `code`, which stays as it is; their messages are for people and may change, so
+a test matches the code:
+
+| `code` | The step or query |
+|---|---|
+| `ERR_NSH_TEST_NOT_FOUND` | Nothing on screen matches the selector, or the open menu has no such item. |
+| `ERR_NSH_TEST_DISABLED` | The view the selector names is disabled (a scroll view the user cannot scroll, a disabled menu item). |
+| `ETIMEDOUT` | `waitFor` or `waitUntil` ran out of time, or the app rendered nothing after `open`. |
+| `ERR_NSH_TEST_NO_BACK` | `back()` found nothing to go back from. |
+
+```tsx
+await expect(app.press("Pay")).rejects.toMatchObject({ code: "ERR_NSH_TEST_DISABLED" });
+```
 
 `app.spanStyle("id:guide")` reads a nested `<Text testID="guide">`; `text:word` reads the first character
 of that match. Scope queries with `id:note >> text:word` and select repeated matches with `>> nth=0`.
@@ -402,7 +418,7 @@ A headless run has the real runtime and no platform. It plays the platform's par
 that only a real platform can do:
 
 - **Native animations run** frame by frame, to their end: `start(callback)` callbacks run, and so does what waits for
-  them.
+  them. Loops without an end run until the app stops them.
 - **Going back** pops screens and closes modals as a platform does (`app.back()`).
 - **Dialogs are answered**: by the test's `onDialog`, else by their cancel button, else they are closed when they can
   be; a dialog that only its other buttons answer fails the step that showed it until the test says which to press.
@@ -446,7 +462,9 @@ test("calls reach the page's host", async () => {
 ### Expectations
 
 `expect(value)` compares values as JSON does (`undefined` is `null`, numbers by value), and each check throws when it
-does not hold. `.not` turns them around: `expect(app.texts()).not.toContain("Error")`.
+does not hold. `.not` turns them around: `expect(app.texts()).not.toContain("Error")`. Given a function, `toThrow`
+checks what calling it throws; given a promise, or a function that returns one, `rejects` and `resolves` check what it
+settles to, as in Jest: `await expect(save()).rejects.toMatchObject({ code: "ERR_ACCESS_DENIED" })`.
 
 | Check | Holds when |
 |---|---|
@@ -457,8 +475,13 @@ does not hold. `.not` turns them around: `expect(app.texts()).not.toContain("Err
 | `toHaveLength(n)` | An array has `n` items, or a string `n` UTF-16 units. |
 | `toBeNull()` | The value is `null` (or `undefined`). |
 | `toBeGreaterThan(n)`, `toBeGreaterThanOrEqual(n)`, `toBeLessThan(n)`, `toBeLessThanOrEqual(n)` | A number compares so with `n`. |
-| `toThrow(message?)` | `expect(fn)`: calling `fn` throws, with a message matching `message` when given. |
-| `rejects.toThrow(message?)` | `expect(fn)`: the promise `fn` returns rejects: `await expect(() => app.press("Pay")).rejects.toThrow("is disabled")`. |
+| `toMatchObject(subset)` | The value has every property of `subset`, each equal, and objects in it match in turn; other properties are not looked at, and arrays match item by item, all of them. |
+| `toThrow(expected?)` | `expect(fn)`: calling `fn` throws. Given `expected`, the error matches it: its message contains a string or matches a `RegExp`; an error class (`TypeError`, a class of the app's) is the error's `name`, and `Error` matches every error; an error has the same message. |
+| `rejects.toThrow(expected?)` | `expect(promise)`: the promise rejects, with an error matching `expected` as `toThrow` says. |
+| `rejects.toMatchObject(subset)` | `expect(promise)`: the promise rejects with a value matching `subset` as `toMatchObject` says: an error's own properties (`code`, `permission`, ...) with its `name` and `message`. |
+| `resolves.toBe(expected)`, `resolves.toEqual(expected)`, `resolves.toMatchObject(subset)` | `expect(promise)`: the promise resolves to a value that holds the check. |
+
+`rejects` and `resolves` have a `.not` of their own too: `await expect(load()).resolves.not.toBe(null)`.
 
 ### On a real platform
 

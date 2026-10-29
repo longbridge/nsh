@@ -30,7 +30,11 @@
 
 use std::time::Duration;
 
-use nsh_core::{AutoFill, element::Style, prelude::*};
+use nsh_core::{
+    AutoFill,
+    element::{Style, TextPartStyle},
+    prelude::*,
+};
 
 use crate::input;
 
@@ -76,9 +80,10 @@ pub struct OtpInputProps {
     /// `focus:` styles the cell that takes the next digit while the input
     /// has the focus, `disabled:` follows the input.
     pub cell_class: Prop<Option<SharedString>>,
-    /// The style of each cell, over `cellClass`.
+    /// The style of each cell, over `cellClass`: its text styles too
+    /// (`color`, `fontSize`), which its digit inherits.
     #[prop(default)]
-    pub cell_style: Prop<Style>,
+    pub cell_style: Prop<TextPartStyle>,
     /// The Tailwind classes of each group of cells (`flex-row gap-2`).
     /// `disabled:` follows the input.
     pub group_class: Prop<Option<SharedString>>,
@@ -160,7 +165,7 @@ const ECHOES: usize = 16;
 /// Takes `value` out of `echoes`, the codes the input reported and has not
 /// seen come back, with those reported before it: whether it is one of
 /// them (the app took the user's change, maybe a key or more behind).
-fn echoed(echoes: &mut Vec<String>, value: &str) -> bool {
+pub(crate) fn echoed(echoes: &mut Vec<String>, value: &str) -> bool {
     match echoes.iter().position(|e| e == value) {
         Some(at) => {
             echoes.drain(..=at);
@@ -170,50 +175,57 @@ fn echoed(echoes: &mut Vec<String>, value: &str) -> bool {
     }
 }
 
-/// The caret's blinking (`gpui-base`'s `BlinkCursor`).
+/// The caret's blinking (`gpui-base`'s `BlinkCursor`): its opacity, moved
+/// natively by a looping animation, so a blink costs the engine nothing
+/// (no task wakes, no view comes or goes).
 #[derive(Clone, Copy)]
 struct Blink {
-    visible: Signal<bool>,
-    task: Stored<Option<Spawned<()>>>,
+    opacity: AnimatedValue,
+    run: Stored<Option<Animation>>,
 }
 
 impl Blink {
     fn new() -> Self {
         Self {
-            visible: signal(false),
-            task: stored(None),
+            opacity: animated_value(1.0),
+            run: stored(None),
         }
     }
 
-    fn cancel(self) {
-        if let Some(task) = self.task.replace(None) {
-            task.cancel();
+    /// Stops blinking, where it is.
+    fn stop(self) {
+        if let Some(run) = self.run.replace(None) {
+            run.stop();
         }
     }
 
     /// Shows the caret, then blinks it after `hold` (none with reduced
-    /// motion).
+    /// motion): hidden for `BLINK`, shown for `BLINK`, and so on.
     fn start(self, hold: Duration) {
-        self.cancel();
-        self.visible.set(true);
+        self.stop();
+        self.opacity.set(1.0);
         if untracked(reduce_motion) {
             return;
         }
-        let visible = self.visible;
-        let task = spawn(async move {
-            timer(hold).await;
-            loop {
-                visible.update(|v| *v = !*v);
-                timer(BLINK).await;
-            }
-        });
-        self.task.replace(Some(task));
-    }
-
-    /// Hides the caret (the input lost the focus).
-    fn stop(self) {
-        self.cancel();
-        self.visible.set(false);
+        let ms = |d: Duration| d.as_secs_f32() * 1000.0;
+        let jump = Easing::Steps(1, StepPosition::JumpEnd);
+        let frames = [
+            Keyframe::at(0.0, 0.0).ease(jump),
+            Keyframe::at(0.5, 1.0).ease(jump),
+            Keyframe::at(1.0, 0.0),
+        ];
+        let blink = Animation::keyframes(
+            &self.opacity,
+            frames,
+            KeyframeTiming::new(2.0 * ms(BLINK))
+                .easing(Easing::Linear)
+                .infinite(),
+        );
+        // A delay before the loop, not the keyframes' own: theirs would
+        // hold the first keyframe, hidden.
+        let run = Animation::sequence([Animation::delay(ms(hold)), blink]);
+        run.start();
+        self.run.replace(Some(run));
     }
 }
 
@@ -408,7 +420,7 @@ struct Cells {
     masked: Prop<bool>,
     disabled: Prop<bool>,
     class: Prop<Option<SharedString>>,
-    style: Prop<Style>,
+    style: Prop<TextPartStyle>,
     caret_class: Prop<Option<SharedString>>,
     caret_style: Prop<Style>,
     code: Code,
@@ -438,7 +450,7 @@ impl Cells {
             })
             .project_disabled(self.disabled)
             .app_class(self.class)
-            .inline_style(self.style)
+            .inline_style(move || self.style.get())
             .child(
                 when(
                     move || digit().is_some(),
@@ -451,14 +463,15 @@ impl Cells {
                     },
                 )
                 .otherwise(move || {
+                    // Mounted while the cell takes the next digit; it
+                    // blinks natively.
                     when(
-                        move || {
-                            self.focused.get() && self.blink.visible.get() && self.active() == ix
-                        },
+                        move || self.focused.get() && self.active() == ix,
                         move || {
                             view()
                                 .app_class(self.caret_class)
                                 .inline_style(self.caret_style)
+                                .bind_opacity(&self.blink.opacity)
                         },
                     )
                 }),
@@ -475,7 +488,7 @@ fn group_count(length: usize, requested: usize) -> usize {
 
 /// `c` as an ASCII digit: itself, or a full-width digit's (`０`–`９`, an
 /// East Asian input method's) as `gpui-base`'s `to_digit_char` maps them.
-fn digit(c: char) -> Option<char> {
+pub(crate) fn digit(c: char) -> Option<char> {
     if c.is_ascii_digit() {
         return Some(c);
     }
@@ -485,7 +498,7 @@ fn digit(c: char) -> Option<char> {
 
 /// What the field lost at its end (characters) and what it gained, from
 /// `before` to `after`.
-fn diff<'a>(before: &str, after: &'a str) -> (usize, &'a str) {
+pub(crate) fn diff<'a>(before: &str, after: &'a str) -> (usize, &'a str) {
     let prefix = before
         .char_indices()
         .zip(after.chars())
@@ -517,7 +530,7 @@ fn edit(shown: &str, deleted: usize, inserted: &str, length: usize) -> String {
 }
 
 /// `text`'s length in UTF-16 units, as inputs count their selection.
-fn utf16_len(text: &str) -> u32 {
+pub(crate) fn utf16_len(text: &str) -> u32 {
     text.encode_utf16().count() as u32
 }
 

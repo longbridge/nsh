@@ -31,6 +31,7 @@
 pub mod agent;
 #[cfg(feature = "js")]
 mod driver;
+mod failure;
 // An engine on a thread of its own: not in WebAssembly, where only the
 // agent's model runs (the web's page).
 #[cfg(not(target_arch = "wasm32"))]

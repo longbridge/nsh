@@ -10,6 +10,7 @@
 use std::{
     any::{Any, TypeId},
     future::Future,
+    path::PathBuf,
     rc::Rc,
     sync::Arc,
     time::Duration,
@@ -21,7 +22,7 @@ use super::{
     AdaptiveColor, Environment, Memo, Owner, Signal, SignalEquals, Tokens, cleanup, computed,
     reactive::with_data,
     signal_with,
-    task::{self, Action, Answer, ClipboardImage, DialogAnswer, Executor, ImageSize},
+    task::{self, Action, Answer, ClipboardImage, DialogAnswer, Executor, FileAnswer, ImageSize},
 };
 use crate::{
     Command, Dialog, EdgeInsets, LayoutAnimation, NodeId, Points, Size,
@@ -70,6 +71,7 @@ struct EnvSignals {
     screen_reader: Memo<bool>,
     pixel_ratio: Memo<f32>,
     locale: Memo<Locale>,
+    screen_color: Memo<bool>,
 }
 
 impl EnvSignals {
@@ -94,6 +96,7 @@ impl EnvSignals {
                 screen_reader: part!(screen_reader),
                 pixel_ratio: part!(pixel_ratio),
                 locale: part!(locale),
+                screen_color: part!(screen_color),
             }
         })
     }
@@ -296,6 +299,16 @@ pub fn tokens() -> Arc<Tokens> {
         .get()
 }
 
+/// Draws the app with the design tokens `tokens` (the app's own, which an
+/// embedding app's still win over), in place of the UI set's defaults or
+/// the theme file's: Tailwind's token classes, [`tokens`] and the
+/// platform's own controls (Linux's menus) follow. An app that picks its
+/// theme while it runs sets it here (`set_tokens(theme.into())` of an
+/// `nsh_base::Theme`).
+pub fn set_tokens(tokens: impl Into<Tokens>) {
+    act(Action::Tokens(tokens.into()));
+}
+
 /// The width of `text` on one line in `font` (the CSS `font` shorthand; an
 /// invalid one measures in `10px sans-serif`), by the platform's text engine
 /// (TS: a canvas's `measureText(text).width`).
@@ -463,10 +476,100 @@ pub fn clipboard_has_image() -> Answer<bool> {
     answer
 }
 
+/// Whether the platform lets the user pick a color on the screen
+/// ([`pick_screen_color`]): macOS and browsers with an `EyeDropper`.
+pub fn can_pick_screen_color() -> bool {
+    env(|e| e.screen_color)
+}
+
+/// The color the user picks anywhere on the screen (the system's color
+/// sampler, a browser's `EyeDropper`), to await in a task: `None` when the
+/// user cancelled or the platform has no sampler
+/// ([`can_pick_screen_color`]).
+pub fn pick_screen_color() -> Answer<Option<crate::Hsla>> {
+    let (answer, action) = super::services::pick_screen_color();
+    act(action);
+    answer
+}
+
 /// The `file:` URLs of the local files on the system clipboard (files
 /// copied in a file manager; TS: `Clipboard.readFiles`), to await in a task.
 pub fn clipboard_files() -> Answer<Vec<String>> {
     let (answer, action) = super::services::clipboard_files();
+    act(action);
+    answer
+}
+
+/// Shows the system's open dialog and gives the files (or folders,
+/// [`OpenDialog::folders`](crate::file_dialog::OpenDialog::folders)) the
+/// user picked, to await in a task: `None` when cancelled, the error when
+/// the dialog could not show (on Linux without a file chooser portal, or
+/// on a platform without file dialogs: iOS, Android, the web;
+/// [`crate::platform::Environment::file_requests`]). GPUI's
+/// `prompt_for_paths`.
+pub fn pick_paths(
+    dialog: crate::file_dialog::OpenDialog,
+) -> Answer<Result<Option<Vec<PathBuf>>, String>> {
+    file_request(
+        crate::file_dialog::FileRequest::OpenDialog(dialog),
+        FileAnswer::OpenDialog,
+    )
+}
+
+/// Shows the system's save dialog and gives the path the user chose to
+/// save to, to await in a task: `None` when cancelled, the error when the
+/// dialog could not show ([`pick_paths`]). The file is not created. GPUI's
+/// `prompt_for_new_path`.
+pub fn pick_save_path(
+    dialog: crate::file_dialog::SaveDialog,
+) -> Answer<Result<Option<PathBuf>, String>> {
+    file_request(
+        crate::file_dialog::FileRequest::SaveDialog(dialog),
+        FileAnswer::SaveDialog,
+    )
+}
+
+/// Opens the local file or folder at `path` (absolute) in its default app
+/// (GPUI's `open_with_system`), to await in a task or drop: `Ok` once it
+/// opened, the error when it did not (no app for it, a relative path, a
+/// platform that opens no local paths). [`open_url`] opens no `file:`
+/// URLs; this is their way.
+pub fn open_path(path: impl Into<PathBuf>) -> Answer<Result<(), String>> {
+    file_request(
+        crate::file_dialog::FileRequest::OpenPath(path.into()),
+        FileAnswer::Done,
+    )
+}
+
+/// Shows the item at `path` (absolute) selected in the file manager
+/// (Finder, File Explorer, the desktop's file manager; GPUI's
+/// `reveal_path`), to await in a task or drop: `Ok` once it showed, the
+/// error when it did not (it does not exist, a relative path, a platform
+/// without a file manager).
+pub fn reveal_path(path: impl Into<PathBuf>) -> Answer<Result<(), String>> {
+    file_request(
+        crate::file_dialog::FileRequest::RevealPath(path.into()),
+        FileAnswer::Done,
+    )
+}
+
+/// Moves the item at `path` (absolute) to the trash (the Recycle Bin on
+/// Windows), to await in a task: where it went when the platform says
+/// (macOS), else `None`, which is no failure; the error when it could not
+/// (it does not exist, the volume has no trash, the platform has none).
+pub fn move_to_trash(path: impl Into<PathBuf>) -> Answer<Result<Option<PathBuf>, String>> {
+    file_request(
+        crate::file_dialog::FileRequest::MoveToTrash(path.into()),
+        FileAnswer::Trash,
+    )
+}
+
+/// Sends file request `request`, answered through `answer`.
+fn file_request<T>(
+    request: crate::file_dialog::FileRequest,
+    answer: impl FnOnce(super::AnswerSlot<T>) -> FileAnswer,
+) -> Answer<T> {
+    let (answer, action) = super::services::file_request(request, answer);
     act(action);
     answer
 }
@@ -485,7 +588,7 @@ pub fn pick_images(request: crate::picker::PickRequest) -> Answer<Vec<crate::pic
 pub(crate) fn host_call(
     name: String,
     args: crate::JsonValue,
-) -> Answer<Result<crate::JsonValue, String>> {
+) -> Answer<Result<crate::JsonValue, super::JsError>> {
     let (answer, action) = super::services::host_call(name, args);
     act(action);
     answer
@@ -526,6 +629,17 @@ pub fn fetch(request: impl Into<crate::platform::HttpRequest>) -> super::Fetch {
 /// `setColorScheme`).
 pub fn set_color_scheme(appearance: Appearance) {
     act(Action::Appearance(appearance));
+}
+
+/// Draws the bar of every scroll view and list whose `scrollbar` is `true`
+/// with the built-in bar `source` makes of `theme` (the UI set's, which
+/// `source` gets back: [`BuiltInScrollbar::app_theme`](super::BuiltInScrollbar::app_theme)),
+/// or (`None`, the default) with the platform's indicator. A view whose `scrollbar` is a theme shows the bar
+/// of the UI set that makes one
+/// ([`Registry::scrollbars_from`](super::Registry::scrollbars_from)).
+/// `nsh-base`'s `set_scrollbar_theme` calls it.
+pub fn set_builtin_scrollbars(source: super::ScrollbarSource, theme: Option<super::AnyValue>) {
+    act(Action::BuiltInScrollbars(source, theme));
 }
 
 // --- Tasks and timers --------------------------------------------------------
@@ -826,6 +940,55 @@ pub fn on_key_with(keystroke: &str, options: KeyOptions, handler: impl Fn(&str) 
     });
 }
 
+/// Watches the scroll view or list `target` names while the current owner
+/// lives: `handler` hears its offset, content size and viewport (zoomed, as
+/// `on_scroll` reports them) when it is first found and whenever one of
+/// them changes, whether or not anything listens to its `on_scroll`. A
+/// view of the app's own that follows a scroll view it did not make (a
+/// scroll bar) watches it this way.
+///
+/// `target` is asked again in every commit (untracked), so a ref set later
+/// in the same render is found when its element is mounted; while it names
+/// no scroll view, nothing is heard. The handler runs at the end of the
+/// commit round that saw the change, and what it changes goes out in the
+/// same batch.
+pub fn watch_scroll(
+    target: impl Fn() -> Option<NodeId> + 'static,
+    handler: impl Fn(&crate::element::ScrollEvent) + 'static,
+) {
+    let owner = Owner::current();
+    let handler = Rc::new(move |e: &crate::element::ScrollEvent| owner.run(|| handler(e)));
+    add_watch(Rc::new(target), handler);
+}
+
+impl super::NodeRef {
+    /// Scrolls the scroll view (or list, along its axis) to a content
+    /// offset, as [`super::ElementRef::scroll_to`] does: for a view holding
+    /// a node, not a ref (a prop a JS `ref` fills, a watch's target).
+    pub fn scroll_to(&self, offset: crate::geometry::Point<Points>, animated: bool) {
+        act(Action::Command(
+            self.0,
+            Command::ScrollTo {
+                x: offset.x,
+                y: offset.y,
+                animated,
+            },
+        ));
+    }
+}
+
+fn add_watch(target: Rc<dyn Fn() -> Option<NodeId>>, handler: super::watch::ScrollHandler) {
+    let watches = executor().watches.clone();
+    let id = watches.borrow_mut().add(target, handler);
+    let weak = Rc::downgrade(&watches);
+    cleanup(move || {
+        if let Some(watches) = weak.upgrade() {
+            let removed = watches.borrow_mut().remove(id);
+            drop(removed);
+        }
+    });
+}
+
 /// `keystroke` as menus and hints show it here (TS: `keymap.label`):
 /// `"⇧⌘L"` on Apple platforms (and in a browser on one), `"Ctrl+Shift+L"`
 /// elsewhere, for `"mod+shift+l"`.
@@ -842,7 +1005,7 @@ pub fn key_label(keystroke: &str) -> String {
 }
 
 /// Listens to the Android back button while the current owner lives (TS:
-/// `BackHandler.onBackPress(f)`): when no modal is
+/// `BackHandler.on("press", f)`): when no modal is
 /// shown, `f` runs before the stack pops, newest listener first, and returns
 /// true when it handled the press. While one listens, a back gesture does
 /// not preview the pop.
@@ -857,6 +1020,11 @@ pub fn on_back_press(f: impl Fn() -> bool + 'static) {
 
 pub(crate) fn title_bar() -> crate::geometry::Edges<crate::geometry::Points> {
     env(|e| e.title_bar)
+}
+
+/// The views' menu handlers.
+pub(crate) fn view_menus() -> Rc<std::cell::RefCell<super::menus::ViewMenus>> {
+    executor().menus.clone()
 }
 
 pub(crate) fn desktop_command(command: crate::desktop::DesktopCommand) {

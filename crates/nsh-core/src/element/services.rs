@@ -1,7 +1,7 @@
 //! The platform's services for components, modules and tasks beyond
 //! dialogs and the keyboard: screen reader announcements, the
 //! clipboard, image information, display frames and the layout direction
-//! ([`super::ambient`]'s functions, [`super::ModuleCx`]). Each is an
+//! ([`super`]'s free functions, [`super::ModuleCx`]). Each is an
 //! [`Action`] the core applies in order with the component's other changes.
 
 use std::{
@@ -12,7 +12,7 @@ use std::{
 
 use super::{
     Answer, ImageSize,
-    task::{Action, AnswerSlot, ClipboardImage, ClipboardRead},
+    task::{Action, AnswerSlot, ClipboardImage, ClipboardRead, FileAnswer},
 };
 use crate::{
     Command, ROOT_ID,
@@ -20,21 +20,21 @@ use crate::{
     time::Instant,
 };
 
-/// Whether an image loaded ahead ([`super::ambient::prefetch_image`]): true
-/// once its bytes are in memory.
+/// Whether an image loaded ahead ([`super::prefetch_image`]): `Ok`
+/// once its bytes are in memory, else the error.
 #[must_use = "an answer does nothing unless awaited"]
 #[derive(Debug)]
 pub struct Prefetch(Answer<Result<ImageSize, String>>);
 
 impl Future for Prefetch {
-    type Output = bool;
+    type Output = Result<(), String>;
 
-    fn poll(mut self: Pin<&mut Self>, cx: &mut TaskContext<'_>) -> Poll<bool> {
-        Pin::new(&mut self.0).poll(cx).map(|size| size.is_ok())
+    fn poll(mut self: Pin<&mut Self>, cx: &mut TaskContext<'_>) -> Poll<Self::Output> {
+        Pin::new(&mut self.0).poll(cx).map(|size| size.map(|_| ()))
     }
 }
 
-/// The response to a [`super::ambient::fetch`]: its status line, headers
+/// The response to a [`super::fetch`]: its status line, headers
 /// and whole body.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct HttpResponse {
@@ -70,7 +70,7 @@ impl HttpResponse {
     }
 }
 
-/// A request in flight ([`super::ambient::fetch`]): awaited, its response,
+/// A request in flight ([`super::fetch`]): awaited, its response,
 /// or why there is none (the network failed, or the app's capabilities do
 /// not grant the host).
 #[must_use = "a request does nothing unless awaited"]
@@ -148,7 +148,7 @@ pub(crate) fn pick_images(
 pub(crate) fn host_call(
     name: String,
     args: crate::JsonValue,
-) -> (Answer<Result<crate::JsonValue, String>>, Action) {
+) -> (Answer<Result<crate::JsonValue, super::JsError>>, Action) {
     let (answer, slot) = Answer::new();
     (
         answer,
@@ -164,6 +164,22 @@ pub(crate) fn host_call(
 pub(crate) fn open_url(url: String) -> (Answer<bool>, Action) {
     let (answer, slot) = Answer::new();
     (answer, Action::OpenUrl(url, slot))
+}
+
+/// Carries out `request` on local paths; `answer` takes the platform's
+/// answer.
+pub(crate) fn file_request<T>(
+    request: crate::file_dialog::FileRequest,
+    answer: impl FnOnce(AnswerSlot<T>) -> FileAnswer,
+) -> (Answer<T>, Action) {
+    let (result, slot) = Answer::new();
+    (result, Action::FileRequest(request, answer(slot)))
+}
+
+/// The color the user picks on the screen (none when cancelled).
+pub(crate) fn pick_screen_color() -> (Answer<Option<crate::Hsla>>, Action) {
+    let (answer, slot) = Answer::new();
+    (answer, Action::PickScreenColor(slot))
 }
 
 /// The size of the image at `uri`, its bytes loaded.

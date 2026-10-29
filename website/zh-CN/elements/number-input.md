@@ -1,7 +1,6 @@
 ---
 title: NumberInput
 description: "NumberInput 组件：在输入框里输入、或用按钮、方向键和屏幕阅读器步进的数字，保留步长的小数位并止于 min 和 max；输入框、按钮和按钮列由应用设置样式。"
-order: 20.87
 group: base
 demo: el-number-input
 ---
@@ -46,7 +45,7 @@ function App() {
   return (
     <NumberInput
       value={tickets()}
-      onChange={(next) => tickets.set(next)}
+      onChange={({ value }) => tickets.set(value)}
       min={1}
       max={10}
       accessibilityLabel="Tickets"
@@ -87,8 +86,8 @@ const price = signal<number | null>(19.95);
 
 <NumberInput
   value={price()}
-  onChange={(next) => price.set(next)}
-  onSubmit={(next) => save(next)}
+  onChange={({ value }) => price.set(value)}
+  onSubmit={({ value }) => save(value)}
   min={0}
   step={0.05}
   placeholder="Price"
@@ -116,7 +115,7 @@ const price = signal<number | null>(19.95);
 | `placeholder` | `.placeholder(..)` | `string` | 无 | 输入框为空时显示。 |
 | `accessibilityLabel` | `.accessibility_label(..)` | `string` | 无 | 没有可见标签时，屏幕阅读器为输入框朗读的内容。 |
 | `controlsRight` | `.controls_right(..)` | `boolean` | `false` | 两个按钮竖着放在输入框右边，增加在上、减少在下。在创建时读取。 |
-| `inputClass`、`inputStyle` | `.input_style(\|s\| ..)` | `string`、`StyleProp<TextStyle>` | 无 | 输入框：它的盒子和文字（`color`、`fontSize`、`textAlign`、`placeholderColor`）。 |
+| `inputClass`、`inputStyle` | `.input_style(\|s\| ..)` | `string`、`StyleProp<InputStyle>` | 无 | 输入框：它的盒子和文字（`color`、`fontSize`、`textAlign`、`placeholderColor`）。 |
 | `decrementButtonClass`、`decrementButtonStyle` | `.decrement_button_style(\|s\| ..)` | `string`、`StyleProp<ViewStyle>` | 无 | 减少按钮。 |
 | `incrementButtonClass`、`incrementButtonStyle` | `.increment_button_style(\|s\| ..)` | `string`、`StyleProp<ViewStyle>` | 无 | 增加按钮。 |
 | `decrementButton`、`incrementButton` | `.decrement_button(..)`、`.increment_button(..)` | `JSX.Element` | 无 | 按钮的内容：一个符号、一个图标。 |
@@ -129,8 +128,8 @@ const price = signal<number | null>(19.95);
 
 | 事件 | Rust | 参数 | 触发时机 |
 |---|---|---|---|
-| `onChange` | `.on_change(\|value: &Option<f64>\| ..)` | `number \| null` | 输入框读出的数字变化了（输入、步进、屏幕阅读器的增加或减少、离开输入框时值超出范围）。 |
-| `onSubmit` | `.on_submit(\|value: &Option<f64>\| ..)` | `number \| null` | 在输入框里按 Return / Enter：被限制在 `min` 和 `max` 之间的值。 |
+| `onChange` | `.on_change(\|value: &Option<f64>\| ..)` | `{ value: number \| null }` | 输入框读出的数字变化了（输入、步进、屏幕阅读器的增加或减少、离开输入框时值超出范围）。 |
+| `onSubmit` | `.on_submit(\|value: &Option<f64>\| ..)` | `{ value: number \| null }` | 在输入框里按 Return / Enter：被限制在 `min` 和 `max` 之间的值。 |
 | `onFocus` | `.on_focus(..)` | 无 | 输入框获得了键盘焦点。 |
 | `onBlur` | `.on_blur(..)` | 无 | 输入框失去了键盘焦点（先把值限制在 `min` 和 `max` 之间）。 |
 

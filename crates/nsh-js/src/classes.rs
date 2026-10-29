@@ -431,18 +431,7 @@ pub(crate) fn send(
     promise: bool,
     make: impl FnOnce(&dyn JsHost) -> Result<RustCall, Thrown>,
 ) -> Raw {
-    CallHost::new(cx, this, UNDEFINED, args).send(promise, false, make)
-}
-
-/// [`send`] of a call that starts its task in the JS call (`Later`): JS
-/// gets a promise of the task, and what the start throws throws here.
-pub(crate) fn start(
-    cx: Ctx,
-    this: Raw,
-    args: js::Args<'_>,
-    make: impl FnOnce(&dyn JsHost) -> Result<RustCall, Thrown>,
-) -> Raw {
-    CallHost::new(cx, this, UNDEFINED, args).send(true, true, make)
+    CallHost::new(cx, this, UNDEFINED, args).send(promise, make)
 }
 
 /// The pending exception as a rejected promise (an uncatchable one, an
@@ -623,11 +612,10 @@ impl<'a> CallHost<'a> {
     fn run(&self, member: &'static Member) -> Raw {
         match member.call {
             MemberCall::Sync(f) => self.run_sync(f),
-            MemberCall::Async(start) => {
-                self.send(true, false, |host| start(host).map(RustCall::Task))
-            }
-            MemberCall::Start(start) => {
-                self.send(true, true, |host| start(host).map(RustCall::Task))
+            // A call returning a promise never throws: what its start
+            // refuses (an argument, a grant, a quota) rejects.
+            MemberCall::Async(start) | MemberCall::Start(start) => {
+                self.send(true, |host| start(host).map(RustCall::Task))
             }
         }
     }
@@ -645,12 +633,10 @@ impl<'a> CallHost<'a> {
     }
 
     /// Sends the call `make` converts this call's values into as an op
-    /// ([`send`]); with `throws`, what `make` throws throws even when the
-    /// call returns a promise (a call starting its task: [`start`]).
+    /// ([`send`]); with `promise`, what `make` refuses rejects the promise.
     fn send(
         &self,
         promise: bool,
-        throws: bool,
         make: impl FnOnce(&dyn JsHost) -> Result<RustCall, Thrown>,
     ) -> Raw {
         let cx = self.cx;
@@ -667,9 +653,9 @@ impl<'a> CallHost<'a> {
             }
             Err(e) => {
                 // Thrown (or rethrown) as a synchronous call's error, then
-                // taken as the promise's unless the call throws.
+                // taken as the promise's.
                 let thrown = self.finish(Err(e));
-                return if promise && !throws {
+                return if promise {
                     rejected_with_exception(cx)
                 } else {
                     thrown
@@ -997,7 +983,11 @@ impl JsHost for CallHost<'_> {
 
     fn retain(&self, v: JsRaw) -> Option<Rc<dyn CallbackHandle>> {
         // The functions' table keeps any value; one that is no function is
-        // only ever handed back (`value`), never called.
+        // only ever handed back (`value`) or answers a settling call
+        // (`Callback::settling`), never called. A promise kept is handled:
+        // Rust looks at how it settles (in a later turn), so its rejection
+        // is reported to Rust, not as unhandled.
+        js::mark_handled(self.cx, from_raw(v));
         Some(new_callback(self.cx, from_raw(v)))
     }
 
@@ -1076,6 +1066,13 @@ impl JsHost for CallHost<'_> {
 
     fn json(&self, v: &JsonValue) -> Result<JsRaw, PropError> {
         Ok(to_raw(crate::host::json_to_js(self.cx, v)))
+    }
+
+    fn new_function(&self, f: Box<dyn Fn()>) -> Result<JsRaw, PropError> {
+        self.checked(js::closure(self.cx, Vec::new(), move |_, _, _| {
+            f();
+            Ok(V::undefined())
+        }))
     }
 
     fn wrap(&self, instance: Rc<dyn ClassInstance>) -> Result<JsRaw, PropError> {
@@ -1169,7 +1166,8 @@ impl JsHost for CallHost<'_> {
                     return;
                 }
                 // SAFETY: the function lives, and so does its VM; a release
-                // runs outside JS, holding no other reference to the graph.
+                // (outside JS, or a `Stop` JS calls) holds no other
+                // reference to the graph.
                 let removed = unsafe { crate::reactive::graph(cx) }
                     .remove_cleanup(owner, |c| js::same(*c, raw));
                 if let Some(removed) = removed {
@@ -1382,18 +1380,86 @@ fn message_of(cx: Ctx, e: Raw) -> String {
     message
 }
 
-/// What `e`, thrown, is: its message and, for an `Error`, its stack.
-fn thrown_of(cx: Ctx, e: Raw) -> Exception {
+/// What `e`, thrown, is: its message, for an `Error` its stack, and for a
+/// traced call the value as JSON ([`thrown_json`]).
+fn thrown_of(cx: Ctx, e: Raw, traced: bool) -> Exception {
     let stack = js::is_object(e)
         .then(|| js::get(cx, e, "stack").ok())
         .flatten()
         .and_then(|s| js::opt_string(cx, s.raw()).ok().flatten())
         .filter(|s| !s.is_empty());
     let _ = js::take_exception(cx);
-    Exception {
-        message: message_of(cx, e),
-        stack,
+    let thrown = if traced { thrown_json(cx, e) } else { None };
+    let mut exception = Exception::from(message_of(cx, e));
+    exception.stack = stack;
+    exception.thrown = thrown;
+    exception
+}
+
+/// `e`, thrown, as JSON for checks of it ([`Exception::thrown`]): an
+/// object's own enumerable properties (an `Error`'s `code`, ...) with its
+/// `name` and `message` when they are strings, any other value as itself.
+/// Only a traced call's reply asks for it (`nsh/test`'s checks): it runs
+/// the app's getters and walks the whole value. `None` when converting it
+/// throws (a getter, a cycle, a value too large), which is dropped; an
+/// uncatchable error (an interrupt) stays pending.
+fn thrown_json(cx: Ctx, e: Raw) -> Option<JsonValue> {
+    // SAFETY: a context reference and a dup the value owns.
+    let rcx = unsafe { rquickjs::Ctx::from_raw(std::ptr::NonNull::new_unchecked(cx)) };
+    // SAFETY: as above.
+    let value = unsafe { rquickjs::Value::from_raw(rcx, qjs::JS_DupValue(cx, e)) };
+    let failed = || {
+        let e = js::take_exception(cx);
+        // SAFETY: a check of a live value.
+        if unsafe { qjs::JS_IsUncatchableError(e.raw()) } {
+            let _ = js::throw(cx, e);
+        }
+        None
+    };
+    // An `Error` is an object whose type rquickjs reports apart
+    // (`Type::Exception`): its own properties are read as an object's.
+    let converted = match value.as_object() {
+        Some(object) if value.type_of() == rquickjs::Type::Exception => object
+            .props::<String, rquickjs::Value>()
+            .filter_map(|entry| match entry {
+                Ok((_, item))
+                    if matches!(
+                        item.type_of(),
+                        rquickjs::Type::Undefined
+                            | rquickjs::Type::Function
+                            | rquickjs::Type::Symbol
+                    ) =>
+                {
+                    None
+                }
+                Ok((key, item)) => Some(crate::protocol::to_json(&item).map(|v| (key, v))),
+                Err(e) => Some(Err(e)),
+            })
+            .collect::<rquickjs::Result<serde_json::Map<_, _>>>()
+            .map(JsonValue::Object),
+        _ => crate::protocol::to_json(&value),
+    };
+    let Ok(mut json) = converted else {
+        return failed();
+    };
+    if let (JsonValue::Object(fields), Some(object)) = (&mut json, value.as_object()) {
+        // `name` comes from the prototype, `message` is not enumerable:
+        // read as JS reads them.
+        for key in ["name", "message"] {
+            if fields.contains_key(key) {
+                continue;
+            }
+            match object.get::<_, rquickjs::Value>(key) {
+                Ok(v) => {
+                    if let Some(text) = v.as_string().and_then(|s| s.to_string().ok()) {
+                        fields.insert(key.to_owned(), JsonValue::String(text));
+                    }
+                }
+                Err(_) => return failed(),
+            }
+        }
     }
+    Some(json)
 }
 
 /// A host for conversions outside a call.
@@ -1430,7 +1496,14 @@ pub(crate) fn run_call(cx: Ctx, mut call: JsCall) {
         }
     };
     let raws: Vec<Raw> = args.iter().map(V::raw).collect();
-    match js::call(cx, function.raw(), UNDEFINED, &raws) {
+    let called = if call.settles() && !js::is_function(cx, function.raw()) {
+        // A value in place of a function (`Callback::settling`) answers
+        // itself, a promise what it settles to.
+        Ok(V::dup(cx, function.raw()))
+    } else {
+        js::call(cx, function.raw(), UNDEFINED, &raws)
+    };
+    match called {
         Ok(result) => {
             if !call.wants_reply() {
                 return;
@@ -1457,7 +1530,8 @@ pub(crate) fn run_call(cx: Ctx, mut call: JsCall) {
                     },
                     move |cx, _, reason| {
                         if let Some(call) = rejected.borrow_mut().take() {
-                            call.reply(Err(thrown_of(cx, reason)));
+                            let traced = call.traced();
+                            call.reply(Err(thrown_of(cx, reason, traced)));
                         }
                         Ok(())
                     },
@@ -1481,7 +1555,8 @@ pub(crate) fn run_call(cx: Ctx, mut call: JsCall) {
                 classes(cx).uncatchable.borrow_mut().get_or_insert(e);
                 call.reply(Err(message.into()));
             } else if call.wants_reply() {
-                call.reply(Err(thrown_of(cx, e.raw())));
+                let traced = call.traced();
+                call.reply(Err(thrown_of(cx, e.raw(), traced)));
             } else {
                 js::report(cx, e);
             }

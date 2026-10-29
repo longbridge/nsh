@@ -6,6 +6,31 @@ use nsh_core::{
 };
 
 use super::{bindings::Bindings, values::Value};
+/// An input's text as `onChange`'s `{ value }`.
+pub(crate) fn value(text: &str) -> Result<Value, PropError> {
+    object([("value", Value::string(text)?)])
+}
+
+/// `value` as the one field `key` of an event's object.
+pub(crate) fn wrap(key: &'static str, value: Value) -> Result<Value, PropError> {
+    object([(key, value)])
+}
+
+/// A video's `onLoad` payload: `{ duration, size: { width, height } }` of the
+/// platforms' `duration`, `width` and `height`, as nsh-js nests them.
+pub(crate) fn video_load(fields: &[(&'static str, PayloadValue)]) -> Result<Value, PropError> {
+    let out = Value::object()?;
+    let size = Value::object()?;
+    for (key, value) in fields {
+        match *key {
+            "width" | "height" => size.set(key, &scalar(value)?)?,
+            _ => out.set(key, &scalar(value)?)?,
+        }
+    }
+    out.set("size", &size)?;
+    Ok(out)
+}
+
 fn object(fields: impl IntoIterator<Item = (&'static str, Value)>) -> Result<Value, PropError> {
     let out = Value::object()?;
     for (key, value) in fields {
@@ -65,7 +90,7 @@ pub(super) fn payload(host: &Bindings, payload: &EventPayload) -> Result<Value, 
                 .map(|(k, v)| scalar(v).map(|v| (*k, v)))
                 .collect::<Result<Vec<_>, _>>()?,
         )?,
-        EventPayload::Layout(b) => bounds(*b)?,
+        EventPayload::Layout(b) => object([("bounds", bounds(*b)?)])?,
         EventPayload::Press(p) => object([
             ("position", point(p.position)?),
             ("pagePosition", point(p.page_position)?),
@@ -113,7 +138,9 @@ pub(super) fn payload(host: &Bindings, payload: &EventPayload) -> Result<Value, 
                 ("uris", strings(&paste.uris)?),
             ])?
         }
-        EventPayload::Picked { id, .. } => object([("id", number(*id))])?,
+        EventPayload::Picked { id, .. } | EventPayload::FileRequest { id, .. } => {
+            object([("id", number(*id))])?
+        }
         EventPayload::Native { name, data } => object([
             ("name", Value::string(name)?),
             ("data", Value(host.json(data)?.0[0] as u32)),
@@ -158,24 +185,33 @@ pub(super) fn payload(host: &Bindings, payload: &EventPayload) -> Result<Value, 
                     "cancelled",
                     boolean(matches!(payload, EventPayload::PanCancelled { .. })),
                 ),
-                ("translationX", number(translation.x.0)),
-                ("translationY", number(translation.y.0)),
-                ("velocityX", number(*velocity_x)),
-                ("velocityY", number(*velocity_y)),
+                ("translation", point(*translation)?),
+                (
+                    "velocity",
+                    object([("x", number(*velocity_x)), ("y", number(*velocity_y))])?,
+                ),
             ])?;
-            if let Some(x) = value_x {
-                out.set("valueX", &number(x.0))?;
-            }
-            if let Some(y) = value_y {
-                out.set("valueY", &number(y.0))?;
+            // The bound values, those of the axes `pan` binds.
+            if value_x.is_some() || value_y.is_some() {
+                let value = object([])?;
+                if let Some(x) = value_x {
+                    value.set("x", &number(x.0))?;
+                }
+                if let Some(y) = value_y {
+                    value.set("y", &number(y.0))?;
+                }
+                out.set("value", &value)?;
             }
             out
         }
-        EventPayload::Scroll(offset) => point(*offset)?,
-        EventPayload::Image(size) => object([
-            ("width", number(size.width.0 as f64)),
-            ("height", number(size.height.0 as f64)),
-        ])?,
+        EventPayload::Scroll(offset) => object([("offset", point(*offset)?)])?,
+        EventPayload::Image(size) => object([(
+            "size",
+            object([
+                ("width", number(size.width.0 as f64)),
+                ("height", number(size.height.0 as f64)),
+            ])?,
+        )])?,
         EventPayload::Error { message } => object([("message", Value::string(message)?)])?,
         EventPayload::Text { text, .. } => object([("text", Value::string(text)?)])?,
         EventPayload::Touch(touch) => {

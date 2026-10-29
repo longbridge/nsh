@@ -90,7 +90,7 @@ function App() {
           { title: "Stats", icon: platform.select({ ios: "chart.bar", android: "ic_stats" }) },
         ]}
         selectedIndex={section()}
-        onChange={(index) => section.set(index)}
+        onChange={({ index }) => section.set(index)}
         class="absolute inset-x-0 bottom-0"
       />
     </View>
@@ -101,7 +101,7 @@ mount(App);
 ```
 
 `TabBar` comes from `nsh/mobile`, `nsh_core::mobile` in Rust. The selection is the app's: a
-tap reports `onChange` with the tab's index, the bar shows the choice at once, as the system's does, and the app shows
+tap reports `onChange` with the tab's index (`{ index }`), the bar shows the choice at once, as the system's does, and the app shows
 that section and passes the index back as `selectedIndex`. Its height is the system's where the style leaves it open.
 In Rust, `tab_bar()` makes one, with a setter per prop (`.items(..)`, `.selected_index(..)`), a listener per event
 (`.on_change(..)`) and the typed style methods; `TabBarItem::new(title).icon(name)` makes a tab.
@@ -127,7 +127,7 @@ In Rust, `tab_bar()` makes one, with a setter per prop (`.items(..)`, `.selected
 
 | Event | Rust | Description |
 |---|---|---|
-| `onChange` | `.on_change(\|index: &u32\| ..)` | The user chose a tab: its index. The bar shows the choice at once; the app shows the tab's content and sets `selectedIndex`. |
+| `onChange` | `.on_change(\|index: &u32\| ..)` | The user chose a tab: `{ index }`, its index. The bar shows the choice at once; the app shows the tab's content and sets `selectedIndex`. |
 
 ### Platform notes
 
@@ -146,7 +146,7 @@ In Rust, `tab_bar()` makes one, with a setter per prop (`.items(..)`, `.selected
 On iOS and Mac Catalyst; on Android it is an empty hidden view.
 
 ```ts
-function InputAccessoryView(props: InputAccessoryViewProps): YNode | null;
+function InputAccessoryView(props: InputAccessoryViewProps): JSX.Element;
 
 interface InputAccessoryViewProps {
   nativeID: string;
@@ -201,19 +201,19 @@ fn Note() -> impl IntoElement {
 ```
 
 ```tsx tabs
-import { signal, Text, View, type YNode } from "nsh";
+import { type InputRef, signal, Text, View } from "nsh";
 import { Input } from "nsh/base";
 import { InputAccessoryView } from "nsh/mobile";
 
 function Note() {
   const text = signal("");
-  let input: YNode | undefined;
+  let input: InputRef | undefined;
   return (
     <View>
       <Input
         ref={(n) => (input = n)}
         value={text()}
-        onChange={(v) => text.set(v)}
+        onChange={({ value }) => text.set(value)}
         placeholder="Write a note"
         ios={{ inputAccessoryViewID: "note-bar" }}
       />
@@ -236,7 +236,7 @@ On Android; on iOS its listeners are kept and never called, and `exitApp()` retu
 
 ```ts
 const BackHandler: {
-  onBackPress(listener: () => boolean | void): () => void;
+  on(event: "press", listener: () => boolean | void): () => void;
   exitApp(): void;
 };
 ```
@@ -245,7 +245,7 @@ The system back button and back gesture. Dialogs handle the back press first (a 
 
 | Member | Rust | Description |
 |---|---|---|
-| `onBackPress(listener)` | `on_back_press(listener)` | `listener` returns `true` when it handled the press. Returns a function that stops listening; a listener added while a component renders (or an effect runs) stops with it, in Rust and TSX alike. |
+| `on("press", listener)` | `on_back_press(listener)` | `listener` returns `true` when it handled the press. Returns a function that stops listening; a listener added while a component renders (or an effect runs) stops with it, in Rust and TSX alike. |
 | `exitApp()` | the listener returns `false` | Leaves the app. A Rust listener that returns `false` lets the press go on, so the stack goes back or the app exits. |
 
 ```rust tabs
@@ -260,8 +260,8 @@ fn Editor() -> impl IntoElement {
             return false; // let the app go back or exit
         }
         spawn(async move {
-            let answer = alert_dialog().title("Discard changes?").cancel("Keep").destructive("Discard").show().await;
-            if answer == Ok(Some("Discard".into())) {
+            let answer = alert_dialog().title("Discard changes?").cancel("keep", "Keep").destructive("discard", "Discard").show().await;
+            if answer.is_ok_and(|r| r.action.as_deref() == Some("discard")) {
                 dirty.set(false); // the next back press leaves
             }
         });
@@ -279,12 +279,12 @@ import { AlertDialog } from "nsh/base";
 function Editor() {
   const dirty = signal(false);
   // Stops listening when Editor goes.
-  BackHandler.onBackPress(() => {
+  BackHandler.on("press", () => {
     if (!dirty()) return false; // let the app go back or exit
     AlertDialog.show({
       title: "Discard changes?",
-      actions: [{ label: "Keep", role: "cancel" }, { label: "Discard", role: "destructive", id: "discard" }],
-    }).then((id) => id === "discard" && BackHandler.exitApp());
+      actions: [{ label: "Keep", role: "cancel", id: "keep" }, { label: "Discard", role: "destructive", id: "discard" }],
+    }).then(({ action }) => action === "discard" && BackHandler.exitApp());
     return true;
   });
   // ...

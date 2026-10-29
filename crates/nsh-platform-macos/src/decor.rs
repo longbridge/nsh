@@ -42,7 +42,7 @@ use objc2_quartz_core::{
 };
 
 use crate::{
-    image::Decoded,
+    image::Picture,
     surface::quiet,
     view::{NshView, ViewState},
 };
@@ -123,7 +123,7 @@ pub(crate) struct Decor {
     /// mode and the position put it.
     picture: Option<Retained<CALayer>>,
     /// The image shown, and its natural size in points.
-    contents: Option<(Decoded, (f32, f32))>,
+    contents: Option<(Picture, (f32, f32))>,
     /// How the image fits.
     mode: ResizeMode,
     /// Where the fitted image sits.
@@ -161,7 +161,7 @@ impl Decor {
 
     /// Shows `image` (natural size `natural` in points), fading in over
     /// `fade` seconds; an animated image plays its frames, forever.
-    pub(crate) fn set_image(&mut self, image: Option<(&Decoded, (f32, f32))>, fade: f64) {
+    pub(crate) fn set_image(&mut self, image: Option<(&Picture, (f32, f32))>, fade: f64) {
         self.contents = image.map(|(d, n)| (d.clone(), n));
         self.image_layer();
         let Some(layer) = self.picture.clone() else {

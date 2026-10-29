@@ -110,8 +110,9 @@ pub enum FunctionCall {
     /// converted in the JS call): it reaches the platform with the same free
     /// functions views use (`dialog`, `clipboard_string`, ...).
     Async(AsyncCall),
-    /// In the JS call, returning a task's start ([`super::Later`]): what
-    /// the call throws throws there; JS gets a promise of the task.
+    /// In the JS call, returning a task's start ([`super::Later`]): JS gets
+    /// a promise of the task, rejected with what the call refuses (a
+    /// function returning a promise never throws).
     Start(AsyncCall),
 }
 
@@ -318,6 +319,17 @@ impl ModuleCx {
         let (answer, slot) = DialogAnswer::new();
         self.actions.push(Action::Dialog(dialog, slot));
         answer
+    }
+
+    /// Draws the views' bars with the built-in bar `source` makes of
+    /// `theme`, or with the platform's indicator
+    /// ([`set_builtin_scrollbars`](super::set_builtin_scrollbars)).
+    pub fn set_builtin_scrollbars(
+        &mut self,
+        source: super::ScrollbarSource,
+        theme: Option<super::AnyValue>,
+    ) {
+        self.actions.push(Action::BuiltInScrollbars(source, theme));
     }
 
     /// Unfocuses the focused input, hiding the software keyboard.
