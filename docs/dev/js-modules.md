@@ -52,7 +52,7 @@ the chunks of a split bundle (`Screen.js`: a name that is no native module, with
 - **Platform modules** (`nsh/mobile`, `nsh/desktop`) are importable on every platform (one bundle runs everywhere);
   where an API does not apply its calls do nothing and its components render nothing. Their `isAvailable` and
   `nsh`'s `platform.os` tell which.
-- **Platform-only props** are grouped: `ios={{…}}` / `android={{…}}` / `web={{…}}` / `desktop={{…}}` (macOS, Windows, Linux, and browsers in the desktop idiom) on
+- **Platform-only props** are grouped: `ios={{…}}` / `android={{…}}` / `web={{…}}` / `desktop={{…}}` (macOS, Windows, Linux, browsers in the desktop idiom, and terminals) on
   elements and components (`IOSProps` / `AndroidProps` / `DesktopProps` in `types.d.ts`, extended per element; the host
   props in them are the generated `IOS…HostProps` / `Android…HostProps`). The renderer
   (`platform_props` in `dom.rs`) sends only the current platform's object, each key as a prop of its own (keys removed
