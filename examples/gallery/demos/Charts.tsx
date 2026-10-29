@@ -233,7 +233,8 @@ function Live() {
                 y: high(),
                 align: peakAlign(),
                 class: "-translate-y-full",
-                style: { ...axis, color: colors.muted, paddingBottom: 6 },
+                // On the card's color, so a grid line near the high passes behind it.
+                style: { ...axis, color: colors.muted, marginTop: -6, paddingHorizontal: 4, borderRadius: 3, backgroundColor: colors.surface },
               },
               {
                 text: fixed(last()),
@@ -656,6 +657,11 @@ const RING = pointer ? 168 : 176;
 const RIM = RING / 2 - 8;
 /** As a pie the ring draws in to leave room for its labels outside. */
 const PIE_RIM = Math.round(RIM * 0.66);
+/** The ring turned so its two smallest slices, the last, meet at 3
+ * o'clock: their labels stack there instead of crowding side by side at
+ * the top. */
+const SMALLEST = REGIONS[3].revenue + REGIONS[4].revenue;
+const PIE_START = Math.PI / 2 - (2 * Math.PI * (REVENUE - SMALLEST / 2)) / REVENUE;
 
 /**
  * Revenue by region as a donut: 2-point gaps of even width, softly rounded
@@ -687,6 +693,8 @@ function Revenue() {
         >
           <Pie
             value="revenue"
+            startAngle={PIE_START}
+            endAngle={PIE_START + 2 * Math.PI}
             innerRadius={donut() ? RIM * 0.62 : 0}
             outerRadius={donut() ? RIM : PIE_RIM}
             padAngle={2 / RIM}
@@ -1013,6 +1021,12 @@ const NODE = ["fill-chart-2", "fill-chart-3", "fill-chart-1", "fill-chart-1", "f
 const FROM = ["from-chart-2/30", "from-chart-3/30", "from-chart-1/30", "from-chart-1/30", "from-chart-4/30", "from-chart-1/30", "from-chart-4/30", "from-chart-1/30", "from-chart-4/30"];
 const TO = ["to-chart-2/30", "to-chart-3/30", "to-chart-1/30", "to-chart-1/30", "to-chart-4/30", "to-chart-1/30", "to-chart-4/30", "to-chart-1/30", "to-chart-4/30"];
 const FLOW_HEIGHT = pointer ? 196 : 220;
+/** The room left of the segments' names and right of the results'. */
+const FLOW_LEFT = 58;
+const FLOW_RIGHT = 64;
+/** Columns closer than this break two-word names over two lines, so the
+ * names centered over neighbouring columns do not run into each other. */
+const FLOW_NARROW = 72;
 const billions = (v: number) => `$${fixed(v, 1)}B`;
 
 /**
@@ -1031,6 +1045,9 @@ function Flows() {
   const share = (v: number) => `${fixed((v / revenue()) * 100, 1)}%`;
   const margin = (i: number) => share(through(quarter(), i));
   const label = () => QUARTERS.find((q) => q.value === quarter())!.label;
+  /** The distance between the five columns, once laid out. */
+  const column = signal(Infinity);
+  const name = (d: (typeof ACCOUNTS)[number]) => (column() < FLOW_NARROW ? d.name.replace(" ", "\n") : d.name);
   return (
     <Card icon="stocks" title="Flows" subtitle="A quarter's revenue from its segments to net income">
       <View style={{ gap: 4 }}>
@@ -1042,7 +1059,10 @@ function Flows() {
           <Text style={{ fontSize: 12, color: colors.muted }}>{`${margin(shown())} of ${label()} revenue`}</Text>
         </View>
       </View>
-      <View style={{ marginTop: size.gap + 18, marginBottom: 6 }}>
+      <View
+        onLayout={({ bounds }) => column.set((bounds.size.width - FLOW_LEFT - FLOW_RIGHT - 3) / 4)}
+        style={{ marginTop: size.gap + 18, marginBottom: 6 }}
+      >
         <Plot
           data={ACCOUNTS}
           appearGeneration={1}
@@ -1052,7 +1072,7 @@ function Flows() {
           onHoverChange={({ index }) => hover.set(index)}
           focusStyle={focusRing(4)}
           // Room for the segments' names left of them and the results' right.
-          style={{ height: FLOW_HEIGHT, marginLeft: 58, marginRight: 64 }}
+          style={{ height: FLOW_HEIGHT, marginLeft: FLOW_LEFT, marginRight: FLOW_RIGHT }}
         >
           <Sankey
             links={income(quarter())}
@@ -1063,8 +1083,8 @@ function Flows() {
             hoverDim={0.7}
             nodeClass={(_, i) => NODE[i]}
             linkBackgroundClass={(link) => `bg-linear-to-r ${FROM[link.source]} ${TO[link.target]}`}
-            nodeLabel={(d: (typeof ACCOUNTS)[number]) => d.name}
-            nodeLabelStyle={{ ...axis, color: colors.muted, padding: 5, numberOfLines: 1 }}
+            nodeLabel={name}
+            nodeLabelStyle={{ ...axis, color: colors.muted, padding: 5, numberOfLines: 2 }}
           />
         </Plot>
       </View>
