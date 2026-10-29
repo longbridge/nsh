@@ -257,3 +257,54 @@ fn image_placeholders_smaller_than_three_by_two_cells_are_decorative() {
     assert_eq!(row(buffer, 0), "");
     assert!(row(buffer, 1).starts_with('┌'), "{:?}", row(buffer, 1));
 }
+
+#[component]
+fn WrappedButtons() -> impl IntoElement {
+    let styled = |label: &'static str| {
+        view().on_press(|_: &()| {}).child(
+            view()
+                .w(px(80.0))
+                .h(px(32.0))
+                .px(px(16.0))
+                .border_1()
+                .bg(nsh_core::color::rgb(0xc8f26d))
+                .justify_center()
+                .child(text(label).text_color(nsh_core::color::rgb(0x13160c))),
+        )
+    };
+    view().flex_1().bg(nsh_core::color::rgb(0x0c0d0f)).child(
+        view()
+            .flex_row()
+            .gap(px(8.0))
+            .child(styled("Sell"))
+            .child(styled("Buy")),
+    )
+}
+
+#[test]
+fn a_press_handler_around_a_styled_box_is_a_bracketed_button_whose_label_stays_put() {
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(24, 3)).unwrap();
+    view.load(App::Rust(Root::new::<WrappedButtons>(|| ())))
+        .unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "Buy");
+    let buffer = terminal.backend().buffer();
+    let lines: Vec<_> = (0..3).map(|y| row(buffer, y)).collect();
+    let line = lines
+        .iter()
+        .find(|line| line.contains("Sell"))
+        .expect("the labels");
+    // Each label keeps the column the layout gave it (16 points into a box at
+    // 0 and at 88 points), and its brackets take the Cells around it.
+    assert_eq!(line, "[ Sell ]   [ Buy ]", "{lines:?}");
+    assert!(
+        lines.iter().all(|line| !line.contains(['│', '─', '┌'])),
+        "{lines:?}"
+    );
+    let label = line.find("Buy").unwrap() as u16;
+    let y = lines.iter().position(|l| l == line).unwrap() as u16;
+    assert!(
+        !buffer[(label, y)].modifier.contains(Modifier::DIM),
+        "dark text designed on its lime fill"
+    );
+}

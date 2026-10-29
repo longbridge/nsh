@@ -92,6 +92,8 @@ struct Painter<'a> {
     /// The Cells a canvas drew, by buffer index: a reversed view around them
     /// leaves them as drawn.
     canvas_cells: Vec<bool>,
+    /// The boxes of the buttons being drawn, which draw no border or fill.
+    button_boxes: Vec<NodeId>,
 }
 
 /// Below this opacity, multiplied through its ancestors, a view draws
@@ -132,6 +134,7 @@ pub(crate) fn draw(
         focused,
         background: None,
         canvas_cells,
+        button_boxes: Vec::new(),
     };
     painter.view(ROOT_ID, Projection::IDENTITY, clip, 1.0, true, None);
     let modals = painter.tree.modals.clone();
@@ -156,14 +159,15 @@ impl Painter<'_> {
         let text_parent = horizontal_text_parent(self.tree, id, parent);
         let sibling_content =
             border_has_sibling_content(self.tree, id, parent, self.cells, self.area);
-        let button = button_label(
+        let (button, boxed) = button_label(
             self.tree,
             id,
             parent,
             self.cells,
             self.area,
             self.background,
-        );
+        )
+        .unzip();
         let Some(view) = self.tree.get_mut(id) else {
             return;
         };
@@ -176,6 +180,8 @@ impl Painter<'_> {
         if view.concealed || view.style.hidden || opacity <= 0.0 {
             return;
         }
+        self.button_boxes.extend(boxed);
+        let unboxed = self.button_boxes.contains(&id);
         let mut projection = parent.view(view);
         let local_frame = Bounds::new(Point::default(), view.frame.size);
         let line = hairline_fill(view, projection.bounds(local_frame).size, self.cells);
@@ -366,7 +372,7 @@ impl Painter<'_> {
         let sides = std::array::from_fn::<_, 4, _>(|i| {
             [widths.top, widths.right, widths.bottom, widths.left][i] > Points::ZERO
                 && !colors[i].is_transparent()
-                && button.is_none()
+                && !unboxed
         });
         let content = i32::from(
             view.kind != ViewKind::View
@@ -496,7 +502,7 @@ impl Painter<'_> {
         let outer_ground = Ground::new(self.scheme, outer_background);
         let ground = Ground::new(self.scheme, self.background);
         if visible_drawn {
-            let fill = if button.is_some() {
+            let fill = if unboxed {
                 nsh_core::Color::TRANSPARENT
             } else {
                 view.animated
@@ -699,6 +705,9 @@ impl Painter<'_> {
             self.buffer[position] = cell;
         }
         self.background = outer_background;
+        if boxed.is_some() {
+            self.button_boxes.pop();
+        }
         if visible_drawn && let Some(button) = button {
             self.brackets(visible, button, own_geometry);
         }
@@ -801,7 +810,7 @@ fn button_label(
     cells: CellSize,
     area: Rect,
     background: Option<nsh_core::Color>,
-) -> Option<ButtonLabel> {
+) -> Option<(ButtonLabel, NodeId)> {
     let view = tree.get(id)?;
     let pressable = match view.props.accessibility.role {
         AccessibilityRole::Button | AccessibilityRole::ImageButton => true,
@@ -812,6 +821,38 @@ fn button_label(
     if !pressable || state.selected || state.checked == Some(Checked::True) {
         return None;
     }
+    // The box is the pressable's own, or that of the plain View it wraps all
+    // its content in (a press handler around a styled View).
+    let mut boxed = id;
+    loop {
+        let view = tree.get(boxed)?;
+        if has_box(view, background) {
+            break;
+        }
+        let mut shown = view.children.iter().filter(|&&child| {
+            tree.get(child)
+                .is_some_and(|child| !child.concealed && !child.style.hidden)
+        });
+        match (shown.next(), shown.next()) {
+            (Some(&child), None) if tree.get(child)?.kind == ViewKind::View => boxed = child,
+            _ => return None,
+        }
+    }
+    let mut rows = Vec::new();
+    if !text_rows(tree, id, projection, cells, area, &mut rows) {
+        return None;
+    }
+    let label = match rows.len() {
+        0 => ButtonLabel::Accessible(view.props.accessibility.label.clone()?),
+        1 => ButtonLabel::Text,
+        _ => return None,
+    };
+    Some((label, boxed))
+}
+
+/// Whether the app drew `view` as a box: a border, or an opaque fill unlike the
+/// `background` it sits on.
+fn has_box(view: &crate::view::NshView, background: Option<nsh_core::Color>) -> bool {
     let border = view
         .animated
         .border_color
@@ -825,23 +866,7 @@ fn button_label(
         .animated
         .background
         .unwrap_or(view.style.background_color);
-    if !bordered && (fill.0 & 255 < 255 || Some(fill) == background) {
-        return None;
-    }
-    let mut rows = Vec::new();
-    if !text_rows(tree, id, projection, cells, area, &mut rows) {
-        return None;
-    }
-    match rows.len() {
-        0 => view
-            .props
-            .accessibility
-            .label
-            .clone()
-            .map(ButtonLabel::Accessible),
-        1 => Some(ButtonLabel::Text),
-        _ => None,
-    }
+    bordered || (fill.0 & 255 == 255 && Some(fill) != background)
 }
 
 /// Collects the Cell rows `id`'s subtree draws text glyphs on, up to two;

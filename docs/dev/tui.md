@@ -377,8 +377,9 @@ Decorations are plain, and each is a documented Decorative feature:
 - **Borders** are straight single lines (`┌─┐`, never `╭╮`) in their palette color: neutral border colors read
   dim, accent ones (an invalid field's red) keep their accent.
 - **Buttons** read `[ label ]`. A button is a pressable view (role `button` or `imagebutton`, or no role and press
-  handlers) that the app drew as a box, with a border or an opaque fill unlike the fill it sits on, and whose
-  text sits on one Cell row. List items without a box (sidebar and watchlist rows) and selected or checked views,
+  handlers) that the app drew as a box, with a border or an opaque fill unlike the fill it sits on, on itself or
+  on the plain View it wraps all its content in (a press handler around a styled View), and whose text sits on
+  one Cell row. List items without a box (sidebar and watchlist rows) and selected or checked views,
   which are reversed, have no brackets; other roles (link, tab, checkbox, radio, switch, menu item, ...) keep
   their own look, and a pressable with several rows of text or other content (a field, an image, a labeled canvas)
   keeps the app's box. The label stays in the Cells the layout gave it; the brackets take the button's own Cells,
