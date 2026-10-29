@@ -1961,6 +1961,13 @@ pub enum Prop {
     ShaderSource(Option<Arc<str>>),
     /// A compiled shader, as Rust sets it (TS sets `source`).
     Shader(Option<crate::shader::Shader>),
+    /// The element whose frame the view's follows along its parent's main
+    /// axis, as Rust sets it (`View::follow`, `core/follow.rs`); `None`
+    /// follows nothing.
+    Follow(Option<crate::element::FollowTarget>),
+    /// How a view that follows an element moves when it follows another
+    /// one (`View::follow_transition`); `None` jumps there.
+    FollowTransition(Option<crate::LayoutTransition>),
     /// `uniforms` (shaders): the values of the members of the shader's
     /// `struct Uniforms`, by name: numbers, colors, lists of them (vectors,
     /// arrays of `vec4f`) and animated values, which move it natively.

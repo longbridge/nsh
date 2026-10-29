@@ -1964,6 +1964,42 @@ element! {
 
 impl Interactive for View {}
 impl ParentElement for View {}
+
+impl View {
+    /// Its frame follows the element carrying `target` (a tab list's
+    /// indicator on the selected tab): along the main axis of its parent
+    /// (vertical in a flex column, else horizontal) it spans that element's
+    /// frame, inside its own margins on that axis, wherever the element is
+    /// inside its parent; across it, its style places it (`bottom(px(0.))`
+    /// and a height for an underline, top and bottom insets for a pill),
+    /// so its style makes it [`Styled::absolute`]. The core places it after
+    /// each layout, with no layout of its own and no JS: following another
+    /// element changes its frame alone, and a layout that moves the element
+    /// moves it in the same batch. While `target` is `None`, or no laid
+    /// out element carries it, its style alone places it; hidden
+    /// (`display: none`) and shown again, it is placed at once. A view
+    /// that follows nothing costs no work after layout.
+    pub fn follow(mut self, target: impl IntoReactive<Option<super::ElementRef>>) -> Self {
+        let target = (target.into_reactive()).map(|t: Option<super::ElementRef>| {
+            t.and_then(|t| t.target()).map(super::FollowTarget)
+        });
+        super::host::bind_prop(&mut self.0, target, Prop::Follow);
+        self
+    }
+
+    /// How it moves when [`Self::follow`] names another element: natively,
+    /// with `transition` as a layout animation of its own frame alone (the
+    /// rest of that commit changes at once); `None` (the default) jumps.
+    /// Following an element for the first time, and a layout that moves
+    /// it, place it at once.
+    pub fn follow_transition(
+        mut self,
+        transition: impl IntoReactive<Option<crate::LayoutTransition>>,
+    ) -> Self {
+        super::host::bind_prop(&mut self.0, transition, Prop::FollowTransition);
+        self
+    }
+}
 impl Interactive for SlotElement {}
 impl Interactive for Text {}
 impl Interactive for Image {}

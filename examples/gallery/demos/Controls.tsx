@@ -353,53 +353,6 @@ const rail = (height = 6) => ({ height, borderRadius: height / 2, overflow: "hid
 /** A bar's fill: the slider's citrus run, or a tone's color. */
 const fillOf = (height = 6, tone?: Tone) => (tone ? { height, borderRadius: height / 2, backgroundColor: toneColor(tone) } : { height, borderRadius: height / 2, ...sliderFill(0, 1) });
 
-/**
- * Where the selected item of a row (tabs, segments) lies, for an indicator
- * that travels to it as gpui-kit's tab bar's does (`motion.move`): each item
- * reports its place (`measure`, from its `onLayout`), and `left` and `width`
- * spring to the selected one's, from the row's outer edge. They are placed
- * at once on the first layout, as the row is resized and with reduced
- * motion.
- *
- * The places are kept as reported, and only a new place of the selected
- * item notifies: a row laid out again reports each of its items, which costs
- * one step each and moves the indicator once. (A native indicator part of
- * `Tabs` would place it with no JS at all.)
- */
-function indicator(index: () => number) {
-  const spans: ({ x: number; width: number } | undefined)[] = [];
-  const moved = signal(0);
-  const span = () => (moved(), spans[index()]);
-  const left = createAnimatedValue(0);
-  const width = createAnimatedValue(0);
-  let at = -1;
-  effect(() => {
-    const i = index();
-    const s = span();
-    if (!s) return;
-    const jump = at === -1 || at === i || reduceMotion();
-    at = i;
-    if (jump) {
-      left.set(s.x);
-      width.set(s.width);
-    } else {
-      left.spring(s.x, motion.move);
-      width.spring(s.width, motion.move);
-    }
-  });
-  return {
-    span,
-    left,
-    width,
-    measure(i: number, x: number, w: number) {
-      const s = spans[i];
-      if (s && s.x === x && s.width === w) return;
-      spans[i] = { x, width: w };
-      if (i === index()) moved.set(moved() + 1);
-    },
-  };
-}
-
 /** The room a tab title's icon takes: the icon and the gap after it. */
 const ICON_ROOM = 14 + 6;
 
@@ -1360,10 +1313,6 @@ export function Controls(props: { show: Control }) {
     // The track's padding and border: a tab is a pill inside them.
     const inset = 3;
     const inner = size.tabs - 2 * (inset + 1);
-    // The pill under the selected tab travels to the next one; the tabs
-    // share the track equally, so only its offset moves (placed inside the
-    // track's border).
-    const pill = indicator(() => SECTIONS.findIndex((s) => s.name === section()));
     const rows = settleOn(section);
     // The tabs share the track equally: icons show while every title fits
     // its share with its icon (a tab's border and padding are 14).
@@ -1375,6 +1324,8 @@ export function Controls(props: { show: Control }) {
     };
     return (
       <Card icon="controls" title="Tabs" subtitle="A section switcher: the app shows the selected one">
+        {/* The pill under the selected tab, inside the track's padding: the list's indicator, which the core places
+            on the selected tab and springs to the next one natively (gpui-kit's `spring_move`). */}
         <Tabs
           onLayout={({ bounds }) => sized.room.set(bounds.size.width)}
           style={{
@@ -1388,22 +1339,8 @@ export function Controls(props: { show: Control }) {
             backgroundColor: colors.inset,
             boxShadow: finish.track.boxShadow,
           }}
+          indicatorStyle={{ top: inset, bottom: inset, borderRadius: inner / 2, borderWidth: 1, ...finish.pill }}
         >
-          <View
-            style={{
-              pointerEvents: "none",
-              position: "absolute",
-              top: inset,
-              bottom: inset,
-              left: 0,
-              width: pill.span()?.width ?? 0,
-              opacity: pill.span() ? 1 : 0,
-              borderRadius: inner / 2,
-              borderWidth: 1,
-              ...finish.pill,
-              transform: [{ translateX: pill.left.sub(1) }],
-            }}
-          />
           <Each of={SECTIONS}>
             {(s, i) => (
               <Tab
@@ -1413,7 +1350,6 @@ export function Controls(props: { show: Control }) {
                   section.set(s().name);
                   last.set(`Tab: ${s().name}`);
                 }}
-                onLayout={({ bounds }) => pill.measure(i(), bounds.origin.x, bounds.size.width)}
                 style={{ flex: 1, paddingHorizontal: 6, borderRadius: inner / 2, borderWidth: 1, borderColor: "transparent", alignItems: "center", justifyContent: "center" }}
                 hoverStyle={s().disabled || section() === s().name ? undefined : hovered()}
                 focusStyle={focusRing()}
@@ -1441,12 +1377,7 @@ export function Controls(props: { show: Control }) {
   function Project() {
     const tab = signal("Issues");
     const shown = () => PROJECT.find((t) => t.name === tab())!;
-    const line = indicator(() => PROJECT.findIndex((t) => t.name === tab()));
     const rows = settleOn(tab);
-    // The underline is a bar `BASE` wide, moved to the selected tab's middle
-    // and stretched to its width: its edges travel together, as both values
-    // spring alike.
-    const BASE = 100;
     // Icons show while the whole strip fits the card with them (a tab's
     // border and padding are 18, 2 between tabs); without them it scrolls
     // when it still does not fit.
@@ -1462,21 +1393,12 @@ export function Controls(props: { show: Control }) {
         <View onLayout={({ bounds }) => sized.room.set(bounds.size.width)} style={{ marginHorizontal: -8 }}>
           <View style={{ position: "absolute", left: 0, right: 0, bottom: 0, height: 1, backgroundColor: colors.line }} />
           <Scroll horizontal scrollbar={false} style={{ flexGrow: 0 }}>
-            <Tabs style={{ flexDirection: "row", gap: 2, paddingTop: 3 }}>
-              <View
-                style={{
-                  pointerEvents: "none",
-                  position: "absolute",
-                  left: 0,
-                  bottom: 0,
-                  width: BASE,
-                  height: 2,
-                  borderRadius: 1,
-                  backgroundColor: colors.accent,
-                  opacity: line.span() ? 1 : 0,
-                  transform: [{ translateX: line.left.add(line.width.mul(0.5)).sub(BASE / 2) }, { scaleX: line.width.mul(1 / BASE) }],
-                }}
-              />
+            {/* The underline: the list's indicator at its bottom, as wide as the selected tab, which travels and
+                stretches to the next one natively. */}
+            <Tabs
+              style={{ flexDirection: "row", gap: 2, paddingTop: 3 }}
+              indicatorStyle={{ bottom: 0, height: 2, borderRadius: 1, backgroundColor: colors.accent }}
+            >
               <Each of={PROJECT}>
                 {(t, i) => (
                   <Tab
@@ -1486,7 +1408,6 @@ export function Controls(props: { show: Control }) {
                       tab.set(t().name);
                       last.set(`Project: ${t().name}`);
                     }}
-                    onLayout={({ bounds }) => line.measure(i(), bounds.origin.x, bounds.size.width)}
                     style={{ height: size.tabs, paddingHorizontal: 8, marginBottom: 4, borderRadius: radius.control, borderWidth: 1, borderColor: "transparent", justifyContent: "center" }}
                     hoverStyle={t().disabled || tab() === t().name ? undefined : hovered()}
                     activeStyle={pressed}

@@ -22260,3 +22260,286 @@ fn frames_of_a_subtree_moved_by_whole_points_are_not_walked_again() {
     let shown = c.commit().unwrap();
     assert_eq!(frame_of(&shown, 6), Some(rect(3.0, 2.0, 12.0, 10.0)));
 }
+
+/// A view that follows another one (`follow.rs`): a row (2: 10 of padding
+/// at the start, 30 high) of tabs 50 (4) and 70 (6) wide, its follower (8)
+/// laid out first, absolute, 2 high at the bottom; then a view (10) after
+/// the row, 10 high.
+fn follow_row(c: &mut Core<FakeEngine>, column: bool) {
+    use StyleValue::{Number, Str};
+    let list: &[(&str, StyleValue<'_>)] = if column {
+        &[("flexDirection", Str("column")), ("width", Number(100.0))]
+    } else {
+        &[
+            ("flexDirection", Str("row")),
+            ("paddingLeft", Number(10.0)),
+            ("height", Number(30.0)),
+        ]
+    };
+    let follower: &[(&str, StyleValue<'_>)] = if column {
+        &[
+            ("position", Str("absolute")),
+            ("left", Number(0.0)),
+            ("width", Number(3.0)),
+            ("marginTop", Number(2.0)),
+            ("marginBottom", Number(2.0)),
+        ]
+    } else {
+        &[
+            ("position", Str("absolute")),
+            ("bottom", Number(0.0)),
+            ("height", Number(2.0)),
+        ]
+    };
+    let tab = |n: f32| -> Vec<(&str, StyleValue<'_>)> {
+        if column {
+            vec![("height", Number(n))]
+        } else {
+            vec![("width", Number(n)), ("height", Number(30.0))]
+        }
+    };
+    let (first, second) = if column { (30.0, 40.0) } else { (50.0, 70.0) };
+    let mut ops = Vec::new();
+    for (id, parent, style) in [
+        (2, 1, list.to_vec()),
+        (8, 2, follower.to_vec()),
+        (4, 2, tab(first)),
+        (6, 2, tab(second)),
+        (10, 1, vec![("height", Number(10.0))]),
+    ] {
+        ops.push(Op::Create { id, tag: Tag::View });
+        ops.push(style_op(id, &style));
+        ops.push(Op::Insert {
+            parent,
+            child: id,
+            before: None,
+        });
+    }
+    ops.push(Op::SetProp {
+        id: 8,
+        prop: Prop::Follow(Some(crate::element::FollowTarget::of_node(6))),
+    });
+    apply(c, ops);
+}
+
+/// The frames of `batch`, each with the layout animation it runs with.
+fn animated_frames(batch: &MountBatch) -> Vec<(NodeId, Option<crate::LayoutTransition>)> {
+    let mut current = None;
+    let mut frames = Vec::new();
+    for item in &batch.items {
+        match item {
+            MountItem::LayoutAnimation(a) => current = a.update,
+            MountItem::Frame { id, .. } => frames.push((*id, current)),
+            _ => {}
+        }
+    }
+    frames
+}
+
+#[test]
+fn a_follower_spans_its_target_along_its_parents_row() {
+    let mut c = core();
+    follow_row(&mut c, false);
+    let batch = c.commit().unwrap();
+    // Across the row, its style: at the bottom, 2 high. Along it, 6: after
+    // the padding and 4.
+    assert_eq!(frame_of(&batch, 8), Some(rect(60.0, 28.0, 70.0, 2.0)));
+    let placed = animated_frames(&batch).iter().filter(|f| f.0 == 8).count();
+    assert_eq!(placed, 1, "one frame, the followed one: {:?}", batch.items);
+}
+
+#[test]
+fn following_another_view_moves_its_frame_alone_with_its_transition() {
+    let mut c = core();
+    follow_row(&mut c, false);
+    c.commit().unwrap();
+    let spring = crate::LayoutTransition::new(crate::LayoutCurve::Spring { damping: 0.85 }, 362.0);
+    apply(
+        &mut c,
+        vec![
+            Op::SetProp {
+                id: 8,
+                prop: Prop::FollowTransition(Some(spring)),
+            },
+            Op::SetProp {
+                id: 8,
+                prop: Prop::Follow(Some(crate::element::FollowTarget::of_node(4))),
+            },
+            // The content after the row changes in the same commit.
+            style_op(10, &[("height", StyleValue::Number(20.0))]),
+        ],
+    );
+    let batch = c.commit().unwrap();
+    assert_eq!(frame_of(&batch, 8), Some(rect(10.0, 28.0, 50.0, 2.0)));
+    let frames = animated_frames(&batch);
+    assert!(frames.contains(&(8, Some(spring))), "{frames:?}");
+    assert!(
+        frames.contains(&(10, None)),
+        "what changes around it changes at once: {frames:?}"
+    );
+    assert_eq!(frames.len(), 2, "no tab moves: {frames:?}");
+}
+
+#[test]
+fn a_follower_moves_at_once_with_the_layout_that_moves_its_target() {
+    let mut c = core();
+    follow_row(&mut c, false);
+    apply(
+        &mut c,
+        vec![Op::SetProp {
+            id: 8,
+            prop: Prop::FollowTransition(Some(crate::LayoutTransition::new(
+                crate::LayoutCurve::EaseOut,
+                160.0,
+            ))),
+        }],
+    );
+    c.commit().unwrap();
+    // The first tab grows: the second moves, and its follower with it, in
+    // the same batch and without the transition.
+    apply(
+        &mut c,
+        vec![style_op(
+            4,
+            &[
+                ("width", StyleValue::Number(60.0)),
+                ("height", StyleValue::Number(30.0)),
+            ],
+        )],
+    );
+    let batch = c.commit().unwrap();
+    assert_eq!(frame_of(&batch, 6), Some(rect(70.0, 0.0, 70.0, 30.0)));
+    assert_eq!(frame_of(&batch, 8), Some(rect(70.0, 28.0, 70.0, 2.0)));
+    assert!(
+        animated_frames(&batch).iter().all(|f| f.1.is_none()),
+        "{:?}",
+        batch.items
+    );
+}
+
+#[test]
+fn a_follower_in_a_column_follows_vertically_inside_its_margins() {
+    let mut c = core();
+    follow_row(&mut c, true);
+    let batch = c.commit().unwrap();
+    // Under 4 (30), inside margins of 2; at the left, 3 wide.
+    assert_eq!(frame_of(&batch, 8), Some(rect(0.0, 32.0, 3.0, 36.0)));
+}
+
+#[test]
+fn a_follower_follows_a_target_inside_other_views() {
+    let mut c = core();
+    follow_row(&mut c, false);
+    // 12, inside 6 after a padding of 5, 20 wide.
+    apply(
+        &mut c,
+        vec![
+            style_op(
+                6,
+                &[
+                    ("width", StyleValue::Number(70.0)),
+                    ("height", StyleValue::Number(30.0)),
+                    ("paddingLeft", StyleValue::Number(5.0)),
+                ],
+            ),
+            Op::Create {
+                id: 12,
+                tag: Tag::View,
+            },
+            style_op(
+                12,
+                &[
+                    ("width", StyleValue::Number(20.0)),
+                    ("height", StyleValue::Number(10.0)),
+                ],
+            ),
+            Op::Insert {
+                parent: 6,
+                child: 12,
+                before: None,
+            },
+            Op::SetProp {
+                id: 8,
+                prop: Prop::Follow(Some(crate::element::FollowTarget::of_node(12))),
+            },
+        ],
+    );
+    let batch = c.commit().unwrap();
+    assert_eq!(frame_of(&batch, 8), Some(rect(65.0, 28.0, 20.0, 2.0)));
+}
+
+#[test]
+fn a_follower_following_nothing_takes_its_own_layout() {
+    let mut c = core();
+    follow_row(&mut c, false);
+    c.commit().unwrap();
+    apply(
+        &mut c,
+        vec![Op::SetProp {
+            id: 8,
+            prop: Prop::Follow(None),
+        }],
+    );
+    let batch = c.commit().unwrap();
+    // Where its style puts it: at the start of the row's content, as wide
+    // as its content (none).
+    assert_eq!(frame_of(&batch, 8), Some(rect(10.0, 28.0, 0.0, 2.0)));
+}
+
+#[test]
+fn nothing_follows_while_no_view_follows_an_element() {
+    // The pass a follower takes (`Core::place_followers`) returns at once
+    // on an empty list, and `set_frame` notes nothing: no work, whatever
+    // the layout does.
+    let mut c = core();
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 2,
+                tag: Tag::View,
+            },
+            style_op(2, &[("height", StyleValue::Number(30.0))]),
+            Op::Insert {
+                parent: 1,
+                child: 2,
+                before: None,
+            },
+            // Following nothing makes no follower.
+            Op::SetProp {
+                id: 2,
+                prop: Prop::Follow(None),
+            },
+            Op::SetProp {
+                id: 2,
+                prop: Prop::FollowTransition(None),
+            },
+        ],
+    );
+    c.commit().unwrap();
+    c.set_viewport(size_pt(200.0, 300.0));
+    c.commit().unwrap();
+    assert!(c.followers.is_empty());
+    assert!(!c.follow_changed);
+
+    // A follower released is forgotten, and so is the work.
+    let mut c = core();
+    follow_row(&mut c, false);
+    c.commit().unwrap();
+    assert_eq!(c.followers.len(), 1);
+    apply(
+        &mut c,
+        vec![
+            Op::Remove {
+                parent: 2,
+                child: 8,
+            },
+            Op::Release { id: 8 },
+        ],
+    );
+    c.commit().unwrap();
+    assert!(c.followers.is_empty());
+    c.set_viewport(size_pt(320.0, 480.0));
+    c.commit();
+    assert!(!c.follow_changed);
+}

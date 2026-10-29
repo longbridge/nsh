@@ -172,6 +172,15 @@ impl Roving {
         }
     }
 
+    /// The element of the current item (the selected tab), the first when
+    /// several are; read in a computation, which runs again as items come
+    /// and go and as they become current or stop being it.
+    pub(crate) fn current(&self) -> Option<ElementRef> {
+        self.0.changed.get();
+        let items = self.0.items.borrow();
+        items.iter().find(|i| i.current.get()).map(|i| i.node)
+    }
+
     /// Moves the focus by `step`, around the ends, past disabled items, and
     /// activates the item it reaches.
     fn step(&self, step: Step) {

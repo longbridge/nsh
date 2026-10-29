@@ -285,7 +285,8 @@ The tabs of a tab list and the list around them. A tab owns its behavior and has
 activation, the disabled state and the tab role and selected state for screen readers. The list is the tab list
 screen readers announce and holds no value: the app tells each tab whether it is selected (`selected`), hears
 presses (`onPress`) and shows the selected section's content itself. The app's label is the tab's children, whose
-`group-selected:` classes follow it. See [Tabs](../elements/tabs.md).
+`group-selected:` classes follow it. The list's indicator (`indicatorClass`, `indicatorStyle`), an underline or a
+pill the app styles, sits on the selected tab and springs to the next one natively. See [Tabs](../elements/tabs.md).
 
 ### Toggle and ToggleGroup
 

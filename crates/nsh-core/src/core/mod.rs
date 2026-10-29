@@ -1,5 +1,6 @@
 mod classes;
 mod components;
+mod follow;
 mod layout_scope;
 mod layout_tree;
 mod list;
@@ -519,6 +520,8 @@ struct Node {
     /// `position: sticky`: its insets, where it sticks in the viewport of
     /// the scroll view around it ([`Core::update_sticky_views`]).
     sticky: Option<Box<taffy::Rect<taffy::LengthPercentageAuto>>>,
+    /// The element its frame follows (`View::follow`, `follow.rs`).
+    follow: Option<Box<follow::Following>>,
     /// `objectFit` (and the `object-*` classes): how its image or video
     /// fits its box.
     object_fit: Option<ResizeMode>,
@@ -762,6 +765,7 @@ impl Node {
             class_pointer: crate::props::PointerEvents::Auto,
             pointer_auto_inside: false,
             sticky: None,
+            follow: None,
             object_fit: None,
             insets: None,
             env: None,
@@ -967,6 +971,11 @@ pub struct Core<M: TextEngine> {
     /// Sticky views came, went or moved: their ranges are worked out
     /// again.
     sticky_changed: bool,
+    /// Views whose frame follows an element's ([`Core::place_followers`]).
+    followers: Vec<Key>,
+    /// What they follow, or frames around them, changed since they were
+    /// placed.
+    follow_changed: bool,
     /// The warning about `bottom` / `right` sticky insets was logged.
     sticky_warned: bool,
     /// The warning about animated insets of views that are not sticky, or
@@ -1009,9 +1018,9 @@ pub struct Core<M: TextEngine> {
     commands: Vec<(NodeId, Command)>,
     /// Animates the layout changes of the next commit.
     layout_animation: Option<LayoutAnimation>,
-    /// Nodes whose change animates the frames it moves in the next commit
-    /// (`layout_scope.rs`).
-    scoped_layout: Vec<(NodeId, crate::LayoutTransition)>,
+    /// Nodes whose change animates the frames it moves in the next commit,
+    /// or their own frame alone when true (`layout_scope.rs`).
+    scoped_layout: Vec<(NodeId, crate::LayoutTransition, bool)>,
     /// Nodes that changed size while `scoped_layout` waits.
     resized: Vec<Key>,
     /// The nodes whose padding or margin uses `env()` (`Node::env`).
@@ -1135,6 +1144,8 @@ impl<M: TextEngine> Core<M> {
             fitted_pending: Vec::new(),
             decorated: Vec::new(),
             sticky_changed: false,
+            followers: Vec::new(),
+            follow_changed: false,
             sticky_warned: false,
             inset_warned: false,
             shaders: Default::default(),
@@ -1932,6 +1943,8 @@ impl<M: TextEngine> Core<M> {
             }
         }
         self.update_lists(relayout);
+        // After every frame of the round: what followers follow is placed.
+        self.place_followers(relayout);
         if !self.decorated.is_empty() {
             self.layout_scrollbars();
         }
@@ -3063,6 +3076,14 @@ impl<M: TextEngine> Core<M> {
                 if !self.set_component_prop(id, name, value) {
                     log::warn!(target: "js", "a Rust component's prop on node {id}, which hosts none");
                 }
+                return Ok(());
+            }
+            Prop::Follow(target) => {
+                self.set_follow_target(key, target);
+                return Ok(());
+            }
+            Prop::FollowTransition(transition) => {
+                self.set_follow_transition(key, transition);
                 return Ok(());
             }
             prop => prop,
@@ -4292,6 +4313,9 @@ impl<M: TextEngine> Core<M> {
         if node.sticky.is_some() {
             self.sticky_nodes.retain(|&k| k != key);
             self.sticky_changed = true;
+        }
+        if node.follow.is_some() {
+            self.release_follower(key);
         }
         if let Some(scroll) = node.scroll.as_ref() {
             if !scroll.dependents.is_empty() {
@@ -6094,6 +6118,9 @@ impl<M: TextEngine> Core<M> {
         if hidden {
             self.layout.emitted(layout);
             self.nodes[key as usize].emitted = None;
+            if self.nodes[key as usize].follow.is_some() {
+                self.laid_follower(key, None, false, (0.0, 0.0));
+            }
             self.set_frame(key, Bounds::default());
             if self.nodes[key as usize].kind.is_container() {
                 let children = std::mem::take(&mut self.nodes[key as usize].children);
@@ -6180,7 +6207,27 @@ impl<M: TextEngine> Core<M> {
         if beside != NO_KEY {
             frame.origin = self.nodes[beside as usize].frame.origin;
         }
-        self.set_frame(key, frame);
+        if self.nodes[key as usize].follow.is_some() {
+            // Its frame along the main axis is the element's it follows,
+            // laid out by now or not: placed once every frame is out.
+            let column = self.layout.parent(layout).is_some_and(|p| {
+                let style = self.layout.style(p);
+                style.display == taffy::Display::Flex
+                    && matches!(
+                        style.flex_direction,
+                        taffy::FlexDirection::Column | taffy::FlexDirection::ColumnReverse
+                    )
+            });
+            let m = unrounded.margin;
+            let margins = if column {
+                (round(m.top, ratio), round(m.bottom, ratio))
+            } else {
+                (round(m.left, ratio), round(m.right, ratio))
+            };
+            self.laid_follower(key, Some(frame), column, margins);
+        } else {
+            self.set_frame(key, frame);
+        }
         let kind = self.nodes[key as usize].kind;
         if kind == Kind::Input {
             let content = content_box(&l);
@@ -6248,6 +6295,8 @@ impl<M: TextEngine> Core<M> {
             let resized = node.frame.size != frame.size;
             node.frame = frame;
             self.note_resized(key, resized);
+            // What views follow may have moved.
+            self.follow_changed |= !self.followers.is_empty();
             let node = &self.nodes[key as usize];
             let (id, is_text) = (node.id, node.kind == Kind::Text);
             if node.events.contains(EventKind::Layout) {
