@@ -740,7 +740,8 @@ view()
 | iOS | The view's `accessibilityIdentifier` (`app.otherElements["add-to-cart"]` in XCUITest). |
 | Android | The accessibility node's view id resource name (`By.res("add-to-cart")` in UI Automator). |
 
-The test id is a method of every element in Rust, and `testID` a prop of every element and of every Rust component (`Button`, `Dialog`, ...). It does not change what screen readers
+The test id is a method of every element in Rust, components' elements included (`button().test_id("save")`, which
+names the component's root), and `testID` a prop of every element and of every Rust component (`Button`, `Dialog`, ...). It does not change what screen readers
 say; use `accessibilityLabel` for that (see [Accessibility](./accessibility.md)). In `--trace` output it appears in
 the view's `ViewProps` item as `test_id: Some("add-to-cart")`.
 

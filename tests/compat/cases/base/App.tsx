@@ -23,6 +23,7 @@ import BaseNavStack from "./base-nav-stack";
 import BaseNumberInput from "./base-number-input";
 import BaseOtpInput from "./base-otp-input";
 import BasePopups from "./base-popups";
+import BaseMenuChecked from "./base-menu-checked";
 import BasePlot from "./base-plot";
 import BaseProgress from "./base-progress";
 import BaseTable from "./base-table";
@@ -64,6 +65,7 @@ const cases: Record<string, () => JSX.Element> = {
   "base-number-input": BaseNumberInput,
   "base-otp-input": BaseOtpInput,
   "base-popups": BasePopups,
+  "base-menu-checked": BaseMenuChecked,
   "base-safe-area-keyboard": BaseSafeAreaKeyboard,
   "base-text-view": BaseTextView,
   "base-selectable-view": BaseSelectableView,

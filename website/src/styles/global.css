@@ -1051,8 +1051,9 @@ html[lang^="zh"] .toc__label { letter-spacing: 0.05em; }
    Phone frame and demo panels (markup from src/lib/demo.js)
    ==================================================================== */
 
-/* The app renders at 390×844 points; `--phone-scale` shrinks the whole
-   device, iframe included, so the app keeps its own layout width. */
+/* The app renders at `--phone-w`×`--phone-h` points; `--phone-scale`
+   shrinks the whole device, iframe included, so the app keeps its own layout
+   width (the home page's phone; demo panels show the app at its real size). */
 .phone {
   --phone-scale: 0.74;
   --phone-pad: 7px;
@@ -1188,7 +1189,7 @@ html[lang^="zh"] .toc__label { letter-spacing: 0.05em; }
 .demo__stage {
   display: flex;
   justify-content: center;
-  padding: 2.25rem 1rem;
+  padding: 1.25rem 1rem;
   background-color: var(--inset);
   box-shadow: var(--finish-inset);
   background-image:
@@ -1197,7 +1198,9 @@ html[lang^="zh"] .toc__label { letter-spacing: 0.05em; }
   background-size: 24px 24px;
   background-position: center;
 }
-.demo__stage .phone { --phone-scale: 0.7; }
+/* The app at its real size, never scaled: a phone's width in the Mobile
+   layout, the stage's width in the Desktop one (`demo-client.ts`). */
+.demo__stage .phone { --phone-scale: 1; max-width: 100%; }
 
 .demo__code { max-height: 42rem; overflow: auto; }
 .demo__body > [role="tabpanel"]:not([data-active]) { display: none; }
@@ -1205,33 +1208,11 @@ html[lang^="zh"] .toc__label { letter-spacing: 0.05em; }
 .demo .demo__code pre::before { display: none; }
 .demo--source-only .demo__code { max-height: 32rem; }
 
-/* Wide enough for both: the phone and its source side by side, no switch.
-   The source takes the stage's height (`contain: size`) and scrolls. */
-.demo[data-view] { container-type: inline-size; }
-@container (min-width: 680px) {
-  .demo__body { display: grid; grid-template-columns: auto minmax(0, 1fr); }
-  .demo__body .demo__stage { padding-inline: 1.75rem; border-right: 1px solid var(--line); }
-  .demo__body .demo__stage .phone { --phone-scale: 0.64; }
-  .demo .demo__body > .demo__code { display: block; max-height: none; contain: size; }
-  .demo__body .demo__code pre { min-height: 100%; font-size: 0.8rem; }
-  .demo__bar .demo__views { display: none; }
-  .demo__bar .demo__file { margin-left: 0; }
-  .demo .demo__body > .demo__stage { display: flex; }
-}
-
-/* The Desktop layout: a 1024×640 window scaled to the stage's width
-   (`demo-client.ts`), the source below it. */
-.demo[data-layout="desktop"] .demo__body { display: block; }
-.demo[data-layout="desktop"] .demo__body > .demo__stage { display: flex; border-right: 0; }
-.demo[data-layout="desktop"] .demo__body > .demo__code { display: block; max-height: 28rem; contain: none; border-top: 1px solid var(--line); }
-.demo[data-layout="desktop"] .demo__bar .demo__views { display: none; }
-
 .demo--missing { padding: 1rem; color: var(--destructive); font-size: 0.875rem; }
 
 @media (max-width: 640px) {
   .demo__file { display: none; }
-  .demo__stage { padding: 1.5rem 0.5rem; }
-  .demo__stage .phone { --phone-scale: 0.62; }
+  .demo__stage { padding: 0.75rem 0.5rem; }
 }
 
 /* ====================================================================

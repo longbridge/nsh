@@ -556,8 +556,10 @@ impl<M: TextEngine> Core<M> {
                     Some(cx) => {
                         let mut old = old;
                         (old.inset_padding, old.inset_margin) = inst.root_insets_applied;
+                        let old = super::components::with_test_id(old, &inst.root_test_id_applied);
                         let attrs = cx.over(attrs);
                         inst.root_insets_applied = (attrs.inset_padding, attrs.inset_margin);
+                        inst.root_test_id_applied = super::components::test_id_of(&attrs);
                         (attrs, old)
                     }
                     None => (attrs, old),

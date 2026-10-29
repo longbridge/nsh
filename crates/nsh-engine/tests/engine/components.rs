@@ -8683,6 +8683,44 @@ fn base_plot_axis_labels_the_ticks_of_its_scale() {
     near(&all, "0%", "linear", (180.0, 90.0));
 }
 
+const NAMED_CARD: &str = r#"import { mount, signal, Text } from "nsh";
+import { Card } from "test/ui";
+
+const id = signal<string | undefined>("a");
+setTimeout(() => id.set("b"), 20);
+setTimeout(() => id.set(undefined), 60);
+
+mount(() => (
+  <Card testID={id()}>
+    <Text>card</Text>
+  </Card>
+));
+"#;
+
+/// A TSX app's `testID` on a Rust component names its root, follows the
+/// app's changes and goes when the app removes it: the core's record of
+/// the id a Rust view gives a component does not send it back.
+#[test]
+fn a_tsx_test_id_on_a_rust_component_follows_the_app() {
+    let (_engine, rx) = start(NAMED_CARD);
+    // The test ids of the card's node, each time its props went.
+    let mut card = None;
+    let mut sent: Vec<Option<String>> = Vec::new();
+    for batch in until(&rx, |_| false) {
+        for item in &batch.items {
+            if let MountItem::ViewProps { id, props } = item {
+                if card.is_none() && props.test_id.as_deref() == Some("a") {
+                    card = Some(*id);
+                }
+                if card == Some(*id) {
+                    sent.push(props.test_id.as_deref().map(str::to_owned));
+                }
+            }
+        }
+    }
+    assert_eq!(sent, [Some("a".into()), Some("b".into()), None]);
+}
+
 const BASE_PLOT_DOMAIN_UPDATE: &str = r##"import { mount, signal, Text, View } from "nsh";
 import { Line, Plot } from "nsh/base/plot";
 

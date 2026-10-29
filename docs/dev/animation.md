@@ -84,6 +84,16 @@
   the core leads each run of frames with the layout animation it takes, an empty one for the rest
   (`core/layout_scope.rs`), as the platforms animate a frame with the last `MountItem::LayoutAnimation` before it.
   Insertions and removals are not scoped (their animations are decided per batch on iOS, Android and the web).
+- **A view that follows another** (`View::follow(target)`, `core/follow.rs`; `nsh/base`'s `Tabs` indicator): its frame
+  along its parent's main axis is the target's, placed by the core after layout, with no layout of its own and no
+  JS. Following another element runs its `follow_transition` as a layout animation of its own frame alone (a scope of
+  the follower's node in `core/layout_scope.rs`, without its ancestors' children: what changes around it in that
+  commit changes at once); the first placement and a layout that moves the target place it at once, in the same
+  batch. The component decides the transition, `None` under reduced motion (`Tabs`: `spring_move`'s spring,
+  `LayoutCurve::Spring { damping: 0.85 }` over 362 ms). A follower hidden (`display: none`) forgets where it was, so
+  shown again it is placed at once. A target that changes size in the commit that makes it the target is followed
+  to its new frame, animated once; a resize sends no layout animation item. With no follower the pass returns at
+  once and `set_frame` notes nothing (`nothing_follows_while_no_view_follows_an_element`).
 - **Desktop backends** (Windows, GPUI, Linux, macOS): one platform-free copy of what they animate. `nsh_core::transition`
   holds a view's layout animation, style transition and keyframes (`Live`: curves, springs, interpolation of frames,
   colors, transforms, shadows and corner radii, timing), which each backend steps on its frame clock and applies to its

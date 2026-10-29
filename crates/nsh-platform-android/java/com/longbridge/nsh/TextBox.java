@@ -576,8 +576,9 @@ final class TextBox extends android.view.ViewGroup implements Node {
         invalidate();
     }
 
-    /** The one color the runs draw all of the text in, null for several (or none yet). */
-    private Integer uniformColor;
+    /** The runs draw all of the text in one color ({@link #uniformColor}); not for several (or none yet). */
+    private boolean uniform;
+    private int uniformColor;
     /** A transition of the text's color (`transition-colors`), and the color it draws the whole text in now. */
     private android.animation.ValueAnimator colorTransition;
     private int transitionTo;
@@ -585,25 +586,28 @@ final class TextBox extends android.view.ViewGroup implements Node {
     private int transitionColor;
 
     /**
-     * The text changed to one drawn in {@code to} (null: several colors), the view's effects being
-     * {@code fx}: its color moves to the new one over the view's transition when that covers colors
-     * and the text is one color before and after, as `nsh_core::transition::recolor` decides on the
-     * other backends. The new layout is drawn in the color on screen, so no frame lays it out again;
-     * a change mid-way starts from where the color is.
+     * The text changed to one drawn in {@code to} (unless {@code one} is false: several colors),
+     * the view's effects being {@code fx}: its color moves to the new one over the view's
+     * transition when that covers colors and the text is one color before and after, as
+     * `nsh_core::transition::recolor` decides on the other backends. The new layout is drawn in the
+     * color on screen, so no frame lays it out again; a change mid-way starts from where the color
+     * is. Unboxed: a text updating live allocates nothing for its color.
      */
-    void recolor(Integer to, Effects fx) {
-        Integer from = uniformColor;
+    void recolor(boolean one, int to, Effects fx) {
+        boolean wasOne = uniform;
+        int from = uniformColor;
+        uniform = one;
         uniformColor = to;
         boolean covered = fx != null && (fx.transitionProps & 1) != 0
                 && fx.transitionDuration + fx.transitionDelay > 0
                 // Reduced motion (no animator duration scale): at once.
                 && android.animation.ValueAnimator.areAnimatorsEnabled()
                 && isAttachedToWindow();
-        if (!covered || to == null || from == null) {
+        if (!covered || !one || !wasOne) {
             stopColorTransition();
             return;
         }
-        if (from.intValue() == to) {
+        if (from == to) {
             // The same color: a transition running to it goes on.
             if (colorTransition != null && transitionTo != to) stopColorTransition();
             return;

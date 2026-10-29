@@ -114,13 +114,15 @@ impl Timers {
         None
     }
 
-    /// Pops one timer due at `now`, rescheduling intervals.
-    fn pop_due(&self, now: Instant) -> Option<Value> {
+    /// Pops one timer due at `now` that was set by id `before` at the
+    /// latest, rescheduling intervals.
+    fn pop_due(&self, now: Instant, before: u32) -> Option<Value> {
         let mut heap = self.heap.borrow_mut();
         let mut timers = self.timers.borrow_mut();
         loop {
             let &Reverse((at, id)) = heap.peek()?;
-            if at > now {
+            // Set during this run (ids grow; one past the wrap is older).
+            if at > now || id.wrapping_sub(before) as i32 > 0 {
                 return None;
             }
             heap.pop();
@@ -142,9 +144,14 @@ impl Timers {
     }
 
     /// Runs the timers due at `now`, one at a time: no borrow is held
-    /// while a callback runs, as it may add or clear timers.
+    /// while a callback runs, as it may add or clear timers. Those added
+    /// meanwhile wait for the next run, as a browser runs `setTimeout(f, 0)`
+    /// in a later task: one that keeps scheduling itself at once comes due
+    /// in each of the clock's rounds, which give up after their limit,
+    /// rather than here for good.
     pub(super) fn run(&self, now: Instant) {
-        while let Some(callback) = self.pop_due(now) {
+        let before = self.next.get();
+        while let Some(callback) = self.pop_due(now, before) {
             report(Value::array([]).and_then(|args| callback.call(&Value(0), &args)));
         }
     }

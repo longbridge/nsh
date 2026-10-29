@@ -785,6 +785,62 @@ covers [props] Sheet.backdropClass
 covers [props] Sheet.backdropStyle
 covers [events] Sheet.onOpenChange
 covers [events] Sheet.onCancel
+# base-menu-checked
+tap id:case-base-menu-checked
+expect Sidebar: true
+tap text:ViewTrigger
+expect SidebarItem
+# A checkable item: a menuitemcheckbox for screen readers, checked;
+# `checkedStyle` on the item, `checked:` on its indicator part around the
+# app's mark, half opaque by its `indicatorStyle`.
+prop id:sidebar role menuitemcheckbox
+prop id:sidebar accessibilityState checked=true
+style id:sidebar backgroundColor #00ff00ff
+style parent:parent:id:sidebar-mark backgroundColor #222222ff
+style parent:parent:id:sidebar-mark opacity 0.5
+listens id:sidebar onPress
+# Choosing it reports `onSelect`; the app sets the other value, which the
+# item and its indicator show; `closeOnSelect={false}` keeps the menu.
+tap text:SidebarItem
+expect Selects: 1
+expect Sidebar: false
+expect SidebarItem
+prop id:sidebar accessibilityState checked=false
+style parent:parent:id:sidebar-mark backgroundColor #111111ff
+tap text:SidebarItem
+expect Sidebar: true
+prop id:sidebar accessibilityState checked=true
+style parent:parent:id:sidebar-mark backgroundColor #222222ff
+# Disabled: dimmed for screen readers, `disabled:` on its indicator.
+prop id:minimap role menuitemcheckbox
+prop id:minimap accessibilityState disabled=true checked=false
+style parent:id:minimap-mark backgroundColor #333333ff
+# `role="menuitemradio"`: one choice of a group, the app checks one.
+prop id:sort-name role menuitemradio
+prop id:sort-name accessibilityState checked=true
+prop id:sort-size role menuitemradio
+prop id:sort-size accessibilityState checked=false
+# A plain item stays a menuitem with no checked state.
+prop id:plain role menuitem
+prop id:plain accessibilityState {}
+# Choosing a radio closes the menu (`closeOnSelect` defaults to true).
+tap text:SizeItem
+expect Sort: size
+expect Selects: 3
+absent SizeItem
+tap text:ViewTrigger
+expect SizeItem
+prop id:sort-size accessibilityState checked=true
+prop id:sort-name accessibilityState checked=false
+covers [nsh/base] MenuItem
+covers [props] MenuItem.checked
+covers [props] MenuItem.indicator
+covers [props] MenuItem.indicatorClass
+covers [props] MenuItem.indicatorStyle
+covers [props] MenuItem.closeOnSelect
+covers [props] checkedStyle
+covers [props] role
+covers [events] MenuItem.onSelect
 # base-switch
 tap id:case-base-switch
 # The switch role and its value for screen readers, on the switch alone;
@@ -972,6 +1028,10 @@ listens id:activity onPress
 # The list is one stop of the keyboard focus: the selected tab.
 prop id:overview focusable true
 prop id:activity focusable false
+# The indicator, below the first tab: on the selected one (20 high, at
+# 0), inside its margins of 2 along the column; 3 wide at the left.
+frame below:id:overview 0 2 3 16
+style below:id:overview backgroundColor #ff0000ff
 # A press reports `onPress`; the app selects the tab, deselects the one
 # that was and shows its content.
 tap text:Activity
@@ -982,9 +1042,11 @@ style id:activity backgroundColor #00ff00ff
 frame text:Activity 38 2 62 17
 prop id:overview accessibilityState {}
 frame text:Overview 28 2 62 17
-# The stop follows the selection.
+# The stop follows the selection, and so does the indicator: Activity is
+# 4 below Overview.
 prop id:activity focusable true
 prop id:overview focusable false
+frame below:id:overview 0 26 3 16
 # The selected tab reports its presses too.
 tap id:activity
 expect Presses: 2
@@ -1001,9 +1063,12 @@ tap label:Billing section
 expect Presses: 3
 expect Showing: billing
 prop id:billing accessibilityState selected=true
+frame below:id:overview 0 50 3 16
 covers [nsh/base] Tab
 covers [nsh/base] Tabs
 covers [props] Tab.selected
+covers [props] Tabs.indicatorClass
+covers [props] Tabs.indicatorStyle
 covers [props] disabled
 covers [props] accessibilityLabel
 covers [events] onPress

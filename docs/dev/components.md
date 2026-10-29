@@ -903,6 +903,16 @@ what changed.
   toolbars); a key sets the target as the focused item first, which makes it the stop (its `focusable` mounts before the
   `focus()` command of the same batch, as a ref's `focus()` only moves to stops), focuses it and activates it.
   Items are in the order they registered: the order the app's children were made.
+  `Roving::current` is the current item's ref, tracked: `Tabs` points its indicator at it.
+- A part that follows another element (`Tabs`' indicator): a view with `View::follow(move || list.current())`, absolute
+  in the list and first among its children (drawn behind the tabs), `pointer-events: none`. The core spans the
+  target's frame along the list's main axis after each layout (`core/follow.rs`: the frames from the target up to the
+  follower's parent summed, the follower's margins on that axis taken off; across it the follower's own layout), so a
+  selection change is one frame item and its layout animation (`View::follow_transition`), and a resize moves it in
+  the batch that moves the tabs. The ref is looked up as the core places it, so the target may render after the
+  follower. `Tabs` hides it while no tab is selected (`Roving::current` is `None`) and keeps it on the first of
+  several selected; it is `accessibility_elements_hidden` and takes no focus, so screen readers and the roving keys
+  see the tabs alone. `ToggleGroup`'s segmented highlight, a pagination's marker or a listbox's highlight are the same view.
 
 ## The JS face and the declarations
 
@@ -965,6 +975,17 @@ Their callbacks are one set, as `Dialog`'s (`popup.rs`: `OpenState`, `lifecycle`
   `closeOnPressOutside`, `closeOnBackdropPress`, read natively when the user acts) let it close, so an app with a flag
   set to `false` can ask first and close itself. A menu's chosen item is no cancel (`"select"`); Escape in a
   sheet's submenu goes back a level and is none either.
+
+**Checkable menu items.** A `MenuItem` with `checked` (`Prop<Option<bool>>`, `None` a plain item) is a
+`menuitemcheckbox`, or a `menuitemradio` by its `role`, with `accessibilityState.checked`, as `gpui-component`'s
+`PopupMenuItem::checked`; the value is the app's and `onSelect` is the press, which closes the menu unless
+`closeOnSelect` is false. The item's `checked:` styles (`checkedStyle`) follow that state, and so does its
+indicator, as `Checkbox`'s: a view of its own around the slot, placed before the content and styled by
+`indicatorClass` / `indicatorStyle`, takes the item's checked and disabled states as a part of it (`Interactive::project_checked`,
+`project_disabled`), so it is no checkable element of its own. Projected states style that node only: the app's mark
+inside (`indicator`) follows them through `group-checked:` with `group` on the part, or is shown and hidden by the
+part's own `checked:` styles. A new value rebinds that item's state and its indicator's projection alone, so only the
+item and its indicator are sent (`crates/nsh-base/tests/base/menu.rs`).
 
 **Presence.** A popup's entrance and exit are the app's transitions between its look and its states' looks, as a
 toast's `transitionStatus` and Base UI's `data-starting-style` / `data-ending-style` (gpui-kit's popups have no exit):
