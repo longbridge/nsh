@@ -49,6 +49,51 @@ pub enum JsKind {
     Other,
 }
 
+/// What class of object a JS object is, as `Object.prototype.toString`
+/// tells built-in objects apart ([`JsIn::class`]): what checks of equality
+/// compare by (`nsh/test`'s `toEqual`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum JsClass {
+    /// An array.
+    Array,
+    /// A function.
+    Function,
+    /// A `Date`.
+    Date,
+    /// A `RegExp`.
+    RegExp,
+    /// A `Map`.
+    Map,
+    /// A `Set`.
+    Set,
+    /// An error (an `Error` or one of its subclasses).
+    Error,
+    /// An `ArrayBuffer`.
+    ArrayBuffer,
+    /// A typed array or a `DataView`, named by its class (`"Uint8Array"`,
+    /// `"DataView"`).
+    View(&'static str),
+    /// Any other object: a plain object, an instance of a class, ...
+    Object,
+}
+
+/// Whether `a` and `b` are the same primitive, as `Object.is` says (`NaN`
+/// is `NaN`, `0` is not `-0`); objects are never the same here.
+fn same_primitive<H: JsHost + ?Sized>(host: &H, a: JsRaw, b: JsRaw) -> bool {
+    match (host.kind(a), host.kind(b)) {
+        (JsKind::Undefined, JsKind::Undefined) | (JsKind::Null, JsKind::Null) => true,
+        (JsKind::Bool, JsKind::Bool) => host.bool(a) == host.bool(b),
+        (JsKind::String, JsKind::String) => host.string(a) == host.string(b),
+        (JsKind::Number, JsKind::Number) => match (host.number(a), host.number(b)) {
+            (Some(a), Some(b)) if a.is_nan() => b.is_nan(),
+            (Some(a), Some(b)) => a == b && a.is_sign_negative() == b.is_sign_negative(),
+            _ => false,
+        },
+        _ => false,
+    }
+}
+
 /// A value of an array or object read in bulk ([`JsIn::primitives`],
 /// [`JsIn::primitive_entries`]).
 #[derive(Debug, Clone, PartialEq)]
@@ -134,6 +179,57 @@ pub trait JsHost {
             self.free(field);
         }
         Ok(entries)
+    }
+    /// The class of object `v` (`None`: not an object). A host that tells
+    /// only arrays, functions and dates apart says `Object` for the rest.
+    fn class(&self, v: JsRaw) -> Option<JsClass> {
+        match self.kind(v) {
+            JsKind::Array => Some(JsClass::Array),
+            JsKind::Function => Some(JsClass::Function),
+            JsKind::Object if self.date(v).is_some() => Some(JsClass::Date),
+            JsKind::Object => Some(JsClass::Object),
+            _ => None,
+        }
+    }
+    /// Whether `a` and `b` are the same value, as `Object.is` says: the
+    /// same primitive, or the same object. A host that cannot tell objects
+    /// apart says no for any two.
+    fn same_value(&self, a: JsRaw, b: JsRaw) -> bool {
+        same_primitive(self, a, b)
+    }
+    /// The bytes of `ArrayBuffer`, typed array or `DataView` `v`, copied
+    /// (`None`: none of those). A host that reads only `Uint8Array`s reads
+    /// [`JsHost::bytes`].
+    fn buffer(&self, v: JsRaw) -> Option<Vec<u8>> {
+        self.bytes(v)
+    }
+    /// The values iterable `v` yields, as `for...of` reads them (a `Map`'s
+    /// `[key, value]` pairs, a `Set`'s values), owned (`None`: not
+    /// iterable). A host without the iteration protocol reads arrays.
+    fn iterate(&self, v: JsRaw) -> Result<Option<Vec<JsRaw>>, PropError> {
+        let Some(len) = self.len(v)? else {
+            return Ok(None);
+        };
+        let mut items = Vec::with_capacity(len);
+        for i in 0..len {
+            match self.index(v, i) {
+                Ok(item) => items.push(item),
+                Err(e) => {
+                    for item in items {
+                        self.free(item);
+                    }
+                    return Err(e);
+                }
+            }
+        }
+        Ok(Some(items))
+    }
+    /// Calls method `name` of `v` (a primitive's, as JS does: `"a".search(…)`)
+    /// with `args` (borrowed): its result, owned. A host without calls
+    /// refuses.
+    fn invoke(&self, v: JsRaw, name: &str, args: &[JsRaw]) -> Result<JsRaw, PropError> {
+        let _ = (v, args);
+        Err(PropError(format!("`{name}` cannot be called here")))
     }
     /// `v` as JSON (as `JSON.stringify` sees it).
     fn to_json(&self, v: JsRaw) -> Result<JsonValue, PropError>;
@@ -339,6 +435,43 @@ impl<'a> JsIn<'a> {
         self.host.date(self.raw)
     }
 
+    /// The class of the object it is (`None`: not an object).
+    pub fn class(&self) -> Option<JsClass> {
+        self.host.class(self.raw)
+    }
+
+    /// Whether it is `other`, as `Object.is` says (the same object, or
+    /// the same primitive: `NaN` is `NaN`, `0` is not `-0`).
+    pub fn same_value(&self, other: JsIn<'_>) -> bool {
+        self.host.same_value(self.raw, other.raw)
+    }
+
+    /// The bytes of the `ArrayBuffer`, typed array or `DataView` it is,
+    /// copied.
+    pub fn as_buffer(&self) -> Option<Vec<u8>> {
+        self.host.buffer(self.raw)
+    }
+
+    /// The values it yields as an iterable, as `for...of` reads them (a
+    /// `Map`'s `[key, value]` pairs, a `Set`'s values; `None`: not
+    /// iterable).
+    pub fn iterate(&self) -> Result<Option<Vec<JsOwned<'a>>>, PropError> {
+        Ok(self.host.iterate(self.raw)?.map(|items| {
+            items
+                .into_iter()
+                .map(|raw| JsOwned::new(self.host, raw))
+                .collect()
+        }))
+    }
+
+    /// Calls its method `name` with `args`: what it returns (a
+    /// primitive's methods too: `"a".search(re)`).
+    pub fn invoke(&self, name: &str, args: &[JsIn<'_>]) -> Result<JsOwned<'a>, PropError> {
+        let args: Vec<JsRaw> = args.iter().map(|a| a.raw).collect();
+        let raw = self.host.invoke(self.raw, name, &args)?;
+        Ok(JsOwned::new(self.host, raw))
+    }
+
     /// The value as JSON.
     pub fn to_json(&self) -> Result<JsonValue, PropError> {
         self.host.to_json(self.raw)
@@ -394,5 +527,36 @@ impl Drop for JsOwned<'_> {
 impl fmt::Debug for JsOwned<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.get().fmt(f)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+    use crate::element::json_host::JsonHost;
+
+    #[test]
+    fn hosts_without_their_own_compare_primitives_and_read_arrays() {
+        let host = JsonHost::default();
+        let value = |json| JsIn::new(&host, host.value(json));
+        let undefined = JsIn::new(&host, host.undefined());
+        assert!(value(json!(1)).same_value(value(json!(1.0))));
+        assert!(value(json!("a")).same_value(value(json!("a"))));
+        assert!(undefined.same_value(undefined));
+        assert!(!undefined.same_value(value(json!(null))));
+        assert!(!value(json!(1)).same_value(value(json!("1"))));
+        assert!(!value(json!(0.0)).same_value(value(json!(-0.0))));
+        // Two objects are never the same here.
+        assert!(!value(json!({})).same_value(value(json!({}))));
+        assert_eq!(value(json!([1])).class(), Some(JsClass::Array));
+        assert_eq!(value(json!({})).class(), Some(JsClass::Object));
+        assert_eq!(value(json!("a")).class(), None);
+        let items = value(json!(["a", 2])).iterate().unwrap().unwrap();
+        let items: Vec<_> = items.iter().map(|i| i.get().to_json().unwrap()).collect();
+        assert_eq!(items, [json!("a"), json!(2)]);
+        assert!(value(json!({})).iterate().unwrap().is_none());
+        assert!(value(json!("a")).invoke("search", &[]).is_err());
     }
 }

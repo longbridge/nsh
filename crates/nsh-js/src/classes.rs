@@ -38,9 +38,9 @@ use std::{
 use nsh_core::{
     JsonValue,
     element::{
-        CallbackHandle, ClassDef, ClassInstance, Exception, JsCall, JsHost, JsIn, JsKind, JsRaw,
-        Member, MemberCall, MemberKind, Posts, PropError, RustCall, RustOp, SyncCall, Thrown,
-        Tracer,
+        CallbackHandle, ClassDef, ClassInstance, Exception, JsCall, JsClass, JsHost, JsIn, JsKind,
+        JsRaw, Member, MemberCall, MemberKind, Posts, PropError, RustCall, RustOp, SyncCall,
+        Thrown, Tracer,
     },
 };
 use rquickjs::qjs;
@@ -50,6 +50,38 @@ use crate::web::{
     self, Object,
     js::{self, Ctx, R, Raw, Throw, Trace, UNDEFINED, V},
 };
+
+/// The class name of typed array type `kind` (`JS_GetTypedArrayType`'s;
+/// `None`: not a typed array).
+fn typed_array_name(kind: c_int) -> Option<&'static str> {
+    const NAMES: [(qjs::JSTypedArrayEnum, &str); 12] = [
+        (
+            qjs::JSTypedArrayEnum_JS_TYPED_ARRAY_UINT8C,
+            "Uint8ClampedArray",
+        ),
+        (qjs::JSTypedArrayEnum_JS_TYPED_ARRAY_INT8, "Int8Array"),
+        (qjs::JSTypedArrayEnum_JS_TYPED_ARRAY_UINT8, "Uint8Array"),
+        (qjs::JSTypedArrayEnum_JS_TYPED_ARRAY_INT16, "Int16Array"),
+        (qjs::JSTypedArrayEnum_JS_TYPED_ARRAY_UINT16, "Uint16Array"),
+        (qjs::JSTypedArrayEnum_JS_TYPED_ARRAY_INT32, "Int32Array"),
+        (qjs::JSTypedArrayEnum_JS_TYPED_ARRAY_UINT32, "Uint32Array"),
+        (
+            qjs::JSTypedArrayEnum_JS_TYPED_ARRAY_BIG_INT64,
+            "BigInt64Array",
+        ),
+        (
+            qjs::JSTypedArrayEnum_JS_TYPED_ARRAY_BIG_UINT64,
+            "BigUint64Array",
+        ),
+        (qjs::JSTypedArrayEnum_JS_TYPED_ARRAY_FLOAT16, "Float16Array"),
+        (qjs::JSTypedArrayEnum_JS_TYPED_ARRAY_FLOAT32, "Float32Array"),
+        (qjs::JSTypedArrayEnum_JS_TYPED_ARRAY_FLOAT64, "Float64Array"),
+    ];
+    NAMES
+        .iter()
+        .find(|(k, _)| *k as c_int == kind)
+        .map(|(_, name)| *name)
+}
 
 /// The JS objects of the live instances, by the instance's address (not
 /// owned: an object leaves when it is finalized).
@@ -915,6 +947,68 @@ impl JsHost for CallHost<'_> {
             return None;
         }
         js::to_number(self.cx, v).ok()
+    }
+
+    fn class(&self, v: JsRaw) -> Option<JsClass> {
+        let v = from_raw(v);
+        if !js::is_object(v) {
+            return None;
+        }
+        // SAFETY: class checks of a live object.
+        unsafe {
+            Some(if qjs::JS_IsArray(v) {
+                JsClass::Array
+            } else if qjs::JS_IsFunction(self.cx, v) {
+                JsClass::Function
+            } else if qjs::JS_IsDate(v) {
+                JsClass::Date
+            } else if qjs::JS_IsRegExp(v) {
+                JsClass::RegExp
+            } else if qjs::JS_IsMap(v) {
+                JsClass::Map
+            } else if qjs::JS_IsSet(v) {
+                JsClass::Set
+            } else if qjs::JS_IsError(v) {
+                JsClass::Error
+            } else if qjs::JS_IsArrayBuffer(v) {
+                JsClass::ArrayBuffer
+            } else if qjs::JS_IsDataView(v) {
+                JsClass::View("DataView")
+            } else if let Some(name) = typed_array_name(qjs::JS_GetTypedArrayType(v)) {
+                JsClass::View(name)
+            } else {
+                JsClass::Object
+            })
+        }
+    }
+
+    fn same_value(&self, a: JsRaw, b: JsRaw) -> bool {
+        // SAFETY: a comparison of two live values (it runs no JS).
+        unsafe { qjs::JS_IsSameValue(self.cx, from_raw(a), from_raw(b)) }
+    }
+
+    fn buffer(&self, v: JsRaw) -> Option<Vec<u8>> {
+        js::buffer_source(self.cx, from_raw(v))
+    }
+
+    fn iterate(&self, v: JsRaw) -> Result<Option<Vec<JsRaw>>, PropError> {
+        let v = from_raw(v);
+        if !js::is_iterable(self.cx, v).map_err(|Throw| self.threw())? {
+            return Ok(None);
+        }
+        let mut items = Vec::new();
+        let read = js::for_each(self.cx, v, |item| {
+            items.push(item);
+            Ok(())
+        });
+        read.map_err(|Throw| self.threw())?;
+        self.read(items.len())?;
+        Ok(Some(items.into_iter().map(|i| to_raw(i.take())).collect()))
+    }
+
+    fn invoke(&self, v: JsRaw, name: &str, args: &[JsRaw]) -> Result<JsRaw, PropError> {
+        let args: Vec<Raw> = args.iter().map(|&a| from_raw(a)).collect();
+        self.checked(js::invoke(self.cx, from_raw(v), name, &args))
     }
 
     fn to_json(&self, v: JsRaw) -> Result<JsonValue, PropError> {

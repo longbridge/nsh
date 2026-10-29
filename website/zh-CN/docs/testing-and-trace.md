@@ -314,7 +314,8 @@ expect(app.texts()).toContain("Saved at 09:00:10");
 | `view:<id>` | `--trace` 输出中该 id 的视图。 |
 | 其他写法 | 依次按 `testID`、标签、文字匹配。 |
 
-`label:`、`text:` 和角色的名称也可以写正则：`text:/^Buy/i`。` >> ` 在前一部分匹配到的视图内部继续查找
+`label:`、`text:` 和角色的名称也可以写正则：`text:/^Buy/i`，语法为 Rust `regex` crate 的语法（与 JavaScript 相同的字符类、
+分组、锚点和量词，以线性时间匹配；标志 `i`、`m` 和 `s`）。` >> ` 在前一部分匹配到的视图内部继续查找
 （`id:cart >> role:button[Remove]`），`nth=<n>` 只保留第 n 个匹配，从 0 开始（`text:Delete >> nth=1`）。选择器找到的是用户
 最先会看到的视图：先在最上层的模态窗口中找，再在屏幕上找；对于导航栈只看最上面的页面。它只匹配用户看得见的视图：有面积、不在
 `visibility: hidden` 之内、位于窗口和裁剪它的视图（`overflow: hidden`）之内，或者位于用户可以滚动的滚动视图内容中的任何位置（滚动就能
@@ -429,25 +430,33 @@ test("calls reach the page's host", async () => {
 
 ### 断言
 
-`expect(value)` 按 JSON 的方式比较值（`undefined` 视为 `null`，数字按数值比较），每个检查不成立时都会抛出异常。
-`.not` 把检查反过来：`expect(app.texts()).not.toContain("Error")`。给出函数时，`toThrow` 检查调用它抛出的异常；
-给出 promise 或返回 promise 的函数时，`rejects` 和 `resolves` 检查它的结果，与 Jest 相同：
+`expect(value)` 按 Jest 的方式检查值，比较的是 JS 创建的值本身：`toBe` 使用 `Object.is`，`toEqual` 逐个成员比较，
+`Date`、`Map`、`Uint8Array` 都按它们本来的类型比较。每个检查不成立时都会抛出异常。`.not` 把检查反过来：
+`expect(app.texts()).not.toContain("Error")`。给出函数时，`toThrow` 检查调用它抛出的异常；给出 promise 或返回 promise
+的函数时，`rejects` 和 `resolves` 检查它的结果，与 Jest 相同：
 `await expect(save()).rejects.toMatchObject({ code: "ERR_ACCESS_DENIED" })`。
 
 | 检查 | 成立条件 |
 |---|---|
-| `toBe(expected)`、`toEqual(expected)` | 值逐个成员地等于 `expected`。 |
-| `toContain(item)` | 数组包含 `item`，或者字符串包含它。 |
+| `toBe(expected)` | 按 `Object.is` 的规则，值就是 `expected`：相同的原始值（`NaN` 等于 `NaN`，`0` 不等于 `-0`）或同一个对象。 |
+| `toEqual(expected)` | 与 Jest 的 `toEqual` 相同，值逐个成员地等于 `expected`：对象比较自身的可枚举属性（值为 `undefined` 的属性视为不存在），数组逐项比较，日期比较时间，正则表达式比较源码和标志，`Map` 和 `Set` 比较条目（不计顺序），`ArrayBuffer` 和类型化数组比较字节，错误比较名称和消息；`NaN` 等于 `NaN`。类的实例等于具有相同属性的普通对象。 |
+| `toMatchObject(subset)` | 值具有 `subset` 的每个属性，且各自按 `toEqual` 的规则相等，其中的对象也依次匹配；不看其他属性，数组逐项匹配，项数相同。 |
+| `toContain(item)` | 数组、`Set`、类型化数组或其他可迭代对象包含 `item`（`===`），或者字符串包含它。 |
+| `toContainEqual(item)` | 数组、`Set` 或其他可迭代对象包含一项按 `toEqual` 的规则等于 `item`。 |
 | `toBeTruthy()`、`toBeFalsy()` | 按 JS 的规则，值为真 / 为假。 |
-| `toMatch(pattern)` | 字符串包含 `pattern`（字符串），或者匹配它（`RegExp`）。 |
-| `toHaveLength(n)` | 数组有 `n` 项，或者字符串有 `n` 个 UTF-16 单元。 |
-| `toBeNull()` | 值为 `null`（或 `undefined`）。 |
+| `toMatch(pattern)` | 字符串包含 `pattern`（字符串），或者匹配它（`RegExp`，由 JS 引擎执行：后行断言、反向引用和命名分组都与 JavaScript 相同）。 |
+| `toHaveLength(n)` | 值的 `length` 为 `n`：字符串的 UTF-16 单元数，数组或类型化数组的项数。 |
+| `toBeNull()` | 值为 `null`。 |
+| `toBeUndefined()`、`toBeDefined()` | 值为 `undefined` / 不是 `undefined`。 |
+| `toBeNaN()` | 值为 `NaN`。 |
 | `toBeGreaterThan(n)`、`toBeGreaterThanOrEqual(n)`、`toBeLessThan(n)`、`toBeLessThanOrEqual(n)` | 数字与 `n` 满足相应的大小关系。 |
-| `toMatchObject(subset)` | 值具有 `subset` 的每个属性，且各自相等，其中的对象也依次匹配；不看其他属性，数组逐项匹配，项数相同。 |
 | `toThrow(expected?)` | `expect(fn)`：调用 `fn` 会抛出异常。给了 `expected` 时，异常要匹配它：消息包含字符串或匹配 `RegExp`；错误类（`TypeError`、应用自己的类）要与异常的 `name` 相同，`Error` 匹配所有错误；错误对象要消息相同。 |
 | `rejects.toThrow(expected?)` | `expect(promise)`：promise 会 reject，异常按 `toThrow` 的规则匹配 `expected`。 |
 | `rejects.toMatchObject(subset)` | `expect(promise)`：promise 会 reject，reject 的值按 `toMatchObject` 的规则匹配 `subset`：错误自身的属性（`code`、`permission` 等），加上它的 `name` 和 `message`。 |
 | `resolves.toBe(expected)`、`resolves.toEqual(expected)`、`resolves.toMatchObject(subset)` | `expect(promise)`：promise resolve 的值满足相应的检查。 |
+
+检查不成立时，消息会写出得到的值和期望的值，写法与 JS 相同：
+`expected Date(2024-01-02T00:00:00.000Z) to equal Date(2024-01-01T00:00:00.000Z)`。
 
 `rejects` 和 `resolves` 也有自己的 `.not`：`await expect(load()).resolves.not.toBe(null)`。
 

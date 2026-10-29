@@ -49,6 +49,8 @@ mod screen;
 mod selector;
 mod storage;
 mod trace;
+#[cfg(feature = "js")]
+mod values;
 
 #[cfg(feature = "bundle")]
 use std::{path::Path, sync::Arc};

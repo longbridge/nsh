@@ -335,10 +335,11 @@ Steps name views with **selectors**, written as Playwright's:
 | `view:<id>` | The view with that id in `--trace` output. |
 | anything else | A `testID`, else a label, else a text, as written. |
 
-`label:`, `text:` and a role's name also take a regex: `text:/^Buy/i`. ` >> ` looks inside what the part before matched
-(`id:cart >> role:button[Remove]`), and `nth=<n>` keeps one of the matches, from 0 (`text:Delete >> nth=1`). A
-selector finds the views a user would look at first: in the top modal, then on screen, and of a navigation stack only
-the top screen. It matches what the user sees: views with an area, outside `visibility: hidden`, inside the window and
+`label:`, `text:` and a role's name also take a regex: `text:/^Buy/i`, written in the syntax of Rust's `regex` crate
+(JavaScript's classes, groups, anchors and quantifiers, matched in linear time; flags `i`, `m` and `s`). ` >> ` looks
+inside what the part before matched (`id:cart >> role:button[Remove]`), and `nth=<n>` keeps one of the matches, from 0
+(`text:Delete >> nth=1`). A selector finds the views a user would look at first: in the top modal, then on screen,
+and of a navigation stack only the top screen. It matches what the user sees: views with an area, outside `visibility: hidden`, inside the window and
 the views that clip them (`overflow: hidden`), or anywhere in the content of a scroll view the user can scroll, which
 scrolling brings in (`opacity` and transforms aside, as in Playwright). A step that acts on a view (`press`, `type`, `clear`, `submit`, `scroll`, `longPress`) needs exactly
 one: a selector matching several fails the step, and the error says how to narrow it.
@@ -461,25 +462,33 @@ test("calls reach the page's host", async () => {
 
 ### Expectations
 
-`expect(value)` compares values as JSON does (`undefined` is `null`, numbers by value), and each check throws when it
-does not hold. `.not` turns them around: `expect(app.texts()).not.toContain("Error")`. Given a function, `toThrow`
-checks what calling it throws; given a promise, or a function that returns one, `rejects` and `resolves` check what it
-settles to, as in Jest: `await expect(save()).rejects.toMatchObject({ code: "ERR_ACCESS_DENIED" })`.
+`expect(value)` checks values as Jest does, as JS made them: `toBe` is `Object.is`, `toEqual` compares member by
+member, and a `Date`, a `Map` or a `Uint8Array` is compared as what it is. Each check throws when it does not hold.
+`.not` turns them around: `expect(app.texts()).not.toContain("Error")`. Given a function, `toThrow` checks what calling
+it throws; given a promise, or a function that returns one, `rejects` and `resolves` check what it settles to, as in
+Jest: `await expect(save()).rejects.toMatchObject({ code: "ERR_ACCESS_DENIED" })`.
 
 | Check | Holds when |
 |---|---|
-| `toBe(expected)`, `toEqual(expected)` | The value equals `expected`, member by member. |
-| `toContain(item)` | An array holds `item`, or a string contains it. |
+| `toBe(expected)` | The value is `expected`, as `Object.is` says: the same primitive (`NaN` is `NaN`, `0` is not `-0`) or the same object. |
+| `toEqual(expected)` | The value equals `expected` member by member, as Jest's `toEqual`: objects by their own enumerable properties (a property that is `undefined` counts as missing), arrays item by item, dates by their time, regular expressions by source and flags, maps and sets by their entries in any order, `ArrayBuffer`s and typed arrays by their bytes, errors by name and message; `NaN` equals `NaN`. An instance of a class equals a plain object with its properties. |
+| `toMatchObject(subset)` | The value has every property of `subset`, each equal as `toEqual` says, and objects in it match in turn; other properties are not looked at, and arrays match item by item, all of them. |
+| `toContain(item)` | An array, a `Set`, a typed array or another iterable holds `item` (`===`), or a string contains it. |
+| `toContainEqual(item)` | An array, a `Set` or another iterable holds an item equal to `item`, as `toEqual` says. |
 | `toBeTruthy()`, `toBeFalsy()` | The value is truthy / falsy, as JS sees it. |
-| `toMatch(pattern)` | A string contains `pattern` (a string), or matches it (a `RegExp`). |
-| `toHaveLength(n)` | An array has `n` items, or a string `n` UTF-16 units. |
-| `toBeNull()` | The value is `null` (or `undefined`). |
+| `toMatch(pattern)` | A string contains `pattern` (a string), or matches it (a `RegExp`, run by the JS engine: look-behind, backreferences and named groups work as in JavaScript). |
+| `toHaveLength(n)` | The value's `length` is `n`: a string's UTF-16 units, an array's or a typed array's items. |
+| `toBeNull()` | The value is `null`. |
+| `toBeUndefined()`, `toBeDefined()` | The value is `undefined` / anything else. |
+| `toBeNaN()` | The value is `NaN`. |
 | `toBeGreaterThan(n)`, `toBeGreaterThanOrEqual(n)`, `toBeLessThan(n)`, `toBeLessThanOrEqual(n)` | A number compares so with `n`. |
-| `toMatchObject(subset)` | The value has every property of `subset`, each equal, and objects in it match in turn; other properties are not looked at, and arrays match item by item, all of them. |
 | `toThrow(expected?)` | `expect(fn)`: calling `fn` throws. Given `expected`, the error matches it: its message contains a string or matches a `RegExp`; an error class (`TypeError`, a class of the app's) is the error's `name`, and `Error` matches every error; an error has the same message. |
 | `rejects.toThrow(expected?)` | `expect(promise)`: the promise rejects, with an error matching `expected` as `toThrow` says. |
 | `rejects.toMatchObject(subset)` | `expect(promise)`: the promise rejects with a value matching `subset` as `toMatchObject` says: an error's own properties (`code`, `permission`, ...) with its `name` and `message`. |
 | `resolves.toBe(expected)`, `resolves.toEqual(expected)`, `resolves.toMatchObject(subset)` | `expect(promise)`: the promise resolves to a value that holds the check. |
+
+A failing check says what it got and what it expected, written as JS would write them:
+`expected Date(2024-01-02T00:00:00.000Z) to equal Date(2024-01-01T00:00:00.000Z)`.
 
 `rejects` and `resolves` have a `.not` of their own too: `await expect(load()).resolves.not.toBe(null)`.
 

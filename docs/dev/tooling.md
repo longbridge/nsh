@@ -243,7 +243,9 @@ An observer sees every batch with the step it came in; `print_batch` prints it a
 The steps name views with selectors (`headless/selector.rs`, Playwright's manner): `id:<testID>`,
 `label:<accessibilityLabel>`, `text:<text>` (an input's text or, while it is empty, its placeholder too), `role:<role>`
 with an optional `[<name>]` (the label, else the texts inside), `view:<id>` or a bare string (testID, then label, then
-text); `label:`, `text:` and names take `/regex/flags`, ` >> ` looks inside the previous part's matches, `nth=<n>`
+text); `label:`, `text:` and names take `/regex/flags` (Rust's `regex` syntax, flags `i`, `m`, `s`: a selector is
+a string the driver matches on its own thread, or a real host's agent on the device, away from any JS engine), ` >> `
+looks inside the previous part's matches, `nth=<n>`
 keeps one. `Screen::resolve` lists the matches where a user would look first: the top modal, then the rest in tree
 order below the root, of a stack only its top screen, and only the views that show (`Screen::shown`, as Playwright's
 visibility): with an area (a `display: none` view has none), outside `visibility: hidden` (`ViewStyle::hidden`), not
@@ -433,6 +435,18 @@ Only the engine of a test file serves it: an app's bundle cannot import it (the 
   while the step that is waiting on the blocking thread runs (`open`, each step, `waitUntil`), so a request made in a
   step is answered within it; a function that throws fails the request and the step. With
   `TestRun::trace` every app observes its batches and prints them under their step (`print_batch`).
+- `expect` checks values as Jest does, in Rust over the VM's values (`values.rs`), never through JSON: the value it was
+  given and each matcher's argument are kept as JS made them (`Kept`, a value `JsHost::retain` keeps, as
+  `Callback::settling` keeps a promise), and a matcher returns a `Check` that compares them as its result goes back to
+  JS, where the host is at hand (an `async` matcher's once what it waits for settled). `toBe` is `Object.is`
+  (`JsHost::same_value`); `toEqual` is Jest's recursive equality (`values::equals`: objects of one class by
+  `JsHost::class`, own enumerable properties with `undefined` ones as missing ones, dates by time, regular expressions
+  by source and flags, maps and sets by their entries through `JsHost::iterate`, buffers and typed arrays by their
+  bytes, `JsHost::buffer`; values inside themselves by the pairs being compared); `toMatchObject` uses it for its
+  leaves; `toContain` is `===`. A `RegExp` given to `toMatch` or `toThrow` runs on the JS engine (`text.search(re)`
+  through `JsHost::invoke`). `rejects.toMatchObject` compares what was thrown as `Exception::thrown` holds it (its own
+  properties with its `name` and `message`), made a JS value again. Failure messages show values as `values::show`
+  writes them (compact JSON, with `undefined`, `NaN`, dates, maps, typed arrays and classes as JS would write them).
 
 `crates/nsh-cli/src/test.rs` finds the test files (a directory's, outside hidden directories, `node_modules` and
 `target`), prints a line per test (a failure with its message, its frames in the test file and the texts on screen),

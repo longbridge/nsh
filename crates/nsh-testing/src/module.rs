@@ -1,6 +1,7 @@
 //! `nsh/test`, the module test files import: `test` declares a test,
 //! `open` starts the app on a headless engine of its own and gives an
-//! [`App`] to take steps on, `expect` checks values. Written in Rust, its
+//! [`App`] to take steps on, `expect` checks values as Jest does, as JS
+//! made them ([`crate::values`]). Written in Rust, its
 //! TypeScript face and declarations are generated, as a UI set's are; only
 //! the engine `nsh test` runs a test file on serves it.
 
@@ -17,8 +18,8 @@ use std::{
 use nsh_core::{
     JsonValue,
     element::{
-        Arg, Exception, JsError, JsHost, JsIn, JsKind, JsOwned, JsValue, PropError, Registry,
-        TsTypes,
+        Arg, Exception, JsClass, JsError, JsHost, JsIn, JsKind, JsOwned, JsValue, PropError,
+        Registry, TsTypes,
     },
     prelude::*,
 };
@@ -30,6 +31,7 @@ use crate::{
     failure,
     headless::{self, RecordingNetwork, StubReply, StubResponse, StubRoute, default_answer},
     run::{OpenApp, Session},
+    values::{self, Check, Kept},
 };
 
 /// The specifier test files import.
@@ -297,18 +299,19 @@ impl Testing {
         })
     }
 
-    /// What to expect of `value`, compared as JSON is (`undefined` is
-    /// `null`): `expect(app.texts()).toContain("Saved")`. Given a function,
-    /// what it throws: `expect(() => parse("x")).toThrow("not a number")`;
-    /// given a promise (or a function returning one), with `rejects` and
+    /// What to expect of `value`, compared as Jest compares values (as JS
+    /// made them: `toBe` by `Object.is`, `toEqual` member by member):
+    /// `expect(app.texts()).toContain("Saved")`. Given a function, what it
+    /// throws: `expect(() => parse("x")).toThrow("not a number")`; given a
+    /// promise (or a function returning one), with `rejects` and
     /// `resolves` what it settles to:
     /// `await expect(app.press("Pay")).rejects.toMatchObject({ code: "ERR_NSH_TEST_DISABLED" })`.
     pub fn expect(value: Subject) -> Expectation {
-        let (value, run, promise) = match value {
-            Subject::Value(value) => (value, None, false),
-            Subject::Function(run) => (JsonValue::Null, Some(run), false),
-            Subject::Promise(run) => (JsonValue::Null, Some(run), true),
-        };
+        let Subject {
+            value,
+            run,
+            promise,
+        } = value;
         Expectation {
             value,
             run,
@@ -1975,14 +1978,16 @@ async fn on_app<R: Send + 'static>(
     .map_err(|e| e.to_string())?
 }
 
-/// What a test expects of a value (`expect`); each check throws
-/// when it does not hold.
+/// What a test expects of a value (`expect`); each check throws when it
+/// does not hold. Values are compared as Jest compares them, as JS made
+/// them ([`crate::values`]).
 #[class]
 pub struct Expectation {
-    value: JsonValue,
+    /// The value `expect` was given (a function or a promise too).
+    value: Kept,
     /// The function `expect` was given, for `toThrow`, `rejects` and
     /// `resolves`; with `promise`, the stand-in of the promise it was given.
-    run: Option<Callback<(), JsonValue>>,
+    run: Option<Callback<(), Kept>>,
     /// `expect` was given a promise.
     promise: bool,
     not: bool,
@@ -2030,61 +2035,90 @@ impl Expectation {
         })
     }
 
-    /// The value matches `pattern`: contains it (a string), or matches it (a
-    /// `RegExp`).
-    pub fn to_match(&self, pattern: Pattern) -> Result<(), String> {
-        let holds = match &self.value {
-            JsonValue::String(s) => pattern.matches(s),
-            _ => false,
-        };
-        self.check(holds, "to match", Some(&pattern.describe()))
+    /// The value (a string) matches `pattern`, as Jest's `toMatch`: contains
+    /// it (a string), or matches it (a `RegExp`, run by the JS engine as
+    /// `text.search(pattern)` runs it).
+    pub fn to_match(&self, pattern: Pattern) -> Check {
+        self.verdict("to match", move |host, value| {
+            let holds = match value.as_string() {
+                Some(text) => pattern.matches(host, &text)?,
+                None => false,
+            };
+            Ok((holds, Some(pattern.describe())))
+        })
     }
 
-    /// The value (an array or a string) has `length` items (UTF-16 units
-    /// for a string, as JS counts them).
-    pub fn to_have_length(&self, length: f64) -> Result<(), String> {
-        let len = match &self.value {
-            JsonValue::Array(items) => Some(items.len()),
-            JsonValue::String(s) => Some(s.encode_utf16().count()),
-            _ => None,
-        };
-        self.check(
-            len.is_some_and(|n| n as f64 == length),
-            "to have length",
-            Some(&JsonValue::from(length)),
-        )
+    /// The value has a `length` of `length`: a string (UTF-16 units, as JS
+    /// counts them), an array, a typed array, or any object with a numeric
+    /// `length`.
+    pub fn to_have_length(&self, length: f64) -> Check {
+        self.verdict("to have length", move |_, value| {
+            let len = match value.kind() {
+                JsKind::String => value.as_string().map(|s| s.encode_utf16().count() as f64),
+                JsKind::Array | JsKind::Function | JsKind::Object => {
+                    value.field("length").map_err(|e| e.0)?.get().as_number()
+                }
+                _ => None,
+            };
+            Ok((len == Some(length), Some(values::number(length))))
+        })
     }
 
-    /// The value is `null` (or `undefined`).
-    pub fn to_be_null(&self) -> Result<(), String> {
-        self.check(self.value.is_null(), "to be null", None)
+    /// The value is `null` (`toBeUndefined` checks for `undefined`).
+    pub fn to_be_null(&self) -> Check {
+        self.verdict("to be null", |_, value| {
+            Ok((value.kind() == JsKind::Null, None))
+        })
+    }
+
+    /// The value is `undefined`.
+    pub fn to_be_undefined(&self) -> Check {
+        self.verdict("to be undefined", |_, value| {
+            Ok((value.kind() == JsKind::Undefined, None))
+        })
+    }
+
+    /// The value is defined: anything but `undefined`, `null` included.
+    pub fn to_be_defined(&self) -> Check {
+        self.verdict("to be defined", |_, value| {
+            Ok((value.kind() != JsKind::Undefined, None))
+        })
+    }
+
+    /// The value is `NaN`.
+    #[allow(non_snake_case)]
+    pub fn to_be_NaN(&self) -> Check {
+        self.verdict("to be NaN", |_, value| {
+            Ok((value.as_number().is_some_and(f64::is_nan), None))
+        })
     }
 
     /// The value (a number) is more than `n`.
-    pub fn to_be_greater_than(&self, n: f64) -> Result<(), String> {
-        self.compare(n, "to be greater than", |a| a > n)
+    pub fn to_be_greater_than(&self, n: f64) -> Check {
+        self.compare(n, "to be greater than", move |a| a > n)
     }
 
     /// The value (a number) is `n` or more.
-    pub fn to_be_greater_than_or_equal(&self, n: f64) -> Result<(), String> {
-        self.compare(n, "to be greater than or equal to", |a| a >= n)
+    pub fn to_be_greater_than_or_equal(&self, n: f64) -> Check {
+        self.compare(n, "to be greater than or equal to", move |a| a >= n)
     }
 
     /// The value (a number) is less than `n`.
-    pub fn to_be_less_than(&self, n: f64) -> Result<(), String> {
-        self.compare(n, "to be less than", |a| a < n)
+    pub fn to_be_less_than(&self, n: f64) -> Check {
+        self.compare(n, "to be less than", move |a| a < n)
     }
 
     /// The value (a number) is `n` or less.
-    pub fn to_be_less_than_or_equal(&self, n: f64) -> Result<(), String> {
-        self.compare(n, "to be less than or equal to", |a| a <= n)
+    pub fn to_be_less_than_or_equal(&self, n: f64) -> Check {
+        self.compare(n, "to be less than or equal to", move |a| a <= n)
     }
 
     /// The function throws; given `expected`, an error that matches it: a
-    /// message containing a string or matching a `RegExp`, an error class
-    /// (the error's `name` is the class's, `TypeError`; `Error` matches
-    /// every error), or an error with the same message.
-    pub fn to_throw(&self, expected: Option<ErrorMatch>) -> Result<(), String> {
+    /// message containing a string or matching a `RegExp` (run by the JS
+    /// engine), an error class (the error's `name` is the class's,
+    /// `TypeError`; `Error` matches every error), or an error with the same
+    /// message.
+    pub fn to_throw(&self, expected: Option<ErrorMatch>) -> Result<Check, String> {
         let run = match &self.run {
             Some(run) if !self.promise => run,
             Some(_) => {
@@ -2099,90 +2133,159 @@ impl Expectation {
             }
         };
         let error = run.call_traced(()).err();
-        thrown(
-            error.as_ref(),
-            expected.as_ref(),
-            self.not,
-            "the function",
-            "to throw",
-        )
+        let not = self.not;
+        Ok(Check::new(move |host| {
+            thrown(
+                host,
+                error.as_ref(),
+                expected.as_ref(),
+                not,
+                "the function",
+                "to throw",
+            )
+        }))
     }
 
-    fn compare(&self, n: f64, what: &str, holds: impl Fn(f64) -> bool) -> Result<(), String> {
-        let holds = self.value.as_f64().is_some_and(holds);
-        self.check(holds, what, Some(&JsonValue::from(n)))
+    fn compare(&self, n: f64, what: &'static str, holds: impl Fn(f64) -> bool + 'static) -> Check {
+        self.verdict(what, move |_, value| {
+            let holds = value.kind() == JsKind::Number && value.as_number().is_some_and(holds);
+            Ok((holds, Some(values::number(n))))
+        })
     }
 
-    /// The value is `expected`.
-    pub fn to_be(&self, expected: JsonValue) -> Result<(), String> {
-        self.check(same(&self.value, &expected), "to be", Some(&expected))
+    /// The value is `expected`, as `Object.is` says (Jest's `toBe`): the
+    /// same primitive (`NaN` is `NaN`, `0` is not `-0`), or the same object.
+    pub fn to_be(&self, expected: Kept) -> Check {
+        self.verdict("to be", move |host, value| {
+            let expected = expected.get(host)?;
+            let expected = expected.get();
+            if value.same_value(expected) {
+                return Ok((true, None));
+            }
+            let mut shown = values::show(expected);
+            if values::equals(value, expected).map_err(|e| e.0)? {
+                shown.push_str(" (an equal value, not the same one: `toEqual` compares members)");
+            }
+            Ok((false, Some(shown)))
+        })
     }
 
-    /// The value equals `expected`, member by member.
-    pub fn to_equal(&self, expected: JsonValue) -> Result<(), String> {
-        self.check(same(&self.value, &expected), "to equal", Some(&expected))
+    /// The value equals `expected` as Jest's `toEqual` says, member by
+    /// member: own enumerable properties (an `undefined` one is as one
+    /// missing), arrays item by item, dates by their time, regular
+    /// expressions by source and flags, maps and sets by their entries,
+    /// `ArrayBuffer`s and typed arrays by their bytes, errors by name and
+    /// message; `NaN` equals `NaN`; classes are not compared.
+    pub fn to_equal(&self, expected: Kept) -> Check {
+        self.verdict("to equal", move |host, value| {
+            let expected = expected.get(host)?;
+            let holds = values::equals(value, expected.get()).map_err(|e| e.0)?;
+            Ok((holds, Some(values::show(expected.get()))))
+        })
     }
 
-    /// The value has every property of `subset`, each equal to it and an
-    /// object matching it in turn, as Jest's `toMatchObject`; other
-    /// properties are not looked at (arrays match item by item, all of
-    /// them): `expect(app.dialogs()[0]).toMatchObject({ title: "Delete?" })`.
-    pub fn to_match_object(&self, subset: JsonValue) -> Result<(), String> {
-        subset_of(&subset)?;
-        self.check(
-            matches_object(&self.value, &subset),
-            "to match object",
-            Some(&subset),
-        )
+    /// The value has every property of `subset`, each equal to it (as
+    /// `toEqual` says) and an object matching it in turn, as Jest's
+    /// `toMatchObject`; other properties are not looked at (arrays match
+    /// item by item, all of them):
+    /// `expect(app.dialogs()[0]).toMatchObject({ title: "Delete?" })`.
+    pub fn to_match_object(&self, subset: Kept) -> Check {
+        self.verdict("to match object", move |host, value| {
+            let subset = subset.get(host)?;
+            subset_of(subset.get())?;
+            let holds = values::matches_object(value, subset.get()).map_err(|e| e.0)?;
+            Ok((holds, Some(values::show(subset.get()))))
+        })
     }
 
-    /// The value (an array) holds `item`, or (a string) contains it.
-    pub fn to_contain(&self, item: JsonValue) -> Result<(), String> {
-        let holds = match (&self.value, &item) {
-            (JsonValue::Array(items), _) => items.iter().any(|i| same(i, &item)),
-            (JsonValue::String(s), JsonValue::String(part)) => s.contains(part.as_str()),
-            _ => false,
-        };
-        self.check(holds, "to contain", Some(&item))
+    /// The value (an array, a `Set`, a typed array or any other iterable)
+    /// holds `item`, as `===` says (Jest's `toContain`); or (a string)
+    /// contains it.
+    pub fn to_contain(&self, item: Kept) -> Check {
+        self.verdict("to contain", move |host, value| {
+            let item = item.get(host)?;
+            let holds = match (value.as_string(), item.get().as_string()) {
+                (Some(text), Some(part)) => text.contains(&part),
+                (Some(_), None) => false,
+                (None, _) => items(value)?
+                    .iter()
+                    .any(|i| values::strict_equal(i.get(), item.get())),
+            };
+            Ok((holds, Some(values::show(item.get()))))
+        })
+    }
+
+    /// The value (an array, a `Set`, a typed array or any other iterable)
+    /// holds an item equal to `item`, as `toEqual` says (Jest's
+    /// `toContainEqual`).
+    pub fn to_contain_equal(&self, item: Kept) -> Check {
+        self.verdict("to contain equal", move |host, value| {
+            let item = item.get(host)?;
+            let mut holds = false;
+            for i in items(value)? {
+                if values::equals(i.get(), item.get()).map_err(|e| e.0)? {
+                    holds = true;
+                    break;
+                }
+            }
+            Ok((holds, Some(values::show(item.get()))))
+        })
     }
 
     /// The value is truthy, as JS sees it.
-    pub fn to_be_truthy(&self) -> Result<(), String> {
-        self.check(truthy(&self.value), "to be truthy", None)
+    pub fn to_be_truthy(&self) -> Check {
+        self.verdict("to be truthy", |_, value| Ok((values::truthy(value), None)))
     }
 
     /// The value is falsy, as JS sees it.
-    pub fn to_be_falsy(&self) -> Result<(), String> {
-        self.check(!truthy(&self.value), "to be falsy", None)
+    pub fn to_be_falsy(&self) -> Check {
+        self.verdict("to be falsy", |_, value| Ok((!values::truthy(value), None)))
     }
 
-    fn check(&self, holds: bool, what: &str, expected: Option<&JsonValue>) -> Result<(), String> {
-        if self.promise {
-            return Err(format!(
-                "`{what}` checks a value, and `expect` was given a promise: check what it resolves to (`await expect(promise).resolves`)"
-            ));
-        }
-        if self.run.is_some() {
-            return Err(format!(
-                "`{what}` checks a value, and `expect` was given a function: call it, or check what it throws (`toThrow`)"
-            ));
-        }
-        if holds != self.not {
-            return Ok(());
-        }
-        let not = if self.not { "not " } else { "" };
-        Err(match expected {
-            Some(expected) => format!("expected {} {not}{what} {expected}", self.value),
-            None => format!("expected {} {not}{what}", self.value),
+    /// The check `holds` makes of the value, made as it goes back to JS:
+    /// whether it holds, and what it expected, shown (`None`: nothing).
+    fn verdict(
+        &self,
+        what: &'static str,
+        holds: impl FnOnce(&dyn JsHost, JsIn<'_>) -> Result<(bool, Option<String>), String> + 'static,
+    ) -> Check {
+        let (value, not) = (self.value.clone(), self.not);
+        let hint = match (&self.run, self.promise) {
+            (_, true) => {
+                "; `expect` was given a promise: check what it settles to with `resolves` or `rejects`"
+            }
+            (Some(_), false) => {
+                "; `expect` was given a function: call it, or check what it throws with `toThrow`"
+            }
+            (None, false) => "",
+        };
+        Check::new(move |host| {
+            let value = value.get(host)?;
+            let (holds, expected) = holds(host, value.get())?;
+            if holds != not {
+                return Ok(());
+            }
+            let not = if not { "not " } else { "" };
+            let shown = values::show(value.get());
+            Err(match expected {
+                Some(expected) => format!("expected {shown} {not}{what} {expected}{hint}"),
+                None => format!("expected {shown} {not}{what}{hint}"),
+            })
         })
     }
+}
+
+/// The items of `value` to look in (`toContain`): what it yields as an
+/// iterable (an array's items, a `Set`'s values); none when it is not one.
+fn items<'a>(value: JsIn<'a>) -> Result<Vec<JsOwned<'a>>, String> {
+    Ok(value.iterate().map_err(|e| e.0)?.unwrap_or_default())
 }
 
 /// What a promise rejects with ([`Expectation::rejects`]).
 #[class]
 pub struct Rejection {
     /// The promise's stand-in, or the function returning it.
-    run: Callback<(), JsonValue>,
+    run: Callback<(), Kept>,
     promise: bool,
     not: bool,
 }
@@ -2204,44 +2307,61 @@ impl Rejection {
     pub async fn to_throw(
         this: Instance<Self>,
         expected: Option<ErrorMatch>,
-    ) -> Result<(), String> {
+    ) -> Result<Check, String> {
         let (run, promise, not) = this.with(|r| (r.run.clone(), r.promise, r.not));
         let error = run.call_async_traced(()).await.err();
-        thrown(
-            error.as_ref(),
-            expected.as_ref(),
-            not,
-            subject(promise),
-            "to reject",
-        )
+        Ok(Check::new(move |host| {
+            thrown(
+                host,
+                error.as_ref(),
+                expected.as_ref(),
+                not,
+                subject(promise),
+                "to reject",
+            )
+        }))
     }
 
     /// The promise rejects with a value that matches `subset` as
     /// `toMatchObject` says: an error's own properties (its `code`, ...)
     /// with its `name` and `message`. Codes, unlike messages, stay as they
     /// are: `await expect(app.back()).rejects.toMatchObject({ code: "ERR_NSH_TEST_NO_BACK" })`.
-    pub async fn to_match_object(this: Instance<Self>, subset: JsonValue) -> Result<(), String> {
-        subset_of(&subset)?;
+    pub async fn to_match_object(this: Instance<Self>, subset: Kept) -> Result<Check, String> {
         let (run, promise, not) = this.with(|r| (r.run.clone(), r.promise, r.not));
         let error = run
             .call_async_traced(())
             .await
             .err()
             .map(|e| error_json(&e));
-        let holds = error.as_ref().is_some_and(|e| matches_object(e, &subset));
-        if holds != not {
-            return Ok(());
-        }
-        let not_ = if not { "not " } else { "" };
-        let subject = subject(promise);
-        Err(match error {
-            Some(error) => format!(
-                "expected {subject} {not_}to reject with a value matching {subset}; it rejected with {error}"
-            ),
-            None => format!(
-                "expected {subject} {not_}to reject with a value matching {subset}; it resolved"
-            ),
-        })
+        Ok(Check::new(move |host| {
+            let subset = subset.get(host)?;
+            subset_of(subset.get())?;
+            let error = match &error {
+                Some(json) => Some(JsOwned::new(host, host.json(json).map_err(|e| e.0)?)),
+                None => None,
+            };
+            let holds = match &error {
+                Some(error) => {
+                    values::matches_object(error.get(), subset.get()).map_err(|e| e.0)?
+                }
+                None => false,
+            };
+            if holds != not {
+                return Ok(());
+            }
+            let not_ = if not { "not " } else { "" };
+            let subject = subject(promise);
+            let subset = values::show(subset.get());
+            Err(match error {
+                Some(error) => format!(
+                    "expected {subject} {not_}to reject with a value matching {subset}; it rejected with {}",
+                    values::show(error.get())
+                ),
+                None => format!(
+                    "expected {subject} {not_}to reject with a value matching {subset}; it resolved"
+                ),
+            })
+        }))
     }
 }
 
@@ -2249,7 +2369,7 @@ impl Rejection {
 #[class]
 pub struct Resolution {
     /// The promise's stand-in, or the function returning it.
-    run: Callback<(), JsonValue>,
+    run: Callback<(), Kept>,
     promise: bool,
     not: bool,
 }
@@ -2266,21 +2386,21 @@ impl Resolution {
         }
     }
 
-    /// The promise resolves to `expected`.
-    pub async fn to_be(this: Instance<Self>, expected: JsonValue) -> Result<(), String> {
-        resolved(this).await?.to_be(expected)
+    /// The promise resolves to `expected`, as `toBe` says.
+    pub async fn to_be(this: Instance<Self>, expected: Kept) -> Result<Check, String> {
+        Ok(resolved(this).await?.to_be(expected))
     }
 
-    /// The promise resolves to a value equal to `expected`, member by
-    /// member.
-    pub async fn to_equal(this: Instance<Self>, expected: JsonValue) -> Result<(), String> {
-        resolved(this).await?.to_equal(expected)
+    /// The promise resolves to a value equal to `expected`, as `toEqual`
+    /// says.
+    pub async fn to_equal(this: Instance<Self>, expected: Kept) -> Result<Check, String> {
+        Ok(resolved(this).await?.to_equal(expected))
     }
 
     /// The promise resolves to a value that matches `subset`, as
     /// `toMatchObject` says.
-    pub async fn to_match_object(this: Instance<Self>, subset: JsonValue) -> Result<(), String> {
-        resolved(this).await?.to_match_object(subset)
+    pub async fn to_match_object(this: Instance<Self>, subset: Kept) -> Result<Check, String> {
+        Ok(resolved(this).await?.to_match_object(subset))
     }
 }
 
@@ -2313,11 +2433,12 @@ fn subject(promise: bool) -> &'static str {
 }
 
 /// `subset` as `toMatchObject` takes it: an object (or an array).
-fn subset_of(subset: &JsonValue) -> Result<(), String> {
-    match subset {
-        JsonValue::Object(_) | JsonValue::Array(_) => Ok(()),
-        other => Err(format!(
-            "`toMatchObject` takes an object of the properties to match, not {other}"
+fn subset_of(subset: JsIn<'_>) -> Result<(), String> {
+    match subset.class() {
+        Some(class) if class != JsClass::Function => Ok(()),
+        _ => Err(format!(
+            "`toMatchObject` takes an object of the properties to match, not {}",
+            values::show(subset)
         )),
     }
 }
@@ -2334,6 +2455,7 @@ fn error_json(error: &Exception) -> JsonValue {
 /// Checks what a function threw or a promise rejected with (`error`;
 /// `None`: nothing) against `expected`; `subject` names what was checked.
 fn thrown(
+    host: &dyn JsHost,
     error: Option<&Exception>,
     expected: Option<&ErrorMatch>,
     not: bool,
@@ -2341,7 +2463,7 @@ fn thrown(
     what: &str,
 ) -> Result<(), String> {
     let holds = match (error, expected) {
-        (Some(error), Some(expected)) => expected.matches(error),
+        (Some(error), Some(expected)) => expected.matches(host, error)?,
         (Some(_), None) => true,
         (None, _) => false,
     };
@@ -2374,16 +2496,16 @@ fn describe_error(error: &Exception) -> String {
     text
 }
 
-/// What `expect` checks: a value, a function (for `toThrow`, `rejects`,
-/// `resolves`) or a promise (`rejects`, `resolves`).
-pub enum Subject {
-    /// A value, as JSON.
-    Value(JsonValue),
-    /// A function.
-    Function(Callback<(), JsonValue>),
-    /// A promise, as a stand-in that answers what it settles to
-    /// ([`Callback::settling`]).
-    Promise(Callback<(), JsonValue>),
+/// What `expect` checks: a value, kept as JS made it; a function (for
+/// `toThrow`, `rejects`, `resolves`) or a promise (`rejects`, `resolves`)
+/// is one too.
+pub struct Subject {
+    value: Kept,
+    /// A function's, or a promise's stand-in that answers what it settles
+    /// to ([`Callback::settling`]).
+    run: Option<Callback<(), Kept>>,
+    /// The value is a promise.
+    promise: bool,
 }
 
 impl Arg for Subject {
@@ -2392,15 +2514,20 @@ impl Arg for Subject {
     }
 
     fn from_js(value: JsIn<'_>) -> Result<Self, PropError> {
-        match value.kind() {
-            JsKind::Function => {
-                <Callback<(), JsonValue> as Arg>::from_js(value).map(Subject::Function)
+        let (run, promise) = match value.kind() {
+            JsKind::Function => (Some(<Callback<(), Kept> as Arg>::from_js(value)?), false),
+            JsKind::Object if is_thenable(value) => {
+                let run = Callback::settling(value)
+                    .ok_or_else(|| value.expected("a value, a function or a promise"))?;
+                (Some(run), true)
             }
-            JsKind::Object if is_thenable(value) => Callback::settling(value)
-                .map(Subject::Promise)
-                .ok_or_else(|| value.expected("a value, a function or a promise")),
-            _ => <JsonValue as JsValue>::from_js(value).map(Subject::Value),
-        }
+            _ => (None, false),
+        };
+        Ok(Subject {
+            value: <Kept as JsValue>::from_js(value)?,
+            run,
+            promise,
+        })
     }
 }
 
@@ -2425,25 +2552,17 @@ pub enum ErrorMatch {
 }
 
 impl ErrorMatch {
-    fn matches(&self, error: &Exception) -> bool {
-        match self {
-            ErrorMatch::Message(pattern) => pattern.matches(&error.message),
+    fn matches(&self, host: &dyn JsHost, error: &Exception) -> Result<bool, String> {
+        Ok(match self {
+            ErrorMatch::Message(pattern) => pattern.matches(host, &error.message)?,
             ErrorMatch::Error(message) => error.message == *message,
-            ErrorMatch::Class(class) => {
-                let json = error_json(error);
-                let field = |key: &str| json.get(key).and_then(JsonValue::as_str);
-                match (field("name"), field("message")) {
-                    (Some(name), Some(_)) => name == class || class == "Error",
-                    (Some(name), None) => name == class,
-                    _ => false,
-                }
-            }
-        }
+            ErrorMatch::Class(class) => is_of_class(error, class),
+        })
     }
 
     fn describe(&self) -> String {
         match self {
-            ErrorMatch::Message(pattern) => pattern.describe().to_string(),
+            ErrorMatch::Message(pattern) => pattern.describe(),
             ErrorMatch::Class(class) => class.clone(),
             ErrorMatch::Error(message) => format!("an error {}", JsonValue::from(message.as_str())),
         }
@@ -2464,7 +2583,7 @@ impl JsValue for ErrorMatch {
                 .ok_or_else(|| value.expected("a named error class"));
         }
         if value.kind() == JsKind::Object
-            && text("source").is_none()
+            && value.class() != Some(JsClass::RegExp)
             && let Some(message) = text("message")
         {
             return Ok(ErrorMatch::Error(message));
@@ -2479,42 +2598,48 @@ impl JsValue for ErrorMatch {
     }
 }
 
-/// Whether `value` matches `subset` as Jest's `toMatchObject` says: an
-/// object has each of its properties, matching; an array as many items,
-/// each matching; anything else is the same value.
-fn matches_object(value: &JsonValue, subset: &JsonValue) -> bool {
-    match (value, subset) {
-        (JsonValue::Object(value), JsonValue::Object(subset)) => subset
-            .iter()
-            .all(|(key, want)| value.get(key).is_some_and(|v| matches_object(v, want))),
-        (JsonValue::Array(value), JsonValue::Array(subset)) => {
-            value.len() == subset.len()
-                && value.iter().zip(subset).all(|(v, w)| matches_object(v, w))
-        }
-        _ => same(value, subset),
+/// Whether `error` is of error class `class` (`TypeError`): its `name` is
+/// the class's, and every error (a value with a `name` and a `message`) is
+/// an `Error`.
+fn is_of_class(error: &Exception, class: &str) -> bool {
+    let json = error_json(error);
+    let field = |key: &str| json.get(key).and_then(JsonValue::as_str);
+    match (field("name"), field("message")) {
+        (Some(name), Some(_)) => name == class || class == "Error",
+        (Some(name), None) => name == class,
+        _ => false,
     }
 }
 
-/// A text a check wants: contained (a string), or matched (a `RegExp`).
+/// A text a check wants: contained (a string), or matched (a `RegExp`,
+/// which the JS engine runs).
 pub enum Pattern {
     /// Contains this.
     Contains(String),
-    /// Matches this (the `RegExp`'s source and flags).
-    Regex(regex::Regex, String),
+    /// Matches this `RegExp`, written as it reads (`/a+/i`).
+    RegExp(Kept, String),
 }
 
 impl Pattern {
-    fn matches(&self, text: &str) -> bool {
+    /// Whether `text` contains or matches it (`text.search(re)` finds it:
+    /// `lastIndex` and the `g` flag do not matter).
+    fn matches(&self, host: &dyn JsHost, text: &str) -> Result<bool, String> {
         match self {
-            Pattern::Contains(part) => text.contains(part.as_str()),
-            Pattern::Regex(re, _) => re.is_match(text),
+            Pattern::Contains(part) => Ok(text.contains(part.as_str())),
+            Pattern::RegExp(re, _) => {
+                let re = re.get(host)?;
+                let text = JsOwned::new(host, host.new_string(text).map_err(|e| e.0)?);
+                let at = text.get().invoke("search", &[re.get()]).map_err(|e| e.0)?;
+                Ok(at.get().as_number().is_some_and(|at| at >= 0.0))
+            }
         }
     }
 
-    fn describe(&self) -> JsonValue {
+    /// As failure messages show it: a string quoted, a `RegExp` as it reads.
+    fn describe(&self) -> String {
         match self {
-            Pattern::Contains(part) => JsonValue::String(part.clone()),
-            Pattern::Regex(_, source) => JsonValue::String(source.clone()),
+            Pattern::Contains(part) => JsonValue::String(part.clone()).to_string(),
+            Pattern::RegExp(_, source) => source.clone(),
         }
     }
 }
@@ -2528,54 +2653,23 @@ impl JsValue for Pattern {
         if let Some(text) = value.as_string() {
             return Ok(Pattern::Contains(text));
         }
-        let field = |name: &str| value.field(name).ok().and_then(|v| v.get().as_string());
-        let (Some(source), Some(flags)) = (field("source"), field("flags")) else {
+        if value.class() != Some(JsClass::RegExp) {
             return Err(value.expected("a string or a RegExp"));
-        };
-        let inline: String = flags
-            .chars()
-            .filter(|f| matches!(f, 'i' | 'm' | 's'))
-            .collect();
-        let pattern = if inline.is_empty() {
-            source.clone()
-        } else {
-            format!("(?{inline}){source}")
-        };
-        let re = regex::Regex::new(&pattern).map_err(|e| PropError(format!("/{source}/: {e}")))?;
-        Ok(Pattern::Regex(re, format!("/{source}/{flags}")))
+        }
+        let field = |name: &str| value.field(name).ok().and_then(|v| v.get().as_string());
+        let written = format!(
+            "/{}/{}",
+            field("source").unwrap_or_default(),
+            field("flags").unwrap_or_default()
+        );
+        Ok(Pattern::RegExp(<Kept as JsValue>::from_js(value)?, written))
     }
 
     fn to_js<'a>(&self, host: &'a dyn JsHost) -> Result<JsOwned<'a>, PropError> {
-        let text = match self {
-            Pattern::Contains(part) => part.clone(),
-            Pattern::Regex(_, source) => source.clone(),
-        };
-        Ok(JsOwned::new(host, host.new_string(&text)?))
-    }
-}
-
-/// Whether `a` and `b` are the same JSON value (numbers by value).
-fn same(a: &JsonValue, b: &JsonValue) -> bool {
-    match (a, b) {
-        (JsonValue::Number(a), JsonValue::Number(b)) => a.as_f64() == b.as_f64(),
-        (JsonValue::Array(a), JsonValue::Array(b)) => {
-            a.len() == b.len() && a.iter().zip(b).all(|(a, b)| same(a, b))
+        match self {
+            Pattern::Contains(part) => Ok(JsOwned::new(host, host.new_string(part)?)),
+            Pattern::RegExp(re, _) => re.to_js(host),
         }
-        (JsonValue::Object(a), JsonValue::Object(b)) => {
-            a.len() == b.len() && a.iter().all(|(k, v)| b.get(k).is_some_and(|w| same(v, w)))
-        }
-        _ => a == b,
-    }
-}
-
-/// JS's truthiness of `value`.
-fn truthy(value: &JsonValue) -> bool {
-    match value {
-        JsonValue::Null => false,
-        JsonValue::Bool(b) => *b,
-        JsonValue::Number(n) => n.as_f64().is_some_and(|n| n != 0.0 && !n.is_nan()),
-        JsonValue::String(s) => !s.is_empty(),
-        JsonValue::Array(_) | JsonValue::Object(_) => true,
     }
 }
 
@@ -2590,143 +2684,312 @@ mod tests {
         assert_eq!(registry().undocumented(), Vec::<String>::new());
     }
 
-    #[test]
-    fn values_compare_as_json_and_checks_say_what_failed() {
-        assert!(same(&json!(1), &json!(1.0)));
-        assert!(same(&json!({"a": [1, "b"]}), &json!({"a": [1.0, "b"]})));
-        assert!(!same(&json!([1]), &json!([1, 2])));
-        let value = |v: JsonValue| Testing::expect(Subject::Value(v));
-        let texts = value(json!(["Buy milk", "1 item left"]));
-        assert_eq!(texts.to_contain(json!("1 item left")), Ok(()));
-        assert_eq!(
-            texts.to_contain(json!("2 items left")),
-            Err(r#"expected ["Buy milk","1 item left"] to contain "2 items left""#.into())
+    /// Runs `checks`, a module importing `expect` from `nsh/test`, on a VM
+    /// of its own, and panics with what it threw. In it, `fails(f,
+    /// message)` checks that `f` throws `message`.
+    fn run(checks: &str) {
+        let host = nsh_js::Host::with_options(nsh_js::HostOptions {
+            ui_sets: vec![registry()],
+            ..Default::default()
+        })
+        .unwrap();
+        let source = format!(
+            r#"import {{ expect }} from "nsh/test";
+const fails = (f, message) => {{
+  let got;
+  try {{ f(); }} catch (e) {{ got = e.message; }}
+  if (got !== message) throw new Error(`${{f}}: threw ${{JSON.stringify(got)}}, not ${{JSON.stringify(message)}}`);
+}};
+{checks}"#
         );
-        assert_eq!(texts.not().to_contain(json!("Error")), Ok(()));
-        assert_eq!(
-            texts.not().to_contain(json!("Buy milk")),
-            Err(r#"expected ["Buy milk","1 item left"] not to contain "Buy milk""#.into())
-        );
-        assert_eq!(value(json!("Saved!")).to_contain(json!("Saved")), Ok(()));
-        assert_eq!(value(json!(0)).to_be_falsy(), Ok(()));
-        assert_eq!(
-            value(json!("")).to_be_truthy(),
-            Err(r#"expected "" to be truthy"#.into())
-        );
-        assert_eq!(value(json!("héllo")).to_have_length(5.0), Ok(()));
-        assert_eq!(value(json!([1, 2])).to_have_length(2.0), Ok(()));
-        assert_eq!(value(json!(null)).to_be_null(), Ok(()));
-        assert_eq!(value(json!(3)).to_be_greater_than(2.0), Ok(()));
-        assert_eq!(
-            value(json!(3)).to_be_less_than(2.0),
-            Err("expected 3 to be less than 2.0".into())
-        );
-        assert_eq!(
-            value(json!("Saved at 9:41")).to_match(Pattern::Contains("Saved".into())),
-            Ok(())
-        );
-        let boom = Exception::from("boom".to_owned());
-        assert_eq!(
-            thrown(Some(&boom), None, false, "the function", "to throw"),
-            Ok(())
-        );
-        assert_eq!(
-            thrown(
-                None,
-                Some(&ErrorMatch::Message(Pattern::Contains("x".into()))),
-                false,
-                "the function",
-                "to throw"
-            ),
-            Err(r#"expected the function to throw "x"; it did not"#.into())
-        );
-    }
-
-    /// An error as `nsh-js` reports one thrown: `thrown` holds its own
-    /// properties with its `name` and `message`.
-    fn error(name: &str, message: &str, code: Option<&str>) -> Exception {
-        let mut thrown = json!({ "name": name, "message": message });
-        if let Some(code) = code {
-            thrown["code"] = json!(code);
+        if let Err(e) = host.eval_source(&source) {
+            panic!("{}", e.message);
         }
-        let mut exception = Exception::from(message.to_owned());
-        exception.thrown = Some(thrown);
-        exception
     }
 
     #[test]
-    fn errors_match_by_message_class_and_properties() {
-        let denied = error("Error", "fs is not granted", Some("ERR_ACCESS_DENIED"));
-        let type_error = error("TypeError", "not a number", None);
-        let class = |name: &str| ErrorMatch::Class(name.into());
-        assert!(class("TypeError").matches(&type_error));
-        assert!(class("Error").matches(&type_error));
-        assert!(!class("RangeError").matches(&type_error));
-        assert!(class("Error").matches(&denied));
-        assert!(ErrorMatch::Error("not a number".into()).matches(&type_error));
-        assert!(!ErrorMatch::Error("not a".into()).matches(&type_error));
-        // A string thrown is no error of any class.
-        let mut text = Exception::from("x".to_owned());
-        text.thrown = Some(json!("x"));
-        assert!(!class("Error").matches(&text));
-        // An error Rust made is an `Error`.
-        assert!(class("Error").matches(&Exception::from("lost".to_owned())));
-        assert_eq!(
-            thrown(
-                Some(&denied),
-                Some(&class("TypeError")),
-                false,
-                "the promise",
-                "to reject"
-            ),
-            Err(r#"expected the promise to reject TypeError; it threw Error "fs is not granted" (code "ERR_ACCESS_DENIED")"#.into())
-        );
+    fn to_be_is_object_is() {
+        run(r#"
+            expect(1).toBe(1);
+            expect("a").toBe("a");
+            expect(NaN).toBe(NaN);
+            expect(0).not.toBe(-0);
+            const o = {};
+            expect(o).toBe(o);
+            const f = () => 1;
+            expect(f).toBe(f);
+            fails(() => expect({}).toBe({}), "expected {} to be {} (an equal value, not the same one: `toEqual` compares members)");
+            fails(() => expect([1]).toBe([2]), "expected [1] to be [2]");
+            fails(() => expect(1).toBe("1"), 'expected 1 to be "1"');
+            fails(() => expect(undefined).toBe(null), "expected undefined to be null");
+            fails(() => expect({ a: undefined, b: -0 }).toBe(1), 'expected {"a":undefined,"b":-0} to be 1');
+            fails(
+                () => expect(Promise.resolve(1)).toBe(1),
+                "expected Promise {} to be 1; `expect` was given a promise: check what it settles to with `resolves` or `rejects`",
+            );
+        "#);
+    }
 
-        let thrown = error_json(&denied);
-        assert!(matches_object(
-            &thrown,
-            &json!({ "code": "ERR_ACCESS_DENIED" })
-        ));
-        assert!(matches_object(
-            &thrown,
-            &json!({ "name": "Error", "code": "ERR_ACCESS_DENIED" })
-        ));
-        assert!(!matches_object(&thrown, &json!({ "code": "ENOENT" })));
-        assert!(!matches_object(&thrown, &json!({ "path": "/x" })));
-        assert_eq!(
-            error_json(&Exception::from("lost".to_owned())),
-            json!({ "name": "Error", "message": "lost" })
-        );
+    #[test]
+    fn to_equal_compares_as_jest_does() {
+        run(r#"
+            expect({ a: 1, b: [1, "x"] }).toEqual({ b: [1, "x"], a: 1 });
+            expect([1]).not.toEqual([1, 2]);
+            // Properties that are `undefined` are as ones missing, holes as
+            // `undefined`.
+            expect({ a: 1, b: undefined }).toEqual({ a: 1 });
+            expect({ a: 1 }).toEqual({ a: 1, b: undefined });
+            expect([, 1]).toEqual([undefined, 1]);
+            expect([undefined]).not.toEqual([]);
+            expect(NaN).toEqual(NaN);
+            expect(0).not.toEqual(-0);
+            expect(null).not.toEqual(undefined);
+            // Dates by their time.
+            expect(new Date(1000)).toEqual(new Date(1000));
+            expect(new Date(NaN)).toEqual(new Date(NaN));
+            expect(new Date(0)).not.toEqual("1970-01-01T00:00:00.000Z");
+            expect(new Date(0)).not.toEqual({});
+            fails(
+                () => expect(new Date(1000)).toEqual(new Date(2000)),
+                "expected Date(1970-01-01T00:00:01.000Z) to equal Date(1970-01-01T00:00:02.000Z)",
+            );
+            // Regular expressions by source and flags.
+            expect(/a+/gi).toEqual(/a+/gi);
+            expect(/a+/g).not.toEqual(/a+/i);
+            expect(/a/).not.toEqual(/b/);
+            // Maps and sets by their entries, in any order.
+            expect(new Map([["a", { x: 1 }], ["b", 2]])).toEqual(new Map([["b", 2], ["a", { x: 1 }]]));
+            expect(new Map([["a", 1]])).not.toEqual(new Map([["a", 2]]));
+            expect(new Map([["a", 1]])).not.toEqual(new Map());
+            expect(new Map()).not.toEqual(new Set());
+            expect(new Set([1, { y: 2 }])).toEqual(new Set([{ y: 2 }, 1]));
+            expect(new Set([1, 2])).not.toEqual(new Set([1, 3]));
+            expect(new Set()).not.toEqual({});
+            fails(() => expect(new Map([["a", 1]])).toEqual(new Map([["a", 2]])), 'expected Map {"a" => 1} to equal Map {"a" => 2}');
+            fails(() => expect(new Set([1])).toEqual(new Set()), "expected Set {1} to equal Set {}");
+            // Typed arrays, `ArrayBuffer`s and `DataView`s by their bytes.
+            expect(new Uint8Array([1, 2])).toEqual(new Uint8Array([1, 2]));
+            expect(new Uint8Array([1, 2])).not.toEqual(new Uint8Array([1, 3]));
+            expect(new Uint8Array([1, 2])).not.toEqual(new Int8Array([1, 2]));
+            expect(new Uint8Array([1, 2])).not.toEqual({ 0: 1, 1: 2 });
+            expect(new Uint8Array([1, 2])).not.toEqual([1, 2]);
+            expect(new Uint8Array([1, 2, 3]).subarray(1)).toEqual(new Uint8Array([2, 3]));
+            expect(new Float64Array([NaN, 1.5])).toEqual(new Float64Array([NaN, 1.5]));
+            expect(new Uint8Array([1, 2]).buffer).toEqual(new Uint8Array([1, 2]).buffer);
+            expect(new ArrayBuffer(2)).not.toEqual(new ArrayBuffer(3));
+            expect(new DataView(new ArrayBuffer(2))).toEqual(new DataView(new ArrayBuffer(2)));
+            fails(() => expect(new Uint8Array([1])).toEqual(new Uint8Array([2])), "expected Uint8Array [1] to equal Uint8Array [2]");
+            // Instances by their properties, not their class.
+            class Point { constructor(x) { this.x = x; } }
+            expect(new Point(1)).toEqual({ x: 1 });
+            expect(new Point(1)).not.toEqual(new Point(2));
+            fails(() => expect(new Point(1)).toEqual(new Point(2)), 'expected Point {"x":1} to equal Point {"x":2}');
+            // Functions only by identity; errors by name and message.
+            const f = () => 1;
+            expect(f).toEqual(f);
+            expect(() => 1).not.toEqual(() => 1);
+            expect(new TypeError("x")).toEqual(new TypeError("x"));
+            expect(new TypeError("x")).not.toEqual(new RangeError("x"));
+            expect(new Error("x")).not.toEqual(new Error("y"));
+            // A value inside itself.
+            const a = { name: "a" };
+            a.self = a;
+            const b = { name: "a" };
+            b.self = b;
+            expect(a).toEqual(b);
+            fails(() => expect(a).toEqual({ name: "b" }), 'expected {"name":"a","self":[Circular]} to equal {"name":"b"}');
+        "#);
+    }
+
+    #[test]
+    fn null_undefined_and_nan_are_told_apart() {
+        run(r#"
+            expect(null).toBeNull();
+            fails(() => expect(undefined).toBeNull(), "expected undefined to be null");
+            fails(() => expect(NaN).toBeNull(), "expected NaN to be null");
+            expect(undefined).toBeUndefined();
+            expect(null).not.toBeUndefined();
+            fails(() => expect(0).toBeUndefined(), "expected 0 to be undefined");
+            expect(null).toBeDefined();
+            expect(0).toBeDefined();
+            fails(() => expect(undefined).toBeDefined(), "expected undefined to be defined");
+            expect(NaN).toBeNaN();
+            expect(1).not.toBeNaN();
+            expect("NaN").not.toBeNaN();
+            fails(() => expect(1).toBeNaN(), "expected 1 to be NaN");
+        "#);
+    }
+
+    #[test]
+    fn regular_expressions_run_on_the_js_engine() {
+        run(r#"
+            expect("Saved at 9:41").toMatch("Saved");
+            expect("Saved at 9:41").toMatch(/\d+:\d+$/);
+            // What only JavaScript's regular expressions have: look-behind
+            // and backreferences.
+            expect("price: $5").toMatch(/(?<=\$)\d/);
+            expect("abab").toMatch(/(ab)\1/);
+            expect("HELLO").toMatch(/hello/i);
+            // `lastIndex` does not matter, a sticky one matches at the start.
+            const g = /a/g;
+            g.lastIndex = 5;
+            expect("a").toMatch(g);
+            expect("ba").not.toMatch(/a/y);
+            fails(() => expect("abc").toMatch(/^b/), 'expected "abc" to match /^b/');
+            fails(() => expect("abc").toMatch("x"), 'expected "abc" to match "x"');
+            fails(() => expect(1).toMatch(/1/), "expected 1 to match /1/");
+            expect(() => { throw new Error("price: $5"); }).toThrow(/(?<=\$)\d/);
+            fails(
+                () => expect(() => { throw new TypeError("boom"); }).toThrow(/^x/),
+                'expected the function to throw /^x/; it threw TypeError "boom"',
+            );
+        "#);
+    }
+
+    #[test]
+    fn errors_match_by_message_class_and_error() {
+        run(r#"
+            const boom = () => { throw new TypeError("not a number"); };
+            expect(boom).toThrow();
+            expect(boom).toThrow("a number");
+            expect(boom).toThrow(TypeError);
+            expect(boom).toThrow(Error);
+            expect(boom).not.toThrow(RangeError);
+            expect(boom).toThrow(new Error("not a number"));
+            expect(boom).not.toThrow(new Error("not a"));
+            // A string thrown is no error of any class.
+            expect(() => { throw "x"; }).not.toThrow(Error);
+            fails(() => expect(() => {}).toThrow("x"), 'expected the function to throw "x"; it did not');
+            fails(
+                () => expect(() => {
+                    const e = new Error("fs is not granted");
+                    e.code = "ERR_ACCESS_DENIED";
+                    throw e;
+                }).toThrow(TypeError),
+                'expected the function to throw TypeError; it threw Error "fs is not granted" (code "ERR_ACCESS_DENIED")',
+            );
+            fails(
+                () => expect(1).toThrow(),
+                "`toThrow` checks a function: `expect(() => parse(text)).toThrow()`",
+            );
+        "#);
+    }
+
+    #[test]
+    fn lengths_of_strings_arrays_and_typed_arrays() {
+        run(r#"
+            expect("héllo").toHaveLength(5);
+            expect("😀").toHaveLength(2);
+            expect([1, 2]).toHaveLength(2);
+            expect(new Uint8Array(3)).toHaveLength(3);
+            expect(new Float64Array(4)).toHaveLength(4);
+            expect({ length: 1 }).toHaveLength(1);
+            expect(5).not.toHaveLength(1);
+            fails(() => expect([1, 2]).toHaveLength(3), "expected [1,2] to have length 3");
+            fails(() => expect(new Uint8Array(2)).toHaveLength(3), "expected Uint8Array [0,0] to have length 3");
+        "#);
     }
 
     #[test]
     fn objects_match_a_subset_of_their_properties() {
-        let value = json!({ "a": 1, "b": { "c": [1, { "d": 2, "e": 3 }], "f": null } });
-        assert!(matches_object(&value, &json!({})));
-        assert!(matches_object(&value, &json!({ "a": 1.0 })));
-        assert!(matches_object(
-            &value,
-            &json!({ "b": { "c": [1, { "d": 2 }] } })
-        ));
-        // Arrays match item by item, all of them.
-        assert!(!matches_object(&value, &json!({ "b": { "c": [1] } })));
-        assert!(!matches_object(&value, &json!({ "a": 2 })));
-        assert!(!matches_object(&value, &json!({ "g": null })));
-        assert!(matches_object(&value, &json!({ "b": { "f": null } })));
-        let expect = |v: JsonValue| Testing::expect(Subject::Value(v));
+        run(r#"
+            const value = {
+                a: 1,
+                b: { c: [1, { d: 2, e: 3 }], f: null },
+                when: new Date(5),
+                tags: new Set(["x"]),
+            };
+            expect(value).toMatchObject({});
+            expect(value).toMatchObject({ a: 1 });
+            expect(value).toMatchObject({ b: { c: [1, { d: 2 }] } });
+            // Arrays match item by item, all of them.
+            expect(value).not.toMatchObject({ b: { c: [1] } });
+            expect(value).not.toMatchObject({ a: 2 });
+            expect(value).not.toMatchObject({ g: undefined });
+            expect(value).toMatchObject({ b: { f: null } });
+            // Leaves equal as `toEqual` says.
+            expect(value).toMatchObject({ when: new Date(5), tags: new Set(["x"]) });
+            expect(value).not.toMatchObject({ when: new Date(6) });
+            expect(value).not.toMatchObject({ when: "1970-01-01T00:00:00.005Z" });
+            expect({ n: NaN }).toMatchObject({ n: NaN });
+            // As in Jest: a plain object is a subset of the bytes it names.
+            expect({ bytes: new Uint8Array([1]) }).toMatchObject({ bytes: { 0: 1 } });
+            // What an error inherits counts (its `name`).
+            expect(new TypeError("x")).toMatchObject({ name: "TypeError", message: "x" });
+            expect(1).not.toMatchObject({ a: 1 });
+            fails(() => expect({ a: 1 }).toMatchObject({ a: 2 }), 'expected {"a":1} to match object {"a":2}');
+            fails(() => expect({ a: 1 }).toMatchObject("a"), '`toMatchObject` takes an object of the properties to match, not "a"');
+        "#);
+    }
+
+    #[test]
+    fn to_contain_is_strict_and_to_contain_equal_deep() {
+        run(r#"
+            const texts = ["Buy milk", "1 item left"];
+            expect(texts).toContain("1 item left");
+            expect(texts).not.toContain("Error");
+            fails(() => expect(texts).toContain("2 items left"), 'expected ["Buy milk","1 item left"] to contain "2 items left"');
+            fails(() => expect(texts).not.toContain("Buy milk"), 'expected ["Buy milk","1 item left"] not to contain "Buy milk"');
+            expect("Saved!").toContain("Saved");
+            expect("Saved!").not.toContain(1);
+            const item = { id: 1 };
+            expect([item]).toContain(item);
+            expect([{ id: 1 }]).not.toContain({ id: 1 });
+            expect([{ id: 1 }]).toContainEqual({ id: 1 });
+            expect([{ id: 1 }]).not.toContainEqual({ id: 2 });
+            expect([NaN]).not.toContain(NaN);
+            expect([NaN]).toContainEqual(NaN);
+            expect([-0]).toContain(0);
+            expect(new Set(["a"])).toContain("a");
+            expect(new Uint8Array([7])).toContain(7);
+            expect(1).not.toContain(1);
+        "#);
+    }
+
+    #[test]
+    fn truthiness_and_numbers_as_js_sees_them() {
+        run(r#"
+            expect(0).toBeFalsy();
+            expect("").toBeFalsy();
+            expect(NaN).toBeFalsy();
+            expect(null).toBeFalsy();
+            expect(undefined).toBeFalsy();
+            expect(0n).toBeFalsy();
+            expect(1n).toBeTruthy();
+            expect([]).toBeTruthy();
+            expect({}).toBeTruthy();
+            fails(() => expect("").toBeTruthy(), 'expected "" to be truthy');
+            expect(3).toBeGreaterThan(2);
+            expect(3).toBeGreaterThanOrEqual(3);
+            expect(2).toBeLessThanOrEqual(2);
+            expect("3").not.toBeGreaterThan(2);
+            fails(() => expect(3).toBeLessThan(2.5), "expected 3 to be less than 2.5");
+            fails(() => expect(3).toBeLessThan(2), "expected 3 to be less than 2");
+        "#);
+    }
+
+    /// An error as `nsh-js` reports one thrown: `thrown` holds its own
+    /// properties with its `name` and `message`.
+    fn error(name: &str, message: &str) -> Exception {
+        let mut exception = Exception::from(message.to_owned());
+        exception.thrown = Some(json!({ "name": name, "message": message }));
+        exception
+    }
+
+    #[test]
+    fn errors_are_of_their_class_and_errors_rust_made_are_errors() {
+        let type_error = error("TypeError", "not a number");
+        assert!(is_of_class(&type_error, "TypeError"));
+        assert!(is_of_class(&type_error, "Error"));
+        assert!(!is_of_class(&type_error, "RangeError"));
+        let mut text = Exception::from("x".to_owned());
+        text.thrown = Some(json!("x"));
+        assert!(!is_of_class(&text, "Error"));
+        assert!(is_of_class(&Exception::from("lost".to_owned()), "Error"));
         assert_eq!(
-            expect(value.clone()).to_match_object(json!({ "a": 1 })),
-            Ok(())
+            error_json(&Exception::from("lost".to_owned())),
+            json!({ "name": "Error", "message": "lost" })
         );
-        assert_eq!(
-            expect(value.clone()).to_match_object(json!({ "a": 2 })),
-            Err(format!("expected {value} to match object {{\"a\":2}}"))
-        );
-        assert_eq!(
-            expect(json!(1)).not().to_match_object(json!({ "a": 1 })),
-            Ok(())
-        );
-        assert!(expect(value).to_match_object(json!("a")).is_err());
     }
 
     #[test]

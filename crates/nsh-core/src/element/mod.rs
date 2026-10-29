@@ -145,7 +145,7 @@ pub use self::{
         Video, WebView, canvas, input, input_accessory_view, native, overlay, scroll, shader, svg,
         video, web_view, web_view_html,
     },
-    js::{JsHost, JsIn, JsKind, JsOwned, JsPrimitive, JsRaw},
+    js::{JsClass, JsHost, JsIn, JsKind, JsOwned, JsPrimitive, JsRaw},
     json_host::from_json,
     keyboard::Keyboard,
     module::{
