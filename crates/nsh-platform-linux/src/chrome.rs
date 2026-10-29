@@ -192,8 +192,9 @@ pub(crate) fn command(surface: &Rc<Surface>, command: &DesktopCommand) {
                 );
             }
         }
-        // GTK 4 has no window levels.
-        DesktopCommand::SetLevel(_) => {}
+        // GTK 4 has no window levels, and its windows keep their opaque
+        // background.
+        DesktopCommand::SetLevel(_) | DesktopCommand::SetBackgroundAppearance(_) => {}
         DesktopCommand::OrderFront => {
             if let Some(window) = window(surface) {
                 window.present();

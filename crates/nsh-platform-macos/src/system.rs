@@ -24,7 +24,9 @@
 //! it hosts (text fields, scroll bars) match the app. The surface's
 //! background, under the root view (which has none of its own), is the
 //! app's: the opaque background of its top view when that fills the root,
-//! else white / neutral-950 by the scheme (as the Linux backend's). It
+//! else white / neutral-950 by the scheme (as the Linux backend's), and
+//! clear while the window's background is blurred
+//! (`Window.setBackgroundAppearance`, [`crate::chrome`]). It
 //! shows where the app has not drawn yet, as in the area a window grows
 //! by before the layout at its new size arrives.
 //!
@@ -122,6 +124,7 @@ pub(crate) fn window_changed(surface: &Rc<Surface>) {
 /// The root view's effective appearance changed (the system's, the
 /// window's).
 pub(crate) fn appearance_changed(surface: &Rc<Surface>) {
+    crate::chrome::follow_appearance(surface);
     update(surface);
 }
 
@@ -265,13 +268,17 @@ fn follow_background(surface: &Surface) {
             let color = s.background();
             (fills && color.0 & 0xff == 0xff).then_some(color)
         });
-    let color = app.unwrap_or(
-        if surface.environment.get().color_scheme == ColorScheme::Dark {
-            nsh_core::Color::rgba(10, 10, 10, 255)
-        } else {
-            nsh_core::Color::rgba(255, 255, 255, 255)
-        },
-    );
+    let color = if crate::chrome::background_blurred(surface) {
+        nsh_core::Color::TRANSPARENT
+    } else {
+        app.unwrap_or(
+            if surface.environment.get().color_scheme == ColorScheme::Dark {
+                nsh_core::Color::rgba(10, 10, 10, 255)
+            } else {
+                nsh_core::Color::rgba(255, 255, 255, 255)
+            },
+        )
+    };
     if surface.background.replace(Some(color)) == Some(color) {
         return;
     }
@@ -385,8 +392,13 @@ pub(crate) fn end_batch(surface: &Surface) {
     follow_background(surface);
 }
 
-/// The app stopped: its dialogs go too, unanswered.
+/// The app stopped: its dialogs go too, unanswered, and the next app starts
+/// with an opaque window.
 pub(crate) fn clear(surface: &Surface) {
+    if crate::chrome::background_blurred(surface) {
+        crate::chrome::reset_background(surface);
+        follow_background(surface);
+    }
     let dialogs = SYSTEM.with(|s| {
         let mut s = s.borrow_mut();
         let (dialogs, kept): (Vec<Shown>, Vec<Shown>) =
@@ -417,7 +429,7 @@ pub(crate) fn set_appearance(surface: &Rc<Surface>, appearance: nsh_core::platfo
         .root
         .ns()
         .setAppearance(ns_appearance(appearance).as_deref());
-    update(surface);
+    appearance_changed(surface);
 }
 
 /// The AppKit appearance of `appearance` (`None`: the system's).

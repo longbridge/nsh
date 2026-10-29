@@ -18,7 +18,8 @@
 //! with the content laid out below it; it is kept above the content. The
 //! other header items (the native header's slots on iOS and Android) stay
 //! hidden. Under the app's content each screen has an opaque backdrop in
-//! the window's color, so a screen sliding over another hides it.
+//! the window's color, so a screen sliding over another hides it; the
+//! backdrop is clear while the window's background is blurred.
 //!
 //! Going back (Escape, Option+Left, Command+[, the mouse's back button;
 //! Escape in a focused text field or web view only leaves it) sends
@@ -169,7 +170,7 @@ fn set_layer_color(view: &NSView, color: Option<Color>) {
 struct ScreenNav {
     view: NshView,
     config: ScreenConfig,
-    /// Its opaque background, under the app's content.
+    /// Its background (opaque unless the window's is blurred), under the app's content.
     backdrop: Retained<Container>,
     /// The header items the app inserted (only the `header` one shows).
     items: Vec<NshView>,
@@ -268,12 +269,18 @@ pub(crate) struct Nav {
     presenting: Vec<NodeId>,
     transitions: Transitions<Motion>,
     ticking: bool,
-    /// The appearance the backgrounds have.
-    dark: Option<bool>,
+    /// The color the backgrounds have.
+    backdrop: Option<Color>,
 }
 
-fn dark(surface: &Surface) -> bool {
-    surface.environment.get().color_scheme == ColorScheme::Dark
+/// A screen's background: the window's color, clear while the window's
+/// background is blurred, so the blur shows where the app paints nothing.
+fn backdrop_color(surface: &Surface) -> Color {
+    if crate::chrome::background_blurred(surface) {
+        Color::TRANSPARENT
+    } else {
+        window_color(surface.environment.get().color_scheme == ColorScheme::Dark)
+    }
 }
 
 fn rect(x: f32, y: f32, width: f32, height: f32) -> Bounds<Points> {
@@ -526,9 +533,9 @@ fn keep_last(parent: &NSView, tail: &[Retained<NSView>]) {
 }
 
 impl ScreenNav {
-    fn new(view: &NshView, dark: bool) -> Self {
+    fn new(view: &NshView, color: Color) -> Self {
         let backdrop = new_backdrop(view);
-        set_layer_color(&backdrop, Some(window_color(dark)));
+        set_layer_color(&backdrop, Some(color));
         ScreenNav {
             view: view.clone(),
             config: ScreenConfig::default(),
@@ -612,7 +619,7 @@ impl Nav {
     fn screen(&mut self, surface: &Surface, view: &NshView) -> &mut ScreenNav {
         self.screens
             .entry(view.id())
-            .or_insert_with(|| ScreenNav::new(view, dark(surface)))
+            .or_insert_with(|| ScreenNav::new(view, backdrop_color(surface)))
     }
 
     /// Ends the transitions `which` selects at once.
@@ -1128,15 +1135,15 @@ impl Nav {
         report(surface, id, &mut m.reported, size, safe_area(surface));
     }
 
-    /// Colors the screens' backgrounds for the appearance, when it changed
-    /// since they were colored.
+    /// Colors the screens' backgrounds for the appearance and the window's
+    /// background, when either changed since they were colored.
     fn follow_appearance(&mut self, surface: &Surface) {
-        let dark = dark(surface);
-        if self.dark.replace(dark).is_none_or(|d| d == dark) {
+        let color = backdrop_color(surface);
+        if self.backdrop.replace(color) == Some(color) {
             return;
         }
         for s in self.screens.values() {
-            set_layer_color(&s.backdrop, Some(window_color(dark)));
+            set_layer_color(&s.backdrop, Some(color));
         }
     }
 }

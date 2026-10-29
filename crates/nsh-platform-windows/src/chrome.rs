@@ -308,6 +308,8 @@ pub(crate) fn command(surface: &Rc<Surface>, command: &DesktopCommand) {
         DesktopCommand::ToggleFullScreen => toggle_fullscreen(surface),
         DesktopCommand::SetFrame(frame) => set_frame(surface, hwnd, frame),
         DesktopCommand::SetLevel(level) => set_level(hwnd, *level),
+        // The window keeps its opaque background.
+        DesktopCommand::SetBackgroundAppearance(_) => {}
         DesktopCommand::OrderFront => {
             // Restoring an already maximized or snapped window would change
             // its bounds when the caller only asked to focus it.

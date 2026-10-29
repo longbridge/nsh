@@ -8,6 +8,14 @@
 //!   frame above its content layout rectangle) and the traffic lights'
 //!   width; it is zero in full screen, where AppKit shows the bar over the
 //!   app only when the pointer reaches the top of the screen.
+//! - **Background appearance** ([`WindowBackgroundAppearance`],
+//!   `Window.setBackgroundAppearance`): `blurred` is a visual effect view
+//!   at the back of the window's content view that blends with what is
+//!   behind the window (the sidebar material, active while the window is).
+//!   It fills the content view, so under a hidden title bar (a full-size
+//!   content view) it is behind the title bar too; the system's title bar
+//!   keeps its own look. The window itself stays as it is. Every app starts
+//!   `opaque` ([`reset_background`]).
 //! - **Drag regions**: a left press on a view marked `windowDrag`
 //!   ([`crate::input::window_drag`]) moves the window with
 //!   `performWindowDragWithEvent:` (AppKit's own drag, with snapping and
@@ -43,8 +51,8 @@ use dispatch2::DispatchQueue;
 use nsh_core::{
     EventKind, EventPayload, PayloadValue, ROOT_ID,
     desktop::{
-        DesktopCommand, Key, MenuAction, MenuItem, MenuRole, Shortcut, TitleBarStyle, WindowFrame,
-        WindowLevel,
+        DesktopCommand, Key, MenuAction, MenuItem, MenuRole, Shortcut, TitleBarStyle,
+        WindowBackgroundAppearance, WindowFrame, WindowLevel,
     },
     geometry::{Edges, Points},
 };
@@ -55,9 +63,12 @@ use objc2::{
     sel,
 };
 use objc2_app_kit::{
-    NSApplication, NSEvent, NSEventModifierFlags, NSFloatingWindowLevel, NSMenu, NSMenuItem,
-    NSNormalWindowLevel, NSRunningApplication, NSScreen, NSToolbar, NSWindow, NSWindowButton,
-    NSWindowCollectionBehavior, NSWindowStyleMask, NSWindowTitleVisibility, NSWindowToolbarStyle,
+    NSAppearanceCustomization, NSApplication, NSAutoresizingMaskOptions, NSEvent,
+    NSEventModifierFlags, NSFloatingWindowLevel, NSMenu, NSMenuItem, NSNormalWindowLevel,
+    NSResponder, NSRunningApplication, NSScreen, NSToolbar, NSUserInterfaceItemIdentification,
+    NSView, NSVisualEffectBlendingMode, NSVisualEffectMaterial, NSVisualEffectState,
+    NSVisualEffectView, NSWindow, NSWindowButton, NSWindowCollectionBehavior, NSWindowOrderingMode,
+    NSWindowStyleMask, NSWindowTitleVisibility, NSWindowToolbarStyle,
 };
 use objc2_core_graphics::kCGDesktopIconWindowLevel;
 use objc2_foundation::{
@@ -137,6 +148,10 @@ pub(crate) struct Chrome {
     menu: RefCell<Option<Retained<NSMenu>>>,
     /// Only the toolbar this surface attached; dropping it restores the window.
     toolbar: RefCell<Option<TitleBarToolbar>>,
+    /// The window's background appearance (`Window.setBackgroundAppearance`).
+    background: Cell<WindowBackgroundAppearance>,
+    /// The view a blurred background put behind the window's content.
+    backdrop: RefCell<Option<Backdrop>>,
 }
 
 impl Drop for Chrome {
@@ -313,6 +328,10 @@ pub(crate) fn command(surface: &Rc<Surface>, command: &DesktopCommand) {
                 });
             }
         }
+        DesktopCommand::SetBackgroundAppearance(appearance) => {
+            surface.chrome.background.set(*appearance);
+            apply_background(surface);
+        }
         DesktopCommand::OrderFront => {
             if let (Some(window), Some(mtm)) = (window(surface), MainThreadMarker::new()) {
                 window.deminiaturize(None);
@@ -390,6 +409,101 @@ fn appkit_frame(current: NSRect, frame: &WindowFrame, primary_height: f64) -> NS
 /// top) and Cocoa's (up from its bottom); the same in both directions.
 fn flip_y(y: f64, primary_height: f64) -> f64 {
     primary_height - y
+}
+
+// --- Background appearance --------------------------------------------------------------
+
+/// The view behind the content of a window whose background is
+/// [`WindowBackgroundAppearance::Blurred`]; dropping it takes it out of the
+/// window.
+struct Backdrop(Retained<NSVisualEffectView>);
+
+impl Drop for Backdrop {
+    fn drop(&mut self) {
+        self.0.removeFromSuperview();
+    }
+}
+
+define_class!(
+    /// A blurred window background: it only draws, so a press on the
+    /// content view where nothing else is reaches the content view, as it
+    /// did without one.
+    #[unsafe(super(NSVisualEffectView, NSView, NSResponder, NSObject))]
+    #[thread_kind = MainThreadOnly]
+    #[name = "NshWindowBackdrop"]
+    struct BackdropView;
+
+    unsafe impl NSObjectProtocol for BackdropView {}
+
+    impl BackdropView {
+        #[unsafe(method_id(hitTest:))]
+        fn hit_test(&self, _point: NSPoint) -> Option<Retained<NSView>> {
+            None
+        }
+    }
+);
+
+/// Whether the app asked for a blurred background: the surface's own
+/// background is clear then ([`crate::system`]).
+pub(crate) fn background_blurred(surface: &Surface) -> bool {
+    surface.chrome.background.get() == WindowBackgroundAppearance::Blurred
+}
+
+/// Gives the window's content view the backdrop the background appearance
+/// asks for. A backdrop already at the back of the window's content view
+/// stays; one in another window (the root view moved) goes.
+fn apply_background(surface: &Surface) {
+    let mut backdrop = surface.chrome.backdrop.borrow_mut();
+    let Some(content) = window(surface)
+        .and_then(|w| w.contentView())
+        .filter(|_| background_blurred(surface))
+    else {
+        *backdrop = None;
+        return;
+    };
+    if backdrop
+        .as_ref()
+        .is_some_and(|b| crate::view::superview(&b.0).is_some_and(|s| s == content))
+    {
+        return;
+    }
+    // SAFETY: NSVisualEffectView's designated initializer, on the main
+    // thread.
+    let view: Retained<BackdropView> =
+        unsafe { msg_send![BackdropView::alloc(surface.mtm), initWithFrame: content.bounds()] };
+    let view = Retained::into_super(view);
+    // A layer from the start, as the backdrop filter's (`docs/dev/pitfalls.md`).
+    view.setWantsLayer(true);
+    view.setBlendingMode(NSVisualEffectBlendingMode::BehindWindow);
+    view.setMaterial(NSVisualEffectMaterial::Sidebar);
+    // As the system's sidebars: vibrant while the window is active.
+    view.setState(NSVisualEffectState::FollowsWindowActiveState);
+    view.setIdentifier(Some(ns_string!("nsh.window-backdrop")));
+    view.setAppearance(Some(&surface.root.ns().effectiveAppearance()));
+    view.setAutoresizingMask(
+        NSAutoresizingMaskOptions::ViewWidthSizable | NSAutoresizingMaskOptions::ViewHeightSizable,
+    );
+    content.addSubview_positioned_relativeTo(&view, NSWindowOrderingMode::Below, None);
+    *backdrop = Some(Backdrop(view));
+}
+
+/// The backdrop is outside the root view: it takes the root's appearance
+/// (the app's color scheme, else the host's) explicitly.
+pub(crate) fn follow_appearance(surface: &Surface) {
+    if let Some(backdrop) = &*surface.chrome.backdrop.borrow() {
+        backdrop
+            .0
+            .setAppearance(Some(&surface.root.ns().effectiveAppearance()));
+    }
+}
+
+/// The app stopped: the next one starts with an opaque window.
+pub(crate) fn reset_background(surface: &Surface) {
+    surface
+        .chrome
+        .background
+        .set(WindowBackgroundAppearance::Opaque);
+    surface.chrome.backdrop.borrow_mut().take();
 }
 
 /// The window's style for the title bar's.
@@ -815,6 +929,7 @@ fn popup(surface: &Rc<Surface>, items: &Arc<[MenuItem]>, at: Option<(f32, f32)>)
 /// The root view moved to a window, or the window changed: a hidden title
 /// bar applies to it (a window keeps its own style otherwise).
 pub(crate) fn window_changed(surface: &Surface) {
+    apply_background(surface);
     if window(surface).is_none() {
         let toolbar = surface.chrome.toolbar.borrow_mut().take();
         drop(toolbar);

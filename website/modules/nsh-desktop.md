@@ -46,6 +46,7 @@ const Window: {
     animated?: boolean;
   }): void;
   setLevel(level: "normal" | "floating" | "desktopIcon"): void;
+  setBackgroundAppearance(appearance: "opaque" | "blurred"): void;
   orderFront(): void;
   close(): void;
 };
@@ -63,6 +64,7 @@ The Rust column names the functions of `nsh_core::element::desktop`.
 | `toggleFullScreen()` | `toggle_full_screen()` | Enters or leaves full screen. |
 | `setFrame(frame)` | `set_frame(WindowFrame { .. })` | Moves and sizes the window in points; omitted fields keep their values. On macOS and Windows, `size` (`width`, `height`) includes window decorations; on Linux it sets GTK's default window size. `origin` (`x`, `y`) is the window's top left corner, measured from the top left of the primary screen (on macOS the one with the menu bar) with `y` growing down, the same on every platform; a `height` without a `y` keeps the top edge where it is, so the window grows and shrinks at its bottom edge. `animated: true` enables macOS's resize animation (default: false). |
 | `setLevel(level)` | `set_level(level)` | On macOS and Windows, `"floating"` keeps the window above normal windows and `"normal"` restores the normal level. `"desktopIcon"` selects macOS's desktop icon level (the window also sits on every space, out of Mission Control and Cmd+`); on Windows it moves the window to the bottom of the current z-order, where later activation can raise it. |
+| `setBackgroundAppearance(appearance)` | `set_background_appearance(appearance)` | What shows behind the app. On macOS, `"blurred"` shows the desktop and the windows behind the window, blurred as in a sidebar, wherever the app paints nothing: give the root view a transparent background, or no background. Under a hidden title bar (`setTitleBar({ style: "hidden" })`) the blur fills the whole window; with the system's title bar it fills the area below it. The blur is vibrant while the window is active and follows the app's color scheme. `"opaque"`, the default, gives the window its own background back; every app starts opaque. The window's own settings (an embedding app's window too) stay as they are. Windows, Linux and GPUI keep their opaque window. |
 | `orderFront()` | `order_front()` | Brings the window to the front of its level and focuses it (the app activates; macOS deminiaturizes, Windows restores minimized windows and sets foreground, GTK presents). The window keeps its level. On macOS, desktop-level surfaces stay behind other windows. GPUI activates its window; the window manager controls foreground requests on Linux. |
 | `close()` | `close_window()` | Closes the window; the app ends with it. |
 

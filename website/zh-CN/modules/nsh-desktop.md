@@ -46,6 +46,7 @@ const Window: {
     animated?: boolean;
   }): void;
   setLevel(level: "normal" | "floating" | "desktopIcon"): void;
+  setBackgroundAppearance(appearance: "opaque" | "blurred"): void;
   orderFront(): void;
   close(): void;
 };
@@ -63,6 +64,7 @@ Rust 列给出 `nsh_core::element::desktop` 中的函数。
 | `toggleFullScreen()` | `toggle_full_screen()` | 进入或退出全屏。 |
 | `setFrame(frame)` | `set_frame(WindowFrame { .. })` | 移动窗口并调整大小，单位为点；省略的字段保持原值。macOS 和 Windows 上的 `size`（`width`、`height`）包含窗口装饰；Linux 上设置 GTK 的默认窗口尺寸。`origin`（`x`、`y`）是窗口的左上角，从主屏幕（macOS 上是带菜单栏的那块屏幕）的左上角量起，`y` 向下增长，各平台相同；只给 `height` 而不给 `y` 时顶边保持不动，窗口从底边伸缩。`animated: true` 启用 macOS 的窗口调整动画（默认为 false）。 |
 | `setLevel(level)` | `set_level(level)` | 在 macOS 和 Windows 上，`"floating"` 让窗口保持在普通窗口之上，`"normal"` 恢复普通层级。`"desktopIcon"` 在 macOS 上选择桌面图标层级（窗口同时存在于所有空间，不进入 Mission Control 和 Cmd+` 循环）；在 Windows 上将窗口移到当前 z 序底部，之后激活窗口仍可将其提升。 |
+| `setBackgroundAppearance(appearance)` | `set_background_appearance(appearance)` | 应用背后显示什么。在 macOS 上，`"blurred"` 让应用未绘制的地方透出窗口后方的桌面和窗口，模糊效果与侧边栏相同：根视图请用透明背景或不设背景。隐藏标题栏时（`setTitleBar({ style: "hidden" })`）模糊铺满整个窗口；使用系统标题栏时铺满标题栏下方的区域。窗口处于活动状态时模糊呈现鲜明效果，并跟随应用的深浅色设置。`"opaque"` 为默认值，让窗口恢复自身的背景；每个应用启动时都是不透明的。窗口自身的设置（包括嵌入应用的窗口）保持不变。Windows、Linux 和 GPUI 的窗口保持不透明。 |
 | `orderFront()` | `order_front()` | 把窗口提升到其所在层级的最前并聚焦（应用随之激活；macOS 会解除最小化，Windows 会恢复最小化的窗口并置于前台，GTK 会 present）。窗口保持原有层级。macOS 的桌面层级窗口保持在其他窗口之后。GPUI 激活其窗口；Linux 上的前台请求由窗口管理器决定。 |
 | `close()` | `close_window()` | 关闭窗口，应用随之结束。 |
 

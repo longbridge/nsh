@@ -152,6 +152,19 @@ pub enum WindowLevel {
     DesktopIcon,
 }
 
+/// What shows behind the window's content
+/// (`Window.setBackgroundAppearance`), as GPUI's
+/// `WindowBackgroundAppearance`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, PropEnum)]
+pub enum WindowBackgroundAppearance {
+    /// The window's own opaque background.
+    #[default]
+    Opaque,
+    /// The desktop and the windows behind the window, blurred (macOS: the
+    /// sidebar material).
+    Blurred,
+}
+
 /// A key of a [`Shortcut`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Key {
@@ -748,6 +761,8 @@ pub enum DesktopCommand {
     SetFrame(WindowFrame),
     /// The window's level (a floating window stays above normal ones).
     SetLevel(WindowLevel),
+    /// What shows behind the window's content.
+    SetBackgroundAppearance(WindowBackgroundAppearance),
     /// Brings the window to the front of its level and focuses it (the app
     /// activates).
     OrderFront,

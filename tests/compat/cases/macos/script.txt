@@ -160,3 +160,11 @@ covers [nsh] Clipboard
 covers [nsh] Picker
 covers [nsh] openUrl
 covers [nsh] Image
+# window-background
+tap id:case-window-background
+expect Background: opaque
+tap id:blurred
+expect Background: blurred
+tap id:opaque
+expect Background: opaque
+covers [nsh/desktop] Window
