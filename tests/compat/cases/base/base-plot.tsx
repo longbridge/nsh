@@ -384,12 +384,19 @@ const MORE_FLOWS = [
   { source: 0, target: 1, value: 70 },
   { source: 1, target: 3, value: 35 },
 ];
+const STEPS: Stage[] = [{ name: "ra" }, { name: "rb" }, { name: "rc" }, { name: "rx" }, { name: "ry" }];
+const STEP_FLOWS = [
+  { source: 0, target: 3, value: 10 },
+  { source: 1, target: 3, value: 10 },
+  { source: 2, target: 4, value: 10 },
+];
 const FILLS = ["fill-[#3366ff]", "fill-[#33aa66]", "fill-[#999999]", "fill-[#ffaa00]"];
 
 /** Flows from visits to trials and away, trials to paid: four nodes in
  * three columns, a ribbon per link, each node its row's fill, each ribbon
- * a gradient from its source's color; and a plot whose links make a
- * cycle. */
+ * outlined over a gradient from its source's color; a plot whose links
+ * make a cycle; and one laid out with no relaxing, each node where the
+ * layout first puts it. */
 function SankeyCase() {
   const flow = signal<number | null>(null);
   const more = signal(false);
@@ -411,11 +418,11 @@ function SankeyCase() {
           nodeAlign="left"
           iterations={4}
           valueScale="sqrt"
-          minLinkWidth={2}
+          minLinkWidth={36}
           nodeCornerRadius={2}
           nodeClass={(_: Stage, i: number) => FILLS[i]}
           nodeStyle={{ stroke: "#ffffff", strokeWidth: 1 }}
-          linkClass="fill-none"
+          linkClass="stroke-[#dddddd]"
           linkStyle={{ opacity: 0.8 }}
           linkBackgroundClass={(link) => `bg-linear-to-r ${FILLS[link.source].replace("fill-", "from-")}/40 to-transparent`}
           linkBackgroundStyle={{ opacity: 0.9 }}
@@ -432,6 +439,9 @@ function SankeyCase() {
       <View testID="more-flows" onPress={() => more.set(true)} style={{ height: 20 }} />
       <Plot testID="cycle" data={STAGES} accessibilityLabel="Cycle" style={{ width: 100, height: 50 }}>
         <Sankey links={[{ source: 0, target: 1, value: 1 }, { source: 1, target: 0, value: 1 }]} />
+      </Plot>
+      <Plot testID="unrelaxed" data={STEPS} style={{ width: 100, height: 100 }}>
+        <Sankey links={STEP_FLOWS} iterations={0} nodeLabel="name" />
       </Plot>
     </View>
   );

@@ -2494,6 +2494,33 @@ covers [props] PlotLabel.texts
 # Each node is labelled with its value (its most in or out, 100 for
 # `visits`) over its name. New flows move in; their labels follow. A
 # plot whose links make a cycle lays out as any other, drawing nothing.
+# The labels come after the nodes, the nodes after the ribbons, the
+# ribbons after their backgrounds: below the first label is the last
+# node, `paid`. Each node is a rectangle 8 wide with corners of 2, its
+# row's fill, outlined white; its height the square root of what goes
+# through it, the nodes of a column 10 apart; `gone`, which nothing
+# leaves, stays next to its source (`nodeAlign="left"`).
+drawing below:parent:parent:text:visits roundRect 192 34.009 8 31.982 2 2 2 2
+drawing below:parent:parent:text:visits fillStyle #ffaa00ff
+drawing below:parent:parent:text:visits strokeStyle #ffffffff
+drawing below:below:parent:parent:text:visits roundRect 96 59.546 8 40.454 2 2 2 2
+# A ribbon is outlined by `linkClass`, at `linkStyle`'s opacity; one
+# thinner than `minLinkWidth` (trials to paid, 32 at `paid`) is drawn
+# that thick, 32 to 68, its canvas reaching past the plot by half of it
+# more; its background, a gradient from its source's color shown inside
+# it, at `linkBackgroundStyle`'s.
+drawing below:below:below:below:below:parent:parent:text:visits strokeStyle #ddddddff
+drawing below:below:below:below:below:parent:parent:text:visits lineTo 192 68
+drawing below:below:below:below:below:parent:parent:text:visits translate 26 26
+style below:below:below:below:below:parent:parent:text:visits opacity 0.8
+drawing id:sankey fillStyle createLinearGradient(8, 27.273, 96, 27.273) addColorStop(0, #3366ff66)...
+style below:below:below:below:below:below:below:below:parent:parent:text:visits opacity 0.9
+# The labels: the part padded by `nodeLabelClass`, its texts sized by
+# `nodeLabelStyle`, the values semibold and colored by their own.
+frame text:visits 4 12 33 12
+style text:visits fontSize 10
+style text:v100 fontWeight 600
+style text:v100 color #333333ff
 prop id:flows role image
 prop id:flows accessibilityLabel Flows
 frame id:sankey 0 0 200 100
@@ -2519,10 +2546,31 @@ tap id:more-flows
 expect v70
 expect v35
 prop id:cycle accessibilityLabel Cycle
+# Unrelaxed (`iterations={0}`), the nodes of the second column stay
+# where the layout first puts them, its room shared out around them:
+# `ry` is not drawn down level with `rc`, its source.
+drawing below:parent:parent:text:ra rect 76 69.333 24 28
 covers [nsh/base/plot] Sankey
 covers [props] Sankey.links
 covers [props] Sankey.nodeLabel
 covers [props] Sankey.valueLabel
+covers [props] Sankey.nodeWidth
+covers [props] Sankey.nodePadding
+covers [props] Sankey.nodeAlign
+covers [props] Sankey.iterations
+covers [props] Sankey.valueScale
+covers [props] Sankey.minLinkWidth
+covers [props] Sankey.nodeCornerRadius
+covers [props] Sankey.nodeClass
+covers [props] Sankey.nodeStyle
+covers [props] Sankey.linkClass
+covers [props] Sankey.linkStyle
+covers [props] Sankey.linkBackgroundClass
+covers [props] Sankey.linkBackgroundStyle
+covers [props] Sankey.nodeLabelClass
+covers [props] Sankey.nodeLabelStyle
+covers [props] Sankey.valueLabelClass
+covers [props] Sankey.valueLabelStyle
 # A plot inside a `PlotAppearScope`, shown and taken away, its period
 # and the scope's `id` changed: what it draws is the same whether its
 # appear replays or not (the clip's width is the animator's), so the
