@@ -26,7 +26,9 @@ use std::{
 use nsh_core::{
     AttributedText, Bounds, Point, Points, ViewKind,
     geometry::{bounds, point, size},
-    selection::{KeptRows, SelectionModel, SelectionTexts, reading_order, reorder},
+    selection::{
+        KeptRows, SelectionModel, SelectionTexts, autoscroll_step, reading_order, reorder,
+    },
 };
 use rustc_hash::FxHashSet;
 
@@ -402,24 +404,11 @@ pub(crate) fn up(surface: &Surface) -> bool {
         })
 }
 
-/// How far the autoscroll moves per point the pointer is past the edge,
-/// per 60 Hz frame, and at most.
-const AUTOSCROLL_RATE: f32 = 0.4;
-const AUTOSCROLL_MAX: f32 = 40.0;
-
 /// The innermost scroll view around `area` (or `area` itself) that can
 /// still move toward where the pointer at `(x, y)` (root coordinates) is
-/// past its edge, and how far past it is.
+/// near or past its edge, and its step per 60 Hz frame
+/// ([`autoscroll_step`]).
 fn past_edge(surface: &Surface, area: &NshView, x: f32, y: f32) -> Option<(NshView, f32, f32)> {
-    let past = |p: f32, extent: f32| {
-        if p < 0.0 {
-            p
-        } else if p > extent {
-            p - extent
-        } else {
-            0.0
-        }
-    };
     let mut current = Some(area.clone());
     while let Some(view) = current {
         if view.kind() == ViewKind::Scroll {
@@ -428,9 +417,9 @@ fn past_edge(surface: &Surface, area: &NshView, x: f32, y: f32) -> Option<(NshVi
             let horizontal = view.state().scroll.as_ref().is_some_and(|s| s.horizontal);
             // Along its axis only.
             let (dx, dy) = if horizontal {
-                (past(lx, frame.width.0), 0.0)
+                (autoscroll_step(lx, frame.width.0), 0.0)
             } else {
-                (0.0, past(ly, frame.height.0))
+                (0.0, autoscroll_step(ly, frame.height.0))
             };
             if (dx != 0.0 || dy != 0.0) && crate::scroll::can_scroll(&view, dx, dy) {
                 return Some((view, dx, dy));
@@ -478,7 +467,7 @@ fn autoscroll_frame(surface: &Rc<Surface>, scale: f32) -> bool {
     let Some((view, dx, dy)) = past_edge(surface, &area, x, y) else {
         return false;
     };
-    let step = |d: f32| (d * AUTOSCROLL_RATE * scale).clamp(-AUTOSCROLL_MAX, AUTOSCROLL_MAX);
+    let step = |d: f32| d * scale;
     if !crate::scroll::autoscroll(surface, &view, step(dx), step(dy)) {
         return false;
     }

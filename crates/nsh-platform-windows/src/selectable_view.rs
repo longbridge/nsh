@@ -25,7 +25,9 @@ use std::{
 use nsh_core::{
     AttributedText, Bounds, EventKind, Point, Points,
     geometry::point,
-    selection::{KeptRows, SelectionModel, SelectionTexts, reading_order, reorder},
+    selection::{
+        KeptRows, SelectionModel, SelectionTexts, autoscroll_step, reading_order, reorder,
+    },
 };
 
 use crate::{
@@ -40,12 +42,9 @@ use crate::{
 const SELECT_SLOP: f32 = 3.0;
 /// The same over a press target (a link, `onPress`).
 const SELECT_SLOP_PRESS: f32 = 10.0;
-/// How often (ms) autoscroll scrolls while the mouse is past an edge.
+/// How often (ms) autoscroll scrolls while the mouse is near or past an
+/// edge.
 const AUTOSCROLL_TICK: u64 = 16;
-/// Autoscroll's step per tick for each point the mouse is past the edge,
-/// and its largest step.
-const AUTOSCROLL_RATE: f32 = 0.3;
-const AUTOSCROLL_MAX: f32 = 40.0;
 
 /// The texts of an area, in document order (depth first, children bottom
 /// to top), as the model sees them: coordinates are the area's.
@@ -518,8 +517,9 @@ fn scroll_view_of(area: &NshView) -> Option<NshView> {
     None
 }
 
-/// How far `(x, y)` (root coordinates) is past the edges of `view`
-/// (negative above or left of it, 0 inside).
+/// The autoscroll step per tick for `(x, y)` (root coordinates) near or
+/// past the edges of `view` ([`autoscroll_step`]: negative toward the top
+/// or left, 0 away from them).
 fn past_edges(view: &NshView, x: f32, y: f32) -> (f32, f32) {
     let bounds = view.to_root().and_then(|m| {
         let s = view.state();
@@ -528,16 +528,7 @@ fn past_edges(view: &NshView, x: f32, y: f32) -> (f32, f32) {
     let Some((bx, by, bw, bh)) = bounds else {
         return (0.0, 0.0);
     };
-    let past = |p: f32, start: f32, len: f32| {
-        if p < start {
-            p - start
-        } else if p > start + len {
-            p - (start + len)
-        } else {
-            0.0
-        }
-    };
-    (past(x, bx, bw), past(y, by, bh))
+    (autoscroll_step(x - bx, bw), autoscroll_step(y - by, bh))
 }
 
 /// Scrolls `view` toward the mouse at `(x, y)` (root coordinates) when it
@@ -548,12 +539,7 @@ fn autoscroll_by(surface: &Rc<Surface>, view: &NshView, x: f32, y: f32) -> bool 
         return false;
     };
     let (px, py) = past_edges(view, x, y);
-    let step = |d: f32| (d * AUTOSCROLL_RATE).clamp(-AUTOSCROLL_MAX, AUTOSCROLL_MAX);
-    let (dx, dy) = if horizontal {
-        (step(px), 0.0)
-    } else {
-        (0.0, step(py))
-    };
+    let (dx, dy) = if horizontal { (px, 0.0) } else { (0.0, py) };
     if (dx, dy) == (0.0, 0.0) || !crate::scroll::can_scroll(view, dx, dy) {
         return false;
     }

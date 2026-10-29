@@ -47,7 +47,9 @@ use gtk4::{self as gtk, gdk, gio, glib, graphene, prelude::*};
 use nsh_core::{
     AttributedText, NodeId, TextLayout,
     geometry::{Bounds, Point, Points},
-    selection::{KeptRows, SelectionModel, SelectionTexts, reading_order, reorder},
+    selection::{
+        KeptRows, SelectionModel, SelectionTexts, autoscroll_step, reading_order, reorder,
+    },
 };
 use rustc_hash::FxHashMap;
 
@@ -571,8 +573,9 @@ pub(crate) fn released(surface: &Surface) {
 /// How often a drag past a scroll view's edge scrolls it (ms).
 const AUTOSCROLL_INTERVAL: u64 = 16;
 
-/// The scroll view around the dragging mouse's area that it is past an
-/// edge of, and by how much to scroll it (wheel deltas).
+/// The scroll view around the dragging mouse's area that it is near or
+/// past an edge of, and by how much to scroll it (wheel deltas,
+/// [`autoscroll_step`]).
 fn autoscroll_target(surface: &Surface) -> Option<(NshView, f32, f32)> {
     let (id, last) = surface
         .selection
@@ -597,27 +600,10 @@ fn autoscroll_target(surface: &Surface) -> Option<(NshView, f32, f32)> {
             .root
             .compute_point(&view, &graphene::Point::new(last.0, last.1))
             .map_or(last, |p| (p.x(), p.y()));
-        let past = |at: f32, extent: f32| {
-            if at < 0.0 {
-                at
-            } else if at > extent {
-                at - extent
-            } else {
-                0.0
-            }
-        };
-        // Faster the further past the edge, as browsers scroll.
-        let speed = |d: f32| {
-            if d == 0.0 {
-                0.0
-            } else {
-                d.signum() * (d.abs() / 4.0).clamp(1.0, 24.0)
-            }
-        };
         let (dx, dy) = if horizontal {
-            (speed(past(x, w)), 0.0)
+            (autoscroll_step(x, w), 0.0)
         } else {
-            (0.0, speed(past(y, h)))
+            (0.0, autoscroll_step(y, h))
         };
         if (dx, dy) != (0.0, 0.0) && crate::scroll::can_scroll(&view, dx, dy) {
             return Some((view, dx, dy));
