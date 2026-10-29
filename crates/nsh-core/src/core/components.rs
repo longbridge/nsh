@@ -416,6 +416,10 @@ pub(super) struct ClipboardAnswer {
     pub(super) text: Option<String>,
     /// The image, for an image read.
     pub(super) image: Option<crate::element::ClipboardImage>,
+    /// The size in encoded bytes of an image over
+    /// [`crate::platform::clipboard::MAX_IMAGE_BYTES`], left out of the
+    /// answer.
+    pub(super) too_large: Option<usize>,
     /// The files' `file:` URLs, for a files read.
     pub(super) files: Vec<String>,
 }
@@ -434,6 +438,9 @@ impl ClipboardAnswer {
                 ("uri", crate::PayloadValue::Str(u)) => uri = Some(u.clone()),
                 ("width", crate::PayloadValue::Number(n)) => width = *n,
                 ("height", crate::PayloadValue::Number(n)) => height = *n,
+                ("tooLarge", crate::PayloadValue::Number(n)) => {
+                    answer.too_large = Some(*n as usize)
+                }
                 ("files", crate::PayloadValue::Str(f)) => {
                     answer.files = f
                         .lines()
@@ -446,12 +453,16 @@ impl ClipboardAnswer {
         }
         // Only an image NSH can show, a `data:` URI, and only one the VM
         // can hold (the web's player encodes its own).
-        answer.image = uri
-            .filter(|u| u.starts_with("data:") && crate::platform::clipboard::uri_within_limit(u))
-            .map(|url| crate::element::ClipboardImage {
+        let uri = uri.filter(|u| u.starts_with("data:"));
+        let bytes = uri.as_deref().map(crate::platform::clipboard::data_uri_len);
+        if let Some(bytes) = bytes.filter(|&b| b > crate::platform::clipboard::MAX_IMAGE_BYTES) {
+            answer.too_large = Some(bytes);
+        } else {
+            answer.image = uri.map(|url| crate::element::ClipboardImage {
                 url,
                 size: crate::geometry::Size::new(pixels(width), pixels(height)),
             });
+        }
         answer
     }
 }
@@ -4780,10 +4791,12 @@ impl<M: TextEngine> Core<M> {
                         has_only: false,
                     },
                     ClipboardRead::Has(_) => Command::ReadClipboard { id, has_only: true },
-                    ClipboardRead::Image(_) => Command::ReadClipboardImage {
-                        id,
-                        has_only: false,
-                    },
+                    ClipboardRead::Image(_) | ClipboardRead::CheckedImage(_) => {
+                        Command::ReadClipboardImage {
+                            id,
+                            has_only: false,
+                        }
+                    }
                     ClipboardRead::HasImage(_) => {
                         Command::ReadClipboardImage { id, has_only: true }
                     }
@@ -4996,16 +5009,20 @@ impl<M: TextEngine> Core<M> {
             has,
             text,
             image,
+            too_large,
             files,
         } = answer;
+        let image = image.filter(|i| !i.url.is_empty());
         match self.components.clipboard_reads.remove(&id) {
             Some(ClipboardRead::Text(slot)) => slot.borrow_mut().deliver(text.unwrap_or_default()),
             Some(ClipboardRead::Has(slot) | ClipboardRead::HasImage(slot)) => {
                 slot.borrow_mut().deliver(has)
             }
-            Some(ClipboardRead::Image(slot)) => slot
-                .borrow_mut()
-                .deliver(image.filter(|i| !i.url.is_empty())),
+            Some(ClipboardRead::Image(slot)) => slot.borrow_mut().deliver(image),
+            Some(ClipboardRead::CheckedImage(slot)) => slot.borrow_mut().deliver(match too_large {
+                Some(bytes) => Err(bytes),
+                None => Ok(image),
+            }),
             Some(ClipboardRead::Files(slot)) => slot.borrow_mut().deliver(files),
             None => {}
         }

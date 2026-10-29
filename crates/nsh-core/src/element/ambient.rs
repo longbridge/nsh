@@ -454,16 +454,28 @@ pub fn clipboard_has_string() -> Answer<bool> {
     answer
 }
 
-/// Puts the image of a `data:` URI (as [`clipboard_image`] gives) on the
-/// system clipboard (TS: `Clipboard.writeImage`).
+/// Puts the image of a base64 `data:` URI, or of the URL
+/// [`clipboard_image`] gave, on the system clipboard (TS:
+/// `Clipboard.writeImage`). Where the platform puts no images on the
+/// clipboard (Android) nothing happens.
 pub fn set_clipboard_image(uri: impl Into<String>) {
     act(super::services::set_clipboard_image(uri.into()));
 }
 
-/// The image on the system clipboard, `None` when it holds none (TS:
-/// `Clipboard.readImage`), to await in a task.
+/// The image on the system clipboard, `None` when it holds none, when it
+/// is over [`crate::platform::clipboard::MAX_IMAGE_BYTES`] encoded or the
+/// platform reads no images (Android) (TS: `Clipboard.readImage`), to
+/// await in a task.
 pub fn clipboard_image() -> Answer<Option<ClipboardImage>> {
     let (answer, action) = super::services::clipboard_image();
+    act(action);
+    answer
+}
+
+/// [`clipboard_image`] for `Clipboard.readImage`: `Err` with the size in
+/// encoded bytes of an image over the limit.
+pub(crate) fn clipboard_checked_image() -> Answer<Result<Option<ClipboardImage>, usize>> {
+    let (answer, action) = super::services::clipboard_checked_image();
     act(action);
     answer
 }

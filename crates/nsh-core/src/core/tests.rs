@@ -9973,6 +9973,44 @@ mod components {
     }
 
     #[test]
+    fn components_read_images_over_the_limit_as_none() {
+        let mut c = core();
+        c.mount_root(&crate::element::Root::new::<ImagePaster>(|| ()));
+        let batch = c.commit().unwrap();
+        let button = batch
+            .items
+            .iter()
+            .find_map(|i| match i {
+                MountItem::Events { id, events } if events.contains(EventKind::Press) => Some(*id),
+                _ => None,
+            })
+            .expect("the button");
+        assert!(c.component_event(button, EventKind::Press, &EventPayload::None));
+        c.commit().unwrap();
+        use crate::PayloadValue::{Bool, Number, Str};
+        let limit = crate::platform::clipboard::MAX_IMAGE_BYTES;
+        let answers = [
+            vec![("id", Number(1.0)), ("has", Bool(true))],
+            // The size of an image the platform left out.
+            vec![
+                ("id", Number(2.0)),
+                ("has", Bool(true)),
+                ("tooLarge", Number((limit + 1) as f64)),
+            ],
+            vec![
+                ("id", Number(3.0)),
+                ("has", Bool(false)),
+                ("files", Str(String::new())),
+            ],
+        ];
+        for payload in answers {
+            assert!(c.component_event(ROOT_ID, EventKind::Clipboard, &EventPayload::Map(payload)));
+        }
+        let shown = run_until(&mut c, |s| s.iter().any(|t| t.starts_with("pasted t")));
+        assert_eq!(shown.last().unwrap(), "pasted true None ");
+    }
+
+    #[test]
     fn clipboard_images_need_the_capability() {
         let mut c = core();
         c.set_access(std::sync::Arc::new(crate::access::Access {
