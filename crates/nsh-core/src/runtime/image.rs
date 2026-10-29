@@ -1,5 +1,5 @@
-//! `nsh/image`: image information and loading ahead, the functions of
-//! `Image` (`nsh-js` makes it the image element's component). A URL the
+//! Image information and loading ahead, the functions of `nsh`'s `Image`
+//! (`nsh-js` makes it the image element's component). A URL the
 //! app's `network` capability does not grant rejects with
 //! `ERR_ACCESS_DENIED` (checked here, in the call, as the core checks the
 //! loads of Rust components' calls).
