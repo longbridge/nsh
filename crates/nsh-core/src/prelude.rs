@@ -193,6 +193,7 @@ pub use crate::element::{
     methods,
     module,
     native,
+    native_components,
     native_module,
     opaque_grey,
     overlay,

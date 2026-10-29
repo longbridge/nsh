@@ -68,7 +68,10 @@ pub use windows;
 #[cfg(feature = "dev")]
 pub use crate::app::set_root;
 pub use crate::{
-    app::{AppOptions, AppSource, AppView, debug_output, fatal_error, run_app, set_ui_sets},
+    app::{
+        AppOptions, AppSource, AppView, debug_output, fatal_error, run_app, set_components,
+        set_ui_sets,
+    },
     image::AssetBase,
     native::{ComponentContext, ComponentFactory, Components, NativeComponent},
 };
