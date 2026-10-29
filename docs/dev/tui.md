@@ -304,7 +304,8 @@ keeps its offset and clips rather than moving back into the viewport. A view's o
 its inner Cell rect. `overflow: hidden` clips descendants to that rect and masks rounded corners. A box with
 only one row, or two rows holding content, uses side bars; an empty two-row box keeps its closed border when no sibling text or content is drawn through it. A box
 with only one or two columns omits vertical strokes, preserving
-space for labels and tiny value indicators. Border corners follow each resolved corner radius independently.
+space for labels and tiny value indicators. Borders are straight single lines whatever their radii; radii shape
+only fill coverage and `overflow: hidden` clips. A button draws no border (the terminal look below).
 A childless plain View fill thinner than half a Cell draws `─` or `│` in its fill's palette color (the
 Terminal look below). A fill at exactly half a Cell is a solid leaf. When both dimensions are thin, the longer
 normalized Cell extent chooses the line direction. Hairlines use absolute edges; rounded controls and compact
@@ -360,6 +361,20 @@ draw their content reversed over their Cell box, after their descendants. A focu
 terminal cursor at its caret instead. Outlines, including the app's focus outlines, are not drawn: focus is the
 reversed box. A view whose opacity, multiplied through its ancestors, is below 3% draws nothing and keeps its hit
 regions; any other opacity is drawn as opaque.
+
+Decorations are plain, and each is a documented Decorative feature:
+
+- **Borders** are straight single lines (`┌─┐`, never `╭╮`) in their palette color: neutral border colors read
+  dim, accent ones (an invalid field's red) keep their accent.
+- **Buttons** read `[ label ]`. A button is a pressable view (role `button` or `imagebutton`, or no role and press
+  handlers) whose text sits on one Cell row; other roles (link, tab, checkbox, radio, switch, menu item, ...) keep
+  their own look, and a pressable with several rows of text or other content (a field, an image, a labeled canvas)
+  keeps the app's box. The brackets take the button's own Cells, one Cell from the first and last glyph of its
+  text, both or neither: a label flush with its box stays bare. The button draws no border or fill.
+- **Icons and decorative images** are not drawn: canvases with role `image` or without an accessibility label, and
+  image placeholders narrower than 3 Cells or shorter than 2. A button whose content is only icons shows its
+  accessibility label as `[ label ]` on its box's middle row, cut with `…` to the box (`[L…]`).
+- **Shadows, gradients and opacity** are ignored (opacity below 3% still hides).
 
 ## Navigation stacks
 
@@ -479,7 +494,8 @@ completion callbacks and promises resolve normally.
 down per Cell (4 × 4 points at the default 8 × 16), and ratatui's `canvas::Canvas` with `Marker::Braille` turns
 them into symbols. Only the canvas's visible Cells are replayed onto, so a canvas partly scrolled or clipped keeps
 its dots in place. The widget resets the background of its area, so it draws into a scratch buffer and only its
-symbols and palette inks are copied: what lies under it stays.
+symbols and palette inks are copied: what lies under it stays. A canvas with role `image` or without an
+accessibility label is an icon and is not drawn (the terminal look above); label a chart to draw it.
 
 - **State**: the affine transform (`translate`, `scale`, `rotate`, `transform`, `setTransform`), `save` /
   `restore`, `fillStyle` / `strokeStyle`, `globalAlpha`, the line dash and its offset, `font` (its weight and
@@ -728,7 +744,9 @@ permit clipboard writes; `nsh test` uses memory and never writes to the machine'
 | View fills | No color: opaque fills clear the Cells they cover to the terminal background; childless solid leaves reversed in their palette color; translucent fills nothing |
 | Opacity | Ignored, except that a view below 3% draws nothing |
 | Selected, checked and focused views | Reversed over their Cell box; focused fields show the terminal cursor |
-| Borders | Reserved inner Cell rect; per-side palette colors and per-corner glyphs; compact boxes omit horizontal or vertical strokes to keep room for content |
+| Borders | Decorative: straight single lines in per-side palette colors over a reserved inner Cell rect; compact boxes omit horizontal or vertical strokes to keep room for content |
+| Buttons | Decorative: `[ label ]` in the button's own Cells around its one row of text, or its accessibility label when it shows only icons; no border or fill |
+| Icons and decorative images | Decorative: canvases with role `image` or no accessibility label and image placeholders under 3 × 2 Cells are not drawn |
 | Outlines, including control focus outlines | Left out; focus is the reversed box |
 | Anchored overlays | Snapped outside the anchor's Cell rect on the core-resolved placement side |
 | Gaps between texts | Positive point gaps between one-line sibling texts or canvas text runs retain at least one Cell; zero gaps keep adjacent text |
@@ -737,7 +755,7 @@ permit clipboard writes; `nsh test` uses memory and never writes to the machine'
 | Base control value states and projected part states | Core-resolved checked, mixed, selected and disabled styles, with checked and selected controls reversed |
 | Slider keyboard input | Component-owned arrows, page and endpoint keys while its thumb has focus |
 | Slider dragging and control hover | Ticket-09 pointer follow-up |
-| Border width, dashes, dots, corner curves | Solid single-Cell strokes; circular and continuous corners share a Cell approximation; widths still participate in core layout |
+| Border width, dashes, dots, corner radii | Decorative: solid single-Cell strokes with square corners; radii shape fill coverage only; widths still participate in core layout |
 | Text | Styled Paragraphs: palette foreground, bold at weight 600 and above, italic, underline and strikethrough |
 | Hover and pressed states | App-defined state styles and hover events on the Cell hit regions |
 | Mouse drags | Native pan values, responder moves and bounded content scrolling |
@@ -754,7 +772,7 @@ permit clipboard writes; `nsh test` uses memory and never writes to the machine'
 | Inline attachments, mentions and inline math | Measured child content placed in whole Cells, wrapping with the surrounding text |
 | Font size, family, line height and letter spacing | Terminal font, display width and one row per line; imported fonts load from adjacent `assets/` or the development server |
 | Shadows, blur, materials, 3D transforms and blend modes | Decorative features left out silently in this slice |
-| View gradients (`backgroundImage`: linear, radial and conic) | Left out, as every fill color |
+| View gradients (`backgroundImage`: linear, radial and conic) | Decorative: left out, as every fill color |
 | Native animated values | Host-frame opacity, background/border/text colors, transforms and canvas slots; completion and cancellation reported |
 | 2D view transforms | Composed positions and axis-aligned Cell extents; upright terminal glyphs and Cell-aligned borders |
 | Canvas transforms | Affine paths on the braille grid, with animated numeric and color slots |

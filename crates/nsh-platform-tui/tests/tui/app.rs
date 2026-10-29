@@ -324,14 +324,14 @@ fn Bordered() -> impl IntoElement {
 }
 
 #[test]
-fn view_fills_and_rounded_borders_are_visible_cells() {
+fn rounded_borders_draw_straight_corners_around_a_solid_leaf() {
     let (mut view, rx) = surface();
     let mut terminal = Terminal::new(TestBackend::new(20, 8)).unwrap();
     view.load(App::Rust(Root::new::<Bordered>(|| ()))).unwrap();
-    draw_until(&mut view, &mut terminal, &rx, "╭────╮");
+    draw_until(&mut view, &mut terminal, &rx, "┌────┐");
     let buffer = terminal.backend().buffer();
-    assert_eq!(buffer[(0, 2)].symbol(), "╰");
-    assert_eq!(buffer[(5, 2)].symbol(), "╯");
+    assert_eq!(buffer[(0, 2)].symbol(), "└");
+    assert_eq!(buffer[(5, 2)].symbol(), "┘");
     // A leaf's fill is its content: reversed in the fill's palette color.
     assert!(reversed(buffer, 2, 1));
     assert_eq!(buffer[(2, 1)].fg, ratatui_core::style::Color::Blue);

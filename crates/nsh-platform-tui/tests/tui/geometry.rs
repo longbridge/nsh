@@ -86,6 +86,7 @@ fn NestedBorders() -> impl IntoElement {
                                 .fill_color(nsh_core::color::rgb(0xef4444))
                                 .fill_rect(0.0, 0.0, 96.0, 96.0),
                         )
+                        .label("drawing")
                         .absolute()
                         .inset(px(0.0)),
                     ),
@@ -102,10 +103,10 @@ fn nested_borders_own_distinct_cells_and_clip_descendant_canvas() {
         .unwrap();
     draw_until(&mut view, &mut terminal, &rx, "ready");
     let buffer = terminal.backend().buffer();
-    assert_eq!(buffer[(2, 2)].symbol(), "╭");
-    assert_eq!(buffer[(13, 7)].symbol(), "╯");
-    assert_eq!(buffer[(3, 3)].symbol(), "╭");
-    assert_eq!(buffer[(12, 6)].symbol(), "╯");
+    assert_eq!(buffer[(2, 2)].symbol(), "┌");
+    assert_eq!(buffer[(13, 7)].symbol(), "┘");
+    assert_eq!(buffer[(3, 3)].symbol(), "┌");
+    assert_eq!(buffer[(12, 6)].symbol(), "┘");
     assert_eq!(buffer[(5, 5)].symbol(), "⣿");
     for y in 3..7 {
         assert_eq!(buffer[(2, y)].symbol(), "│");
@@ -225,7 +226,7 @@ fn RoundedCoverage() -> impl IntoElement {
 }
 
 #[test]
-fn rounded_fills_clips_and_individual_border_corners_keep_the_apps_radii() {
+fn rounded_fills_and_clips_keep_the_apps_radii_and_borders_draw_straight_corners() {
     let (mut view, rx) = surface();
     let mut terminal = Terminal::new(TestBackend::new(32, 16)).unwrap();
     view.load(App::Rust(Root::new::<RoundedCoverage>(|| ())))
@@ -239,10 +240,10 @@ fn rounded_fills_clips_and_individual_border_corners_keep_the_apps_radii() {
     assert_eq!(solid(buffer, 2, 3), Some(Color::Blue));
     assert_eq!(solid(buffer, 27, 1), Some(Color::Red));
     assert_eq!(solid(buffer, 16, 6), Some(Color::Red));
-    assert_eq!(buffer[(2, 8)].symbol(), "╭");
+    assert_eq!(buffer[(2, 8)].symbol(), "┌");
     assert_eq!(buffer[(11, 8)].symbol(), "┐");
     assert_eq!(buffer[(2, 11)].symbol(), "└");
-    assert_eq!(buffer[(11, 11)].symbol(), "╯");
+    assert_eq!(buffer[(11, 11)].symbol(), "┘");
 }
 
 #[component]
@@ -263,6 +264,7 @@ fn CenteredIcons() -> impl IntoElement {
                             .fill_color(nsh_core::color::rgb(0xffffff))
                             .fill_rect(0.0, 0.0, 8.0, 17.0),
                     )
+                    .label("drawing")
                     .w(px(8.0))
                     .h(px(17.0)),
                 )
@@ -791,6 +793,7 @@ fn AdjacentCanvasLabels() -> impl IntoElement {
                     .fill_text("09:09", 0.0, 64.0)
                     .fill_text("10:15", 40.0, 64.0),
             )
+            .label("drawing")
             .absolute()
             .left(px(16.0))
             .top(px(16.0))

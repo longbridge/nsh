@@ -227,7 +227,7 @@ fn canvas_slots_follow_native_values_and_appear_effects_end_visible() {
             value.timing(1, { duration: 80 }).then(() => done.set(true));
             return <View>
                 <View style={{ opacity: value, translate: [x, 0] }}><Text>Appeared</Text></View>
-                <Canvas style={{ width: 80, height: 16 }} draw={cx => {
+                <Canvas accessibilityLabel="drawing" style={{ width: 80, height: 16 }} draw={cx => {
                     cx.fillStyle = color;
                     cx.translate(x, 0);
                     cx.fillRect(0, 0, 16, 16);
@@ -364,7 +364,7 @@ fn canvas_reset_transform_preserves_the_views_animated_transform() {
             const scale = createAnimatedValue(2);
             return <View>
                 <Text>Canvas transform</Text>
-                <Canvas style={{ position: "absolute", left: 16, top: 16, width: 16, height: 16,
+                <Canvas accessibilityLabel="drawing" style={{ position: "absolute", left: 16, top: 16, width: 16, height: 16,
                     transformOrigin: "top left", scale }} draw={cx => {
                     cx.translate(80, 0);
                     cx.setTransform(1, 0, 0, 1, 0, 0);

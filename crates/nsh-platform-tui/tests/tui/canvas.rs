@@ -43,6 +43,7 @@ fn Shapes() -> impl IntoElement {
                     .text_baseline(CanvasTextBaseline::Top)
                     .fill_text("Hi", 80.0, 32.0),
             )
+            .label("drawing")
             .w(px(160.0))
             .h(px(48.0)),
         )
@@ -53,6 +54,7 @@ fn Shapes() -> impl IntoElement {
                     .fill_color(nsh_core::color::rgb(0xffffff))
                     .fill_rect(0.0, 0.0, 16.0, 16.0),
             )
+            .label("drawing")
             .w(px(16.0))
             .h(px(16.0))
             .bg(nsh_core::color::rgb(0x000000)),
@@ -123,6 +125,7 @@ fn Clipped() -> impl IntoElement {
                     .line_to(80.0, 30.0)
                     .stroke(),
             )
+            .label("drawing")
             .w(px(80.0))
             .h(px(32.0)),
         )
@@ -135,6 +138,7 @@ fn Clipped() -> impl IntoElement {
                     .rect(rect(16.0, 0.0, 48.0, 16.0))
                     .fill_with(FillRule::EvenOdd),
             )
+            .label("drawing")
             .w(px(80.0))
             .h(px(16.0)),
         )
@@ -188,6 +192,7 @@ fn Pads() -> impl IntoElement {
                         .test_id("right"),
                     ),
             )
+            .label("drawing")
             .w(px(80.0))
             .h(px(16.0))
             .on_press(move || presses.update(|n| *n += 1)),

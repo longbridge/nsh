@@ -1,7 +1,8 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 
 use nsh_core::{
-    Bounds, Checked, NodeId, Point, PointerEvents, Points, ROOT_ID, ViewKind, platform::ColorScheme,
+    AccessibilityRole, Bounds, Checked, NodeId, Point, PointerEvents, Points, ROOT_ID, ViewKind,
+    platform::ColorScheme,
 };
 use ratatui_core::{
     buffer::Buffer,
@@ -10,6 +11,7 @@ use ratatui_core::{
     widgets::Widget,
 };
 use ratatui_widgets::{block::Block, borders::Borders};
+use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
 use crate::{
@@ -24,6 +26,10 @@ use crate::{
 const COMPACT_HEIGHT_CELLS: f32 = 1.5;
 const MIN_BORDERED_EXTENT: i32 = 3;
 const HAIRLINE_CELL_FRACTION: f32 = 0.5;
+/// Image placeholders smaller than this, in Cells, are decorative and not drawn.
+const MIN_IMAGE_CELLS: (i32, i32) = (3, 2);
+/// The Cells between a button's label and each of its brackets.
+const BRACKET_GAP: i32 = 1;
 
 pub(crate) struct Hit {
     pub(crate) node: NodeId,
@@ -49,6 +55,14 @@ struct Clip {
     visible: Rect,
     borders: CellBounds,
     fit: bool,
+}
+
+/// What a button shows between its brackets.
+enum ButtonLabel {
+    /// Its own text, drawn on one row.
+    Text,
+    /// The accessibility label of a button whose content is only icons.
+    Accessible(Arc<str>),
 }
 
 /// How a view's fill shows in the terminal, which draws no fill colors.
@@ -134,6 +148,7 @@ impl Painter<'_> {
         let text_parent = horizontal_text_parent(self.tree, id, parent);
         let sibling_content =
             border_has_sibling_content(self.tree, id, parent, self.cells, self.area);
+        let button = button_label(self.tree, id, parent, self.cells, self.area);
         let Some(view) = self.tree.get_mut(id) else {
             return;
         };
@@ -332,8 +347,9 @@ impl Painter<'_> {
             .animated
             .border_color
             .map_or(view.style.borders.colors, |color| [color; 4]);
+        // A button reads `[ label ]`: no border or fill around it.
         let sides = [widths.top, widths.right, widths.bottom, widths.left]
-            .map(|width| width > Points::ZERO);
+            .map(|width| width > Points::ZERO && button.is_none());
         let has_content = view.kind != ViewKind::View
             || !view.children.is_empty()
             || view.component.is_some()
@@ -394,6 +410,7 @@ impl Painter<'_> {
                 .as_ref()
                 .map_or_else(Point::default, |scroll| scroll.origin()),
         });
+        let own_geometry = self.geometry.len() - 1;
         let children_clip = Clip {
             fit: sides.iter().any(|&side| side) && view.kind != ViewKind::Scroll,
             visible: if view.style.overflow_hidden
@@ -438,12 +455,26 @@ impl Painter<'_> {
         } else {
             Vec::new()
         };
-        let visible_drawn = !visible.is_empty() && opacity >= INVISIBLE_OPACITY;
+        let role = view.props.accessibility.role;
+        let decorative = match view.kind {
+            ViewKind::Canvas => {
+                role == AccessibilityRole::Image || view.props.accessibility.label.is_none()
+            }
+            ViewKind::Image => {
+                bounds.right - bounds.left < MIN_IMAGE_CELLS.0
+                    || bounds.bottom - bounds.top < MIN_IMAGE_CELLS.1
+            }
+            _ => false,
+        };
+        let visible_drawn = !visible.is_empty() && opacity >= INVISIBLE_OPACITY && !decorative;
         if visible_drawn {
-            let fill = view
-                .animated
-                .background
-                .unwrap_or(view.style.background_color);
+            let fill = if button.is_some() {
+                nsh_core::Color::TRANSPARENT
+            } else {
+                view.animated
+                    .background
+                    .unwrap_or(view.style.background_color)
+            };
             let rounded = !radii.is_zero();
             let leaf =
                 view.kind == ViewKind::View && view.children.is_empty() && view.component.is_none();
@@ -497,31 +528,9 @@ impl Painter<'_> {
             }
             Block::default()
                 .borders(borders)
-                .border_set(ratatui_core::symbols::border::Set {
-                    top_left: if radii.top_left > Points::ZERO {
-                        "╭"
-                    } else {
-                        "┌"
-                    },
-                    top_right: if radii.top_right > Points::ZERO {
-                        "╮"
-                    } else {
-                        "┐"
-                    },
-                    bottom_right: if radii.bottom_right > Points::ZERO {
-                        "╯"
-                    } else {
-                        "┘"
-                    },
-                    bottom_left: if radii.bottom_left > Points::ZERO {
-                        "╰"
-                    } else {
-                        "└"
-                    },
-                    ..ratatui_core::symbols::border::PLAIN
-                })
+                .border_set(ratatui_core::symbols::border::PLAIN)
                 .render(visible, self.buffer);
-            // Block chooses the corner symbols; each edge keeps its own palette color.
+            // Each edge keeps its own palette color.
             for (side, color) in colors.iter().enumerate() {
                 let edge = match side {
                     0 if borders.contains(Borders::TOP) => {
@@ -648,6 +657,9 @@ impl Painter<'_> {
         for (position, cell) in clipped_corners {
             self.buffer[position] = cell;
         }
+        if visible_drawn && let Some(button) = button {
+            self.brackets(visible, button, own_geometry);
+        }
         let Some(view) = self.tree.get(id) else {
             return;
         };
@@ -663,6 +675,180 @@ impl Painter<'_> {
             }
         }
     }
+}
+
+impl Painter<'_> {
+    /// Draws a button's brackets in its own Cells: around its one row of text
+    /// (the text views from `texts` on in `geometry`), one Cell away when the
+    /// box has room for both, or around its accessibility label on the box's
+    /// middle row, cut to the box.
+    fn brackets(&mut self, visible: Rect, button: ButtonLabel, texts: usize) {
+        match button {
+            ButtonLabel::Text => {
+                let mut label: Option<(u16, u16, u16)> = None;
+                for geometry in &self.geometry[texts..] {
+                    let Some(text) = geometry.text_frame else {
+                        continue;
+                    };
+                    let text = CellBounds::new(text, self.cells, self.area)
+                        .clipped(geometry.visible.intersection(visible));
+                    for y in text.y..text.bottom() {
+                        for x in text.x..text.right() {
+                            let symbol = self.buffer[(x, y)].symbol();
+                            if symbol == " " || label.is_some_and(|(row, ..)| row != y) {
+                                continue;
+                            }
+                            let end = x + symbol.width().max(1) as u16;
+                            label = Some(label.map_or((y, x, end), |(row, left, right)| {
+                                (row, left.min(x), right.max(end))
+                            }));
+                        }
+                    }
+                }
+                let Some((y, left, right)) = label else {
+                    return;
+                };
+                let gap = BRACKET_GAP as u16;
+                let open = left.saturating_sub(gap + 1).max(visible.x);
+                let close = (right + gap).min(visible.right() - 1);
+                let free = |x: u16| self.buffer[(x, y)].symbol() == " ";
+                // Both brackets or neither: a label flush with its box stays bare.
+                if open < left && close >= right && free(open) && free(close) {
+                    let style = self.buffer[(left, y)].style();
+                    self.buffer[(open, y)].set_symbol("[").set_style(style);
+                    self.buffer[(close, y)].set_symbol("]").set_style(style);
+                }
+            }
+            ButtonLabel::Accessible(label) => {
+                let width = usize::from(visible.width);
+                let mut text = format!("[ {label} ]");
+                if text.width() > width {
+                    let mut kept = String::new();
+                    for grapheme in label.graphemes(true) {
+                        if kept.width() + grapheme.width() + "[…]".width() > width {
+                            break;
+                        }
+                        kept.push_str(grapheme);
+                    }
+                    text = format!("[{kept}…]");
+                }
+                if text.width() > width {
+                    return;
+                }
+                let x = visible.x + ((width - text.width()) / 2) as u16;
+                let y = visible.y + (visible.height - 1) / 2;
+                self.buffer.set_string(x, y, text, Style::reset());
+            }
+        }
+    }
+}
+
+/// What a button shows between brackets: a pressable view (role button, or no
+/// role and press handlers) whose text sits on one row, or whose content is
+/// only icons and which has an accessibility label. Other content (fields,
+/// labeled canvases, images, native components) keeps the app's box.
+fn button_label(
+    tree: &Mounter,
+    id: NodeId,
+    projection: Projection,
+    cells: CellSize,
+    area: Rect,
+) -> Option<ButtonLabel> {
+    let view = tree.get(id)?;
+    let pressable = match view.props.accessibility.role {
+        AccessibilityRole::Button | AccessibilityRole::ImageButton => true,
+        AccessibilityRole::None => nsh_core::input::has_press(view.events),
+        _ => false,
+    };
+    if !pressable {
+        return None;
+    }
+    let mut rows = Vec::new();
+    if !text_rows(tree, id, projection, cells, area, &mut rows) {
+        return None;
+    }
+    match rows.len() {
+        0 => view
+            .props
+            .accessibility
+            .label
+            .clone()
+            .map(ButtonLabel::Accessible),
+        1 => Some(ButtonLabel::Text),
+        _ => None,
+    }
+}
+
+/// Collects the Cell rows `id`'s subtree draws text glyphs on, up to two;
+/// `false` when it holds content other than text and decorative icons.
+fn text_rows(
+    tree: &Mounter,
+    id: NodeId,
+    projection: Projection,
+    cells: CellSize,
+    area: Rect,
+    rows: &mut Vec<i32>,
+) -> bool {
+    let Some(view) = tree.get(id) else {
+        return true;
+    };
+    if view.concealed
+        || view.style.hidden
+        || view.kind == ViewKind::Modal
+        || view.animated.opacity.unwrap_or(view.style.opacity) < INVISIBLE_OPACITY
+    {
+        return true;
+    }
+    let projection = projection.view(view);
+    let frame = CellBounds::new(
+        projection.bounds(Bounds::new(Point::default(), view.frame.size)),
+        cells,
+        area,
+    );
+    let content = match view.kind {
+        ViewKind::View | ViewKind::Text => view.component.is_some(),
+        ViewKind::Canvas => view.props.accessibility.label.is_some(),
+        ViewKind::Image => {
+            frame.right - frame.left >= MIN_IMAGE_CELLS.0
+                && frame.bottom - frame.top >= MIN_IMAGE_CELLS.1
+        }
+        _ => true,
+    };
+    if content {
+        return false;
+    }
+    if let Some((layout, text)) = &view.text
+        && let Some(layout) = layout.downcast::<CellLayout>()
+    {
+        for (index, row) in layout.rows.iter().enumerate() {
+            if row
+                .glyphs
+                .iter()
+                .all(|glyph| glyph.text.chars().all(char::is_whitespace))
+            {
+                continue;
+            }
+            let bounds = projection.bounds(Bounds::new(
+                text.origin + Point::new(Points::ZERO, cells.height() * index as f32),
+                nsh_core::Size::new(text.size.width, cells.height()),
+            ));
+            let top = CellBounds::new(bounds, cells, area).top;
+            if !rows.contains(&top) {
+                rows.push(top);
+            }
+            if rows.len() > 1 {
+                return true;
+            }
+        }
+    }
+    let offset = view
+        .scroll
+        .as_ref()
+        .map_or_else(Point::default, |scroll| scroll.origin());
+    let projection = projection.translated(Point::new(-offset.x, -offset.y));
+    view.children
+        .iter()
+        .all(|&child| rows.len() > 1 || text_rows(tree, child, projection, cells, area, rows))
 }
 
 fn hairline_fill(

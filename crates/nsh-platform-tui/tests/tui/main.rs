@@ -9,6 +9,7 @@ mod app;
 
 mod canvas;
 mod controls;
+mod decorations;
 mod focus_navigation;
 mod geometry;
 mod keyboard;
