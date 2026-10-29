@@ -87,6 +87,11 @@ message or a due timer (7, none between pastes).
   3.85 → 4.09 ms; first-frame totals were 127.3 → 124.5 ms. These noisy single runs establish unchanged
   engine work counts, not a speedup or a measurement of Java touch dispatch. Passive feedback reuses the root's
   touch tracker; observers are picked at finger-down and cancelled when a native gesture takes over.
+- Android, animated values (Pixel 10 Pro, 120 Hz, release-dev host, the gallery's Animations demo with its three loops,
+  `simpleperf stat` over 10 s, three runs each): the UI thread runs ~4.09 G instructions before setting the camera
+  distance only when it moves and ~2.99 G after (-27%), its CPU time ~2.22 → ~2.04 s; `Mounter.outputs` gets 1000+
+  values a frame there (ART allocates the array as a large object), every bound value of the page, moved or not.
+  RenderThread is unchanged (~18.2 G).
 - Android emulator (arm64, release): rebinding one gallery row while scrolling ~0.3–0.4ms (JS ~60µs); text costs per new
   text: `PrecomputedText` ~120µs, measure ~50µs, final layout reused. First gallery frame 20–50ms (noisy on the emulator).
 

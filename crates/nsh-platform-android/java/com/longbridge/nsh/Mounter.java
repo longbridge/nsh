@@ -1283,11 +1283,18 @@ final class Mounter {
         if (v instanceof TextBox) ((TextBox) v).setColor(false, 0);
     }
 
-    /** `perspective` as a camera distance (React Native's normalization). */
+    /**
+     * `perspective` as a camera distance (React Native's normalization), set
+     * only when it moves: `setCameraDistance` invalidates the view on every
+     * call, and animated values and transitions come here each frame with
+     * the distance unchanged.
+     */
     private void setPerspective(View v, float term) {
         if (term == 0) term = 0.00078125f;
-        float distance = -1 / term;
-        v.setCameraDistance(density * density * distance * (float) Math.sqrt(5));
+        float distance = Math.abs(density * density * (-1 / term) * (float) Math.sqrt(5));
+        // The view keeps it divided by the screen's dpi: equal within a hair.
+        if (Math.abs(Math.abs(v.getCameraDistance()) - distance) <= distance * 1e-5f) return;
+        v.setCameraDistance(distance);
     }
 
     /** Press feedback of a view: `delayLongPress`, `android_ripple`. */
