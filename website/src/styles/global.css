@@ -1200,7 +1200,14 @@ html[lang^="zh"] .toc__label { letter-spacing: 0.05em; }
 }
 /* The app at its real size, never scaled: a phone's width in the Mobile
    layout, the stage's width in the Desktop one (`demo-client.ts`). */
-.demo__stage .phone { --phone-scale: 1; max-width: 100%; }
+.demo__stage .phone { --phone-scale: 1; --phone-pad: 0px; border: 0; border-radius: 12px; background: none; box-shadow: none; }
+/* A desktop window takes the panel's whole width: apps lay out wide from
+   700 points (`wide()`), a panel is about 720. */
+.demo[data-layout="desktop"] .demo__stage { padding: 0; }
+.demo[data-layout="desktop"] .demo__stage .phone,
+.demo[data-layout="desktop"] .demo__stage .phone__screen { border-radius: 0; }
+/* The panel's bar names the file already. */
+.demo__stage .phone__bar { display: none; }
 
 .demo__code { max-height: 42rem; overflow: auto; }
 .demo__body > [role="tabpanel"]:not([data-active]) { display: none; }

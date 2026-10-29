@@ -191,8 +191,14 @@ every demo and is remembered:
 
 | Layout | Frame | Idiom | What the app has |
 | --- | --- | --- | --- |
-| Mobile | 390×844 points, the default | `phone` | touches; menus as sheets, held fingers |
-| Desktop | 1024×640 points, scaled to the column, the source below | `desktop` | a pointer; hover, right clicks, popups, keyboard |
+| Mobile | up to 390×844 points, the default | `phone` | touches; menus as sheets, held fingers |
+| Desktop | the column's width (up to 1024) × up to 900 points | `desktop` | a pointer; hover, right clicks, popups, keyboard |
+
+Panels show the app at its real size, never scaled, with Preview and Source as
+tabs: the frame is as wide as the column allows up to the layout's width, and
+once the app settles its height ends just below what it draws (a scroll
+view that fills the frame grows it by what is out of view)
+(`contentHeight` in `demo-client.ts`), so short demos leave no empty screen.
 
 The rules every demo follows, now and for the ones to come:
 
