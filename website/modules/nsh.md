@@ -226,7 +226,7 @@ function ErrorBoundary(props: {
 }): JSX.Element;
 ```
 
-Renders its children, or `fallback` once something under them throws: a component's body, a binding, an effect or an event handler. The part that failed is removed and the fallback shows in its place. `fallback(error, reset)` gets the thrown value and `reset`, which renders the children again; a `fallback` that takes no arguments is shown as it is. A failure goes to the nearest boundary above it, and one in a fallback to the boundary above that. Rust components use `catch_error` ([Error boundaries](../docs/reactivity.md#error-boundaries)).
+Renders its children, or `fallback` once something under them throws: a component's body, a binding, an effect or an event handler. The part that failed is removed and the fallback shows in its place. A function `fallback` is called as `fallback(error, reset)` with the thrown value and `reset`, which renders the children again, whatever parameters it declares; a `fallback` element is shown as it is. A failure goes to the nearest boundary above it, and one in a fallback to the boundary above that. Rust components use `catch_error` ([Error boundaries](../docs/reactivity.md#error-boundaries)).
 
 ```tsx
 import { ErrorBoundary, Text, View } from "nsh";

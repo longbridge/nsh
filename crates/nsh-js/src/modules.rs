@@ -208,7 +208,7 @@ const NSH: &[Item] = &[
         "ErrorBoundary",
         Export::Function(dom::error_boundary, 1),
         Ts::function(
-            "Its children, or `fallback` once something under them threw (a component's body, a\nbinding, an effect, a listener): what failed goes, and `fallback(error, reset)` shows the\nthrown value; `reset()` renders the children again. A fallback that takes no arguments\nis shown as is. What throws in the fallback goes to the boundary above.",
+            "Its children, or `fallback` once something under them threw (a component's body, a\nbinding, an effect, a listener): what failed goes, and `fallback(error, reset)` shows the\nthrown value; `reset()` renders the children again. A function fallback is always\ncalled so; an element is shown as is. What throws in the fallback goes to\nthe boundary above.",
             &[
                 "(props: { fallback: JSX.Element | ((error: unknown, reset: () => void) => JSX.Element); children?: JSX.Element }): JSX.Element",
             ],

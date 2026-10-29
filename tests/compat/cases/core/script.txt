@@ -375,6 +375,7 @@ tap id:case-core-error-boundary
 expect Around the boundary
 expect Risky ok
 expect Outer caught fallback of binding
+expect Rest caught binding
 tap id:break
 expect Caught binding
 absent Risky ok

@@ -3295,9 +3295,10 @@ pub(crate) fn catch_listener_failure(cx: *mut JsContext, id: NodeId) -> bool {
 
 /// `ErrorBoundary({ fallback, children })`: its children, or its fallback
 /// once something under them failed (a component's body, a binding, an
-/// effect, a listener). `fallback(error, reset)` gets the thrown value and
-/// what renders the children again; a fallback that is not a function of
-/// arguments is shown as is. What fails in the fallback goes to the
+/// effect, a listener). A function `fallback` is called with the thrown
+/// value and what renders the children again (`fallback(error, reset)`),
+/// whatever parameters it declares; any other fallback (an element) is
+/// shown as is. What fails in the fallback goes to the
 /// boundary above.
 ///
 /// A memo shows one or the other, reading the boundary's signal (`[error]`
@@ -3359,15 +3360,10 @@ unsafe extern "C" fn boundary_run(
                 qjs::JS_FreeValue(cx, error);
                 return fallback;
             }
-            let mut length = 0i32;
-            let l = qjs::JS_GetPropertyStr(cx, fallback, c"length".as_ptr());
-            qjs::JS_ToInt32(cx, &mut length, l);
-            qjs::JS_FreeValue(cx, l);
-            if length == 0 {
-                // An element to show, as children are.
-                qjs::JS_FreeValue(cx, error);
-                return fallback;
-            }
+            // Every function is called with what failed and the reset,
+            // whatever its parameters say (`(...args) => …` and defaults
+            // count none): one that takes no arguments returns its element
+            // all the same.
             let mut rdata = [failed];
             let reset =
                 qjs::JS_NewCFunctionData(cx, Some(boundary_reset), 0, 0, 1, rdata.as_mut_ptr());
@@ -3803,6 +3799,51 @@ mod tests {
         host.eval_script("body.js", "failBody = true; reset()")
             .unwrap();
         assert_eq!(texts(&host), ["outer caught body"]);
+    }
+
+    /// A function fallback is called with the error and the reset whatever
+    /// parameters it declares (`(...args)` and defaults count none); an
+    /// element is shown as is.
+    #[test]
+    fn a_function_fallback_gets_the_error_whatever_it_declares() {
+        let host = Host::new().unwrap();
+        host.eval_source(
+            r#"
+            import { mount, signal, ErrorBoundary } from "nsh";
+            import { element, insert, text, component } from "nsh:rt";
+            const fail = signal(false);
+            globalThis.fail = fail;
+            const Risky = () => {
+                const t = element("text");
+                insert(t, () => { if (fail()) throw new Error("boom"); return "ok"; });
+                return t;
+            };
+            mount(() => {
+                const v = element("view");
+                insert(v, component(ErrorBoundary, {
+                    fallback: (...args) => text(`rest ${args[0].message} ${typeof args[1]}`),
+                    get children() { return component(Risky, {}); },
+                }));
+                insert(v, component(ErrorBoundary, {
+                    fallback: (error = new Error("none")) => text(`default ${error.message}`),
+                    get children() { return component(Risky, {}); },
+                }));
+                insert(v, component(ErrorBoundary, {
+                    // An element, as compiled JSX passes one: made when read.
+                    get fallback() { return text("element"); },
+                    get children() { return component(Risky, {}); },
+                }));
+                return v;
+            });
+            "#,
+        )
+        .unwrap();
+        assert_eq!(texts(&host), ["ok", "ok", "ok"]);
+        host.eval_script("fail.js", "fail.set(true)").unwrap();
+        assert_eq!(
+            texts(&host),
+            ["rest boom function", "default boom", "element"]
+        );
     }
 
     /// A failure in a fallback goes to the boundary above; with no

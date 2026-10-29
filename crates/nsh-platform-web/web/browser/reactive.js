@@ -95,7 +95,9 @@ export function createReactive(invoke, live, values) {
     const memoize = value => typeof value === "function" ? computed(() => memoize(value())) : Array.isArray(value) ? value.map(memoize) : value;
     return computed(() => {
       const state = failed();
-      if (state) return untracked(() => typeof props.fallback === "function" && props.fallback.length ? props.fallback(state[0], () => failed.set(undefined)) : props.fallback);
+      // A function is called with the error and the reset whatever it
+      // declares (`(...args)` and defaults count none); an element shows.
+      if (state) return untracked(() => typeof props.fallback === "function" ? props.fallback(state[0], () => failed.set(undefined)) : props.fallback);
       return computed(() => {
         call(113, boundaryKey, failed);
         return untracked(() => memoize(props.children));

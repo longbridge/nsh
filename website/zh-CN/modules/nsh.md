@@ -226,7 +226,7 @@ function ErrorBoundary(props: {
 }): JSX.Element;
 ```
 
-渲染它的子元素；子元素下的代码抛出异常后（组件函数体、绑定、effect 或事件处理函数），改为渲染 `fallback`。失败的部分被移除，fallback 显示在原处。`fallback(error, reset)` 得到抛出的值和 `reset`，`reset` 重新渲染子元素；不带参数的 `fallback` 按原样显示。失败交给它上方最近的错误边界，fallback 中的失败交给再上一层的错误边界。Rust 组件使用 `catch_error`（[错误边界](../docs/reactivity.md#错误边界)）。
+渲染它的子元素；子元素下的代码抛出异常后（组件函数体、绑定、effect 或事件处理函数），改为渲染 `fallback`。失败的部分被移除，fallback 显示在原处。函数形式的 `fallback` 总是以 `fallback(error, reset)` 调用，得到抛出的值和 `reset`，`reset` 重新渲染子元素，与它声明了几个参数无关；元素形式的 `fallback` 按原样显示。失败交给它上方最近的错误边界，fallback 中的失败交给再上一层的错误边界。Rust 组件使用 `catch_error`（[错误边界](../docs/reactivity.md#错误边界)）。
 
 ```tsx
 import { ErrorBoundary, Text, View } from "nsh";
