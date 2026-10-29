@@ -59,6 +59,11 @@ use crate::{runtime::Platform, ui};
 /// (`nsh-macros` `native_module.rs`): the crate's UI set.
 const ENTRY: &str = "__nsh_native_module";
 
+/// The prefix of the function `#[native_components(<platform>)]` makes at
+/// the root of the app's crate (`nsh-macros` `native_components.rs`): the
+/// native components it registers on that platform.
+const COMPONENTS_ENTRY: &str = "__nsh_native_components_";
+
 /// The app of this command, if it has Rust crates ([`set_current`]).
 static CURRENT: std::sync::Mutex<Option<RustApp>> = std::sync::Mutex::new(None);
 
@@ -1232,6 +1237,13 @@ panic = \"abort\"
         } else {
             ("", ";")
         };
+        let (set_components, components_fn) = match components_platform(dir) {
+            Some(key) => (
+                format!("\n        {platform}::set_components(app_components);"),
+                self.app_components(&cfg, &platform, key),
+            ),
+            None => (String::new(), String::new()),
+        };
         write(
             &ws.join(dir).join("main.rs"),
             &format!(
@@ -1239,9 +1251,9 @@ panic = \"abort\"
                  //! components, on {lib}'s runner; no JS runtime.\n{subsystem}\n\
                  fn main(){ret} {{\n    \
                  #[cfg({os})]\n    {{\n        \
-                 {platform}::set_ui_sets({sets});\n        \
+                 {platform}::set_ui_sets({sets});{set_components}\n        \
                  {lib}::run_rust(app_root()){tail}\n    }}\n    \
-                 #[cfg(not({os}))]\n    {lib}::main(){tail}\n}}\n{}{}",
+                 #[cfg(not({os}))]\n    {lib}::main(){tail}\n}}\n{}{components_fn}{}",
                 self.app_sets(&cfg),
                 self.root_fn(&cfg, root),
             ),
@@ -1592,11 +1604,20 @@ opt-level = \"s\"
             ),
             _ => (String::new(), String::new()),
         };
+        // The desktops' standalone backends and iOS register the app's
+        // native components on every view they make.
+        let (set_components, components_fn) = match components_platform(dir) {
+            Some(key) => (
+                format!("\n    #[cfg({os})]\n    {platform}::set_components(app_components);"),
+                self.app_components(&cfg, &platform, key),
+            ),
+            None => (String::new(), String::new()),
+        };
         write(
             &ws.join(dir).join("main.rs"),
             &format!(
                 "//! The {name} {what} with `nsh/base` and the app's Rust components.\n{subsystem}\n\
-                 fn main(){exit} {{\n    #[cfg({os})]\n    {platform}::set_ui_sets({sets});{set_root}\n    {lib}::main()\n}}\n{}{root_fn}",
+                 fn main(){exit} {{\n    #[cfg({os})]\n    {platform}::set_ui_sets({sets});{set_components}{set_root}\n    {lib}::main()\n}}\n{}{components_fn}{root_fn}",
                 self.app_sets(&cfg)
             ),
         )
@@ -1971,6 +1992,32 @@ impl RustApp {
         code
     }
 
+    /// `app_components()`, for the generated code of the platform `key`
+    /// (`windows`; its crate `platform`, `nsh_platform_windows`), under
+    /// `cfg`: the native components each crate registers there, with the
+    /// entry `#[native_components(<key>)]` makes in it ([`COMPONENTS_ENTRY`]).
+    /// Each crate's call glob-imports it in a block, as [`Self::app_sets`]
+    /// does, over nsh's stand-in, which registers nothing: most crates have
+    /// no native components.
+    fn app_components(&self, cfg: &str, platform: &str, key: &str) -> String {
+        let entry = format!("{COMPONENTS_ENTRY}{key}");
+        let mut calls = String::new();
+        for krate in &self.crates {
+            calls.push_str(&format!(
+                "    {{\n        #[allow(unused_imports)]\n        use {}::*;\n        \
+                 {entry}(components); // the crate {} (nsh.json \"rust\")\n    }}\n",
+                krate.name(),
+                krate.package,
+            ));
+        }
+        format!(
+            "\n/// The app's native components on this platform: what `#[native_components({key})]` registers in its crates.\n\
+             {cfg}fn app_components(components: &{platform}::Components) {{\n{calls}}}\n\
+             \n// Without the entry: nsh's stand-in, which registers nothing.\n\
+             {cfg}#[allow(unused_imports)]\nuse nsh_core::element::__private::no_native_components as {entry};\n"
+        )
+    }
+
     /// `app_root()`, a Rust app's root (`nsh.json` `"root"`, `"theme"`,
     /// `"appearance"`, `"statusBar"`: a component of the first crate `"rust"` lists), for
     /// the generated code, under `cfg`.
@@ -1978,6 +2025,21 @@ impl RustApp {
         let krate = self.crates.first().map(AppCrate::name).unwrap_or_default();
         root_fn(cfg, &krate, root)
     }
+}
+
+/// The platform (`#[native_components(<platform>)]`) whose native
+/// components the generated crate `dir` registers: the desktops' standalone
+/// backends and iOS (`windows-host`, `windows-app`, `rust-windows`,
+/// `ios-host`, ...).
+fn components_platform(dir: &str) -> Option<&'static str> {
+    let platform = dir.strip_prefix("rust-").unwrap_or(dir);
+    ["windows", "macos", "linux", "ios"]
+        .into_iter()
+        .find(|key| {
+            platform
+                .strip_prefix(key)
+                .is_some_and(|rest| rest.is_empty() || rest == "-host" || rest == "-app")
+        })
 }
 
 /// The function of the generated code that makes the UI set of `krate`
@@ -3201,6 +3263,54 @@ panic = \"abort\"
                     "{dir}: {code}"
                 );
             }
+            // The desktops' standalone backends and iOS register each
+            // crate's native components, over one stand-in that registers
+            // nothing.
+            match super::components_platform(dir) {
+                Some(key) => {
+                    let platform = format!("nsh_platform_{key}");
+                    let set = format!("{platform}::set_components(app_components);");
+                    assert!(code.contains(&set), "{dir}: no {set:?} in\n{code}");
+                    let entry = format!("__nsh_native_components_{key}");
+                    assert!(
+                        code.contains(&format!(
+                            "fn app_components(components: &{platform}::Components) {{\n"
+                        )),
+                        "{dir}: {code}"
+                    );
+                    for (name, package) in
+                        [("app_charts", "charts"), ("app_app_storage", "app-storage")]
+                    {
+                        let call = format!(
+                            "    {{\n        #[allow(unused_imports)]\n        use {name}::*;\n        {entry}(components); // the crate {package} (nsh.json \"rust\")\n    }}\n"
+                        );
+                        assert!(code.contains(&call), "{dir}: no {call:?} in\n{code}");
+                    }
+                    assert_eq!(
+                        code.matches(&format!("no_native_components as {entry};"))
+                            .count(),
+                        1,
+                        "{dir}"
+                    );
+                }
+                None => assert!(!code.contains("set_components"), "{dir}: {code}"),
+            }
+        }
+        for (dir, key) in [
+            ("windows-host", Some("windows")),
+            ("windows-app", Some("windows")),
+            ("rust-windows", Some("windows")),
+            ("macos-app", Some("macos")),
+            ("rust-linux", Some("linux")),
+            ("linux-host", Some("linux")),
+            ("rust-ios", Some("ios")),
+            ("ios-host", Some("ios")),
+            ("ios-app", Some("ios")),
+            ("gpui-host", None),
+            ("android", None),
+            ("web", None),
+        ] {
+            assert_eq!(super::components_platform(dir), key, "{dir}");
         }
         // The describe program: the app's sets only, and nsh-core.
         let describe = read("describe/main.rs");

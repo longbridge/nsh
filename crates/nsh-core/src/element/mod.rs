@@ -94,7 +94,7 @@ macro_rules! decl {
 
 pub use nsh_macros::{
     Event, JsObject, PropEnum, Props, asset, assets, class, component, methods, module,
-    native_module,
+    native_components, native_module,
 };
 
 // The core's parts of `nsh_base`'s navigation and dialogs.
@@ -289,5 +289,82 @@ pub mod __private {
     /// is not at the crate's root (as [`no_native_module`]).
     pub fn native_module_not_at_root<R: NotAtRoot>() -> R {
         unreachable!("never compiles")
+    }
+
+    /// Stands in for the entry `#[native_components(…)]` makes for a
+    /// platform (`app::__nsh_native_components_windows`) when the app's
+    /// crate has none: a glob import of the crate in a block shadows it.
+    /// Most crates have no native components, so it registers nothing.
+    pub fn no_native_components<C>(_components: C) {}
+
+    /// Implemented by nothing: `#[native_components]` in a module other
+    /// than the crate's root fails with this message.
+    #[diagnostic::on_unimplemented(
+        message = "`#[native_components]` goes at the root of the crate (lib.rs)",
+        label = "nsh's generated hosts call the entry it makes there",
+        note = "move the function with `#[native_components(…)]` to the crate's lib.rs"
+    )]
+    pub trait NativeComponentsNotAtRoot {}
+
+    /// Stands in for `crate::__nsh_native_components_<platform>` when
+    /// `#[native_components]` is not at the crate's root (as
+    /// [`native_module_not_at_root`]).
+    pub fn native_components_not_at_root<C, R: NativeComponentsNotAtRoot>(_components: C) -> R {
+        unreachable!("never compiles")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::cell::RefCell;
+
+    // As the hosts nsh generates call a crate's entry (`nsh-cli`
+    // `rust_app.rs`, `app_components()`): NSH's stand-in here, a glob of
+    // the crate in a block below.
+    #[cfg(windows)]
+    use super::__private::no_native_components as __nsh_native_components_windows;
+    #[cfg(target_os = "linux")]
+    use super::__private::no_native_components as __nsh_native_components_linux;
+    #[cfg(target_os = "macos")]
+    use super::__private::no_native_components as __nsh_native_components_macos;
+
+    /// A crate without `#[native_components]`.
+    mod without {}
+
+    /// Calls this platform's entry, whichever is in scope.
+    macro_rules! register {
+        ($components:expr) => {
+            #[cfg(windows)]
+            __nsh_native_components_windows($components);
+            #[cfg(target_os = "linux")]
+            __nsh_native_components_linux($components);
+            #[cfg(target_os = "macos")]
+            __nsh_native_components_macos($components);
+        };
+    }
+
+    #[test]
+    #[cfg(any(windows, target_os = "linux", target_os = "macos"))]
+    fn the_hosts_register_a_crates_native_components_through_its_entry() {
+        // Not `components`: the glob below imports the function of that name.
+        let registered = RefCell::new(Vec::new());
+        {
+            // The entry at the crate's root (`lib.rs`), which calls the
+            // function named as its parameter.
+            #[allow(unused_imports)]
+            use crate::*;
+            register!(&registered);
+        }
+        assert_eq!(*registered.borrow(), [std::env::consts::OS]);
+        {
+            #[allow(unused_imports)]
+            use without::*;
+            register!(&registered);
+        }
+        assert_eq!(
+            *registered.borrow(),
+            [std::env::consts::OS],
+            "the stand-in registers nothing"
+        );
     }
 }

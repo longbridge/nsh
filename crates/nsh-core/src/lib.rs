@@ -116,3 +116,31 @@ pub use crate::{
         Decomposed, MAX_TRANSFORMS, Matrix, Transform, TransformKind, TransformOp, translation,
     },
 };
+
+// `#[native_components]` as an app's crate has it: at the crate's root, one
+// function per platform, named as the attribute's documentation names it
+// (as its parameter). `element`'s tests call them as nsh's generated hosts
+// do; a `RefCell` stands in for the platform's components.
+#[cfg(test)]
+#[element::native_components(windows)]
+fn components(components: &std::cell::RefCell<Vec<&'static str>>) {
+    components.borrow_mut().push("windows");
+}
+
+#[cfg(test)]
+#[element::native_components(macos)]
+fn components(components: &std::cell::RefCell<Vec<&'static str>>) {
+    components.borrow_mut().push("macos");
+}
+
+#[cfg(test)]
+#[element::native_components(linux)]
+fn components(components: &std::cell::RefCell<Vec<&'static str>>) {
+    components.borrow_mut().push("linux");
+}
+
+#[cfg(test)]
+#[element::native_components(ios)]
+fn components(components: &std::cell::RefCell<Vec<&'static str>>) {
+    components.borrow_mut().push("ios");
+}

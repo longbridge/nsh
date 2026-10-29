@@ -70,6 +70,28 @@ pub fn set_ui_sets(sets: Vec<nsh_core::element::Registry>) {
     *UI_SETS.write().unwrap_or_else(|e| e.into_inner()) = Some(sets);
 }
 
+/// The app's native components ([`set_components`]).
+static COMPONENTS: std::sync::RwLock<Option<fn(&Components)>> = std::sync::RwLock::new(None);
+
+/// Sets what registers the app's own native components (`nsh.json`
+/// `"rust"`, `#[native_components(ios)]`): every [`AppView`] calls it on
+/// its [`SurfaceOptions::components`] when it is made, so the app's
+/// elements find them as an embedding app's. The development host and
+/// release runner nsh generates for such an app call this before
+/// [`run_app`].
+pub fn set_components(register: fn(&Components)) {
+    *COMPONENTS.write().unwrap_or_else(|e| e.into_inner()) = Some(register);
+}
+
+/// Registers the app's native components ([`set_components`]) on
+/// `components`.
+fn register_app_components(components: &Components) {
+    let register = *COMPONENTS.read().unwrap_or_else(|e| e.into_inner());
+    if let Some(register) = register {
+        register(components);
+    }
+}
+
 /// The app's Rust root ([`set_root`]).
 #[cfg(feature = "dev")]
 static ROOT: std::sync::RwLock<Option<fn() -> nsh_engine::Root>> = std::sync::RwLock::new(None);

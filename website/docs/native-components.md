@@ -17,11 +17,12 @@ Because NSH renders with the system's own views, a native component is just one 
 there is no layering problem, it clips, scrolls and receives touches like a `<View>`.
 
 > [!NOTE]
-> Native components exist only where an app embeds NSH ([iOS](./ios.md), [Android](./android.md),
+> Native components are registered by the app that embeds NSH ([iOS](./ios.md), [Android](./android.md),
 > [macOS](./macos.md#embedding-in-a-mac-app), [Linux](./linux.md#embedding-in-a-gtk-app),
-> [Windows](./windows.md#embedding-in-a-win32-app)).
-> A packaged standalone app (`nsh package`) or a development host registers none, so the element renders an empty
-> view there (the name is logged once as unknown).
+> [Windows](./windows.md#embedding-in-a-win32-app)), or on Windows, macOS, Linux and iOS by the app's own Rust crate,
+> whose components the development host and the packaged app (`nsh package`) register
+> ([Registering from the app's crate](#registering-from-the-apps-crate)). A name nothing registered renders an empty
+> view (the name is logged once as unknown).
 
 ## How it fits together
 
@@ -602,6 +603,43 @@ view, and its container gets the touches. A component that returns a child windo
 hidden with its view, receives its own input, and sits above everything NSH draws (NSH content over it is hidden, as
 with web views). `ComponentContext::emit`, `set_size` (points) and `redraw` work from any thread. Register before
 `AppView::load`; a registry belongs to one `AppView` (and the views made from the same `AppOptions`).
+
+## Registering from the app's crate
+
+An app with a Rust crate of its own (`nsh.json` `"rust"`, [Rust](./rust.md)) registers native components in that
+crate, so they work in the hosts NSH builds for the app: the development host of `nsh run` and `nsh test --target`, and
+the app `nsh package` makes. A function with `#[native_components(<platform>)]` at the crate's root (`lib.rs`) registers
+them on that platform's `Components`, and the host calls it for every view it makes, as an embedding app registers on
+its `AppView`:
+
+```rust
+use std::rc::Rc;
+use nsh_core::prelude::*;
+
+#[native_components(windows)]
+fn components(components: &nsh_platform_windows::Components) {
+    use nsh_platform_windows::{ComponentContext, NativeComponent};
+    components.register(
+        "embed.badge",
+        Rc::new(|context: ComponentContext| -> Box<dyn NativeComponent> {
+            Box::new(Badge { on: false, context })
+        }),
+    );
+}
+```
+
+The platform is `windows`, `macos`, `linux` or `ios`, and the components are those of
+`nsh_platform_windows`, `nsh_platform_macos`, `nsh_platform_linux` or `nsh_platform_ios` (the sections above). The
+function compiles only on its platform, so a crate has one per platform it supports, each registering the same names,
+and depends on each platform's crate for that platform only:
+
+```toml
+[target.'cfg(windows)'.dependencies]
+nsh-platform-windows = { version = "0.1", default-features = false }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+nsh-platform-macos = { version = "0.1", default-features = false }
+```
 
 ## Rules and limits
 
