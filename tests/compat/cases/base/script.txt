@@ -1222,6 +1222,73 @@ covers [nsh/base] Collapsible
 covers [props] Collapsible.open
 covers [props] Collapsible.content
 
+# base-carousel
+tap id:case-base-carousel
+# A region named by the app, a stop of the keyboard focus; each slide a
+# group; the controls and the pagination items buttons. The content lays
+# the slides 200 wide out in a row, 10 apart, after a runway of a period
+# (3 slides and 3 gaps: 630) less a gap, as the carousel loops seamlessly;
+# each slide is there once.
+expect Index: 0
+expect Changes: 0
+prop id:carousel role region
+prop id:carousel accessibilityLabel Colors
+prop id:carousel focusable true
+prop id:slide-0 role group
+prop id:slide-0 accessibilityLabel 1 of 3
+frame id:slide-0 630 0 200 100
+frame id:slide-1 840 0 200 100
+frame id:slide-2 1050 0 200 100
+prop id:previous role button
+prop id:previous accessibilityLabel Previous slide
+prop id:next role button
+prop id:dots role group
+prop id:dots accessibilityLabel Choose a slide
+prop id:dot-0 role button
+prop id:dot-0 accessibilityState selected=true
+style id:dot-0 backgroundColor #00ff00ff
+prop id:dot-1 accessibilityState {}
+nostyle id:dot-1 backgroundColor
+listens id:dot-1 onPress
+# The indicator, below the first item: on the item of the slide shown.
+frame below:id:dot-0 0 0 10 10
+style below:id:dot-0 backgroundColor #ff0000ff
+# Looping: previous on the first slide goes to the last; the app follows
+# `onChange` and the item of the slide shown is selected.
+tap id:previous
+expect Changes: 1
+expect Index: 2
+prop id:dot-2 accessibilityState selected=true
+style id:dot-2 backgroundColor #00ff00ff
+prop id:dot-0 accessibilityState {}
+frame below:id:dot-0 20 0 10 10
+# Past the last, the first again.
+tap id:next
+expect Changes: 2
+expect Index: 0
+# A pagination item goes to its slide; its own slide's reports nothing.
+tap id:dot-1
+expect Changes: 3
+expect Index: 1
+frame below:id:dot-0 10 0 10 10
+tap id:dot-1
+expect Changes: 3
+covers [nsh/base] Carousel
+covers [nsh/base] CarouselContent
+covers [nsh/base] CarouselItem
+covers [nsh/base] CarouselPrevious
+covers [nsh/base] CarouselNext
+covers [nsh/base] CarouselPagination
+covers [nsh/base] CarouselPaginationItem
+covers [props] Carousel.index
+covers [props] Carousel.looping
+covers [props] CarouselPaginationItem.index
+covers [props] indicatorClass
+covers [props] indicatorStyle
+covers [props] selectedStyle
+covers [props] accessibilityLabel
+covers [events] onChange
+
 # base-collapsible-reveal
 # With `reveal`: the clipping region is there while closed, zero high, so
 # the gap (4) comes before it: the collapsible is 24 high.

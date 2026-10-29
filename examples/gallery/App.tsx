@@ -29,6 +29,7 @@ const primitives: DemoEntry[] = [
 const components: DemoEntry[] = [
   { name: "Accordion", detail: "An FAQ one answer at a time, settings sections open together, controls and an accordion inside", icon: "collapsible", screen: lazy(() => import("./demos/AccordionDemo").then((m) => m.AccordionDemo)) },
   { name: "Button", detail: "Kinds and sizes, icon and split buttons, progress, copying, hold to confirm", icon: "button", screen: lazy(() => import("./demos/ButtonDemo").then((m) => m.ButtonDemo)) },
+  { name: "Carousel", detail: "An onboarding stepped by its buttons, a product's photos with thumbnails, banners that roll on, cards three to a view, a ticker", icon: "image", screen: lazy(() => import("./demos/CarouselDemo").then((m) => m.CarouselDemo)) },
   { name: "Checkbox", detail: "A filter whose “Select all” shows a partial selection", icon: "checkbox", screen: lazy(() => import("./demos/Controls").then((m) => m.CheckboxDemo)) },
   { name: "Collapsible", detail: "Details under a summary, kept while collapsed", icon: "collapsible", screen: lazy(() => import("./demos/Controls").then((m) => m.CollapsibleDemo)) },
   { name: "ColorPicker", detail: "An area, sliders of RGB, HSL, HSB or OKLCH, a field and swatches", icon: "styles", screen: lazy(() => import("./demos/ColorPickerDemo").then((m) => m.ColorPickerDemo)) },

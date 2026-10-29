@@ -1,6 +1,6 @@
 ---
 title: nsh/base
-description: "Unstyled base components for an app's UI: buttons, links, checkboxes, radios, switches, tabs, toggles, toolbars, selects, comboboxes, calendars, date pickers, time fields, resizable panels, dockable workspaces, Markdown and HTML documents, a code editor, diffs, text inputs, navigation stacks and dialogs, system alert dialogs and the status bar of pages and dialogs."
+description: "Unstyled base components for an app's UI: buttons, links, carousels, checkboxes, radios, switches, tabs, toggles, toolbars, selects, comboboxes, calendars, date pickers, time fields, resizable panels, dockable workspaces, Markdown and HTML documents, a code editor, diffs, text inputs, navigation stacks and dialogs, system alert dialogs and the status bar of pages and dialogs."
 order: 2.5
 demo: ui-navigation
 ---
@@ -10,7 +10,7 @@ demo: ui-navigation
 `nsh/base` is the base component layer of an app's UI: unstyled components that own behavior, state, focus and
 accessibility, on every platform. It sits between the primitives (`nsh`, `nsh/mobile` and `nsh/desktop`) and the
 app's own component library, as `gpui-base` sits between `gpui` and a styled library in GPUI Kit (see
-[Modules](./index.md#three-layers)). It provides controls (`Button`, `Link`, `Checkbox`, `ColorPicker` with its `ColorArea`, `ColorSlider`, `ColorField`, `ColorSwatch` and `ColorEyeDropper`, `NumberInput`, `Radio` in a `RadioGroup`, `Slider`, `Switch`, `Tab` in `Tabs`, `Toggle` in a `ToggleGroup`, `Select`, `Combobox`, `Calendar`, `TimeField`, `DatePicker`), bars of controls (`Toolbar` with its `ToolbarGroup` and `ToolbarSeparator`), scroll bars of the app's own look (`Scrollbar`), regions that expand and collapse (`Collapsible`, and `Accordion` with its `AccordionItem`, `AccordionHeader`, `AccordionTrigger` and `AccordionPanel`), a progress bar (`Progress`), one-time codes (`OtpInput`), the pages of a set (`Pagination`), the parts charts are built from (`Plot` with `Line`, `Area`, `Bar`, `Grid`, `Pie` and `Arc`, in `nsh/base/plot`), workspaces the user arranges (`ResizablePanel`s in a
+[Modules](./index.md#three-layers)). It provides controls (`Button`, `Link`, `Checkbox`, `ColorPicker` with its `ColorArea`, `ColorSlider`, `ColorField`, `ColorSwatch` and `ColorEyeDropper`, `NumberInput`, `Radio` in a `RadioGroup`, `Slider`, `Switch`, `Tab` in `Tabs`, `Toggle` in a `ToggleGroup`, `Select`, `Combobox`, `Calendar`, `TimeField`, `DatePicker`), bars of controls (`Toolbar` with its `ToolbarGroup` and `ToolbarSeparator`), scroll bars of the app's own look (`Scrollbar`), slides shown one place at a time (`Carousel` with its `CarouselContent`, `CarouselItem`, `CarouselPrevious`, `CarouselNext`, `CarouselPagination` and `CarouselPaginationItem`), regions that expand and collapse (`Collapsible`, and `Accordion` with its `AccordionItem`, `AccordionHeader`, `AccordionTrigger` and `AccordionPanel`), a progress bar (`Progress`), one-time codes (`OtpInput`), the pages of a set (`Pagination`), the parts charts are built from (`Plot` with `Line`, `Area`, `Bar`, `Grid`, `Pie` and `Arc`, in `nsh/base/plot`), workspaces the user arranges (`ResizablePanel`s in a
 `ResizablePanelGroup`, and `DockArea`'s splits, tab groups and docks), documents of Markdown or HTML (`TextView`), a code editor (`Editor`) the changes between texts (`DiffView`) and tables of rows and columns (`Table` and its parts, `DataTable`), text inputs
 (`Input`), popups shown on top of everything (`Popover`, `Menu` and `ContextMenu` with their `MenuItem`,
 `MenuSeparator` and `Submenu`, `Tooltip`, `Sheet`), toasts (`Toast` in a `ToastStack`, their lifecycle in a `ToastManager`), navigation (a `NavStack` of `NavPage`s driven
@@ -26,7 +26,8 @@ from the `nsh-base` crate (`nsh_base::{button, dialog, …}`).
 ```rust tabs
 use nsh_base::{
     MarkdownExtension, MarkdownOptions, accordion, accordion_header, accordion_item, accordion_panel, accordion_trigger,
-    alert_dialog, button, checkbox, color_area, color_field, color_picker,
+    alert_dialog, button, carousel, carousel_content, carousel_item, carousel_next,
+    carousel_pagination, carousel_pagination_item, carousel_previous, checkbox, color_area, color_field, color_picker,
     color_slider, color_swatch, dialog, diff_view, dock_area, editor, link,
     calendar, combobox, date_picker, h_resizable, nav_page, nav_stack, radio, radio_group, resizable_panel, select, switch, tab, tabs, text_view, theme, time_field, toast, toast_stack, toggle, toggle_group, toolbar, toolbar_group, toolbar_separator, v_resizable,
 };
@@ -41,6 +42,13 @@ import {
   AccordionTrigger,
   AlertDialog,
   Button,
+  Carousel,
+  CarouselContent,
+  CarouselItem,
+  CarouselNext,
+  CarouselPagination,
+  CarouselPaginationItem,
+  CarouselPrevious,
   Checkbox,
   Collapsible,
   ColorArea,
@@ -114,6 +122,12 @@ import type {
   AlertDialogResult,
   AlertDialogRole,
   ButtonProps,
+  CarouselContentProps,
+  CarouselControlProps,
+  CarouselItemProps,
+  CarouselPaginationItemProps,
+  CarouselPaginationProps,
+  CarouselProps,
   CheckboxProps,
   CollapsibleProps,
   ColorAreaProps,
@@ -215,6 +229,7 @@ walkthroughs, see the [Navigation guide](../docs/navigation.md) and [Forms and k
 | [`Tab`](../elements/tabs.md), [`Tabs`](../elements/tabs.md) | `tab()`, `tabs()` | One tab of a tab list, and the list; the app owns which one is selected and shows its content. |
 | [`Toggle`](../elements/toggle.md), [`ToggleGroup`](../elements/toggle.md) | `toggle()`, `toggle_group()` | A button that is on or off, and a toolbar of them; the app owns which ones are pressed. |
 | [`Toolbar`](../elements/toolbar.md), [`ToolbarGroup`](../elements/toolbar.md), [`ToolbarSeparator`](../elements/toolbar.md) | `toolbar()`, `toolbar_group()`, `toolbar_separator()` | A bar of buttons, toggles and links: one stop of the keyboard focus whose arrow keys move along it; groups of related items and lines between them. |
+| [`Carousel`](../elements/carousel.md) and its parts | `carousel()`, `carousel_content()`, `carousel_item()`, `carousel_previous()`, `carousel_next()`, `carousel_pagination()`, `carousel_pagination_item()` | Slides shown one place at a time on the platform's own scrolling, with previous / next, a pagination, the keys and a seamless loop; the app owns `index`. |
 | [`Select`](../elements/select.md) | `select()` | One value from a list of items: a popup at the trigger on desktops, a sheet on phones; the app owns `value` and draws the trigger. |
 | [`Combobox`](../elements/combobox.md) | `combobox()` | One value or several (`multiple`) from a searchable list of items, as a select's; the app owns `value` and draws the trigger. |
 | [`Calendar`](../elements/calendar.md) | `calendar()` | A date or a range of dates picked from months of days, with month and year views and the keyboard; the app owns `value` and draws the items. |
@@ -296,6 +311,18 @@ screen readers announce and holds no value: the app tells each tab whether it is
 presses (`onPress`) and shows the selected section's content itself. The app's label is the tab's children, whose
 `group-selected:` classes follow it. The list's indicator (`indicatorClass`, `indicatorStyle`), an underline or a
 pill the app styles, sits on the selected tab and springs to the next one natively. See [Tabs](../elements/tabs.md).
+
+### Carousel
+
+Slides shown one place at a time (a product's photos, an onboarding, a banner, a row of cards). The content is a
+native scroll view that snaps to the slides' starts, so a finger, the wheel and the touchpad move them in the same
+frame as the pointer; when it rests the carousel reports the slide with `onChange`. Previous and next
+(`CarouselPrevious`, `CarouselNext`), the pagination (`CarouselPaginationItem`s in a `CarouselPagination`, with an
+indicator that springs to the slide shown) and the arrow keys move it natively, around the ends seamlessly with
+`looping`. The slide shown is the app's `index`, which the app's own timer advances for slides that move on by
+themselves (`onDragStart` / `onDragEnd`, `onFocus` / `onBlur` say when to wait); the look and every label are the
+app's. See
+[Carousel](../elements/carousel.md).
 
 ### Toggle and ToggleGroup
 
@@ -638,7 +665,7 @@ launch screen.
 
 - [Navigation guide](../docs/navigation.md).
 - [Forms and keyboard](../docs/forms-and-keyboard.md).
-- [Button](../elements/button.md), [Link](../elements/link.md), [Checkbox](../elements/checkbox.md), [Radio](../elements/radio.md), [Switch](../elements/switch.md), [Tabs](../elements/tabs.md), [Toggle](../elements/toggle.md), [Toolbar](../elements/toolbar.md), [Select](../elements/select.md), [Combobox](../elements/combobox.md), [Calendar](../elements/calendar.md), [TimeField](../elements/time-field.md), [DatePicker](../elements/date-picker.md), [Collapsible](../elements/collapsible.md), [Accordion](../elements/accordion.md), [Progress](../elements/progress.md), [Slider](../elements/slider.md), [ColorPicker](../elements/color-picker.md), [Scrollbar](../elements/scrollbar.md), [NumberInput](../elements/number-input.md), [OtpInput](../elements/otp-input.md), [Pagination](../elements/pagination.md), [Plot](../elements/plot.md), [NavStack](../elements/nav-stack.md), [Dialog](../elements/dialog.md),
+- [Button](../elements/button.md), [Link](../elements/link.md), [Checkbox](../elements/checkbox.md), [Radio](../elements/radio.md), [Switch](../elements/switch.md), [Tabs](../elements/tabs.md), [Toggle](../elements/toggle.md), [Toolbar](../elements/toolbar.md), [Carousel](../elements/carousel.md), [Select](../elements/select.md), [Combobox](../elements/combobox.md), [Calendar](../elements/calendar.md), [TimeField](../elements/time-field.md), [DatePicker](../elements/date-picker.md), [Collapsible](../elements/collapsible.md), [Accordion](../elements/accordion.md), [Progress](../elements/progress.md), [Slider](../elements/slider.md), [ColorPicker](../elements/color-picker.md), [Scrollbar](../elements/scrollbar.md), [NumberInput](../elements/number-input.md), [OtpInput](../elements/otp-input.md), [Pagination](../elements/pagination.md), [Plot](../elements/plot.md), [NavStack](../elements/nav-stack.md), [Dialog](../elements/dialog.md),
   [AlertDialog](../elements/alert-dialog.md), [TextView](../elements/text-view.md), [Editor](../elements/editor.md), [DiffView](../elements/diff-view.md), [Table](../elements/table.md), [DataTable](../elements/data-table.md),
   [Text](../elements/text.md) and
   [Input](../elements/input.md).
