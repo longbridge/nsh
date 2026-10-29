@@ -83,17 +83,17 @@ fn tab_enters_the_list_at_the_selected_tab_and_leaves_it_in_one_stop() {
     app.press_key("tab").unwrap();
     // Return presses the tab the focus is on: the selected one.
     app.press_key("enter").unwrap();
-    app.wait_for("presses:1").unwrap();
-    app.wait_for("selected:Two").unwrap();
+    app.wait_for("text:presses:1").unwrap();
+    app.wait_for("text:selected:Two").unwrap();
     // One more Tab leaves the list.
     app.press_key("tab").unwrap();
     app.press_key("enter").unwrap();
-    app.wait_for("pressed:after").unwrap();
+    app.wait_for("text:pressed:after").unwrap();
     // Shift+Tab comes back to the selected tab, not the last one.
     app.press_key("shift+tab").unwrap();
     app.press_key("enter").unwrap();
-    app.wait_for("presses:2").unwrap();
-    app.wait_for("selected:Two").unwrap();
+    app.wait_for("text:presses:2").unwrap();
+    app.wait_for("text:selected:Two").unwrap();
 }
 
 #[test]
@@ -102,27 +102,27 @@ fn arrows_move_and_select_wrapping_and_skipping_disabled_tabs() {
     app.press_key("tab").unwrap();
     app.press_key("tab").unwrap();
     app.press_key("right").unwrap();
-    app.wait_for("selected:Three").unwrap();
+    app.wait_for("text:selected:Three").unwrap();
     // Four is disabled: Right goes on to Five.
     app.press_key("right").unwrap();
-    app.wait_for("selected:Five").unwrap();
+    app.wait_for("text:selected:Five").unwrap();
     // Past the end, around to the first.
     app.press_key("right").unwrap();
-    app.wait_for("selected:One").unwrap();
+    app.wait_for("text:selected:One").unwrap();
     app.press_key("left").unwrap();
-    app.wait_for("selected:Five").unwrap();
+    app.wait_for("text:selected:Five").unwrap();
     app.press_key("left").unwrap();
-    app.wait_for("selected:Three").unwrap();
+    app.wait_for("text:selected:Three").unwrap();
     // Up and Down move as Left and Right do.
     app.press_key("down").unwrap();
-    app.wait_for("selected:Five").unwrap();
+    app.wait_for("text:selected:Five").unwrap();
     app.press_key("up").unwrap();
-    app.wait_for("selected:Three").unwrap();
-    app.wait_for("presses:7").unwrap();
+    app.wait_for("text:selected:Three").unwrap();
+    app.wait_for("text:presses:7").unwrap();
     // The focus moved with the selection: Return presses Three.
     app.press_key("enter").unwrap();
-    app.wait_for("presses:8").unwrap();
-    app.wait_for("selected:Three").unwrap();
+    app.wait_for("text:presses:8").unwrap();
+    app.wait_for("text:selected:Three").unwrap();
 }
 
 #[test]
@@ -131,12 +131,12 @@ fn home_and_end_go_to_the_first_and_last_enabled_tab() {
     app.press_key("tab").unwrap();
     app.press_key("tab").unwrap();
     app.press_key("end").unwrap();
-    app.wait_for("selected:Five").unwrap();
+    app.wait_for("text:selected:Five").unwrap();
     app.press_key("home").unwrap();
-    app.wait_for("selected:One").unwrap();
+    app.wait_for("text:selected:One").unwrap();
     // Home on the first tab moves nothing and reports nothing.
     app.press_key("home").unwrap();
-    app.wait_for("presses:2").unwrap();
+    app.wait_for("text:presses:2").unwrap();
 }
 
 #[test]
@@ -146,15 +146,15 @@ fn the_arrows_do_nothing_while_the_focus_is_outside_the_list() {
     app.press_key("right").unwrap();
     app.press_key("end").unwrap();
     app.wait(std::time::Duration::from_millis(50)).unwrap();
-    app.wait_for("selected:Two").unwrap();
-    app.wait_for("presses:0").unwrap();
+    app.wait_for("text:selected:Two").unwrap();
+    app.wait_for("text:presses:0").unwrap();
     // Leaving the list unbinds its keys again.
     app.press_key("tab").unwrap();
     app.press_key("tab").unwrap();
     app.press_key("left").unwrap();
     app.wait(std::time::Duration::from_millis(50)).unwrap();
-    app.wait_for("selected:Two").unwrap();
-    app.wait_for("presses:0").unwrap();
+    app.wait_for("text:selected:Two").unwrap();
+    app.wait_for("text:presses:0").unwrap();
 }
 
 /// Tabs without a list are stops of their own, as before.
@@ -181,7 +181,7 @@ fn a_tab_outside_a_list_is_a_stop_of_its_own() {
     app.press_key("tab").unwrap();
     app.press_key("tab").unwrap();
     app.press_key("enter").unwrap();
-    app.wait_for("pressed:second").unwrap();
+    app.wait_for("text:pressed:second").unwrap();
 }
 
 /// How the indicator harness lays its list out: no indicator.

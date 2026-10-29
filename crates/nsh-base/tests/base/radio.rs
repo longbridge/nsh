@@ -65,12 +65,12 @@ fn with_none_checked_tab_enters_at_the_first_radio_and_space_checks_it() {
     let mut app = start::<Plans>();
     app.press_key("tab").unwrap();
     app.press_key("space").unwrap();
-    app.wait_for("plan:Free").unwrap();
-    app.wait_for("changes:1").unwrap();
+    app.wait_for("text:plan:Free").unwrap();
+    app.wait_for("text:changes:1").unwrap();
     // A checked radio reports nothing.
     app.press_key("space").unwrap();
     app.wait(std::time::Duration::from_millis(50)).unwrap();
-    app.wait_for("changes:1").unwrap();
+    app.wait_for("text:changes:1").unwrap();
 }
 
 #[test]
@@ -78,18 +78,18 @@ fn arrows_move_and_check_wrapping_and_skipping_disabled_radios() {
     let mut app = start::<Plans>();
     app.press_key("tab").unwrap();
     app.press_key("down").unwrap();
-    app.wait_for("plan:Plus").unwrap();
+    app.wait_for("text:plan:Plus").unwrap();
     // Team is disabled: Down goes on to Enterprise.
     app.press_key("down").unwrap();
-    app.wait_for("plan:Enterprise").unwrap();
+    app.wait_for("text:plan:Enterprise").unwrap();
     // Past the end, around to the first.
     app.press_key("right").unwrap();
-    app.wait_for("plan:Free").unwrap();
+    app.wait_for("text:plan:Free").unwrap();
     app.press_key("up").unwrap();
-    app.wait_for("plan:Enterprise").unwrap();
+    app.wait_for("text:plan:Enterprise").unwrap();
     app.press_key("left").unwrap();
-    app.wait_for("plan:Plus").unwrap();
-    app.wait_for("changes:5").unwrap();
+    app.wait_for("text:plan:Plus").unwrap();
+    app.wait_for("text:changes:5").unwrap();
 }
 
 #[test]
@@ -98,13 +98,13 @@ fn the_group_is_one_stop_at_the_checked_radio() {
     app.press_key("tab").unwrap();
     app.press_key("down").unwrap();
     app.press_key("down").unwrap();
-    app.wait_for("plan:Enterprise").unwrap();
+    app.wait_for("text:plan:Enterprise").unwrap();
     // One Tab leaves the group, whatever radio the focus is on.
     app.press_key("tab").unwrap();
     app.press_key("enter").unwrap();
-    app.wait_for("after:true").unwrap();
+    app.wait_for("text:after:true").unwrap();
     // Shift+Tab comes back to the checked radio: Down from there wraps.
     app.press_key("shift+tab").unwrap();
     app.press_key("down").unwrap();
-    app.wait_for("plan:Free").unwrap();
+    app.wait_for("text:plan:Free").unwrap();
 }

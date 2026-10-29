@@ -27,7 +27,7 @@ test("shows the environment and previews the status bar", async () => {
     expect(app.texts()).toContain(text);
   }
   await app.press("Light");
-  await app.waitFor('foreground: "light"');
+  await app.waitFor('text:foreground: "light"');
   await app.press("label:Hide the status bar");
   // The preview's dialog shows the setting while it is open.
   await app.press("Preview");
