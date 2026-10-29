@@ -37,8 +37,10 @@ const KEY: Duration = Duration::from_millis(80);
 const KEY_LANDS: Duration = Duration::from_millis(600);
 /// A finger's moves, a display frame apart.
 const FRAME: Duration = Duration::from_millis(16);
-/// How far a finger moves in one frame at most, in points.
-const MOVE_STEP: f64 = 20.0;
+/// How far a finger moves in one frame on average, in points: a quick
+/// swipe's 2500 pt/s, so a gesture takes few frames, each a trip to the
+/// main thread.
+const MOVE_STEP: f64 = 40.0;
 /// How long a finger rests before it lifts at the end of a scroll, so the
 /// scroll view keeps no velocity (no fling after it).
 const REST: Duration = Duration::from_millis(120);

@@ -277,6 +277,9 @@ final class Native {
      * text and of the input's viewport, in points; sent while a built-in bar
      * replaces its scroll indicator.
      */
+    /** Keeps the virtual list rows holding views {@code ids} rendered wherever they scroll (a selection's ends); none lets go. */
+    static native void keepRendered(long handle, int[] ids);
+
     static native void inputScroll(long handle, int id, float y, float contentWidth, float contentHeight,
                                    float width, float height);
 
