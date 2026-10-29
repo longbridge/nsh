@@ -1,5 +1,5 @@
-//! What the popups of `nsh/base` share (`Popover`, `Menu`, `ContextMenu`,
-//! `Tooltip`, `Sheet`): their open state, controlled or not, and why it
+//! What the popups of `nsh/base` share (`Popover`, `HoverCard`, `Menu`,
+//! `ContextMenu`, `Tooltip`, `Sheet`): their open state, controlled or not, and why it
 //! changed. They show their content in the core's overlays
 //! (`nsh_core::element::overlay`), which place it and report presses outside,
 //! Escape and the back button; deciding to close is theirs. A sheet comes
@@ -38,8 +38,11 @@ pub enum OpenChangeReason {
     /// An item was chosen (a menu's).
     Select,
     /// The pointer rested on its trigger, or left or pressed it (a
-    /// tooltip's).
+    /// tooltip's); left its trigger and itself (a hover card's).
     Hover,
+    /// The keyboard focus came to its trigger, or left it (a hover
+    /// card's).
+    Focus,
     /// A finger was held on its trigger (a context menu's on touch
     /// screens).
     LongPress,
@@ -180,8 +183,8 @@ impl StateLooks {
     }
 }
 
-/// A popup's presence (`Popover`'s, a desktop menu's and its submenus',
-/// `Tooltip`'s), as a toast's `transitionStatus` and Base UI's
+/// A popup's presence (`Popover`'s, `HoverCard`'s, a desktop menu's and
+/// its submenus', `Tooltip`'s), as a toast's `transitionStatus` and Base UI's
 /// `data-starting-style` / `data-ending-style`: opened, it is mounted with
 /// its starting look until its first display frame, so the app's
 /// `transition-*` classes run its entrance; closed, it stays mounted with

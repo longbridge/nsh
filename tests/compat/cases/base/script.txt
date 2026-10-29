@@ -3415,3 +3415,49 @@ expect BubbleMenu
 covers [props] RichEditor.bubbleMenu
 expect CellA
 expect CellD
+# base-hover-card
+tap id:case-base-hover-card
+# `defaultOpen`: open at first; a press outside closes it.
+expect OwnCard
+tap text:Elsewhere
+absent OwnCard
+# A phone has no pointer to rest: a press on the trigger opens it, above
+# the trigger (20, 300), 6 points away, lined up by its start but kept 30
+# points from the edge; the app's class and style.
+tap id:mention
+expect AdaCard
+expect Log: card true triggerPress
+expect Life: card open
+expect Side: top
+frame parent:text:AdaCard 30 254 120 40
+style parent:text:AdaCard backgroundColor #123456ff
+# The trigger again closes it.
+tap id:mention
+absent AdaCard
+expect Log: card false triggerPress
+expect Life: card closed
+# A press outside closes it, and so do Escape and back.
+tap id:mention
+expect AdaCard
+tap text:Elsewhere
+absent AdaCard
+expect Log: card false pressOutside
+tap id:mention
+expect AdaCard
+event text:AdaCard onCancel
+absent AdaCard
+expect Log: card false cancel
+covers [nsh/base] HoverCard
+covers [props] HoverCard.open
+covers [props] HoverCard.defaultOpen
+covers [props] HoverCard.placement
+covers [props] HoverCard.align
+covers [props] HoverCard.offset
+covers [props] HoverCard.margin
+covers [props] HoverCard.popupClass
+covers [props] HoverCard.popupStyle
+covers [props] HoverCard.trigger
+covers [events] HoverCard.onOpenChange
+covers [events] HoverCard.onOpen
+covers [events] HoverCard.onClose
+covers [events] HoverCard.onPosition

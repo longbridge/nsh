@@ -112,6 +112,7 @@ and take their look from the app.
 | `<DiffView>` | `nsh_base::diff_view()` | The changes between two texts or of a patch, split or unified | [DiffView](./diff-view.md) |
 | `<DockArea>` | `nsh_base::dock_area()` | A workspace of splits, tab groups and edge docks the user arranges | [Dock](./dock.md) |
 | `<Editor>` | `nsh_base::editor()` | A code editor with highlighting, several carets, folding and search | [Editor](./editor.md) |
+| `<HoverCard>` | `nsh_base::hover_card()` | A preview of what its trigger points at, while the pointer rests on it | [HoverCard](./hover-card.md) |
 | `<Input>` | `nsh_base::input()` | The native text input (UITextField or UITextView / EditText) | [Input](./input.md) |
 | `<Link>` | `nsh_base::link()` | A press target that opens a page, a site or a route of the app | [Link](./link.md) |
 | `<Menu>`, `<ContextMenu>`, `<MenuItem>`, `<MenuSeparator>`, `<Submenu>` | `nsh_base::menu()`, ... | Menus: popups with cascading submenus on desktops, sheets on phones | [Menu](./menu.md) |

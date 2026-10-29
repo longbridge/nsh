@@ -3,7 +3,7 @@
 //! controls (`Button`, a link (`Link`), `Checkbox`, a color picker: `ColorPicker` and its parts, `NumberInput`, `Radio` in a
 //! `RadioGroup`, `Slider`, `Switch`, `Toggle` in a `ToggleGroup`, a bar of them and of buttons and links (`Toolbar`, `ToolbarGroup`, `ToolbarSeparator`), a scroll bar of the app's own look (`Scrollbar`), `Tab` in `Tabs`, `Select`, `Combobox`, a one-time code: `OtpInput`), the pages of a set (`Pagination`), a progress bar (`Progress`), disclosure (`Collapsible`, `Accordion` and its parts),
 //! the parts of charts (`plot`: `nsh/base/plot`), navigation (stacks and pages), dialogs, popups on the core's overlays
-//! (`Popover`, `Menu`, `ContextMenu`, `Tooltip`, `Sheet`), a code editor
+//! (`Popover`, `HoverCard`, `Menu`, `ContextMenu`, `Tooltip`, `Sheet`), a code editor
 //! (`Editor`), the changes between two texts (`DiffView`), tables over any number of rows and columns (`DataTable`) and static tables
 //! with a table's semantics (`Table` and its parts), toasts (`Toast`,
 //! `ToastStack`, `ToastManager`), text input (`Input`), the system's
@@ -29,6 +29,7 @@ mod date_picker;
 mod diff;
 pub mod dock;
 pub mod editor;
+mod hover_card;
 mod keys;
 mod link;
 mod listbox;
@@ -126,6 +127,7 @@ pub use crate::{
         EditorSearch, EditorSearchResult, EditorSelection, EditorStyles, EditorTextPressEvent,
         EditorToken, editor,
     },
+    hover_card::{HoverCard, HoverCardElement, HoverCardEvent, HoverCardProps, hover_card},
     link::{Link, LinkElement, LinkEvent, LinkOpenWith, LinkProps, link},
     menu::{
         ContextMenu, ContextMenuElement, ContextMenuProps, Menu, MenuElement, MenuEvent, MenuItem,
@@ -246,8 +248,8 @@ pub mod parts {
         Accordion, AccordionHeader, AccordionItem, AccordionPanel, AccordionTrigger, AlertDialog,
         Button, Calendar, Checkbox, Collapsible, ColorArea, ColorEyeDropper, ColorField,
         ColorPicker, ColorSlider, ColorSwatch, Combobox, ContextMenu, DataTable, DatePicker,
-        DiffView, DockArea, Editor, Link, Menu, MenuItem, MenuSeparator, NumberInput, OtpInput,
-        Pagination, Popover, Progress, Radio, RadioGroup, ResizablePanel, ResizablePanelGroup,
+        DiffView, DockArea, Editor, HoverCard, Link, Menu, MenuItem, MenuSeparator, NumberInput,
+        OtpInput, Pagination, Popover, Progress, Radio, RadioGroup, ResizablePanel, ResizablePanelGroup,
         Scrollbar, Select, Sheet, Slider, Submenu, Switch, Tab, Table, TableBody, TableCaption,
         TableCell, TableFooter, TableHead, TableHeader, TableRow, Tabs, TextView, TimeField, Toast,
         ToastStack, Toggle, ToggleGroup, Toolbar, ToolbarGroup, ToolbarSeparator, Tooltip, plot,
@@ -273,7 +275,7 @@ pub mod parts {
 
     /// The controls, popups, toasts and dialogs every app may use: buttons,
     /// links, checkboxes, color pickers, radios, switches, toggles, toolbars, sliders, scroll bars, number inputs, one-time code inputs, paginations, selects, comboboxes, tabs, collapsibles, accordions, progress,
-    /// menus, popovers, sheets, tooltips, toasts and system alerts.
+    /// menus, popovers, hover cards, sheets, tooltips, toasts and system alerts.
     pub fn core(registry: &mut Registry) {
         registry
             .register::<Accordion>()
@@ -289,6 +291,7 @@ pub mod parts {
             .register::<MenuSeparator>()
             .register::<Submenu>()
             .register::<Popover>()
+            .register::<HoverCard>()
             .register::<Sheet>()
             .register::<Tooltip>()
             .register::<Calendar>()
@@ -425,6 +428,7 @@ mod tests {
                 "DiffView",
                 "DockArea",
                 "Editor",
+                "HoverCard",
                 "Link",
                 "Menu",
                 "MenuItem",

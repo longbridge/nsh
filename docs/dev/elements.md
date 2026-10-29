@@ -352,7 +352,7 @@ Text, styles, scrolling and lists, animation, canvases and images have their own
 ## Overlays
 
 `<Overlay>` (`nsh`; Rust `overlay()`) shows its children on top of the root view it is in: the surface, or the
-dialog around it (`Modal`). It is the one mechanism popups are built on (`nsh/base`'s `Popover`, `Menu`,
+dialog around it (`Modal`). It is the one mechanism popups are built on (`nsh/base`'s `Popover`, `HoverCard`, `Menu`,
 `ContextMenu`, `Tooltip`, `Sheet`: `components.md`); it draws nothing and closes nothing itself.
 
 - **Where it stays and where it shows** (`core/overlay.rs`): the node stays its parent's child for everything but its

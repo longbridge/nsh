@@ -57,7 +57,7 @@ crates/
                        moving, fixed columns; `data_table/`, docs/dev/data-table.md), `RichEditor`'s headless kernel after ProseMirror
                        (schema-defined documents, steps, transactions, states, commands, history, formats; `rich_editor/`,
                        docs/dev/rich-editor.md),
-                       the popups on the core's overlays (`Popover`, `Menu` / `ContextMenu` / `MenuItem` / `MenuSeparator` / `Submenu`,
+                       the popups on the core's overlays (`Popover`, `HoverCard`, `Menu` / `ContextMenu` / `MenuItem` / `MenuSeparator` / `Submenu`,
                        `Tooltip`, `Sheet`; presented per device: docs/dev/components.md "Popups"), written in Rust (the navigation and `Dialog` in `nsh-js`); JS face and declarations made from their specs;
                        the theme (`theme.rs`: shadcn/ui's tokens and their defaults, `neutral`, read from shadcn's `cssVars` theme
                        files, which the core keeps as design tokens and no component of `nsh-base` draws with)

@@ -14,6 +14,7 @@ mod editor_completion;
 mod editor_definition;
 mod editor_diagnostics;
 mod editor_languages;
+mod hover_card;
 mod link;
 mod menu;
 mod number_input;
