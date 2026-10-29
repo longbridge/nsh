@@ -301,10 +301,11 @@ that box while text keeps terminal glyphs; vertical text stacks reserve one Cell
 so contraction reduces quantized gaps without collapsing two labels onto one row. A following inset
 starts below already-painted sibling text. Ordinary descendants remain clipped by inherited border limits. Scroll content
 keeps its offset and clips rather than moving back into the viewport. A view's own text, field and canvas use
-its inner Cell rect. `overflow: hidden` clips descendants to that rect and masks rounded corners. A box with
-only one row, or two rows holding content, uses side bars; an empty two-row box keeps its closed border when no sibling text or content is drawn through it. A box
-with only one or two columns omits vertical strokes, preserving
-space for labels and tiny value indicators. Borders are straight single lines whatever their radii; radii shape
+its inner Cell rect. `overflow: hidden` clips descendants to that rect and masks rounded corners. A border is
+drawn whole or not at all: each drawn side owns a Cell, and a box holding content keeps one row and one column
+between them, so a one- or two-row box with content (a chip, a compact button) draws no border and its content
+keeps the Cells the layout gave it; an empty two-row box keeps its closed border when no sibling text or content
+is drawn through it. Borders are straight single lines whatever their radii; radii shape
 only fill coverage and `overflow: hidden` clips. A button draws no border (the terminal look below).
 A childless plain View fill thinner than half a Cell draws `─` or `│` in its fill's palette color (the
 Terminal look below). A fill at exactly half a Cell is a solid leaf. When both dimensions are thin, the longer
@@ -367,10 +368,13 @@ Decorations are plain, and each is a documented Decorative feature:
 - **Borders** are straight single lines (`┌─┐`, never `╭╮`) in their palette color: neutral border colors read
   dim, accent ones (an invalid field's red) keep their accent.
 - **Buttons** read `[ label ]`. A button is a pressable view (role `button` or `imagebutton`, or no role and press
-  handlers) whose text sits on one Cell row; other roles (link, tab, checkbox, radio, switch, menu item, ...) keep
+  handlers) that the app drew as a box, with a border or an opaque fill unlike the fill it sits on, and whose
+  text sits on one Cell row. List items without a box (sidebar and watchlist rows) and selected or checked views,
+  which are reversed, have no brackets; other roles (link, tab, checkbox, radio, switch, menu item, ...) keep
   their own look, and a pressable with several rows of text or other content (a field, an image, a labeled canvas)
-  keeps the app's box. The brackets take the button's own Cells, one Cell from the first and last glyph of its
-  text, both or neither: a label flush with its box stays bare. The button draws no border or fill.
+  keeps the app's box. The label stays in the Cells the layout gave it; the brackets take the button's own Cells,
+  one Cell from the first and last glyph of its text, both or neither: a label flush with its box stays bare. The
+  button draws no border or fill.
 - **Icons and decorative images** are not drawn: canvases with role `image` or without an accessibility label, and
   image placeholders narrower than 3 Cells or shorter than 2. A button whose content is only icons shows its
   accessibility label as `[ label ]` on its box's middle row, cut with `…` to the box (`[L…]`).
@@ -744,7 +748,7 @@ permit clipboard writes; `nsh test` uses memory and never writes to the machine'
 | View fills | No color: opaque fills clear the Cells they cover to the terminal background; childless solid leaves reversed in their palette color; translucent fills nothing |
 | Opacity | Ignored, except that a view below 3% draws nothing |
 | Selected, checked and focused views | Reversed over their Cell box; focused fields show the terminal cursor |
-| Borders | Decorative: straight single lines in per-side palette colors over a reserved inner Cell rect; compact boxes omit horizontal or vertical strokes to keep room for content |
+| Borders | Decorative: straight single lines in per-side palette colors over a reserved inner Cell rect, drawn whole or not at all; boxes without room for a whole border around their content draw none |
 | Buttons | Decorative: `[ label ]` in the button's own Cells around its one row of text, or its accessibility label when it shows only icons; no border or fill |
 | Icons and decorative images | Decorative: canvases with role `image` or no accessibility label and image placeholders under 3 × 2 Cells are not drawn |
 | Outlines, including control focus outlines | Left out; focus is the reversed box |

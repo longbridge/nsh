@@ -24,7 +24,6 @@ use crate::{
 };
 
 const COMPACT_HEIGHT_CELLS: f32 = 1.5;
-const MIN_BORDERED_EXTENT: i32 = 3;
 const HAIRLINE_CELL_FRACTION: f32 = 0.5;
 /// Image placeholders smaller than this, in Cells, are decorative and not drawn.
 const MIN_IMAGE_CELLS: (i32, i32) = (3, 2);
@@ -87,6 +86,9 @@ struct Painter<'a> {
     cells: CellSize,
     scheme: ColorScheme,
     focused: Option<NodeId>,
+    /// The opaque fill of the nearest view drawn so far that has one: what
+    /// the app drew the current view on.
+    background: Option<nsh_core::Color>,
 }
 
 /// Below this opacity, multiplied through its ancestors, a view draws
@@ -124,6 +126,7 @@ pub(crate) fn draw(
         cells,
         scheme,
         focused,
+        background: None,
     };
     painter.view(ROOT_ID, Projection::IDENTITY, clip, 1.0, true, None);
     let modals = painter.tree.modals.clone();
@@ -148,7 +151,14 @@ impl Painter<'_> {
         let text_parent = horizontal_text_parent(self.tree, id, parent);
         let sibling_content =
             border_has_sibling_content(self.tree, id, parent, self.cells, self.area);
-        let button = button_label(self.tree, id, parent, self.cells, self.area);
+        let button = button_label(
+            self.tree,
+            id,
+            parent,
+            self.cells,
+            self.area,
+            self.background,
+        );
         let Some(view) = self.tree.get_mut(id) else {
             return;
         };
@@ -348,22 +358,23 @@ impl Painter<'_> {
             .border_color
             .map_or(view.style.borders.colors, |color| [color; 4]);
         // A button reads `[ label ]`: no border or fill around it.
-        let sides = [widths.top, widths.right, widths.bottom, widths.left]
-            .map(|width| width > Points::ZERO && button.is_none());
-        let has_content = view.kind != ViewKind::View
-            || !view.children.is_empty()
-            || view.component.is_some()
-            || sibling_content;
         let sides = std::array::from_fn::<_, 4, _>(|i| {
-            let extent = if i % 2 == 0 {
-                bounds.bottom - bounds.top
-            } else {
-                bounds.right - bounds.left
-            };
-            let has_room =
-                extent >= MIN_BORDERED_EXTENT || (i % 2 == 0 && extent == 2 && !has_content);
-            sides[i] && !colors[i].is_transparent() && has_room
+            [widths.top, widths.right, widths.bottom, widths.left][i] > Points::ZERO
+                && !colors[i].is_transparent()
+                && button.is_none()
         });
+        let content = i32::from(
+            view.kind != ViewKind::View
+                || !view.children.is_empty()
+                || view.component.is_some()
+                || sibling_content,
+        );
+        // A border is drawn whole or not at all: each drawn side owns a Cell,
+        // and content keeps a row and a column between them.
+        let room = bounds.bottom - bounds.top
+            >= i32::from(sides[0]) + i32::from(sides[2]) + content
+            && bounds.right - bounds.left >= i32::from(sides[1]) + i32::from(sides[3]) + content;
+        let sides = sides.map(|side| side && room);
         let inner = CellBounds {
             left: bounds.left + i32::from(sides[3]),
             top: bounds.top + i32::from(sides[0]),
@@ -467,6 +478,14 @@ impl Painter<'_> {
             _ => false,
         };
         let visible_drawn = !visible.is_empty() && opacity >= INVISIBLE_OPACITY && !decorative;
+        let outer_background = self.background;
+        let own_fill = view
+            .animated
+            .background
+            .unwrap_or(view.style.background_color);
+        if own_fill.0 & 255 == 255 {
+            self.background = Some(own_fill);
+        }
         if visible_drawn {
             let fill = if button.is_some() {
                 nsh_core::Color::TRANSPARENT
@@ -657,6 +676,7 @@ impl Painter<'_> {
         for (position, cell) in clipped_corners {
             self.buffer[position] = cell;
         }
+        self.background = outer_background;
         if visible_drawn && let Some(button) = button {
             self.brackets(visible, button, own_geometry);
         }
@@ -744,15 +764,19 @@ impl Painter<'_> {
 }
 
 /// What a button shows between brackets: a pressable view (role button, or no
-/// role and press handlers) whose text sits on one row, or whose content is
-/// only icons and which has an accessibility label. Other content (fields,
-/// labeled canvases, images, native components) keeps the app's box.
+/// role and press handlers) that the app drew as a box (a border, or an opaque
+/// fill unlike the `background` it sits on), whose text sits on one row, or
+/// whose content is only icons and which has an accessibility label. List
+/// items without a box, selected or checked views (shown reversed) and other
+/// content (fields, labeled canvases, images, native components) keep their
+/// look.
 fn button_label(
     tree: &Mounter,
     id: NodeId,
     projection: Projection,
     cells: CellSize,
     area: Rect,
+    background: Option<nsh_core::Color>,
 ) -> Option<ButtonLabel> {
     let view = tree.get(id)?;
     let pressable = match view.props.accessibility.role {
@@ -760,7 +784,24 @@ fn button_label(
         AccessibilityRole::None => nsh_core::input::has_press(view.events),
         _ => false,
     };
-    if !pressable {
+    let state = &view.props.accessibility.state;
+    if !pressable || state.selected || state.checked == Some(Checked::True) {
+        return None;
+    }
+    let border = view
+        .animated
+        .border_color
+        .map_or(view.style.borders.colors, |color| [color; 4]);
+    let widths = &view.style.borders.widths;
+    let bordered = [widths.top, widths.right, widths.bottom, widths.left]
+        .iter()
+        .zip(border)
+        .any(|(&width, color)| width > Points::ZERO && !color.is_transparent());
+    let fill = view
+        .animated
+        .background
+        .unwrap_or(view.style.background_color);
+    if !bordered && (fill.0 & 255 < 255 || Some(fill) == background) {
         return None;
     }
     let mut rows = Vec::new();

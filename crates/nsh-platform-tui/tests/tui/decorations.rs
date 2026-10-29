@@ -63,8 +63,17 @@ fn borders_are_straight_single_lines_in_their_palette_color() {
 
 #[component]
 fn Buttons() -> impl IntoElement {
+    let raised = nsh_core::color::rgb(0x24262a);
+    let row = || {
+        view()
+            .w(px(80.0))
+            .h(px(16.0))
+            .px(px(16.0))
+            .on_press(|_: &()| {})
+    };
     view()
         .flex_1()
+        .bg(nsh_core::color::rgb(0x0c0d0f))
         .child(
             nsh_base::button()
                 .w(px(80.0))
@@ -78,14 +87,7 @@ fn Buttons() -> impl IntoElement {
                 .on_press(|_: &()| {})
                 .child(text("Buy")),
         )
-        .child(
-            view()
-                .w(px(80.0))
-                .h(px(16.0))
-                .px(px(16.0))
-                .on_press(|_: &()| {})
-                .child(text("Sell")),
-        )
+        .child(row().bg(raised).child(text("Sell")))
         .child(
             view()
                 .w(px(80.0))
@@ -97,27 +99,16 @@ fn Buttons() -> impl IntoElement {
                 .child(text("details")),
         )
         .child(
-            view()
-                .w(px(80.0))
-                .h(px(16.0))
-                .px(px(16.0))
+            row()
+                .border_1()
                 .role(AccessibilityRole::Checkbox)
-                .on_press(|_: &()| {})
                 .child(text("Check")),
         )
+        .child(row().px(px(0.0)).border_1().child(text("Flush")))
         .child(
-            view()
-                .w(px(80.0))
-                .h(px(16.0))
-                .on_press(|_: &()| {})
-                .child(text("Flush")),
-        )
-        .child(
-            view()
-                .w(px(80.0))
-                .h(px(16.0))
+            row()
                 .px(px(24.0))
-                .on_press(|_: &()| {})
+                .bg(raised)
                 .child(
                     view()
                         .absolute()
@@ -128,18 +119,26 @@ fn Buttons() -> impl IntoElement {
                 )
                 .child(text("Nav")),
         )
+        .child(row().child(text("Item")))
+        .child(
+            row()
+                .bg(raised)
+                .accessibility_state(super::app::selected())
+                .child(text("Chosen")),
+        )
+        .child(row().bg(nsh_core::color::rgb(0x0c0d0f)).child(text("Same")))
 }
 
 #[test]
-fn a_pressable_with_one_row_of_text_reads_as_a_bracketed_label() {
+fn a_boxed_pressable_with_one_row_of_text_reads_as_a_bracketed_label() {
     let (mut view, rx) = surface();
-    let mut terminal = Terminal::new(TestBackend::new(20, 10)).unwrap();
+    let mut terminal = Terminal::new(TestBackend::new(20, 12)).unwrap();
     view.load(App::Rust(Root::new::<Buttons>(|| ()))).unwrap();
-    draw_until(&mut view, &mut terminal, &rx, "Flush");
+    draw_until(&mut view, &mut terminal, &rx, "Same");
     let buffer = terminal.backend().buffer();
-    let lines: Vec<_> = (0..10).map(|y| row(buffer, y)).collect();
-    // The two-row bordered button: brackets in its own Cells, no side bars,
-    // no fill.
+    let lines: Vec<_> = (0..12).map(|y| row(buffer, y)).collect();
+    // The two-row bordered button: brackets in its own Cells around the label
+    // where the layout put it, no side bars, no fill.
     assert!(
         lines[0..2].iter().any(|line| line == "[ Buy ]"),
         "{lines:?}"
@@ -149,7 +148,7 @@ fn a_pressable_with_one_row_of_text_reads_as_a_bracketed_label() {
         "{lines:?}"
     );
     assert!((0..10).all(|x| !buffer[(x, 0)].modifier.contains(Modifier::REVERSED)));
-    assert_eq!(lines[2], "[ Sell ]", "a pressable without a role");
+    assert_eq!(lines[2], "[ Sell ]", "a raised fill is a box");
     assert_eq!(
         lines[3], "┌────────┐",
         "two rows of text keep the app's box"
@@ -159,10 +158,19 @@ fn a_pressable_with_one_row_of_text_reads_as_a_bracketed_label() {
         "{lines:?}"
     );
     assert_eq!(lines[6], "  Check", "other roles keep their own look");
-    assert_eq!(lines[7], "Flush", "no room for both brackets");
+    assert_eq!(
+        lines[7], "Flush",
+        "no room for both brackets, nor for a border"
+    );
     assert_eq!(
         lines[8], "│[ Nav ]",
         "brackets go around the text, not the accent"
+    );
+    assert_eq!(lines[9], "  Item", "a list item without a box");
+    assert_eq!(lines[10], "  Chosen", "selection is reverse, not brackets");
+    assert_eq!(
+        lines[11], "  Same",
+        "a fill like the one under it is no box"
     );
 }
 
@@ -179,6 +187,7 @@ fn IconButtons() -> impl IntoElement {
             view()
                 .w(px(32.0))
                 .h(px(32.0))
+                .border_1()
                 .role(AccessibilityRole::Button)
                 .label("Light appearance")
                 .items_center()
@@ -190,6 +199,7 @@ fn IconButtons() -> impl IntoElement {
             view()
                 .w(px(160.0))
                 .h(px(16.0))
+                .bg(nsh_core::color::rgb(0x24262a))
                 .role(AccessibilityRole::Button)
                 .label("Close")
                 .on_press(|_: &()| {})

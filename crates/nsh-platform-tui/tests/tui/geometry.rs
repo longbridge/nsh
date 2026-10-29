@@ -160,7 +160,7 @@ fn CompactBorders() -> impl IntoElement {
 }
 
 #[test]
-fn compact_borders_leave_room_for_labels_and_do_not_draw_stray_corners() {
+fn compact_boxes_draw_no_border_and_keep_their_labels_in_place() {
     let (mut view, rx) = surface();
     let mut terminal = Terminal::new(TestBackend::new(30, 12)).unwrap();
     view.load(App::Rust(Root::new::<CompactBorders>(|| ())))
@@ -175,11 +175,15 @@ fn compact_borders_leave_room_for_labels_and_do_not_draw_stray_corners() {
         "{rows:?}"
     );
     assert!(rows[4].contains("own"), "{rows:?}");
+    // No room for a whole border: none at all, and the labels stay at the
+    // columns the layout gave them.
     for y in [1, 2, 4] {
-        assert_eq!(buffer[(2, y)].symbol(), "│");
-        assert_eq!(buffer[(11, y)].symbol(), "│");
-        assert!(!rows[y as usize].contains(['─', '╭', '╮', '╰', '╯']));
+        assert!(
+            !rows[y as usize].contains(['│', '─', '┌', '┐', '└', '┘']),
+            "{rows:?}"
+        );
     }
+    assert_eq!(rows[4].find("own"), Some(2));
     assert_eq!(buffer[(2, 6)].symbol(), " ");
     assert_eq!(buffer[(3, 6)].symbol(), " ");
     assert_eq!(solid(buffer, 2, 6), Some(Color::Blue));
