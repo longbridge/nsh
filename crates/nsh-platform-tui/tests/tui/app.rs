@@ -524,20 +524,22 @@ fn the_surface_reports_the_machines_operating_system() {
 
 #[cfg(feature = "js")]
 #[test]
-fn apps_read_the_real_os_and_the_desktop_module() {
+fn apps_read_the_terminal_idiom_the_real_os_and_the_desktop_module() {
     let expected = if cfg!(target_os = "macos") {
-        "macos desktop true"
+        "macos terminal true d"
     } else if cfg!(target_os = "windows") {
-        "windows desktop true"
+        "windows terminal true d"
     } else {
-        "linux desktop true"
+        "linux terminal true d"
     };
     let code = nsh_bundler::compile_module(
         "App.tsx",
         r#"
         import { mount, platform, Text } from "nsh";
         import { isAvailable } from "nsh/desktop";
-        mount(() => <Text>{`${platform.os} ${platform.idiom} ${isAvailable}`}</Text>);
+        mount(() => (
+          <Text>{`${platform.os} ${platform.idiom} ${isAvailable} ${platform.select({ mobile: "m", desktop: "d" })}`}</Text>
+        ));
     "#,
         &[],
     )
