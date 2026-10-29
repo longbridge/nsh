@@ -2,7 +2,13 @@ use nsh_core::prelude::*;
 use nsh_platform_tui::{App, Root};
 use ratatui_core::{backend::TestBackend, style::Color, terminal::Terminal};
 
-use super::app::{draw_until, surface};
+use super::app::{draw_until, reversed, surface};
+
+/// The palette color of a leaf fill drawn at `(x, y)`: leaves whose fill is
+/// their content show reversed in it.
+fn solid(buffer: &ratatui_core::buffer::Buffer, x: u16, y: u16) -> Option<Color> {
+    reversed(buffer, x, y).then_some(buffer[(x, y)].fg)
+}
 
 #[component]
 fn AbsoluteEdges() -> impl IntoElement {
@@ -49,7 +55,7 @@ fn absolute_edges_preserve_accumulated_padding_and_equal_sibling_gaps() {
     let buffer = terminal.backend().buffer();
     assert_eq!(buffer[(1, 1)].symbol(), "n");
     let painted: Vec<_> = (0..20)
-        .filter(|&x| buffer[(x, 3)].bg == Color::Rgb(0x12, 0x34, 0x56))
+        .filter(|&x| solid(buffer, x, 3) == Some(Color::Blue))
         .collect();
     assert_eq!(painted, [2, 3, 4, 5, 7, 8, 9, 11, 12, 13, 14]);
 }
@@ -77,7 +83,7 @@ fn NestedBorders() -> impl IntoElement {
                     .child(
                         canvas(
                             Painter::new()
-                                .fill_color(nsh_core::color::rgb(0xabcdef))
+                                .fill_color(nsh_core::color::rgb(0xef4444))
                                 .fill_rect(0.0, 0.0, 96.0, 96.0),
                         )
                         .absolute()
@@ -175,53 +181,9 @@ fn compact_borders_leave_room_for_labels_and_do_not_draw_stray_corners() {
     }
     assert_eq!(buffer[(2, 6)].symbol(), " ");
     assert_eq!(buffer[(3, 6)].symbol(), " ");
-    assert_eq!(buffer[(2, 6)].bg, Color::Rgb(0x12, 0x34, 0x56));
+    assert_eq!(solid(buffer, 2, 6), Some(Color::Blue));
     assert_eq!(buffer[(16, 1)].symbol(), "┌");
     assert_eq!(buffer[(25, 2)].symbol(), "┘");
-}
-
-#[component]
-fn CrowdedOutline() -> impl IntoElement {
-    view().flex_1().children([
-        view()
-            .absolute()
-            .left(px(16.0))
-            .top(px(16.0))
-            .w(px(96.0))
-            .h(px(64.0))
-            .border_1()
-            .overflow_hidden()
-            .child(
-                view()
-                    .absolute()
-                    .inset(px(1.0))
-                    .border_1()
-                    .rounded(px(8.0))
-                    .outline(px(2.0))
-                    .outline_offset(px(-2.0))
-                    .outline_color(nsh_core::color::rgb(0xabcdef))
-                    .child(text("edge")),
-            ),
-        view().absolute().top(px(128.0)).child(text("ready")),
-    ])
-}
-
-#[test]
-fn a_clipped_outline_recolors_its_own_edges_without_partial_strokes() {
-    let (mut view, rx) = surface();
-    let mut terminal = Terminal::new(TestBackend::new(30, 12)).unwrap();
-    view.load(App::Rust(Root::new::<CrowdedOutline>(|| ())))
-        .unwrap();
-    draw_until(&mut view, &mut terminal, &rx, "ready");
-    let buffer = terminal.backend().buffer();
-    for y in 2..4 {
-        assert_eq!(buffer[(3, y)].symbol(), "│");
-        assert_eq!(buffer[(12, y)].symbol(), "│");
-        assert_eq!(buffer[(3, y)].fg, Color::Rgb(0xab, 0xcd, 0xef));
-        assert_eq!(buffer[(12, y)].fg, Color::Rgb(0xab, 0xcd, 0xef));
-    }
-    assert_eq!(buffer[(2, 1)].symbol(), "┌");
-    assert_ne!(buffer[(2, 1)].fg, Color::Rgb(0xab, 0xcd, 0xef));
 }
 
 #[component]
@@ -247,7 +209,7 @@ fn RoundedCoverage() -> impl IntoElement {
                 view()
                     .absolute()
                     .inset(px(0.0))
-                    .bg(nsh_core::color::rgb(0xabcdef)),
+                    .bg(nsh_core::color::rgb(0xef4444)),
             ),
         view()
             .absolute()
@@ -271,12 +233,12 @@ fn rounded_fills_clips_and_individual_border_corners_keep_the_apps_radii() {
     draw_until(&mut view, &mut terminal, &rx, "ready");
     let buffer = terminal.backend().buffer();
     for (x, y) in [(2, 1), (13, 1), (2, 6), (13, 6), (16, 1)] {
-        assert_eq!(buffer[(x, y)].bg, Color::Reset, "corner {x},{y}");
+        assert_eq!(solid(buffer, x, y), None, "corner {x},{y}");
     }
-    assert_eq!(buffer[(7, 1)].bg, Color::Rgb(0x12, 0x34, 0x56));
-    assert_eq!(buffer[(2, 3)].bg, Color::Rgb(0x12, 0x34, 0x56));
-    assert_eq!(buffer[(27, 1)].bg, Color::Rgb(0xab, 0xcd, 0xef));
-    assert_eq!(buffer[(16, 6)].bg, Color::Rgb(0xab, 0xcd, 0xef));
+    assert_eq!(solid(buffer, 7, 1), Some(Color::Blue));
+    assert_eq!(solid(buffer, 2, 3), Some(Color::Blue));
+    assert_eq!(solid(buffer, 27, 1), Some(Color::Red));
+    assert_eq!(solid(buffer, 16, 6), Some(Color::Red));
     assert_eq!(buffer[(2, 8)].symbol(), "╭");
     assert_eq!(buffer[(11, 8)].symbol(), "┐");
     assert_eq!(buffer[(2, 11)].symbol(), "└");
@@ -344,7 +306,7 @@ fn centered_icons_and_labels_share_a_row_at_every_cell_height_and_phase() {
                 .collect();
             assert_eq!(icon_rows, [label_row], "height {height}, column {column}");
             let indicator_rows: Vec<_> = (0..4)
-                .filter(|&y| buffer[(column + 2, y)].bg == Color::Rgb(0x12, 0x34, 0x56))
+                .filter(|&y| solid(buffer, column + 2, y) == Some(Color::Blue))
                 .collect();
             assert_eq!(
                 indicator_rows,
@@ -455,10 +417,10 @@ fn a_bottom_tooltip_starts_after_the_anchors_last_cell_row() {
         .unwrap();
     draw_until(&mut view, &mut terminal, &rx, "tooltip");
     let buffer = terminal.backend().buffer();
-    assert_eq!(buffer[(2, 15)].bg, Color::Rgb(0x12, 0x34, 0x56));
+    assert_eq!(solid(buffer, 2, 15), Some(Color::Blue));
     assert_eq!(buffer[(2, 15)].symbol(), " ");
     assert_eq!(buffer[(2, 16)].symbol(), "t");
-    assert_ne!(buffer[(2, 16)].bg, Color::Rgb(0x12, 0x34, 0x56));
+    assert_eq!(solid(buffer, 2, 16), None);
 }
 
 #[component]
@@ -485,7 +447,7 @@ fn ThinAnchor() -> impl IntoElement {
                 .h(px(4.0))
                 .w(px(80.0))
                 .rounded(px(2.0))
-                .bg(nsh_core::color::rgb(0xabcdef)),
+                .bg(nsh_core::color::rgb(0xef4444)),
         )
         .child(view().absolute().top(px(96.0)).child(text("ready")))
 }
@@ -499,8 +461,8 @@ fn even_a_subcell_anchor_keeps_its_row_when_a_tooltip_opens_below() {
     draw_until(&mut view, &mut terminal, &rx, "ready");
     let buffer = terminal.backend().buffer();
     assert_eq!(buffer[(2, 1)].symbol(), "─");
-    assert_eq!(buffer[(2, 1)].fg, Color::Rgb(0x12, 0x34, 0x56));
-    assert_eq!(buffer[(2, 2)].fg, Color::Rgb(0xab, 0xcd, 0xef));
+    assert_eq!(buffer[(2, 1)].fg, Color::Blue);
+    assert_eq!(buffer[(2, 2)].fg, Color::Red);
 }
 
 #[component]
@@ -708,11 +670,11 @@ fn a_subcell_separator_keeps_disjoint_text_that_quantizes_to_its_row() {
     draw_until(&mut view, &mut terminal, &rx, "ready");
     let buffer = terminal.backend().buffer();
     assert_eq!(buffer[(2, 4)].symbol(), "L");
-    assert_eq!(buffer[(10, 4)].fg, Color::Rgb(0x12, 0x34, 0x56));
+    assert_eq!(buffer[(10, 4)].fg, Color::Blue);
     assert_eq!(buffer[(10, 4)].symbol(), "─");
-    assert_eq!(buffer[(10, 4)].bg, Color::Reset);
+    assert!(!reversed(buffer, 10, 4));
     assert_eq!(buffer[(2, 8)].symbol(), " ");
-    assert_eq!(buffer[(2, 8)].bg, Color::Rgb(0x12, 0x34, 0x56));
+    assert_eq!(solid(buffer, 2, 8), Some(Color::Blue));
 }
 
 #[component]
@@ -943,7 +905,7 @@ fn HairlineFills() -> impl IntoElement {
 }
 
 #[test]
-fn childless_hairline_fills_draw_border_weight_glyphs_and_keep_the_background() {
+fn childless_hairline_fills_draw_rules_in_their_palette_color() {
     let (mut view, rx) = surface();
     let mut terminal = Terminal::new(TestBackend::new(40, 12)).unwrap();
     view.load(App::Rust(Root::new::<HairlineFills>(|| ())))
@@ -952,27 +914,26 @@ fn childless_hairline_fills_draw_border_weight_glyphs_and_keep_the_background() 
     let buffer = terminal.backend().buffer();
     for column in 2..12 {
         assert_eq!(buffer[(column, 1)].symbol(), "─");
-        assert_eq!(buffer[(column, 1)].fg, Color::Rgb(0x12, 0x34, 0x56));
+        assert_eq!(buffer[(column, 1)].fg, Color::Blue);
         assert_eq!(buffer[(column, 1)].bg, Color::Reset);
         assert_eq!(buffer[(column, 1)].symbol(), buffer[(column, 6)].symbol());
         assert_eq!(buffer[(column, 1)].fg, buffer[(column, 6)].fg);
     }
     for row in 3..5 {
         assert_eq!(buffer[(2, row)].symbol(), "│");
-        assert_eq!(buffer[(2, row)].fg, Color::Rgb(0x12, 0x34, 0x56));
-        assert_eq!(buffer[(2, row)].bg, Color::Reset);
+        assert_eq!(buffer[(2, row)].fg, Color::Blue);
     }
     assert_eq!(buffer[(16, 1)].symbol(), " ");
-    assert_eq!(buffer[(16, 1)].bg, Color::Rgb(0x12, 0x34, 0x56));
+    assert_eq!(
+        solid(buffer, 16, 1),
+        Some(Color::Blue),
+        "half a Cell is a solid leaf"
+    );
     assert_eq!(buffer[(16, 3)].symbol(), "c");
-    assert_eq!(buffer[(16, 3)].bg, Color::Rgb(0x12, 0x34, 0x56));
+    assert_eq!(solid(buffer, 16, 3), None, "a container draws no fill");
     assert_eq!(buffer[(16, 5)].symbol(), "─");
-    assert_eq!(buffer[(16, 5)].fg, Color::Rgb(17, 35, 53));
-    assert_eq!(buffer[(16, 5)].bg, Color::Reset);
+    assert_eq!(buffer[(16, 5)].fg, Color::Blue, "opacity keeps the color");
     assert_eq!(buffer[(16, 7)].symbol(), "─");
-    assert_eq!(buffer[(16, 7)].fg, Color::Rgb(127, 0, 128));
-    assert_eq!(buffer[(16, 7)].bg, Color::Reset);
-    assert_eq!(buffer[(28, 7)].symbol(), "─");
-    assert_eq!(buffer[(28, 7)].fg, Color::Rgb(0, 255, 0));
-    assert_eq!(buffer[(28, 7)].bg, Color::Reset);
+    assert_eq!(buffer[(16, 7)].fg, Color::Red, "gradients are left out");
+    assert_eq!(buffer[(28, 7)].symbol(), " ");
 }

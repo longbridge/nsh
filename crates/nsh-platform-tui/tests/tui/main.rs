@@ -9,13 +9,12 @@ mod app;
 
 mod canvas;
 mod controls;
-mod fills;
 mod focus_navigation;
 mod geometry;
 mod keyboard;
 mod modal_focus;
 mod navigation;
-mod page_background;
+mod palette;
 mod performance;
 mod pointer;
 mod scroll;

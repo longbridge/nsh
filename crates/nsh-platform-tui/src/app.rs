@@ -694,8 +694,9 @@ impl AppView {
     }
 
     fn handle_field_mouse(&mut self, mouse: crate::MouseInput) -> bool {
-        use crate::{MouseButton, MouseKind};
         use ratatui_core::layout::Position;
+
+        use crate::{MouseButton, MouseKind};
         let Some(engine) = &self.surface.engine else {
             return false;
         };
@@ -902,6 +903,8 @@ impl AppView {
             buffer,
             area,
             self.options.cells,
+            self.environment.color_scheme,
+            self.keyboard.focused,
             &mut self.hits,
             &mut self.geometry,
         );

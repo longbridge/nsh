@@ -30,10 +30,12 @@ The one-line input a terminal surface shows at its bottom only while the user se
 when done; the terminal backend has no permanent chrome.
 _Avoid_: command line, status line, mode line, echo area
 
-**Page background**:
-The fill of a root view, a screen or a modal, and any fill of the same color; drawn as the terminal's own
-background so an app follows the user's terminal colors.
-_Avoid_: canvas color, window color
+**Terminal look**:
+How the terminal backend draws an app, as system UI keeps a platform's look: app colors become the terminal's
+16-color meanings (the default foreground, dim, or an accent: red, yellow, green, cyan, blue, magenta), so the
+user's terminal theme decides the actual colors; no fill color is drawn, every Cell showing the terminal's own
+background; selected, checked and focused views are reversed.
+_Avoid_: theme, skin, terminal style
 
 ### Degradation
 

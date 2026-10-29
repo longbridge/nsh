@@ -19,6 +19,7 @@ use nsh_core::{
     canvas::{
         CanvasOp, CanvasTextAlign, CanvasTextBaseline, Drawing, FillRule, Num, Paint, PathOp,
     },
+    platform::ColorScheme,
 };
 use ratatui_core::{
     buffer::Buffer,
@@ -35,7 +36,7 @@ use self::path::{Dash, IDENTITY, Matrix, Outline, apply, distance, mean_scale, m
 use crate::{
     CellSize,
     geometry::{CellBounds, TextRun},
-    render::blend,
+    palette::ink,
 };
 
 const DOTS_ACROSS: usize = 2;
@@ -87,23 +88,20 @@ impl CanvasView {
 }
 
 /// Draws `canvas` into the `visible` Cells of a view whose Cells are
-/// `bounds`, at the view's `opacity`, over a `page` color where the Cells
-/// show the terminal's background.
-#[allow(clippy::too_many_arguments)]
+/// `bounds`, in `scheme`'s palette.
 pub(crate) fn draw(
     canvas: &CanvasView,
     buffer: &mut Buffer,
     bounds: CellBounds,
     visible: Rect,
     cells: CellSize,
-    opacity: f32,
     projection: crate::animation::Projection,
-    page: Color,
+    scheme: ColorScheme,
 ) {
     if visible.is_empty() {
         return;
     }
-    let mut replay = Replay::new(canvas, buffer, bounds, visible, cells, opacity, page);
+    let mut replay = Replay::new(canvas, bounds, visible, cells, scheme);
     let m = projection.matrix.0;
     replay.base = [
         m[0] as f32,
@@ -126,16 +124,20 @@ pub(crate) fn draw(
         .paint(|cx| cx.draw(&dots))
         .render(scratch.area, &mut scratch);
     // The Canvas widget resets the background of its whole area; copying
-    // only its symbols keeps the view's own fill and what lies under it.
+    // only its symbols, in each Cell's latest ink, keeps what lies under it.
+    let inks = dots.latest();
     for y in 0..visible.height {
         for x in 0..visible.width {
             let dot = &scratch[(x, y)];
             if dot.symbol() != " " {
                 let symbol = dot.symbol().to_owned();
-                let fg = dot.fg;
                 let cell = &mut buffer[(visible.x + x, visible.y + y)];
                 cell.set_symbol(&symbol);
-                cell.set_fg(fg);
+                if let Some((style, _)) =
+                    inks[usize::from(y) * usize::from(visible.width) + usize::from(x)]
+                {
+                    cell.set_style(style);
+                }
             }
         }
     }
@@ -176,8 +178,7 @@ pub(crate) fn draw(
             if label.clip.as_ref().is_some_and(|clip| !clip[probe]) {
                 continue;
             }
-            let cell = &buffer[(visible.x + column, visible.y + row)];
-            let mut style = Style::default().fg(blend(label.color, label.alpha, cell.bg, page));
+            let mut style = label.ink;
             if label.bold {
                 style = style.add_modifier(Modifier::BOLD);
             }
@@ -195,8 +196,8 @@ pub(crate) fn draw(
     }
 }
 
-/// The dots of the visible Cells, each with its color and when it was
-/// painted (the Cell takes the color of its latest dot).
+/// The dots of the visible Cells, each with its palette ink and when it was
+/// painted (the Cell takes the ink of its latest dot).
 struct Dots {
     width: usize,
     height: usize,
@@ -204,12 +205,7 @@ struct Dots {
     origin: [f32; 2],
     /// A dot's size in points.
     step: [f32; 2],
-    colors: Vec<Option<(Color, u32)>>,
-    /// The background of each visible Cell, which translucent paints blend
-    /// over.
-    backgrounds: Vec<Color>,
-    /// The color a Cell showing the terminal's background stands for.
-    page: Color,
+    inks: Vec<Option<(Style, u32)>>,
     painted: u32,
 }
 
@@ -218,15 +214,25 @@ impl Dots {
         self.origin[1] + (row as f32 + 0.5) * self.step[1]
     }
 
-    fn background(&self, index: usize) -> Color {
-        let (column, row) = (index % self.width, index / self.width);
-        self.backgrounds[row / DOTS_DOWN * (self.width / DOTS_ACROSS) + column / DOTS_ACROSS]
+    fn paint(&mut self, index: usize, ink: Style) {
+        self.painted += 1;
+        self.inks[index] = Some((ink, self.painted));
     }
 
-    fn paint(&mut self, index: usize, color: nsh_core::Color, alpha: f32) {
-        let under = self.colors[index].map_or_else(|| self.background(index), |(c, _)| c);
-        self.painted += 1;
-        self.colors[index] = Some((blend(color, alpha, under, self.page), self.painted));
+    /// The ink of each Cell's latest dot, row by row.
+    fn latest(&self) -> Vec<Option<(Style, u32)>> {
+        let columns = self.width / DOTS_ACROSS;
+        let mut latest: Vec<Option<(Style, u32)>> = vec![None; columns * (self.height / DOTS_DOWN)];
+        for (index, dot) in self.inks.iter().enumerate() {
+            if let Some((ink, painted)) = *dot {
+                let cell =
+                    index / self.width / DOTS_DOWN * columns + index % self.width / DOTS_ACROSS;
+                if latest[cell].is_none_or(|(_, last)| painted > last) {
+                    latest[cell] = Some((ink, painted));
+                }
+            }
+        }
+        latest
     }
 
     /// Calls `visit` with each dot whose center `outline` holds by `rule`.
@@ -341,24 +347,9 @@ fn clip_segment(
 
 impl Shape for Dots {
     fn draw(&self, painter: &mut Painter) {
-        let columns = self.width / DOTS_ACROSS;
-        let mut latest: Vec<Option<(Color, u32)>> = vec![None; columns * (self.height / DOTS_DOWN)];
-        for (index, dot) in self.colors.iter().enumerate() {
-            if let Some((color, painted)) = *dot {
-                let cell =
-                    index / self.width / DOTS_DOWN * columns + index % self.width / DOTS_ACROSS;
-                if latest[cell].is_none_or(|(_, last)| painted > last) {
-                    latest[cell] = Some((color, painted));
-                }
-            }
-        }
-        for (index, dot) in self.colors.iter().enumerate() {
+        for (index, dot) in self.inks.iter().enumerate() {
             if dot.is_some() {
-                let cell =
-                    index / self.width / DOTS_DOWN * columns + index % self.width / DOTS_ACROSS;
-                if let Some((color, _)) = latest[cell] {
-                    painter.paint(index % self.width, index / self.width, color);
-                }
+                painter.paint(index % self.width, index / self.width, Color::Reset);
             }
         }
     }
@@ -369,8 +360,7 @@ struct Label<'a> {
     run: TextRun,
     text: &'a str,
     clip: Option<Rc<[bool]>>,
-    color: nsh_core::Color,
-    alpha: f32,
+    ink: Style,
     bold: bool,
     italic: bool,
 }
@@ -416,7 +406,7 @@ struct Replay<'a> {
     cells: CellSize,
     /// The visible Cells' offset from the canvas's first Cell.
     offset: [i32; 2],
-    opacity: f32,
+    scheme: ColorScheme,
     base: Matrix,
     state: State,
     saved: Vec<State>,
@@ -426,22 +416,16 @@ struct Replay<'a> {
 impl<'a> Replay<'a> {
     fn new(
         canvas: &'a CanvasView,
-        buffer: &Buffer,
         bounds: CellBounds,
         visible: Rect,
         cells: CellSize,
-        opacity: f32,
-        page: Color,
+        scheme: ColorScheme,
     ) -> Self {
         let offset = [
             i32::from(visible.x) - bounds.left,
             i32::from(visible.y) - bounds.top,
         ];
         let (cell_width, cell_height) = (cells.width().0, cells.height().0);
-        let backgrounds = (visible.y..visible.bottom())
-            .flat_map(|y| (visible.x..visible.right()).map(move |x| (x, y)))
-            .map(|position| buffer[position].bg)
-            .collect();
         let width = usize::from(visible.width) * DOTS_ACROSS;
         let height = usize::from(visible.height) * DOTS_DOWN;
         Self {
@@ -457,15 +441,13 @@ impl<'a> Replay<'a> {
                     cell_width / DOTS_ACROSS as f32,
                     cell_height / DOTS_DOWN as f32,
                 ],
-                colors: vec![None; width * height],
-                backgrounds,
-                page,
+                inks: vec![None; width * height],
                 painted: 0,
             },
             labels: Vec::new(),
             cells,
             offset,
-            opacity,
+            scheme,
             base: IDENTITY,
             state: State::default(),
             saved: Vec::new(),
@@ -485,11 +467,12 @@ impl<'a> Replay<'a> {
         Outline::of(path, &self.state.matrix, &|n| self.n(n))
     }
 
-    /// A paint's color and the alpha it is drawn with; `None` draws nothing.
-    fn ink(&self, paint: &Paint) -> Option<(nsh_core::Color, f32)> {
+    /// A paint's palette ink, its alpha including `globalAlpha`; `None`
+    /// draws nothing.
+    fn ink(&self, paint: &Paint) -> Option<Style> {
         let color = self.canvas.color(paint);
-        let alpha = (color.0 & 255) as f32 / 255.0 * self.state.alpha * self.opacity;
-        (alpha > 0.0).then_some((color, alpha))
+        let alpha = ((color.0 & 255) as f32 * self.state.alpha).round() as u32;
+        (alpha > 0).then(|| ink(nsh_core::Color(color.0 & !255 | alpha), self.scheme))
     }
 
     fn clipped_out(&self, index: usize) -> bool {
@@ -497,20 +480,20 @@ impl<'a> Replay<'a> {
     }
 
     fn fill(&mut self, outline: &Outline, rule: FillRule) {
-        let Some((color, alpha)) = self.ink(&self.state.fill.clone()) else {
+        let Some(ink) = self.ink(&self.state.fill.clone()) else {
             return;
         };
         let mut inside = Vec::new();
         self.dots.inside(outline, rule, |index| inside.push(index));
         for index in inside {
             if !self.clipped_out(index) {
-                self.dots.paint(index, color, alpha);
+                self.dots.paint(index, ink);
             }
         }
     }
 
     fn stroke(&mut self, outline: &Outline) {
-        let Some((color, alpha)) = self.ink(&self.state.stroke.clone()) else {
+        let Some(ink) = self.ink(&self.state.stroke.clone()) else {
             return;
         };
         let dash = Dash::new(
@@ -545,7 +528,7 @@ impl<'a> Replay<'a> {
         on.dedup();
         for index in on {
             if !self.clipped_out(index) {
-                self.dots.paint(index, color, alpha);
+                self.dots.paint(index, ink);
             }
         }
     }
@@ -556,13 +539,13 @@ impl<'a> Replay<'a> {
             .inside(outline, FillRule::NonZero, |index| inside.push(index));
         for index in inside {
             if !self.clipped_out(index) {
-                self.dots.colors[index] = None;
+                self.dots.inks[index] = None;
             }
         }
     }
 
     fn clip(&mut self, outline: &Outline, rule: FillRule) {
-        let mut clip = vec![false; self.dots.colors.len()];
+        let mut clip = vec![false; self.dots.inks.len()];
         self.dots.inside(outline, rule, |index| clip[index] = true);
         if let Some(previous) = &self.state.clip {
             for (inside, &before) in clip.iter_mut().zip(previous.iter()) {
@@ -573,7 +556,7 @@ impl<'a> Replay<'a> {
     }
 
     fn text(&mut self, text: &'a str, x: f32, y: f32, max_width: Option<f32>, paint: Paint) {
-        let Some((color, alpha)) = self.ink(&paint) else {
+        let Some(ink) = self.ink(&paint) else {
             return;
         };
         let (cell_width, cell_height) = (self.cells.width().0, self.cells.height().0);
@@ -625,8 +608,7 @@ impl<'a> Replay<'a> {
             },
             text: &text[..text_end],
             clip: self.state.clip.clone(),
-            color,
-            alpha,
+            ink,
             bold: self.state.bold,
             italic: self.state.italic,
         });

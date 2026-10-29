@@ -1,7 +1,14 @@
 use std::collections::HashMap;
 
-use nsh_core::{Bounds, NodeId, Point, PointerEvents, Points, ROOT_ID, ViewKind};
-use ratatui_core::{buffer::Buffer, layout::Rect, style::Color, widgets::Widget};
+use nsh_core::{
+    Bounds, Checked, NodeId, Point, PointerEvents, Points, ROOT_ID, ViewKind, platform::ColorScheme,
+};
+use ratatui_core::{
+    buffer::Buffer,
+    layout::Rect,
+    style::{Modifier, Style},
+    widgets::Widget,
+};
 use ratatui_widgets::{block::Block, borders::Borders};
 use unicode_width::UnicodeWidthStr;
 
@@ -10,6 +17,7 @@ use crate::{
     animation::Projection,
     geometry::{CellBounds, TextRun},
     mount::Mounter,
+    palette::ink,
     text::CellLayout,
 };
 
@@ -43,83 +51,73 @@ struct Clip {
     fit: bool,
 }
 
-struct Outline {
-    page: Color,
-    stroke: CellBounds,
-    content: CellBounds,
-    clip: Rect,
-    color: nsh_core::Color,
-    opacity: f32,
-}
-
+/// How a view's fill shows in the terminal, which draws no fill colors.
 #[derive(Clone, Copy)]
-struct FillPaint {
-    color: nsh_core::Color,
-    opacity: f32,
-    line: Option<&'static str>,
+enum Fill {
+    /// A sub-Cell rule: line glyphs in the fill's palette color.
+    Line(&'static str, Style),
+    /// A leaf whose fill is its content (a progress indicator, a thumb):
+    /// reversed Cells in the fill's palette color.
+    Solid(Style),
+    /// An opaque fill clears what is under it to the terminal's background.
+    Clear,
 }
 
 struct Painter<'a> {
     text_runs: HashMap<NodeId, Vec<TextRun>>,
-    outlines: Vec<Outline>,
     tree: &'a mut Mounter,
     buffer: &'a mut Buffer,
     hits: &'a mut Vec<Hit>,
     geometry: &'a mut Vec<Geometry>,
     area: Rect,
     cells: CellSize,
-    page_backgrounds: &'a [nsh_core::Color],
-    /// The color of the page under the views being drawn, which the Cells
-    /// drawn with the terminal's background stand for when colors blend.
-    page: Color,
+    scheme: ColorScheme,
+    focused: Option<NodeId>,
 }
 
-/// Below this opacity a view draws nothing: blending changes no channel by
-/// more than 8 of 255, while a border or glyph would still replace the
-/// glyph under it.
+/// Below this opacity, multiplied through its ancestors, a view draws
+/// nothing; above it opacity is ignored, as the palette has no translucency.
 const INVISIBLE_OPACITY: f32 = 0.03;
 
+/// Draws the tree in the terminal's look (`palette`): colors from the
+/// terminal's palette in `scheme`, no fill colors, and the `focused` view,
+/// selected views and checked views reversed over their Cells.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn draw(
     tree: &mut Mounter,
     buffer: &mut Buffer,
     area: Rect,
     cells: CellSize,
+    scheme: ColorScheme,
+    focused: Option<NodeId>,
     hits: &mut Vec<Hit>,
     geometry: &mut Vec<Geometry>,
 ) {
     hits.clear();
     geometry.clear();
-    tree.collect_page_backgrounds();
     let clip = Clip {
         visible: area.intersection(buffer.area),
         borders: CellBounds::UNBOUNDED,
         fit: false,
     };
-    let page_backgrounds = std::mem::take(&mut tree.page_backgrounds);
     let mut painter = Painter {
         text_runs: HashMap::new(),
-        outlines: Vec::new(),
         tree,
         buffer,
         hits,
         geometry,
         area,
         cells,
-        page_backgrounds: &page_backgrounds,
-        page: page_backgrounds
-            .first()
-            .map_or(Color::Rgb(0, 0, 0), |&page| rgb(page)),
+        scheme,
+        focused,
     };
     painter.view(ROOT_ID, Projection::IDENTITY, clip, 1.0, true, None);
-    painter.outlines();
     let modals = painter.tree.modals.clone();
     for modal in modals {
         if crate::navigation::modal_visible(painter.tree, modal) {
             painter.view(modal, Projection::IDENTITY, clip, 1.0, true, None);
-            painter.outlines();
         }
     }
-    tree.page_backgrounds = page_backgrounds;
 }
 
 impl Painter<'_> {
@@ -328,22 +326,6 @@ impl Painter<'_> {
                 node_origin: origin,
             });
         }
-        let outline = view.style.outline;
-        let outline = outline.is_visible().then(|| {
-            let outset = outline.offset + outline.width;
-            let stroke = CellBounds::new(
-                projection.bounds(Bounds::new(
-                    Point::new(-outset, -outset),
-                    nsh_core::Size::new(
-                        view.frame.size.width + outset * 2.0,
-                        view.frame.size.height + outset * 2.0,
-                    ),
-                )),
-                self.cells,
-                self.area,
-            );
-            (stroke, outline.color)
-        });
         let children_pointer = pointer && view.props.pointer_events != PointerEvents::BoxOnly;
         let widths = &view.style.borders.widths;
         let colors = view
@@ -456,20 +438,27 @@ impl Painter<'_> {
         } else {
             Vec::new()
         };
-        let outer_page = self.page;
-        if !visible.is_empty() && opacity >= INVISIBLE_OPACITY {
+        let visible_drawn = !visible.is_empty() && opacity >= INVISIBLE_OPACITY;
+        if visible_drawn {
             let fill = view
                 .animated
                 .background
                 .unwrap_or(view.style.background_color);
             let rounded = !radii.is_zero();
-            let has_fill = !fill.is_transparent()
-                || view
-                    .style
-                    .effects
-                    .as_ref()
-                    .is_some_and(|effects| !effects.background_images.is_empty());
-            let protected = if has_fill
+            let leaf =
+                view.kind == ViewKind::View && view.children.is_empty() && view.component.is_none();
+            let fill = if fill.is_transparent() {
+                None
+            } else if let Some(line) = line {
+                Some(Fill::Line(line, ink(fill, self.scheme)))
+            } else if fill.0 & 255 < 255 {
+                None
+            } else if leaf {
+                Some(Fill::Solid(ink(fill, self.scheme)))
+            } else {
+                Some(Fill::Clear)
+            };
+            let protected = if fill.is_some()
                 && (frame.size.height < self.cells.height()
                     || frame.size.width < self.cells.width())
             {
@@ -490,43 +479,8 @@ impl Painter<'_> {
                         || !protected[usize::from(y - visible.y) * usize::from(visible.width)
                             + usize::from(x - visible.x)])
             };
-            let paint = FillPaint {
-                color: fill,
-                opacity,
-                line,
-            };
-            fill_cells(
-                self.buffer,
-                self.page_backgrounds,
-                self.page,
-                visible,
-                paint,
-                covered,
-            );
-            if self.page_backgrounds.contains(&fill) {
-                self.page = rgb(fill);
-            }
-            // A Cell holds one background color: each gradient layer draws its
-            // middle stop, as canvas gradients do, bottom layer first.
-            let gradients = view
-                .style
-                .effects
-                .as_ref()
-                .map_or(&[][..], |effects| &effects.background_images[..]);
-            for gradient in gradients.iter().rev() {
-                if let Some(stop) = gradient.stops.get(gradient.stops.len() / 2) {
-                    fill_cells(
-                        self.buffer,
-                        self.page_backgrounds,
-                        self.page,
-                        visible,
-                        FillPaint {
-                            color: stop.color,
-                            ..paint
-                        },
-                        covered,
-                    );
-                }
+            if let Some(fill) = fill {
+                fill_cells(self.buffer, visible, fill, covered);
             }
             let mut borders = Borders::NONE;
             if sides[0] && bounds.top == i32::from(visible.y) {
@@ -567,7 +521,7 @@ impl Painter<'_> {
                     ..ratatui_core::symbols::border::PLAIN
                 })
                 .render(visible, self.buffer);
-            // Block chooses the corner symbols; each edge keeps its own wire color.
+            // Block chooses the corner symbols; each edge keeps its own palette color.
             for (side, color) in colors.iter().enumerate() {
                 let edge = match side {
                     0 if borders.contains(Borders::TOP) => {
@@ -584,10 +538,10 @@ impl Painter<'_> {
                     }
                     _ => continue,
                 };
+                let style = ink(*color, self.scheme);
                 for y in edge.y..edge.bottom() {
                     for x in edge.x..edge.right() {
-                        let cell = &mut self.buffer[(x, y)];
-                        cell.set_fg(blend(*color, opacity, cell.bg, self.page));
+                        self.buffer[(x, y)].set_style(style);
                     }
                 }
             }
@@ -600,26 +554,20 @@ impl Painter<'_> {
                     (i32::from(text_area.y) - text_bounds.top).clamp(0, u16::MAX as i32) as u16,
                     (i32::from(text_area.x) - text_bounds.left).clamp(0, u16::MAX as i32) as u16,
                 );
+                let paragraph = layout.paragraph(self.scheme);
                 if scroll == (0, 0) {
-                    (&layout.paragraph).render(text_area, self.buffer);
+                    paragraph.render(text_area, self.buffer);
                 } else {
-                    layout
-                        .paragraph
+                    paragraph
                         .clone()
                         .scroll(scroll)
                         .render(text_area, self.buffer);
                 }
-                if view.animated.color.is_some() || opacity < 1.0 {
+                if let Some(color) = view.animated.color {
+                    let style = ink(color, self.scheme);
                     for y in text_area.y..text_area.bottom() {
                         for x in text_area.x..text_area.right() {
-                            let cell = &mut self.buffer[(x, y)];
-                            let color = view.animated.color.or_else(|| match cell.fg {
-                                Color::Rgb(r, g, b) => Some(nsh_core::Color::rgba(r, g, b, 255)),
-                                _ => None,
-                            });
-                            if let Some(color) = color {
-                                cell.set_fg(blend(color, opacity, cell.bg, self.page));
-                            }
+                            self.buffer[(x, y)].set_style(style);
                         }
                     }
                 }
@@ -636,9 +584,8 @@ impl Painter<'_> {
                     content,
                     inner.clipped(clip.visible),
                     self.buffer,
-                    opacity,
                     view.animated.color,
-                    self.page,
+                    self.scheme,
                 );
             }
             if let Some(canvas) = &view.canvas {
@@ -648,9 +595,8 @@ impl Painter<'_> {
                     bounds,
                     inner.clipped(clip.visible),
                     self.cells,
-                    opacity,
                     projection.snapped(Point::new(-origin.x, -origin.y)),
-                    self.page,
+                    self.scheme,
                 );
             }
             if let Some(component) = &mut view.component {
@@ -702,131 +648,17 @@ impl Painter<'_> {
         for (position, cell) in clipped_corners {
             self.buffer[position] = cell;
         }
-        if let Some((stroke, color)) = outline
-            && opacity >= INVISIBLE_OPACITY
-        {
-            self.outlines.push(Outline {
-                stroke,
-                content: bounds,
-                clip: clip.borders.clipped(clip.visible),
-                color,
-                opacity,
-                page: self.page,
-            });
-        }
-        self.page = outer_page;
-    }
-}
-
-impl Painter<'_> {
-    fn outlines(&mut self) {
-        for outline in std::mem::take(&mut self.outlines) {
-            self.outline(
-                outline.stroke,
-                outline.content,
-                outline.clip,
-                outline.color,
-                outline.opacity,
-                outline.page,
-            );
-        }
-    }
-
-    /// Draws an outline after the view's content. A Cell cannot hold a stroke
-    /// between two text rows, so an edge that would cross glyphs inside the
-    /// view's box moves outward to the nearest free row or column, and the
-    /// stroke never replaces a glyph that is already drawn.
-    fn outline(
-        &mut self,
-        mut stroke: CellBounds,
-        content: CellBounds,
-        clip: Rect,
-        color: nsh_core::Color,
-        opacity: f32,
-        page: Color,
-    ) {
-        let buffer = &*self.buffer;
-        let glyph_at = |x: i32, y: i32| {
-            let (Ok(x), Ok(y)) = (u16::try_from(x), u16::try_from(y)) else {
-                return false;
-            };
-            clip.contains(ratatui_core::layout::Position::new(x, y))
-                && buffer[(x, y)].symbol() != " "
-        };
-        let inside_rows = content.top..content.bottom;
-        let inside_columns = content.left..content.right;
-        let columns = stroke.left.max(content.left)..stroke.right.min(content.right);
-        let row_has_glyphs = |y: i32| columns.clone().any(|x| glyph_at(x, y));
-        while inside_rows.contains(&stroke.top) && row_has_glyphs(stroke.top) {
-            stroke.top -= 1;
-        }
-        while inside_rows.contains(&(stroke.bottom - 1)) && row_has_glyphs(stroke.bottom - 1) {
-            stroke.bottom += 1;
-        }
-        let rows = stroke.top.max(content.top)..stroke.bottom.min(content.bottom);
-        let column_has_glyphs = |x: i32| rows.clone().any(|y| glyph_at(x, y));
-        while inside_columns.contains(&stroke.left) && column_has_glyphs(stroke.left) {
-            stroke.left -= 1;
-        }
-        while inside_columns.contains(&(stroke.right - 1)) && column_has_glyphs(stroke.right - 1) {
-            stroke.right += 1;
-        }
-
-        let area = stroke.clipped(clip);
-        let closed = stroke.top == i32::from(area.y)
-            && stroke.bottom == i32::from(area.bottom())
-            && stroke.left == i32::from(area.x)
-            && stroke.right == i32::from(area.right())
-            && area.width >= 2
-            && area.height >= 2
-            && (area.x..area.right()).all(|x| {
-                !glyph_at(i32::from(x), stroke.top) && !glyph_at(i32::from(x), stroke.bottom - 1)
-            })
-            && (area.y..area.bottom()).all(|y| {
-                !glyph_at(stroke.left, i32::from(y)) && !glyph_at(stroke.right - 1, i32::from(y))
-            });
-        if !closed {
-            let area = content.clipped(clip);
-            for y in area.y..area.bottom() {
-                for x in area.x..area.right() {
-                    if i32::from(x) == content.left
-                        || i32::from(x) + 1 == content.right
-                        || i32::from(y) == content.top
-                        || i32::from(y) + 1 == content.bottom
-                    {
-                        let cell = &mut self.buffer[(x, y)];
-                        cell.set_fg(blend(color, opacity, cell.bg, page));
-                    }
-                }
-            }
+        let Some(view) = self.tree.get(id) else {
             return;
-        }
-        let top = stroke.top == i32::from(area.y);
-        let bottom = stroke.bottom == i32::from(area.bottom());
-        let left = stroke.left == i32::from(area.x);
-        let right = stroke.right == i32::from(area.right());
-        let set = ratatui_core::symbols::border::PLAIN;
-        for y in area.y..area.bottom() {
-            for x in area.x..area.right() {
-                let on_top = top && y == area.y;
-                let on_bottom = bottom && y + 1 == area.bottom();
-                let on_left = left && x == area.x;
-                let on_right = right && x + 1 == area.right();
-                let symbol = match (on_top, on_bottom, on_left, on_right) {
-                    (true, _, true, _) => set.top_left,
-                    (true, _, _, true) => set.top_right,
-                    (_, true, true, _) => set.bottom_left,
-                    (_, true, _, true) => set.bottom_right,
-                    (true, ..) => set.horizontal_top,
-                    (_, true, ..) => set.horizontal_bottom,
-                    (_, _, true, _) => set.vertical_left,
-                    (_, _, _, true) => set.vertical_right,
-                    _ => continue,
-                };
-                let cell = &mut self.buffer[(x, y)];
-                if cell.symbol() == " " {
-                    cell.set_symbol(symbol);
-                    cell.set_fg(blend(color, opacity, cell.bg, page));
+        };
+        let state = &view.props.accessibility.state;
+        let reversed = state.selected
+            || state.checked == Some(Checked::True)
+            || (self.focused == Some(id) && view.input.is_none());
+        if reversed && visible_drawn {
+            for y in visible.y..visible.bottom() {
+                for x in visible.x..visible.right() {
+                    self.buffer[(x, y)].modifier.insert(Modifier::REVERSED);
                 }
             }
         }
@@ -848,13 +680,7 @@ fn hairline_fill(
         .animated
         .background
         .unwrap_or(view.style.background_color);
-    let has_fill = !fill.is_transparent()
-        || view
-            .style
-            .effects
-            .as_ref()
-            .is_some_and(|effects| !effects.background_images.is_empty());
-    if !has_fill || !(horizontal || vertical) {
+    if fill.is_transparent() || !(horizontal || vertical) {
         return None;
     }
     Some(
@@ -1073,72 +899,25 @@ fn disjoint_text_cells(
     protected
 }
 
-/// Fills the `visible` Cells with `fill`: page backgrounds with the terminal's
-/// own, opaque fills replace what is there, translucent ones blend over it.
-fn fill_cells(
-    buffer: &mut Buffer,
-    page_backgrounds: &[nsh_core::Color],
-    page: Color,
-    visible: Rect,
-    paint: FillPaint,
-    covered: impl Fn(u16, u16) -> bool,
-) {
-    let FillPaint {
-        color: fill,
-        opacity,
-        line,
-    } = paint;
-    if fill.is_transparent() {
-        return;
-    }
-    let opaque = (fill.0 & 255 == 255 && opacity >= 1.0).then(|| rgb(fill));
-    let constant = if page_backgrounds.contains(&fill) {
-        Some(Color::Reset)
-    } else {
-        opaque
-    };
+/// Draws `fill` on the `visible` Cells it covers; each replaces what the
+/// Cell held.
+fn fill_cells(buffer: &mut Buffer, visible: Rect, fill: Fill, covered: impl Fn(u16, u16) -> bool) {
     for y in visible.y..visible.bottom() {
         for x in visible.x..visible.right() {
             if !covered(x, y) {
                 continue;
             }
             let cell = &mut buffer[(x, y)];
-            if let Some(line) = line {
-                let background = cell.bg;
-                let under_stroke = if cell.symbol() == line {
-                    cell.fg
-                } else {
-                    background
-                };
-                let foreground = opaque.unwrap_or_else(|| blend(fill, opacity, under_stroke, page));
-                cell.reset();
-                cell.set_bg(background).set_fg(foreground).set_symbol(line);
-            } else {
-                let background = constant.unwrap_or_else(|| blend(fill, opacity, cell.bg, page));
-                cell.reset();
-                cell.set_bg(background);
+            cell.reset();
+            match fill {
+                Fill::Line(line, style) => {
+                    cell.set_symbol(line).set_style(style);
+                }
+                Fill::Solid(style) => {
+                    cell.set_style(style.add_modifier(Modifier::REVERSED));
+                }
+                Fill::Clear => {}
             }
         }
     }
-}
-
-/// Blends `color` at `opacity` over a Cell's `background`; a Cell drawn with
-/// the terminal's background shows the `page` color.
-pub(crate) fn blend(color: nsh_core::Color, opacity: f32, background: Color, page: Color) -> Color {
-    let packed = color.0;
-    let alpha = (packed & 255) as f32 / 255.0 * opacity;
-    let (r, g, b) = match (background, page) {
-        (Color::Rgb(r, g, b), _) | (_, Color::Rgb(r, g, b)) => (r, g, b),
-        _ => (0, 0, 0),
-    };
-    let channel = |shift: u32, base: u8| {
-        (((packed >> shift) & 255) as f32 * alpha + f32::from(base) * (1.0 - alpha)).round() as u8
-    };
-    Color::Rgb(channel(24, r), channel(16, g), channel(8, b))
-}
-
-/// `color`'s red, green and blue as a Cell color.
-fn rgb(color: nsh_core::Color) -> Color {
-    let [r, g, b, _] = color.0.to_be_bytes();
-    Color::Rgb(r, g, b)
 }
