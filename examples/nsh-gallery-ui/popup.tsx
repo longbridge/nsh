@@ -1,6 +1,7 @@
 // The popup families' one surface and the motion they come in with.
 import type { JSX, MotionSpec, ViewStyle } from "nsh";
 import { createMotion, Easing, View } from "nsh";
+import { CheckMark } from "./icons";
 import { finish } from "./theme";
 
 /** The side of its trigger a popup is on. */
@@ -63,4 +64,34 @@ export function createPresence(side: PopupSide = "top") {
       m.opacity.set(0);
     },
   };
+}
+
+/**
+ * The mark of a checkable menu item, its `indicator`: a check (a setting)
+ * or a dot (one choice of a group) in a box before the label, so the labels
+ * of a menu stay in line. It shows the value through the indicator part
+ * around it, which takes the item's state: give the item
+ * `indicatorClass={menuIndicator}` (`group`), and the mark's `group-checked:`
+ * classes follow the item. It fades and grows in from 75 % in
+ * 150 ms as the item is checked and goes the same way, so moving a group's
+ * choice crosses over from one item to the next. Reduced motion shows it at
+ * once.
+ */
+/** The indicator part `MenuMark` goes in: a group its classes follow. */
+export const menuIndicator = "group";
+
+export function MenuMark(props: { kind?: "check" | "dot"; tint: string; size?: number }) {
+  const size = () => props.size ?? 16;
+  return (
+    <View
+      class="items-center justify-center opacity-0 scale-75 transition duration-150 ease-out motion-reduce:transition-none group-checked:opacity-100 group-checked:scale-100"
+      style={{ width: size(), height: size() }}
+    >
+      {props.kind === "dot" ? (
+        <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: props.tint }} />
+      ) : (
+        <CheckMark size={size() - 2} weight={2.25} tint={props.tint} />
+      )}
+    </View>
+  );
 }

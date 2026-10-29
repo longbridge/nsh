@@ -9,11 +9,16 @@
 //! submenus replace its items (a submenu's `back` row, and Escape or the
 //! back button, return to the items above). The items reach their menu
 //! through context, so the app arranges them freely (groups, labels,
-//! conditions).
+//! conditions). An item with `checked` is checkable (a setting, or one
+//! choice of a group by its `role`): the value is the app's, its indicator
+//! a part that takes the item's state.
 
 use std::{rc::Rc, time::Duration};
 
-use nsh_core::{ContextMenuEvent, TouchEvent, TouchPhase, element::Style, prelude::*};
+use nsh_core::{
+    AccessibilityState, Checked, ContextMenuEvent, TouchEvent, TouchPhase, element::Style,
+    prelude::*,
+};
 
 use crate::popup::{
     OpenChangeReason, OpenState, PopupPresence, SheetMotion, StateLooks, lifecycle,
@@ -505,11 +510,36 @@ pub struct MenuItemProps {
     /// it is dimmed.
     #[prop(default)]
     pub disabled: Prop<bool>,
+    /// Checked or not, which makes it a checkable item (a setting the menu
+    /// shows, one choice of a group): screen readers say whether it is
+    /// checked, and `checked:` styles apply to it and its indicator while
+    /// it is. The app owns the value: choosing the item reports `onSelect`,
+    /// and the item shows the value the app passes back.
+    pub checked: Prop<Option<bool>>,
+    /// The style while checked, as `checked:` classes.
+    #[prop(default)]
+    pub checked_style: Prop<Style>,
+    /// What it is for screen readers: `"menuitemcheckbox"` while `checked`
+    /// is set, `"menuitem"` otherwise; `"menuitemradio"` for one choice of a
+    /// group of items, which the app checks one at a time.
+    pub role: Prop<Option<AccessibilityRole>>,
     /// Choosing it closes the menu (default true).
     #[prop(default = true)]
     pub close_on_select: Prop<bool>,
     /// What screen readers say, when its content is not enough.
     pub accessibility_label: Prop<Option<SharedString>>,
+    /// The Tailwind classes of the indicator, the part around the mark
+    /// before the content; `checked:` and `disabled:` follow the item, and
+    /// with `group` the mark's `group-checked:` classes do too.
+    pub indicator_class: Prop<Option<SharedString>>,
+    /// The style of the indicator, over `indicatorClass`.
+    #[prop(default)]
+    pub indicator_style: Prop<Style>,
+    /// The content of the indicator: the mark that shows the item checked
+    /// (a check, a radio's dot), the app's element. It stays while the
+    /// value changes; the indicator's `checked:` styles (or the mark's
+    /// `group-checked:`) show and hide it.
+    pub indicator: Prop<Option<Slot>>,
     /// The content.
     pub children: Prop<Children>,
 }
@@ -517,28 +547,72 @@ pub struct MenuItemProps {
 /// The events of a [`MenuItem`].
 #[derive(Debug, Clone, PartialEq, Event)]
 pub enum MenuItemEvent {
-    /// It was chosen.
+    /// It was chosen (a checkable item asks for the other value: the app
+    /// sets `checked`).
     Select,
 }
 
 /// An item of a `Menu`, `ContextMenu` or `Submenu`: pressing it chooses it
-/// (`onSelect`) and closes the menu. Its look is the app's: `class`,
-/// `style` and the `active:`, `hover:`, `disabled:` states.
+/// (`onSelect`) and closes the menu (unless `closeOnSelect` is false). With
+/// `checked` it is a checkable item, alone or one choice of a group (`role`
+/// `"menuitemradio"`), as `gpui-component`'s `PopupMenuItem::checked`. Its
+/// look is the app's: `class`, `style`, the `active:`, `hover:`,
+/// `disabled:` and `checked:` states, and the `indicator` it shows checked
+/// with.
 #[component]
 pub fn MenuItem(props: MenuItemProps, cx: Scope<MenuItemEvent>) -> impl IntoElement {
     let menu = use_context::<MenuContext>();
     let hover = menu.clone();
     let chosen = menu.clone();
     let sheet = menu.filter(|m| m.sheet);
+    let (checked, disabled) = (props.checked, props.disabled);
+    let (indicator, children) = (props.indicator, props.children);
+    let (indicator_class, indicator_style) = (props.indicator_class, props.indicator_style);
+    // The indicator is a part that takes the item's states, as
+    // `Checkbox`'s: it is no checkable element of its own for screen
+    // readers, and only it restyles when the value changes.
+    let parts = move || {
+        vec![
+            // A view of its own, as `Checkbox`'s indicator: the projected
+            // states and the app's classes land on one node, which the
+            // mark inside reads as a group.
+            when(
+                move || indicator.get().is_some(),
+                move || {
+                    view()
+                        .project_checked(move || checked.get() == Some(true))
+                        .project_disabled(disabled)
+                        .app_class(indicator_class)
+                        .inline_style(indicator_style)
+                        .child(indicator.place(|mark| mark))
+                },
+            )
+            .into_element(),
+            children.into_element(),
+        ]
+    };
     let content = match sheet.clone() {
         // Only the items of the level shown are there (for screen readers
         // and tests too).
-        Some(m) => when(move || m.shown(), move || props.children).into_element(),
-        None => props.children.into_element(),
+        Some(m) => vec![when(move || m.shown(), parts).into_element()],
+        None => parts(),
     };
     view()
-        .role(AccessibilityRole::Menuitem)
-        .disabled(props.disabled)
+        .role(move || {
+            props.role.get().unwrap_or(if checked.get().is_some() {
+                AccessibilityRole::MenuItemCheckbox
+            } else {
+                AccessibilityRole::Menuitem
+            })
+        })
+        .accessibility_state(move || AccessibilityState {
+            checked: checked
+                .get()
+                .map(|on| if on { Checked::True } else { Checked::False }),
+            ..AccessibilityState::default()
+        })
+        .checked_style(props.checked_style)
+        .disabled(disabled)
         .optional_label(props.accessibility_label)
         .when_some(sheet, |v, m| {
             v.style_when(move || !m.shown(), |s| s.hidden())
@@ -557,7 +631,7 @@ pub fn MenuItem(props: MenuItemProps, cx: Scope<MenuItemEvent>) -> impl IntoElem
                 (m.close)(OpenChangeReason::Select);
             }
         })
-        .child(content)
+        .children(content)
 }
 
 /// The props of [`MenuSeparator`].

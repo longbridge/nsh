@@ -976,6 +976,17 @@ Their callbacks are one set, as `Dialog`'s (`popup.rs`: `OpenState`, `lifecycle`
   set to `false` can ask first and close itself. A menu's chosen item is no cancel (`"select"`); Escape in a
   sheet's submenu goes back a level and is none either.
 
+**Checkable menu items.** A `MenuItem` with `checked` (`Prop<Option<bool>>`, `None` a plain item) is a
+`menuitemcheckbox`, or a `menuitemradio` by its `role`, with `accessibilityState.checked`, as `gpui-component`'s
+`PopupMenuItem::checked`; the value is the app's and `onSelect` is the press, which closes the menu unless
+`closeOnSelect` is false. The item's `checked:` styles (`checkedStyle`) follow that state, and so does its
+indicator, as `Checkbox`'s: a view of its own around the slot, placed before the content and styled by
+`indicatorClass` / `indicatorStyle`, takes the item's checked and disabled states as a part of it (`Interactive::project_checked`,
+`project_disabled`), so it is no checkable element of its own. Projected states style that node only: the app's mark
+inside (`indicator`) follows them through `group-checked:` with `group` on the part, or is shown and hidden by the
+part's own `checked:` styles. A new value rebinds that item's state and its indicator's projection alone, so only the
+item and its indicator are sent (`crates/nsh-base/tests/base/menu.rs`).
+
 **Presence.** A popup's entrance and exit are the app's transitions between its look and its states' looks, as a
 toast's `transitionStatus` and Base UI's `data-starting-style` / `data-ending-style` (gpui-kit's popups have no exit):
 `Popover`'s, `Menu`'s and `ContextMenu`'s `popupStartingClass` / `popupStartingStyle` and `popupEndingClass` /

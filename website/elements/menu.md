@@ -105,6 +105,100 @@ On the desktops the secondary button opens it where the pointer is. On touch scr
 opens it as a sheet; the trigger's own presses and the scroll views around it keep working, and moving the finger
 cancels the hold.
 
+## Checkable items
+
+`checked` makes an item checkable: a setting the menu shows ("Show sidebar") or, with `role="menuitemradio"`, one
+choice of a group ("Sort by"). The value is yours: choosing the item calls `onSelect`, you set the next value, and the
+item shows it. While it is checked, its `checked:` classes and `checkedStyle` apply, and so do those of its
+indicator: the part before its content (`indicatorClass`, `indicatorStyle`) around the mark you give it
+(`indicator`). The mark is made once and kept; the indicator's `checked:` classes show and hide it, or the mark's own
+`group-checked:` classes with `group` in `indicatorClass`. `closeOnSelect={false}` keeps the menu open, so a setting
+shows its new value at once.
+
+```rust tabs
+use nsh_base::{menu, menu_item};
+use nsh_core::{element::StyleRefinement, prelude::*};
+
+fn view_menu(sidebar: Signal<bool>, sort: Signal<&'static str>) -> impl IntoElement {
+    // The indicator part shows the mark while the item is checked.
+    let part = |s: StyleRefinement| s.w(px(16.0)).opacity(0.0).checked(|s| s.opacity(1.0));
+    let by = move |label: &'static str| {
+        menu_item()
+            .role(AccessibilityRole::MenuItemRadio)
+            .checked(move || Some(sort.get() == label))
+            .indicator_style(part)
+            .indicator(text("✓"))
+            .on_select(move || sort.set(label))
+            .flex_row()
+            .gap_2()
+            .px_3()
+            .py_2()
+            .child(text(label))
+    };
+    menu()
+        .trigger(view().px_3().py_2().child(text("View")))
+        .child(
+            menu_item()
+                .checked(move || Some(sidebar.get()))
+                .close_on_select(false)
+                .indicator_style(part)
+                .indicator(text("✓"))
+                .on_select(move || sidebar.set(!sidebar.get_untracked()))
+                .flex_row()
+                .gap_2()
+                .px_3()
+                .py_2()
+                .child(text("Show sidebar")),
+        )
+        .child(by("Name"))
+        .child(by("Date modified"))
+}
+```
+
+```tsx tabs
+import { Text, View, signal } from "nsh";
+import { Menu, MenuItem } from "nsh/base";
+
+// The indicator part shows the mark while the item is checked.
+const part = "w-4 opacity-0 transition-opacity checked:opacity-100";
+
+function ViewMenu() {
+  const sidebar = signal(true);
+  const sort = signal("Name");
+  return (
+    <Menu popupClass="min-w-48 rounded-lg bg-white p-1 shadow-lg" trigger={<View class="px-3 py-2"><Text>View</Text></View>}>
+      <MenuItem
+        checked={sidebar()}
+        closeOnSelect={false}
+        indicatorClass={part}
+        indicator={<Text>✓</Text>}
+        onSelect={() => sidebar.set(!sidebar())}
+        class="flex-row gap-2 rounded-md px-3 py-2 hover:bg-gray-100"
+      >
+        <Text>Show sidebar</Text>
+      </MenuItem>
+      <Each of={["Name", "Date modified", "Size"]}>
+        {(by) => (
+          <MenuItem
+            role="menuitemradio"
+            checked={sort() === by()}
+            indicatorClass={part}
+            indicator={<Text>✓</Text>}
+            onSelect={() => sort.set(by())}
+            class="flex-row gap-2 rounded-md px-3 py-2 hover:bg-gray-100 checked:font-semibold"
+          >
+            <Text>{by()}</Text>
+          </MenuItem>
+        )}
+      </Each>
+    </Menu>
+  );
+}
+```
+
+A mark at the trailing edge goes in the content instead, styled with `group-checked:` classes under `group` on the
+item.
+
 ## Entrance and exit
 
 On the desktops the popup comes and goes with your transitions, as a [Popover](./popover.md#entrance-and-exit)'s:
@@ -164,9 +258,14 @@ it in `onOpenChange({ open, reason })`: `"triggerPress"`, `"select"`, `"pressOut
 | Prop | Rust | Type | Default | Description |
 |---|---|---|---|---|
 | `disabled` | `.disabled(..)` | `boolean` | `false` | Not chosen; `disabled:` styles apply. |
+| `checked` | `.checked(..)` | `boolean` | none | Checked or not, which makes it a checkable item; owned by the app. |
+| `checkedStyle` | `.checked_style(..)` | `StyleProp<ViewStyle>` | none | Its style while checked, as `checked:` classes. |
+| `role` | `.role(..)` | `AccessibilityRole` | `"menuitemcheckbox"` with `checked`, else `"menuitem"` | What it is for screen readers; `"menuitemradio"` for one choice of a group. |
+| `indicatorClass`, `indicatorStyle` | `.indicator_class(..)`, `.indicator_style(..)` | `string`, `StyleProp<ViewStyle>` | none | The indicator, the part before its content; its `checked:` and `disabled:` classes follow the item. |
+| `indicator` | `.indicator(..)` | `JSX.Element` | none | The mark inside the indicator. |
 | `closeOnSelect` | `.close_on_select(..)` | `boolean` | `true` | Choosing it closes the menu. |
 | `accessibilityLabel` | `.accessibility_label(..)` | `string` | none | What screen readers say, when the content is not enough. |
-| `children`, `class`, `style` | `.child(..)`, style methods | | none | Its content and look, with `hover:` and `active:` states. |
+| `children`, `class`, `style` | `.child(..)`, style methods | | none | Its content and look, with `hover:`, `active:` and `checked:` states. |
 
 ### Submenu
 
@@ -188,10 +287,11 @@ it in `onOpenChange({ open, reason })`: `"triggerPress"`, `"select"`, `"pressOut
 | `onClose` (`Menu`, `ContextMenu`) | `.on_close(\|\| ..)` | It is gone: as a sheet once it went, as a popup after its exit. Also when the app closed it. |
 | `onPosition` (`Menu`, `ContextMenu`) | `.on_position(\|e\| ..)` | Desktops: the popup was placed: `placement` (the side it went on), `bounds`, `available`. |
 | `onCancel` (`Menu`, `ContextMenu`) | `.on_cancel(\|\| ..)` | The user tried to close it without choosing (Escape or back, a press outside or on the backdrop). |
-| `onSelect` (`MenuItem`) | `.on_select(\|\| ..)` | The item was chosen. |
+| `onSelect` (`MenuItem`) | `.on_select(\|\| ..)` | The item was chosen; a checkable item asks for its other value. |
 
 ## Accessibility
 
 The popup or sheet is a menu and its items menu items for screen readers; the trigger tells whether the menu is
-expanded. In TSX the trigger is the element you pass: it takes the presses and the expanded state itself, so its own
+expanded. A checkable item is a checkbox or radio menu item, read as checked or not checked; its indicator is part of
+the item. In TSX the trigger is the element you pass: it takes the presses and the expanded state itself, so its own
 `active:` classes and `activeStyle` show while it is pressed, and its own `onPress` runs too. Only the items of the level shown are on screen, so screen readers read what is there.
