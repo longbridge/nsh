@@ -215,7 +215,7 @@ if (host.available()) {
 | 文件（`fs/promises`） | Promise 以 `ERR_ACCESS_DENIED` 被 reject，`permission` 为 `"fs"`，`resource` 为该路径；不会访问磁盘。 |
 | 进程（`process`） | `run` 被 reject，`spawn` 和 `exit` 抛出，错误为 `ERR_ACCESS_DENIED`，`permission` 为 `"process"`，`resource` 为该命令（`exit` 为 `"exit"`）；不会启动子进程。 |
 | TCP socket（`net.connect`） | Promise 以 `ERR_ACCESS_DENIED` 被 reject，`permission` 为 `"network"`，`resource` 为 `"host:port"`；发生在任何 DNS 查询之前。 |
-| WebSocket | `WebSocket.connect` 以 `ERR_ACCESS_DENIED` 被 reject，`permission` 为 `"network"`，`resource` 为该 URL；全局 `WebSocket` 像连接失败时那样先触发 `error`，再触发 `close`（code 为 1006）。 |
+| WebSocket | `websocket` 模块的 `connect` 以 `ERR_ACCESS_DENIED` 被 reject，`permission` 为 `"network"`，`resource` 为该 URL；全局 `WebSocket` 像连接失败时那样先触发 `error`，再触发 `close`（code 为 1006）。 |
 
 [标准模块](../modules/standard-modules.md#失败)的错误带有 `code` `"ERR_ACCESS_DENIED"`，应用借此区分被拒绝与操作失败；
 错误的 `permission` 和 `resource` 指出所需的能力和所请求的对象。[`nsh`](../modules/nsh.md) 的模块也以同样方式拒绝：它们的

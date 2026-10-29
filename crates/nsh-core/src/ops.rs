@@ -208,7 +208,7 @@ events! {
     ContentSizeChange = "onContentSizeChange": "The size of an input's text changed (payload: `width`, `height`; raised by the core).",
     BackRequest = "onBackRequest" as "onBackPress": "The user pressed back on a screen (the header's back button, Android back, the desktops' back keys and mouse button, the browser's back), whether or not `popOnBack` let it pop.",
     NativeEvent = "onNativeEvent": "A registered native component emitted an event (payload: [`EventPayload::Native`]).",
-    Clipboard = "onClipboard": "A clipboard read finished (root only; payload: `id`, `has`: whether it holds what was asked; for text `text`, unless only `has` was asked; for an image `uri` (a `data:` URI), `width` and `height`, unless only `has` was asked; for files `files`, their `file:` URLs one per line).",
+    Clipboard = "onClipboard": "A clipboard read finished (root only; payload: `id`, `has`: whether it holds what was asked; for text `text`, unless only `has` was asked; for an image `uri` (a `data:` URI), `width` and `height`, unless only `has` was asked, or `tooLarge` (its size in bytes) for one over `platform::clipboard::MAX_IMAGE_BYTES`; for files `files`, their `file:` URLs one per line).",
     KeyCommand = "onKeyCommand": "A key matched a binding of `keymap` (`nsh`) (root only; payload: the binding's id, [`crate::keymap::KeyBinding::id`]).",
     Menu = "onMenu": "A menu item was chosen: the application menu's or a context menu's (root only; desktops; payload: `id`), or a context menu closed (`closed`: true, after its item).",
     MouseEnter = "onMouseEnter": "The mouse came over the view or a view inside it (never on touches; payload: [`EventPayload::Mouse`]).",
@@ -1685,7 +1685,9 @@ pub enum Command {
     /// Read the image on the system clipboard and report it as
     /// [`EventKind::Clipboard`] `id` (on the root): `has` and, unless
     /// `has_only`, the image as a `data:` URI (`uri`) and its size in
-    /// pixels (`width`, `height`).
+    /// pixels (`width`, `height`), or for an image over
+    /// [`crate::platform::clipboard::MAX_IMAGE_BYTES`] its size in bytes
+    /// (`tooLarge`; [`crate::platform::clipboard::image_answer`]).
     ReadClipboardImage {
         /// The request.
         id: u32,
