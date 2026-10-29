@@ -498,6 +498,9 @@ pub(super) struct Components {
     /// While a view's slot content is matched: the nested component's host
     /// and the slot (its regions are the slot's).
     pub(super) filling: Option<(NodeId, &'static str)>,
+    /// A node moved in the tree since the order watches last looked
+    /// (`core/watch.rs`): an app's keyed reorder of their elements.
+    pub(super) moved: bool,
     /// The lists components place (the glue's, of `Items` props) -> the
     /// row function the component's view gave last, and the number of rows
     /// its wrappers last saw.
@@ -625,6 +628,7 @@ impl Default for Components {
             styles: FxHashMap::default(),
             merges: FxHashMap::default(),
             filling: None,
+            moved: false,
             lists: FxHashMap::default(),
             environment: Environment::default(),
             executor: Rc::new(Executor::default()),

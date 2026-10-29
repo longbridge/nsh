@@ -10,7 +10,7 @@ the styled layer, GPUI Kit's `gpui-component`, is never part of NSH. The look of
 come from two places:
 
 - **`nsh/base`**: unstyled base components of `gpui-base`'s scope, the crate `nsh-base` (`crates/nsh-base`,
-  `nsh_base::registry()`): `Button`, `Link` (a press target that opens its `href`: through the core's `openUrl` flow, or the app's `onOpen` with `openWith="app"`), `Checkbox`, `Radio`, `RadioGroup`, `Switch`, `Tab`, `Tabs`, `Toggle`, `ToggleGroup`, `Select` (one value from a list: "Popups" below), `Combobox` (one value or several from the same list), `Calendar` (a date or a range from months of days), `TimeField` (a time of day by segments), `DatePicker` (a calendar and a time field in a popup: "Popups" below), `Collapsible`, `Accordion` with `AccordionItem`, `AccordionHeader`, `AccordionTrigger` and `AccordionPanel`, `Progress`, `Slider`, `Scrollbar` ("Scroll bars" below), `ColorPicker` with `ColorArea`, `ColorSlider`, `ColorField`, `ColorSwatch` and `ColorEyeDropper` (a color in RGB, HSL, HSB or OKLCH, its parts laid out by the app), `NumberInput`, `OtpInput`, `Pagination` (the pages of a set: Previous, the pages around the current one, ellipses, Next; its places made once, a page change changing what they show), `Table` with `TableHeader`, `TableBody`, `TableFooter`, `TableRow`, `TableHead`, `TableCell` and `TableCaption` (a table's accessibility roles around the app's rows), `TextView` (`text-view.md`), `ResizablePanelGroup` and `ResizablePanel`, `DockArea`
+  `nsh_base::registry()`): `Button`, `Link` (a press target that opens its `href`: through the core's `openUrl` flow, or the app's `onOpen` with `openWith="app"`), `Checkbox`, `Radio`, `RadioGroup`, `Switch`, `Tab`, `Tabs`, `Toggle`, `ToggleGroup`, `Toolbar`, `ToolbarGroup`, `ToolbarSeparator`, `Select` (one value from a list: "Popups" below), `Combobox` (one value or several from the same list), `Calendar` (a date or a range from months of days), `TimeField` (a time of day by segments), `DatePicker` (a calendar and a time field in a popup: "Popups" below), `Collapsible`, `Accordion` with `AccordionItem`, `AccordionHeader`, `AccordionTrigger` and `AccordionPanel`, `Progress`, `Slider`, `Scrollbar` ("Scroll bars" below), `ColorPicker` with `ColorArea`, `ColorSlider`, `ColorField`, `ColorSwatch` and `ColorEyeDropper` (a color in RGB, HSL, HSB or OKLCH, its parts laid out by the app), `NumberInput`, `OtpInput`, `Pagination` (the pages of a set: Previous, the pages around the current one, ellipses, Next; its places made once, a page change changing what they show), `Table` with `TableHeader`, `TableBody`, `TableFooter`, `TableRow`, `TableHead`, `TableCell` and `TableCaption` (a table's accessibility roles around the app's rows), `TextView` (`text-view.md`), `ResizablePanelGroup` and `ResizablePanel`, `DockArea`
   (`dock.md`), `Editor` (a code editor, `editor.md`), `DiffView` (the changes between two texts, `diff.md`), `DataTable` (a table over any number of rows and columns, `data-table.md`), the popups on the core's overlays (`Popover`,
   `Menu` with `MenuItem`, `MenuSeparator` and `Submenu`, `ContextMenu`, `Tooltip`, `Sheet`: "Popups" below), toasts
   (`Toast`, `ToastStack` and the class `ToastManager`: "Toasts" below) and the
@@ -336,6 +336,7 @@ reasons: `reactive-components.md`.
   | `Animated.sequence / parallel / stagger / delay / loop`, `.start(cb)` / `.stop()` / `.reset()` | `Animation::sequence([Animation::timing(&v, to, Timing::new(ms, easing)), Animation::delay(ms), Animation::spring(..)])`, `::parallel(..)` (`.stop_together(false)`), `::stagger(ms, ..)`, `.looped(iterations)` (`.reset_before_iteration(false)`); `a.start()` returns an `AnimationEnd`, `a.stop()`, `a.reset()` |
   | `keymap.bind("mod+k", f, { when, repeat })`, `keymap.label("mod+k")` (`nsh`'s `keymap`) | `on_key("mod+k", \|keystroke\| ..)` / `on_key_with(k, KeyOptions { when, repeat }, f)`, bound while the current owner lives; `key_label("mod+k")` (`⌘K`, `Ctrl+K`). The core joins the views' bindings to JS's in the root's one table (a view's after JS's: it wins on the same keystroke) and runs a view's handler itself when the root's `KeyCommand` reports it; their ids start at 2^31, above JS's (`element/keys.rs`) |
   | (none: a JS app's scroll view or list is its own; Rust views watch one they did not make) | `watch_scroll(target, \|e: &ScrollEvent\| ..)` (offset, content size and viewport, when first found and on every change, whoever listens to its `on_scroll`), while the current owner lives; `target` (`\|\| r.node()`) is resolved again in every commit, so a ref set later in the render is found; `NodeRef(id).scroll_to(offset, animated)` scrolls a node such a target names. The core runs a scroll watch at the end of the commit round that changed what it reports, and another round sends what it changed; a hover watch has the node listen to the pointer, as a hint's anchor (`element/watch.rs`, `core/watch.rs`; `nsh_base::Scrollbar`) |
+  | (none: JS's elements are in the order JS makes them) | `nsh_core::element::watch_order(\|\| refs, \|order: &[usize]\| ..)` (`#[doc(hidden)]`, for `nsh-base`'s roving focus; not in the prelude), while the current owner lives: the order the tree has the elements in, as indices into the list `refs` gives (those no node in the tree carries last), heard only when it differs from the list's; the core looks at the end of the commit round the watch is made in, of one after the returned `OrderWatch` is `invalidate()`d (an item came) and of one that moved a node (`Core::insert` of a node with a parent: an app's keyed reorder), and another round sends what the handler changed. A round that moved and invalidated nothing costs nothing (`element/watch.rs`, `core/watch.rs`) |
   | `BackHandler.on("press", f)`, the function it returns | `on_back_press(\|\| -> bool)`: registered while the current owner lives (only while a signal holds: inside an `effect`). After modals and before stacks, the views' listeners run newest first, then JS's; when none returns true the core sends `Command::Back`: the top stack pops, else the app exits (`element/back.rs`) |
   | `<ErrorBoundary fallback>` | `catch_error(\|\| view, \|error, reset\| fallback)` |
   | a class TS uses (`new Tally(3)`, `tally.add(2)`, `tally.count`, `await tally.save(p)`) | `#[class]` on the struct and its `impl`, `registry.class::<Tally>()`: synchronous members run in the call, `async fn`s return promises |
@@ -893,16 +894,30 @@ what changed.
 - Keys while the control has the keyboard focus: a signal of the focus (`on_focus` / `on_blur`), and
   `keys::bind_while(focused, keys, handler)`, which binds them in an effect that returns early while it is false,
   so the bindings of the global keymap come and go with the focus (`DataTable` does the same by hand).
-- Roving focus (`roving.rs`, WAI-ARIA's tab list, radio group and toolbar): `Tabs`, `RadioGroup` and `ToggleGroup`
-  provide a `Roving` through context, and each `Tab` / `Radio` / `Toggle` under one registers its ref, its current
-  state (`selected`, `checked`, `pressed`), its `disabled` (a toggle's or its group's) and what moving to it does (a
-  press, `Change(true)`, nothing for a toolbar's toggle: the toolbar pattern only moves the focus); an item outside a
-  group stays a stop of its own.
-  Only the stop is `focusable`: the item the focus is on, else the current one, else the first enabled, so Tab
-  passes the group in one step. While an item has the focus the group binds its arrows (and Home / End for tabs and
-  toolbars); a key sets the target as the focused item first, which makes it the stop (its `focusable` mounts before the
-  `focus()` command of the same batch, as a ref's `focus()` only moves to stops), focuses it and activates it.
-  Items are in the order they registered: the order the app's children were made.
+- Roving focus (`roving.rs`, WAI-ARIA's tab list, radio group and toolbar): `Tabs`, `RadioGroup`, `ToggleGroup` and
+  `Toolbar` provide a `Roving` through context, and each `Tab` / `Radio` under one, and each `Toggle`, `Button` and
+  `Link` under a toolbar or a toggle group (a `Bar`), registers its ref, its current state (`selected`, `checked`,
+  `pressed`; none for a toolbar's items), its `disabled` (its own or its bar's) and what moving to it does (a press,
+  `Change(true)`, nothing for a toolbar's items: the toolbar pattern only moves the focus); an item outside a group
+  stays a stop of its own. A `Menu`'s or `Popover`'s trigger in a bar is one of its items too (`bar_trigger`): the
+  popup reads the bar where it is made and registers its trigger slot's element under the ref it anchors to, so the
+  view the app puts there takes the stop's `focusable`, the focus listeners and the bar's `disabled` (a `Button` inside
+  a trigger would be a second pressable: triggers are plain views, as everywhere). A `ToggleGroup` or `ToolbarGroup` inside a toolbar provides the toolbar's `Roving` again
+  (with its own `disabled` added), so its items are the toolbar's and the toolbar stays one stop. A popup's content
+  (`Popover`, `Sheet`, `Menu`, the dropdown of `popup.rs`) leaves the bar (`leave_bar`): its controls are stops of
+  their own though its trigger is a toolbar's item.
+  Only the stop is `focusable`: the item the focus is on, else the item it last left (a toolbar) or the current one
+  (the others), else the first enabled, so Tab passes the group in one step. Each item's `focusable` reads a flag of
+  its own, which one effect of the group sets when the stop changes, so a move runs the bindings of the item left and
+  the item reached only, however many items there are. While an item has the focus the group binds its arrows (both
+  pairs, and Home / End for tabs and toggle groups; the axis's pair and Home / End for a toolbar, leaving the other
+  pair to its items); a key sets the target as the focused item first, which makes it the stop (its `focusable` mounts
+  before the `focus()` command of the same batch, as a ref's `focus()` only moves to stops), focuses it and activates
+  it. Items are in the tree's order, not the order they registered: the core makes components in an order of its own
+  (an item inside a `ToolbarGroup`, or a popover's trigger, renders after the toolbar's later children), so the group
+  watches its items' order (`watch_order`) and invalidates the watch as an item comes; the core sorts their refs by
+  their place in the tree at the end of that round, and of any round that moved a node (an app's keyed reorder of the
+  items), and the group's flags change in the same batch.
   `Roving::current` is the current item's ref, tracked: `Tabs` points its indicator at it.
 - A part that follows another element (`Tabs`' indicator): a view with `View::follow(move || list.current())`, absolute
   in the list and first among its children (drawn behind the tabs), `pointer-events: none`. The core spans the

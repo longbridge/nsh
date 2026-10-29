@@ -4060,6 +4060,7 @@ impl<M: TextEngine> Core<M> {
         let child = self.key(child_id)?;
         if self.nodes[child as usize].parent != NO_KEY {
             self.input_bar_moves(child);
+            self.components.moved = true;
         }
         let mut before = before.map(|b| self.key(b)).transpose()?;
         // Appended below the built-in bar, which stays on top.

@@ -977,6 +977,39 @@ impl super::NodeRef {
     }
 }
 
+/// Watches the order the tree has the elements `elements` gives in, while
+/// the current owner lives: `handler` hears it as indices into that list
+/// (`[2, 0, 1]`: the third element comes first; elements carried by no
+/// node in the tree last, in the order given) whenever it differs from the
+/// list's own. `nsh-base`'s roving focus keeps a group's items (a
+/// toolbar's) in order this way: components render in the order the core
+/// makes them, which is not the tree's (an item inside a group renders
+/// after the toolbar's later children).
+///
+/// The core looks at the end of a commit round: in the round the watch is
+/// made in, after [`super::OrderWatch::invalidate`] (an element came), and
+/// after a round that moved a node (an app's keyed reorder), asking
+/// `elements` untracked; what the handler changes goes out in the same
+/// batch. A round that moved nothing and invalidated nothing costs nothing.
+#[doc(hidden)]
+pub fn watch_order(
+    elements: impl Fn() -> Vec<super::ElementRef> + 'static,
+    handler: impl Fn(&[usize]) + 'static,
+) -> super::OrderWatch {
+    let owner = Owner::current();
+    let handler = Rc::new(move |order: &[usize]| owner.run(|| handler(order)));
+    let watches = executor().watches.clone();
+    let (id, dirty) = watches.borrow_mut().add_order(Rc::new(elements), handler);
+    let weak = Rc::downgrade(&watches);
+    cleanup(move || {
+        if let Some(watches) = weak.upgrade() {
+            let removed = watches.borrow_mut().remove_order(id);
+            drop(removed);
+        }
+    });
+    super::OrderWatch::new(dirty)
+}
+
 fn add_watch(target: Rc<dyn Fn() -> Option<NodeId>>, handler: super::watch::ScrollHandler) {
     let watches = executor().watches.clone();
     let id = watches.borrow_mut().add(target, handler);
