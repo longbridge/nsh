@@ -346,7 +346,8 @@ fn composition_shows_its_text_without_changing_the_document() {
     keys(&mut app, &["end"]);
     compose(&mut app, true, "に");
     compose(&mut app, true, "にほ");
-    see(&mut app, "にほ");
+    // In the line, after the caret, in the paragraph's typography.
+    see(&mut app, "abにほ");
     see(&mut app, &tree(r#"doc(paragraph("ab"))"#));
     see(&mut app, "Sel 3-3");
 }
@@ -361,7 +362,7 @@ fn committing_a_composition_inserts_its_text_as_one_undo_step() {
     compose(&mut app, false, "");
     see(&mut app, &tree(r#"doc(paragraph("ab日本"))"#));
     see(&mut app, "Sel 5-5");
-    app.wait_for_gone("text:にほん", Duration::from_secs(5))
+    app.wait_for_gone("text:abにほん", Duration::from_secs(5))
         .unwrap();
     keys(&mut app, &["mod+z"]);
     see(&mut app, &tree(r#"doc(paragraph("ab"))"#));
@@ -374,9 +375,9 @@ fn a_cancelled_composition_leaves_the_document() {
     focus(&mut app);
     keys(&mut app, &["end"]);
     compose(&mut app, true, "にほ");
-    see(&mut app, "にほ");
+    see(&mut app, "abにほ");
     compose(&mut app, false, "");
-    app.wait_for_gone("text:にほ", Duration::from_secs(5))
+    app.wait_for_gone("text:abにほ", Duration::from_secs(5))
         .unwrap();
     see(&mut app, &tree(r#"doc(paragraph("ab"))"#));
     see(&mut app, "Sel 3-3");
@@ -451,6 +452,14 @@ fn the_placeholder_shows_in_the_current_empty_block() {
     let mut app = start_configured(paragraphs(&["", ""]), Some("Write here"), true);
     see(&mut app, "Sel 1-1");
     see(&mut app, "\u{200b}Write here");
+}
+
+#[test]
+fn the_placeholder_leaves_an_empty_line_blank_beside_content() {
+    let mut app = start_configured(paragraphs(&["", "ab"]), Some("Write here"), true);
+    see(&mut app, "Sel 1-1");
+    app.wait(Duration::from_millis(100)).unwrap();
+    assert!(!app.shows("\u{200b}Write here"));
 }
 
 #[test]
