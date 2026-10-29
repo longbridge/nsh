@@ -18,7 +18,8 @@ covers [fs/promises] rename
 covers [fs/promises] readlink
 covers [net] default
 covers [net] connect
-covers [websocket] WebSocket
+covers [websocket] default
+covers [websocket] connect
 covers [globals] WebSocket
 covers [net] Socket
 covers [websocket] WebSocketConnection

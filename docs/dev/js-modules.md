@@ -129,7 +129,7 @@ and with `nsh-engine`'s `js` (which every native platform enables); a runtime bu
 | `process` | `nsh_core::runtime::process`, `nsh-js` `standard/process.rs` | `run`, `spawn`, `exit`, `platform`, `arch`, `nextTick`, `ChildProcess`, default (also `env` / `dataDir` getters); the default object is the global `process` |
 | `net` | `nsh_core::runtime::net` | `connect`, `Socket`, default |
 | `console` | `nsh-js` `standard/console.rs` | default: the VM's `console` (`log`, `info`, `debug`, `warn`, `error`) |
-| `websocket` | `nsh_core::runtime::websocket`, `nsh-js` `standard/websocket.rs` (the global) | `WebSocket` (`connect`), `WebSocketConnection`; the global `WebSocket` constructor |
+| `websocket` | `nsh_core::runtime::websocket`, `nsh-js` `standard/websocket.rs` (the global) | `connect`, `WebSocketConnection`, default; the global `WebSocket` constructor |
 | `buffer`, `crypto`, `path`, `url`, `zlib` | LLRT, vendored by `quickjs-jit-stdlib` (`standard/mod.rs`) | their LLRT exports, projected by `standard/declarations.rs`; `Buffer` and `crypto` are globals |
 
 `process.platform`, `process.arch`, `os.platform()` and `os.arch()` are Rust's `std::env::consts` values, as
@@ -154,8 +154,14 @@ The work runs as core tasks on the engine's tokio runtime (`fs/promises` on its 
 `ChildProcess` in the call; a core task posts the child's output to the `Callback`s `on(..)` keeps; `nsh-js`
 adds what needs the VM: the global `process` (the module's default object, one per VM) and `nextTick`, a JS job.
 `websocket`'s URL, options, grant (`Access::allows_websocket`) and limits are checked in the call, the handshake
-uses the configured `WebSocketTransport` (browser WebSocket on web, the native transport elsewhere). On native hosts a task spawned per connection drives the socket (answering pings, keeping up to eight unread
-messages). Native TLS uses the host's installed crypto provider, or a connection-local ring provider, with
+uses the configured `WebSocketTransport` (browser WebSocket on web, the native transport elsewhere). On native hosts a task spawned per connection drives the socket (answering pings, keeping what arrives until it
+is read). Unread messages are back pressure: while 8 messages or 8 MiB wait, the native task does not poll the
+socket (TCP's flow control holds the peer back, and pings wait for reading to resume) and a host transport is
+paused (`WebSocketTask::pause`; the browser's page holds its socket's events, `web/nsh.js`), so a connection keeps
+at most one message of 8 MiB past the threshold. A clean close (the peer's close frame, or the app's
+`close(code, reason)` and the peer's reply) makes `read()` resolve `null` after the messages before it, with
+`closeCode` / `closeReason` the frame's (1005 without a code, 1006 for a connection that ended without one); only a
+failure rejects, with a `code`. Native TLS uses the host's installed crypto provider, or a connection-local ring provider, with
 WebPKI trust roots; opening a connection leaves the process-wide provider unchanged. Connections count under the VM's `Quotas` kind `runtime::WEBSOCKETS`, which the global `WebSocket`
 (`nsh-js` `standard/websocket.rs`, made on first use) shares. `os.homedir()` and `process.dataDir` are metadata
 and grant no file access. On WebAssembly, `os.homedir()` throws `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` and `process.env` is an empty object;
