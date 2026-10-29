@@ -335,6 +335,11 @@ Steps name views with **selectors**, written as Playwright's:
 | `view:<id>` | The view with that id in `--trace` output. |
 | anything else | A `testID`, else a label, else a text, as written. |
 
+A part that starts with a lowercase word and a colon names a prefix (`id`, `label`, `role`, `text`, `view`), so
+`tapped: solo` is a step error that lists them. A text, label or test id that starts this way takes its prefix, which
+reads the rest as written: `text:tapped: solo`, `label:note: draft`, `id:row:2`. Selectors keep their meaning as new
+prefixes arrive.
+
 `label:`, `text:` and a role's name also take a regex: `text:/^Buy/i`, written in the syntax of Rust's `regex` crate
 (JavaScript's classes, groups, anchors and quantifiers, matched in linear time; flags `i`, `m` and `s`). ` >> ` looks
 inside what the part before matched (`id:cart >> role:button[Remove]`), and `nth=<n>` keeps one of the matches, from 0

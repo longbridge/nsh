@@ -173,18 +173,18 @@ fn one_item_opens_at_a_time_and_an_open_one_closes() {
     let mut app = start(HarnessProps::default(), false);
     assert!(!app.shows("Shipping details"), "closed at first");
     app.toggle("Shipping");
-    app.wait_for("open:shipping").unwrap();
+    app.wait_for("text:open:shipping").unwrap();
     assert!(app.shows("Shipping details"));
     // Another item replaces it.
     app.toggle("Returns");
-    app.wait_for("open:returns").unwrap();
+    app.wait_for("text:open:returns").unwrap();
     assert!(app.shows("Returns details"));
     assert!(!app.shows("Shipping details"));
     // The open item's trigger closes it.
     app.toggle("Returns");
-    app.wait_for("open:").unwrap();
+    app.wait_for("text:open:").unwrap();
     assert!(!app.shows("Returns details"));
-    app.wait_for("changes:3").unwrap();
+    app.wait_for("text:changes:3").unwrap();
 }
 
 #[test]
@@ -199,11 +199,11 @@ fn with_multiple_items_open_together() {
     app.toggle("Returns");
     app.toggle("Shipping");
     // Joined at the end, in the order they opened.
-    app.wait_for("open:returns,shipping").unwrap();
+    app.wait_for("text:open:returns,shipping").unwrap();
     assert!(app.shows("Shipping details"));
     assert!(app.shows("Returns details"));
     app.toggle("Returns");
-    app.wait_for("open:shipping").unwrap();
+    app.wait_for("text:open:shipping").unwrap();
     assert!(!app.shows("Returns details"));
 }
 
@@ -238,7 +238,7 @@ fn disabled_items_and_accordions_take_no_presses() {
         None
     );
     app.wait(std::time::Duration::from_millis(20)).unwrap();
-    app.wait_for("changes:0").unwrap();
+    app.wait_for("text:changes:0").unwrap();
 
     let app = start(
         HarnessProps {
@@ -275,7 +275,7 @@ fn screen_readers_hear_a_group_of_headings_buttons_and_regions() {
     assert_eq!(screen.count("role:region").unwrap(), 0);
 
     app.toggle("Shipping");
-    app.wait_for("open:shipping").unwrap();
+    app.wait_for("text:open:shipping").unwrap();
     let screen = app.screen();
     let state = screen.accessibility_state("role:button[Shipping]").unwrap();
     assert_eq!(state.expanded, Some(true));
@@ -295,25 +295,25 @@ fn tab_reaches_each_trigger_in_order_and_return_toggles_it() {
     let mut app = start(HarnessProps::default(), false);
     app.press_key("tab").unwrap();
     app.press_key("enter").unwrap();
-    app.wait_for("pressed:before").unwrap();
+    app.wait_for("text:pressed:before").unwrap();
     // The first trigger.
     app.press_key("tab").unwrap();
     app.press_key("enter").unwrap();
-    app.wait_for("open:shipping").unwrap();
+    app.wait_for("text:open:shipping").unwrap();
     // The second; the open panel holds no stop.
     app.press_key("tab").unwrap();
     app.press_key("space").unwrap();
-    app.wait_for("open:returns").unwrap();
+    app.wait_for("text:open:returns").unwrap();
     // The disabled third is no stop: Tab goes on past the accordion.
     app.press_key("tab").unwrap();
     app.press_key("enter").unwrap();
-    app.wait_for("pressed:after").unwrap();
+    app.wait_for("text:pressed:after").unwrap();
     // No arrow keys between the triggers.
     app.press_key("shift+tab").unwrap();
     app.press_key("up").unwrap();
     app.wait(std::time::Duration::from_millis(20)).unwrap();
-    app.wait_for("open:returns").unwrap();
-    app.wait_for("changes:2").unwrap();
+    app.wait_for("text:open:returns").unwrap();
+    app.wait_for("text:changes:2").unwrap();
 }
 
 #[test]
@@ -331,12 +331,12 @@ fn kept_mounted_content_stays_in_the_tree_while_closed() {
     );
     // Made in the first render: opening makes nothing.
     let opened = app.toggle("Shipping");
-    app.wait_for("open:shipping").unwrap();
+    app.wait_for("text:open:shipping").unwrap();
     assert!(app.shows("Shipping details"));
     assert!(!creates(&opened), "{opened:#?}");
     // Closing removes nothing.
     let closed = app.toggle("Shipping");
-    app.wait_for("open:").unwrap();
+    app.wait_for("text:open:").unwrap();
     assert!(!app.shows("Shipping details"));
     assert!(
         !closed

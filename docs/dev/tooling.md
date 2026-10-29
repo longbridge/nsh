@@ -246,7 +246,9 @@ with an optional `[<name>]` (the label, else the texts inside), `view:<id>` or a
 text); `label:`, `text:` and names take `/regex/flags` (Rust's `regex` syntax, flags `i`, `m`, `s`: a selector is
 a string the driver matches on its own thread, or a real host's agent on the device, away from any JS engine), ` >> `
 looks inside the previous part's matches, `nth=<n>`
-keeps one. `Screen::resolve` lists the matches where a user would look first: the top modal, then the rest in tree
+keeps one. A part starting with a lowercase word and a colon (`[a-z][a-z0-9-]*:`) that is no known prefix is a parse
+error, never a bare string, so adding a prefix cannot change what an existing selector matches; such a text is
+written `text:tapped: solo`. `Screen::resolve` lists the matches where a user would look first: the top modal, then the rest in tree
 order below the root, of a stack only its top screen, and only the views that show (`Screen::shown`, as Playwright's
 visibility): with an area (a `display: none` view has none), outside `visibility: hidden` (`ViewStyle::hidden`), not
 clipped away by `overflow: hidden`, a scroll view the user cannot scroll (`ScrollBehavior::enabled`) or the window

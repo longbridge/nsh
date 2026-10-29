@@ -2,7 +2,7 @@ import { expect, open, test } from "nsh/test";
 
 test("the page's host answers calls", async () => {
   const app = await open("./App.tsx");
-  expect(app.shows("available: true")).toBe(true);
+  expect(app.shows("text:available: true")).toBe(true);
   await app.press("label:echo");
   await app.waitFor('text:result: {"n":1}');
 });
@@ -36,7 +36,7 @@ test("a call the host does not answer times out on the app's clock", async () =>
   const app = await open("./App.tsx", { clock: {} });
   await app.press("label:slow");
   await app.clock.runFor(900);
-  expect(app.shows("result: (none)")).toBe(true);
+  expect(app.shows("text:result: (none)")).toBe(true);
   await app.clock.runFor(200);
   await app.waitFor("text:/result: rejected: ETIMEDOUT /");
 });
@@ -45,7 +45,7 @@ test("the host's timers run on the app's clock", async () => {
   const app = await open("./App.tsx", { clock: {} });
   await app.press("label:later");
   await app.clock.runFor(400);
-  expect(app.shows("result: (none)")).toBe(true);
+  expect(app.shows("text:result: (none)")).toBe(true);
   await app.clock.runFor(200);
   await app.waitFor('text:result: "late"');
 });

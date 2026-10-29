@@ -46,6 +46,14 @@ test("text selectors take a regex", async () => {
   expect(app.shows("text:/^draft:/i")).toBe(true);
 });
 
+test("an unknown prefix is an error, and a prefix matches a text with a colon", async () => {
+  const app = await open("./App.tsx");
+  expect(() => app.shows("log: none")).toThrow(/unknown selector prefix `log:`; known: id, label, role, text, view/);
+  await expect(app.press("draft: Old text")).rejects.toThrow(/unknown selector prefix `draft:`/);
+  expect(app.shows("text:Log: none")).toBe(true);
+  expect(app.shows("Log: none")).toBe(true);
+});
+
 test("expectations beyond equality", async () => {
   expect("Saved at 9:41").toMatch(/at \d+:\d+/);
   expect([1, 2, 3]).toHaveLength(3);

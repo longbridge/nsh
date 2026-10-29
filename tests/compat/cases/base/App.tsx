@@ -6,6 +6,7 @@ import { type JSX, View, mount, signal } from "nsh";
 import BaseStatusBar from "./base-status-bar";
 import BaseAccordion from "./base-accordion";
 import BaseAlertDialog from "./base-alert-dialog";
+import BaseAvatar from "./base-avatar";
 import BaseButton from "./base-button";
 import BaseCheckbox from "./base-checkbox";
 import BaseCollapsible from "./base-collapsible";
@@ -54,6 +55,7 @@ const cases: Record<string, () => JSX.Element> = {
   "base-status-bar": BaseStatusBar,
   "base-accordion": BaseAccordion,
   "base-alert-dialog": BaseAlertDialog,
+  "base-avatar": BaseAvatar,
   "base-button": BaseButton,
   "base-dialog": BaseDialog,
   "base-dialog-backdrop": BaseDialogBackdrop,

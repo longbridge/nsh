@@ -1207,6 +1207,11 @@ impl JsHost for CallHost<'_> {
         .with_os(unsafe { (*crate::state::state(self.cx)).dom.os() })
     }
 
+    fn image_blob(&self, url: &str) -> Option<(std::sync::Arc<str>, nsh_core::ImageData)> {
+        // The same key and bytes a host `<Image>`'s `src` gets.
+        crate::web::blob::resolve_image_url(self.cx, url)
+    }
+
     fn start_task(&self, task: nsh_core::element::TaskStart) {
         // Past the op limit the app is stopped: the task goes with it.
         let op = nsh_core::Op::Rust(RustOp {

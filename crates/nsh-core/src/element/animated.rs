@@ -1436,11 +1436,12 @@ impl super::JsValue for Spring {
     }
 }
 
-/// A JSON value as the core's decoders read JS values (an easing).
-struct JsonInput<'a>(Option<&'a crate::JsonValue>);
+/// A JSON value as the core's decoders read JS values (an easing, an
+/// image source).
+pub(crate) struct JsonInput<'a>(pub(crate) Option<&'a crate::JsonValue>);
 
 /// A JSON array, read by index.
-struct JsonList<'a>(&'a [crate::JsonValue]);
+pub(crate) struct JsonList<'a>(&'a [crate::JsonValue]);
 
 impl<'a> crate::js::host::HostList for JsonList<'a> {
     type Item = JsonInput<'a>;

@@ -102,10 +102,10 @@ fn a_press_asks_for_the_other_value_and_shows_the_one_passed_back() {
     let mut app = start::<Formatting>();
     assert_eq!(pressed(&app, "role:button[Favorite]"), Some(Checked::False));
     app.press("role:button[Favorite]").unwrap();
-    app.wait_for("favorite:true").unwrap();
+    app.wait_for("text:favorite:true").unwrap();
     assert_eq!(pressed(&app, "role:button[Favorite]"), Some(Checked::True));
     app.press("role:button[Favorite]").unwrap();
-    app.wait_for("favorite:false").unwrap();
+    app.wait_for("text:favorite:false").unwrap();
     assert_eq!(pressed(&app, "role:button[Favorite]"), Some(Checked::False));
 }
 
@@ -126,10 +126,10 @@ fn space_and_return_press_the_focused_toggle() {
     app.press_key("tab").unwrap();
     app.press_key("tab").unwrap();
     app.press_key("space").unwrap();
-    app.wait_for("marks:none").unwrap();
+    app.wait_for("text:marks:none").unwrap();
     app.press_key("enter").unwrap();
-    app.wait_for("marks:Italic").unwrap();
-    app.wait_for("changes:2").unwrap();
+    app.wait_for("text:marks:Italic").unwrap();
+    app.wait_for("text:changes:2").unwrap();
 }
 
 #[test]
@@ -140,19 +140,19 @@ fn arrows_move_the_focus_without_pressing_wrapping_and_skipping_disabled_toggles
     // Italic → Underline: Strikethrough is disabled.
     app.press_key("right").unwrap();
     app.wait(Duration::from_millis(50)).unwrap();
-    app.wait_for("changes:0").unwrap();
+    app.wait_for("text:changes:0").unwrap();
     app.press_key("space").unwrap();
-    app.wait_for("marks:Italic,Underline").unwrap();
+    app.wait_for("text:marks:Italic,Underline").unwrap();
     // Past the end, around to Bold; Down moves as Right does.
     app.press_key("down").unwrap();
     app.press_key("space").unwrap();
-    app.wait_for("marks:Bold,Italic,Underline").unwrap();
+    app.wait_for("text:marks:Bold,Italic,Underline").unwrap();
     // Left and Up back around the start.
     app.press_key("left").unwrap();
     app.press_key("up").unwrap();
     app.press_key("space").unwrap();
-    app.wait_for("marks:Bold,Underline").unwrap();
-    app.wait_for("changes:3").unwrap();
+    app.wait_for("text:marks:Bold,Underline").unwrap();
+    app.wait_for("text:changes:3").unwrap();
 }
 
 #[test]
@@ -162,10 +162,10 @@ fn home_and_end_go_to_the_first_and_last_enabled_toggle() {
     app.press_key("tab").unwrap();
     app.press_key("home").unwrap();
     app.press_key("space").unwrap();
-    app.wait_for("marks:Bold,Italic").unwrap();
+    app.wait_for("text:marks:Bold,Italic").unwrap();
     app.press_key("end").unwrap();
     app.press_key("space").unwrap();
-    app.wait_for("marks:Bold,Italic,Underline").unwrap();
+    app.wait_for("text:marks:Bold,Italic,Underline").unwrap();
 }
 
 #[test]
@@ -177,11 +177,11 @@ fn the_group_is_one_stop_at_the_first_pressed_toggle() {
     // One Tab leaves the toolbar, whatever toggle the focus is on.
     app.press_key("tab").unwrap();
     app.press_key("enter").unwrap();
-    app.wait_for("after:true").unwrap();
+    app.wait_for("text:after:true").unwrap();
     // Shift+Tab comes back to Italic, the pressed one.
     app.press_key("shift+tab").unwrap();
     app.press_key("space").unwrap();
-    app.wait_for("marks:none").unwrap();
+    app.wait_for("text:marks:none").unwrap();
 }
 
 #[test]
@@ -191,14 +191,14 @@ fn a_disabled_group_disables_its_toggles() {
     app.wait(Duration::from_millis(50)).unwrap();
     // A press finds no enabled view to press.
     assert!(app.press("role:button[Bold]").is_err());
-    app.wait_for("changes:0").unwrap();
+    app.wait_for("text:changes:0").unwrap();
     // No toggle is a stop: Tab goes from the favorite on to the button.
     app.press_key("tab").unwrap();
     app.press_key("tab").unwrap();
     app.press_key("enter").unwrap();
-    app.wait_for("after:true").unwrap();
+    app.wait_for("text:after:true").unwrap();
     // Enabled again, its toggles take presses.
     app.press("text:Lock").unwrap();
     app.press("role:button[Bold]").unwrap();
-    app.wait_for("marks:Bold,Italic").unwrap();
+    app.wait_for("text:marks:Bold,Italic").unwrap();
 }
