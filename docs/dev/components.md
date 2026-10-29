@@ -820,7 +820,14 @@ what changed.
   slot's `Fill` and its view places where it places the slot, as JS children are placed (`Placement`). A place that
   only places it (`place(|s| s)`) puts the nodes there as they are (`ElKind::Filled`); a place that styles it
   (`place(|h| h.px_4())`) or gives it props or listeners makes a node of the nested view's own with them around them,
-  which lays one node out through while the place styles none of its layout, as JS's holders. The slot's prop is
+  which lays one node out through while the place styles none of its layout, as JS's holders. That node is a holder
+  as JS's are (`Core::reconcile_wrapper`, `Components::fill_holders`): its styles stay on it, the rest goes to the
+  fill's one element (the same rule: not raw text, a component's host, a list or another holder), combined with what
+  the placing view gives that element as JS's side is (`Core::apply_target_attrs`, `Core::target_events`), and follows
+  the fill's nodes as they are placed and released. So a component's `on_focus` / `on_blur` on its trigger hear the
+  focus of a Rust app's element, which only the focused element gets, as they do a TSX app's. An overlay placed against
+  what that element draws (`anchor_content`, a popup's) goes by the holder (`Core::content_anchor`): the element's own
+  box, its size and padding included, not the box around its children. The slot's prop is
   `Some` while the fill has nodes. The fill is the placing view's content: reconciled whenever that view reconciles
   the nested element (a new element replaces the old in its place), released with it, and taken out of a place that
   goes before that place's node is deleted. A view passes a slot it is given on to a nested component's slot by
