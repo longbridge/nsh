@@ -3,7 +3,7 @@
 use nsh_platform_tui::{Bundle, MouseKind};
 use ratatui_core::{backend::TestBackend, style::Color, terminal::Terminal};
 
-use super::app::{draw_until, mouse, surface};
+use super::app::{draw_until, mouse, reversed, surface};
 
 #[test]
 fn hover_styles_and_events_follow_the_pointer_and_clear_outside_the_surface() {
@@ -14,9 +14,9 @@ fn hover_styles_and_events_follow_the_pointer_and_clear_outside_the_surface() {
         const state = signal("idle");
         mount(() => <View>
             <View style={{ width: 80, height: 32, backgroundColor: "#123456" }}
-                hoverStyle={{ backgroundColor: "#abcdef" }}
+                hoverStyle={{ backgroundColor: "#ef4444" }}
                 onHoverIn={() => state.set("inside")}
-                onHoverOut={() => state.set("outside")}><Text>Hover</Text></View>
+                onHoverOut={() => state.set("outside")} />
             <Text>{state()}</Text>
         </View>);
     "##,
@@ -29,16 +29,12 @@ fn hover_styles_and_events_follow_the_pointer_and_clear_outside_the_surface() {
     draw_until(&mut view, &mut terminal, &rx, "idle");
     view.handle(mouse(MouseKind::Move, 1, 0));
     draw_until(&mut view, &mut terminal, &rx, "inside");
-    assert_eq!(
-        terminal.backend().buffer()[(1, 1)].bg,
-        Color::Rgb(0xab, 0xcd, 0xef)
-    );
+    // The hovered leaf's fill shows reversed in its palette color.
+    assert!(reversed(terminal.backend().buffer(), 1, 1));
+    assert_eq!(terminal.backend().buffer()[(1, 1)].fg, Color::Red);
     view.handle(mouse(MouseKind::Move, 41, 0));
     draw_until(&mut view, &mut terminal, &rx, "outside");
-    assert_eq!(
-        terminal.backend().buffer()[(1, 1)].bg,
-        Color::Rgb(0x12, 0x34, 0x56)
-    );
+    assert_eq!(terminal.backend().buffer()[(1, 1)].fg, Color::Blue);
 }
 
 #[test]
@@ -127,10 +123,11 @@ fn dragging_scroll_content_reveals_later_rows_without_pressing_them() {
 
 #[test]
 fn a_selection_area_copies_across_texts_and_keeps_wide_graphemes_whole() {
+    use std::sync::Arc;
+
     use nsh_core::clipboard::{ClipboardBackend, MemoryClipboard};
     use nsh_platform_tui::{AppOptions, AppView, Input, Modifiers, MouseButton::Left};
     use ratatui_core::style::Modifier;
-    use std::sync::Arc;
     let clipboard = Arc::new(MemoryClipboard::default());
     let (tx, rx) = crossbeam_channel::unbounded();
     let mut options = AppOptions::default();
@@ -201,7 +198,7 @@ fn dragging_clears_active_styles() {
         r##"
         import { mount, View, Text } from "nsh";
         mount(() => <View><View style={{width: 80, height: 32, backgroundColor: "#123456"}}
-            activeStyle={{backgroundColor: "#abcdef"}}><Text>Hold</Text></View></View>);
+            activeStyle={{backgroundColor: "#ef4444"}} onPress={() => {}} /><Text>Hold</Text></View>);
     "##,
         &[],
     )
@@ -217,24 +214,25 @@ fn dragging_clears_active_styles() {
                 terminal
                     .draw(|frame| view.render(frame, frame.area()))
                     .unwrap();
-                if terminal.backend().buffer()[(1, 1)].bg == color {
+                if terminal.backend().buffer()[(1, 1)].fg == color {
                     break;
                 }
                 rx.recv_deadline(deadline).unwrap();
             }
         };
     view.handle(mouse(MouseKind::Down(Left), 1, 0));
-    until_color(&mut view, &mut terminal, Color::Rgb(0xab, 0xcd, 0xef));
+    until_color(&mut view, &mut terminal, Color::Red);
     view.handle(mouse(MouseKind::Move, 4, 0));
-    until_color(&mut view, &mut terminal, Color::Rgb(0x12, 0x34, 0x56));
+    until_color(&mut view, &mut terminal, Color::Blue);
     view.handle(mouse(MouseKind::Up(Left), 4, 0));
 }
 
 #[test]
 fn selectable_text_still_presses_on_a_click_and_only_copies_after_a_drag() {
+    use std::sync::Arc;
+
     use nsh_core::clipboard::{ClipboardBackend, MemoryClipboard};
     use nsh_platform_tui::{AppOptions, AppView, Input, Modifiers, MouseButton::Left};
-    use std::sync::Arc;
     let clipboard = Arc::new(MemoryClipboard::default());
     let (tx, rx) = crossbeam_channel::unbounded();
     let mut options = AppOptions::default();

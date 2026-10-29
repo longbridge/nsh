@@ -1,8 +1,8 @@
 use nsh_core::prelude::*;
 use nsh_platform_tui::{App, Handled, Input, Modifiers, Root};
-use ratatui_core::{backend::TestBackend, style::Color, terminal::Terminal};
+use ratatui_core::{backend::TestBackend, terminal::Terminal};
 
-use super::app::{draw_until, surface};
+use super::app::{draw_until, reversed, surface};
 
 fn key(name: &str, modifiers: Modifiers) -> Input {
     Input::Key {
@@ -79,10 +79,7 @@ fn terminal_keys_follow_tree_order_and_horizontal_keys_stay_spatial() {
         assert_eq!(view.handle(input), Handled::Yes);
         draw_until(&mut view, &mut terminal, &rx, &format!("focus {focused}"));
         assert!(!terminal.backend().cursor_visible());
-        assert_eq!(
-            terminal.backend().buffer()[cursor].bg,
-            Color::Rgb(0x12, 0x34, 0x56)
-        );
+        assert!(reversed(terminal.backend().buffer(), cursor.0, cursor.1));
     }
     assert_eq!(view.handle(key("Enter", Default::default())), Handled::Yes);
     draw_until(&mut view, &mut terminal, &rx, "press DUP");
@@ -707,10 +704,7 @@ fn the_diagnostics_panel_owns_repeated_keys_and_preserves_app_focus() {
     view.handle(key("Escape", Default::default()));
     draw_until(&mut view, &mut terminal, &rx, "focus B");
     assert!(!terminal.backend().cursor_visible());
-    assert_eq!(
-        terminal.backend().buffer()[(10, 1)].bg,
-        Color::Rgb(0x12, 0x34, 0x56)
-    );
+    assert!(reversed(terminal.backend().buffer(), 10, 1));
     view.stop();
     std::fs::remove_file(path).unwrap();
 }
@@ -726,10 +720,10 @@ fn draw_focused_cell(
         terminal
             .draw(|frame| view.render(frame, frame.area()))
             .unwrap();
-        if terminal.backend().buffer()[at].bg == Color::Rgb(0x12, 0x34, 0x56) {
+        if reversed(terminal.backend().buffer(), at.0, at.1) {
             return;
         }
-        rx.recv_deadline(deadline).expect("app focus style");
+        rx.recv_deadline(deadline).expect("reversed focus");
     }
 }
 

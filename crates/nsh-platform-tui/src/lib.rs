@@ -15,6 +15,7 @@ mod keyboard;
 mod mount;
 mod native;
 mod navigation;
+mod palette;
 mod perf;
 mod render;
 #[cfg(feature = "run-app")]
@@ -28,6 +29,7 @@ mod view;
 
 pub use nsh_core::platform::{Appearance, Locale};
 pub use nsh_engine::{App, AppError, Bundle, CacheOptions, HostChannel, Limits, Root};
+pub use perf::{FrameMetrics, MeasuredBackend, MeasuredWriter};
 
 #[cfg(feature = "run-app")]
 pub use crate::run::{RunEvent, run_app};
@@ -38,5 +40,3 @@ pub use crate::{
     native::{ComponentFactory, NativeComponent},
     text::{CellTextEngine, PreparedText},
 };
-
-pub use perf::{FrameMetrics, MeasuredBackend, MeasuredWriter};

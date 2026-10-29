@@ -2,20 +2,22 @@
 
 mod text;
 mod text_input;
+mod toggles;
 
+mod alignment;
 #[cfg(feature = "js")]
 mod animation;
 mod app;
 
 mod canvas;
 mod controls;
-mod fills;
+mod decorations;
 mod focus_navigation;
 mod geometry;
 mod keyboard;
 mod modal_focus;
 mod navigation;
-mod page_background;
+mod palette;
 mod performance;
 mod pointer;
 mod scroll;

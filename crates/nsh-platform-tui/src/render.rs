@@ -1,8 +1,17 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 
-use nsh_core::{Bounds, NodeId, Point, PointerEvents, Points, ROOT_ID, ViewKind};
-use ratatui_core::{buffer::Buffer, layout::Rect, style::Color, widgets::Widget};
-use ratatui_widgets::{block::Block, borders::Borders};
+use nsh_core::{
+    AccessibilityRole, Bounds, Checked, NodeId, Point, PointerEvents, Points, ROOT_ID, ViewKind,
+    platform::ColorScheme,
+};
+use ratatui_core::{
+    buffer::Buffer,
+    layout::Rect,
+    style::{Modifier, Style},
+    widgets::Widget,
+};
+use ratatui_widgets::{block::Block, borders::Borders, paragraph::Paragraph};
+use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
 use crate::{
@@ -10,12 +19,19 @@ use crate::{
     animation::Projection,
     geometry::{CellBounds, TextRun},
     mount::Mounter,
+    palette::{Ground, ink},
     text::CellLayout,
 };
 
 const COMPACT_HEIGHT_CELLS: f32 = 1.5;
-const MIN_BORDERED_EXTENT: i32 = 3;
 const HAIRLINE_CELL_FRACTION: f32 = 0.5;
+/// The alpha from which a translucent fill clears what is under it, as an
+/// opaque one does (50%); lighter fills (scrims, tints) draw nothing.
+const CLEARING_ALPHA: u32 = 128;
+/// Image placeholders smaller than this, in Cells, are decorative and not drawn.
+const MIN_IMAGE_CELLS: (i32, i32) = (3, 2);
+/// The Cells between a button's label and each of its brackets.
+const BRACKET_GAP: i32 = 1;
 
 pub(crate) struct Hit {
     pub(crate) node: NodeId,
@@ -43,83 +59,124 @@ struct Clip {
     fit: bool,
 }
 
-struct Outline {
-    page: Color,
-    stroke: CellBounds,
-    content: CellBounds,
-    clip: Rect,
-    color: nsh_core::Color,
-    opacity: f32,
+/// A checkbox's, radio's or switch's state as terminal glyphs, and the view
+/// the app drew it with (its indicator), whose place the glyph takes.
+struct Toggle {
+    glyph: &'static str,
+    /// The glyph where the full one does not fit.
+    short: &'static str,
+    indicator: Option<NodeId>,
 }
 
+/// What a button shows between its brackets.
+enum ButtonLabel {
+    /// Its own text, drawn on one row.
+    Text,
+    /// The accessibility label of a button whose content is only icons.
+    Accessible(Arc<str>),
+}
+
+/// How a view's fill shows in the terminal, which draws no fill colors.
 #[derive(Clone, Copy)]
-struct FillPaint {
-    color: nsh_core::Color,
-    opacity: f32,
-    line: Option<&'static str>,
+enum Fill {
+    /// A sub-Cell rule: line glyphs in the fill's palette color.
+    Line(&'static str, Style),
+    /// A leaf whose fill is its content (a progress indicator, a thumb):
+    /// reversed Cells in the fill's palette color.
+    Solid(Style),
+    /// An opaque fill clears what is under it to the terminal's background.
+    Clear,
 }
 
 struct Painter<'a> {
     text_runs: HashMap<NodeId, Vec<TextRun>>,
-    outlines: Vec<Outline>,
     tree: &'a mut Mounter,
     buffer: &'a mut Buffer,
     hits: &'a mut Vec<Hit>,
     geometry: &'a mut Vec<Geometry>,
     area: Rect,
     cells: CellSize,
-    page_backgrounds: &'a [nsh_core::Color],
-    /// The color of the page under the views being drawn, which the Cells
-    /// drawn with the terminal's background stand for when colors blend.
-    page: Color,
+    scheme: ColorScheme,
+    focused: Option<NodeId>,
+    /// The opaque fill of the nearest view drawn so far that has one: what
+    /// the app drew the current view on.
+    background: Option<nsh_core::Color>,
+    /// The Cells a canvas drew, by buffer index: a reversed view around them
+    /// leaves them as drawn.
+    canvas_cells: Vec<bool>,
+    /// The boxes of the buttons being drawn, which draw no border or fill.
+    button_boxes: Vec<NodeId>,
+    /// The indicators of the toggles being drawn, which a glyph replaces.
+    indicators: Vec<NodeId>,
+    /// Whether the view being drawn is inside an indicator.
+    in_indicator: bool,
+    /// The hairline rules drawn once their parent's subtree is, as a rule
+    /// keeps off rows (or columns) that hold text.
+    rules: Vec<Rule>,
+    /// The visible Cells of the view whose children are being drawn.
+    parent_box: Rect,
 }
 
-/// Below this opacity a view draws nothing: blending changes no channel by
-/// more than 8 of 255, while a border or glyph would still replace the
-/// glyph under it.
+/// A hairline rule waiting for its parent's subtree.
+struct Rule {
+    cells: Rect,
+    line: &'static str,
+    style: Style,
+    /// Where it may move: its parent's visible Cells.
+    within: Rect,
+}
+
+/// Below this opacity, multiplied through its ancestors, a view draws
+/// nothing; above it opacity is ignored, as the palette has no translucency.
 const INVISIBLE_OPACITY: f32 = 0.03;
 
+/// Draws the tree in the terminal's look (`palette`): colors from the
+/// terminal's palette in `scheme`, no fill colors, and the `focused` view,
+/// selected views and checked views reversed over their Cells.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn draw(
     tree: &mut Mounter,
     buffer: &mut Buffer,
     area: Rect,
     cells: CellSize,
+    scheme: ColorScheme,
+    focused: Option<NodeId>,
     hits: &mut Vec<Hit>,
     geometry: &mut Vec<Geometry>,
 ) {
     hits.clear();
     geometry.clear();
-    tree.collect_page_backgrounds();
     let clip = Clip {
         visible: area.intersection(buffer.area),
         borders: CellBounds::UNBOUNDED,
         fit: false,
     };
-    let page_backgrounds = std::mem::take(&mut tree.page_backgrounds);
+    let canvas_cells = vec![false; buffer.area.area() as usize];
     let mut painter = Painter {
         text_runs: HashMap::new(),
-        outlines: Vec::new(),
         tree,
         buffer,
         hits,
         geometry,
         area,
         cells,
-        page_backgrounds: &page_backgrounds,
-        page: page_backgrounds
-            .first()
-            .map_or(Color::Rgb(0, 0, 0), |&page| rgb(page)),
+        scheme,
+        focused,
+        background: None,
+        canvas_cells,
+        button_boxes: Vec::new(),
+        indicators: Vec::new(),
+        in_indicator: false,
+        rules: Vec::new(),
+        parent_box: area,
     };
     painter.view(ROOT_ID, Projection::IDENTITY, clip, 1.0, true, None);
-    painter.outlines();
     let modals = painter.tree.modals.clone();
     for modal in modals {
         if crate::navigation::modal_visible(painter.tree, modal) {
             painter.view(modal, Projection::IDENTITY, clip, 1.0, true, None);
-            painter.outlines();
         }
     }
-    tree.page_backgrounds = page_backgrounds;
 }
 
 impl Painter<'_> {
@@ -136,6 +193,16 @@ impl Painter<'_> {
         let text_parent = horizontal_text_parent(self.tree, id, parent);
         let sibling_content =
             border_has_sibling_content(self.tree, id, parent, self.cells, self.area);
+        let (button, boxed) = button_label(
+            self.tree,
+            id,
+            parent,
+            self.cells,
+            self.area,
+            self.background,
+        )
+        .unzip();
+        let toggle = toggle(self.tree, id, self.cells);
         let Some(view) = self.tree.get_mut(id) else {
             return;
         };
@@ -148,6 +215,12 @@ impl Painter<'_> {
         if view.concealed || view.style.hidden || opacity <= 0.0 {
             return;
         }
+        self.button_boxes.extend(boxed);
+        self.indicators
+            .extend(toggle.as_ref().and_then(|toggle| toggle.indicator));
+        let outer_in_indicator = self.in_indicator;
+        self.in_indicator |= self.indicators.contains(&id);
+        let unboxed = self.button_boxes.contains(&id);
         let mut projection = parent.view(view);
         let local_frame = Bounds::new(Point::default(), view.frame.size);
         let line = hairline_fill(view, projection.bounds(local_frame).size, self.cells);
@@ -328,44 +401,30 @@ impl Painter<'_> {
                 node_origin: origin,
             });
         }
-        let outline = view.style.outline;
-        let outline = outline.is_visible().then(|| {
-            let outset = outline.offset + outline.width;
-            let stroke = CellBounds::new(
-                projection.bounds(Bounds::new(
-                    Point::new(-outset, -outset),
-                    nsh_core::Size::new(
-                        view.frame.size.width + outset * 2.0,
-                        view.frame.size.height + outset * 2.0,
-                    ),
-                )),
-                self.cells,
-                self.area,
-            );
-            (stroke, outline.color)
-        });
         let children_pointer = pointer && view.props.pointer_events != PointerEvents::BoxOnly;
         let widths = &view.style.borders.widths;
         let colors = view
             .animated
             .border_color
             .map_or(view.style.borders.colors, |color| [color; 4]);
-        let sides = [widths.top, widths.right, widths.bottom, widths.left]
-            .map(|width| width > Points::ZERO);
-        let has_content = view.kind != ViewKind::View
-            || !view.children.is_empty()
-            || view.component.is_some()
-            || sibling_content;
+        // A button reads `[ label ]`: no border or fill around it.
         let sides = std::array::from_fn::<_, 4, _>(|i| {
-            let extent = if i % 2 == 0 {
-                bounds.bottom - bounds.top
-            } else {
-                bounds.right - bounds.left
-            };
-            let has_room =
-                extent >= MIN_BORDERED_EXTENT || (i % 2 == 0 && extent == 2 && !has_content);
-            sides[i] && !colors[i].is_transparent() && has_room
+            [widths.top, widths.right, widths.bottom, widths.left][i] > Points::ZERO
+                && !colors[i].is_transparent()
+                && !unboxed
         });
+        let content = i32::from(
+            view.kind != ViewKind::View
+                || !view.children.is_empty()
+                || view.component.is_some()
+                || sibling_content,
+        );
+        // A border is drawn whole or not at all: each drawn side owns a Cell,
+        // and content keeps a row and a column between them.
+        let room = bounds.bottom - bounds.top
+            >= i32::from(sides[0]) + i32::from(sides[2]) + content
+            && bounds.right - bounds.left >= i32::from(sides[1]) + i32::from(sides[3]) + content;
+        let sides = sides.map(|side| side && room);
         let inner = CellBounds {
             left: bounds.left + i32::from(sides[3]),
             top: bounds.top + i32::from(sides[0]),
@@ -412,6 +471,7 @@ impl Painter<'_> {
                 .as_ref()
                 .map_or_else(Point::default, |scroll| scroll.origin()),
         });
+        let own_geometry = self.geometry.len() - 1;
         let children_clip = Clip {
             fit: sides.iter().any(|&side| side) && view.kind != ViewKind::Scroll,
             visible: if view.style.overflow_hidden
@@ -456,20 +516,56 @@ impl Painter<'_> {
         } else {
             Vec::new()
         };
-        let outer_page = self.page;
-        if !visible.is_empty() && opacity >= INVISIBLE_OPACITY {
-            let fill = view
-                .animated
-                .background
-                .unwrap_or(view.style.background_color);
+        let role = view.props.accessibility.role;
+        let decorative = match view.kind {
+            ViewKind::Canvas => {
+                role == AccessibilityRole::Image || view.props.accessibility.label.is_none()
+            }
+            ViewKind::Image => {
+                bounds.right - bounds.left < MIN_IMAGE_CELLS.0
+                    || bounds.bottom - bounds.top < MIN_IMAGE_CELLS.1
+            }
+            _ => false,
+        };
+        let visible_drawn = !visible.is_empty()
+            && opacity >= INVISIBLE_OPACITY
+            && !decorative
+            && !self.in_indicator;
+        let outer_background = self.background;
+        let own_fill = view
+            .animated
+            .background
+            .unwrap_or(view.style.background_color);
+        if own_fill.0 & 255 == 255 {
+            self.background = Some(own_fill);
+        }
+        // Fills and borders sit on what is under the view; its content on its
+        // own fill.
+        let outer_ground = Ground::new(self.scheme, outer_background);
+        let ground = Ground::new(self.scheme, self.background);
+        if visible_drawn {
+            let fill = if unboxed {
+                nsh_core::Color::TRANSPARENT
+            } else {
+                view.animated
+                    .background
+                    .unwrap_or(view.style.background_color)
+            };
             let rounded = !radii.is_zero();
-            let has_fill = !fill.is_transparent()
-                || view
-                    .style
-                    .effects
-                    .as_ref()
-                    .is_some_and(|effects| !effects.background_images.is_empty());
-            let protected = if has_fill
+            let leaf =
+                view.kind == ViewKind::View && view.children.is_empty() && view.component.is_none();
+            let fill = if fill.is_transparent() {
+                None
+            } else if let Some(line) = line {
+                Some(Fill::Line(line, ink(fill, outer_ground)))
+            } else if fill.0 & 255 < CLEARING_ALPHA {
+                None
+            } else if leaf {
+                Some(Fill::Solid(ink(fill, outer_ground)))
+            } else {
+                Some(Fill::Clear)
+            };
+            let protected = if fill.is_some()
                 && (frame.size.height < self.cells.height()
                     || frame.size.width < self.cells.width())
             {
@@ -490,42 +586,21 @@ impl Painter<'_> {
                         || !protected[usize::from(y - visible.y) * usize::from(visible.width)
                             + usize::from(x - visible.x)])
             };
-            let paint = FillPaint {
-                color: fill,
-                opacity,
-                line,
-            };
-            fill_cells(
-                self.buffer,
-                self.page_backgrounds,
-                self.page,
-                visible,
-                paint,
-                covered,
-            );
-            if self.page_backgrounds.contains(&fill) {
-                self.page = rgb(fill);
-            }
-            // A Cell holds one background color: each gradient layer draws its
-            // middle stop, as canvas gradients do, bottom layer first.
-            let gradients = view
-                .style
-                .effects
-                .as_ref()
-                .map_or(&[][..], |effects| &effects.background_images[..]);
-            for gradient in gradients.iter().rev() {
-                if let Some(stop) = gradient.stops.get(gradient.stops.len() / 2) {
-                    fill_cells(
-                        self.buffer,
-                        self.page_backgrounds,
-                        self.page,
-                        visible,
-                        FillPaint {
-                            color: stop.color,
-                            ..paint
-                        },
-                        covered,
-                    );
+            if let Some(Fill::Line(line, style)) = fill {
+                self.rules.push(Rule {
+                    cells: visible,
+                    line,
+                    style,
+                    within: self.parent_box,
+                });
+            } else if let Some(fill) = fill {
+                fill_cells(self.buffer, visible, fill, covered);
+                for y in visible.y..visible.bottom() {
+                    for x in visible.x..visible.right() {
+                        if covered(x, y) {
+                            self.canvas_cells[self.buffer.index_of(x, y)] = false;
+                        }
+                    }
                 }
             }
             let mut borders = Borders::NONE;
@@ -543,31 +618,9 @@ impl Painter<'_> {
             }
             Block::default()
                 .borders(borders)
-                .border_set(ratatui_core::symbols::border::Set {
-                    top_left: if radii.top_left > Points::ZERO {
-                        "╭"
-                    } else {
-                        "┌"
-                    },
-                    top_right: if radii.top_right > Points::ZERO {
-                        "╮"
-                    } else {
-                        "┐"
-                    },
-                    bottom_right: if radii.bottom_right > Points::ZERO {
-                        "╯"
-                    } else {
-                        "┘"
-                    },
-                    bottom_left: if radii.bottom_left > Points::ZERO {
-                        "╰"
-                    } else {
-                        "└"
-                    },
-                    ..ratatui_core::symbols::border::PLAIN
-                })
+                .border_set(ratatui_core::symbols::border::PLAIN)
                 .render(visible, self.buffer);
-            // Block chooses the corner symbols; each edge keeps its own wire color.
+            // Each edge keeps its own palette color.
             for (side, color) in colors.iter().enumerate() {
                 let edge = match side {
                     0 if borders.contains(Borders::TOP) => {
@@ -584,10 +637,10 @@ impl Painter<'_> {
                     }
                     _ => continue,
                 };
+                let style = ink(*color, outer_ground);
                 for y in edge.y..edge.bottom() {
                     for x in edge.x..edge.right() {
-                        let cell = &mut self.buffer[(x, y)];
-                        cell.set_fg(blend(*color, opacity, cell.bg, self.page));
+                        self.buffer[(x, y)].set_style(style);
                     }
                 }
             }
@@ -600,26 +653,19 @@ impl Painter<'_> {
                     (i32::from(text_area.y) - text_bounds.top).clamp(0, u16::MAX as i32) as u16,
                     (i32::from(text_area.x) - text_bounds.left).clamp(0, u16::MAX as i32) as u16,
                 );
+                let paragraph = layout.paragraph(ground);
                 if scroll == (0, 0) {
-                    (&layout.paragraph).render(text_area, self.buffer);
+                    paragraph.as_ref().render(text_area, self.buffer);
                 } else {
-                    layout
-                        .paragraph
-                        .clone()
+                    Paragraph::clone(&paragraph)
                         .scroll(scroll)
                         .render(text_area, self.buffer);
                 }
-                if view.animated.color.is_some() || opacity < 1.0 {
+                if let Some(color) = view.animated.color {
+                    let style = ink(color, ground);
                     for y in text_area.y..text_area.bottom() {
                         for x in text_area.x..text_area.right() {
-                            let cell = &mut self.buffer[(x, y)];
-                            let color = view.animated.color.or_else(|| match cell.fg {
-                                Color::Rgb(r, g, b) => Some(nsh_core::Color::rgba(r, g, b, 255)),
-                                _ => None,
-                            });
-                            if let Some(color) = color {
-                                cell.set_fg(blend(color, opacity, cell.bg, self.page));
-                            }
+                            self.buffer[(x, y)].set_style(style);
                         }
                     }
                 }
@@ -636,21 +682,26 @@ impl Painter<'_> {
                     content,
                     inner.clipped(clip.visible),
                     self.buffer,
-                    opacity,
                     view.animated.color,
-                    self.page,
+                    ground,
                 );
             }
             if let Some(canvas) = &view.canvas {
+                let buffer_area = self.buffer.area;
+                let canvas_cells = &mut self.canvas_cells;
                 crate::canvas::draw(
                     canvas,
                     self.buffer,
                     bounds,
                     inner.clipped(clip.visible),
                     self.cells,
-                    opacity,
                     projection.snapped(Point::new(-origin.x, -origin.y)),
-                    self.page,
+                    ground,
+                    |x, y| {
+                        let index = usize::from(y - buffer_area.y) * usize::from(buffer_area.width)
+                            + usize::from(x - buffer_area.x);
+                        canvas_cells[index] = true;
+                    },
                 );
             }
             if let Some(component) = &mut view.component {
@@ -680,8 +731,10 @@ impl Painter<'_> {
             .map_or_else(Point::default, |scroll| scroll.origin());
         let child_projection =
             projection.translated(Point::new(-scroll_origin.x, -scroll_origin.y));
-        let children = view.children.len();
-        for index in 0..children {
+        let pitch = even_pitch(self.tree, id, child_projection, self.cells);
+        let outer_parent_box = std::mem::replace(&mut self.parent_box, visible);
+        let rules = self.rules.len();
+        for (index, delta) in pitch.into_iter().enumerate() {
             let child = self.tree.get(id).unwrap().children[index];
             if self
                 .tree
@@ -692,145 +745,552 @@ impl Painter<'_> {
             }
             self.view(
                 child,
-                child_projection,
+                child_projection.snapped(Point::new(Points::ZERO, delta)),
                 children_clip,
                 opacity,
                 children_pointer,
                 press,
             );
         }
+        self.parent_box = outer_parent_box;
+        for rule in self.rules.split_off(rules) {
+            self.rule(rule);
+        }
         for (position, cell) in clipped_corners {
             self.buffer[position] = cell;
         }
-        if let Some((stroke, color)) = outline
-            && opacity >= INVISIBLE_OPACITY
-        {
-            self.outlines.push(Outline {
-                stroke,
-                content: bounds,
-                clip: clip.borders.clipped(clip.visible),
-                color,
-                opacity,
-                page: self.page,
-            });
+        self.background = outer_background;
+        if boxed.is_some() {
+            self.button_boxes.pop();
         }
-        self.page = outer_page;
+        self.in_indicator = outer_in_indicator;
+        if let Some(toggle) = &toggle
+            && toggle.indicator.is_some()
+        {
+            self.indicators.pop();
+        }
+        if visible_drawn && let Some(button) = button {
+            self.brackets(visible, button, own_geometry);
+        }
+        if visible_drawn && let Some(toggle) = toggle {
+            self.toggle_glyph(visible, toggle, own_geometry);
+        }
+        let Some(view) = self.tree.get(id) else {
+            return;
+        };
+        let state = &view.props.accessibility.state;
+        // A toggle shows its state with its glyph; only focus reverses it.
+        let shows_state = !is_toggle(view.props.accessibility.role)
+            && (state.selected || state.checked == Some(Checked::True));
+        let reversed = shows_state || (self.focused == Some(id) && view.input.is_none());
+        if reversed && visible_drawn {
+            for y in visible.y..visible.bottom() {
+                for x in visible.x..visible.right() {
+                    if !self.canvas_cells[self.buffer.index_of(x, y)] {
+                        self.buffer[(x, y)].modifier.insert(Modifier::REVERSED);
+                    }
+                }
+            }
+        }
     }
 }
 
 impl Painter<'_> {
-    fn outlines(&mut self) {
-        for outline in std::mem::take(&mut self.outlines) {
-            self.outline(
-                outline.stroke,
-                outline.content,
-                outline.clip,
-                outline.color,
-                outline.opacity,
-                outline.page,
-            );
-        }
-    }
-
-    /// Draws an outline after the view's content. A Cell cannot hold a stroke
-    /// between two text rows, so an edge that would cross glyphs inside the
-    /// view's box moves outward to the nearest free row or column, and the
-    /// stroke never replaces a glyph that is already drawn.
-    fn outline(
-        &mut self,
-        mut stroke: CellBounds,
-        content: CellBounds,
-        clip: Rect,
-        color: nsh_core::Color,
-        opacity: f32,
-        page: Color,
-    ) {
-        let buffer = &*self.buffer;
-        let glyph_at = |x: i32, y: i32| {
-            let (Ok(x), Ok(y)) = (u16::try_from(x), u16::try_from(y)) else {
-                return false;
+    /// Draws a hairline rule on its own row (or column) when that holds no
+    /// text, else on the nearest one inside its parent that holds none, else
+    /// not at all.
+    fn rule(&mut self, rule: Rule) {
+        let Rule {
+            cells,
+            line,
+            style,
+            within,
+        } = rule;
+        let horizontal = line == "─";
+        let free = |buffer: &Buffer, at: u16| {
+            let cells: Box<dyn Iterator<Item = (u16, u16)>> = if horizontal {
+                Box::new((cells.x..cells.right()).map(move |x| (x, at)))
+            } else {
+                Box::new((cells.y..cells.bottom()).map(move |y| (at, y)))
             };
-            clip.contains(ratatui_core::layout::Position::new(x, y))
-                && buffer[(x, y)].symbol() != " "
+            cells
+                .into_iter()
+                .all(|position| matches!(buffer[position].symbol(), " " | "─" | "│"))
         };
-        let inside_rows = content.top..content.bottom;
-        let inside_columns = content.left..content.right;
-        let columns = stroke.left.max(content.left)..stroke.right.min(content.right);
-        let row_has_glyphs = |y: i32| columns.clone().any(|x| glyph_at(x, y));
-        while inside_rows.contains(&stroke.top) && row_has_glyphs(stroke.top) {
-            stroke.top -= 1;
-        }
-        while inside_rows.contains(&(stroke.bottom - 1)) && row_has_glyphs(stroke.bottom - 1) {
-            stroke.bottom += 1;
-        }
-        let rows = stroke.top.max(content.top)..stroke.bottom.min(content.bottom);
-        let column_has_glyphs = |x: i32| rows.clone().any(|y| glyph_at(x, y));
-        while inside_columns.contains(&stroke.left) && column_has_glyphs(stroke.left) {
-            stroke.left -= 1;
-        }
-        while inside_columns.contains(&(stroke.right - 1)) && column_has_glyphs(stroke.right - 1) {
-            stroke.right += 1;
-        }
-
-        let area = stroke.clipped(clip);
-        let closed = stroke.top == i32::from(area.y)
-            && stroke.bottom == i32::from(area.bottom())
-            && stroke.left == i32::from(area.x)
-            && stroke.right == i32::from(area.right())
-            && area.width >= 2
-            && area.height >= 2
-            && (area.x..area.right()).all(|x| {
-                !glyph_at(i32::from(x), stroke.top) && !glyph_at(i32::from(x), stroke.bottom - 1)
-            })
-            && (area.y..area.bottom()).all(|y| {
-                !glyph_at(stroke.left, i32::from(y)) && !glyph_at(stroke.right - 1, i32::from(y))
+        let (first, end, low, high) = if horizontal {
+            (cells.y, cells.bottom(), within.y, within.bottom())
+        } else {
+            (cells.x, cells.right(), within.x, within.right())
+        };
+        for at in first..end {
+            let target = (0..=high.saturating_sub(low)).find_map(|distance| {
+                [at.checked_sub(distance), at.checked_add(distance)]
+                    .into_iter()
+                    .flatten()
+                    .find(|&near| (low..high).contains(&near) && free(self.buffer, near))
             });
-        if !closed {
-            let area = content.clipped(clip);
-            for y in area.y..area.bottom() {
-                for x in area.x..area.right() {
-                    if i32::from(x) == content.left
-                        || i32::from(x) + 1 == content.right
-                        || i32::from(y) == content.top
-                        || i32::from(y) + 1 == content.bottom
-                    {
-                        let cell = &mut self.buffer[(x, y)];
-                        cell.set_fg(blend(color, opacity, cell.bg, page));
-                    }
-                }
-            }
-            return;
-        }
-        let top = stroke.top == i32::from(area.y);
-        let bottom = stroke.bottom == i32::from(area.bottom());
-        let left = stroke.left == i32::from(area.x);
-        let right = stroke.right == i32::from(area.right());
-        let set = ratatui_core::symbols::border::PLAIN;
-        for y in area.y..area.bottom() {
-            for x in area.x..area.right() {
-                let on_top = top && y == area.y;
-                let on_bottom = bottom && y + 1 == area.bottom();
-                let on_left = left && x == area.x;
-                let on_right = right && x + 1 == area.right();
-                let symbol = match (on_top, on_bottom, on_left, on_right) {
-                    (true, _, true, _) => set.top_left,
-                    (true, _, _, true) => set.top_right,
-                    (_, true, true, _) => set.bottom_left,
-                    (_, true, _, true) => set.bottom_right,
-                    (true, ..) => set.horizontal_top,
-                    (_, true, ..) => set.horizontal_bottom,
-                    (_, _, true, _) => set.vertical_left,
-                    (_, _, _, true) => set.vertical_right,
-                    _ => continue,
-                };
-                let cell = &mut self.buffer[(x, y)];
-                if cell.symbol() == " " {
-                    cell.set_symbol(symbol);
-                    cell.set_fg(blend(color, opacity, cell.bg, page));
-                }
+            let Some(target) = target else {
+                continue;
+            };
+            let positions: Vec<_> = if horizontal {
+                (cells.x..cells.right()).map(|x| (x, target)).collect()
+            } else {
+                (cells.y..cells.bottom()).map(|y| (target, y)).collect()
+            };
+            for position in positions {
+                let cell = &mut self.buffer[position];
+                cell.reset();
+                cell.set_symbol(line).set_style(style);
+                self.canvas_cells[self.buffer.index_of(position.0, position.1)] = false;
             }
         }
     }
+
+    /// Draws a toggle's glyph on its label's first row (else its indicator's
+    /// middle row). Before the label it ends one Cell from the label's first
+    /// glyph, reaching left into the control's blank Cells, else its short
+    /// form does, else it sits flush with the label. An indicator after the
+    /// label (a trailing switch) takes the glyph from its left column,
+    /// extending right only into blank Cells, else the short form.
+    fn toggle_glyph(&mut self, visible: Rect, toggle: Toggle, texts: usize) {
+        let label = self.text_extent(visible, texts);
+        let indicator = toggle.indicator.and_then(|indicator| {
+            let bounds = self.geometry[texts..]
+                .iter()
+                .find(|geometry| geometry.id == indicator)?
+                .bounds;
+            Some((indicator, bounds))
+        });
+        let style = match (indicator, label) {
+            (Some((indicator, _)), _) => self
+                .tree
+                .get(indicator)
+                .map_or_else(Style::reset, |view| self.indicator_ink(view)),
+            (None, Some((y, left, _))) => self.buffer[(left, y)].style(),
+            (None, None) => return,
+        };
+        let blank = |buffer: &Buffer, x: u16, y: u16| {
+            visible.contains(ratatui_core::layout::Position::new(x, y))
+                && buffer[(x, y)].symbol() == " "
+        };
+        let glyphs = [toggle.glyph, toggle.short];
+        match (indicator, label) {
+            (indicator, Some((y, left, _)))
+                if indicator.is_none_or(|(_, bounds)| bounds.left < i32::from(left)) =>
+            {
+                let placed = [
+                    (glyphs[0], 1),
+                    (glyphs[1], 1),
+                    (glyphs[0], 0),
+                    (glyphs[1], 0),
+                ]
+                .into_iter()
+                .find_map(|(glyph, gap)| {
+                    let start = left.checked_sub(glyph.width() as u16 + gap)?;
+                    (start..left)
+                        .all(|x| blank(self.buffer, x, y))
+                        .then_some((start, glyph))
+                });
+                if let Some((start, glyph)) = placed {
+                    self.buffer.set_string(start, y, glyph, style);
+                }
+            }
+            (Some((_, bounds)), label) => {
+                let row = label.map_or(
+                    bounds.top + (bounds.bottom - bounds.top - 1).max(0) / 2,
+                    |(y, ..)| i32::from(y),
+                );
+                let (Ok(x), Ok(y)) = (u16::try_from(bounds.left), u16::try_from(row)) else {
+                    return;
+                };
+                if !visible.contains(ratatui_core::layout::Position::new(x, y)) {
+                    return;
+                }
+                let room = (x..visible.right())
+                    .take_while(|&column| {
+                        i32::from(column) < bounds.right || blank(self.buffer, column, y)
+                    })
+                    .count() as u16;
+                if let Some(glyph) = glyphs
+                    .into_iter()
+                    .find(|glyph| glyph.width() as u16 <= room)
+                {
+                    self.buffer.set_string(x, y, glyph, style);
+                }
+            }
+            (None, _) => {}
+        }
+    }
+
+    /// The palette ink of an indicator: its opaque fill's, else its border's.
+    fn indicator_ink(&self, view: &crate::view::NshView) -> Style {
+        let ground = Ground::new(self.scheme, self.background);
+        let fill = view
+            .animated
+            .background
+            .unwrap_or(view.style.background_color);
+        if fill.0 & 255 == 255 {
+            return ink(fill, ground);
+        }
+        let colors = view
+            .animated
+            .border_color
+            .map_or(view.style.borders.colors, |color| [color; 4]);
+        colors
+            .into_iter()
+            .find(|color| !color.is_transparent())
+            .map_or_else(Style::reset, |color| ink(color, ground))
+    }
+
+    /// The row, first column and end column of the first row of text the text
+    /// views from `texts` on in `geometry` draw inside `visible`.
+    fn text_extent(&self, visible: Rect, texts: usize) -> Option<(u16, u16, u16)> {
+        let mut label: Option<(u16, u16, u16)> = None;
+        for geometry in &self.geometry[texts..] {
+            let Some(text) = geometry.text_frame else {
+                continue;
+            };
+            let text = CellBounds::new(text, self.cells, self.area)
+                .clipped(geometry.visible.intersection(visible));
+            for y in text.y..text.bottom() {
+                for x in text.x..text.right() {
+                    let symbol = self.buffer[(x, y)].symbol();
+                    if symbol == " " || label.is_some_and(|(row, ..)| row != y) {
+                        continue;
+                    }
+                    let end = x + symbol.width().max(1) as u16;
+                    label = Some(label.map_or((y, x, end), |(row, left, right)| {
+                        (row, left.min(x), right.max(end))
+                    }));
+                }
+            }
+        }
+        label
+    }
+
+    /// Draws a button's brackets in its own Cells: around its one row of text
+    /// (the text views from `texts` on in `geometry`), one Cell away on both
+    /// sides when the box has room, else next to it, or around its
+    /// accessibility label on the box's middle row, cut to the box.
+    fn brackets(&mut self, visible: Rect, button: ButtonLabel, texts: usize) {
+        match button {
+            ButtonLabel::Text => {
+                let Some((y, left, right)) = self.text_extent(visible, texts) else {
+                    return;
+                };
+                let free = |x: u16| {
+                    (visible.x..visible.right()).contains(&x) && self.buffer[(x, y)].symbol() == " "
+                };
+                // The same gap on both sides, the widest the box has room for,
+                // and both brackets or neither: a label flush with its box
+                // stays bare.
+                let Some(gap) = (0..=BRACKET_GAP as u16).rev().find(|&gap| {
+                    left > gap
+                        && (left - gap - 1..left).all(free)
+                        && (right..=right + gap).all(free)
+                }) else {
+                    return;
+                };
+                let style = self.buffer[(left, y)].style();
+                self.buffer[(left - gap - 1, y)]
+                    .set_symbol("[")
+                    .set_style(style);
+                self.buffer[(right + gap, y)]
+                    .set_symbol("]")
+                    .set_style(style);
+            }
+            ButtonLabel::Accessible(label) => {
+                let width = usize::from(visible.width);
+                let mut text = format!("[ {label} ]");
+                if text.width() > width {
+                    let mut kept = String::new();
+                    for grapheme in label.graphemes(true) {
+                        if kept.width() + grapheme.width() + "[…]".width() > width {
+                            break;
+                        }
+                        kept.push_str(grapheme);
+                    }
+                    text = format!("[{kept}…]");
+                }
+                if text.width() > width {
+                    return;
+                }
+                let x = visible.x + ((width - text.width()) / 2) as u16;
+                let y = visible.y + (visible.height - 1) / 2;
+                self.buffer.set_string(x, y, text, Style::reset());
+            }
+        }
+    }
+}
+
+/// What a button shows between brackets: a pressable view (role button, or no
+/// role and press handlers) that the app drew as a box (a border, or an opaque
+/// fill unlike the `background` it sits on), whose text sits on one row, or
+/// whose content is only icons and which has an accessibility label. List
+/// items without a box, selected or checked views (shown reversed) and other
+/// content (fields, labeled canvases, images, native components) keep their
+/// look.
+fn button_label(
+    tree: &Mounter,
+    id: NodeId,
+    projection: Projection,
+    cells: CellSize,
+    area: Rect,
+    background: Option<nsh_core::Color>,
+) -> Option<(ButtonLabel, NodeId)> {
+    let view = tree.get(id)?;
+    let pressable = match view.props.accessibility.role {
+        AccessibilityRole::Button | AccessibilityRole::ImageButton => true,
+        AccessibilityRole::None => nsh_core::input::has_press(view.events),
+        _ => false,
+    };
+    let state = &view.props.accessibility.state;
+    if !pressable || state.selected || state.checked == Some(Checked::True) {
+        return None;
+    }
+    // The box is the pressable's own, or that of the plain View it wraps all
+    // its content in (a press handler around a styled View).
+    let mut boxed = id;
+    loop {
+        let view = tree.get(boxed)?;
+        if has_box(view, background) {
+            break;
+        }
+        let mut shown = view.children.iter().filter(|&&child| {
+            tree.get(child)
+                .is_some_and(|child| !child.concealed && !child.style.hidden)
+        });
+        match (shown.next(), shown.next()) {
+            (Some(&child), None) if tree.get(child)?.kind == ViewKind::View => boxed = child,
+            _ => return None,
+        }
+    }
+    let mut rows = Vec::new();
+    if !text_rows(tree, id, projection, cells, area, &mut rows) {
+        return None;
+    }
+    let label = match rows.len() {
+        0 => ButtonLabel::Accessible(view.props.accessibility.label.clone()?),
+        1 => ButtonLabel::Text,
+        _ => return None,
+    };
+    Some((label, boxed))
+}
+
+fn is_toggle(role: AccessibilityRole) -> bool {
+    matches!(
+        role,
+        AccessibilityRole::Checkbox | AccessibilityRole::Radio | AccessibilityRole::Switch
+    )
+}
+
+/// A checkbox's, radio's or switch's glyphs for its checked state, and its
+/// indicator: the first view in it, in tree order, that the app drew as a box
+/// (a border or an opaque fill, not a hairline rule) holding no text.
+fn toggle(tree: &Mounter, id: NodeId, cells: CellSize) -> Option<Toggle> {
+    let view = tree.get(id)?;
+    let checked = view.props.accessibility.state.checked;
+    let (glyph, short) = match (view.props.accessibility.role, checked) {
+        (AccessibilityRole::Checkbox, Some(Checked::True)) => ("[x]", "x"),
+        (AccessibilityRole::Checkbox, Some(Checked::Mixed)) => ("[-]", "-"),
+        (AccessibilityRole::Checkbox, _) => ("[ ]", " "),
+        (AccessibilityRole::Radio, Some(Checked::True)) => ("(•)", "•"),
+        (AccessibilityRole::Radio, _) => ("( )", " "),
+        (AccessibilityRole::Switch, Some(Checked::True)) => ("[on ]", "on"),
+        (AccessibilityRole::Switch, _) => ("[off]", "off"),
+        _ => return None,
+    };
+    Some(Toggle {
+        glyph,
+        short,
+        indicator: indicator(tree, id, cells),
+    })
+}
+
+fn indicator(tree: &Mounter, id: NodeId, cells: CellSize) -> Option<NodeId> {
+    let view = tree.get(id)?;
+    view.children.iter().find_map(|&child| {
+        let shown = tree.get(child)?;
+        if shown.concealed || shown.style.hidden {
+            return None;
+        }
+        let rule = shown.frame.size.width < cells.width() * HAIRLINE_CELL_FRACTION
+            || shown.frame.size.height < cells.height() * HAIRLINE_CELL_FRACTION;
+        if has_box(shown, None) && !rule && !holds_text(tree, child) {
+            Some(child)
+        } else {
+            indicator(tree, child, cells)
+        }
+    })
+}
+
+fn holds_text(tree: &Mounter, id: NodeId) -> bool {
+    tree.get(id).is_some_and(|view| {
+        view.input.is_some()
+            || view.text.as_ref().is_some_and(|(layout, _)| {
+                layout.downcast::<CellLayout>().is_some_and(|layout| {
+                    layout.rows.iter().any(|row| {
+                        row.glyphs
+                            .iter()
+                            .any(|glyph| !glyph.text.chars().all(char::is_whitespace))
+                    })
+                })
+            })
+            || view.children.iter().any(|&child| holds_text(tree, child))
+    })
+}
+
+/// Whether the app drew `view` as a box: a border, or an opaque fill unlike the
+/// `background` it sits on.
+fn has_box(view: &crate::view::NshView, background: Option<nsh_core::Color>) -> bool {
+    let border = view
+        .animated
+        .border_color
+        .map_or(view.style.borders.colors, |color| [color; 4]);
+    let widths = &view.style.borders.widths;
+    let bordered = [widths.top, widths.right, widths.bottom, widths.left]
+        .iter()
+        .zip(border)
+        .any(|(&width, color)| width > Points::ZERO && !color.is_transparent());
+    let fill = view
+        .animated
+        .background
+        .unwrap_or(view.style.background_color);
+    bordered || (fill.0 & 255 == 255 && Some(fill) != background)
+}
+
+/// Collects the Cell rows `id`'s subtree draws text glyphs on, up to two;
+/// `false` when it holds content other than text and decorative icons.
+fn text_rows(
+    tree: &Mounter,
+    id: NodeId,
+    projection: Projection,
+    cells: CellSize,
+    area: Rect,
+    rows: &mut Vec<i32>,
+) -> bool {
+    let Some(view) = tree.get(id) else {
+        return true;
+    };
+    if view.concealed
+        || view.style.hidden
+        || view.kind == ViewKind::Modal
+        || view.animated.opacity.unwrap_or(view.style.opacity) < INVISIBLE_OPACITY
+    {
+        return true;
+    }
+    let projection = projection.view(view);
+    let frame = CellBounds::new(
+        projection.bounds(Bounds::new(Point::default(), view.frame.size)),
+        cells,
+        area,
+    );
+    let content = match view.kind {
+        ViewKind::View | ViewKind::Text => view.component.is_some(),
+        ViewKind::Canvas => view.props.accessibility.label.is_some(),
+        ViewKind::Image => {
+            frame.right - frame.left >= MIN_IMAGE_CELLS.0
+                && frame.bottom - frame.top >= MIN_IMAGE_CELLS.1
+        }
+        _ => true,
+    };
+    if content {
+        return false;
+    }
+    if let Some((layout, text)) = &view.text
+        && let Some(layout) = layout.downcast::<CellLayout>()
+    {
+        for (index, row) in layout.rows.iter().enumerate() {
+            if row
+                .glyphs
+                .iter()
+                .all(|glyph| glyph.text.chars().all(char::is_whitespace))
+            {
+                continue;
+            }
+            let bounds = projection.bounds(Bounds::new(
+                text.origin + Point::new(Points::ZERO, cells.height() * index as f32),
+                nsh_core::Size::new(text.size.width, cells.height()),
+            ));
+            let top = CellBounds::new(bounds, cells, area).top;
+            if !rows.contains(&top) {
+                rows.push(top);
+            }
+            if rows.len() > 1 {
+                return true;
+            }
+        }
+    }
+    let offset = view
+        .scroll
+        .as_ref()
+        .map_or_else(Point::default, |scroll| scroll.origin());
+    let projection = projection.translated(Point::new(-offset.x, -offset.y));
+    view.children
+        .iter()
+        .all(|&child| rows.len() > 1 || text_rows(tree, child, projection, cells, area, rows))
+}
+
+/// How far each child of `id` moves down so that consecutive siblings of
+/// equal height stacked in a column, at an equal point pitch, keep one Cell
+/// pitch and one Cell height: the first keeps its rounded row, and each
+/// next one starts the pitch's rounded rows below it, on a Cell edge. Others
+/// keep their absolute edges.
+fn even_pitch(tree: &Mounter, id: NodeId, projection: Projection, cells: CellSize) -> Vec<Points> {
+    const SAME: f32 = 0.01;
+    let Some(view) = tree.get(id) else {
+        return Vec::new();
+    };
+    let frames: Vec<_> = view
+        .children
+        .iter()
+        .map(|&child| {
+            tree.get(child)
+                .filter(|child| {
+                    !child.concealed && !child.style.hidden && child.kind != ViewKind::Modal
+                })
+                .map(|child| {
+                    projection
+                        .view(child)
+                        .bounds(Bounds::new(Point::default(), child.frame.size))
+                })
+                .filter(|frame| frame.size.height > Points::ZERO)
+        })
+        .collect();
+    let mut deltas = vec![Points::ZERO; frames.len()];
+    let height = cells.height();
+    let mut start = 0;
+    while start < frames.len() {
+        let Some(first) = frames[start] else {
+            start += 1;
+            continue;
+        };
+        let mut pitch = None;
+        let mut end = start + 1;
+        while let Some(Some(next)) = frames.get(end) {
+            let previous = frames[end - 1].expect("a frame of the run");
+            let step = next.top() - previous.top();
+            if (next.size.height - first.size.height).abs().0 > SAME
+                || (next.left() - first.left()).abs().0 > SAME
+                || next.top() < previous.bottom() - Points(SAME)
+                || pitch.is_some_and(|pitch: Points| (step - pitch).abs().0 > SAME)
+            {
+                break;
+            }
+            pitch = Some(step);
+            end += 1;
+        }
+        if let Some(pitch) = pitch {
+            let first_row = (first.top() / height + 0.5).floor();
+            let pitch_rows = (pitch / height + 0.5).floor();
+            for (offset, index) in (start..end).enumerate() {
+                let top = frames[index].expect("a frame of the run").top();
+                deltas[index] = height * (first_row + offset as f32 * pitch_rows) - top;
+            }
+        }
+        start = end;
+    }
+    deltas
 }
 
 fn hairline_fill(
@@ -848,13 +1308,7 @@ fn hairline_fill(
         .animated
         .background
         .unwrap_or(view.style.background_color);
-    let has_fill = !fill.is_transparent()
-        || view
-            .style
-            .effects
-            .as_ref()
-            .is_some_and(|effects| !effects.background_images.is_empty());
-    if !has_fill || !(horizontal || vertical) {
+    if fill.is_transparent() || !(horizontal || vertical) {
         return None;
     }
     Some(
@@ -1073,72 +1527,25 @@ fn disjoint_text_cells(
     protected
 }
 
-/// Fills the `visible` Cells with `fill`: page backgrounds with the terminal's
-/// own, opaque fills replace what is there, translucent ones blend over it.
-fn fill_cells(
-    buffer: &mut Buffer,
-    page_backgrounds: &[nsh_core::Color],
-    page: Color,
-    visible: Rect,
-    paint: FillPaint,
-    covered: impl Fn(u16, u16) -> bool,
-) {
-    let FillPaint {
-        color: fill,
-        opacity,
-        line,
-    } = paint;
-    if fill.is_transparent() {
-        return;
-    }
-    let opaque = (fill.0 & 255 == 255 && opacity >= 1.0).then(|| rgb(fill));
-    let constant = if page_backgrounds.contains(&fill) {
-        Some(Color::Reset)
-    } else {
-        opaque
-    };
+/// Draws `fill` on the `visible` Cells it covers; each replaces what the
+/// Cell held.
+fn fill_cells(buffer: &mut Buffer, visible: Rect, fill: Fill, covered: impl Fn(u16, u16) -> bool) {
     for y in visible.y..visible.bottom() {
         for x in visible.x..visible.right() {
             if !covered(x, y) {
                 continue;
             }
             let cell = &mut buffer[(x, y)];
-            if let Some(line) = line {
-                let background = cell.bg;
-                let under_stroke = if cell.symbol() == line {
-                    cell.fg
-                } else {
-                    background
-                };
-                let foreground = opaque.unwrap_or_else(|| blend(fill, opacity, under_stroke, page));
-                cell.reset();
-                cell.set_bg(background).set_fg(foreground).set_symbol(line);
-            } else {
-                let background = constant.unwrap_or_else(|| blend(fill, opacity, cell.bg, page));
-                cell.reset();
-                cell.set_bg(background);
+            cell.reset();
+            match fill {
+                Fill::Line(line, style) => {
+                    cell.set_symbol(line).set_style(style);
+                }
+                Fill::Solid(style) => {
+                    cell.set_style(style.add_modifier(Modifier::REVERSED));
+                }
+                Fill::Clear => {}
             }
         }
     }
-}
-
-/// Blends `color` at `opacity` over a Cell's `background`; a Cell drawn with
-/// the terminal's background shows the `page` color.
-pub(crate) fn blend(color: nsh_core::Color, opacity: f32, background: Color, page: Color) -> Color {
-    let packed = color.0;
-    let alpha = (packed & 255) as f32 / 255.0 * opacity;
-    let (r, g, b) = match (background, page) {
-        (Color::Rgb(r, g, b), _) | (_, Color::Rgb(r, g, b)) => (r, g, b),
-        _ => (0, 0, 0),
-    };
-    let channel = |shift: u32, base: u8| {
-        (((packed >> shift) & 255) as f32 * alpha + f32::from(base) * (1.0 - alpha)).round() as u8
-    };
-    Color::Rgb(channel(24, r), channel(16, g), channel(8, b))
-}
-
-/// `color`'s red, green and blue as a Cell color.
-fn rgb(color: nsh_core::Color) -> Color {
-    let [r, g, b, _] = color.0.to_be_bytes();
-    Color::Rgb(r, g, b)
 }

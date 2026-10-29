@@ -165,7 +165,7 @@ fn placeholder_and_masked_text_draw_in_the_content_box_and_click_places_the_care
     draw_until(&mut view, &mut terminal, &rx, "Password");
     assert_eq!(
         terminal.backend().buffer()[(0, 1)].fg,
-        ratatui_core::style::Color::Rgb(0x12, 0x34, 0x56)
+        ratatui_core::style::Color::Blue
     );
     view.handle(Input::Paste("界🙂abc".into()));
     draw_until(&mut view, &mut terminal, &rx, "•••••");
