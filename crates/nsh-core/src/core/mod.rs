@@ -995,6 +995,8 @@ pub struct Core<M: TextEngine> {
     /// headers under the status bar).
     safe_area: EdgeInsets,
     list_binds: Vec<ListBind>,
+    /// The lists keeping items rendered for [`Core::set_kept`].
+    kept_lists: Vec<Key>,
     /// The runtime's lists with overscan cells waiting to bind
     /// ([`Core::take_paced_list_binds`]), in the order they asked.
     paced_lists: Vec<NodeId>,
@@ -1154,6 +1156,7 @@ impl<M: TextEngine> Core<M> {
             header_heights: (Points(44.0), Points(96.0)),
             safe_area: EdgeInsets::default(),
             list_binds: Vec::new(),
+            kept_lists: Vec::new(),
             paced_lists: Vec::new(),
             paced_scratch: Vec::new(),
             events: Vec::new(),
@@ -1390,6 +1393,60 @@ impl<M: TextEngine> Core<M> {
         if dependents {
             self.dependents_dirty(key);
         }
+    }
+
+    /// Keeps the rows of virtual lists that hold `nodes` rendered, out of
+    /// the render window too, until the next call: the ends of a text
+    /// selection across a list's rows, whose texts must outlive scrolling
+    /// away (a recycled cell would show another row). Replaces the last
+    /// call's; none releases them.
+    pub fn set_kept(&mut self, nodes: &[NodeId]) {
+        let mut kept: Vec<(Key, u32)> = Vec::new();
+        for &id in nodes {
+            let Ok(mut key) = self.key(id) else { continue };
+            // Up to the cell: the ancestor whose parent is a list holding
+            // it in a slot.
+            loop {
+                let parent = self.nodes[key as usize].parent;
+                if parent == NO_KEY {
+                    break;
+                }
+                if let Some(list) = self.nodes[parent as usize].list.as_ref()
+                    && let Some(index) = list
+                        .slots
+                        .iter()
+                        .find(|s| s.cell == key)
+                        .and_then(|s| s.index)
+                {
+                    kept.push((parent, index));
+                    break;
+                }
+                key = parent;
+            }
+        }
+        let mut lists: Vec<Key> = kept.iter().map(|&(list, _)| list).collect();
+        lists.sort_unstable();
+        lists.dedup();
+        for &list in self.kept_lists.iter().filter(|l| !lists.contains(l)) {
+            if let Some(state) = self
+                .nodes
+                .get_mut(list as usize)
+                .and_then(|n| n.list.as_mut())
+            {
+                state.set_kept(Vec::new());
+            }
+        }
+        for &list in &lists {
+            let items = kept
+                .iter()
+                .filter(|&&(l, _)| l == list)
+                .map(|&(_, i)| i)
+                .collect();
+            if let Some(state) = self.nodes[list as usize].list.as_mut() {
+                state.set_kept(items);
+            }
+        }
+        self.kept_lists = lists;
     }
 
     /// The platform scrolled the text of multiline input `id` to `offset`,

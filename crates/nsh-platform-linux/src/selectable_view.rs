@@ -74,6 +74,9 @@ struct Area {
     model: SelectionModel,
     /// The texts that draw part of the selection.
     highlighted: Vec<glib::WeakRef<NshView>>,
+    /// The texts at the selection's ends, whose virtual list rows the core
+    /// keeps rendered (`EngineControl::keep_rendered`).
+    kept: Vec<NodeId>,
     /// A batch changed its subtree.
     dirty: bool,
     /// Its keys and focus controllers.
@@ -379,6 +382,7 @@ impl Area {
             view: view.downgrade(),
             model: SelectionModel::new(),
             highlighted: Vec::new(),
+            kept: Vec::new(),
             dirty: true,
             controllers: [keys.upcast(), focus.upcast()],
         }
@@ -741,16 +745,33 @@ fn clear(surface: &Surface, id: NodeId) {
 /// Shows area `id`'s selection: each text's range, the keyboard focus
 /// while there is one.
 fn apply(surface: &Surface, id: NodeId, area: &NshView, texts: &Texts) {
-    let (ranges, empty, old) = {
+    let (ranges, empty, old, kept) = {
         let mut areas = surface.selection.areas.borrow_mut();
         let Some(a) = areas.get_mut(&id) else { return };
         let ranges = a.model.ranges(texts);
+        // Scrolled away, the ends' rows must not be recycled: the
+        // selection would lose its texts.
+        let ends: Vec<NodeId> = a
+            .model
+            .bounds()
+            .into_iter()
+            .flat_map(|(start, end)| [start.text, end.text])
+            .filter_map(|i| texts.items.get(i).map(|item| item.view.id()))
+            .collect();
+        let kept = (ends != a.kept).then(|| {
+            a.kept = ends.clone();
+            ends
+        });
         (
             ranges,
             a.model.is_empty(),
             std::mem::take(&mut a.highlighted),
+            kept,
         )
     };
+    if let Some(nodes) = kept {
+        surface.control(|c| c.keep_rendered(nodes));
+    }
     let mut highlighted = Vec::with_capacity(ranges.len());
     let mut drawn = Vec::with_capacity(ranges.len());
     for (i, range) in ranges {
