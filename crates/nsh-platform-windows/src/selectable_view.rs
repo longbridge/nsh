@@ -25,7 +25,7 @@ use std::{
 use nsh_core::{
     AttributedText, Bounds, EventKind, Point, Points,
     geometry::point,
-    selection::{SelectionModel, SelectionTexts},
+    selection::{KeptRows, SelectionModel, SelectionTexts, reading_order, reorder},
 };
 
 use crate::{
@@ -77,12 +77,24 @@ impl Texts {
     }
 
     fn collect(&mut self, view: &NshView) {
+        // In reading order: a virtual list's recycled cells are mounted
+        // in no particular order.
+        let start = self.views.len();
+        let mut runs = Vec::new();
         view.with_children(|children| {
             for child in children {
+                let from = self.views.len();
                 self.add(child);
                 self.collect(child);
+                runs.push((child.state().frame, from..self.views.len()));
             }
         });
+        if let Some(order) = reading_order(&runs) {
+            reorder(&mut self.views, start, &order);
+            reorder(&mut self.texts, start, &order);
+            reorder(&mut self.frames, start, &order);
+            reorder(&mut self.to_root, start, &order);
+        }
     }
 
     /// Adds `view` when it is text that takes part.
@@ -209,6 +221,8 @@ struct Current {
     last: Option<(f32, f32)>,
     /// An autoscroll tick is pending.
     autoscrolling: bool,
+    /// The virtual list rows its ends are in, kept rendered.
+    kept: KeptRows,
 }
 
 impl Current {
@@ -223,11 +237,15 @@ impl Current {
             over_press: false,
             last: None,
             autoscrolling: false,
+            kept: KeptRows::default(),
         }
     }
 
     /// Hands each text its part of the selection.
     fn apply(&mut self, texts: &Texts) {
+        if let Some(nodes) = self.kept.changed(&self.model) {
+            keep_rendered(self.surface, nodes);
+        }
         let ranges = self.model.ranges(texts);
         let mut highlighted = Vec::with_capacity(ranges.len());
         for (i, range) in ranges {
@@ -244,9 +262,23 @@ impl Current {
 
     /// Takes the highlights away.
     fn unhighlight(&mut self) {
+        if let Some(nodes) = self.kept.release() {
+            keep_rendered(self.surface, nodes);
+        }
         for view in self.highlighted.drain(..) {
             set_range(&view, None);
         }
+    }
+}
+
+/// Keeps the virtual list rows of `nodes` rendered (none: lets go).
+fn keep_rendered(surface: u64, nodes: Vec<u64>) {
+    if let Some(surface) = Surface::by_key(surface) {
+        let nodes = nodes
+            .into_iter()
+            .filter_map(|k| k.try_into().ok())
+            .collect();
+        surface.control(|c| c.keep_rendered(nodes));
     }
 }
 

@@ -25,8 +25,8 @@ use std::{
 
 use nsh_core::{
     AttributedText, Bounds, Point, Points, ViewKind,
-    geometry::{bounds, point},
-    selection::{SelectionModel, SelectionTexts},
+    geometry::{bounds, point, size},
+    selection::{KeptRows, SelectionModel, SelectionTexts, reading_order, reorder},
 };
 use rustc_hash::FxHashSet;
 
@@ -108,13 +108,34 @@ fn walk(view: &NshView, origin: (f32, f32), out: &mut Texts) {
     // their offset, which shows as a layer transform before the bounds
     // have it.
     let offset = crate::scroll::bounds_origin(view);
+    // In reading order: a virtual list's recycled cells are mounted in no
+    // particular order.
+    let start = out.len();
+    let mut runs = Vec::new();
     for child in view.child_views() {
-        let o = child.ns().frame().origin;
+        let frame = child.ns().frame();
         let at = (
-            origin.0 + o.x as f32 - offset.0,
-            origin.1 + o.y as f32 - offset.1,
+            origin.0 + frame.origin.x as f32 - offset.0,
+            origin.1 + frame.origin.y as f32 - offset.1,
         );
+        let from = out.len();
         walk(&child, at, out);
+        runs.push((
+            bounds(
+                point(Points(frame.origin.x as f32), Points(frame.origin.y as f32)),
+                size(
+                    Points(frame.size.width as f32),
+                    Points(frame.size.height as f32),
+                ),
+            ),
+            from..out.len(),
+        ));
+    }
+    if let Some(order) = reading_order(&runs) {
+        reorder(&mut out.views, start, &order);
+        reorder(&mut out.contents, start, &order);
+        reorder(&mut out.origins, start, &order);
+        reorder(&mut out.frames, start, &order);
     }
 }
 
@@ -177,6 +198,8 @@ struct Active {
     over_press: bool,
     /// Where the pointer is while it drags (root coordinates).
     pointer: Cell<Option<(f32, f32)>>,
+    /// The virtual list rows its ends are in, kept rendered.
+    kept: KeptRows,
 }
 
 impl Active {
@@ -187,7 +210,10 @@ impl Active {
 
     /// Sets each text's part of the selection, and clears it where the
     /// texts no longer take part.
-    fn show(&mut self, texts: &Texts) {
+    fn show(&mut self, surface: &Surface, texts: &Texts) {
+        if let Some(nodes) = self.kept.changed(&self.model) {
+            keep_rendered(surface, nodes);
+        }
         let mut parts = vec![None; texts.len()];
         for (i, range) in self.model.ranges(texts) {
             parts[i] = Some((range.start, range.end));
@@ -210,7 +236,10 @@ impl Active {
     }
 
     /// Clears every text's part.
-    fn hide(&mut self) {
+    fn hide(&mut self, surface: &Surface) {
+        if let Some(nodes) = self.kept.release() {
+            keep_rendered(surface, nodes);
+        }
         for old in self.shown.drain(..) {
             if let Some(view) = old.load().and_then(|v| NshView::from_ns(&v)) {
                 crate::text::set_area_range(&view, None);
@@ -230,10 +259,10 @@ impl AreaSelection {
     }
 
     /// Clears the selection and forgets the area.
-    pub(crate) fn clear(&self) {
+    pub(crate) fn clear(&self, surface: &Surface) {
         let active = self.active.borrow_mut().take();
         if let Some(mut active) = active {
-            active.hide();
+            active.hide(surface);
         }
     }
 
@@ -255,7 +284,7 @@ impl AreaSelection {
 
     /// Selects every text of the area last pressed (Cmd+A). False without
     /// one.
-    pub(crate) fn select_all(&self) -> bool {
+    pub(crate) fn select_all(&self, surface: &Surface) -> bool {
         let mut active = self.active.borrow_mut();
         let Some(active) = active.as_mut() else {
             return false;
@@ -265,7 +294,7 @@ impl AreaSelection {
         };
         let texts = collect(&area);
         active.model.select_all(&texts);
-        active.show(&texts);
+        active.show(surface, &texts);
         true
     }
 }
@@ -298,6 +327,7 @@ pub(crate) fn down(
         dragging: Cell::new(false),
         over_press: false,
         pointer: Cell::new(None),
+        kept: KeptRows::default(),
     });
     let clicks = clicks.max(1) as u32;
     active.over_press = over_press;
@@ -307,7 +337,7 @@ pub(crate) fn down(
     active
         .model
         .press(&texts, point(Points(lx), Points(ly)), clicks, shift);
-    active.show(&texts);
+    active.show(surface, &texts);
 }
 
 /// The primary button, pressed in `area`, moved by `(dx, dy)` from where it
@@ -353,7 +383,7 @@ fn extend(surface: &Surface, area: &NshView, x: f32, y: f32) {
         return;
     };
     if active.model.drag(&texts, point(Points(lx), Points(ly))) {
-        active.show(&texts);
+        active.show(surface, &texts);
     }
 }
 
@@ -465,7 +495,7 @@ pub(crate) fn end_batch(surface: &Surface) {
     };
     let Some(area) = active.area() else {
         // The area is gone.
-        active.hide();
+        active.hide(surface);
         *slot = None;
         return;
     };
@@ -474,5 +504,14 @@ pub(crate) fn end_batch(surface: &Surface) {
     }
     let texts = collect(&area);
     active.model.texts_changed(&texts);
-    active.show(&texts);
+    active.show(surface, &texts);
+}
+
+/// Keeps the virtual list rows of `nodes` rendered (none: lets go).
+fn keep_rendered(surface: &Surface, nodes: Vec<u64>) {
+    let nodes = nodes
+        .into_iter()
+        .filter_map(|k| k.try_into().ok())
+        .collect();
+    surface.control(|c| c.keep_rendered(nodes));
 }

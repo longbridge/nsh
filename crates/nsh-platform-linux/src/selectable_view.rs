@@ -47,7 +47,7 @@ use gtk4::{self as gtk, gdk, gio, glib, graphene, prelude::*};
 use nsh_core::{
     AttributedText, NodeId, TextLayout,
     geometry::{Bounds, Point, Points},
-    selection::{SelectionModel, SelectionTexts, sibling_order},
+    selection::{KeptRows, SelectionModel, SelectionTexts, reading_order, reorder},
 };
 use rustc_hash::FxHashMap;
 
@@ -74,9 +74,8 @@ struct Area {
     model: SelectionModel,
     /// The texts that draw part of the selection.
     highlighted: Vec<glib::WeakRef<NshView>>,
-    /// The texts at the selection's ends, whose virtual list rows the core
-    /// keeps rendered (`EngineControl::keep_rendered`).
-    kept: Vec<NodeId>,
+    /// The virtual list rows its ends are in, kept rendered.
+    kept: KeptRows,
     /// A batch changed its subtree.
     dirty: bool,
     /// Its keys and focus controllers.
@@ -178,21 +177,16 @@ fn collect(area: &NshView) -> Texts {
             }
         }
         // In reading order: a virtual list's recycled cells are mounted
-        // in no particular order. Only children with texts count: a spare
-        // cell left where it was may overlap the shown ones.
-        let mut parts: Vec<(Bounds<Points>, Vec<Item>)> = view
-            .child_views()
-            .into_iter()
-            .filter_map(|child| {
-                let mut items = Vec::new();
-                walk(area, &child, &mut items);
-                let frame = child.state().frame;
-                (!items.is_empty()).then_some((frame, items))
-            })
-            .collect();
-        let frames: Vec<_> = parts.iter().map(|(frame, _)| *frame).collect();
-        for i in sibling_order(&frames) {
-            out.append(&mut parts[i].1);
+        // in no particular order.
+        let start = out.len();
+        let mut runs = Vec::new();
+        for child in view.child_views() {
+            let from = out.len();
+            walk(area, &child, out);
+            runs.push((child.state().frame, from..out.len()));
+        }
+        if let Some(order) = reading_order(&runs) {
+            reorder(out, start, &order);
         }
     }
     let mut items = Vec::new();
@@ -382,7 +376,7 @@ impl Area {
             view: view.downgrade(),
             model: SelectionModel::new(),
             highlighted: Vec::new(),
-            kept: Vec::new(),
+            kept: KeptRows::default(),
             dirty: true,
             controllers: [keys.upcast(), focus.upcast()],
         }
@@ -749,19 +743,7 @@ fn apply(surface: &Surface, id: NodeId, area: &NshView, texts: &Texts) {
         let mut areas = surface.selection.areas.borrow_mut();
         let Some(a) = areas.get_mut(&id) else { return };
         let ranges = a.model.ranges(texts);
-        // Scrolled away, the ends' rows must not be recycled: the
-        // selection would lose its texts.
-        let ends: Vec<NodeId> = a
-            .model
-            .bounds()
-            .into_iter()
-            .flat_map(|(start, end)| [start.text, end.text])
-            .filter_map(|i| texts.items.get(i).map(|item| item.view.id()))
-            .collect();
-        let kept = (ends != a.kept).then(|| {
-            a.kept = ends.clone();
-            ends
-        });
+        let kept = a.kept.changed(&a.model);
         (
             ranges,
             a.model.is_empty(),
@@ -770,7 +752,14 @@ fn apply(surface: &Surface, id: NodeId, area: &NshView, texts: &Texts) {
         )
     };
     if let Some(nodes) = kept {
-        surface.control(|c| c.keep_rendered(nodes));
+        surface.control(|c| {
+            c.keep_rendered(
+                nodes
+                    .into_iter()
+                    .filter_map(|k| k.try_into().ok())
+                    .collect(),
+            )
+        });
     }
     let mut highlighted = Vec::with_capacity(ranges.len());
     let mut drawn = Vec::with_capacity(ranges.len());
