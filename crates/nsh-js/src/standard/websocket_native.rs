@@ -1,5 +1,5 @@
 //! The global `WebSocket`: a capability-checked transport on the owning VM.
-//! (The `websocket` module's `WebSocket.connect` is the runtime's Rust
+//! (The `websocket` module's `connect` is the runtime's Rust
 //! registry, `nsh_core::runtime`; both count under one per-VM cap.)
 //!
 //! The class itself is native, an `EventTarget` (`web/websocket.rs`).

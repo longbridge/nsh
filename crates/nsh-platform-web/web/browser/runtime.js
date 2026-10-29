@@ -180,14 +180,12 @@ export function createBrowserHost(player) {
           if (!Object.hasOwn(realm, "__nsh_hot")) Object.defineProperty(realm, "__nsh_hot", { value: hot.hot, configurable: true });
           return hot.hot;
         } });
-        namespaces.set("nsh/list", { List: lists.render });
         namespaces.set("nsh/device", Object.fromEntries(["windowSize", "colorScheme", "setColorScheme", "fontScale", "pixelRatio", "locale", "platform"].map(name => [name, nsh[name]])));
         namespaces.set("nsh/accessibility", { reduceMotion: nsh.reduceMotion, screenReaderEnabled: nsh.screenReaderEnabled });
-        for (const [specifier, name] of [["nsh/image", "Image"], ["nsh/webview", "WebView"], ["nsh/video", "Video"], ["nsh/host", "host"]]) namespaces.set(specifier, { [name]: nsh[name] });
+        namespaces.set("nsh/host", { host: nsh.host });
         namespaces.set("nsh/native", { nativeComponent: nsh.nativeComponent, nativeModule: nsh.nativeModule });
         namespaces.set("nsh/keymap", { keymap: nsh.keymap });
         namespaces.set("nsh/animated", animation.api);
-        namespaces.set("nsh/canvas", canvas);
         namespaces.set("nsh/gesture", { PanResponder: gestures.PanResponder });
         const map = { ...moduleMap };
         const entryURL = new URL(entry, document.baseURI);

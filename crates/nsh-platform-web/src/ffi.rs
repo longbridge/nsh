@@ -99,6 +99,8 @@ unsafe extern "C" {
     fn js_websocket_close(id: u32, code: u32, reason: *const u8, len: usize) -> u32;
     #[link_name = "websocket_buffered"]
     fn js_websocket_buffered(id: u32) -> f64;
+    #[link_name = "websocket_pause"]
+    fn js_websocket_pause(id: u32, paused: u32);
     #[link_name = "websocket_cancel"]
     fn js_websocket_cancel(id: u32);
     #[link_name = "load_data"]
@@ -412,6 +414,12 @@ pub(crate) fn websocket_close(id: u32, code: u16, reason: &str) -> bool {
 pub(crate) fn websocket_buffered(id: u32) -> usize {
     // SAFETY: no pointers.
     unsafe { js_websocket_buffered(id) as usize }
+}
+
+/// Holds (`true`) or delivers again (`false`) the browser socket's events.
+pub(crate) fn websocket_pause(id: u32, paused: bool) {
+    // SAFETY: no pointers.
+    unsafe { js_websocket_pause(id, paused as u32) }
 }
 
 /// Removes callbacks before closing a discarded browser socket.

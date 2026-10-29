@@ -283,12 +283,10 @@ mount(App);
 /// The props `List` does not use itself reach its scroll view, as they do
 /// a `<Scroll>`'s: the test id and accessibility (UI tests find the list),
 /// classes, touch props and layout events; and they follow their signals.
-/// (Imported from `nsh/list`, where `List` was first: it still is.)
 #[test]
 fn list_passes_host_props_to_its_scroll_view() {
     let app = r#"
-import { mount, signal, Text, View } from "nsh";
-import { List } from "nsh";
+import { List, mount, signal, Text, View } from "nsh";
 const label = signal("Feed");
 const size = signal("none");
 function App() {

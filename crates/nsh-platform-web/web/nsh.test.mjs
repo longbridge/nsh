@@ -565,3 +565,44 @@ test("data that does not load reaches the engine as none", async () => {
   }
   assert.deepEqual(handed, [["syntaxes", [], 0]]);
 });
+
+test("a paused WebSocket holds its events, in order, until the engine resumes it", async () => {
+  const { player } = fakePlayer();
+  const sockets = [];
+  const saved = globalThis.WebSocket;
+  globalThis.WebSocket = class {
+    constructor(url) {
+      this.url = url;
+      this.protocol = "";
+      sockets.push(this);
+    }
+    close() {}
+  };
+  const got = [];
+  // As the engine does: it pauses the socket from inside the event that
+  // fills its queue (after "a", and again after "b").
+  player.wasm.nsh_websocket_event = (id, kind, p, l) => {
+    got.push(`${kind}:${new TextDecoder().decode(new Uint8Array(player.wasm.memory.buffer, p, l))}`);
+    if (got.length === 2 || got.length === 3) player.websocketPause(id, true);
+    return -1;
+  };
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+  try {
+    player.websocketStart(1, { url: "ws://example.test/", protocols: [] });
+    const [socket] = sockets;
+    socket.onopen();
+    for (const data of ["a", "b", "c"]) socket.onmessage({ data });
+    socket.onclose({ reason: "done", code: 4000, wasClean: true });
+    assert.deepEqual(got, ["0:", "1:a"]);
+    player.websocketPause(1, false);
+    assert.deepEqual(got, ["0:", "1:a"], "held events enter the engine in a task of their own");
+    await settle();
+    assert.deepEqual(got, ["0:", "1:a", "1:b"]);
+    player.websocketPause(1, false);
+    await settle();
+    assert.deepEqual(got, ["0:", "1:a", "1:b", "1:c", "4:done"]);
+  } finally {
+    clearTimeout(player.timer);
+    globalThis.WebSocket = saved;
+  }
+});

@@ -519,6 +519,7 @@ mod tests {
         fn buffered_amount(&self) -> usize {
             0
         }
+        fn pause(&mut self, _: bool) {}
     }
     impl Drop for Task {
         fn drop(&mut self) {
