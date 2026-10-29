@@ -25,6 +25,9 @@ use crate::{
 
 const COMPACT_HEIGHT_CELLS: f32 = 1.5;
 const HAIRLINE_CELL_FRACTION: f32 = 0.5;
+/// The alpha from which a translucent fill clears what is under it, as an
+/// opaque one does (50%); lighter fills (scrims, tints) draw nothing.
+const CLEARING_ALPHA: u32 = 128;
 /// Image placeholders smaller than this, in Cells, are decorative and not drawn.
 const MIN_IMAGE_CELLS: (i32, i32) = (3, 2);
 /// The Cells between a button's label and each of its brackets.
@@ -539,7 +542,7 @@ impl Painter<'_> {
                 None
             } else if let Some(line) = line {
                 Some(Fill::Line(line, ink(fill, outer_ground)))
-            } else if fill.0 & 255 < 255 {
+            } else if fill.0 & 255 < CLEARING_ALPHA {
                 None
             } else if leaf {
                 Some(Fill::Solid(ink(fill, outer_ground)))

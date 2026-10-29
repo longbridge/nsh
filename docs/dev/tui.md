@@ -366,9 +366,10 @@ engine lays text out once on the engine thread; the styled `Paragraph` for a gro
 first drawn on it, and the last few are kept. Borders, hairlines, canvas dots and text, field text and placeholders and animated colors use
 the same mapping.
 
-No fill color is drawn; every Cell shows the terminal's background. A view's opaque fill still clears the Cells
-it covers, so a popup, a menu or a sticky header hides what lies under it. Translucent fills (scrims, tints)
-draw nothing. A childless View whose opaque fill is its content (a progress indicator, a slider thumb, a status
+No fill color is drawn; every Cell shows the terminal's background. A view's opaque fill, or a translucent one
+of at least 50% alpha, still clears the Cells it covers, so a popup, a menu, a sticky header or a floating bar
+hides what lies under it. Lighter fills (scrims, tints) draw nothing. A childless View whose opaque fill is its
+content (a progress indicator, a slider thumb, a status
 dot) draws its Cells reversed in the fill's palette color; one thinner than half a Cell draws the hairline glyphs
 above. Gradients are left out.
 
@@ -775,7 +776,7 @@ permit clipboard writes; `nsh test` uses memory and never writes to the machine'
 | Test screenshots | Versioned UTF-8 JSON of Cell symbols, foreground/background/underline colors and modifiers |
 | Development errors | Dismissible panel, with the mapped message and stack; cleared by the next update |
 | Colors | The terminal's 16-color meanings by `palette.rs`: hue-band accents, the default foreground or dim, read against the opaque fill the app drew them on or the appearance's page |
-| View fills | No color: opaque fills clear the Cells they cover to the terminal background; childless solid leaves reversed in their palette color; translucent fills nothing |
+| View fills | No color: opaque fills and fills of at least 50% alpha clear the Cells they cover to the terminal background; childless solid leaves reversed in their palette color; lighter fills nothing |
 | Opacity | Ignored, except that a view below 3% draws nothing |
 | Selected, checked and focused views | Reversed over their Cell box; focused fields show the terminal cursor |
 | Borders | Decorative: straight single lines in per-side palette colors over a reserved inner Cell rect, drawn whole or not at all; boxes without room for a whole border around their content draw none |

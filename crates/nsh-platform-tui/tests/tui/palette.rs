@@ -140,7 +140,7 @@ fn Fills() -> impl IntoElement {
                 .left(px(0.0))
                 .w(px(80.0))
                 .h(px(16.0))
-                .bg(nsh_core::color::rgba(0x00000080)),
+                .bg(nsh_core::color::rgba(0x00000066)),
         )
         .child(
             view()
@@ -148,12 +148,22 @@ fn Fills() -> impl IntoElement {
                 .h(px(16.0))
                 .bg(nsh_core::color::rgb(0x22c55e)),
         )
+        .child(text("hidden"))
+        .child(
+            view()
+                .absolute()
+                .top(px(80.0))
+                .left(px(0.0))
+                .w(px(80.0))
+                .h(px(16.0))
+                .bg(nsh_core::color::rgba(0x0c0d0f80)),
+        )
 }
 
 #[test]
 fn fills_draw_no_color_and_opaque_ones_clear_what_is_under_them() {
     let (mut view, rx) = surface();
-    let mut terminal = Terminal::new(TestBackend::new(20, 6)).unwrap();
+    let mut terminal = Terminal::new(TestBackend::new(20, 7)).unwrap();
     view.load(App::Rust(Root::new::<Fills>(|| ()))).unwrap();
     draw_until(&mut view, &mut terminal, &rx, "pop");
     let buffer = terminal.backend().buffer();
@@ -167,7 +177,12 @@ fn fills_draw_no_color_and_opaque_ones_clear_what_is_under_them() {
     assert_eq!(
         buffer[(0, 3)].symbol(),
         "s",
-        "a translucent scrim draws nothing"
+        "a fill under 50% alpha draws nothing"
+    );
+    assert_eq!(
+        buffer[(0, 5)].symbol(),
+        " ",
+        "a fill of 50% alpha or more clears like an opaque one"
     );
     // A leaf whose fill is its content shows in its palette color.
     assert_eq!(buffer[(0, 4)].fg, Color::Green);
