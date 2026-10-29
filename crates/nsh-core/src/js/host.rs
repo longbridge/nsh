@@ -910,7 +910,7 @@ const GROUPS: &[(u32, &str, &str)] = &[
 /// The declarations of the host elements' props: the named types they use
 /// and one interface per element group and platform (`InputHostProps`,
 /// `IOSInputHostProps`, ...), which the element types and the components
-/// of `nsh/webview`, `nsh/video`, ... extend.
+/// of `nsh` (`WebView`, `Video`, ...) extend.
 pub fn declarations() -> String {
     use std::fmt::Write as _;
     let mut types = TsTypes::default();

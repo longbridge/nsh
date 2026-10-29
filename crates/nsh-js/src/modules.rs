@@ -99,9 +99,9 @@ pub(crate) type Item = (&'static str, Export, Ts);
 pub(crate) struct NativeModule {
     pub(crate) name: &'static str,
     pub(crate) exports: &'static [Item],
-    /// The modules whose exports this one serves too, the same values (one
-    /// per VM): `nsh` serves the primitives `nsh/image`, `nsh/list`, ...
-    /// exported first.
+    /// The sources whose exports this one serves too (`moved_to`), kept by
+    /// area: `nsh` serves the primitives (`nsh/list`, `nsh/image`, ...), the
+    /// environment (`nsh/device`), ...; no app imports a source.
     pub(crate) also: &'static [&'static str],
     /// The module that serves this one's exports (`nsh`): it is no module
     /// apps import, only the source of those exports and their types.
@@ -478,7 +478,7 @@ pub(crate) const MODULES: &[NativeModule] = &[
     },
 ];
 
-/// `nsh/image`: `Image`, the image element as a component carrying the
+/// `nsh`'s `Image`: the image element as a component carrying the
 /// functions of the runtime's module (`getSize`, `prefetch`).
 const IMAGE_EXPORTS: &[Item] = &[(
     "Image",
@@ -496,9 +496,9 @@ const IMAGE_EXPORTS: &[Item] = &[(
 /// One export of a module, as it is made.
 enum Made {
     Own(Export),
-    /// An export of nsh's module `.0` that another serves too (`nsh`'s
-    /// `Image` is `nsh/image`'s): one value per VM, whichever module is
-    /// imported first making it.
+    /// An export of source `.0` a module serves (`nsh`'s `Image` is the
+    /// source `nsh/image`'s): one value per VM, whichever module serving it
+    /// is imported first making it.
     Shared(&'static str, Export),
     /// A Rust component, with the functions of a module of the same name.
     Component(Arc<ComponentSpec>, Option<Arc<ModuleSpec>>),
@@ -1193,8 +1193,9 @@ mod tests {
         assert_eq!(names, nsh_core::js::NATIVE_MODULES);
     }
 
-    /// `Image` carries its functions; the areas the primitives come from
-    /// are no modules of their own.
+    /// `Image` carries its functions; the sources the primitives come from
+    /// are no modules apps import (bundles never import them: the bundler
+    /// refuses them).
     #[test]
     fn nsh_serves_the_primitives() {
         let source = r#"

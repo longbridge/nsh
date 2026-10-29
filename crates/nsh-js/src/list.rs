@@ -1140,7 +1140,7 @@ fn report(cx: *mut JsContext, id: NodeId) -> JsValue {
     }
 }
 
-/// `nsh/list`: `List` (its tags compile to `nsh:rt`'s `list`, the same
+/// `nsh`'s `List` (its tags compile to `nsh:rt`'s `list`, the same
 /// function).
 pub(crate) const EXPORTS: &[crate::modules::Item] = &[(
     "List",
@@ -1156,7 +1156,7 @@ pub(crate) const EXPORTS: &[crate::modules::Item] = &[(
     ),
 )];
 
-/// `nsh/list`'s types.
+/// `List`'s types.
 pub(crate) const TYPES: &str = r#"/** A component (`Header`) or an element (`<Header />`). */
 export type ListSlot = (() => JSX.Element) | JSX.Element;
 

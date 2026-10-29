@@ -8,7 +8,7 @@
 import { Text, View, signal } from "nsh";
 import fs, { readFile, writeFile, readdir, exists, unlink, rmdir, mkdir, stat, lstat, rename, readlink } from "fs/promises";
 import net, { connect, Socket } from "net";
-import { WebSocket as NativeWebSocket, WebSocketConnection } from "websocket";
+import websocketModule, { connect as connectWebSocket, WebSocketConnection } from "websocket";
 
 function denial(permission: string, resource: string) {
   return (error: any) => {
@@ -49,7 +49,8 @@ const shown = signal("");
   const sockets = net.connect === connect
     && await rejects(() => connect({ host: "compat.invalid", port: 80 }), denial("network", "compat.invalid:80"))
     && misused(() => new (Socket as any)());
-  const websocket = await rejects(() => NativeWebSocket.connect("https://compat.invalid/"), (e) => e instanceof TypeError)
+  const websocket = websocketModule.connect === connectWebSocket
+    && await rejects(() => connectWebSocket("https://compat.invalid/"), (e) => e instanceof TypeError)
     && misused(() => new (WebSocketConnection as any)());
   const syntax = (() => {
     try { new WebSocket("ftp://compat.invalid/"); return false; }
