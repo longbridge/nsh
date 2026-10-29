@@ -707,7 +707,8 @@ program that describes them, builds the hosts and runners with them, and does ev
     (`nsh-macros` `native_components.rs`) on a `fn(&nsh_platform_<platform>::Components)` at the crate's root makes,
     under the platform's `cfg`, a hidden entry `__nsh_native_components_<platform>`, which the generated
     `app_components()` calls for each listed crate (a glob of the crate in a block over NSH's stand-in
-    `no_native_components`, which registers nothing: most crates have none) and `main` passes to the platform's
+    `no_native_components`, which registers nothing: most crates have none; its parameter is `__nsh_components`, since
+    the glob would shadow a `components` with a value of that name the crate exports) and `main` passes to the platform's
     `set_components` before the host starts; each `AppView` the backend makes calls it on its own registry (its
     `components`), as an embedding app registers. The entry's parameter is hygienic (`Span::mixed_site`), so the app's
     function may share its name. Root checks and a second entry fail as `#[native_module]`'s do. Android's components

@@ -1998,21 +1998,23 @@ impl RustApp {
     /// entry `#[native_components(<key>)]` makes in it ([`COMPONENTS_ENTRY`]).
     /// Each crate's call glob-imports it in a block, as [`Self::app_sets`]
     /// does, over nsh's stand-in, which registers nothing: most crates have
-    /// no native components.
+    /// no native components. The parameter's name is nsh's (`__nsh_`), as
+    /// the entry's: the glob would shadow it with any value of the same name
+    /// the crate exports (`pub fn components`).
     fn app_components(&self, cfg: &str, platform: &str, key: &str) -> String {
         let entry = format!("{COMPONENTS_ENTRY}{key}");
         let mut calls = String::new();
         for krate in &self.crates {
             calls.push_str(&format!(
                 "    {{\n        #[allow(unused_imports)]\n        use {}::*;\n        \
-                 {entry}(components); // the crate {} (nsh.json \"rust\")\n    }}\n",
+                 {entry}(__nsh_components); // the crate {} (nsh.json \"rust\")\n    }}\n",
                 krate.name(),
                 krate.package,
             ));
         }
         format!(
             "\n/// The app's native components on this platform: what `#[native_components({key})]` registers in its crates.\n\
-             {cfg}fn app_components(components: &{platform}::Components) {{\n{calls}}}\n\
+             {cfg}fn app_components(__nsh_components: &{platform}::Components) {{\n{calls}}}\n\
              \n// Without the entry: nsh's stand-in, which registers nothing.\n\
              {cfg}#[allow(unused_imports)]\nuse nsh_core::element::__private::no_native_components as {entry};\n"
         )
@@ -3185,6 +3187,58 @@ panic = \"abort\"
     }
 
     #[test]
+    fn the_generated_registration_compiles_whatever_the_crates_export() {
+        // `app_components()` as the hosts have it, built by `rustc` with
+        // stand-ins for the platform's crate, nsh-core and two crates: one
+        // exporting a function named as a parameter of the generated code
+        // could be (`pub fn components`), one without native components.
+        let dir = std::env::temp_dir().join(format!("nsh-rust-components-{}", std::process::id()));
+        let app = app(
+            &dir,
+            &[
+                ("charts", dir.join("native/charts")),
+                ("app-storage", dir.join("native/storage")),
+            ],
+            None,
+        );
+        let generated = app.app_components("", "nsh_platform_windows", "windows");
+        let source = format!(
+            "mod nsh_platform_windows {{\n    pub struct Components(pub std::cell::Cell<u32>);\n}}\n\
+             mod nsh_core {{\n    pub mod element {{\n        pub mod __private {{\n            \
+             pub fn no_native_components<C>(_components: C) {{}}\n        }}\n    }}\n}}\n\
+             mod app_charts {{\n    use crate::nsh_platform_windows::Components;\n    \
+             pub fn components(components: &Components) {{\n        components.0.set(components.0.get() + 1);\n    }}\n    \
+             pub fn __nsh_native_components_windows(registry: &Components) {{\n        components(registry)\n    }}\n}}\n\
+             mod app_app_storage {{}}\n{generated}\n\
+             fn main() {{\n    let components = nsh_platform_windows::Components(Default::default());\n    \
+             app_components(&components);\n    assert_eq!(components.0.get(), 1, \"charts registers once, storage nothing\");\n}}\n"
+        );
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("registration.rs");
+        let exe = dir.join(format!("registration{}", std::env::consts::EXE_SUFFIX));
+        std::fs::write(&file, &source).unwrap();
+        let rustc = std::env::var_os("RUSTC").unwrap_or_else(|| "rustc".into());
+        let built = std::process::Command::new(rustc)
+            .args(["--edition", "2024", "--crate-type", "bin", "-o"])
+            .arg(&exe)
+            .arg(&file)
+            .output()
+            .unwrap();
+        assert!(
+            built.status.success(),
+            "{}\n{source}",
+            String::from_utf8_lossy(&built.stderr)
+        );
+        let ran = std::process::Command::new(&exe).output().unwrap();
+        assert!(
+            ran.status.success(),
+            "{}",
+            String::from_utf8_lossy(&ran.stderr)
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn the_generated_code_calls_the_entry_of_each_crate() {
         let dir = std::env::temp_dir().join(format!("nsh-rust-two-{}", std::process::id()));
         let app = app(
@@ -3274,7 +3328,7 @@ panic = \"abort\"
                     let entry = format!("__nsh_native_components_{key}");
                     assert!(
                         code.contains(&format!(
-                            "fn app_components(components: &{platform}::Components) {{\n"
+                            "fn app_components(__nsh_components: &{platform}::Components) {{\n"
                         )),
                         "{dir}: {code}"
                     );
@@ -3282,7 +3336,7 @@ panic = \"abort\"
                         [("app_charts", "charts"), ("app_app_storage", "app-storage")]
                     {
                         let call = format!(
-                            "    {{\n        #[allow(unused_imports)]\n        use {name}::*;\n        {entry}(components); // the crate {package} (nsh.json \"rust\")\n    }}\n"
+                            "    {{\n        #[allow(unused_imports)]\n        use {name}::*;\n        {entry}(__nsh_components); // the crate {package} (nsh.json \"rust\")\n    }}\n"
                         );
                         assert!(code.contains(&call), "{dir}: no {call:?} in\n{code}");
                     }
