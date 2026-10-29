@@ -164,7 +164,7 @@ options as the test gives them: one the target's platform cannot honor makes `op
 | Option | Default | Description |
 |---|---|---|
 | `storage` | empty | What `Storage` holds at the start: `{ todos: "[]" }`. |
-| `network` | none | What the app's requests get, by route: see [Stubbing the network](#stubbing-the-network). `"live"`: the real network. |
+| `network` | none | What the app's requests get, by route: see [Stubbing the network](#stubbing-the-network). `"live"`: the real network, for its requests, sockets and WebSockets. |
 | `width`, `height` | 390, 844 | The viewport in points: headless, the desktops' window, the web's page. On iOS and Android the app fills the device's screen. |
 | `safeArea` | 0 | The safe area insets in points: `{ top: 47, bottom: 34 }`. |
 | `clipboard` | empty | The text on the clipboard at the start. |
@@ -274,6 +274,14 @@ expect(app.requests().map((r) => r.method)).toEqual(["GET", "POST"]);
 A route's function gets the request (`method`, `url`, `headers`, `body` as text) and runs in the test file, so it can
 count requests or answer from what the test set up. A function that throws fails the request and the step that made
 it. `app.requests()` lists the requests the app made, in order, the same way.
+
+Connections stay in the test too: the app's sockets (`net`) and WebSockets (the global `WebSocket` and the `websocket`
+module) open none unless `network` is `"live"`. After the capability checks the app's own runs pass, `net.connect`
+and the `websocket` module's `connect` reject with `code` `ERR_NSH_TEST_NETWORK`, and a global `WebSocket` fires `error`, then
+`close` (1006, not clean), as for a connection the network refused. With `"live"`, they connect to the real network
+along with the app's requests. In Rust, `EngineConfig::refuse_connections` does the same for a `Headless` app: a
+function of what the app connects to (a WebSocket's URL, a socket's `host:port`) that returns the error its call
+fails with.
 
 ### Controlling time
 
@@ -529,7 +537,7 @@ it does headless: `app.clock.runFor`, `fastForward` and `setSystemTime` move the
 the platform shows moves it a frame (1/60 s), so the app's time passes while it animates. The platform's own animations, and a route's
 `delay`, take real time. The app's requests come to the test as they do headless: `network` routes answer them,
 a request no route matches fails, and `"live"` lets them through to the host's network; `app.requests()` lists them
-all. `storage` is in the app's storage when it starts, and `app.storage()` reads it from the app. `locale`,
+all. Sockets and WebSockets connect on the host's network with `"live"`, and are refused as headless otherwise. `storage` is in the app's storage when it starts, and `app.storage()` reads it from the app. `locale`,
 `reducedMotion` and `safeArea`, when `open` gives them (a default value included), hold whatever the platform reports,
 and a `colorScheme` it gives switches the system's appearance (`"light"` too); what it leaves out is the platform's, and the app's clipboard calls are served from the
 test's own clipboard (`clipboard` is its text at first, `app.clipboard()` reads it), so the machine's clipboard stays

@@ -3,6 +3,7 @@ platform macos
 # desktop-props
 tap id:case-desktop-props
 expect Title bar
+expect Desktop: true desktop desktop
 prop id:bar desktop.windowDrag true
 prop id:body windowDrag false
 covers [props] desktop

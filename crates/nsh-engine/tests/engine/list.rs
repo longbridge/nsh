@@ -115,6 +115,7 @@ fn config(app: &str) -> (EngineConfig, std::path::PathBuf) {
         trace: false,
         network: None,
         websocket: None,
+        refuse_connections: None,
         filesystem: None,
         assets: None,
         environment: Default::default(),

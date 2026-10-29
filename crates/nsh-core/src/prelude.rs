@@ -225,7 +225,7 @@ pub use crate::element::{
     can_pick_screen_color, catch_error, cleanup, clipboard_files, clipboard_has_image,
     clipboard_has_string, clipboard_image, clipboard_string, color, component, component_ref,
     computed, dark, dismiss_keyboard, dynamic, each, effect, element_ref, engine_context, fetch,
-    font_scale, global, idiom, image_size, is_desktop, key_label, keyboard_duration,
+    font_scale, global, idiom, image_size, is_catalyst, is_desktop, key_label, keyboard_duration,
     keyboard_height, locale, measure_text, motion, move_to_trash, next_frame, on_back_press,
     on_key, on_key_with, open_path, open_url, os, os_version, pick_images, pick_paths,
     pick_save_path, pick_screen_color, pixel_ratio, prefetch_image, provide_context, reduce_motion,

@@ -159,6 +159,11 @@ pub struct TestEnvironment {
     /// the embedding app's, which the test plays.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub host_params: Option<serde_json::Map<String, serde_json::Value>>,
+    /// Whether the app's sockets and WebSockets reach the host's network
+    /// (`open`'s `network: "live"`); otherwise the host refuses them, as
+    /// the test fails requests no route answers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub live_network: Option<bool>,
 }
 
 /// How a test moves its app's manual clock ([`TestEnvironment::clock`];

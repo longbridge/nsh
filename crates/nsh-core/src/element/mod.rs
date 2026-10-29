@@ -171,7 +171,7 @@ pub use self::{
     },
     system::{
         CallCx, Cleanup, ErrorClass, ErrorFields, Held, IntoThrown, JsError, Later, Local, Locals,
-        Quotas, Stop, System, codes, io_code,
+        Quotas, RefuseConnections, Stop, System, codes, io_code,
     },
     task::{Answer, ClipboardImage, DialogAnswer, ImageSize, Task},
     tokens::{FONT_MONO, FONT_SANS, ThemeTokens, Token, TokenSource, Tokens},

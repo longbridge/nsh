@@ -10,7 +10,7 @@ import { alpha, Button, Caption, Card, colors, DemoPage, density, focusRing, Ico
 // `transition-colors`, the bar and the arrows with `transition-transform`;
 // both stand still with reduced motion.
 
-const pointer = platform.idiom === "desktop";
+const pointer = platform.desktop;
 const violet = token("violet");
 
 /** The hrefs opened so far, for the visited look, and the event log. */

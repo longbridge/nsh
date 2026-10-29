@@ -436,7 +436,9 @@ Only the engine of a test file serves it: an app's bundle cannot import it (the 
   lock): the test file's directory, the app's sets, the compiler and the apps the running test opened.
 - `open(entry, options)` builds the entry (`Entry::App`, once per run) and starts it on a `headless::Headless` of its
   own (`StubNetwork` from `options.network`, or `UreqNetwork` for `"live"`, behind a `RecordingNetwork` for
-  `app.requests()`; `MemoryStorage` seeded with `options.storage`; the viewport, safe area, color scheme, locale,
+  `app.requests()`; `EngineConfig::refuse_connections` set to `failure::refuse_connections` unless `"live"`, so `net`
+  sockets and both WebSocket APIs fail with `ERR_NSH_TEST_NETWORK` after their capability checks, as `System::
+  check_connection` says; `MemoryStorage` seeded with `options.storage`; the viewport, safe area, color scheme, locale,
   reduced motion and OS), on a blocking thread; `App`'s async methods are the driver's steps, run there too, and its
   synchronous ones (`texts`, `shows`, `value`) read the screen after `catch_up`. A route's JS function stays on the
   VM: its `StubHandler` sends the request and its `StubReply` over a channel (`RouteServer`), and `serve` answers them
@@ -574,7 +576,11 @@ request the app makes goes back as a `ClientMessage::Fetch` with an id (`FetchCa
 test's side answers it from its routes (`protocol::TestNetwork`, `run.rs`'s `HostRoutes` over the same
 `StubNetwork` headless runs use, recording every request for `app.requests()`) with `ServerMessage::Fetch` replies:
 `Head`, `Data` (base64) and `End`, or `Failed`, or `Pass` for `network: "live"`, when the host's own network makes
-the request. `app.storage()` asks the host (`SceneQuery::Storage`). The web's page takes both through `dev.html`
+the request. Sockets and WebSockets never cross: `TestEnvironment::live_network` says whether the test lets the app
+reach the network, and without it `set_up_engine` sets `EngineConfig::refuse_connections` as headless runs do. On the
+web the realm's global `WebSocket` is the browser's, so `testing.js` puts one in its place that asks the engine first
+(operation 1010, `System::check_connection`) and, refused, fires `error` and `close` (1006) as nsh-js' does.
+`app.storage()` asks the host (`SceneQuery::Storage`). The web's page takes both through `dev.html`
 (`player.testSetup`, `testFetchReply`, and `onTestSend` for its requests).
 
 macOS (`nsh-platform-macos`, feature `dev`): `agent.rs` implements `Native` with `synth.rs`'s posted mouse, trackpad

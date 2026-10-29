@@ -154,7 +154,7 @@ describe("the cart", () => {
 | 选项 | 默认值 | 说明 |
 |---|---|---|
 | `storage` | 空 | `Storage` 初始保存的内容：`{ todos: "[]" }`。 |
-| `network` | 无 | 应用的请求按路由得到的结果，见[模拟网络](#模拟网络)。`"live"`：使用真实网络。 |
+| `network` | 无 | 应用的请求按路由得到的结果，见[模拟网络](#模拟网络)。`"live"`：请求、socket 和 WebSocket 都使用真实网络。 |
 | `width`、`height` | 390、844 | 视口大小，单位为点：headless、桌面平台的窗口、web 的页面。在 iOS 和 Android 上应用占满设备屏幕。 |
 | `safeArea` | 0 | 安全区域内边距，单位为点：`{ top: 47, bottom: 34 }`。 |
 | `clipboard` | 空 | 剪贴板初始的文字。 |
@@ -256,6 +256,12 @@ expect(app.requests().map((r) => r.method)).toEqual(["GET", "POST"]);
 
 路由的函数接收请求（`method`、`url`、`headers`，以及文字形式的 `body`），在测试文件中运行，所以可以统计请求次数，或者根据
 测试准备好的数据作答。函数抛出异常时，请求失败，发出该请求的步骤也随之失败。`app.requests()` 以同样的形式按顺序列出应用发出的请求。
+
+连接同样留在测试之内：除非 `network` 为 `"live"`，应用的 socket（`net`）和 WebSocket（全局 `WebSocket` 和 `websocket` 模块）
+不会建立连接。在应用自身的能力检查通过之后，`net.connect` 和 `websocket` 模块的 `connect` 以 `code` 为 `ERR_NSH_TEST_NETWORK` 的错误
+reject，全局 `WebSocket` 先触发 `error`，再触发 `close`（1006，非正常关闭），与网络拒绝连接时一样。使用 `"live"` 时，它们和应用的请求一起
+连接真实网络。在 Rust 中，`EngineConfig::refuse_connections` 对 `Headless` 应用做同样的事：它是一个函数，接收应用要连接的目标
+（WebSocket 的 URL、socket 的 `host:port`），返回这次调用失败时的错误。
 
 ### 控制时间
 
@@ -486,6 +492,7 @@ nsh test tests/form.test.tsx --target macos   # 只运行一个文件
 `fastForward` 和 `setSystemTime` 立即推进应用的时间（计时器、每隔一帧的 `requestAnimationFrame`、`Date`），`app.wait(ms)`、`waitFor` 和 `waitUntil` 也会推进它；
 平台每显示一帧，时钟前进一帧（1/60 秒），所以应用在动画时时间照常流逝。平台自身的动画和路由的 `delay` 按真实时间进行。应用的请求和 headless
 时一样交给测试：由 `network` 路由应答，没有路由匹配的请求会失败，`"live"` 则放行到 host 的真实网络；`app.requests()` 列出全部请求。
+使用 `"live"` 时，socket 和 WebSocket 在 host 的网络上连接，否则和 headless 时一样被拒绝。
 `storage` 在应用启动时就已写入应用存储，`app.storage()` 从应用中读取。`open` 给出的 `locale`、`reducedMotion` 和 `safeArea`（包括取默认值时）不随平台上报的值变化，给出的 `colorScheme` 会切换系统外观（`"light"` 也一样），没有给出的则沿用平台自己的；
 应用的剪贴板调用由测试自己的剪贴板应答（`clipboard` 是它的初始文本，`app.clipboard()` 读取它），机器的剪贴板保持不变；文本输入框自身的复制和
 粘贴使用系统剪贴板。`host.params` 会传给应用，`app.host.send` 发送事件，应用打开的 URL 被记录下来供 `app.openedUrls()` 读取，而不会真正打开。

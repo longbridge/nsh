@@ -10,7 +10,7 @@ import { Card, colors, DemoPage, focusRing, Icon, mono, Segmented } from "../ui"
 // the whole color typed in any CSS form; a palette of swatches. The second
 // card adjusts a theme token in OKLCH, a row per channel.
 
-const pointer = platform.idiom === "desktop";
+const pointer = platform.desktop;
 const thumb = "rounded-full border-2 border-white";
 const thumbStyle = { boxShadow: "0 0 0 1px rgba(0,0,0,0.25), 0 1px 3px rgba(0,0,0,0.3)" };
 

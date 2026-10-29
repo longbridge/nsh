@@ -18,7 +18,7 @@ export { focusRing } from "./theme";
 
 /** A pointer and a keyboard: desktop density and copy ("Click", "Tab to it
  * and press Space"); touch density and copy ("Tap") otherwise. */
-export const desktop = __platform.idiom === "desktop";
+export const desktop = __platform.desktop;
 
 /** A window wide enough for the desktop layout (the site's Desktop frame is
  * the documentation column's width, about 720 points). */

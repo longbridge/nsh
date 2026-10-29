@@ -332,7 +332,7 @@ export async function createHost(player) {
 
 `platform.os` 为 `"web"`。浏览器所在设备的类型决定应用的行为，即 `platform.idiom`：
 
-- `"desktop"`：有鼠标（能悬停的精确指针），且容器宽度至少 600 点。此时 `platform.select` 选 `desktop`，`desktop={{…}}` 属性生效。
+- `"desktop"`：有鼠标（能悬停的精确指针），且容器宽度至少 600 点。此时 `platform.desktop` 为 `true`，`platform.select` 选 `desktop`，`desktop={{…}}` 属性生效。
 - `"pad"`：短边至少 600 点的触摸屏；其余为 `"phone"`。两者都属于移动端：`platform.select` 选 `mobile`。
 
 界面风格在应用启动时确定，运行期间不变，与其他平台一致；变窄的桌面窗口仍是桌面，按自己的 `windowSize()` 布局。`web={{…}}` 属性、`platform.select({ web })` 和 `web:` 类只在浏览器中生效；`ios={{…}}`、`native` 和 `ios:` 在浏览器中不生效。

@@ -480,6 +480,9 @@ impl Session {
         let clock = launch
             .clock
             .map_or_else(nsh_engine::Clock::system, nsh_engine::Clock::manual);
+        // Off the network unless the test asks: requests no route answers
+        // fail, and so do sockets and WebSockets.
+        let live = matches!(launch.network, NetworkSetup::Live);
         let inner: Arc<dyn nsh_engine::Network> = match launch.network {
             NetworkSetup::Live => Arc::new(UreqNetwork::new()),
             NetworkSetup::Stub(routes) => {
@@ -517,6 +520,7 @@ impl Session {
             ),
             trace: self.run.trace.is_some(),
             network: Some(requests.clone()),
+            refuse_connections: (!live).then(crate::failure::refuse_connections),
             assets: Some(Arc::new(DirectoryAssets::new(dir, files))),
             storage: Some(storage.clone()),
             environment: Environment {
@@ -632,6 +636,8 @@ impl Session {
             NetworkSetup::Stub(routes) => (Arc::new(StubNetwork::new(routes)), false),
             NetworkSetup::None => (Arc::new(StubNetwork::default()), false),
         };
+        // Its sockets and WebSockets reach the host's network only so too.
+        environment.live_network = live.then_some(true);
         let requests = RecordingNetwork::new(inner);
         let storage: Vec<(String, String)> = launch.storage.0.into_iter().collect();
         let size = match (launch.width, launch.height) {

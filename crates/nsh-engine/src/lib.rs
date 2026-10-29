@@ -661,6 +661,11 @@ pub struct EngineConfig {
     pub network: Option<Arc<dyn Network>>,
     /// The host transport for WebSockets, including the browser WebSocket API.
     pub websocket: Option<Arc<dyn nsh_core::websocket::WebSocketTransport>>,
+    /// Refuses the app's connections (`net` sockets and both WebSocket
+    /// APIs) with the error it gives for what they connect to, before they
+    /// reach the network: a test's, which reaches it only when the test
+    /// asks (`nsh test`'s `network: "live"`). `None`: they connect.
+    pub refuse_connections: Option<nsh_core::element::RefuseConnections>,
     /// App-private host filesystem service (for browser storage).
     pub filesystem: Option<Arc<dyn nsh_core::filesystem::FileSystem>>,
     /// Source of bundled files such as fonts; without one, they fail to load.
@@ -794,6 +799,7 @@ impl EngineConfig {
             trace: false,
             network: None,
             websocket: None,
+            refuse_connections: None,
             filesystem: None,
             assets: None,
             environment: Environment::default(),
@@ -1575,6 +1581,7 @@ impl<M: TextEngine + 'static> Driver<M> {
                     script::SystemConfig {
                         access: (*access).clone(),
                         websocket: config.websocket.clone(),
+                        refuse_connections: config.refuse_connections.clone(),
                         filesystem: config.filesystem.clone(),
                         data_dir: config
                             .data_dir

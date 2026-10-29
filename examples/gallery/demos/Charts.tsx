@@ -4,7 +4,7 @@ import { Arc, Area, Bar, Grid, Line, Pie, Plot, PlotAppearScope, PlotAxis, PlotL
 import { platform } from "nsh";
 import { alpha, Button, Card, chart, colors, DemoPage, finish, focusRing, Legend, mono, Segmented, toneColor, type Tone } from "../ui";
 
-const pointer = platform.idiom === "desktop";
+const pointer = platform.desktop;
 const size = pointer ? { gap: 10, switch: "small" as const } : { gap: 12, switch: "regular" as const };
 
 /** A repeatable stream of numbers in [0, 1). */
