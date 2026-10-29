@@ -668,17 +668,20 @@ fn QuantizedSeparators() -> impl IntoElement {
 }
 
 #[test]
-fn a_subcell_separator_keeps_disjoint_text_that_quantizes_to_its_row() {
+fn a_hairline_rule_moves_off_a_row_holding_text_to_the_nearest_free_row() {
     let (mut view, rx) = surface();
     let mut terminal = Terminal::new(TestBackend::new(30, 16)).unwrap();
     view.load(App::Rust(Root::new::<QuantizedSeparators>(|| ())))
         .unwrap();
     draw_until(&mut view, &mut terminal, &rx, "ready");
     let buffer = terminal.backend().buffer();
-    assert_eq!(buffer[(2, 4)].symbol(), "L");
-    assert_eq!(buffer[(10, 4)].fg, Color::Blue);
-    assert_eq!(buffer[(10, 4)].symbol(), "─");
-    assert!(!reversed(buffer, 10, 4));
+    let row = |y: u16| (0..30).map(|x| buffer[(x, y)].symbol()).collect::<String>();
+    // The 1-point rule at the top of its box lands on the label's row, drawn
+    // later: it moves to the box's nearest row without text.
+    assert_eq!(row(4).trim_end(), "  Label", "no rule through the label");
+    assert_eq!(buffer[(10, 5)].symbol(), "─");
+    assert_eq!(buffer[(10, 5)].fg, Color::Blue);
+    assert!(!reversed(buffer, 10, 5));
     assert_eq!(buffer[(2, 8)].symbol(), " ");
     assert_eq!(solid(buffer, 2, 8), Some(Color::Blue));
 }

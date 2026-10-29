@@ -110,6 +110,20 @@ struct Painter<'a> {
     indicators: Vec<NodeId>,
     /// Whether the view being drawn is inside an indicator.
     in_indicator: bool,
+    /// The hairline rules drawn once their parent's subtree is, as a rule
+    /// keeps off rows (or columns) that hold text.
+    rules: Vec<Rule>,
+    /// The visible Cells of the view whose children are being drawn.
+    parent_box: Rect,
+}
+
+/// A hairline rule waiting for its parent's subtree.
+struct Rule {
+    cells: Rect,
+    line: &'static str,
+    style: Style,
+    /// Where it may move: its parent's visible Cells.
+    within: Rect,
 }
 
 /// Below this opacity, multiplied through its ancestors, a view draws
@@ -153,6 +167,8 @@ pub(crate) fn draw(
         button_boxes: Vec::new(),
         indicators: Vec::new(),
         in_indicator: false,
+        rules: Vec::new(),
+        parent_box: area,
     };
     painter.view(ROOT_ID, Projection::IDENTITY, clip, 1.0, true, None);
     let modals = painter.tree.modals.clone();
@@ -570,7 +586,14 @@ impl Painter<'_> {
                         || !protected[usize::from(y - visible.y) * usize::from(visible.width)
                             + usize::from(x - visible.x)])
             };
-            if let Some(fill) = fill {
+            if let Some(Fill::Line(line, style)) = fill {
+                self.rules.push(Rule {
+                    cells: visible,
+                    line,
+                    style,
+                    within: self.parent_box,
+                });
+            } else if let Some(fill) = fill {
                 fill_cells(self.buffer, visible, fill, covered);
                 for y in visible.y..visible.bottom() {
                     for x in visible.x..visible.right() {
@@ -709,6 +732,8 @@ impl Painter<'_> {
         let child_projection =
             projection.translated(Point::new(-scroll_origin.x, -scroll_origin.y));
         let pitch = even_pitch(self.tree, id, child_projection, self.cells);
+        let outer_parent_box = std::mem::replace(&mut self.parent_box, visible);
+        let rules = self.rules.len();
         for (index, delta) in pitch.into_iter().enumerate() {
             let child = self.tree.get(id).unwrap().children[index];
             if self
@@ -726,6 +751,10 @@ impl Painter<'_> {
                 children_pointer,
                 press,
             );
+        }
+        self.parent_box = outer_parent_box;
+        for rule in self.rules.split_off(rules) {
+            self.rule(rule);
         }
         for (position, cell) in clipped_corners {
             self.buffer[position] = cell;
@@ -767,6 +796,56 @@ impl Painter<'_> {
 }
 
 impl Painter<'_> {
+    /// Draws a hairline rule on its own row (or column) when that holds no
+    /// text, else on the nearest one inside its parent that holds none, else
+    /// not at all.
+    fn rule(&mut self, rule: Rule) {
+        let Rule {
+            cells,
+            line,
+            style,
+            within,
+        } = rule;
+        let horizontal = line == "─";
+        let free = |buffer: &Buffer, at: u16| {
+            let cells: Box<dyn Iterator<Item = (u16, u16)>> = if horizontal {
+                Box::new((cells.x..cells.right()).map(move |x| (x, at)))
+            } else {
+                Box::new((cells.y..cells.bottom()).map(move |y| (at, y)))
+            };
+            cells
+                .into_iter()
+                .all(|position| matches!(buffer[position].symbol(), " " | "─" | "│"))
+        };
+        let (first, end, low, high) = if horizontal {
+            (cells.y, cells.bottom(), within.y, within.bottom())
+        } else {
+            (cells.x, cells.right(), within.x, within.right())
+        };
+        for at in first..end {
+            let target = (0..=high.saturating_sub(low)).find_map(|distance| {
+                [at.checked_sub(distance), at.checked_add(distance)]
+                    .into_iter()
+                    .flatten()
+                    .find(|&near| (low..high).contains(&near) && free(self.buffer, near))
+            });
+            let Some(target) = target else {
+                continue;
+            };
+            let positions: Vec<_> = if horizontal {
+                (cells.x..cells.right()).map(|x| (x, target)).collect()
+            } else {
+                (cells.y..cells.bottom()).map(|y| (target, y)).collect()
+            };
+            for position in positions {
+                let cell = &mut self.buffer[position];
+                cell.reset();
+                cell.set_symbol(line).set_style(style);
+                self.canvas_cells[self.buffer.index_of(position.0, position.1)] = false;
+            }
+        }
+    }
+
     /// Draws a toggle's glyph: from its indicator's left column on its middle
     /// row, extending right only into blank Cells, else its short form, else
     /// nothing; without an indicator, in the blank Cells before its label with

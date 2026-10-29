@@ -320,7 +320,10 @@ keeps the Cells the layout gave it; an empty two-row box keeps its closed border
 is drawn through it. Borders are straight single lines whatever their radii; radii shape
 only fill coverage and `overflow: hidden` clips. A button draws no border (the terminal look below).
 A childless plain View fill thinner than half a Cell draws `─` or `│` in its fill's palette color (the
-Terminal look below). A fill at exactly half a Cell is a solid leaf. When both dimensions are thin, the longer
+Terminal look below). A rule never runs through a row (or, upright, a column) that holds text: it is drawn once
+its parent's subtree is, on its own row when that holds none, else on the nearest row inside its parent that
+holds none (a list's divider at the top of a row moves below the row's text), else not at all. A fill at
+exactly half a Cell is a solid leaf. When both dimensions are thin, the longer
 normalized Cell extent chooses the line direction. Hairlines use absolute edges; rounded controls and compact
 canvases keep their center-row rule.
 A sub-Cell fill preserves already-painted glyphs that it does not overlap in point space, even when both
@@ -785,7 +788,7 @@ permit clipboard writes; `nsh test` uses memory and never writes to the machine'
 | Outlines, including control focus outlines | Left out; focus is the reversed box |
 | Anchored overlays | Snapped outside the anchor's Cell rect on the core-resolved placement side |
 | Gaps between texts | Positive point gaps between one-line sibling texts or canvas text runs retain at least one Cell; zero gaps keep adjacent text |
-| Childless hairline fills | Below half a Cell, horizontal or vertical line glyphs in the fill's palette color |
+| Childless hairline fills | Below half a Cell, horizontal or vertical line glyphs in the fill's palette color, moved to the nearest row (column) inside their parent that holds no text, or left out |
 | Positive sub-Cell extents | At least one Cell; zero-width progress indicators remain empty |
 | Base control value states and projected part states | Core-resolved checked, mixed, selected and disabled styles; selected tabs reversed |
 | Checkbox, radio and switch states | Decorative: `[x]` / `[ ]` / `[-]`, `(•)` / `( )`, `[on ]` / `[off]` in place of the indicator (short forms `x`, `-`, `•`, `on`, `off`), or before the label without one; only focus reverses them |
