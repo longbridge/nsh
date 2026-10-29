@@ -14,11 +14,11 @@ group: platforms
 | [构建方法（`.ripple(..)`、`.input_accessory(..)`）](#平台专属属性) | [`ios={{…}}`、`android={{…}}`、`desktop={{…}}`、`web={{…}}`](#平台专属属性) | 只有一个平台才有的属性。 |
 | [`on_back_press`、`nsh_core::element::desktop`](#平台模块) | [`nsh/mobile`、`nsh/desktop`](#平台模块) | 只有移动平台或只有桌面才有的 API。 |
 | [`os()`、`idiom()`、`is_desktop()`](#platformos-与-platformselect) | [`platform.os`、`platform.desktop`、`platform.select`](#platformos-与-platformselect) | 按平台选择值或代码。 |
-| [`.when(os() == Os::Ios, ..)`](#tailwind-中的平台变体) | [`ios:` / `android:` / `web:` 类](#tailwind-中的平台变体) | 按平台设置样式。 |
+| [`.when(os() == Os::Ios, ..)`](#tailwind-中的平台变体) | [`ios:` / `android:` / `ohos:` / `web:` 类](#tailwind-中的平台变体) | 按平台设置样式。 |
 
 ## 桌面与移动端
 
-每个平台不是桌面就是移动端，判断规则只有一条。桌面是 macOS、Windows、Linux，以及桌面形态的浏览器（有鼠标且窗口较宽，见 [Web](./web.md)）。移动端是 iOS、Android，以及手机或平板形态的浏览器；Mac Catalyst 运行 iOS 后端，因此也属于移动端，适用 `ios={{…}}` 属性。`desktop={{…}}` 属性、`platform.select({ desktop, mobile })`、`platform.desktop` 和 `platform.idiom === "desktop"` 都遵循这条规则，`nsh/base` 的组件（菜单在桌面上是弹出层，在移动端是底部面板）和 Rust 中的 `is_desktop()` 也一样。
+每个平台不是桌面就是移动端，判断规则只有一条。桌面是 macOS、Windows、Linux，以及桌面形态的浏览器和 OHOS 设备（有鼠标且窗口较宽，见 [Web](./web.md)）。移动端是 iOS、Android、非桌面形态的 OHOS，以及手机或平板形态的浏览器；Mac Catalyst 运行 iOS 后端，因此也属于移动端，适用 `ios={{…}}` 属性。`desktop={{…}}` 属性、`platform.select({ desktop, mobile })`、`platform.desktop` 和 `platform.idiom === "desktop"` 都遵循这条规则，`nsh/base` 的组件（菜单在桌面上是弹出层，在移动端是底部面板）和 Rust 中的 `is_desktop()` 也一样。
 
 `nsh/desktop` 的 `isAvailable` 回答的是一个更窄的问题：这个模块的窗口和菜单 API 是否可用，它们在 macOS、Windows 和 Linux 上可用。布局、密度和输入方式用 `platform.desktop` 判断，调用 `Window` 和 `Menu` 用 `isAvailable` 判断。
 
@@ -200,7 +200,7 @@ function PhotoViewer() {
 
 ## platform.os 与 platform.select
 
-Rust 中的 `os()` 和 TSX 中 `nsh` 的常量 `platform` 告诉你应用运行在哪里：`Os::Ios`、`Os::Android`、`Os::MacOs`、`Os::Windows`、`Os::Linux` 或 `Os::Web`，`platform.os` 为 `"ios"`、`"android"`、`"macos"`、`"windows"`、`"linux"` 或 `"web"`（Mac Catalyst 为 `"ios"`，无论哪种形态 `platform.catalyst` 都为真；[macOS 后端](./macos.md)为 `"macos"`，[Linux 后端](./linux.md)为 `"linux"`，[Windows 后端](./windows.md)为 `"windows"`，它们的元素会应用 `desktop` 属性；[浏览器](./web.md)为 `"web"`，`platform.desktop` 为 `true` 时也会应用 `desktop` 属性）。版本、界面风格等见[设备与环境](./device-and-environment.md#平台)。
+Rust 中的 `os()` 和 TSX 中 `nsh` 的常量 `platform` 告诉你应用运行在哪里：`Os::Ios`、`Os::Android`、`Os::Ohos`、`Os::MacOs`、`Os::Windows`、`Os::Linux` 或 `Os::Web`，`platform.os` 为 `"ios"`、`"android"`、`"ohos"`、`"macos"`、`"windows"`、`"linux"` 或 `"web"`（Mac Catalyst 为 `"ios"`，无论哪种形态 `platform.catalyst` 都为真；[macOS 后端](./macos.md)为 `"macos"`，[Linux 后端](./linux.md)为 `"linux"`，[Windows 后端](./windows.md)为 `"windows"`，它们的元素会应用 `desktop` 属性；[浏览器](./web.md)为 `"web"`，`platform.desktop` 为 `true` 时也会应用 `desktop` 属性）。版本、界面风格等见[设备与环境](./device-and-environment.md#平台)。
 
 ```rust tabs
 use nsh_core::{element::Os, prelude::*};
@@ -291,7 +291,7 @@ when(os() == Os::Ios, || input_accessory_view("bar").child(…))
 
 ## Tailwind 中的平台变体
 
-Rust 用 `.when(os() == Os::Ios, |v| ..)` 按平台设置样式；在 TSX 中，`ios:`、`android:` 和 `web:` 变体只在一个平台上应用对应的类：
+Rust 用 `.when(os() == Os::Ios, |v| ..)` 按平台设置样式；在 TSX 中，`ios:`、`android:`、`ohos:` 和 `web:` 变体只在一个平台上应用对应的类：
 
 ```rust tabs
 view()

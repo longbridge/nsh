@@ -42,6 +42,9 @@ Input                        native gestures -> EngineControl::dispatch_event ->
   to the new bounds) before reporting to the core, without counting the rescale as a core scroll command. Commands
   arriving during that layout update the saved target. Modal windows invalidate their pixel-size report cache and
   report their new dp size even when Android keeps the same pixel bounds.
+- **OHOS** (ArkUI, `ohos.md`): the engine thread typesets with native `OH_Drawing_Typography`; each commit is a
+  `MountBatch` sent via a N-API threadsafe function to the ArkUI UI thread, which creates/updates ArkUI custom nodes and
+  runs `NativeVSync` animations.
 - **Linux** (GTK 4, `linux.md`): one `NshView` widget per node, placed at the core's frames in `size_allocate` and
   drawn with GSK nodes in `snapshot`; each commit wakes the GTK main loop once (`MainContext::invoke`); native
   animations run on the frame clock.
@@ -106,4 +109,5 @@ Dependency direction: `nsh-core` ← `nsh-js` ← `nsh-engine` (also ← `nsh-pa
 
 The CoreText, StaticLayout, Pango, DirectWrite and GPUI text engines are documented in
 `crates/nsh-platform-ios/src/text.rs`, `crates/nsh-platform-android/src/text.rs`, `crates/nsh-platform-linux/src/text.rs`,
-`crates/nsh-platform-windows/src/text.rs` and `crates/gpui/nsh-platform-gpui/src/text.rs`, the measure cache in `crates/nsh-core/src/text.rs` (`MeasureCache`).
+`crates/nsh-platform-windows/src/text.rs`, `crates/gpui/nsh-platform-gpui/src/text.rs` and
+`crates/nsh-platform-ohos/src/text/typography.rs`, the measure cache in `crates/nsh-core/src/text.rs` (`MeasureCache`).

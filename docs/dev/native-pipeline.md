@@ -253,3 +253,8 @@ runtime (`crates/nsh-js/src/hot.rs`, see `tooling.md`). The script is an ES modu
 `__nsh_hot` global; only development bundles import it) and the namespaces of the native modules the app imports, which
 factories `require` by specifier; an edit that imports a native module the running script did not makes the host
 reload.
+
+Media imports (`.mp4`, `.m4v`, `.webm`, `.mov`) produce `asset:/` URL strings.
+The bundler records the original binary files in the same sorted asset inventory
+as images/fonts; delivery and signed-package extraction preserve their bytes.
+Generated asset declarations type these imports as strings.

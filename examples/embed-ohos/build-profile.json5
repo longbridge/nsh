@@ -1,0 +1,42 @@
+{
+  "app": {
+    "products": [
+      {
+        "name": "default",
+        "compatibleSdkVersion": "6.0.0(20)",
+        "targetSdkVersion": "6.0.0(20)",
+        "runtimeOS": "HarmonyOS",
+        "buildOption": {
+          "strictMode": {
+            "caseSensitiveCheck": true,
+            "useNormalizedOHMUrl": true
+          }
+        }
+      }
+    ],
+    "buildModeSet": [
+      {
+        "name": "debug"
+      },
+      {
+        "name": "release"
+      }
+    ],
+    "signingConfigs": []
+  },
+  "modules": [
+    {
+      "name": "nsh_ohos",
+      "srcPath": "../../target/ohos/arkts-deps/nsh"
+    },
+    {
+      "name": "entry",
+      "srcPath": "./entry",
+      "targets": [
+        {
+          "name": "default"
+        }
+      ]
+    }
+  ]
+}

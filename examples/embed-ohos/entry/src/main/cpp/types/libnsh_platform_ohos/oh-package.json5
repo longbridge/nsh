@@ -1,0 +1,5 @@
+{
+  "name": "libnsh_platform_ohos.so",
+  "version": "0.1.1",
+  "types": "./Index.d.ts"
+}

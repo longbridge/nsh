@@ -558,3 +558,14 @@ Things that were found the hard way. Read the section of the area you change bef
   after switching direction at runtime UIKit keeps an existing back button's chevron; Android has no skew transforms
   (as in React Native); Android's stylus handwriting mode (on by default on recent
   emulators) intercepts taps on inputs — turn it off with `adb shell settings put secure stylus_handwriting_enabled 0`.
+
+## OHOS
+
+- **Use `FontCollection::shared()` for the engine's typography cache**: `FontCollection::new()` serves only one
+  typography builder and crashes in `FontCollection::CreateSktFontCollection` when reused across text nodes.
+- **Register native clicks only for nodes with `onPress`**: registering a no-op handler on every custom node makes
+  passive text participate in hit testing and compete with its pressable parent.
+- **`OH_ArkUI_NodeContent_RegisterCallback(handle, NULL)` returns `PARAM_INVALID`**: reset user data before releasing
+  the owned callback instead of passing a null function pointer.
+- **Pinch gesture centers are physical pixels** (`OH_ArkUI_PinchGesture_GetCenterX/Y`) even when the node length metric
+  is `vp`: divide by the surface density before computing the focal point.

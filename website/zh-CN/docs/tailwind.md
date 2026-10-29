@@ -97,7 +97,7 @@ Rust 组件（`nsh/base` 的以及应用自己 crate 中的组件）在 TSX 中�
 | `max-sm:`、`max-md:` ... | 窗口宽度小于该断点 | 同上，使用 `<` |
 | `min-[600px]:`、`max-[600px]:` | 任意断点 | 同上 |
 | `portrait:`、`landscape:` | 窗口方向 | `window().width > window().height` |
-| `ios:`、`android:`、`web:` | 平台 | `.when(os() == Os::Ios, \|v\| ..)` |
+| `ios:`、`android:`、`ohos:`、`web:` | 平台 | `.when(os() == Os::Ios, \|v\| ..)` |
 | `rtl:`、`ltr:` | [布局方向](./layout.md#从右到左) | 视图的 `.direction(LayoutDirection::..)` |
 | `motion-safe:`、`motion-reduce:` | 用户的“减弱动态效果”设置 | `reduce_motion()` |
 

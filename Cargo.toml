@@ -38,6 +38,7 @@ nsh-engine = { version = "0.3.0", path = "crates/nsh-engine", default-features =
 nsh-bundler = { version = "0.3.0", path = "crates/nsh-bundler", default-features = false }
 nsh-platform-ios = { version = "0.3.0", path = "crates/nsh-platform-ios", default-features = false }
 nsh-platform-android = { version = "0.3.0", path = "crates/nsh-platform-android", default-features = false }
+nsh-platform-ohos = { version = "0.3.0", path = "crates/nsh-platform-ohos" }
 nsh-platform-linux = { version = "0.3.0", path = "crates/nsh-platform-linux", default-features = false }
 nsh-platform-macos = { version = "0.3.0", path = "crates/nsh-platform-macos", default-features = false }
 nsh-platform-windows = { version = "0.3.0", path = "crates/nsh-platform-windows", default-features = false }
@@ -100,7 +101,7 @@ getrandom = "0.3"
 slab = "0.4"
 percent-encoding = "2.3"
 url = "2.5"
-ureq = "3.1"
+ureq = "3.1.3"
 regex = "1"
 # The text of `nsh-base`'s `Editor`: a rope, and its grapheme and word boundaries.
 ropey = "1.6"
@@ -116,6 +117,29 @@ markup5ever_rcdom = "0.3.0"
 syntect = { version = "5.3.0", default-features = false, features = ["parsing", "regex-fancy", "dump-load"] }
 two-face = { version = "0.4.5", default-features = false, features = ["syntect-fancy"] }
 jni = "0.21"
+napi-ohos = { version = "1.2.0", default-features = false, features = ["napi8", "serde-json", "tokio_rt"] }
+napi-derive-ohos = "1.2.0"
+napi-build-ohos = "1.2.0"
+ohos-arkui-binding = { version = "0.6.0", default-features = false, features = ["napi", "xcomponent", "api-20"] }
+ohos-accessibility-binding = { version = "0.2.0", default-features = false, features = ["api-20"] }
+ohos-display-binding = { version = "0.1.5", default-features = false, features = ["api-20"] }
+ohos-device-binding = { version = "0.1.0", default-features = false }
+ohos-drawing-binding = { version = "0.2.7", default-features = false, features = ["api-20"] }
+ohos-native-image-binding = { version = "0.1.0", default-features = false, features = ["api-20"] }
+ohos-resource-manager-binding = { version = "0.3.6", default-features = false, features = ["napi", "api-20"] }
+ohos-vsync-binding = { version = "0.3.2", default-features = false, features = ["api-20"] }
+ohos-web-binding = { version = "0.3.1", default-features = false, features = ["api-20"] }
+ohos-window-manager-binding = { version = "0.1.2", default-features = false, features = ["input", "api-20"] }
+ohos-image-native-binding = { version = "0.0.8", default-features = false }
+ohos-pasteboard-binding = { version = "0.0.8", default-features = false, features = ["api-20"] }
+ohos-udmf-binding = { version = "0.0.8", default-features = false, features = ["api-20"] }
+ohos-avplayer-binding = { version = "0.1.0", default-features = false, features = ["api-20"] }
+glow = "0.18"
+khronos-egl = { version = "6", default-features = false, features = ["static", "no-pkg-config", "1_5"] }
+ohos-xcomponent-binding = { version = "0.6.0", default-features = false, features = ["callbacks", "multi_mode", "api-20"] }
+ohos-native-window-binding = { version = "0.3.3", default-features = false, features = ["api-20"] }
+ohos-hilog-binding = { version = "0.2.5", features = ["log"] }
+ohos-net-connection-binding = { version = "0.1.4", default-features = false }
 windows-sys = "0.61"
 dunce = "1"
 semver = "1"

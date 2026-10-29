@@ -359,6 +359,7 @@ adb reverse tcp:8790 tcp:8790
 
 - [用 Rust 开发](./rust.md)
 - [嵌入 iOS 应用](./ios.md)
+- [嵌入 OHOS 应用](./ohos.md)
 - [原生组件](./native-components.md)
 - [签名包](./signed-packages.md)
 - [打包](./packaging.md)：无需编写任何 Java 代码即可生成独立 APK

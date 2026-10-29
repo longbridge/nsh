@@ -56,6 +56,7 @@ view()
 | `.accessibility_elements_hidden(..)` | `accessibilityElementsHidden` | `boolean` | 对辅助技术隐藏该视图及其子树。 |
 | | `importantForAccessibility` | `"auto" \| "yes" \| "no" \| "no-hide-descendants"` | 视图（及其子树）是否暴露。 |
 | | `android={{ accessibilityLiveRegion }}` | `"none" \| "polite" \| "assertive"` | Android：视图的变化如何播报给 TalkBack。 |
+| | `ohos={{ accessibilityLiveRegion }}` | `"none" \| "polite" \| "assertive"` | OHOS API 20：polite 等待当前播报，assertive 打断当前播报。 |
 | `.test_id(..)` | `testID` | `string` | UI 测试用的标识（iOS 上的 accessibility identifier，Android 上的 resource id）；不会被朗读。 |
 
 给每个只有图标的控件加上标签：屏幕阅读器无法朗读一个符号或一张图片。标签保持简短，不要包含角色（写 "Play"，不要写 "Play button"）：角色会单独播报。

@@ -308,7 +308,7 @@ Rust 中的 `os()`、`os_version()`、`idiom()`、`is_desktop()` 和 `is_catalys
 
 | Rust | TSX | 说明 |
 |---|---|---|
-| `os()` | `platform.os` | `Os::Ios`、`Os::Android`、`Os::MacOs`、`Os::Windows`、`Os::Linux` 或 `Os::Web`（`os().name()` 即 TSX 的字符串）。Mac Catalyst 为 iOS。 |
+| `os()` | `platform.os` | `Os::Ios`、`Os::Android`、`Os::Ohos`、`Os::MacOs`、`Os::Windows`、`Os::Linux` 或 `Os::Web`（`os().name()` 即 TSX 的字符串）。Mac Catalyst 为 iOS。 |
 | `os_version()` | `platform.version` | 主版本号和次版本号；Android 上为 API 级别和 0。 |
 | `idiom()` | `platform.idiom` | `Idiom::Phone`、`Pad`、`Mac`、`Tv` 或 `Desktop`；`is_desktop()` 成立时恰好是 `Desktop`。 |
 | `is_desktop()` | `platform.desktop` | macOS、Windows 或 Linux，或桌面浏览器（[桌面与移动端](./platform-specific.md#桌面与移动端)）。 |
@@ -318,7 +318,7 @@ TSX 的 `platform` 完整成员：
 
 | 成员 | 说明 |
 |---|---|
-| `platform.os` | `"ios"`、`"android"`、`"macos"`、`"windows"`、`"linux"` 或 `"web"`。Mac Catalyst 报告 `"ios"`。 |
+| `platform.os` | `"ios"`、`"android"`、`"ohos"`、`"macos"`、`"windows"`、`"linux"` 或 `"web"`。Mac Catalyst 报告 `"ios"`。 |
 | `platform.version` | 字符串：iOS 和桌面平台为系统版本（`"17.5"`）；Android 为 API 级别（`"35"`）；Web 为 `"0.0"`。 |
 | `platform.idiom` | `"phone"`、`"pad"`、`"mac"`、`"tv"` 或 `"desktop"`。`platform.desktop` 为 `true` 时恰好是 `"desktop"`。`"mac"` 是 Mac Catalyst 下 UIKit 的 Mac 界面风格，属于移动端界面风格。 |
 | `platform.desktop` | 适用桌面行为：macOS、Windows、Linux 和桌面浏览器。`desktop={{…}}` 属性和 `platform.select({ desktop })` 以它为准。 |
@@ -338,6 +338,8 @@ const hapticsSupported = platform.os === "ios" || (platform.os === "android" && 
 ```
 
 `nsh test` 以 iOS 身份无界面运行。
+
+在 [OHOS](./ohos.md) 上，`platform.os` 为 `"ohos"`，`platform.version` 为系统 API 级别（`"20"`），安全区域与键盘高度只将与各个 `NshSurface` 重叠的部分作为 insets 上报。
 
 在 [Linux](./linux.md) 上，`platform.os` 为 `"linux"`，界面风格为 `"desktop"`，`platform.version` 为内核的主、次版本号（`"6.12"`）：
 各发行版给版本编号的方式无法相互比较。在那里，安全区域和键盘高度为 0，`colorScheme()` 实时跟随桌面的设置（XDG 设置门户），

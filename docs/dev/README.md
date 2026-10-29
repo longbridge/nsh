@@ -24,7 +24,8 @@ For people working on NSH itself (`AGENTS.md` at the root is the short version a
 | [images.md](images.md) | Loading, decoding, caching, animated images |
 | [sandbox.md](sandbox.md) | VM limits, hardening, capabilities |
 | [signed-packages.md](signed-packages.md) | Keys, packages, verification, revocation |
-| [embedding.md](embedding.md) | `nsh package`, the iOS / Android SDKs, native components |
+| [embedding.md](embedding.md) | `nsh package`, the iOS / Android / OHOS SDKs, native components |
+| [ohos.md](ohos.md) | The OHOS backend (ArkUI): API 20 baseline, `NshSurface` lifecycle, native interop, rendering, text, scrolling, media |
 | [layerfs.md](layerfs.md) | Opt-in Linux development and CI trial: Git, Cargo, snapshots and receipts |
 | [tooling.md](tooling.md) | `.nsh/types`, the dev server, hot reload, symbolication |
 | [macos.md](macos.md) | The macOS backend (AppKit): building, how each area maps to AppKit, `nsh test --target macos`, what differs |

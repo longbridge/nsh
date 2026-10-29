@@ -97,7 +97,7 @@ Rust components (`nsh/base`'s and those of an app's own crate) accept `class` an
 | `max-sm:`, `max-md:`, ... | The window is narrower than the breakpoint | The same, with `<` |
 | `min-[600px]:`, `max-[600px]:` | Arbitrary breakpoints | The same |
 | `portrait:`, `landscape:` | The window's orientation | `window().width > window().height` |
-| `ios:`, `android:`, `web:` | The platform | `.when(os() == Os::Ios, \|v\| ..)` |
+| `ios:`, `android:`, `ohos:`, `web:` | The platform | `.when(os() == Os::Ios, \|v\| ..)` |
 | `rtl:`, `ltr:` | The [layout direction](./layout.md#right-to-left) | `.direction(LayoutDirection::..)` on a view |
 | `motion-safe:`, `motion-reduce:` | The user's reduce motion setting | `reduce_motion()` |
 
