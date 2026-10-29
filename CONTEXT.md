@@ -34,8 +34,9 @@ _Avoid_: command line, status line, mode line, echo area
 How the terminal backend draws an app, as system UI keeps a platform's look: app colors become the terminal's
 16-color meanings (the default foreground, dim, or an accent: red, yellow, green, cyan, blue, magenta), so the
 user's terminal theme decides the actual colors; no fill color is drawn, every Cell showing the terminal's own
-background; selected, checked and focused views are reversed. Decorations are plain: straight single-line
-borders, buttons that read `[ label ]`, no icons, shadows, gradients or opacity.
+background; selected and focused views are reversed, and checkboxes, radios and switches show their state as
+`[x]`, `(•)` or `[on ]`. Decorations are plain: straight single-line borders, buttons that read `[ label ]`, no
+icons, shadows, gradients or opacity.
 _Avoid_: theme, skin, terminal style
 
 ### Degradation

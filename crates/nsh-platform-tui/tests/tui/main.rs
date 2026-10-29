@@ -2,6 +2,7 @@
 
 mod text;
 mod text_input;
+mod toggles;
 
 mod alignment;
 #[cfg(feature = "js")]

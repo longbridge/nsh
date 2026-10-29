@@ -4,12 +4,6 @@ use ratatui_core::{backend::TestBackend, style::Color, terminal::Terminal};
 
 use super::app::{draw_until, reversed, selected, surface};
 
-fn dim(buffer: &ratatui_core::buffer::Buffer, x: u16, y: u16) -> bool {
-    buffer[(x, y)]
-        .modifier
-        .contains(ratatui_core::style::Modifier::DIM)
-}
-
 fn key(name: &str) -> Input {
     Input::Key {
         key: name.into(),
@@ -246,12 +240,20 @@ fn checkbox_and_switch_project_value_and_disabled_states_to_their_parts() {
     view.load(App::Rust(Root::new::<ValueControls>(|| ())))
         .unwrap();
     draw_until(&mut view, &mut terminal, &rx, "mixed true");
-    // The indicator is a leaf: its fill shows reversed in its palette color.
+    // The 1-Cell indicators show the glyphs' short forms in their palette
+    // colors; checked is a glyph, not reverse.
+    let line = |buffer: &ratatui_core::buffer::Buffer, y: u16| -> String {
+        (0..12).map(|x| buffer[(x, y)].symbol()).collect()
+    };
     let buffer = terminal.backend().buffer();
-    assert!(reversed(buffer, 0, 0));
+    assert!(
+        line(buffer, 0).starts_with("-check"),
+        "{:?}",
+        line(buffer, 0)
+    );
     assert_eq!(buffer[(0, 0)].fg, Color::Blue);
-    assert!(!reversed(buffer, 2, 0), "mixed is not checked");
-    assert!(dim(buffer, 0, 1), "the unchecked thumb's dark gray");
+    assert!(!reversed(buffer, 2, 0));
+    assert!(line(buffer, 1).starts_with("  switch"), "no room for off");
     view.handle(key("Tab"));
     view.handle(key("Enter"));
     draw_until(&mut view, &mut terminal, &rx, "check true mixed false");
@@ -259,19 +261,31 @@ fn checkbox_and_switch_project_value_and_disabled_states_to_their_parts() {
     terminal
         .draw(|frame| view.render(frame, frame.area()))
         .unwrap();
-    assert!(reversed(terminal.backend().buffer(), 2, 0), "checked");
+    let buffer = terminal.backend().buffer();
+    assert!(
+        line(buffer, 0).starts_with("xcheck"),
+        "{:?}",
+        line(buffer, 0)
+    );
+    assert!(!reversed(buffer, 2, 0), "checked is not reversed");
     view.handle(key("Enter"));
     draw_until(&mut view, &mut terminal, &rx, "switch true");
     let buffer = terminal.backend().buffer();
-    assert_eq!(buffer[(0, 1)].fg, Color::Yellow, "the checked thumb");
-    assert!(!dim(buffer, 0, 1));
-    assert!(reversed(buffer, 3, 1), "checked");
+    assert!(
+        line(buffer, 1).starts_with("onswitch"),
+        "{:?}",
+        line(buffer, 1)
+    );
+    assert_eq!(buffer[(0, 1)].fg, Color::Blue, "the checked track's color");
     view.handle(key("Tab"));
     view.handle(key("Enter"));
     draw_until(&mut view, &mut terminal, &rx, "disabled true");
     let buffer = terminal.backend().buffer();
-    assert_eq!(buffer[(0, 1)].fg, Color::Yellow, "the disabled thumb");
-    assert!(reversed(buffer, 3, 1), "a disabled switch stays checked");
+    assert!(
+        line(buffer, 1).starts_with("onswitch"),
+        "a disabled switch stays on"
+    );
+    assert!(!reversed(buffer, 3, 1));
     view.handle(key("Tab"));
     view.handle(key("Enter"));
     draw_until(

@@ -372,7 +372,8 @@ draw nothing. A childless View whose opaque fill is its content (a progress indi
 dot) draws its Cells reversed in the fill's palette color; one thinner than half a Cell draws the hairline glyphs
 above. Gradients are left out.
 
-Views whose accessibility state is selected or checked (`checked: true`; mixed is not), and the focused control,
+Views whose accessibility state is selected or checked (`checked: true`; mixed is not), other than checkboxes,
+radios and switches (below), and the focused control,
 draw their content reversed over their Cell box, after their descendants. Cells a canvas drew stay as drawn,
 in their palette color on the terminal background (a sparkline in a selected row), unless a later fill covered
 them. A focused text field shows the terminal cursor at its caret instead. Outlines, including the app's focus outlines, are not drawn: focus is the
@@ -395,6 +396,16 @@ Decorations are plain, and each is a documented Decorative feature:
 - **Icons and decorative images** are not drawn: canvases with role `image` or without an accessibility label, and
   image placeholders narrower than 3 Cells or shorter than 2. A button whose content is only icons shows its
   accessibility label as `[ label ]` on its box's middle row, cut with `…` to the box (`[L…]`).
+- **Checkboxes, radios and switches** (roles `checkbox`, `radio`, `switch`) show their state with terminal glyphs
+  instead of reverse: a checkbox `[x]`, `[ ]` or `[-]` (mixed), a radio `(•)` or `( )`, a switch `[on ]` or
+  `[off]`. The glyph takes the place of the indicator, the first view inside the control that the app drew as a
+  box (a border or an opaque fill, not a hairline rule) holding no text; the indicator and everything in it (its
+  border, fill, mark or thumb) are not drawn. The glyph starts at the indicator's left column on its middle row,
+  so equal controls in a list put their glyphs in one column, and takes the palette ink of the indicator's fill,
+  else its border. When the indicator is narrower, the glyph extends right only into blank Cells; without room
+  it shortens (`x`, `-`, `•`, `on`, `off`), and without room for that it is left out. A control without an
+  indicator draws its glyph in the blank Cells before its label, one Cell from it, or its short form, or
+  nothing. Keyboard focus still reverses the control.
 - **Shadows, gradients and opacity** are ignored (opacity below 3% still hides).
 
 ## Navigation stacks
@@ -646,7 +657,8 @@ PageUp/PageDown by a page, and Home/End move to its limits. Those bindings run b
 scrolling. Tab/Shift+Tab leave the thumb; Ctrl+N/Ctrl+P remain traversal keys. Range thumbs stay within each
 other and disabled thumbs are skipped. Progress draws the app's indicator as a solid leaf or hairline in its
 palette color, including indeterminate indicators sized by the app; its track is a container and draws no fill.
-Checked Checkboxes, Radios and Switches and selected Tabs are reversed over their whole Cell box.
+Selected Tabs are reversed over their whole Cell box; Checkboxes, Radios and Switches show their state with
+terminal glyphs (the terminal look above).
 
 Mouse presses use the same hit regions as other views when the host captures the mouse. The controls
 acceptance covers keyboard and press behavior; Slider dragging and hover feedback require the joint pointer
@@ -774,7 +786,8 @@ permit clipboard writes; `nsh test` uses memory and never writes to the machine'
 | Gaps between texts | Positive point gaps between one-line sibling texts or canvas text runs retain at least one Cell; zero gaps keep adjacent text |
 | Childless hairline fills | Below half a Cell, horizontal or vertical line glyphs in the fill's palette color |
 | Positive sub-Cell extents | At least one Cell; zero-width progress indicators remain empty |
-| Base control value states and projected part states | Core-resolved checked, mixed, selected and disabled styles, with checked and selected controls reversed |
+| Base control value states and projected part states | Core-resolved checked, mixed, selected and disabled styles; selected tabs reversed |
+| Checkbox, radio and switch states | Decorative: `[x]` / `[ ]` / `[-]`, `(•)` / `( )`, `[on ]` / `[off]` in place of the indicator (short forms `x`, `-`, `•`, `on`, `off`), or before the label without one; only focus reverses them |
 | Slider keyboard input | Component-owned arrows, page and endpoint keys while its thumb has focus |
 | Slider dragging and control hover | Ticket-09 pointer follow-up |
 | Border width, dashes, dots, corner radii | Decorative: solid single-Cell strokes with square corners; radii shape fill coverage only; widths still participate in core layout |

@@ -56,6 +56,15 @@ struct Clip {
     fit: bool,
 }
 
+/// A checkbox's, radio's or switch's state as terminal glyphs, and the view
+/// the app drew it with (its indicator), whose place the glyph takes.
+struct Toggle {
+    glyph: &'static str,
+    /// The glyph where the full one does not fit.
+    short: &'static str,
+    indicator: Option<NodeId>,
+}
+
 /// What a button shows between its brackets.
 enum ButtonLabel {
     /// Its own text, drawn on one row.
@@ -94,6 +103,10 @@ struct Painter<'a> {
     canvas_cells: Vec<bool>,
     /// The boxes of the buttons being drawn, which draw no border or fill.
     button_boxes: Vec<NodeId>,
+    /// The indicators of the toggles being drawn, which a glyph replaces.
+    indicators: Vec<NodeId>,
+    /// Whether the view being drawn is inside an indicator.
+    in_indicator: bool,
 }
 
 /// Below this opacity, multiplied through its ancestors, a view draws
@@ -135,6 +148,8 @@ pub(crate) fn draw(
         background: None,
         canvas_cells,
         button_boxes: Vec::new(),
+        indicators: Vec::new(),
+        in_indicator: false,
     };
     painter.view(ROOT_ID, Projection::IDENTITY, clip, 1.0, true, None);
     let modals = painter.tree.modals.clone();
@@ -168,6 +183,7 @@ impl Painter<'_> {
             self.background,
         )
         .unzip();
+        let toggle = toggle(self.tree, id, self.cells);
         let Some(view) = self.tree.get_mut(id) else {
             return;
         };
@@ -181,6 +197,10 @@ impl Painter<'_> {
             return;
         }
         self.button_boxes.extend(boxed);
+        self.indicators
+            .extend(toggle.as_ref().and_then(|toggle| toggle.indicator));
+        let outer_in_indicator = self.in_indicator;
+        self.in_indicator |= self.indicators.contains(&id);
         let unboxed = self.button_boxes.contains(&id);
         let mut projection = parent.view(view);
         let local_frame = Bounds::new(Point::default(), view.frame.size);
@@ -488,7 +508,10 @@ impl Painter<'_> {
             }
             _ => false,
         };
-        let visible_drawn = !visible.is_empty() && opacity >= INVISIBLE_OPACITY && !decorative;
+        let visible_drawn = !visible.is_empty()
+            && opacity >= INVISIBLE_OPACITY
+            && !decorative
+            && !self.in_indicator;
         let outer_background = self.background;
         let own_fill = view
             .animated
@@ -708,16 +731,26 @@ impl Painter<'_> {
         if boxed.is_some() {
             self.button_boxes.pop();
         }
+        self.in_indicator = outer_in_indicator;
+        if let Some(toggle) = &toggle
+            && toggle.indicator.is_some()
+        {
+            self.indicators.pop();
+        }
         if visible_drawn && let Some(button) = button {
             self.brackets(visible, button, own_geometry);
+        }
+        if visible_drawn && let Some(toggle) = toggle {
+            self.toggle_glyph(visible, toggle, own_geometry);
         }
         let Some(view) = self.tree.get(id) else {
             return;
         };
         let state = &view.props.accessibility.state;
-        let reversed = state.selected
-            || state.checked == Some(Checked::True)
-            || (self.focused == Some(id) && view.input.is_none());
+        // A toggle shows its state with its glyph; only focus reverses it.
+        let shows_state = !is_toggle(view.props.accessibility.role)
+            && (state.selected || state.checked == Some(Checked::True));
+        let reversed = shows_state || (self.focused == Some(id) && view.input.is_none());
         if reversed && visible_drawn {
             for y in visible.y..visible.bottom() {
                 for x in visible.x..visible.right() {
@@ -731,6 +764,111 @@ impl Painter<'_> {
 }
 
 impl Painter<'_> {
+    /// Draws a toggle's glyph: from its indicator's left column on its middle
+    /// row, extending right only into blank Cells, else its short form, else
+    /// nothing; without an indicator, in the blank Cells before its label with
+    /// one Cell between them.
+    fn toggle_glyph(&mut self, visible: Rect, toggle: Toggle, texts: usize) {
+        let blank = |buffer: &Buffer, x: u16, y: u16| {
+            visible.contains(ratatui_core::layout::Position::new(x, y))
+                && buffer[(x, y)].symbol() == " "
+        };
+        if let Some(indicator) = toggle.indicator {
+            let Some(geometry) = self.geometry[texts..].iter().find(|g| g.id == indicator) else {
+                return;
+            };
+            let bounds = geometry.bounds;
+            let (Ok(x), Ok(y)) = (
+                u16::try_from(bounds.left),
+                u16::try_from(bounds.top + (bounds.bottom - bounds.top - 1).max(0) / 2),
+            ) else {
+                return;
+            };
+            if !visible.contains(ratatui_core::layout::Position::new(x, y)) {
+                return;
+            }
+            let own = u16::try_from(bounds.right - bounds.left)
+                .unwrap_or(0)
+                .min(visible.right() - x);
+            let room = own
+                + (x + own..visible.right())
+                    .take_while(|&column| blank(self.buffer, column, y))
+                    .count() as u16;
+            let Some(glyph) = [toggle.glyph, toggle.short]
+                .into_iter()
+                .find(|glyph| glyph.width() as u16 <= room)
+            else {
+                return;
+            };
+            let style = self
+                .tree
+                .get(indicator)
+                .map_or_else(Style::reset, |view| self.indicator_ink(view));
+            self.buffer.set_string(x, y, glyph, style);
+            return;
+        }
+        let Some((y, left, _)) = self.text_extent(visible, texts) else {
+            return;
+        };
+        let style = self.buffer[(left, y)].style();
+        for glyph in [toggle.glyph, toggle.short] {
+            let width = glyph.width() as u16;
+            let Some(start) = left.checked_sub(width + 1) else {
+                continue;
+            };
+            if (start..left).all(|x| blank(self.buffer, x, y)) {
+                self.buffer.set_string(start, y, glyph, style);
+                return;
+            }
+        }
+    }
+
+    /// The palette ink of an indicator: its opaque fill's, else its border's.
+    fn indicator_ink(&self, view: &crate::view::NshView) -> Style {
+        let ground = Ground::new(self.scheme, self.background);
+        let fill = view
+            .animated
+            .background
+            .unwrap_or(view.style.background_color);
+        if fill.0 & 255 == 255 {
+            return ink(fill, ground);
+        }
+        let colors = view
+            .animated
+            .border_color
+            .map_or(view.style.borders.colors, |color| [color; 4]);
+        colors
+            .into_iter()
+            .find(|color| !color.is_transparent())
+            .map_or_else(Style::reset, |color| ink(color, ground))
+    }
+
+    /// The row, first column and end column of the first row of text the text
+    /// views from `texts` on in `geometry` draw inside `visible`.
+    fn text_extent(&self, visible: Rect, texts: usize) -> Option<(u16, u16, u16)> {
+        let mut label: Option<(u16, u16, u16)> = None;
+        for geometry in &self.geometry[texts..] {
+            let Some(text) = geometry.text_frame else {
+                continue;
+            };
+            let text = CellBounds::new(text, self.cells, self.area)
+                .clipped(geometry.visible.intersection(visible));
+            for y in text.y..text.bottom() {
+                for x in text.x..text.right() {
+                    let symbol = self.buffer[(x, y)].symbol();
+                    if symbol == " " || label.is_some_and(|(row, ..)| row != y) {
+                        continue;
+                    }
+                    let end = x + symbol.width().max(1) as u16;
+                    label = Some(label.map_or((y, x, end), |(row, left, right)| {
+                        (row, left.min(x), right.max(end))
+                    }));
+                }
+            }
+        }
+        label
+    }
+
     /// Draws a button's brackets in its own Cells: around its one row of text
     /// (the text views from `texts` on in `geometry`), one Cell away on both
     /// sides when the box has room, else next to it, or around its
@@ -738,27 +876,7 @@ impl Painter<'_> {
     fn brackets(&mut self, visible: Rect, button: ButtonLabel, texts: usize) {
         match button {
             ButtonLabel::Text => {
-                let mut label: Option<(u16, u16, u16)> = None;
-                for geometry in &self.geometry[texts..] {
-                    let Some(text) = geometry.text_frame else {
-                        continue;
-                    };
-                    let text = CellBounds::new(text, self.cells, self.area)
-                        .clipped(geometry.visible.intersection(visible));
-                    for y in text.y..text.bottom() {
-                        for x in text.x..text.right() {
-                            let symbol = self.buffer[(x, y)].symbol();
-                            if symbol == " " || label.is_some_and(|(row, ..)| row != y) {
-                                continue;
-                            }
-                            let end = x + symbol.width().max(1) as u16;
-                            label = Some(label.map_or((y, x, end), |(row, left, right)| {
-                                (row, left.min(x), right.max(end))
-                            }));
-                        }
-                    }
-                }
-                let Some((y, left, right)) = label else {
+                let Some((y, left, right)) = self.text_extent(visible, texts) else {
                     return;
                 };
                 let free = |x: u16| {
@@ -858,6 +976,69 @@ fn button_label(
         _ => return None,
     };
     Some((label, boxed))
+}
+
+fn is_toggle(role: AccessibilityRole) -> bool {
+    matches!(
+        role,
+        AccessibilityRole::Checkbox | AccessibilityRole::Radio | AccessibilityRole::Switch
+    )
+}
+
+/// A checkbox's, radio's or switch's glyphs for its checked state, and its
+/// indicator: the first view in it, in tree order, that the app drew as a box
+/// (a border or an opaque fill, not a hairline rule) holding no text.
+fn toggle(tree: &Mounter, id: NodeId, cells: CellSize) -> Option<Toggle> {
+    let view = tree.get(id)?;
+    let checked = view.props.accessibility.state.checked;
+    let (glyph, short) = match (view.props.accessibility.role, checked) {
+        (AccessibilityRole::Checkbox, Some(Checked::True)) => ("[x]", "x"),
+        (AccessibilityRole::Checkbox, Some(Checked::Mixed)) => ("[-]", "-"),
+        (AccessibilityRole::Checkbox, _) => ("[ ]", " "),
+        (AccessibilityRole::Radio, Some(Checked::True)) => ("(•)", "•"),
+        (AccessibilityRole::Radio, _) => ("( )", " "),
+        (AccessibilityRole::Switch, Some(Checked::True)) => ("[on ]", "on"),
+        (AccessibilityRole::Switch, _) => ("[off]", "off"),
+        _ => return None,
+    };
+    Some(Toggle {
+        glyph,
+        short,
+        indicator: indicator(tree, id, cells),
+    })
+}
+
+fn indicator(tree: &Mounter, id: NodeId, cells: CellSize) -> Option<NodeId> {
+    let view = tree.get(id)?;
+    view.children.iter().find_map(|&child| {
+        let shown = tree.get(child)?;
+        if shown.concealed || shown.style.hidden {
+            return None;
+        }
+        let rule = shown.frame.size.width < cells.width() * HAIRLINE_CELL_FRACTION
+            || shown.frame.size.height < cells.height() * HAIRLINE_CELL_FRACTION;
+        if has_box(shown, None) && !rule && !holds_text(tree, child) {
+            Some(child)
+        } else {
+            indicator(tree, child, cells)
+        }
+    })
+}
+
+fn holds_text(tree: &Mounter, id: NodeId) -> bool {
+    tree.get(id).is_some_and(|view| {
+        view.input.is_some()
+            || view.text.as_ref().is_some_and(|(layout, _)| {
+                layout.downcast::<CellLayout>().is_some_and(|layout| {
+                    layout.rows.iter().any(|row| {
+                        row.glyphs
+                            .iter()
+                            .any(|glyph| !glyph.text.chars().all(char::is_whitespace))
+                    })
+                })
+            })
+            || view.children.iter().any(|&child| holds_text(tree, child))
+    })
 }
 
 /// Whether the app drew `view` as a box: a border, or an opaque fill unlike the
