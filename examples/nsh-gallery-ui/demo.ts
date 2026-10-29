@@ -294,3 +294,4 @@ export function Segmented<T extends string | number>(props: { label?: string; op
 
 export { dataTableClasses, dataTableFitPadding } from "./data-table";
 export { sliderFill, sliderLook, sliderValueClass, sliderValueStyle, type SliderLookOptions } from "./slider";
+export { avatarHue, avatarIdentity, avatarPortrait, AVATAR_BROKEN } from "./avatar";
