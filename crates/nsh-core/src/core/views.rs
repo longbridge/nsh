@@ -564,11 +564,13 @@ impl<M: TextEngine> Core<M> {
                     }
                     None => (attrs, old),
                 };
-                if self.components.slot_hosts.get(&id) == Some(&host) {
-                    // An app's slot: what is not a style goes to its
-                    // target (`super::slots`).
+                if self.components.slot_hosts.get(&id) == Some(&host)
+                    || self.components.fill_holders.contains(&id)
+                {
+                    // An app's slot, or a node around a fill: what is not a
+                    // style goes to its target (`super::slots`).
                     self.apply_slot_attrs(id, host, &attrs, &old, None);
-                } else {
+                } else if !self.apply_target_attrs(id, &attrs, &old) {
                     self.apply_attrs_over(id, &attrs, &old, app.as_ref());
                 }
                 if let Some((style, classes, class)) = restyle {

@@ -2,7 +2,10 @@
 
 use nsh_core::{element::Style, prelude::*};
 
-use crate::popup::{OpenChangeReason, OpenState, PopupPresence, StateLooks, lifecycle};
+use crate::{
+    popup::{OpenChangeReason, OpenState, PopupPresence, StateLooks, lifecycle},
+    roving::{bar, bar_trigger, leave_bar},
+};
 
 /// The props of [`Popover`].
 #[derive(Debug, Clone, PartialEq, Props)]
@@ -132,9 +135,11 @@ pub fn Popover(props: PopoverProps, cx: Scope<PopoverEvent>) -> impl IntoElement
     );
     let anchor = element_ref();
     let desktop = is_desktop();
+    // In a toolbar, the trigger is one of its items.
+    let around = bar();
     view()
         .child(props.trigger.place(move |trigger| {
-            trigger
+            let trigger = trigger
                 .element_ref(&anchor)
                 .accessibility_state(move || AccessibilityState {
                     expanded: Some(open.get()),
@@ -142,11 +147,14 @@ pub fn Popover(props: PopoverProps, cx: Scope<PopoverEvent>) -> impl IntoElement
                 })
                 .on_press(move || {
                     change(!open.get_untracked(), OpenChangeReason::TriggerPress);
-                })
+                });
+            bar_trigger(around.clone(), trigger, anchor)
         }))
         .child(when(
             move || presence.mounted(),
             move || {
+                // The trigger may be a toolbar's item; the content is not.
+                leave_bar();
                 // Touch screens: the press outside is the popover's (not
                 // while it goes).
                 let backdrop = when(

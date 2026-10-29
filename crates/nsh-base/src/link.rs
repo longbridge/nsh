@@ -2,6 +2,8 @@
 
 use nsh_core::{AccessibilityCurrent, AccessibilityState, open_url::check_url, prelude::*};
 
+use crate::roving::bar_item;
+
 /// How a [`Link`] opens its `href` (`openWith`).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PropEnum)]
 pub enum LinkOpenWith {
@@ -30,7 +32,8 @@ pub struct LinkProps {
     pub open_with: Prop<LinkOpenWith>,
     /// No presses (none reach a pressable around it either), no press
     /// feedback, not a stop of the keyboard focus; `disabled:` styles
-    /// apply and screen readers say it is dimmed.
+    /// apply and screen readers say it is dimmed. A link in a disabled
+    /// `Toolbar` is disabled too.
     #[prop(default)]
     pub disabled: Prop<bool>,
     /// The link to the page the user is on (a navigation's, a
@@ -68,11 +71,12 @@ pub enum LinkEvent {
 /// `activeStyle`, `focusStyle` and `disabledStyle`, and its children are
 /// its content. Inside a `<Text>` it is an inline box of the paragraph, as
 /// every view there is: it stays on one line (`align-text-bottom` sits its
-/// text on the paragraph's baseline).
+/// text on the paragraph's baseline). In a `Toolbar`, it is one of the
+/// toolbar's items, as a `Button` there is.
 #[component]
 pub fn Link(props: LinkProps, cx: Scope<LinkEvent>) -> impl IntoElement {
-    view()
-        .disabled(props.disabled)
+    let (view, disabled) = bar_item(view(), None, props.disabled);
+    view.disabled(disabled)
         .role(AccessibilityRole::Link)
         .optional_label(props.accessibility_label)
         .accessibility_state(move || AccessibilityState {
