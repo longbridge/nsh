@@ -181,6 +181,26 @@ pub(super) struct Instance {
     given_changed: bool,
     /// The insets its root's node has (its own, or given it).
     pub(super) root_insets_applied: (Option<crate::EdgeInsets>, Option<crate::EdgeInsets>),
+    /// The test id its root's node has (its own, or given it).
+    pub(super) root_test_id_applied: Option<Arc<str>>,
+}
+
+/// The test id among `attrs`' props.
+pub(super) fn test_id_of(attrs: &Attrs) -> Option<Arc<str>> {
+    attrs.props.iter().find_map(|p| match p {
+        Prop::TestId(id) => id.clone(),
+        _ => None,
+    })
+}
+
+/// `attrs` with the test id `id` in place of its own (`None`: none), as its
+/// node has it.
+pub(super) fn with_test_id(mut attrs: Attrs, id: &Option<Arc<str>>) -> Attrs {
+    attrs.props.retain(|p| !matches!(p, Prop::TestId(_)));
+    if let Some(id) = id {
+        attrs.props.push(Prop::TestId(Some(id.clone())));
+    }
+    attrs
 }
 
 /// What a component's root takes from the components above it on its host
@@ -199,6 +219,8 @@ pub(super) struct RootContext {
     /// The insets given it (the outer wins).
     inset_padding: Option<crate::EdgeInsets>,
     inset_margin: Option<crate::EdgeInsets>,
+    /// The test id given it (the outer wins), over the root's own.
+    test_id: Option<Arc<str>>,
     /// Whether any view gives it anything besides styles.
     given: bool,
 }
@@ -211,6 +233,9 @@ impl RootContext {
         }
         if let Some(insets) = self.inset_margin {
             attrs.inset_margin = Some(insets);
+        }
+        if let Some(id) = &self.test_id {
+            crate::element::host::set_in(&mut attrs.props, Prop::TestId(Some(id.clone())));
         }
         attrs
     }
@@ -281,6 +306,7 @@ impl Instance {
             given: None,
             given_changed: false,
             root_insets_applied: (None, None),
+            root_test_id_applied: None,
         }
     }
 }
@@ -1739,6 +1765,14 @@ impl<M: TextEngine> Core<M> {
                 });
             }
             inst.root_insets_applied = insets;
+            let test_id = cx.test_id.clone().or_else(|| test_id_of(&attrs));
+            if test_id != inst.root_test_id_applied {
+                let _ = self.apply_op(Op::SetProp {
+                    id: host,
+                    prop: Prop::TestId(test_id.clone()),
+                });
+                inst.root_test_id_applied = test_id;
+            }
         }
     }
 
@@ -2156,8 +2190,10 @@ impl<M: TextEngine> Core<M> {
         // As it was applied: with the insets its node got.
         let mut old_over = old_attrs.clone();
         (old_over.inset_padding, old_over.inset_margin) = inst.root_insets_applied;
+        let old_over = with_test_id(old_over, &inst.root_test_id_applied);
         self.apply_attrs_over(host, &attrs, &old_over, app);
         inst.root_insets_applied = (attrs.inset_padding, attrs.inset_margin);
+        inst.root_test_id_applied = test_id_of(&attrs);
         // Given an inline style or animated values while its own did not
         // change: they go now.
         let given_changed = std::mem::take(&mut inst.given_changed) || first;
@@ -2294,6 +2330,7 @@ impl<M: TextEngine> Core<M> {
             js: None,
             inset_padding: None,
             inset_margin: None,
+            test_id: None,
             given: false,
         };
         if inst.above.is_none() && inst.given.is_none() {
@@ -2309,6 +2346,7 @@ impl<M: TextEngine> Core<M> {
             decls.extend(given.animated.iter().map(|(d, _)| d.clone()));
             cx.inset_padding = given.inset_padding.or(cx.inset_padding);
             cx.inset_margin = given.inset_margin.or(cx.inset_margin);
+            cx.test_id = test_id_of(given).or(cx.test_id.take());
         };
         if let Some(given) = &inst.given {
             take(&mut cx, given);

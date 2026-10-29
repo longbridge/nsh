@@ -219,7 +219,7 @@ import type {
 | [`DataTable`](../elements/data-table.md) | `data_table()` | 行列数量不限的表格：选择、排序，列可固定、调整宽度和移动，行由应用分页提供。 |
 | [`Input`](../elements/input.md) | `nsh_base::input()` | 平台原生的文本输入框，单行或多行。 |
 | [`Popover`](../elements/popover.md) | `popover()` | 锚定在触发元素上、显示在一切之上的内容。 |
-| [`Menu`、`ContextMenu`、`MenuItem`、`MenuSeparator`、`Submenu`](../elements/menu.md) | `menu()`、... | 菜单：桌面上是带级联子菜单的弹出层，手机上是 sheet。 |
+| [`Menu`、`ContextMenu`、`MenuItem`、`MenuSeparator`、`Submenu`](../elements/menu.md) | `menu()`、... | 菜单：桌面上是带级联子菜单的弹出层，手机上是 sheet；支持可勾选的条目和单选的一组选项。 |
 | [`Tooltip`](../elements/tooltip.md) | `tooltip()` | 显示在触发元素旁的提示。 |
 | [`Sheet`](../elements/sheet.md) | `sheet()` | 位于屏幕一侧边缘、覆盖在背景层之上的面板。 |
 | [`Toast`、`ToastStack`、`ToastManager`](../elements/toast.md) | `toast()`、`toast_stack()`、`ToastManager` | 无样式的 toast：语义根、层叠的栈、它们的生命周期。 |
@@ -265,7 +265,7 @@ import type {
 
 ### Tab 与 Tabs
 
-标签列表中的标签页，以及包住它们的列表。标签页只负责行为、没有外观：处理按压、键盘激活、禁用状态，并向屏幕阅读器报告标签页角色和选中状态。列表是屏幕阅读器播报的标签列表，本身不持有值：应用告诉每个标签页是否选中（`selected`），接收按压（`onPress`），并自己显示选中部分的内容。应用的标签是标签页的子元素，它们的 `group-selected:` 类跟随标签页。见 [Tabs](../elements/tabs.md)。
+标签列表中的标签页，以及包住它们的列表。标签页只负责行为、没有外观：处理按压、键盘激活、禁用状态，并向屏幕阅读器报告标签页角色和选中状态。列表是屏幕阅读器播报的标签列表，本身不持有值：应用告诉每个标签页是否选中（`selected`），接收按压（`onPress`），并自己显示选中部分的内容。应用的标签是标签页的子元素，它们的 `group-selected:` 类跟随标签页。列表的指示器（`indicatorClass`、`indicatorStyle`）是应用设置样式的下划线或胶囊，停在选中的标签页上，并以弹簧动画原生地移到下一个。见 [Tabs](../elements/tabs.md)。
 
 <a id="toggle-and-togglegroup"></a>
 

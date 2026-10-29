@@ -1964,6 +1964,42 @@ element! {
 
 impl Interactive for View {}
 impl ParentElement for View {}
+
+impl View {
+    /// Its frame follows the element carrying `target` (a tab list's
+    /// indicator on the selected tab): along the main axis of its parent
+    /// (vertical in a flex column, else horizontal) it spans that element's
+    /// frame, inside its own margins on that axis, wherever the element is
+    /// inside its parent; across it, its style places it (`bottom(px(0.))`
+    /// and a height for an underline, top and bottom insets for a pill),
+    /// so its style makes it [`Styled::absolute`]. The core places it after
+    /// each layout, with no layout of its own and no JS: following another
+    /// element changes its frame alone, and a layout that moves the element
+    /// moves it in the same batch. While `target` is `None`, or no laid
+    /// out element carries it, its style alone places it; hidden
+    /// (`display: none`) and shown again, it is placed at once. A view
+    /// that follows nothing costs no work after layout.
+    pub fn follow(mut self, target: impl IntoReactive<Option<super::ElementRef>>) -> Self {
+        let target = (target.into_reactive()).map(|t: Option<super::ElementRef>| {
+            t.and_then(|t| t.target()).map(super::FollowTarget)
+        });
+        super::host::bind_prop(&mut self.0, target, Prop::Follow);
+        self
+    }
+
+    /// How it moves when [`Self::follow`] names another element: natively,
+    /// with `transition` as a layout animation of its own frame alone (the
+    /// rest of that commit changes at once); `None` (the default) jumps.
+    /// Following an element for the first time, and a layout that moves
+    /// it, place it at once.
+    pub fn follow_transition(
+        mut self,
+        transition: impl IntoReactive<Option<crate::LayoutTransition>>,
+    ) -> Self {
+        super::host::bind_prop(&mut self.0, transition, Prop::FollowTransition);
+        self
+    }
+}
 impl Interactive for SlotElement {}
 impl Interactive for Text {}
 impl Interactive for Image {}
@@ -2262,10 +2298,11 @@ impl IntoElement for Children {
 /// Another component in a view ([`Component::element`]). Its styles go
 /// after the component's own, like an app's classes, and so do its inline
 /// style, animated values and insets ([`Element`]'s), on the component's
-/// root; its state styles ([`Self::active`], [`Self::hover`],
-/// [`Self::focus`], [`Self::disabled_style`], [`Styled::selected`],
-/// [`Styled::checked`]) follow the states of that root, as an app's
-/// `active:` / `hover:` classes on a TSX component do. It hears and is to
+/// root, which also takes its [`Self::test_id`] over its own; its state
+/// styles ([`Self::active`], [`Self::hover`], [`Self::focus`],
+/// [`Self::disabled_style`], [`Styled::selected`], [`Styled::checked`])
+/// follow the states of that root, as an app's `active:` / `hover:`
+/// classes on a TSX component do. It hears and is to
 /// assistive technologies what the component says (its events and props):
 /// it is not [`Interactive`] or [`Accessible`]. The element a
 /// `#[component]`'s constructor makes (`button()`) wraps one
@@ -2372,6 +2409,13 @@ impl<C: Component> ComponentElement<C> {
     pub fn disabled_style(mut self, f: impl FnOnce(StyleRefinement) -> StyleRefinement) -> Self {
         let s = f(StyleRefinement::default());
         self.node.style.extend_as(Variant::DISABLED, s);
+        self
+    }
+
+    /// The id UI tests find its root by (TS: `testID` given the component),
+    /// as [`Interactive::test_id`] names a view.
+    pub fn test_id(mut self, id: &str) -> Self {
+        super::host::set(&mut self.node, Prop::TestId(Some(id.into())));
         self
     }
 

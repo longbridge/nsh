@@ -687,7 +687,7 @@ view()
 | iOS | 视图的 `accessibilityIdentifier`（在 XCUITest 中为 `app.otherElements["add-to-cart"]`）。 |
 | Android | 无障碍节点的 view id 资源名（在 UI Automator 中为 `By.res("add-to-cart")`）。 |
 
-在 Rust 中测试 id 是每个元素的方法；`testID` 是每个元素以及每个 Rust 组件（`Button`、`Dialog` 等）都有的 prop。它不会改变屏幕阅读器读出的内容；那应该用
+在 Rust 中测试 id 是每个元素的方法，组件的元素也不例外（`button().test_id("save")` 为组件的根视图命名）；`testID` 是每个元素以及每个 Rust 组件（`Button`、`Dialog` 等）都有的 prop。它不会改变屏幕阅读器读出的内容；那应该用
 `accessibilityLabel`（参见[无障碍](./accessibility.md)）。在 `--trace` 的输出中，它出现在视图的 `ViewProps` item 里，
 形如 `test_id: Some("add-to-cart")`。
 

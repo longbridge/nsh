@@ -131,7 +131,7 @@ pub use self::{
         MethodSpec, Methods, NoEvent, Param, PropDecode, PropKind, PropSpec, Props, Registry, Root,
         ScrollbarSource, declarations,
     },
-    element_ref::{ComponentRef, ElementRef},
+    element_ref::{ComponentRef, ElementRef, FollowTarget},
     engine_context::{EngineContext, EngineContextGuard, engine_context},
     env::Environment,
     events::{

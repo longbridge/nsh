@@ -79,6 +79,29 @@ impl PartialEq for RefTarget {
     }
 }
 
+/// The element a view's frame follows ([`super::View::follow`]): whatever
+/// element carries the ref, looked up as the core lays out, so the
+/// element may be rendered after the view that follows it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FollowTarget(pub(crate) RefTarget);
+
+impl FollowTarget {
+    /// The node carrying the ref now.
+    pub(crate) fn node(&self) -> Option<NodeId> {
+        Some(self.0.0.node.get()).filter(|&n| n != 0)
+    }
+
+    /// A target carried by `node`, with no ref behind it (the core's
+    /// tests).
+    #[cfg(test)]
+    pub(crate) fn of_node(node: NodeId) -> Self {
+        Self(RefTarget(Rc::new(Target {
+            node: Cell::new(node),
+            executor: Weak::new(),
+        })))
+    }
+}
+
 impl ElementRef {
     pub(crate) fn new(executor: &Rc<Executor>) -> Self {
         Self(Kept::new(Rc::new(Target {

@@ -19,6 +19,10 @@
 //! animation animates frames only (its `update`). A commit that also
 //! animates its whole layout (a layout animation at the root) animates
 //! every frame with that one.
+//!
+//! A view that follows another one (`follow.rs`) moving to another element
+//! scopes its own frame alone (and its subtree's): what changes around it
+//! in that commit is not its doing.
 
 use super::{Core, Key, NO_KEY};
 use crate::{LayoutAnimation, LayoutTransition, MountItem, NodeId, text::TextEngine};
@@ -26,7 +30,8 @@ use crate::{LayoutAnimation, LayoutTransition, MountItem, NodeId, text::TextEngi
 /// A node whose change animates the frames it moves, with `transition`.
 struct Scope {
     key: Key,
-    /// Its ancestors, nearest first.
+    /// Its ancestors, nearest first; none when it animates its own frame
+    /// alone.
     ancestors: Vec<Key>,
     transition: LayoutTransition,
 }
@@ -35,7 +40,13 @@ impl<M: TextEngine> Core<M> {
     /// Node `id`'s change animates the frames it moves in the next commit
     /// with `transition`.
     pub(super) fn scope_layout_animation(&mut self, id: NodeId, transition: LayoutTransition) {
-        self.scoped_layout.push((id, transition));
+        self.scoped_layout.push((id, transition, false));
+    }
+
+    /// Node `id`'s own frame (and its subtree's) animates in the next
+    /// commit with `transition`, and nothing it moves.
+    pub(super) fn scope_frame_animation(&mut self, id: NodeId, transition: LayoutTransition) {
+        self.scoped_layout.push((id, transition, true));
     }
 
     /// The frame of `key` changes in this commit, and its size with it when
@@ -68,11 +79,11 @@ impl<M: TextEngine> Core<M> {
         }
         let scopes: Vec<Scope> = requested
             .into_iter()
-            .filter_map(|(id, transition)| {
+            .filter_map(|(id, transition, own)| {
                 let key = self.key(id).ok()?;
                 let mut ancestors = Vec::new();
                 let mut k = self.nodes[key as usize].parent;
-                while k != NO_KEY {
+                while !own && k != NO_KEY {
                     ancestors.push(k);
                     k = self.nodes[k as usize].parent;
                 }
