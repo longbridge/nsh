@@ -417,9 +417,9 @@ fn past_edge(surface: &Surface, area: &NshView, x: f32, y: f32) -> Option<(NshVi
             let horizontal = view.state().scroll.as_ref().is_some_and(|s| s.horizontal);
             // Along its axis only.
             let (dx, dy) = if horizontal {
-                (autoscroll_step(lx, frame.width.0), 0.0)
+                (autoscroll_step(Points(lx), frame.width).0, 0.0)
             } else {
-                (0.0, autoscroll_step(ly, frame.height.0))
+                (0.0, autoscroll_step(Points(ly), frame.height).0)
             };
             if (dx != 0.0 || dy != 0.0) && crate::scroll::can_scroll(&view, dx, dy) {
                 return Some((view, dx, dy));

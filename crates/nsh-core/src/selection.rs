@@ -480,26 +480,26 @@ impl KeptRows {
 /// pointer little room past it, and speeds up linearly from
 /// [`AUTOSCROLL_MIN`] to [`AUTOSCROLL_MAX`] over [`AUTOSCROLL_RAMP`] from
 /// there outward.
-pub fn autoscroll_step(at: f32, extent: f32) -> f32 {
+pub fn autoscroll_step(at: Points, extent: Points) -> Points {
     let into = if at < AUTOSCROLL_INSIDE {
         at - AUTOSCROLL_INSIDE
     } else if at > extent - AUTOSCROLL_INSIDE {
         at - (extent - AUTOSCROLL_INSIDE)
     } else {
-        return 0.0;
+        return Points(0.0);
     };
-    let t = (into.abs() / AUTOSCROLL_RAMP).min(1.0);
-    into.signum() * (AUTOSCROLL_MIN + t * (AUTOSCROLL_MAX - AUTOSCROLL_MIN))
+    let t = (into.0.abs() / AUTOSCROLL_RAMP.0).min(1.0);
+    Points(into.0.signum() * (AUTOSCROLL_MIN.0 + t * (AUTOSCROLL_MAX.0 - AUTOSCROLL_MIN.0)))
 }
 
 /// How far inside an edge a selection drag starts scrolling ([`autoscroll_step`]).
-pub const AUTOSCROLL_INSIDE: f32 = 16.0;
+pub const AUTOSCROLL_INSIDE: Points = Points(16.0);
 /// Its step per tick where it starts.
-pub const AUTOSCROLL_MIN: f32 = 12.0;
+pub const AUTOSCROLL_MIN: Points = Points(12.0);
 /// Its largest step per tick, [`AUTOSCROLL_RAMP`] from where it starts on.
-pub const AUTOSCROLL_MAX: f32 = 64.0;
+pub const AUTOSCROLL_MAX: Points = Points(64.0);
 /// How far from where it starts it reaches [`AUTOSCROLL_MAX`].
-pub const AUTOSCROLL_RAMP: f32 = 96.0;
+pub const AUTOSCROLL_RAMP: Points = Points(96.0);
 
 /// The position under `point` ([module docs](self): the hit-testing rule),
 /// `None` without texts.
@@ -1184,12 +1184,13 @@ mod tests {
 
     #[test]
     fn autoscroll_starts_inside_the_edge_and_speeds_up_outward() {
-        assert_eq!(autoscroll_step(200.0, 400.0), 0.0);
-        assert_eq!(autoscroll_step(17.0, 400.0), 0.0);
-        assert!(autoscroll_step(15.0, 400.0) < 0.0);
-        assert!(autoscroll_step(385.0, 400.0) > 0.0);
-        assert_eq!(autoscroll_step(400.0 - 16.0 + 96.0, 400.0), AUTOSCROLL_MAX);
-        assert_eq!(autoscroll_step(-500.0, 400.0), -AUTOSCROLL_MAX);
-        assert!(autoscroll_step(420.0, 400.0) > autoscroll_step(390.0, 400.0));
+        let step = |at: f32| autoscroll_step(Points(at), Points(400.0));
+        assert_eq!(step(200.0), Points(0.0));
+        assert_eq!(step(17.0), Points(0.0));
+        assert!(step(15.0) < Points(0.0));
+        assert!(step(385.0) > Points(0.0));
+        assert_eq!(step(400.0 - 16.0 + 96.0), AUTOSCROLL_MAX);
+        assert_eq!(step(-500.0), Points(-AUTOSCROLL_MAX.0));
+        assert!(step(420.0) > step(390.0));
     }
 }

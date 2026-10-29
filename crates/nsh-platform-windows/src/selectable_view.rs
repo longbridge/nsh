@@ -528,7 +528,10 @@ fn past_edges(view: &NshView, x: f32, y: f32) -> (f32, f32) {
     let Some((bx, by, bw, bh)) = bounds else {
         return (0.0, 0.0);
     };
-    (autoscroll_step(x - bx, bw), autoscroll_step(y - by, bh))
+    (
+        autoscroll_step(Points(x - bx), Points(bw)).0,
+        autoscroll_step(Points(y - by), Points(bh)).0,
+    )
 }
 
 /// Scrolls `view` toward the mouse at `(x, y)` (root coordinates) when it

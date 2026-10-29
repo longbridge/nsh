@@ -601,9 +601,9 @@ fn autoscroll_target(surface: &Surface) -> Option<(NshView, f32, f32)> {
             .compute_point(&view, &graphene::Point::new(last.0, last.1))
             .map_or(last, |p| (p.x(), p.y()));
         let (dx, dy) = if horizontal {
-            (autoscroll_step(x, w), 0.0)
+            (autoscroll_step(Points(x), Points(w)).0, 0.0)
         } else {
-            (0.0, autoscroll_step(y, h))
+            (0.0, autoscroll_step(Points(y), Points(h)).0)
         };
         if (dx, dy) != (0.0, 0.0) && crate::scroll::can_scroll(&view, dx, dy) {
             return Some((view, dx, dy));
