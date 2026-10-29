@@ -45,6 +45,16 @@ fn row(terminal: &Terminal<TestBackend>, y: u16) -> String {
         .collect()
 }
 
+fn underlined(terminal: &Terminal<TestBackend>) -> String {
+    let buffer = terminal.backend().buffer();
+    buffer
+        .content
+        .iter()
+        .filter(|cell| cell.modifier.contains(Modifier::UNDERLINED))
+        .map(|cell| cell.symbol())
+        .collect()
+}
+
 fn reversed(terminal: &Terminal<TestBackend>) -> String {
     let buffer = terminal.backend().buffer();
     buffer
@@ -222,6 +232,11 @@ fn control_s_finds_text_forward_focuses_and_reveals_it_and_repeats_to_the_next_m
     draw_until(&mut view, &mut terminal, &rx, "focus 1 offset 0");
     assert_eq!(row(&terminal, BOTTOM_ROW).trim_end(), "/item 1");
     assert_eq!(reversed(&terminal), "item 1");
+    assert_eq!(
+        underlined(&terminal),
+        "item 1",
+        "a match inside a reversed box is underlined"
+    );
     for (expected, focused) in [
         ("focus 10 offset 128", "item 10"),
         ("focus 11 offset 128", "item 11"),
@@ -289,6 +304,11 @@ fn a_match_in_plain_text_takes_focus_away_and_traversal_continues_from_it() {
     type_text(&mut view, &mut terminal, "note");
     draw_until(&mut view, &mut terminal, &rx, "focus -1");
     assert_eq!(reversed(&terminal), "note");
+    assert_eq!(
+        underlined(&terminal),
+        "",
+        "a match in plain text is only reversed"
+    );
     assert_eq!(view.handle(key("Enter")), Handled::Yes);
     assert_eq!(view.handle(ctrl("n")), Handled::Yes);
     draw_until(&mut view, &mut terminal, &rx, "focus 101");

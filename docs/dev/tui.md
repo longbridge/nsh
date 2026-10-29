@@ -627,7 +627,8 @@ including after the Minibuffer closes.
 
 While searching, the platform draws the Minibuffer over the bottom row of the surface's area, in the terminal's
 default colors: `/` (forward) or `?` (backward), after less and vim, then as much of the query's end as fits,
-with the terminal cursor after it. A query with no match is crossed out. The current match's Cells are reversed.
+with the terminal cursor after it. A query with no match is crossed out. The current match's Cells are reversed, or underlined inside a box
+already reversed (the focused control it moved to, a selected row), so the match stays visible.
 The prompt is a symbol because the platform draws no built-in strings. The app's layout never changes for the
 Minibuffer, and once the search ends nothing of it, or of the match highlight, is drawn. A match on the bottom
 row lies under the Minibuffer until the search ends. Positions come from the last completed frame.
@@ -783,7 +784,7 @@ permit clipboard writes; `nsh test` uses memory and never writes to the machine'
 | Selectable text | Reversed grapheme Cells; copies use the shared clipboard and OSC 52 |
 | Pointer precision | One terminal Cell, converted to its center in points |
 | Input | Editable Paragraph, reversed selection and terminal caret; single-line text and caret centered in the content box; masked text is dots |
-| Searching the screen | The Minibuffer over the bottom row and the match's Cells reversed, only while searching |
+| Searching the screen | The Minibuffer over the bottom row and the match's Cells reversed (underlined inside a reversed box), only while searching |
 | Keyboard paging and endpoints | The innermost Scroll around focus or a plain-text search point; otherwise the first Scroll in the active scope |
 | Focus and search reveals | Fully visible targets stay in place; vertical scrolling centers the target within the content limits, with core margins for horizontal or oversized targets |
 | Input-method composition | Terminal emulator composition, committed text delivered to the field |
