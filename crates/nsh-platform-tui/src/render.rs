@@ -10,7 +10,7 @@ use ratatui_core::{
     style::{Modifier, Style},
     widgets::Widget,
 };
-use ratatui_widgets::{block::Block, borders::Borders};
+use ratatui_widgets::{block::Block, borders::Borders, paragraph::Paragraph};
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
@@ -19,7 +19,7 @@ use crate::{
     animation::Projection,
     geometry::{CellBounds, TextRun},
     mount::Mounter,
-    palette::ink,
+    palette::{Ground, ink},
     text::CellLayout,
 };
 
@@ -486,6 +486,10 @@ impl Painter<'_> {
         if own_fill.0 & 255 == 255 {
             self.background = Some(own_fill);
         }
+        // Fills and borders sit on what is under the view; its content on its
+        // own fill.
+        let outer_ground = Ground::new(self.scheme, outer_background);
+        let ground = Ground::new(self.scheme, self.background);
         if visible_drawn {
             let fill = if button.is_some() {
                 nsh_core::Color::TRANSPARENT
@@ -500,11 +504,11 @@ impl Painter<'_> {
             let fill = if fill.is_transparent() {
                 None
             } else if let Some(line) = line {
-                Some(Fill::Line(line, ink(fill, self.scheme)))
+                Some(Fill::Line(line, ink(fill, outer_ground)))
             } else if fill.0 & 255 < 255 {
                 None
             } else if leaf {
-                Some(Fill::Solid(ink(fill, self.scheme)))
+                Some(Fill::Solid(ink(fill, outer_ground)))
             } else {
                 Some(Fill::Clear)
             };
@@ -566,7 +570,7 @@ impl Painter<'_> {
                     }
                     _ => continue,
                 };
-                let style = ink(*color, self.scheme);
+                let style = ink(*color, outer_ground);
                 for y in edge.y..edge.bottom() {
                     for x in edge.x..edge.right() {
                         self.buffer[(x, y)].set_style(style);
@@ -582,17 +586,16 @@ impl Painter<'_> {
                     (i32::from(text_area.y) - text_bounds.top).clamp(0, u16::MAX as i32) as u16,
                     (i32::from(text_area.x) - text_bounds.left).clamp(0, u16::MAX as i32) as u16,
                 );
-                let paragraph = layout.paragraph(self.scheme);
+                let paragraph = layout.paragraph(ground);
                 if scroll == (0, 0) {
-                    paragraph.render(text_area, self.buffer);
+                    paragraph.as_ref().render(text_area, self.buffer);
                 } else {
-                    paragraph
-                        .clone()
+                    Paragraph::clone(&paragraph)
                         .scroll(scroll)
                         .render(text_area, self.buffer);
                 }
                 if let Some(color) = view.animated.color {
-                    let style = ink(color, self.scheme);
+                    let style = ink(color, ground);
                     for y in text_area.y..text_area.bottom() {
                         for x in text_area.x..text_area.right() {
                             self.buffer[(x, y)].set_style(style);
@@ -613,7 +616,7 @@ impl Painter<'_> {
                     inner.clipped(clip.visible),
                     self.buffer,
                     view.animated.color,
-                    self.scheme,
+                    ground,
                 );
             }
             if let Some(canvas) = &view.canvas {
@@ -624,7 +627,7 @@ impl Painter<'_> {
                     inner.clipped(clip.visible),
                     self.cells,
                     projection.snapped(Point::new(-origin.x, -origin.y)),
-                    self.scheme,
+                    ground,
                 );
             }
             if let Some(component) = &mut view.component {

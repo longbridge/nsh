@@ -3,7 +3,6 @@
 use nsh_core::{
     Bounds, EventKind, EventPayload, InputConfig, NodeId, PayloadValue, Points, SubmitBehavior,
     TextAlign,
-    platform::ColorScheme,
     text_edit::{self, Model, Unit},
 };
 use nsh_engine::EngineControl;
@@ -429,7 +428,7 @@ impl Field {
         clip: Rect,
         buffer: &mut Buffer,
         color: Option<nsh_core::Color>,
-        scheme: ColorScheme,
+        ground: crate::palette::Ground,
     ) {
         if !config.multiline {
             bounds.top += (bounds.bottom - bounds.top - 1).max(0) / 2;
@@ -467,7 +466,7 @@ impl Field {
         } else {
             color.unwrap_or(config.style.color)
         };
-        let mut style = crate::palette::ink(color, scheme);
+        let mut style = crate::palette::ink(color, ground);
         if config.style.font_weight >= 600 {
             style = style.add_modifier(Modifier::BOLD);
         }

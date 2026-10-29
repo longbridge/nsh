@@ -1,16 +1,18 @@
 //! The terminal's look: app colors drawn with the terminal's own palette.
 //!
 //! An app's RGBA color becomes one of the 16-color meanings, so the user's
-//! terminal theme decides the actual colors. The color's own alpha is first
-//! blended over the page of the app's appearance (black when dark, white when
-//! light); view opacity never changes a color.
+//! terminal theme decides the actual colors. A color is read against its
+//! [`Ground`]: the opaque fill the app drew it on (what the app designed it
+//! against), else the page of the app's appearance (black when dark, white when
+//! light). Its own alpha is first blended over that ground; view opacity never
+//! changes a color.
 //!
 //! - **Saturated** colors (chroma at least [`SATURATED_CHROMA`]) take the
 //!   accent of their hue band, at normal intensity: red, yellow (orange and
 //!   amber), green (lime and emerald), cyan (teal), blue (violet) or magenta
 //!   (purple and pink).
 //! - **Near-neutral** colors are the default foreground, or dim when their
-//!   lightness is closer to the page's than [`DEFAULT_CONTRAST`] (secondary
+//!   lightness is closer to the ground's than [`DEFAULT_CONTRAST`] (secondary
 //!   text, placeholders, separators).
 //! - A fully transparent color hides what it draws.
 
@@ -20,7 +22,7 @@ use ratatui_core::style::{Color, Modifier, Style};
 /// The chroma (largest minus smallest channel, of 255) from which a color
 /// reads as an accent rather than a shade of gray.
 const SATURATED_CHROMA: f32 = 0.2 * 255.0;
-/// The CIE L* distance from the page from which a neutral color is the
+/// The CIE L* distance from the ground from which a neutral color is the
 /// default foreground rather than dim.
 const DEFAULT_CONTRAST: f32 = 75.0;
 /// Hue bands (degrees, upper bounds) and the accent each one reads as.
@@ -33,9 +35,27 @@ const HUE_BANDS: [(f32, Color); 6] = [
     (335.0, Color::Magenta),
 ];
 
-/// The terminal style `color` draws with in `scheme`: a foreground from the
+/// What a color is read against: the opaque fill the app drew it on, else the
+/// page of the app's appearance.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) struct Ground([u8; 3]);
+
+impl Ground {
+    pub(crate) fn new(scheme: ColorScheme, fill: Option<nsh_core::Color>) -> Self {
+        match (fill, scheme) {
+            (Some(fill), _) => {
+                let [red, green, blue, _] = fill.0.to_be_bytes();
+                Self([red, green, blue])
+            }
+            (None, ColorScheme::Dark) => Self([0; 3]),
+            (None, ColorScheme::Light) => Self([255; 3]),
+        }
+    }
+}
+
+/// The terminal style `color` draws with on `ground`: a foreground from the
 /// palette and the dim (or hidden) attribute, which replace the Cell's.
-pub(crate) fn ink(color: nsh_core::Color, scheme: ColorScheme) -> Style {
+pub(crate) fn ink(color: nsh_core::Color, ground: Ground) -> Style {
     let [red, green, blue, alpha] = color.0.to_be_bytes();
     if alpha == 0 {
         return Style::new()
@@ -43,13 +63,12 @@ pub(crate) fn ink(color: nsh_core::Color, scheme: ColorScheme) -> Style {
             .add_modifier(Modifier::HIDDEN)
             .remove_modifier(Modifier::DIM);
     }
-    let page = match scheme {
-        ColorScheme::Dark => 0.0,
-        ColorScheme::Light => 255.0,
-    };
     let alpha = f32::from(alpha) / 255.0;
-    let [red, green, blue] =
-        [red, green, blue].map(|channel| f32::from(channel) * alpha + page * (1.0 - alpha));
+    let mut channels = [red, green, blue]
+        .into_iter()
+        .zip(ground.0)
+        .map(|(channel, under)| f32::from(channel) * alpha + f32::from(under) * (1.0 - alpha));
+    let [red, green, blue] = std::array::from_fn(|_| channels.next().unwrap_or_default());
     let max = red.max(green).max(blue);
     let min = red.min(green).min(blue);
     let plain = Style::new().remove_modifier(Modifier::HIDDEN);
@@ -60,7 +79,9 @@ pub(crate) fn ink(color: nsh_core::Color, scheme: ColorScheme) -> Style {
             .map_or(Color::Red, |(_, accent)| *accent);
         return plain.fg(accent).remove_modifier(Modifier::DIM);
     }
-    let contrast = (lightness(red, green, blue) - lightness(page, page, page)).abs();
+    let [under_red, under_green, under_blue] = ground.0.map(f32::from);
+    let contrast =
+        (lightness(red, green, blue) - lightness(under_red, under_green, under_blue)).abs();
     if contrast < DEFAULT_CONTRAST {
         plain.fg(Color::Reset).add_modifier(Modifier::DIM)
     } else {
@@ -103,10 +124,10 @@ mod tests {
     use nsh_core::{Color as Rgba, platform::ColorScheme};
     use ratatui_core::style::{Color, Modifier};
 
-    use super::ink;
+    use super::{Ground, ink};
 
     fn reads(color: u32, scheme: ColorScheme) -> (Color, bool) {
-        let style = ink(Rgba(color), scheme);
+        let style = ink(Rgba(color), Ground::new(scheme, None));
         (
             style.fg.unwrap(),
             style.add_modifier.contains(Modifier::DIM),
@@ -143,9 +164,22 @@ mod tests {
     }
 
     #[test]
+    fn colors_are_read_against_the_fill_they_were_designed_on() {
+        let lime = Ground::new(ColorScheme::Dark, Some(Rgba(0xc8f26dff)));
+        let label = ink(Rgba(0x13160cff), lime);
+        assert_eq!(label.fg, Some(Color::Reset));
+        assert!(!label.add_modifier.contains(Modifier::DIM));
+        assert!(
+            ink(Rgba(0xfafafaff), lime)
+                .add_modifier
+                .contains(Modifier::DIM)
+        );
+    }
+
+    #[test]
     fn translucent_colors_blend_over_the_page_and_transparent_ones_hide() {
         assert_eq!(reads(0xef44441a, ColorScheme::Dark), (Color::Reset, true));
-        let hidden = ink(Rgba(0xef444400), ColorScheme::Dark);
+        let hidden = ink(Rgba(0xef444400), Ground::new(ColorScheme::Dark, None));
         assert!(hidden.add_modifier.contains(Modifier::HIDDEN));
     }
 }

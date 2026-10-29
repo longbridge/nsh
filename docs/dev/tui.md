@@ -335,20 +335,23 @@ Alignment becomes a whole-Cell indent. Line geometry reports UTF-16 offsets and 
 
 The terminal backend follows the terminal's own look, as system UI keeps a platform's look: `palette.rs` maps
 every app color onto the terminal's 16-color meanings, so the user's terminal theme decides the actual colors.
-The app's appearance (`ColorScheme`: the terminal's background from OSC 11, dark when unknown, or the app's own
-choice) is the one input besides the color: a color's alpha is blended over the appearance's page, black when
-dark and white when light, before it is read. View opacity never changes a color.
+A color is read against its ground: the opaque fill of the nearest view the app drew it on (what the app
+designed it against: a button label on its button's fill, text on its card), else the page of the app's
+appearance (`ColorScheme`: the terminal's background from OSC 11, dark when unknown, or the app's own choice),
+black when dark and white when light. Text, fields and canvases sit on their own view's fill; fills and borders
+on what is under their view. A color's alpha is blended over the ground before it is read. View opacity never
+changes a color, and the ground decides only the ink, never where anything is drawn.
 
 | App color | Terminal ink |
 |---|---|
 | Saturated: chroma (largest minus smallest channel) at least 20% of 255 | The accent of its hue band, at normal intensity: red [335°, 15°), yellow [15°, 75°) (orange, amber), green [75°, 165°) (lime, emerald), cyan [165°, 200°) (teal), blue [200°, 265°) (violet), magenta [265°, 335°) (purple, pink) |
-| Near-neutral, CIE L* at least 75 from the page's | The default foreground |
-| Near-neutral, closer to the page (secondary text, placeholders, separators, borders) | The default foreground, dim |
+| Near-neutral, CIE L* at least 75 from the ground's | The default foreground |
+| Near-neutral, closer to the ground (secondary text, placeholders, separators, borders) | The default foreground, dim |
 | Fully transparent | Hidden |
 
 Text keeps its attributes: weight 600 and above is bold, and italic, underline and strikethrough stay. The text
-engine lays text out once on the engine thread; each appearance's styled `Paragraph` is made when the text is
-first drawn in it. Borders, hairlines, canvas dots and text, field text and placeholders and animated colors use
+engine lays text out once on the engine thread; the styled `Paragraph` for a ground is made when the text is
+first drawn on it, and the last few are kept. Borders, hairlines, canvas dots and text, field text and placeholders and animated colors use
 the same mapping.
 
 No fill color is drawn; every Cell shows the terminal's background. A view's opaque fill still clears the Cells
@@ -744,7 +747,7 @@ permit clipboard writes; `nsh test` uses memory and never writes to the machine'
 | Development logs and connection/build status | Append-only log file, visible in the on-demand `C-h e` panel |
 | Test screenshots | Versioned UTF-8 JSON of Cell symbols, foreground/background/underline colors and modifiers |
 | Development errors | Dismissible panel, with the mapped message and stack; cleared by the next update |
-| Colors | The terminal's 16-color meanings by `palette.rs`: hue-band accents, the default foreground or dim; alpha read over the appearance's page |
+| Colors | The terminal's 16-color meanings by `palette.rs`: hue-band accents, the default foreground or dim, read against the opaque fill the app drew them on or the appearance's page |
 | View fills | No color: opaque fills clear the Cells they cover to the terminal background; childless solid leaves reversed in their palette color; translucent fills nothing |
 | Opacity | Ignored, except that a view below 3% draws nothing |
 | Selected, checked and focused views | Reversed over their Cell box; focused fields show the terminal cursor |

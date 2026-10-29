@@ -19,7 +19,6 @@ use nsh_core::{
     canvas::{
         CanvasOp, CanvasTextAlign, CanvasTextBaseline, Drawing, FillRule, Num, Paint, PathOp,
     },
-    platform::ColorScheme,
 };
 use ratatui_core::{
     buffer::Buffer,
@@ -36,7 +35,7 @@ use self::path::{Dash, IDENTITY, Matrix, Outline, apply, distance, mean_scale, m
 use crate::{
     CellSize,
     geometry::{CellBounds, TextRun},
-    palette::ink,
+    palette::{Ground, ink},
 };
 
 const DOTS_ACROSS: usize = 2;
@@ -88,7 +87,7 @@ impl CanvasView {
 }
 
 /// Draws `canvas` into the `visible` Cells of a view whose Cells are
-/// `bounds`, in `scheme`'s palette.
+/// `bounds`, in the palette on `ground`.
 pub(crate) fn draw(
     canvas: &CanvasView,
     buffer: &mut Buffer,
@@ -96,12 +95,12 @@ pub(crate) fn draw(
     visible: Rect,
     cells: CellSize,
     projection: crate::animation::Projection,
-    scheme: ColorScheme,
+    ground: Ground,
 ) {
     if visible.is_empty() {
         return;
     }
-    let mut replay = Replay::new(canvas, bounds, visible, cells, scheme);
+    let mut replay = Replay::new(canvas, bounds, visible, cells, ground);
     let m = projection.matrix.0;
     replay.base = [
         m[0] as f32,
@@ -406,7 +405,7 @@ struct Replay<'a> {
     cells: CellSize,
     /// The visible Cells' offset from the canvas's first Cell.
     offset: [i32; 2],
-    scheme: ColorScheme,
+    ground: Ground,
     base: Matrix,
     state: State,
     saved: Vec<State>,
@@ -419,7 +418,7 @@ impl<'a> Replay<'a> {
         bounds: CellBounds,
         visible: Rect,
         cells: CellSize,
-        scheme: ColorScheme,
+        ground: Ground,
     ) -> Self {
         let offset = [
             i32::from(visible.x) - bounds.left,
@@ -447,7 +446,7 @@ impl<'a> Replay<'a> {
             labels: Vec::new(),
             cells,
             offset,
-            scheme,
+            ground,
             base: IDENTITY,
             state: State::default(),
             saved: Vec::new(),
@@ -472,7 +471,7 @@ impl<'a> Replay<'a> {
     fn ink(&self, paint: &Paint) -> Option<Style> {
         let color = self.canvas.color(paint);
         let alpha = ((color.0 & 255) as f32 * self.state.alpha).round() as u32;
-        (alpha > 0).then(|| ink(nsh_core::Color(color.0 & !255 | alpha), self.scheme))
+        (alpha > 0).then(|| ink(nsh_core::Color(color.0 & !255 | alpha), self.ground))
     }
 
     fn clipped_out(&self, index: usize) -> bool {

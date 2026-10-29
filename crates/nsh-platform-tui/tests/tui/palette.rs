@@ -311,3 +311,44 @@ fn selected_checked_and_focused_views_are_reversed_without_app_focus_outlines() 
     );
     assert!(dim(buffer, 0, 4), "placeholder");
 }
+
+#[component]
+fn DesignedOnFills() -> impl IntoElement {
+    view()
+        .flex_1()
+        .bg(nsh_core::color::rgb(0x0c0d0f))
+        .child(
+            view()
+                .w(px(80.0))
+                .h(px(16.0))
+                .bg(nsh_core::color::rgb(0xc8f26d))
+                .child(text("Buy").text_color(nsh_core::color::rgb(0x13160c))),
+        )
+        .child(text("bare").text_color(nsh_core::color::rgb(0x13160c)))
+        .child(
+            view()
+                .w(px(80.0))
+                .h(px(16.0))
+                .bg(nsh_core::color::rgba(0xc8f26d80))
+                .child(text("tint").text_color(nsh_core::color::rgb(0x13160c))),
+        )
+}
+
+#[test]
+fn neutral_text_is_read_against_the_opaque_fill_it_was_designed_on() {
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(20, 4)).unwrap();
+    view.load(App::Rust(Root::new::<DesignedOnFills>(|| ())))
+        .unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "tint");
+    let buffer = terminal.backend().buffer();
+    assert_eq!(buffer[(0, 0)].fg, Color::Reset);
+    assert!(!dim(buffer, 0, 0), "dark text designed on a lime fill");
+    assert!(dim(buffer, 0, 1), "the same text on the dark page");
+    assert!(dim(buffer, 0, 2), "a translucent fill is not a ground");
+    assert_eq!(
+        buffer[(0, 0)].bg,
+        Color::Reset,
+        "the fill is still not drawn"
+    );
+}

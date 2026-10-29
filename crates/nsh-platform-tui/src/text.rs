@@ -1,8 +1,8 @@
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, Mutex};
 
 use nsh_core::{
     AttachmentAlignments, AttributedText, EllipsizeMode, FontExtent, Point, Points, Size,
-    TextAlign, TextEngine, TextLayout, TextLine, platform::ColorScheme,
+    TextAlign, TextEngine, TextLayout, TextLine,
 };
 use ratatui_core::{
     style::{Modifier, Style},
@@ -12,7 +12,11 @@ use ratatui_widgets::paragraph::Paragraph;
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
-use crate::CellSize;
+use crate::{CellSize, palette::Ground};
+
+/// How many grounds a text keeps its drawn rows for (a hover or selection
+/// changes the fill under it back and forth).
+const PARAGRAPH_GROUNDS: usize = 4;
 
 /// Text measured on a fixed grid, independent of the requested font size.
 #[derive(Default)]
@@ -55,8 +59,9 @@ pub struct PreparedText {
 }
 
 pub(crate) struct CellLayout {
-    /// The rows as drawn in each appearance's palette, made when first drawn.
-    paragraphs: [OnceLock<Paragraph<'static>>; 2],
+    /// The rows as drawn in the palette on the grounds they were last drawn
+    /// on, made when first drawn there.
+    paragraphs: Mutex<Vec<(Ground, Arc<Paragraph<'static>>)>>,
     /// The displayed rows, kept for searching the text on screen.
     pub(crate) rows: Vec<Row>,
     metrics: Vec<TextLine>,
@@ -70,24 +75,34 @@ pub(crate) struct Row {
 }
 
 impl CellLayout {
-    /// The rows with each glyph's color drawn in `scheme`'s palette.
-    pub(crate) fn paragraph(&self, scheme: ColorScheme) -> &Paragraph<'static> {
-        self.paragraphs[usize::from(scheme == ColorScheme::Dark)].get_or_init(|| {
-            Paragraph::new(
-                self.rows
-                    .iter()
-                    .map(|row| {
-                        let indent = (row.indent > 0).then(|| Span::raw(" ".repeat(row.indent)));
-                        Line::from_iter(indent.into_iter().chain(row.glyphs.iter().map(|glyph| {
-                            let style = glyph.color.map_or(glyph.style, |color| {
-                                glyph.style.patch(crate::palette::ink(color, scheme))
-                            });
-                            Span::styled(glyph.text.to_string(), style)
-                        })))
-                    })
-                    .collect::<Vec<_>>(),
-            )
-        })
+    /// The rows with each glyph's color drawn in the palette on `ground`.
+    pub(crate) fn paragraph(&self, ground: Ground) -> Arc<Paragraph<'static>> {
+        let mut paragraphs = self
+            .paragraphs
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some((_, paragraph)) = paragraphs.iter().find(|(drawn, _)| *drawn == ground) {
+            return paragraph.clone();
+        }
+        let paragraph = Arc::new(Paragraph::new(
+            self.rows
+                .iter()
+                .map(|row| {
+                    let indent = (row.indent > 0).then(|| Span::raw(" ".repeat(row.indent)));
+                    Line::from_iter(indent.into_iter().chain(row.glyphs.iter().map(|glyph| {
+                        let style = glyph.color.map_or(glyph.style, |color| {
+                            glyph.style.patch(crate::palette::ink(color, ground))
+                        });
+                        Span::styled(glyph.text.to_string(), style)
+                    })))
+                })
+                .collect::<Vec<_>>(),
+        ));
+        if paragraphs.len() == PARAGRAPH_GROUNDS {
+            paragraphs.remove(0);
+        }
+        paragraphs.push((ground, paragraph.clone()));
+        paragraph
     }
 }
 
