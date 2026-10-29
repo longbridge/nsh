@@ -1277,8 +1277,8 @@ const Clipboard: {
 };
 
 interface ClipboardImage {
-  url: string; // data:image/png;base64,…
-  size: PixelSize;
+  url: string; // Image 能显示、fetch 能读取的 URL
+  size: PixelSize; // 像素
 }
 ```
 
@@ -1293,6 +1293,10 @@ interface ClipboardImage {
 | `await Clipboard.readFiles()` | `clipboard_files().await -> Vec<String>` |
 
 Rust 的读取函数返回一个应答，在任务中（`spawn`，或 `async` 模块函数）await 它；`ClipboardImage` 是 `nsh_core::element::ClipboardImage`，含 `url` 和 `size`（一个 `Size<DevicePixels>`）。
+
+iOS、桌面和 Web 上可以通过剪贴板传递图片。在 Android 上，剪贴板传递文本：`writeImage` 和 `readImage` 以 `code` 为
+`"ERR_FEATURE_UNAVAILABLE_ON_PLATFORM"` 的 `Error` 拒绝，`hasImage` 返回 `false`。在 Rust 中，`set_clipboard_image`
+在那里保持剪贴板不变，`clipboard_image` 返回 `None`。
 
 用户也可以自己从[可选文本](../elements/text.md)中复制；剪贴板 API 用于在代码中复制，比如“复制”按钮。
 
@@ -1381,7 +1385,7 @@ Clipboard.hasText().then((has) => canPaste.set(has));
 readImage(): Promise<ClipboardImage | null>;
 ```
 
-返回剪贴板上的图片，没有时为 `null`：粘贴的截图，或在浏览器、图片编辑器里复制的图片。Rust：`clipboard_image()`，没有时为 `None`。`url` 是图片的 `data:` URL（PNG，或剪贴板自带的 JPEG、GIF、WebP、BMP），可直接作为 [`Image`](../elements/image.md) 的 `src`；在 TSX 中用 `fetch(url)` 拿到它的字节用于上传，在 Rust 中解码逗号之后的 base64 即得到字节。`size`（`width` 和 `height`）是像素尺寸。和 `readText` 一样，在用户要求粘贴时再读。可读取的图片最大 48 MB（编码后），这样 `data:` URL 能放进应用的内存；更大的图片 `readImage` 返回 `null`，`hasImage` 返回 `true`。
+返回剪贴板上的图片，没有时为 `null`：粘贴的截图，或在浏览器、图片编辑器里复制的图片。Rust：`clipboard_image()`，没有时为 `None`。`url` 是图片（PNG，或剪贴板自带的 JPEG、GIF、WebP、BMP）的 URL，[`Image`](../elements/image.md) 能把它作为 `src` 显示，`fetch` 能读取它：用 `fetch(url)` 拿到它的字节用于上传。`size`（`width` 和 `height`）是解码后的像素尺寸。和 `readText` 一样，在用户要求粘贴时再读。可读取的图片最大 48 MB（编码后），这样图片能放进应用的内存；更大的图片会以 `code` 为 `"ERR_NSH_QUOTA_EXCEEDED"` 的 `Error` 拒绝（消息给出图片大小和上限），此时 `hasImage` 返回 `true`。Rust：`clipboard_image()` 对它返回 `None`。
 
 ```rust tabs
 use base64::Engine as _;
@@ -1472,7 +1476,7 @@ keymap.bind("mod+v", async () => {
 hasImage(): Promise<boolean>;
 ```
 
-返回剪贴板上是否有图片，不读取内容：iOS 上不会出现粘贴提示。Rust：`clipboard_has_image()`。
+返回剪贴板上是否有图片，不读取内容：iOS 上不会出现粘贴提示。Rust：`clipboard_has_image()`。Android 上返回 `false`。
 
 ### Clipboard.writeImage
 
@@ -1480,7 +1484,7 @@ hasImage(): Promise<boolean>;
 writeImage(src: string): Promise<void>;
 ```
 
-把 `src`（base64 `data:` URL，例如 `readImage` 给的）的图片放到剪贴板上，替换原有内容。Rust：`set_clipboard_image(src)`。Windows 上接受 PNG，这是浏览器、Office 和截图工具读取的格式。
+把 `src`（base64 `data:` URL，或 `readImage` 给的 `url`）的图片放到剪贴板上，替换原有内容。Rust：`set_clipboard_image(src)`。Windows 上接受 PNG，这是浏览器、Office 和截图工具读取的格式。Android 上以 `"ERR_FEATURE_UNAVAILABLE_ON_PLATFORM"` 拒绝。
 
 ```rust tabs
 set_clipboard_image(image.url.clone());

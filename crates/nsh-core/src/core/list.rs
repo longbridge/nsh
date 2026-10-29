@@ -292,6 +292,9 @@ pub(super) struct ListState {
     pub(super) follow_end: Option<f32>,
     /// `stickyHeaderIndices`, sorted.
     pub(super) sticky: Vec<u32>,
+    /// Items kept rendered wherever they are (`Core::set_kept`): the ends
+    /// of a text selection, whose texts must outlive scrolling away.
+    kept: Vec<u32>,
     /// `stickyHeaderOffset`: sticky items stick this far from the
     /// viewport's start.
     sticky_offset: f32,
@@ -394,6 +397,7 @@ impl ListState {
             inverted: false,
             follow_end: None,
             sticky: Vec::new(),
+            kept: Vec::new(),
             sticky_offset: 0.0,
             sticky_node: None,
             sent_sticky: Vec::new(),
@@ -554,6 +558,7 @@ impl ListState {
                 None
             }
         };
+        self.kept = self.kept.iter().filter_map(|&i| shift(i)).collect();
         self.by_index.clear();
         for (slot, s) in self.slots.iter_mut().enumerate() {
             let index = s.index.and_then(shift);
@@ -1060,6 +1065,16 @@ impl ListState {
         }
     }
 
+    /// Keeps `items` rendered outside the window (none: only the window's).
+    pub(super) fn set_kept(&mut self, mut items: Vec<u32>) {
+        items.sort_unstable();
+        items.dedup();
+        if items != self.kept {
+            self.kept = items;
+            self.dirty = true;
+        }
+    }
+
     pub(super) fn set_sticky(&mut self, mut sticky: Vec<u32>) {
         sticky.sort_unstable();
         sticky.dedup();
@@ -1392,10 +1407,12 @@ impl ListState {
         // And the one before it: scrolled back, it shows at once, pushed by
         // the pinned one, before a round of binding could render it.
         let before = sticky.and_then(|s| self.sticky.iter().rev().find(|&&p| p < s).copied());
+        let kept = std::mem::take(&mut self.kept);
         let wanted = |i: u32| {
             range.is_some_and(|(f, l)| (f..=l).contains(&i))
                 || sticky == Some(i)
                 || before == Some(i)
+                || kept.contains(&i)
         };
 
         for slot in 0..self.slots.len() as u32 {
@@ -1432,6 +1449,10 @@ impl ListState {
         for s in [before, sticky].into_iter().flatten() {
             bind(self, s);
         }
+        let count = self.count;
+        for &i in kept.iter().filter(|&&i| i < count) {
+            bind(self, i);
+        }
         let (start, end) = self.urgent_span(at);
         let new = binds.len();
         for slot in 0..self.slots.len() {
@@ -1443,6 +1464,7 @@ impl ListState {
             if !self.paced
                 || sticky == Some(i)
                 || before == Some(i)
+                || kept.contains(&i)
                 || self.item_overlaps(i, start, end)
             {
                 self.slots[slot].requested = Some(i);
@@ -1450,6 +1472,7 @@ impl ListState {
             }
         }
         binds[new..].sort_unstable_by_key(|b| b.1);
+        self.kept = kept;
 
         let total = self.blocks().total;
         let near_end = at + self.viewport >= total - self.viewport * self.end_threshold;
@@ -2300,5 +2323,26 @@ mod tests {
         l.set_inverted(true);
         // Item 0 at the bottom of the viewport.
         assert_eq!(l.offset_for_index(0, 0.0, 0.0), 4600.0);
+    }
+
+    #[test]
+    fn kept_items_stay_rendered_out_of_the_window() {
+        let mut l = list(100, 50.0, 400.0);
+        l.set_kept(vec![2]);
+        l.offset = 3000.0;
+        let mut binds = Vec::new();
+        l.update_window(&mut binds);
+        let bound = |l: &ListState, i: u32| l.slots.iter().any(|s| s.index == Some(i));
+        assert!(bound(&l, 2), "{binds:?}");
+        assert!(!bound(&l, 3));
+        // An item inserted before it moves it along.
+        l.splice(0, 0, 1);
+        binds.clear();
+        l.update_window(&mut binds);
+        assert!(bound(&l, 3) && !bound(&l, 2), "{binds:?}");
+        l.set_kept(Vec::new());
+        binds.clear();
+        l.update_window(&mut binds);
+        assert!(!bound(&l, 3));
     }
 }

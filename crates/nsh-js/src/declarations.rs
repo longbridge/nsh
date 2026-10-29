@@ -433,7 +433,7 @@ fn bodies(ui_sets: &[SetDescription]) -> Vec<(String, String)> {
         }
         files.push((path_of(m.name), body));
     }
-    // The registries that are modules of their own (`nsh/base`, `nsh/image`).
+    // The registries that are modules of their own (`nsh/base`, `os`).
     for registry in registries {
         let Some(specifier) = registry.specifier() else {
             continue;
@@ -971,7 +971,7 @@ declare const text: "export default ignored";
 
     #[test]
     fn paths_are_relative() {
-        assert_eq!(relative("nsh/list.d.ts", "nsh/types.d.ts"), "./types");
+        assert_eq!(relative("nsh/base.d.ts", "nsh/types.d.ts"), "./types");
         assert_eq!(relative("nsh/acme/ui.d.ts", "nsh/types.d.ts"), "../types");
         assert_eq!(relative("nsh/types.d.ts", "nsh/acme/ui.d.ts"), "./acme/ui");
     }

@@ -1307,6 +1307,109 @@ fn clipboard_images_and_files_reach_js() {
     );
 }
 
+/// The image functions, as each settles: `ok` and the value, or the
+/// error's class and `code`.
+const CLIPBOARD_IMAGE_TEXT_ONLY: &str = r#"import { mount, signal, Text } from "nsh";
+import { Clipboard } from "nsh";
+
+const shown = signal("waiting");
+const settled = (p: Promise<unknown>) =>
+  p.then(
+    (value) => `ok ${value}`,
+    (e) => `${e.name} ${e.code}`,
+  );
+setTimeout(async () => {
+  const results = await Promise.all([
+    settled(Clipboard.writeImage("data:image/png;base64,aGk=")),
+    settled(Clipboard.readImage()),
+    settled(Clipboard.hasImage()),
+  ]);
+  shown.set(results.join(" | "));
+}, 0);
+
+mount(() => <Text>{shown()}</Text>);
+"#;
+
+#[test]
+fn clipboard_images_are_unavailable_where_the_clipboard_holds_text_only() {
+    let (_engine, rx) = start_in(
+        CLIPBOARD_IMAGE_TEXT_ONLY,
+        Environment {
+            os: nsh_engine::Os::Android,
+            ..Environment::default()
+        },
+    );
+    // Writing and reading reject, `hasImage` answers no; nothing reaches
+    // the platform.
+    let wanted = "Error ERR_FEATURE_UNAVAILABLE_ON_PLATFORM | Error ERR_FEATURE_UNAVAILABLE_ON_PLATFORM | ok false";
+    let mut commands = 0;
+    let batches = until(&rx, |batch| {
+        commands += batch
+            .items
+            .iter()
+            .filter(|i| {
+                matches!(
+                    i,
+                    MountItem::Command {
+                        id: ROOT_ID,
+                        command: Command::SetClipboardImage(_) | Command::ReadClipboardImage { .. },
+                    }
+                )
+            })
+            .count();
+        shows(batch, wanted)
+    });
+    assert!(batches.iter().any(|b| shows(b, wanted)), "{wanted}");
+    assert_eq!(commands, 0, "an image call reached the platform");
+}
+
+const CLIPBOARD_IMAGE_TOO_LARGE: &str = r#"import { mount, signal, Text } from "nsh";
+import { Clipboard } from "nsh";
+
+const shown = signal("waiting");
+setTimeout(async () => {
+  const has = await Clipboard.hasImage();
+  const read = await Clipboard.readImage().then(
+    () => "resolved",
+    (e) => `${e.name} ${e.code} ${e.message}`,
+  );
+  shown.set(`${has} ${read}`);
+}, 0);
+
+mount(() => <Text>{shown()}</Text>);
+"#;
+
+#[test]
+fn clipboard_images_over_the_limit_reject() {
+    let (engine, rx) = start(CLIPBOARD_IMAGE_TOO_LARGE);
+    let control = engine.control();
+    // A 50 MiB image: the platform answers its size, not its bytes.
+    let size = 50 << 20;
+    let wanted = format!(
+        "true Error ERR_NSH_QUOTA_EXCEEDED Clipboard.readImage: the clipboard's image is {size} bytes (50 MB), over the 48 MB an app reads"
+    );
+    let batches = until(&rx, |batch| {
+        for item in &batch.items {
+            if let MountItem::Command {
+                id: ROOT_ID,
+                command: Command::ReadClipboardImage { id, has_only },
+            } = item
+            {
+                let mut payload = vec![
+                    ("id", PayloadValue::Number(*id as f64)),
+                    ("has", PayloadValue::Bool(true)),
+                ];
+                if !has_only {
+                    payload.push(("tooLarge", PayloadValue::Number(size as f64)));
+                }
+                control.dispatch_event(ROOT_ID, EventKind::Clipboard, EventPayload::Map(payload));
+            }
+        }
+        shows(batch, &wanted)
+    });
+    assert!(batches.iter().any(|b| shows(b, &wanted)), "{wanted}");
+}
+
 const PICKER: &str = r#"import { mount, signal, Text } from "nsh";
 import { Picker } from "nsh";
 

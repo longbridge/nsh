@@ -1288,8 +1288,8 @@ const Clipboard: {
 };
 
 interface ClipboardImage {
-  url: string; // data:image/png;base64,…
-  size: PixelSize;
+  url: string; // a URL that Image shows and fetch reads
+  size: PixelSize; // in pixels
 }
 ```
 
@@ -1304,6 +1304,10 @@ interface ClipboardImage {
 | `await Clipboard.readFiles()` | `clipboard_files().await -> Vec<String>` |
 
 The Rust reads return answers to await in a task (`spawn`, or an `async` module function); `ClipboardImage` is `nsh_core::element::ClipboardImage`, with `url` and `size` (a `Size<DevicePixels>`).
+
+Images go through the clipboard on iOS, the desktops and the web. On Android the clipboard carries text: `writeImage` and
+`readImage` reject with an `Error` whose `code` is `"ERR_FEATURE_UNAVAILABLE_ON_PLATFORM"`, and `hasImage` resolves
+`false`. In Rust, `set_clipboard_image` leaves the clipboard as it is there and `clipboard_image` answers `None`.
 
 The user can also copy from a [selectable text](../elements/text.md) themselves; the clipboard API is for copying from code, such as a Copy button.
 
@@ -1393,11 +1397,12 @@ readImage(): Promise<ClipboardImage | null>;
 ```
 
 Resolves with the clipboard's image, or `null` when it holds none: a pasted screenshot, or an image copied in a browser
-or an image editor. Rust: `clipboard_image()`, `None` when it holds none. `url` is a `data:` URL of the image (PNG, or
-the clipboard's own JPEG, GIF, WebP or BMP), which an [`Image`](../elements/image.md) shows as its `src`; in TSX,
-`fetch(url)` gives its bytes, for an upload, and in Rust the base64 after the comma decodes to them. `size` (`width` and
-`height`) is its size in pixels. As with `readText`, read it when the user asks to paste. Images of up to 48 MB (encoded) are
-read, so the `data:` URL fits in the app's memory; for a larger one `readImage` resolves `null` and `hasImage` `true`.
+or an image editor. Rust: `clipboard_image()`, `None` when it holds none. `url` is a URL of the image (PNG, or the
+clipboard's own JPEG, GIF, WebP or BMP) that an [`Image`](../elements/image.md) shows as its `src` and `fetch` reads:
+`fetch(url)` gives its bytes, for an upload. `size` (`width` and `height`) is its size in pixels, as decoded. As with
+`readText`, read it when the user asks to paste. Images of up to 48 MB (encoded) are read, so the image fits in the
+app's memory; a larger one rejects with an `Error` whose `code` is `"ERR_NSH_QUOTA_EXCEEDED"` (its message gives the
+image's size and the limit), while `hasImage` resolves `true`. Rust: `clipboard_image()` answers `None` for it.
 
 ```rust tabs
 use base64::Engine as _;
@@ -1490,7 +1495,7 @@ hasImage(): Promise<boolean>;
 ```
 
 Resolves with whether the clipboard holds an image, without reading it: no paste notice on iOS. Rust:
-`clipboard_has_image()`.
+`clipboard_has_image()`. On Android it resolves `false`.
 
 ### Clipboard.writeImage
 
@@ -1498,8 +1503,9 @@ Resolves with whether the clipboard holds an image, without reading it: no paste
 writeImage(src: string): Promise<void>;
 ```
 
-Puts the image of `src`, a base64 `data:` URL such as `readImage` gives, on the clipboard, replacing what it holds. Rust:
-`set_clipboard_image(src)`. On Windows it takes a PNG, the format browsers, Office and the Snipping Tool read.
+Puts the image of `src`, a base64 `data:` URL or the `url` `readImage` gave, on the clipboard, replacing what it holds.
+Rust: `set_clipboard_image(src)`. On Windows it takes a PNG, the format browsers, Office and the Snipping Tool read. On
+Android it rejects with `"ERR_FEATURE_UNAVAILABLE_ON_PLATFORM"`.
 
 ```rust tabs
 set_clipboard_image(image.url.clone());

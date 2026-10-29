@@ -237,8 +237,8 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   subroles, a tree is a list of static-text items (as options: AppKit's outline rows need its rows and columns) with
   their disclosure level, `current` and a heading's level are not exposed (AppKit has no attribute for the first, and a
   heading's value is its text, which VoiceOver reads); iOS a pressed toggle carries the selected trait (UIKit's toggle
-  trait is iOS 17's), mixed and `current` are spoken in the value, `group` / `region` / `navigation` / `tree` are
-  semantic-group containers named by their label (never one element hiding their content), no level; Android a toggle
+  trait is iOS 17's), mixed and `current` are spoken in the value, `group` / `region` / `navigation` / `tree` /
+  `toolbar` are semantic-group containers named by their label (never one element hiding their content), no level; Android a toggle
   is a checkable `ToggleButton`, `current` and mixed go in the state description, roles without a widget class in the
   role description, no level; Windows a toggle has the Toggle pattern (and "toggle button"), landmarks
   (`UIA_LandmarkTypePropertyId`), `Tree` / `TreeItem` control types, a heading's `HeadingLevel1`…`9`, a tree item's

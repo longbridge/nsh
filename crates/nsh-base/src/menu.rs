@@ -20,8 +20,9 @@ use nsh_core::{
     prelude::*,
 };
 
-use crate::popup::{
-    OpenChangeReason, OpenState, PopupPresence, SheetMotion, StateLooks, lifecycle,
+use crate::{
+    popup::{OpenChangeReason, OpenState, PopupPresence, SheetMotion, StateLooks, lifecycle},
+    roving::{bar, bar_trigger, leave_bar},
 };
 
 /// How long a finger stays on a context menu's trigger before it opens
@@ -179,6 +180,8 @@ fn surface(
             }
         },
         move || {
+            // The trigger may be a toolbar's item; the items are not.
+            leave_bar();
             // Each opening starts at the top.
             path.set(Vec::new());
             open_sub.set(None);
@@ -347,16 +350,19 @@ pub fn Menu(props: MenuProps, cx: Scope<MenuEvent>) -> impl IntoElement {
         backdrop_style: props.backdrop_style,
     };
     let toggle = change.clone();
+    // In a toolbar, the trigger is one of its items.
+    let around = bar();
     view()
         .child(props.trigger.place(move |trigger| {
             let toggle = toggle.clone();
-            trigger
+            let trigger = trigger
                 .element_ref(&anchor)
                 .accessibility_state(move || AccessibilityState {
                     expanded: Some(open.get()),
                     ..AccessibilityState::default()
                 })
-                .on_press(move || toggle(!open.get_untracked(), OpenChangeReason::TriggerPress))
+                .on_press(move || toggle(!open.get_untracked(), OpenChangeReason::TriggerPress));
+            bar_trigger(around.clone(), trigger, anchor)
         }))
         .child(surface(
             open,

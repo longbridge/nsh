@@ -314,7 +314,7 @@ expect Fruit Fig
 expect Fruit Kiwi
 expect Not checked
 tap id:check
-expect same true functions true context true gradient true path true
+expect functions true context true gradient true path true
 covers [nsh] Image
 covers [nsh] Video
 covers [nsh] WebView

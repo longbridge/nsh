@@ -46,7 +46,6 @@ const Window: {
     origin?: Partial<Point>;
     size?: Partial<Size>;
     animated?: boolean;
-    anchorTop?: boolean;
   }): void;
   setLevel(level: "normal" | "floating" | "desktopIcon"): void;
   orderFront(): void;
@@ -64,7 +63,7 @@ The Rust column names the functions of `nsh_core::element::desktop`.
 | `minimize()` | `minimize()` | Minimizes the window. |
 | `toggleMaximize()` | `toggle_maximize()` | Maximizes the window, or restores it when it is maximized. |
 | `toggleFullScreen()` | `toggle_full_screen()` | Enters or leaves full screen. |
-| `setFrame(frame)` | `set_frame(WindowFrame { .. })` | Moves and sizes the window in points; omitted fields keep their values. On macOS and Windows, `size` (`width`, `height`) includes window decorations; on Linux it sets GTK's default window size. `origin` (`x`, `y`) is the bottom left corner in macOS screen coordinates and the top left on Windows. `animated: true` enables macOS's resize animation (default: false). `anchorTop: true` keeps the top edge where it is when `height` changes without a `y`: the window grows and shrinks at its bottom edge. |
+| `setFrame(frame)` | `set_frame(WindowFrame { .. })` | Moves and sizes the window in points; omitted fields keep their values. On macOS and Windows, `size` (`width`, `height`) includes window decorations; on Linux it sets GTK's default window size. `origin` (`x`, `y`) is the window's top left corner, measured from the top left of the primary screen (on macOS the one with the menu bar) with `y` growing down, the same on every platform; a `height` without a `y` keeps the top edge where it is, so the window grows and shrinks at its bottom edge. `animated: true` enables macOS's resize animation (default: false). |
 | `setLevel(level)` | `set_level(level)` | On macOS and Windows, `"floating"` keeps the window above normal windows and `"normal"` restores the normal level. `"desktopIcon"` selects macOS's desktop icon level (the window also sits on every space, out of Mission Control and Cmd+`); on Windows it moves the window to the bottom of the current z-order, where later activation can raise it. |
 | `orderFront()` | `order_front()` | Brings the window to the front of its level and focuses it (the app activates; macOS deminiaturizes, Windows restores minimized windows and sets foreground, GTK presents). The window keeps its level. On macOS, desktop-level surfaces stay behind other windows. GPUI activates its window; the window manager controls foreground requests on Linux. |
 | `close()` | `close_window()` | Closes the window; the app ends with it. |
