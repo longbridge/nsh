@@ -1249,7 +1249,6 @@ impl Cx {
                     .underline()
                     .text_decoration_color(move || theme().primary.opacity(0.4))
                     .text_decoration_thickness(px(1.0))
-                    .underline_offset(px(3.0))
                     .role(AccessibilityRole::Link)
                     .when_some(title.clone(), |t, title| t.hint(title))
                     .on_press(self.link_press(url));
