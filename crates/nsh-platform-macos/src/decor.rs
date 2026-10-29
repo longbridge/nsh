@@ -14,10 +14,10 @@
 //! A shader view's frames are the contents of a sublayer
 //! ([`crate::shader`]) shaped here as an image view's image layer is.
 //!
-//! Text and canvas views draw into their layer's contents (`drawRect:`),
-//! which Core Animation shows below every sublayer: their background is the
-//! layer's own, never a fill layer, and nothing inside the box is drawn over
-//! them but borders.
+//! Text and canvas views draw into a content sublayer
+//! ([`NshView::redraw`]: `drawLayer:inContext:`) at `BEHIND / 2`, above the
+//! decoration behind them and below their children and the borders in
+//! front. Their background is the layer's own, never a fill layer.
 //!
 //! A `drop-shadow()` filter is the layer's own shadow: it follows the
 //! content.
