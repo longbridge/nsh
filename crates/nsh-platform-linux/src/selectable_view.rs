@@ -47,7 +47,7 @@ use gtk4::{self as gtk, gdk, gio, glib, graphene, prelude::*};
 use nsh_core::{
     AttributedText, NodeId, TextLayout,
     geometry::{Bounds, Point, Points},
-    selection::{SelectionModel, SelectionTexts},
+    selection::{SelectionModel, SelectionTexts, sibling_order},
 };
 use rustc_hash::FxHashMap;
 
@@ -174,8 +174,24 @@ fn collect(area: &NshView) -> Texts {
                 });
             }
         }
-        for child in view.child_views() {
-            walk(area, &child, out);
+        // In reading order: a virtual list's recycled cells are mounted
+        // in no particular order.
+        let children = view.child_views();
+        let frames: Vec<_> = children
+            .iter()
+            .map(|child| {
+                child
+                    .compute_bounds(view)
+                    .map_or_else(Bounds::default, |r| {
+                        Bounds::new(
+                            Point::new(Points(r.x()), Points(r.y())),
+                            nsh_core::geometry::Size::new(Points(r.width()), Points(r.height())),
+                        )
+                    })
+            })
+            .collect();
+        for i in sibling_order(&frames) {
+            walk(area, &children[i], out);
         }
     }
     let mut items = Vec::new();
