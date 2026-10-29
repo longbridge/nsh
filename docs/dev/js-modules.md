@@ -150,7 +150,9 @@ or bytes in flight, children, sockets, WebSockets, pending writes, listeners) `c
 `error` and `close` (1006) a turn later (`standard/websocket.rs` `refused`), as a browser's refused connection does.
 The work runs as core tasks on the engine's tokio runtime (`fs/promises` on its blocking threads). A call's
 `System` carries the VM's `Access`, data directory, `TrustedPaths`, `Quotas` and per-VM state (`Locals`:
-`process`'s children, killed at once and joined together when the VM goes). `process.spawn` returns its
+`process`'s children, killed at once and joined together when the VM goes), and the host's
+`refuse_connections` (`EngineConfig::refuse_connections`: a test's network), which `net` and both WebSocket APIs
+consult after the capability check (`System::check_connection`), failing with the host's error. `process.spawn` returns its
 `ChildProcess` in the call; a core task posts the child's output to the `Callback`s `on(..)` keeps; `nsh-js`
 adds what needs the VM: the global `process` (the module's default object, one per VM) and `nextTick`, a JS job.
 `websocket`'s URL, options, grant (`Access::allows_websocket`) and limits are checked in the call, the handshake

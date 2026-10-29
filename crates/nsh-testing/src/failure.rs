@@ -58,6 +58,25 @@ pub(crate) fn rendered_nothing(timeout: Duration) -> String {
     format!("the app rendered nothing in {} s", timeout.as_secs())
 }
 
+/// What a test app's sockets and WebSockets fail with (`net.connect`,
+/// `WebSocket.connect`; the global `WebSocket` fires `error` and `close`)
+/// while its test keeps it off the network: `open`'s `network` other than
+/// `"live"`, under which a request no route answers fails too.
+#[cfg(any(feature = "js", feature = "agent"))]
+pub(crate) const NETWORK: &str = "ERR_NSH_TEST_NETWORK";
+
+/// Refuses a test app's connections with [`NETWORK`]
+/// (`EngineConfig::refuse_connections`), naming what it connected to.
+#[cfg(any(feature = "js", feature = "agent"))]
+pub(crate) fn refuse_connections() -> nsh_core::element::RefuseConnections {
+    std::sync::Arc::new(|target: &str| {
+        nsh_core::element::JsError::Error(format!(
+            "{target}: a test's app reaches the network only with `open(entry, {{ network: \"live\" }})`"
+        ))
+        .with_code(NETWORK)
+    })
+}
+
 /// `back()` with nothing to go back from.
 #[cfg(any(feature = "js", not(target_arch = "wasm32")))]
 pub(crate) const NOTHING_TO_GO_BACK_FROM: &str = "nothing to go back from";

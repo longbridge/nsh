@@ -51,7 +51,18 @@ pub struct System {
     pub filesystem: Option<Arc<dyn crate::filesystem::FileSystem>>,
     /// The operating system the app runs on, as the host says.
     pub os: crate::platform::Os,
+    /// Refuses the app's connections (`net` sockets and WebSockets, both
+    /// APIs) before they reach the network: a test's, which reaches it
+    /// only when the test asks (`nsh test`'s `network: "live"`). `None`:
+    /// they connect. `fetch` goes through the host's network instead.
+    pub refuse_connections: Option<RefuseConnections>,
 }
+
+/// What a host refuses the app's connections with
+/// ([`System::refuse_connections`]): given what the app connects to (a
+/// WebSocket's URL, a socket's `host:port`), the error its call fails
+/// with.
+pub type RefuseConnections = Arc<dyn Fn(&str) -> JsError + Send + Sync>;
 
 impl System {
     /// The VM's capabilities and directories.
@@ -71,7 +82,26 @@ impl System {
             websocket: None,
             filesystem: None,
             os: crate::platform::Os::default(),
+            refuse_connections: None,
         }
+    }
+
+    /// Whether the app may connect to `target` (a WebSocket's URL, a
+    /// socket's `host:port`) as far as the host is concerned: the error
+    /// [`System::refuse_connections`] gives, when the host set one. The
+    /// app's capabilities are checked apart.
+    pub fn check_connection(&self, target: &str) -> Result<(), JsError> {
+        match &self.refuse_connections {
+            Some(refuse) => Err(refuse(target)),
+            None => Ok(()),
+        }
+    }
+
+    /// Refuses the app's connections with what `refuse` gives
+    /// ([`System::refuse_connections`]).
+    pub fn with_refuse_connections(mut self, refuse: Option<RefuseConnections>) -> Self {
+        self.refuse_connections = refuse;
+        self
     }
 
     /// Uses the host WebSocket transport instead of the native stack.

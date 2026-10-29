@@ -115,6 +115,9 @@ struct Setup {
     host: Option<nsh_engine::HostChannel>,
     /// The URLs the app opened: recorded, never opened.
     opened_urls: Arc<Mutex<Vec<String>>>,
+    /// Whether the app's sockets and WebSockets reach the network
+    /// (`network: "live"`); otherwise the engine refuses them.
+    live_network: bool,
 }
 
 #[derive(Default)]
@@ -204,17 +207,19 @@ impl Model {
             host_params: environment.host_params,
             host: None,
             opened_urls: Arc::default(),
+            live_network: environment.live_network == Some(true),
         });
     }
 
     /// Sets `config`, the engine of a test session's app, up as the test
     /// says ([`Model::set_up`]; nothing before): its storage is the test's,
     /// its requests go to the test (which answers them or lets them through
-    /// to the host's network), a traced app's engine logs each commit's
-    /// timings, the environment keeps what the test fixed, the app's
-    /// clipboard calls are served from the test's clipboard, and it runs on
-    /// the test's manual clock when there is one (which also moves with the
-    /// display's frames). The test plays the embedding app on the view's
+    /// to the host's network), its sockets and WebSockets are refused
+    /// unless the test lets it reach the network (`network: "live"`), a
+    /// traced app's engine logs each commit's timings, the environment
+    /// keeps what the test fixed, the app's clipboard calls are served from
+    /// the test's clipboard, and it runs on the test's manual clock when
+    /// there is one (which also moves with the display's frames). The test plays the embedding app on the view's
     /// channel (`config.host`): its launch parameters, and a URL handler
     /// that records the URLs the app opens instead of opening them. The
     /// host hands the engine back once it started
@@ -226,6 +231,9 @@ impl Model {
             forwarder: setup.forwarder.clone(),
             platform: config.network.take(),
         }));
+        if !setup.live_network {
+            config.refuse_connections = Some(crate::failure::refuse_connections());
+        }
         config.storage = Some(setup.storage.clone() as Arc<dyn nsh_core::storage::StorageBackend>);
         config.trace |= setup.trace.is_some();
         config.pinned = setup.pins;

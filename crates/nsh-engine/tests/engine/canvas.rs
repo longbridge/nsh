@@ -72,6 +72,7 @@ pub(crate) fn start(app: &str) -> (Engine, crossbeam_channel::Receiver<MountBatc
         trace: false,
         network: None,
         websocket: None,
+        refuse_connections: None,
         filesystem: None,
         assets: None,
         environment: Default::default(),

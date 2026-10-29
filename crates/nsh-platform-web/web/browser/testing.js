@@ -4,7 +4,9 @@
 // which the test cannot move, so the engine keeps them (`timers.rs`) and
 // runs them as `app.clock` moves it. In a test session `fetch` goes through
 // the engine's network (`fetch.rs`), where the test's routes answer it and
-// `app.requests()` records it. Installed before the entry is imported.
+// `app.requests()` records it, and a `WebSocket` the engine refuses (off
+// the network unless `network: "live"`) opens nothing. Installed before
+// the entry is imported.
 
 const REDIRECTS = new Set([301, 302, 303, 307, 308]);
 const NULL_BODY = new Set([101, 103, 204, 205, 304]);
@@ -169,15 +171,98 @@ function installFetch(target, call, active, wake) {
   });
 }
 
+const WEBSOCKET_SCHEMES = { "ws:": "ws:", "wss:": "wss:", "http:": "ws:", "https:": "wss:" };
+
+// The realm's `WebSocket`, which asks the engine first (`System::
+// refuse_connections`, a test's network): a socket it refuses opens
+// nothing and, as nsh-js' global and a browser's refused connection, fires
+// `error` (with the engine's `message`) and then `close` (1006, not clean)
+// after the constructor returns, so handlers set in the same turn hear
+// them. The others are the browser's own.
+function installWebSocket(target, call, active, wake) {
+  const NativeWebSocket = target.WebSocket;
+  if (typeof NativeWebSocket !== "function") return;
+  const { Event, CloseEvent, EventTarget, DOMException, URL, TypeError: RealmTypeError } = target;
+  const refused = (newTarget, url, message) => {
+    const socket = Reflect.construct(EventTarget, [], newTarget);
+    let readyState = NativeWebSocket.CONNECTING;
+    let binaryType = "blob";
+    const handlers = { open: null, message: null, error: null, close: null };
+    const own = (name, descriptor) =>
+      Object.defineProperty(socket, name, { configurable: true, enumerable: true, ...descriptor });
+    own("url", { value: url });
+    own("protocol", { value: "" });
+    own("extensions", { value: "" });
+    own("bufferedAmount", { value: 0 });
+    own("readyState", { get: () => readyState });
+    own("binaryType", {
+      get: () => binaryType,
+      set: value => { if (value === "blob" || value === "arraybuffer") binaryType = value; },
+    });
+    for (const kind of Object.keys(handlers)) {
+      own(`on${kind}`, {
+        get: () => handlers[kind],
+        set: value => { handlers[kind] = typeof value === "function" ? value : null; },
+      });
+      socket.addEventListener(kind, event => handlers[kind]?.call(socket, event));
+    }
+    own("send", {
+      value: function send() {
+        if (readyState === NativeWebSocket.CONNECTING) throw new DOMException("Still in CONNECTING state.", "InvalidStateError");
+      },
+    });
+    own("close", {
+      value: function close() {
+        if (readyState === NativeWebSocket.CONNECTING) readyState = NativeWebSocket.CLOSING;
+      },
+    });
+    Promise.resolve().then(() => {
+      if (!active()) return;
+      try {
+        readyState = NativeWebSocket.CLOSED;
+        const error = new Event("error");
+        Object.defineProperty(error, "message", { value: message, enumerable: true });
+        socket.dispatchEvent(error);
+        socket.dispatchEvent(new CloseEvent("close", { code: 1006, reason: "", wasClean: false }));
+      } finally { wake(); }
+    });
+    return socket;
+  };
+  function WebSocket(url, protocols) {
+    if (new.target === undefined) throw new RealmTypeError("Failed to construct 'WebSocket': Please use the 'new' operator");
+    const args = protocols === undefined ? [url] : [url, protocols];
+    let parsed = null;
+    try { parsed = new URL(String(url), target.location?.href); } catch { /* the browser's error */ }
+    const scheme = parsed && !parsed.hash && WEBSOCKET_SCHEMES[parsed.protocol];
+    if (scheme) {
+      parsed.protocol = scheme;
+      const message = call(1010, [parsed.href]);
+      if (typeof message === "string") return refused(new.target, parsed.href, message);
+    }
+    return Reflect.construct(NativeWebSocket, args, new.target);
+  }
+  Object.setPrototypeOf(WebSocket, NativeWebSocket);
+  Object.defineProperty(WebSocket, "prototype", { value: NativeWebSocket.prototype, writable: false });
+  for (const name of ["CONNECTING", "OPEN", "CLOSING", "CLOSED"]) {
+    Object.defineProperty(WebSocket, name, { value: NativeWebSocket[name], enumerable: true });
+  }
+  define(NativeWebSocket.prototype, "constructor", WebSocket);
+  define(target, "WebSocket", WebSocket);
+}
+
 /**
  * Puts the engine's clock and network in `target`'s place (the app realm's
  * global object) where the session needs them: the clock when the
- * engine's is manual, `fetch` when `network` (a test session). `call` is
- * the host's operation call; callbacks end with `wake` (a pump).
+ * engine's is manual, `fetch` and `WebSocket` when `network` (a test
+ * session). `call` is the host's operation call; callbacks end with `wake`
+ * (a pump).
  */
 export function installTesting(target, call, { active = () => true, wake = () => {}, network = false } = {}) {
   const clock = call(1000, []) === true;
   if (clock) installClock(target, call, active, wake);
-  if (network) installFetch(target, call, active, wake);
+  if (network) {
+    installFetch(target, call, active, wake);
+    installWebSocket(target, call, active, wake);
+  }
   return { clock, network };
 }

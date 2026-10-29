@@ -269,6 +269,15 @@ fn apps_run_under_the_capabilities_their_nsh_json_declares() {
 }
 
 #[test]
+fn sockets_and_websockets_reach_the_network_only_when_the_test_says() {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/testing/network");
+    let results = run_file(&test_run(None), &dir.join("App.test.tsx"), &mut |_| {}).unwrap();
+    let failed: Vec<_> = results.iter().filter(|r| r.failure.is_some()).collect();
+    assert!(failed.is_empty(), "{failed:#?}");
+    assert_eq!(results.len(), 3);
+}
+
+#[test]
 fn a_test_plays_the_embedding_app() {
     let run = TestRun {
         ui_sets: vec![nsh_base::registry()],

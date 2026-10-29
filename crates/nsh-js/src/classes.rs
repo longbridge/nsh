@@ -1108,6 +1108,7 @@ impl JsHost for CallHost<'_> {
         .with_locals(shared.system_locals.clone())
         .with_exit(shared.system_exit_handler.borrow().clone())
         .with_websocket(shared.system_websocket.borrow().clone())
+        .with_refuse_connections(shared.system_refuse_connections.borrow().clone())
         .with_filesystem(shared.system_filesystem.borrow().clone())
         // SAFETY: a short read of the live renderer state.
         .with_os(unsafe { (*crate::state::state(self.cx)).dom.os() })

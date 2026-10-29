@@ -73,6 +73,7 @@ impl WebSocket {
         if !sys.access.allows_websocket(parsed.as_str()) {
             return Err(denied(parsed.as_str()));
         }
+        sys.check_connection(parsed.as_str())?;
         let held = slot(&sys)?;
         let headers = options
             .map(|o| o.headers)
