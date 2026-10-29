@@ -3,6 +3,7 @@
 mod text;
 mod text_input;
 
+mod alignment;
 #[cfg(feature = "js")]
 mod animation;
 mod app;

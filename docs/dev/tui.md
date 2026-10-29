@@ -283,6 +283,13 @@ scroll offsets. Parent rounding is never added to a child's point position. The 
 exclusive. Equal whole-Cell gaps stay equal and nested padding accumulates before rounding; a moving view's Cell
 width or height can vary by one Cell. For example, a box at y = 216pt with height 40pt covers rows 14 and 15;
 its bottom at 256pt rounds to edge 16. A text row after 12pt of padding begins at 228pt, on row 14.
+Alignment follows from these rules, and the alignment tests check it: text starting at the same point x starts
+in the same Cell column on every row (a list's labels, a section's left edge, values under their headings), and
+right-aligned text whose right edge is at the same point x ends in the same column (prices, sizes, totals), since
+the text engine measures whole Cells. Siblings centered on one row share it. Brackets, the borders and fills the
+terminal look leaves out and the palette's grounds never move content between Cells. Views at different point
+x keep their own rounding: two cards at different phases can place an icon and its title one Cell closer in one
+than in the other, and a 34-point tile is 2 or 3 rows tall depending on where it starts.
 Consecutive siblings of equal height stacked in one column at an equal point pitch (a list's rows) keep one Cell
 pitch and one Cell height: the first keeps its rounded row, each next one starts the pitch's rounded rows below
 the one before, on a Cell edge, and its content moves with it. The gallery's 36-point sidebar rows 2 points apart
@@ -382,9 +389,9 @@ Decorations are plain, and each is a documented Decorative feature:
   one Cell row. List items without a box (sidebar and watchlist rows) and selected or checked views,
   which are reversed, have no brackets; other roles (link, tab, checkbox, radio, switch, menu item, ...) keep
   their own look, and a pressable with several rows of text or other content (a field, an image, a labeled canvas)
-  keeps the app's box. The label stays in the Cells the layout gave it; the brackets take the button's own Cells,
-  one Cell from the first and last glyph of its text, both or neither: a label flush with its box stays bare. The
-  button draws no border or fill.
+  keeps the app's box. The label stays in the Cells the layout gave it; the brackets take the button's own Cells
+  with the same gap on both sides, one Cell when the box has room, else none (`[Sell]`), both or neither: a label
+  flush with its box stays bare. The button draws no border or fill.
 - **Icons and decorative images** are not drawn: canvases with role `image` or without an accessibility label, and
   image placeholders narrower than 3 Cells or shorter than 2. A button whose content is only icons shows its
   accessibility label as `[ label ]` on its box's middle row, cut with `…` to the box (`[L…]`).

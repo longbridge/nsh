@@ -732,9 +732,9 @@ impl Painter<'_> {
 
 impl Painter<'_> {
     /// Draws a button's brackets in its own Cells: around its one row of text
-    /// (the text views from `texts` on in `geometry`), one Cell away when the
-    /// box has room for both, or around its accessibility label on the box's
-    /// middle row, cut to the box.
+    /// (the text views from `texts` on in `geometry`), one Cell away on both
+    /// sides when the box has room, else next to it, or around its
+    /// accessibility label on the box's middle row, cut to the box.
     fn brackets(&mut self, visible: Rect, button: ButtonLabel, texts: usize) {
         match button {
             ButtonLabel::Text => {
@@ -761,16 +761,26 @@ impl Painter<'_> {
                 let Some((y, left, right)) = label else {
                     return;
                 };
-                let gap = BRACKET_GAP as u16;
-                let open = left.saturating_sub(gap + 1).max(visible.x);
-                let close = (right + gap).min(visible.right() - 1);
-                let free = |x: u16| self.buffer[(x, y)].symbol() == " ";
-                // Both brackets or neither: a label flush with its box stays bare.
-                if open < left && close >= right && free(open) && free(close) {
-                    let style = self.buffer[(left, y)].style();
-                    self.buffer[(open, y)].set_symbol("[").set_style(style);
-                    self.buffer[(close, y)].set_symbol("]").set_style(style);
-                }
+                let free = |x: u16| {
+                    (visible.x..visible.right()).contains(&x) && self.buffer[(x, y)].symbol() == " "
+                };
+                // The same gap on both sides, the widest the box has room for,
+                // and both brackets or neither: a label flush with its box
+                // stays bare.
+                let Some(gap) = (0..=BRACKET_GAP as u16).rev().find(|&gap| {
+                    left > gap
+                        && (left - gap - 1..left).all(free)
+                        && (right..=right + gap).all(free)
+                }) else {
+                    return;
+                };
+                let style = self.buffer[(left, y)].style();
+                self.buffer[(left - gap - 1, y)]
+                    .set_symbol("[")
+                    .set_style(style);
+                self.buffer[(right + gap, y)]
+                    .set_symbol("]")
+                    .set_style(style);
             }
             ButtonLabel::Accessible(label) => {
                 let width = usize::from(visible.width);
