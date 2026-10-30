@@ -348,7 +348,7 @@ fn a_web_view_ref_sends_trusted_input_to_its_view() {
     assert_eq!(
         sent,
         [
-            (web, WebInput::Click { x: 12.5, y: 40.0 }),
+            (web, WebInput::Click { x: nsh_core::Points(12.5), y: nsh_core::Points(40.0) }),
             (web, WebInput::Text("NABIL".into())),
             (web, WebInput::Key(WebKey::Enter)),
         ]

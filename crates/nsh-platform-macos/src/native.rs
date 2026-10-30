@@ -1600,7 +1600,7 @@ fn web_input(web: &AnyObject, input: &WebInput) {
                 let scale = zoom * magnification;
                 let point: NSPoint = msg_send![
                     web,
-                    convertPoint: NSPoint::new(x * scale, y * scale),
+                    convertPoint: NSPoint::new(f64::from(x.0) * scale, f64::from(y.0) * scale),
                     toView: std::ptr::null::<AnyObject>()
                 ];
                 for (kind, pressure) in [

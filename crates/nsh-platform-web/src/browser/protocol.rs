@@ -270,8 +270,8 @@ fn web_input(arg: &Value<'_>) -> Option<nsh_core::WebInput> {
     };
     match text("type")?.as_str() {
         "click" => Some(WebInput::Click {
-            x: number("x")?,
-            y: number("y")?,
+            x: nsh_core::Points(number("x")? as f32),
+            y: nsh_core::Points(number("y")? as f32),
         }),
         "text" => text("text").map(WebInput::Text),
         "key" => WebKey::from_name(&text("key")?).map(WebInput::Key),

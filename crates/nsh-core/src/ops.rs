@@ -1555,13 +1555,14 @@ pub enum OverlayProp {
 /// make (`WebView`'s `sendInput`).
 #[derive(Debug, Clone, PartialEq)]
 pub enum WebInput {
-    /// A primary click at a point of the page's viewport, in CSS pixels
-    /// (what `getBoundingClientRect()` reports).
+    /// A primary click at a point of the page's viewport: CSS pixels, which
+    /// are points at the page's own zoom (what `getBoundingClientRect()`
+    /// reports).
     Click {
         /// From the viewport's left edge.
-        x: f64,
+        x: Points,
         /// From the viewport's top edge.
-        y: f64,
+        y: Points,
     },
     /// Text typed into what has the page's keyboard focus.
     Text(String),
