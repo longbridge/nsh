@@ -3,9 +3,10 @@
 ## Scope
 
 Desktop views accept local files and directories dragged from another app.
-AppKit, GTK and Win32 use the same events and payload; Rust applications need
-no JavaScript runtime. Ordinary pointer drags and title-bar dragging retain
-their existing behavior. The application decides how to consume dropped files.
+AppKit, GTK, Win32 and the GPUI backend use the same events and payload; Rust
+applications need no JavaScript runtime. Ordinary pointer drags and title-bar
+dragging retain their existing behavior. The application decides how to consume
+dropped files.
 
 ## Contract
 
