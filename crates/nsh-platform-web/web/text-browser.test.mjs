@@ -66,6 +66,49 @@ test('tabular digits are measured as wide as the DOM draws them', { skip: !chrom
 });
 
 
+// On a 2x screen Chrome draws color emoji narrower than canvas measures
+// them (14 against 18 px at 14px): the engine adds each emoji cluster's
+// difference, measured in the DOM, to the canvas width (`emoji_excess`).
+test('emoji are measured as wide as the DOM draws them on a 2x screen', { skip: !chromium }, async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'nsh-text-emoji-'));
+  try {
+    const source = await readFile(new URL('./nsh.js', import.meta.url), 'utf8');
+    const module = 'data:text/javascript;base64,' + Buffer.from(source + '\nexport { measureNumericText };').toString('base64');
+    await writeFile(join(dir, 'index.html'), `<!doctype html><meta charset="utf-8"><body><script type="module">
+      import { measureNumericText } from '${module}';
+      try {
+        const font = '400 14px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+        const canvas = new OffscreenCanvas(1, 1).getContext('2d');
+        canvas.font = font;
+        const drawn = (text) => {
+          const run = document.createElement('span');
+          run.style.cssText = 'position:absolute;white-space:pre;font:' + font;
+          run.textContent = text;
+          document.body.append(run);
+          const width = run.getBoundingClientRect().width;
+          run.remove();
+          return width;
+        };
+        const clusters = (text) => [...new Intl.Segmenter().segment(text)].map((s) => s.segment);
+        const emoji = /[\\u{1F000}-\\u{1FAFF}\\u{FE0F}\\u{20E3}\\u{231A}\\u{2B50}]/u;
+        for (const text of ['🤩'.repeat(22), 'abc🤩def', '👍🏻 1️⃣ ⌚ 🇨🇳 ⭐ ok']) {
+          const measured = canvas.measureText(text).width + clusters(text)
+            .filter((c) => emoji.test(c))
+            .reduce((w, c) => w + measureNumericText(font, 'normal', c) - canvas.measureText(c).width, 0);
+          if (Math.abs(measured - drawn(text)) > 0.05) throw Error(text + ': measured ' + measured + ', drawn ' + drawn(text));
+        }
+        document.body.dataset.result = 'passed';
+      } catch (e) { document.body.dataset.result = 'failed: ' + e.message; }
+    </script>`);
+    const html = execFileSync(chromium, ['--headless', '--no-sandbox', '--disable-dev-shm-usage',
+      '--disable-gpu', '--no-first-run', '--no-default-browser-check', '--virtual-time-budget=1000',
+      '--force-device-scale-factor=2',
+      '--user-data-dir=' + join(dir, 'profile'), '--dump-dom', pathToFileURL(join(dir, 'index.html')).href],
+      { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 20000, maxBuffer: 1024 * 1024 });
+    assert.equal(html.match(/data-result="([^"]*)"/)?.[1], 'passed');
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});
+
 test('cluster boxes follow bidi reordering and preserve measurement styles', { skip: !chromium }, async () => {
   const dir = await mkdtemp(join(tmpdir(), 'nsh-text-bidi-'));
   try {

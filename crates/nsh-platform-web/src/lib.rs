@@ -424,11 +424,17 @@ pub unsafe extern "C" fn nsh_environment(ptr: *const u8, len: usize) -> f64 {
         e.apple_keyboard = env.apple_keyboard;
         e.reduce_motion = env.reduce_motion;
         e.font_scale = env.font_scale;
+        let rescaled = e.pixel_ratio != env.pixel_ratio;
         e.pixel_ratio = env.pixel_ratio;
         e.safe_area = env.safe_area;
         e.keyboard_height = env.keyboard_height;
         e.screen_color = env.screen_color;
         app.control.set_environment(app.environment);
+        // The DOM draws emoji as wide as the pixel ratio makes them.
+        if rescaled {
+            app.text.clear_caches();
+            app.control.fonts_changed();
+        }
     })
 }
 

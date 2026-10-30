@@ -145,3 +145,21 @@ fn figures_are_measured_character_by_character() {
         assert!(!measured_by_char(text), "{text}");
     }
 }
+
+#[test]
+fn color_emoji_are_told_from_text_symbols() {
+    use crate::css::is_emoji;
+
+    // Drawn by the color emoji font: plane 1's emoji, `Emoji_Presentation`
+    // in the BMP, the emoji variation selector and the keycap.
+    for c in [
+        '🤩', '👍', '🏻', '🇨', '🀄', '⌚', '⭐', '✅', '\u{fe0f}', '\u{20e3}',
+    ] {
+        assert!(is_emoji(c), "{c}");
+    }
+    // Text presentation by default: drawn by a text font, measured on
+    // canvas.
+    for c in ['a', '中', '❤', '☺', '★', '✓', '©', '1', '\u{200d}'] {
+        assert!(!is_emoji(c), "{c}");
+    }
+}

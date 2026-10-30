@@ -23,7 +23,10 @@ use nsh_core::{
 use rustc_hash::FxHashMap;
 
 pub(crate) use self::css::{css_font, font_variant_numeric};
-use self::{css::measured_by_char, hit::Stop};
+use self::{
+    css::{is_emoji, measured_by_char},
+    hit::Stop,
+};
 use crate::ffi;
 
 mod css;
@@ -40,6 +43,9 @@ type WidthKey = (Arc<str>, Option<Arc<str>>, String);
 pub(crate) struct WebTextEngine {
     /// Width of `(font, font-variant-numeric, text)`.
     widths: RefCell<FxHashMap<WidthKey, f32>>,
+    /// How much wider the DOM draws an emoji cluster in a font than canvas
+    /// measures it.
+    emoji: RefCell<FxHashMap<(Arc<str>, String), f32>>,
     /// Ascent and descent of a font.
     metrics: RefCell<FxHashMap<Arc<str>, (f32, f32)>>,
     /// The x height of a font (attachments in the middle of a line).
@@ -51,6 +57,7 @@ impl WebTextEngine {
     /// measured with a fallback font is stale.
     pub(crate) fn clear_caches(&self) {
         self.widths.borrow_mut().clear();
+        self.emoji.borrow_mut().clear();
         self.metrics.borrow_mut().clear();
         self.x_heights.borrow_mut().clear();
     }
@@ -91,7 +98,7 @@ impl WebTextEngine {
             // Canvas cannot measure numeric variants: tabular digits are
             // wider than the proportional ones it measures.
             Some(numeric) => ffi::measure_numeric_text(font, numeric, text),
-            None => ffi::measure_text(font, text),
+            None => ffi::measure_text(font, text) + self.emoji_excess(font, text),
         };
         let mut widths = self.widths.borrow_mut();
         // Bounded: a long-running app measures many distinct strings.
@@ -100,6 +107,39 @@ impl WebTextEngine {
         }
         widths.insert(key, w);
         w
+    }
+
+    /// How much wider the DOM draws `text`'s emoji ([`is_emoji`]) than
+    /// canvas measured them. Each cluster is measured in the DOM once, so a
+    /// line being typed is still measured on canvas.
+    fn emoji_excess(&self, font: &Arc<str>, text: &str) -> f32 {
+        if !text.chars().any(is_emoji) {
+            return 0.0;
+        }
+        let mut excess = 0.0;
+        let mut at = 0;
+        while at < text.len() {
+            let end = next_cluster(text, at);
+            let cluster = &text[at..end];
+            at = end;
+            if !cluster.chars().any(is_emoji) {
+                continue;
+            }
+            let key = (font.clone(), cluster.to_owned());
+            if let Some(&e) = self.emoji.borrow().get(&key) {
+                excess += e;
+                continue;
+            }
+            let e = ffi::measure_numeric_text(font, "normal", cluster)
+                - ffi::measure_text(font, cluster);
+            let mut emoji = self.emoji.borrow_mut();
+            if emoji.len() > 20_000 {
+                emoji.clear();
+            }
+            emoji.insert(key, e);
+            excess += e;
+        }
+        excess
     }
 
     fn run_width(&self, run: &RunStyle, text: &str) -> f32 {
