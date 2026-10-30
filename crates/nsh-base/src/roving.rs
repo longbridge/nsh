@@ -401,6 +401,16 @@ pub(crate) fn leave_bar() {
     }
 }
 
+/// The bar around a popup being made, which its trigger joins
+/// ([`bar_trigger`]), left for what the popup makes from now on: a
+/// component the app puts in the trigger (a `Button`) is that one item,
+/// not another of its own.
+pub(crate) fn popup_bar() -> Option<Bar> {
+    let around = bar();
+    leave_bar();
+    around
+}
+
 /// A part of a bar that holds items (a [`ToggleGroup`] or a
 /// [`ToolbarGroup`] inside a toolbar): the same group of the focus, its
 /// items disabled with the bar's too.

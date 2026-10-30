@@ -810,13 +810,14 @@ what changed.
   holding several nodes, is a box of its own (a column, as any view). A render's holder (`componentRender`) follows
   the same rule in its placeholder. Everything else the element gives (accessibility, `disabled`,
   `focusable` and other host props, listeners, touch responder, element ref: `core/slots.rs` `split`) goes to the
-  slot's target: the app's element when the holder holds exactly one (not raw text, a component's host or a list),
-  else the holder. So the app's `active:` / `focus:` / `disabled:` classes and state styles on its own element follow
+  slot's target: the app's element when the holder holds exactly one (not raw text or a list), else the holder. So the app's `active:` / `focus:` / `disabled:` classes and state styles on its own element follow
   the presses, focus and `disabled` the component gives it, and a ref measures the app's element. The target follows
   the holder's content (JS inserting or removing in it, `Core::retarget_slot`). On the app's element the two sides
   combine (`slots::merged`): the component's values win, the app's fill in what it leaves unset (field by field in
   `accessibilityState`); `disabled`, the state flags and projected states hold when either sets them; both sides'
-  listeners run, the component's first. JS's ops on it go through the core (`Core::js_slot_op`), which keeps JS's
+  listeners run, the component's first. The app's element may be a component's host (a `Button` as a popover's
+  trigger): its own side is its view's root, the slot's component hears its events first, then its own (left on the
+  holder, the slot's presses would never come: the root is the innermost press target). JS's ops on it go through the core (`Core::js_slot_op`), which keeps JS's
   own values and sends the combination, and puts them back when the component's part leaves the element (another
   element joins the holder, the element leaves it, the slot or the component goes). JS's values from before are read
   from the node (accessibility, `disabled`, `pointerEvents`, `focusable`, projected states); another host prop the
@@ -829,7 +830,7 @@ what changed.
   (`place(|h| h.px_4())`) or gives it props or listeners makes a node of the nested view's own with them around them,
   which lays one node out through while the place styles none of its layout, as JS's holders. That node is a holder
   as JS's are (`Core::reconcile_wrapper`, `Components::fill_holders`): its styles stay on it, the rest goes to the
-  fill's one element (the same rule: not raw text, a component's host, a list or another holder), combined with what
+  fill's one element (the same rule: not raw text, a list or another holder), combined with what
   the placing view gives that element as JS's side is (`Core::apply_target_attrs`, `Core::target_events`), and follows
   the fill's nodes as they are placed and released. So a component's `on_focus` / `on_blur` on its trigger hear the
   focus of a Rust app's element, which only the focused element gets, as they do a TSX app's. An overlay placed against
@@ -914,8 +915,8 @@ what changed.
   `Change(true)`, nothing for a toolbar's items: the toolbar pattern only moves the focus); an item outside a group
   stays a stop of its own. A `Menu`'s or `Popover`'s trigger in a bar is one of its items too (`bar_trigger`): the
   popup reads the bar where it is made and registers its trigger slot's element under the ref it anchors to, so the
-  view the app puts there takes the stop's `focusable`, the focus listeners and the bar's `disabled` (a `Button` inside
-  a trigger would be a second pressable: triggers are plain views, as everywhere). A `ToggleGroup` or `ToolbarGroup` inside a toolbar provides the toolbar's `Roving` again
+  view the app puts there takes the stop's `focusable`, the focus listeners and the bar's `disabled`; the popup leaves
+  the bar for what it makes (`popup_bar`), so a `Button` the app puts there is that one item, not one of its own. A `ToggleGroup` or `ToolbarGroup` inside a toolbar provides the toolbar's `Roving` again
   (with its own `disabled` added), so its items are the toolbar's and the toolbar stays one stop. A popup's content
   (`Popover`, `Sheet`, `Menu`, the dropdown of `popup.rs`) leaves the bar (`leave_bar`): its controls are stops of
   their own though its trigger is a toolbar's item.

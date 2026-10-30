@@ -172,6 +172,22 @@ impl<M: TextEngine> Core<M> {
     /// The component whose handlers node `id` has: the one whose view has
     /// it, or the one it is a slot of (a trigger the app passed).
     fn touch_host(&self, id: NodeId) -> Option<NodeId> {
+        // A component's host in a slot: the slot's component when its own
+        // view does not hear them there (a context menu's trigger).
+        if self.is_host(id)
+            && let Some(slot) = self.adopted_host(id)
+        {
+            let own = self.base_of(id);
+            let hears = |host| {
+                self.next_handler(host, id, EventKind::Touch, 0).is_some()
+                    || self.responder_el(host, id).is_some()
+            };
+            return Some(if hears(own) || !hears(slot) {
+                own
+            } else {
+                slot
+            });
+        }
         self.host_of(id)
             .or_else(|| self.components.slot_hosts.get(&id).copied())
             .or_else(|| self.adopted_host(id))

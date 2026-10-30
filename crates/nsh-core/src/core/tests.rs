@@ -7741,6 +7741,95 @@ mod components {
         assert!(!c.component_event(6, EventKind::Press, &EventPayload::None));
     }
 
+    /// A component's host as the app's element in a slot (a `Button` as a
+    /// popover's trigger) takes the slot's props and listeners: its root is
+    /// the innermost press target, so a press the holder took would never
+    /// come. A press runs the slot's listener, then the host's own; when
+    /// the host goes, the holder takes the slot's part.
+    #[test]
+    fn a_components_host_in_a_slot_takes_its_props() {
+        use crate::AccessibilityRole;
+        let mut c = core();
+        let mut registry = Registry::new();
+        registry.register::<Disclosure>();
+        registry.register::<Tally>();
+        c.set_components(registry);
+        let component = |id, name: &str| Op::SetProp {
+            id,
+            prop: Prop::Component(name.into()),
+        };
+        apply(
+            &mut c,
+            vec![
+                Op::Create {
+                    id: 2,
+                    tag: Tag::View,
+                },
+                component(2, std::any::type_name::<Disclosure>()),
+                Op::Insert {
+                    parent: ROOT_ID,
+                    child: 2,
+                    before: None,
+                },
+                Op::Create {
+                    id: 4,
+                    tag: Tag::View,
+                },
+                Op::SetProp {
+                    id: 4,
+                    prop: Prop::ComponentSlot("trigger".into()),
+                },
+                Op::Create {
+                    id: 6,
+                    tag: Tag::View,
+                },
+                component(6, std::any::type_name::<Tally>()),
+                Op::Insert {
+                    parent: 4,
+                    child: 6,
+                    before: None,
+                },
+                Op::Insert {
+                    parent: 2,
+                    child: 4,
+                    before: None,
+                },
+            ],
+        );
+        c.commit().unwrap();
+        let trigger = props_of(&c, 6);
+        assert_eq!(trigger.accessibility.role, AccessibilityRole::Button);
+        assert_eq!(trigger.accessibility.state.expanded, Some(false));
+        assert_eq!(trigger.focusable, Some(true));
+        assert!(events_of(&c, 6).contains(EventKind::Press));
+        assert_eq!(props_of(&c, 4).accessibility.role, AccessibilityRole::None);
+        assert!(!events_of(&c, 4).contains(EventKind::Press));
+        js_events(&mut c);
+
+        c.component_event(6, EventKind::Press, &EventPayload::None);
+        c.commit();
+        assert_eq!(props_of(&c, 6).accessibility.state.expanded, Some(true));
+        assert!(
+            js_events(&mut c).iter().any(|(id, _, payload)| *id == 6
+                && matches!(payload, EventPayload::Native { name, .. } if &**name == "tap")),
+            "the host's own listener runs too"
+        );
+        c.component_event(6, EventKind::Press, &EventPayload::None);
+        c.commit();
+        assert_eq!(props_of(&c, 6).accessibility.state.expanded, Some(false));
+
+        apply(&mut c, vec![Op::Release { id: 6 }]);
+        c.commit();
+        assert_eq!(
+            props_of(&c, 4).accessibility.role,
+            AccessibilityRole::Button
+        );
+        assert!(events_of(&c, 4).contains(EventKind::Press));
+        c.component_event(4, EventKind::Press, &EventPayload::None);
+        c.commit();
+        assert_eq!(props_of(&c, 4).accessibility.state.expanded, Some(true));
+    }
+
     #[test]
     fn slots_are_the_glues_nodes_placed_by_the_render() {
         let mut c = core();

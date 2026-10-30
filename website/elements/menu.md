@@ -293,5 +293,5 @@ it in `onOpenChange({ open, reason })`: `"triggerPress"`, `"select"`, `"pressOut
 
 The popup or sheet is a menu and its items menu items for screen readers; the trigger tells whether the menu is
 expanded. A checkable item is a checkbox or radio menu item, read as checked or not checked; its indicator is part of
-the item. In TSX the trigger is the element you pass: it takes the presses and the expanded state itself, so its own
-`active:` classes and `activeStyle` show while it is pressed, and its own `onPress` runs too. Only the items of the level shown are on screen, so screen readers read what is there.
+the item. In TSX the trigger is the element you pass, a `Button` or a view of your own: it takes the presses and the
+expanded state itself, so its own `active:` classes and `activeStyle` show while it is pressed, and its own `onPress` runs too. Only the items of the level shown are on screen, so screen readers read what is there.
