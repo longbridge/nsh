@@ -1628,11 +1628,11 @@ fn web_input(web: &AnyObject, input: &WebInput) {
                 }
             }
             WebInput::Text(text) => {
-                // The US layout's key for each character, so the page's
-                // `KeyboardEvent.code` names the key a user would press.
+                // The US layout's key (and Shift) for each character, so the
+                // page's `KeyboardEvent.code` names the key a user would press.
                 for c in text.chars() {
-                    let code = crate::input::us_key_code(c).unwrap_or(0);
-                    key(web, &window, time, &c.to_string(), code);
+                    let (code, shift) = crate::input::us_typing_key(c).unwrap_or((0, false));
+                    key(web, &window, time, &c.to_string(), code, shift);
                 }
             }
             WebInput::Key(k) => {
@@ -1642,20 +1642,20 @@ fn web_input(web: &AnyObject, input: &WebInput) {
                     WebKey::Escape => ("\u{1b}", 53),
                     WebKey::Backspace => ("\u{7f}", 51),
                 };
-                key(web, &window, time, chars, code);
+                key(web, &window, time, chars, code, false);
             }
         }
     }
 }
 
 /// A key's down and up, with `chars` typed, handed to the web view.
-fn key(web: &AnyObject, window: &NSWindow, time: f64, chars: &str, code: u16) {
+fn key(web: &AnyObject, window: &NSWindow, time: f64, chars: &str, code: u16, shift: bool) {
     let s = NSString::from_str(chars);
     for kind in [NSEventType::KeyDown, NSEventType::KeyUp] {
         let event = NSEvent::keyEventWithType_location_modifierFlags_timestamp_windowNumber_context_characters_charactersIgnoringModifiers_isARepeat_keyCode(
             kind,
             NSPoint::new(0.0, 0.0),
-            NSEventModifierFlags::empty(),
+            if shift { NSEventModifierFlags::Shift } else { NSEventModifierFlags::empty() },
             time,
             window.windowNumber(),
             None,

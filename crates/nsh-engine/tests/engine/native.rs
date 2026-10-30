@@ -304,7 +304,7 @@ function App() {
           page &&
           queueMicrotask(() => {
             page.sendInput({ type: "click", x: 12.5, y: 40 });
-            page.sendInput({ type: "text", text: "NABIL" });
+            page.sendInput({ type: "text", text: "a b!" });
             page.sendInput({ type: "key", key: "Enter" });
             // Not one of its forms: nothing is sent.
             page.sendInput({ type: "key", key: "F13" });
@@ -348,8 +348,14 @@ fn a_web_view_ref_sends_trusted_input_to_its_view() {
     assert_eq!(
         sent,
         [
-            (web, WebInput::Click { x: nsh_core::Points(12.5), y: nsh_core::Points(40.0) }),
-            (web, WebInput::Text("NABIL".into())),
+            (
+                web,
+                WebInput::Click {
+                    x: nsh_core::Points(12.5),
+                    y: nsh_core::Points(40.0)
+                }
+            ),
+            (web, WebInput::Text("a b!".into())),
             (web, WebInput::Key(WebKey::Enter)),
         ]
     );
