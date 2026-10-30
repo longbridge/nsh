@@ -92,6 +92,10 @@ message or a due timer (7, none between pastes).
   distance only when it moves and ~2.99 G after (-27%), its CPU time ~2.22 → ~2.04 s; `Mounter.outputs` gets 1000+
   values a frame there (ART allocates the array as a large object), every bound value of the page, moved or not.
   RenderThread is unchanged (~18.2 G).
+- Android, going back (Pixel 10 Pro, 120 Hz, dev host, Text → the gallery's index with the back button, `gfxinfo
+  framestats` over the 300 ms slide, three runs each): 23 → 33 frames, mean frame time ~35 → ~13 ms, RenderThread
+  issue ~12 → ~5.5 ms a frame once the slides move by whole pixels; after a back gesture's release ~13–19 → ~4–5 ms.
+  The first frame still records the index again (it was `INVISIBLE`): 20–44 ms of UI-thread drawing.
 - Android emulator (arm64, release): rebinding one gallery row while scrolling ~0.3–0.4ms (JS ~60µs); text costs per new
   text: `PrecomputedText` ~120µs, measure ~50µs, final layout reused. First gallery frame 20–50ms (noisy on the emulator).
 
