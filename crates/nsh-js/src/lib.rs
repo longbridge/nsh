@@ -62,7 +62,7 @@ pub use nsh_core::{
 pub use crate::{
     bytecode::{
         BUNDLE_NAME, BYTECODE_VERSION, Strip, compile_bytecode, compile_bytecode_with,
-        compile_chunk_bytecode,
+        compile_chunk_bytecode, is_bytecode,
     },
     declarations::type_definitions,
     error::JsError,

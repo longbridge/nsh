@@ -129,6 +129,7 @@ mod tests {
             ("HostProps", "  onPressUp?: (e: PressEvent) => void;"),
             ("HostProps", "  onLayout?: (e: { bounds: Bounds }) => void;"),
             ("AndroidHostProps", "  elevation?: number;"),
+            ("OhosHostProps", "  accessibilityLiveRegion?: LiveRegion;"),
             ("IOSHostProps", "  backdropMaterial?: BackdropMaterial;"),
             ("InputHostProps", "  keyboardType?: KeyboardType;"),
             (

@@ -308,7 +308,7 @@ On Android, a view embedded below a toolbar gets only the parts of the system ba
 
 | Rust | TSX | Description |
 |---|---|---|
-| `os()` | `platform.os` | `Os::Ios`, `Os::Android`, `Os::MacOs`, `Os::Windows`, `Os::Linux` or `Os::Web` (`os().name()` is TSX's string). Mac Catalyst is iOS. |
+| `os()` | `platform.os` | `Os::Ios`, `Os::Android`, `Os::Ohos`, `Os::MacOs`, `Os::Windows`, `Os::Linux` or `Os::Web` (`os().name()` is TSX's string). Mac Catalyst is iOS. |
 | `os_version()` | `platform.version` | Major and minor; on Android the API level and 0. |
 | `idiom()` | `platform.idiom` | `Idiom::Phone`, `Pad`, `Mac`, `Tv` or `Desktop`; `Desktop` exactly where `is_desktop()` holds. |
 | `is_desktop()` | `platform.desktop` | macOS, Windows or Linux, or a desktop browser ([Desktop and mobile](./platform-specific.md#desktop-and-mobile)). |
@@ -318,7 +318,7 @@ TSX's `platform` in full:
 
 | Member | Description |
 |---|---|
-| `platform.os` | `"ios"`, `"android"`, `"macos"`, `"windows"`, `"linux"` or `"web"`. Mac Catalyst reports `"ios"`. |
+| `platform.os` | `"ios"`, `"android"`, `"ohos"`, `"macos"`, `"windows"`, `"linux"` or `"web"`. Mac Catalyst reports `"ios"`. |
 | `platform.version` | A string: iOS and desktops: the OS version (`"17.5"`); Android: the API level (`"35"`); the web: `"0.0"`. |
 | `platform.idiom` | `"phone"`, `"pad"`, `"mac"`, `"tv"` or `"desktop"`. `"desktop"` exactly where `platform.desktop` is `true`. `"mac"` is UIKit's Mac idiom under Mac Catalyst, a mobile idiom. |
 | `platform.desktop` | Desktop behavior applies: macOS, Windows, Linux and desktop browsers. `desktop={{…}}` props and `platform.select({ desktop })` follow it. |
@@ -338,6 +338,9 @@ const hapticsSupported = platform.os === "ios" || (platform.os === "android" && 
 ```
 
 `nsh test` runs headless as iOS.
+
+On [OHOS](./ohos.md), `platform.os` is `"ohos"`, `platform.version` is the system API level (`"20"`), and safe-area
+insets and keyboard height report the portion overlapping each `NshSurface`.
 
 On [Linux](./linux.md), `platform.os` is `"linux"`, the idiom `"desktop"` and `platform.version` the kernel's major
 and minor version (`"6.12"`): distributions number their releases in ways that cannot be compared. There, the safe

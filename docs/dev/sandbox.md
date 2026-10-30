@@ -75,7 +75,7 @@ trusted: every limit and check is enforced in Rust, never in JS.
   to answer (the status bar, a canvas image) only logs. Rust components' calls keep their Rust types: the core's
   checks answer them as the system would with nothing there (an empty clipboard, no picked files, `open_url` `false`)
   and an `Err` with the message for `fetch`.
-  `asset:` URIs are always allowed. Host checks take the host after the last `@` (`https://ok.com@evil.io` is evil.io).
+  Media `asset:` URIs refer to the app's own files. WebView `asset:/` resources require web views to be granted by both app and host, like inline HTML. Host checks take the host after the last `@` (`https://ok.com@evil.io` is evil.io).
 - **Desktop system APIs**: `process` and `fs/promises` (the only process and file APIs) check the intersection of the
   declaration and the optional host grant in Rust. Process commands match exactly: a grant for `codex` grants that
   command, while `/usr/bin/codex` requires its own entry. The runtime launches the executable directly with an

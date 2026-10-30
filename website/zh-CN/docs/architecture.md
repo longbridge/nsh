@@ -93,7 +93,7 @@ group: tools
 文本往往是 UI 中开销最大的部分。NSH 在引擎线程上使用平台自己的文本引擎布局文本，因此它看起来与原生文本完全一致：
 
 1. **prepare**：一个 `<Text>` 及其嵌套的 span 合并成一个属性字符串（Apple 平台上用 CoreText，Android 上用
-   `PrecomputedText` / `StaticLayout`）；
+   `PrecomputedText` / `StaticLayout`，OHOS 上用原生文本排版）；
 2. **measure**：按布局请求的宽度测量；测量结果按内容和宽度缓存，所以仅改变颜色不会重新测量；
 3. **layout**：按最终尺寸布局。
 
@@ -143,6 +143,7 @@ NSH 是一个 Rust workspace。编写应用时你永远不需要构建它（发�
 | `nsh-dev` | 开发服务器及其客户端。 |
 | `nsh-platform-ios` | UIKit 后端（iOS、模拟器、Mac Catalyst）：视图挂载、CoreText 文本引擎、输入；嵌入 SDK。 |
 | `nsh-platform-android` | Android 后端：`libnsh.so` 和 Java 运行时（`NshView`、各类视图、图片、网络）。 |
+| `nsh-platform-ohos` | OHOS 后端：ArkUI 自定义节点、原生文本排版、NativeVSync 和 ArkTS `NshSurface` 嵌入 SDK。 |
 | `nsh-cli` | `nsh` 命令。 |
 
 依赖方向是 `nsh-core` ← `nsh-js` ← `nsh-engine` ← 各平台；`nsh-base` 构建在 `nsh-core` 之上。core 不依赖任何平台，也不依赖任何 JS 引擎，正因如此

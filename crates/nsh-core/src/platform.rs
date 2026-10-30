@@ -59,6 +59,8 @@ pub enum Os {
     Ios,
     /// Android.
     Android,
+    /// OpenHarmony.
+    Ohos,
     /// macOS (a desktop backend).
     MacOs,
     /// Windows.
@@ -76,6 +78,7 @@ impl Os {
         match self {
             Os::Ios => "ios",
             Os::Android => "android",
+            Os::Ohos => "ohos",
             Os::MacOs => "macos",
             Os::Windows => "windows",
             Os::Linux => "linux",
@@ -105,7 +108,9 @@ impl Default for Os {
     /// The mobile OS of this build (headless runs, `nsh test`, behave as iOS); desktop
     /// backends set theirs.
     fn default() -> Self {
-        if cfg!(target_os = "android") {
+        if cfg!(target_env = "ohos") {
+            Os::Ohos
+        } else if cfg!(target_os = "android") {
             Os::Android
         } else {
             Os::Ios
@@ -135,11 +140,11 @@ pub enum Idiom {
 impl Idiom {
     /// Whether desktop behavior applies on `os` in this idiom, NSH's one
     /// definition of desktop: a desktop OS (macOS, Windows, Linux), or a
-    /// browser in the desktop idiom. `desktop={{…}}` props,
+    /// browser or an OHOS device in the desktop idiom. `desktop={{…}}` props,
     /// `platform.select({ desktop })`, `platform.desktop` and
     /// `platform.idiom === "desktop"` all follow it ([`Idiom::reported_on`]).
     pub fn desktop_on(self, os: Os) -> bool {
-        os.is_desktop() || (os == Os::Web && self == Idiom::Desktop)
+        os.is_desktop() || (matches!(os, Os::Web | Os::Ohos) && self == Idiom::Desktop)
     }
 
     /// The idiom apps see on `os` (TS: `platform.idiom`): [`Idiom::Desktop`]

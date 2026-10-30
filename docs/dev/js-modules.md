@@ -54,13 +54,13 @@ the chunks of a split bundle (`Screen.js`: a name that is no native module, with
   `nsh`'s `platform.os` tell which. `nsh/desktop`'s `isAvailable` (`Os::is_desktop`: macOS, Windows, Linux) says
   its window and menu APIs work; it is narrower than desktop behavior, `platform.desktop` (`Environment::desktop()`,
   which browsers in the desktop idiom have too: "One definition of desktop" in `api-naming.md`).
-- **Platform-only props** are grouped: `ios={{…}}` / `android={{…}}` / `web={{…}}` / `desktop={{…}}` (macOS, Windows, Linux, and browsers in the desktop idiom) on
-  elements and components (`IOSProps` / `AndroidProps` / `DesktopProps` in `types.d.ts`, each extending its
-  generated `IOSHostProps` / `AndroidHostProps` / `DesktopHostProps`, and extended per element with its own
+- **Platform-only props** are grouped: `ios={{…}}` / `android={{…}}` / `ohos={{…}}` / `web={{…}}` / `desktop={{…}}` (macOS, Windows, Linux, and browsers in the desktop idiom) on
+  elements and components (`IOSProps` / `AndroidProps` / `OhosProps` / `DesktopProps` in `types.d.ts`, each extending its
+  generated `IOSHostProps` / `AndroidHostProps` / `OhosHostProps` / `DesktopHostProps`, and extended per element with its own
   `IOS…HostProps` / `Desktop…HostProps`; a test holds every `…HostProps` to an element's props). The renderer
   (`platform_props` in `dom.rs`) sends only the current platform's object, each key as a prop of its own (keys removed
   from the object are cleared); the core knows them by those names. Android: `ripple`, `elevation`,
-  `accessibilityLiveRegion`, Dialog `statusBarTranslucent`. iOS: `backdropMaterial` (the system material of a
+  `accessibilityLiveRegion`, Dialog `statusBarTranslucent`; OHOS: `accessibilityLiveRegion`. iOS: `backdropMaterial` (the system material of a
   backdrop blur), input `inputAccessoryViewID` / `textContentType` / `keyboardAppearance`, Dialog
   `supportedOrientations`, WebView `allowsBackForwardNavigationGestures`. Desktop:
   `windowDrag`, WebView `allowsBackForwardNavigationGestures` (macOS' and Linux's trackpad swipes, Windows'

@@ -64,7 +64,7 @@ pub use nsh_core::{
     time::Clock,
 };
 #[cfg(feature = "js-core")]
-pub use nsh_js::BYTECODE_VERSION;
+pub use nsh_js::{BYTECODE_VERSION, is_bytecode};
 /// Signed packages, release-key certificates, revocations and trust stores.
 #[cfg(feature = "js-core")]
 pub use nsh_package as package;
@@ -633,7 +633,7 @@ pub trait Network: Send + Sync + 'static {
 /// Reads the app's bundled files (`asset:/…` URIs): from the app's
 /// resources, or from the dev server during development.
 pub trait Assets: Send + Sync + 'static {
-    /// The bytes of `uri`. Blocking; called on the engine thread.
+    /// The bytes of `uri`. Blocking; called on the engine or an IO worker.
     fn read(&self, uri: &str) -> Result<Vec<u8>, String>;
 
     /// Where `asset:/` URIs resolve, when it is a directory or a URL the
@@ -645,6 +645,18 @@ pub trait Assets: Send + Sync + 'static {
     #[cfg(not(target_arch = "wasm32"))]
     fn base(&self) -> Option<nsh_core::image::loader::AssetBase> {
         None
+    }
+
+    /// Opens a local asset without copying it, when this store exposes files.
+    /// `None` selects [`Self::reader`]; errors from a file store stay errors.
+    fn open_file(&self, _uri: &str) -> Option<Result<std::fs::File, String>> {
+        None
+    }
+    /// Opens a blocking reader on the calling thread. Resource stores can stream
+    /// large assets; the default reads the bytes of memory-backed stores once.
+    fn reader(&self, uri: &str) -> Result<Box<dyn io::Read>, String> {
+        self.read(uri)
+            .map(|bytes| Box::new(io::Cursor::new(bytes)) as Box<dyn io::Read>)
     }
 }
 
@@ -2503,6 +2515,8 @@ fn class_environment(env: &Environment) -> nsh_core::tailwind::ClassEnvironment 
         dark: env.color_scheme == ColorScheme::Dark,
         platform: if env.os == Os::Web {
             nsh_core::tailwind::Platform::Web
+        } else if env.os == Os::Ohos {
+            nsh_core::tailwind::Platform::Ohos
         } else if cfg!(target_os = "android") {
             nsh_core::tailwind::Platform::Android
         } else {

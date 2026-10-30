@@ -15,6 +15,7 @@ Apps written in Rust also need a Rust toolchain ([below](#for-apps-written-in-ru
 |---|---|---|
 | iOS | macOS | Xcode and an iOS simulator runtime |
 | Android | macOS, Windows or Linux | The Android SDK and a JDK; an emulator or a device |
+| [OHOS](./ohos.md) | macOS, Windows or Linux | DevEco Studio or the OpenHarmony SDK (API 20+) and Rust; an `arm64-v8a` device or emulator |
 | macOS | macOS | Xcode's command line tools; apps run on macOS 14+ |
 | Windows | Windows | Windows 10 1809+; the WebView2 Runtime for web views |
 | Linux | Linux | GTK 4.14+ (and its development packages to build the runtime) |
@@ -201,6 +202,10 @@ See [Windows](./windows.md).
 ### Building the Android runtime
 
 Building the Android runtime from a checkout (`cargo xtask android`) additionally needs an **NDK** from the SDK (`ndk;<version>`; set `ANDROID_NDK_HOME` if the newest one installed is incomplete) and `javac`.
+
+### Building the OHOS embedding SDK
+
+See [OHOS](./ohos.md). With DevEco Studio or `OHOS_NDK_HOME` pointing to the SDK's `openharmony` directory, run `cargo xtask ohos` to build `libnsh_platform_ohos.so` and `@nsh/ohos` (API 20+, `arm64-v8a`).
 
 ## What works where
 

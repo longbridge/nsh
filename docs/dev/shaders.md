@@ -136,6 +136,17 @@ is. Views out of sight stop rendering until they show again.
 | Windows | the surface's frame ticker (`Surface::on_frame`), at the window's scale | a Direct2D bitmap drawn under the children (made again after a device loss) | `reveal`: hidden, concealed or detached views |
 | GPUI | a frame client of its surface | a GPUI image (BGRA, straight, the view's opacity multiplied in, as canvases' pixmaps), whose replaced image leaves GPUI's atlases | views not drawn in the last frame |
 | Web | `requestAnimationFrame` | a `<canvas>` under the children | `IntersectionObserver` |
+| OHOS | a thread of the surface's own (`nsh-shader`), on the surface's `NativeVSync` | its own XComponent's native window, first among the view's children, clipped to its corners | `in_sight`: hidden, or outside the root or a scroll view around it |
+
+On OHOS wgpu has only its GLES backend, where rendering and reading a frame back wait for the GPU on the calling
+thread, so OHOS does not use `nsh_engine::shader`'s read-back renderer (`render/shader/`). Each shader view has an
+XComponent (`surface.rs`) first among its children, the size of its box and clipped to its corners, and a thread of the
+surface's own owns a wgpu device (`gpu.rs`: the engine's pipelines and bindings, `nsh_core::shader`'s programs,
+built-ins and slots) that renders each view straight into its XComponent's native window and presents it; RenderService
+composites it as it does a video's. The UI thread only sends the worker layers, slots, sizes, whether a view is in sight
+and its window; the worker renders on the surface's VSync while a view in sight has a frame due. A view that goes keeps
+its XComponent until the worker has dropped its surface of the window (`Message::Shader`). wgpu's GLES surfaces offer
+only the `Opaque` composite alpha mode, so a shader's translucent pixels are not blended with what is under the view.
 
 On Android the layer stays in `libnsh`: the encoder sends Java only whether a view shows a shader (opcode `SHADER`,
 35, in `encode.rs` ↔ `Mounter.java`), Java reports the size in pixels (`Native.shaderSize`), and the layer goes to

@@ -1,0 +1,10 @@
+{
+  "name": "@nsh/ohos",
+  "version": "0.1.0",
+  "description": "Native Shell OHOS embedding SDK",
+  "main": "index.ets",
+  "license": "MIT OR Apache-2.0",
+  "dependencies": {
+    "libnsh_platform_ohos.so": "file:./src/main/cpp/types/libnsh_platform_ohos"
+  }
+}

@@ -1281,9 +1281,9 @@ impl Access {
     }
 
     /// Whether a web view may show (or navigate to) `url`; `about:blank`
-    /// whenever web views are granted.
+    /// and scoped `asset:/` resources whenever web views are granted.
     pub fn allows_webview(&self, url: &str) -> bool {
-        if url == "about:blank" {
+        if url == "about:blank" || url.starts_with("asset:/") {
             return self.allows_webviews();
         }
         let Some(parts) = parse_url(url) else {
@@ -1823,6 +1823,22 @@ mod tests {
         assert!(!access.allows_picker());
         assert!(!access.allows_host("getUserInfo"));
         assert!(Access::all().is_unrestricted());
+    }
+
+    #[test]
+    fn scoped_web_resources_require_both_webview_grants() {
+        let enabled = caps(r#"{"webview":{"hosts":[]}}"#);
+        let mut access = Access {
+            declared: enabled,
+            granted: None,
+        };
+        assert!(access.allows_webview("asset:/pages/index.html"));
+        assert!(access.allows_webview("about:blank"));
+        assert!(!access.allows_webview("file:///private/index.html"));
+        assert!(!access.allows_webview("https://example.com/"));
+        access.granted = Some(caps("{}"));
+        assert!(!access.allows_webview("asset:/pages/index.html"));
+        assert!(!access.allows_webview("about:blank"));
     }
 
     #[test]

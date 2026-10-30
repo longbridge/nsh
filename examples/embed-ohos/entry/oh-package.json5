@@ -1,0 +1,8 @@
+{
+  "name": "entry",
+  "version": "1.0.0",
+  "dependencies": {
+    "libnsh_platform_ohos.so": "file:./src/main/cpp/types/libnsh_platform_ohos",
+    "@nsh/ohos": "file:../../../target/ohos/arkts-deps/nsh"
+  }
+}

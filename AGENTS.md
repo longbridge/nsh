@@ -9,7 +9,8 @@ the renderer and every module apps import are Rust); layout uses Taffy; embeddin
 web views has no layering problems. The
 toolchain is pure Rust and does not need Node.js; app developers get a prebuilt distribution (`cargo xtask dist`) and
 never need Rust either. Every platform has a native backend: iOS with UIKit views (`nsh-platform-ios`), Android with
-Android views (`nsh-platform-android`), macOS with AppKit views (`nsh-platform-macos`), Windows in Win32 windows drawn
+Android views (`nsh-platform-android`), OHOS with ArkUI custom nodes (`nsh-platform-ohos`),
+macOS with AppKit views (`nsh-platform-macos`), Windows in Win32 windows drawn
 with Direct2D (`nsh-platform-windows`), Linux with GTK 4 widgets (`nsh-platform-linux`). Each desktop OS has one
 backend for standalone apps (AppKit, Win32, GTK 4); the GPUI backend (`nsh-platform-gpui`) draws on macOS, Windows and
 Linux and is the backend for embedding in GPUI / GPUI Kit apps; the web platform
@@ -103,6 +104,8 @@ crates/
                        `include/nsh.h`) under the `NativeShell` Swift module (`swift/NativeShell.swift`) iOS apps embed nsh with
   nsh-platform-android/ Android backend: `libnsh.so` (JNI glue, StaticLayout text engine, batch encoding, UI-thread animator) + the Java
                        runtime in `java/com/longbridge/nsh` (NshView, Mounter, views, images, networking); feature `dev` as above
+  nsh-platform-ohos/   OHOS arm64 embedding backend (API 20 baseline, optional API 23/26 features): automatic UIContext/UIAbilityContext session, instance-owned NodeContent views, ArkUI native nodes,
+                       native typography/VSync; explicit N-API NshSurface; bindings own native APIs; examples/embed-ohos is the app host
   nsh-platform-web/    WebAssembly backend (published web apps, `nsh run --target web`, the website's live demos): the engine on
                        the page's main thread (`LocalEngine`), text laid out with browser font metrics, batches as JSON + CSS
                        for the DOM runtime in `web/nsh.js`, the animator on requestAnimationFrame, fetch over the browser's
@@ -203,6 +206,7 @@ are never linked into the CLI: it reads their UI sets as data (`nsh_core::elemen
 | the Linux backend (`nsh-platform-linux`, GTK 4) | `docs/dev/linux.md` |
 | the macOS backend (`nsh-platform-macos`, AppKit) | `docs/dev/macos.md` |
 | the Windows backend (`nsh-platform-windows`, Win32 / Direct2D) | `docs/dev/windows.md` |
+| the OHOS backend (`nsh-platform-ohos`, ArkUI) | `docs/dev/ohos.md` |
 | the GPUI backend (`nsh-platform-gpui`, macOS / Windows / Linux) | `docs/dev/gpui.md` |
 | anything apps use: exports, `nsh:rt`, props, events, style keys, Tailwind, declarations, behavior, formats | `docs/dev/compatibility.md` |
 | a hot path | `docs/dev/performance.md` (baselines) |
@@ -258,6 +262,7 @@ echo 'await app.screenshot("a.png"); await app.press("label:Navigation"); await 
 ./target/debug/nsh package examples/gallery --target web --run             # a static site (files named by content), served on this machine
 ./target/debug/nsh package examples/gallery --target ios-simulator --run   # installable app (.app / .ipa / .apk)
 cargo xtask android [--release] [--dev]                                            # Android runtime into target/android/<profile>[-dev]
+cargo xtask ohos [--release] [--dev]                                               # OHOS arm64 embedding SDK into target/ohos/<profile>[-dev]
 cargo xtask dist                                                                   # the distribution in dist/nsh
 ./target/debug/nsh dev examples/counter --server-only                      # dev server only (for simulators / devices); prints local and LAN URLs
 ./target/debug/nsh build examples/counter --release                        # writes bundle.js / bundle.nshc
@@ -290,7 +295,9 @@ cd website && bun run dev                                                       
 `nsh-platform-ios` only compiles for `target_os = "ios"` (iOS devices, the iOS simulator and Catalyst); on a macOS
 host it is an empty crate, so always run clippy on platform code with the Catalyst target. Likewise
 `nsh-platform-android` is empty off Android: check it with `cargo xtask android` (which sets up the NDK linker, `CC`,
-`AR` and bindgen's sysroot) and `cargo xtask clippy-android`. `nsh-platform-linux` and its hosts are empty off Linux:
+`AR` and bindgen's sysroot) and `cargo xtask clippy-android`. `nsh-platform-ohos` only compiles for
+`target_env = "ohos"` (OHOS also sets `target_os = "linux"`, so Linux-only crates exclude `target_env = "ohos"`):
+check it with `cargo xtask ohos` and `cargo xtask clippy-ohos`. `nsh-platform-linux` and its hosts are empty off Linux:
 check them on Linux, with the GTK 4 (≥ 4.14) development packages installed. `nsh-platform-macos` and its hosts are
 empty off macOS (`target_os = "macos"`, not Catalyst). `nsh-platform-windows` and its hosts are empty off Windows:
 check them on Windows, with the MSVC Build Tools, the Windows SDK and LLVM (libclang for QuickJS' bindings);

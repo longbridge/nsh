@@ -22,6 +22,13 @@ pub const BYTECODE_VERSION: &str = "quickjs-ng-0.16.2+0fdea21/bc28/le";
 #[cfg(test)]
 const ENGINES: &[(&str, &str)] = &[("quickjs-jit-sys", "0.14.1")];
 
+/// Recognizes the linked QuickJS bytecode header. This is format detection,
+/// not validation: loading the bytes still requires the trusted-input contract.
+pub fn is_bytecode(bytes: &[u8]) -> bool {
+    // Keep in sync with QuickJS-NG's BC_VERSION; the compilation test checks it.
+    bytes.first() == Some(&28)
+}
+
 /// Module name every bundle is evaluated under; JS stack frames reference
 /// it as `bundle.js:LINE:COL`.
 pub const BUNDLE_NAME: &str = nsh_core::js::ENTRY_CHUNK;
@@ -171,6 +178,15 @@ mod tests {
     use std::ffi::CStr;
 
     use super::*;
+
+    #[test]
+    fn compiled_modules_are_recognized_by_their_header() {
+        assert!(is_bytecode(
+            &compile_bytecode("export default 1", false).unwrap()
+        ));
+        assert!(!is_bytecode(b"export default 1"));
+        assert!(!is_bytecode(&[]));
+    }
 
     #[test]
     fn native_and_standard_imports_compile_together_without_host_initialization() {

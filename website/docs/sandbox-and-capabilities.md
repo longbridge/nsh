@@ -168,7 +168,7 @@ paths.
 
 Top-level navigations inside the web view are checked too, by the platform's navigation delegate, before they load.
 The page's own subresources (its scripts, images, XHRs) are the web content's business and are not checked.
-`about:blank` and inline HTML (`html`) need only web views to be granted at all: `"webview": { "hosts": [] }`
+`about:blank`, scoped `asset:/` resources and inline HTML (`html`) need only web views to be granted at all: `"webview": { "hosts": [] }`
 allows them without allowing any remote page.
 
 ### `statusBar`

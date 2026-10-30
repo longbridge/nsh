@@ -1,15 +1,15 @@
 ---
 title: 平台概览
-description: "NSH 在哪些平台上运行：iOS、Android、macOS、Windows、Linux、GPUI 和 Web，每个平台都有自己的后端；在各平台上如何运行、打包和嵌入 Rust 或 TSX 应用，以及各自需要什么。"
+description: "NSH 在哪些平台上运行：iOS、Android、OHOS、macOS、Windows、Linux、GPUI 和 Web，每个平台都有自己的后端；在各平台上如何运行、打包和嵌入 Rust 或 TSX 应用，以及各自需要什么。"
 order: 10
 group: platforms
 ---
 
 # 平台概览
 
-NSH 运行在手机、桌面和网页上：iOS、Android、macOS、Windows、Linux、GPUI 和 Web。每个平台都有自己的后端，用平台自己的界面技术绘制：同一个应用在 iPhone 上是 UIKit 视图，在 Mac 上是 AppKit 视图，在 Linux 上是 GTK 4 控件，在 GPUI 应用里是 GPUI 元素，在浏览器里是 HTML，文本、输入、无障碍和深色模式都是平台自己的。后端之上的部分全部共享：响应式图、渲染器、Taffy 布局、组件和原生模块在每个平台上都是同一份 Rust 代码，所以一个应用可以在所有平台上运行。用 Rust 编写的应用就是这份代码加上你的 crate，不带 JavaScript 虚拟机；TSX 应用则在它之上用 QuickJS 运行自己的模块（[用 Rust 开发](./rust.md)）。
+NSH 运行在手机、桌面和网页上：iOS、Android、OHOS、macOS、Windows、Linux、GPUI 和 Web。每个平台都有自己的后端，用平台自己的界面技术绘制：同一个应用在 iPhone 上是 UIKit 视图，在 OHOS 上是 ArkUI 自定义节点，在 Mac 上是 AppKit 视图，在 Linux 上是 GTK 4 控件，在 GPUI 应用里是 GPUI 元素，在浏览器里是 HTML，文本、输入、无障碍和深色模式都是平台自己的。后端之上的部分全部共享：响应式图、渲染器、Taffy 布局、组件和原生模块在每个平台上都是同一份 Rust 代码，所以一个应用可以在所有平台上运行。用 Rust 编写的应用就是这份代码加上你的 crate，不带 JavaScript 虚拟机；TSX 应用则在它之上用 QuickJS 运行自己的模块（[用 Rust 开发](./rust.md)）。
 
-在每个平台上，应用都有同样的两种用法：打包成该平台可安装的应用（`nsh package`），或嵌入你自己的原生应用——宿主可以链接一个 Rust 根组件，也可以在运行时加载 TSX。开发时用 `nsh run`（改动 Rust 会重新构建并重启应用，改动 TSX 是热更新）。
+在每个平台上，应用都有同样的两种用法：打包成该平台可安装的应用（`nsh package`），或嵌入你自己的原生应用——宿主可以链接一个 Rust 根组件，也可以在运行时加载 TSX。开发时用 `nsh run`（改动 Rust 会重新构建并重启应用，改动 TSX 是热更新）。OHOS 使用 [DevEco 嵌入流程](./ohos.md)。
 
 ## 一览
 
@@ -17,6 +17,7 @@ NSH 运行在手机、桌面和网页上：iOS、Android、macOS、Windows、Lin
 |---|---|---|---|---|
 | [iOS](./ios.md) | UIKit；CoreText | iOS 15.0+，真机和模拟器 | `nsh run --target ios` | `.app`（模拟器）、签名的 `.ipa` |
 | [Android](./android.md) | Android 视图；`StaticLayout` | Android 9（API 28）+，`arm64-v8a`、`armeabi-v7a` 和 `x86_64` | `nsh run --target android` | 签名的 `.apk` |
+| [OHOS](./ohos.md) | ArkUI 自定义节点；原生文本排版 | API 20+，`arm64-v8a` | `cargo xtask ohos`、DevEco 宿主 | 用 DevEco 构建宿主 HAP |
 | [macOS](./macos.md) | AppKit 与 Core Animation；CoreText | macOS 14+ | `nsh run --target macos` | ad hoc 签名的 `.app` |
 | [Windows](./windows.md) | 用 Direct2D 绘制的 Win32 窗口；DirectWrite | Windows 10 1809+、Windows 11 | `nsh run`（Windows 上的默认目标） | 一个目录和一个 `.zip` |
 | [Linux](./linux.md) | GTK 4 控件；Pango | GTK 4.14+ | `nsh run`（Linux 上的默认目标） | 一个目录和一个 `.tar.gz` |
@@ -56,6 +57,7 @@ nsh package App.tsx --target macos
 | iOS | `AppView`（一个 `UIView`） | Rust 根组件、TSX bundle | `nsh-platform-ios` crate | Rust |
 | iOS | `NshAppView`（一个 `UIView`） | TSX bundle、签名包 | `NativeShell.xcframework` | Swift |
 | Android | `NshView`（一个 `FrameLayout`） | TSX bundle、签名包 | `nsh.aar` | Java 或 Kotlin |
+| [OHOS](./ohos.md) | `NshSurface`（配合 `ContentSlot`） | TSX bundle、签名包 | `@nsh/ohos` 与 `libnsh_platform_ohos.so` | ArkTS |
 | Web | `createPlayer`（一个页面元素）或 iframe | TSX bundle；Rust 应用以发布的网站嵌入 | `nsh package --target web` 生成的运行时文件 | JavaScript 或 HTML |
 
 Rust 宿主以 `AppSource::Rust` 或 `App::Rust` 挂载 Rust 根组件（`Root::of::<App>()`），并用 `set_ui_sets` 把应用的 UI 集合交给它的引擎，这样它加载的 TSX 就能导入应用自己的组件和模块。每个视图都是一个引擎，一个应用可以同时显示多个。在每个平台上，宿主都可以注册自己的原生视图给应用使用（[原生组件](./native-components.md)）。
@@ -67,7 +69,7 @@ Rust 宿主以 `AppSource::Rust` 或 `App::Rust` 挂载 Rust 根组件（`Root::
 
 应用的大部分代码不需要判断平台：元素、样式、布局和模块在各处行为一致。平台确实不同的地方，NSH 给它一个固定的位置（[平台特定代码](./platform-specific.md)）：
 
-- **环境说明应用运行在哪里**：Rust 里是 `os()`、`idiom()` 和 `is_desktop()`（`nsh_core::prelude`），TSX 里是 `nsh` 的 `platform.os`、`platform.idiom`、`platform.desktop` 和 `platform.select`。操作系统是 iOS、Android、macOS、Windows、Linux 或 Web。
+- **环境说明应用运行在哪里**：Rust 里是 `os()`、`idiom()` 和 `is_desktop()`（`nsh_core::prelude`），TSX 里是 `nsh` 的 `platform.os`、`platform.idiom`、`platform.desktop` 和 `platform.select`。操作系统是 iOS、Android、OHOS、macOS、Windows、Linux 或 Web。
 - **平台专属属性**在 TSX 里放在 `ios={{…}}`、`android={{…}}`、`web={{…}}` 或 `desktop={{…}}` 里（`desktop`：macOS、Windows、Linux 和桌面浏览器）。
 - **输入跟随平台。** 手机上是触摸和软键盘；桌面上是鼠标、触控板和键盘。
 

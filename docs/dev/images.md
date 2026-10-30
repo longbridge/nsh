@@ -234,3 +234,5 @@
   patterns count each time they are drawn) is refused with an `svg::Error`. A panic in usvg or resvg is an
   `svg::Error` too (`catch_unwind`): the decoders run in GCD blocks and JNI functions, where an unwinding panic aborts.
   Android's decode threads also catch `OutOfMemoryError`, so a load that runs out of memory fails instead of hanging.
+  On OHOS, worker IO validates redirects and encoded/natural-size bounds, and ArkUI presents `PixelMap`s /
+  `DrawableDescriptor`s with corner radii, a source-alpha-preserving tint matrix, native blur and VSync fade.

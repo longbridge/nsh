@@ -41,7 +41,11 @@
   them), Shift+click extends; the highlight is drawn behind the glyphs in `selectionColor` at 30% (the system blue by
   default); the view takes keyboard focus only while it has a selection, for Ctrl+C (and Ctrl+Insert), Ctrl+A and
   Escape, and a press anywhere else or losing focus ends it; a finished drag also sets the primary selection.
-  Touchscreen drags scroll instead; there is no context menu. GPUI (`nsh-platform-gpui` `text.rs`): the same selection
+  Touchscreen drags scroll instead; there is no context menu.
+  OHOS (`text/selection/controller.rs`): the engine retains Unicode grapheme/word boundaries and visual-run boxes from
+  `ohos-drawing-binding::Typography::range_boxes`; long-pressing selects a word, dragging or moving the two handles
+  adjusts the range (auto-scrolling near scroll edges on VSync), and `@nsh/ohos` shows a Copy / Select All menu.
+  GPUI (`nsh-platform-gpui` `text.rs`): the same desktop selection
   (Cmd instead of Ctrl on macOS), plus a right-click menu (Copy, Select All: `chrome::popup_actions`). Its engine
   shapes each paragraph once with GPUI's text system, in segments of one bidi level and font size, and does the rest
   itself: lines break at UAX #14 opportunities (`unicode-linebreak`), measuring at another width only re-breaks, and
@@ -119,5 +123,5 @@
   one block; a plain string child is a raw text node (as JS's strings), a text's own content its first piece
   (`core/components.rs`, `Part::Raw`).
 
-See also the text pitfalls in [pitfalls.md](pitfalls.md) and the engines in `crates/nsh-platform-ios/src/text.rs` /
-`crates/nsh-platform-android/src/text.rs`.
+See also the text pitfalls in [pitfalls.md](pitfalls.md) and the engines in `crates/nsh-platform-ios/src/text.rs`,
+`crates/nsh-platform-android/src/text.rs` and `crates/nsh-platform-ohos/src/text/typography.rs`.
