@@ -2275,7 +2275,7 @@ final class Mounter {
     }
 
     void event(int id, int kind) {
-        Native.event(handle(), id, kind, null, 0, 0, 0);
+        event(id, kind, null, 0, 0, 0);
     }
 
     /** A press's touch: where it is now and the modifier keys it began with. */
@@ -2328,11 +2328,20 @@ final class Mounter {
     }
 
     void eventMap(int id, int kind, String[] keys, Object[] values) {
-        Native.eventMap(handle(), id, kind, keys, values);
+        long handle = handle();
+        if (handle == 0) return;
+        Native.eventMap(handle, id, kind, keys, values);
     }
 
+    /**
+     * Sends a node's event. Loads finish on their own time (an image's {@code
+     * onLoad}, a video's, a web view's): once the view is destroyed there is
+     * no app to tell, and the native side takes a live handle only.
+     */
     void event(int id, int kind, String text, int count, float x, float y) {
-        Native.event(handle(), id, kind, text, count, x, y);
+        long handle = handle();
+        if (handle == 0) return;
+        Native.event(handle, id, kind, text, count, x, y);
     }
 
     void zoom(int id, float scale) {
