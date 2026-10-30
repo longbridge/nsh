@@ -9,7 +9,7 @@
 //! without the feature `js`: the runner then links no QuickJS.
 
 /// Runs the release runner (until its window closes).
-#[cfg(all(target_os = "linux", feature = "js"))]
+#[cfg(all(target_os = "linux", not(target_env = "ohos"), feature = "js"))]
 pub fn main() -> std::process::ExitCode {
     use nsh_platform_linux::{AppSource, Bundle};
 
@@ -29,7 +29,7 @@ pub fn main() -> std::process::ExitCode {
 
 /// Runs the Rust app whose root is `root` (until its window closes), with
 /// the package's assets, name, id and appearance as [`main`] has them.
-#[cfg(target_os = "linux")]
+#[cfg(all(target_os = "linux", not(target_env = "ohos")))]
 pub fn run_rust(root: nsh_platform_linux::Root) -> std::process::ExitCode {
     let Some((_, options)) = setup() else {
         return std::process::ExitCode::FAILURE;
@@ -40,7 +40,7 @@ pub fn run_rust(root: nsh_platform_linux::Root) -> std::process::ExitCode {
 /// Installs the logger and reads the package: its `nsh` directory (next
 /// to the executable, or `NSH_APP_DIR`: `nsh run` of a Rust app) and the
 /// window's options.
-#[cfg(target_os = "linux")]
+#[cfg(all(target_os = "linux", not(target_env = "ohos")))]
 fn setup() -> Option<(std::path::PathBuf, nsh_platform_linux::AppOptions)> {
     use nsh_platform_linux::{AppOptions, Appearance, AssetBase, Limits};
 
@@ -102,7 +102,7 @@ fn setup() -> Option<(std::path::PathBuf, nsh_platform_linux::AppOptions)> {
     Some((dir, options))
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(all(target_os = "linux", not(target_env = "ohos")))]
 fn run(
     source: nsh_platform_linux::AppSource,
     options: nsh_platform_linux::AppOptions,
@@ -117,14 +117,14 @@ fn run(
 }
 
 /// Built without the feature `js`: runs Rust apps only ([`run_rust`]).
-#[cfg(all(target_os = "linux", not(feature = "js")))]
+#[cfg(all(target_os = "linux", not(target_env = "ohos"), not(feature = "js")))]
 pub fn main() -> std::process::ExitCode {
     eprintln!("this runner was built without the feature `js`: it runs Rust apps (run_rust)");
     std::process::ExitCode::FAILURE
 }
 
 /// Not on Linux: says so and exits.
-#[cfg(not(target_os = "linux"))]
+#[cfg(not(all(target_os = "linux", not(target_env = "ohos"))))]
 pub fn main() -> std::process::ExitCode {
     eprintln!("nsh-linux-app is the executable of packaged Linux apps; build it on Linux");
     std::process::ExitCode::FAILURE
