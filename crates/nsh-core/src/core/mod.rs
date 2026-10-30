@@ -7009,10 +7009,14 @@ fn span(from: f32, to: f32, ratio: f32) -> f32 {
 }
 
 /// `value` rounded up to a device pixel of `ratio` pixels per point. A
-/// value a hair over a whole pixel (`56.0 / 2.625 * 2.625` is
-/// `56.000004`) stays that pixel.
+/// value that is a whole pixel but for `f32` (`56.0 / 2.625 * 2.625` is
+/// `56.000004`) stays that pixel; a value really over one gets the next
+/// pixel even when it is over by less than the tolerance: a text measured
+/// `78.000_49` points wide (a PingFang glyph's 1020 / 1028 em beside SF's
+/// 1/128 point advances) wraps in a box of 78.
 fn ceil_to_pixel(value: Points, ratio: f32) -> Points {
-    Points((value.0 * ratio - 1.0e-3).ceil().max(0.0) / ratio)
+    let up = (value.0 * ratio - 1.0e-3).ceil().max(0.0) / ratio;
+    Points(if up < value.0 { up + 1.0 / ratio } else { up })
 }
 
 /// `layout` rounded as Taffy's rounding pass (`taffy::round_layout`) rounds
