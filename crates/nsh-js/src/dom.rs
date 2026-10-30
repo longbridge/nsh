@@ -446,7 +446,7 @@ pub(crate) const NODE_METHODS: &[(&str, c_int, &str, &str)] = &[
             "(input: { type: \"click\"; x: number; y: number } | { type: \"text\"; text: string } | { type: \"key\"; key: \"Enter\" | \"Tab\" | \"Escape\" | \"Backspace\" }): void"
         ),
         decl!(
-            "`WebView`: gives the page input as the user's own, so its events are trusted (`isTrusted`), which `injectJavaScript` cannot do: a click at a point of the viewport in CSS pixels (as `getBoundingClientRect()` reports), text typed into what has the page's focus, or a key. macOS only for now; elsewhere it does nothing."
+            "`WebView`: gives the page input as the user's own, so its events are trusted (`isTrusted`), which `injectJavaScript` cannot do: a click at a point of the viewport in CSS pixels (as `getBoundingClientRect()` reports), text typed into what has the page's focus, or a key. A click's events can still be on their way when the next call starts: let it settle (a frame or so) before typing after it. macOS only for now; elsewhere it does nothing."
         ),
     ),
     (

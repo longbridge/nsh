@@ -1628,9 +1628,11 @@ fn web_input(web: &AnyObject, input: &WebInput) {
                 }
             }
             WebInput::Text(text) => {
-                // The characters are what the page reads; no virtual key code is needed.
+                // The US layout's key for each character, so the page's
+                // `KeyboardEvent.code` names the key a user would press.
                 for c in text.chars() {
-                    key(web, &window, time, &c.to_string(), 0);
+                    let code = crate::input::us_key_code(c).unwrap_or(0);
+                    key(web, &window, time, &c.to_string(), code);
                 }
             }
             WebInput::Key(k) => {

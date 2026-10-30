@@ -98,7 +98,7 @@ Events:
 
 ### A browser with back and forward
 
-The web view's ref (an `element_ref()` put on it with `.element_ref(&web)` in Rust, `ref` in TSX) has `reload`, `go_back` / `goBack`, `go_forward` / `goForward`, `stop_loading` / `stopLoading`, `inject_java_script` / `injectJavaScript(script)` and `post_message` / `postMessage(data)`:
+The web view's ref (an `element_ref()` put on it with `.element_ref(&web)` in Rust, `ref` in TSX) has `reload`, `go_back` / `goBack`, `go_forward` / `goForward`, `stop_loading` / `stopLoading`, `inject_java_script` / `injectJavaScript(script)`, `post_message` / `postMessage(data)` and `send_input` / `sendInput(input)` ([below](#input-as-the-users-own)):
 
 ```rust tabs
 use nsh_core::prelude::*;
@@ -286,6 +286,24 @@ web_view("https://example.com")
   onMessage={(e) => console.log("title", e.data)}
 />
 ```
+
+### Input as the user's own
+
+`injectJavaScript` can only make synthetic events, which a page sees as untrusted (`event.isTrusted` is `false`) and some widgets ignore. The ref's `send_input` (`sendInput(input)`) gives the page input as the user's own hands would, so its events are trusted:
+
+- `{ type: "click", x, y }` clicks a point of the viewport, in CSS pixels (what `getBoundingClientRect()` reports).
+- `{ type: "text", text }` types the text into what has the page's focus, a key at a time.
+- `{ type: "key", key }` presses `Enter`, `Tab`, `Escape` or `Backspace`.
+
+```tsx
+web.sendInput({ type: "click", x: 120, y: 40 });
+setTimeout(() => {
+  web.sendInput({ type: "text", text: "espresso" });
+  web.sendInput({ type: "key", key: "Enter" });
+}, 50);
+```
+
+The page handles input on its own schedule: a click's events can still be on their way when the next call starts, so let a click settle (a frame or so) before typing after it. macOS delivers the input; the other platforms ignore it for now.
 
 ### Which sites a web view may show
 
