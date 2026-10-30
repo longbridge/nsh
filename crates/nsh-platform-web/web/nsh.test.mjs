@@ -138,6 +138,36 @@ test("events sent after the app stopped wait for the next app", () => {
   assert.deepEqual(events(sent), ["running", "stopped"]);
 });
 
+const trap = () => {
+  throw new WebAssembly.RuntimeError("unreachable");
+};
+
+test("an engine that trapped takes no more calls, nor the ones it deferred", () => {
+  const { player } = fakePlayer();
+  const reached = [];
+  assert.throws(
+    () =>
+      player.call(() => {
+        player.call(() => reached.push("deferred"));
+        trap();
+      }),
+    WebAssembly.RuntimeError,
+  );
+  player.call(() => reached.push("later"));
+  assert.deepEqual(reached, []);
+});
+
+test("an error that is not a trap leaves the engine taking calls", () => {
+  const { player } = fakePlayer();
+  const reached = [];
+  assert.throws(() => player.call(failing));
+  player.call(() => {
+    reached.push("later");
+    return -1;
+  });
+  assert.deepEqual(reached, ["later"]);
+});
+
 async function reply(host) {
   const { player, sent } = fakePlayer(host === undefined ? {} : { host });
   player.app = 1;
