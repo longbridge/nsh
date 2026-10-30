@@ -714,7 +714,10 @@ engine starts). A Rust app's root carries them (`Root::tokens`), and an app that
 them with `element::set_tokens(tokens)` (`set_tokens(theme.into())` of an `nsh_base::Theme`; the setter beside the
 `tokens()` accessor, as `set_color_scheme` is beside `color_scheme()`). The core sends the tokens drawn with to the
 platform when they change (`Command::Tokens` on the root), which colors its own controls with them (Linux's menus:
-`docs/dev/linux.md`). `nsh_base::theme()` reads the tokens from a signal of
+`docs/dev/linux.md`; Android's alerts and action sheets: `popover` behind, `popover-foreground` for the title and
+the options, `muted-foreground` for the message, `primary` for the buttons and `destructive` for a destructive action,
+over the system dialog's shape; iOS's alerts take `primary` as their tint, which iOS 17 draws the regular and cancel
+actions in and iOS 26 does not use; an app without a theme of its own keeps the system's colors on both). `nsh_base::theme()` reads the tokens from a signal of
 the surface (`element::tokens`): new tokens run again the bindings that read them. An embedding app can give a
 surface its own (`Core::set_host_tokens`, `EngineControl::set_tokens`; sent from `Engine::start_with`'s `setup` they
 are in the first frame and JS's first render): they win over the app's until cleared, and the app's names they lack

@@ -654,15 +654,38 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
                     | Command::PickScreenColor { .. }
                     // No file dialogs (`Environment::file_requests`): the
                     // core answers first.
-                    | Command::FileRequest { .. }
-                    // No menus of the platform's own to color.
-                    | Command::Tokens(_) => e.int(-1),
+                    | Command::FileRequest { .. } => e.int(-1),
+                    // `SystemUi.dialog` draws alerts and action sheets in
+                    // them: each of `DIALOG_TOKENS`, light then dark (0: the
+                    // system's). An app without a theme of its own (its
+                    // tokens the default theme's) keeps the system's colors.
+                    Command::Tokens(tokens) => {
+                        e.int(27);
+                        let themed = nsh_base::tokens_of(None).is_ok_and(|d| *tokens != d);
+                        for name in DIALOG_TOKENS {
+                            let color = tokens.color(name).filter(|_| themed);
+                            for c in [color.map(|c| c.light), color.map(|c| c.dark)] {
+                                e.int(c.map_or(0, |c| argb(c.into())));
+                            }
+                        }
+                    }
                 }
             }
         }
     }
     e
 }
+
+/// The tokens alerts and action sheets are drawn in (`SystemUi.java`'s
+/// order): the dialog, its title, its message, its buttons and a
+/// destructive action.
+const DIALOG_TOKENS: [&str; 5] = [
+    "popover",
+    "popover-foreground",
+    "muted-foreground",
+    "primary",
+    "destructive",
+];
 
 /// The event kind with index `index` (`EventKind as u8`, the order of the
 /// constants in `Native.java`).

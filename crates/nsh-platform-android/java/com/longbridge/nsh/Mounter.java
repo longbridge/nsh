@@ -67,6 +67,11 @@ final class Mounter {
     boolean rtl;
     /** The app's appearance (`nsh_core::platform::Appearance`): 0 the system's, 1 light, 2 dark. */
     int appearance;
+    /**
+     * The app's colors for alerts and action sheets ({@code encode.rs} {@code DIALOG_TOKENS}): the dialog, its title,
+     * its message, its buttons and a destructive action, each light then dark ARGB (0: the system's).
+     */
+    final int[] dialogColors = new int[10];
     /** The status bar the app asked for last (style, hidden), applied again when the appearance changes. */
     private int barStyle = -1;
     private boolean barHidden;
@@ -2049,6 +2054,10 @@ final class Mounter {
                 request.current = b.getInt() != 0;
                 request.view = host;
                 Picker.show(context, request);
+                break;
+            }
+            case 27: {
+                for (int i = 0; i < dialogColors.length; i++) dialogColors[i] = b.getInt();
                 break;
             }
             case 26: {
