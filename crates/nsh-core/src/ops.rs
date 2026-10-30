@@ -1550,6 +1550,51 @@ pub enum OverlayProp {
     Open(Option<bool>),
 }
 
+/// Input for a web view's page, delivered as the user's hands give it: the
+/// page's events are trusted (`isTrusted`), which scripts it injects cannot
+/// make (`WebView`'s `sendInput`).
+#[derive(Debug, Clone, PartialEq)]
+pub enum WebInput {
+    /// A primary click at a point of the page's viewport, in CSS pixels
+    /// (what `getBoundingClientRect()` reports).
+    Click {
+        /// From the viewport's left edge.
+        x: f64,
+        /// From the viewport's top edge.
+        y: f64,
+    },
+    /// Text typed into what has the page's keyboard focus.
+    Text(String),
+    /// A key pressed and released.
+    Key(WebKey),
+}
+
+/// A key `WebInput::Key` presses.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WebKey {
+    /// Return: submits a form, confirms a field.
+    Enter,
+    /// Moves the focus forward.
+    Tab,
+    /// Escape.
+    Escape,
+    /// Deletes backward.
+    Backspace,
+}
+
+impl WebKey {
+    /// The key a DOM `KeyboardEvent.key` names (`"Enter"`, ...).
+    pub fn from_name(name: &str) -> Option<Self> {
+        Some(match name {
+            "Enter" => Self::Enter,
+            "Tab" => Self::Tab,
+            "Escape" => Self::Escape,
+            "Backspace" => Self::Backspace,
+            _ => return None,
+        })
+    }
+}
+
 /// An imperative call on a native view (`ref.focus()` and the like).
 #[derive(Debug, Clone, PartialEq)]
 pub enum Command {
@@ -1588,6 +1633,8 @@ pub enum Command {
     InjectJavaScript(String),
     /// Send a message to a web view's page (`window.onmessage` data).
     PostMessage(String),
+    /// Give a web view's page input as the user's own (trusted events).
+    SendInput(WebInput),
     /// Seek a video to a time in seconds.
     Seek(f64),
     /// Scroll a list to an item (resolved by the core into `ScrollTo`).

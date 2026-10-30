@@ -469,6 +469,7 @@ impl Mounter {
             | Command::StopLoading
             | Command::InjectJavaScript(_)
             | Command::PostMessage(_)
+            | Command::SendInput(_)
             | Command::Seek(_)
             | Command::Native { .. } => {
                 if let Some(view) = view {
