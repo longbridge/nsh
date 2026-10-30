@@ -143,7 +143,7 @@ pub(crate) struct CurrentColor {
     pub(crate) inline: Option<Color>,
 }
 
-/// The platform classes run on (`ios:`, `android:`, `web:`).
+/// The platform classes run on (`ios:`, `android:`, `ohos:`, `web:`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Platform {
     /// iOS and Mac Catalyst.
@@ -151,6 +151,8 @@ pub enum Platform {
     Ios,
     /// Android.
     Android,
+    /// OpenHarmony.
+    Ohos,
     /// A web browser.
     Web,
 }
@@ -417,7 +419,8 @@ pub(crate) mod rank {
     /// NSH's platform variants, after Tailwind's.
     pub(crate) const IOS: Key = Key::new(70);
     pub(crate) const ANDROID: Key = Key::new(71);
-    pub(crate) const WEB: Key = Key::new(72);
+    pub(crate) const OHOS: Key = Key::new(72);
+    pub(crate) const WEB: Key = Key::new(73);
 }
 
 impl Rule {
@@ -1195,6 +1198,10 @@ fn variant(theme: &Theme, v: &str, cond: &mut Condition) -> Option<Key> {
         "android" => {
             cond.platform = Some(Platform::Android);
             rank::ANDROID
+        }
+        "ohos" => {
+            cond.platform = Some(Platform::Ohos);
+            rank::OHOS
         }
         "web" => {
             cond.platform = Some(Platform::Web);

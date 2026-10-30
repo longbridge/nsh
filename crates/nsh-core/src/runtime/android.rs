@@ -5,8 +5,8 @@ use crate::{
     element::{ModuleCx, module, task::Action},
 };
 
-/// The Android back button: its listeners run after modals and before
-/// stacks.
+/// The Android back button: its listeners run after native dialogs and modals
+/// and before stacks.
 #[module]
 pub(crate) struct BackHandler;
 

@@ -1,4 +1,4 @@
-//! The Android back button for views ([`super::on_back_press`]; TS:
+//! The Android and OHOS back button for views ([`super::on_back_press`]; TS:
 //! `BackHandler.on("press", ...)`).
 //!
 //! The newest modal takes the button first, natively. Without one, the

@@ -1118,6 +1118,17 @@ fn variants() {
     assert_eq!(s.layout.padding.top, taffy::LengthPercentage::length(4.0));
     let (s, _) = styled_with("pt-1 ios:pt-3 android:pt-5", dark, (390.0, 844.0), 0);
     assert_eq!(s.layout.padding.top, taffy::LengthPercentage::length(20.0));
+    let ohos = ClassEnvironment {
+        platform: Platform::Ohos,
+        ..ClassEnvironment::default()
+    };
+    let (s, _) = styled_with(
+        "pt-1 ios:pt-3 android:pt-4 ohos:pt-5",
+        ohos,
+        (390.0, 844.0),
+        0,
+    );
+    assert_eq!(s.layout.padding.top, taffy::LengthPercentage::length(20.0));
     let web = ClassEnvironment {
         platform: Platform::Web,
         ..ClassEnvironment::default()

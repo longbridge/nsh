@@ -22,7 +22,7 @@
 //! `nsh_platform_linux::set_ui_sets` and then [`main`].
 
 /// Runs the development host (until its window closes).
-#[cfg(target_os = "linux")]
+#[cfg(all(target_os = "linux", not(target_env = "ohos")))]
 pub fn main() -> std::process::ExitCode {
     use std::{env, path::PathBuf};
 
@@ -96,7 +96,7 @@ pub fn main() -> std::process::ExitCode {
 }
 
 /// Not on Linux: says so and exits.
-#[cfg(not(target_os = "linux"))]
+#[cfg(not(all(target_os = "linux", not(target_env = "ohos"))))]
 pub fn main() -> std::process::ExitCode {
     eprintln!("nsh-linux-host runs on Linux");
     std::process::ExitCode::FAILURE

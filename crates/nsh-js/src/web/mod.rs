@@ -266,6 +266,8 @@ thread_local! {
     /// The finalizers running on this thread: in a collection, or freeing
     /// an object whose last reference went (any release of a JS value may
     /// run one). No JS may run and no op be made until they return.
+    // OHOS emulates TLS; Clippy also inspects that macro expansion's initializer.
+    #[cfg_attr(target_env = "ohos", allow(clippy::missing_const_for_thread_local))]
     static FINALIZING: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
 }
 

@@ -1058,7 +1058,7 @@ pub fn key_label(keystroke: &str) -> String {
         .label(os(), apple)
 }
 
-/// Listens to the Android back button while the current owner lives (TS:
+/// Listens to the Android or OHOS back button while the current owner lives (TS:
 /// `BackHandler.on("press", f)`): when no modal is
 /// shown, `f` runs before the stack pops, newest listener first, and returns
 /// true when it handled the press. While one listens, a back gesture does

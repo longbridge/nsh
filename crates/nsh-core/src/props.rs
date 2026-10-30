@@ -286,9 +286,8 @@ pub enum AccessibilityProp {
     /// `"no-hide-descendants"`.
     #[prop(js = "importantForAccessibility", with = crate::js::host_values::important, reset = AccessibilityProp::Important(None, false), ts = "\"auto\" | \"yes\" | \"no\" | \"no-hide-descendants\"")]
     Important(Option<bool>, bool),
-    /// `accessibilityLiveRegion` (Android): how changes of the view are announced
-    /// to TalkBack.
-    #[prop(android = "accessibilityLiveRegion")]
+    /// How changes of the view are announced by Android and OHOS screen readers.
+    #[prop(android = "accessibilityLiveRegion", ohos = "accessibilityLiveRegion")]
     LiveRegion(LiveRegion),
     /// `accessibilityActions`: custom actions offered to assistive technologies
     /// (`onAccessibilityAction` reports them).

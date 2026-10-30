@@ -26,7 +26,7 @@ webview = ["dep:webkit6"]
 log.workspace = true
 
 # Empty off Linux (like the other platform crates off their targets).
-[target.'cfg(target_os = "linux")'.dependencies]
+[target.'cfg(all(target_os = "linux", not(target_env = "ohos")))'.dependencies]
 nsh-core = { workspace = true, features = ["svg", "loader"] }
 nsh-engine = { workspace = true, features = ["net", "shader"] }
 nsh-base = { workspace = true, features = ["highlight"] }

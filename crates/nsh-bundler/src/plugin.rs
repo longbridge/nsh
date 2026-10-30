@@ -71,6 +71,9 @@ pub(crate) const IMAGE_EXTENSIONS: &[&str] = &["png", "jpg", "jpeg", "gif", "web
 /// File types imported as fonts.
 pub(crate) const FONT_EXTENSIONS: &[&str] = &["ttf", "otf"];
 
+/// File types imported as media URLs for the native player.
+pub(crate) const MEDIA_EXTENSIONS: &[&str] = &["mp4", "m4v", "webm", "mov"];
+
 fn has_extension(path: &Path, extensions: &[&str]) -> bool {
     path.extension()
         .and_then(|e| e.to_str())
@@ -426,6 +429,17 @@ impl Plugin for NshPlugin {
     async fn load(&self, _cx: SharedLoadPluginContext, args: &HookLoadArgs<'_>) -> HookLoadReturn {
         let path = Path::new(args.id);
         let rel = self.rel(path);
+        if has_extension(path, MEDIA_EXTENSIONS) {
+            self.assets
+                .lock()
+                .expect("assets lock")
+                .push(path.to_path_buf());
+            return Ok(Some(HookLoadOutput {
+                code: format!("export default {:?};", format!("asset:/{rel}")).into(),
+                module_type: Some(ModuleType::Js),
+                ..Default::default()
+            }));
+        }
         if has_extension(path, FONT_EXTENSIONS) {
             // A font import is its family name; the runtime registers the
             // font before the first frame.

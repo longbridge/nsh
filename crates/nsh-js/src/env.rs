@@ -639,12 +639,14 @@ pub(crate) const DEVICE_EXPORTS: &[Item] = &[
 pub(crate) const DEVICE_TYPES: &str = r#"export interface PlatformSelectSpec<T> {
   ios?: T;
   android?: T;
+  ohos?: T;
   macos?: T;
   windows?: T;
   linux?: T;
   web?: T;
   /** Where `platform.desktop` is false: iOS (Mac Catalyst included),
-   * Android, and browsers in the phone or tablet idiom. */
+   * Android, OHOS outside the desktop idiom, and browsers in the phone
+   * or tablet idiom. */
   mobile?: T;
   /** Where `platform.desktop` is true: macOS, Windows, Linux, and browsers
    * in the desktop idiom. */
