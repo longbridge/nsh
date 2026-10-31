@@ -13,10 +13,9 @@ const ALL: Option<&str> = Some(r#"{ "host": true }"#);
 
 /// A platform that embeds a host.
 fn with_host() -> Environment {
-    Environment {
-        host: true,
-        ..Environment::default()
-    }
+    let mut environment = Environment::default();
+    environment.host = true;
+    environment
 }
 
 /// Calls each of `names` with `{ a: 1 }` and shows `available()` and what

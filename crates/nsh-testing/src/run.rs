@@ -523,30 +523,31 @@ impl Session {
             refuse_connections: (!live).then(crate::failure::refuse_connections),
             assets: Some(Arc::new(DirectoryAssets::new(dir, files))),
             storage: Some(storage.clone()),
-            environment: Environment {
-                safe_area: Edges {
+            environment: {
+                let mut environment = Environment::default();
+                environment.safe_area = Edges {
                     top: safe_area.top,
                     right: safe_area.right,
                     bottom: safe_area.bottom,
                     left: safe_area.left,
-                },
-                color_scheme: launch.color_scheme.unwrap_or_default().into(),
-                locale: locale.unwrap_or(Locale::EN_US),
-                reduce_motion: launch.reduced_motion.unwrap_or(false),
-                os: match platform {
+                };
+                environment.color_scheme = launch.color_scheme.unwrap_or_default().into();
+                environment.locale = locale.unwrap_or(Locale::EN_US);
+                environment.reduce_motion = launch.reduced_motion.unwrap_or(false);
+                environment.os = match platform {
                     Platform::Ios => Os::Ios,
                     Platform::Android => Os::Android,
                     Platform::Macos => Os::MacOs,
                     Platform::Windows => Os::Windows,
                     Platform::Linux => Os::Linux,
                     Platform::Web => Os::Web,
-                },
-                idiom: match platform {
+                };
+                environment.idiom = match platform {
                     Platform::Ios | Platform::Android => Idiom::default(),
                     _ => Idiom::Desktop,
-                },
-                host: page_host.is_some(),
-                ..Default::default()
+                };
+                environment.host = page_host.is_some();
+                environment
             },
             ui_sets: self.run.ui_sets.clone(),
             clock,

@@ -846,15 +846,13 @@ mount(() => (
 
 #[test]
 fn safe_area_and_keyboard_env_insets() {
-    let environment = Environment {
-        window: Size::new(px(390.0), px(844.0)),
-        safe_area: Edges {
-            top: Points(47.0),
-            right: Points(10.0),
-            bottom: Points(34.0),
-            left: Points(10.0),
-        },
-        ..Default::default()
+    let mut environment = Environment::default();
+    environment.window = Size::new(px(390.0), px(844.0));
+    environment.safe_area = Edges {
+        top: Points(47.0),
+        right: Points(10.0),
+        bottom: Points(34.0),
+        left: Points(10.0),
     };
     let (engine, rx) = start_in(SAFE_AREA, environment);
     let first = until(&rx, |b| shows(b, "inside"));
@@ -868,14 +866,13 @@ fn safe_area_and_keyboard_env_insets() {
         first.iter().any(|b| shows(b, "top 47")),
         "the environment's accessor"
     );
-    engine.control().set_environment(Environment {
-        keyboard_height: px(300.0),
-        safe_area: Edges {
-            top: Points(20.0),
-            ..environment.safe_area
-        },
-        ..environment
-    });
+    let mut env = environment;
+    env.keyboard_height = px(300.0);
+    env.safe_area = Edges {
+        top: Points(20.0),
+        ..environment.safe_area
+    };
+    engine.control().set_environment(env);
     let after = until(&rx, |b| shows(b, "top 20"));
     assert!(
         after.iter().any(|b| shows(b, "top 20")),
@@ -1333,13 +1330,11 @@ mount(() => <Text>{shown()}</Text>);
 
 #[test]
 fn clipboard_images_are_unavailable_where_the_clipboard_holds_text_only() {
-    let (_engine, rx) = start_in(
-        CLIPBOARD_IMAGE_TEXT_ONLY,
-        Environment {
-            os: nsh_engine::Os::Android,
-            ..Environment::default()
-        },
-    );
+    let (_engine, rx) = start_in(CLIPBOARD_IMAGE_TEXT_ONLY, {
+        let mut environment = Environment::default();
+        environment.os = nsh_engine::Os::Android;
+        environment
+    });
     // Writing and reading reject, `hasImage` answers no; nothing reaches
     // the platform.
     let wanted = "Error ERR_FEATURE_UNAVAILABLE_ON_PLATFORM | Error ERR_FEATURE_UNAVAILABLE_ON_PLATFORM | ok false";
@@ -1865,13 +1860,11 @@ mount(() => <Text>{chosen()}</Text>);
 fn menus_reach_the_platform_and_call_back() {
     use nsh_core::desktop::{DesktopCommand, Key, MenuAction, MenuItem, MenuRole, Shortcut};
 
-    let (engine, rx) = start_in(
-        MENU,
-        Environment {
-            os: nsh_engine::Os::Windows,
-            ..Environment::default()
-        },
-    );
+    let (engine, rx) = start_in(MENU, {
+        let mut environment = Environment::default();
+        environment.os = nsh_engine::Os::Windows;
+        environment
+    });
     let mut menu = None;
     until(&rx, |batch| {
         for item in &batch.items {
@@ -2790,13 +2783,11 @@ fn base_tabs_and_radio_groups_rove_the_keyboard_focus() {
 
     use nsh_core::keymap::{KeyMatch, Keymap, Keystroke};
 
-    let (engine, rx) = start_in(
-        BASE_ROVING,
-        Environment {
-            os: nsh_engine::Os::MacOs,
-            ..Environment::default()
-        },
-    );
+    let (engine, rx) = start_in(BASE_ROVING, {
+        let mut environment = Environment::default();
+        environment.os = nsh_engine::Os::MacOs;
+        environment
+    });
     let mut batches = until(&rx, |batch| shows(batch, "Log: "));
     let id = |batches: &[MountBatch], test_id: &str| {
         batches
@@ -3001,13 +2992,11 @@ fn a_base_toggle_reports_the_next_value_and_its_group_roves_without_pressing() {
         keymap::{KeyMatch, Keymap, Keystroke},
     };
 
-    let (engine, rx) = start_in(
-        BASE_TOGGLE,
-        Environment {
-            os: nsh_engine::Os::MacOs,
-            ..Environment::default()
-        },
-    );
+    let (engine, rx) = start_in(BASE_TOGGLE, {
+        let mut environment = Environment::default();
+        environment.os = nsh_engine::Os::MacOs;
+        environment
+    });
     let mut batches = until(&rx, |batch| shows(batch, "Log: "));
     let id = |batches: &[MountBatch], test_id: &str| {
         batches
@@ -3771,13 +3760,11 @@ mount(() => (
 /// closes: the core follows the expanded state the popover sets.
 #[test]
 fn a_popovers_trigger_is_styled_while_open() {
-    let (engine, rx) = start_in(
-        EXPANDED_TRIGGER,
-        Environment {
-            os: nsh_engine::Os::Windows,
-            ..Environment::default()
-        },
-    );
+    let (engine, rx) = start_in(EXPANDED_TRIGGER, {
+        let mut environment = Environment::default();
+        environment.os = nsh_engine::Os::Windows;
+        environment
+    });
     let first = rx
         .recv_timeout(Duration::from_secs(5))
         .expect("first frame");
@@ -3981,10 +3968,9 @@ fn popups_report_their_open_change_first(environment: Environment) {
 /// the turn that changes it.
 #[test]
 fn popups_report_their_open_change_first_on_the_desktops() {
-    popups_report_their_open_change_first(Environment {
-        os: nsh_engine::Os::Windows,
-        ..Environment::default()
-    });
+    let mut environment = Environment::default();
+    environment.os = nsh_engine::Os::Windows;
+    popups_report_their_open_change_first(environment);
 }
 
 /// On touch screens a menu is a sheet that comes in and goes: its
@@ -4033,13 +4019,11 @@ mount(App);
 /// `onPosition` says the side it went on, its frame and its room.
 #[test]
 fn a_popovers_looks_follow_its_presence_from_tsx() {
-    let (engine, rx) = start_in(
-        POPUP_LOOKS,
-        Environment {
-            os: nsh_engine::Os::Windows,
-            ..Environment::default()
-        },
-    );
+    let (engine, rx) = start_in(POPUP_LOOKS, {
+        let mut environment = Environment::default();
+        environment.os = nsh_engine::Os::Windows;
+        environment
+    });
     let first = rx
         .recv_timeout(Duration::from_secs(5))
         .expect("first frame");
@@ -4888,14 +4872,12 @@ mount(() => (
 #[test]
 fn a_base_select_on_a_desktop_places_its_popup_at_the_apps_trigger() {
     use nsh_core::AccessibilityRole;
-    let (_engine, rx) = start_in(
-        BASE_SELECT_DESKTOP,
-        Environment {
-            os: nsh_engine::Os::MacOs,
-            idiom: nsh_engine::Idiom::Desktop,
-            ..Environment::default()
-        },
-    );
+    let (_engine, rx) = start_in(BASE_SELECT_DESKTOP, {
+        let mut environment = Environment::default();
+        environment.os = nsh_engine::Os::MacOs;
+        environment.idiom = nsh_engine::Idiom::Desktop;
+        environment
+    });
     let mut all = until(&rx, |b| shows(b, "Apple"));
     all.extend(until(&rx, |_| false));
     let trigger = test_view(&all, "trigger");
@@ -5296,13 +5278,11 @@ fn the_tab_bar_is_the_systems_component_on_ios_and_android() {
     use nsh_core::platform::Os;
 
     for os in [Os::Ios, Os::Android] {
-        let (_engine, rx) = start_in(
-            TAB_BAR,
-            Environment {
-                os,
-                ..Environment::default()
-            },
-        );
+        let (_engine, rx) = start_in(TAB_BAR, {
+            let mut environment = Environment::default();
+            environment.os = os;
+            environment
+        });
         let batches = until(&rx, |batch| batch.items.iter().any(is_tab_bar));
         let props = batches.iter().find_map(|batch| {
             batch.items.iter().find_map(|i| match i {
@@ -5343,25 +5323,21 @@ fn the_tab_bar_renders_nothing_on_the_desktops_and_the_web() {
             "mount(() => <><App /><Text>{`Ready: ${isAvailable}`}</Text></>);",
         );
     for (os, available) in [(Os::Ios, true), (Os::Android, true)] {
-        let (_engine, rx) = start_in(
-            &app,
-            Environment {
-                os,
-                ..Environment::default()
-            },
-        );
+        let (_engine, rx) = start_in(&app, {
+            let mut environment = Environment::default();
+            environment.os = os;
+            environment
+        });
         let ready = format!("Ready: {available}");
         let batches = until(&rx, |batch| shows(batch, &ready));
         assert!(batches.iter().any(|batch| shows(batch, &ready)), "{os:?}");
     }
     for os in [Os::MacOs, Os::Windows, Os::Linux, Os::Web] {
-        let (_engine, rx) = start_in(
-            &app,
-            Environment {
-                os,
-                ..Environment::default()
-            },
-        );
+        let (_engine, rx) = start_in(&app, {
+            let mut environment = Environment::default();
+            environment.os = os;
+            environment
+        });
         let batches = until(&rx, |batch| shows(batch, "Ready: false"));
         assert!(
             batches.iter().any(|batch| shows(batch, "Ready: false")),
@@ -5786,10 +5762,8 @@ mount(App);
 #[test]
 fn base_plot_marks_draw_the_edges_of_their_data() {
     use nsh_core::canvas::{CanvasOp, Paint, PathOp};
-    let environment = Environment {
-        color_scheme: nsh_core::platform::ColorScheme::Dark,
-        ..Environment::default()
-    };
+    let mut environment = Environment::default();
+    environment.color_scheme = nsh_core::platform::ColorScheme::Dark;
     let (engine, rx) = start_in(BASE_PLOT_SHAPES, environment);
     // The function's values come a turn after the rows.
     let batches = until_drawn(&rx, |d| {
@@ -6068,10 +6042,8 @@ fn base_plot_moves_natively_with_its_motion() {
     assert!(timings(&left).contains(&(0.0, 80.0)));
 
     // Reduced motion: no appear, no clip.
-    let environment = Environment {
-        reduce_motion: true,
-        ..Environment::default()
-    };
+    let mut environment = Environment::default();
+    environment.reduce_motion = true;
     let (_engine, rx) = start_in(BASE_PLOT_MOTION, environment);
     let mut batches = until(&rx, |b| shows(b, "hover null"));
     batches.extend(until(&rx, |_| false));
@@ -6640,10 +6612,8 @@ fn base_plot_pie_sweeps_in_and_lifts_on_the_pointer_spring() {
     )));
 
     // Reduced motion: whole at once, no sweep.
-    let environment = Environment {
-        reduce_motion: true,
-        ..Environment::default()
-    };
+    let mut environment = Environment::default();
+    environment.reduce_motion = true;
     let (_engine, rx) = start_in(BASE_PLOT_PIE_MOTION, environment);
     let mut all = until(&rx, |b| shows(b, "hover null"));
     all.extend(until(&rx, |_| false));
@@ -6727,10 +6697,8 @@ fn base_plot_pie_radii_move_with_the_update_motion() {
 
     // Reduced motion: the pie at once, its slices meeting short of the
     // center.
-    let environment = Environment {
-        reduce_motion: true,
-        ..Environment::default()
-    };
+    let mut environment = Environment::default();
+    environment.reduce_motion = true;
     let (_engine, rx) = start_in(BASE_PLOT_PIE_UPDATE, environment);
     let mut all = until(&rx, |b| shows(b, "pie"));
     all.extend(until(&rx, |_| false));
@@ -7067,10 +7035,8 @@ fn base_plot_sankey_hovers_its_nodes_and_labels_them() {
         keymap::{KeyMatch, Keymap, Keystroke},
         platform::Os,
     };
-    let environment = Environment {
-        os: Os::MacOs,
-        ..Environment::default()
-    };
+    let mut environment = Environment::default();
+    environment.os = Os::MacOs;
     let (engine, rx) = start_in(BASE_PLOT_SANKEY_HOVER, environment);
     // The labels' texts come a turn after the rows and the links.
     let mut all = until(&rx, |b| shows(b, "v12"));
@@ -7359,10 +7325,8 @@ fn base_plot_sankey_moves_to_new_flows() {
     near(at(ribbon, start.unwrap()), [72.5, 61.25, 50.0]);
 
     // Reduced motion: the new flows at once.
-    let environment = Environment {
-        reduce_motion: true,
-        ..Environment::default()
-    };
+    let mut environment = Environment::default();
+    environment.reduce_motion = true;
     let (_engine, rx) = start_in(BASE_PLOT_SANKEY_UPDATE, environment);
     let mut all = until(&rx, |b| shows(b, "late"));
     all.extend(until(&rx, |_| false));
@@ -7597,10 +7561,8 @@ fn base_plot_arc_and_pie_angles_move_with_the_update_motion() {
     assert!(near(ends[0], 0.0) && near(ends[1], FRAC_PI_2), "{ends:?}");
 
     // Reduced motion: the new angles at once.
-    let environment = Environment {
-        reduce_motion: true,
-        ..Environment::default()
-    };
+    let mut environment = Environment::default();
+    environment.reduce_motion = true;
     let (_engine, rx) = start_in(BASE_PLOT_ARC_TWEEN, environment);
     let mut all = until(&rx, |b| shows(b, "late"));
     all.extend(until(&rx, |_| false));
@@ -8486,10 +8448,8 @@ fn base_plot_bars_grow_and_fade_natively() {
     assert!(plot_drawings(&entered).is_empty());
 
     // Reduced motion: whole at once.
-    let environment = Environment {
-        reduce_motion: true,
-        ..Environment::default()
-    };
+    let mut environment = Environment::default();
+    environment.reduce_motion = true;
     let (_engine, rx) = start_in(BASE_PLOT_BAR_MOTION, environment);
     let mut batches = until(&rx, |b| shows(b, "hover null"));
     batches.extend(until(&rx, |_| false));
@@ -8971,10 +8931,8 @@ fn base_plot_domains_move_with_the_update_motion() {
     );
 
     // Reduced motion: no move, no transform.
-    let environment = Environment {
-        reduce_motion: true,
-        ..Environment::default()
-    };
+    let mut environment = Environment::default();
+    environment.reduce_motion = true;
     let (_engine, rx) = start_in(BASE_PLOT_DOMAIN_UPDATE, environment);
     let mut all = until(&rx, |b| shows(b, "top 200"));
     all.extend(until(&rx, |_| false));
@@ -9410,10 +9368,8 @@ fn a_base_plot_moves_its_hover_with_the_keys_while_focused() {
         keymap::{KeyMatch, Keymap, Keystroke},
         platform::Os,
     };
-    let environment = Environment {
-        os: Os::MacOs,
-        ..Environment::default()
-    };
+    let mut environment = Environment::default();
+    environment.os = Os::MacOs;
     let (engine, rx) = start_in(BASE_PLOT_KEYS, environment);
     let mut all = until(&rx, |b| shows(b, "hover null"));
     all.extend(until(&rx, |_| false));
@@ -9611,10 +9567,8 @@ fn base_plot_reversed_scales_run_from_the_other_edge() {
         keymap::{KeyMatch, Keymap, Keystroke},
         platform::Os,
     };
-    let environment = Environment {
-        os: Os::MacOs,
-        ..Environment::default()
-    };
+    let mut environment = Environment::default();
+    environment.os = Os::MacOs;
     let (engine, rx) = start_in(BASE_PLOT_REVERSE, environment);
     let mut all = until_drawn(&rx, |d| path_points(&d.ops).first() == Some(&(108.0, -8.0)));
     all.extend(until(&rx, |b| shows(b, "r2")));

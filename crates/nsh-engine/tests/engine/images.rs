@@ -58,9 +58,10 @@ fn start_with(
     .unwrap();
     let (tx, rx) = crossbeam_channel::unbounded();
     let config = EngineConfig {
-        environment: Environment {
-            pixel_ratio,
-            ..Environment::default()
+        environment: {
+            let mut environment = Environment::default();
+            environment.pixel_ratio = pixel_ratio;
+            environment
         },
         ui_sets,
         // SAFETY: compiled just now by this runtime.
@@ -128,10 +129,8 @@ mount(() => (
 
 #[test]
 fn variant_repick_sends_only_the_images_whose_variant_changes() {
-    let mut environment = Environment {
-        pixel_ratio: 3.0,
-        ..Environment::default()
-    };
+    let mut environment = Environment::default();
+    environment.pixel_ratio = 3.0;
     let (engine, rx) = start(APP, environment.pixel_ratio);
     let first = sent(&rx);
     let mounted: Vec<_> = first.iter().flat_map(images).collect();
@@ -195,10 +194,8 @@ fn variant_repick_sends_only_the_images_whose_variant_changes() {
 /// image whose pick changed, each time.
 #[test]
 fn variant_repick_item_counts_stay_bounded() {
-    let mut environment = Environment {
-        pixel_ratio: 1.0,
-        ..Environment::default()
-    };
+    let mut environment = Environment::default();
+    environment.pixel_ratio = 1.0;
     let (engine, rx) = start(APP, environment.pixel_ratio);
     sent(&rx);
     for ratio in [2.0, 1.0, 2.0, 1.0, 3.0, 1.0] {

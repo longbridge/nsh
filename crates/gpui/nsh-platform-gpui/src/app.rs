@@ -798,20 +798,19 @@ impl Render for AppView {
 }
 
 fn initial_environment() -> Environment {
-    Environment {
-        window: nsh_core::Size::default(),
-        color_scheme: ColorScheme::Light,
-        os: if cfg!(target_os = "macos") {
-            Os::MacOs
-        } else if cfg!(windows) {
-            Os::Windows
-        } else {
-            Os::Linux
-        },
-        idiom: Idiom::Desktop,
-        file_requests: true,
-        ..Environment::default()
-    }
+    let mut environment = Environment::default();
+    environment.window = nsh_core::Size::default();
+    environment.color_scheme = ColorScheme::Light;
+    environment.os = if cfg!(target_os = "macos") {
+        Os::MacOs
+    } else if cfg!(windows) {
+        Os::Windows
+    } else {
+        Os::Linux
+    };
+    environment.idiom = Idiom::Desktop;
+    environment.file_requests = true;
+    environment
 }
 
 /// Opens a window showing `source` in an [`AppView`] (in a running GPUI

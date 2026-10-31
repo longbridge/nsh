@@ -158,7 +158,11 @@ impl Idiom {
 }
 
 /// What the platform knows about the surface.
+///
+/// Non-exhaustive, so that a new field breaks no code that builds one: other
+/// crates start from [`Environment::default`] and set the fields they know.
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[non_exhaustive]
 pub struct Environment {
     /// Size of the surface in points.
     pub window: Size<Points>,

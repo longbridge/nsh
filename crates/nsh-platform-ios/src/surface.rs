@@ -307,49 +307,45 @@ impl RootView {
                 traits.displayScale(),
             )
         };
-        let mut env = Environment {
-            window: Size::new(Points(size.width as f32), Points(size.height as f32)),
-            safe_area: Edges {
-                top: Points(insets.top as f32),
-                right: Points(insets.right as f32),
-                bottom: Points(insets.bottom as f32),
-                left: Points(insets.left as f32),
-            },
-            // UIKit draws no title bar an app could hide.
-            title_bar: Edges::default(),
-            keyboard_height: Points(keyboard_height),
-            keyboard_duration,
-            color_scheme: if style == UIUserInterfaceStyle::Dark {
-                ColorScheme::Dark
-            } else {
-                ColorScheme::Light
-            },
-            // The body text style is 17pt at the default size.
-            font_scale: (body / 17.0) as f32,
-            rtl: preferred_language_rtl(),
-            reduce_motion: objc2_ui_kit::UIAccessibilityIsReduceMotionEnabled(),
-            pixel_ratio: scale as f32,
-            screen_reader: objc2_ui_kit::UIAccessibilityIsVoiceOverRunning(),
-            os: nsh_engine::Os::Ios,
-            os_version: os_version(self.mtm()),
-            idiom: match UIDevice::currentDevice(self.mtm()).userInterfaceIdiom() {
-                UIUserInterfaceIdiom::Pad => Idiom::Pad,
-                UIUserInterfaceIdiom::Mac => Idiom::Mac,
-                UIUserInterfaceIdiom::TV => Idiom::Tv,
-                _ => Idiom::Phone,
-            },
-            locale: current_locale(),
-            // Only read for the web: iOS keys are always Apple's.
-            apple_keyboard: true,
-            // No host answers `nsh/host` here: an embedding app talks to its
-            // apps through its own UI sets (`nsh/native`).
-            host: false,
-            // UIKit has no screen color sampler.
-            screen_color: false,
-            // No file dialogs, file manager or trash (Catalyst included):
-            // the default, so the core answers those requests.
-            ..Environment::default()
+        let mut env = Environment::default();
+        env.window = Size::new(Points(size.width as f32), Points(size.height as f32));
+        env.safe_area = Edges {
+            top: Points(insets.top as f32),
+            right: Points(insets.right as f32),
+            bottom: Points(insets.bottom as f32),
+            left: Points(insets.left as f32),
         };
+        // UIKit draws no title bar an app could hide.
+        env.title_bar = Edges::default();
+        env.keyboard_height = Points(keyboard_height);
+        env.keyboard_duration = keyboard_duration;
+        env.color_scheme = if style == UIUserInterfaceStyle::Dark {
+            ColorScheme::Dark
+        } else {
+            ColorScheme::Light
+        };
+        // The body text style is 17pt at the default size.
+        env.font_scale = (body / 17.0) as f32;
+        env.rtl = preferred_language_rtl();
+        env.reduce_motion = objc2_ui_kit::UIAccessibilityIsReduceMotionEnabled();
+        env.pixel_ratio = scale as f32;
+        env.screen_reader = objc2_ui_kit::UIAccessibilityIsVoiceOverRunning();
+        env.os = nsh_engine::Os::Ios;
+        env.os_version = os_version(self.mtm());
+        env.idiom = match UIDevice::currentDevice(self.mtm()).userInterfaceIdiom() {
+            UIUserInterfaceIdiom::Pad => Idiom::Pad,
+            UIUserInterfaceIdiom::Mac => Idiom::Mac,
+            UIUserInterfaceIdiom::TV => Idiom::Tv,
+            _ => Idiom::Phone,
+        };
+        env.locale = current_locale();
+        // Only read for the web: iOS keys are always Apple's.
+        env.apple_keyboard = true;
+        // No host answers `nsh/host` here: an embedding app talks to its
+        // apps through its own UI sets (`nsh/native`).
+        env.host = false;
+        // UIKit has no screen color sampler.
+        env.screen_color = false;
         // The embedding app's settings over the system's.
         self.ivars().host.get().apply(&mut env);
         env

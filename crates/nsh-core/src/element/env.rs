@@ -7,7 +7,11 @@ use crate::{
 };
 
 /// The environment of a surface, as the platform reports it.
+///
+/// Non-exhaustive, so that a new field breaks no code that builds one: other
+/// crates start from [`Environment::default`] and set the fields they know.
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[non_exhaustive]
 pub struct Environment {
     /// The surface's size in points.
     pub window: Size<Points>,

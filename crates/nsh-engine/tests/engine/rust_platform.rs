@@ -264,10 +264,8 @@ fn the_layout_direction_follows_the_language() {
         }
         None
     };
-    let rtl = Environment {
-        rtl: true,
-        ..Environment::default()
-    };
+    let mut rtl = Environment::default();
+    rtl.rtl = true;
     assert_eq!(directions_after(rtl), Some(true));
     assert_eq!(directions_after(Environment::default()), Some(false));
 }
@@ -290,33 +288,26 @@ fn Device() -> impl IntoElement {
 
 #[test]
 fn components_read_the_pixel_ratio_the_device_and_the_locale() {
-    let environment = Environment {
-        pixel_ratio: 3.0,
-        os: Os::Android,
-        os_version: (34, 0),
-        idiom: Idiom::Pad,
-        locale: Locale::parse("de_DE").unwrap(),
-        ..Environment::default()
-    };
+    let mut environment = Environment::default();
+    environment.pixel_ratio = 3.0;
+    environment.os = Os::Android;
+    environment.os_version = (34, 0);
+    environment.idiom = Idiom::Pad;
+    environment.locale = Locale::parse("de_DE").unwrap();
     let (engine, rx, _) = start::<Device>(environment);
     let shown = "android 34.0 Pad ×3 10.333333 de-DE";
     let (texts, ..) = until(&rx, shown);
     assert!(texts.iter().any(|t| t == shown), "{texts:?}");
     // The window moved to another screen: what reads the pixel ratio
     // follows.
-    engine.control().set_environment(Environment {
-        pixel_ratio: 2.0,
-        ..environment
-    });
+    environment.pixel_ratio = 2.0;
+    engine.control().set_environment(environment);
     let shown = "android 34.0 Pad ×2 10.5 de-DE";
     let (texts, ..) = until(&rx, shown);
     assert!(texts.iter().any(|t| t == shown), "{texts:?}");
     // The user changed the language: what reads the locale follows.
-    engine.control().set_environment(Environment {
-        pixel_ratio: 2.0,
-        locale: Locale::parse("zh-Hans_CN").unwrap(),
-        ..environment
-    });
+    environment.locale = Locale::parse("zh-Hans_CN").unwrap();
+    engine.control().set_environment(environment);
     let shown = "android 34.0 Pad ×2 10.5 zh-Hans-CN";
     let (texts, ..) = until(&rx, shown);
     assert!(texts.iter().any(|t| t == shown), "{texts:?}");

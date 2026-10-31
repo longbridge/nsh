@@ -362,14 +362,14 @@ impl AppView {
 }
 
 fn initial_environment() -> Environment {
-    Environment {
-        window: nsh_core::Size::new(nsh_core::geometry::px(0.0), nsh_core::geometry::px(0.0)),
-        color_scheme: ColorScheme::Light,
-        os: Os::Linux,
-        idiom: Idiom::Desktop,
-        file_requests: true,
-        ..Environment::default()
-    }
+    let mut environment = Environment::default();
+    environment.window =
+        nsh_core::Size::new(nsh_core::geometry::px(0.0), nsh_core::geometry::px(0.0));
+    environment.color_scheme = ColorScheme::Light;
+    environment.os = Os::Linux;
+    environment.idiom = Idiom::Desktop;
+    environment.file_requests = true;
+    environment
 }
 
 /// Runs `source` in a window until it is closed.

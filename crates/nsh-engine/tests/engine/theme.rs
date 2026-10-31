@@ -263,10 +263,9 @@ fn a_hosts_theme_overrides_win_over_the_apps_tokens_they_set_and_keep_the_rest()
         vec![Color(0xe11d48ff), Color(0xffff00ff)]
     );
     // Dark: the override's dark value.
-    engine.control().set_environment(Environment {
-        color_scheme: ColorScheme::Dark,
-        ..Environment::default()
-    });
+    let mut environment = Environment::default();
+    environment.color_scheme = ColorScheme::Dark;
+    engine.control().set_environment(environment);
     assert!(colors(backgrounds_by_id(&rx)).contains(&Color(0xfb7185ff)));
     // Changed live, then cleared: the app's own again.
     engine.control().set_tokens(Some(
