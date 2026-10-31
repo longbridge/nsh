@@ -291,3 +291,72 @@ fn animated_component_prop_survives_rerender() {
         );
     }
 }
+
+const WEB_INPUT_APP: &str = r#"import { mount, View, WebView } from "nsh";
+
+function App() {
+  return (
+    <View>
+      <WebView
+        src="https://example.com/"
+        style={{ height: 100 }}
+        ref={(page: any) =>
+          page &&
+          queueMicrotask(() => {
+            page.sendInput({ type: "click", x: 12.5, y: 40 });
+            page.sendInput({ type: "text", text: "a b!" });
+            page.sendInput({ type: "key", key: "Enter" });
+            // Not one of its forms: nothing is sent.
+            page.sendInput({ type: "key", key: "F13" });
+            page.sendInput({ type: "click", x: 1 });
+          })
+        }
+      />
+    </View>
+  );
+}
+
+mount(App);
+"#;
+
+#[test]
+fn a_web_view_ref_sends_trusted_input_to_its_view() {
+    use nsh_core::{WebInput, WebKey};
+    let (_engine, rx) = start(WEB_INPUT_APP);
+    let mut web = None;
+    let mut sent = Vec::new();
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    while sent.len() < 3 && std::time::Instant::now() < deadline {
+        let Ok(batch) = rx.recv_timeout(Duration::from_millis(200)) else {
+            continue;
+        };
+        for item in &batch.items {
+            match item {
+                MountItem::Create {
+                    id,
+                    kind: ViewKind::WebView,
+                } => web = Some(*id),
+                MountItem::Command {
+                    id,
+                    command: Command::SendInput(input),
+                } => sent.push((*id, input.clone())),
+                _ => {}
+            }
+        }
+    }
+    let web = web.expect("a web view");
+    assert_eq!(
+        sent,
+        [
+            (
+                web,
+                WebInput::Click {
+                    x: nsh_core::Points(12.5),
+                    y: nsh_core::Points(40.0)
+                }
+            ),
+            (web, WebInput::Text("a b!".into())),
+            (web, WebInput::Key(WebKey::Enter)),
+        ]
+    );
+}

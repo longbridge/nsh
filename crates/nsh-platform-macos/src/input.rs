@@ -900,12 +900,27 @@ pub(crate) fn us_key(code: u16) -> Option<char> {
 
 /// The virtual key code of the key typing `c` on the US layout (without
 /// Shift), for synthesized key events.
-#[cfg(feature = "dev")]
 pub(crate) fn us_key_code(c: char) -> Option<u16> {
     let c = u8::try_from(c.to_ascii_lowercase())
         .ok()
         .filter(|&c| c != 0)?;
     US_KEYS.iter().position(|&k| k == c).map(|i| i as u16)
+}
+
+/// The key, and whether Shift is down, that type `c` on the US layout:
+/// letters, digits, space and punctuation, shifted ones (`A`, `!`, `?`) on
+/// their unshifted key. `None` for what no US key types.
+pub(crate) fn us_typing_key(c: char) -> Option<(u16, bool)> {
+    if c == ' ' {
+        return Some((49, false));
+    }
+    if let Some(code) = us_key_code(c) {
+        return Some((code, c.is_ascii_uppercase()));
+    }
+    US_KEYS
+        .iter()
+        .position(|&k| k != 0 && nsh_core::keymap::shifted(k as char) == c)
+        .map(|i| (i as u16, true))
 }
 
 /// Where keys look for a scroll view: the mouse, or the middle.
@@ -2371,6 +2386,24 @@ pub(crate) fn file_drop_target(surface: &Surface, x: f32, y: f32) -> Option<NshV
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn typing_keys_follow_the_us_layout() {
+        // a, space, b and a shifted 1: each its own key, Shift only for "!".
+        let keys: Vec<_> = "a b!".chars().map(us_typing_key).collect();
+        assert_eq!(
+            keys,
+            [
+                Some((0, false)),
+                Some((49, false)),
+                Some((11, false)),
+                Some((18, true))
+            ]
+        );
+        assert_eq!(us_typing_key('N'), Some((45, true)));
+        assert_eq!(us_typing_key('?'), Some((44, true)));
+        assert_eq!(us_typing_key('é'), None);
+    }
 
     #[test]
     fn batches_do_not_push_the_repick_on() {

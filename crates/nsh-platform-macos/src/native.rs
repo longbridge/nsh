@@ -43,7 +43,7 @@ use std::{
 use block2::RcBlock;
 use nsh_core::{
     Bounds, Command, EventKind, EventPayload, JsonValue, NativeProps, NodeId, PayloadValue, Points,
-    ResizeMode, Size, VideoProps, ViewKind, WebProps, WebSource, geometry::Point,
+    ResizeMode, Size, VideoProps, ViewKind, WebInput, WebKey, WebProps, WebSource, geometry::Point,
 };
 use nsh_engine::{Access, App, EngineControl, Policy};
 use objc2::{
@@ -51,7 +51,7 @@ use objc2::{
     rc::{Allocated, Retained},
     runtime::{AnyClass, AnyObject, Bool, ProtocolObject},
 };
-use objc2_app_kit::NSView;
+use objc2_app_kit::{NSEvent, NSEventModifierFlags, NSEventType, NSView, NSWindow};
 use objc2_core_foundation::CGSize;
 use objc2_foundation::{
     NSNotification, NSNotificationCenter, NSObject, NSObjectProtocol, NSOperationQueue, NSPoint,
@@ -396,6 +396,15 @@ pub(crate) fn command(surface: &Rc<Surface>, view: &NshView, command: &Command) 
             if let Some(mut component) = take_component(surface, view.id()) {
                 component.command(name, args);
                 put_component(surface, view.id(), component);
+            }
+        }
+        Command::SendInput(input) => {
+            let web = match surface.native.hosts.borrow().get(&view.id()) {
+                Some(Host::Web(web)) => web.web.clone(),
+                _ => None,
+            };
+            if let Some(web) = web {
+                web_input(&web, input);
             }
         }
         _ => {
@@ -1569,6 +1578,100 @@ fn web_command(web: &AnyObject, command: &Command) {
                 let _: () = msg_send![web, stopLoading];
             }
             _ => {}
+        }
+    }
+}
+
+/// `sendInput()`: events made as AppKit makes the user's and handed to the
+/// web view, so the page sees them trusted, which injected scripts cannot do.
+fn web_input(web: &AnyObject, input: &WebInput) {
+    // SAFETY: AppKit's and WebKit's documented API, on the main thread.
+    unsafe {
+        let window: Option<Retained<NSWindow>> = msg_send![web, window];
+        let Some(window) = window else { return };
+        // Keys go to the first responder; a click makes the web view it too.
+        let _: Bool = msg_send![&*window, makeFirstResponder: web];
+        let time = objc2_foundation::NSProcessInfo::processInfo().systemUptime();
+        match input {
+            WebInput::Click { x, y } => {
+                // CSS pixels are points scaled by the page's zoom and magnification.
+                let zoom: f64 = msg_send![web, pageZoom];
+                let magnification: f64 = msg_send![web, magnification];
+                let scale = zoom * magnification;
+                let point: NSPoint = msg_send![
+                    web,
+                    convertPoint: NSPoint::new(f64::from(x.0) * scale, f64::from(y.0) * scale),
+                    toView: std::ptr::null::<AnyObject>()
+                ];
+                for (kind, pressure) in [
+                    (NSEventType::LeftMouseDown, 1.0),
+                    (NSEventType::LeftMouseUp, 0.0),
+                ] {
+                    let Some(event) = NSEvent::mouseEventWithType_location_modifierFlags_timestamp_windowNumber_context_eventNumber_clickCount_pressure(
+                        kind,
+                        point,
+                        NSEventModifierFlags::empty(),
+                        time,
+                        window.windowNumber(),
+                        None,
+                        0,
+                        1,
+                        pressure,
+                    ) else {
+                        continue;
+                    };
+                    if kind == NSEventType::LeftMouseDown {
+                        let _: () = msg_send![web, mouseDown: &*event];
+                    } else {
+                        let _: () = msg_send![web, mouseUp: &*event];
+                    }
+                }
+            }
+            WebInput::Text(text) => {
+                // The US layout's key (and Shift) for each character, so the
+                // page's `KeyboardEvent.code` names the key a user would press.
+                for c in text.chars() {
+                    let (code, shift) = crate::input::us_typing_key(c).unwrap_or((0, false));
+                    key(web, &window, time, &c.to_string(), code, shift);
+                }
+            }
+            WebInput::Key(k) => {
+                let (chars, code) = match k {
+                    WebKey::Enter => ("\r", 36),
+                    WebKey::Tab => ("\t", 48),
+                    WebKey::Escape => ("\u{1b}", 53),
+                    WebKey::Backspace => ("\u{7f}", 51),
+                };
+                key(web, &window, time, chars, code, false);
+            }
+        }
+    }
+}
+
+/// A key's down and up, with `chars` typed, handed to the web view.
+fn key(web: &AnyObject, window: &NSWindow, time: f64, chars: &str, code: u16, shift: bool) {
+    let s = NSString::from_str(chars);
+    for kind in [NSEventType::KeyDown, NSEventType::KeyUp] {
+        let event = NSEvent::keyEventWithType_location_modifierFlags_timestamp_windowNumber_context_characters_charactersIgnoringModifiers_isARepeat_keyCode(
+            kind,
+            NSPoint::new(0.0, 0.0),
+            if shift { NSEventModifierFlags::Shift } else { NSEventModifierFlags::empty() },
+            time,
+            window.windowNumber(),
+            None,
+            &s,
+            &s,
+            false,
+            code,
+        );
+        let Some(event) = event else { continue };
+        // SAFETY: NSResponder's documented API, on the main thread.
+        unsafe {
+            if kind == NSEventType::KeyDown {
+                let _: () = msg_send![web, keyDown: &*event];
+            } else {
+                let _: () = msg_send![web, keyUp: &*event];
+            }
         }
     }
 }

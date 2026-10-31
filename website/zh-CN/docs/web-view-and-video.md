@@ -93,7 +93,7 @@ mount(App);
 
 ### 带前进后退的浏览器
 
-Web 视图的 ref（Rust 中用 `.element_ref(&web)` 挂上的 `element_ref()`，TSX 中的 `ref`）提供 `reload`、`go_back` / `goBack`、`go_forward` / `goForward`、`stop_loading` / `stopLoading`、`inject_java_script` / `injectJavaScript(script)` 和 `post_message` / `postMessage(data)`：
+Web 视图的 ref（Rust 中用 `.element_ref(&web)` 挂上的 `element_ref()`，TSX 中的 `ref`）提供 `reload`、`go_back` / `goBack`、`go_forward` / `goForward`、`stop_loading` / `stopLoading`、`inject_java_script` / `injectJavaScript(script)`、`post_message` / `postMessage(data)` 和 `send_input` / `sendInput(input)`（见[下文](#像用户一样输入)）：
 
 ```rust tabs
 use nsh_core::prelude::*;
@@ -281,6 +281,24 @@ web_view("https://example.com")
   onMessage={(e) => console.log("title", e.data)}
 />
 ```
+
+### 像用户一样输入
+
+`injectJavaScript` 只能产生合成事件，页面会把它们视为不可信（`event.isTrusted` 为 `false`），有些控件会忽略它们。ref 的 `send_input`（`sendInput(input)`）以用户亲手操作的方式把输入交给页面，因此页面收到的事件是可信的：
+
+- `{ type: "click", x, y }` 点击视口中的一个点，单位为 CSS 像素（即 `getBoundingClientRect()` 报告的值）。
+- `{ type: "text", text }` 把文本逐键输入到页面中当前有焦点的元素。
+- `{ type: "key", key }` 按下 `Enter`、`Tab`、`Escape` 或 `Backspace`。
+
+```tsx
+web.sendInput({ type: "click", x: 120, y: 40 });
+setTimeout(() => {
+  web.sendInput({ type: "text", text: "espresso" });
+  web.sendInput({ type: "key", key: "Enter" });
+}, 50);
+```
+
+页面按自己的节奏处理输入：点击的事件在下一次调用开始时可能仍在途中，所以点击后先等它生效（大约一帧）再输入。目前由 macOS 投递这些输入，其他平台暂时忽略。
 
 ### 网页视图可以显示哪些网站
 

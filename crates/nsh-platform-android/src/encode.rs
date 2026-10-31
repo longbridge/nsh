@@ -656,7 +656,9 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
                     // core answers first.
                     | Command::FileRequest { .. }
                     // No menus of the platform's own to color.
-                    | Command::Tokens(_) => e.int(-1),
+                    | Command::Tokens(_)
+                    // Trusted web view input is macOS's for now.
+                    | Command::SendInput(_) => e.int(-1),
                 }
             }
         }
