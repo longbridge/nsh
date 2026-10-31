@@ -1277,6 +1277,7 @@ fn set_prop(
             };
             return dom(cx).push(cx, Op::SetProp { id, prop });
         }
+        "tooltip" if followed(cx, name, value) => return bind_prop_with(cx, node, name, value),
         _ => {}
     }
     if let Some(prop) = crate::touch::touch_prop(name) {
@@ -1356,6 +1357,16 @@ fn set_prop(
         Err(rquickjs::Error::Exception) => Err(qjs::JS_EXCEPTION),
         Err(e) => Err(throw_type(cx, &format!("nsh: prop `{name}`: {e}"))),
     }
+}
+
+/// Whether `set_prop` follows `value` (borrowed) of prop `name` with a
+/// bound prop of its own: a `tooltip` given by a function (in a development
+/// bundle a component's element is its hot proxy's memo). That binding goes
+/// when the computation that set the prop runs again, so such a value is
+/// set again on every run, even unchanged.
+fn followed(cx: *mut JsContext, name: &str, value: JsValue) -> bool {
+    // SAFETY: an inline check of a borrowed value.
+    name == "tooltip" && unsafe { qjs::JS_IsFunction(cx, value) } && node_ptr(cx, value).is_null()
 }
 
 /// Sets the handler of `event` on node `p` to `value` (borrowed; not a
@@ -1620,7 +1631,11 @@ unsafe extern "C" fn bind_prop_run(
     if unsafe { qjs::JS_IsException(next) } {
         return next;
     }
-    if unsafe { qjs::JS_IsStrictEqual(cx, prev, next) } {
+    // The name is read only for an unchanged function ([`followed`]).
+    if unsafe { qjs::JS_IsStrictEqual(cx, prev, next) }
+        && !(unsafe { qjs::JS_IsFunction(cx, next) }
+            && to_string(cx, name).is_some_and(|name| followed(cx, &name, next)))
+    {
         return next;
     }
     let Some(name) = to_string(cx, name) else {
@@ -1721,7 +1736,7 @@ unsafe extern "C" fn spread_run(
             } else {
                 UNDEFINED
             };
-            let r = if qjs::JS_IsStrictEqual(cx, old, v) {
+            let r = if qjs::JS_IsStrictEqual(cx, old, v) && !followed(cx, &name_str, v) {
                 Ok(())
             } else {
                 set_prop(cx, node, &name_str, v, old)
@@ -4397,6 +4412,73 @@ mod tests {
                 .any(|o| matches!(o, Op::Animation(AnimationOp::Release { .. }))),
             "{ops:?}"
         );
+    }
+
+    /// A `tooltip` given by a memo (a component's element in a development
+    /// bundle: its hot proxy's) is the element the memo gives, and follows it.
+    #[test]
+    fn a_tooltip_given_by_a_memo_follows_it() {
+        let host = Host::new().unwrap();
+        host.eval_source(
+            r#"
+            import { computed, signal } from "nsh";
+            import { element, prop } from "nsh:rt";
+            const tips = [element("view"), element("view")];
+            const shown = signal(0);
+            prop(element("view"), "tooltip", computed(() => tips[shown()]));
+            shown.set(1);
+            "#,
+        )
+        .unwrap();
+        assert_eq!(tooltips(&host), ["Node(2)", "Node(4)"]);
+    }
+
+    /// A tooltip memo stays followed when what set it runs again with the
+    /// same memo: a spread after another of its props changed, a bound prop
+    /// after something else it read did. Each run sets the memo's element
+    /// again (the core keeps it as it is).
+    #[test]
+    fn a_tooltip_memo_is_followed_after_what_set_it_ran_again() {
+        let host = Host::new().unwrap();
+        host.eval_source(
+            r#"
+            import { computed, signal } from "nsh";
+            import { bindProp, element, spread } from "nsh:rt";
+            const tips = [element("view"), element("view")];
+            const shown = signal(0);
+            const id = signal("a");
+            const tip = computed(() => tips[shown()]);
+            spread(element("view"), {
+                get testID() { return id(); },
+                get tooltip() { return tip; },
+            });
+            bindProp(element("view"), "tooltip", () => (id(), tip));
+            id.set("b");
+            shown.set(1);
+            "#,
+        )
+        .unwrap();
+        assert_eq!(
+            tooltips(&host),
+            [
+                "Node(2)", "Node(2)", "Node(2)", "Node(2)", "Node(4)", "Node(4)"
+            ]
+        );
+    }
+
+    /// The tooltips the ops since the last call set.
+    fn tooltips(host: &Host) -> Vec<String> {
+        let mut ops = Vec::new();
+        host.take_ops(&mut ops);
+        ops.into_iter()
+            .filter_map(|o| match o {
+                Op::SetProp {
+                    prop: nsh_core::Prop::Tooltip(content),
+                    ..
+                } => Some(format!("{content:?}")),
+                _ => None,
+            })
+            .collect()
     }
 
     #[test]
