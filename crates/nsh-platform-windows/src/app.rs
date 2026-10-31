@@ -352,14 +352,13 @@ impl AppView {
 }
 
 fn initial_environment() -> Environment {
-    Environment {
-        window: Size::new(px(0.0), px(0.0)),
-        color_scheme: ColorScheme::Light,
-        os: Os::Windows,
-        idiom: Idiom::Desktop,
-        file_requests: true,
-        ..Environment::default()
-    }
+    let mut environment = Environment::default();
+    environment.window = Size::new(px(0.0), px(0.0));
+    environment.color_scheme = ColorScheme::Light;
+    environment.os = Os::Windows;
+    environment.idiom = Idiom::Desktop;
+    environment.file_requests = true;
+    environment
 }
 
 /// Runs `source` in a window until it is closed.

@@ -426,15 +426,14 @@ impl AppView {
 }
 
 fn initial_environment() -> Environment {
-    Environment {
-        window: Size::new(px(0.0), px(0.0)),
-        color_scheme: ColorScheme::Light,
-        os: Os::MacOs,
-        idiom: Idiom::Desktop,
-        screen_color: true,
-        file_requests: true,
-        ..Environment::default()
-    }
+    let mut environment = Environment::default();
+    environment.window = Size::new(px(0.0), px(0.0));
+    environment.color_scheme = ColorScheme::Light;
+    environment.os = Os::MacOs;
+    environment.idiom = Idiom::Desktop;
+    environment.screen_color = true;
+    environment.file_requests = true;
+    environment
 }
 
 /// The standalone app's window and view.

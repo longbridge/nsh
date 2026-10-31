@@ -180,10 +180,9 @@ impl App {
         })
         .unwrap();
         // The runtime reads the environment while it loads.
-        host.set_environment(&nsh_js::Environment {
-            window: Size::new(px(390.0), px(844.0)),
-            ..Default::default()
-        });
+        let mut environment = nsh_js::Environment::default();
+        environment.window = Size::new(px(390.0), px(844.0));
+        host.set_environment(&environment);
         let mut core = Core::new(ApproxTextEngine, Size::new(px(390.0), px(844.0)));
         core.set_components(crate::test_ui::registry());
         Self {

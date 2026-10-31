@@ -607,6 +607,11 @@ public class NshView extends FrameLayout {
     // --- Environment ---------------------------------------------------------
 
     private float keyboard;
+    /**
+     * Whether the app is in use (`appState()`): its activity's state, 0 resumed (active), 1 paused or started
+     * again (inactive: visible without the focus), 2 stopped (background). Active until the activity says otherwise.
+     */
+    private int appState;
     /** How long the keyboard's last move took (ms; `keyboardFrame().duration`). */
     private long keyboardDuration = 250;
     /** The host app's locale and text size ({@link #setLocale}, {@link #setFontScale}). */
@@ -720,7 +725,52 @@ public class NshView extends FrameLayout {
             Build.VERSION.SDK_INT,
             (c.uiMode & Configuration.UI_MODE_TYPE_MASK) == Configuration.UI_MODE_TYPE_TELEVISION ? 3
                     : c.smallestScreenWidthDp >= 600 ? 1 : 0,
+            appState,
         }, dark, locale.toLanguageTag());
+    }
+
+    /** The view's activity reported `state` (`appState()`'s values). */
+    private void activityState(Activity activity, int state) {
+        if (activity != activity(getContext()) || state == appState) return;
+        appState = state;
+        publishEnvironment(getRootWindowInsets());
+    }
+
+    /**
+     * The activities going through their lifecycle: `appState()`. One callback per application, registered by the
+     * first view attached and kept for the process, so it knows each activity's last state while views come and go: a
+     * view attached again starts from its activity's state then, whatever the activity did while it was detached.
+     */
+    private static final class Lifecycles implements android.app.Application.ActivityLifecycleCallbacks {
+        private static Lifecycles registered;
+        private final java.util.WeakHashMap<Activity, Integer> states = new java.util.WeakHashMap<>();
+        private final java.util.ArrayList<NshView> views = new java.util.ArrayList<>();
+
+        static Lifecycles of(Activity activity) {
+            if (registered == null) {
+                registered = new Lifecycles();
+                activity.getApplication().registerActivityLifecycleCallbacks(registered);
+            }
+            return registered;
+        }
+
+        /** The last state `activity` reported, or null before it reported one. */
+        Integer state(Activity activity) {
+            return states.get(activity);
+        }
+
+        private void state(Activity activity, int state) {
+            states.put(activity, state);
+            for (NshView view : new java.util.ArrayList<>(views)) view.activityState(activity, state);
+        }
+
+        @Override public void onActivityResumed(Activity a) { state(a, 0); }
+        @Override public void onActivityPaused(Activity a) { state(a, 1); }
+        @Override public void onActivityStarted(Activity a) { state(a, 1); }
+        @Override public void onActivityStopped(Activity a) { state(a, 2); }
+        @Override public void onActivityCreated(Activity a, android.os.Bundle b) {}
+        @Override public void onActivitySaveInstanceState(Activity a, android.os.Bundle b) {}
+        @Override public void onActivityDestroyed(Activity a) { states.remove(a); }
     }
 
     private android.view.accessibility.AccessibilityManager accessibility() {
@@ -823,6 +873,14 @@ public class NshView extends FrameLayout {
     protected void onAttachedToWindow() {
         super.onAttachedToWindow();
         accessibility().addTouchExplorationStateChangeListener(screenReader);
+        Activity activity = activity(getContext());
+        if (activity != null) {
+            Lifecycles lifecycles = Lifecycles.of(activity);
+            lifecycles.views.add(this);
+            // What the activity did while the view was detached.
+            Integer state = lifecycles.state(activity);
+            if (state != null) activityState(activity, state);
+        }
         // The dispatcher exists once attached.
         if (handle != 0) mounter.updateBack();
     }
@@ -831,6 +889,7 @@ public class NshView extends FrameLayout {
     protected void onDetachedFromWindow() {
         super.onDetachedFromWindow();
         accessibility().removeTouchExplorationStateChangeListener(screenReader);
+        if (Lifecycles.registered != null) Lifecycles.registered.views.remove(this);
     }
 
     /** `BackHandler.exitApp()`: what the back button does without the app. */

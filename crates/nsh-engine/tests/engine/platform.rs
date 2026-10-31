@@ -56,10 +56,11 @@ fn first_frame(os: Os, idiom: Idiom) -> (Vec<String>, Vec<String>) {
         refuse_connections: None,
         filesystem: None,
         assets: None,
-        environment: Environment {
-            os,
-            idiom,
-            ..Environment::default()
+        environment: {
+            let mut environment = Environment::default();
+            environment.os = os;
+            environment.idiom = idiom;
+            environment
         },
         header_heights: (nsh_core::Points(44.0), nsh_core::Points(96.0)),
         limits: nsh_engine::Limits::default(),

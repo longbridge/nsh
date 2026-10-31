@@ -3,11 +3,15 @@
 
 use crate::{
     EdgeInsets, Points, Size,
-    platform::{Idiom, Locale, Os},
+    platform::{AppState, Idiom, Locale, Os},
 };
 
 /// The environment of a surface, as the platform reports it.
+///
+/// Non-exhaustive, so that a new field breaks no code that builds one: other
+/// crates start from [`Environment::default`] and set the fields they know.
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[non_exhaustive]
 pub struct Environment {
     /// The surface's size in points.
     pub window: Size<Points>,
@@ -46,6 +50,9 @@ pub struct Environment {
     /// The embedding app answers `nsh/host`'s calls
     /// ([`crate::platform::Environment::host`]).
     pub host: bool,
+    /// Whether the app is in use: in the foreground, visible without the
+    /// focus, or in the background.
+    pub app_state: AppState,
     /// The platform picks colors from the screen
     /// ([`crate::platform::Environment::screen_color`]).
     pub screen_color: bool,
@@ -74,6 +81,7 @@ impl Default for Environment {
             locale: Locale::EN_US,
             apple_keyboard: false,
             host: false,
+            app_state: AppState::Active,
             screen_color: false,
             file_requests: false,
         }

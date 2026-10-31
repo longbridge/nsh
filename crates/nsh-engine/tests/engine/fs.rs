@@ -74,13 +74,14 @@ mount(() => <Text>{{shown()}}</Text>);
         refuse_connections: None,
         filesystem: None,
         assets: None,
-        environment: Environment {
-            os: if cfg!(target_os = "macos") {
+        environment: {
+            let mut environment = Environment::default();
+            environment.os = if cfg!(target_os = "macos") {
                 Os::MacOs
             } else {
                 Os::Linux
-            },
-            ..Default::default()
+            };
+            environment
         },
         header_heights: (nsh_core::Points(44.0), nsh_core::Points(96.0)),
         limits: nsh_engine::Limits::default(),
@@ -645,9 +646,10 @@ mount(() => <Text>{shown()}</Text>);
         refuse_connections: None,
         filesystem: None,
         assets: None,
-        environment: Environment {
-            os: Os::Ios,
-            ..Default::default()
+        environment: {
+            let mut environment = Environment::default();
+            environment.os = Os::Ios;
+            environment
         },
         header_heights: (nsh_core::Points(44.0), nsh_core::Points(96.0)),
         limits: nsh_engine::Limits::default(),

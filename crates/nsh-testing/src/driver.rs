@@ -8,7 +8,7 @@ use std::time::Duration;
 use nsh_core::{
     Dialog, ResolvedTextStyle,
     geometry::{Point, Points, Size},
-    platform::ColorScheme,
+    platform::{AppState, ColorScheme},
 };
 use nsh_dev::protocol::{ClockChange, TestStep};
 use serde_json::Value;
@@ -65,6 +65,11 @@ pub(crate) trait Driver: Send {
     fn next_frame(&mut self, timeout: Duration) -> Result<Duration, String>;
     fn set_viewport(&mut self, size: Size<Points>) -> Result<(), String>;
     fn set_color_scheme(&mut self, scheme: ColorScheme) -> Result<(), String>;
+    /// Whether the app is in use, as the system reports it (`appState()`).
+    fn set_app_state(&mut self, state: AppState) -> Result<(), String> {
+        let _ = state;
+        Err(headless_only("setAppState"))
+    }
     fn run_for(&mut self, time: Duration) -> Result<(), String>;
     fn fast_forward(&mut self, time: Duration) -> Result<(), String>;
     fn set_system_time(&mut self, at: std::time::SystemTime) -> Result<(), String>;
@@ -193,6 +198,11 @@ impl Driver for Headless {
         };
         self.set_environment(&format!("setColorScheme({name})"), |e| {
             e.color_scheme = scheme;
+        })
+    }
+    fn set_app_state(&mut self, state: AppState) -> Result<(), String> {
+        self.set_environment(&format!("setAppState({})", state.name()), |e| {
+            e.app_state = state;
         })
     }
     fn run_for(&mut self, time: Duration) -> Result<(), String> {

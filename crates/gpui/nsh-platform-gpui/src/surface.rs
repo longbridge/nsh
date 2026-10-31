@@ -740,17 +740,15 @@ mod tests {
                 font_scale: Some(1.5),
             });
         // What the system reports goes under the host's settings.
-        surface.set_environment(nsh_engine::Environment {
-            font_scale: 1.25,
-            ..Default::default()
-        });
+        let mut environment = nsh_engine::Environment::default();
+        environment.font_scale = 1.25;
+        surface.set_environment(environment);
         let env = surface.environment.get();
         assert_eq!((Some(env.locale), env.font_scale), (zh, 1.5));
         surface.host_environment.set(Default::default());
-        surface.set_environment(nsh_engine::Environment {
-            font_scale: 1.25,
-            ..Default::default()
-        });
+        let mut environment = nsh_engine::Environment::default();
+        environment.font_scale = 1.25;
+        surface.set_environment(environment);
         let env = surface.environment.get();
         assert_eq!(
             (env.locale, env.font_scale),

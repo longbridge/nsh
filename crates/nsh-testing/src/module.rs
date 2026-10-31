@@ -645,6 +645,28 @@ impl From<ColorScheme> for nsh_core::platform::ColorScheme {
     }
 }
 
+/// Whether the app is in use (`appState()`).
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PropEnum)]
+pub enum AppState {
+    /// In the foreground and taking input.
+    #[default]
+    Active,
+    /// Visible without the focus.
+    Inactive,
+    /// Not visible.
+    Background,
+}
+
+impl From<AppState> for nsh_core::platform::AppState {
+    fn from(state: AppState) -> Self {
+        match state {
+            AppState::Active => nsh_core::platform::AppState::Active,
+            AppState::Inactive => nsh_core::platform::AppState::Inactive,
+            AppState::Background => nsh_core::platform::AppState::Background,
+        }
+    }
+}
+
 /// The platform a headless app is opened as.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PropEnum)]
 pub enum Platform {
@@ -1910,6 +1932,13 @@ impl App {
         scheme: ColorScheme,
     ) -> Result<(), JsError> {
         step(&this, move |app| app.set_color_scheme(scheme.into())).await
+    }
+
+    /// Moves the app to `state`, as the system does when the user leaves it
+    /// (`"background"`), switches to another app or window (`"inactive"`)
+    /// and comes back (`"active"`); `appState()` follows. Headless only.
+    pub async fn set_app_state(this: Instance<Self>, state: AppState) -> Result<(), JsError> {
+        step(&this, move |app| app.set_app_state(state.into())).await
     }
 
     /// The text on the clipboard now, `null` when it holds none.

@@ -57,8 +57,8 @@ pub use nsh_core::{
     geometry::{self, Bounds, Edges, Point, Points, Size},
     js::{HostLimits, Limits},
     platform::{
-        ColorScheme, Environment, FetchEvent, FetchOp, HostEnvironment, HttpBody, HttpHead,
-        HttpRequest, Idiom, Locale, Os,
+        AppState, ColorScheme, Environment, FetchEvent, FetchOp, HostEnvironment, HttpBody,
+        HttpHead, HttpRequest, Idiom, Locale, Os,
     },
     storage::{StorageBackend, StorageChange},
     time::Clock,
@@ -2474,27 +2474,28 @@ fn insets(env: &Environment) -> EdgeInsets {
 
 /// What Rust components read from the environment.
 fn ui_environment(env: &Environment, window: Size<Points>) -> nsh_core::element::Environment {
-    nsh_core::element::Environment {
-        window,
-        safe_area: insets(env),
-        title_bar: env.title_bar,
-        keyboard_height: env.keyboard_height,
-        keyboard_duration: env.keyboard_duration,
-        dark: env.color_scheme == ColorScheme::Dark,
-        font_scale: env.font_scale,
-        reduce_motion: env.reduce_motion,
-        screen_reader: env.screen_reader,
-        rtl: env.rtl,
-        pixel_ratio: env.pixel_ratio,
-        os: env.os,
-        os_version: env.os_version,
-        idiom: env.idiom,
-        locale: env.locale,
-        apple_keyboard: env.apple_keyboard,
-        host: env.host,
-        screen_color: env.screen_color,
-        file_requests: env.file_requests,
-    }
+    let mut environment = nsh_core::element::Environment::default();
+    environment.window = window;
+    environment.safe_area = insets(env);
+    environment.title_bar = env.title_bar;
+    environment.keyboard_height = env.keyboard_height;
+    environment.keyboard_duration = env.keyboard_duration;
+    environment.dark = env.color_scheme == ColorScheme::Dark;
+    environment.font_scale = env.font_scale;
+    environment.reduce_motion = env.reduce_motion;
+    environment.screen_reader = env.screen_reader;
+    environment.rtl = env.rtl;
+    environment.pixel_ratio = env.pixel_ratio;
+    environment.os = env.os;
+    environment.os_version = env.os_version;
+    environment.idiom = env.idiom;
+    environment.locale = env.locale;
+    environment.apple_keyboard = env.apple_keyboard;
+    environment.host = env.host;
+    environment.app_state = env.app_state;
+    environment.screen_color = env.screen_color;
+    environment.file_requests = env.file_requests;
+    environment
 }
 
 /// What class variants read from the environment.
@@ -2779,11 +2780,9 @@ mod tests {
             reduce_motion: Some(true),
             ..Default::default()
         };
-        let mut reported = super::Environment {
-            locale: nsh_core::platform::Locale::parse("en-US").unwrap(),
-            font_scale: 1.5,
-            ..Default::default()
-        };
+        let mut reported = super::Environment::default();
+        reported.locale = nsh_core::platform::Locale::parse("en-US").unwrap();
+        reported.font_scale = 1.5;
         pins.apply(&mut reported);
         assert_eq!(reported.locale.as_str(), "de-DE");
         assert!(reported.reduce_motion);
@@ -2847,10 +2846,8 @@ mod tests {
             right: Points(138.0),
             bottom: Points(0.0),
         };
-        let environment = super::Environment {
-            title_bar,
-            ..Default::default()
-        };
+        let mut environment = super::Environment::default();
+        environment.title_bar = title_bar;
         assert_eq!(
             super::ui_environment(
                 &environment,

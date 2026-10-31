@@ -39,7 +39,13 @@
 //!   preference on macOS, AT-SPI's `ScreenReaderEnabled` on Linux;
 //! - the pixel ratio: the window's scale factor (the surface sets it);
 //! - the OS version: the kernel's on Linux, `RtlGetVersion`'s on Windows,
-//!   `kern.osproductversion` on macOS.
+//!   `kern.osproductversion` on macOS;
+//! - the app's state, from GPUI's window activation and visibility
+//!   (`observe_window_activation`, `observe_window_visibility`):
+//!   background while the surface's window is not presented (GPUI's
+//!   `WindowVisibility::Hidden`: minimized, covered or on another desktop,
+//!   as far as the platform reports it), active while one of the windows
+//!   showing a surface is the active one, inactive otherwise.
 //!
 //! On Windows and macOS the settings are read again whenever the window's
 //! appearance changes (GPUI reports no other setting changes); on Linux
@@ -68,7 +74,7 @@ use nsh_core::{
     Points, ROOT_ID,
     platform::{Appearance, clipboard},
 };
-use nsh_engine::{ColorScheme, Edges, Environment, Locale};
+use nsh_engine::{AppState, ColorScheme, Edges, Environment, Locale};
 
 use crate::{
     app::AppView,
@@ -119,6 +125,10 @@ struct Watched {
     owns_window: bool,
     /// The appearance last given to the window (owned windows).
     forced: Option<Appearance>,
+    /// The window is the active one, as last seen.
+    active: bool,
+    /// The window is presented (GPUI's visibility), as last seen.
+    visible: bool,
 }
 
 /// Runs `f` on the record of the surface with `key`, if it is watched.
@@ -175,6 +185,40 @@ fn settings_changed() {
     }
 }
 
+/// A surface's window was activated or deactivated, or shown or hidden:
+/// every surface follows, as whether the app is the active one depends on
+/// all of their windows.
+fn app_state_changed() {
+    let surfaces: Vec<Rc<Surface>> = WATCHED.with(|w| {
+        let mut w = w.borrow_mut();
+        w.retain(|w| w.surface.strong_count() > 0);
+        w.iter().filter_map(|w| w.surface.upgrade()).collect()
+    });
+    for surface in surfaces {
+        let mut env: Environment = surface.environment.get();
+        env.app_state = app_state(&surface, env.app_state);
+        surface.set_environment(env);
+    }
+}
+
+/// The app's state as `surface` sees it; `current` while it is not
+/// watched.
+fn app_state(surface: &Surface, current: AppState) -> AppState {
+    WATCHED.with(|w| {
+        let w = w.borrow();
+        let Some(this) = w.iter().find(|w| w.key == surface.key()) else {
+            return current;
+        };
+        if !this.visible {
+            AppState::Background
+        } else if w.iter().any(|w| w.active && w.surface.strong_count() > 0) {
+            AppState::Active
+        } else {
+            AppState::Inactive
+        }
+    })
+}
+
 /// True when the window looks dark (or a test made the system look so).
 fn window_dark(window: &Window) -> bool {
     if let Some(dark) = SIMULATED.with(Cell::get) {
@@ -219,11 +263,28 @@ pub(crate) fn watch_environment(
             window: Some(window.window_handle()),
             owns_window: false,
             forced: None,
+            active: window.is_window_active(),
+            visible: window.is_visible(),
         });
     });
     cx.observe_window_appearance(window, |view, window, cx| {
         let surface = view.surface().clone();
         appearance_changed(&surface, window);
+        crate::rt::flush(cx);
+    })
+    .detach();
+    cx.observe_window_activation(window, |view, window, cx| {
+        let active = window.is_window_active();
+        with_watched(view.surface().key(), |w| w.active = active);
+        app_state_changed();
+        crate::rt::flush(cx);
+    })
+    .detach();
+    cx.observe_window_visibility(window, |view, visibility, _, cx| {
+        with_watched(view.surface().key(), |w| {
+            w.visible = visibility.is_visible()
+        });
+        app_state_changed();
         crate::rt::flush(cx);
     })
     .detach();
@@ -325,6 +386,7 @@ fn update(surface: &Surface) {
     env.os_version = settings.os_version;
     env.safe_area = Edges::default();
     env.keyboard_height = Points(0.0);
+    env.app_state = app_state(surface, env.app_state);
     surface.set_environment(env);
 }
 

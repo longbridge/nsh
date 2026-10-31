@@ -854,17 +854,17 @@ const toggle = () => {
 
 ## Device
 
-The device API tells the app about the device and its environment. Rust code calls the functions of `nsh_core::prelude` (`window()`, `dark()`, `font_scale()`, `locale()`, `os()`, `idiom()`, `pixel_ratio()`, `set_color_scheme()`, ...); TSX imports them from `nsh`. The window size, the color scheme, the font scale, the pixel ratio and the locale are reactive: read them in a binding (a closure passed to an element in Rust, JSX in TSX), `computed` or `effect`, and what reads them updates when the platform reports a change (rotation, a window resize, switching to dark mode, changing the text size or the language, moving to a screen of another density).
+The device API tells the app about the device and its environment. Rust code calls the functions of `nsh_core::prelude` (`window()`, `dark()`, `font_scale()`, `locale()`, `app_state()`, `os()`, `idiom()`, `pixel_ratio()`, `set_color_scheme()`, ...); TSX imports them from `nsh`. The window size, the color scheme, the font scale, the pixel ratio, the locale and the app state are reactive: read them in a binding (a closure passed to an element in Rust, JSX in TSX), `computed` or `effect`, and what reads them updates when the platform reports a change (rotation, a window resize, switching to dark mode, changing the text size or the language, moving to a screen of another density, leaving the app and coming back).
 
 ```rust tabs
 use nsh_core::{
-    platform::{Appearance, Idiom, Os},
-    prelude::*, // window, dark, font_scale, locale, os, idiom, pixel_ratio, set_color_scheme, ...
+    platform::{AppState, Appearance, Idiom, Os},
+    prelude::*, // window, dark, font_scale, locale, app_state, os, idiom, pixel_ratio, set_color_scheme, ...
 };
 ```
 
 ```tsx tabs
-import { colorScheme, fontScale, locale, openUrl, pixelRatio, platform, setColorScheme, windowSize } from "nsh";
+import { appState, colorScheme, fontScale, locale, openUrl, pixelRatio, platform, setColorScheme, windowSize } from "nsh";
 ```
 
 See [Device and environment](../docs/device-and-environment.md) for the guide.
@@ -922,6 +922,33 @@ const locale: Accessor<string>;
 ```
 
 The user's locale as a BCP 47 tag (`"en-US"`, `"zh-Hans-CN"`), or the locale the embedding app sets in its place. Reactive. Rust: `locale() -> Locale` (`locale().as_str()` is the tag). `Intl` formats for it by default; read it to choose the strings of your own translations ([Device and environment](../docs/device-and-environment.md#language-and-region)).
+
+### appState
+
+```ts
+const appState: Accessor<"active" | "inactive" | "background">;
+```
+
+Whether the app is in use, in React Native's `AppState` terms: `"active"` in the foreground and taking input, `"inactive"` while visible without the focus (another app or window has it, or the system shows something over it, such as the app switcher or an incoming call), `"background"` while not visible (in the background, minimized, a hidden browser tab). An app shown inside a native app follows that app's. Reactive. Rust: `app_state() -> AppState` (`AppState::Active`, `Inactive`, `Background`).
+
+Read it in an effect to pause work nobody sees and resume it when the app comes back:
+
+```rust tabs
+effect(move || {
+    if app_state() == AppState::Background {
+        feed.pause();
+    } else {
+        feed.resume();
+    }
+});
+```
+
+```tsx tabs
+effect(() => {
+  if (appState() === "background") feed.pause();
+  else feed.resume();
+});
+```
 
 ### setColorScheme
 

@@ -53,8 +53,8 @@ use nsh_core::{
     keymap::{Key, KeyMatch, Keymap, Keystroke, Modifiers},
 };
 use nsh_engine::{
-    App, Assets, ColorScheme, EngineConfig, EngineControl, Environment, Idiom, Limits, LocalEngine,
-    MountSink, Os,
+    App, AppState, Assets, ColorScheme, EngineConfig, EngineControl, Environment, Idiom, Limits,
+    LocalEngine, MountSink, Os,
 };
 
 use crate::{animation::UiAnimation, encode::Out, text::WebTextEngine};
@@ -332,23 +332,23 @@ pub unsafe extern "C" fn nsh_asset_bytes(ptr: *const u8, len: usize) {
 }
 
 fn environment(width: f32, height: f32, dark: bool, pixel_ratio: f32) -> Environment {
-    Environment {
-        window: nsh_core::Size::new(nsh_core::Points(width), nsh_core::Points(height)),
-        color_scheme: if dark {
-            ColorScheme::Dark
-        } else {
-            ColorScheme::Light
-        },
-        pixel_ratio,
-        ..page()
-    }
+    let mut environment = page();
+    environment.window = nsh_core::Size::new(nsh_core::Points(width), nsh_core::Points(height));
+    environment.color_scheme = if dark {
+        ColorScheme::Dark
+    } else {
+        ColorScheme::Light
+    };
+    environment.pixel_ratio = pixel_ratio;
+    environment
 }
 
 /// The page's environment as last reported (`os` is the web's).
 fn page() -> Environment {
-    PAGE.with(Cell::get).unwrap_or(Environment {
-        os: Os::Web,
-        ..Environment::default()
+    PAGE.with(Cell::get).unwrap_or_else(|| {
+        let mut environment = Environment::default();
+        environment.os = Os::Web;
+        environment
     })
 }
 
@@ -415,6 +415,12 @@ pub unsafe extern "C" fn nsh_environment(ptr: *const u8, len: usize) -> f64 {
     }
     env.keyboard_height = Points(num("keyboard").unwrap_or(env.keyboard_height.0));
     env.host = flag("host").unwrap_or(env.host);
+    env.app_state = match value.get("appState").and_then(|v| v.as_str()) {
+        Some("background") => AppState::Background,
+        Some("inactive") => AppState::Inactive,
+        Some(_) => AppState::Active,
+        None => env.app_state,
+    };
     env.screen_color = flag("screenColor").unwrap_or(env.screen_color);
     PAGE.with(|p| p.set(Some(env)));
     send(|app| {
@@ -427,6 +433,7 @@ pub unsafe extern "C" fn nsh_environment(ptr: *const u8, len: usize) -> f64 {
         e.pixel_ratio = env.pixel_ratio;
         e.safe_area = env.safe_area;
         e.keyboard_height = env.keyboard_height;
+        e.app_state = env.app_state;
         e.screen_color = env.screen_color;
         app.control.set_environment(app.environment);
     })

@@ -1535,6 +1535,11 @@ class Player {
     resolution();
     addEventListener("languagechange", changed);
     addEventListener("resize", changed);
+    // `appState()`: hidden (another tab, a minimized window) or without
+    // the focus.
+    document.addEventListener("visibilitychange", changed);
+    addEventListener("focus", changed);
+    addEventListener("blur", changed);
     visualViewport?.addEventListener("resize", changed);
     visualViewport?.addEventListener("scroll", changed);
     new MutationObserver(changed).observe(document.documentElement, { attributes: true, attributeFilter: ["dir", "lang"] });
@@ -1587,6 +1592,9 @@ class Player {
       keyboard: this.keyboardHeight(),
       appleKeyboard: APPLE,
       host: Boolean(this.options.host),
+      appState: document.visibilityState === "hidden"
+        ? "background"
+        : document.hasFocus() ? "active" : "inactive",
       screenColor: typeof window.EyeDropper === "function",
     };
   }

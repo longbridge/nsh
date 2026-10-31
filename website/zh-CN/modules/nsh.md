@@ -843,17 +843,17 @@ const toggle = () => {
 
 ## Device
 
-设备 API 向应用提供设备及其环境的信息。Rust 代码调用 `nsh_core::prelude` 中的函数（`window()`、`dark()`、`font_scale()`、`locale()`、`os()`、`idiom()`、`pixel_ratio()`、`set_color_scheme()` 等）；TSX 从 `nsh` 导入它们。窗口尺寸、配色方案、字体缩放、像素密度和区域设置是响应式的：在绑定（Rust 中传给元素的闭包，TSX 中的 JSX）、`computed` 或 `effect` 中读取它们，平台报告变化（旋转、窗口缩放、切换深色模式、修改文字大小或语言、移到另一种像素密度的屏幕）时，读取它们的地方会随之更新。
+设备 API 向应用提供设备及其环境的信息。Rust 代码调用 `nsh_core::prelude` 中的函数（`window()`、`dark()`、`font_scale()`、`locale()`、`app_state()`、`os()`、`idiom()`、`pixel_ratio()`、`set_color_scheme()` 等）；TSX 从 `nsh` 导入它们。窗口尺寸、配色方案、字体缩放、像素密度、区域设置和应用状态是响应式的：在绑定（Rust 中传给元素的闭包，TSX 中的 JSX）、`computed` 或 `effect` 中读取它们，平台报告变化（旋转、窗口缩放、切换深色模式、修改文字大小或语言、移到另一种像素密度的屏幕、离开应用再回来）时，读取它们的地方会随之更新。
 
 ```rust tabs
 use nsh_core::{
-    platform::{Appearance, Idiom, Os},
-    prelude::*, // window、dark、font_scale、locale、os、idiom、pixel_ratio、set_color_scheme……
+    platform::{AppState, Appearance, Idiom, Os},
+    prelude::*, // window、dark、font_scale、locale、app_state、os、idiom、pixel_ratio、set_color_scheme……
 };
 ```
 
 ```tsx tabs
-import { colorScheme, fontScale, locale, openUrl, pixelRatio, platform, setColorScheme, windowSize } from "nsh";
+import { appState, colorScheme, fontScale, locale, openUrl, pixelRatio, platform, setColorScheme, windowSize } from "nsh";
 ```
 
 教程见[设备与环境](../docs/device-and-environment.md)。
@@ -911,6 +911,33 @@ const locale: Accessor<string>;
 ```
 
 用户的区域设置，BCP 47 标签（`"en-US"`、`"zh-Hans-CN"`），或嵌入它的应用设置的区域设置。响应式。Rust：`locale() -> Locale`（`locale().as_str()` 即标签）。`Intl` 默认按它格式化；读取它来选择你自己的翻译文案（[设备与环境](../docs/device-and-environment.md#语言和地区)）。
+
+### appState
+
+```ts
+const appState: Accessor<"active" | "inactive" | "background">;
+```
+
+应用是否正在使用，与 React Native 的 `AppState` 含义相同：`"active"` 表示在前台并接收输入；`"inactive"` 表示仍可见但没有焦点（焦点在另一个应用或窗口上，或系统在它上面显示了内容，例如应用切换器或来电）；`"background"` 表示不可见（在后台、已最小化、浏览器中隐藏的标签页）。显示在原生应用中的应用跟随该应用的状态。响应式。Rust：`app_state() -> AppState`（`AppState::Active`、`Inactive`、`Background`）。
+
+在 effect 中读取它，即可暂停无人可见的工作，并在应用回来时恢复：
+
+```rust tabs
+effect(move || {
+    if app_state() == AppState::Background {
+        feed.pause();
+    } else {
+        feed.resume();
+    }
+});
+```
+
+```tsx tabs
+effect(() => {
+  if (appState() === "background") feed.pause();
+  else feed.resume();
+});
+```
 
 ### setColorScheme
 

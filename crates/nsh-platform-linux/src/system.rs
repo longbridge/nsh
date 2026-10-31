@@ -25,7 +25,13 @@
 //! - right to left: GTK's default text direction (the locale's);
 //! - the screen reader: the AT-SPI bus's `ScreenReaderEnabled`;
 //! - the OS version: the kernel's major and minor version (distributions
-//!   number their releases in incomparable ways, some not at all).
+//!   number their releases in incomparable ways, some not at all);
+//! - the app's state, from GDK's toplevel states, followed on the root's
+//!   map and unmap and its toplevel's `state` ([`app_state_changed`]):
+//!   background while the surface's window is not shown (the root
+//!   unmapped, the window minimized, or suspended: on another workspace or
+//!   covered, where the compositor says so), active while one of the
+//!   app's windows has the focus, inactive otherwise.
 //!
 //! Safe area and keyboard height are zero: desktop windows have neither.
 //!
@@ -55,7 +61,7 @@ use nsh_core::{
     geometry::{Point, Size, px},
     platform::clipboard,
 };
-use nsh_engine::{ColorScheme, Edges, Environment, Locale};
+use nsh_engine::{AppState, ColorScheme, Edges, Environment, Locale};
 
 use crate::{surface::Surface, view::NshView};
 
@@ -197,10 +203,15 @@ pub(crate) fn watch_environment(surface: &Rc<Surface>) {
                 update(&surface, appearance());
             }
         });
+        if let Some(toplevel) = gdk_surface.downcast_ref::<gdk::Toplevel>() {
+            toplevel.connect_state_notify(|_| app_state_changed());
+        }
         if let Some(surface) = weak.upgrade() {
             update(&surface, appearance());
         }
     });
+    surface.root.connect_map(|_| app_state_changed());
+    surface.root.connect_unmap(|_| app_state_changed());
     update(surface, appearance());
     environment_applied(surface);
 }
@@ -261,17 +272,63 @@ fn appearance() -> Appearance {
     }
 }
 
-/// A system setting changed: tells every surface.
-fn system_changed() {
-    let appearance = appearance();
-    let surfaces: Vec<Rc<Surface>> = SYSTEM.with(|s| {
+/// This thread's surfaces.
+fn surfaces() -> Vec<Rc<Surface>> {
+    SYSTEM.with(|s| {
         let mut s = s.borrow_mut();
         s.surfaces.retain(|w| w.strong_count() > 0);
         s.surfaces.iter().filter_map(Weak::upgrade).collect()
-    });
-    for surface in surfaces {
+    })
+}
+
+/// A system setting changed: tells every surface.
+fn system_changed() {
+    let appearance = appearance();
+    for surface in surfaces() {
         update(&surface, appearance);
     }
+}
+
+/// A surface's window was focused, minimized, suspended, shown or hidden:
+/// tells every surface, as whether the app is the active one depends on
+/// all of its windows.
+fn app_state_changed() {
+    for surface in surfaces() {
+        let mut env: Environment = surface.environment.get();
+        env.app_state = app_state(&surface);
+        surface.set_environment(env);
+    }
+}
+
+/// The app's state as `surface` sees it.
+fn app_state(surface: &Surface) -> AppState {
+    let hidden = gdk::ToplevelState::MINIMIZED | gdk::ToplevelState::SUSPENDED;
+    let shown = surface.root.is_mapped()
+        && surface
+            .root
+            .native()
+            .and_then(|n| toplevel_state(&n))
+            .is_none_or(|s| !s.intersects(hidden));
+    let focused = || {
+        gtk::Window::list_toplevels().iter().any(|w| {
+            w.downcast_ref::<gtk::Native>()
+                .and_then(toplevel_state)
+                .is_some_and(|s| s.contains(gdk::ToplevelState::FOCUSED))
+        })
+    };
+    if !shown {
+        AppState::Background
+    } else if focused() {
+        AppState::Active
+    } else {
+        AppState::Inactive
+    }
+}
+
+/// The state of `native`'s toplevel surface, once it is realized.
+fn toplevel_state(native: &gtk::Native) -> Option<gdk::ToplevelState> {
+    let surface = native.surface()?;
+    Some(surface.downcast_ref::<gdk::Toplevel>()?.state())
 }
 
 /// The embedding app set its locale or text size
@@ -299,6 +356,7 @@ fn update(surface: &Surface, appearance: Appearance) {
     env.os_version = OS_VERSION.with(|v| *v);
     env.safe_area = Edges::default();
     env.keyboard_height = px(0.0);
+    env.app_state = app_state(surface);
     surface.set_environment(env);
 }
 

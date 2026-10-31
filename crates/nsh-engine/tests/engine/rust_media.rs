@@ -304,10 +304,9 @@ fn web_views_and_videos_report_and_take_commands() {
 fn an_inline_page_follows_what_its_html_reads() {
     let (engine, rx, mut seen) = start();
     assert_eq!(seen.html, ["<body class=light>"]);
-    engine.control().set_environment(Environment {
-        color_scheme: ColorScheme::Dark,
-        ..Environment::default()
-    });
+    let mut environment = Environment::default();
+    environment.color_scheme = ColorScheme::Dark;
+    engine.control().set_environment(environment);
     seen.drain(&rx);
     assert_eq!(seen.html, ["<body class=light>", "<body class=dark>"]);
 }
