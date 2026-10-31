@@ -9,6 +9,7 @@ import android.text.InputFilter;
 import android.text.InputType;
 import android.text.Layout;
 import android.text.TextWatcher;
+import android.text.method.ArrowKeyMovementMethod;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.MotionEvent;
@@ -378,7 +379,18 @@ final class InputBox extends FrameLayout implements Node {
         }
         edit.setImeOptions(ime);
         edit.setFilters(maxLength >= 0 ? new InputFilter[] {new InputFilter.LengthFilter(maxLength)} : new InputFilter[0]);
-        edit.setEnabled(editable);
+        // `readonly` keeps focus and selection, as the docs say: the text selects as a selectable TextView's does (a
+        // long press on a word, the handles, Copy) while no key listener edits it and no keyboard comes up. Disabling
+        // the EditText instead, as before, took the selection away too.
+        if (!editable) {
+            edit.setKeyListener(null);
+            edit.setTextIsSelectable(true);
+        } else if (edit.isTextSelectable()) {
+            edit.setTextIsSelectable(false);
+            edit.setInputType(type);
+            edit.setMovementMethod(ArrowKeyMovementMethod.getInstance());
+            edit.setFocusableInTouchMode(true);
+        }
         if (hasCaretColor && Build.VERSION.SDK_INT >= 29) {
             edit.setTextCursorDrawable(new ColorDrawable(caretColor) {
                 @Override
