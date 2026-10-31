@@ -719,7 +719,10 @@ fn font_loads(
 /// page fetches them first.
 fn is_font(path: &str) -> bool {
     let ext = path.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase());
-    matches!(ext.as_deref(), Some("ttf" | "otf" | "ttc"))
+    matches!(
+        ext.as_deref(),
+        Some("ttf" | "otf" | "ttc" | "woff" | "woff2")
+    )
 }
 
 /// The app's icon at the sizes browsers use, by URL.

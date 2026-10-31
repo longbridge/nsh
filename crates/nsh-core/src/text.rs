@@ -1235,6 +1235,20 @@ impl MeasureCache {
     }
 }
 
+/// The TrueType or OpenType data of a font file, which the text engines
+/// register: `data` itself, or what a WOFF or WOFF2 file holds,
+/// decompressed (WOFF2's transformed glyph tables rebuilt).
+pub fn font_data(data: &[u8]) -> Result<std::borrow::Cow<'_, [u8]>, String> {
+    let unwrapped = match data.get(..4) {
+        Some(b"wOFF") => wuff::decompress_woff1(data),
+        Some(b"wOF2") => wuff::decompress_woff2(data),
+        _ => return Ok(std::borrow::Cow::Borrowed(data)),
+    };
+    unwrapped
+        .map(std::borrow::Cow::Owned)
+        .map_err(|e| format!("the WOFF font does not decompress: {e:?}"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1490,5 +1504,32 @@ mod tests {
                 size(px(5.5), px(12.0))
             )]
         );
+    }
+
+    #[test]
+    fn woff_and_woff2_fonts_decompress_to_the_font_they_hold() {
+        let ttf: &[u8] =
+            include_bytes!("../../../tests/compat/cases/layout/fonts/Pacifico-Regular.ttf");
+        let face = |data: &[u8]| {
+            let face = ttf_parser::Face::parse(data, 0).expect("a font");
+            let family = face
+                .names()
+                .into_iter()
+                .find(|n| n.name_id == ttf_parser::name_id::FAMILY && n.is_unicode())
+                .and_then(|n| n.to_string());
+            (family, face.number_of_glyphs(), face.glyph_index('P'))
+        };
+        let original = face(ttf);
+        assert_eq!(original.0.as_deref(), Some("Pacifico"));
+        // TrueType comes back as it is.
+        assert!(matches!(font_data(ttf), Ok(std::borrow::Cow::Borrowed(_))));
+        for wrapped in [
+            &include_bytes!("../tests/fonts/Pacifico-Regular.woff")[..],
+            &include_bytes!("../tests/fonts/Pacifico-Regular.woff2")[..],
+        ] {
+            let data = font_data(wrapped).expect("decompressed");
+            assert_eq!(face(&data), original);
+        }
+        assert!(font_data(b"wOF2 and nothing else").is_err());
     }
 }

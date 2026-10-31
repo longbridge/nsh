@@ -358,7 +358,7 @@ function RemoteImage(props: { url: string }) {
 
 | File | Rust (`asset!`) | TSX import | Page |
 |---|---|---|---|
-| `.ttf`, `.otf` | A `FontAsset` with its family name | The font's family name | [Fonts](./fonts.md) |
+| `.ttf`, `.otf`, `.woff`, `.woff2` | A `FontAsset` with its family name | The font's family name | [Fonts](./fonts.md) |
 | `.json` and other files | A `FileAsset` with its URI | `.json`: the parsed value, bundled into the script | [Project structure](./project-structure.md#modules) |
 
 Fonts are registered before the first frame in both.

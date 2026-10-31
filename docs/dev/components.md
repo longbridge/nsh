@@ -614,7 +614,7 @@ A crate ships files in its `assets/` directory, as TS imports them: `asset!("log
 relative to `assets/`) reads the file at compile time and is an `ImageAsset { url, size, scales }` (the natural size in
 points, `Size<Points>`: `@2x` / `@3x` divide the pixels; `scales` lists the `@1.5x`–`@4x` siblings of a file named
 without a density, which `assets!()` ships and images pick from by the screen's pixel ratio, as for TS imports), a
-`FontAsset { uri, family }` (`.ttf`, `.otf`: the family from the font's name table) or a `FileAsset { uri }`; a missing
+`FontAsset { uri, family }` (`.ttf`, `.otf`, `.woff`, `.woff2`: the family from the font's name table, a WOFF's of the font it holds) or a `FileAsset { uri }`; a missing
 or unreadable file fails the build (a variant too, and one whose pixels are off its scale), a changed one builds the
 crate again (`include_bytes!`). An `.svg` is an `ImageAsset` too, as TS's import gives, with no `scales` (a vector
 draws for any pixel ratio): its size in points is its root's `width` and `height` in absolute units (else one of them

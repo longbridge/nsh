@@ -1567,10 +1567,11 @@ impl<M: TextEngine> Core<M> {
         out.append(&mut self.events);
     }
 
-    /// Registers a custom font (TrueType / OpenType data) with the text
-    /// engine. Text measured before is measured again.
+    /// Registers a custom font (TrueType, OpenType, WOFF or WOFF2 data) with
+    /// the text engine. Text measured before is measured again.
     pub fn register_font(&mut self, data: &[u8]) -> Result<(), String> {
-        self.text_engine.register_font(data)?;
+        self.text_engine
+            .register_font(&crate::text::font_data(data)?)?;
         self.fonts_changed();
         Ok(())
     }

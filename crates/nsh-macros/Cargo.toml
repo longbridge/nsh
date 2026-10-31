@@ -20,3 +20,5 @@ proc-macro2.workspace = true
 quote.workspace = true
 syn.workspace = true
 ttf-parser.workspace = true
+# WOFF and WOFF2 fonts' family names (`asset!`), read from what they hold.
+wuff.workspace = true

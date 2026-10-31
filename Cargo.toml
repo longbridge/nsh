@@ -58,6 +58,9 @@ imagesize = "0.15"
 # system fonts or raster images, so an SVG never reads files or fonts.
 resvg = { version = "0.46", default-features = false }
 ttf-parser = "0.25"
+# WOFF and WOFF2 fonts, decompressed to the TrueType / OpenType data the
+# text engines register (`nsh-core`'s `text::font_data`).
+wuff = "0.2.9"
 oxc_sourcemap = "9"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
