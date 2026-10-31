@@ -278,6 +278,10 @@ Things that were found the hard way. Read the section of the area you change bef
   return early on an unchanged value, `setCameraDistance` does not: it invalidates the view on every call. Animated
   values and transitions write a view's whole transform each frame, so `Mounter.setPerspective` sets it only when it
   moves (it was a fifth of the UI thread's time on the gallery's Animations demo).
+- **Android, shadows moved by fractions of a pixel**: Skia caches a shadow's blurred mask keyed on the subpixel part
+  of its position, so a view moved by a fractional offset each frame blurs its shadows again every frame (on the GPU,
+  each into a new render target, slow on PowerVR). `StackBox`'s push / pop slides move by whole pixels; going back to
+  the gallery's index ran at about half the frame rate before (#519).
 - **Android, JNI event maps intern their keys from a fixed list** (`Java_com_longbridge_nsh_Native_eventMap`): a new payload key must be
   added there or it is dropped silently.
 - **Android, inputs' `pointerEvents`**: `InputBox` is a `FrameLayout`, not a `Box`: it keeps `pointerEvents` itself and
