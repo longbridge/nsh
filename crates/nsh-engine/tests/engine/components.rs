@@ -5329,6 +5329,46 @@ fn the_tab_bar_is_the_systems_component_on_ios_and_android() {
     }
 }
 
+/// The bar's selected tab takes the theme's `primary`, as the platforms
+/// read one color: the light value, then the dark one when the appearance
+/// turns dark.
+#[test]
+fn the_tab_bar_takes_the_themes_primary_color() {
+    use nsh_core::platform::{ColorScheme, Os};
+
+    let theme = r##"{ "theme": { "cssVars": {
+        "light": { "primary": "#26251E" }, "dark": { "primary": "#EDECE6" } } } }"##;
+    let tint = |batches: &[MountBatch]| {
+        batches
+            .iter()
+            .flat_map(|batch| &batch.items)
+            .filter_map(|item| match item {
+                MountItem::ComponentProps { props, .. } => Some(props),
+                _ => None,
+            })
+            .flatten()
+            .rfind(|(name, _)| &**name == "tint")
+            .and_then(|(_, value)| value.clone())
+    };
+    for os in [Os::Ios, Os::Android] {
+        let environment = Environment {
+            os,
+            ..Environment::default()
+        };
+        let (engine, rx) = start_with(TAB_BAR, environment, None, Some(theme));
+        let batches = until(&rx, |batch| batch.items.iter().any(is_tab_bar));
+        assert_eq!(tint(&batches), Some(serde_json::json!("#26251E")), "{os:?}");
+        engine.control().set_environment(Environment {
+            color_scheme: ColorScheme::Dark,
+            ..environment
+        });
+        let dark = until(&rx, |batch| {
+            tint(std::slice::from_ref(batch)) == Some(serde_json::json!("#EDECE6"))
+        });
+        assert_eq!(tint(&dark), Some(serde_json::json!("#EDECE6")), "{os:?}");
+    }
+}
+
 /// Where the system has no tab bar it renders nothing: no component at all;
 /// `isAvailable` tells which platforms `nsh/mobile` serves.
 #[test]
