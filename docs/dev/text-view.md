@@ -74,8 +74,8 @@ The defaults are a reading typography modeled on Allsum's documents (the constan
 20 / 17 / 15 with lines of 1.25 (level 1) or 1.35 and letter spacing of -0.02 em (level 1) or -0.012 em, with room
 above them after a block (1.1 / 1.6 / 1.4 em, 0.6 em after a heading, none first: their top margin less the gap,
 from `Before`, which the top level's rows keep as a memo); strong text semibold; links underlined 1 pt at 40 % of
-their color, 3 pt below; `<mark>` on a rounded yellow (a marker's, `HIGHLIGHT`); code, keys and TeX at 13 in the
-theme's `font-mono` (else the system's `monospace`) on a faint rounded
+their color, at the platform's automatic underline position; `<mark>` on a rounded yellow (a marker's,
+`HIGHLIGHT`); code, keys and TeX at 13 in the theme's `font-mono` (else the system's `monospace`) on a faint rounded
 background (spans have no padding); lists indented 1.4 em, their markers (`•`, `◦`, `▪` by depth, or numbers) right-aligned against the content in
 the indent (so `10.` reaches further left and the items stay in line), items 0.25 em apart, tasks a
 15 pt box drawn as a view (filled with a `✓` when done, the item's text then muted and struck); quotes a 2 pt line at
