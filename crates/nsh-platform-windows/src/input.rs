@@ -293,6 +293,8 @@ pub(crate) struct Input {
     /// Where the mouse last was (root coordinates): keyboard scrolling
     /// goes to the scroll view under it.
     last: Cell<Option<(f32, f32)>>,
+    /// A view's `cursor` changed in the batch being applied.
+    cursor_changed: Cell<bool>,
     /// A key with Alt was taken: Alt's release must not open the window
     /// menu.
     alt_combo: Cell<bool>,
@@ -575,7 +577,20 @@ pub(crate) fn props_changed(_surface: &Rc<Surface>, _view: &NshView) {
 
 /// The view's style changed.
 pub(crate) fn style_changed(_view: &NshView) {
-    // The cursor is read when the window asks for it.
+    // Cursor changes are coalesced by the mounter until the batch ends.
+}
+
+/// A view's `cursor` changed: it shows once the batch is applied, without
+/// waiting for the mouse to move.
+pub(crate) fn cursor_changed(surface: &Surface) {
+    surface.input.cursor_changed.set(true);
+}
+
+/// A batch was applied.
+pub(crate) fn batch_applied(surface: &Rc<Surface>) {
+    if surface.input.cursor_changed.take() {
+        crate::window::refresh_cursor(surface);
+    }
 }
 
 /// `SetJsResponder` / `ClearJsResponder`. Runs while the mounter applies a

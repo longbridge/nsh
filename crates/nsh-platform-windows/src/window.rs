@@ -723,14 +723,7 @@ fn handle(
             return Some(LRESULT(0));
         }
         WM_SETCURSOR if lo(lparam.0) == HTCLIENT as i32 => {
-            let mut p = POINT::default();
-            // SAFETY: plain calls with local out values.
-            unsafe {
-                let _ = GetCursorPos(&mut p);
-                let _ = ScreenToClient(hwnd, &mut p);
-            }
-            let cursor = crate::input::cursor(surface, p.x as f32 / scale, p.y as f32 / scale);
-            set_cursor(cursor);
+            update_cursor(surface, hwnd);
             return Some(LRESULT(1));
         }
         WM_KEYDOWN | WM_SYSKEYDOWN | WM_KEYUP | WM_SYSKEYUP => {
@@ -895,6 +888,46 @@ pub(crate) fn lines_per_notch() -> f32 {
     };
     LINES.with(|c| c.set(Some(l)));
     l
+}
+
+/// Sets the cursor of what is under the mouse in the client area.
+fn update_cursor(surface: &Rc<Surface>, hwnd: HWND) {
+    let mut p = POINT::default();
+    // SAFETY: plain calls with local out values.
+    unsafe {
+        let _ = GetCursorPos(&mut p);
+        let _ = ScreenToClient(hwnd, &mut p);
+    }
+    let scale = surface.scale();
+    set_cursor(crate::input::cursor(
+        surface,
+        p.x as f32 / scale,
+        p.y as f32 / scale,
+    ));
+}
+
+/// A style batch does not trigger `WM_SETCURSOR`: apply its cursor at the
+/// resting mouse, keeping other windows and non-client cursors intact.
+pub(crate) fn refresh_cursor(surface: &Rc<Surface>) {
+    let hwnd = surface.hwnd();
+    let mut p = POINT::default();
+    // SAFETY: plain calls with a local value; the hit test is the window's
+    // own (a custom title bar's caption is not the client area).
+    let over = unsafe {
+        GetCursorPos(&mut p).is_ok()
+            && WindowFromPoint(p) == hwnd
+            && SendMessageW(
+                hwnd,
+                WM_NCHITTEST,
+                None,
+                Some(LPARAM(((p.y as u16 as isize) << 16) | p.x as u16 as isize)),
+            )
+            .0 as u32
+                == HTCLIENT
+    };
+    if over {
+        update_cursor(surface, hwnd);
+    }
 }
 
 /// Sets the cursor shown over the window.
