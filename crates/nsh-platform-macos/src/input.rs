@@ -67,7 +67,10 @@ use nsh_core::{
     tailwind::state::{HOVERED, PRESSED},
 };
 use objc2::{AnyThread, ClassType, rc::Retained, sel};
-use objc2_app_kit::{NSCursor, NSEvent, NSEventModifierFlags, NSEventPhase, NSEventType, NSImage};
+use objc2_app_kit::{
+    NSCursor, NSCursorFrameResizeDirections, NSCursorFrameResizePosition, NSEvent,
+    NSEventModifierFlags, NSEventPhase, NSEventType, NSImage,
+};
 use objc2_foundation::NSSize;
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -392,8 +395,8 @@ fn cursor_of(cursor: Cursor) -> Option<Cursor> {
 /// The AppKit cursor of `cursor` (AppKit has no public wait, progress or
 /// help cursors: those show the arrow).
 fn ns_cursor(cursor: Cursor) -> Retained<NSCursor> {
-    // Zoom cursors are newer than the rest (macOS 15).
-    let zoom = |sel| NSCursor::class().responds_to(sel);
+    // Zoom and diagonal resize cursors need macOS 15.
+    let supported = |sel| NSCursor::class().responds_to(sel);
     match cursor {
         Cursor::Pointer => NSCursor::pointingHandCursor(),
         Cursor::Text => NSCursor::IBeamCursor(),
@@ -401,13 +404,28 @@ fn ns_cursor(cursor: Cursor) -> Retained<NSCursor> {
         Cursor::Move | Cursor::Grab => NSCursor::openHandCursor(),
         Cursor::Grabbing => NSCursor::closedHandCursor(),
         Cursor::NotAllowed => NSCursor::operationNotAllowedCursor(),
-        Cursor::ZoomIn if zoom(sel!(zoomInCursor)) => NSCursor::zoomInCursor(),
-        Cursor::ZoomOut if zoom(sel!(zoomOutCursor)) => NSCursor::zoomOutCursor(),
+        Cursor::ZoomIn if supported(sel!(zoomInCursor)) => NSCursor::zoomInCursor(),
+        Cursor::ZoomOut if supported(sel!(zoomOutCursor)) => NSCursor::zoomOutCursor(),
         // Their replacements are macOS 15's.
         #[allow(deprecated)]
         Cursor::ColResize => NSCursor::resizeLeftRightCursor(),
         #[allow(deprecated)]
         Cursor::RowResize => NSCursor::resizeUpDownCursor(),
+        Cursor::NwseResize | Cursor::NeswResize
+            if supported(sel!(frameResizeCursorFromPosition:inDirections:)) =>
+        {
+            let position = if cursor == Cursor::NwseResize {
+                NSCursorFrameResizePosition::TopLeft
+            } else {
+                NSCursorFrameResizePosition::TopRight
+            };
+            NSCursor::frameResizeCursorFromPosition_inDirections(
+                position,
+                NSCursorFrameResizeDirections::All,
+            )
+        }
+        // macOS 14 keeps the move cursor used before diagonal axes were distinct.
+        Cursor::NwseResize | Cursor::NeswResize => NSCursor::openHandCursor(),
         Cursor::None => invisible_cursor(),
         _ => NSCursor::arrowCursor(),
     }

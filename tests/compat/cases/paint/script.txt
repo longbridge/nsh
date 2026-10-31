@@ -216,6 +216,14 @@ style id:cursor-zoom-out cursor zoom-out
 style id:cursor-col-resize cursor col-resize
 style id:cursor-row-resize cursor row-resize
 style id:cursor-none cursor none
+style id:cursor-nwse-resize cursor nwse-resize
+style id:cursor-nesw-resize cursor nesw-resize
+style id:cursor-nw-resize cursor nwse-resize
+style id:cursor-se-resize cursor nwse-resize
+style id:cursor-ne-resize cursor nesw-resize
+style id:cursor-sw-resize cursor nesw-resize
+style id:cursor-class-nwse cursor nwse-resize
+style id:cursor-class-nesw cursor nesw-resize
 style id:tinted tintColor #ff9500ff
 style id:tinted-hsl tintColor #0080ffff
 style id:origin-center transformOrigin 50% 50% 0

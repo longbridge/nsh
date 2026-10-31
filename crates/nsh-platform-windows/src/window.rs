@@ -920,6 +920,8 @@ pub(crate) fn set_cursor(cursor: crate::input::Cursor) {
         Cursor::NotAllowed => IDC_NO,
         Cursor::ResizeEw => IDC_SIZEWE,
         Cursor::ResizeNs => IDC_SIZENS,
+        Cursor::ResizeNwse => IDC_SIZENWSE,
+        Cursor::ResizeNesw => IDC_SIZENESW,
         Cursor::Wait => IDC_WAIT,
         Cursor::Progress => IDC_APPSTARTING,
         Cursor::Help => IDC_HELP,

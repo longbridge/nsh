@@ -882,6 +882,8 @@ fn effects(e: &mut Encoded, s: &ViewStyle) {
         Cursor::ColResize => 14,
         Cursor::RowResize => 15,
         Cursor::None => 16,
+        Cursor::NwseResize => 17,
+        Cursor::NeswResize => 18,
     });
     match s.transition.filter(|t| t.duration > 0.0) {
         Some(t) => {
