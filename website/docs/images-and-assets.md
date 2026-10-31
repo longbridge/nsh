@@ -363,6 +363,34 @@ function RemoteImage(props: { url: string }) {
 
 Fonts are registered before the first frame in both.
 
+### Reading a file at run time
+
+`fetch` reads a file the app ships by its `asset:/` URL, in TSX and in Rust alike. An imported image carries its URL (`url`), a Rust crate's files have theirs from `asset!` (`FileAsset::uri`) and `assets!()`:
+
+```tsx
+import flag from "./images/flag.png";
+
+const bytes = await (await fetch(flag.url)).bytes();
+```
+
+```rust
+const GREETING: FileAsset = asset!("locales/en.txt");
+
+#[component]
+fn Greeting() -> impl IntoElement {
+    let greeting = signal(String::new());
+    spawn(async move {
+        match fetch(GREETING.uri).await {
+            Ok(response) => greeting.set(response.text()),
+            Err(error) => greeting.set(error),
+        }
+    });
+    text(move || greeting.get())
+}
+```
+
+The engine reads the file from the app's files off its thread (from the dev server during `nsh run`), with no capability needed: they are the app's own. A web app downloads what the page did not preload from where it serves its assets. The response is `200` with the file's bytes and its `Content-Length`; a file the app does not ship rejects as a network error that names it. The URL names the file by its path inside the app's files, so a URL whose path leaves them (`..`, an absolute path) rejects the same way, before anything is read.
+
 ### A module's own URL
 
 In TSX, `import.meta.url` is the URL of the module it is written in, so `new URL("./data.json", import.meta.url)` names a file beside it. A local or packaged desktop app's modules have `file:` URLs in the app's directory, which `fs/promises` reads under a `${pluginDir}` grant; a web app's are the page's; a packaged mobile app's are `asset:/` URLs like those of imported images. Import an image to ship it: a URL made this way names the file, it does not package it.

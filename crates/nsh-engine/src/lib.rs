@@ -631,10 +631,23 @@ pub trait Network: Send + Sync + 'static {
 }
 
 /// Reads the app's bundled files (`asset:/…` URIs): from the app's
-/// resources, or from the dev server during development.
+/// resources, or from the dev server during development. The engine reads
+/// the fonts it registers with it, and answers the app's requests of
+/// `asset:/` URLs (`fetch`) from it.
 pub trait Assets: Send + Sync + 'static {
-    /// The bytes of `uri`. Blocking; called on the engine thread.
+    /// The bytes of `uri`. Blocking: the engine calls it on its thread for
+    /// the fonts it registers, and on a thread of the runtime's blocking
+    /// pool for the app's requests (in WebAssembly on its thread).
     fn read(&self, uri: &str) -> Result<Vec<u8>, String>;
+
+    /// Where `uri` is served, for files [`Assets::read`] does not have at
+    /// hand: the engine downloads them from there with its network stack
+    /// (the web page, which holds only the files it preloaded). `None`, the
+    /// default, when `read` is the only way.
+    fn url(&self, uri: &str) -> Option<String> {
+        let _ = uri;
+        None
+    }
 
     /// Where `asset:/` URIs resolve, when it is a directory or a URL the
     /// image loader can read itself: the core's image loads ([`svg`]s)
@@ -901,6 +914,10 @@ enum Message {
     /// An event of a request (by the hop it is for: events of a hop the
     /// engine left are dropped).
     Fetch(Requester, u64, FetchEvent),
+    /// Hop `.1` of the request `.2` for a bundled file read it on a
+    /// blocking thread ([`Net::asset`]): its bytes, or why there are none.
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+    AssetRead(Requester, u64, HttpRequest, Result<Vec<u8>, String>),
     Hot(HotUpdate),
     /// A chunk [`MountSink::load_chunk`] was asked for, or why it could
     /// not be loaded (its id and the message).
@@ -1459,7 +1476,9 @@ impl<M: TextEngine + 'static> Driver<M> {
         // WebAssembly has no threads for a runtime: tasks' timers are
         // `nsh_core::time`'s there, fired by the driver.
         #[cfg(not(target_arch = "wasm32"))]
-        core.set_task_runtime(config.runtime.clone().unwrap_or_else(shared_runtime));
+        let runtime = config.runtime.clone().unwrap_or_else(shared_runtime);
+        #[cfg(not(target_arch = "wasm32"))]
+        core.set_task_runtime(runtime.clone());
         // A Rust app's theme and fonts come with its root (a JS app's from
         // its bundle).
         if let App::Rust(root) = &config.app {
@@ -1554,6 +1573,9 @@ impl<M: TextEngine + 'static> Driver<M> {
                 abandoned: Vec::new(),
                 access: access.clone(),
                 hops: 0,
+                assets: config.assets.clone(),
+                #[cfg(not(target_arch = "wasm32"))]
+                runtime,
             },
         };
 
@@ -1977,6 +1999,51 @@ struct Net {
     access: Arc<nsh_core::access::Access>,
     /// Hops started so far (the id of the next).
     hops: u64,
+    /// Where requests of `asset:/` URLs are answered from
+    /// ([`EngineConfig::assets`]).
+    assets: Option<Arc<dyn Assets>>,
+    /// The runtime whose blocking pool reads them (the components'
+    /// tasks').
+    #[cfg(not(target_arch = "wasm32"))]
+    runtime: tokio::runtime::Handle,
+}
+
+/// The task of a request for a bundled file while it is read: the read
+/// finishes on its own, and a cancelled request drops what it gives.
+struct AssetTask;
+
+impl FetchTask for AssetTask {
+    fn send(&mut self, _: Vec<u8>) {}
+    fn finish(&mut self) {}
+    fn pause(&mut self, _: bool) {}
+    fn cancel(self: Box<Self>) {}
+}
+
+/// Whether `url` names a bundled file (`asset:/…`).
+fn is_asset(url: &str) -> bool {
+    url.get(..6)
+        .is_some_and(|scheme| scheme.eq_ignore_ascii_case("asset:"))
+}
+
+/// Whether the bundled file `url` names stays inside the app's files
+/// whichever way a host maps `asset:/<path>` to its asset directory: the
+/// path is relative, and no segment is empty, `.` or `..` (encoded or not)
+/// or holds a backslash, a NUL or a colon (a Windows drive). Hosts join the
+/// path to their directory as it comes, so they never see one that
+/// escapes it.
+fn is_inside_assets(url: &str) -> bool {
+    let Some(path) = url.get(6..).and_then(|rest| rest.strip_prefix('/')) else {
+        return false;
+    };
+    path.split('/').all(|segment| {
+        let segment = segment.to_ascii_lowercase();
+        let named = !matches!(segment.replace("%2e", ".").as_str(), "" | "." | "..");
+        let plain = !segment.contains(['\\', '\0', ':'])
+            && !["%2f", "%5c", "%00", "%3a"]
+                .iter()
+                .any(|encoded| segment.contains(encoded));
+        named && plain
+    })
 }
 
 /// A request in flight.
@@ -1986,6 +2053,9 @@ struct Inflight {
     hop: u64,
     /// Requests whose redirects the engine follows (to check each hop).
     followed: Option<access::Followed>,
+    /// The bundled file (`asset:/…`) a download is of: a status other than
+    /// a success fails it, as a file the host does not have does.
+    asset: Option<String>,
 }
 
 impl Net {
@@ -2042,9 +2112,12 @@ impl Net {
         }
     }
 
-    /// Makes `who`'s request, if the app may (else why not).
+    /// Makes `who`'s request, if the app may (else why not). Bundled files
+    /// are the app's own: their requests need no capability.
     fn request(&mut self, who: Requester, request: HttpRequest) -> Result<(), access::Refused> {
-        if self.access.is_unrestricted() {
+        if is_asset(&request.url) {
+            self.asset(who, request);
+        } else if self.access.is_unrestricted() {
             self.start(who, request, None);
         } else if !self.access.allows_http(&request.method, &request.url) {
             return Err(access::refused(&request.method, &request.url));
@@ -2078,8 +2151,110 @@ impl Net {
                 task,
                 hop,
                 followed,
+                asset: None,
             },
         );
+    }
+
+    /// Answers `who`'s request of a bundled file (an `asset:/` URL) from
+    /// the host's assets: read on the runtime's blocking pool, which reports
+    /// with [`Message::AssetRead`] (in WebAssembly, which has no threads,
+    /// here).
+    fn asset(&mut self, who: Requester, request: HttpRequest) {
+        self.hops += 1;
+        let hop = self.hops;
+        self.inflight.insert(
+            who,
+            Inflight {
+                task: Box::new(AssetTask),
+                hop,
+                followed: None,
+                asset: None,
+            },
+        );
+        if !is_inside_assets(&request.url) {
+            let refused = Err(format!(
+                "{}: bundled files are named by a path inside the app's files",
+                request.url
+            ));
+            self.asset_read(who, hop, request, refused);
+            return;
+        }
+        let read = |assets: &dyn Assets, request: &HttpRequest| match request.method.as_str() {
+            "GET" | "HEAD" => assets.read(&request.url),
+            method => Err(format!(
+                "{method} {}: bundled files are read with GET",
+                request.url
+            )),
+        };
+        let Some(assets) = &self.assets else {
+            let failed = Err("this host cannot load assets".to_owned());
+            self.asset_read(who, hop, request, failed);
+            return;
+        };
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let assets = assets.clone();
+            let tx = self.tx.clone();
+            // The read reports itself; nothing awaits its handle.
+            drop(self.runtime.spawn_blocking(move || {
+                let bytes = read(&*assets, &request);
+                let _ = tx.send(Message::AssetRead(who, hop, request, bytes));
+            }));
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            let bytes = read(&**assets, &request);
+            self.asset_read(who, hop, request, bytes);
+        }
+    }
+
+    /// Hop `hop` of `who`'s request of a bundled file read it: its response,
+    /// or, when the host has no copy but serves the file at a URL
+    /// ([`Assets::url`]), the download of it. Dropped when the request was
+    /// cancelled meanwhile.
+    fn asset_read(
+        &mut self,
+        who: Requester,
+        hop: u64,
+        request: HttpRequest,
+        read: Result<Vec<u8>, String>,
+    ) {
+        if self.inflight.get(&who).is_none_or(|i| i.hop != hop) {
+            return;
+        }
+        let events = match read {
+            Ok(bytes) => {
+                let head = HttpHead {
+                    status: 200,
+                    status_text: "OK".to_owned(),
+                    headers: vec![("content-length".to_owned(), bytes.len().to_string())],
+                    url: request.url.clone(),
+                    ..HttpHead::default()
+                };
+                let mut events = vec![FetchEvent::Head(head)];
+                if request.method == "GET" && !bytes.is_empty() {
+                    events.push(FetchEvent::Data(bytes));
+                }
+                events.push(FetchEvent::End);
+                events
+            }
+            Err(error) => match self.assets.as_ref().and_then(|a| a.url(&request.url)) {
+                Some(url) => {
+                    self.inflight.remove(&who);
+                    let uri = request.url.clone();
+                    self.start(who, HttpRequest { url, ..request }, None);
+                    if let Some(download) = self.inflight.get_mut(&who) {
+                        download.asset = Some(uri);
+                    }
+                    return;
+                }
+                None => vec![FetchEvent::Failed(error)],
+            },
+        };
+        for event in events {
+            let _ = self.tx.send(Message::Fetch(who, hop, event));
+        }
     }
 
     /// An event of hop `hop` of request `id`: what JS is told, if anything
@@ -2097,6 +2272,15 @@ impl Net {
         let inflight = self.inflight.get_mut(&id).filter(|i| i.hop == hop)?;
         match event {
             FetchEvent::Head(head) => {
+                let missing = (inflight.asset.as_ref())
+                    .filter(|_| !(200..300).contains(&head.status))
+                    .map(|uri| format!("{uri}: HTTP {}", head.status));
+                if let Some(missing) = missing {
+                    if let Some(i) = self.inflight.remove(&id) {
+                        i.task.cancel();
+                    }
+                    return Some(Ok(FetchEvent::Failed(missing)));
+                }
                 let Some(followed) = &mut inflight.followed else {
                     return Some(Ok(FetchEvent::Head(head)));
                 };
@@ -2650,6 +2834,9 @@ fn handle<M: TextEngine>(script: Option<&Script>, state: &mut State<M>, message:
                 }
             }
         },
+        Message::AssetRead(who, hop, request, read) => {
+            state.net.asset_read(who, hop, request, read)
+        }
         Message::Hot(update) => state.hot.push(update),
         Message::Chunk(chunk) => {
             if let Some(script) = script {

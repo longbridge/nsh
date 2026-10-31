@@ -354,6 +354,34 @@ function RemoteImage(props: { url: string }) {
 
 两种方式下，字体都在第一帧之前注册。
 
+### 运行时读取文件
+
+`fetch` 通过 `asset:/` URL 读取应用随附的文件，TSX 和 Rust 中都一样。导入的图片带有它的 URL（`url`），Rust crate 的文件则由 `asset!`（`FileAsset::uri`）和 `assets!()` 给出：
+
+```tsx
+import flag from "./images/flag.png";
+
+const bytes = await (await fetch(flag.url)).bytes();
+```
+
+```rust
+const GREETING: FileAsset = asset!("locales/en.txt");
+
+#[component]
+fn Greeting() -> impl IntoElement {
+    let greeting = signal(String::new());
+    spawn(async move {
+        match fetch(GREETING.uri).await {
+            Ok(response) => greeting.set(response.text()),
+            Err(error) => greeting.set(error),
+        }
+    });
+    text(move || greeting.get())
+}
+```
+
+引擎在自身线程之外从应用的文件中读取该文件（`nsh run` 期间从开发服务器读取），无需任何能力授权：这些是应用自己的文件。Web 应用会从页面提供资源的位置下载页面未预加载的文件。响应状态为 `200`，带有文件的字节和 `Content-Length`；应用没有随附的文件会以指明该文件的网络错误拒绝。URL 以文件在应用文件中的路径来指明它，因此路径离开应用文件的 URL（`..`、绝对路径）也会以同样的方式拒绝，且不会读取任何内容。
+
 ### 模块自身的 URL
 
 在 TSX 中，`import.meta.url` 是书写它的模块的 URL，因此 `new URL("./data.json", import.meta.url)` 指向它旁边的文件。本地运行或打包的桌面应用中，模块的 URL 是应用目录下的 `file:` URL，可在 `${pluginDir}` 授权下用 `fs/promises` 读取；Web 应用中是页面的 URL；打包的移动应用中是 `asset:/` URL，与导入的图片相同。要随应用发布图片，请导入它：这样构造的 URL 只指向文件，并不会打包它。

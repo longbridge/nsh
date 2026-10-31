@@ -639,7 +639,10 @@ pub fn prefetch_image(src: impl Into<String>) -> super::Prefetch {
 /// on native targets and the browser's on the web, under the app's
 /// `capabilities.network`. `request` is a URL (`GET`) or an
 /// [`HttpRequest`](crate::platform::HttpRequest); the URL is absolute.
-/// The whole body arrives with the response.
+/// The whole body arrives with the response. An `asset:/` URL, as
+/// [`FileAsset::uri`](super::FileAsset::uri) and `assets!()` give it, is a
+/// file the app ships: the engine answers it from the host's assets, with
+/// no capability needed.
 pub fn fetch(request: impl Into<crate::platform::HttpRequest>) -> super::Fetch {
     let (answer, action) = super::services::fetch(request.into());
     act(action);

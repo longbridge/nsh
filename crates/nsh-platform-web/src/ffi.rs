@@ -65,6 +65,8 @@ unsafe extern "C" {
     fn js_log(level: u32, message: *const u8, len: usize);
     #[link_name = "read_asset"]
     fn js_read_asset(uri: *const u8, uri_len: usize) -> u32;
+    #[link_name = "asset_url"]
+    fn js_asset_url(uri: *const u8, uri_len: usize, buf: *mut u8, cap: usize) -> usize;
     #[link_name = "fetch_start"]
     fn js_fetch_start(
         id: u32,
@@ -274,6 +276,23 @@ pub(crate) fn read_asset(uri: &str) -> Option<Vec<u8>> {
         return None;
     }
     crate::ASSET.with(|a| a.borrow_mut().take())
+}
+
+/// Where the page serves the bundled file `uri` (`asset:/…`): the URL its
+/// `assets` map gives the file, else one under its `assetBase`.
+pub(crate) fn asset_url(uri: &str) -> String {
+    let mut buf = vec![0u8; 256];
+    loop {
+        // SAFETY: the slices are valid for the call; JS reads `uri` and
+        // writes at most `buf.len()` bytes into `buf`.
+        let len = unsafe { js_asset_url(uri.as_ptr(), uri.len(), buf.as_mut_ptr(), buf.len()) };
+        if len <= buf.len() {
+            buf.truncate(len);
+            return String::from_utf8(buf).unwrap_or_default();
+        }
+        // It did not fit: JS wrote nothing and said how long it is.
+        buf.resize(len, 0);
+    }
 }
 
 /// [`fetch_start`]'s `body_kind`: no body.
