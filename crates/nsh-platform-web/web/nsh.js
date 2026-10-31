@@ -805,6 +805,8 @@ class Player {
     // Of the views' own style rules (`op_css`).
     this.classPrefix = `nsh-p${++players}-`;
     this.timer = 0;
+    // The engine trapped: it takes no more calls (`call`).
+    this.trapped = false;
     // An `nsh_pump` is queued (`requestPump`).
     this.pumpRequested = false;
     this.frame = 0;
@@ -1036,6 +1038,7 @@ class Player {
     imports.__wbindgen_placeholder__ && (imports.__wbindgen_placeholder__.__wbindgen_describe = () => {});
     const instance = await WebAssembly.instantiate(module, imports);
     this.wasm = this.browserHost ? this.browserHost.bind(instance.exports) : instance.exports;
+    this.trapped = false;
     // The glue's own setup (its view of the memory, wasm-bindgen's tables)
     // before any of the app's code runs.
     glue?.__nsh_finalize(instance, module);
@@ -1468,9 +1471,13 @@ class Player {
   /**
    * Calls into the engine (`f(exports)` returns its next pump delay). The
    * engine is not reentrant: a call made while it runs (from a batch being
-   * applied) waits until it returns.
+   * applied) waits until it returns. After a trap (a panic) it takes no
+   * calls: the trap left it in the middle of one, its state still borrowed,
+   * so each later call would only panic again, and that report would cover
+   * the panic's own.
    */
   call(f) {
+    if (this.trapped) return;
     if (this.depth > 0) {
       (this.deferred ??= []).push(f);
       return;
@@ -1478,6 +1485,13 @@ class Player {
     this.depth = 1;
     try {
       this.schedule(f(this.wasm));
+    } catch (err) {
+      if (err instanceof WebAssembly.RuntimeError) {
+        this.trapped = true;
+        this.deferred = [];
+        clearTimeout(this.timer);
+      }
+      throw err;
     } finally {
       this.depth = 0;
     }
