@@ -356,7 +356,7 @@ pub(crate) fn command(surface: &Rc<Surface>, command: &DesktopCommand) {
 }
 
 /// Moves and sizes the window: a field left out keeps its value.
-fn set_frame(window: &NSWindow, frame: &WindowFrame) {
+pub(crate) fn set_frame(window: &NSWindow, frame: &WindowFrame) {
     let primary_height = NSScreen::screens(MainThreadMarker::from(window))
         .firstObject()
         .map_or(0.0, |s| s.frame().size.height);

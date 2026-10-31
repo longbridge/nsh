@@ -35,6 +35,7 @@ mod menu_style;
 mod mount;
 mod native;
 mod navigation;
+pub mod panel;
 mod scroll;
 mod selectable_view;
 mod shader;
@@ -59,4 +60,5 @@ pub use crate::{
     app::{AppOptions, AppSource, AppView, run_app, set_ui_sets},
     image::AssetBase,
     native::{ComponentContext, ComponentFactory, Components, NativeComponent},
+    panel::{Panel, PanelError, PanelLevel, PanelOptions},
 };

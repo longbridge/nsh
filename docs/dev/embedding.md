@@ -210,6 +210,27 @@
   token takes both appearances: one the file gives only in `light` (or `theme`) is that color in dark mode too, as
   in a theme file, so an override that differs in dark mode names it in `dark`. GPUI's `AppView::set_theme` /
   `set_theme_json` (below) give a whole theme instead, the default's where the file is silent.
+- **A host's panel windows** (`nsh_platform_macos::Panel`; `crates/nsh-platform-macos/src/panel.rs`): the types are
+  `nsh_core::desktop`'s (`PanelOptions`, `PanelLevel`, `PanelError`), the toolkit-free part of a platform's window, and
+  a backend only maps and opens them. A host that needs a second window of its own (a floating palette, a quick-look
+  window) opens one with `Panel::open(options, app, source)`, giving it an `AppSource` of its own (a Rust root, a
+  bundle, a dev server): the panel runs its own app and engine (`AppView`) beside the main window's. A panel has no
+  title bar by default (`borderless` gives it one), floats at a `PanelLevel` (`Normal`, `Floating` — above other apps' windows — or `AboveDock`), may be
+  transparent, move by its background, hide when the app is inactive and take the keyboard without activating the app
+  (`nonactivating`); `show` makes it the key window without activating the app, `hide` orders it out and gives the
+  focus back to the app that had it, `set_frame`, `set_level` and `set_title` change it while it is open, and
+  `close` (or dropping the `Panel`) closes the window and stops its app. Sizes are points, and `PanelOptions::size`'s
+  `None` opens it at 70% of the screen; `PanelOptions::position` places the window's top-left corner from the primary
+  screen's top-left one, as `WindowFrame`'s `x` and `y` do (GTK 4 has no positioning, so Linux ignores it).
+  `PanelOptions::hides_on_resign_key` hides the panel when it loses the keyboard (macOS's `windowDidResignKey:`,
+  Win32's `WM_KILLFOCUS`), the signal a `nonactivating` panel has, which never deactivates the app.
+  `Panel::open` runs on the main thread, as `run_app` does: components run on
+  the engine thread, so a host opens its panels from its own main-thread code (`examples/panel/native/src/main.rs`
+  opens one before the main window, and gives its app launch parameters through `AppOptions::host`: the app reads
+  them as `host.params`). Windows and Linux have the same types and their own backends: Win32 maps the options to
+  window styles and z-order levels (both `Floating` and `AboveDock` are topmost), and GTK 4 cannot float a window
+  above others or position one, so those options have no effect there; the module docs of each backend list what it
+  leaves out.
 - **The iOS SDK** (`crates/xtask/src/ios.rs`): per platform slice (device, simulator, Catalyst) a static
   `NativeShell.framework` whose binary is `nsh-platform-ios` with feature `embed` (built by `cargo rustc --crate-type
   staticlib`, so the hosts never build or export it) merged by `libtool` with the Swift module, compiled with library

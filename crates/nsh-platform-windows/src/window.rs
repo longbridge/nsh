@@ -87,6 +87,9 @@ struct WindowData {
     sys_char: Cell<bool>,
     /// Where the window was before it went full screen.
     windowed: Cell<Option<WINDOWPLACEMENT>>,
+    /// Hides the window when it loses the keyboard (a panel's
+    /// [`nsh_core::desktop::PanelOptions::hides_on_resign_key`]).
+    hides_on_resign_key: Cell<bool>,
 }
 
 thread_local! {
@@ -171,6 +174,7 @@ pub(crate) fn create(
         surrogate: Cell::new(0),
         sys_char: Cell::new(false),
         windowed: Cell::new(None),
+        hides_on_resign_key: Cell::new(false),
     });
     let title: Vec<u16> = title.encode_utf16().chain(Some(0)).collect();
     let (style, ex_style) = match parent {
@@ -436,6 +440,14 @@ fn data(hwnd: HWND) -> Option<&'static WindowData> {
     // SAFETY: the pointer was stored by `WM_NCCREATE` and is freed only in
     // `WM_NCDESTROY`, after which the slot is cleared.
     unsafe { (GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *const WindowData).as_ref() }
+}
+
+/// Hides the window when it loses the keyboard (a panel's
+/// `PanelOptions::hides_on_resign_key`), or restores it.
+pub(crate) fn set_hides_on_resign_key(hwnd: HWND, hide: bool) {
+    if let Some(data) = data(hwnd) {
+        data.hides_on_resign_key.set(hide);
+    }
 }
 
 fn lo(l: isize) -> i32 {
@@ -774,7 +786,16 @@ fn handle(
             return crate::text_input::ime(surface, hwnd, msg, wparam, lparam);
         }
         WM_SETFOCUS => crate::text_input::window_focus(surface, true),
-        WM_KILLFOCUS => crate::text_input::window_focus(surface, false),
+        WM_KILLFOCUS => {
+            crate::text_input::window_focus(surface, false);
+            // A panel that hides on resign leaves the screen as it loses
+            // the keyboard, as a nonactivating panel never deactivates the
+            // app (there is no `WM_ACTIVATE` for it to hide on).
+            if data.hides_on_resign_key.get() {
+                // SAFETY: a plain call on the live window.
+                let _ = unsafe { ShowWindow(hwnd, SW_HIDE) };
+            }
+        }
         WM_GETOBJECT => return crate::access::get_object(surface, hwnd, wparam, lparam),
         WM_SETTINGCHANGE | WM_THEMECHANGED | WM_SYSCOLORCHANGE | WM_DWMCOLORIZATIONCOLORCHANGED => {
             crate::system::settings_changed(surface);

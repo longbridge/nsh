@@ -236,6 +236,10 @@ pub(crate) struct Surface {
     resize_late: Cell<bool>,
     /// The background set under the root ([`crate::system`]).
     pub(crate) background: Cell<Option<nsh_core::Color>>,
+    /// Whether the surface belongs to a transparent panel: its background
+    /// stays transparent unless the app paints an opaque one
+    /// ([`crate::system::follow_background`]).
+    pub(crate) transparent: Cell<bool>,
     on_error: RefCell<Option<ErrorHandler>>,
     on_hot_update_failed: RefCell<Option<Box<dyn Fn()>>>,
     /// Where `asset:/` image URIs resolve ([`crate::image::set_asset_base`]).
@@ -294,6 +298,7 @@ impl Surface {
             fallback: Cell::new(false),
             resize_late: Cell::new(false),
             background: Cell::new(None),
+            transparent: Cell::new(false),
             on_error: RefCell::new(None),
             on_hot_update_failed: RefCell::new(None),
             asset_base: RefCell::new(None),

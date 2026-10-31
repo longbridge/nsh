@@ -419,6 +419,16 @@ impl AppView {
         &self.surface
     }
 
+    /// Makes the surface transparent: the background under the root shows
+    /// what is behind the window, unless the app paints an opaque one of
+    /// its own (see `PanelOptions::transparent`).
+    pub(crate) fn set_transparent(&self) {
+        if self.surface.transparent.replace(true) {
+            return;
+        }
+        crate::system::environment_applied(&self.surface);
+    }
+
     /// The view the surface is in (overlays go above it).
     pub(crate) fn container(&self) -> &NSView {
         &self.container
