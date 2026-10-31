@@ -521,12 +521,7 @@ final class Mounter {
                 case INPUT_CONTENT: {
                     View v = views.get(b.getInt());
                     float x = b.getFloat(), y = b.getFloat(), w = b.getFloat(), h = b.getFloat();
-                    if (v instanceof InputBox) {
-                        InputBox in = (InputBox) v;
-                        Box.Frame f = Box.frame(in);
-                        int width = f.right - f.left, height = f.bottom - f.top;
-                        in.setContent(px(x), px(y), Math.max(0, width - px(x + w)), Math.max(0, height - px(y + h)));
-                    }
+                    if (v instanceof InputBox) ((InputBox) v).setContent(px(x), px(y), px(x + w) - px(x), px(y + h) - px(y));
                     break;
                 }
                 case COMMAND: command(b, objects); break;

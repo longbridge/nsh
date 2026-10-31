@@ -644,9 +644,25 @@ final class InputBox extends FrameLayout implements Node {
         edit.scrollTo(edit.getScrollX(), y);
     }
 
-    void setContent(int left, int top, int right, int bottom) {
-        // Padding of the container: the EditText fills the content box.
-        setPadding(left, top, right, bottom);
+    /** The content box in the input's frame (px), kept so that the padding follows the frame's size. */
+    private int contentX, contentY, contentW = -1, contentH = -1;
+
+    void setContent(int x, int y, int w, int h) {
+        contentX = x; contentY = y; contentW = w; contentH = h;
+        applyContent(getWidth(), getHeight());
+    }
+
+    // Padding of the container: the EditText fills the content box. A new box can arrive before the frame it
+    // belongs to (an input that shrinks), so the insets come from the size being laid out, not from the old frame.
+    private void applyContent(int width, int height) {
+        if (contentW < 0) return;
+        setPadding(contentX, contentY, Math.max(0, width - contentX - contentW), Math.max(0, height - contentY - contentH));
+    }
+
+    @Override
+    protected void onMeasure(int widthSpec, int heightSpec) {
+        applyContent(MeasureSpec.getSize(widthSpec), MeasureSpec.getSize(heightSpec));
+        super.onMeasure(widthSpec, heightSpec);
     }
 
     void focus() {
