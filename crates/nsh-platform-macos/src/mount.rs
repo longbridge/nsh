@@ -333,6 +333,8 @@ impl Mounter {
                     self.draw_when_shown(view, Damage::All);
                 }
             }
+            // Effects and transitions: this platform does not draw them yet.
+            MountItem::ShaderTransition { .. } | MountItem::ShaderInput { .. } => {}
             MountItem::Shader { id, layer } => {
                 if let Some(view) = self.get(*id) {
                     crate::shader::set(surface, view, layer.clone());

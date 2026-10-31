@@ -1353,6 +1353,8 @@ impl Mounter {
             }
             MountItem::Refreshing { id, refreshing } => self.set_refreshing(id, refreshing),
             MountItem::Canvas { id, drawing } => self.set_drawing(id, drawing),
+            // Effects and transitions: this platform does not draw them yet.
+            MountItem::ShaderTransition { .. } | MountItem::ShaderInput { .. } => {}
             MountItem::Shader { id, layer } => {
                 let scale = self.display_scale();
                 if let Some(s) = self.views.get(id as usize).and_then(Option::as_ref) {

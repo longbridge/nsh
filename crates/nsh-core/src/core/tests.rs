@@ -22733,3 +22733,73 @@ fn nothing_follows_while_no_view_follows_an_element() {
     c.commit();
     assert!(!c.follow_changed);
 }
+
+#[test]
+fn an_effect_takes_its_picture_again_when_a_child_leaves() {
+    let mut c = core();
+    let source = "fn shade(uv: vec2f) -> vec4f { return sample_content(uv); }";
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 2,
+                tag: Tag::ShaderEffect,
+            },
+            style_op(
+                2,
+                &[
+                    ("width", StyleValue::Number(100.0)),
+                    ("height", StyleValue::Number(50.0)),
+                ],
+            ),
+            Op::SetProp {
+                id: 2,
+                prop: Prop::ShaderSource(Some(source.into())),
+            },
+            Op::Create {
+                id: 3,
+                tag: Tag::View,
+            },
+            style_op(
+                3,
+                &[
+                    ("position", StyleValue::Str("absolute")),
+                    ("width", StyleValue::Number(10.0)),
+                    ("height", StyleValue::Number(10.0)),
+                ],
+            ),
+            Op::Insert {
+                parent: 2,
+                child: 3,
+                before: None,
+            },
+            Op::Insert {
+                parent: ROOT_ID,
+                child: 2,
+                before: None,
+            },
+        ],
+    );
+    c.commit().unwrap();
+    // An absolute child of a fixed-size effect: only its Remove and Delete
+    // go out, neither of which leads to the effect any more.
+    apply(
+        &mut c,
+        vec![
+            Op::Remove {
+                parent: 2,
+                child: 3,
+            },
+            Op::Release { id: 3 },
+        ],
+    );
+    let batch = c.commit().unwrap();
+    assert!(
+        batch
+            .items
+            .iter()
+            .any(|i| matches!(i, MountItem::ShaderInput { id: 2 })),
+        "{:?}",
+        batch.items
+    );
+}

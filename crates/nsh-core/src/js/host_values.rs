@@ -695,6 +695,41 @@ impl HostValue for crate::shader::ShaderUniforms {
     }
 }
 
+/// An effect's `progress`: a number or an animated value.
+impl HostValue for crate::shader::ShaderProgress {
+    fn decode<I: HostInput>(input: &I, _: &mut HostCx) -> Option<Self> {
+        if let Some(n) = input.as_number() {
+            return Some(crate::shader::ShaderProgress::Number(n as f32));
+        }
+        input
+            .animated_node()
+            .map(crate::shader::ShaderProgress::Animated)
+    }
+
+    fn ts_type(_: &mut TsTypes) -> String {
+        "number | AnimatedNode".into()
+    }
+}
+
+/// A transition's `value`: a string, a number or a boolean.
+impl HostValue for crate::shader::TransitionKey {
+    fn decode<I: HostInput>(input: &I, _: &mut HostCx) -> Option<Self> {
+        if let Some(b) = input.as_bool() {
+            return Some(crate::shader::TransitionKey::Bool(b));
+        }
+        if let Some(n) = input.as_number() {
+            return Some(crate::shader::TransitionKey::Number(n.to_bits()));
+        }
+        input
+            .as_string()
+            .map(|s| crate::shader::TransitionKey::String(s.as_str().into()))
+    }
+
+    fn ts_type(_: &mut TsTypes) -> String {
+        "string | number | boolean".into()
+    }
+}
+
 fn uniform_value<I: HostInput>(input: &I, depth: u32) -> Option<crate::shader::UniformValue> {
     use crate::shader::UniformValue;
     if let Some(n) = input.as_number() {

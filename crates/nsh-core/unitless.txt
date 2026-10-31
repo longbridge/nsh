@@ -193,6 +193,12 @@ scroll::spokes ->                                                # an opacity pe
 scroll::wheel_end(vx)                                            # a velocity, points per second
 scroll::wheel_end(vy)                                            # a velocity, points per second
 shader::UniformValue::Number.0                                  # a uniform's value, whatever the app's program makes of it
+shader::ShaderLayer.progress                                     # progress, 0..1
+shader::ShaderLayer::with_progress(progress)                     # progress, 0..1
+shader::ShaderProgress::Number.0                                 # progress, 0..1
+shader::builtins(progress)                                       # progress, 0..1
+element::host::ShaderView::progress(progress)                    # progress, 0..1
+ops::Prop::TransitionDuration.0                                  # time (milliseconds, as JS gives it)
 shader::builtins(scale)                                          # pixels per point, a ratio
 shader::builtins(time)                                           # time
 shape::SMOOTHING                                                 # a corner smoothing factor

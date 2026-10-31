@@ -65,6 +65,22 @@ pub enum Tag {
     /// A view whose box a shader draws, under its children (`<shader>`,
     /// TS: `Shader` of `nsh`; [`crate::shader`]).
     Shader,
+    /// A view whose children draw through a shader (`<shadereffect>`, TS:
+    /// `ShaderEffect` of `nsh`): what they draw is its `sample_content`.
+    ShaderEffect,
+    /// A view whose children change through a shader (`<shadertransition>`,
+    /// TS: `ShaderTransition` of `nsh`): when its `value` changes, a picture
+    /// of what they drew is its `sample_from`, what they draw its
+    /// `sample_to`.
+    ShaderTransition,
+    /// The whole surface drawn through a shader (`<screeneffect>`, TS:
+    /// `ScreenEffect` of `nsh`): what the surface draws is its
+    /// `sample_content`. It takes no space and has no children.
+    ScreenEffect,
+    /// The whole surface changing through a shader (`<screentransition>`,
+    /// TS: `ScreenTransition` of `nsh`), as a transition does for its
+    /// children. It takes no space and has no children.
+    ScreenTransition,
 }
 
 impl Tag {
@@ -90,6 +106,10 @@ impl Tag {
             "native" => Tag::Native,
             "overlay" => Tag::Overlay,
             "shader" => Tag::Shader,
+            "shadereffect" => Tag::ShaderEffect,
+            "shadertransition" => Tag::ShaderTransition,
+            "screeneffect" => Tag::ScreenEffect,
+            "screentransition" => Tag::ScreenTransition,
             _ => return None,
         })
     }
@@ -1374,6 +1394,16 @@ pub enum HeaderSlot {
     Header,
 }
 
+/// What a shader transition without a `source` runs (`fallback`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, PropEnum)]
+pub enum TransitionFallback {
+    /// A cross-fade ([`crate::shader::crossfade`]).
+    #[default]
+    Fade,
+    /// Nothing: the children change at once.
+    None,
+}
+
 /// How a screen enters and leaves (`animation`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, PropEnum)]
 pub enum ScreenAnimation {
@@ -1958,7 +1988,10 @@ pub enum Prop {
     /// `source` (shaders): the WGSL defining `fn shade(uv: vec2f) -> vec4f`,
     /// the color of each point of the box (`uv` 0..1 from the top left;
     /// straight sRGB with alpha), which reads `nsh.size`, `nsh.time`,
-    /// `nsh.scale` and its `struct Uniforms` as `uniforms`.
+    /// `nsh.scale` and its `struct Uniforms` as `uniforms`, and an effect's
+    /// or transition's pictures (`sample_content`, `sample_from`, ...).
+    /// An effect without one draws its children as they are; a transition
+    /// without one runs its `fallback`.
     #[prop(js = "source", on = SHADER)]
     ShaderSource(Option<Arc<str>>),
     /// A compiled shader, as Rust sets it (TS sets `source`).
@@ -1978,6 +2011,25 @@ pub enum Prop {
     /// `paused` (shaders): its clock (`nsh.time`) stands still.
     #[prop(js = "paused", on = SHADER, shared)]
     ShaderPaused(bool),
+    /// `progress` (shader effects): `nsh.progress`, a number or an animated
+    /// value, which moves it natively.
+    #[prop(js = "progress", on = EFFECT)]
+    ShaderProgress(crate::shader::ShaderProgress),
+    /// `maxSampleOffset` (shader effects and transitions): how far beyond
+    /// the box, in points, the shader draws and its pictures reach.
+    #[prop(js = "maxSampleOffset", on = EFFECT | TRANSITION)]
+    MaxSampleOffset(Points),
+    /// `value` (shader transitions): a string, number or boolean; when it
+    /// changes, the transition runs (not for the first one).
+    #[prop(js = "value", on = TRANSITION, shared)]
+    TransitionValue(Option<crate::shader::TransitionKey>),
+    /// `duration` (shader transitions): how long one runs, in milliseconds
+    /// (300 by default).
+    #[prop(js = "duration", on = TRANSITION)]
+    TransitionDuration(Option<f32>),
+    /// `fallback` (shader transitions): what runs without a `source`.
+    #[prop(js = "fallback", on = TRANSITION)]
+    TransitionFallback(TransitionFallback),
     /// `src`: a URL, `asset:/path`, or an imported asset.
     #[prop(js = "src", on = IMAGE, shared)]
     Source(Option<ImageSource>),
@@ -2081,7 +2133,7 @@ pub enum Prop {
         Option<crate::animation::NodeId>,
     ),
     /// `value`: the text, controlled by JS.
-    #[prop(js = "value", on = INPUT)]
+    #[prop(js = "value", on = INPUT, shared)]
     Value(String),
     /// `defaultValue`: the initial text.
     #[prop(js = "defaultValue", once, on = INPUT)]

@@ -462,6 +462,34 @@ pub fn shader() -> ShaderView {
     ShaderView(ElNode::new(Tag::Shader))
 }
 
+/// A view whose children draw through a shader: give it the program with
+/// [`ShaderView::source`], which reads what they draw with
+/// `sample_content`. Without a program the children draw as they are.
+pub fn shader_effect() -> ShaderView {
+    ShaderView(ElNode::new(Tag::ShaderEffect))
+}
+
+/// A view whose children change through a shader when its
+/// [`ShaderView::value`] changes: `sample_from` is a picture of what they
+/// drew, `sample_to` what they draw now, `nsh.progress` how far it is.
+/// Without a program it cross-fades ([`ShaderView::fallback`]).
+pub fn shader_transition() -> ShaderView {
+    ShaderView(ElNode::new(Tag::ShaderTransition))
+}
+
+/// The whole surface drawn through a shader, which reads it with
+/// `sample_content`. It takes no space and has no children.
+pub fn screen_effect() -> ShaderView {
+    ShaderView(ElNode::new(Tag::ScreenEffect))
+}
+
+/// The whole surface changing through a shader when its
+/// [`ShaderView::value`] changes, as [`shader_transition`] does for its
+/// children. It takes no space and has no children.
+pub fn screen_transition() -> ShaderView {
+    ShaderView(ElNode::new(Tag::ScreenTransition))
+}
+
 crate::static_reactive!(crate::shader::Shader: crate::shader::Shader);
 
 /// A value [`ShaderView::uniform`] takes ([`IntoUniform`]).
@@ -562,7 +590,56 @@ impl ShaderView {
     pub fn paused(self, paused: impl IntoReactive<bool>) -> Self {
         self.bind_prop(paused, Prop::ShaderPaused)
     }
+
+    /// An effect's `nsh.progress` (a bound one sets it again when it
+    /// changes).
+    pub fn progress(self, progress: impl IntoReactive<f32>) -> Self {
+        self.bind_prop(progress, |p| {
+            Prop::ShaderProgress(crate::shader::ShaderProgress::Number(p))
+        })
+    }
+
+    /// An effect's `nsh.progress` moved by an animated value, which the
+    /// platform writes on every frame it changes, without the engine.
+    pub fn animated_progress(mut self, value: &impl super::Animated) -> Self {
+        let progress = match value.animated_node().live() {
+            Some(node) => {
+                let id = node.id();
+                self.0.attrs.bound.push(node);
+                crate::shader::ShaderProgress::Animated(id)
+            }
+            None => crate::shader::ShaderProgress::Number(0.0),
+        };
+        self.set(Prop::ShaderProgress(progress))
+    }
+
+    /// How far beyond its box, in points, an effect or a transition draws
+    /// and its pictures reach (`maxSampleOffset`).
+    pub fn max_sample_offset(self, offset: Points) -> Self {
+        self.set(Prop::MaxSampleOffset(offset))
+    }
+
+    /// A transition's value: when it changes, the transition runs (not for
+    /// the first one).
+    pub fn value(self, value: impl IntoReactive<crate::shader::TransitionKey>) -> Self {
+        self.bind_prop(value, |v| Prop::TransitionValue(Some(v)))
+    }
+
+    /// How long a transition runs (300 ms by default).
+    pub fn duration(self, duration: std::time::Duration) -> Self {
+        self.set(Prop::TransitionDuration(Some(
+            duration.as_secs_f32() * 1000.0,
+        )))
+    }
+
+    /// What a transition without a program runs: a cross-fade (the
+    /// default) or nothing.
+    pub fn fallback(self, fallback: crate::TransitionFallback) -> Self {
+        self.set(Prop::TransitionFallback(fallback))
+    }
 }
+
+crate::static_reactive!(crate::shader::TransitionKey: crate::shader::TransitionKey);
 
 /// A web view loading `url` (a bound one loads again when it changes).
 pub fn web_view(url: impl IntoReactive<String>) -> WebView {
