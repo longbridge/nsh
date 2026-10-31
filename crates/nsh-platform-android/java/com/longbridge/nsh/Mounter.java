@@ -1945,11 +1945,19 @@ final class Mounter {
                 if (v instanceof InputBox) {
                     ((InputBox) v).blur();
                 } else if (id == 1) {
+                    // Keyboard.dismiss(): hide the keyboard even when the field that showed it is gone (a page that
+                    // closed with it), which leaves no focused view in the host but the keyboard still up. Not when
+                    // an editor outside the host has it (the embedding app's, another NshView's): they share the window.
                     View f = host.findFocus();
-                    if (f != null && f != host) {
-                        InputMethodManager imm = (InputMethodManager) context.getSystemService(Context.INPUT_METHOD_SERVICE);
+                    InputMethodManager imm = (InputMethodManager) context.getSystemService(Context.INPUT_METHOD_SERVICE);
+                    if (f != null) {
                         imm.hideSoftInputFromWindow(f.getWindowToken(), 0);
-                        host.requestFocus();
+                        if (f != host) host.requestFocus();
+                    } else {
+                        View other = host.getRootView().findFocus();
+                        if (other == null || !other.onCheckIsTextEditor() || !imm.isActive(other)) {
+                            imm.hideSoftInputFromWindow(host.getWindowToken(), 0);
+                        }
                     }
                 }
                 break;
