@@ -699,6 +699,10 @@ pub(crate) struct Dv {
     pub(crate) nav: Rc<Cell<Option<super::review::Nav>>>,
     /// The rows made last.
     rows_window: crate::window::RowWindow,
+    /// The offset, rows' size and viewport reported last (`onScroll`).
+    pub(crate) scroll_reported: Rc<Cell<Option<super::review::Scrolled>>>,
+    /// The changes' boxes reported last (`onHunkBoundsChange`).
+    pub(crate) bounds_reported: Rc<RefCell<Option<Vec<super::DiffHunkBounds>>>>,
 }
 
 impl Dv {
@@ -729,8 +733,12 @@ impl Dv {
             hscroll_x: Rc::default(),
             nav: Rc::default(),
             rows_window: Default::default(),
+            scroll_reported: Rc::default(),
+            bounds_reported: Rc::default(),
         };
         dv.follow_props();
+        dv.report_scroll();
+        dv.report_hunk_bounds();
         dv
     }
 

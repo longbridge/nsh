@@ -3212,6 +3212,17 @@ absent BETA
 tap id:file-0
 expect Toggled: a.ts false
 expect BETA
+# A longer diff of every line reports where its rows are once laid out:
+# 30 rows of 20 points, as wide as its 390 × 100 viewport, at the top.
+expect Scrolled: 0 0 390x600 390x100
+# Where each change's row is in them, reported and as the ref gives it.
+expect Moved: 0@0,80 390x20 1@0,480 390x20
+tap id:marks
+expect Marks: 0@0,80 390x20 1@0,480 390x20
+# The ref scrolls them to an offset, reported.
+tap id:scroll-to
+expect Scrolled: 0 470 390x600 390x100
+expect line TWENTY-FIVE
 covers [props] DiffView.softWrap
 covers [props] DiffView.annotations
 covers [props] DiffView.renderAnnotation
@@ -3227,6 +3238,8 @@ covers [props] DiffView.renderSeparator
 covers [props] DiffView.renderHunkActions
 covers [props] DiffView.renderFileHeader
 covers [events] DiffView.onFileToggle
+covers [events] DiffView.onHunkBoundsChange
+covers [props] DiffView.expandAll
 
 # base-data-table
 tap id:case-base-data-table
