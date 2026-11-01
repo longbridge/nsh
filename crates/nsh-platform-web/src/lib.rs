@@ -460,7 +460,7 @@ fn init() {
         let _ = log::set_logger(&LOGGER);
         log::set_max_level(log::LevelFilter::Info);
         std::panic::set_hook(Box::new(|info| {
-            ffi::report_error(&format!("nsh panicked: {info}"));
+            ffi::report_panic(&format!("nsh panicked: {info}"));
         }));
         // What this module leaves out (the syntaxes) comes from the page.
         nsh_core::runtime_data::set_loader(ffi::load_data);

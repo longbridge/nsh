@@ -227,6 +227,10 @@ pub(crate) enum Cursor {
     ResizeEw,
     /// Resize up and down.
     ResizeNs,
+    /// Resize northwest and southeast.
+    ResizeNwse,
+    /// Resize northeast and southwest.
+    ResizeNesw,
     /// Busy.
     Wait,
     /// Working in the background.
@@ -621,6 +625,8 @@ fn css_cursor(cursor: nsh_core::Cursor) -> Option<Cursor> {
         C::ZoomIn | C::ZoomOut => Cursor::Crosshair,
         C::ColResize => Cursor::ResizeEw,
         C::RowResize => Cursor::ResizeNs,
+        C::NwseResize => Cursor::ResizeNwse,
+        C::NeswResize => Cursor::ResizeNesw,
         C::None => Cursor::Hidden,
     })
 }
@@ -2783,6 +2789,8 @@ mod tests {
         assert_eq!(css_cursor(C::Pointer), Some(Cursor::Hand));
         assert_eq!(css_cursor(C::NotAllowed), Some(Cursor::NotAllowed));
         assert_eq!(css_cursor(C::None), Some(Cursor::Hidden));
+        assert_eq!(css_cursor(C::NwseResize), Some(Cursor::ResizeNwse));
+        assert_eq!(css_cursor(C::NeswResize), Some(Cursor::ResizeNesw));
     }
 
     #[test]

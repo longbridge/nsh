@@ -603,6 +603,33 @@ hidden with its view, receives its own input, and sits above everything NSH draw
 with web views). `ComponentContext::emit`, `set_size` (points) and `redraw` work from any thread. Register before
 `AppView::load`; a registry belongs to one `AppView` (and the views made from the same `AppOptions`).
 
+A component also takes the mouse wheel and touchpad scrolls over it with `wheel` (an image viewer zooms with them). The
+`Wheel` it gets holds the pointer (`x`, `y`, the component's points), the distance in points (`dx`, `dy`, positive
+toward the right and down, as scroll views move their content) and in wheel notches (`notches_x`, `notches_y`, with
+fractions from precision touchpads and high-resolution wheels), whether it came in fine steps (`precise`) and the
+modifiers held (`shift`, `ctrl`, `alt`). It returns `true` for a scroll it took; the scroll views around it scroll with
+the rest, and by default with all of them. A scroll a scroll view has begun stays on that view. Ctrl + wheel is also a
+precision touchpad's pinch, and Shift + wheel arrives as the wheel sent it (`dy`, with `shift`):
+
+```rust
+use nsh_platform_windows::Wheel;
+
+impl NativeComponent for ImageView {
+    // draw, set_prop, ...
+
+    fn wheel(&mut self, event: &Wheel) -> bool {
+        if !event.ctrl {
+            return false; // the scroll views around it scroll
+        }
+        // √2 per notch, about the pointer.
+        let factor = 2f32.powf(-event.notches_y / 2.0);
+        self.zoom_about(event.x, event.y, factor);
+        self.context.redraw();
+        true
+    }
+}
+```
+
 ## Rules and limits
 
 - **Register before loading.** Factories apply to elements created after the registration. Register every name before

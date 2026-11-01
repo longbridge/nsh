@@ -531,7 +531,12 @@ there is at its top. The browser's bars are the browser's: the web ignores `Comm
 Exports are `nsh_*` functions (`src/lib.rs`); imports are module `nsh` (`src/ffi.rs`). Every export that reaches
 the engine pumps it and returns the next delay in milliseconds (-1: none), which `nsh.js` turns into a `setTimeout`.
 The engine is not reentrant: `nsh.js` routes every call through `Player.call`, which defers calls made while a
-batch is being applied (a batch arrives inside a wasm call).
+batch is being applied (a batch arrives inside a wasm call). A trap (a panic, `panic = "abort"`) ends the call it
+happened in with the engine's state still borrowed, so after one `Player.call` drops every call, the deferred ones
+too: each would only panic again (`RefCell already borrowed`). The panic hook reports through its own import
+(`report_panic`, not `report_error`), so the page knows before the trap: the overlay keeps that first report, and
+what follows from any entry into the engine (the browser runtime's app code calls it outside `Player.call`) goes to
+the console only (`web/nsh.test.mjs`). The page needs a reload to run again.
 
 A commit becomes one JSON array (`src/encode.rs`): `["c", id, kind]`, `["f", id, x, y, w, h]`, `["s", id, class,
 borderClass, tint]`, `["t", id, ...content, runs, styles, selectable, selectionClass]` (`styles`: a class per run

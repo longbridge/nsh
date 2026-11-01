@@ -853,6 +853,38 @@ fn effects_and_interaction() {
 }
 
 #[test]
+fn diagonal_resize_cursors_keep_their_axes() {
+    use crate::style::StyleValue;
+
+    for (name, expected) in [
+        ("nwse-resize", Cursor::NwseResize),
+        ("nw-resize", Cursor::NwseResize),
+        ("se-resize", Cursor::NwseResize),
+        ("nesw-resize", Cursor::NeswResize),
+        ("ne-resize", Cursor::NeswResize),
+        ("sw-resize", Cursor::NeswResize),
+        ("ew-resize", Cursor::ColResize),
+        ("ns-resize", Cursor::RowResize),
+        ("move", Cursor::Move),
+    ] {
+        let mut inline = Style::default();
+        inline.set("cursor", StyleValue::Str(name)).unwrap();
+        assert_eq!(inline.view.cursor, expected, "inline {name}");
+        assert_eq!(
+            styled(&format!("cursor-{name}")).view.cursor,
+            expected,
+            "{name}"
+        );
+        assert_eq!(
+            styled(&format!("cursor-[{name}]")).view.cursor,
+            expected,
+            "arbitrary {name}"
+        );
+        assert_eq!(Cursor::parse(expected.name()), Some(expected));
+    }
+}
+
+#[test]
 fn transitions_and_animations() {
     let s = styled("transition-colors duration-300 ease-out delay-75");
     let t = s.view.transition.unwrap();
