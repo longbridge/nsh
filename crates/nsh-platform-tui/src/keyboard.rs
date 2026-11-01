@@ -662,6 +662,11 @@ impl Keyboard {
             Action::PageDown | Action::PageUp | Action::Start | Action::End => {
                 let target = self
                     .focused
+                    .or(self.search_point)
+                    .filter(|&id| {
+                        geometry.iter().any(|g| g.id == id)
+                            && input_scope(tree, id) == crate::navigation::focus_scope(tree)
+                    })
                     .and_then(|id| scroll_ancestor(tree, id))
                     .or_else(|| {
                         geometry
@@ -805,7 +810,14 @@ pub(crate) fn reveal_frame(
             )
         };
         if start < nsh_core::Points::ZERO || start + len > viewport {
-            let delta = nsh_core::scroll::reveal_delta(start, start + len, viewport);
+            let delta = if horizontal {
+                nsh_core::scroll::reveal_delta(start, start + len, viewport)
+            } else {
+                let centered_start = (viewport - len) / 2.0;
+                // Oversized spans keep the core's margin and start-first policy.
+                start - centered_start
+                    + nsh_core::scroll::reveal_delta(centered_start, centered_start + len, viewport)
+            };
             let moved = move_scroll(tree, id, offset + delta);
             if horizontal {
                 origin.x -= moved;

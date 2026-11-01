@@ -13,7 +13,7 @@ test("terminal screenshots capture styled Cells after real pointer input", async
   expect(picture.rows.length).toBe(4);
   expect(picture.rows.every((row: unknown[]) => row.length === 20)).toBe(true);
   expect(picture.rows[0][0]).toEqual({
-    symbol: "界", fg: "#123456", bg: "reset", underline: "reset", modifiers: ["bold", "italic", "underlined"],
+    symbol: "界", fg: "blue", bg: "reset", underline: "reset", modifiers: ["bold", "italic", "underlined"],
   });
   expect(picture.rows[0][2].symbol).toBe("A");
   const shown = picture.rows.map((row: { symbol: string }[]) => row.map(cell => cell.symbol).join(""));

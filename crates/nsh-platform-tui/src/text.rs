@@ -1,18 +1,22 @@
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use nsh_core::{
     AttachmentAlignments, AttributedText, EllipsizeMode, FontExtent, Point, Points, Size,
     TextAlign, TextEngine, TextLayout, TextLine,
 };
 use ratatui_core::{
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span},
 };
 use ratatui_widgets::paragraph::Paragraph;
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
-use crate::CellSize;
+use crate::{CellSize, palette::Ground};
+
+/// How many grounds a text keeps its drawn rows for (a hover or selection
+/// changes the fill under it back and forth).
+const PARAGRAPH_GROUNDS: usize = 4;
 
 /// Text measured on a fixed grid, independent of the requested font size.
 #[derive(Default)]
@@ -35,6 +39,7 @@ pub(crate) struct Glyph {
     end: u32,
     pub(crate) width: usize,
     style: Style,
+    color: Option<nsh_core::Color>,
     attachment: Option<Attachment>,
 }
 
@@ -54,7 +59,9 @@ pub struct PreparedText {
 }
 
 pub(crate) struct CellLayout {
-    pub(crate) paragraph: Paragraph<'static>,
+    /// The rows as drawn in the palette on the grounds they were last drawn
+    /// on, made when first drawn there.
+    paragraphs: Mutex<Vec<(Ground, Arc<Paragraph<'static>>)>>,
     /// The displayed rows, kept for searching the text on screen.
     pub(crate) rows: Vec<Row>,
     metrics: Vec<TextLine>,
@@ -67,6 +74,38 @@ pub(crate) struct Row {
     pub(crate) glyphs: Vec<Glyph>,
 }
 
+impl CellLayout {
+    /// The rows with each glyph's color drawn in the palette on `ground`.
+    pub(crate) fn paragraph(&self, ground: Ground) -> Arc<Paragraph<'static>> {
+        let mut paragraphs = self
+            .paragraphs
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some((_, paragraph)) = paragraphs.iter().find(|(drawn, _)| *drawn == ground) {
+            return paragraph.clone();
+        }
+        let paragraph = Arc::new(Paragraph::new(
+            self.rows
+                .iter()
+                .map(|row| {
+                    let indent = (row.indent > 0).then(|| Span::raw(" ".repeat(row.indent)));
+                    Line::from_iter(indent.into_iter().chain(row.glyphs.iter().map(|glyph| {
+                        let style = glyph.color.map_or(glyph.style, |color| {
+                            glyph.style.patch(crate::palette::ink(color, ground))
+                        });
+                        Span::styled(glyph.text.to_string(), style)
+                    })))
+                })
+                .collect::<Vec<_>>(),
+        ));
+        if paragraphs.len() == PARAGRAPH_GROUNDS {
+            paragraphs.remove(0);
+        }
+        paragraphs.push((ground, paragraph.clone()));
+        paragraph
+    }
+}
+
 fn glyphs(text: &AttributedText, cells: CellSize, alignments: &AttachmentAlignments) -> Vec<Glyph> {
     let mut offset = 0;
     text.text
@@ -75,13 +114,8 @@ fn glyphs(text: &AttributedText, cells: CellSize, alignments: &AttachmentAlignme
             let start = offset;
             offset += grapheme.encode_utf16().count() as u32;
             let mut style = Style::default();
-            if let Some(span) = text.span_at(start) {
-                let color = span.style.color.0;
-                style = style.fg(Color::Rgb(
-                    (color >> 24) as u8,
-                    (color >> 16) as u8,
-                    (color >> 8) as u8,
-                ));
+            let span = text.span_at(start);
+            if let Some(span) = span {
                 if span.style.font_weight >= 600 {
                     style = style.add_modifier(Modifier::BOLD);
                 }
@@ -123,6 +157,7 @@ fn glyphs(text: &AttributedText, cells: CellSize, alignments: &AttachmentAlignme
                 end: offset,
                 width,
                 style,
+                color: span.map(|span| span.style.color),
                 attachment,
             }
         })
@@ -269,7 +304,6 @@ impl TextEngine for CellTextEngine {
         let rows = self.rows(text, Some(size.width));
         let glyphs = &text.glyphs;
         let text = &text.text;
-        let mut lines = Vec::new();
         let mut displayed = Vec::new();
         let mut metrics = Vec::new();
         let mut selection_glyphs = Vec::new();
@@ -330,29 +364,18 @@ impl TextEngine for CellTextEngine {
                 ));
                 column += glyph.width;
             }
-            let mut spans = Vec::with_capacity(row.len() + 1);
-            if indent > 0 {
-                spans.push(Span::raw(" ".repeat(indent)));
-            }
-            spans.extend(
-                row.iter()
-                    .map(|g| Span::styled(g.text.to_string(), g.style)),
-            );
-            while lines.len() < glyph_row {
-                lines.push(Line::default());
+            while displayed.len() < glyph_row {
                 displayed.push(Row {
                     indent: 0,
                     glyphs: Vec::new(),
                 });
             }
-            lines.push(Line::from(spans));
             displayed.push(Row {
                 indent,
                 glyphs: row,
             });
             top = baseline + descent;
-            while lines.len() < top {
-                lines.push(Line::default());
+            while displayed.len() < top {
                 displayed.push(Row {
                     indent: 0,
                     glyphs: Vec::new(),
@@ -360,7 +383,7 @@ impl TextEngine for CellTextEngine {
             }
         }
         TextLayout(Arc::new(CellLayout {
-            paragraph: Paragraph::new(lines),
+            paragraphs: Default::default(),
             rows: displayed,
             metrics,
             attachments,
@@ -419,6 +442,7 @@ fn ellipsize(row: &mut Vec<Glyph>, columns: usize, mode: EllipsizeMode) {
             end: offset,
             width: 1,
             style: at.map_or_else(Style::default, |g| g.style),
+            color: at.and_then(|g| g.color),
             attachment: None,
         });
     }

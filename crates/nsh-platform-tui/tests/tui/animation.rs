@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 use nsh_platform_tui::{AppView, Bundle, Input, MouseButton, MouseKind};
 use ratatui_core::{backend::TestBackend, buffer::Buffer, style::Color, terminal::Terminal};
 
-use super::app::{mouse, surface};
+use super::app::{mouse, reversed, surface};
 
 fn load(
     source: &str,
@@ -117,19 +117,20 @@ fn bound_colors_override_styles_and_unbinding_restores_them() {
         contents(buffer).contains("Field")
     });
     let buffer = terminal.backend().buffer();
-    assert_eq!(buffer[(0, 1)].fg, Color::Rgb(0, 255, 0));
-    assert_eq!(buffer[(1, 2)].bg, Color::Rgb(0, 255, 0));
-    assert_eq!(buffer[(0, 4)].fg, Color::Rgb(0, 255, 0));
-    assert_eq!(buffer[(0, 5)].fg, Color::Rgb(0, 255, 0));
+    assert_eq!(buffer[(0, 1)].fg, Color::Green);
+    assert_eq!(buffer[(1, 2)].fg, Color::Green);
+    assert!(reversed(buffer, 1, 2));
+    assert_eq!(buffer[(0, 4)].fg, Color::Green);
+    assert_eq!(buffer[(0, 5)].fg, Color::Green);
     press(&mut view, "Tab");
     press(&mut view, "Enter");
     render_until(&mut view, &mut terminal, &wake, |buffer, _| {
-        buffer[(0, 4)].fg == Color::Rgb(255, 0, 0)
+        buffer[(0, 4)].fg == Color::Red
     });
     let buffer = terminal.backend().buffer();
-    assert_eq!(buffer[(0, 1)].fg, Color::Rgb(255, 0, 0));
-    assert_eq!(buffer[(1, 2)].bg, Color::Rgb(255, 0, 0));
-    assert_eq!(buffer[(0, 5)].fg, Color::Rgb(255, 0, 0));
+    assert_eq!(buffer[(0, 1)].fg, Color::Red);
+    assert_eq!(buffer[(1, 2)].fg, Color::Red);
+    assert_eq!(buffer[(0, 5)].fg, Color::Red);
 }
 
 #[test]
@@ -202,13 +203,15 @@ fn scale_and_rotation_project_descendants_around_the_transform_origin() {
     let buffer = terminal.backend().buffer();
     for y in 1..3 {
         for x in 4..6 {
-            assert_eq!(buffer[(x, y)].bg, Color::Rgb(255, 0, 0));
+            assert!(reversed(buffer, x, y));
+            assert_eq!(buffer[(x, y)].fg, Color::Red);
         }
     }
-    assert_eq!(buffer[(3, 1)].bg, Color::Reset);
-    assert_eq!(buffer[(8, 2)].bg, Color::Rgb(0, 255, 0));
-    assert_eq!(buffer[(9, 2)].bg, Color::Rgb(0, 255, 0));
-    assert_eq!(buffer[(10, 2)].bg, Color::Reset);
+    assert!(!reversed(buffer, 3, 1));
+    assert!(reversed(buffer, 8, 2));
+    assert!(reversed(buffer, 9, 2));
+    assert_eq!(buffer[(9, 2)].fg, Color::Green);
+    assert!(!reversed(buffer, 10, 2));
 }
 
 #[test]
@@ -224,7 +227,7 @@ fn canvas_slots_follow_native_values_and_appear_effects_end_visible() {
             value.timing(1, { duration: 80 }).then(() => done.set(true));
             return <View>
                 <View style={{ opacity: value, translate: [x, 0] }}><Text>Appeared</Text></View>
-                <Canvas style={{ width: 80, height: 16 }} draw={cx => {
+                <Canvas accessibilityLabel="drawing" style={{ width: 80, height: 16 }} draw={cx => {
                     cx.fillStyle = color;
                     cx.translate(x, 0);
                     cx.fillRect(0, 0, 16, 16);
@@ -243,11 +246,11 @@ fn canvas_slots_follow_native_values_and_appear_effects_end_visible() {
     assert_eq!(buffer[(0, 1)].symbol(), " ");
     assert_eq!(buffer[(2, 1)].symbol(), "⣿");
     assert_eq!(buffer[(3, 1)].symbol(), "⣿");
-    assert_eq!(buffer[(2, 1)].fg, Color::Rgb(0, 255, 0));
+    assert_eq!(buffer[(2, 1)].fg, Color::Green);
 }
 
 #[test]
-fn animated_page_backgrounds_still_use_the_terminals_background() {
+fn animated_fills_draw_no_color_and_a_leaf_follows_its_animated_fill() {
     let (mut view, wake, mut terminal) = load(
         r##"
         import { mount, View, Text, createAnimatedValue } from "nsh";
@@ -256,7 +259,7 @@ fn animated_page_backgrounds_still_use_the_terminals_background() {
             const color = value.interpolate({ inputRange: [0, 1], outputRange: ["#ff0000", "#00ff00"] });
             return <View style={{ backgroundColor: color }}>
                 <View onPress={() => value.set(1)}><Text>Change page</Text></View>
-                <View style={{ width: 80, height: 16, backgroundColor: "#00ff00" }} />
+                <View style={{ width: 80, height: 16, backgroundColor: color }} />
             </View>;
         });
     "##,
@@ -264,17 +267,15 @@ fn animated_page_backgrounds_still_use_the_terminals_background() {
     render_until(&mut view, &mut terminal, &wake, |buffer, _| {
         contents(buffer).contains("Change page")
     });
-    assert_eq!(terminal.backend().buffer()[(0, 0)].bg, Color::Reset);
-    assert_eq!(
-        terminal.backend().buffer()[(0, 1)].bg,
-        Color::Rgb(0, 255, 0)
-    );
+    assert_eq!(terminal.backend().buffer()[(0, 1)].fg, Color::Red);
     press(&mut view, "Tab");
     press(&mut view, "Enter");
     render_until(&mut view, &mut terminal, &wake, |buffer, _| {
-        buffer[(0, 1)].bg == Color::Reset
+        buffer[(0, 1)].fg == Color::Green
     });
-    assert_eq!(terminal.backend().buffer()[(0, 0)].bg, Color::Reset);
+    let buffer = terminal.backend().buffer();
+    assert!(reversed(buffer, 0, 1));
+    assert!(buffer.content.iter().all(|cell| cell.bg == Color::Reset));
 }
 
 #[test]
@@ -363,7 +364,7 @@ fn canvas_reset_transform_preserves_the_views_animated_transform() {
             const scale = createAnimatedValue(2);
             return <View>
                 <Text>Canvas transform</Text>
-                <Canvas style={{ position: "absolute", left: 16, top: 16, width: 16, height: 16,
+                <Canvas accessibilityLabel="drawing" style={{ position: "absolute", left: 16, top: 16, width: 16, height: 16,
                     transformOrigin: "top left", scale }} draw={cx => {
                     cx.translate(80, 0);
                     cx.setTransform(1, 0, 0, 1, 0, 0);
@@ -381,14 +382,14 @@ fn canvas_reset_transform_preserves_the_views_animated_transform() {
     for y in 1..3 {
         for x in 2..4 {
             assert_eq!(buffer[(x, y)].symbol(), "⣿");
-            assert_eq!(buffer[(x, y)].fg, Color::Rgb(255, 0, 0));
+            assert_eq!(buffer[(x, y)].fg, Color::Red);
         }
     }
     assert_eq!(buffer[(4, 1)].symbol(), " ");
 }
 
 #[test]
-fn animated_parent_opacity_blends_descendant_text_in_cells() {
+fn animated_parent_opacity_keeps_descendant_text_colors() {
     let (mut view, wake, mut terminal) = load(
         r##"
         import { mount, View, Text, createAnimatedValue } from "nsh";
@@ -401,8 +402,7 @@ fn animated_parent_opacity_blends_descendant_text_in_cells() {
     render_until(&mut view, &mut terminal, &wake, |buffer, _| {
         contents(buffer).contains("Faded")
     });
-    assert_eq!(
-        terminal.backend().buffer()[(0, 0)].fg,
-        Color::Rgb(128, 128, 128)
-    );
+    let cell = &terminal.backend().buffer()[(0, 0)];
+    assert_eq!(cell.fg, Color::Reset);
+    assert!(!cell.modifier.contains(ratatui_core::style::Modifier::DIM));
 }

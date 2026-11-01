@@ -2,7 +2,7 @@ use nsh_core::prelude::*;
 use nsh_platform_tui::{App, Handled, Input, Root};
 use ratatui_core::{backend::TestBackend, style::Color, terminal::Terminal};
 
-use super::app::{draw_until, surface};
+use super::app::{draw_until, reversed, selected, surface};
 
 fn key(name: &str) -> Input {
     Input::Key {
@@ -35,7 +35,7 @@ fn OutlinedButton() -> impl IntoElement {
 }
 
 #[test]
-fn controls_draw_the_apps_focus_outline_without_changing_layout() {
+fn a_focused_control_is_reversed_and_its_app_outline_is_not_drawn() {
     let (mut view, rx) = surface();
     let mut terminal = Terminal::new(TestBackend::new(30, 10)).unwrap();
     view.load(App::Rust(Root::new::<OutlinedButton>(|| ())))
@@ -44,18 +44,24 @@ fn controls_draw_the_apps_focus_outline_without_changing_layout() {
     assert_eq!(view.handle(key("Tab")), Handled::Yes);
     assert_eq!(view.handle(key("Enter")), Handled::Yes);
     draw_until(&mut view, &mut terminal, &rx, "pressed");
-    // The app's inset outline surrounds its original 10 by 3 Cell box.
-    assert_eq!(
-        terminal.backend().buffer()[(2, 4)].fg,
-        Color::Rgb(0x12, 0x34, 0x56)
-    );
+    // Focus reverses the button's own 10 by 3 Cell box; its outline is the
+    // app's focus style, which the terminal's look leaves out.
+    let buffer = terminal.backend().buffer();
+    for (x, y) in [(2, 2), (11, 2), (2, 4), (11, 4)] {
+        assert!(reversed(buffer, x, y), "({x}, {y})");
+        assert_eq!(buffer[(x, y)].fg, Color::Reset);
+    }
+    for (x, y) in [(1, 2), (12, 2), (2, 1), (2, 5)] {
+        assert!(!reversed(buffer, x, y), "({x}, {y})");
+        assert_eq!(buffer[(x, y)].symbol(), " ");
+    }
     assert!(!terminal.backend().cursor_visible());
 }
 
 #[component]
 fn ScaledOutline() -> impl IntoElement {
     view().flex_1().child(
-        nsh_base::button()
+        view()
             .absolute()
             .left(px(16.0))
             .top(px(32.0))
@@ -66,78 +72,23 @@ fn ScaledOutline() -> impl IntoElement {
             .outline(px(2.0))
             .outline_offset(px(-2.0))
             .outline_color(nsh_core::color::rgb(0x123456))
+            .accessibility_state(selected())
             .child(text("scaled")),
     )
 }
 
 #[test]
-fn an_app_outline_follows_the_controls_transformed_bounds() {
+fn a_reversed_box_follows_the_controls_transformed_bounds_without_its_outline() {
     let (mut view, rx) = surface();
     let mut terminal = Terminal::new(TestBackend::new(30, 10)).unwrap();
     view.load(App::Rust(Root::new::<ScaledOutline>(|| ())))
         .unwrap();
     draw_until(&mut view, &mut terminal, &rx, "scaled");
-    let corner = &terminal.backend().buffer()[(21, 7)];
-    assert_eq!(corner.symbol(), "┘");
-    assert_eq!(corner.fg, Color::Rgb(0x12, 0x34, 0x56));
-}
-
-#[component]
-fn OutlinedRow() -> impl IntoElement {
-    view()
-        .flex_1()
-        .child(
-            nsh_base::button()
-                .absolute()
-                .left(px(16.0))
-                .top(px(32.0))
-                .w(px(80.0))
-                .h(px(32.0))
-                .pt(px(16.0))
-                .focus(|s| {
-                    s.outline(px(2.0))
-                        .outline_offset(px(-2.0))
-                        .outline_color(nsh_core::color::rgb(0x123456))
-                })
-                .child(text("Stocks")),
-        )
-        .child(
-            view()
-                .absolute()
-                .left(px(16.0))
-                .top(px(64.0))
-                .child(text("below")),
-        )
-}
-
-#[test]
-fn an_outline_blocked_by_neighbouring_text_recolors_its_own_edges() {
-    let (mut view, rx) = surface();
-    let mut terminal = Terminal::new(TestBackend::new(30, 8)).unwrap();
-    view.load(App::Rust(Root::new::<OutlinedRow>(|| ())))
-        .unwrap();
-    draw_until(&mut view, &mut terminal, &rx, "below");
-    assert_eq!(view.handle(key("Tab")), Handled::Yes);
-    let outline = Color::Rgb(0x12, 0x34, 0x56);
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-    loop {
-        terminal
-            .draw(|frame| view.render(frame, frame.area()))
-            .unwrap();
-        if terminal.backend().buffer()[(2, 3)].fg == outline {
-            break;
-        }
-        rx.recv_deadline(deadline).unwrap();
-    }
     let buffer = terminal.backend().buffer();
-    assert_eq!(buffer[(5, 2)].symbol(), " ");
-    assert_eq!(buffer[(5, 2)].fg, outline);
-    assert_eq!(buffer[(2, 3)].symbol(), "S");
-    assert_eq!(buffer[(1, 3)].symbol(), " ");
-    assert_eq!(buffer[(1, 4)].symbol(), " ");
-    assert_eq!(buffer[(11, 4)].symbol(), " ");
-    assert_eq!(buffer[(2, 4)].symbol(), "b");
-    assert_ne!(buffer[(2, 4)].fg, outline);
+    assert!(reversed(buffer, 21, 7));
+    assert_eq!(buffer[(21, 7)].symbol(), " ");
+    assert!(!reversed(buffer, 22, 7));
+    assert!(!reversed(buffer, 21, 8));
 }
 
 #[component]
@@ -163,32 +114,24 @@ fn ThinProgress() -> impl IntoElement {
 }
 
 #[test]
-fn a_subcell_progress_rail_is_visible_and_zero_progress_stays_empty() {
+fn a_subcell_progress_indicator_is_a_rule_and_zero_progress_stays_empty() {
     let (mut view, rx) = surface();
     let mut terminal = Terminal::new(TestBackend::new(30, 8)).unwrap();
     view.load(App::Rust(Root::new::<ThinProgress>(|| ())))
         .unwrap();
     draw_until(&mut view, &mut terminal, &rx, "progress 0");
-    assert_eq!(
-        terminal.backend().buffer()[(0, 0)].bg,
-        Color::Rgb(0x12, 0x34, 0x56)
-    );
     assert_eq!(terminal.backend().buffer()[(0, 0)].symbol(), " ");
     view.handle(key("Tab"));
     view.handle(key("Enter"));
     draw_until(&mut view, &mut terminal, &rx, "progress 50");
+    let buffer = terminal.backend().buffer();
+    assert_eq!(buffer[(9, 0)].symbol(), "─");
+    assert_eq!(buffer[(9, 0)].fg, Color::Blue);
+    assert_eq!(buffer[(9, 0)].bg, Color::Reset);
     assert_eq!(
-        terminal.backend().buffer()[(9, 0)].fg,
-        Color::Rgb(0xab, 0xcd, 0xef)
-    );
-    assert_eq!(terminal.backend().buffer()[(9, 0)].symbol(), "─");
-    assert_eq!(
-        terminal.backend().buffer()[(9, 0)].bg,
-        Color::Rgb(0x12, 0x34, 0x56)
-    );
-    assert_eq!(
-        terminal.backend().buffer()[(10, 0)].bg,
-        Color::Rgb(0x12, 0x34, 0x56)
+        buffer[(10, 0)].symbol(),
+        " ",
+        "the rail is a container: no fill"
     );
 }
 
@@ -231,10 +174,9 @@ fn moving_back_between_controls_keeps_the_groups_focus_within_style() {
         }
         view.handle(input);
         draw_until(&mut view, &mut terminal, &rx, &format!("focus {name}"));
-        assert_eq!(
-            terminal.backend().buffer()[(0, 0)].bg,
-            Color::Rgb(0x12, 0x34, 0x56)
-        );
+        let buffer = terminal.backend().buffer();
+        assert!(reversed(buffer, 0, 0));
+        assert_eq!(buffer[(0, 0)].fg, Color::Blue);
     }
 }
 
@@ -298,39 +240,52 @@ fn checkbox_and_switch_project_value_and_disabled_states_to_their_parts() {
     view.load(App::Rust(Root::new::<ValueControls>(|| ())))
         .unwrap();
     draw_until(&mut view, &mut terminal, &rx, "mixed true");
-    assert_eq!(
-        terminal.backend().buffer()[(0, 0)].bg,
-        Color::Rgb(0xab, 0xcd, 0xef)
+    // The 1-Cell indicators show the glyphs' short forms in their palette
+    // colors; checked is a glyph, not reverse.
+    let line = |buffer: &ratatui_core::buffer::Buffer, y: u16| -> String {
+        (0..12).map(|x| buffer[(x, y)].symbol()).collect()
+    };
+    let buffer = terminal.backend().buffer();
+    assert!(
+        line(buffer, 0).starts_with("-check"),
+        "{:?}",
+        line(buffer, 0)
     );
+    assert_eq!(buffer[(0, 0)].fg, Color::Blue);
+    assert!(!reversed(buffer, 2, 0));
+    assert!(line(buffer, 1).starts_with("  switch"), "no room for off");
     view.handle(key("Tab"));
     view.handle(key("Enter"));
     draw_until(&mut view, &mut terminal, &rx, "check true mixed false");
-    assert_eq!(
-        terminal.backend().buffer()[(0, 0)].bg,
-        Color::Rgb(0x12, 0x34, 0x56)
-    );
     view.handle(key("Tab"));
+    terminal
+        .draw(|frame| view.render(frame, frame.area()))
+        .unwrap();
+    let buffer = terminal.backend().buffer();
+    assert!(
+        line(buffer, 0).starts_with("xcheck"),
+        "{:?}",
+        line(buffer, 0)
+    );
+    assert!(!reversed(buffer, 2, 0), "checked is not reversed");
     view.handle(key("Enter"));
     draw_until(&mut view, &mut terminal, &rx, "switch true");
-    assert_eq!(
-        terminal.backend().buffer()[(0, 1)].bg,
-        Color::Rgb(0x65, 0x43, 0x21)
+    let buffer = terminal.backend().buffer();
+    assert!(
+        line(buffer, 1).starts_with("onswitch"),
+        "{:?}",
+        line(buffer, 1)
     );
-    assert_eq!(
-        terminal.backend().buffer()[(1, 1)].bg,
-        Color::Rgb(0x12, 0x34, 0x56)
-    );
+    assert_eq!(buffer[(0, 1)].fg, Color::Blue, "the checked track's color");
     view.handle(key("Tab"));
     view.handle(key("Enter"));
     draw_until(&mut view, &mut terminal, &rx, "disabled true");
-    assert_eq!(
-        terminal.backend().buffer()[(0, 1)].bg,
-        Color::Rgb(0xfe, 0xdc, 0xba)
+    let buffer = terminal.backend().buffer();
+    assert!(
+        line(buffer, 1).starts_with("onswitch"),
+        "a disabled switch stays on"
     );
-    assert_eq!(
-        terminal.backend().buffer()[(1, 1)].bg,
-        Color::Rgb(0xab, 0xcd, 0xef)
-    );
+    assert!(!reversed(buffer, 3, 1));
     view.handle(key("Tab"));
     view.handle(key("Enter"));
     draw_until(
@@ -390,13 +345,12 @@ fn a_focused_slider_handles_arrows_pages_and_endpoints_then_releases_them_on_tab
         terminal
             .draw(|frame| view.render(frame, frame.area()))
             .unwrap();
-        if terminal
-            .backend()
-            .buffer()
-            .content
-            .iter()
-            .any(|cell| cell.bg == Color::Rgb(0x65, 0x43, 0x21))
-        {
+        if terminal.backend().buffer().content.iter().any(|cell| {
+            cell.fg == Color::Yellow
+                && cell
+                    .modifier
+                    .contains(ratatui_core::style::Modifier::REVERSED)
+        }) {
             break;
         }
         assert!(
@@ -503,10 +457,8 @@ fn sidebar_and_watchlist_accents_remain_visible_with_their_authored_heights() {
     view.load(App::Rust(Root::new::<SelectedAccentBars>(|| ())))
         .unwrap();
     draw_until(&mut view, &mut terminal, &rx, "active 0");
-    let accent = Color::Rgb(0xc8, 0xf2, 0x6d);
-    let marked = |cell: &ratatui_core::buffer::Cell| {
-        cell.bg == accent || (cell.fg == accent && cell.symbol() == "│")
-    };
+    let marked =
+        |cell: &ratatui_core::buffer::Cell| cell.fg == Color::Green && cell.symbol() == "│";
     let buffer = terminal.backend().buffer();
     assert!(marked(&buffer[(2, 2)]));
     assert!(!marked(&buffer[(2, 1)]));

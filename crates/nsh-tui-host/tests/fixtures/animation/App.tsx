@@ -17,7 +17,7 @@ function App() {
       <View testID="again" onPress={run} style={{ width: 80, height: 16, opacity: progress, translate: [x, 0] }}>
         <Text style={{ color }}>Again</Text>
       </View>
-      <Canvas style={{ width: 80, height: 16 }} draw={cx => {
+      <Canvas accessibilityLabel="Progress" style={{ width: 80, height: 16 }} draw={cx => {
         cx.fillStyle = color;
         cx.translate(x, 0);
         cx.fillRect(0, 0, 16, 16);

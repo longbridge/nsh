@@ -212,9 +212,16 @@ impl Minibuffer {
             && let Some((bounds, visible)) = locate(tree, geometry, cells, area, found)
         {
             let highlight = bounds.clipped(visible);
+            // Inside a reversed box (the focused or a selected view) the
+            // match is underlined, as reversing it again would hide it.
             for y in highlight.top()..highlight.bottom() {
                 for x in highlight.left()..highlight.right() {
-                    buffer[(x, y)].modifier.insert(Modifier::REVERSED);
+                    let modifier = &mut buffer[(x, y)].modifier;
+                    modifier.insert(if modifier.contains(Modifier::REVERSED) {
+                        Modifier::UNDERLINED
+                    } else {
+                        Modifier::REVERSED
+                    });
                 }
             }
         }

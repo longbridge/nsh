@@ -75,6 +75,21 @@ fn a_surface_draws_a_rust_app_into_the_embedders_buffer() {
     );
 }
 
+/// Marks a view selected, which reverses its Cell box: the probe for where
+/// a view's Cells are, now that fills draw no color.
+pub(super) fn selected() -> nsh_core::AccessibilityState {
+    nsh_core::AccessibilityState {
+        selected: true,
+        ..Default::default()
+    }
+}
+
+pub(super) fn reversed(buffer: &ratatui_core::buffer::Buffer, x: u16, y: u16) -> bool {
+    buffer[(x, y)]
+        .modifier
+        .contains(ratatui_core::style::Modifier::REVERSED)
+}
+
 pub(super) fn mouse(
     kind: nsh_platform_tui::MouseKind,
     column: u16,
@@ -309,18 +324,17 @@ fn Bordered() -> impl IntoElement {
 }
 
 #[test]
-fn view_fills_and_rounded_borders_are_visible_cells() {
+fn rounded_borders_draw_straight_corners_around_a_solid_leaf() {
     let (mut view, rx) = surface();
     let mut terminal = Terminal::new(TestBackend::new(20, 8)).unwrap();
     view.load(App::Rust(Root::new::<Bordered>(|| ()))).unwrap();
-    draw_until(&mut view, &mut terminal, &rx, "╭────╮");
+    draw_until(&mut view, &mut terminal, &rx, "┌────┐");
     let buffer = terminal.backend().buffer();
-    assert_eq!(buffer[(0, 2)].symbol(), "╰");
-    assert_eq!(buffer[(5, 2)].symbol(), "╯");
-    assert_eq!(
-        buffer[(2, 1)].bg,
-        ratatui_core::style::Color::Rgb(0x12, 0x34, 0x56)
-    );
+    assert_eq!(buffer[(0, 2)].symbol(), "└");
+    assert_eq!(buffer[(5, 2)].symbol(), "┘");
+    // A leaf's fill is its content: reversed in the fill's palette color.
+    assert!(reversed(buffer, 2, 1));
+    assert_eq!(buffer[(2, 1)].fg, ratatui_core::style::Color::Blue);
 }
 
 #[cfg(feature = "js")]
@@ -391,7 +405,7 @@ fn PaddedLabel() -> impl IntoElement {
             .top(px(216.0))
             .w(px(40.0))
             .py(px(12.0))
-            .bg(nsh_core::color::rgb(0x123456))
+            .accessibility_state(selected())
             .on_press(move |_: &()| count.update(|count| *count += 1))
             .child(text(move || format!("Tap {}", count.get()))),
     )
@@ -400,7 +414,6 @@ fn PaddedLabel() -> impl IntoElement {
 #[test]
 fn absolute_edges_define_the_padded_box_and_its_hit_cells() {
     use nsh_platform_tui::{Handled, MouseButton, MouseKind};
-    use ratatui_core::style::Color;
 
     let (mut view, rx) = surface();
     let mut terminal = Terminal::new(TestBackend::new(100, 34)).unwrap();
@@ -410,14 +423,14 @@ fn absolute_edges_define_the_padded_box_and_its_hit_cells() {
     let buffer = terminal.backend().buffer();
     for row in 14..16 {
         for column in 1..6 {
-            assert_eq!(buffer[(column, row)].bg, Color::Rgb(0x12, 0x34, 0x56));
+            assert!(reversed(buffer, column, row));
         }
     }
     assert_eq!(buffer[(1, 14)].symbol(), "T");
     assert_eq!(buffer[(1, 15)].symbol(), " ");
     assert_eq!(buffer[(1, 16)].symbol(), " ");
     for (column, row) in [(1, 13), (1, 16), (0, 15), (6, 15)] {
-        assert_eq!(buffer[(column, row)].bg, Color::Reset);
+        assert!(!reversed(buffer, column, row));
         assert_eq!(
             view.handle(mouse(MouseKind::Down(MouseButton::Left), column, row)),
             Handled::Ignored
@@ -449,7 +462,7 @@ fn PaddedTextContent() -> impl IntoElement {
             .top(px(216.0))
             .w(px(40.0))
             .py(px(12.0))
-            .bg(nsh_core::color::rgb(0x123456)),
+            .accessibility_state(selected()),
     )
 }
 
@@ -464,10 +477,7 @@ fn text_content_padding_uses_the_unrounded_absolute_origin() {
     assert_eq!(buffer[(1, 14)].symbol(), "L");
     assert_eq!(buffer[(1, 15)].symbol(), " ");
     assert_eq!(buffer[(1, 16)].symbol(), " ");
-    assert_eq!(
-        buffer[(1, 15)].bg,
-        ratatui_core::style::Color::Rgb(0x12, 0x34, 0x56)
-    );
+    assert!(reversed(buffer, 1, 15));
 }
 
 #[component]
@@ -479,7 +489,7 @@ fn NegativeHalfCell() -> impl IntoElement {
             .top(px(-8.0))
             .w(px(8.0))
             .h(px(16.0))
-            .bg(nsh_core::color::rgb(0x123456))
+            .accessibility_state(selected())
             .child(text("X")),
     )
 }
@@ -493,12 +503,9 @@ fn negative_half_cell_edges_round_towards_the_positive_direction() {
     draw_until(&mut view, &mut terminal, &rx, "X");
     let buffer = terminal.backend().buffer();
     assert_eq!(buffer[(0, 0)].symbol(), "X");
-    assert_eq!(
-        buffer[(0, 0)].bg,
-        ratatui_core::style::Color::Rgb(0x12, 0x34, 0x56)
-    );
-    assert_eq!(buffer[(1, 0)].bg, ratatui_core::style::Color::Reset);
-    assert_eq!(buffer[(0, 1)].bg, ratatui_core::style::Color::Reset);
+    assert!(reversed(buffer, 0, 0));
+    assert!(!reversed(buffer, 1, 0));
+    assert!(!reversed(buffer, 0, 1));
 }
 
 #[component]

@@ -45,6 +45,16 @@ fn row(terminal: &Terminal<TestBackend>, y: u16) -> String {
         .collect()
 }
 
+fn underlined(terminal: &Terminal<TestBackend>) -> String {
+    let buffer = terminal.backend().buffer();
+    buffer
+        .content
+        .iter()
+        .filter(|cell| cell.modifier.contains(Modifier::UNDERLINED))
+        .map(|cell| cell.symbol())
+        .collect()
+}
+
 fn reversed(terminal: &Terminal<TestBackend>) -> String {
     let buffer = terminal.backend().buffer();
     buffer
@@ -52,7 +62,9 @@ fn reversed(terminal: &Terminal<TestBackend>) -> String {
         .iter()
         .filter(|cell| cell.modifier.contains(Modifier::REVERSED))
         .map(|cell| cell.symbol())
-        .collect()
+        .collect::<String>()
+        .trim_end()
+        .to_owned()
 }
 
 #[component]
@@ -220,19 +232,28 @@ fn control_s_finds_text_forward_focuses_and_reveals_it_and_repeats_to_the_next_m
     draw_until(&mut view, &mut terminal, &rx, "focus 1 offset 0");
     assert_eq!(row(&terminal, BOTTOM_ROW).trim_end(), "/item 1");
     assert_eq!(reversed(&terminal), "item 1");
-    for expected in [
-        "focus 10 offset 128",
-        "focus 11 offset 128",
-        "focus 1 offset 0",
+    assert_eq!(
+        underlined(&terminal),
+        "item 1",
+        "a match inside a reversed box is underlined"
+    );
+    for (expected, focused) in [
+        ("focus 10 offset 128", "item 10"),
+        ("focus 11 offset 128", "item 11"),
+        ("focus 1 offset 0", "item 1"),
     ] {
         assert_eq!(view.handle(ctrl("s")), Handled::Yes);
         draw_until(&mut view, &mut terminal, &rx, expected);
-        assert_eq!(reversed(&terminal), "item 1");
+        assert_eq!(
+            reversed(&terminal),
+            focused,
+            "the match in its focused control"
+        );
     }
     assert_eq!(view.handle(key("Enter")), Handled::Yes);
     draw(&mut view, &mut terminal);
     assert!(row(&terminal, BOTTOM_ROW).starts_with("footer line"));
-    assert_eq!(reversed(&terminal), "");
+    assert_eq!(reversed(&terminal), "item 1", "the focused control");
     assert_eq!(view.handle(key("Enter")), Handled::Yes);
     draw_until(&mut view, &mut terminal, &rx, "focus 1 offset 0 pressed 1");
 }
@@ -262,7 +283,7 @@ fn control_r_searches_backward_and_cancel_restores_focus_and_scrolling() {
         assert_eq!(view.handle(cancel), Handled::Yes);
         draw_until(&mut view, &mut terminal, &rx, "focus 2 offset 0");
         assert!(row(&terminal, BOTTOM_ROW).starts_with("footer line"));
-        assert_eq!(reversed(&terminal), "");
+        assert_eq!(reversed(&terminal), "item 2", "the focused control");
     }
 }
 
@@ -275,7 +296,7 @@ fn a_match_in_plain_text_takes_focus_away_and_traversal_continues_from_it() {
     draw(&mut view, &mut terminal);
     type_text(&mut view, &mut terminal, "Note");
     assert_eq!(row(&terminal, BOTTOM_ROW).trim_end(), "/Note");
-    assert_eq!(reversed(&terminal), "");
+    assert_eq!(reversed(&terminal), "before", "the focused control");
     draw_until(&mut view, &mut terminal, &rx, "focus 100");
     for _ in 0..4 {
         assert_eq!(view.handle(key("Backspace")), Handled::Yes);
@@ -283,6 +304,11 @@ fn a_match_in_plain_text_takes_focus_away_and_traversal_continues_from_it() {
     type_text(&mut view, &mut terminal, "note");
     draw_until(&mut view, &mut terminal, &rx, "focus -1");
     assert_eq!(reversed(&terminal), "note");
+    assert_eq!(
+        underlined(&terminal),
+        "",
+        "a match in plain text is only reversed"
+    );
     assert_eq!(view.handle(key("Enter")), Handled::Yes);
     assert_eq!(view.handle(ctrl("n")), Handled::Yes);
     draw_until(&mut view, &mut terminal, &rx, "focus 101");
