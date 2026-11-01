@@ -320,8 +320,11 @@ heights follow those dimensions and edge rounding. Inside a selected or checked 
 bar marks the selection (the terminal look below). Inspect Cell modifiers as well as symbols when checking solid
 leaves; a reversed Cell can have a space as its symbol.
 
-A drawn border owns one Cell on each side. Child boxes fit inside those reserved Cells, with any displacement
-carried into their contents. When reservation shortens a child box, its vertical point offsets contract into
+A drawn border owns one Cell on its side. Child boxes fit inside those reserved Cells, and a border reserves only
+its own side: a child is never pushed past its parent's edge on the other sides, it narrows instead. A child whose
+content reaches into a reserved column moves off it, the displacement carried into its contents; one whose
+content stays clear of it only narrows, so its content keeps its columns (a sidebar's right border leaves its
+rows' text where it was, a left border moves only a row whose text starts at the edge). When reservation shortens a child box, its vertical point offsets contract into
 that box while text keeps terminal glyphs; vertical text stacks reserve one Cell per measured line,
 so contraction reduces quantized gaps without collapsing two labels onto one row. A following inset
 starts below already-painted sibling text. Ordinary descendants remain clipped by inherited border limits. Scroll content

@@ -54,6 +54,8 @@ struct Clip {
     visible: Rect,
     borders: CellBounds,
     fit: bool,
+    /// The Cells of the view whose children are drawn.
+    parent: CellBounds,
 }
 
 /// A checkbox's, radio's or switch's state as terminal glyphs, and the view
@@ -170,6 +172,7 @@ pub(crate) fn draw(
         visible: area.intersection(buffer.area),
         borders: CellBounds::UNBOUNDED,
         fit: false,
+        parent: CellBounds::UNBOUNDED,
     };
     let mut emptied = vec![false; tree.views.len()];
     mark_emptied(tree, ROOT_ID, &mut emptied);
@@ -223,6 +226,8 @@ impl Painter<'_> {
         let text_parent = horizontal_text_parent(self.tree, id, parent);
         let sibling_content =
             border_has_sibling_content(self.tree, id, parent, self.cells, self.area);
+        let reserved_content = clip.fit
+            && content_in_reserved_columns(self.tree, id, parent, self.cells, self.area, clip);
         let (button, boxed) = button_label(
             self.tree,
             id,
@@ -340,9 +345,32 @@ impl Painter<'_> {
         let content_projection = projection;
         let raw_bounds = bounds;
         let mut bounds = if clip.fit {
-            bounds.fitted(clip.borders)
+            // A border reserves only its own side: on the other sides the
+            // box is not pushed past its parent's edge, it narrows instead.
+            let limits = CellBounds {
+                left: clip.borders.left.max(bounds.left.min(clip.parent.left)),
+                top: clip.borders.top.max(bounds.top.min(clip.parent.top)),
+                right: clip.borders.right.min(bounds.right.max(clip.parent.right)),
+                bottom: clip
+                    .borders
+                    .bottom
+                    .min(bounds.bottom.max(clip.parent.bottom)),
+            };
+            let mut fitted = bounds.fitted(limits);
+            if !reserved_content {
+                // Content clear of the reserved columns keeps its own.
+                let kept = bounds.constrained(limits);
+                fitted.left = kept.left;
+                fitted.right = kept.right;
+            }
+            fitted
         } else {
             bounds.constrained(clip.borders)
+        };
+        let shift = if reserved_content {
+            bounds.left - raw_bounds.left
+        } else {
+            0
         };
         if clip.fit
             && view.style.borders.widths.top > Points::ZERO
@@ -366,10 +394,8 @@ impl Painter<'_> {
             bounds.top = top.min(bounds.bottom);
         }
         if clip.fit {
-            projection = projection.snapped(Point::new(
-                self.cells.width() * (bounds.left - raw_bounds.left) as f32,
-                Points::ZERO,
-            ));
+            projection =
+                projection.snapped(Point::new(self.cells.width() * shift as f32, Points::ZERO));
             let old_height = raw_bounds.bottom - raw_bounds.top;
             let new_height = bounds.bottom - bounds.top;
             let scale = if old_height > 0 {
@@ -506,6 +532,7 @@ impl Painter<'_> {
         let own_geometry = self.geometry.len() - 1;
         let children_clip = Clip {
             fit: sides.iter().any(|&side| side) && view.kind != ViewKind::Scroll,
+            parent: bounds,
             visible: if view.style.overflow_hidden
                 || matches!(
                     view.kind,
@@ -1595,6 +1622,42 @@ fn border_has_sibling_content(
                 && (transparent || position > index)
                 && subtree_content_intersects(tree, child, projection, cells, bounds)
         })
+}
+
+/// Whether `id`'s content lies in the columns of its box that the borders
+/// it is fitted into reserve, so that the box moves off them with its
+/// content rather than only narrowing.
+fn content_in_reserved_columns(
+    tree: &Mounter,
+    id: NodeId,
+    projection: Projection,
+    cells: CellSize,
+    area: Rect,
+    clip: Clip,
+) -> bool {
+    let Some(view) = tree.get(id) else {
+        return false;
+    };
+    let frame = projection
+        .view(view)
+        .bounds(Bounds::new(Point::default(), view.frame.size));
+    let raw = CellBounds::new(frame, cells, area);
+    let columns = |from: i32, to: i32| {
+        Bounds::new(
+            Point::new(
+                cells.width() * (from - i32::from(area.x)) as f32,
+                frame.top(),
+            ),
+            nsh_core::Size::new(cells.width() * (to - from) as f32, frame.size.height),
+        )
+    };
+    [
+        (raw.left, clip.borders.left.min(raw.right)),
+        (clip.borders.right.max(raw.left), raw.right),
+    ]
+    .into_iter()
+    .filter(|(from, to)| to > from)
+    .any(|(from, to)| subtree_content_intersects(tree, id, projection, cells, columns(from, to)))
 }
 
 fn subtree_content_intersects(
