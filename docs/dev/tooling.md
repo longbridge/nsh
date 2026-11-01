@@ -140,6 +140,9 @@ to that file. `C-h e` opens its log/error panel; closing it gives every row back
 - The web host is a page the dev server serves itself (`DevServer::serve_web`, the fallback route: `/`, `/nsh.js`,
   `/nsh.wasm`, `/nsh.version`, and for a runtime whose crates call JS through wasm-bindgen its glue, `/nsh-bindgen.js`,
   with the snippets it imports, `/snippets/…`) when a web runtime exists; browsers connect to `/ws` on the same port.
+  A browser loading another path that names no file gets the page (`server::wants_page`: a `GET` accepting
+  `text/html` of a path whose last segment has no extension), as a single-page app's host rewrites it; `SiteServer`
+  (`nsh package --target web --run`) answers it with `index.html` the same way.
   `nsh run --target web` builds the runtime in a checkout and prints the page's address (`docs/dev/web.md`, "The CLI's
   web target" and "Crates that call JS through wasm-bindgen").
 - Watching ignores `Access` events: inotify (Linux) reports reads, FSEvents does not, so the build's own reads of the

@@ -6,7 +6,7 @@ use std::{io, net::SocketAddr, path::PathBuf, sync::Arc};
 use axum::{
     Router,
     extract::State,
-    http::{HeaderMap, StatusCode, Uri, header},
+    http::{HeaderMap, Method, StatusCode, Uri, header},
     response::{IntoResponse, Response},
 };
 
@@ -15,7 +15,9 @@ use axum::{
 /// year; the others (`index.html`, `manifest.webmanifest`) are revalidated
 /// on every load, so a new release shows on the next one. A file's
 /// precompressed copy (`<file>.br`, `<file>.gz`, which `nsh package`
-/// writes) is sent in its place when the browser accepts its encoding.
+/// writes) is sent in its place when the browser accepts its encoding. A
+/// browser loading one of the app's own paths (`/sports/football`) gets
+/// `index.html`, as a host's rewrite rule for single-page apps gives it.
 pub struct SiteServer {
     addr: SocketAddr,
     _runtime: tokio::runtime::Runtime,
@@ -50,16 +52,26 @@ impl SiteServer {
     }
 }
 
-async fn file(State(root): State<Arc<PathBuf>>, headers: HeaderMap, uri: Uri) -> Response {
+async fn file(
+    State(root): State<Arc<PathBuf>>,
+    method: Method,
+    headers: HeaderMap,
+    uri: Uri,
+) -> Response {
     let path = uri.path().trim_start_matches('/');
     let path = if path.is_empty() || path.ends_with('/') {
         format!("{path}index.html")
     } else {
         path.to_owned()
     };
-    let decoded = percent_decode(&path);
-    let Ok(file) = dunce::canonicalize(root.join(&decoded)) else {
-        return StatusCode::NOT_FOUND.into_response();
+    let mut decoded = percent_decode(&path);
+    let file = match dunce::canonicalize(root.join(&decoded)) {
+        Ok(file) => file,
+        Err(_) if crate::server::wants_page(&method, &uri, &headers) => {
+            decoded = "index.html".to_owned();
+            root.join(&decoded)
+        }
+        Err(_) => return StatusCode::NOT_FOUND.into_response(),
     };
     if !file.starts_with(&*root) {
         return StatusCode::FORBIDDEN.into_response();

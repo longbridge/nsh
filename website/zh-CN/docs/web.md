@@ -191,6 +191,15 @@ nsh package App.tsx --target web --run
 
 以 `application/wasm` 类型提供 `.wasm`（浏览器会边下载边编译），并把预压缩的副本发给支持它的浏览器：nginx 用 `brotli_static on; gzip_static on;`，Caddy 用 `file_server { precompressed br gzip }`，或使用支持 Brotli 的 CDN。用 Brotli 时运行时比 gzip 小约四分之一。`nsh package --target web --run` 就按这种方式在 `http://127.0.0.1:4173/` 上提供站点。
 
+把自己的路径显示在地址栏里的应用（`https://example.com/sports/football`）是单页应用：打开指向这类路径的链接，或在这里刷新，都会加载 `index.html`，再由应用显示路径对应的页面。托管服务把这类请求改写为 `index.html`：最后一段路径没有文件扩展名、`Accept` 头要求 `text/html` 的 `GET` 请求。文件仍用各自的 URL，应用自己的请求（`fetch` 接受 `*/*`）得到托管服务本来的应答。`nsh package --target web --run` 和开发服务器（`nsh run --target web`）都遵循这条规则；在托管服务上：
+
+| 托管服务 | 改写方式 |
+|---|---|
+| nginx | `location / { try_files $uri /index.html; }` |
+| Netlify | 在 `_redirects` 中写 `/*  /index.html  200`（已存在的文件照常提供） |
+| Cloudflare Pages | 站点顶层没有 `404.html` 时自带 |
+| GitHub Pages | 把 `index.html` 复制一份为 `404.html` |
+
 发布到 Web 的应用与打包的原生应用运行方式相同：以发布模式运行，具有其 `nsh.json` 声明的能力（[沙箱与能力](./sandbox-and-capabilities.md)），TSX 应用由浏览器的 JavaScript 引擎执行。当能力限制了 `network` 时，页面还会带上 Content-Security-Policy `connect-src`，其中列出声明的主机（以及页面自身的源），由浏览器自己拒绝发往其他主机的请求和重定向。导致应用无法启动的错误会显示在页面上；之后的错误输出到浏览器控制台。
 
 ### 用 iframe 嵌入

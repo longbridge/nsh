@@ -192,6 +192,19 @@ copies to browsers that accept them: nginx's `brotli_static on; gzip_static on;`
 precompressed br gzip }`, or a CDN that compresses with Brotli. With Brotli the runtime is about a quarter smaller
 than with gzip. `nsh package --target web --run` serves the site this way on `http://127.0.0.1:4173/`.
 
+An app whose own paths show in the address bar (`https://example.com/sports/football`) is a single-page app: a link to
+one of those paths, or a reload there, loads `index.html`, and the app shows the page the path names. The host rewrites
+such requests to `index.html`: a `GET` whose path has no file extension in its last segment and whose `Accept` header
+asks for `text/html`. Files keep their own URLs and the app's own requests (`fetch` accepts `*/*`) get the host's
+answer. `nsh package --target web --run` and the dev server (`nsh run --target web`) follow this rule; on a host:
+
+| Host | The rewrite |
+|---|---|
+| nginx | `location / { try_files $uri /index.html; }` |
+| Netlify | `/*  /index.html  200` in `_redirects` (files that exist are served as they are) |
+| Cloudflare Pages | built in for a site without a top-level `404.html` |
+| GitHub Pages | a copy of `index.html` as `404.html` |
+
 An app published for the web runs like a packaged native app: as a release, with the capabilities its `nsh.json` declares
 ([Sandbox and capabilities](./sandbox-and-capabilities.md)), a TSX app on the browser's JavaScript engine. When they restrict `network`, the page also carries a
 Content-Security-Policy `connect-src` with the declared hosts (and the page's own origin), so the browser itself

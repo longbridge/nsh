@@ -460,3 +460,64 @@ fn a_traced_test_session_hears_the_batches_before_the_step_ends() {
         ["Create { id: 2, kind: View }"]
     );
 }
+
+/// The status line and body of `GET path` with `accept`, over a plain
+/// HTTP/1.1 connection.
+fn get(addr: std::net::SocketAddr, path: &str, accept: &str) -> (String, String) {
+    use std::io::{Read, Write};
+    let mut stream = std::net::TcpStream::connect(addr).unwrap();
+    stream.set_read_timeout(Some(TIMEOUT)).unwrap();
+    write!(
+        stream,
+        "GET {path} HTTP/1.1\r\nHost: {addr}\r\nAccept: {accept}\r\nConnection: close\r\n\r\n"
+    )
+    .unwrap();
+    let mut response = String::new();
+    stream.read_to_string(&mut response).unwrap();
+    let status = response.lines().next().unwrap_or_default().to_owned();
+    let body = response
+        .split_once("\r\n\r\n")
+        .map(|(_, body)| body.to_owned())
+        .unwrap_or_default();
+    (status, body)
+}
+
+const BROWSER: &str = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8";
+
+#[test]
+fn the_web_host_serves_its_page_at_the_apps_paths() {
+    let server = DevServer::start("127.0.0.1:0".parse().unwrap(), "bc-1", None, |_| {}).unwrap();
+    server.serve_web("<p>page</p>".into(), [("nsh.js".into(), b"js".to_vec())]);
+    let addr = server.local_addr();
+    assert_eq!(get(addr, "/", BROWSER).1, "<p>page</p>");
+    assert_eq!(get(addr, "/sports/football", BROWSER).1, "<p>page</p>");
+    assert_eq!(
+        get(addr, "/sports/football?tab=live", BROWSER).1,
+        "<p>page</p>"
+    );
+    assert_eq!(get(addr, "/nsh.js", "*/*").1, "js");
+    // A file that is not there, and the app's own requests, stay missing.
+    assert!(get(addr, "/sports/nsh.js", BROWSER).0.contains("404"));
+    assert!(get(addr, "/api/teams", "*/*").0.contains("404"));
+}
+
+#[test]
+fn a_packaged_site_serves_its_page_at_the_apps_paths() {
+    let dir = std::env::temp_dir().join(format!("nsh-site-{}", std::process::id()));
+    std::fs::create_dir_all(dir.join("assets")).unwrap();
+    std::fs::write(dir.join("index.html"), "<p>site</p>").unwrap();
+    std::fs::write(dir.join("assets/logo.png"), "png").unwrap();
+    let server = nsh_dev::SiteServer::start("127.0.0.1:0".parse().unwrap(), dir.clone()).unwrap();
+    let addr = server.local_addr();
+    assert_eq!(get(addr, "/", BROWSER).1, "<p>site</p>");
+    assert_eq!(get(addr, "/sports/football", BROWSER).1, "<p>site</p>");
+    assert_eq!(get(addr, "/assets/logo.png", "*/*").1, "png");
+    assert!(get(addr, "/assets/missing.png", BROWSER).0.contains("404"));
+    assert!(
+        get(addr, "/api/teams", "application/json")
+            .0
+            .contains("404")
+    );
+    drop(server);
+    let _ = std::fs::remove_dir_all(dir);
+}
