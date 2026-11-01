@@ -8,6 +8,7 @@ mod alignment;
 #[cfg(feature = "js")]
 mod animation;
 mod app;
+mod bars;
 
 mod canvas;
 mod controls;
