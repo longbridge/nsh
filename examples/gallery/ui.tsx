@@ -2,8 +2,8 @@
 // in the repository's internal nsh-gallery-ui layer.
 import type { JSX, ScrollProps } from "nsh";
 import { computed, Image, Scroll, signal, Text, View } from "nsh";
-import { platform, setColorScheme, windowSize } from "nsh";
-import { Appear, colors, Icon, isDark, Press, radius, RoundButton } from "../nsh-gallery-ui";
+import { setColorScheme, windowSize } from "nsh";
+import { Appear, Button, colors, desktopIdiom, Icon, isDark, Press, radius, RoundButton, TERMINAL_COLUMN, TERMINAL_ROW, terminal } from "../nsh-gallery-ui";
 import { nav } from "./nav";
 import logoDark from "./logo-dark.svg";
 import logoLight from "./logo-light.svg";
@@ -13,7 +13,8 @@ export * from "../nsh-gallery-ui";
 /**
  * A page's header where the app draws it (desktops, the web: `<NavPage
  * header>`): a back button while the page is above another, the title, and
- * `right`. Phones show their system header with the page's `title` instead.
+ * `right`, on one row in the terminal. Phones show their system header with
+ * the page's `title` instead.
  */
 export function PageHeader(props: {
   title: string;
@@ -35,6 +36,24 @@ export function PageHeader(props: {
 }) {
   const back = () => !props.left && !props.root && nav.routes().length > 1;
   const tint = () => props.tint ?? colors.accent;
+  const goBack = () => (props.onBack ? props.onBack() : nav.pop());
+  if (terminal) {
+    // One row, then the rule on a row of its own.
+    return (
+      <View style={{ height: 2 * TERMINAL_ROW, borderBottomWidth: props.transparent || props.background ? 0 : 1, borderBottomColor: colors.line, backgroundColor: props.transparent ? "transparent" : (props.background ?? colors.background) }}>
+        <View style={{ height: TERMINAL_ROW, flexDirection: "row", alignItems: "center", gap: 2 * TERMINAL_COLUMN, paddingHorizontal: TERMINAL_COLUMN }}>
+          {props.left}
+          <If when={back()}>
+            <Button label="Back" variant="secondary" onPress={goBack} />
+          </If>
+          <View style={{ flex: 1, flexDirection: "row", alignItems: "center" }}>
+            {props.center ?? <Text style={{ numberOfLines: 1, flex: 1, fontSize: 17, fontWeight: "600", color: colors.text }}>{props.title}</Text>}
+          </View>
+          {props.right}
+        </View>
+      </View>
+    );
+  }
   return (
     <View
       style={{
@@ -51,7 +70,7 @@ export function PageHeader(props: {
       {props.left}
       <If when={back()}>
         <View
-          onPress={() => (props.onBack ? props.onBack() : nav.pop())}
+          onPress={goBack}
           role="button"
           accessibilityLabel="Back"
           hitSlop={6}
@@ -79,12 +98,12 @@ export const SIDEBAR = 264;
 
 /**
  * Whether the gallery takes its desktop layout: a sidebar of the demos next
- * to the open one, demos in columns, hover states. Desktops take it from
- * 700 pt wide, other platforms from 900 pt (an iPad in landscape, a wide
- * Mac Catalyst window); phones never do. Below that it is the phone layout,
+ * to the open one, demos in columns, hover states. Desktops and terminals
+ * take it from 700 pt wide, other platforms from 900 pt (an iPad in
+ * landscape, a wide Mac Catalyst window); phones never do. Below that it is the phone layout,
  * unchanged. The shell remounts when it changes, so demos read it once.
  */
-export const desktop = computed(() => windowSize().width >= (platform.idiom === "desktop" ? 700 : 900));
+export const desktop = computed(() => windowSize().width >= (desktopIdiom ? 700 : 900));
 
 /** Whether the desktop layout shows its sidebar (the toggle in the demo's
  * toolbar and Ctrl+B / Cmd+B hide and show it; kept while the app runs). */
@@ -120,6 +139,7 @@ export function ThemeToggle(props: { bar?: boolean }) {
     <RoundButton
       icon={isDark() ? "sun" : "moon"}
       label={isDark() ? "Light appearance" : "Dark appearance"}
+      title="Theme"
       variant="secondary"
       size={34}
       onPress={() => setColorScheme(isDark() ? "light" : "dark")}
@@ -127,8 +147,10 @@ export function ThemeToggle(props: { bar?: boolean }) {
   );
 }
 
-/** NSH's mark, sharp at any size, in the appearance shown (its dot is dark on light backgrounds). */
+/** NSH's mark, sharp at any size, in the appearance shown (its dot is dark
+ * on light backgrounds); none in the terminal. */
 export function Logo(props: { size: number }) {
+  if (terminal) return null;
   return <Image src={isDark() ? logoDark : logoLight} style={{ width: props.size, height: props.size }} />;
 }
 
@@ -136,7 +158,8 @@ export function Logo(props: { size: number }) {
  * A demo's page of cards, each fading in after the one before. On phones
  * one column on the 16 pt gutters; in the desktop layout the cards are
  * dealt left to right into as many columns as fit the pane (at least
- * 380 pt each, `columns` at most), on 24 pt gutters. `children` follow the
+ * 380 pt each, `columns` at most), on 24 pt gutters; the terminal's are a
+ * Cell wide, its spaces whole rows. `children` follow the
  * cards inside the scroll view (a demo's modals).
  */
 export function DemoPage(props: {
@@ -171,7 +194,7 @@ export function DemoPage(props: {
       <If
         when={wide}
         else={
-          <View style={{ padding: 16, paddingBottom: props.bottom ?? 40, gap: 16 }}>
+          <View style={terminal ? { paddingHorizontal: TERMINAL_COLUMN, paddingVertical: TERMINAL_ROW, gap: TERMINAL_ROW } : { padding: 16, paddingBottom: props.bottom ?? 40, gap: 16 }}>
             <Each of={props.cards}>{(body, i) => card(body(), i())}</Each>
           </View>
         }
@@ -180,10 +203,13 @@ export function DemoPage(props: {
           const n = columns();
           return (
             <View
-              style={{ flexDirection: "row", alignItems: "flex-start", gap: 20, padding: 24, paddingBottom: 48, width: "100%", maxWidth: n * 560 + 48, alignSelf: "center" }}
+              style={[
+                { flexDirection: "row", alignItems: "flex-start", width: "100%", maxWidth: n * 560 + 48, alignSelf: "center" },
+                terminal ? { gap: 2 * TERMINAL_COLUMN, paddingHorizontal: TERMINAL_COLUMN, paddingVertical: TERMINAL_ROW } : { gap: 20, padding: 24, paddingBottom: 48 },
+              ]}
             >
               {Array.from({ length: n }, (_, column) => (
-                <View style={{ flex: 1, minWidth: 0, gap: 20 }}>{props.cards.map((body, i) => (i % n === column ? card(body, i) : null))}</View>
+                <View style={{ flex: 1, minWidth: 0, gap: terminal ? TERMINAL_ROW : 20 }}>{props.cards.map((body, i) => (i % n === column ? card(body, i) : null))}</View>
               ))}
             </View>
           );
