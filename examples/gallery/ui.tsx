@@ -158,7 +158,8 @@ export function Logo(props: { size: number }) {
  * A demo's page of cards, each fading in after the one before. On phones
  * one column on the 16 pt gutters; in the desktop layout the cards are
  * dealt left to right into as many columns as fit the pane (at least
- * 380 pt each, `columns` at most), on 24 pt gutters. `children` follow the
+ * 380 pt each, `columns` at most), on 24 pt gutters; the terminal's are a
+ * Cell wide, its spaces whole rows. `children` follow the
  * cards inside the scroll view (a demo's modals).
  */
 export function DemoPage(props: {
@@ -193,7 +194,7 @@ export function DemoPage(props: {
       <If
         when={wide}
         else={
-          <View style={{ padding: 16, paddingBottom: props.bottom ?? 40, gap: 16 }}>
+          <View style={terminal ? { paddingHorizontal: TERMINAL_COLUMN, paddingVertical: TERMINAL_ROW, gap: TERMINAL_ROW } : { padding: 16, paddingBottom: props.bottom ?? 40, gap: 16 }}>
             <Each of={props.cards}>{(body, i) => card(body(), i())}</Each>
           </View>
         }
@@ -202,10 +203,13 @@ export function DemoPage(props: {
           const n = columns();
           return (
             <View
-              style={{ flexDirection: "row", alignItems: "flex-start", gap: 20, padding: 24, paddingBottom: 48, width: "100%", maxWidth: n * 560 + 48, alignSelf: "center" }}
+              style={[
+                { flexDirection: "row", alignItems: "flex-start", width: "100%", maxWidth: n * 560 + 48, alignSelf: "center" },
+                terminal ? { gap: 2 * TERMINAL_COLUMN, paddingHorizontal: TERMINAL_COLUMN, paddingVertical: TERMINAL_ROW } : { gap: 20, padding: 24, paddingBottom: 48 },
+              ]}
             >
               {Array.from({ length: n }, (_, column) => (
-                <View style={{ flex: 1, minWidth: 0, gap: 20 }}>{props.cards.map((body, i) => (i % n === column ? card(body, i) : null))}</View>
+                <View style={{ flex: 1, minWidth: 0, gap: terminal ? TERMINAL_ROW : 20 }}>{props.cards.map((body, i) => (i % n === column ? card(body, i) : null))}</View>
               ))}
             </View>
           );
