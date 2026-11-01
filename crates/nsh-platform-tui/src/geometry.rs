@@ -165,6 +165,21 @@ impl CellBounds {
         )
     }
 
+    /// The point rect these Cells cover.
+    pub(crate) fn points(
+        self,
+        cells: CellSize,
+        area: ratatui_core::layout::Rect,
+    ) -> nsh_core::Bounds<Points> {
+        nsh_core::Bounds::new(
+            self.origin(cells, area),
+            nsh_core::Size::new(
+                cells.width() * self.right.saturating_sub(self.left) as f32,
+                cells.height() * self.bottom.saturating_sub(self.top) as f32,
+            ),
+        )
+    }
+
     pub(crate) fn clipped(self, clip: ratatui_core::layout::Rect) -> ratatui_core::layout::Rect {
         let left = self.left.clamp(i32::from(clip.x), i32::from(clip.right())) as u16;
         let top = self.top.clamp(i32::from(clip.y), i32::from(clip.bottom())) as u16;

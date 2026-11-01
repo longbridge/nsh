@@ -316,7 +316,7 @@ fn LeftPanel() -> impl IntoElement {
     bordered_panel(Side::Left)
 }
 
-fn panel_spans(side: Side) -> Vec<Vec<(u16, u16)>> {
+fn panel_spans(side: Side) -> Vec<Vec<(u16, u16, u16)>> {
     let (mut view, rx) = surface();
     let mut terminal = Terminal::new(TestBackend::new(24, 6)).unwrap();
     let root = match side {
@@ -334,7 +334,7 @@ fn panel_spans(side: Side) -> Vec<Vec<(u16, u16)>> {
         .map(|word| {
             let found = spans(buffer, word);
             assert_eq!(found.len(), 1, "{side:?} {word}:\n{}", dump(buffer));
-            found.iter().map(|&(_, start, end)| (start, end)).collect()
+            found
         })
         .collect()
 }
@@ -342,11 +342,65 @@ fn panel_spans(side: Side) -> Vec<Vec<(u16, u16)>> {
 #[test]
 fn a_border_on_one_side_never_moves_content_on_the_other_sides() {
     let plain = panel_spans(Side::None);
-    assert_eq!(plain, [vec![(0, 4)], vec![(2, 5)], vec![(13, 18)]]);
+    assert_eq!(plain, [vec![(1, 0, 4)], vec![(2, 2, 5)], vec![(3, 13, 18)]]);
     for side in [Side::Top, Side::Right, Side::Bottom] {
         assert_eq!(panel_spans(side), plain, "{side:?} border");
     }
     let left = panel_spans(Side::Left);
-    assert_eq!(left[0], [(1, 5)], "flush text moves off the left border");
+    assert_eq!(left[0], [(1, 1, 5)], "flush text moves off the left border");
     assert_eq!(left[1..], plain[1..], "the rest stays put");
+}
+
+/// Two flush rows filling a two-row box with a border on its top or bottom.
+fn stacked_rows(top: bool) -> impl IntoElement {
+    let rows = view()
+        .absolute()
+        .left(px(0.0))
+        .top(px(0.0))
+        .w(px(160.0))
+        .h(px(32.0))
+        .child(view().h(px(16.0)).child(text("Edge")))
+        .child(view().h(px(16.0)).px(px(16.0)).child(text("Pad")));
+    let color = nsh_core::color::rgb(0x8a8f98);
+    if top {
+        rows.border_t(px(1.0)).border_color(color)
+    } else {
+        rows.border_b(px(1.0)).border_color(color)
+    }
+}
+
+#[component]
+fn TopStack() -> impl IntoElement {
+    stacked_rows(true)
+}
+
+#[component]
+fn BottomStack() -> impl IntoElement {
+    stacked_rows(false)
+}
+
+#[test]
+fn a_top_or_bottom_border_never_stacks_two_rows_of_content_on_one() {
+    for (name, root) in [
+        ("top", Root::new::<TopStack>(|| ())),
+        ("bottom", Root::new::<BottomStack>(|| ())),
+    ] {
+        let (mut view, rx) = surface();
+        let mut terminal = Terminal::new(TestBackend::new(24, 4)).unwrap();
+        view.load(App::Rust(root)).unwrap();
+        draw_until(&mut view, &mut terminal, &rx, "Pad");
+        let buffer = terminal.backend().buffer();
+        assert_eq!(
+            spans(buffer, "Edge"),
+            [(0, 0, 4)],
+            "{name}:\n{}",
+            dump(buffer)
+        );
+        assert_eq!(
+            spans(buffer, "Pad"),
+            [(1, 2, 5)],
+            "{name}:\n{}",
+            dump(buffer)
+        );
+    }
 }

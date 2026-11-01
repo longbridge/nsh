@@ -226,8 +226,12 @@ impl Painter<'_> {
         let text_parent = horizontal_text_parent(self.tree, id, parent);
         let sibling_content =
             border_has_sibling_content(self.tree, id, parent, self.cells, self.area);
-        let reserved_content = clip.fit
-            && content_in_reserved_columns(self.tree, id, parent, self.cells, self.area, clip);
+        let reaches = if clip.fit {
+            reserved_reach(self.tree, id, parent, self.cells, self.area, clip)
+        } else {
+            Reach::default()
+        };
+        let blocked = blocked_border_rows(self.tree, id, parent, self.cells, self.area);
         let (button, boxed) = button_label(
             self.tree,
             id,
@@ -357,21 +361,26 @@ impl Painter<'_> {
                     .min(bounds.bottom.max(clip.parent.bottom)),
             };
             let mut fitted = bounds.fitted(limits);
-            if !reserved_content {
-                // Content clear of the reserved columns keeps its own.
-                let kept = bounds.constrained(limits);
+            // Content clear of the reserved columns or rows keeps its own.
+            let kept = bounds.constrained(limits);
+            if !reaches.columns {
                 fitted.left = kept.left;
                 fitted.right = kept.right;
+            }
+            if !reaches.rows {
+                fitted.top = kept.top;
+                fitted.bottom = kept.bottom;
             }
             fitted
         } else {
             bounds.constrained(clip.borders)
         };
-        let shift = if reserved_content {
+        let shift = if reaches.columns {
             bounds.left - raw_bounds.left
         } else {
             0
         };
+        let mut contract = reaches.rows;
         if clip.fit
             && view.style.borders.widths.top > Points::ZERO
             && !bounds.clipped(clip.visible).is_empty()
@@ -391,11 +400,14 @@ impl Painter<'_> {
                     }
                 }
             }
+            contract |= top.min(bounds.bottom) != bounds.top;
             bounds.top = top.min(bounds.bottom);
         }
         if clip.fit {
             projection =
                 projection.snapped(Point::new(self.cells.width() * shift as f32, Points::ZERO));
+        }
+        if clip.fit && contract {
             let old_height = raw_bounds.bottom - raw_bounds.top;
             let new_height = bounds.bottom - bounds.top;
             let scale = if old_height > 0 {
@@ -470,6 +482,8 @@ impl Painter<'_> {
             [widths.top, widths.right, widths.bottom, widths.left][i] > Points::ZERO
                 && !colors[i].is_transparent()
                 && !unboxed
+                && !(i == 0 && blocked.top)
+                && !(i == 2 && blocked.bottom)
         });
         let content = i32::from(
             view.kind != ViewKind::View
@@ -1624,40 +1638,160 @@ fn border_has_sibling_content(
         })
 }
 
-/// Whether `id`'s content lies in the columns of its box that the borders
-/// it is fitted into reserve, so that the box moves off them with its
-/// content rather than only narrowing.
-fn content_in_reserved_columns(
+/// Whether a view's content reaches into the columns, and into the rows, of
+/// its box that the borders it is fitted into reserve.
+#[derive(Clone, Copy, Default)]
+struct Reach {
+    columns: bool,
+    rows: bool,
+}
+
+/// Where `id`'s content lies against the Cells the borders it is fitted
+/// into reserve: the box moves off them with its content only where its
+/// content reaches into them, and otherwise only narrows.
+fn reserved_reach(
     tree: &Mounter,
     id: NodeId,
     projection: Projection,
     cells: CellSize,
     area: Rect,
     clip: Clip,
-) -> bool {
+) -> Reach {
     let Some(view) = tree.get(id) else {
-        return false;
+        return Reach::default();
     };
-    let frame = projection
-        .view(view)
-        .bounds(Bounds::new(Point::default(), view.frame.size));
-    let raw = CellBounds::new(frame, cells, area);
-    let columns = |from: i32, to: i32| {
-        Bounds::new(
-            Point::new(
-                cells.width() * (from - i32::from(area.x)) as f32,
-                frame.top(),
-            ),
-            nsh_core::Size::new(cells.width() * (to - from) as f32, frame.size.height),
-        )
+    let raw = CellBounds::new(
+        projection
+            .view(view)
+            .bounds(Bounds::new(Point::default(), view.frame.size)),
+        cells,
+        area,
+    );
+    let reaches = |strips: [CellBounds; 2]| {
+        strips.into_iter().any(|strip| {
+            strip.right > strip.left
+                && strip.bottom > strip.top
+                && subtree_content_intersects(
+                    tree,
+                    id,
+                    projection,
+                    cells,
+                    strip.points(cells, area),
+                )
+        })
     };
-    [
-        (raw.left, clip.borders.left.min(raw.right)),
-        (clip.borders.right.max(raw.left), raw.right),
-    ]
-    .into_iter()
-    .filter(|(from, to)| to > from)
-    .any(|(from, to)| subtree_content_intersects(tree, id, projection, cells, columns(from, to)))
+    Reach {
+        columns: reaches([
+            CellBounds {
+                right: clip.borders.left.min(raw.right),
+                ..raw
+            },
+            CellBounds {
+                left: clip.borders.right.max(raw.left),
+                ..raw
+            },
+        ]),
+        rows: reaches([
+            CellBounds {
+                bottom: clip.borders.top.min(raw.bottom),
+                ..raw
+            },
+            CellBounds {
+                top: clip.borders.bottom.max(raw.top),
+                ..raw
+            },
+        ]),
+    }
+}
+
+/// The top and bottom borders of `id` that are left out because a child
+/// whose content reaches into the border's row cannot move off it without
+/// landing on a sibling's content: stacking two rows of text on one is
+/// worse than a missing rule.
+#[derive(Clone, Copy, Default)]
+struct BlockedRows {
+    top: bool,
+    bottom: bool,
+}
+
+fn blocked_border_rows(
+    tree: &Mounter,
+    id: NodeId,
+    projection: Projection,
+    cells: CellSize,
+    area: Rect,
+) -> BlockedRows {
+    let Some(view) = tree.get(id) else {
+        return BlockedRows::default();
+    };
+    let widths = &view.style.borders.widths;
+    if widths.top <= Points::ZERO && widths.bottom <= Points::ZERO {
+        return BlockedRows::default();
+    }
+    let projection = projection.view(view);
+    let raw = CellBounds::new(
+        projection.bounds(Bounds::new(Point::default(), view.frame.size)),
+        cells,
+        area,
+    );
+    let offset = view
+        .scroll
+        .as_ref()
+        .map_or_else(Point::default, |scroll| scroll.origin());
+    let projection = projection.translated(Point::new(-offset.x, -offset.y));
+    let children: Vec<(NodeId, CellBounds)> = view
+        .children
+        .iter()
+        .filter_map(|&child| {
+            let shown = tree.get(child)?;
+            if shown.concealed || shown.style.hidden || shown.kind == ViewKind::Modal {
+                return None;
+            }
+            let frame = projection
+                .view(shown)
+                .bounds(Bounds::new(Point::default(), shown.frame.size));
+            Some((child, CellBounds::new(frame, cells, area)))
+        })
+        .collect();
+    let row = |bounds: CellBounds, y: i32| CellBounds {
+        top: y,
+        bottom: y + 1,
+        ..bounds
+    };
+    // A child reaching into the border's `reserved` row moves one row
+    // toward `step`; the row it newly covers must hold no sibling's content.
+    let blocked = |reserved: i32, step: i32| {
+        children.iter().any(|&(child, bounds)| {
+            if !(bounds.top..bounds.bottom).contains(&reserved)
+                || !subtree_content_intersects(
+                    tree,
+                    child,
+                    projection,
+                    cells,
+                    row(bounds, reserved).points(cells, area),
+                )
+            {
+                return false;
+            }
+            let covered = if step > 0 {
+                bounds.bottom
+            } else {
+                bounds.top - 1
+            };
+            if !(raw.top..raw.bottom).contains(&covered) {
+                return false;
+            }
+            let covered = row(bounds, covered).points(cells, area);
+            children.iter().any(|&(sibling, _)| {
+                sibling != child
+                    && subtree_content_intersects(tree, sibling, projection, cells, covered)
+            })
+        })
+    };
+    BlockedRows {
+        top: widths.top > Points::ZERO && blocked(raw.top, 1),
+        bottom: widths.bottom > Points::ZERO && blocked(raw.bottom - 1, -1),
+    }
 }
 
 fn subtree_content_intersects(
