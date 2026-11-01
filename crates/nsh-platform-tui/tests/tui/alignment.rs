@@ -251,3 +251,102 @@ fn siblings_centered_on_a_row_share_it() {
         );
     }
 }
+
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum Side {
+    None,
+    Top,
+    Right,
+    Bottom,
+    Left,
+}
+
+/// A sidebar-like panel: full-width rows, one flush with its left edge, one
+/// padded, one right-aligned, a row's padding above and below them, with a
+/// border on at most one side.
+fn bordered_panel(side: Side) -> impl IntoElement {
+    let panel = view()
+        .absolute()
+        .left(px(0.0))
+        .top(px(0.0))
+        .w(px(160.0))
+        .h(px(80.0))
+        .py(px(16.0))
+        .child(view().h(px(16.0)).child(text("Edge")))
+        .child(view().h(px(16.0)).px(px(16.0)).child(text("Pad")))
+        .child(
+            view()
+                .h(px(16.0))
+                .pr(px(16.0))
+                .items_end()
+                .child(text("Right")),
+        );
+    let color = nsh_core::color::rgb(0x8a8f98);
+    match side {
+        Side::None => panel,
+        Side::Top => panel.border_t(px(1.0)).border_color(color),
+        Side::Right => panel.border_r(px(1.0)).border_color(color),
+        Side::Bottom => panel.border_b(px(1.0)).border_color(color),
+        Side::Left => panel.border_l(px(1.0)).border_color(color),
+    }
+}
+
+#[component]
+fn PlainPanel() -> impl IntoElement {
+    bordered_panel(Side::None)
+}
+
+#[component]
+fn TopPanel() -> impl IntoElement {
+    bordered_panel(Side::Top)
+}
+
+#[component]
+fn RightPanel() -> impl IntoElement {
+    bordered_panel(Side::Right)
+}
+
+#[component]
+fn BottomPanel() -> impl IntoElement {
+    bordered_panel(Side::Bottom)
+}
+
+#[component]
+fn LeftPanel() -> impl IntoElement {
+    bordered_panel(Side::Left)
+}
+
+fn panel_spans(side: Side) -> Vec<Vec<(u16, u16)>> {
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(24, 6)).unwrap();
+    let root = match side {
+        Side::None => Root::new::<PlainPanel>(|| ()),
+        Side::Top => Root::new::<TopPanel>(|| ()),
+        Side::Right => Root::new::<RightPanel>(|| ()),
+        Side::Bottom => Root::new::<BottomPanel>(|| ()),
+        Side::Left => Root::new::<LeftPanel>(|| ()),
+    };
+    view.load(App::Rust(root)).unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "Right");
+    let buffer = terminal.backend().buffer();
+    ["Edge", "Pad", "Right"]
+        .iter()
+        .map(|word| {
+            let found = spans(buffer, word);
+            assert_eq!(found.len(), 1, "{side:?} {word}:\n{}", dump(buffer));
+            found.iter().map(|&(_, start, end)| (start, end)).collect()
+        })
+        .collect()
+}
+
+#[test]
+fn a_border_on_one_side_never_moves_content_on_the_other_sides() {
+    let plain = panel_spans(Side::None);
+    assert_eq!(plain, [vec![(0, 4)], vec![(2, 5)], vec![(13, 18)]]);
+    for side in [Side::Top, Side::Right, Side::Bottom] {
+        assert_eq!(panel_spans(side), plain, "{side:?} border");
+    }
+    let left = panel_spans(Side::Left);
+    assert_eq!(left[0], [(1, 5)], "flush text moves off the left border");
+    assert_eq!(left[1..], plain[1..], "the rest stays put");
+}
