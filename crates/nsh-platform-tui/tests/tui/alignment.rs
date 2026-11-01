@@ -316,7 +316,7 @@ fn LeftPanel() -> impl IntoElement {
     bordered_panel(Side::Left)
 }
 
-fn panel_spans(side: Side) -> Vec<Vec<(u16, u16)>> {
+fn panel_spans(side: Side) -> Vec<Vec<(u16, u16, u16)>> {
     let (mut view, rx) = surface();
     let mut terminal = Terminal::new(TestBackend::new(24, 6)).unwrap();
     let root = match side {
@@ -334,7 +334,7 @@ fn panel_spans(side: Side) -> Vec<Vec<(u16, u16)>> {
         .map(|word| {
             let found = spans(buffer, word);
             assert_eq!(found.len(), 1, "{side:?} {word}:\n{}", dump(buffer));
-            found.iter().map(|&(_, start, end)| (start, end)).collect()
+            found
         })
         .collect()
 }
@@ -342,11 +342,11 @@ fn panel_spans(side: Side) -> Vec<Vec<(u16, u16)>> {
 #[test]
 fn a_border_on_one_side_never_moves_content_on_the_other_sides() {
     let plain = panel_spans(Side::None);
-    assert_eq!(plain, [vec![(0, 4)], vec![(2, 5)], vec![(13, 18)]]);
+    assert_eq!(plain, [vec![(1, 0, 4)], vec![(2, 2, 5)], vec![(3, 13, 18)]]);
     for side in [Side::Top, Side::Right, Side::Bottom] {
         assert_eq!(panel_spans(side), plain, "{side:?} border");
     }
     let left = panel_spans(Side::Left);
-    assert_eq!(left[0], [(1, 5)], "flush text moves off the left border");
+    assert_eq!(left[0], [(1, 1, 5)], "flush text moves off the left border");
     assert_eq!(left[1..], plain[1..], "the rest stays put");
 }
