@@ -223,8 +223,12 @@ fn icons_are_not_drawn_and_an_icon_only_button_shows_its_label() {
         .unwrap();
     draw_until(&mut view, &mut terminal, &rx, "icon");
     let buffer = terminal.backend().buffer();
-    assert_eq!(row(buffer, 0), "[L…]", "cut to its 4 by 2 Cell box");
-    assert_eq!(row(buffer, 1), "");
+    assert_eq!(row(buffer, 0), "");
+    assert_eq!(
+        row(buffer, 1),
+        "[ Light appearance ]",
+        "its 4 by 2 Cell box and the blank Cells beside it, on its icon's row"
+    );
     assert_eq!(row(buffer, 2), "     [ Close ]");
     assert_eq!(
         row(buffer, 3),
@@ -235,14 +239,15 @@ fn icons_are_not_drawn_and_an_icon_only_button_shows_its_label() {
 
 #[cfg(feature = "js")]
 #[test]
-fn image_placeholders_smaller_than_three_by_two_cells_are_decorative() {
+fn images_without_an_accessibility_label_are_decorative_at_any_size() {
     let code = nsh_bundler::compile_module(
         "App.tsx",
         r#"
         import { mount, View, Text, Image } from "nsh";
         mount(() => <View>
             <Image src="small.png" style={{ width: 16, height: 16 }} />
-            <Image src="large.png" style={{ width: 80, height: 48 }} />
+            <Image src="logo.png" style={{ width: 80, height: 48 }} />
+            <Image src="chart.png" accessibilityLabel="Chart" style={{ width: 80, height: 48 }} />
             <Text>ready</Text>
         </View>);
     "#,
@@ -250,12 +255,15 @@ fn image_placeholders_smaller_than_three_by_two_cells_are_decorative() {
     )
     .unwrap();
     let (mut view, rx) = surface();
-    let mut terminal = Terminal::new(TestBackend::new(20, 6)).unwrap();
+    let mut terminal = Terminal::new(TestBackend::new(20, 10)).unwrap();
     view.load(nsh_platform_tui::Bundle::source(code)).unwrap();
     draw_until(&mut view, &mut terminal, &rx, "ready");
     let buffer = terminal.backend().buffer();
-    assert_eq!(row(buffer, 0), "");
-    assert!(row(buffer, 1).starts_with('┌'), "{:?}", row(buffer, 1));
+    let lines: Vec<_> = (0..10).map(|y| row(buffer, y)).collect();
+    assert!(lines[0..4].iter().all(String::is_empty), "{lines:?}");
+    assert_eq!(lines[4], "┌Chart───┐", "{lines:?}");
+    assert_eq!(lines[6], "└────────┘", "{lines:?}");
+    assert_eq!(lines[7], "ready", "content never moves");
 }
 
 #[component]
@@ -307,4 +315,158 @@ fn a_press_handler_around_a_styled_box_is_a_bracketed_button_whose_label_stays_p
         !buffer[(label, y)].modifier.contains(Modifier::DIM),
         "dark text designed on its lime fill"
     );
+}
+
+/// An icon tile: a bordered, filled box whose only content is an icon and a
+/// status dot.
+fn tile() -> View {
+    view()
+        .w(px(32.0))
+        .h(px(32.0))
+        .border_1()
+        .rounded(px(8.0))
+        .bg(nsh_core::color::rgb(0x24262a))
+        .border_color(nsh_core::color::rgb(0x8a8f98))
+        .items_center()
+        .justify_center()
+        .child(
+            canvas(Painter::new().fill_rect(0.0, 0.0, 16.0, 16.0))
+                .w(px(16.0))
+                .h(px(16.0)),
+        )
+        .child(
+            view()
+                .absolute()
+                .right(px(0.0))
+                .top(px(0.0))
+                .w(px(8.0))
+                .h(px(8.0))
+                .bg(nsh_core::color::rgb(0x45d49a)),
+        )
+}
+
+#[component]
+fn Tiles() -> impl IntoElement {
+    let header = |tile: View| {
+        view()
+            .flex_row()
+            .items_center()
+            .gap(px(8.0))
+            .child(tile)
+            .child(text("Title"))
+    };
+    view()
+        .flex_1()
+        .child(header(tile()))
+        .child(header(tile().accessibility_state(super::app::selected())))
+        .child(header(view().w(px(32.0)).h(px(32.0))))
+}
+
+#[test]
+fn a_box_whose_only_content_was_dropped_is_not_drawn_and_its_neighbors_stay_put() {
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(16, 6)).unwrap();
+    view.load(App::Rust(Root::new::<Tiles>(|| ()))).unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "Title");
+    let buffer = terminal.backend().buffer();
+    let lines: Vec<_> = (0..6).map(|y| row(buffer, y)).collect();
+    // No border, fill, dot or selection bar: the tile takes no glyphs, and
+    // the title keeps the column it has beside an empty spacer.
+    assert_eq!(lines[0..2], lines[4..6], "{lines:?}");
+    assert_eq!(lines[2..4], lines[4..6], "{lines:?}");
+    assert!(
+        lines.iter().all(|line| !line.contains(['┌', '│', '└'])),
+        "{lines:?}"
+    );
+    assert!(
+        buffer
+            .content
+            .iter()
+            .all(|cell| cell.bg == Color::Reset && !cell.modifier.contains(Modifier::REVERSED)),
+        "{lines:?}"
+    );
+}
+
+#[component]
+fn CrowdedIconButtons() -> impl IntoElement {
+    let icon_button = |label: &'static str| {
+        view()
+            .w(px(32.0))
+            .h(px(32.0))
+            .border_1()
+            .role(AccessibilityRole::Button)
+            .label(label)
+            .items_center()
+            .justify_center()
+            .on_press(|_: &()| {})
+            .child(
+                canvas(Painter::new().fill_rect(0.0, 0.0, 16.0, 16.0))
+                    .w(px(16.0))
+                    .h(px(16.0)),
+            )
+    };
+    let header = |button: View| {
+        view()
+            .flex_row()
+            .items_center()
+            .gap(px(16.0))
+            .child(text("Gallery"))
+            .child(button)
+            .child(text("NSH"))
+    };
+    view()
+        .flex_1()
+        .child(header(icon_button("Light appearance")))
+        .child(header(icon_button("Go")))
+        .child(header(view().w(px(32.0)).h(px(32.0))))
+}
+
+#[test]
+fn an_icon_only_button_shows_its_whole_label_or_nothing_and_focus_puts_the_bar_on_it() {
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(20, 6)).unwrap();
+    view.load(App::Rust(Root::new::<CrowdedIconButtons>(|| ())))
+        .unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "NSH");
+    let lines: Vec<_> = (0..6)
+        .map(|y| row(terminal.backend().buffer(), y))
+        .collect();
+    // Between two texts the long label has no room: neither a cut label nor
+    // the button's box, and the texts keep their columns. The short one
+    // takes the blank Cells beside its box, a Cell away from the texts.
+    assert_eq!(lines[0..2], lines[4..6], "{lines:?}");
+    assert_eq!(lines[2], "", "{lines:?}");
+    assert_eq!(lines[3], "Gallery [ Go ] NSH", "{lines:?}");
+    assert!(
+        lines.iter().all(|line| !line.contains(['…', '┌', '│'])),
+        "{lines:?}"
+    );
+
+    let key = |name: &str| nsh_platform_tui::Input::Key {
+        key: name.into(),
+        modifiers: Default::default(),
+        release: false,
+    };
+    assert_eq!(view.handle(key("Tab")), nsh_platform_tui::Handled::Yes);
+    terminal
+        .draw(|frame| view.render(frame, frame.area()))
+        .unwrap();
+    let buffer = terminal.backend().buffer();
+    let focused = |x: u16, y: u16| buffer[(x, y)].bg != Color::Reset;
+    assert!((9..13).all(|x| focused(x, 1)), "the bar on its label's row");
+    assert!(!focused(8, 1) && !focused(13, 1) && !focused(9, 0));
+    let after: Vec<_> = (0..6).map(|y| row(buffer, y)).collect();
+    assert_eq!(lines, after, "content never moves");
+
+    assert_eq!(view.handle(key("Tab")), nsh_platform_tui::Handled::Yes);
+    terminal
+        .draw(|frame| view.render(frame, frame.area()))
+        .unwrap();
+    let buffer = terminal.backend().buffer();
+    assert!(
+        (8..14).all(|x| buffer[(x, 3)].bg != Color::Reset),
+        "the bar under the whole label"
+    );
+    assert!(!(buffer[(7, 3)].bg != Color::Reset) && !(buffer[(14, 3)].bg != Color::Reset));
+    assert!((0..20).all(|x| buffer[(x, 2)].bg == Color::Reset));
 }

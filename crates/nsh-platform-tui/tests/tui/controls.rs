@@ -2,7 +2,7 @@ use nsh_core::prelude::*;
 use nsh_platform_tui::{App, Handled, Input, Root};
 use ratatui_core::{backend::TestBackend, style::Color, terminal::Terminal};
 
-use super::app::{draw_until, reversed, selected, surface};
+use super::app::{barred, draw_until, reversed, selected, surface};
 
 fn key(name: &str) -> Input {
     Input::Key {
@@ -35,7 +35,7 @@ fn OutlinedButton() -> impl IntoElement {
 }
 
 #[test]
-fn a_focused_control_is_reversed_and_its_app_outline_is_not_drawn() {
+fn a_focused_control_shows_the_bar_and_its_app_outline_is_not_drawn() {
     let (mut view, rx) = surface();
     let mut terminal = Terminal::new(TestBackend::new(30, 10)).unwrap();
     view.load(App::Rust(Root::new::<OutlinedButton>(|| ())))
@@ -44,15 +44,20 @@ fn a_focused_control_is_reversed_and_its_app_outline_is_not_drawn() {
     assert_eq!(view.handle(key("Tab")), Handled::Yes);
     assert_eq!(view.handle(key("Enter")), Handled::Yes);
     draw_until(&mut view, &mut terminal, &rx, "pressed");
-    // Focus reverses the button's own 10 by 3 Cell box; its outline is the
-    // app's focus style, which the terminal's look leaves out.
+    // Focus puts the bar on the text row across the button's own 10 by 3
+    // Cell box; its outline is the app's focus style, which the terminal's
+    // look leaves out.
     let buffer = terminal.backend().buffer();
-    for (x, y) in [(2, 2), (11, 2), (2, 4), (11, 4)] {
-        assert!(reversed(buffer, x, y), "({x}, {y})");
+    for (x, y) in [(2, 2), (11, 2)] {
+        assert!(barred(buffer, x, y), "({x}, {y})");
+        assert_eq!(buffer[(x, y)].fg, Color::Reset);
+    }
+    for (x, y) in [(2, 4), (11, 4)] {
+        assert!(!barred(buffer, x, y), "no bar on the blank row ({x}, {y})");
         assert_eq!(buffer[(x, y)].fg, Color::Reset);
     }
     for (x, y) in [(1, 2), (12, 2), (2, 1), (2, 5)] {
-        assert!(!reversed(buffer, x, y), "({x}, {y})");
+        assert!(!barred(buffer, x, y), "({x}, {y})");
         assert_eq!(buffer[(x, y)].symbol(), " ");
     }
     assert!(!terminal.backend().cursor_visible());
@@ -78,17 +83,18 @@ fn ScaledOutline() -> impl IntoElement {
 }
 
 #[test]
-fn a_reversed_box_follows_the_controls_transformed_bounds_without_its_outline() {
+fn a_bar_follows_the_controls_transformed_bounds_without_its_outline() {
     let (mut view, rx) = surface();
     let mut terminal = Terminal::new(TestBackend::new(30, 10)).unwrap();
     view.load(App::Rust(Root::new::<ScaledOutline>(|| ())))
         .unwrap();
     draw_until(&mut view, &mut terminal, &rx, "scaled");
     let buffer = terminal.backend().buffer();
-    assert!(reversed(buffer, 21, 7));
-    assert_eq!(buffer[(21, 7)].symbol(), " ");
-    assert!(!reversed(buffer, 22, 7));
-    assert!(!reversed(buffer, 21, 8));
+    assert_eq!(buffer[(2, 2)].symbol(), "s");
+    assert!(barred(buffer, 2, 2) && barred(buffer, 21, 2));
+    assert_eq!(buffer[(21, 2)].symbol(), " ");
+    assert!(!barred(buffer, 1, 2) && !barred(buffer, 22, 2));
+    assert!(!barred(buffer, 21, 7), "no bar on the blank rows");
 }
 
 #[component]

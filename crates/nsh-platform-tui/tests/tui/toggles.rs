@@ -117,7 +117,7 @@ fn Radios() -> impl IntoElement {
 }
 
 #[test]
-fn radios_put_their_glyphs_in_one_column_and_focus_stays_reversed() {
+fn radios_put_their_glyphs_in_one_column_and_focus_puts_the_bar_on_them() {
     let (mut view, rx) = surface();
     let mut terminal = Terminal::new(TestBackend::new(20, 6)).unwrap();
     view.load(App::Rust(Root::new::<Radios>(|| ()))).unwrap();
@@ -140,10 +140,14 @@ fn radios_put_their_glyphs_in_one_column_and_focus_stays_reversed() {
     draw_until(&mut view, &mut terminal, &rx, "(•) Free");
     let buffer = terminal.backend().buffer();
     assert_eq!(rows(buffer)[0..3], ["(•) Free", "    detail", "( ) Plus"]);
-    assert!(
-        buffer[(4, 0)].modifier.contains(Modifier::REVERSED),
-        "keyboard focus is still reversed"
-    );
+    assert!(!reversed_anywhere(buffer));
+    for y in 0..2 {
+        assert!(
+            (0..10).all(|x| buffer[(x, y)].bg != ratatui_core::style::Color::Reset
+                && buffer[(x, y)].modifier.contains(Modifier::BOLD)),
+            "keyboard focus: the bar on the glyph's and the label's rows"
+        );
+    }
 }
 
 #[component]

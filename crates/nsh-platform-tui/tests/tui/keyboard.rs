@@ -2,7 +2,7 @@ use nsh_core::prelude::*;
 use nsh_platform_tui::{App, Handled, Input, Modifiers, Root};
 use ratatui_core::{backend::TestBackend, terminal::Terminal};
 
-use super::app::{draw_until, reversed, surface};
+use super::app::{barred, draw_until, surface};
 
 fn key(name: &str, modifiers: Modifiers) -> Input {
     Input::Key {
@@ -79,7 +79,7 @@ fn terminal_keys_follow_tree_order_and_horizontal_keys_stay_spatial() {
         assert_eq!(view.handle(input), Handled::Yes);
         draw_until(&mut view, &mut terminal, &rx, &format!("focus {focused}"));
         assert!(!terminal.backend().cursor_visible());
-        assert!(reversed(terminal.backend().buffer(), cursor.0, cursor.1));
+        assert!(barred(terminal.backend().buffer(), cursor.0, cursor.1));
     }
     assert_eq!(view.handle(key("Enter", Default::default())), Handled::Yes);
     draw_until(&mut view, &mut terminal, &rx, "press DUP");
@@ -704,7 +704,7 @@ fn the_diagnostics_panel_owns_repeated_keys_and_preserves_app_focus() {
     view.handle(key("Escape", Default::default()));
     draw_until(&mut view, &mut terminal, &rx, "focus B");
     assert!(!terminal.backend().cursor_visible());
-    assert!(reversed(terminal.backend().buffer(), 10, 1));
+    assert!(barred(terminal.backend().buffer(), 10, 1));
     view.stop();
     std::fs::remove_file(path).unwrap();
 }
@@ -720,10 +720,10 @@ fn draw_focused_cell(
         terminal
             .draw(|frame| view.render(frame, frame.area()))
             .unwrap();
-        if reversed(terminal.backend().buffer(), at.0, at.1) {
+        if barred(terminal.backend().buffer(), at.0, at.1) {
             return;
         }
-        rx.recv_deadline(deadline).expect("reversed focus");
+        rx.recv_deadline(deadline).expect("the focus bar");
     }
 }
 

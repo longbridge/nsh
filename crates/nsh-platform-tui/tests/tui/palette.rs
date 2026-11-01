@@ -25,6 +25,10 @@ fn reversed(buffer: &Buffer, x: u16, y: u16) -> bool {
     buffer[(x, y)].modifier.contains(Modifier::REVERSED)
 }
 
+fn barred(buffer: &Buffer, x: u16, y: u16) -> bool {
+    buffer[(x, y)].bg == Color::Black && buffer[(x, y)].modifier.contains(Modifier::BOLD)
+}
+
 #[component]
 fn Inks() -> impl IntoElement {
     view()
@@ -288,17 +292,18 @@ fn States() -> impl IntoElement {
 }
 
 #[test]
-fn selected_checked_and_focused_views_are_reversed_without_app_focus_outlines() {
+fn selected_checked_and_focused_views_show_the_bar_without_app_focus_outlines() {
     let (mut view, rx) = surface();
     let mut terminal = Terminal::new(TestBackend::new(20, 8)).unwrap();
     view.load(App::Rust(Root::new::<States>(|| ()))).unwrap();
     draw_until(&mut view, &mut terminal, &rx, "field");
     let buffer = terminal.backend().buffer();
-    assert!(reversed(buffer, 0, 0) && reversed(buffer, 9, 0), "selected");
-    assert!(reversed(buffer, 0, 1) && reversed(buffer, 9, 1), "checked");
-    assert!(!reversed(buffer, 0, 2), "unchecked");
-    assert!(!reversed(buffer, 0, 3), "not focused yet");
-    assert!(!reversed(buffer, 10, 1), "outside the box");
+    assert!(barred(buffer, 0, 0) && barred(buffer, 9, 0), "selected");
+    assert!(barred(buffer, 0, 1) && barred(buffer, 9, 1), "checked");
+    assert!(!barred(buffer, 0, 2), "unchecked");
+    assert!(!barred(buffer, 0, 3), "not focused yet");
+    assert!(!barred(buffer, 10, 1), "outside the box");
+    assert!(!reversed(buffer, 0, 0), "no reverse video");
 
     assert_eq!(view.handle(key("Tab")), Handled::Yes);
     terminal
@@ -306,7 +311,7 @@ fn selected_checked_and_focused_views_are_reversed_without_app_focus_outlines() 
         .unwrap();
     draw_until(&mut view, &mut terminal, &rx, "button");
     let buffer = terminal.backend().buffer();
-    assert!(reversed(buffer, 0, 3) && reversed(buffer, 9, 3), "focused");
+    assert!(barred(buffer, 0, 3) && barred(buffer, 9, 3), "focused");
     for x in 0..20 {
         for y in [2, 4] {
             assert_eq!(buffer[(x, y)].fg, Color::Reset, "no outline at ({x}, {y})");
@@ -319,9 +324,9 @@ fn selected_checked_and_focused_views_are_reversed_without_app_focus_outlines() 
         .draw(|frame| view.render(frame, frame.area()))
         .unwrap();
     let buffer = terminal.backend().buffer();
-    assert!(!reversed(buffer, 0, 3), "focus left the button");
+    assert!(!barred(buffer, 0, 3), "focus left the button");
     assert!(
-        !reversed(buffer, 0, 4),
+        !barred(buffer, 0, 4),
         "a focused field shows its caret instead"
     );
     assert!(dim(buffer, 0, 4), "placeholder");
@@ -394,18 +399,19 @@ fn SelectedChartRow() -> impl IntoElement {
 }
 
 #[test]
-fn canvas_cells_inside_a_reversed_view_keep_their_palette_color_unreversed() {
+fn canvas_cells_under_a_bar_keep_their_palette_color() {
     let (mut view, rx) = surface();
     let mut terminal = Terminal::new(TestBackend::new(20, 2)).unwrap();
     view.load(App::Rust(Root::new::<SelectedChartRow>(|| ())))
         .unwrap();
     draw_until(&mut view, &mut terminal, &rx, "ORBX");
     let buffer = terminal.backend().buffer();
-    assert!(reversed(buffer, 0, 0), "the row's text");
-    assert!(reversed(buffer, 9, 0), "the row's empty Cells");
+    assert!(barred(buffer, 0, 0), "the row's text");
+    assert!(barred(buffer, 9, 0), "the row's empty Cells");
     for x in 6..8 {
         assert_eq!(buffer[(x, 0)].symbol(), "⣿");
         assert_eq!(buffer[(x, 0)].fg, Color::Red);
+        assert!(barred(buffer, x, 0), "the chart at {x}");
         assert!(!reversed(buffer, x, 0), "the chart at {x}");
     }
 }
