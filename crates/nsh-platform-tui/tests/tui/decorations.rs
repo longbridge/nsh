@@ -235,14 +235,15 @@ fn icons_are_not_drawn_and_an_icon_only_button_shows_its_label() {
 
 #[cfg(feature = "js")]
 #[test]
-fn image_placeholders_smaller_than_three_by_two_cells_are_decorative() {
+fn images_without_an_accessibility_label_are_decorative_at_any_size() {
     let code = nsh_bundler::compile_module(
         "App.tsx",
         r#"
         import { mount, View, Text, Image } from "nsh";
         mount(() => <View>
             <Image src="small.png" style={{ width: 16, height: 16 }} />
-            <Image src="large.png" style={{ width: 80, height: 48 }} />
+            <Image src="logo.png" style={{ width: 80, height: 48 }} />
+            <Image src="chart.png" accessibilityLabel="Chart" style={{ width: 80, height: 48 }} />
             <Text>ready</Text>
         </View>);
     "#,
@@ -250,12 +251,15 @@ fn image_placeholders_smaller_than_three_by_two_cells_are_decorative() {
     )
     .unwrap();
     let (mut view, rx) = surface();
-    let mut terminal = Terminal::new(TestBackend::new(20, 6)).unwrap();
+    let mut terminal = Terminal::new(TestBackend::new(20, 10)).unwrap();
     view.load(nsh_platform_tui::Bundle::source(code)).unwrap();
     draw_until(&mut view, &mut terminal, &rx, "ready");
     let buffer = terminal.backend().buffer();
-    assert_eq!(row(buffer, 0), "");
-    assert!(row(buffer, 1).starts_with('┌'), "{:?}", row(buffer, 1));
+    let lines: Vec<_> = (0..10).map(|y| row(buffer, y)).collect();
+    assert!(lines[0..4].iter().all(String::is_empty), "{lines:?}");
+    assert_eq!(lines[4], "┌Chart───┐", "{lines:?}");
+    assert_eq!(lines[6], "└────────┘", "{lines:?}");
+    assert_eq!(lines[7], "ready", "content never moves");
 }
 
 #[component]

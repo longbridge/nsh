@@ -28,8 +28,6 @@ const HAIRLINE_CELL_FRACTION: f32 = 0.5;
 /// The alpha from which a translucent fill clears what is under it, as an
 /// opaque one does (50%); lighter fills (scrims, tints) draw nothing.
 const CLEARING_ALPHA: u32 = 128;
-/// Image placeholders smaller than this, in Cells, are decorative and not drawn.
-const MIN_IMAGE_CELLS: (i32, i32) = (3, 2);
 /// The Cells between a button's label and each of its brackets.
 const BRACKET_GAP: i32 = 1;
 
@@ -511,17 +509,7 @@ impl Painter<'_> {
         } else {
             Vec::new()
         };
-        let role = view.props.accessibility.role;
-        let decorative = match view.kind {
-            ViewKind::Canvas => {
-                role == AccessibilityRole::Image || view.props.accessibility.label.is_none()
-            }
-            ViewKind::Image => {
-                bounds.right - bounds.left < MIN_IMAGE_CELLS.0
-                    || bounds.bottom - bounds.top < MIN_IMAGE_CELLS.1
-            }
-            _ => false,
-        };
+        let decorative = is_decorative(view);
         let visible_drawn = !visible.is_empty()
             && opacity >= INVISIBLE_OPACITY
             && !decorative
@@ -702,10 +690,14 @@ impl Painter<'_> {
                     | ViewKind::HeaderItem
                     | ViewKind::Modal
             ) {
-                let title = view
-                    .component_name
-                    .clone()
-                    .unwrap_or_else(|| format!("{:?}", view.kind));
+                // An image's placeholder carries its accessibility label.
+                let title = match (view.kind, &view.props.accessibility.label) {
+                    (ViewKind::Image, Some(label)) => label.to_string(),
+                    _ => view
+                        .component_name
+                        .clone()
+                        .unwrap_or_else(|| format!("{:?}", view.kind)),
+                };
                 Block::bordered().title(title).render(visible, self.buffer);
             }
         }
@@ -1090,6 +1082,20 @@ fn button_label(
     Some((label, boxed))
 }
 
+/// Whether the terminal leaves `view` out as decoration: icons (canvases
+/// with role `image` or no accessibility label) and images without an
+/// accessibility label.
+fn is_decorative(view: &crate::view::NshView) -> bool {
+    let label = &view.props.accessibility.label;
+    match view.kind {
+        ViewKind::Canvas => {
+            view.props.accessibility.role == AccessibilityRole::Image || label.is_none()
+        }
+        ViewKind::Image => label.is_none(),
+        _ => false,
+    }
+}
+
 fn is_toggle(role: AccessibilityRole) -> bool {
     matches!(
         role,
@@ -1193,19 +1199,9 @@ fn text_rows(
         return true;
     }
     let projection = projection.view(view);
-    let frame = CellBounds::new(
-        projection.bounds(Bounds::new(Point::default(), view.frame.size)),
-        cells,
-        area,
-    );
     let content = match view.kind {
         ViewKind::View | ViewKind::Text => view.component.is_some(),
-        ViewKind::Canvas => view.props.accessibility.label.is_some(),
-        ViewKind::Image => {
-            frame.right - frame.left >= MIN_IMAGE_CELLS.0
-                && frame.bottom - frame.top >= MIN_IMAGE_CELLS.1
-        }
-        _ => true,
+        _ => !is_decorative(view),
     };
     if content {
         return false;
