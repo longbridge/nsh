@@ -2,7 +2,7 @@ import { Canvas, cleanup, computed, effect, Scroll, signal, Text, untracked, Vie
 import { createAnimatedValue, Easing, LayoutAnimation } from "nsh";
 import { Icon } from "../icons";
 import { nav } from "../nav";
-import { colors, desktop, finish, motion, paneWidth, Press, Segmented } from "../ui";
+import { Button, colors, desktop, finish, motion, paneWidth, Press, Segmented, TERMINAL_COLUMN, TERMINAL_ROW, terminal } from "../ui";
 import { Detail, StockView } from "./stocks/Detail";
 import { createMarket, grouped, INDEX_BASE, ISSUES, type Market, percent, price, type Stock, sectors, signed, time, toneOf } from "./stocks/market";
 import { alpha, calm, SpringBar } from "./stocks/parts";
@@ -24,19 +24,21 @@ const open = (market: Market, stock: Stock) => nav.push({ name: "page", page: ()
 function SectorBar(props: { label: string; change: () => number; scale: () => number }) {
   const share = () => Math.min(1, Math.abs(props.change()) / props.scale());
   return (
-    <View style={{ flexDirection: "row", alignItems: "center", gap: 10, height: 22 }}>
-      <Text style={{ numberOfLines: 1, width: 84, fontSize: 13, color: colors.muted }}>
+    <View style={{ flexDirection: "row", alignItems: "center", gap: 10, height: terminal ? TERMINAL_ROW : 22 }}>
+      <Text style={{ numberOfLines: 1, width: terminal ? 96 : 84, fontSize: 13, color: colors.muted }}>
         {props.label}
       </Text>
-      <View style={{ flex: 1, flexDirection: "row", alignItems: "center" }}>
-        <View style={{ flex: 1 }}>
-          <SpringBar share={() => (props.change() < 0 ? share() : 0)} color={colors.down} from="right" height={8} radius={2} />
+      <If when={!terminal} else={<View style={{ flex: 1 }} />}>
+        <View style={{ flex: 1, flexDirection: "row", alignItems: "center" }}>
+          <View style={{ flex: 1 }}>
+            <SpringBar share={() => (props.change() < 0 ? share() : 0)} color={colors.down} from="right" height={8} radius={2} />
+          </View>
+          <View style={{ width: 1, height: 14, backgroundColor: colors.border }} />
+          <View style={{ flex: 1 }}>
+            <SpringBar share={() => (props.change() > 0 ? share() : 0)} color={colors.up} height={8} radius={2} />
+          </View>
         </View>
-        <View style={{ width: 1, height: 14, backgroundColor: colors.border }} />
-        <View style={{ flex: 1 }}>
-          <SpringBar share={() => (props.change() > 0 ? share() : 0)} color={colors.up} height={8} radius={2} />
-        </View>
-      </View>
+      </If>
       <Text style={{ width: 56, textAlign: "right", fontSize: 12, fontVariant: ["tabular-nums"], color: toneOf(props.change()) }}>{signed(props.change())}%</Text>
     </View>
   );
@@ -57,13 +59,15 @@ function Breadth(props: { market: Market }) {
   });
   const scale = () => Math.max(0.5, ...means().map(Math.abs)) * 1.1;
   return (
-    <View style={{ paddingHorizontal: 16, paddingBottom: 14, gap: 10 }}>
-      <View style={{ gap: 6 }}>
-        <View style={{ flexDirection: "row", height: 6, borderRadius: 3, overflow: "hidden", gap: 2 }}>
-          <View style={{ flex: b().up, backgroundColor: colors.up }} />
-          <View style={{ flex: b().flat, backgroundColor: colors.faint }} />
-          <View style={{ flex: b().down, backgroundColor: colors.down }} />
-        </View>
+    <View style={terminal ? { paddingHorizontal: TERMINAL_COLUMN, paddingBottom: TERMINAL_ROW, gap: TERMINAL_ROW } : { paddingHorizontal: 16, paddingBottom: 14, gap: 10 }}>
+      <View style={{ gap: terminal ? 0 : 6 }}>
+        <If when={!terminal}>
+          <View style={{ flexDirection: "row", height: 6, borderRadius: 3, overflow: "hidden", gap: 2 }}>
+            <View style={{ flex: b().up, backgroundColor: colors.up }} />
+            <View style={{ flex: b().flat, backgroundColor: colors.faint }} />
+            <View style={{ flex: b().down, backgroundColor: colors.down }} />
+          </View>
+        </If>
         <View style={{ flexDirection: "row" }}>
           <Text style={{ flex: 1, fontSize: 12, fontVariant: ["tabular-nums"], color: colors.up }}>{b().up} up</Text>
           <Text style={{ fontSize: 12, fontVariant: ["tabular-nums"], color: colors.faint }}>
@@ -72,7 +76,7 @@ function Breadth(props: { market: Market }) {
           <Text style={{ flex: 1, textAlign: "right", fontSize: 12, fontVariant: ["tabular-nums"], color: colors.down }}>{b().down} down</Text>
         </View>
       </View>
-      <View style={{ gap: 2 }}>
+      <View style={{ gap: terminal ? 0 : 2 }}>
         <Each of={sectors}>{(s, i) => <SectorBar label={s().label} change={() => means()[i()]} scale={scale} />}</Each>
       </View>
     </View>
@@ -82,7 +86,8 @@ function Breadth(props: { market: Market }) {
 /**
  * The market in one line, on the 16 pt gutters: the composite and its
  * change, the clock, pause. A tap opens breadth and sectors (a layout
- * animation; the chevron turns natively).
+ * animation; the chevron turns natively). One row in the terminal, pause
+ * a text button.
  */
 function MarketStrip(props: { market: Market }) {
   const opened = signal(false);
@@ -95,14 +100,16 @@ function MarketStrip(props: { market: Market }) {
     opened.set(!opened());
     turn.spring(opened() ? 1 : 0, motion.settle);
   };
+  const height = terminal ? TERMINAL_ROW : 56;
+  const pause = () => (running() ? props.market.stop() : props.market.start());
   return (
     <View>
-      <View style={{ flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 16, height: 56 }}>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: terminal ? 2 * TERMINAL_COLUMN : 12, paddingHorizontal: terminal ? TERMINAL_COLUMN : 16, height }}>
         <View
           onPress={toggle}
           role="button"
           accessibilityLabel={opened() ? "Hide breadth" : "Show breadth"}
-          style={{ flex: 1, flexDirection: "row", alignItems: "center", gap: 8, height: 56 }}
+          style={{ flex: 1, flexDirection: "row", alignItems: "center", gap: terminal ? TERMINAL_COLUMN : 8, height }}
         >
           <Text style={{ numberOfLines: 1, fontSize: 13, color: colors.muted }}>
             Composite
@@ -111,16 +118,23 @@ function MarketStrip(props: { market: Market }) {
             {grouped(level())}
           </Text>
           <Text style={{ fontSize: 13, fontWeight: "500", color: toneOf(change()), fontVariant: ["tabular-nums"] }}>{signed(change())}%</Text>
-          <View style={{ rotate: turn.interpolate({ inputRange: [0, 1], outputRange: ["90deg", "-90deg"] }) }}>
-            <Icon name="chevron" size={12} tint={colors.faint} />
-          </View>
+          <If when={!terminal}>
+            <View style={{ rotate: turn.interpolate({ inputRange: [0, 1], outputRange: ["90deg", "-90deg"] }) }}>
+              <Icon name="chevron" size={12} tint={colors.faint} />
+            </View>
+          </If>
         </View>
         <Text style={{ fontSize: 12, color: colors.faint, fontVariant: ["tabular-nums"] }}>{time(props.market.clock())}</Text>
-        <Press onPress={() => (running() ? props.market.stop() : props.market.start())} hitSlop={6} accessibilityLabel={running() ? "Pause the market" : "Resume the market"}>
-          <View style={[{ width: 32, height: 32, borderRadius: 16, alignItems: "center", justifyContent: "center" }, running() ? { ...finish.pill, borderWidth: 1 } : finish.accent]}>
-            <Icon name={running() ? "pause" : "play"} size={13} tint={running() ? colors.muted : colors.onAccent} />
-          </View>
-        </Press>
+        <If
+          when={!terminal}
+          else={<Button label={running() ? "Pause" : "Resume"} accessibilityLabel={running() ? "Pause the market" : "Resume the market"} variant="secondary" onPress={pause} />}
+        >
+          <Press onPress={pause} hitSlop={6} accessibilityLabel={running() ? "Pause the market" : "Resume the market"}>
+            <View style={[{ width: 32, height: 32, borderRadius: 16, alignItems: "center", justifyContent: "center" }, running() ? { ...finish.pill, borderWidth: 1 } : finish.accent]}>
+              <Icon name={running() ? "pause" : "play"} size={13} tint={running() ? colors.muted : colors.onAccent} />
+            </View>
+          </Press>
+        </If>
       </View>
       <If when={opened()}>
         <Breadth market={props.market} />
@@ -313,6 +327,35 @@ function StockRow(props: { market: Market; stock: Stock; first: boolean; onPress
   );
 }
 
+/** A watchlist row in the terminal, on one row: code, name, price and
+ * change in columns, the prices and changes right-aligned. */
+function TerminalStockRow(props: { stock: Stock; onPress: () => void; wide?: boolean; active?: boolean }) {
+  const q = () => props.stock.quote();
+  const change = () => percent(q());
+  return (
+    <View
+      onPress={props.onPress}
+      role="button"
+      accessibilityLabel={props.stock.name}
+      accessibilityState={props.wide ? { selected: !!props.active } : undefined}
+      style={{ height: TERMINAL_ROW, flexDirection: "row", alignItems: "center", gap: 2 * TERMINAL_COLUMN, paddingHorizontal: TERMINAL_COLUMN }}
+    >
+      <Text style={{ numberOfLines: 1, width: 4 * TERMINAL_COLUMN, fontSize: 16, fontWeight: "600", color: colors.text }}>
+        {props.stock.code}
+      </Text>
+      <Text style={{ numberOfLines: 1, flex: 1, fontSize: 13, color: colors.muted }}>
+        {props.stock.name}
+      </Text>
+      <Text style={{ numberOfLines: 1, width: 9 * TERMINAL_COLUMN, textAlign: "right", fontSize: 16, fontWeight: "600", color: colors.text, fontVariant: ["tabular-nums"] }}>
+        {price(q().last, props.stock)}
+      </Text>
+      <Text style={{ numberOfLines: 1, width: 7 * TERMINAL_COLUMN, textAlign: "right", fontSize: 13, fontWeight: "500", color: toneOf(change()), fontVariant: ["tabular-nums"] }}>
+        {signed(change())}%
+      </Text>
+    </View>
+  );
+}
+
 /** The watchlist's width beside the stock in the desktop layout. */
 const WATCHLIST = 380;
 
@@ -381,28 +424,37 @@ export function Stocks() {
   const watchlist = (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       <MarketStrip market={market} />
-      <View style={{ paddingHorizontal: 16, paddingBottom: 6 }}>
+      <View style={terminal ? { paddingHorizontal: TERMINAL_COLUMN, paddingBottom: TERMINAL_ROW } : { paddingHorizontal: 16, paddingBottom: 6 }}>
         <Segmented options={options} value={filter()} onChange={(f) => filter.set(f)} size="small" />
       </View>
       <Scroll style={{ flex: 1 }}>
         <View>
           <Each of={rows()}>
-            {(stock, i) => (
-              <StockRow
-                market={market}
-                stock={stock()}
-                first={i() === 0}
-                onPress={() => (wide ? shown.set(stock()) : open(market, stock()))}
-                wide={wide}
-                active={wide && shown() === stock()}
-              />
-            )}
+            {(stock, i) =>
+              terminal ? (
+                <TerminalStockRow
+                  stock={stock()}
+                  onPress={() => (wide ? shown.set(stock()) : open(market, stock()))}
+                  wide={wide}
+                  active={wide && shown() === stock()}
+                />
+              ) : (
+                <StockRow
+                  market={market}
+                  stock={stock()}
+                  first={i() === 0}
+                  onPress={() => (wide ? shown.set(stock()) : open(market, stock()))}
+                  wide={wide}
+                  active={wide && shown() === stock()}
+                />
+              )
+            }
           </Each>
           <If when={!rows().length}>
             <Text style={{ paddingVertical: 32, textAlign: "center", fontSize: 14, color: colors.muted }}>Nothing here right now</Text>
           </If>
         </View>
-        <Text style={{ paddingHorizontal: 16, paddingTop: 16, paddingBottom: 40, fontSize: 12, lineHeight: 17, color: colors.faint, fontVariant: ["tabular-nums"] }}>
+        <Text style={{ paddingHorizontal: terminal ? TERMINAL_COLUMN : 16, paddingTop: 16, paddingBottom: terminal ? TERMINAL_ROW : 40, fontSize: 12, lineHeight: 17, color: colors.faint, fontVariant: ["tabular-nums"] }}>
           Simulated, fictional companies · tick 50 ms · {stats().ms.toFixed(2)} ms JS/tick · {stats().updates} quotes/s
         </Text>
       </Scroll>
