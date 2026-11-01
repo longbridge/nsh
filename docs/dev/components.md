@@ -7,10 +7,12 @@ native.
 
 NSH is layered as GPUI Kit is (`architecture.md` "Layers"): `nsh-core` is its `gpui`, `nsh-base` its `gpui-base`, and
 the styled layer, GPUI Kit's `gpui-component`, is never part of NSH. The look of an app is the app's. Rust components
-come from two places:
+come from two places. `nsh/base` also provides `Avatar` and `AvatarGroup`:
+images whose load state drives their fallback natively, and a row that
+places its first `limit` avatars.
 
 - **`nsh/base`**: unstyled base components of `gpui-base`'s scope, the crate `nsh-base` (`crates/nsh-base`,
-  `nsh_base::registry()`): `Button`, `Link` (a press target that opens its `href`: through the core's `openUrl` flow, or the app's `onOpen` with `openWith="app"`), `Checkbox`, `Radio`, `RadioGroup`, `Switch`, `Tab`, `Tabs`, `Toggle`, `ToggleGroup`, `Toolbar`, `ToolbarGroup`, `ToolbarSeparator`, `Select` (one value from a list: "Popups" below), `Combobox` (one value or several from the same list), `Calendar` (a date or a range from months of days), `TimeField` (a time of day by segments), `DatePicker` (a calendar and a time field in a popup: "Popups" below), `Collapsible`, `Accordion` with `AccordionItem`, `AccordionHeader`, `AccordionTrigger` and `AccordionPanel`, `Progress`, `Slider`, `Scrollbar` ("Scroll bars" below), `ColorPicker` with `ColorArea`, `ColorSlider`, `ColorField`, `ColorSwatch` and `ColorEyeDropper` (a color in RGB, HSL, HSB or OKLCH, its parts laid out by the app), `NumberInput`, `OtpInput`, `Pagination` (the pages of a set: Previous, the pages around the current one, ellipses, Next; its places made once, a page change changing what they show), `Tree` (items that hold items, virtualized: the expanded items' rows only, the selection and expansion the app's, one Tab stop whose arrows move the selection), `Table` with `TableHeader`, `TableBody`, `TableFooter`, `TableRow`, `TableHead`, `TableCell` and `TableCaption` (a table's accessibility roles around the app's rows), `TextView` (`text-view.md`), `ResizablePanelGroup` and `ResizablePanel`, `DockArea`
+  `nsh_base::registry()`): `Button`, `Link` (a press target that opens its `href`: through the core's `openUrl` flow, or the app's `onOpen` with `openWith="app"`), `Carousel` with `CarouselContent`, `CarouselItem`, `CarouselPrevious`, `CarouselNext`, `CarouselPagination` and `CarouselPaginationItem` (slides on a native scroll view: "Carousels" below), `Checkbox`, `Radio`, `RadioGroup`, `Switch`, `Tab`, `Tabs`, `Toggle`, `ToggleGroup`, `Toolbar`, `ToolbarGroup`, `ToolbarSeparator`, `Select` (one value from a list: "Popups" below), `Combobox` (one value or several from the same list), `Calendar` (a date or a range from months of days), `TimeField` (a time of day by segments), `DatePicker` (a calendar and a time field in a popup: "Popups" below), `Collapsible`, `Accordion` with `AccordionItem`, `AccordionHeader`, `AccordionTrigger` and `AccordionPanel`, `Progress`, `Slider`, `Scrollbar` ("Scroll bars" below), `ColorPicker` with `ColorArea`, `ColorSlider`, `ColorField`, `ColorSwatch` and `ColorEyeDropper` (a color in RGB, HSL, HSB or OKLCH, its parts laid out by the app), `NumberInput`, `OtpInput`, `Pagination` (the pages of a set: Previous, the pages around the current one, ellipses, Next; its places made once, a page change changing what they show), `Tree` (items that hold items, virtualized: the expanded items' rows only, the selection and expansion the app's, one Tab stop whose arrows move the selection), `Table` with `TableHeader`, `TableBody`, `TableFooter`, `TableRow`, `TableHead`, `TableCell` and `TableCaption` (a table's accessibility roles around the app's rows), `TextView` (`text-view.md`), `ResizablePanelGroup` and `ResizablePanel`, `DockArea`
   (`dock.md`), `Editor` (a code editor, `editor.md`), `DiffView` (the changes between two texts, `diff.md`), `DataTable` (a table over any number of rows and columns, `data-table.md`), the popups on the core's overlays (`Popover`,
   `Menu` with `MenuItem`, `MenuSeparator` and `Submenu`, `ContextMenu`, `Tooltip`, `Sheet`: "Popups" below), toasts
   (`Toast`, `ToastStack` and the class `ToastManager`: "Toasts" below) and the
@@ -53,6 +55,7 @@ Visual rules are changed in the shared layer; `nsh-base` supplies the components
 | `crates/nsh-macros` | `#[component]`, `#[derive(Props)]`, `#[derive(PropEnum)]`, `#[derive(Event)]`, `#[derive(JsObject)]`; `#[methods]`, `#[module]`, `#[class]`; `#[native_module("…")]` (an app crate's set: `docs/dev/tooling.md`); `style_helpers!` (the spacing methods of `Styled`) |
 | `crates/nsh-core/src/core/components.rs` | The core side: instances, children and slots, events; `core/views.rs`: views, their bindings' patches and regions |
 | `crates/nsh-base/` | `nsh/base`'s components and modules, one file each (`accordion.rs`, its parts on `collapsible.rs`'s reveal, `alert_dialog.rs`, `button.rs`, `checkbox.rs`, `number_input.rs`, `radio.rs`, `slider.rs`, `switch.rs`, `tabs.rs`, `select.rs` on `listbox.rs`; `tree.rs`, its items flattened natively into the rows the expanded items show; `color_picker/`, `ColorPicker` and its parts over a color as each space's channels hold it (`model.rs`: the conversions, OKLCH's gamut mapping, the CSS forms it reads and writes); `numeric.rs`, the rules of a number in a range with a step that `Slider` follows and of a number typed as text that `NumberInput` follows; `keys.rs`, the keys a focused control binds; `TextView`, `ResizablePanelGroup`, `DockArea`, `Editor` and `DiffView` directories, `text_view/`, `resizable/`, `dock/`, `editor/`, `diff/`; `rich_editor/`, `RichEditor`'s headless kernel, `docs/dev/rich-editor.md`; `syntax.rs`, the syntax highlighting `TextView` and `Editor` share), one `Registry` (`lib.rs`) |
+| `crates/nsh-base/` | `nsh/base`'s components and modules, one file each (`accordion.rs`, its parts on `collapsible.rs`'s reveal, `alert_dialog.rs`, `button.rs`, `carousel.rs`, `avatar.rs`, `checkbox.rs`, `number_input.rs`, `radio.rs`, `slider.rs`, `switch.rs`, `tabs.rs`, `select.rs` on `listbox.rs`; `tree.rs`, its items flattened natively into the rows the expanded items show; `color_picker/`, `ColorPicker` and its parts over a color as each space's channels hold it (`model.rs`: the conversions, OKLCH's gamut mapping, the CSS forms it reads and writes); `numeric.rs`, the rules of a number in a range with a step that `Slider` follows and of a number typed as text that `NumberInput` follows; `keys.rs`, the keys a focused control binds; `TextView`, `ResizablePanelGroup`, `DockArea`, `Editor` and `DiffView` directories, `text_view/`, `resizable/`, `dock/`, `editor/`, `diff/`; `rich_editor/`, `RichEditor`'s headless kernel, `docs/dev/rich-editor.md`; `syntax.rs`, the syntax highlighting `TextView` and `Editor` share), one `Registry` (`lib.rs`) |
 | `crates/nsh-core/src/runtime/` | The runtime's Rust modules (`nsh`'s `Keyboard` and `Image` functions, with its environment, accessibility, clipboard, picker, storage and host modules, `nsh/mobile`, `nsh/desktop`), one `Registry` per JS module (`mod.rs`) |
 | `crates/nsh-js/src/components.rs` | The JS face of components and modules, made from their specs when a bundle imports the module; `classes.rs`: classes' (on the web classes' machinery), synchronous functions', callbacks |
 | `crates/nsh-js/src/declarations.rs` | `nsh/base.d.ts`, `app/native.d.ts`, ...: the declarations generated from each registry (`nsh_core::element::declarations`) with the re-exports and the navigation |
@@ -320,7 +323,7 @@ reasons: `reactive-components.md`.
   | `windowSize()`, `safeArea()`, `keyboardFrame()`, `colorScheme()`, ... | `window()`, `safe_area()`, `keyboard_height()`, `dark()`, `font_scale()`, `reduce_motion()`, `screen_reader()`, `rtl()`: reading subscribes |
   | `Window.setTitleBar({ style, height })`, `titleBar()`, `Window.close()`, `Window.setTitle(..)`, `minimize()`, ... (`nsh/desktop`) | `element::desktop::set_title_bar(style, height)`, `title_bar()`, `close_window()`, `set_title(..)`, `minimize()`, `toggle_maximize()`, `toggle_full_screen()`, `set_frame(..)`, `set_level(..)`, `order_front()`, `set_menu_bar_visibility(..)`; the same root commands and native controls, with title-bar insets forwarded through `element::Environment`; `.window_drag(bool)` on any interactive element marks or excludes a native drag region |
   | `Menu.setApplicationMenu(items)`, `Menu.popup(items, at)` (`nsh/desktop`) | `element::desktop::set_application_menu(vec![MenuItem::submenu(..)])` (`None`: the default menu), `popup_menu(items)` / `popup_menu_at(items, at)` (an `Answer<()>` once it closes); `MenuItem::new(label).shortcut("mod+n").on_select(f)`, `::role(..)`, `::separator()`, `::submenu(..)`. The same `DesktopCommand`s as JS's; a view's item ids start at 2^31, above JS's, and the core runs a view's handler (under the owner that set the menu, while it lives) when the root's `Menu` event reports it; a context menu closing goes to both sides (`element/menus.rs`) |
-  | `pixelRatio()`, `Math.round(x * pixelRatio()) / pixelRatio()`, `platform.os` / `version` / `idiom` (`"desktop"`) | `pixel_ratio()`, `round_to_nearest_pixel(v)`, `os()`, `os_version()`, `idiom()`, `is_desktop()` |
+  | `pixelRatio()`, `Math.round(x * pixelRatio()) / pixelRatio()`, `platform.os` / `version` / `idiom` / `desktop` / `catalyst` | `pixel_ratio()`, `round_to_nearest_pixel(v)`, `os()`, `os_version()`, `idiom()`, `is_desktop()`, `is_catalyst()` |
   | `Intl.NumberFormat()`, `toLocaleString()` (the user's locale) | `locale()` (a `Locale`: `de-DE`; reading subscribes), formatted with a Rust crate: `Intl` and the locale-aware `toLocale*String`s are JS globals of TS apps |
   | `requestAnimationFrame(cb)`, `cancelAnimationFrame` | `request_animation_frame(\|at\| ..)` returns a `Spawned`; in a task `next_frame().await` (an `Instant`), once per frame in a loop |
   | a view's `direction` style | `.direction(LayoutDirection::Rtl)` (`Styled`); the surface's direction follows the user's language |
@@ -714,7 +717,10 @@ engine starts). A Rust app's root carries them (`Root::tokens`), and an app that
 them with `element::set_tokens(tokens)` (`set_tokens(theme.into())` of an `nsh_base::Theme`; the setter beside the
 `tokens()` accessor, as `set_color_scheme` is beside `color_scheme()`). The core sends the tokens drawn with to the
 platform when they change (`Command::Tokens` on the root), which colors its own controls with them (Linux's menus:
-`docs/dev/linux.md`). `nsh_base::theme()` reads the tokens from a signal of
+`docs/dev/linux.md`; Android's alerts and action sheets: `popover` behind, `popover-foreground` for the title and
+the options, `muted-foreground` for the message, `primary` for the buttons and `destructive` for a destructive action,
+over the system dialog's shape; iOS's alerts take `primary` as their tint, which iOS 17 draws the regular and cancel
+actions in and iOS 26 does not use; an app without a theme of its own keeps the system's colors on both). `nsh_base::theme()` reads the tokens from a signal of
 the surface (`element::tokens`): new tokens run again the bindings that read them. An embedding app can give a
 surface its own (`Core::set_host_tokens`, `EngineControl::set_tokens`; sent from `Engine::start_with`'s `setup` they
 are in the first frame and JS's first render): they win over the app's until cleared, and the app's names they lack
@@ -1129,6 +1135,61 @@ the requests) decides, as `hint_open`. The tooltip itself is the bubble (the app
 what it says; it never takes the pointer (`pointer_events(None)`). An element's `tooltip` prop (`Interactive::tooltip`,
 `Prop::Tooltip`) takes any other element too, shown as it is in a hint overlay the core makes itself
 (`Core::set_tooltip`); it takes no text, so every tooltip's look is the app's.
+
+## Carousels
+
+`nsh/base`'s `Carousel` (`carousel.rs`, `gpui-component`'s parts and names) is a scroll view and the state around it,
+with no scrolling of its own:
+
+- **The content** (`CarouselContent`) is a `scroll()` along the axis, its indicator off. Each `CarouselItem`
+  registers with the carousel through context and reports its frame (`on_layout`: its place in the content, which a
+  scroll does not change); once every slide is laid out, the snap points are their starts less the first one's,
+  held to the scroll range, which a `watch_scroll` of the content reports (its content size and viewport, no
+  offset). The scroll view gets them as `snap_offsets` (equal ones once) with `disable_interval_momentum`, so a
+  fling moves one slide on every platform (`ScrollBehavior::snap_target`, Android's port, the web's `nsh.js`) and a
+  finger, the wheel and the touchpad move it natively with no work of the engine's. Slides are indexed by where they
+  start along the axis; several resting where the last does (the end of the range with several per view) are one
+  stop, the first of them, for previous, next and the keys.
+- **The slide shown** is a memo: a swipe's slide while the app has not answered it (`pending`, cleared by the next
+  `index`), else the app's `index`, else the carousel's own (from `defaultIndex`). An effect scrolls the content to
+  its snap point when it changes (animated unless `reduce_motion()`) and when the snap points move (at once: a resize
+  keeps the slide); it sends nothing while the content rests there (`Ctl::at`).
+- **The user's scroll** is reported where the platform reports it come to rest (`on_scroll_end`): the nearest snap
+  point's slide becomes the one shown and goes to `onChange`; a rest between snap points (the headless driver, which
+  does not snap) is scrolled onto the slide. Controls, pagination items and keys emit `onChange` and set the own
+  index while uncontrolled.
+- **What the app pauses its own rotation by**: `onDragStart` from `on_scroll_drag_start`, `onDragEnd` where that
+  scroll comes to rest; `onFocus` / `onBlur` for the carousel as a whole, from a count of its views with the keyboard
+  focus (a move between them blurs one before it focuses the next, so `onBlur` waits a zero-delay timer and fires
+  only if none of them has it then). Slides that move on by themselves are the app's timer setting `index`
+  (`api-naming.md`).
+- **The pagination** keeps its items for an indicator that follows the item of the slide shown (`View::follow`, as
+  `Tabs`' does, with the same spring). A change of slide reruns the selected memo of the two items it concerns; no
+  slide renders again.
+
+**A seamless loop** (`looping`, read when the carousel is made) is `gpui-component`'s runway, made of the scroll
+view and the animation graph:
+
+- The content gets a runway before and after the slides (`Ctl::runway`, hidden from screen readers and the pointer,
+  out of the layout until measured), a period long less the gap: the period runs from the first slide's start to
+  the last one's end, plus the gap between the first two. The middle period, where the slides are laid out, rests
+  between offsets `P` and `2P`; the snap points repeat over the three periods, so a swipe crosses the seam with no
+  work of the engine's.
+- Each slide is drawn in the period nearest the viewport's center: a translation of `y - (y mod P)` with
+  `y = offset + shift`, where `offset` follows the scroll (`scroll_value`), `shift` is half the viewport less the
+  slide's center plus half a period, and the graph's `Mod` is Euclidean. The offset, the period and one shift per
+  slide are values made once (three derived nodes per slide, made when it registers); a relayout only `set`s them.
+  Without `looping` none of this exists.
+- A scroll that rests outside the middle period moves back into it by one period, without animation
+  (`Ctl::recenter`): every slide is drawn where it was, so nothing moves on screen and no `onChange` is sent. After
+  an animated scroll across the seam (next on the last slide, previous on the first, the app's `index` from the last
+  to the first or back: the adjacent period's snap point, one step) it runs on a timer of `RECENTER_MS` as well,
+  since iOS reports no rest for a scroll it was asked for; a later scroll or a drag cancels it.
+- Seamless only while the period is at least the viewport and the widest slide: each slide then shows once at a
+  time. Shorter, the slides are laid out without runways or translations and previous / next go around by scrolling
+  back across them.
+
+Each slide is in the tree once: screen readers and the pagination see it once, wherever it is drawn.
 
 ## Scroll bars
 

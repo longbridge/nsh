@@ -179,6 +179,7 @@ impl Host {
             trace: self.trace,
             network: Some(crate::net::network()),
             websocket: None,
+            refuse_connections: None,
             filesystem: None,
             assets: Some(Arc::new(ViewAssets(self.clone()))),
             environment: *self.environment.lock().expect("environment"),

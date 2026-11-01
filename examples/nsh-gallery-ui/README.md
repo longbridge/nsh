@@ -15,6 +15,7 @@ and NSH's elements; it is maintained with these examples, rather than published 
 | `data-table.ts` | Compact table spacing, resize separators, sort chevrons and selection feedback |
 | `scroll-area.tsx` | The scroll bar's track and thumb, and `ScrollArea`: a scroll view with that bar in place of the platform's indicator |
 | `tree.tsx` | A `Tree`'s rows: `treeItemClass` (hover, selected, focus and disabled feedback) and `TreeRow` (the chevron and folder that open with the row, the label indented by depth) |
+| `avatar.ts` | Avatars' identity colors (an OkLCH hue per name, as gpui-component's), offline SVG portraits and an image that never loads |
 | `slider.ts` | The slider's rail, gradient fill, pill thumb, value column and state feedback |
 | `palette.ts`, `demo.ts` | The documentation demos' palette adapter, button/field state helpers, and stage, inspector, panel and log components |
 | `css.js` | CSS variables for the website, generated from the same theme and finish data |

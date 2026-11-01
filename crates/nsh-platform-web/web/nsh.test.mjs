@@ -138,6 +138,61 @@ test("events sent after the app stopped wait for the next app", () => {
   assert.deepEqual(events(sent), ["running", "stopped"]);
 });
 
+const trap = () => {
+  throw new WebAssembly.RuntimeError("unreachable");
+};
+
+test("an engine that trapped takes no more calls, nor the ones it deferred", () => {
+  const { player } = fakePlayer();
+  const reached = [];
+  assert.throws(
+    () =>
+      player.call(() => {
+        player.call(() => reached.push("deferred"));
+        trap();
+      }),
+    WebAssembly.RuntimeError,
+  );
+  player.call(() => reached.push("later"));
+  assert.deepEqual(reached, []);
+});
+
+test("an error that is not a trap leaves the engine taking calls", () => {
+  const { player } = fakePlayer();
+  const reached = [];
+  assert.throws(() => player.call(failing));
+  player.call(() => {
+    reached.push("later");
+    return -1;
+  });
+  assert.deepEqual(reached, ["later"]);
+});
+
+test("the overlay keeps the first panic, whichever entry the next one comes from", () => {
+  const { player } = fakePlayer();
+  const shown = [];
+  const box = { replaceChildren: (_copy, message) => shown.push(message) };
+  player.root = { querySelector: () => box, append() {} };
+  const document = globalThis.document;
+  globalThis.document = { createElement: () => ({ addEventListener() {} }) };
+  const error = console.error;
+  console.error = () => {};
+  try {
+    player.reportPanic("nsh panicked: the real one");
+    // The engine is left borrowed: an app's own timer calling into it in
+    // the browser runtime panics again, and the engine reports an error.
+    player.reportPanic("nsh panicked: RefCell already borrowed");
+    player.showError("a later error");
+  } finally {
+    globalThis.document = document;
+    console.error = error;
+  }
+  assert.deepEqual(shown, ["nsh panicked: the real one"]);
+  const reached = [];
+  player.call(() => reached.push("later"));
+  assert.deepEqual(reached, []);
+});
+
 async function reply(host) {
   const { player, sent } = fakePlayer(host === undefined ? {} : { host });
   player.app = 1;
@@ -605,4 +660,37 @@ test("a paused WebSocket holds its events, in order, until the engine resumes it
     clearTimeout(player.timer);
     globalThis.WebSocket = saved;
   }
+});
+
+test("a plain Shader uploads the whole built-ins block, progress and overflow at 0", () => {
+  const { player } = fakePlayer();
+  const uploads = [];
+  const gl = new Proxy(
+    {
+      UNIFORM_BUFFER: "uniform",
+      canvas: { width: 0, height: 0, transferToImageBitmap: () => "bitmap" },
+      bufferData: (target, data) => uploads.push([target, Array.from(data)]),
+    },
+    { get: (gl, name) => (name in gl ? gl[name] : () => {}) },
+  );
+  Object.assign(player, {
+    shaderGl: () => gl,
+    shaderProgram: () => ({ program: {}, builtins: {}, uniforms: null, vao: {} }),
+    zoomOf: () => 1,
+  });
+  const el = {
+    _frame: [0, 0, 100, 50],
+    _shader: { layer: {}, words: new Uint32Array(0), kept: 1500, since: null },
+    _shaderCanvas: { width: 0, height: 0, getContext: () => ({ transferFromImageBitmap() {} }) },
+  };
+  const saved = globalThis.devicePixelRatio;
+  globalThis.devicePixelRatio = 2;
+  try {
+    player.renderShader(el, 0);
+  } finally {
+    globalThis.devicePixelRatio = saved;
+  }
+  // `struct Nsh`, 32 bytes as core's `shader::builtins` lays it out: size,
+  // time, scale, progress, overflow and padding.
+  assert.deepEqual(uploads, [["uniform", [100, 50, 1.5, 2, 0, 0, 0, 0]]]);
 });

@@ -2,7 +2,9 @@
 //! what a user does with them and what the app hears and shows.
 
 mod accordion;
+mod avatar;
 mod calendar;
+mod carousel;
 mod collapsible;
 mod color_picker;
 mod combobox;

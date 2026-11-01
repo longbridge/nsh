@@ -6,7 +6,7 @@ order: 12.5
 
 # nsh/desktop
 
-`nsh/desktop` 包含只有桌面才有的东西：窗口和它的标题栏、应用菜单和右键菜单。它在 macOS、Windows 和 Linux 上可用。Rust 代码在 `nsh_core::element::desktop` 中有同样的功能：窗口的函数（`set_title`、`set_title_bar`、`title_bar`、`minimize`……`close_window`）、应用菜单和右键菜单（`set_application_menu`、`popup_menu`，由 `MenuItem` 组成），并用 `.window_drag(true)` 标记可拖动的视图；TSX 导入 `nsh/desktop`。这个模块在所有平台上都可以导入，因此同一个 bundle 可以在所有平台运行：在 iOS 和 Android 上它的函数什么也不做，`isAvailable` 告诉你当前是否在桌面上。
+`nsh/desktop` 包含只有桌面才有的东西：窗口和它的标题栏、应用菜单和右键菜单。它在 macOS、Windows 和 Linux 上可用。Rust 代码在 `nsh_core::element::desktop` 中有同样的功能：窗口的函数（`set_title`、`set_title_bar`、`title_bar`、`minimize`……`close_window`）、应用菜单和右键菜单（`set_application_menu`、`popup_menu`，由 `MenuItem` 组成），并用 `.window_drag(true)` 标记可拖动的视图；TSX 导入 `nsh/desktop`。这个模块在所有平台上都可以导入，因此同一个 bundle 可以在所有平台运行：在 iOS 和 Android 上它的函数什么也不做，`isAvailable` 告诉你当前是否有它的窗口和菜单。
 
 ```rust tabs
 use nsh_core::{
@@ -28,7 +28,9 @@ import { isAvailable, Menu, titleBar, Window } from "nsh/desktop";
 const isAvailable: boolean;
 ```
 
-在 macOS、Windows 和 Linux 上为 `true`，其他平台为 `false`。Rust：`os().is_desktop()`。
+在这个模块的窗口和菜单 API 可用的地方为 `true`：macOS、Windows 和 Linux；其他平台为 `false`。Rust：`os().is_desktop()`。
+
+[`platform.desktop`](./nsh.md#platform) 是更宽的桌面行为判断（`desktop={{…}}` 属性、`platform.select({ desktop })`）：桌面形态的浏览器也算在内，它们运行在浏览器自己的窗口中。桌面布局、密度和输入方式用 `platform.desktop` 判断，调用 `Window` 和 `Menu` 用 `isAvailable` 判断。
 
 ## Window
 

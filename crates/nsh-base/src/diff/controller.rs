@@ -731,6 +731,8 @@ impl Dv {
             rows_window: Default::default(),
         };
         dv.follow_props();
+        dv.report_scroll();
+        dv.report_hunk_bounds();
         dv
     }
 

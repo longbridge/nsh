@@ -1249,7 +1249,9 @@ impl Cx {
                     .underline()
                     .text_decoration_color(move || theme().primary.opacity(0.4))
                     .text_decoration_thickness(px(1.0))
-                    .underline_offset(px(3.0))
+                    // No offset of its own: the native backends clip a
+                    // decoration to the text's box, so a fixed one below a
+                    // tight line's box hides the underline (#447).
                     .role(AccessibilityRole::Link)
                     .when_some(title.clone(), |t, title| t.hint(title))
                     .on_press(self.link_press(url));

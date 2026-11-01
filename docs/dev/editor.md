@@ -327,6 +327,22 @@ bounds), its `lineClass` / `lineStyle` the rows of its lines behind the text. A 
 binary searches over the marks (sorted by start): those starting from the longest mark's length before the row
 (`decoration_reach`) up to its end, so thousands of short ones (semantic tokens) cost a row only its own.
 
+A decoration's `gutter` and `overviewRuler` marks follow GPUI Kit's gutter and overview ruler decorations (#3704) on
+the decorations NSH already has, as Monaco puts both on one decoration: one list keeps one place for a range and its
+marks. The gutter's strip (`gutterDecorationsWidth`) is reserved while any decoration has a gutter mark, so the text
+does not move as marks come and go. Each painted gutter row asks for its marks with the same windowed search
+(`State::gutter_marks`): a row's lines are its fold's when folded, so a range or boundary inside a fold marks the
+fold's row; a non-empty range ending at a line's start leaves that line out; an empty range is a line across the top of
+its line's first row at a line start, across the bottom of its last row elsewhere (the end of a text without a final
+line break); that boundary is `placement: "before"`, and by default an empty range covers its line, as it does for
+`lineClass` (one decoration, one meaning of its range). Empty ranges are kept through edits (`adjust` collapses a deleted range to its boundary). The overview
+ruler (`view::overview_ruler`, the `overviewRuler` part, 14 points wide unless the part sets a width; its lanes are
+shares of that width, so a width the app's classes set moves them too) lies over the scroll view's right edge, receiving no pointer;
+its marks' display rows (`State::overview_ruler_marks`) are worked out again only when the text, folds, wrapping or
+decorations change (`text_rev`, `marks_rev`), and their places (`layout::ruler_place`: the rows scaled from the
+rows' box to the viewport's height, at least 6 points; `layout::ruler_lane`, Monaco's lanes) when the viewport does. GPUI Kit's folded
+color and the theme's status colors are left out: a mark's look is the app's `class` / `style`.
+
 A diagnostic is LSP's `Diagnostic` with names for its enums: `codeDescription` and `relatedInformation` are data the
 hover hands back (related ranges as the app gave them, as they may be in other documents), and `tags` style its text.
 A tagged diagnostic's text is cut into spans as a decoration's is, in the same pass of `State::row_content`: the row

@@ -395,6 +395,30 @@ test("virtualized lists recycle owners and preserve the last item while data shr
   close();
 });
 
+test("list cells keep their items when items are inserted before them", { skip: !path }, async () => {
+  const { createLists } = await import("./list.js");
+  const { api, invoke, values, dom, close } = await fixture();
+  const lists = createLists(invoke, values, api, dom, () => true, () => {});
+  const data = api.signal([{ id: "a" }, { id: "b" }]);
+  const shown = [], indices = [];
+  let node, dispose;
+  api.root(stop => {
+    dispose = stop;
+    node = lists.render({ get each() { return data(); },
+      children(item, index) { indices.push(index); return () => { shown.push(item().id); return item().id; }; } });
+  });
+  const id = values.nodeIds.get(node);
+  lists.bind(id, [[0, 0], [1, 1]]);
+  assert.deepEqual(shown, ["a", "b"]);
+  data.set([{ id: "new" }, ...data()]);
+  assert.deepEqual(indices.map(index => index()), [1, 2]);
+  // The core's bindings after the splice move nothing more.
+  lists.bind(id, [[0, 1], [1, 2]]);
+  assert.deepEqual(shown, ["a", "b"]);
+  dispose();
+  close();
+});
+
 test("resources cancel superseded loads, retain values, and ignore settlement after disposal", { skip: !path }, async () => {
   const { createResource } = await import("./resource.js");
   const { api, invoke, close } = await fixture();
@@ -684,6 +708,27 @@ test("merged props answer `in` from their sources, getters included", { skip: !p
   assert.ok(!("missing" in props));
   assert.equal(props.children, "label");
   close();
+});
+
+test("what a component's children read runs them alone, never the expression that made the component", { skip: !path }, async () => {
+  const { api, dom, close } = await fixture();
+  const seq = api.signal(0);
+  let made = 0, runs = 0, dispose;
+  // A component returning a fragment's dynamic child, and one returning an
+  // array holding a function.
+  const Fragment = () => { made++; return () => { runs++; return `seq ${seq()}`; }; };
+  const Items = () => { made++; return ["a", () => { runs++; return seq(); }]; };
+  api.root(stop => {
+    dispose = stop;
+    for (const Component of [Fragment, Items]) {
+      const kind = "message";
+      dom.rt.insert(dom.rt.element("view"), () => kind === "message" ? dom.rt.component(Component, {}) : null);
+    }
+  });
+  seq.set(1); seq.set(2);
+  assert.equal(made, 2);
+  assert.equal(runs, 6);
+  dispose(); close();
 });
 
 test("native video loads nest their size as the native JS host does", { skip: !path }, async () => {

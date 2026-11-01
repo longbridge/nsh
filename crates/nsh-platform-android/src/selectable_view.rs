@@ -349,7 +349,9 @@ extern "system" fn Java_com_longbridge_nsh_SelectableView_nativeReadingOrder<'lo
         };
         at += n * 6;
         let group: Vec<_> = group
-            .chunks_exact(6)
+            .as_chunks::<6>()
+            .0
+            .iter()
             .map(|r| {
                 (
                     bounds(point(px(r[0]), px(r[1])), size(px(r[2]), px(r[3]))),
