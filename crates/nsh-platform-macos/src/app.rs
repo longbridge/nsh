@@ -333,7 +333,9 @@ impl AppView {
         self.surface
             .native
             .set_asset_base(options.asset_base.clone());
-        self.surface.native.set_app(&config.app);
+        self.surface
+            .native
+            .set_app(&config.app, config.data_dir.as_deref());
         self.surface.start(config);
     }
 
