@@ -3,7 +3,7 @@
 import type { JSX, ScrollProps } from "nsh";
 import { computed, Image, Scroll, signal, Text, View } from "nsh";
 import { setColorScheme, windowSize } from "nsh";
-import { Appear, colors, desktopIdiom, Icon, isDark, Press, radius, RoundButton, terminal } from "../nsh-gallery-ui";
+import { Appear, Button, colors, desktopIdiom, Icon, isDark, Press, radius, RoundButton, TERMINAL_COLUMN, TERMINAL_ROW, terminal } from "../nsh-gallery-ui";
 import { nav } from "./nav";
 import logoDark from "./logo-dark.svg";
 import logoLight from "./logo-light.svg";
@@ -13,7 +13,8 @@ export * from "../nsh-gallery-ui";
 /**
  * A page's header where the app draws it (desktops, the web: `<NavPage
  * header>`): a back button while the page is above another, the title, and
- * `right`. Phones show their system header with the page's `title` instead.
+ * `right`, on one row in the terminal. Phones show their system header with
+ * the page's `title` instead.
  */
 export function PageHeader(props: {
   title: string;
@@ -35,6 +36,24 @@ export function PageHeader(props: {
 }) {
   const back = () => !props.left && !props.root && nav.routes().length > 1;
   const tint = () => props.tint ?? colors.accent;
+  const goBack = () => (props.onBack ? props.onBack() : nav.pop());
+  if (terminal) {
+    // One row, then the rule on a row of its own.
+    return (
+      <View style={{ height: 2 * TERMINAL_ROW, borderBottomWidth: props.transparent || props.background ? 0 : 1, borderBottomColor: colors.line, backgroundColor: props.transparent ? "transparent" : (props.background ?? colors.background) }}>
+        <View style={{ height: TERMINAL_ROW, flexDirection: "row", alignItems: "center", gap: 2 * TERMINAL_COLUMN, paddingHorizontal: TERMINAL_COLUMN }}>
+          {props.left}
+          <If when={back()}>
+            <Button label="Back" variant="secondary" onPress={goBack} />
+          </If>
+          <View style={{ flex: 1, flexDirection: "row", alignItems: "center" }}>
+            {props.center ?? <Text style={{ numberOfLines: 1, flex: 1, fontSize: 17, fontWeight: "600", color: colors.text }}>{props.title}</Text>}
+          </View>
+          {props.right}
+        </View>
+      </View>
+    );
+  }
   return (
     <View
       style={{
@@ -51,7 +70,7 @@ export function PageHeader(props: {
       {props.left}
       <If when={back()}>
         <View
-          onPress={() => (props.onBack ? props.onBack() : nav.pop())}
+          onPress={goBack}
           role="button"
           accessibilityLabel="Back"
           hitSlop={6}
