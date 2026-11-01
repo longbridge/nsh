@@ -292,10 +292,24 @@ web_view("https://example.com")
 `injectJavaScript` can only make synthetic events, which a page sees as untrusted (`event.isTrusted` is `false`) and some widgets ignore. The ref's `send_input` (`sendInput(input)`) gives the page input as the user's own hands would, so its events are trusted:
 
 - `{ type: "click", x, y }` clicks a point of the viewport, in CSS pixels (what `getBoundingClientRect()` reports).
-- `{ type: "text", text }` types the text into what has the page's focus, a key at a time.
+- `{ type: "text", text }` types the text into what has the page's focus, a key at a time: each character on the US layout's key for it, a line break as Enter, and what no US key types (`é`, CJK, emoji) on no key (`code` is `"Unidentified"`).
 - `{ type: "key", key }` presses `Enter`, `Tab`, `Escape` or `Backspace`.
 
-```tsx
+```rust tabs
+use nsh_core::{WebInput, WebKey, prelude::*};
+use std::time::Duration;
+
+fn search(web: &ElementRef) {
+    web.send_input(WebInput::Click { x: px(120.0), y: px(40.0) });
+    let web = *web;
+    set_timeout(Duration::from_millis(50), move || {
+        web.send_input(WebInput::Text("espresso".into()));
+        web.send_input(WebInput::Key(WebKey::Enter));
+    });
+}
+```
+
+```tsx tabs
 web.sendInput({ type: "click", x: 120, y: 40 });
 setTimeout(() => {
   web.sendInput({ type: "text", text: "espresso" });
@@ -303,7 +317,11 @@ setTimeout(() => {
 }, 50);
 ```
 
-The page handles input on its own schedule: a click's events can still be on their way when the next call starts, so let a click settle (a frame or so) before typing after it. macOS delivers the input; the other platforms ignore it for now.
+In Rust these are `WebInput::Click { x, y }`, `WebInput::Text(text)` and `WebInput::Key(WebKey::Enter)`.
+
+Trusted input carries user activation (it may open windows, write the clipboard, open the system's file panel or press a page's confirm button), so it is a capability of its own: the app needs `"webview": { "input": true }` in `nsh.json`'s `capabilities` ([`webview`](./sandbox-and-capabilities.md#webview)), also when it declares none, and the core drops the call otherwise.
+
+Like a click, `sendInput` takes the keyboard focus for the web view, away from the app's own `Input`. The page handles input on its own schedule: a click's events can still be on their way when the next call starts, so let a click settle (a frame or so) before typing after it. macOS delivers the input; the other platforms ignore it for now.
 
 ### Which sites a web view may show
 

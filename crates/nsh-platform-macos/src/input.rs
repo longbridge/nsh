@@ -907,12 +907,19 @@ pub(crate) fn us_key_code(c: char) -> Option<u16> {
     US_KEYS.iter().position(|&k| k == c).map(|i| i as u16)
 }
 
+/// A virtual key code no key has, for what no US key types: WebKit names
+/// it no key (`code` "Unidentified"), where 0 would be A.
+pub(crate) const NO_KEY: u16 = 0xffff;
+
 /// The key, and whether Shift is down, that type `c` on the US layout:
-/// letters, digits, space and punctuation, shifted ones (`A`, `!`, `?`) on
-/// their unshifted key. `None` for what no US key types.
+/// letters, digits, space, Return (`\r`), Tab and punctuation, shifted ones
+/// (`A`, `!`, `?`) on their unshifted key. `None` for what no US key types.
 pub(crate) fn us_typing_key(c: char) -> Option<(u16, bool)> {
-    if c == ' ' {
-        return Some((49, false));
+    match c {
+        ' ' => return Some((49, false)),
+        '\r' => return Some((36, false)),
+        '\t' => return Some((48, false)),
+        _ => {}
     }
     if let Some(code) = us_key_code(c) {
         return Some((code, c.is_ascii_uppercase()));
@@ -2402,7 +2409,10 @@ mod tests {
         );
         assert_eq!(us_typing_key('N'), Some((45, true)));
         assert_eq!(us_typing_key('?'), Some((44, true)));
+        assert_eq!(us_typing_key('\r'), Some((36, false)));
         assert_eq!(us_typing_key('é'), None);
+        // Without Shift, a shifted character's key types its own.
+        assert_eq!(us_key(18), Some('1'));
     }
 
     #[test]

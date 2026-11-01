@@ -1589,8 +1589,12 @@ fn web_input(web: &AnyObject, input: &WebInput) {
     unsafe {
         let window: Option<Retained<NSWindow>> = msg_send![web, window];
         let Some(window) = window else { return };
-        // Keys go to the first responder; a click makes the web view it too.
-        let _: Bool = msg_send![&*window, makeFirstResponder: web];
+        // Keys go to the first responder, which a click makes the web view
+        // too: it takes the keyboard focus, unless it has it already.
+        let first: Option<Retained<AnyObject>> = msg_send![&*window, firstResponder];
+        if first.as_deref().is_none_or(|f| !std::ptr::eq(f, web)) {
+            let _: Bool = msg_send![&*window, makeFirstResponder: web];
+        }
         let time = objc2_foundation::NSProcessInfo::processInfo().systemUptime();
         match input {
             WebInput::Click { x, y } => {
@@ -1629,10 +1633,24 @@ fn web_input(web: &AnyObject, input: &WebInput) {
             }
             WebInput::Text(text) => {
                 // The US layout's key (and Shift) for each character, so the
-                // page's `KeyboardEvent.code` names the key a user would press.
+                // page's `KeyboardEvent.code` names the key a user would press;
+                // a line break is Return, and what no US key types (`é`, CJK,
+                // emoji) no key at all (`code` "Unidentified").
                 for c in text.chars() {
-                    let (code, shift) = crate::input::us_typing_key(c).unwrap_or((0, false));
-                    key(web, &window, time, &c.to_string(), code, shift);
+                    let c = if c == '\n' { '\r' } else { c };
+                    let (code, shift) =
+                        crate::input::us_typing_key(c).unwrap_or((crate::input::NO_KEY, false));
+                    // What the key types without Shift (`a` for `A`), as AppKit's own.
+                    let plain = crate::input::us_key(code).unwrap_or(c);
+                    key(
+                        web,
+                        &window,
+                        time,
+                        &c.to_string(),
+                        &plain.to_string(),
+                        code,
+                        shift,
+                    );
                 }
             }
             WebInput::Key(k) => {
@@ -1641,16 +1659,28 @@ fn web_input(web: &AnyObject, input: &WebInput) {
                     WebKey::Tab => ("\t", 48),
                     WebKey::Escape => ("\u{1b}", 53),
                     WebKey::Backspace => ("\u{7f}", 51),
+                    _ => return,
                 };
-                key(web, &window, time, chars, code, false);
+                key(web, &window, time, chars, chars, code, false);
             }
+            _ => {}
         }
     }
 }
 
-/// A key's down and up, with `chars` typed, handed to the web view.
-fn key(web: &AnyObject, window: &NSWindow, time: f64, chars: &str, code: u16, shift: bool) {
+/// A key's down and up, with `chars` typed (`plain` without modifiers),
+/// handed to the web view.
+fn key(
+    web: &AnyObject,
+    window: &NSWindow,
+    time: f64,
+    chars: &str,
+    plain: &str,
+    code: u16,
+    shift: bool,
+) {
     let s = NSString::from_str(chars);
+    let plain = NSString::from_str(plain);
     for kind in [NSEventType::KeyDown, NSEventType::KeyUp] {
         let event = NSEvent::keyEventWithType_location_modifierFlags_timestamp_windowNumber_context_characters_charactersIgnoringModifiers_isARepeat_keyCode(
             kind,
@@ -1660,7 +1690,7 @@ fn key(web: &AnyObject, window: &NSWindow, time: f64, chars: &str, code: u16, sh
             window.windowNumber(),
             None,
             &s,
-            &s,
+            &plain,
             false,
             code,
         );

@@ -1552,8 +1552,9 @@ pub enum OverlayProp {
 
 /// Input for a web view's page, delivered as the user's hands give it: the
 /// page's events are trusted (`isTrusted`), which scripts it injects cannot
-/// make (`WebView`'s `sendInput`).
+/// make (`WebView`'s `sendInput`). Needs `capabilities.webview.input`.
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub enum WebInput {
     /// A primary click at a point of the page's viewport: CSS pixels, which
     /// are points at the page's own zoom (what `getBoundingClientRect()`
@@ -1572,6 +1573,7 @@ pub enum WebInput {
 
 /// A key `WebInput::Key` presses.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum WebKey {
     /// Return: submits a form, confirms a field.
     Enter,
