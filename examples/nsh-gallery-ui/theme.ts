@@ -25,6 +25,11 @@ export const desktopIdiom = platform.idiom === "desktop" || terminal;
 export const TERMINAL_ROW = 16;
 export const TERMINAL_COLUMN = 8;
 
+/** A vertical space (a gap, a padding) in the terminal's whole rows: none
+ * below half a row, else the nearest whole number of rows. Unchanged
+ * elsewhere. */
+export const wholeRows = (points: number) => (terminal ? Math.round(points / TERMINAL_ROW) * TERMINAL_ROW : points);
+
 /** Whether the shared example UI shows its dark palette (reactive: reading it subscribes). */
 export const isDark = () => colorScheme() !== "light";
 

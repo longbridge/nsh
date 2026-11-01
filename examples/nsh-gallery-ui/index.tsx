@@ -7,7 +7,7 @@ import { keymap } from "nsh";
 import { Button as BaseButton, Sheet as BaseSheet, Switch, Tooltip } from "nsh/base";
 import { safeArea } from "nsh";
 import { Icon, type IconName } from "./icons";
-import { alpha, colors, desktopIdiom, finish, focusRing, isDark, mono, motion, radius, TERMINAL_COLUMN, TERMINAL_ROW, terminal, toneColor, toneTint, type Tone } from "./theme";
+import { alpha, colors, desktopIdiom, finish, focusRing, isDark, mono, motion, radius, TERMINAL_COLUMN, TERMINAL_ROW, terminal, toneColor, toneTint, type Tone, wholeRows } from "./theme";
 
 export * from "./theme";
 export { Segmented } from "./segmented";
@@ -131,7 +131,8 @@ export function IconTile(props: { name: IconName; tint?: string; size?: number }
 /**
  * A card: an optional icon, a title and a subtitle, something on the right
  * (a badge, an action), then the content on an inset surface (or bare with
- * `flush`).
+ * `flush`). The terminal draws one box, a blank row under the title and the
+ * content right in the card.
  */
 export function Card(props: {
   icon?: IconName;
@@ -143,26 +144,13 @@ export function Card(props: {
   children: JSX.Element;
 }) {
   return (
-    <View
-      style={[
-        {
-          backgroundColor: colors.surface,
-          borderRadius: radius.card,
-          borderCurve: "continuous",
-          borderWidth: 1,
-          borderColor: colors.border,
-          padding: 5,
-          ...finish.card,
-        },
-        props.style ?? null,
-      ]}
-    >
+    <View style={[cardStyle(), props.style ?? null]}>
       <If when={props.title}>
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 11, paddingTop: 11, paddingBottom: 12 }}>
+        <View style={terminal ? { flexDirection: "row", gap: 2 * TERMINAL_COLUMN, paddingBottom: TERMINAL_ROW } : { flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 11, paddingTop: 11, paddingBottom: 12 }}>
           <If when={props.icon}>
             <IconTile name={props.icon!} />
           </If>
-          <View style={{ flex: 1, gap: 2 }}>
+          <View style={{ flex: 1, gap: terminal ? 0 : 2 }}>
             <Text style={{ fontSize: 17, fontWeight: "600", color: colors.text }}>{props.title}</Text>
             <If when={props.subtitle}>
               <Text style={{ numberOfLines: 2, fontSize: 13, color: colors.muted }}>
@@ -180,8 +168,26 @@ export function Card(props: {
   );
 }
 
-/** The darker surface inside a card. */
+/**
+ * A card's box: in the terminal a border whose row and column on each side
+ * the padding fills out, so the content starts one Cell inside it.
+ */
+const cardStyle = (): ViewStyle =>
+  terminal
+    ? { borderWidth: 1, borderColor: colors.border, paddingVertical: TERMINAL_ROW - 1, paddingHorizontal: 2 * TERMINAL_COLUMN - 1 }
+    : {
+        backgroundColor: colors.surface,
+        borderRadius: radius.card,
+        borderCurve: "continuous",
+        borderWidth: 1,
+        borderColor: colors.border,
+        padding: 5,
+        ...finish.card,
+      };
+
+/** The darker surface inside a card (only its gap, in whole rows, in the terminal). */
 export function Inset(props: { gap?: number; padding?: number; children: JSX.Element }) {
+  if (terminal) return <View style={{ gap: wholeRows(props.gap ?? 12) }}>{props.children}</View>;
   return (
     <View
       style={{
@@ -285,18 +291,19 @@ export function Legend(props: { color: string; label: string; value?: string }) 
   );
 }
 
-/** A row inside an inset, with a hairline above all but the first. */
+/** A row inside an inset, with a hairline above all but the first (one row
+ * of the terminal, which keeps no hairlines between rows). */
 export function Row(props: { first?: boolean; onPress?: () => void; children: JSX.Element }) {
   return (
     <View
       onPress={props.onPress}
       activeStyle={props.onPress ? { backgroundColor: colors.raised } : undefined}
       style={{
-        minHeight: 48,
+        minHeight: terminal ? TERMINAL_ROW : 48,
         flexDirection: "row",
         alignItems: "center",
-        gap: 12,
-        borderTopWidth: props.first ? 0 : 1,
+        gap: terminal ? 2 * TERMINAL_COLUMN : 12,
+        borderTopWidth: props.first || terminal ? 0 : 1,
         borderTopColor: colors.line,
       }}
     >
@@ -427,21 +434,8 @@ export function RoundButton(props: {
 /** A titled card of controls (the demos' sections). */
 export function Section(props: { title: string; note?: string; style?: ViewStyle; children: JSX.Element }) {
   return (
-    <View
-      style={[
-        {
-          backgroundColor: colors.surface,
-          borderRadius: radius.card,
-          borderCurve: "continuous",
-          borderWidth: 1,
-          borderColor: colors.border,
-          padding: 5,
-          ...finish.card,
-        },
-        props.style ?? null,
-      ]}
-    >
-      <View style={{ flexDirection: "row", alignItems: "baseline", paddingHorizontal: 11, paddingTop: 10, paddingBottom: 10, gap: 8 }}>
+    <View style={[cardStyle(), props.style ?? null]}>
+      <View style={terminal ? { flexDirection: "row", gap: 2 * TERMINAL_COLUMN, paddingBottom: TERMINAL_ROW } : { flexDirection: "row", alignItems: "baseline", paddingHorizontal: 11, paddingTop: 10, paddingBottom: 10, gap: 8 }}>
         <Text style={{ flex: 1, fontSize: 15, fontWeight: "600", color: colors.text }}>{props.title}</Text>
         <If when={props.note}>
           <Text style={{ fontSize: 13, color: colors.faint, fontVariant: ["tabular-nums"] }}>{props.note}</Text>
@@ -476,13 +470,14 @@ export function Toggle(props: { value: boolean; onChange: (value: boolean) => vo
  * The gallery's switch, as the styles of `Switch`'s parts: a 50 × 30
  * track that turns citrus and a knob that springs across, both natively.
  * `on` is the value the app owns: the knob follows it, from a press or from
- * elsewhere. `small` is 38 × 22, for pointer-sized rows. Read the styles in
+ * elsewhere. `small` is 38 × 22, for pointer-sized rows; the terminal's is
+ * one row, as wide as its glyph (`[off]`). Read the styles in
  * JSX, so the appearance is followed.
  */
 export function switchLook(on: () => boolean, size: "small" | "regular" = "regular"): { readonly trackStyle: ViewStyle; readonly thumbStyle: ViewStyle } {
   // The track's size and inset, and the knob: it travels what is left inside
   // the border and the padding.
-  const [width, height, inset, knob] = size === "small" ? [38, 22, 2, 16] : [50, 30, 3, 22];
+  const [width, height, inset, knob] = terminal ? [5 * TERMINAL_COLUMN, TERMINAL_ROW, 0, TERMINAL_ROW] : size === "small" ? [38, 22, 2, 16] : [50, 30, 3, 22];
   const t = createAnimatedValue(on() ? 1 : 0);
   const x = t.interpolate({ inputRange: [0, 1], outputRange: [0, width - 2 - 2 * inset - knob] });
   let shown = on();
