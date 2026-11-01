@@ -108,6 +108,9 @@ struct Painter<'a> {
     emptied: Vec<bool>,
     /// Whether the view being drawn is inside one of them.
     in_emptied: bool,
+    /// Whether the view being drawn is inside a selected or checked view,
+    /// whose bar marks the selection.
+    in_selection: bool,
     /// The hairline rules drawn once their parent's subtree is, as a rule
     /// keeps off rows (or columns) that hold text.
     rules: Vec<Rule>,
@@ -185,6 +188,7 @@ pub(crate) fn draw(
         in_indicator: false,
         emptied,
         in_emptied: false,
+        in_selection: false,
         rules: Vec::new(),
         labels: Vec::new(),
         parent_box: area,
@@ -580,6 +584,16 @@ impl Painter<'_> {
             } else {
                 Some(Fill::Clear)
             };
+            // The bar marks a selection: its accent bars and leaves would
+            // mark it twice.
+            let fill = fill.filter(|fill| {
+                !self.in_selection
+                    || match fill {
+                        Fill::Line(_, style) => style.fg == Some(Color::Reset),
+                        Fill::Solid(_) => false,
+                        Fill::Clear => true,
+                    }
+            });
             let protected = if fill.is_some()
                 && (frame.size.height < self.cells.height()
                     || frame.size.width < self.cells.width())
@@ -730,6 +744,8 @@ impl Painter<'_> {
                 Block::bordered().title(title).render(visible, self.buffer);
             }
         }
+        let outer_in_selection = self.in_selection;
+        self.in_selection |= visible_drawn && shows_state(view);
         let scroll_origin = view
             .scroll
             .as_ref()
@@ -759,6 +775,7 @@ impl Painter<'_> {
             );
         }
         self.parent_box = outer_parent_box;
+        self.in_selection = outer_in_selection;
         for label in self.labels.split_off(labels) {
             self.label(label);
         }
@@ -803,10 +820,7 @@ impl Painter<'_> {
         let Some(view) = self.tree.get(id) else {
             return;
         };
-        let state = &view.props.accessibility.state;
-        // A toggle shows its state with its glyph; only focus puts a bar on it.
-        let shows_state = !is_toggle(view.props.accessibility.role)
-            && (state.selected || state.checked == Some(Checked::True));
+        let shows_state = shows_state(view);
         // An emptied box shows no selection, but focus stays visible on it;
         // an icon-only button's label takes its bar.
         let focused = focused && view.input.is_none() && !labeled;
@@ -1246,6 +1260,14 @@ fn mark_emptied(tree: &Mounter, id: NodeId, emptied: &mut [bool]) -> Holds {
         emptied[id as usize] = true;
     }
     holds
+}
+
+/// Whether `view` shows its selected or checked state with the bar; a toggle
+/// shows it with its glyph, and only focus puts a bar on it.
+fn shows_state(view: &crate::view::NshView) -> bool {
+    let state = &view.props.accessibility.state;
+    !is_toggle(view.props.accessibility.role)
+        && (state.selected || state.checked == Some(Checked::True))
 }
 
 fn is_toggle(role: AccessibilityRole) -> bool {

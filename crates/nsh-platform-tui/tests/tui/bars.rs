@@ -164,3 +164,72 @@ fn key(name: &str) -> Input {
         release: false,
     }
 }
+
+/// A sidebar row: an accent bar and a status dot when selected, a divider
+/// at its top.
+fn sidebar_row(selection: AccessibilityState, label: &'static str) -> impl IntoElement {
+    let selected = selection.selected;
+    view()
+        .w(px(160.0))
+        .h(px(36.0))
+        .flex_row()
+        .items_center()
+        .px(px(24.0))
+        .accessibility_state(selection)
+        .child(
+            view()
+                .absolute()
+                .left(px(16.0))
+                .right(px(0.0))
+                .top(px(0.0))
+                .h(px(1.0))
+                .bg(nsh_core::color::rgb(0x2c2e33)),
+        )
+        .child(
+            view()
+                .absolute()
+                .left(px(0.0))
+                .top(px(9.0))
+                .w(px(3.0))
+                .h(px(18.0))
+                .bg(nsh_core::color::rgb(0x45d49a))
+                .opacity(if selected { 1.0 } else { 0.0 }),
+        )
+        .child(
+            view()
+                .absolute()
+                .right(px(8.0))
+                .top(px(8.0))
+                .w(px(8.0))
+                .h(px(16.0))
+                .bg(nsh_core::color::rgb(0x45d49a))
+                .opacity(if selected { 1.0 } else { 0.0 }),
+        )
+        .child(text(label))
+}
+
+#[component]
+fn Sidebar() -> impl IntoElement {
+    view()
+        .flex_1()
+        .child(sidebar_row(selected(), "Stocks"))
+        .child(sidebar_row(AccessibilityState::default(), "Stocks"))
+        .child(text("end"))
+}
+
+#[test]
+fn a_selection_bar_leaves_out_accent_bars_and_leaf_fills_inside_it() {
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(24, 6)).unwrap();
+    view.load(App::Rust(Root::new::<Sidebar>(|| ()))).unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "end");
+    let buffer = terminal.backend().buffer();
+    let lines: Vec<_> = (0..6).map(|y| row(buffer, y)).collect();
+    assert!(!reversed_anywhere(buffer), "{lines:?}");
+    assert!(
+        buffer.content.iter().all(|cell| cell.fg != Color::Green),
+        "no accent bar or dot: {lines:?}"
+    );
+    assert!(lines[0].contains('─'), "a neutral divider stays: {lines:?}");
+    assert_eq!(lines[0..2], lines[2..4], "content never moves");
+}
