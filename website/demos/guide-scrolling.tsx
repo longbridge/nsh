@@ -1,4 +1,4 @@
-import { mount, Scroll, signal, Text, View, type YNode } from "nsh";
+import { mount, Scroll, type ScrollRef, signal, Text, View } from "nsh";
 import { createAnimatedValue } from "nsh";
 import { button, buttonText, desktop, size, tint, ui, wide } from "./palette";
 
@@ -73,7 +73,7 @@ function App() {
   const y = signal(0);
   const refreshing = signal(false);
   const refreshed = signal(0);
-  let scroll!: YNode;
+  let scroll!: ScrollRef;
   const refresh = () => {
     refreshing.set(true);
     setTimeout(() => {

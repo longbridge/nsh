@@ -3,7 +3,8 @@
 use nsh_core::{
     SvgPaint,
     element::{
-        JsHost, JsIn, JsKind, JsOwned, JsValue, PropError, RowAccessor, Rows, Style, TsTypes,
+        JsHost, JsIn, JsKind, JsOwned, JsValue, PropError, RowAccessor, RowText, Rows, Style,
+        TsTypes,
     },
     prelude::*,
 };
@@ -12,7 +13,8 @@ use super::{
     PlotContext, STROKE_ROOM, layer,
     line::{Curve, trace, trace_back},
     mark_canvas, mark_canvas_with, reach,
-    series::{HoverDot, Series},
+    scale::AxisMap,
+    series::{self, HoverDot, Series},
 };
 
 /// Where an [`Area`]'s bottom edge goes (`y0`; TS `number |
@@ -103,8 +105,9 @@ pub struct AreaProps {
     /// the y scale, a constant baseline; or a field name or a function of
     /// the row and its index, a bottom value per row (a band: a day's low
     /// to its high, a forecast's fan), traced with the top edge's `curve`,
-    /// a row without one skipped. Without one, the bottom edge of the
-    /// plot.
+    /// a row without one skipped. Without one, the edge of the plot where
+    /// the y scale's smallest values are: the bottom edge, the top one
+    /// when the scale is reversed (an area hanging from the top).
     pub y0: Prop<Option<AreaY0>>,
     /// How its edges connect their points: `"natural"` (the default, a
     /// smooth curve, as `gpui-base`'s), `"linear"` or `"stepAfter"`.
@@ -134,6 +137,14 @@ pub struct AreaProps {
     /// `dotStyle` where none is set.
     #[prop(default)]
     pub hover_dot_style: Prop<Style>,
+    /// The category of its rows, which the plot's `colorScale` gives a
+    /// color (d3's `scaleOrdinal` of a field): a field name (its text, a
+    /// number as JS writes it) or a function of the row and its index. An
+    /// area is one series: its first row with a category gives the color.
+    /// That color is its `fill` where nothing sets one, in place of
+    /// `currentColor` (beside a background, `fill` stays `none`), so the
+    /// app's `fill-*` classes and `fill` style win.
+    pub color: Prop<Option<RowText>>,
 }
 
 /// A series of a [`Plot`](super::Plot) drawn as the region between its
@@ -144,7 +155,8 @@ pub struct AreaProps {
 /// `area().y0(accessor)`) a bottom edge through those values with the same
 /// curve, back to the first row, a band. It fills with its `fill`
 /// (`fill-*` classes; inherited from the plot as CSS inherits it),
-/// `currentColor` where none is set, over its `background` part (a
+/// `currentColor` where none is set (with `color`, its category's color
+/// of the plot's `colorScale` instead), over its `background` part (a
 /// gradient, `bg-linear-*`, shown inside its shape; `fill` is then `none`
 /// where none is set), and strokes its top edge with its `stroke`
 /// (`stroke-*`, `strokeWidth`, `strokeDasharray`), none where none is set.
@@ -170,10 +182,23 @@ pub fn Area(props: AreaProps, _cx: Scope<NoEvent>) -> impl IntoElement {
         );
         series
     });
-    // Its constant baseline: `y0`'s value, or the plot's bottom edge.
+    let (data, color) = (props.data, props.color);
+    let colors = plot.map(|plot| {
+        series::colors(
+            plot,
+            move || data.get().unwrap_or_else(|| plot.rows.get()),
+            color,
+        )
+    });
+    // Its constant baseline: `y0`'s value, or the edge of the plot where
+    // the y scale's smallest values are (the bottom one; the top one when
+    // reversed).
     let base = move |plot: PlotContext| match y0.with(|y0| y0.as_ref().map(AreaY0::value)) {
         Some(Some(v)) => plot.y_map.get().tick(v).unwrap_or(0.0),
-        _ => plot.size.get().height.0,
+        _ => match plot.y_map.get() {
+            AxisMap::Linear(map) => map.range()[0],
+            _ => plot.size.get().height.0,
+        },
     };
     // How far past the plot it draws: its edges' swing, or its baseline.
     let bleed = move || {
@@ -191,9 +216,9 @@ pub fn Area(props: AreaProps, _cx: Scope<NoEvent>) -> impl IntoElement {
         });
         STROKE_ROOM + swing.max(past).ceil()
     };
-    // Its shape: the top edge, down to the baseline or the bottom edge, and
+    // Its shape: the top edge, to the baseline or the plot's edge, and
     // back. Both edges of a band and a baseline at a value move with the y
-    // scale's domain; the plot's bottom edge stays.
+    // scale's domain; the plot's edge stays.
     let shape =
         move |p: Painter, plot: PlotContext, points: &[Point<Points>], lows: &[Point<Points>]| {
             let (first, last) = (points[0], points[points.len() - 1]);
@@ -264,7 +289,10 @@ pub fn Area(props: AreaProps, _cx: Scope<NoEvent>) -> impl IntoElement {
                 true => SvgPaint::None,
                 false => SvgPaint::CurrentColor,
             };
-            let p = p.fill_style_from_view(initial);
+            let p = p.fill_style_from_view(series::paint_of(
+                colors.and_then(series::first_color),
+                initial,
+            ));
             let (Some(plot), Some(series)) = (plot, series) else {
                 return p;
             };

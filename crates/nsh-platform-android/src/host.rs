@@ -98,10 +98,11 @@ impl Host {
         self.density.get()
     }
 
-    /// Whether the native animation graph animates.
+    /// Whether the native animation graph runs an animation that ends by
+    /// itself (not one looping forever, which no test step waits for).
     #[cfg(feature = "dev")]
     pub(crate) fn animating(&self) -> bool {
-        self.ui.lock().is_ok_and(|ui| ui.animating())
+        self.ui.lock().is_ok_and(|ui| ui.finishing())
     }
 
     fn control(&self) -> Option<EngineControl> {
@@ -178,6 +179,7 @@ impl Host {
             trace: self.trace,
             network: Some(crate::net::network()),
             websocket: None,
+            refuse_connections: None,
             filesystem: None,
             assets: Some(Arc::new(ViewAssets(self.clone()))),
             environment: *self.environment.lock().expect("environment"),
@@ -730,7 +732,7 @@ extern "system" fn Java_com_longbridge_nsh_Native_imageCacheLookup<'local>(
                 .iter()
                 .flat_map(|(name, value)| [*name, value.as_str()])
                 .collect();
-            string_array(&mut env, &strings).unwrap_or_else(|| JObject::null())
+            string_array(&mut env, &strings).unwrap_or_default()
         }
         Lookup::Miss => JObject::null(),
     }
@@ -789,8 +791,10 @@ extern "system" fn Java_com_longbridge_nsh_Native_imageCacheComplete<'local>(
             }
         }
         let pairs = strings
-            .chunks_exact(2)
-            .map(|pair| (pair[0].as_str(), pair[1].as_str()));
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|[name, value]| (name.as_str(), value.as_str()));
         let body = if body.is_null() {
             Vec::new()
         } else {
@@ -1456,6 +1460,7 @@ extern "system" fn Java_com_longbridge_nsh_Native_eventMap(
                 "canGoForward" => "canGoForward",
                 "data" => "data",
                 "message" => "message",
+                "code" => "code",
                 "duration" => "duration",
                 "width" => "width",
                 "height" => "height",
@@ -1564,6 +1569,27 @@ extern "system" fn Java_com_longbridge_nsh_Native_shaderSize(
     ui.shaders.wants_frame().into()
 }
 
+/// Keeps the virtual list rows holding nodes `ids` rendered wherever they
+/// scroll (a text selection's ends); none lets go.
+#[unsafe(no_mangle)]
+extern "system" fn Java_com_longbridge_nsh_Native_keepRendered(
+    env: JNIEnv<'_>,
+    _: JClass<'_>,
+    handle: jlong,
+    ids: jni::objects::JIntArray<'_>,
+) {
+    // SAFETY: Java passes its live handle.
+    let host = unsafe { host(handle) };
+    let len = env.get_array_length(&ids).unwrap_or(0).max(0) as usize;
+    let mut nodes = vec![0; len];
+    if env.get_int_array_region(&ids, 0, &mut nodes).is_err() {
+        return;
+    }
+    if let Some(control) = host.control() {
+        control.keep_rendered(nodes.into_iter().map(|id| id as NodeId).collect());
+    }
+}
+
 /// A scroll view moved: the engine (lists) and its scroll value learn the
 /// offset. Returns bound values when a scroll value changed, else null.
 #[unsafe(no_mangle)]
@@ -1587,6 +1613,33 @@ extern "system" fn Java_com_longbridge_nsh_Native_scroll(
     }
     finish(host, &mut ui);
     floats(&env, &ui.outputs())
+}
+
+/// A multiline input's text scrolled, or its text or size changed, while a
+/// built-in bar replaces its indicator (`InputConfig::replaced`): the engine
+/// learns the offset, the text's size and the viewport's (points).
+#[unsafe(no_mangle)]
+extern "system" fn Java_com_longbridge_nsh_Native_inputScroll(
+    _: JNIEnv<'_>,
+    _: JClass<'_>,
+    handle: jlong,
+    id: jint,
+    y: jfloat,
+    content_width: jfloat,
+    content_height: jfloat,
+    width: jfloat,
+    height: jfloat,
+) {
+    // SAFETY: Java passes its live handle.
+    let host = unsafe { host(handle) };
+    if let Some(control) = host.control() {
+        control.input_scroll(
+            id as NodeId,
+            point(px(0.0), px(y)),
+            size(px(content_width), px(content_height)),
+            size(px(width), px(height)),
+        );
+    }
 }
 
 /// A vertical scroll view is pulled `distance` (points) past its top: its

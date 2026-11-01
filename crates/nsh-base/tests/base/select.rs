@@ -170,6 +170,8 @@ struct Seen {
     parents: HashMap<NodeId, NodeId>,
     /// The views inserted into the root view, in order.
     roots: Vec<NodeId>,
+    /// How many mount items came.
+    items: usize,
 }
 
 struct App {
@@ -300,6 +302,7 @@ fn start_on(props: HarnessProps, os: Os, idiom: Idiom, screen_reader: bool) -> A
     let into = seen.clone();
     app.observe(move |_, batch| {
         let mut seen = into.lock().unwrap();
+        seen.items += batch.items.len();
         for item in &batch.items {
             match item {
                 MountItem::ViewProps { id, props } => {
@@ -356,7 +359,11 @@ fn the_clear_button_clears_the_value_and_leaves_the_list_closed() {
         app.press("text:Clear").unwrap();
         app.log_ends("change:none");
         app.gone("text:Clear");
-        assert!(!app.shows("role:listbox"), "the list stays closed");
+        assert_eq!(
+            app.screen().count("role:listbox").unwrap(),
+            0,
+            "the list stays closed"
+        );
         if controlled {
             app.see("Value: none");
         }
@@ -646,6 +653,28 @@ fn search_filters_the_items_and_their_sections() {
     app.see("Value: rice");
 }
 
+#[test]
+fn a_search_keystroke_in_a_long_list_sends_only_the_rows_in_view() {
+    let mut app = desktop(HarnessProps {
+        searchable: true,
+        ..props(many(5000))
+    });
+    app.open_list();
+    app.see("Item 0");
+    app.type_text("Search", "4").unwrap();
+    app.see(">Item 4");
+    app.idle(Duration::from_millis(50)).unwrap();
+    app.seen.lock().unwrap().items = 0;
+    app.type_text("text:4", "2").unwrap();
+    app.see(">Item 42");
+    app.idle(Duration::from_millis(50)).unwrap();
+    let items = app.seen.lock().unwrap().items;
+    println!("a search keystroke over 5000 items: {items} mount items");
+    // The rows in view change (and their window's): nothing grows with
+    // the items.
+    assert!(items < 600, "{items} mount items for a keystroke");
+}
+
 // 7. Typeahead.
 
 #[test]
@@ -749,12 +778,12 @@ fn on_the_desktops_the_popup_is_at_the_trigger_as_wide_and_within_the_window() {
     assert_eq!(frame.origin.x, px(40.0));
     assert_eq!(frame.origin.y, px(130.0));
     // As wide as the trigger: filled from Rust, the combobox is the view
-    // the select makes around the app's element, which its column
-    // stretches to the select's 200 (a TSX trigger is the app's element
-    // itself: the engine's `a_base_select_on_a_desktop_…`). Its rows have
-    // no width of their own.
-    assert_eq!(seen.frames[&trigger].size.width, px(200.0));
-    assert_eq!(frame.size.width, px(200.0), "{frame:?}");
+    // the select makes around the app's element, which lays that element
+    // out through and takes its 160 (a TSX trigger is the app's element
+    // itself, as wide: the engine's `a_base_select_on_a_desktop_…`). Its
+    // rows have no width of their own.
+    assert_eq!(seen.frames[&trigger].size.width, px(160.0));
+    assert_eq!(frame.size.width, px(160.0), "{frame:?}");
     // Never past the window: its rows scroll.
     assert!(frame.origin.y + frame.size.height <= px(844.0), "{frame:?}");
 }

@@ -1,7 +1,6 @@
 ---
 title: Select
 description: "The Select component: one value chosen from a list of items, a popup at its trigger on desktops and a sheet on phones, with the keyboard, typeahead, search and sections, styled by the app."
-order: 20.65
 group: base
 demo: el-select
 ---
@@ -21,7 +20,7 @@ the list, the rows, the sections' headers and the search field, or draws the row
 
 ```rust tabs
 use nsh_base::{SelectItem, SelectItemState, select, theme};
-use nsh_core::ui::prelude::*;
+use nsh_core::prelude::*;
 
 const FRUITS: [(&str, &str); 5] = [
     ("apple", "Apple"),

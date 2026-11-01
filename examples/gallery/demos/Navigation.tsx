@@ -29,7 +29,7 @@ function LinkRow(props: { icon: IconName; title: string; note: string; first?: b
       <View
         hoverStyle={hovered()}
         style={{
-          minHeight: density.row + (platform.idiom === "desktop" ? 8 : 12),
+          minHeight: density.row + (platform.desktop ? 8 : 12),
           flexDirection: "row",
           alignItems: "center",
           gap: 12,
@@ -198,10 +198,10 @@ function Unsaved() {
   const text = signal("");
   const focused = signal(false);
   const confirm = async () => {
-    const action = await AlertDialog.show({
+    const { action } = await AlertDialog.show({
       title: "Discard your changes?",
       actions: [
-        { label: "Keep editing", role: "cancel" },
+        { label: "Keep editing", role: "cancel", id: "keep" },
         { label: "Discard", role: "destructive", id: "discard" },
       ],
     });
@@ -386,7 +386,7 @@ export function Navigation() {
   effect(() => {
     if (!intercept()) return;
     // Removed with the effect when it runs again.
-    BackHandler.onBackPress(() => {
+    BackHandler.on("press", () => {
       backs.set(backs() + 1);
       return true;
     });

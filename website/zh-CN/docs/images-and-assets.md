@@ -304,8 +304,8 @@ const status = signal("loading…");
 spawn(async move {
     // Ok(ImageSize { width, height })，单位为像素。
     let size = image_size("https://example.com/photo.jpg").await;
-    // 字节进入内存后为 true。
-    let ok = prefetch_image("https://example.com/next.jpg").await;
+    // 字节进入内存后为 Ok(())。
+    let loaded = prefetch_image("https://example.com/next.jpg").await;
 });
 ```
 
@@ -313,13 +313,13 @@ spawn(async move {
 import { Image } from "nsh";
 
 const size = await Image.getSize("https://example.com/photo.jpg");   // { width, height } in pixels
-const ok = await Image.prefetch("https://example.com/next.jpg");      // true once the bytes are in memory
+await Image.prefetch("https://example.com/next.jpg");                // once the bytes are in memory
 ```
 
 | Rust | TSX | 返回值 |
 |---|---|---|
 | `image_size(src)` | `Image.getSize(src)` | 图片的像素尺寸（SVG 为点，[在 Web 上为浏览器测得的尺寸](#svg-图片)）；无法加载时返回错误 |
-| `prefetch_image(src)` | `Image.prefetch(src)` | 图片字节加载完成后为 `true` |
+| `prefetch_image(src)` | `Image.prefetch(src)` | 图片字节加载完成后完成，不带值；无法加载时返回错误 |
 
 在 TSX 中，`src` 是 URL 字符串或导入的图片。对于带有[变体](#像素密度)的导入图片，两者都会加载视图在当前屏幕上加载的那个变体，`getSize` 返回导入文件的尺寸。两者都会为接下来显示该图片的视图保留已下载的字节，因此先预取再显示的图片无需再次下载。
 

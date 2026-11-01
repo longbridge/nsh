@@ -906,13 +906,20 @@ fn tick(host: &impl ScrollHost, now: f64) -> bool {
 // Mount items.
 
 /// `ScrollConfig`.
-pub fn config(host: &impl ScrollHost, horizontal: bool, indicator: bool, mirrored: bool) {
+pub fn config(
+    host: &impl ScrollHost,
+    horizontal: bool,
+    indicator: bool,
+    replaced: bool,
+    mirrored: bool,
+) {
     let changed = host.scroll_mut(|s, _| {
         s.horizontal = horizontal;
         // A horizontal view keeps its indicator: it is the mouse's scroll
         // bar, and a mouse without a horizontal wheel has no other way
-        // to move it (mouse drags do not scroll).
-        s.indicator = indicator || horizontal;
+        // to move it (mouse drags do not scroll); a built-in bar of the
+        // app's (`replaced`) is the mouse's then.
+        s.indicator = indicator || (horizontal && !replaced);
         if !indicator {
             s.live.alpha = 0.0;
         }

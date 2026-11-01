@@ -3,7 +3,10 @@
 
 use nsh_core::{element::Style, prelude::*};
 
-use crate::popup::{OpenChangeReason, OpenState, SheetMotion, lifecycle};
+use crate::{
+    popup::{OpenChangeReason, OpenState, SheetMotion, lifecycle},
+    roving::leave_bar,
+};
 
 /// The props of [`Sheet`].
 #[derive(Debug, Clone, PartialEq, Props)]
@@ -114,6 +117,8 @@ pub fn Sheet(props: SheetProps, cx: Scope<SheetEvent>) -> impl IntoElement {
         move || cx.emit(SheetEvent::Close),
     );
     when(motion.shown, move || {
+        // Placed in a toolbar, its content is still no part of it.
+        leave_bar();
         let backdrop = overlay()
             .inset_0()
             .bind_opacity(&dragged_fade)
@@ -177,7 +182,7 @@ pub fn Sheet(props: SheetProps, cx: Scope<SheetEvent>) -> impl IntoElement {
         // children and scroll positions keep their state.
         panel = panel.bind_translate_y(&dragged_y);
         let layers = vec![backdrop.into_element(), panel.into_element()];
-        if nsh_core::element::ambient::os() == nsh_core::platform::Os::Web {
+        if nsh_core::element::os() == nsh_core::platform::Os::Web {
             // A web modal is a separately sized surface. The player's host
             // can present it over the viewport, including outside an iframe,
             // while the sheet keeps its own motion and controlled lifetime.

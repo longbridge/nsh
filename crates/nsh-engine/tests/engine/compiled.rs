@@ -65,6 +65,7 @@ fn start() -> (Engine, Receiver<MountBatch>) {
         trace: false,
         network: None,
         websocket: None,
+        refuse_connections: None,
         filesystem: None,
         assets: None,
         environment: Default::default(),
@@ -228,6 +229,7 @@ fn start_app_with(app: &str, header_heights: (Points, Points)) -> (Engine, Recei
         trace: false,
         network: None,
         websocket: None,
+        refuse_connections: None,
         filesystem: None,
         assets: None,
         environment: Default::default(),
@@ -658,20 +660,20 @@ fn an_if_hands_its_function_child_the_value() {
 }
 
 const REFS: &str = r#"
-import { mount, signal, Text, View, type YNode } from "nsh";
+import { mount, signal, Text, View, type InputRef, type ViewRef } from "nsh";
 import { Input } from "nsh/base";
 import { Stepper, type StepperRef } from "test/ui";
 
-function Field(props: { ref?: (node: YNode) => void }) {
+function Field(props: { ref?: (node: InputRef) => void }) {
   return <Input ref={props.ref} />;
 }
 
-let assigned: YNode | undefined;
-const held = signal<YNode | undefined>(undefined);
-const fields: { input?: YNode; [key: string]: YNode | undefined } = {};
+let assigned: ViewRef | undefined;
+const held = signal<InputRef | undefined>(undefined);
+const fields: { input?: InputRef; [key: string]: InputRef | undefined } = {};
 const key = () => "computed";
-let called: YNode | undefined;
-let forwarded: YNode | undefined;
+let called: ViewRef | undefined;
+let forwarded: InputRef | undefined;
 const stepper = signal<StepperRef | undefined>(undefined);
 const report = signal("");
 

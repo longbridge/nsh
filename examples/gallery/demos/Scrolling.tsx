@@ -1,11 +1,11 @@
-import { Canvas, List, platform, Scroll, type ScrollEvent, signal, Text, View, type YNode } from "nsh";
+import { Canvas, List, platform, Scroll, type ScrollEvent, type ScrollRef, signal, Text, View } from "nsh";
 import { Input } from "nsh/base";
 import { createAnimatedValue } from "nsh";
 import { windowSize } from "nsh";
 import { alpha, Badge, Button, Caption, colors, DemoPage, Figure, finish, hint, isDark, Meter, mono, Press, radius, Section, Segmented, Toggle as Switch, type Tone, toneColor, toneTint } from "../ui";
 
 /** A pointer's desktop: compact controls and no keyboard to scroll above. */
-const desk = platform.idiom === "desktop";
+const desk = platform.desktop;
 
 const tones: Tone[] = ["accent", "info", "warn", "up", "danger"];
 
@@ -285,7 +285,7 @@ function Events() {
 
 /** Pinch to zoom (natively); tap a tile to zoom in on it. */
 function Zoom() {
-  let scroll: YNode | undefined;
+  let scroll: ScrollRef | undefined;
   const scale = signal(1);
   const bounces = signal(true);
   const tiles = Array.from({ length: 24 }, (_, i) => i);

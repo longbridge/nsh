@@ -323,6 +323,7 @@ impl AppView {
             trace: options.trace,
             network: Some(nsh_engine::net::network()),
             websocket: None,
+            refuse_connections: None,
             filesystem: None,
             assets: Some(Arc::new(AssetReader(options.asset_base.clone()))),
             environment: self.surface.environment.get(),
@@ -861,6 +862,7 @@ fn initial_environment() -> Environment {
             Os::Linux
         },
         idiom: Idiom::Desktop,
+        file_requests: true,
         ..Environment::default()
     }
 }

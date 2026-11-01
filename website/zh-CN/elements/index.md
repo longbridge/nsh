@@ -88,34 +88,41 @@ TSX 从 `nsh/base` 导入，Rust 从 `nsh_base` crate 导入。它们负责行�
 
 | 组件 | Rust | 作用 | 页面 |
 |---|---|---|---|
-| `<Button>` | `nsh_base::button()` | 带有状态和角色的可按压控件 | [Button](./button.md) |
-| `<Input>` | `nsh_base::input()` | 原生文本输入框（UITextField 或 UITextView / EditText） | [Input](./input.md) |
-| `<OtpInput>` | `nsh_base::otp_input()` | 固定位数的一次性验证码，输入、粘贴或自动填充到格子里 | [OtpInput](./otp-input.md) |
-| `<Checkbox>` | `nsh_base::checkbox()` | 带指示器的勾选 / 未勾选 / 半选控件 | [Checkbox](./checkbox.md) |
-| `<Radio>`、`<RadioGroup>` | `nsh_base::radio()`、`radio_group()` | 一组只能选一个的选项中的一项，以及这一组 | [Radio](./radio.md) |
-| `<Tab>`、`<Tabs>` | `nsh_base::tab()`、`tabs()` | 标签列表中的一个标签页，以及这个列表 | [Tabs](./tabs.md) |
-| `<Switch>` | `nsh_base::switch()` | 带轨道和滑块的开 / 关控件 | [Switch](./switch.md) |
-| `<Select>` | `nsh_base::select()` | 从一组条目中选出一个值，支持键盘、搜索和分组 | [Select](./select.md) |
-| `<Collapsible>` | `nsh_base::collapsible()` | 内容可展开和收起的区域 | [Collapsible](./collapsible.md) |
-| `<Progress>` | `nsh_base::progress()` | 进度条：任务完成了多少，或正在进行 | [Progress](./progress.md) |
-| `<NumberInput>` | `nsh_base::number_input()` | 在输入框里输入、或用按钮和按键步进的数字 | [NumberInput](./number-input.md) |
-| `<Slider>` | `nsh_base::slider()` | 沿轨道选取一个值或两个值组成的范围 | [Slider](./slider.md) |
-| `<Plot>`、`<Line>`、`<Area>`、`<Bar>`、`<Grid>`、`<Pie>`、`<Arc>`（`nsh/base/plot`） | `nsh_base::plot::{plot, line, area, bar, grid, pie, arc}` | 图表的框架与图形，根据应用的数据行原生绘制 | [Plot](./plot.md) |
-| `<Dialog>` | `nsh_base::dialog()` | 把子元素呈现在其他一切之上 | [Dialog](./dialog.md) |
-| `<NavStack>`、`<NavPage>` | `nsh_base::nav_stack()`、`nsh_base::nav_page()` | 原生导航：带有平台标题栏和返回手势的页面栈 | [NavStack](./nav-stack.md) |
 | `AlertDialog` | `nsh_base::alert_dialog()` | 系统的提示框和操作表 | [AlertDialog](./alert-dialog.md) |
-| `<TextView>` | `nsh_base::text_view()` | 用文本和视图显示 Markdown 或 HTML 文档 | [TextView](./text-view.md) |
-| `<Editor>` | `nsh_base::editor()` | 带高亮、多光标、折叠和搜索的代码编辑器 | [Editor](./editor.md) |
-| `<DiffView>` | `nsh_base::diff_view()` | 两段文本之间或补丁中的改动，并排或合并显示 | [DiffView](./diff-view.md) |
-| `<Table>` 及其部件 | `nsh_base::table()`、`table_row()` 等 | 由应用写出行和单元格的表格，带有表格的角色 | [Table](./table.md) |
+| `<Accordion>` 及其部件 | `nsh_base::accordion()`、`accordion_item()` 等 | 在各自标题下展开和收起的一组分区，一次一个或同时多个 | [Accordion](./accordion.md) |
+| `<Avatar>`、`<AvatarGroup>` | `nsh_base::avatar()`、`avatar_group()` | 一个人的头像，加载中或失败时显示后备内容；以及只显示前几个的一排头像 | [Avatar](./avatar.md) |
+| `<Button>` | `nsh_base::button()` | 带有状态和角色的可按压控件 | [Button](./button.md) |
+| `<Checkbox>` | `nsh_base::checkbox()` | 带指示器的勾选 / 未勾选 / 半选控件 | [Checkbox](./checkbox.md) |
+| `<Collapsible>` | `nsh_base::collapsible()` | 内容可展开和收起的区域 | [Collapsible](./collapsible.md) |
 | `<DataTable>` | `nsh_base::data_table()` | 行列数量不限的表格，可选择、排序，列可调整宽度和移动 | [DataTable](./data-table.md) |
-| `<Popover>` | `nsh_base::popover()` | 锚定在触发元素上、显示在一切之上的内容 | [Popover](./popover.md) |
-| `<Menu>`、`<ContextMenu>`、`<MenuItem>`、`<MenuSeparator>`、`<Submenu>` | `nsh_base::menu()`、... | 菜单：桌面上是带级联子菜单的弹出层，手机上是 sheet | [Menu](./menu.md) |
-| `<Tooltip>` | `nsh_base::tooltip()` | 悬停或手指按住时显示在触发元素旁的提示 | [Tooltip](./tooltip.md) |
-| `<Sheet>` | `nsh_base::sheet()` | 位于屏幕一侧边缘、覆盖在背景层之上的面板 | [Sheet](./sheet.md) |
-| `<Toast>`、`<ToastStack>` | `nsh_base::toast()`、`toast_stack()` | toast 的语义根；从一侧边缘排成层叠的 toast | [Toast](./toast.md) |
-| `<ResizablePanelGroup>`、`<ResizablePanel>` | `nsh_base::h_resizable()`、`resizable_panel()` | 并排或上下排列的面板，以及调整它们大小的手柄 | [Resizable](./resizable.md) |
+| `<Dialog>` | `nsh_base::dialog()` | 把子元素呈现在其他一切之上 | [Dialog](./dialog.md) |
+| `<DiffView>` | `nsh_base::diff_view()` | 两段文本之间或补丁中的改动，并排或合并显示 | [DiffView](./diff-view.md) |
 | `<DockArea>` | `nsh_base::dock_area()` | 由分栏、标签组和边缘停靠区组成、用户自行安排的工作区 | [Dock](./dock.md) |
+| `<Editor>` | `nsh_base::editor()` | 带高亮、多光标、折叠和搜索的代码编辑器 | [Editor](./editor.md) |
+| `<Input>` | `nsh_base::input()` | 原生文本输入框（UITextField 或 UITextView / EditText） | [Input](./input.md) |
+| `<Link>` | `nsh_base::link()` | 打开页面、网站或应用内路由的按压目标 | [Link](./link.md) |
+| `<Menu>`、`<ContextMenu>`、`<MenuItem>`、`<MenuSeparator>`、`<Submenu>` | `nsh_base::menu()`、... | 菜单：桌面上是带级联子菜单的弹出层，手机上是 sheet | [Menu](./menu.md) |
+| `<NavStack>`、`<NavPage>` | `nsh_base::nav_stack()`、`nsh_base::nav_page()` | 原生导航：带有平台标题栏和返回手势的页面栈 | [NavStack](./nav-stack.md) |
+| `<NumberInput>` | `nsh_base::number_input()` | 在输入框里输入、或用按钮和按键步进的数字 | [NumberInput](./number-input.md) |
+| `<OtpInput>` | `nsh_base::otp_input()` | 固定位数的一次性验证码，输入、粘贴或自动填充到格子里 | [OtpInput](./otp-input.md) |
+| `<Pagination>` | `nsh_base::pagination()` | 一组内容的各页：上一页、当前页附近的页码、省略号和下一页 | [Pagination](./pagination.md) |
+| `<Plot>`、`<Line>`、`<Area>`、`<Bar>`、`<Grid>`、`<Pie>`、`<Arc>`（`nsh/base/plot`） | `nsh_base::plot::{plot, line, area, bar, grid, pie, arc}` | 图表的框架与图形，根据应用的数据行原生绘制 | [Plot](./plot.md) |
+| `<Popover>` | `nsh_base::popover()` | 锚定在触发元素上、显示在一切之上的内容 | [Popover](./popover.md) |
+| `<Progress>` | `nsh_base::progress()` | 进度条：任务完成了多少，或正在进行 | [Progress](./progress.md) |
+| `<Radio>`、`<RadioGroup>` | `nsh_base::radio()`、`radio_group()` | 一组只能选一个的选项中的一项，以及这一组 | [Radio](./radio.md) |
+| `<ResizablePanelGroup>`、`<ResizablePanel>` | `nsh_base::h_resizable()`、`resizable_panel()` | 并排或上下排列的面板，以及调整它们大小的手柄 | [Resizable](./resizable.md) |
+| `<Scrollbar>` | `nsh_base::scrollbar()` | 为滚动视图或列表提供应用自己外观的滚动条 | [Scrollbar](./scrollbar.md) |
+| `<Select>` | `nsh_base::select()` | 从一组条目中选出一个值，支持键盘、搜索和分组 | [Select](./select.md) |
+| `<Sheet>` | `nsh_base::sheet()` | 位于屏幕一侧边缘、覆盖在背景层之上的面板 | [Sheet](./sheet.md) |
+| `<Slider>` | `nsh_base::slider()` | 沿轨道选取一个值或两个值组成的范围 | [Slider](./slider.md) |
+| `<Switch>` | `nsh_base::switch()` | 带轨道和滑块的开 / 关控件 | [Switch](./switch.md) |
+| `<Table>` 及其部件 | `nsh_base::table()`、`table_row()` 等 | 由应用写出行和单元格的表格，带有表格的角色 | [Table](./table.md) |
+| `<Tab>`、`<Tabs>` | `nsh_base::tab()`、`tabs()` | 标签列表中的一个标签页，以及这个列表 | [Tabs](./tabs.md) |
+| `<TextView>` | `nsh_base::text_view()` | 用文本和视图显示 Markdown 或 HTML 文档 | [TextView](./text-view.md) |
+| `<Toast>`、`<ToastStack>` | `nsh_base::toast()`、`toast_stack()` | toast 的语义根；从一侧边缘排成层叠的 toast | [Toast](./toast.md) |
+| `<Toggle>`、`<ToggleGroup>` | `nsh_base::toggle()`、`toggle_group()` | 一个处于开或关的按钮，以及由它们组成的工具栏 | [Toggle](./toggle.md) |
+| `<Toolbar>`、`<ToolbarGroup>`、`<ToolbarSeparator>` | `nsh_base::toolbar()`、`toolbar_group()`、`toolbar_separator()` | 由按钮、开关按钮和链接组成的一栏，在键盘焦点里只占一站 | [Toolbar](./toolbar.md) |
+| `<Tooltip>` | `nsh_base::tooltip()` | 悬停或手指按住时显示在触发元素旁的提示 | [Tooltip](./tooltip.md) |
 
 > [!NOTE]
 > 字符串只有放在 `Text` 里才会被绘制。`View` 的字符串子节点不会创建原生视图，也不参与布局。
@@ -168,6 +175,7 @@ TSX 从 `nsh/base` 导入，Rust 从 `nsh_base` crate 导入。它们负责行�
 | `indeterminateStyle` | `.indeterminate(\|s\| ..)`、`.indeterminate_style(style)` | `indeterminate:` | `accessibilityState.checked` 为 `"mixed"` 时（既非勾选也非未勾选的复选框）。 |
 | `selectedStyle` | `.selected(\|s\| ..)` | `selected:` | `accessibilityState.selected` 为 `true` 时（选中的 `Button`、标签页）。 |
 | `expandedStyle` | `.expanded(\|s\| ..)`、`.expanded_style(style)` | `aria-expanded:` | `accessibilityState.expanded` 为 `true` 时（弹出层打开时 `Popover`、`Menu` 的触发器）。 |
+| `pressedStyle` | `.aria_pressed(\|s\| ..)`、`.pressed_style(style)` | `aria-pressed:` | `accessibilityState.pressed` 为 `true` 时（处于开启状态的切换按钮；`"mixed"` 不算按下）。不同于 `activeStyle`（正在按压）。 |
 
 ```rust tabs
 view()
@@ -355,7 +363,7 @@ view().on_press(open_page).child(
 | 属性 | Rust | 类型 | 说明 |
 |---|---|---|---|
 | `onLayout` | `.on_layout(\|frame: &Bounds<Points>\| ..)` | `(e: { bounds: Bounds }) => void` | 每次布局改变视图位置尺寸后，`bounds` 给出相对父视图的 frame `{ origin, size }`。 |
-| `ref` | `.element_ref(&handle)` | `YNode \| (node: YNode) => void` | 原生节点（参见 [ref 方法](#ref-方法)）。`ref={el}` 赋值给变量，`ref={fn}` 调用函数。 |
+| `ref` | `.element_ref(&handle)` | `ViewRef \| (node: ViewRef) => void` | 元素的 ref（参见 [ref 方法](#ref-方法)）：`ViewRef`，或元素自己基于它的类型。`ref={el}` 赋值给变量，`ref={fn}` 调用函数。 |
 | `nativeID` | `.native_id(id)` | `string` | 为视图命名，供其他元素引用，例如输入框引用的 `InputAccessoryView`。 |
 | `testID` | `.test_id(id)` | `string` | UI 测试使用的标识（在 Android 上是视图的 resource id）。 |
 | `key` | `.key(key)` | `string` | 元素在兄弟元素之间的标识。 |
@@ -398,7 +406,8 @@ stopPropagation() }`）；`…ShouldSetResponder` 回调还会收到 `gestureSta
 | `accessibilityLabel` | `.label(..)` | `string` | 屏幕阅读器朗读的内容。没有标签的视图会朗读其中的文本。 |
 | `accessibilityHint` | `.hint(..)` | `string` | 激活该元素会发生什么。 |
 | `role` | `.role(AccessibilityRole::Button)` | `AccessibilityRole` | 元素是什么（`"button"`、`"header"`、`"link"`、`"switch"` 等）。 |
-| `accessibilityState` | `.accessibility_state(..)` | `{ disabled?, selected?, checked?, busy?, expanded? }` | 辅助技术报告的状态（`checked` 可以是 `"mixed"`）。 |
+| `accessibilityState` | `.accessibility_state(..)` | `{ disabled?, selected?, checked?, busy?, expanded?, pressed?, current? }` | 辅助技术报告的状态（`checked` 和 `pressed` 可以是 `"mixed"`；`current` 为 `true` 或 `"page"`、`"step"`、`"location"`、`"date"`、`"time"`）。 |
+| `accessibilityLevel` | `.accessibility_level(..)` | `number` | 标题的级别（1 为最高），树节点的深度（顶层为 1）。 |
 | `accessibilityValue` | `.accessibility_value(..)` | `{ min?, max?, now?, text? }` | 范围类或文本类元素的值。 |
 | `accessibilityElementsHidden` | | `boolean` | 对辅助技术隐藏该视图及其子树。 |
 | `importantForAccessibility` | | `"auto" \| "yes" \| "no" \| "no-hide-descendants"` | 是否暴露该视图。 |
@@ -451,20 +460,21 @@ view()
 
 ## ref 方法
 
-在 TSX 中 `ref` 收到一个 `YNode`；在 Rust 中，`element_ref()` 创建一个 `ElementRef` 句柄，由 `.element_ref(&handle)` 附加到元素上。它们的方法向原生视图发送命令，与同一轮中先前的改动按顺序执行。各元素页面会说明哪些方法适用。
+在 TSX 中 `ref` 收到元素的 ref，类型是元素自己的：`View`、`Text`、`Image`、`Canvas`、`Overlay` 和 `Shader` 是 `ViewRef`（`focus`、`blur`、`measure`），其他元素是在 `ViewRef` 之上加上自身方法的类型：`InputRef`（`Input`）、`ScrollRef`（`Scroll`）、`ListRef`（`List`）、`WebViewRef`（`WebView`）、`VideoRef`（`Video`）和 `NativeComponentRef`（原生组件）。在 Rust 中，`element_ref()` 创建一个 `ElementRef` 句柄，由 `.element_ref(&handle)` 附加到元素上。它们的方法向原生视图发送命令，与同一轮中先前的改动按顺序执行。各元素页面会说明哪些方法适用。ref 变量请按元素自己的类型声明（`<Input>` 用 `let field!: InputRef`）：声明为 `ViewRef` 的变量不能用在 ref 带有自己方法的元素上。
 
-| 方法 | Rust | 适用于 | 说明 |
+| 方法 | Rust | Ref | 说明 |
 |---|---|---|---|
-| `focus()` / `blur()` | `focus()` / `blur()` | `<Input>` | 获取焦点（弹出键盘）/ 失去焦点。 |
-| `setSelection(start, end?)` | `set_selection(start, end)` | `<Input>` | 选中 `start..end`（UTF-16 单位）；省略 `end` 时为光标。 |
-| `scrollTo({ x?, y?, animated? })` | `scroll_to(point, animated)` | `<Scroll>`、`List` | 滚动到某个偏移量。 |
-| `zoomTo({ scale, x?, y?, animated? })` | `zoom_to(scale, center, animated)` | 可缩放的 `<Scroll>` | 围绕内容中的某点缩放到 `scale`。 |
-| `scrollToOffset({ offset, animated? })` | `scroll_to_offset(offset, animated)` | `List` | 沿列表方向滚动到某个偏移量。 |
-| `scrollToIndex({ index, animated?, viewPosition?, viewOffset? })` | `scroll_to_index(index, position, offset, animated)` | `List` | 把某一项滚动到可见区域。 |
-| `scrollToEnd({ animated? })` | `scroll_to_end(animated)` | `List` | 滚动到内容末尾。 |
-| `reload()`、`goBack()`、`goForward()`、`stopLoading()`、`injectJavaScript(script)`、`postMessage(data)` | `reload()`、`go_back()`、`go_forward()`、`stop_loading()`、`inject_java_script(..)`、`post_message(..)` | `WebView` | 控制页面。 |
-| `seek(seconds)` | `seek(seconds)` | `Video` | 跳转到某个时间点。 |
-| `command(name, args?)` | `command(name, args)` | 原生组件 | 调用已注册原生组件的命令（[`nativeComponent`](../modules/nsh.md#nativecomponent-and-nativemodule)）。 |
+| `focus()` / `blur()` | `focus()` / `blur()` | `ViewRef` | 让 `<Input>` 获取焦点（弹出键盘），或让可按下的视图获得键盘焦点 / 失去焦点。 |
+| `measure()` | `measure()` | `ViewRef` | [视图的位置](../docs/touch-and-gestures.md)。 |
+| `setSelection(start, end?)` | `set_selection(start, end)` | `InputRef` | 选中 `start..end`（UTF-16 单位）；省略 `end` 时为光标。 |
+| `scrollTo({ x?, y?, animated? })` | `scroll_to(point, animated)` | `ScrollRef`、`ListRef` | 滚动到某个偏移量。 |
+| `zoomTo({ scale, x?, y?, animated? })` | `zoom_to(scale, center, animated)` | `ScrollRef`（可缩放的 `<Scroll>`） | 围绕内容中的某点缩放到 `scale`。 |
+| `scrollToOffset({ offset, animated? })` | `scroll_to_offset(offset, animated)` | `ListRef` | 沿列表方向滚动到某个偏移量。 |
+| `scrollToIndex({ index, animated?, viewPosition?, viewOffset? })` | `scroll_to_index(index, position, offset, animated)` | `ListRef` | 把某一项滚动到可见区域。 |
+| `scrollToEnd({ animated? })` | `scroll_to_end(animated)` | `ScrollRef`、`ListRef` | 滚动到内容末尾。 |
+| `reload()`、`goBack()`、`goForward()`、`stopLoading()`、`injectJavaScript(script)`、`postMessage(data)` | `reload()`、`go_back()`、`go_forward()`、`stop_loading()`、`inject_java_script(..)`、`post_message(..)` | `WebViewRef` | 控制页面。 |
+| `seek(seconds)` | `seek(seconds)` | `VideoRef` | 跳转到某个时间点。 |
+| `command(name, args?)` | `command(name, args)` | `NativeComponentRef` | 调用已注册原生组件的命令（[`nativeComponent`](../modules/nsh.md#nativecomponent-and-nativemodule)）。 |
 
 ```rust tabs
 let field = element_ref();
@@ -475,10 +485,10 @@ view()
 ```
 
 ```tsx tabs
-import { View, type YNode } from "nsh";
+import { type InputRef, View } from "nsh";
 import { Input } from "nsh/base";
 
-let input!: YNode;
+let input!: InputRef;
 <View onPress={() => input.focus()}>
   <Input ref={input} placeholder="点击这一行开始输入" />
 </View>;

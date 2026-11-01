@@ -320,12 +320,12 @@ pub fn sign_in() -> impl IntoElement {
 ```
 
 ```tsx tabs
-import { mount, signal, View, type YNode } from "nsh";
+import { type InputRef, mount, signal, View } from "nsh";
 import { Input } from "nsh/base";
 
 function SignIn() {
   const email = signal("");
-  let password!: YNode;
+  let password!: InputRef;
   const submit = () => console.log("sign in", email());
   return (
     <View style={{ flex: 1, padding: 16, paddingTop: 60, gap: 12 }}>
@@ -742,13 +742,13 @@ pub fn note() -> impl IntoElement {
 ```
 
 ```tsx tabs
-import { signal, Text, View, type YNode } from "nsh";
+import { type InputRef, signal, Text, View } from "nsh";
 import { Input } from "nsh/base";
 import { InputAccessoryView } from "nsh/mobile";
 
 function Note() {
   const text = signal("");
-  let input!: YNode;
+  let input!: InputRef;
   return (
     <View style={{ padding: 16 }}>
       <Input

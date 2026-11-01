@@ -67,7 +67,7 @@ function App() {
 
   effect(() => {
     // The bar is 40 points tall: the window controls are centered in it.
-    Window.setTitleBar(hidden() ? "hidden" : "default", 40);
+    Window.setTitleBar({ style: hidden() ? "hidden" : "default", height: 40 });
   });
 
   effect(() => {

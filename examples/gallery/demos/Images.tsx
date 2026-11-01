@@ -258,7 +258,10 @@ function Info() {
             variant="secondary"
             onPress={() => {
               prefetched.set("loading…");
-              Image.prefetch(big).then((ok) => prefetched.set(ok ? "in memory" : "failed"));
+              Image.prefetch(big).then(
+                () => prefetched.set("in memory"),
+                () => prefetched.set("failed"),
+              );
             }}
           />
         </View>

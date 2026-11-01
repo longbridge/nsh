@@ -1,4 +1,4 @@
-import { signal, Text, Video, View, WebView, type WebViewNavigation, type YNode } from "nsh";
+import { signal, Text, Video, type VideoRef, View, WebView, type WebViewNavigation, type WebViewRef } from "nsh";
 import { Icon } from "../icons";
 import { Badge, Button, Caption, Card, colors, DemoPage, finish, isDark, Meter, Press, radius, RoundButton, Segmented } from "../ui";
 
@@ -25,7 +25,7 @@ const frame = () => ({ borderRadius: radius.control, overflow: "hidden", borderW
 function Messaging() {
   const message = signal("");
   const sent = signal(0);
-  let web!: YNode;
+  let web!: WebViewRef;
   return (
     <Card icon="media" title="Web view" subtitle="Inline HTML, with messages both ways">
       <WebView ref={web} html={page()} style={{ height: 210, backgroundColor: colors.inset, ...frame() }} onMessage={(e) => message.set(e.data)} />
@@ -70,7 +70,7 @@ function NavButton(props: { flip?: boolean; enabled: boolean; label: string; onP
 
 function Site() {
   const state = signal<WebViewNavigation | null>(null);
-  let site!: YNode;
+  let site!: WebViewRef;
   const host = () => {
     const url = state()?.url ?? "";
     return url.replace(/^https?:\/\//, "").replace(/\/.*$/, "") || "…";
@@ -126,7 +126,7 @@ function Player() {
   const duration = signal(0);
   const buffering = signal(false);
   const failed = signal(false);
-  let video!: YNode;
+  let video!: VideoRef;
   return (
     <Card
       icon="play"

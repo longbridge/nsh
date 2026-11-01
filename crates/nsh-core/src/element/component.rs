@@ -403,23 +403,47 @@ pub struct ComponentSpec {
     pub generic: bool,
 }
 
+/// What makes a component's props', events' and methods' specs.
+type Specs = (
+    fn(&mut TsTypes) -> Vec<PropSpec>,
+    fn(&mut TsTypes) -> Vec<EventSpec>,
+    fn(&mut TsTypes) -> Vec<MethodSpec>,
+);
+
 impl ComponentSpec {
     pub(crate) fn of<C: Component>() -> Self {
+        Self::build(
+            name_of::<C>(),
+            C::DOC,
+            (C::Props::spec, C::Event::spec, C::METHODS.specs),
+            C::Props::LAZY_CHILDREN,
+            C::Props::GENERIC,
+        )
+    }
+
+    /// [`Self::of`] past what depends on the component's type.
+    #[inline(never)]
+    fn build(
+        name: &'static str,
+        doc: &'static str,
+        (props, events, methods): Specs,
+        lazy_children: bool,
+        generic: bool,
+    ) -> Self {
         let mut types = TsTypes::default();
-        let props = C::Props::spec(&mut types);
-        let events = C::Event::spec(&mut types);
-        let methods = (C::METHODS.specs)(&mut types);
-        let name = name_of::<C>();
+        let props = props(&mut types);
+        let events = events(&mut types);
+        let methods = methods(&mut types);
         Self {
             name,
             export: export_name(name).to_owned(),
-            doc: C::DOC,
+            doc,
             props,
             events,
             methods,
             types,
-            lazy_children: C::Props::LAZY_CHILDREN,
-            generic: C::Props::GENERIC,
+            lazy_children,
+            generic,
         }
     }
 
@@ -557,7 +581,7 @@ impl Root {
     }
 
     /// Shows the app in `appearance` whatever the system's (`nsh.json`
-    /// `"appearance"`; later [`super::ambient::set_color_scheme`] calls
+    /// `"appearance"`; later [`super::set_color_scheme`] calls
     /// change it).
     pub fn appearance(mut self, appearance: crate::platform::Appearance) -> Self {
         self.appearance = Some(appearance);
@@ -639,6 +663,29 @@ struct ClassType {
     type_name: &'static str,
 }
 
+/// The bar of one scroll view or list that the core asks a UI set to make
+/// ([`Registry::scrollbars_from`]).
+#[derive(Debug, Clone, Default)]
+#[non_exhaustive]
+pub struct BuiltInScrollbar {
+    /// The scroll view or list it scrolls.
+    pub target: crate::NodeId,
+    /// Whether that view scrolls sideways.
+    pub horizontal: bool,
+    /// The view's own theme (its `scrollbar` object, as JSON); `None`: the
+    /// app's.
+    pub theme: Option<Arc<crate::JsonValue>>,
+    /// The app's theme, as the set gave it
+    /// ([`set_builtin_scrollbars`](super::set_builtin_scrollbars)).
+    pub app_theme: Option<super::AnyValue>,
+}
+
+/// Makes the built-in bar of a scroll view or list: a component element,
+/// which the core lays out over the view's viewport and keeps there as
+/// it scrolls; `None` leaves the view the platform's indicator
+/// ([`Registry::scrollbars_from`]).
+pub type ScrollbarSource = fn(&BuiltInScrollbar) -> Option<super::AnyElement>;
+
 /// What a UI set exports to JS: its components and modules, and what it
 /// passes on from the runtime. Cheap to clone.
 #[derive(Clone, Default)]
@@ -662,6 +709,8 @@ pub struct Registry {
     assets: Arc<Vec<&'static [super::AssetFile]>>,
     /// Makes the design tokens of a theme ([`Registry::tokens_from`]).
     tokens: Option<super::TokenSource>,
+    /// Makes the views' built-in scroll bars ([`Registry::scrollbars_from`]).
+    scrollbars: Option<ScrollbarSource>,
     /// The UI sets served under paths of this one's specifier
     /// ([`Registry::submodule`]).
     submodules: Arc<Vec<Registry>>,
@@ -695,10 +744,26 @@ impl Registry {
     #[track_caller]
     pub fn register<C: Component>(&mut self) -> &mut Self {
         let spec = ComponentSpec::of::<C>();
+        let mut refs = Vec::new();
+        (C::METHODS.refs)(&mut refs);
+        self.register_erased(spec, make_instance::<C>, TypeId::of::<C>(), refs)
+    }
+
+    /// [`Self::register`] past what depends on the component's type: once,
+    /// not once per component.
+    #[track_caller]
+    #[inline(never)]
+    fn register_erased(
+        &mut self,
+        spec: ComponentSpec,
+        make: fn() -> Box<dyn AnyInstance>,
+        id: TypeId,
+        refs: Vec<&'static ClassDef>,
+    ) -> &mut Self {
         let types = Arc::make_mut(&mut self.types);
         if let Some(old) = types.get(spec.name) {
             let set = self.ui_set.or(self.namespace);
-            panic!("{}", same_name(spec.name, old.id, TypeId::of::<C>(), set));
+            panic!("{}", same_name(spec.name, old.id, id, set));
         }
         if self.classes.keys().any(|(_, name)| *name == spec.export) {
             panic!(
@@ -721,12 +786,10 @@ impl Registry {
             spec.name,
             ComponentType {
                 spec: Arc::new(spec),
-                make: make_instance::<C>,
-                id: TypeId::of::<C>(),
+                make,
+                id,
             },
         );
-        let mut refs = Vec::new();
-        (C::METHODS.refs)(&mut refs);
         self.classes_named(refs)
     }
 
@@ -858,6 +921,7 @@ impl Registry {
         let mut out = Self::default();
         for set in sets.iter().flat_map(Registry::sets) {
             out.tokens = out.tokens.or(set.tokens);
+            out.scrollbars = out.scrollbars.or(set.scrollbars);
             Arc::make_mut(&mut out.setups).extend(set.setups.iter().cloned());
             let types = Arc::make_mut(&mut out.types);
             for (name, ty) in set.types.iter() {
@@ -951,6 +1015,21 @@ impl Registry {
     pub fn tokens_from(&mut self, source: super::TokenSource) -> &mut Self {
         self.tokens = Some(source);
         self
+    }
+
+    /// Makes the built-in bar of the scroll views and lists that show one
+    /// ([`set_builtin_scrollbars`](super::set_builtin_scrollbars), or a
+    /// theme as their `scrollbar`) with `source`. Of the sets a host
+    /// serves, the first that has one makes them.
+    pub fn scrollbars_from(&mut self, source: ScrollbarSource) -> &mut Self {
+        self.scrollbars = Some(source);
+        self
+    }
+
+    /// How the set makes the views' built-in scroll bars
+    /// ([`Registry::scrollbars_from`]).
+    pub(crate) fn scrollbar_source(&self) -> Option<ScrollbarSource> {
+        self.scrollbars
     }
 
     /// Runs `f` once on each engine that serves the set, in its reactive
@@ -1256,7 +1335,7 @@ pub fn declarations(registry: &Registry, omit: &[&str]) -> String {
         } else {
             let _ = write!(
                 out,
-                "/** The ref of `{0}`: its methods. */\nexport interface {0}Ref {{\n  /** The component's host node. */\n  readonly node: YNode;\n",
+                "/** The ref of `{0}`: its methods. */\nexport interface {0}Ref {{\n  /** The component's host node. */\n  readonly node: ViewRef;\n",
                 spec.export
             );
             for m in &spec.methods {

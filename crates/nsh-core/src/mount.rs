@@ -566,6 +566,13 @@ pub struct InputConfig {
     pub accessory_id: Option<Box<str>>,
     /// The input accessory it names, if one is mounted.
     pub accessory: Option<NodeId>,
+    /// A multiline input shows its scroll indicator (`scrollbar`; false
+    /// while a built-in bar takes its place).
+    pub scrollbar_visible: bool,
+    /// A built-in bar of the app's takes the indicator's place: the
+    /// platform reports how far the text scrolled
+    /// (`EngineControl::input_scroll`) and takes `Command::ScrollTo`.
+    pub replaced: bool,
 }
 
 impl InputConfig {
@@ -611,6 +618,8 @@ impl Default for InputConfig {
             caret_hidden: false,
             accessory_id: None,
             accessory: None,
+            scrollbar_visible: true,
+            replaced: false,
         }
     }
 }
@@ -740,6 +749,10 @@ pub enum MountItem {
         horizontal: bool,
         /// Shows the scroll indicator.
         scrollbar_visible: bool,
+        /// A built-in bar of the app's takes the indicator's place (the
+        /// core's, over the viewport): the platform shows none on either
+        /// axis, also where a horizontal view keeps its own.
+        replaced: bool,
         /// Native animation value fed with the main-axis offset.
         scroll_value: Option<crate::animation::NodeId>,
         /// Native animation value fed with how far it is pulled past its
@@ -860,7 +873,10 @@ pub enum MountItem {
         label: Option<Arc<str>>,
     },
     /// Animate the frame changes, insertions and removals that follow in
-    /// this batch.
+    /// this batch, until the next one replaces it: a batch may lead runs
+    /// of frames with different ones, an empty one for frames that do not
+    /// animate (`core/layout_scope.rs`). Platforms animate each frame with
+    /// the one before it.
     LayoutAnimation(LayoutAnimation),
     /// An animation graph change, in order with the other items.
     Animation(AnimationOp),

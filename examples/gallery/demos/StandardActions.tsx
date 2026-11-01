@@ -114,7 +114,7 @@ export function StandardActions() {
     return <Action name="Request host exit" detail="process.exit(0) · Gallery keeps this demo open by denying exit requests" action={async () => {
       try { process.exit(0); }
       catch (error) {
-        if (!(error instanceof TypeError) || !error.message.includes("process.exit() is not granted")) throw error;
+        if (!(error instanceof Error) || !("code" in error) || error.code !== "ERR_ACCESS_DENIED") throw error;
         return "Exit request blocked by Gallery policy. You can continue exploring.";
       }
       return "Exit requested from the host";
@@ -122,7 +122,7 @@ export function StandardActions() {
   }
   function Tcp() {
     return <Action name="TCP" detail={platform.os === "web" ? "net.connect · browser hosts return an unsupported-operation error" : "net.connect · Socket.write/read/close · local echo on 127.0.0.1:9876"} action={async () => {
-      const socket = await net.connect("127.0.0.1", 9876);
+      const socket = await net.connect({ host: "127.0.0.1", port: 9876 });
       const close = () => socket.close();
       if (disposed) { close(); return "Closed"; }
       release.add(close);

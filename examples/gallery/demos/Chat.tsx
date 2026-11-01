@@ -1,4 +1,4 @@
-import { batch, cleanup, computed, effect, List, Scroll, signal, Text, View, type ViewStyle, type YNode } from "nsh";
+import { batch, cleanup, computed, effect, List, type ListRef, Scroll, signal, Text, View, type ViewStyle } from "nsh";
 import { createAnimatedValue, LayoutAnimation } from "nsh";
 import { Clipboard } from "nsh";
 import { platform } from "nsh";
@@ -52,7 +52,7 @@ export function Chat() {
 
   const messages = signal<Msg[]>([]);
   const model = signal<Model>("Swift");
-  const native = platform.idiom === "desktop" && platform.os !== "web";
+  const native = platform.desktop && platform.os !== "web";
   const provider = signal<Provider>("Codex");
   let cancelLocal: (() => void) | undefined;
   const draft = signal("");
@@ -75,7 +75,7 @@ export function Chat() {
   /** Whether the user is at the bottom (the list then follows the stream
    * natively, `maintainVisibleContentPosition`); scrolling up clears it. */
   const following = signal(true);
-  let list: YNode | undefined;
+  let list: ListRef | undefined;
   let dragging = false;
 
   type Run = { id: string; model: Model; script: string; cancelled: boolean; md: string; reason: string; thinkStart: number; thinkSeconds: number | null };
@@ -760,7 +760,7 @@ export function Chat() {
               multiline
               // Return sends on desktops, as in chat apps there (Shift+Return
               // adds a line); phones keep return for line breaks.
-              submitBehavior={platform.idiom === "desktop" ? "submit" : "newline"}
+              submitBehavior={platform.desktop ? "submit" : "newline"}
               onSubmit={() => {
                 if (!streaming()) send();
               }}

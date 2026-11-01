@@ -1,4 +1,4 @@
-import { type JSX, signal, Text, View, type YNode } from "nsh";
+import { type InputRef, type JSX, signal, Text, View, type ViewRef } from "nsh";
 import { announce, reduceMotion, screenReaderEnabled, setAccessibilityFocus } from "nsh";
 import { LayoutAnimation } from "nsh";
 import { locale, pixelRatio, platform } from "nsh";
@@ -204,7 +204,7 @@ function PressFeedback() {
 
 function Accessory() {
   const text = signal("");
-  let input: YNode | undefined;
+  let input: InputRef | undefined;
   return (
     <Card icon="text" title="Input accessory" subtitle="A bar over the iOS keyboard" right={<Badge label="nsh/ios" />}>
       <Field
@@ -215,7 +215,7 @@ function Accessory() {
         ios={{ inputAccessoryViewID: "counter" }}
       />
       <Caption
-        label={platform.idiom === "desktop" ? "Desktops have no input accessories" : platform.os === "android" ? "Android has no input accessories" : "The bar counts what you type"} note='inputAccessoryViewID="counter"' />
+        label={platform.desktop ? "Desktops have no input accessories" : platform.os === "android" ? "Android has no input accessories" : "The bar counts what you type"} note='inputAccessoryViewID="counter"' />
       <InputAccessoryView nativeID="counter" style={{ backgroundColor: colors.surface }}>
         <View
           style={{
@@ -331,7 +331,7 @@ function PlatformInfo() {
   const rows = (): [string, string][] => [
     ["platform.os", platform.os],
     ["platform.version", platform.version],
-    ["platform.idiom / catalyst", `${platform.idiom} / ${platform.catalyst}`],
+    ["platform.idiom / desktop / catalyst", `${platform.idiom} / ${platform.desktop} / ${platform.catalyst}`],
     ["platform.select", platform.select({ ios: "ios branch", android: "android branch" }) ?? ""],
     ["pixelRatio()", String(pixelRatio())],
     ["10.3 on whole pixels", String(Math.round(10.3 * pixelRatio()) / pixelRatio())],
@@ -340,7 +340,7 @@ function PlatformInfo() {
     ["locale()", locale()],
   ];
   const announced = signal(0);
-  let target: YNode | undefined;
+  let target: ViewRef | undefined;
   return (
     <Card icon="spark" title="Platform" subtitle="platform, pixelRatio, announce" right={<Badge label={platform.os} tone="accent" />}>
       <View>

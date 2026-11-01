@@ -5,7 +5,7 @@
 use crate::{
     Command, ROOT_ID,
     desktop::{DesktopCommand, MenuBarMode, TitleBarStyle, WindowFrame, WindowLevel},
-    element::{ModuleCx, module, task::Action},
+    element::{JsObject, ModuleCx, module, task::Action},
     geometry::Points,
 };
 
@@ -20,6 +20,15 @@ fn desktop(cx: &mut ModuleCx, command: DesktopCommand) {
 #[module]
 pub(crate) struct Window;
 
+/// `Window.setTitleBar`'s options, in one object so more can join them.
+#[derive(Debug, Clone, Default, PartialEq, JsObject)]
+pub(crate) struct TitleBarOptions {
+    /// `"default"`: the system's title bar; `"hidden"`: the app's.
+    pub(crate) style: TitleBarStyle,
+    /// The app's bar's height in points; the platform's without it.
+    pub(crate) height: Option<f32>,
+}
+
 #[module]
 impl Window {
     /// Sets the window's title (the title bar, the taskbar / Dock, the
@@ -29,7 +38,7 @@ impl Window {
     }
 
     /// Shows the system's title bar (`"default"`) or hides it
-    /// (`"hidden"`): the app then fills the window up to its top edge and
+    /// (`"hidden"`), from `{ style, height }`: the app then fills the window up to its top edge and
     /// draws a title bar of its own, made draggable with
     /// `desktop={{ windowDrag: true }}`; the system's window controls stay,
     /// in the area `titleBar()` reports. `height` is the app's bar's height
@@ -38,9 +47,15 @@ impl Window {
     /// chrome up to 44 points and regular chrome above; use `titleBar().height`
     /// to lay out the bar at AppKit's actual height. An embedding host's
     /// existing toolbar keeps its own style and height.
-    pub(crate) fn set_title_bar(style: TitleBarStyle, height: Option<f32>, cx: &mut ModuleCx) {
-        let height = crate::desktop::title_bar_height(height.map(Points));
-        desktop(cx, DesktopCommand::SetTitleBar { style, height });
+    pub(crate) fn set_title_bar(options: TitleBarOptions, cx: &mut ModuleCx) {
+        let height = crate::desktop::title_bar_height(options.height.map(Points));
+        desktop(
+            cx,
+            DesktopCommand::SetTitleBar {
+                style: options.style,
+                height,
+            },
+        );
     }
 
     /// When the menu bar shows on Windows and Linux, where the window draws
@@ -71,8 +86,8 @@ impl Window {
 
     /// Moves and sizes the window in points; omitted fields keep their values.
     /// macOS and Windows use the outer frame, including window decorations;
-    /// Linux uses GTK's default window size. `x` and `y` are the bottom left
-    /// corner in macOS screen coordinates and the top left on Windows.
+    /// Linux uses GTK's default window size. `x` and `y` are the top left
+    /// corner, from the primary screen's top left with `y` growing down.
     /// `animated` enables macOS's resize animation (false by default).
     /// Sizing is supported on macOS, Windows and Linux; positioning and levels
     /// on macOS and Windows. A view embedded in another app's window leaves
@@ -84,7 +99,6 @@ impl Window {
             width: frame.width.filter(|v| v.is_finite() && v.0 > 0.0),
             height: frame.height.filter(|v| v.is_finite() && v.0 > 0.0),
             animated: frame.animated,
-            anchor_top: frame.anchor_top,
         };
         desktop(cx, DesktopCommand::SetFrame(frame));
     }

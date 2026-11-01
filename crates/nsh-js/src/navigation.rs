@@ -89,7 +89,7 @@ pub(crate) const EXPORTS: &[Item] = &[
         Export::Function(stack, 1),
         Ts::function(
             "A native navigation stack: UINavigationController on iOS (swipe back,\nnative header), a stack with a toolbar and predictive back on Android.\nPages stay mounted (with their state) while they are in the stack.",
-            &["<R>(props: NavStackProps<R>): YNode"],
+            &["<R>(props: NavStackProps<R>): JSX.Element"],
         ),
     ),
     (
@@ -97,7 +97,7 @@ pub(crate) const EXPORTS: &[Item] = &[
         Export::Function(screen, 1),
         Ts::function(
             "One page of a `<NavStack>`: its `header` (desktops, the web) and the system\nheader's options (iOS, Android).",
-            &["(props: NavPageProps): YNode"],
+            &["(props: NavPageProps): JSX.Element"],
         ),
     ),
     (

@@ -1,4 +1,4 @@
-import { type JSX, mount, Scroll, signal, split, Text, View, type YNode } from "nsh";
+import { type InputRef, type JSX, mount, Scroll, signal, split, Text, View } from "nsh";
 import { Input, type InputProps } from "nsh/base";
 import { button, buttonText, desktop, field, tint, ui, wide } from "./palette";
 
@@ -37,7 +37,7 @@ function Field(props: InputProps & { label: string }) {
 function App() {
   const name = signal("");
   const taps = signal(0);
-  let nameInput: YNode | undefined;
+  let nameInput: InputRef | undefined;
 
   return (
     <Scroll style={{ flex: 1, backgroundColor: ui().page }}>

@@ -344,6 +344,11 @@ impl RootView {
             // No host answers `nsh/host` here: an embedding app talks to its
             // apps through its own UI sets (`nsh/native`).
             host: false,
+            // UIKit has no screen color sampler.
+            screen_color: false,
+            // No file dialogs, file manager or trash (Catalyst included):
+            // the default, so the core answers those requests.
+            ..Environment::default()
         };
         // The embedding app's settings over the system's.
         self.ivars().host.get().apply(&mut env);
@@ -524,6 +529,7 @@ impl RootView {
             trace: self.ivars().options.trace,
             network: Some(crate::net::network()),
             websocket: None,
+            refuse_connections: None,
             filesystem: None,
             assets: Some(Arc::new(crate::image::AssetReader(
                 self.ivars().options.asset_base.clone(),

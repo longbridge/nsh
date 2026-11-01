@@ -95,8 +95,11 @@ presses and the pointer's cursor. The active-line backgrounds are drawn in these
 The text and foreground decorations are the paint layer, drawn over the scroll views (`pointer_events(None)`)
 and moved by the offsets they report (`top(-scroll_y)`, `left(-scroll_x)`): the rows the offset needs and the offset
 itself come in the same commit, so a scroll bar dragged across a long file or a paste of many lines never shows a
-frame where the platform moved the content before the rows it needs were made. The paint layer's views keep the hit
-layer's handlers, so tests that press a row's text reach the same code. Only the rows in view are made, plus a
+frame where the platform moved the content before the rows it needs were made. No view of the paint layer is a
+target, the rows' texts included: a finger or a wheel on a row's glyphs reaches the scroll views below it, as on blank
+space (a text that took the pointer would hold it outside them: no scrolling, and the finger's lift a tap). Only a
+folded row's text takes presses, for its placeholder. The paint layer's views keep the hit layer's handlers, so tests
+that press a row's text reach the same code. Only the rows in view are made, plus a
 viewport and a half (at least 16 rows) ahead in the way they scroll and half a viewport behind, and at least 40 rows'
 height before the viewport is known. That window (`window.rs`'s `RowWindow`, which the `DiffView` shares) stays put
 while it covers the rows in view with half a viewport to spare, so most scroll frames change no rows and commit
@@ -131,7 +134,8 @@ itself lives in an `Rc<RefCell<State>>` outside the reactive graph.
 ### Typed text and input methods
 
 A native `Input` (the sink), invisible, 1 point wide and a row tall, is kept at the primary caret, so input methods
-open their candidate windows there and soft keyboards show. It lies over the scroll views, not in them, placed in the
+open their candidate windows there and soft keyboards show. It takes no pointer (`pointer_events(None)`, which the
+mobile platforms honor on inputs too): over the caret it would take the touches of the selection's end handle. It lies over the scroll views, not in them, placed in the
 editor's box (`Ed::in_editor`) and held inside it: the platforms scroll the scroll views around a focused field to
 show it, which the editor does itself for its caret, and doing it again moved the text under the caret by a margin,
 animated, when the editor took the focus. It holds only what was just typed: each `onChange` is
@@ -305,7 +309,7 @@ again for the echo of a controlled `value`. Building it is the one cost of an ed
 Unicode case folding, linear time whatever the query, `^` / `$` at every line's start and end, whole words by word
 boundaries. `findNext` / `findPrevious` (commands) select the next / previous match from the primary selection,
 wrapping; `replace(text)` replaces the current match and selects the next, `replaceAll(text)` replaces every match as
-one edit and returns how many. Replacements expand `$1` and `${name}` for regular expressions. `inSelection` keeps
+one edit and returns `{ count }` (`EditorReplaceAll`), how many. Replacements expand `$1` and `${name}` for regular expressions. `inSelection` keeps
 the matches inside a scope: what was selected when the search turned to the selection (the carets' lines when nothing
 was), kept while it stays on and carried through edits as marks are (`State::set_search`). The find bar is the app's;
 `findWithSelection` (`cmd+e`) reports the selected text (a caret: its word) with `onFindWithSelection` for it to take

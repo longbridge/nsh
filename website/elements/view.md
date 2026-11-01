@@ -1,7 +1,7 @@
 ---
 title: View
 description: "The basic container element: layout, backgrounds, borders, shadows, press handling and gestures."
-order: 2
+order: 10
 group: primitives
 demo: el-view
 ---
@@ -228,7 +228,7 @@ received files.
 
 ## Ref methods
 
-A plain view has no commands of its own. `ref` (`.element_ref(&handle)` in Rust) gives you its node, e.g. to pass to
+A plain view's ref is a `ViewRef`: `focus()`, `blur()` and `measure()`. `ref` (`.element_ref(&handle)` in Rust) gives you its node, e.g. to pass to
 `setAccessibilityFocus` ([`nsh`'s accessibility API](../modules/nsh.md#accessibility)), or to measure it
 (`handle.measure()` in Rust).
 

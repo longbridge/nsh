@@ -3,7 +3,8 @@
 An app is TSX importing NSH's modules. The bundler compiles each module with NSH's JSX compiler and rolldown bundles
 them into one ES module holding only the app's code (split into chunks loaded on demand for the web: "Split bundles"): imports of NSH's modules stay imports, and `nsh-js` serves them
 natively. The reactive graph, the renderer and every API apps import are Rust; nothing of NSH is JS. Apps cannot
-import `solid-js` (the bundler refuses it, pointing to `nsh`'s `signal` / `computed` / `effect` / ...). It also refuses a named import a
+import `solid-js` (the bundler refuses it, pointing to `nsh`'s `signal` / `computed` / `effect` / ...), nor a module named as
+NSH's that NSH does not have (`nsh/list`: the bundler refuses it, naming NSH's modules). It also refuses a named import a
 native module does not export, as the names `nsh-js` serves say (`native_module_exports`), when the code uses it as a
 value (types need no `type` keyword), with the place in the source and the closest export's name. Since those imports
 stay in the output, the bundle also says what the app uses of each native module (`Bundle::native_use`, `natives.rs`):
@@ -175,8 +176,9 @@ One Oxc pass removes TypeScript and lowers JSX (`plugin.rs` `compile_native`):
   new index and its item accessor follows; header, footer, empty and separator cells, viewability tokens (with
   `minimumViewTime`), `initialScrollIndex`. Rust components with rows (an `Items` prop) get a list of the app's data as
   their items slot.
-- Nodes have the methods of `YNode` (`_core.d.ts`: `focus`, `blur`, `setSelection`, `command`, `scrollTo`, `zoomTo`,
-  `scrollToOffset`, `scrollToIndex`, `scrollToEnd`, the web view's and video's): each sends a command
+- Nodes have the methods of the refs (`dom::NODE_METHODS`, declared per element by `declarations::REFS`: `ViewRef`'s
+  `focus`, `blur`, `measure`; `InputRef`'s `setSelection`, `ScrollRef`'s and `ListRef`'s scrolling, `WebViewRef`'s,
+  `VideoRef`'s `seek`, `NativeComponentRef`'s `command`; every node has them all at run time): each sends a command
   (`protocol::decode_command`); `measure` returns a promise the core settles after the turn's layout
   (`Command::Measure`, `elements.md`).
 

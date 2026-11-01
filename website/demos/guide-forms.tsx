@@ -1,4 +1,4 @@
-import { type JSX, mount, Scroll, signal, Text, View, type YNode } from "nsh";
+import { type InputRef, type JSX, mount, Scroll, signal, Text, View } from "nsh";
 import { Input } from "nsh/base";
 import { button, buttonText, desktop, field, Inspector, Panel, Stage, ui, wide } from "./palette";
 
@@ -12,9 +12,9 @@ function App() {
   const notesHeight = signal(0);
   const focused = signal("nothing");
   const sent = signal("");
-  let emailInput!: YNode;
-  let passwordInput!: YNode;
-  let notesInput!: YNode;
+  let emailInput!: InputRef;
+  let passwordInput!: InputRef;
+  let notesInput!: InputRef;
 
   let tries = 0;
   const submit = () => sent.set(`#${++tries}: signed up ${name() || "nobody"} <${email() || "no e-mail"}>`);

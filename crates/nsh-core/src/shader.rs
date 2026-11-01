@@ -273,6 +273,42 @@ pub fn source_hash(source: &str) -> u64 {
     hasher.finish()
 }
 
+/// What compiles the apps' shader sources in this module ([`Shader::compile`],
+/// which links naga).
+pub type Compile = fn(&str) -> Result<Shader, ShaderError>;
+
+#[cfg(target_arch = "wasm32")]
+thread_local! {
+    /// The compiler a web runtime linked: one built for an app that uses no
+    /// shader leaves it out, naga with it ([`set_compile`]).
+    static COMPILE: std::cell::Cell<Option<Compile>> = const { std::cell::Cell::new(None) };
+}
+
+/// Sets the compiler of this WebAssembly module's shader sources: the web
+/// runtime's gate for shaders sets it, so naga is linked only into the
+/// runtimes of apps that use shaders. The native backends always have
+/// [`Shader::compile`].
+#[cfg(target_arch = "wasm32")]
+pub fn set_compile(compile: Compile) {
+    COMPILE.with(|c| c.set(Some(compile)));
+}
+
+/// Compiles `source` with this module's compiler, if it has one.
+pub(crate) fn compile_source(source: &str) -> Result<Shader, ShaderError> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        match COMPILE.with(|c| c.get()) {
+            Some(compile) => compile(source),
+            None => Err(ShaderError::new(
+                "this web runtime has no shader compiler (it was linked for an app that \
+                 imports no `Shader`)",
+            )),
+        }
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    Shader::compile(source)
+}
+
 impl Shader {
     /// Checks and compiles the app's WGSL `source`, which defines
     /// `fn shade(uv: vec2f) -> vec4f` (module docs).

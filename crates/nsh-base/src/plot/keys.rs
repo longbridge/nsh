@@ -4,7 +4,11 @@
 //! pointer drives. `gpui-base`'s plot has no keyboard of its own and
 //! WAI-ARIA has no pattern for charts, so the keys are the few a row
 //! picker takes (a slider's Left / Right / Home / End, a listbox's
-//! Escape) and nothing more.
+//! Escape) and nothing more. As a slider's arrows in a right-to-left
+//! layout, Left and Right follow the screen: on a reversed x scale (the
+//! first row at the right edge) Right moves to the row before, while Home
+//! and End, and screen readers' increment and decrement, keep the rows'
+//! order.
 //!
 //! The app's shortcuts are window-wide (`on_key_with`), so the plot binds
 //! its keys only while it has the focus (as `DataTable` does), and Escape
@@ -26,6 +30,18 @@ pub(super) enum Step {
     First,
     /// The last row (End).
     Last,
+}
+
+impl Step {
+    /// The step the other arrow takes: Left's and Right's swapped, the
+    /// others as they are.
+    fn mirrored(self) -> Self {
+        match self {
+            Step::Previous => Step::Next,
+            Step::Next => Step::Previous,
+            step => step,
+        }
+    }
 }
 
 /// The row `step` moves the hover to from `from`, among `len` rows of
@@ -73,15 +89,23 @@ const KEYS: &[(&str, bool, Step)] = &[
 ];
 
 /// Binds the plot's keys while `active` (focused and interactive): each
-/// moves the hover to the row `to` finds for its step; Escape (`go(None)`)
-/// only while a row is `hovered`.
+/// moves the hover to the row `to` finds for its step, Left's and Right's
+/// swapped while `mirrored` (the rows run right to left); Escape
+/// (`go(None)`) only while a row is `hovered`.
 pub(super) fn bind(
     active: impl Fn() -> bool + Copy + 'static,
+    mirrored: impl Fn() -> bool + Copy + 'static,
     hovered: Signal<Option<u32>>,
     to: impl Fn(Step) -> Option<u32> + Copy + 'static,
     go: impl Fn(Option<u32>) + Copy + 'static,
 ) {
-    bind_while(active, KEYS, move |step| go(to(step)));
+    bind_while(active, KEYS, move |step: Step| {
+        let step = match mirrored() {
+            true => step.mirrored(),
+            false => step,
+        };
+        go(to(step))
+    });
     let hovering = computed(move || hovered.get().is_some());
     bind_while(
         move || active() && hovering.get(),
@@ -114,5 +138,15 @@ mod tests {
         // No row placed: nothing to hover.
         assert_eq!(step(0, |_| true, None, Step::Next), None);
         assert_eq!(step(1, |_| false, Some(0), Step::Next), None);
+    }
+
+    /// Mirrored (a reversed x scale), Left and Right swap their steps and
+    /// Home and End keep theirs.
+    #[test]
+    fn mirrored_arrows_swap_their_steps() {
+        assert_eq!(Step::Next.mirrored(), Step::Previous);
+        assert_eq!(Step::Previous.mirrored(), Step::Next);
+        assert_eq!(Step::First.mirrored(), Step::First);
+        assert_eq!(Step::Last.mirrored(), Step::Last);
     }
 }
