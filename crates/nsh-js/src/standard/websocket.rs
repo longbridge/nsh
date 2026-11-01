@@ -4,7 +4,9 @@
 //! As a browser's, the constructor throws only for a wrong use (a bad URL
 //! or protocol: `SyntaxError`); a URL the app's network capabilities do
 //! not grant opens no connection, and the socket fires `error` and then
-//! `close` (code 1006, not clean), as a refused connection does. A used-up
+//! `close` (code 1006, not clean), as a refused connection does; so does
+//! one the host refuses (a test's network,
+//! `nsh_core::element::System::refuse_connections`). A used-up
 //! quota (32 WebSockets per VM, shared with the `websocket` module) throws
 //! `ERR_NSH_QUOTA_EXCEEDED`, a platform without WebSockets
 //! `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`.
@@ -68,6 +70,17 @@ fn denial(url: &url::Url) -> String {
     format!(
         "a WebSocket to `{url}` is not granted; add its host to capabilities.network.hosts or a GET rule in capabilities.network.http"
     )
+}
+
+/// Why the host refuses a WebSocket to `url` before it reaches the network
+/// (a test's network: `nsh_core::element::System::refuse_connections`), if
+/// it does.
+fn host_refusal(cx: &Ctx<'_>, url: &url::Url) -> Option<String> {
+    let refuse = crate::dom::shared(cx.as_raw().as_ptr())
+        .system_refuse_connections
+        .borrow()
+        .clone()?;
+    Some(refuse(url.as_str()).message().to_owned())
 }
 
 /// The transport of a WebSocket that opens no connection: as a browser's
@@ -184,6 +197,9 @@ fn open<'js>(
         .allows_websocket(parsed.as_str())
     {
         return refused(cx, callback, denial(&parsed));
+    }
+    if let Some(message) = host_refusal(&cx, &parsed) {
+        return refused(cx, callback, message);
     }
     let slot = slot(&cx)?;
     let events = Rc::new(RefCell::new(Events::default()));

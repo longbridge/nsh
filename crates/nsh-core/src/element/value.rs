@@ -505,6 +505,66 @@ impl JsValue for crate::geometry::Size<crate::geometry::Points> {
     }
 }
 
+/// What an image shows, as `<Image>`'s `src` takes it (a Rust component's
+/// image prop): decoded by `<Image>`'s own decoder and declared with its
+/// type, so the two take the same values (a URL, an `asset:/` or `data:`
+/// URI, a `blob:` URL, an imported `ImageAsset` with its size and scales).
+/// A `blob:` URL takes its blob's bytes from the VM, as `<Image>`'s does
+/// ([`super::JsHost::image_blob`]). An empty string is an empty source: no
+/// image.
+impl JsValue for super::ImageSrc {
+    fn ts_type(types: &mut TsTypes) -> String {
+        <crate::ImageSource as crate::js::host::HostValue>::ts_type(types)
+    }
+
+    fn from_js(value: JsIn<'_>) -> Result<Self, PropError> {
+        use crate::js::host::{HostCx, HostValue};
+        // A source is a string or a small object, decoded when the prop is
+        // set: through JSON, `<Image>`'s decoder reads it as it reads a
+        // host prop.
+        let json = value.to_json()?;
+        let input = super::animated::JsonInput(Some(&json));
+        match crate::ImageSource::decode(&input, &mut HostCx::default()) {
+            Some(source) => {
+                let (uri, data) = match source.uri.starts_with("blob:") {
+                    true => match value.host().image_blob(&source.uri) {
+                        Some((key, data)) => (key, Some(data)),
+                        None => (source.uri, None),
+                    },
+                    false => (source.uri, None),
+                };
+                Ok(Self {
+                    uri: uri.into(),
+                    size: source.size.map(|s| (s.width.0, s.height.0)),
+                    scales: source.scales,
+                    data,
+                })
+            }
+            None if json.as_str() == Some("") => Ok("".into()),
+            None => Err(value.expected("a URL or an imported image")),
+        }
+    }
+
+    fn to_js<'a>(&self, host: &'a dyn JsHost) -> Result<JsOwned<'a>, PropError> {
+        if self.size.is_none() && self.scales.is_empty() {
+            return self.uri.to_js(host);
+        }
+        let owned = JsOwned::new(host, host.new_object()?);
+        let object = owned.get().raw();
+        host.set_field(object, "url", self.uri.to_js(host)?.into_raw())?;
+        if let Some((w, h)) = self.size {
+            let size =
+                crate::geometry::size(crate::geometry::Points(w), crate::geometry::Points(h));
+            host.set_field(object, "size", size.to_js(host)?.into_raw())?;
+        }
+        if !self.scales.is_empty() {
+            let scales: Vec<f32> = self.scales.iter().collect();
+            host.set_field(object, "scales", scales.to_js(host)?.into_raw())?;
+        }
+        Ok(owned)
+    }
+}
+
 /// A rectangle in points: TS's `Bounds` (`{ origin, size }`), as events
 /// carry it.
 impl JsValue for crate::geometry::Bounds<crate::geometry::Points> {
@@ -942,6 +1002,53 @@ mod tests {
             .unwrap_err()
             .0;
         assert!(error.starts_with("`c`: "), "{error}");
+    }
+
+    /// An image prop takes what `<Image>`'s `src` takes, read by the same
+    /// decoder and declared with the same type: a URL, an imported asset
+    /// with its size and scales, an empty string (no image); anything else
+    /// is refused. It goes back to JS in the form it came in.
+    #[test]
+    fn image_sources_read_as_images_read_them() {
+        use crate::element::{ImageSrc, TsTypes};
+        let host = JsonHost::default();
+        let read = |json| ImageSrc::from_js(JsIn::new(&host, host.value(json)));
+        let url = read(serde_json::json!("https://example.com/ada.png")).unwrap();
+        assert_eq!(url, ImageSrc::from("https://example.com/ada.png"));
+        assert_eq!(
+            host.read(url.to_js(&host).unwrap()),
+            Some(serde_json::json!("https://example.com/ada.png"))
+        );
+        let asset = serde_json::json!({
+            "url": "asset:/ada.png",
+            "size": { "width": 48, "height": 48 },
+            "scales": [1, 2, 2.5, 3],
+        });
+        let read_asset = read(asset).unwrap();
+        assert_eq!(read_asset.size, Some((48.0, 48.0)));
+        assert_eq!(
+            read_asset.scales.iter().collect::<Vec<_>>(),
+            [1.0, 2.0, 3.0]
+        );
+        // Written back, it reads as the same asset (whatever form its
+        // numbers take in JSON).
+        let written = host.read(read_asset.to_js(&host).unwrap()).unwrap();
+        assert_eq!(read(written).unwrap(), read_asset);
+        assert!(read(serde_json::json!("")).unwrap().is_empty());
+        // A host without blobs keeps a `blob:` URL as it is, with no bytes.
+        let blob = read(serde_json::json!("blob:nsh://app/1")).unwrap();
+        assert_eq!((blob.uri.as_str(), blob.data), ("blob:nsh://app/1", None));
+        for bad in [
+            serde_json::json!(3),
+            serde_json::json!({ "uri": "https://example.com/a.png" }),
+            serde_json::json!(true),
+        ] {
+            assert!(read(bad.clone()).is_err(), "{bad}");
+        }
+        assert_eq!(
+            ImageSrc::ts_type(&mut TsTypes::default()),
+            <crate::ImageSource as crate::js::host::HostValue>::ts_type(&mut TsTypes::default())
+        );
     }
 
     /// A percentage as CSS writes it; anything else is not one.

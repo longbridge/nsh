@@ -606,3 +606,36 @@ test("a paused WebSocket holds its events, in order, until the engine resumes it
     globalThis.WebSocket = saved;
   }
 });
+
+test("a plain Shader uploads the whole built-ins block, progress and overflow at 0", () => {
+  const { player } = fakePlayer();
+  const uploads = [];
+  const gl = new Proxy(
+    {
+      UNIFORM_BUFFER: "uniform",
+      canvas: { width: 0, height: 0, transferToImageBitmap: () => "bitmap" },
+      bufferData: (target, data) => uploads.push([target, Array.from(data)]),
+    },
+    { get: (gl, name) => (name in gl ? gl[name] : () => {}) },
+  );
+  Object.assign(player, {
+    shaderGl: () => gl,
+    shaderProgram: () => ({ program: {}, builtins: {}, uniforms: null, vao: {} }),
+    zoomOf: () => 1,
+  });
+  const el = {
+    _frame: [0, 0, 100, 50],
+    _shader: { layer: {}, words: new Uint32Array(0), kept: 1500, since: null },
+    _shaderCanvas: { width: 0, height: 0, getContext: () => ({ transferFromImageBitmap() {} }) },
+  };
+  const saved = globalThis.devicePixelRatio;
+  globalThis.devicePixelRatio = 2;
+  try {
+    player.renderShader(el, 0);
+  } finally {
+    globalThis.devicePixelRatio = saved;
+  }
+  // `struct Nsh`, 32 bytes as core's `shader::builtins` lays it out: size,
+  // time, scale, progress, overflow and padding.
+  assert.deepEqual(uploads, [["uniform", [100, 50, 1.5, 2, 0, 0, 0, 0]]]);
+});

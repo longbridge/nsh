@@ -66,7 +66,7 @@ fn Links() -> impl IntoElement {
 fn a_press_opens_a_site_through_the_system_and_reports_open_then_press() {
     let mut app = start::<Links>();
     app.press("role:link[Docs]").unwrap();
-    app.wait_for("log:docs open https://example.com/docs,docs press")
+    app.wait_for("text:log:docs open https://example.com/docs,docs press")
         .unwrap();
     assert_eq!(app.screen().opened_urls(), ["https://example.com/docs"]);
 }
@@ -75,7 +75,7 @@ fn a_press_opens_a_site_through_the_system_and_reports_open_then_press() {
 fn with_open_with_app_the_app_opens_it_and_nothing_else_does() {
     let mut app = start::<Links>();
     app.press("role:link[Order 42]").unwrap();
-    app.wait_for("log:order open /orders/42,order press")
+    app.wait_for("text:log:order open /orders/42,order press")
         .unwrap();
     assert!(app.screen().opened_urls().is_empty());
 }
@@ -84,7 +84,7 @@ fn with_open_with_app_the_app_opens_it_and_nothing_else_does() {
 fn a_path_of_the_apps_is_only_reported() {
     let mut app = start::<Links>();
     app.press("role:link[Help]").unwrap();
-    app.wait_for("log:help open /help,help press").unwrap();
+    app.wait_for("text:log:help open /help,help press").unwrap();
     assert!(app.screen().opened_urls().is_empty());
 }
 
@@ -93,11 +93,11 @@ fn return_and_space_each_open_the_focused_link() {
     let mut app = start::<Links>();
     app.press_key("tab").unwrap();
     app.press_key("enter").unwrap();
-    app.wait_for("log:docs open https://example.com/docs,docs press")
+    app.wait_for("text:log:docs open https://example.com/docs,docs press")
         .unwrap();
     app.press_key("space").unwrap();
     app.wait_for(
-        "log:docs open https://example.com/docs,docs press,docs open https://example.com/docs,docs press",
+        "text:log:docs open https://example.com/docs,docs press,docs open https://example.com/docs,docs press",
     )
     .unwrap();
     assert_eq!(app.screen().opened_urls().len(), 2);
@@ -109,8 +109,8 @@ fn a_disabled_link_is_inert_and_keeps_presses_from_what_is_around_it() {
     assert!(!app.screen().enabled("role:link[Archived]").unwrap());
     assert!(app.press("role:link[Archived]").is_err());
     app.wait(Duration::from_millis(50)).unwrap();
-    app.wait_for("log:").unwrap();
-    app.wait_for("card:0").unwrap();
+    app.wait_for("text:log:").unwrap();
+    app.wait_for("text:card:0").unwrap();
     assert!(app.screen().opened_urls().is_empty());
     assert!(
         app.screen()
@@ -124,7 +124,7 @@ fn a_disabled_link_is_inert_and_keeps_presses_from_what_is_around_it() {
         app.press_key("tab").unwrap();
     }
     app.press_key("enter").unwrap();
-    app.wait_for("card:1").unwrap();
+    app.wait_for("text:card:1").unwrap();
 }
 
 #[test]

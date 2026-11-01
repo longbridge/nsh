@@ -23,6 +23,7 @@ function engine({ manual = true } = {}) {
       case 1007: state.listener = args[0]; return undefined;
       case 1008: state.ops.push(["start", ...args]); return ++state.next;
       case 1009: state.ops.push(["cancel", args[0]]); return undefined;
+      case 1010: return state.refuse ? `${args[0]}: refused` : undefined;
       default: throw new Error(`unknown operation ${op}`);
     }
   };
@@ -168,6 +169,41 @@ test("fetch goes through the engine's network", async () => {
   host.event(id, 2);
   assert.deepEqual(await response.json(), { id: 1 });
   assert.ok(wakes >= 4);
+});
+
+test("a WebSocket the engine refuses opens nothing: error, then close", async () => {
+  class NativeWebSocket extends EventTarget {
+    static CONNECTING = 0;
+    static OPEN = 1;
+    static CLOSING = 2;
+    static CLOSED = 3;
+    constructor(...args) { super(); this.args = args; }
+  }
+  class CloseEvent extends Event {
+    constructor(type, init) { super(type); Object.assign(this, init); }
+  }
+  const target = { ...realm(), WebSocket: NativeWebSocket, Event, CloseEvent, EventTarget, DOMException, URL };
+  const host = engine({ manual: false });
+  host.state.refuse = true;
+  let wakes = 0;
+  installTesting(target, host.call, { network: true, wake: () => wakes++ });
+  const socket = new target.WebSocket("https://example.com/live");
+  assert.ok(socket instanceof target.WebSocket && socket instanceof NativeWebSocket);
+  assert.equal(socket.url, "wss://example.com/live");
+  assert.equal(socket.readyState, target.WebSocket.CONNECTING);
+  assert.throws(() => socket.send("x"), { name: "InvalidStateError" });
+  const heard = [];
+  socket.onerror = event => heard.push(["error", event.message]);
+  socket.addEventListener("close", event => heard.push(["close", event.code, event.wasClean]));
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(heard, [["error", "wss://example.com/live: refused"], ["close", 1006, false]]);
+  assert.equal(socket.readyState, target.WebSocket.CLOSED);
+  assert.ok(wakes >= 1);
+  // Live: the browser's own.
+  host.state.refuse = false;
+  const live = new target.WebSocket("ws://example.com/", "chat");
+  assert.deepEqual(live.args, ["ws://example.com/", "chat"]);
+  assert.ok(live instanceof target.WebSocket);
 });
 
 test("a failed request rejects with a TypeError", async () => {

@@ -2609,7 +2609,9 @@ class Player {
     gl.bindVertexArray(program.vao);
     if (program.builtins) {
       gl.bindBuffer(gl.UNIFORM_BUFFER, program.builtins);
-      gl.bufferData(gl.UNIFORM_BUFFER, new Float32Array([w, h, Math.max(0, time), pw / Math.max(w, 1e-6)]), gl.DYNAMIC_DRAW);
+      // `struct Nsh` (core's `shader::builtins`, 32 bytes): size, time,
+      // scale, then progress and overflow, which a plain Shader leaves at 0.
+      gl.bufferData(gl.UNIFORM_BUFFER, new Float32Array([w, h, Math.max(0, time), pw / Math.max(w, 1e-6), 0, 0, 0, 0]), gl.DYNAMIC_DRAW);
       gl.bindBufferBase(gl.UNIFORM_BUFFER, 0, program.builtins);
     }
     if (program.uniforms) {

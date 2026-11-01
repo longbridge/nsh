@@ -521,12 +521,7 @@ final class Mounter {
                 case INPUT_CONTENT: {
                     View v = views.get(b.getInt());
                     float x = b.getFloat(), y = b.getFloat(), w = b.getFloat(), h = b.getFloat();
-                    if (v instanceof InputBox) {
-                        InputBox in = (InputBox) v;
-                        Box.Frame f = Box.frame(in);
-                        int width = f.right - f.left, height = f.bottom - f.top;
-                        in.setContent(px(x), px(y), Math.max(0, width - px(x + w)), Math.max(0, height - px(y + h)));
-                    }
+                    if (v instanceof InputBox) ((InputBox) v).setContent(px(x), px(y), px(x + w) - px(x), px(y + h) - px(y));
                     break;
                 }
                 case COMMAND: command(b, objects); break;
@@ -1283,11 +1278,18 @@ final class Mounter {
         if (v instanceof TextBox) ((TextBox) v).setColor(false, 0);
     }
 
-    /** `perspective` as a camera distance (React Native's normalization). */
+    /**
+     * `perspective` as a camera distance (React Native's normalization), set
+     * only when it moves: `setCameraDistance` invalidates the view on every
+     * call, and animated values and transitions come here each frame with
+     * the distance unchanged.
+     */
     private void setPerspective(View v, float term) {
         if (term == 0) term = 0.00078125f;
-        float distance = -1 / term;
-        v.setCameraDistance(density * density * distance * (float) Math.sqrt(5));
+        float distance = Math.abs(density * density * (-1 / term) * (float) Math.sqrt(5));
+        // The view keeps it divided by the screen's dpi: equal within a hair.
+        if (Math.abs(Math.abs(v.getCameraDistance()) - distance) <= distance * 1e-5f) return;
+        v.setCameraDistance(distance);
     }
 
     /** Press feedback of a view: `delayLongPress`, `android_ripple`. */
@@ -1938,11 +1940,19 @@ final class Mounter {
                 if (v instanceof InputBox) {
                     ((InputBox) v).blur();
                 } else if (id == 1) {
+                    // Keyboard.dismiss(): hide the keyboard even when the field that showed it is gone (a page that
+                    // closed with it), which leaves no focused view in the host but the keyboard still up. Not when
+                    // an editor outside the host has it (the embedding app's, another NshView's): they share the window.
                     View f = host.findFocus();
-                    if (f != null && f != host) {
-                        InputMethodManager imm = (InputMethodManager) context.getSystemService(Context.INPUT_METHOD_SERVICE);
+                    InputMethodManager imm = (InputMethodManager) context.getSystemService(Context.INPUT_METHOD_SERVICE);
+                    if (f != null) {
                         imm.hideSoftInputFromWindow(f.getWindowToken(), 0);
-                        host.requestFocus();
+                        if (f != host) host.requestFocus();
+                    } else {
+                        View other = host.getRootView().findFocus();
+                        if (other == null || !other.onCheckIsTextEditor() || !imm.isActive(other)) {
+                            imm.hideSoftInputFromWindow(host.getWindowToken(), 0);
+                        }
                     }
                 }
                 break;

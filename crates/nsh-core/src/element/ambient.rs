@@ -276,15 +276,24 @@ pub fn os_version() -> (u16, u16) {
         .with_untracked(|e| e.os_version)
 }
 
-/// The kind of device (TS: `platform.idiom`, `platform.catalyst`).
+/// The kind of device (TS: `platform.idiom`): [`Idiom::Desktop`] exactly
+/// where [`is_desktop`] holds ([`Idiom::reported_on`]).
 pub fn idiom() -> Idiom {
     with_data(|d| d.ambient.env.as_ref().map(|e| e.env))
         .expect("the core sets the environment")
-        .with_untracked(|e| e.idiom)
+        .with_untracked(|e| e.idiom.reported_on(e.os))
 }
 
-/// Whether desktop behavior applies: a desktop OS, or a browser in the
-/// desktop idiom (TS: `platform.idiom` `"desktop"`); it does not change.
+/// Whether the app runs under Mac Catalyst, in every idiom (TS:
+/// `platform.catalyst`, [`Os::is_catalyst`]); Catalyst is mobile, not
+/// desktop.
+pub fn is_catalyst() -> bool {
+    os().is_catalyst()
+}
+
+/// Whether desktop behavior applies, NSH's one definition of desktop: a
+/// desktop OS (macOS, Windows, Linux), or a browser in the desktop idiom
+/// (TS: `platform.desktop`, [`Idiom::desktop_on`]); it does not change.
 pub fn is_desktop() -> bool {
     with_data(|d| d.ambient.env.as_ref().map(|e| e.env))
         .expect("the core sets the environment")

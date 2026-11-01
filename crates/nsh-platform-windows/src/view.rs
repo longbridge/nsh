@@ -118,9 +118,10 @@ pub(crate) trait Hosted {
         false
     }
 
-    /// A wheel or touchpad scroll at `(x, y)` (item coordinates) for a
-    /// [`Hosted::raw`] item; true when it took it (else the scroll views
-    /// around it get it).
+    /// A wheel or touchpad scroll at `(x, y)` (item coordinates): for a
+    /// [`Hosted::raw`] item under the pointer, or any other item of the
+    /// view under it (a native component); true when it took it (else the
+    /// scroll views around it get it).
     fn wheel(&self, x: f32, y: f32, event: &crate::input::WheelEvent) -> bool {
         let _ = (x, y, event);
         false
