@@ -105,16 +105,36 @@ fn uris(paths: &[std::path::PathBuf]) -> Vec<String> {
         .collect()
 }
 
+/// An absolute path to `name` for tests: `/tmp/name`, or `C:\tmp\name` on
+/// Windows, where a path without a drive is not absolute.
+#[cfg(test)]
+pub(crate) fn test_path(name: &str) -> String {
+    if cfg!(windows) {
+        format!(r"C:\tmp\{name}")
+    } else {
+        format!("/tmp/{name}")
+    }
+}
+
+/// The `file:` URL of [`test_path`]`(name)`, `escaped` being `name`
+/// percent-encoded.
+#[cfg(test)]
+pub(crate) fn test_url(escaped: &str) -> String {
+    if cfg!(windows) {
+        format!("file:///C:/tmp/{escaped}")
+    } else {
+        format!("file:///tmp/{escaped}")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn only_absolute_paths_become_file_urls() {
-        let paths = ["/tmp/a b.txt", "relative.txt", "/tmp/é"].map(std::path::PathBuf::from);
-        assert_eq!(
-            uris(&paths),
-            ["file:///tmp/a%20b.txt", "file:///tmp/%C3%A9"]
-        );
+        let paths = [test_path("a b.txt"), "relative.txt".into(), test_path("é")]
+            .map(std::path::PathBuf::from);
+        assert_eq!(uris(&paths), [test_url("a%20b.txt"), test_url("%C3%A9")]);
     }
 }

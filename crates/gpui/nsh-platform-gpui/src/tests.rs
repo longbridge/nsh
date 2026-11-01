@@ -783,7 +783,7 @@ mount(() => <View style={{ flex: 1 }}>
         });
         cx.run_until_parked();
     };
-    let enter = |cx: &mut VisualTestContext, y: f32, paths: &[&str]| {
+    let enter = |cx: &mut VisualTestContext, y: f32, paths: &[String]| {
         let paths = gpui::ExternalPaths(paths.iter().map(std::path::PathBuf::from).collect());
         send(
             cx,
@@ -799,7 +799,12 @@ mount(() => <View style={{ flex: 1 }}>
     // The innermost listener under the drag is the destination; moving
     // leaves it for the next one, and the drop goes there, without the
     // relative path.
-    enter(cx, 20.0, &["/tmp/a b.txt", "b.txt"]);
+    let dropped = crate::file_drop::test_url("a%20b.txt");
+    enter(
+        cx,
+        20.0,
+        &[crate::file_drop::test_path("a b.txt"), "b.txt".into()],
+    );
     wait_for(&view, cx, "enter inner");
     send(cx, gpui::FileDropEvent::Pending { position: at(70.0) });
     wait_for(&view, cx, "enter inner, leave inner, enter outer");
@@ -807,19 +812,21 @@ mount(() => <View style={{ flex: 1 }}>
     wait_for(
         &view,
         cx,
-        "enter inner, leave inner, enter outer, drop outer file:///tmp/a%20b.txt, leave outer",
+        &format!("enter inner, leave inner, enter outer, drop outer {dropped}, leave outer"),
     );
     // Leaving the window leaves the destination.
-    enter(cx, 20.0, &["/tmp/c.txt"]);
+    enter(cx, 20.0, &[crate::file_drop::test_path("c.txt")]);
     send(cx, gpui::FileDropEvent::Exited);
     wait_for(
         &view,
         cx,
-        "enter inner, leave inner, enter outer, drop outer file:///tmp/a%20b.txt, leave outer, \
-         enter inner, leave inner",
+        &format!(
+            "enter inner, leave inner, enter outer, drop outer {dropped}, leave outer, \
+             enter inner, leave inner"
+        ),
     );
     // Where no view listens, the drop goes nowhere.
-    enter(cx, 150.0, &["/tmp/d.txt"]);
+    enter(cx, 150.0, &[crate::file_drop::test_path("d.txt")]);
     send(
         cx,
         gpui::FileDropEvent::Submit {
@@ -829,8 +836,10 @@ mount(() => <View style={{ flex: 1 }}>
     wait_for(
         &view,
         cx,
-        "enter inner, leave inner, enter outer, drop outer file:///tmp/a%20b.txt, leave outer, \
-         enter inner, leave inner",
+        &format!(
+            "enter inner, leave inner, enter outer, drop outer {dropped}, leave outer, \
+             enter inner, leave inner"
+        ),
     );
 }
 
