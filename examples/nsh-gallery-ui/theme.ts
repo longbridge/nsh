@@ -20,6 +20,11 @@ export const terminal = platform.idiom === "terminal";
  */
 export const desktopIdiom = platform.idiom === "desktop" || terminal;
 
+/** One Cell row and one Cell column in points (the default 8 × 16 points
+ * per Cell): the terminal's line height and its unit of spacing. */
+export const TERMINAL_ROW = 16;
+export const TERMINAL_COLUMN = 8;
+
 /** Whether the shared example UI shows its dark palette (reactive: reading it subscribes). */
 export const isDark = () => colorScheme() !== "light";
 

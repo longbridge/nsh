@@ -7,7 +7,7 @@ import { keymap } from "nsh";
 import { Button as BaseButton, Sheet as BaseSheet, Switch, Tooltip } from "nsh/base";
 import { safeArea } from "nsh";
 import { Icon, type IconName } from "./icons";
-import { alpha, colors, desktopIdiom, finish, focusRing, isDark, mono, motion, radius, terminal, toneColor, toneTint, type Tone } from "./theme";
+import { alpha, colors, desktopIdiom, finish, focusRing, isDark, mono, motion, radius, TERMINAL_COLUMN, TERMINAL_ROW, terminal, toneColor, toneTint, type Tone } from "./theme";
 
 export * from "./theme";
 export { Segmented } from "./segmented";
@@ -104,8 +104,9 @@ export function Appear(props: { index?: number; flex?: boolean; children: JSX.El
   );
 }
 
-/** A rounded icon tile. */
+/** A rounded icon tile (decoration: none in the terminal). */
 export function IconTile(props: { name: IconName; tint?: string; size?: number }) {
+  if (terminal) return null;
   const size = props.size ?? 40;
   return (
     <View
@@ -226,14 +227,14 @@ export function Figure(props: { value: string; unit?: string; note?: string; ton
   );
 }
 
-/** A small label in a tinted capsule. */
+/** A small label in a tinted capsule (a word on its row in the terminal). */
 export function Badge(props: { label: string; tone?: Tone; outline?: boolean }) {
   const tone = () => props.tone ?? "neutral";
   return (
     <View
       style={{
-        paddingHorizontal: 10,
-        height: 26,
+        paddingHorizontal: terminal ? 0 : 10,
+        height: terminal ? TERMINAL_ROW : 26,
         borderRadius: 13,
         justifyContent: "center",
         backgroundColor: props.outline ? "transparent" : toneTint(tone()),
@@ -297,12 +298,15 @@ export function Row(props: { first?: boolean; onPress?: () => void; children: JS
 export type ButtonVariant = "primary" | "secondary" | "accent" | "ghost";
 
 /**
- * A button, 44 pt tall (32 pt `small`, for pointer-sized surfaces):
+ * A button, 44 pt tall (32 pt `small`, for pointer-sized surfaces; one row,
+ * its label and no icon in the terminal, which brackets it):
  * `primary` is light (the main action), `secondary` dark, `accent` citrus
  * (the theme's `brand-fill`). A `color` fills it with that color instead.
  */
 export function Button(props: {
   label: string;
+  /** What screen readers say, when the label is shorter (default `label`). */
+  accessibilityLabel?: string;
   variant?: ButtonVariant;
   color?: string;
   icon?: IconName;
@@ -326,15 +330,15 @@ export function Button(props: {
       onPressDown={() => scale.spring(0.97, motion.press)}
       onPressUp={() => scale.spring(1, motion.press)}
       disabled={props.disabled}
-      accessibilityLabel={props.label}
+      accessibilityLabel={props.accessibilityLabel ?? props.label}
       hoverStyle={props.disabled ? undefined : { opacity: 0.88 }}
       focusStyle={focusRing(2)}
       style={{ flex: props.flex, opacity: props.disabled ? 0.4 : 1, transform: [{ scale }], borderRadius: small() ? 8 : radius.control }}
     >
       <View
         style={{
-          height: small() ? 32 : 44,
-          paddingHorizontal: small() ? 12 : 18,
+          height: terminal ? TERMINAL_ROW : small() ? 32 : 44,
+          paddingHorizontal: terminal ? TERMINAL_COLUMN : small() ? 12 : 18,
           borderRadius: small() ? 8 : radius.control,
           borderCurve: "continuous",
           flexDirection: "row",
@@ -353,7 +357,7 @@ export function Button(props: {
           borderColor: colors.border,
         }}
       >
-        <If when={props.icon}>
+        <If when={props.icon && !terminal}>
           <Icon name={props.icon!} size={small() ? 14 : 16} tint={fg()} />
         </If>
         <Text style={{ fontSize: small() ? 13 : 15, fontWeight: "600", color: fg() }}>{props.label}</Text>
@@ -362,14 +366,31 @@ export function Button(props: {
   );
 }
 
+/**
+ * A round icon button; in the terminal a text button reading `title` (a
+ * word or two), else `label`.
+ */
 export function RoundButton(props: {
   icon: IconName;
   label: string;
+  /** The terminal's text in place of the icon (default `label`). */
+  title?: string;
   variant?: "primary" | "secondary";
   size?: number;
   disabled?: boolean;
   onPress: () => void;
 }) {
+  if (terminal) {
+    return (
+      <Button
+        label={props.title ?? props.label}
+        accessibilityLabel={props.label}
+        variant={props.variant ?? "primary"}
+        disabled={props.disabled}
+        onPress={props.onPress}
+      />
+    );
+  }
   const size = props.size ?? 44;
   const primary = () => (props.variant ?? "primary") === "primary";
   return (
