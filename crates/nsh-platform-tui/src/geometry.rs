@@ -180,6 +180,27 @@ impl CellBounds {
         )
     }
 
+    /// The point rect through the centers of these Cells: what is drawn in
+    /// one of them covers its center, what only rounds next to it does not.
+    pub(crate) fn centers(
+        self,
+        cells: CellSize,
+        area: ratatui_core::layout::Rect,
+    ) -> nsh_core::Bounds<Points> {
+        const CENTER: Points = Points(0.5);
+        let origin = self.origin(cells, area);
+        nsh_core::Bounds::new(
+            nsh_core::Point::new(
+                origin.x + cells.width() / 2.0 - CENTER,
+                origin.y + cells.height() / 2.0 - CENTER,
+            ),
+            nsh_core::Size::new(
+                cells.width() * (self.right.saturating_sub(self.left) - 1) as f32 + CENTER * 2.0,
+                cells.height() * (self.bottom.saturating_sub(self.top) - 1) as f32 + CENTER * 2.0,
+            ),
+        )
+    }
+
     pub(crate) fn clipped(self, clip: ratatui_core::layout::Rect) -> ratatui_core::layout::Rect {
         let left = self.left.clamp(i32::from(clip.x), i32::from(clip.right())) as u16;
         let top = self.top.clamp(i32::from(clip.y), i32::from(clip.bottom())) as u16;
