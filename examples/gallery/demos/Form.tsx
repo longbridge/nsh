@@ -4,7 +4,11 @@ import { Dialog, Input, type InputProps, NavPage } from "nsh/base";
 import { Keyboard, keyboardFrame, safeAreaInsets } from "nsh";
 import { Icon, type IconName } from "../icons";
 import { nav } from "../nav";
-import { Appear, Badge, Button, Caption, Card, colors, DemoPage, finish, header, hint, IconTile, Inset, Meter, mono, PageHeader, Press, radius, RoundButton, Section, Segmented, tints, type Tone, toneColor } from "../ui";
+import { Appear, Badge, Button, Caption, Card, colors, DemoPage, finish, header, hint, IconTile, Inset, Meter, mono, PageHeader, Press, radius, RoundButton, Section, Segmented, terminal, TERMINAL_COLUMN, TERMINAL_ROW, tints, type Tone, toneColor } from "../ui";
+
+/** A field's text inside its border: in the terminal one Cell inside the
+ * border's own row and column. */
+const inset = terminal ? { horizontal: 2 * TERMINAL_COLUMN - 1, vertical: TERMINAL_ROW - 1 } : { horizontal: 14, vertical: 13 };
 
 /**
  * A labelled input (`api` names the prop it shows, `hint` is a plain note):
@@ -26,9 +30,9 @@ function Field(
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
     if (has) Animated.sequence([9, -8, 6, -4, 2, 0].map((x) => Animated.timing(shake, { toValue: x, duration: 45 }))).start();
   });
-  const box = () => (props.multiline ? { minHeight: 46, paddingTop: 13, paddingBottom: 13 } : { height: 46 });
+  const box = () => (props.multiline ? { minHeight: 46, paddingTop: inset.vertical, paddingBottom: inset.vertical } : { height: 46 });
   return (
-    <View style={{ gap: 6, translate: [shake, 0] }}>
+    <View style={{ gap: terminal ? 0 : 6, translate: [shake, 0] }}>
       <View style={{ flexDirection: "row", alignItems: "baseline", gap: 8 }}>
         <Text style={{ flex: 1, fontSize: 13, fontWeight: "500", color: colors.muted }}>{own.label}</Text>
         <If when={own.api}>
@@ -52,7 +56,7 @@ function Field(
         }}
       >
         <If when={own.prefix}>
-          <Text style={{ paddingLeft: 14, fontSize: 15, color: colors.muted }}>{own.prefix}</Text>
+          <Text style={{ paddingLeft: inset.horizontal, fontSize: 15, color: colors.muted }}>{own.prefix}</Text>
         </If>
         <Input
           returnKeyType={own.next ? "next" : "done"}
@@ -66,7 +70,7 @@ function Field(
             own.onBlur?.();
           }}
           {...input}
-          style={[{ flex: 1, paddingHorizontal: 14, fontSize: 15, color: props.readonly ? colors.muted : colors.text, placeholderColor: colors.faint, caretColor: colors.accent, selectionColor: colors.accent, ...box() }, ...(Array.isArray(own.style) ? own.style : [own.style])]}
+          style={[{ flex: 1, paddingHorizontal: inset.horizontal, paddingLeft: own.prefix && terminal ? TERMINAL_COLUMN : inset.horizontal, fontSize: 15, color: props.readonly ? colors.muted : colors.text, placeholderColor: colors.faint, caretColor: colors.accent, selectionColor: colors.accent, ...box() }, ...(Array.isArray(own.style) ? own.style : [own.style])]}
         />
         <View
           style={{
@@ -87,7 +91,9 @@ function Field(
       </View>
       <If when={own.error}>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 7 }}>
-          <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: colors.danger }} />
+          <If when={!terminal}>
+            <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: colors.danger }} />
+          </If>
           <Text style={{ flex: 1, fontSize: 13, color: colors.danger }}>{own.error}</Text>
         </View>
       </If>
@@ -95,30 +101,37 @@ function Field(
   );
 }
 
-/** A row that opens something: an icon, a title, the API it shows. */
+/** A row that opens something: an icon, a title, the API it shows (the
+ * title and the API on one row in the terminal, the API at its end). */
 function LinkRow(props: { icon: IconName; title: string; note: string; first?: boolean; onPress: () => void }) {
   return (
     <Press onPress={props.onPress} scale={0.98} accessibilityLabel={props.title}>
       <View
-        style={{
-          minHeight: 60,
-          flexDirection: "row",
-          alignItems: "center",
-          gap: 12,
-          paddingHorizontal: 10,
-          paddingVertical: 8,
-          borderTopWidth: props.first ? 0 : 1,
-          borderTopColor: colors.line,
-        }}
+        style={
+          terminal
+            ? { height: TERMINAL_ROW, flexDirection: "row", alignItems: "center" }
+            : {
+                minHeight: 60,
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 12,
+                paddingHorizontal: 10,
+                paddingVertical: 8,
+                borderTopWidth: props.first ? 0 : 1,
+                borderTopColor: colors.line,
+              }
+        }
       >
         <IconTile name={props.icon} size={34} />
-        <View style={{ flex: 1, gap: 2 }}>
-          <Text style={{ fontSize: 15, fontWeight: "500", color: colors.text }}>{props.title}</Text>
+        <View style={terminal ? { flex: 1, flexDirection: "row", gap: 2 * TERMINAL_COLUMN } : { flex: 1, gap: 2 }}>
+          <Text style={{ flex: terminal ? 1 : undefined, fontSize: 15, fontWeight: "500", color: colors.text }}>{props.title}</Text>
           <Text style={{ numberOfLines: 1, fontSize: 12, color: colors.faint, fontFamily: mono }}>
             {props.note}
           </Text>
         </View>
-        <Icon name="chevron" size={14} tint={colors.faint} />
+        <If when={!terminal}>
+          <Icon name="chevron" size={14} tint={colors.faint} />
+        </If>
       </View>
     </Press>
   );
@@ -127,7 +140,7 @@ function LinkRow(props: { icon: IconName; title: string; note: string; first?: b
 /** Two items side by side, equal widths. */
 function Pair(props: { children: [JSX.Element, JSX.Element] }) {
   return (
-    <View style={{ flexDirection: "row", gap: 8 }}>
+    <View style={{ flexDirection: "row", gap: terminal ? 2 * TERMINAL_COLUMN : 8 }}>
       <View style={{ flex: 1 }}>{props.children[0]}</View>
       <View style={{ flex: 1 }}>{props.children[1]}</View>
     </View>
@@ -235,7 +248,7 @@ export function Form() {
               autoComplete="email"
               placeholder="ada@example.com"
             />
-            <View style={{ gap: 8 }}>
+            <View style={{ gap: terminal ? 0 : 8 }}>
               <Field
                 ref={ref(2)}
                 next={next(2)}
@@ -339,7 +352,7 @@ export function Form() {
               placeholder="A blue placeholder, an amber selection"
               style={{ placeholderColor: colors.info, caretColor: colors.warn, selectionColor: colors.warn }}
             />
-            <View style={{ gap: 8 }}>
+            <View style={{ gap: terminal ? 0 : 8 }}>
               <Field
                 ref={ref(14)}
                 label="Notes"
@@ -370,12 +383,14 @@ export function Form() {
                   flexDirection: "row",
                   alignItems: "center",
                   gap: 8,
-                  padding: 12,
+                  padding: terminal ? 0 : 12,
                   borderRadius: radius.control,
                   backgroundColor: status()?.tone === "up" ? tints.up : tints.danger,
                 }}
               >
-                <Icon name={status()?.tone === "up" ? "check" : "bell"} size={16} tint={status()?.tone === "up" ? colors.up : colors.danger} />
+                <If when={!terminal}>
+                  <Icon name={status()?.tone === "up" ? "check" : "bell"} size={16} tint={status()?.tone === "up" ? colors.up : colors.danger} />
+                </If>
                 <Text style={{ flex: 1, fontSize: 14, lineHeight: 19, color: status()?.tone === "up" ? colors.up : colors.danger }}>{status()?.text}</Text>
               </View>
             </If>
