@@ -1358,36 +1358,30 @@ define_class!(
             suggested: &NSString,
             done: &block2::Block<dyn Fn(*const NSURL)>,
         ) {
-            let Some(root) = self.ivars().downloads.as_ref() else {
+            let key = download_key(download);
+            let mut active = self.ivars().active.borrow_mut();
+            let Some(entry) = active.get_mut(&key) else {
+                drop(active);
                 done.call((std::ptr::null(),));
                 return;
             };
-            // SAFETY: NSUUID's and WKDownload's documented API.
-            let (id, url) = unsafe {
-                let uuid: Retained<AnyObject> = msg_send![class(c"NSUUID").expect("Foundation"), UUID];
-                let id: Retained<NSString> = msg_send![&uuid, UUIDString];
-                let request: Option<Retained<AnyObject>> = msg_send![download, originalRequest];
-                let url: Option<Retained<NSURL>> = request.and_then(|r| msg_send![&r, URL]);
-                let url = url.and_then(|u| u.absoluteString()).map(|s| s.to_string());
-                (id.to_string().to_lowercase(), url.unwrap_or_default())
-            };
-            let filename = file_name(&suggested.to_string());
-            let dir = root.join(&id);
-            let path = dir.join(&filename);
-            // SAFETY: `download` is a live WKDownload this handler delegates.
-            let object = unsafe { Retained::retain(download as *const AnyObject as *mut AnyObject) }
-                .expect("a download");
-            let entry = Download { _download: object, id, url, filename, path };
+            // The server's name replaces the one taken from the URL when it was adopted.
+            entry.filename = file_name(&suggested.to_string());
+            let dir = entry.path.parent().map(Path::to_path_buf).unwrap_or_default();
+            entry.path = dir.join(&entry.filename);
             if let Err(e) = std::fs::create_dir_all(&dir) {
                 log::warn!(target: "js", "web view download into {}: {e}", dir.display());
                 // WebKit then cancels it, which reaches no entry: the app hears of it here.
+                let entry = active.remove(&key).expect("tracked above");
+                drop(active);
                 self.emit(EventKind::Download, || failed_event(&entry, e.to_string()));
                 done.call((std::ptr::null(),));
                 return;
             }
             let destination = NSURL::fileURLWithPath(&NSString::from_str(&entry.path.to_string_lossy()));
-            self.emit(EventKind::Download, || download_event("started", &entry, None));
-            self.ivars().active.borrow_mut().insert(download_key(download), entry);
+            let started = download_event("started", entry, None);
+            drop(active);
+            self.emit(EventKind::Download, || started);
             done.call((Retained::as_ptr(&destination),));
         }
 
@@ -1405,7 +1399,8 @@ define_class!(
             let Some(entry) = self.ivars().active.borrow_mut().remove(&download_key(download)) else {
                 return;
             };
-            if let Some(dir) = entry.path.parent() {
+            // A download can fail before it has a destination (no response yet): nothing was written then.
+            if let Some(dir) = entry.path.parent().filter(|dir| dir.exists()) {
                 let _ = std::fs::remove_dir_all(dir);
             }
             // SAFETY: `localizedDescription` of an NSError.
@@ -1473,12 +1468,42 @@ impl WebHandler {
         self.ivars().downloads.is_some() && self.ivars().emitter.listens(EventKind::Download)
     }
 
-    /// Becomes the delegate of `download` (its file and its end).
+    /// Becomes the delegate of `download` and tracks it from now on, so a
+    /// download that fails before WebKit asks for its destination is
+    /// still reported. Its name comes from the URL until the server's is
+    /// known.
     fn adopt(&self, download: &AnyObject) {
         // SAFETY: WKDownload's `delegate` (weak); this handler outlives it
-        // as the web view's delegate, and keeps it in `active` once it has a
-        // destination.
+        // as the web view's delegate, and keeps it in `active` until it ends.
         let _: () = unsafe { msg_send![download, setDelegate: self] };
+        let Some(root) = self.ivars().downloads.as_ref() else {
+            return;
+        };
+        // SAFETY: NSUUID's and WKDownload's documented API.
+        let (id, url) = unsafe {
+            let uuid: Retained<AnyObject> = msg_send![class(c"NSUUID").expect("Foundation"), UUID];
+            let id: Retained<NSString> = msg_send![&uuid, UUIDString];
+            let request: Option<Retained<AnyObject>> = msg_send![download, originalRequest];
+            let url: Option<Retained<NSURL>> = request.and_then(|r| msg_send![&r, URL]);
+            let url = url.and_then(|u| u.absoluteString()).map(|s| s.to_string());
+            (id.to_string().to_lowercase(), url.unwrap_or_default())
+        };
+        let filename = file_name(url_file_name(&url));
+        let path = root.join(&id).join(&filename);
+        // SAFETY: `download` is a live WKDownload this handler delegates.
+        let object = unsafe { Retained::retain(download as *const AnyObject as *mut AnyObject) }
+            .expect("a download");
+        let entry = Download {
+            _download: object,
+            id,
+            url,
+            filename,
+            path,
+        };
+        self.ivars()
+            .active
+            .borrow_mut()
+            .insert(download_key(download), entry);
     }
 
     fn failed(&self, err: &AnyObject) {
@@ -1554,6 +1579,12 @@ fn failed_event(entry: &Download, message: String) -> EventPayload {
         fields.push(("message", PayloadValue::Str(message)));
     }
     event
+}
+
+/// The last path segment of `url`, without its query or fragment.
+fn url_file_name(url: &str) -> &str {
+    let end = url.find(['?', '#']).unwrap_or(url.len());
+    url[..end].rsplit('/').next().unwrap_or_default()
 }
 
 fn download_key(download: &AnyObject) -> usize {
@@ -1852,6 +1883,11 @@ mod tests {
         assert_eq!(file_name(""), "download");
         assert_eq!(file_name(".."), "download");
         assert_eq!(file_name(&"x".repeat(300)).len(), 200);
+        assert_eq!(
+            url_file_name("https://example.com/files/report.pdf?v=2#p1"),
+            "report.pdf"
+        );
+        assert_eq!(file_name(url_file_name("https://example.com/")), "download");
     }
 
     #[test]
