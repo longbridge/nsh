@@ -421,7 +421,7 @@ export function StockView(props: { market: Market; stock: Stock; wide?: boolean;
         }
       >
         <Dialog open={ticket()} presentation="formSheet" onOpenChange={(open) => ticket.set(open)} style={{ flex: 1 }}>
-          <View style={{ flex: 1, padding: 20, backgroundColor: colors.surface }}>{ticketView}</View>
+          <View style={{ flex: 1, padding: terminal ? TERMINAL_ROW : 20, backgroundColor: colors.surface }}>{ticketView}</View>
         </Dialog>
       </If>
     </View>
