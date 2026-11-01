@@ -161,3 +161,7 @@ covers [nsh] Clipboard
 covers [nsh] Picker
 covers [nsh] openUrl
 covers [nsh] Image
+# web-send-input
+tap id:case-web-send-input
+tap id:send
+expect Sent input

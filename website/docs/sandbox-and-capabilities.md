@@ -113,7 +113,7 @@ An app declares what it may reach outside its VM in `nsh.json`:
       "http": [{ "host": "quotes.example.com", "methods": ["GET"], "pathPrefix": "/v1/" }],
       "sockets": ["feed.example.com:7000"]
     },
-    "webview": { "hosts": ["*.example.com"] },
+    "webview": { "hosts": ["*.example.com"], "input": true },
     "statusBar": true,
     "clipboard": true,
     "picker": true,
@@ -165,11 +165,16 @@ paths.
 | Key | Type | Description |
 |---|---|---|
 | `hosts` | `string[]` | Hosts a [web view](./web-view-and-video.md) may show and navigate to (`http` and `https`). Without `webview`, the app may not show web pages at all. |
+| `input` | `boolean` | A web view's ref may give its page trusted input ([`sendInput`](./web-view-and-video.md#input-as-the-users-own)). Never granted unless declared, also for an app without `"capabilities"`. |
 
 Top-level navigations inside the web view are checked too, by the platform's navigation delegate, before they load.
 The page's own subresources (its scripts, images, XHRs) are the web content's business and are not checked.
 `about:blank` and inline HTML (`html`) need only web views to be granted at all: `"webview": { "hosts": [] }`
 allows them without allowing any remote page.
+
+`input` is separate from `hosts` because trusted input carries user activation, which `injectJavaScript` never gets:
+the page may then open windows, write the clipboard, open the system's file panel, start WebAuthn or permission prompts
+and press any button that checks `isTrusted`. Without it the core drops `sendInput` and logs which key to add.
 
 ### `statusBar`
 

@@ -45,6 +45,13 @@ mount(App);
 "#;
 
 fn start(app: &str) -> (Engine, Receiver<MountBatch>) {
+    start_with(app, None)
+}
+
+fn start_with(
+    app: &str,
+    declared: Option<nsh_core::access::Capabilities>,
+) -> (Engine, Receiver<MountBatch>) {
     // One directory per app started: the tests run in parallel.
     static STARTED: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
     let n = STARTED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -59,9 +66,11 @@ fn start(app: &str) -> (Engine, Receiver<MountBatch>) {
         ui_sets: vec![nsh_base::registry().into()],
     })
     .unwrap();
+    let mut app = Bundle::source(bundle.code);
+    app.policy.declared = declared;
     let (tx, rx) = crossbeam_channel::unbounded();
     let config = EngineConfig {
-        app: nsh_engine::App::Js(Bundle::source(bundle.code)),
+        app: nsh_engine::App::Js(app),
         viewport: Size::new(px(320.0), px(480.0)),
         trace: false,
         network: None,
@@ -319,13 +328,18 @@ function App() {
 mount(App);
 "#;
 
-#[test]
-fn a_web_view_ref_sends_trusted_input_to_its_view() {
-    use nsh_core::{WebInput, WebKey};
-    let (_engine, rx) = start(WEB_INPUT_APP);
+/// The web view's id and the input the app sent it, within `wait`.
+fn sent_input(
+    declared: Option<nsh_core::access::Capabilities>,
+    wait: Duration,
+) -> (
+    nsh_core::NodeId,
+    Vec<(nsh_core::NodeId, nsh_core::WebInput)>,
+) {
+    let (_engine, rx) = start_with(WEB_INPUT_APP, declared);
     let mut web = None;
     let mut sent = Vec::new();
-    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    let deadline = std::time::Instant::now() + wait;
     while sent.len() < 3 && std::time::Instant::now() < deadline {
         let Ok(batch) = rx.recv_timeout(Duration::from_millis(200)) else {
             continue;
@@ -344,7 +358,16 @@ fn a_web_view_ref_sends_trusted_input_to_its_view() {
             }
         }
     }
-    let web = web.expect("a web view");
+    (web.expect("a web view"), sent)
+}
+
+#[test]
+fn a_web_view_ref_sends_trusted_input_to_its_view() {
+    use nsh_core::{WebInput, WebKey, access::Capabilities};
+    let declared =
+        Capabilities::from_json(&json!({ "webview": { "hosts": ["example.com"], "input": true } }))
+            .unwrap();
+    let (web, sent) = sent_input(Some(declared), Duration::from_secs(5));
     assert_eq!(
         sent,
         [
@@ -359,4 +382,11 @@ fn a_web_view_ref_sends_trusted_input_to_its_view() {
             (web, WebInput::Key(WebKey::Enter)),
         ]
     );
+    // Not declared (also with no declaration at all): the core sends none.
+    let hosts =
+        Capabilities::from_json(&json!({ "webview": { "hosts": ["example.com"] } })).unwrap();
+    for declared in [Some(hosts), None] {
+        let (_, sent) = sent_input(declared, Duration::from_secs(1));
+        assert_eq!(sent, []);
+    }
 }
