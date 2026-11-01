@@ -1000,8 +1000,14 @@ mod tests {
             settled(connection.read().unwrap()).await,
             Ok(serde_json::json!("before close"))
         );
-        assert_eq!(settled(connection.read().unwrap()).await, Ok(serde_json::json!(null)));
-        assert_eq!(settled(connection.read().unwrap()).await, Ok(serde_json::json!(null)));
+        assert_eq!(
+            settled(connection.read().unwrap()).await,
+            Ok(serde_json::json!(null))
+        );
+        assert_eq!(
+            settled(connection.read().unwrap()).await,
+            Ok(serde_json::json!(null))
+        );
     }
 
     #[tokio::test]
@@ -1090,7 +1096,10 @@ mod tests {
         );
         clean_close(&state, 4001, "bye");
         assert!(matches!(poll(close.as_mut()), Poll::Ready(Ok(_))));
-        assert_eq!(settled(connection.read().unwrap()).await, Ok(serde_json::json!(null)));
+        assert_eq!(
+            settled(connection.read().unwrap()).await,
+            Ok(serde_json::json!(null))
+        );
         assert_eq!(connection.close_code(), Some(4001));
     }
 
