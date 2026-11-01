@@ -49,6 +49,8 @@ mod screen;
 mod selector;
 mod storage;
 mod trace;
+#[cfg(feature = "js")]
+mod values;
 
 #[cfg(feature = "bundle")]
 use std::{path::Path, sync::Arc};
@@ -78,8 +80,8 @@ pub use self::{
         RouteOption, SPECIFIER, SafeArea, SpanStyle, StubRequest, Testing, registry,
     },
     run::{
-        Built, Compile, Entry, Failure, HostOptions, Output, StartHost, TestResult, TestRun,
-        TestStatus, run_file,
+        Built, Compile, Entry, Failure, HostOptions, HostTarget, Output, StartHost, TestResult,
+        TestRun, TestStatus, run_file,
     },
     runner::{PROTOCOL, Reply, RunnerMessage, TestRequest, runner},
 };

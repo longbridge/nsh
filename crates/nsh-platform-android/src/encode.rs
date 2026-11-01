@@ -330,6 +330,8 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
                 e.int(id as i32);
                 canvas(&mut e, &drawing);
             }
+            // Effects and transitions: this platform does not draw them yet.
+            MountItem::ShaderTransition { .. } | MountItem::ShaderInput { .. } => {}
             MountItem::Shader { id, layer } => {
                 // Java learns only whether the view shows a shader; the
                 // layer goes to the UI-thread renderer (`crate::shader`).
@@ -654,7 +656,9 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
                     | Command::PickScreenColor { .. }
                     // No file dialogs (`Environment::file_requests`): the
                     // core answers first.
-                    | Command::FileRequest { .. } => e.int(-1),
+                    | Command::FileRequest { .. }
+                    // No menus of the platform's own to color.
+                    | Command::Tokens(_) => e.int(-1),
                 }
             }
         }

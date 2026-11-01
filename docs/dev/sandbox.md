@@ -120,7 +120,9 @@ match is a parse error rather than a silent grant of nothing: a scheme outside t
 leading `/` or with `*`, `?` or `#`, a method that is not a token. WebSockets (the global and the `websocket` module)
 go through `Access::allows_websocket`: a handshake is an HTTP GET, so `ws` / `wss` are checked as GETs over `http` /
 `https` (or under their own scheme, for rules listing `ws` / `wss`), on the parsed URL the handshake then connects
-to, before DNS; redirects are rejected; both APIs share one cap of 32 per VM (the `Quotas` kind `runtime::WEBSOCKETS`). Raw TCP
+to, before DNS; redirects are rejected; both APIs share one cap of 32 per VM (the `Quotas` kind `runtime::WEBSOCKETS`). A
+`websocket` connection's unread messages are bounded by back pressure: it stops reading from the network while 8
+messages or 8 MiB wait (`runtime/websocket.rs`), so the native memory one keeps stays under 16 MiB. Raw TCP
 `net.connect({ host, port })` requires an exact `network.sockets` entry (`"host:port"`, no patterns, port 1 to 65535): a socket
 bypasses every HTTP rule, so neither `hosts` nor `http` grants imply one, and `Capabilities::all()` (apps without a
 declaration) has none. Sockets are capped at 32 per VM (the call's `System` quotas) and 4 MiB of pending writes each;

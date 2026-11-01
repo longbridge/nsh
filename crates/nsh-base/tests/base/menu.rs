@@ -233,7 +233,7 @@ fn the_item_and_its_indicator_show_the_value_the_app_passes() {
     assert_eq!(app.background(app.around("sidebar-mark")), Some(CHECKED));
     assert_eq!(app.background(app.around("minimap-mark")), Some(UNCHECKED));
     app.app.press("text:Show sidebar").unwrap();
-    app.app.wait_for("sidebar:false").unwrap();
+    app.app.wait_for("text:sidebar:false").unwrap();
     assert_eq!(
         app.checked("role:menuitemcheckbox[Show sidebar]"),
         Some(Checked::False)
@@ -248,11 +248,11 @@ fn a_setting_reports_its_choice_and_keeps_the_menu_open() {
     app.app.press("id:view").unwrap();
     app.app.wait_for("Show sidebar").unwrap();
     app.app.press("text:Show sidebar").unwrap();
-    app.app.wait_for("selects:1").unwrap();
-    app.app.wait_for("sidebar:false").unwrap();
+    app.app.wait_for("text:selects:1").unwrap();
+    app.app.wait_for("text:sidebar:false").unwrap();
     assert!(app.app.shows("Show sidebar"), "still open");
     app.app.press("text:Show sidebar").unwrap();
-    app.app.wait_for("sidebar:true").unwrap();
+    app.app.wait_for("text:sidebar:true").unwrap();
     assert_eq!(
         app.checked("role:menuitemcheckbox[Show sidebar]"),
         Some(Checked::True)
@@ -266,8 +266,8 @@ fn a_choice_of_one_closes_the_menu_and_the_app_moves_the_check() {
     app.app.press("id:view").unwrap();
     app.app.wait_for("Show sidebar").unwrap();
     app.app.press("text:Size").unwrap();
-    app.app.wait_for("sort:size").unwrap();
-    app.app.wait_for("closes:1").unwrap();
+    app.app.wait_for("text:sort:size").unwrap();
+    app.app.wait_for("text:closes:1").unwrap();
     assert!(!app.app.shows("Show sidebar"), "closed");
     app.app.press("id:view").unwrap();
     app.app.wait_for("Show sidebar").unwrap();
@@ -284,7 +284,7 @@ fn a_disabled_item_reports_nothing() {
     app.app.press("id:view").unwrap();
     app.app.wait_for("Show minimap").unwrap();
     assert!(app.app.press("text:Show minimap").is_err());
-    app.app.wait_for("selects:0").unwrap();
+    app.app.wait_for("text:selects:0").unwrap();
 }
 
 #[test]
@@ -300,7 +300,7 @@ fn toggling_one_item_sends_only_what_it_shows() {
     let (item, indicator) = (app.around("sidebar"), app.around("sidebar-mark"));
     let batches = app.batches_of(|app| {
         app.press("text:Show sidebar").unwrap();
-        app.wait_for("sidebar:false").unwrap();
+        app.wait_for("text:sidebar:false").unwrap();
     });
     let touched: Vec<NodeId> = batches.into_iter().flatten().collect();
     assert!(

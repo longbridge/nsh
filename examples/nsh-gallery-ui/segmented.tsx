@@ -22,7 +22,7 @@ export function Segmented<T extends string>(props: {
   size?: "small" | "regular";
   fill?: boolean;
 }) {
-  const pointer = platform.idiom === "desktop";
+  const pointer = platform.desktop;
   const spread = !pointer || !!props.fill;
   // The track's padding: the thumb sits inside it.
   const inset = 2;

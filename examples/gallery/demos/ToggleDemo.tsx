@@ -11,7 +11,7 @@ import { LucideIcon, type LucideIconName } from "./RichEditorUi";
 // gallery's: a raised pill while pressed that fades in, a press that sinks,
 // a star that pops; none of it with reduced motion.
 
-const pointer = platform.idiom === "desktop";
+const pointer = platform.desktop;
 
 type Size = "small" | "regular" | "large";
 

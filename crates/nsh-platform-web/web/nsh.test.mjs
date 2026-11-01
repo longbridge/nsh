@@ -565,3 +565,77 @@ test("data that does not load reaches the engine as none", async () => {
   }
   assert.deepEqual(handed, [["syntaxes", [], 0]]);
 });
+
+test("a paused WebSocket holds its events, in order, until the engine resumes it", async () => {
+  const { player } = fakePlayer();
+  const sockets = [];
+  const saved = globalThis.WebSocket;
+  globalThis.WebSocket = class {
+    constructor(url) {
+      this.url = url;
+      this.protocol = "";
+      sockets.push(this);
+    }
+    close() {}
+  };
+  const got = [];
+  // As the engine does: it pauses the socket from inside the event that
+  // fills its queue (after "a", and again after "b").
+  player.wasm.nsh_websocket_event = (id, kind, p, l) => {
+    got.push(`${kind}:${new TextDecoder().decode(new Uint8Array(player.wasm.memory.buffer, p, l))}`);
+    if (got.length === 2 || got.length === 3) player.websocketPause(id, true);
+    return -1;
+  };
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+  try {
+    player.websocketStart(1, { url: "ws://example.test/", protocols: [] });
+    const [socket] = sockets;
+    socket.onopen();
+    for (const data of ["a", "b", "c"]) socket.onmessage({ data });
+    socket.onclose({ reason: "done", code: 4000, wasClean: true });
+    assert.deepEqual(got, ["0:", "1:a"]);
+    player.websocketPause(1, false);
+    assert.deepEqual(got, ["0:", "1:a"], "held events enter the engine in a task of their own");
+    await settle();
+    assert.deepEqual(got, ["0:", "1:a", "1:b"]);
+    player.websocketPause(1, false);
+    await settle();
+    assert.deepEqual(got, ["0:", "1:a", "1:b", "1:c", "4:done"]);
+  } finally {
+    clearTimeout(player.timer);
+    globalThis.WebSocket = saved;
+  }
+});
+
+test("a plain Shader uploads the whole built-ins block, progress and overflow at 0", () => {
+  const { player } = fakePlayer();
+  const uploads = [];
+  const gl = new Proxy(
+    {
+      UNIFORM_BUFFER: "uniform",
+      canvas: { width: 0, height: 0, transferToImageBitmap: () => "bitmap" },
+      bufferData: (target, data) => uploads.push([target, Array.from(data)]),
+    },
+    { get: (gl, name) => (name in gl ? gl[name] : () => {}) },
+  );
+  Object.assign(player, {
+    shaderGl: () => gl,
+    shaderProgram: () => ({ program: {}, builtins: {}, uniforms: null, vao: {} }),
+    zoomOf: () => 1,
+  });
+  const el = {
+    _frame: [0, 0, 100, 50],
+    _shader: { layer: {}, words: new Uint32Array(0), kept: 1500, since: null },
+    _shaderCanvas: { width: 0, height: 0, getContext: () => ({ transferFromImageBitmap() {} }) },
+  };
+  const saved = globalThis.devicePixelRatio;
+  globalThis.devicePixelRatio = 2;
+  try {
+    player.renderShader(el, 0);
+  } finally {
+    globalThis.devicePixelRatio = saved;
+  }
+  // `struct Nsh`, 32 bytes as core's `shader::builtins` lays it out: size,
+  // time, scale, progress, overflow and padding.
+  assert.deepEqual(uploads, [["uniform", [100, 50, 1.5, 2, 0, 0, 0, 0]]]);
+});

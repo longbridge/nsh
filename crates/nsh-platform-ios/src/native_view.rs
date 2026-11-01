@@ -429,6 +429,7 @@ fn is_container(a: &Accessibility) -> bool {
             | AccessibilityRole::Region
             | AccessibilityRole::Navigation
             | AccessibilityRole::Tree
+            | AccessibilityRole::Toolbar
     )
 }
 
@@ -639,12 +640,16 @@ mod tests {
         let mut page = props(AccessibilityRole::Link, &[]);
         page.accessibility.state.current = Some(AccessibilityCurrent::Page);
         assert_eq!(accessibility_value(&page).as_deref(), Some("current page"));
-        // Groups are containers, others are not.
+        // Groups and toolbars are containers (a labelled toolbar names the
+        // controls VoiceOver enters), others are not.
         assert!(is_container(
             &props(AccessibilityRole::Navigation, &[]).accessibility
         ));
-        assert!(!is_container(
+        assert!(is_container(
             &props(AccessibilityRole::Toolbar, &[]).accessibility
+        ));
+        assert!(!is_container(
+            &props(AccessibilityRole::Button, &[]).accessibility
         ));
     }
 }

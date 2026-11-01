@@ -99,9 +99,9 @@ pub(crate) type Item = (&'static str, Export, Ts);
 pub(crate) struct NativeModule {
     pub(crate) name: &'static str,
     pub(crate) exports: &'static [Item],
-    /// The modules whose exports this one serves too, the same values (one
-    /// per VM): `nsh` serves the primitives `nsh/image`, `nsh/list`, ...
-    /// exported first.
+    /// The sources whose exports this one serves too (`moved_to`), kept by
+    /// area: `nsh` serves the primitives (`nsh/list`, `nsh/image`, ...), the
+    /// environment (`nsh/device`), ...; no app imports a source.
     pub(crate) also: &'static [&'static str],
     /// The module that serves this one's exports (`nsh`): it is no module
     /// apps import, only the source of those exports and their types.
@@ -252,6 +252,38 @@ const NSH: &[Item] = &[
         Ts::function(
             "A view whose box a GPU shader draws, under its children: `source` is WGSL\ndefining `fn shade(uv: vec2f) -> vec4f`, the straight sRGB color of each\npoint (`uv` 0..1 from the top left), which reads `nsh.size` (points),\n`nsh.time` (seconds; reading it animates the shader, unless `paused`),\n`nsh.scale` and the members of its `struct Uniforms` as `uniforms.name`, set by\n`uniforms={{ name: value }}`: numbers, colors, lists and animated values,\nwhich move it natively. It takes every prop of a `View`.",
             &["(props: ShaderProps): JSX.Element"],
+        ),
+    ),
+    (
+        "ShaderEffect",
+        Export::Value(|cx| dom::host_component(cx, "shadereffect", true)),
+        Ts::function(
+            "A view whose children draw through a GPU shader: its WGSL `shade` reads\nwhat they draw with `sample_content(uv)` (and what is behind the view with\n`sample_backdrop(uv)`), `nsh.progress` from `progress` (a number or an\nanimated value), and draws `maxSampleOffset` points beyond the box. The\nchildren keep their presses. Without `source` they draw as they are.",
+            &["(props: ShaderEffectProps): JSX.Element"],
+        ),
+    ),
+    (
+        "ShaderTransition",
+        Export::Value(|cx| dom::host_component(cx, "shadertransition", true)),
+        Ts::function(
+            "A view whose children change through a GPU shader: when `value` changes\n(not the first one) its WGSL `shade` draws, for `duration` ms (300),\n`sample_from(uv)` (a picture of what they drew) changing into\n`sample_to(uv)` (what they draw now) as `nsh.progress` goes from 0 to 1.\nWithout `source` it runs `fallback`: `\"fade\"` (a cross-fade) or `\"none\"`.",
+            &["(props: ShaderTransitionProps): JSX.Element"],
+        ),
+    ),
+    (
+        "ScreenEffect",
+        Export::Value(|cx| dom::host_component(cx, "screeneffect", false)),
+        Ts::function(
+            "The whole surface (its pages, dialogs and overlays) drawn through a GPU\nshader, which reads it with `sample_content(uv)`. It takes no space and\nhas no children; the last one mounted with a `source` draws.",
+            &["(props: ScreenEffectProps): JSX.Element"],
+        ),
+    ),
+    (
+        "ScreenTransition",
+        Export::Value(|cx| dom::host_component(cx, "screentransition", false)),
+        Ts::function(
+            "The whole surface changing through a GPU shader when `value` changes,\nas `ShaderTransition` does for its children.",
+            &["(props: ScreenTransitionProps): JSX.Element"],
         ),
     ),
 ];
@@ -478,7 +510,7 @@ pub(crate) const MODULES: &[NativeModule] = &[
     },
 ];
 
-/// `nsh/image`: `Image`, the image element as a component carrying the
+/// `nsh`'s `Image`: the image element as a component carrying the
 /// functions of the runtime's module (`getSize`, `prefetch`).
 const IMAGE_EXPORTS: &[Item] = &[(
     "Image",
@@ -496,9 +528,9 @@ const IMAGE_EXPORTS: &[Item] = &[(
 /// One export of a module, as it is made.
 enum Made {
     Own(Export),
-    /// An export of nsh's module `.0` that another serves too (`nsh`'s
-    /// `Image` is `nsh/image`'s): one value per VM, whichever module is
-    /// imported first making it.
+    /// An export of source `.0` a module serves (`nsh`'s `Image` is the
+    /// source `nsh/image`'s): one value per VM, whichever module serving it
+    /// is imported first making it.
     Shared(&'static str, Export),
     /// A Rust component, with the functions of a module of the same name.
     Component(Arc<ComponentSpec>, Option<Arc<ModuleSpec>>),
@@ -1193,8 +1225,9 @@ mod tests {
         assert_eq!(names, nsh_core::js::NATIVE_MODULES);
     }
 
-    /// `Image` carries its functions; the areas the primitives come from
-    /// are no modules of their own.
+    /// `Image` carries its functions; the sources the primitives come from
+    /// are no modules apps import (bundles never import them: the bundler
+    /// refuses them).
     #[test]
     fn nsh_serves_the_primitives() {
         let source = r#"

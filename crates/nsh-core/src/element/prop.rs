@@ -313,6 +313,27 @@ impl IntoProp<Option<super::SharedString>, PropText> for String {
     }
 }
 
+/// A URL as a set image prop (`.src("https://…")`).
+impl IntoProp<Option<super::ImageSrc>, PropText> for &'static str {
+    fn into_prop(self) -> Reactive<Option<super::ImageSrc>> {
+        Reactive::Static(Some(self.into()))
+    }
+}
+
+/// A URL as a set image prop.
+impl IntoProp<Option<super::ImageSrc>, PropText> for String {
+    fn into_prop(self) -> Reactive<Option<super::ImageSrc>> {
+        Reactive::Static(Some(self.into()))
+    }
+}
+
+/// A crate's image as a set image prop (`.src(asset!("ada.png"))`).
+impl IntoProp<Option<super::ImageSrc>, PropText> for super::ImageAsset {
+    fn into_prop(self) -> Reactive<Option<super::ImageSrc>> {
+        Reactive::Static(Some(self.into()))
+    }
+}
+
 impl<T, U: Into<T>> IntoProp<T, PropValue> for U {
     fn into_prop(self) -> Reactive<T> {
         Reactive::Static(self.into())

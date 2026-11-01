@@ -86,8 +86,8 @@ pub fn toggle_full_screen() {
 /// Moves and sizes the window in points; fields left out keep their values
 /// (TS: `Window.setFrame`). macOS and Windows size the outer frame, window
 /// decorations included; Linux sets GTK's default window size. `x` and `y`
-/// are the bottom left corner in macOS screen coordinates and the top left
-/// on Windows. Sizing works on macOS, Windows and Linux; positioning on
+/// are the top left corner, from the primary screen's top left with `y`
+/// growing down. Sizing works on macOS, Windows and Linux; positioning on
 /// macOS and Windows. Widths and heights take positive finite numbers, `x`
 /// and `y` finite ones: other values keep the field's value.
 pub fn set_frame(frame: WindowFrame) {
@@ -97,7 +97,6 @@ pub fn set_frame(frame: WindowFrame) {
         width: frame.width.filter(|v| v.is_finite() && v.0 > 0.0),
         height: frame.height.filter(|v| v.is_finite() && v.0 > 0.0),
         animated: frame.animated,
-        anchor_top: frame.anchor_top,
     }));
 }
 

@@ -896,8 +896,10 @@ pub(crate) fn raw_at(surface: &Rc<Surface>, x: f32, y: f32) -> bool {
 }
 
 /// Gives a wheel or touchpad scroll to the raw item (a web view) under the
-/// pointer, unless a scroll of nsh's scroll views is going on (one scroll
-/// stays on its view, as in browsers). False when none takes it.
+/// pointer, or to an item the view under the pointer draws that wants it (a
+/// native component that zooms), unless a scroll of nsh's scroll views is
+/// going on (one scroll stays on its view, as in browsers). False when none
+/// takes it.
 fn raw_wheel(surface: &Rc<Surface>, event: &WheelEvent) -> bool {
     let input = &surface.input;
     let time = event.time * 1000.0;
@@ -914,15 +916,22 @@ fn raw_wheel(surface: &Rc<Surface>, event: &WheelEvent) -> bool {
     let Some(hit) = pick(&surface.root, event.x, event.y, true) else {
         return false;
     };
-    let Some(native) = hit.item.filter(|n| n.item.raw()) else {
-        return false;
-    };
     let (lx, ly) = local(&hit.view, event.x, event.y);
-    native.item.wheel(
-        lx - native.rect.origin.x.0,
-        ly - native.rect.origin.y.0,
-        event,
-    )
+    if let Some(native) = hit.item.filter(|n| n.item.raw()) {
+        return native.item.wheel(
+            lx - native.rect.origin.x.0,
+            ly - native.rect.origin.y.0,
+            event,
+        );
+    }
+    // Items that take no pointer (a native component draws in its view and
+    // leaves presses to it) may still take the wheel; raw ones only under
+    // the pointer, above. Cloned: an item's code may change the view.
+    let natives = hit.view.state().natives.clone();
+    natives.iter().filter(|n| !n.item.raw()).any(|n| {
+        n.item
+            .wheel(lx - n.rect.origin.x.0, ly - n.rect.origin.y.0, event)
+    })
 }
 
 /// A wheel event from the window.

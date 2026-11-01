@@ -9,7 +9,7 @@
 // fails: `error`, then `close` (1006, not clean). Its script checks each.
 import { Text, View, signal } from "nsh";
 import { Clipboard, Image, Picker, openUrl } from "nsh";
-import { WebSocket as NativeWebSocket } from "websocket";
+import { connect } from "websocket";
 
 const described = (e: any) => [e.name, e.code, e.permission, JSON.stringify(e.resource)].join(" ");
 
@@ -59,7 +59,7 @@ function App() {
             `Image size: ${await settle(() => Image.getSize("https://example.com/a.png"))}`,
             `Image prefetch: ${await settle(() => Image.prefetch("https://example.com/b.png"))}`,
             `Fetch: ${await settle(() => fetch("https://example.com/data"))}`,
-            `WebSocket: ${await settle(() => NativeWebSocket.connect("ws://example.com/feed"))}`,
+            `WebSocket: ${await settle(() => connect("ws://example.com/feed"))}`,
             `Global WebSocket: ${await refused("ws://example.com/feed")}`,
           ]);
         }}
