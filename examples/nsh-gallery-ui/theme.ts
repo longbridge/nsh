@@ -3,7 +3,22 @@ import type { Tokens, ViewStyle } from "nsh";
 import { token } from "nsh";
 import { Easing } from "nsh";
 import { colorScheme } from "nsh";
+import { platform } from "nsh";
 import finishes from "./finishes.json";
+
+/**
+ * The Terminal idiom: the shared UI and the gallery leave out what a
+ * terminal program would not show (charts, sparklines, decorative icons and
+ * art, window chrome), put on one row what other platforms stack, and space
+ * in whole Cell rows (16 pt at the default 8 × 16 points per Cell).
+ */
+export const terminal = platform.idiom === "terminal";
+
+/**
+ * A desktop's layout, density and keys: the Desktop idiom, or the Terminal
+ * idiom, which takes the desktop's wherever the desktop does.
+ */
+export const desktopIdiom = platform.idiom === "desktop" || terminal;
 
 /** Whether the shared example UI shows its dark palette (reactive: reading it subscribes). */
 export const isDark = () => colorScheme() !== "light";

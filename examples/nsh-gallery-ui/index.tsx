@@ -7,7 +7,7 @@ import { keymap } from "nsh";
 import { Button as BaseButton, Sheet as BaseSheet, Switch, Tooltip } from "nsh/base";
 import { safeArea } from "nsh";
 import { Icon, type IconName } from "./icons";
-import { alpha, colors, finish, focusRing, isDark, mono, motion, radius, toneColor, toneTint, type Tone } from "./theme";
+import { alpha, colors, desktopIdiom, finish, focusRing, isDark, mono, motion, radius, terminal, toneColor, toneTint, type Tone } from "./theme";
 
 export * from "./theme";
 export { Segmented } from "./segmented";
@@ -27,7 +27,7 @@ export const handleThumb =
  * Instructions for the device's input: `touch` on phones and tablets,
  * `pointer` on desktops (a mouse, a touchpad, a keyboard).
  */
-export const hint = (touch: string, pointer: string) => (platform.idiom === "desktop" ? pointer : touch);
+export const hint = (touch: string, pointer: string) => (desktopIdiom ? pointer : touch);
 
 /**
  * Desktops' way to refresh what phones pull down (the mouse does not drag
@@ -37,7 +37,7 @@ export const hint = (touch: string, pointer: string) => (platform.idiom === "des
  * key's label for the hint, or null where it is not bound.
  */
 export function bindRefresh(refresh: () => void): string | null {
-  if (platform.idiom !== "desktop" || platform.os === "web") return null;
+  if (!desktopIdiom || platform.os === "web") return null;
   keymap.bind("mod+r", refresh);
   return keymap.label("mod+r");
 }

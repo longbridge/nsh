@@ -1,6 +1,5 @@
 import type { TextStyle, ViewStyle } from "nsh";
-import { platform } from "nsh";
-import { alpha, colors } from "./theme";
+import { alpha, colors, desktopIdiom } from "./theme";
 
 /** Options of `sliderLook`. */
 export interface SliderLookOptions {
@@ -37,7 +36,7 @@ export const sliderValueStyle = (): TextStyle => ({ color: alpha(colors.text, 0.
  */
 export function sliderLook(o: SliderLookOptions = {}) {
   const vertical = !!o.vertical;
-  const pointer = platform.idiom === "desktop";
+  const pointer = desktopIdiom;
   const rail = `${vertical ? "w-2" : "h-2"} rounded-full bg-track dark:bg-inset`;
   const focus = "focus-within:ring-2 focus-within:ring-brand/36 focus-within:ring-offset-2 focus-within:ring-offset-card";
   const fade = "transition duration-150 motion-reduce:transition-none";
