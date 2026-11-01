@@ -259,18 +259,18 @@ fn previous_and_next_move_and_stop_at_the_ends() {
         "the first slide has none before it"
     );
     let items = app.press_button("Next");
-    app.wait_for("index:1").unwrap();
+    app.wait_for("text:index:1").unwrap();
     assert_eq!(scrolls(&items), [(300.0, true)], "scrolled, animated");
     assert!(app.enabled("Previous"));
     for i in 2..SLIDES {
         app.press_button("Next");
-        app.wait_for(&format!("index:{i}")).unwrap();
+        app.wait_for(&format!("text:index:{i}")).unwrap();
     }
     assert!(!app.enabled("Next"), "the last slide has none after it");
     let items = app.press_button("Previous");
-    app.wait_for("index:3").unwrap();
+    app.wait_for("text:index:3").unwrap();
     assert_eq!(scrolls(&items), [(900.0, true)]);
-    app.wait_for("changes:5").unwrap();
+    app.wait_for("text:changes:5").unwrap();
 }
 
 #[test]
@@ -278,14 +278,14 @@ fn a_pagination_item_moves_to_its_slide_and_is_selected_while_it_shows() {
     let mut app = start(HarnessProps::default(), false);
     assert!(app.screen().selected("role:button[Go to 1]").unwrap());
     let items = app.press_button("Go to 3");
-    app.wait_for("index:2").unwrap();
+    app.wait_for("text:index:2").unwrap();
     assert_eq!(scrolls(&items), [(600.0, true)]);
     assert!(app.screen().selected("role:button[Go to 3]").unwrap());
     assert!(!app.screen().selected("role:button[Go to 1]").unwrap());
     // Its own slide's item reports nothing.
     app.press_button("Go to 3");
     app.wait(Duration::from_millis(50)).unwrap();
-    app.wait_for("changes:1").unwrap();
+    app.wait_for("text:changes:1").unwrap();
 }
 
 #[test]
@@ -307,16 +307,16 @@ fn a_swipe_reports_the_slide_it_rests_on_between_drag_start_and_end() {
     // The finger lets go two thirds of the way: the content lands on the
     // second slide, and the app hears of it once it rests.
     app.scroll("text:Slide 1", px(200.0)).unwrap();
-    app.wait_for("index:1").unwrap();
-    app.wait_for("changes:1").unwrap();
-    app.wait_for("events:dragStart,dragEnd").unwrap();
+    app.wait_for("text:index:1").unwrap();
+    app.wait_for("text:changes:1").unwrap();
+    app.wait_for("text:events:dragStart,dragEnd").unwrap();
     let items = app.take();
     assert_eq!(scrolls(&items), [(300.0, true)], "landed on the slide");
     assert!(app.screen().selected("role:button[Go to 2]").unwrap());
     // Back past the middle of the first: the first again.
     app.scroll("text:Slide 2", px(-200.0)).unwrap();
-    app.wait_for("index:0").unwrap();
-    app.wait_for("events:dragStart,dragEnd,dragStart,dragEnd")
+    app.wait_for("text:index:0").unwrap();
+    app.wait_for("text:events:dragStart,dragEnd,dragStart,dragEnd")
         .unwrap();
 }
 
@@ -331,13 +331,13 @@ fn the_app_index_scrolls_to_its_slide_without_a_change() {
     );
     app.take();
     app.press("text:Jump").unwrap();
-    app.wait_for("index:3").unwrap();
+    app.wait_for("text:index:3").unwrap();
     assert_eq!(scrolls(&app.take()), [(900.0, true)]);
     assert!(app.screen().selected("role:button[Go to 4]").unwrap());
-    app.wait_for("changes:0").unwrap();
+    app.wait_for("text:changes:0").unwrap();
     // A control asks the app, which follows: one scroll.
     let items = app.press_button("Next");
-    app.wait_for("index:4").unwrap();
+    app.wait_for("text:index:4").unwrap();
     assert_eq!(scrolls(&items), [(1200.0, true)]);
 }
 
@@ -361,20 +361,20 @@ fn the_keys_move_while_the_carousel_has_the_focus() {
     app.press_key("tab").unwrap();
     app.press_key("right").unwrap();
     app.wait(Duration::from_millis(50)).unwrap();
-    app.wait_for("index:0").unwrap();
+    app.wait_for("text:index:0").unwrap();
     // On the carousel.
     app.press_key("tab").unwrap();
     app.press_key("right").unwrap();
-    app.wait_for("index:1").unwrap();
+    app.wait_for("text:index:1").unwrap();
     app.press_key("end").unwrap();
-    app.wait_for("index:4").unwrap();
+    app.wait_for("text:index:4").unwrap();
     // The last slide: Right moves nothing.
     app.press_key("right").unwrap();
     app.press_key("left").unwrap();
-    app.wait_for("index:3").unwrap();
+    app.wait_for("text:index:3").unwrap();
     app.press_key("home").unwrap();
-    app.wait_for("index:0").unwrap();
-    app.wait_for("changes:4").unwrap();
+    app.wait_for("text:index:0").unwrap();
+    app.wait_for("text:changes:4").unwrap();
 }
 
 #[test]
@@ -382,27 +382,27 @@ fn focus_and_blur_report_the_carousel_as_a_whole() {
     let mut app = start(HarnessProps::default(), false);
     app.press_key("tab").unwrap();
     app.run_for(Duration::from_millis(50)).unwrap();
-    app.wait_for("events:").unwrap();
+    app.wait_for("text:events:").unwrap();
     // Into the carousel.
     app.press_key("tab").unwrap();
     app.run_for(Duration::from_millis(50)).unwrap();
-    app.wait_for("events:focus").unwrap();
+    app.wait_for("text:events:focus").unwrap();
     // From the carousel to its next control: still in it, nothing.
     app.press_key("tab").unwrap();
     app.run_for(Duration::from_millis(50)).unwrap();
-    app.wait_for("events:focus").unwrap();
+    app.wait_for("text:events:focus").unwrap();
     // Back out before it.
     app.press_key("shift+tab").unwrap();
     app.press_key("shift+tab").unwrap();
     app.run_for(Duration::from_millis(50)).unwrap();
-    app.wait_for("events:focus,blur").unwrap();
+    app.wait_for("text:events:focus,blur").unwrap();
 }
 
 #[test]
 fn reduced_motion_scrolls_at_once() {
     let mut app = start(HarnessProps::default(), true);
     let items = app.press_button("Next");
-    app.wait_for("index:1").unwrap();
+    app.wait_for("text:index:1").unwrap();
     assert_eq!(scrolls(&items), [(300.0, false)]);
 }
 
@@ -418,24 +418,24 @@ fn several_slides_per_view_rest_with_the_last_at_the_end() {
     // Five slides 100 wide in 300: the range ends at 200, where the last
     // three rest.
     app.press_button("Next");
-    app.wait_for("index:1").unwrap();
+    app.wait_for("text:index:1").unwrap();
     let items = app.press_button("Next");
-    app.wait_for("index:2").unwrap();
+    app.wait_for("text:index:2").unwrap();
     assert_eq!(scrolls(&items), [(200.0, true)]);
     assert!(!app.enabled("Next"), "the third rests where the last does");
     // The fifth's item shows the same place; previous goes to the second.
     let items = app.press_button("Go to 5");
-    app.wait_for("index:4").unwrap();
+    app.wait_for("text:index:4").unwrap();
     assert_eq!(scrolls(&items), []);
     app.press_button("Previous");
-    app.wait_for("index:1").unwrap();
+    app.wait_for("text:index:1").unwrap();
 }
 
 #[test]
 fn a_change_updates_the_two_pagination_items_and_scrolls_once() {
     let mut app = start(HarnessProps::default(), false);
     let items = app.press_button("Go to 2");
-    app.wait_for("index:1").unwrap();
+    app.wait_for("text:index:1").unwrap();
     assert_eq!(scrolls(&items), [(300.0, true)]);
     // The two pagination items, the previous button, the scroll and the
     // harness's two texts; no slide.
@@ -471,7 +471,7 @@ fn the_pagination_indicator_follows_the_slide_shown() {
     };
     app.take();
     let items = app.press_button("Go to 4");
-    app.wait_for("index:3").unwrap();
+    app.wait_for("text:index:3").unwrap();
     // The indicator moves to the fourth item, 10 wide each: x 30.
     assert!(
         frames(&items).iter().any(|(_, x)| (*x - 30.0).abs() < 0.01),
@@ -517,15 +517,15 @@ fn next_on_the_last_slide_goes_across_the_seam_and_recenters_silently() {
     );
     assert!(app.enabled("Next"));
     let items = app.press_button("Next");
-    app.wait_for("index:0").unwrap();
+    app.wait_for("text:index:0").unwrap();
     // One step forward, into the next period: no rewind across the slides.
     assert_eq!(scrolls(&items), [(3000.0, true)]);
-    app.wait_for("changes:1").unwrap();
+    app.wait_for("text:changes:1").unwrap();
     // Once it rests: exactly one scroll back into the middle period, not
     // animated, and no change.
     let items = app.after_wrap();
     assert_eq!(scrolls(&items), [(1500.0, false)]);
-    app.wait_for("changes:1").unwrap();
+    app.wait_for("text:changes:1").unwrap();
     assert!(app.screen().selected("role:button[Go to 1]").unwrap());
 }
 
@@ -534,10 +534,10 @@ fn previous_on_the_first_slide_goes_back_across_the_seam() {
     let mut app = start(looping(), false);
     assert!(app.enabled("Previous"));
     let items = app.press_button("Previous");
-    app.wait_for("index:4").unwrap();
+    app.wait_for("text:index:4").unwrap();
     assert_eq!(scrolls(&items), [(1200.0, true)]);
     assert_eq!(scrolls(&app.after_wrap()), [(2700.0, false)]);
-    app.wait_for("changes:1").unwrap();
+    app.wait_for("text:changes:1").unwrap();
 }
 
 #[test]
@@ -553,10 +553,10 @@ fn the_app_going_from_the_last_slide_to_the_first_wraps_forward() {
     );
     app.take();
     app.press("text:First").unwrap();
-    app.wait_for("index:0").unwrap();
+    app.wait_for("text:index:0").unwrap();
     assert_eq!(scrolls(&app.take()), [(3000.0, true)]);
     assert_eq!(scrolls(&app.after_wrap()), [(1500.0, false)]);
-    app.wait_for("changes:0").unwrap();
+    app.wait_for("text:changes:0").unwrap();
 }
 
 #[test]
@@ -566,8 +566,8 @@ fn a_swipe_crosses_the_seam() {
     // From the first slide back past the seam: the last one, in the period
     // before, then silently back in the middle.
     app.scroll("text:Slide 1", px(-200.0)).unwrap();
-    app.wait_for("index:4").unwrap();
-    app.wait_for("changes:1").unwrap();
+    app.wait_for("text:index:4").unwrap();
+    app.wait_for("text:changes:1").unwrap();
     let items = app.take();
     assert_eq!(
         scrolls(&items),
@@ -575,8 +575,8 @@ fn a_swipe_crosses_the_seam() {
         "landed on the last slide"
     );
     assert_eq!(scrolls(&app.after_wrap()), [(2700.0, false)]);
-    app.wait_for("changes:1").unwrap();
-    app.wait_for("events:dragStart,dragEnd").unwrap();
+    app.wait_for("text:changes:1").unwrap();
+    app.wait_for("text:events:dragStart,dragEnd").unwrap();
 }
 
 #[test]

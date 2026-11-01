@@ -1,6 +1,6 @@
 //! `nsh/base`: the behavior and infrastructure foundation of NSH apps' UI,
 //! written in Rust, with no look of its own (as `gpui-base` is GPUI Kit's):
-//! controls (`Button`, a link (`Link`), `Checkbox`, a carousel (`Carousel` and its parts), a color picker: `ColorPicker` and its parts, `NumberInput`, `Radio` in a
+//! controls (`Button`, a link (`Link`), `Checkbox`, avatars (`Avatar`, `AvatarGroup`), a carousel (`Carousel` and its parts), a color picker: `ColorPicker` and its parts, `NumberInput`, `Radio` in a
 //! `RadioGroup`, `Slider`, `Switch`, `Toggle` in a `ToggleGroup`, a bar of them and of buttons and links (`Toolbar`, `ToolbarGroup`, `ToolbarSeparator`), a scroll bar of the app's own look (`Scrollbar`), `Tab` in `Tabs`, `Select`, `Combobox`, a one-time code: `OtpInput`), the pages of a set (`Pagination`), a progress bar (`Progress`), disclosure (`Collapsible`, `Accordion` and its parts),
 //! the parts of charts (`plot`: `nsh/base/plot`), navigation (stacks and pages), dialogs, popups on the core's overlays
 //! (`Popover`, `Menu`, `ContextMenu`, `Tooltip`, `Sheet`), a code editor
@@ -260,15 +260,15 @@ pub mod parts {
 
     use crate::{
         Accordion, AccordionHeader, AccordionItem, AccordionPanel, AccordionTrigger, AlertDialog,
-        Button, Calendar, Carousel, CarouselContent, CarouselItem, CarouselNext, CarouselPagination,
-        CarouselPaginationItem, CarouselPrevious, Checkbox, Collapsible, ColorArea, ColorEyeDropper,
-        ColorField, ColorPicker, ColorSlider, ColorSwatch, Combobox, ContextMenu, DataTable,
-        DatePicker, DiffView, DockArea, Editor, Link, Menu, MenuItem, MenuSeparator, NumberInput,
-        OtpInput, Pagination, Popover, Progress, Radio, RadioGroup, ResizablePanel,
-        ResizablePanelGroup, Scrollbar, Select, Sheet, Slider, Submenu, Switch, Tab, Table,
-        TableBody, TableCaption, TableCell, TableFooter, TableHead, TableHeader, TableRow, Tabs,
-        TextView, TimeField, Toast, ToastStack, Toggle, ToggleGroup, Toolbar, ToolbarGroup,
-        ToolbarSeparator, Tooltip, plot, rich_editor, toast,
+        Avatar, AvatarGroup, Button, Calendar, Carousel, CarouselContent, CarouselItem,
+        CarouselNext, CarouselPagination, CarouselPaginationItem, CarouselPrevious, Checkbox,
+        Collapsible, ColorArea, ColorEyeDropper, ColorField, ColorPicker, ColorSlider, ColorSwatch,
+        Combobox, ContextMenu, DataTable, DatePicker, DiffView, DockArea, Editor, Link, Menu,
+        MenuItem, MenuSeparator, NumberInput, OtpInput, Pagination, Popover, Progress, Radio,
+        RadioGroup, ResizablePanel, ResizablePanelGroup, Scrollbar, Select, Sheet, Slider, Submenu,
+        Switch, Tab, Table, TableBody, TableCaption, TableCell, TableFooter, TableHead,
+        TableHeader, TableRow, Tabs, TextView, TimeField, Toast, ToastStack, Toggle, ToggleGroup,
+        Toolbar, ToolbarGroup, ToolbarSeparator, Tooltip, plot, rich_editor, toast,
     };
 
     /// What a part does: registers its components, classes and modules.

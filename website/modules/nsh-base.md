@@ -18,6 +18,9 @@ by the state you create with `createNavStack`, and `Dialog` for content presente
 alert dialogs (`AlertDialog`). Pages and dialogs also decide the status bar
 (`statusBar`).
 
+The base set also includes `Avatar` and `AvatarGroup`: pictures with native
+image-loading state and a row that places its first `limit` avatars.
+
 The look is the app's: what goes inside a page, a dialog or a header is your own JSX, drawn from the primitives with
 styles, [Tailwind](../docs/tailwind.md) classes and your theme, Rust components from [your own crate](../docs/rust.md),
 or a component library the community builds on `nsh/base`. Every host serves `nsh/base`; Rust apps use the same API
@@ -680,6 +683,7 @@ launch screen.
 
 - [Navigation guide](../docs/navigation.md).
 - [Forms and keyboard](../docs/forms-and-keyboard.md).
+- [Avatar](../elements/avatar.md).
 - [Button](../elements/button.md), [Link](../elements/link.md), [Checkbox](../elements/checkbox.md), [Radio](../elements/radio.md), [Switch](../elements/switch.md), [Tabs](../elements/tabs.md), [Toggle](../elements/toggle.md), [Toolbar](../elements/toolbar.md), [Carousel](../elements/carousel.md), [Select](../elements/select.md), [Combobox](../elements/combobox.md), [Calendar](../elements/calendar.md), [TimeField](../elements/time-field.md), [DatePicker](../elements/date-picker.md), [Collapsible](../elements/collapsible.md), [Accordion](../elements/accordion.md), [Progress](../elements/progress.md), [Slider](../elements/slider.md), [ColorPicker](../elements/color-picker.md), [Scrollbar](../elements/scrollbar.md), [NumberInput](../elements/number-input.md), [OtpInput](../elements/otp-input.md), [Pagination](../elements/pagination.md), [Plot](../elements/plot.md), [NavStack](../elements/nav-stack.md), [Dialog](../elements/dialog.md),
   [AlertDialog](../elements/alert-dialog.md), [TextView](../elements/text-view.md), [Editor](../elements/editor.md), [DiffView](../elements/diff-view.md), [Table](../elements/table.md), [DataTable](../elements/data-table.md),
   [Text](../elements/text.md) and

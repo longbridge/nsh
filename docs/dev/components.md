@@ -7,7 +7,9 @@ native.
 
 NSH is layered as GPUI Kit is (`architecture.md` "Layers"): `nsh-core` is its `gpui`, `nsh-base` its `gpui-base`, and
 the styled layer, GPUI Kit's `gpui-component`, is never part of NSH. The look of an app is the app's. Rust components
-come from two places:
+come from two places. `nsh/base` also provides `Avatar` and `AvatarGroup`:
+images whose load state drives their fallback natively, and a row that
+places its first `limit` avatars.
 
 - **`nsh/base`**: unstyled base components of `gpui-base`'s scope, the crate `nsh-base` (`crates/nsh-base`,
   `nsh_base::registry()`): `Button`, `Link` (a press target that opens its `href`: through the core's `openUrl` flow, or the app's `onOpen` with `openWith="app"`), `Carousel` with `CarouselContent`, `CarouselItem`, `CarouselPrevious`, `CarouselNext`, `CarouselPagination` and `CarouselPaginationItem` (slides on a native scroll view: "Carousels" below), `Checkbox`, `Radio`, `RadioGroup`, `Switch`, `Tab`, `Tabs`, `Toggle`, `ToggleGroup`, `Toolbar`, `ToolbarGroup`, `ToolbarSeparator`, `Select` (one value from a list: "Popups" below), `Combobox` (one value or several from the same list), `Calendar` (a date or a range from months of days), `TimeField` (a time of day by segments), `DatePicker` (a calendar and a time field in a popup: "Popups" below), `Collapsible`, `Accordion` with `AccordionItem`, `AccordionHeader`, `AccordionTrigger` and `AccordionPanel`, `Progress`, `Slider`, `Scrollbar` ("Scroll bars" below), `ColorPicker` with `ColorArea`, `ColorSlider`, `ColorField`, `ColorSwatch` and `ColorEyeDropper` (a color in RGB, HSL, HSB or OKLCH, its parts laid out by the app), `NumberInput`, `OtpInput`, `Pagination` (the pages of a set: Previous, the pages around the current one, ellipses, Next; its places made once, a page change changing what they show), `Table` with `TableHeader`, `TableBody`, `TableFooter`, `TableRow`, `TableHead`, `TableCell` and `TableCaption` (a table's accessibility roles around the app's rows), `TextView` (`text-view.md`), `ResizablePanelGroup` and `ResizablePanel`, `DockArea`
