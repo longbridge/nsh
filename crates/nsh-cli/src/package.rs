@@ -267,6 +267,11 @@ pub(crate) struct WebConfig {
     /// (`/apps/counter/sports/football`). Without it the page's URLs are
     /// relative to the page.
     pub(crate) base: Option<String>,
+    /// Whether pushed pages and open dialogs are entries of the browser's
+    /// history (`createPlayer`'s `history`), on the packaged page and the
+    /// dev server's; by default only where the app is the whole page, not
+    /// in an iframe.
+    pub(crate) history: Option<bool>,
 }
 
 /// Options of `nsh package`.

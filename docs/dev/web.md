@@ -146,7 +146,9 @@ build to the same file) and takes `nsh.js` from the crate.
   in the form browsers send it, unreserved characters and percent-escapes without dot or empty segments, a `/`
   added at its end, which `start_at` matches requests against as it is) puts a `<base href>` first in the head, so the page loads its files at any of the app's paths
   (`/sports/football`), which `SiteServer::start_at` (`--run`) serves under it; the dev page has `<base href="/">`
-  (the dev server serves its files at the root). The app ships as minified ES modules
+  (the dev server serves its files at the root). `nsh.json` `web.history` reaches `createPlayer`'s `history` on
+  both pages (the packaged page's `app.history`, the dev page's `HISTORY`, which `with_page_host` fills in); without
+  it the player's default (`window.top === window`) holds. The app ships as minified ES modules
   (`app.<digest>.js` and `<chunk>.<digest>.js`). An import map resolves original chunk URLs to hashed files;
   transitive entry fonts load before startup and dynamic imports prepare the requested chunk's font dependencies.
   The browser loads static dependencies, module cycles and dynamic chunks itself. No bytecode or hardening

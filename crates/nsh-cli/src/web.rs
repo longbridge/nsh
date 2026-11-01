@@ -252,6 +252,9 @@ pub(crate) fn package(
     if let Some(glue) = &glue {
         app["glue"] = glue.as_str().into();
     }
+    if let Some(history) = config.web.history {
+        app["history"] = history.into();
+    }
     let html = page(&PageParts {
         name,
         appearance,
@@ -851,13 +854,18 @@ pub(crate) fn dev_host(runtime: &WebRuntime, rust: bool) -> anyhow::Result<(Stri
 
 /// The dev host's page and files ([`dev_host`]) for the app at `entry`:
 /// with its page's host module (`nsh.json` `web.host`) as `nsh-host.js`,
-/// read now (a change takes another session), or none.
+/// read now (a change takes another session), or none, and its
+/// `web.history`.
 pub(crate) fn with_page_host(
     (page, mut files): (String, Files),
     entry: &Path,
 ) -> anyhow::Result<(String, Files)> {
-    let module = crate::package::read_config(entry)?
-        .web
+    let web = crate::package::read_config(entry)?.web;
+    let history = match web.history {
+        Some(history) => history.to_string(),
+        None => "null".to_owned(),
+    };
+    let module = web
         .host
         .map(|host| crate::package::web_host_module(entry, &host))
         .transpose()?;
@@ -871,7 +879,11 @@ pub(crate) fn with_page_host(
         }
         None => "null".to_owned(),
     };
-    Ok((page.replace("{{host}}", &host), files))
+    Ok((
+        page.replace("{{host}}", &host)
+            .replace("{{history}}", &history),
+        files,
+    ))
 }
 
 /// Where the dev host serves the page's host module ([`with_page_host`]).
@@ -1336,15 +1348,28 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("nsh-web-dev-host-{}", std::process::id()));
         fs::create_dir_all(&dir).unwrap();
         let entry = dir.join("App.tsx");
-        let base = || ("const HOST = {{host}};".to_owned(), Files::new());
-        // No nsh.json, or one without `web.host`: no host.
+        let base = || {
+            (
+                "const HOST = {{host}}; const HISTORY = {{history}};".to_owned(),
+                Files::new(),
+            )
+        };
+        // No nsh.json, or one without `web.host`: no host, and the
+        // player's own default for the history.
         let (page, files) = with_page_host(base(), &entry).unwrap();
-        assert_eq!(page, "const HOST = null;");
+        assert_eq!(page, "const HOST = null; const HISTORY = null;");
         assert!(files.is_empty());
         fs::write(dir.join("host.js"), "export function createHost() {}").unwrap();
-        fs::write(dir.join("nsh.json"), r#"{ "web": { "host": "host.js" } }"#).unwrap();
+        fs::write(
+            dir.join("nsh.json"),
+            r#"{ "web": { "host": "host.js", "history": false } }"#,
+        )
+        .unwrap();
         let (page, files) = with_page_host(base(), &entry).unwrap();
-        assert_eq!(page, "const HOST = \"./nsh-host.js\";");
+        assert_eq!(
+            page,
+            "const HOST = \"./nsh-host.js\"; const HISTORY = false;"
+        );
         assert_eq!(
             files,
             [(
@@ -1629,7 +1654,13 @@ mod tests {
             "{page}"
         );
         // The page's host is the app's (`with_page_host`).
-        assert!(!page.replace("{{host}}", "").contains("{{"), "{page}");
+        assert!(
+            !page
+                .replace("{{host}}", "")
+                .replace("{{history}}", "")
+                .contains("{{"),
+            "{page}"
+        );
         // `nsh/base` with its submodules, each a module the page serves.
         assert!(
             page.contains("const UI_SETS = [\"nsh/base\",\"nsh/base/plot\"];"),

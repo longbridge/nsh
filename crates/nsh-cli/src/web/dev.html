@@ -48,6 +48,9 @@
   // The page's host (`nsh.json` `web.host`): its `createHost(player)` runs
   // once the player exists, before the first bundle, as on a packaged page.
   const HOST = {{host}};
+  // Whether pages and dialogs are browser history entries (`nsh.json`
+  // `web.history`; `null`: the player's default).
+  const HISTORY = {{history}};
   const status = document.getElementById("status");
   const problem = document.getElementById("problem");
   const decoder = new TextDecoder();
@@ -100,6 +103,7 @@
     glue: GLUE ?? undefined,
     host: HOST ? { call: (name, args) => host.call(name, args) } : undefined,
     assetBase: "/assets/",
+    history: HISTORY ?? undefined,
     readAsset,
     onLog: (level, message) => send({ type: "log", level: levels[level] ?? "info", target: "js", message }),
   });

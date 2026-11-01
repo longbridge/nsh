@@ -36,7 +36,9 @@
   // with it. A Rust app (`app.rust`) has no code: its runtime mounts its
   // root. The page's host (`app.host`, nsh.json `web.host`) answers the
   // app's `nsh/host` calls: its `createHost(player)` runs once the player
-  // exists, before the app starts, so no call comes earlier.
+  // exists, before the app starts, so no call comes earlier. Its pages
+  // and dialogs are browser history entries as nsh.json `web.history`
+  // says.
   import { createPlayer } from "./{{runtime}}";
 
   const app = {{app}};
@@ -96,6 +98,8 @@
         assets: app.assets,
         data: app.data,
         sides: app.sides,
+        // nsh.json `web.history`; without it the player's default.
+        history: app.history,
         readAsset: (uri) => fonts.get(path(uri)) ?? null,
         // The chunk's fonts and the side modules of the runtime it needs.
         prepareChunk: (id) => Promise.all([
