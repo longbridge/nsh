@@ -3,7 +3,7 @@
 import type { JSX, ScrollProps } from "nsh";
 import { computed, Image, Scroll, signal, Text, View } from "nsh";
 import { setColorScheme, windowSize } from "nsh";
-import { Appear, colors, desktopIdiom, Icon, isDark, Press, radius, RoundButton } from "../nsh-gallery-ui";
+import { Appear, colors, desktopIdiom, Icon, isDark, Press, radius, RoundButton, terminal } from "../nsh-gallery-ui";
 import { nav } from "./nav";
 import logoDark from "./logo-dark.svg";
 import logoLight from "./logo-light.svg";
@@ -120,6 +120,7 @@ export function ThemeToggle(props: { bar?: boolean }) {
     <RoundButton
       icon={isDark() ? "sun" : "moon"}
       label={isDark() ? "Light appearance" : "Dark appearance"}
+      title="Theme"
       variant="secondary"
       size={34}
       onPress={() => setColorScheme(isDark() ? "light" : "dark")}
@@ -127,8 +128,10 @@ export function ThemeToggle(props: { bar?: boolean }) {
   );
 }
 
-/** NSH's mark, sharp at any size, in the appearance shown (its dot is dark on light backgrounds). */
+/** NSH's mark, sharp at any size, in the appearance shown (its dot is dark
+ * on light backgrounds); none in the terminal. */
 export function Logo(props: { size: number }) {
+  if (terminal) return null;
   return <Image src={isDark() ? logoDark : logoLight} style={{ width: props.size, height: props.size }} />;
 }
 
