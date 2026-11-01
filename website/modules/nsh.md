@@ -938,7 +938,7 @@ const platform: Platform;
 interface Platform {
   readonly os: "ios" | "android" | "macos" | "windows" | "linux" | "web";
   readonly version: string;
-  readonly idiom: "phone" | "pad" | "mac" | "tv" | "desktop";
+  readonly idiom: "phone" | "pad" | "mac" | "tv" | "desktop" | "terminal";
   readonly catalyst: boolean;
   select<T>(spec: PlatformSelectSpec<T>): T | undefined;
 }
@@ -950,7 +950,7 @@ The platform the app runs on, constant while it runs.
 |---|---|---|
 | `os` | `os() -> Os` (`os().name()` is the TS string) | The operating system. iOS, the iOS simulator and Mac Catalyst report `"ios"`, browsers `"web"`. |
 | `version` | `os_version() -> (u16, u16)` | iOS and desktops: the OS version (`"17.5"`); Android: the API level (`"35"`); the web: `"0.0"`. Rust gives the major and minor version, or the API level and 0 on Android. |
-| `idiom` | `idiom() -> Idiom`; `is_desktop()` for `"desktop"` | The kind of device: `"phone"`, `"pad"` (an iPad, an Android tablet), `"mac"` (Mac Catalyst in the Mac idiom), `"tv"` (Apple TV, Android TV) or `"desktop"`, where desktop behavior applies: macOS, Windows, Linux, and browsers with a mouse and a wide window. |
+| `idiom` | `idiom() -> Idiom`; `is_desktop()` for `"desktop"` and `"terminal"` | The kind of device: `"phone"`, `"pad"` (an iPad, an Android tablet), `"mac"` (Mac Catalyst in the Mac idiom), `"tv"` (Apple TV, Android TV), `"desktop"`, where desktop behavior applies: macOS, Windows, Linux, and browsers with a mouse and a wide window, or `"terminal"` (`--target tui`): drawn on a grid of character cells, with desktop behavior; `os` is still the machine's. |
 | `catalyst` | `idiom() == Idiom::Mac` | Mac Catalyst in the Mac idiom. |
 | `select(spec)` | `match os() { … }` | The value for this platform (see below). |
 
@@ -973,7 +973,7 @@ interface PlatformSelectSpec<T> {
   linux?: T;
   web?: T;
   mobile?: T;   // iOS, Android, and phone and tablet browsers
-  desktop?: T;  // macOS, Windows, Linux, and desktop browsers
+  desktop?: T;  // macOS, Windows, Linux, desktop browsers, and terminals
   native?: T;   // every platform but the web
   default?: T;
 }

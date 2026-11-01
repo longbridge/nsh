@@ -271,8 +271,9 @@ pub fn idiom() -> Idiom {
         .with_untracked(|e| e.idiom)
 }
 
-/// Whether desktop behavior applies: a desktop OS, or a browser in the
-/// desktop idiom (TS: `platform.idiom` `"desktop"`); it does not change.
+/// Whether desktop behavior applies: a desktop OS, a browser in the
+/// desktop idiom (TS: `platform.idiom` `"desktop"`) or a terminal
+/// (`"terminal"`); it does not change.
 pub fn is_desktop() -> bool {
     with_data(|d| d.ambient.env.as_ref().map(|e| e.env))
         .expect("the core sets the environment")

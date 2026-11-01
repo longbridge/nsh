@@ -93,7 +93,7 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   with `selectable` makes its texts select together (`text.md` "Selectable views").
 - **Platform modules**: `platform` (`nsh`'s environment, a constant: `os`: `ios` / `android` / `macos` / `windows` / `linux` / `web`, from the platform's
   `Environment::os` (`nsh_engine::Os`; the default is the build's mobile OS, so `nsh test` is iOS); `version` (a string,
-  Android's API level), `idiom` (`phone` / `pad` / `mac` / `tv` / `desktop`), `catalyst`, `select` (the OS, then `mobile` / `desktop`, `native` (not on the web), `default`); the `desktop` idiom, `desktop` and `desktop={{…}}` follow `Environment::desktop()`: a desktop OS, or the web in the desktop idiom), `pixelRatio()` (an accessor: the window moving to another screen writes it), `nsh`'s
+  Android's API level), `idiom` (`phone` / `pad` / `mac` / `tv` / `desktop` / `terminal`), `catalyst`, `select` (the OS, then `mobile` / `desktop`, `native` (not on the web), `default`); the `desktop` idiom, `desktop` and `desktop={{…}}` follow `Environment::desktop()`: a desktop OS, the web in the desktop idiom, or the terminal idiom), `pixelRatio()` (an accessor: the window moving to another screen writes it), `nsh`'s
   `announce(message)` and `setAccessibilityFocus(ref)` (Rust, the node passed as `{ $node: id }`), reactive `screenReaderEnabled()` / `reduceMotion()`. The environment carries `pixelRatio`,
   `screenReader`, `osVersion` and `idiom` (VoiceOver / TalkBack changes are observed natively).
 - **`disabled`** on any element applies `disabled:` classes and removes its press and `onContextMenu` listeners from what

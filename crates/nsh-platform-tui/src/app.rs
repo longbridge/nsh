@@ -156,7 +156,7 @@ impl AppView {
     pub fn new(options: AppOptions) -> Self {
         let environment = Environment {
             os: OS,
-            idiom: Idiom::Desktop,
+            idiom: Idiom::Terminal,
             color_scheme: options.appearance.resolve(options.capabilities.background),
             reduce_motion: true,
             ..Default::default()

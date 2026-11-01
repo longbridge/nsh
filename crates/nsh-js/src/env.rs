@@ -524,6 +524,7 @@ fn idiom(env: &Environment) -> &'static str {
         Idiom::Mac => "mac",
         Idiom::Tv => "tv",
         Idiom::Desktop => "desktop",
+        Idiom::Terminal => "terminal",
     }
 }
 
@@ -642,7 +643,7 @@ pub(crate) const DEVICE_TYPES: &str = r#"export interface PlatformSelectSpec<T> 
   web?: T;
   /** iOS, Android, and phone and tablet browsers. */
   mobile?: T;
-  /** macOS, Windows, Linux, and desktop browsers. */
+  /** macOS, Windows, Linux, desktop browsers, and terminals. */
   desktop?: T;
   /** Every platform but the web. */
   native?: T;
@@ -658,8 +659,10 @@ export interface PlatformInfo {
   readonly version: string;
   /** The kind of device. `"desktop"`: desktop behavior applies (macOS,
    * Windows, Linux, and browsers with a mouse and a wide viewport); Mac
-   * Catalyst in the Mac idiom is `"mac"`. */
-  readonly idiom: "phone" | "pad" | "mac" | "tv" | "desktop";
+   * Catalyst in the Mac idiom is `"mac"`. `"terminal"`: drawn on a grid of
+   * character cells in a terminal, with desktop behavior; `os` is still
+   * the machine's. */
+  readonly idiom: "phone" | "pad" | "mac" | "tv" | "desktop" | "terminal";
   /** Mac Catalyst in the Mac idiom. */
   readonly catalyst: boolean;
   /** The value for this platform: its OS (`ios`, `macos`, `web`, ...),

@@ -197,7 +197,7 @@ them yet (`compatibility.md`). The frozen RN-shaped modules keep their names. A 
 | `MenuItem.enabled` | `MenuItem.disabled` | States | |
 | **`nsh`: the environment** | | | |
 | `Platform.OS`, `Platform.Version`, `Platform.constants` | `platform.os`, `platform.version: string` | Environment | A constant object; Android's version is its API level as a string (`"35"`) |
-| `Platform.isPad`, `isTV`, `isDesktop`, `isMacCatalyst`, `constants.interfaceIdiom` | `platform.idiom: "phone" \| "pad" \| "mac" \| "tv" \| "desktop"`, `platform.catalyst` | Environment | `isDesktop` is `platform.idiom === "desktop"` |
+| `Platform.isPad`, `isTV`, `isDesktop`, `isMacCatalyst`, `constants.interfaceIdiom` | `platform.idiom: "phone" \| "pad" \| "mac" \| "tv" \| "desktop" \| "terminal"`, `platform.catalyst` | Environment | `isDesktop` is `platform.idiom === "desktop"` |
 | `Platform.select(spec)` | `platform.select(spec)` | Environment | Same spec |
 | `PixelRatio.get()` | `pixelRatio(): number` (accessor, reactive) | Environment | Follows the window to another screen |
 | `PixelRatio.getFontScale()` | `fontScale()` | Environment | Already exists |

@@ -252,7 +252,19 @@ and host channel. `TerminalCapabilities` starts with the terminal background; ca
 renderers. Embedding defaults to bounded limits; the Development host explicitly selects standalone limits.
 `register_component` creates per-node widgets with ordered property updates, commands and buffer rendering;
 reserved `nsh/` names are rejected. Native component input, sizing and richer context belong to the native
-component ticket. The terminal idiom and the Release runner are separate slices. The current environment uses desktop behavior and reports the machine's operating system (macOS, Windows or Linux), as the desktop development hosts do, so `fs/promises` and `process` run under the app's declared capabilities and `platform.os` names the real system. `nsh/desktop`'s `isAvailable` follows the OS, so an app that draws its own window chrome there (the gallery's `TitleBar`) draws it in the terminal too, as the app's own content. This is the real-OS part of the Terminal idiom ticket; the idiom itself (`Idiom::Terminal`) is still that ticket's, and the surface reports the desktop idiom until then.
+component ticket. The Release runner is a separate slice.
+
+The surface reports the Terminal idiom (`Idiom::Terminal`, `platform.idiom` `"terminal"`) and the machine's
+operating system (macOS, Windows or Linux), as the desktop development hosts report theirs, so `fs/promises` and
+`process` run under the app's declared capabilities and `platform.os` names the real system. The terminal is a form
+of device, as the phone, pad and desktop are, so it is an idiom rather than a flag beside one: an app that lays out
+for Cells asks the one question it asks for every other device form, and the OS stays free to say which system it
+runs on. Desktop behavior applies to the idiom on any OS (`Idiom::desktop_on`): keyboard shortcuts, hover,
+tooltips, context menus, `desktop={{…}}` props and `platform.select`'s `desktop` key. `nsh/desktop`'s
+`isAvailable` follows the OS, so an app that draws its own window chrome there (the gallery's `TitleBar`) draws it
+in the terminal too, as the app's own content, until it leaves it out for `platform.idiom === "terminal"`. Code
+that tests `platform.idiom === "desktop"` for a pointer or a wide layout no longer matches in the terminal; apps
+choose what the terminal gets from the idiom.
 
 ## Points per Cell
 
@@ -777,6 +789,7 @@ permit clipboard writes; `nsh test` uses memory and never writes to the machine'
 
 | Feature | Terminal representation |
 |---|---|
+| Device form | `platform.idiom` `"terminal"` with the real `platform.os`; desktop behavior (`desktop={{…}}`, `platform.select`'s `desktop`, shortcuts, hover, context menus) |
 | Performance monitor | One corner line, toggled by `C-h p` or enabled by `--fps`; idle draws stop and readings also go to `nsh::perf` |
 | Development logs and connection/build status | Append-only log file, visible in the on-demand `C-h e` panel |
 | Test screenshots | Versioned UTF-8 JSON of Cell symbols, foreground/background/underline colors and modifiers |

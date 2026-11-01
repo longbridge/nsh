@@ -119,13 +119,17 @@ pub enum Idiom {
     /// A desktop computer (a desktop backend, or a browser with a mouse and
     /// a wide viewport; Mac Catalyst is [`Idiom::Mac`]).
     Desktop,
+    /// A terminal: drawn on a grid of Cells, keyboard first (the terminal
+    /// backend). The OS stays the machine's; desktop behavior applies.
+    Terminal,
 }
 
 impl Idiom {
     /// Whether desktop behavior applies on `os` in this idiom: a desktop
-    /// OS, or a browser in the desktop idiom (TS: `platform.idiom` `"desktop"`).
+    /// OS, a browser in the desktop idiom (TS: `platform.idiom`
+    /// `"desktop"`), or a terminal (`"terminal"`).
     pub fn desktop_on(self, os: Os) -> bool {
-        os.is_desktop() || (os == Os::Web && self == Idiom::Desktop)
+        os.is_desktop() || (os == Os::Web && self == Idiom::Desktop) || self == Idiom::Terminal
     }
 }
 
@@ -179,9 +183,9 @@ pub struct Environment {
 }
 
 impl Environment {
-    /// Desktop behavior applies: a desktop OS, or a browser in the desktop
-    /// idiom (`desktop={{…}}` props, `platform.select({ desktop })`,
-    /// `platform.idiom` `"desktop"`).
+    /// Desktop behavior applies: a desktop OS, a browser in the desktop
+    /// idiom (`platform.idiom` `"desktop"`) or a terminal (`"terminal"`):
+    /// `desktop={{…}}` props, `platform.select({ desktop })`.
     pub fn desktop(&self) -> bool {
         self.idiom.desktop_on(self.os)
     }
@@ -471,7 +475,16 @@ pub enum FetchOp {
 
 #[cfg(test)]
 mod tests {
-    use super::{Environment, HostEnvironment, Locale};
+    use super::{Environment, HostEnvironment, Idiom, Locale, Os};
+
+    #[test]
+    fn desktop_behavior_applies_in_the_terminal_idiom_on_any_os() {
+        for os in [Os::MacOs, Os::Windows, Os::Linux, Os::Ios, Os::Web] {
+            assert!(Idiom::Terminal.desktop_on(os), "{os:?}");
+        }
+        assert!(!Idiom::Phone.desktop_on(Os::Web));
+        assert!(!Idiom::Pad.desktop_on(Os::Ios));
+    }
 
     #[test]
     fn a_host_environment_replaces_what_it_sets() {
