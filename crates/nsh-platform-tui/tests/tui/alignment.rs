@@ -350,3 +350,57 @@ fn a_border_on_one_side_never_moves_content_on_the_other_sides() {
     assert_eq!(left[0], [(1, 1, 5)], "flush text moves off the left border");
     assert_eq!(left[1..], plain[1..], "the rest stays put");
 }
+
+/// Two flush rows filling a two-row box with a border on its top or bottom.
+fn stacked_rows(top: bool) -> impl IntoElement {
+    let rows = view()
+        .absolute()
+        .left(px(0.0))
+        .top(px(0.0))
+        .w(px(160.0))
+        .h(px(32.0))
+        .child(view().h(px(16.0)).child(text("Edge")))
+        .child(view().h(px(16.0)).px(px(16.0)).child(text("Pad")));
+    let color = nsh_core::color::rgb(0x8a8f98);
+    if top {
+        rows.border_t(px(1.0)).border_color(color)
+    } else {
+        rows.border_b(px(1.0)).border_color(color)
+    }
+}
+
+#[component]
+fn TopStack() -> impl IntoElement {
+    stacked_rows(true)
+}
+
+#[component]
+fn BottomStack() -> impl IntoElement {
+    stacked_rows(false)
+}
+
+#[test]
+fn a_top_or_bottom_border_never_stacks_two_rows_of_content_on_one() {
+    for (name, root) in [
+        ("top", Root::new::<TopStack>(|| ())),
+        ("bottom", Root::new::<BottomStack>(|| ())),
+    ] {
+        let (mut view, rx) = surface();
+        let mut terminal = Terminal::new(TestBackend::new(24, 4)).unwrap();
+        view.load(App::Rust(root)).unwrap();
+        draw_until(&mut view, &mut terminal, &rx, "Pad");
+        let buffer = terminal.backend().buffer();
+        assert_eq!(
+            spans(buffer, "Edge"),
+            [(0, 0, 4)],
+            "{name}:\n{}",
+            dump(buffer)
+        );
+        assert_eq!(
+            spans(buffer, "Pad"),
+            [(1, 2, 5)],
+            "{name}:\n{}",
+            dump(buffer)
+        );
+    }
+}

@@ -322,11 +322,15 @@ leaves; a reversed Cell can have a space as its symbol.
 
 A drawn border owns one Cell on its side. Child boxes fit inside those reserved Cells, and a border reserves only
 its own side: a child is never pushed past its parent's edge on the other sides, it narrows instead. A child whose
-content reaches into a reserved column moves off it, the displacement carried into its contents; one whose
-content stays clear of it only narrows, so its content keeps its columns (a sidebar's right border leaves its
-rows' text where it was, a left border moves only a row whose text starts at the edge). When reservation shortens a child box, its vertical point offsets contract into
-that box while text keeps terminal glyphs; vertical text stacks reserve one Cell per measured line,
-so contraction reduces quantized gaps without collapsing two labels onto one row. A following inset
+content reaches into a reserved column or row moves off it, the displacement carried into its contents; one whose
+content stays clear of it only narrows, so its content keeps its columns and rows (a sidebar's right border leaves
+its rows' text where it was, a left border moves only a row whose text starts at the edge, a card's header below
+its padding stays on its row). When reservation shortens a child box whose content reaches into a reserved row,
+its vertical point offsets contract into that box while text keeps terminal glyphs; vertical text stacks reserve
+one Cell per measured line, so contraction reduces quantized gaps without collapsing two labels onto one row.
+Moving never stacks rows of content: when a child whose content reaches into a top or bottom border's row would
+land on a sibling's content by moving one row off it (two flush rows filling the box), that border is left out
+and the content keeps its rows. A following inset
 starts below already-painted sibling text. Ordinary descendants remain clipped by inherited border limits. Scroll content
 keeps its offset and clips rather than moving back into the viewport. A view's own text, field and canvas use
 its inner Cell rect. `overflow: hidden` clips descendants to that rect and masks rounded corners. A border is
