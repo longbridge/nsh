@@ -1,11 +1,10 @@
 import { cleanup, computed, effect, List, Scroll, signal, Text, View, type YNode } from "nsh";
 import { reduceMotion } from "nsh";
 import { Animated, type AnimatedNode, createAnimatedValue, Easing, LayoutAnimation } from "nsh";
-import { platform } from "nsh";
 import { Tab, Tabs, Input } from "nsh/base";
 import { keyboardFrame, safeAreaInsets } from "nsh";
 import { Icon, type IconName } from "../icons";
-import { alpha, Appear, Badge, bindRefresh, Button, colors, columnsFor, desktop, finish, hint, IconTile, Meter, mono, Press, radius, RoundButton, Section, Segmented, tabPress, type Tone, toneColor, toneTint } from "../ui";
+import { alpha, Appear, Badge, bindRefresh, Button, colors, columnsFor, desktop, desktopIdiom, finish, hint, IconTile, Meter, mono, Press, radius, RoundButton, Section, Segmented, tabPress, type Tone, toneColor, toneTint } from "../ui";
 
 const tones: Tone[] = ["accent", "info", "warn", "up", "danger", "neutral"];
 
@@ -485,7 +484,7 @@ function More() {
           </View>
           <Segmented options={indicators} value={indicator()} onChange={(v) => indicator.set(v)} />
           {/* The mouse does not pull scroll views down: desktops refresh here. */}
-          <If when={platform.idiom === "desktop"}>
+          <If when={desktopIdiom}>
             <Button label="Refresh" variant="secondary" disabled={refreshing()} onPress={refresh} />
           </If>
         </Section>

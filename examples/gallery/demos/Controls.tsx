@@ -1,9 +1,8 @@
 import { cleanup, computed, type JSX, signal, Text, View } from "nsh";
 import { Checkbox, Collapsible, Progress, Radio, RadioGroup, Slider, Switch, Tab, Tabs } from "nsh/base";
 import { reduceMotion } from "nsh";
-import { platform } from "nsh";
 import { Icon } from "../icons";
-import { Badge, Button, Caption, Card, colors, DemoPage, finish, focusRing, hovered, mono, sliderFill, sliderLook, sliderValueClass, sliderValueStyle, switchLook, toneColor } from "../ui";
+import { Badge, Button, Caption, Card, colors, DemoPage, desktopIdiom, finish, focusRing, hovered, mono, sliderFill, sliderLook, sliderValueClass, sliderValueStyle, switchLook, toneColor } from "../ui";
 
 // `nsh/base`'s controls own presses, keys, the disabled state and what
 // screen readers say; every value is the app's, and so is the look: the
@@ -16,10 +15,10 @@ import { Badge, Button, Caption, Card, colors, DemoPage, finish, focusRing, hove
  * use: smaller controls, rows and type, whatever the window's width.
  */
 const size =
-  platform.idiom === "desktop"
+  desktopIdiom
     ? { row: 40, padding: 6, gap: 10, label: 14, detail: 12, control: 16, corner: 5, check: 12, dash: 8, dot: 6, tabs: 30, line: 32, switch: "small" as const }
     : { row: 56, padding: 8, gap: 12, label: 15, detail: 13, control: 22, corner: 7, check: 16, dash: 10, dot: 8, tabs: 40, line: 44, switch: "regular" as const };
-const pointer = platform.idiom === "desktop";
+const pointer = desktopIdiom;
 
 /** A control's row: the control and its label, the whole row pressable. */
 const row = (first: boolean) => ({

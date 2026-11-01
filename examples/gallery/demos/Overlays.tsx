@@ -1,8 +1,7 @@
 import { Overlay, signal, Text, View, type YNode } from "nsh";
 import { Popover, Sheet, Tooltip } from "nsh/base";
 import { dismissToast, toast } from "../toast";
-import { platform } from "nsh";
-import { Badge, Button, Caption, Card, colors, DemoPage, finish, mono, radius, Tip } from "../ui";
+import { Badge, Button, Caption, Card, colors, DemoPage, desktopIdiom, finish, mono, radius, Tip } from "../ui";
 
 /** The popups' look: the gallery's, as `nsh/base` draws none. */
 const popup = () => ({
@@ -101,7 +100,7 @@ export function Overlays() {
     const hovered = signal(false);
     const pinned = signal(false);
     return (
-      <Card icon="text" title="Tooltip" subtitle={platform.idiom === "desktop" ? "Rest the pointer on a button" : "Tooltips follow a pointer: pin one to see it"}>
+      <Card icon="text" title="Tooltip" subtitle={desktopIdiom ? "Rest the pointer on a button" : "Tooltips follow a pointer: pin one to see it"}>
         <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
           {/* A short text in a `Tooltip` of the gallery's look. */}
           <View tooltip={<Tip label="Saves the document" />}>

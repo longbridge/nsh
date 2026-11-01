@@ -8,7 +8,7 @@ import { safeArea } from "nsh";
 import { Icon, type IconName } from "../icons";
 import { nav } from "../nav";
 import { TitleBar } from "../TitleBar";
-import { Appear, Badge, Button, Caption, Card, colors, DemoPage, finish, header, hint, IconTile, Inset, isDark, mono, PageHeader, Press, radius, Row, Segmented, tints, Toggle, type Tone, toneColor, toneTint } from "../ui";
+import { Appear, Badge, Button, Caption, Card, colors, DemoPage, desktopIdiom, finish, header, hint, IconTile, Inset, isDark, mono, PageHeader, Press, radius, Row, Segmented, tints, Toggle, type Tone, toneColor, toneTint } from "../ui";
 
 // One device pixel, in points (reading it in a binding follows the screen).
 const hairline = () => 1 / pixelRatio();
@@ -215,7 +215,7 @@ function Accessory() {
         ios={{ inputAccessoryViewID: "counter" }}
       />
       <Caption
-        label={platform.idiom === "desktop" ? "Desktops have no input accessories" : platform.os === "android" ? "Android has no input accessories" : "The bar counts what you type"} note='inputAccessoryViewID="counter"' />
+        label={desktopIdiom ? "Desktops have no input accessories" : platform.os === "android" ? "Android has no input accessories" : "The bar counts what you type"} note='inputAccessoryViewID="counter"' />
       <InputAccessoryView nativeID="counter" style={{ backgroundColor: colors.surface }}>
         <View
           style={{

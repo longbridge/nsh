@@ -6,7 +6,7 @@ import { Picker } from "nsh";
 import { Input } from "nsh/base";
 import { keyboardFrame, safeAreaInsets } from "nsh";
 import { Icon, type IconName } from "../icons";
-import { alpha, Appear, Badge, colors, desktop, finish, IconTile, motion, Press, radius, RoundButton, Segmented, toneTint } from "../ui";
+import { alpha, Appear, Badge, colors, desktop, desktopIdiom, finish, IconTile, motion, Press, radius, RoundButton, Segmented, toneTint } from "../ui";
 import { localReply, type Provider } from "./chat/local";
 import { Glyph } from "./chat/glyphs";
 import { Markdown } from "./chat/markdown";
@@ -52,7 +52,7 @@ export function Chat() {
 
   const messages = signal<Msg[]>([]);
   const model = signal<Model>("Swift");
-  const native = platform.idiom === "desktop" && platform.os !== "web";
+  const native = desktopIdiom && platform.os !== "web";
   const provider = signal<Provider>("Codex");
   let cancelLocal: (() => void) | undefined;
   const draft = signal("");
@@ -760,7 +760,7 @@ export function Chat() {
               multiline
               // Return sends on desktops, as in chat apps there (Shift+Return
               // adds a line); phones keep return for line breaks.
-              submitBehavior={platform.idiom === "desktop" ? "submit" : "newline"}
+              submitBehavior={desktopIdiom ? "submit" : "newline"}
               onSubmit={() => {
                 if (!streaming()) send();
               }}

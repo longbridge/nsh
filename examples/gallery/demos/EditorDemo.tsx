@@ -1,10 +1,10 @@
 import { type Bounds, cleanup, computed, List, Overlay, type Point, signal, Text, untracked, View, type YNode } from "nsh";
 import { Button, DockArea, type DockAreaRef, Editor, type EditorDecoration, type EditorDiagnostic, type EditorPosition, type EditorRange, type EditorRef, type EditorSearchResult, type EditorSelection, Menu, MenuItem, MenuSeparator, TextView, Input } from "nsh/base";
 import { isAvailable as hasMenus, Menu as NativeMenu, type MenuItem as NativeMenuItem } from "nsh/desktop";
-import { openUrl, platform, windowSize } from "nsh";
+import { openUrl, windowSize } from "nsh";
 import { keymap } from "nsh";
 import { Icon, type IconName } from "../icons";
-import { colors, handleThumb, Tip } from "../ui";
+import { colors, desktopIdiom, handleThumb, Tip } from "../ui";
 import { SAMPLE } from "./lsp/sample";
 import { type CodeAction, type DocumentColor, LanguageServer, type Problem } from "./lsp/server";
 
@@ -136,7 +136,7 @@ const same = (a: EditorRange, b: EditorRange) =>
   a.start.line === b.start.line && a.start.column === b.start.column && a.end.line === b.end.line && a.end.column === b.end.column;
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 || word === "info" ? "" : "s"}`;
 
-const pointer = platform.idiom === "desktop";
+const pointer = desktopIdiom;
 
 /** What the hover card shows. */
 interface HoverCard {

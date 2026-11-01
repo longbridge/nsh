@@ -1,9 +1,9 @@
 import type { JSX } from "nsh";
 import { signal, Text, untracked, View } from "nsh";
 import { Button, DockArea, type DockAreaLayout, type DockAreaRef } from "nsh/base";
-import { platform, windowSize } from "nsh";
+import { windowSize } from "nsh";
 import { Icon } from "../icons";
-import { colors, desktop, finish, handleThumb, hint, IconTile, radius } from "../ui";
+import { colors, desktop, desktopIdiom, finish, handleThumb, hint, IconTile, radius } from "../ui";
 
 // `nsh/base`'s `DockArea` owns the workspace's behavior: tab drags into
 // another group, to a group's edge (a new split) or along a tab bar, all
@@ -201,7 +201,7 @@ export function Dock() {
   const wide = untracked(windowSize).width >= 600;
   const shown = signal<Record<string, boolean>>({ left: wide, bottom: wide });
   let area!: DockAreaRef;
-  const pointer = platform.idiom === "desktop";
+  const pointer = desktopIdiom;
 
   return (
     <View class="flex-1 bg-background" style={{ padding: desktop() ? 24 : 16, gap: desktop() ? 16 : 12 }}>

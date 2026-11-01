@@ -1,9 +1,8 @@
 import { List, signal, Text, View } from "nsh";
 import { Area, Bar, Grid, Line, Pie, Plot } from "nsh/base/plot";
-import { platform } from "nsh";
-import { alpha, Button, Caption, Card, colors, DemoPage, finish, Legend, mono, Segmented, toneColor } from "../ui";
+import { alpha, Button, Caption, Card, colors, DemoPage, desktopIdiom, finish, Legend, mono, Segmented, toneColor } from "../ui";
 
-const pointer = platform.idiom === "desktop";
+const pointer = desktopIdiom;
 const size = pointer ? { gap: 10, label: 14, detail: 12, switch: "small" as const } : { gap: 12, label: 15, detail: 13, switch: "regular" as const };
 
 const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];

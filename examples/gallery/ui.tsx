@@ -2,8 +2,8 @@
 // in the repository's internal nsh-gallery-ui layer.
 import type { JSX, ScrollProps } from "nsh";
 import { computed, Image, Scroll, signal, Text, View } from "nsh";
-import { platform, setColorScheme, windowSize } from "nsh";
-import { Appear, colors, Icon, isDark, Press, radius, RoundButton } from "../nsh-gallery-ui";
+import { setColorScheme, windowSize } from "nsh";
+import { Appear, colors, desktopIdiom, Icon, isDark, Press, radius, RoundButton } from "../nsh-gallery-ui";
 import { nav } from "./nav";
 import logoDark from "./logo-dark.svg";
 import logoLight from "./logo-light.svg";
@@ -79,12 +79,12 @@ export const SIDEBAR = 264;
 
 /**
  * Whether the gallery takes its desktop layout: a sidebar of the demos next
- * to the open one, demos in columns, hover states. Desktops take it from
- * 700 pt wide, other platforms from 900 pt (an iPad in landscape, a wide
- * Mac Catalyst window); phones never do. Below that it is the phone layout,
+ * to the open one, demos in columns, hover states. Desktops and terminals
+ * take it from 700 pt wide, other platforms from 900 pt (an iPad in
+ * landscape, a wide Mac Catalyst window); phones never do. Below that it is the phone layout,
  * unchanged. The shell remounts when it changes, so demos read it once.
  */
-export const desktop = computed(() => windowSize().width >= (platform.idiom === "desktop" ? 700 : 900));
+export const desktop = computed(() => windowSize().width >= (desktopIdiom ? 700 : 900));
 
 /** Whether the desktop layout shows its sidebar (the toggle in the demo's
  * toolbar and Ctrl+B / Cmd+B hide and show it; kept while the app runs). */
