@@ -820,8 +820,11 @@ impl Dt {
         Points(a.scroll as f32)
     }
 
-    /// A scroll came to rest: followed from an anchor, the scroll views
-    /// move, unseen, to where their bars stand for the content shown.
+    /// A scroll came to rest: followed from an anchor, the anchor moves to
+    /// where the bar stands for the content shown, and the scroll views move
+    /// there, unseen, when they are not already. The anchor moves even then:
+    /// a drag back to the top leaves the offset where the bar already stands,
+    /// and the next drag would otherwise be followed from the old anchor.
     pub(crate) fn rest(&self) {
         if !self.anchored {
             return;
@@ -831,8 +834,15 @@ impl Dt {
         if g.y.scaled() {
             let a = g.y.anchor_at(g.cy, ratio);
             let y = Points(a.scroll as f32);
+            // Always, including when the scroll view is already there. A drag
+            // back to the top ends at offset 0, which is already where the bar
+            // stands for the top, so the comparison below does not move it.
+            // Leaving the anchor that stood for the content before that drag
+            // makes the next one, followed from it, jump back toward that
+            // content: the offset is 0 and the rows show the top, then a short
+            // drag lands on the old anchor's rows.
+            self.anchor_y.set(a);
             if y != self.scroll_y.get_untracked() {
-                self.anchor_y.set(a);
                 self.scroll_y.set(y);
                 self.vscroll.scroll_to(Point { x: Points::ZERO, y }, false);
             }
@@ -840,8 +850,8 @@ impl Dt {
         if g.x.scaled() {
             let a = g.x.anchor_at(g.cx, ratio);
             let x = Points(a.scroll as f32);
+            self.anchor_x.set(a);
             if x != self.scroll_x.get_untracked() {
-                self.anchor_x.set(a);
                 self.scroll_x.set(x);
                 self.hscroll.scroll_to(Point { x, y: Points::ZERO }, false);
             }
