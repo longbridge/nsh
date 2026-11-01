@@ -332,7 +332,11 @@ repository's `target/`; dependencies only it uses are declared in `crates/gpui/C
   registries exporting one name panic, `Registry::merged`). Mobile-only APIs (iOS, Android or both) go to `nsh/mobile`, desktop-only ones to `nsh/desktop`,
   platform-only props into `ios={{…}}` / `android={{…}}` / `desktop={{…}}` (typed objects: a system feature
   several platforms have goes in each of theirs under one name; what an element means everywhere is a top-level
-  prop, ignored where it does not apply). `nsh` has no catch-all re-exports. Beside
+  prop, ignored where it does not apply). Desktop has one definition: a desktop OS (macOS, Windows, Linux) or the
+  web in the desktop idiom (`Environment::desktop()`), which `desktop={{…}}`, `platform.select({ desktop })`,
+  `platform.desktop` and `platform.idiom === "desktop"` all follow; Mac Catalyst is mobile (the iOS backend);
+  `nsh/desktop`'s `isAvailable` alone is narrower, the OSes with its windows and menus (`api-naming.md`). `nsh` has
+  no catch-all re-exports. Beside
   them sits a fixed catalog of eleven standard modules with bare specifiers (`nsh_core::js::STANDARD_MODULES`:
   `buffer`, `console`, `crypto`, `fs/promises`, `net`, `os`, `path`, `process`, `url`, `websocket`, `zlib`):
   Node-shaped subsets compatible with gpui-shell's, built on the same native machinery (typed registries, capability

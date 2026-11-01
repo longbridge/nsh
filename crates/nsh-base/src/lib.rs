@@ -18,6 +18,7 @@
 
 mod accordion;
 mod alert_dialog;
+mod avatar;
 mod button;
 mod calendar;
 mod carousel;
@@ -84,6 +85,10 @@ pub use crate::{
         AlertDialog, AlertDialogAction, AlertDialogOptions, AlertDialogPresentation,
         AlertDialogResult, AlertDialogRole, alert_dialog,
     },
+    avatar::{
+        Avatar, AvatarElement, AvatarEvent, AvatarGroup, AvatarGroupElement, AvatarGroupProps,
+        AvatarProps, AvatarStatus, avatar, avatar_group,
+    },
     button::{Button, ButtonElement, ButtonEvent, ButtonProps, button},
     calendar::{
         Calendar, CalendarElement, CalendarEvent, CalendarItemKind, CalendarItemState,
@@ -131,10 +136,11 @@ pub use crate::{
         Editor, EditorApi, EditorBounds, EditorClasses, EditorCommand, EditorContextMenuEvent,
         EditorDecoration, EditorDiagnostic, EditorDiagnosticCodeDescription,
         EditorDiagnosticRelatedInformation, EditorDiagnosticSeverity, EditorDiagnosticTag,
-        EditorElement, EditorEvent, EditorFoldRange, EditorHoverEvent, EditorLocation, EditorPart,
-        EditorPosition, EditorProps, EditorRange, EditorRect, EditorReplaceAll, EditorScrollBeyond,
-        EditorSearch, EditorSearchResult, EditorSelection, EditorStyles, EditorTextPressEvent,
-        EditorToken, editor,
+        EditorElement, EditorEvent, EditorFoldRange, EditorGutterMark, EditorGutterPlacement,
+        EditorHoverEvent, EditorLocation, EditorOverviewRulerLane, EditorOverviewRulerMark,
+        EditorPart, EditorPosition, EditorProps, EditorRange, EditorRect, EditorReplaceAll,
+        EditorScrollBeyond, EditorSearch, EditorSearchResult, EditorSelection, EditorStyles,
+        EditorTextPressEvent, EditorToken, editor,
     },
     link::{Link, LinkElement, LinkEvent, LinkOpenWith, LinkProps, link},
     menu::{
@@ -292,6 +298,8 @@ pub mod parts {
             .register::<AccordionHeader>()
             .register::<AccordionTrigger>()
             .register::<AccordionPanel>()
+            .register::<Avatar>()
+            .register::<AvatarGroup>()
             .register::<Button>()
             .register::<Link>()
             .register::<ContextMenu>()
@@ -426,6 +434,8 @@ mod tests {
                 "AccordionItem",
                 "AccordionPanel",
                 "AccordionTrigger",
+                "Avatar",
+                "AvatarGroup",
                 "Button",
                 "Calendar",
                 "Carousel",

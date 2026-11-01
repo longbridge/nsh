@@ -115,6 +115,9 @@ fn open<'js>(
     if !allowed(&cx, &parsed) {
         return super::refused(cx, callback, super::denial(&parsed));
     }
+    if let Some(message) = super::host_refusal(&cx, &parsed) {
+        return super::refused(cx, callback, message);
+    }
     let slot = super::slot(&cx)?;
     let mut request = parsed
         .as_str()

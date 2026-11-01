@@ -264,7 +264,8 @@ impl WebSocket {
     /// URL or option rejects with a `TypeError`, a URL not granted with
     /// `ERR_ACCESS_DENIED`, the 33rd connection with
     /// `ERR_NSH_QUOTA_EXCEEDED`, a failed handshake with the OS's code or
-    /// `EPROTO`, a slow one with `ETIMEDOUT`.
+    /// `EPROTO`, a slow one with `ETIMEDOUT`, one the host refuses (a
+    /// test's network) with the host's error.
     pub(crate) fn connect(
         url: String,
         options: Option<ConnectOptions>,
@@ -301,6 +302,7 @@ impl WebSocket {
         if !sys.access.allows_websocket(parsed.as_str()) {
             return Err(denied(parsed.as_str()));
         }
+        sys.check_connection(parsed.as_str())?;
         let headers = options.map(|options| options.headers).unwrap_or_default();
         if !headers.is_empty() && !transport.supports_headers() {
             return Err(JsError::Type(
@@ -885,6 +887,47 @@ mod tests {
         assert_eq!(sys.quotas.held(WEBSOCKETS), 0);
         DROPS.with(|drops| assert_eq!(drops.get(), 1));
         EVENTS.with(|events| events.borrow_mut().take());
+    }
+
+    #[test]
+    fn a_host_refusing_connections_refuses_websockets_and_sockets() {
+        let refuse: crate::element::RefuseConnections = Arc::new(|target: &str| {
+            JsError::Error(format!("{target}: refused")).with_code("ERR_TEST_REFUSED")
+        });
+        let host = system().with_refuse_connections(Some(refuse.clone()));
+        let Err(error) = WebSocket::connect("ws://example.com".into(), None, host.clone()) else {
+            panic!("a refused WebSocket connected")
+        };
+        assert_eq!(error.code(), Some("ERR_TEST_REFUSED"));
+        assert_eq!(error.message(), "ws://example.com/: refused");
+        assert_eq!(host.quotas.held(WEBSOCKETS), 0);
+        let sockets = serde_json::json!({ "network": { "hosts": ["*"], "sockets": ["[::1]:7"] } });
+        let native = System {
+            access: Arc::new(Access {
+                declared: crate::access::Capabilities::from_json(&sockets).unwrap(),
+                granted: None,
+            }),
+            ..System::default()
+        }
+        .with_refuse_connections(Some(refuse));
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let Err(error) = WebSocket::connect("ws://example.com".into(), None, native.clone())
+            else {
+                panic!("a refused WebSocket connected")
+            };
+            assert_eq!(error.code(), Some("ERR_TEST_REFUSED"));
+        }
+        let options = super::super::net::ConnectOptions {
+            host: "::1".into(),
+            port: 7,
+        };
+        let Err(error) = super::super::net::Net::connect(options, native.clone()) else {
+            panic!("a refused socket connected")
+        };
+        assert_eq!(error.code(), Some("ERR_TEST_REFUSED"));
+        assert_eq!(error.message(), "[::1]:7: refused");
+        assert_eq!(native.quotas.held("net.sockets"), 0);
     }
 
     #[test]

@@ -21,10 +21,14 @@
 //! itself runs (so steps finish animations without waiting for them),
 //! [`Headless::wait`] and a long press move the clock by their time, and
 //! [`Headless::run_for`] / [`Headless::fast_forward`] move it as a test
-//! says. What the driver waits for (a step's quiet, a `waitFor`'s timeout)
-//! stays real time. Native animations that loop forever (a spinner) run in
-//! the background on either clock: their values move with the app's time,
-//! and no step or wait waits for them (nor moves a manual clock for them).
+//! says. A wait for what the app shows ([`Headless::wait_until`],
+//! [`Headless::wait_for`]) moves it too, a display frame at a time,
+//! looking after each frame, by its timeout at most, and fails once that
+//! much real time passed too; what a step waits for (its quiet) stays real
+//! time. Native animations that
+//! loop forever (a spinner) run in the background on either clock: their
+//! values move with the app's time, and no step or wait waits for them
+//! (nor moves a manual clock for them).
 //!
 //! `nsh test` runs apps this way (feature `js`: [`crate::run_file`]),
 //! printing the batches under their steps with `--trace`; so do Rust tests
@@ -83,6 +87,10 @@ const SETTLE: Duration = Duration::from_secs(2);
 const MAX_IDLE: Duration = Duration::from_secs(10);
 /// How far a scroll moves per display frame, in points.
 const SCROLL_STEP: Points = Points(10.0);
+/// On a manual clock: how long a wait looks in real time for batches
+/// between two of its frames, for what the app's clock does not bring (a
+/// response a test's function gives).
+const FRAME_LOOK: Duration = Duration::from_millis(1);
 
 struct ChannelSink {
     batches: Sender<MountBatch>,
@@ -1051,7 +1059,12 @@ impl Headless {
     }
 
     /// Applies batches until `done` holds for the screen, `timeout` at
-    /// most; the error names `what` and the texts on screen.
+    /// most; the error names `what` and the texts on screen. On a manual
+    /// clock the wait moves it, a display frame at a time (the timers due
+    /// run on the way, as [`Headless::run_for`] runs them), looking after
+    /// each frame, by `timeout` at most; it fails once the clock moved that
+    /// far and `timeout` of real time passed too, so what comes from
+    /// outside the app (a route's function, the network) has that long.
     pub fn wait_until(
         &mut self,
         what: &str,
@@ -1059,10 +1072,21 @@ impl Headless {
         done: impl Fn(&Screen) -> bool,
     ) -> Result<(), String> {
         let deadline = Instant::now() + timeout;
+        let clock_end = self.clock.is_manual().then(|| self.clock.now() + timeout);
         self.drain();
         self.check()?;
         while !done(&self.screen) {
-            match self.pump(deadline) {
+            // The clock moves by the timeout at most; then the wait goes on
+            // for what comes from outside the app, until as much real time
+            // passed.
+            let pumped = match clock_end {
+                Some(end) if self.clock.now() < end => {
+                    let left = end.saturating_duration_since(self.clock.now());
+                    self.wait_frame(left.min(FRAME))
+                }
+                _ => self.pump(deadline),
+            };
+            match pumped {
                 Pumped::Batch => {}
                 Pumped::Error => self.check()?,
                 Pumped::Exited => {
@@ -1072,7 +1096,9 @@ impl Headless {
                     ));
                 }
                 Pumped::Timeout => {
-                    if Instant::now() >= deadline {
+                    let over = Instant::now() >= deadline
+                        && clock_end.is_none_or(|end| self.clock.now() >= end);
+                    if over {
                         return Err(format!(
                             "{}; {}",
                             failure::never_happened(what, timeout),
@@ -1118,6 +1144,51 @@ impl Headless {
             self.check()?;
         }
         self.check()
+    }
+
+    /// What a test polling a condition waits for between looks, as
+    /// [`Headless::wait_until`] waits: on a manual clock, moves it by a
+    /// display frame (`timeout` of the app's time at most) and applies what
+    /// came, giving how far the clock moved; on the system's clock,
+    /// [`Headless::next_change`] (and zero).
+    pub fn next_frame(&mut self, timeout: Duration) -> Result<Duration, String> {
+        if !self.clock.is_manual() {
+            return self.next_change(timeout).map(|()| Duration::ZERO);
+        }
+        // An app that left takes no frame, but the wait's time runs out.
+        let by = timeout.min(FRAME);
+        if !by.is_zero() {
+            self.wait_frame(by);
+        }
+        self.check().map(|()| by)
+    }
+
+    /// On a manual clock: a frame of a wait, `by` after the last, and what
+    /// it brought; then a batch or an error that comes within
+    /// [`FRAME_LOOK`] of real time.
+    fn wait_frame(&mut self, by: Duration) -> Pumped {
+        if self.exited {
+            return Pumped::Exited;
+        }
+        self.frame(by);
+        self.drain();
+        crossbeam_channel::select_biased! {
+            recv(self.errors) -> error => match error {
+                Ok(error) => {
+                    self.seen.push(error);
+                    Pumped::Error
+                }
+                Err(_) => Pumped::Timeout,
+            },
+            recv(self.batches) -> batch => match batch {
+                Ok(batch) => {
+                    self.apply(&batch);
+                    Pumped::Batch
+                }
+                Err(_) => Pumped::Timeout,
+            },
+            default(FRAME_LOOK) => Pumped::Timeout,
+        }
     }
 
     /// The one view `pick` gave for `selector`, or the error a step on
@@ -1756,9 +1827,9 @@ mod tests {
         let mut app = Headless::start(EngineConfig::new(Root::of::<PressPoint>())).unwrap();
         app.first_render().unwrap();
         app.press_at("id:pad", point(px(10.0), px(12.0))).unwrap();
-        app.wait_for("seen: at 10 12 in 10 22").unwrap();
+        app.wait_for("text:seen: at 10 12 in 10 22").unwrap();
         app.press("id:pad").unwrap();
-        app.wait_for("seen: at 40 20 in 40 30").unwrap();
+        app.wait_for("text:seen: at 40 20 in 40 30").unwrap();
     }
 
     #[component]
@@ -1922,14 +1993,14 @@ mod tests {
         assert_eq!(app.screen().selected("id:cell-b1"), Ok(true));
         assert_eq!(app.screen().selected("id:cell-a1"), Ok(false));
         app.press("id:cell-b1").unwrap();
-        app.wait_for("pressed: 1").unwrap();
+        app.wait_for("text:pressed: 1").unwrap();
         assert!(
             app.shows("touch x: 150 local x: 150"),
             "{:?}",
             app.screen().texts()
         );
         app.press("text:12").unwrap();
-        app.wait_for("pressed: 2").unwrap();
+        app.wait_for("text:pressed: 2").unwrap();
         assert!(
             app.shows("touch x: 50 local x: 50"),
             "{:?}",

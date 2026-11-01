@@ -124,6 +124,43 @@ export interface ShaderProps extends CommonProps, ViewHostProps, ShaderHostProps
   style?: StyleProp<ViewStyle>;
 }
 
+/** `<ShaderEffect>`: a view whose children draw through a WGSL shader,
+ * which reads what they draw with `sample_content(uv)`. */
+export interface ShaderEffectProps
+  extends CommonProps, ViewHostProps, ShaderHostProps, ShaderEffectHostProps {
+  /** The WGSL defining `fn shade(uv: vec2f) -> vec4f`; without it the
+   * children draw as they are. */
+  source?: string;
+  style?: StyleProp<ViewStyle>;
+}
+
+/** `<ShaderTransition>`: a view whose children change through a WGSL
+ * shader when its `value` changes: `sample_from(uv)` is a picture of what
+ * they drew, `sample_to(uv)` what they draw now, `nsh.progress` 0 to 1. */
+export interface ShaderTransitionProps
+  extends CommonProps, ViewHostProps, ShaderHostProps, ShaderTransitionHostProps {
+  /** The WGSL defining `fn shade(uv: vec2f) -> vec4f`; without it the
+   * transition runs its `fallback` (a cross-fade). */
+  source?: string;
+  style?: StyleProp<ViewStyle>;
+}
+
+/** `<ScreenEffect>`: the whole surface drawn through a WGSL shader, which
+ * reads it with `sample_content(uv)`. It takes no space and has no
+ * children. */
+export interface ScreenEffectProps extends ShaderHostProps, ShaderEffectHostProps {
+  /** The WGSL defining `fn shade(uv: vec2f) -> vec4f`. */
+  source?: string;
+}
+
+/** `<ScreenTransition>`: the whole surface changing through a WGSL shader
+ * when its `value` changes, as `ShaderTransition` does for its children. */
+export interface ScreenTransitionProps extends ShaderHostProps, ShaderTransitionHostProps {
+  /** The WGSL defining `fn shade(uv: vec2f) -> vec4f`; without it the
+   * transition runs its `fallback`. */
+  source?: string;
+}
+
 /** `<Scroll>` */
 export interface ScrollProps extends CommonProps<ViewStyle, ScrollRef>, ScrollingHostProps, ScrollHostProps {
   style?: StyleProp<ViewStyle>;

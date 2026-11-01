@@ -11,7 +11,7 @@ import { alpha, Badge, Button, Card, colors, DemoPage, finish, focusRing, hovere
 // time; a settings page opens several sections, with controls inside and
 // an accordion nested in its last one.
 
-const pointer = platform.idiom === "desktop";
+const pointer = platform.desktop;
 /** The sizes of the page: a pointer's compact tier, a touch screen's roomier one. */
 const size = pointer
   ? { row: 40, padding: 6, gap: 10, label: 14, detail: 12, icon: 12, control: 16, dot: 6, line: 32, switch: "small" as const }

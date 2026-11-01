@@ -1,6 +1,6 @@
 // A case of the API's test suite (docs/dev/compatibility.md): `nsh/device`
 // as the headless runtime reports it (iOS, a phone, 1 pixel per point, the
-// script's viewport), the color scheme an app sets and `openUrl`: a promise
+// script's viewport; mobile, so `platform.desktop` is false), the color scheme an app sets and `openUrl`: a promise
 // for a URL it opens (the headless runtime answers none), one rejected with
 // a `TypeError` for a URL it never opens (it never throws). Its script
 // checks each.
@@ -13,6 +13,7 @@ function App() {
     <View style={{ flex: 1, paddingTop: 64 }}>
       <Text>{`OS: ${platform.os}`}</Text>
       <Text>{`Idiom: ${platform.idiom}`}</Text>
+      <Text>{`Desktop: ${platform.desktop}`}</Text>
       <Text>{`Catalyst: ${platform.catalyst}`}</Text>
       <Text>{`Version: ${platform.version}`}</Text>
       <Text>{`Select: ${platform.select({ ios: "ios", android: "android", default: "other" })}`}</Text>

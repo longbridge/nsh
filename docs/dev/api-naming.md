@@ -161,6 +161,14 @@ go elsewhere under these rules rather than into them.
   `desktop={{…}}`: iOS, macOS, Windows and Linux have the swipes, Android and the web none; decided by the user,
   2026-10-29). Each object is typed (`IOSProps`, `AndroidProps`, `DesktopProps`, an element's own extending them),
   so a key no platform has fails the type check.
+- **One definition of desktop**: desktop is a desktop OS (macOS, Windows, Linux) or the web in the desktop idiom
+  (`Idiom::desktop_on`, `Environment::desktop()`); everything else is mobile, Mac Catalyst included (it runs the iOS
+  backend: `ios={{…}}` applies). `desktop={{…}}` props, `platform.select({ desktop, mobile })`, `platform.desktop`,
+  `platform.idiom === "desktop"` (`Idiom::reported_on`), Rust's `is_desktop()` and `nsh-base`'s per-device
+  presentation all follow it; nothing apps see defines desktop otherwise. `"mac"` stays UIKit's Mac idiom under
+  Catalyst (mobile), `platform.catalyst` is Catalyst in either idiom (`Os::is_catalyst`). The one narrower check is
+  `nsh/desktop`'s `isAvailable` (`Os::is_desktop`): where its window and menu APIs work, the desktop OSes (decided by
+  the user, 2026-10-29).
 - **Accessors** are named after what they read (`safeArea()`, `windowSize()`, `titleBar()`); they never differ from
   a module's name by case only.
 - **Navigation verbs** are `gpui-base`'s: `push`, `pop`, `popToRoot`, `replace` (`NavStackState`); replacing all is
@@ -212,7 +220,8 @@ release (item 3 of the API review); where code differs from one, the rule wins a
     error), and Node's codes for I/O (`ENOENT`, `EACCES`:
     the OS refused, never NSH's capabilities) and its own (`ERR_FS_FILE_TOO_LARGE`, `ERR_OUT_OF_RANGE`). Never
     `EACCES` or a code-less message for a capability denial. `nsh/test`'s steps fail with codes of their own
-    (`ERR_NSH_TEST_NOT_FOUND`, `ERR_NSH_TEST_DISABLED`, `ERR_NSH_TEST_NO_BACK`, `ETIMEDOUT`).
+    (`ERR_NSH_TEST_NOT_FOUND`, `ERR_NSH_TEST_DISABLED`, `ERR_NSH_TEST_NO_BACK`, `ETIMEDOUT`;
+    `ERR_NSH_TEST_UNSUPPORTED` for an `open` option the `--target` cannot honor).
   - Never a sentinel (`false`, `-1`, `""`, `[]`) or silence for a failure: the clipboard and the picker reject when
     not granted. `null` stays an answer to a query with nothing there (`groupOf`, `posAtCoords` over nothing,
     `Storage.getItem` of an absent key, `ViewRef.measure()` of a view not in the tree), and a cancel resolves empty.
@@ -303,7 +312,7 @@ them yet (`compatibility.md`). The frozen RN-shaped modules keep their names. A 
 | `net.connect(host, port)` | `net.connect({ host, port })` (`ConnectOptions`) | Shapes that can grow | 2026-10-28: Node's `net.connect(options)`, so a timeout or TLS can join them |
 | **`nsh`: the environment** | | | |
 | `Platform.OS`, `Platform.Version`, `Platform.constants` | `platform.os`, `platform.version: string` | Environment | A constant object; Android's version is its API level as a string (`"35"`) |
-| `Platform.isPad`, `isTV`, `isDesktop`, `isMacCatalyst`, `constants.interfaceIdiom` | `platform.idiom: "phone" \| "pad" \| "mac" \| "tv" \| "desktop"`, `platform.catalyst` | Environment | `isDesktop` is `platform.idiom === "desktop"` |
+| `Platform.isPad`, `isTV`, `isDesktop`, `isMacCatalyst`, `constants.interfaceIdiom` | `platform.idiom: "phone" \| "pad" \| "mac" \| "tv" \| "desktop"`, `platform.desktop`, `platform.catalyst` | Environment | `isDesktop` is `platform.desktop` ("One definition of desktop") |
 | `Platform.select(spec)` | `platform.select(spec)` | Environment | Same spec |
 | `PixelRatio.get()` | `pixelRatio(): number` (accessor, reactive) | Environment | Follows the window to another screen |
 | `PixelRatio.getFontScale()` | `fontScale()` | Environment | Already exists |
@@ -750,6 +759,14 @@ and `Input`'s React Native names follow the rules as well.
 | `number_of_months`, `first_day_of_week`, `disabled_matcher`, `set_year_range` | `numberOfMonths`, `firstDayOfWeek`, `disabledMatcher`, `yearRange` | `time/date_picker.rs:296-352`, `:635` | Passed on to the calendar, with every other `Calendar` prop (its parts, `renderItem`, Previous / Next labels) and `calendarClass` / `calendarStyle` |
 | The time row's "Time" label (`t!("DatePicker.time")`) | slot `timeLabel`, parts `timeClass` / `timeStyle`, `timeFieldClass` / `timeFieldStyle`, `timeAccessibilityLabel`, the segments' parts and `renderSegment` | `time/date_picker.rs:663` | No built-in strings: the label is the app's words |
 | `placeholder` (`t!("DatePicker.placeholder")`), `appearance`, `Sizable::with_size`, the calendar icon (`IconName::Calendar`) | the app's `trigger` | `time/date_picker.rs:617`, `:641`, `:556`, `:779` | The trigger is the app's element: its text, look, size and icon |
+| **Editor's decorations** (`nsh/base`) | | | |
+| `GutterDecoration`, `GutterDecorationCollection`, `EditorState::create_gutter_decorations_collection` | `EditorDecoration.gutter: EditorGutterMark { placement?, class?, style? }` | `input/editor/decorations.rs` (#3704); Monaco `IModelDecorationOptions` | Not followed: a mark of the decorations the app already passes, as Monaco puts both on one decoration, so a range has one place and the editor one list. "Mark": it is a part of a decoration, not one. A collection's `set` / `append` / `clear` / `dispose` are the prop's new value |
+| An empty range as a line boundary (`GutterDecoration` keeps empty ranges) | `placement: "lines" \| "before"` (default `lines`: an empty range covers its line) | `input/editor/decorations.rs` | Not followed: on one decoration an empty range already means its line (`lineClass`, breakpoints); the boundary is asked for, never inferred from the range |
+| `GutterDecoration::with_color`, `with_folded_color` | the mark's `class` / `style`; on a folded row the same look | `input/editor/decorations.rs` | No look of NSH's own; a folded look can come later as optional `foldedClass` / `foldedStyle` |
+| `OverviewRulerDecoration`, `OverviewRulerLane { Left, Center, Right, Full }` | `EditorDecoration.overviewRuler: EditorOverviewRulerMark { lane?, class?, style? }`, `EditorOverviewRulerLane` (`"left"`, `"center"`, `"right"`, `"full"`, default `center`) | `input/editor/decorations.rs`; Monaco `OverviewRulerLane` | As the gutter's. The lanes are shares of the ruler's width |
+| `EditorState::gutter_decorations_width` | `gutterDecorationsWidth` (points, default 3) | `input/editor/mod.rs` | The strip's width lays out the line numbers, so it is a prop |
+| The overview ruler's width (the theme's scroll bar width) | the `overviewRuler` part's width (14 points by default) | `input/base/element.rs` | NSH has no scroll bar theme: the part's classes set it, and the lanes follow |
+| `StatusColors::created` / `modified` / `deleted` (`gpui-component`) | (none) | `component/src/highlighter/registry.rs` | A styled library's colors; the app's `bg-*` |
 | **Overlays and popups** (new) | | | |
 | `<Overlay>` (`nsh`) | | none (GPUI's `deferred` / `anchored`, the web's top layer) | A primitive: what shows above the root view, not a component with a look |
 | `anchor`, `placement`, `align`, `offset`, `margin` | | `positioner.rs` `Positioner::placement` / `align` / `offset` / `margin`, `Placement`, `Align` | `placement`'s values are `Placement`'s (`"top"`, `"bottom"`, `"left"`, `"right"`), `align`'s `Align`'s (`"start"`, `"center"`, `"end"`) |
@@ -766,3 +783,14 @@ and `Input`'s React Native names follow the rules as well.
 | `popupStartingClass` / `popupStartingStyle`, `popupEndingClass` / `popupEndingStyle` (`Popover`, `Menu`, `ContextMenu`); `startingClass` / `startingStyle`, `endingClass` / `endingStyle` (`Tooltip`) | | none in gpui-kit (its popups vanish at once, `gpui-kit` `component/src/popover.rs`); Base UI's `data-starting-style` / `data-ending-style`; `Toast`'s `startingClass` / `endingClass` | A state's look of the part it styles: `<part>` + Toast's state names (`Tooltip` is its own bubble, so no part); classes and styles, as every part; the popup stays mounted through its ending look's transitions |
 | `onPosition({ placement, bounds, available })` of `Popover`, `Menu`, `ContextMenu` | | the core `Overlay`'s `onPosition` | The overlay's report, forwarded with its payload's names |
 | `onOpen`, `onClose`, `onCancel` of the popups | | `DialogTrigger::on_open`, `Dialog::on_close`, `Dialog::on_cancel` | One set with `Dialog`'s (`Popover`, `Menu`, `ContextMenu`, `Sheet`; `Tooltip` without `onCancel`): `onOpen` / `onClose` once it is all there / gone, whoever changed `open`; `onCancel` for each attempt of the user to close it (Escape or back, a press outside or on the backdrop), whether or not its `closeOn<Trigger>` let it close |
+| **Avatar** (new) | | | |
+| `gpui-base` `Avatar::image(AvatarImage::new(src))`, `Avatar::fallback(AvatarFallback)` | `src` (`<Image>`'s own type and decoder: `ImageSrc`'s `JsValue` reads it with `HostValue for ImageSource`); parts `imageClass` / `imageStyle`, `fallbackClass` / `fallbackStyle`; slot `fallback` | `gpui-base` `avatar.rs`; `gpui-component` `Avatar::src` | One component with parts, as every `nsh/base` component, not three elements: the avatar owns the loading state the two slots share, which `gpui-base` (whose `img` draws nothing until loaded) does not need. The fallback shows while the picture loads, fails or is missing, not only without an image |
+| `gpui-component` `Avatar::name` (initials) | `name`: the initials and what screen readers say | `avatar/avatar.rs` `extract_text_initials` | The same initials, but a single word in a script without letter case gives one character (a Han name's surname), not two |
+| `gpui-component` `Avatar::placeholder(Icon)` | slot `fallback` | `avatar/avatar.rs` | The app's element in place of the initials; no built-in icon |
+| `gpui-component` `Sizable::with_size`, `avatar_size`, `IdentityColor`, the border | the app's `class` / parts | `avatar/mod.rs`, `avatar/avatar.rs` | No look: size, shape, colors (an identity color per name is the app's, the gallery's `avatarIdentity`) |
+| `fallbackDelay` (new) | | Radix `AvatarFallback delayMs` | No `gpui-base` counterpart: GPUI draws an image the frame it is ready and has no state between. Its use: a picture that loads within the delay (a cached one, a fast network) shows without the initials flashing first; past it, the fallback stands in while the picture loads. In milliseconds without a unit in its name ("Units"), named after what it delays |
+| `onStatusChange({ status })`, `AvatarStatus` (new) | | Radix `Avatar onLoadingStatusChange`, `ImageLoadingStatus` | No `gpui-base` counterpart. It reports the one status there is (`"idle"`, `"loading"`, `"loaded"`, `"error"`, Radix's values) |
+| Screen readers (new) | the avatar an image labelled `accessibilityLabel` ?? `name`; the fallback and the picture `accessibilityElementsHidden` | `gpui-base` gives `Avatar` no role | The name is said once, not again as the initials; `accessibilityLabel=""` is decorative, as HTML's `alt=""` |
+| `gpui-component` `AvatarGroup::limit` (default 3), `child` / `children` | `limit` (default 3), the children | `avatar/avatar_group.rs` | Avatars past the limit stay out of the tree (`children_each`), not only out of the render |
+| `gpui-component` `AvatarGroup::ellipsis()` (a "⋯" avatar) | not followed: slot `overflow`, parts `overflowClass` / `overflowStyle`, `overflowAccessibilityLabel`; `total` (new) | `avatar/avatar_group.rs` | `ellipsis` is a flag after which the group draws a "⋯" avatar of its own; here the group draws nothing, so the flag becomes the app's content, and that content is the count of the people not shown ("+5", what avatar groups show: shadcn's, Material's, GitHub's), which a prop named `ellipsis` would misname. `overflow` names the part by what it stands for, whatever the app writes in it ("⋯" included). Screen readers read its content, or `overflowAccessibilityLabel` ("5 more people") in its place, the app's words as every string; `total` lets a long list pass only the avatars shown |
+| `gpui-component` `AvatarGroup`'s `flex_row_reverse` and negative margin | the app's `class` on the group and the avatars | `avatar/avatar_group.rs` | The overlap and stacking order are look; the group sets no direction |

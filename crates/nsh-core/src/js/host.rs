@@ -117,6 +117,10 @@ pub fn element_bits(tag: crate::Tag) -> u32 {
             Tag::InputAccessory => on::INPUT_ACCESSORY,
             Tag::View => on::VIEW,
             Tag::Shader => on::VIEW | on::SHADER,
+            Tag::ShaderEffect => on::VIEW | on::SHADER | on::EFFECT,
+            Tag::ShaderTransition => on::VIEW | on::SHADER | on::TRANSITION,
+            Tag::ScreenEffect => on::SHADER | on::EFFECT,
+            Tag::ScreenTransition => on::SHADER | on::TRANSITION,
             Tag::Cell | Tag::Stack | Tag::HeaderItem | Tag::Canvas | Tag::Native | Tag::Overlay => {
                 0
             }
@@ -163,8 +167,12 @@ pub mod on {
     pub const OVERLAY: u32 = 1 << 12;
     /// `<view>`.
     pub const VIEW: u32 = 1 << 13;
-    /// `<shader>`.
+    /// `<shader>` and the shader effects and transitions.
     pub const SHADER: u32 = 1 << 14;
+    /// Shader effects (`ShaderEffect`, `ScreenEffect`).
+    pub const EFFECT: u32 = 1 << 15;
+    /// Shader transitions (`ShaderTransition`, `ScreenTransition`).
+    pub const TRANSITION: u32 = 1 << 16;
     /// Set by the runtime itself, not part of the elements' types.
     pub const INTERNAL: u32 = 1 << 31;
 }
@@ -903,6 +911,8 @@ const GROUPS: &[(u32, &str, &str)] = &[
     (on::WEBVIEW, "WebView", "web views"),
     (on::VIDEO, "Video", "videos"),
     (on::SHADER, "Shader", "shaders"),
+    (on::EFFECT, "ShaderEffect", "shader effects"),
+    (on::TRANSITION, "ShaderTransition", "shader transitions"),
     (on::INPUT_ACCESSORY, "InputAccessory", "input accessories"),
     (on::OVERLAY, "Overlay", "`<Overlay>`"),
 ];

@@ -29,6 +29,8 @@ import {
   AccordionPanel,
   AccordionTrigger,
   AlertDialog,
+  Avatar,
+  AvatarGroup,
   Button,
   Carousel,
   CarouselContent,
@@ -109,6 +111,9 @@ import type {
   AlertDialogPresentation,
   AlertDialogResult,
   AlertDialogRole,
+  AvatarGroupProps,
+  AvatarProps,
+  AvatarStatus,
   ButtonProps,
   CarouselContentProps,
   CarouselControlProps,
@@ -210,6 +215,7 @@ import type {
 |---|---|---|
 | [`Button`](../elements/button.md) | `button()` | 带禁用和选中状态、面向屏幕阅读器有角色的按压目标。 |
 | [`Link`](../elements/link.md) | `link()` | 指向某处的按压目标：由系统打开它的 `href`，或由应用打开（`openWith="app"`、`onOpen`）。 |
+| [`Avatar`](../elements/avatar.md)、[`AvatarGroup`](../elements/avatar.md) | `avatar()`、`avatar_group()` | 一个人的头像，加载中、失败或没有图片时显示后备内容（首字母、应用的图标）；以及显示前 `limit` 个和溢出部分的一排头像。加载状态在原生侧处理。 |
 | [`Checkbox`](../elements/checkbox.md) | `checkbox()` | 勾选 / 未勾选 / 半选控件，指示器及其中的标记由应用设置。 |
 | [`Radio`](../elements/radio.md)、[`RadioGroup`](../elements/radio.md) | `radio()`、`radio_group()` | 一组只能选一个的选项中的一项，以及这一组；勾选哪一个由应用持有。 |
 | [`Switch`](../elements/switch.md) | `switch()` | 开 / 关控件，轨道和滑块由应用设置样式。 |
@@ -332,6 +338,10 @@ import type {
 ### Accordion
 
 在各自标题下展开和收起的一组分区，没有外观：`Accordion` 包含多个 `AccordionItem`，每个分区由包住 `AccordionTrigger` 的 `AccordionHeader` 和一个 `AccordionPanel` 组成。`value`（展开项的值）由应用持有，按下触发器时应用设置 `onChange` 报告的值：一次一项，或设置 `multiple` 后同时多项。屏幕阅读器读到一组标题，其中的按钮报告分区是否已展开，展开的面板是一个区域。设置 `reveal` 后，面板以原生运行的弹簧高度展开和收起；设置 `keepMounted` 后，收起时内容仍留在树中。见 [Accordion](../elements/accordion.md)。
+
+### Avatar
+
+一个人的头像，没有外观：后备内容（`name` 的首字母，或应用的 `fallback`）和覆盖在它之上的图片（加载完成前保持透明），两者都与头像一样大，然后是应用的子元素（在线状态圆点）。图片自己的加载和错误事件在原生侧改变它的状态（`onStatusChange`），`fallbackDelay` 让后备内容在图片加载时晚一点出现。屏幕阅读器读到一张以名字为标签的图片。`AvatarGroup` 显示前 `limit` 个头像，其余的不创建视图，`total` 更多时显示 `overflow`。见 [Avatar](../elements/avatar.md)。
 
 ### Progress
 

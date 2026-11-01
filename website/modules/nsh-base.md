@@ -41,6 +41,8 @@ import {
   AccordionPanel,
   AccordionTrigger,
   AlertDialog,
+  Avatar,
+  AvatarGroup,
   Button,
   Carousel,
   CarouselContent,
@@ -121,6 +123,9 @@ import type {
   AlertDialogPresentation,
   AlertDialogResult,
   AlertDialogRole,
+  AvatarGroupProps,
+  AvatarProps,
+  AvatarStatus,
   ButtonProps,
   CarouselContentProps,
   CarouselControlProps,
@@ -223,6 +228,7 @@ walkthroughs, see the [Navigation guide](../docs/navigation.md) and [Forms and k
 |---|---|---|
 | [`Button`](../elements/button.md) | `button()` | A press target with the disabled and selected states and a role for screen readers. |
 | [`Link`](../elements/link.md) | `link()` | A press target that goes somewhere: it opens its `href` through the system, or the app opens it (`openWith="app"`, `onOpen`). |
+| [`Avatar`](../elements/avatar.md), [`AvatarGroup`](../elements/avatar.md) | `avatar()`, `avatar_group()` | A person's picture, or a fallback (the initials, the app's icon) while it loads, when it fails and without one; and a row that shows the first `limit` and an overflow. The loading state is native. |
 | [`Checkbox`](../elements/checkbox.md) | `checkbox()` | A checked, unchecked or indeterminate control with an indicator the app styles and marks. |
 | [`Radio`](../elements/radio.md), [`RadioGroup`](../elements/radio.md) | `radio()`, `radio_group()` | One option of a set the user picks one of, and the set; the app owns which one is checked. |
 | [`Switch`](../elements/switch.md) | `switch()` | An on / off control with a track and a thumb the app styles. |
@@ -400,6 +406,15 @@ values, and sets the one `onChange` reports when a trigger is pressed: one item 
 Screen readers hear a group of headings whose buttons say whether their item is expanded, and each open panel as a
 region. With `reveal` a panel opens and closes with a springing height, natively; with `keepMounted` its content stays
 in the tree while closed. See [Accordion](../elements/accordion.md).
+
+### Avatar
+
+A person's picture, with no look: the fallback (the initials of `name`, or the app's `fallback`) and the picture over
+it, transparent until it has loaded, both as large as the avatar, then the app's children (a presence dot). The image's
+own load and error events change its status natively (`onStatusChange`), and `fallbackDelay` keeps the fallback back
+while a picture loads. Screen readers hear an image labelled with the name. An `AvatarGroup` shows its first `limit`
+avatars, makes no views for the others, and shows its `overflow` while `total` is more. See
+[Avatar](../elements/avatar.md).
 
 ### Progress
 
