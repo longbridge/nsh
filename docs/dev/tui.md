@@ -420,8 +420,12 @@ Decorations are plain, and each is a documented Decorative feature:
   tile, a page header's tile, a square around an icon) is **emptied**: it and everything in it draw no border,
   fill, leaf or selection bar and take no Cells' glyphs; their neighbors keep their Cells, and the View keeps its
   hit regions, so keyboard focus still puts the bar on it. Checkboxes, radios and switches are never emptied:
-  their glyph is their content. A button whose content is only icons shows its
-  accessibility label as `[ label ]` on its box's middle row, cut with `…` to the box (`[L…]`).
+  their glyph is their content. A button whose content is only icons shows its accessibility label as
+  `[ label ]`, else `[label]`, on its icons' center row, only where the whole label fits: centered in its box, or
+  over the box and the blank Cells beside it inside its parent, a blank Cell away from other glyphs, as close to
+  centered as it can be. It is placed once its siblings are drawn, so it never covers their text. A label that
+  does not fit whole is not drawn at all (never cut to `[L…]`); the button stays focusable, and focus puts the
+  bar on that row, under the label when there is one.
 - **Checkboxes, radios and switches** (roles `checkbox`, `radio`, `switch`) show their state with terminal glyphs
   instead of the bar: a checkbox `[x]`, `[ ]` or `[-]` (mixed), a radio `(•)` or `( )`, a switch `[on ]` or
   `[off]`. The glyph takes the place of the indicator, the first view inside the control that the app drew as a
@@ -807,7 +811,7 @@ permit clipboard writes; `nsh test` uses memory and never writes to the machine'
 | Opacity | Ignored, except that a view below 3% draws nothing |
 | Selected, checked and focused views | A soft bar on their text rows (else their first row) across their Cell box: palette color 0 (dark) or 7 (light) behind bold text; focused fields show the terminal cursor |
 | Borders | Decorative: straight single lines in per-side palette colors over a reserved inner Cell rect, drawn whole or not at all; boxes without room for a whole border around their content draw none |
-| Buttons | Decorative: `[ label ]` in the button's own Cells around its one row of text, or its accessibility label when it shows only icons; no border or fill |
+| Buttons | Decorative: `[ label ]` in the button's own Cells around its one row of text, or its accessibility label when it shows only icons, only where the whole label fits beside it, else nothing; no border or fill |
 | Icons and decorative images | Decorative: canvases with role `image` or no accessibility label and images without an accessibility label are not drawn, at any size; a labeled image's placeholder is a border titled with its label; a View holding nothing else draws no border, fill or selection bar (focus still shows) |
 | Outlines, including control focus outlines | Left out; focus is the bar |
 | Anchored overlays | Snapped outside the anchor's Cell rect on the core-resolved placement side |

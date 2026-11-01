@@ -11,7 +11,6 @@ use ratatui_core::{
     widgets::Widget,
 };
 use ratatui_widgets::{block::Block, borders::Borders, paragraph::Paragraph};
-use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
 use crate::{
@@ -112,8 +111,23 @@ struct Painter<'a> {
     /// The hairline rules drawn once their parent's subtree is, as a rule
     /// keeps off rows (or columns) that hold text.
     rules: Vec<Rule>,
+    /// The labels of icon-only buttons drawn once their parent's subtree is.
+    labels: Vec<Label>,
     /// The visible Cells of the view whose children are being drawn.
     parent_box: Rect,
+}
+
+/// An icon-only button's accessibility label waiting for its parent's
+/// subtree, as it may take only blank Cells beside the button's box.
+struct Label {
+    text: Arc<str>,
+    /// The button's visible Cells.
+    cells: Rect,
+    /// The row of its icons' center.
+    row: u16,
+    /// Where it may reach: its parent's visible Cells.
+    within: Rect,
+    focused: bool,
 }
 
 /// A hairline rule waiting for its parent's subtree.
@@ -172,6 +186,7 @@ pub(crate) fn draw(
         emptied,
         in_emptied: false,
         rules: Vec::new(),
+        labels: Vec::new(),
         parent_box: area,
     };
     painter.view(ROOT_ID, Projection::IDENTITY, clip, 1.0, true, None);
@@ -724,6 +739,7 @@ impl Painter<'_> {
         let pitch = even_pitch(self.tree, id, child_projection, self.cells);
         let outer_parent_box = std::mem::replace(&mut self.parent_box, visible);
         let rules = self.rules.len();
+        let labels = self.labels.len();
         for (index, delta) in pitch.into_iter().enumerate() {
             let child = self.tree.get(id).unwrap().children[index];
             if self
@@ -743,6 +759,9 @@ impl Painter<'_> {
             );
         }
         self.parent_box = outer_parent_box;
+        for label in self.labels.split_off(labels) {
+            self.label(label);
+        }
         for rule in self.rules.split_off(rules) {
             self.rule(rule);
         }
@@ -760,8 +779,23 @@ impl Painter<'_> {
         {
             self.indicators.pop();
         }
-        if shown && let Some(button) = button {
-            self.brackets(visible, button, own_geometry);
+        let focused = self.focused == Some(id);
+        let mut labeled = false;
+        match button {
+            Some(ButtonLabel::Text) if shown => self.brackets(visible, own_geometry),
+            Some(ButtonLabel::Accessible(text)) if shown => {
+                let center = i32::from(self.area.y)
+                    + (frame.center().y / self.cells.height()).floor() as i32;
+                self.labels.push(Label {
+                    text,
+                    cells: visible,
+                    row: center.clamp(i32::from(visible.y), i32::from(visible.bottom()) - 1) as u16,
+                    within: self.parent_box.intersection(clip.visible),
+                    focused,
+                });
+                labeled = true;
+            }
+            _ => {}
         }
         if visible_drawn && let Some(toggle) = toggle {
             self.toggle_glyph(visible, toggle, own_geometry);
@@ -773,8 +807,9 @@ impl Painter<'_> {
         // A toggle shows its state with its glyph; only focus puts a bar on it.
         let shows_state = !is_toggle(view.props.accessibility.role)
             && (state.selected || state.checked == Some(Checked::True));
-        // An emptied box shows no selection, but focus stays visible on it.
-        let focused = self.focused == Some(id) && view.input.is_none();
+        // An emptied box shows no selection, but focus stays visible on it;
+        // an icon-only button's label takes its bar.
+        let focused = focused && view.input.is_none() && !labeled;
         if (shows_state && visible_drawn) || (focused && shown) {
             self.bar(visible, own_geometry);
         }
@@ -805,16 +840,78 @@ impl Painter<'_> {
         if rows.is_empty() {
             rows.push(visible.y);
         }
+        for y in rows {
+            self.bar_row(y, visible.x..visible.right());
+        }
+    }
+
+    fn bar_row(&mut self, y: u16, columns: std::ops::Range<u16>) {
         let color = match self.scheme {
             ColorScheme::Dark => Color::Black,
             ColorScheme::Light => Color::Gray,
         };
-        for y in rows {
-            for x in visible.x..visible.right() {
-                let cell = &mut self.buffer[(x, y)];
-                cell.bg = color;
-                cell.modifier.insert(Modifier::BOLD);
-            }
+        for x in columns {
+            let cell = &mut self.buffer[(x, y)];
+            cell.bg = color;
+            cell.modifier.insert(Modifier::BOLD);
+        }
+    }
+
+    /// Draws an icon-only button's accessibility label as `[ label ]`, else
+    /// `[label]`, on its icons' row: centered in its box, or over the box and
+    /// blank Cells beside it, a blank Cell away from other glyphs, closest to
+    /// centered. A label that does not fit whole is not drawn. Focus puts the
+    /// bar under the box and the label.
+    fn label(&mut self, label: Label) {
+        let Label {
+            text,
+            cells,
+            row,
+            within,
+            focused,
+        } = label;
+        let (left, right) = (i32::from(cells.x), i32::from(cells.right()));
+        let blank = |buffer: &Buffer, x: i32| {
+            u16::try_from(x).is_ok_and(|x| {
+                within.contains(ratatui_core::layout::Position::new(x, row))
+                    && buffer[(x, row)].symbol() == " "
+            })
+        };
+        let apart = |buffer: &Buffer, x: i32| {
+            u16::try_from(x).is_err()
+                || !within.contains(ratatui_core::layout::Position::new(x as u16, row))
+                || buffer[(x as u16, row)].symbol() == " "
+        };
+        let placed = [format!("[ {text} ]"), format!("[{text}]")]
+            .into_iter()
+            .find_map(|shown| {
+                let width = shown.width() as i32;
+                if width <= right - left {
+                    return Some((left + (right - left - width) / 2, shown));
+                }
+                let centered = left - (width - (right - left)) / 2;
+                let mut starts: Vec<i32> = (right - width..=left).collect();
+                starts.sort_by_key(|start| (start - centered).abs());
+                starts
+                    .into_iter()
+                    .find(|&start| {
+                        let end = start + width;
+                        (start..left)
+                            .chain(right..end)
+                            .all(|x| blank(self.buffer, x))
+                            && (start == left || apart(self.buffer, start - 1))
+                            && (end == right || apart(self.buffer, end))
+                    })
+                    .map(|start| (start, shown))
+            });
+        let mut columns = cells.x..cells.right();
+        if let Some((start, shown)) = placed {
+            let start = start as u16;
+            self.buffer.set_string(start, row, &shown, Style::reset());
+            columns = start.min(cells.x)..(start + shown.width() as u16).max(cells.right());
+        }
+        if focused {
+            self.bar_row(row, columns);
         }
     }
 
@@ -989,58 +1086,31 @@ impl Painter<'_> {
         label
     }
 
-    /// Draws a button's brackets in its own Cells: around its one row of text
+    /// Draws a button's brackets in its own Cells around its one row of text
     /// (the text views from `texts` on in `geometry`), one Cell away on both
-    /// sides when the box has room, else next to it, or around its
-    /// accessibility label on the box's middle row, cut to the box.
-    fn brackets(&mut self, visible: Rect, button: ButtonLabel, texts: usize) {
-        match button {
-            ButtonLabel::Text => {
-                let Some((y, left, right)) = self.text_extent(visible, texts) else {
-                    return;
-                };
-                let free = |x: u16| {
-                    (visible.x..visible.right()).contains(&x) && self.buffer[(x, y)].symbol() == " "
-                };
-                // The same gap on both sides, the widest the box has room for,
-                // and both brackets or neither: a label flush with its box
-                // stays bare.
-                let Some(gap) = (0..=BRACKET_GAP as u16).rev().find(|&gap| {
-                    left > gap
-                        && (left - gap - 1..left).all(free)
-                        && (right..=right + gap).all(free)
-                }) else {
-                    return;
-                };
-                let style = self.buffer[(left, y)].style();
-                self.buffer[(left - gap - 1, y)]
-                    .set_symbol("[")
-                    .set_style(style);
-                self.buffer[(right + gap, y)]
-                    .set_symbol("]")
-                    .set_style(style);
-            }
-            ButtonLabel::Accessible(label) => {
-                let width = usize::from(visible.width);
-                let mut text = format!("[ {label} ]");
-                if text.width() > width {
-                    let mut kept = String::new();
-                    for grapheme in label.graphemes(true) {
-                        if kept.width() + grapheme.width() + "[…]".width() > width {
-                            break;
-                        }
-                        kept.push_str(grapheme);
-                    }
-                    text = format!("[{kept}…]");
-                }
-                if text.width() > width {
-                    return;
-                }
-                let x = visible.x + ((width - text.width()) / 2) as u16;
-                let y = visible.y + (visible.height - 1) / 2;
-                self.buffer.set_string(x, y, text, Style::reset());
-            }
-        }
+    /// sides when the box has room, else next to it.
+    fn brackets(&mut self, visible: Rect, texts: usize) {
+        let Some((y, left, right)) = self.text_extent(visible, texts) else {
+            return;
+        };
+        let free = |x: u16| {
+            (visible.x..visible.right()).contains(&x) && self.buffer[(x, y)].symbol() == " "
+        };
+        // The same gap on both sides, the widest the box has room for,
+        // and both brackets or neither: a label flush with its box
+        // stays bare.
+        let Some(gap) = (0..=BRACKET_GAP as u16).rev().find(|&gap| {
+            left > gap && (left - gap - 1..left).all(free) && (right..=right + gap).all(free)
+        }) else {
+            return;
+        };
+        let style = self.buffer[(left, y)].style();
+        self.buffer[(left - gap - 1, y)]
+            .set_symbol("[")
+            .set_style(style);
+        self.buffer[(right + gap, y)]
+            .set_symbol("]")
+            .set_style(style);
     }
 }
 

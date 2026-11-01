@@ -223,8 +223,12 @@ fn icons_are_not_drawn_and_an_icon_only_button_shows_its_label() {
         .unwrap();
     draw_until(&mut view, &mut terminal, &rx, "icon");
     let buffer = terminal.backend().buffer();
-    assert_eq!(row(buffer, 0), "[L…]", "cut to its 4 by 2 Cell box");
-    assert_eq!(row(buffer, 1), "");
+    assert_eq!(row(buffer, 0), "");
+    assert_eq!(
+        row(buffer, 1),
+        "[ Light appearance ]",
+        "its 4 by 2 Cell box and the blank Cells beside it, on its icon's row"
+    );
     assert_eq!(row(buffer, 2), "     [ Close ]");
     assert_eq!(
         row(buffer, 3),
@@ -381,4 +385,88 @@ fn a_box_whose_only_content_was_dropped_is_not_drawn_and_its_neighbors_stay_put(
             .all(|cell| cell.bg == Color::Reset && !cell.modifier.contains(Modifier::REVERSED)),
         "{lines:?}"
     );
+}
+
+#[component]
+fn CrowdedIconButtons() -> impl IntoElement {
+    let icon_button = |label: &'static str| {
+        view()
+            .w(px(32.0))
+            .h(px(32.0))
+            .border_1()
+            .role(AccessibilityRole::Button)
+            .label(label)
+            .items_center()
+            .justify_center()
+            .on_press(|_: &()| {})
+            .child(
+                canvas(Painter::new().fill_rect(0.0, 0.0, 16.0, 16.0))
+                    .w(px(16.0))
+                    .h(px(16.0)),
+            )
+    };
+    let header = |button: View| {
+        view()
+            .flex_row()
+            .items_center()
+            .gap(px(16.0))
+            .child(text("Gallery"))
+            .child(button)
+            .child(text("NSH"))
+    };
+    view()
+        .flex_1()
+        .child(header(icon_button("Light appearance")))
+        .child(header(icon_button("Go")))
+        .child(header(view().w(px(32.0)).h(px(32.0))))
+}
+
+#[test]
+fn an_icon_only_button_shows_its_whole_label_or_nothing_and_focus_puts_the_bar_on_it() {
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(20, 6)).unwrap();
+    view.load(App::Rust(Root::new::<CrowdedIconButtons>(|| ())))
+        .unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "NSH");
+    let lines: Vec<_> = (0..6)
+        .map(|y| row(terminal.backend().buffer(), y))
+        .collect();
+    // Between two texts the long label has no room: neither a cut label nor
+    // the button's box, and the texts keep their columns. The short one
+    // takes the blank Cells beside its box, a Cell away from the texts.
+    assert_eq!(lines[0..2], lines[4..6], "{lines:?}");
+    assert_eq!(lines[2], "", "{lines:?}");
+    assert_eq!(lines[3], "Gallery [ Go ] NSH", "{lines:?}");
+    assert!(
+        lines.iter().all(|line| !line.contains(['…', '┌', '│'])),
+        "{lines:?}"
+    );
+
+    let key = |name: &str| nsh_platform_tui::Input::Key {
+        key: name.into(),
+        modifiers: Default::default(),
+        release: false,
+    };
+    assert_eq!(view.handle(key("Tab")), nsh_platform_tui::Handled::Yes);
+    terminal
+        .draw(|frame| view.render(frame, frame.area()))
+        .unwrap();
+    let buffer = terminal.backend().buffer();
+    let focused = |x: u16, y: u16| buffer[(x, y)].bg != Color::Reset;
+    assert!((9..13).all(|x| focused(x, 1)), "the bar on its label's row");
+    assert!(!focused(8, 1) && !focused(13, 1) && !focused(9, 0));
+    let after: Vec<_> = (0..6).map(|y| row(buffer, y)).collect();
+    assert_eq!(lines, after, "content never moves");
+
+    assert_eq!(view.handle(key("Tab")), nsh_platform_tui::Handled::Yes);
+    terminal
+        .draw(|frame| view.render(frame, frame.area()))
+        .unwrap();
+    let buffer = terminal.backend().buffer();
+    assert!(
+        (8..14).all(|x| buffer[(x, 3)].bg != Color::Reset),
+        "the bar under the whole label"
+    );
+    assert!(!(buffer[(7, 3)].bg != Color::Reset) && !(buffer[(14, 3)].bg != Color::Reset));
+    assert!((0..20).all(|x| buffer[(x, 2)].bg == Color::Reset));
 }
