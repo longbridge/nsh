@@ -168,6 +168,31 @@ test("an error that is not a trap leaves the engine taking calls", () => {
   assert.deepEqual(reached, ["later"]);
 });
 
+test("the overlay keeps the first panic, whichever entry the next one comes from", () => {
+  const { player } = fakePlayer();
+  const shown = [];
+  const box = { replaceChildren: (_copy, message) => shown.push(message) };
+  player.root = { querySelector: () => box, append() {} };
+  const document = globalThis.document;
+  globalThis.document = { createElement: () => ({ addEventListener() {} }) };
+  const error = console.error;
+  console.error = () => {};
+  try {
+    player.reportPanic("nsh panicked: the real one");
+    // The engine is left borrowed: an app's own timer calling into it in
+    // the browser runtime panics again, and the engine reports an error.
+    player.reportPanic("nsh panicked: RefCell already borrowed");
+    player.showError("a later error");
+  } finally {
+    globalThis.document = document;
+    console.error = error;
+  }
+  assert.deepEqual(shown, ["nsh panicked: the real one"]);
+  const reached = [];
+  player.call(() => reached.push("later"));
+  assert.deepEqual(reached, []);
+});
+
 async function reply(host) {
   const { player, sent } = fakePlayer(host === undefined ? {} : { host });
   player.app = 1;

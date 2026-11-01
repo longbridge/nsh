@@ -938,6 +938,7 @@ class Player {
         request_frame: () => this.requestFrame(),
         request_pump: () => this.requestPump(),
         report_error: (p, l) => this.showError(this.str(p, l)),
+        report_panic: (p, l) => this.reportPanic(this.str(p, l)),
         test_send: (p, l) => this.onTestSend?.(JSON.parse(this.str(p, l))),
         log: (level, p, l) => {
           const message = this.str(p, l);
@@ -1473,8 +1474,8 @@ class Player {
    * engine is not reentrant: a call made while it runs (from a batch being
    * applied) waits until it returns. After a trap (a panic) it takes no
    * calls: the trap left it in the middle of one, its state still borrowed,
-   * so each later call would only panic again, and that report would cover
-   * the panic's own.
+   * so each later call would only panic again (`reportPanic` keeps the
+   * first panic's report on screen whichever entry a later one comes from).
    */
   call(f) {
     if (this.trapped) return;
@@ -1486,11 +1487,7 @@ class Player {
     try {
       this.schedule(f(this.wasm));
     } catch (err) {
-      if (err instanceof WebAssembly.RuntimeError) {
-        this.trapped = true;
-        this.deferred = [];
-        clearTimeout(this.timer);
-      }
+      if (err instanceof WebAssembly.RuntimeError) this.trap();
       throw err;
     } finally {
       this.depth = 0;
@@ -1631,10 +1628,31 @@ class Player {
       this.wasm.nsh_event(id, np, nl, pp, pl)));
   }
 
-  showError(message) {
+  /**
+   * The engine panicked (its panic hook): it traps once this returns, its
+   * state still borrowed. The first panic's report stays on screen; what
+   * comes after, from any entry into the engine (a pump, an event, the
+   * app's own timers calling into it in the browser runtime), only panics
+   * again over the borrowed state, so it goes to the console.
+   */
+  reportPanic(message) {
+    const first = !this.trapped;
+    this.trap();
+    this.showError(message, { overlay: first });
+  }
+
+  /** Stops calling an engine that trapped (`call`, `reportPanic`). */
+  trap() {
+    this.trapped = true;
+    this.deferred = [];
+    clearTimeout(this.timer);
+  }
+
+  showError(message, { overlay = !this.trapped } = {}) {
     console.error("[nsh]", message);
     this.options.onError?.(message);
-    if (this.options.overlay === false) return;
+    // After a panic the overlay keeps its report (`reportPanic`).
+    if (this.options.overlay === false || !overlay) return;
     let box = this.root.querySelector(":scope > .nsh-error");
     if (!box) {
       box = document.createElement("div");
