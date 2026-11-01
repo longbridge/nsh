@@ -115,7 +115,7 @@ The cases are grouped by domain (`base`, `core`, `events`, `layout`, `paint`, `p
 each. The domain's `App.tsx` imports every case and shows one at a time: the script taps `id:case-<case>` (one of the
 one-point views over the top left corner, out of the layout) and checks that case, then the next. What applies to a
 whole app has a domain of its own: the platform (`android`; `macos`, which also declares capabilities; `browser`, a
-desktop browser with the user's text size at 2) and `nsh.json`'s settings (the `layout` domain's theme spacing, the
+desktop browser with the user's text size at 2; `terminal`, the Terminal idiom on Linux) and `nsh.json`'s settings (the `layout` domain's theme spacing, the
 `base` domain's status bar). A case goes where its platform and settings are, and where they change nothing its
 neighbors check. An app whose `nsh.json` declares `capabilities` runs with the `capabilities.json` and `app.json` its
 build wrote and a new, empty data directory, so a script checks what a grant allows and what stays refused (the

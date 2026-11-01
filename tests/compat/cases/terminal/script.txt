@@ -1,0 +1,9 @@
+# What a user does and sees (compat/apps.rs): each case after its tap.
+platform linux terminal
+# mod-device-terminal
+tap id:case-mod-device-terminal
+expect OS: linux
+expect Idiom: terminal
+expect Select: desktop
+prop id:bar desktop.windowDrag true
+covers [nsh] platform
