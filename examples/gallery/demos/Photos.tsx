@@ -1,9 +1,8 @@
 import { computed, Image, List, signal, Text, untracked, View } from "nsh";
 import { createAnimatedValue } from "nsh";
-import { platform } from "nsh";
 import logo from "../logo@2x.png";
 import { Icon } from "../icons";
-import { Badge, bindRefresh, Button, colors, columnsFor, desktop, finish, paneWidth, Press, radius, Stat, type Tone, toneColor } from "../ui";
+import { Badge, bindRefresh, Button, colors, columnsFor, desktop, desktopIdiom, finish, paneWidth, Press, radius, Stat, type Tone, toneColor } from "../ui";
 
 type Photo = { id: number; title: string; author: string; tone: Tone; views: number };
 
@@ -186,7 +185,7 @@ export function Photos() {
       </View>
       <View style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingTop: 12 }}>
         <Icon name="arrow-down" size={14} tint={colors.faint} />
-        {platform.idiom === "desktop" ? (
+        {desktopIdiom ? (
           <Text style={{ flex: 1, fontSize: 13, color: colors.faint }}>
             {refreshKey ? `${refreshKey} refreshes. ` : ""}Scrolling to the end loads {PAGE} more.
           </Text>
@@ -194,7 +193,7 @@ export function Photos() {
           <Text style={{ flex: 1, fontSize: 13, color: colors.faint }}>Pull to refresh. Scrolling to the end loads {PAGE} more.</Text>
         )}
         {/* The mouse does not pull scroll views down: desktops refresh here. */}
-        <If when={platform.idiom === "desktop"}>
+        <If when={desktopIdiom}>
           <Button label={refreshing() ? "Refreshing…" : "Refresh"} variant="secondary" disabled={refreshing()} onPress={refresh} />
         </If>
       </View>

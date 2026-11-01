@@ -1,12 +1,13 @@
 import { effect, signal, Text, View } from "nsh";
 import { createAnimatedValue } from "nsh";
 import { Tab, Tabs } from "nsh/base";
-import { colors, finish, motion } from "./theme";
+import { colors, finish, motion, TERMINAL_ROW, terminal } from "./theme";
 
 /**
  * Equal segments with an indicator that springs to the selected one
  * (`count` shows a quiet number after a label): `nsh/base`'s `Tabs`, a tab
- * per segment, in the gallery's look.
+ * per segment, in the gallery's look. The terminal shows the segments on
+ * one row, the selected one as its selection, without the track.
  */
 export function Segmented<T extends string>(props: {
   options: readonly { value: T; label: string; count?: number }[];
@@ -33,6 +34,28 @@ export function Segmented<T extends string>(props: {
     else x.set(to);
     placed = true;
   });
+  if (terminal) {
+    return (
+      <Tabs style={{ height: TERMINAL_ROW, flexDirection: "row" }}>
+        <Each of={props.options}>
+          {(option) => (
+            <Tab
+              selected={props.value === option().value}
+              onPress={() => props.onChange(option().value)}
+              style={{ flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8 }}
+            >
+              <Text style={{ numberOfLines: 1, fontSize: 13, fontWeight: "500", color: props.value === option().value ? colors.text : colors.muted }}>
+                {option().label}
+              </Text>
+              <If when={option().count !== undefined}>
+                <Text style={{ fontSize: 12, color: colors.faint, fontVariant: ["tabular-nums"] }}>{option().count}</Text>
+              </If>
+            </Tab>
+          )}
+        </Each>
+      </Tabs>
+    );
+  }
   return (
     <Tabs
       onLayout={(e) => width.set(e.size.width)}

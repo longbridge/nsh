@@ -1,9 +1,8 @@
 import { cleanup, computed, type JSX, signal, Text, View } from "nsh";
 import { Checkbox, Collapsible, Progress, Radio, RadioGroup, Slider, Switch, Tab, Tabs } from "nsh/base";
 import { reduceMotion } from "nsh";
-import { platform } from "nsh";
 import { Icon } from "../icons";
-import { Badge, Button, Caption, Card, colors, DemoPage, finish, focusRing, hovered, mono, sliderFill, sliderLook, sliderValueClass, sliderValueStyle, switchLook, toneColor } from "../ui";
+import { Badge, Button, Caption, Card, colors, DemoPage, desktopIdiom, finish, focusRing, hovered, mono, sliderFill, sliderLook, sliderValueClass, sliderValueStyle, switchLook, terminal, TERMINAL_COLUMN, TERMINAL_ROW, toneColor } from "../ui";
 
 // `nsh/base`'s controls own presses, keys, the disabled state and what
 // screen readers say; every value is the app's, and so is the look: the
@@ -13,13 +12,16 @@ import { Badge, Button, Caption, Card, colors, DemoPage, finish, focusRing, hove
 /**
  * The sizes of the page. Touch screens take the standard tier (44 pt and
  * more to press); a pointer the compact one desktops' settings and filters
- * use: smaller controls, rows and type, whatever the window's width.
+ * use: smaller controls, rows and type, whatever the window's width. The
+ * terminal's rows are one Cell row each, an indicator's box three Cells wide
+ * for its glyph (`[x]`).
  */
-const size =
-  platform.idiom === "desktop"
+const size = terminal
+  ? { row: TERMINAL_ROW, padding: 0, gap: TERMINAL_COLUMN, label: 14, detail: 12, control: 3 * TERMINAL_COLUMN, corner: 0, check: 12, dash: 8, dot: 6, tabs: TERMINAL_ROW, line: TERMINAL_ROW, switch: "small" as const }
+  : desktopIdiom
     ? { row: 40, padding: 6, gap: 10, label: 14, detail: 12, control: 16, corner: 5, check: 12, dash: 8, dot: 6, tabs: 30, line: 32, switch: "small" as const }
     : { row: 56, padding: 8, gap: 12, label: 15, detail: 13, control: 22, corner: 7, check: 16, dash: 10, dot: 8, tabs: 40, line: 44, switch: "regular" as const };
-const pointer = platform.idiom === "desktop";
+const pointer = desktopIdiom;
 
 /** A control's row: the control and its label, the whole row pressable. */
 const row = (first: boolean) => ({
@@ -28,7 +30,7 @@ const row = (first: boolean) => ({
   alignItems: "center" as const,
   gap: size.gap,
   paddingVertical: size.padding,
-  borderTopWidth: first ? 0 : 1,
+  borderTopWidth: first || terminal ? 0 : 1,
   borderTopColor: colors.line,
 });
 /** How far a row's hover fill reaches past its content on each side, and its corners. */
@@ -46,14 +48,15 @@ const hoverRow = (first: boolean, start = 0) => ({
   marginHorizontal: -BLEED,
   paddingStart: BLEED + start,
   paddingEnd: BLEED,
-  paddingTop: size.padding + (first ? 0 : 1),
+  paddingTop: size.padding + (first || terminal ? 0 : 1),
   borderRadius: BLEED,
 });
 
-/** The hairline above a `hoverRow` that is not the first. */
+/** The hairline above a `hoverRow` that is not the first (none in the
+ * terminal, whose rows are one row each). */
 function Divider(props: { show: boolean }) {
   return (
-    <If when={props.show}>
+    <If when={props.show && !terminal}>
       <View style={{ position: "absolute", top: 0, left: BLEED, right: BLEED, height: 1, backgroundColor: colors.line }} />
     </If>
   );
@@ -61,6 +64,9 @@ function Divider(props: { show: boolean }) {
 
 const pressed = { opacity: 0.7 };
 const dimmed = { opacity: 0.4 };
+
+/** A box's or a ring's height: one row in the terminal, where it is a glyph three Cells wide. */
+const indicatorHeight = terminal ? TERMINAL_ROW : size.control;
 
 /** The fill of a box or ring that is on, and of one that is off. */
 const fill = (on: boolean) =>
@@ -73,7 +79,7 @@ type Mark = "check" | "dash" | null;
 /** A checkbox's box: empty, or citrus with a check or a dash. */
 const box = (mark: Mark) => ({
   width: size.control,
-  height: size.control,
+  height: indicatorHeight,
   borderRadius: size.corner,
   alignItems: "center" as const,
   justifyContent: "center" as const,
@@ -99,7 +105,7 @@ function BoxMark(props: { mark: Mark }) {
 function Ring(props: { on: boolean }) {
   return (
     <View
-      style={{ width: size.control, height: size.control, borderRadius: size.control / 2, alignItems: "center", justifyContent: "center", borderWidth: 1, ...fill(props.on) }}
+      style={{ width: size.control, height: indicatorHeight, borderRadius: size.control / 2, alignItems: "center", justifyContent: "center", borderWidth: 1, ...fill(props.on) }}
     >
       <If when={props.on}>
         <View style={{ width: size.dot, height: size.dot, borderRadius: size.dot / 2, backgroundColor: colors.onAccent }} />
@@ -108,13 +114,16 @@ function Ring(props: { on: boolean }) {
   );
 }
 
-/** A label, and a quieter line under it. */
+/** The terminal's labels' column, so the details after them line up. */
+const LABEL_WIDTH = 16 * TERMINAL_COLUMN;
+
+/** A label, and a quieter line under it (after it in the terminal). */
 function Label(props: { label: string; detail?: string }) {
   return (
-    <View style={{ flex: 1, gap: 2 }}>
-      <Text style={{ fontSize: size.label, color: colors.text }}>{props.label}</Text>
+    <View style={terminal ? { flex: 1, flexDirection: "row", gap: 2 * TERMINAL_COLUMN } : { flex: 1, gap: 2 }}>
+      <Text style={{ width: terminal ? LABEL_WIDTH : undefined, fontSize: size.label, color: colors.text }}>{props.label}</Text>
       <If when={props.detail}>
-        <Text style={{ fontSize: size.detail, color: colors.muted }}>{props.detail}</Text>
+        <Text style={{ numberOfLines: 1, flexShrink: 1, fontSize: size.detail, color: colors.muted }}>{props.detail}</Text>
       </If>
     </View>
   );
@@ -336,8 +345,8 @@ export function Controls() {
           style={{
             height: size.tabs,
             flexDirection: "row",
-            gap: 2,
-            padding: 3,
+            gap: terminal ? 0 : 2,
+            padding: terminal ? 0 : 3,
             borderRadius: size.tabs / 2,
             borderWidth: 1,
             borderColor: colors.border,
@@ -405,12 +414,14 @@ export function Controls() {
           <Divider show={!props.first} />
           <Label label={props.label} detail={props.detail} />
           {/* A lane as wide as the chevron's stroke (half its icon box), so the chevron ends where the values below it end. */}
-          <View
-            class="transition-transform duration-150 motion-reduce:transition-none"
-            style={{ width: size.check / 2, alignItems: "center", rotate: props.open ? "90deg" : "0deg" }}
-          >
-            <Icon name="chevron" size={size.check} tint={colors.muted} />
-          </View>
+          <If when={!terminal}>
+            <View
+              class="transition-transform duration-150 motion-reduce:transition-none"
+              style={{ width: size.check / 2, alignItems: "center", rotate: props.open ? "90deg" : "0deg" }}
+            >
+              <Icon name="chevron" size={size.check} tint={colors.muted} />
+            </View>
+          </If>
         </View>
       );
     }
@@ -491,6 +502,8 @@ export function Controls() {
         }
       }, 300);
     };
+    // Half a row in the terminal: a solid bar on its row, not a rule.
+    const barHeight = terminal ? TERMINAL_ROW / 2 : 6;
     /** A transfer: its label and value over a bar, the value tabular at the trailing edge. */
     function Transfer(props: { label: string; detail: string; value: number; indeterminate?: boolean; first?: boolean }) {
       return (
@@ -499,7 +512,7 @@ export function Controls() {
           indeterminate={props.indeterminate}
           // The label row first: the children follow the track.
           style={{ ...row(!!props.first), flexDirection: "column-reverse", alignItems: "stretch", gap: size.padding }}
-          trackStyle={{ height: 6, borderRadius: 3, overflow: "hidden", backgroundColor: colors.raised }}
+          trackStyle={{ height: barHeight, borderRadius: 3, overflow: "hidden", backgroundColor: colors.raised }}
           indicatorClass={
             !props.indeterminate
               ? undefined
@@ -507,7 +520,7 @@ export function Controls() {
                 ? "w-1/3 translate-x-full"
                 : `w-1/3 transition-transform duration-700 ease-in-out ${end() ? "translate-x-[200%]" : "translate-x-0"}`
           }
-          indicatorStyle={{ height: 6, borderRadius: 3, backgroundColor: toneColor("accent") }}
+          indicatorStyle={{ height: barHeight, borderRadius: 3, backgroundColor: toneColor("accent") }}
         >
           <View style={{ flexDirection: "row", alignItems: "center", gap: size.gap }}>
             <Label label={props.label} detail={props.detail} />

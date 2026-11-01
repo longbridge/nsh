@@ -1,15 +1,14 @@
 import { type JSX, Scroll, signal, Text, View } from "nsh";
 import { ContextMenu, Menu, MenuItem, MenuSeparator, type OpenChangeReason, Submenu } from "nsh/base";
-import { platform } from "nsh";
 import { keymap } from "nsh";
 import { Icon } from "../icons";
-import { Badge, Button, Caption, Card, colors, DemoPage, finish, isDark, mono, radius, Row, Segmented, Tip } from "../ui";
+import { Badge, Button, Caption, Card, colors, DemoPage, desktopIdiom, finish, isDark, mono, radius, Row, Segmented, Tip } from "../ui";
 
 // The look of every menu here is the gallery's: `nsh/base` draws none.
 
 /** The popup on desktops, the sheet at the bottom on touch screens. */
 const surface = () =>
-  platform.idiom === "desktop"
+  desktopIdiom
     ? {
         backgroundColor: colors.raised,
         borderRadius: radius.inset,
@@ -52,7 +51,7 @@ function Item(props: {
   danger?: boolean;
   keepOpen?: boolean;
 }) {
-  const height = platform.idiom === "desktop" ? 32 : 46;
+  const height = desktopIdiom ? 32 : 46;
   return (
     <MenuItem
       onSelect={props.onSelect}
@@ -84,7 +83,7 @@ function Item(props: {
 
 /** The row that opens a submenu, and the row a sheet shows to come back. */
 function SubmenuOf(props: { label: string; children: JSX.Element; disabled?: boolean }) {
-  const height = platform.idiom === "desktop" ? 32 : 46;
+  const height = desktopIdiom ? 32 : 46;
   return (
     <Submenu
       disabled={props.disabled}
@@ -194,9 +193,9 @@ export function Menus() {
       "mod+alt+z": undo,
       "mod+alt+shift+z": redo,
     });
-    const key = (k: string) => (platform.idiom === "desktop" ? keymap.label(k) : undefined);
+    const key = (k: string) => (desktopIdiom ? keymap.label(k) : undefined);
     return (
-      <Card icon="lists" title="Menu bar" subtitle={platform.idiom === "desktop" ? "Hover across submenus; the shortcuts work too" : "Each menu a sheet; submenus take its place"}>
+      <Card icon="lists" title="Menu bar" subtitle={desktopIdiom ? "Hover across submenus; the shortcuts work too" : "Each menu a sheet; submenus take its place"}>
         <View style={{ flexDirection: "row", gap: 8 }}>
           <Menu offset={4} margin={8} popupStyle={surface()} backdropStyle={backdrop} onOpenChange={changed("File")} trigger={<Chip label="File" />}>
             <Item label="New document" shortcut={key("mod+alt+n")} onSelect={() => act("New document")} />
@@ -279,7 +278,7 @@ export function Menus() {
       </>
     );
     return (
-      <Card icon="photos" title="On the rows of a list" subtitle={platform.idiom === "desktop" ? "Right click a row, or its ⋯ button" : "Hold a finger on a row, or press its ⋯"}>
+      <Card icon="photos" title="On the rows of a list" subtitle={desktopIdiom ? "Right click a row, or its ⋯ button" : "Hold a finger on a row, or press its ⋯"}>
         <If when={files().length > 0} else={<Caption label="No files left" />}>
           <View>
             <Each of={files()} key={(f) => f.id}>
@@ -311,7 +310,7 @@ export function Menus() {
     const placement = signal<"top" | "bottom" | "left" | "right">("bottom");
     const align = signal<"start" | "center" | "end">("start");
     return (
-      <Card icon="components" title="Where it goes" subtitle={platform.idiom === "desktop" ? "The side and alignment; it flips where there is no room" : "Phones show menus as sheets: try a desktop"}>
+      <Card icon="components" title="Where it goes" subtitle={desktopIdiom ? "The side and alignment; it flips where there is no room" : "Phones show menus as sheets: try a desktop"}>
         <Segmented
           size="small"
           options={[{ value: "top", label: "Top" }, { value: "bottom", label: "Bottom" }, { value: "left", label: "Left" }, { value: "right", label: "Right" }]}
@@ -340,7 +339,7 @@ export function Menus() {
     return (
       <Card icon="scroll" title="A long menu" subtitle="Twenty choices in a menu that scrolls">
         <Menu offset={4} margin={8} popupStyle={{ ...surface(), padding: 0 }} backdropStyle={backdrop} onOpenChange={changed("Time zone")} trigger={<Chip label={zone()} icon="search" />}>
-          <Scroll style={{ maxHeight: platform.idiom === "desktop" ? 280 : 360 }} contentStyle={{ padding: 6 }}>
+          <Scroll style={{ maxHeight: desktopIdiom ? 280 : 360 }} contentStyle={{ padding: 6 }}>
             <Each of={ZONES}>{(z) => <Item label={z()} mark={zone() === z() ? "check" : null} onSelect={() => zone.set(z())} />}</Each>
           </Scroll>
         </Menu>
@@ -352,7 +351,7 @@ export function Menus() {
     const open = signal(false);
     keymap.bind("mod+shift+p", () => open.set(!open()));
     return (
-      <Card icon="spark" title="Opened by the app" subtitle="A controlled menu: a button or a shortcut opens it" right={platform.idiom === "desktop" ? <Badge label={keymap.label("mod+shift+p")} /> : undefined}>
+      <Card icon="spark" title="Opened by the app" subtitle="A controlled menu: a button or a shortcut opens it" right={desktopIdiom ? <Badge label={keymap.label("mod+shift+p")} /> : undefined}>
         <Menu
           open={open()}
           onOpenChange={(next, reason) => {

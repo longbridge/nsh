@@ -9,7 +9,7 @@ import { Icon } from "./icons";
 import { TitleBar } from "./TitleBar";
 import { Toaster } from "./toast";
 import { type DemoEntry, nav } from "./nav";
-import { Appear, Badge, colors, desktop, focusRing, header, IconTile, lazy, Logo, mono, PageHeader, Press, radius, SIDEBAR, sidebarOpen, ThemeToggle } from "./ui";
+import { Appear, Badge, Button, colors, desktop, focusRing, header, IconTile, lazy, Logo, mono, PageHeader, Press, radius, SIDEBAR, sidebarOpen, TERMINAL_COLUMN, TERMINAL_ROW, terminal, ThemeToggle } from "./ui";
 
 /** The demos, by what they show; each module loads when first shown (`lazy`). */
 const groups: { title: string; demos: DemoEntry[] }[] = [
@@ -178,9 +178,25 @@ const select = (demo: DemoEntry) => {
 };
 
 /** A demo in the sidebar: an accent bar and a raised fill when selected,
- * a fill under the pointer otherwise. */
+ * a fill under the pointer otherwise. One row of text in the terminal,
+ * which shows the selection as a bar of its own. */
 function SidebarRow(props: { demo: DemoEntry }) {
   const active = () => selected().name === props.demo.name;
+  if (terminal) {
+    return (
+      <View
+        onPress={() => select(props.demo)}
+        role="button"
+        accessibilityLabel={props.demo.name}
+        accessibilityState={{ selected: active() }}
+        style={{ height: TERMINAL_ROW, flexDirection: "row", alignItems: "center", paddingHorizontal: TERMINAL_COLUMN }}
+      >
+        <Text style={{ numberOfLines: 1, flex: 1, fontSize: 14, fontWeight: active() ? "600" : "400", color: active() ? colors.text : colors.muted }}>
+          {props.demo.name}
+        </Text>
+      </View>
+    );
+  }
   return (
     <View
       onPress={() => select(props.demo)}
@@ -206,8 +222,10 @@ function SidebarRow(props: { demo: DemoEntry }) {
 const toggleSidebar = () => sidebarOpen.set(!untracked(sidebarOpen));
 
 /** The title bar's button that hides and shows the sidebar, where desktop
- * apps put it: at the title bar's leading edge, after the logo. */
+ * apps put it: at the title bar's leading edge, after the logo. The
+ * terminal, which has no title bar, puts it first in the demo's toolbar. */
 function SidebarToggle() {
+  if (terminal) return <Button label="Sidebar" accessibilityLabel="Toggle sidebar" variant="secondary" onPress={toggleSidebar} />;
   return (
     <View
       onPress={toggleSidebar}
@@ -251,20 +269,36 @@ function Sidebar() {
           borderRightColor: colors.line,
         }}
       >
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 20, paddingTop: 20, paddingBottom: 12 }}>
-          <Logo size={32} />
-          <View style={{ flex: 1, gap: 1 }}>
+        <If
+          when={terminal}
+          else={
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 20, paddingTop: 20, paddingBottom: 12 }}>
+              <Logo size={32} />
+              <View style={{ flex: 1, gap: 1 }}>
+                <Text style={{ fontSize: 16, fontWeight: "600", color: colors.text }}>Gallery</Text>
+                <Text style={{ fontSize: 12, color: colors.muted }}>NSH · {platform.os}</Text>
+              </View>
+              <ThemeToggle />
+            </View>
+          }
+        >
+          <View style={{ height: TERMINAL_ROW, flexDirection: "row", alignItems: "center", gap: 2 * TERMINAL_COLUMN, paddingRight: TERMINAL_COLUMN, marginBottom: TERMINAL_ROW }}>
             <Text style={{ fontSize: 16, fontWeight: "600", color: colors.text }}>Gallery</Text>
-            <Text style={{ fontSize: 12, color: colors.muted }}>NSH · {platform.os}</Text>
+            <Text style={{ numberOfLines: 1, flex: 1, fontSize: 12, color: colors.muted }}>NSH · {platform.os}</Text>
+            <ThemeToggle />
           </View>
-          <ThemeToggle />
-        </View>
+        </If>
         <Scroll style={{ flex: 1 }}>
-          <View style={{ paddingHorizontal: 12, paddingBottom: 16 }}>
+          <View style={terminal ? undefined : { paddingHorizontal: 12, paddingBottom: 16 }}>
             <Each of={groups}>
               {(group) => (
-                <View style={{ gap: 2 }}>
-                  <Text style={{ fontSize: 11, fontWeight: "600", color: colors.faint, letterSpacing: 0.6, paddingHorizontal: 10, paddingTop: 16, paddingBottom: 6 }}>
+                <View style={{ gap: terminal ? 0 : 2 }}>
+                  <Text
+                    style={[
+                      { fontSize: 11, fontWeight: "600", color: colors.faint, letterSpacing: 0.6 },
+                      terminal ? { height: TERMINAL_ROW } : { paddingHorizontal: 10, paddingTop: 16, paddingBottom: 6 },
+                    ]}
+                  >
                     {group().title.toUpperCase()}
                   </Text>
                   <Each of={group().demos}>{(demo) => <SidebarRow demo={demo()} />}</Each>
@@ -273,7 +307,13 @@ function Sidebar() {
             </Each>
           </View>
         </Scroll>
-        <View style={{ paddingHorizontal: 20, paddingVertical: 12, borderTopWidth: 1, borderTopColor: colors.line, gap: 2 }}>
+        <View
+          style={[
+            { borderTopWidth: 1, borderTopColor: colors.line },
+            // The rule takes a whole row in the terminal: the rest of it is padding.
+            terminal ? { paddingTop: TERMINAL_ROW - 1 } : { paddingHorizontal: 20, paddingVertical: 12, gap: 2 },
+          ]}
+        >
           <Text style={{ fontSize: 12, color: colors.muted, fontFamily: mono }}>
             {Math.round(windowSize().width)} × {Math.round(windowSize().height)} pt
           </Text>
@@ -284,23 +324,41 @@ function Sidebar() {
   );
 }
 
+/** The demo pane's toolbar in the terminal: one row with the sidebar's
+ * toggle (the terminal has no title bar for it), the name and what the demo
+ * shows, then a rule. */
+function TerminalToolbar(props: { group: string }) {
+  return (
+    <View style={{ height: 2 * TERMINAL_ROW, borderBottomWidth: 1, borderBottomColor: colors.line }}>
+      <View style={{ height: TERMINAL_ROW, flexDirection: "row", alignItems: "center", gap: 2 * TERMINAL_COLUMN, paddingHorizontal: TERMINAL_COLUMN }}>
+        <SidebarToggle />
+        <Text style={{ numberOfLines: 1, fontSize: 18, fontWeight: "600", color: colors.text }}>{selected().name}</Text>
+        <Text style={{ numberOfLines: 1, flex: 1, fontSize: 13, color: colors.muted }}>{selected().detail}</Text>
+        <Badge label={props.group} />
+      </View>
+    </View>
+  );
+}
+
 /** The selected demo under a toolbar with its name and what it shows. */
 function DemoPane() {
   const group = () => groups.find((g) => g.demos.some((demo) => demo.name === selected().name))?.title ?? "Gallery";
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
-      <View style={{ height: 64, flexDirection: "row", alignItems: "center", gap: 14, paddingHorizontal: 24, borderBottomWidth: 1, borderBottomColor: colors.line }}>
-        <IconTile name={selected().icon} size={36} />
-        <View style={{ flex: 1, gap: 2 }}>
-          <Text style={{ numberOfLines: 1, fontSize: 18, fontWeight: "600", color: colors.text }}>
-            {selected().name}
-          </Text>
-          <Text style={{ numberOfLines: 1, fontSize: 13, color: colors.muted }}>
-            {selected().detail}
-          </Text>
+      <If when={!terminal} else={<TerminalToolbar group={group()} />}>
+        <View style={{ height: 64, flexDirection: "row", alignItems: "center", gap: 14, paddingHorizontal: 24, borderBottomWidth: 1, borderBottomColor: colors.line }}>
+          <IconTile name={selected().icon} size={36} />
+          <View style={{ flex: 1, gap: 2 }}>
+            <Text style={{ numberOfLines: 1, fontSize: 18, fontWeight: "600", color: colors.text }}>
+              {selected().name}
+            </Text>
+            <Text style={{ numberOfLines: 1, fontSize: 13, color: colors.muted }}>
+              {selected().detail}
+            </Text>
+          </View>
+          <Badge label={group()} />
         </View>
-        <Badge label={group()} />
-      </View>
+      </If>
       <View style={{ flex: 1 }}>
         {(() => {
           const Demo = selected().screen;

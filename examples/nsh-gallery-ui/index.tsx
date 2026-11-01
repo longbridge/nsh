@@ -7,7 +7,7 @@ import { keymap } from "nsh";
 import { Button as BaseButton, Sheet as BaseSheet, Switch, Tooltip } from "nsh/base";
 import { safeArea } from "nsh";
 import { Icon, type IconName } from "./icons";
-import { alpha, colors, finish, focusRing, isDark, mono, motion, radius, toneColor, toneTint, type Tone } from "./theme";
+import { alpha, colors, desktopIdiom, finish, focusRing, isDark, mono, motion, radius, TERMINAL_COLUMN, TERMINAL_ROW, terminal, toneColor, toneTint, type Tone, wholeRows } from "./theme";
 
 export * from "./theme";
 export { Segmented } from "./segmented";
@@ -27,7 +27,7 @@ export const handleThumb =
  * Instructions for the device's input: `touch` on phones and tablets,
  * `pointer` on desktops (a mouse, a touchpad, a keyboard).
  */
-export const hint = (touch: string, pointer: string) => (platform.idiom === "desktop" ? pointer : touch);
+export const hint = (touch: string, pointer: string) => (desktopIdiom ? pointer : touch);
 
 /**
  * Desktops' way to refresh what phones pull down (the mouse does not drag
@@ -37,7 +37,7 @@ export const hint = (touch: string, pointer: string) => (platform.idiom === "des
  * key's label for the hint, or null where it is not bound.
  */
 export function bindRefresh(refresh: () => void): string | null {
-  if (platform.idiom !== "desktop" || platform.os === "web") return null;
+  if (!desktopIdiom || platform.os === "web") return null;
   keymap.bind("mod+r", refresh);
   return keymap.label("mod+r");
 }
@@ -104,8 +104,9 @@ export function Appear(props: { index?: number; flex?: boolean; children: JSX.El
   );
 }
 
-/** A rounded icon tile. */
+/** A rounded icon tile (decoration: none in the terminal). */
 export function IconTile(props: { name: IconName; tint?: string; size?: number }) {
+  if (terminal) return null;
   const size = props.size ?? 40;
   return (
     <View
@@ -130,7 +131,8 @@ export function IconTile(props: { name: IconName; tint?: string; size?: number }
 /**
  * A card: an optional icon, a title and a subtitle, something on the right
  * (a badge, an action), then the content on an inset surface (or bare with
- * `flush`).
+ * `flush`). The terminal draws one box, a blank row under the title and the
+ * content right in the card.
  */
 export function Card(props: {
   icon?: IconName;
@@ -142,26 +144,13 @@ export function Card(props: {
   children: JSX.Element;
 }) {
   return (
-    <View
-      style={[
-        {
-          backgroundColor: colors.surface,
-          borderRadius: radius.card,
-          borderCurve: "continuous",
-          borderWidth: 1,
-          borderColor: colors.border,
-          padding: 5,
-          ...finish.card,
-        },
-        props.style ?? null,
-      ]}
-    >
+    <View style={[cardStyle(), props.style ?? null]}>
       <If when={props.title}>
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 11, paddingTop: 11, paddingBottom: 12 }}>
+        <View style={terminal ? { flexDirection: "row", gap: 2 * TERMINAL_COLUMN, paddingBottom: TERMINAL_ROW } : { flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 11, paddingTop: 11, paddingBottom: 12 }}>
           <If when={props.icon}>
             <IconTile name={props.icon!} />
           </If>
-          <View style={{ flex: 1, gap: 2 }}>
+          <View style={{ flex: 1, gap: terminal ? 0 : 2 }}>
             <Text style={{ fontSize: 17, fontWeight: "600", color: colors.text }}>{props.title}</Text>
             <If when={props.subtitle}>
               <Text style={{ numberOfLines: 2, fontSize: 13, color: colors.muted }}>
@@ -179,8 +168,26 @@ export function Card(props: {
   );
 }
 
-/** The darker surface inside a card. */
+/**
+ * A card's box: in the terminal a border whose row and column on each side
+ * the padding fills out, so the content starts one Cell inside it.
+ */
+const cardStyle = (): ViewStyle =>
+  terminal
+    ? { borderWidth: 1, borderColor: colors.border, paddingVertical: TERMINAL_ROW - 1, paddingHorizontal: 2 * TERMINAL_COLUMN - 1 }
+    : {
+        backgroundColor: colors.surface,
+        borderRadius: radius.card,
+        borderCurve: "continuous",
+        borderWidth: 1,
+        borderColor: colors.border,
+        padding: 5,
+        ...finish.card,
+      };
+
+/** The darker surface inside a card (only its gap, in whole rows, in the terminal). */
 export function Inset(props: { gap?: number; padding?: number; children: JSX.Element }) {
+  if (terminal) return <View style={{ gap: wholeRows(props.gap ?? 12) }}>{props.children}</View>;
   return (
     <View
       style={{
@@ -226,14 +233,14 @@ export function Figure(props: { value: string; unit?: string; note?: string; ton
   );
 }
 
-/** A small label in a tinted capsule. */
+/** A small label in a tinted capsule (a word on its row in the terminal). */
 export function Badge(props: { label: string; tone?: Tone; outline?: boolean }) {
   const tone = () => props.tone ?? "neutral";
   return (
     <View
       style={{
-        paddingHorizontal: 10,
-        height: 26,
+        paddingHorizontal: terminal ? 0 : 10,
+        height: terminal ? TERMINAL_ROW : 26,
         borderRadius: 13,
         justifyContent: "center",
         backgroundColor: props.outline ? "transparent" : toneTint(tone()),
@@ -247,10 +254,17 @@ export function Badge(props: { label: string; tone?: Tone; outline?: boolean }) 
   );
 }
 
-/** A label above a value, for grids of figures. */
+/** A label above a value, for grids of figures; on one row in the terminal,
+ * the value right-aligned. */
 export function Stat(props: { label: string; value: string; tone?: Tone; width?: `${number}%` }) {
   return (
-    <View style={{ width: props.width, gap: 3, paddingVertical: 4 }}>
+    <View
+      style={
+        terminal
+          ? { width: props.width, height: TERMINAL_ROW, flexDirection: "row", justifyContent: "space-between", gap: TERMINAL_COLUMN, paddingRight: 2 * TERMINAL_COLUMN }
+          : { width: props.width, gap: 3, paddingVertical: 4 }
+      }
+    >
       <Text style={{ fontSize: 12, color: colors.muted }}>{props.label}</Text>
       <Text style={{ fontSize: 15, color: props.tone ? toneColor(props.tone) : colors.text, fontVariant: ["tabular-nums"] }}>
         {props.value}
@@ -259,11 +273,14 @@ export function Stat(props: { label: string; value: string; tone?: Tone; width?:
   );
 }
 
-/** A colored square and a label, for chart legends. */
+/** A colored square and a label, for chart legends (the label alone in the
+ * terminal, which draws no charts). */
 export function Legend(props: { color: string; label: string; value?: string }) {
   return (
     <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-      <View style={{ width: 9, height: 9, borderRadius: 2.5, backgroundColor: props.color }} />
+      <If when={!terminal}>
+        <View style={{ width: 9, height: 9, borderRadius: 2.5, backgroundColor: props.color }} />
+      </If>
       <Text style={{ fontSize: 13, color: colors.muted }}>
         {props.label}
         <If when={props.value}>
@@ -274,18 +291,19 @@ export function Legend(props: { color: string; label: string; value?: string }) 
   );
 }
 
-/** A row inside an inset, with a hairline above all but the first. */
+/** A row inside an inset, with a hairline above all but the first (one row
+ * of the terminal, which keeps no hairlines between rows). */
 export function Row(props: { first?: boolean; onPress?: () => void; children: JSX.Element }) {
   return (
     <View
       onPress={props.onPress}
       activeStyle={props.onPress ? { backgroundColor: colors.raised } : undefined}
       style={{
-        minHeight: 48,
+        minHeight: terminal ? TERMINAL_ROW : 48,
         flexDirection: "row",
         alignItems: "center",
-        gap: 12,
-        borderTopWidth: props.first ? 0 : 1,
+        gap: terminal ? 2 * TERMINAL_COLUMN : 12,
+        borderTopWidth: props.first || terminal ? 0 : 1,
         borderTopColor: colors.line,
       }}
     >
@@ -297,12 +315,15 @@ export function Row(props: { first?: boolean; onPress?: () => void; children: JS
 export type ButtonVariant = "primary" | "secondary" | "accent" | "ghost";
 
 /**
- * A button, 44 pt tall (32 pt `small`, for pointer-sized surfaces):
+ * A button, 44 pt tall (32 pt `small`, for pointer-sized surfaces; one row,
+ * its label and no icon in the terminal, which brackets it):
  * `primary` is light (the main action), `secondary` dark, `accent` citrus
  * (the theme's `brand-fill`). A `color` fills it with that color instead.
  */
 export function Button(props: {
   label: string;
+  /** What screen readers say, when the label is shorter (default `label`). */
+  accessibilityLabel?: string;
   variant?: ButtonVariant;
   color?: string;
   icon?: IconName;
@@ -326,15 +347,15 @@ export function Button(props: {
       onPressDown={() => scale.spring(0.97, motion.press)}
       onPressUp={() => scale.spring(1, motion.press)}
       disabled={props.disabled}
-      accessibilityLabel={props.label}
+      accessibilityLabel={props.accessibilityLabel ?? props.label}
       hoverStyle={props.disabled ? undefined : { opacity: 0.88 }}
       focusStyle={focusRing(2)}
       style={{ flex: props.flex, opacity: props.disabled ? 0.4 : 1, transform: [{ scale }], borderRadius: small() ? 8 : radius.control }}
     >
       <View
         style={{
-          height: small() ? 32 : 44,
-          paddingHorizontal: small() ? 12 : 18,
+          height: terminal ? TERMINAL_ROW : small() ? 32 : 44,
+          paddingHorizontal: terminal ? TERMINAL_COLUMN : small() ? 12 : 18,
           borderRadius: small() ? 8 : radius.control,
           borderCurve: "continuous",
           flexDirection: "row",
@@ -353,7 +374,7 @@ export function Button(props: {
           borderColor: colors.border,
         }}
       >
-        <If when={props.icon}>
+        <If when={props.icon && !terminal}>
           <Icon name={props.icon!} size={small() ? 14 : 16} tint={fg()} />
         </If>
         <Text style={{ fontSize: small() ? 13 : 15, fontWeight: "600", color: fg() }}>{props.label}</Text>
@@ -362,14 +383,31 @@ export function Button(props: {
   );
 }
 
+/**
+ * A round icon button; in the terminal a text button reading `title` (a
+ * word or two), else `label`.
+ */
 export function RoundButton(props: {
   icon: IconName;
   label: string;
+  /** The terminal's text in place of the icon (default `label`). */
+  title?: string;
   variant?: "primary" | "secondary";
   size?: number;
   disabled?: boolean;
   onPress: () => void;
 }) {
+  if (terminal) {
+    return (
+      <Button
+        label={props.title ?? props.label}
+        accessibilityLabel={props.label}
+        variant={props.variant ?? "primary"}
+        disabled={props.disabled}
+        onPress={props.onPress}
+      />
+    );
+  }
   const size = props.size ?? 44;
   const primary = () => (props.variant ?? "primary") === "primary";
   return (
@@ -396,21 +434,8 @@ export function RoundButton(props: {
 /** A titled card of controls (the demos' sections). */
 export function Section(props: { title: string; note?: string; style?: ViewStyle; children: JSX.Element }) {
   return (
-    <View
-      style={[
-        {
-          backgroundColor: colors.surface,
-          borderRadius: radius.card,
-          borderCurve: "continuous",
-          borderWidth: 1,
-          borderColor: colors.border,
-          padding: 5,
-          ...finish.card,
-        },
-        props.style ?? null,
-      ]}
-    >
-      <View style={{ flexDirection: "row", alignItems: "baseline", paddingHorizontal: 11, paddingTop: 10, paddingBottom: 10, gap: 8 }}>
+    <View style={[cardStyle(), props.style ?? null]}>
+      <View style={terminal ? { flexDirection: "row", gap: 2 * TERMINAL_COLUMN, paddingBottom: TERMINAL_ROW } : { flexDirection: "row", alignItems: "baseline", paddingHorizontal: 11, paddingTop: 10, paddingBottom: 10, gap: 8 }}>
         <Text style={{ flex: 1, fontSize: 15, fontWeight: "600", color: colors.text }}>{props.title}</Text>
         <If when={props.note}>
           <Text style={{ fontSize: 13, color: colors.faint, fontVariant: ["tabular-nums"] }}>{props.note}</Text>
@@ -445,13 +470,14 @@ export function Toggle(props: { value: boolean; onChange: (value: boolean) => vo
  * The gallery's switch, as the styles of `Switch`'s parts: a 50 × 30
  * track that turns citrus and a knob that springs across, both natively.
  * `on` is the value the app owns: the knob follows it, from a press or from
- * elsewhere. `small` is 38 × 22, for pointer-sized rows. Read the styles in
+ * elsewhere. `small` is 38 × 22, for pointer-sized rows; the terminal's is
+ * one row, as wide as its glyph (`[off]`). Read the styles in
  * JSX, so the appearance is followed.
  */
 export function switchLook(on: () => boolean, size: "small" | "regular" = "regular"): { readonly trackStyle: ViewStyle; readonly thumbStyle: ViewStyle } {
   // The track's size and inset, and the knob: it travels what is left inside
   // the border and the padding.
-  const [width, height, inset, knob] = size === "small" ? [38, 22, 2, 16] : [50, 30, 3, 22];
+  const [width, height, inset, knob] = terminal ? [5 * TERMINAL_COLUMN, TERMINAL_ROW, 0, TERMINAL_ROW] : size === "small" ? [38, 22, 2, 16] : [50, 30, 3, 22];
   const t = createAnimatedValue(on() ? 1 : 0);
   const x = t.interpolate({ inputRange: [0, 1], outputRange: [0, width - 2 - 2 * inset - knob] });
   let shown = on();
@@ -491,14 +517,16 @@ export function switchLook(on: () => boolean, size: "small" | "regular" = "regul
   };
 }
 
-/** A horizontal meter with an optional marker (a limit). */
+/** A horizontal meter with an optional marker (a limit); half a row in the
+ * terminal, so its fill is a solid bar rather than a rule. */
 export function Meter(props: { value: number; tone?: Tone; marker?: number }) {
+  const height = terminal ? TERMINAL_ROW / 2 : 6;
   return (
-    <View style={{ height: 6, borderRadius: 3, backgroundColor: colors.raised }}>
+    <View style={{ height, borderRadius: 3, backgroundColor: colors.raised }}>
       <View
         style={{
           width: `${Math.max(0, Math.min(1, props.value)) * 100}%`,
-          height: 6,
+          height,
           borderRadius: 3,
           backgroundColor: toneColor(props.tone ?? "accent"),
         }}

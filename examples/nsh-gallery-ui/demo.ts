@@ -1,9 +1,9 @@
 import type { JSX as __JSX } from "nsh";
 import { Text as __Text, View as __View } from "nsh";
-import { platform as __platform, windowSize as __windowSize } from "nsh";
+import { windowSize as __windowSize } from "nsh";
 import { Segmented as GallerySegmented } from "./segmented";
 import { ui, tint } from "./palette";
-import { focusRing } from "./theme";
+import { desktopIdiom, focusRing } from "./theme";
 export { ui, tint } from "./palette";
 
 /** A pressable under the pointer (`hoverStyle`): a whisper of the text
@@ -18,7 +18,7 @@ export { focusRing } from "./theme";
 
 /** A pointer and a keyboard: desktop density and copy ("Click", "Tab to it
  * and press Space"); touch density and copy ("Tap") otherwise. */
-export const desktop = __platform.idiom === "desktop";
+export const desktop = desktopIdiom;
 
 /** A window wide enough for the desktop layout (the site's Desktop frame is
  * 1024 points): the subject on a stage, its state and options beside it. */
