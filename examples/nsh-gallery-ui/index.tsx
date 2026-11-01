@@ -248,10 +248,17 @@ export function Badge(props: { label: string; tone?: Tone; outline?: boolean }) 
   );
 }
 
-/** A label above a value, for grids of figures. */
+/** A label above a value, for grids of figures; on one row in the terminal,
+ * the value right-aligned. */
 export function Stat(props: { label: string; value: string; tone?: Tone; width?: `${number}%` }) {
   return (
-    <View style={{ width: props.width, gap: 3, paddingVertical: 4 }}>
+    <View
+      style={
+        terminal
+          ? { width: props.width, height: TERMINAL_ROW, flexDirection: "row", justifyContent: "space-between", gap: TERMINAL_COLUMN, paddingRight: 2 * TERMINAL_COLUMN }
+          : { width: props.width, gap: 3, paddingVertical: 4 }
+      }
+    >
       <Text style={{ fontSize: 12, color: colors.muted }}>{props.label}</Text>
       <Text style={{ fontSize: 15, color: props.tone ? toneColor(props.tone) : colors.text, fontVariant: ["tabular-nums"] }}>
         {props.value}
@@ -260,11 +267,14 @@ export function Stat(props: { label: string; value: string; tone?: Tone; width?:
   );
 }
 
-/** A colored square and a label, for chart legends. */
+/** A colored square and a label, for chart legends (the label alone in the
+ * terminal, which draws no charts). */
 export function Legend(props: { color: string; label: string; value?: string }) {
   return (
     <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-      <View style={{ width: 9, height: 9, borderRadius: 2.5, backgroundColor: props.color }} />
+      <If when={!terminal}>
+        <View style={{ width: 9, height: 9, borderRadius: 2.5, backgroundColor: props.color }} />
+      </If>
       <Text style={{ fontSize: 13, color: colors.muted }}>
         {props.label}
         <If when={props.value}>
