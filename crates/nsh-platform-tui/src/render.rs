@@ -7,7 +7,7 @@ use nsh_core::{
 use ratatui_core::{
     buffer::Buffer,
     layout::Rect,
-    style::{Modifier, Style},
+    style::{Color, Modifier, Style},
     widgets::Widget,
 };
 use ratatui_widgets::{block::Block, borders::Borders, paragraph::Paragraph};
@@ -101,9 +101,6 @@ struct Painter<'a> {
     /// The opaque fill of the nearest view drawn so far that has one: what
     /// the app drew the current view on.
     background: Option<nsh_core::Color>,
-    /// The Cells a canvas drew, by buffer index: a reversed view around them
-    /// leaves them as drawn.
-    canvas_cells: Vec<bool>,
     /// The boxes of the buttons being drawn, which draw no border or fill.
     button_boxes: Vec<NodeId>,
     /// The indicators of the toggles being drawn, which a glyph replaces.
@@ -132,7 +129,7 @@ const INVISIBLE_OPACITY: f32 = 0.03;
 
 /// Draws the tree in the terminal's look (`palette`): colors from the
 /// terminal's palette in `scheme`, no fill colors, and the `focused` view,
-/// selected views and checked views reversed over their Cells.
+/// selected views and checked views as a soft bar on their text rows.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn draw(
     tree: &mut Mounter,
@@ -151,7 +148,6 @@ pub(crate) fn draw(
         borders: CellBounds::UNBOUNDED,
         fit: false,
     };
-    let canvas_cells = vec![false; buffer.area.area() as usize];
     let mut painter = Painter {
         text_runs: HashMap::new(),
         tree,
@@ -163,7 +159,6 @@ pub(crate) fn draw(
         scheme,
         focused,
         background: None,
-        canvas_cells,
         button_boxes: Vec::new(),
         indicators: Vec::new(),
         in_indicator: false,
@@ -552,8 +547,11 @@ impl Painter<'_> {
                     .unwrap_or(view.style.background_color)
             };
             let rounded = !radii.is_zero();
-            let leaf =
-                view.kind == ViewKind::View && view.children.is_empty() && view.component.is_none();
+            // A view that holds text never draws its fill as content.
+            let leaf = view.kind == ViewKind::View
+                && view.children.is_empty()
+                && view.component.is_none()
+                && view.text.is_none();
             let fill = if fill.is_transparent() {
                 None
             } else if let Some(line) = line {
@@ -595,13 +593,6 @@ impl Painter<'_> {
                 });
             } else if let Some(fill) = fill {
                 fill_cells(self.buffer, visible, fill, covered);
-                for y in visible.y..visible.bottom() {
-                    for x in visible.x..visible.right() {
-                        if covered(x, y) {
-                            self.canvas_cells[self.buffer.index_of(x, y)] = false;
-                        }
-                    }
-                }
             }
             let mut borders = Borders::NONE;
             if sides[0] && bounds.top == i32::from(visible.y) {
@@ -687,8 +678,6 @@ impl Painter<'_> {
                 );
             }
             if let Some(canvas) = &view.canvas {
-                let buffer_area = self.buffer.area;
-                let canvas_cells = &mut self.canvas_cells;
                 crate::canvas::draw(
                     canvas,
                     self.buffer,
@@ -697,11 +686,6 @@ impl Painter<'_> {
                     self.cells,
                     projection.snapped(Point::new(-origin.x, -origin.y)),
                     ground,
-                    |x, y| {
-                        let index = usize::from(y - buffer_area.y) * usize::from(buffer_area.width)
-                            + usize::from(x - buffer_area.x);
-                        canvas_cells[index] = true;
-                    },
                 );
             }
             if let Some(component) = &mut view.component {
@@ -779,23 +763,53 @@ impl Painter<'_> {
             return;
         };
         let state = &view.props.accessibility.state;
-        // A toggle shows its state with its glyph; only focus reverses it.
+        // A toggle shows its state with its glyph; only focus puts a bar on it.
         let shows_state = !is_toggle(view.props.accessibility.role)
             && (state.selected || state.checked == Some(Checked::True));
-        let reversed = shows_state || (self.focused == Some(id) && view.input.is_none());
-        if reversed && visible_drawn {
-            for y in visible.y..visible.bottom() {
-                for x in visible.x..visible.right() {
-                    if !self.canvas_cells[self.buffer.index_of(x, y)] {
-                        self.buffer[(x, y)].modifier.insert(Modifier::REVERSED);
-                    }
-                }
-            }
+        let barred = shows_state || (self.focused == Some(id) && view.input.is_none());
+        if barred && visible_drawn {
+            self.bar(visible, own_geometry);
         }
     }
 }
 
 impl Painter<'_> {
+    /// Puts the soft bar of a selected or focused view on the rows of
+    /// `visible` that hold the text of the views from `texts` on in
+    /// `geometry`, else on its first row: across its width, the palette's
+    /// color 0 in the dark appearance or color 7 in the light one, in bold.
+    fn bar(&mut self, visible: Rect, texts: usize) {
+        let mut rows: Vec<u16> = Vec::new();
+        for geometry in &self.geometry[texts..] {
+            let Some(text) = geometry.text_frame else {
+                continue;
+            };
+            let text = CellBounds::new(text, self.cells, self.area)
+                .clipped(geometry.visible.intersection(visible));
+            for y in text.y..text.bottom() {
+                if !rows.contains(&y)
+                    && (text.x..text.right()).any(|x| self.buffer[(x, y)].symbol() != " ")
+                {
+                    rows.push(y);
+                }
+            }
+        }
+        if rows.is_empty() {
+            rows.push(visible.y);
+        }
+        let color = match self.scheme {
+            ColorScheme::Dark => Color::Black,
+            ColorScheme::Light => Color::Gray,
+        };
+        for y in rows {
+            for x in visible.x..visible.right() {
+                let cell = &mut self.buffer[(x, y)];
+                cell.bg = color;
+                cell.modifier.insert(Modifier::BOLD);
+            }
+        }
+    }
+
     /// Draws a hairline rule on its own row (or column) when that holds no
     /// text, else on the nearest one inside its parent that holds none, else
     /// not at all.
@@ -841,7 +855,6 @@ impl Painter<'_> {
                 let cell = &mut self.buffer[position];
                 cell.reset();
                 cell.set_symbol(line).set_style(style);
-                self.canvas_cells[self.buffer.index_of(position.0, position.1)] = false;
             }
         }
     }
@@ -1027,7 +1040,7 @@ impl Painter<'_> {
 /// role and press handlers) that the app drew as a box (a border, or an opaque
 /// fill unlike the `background` it sits on), whose text sits on one row, or
 /// whose content is only icons and which has an accessibility label. List
-/// items without a box, selected or checked views (shown reversed) and other
+/// items without a box, selected or checked views (shown with the bar) and other
 /// content (fields, labeled canvases, images, native components) keep their
 /// look.
 fn button_label(

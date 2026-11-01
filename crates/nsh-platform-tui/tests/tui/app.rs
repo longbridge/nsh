@@ -75,8 +75,9 @@ fn a_surface_draws_a_rust_app_into_the_embedders_buffer() {
     );
 }
 
-/// Marks a view selected, which reverses its Cell box: the probe for where
-/// a view's Cells are, now that fills draw no color.
+/// Marks a view selected, which puts the soft bar on its text rows (its first
+/// row without text) across its Cell box: the probe for where a view's Cells
+/// are, now that fills draw no color.
 pub(super) fn selected() -> nsh_core::AccessibilityState {
     nsh_core::AccessibilityState {
         selected: true,
@@ -88,6 +89,13 @@ pub(super) fn reversed(buffer: &ratatui_core::buffer::Buffer, x: u16, y: u16) ->
     buffer[(x, y)]
         .modifier
         .contains(ratatui_core::style::Modifier::REVERSED)
+}
+
+/// Whether the soft bar of a selected or focused view covers `(x, y)`.
+pub(super) fn barred(buffer: &ratatui_core::buffer::Buffer, x: u16, y: u16) -> bool {
+    let cell = &buffer[(x, y)];
+    cell.bg != ratatui_core::style::Color::Reset
+        && cell.modifier.contains(ratatui_core::style::Modifier::BOLD)
 }
 
 pub(super) fn mouse(
@@ -421,16 +429,15 @@ fn absolute_edges_define_the_padded_box_and_its_hit_cells() {
         .unwrap();
     draw_until(&mut view, &mut terminal, &rx, "Tap 0");
     let buffer = terminal.backend().buffer();
-    for row in 14..16 {
-        for column in 1..6 {
-            assert!(reversed(buffer, column, row));
-        }
+    for column in 1..6 {
+        assert!(barred(buffer, column, 14), "the bar on the text row");
+        assert!(!barred(buffer, column, 15));
     }
     assert_eq!(buffer[(1, 14)].symbol(), "T");
     assert_eq!(buffer[(1, 15)].symbol(), " ");
     assert_eq!(buffer[(1, 16)].symbol(), " ");
+    assert!(!barred(buffer, 0, 14) && !barred(buffer, 6, 14));
     for (column, row) in [(1, 13), (1, 16), (0, 15), (6, 15)] {
-        assert!(!reversed(buffer, column, row));
         assert_eq!(
             view.handle(mouse(MouseKind::Down(MouseButton::Left), column, row)),
             Handled::Ignored
@@ -477,7 +484,7 @@ fn text_content_padding_uses_the_unrounded_absolute_origin() {
     assert_eq!(buffer[(1, 14)].symbol(), "L");
     assert_eq!(buffer[(1, 15)].symbol(), " ");
     assert_eq!(buffer[(1, 16)].symbol(), " ");
-    assert!(reversed(buffer, 1, 15));
+    assert!(barred(buffer, 1, 14) && !barred(buffer, 1, 15));
 }
 
 #[component]
@@ -503,9 +510,9 @@ fn negative_half_cell_edges_round_towards_the_positive_direction() {
     draw_until(&mut view, &mut terminal, &rx, "X");
     let buffer = terminal.backend().buffer();
     assert_eq!(buffer[(0, 0)].symbol(), "X");
-    assert!(reversed(buffer, 0, 0));
-    assert!(!reversed(buffer, 1, 0));
-    assert!(!reversed(buffer, 0, 1));
+    assert!(barred(buffer, 0, 0));
+    assert!(!barred(buffer, 1, 0));
+    assert!(!barred(buffer, 0, 1));
 }
 
 #[component]

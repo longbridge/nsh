@@ -298,8 +298,8 @@ its bottom at 256pt rounds to edge 16. A text row after 12pt of padding begins a
 Alignment follows from these rules, and the alignment tests check it: text starting at the same point x starts
 in the same Cell column on every row (a list's labels, a section's left edge, values under their headings), and
 right-aligned text whose right edge is at the same point x ends in the same column (prices, sizes, totals), since
-the text engine measures whole Cells. Siblings centered on one row share it. Brackets, the borders and fills the
-terminal look leaves out and the palette's grounds never move content between Cells. Views at different point
+the text engine measures whole Cells. Siblings centered on one row share it. Brackets, selection bars, the borders and
+fills the terminal look leaves out and the palette's grounds never move content between Cells. Views at different point
 x keep their own rounding: two cards at different phases can place an icon and its title one Cell closer in one
 than in the other, and a 34-point tile is 2 or 3 rows tall depending on where it starts.
 Consecutive siblings of equal height stacked in one column at an equal point pitch (a list's rows) keep one Cell
@@ -389,12 +389,15 @@ dot) draws its Cells reversed in the fill's palette color; one thinner than half
 above. Gradients are left out.
 
 Views whose accessibility state is selected or checked (`checked: true`; mixed is not), other than checkboxes,
-radios and switches (below), and the focused control,
-draw their content reversed over their Cell box, after their descendants. Cells a canvas drew stay as drawn,
-in their palette color on the terminal background (a sparkline in a selected row), unless a later fill covered
-them. A focused text field shows the terminal cursor at its caret instead. Outlines, including the app's focus outlines, are not drawn: focus is the
-reversed box. A view whose opacity, multiplied through its ancestors, is below 3% draws nothing and keeps its hit
-regions; any other opacity is drawn as opaque.
+radios and switches (below), and the focused control show a **soft bar**, never reverse video: on the rows of
+their Cell box that hold their text, across the box's width, the Cells' background is the terminal palette's
+color 0 (black) in the dark appearance or color 7 (white) in the light one, and the text is bold. The bar is
+added after the view's descendants are drawn and changes no symbol or ink: a multi-row box (a 64-point
+watchlist row, a tab) is not filled, its blank rows stay blank, and every glyph keeps its Cell and its palette
+color (a red change stays red text on the bar; a sparkline keeps its dots). A box with no text gets the bar on
+its first row. A focused text field shows the terminal cursor at its caret instead. Outlines, including the
+app's focus outlines, are not drawn: focus is the bar. A view whose opacity, multiplied through its ancestors,
+is below 3% draws nothing and keeps its hit regions; any other opacity is drawn as opaque.
 
 Decorations are plain, and each is a documented Decorative feature:
 
@@ -404,7 +407,7 @@ Decorations are plain, and each is a documented Decorative feature:
   handlers) that the app drew as a box, with a border or an opaque fill unlike the fill it sits on, on itself or
   on the plain View it wraps all its content in (a press handler around a styled View), and whose text sits on
   one Cell row. List items without a box (sidebar and watchlist rows) and selected or checked views,
-  which are reversed, have no brackets; other roles (link, tab, checkbox, radio, switch, menu item, ...) keep
+  which show the bar, have no brackets; other roles (link, tab, checkbox, radio, switch, menu item, ...) keep
   their own look, and a pressable with several rows of text or other content (a field, an image, a labeled canvas)
   keeps the app's box. The label stays in the Cells the layout gave it; the brackets take the button's own Cells
   with the same gap on both sides, one Cell when the box has room, else none (`[Sell]`), both or neither: a label
@@ -424,7 +427,7 @@ Decorations are plain, and each is a documented Decorative feature:
   its glyphs in one column; without room its short form (`x`, `-`, `•`, `on`, `off`) does, then the glyph sits
   flush with the label, else it is left out. An indicator after the label (a trailing switch) takes the glyph
   from its left column, extending right only into blank Cells, else the short form. A control without an
-  indicator places its glyph before its label the same way. Keyboard focus still reverses the control.
+  indicator places its glyph before its label the same way. Keyboard focus still puts the bar on the control.
 - **Shadows, gradients and opacity** are ignored (opacity below 3% still hides).
 
 ## Navigation stacks
@@ -612,8 +615,8 @@ Removing an ordinary focused view clears focus. Modal presentation and closing u
 above; unfocused surfaces ignore keys.
 
 Focus changes clear the old focused state before setting the new one, so the core's derived `focus-within`
-state stays on a shared ancestor when moving backward between its controls. The focused control is drawn
-reversed over its Cell box, transformed with the control before Cell rounding and ancestor clipping; the app's
+state stays on a shared ancestor when moving backward between its controls. The focused control shows the
+bar on its text rows across its Cell box, transformed with the control before Cell rounding and ancestor clipping; the app's
 outlines and its other focus styles' fills are not drawn (the terminal look above).
 
 The host preserves Ctrl, Alt, Shift and known releases; crossterm also decodes an ESC-prefixed character as Alt.
@@ -657,8 +660,8 @@ including after the Minibuffer closes.
 
 While searching, the platform draws the Minibuffer over the bottom row of the surface's area, in the terminal's
 default colors: `/` (forward) or `?` (backward), after less and vim, then as much of the query's end as fits,
-with the terminal cursor after it. A query with no match is crossed out. The current match's Cells are reversed, or underlined inside a box
-already reversed (the focused control it moved to, a selected row), so the match stays visible.
+with the terminal cursor after it. A query with no match is crossed out. The current match's Cells are
+reversed, also inside a bar (the focused control it moved to, a selected row).
 The prompt is a symbol because the platform draws no built-in strings. The app's layout never changes for the
 Minibuffer, and once the search ends nothing of it, or of the match highlight, is drawn. A match on the bottom
 row lies under the Minibuffer until the search ends. Positions come from the last completed frame.
@@ -676,13 +679,13 @@ PageUp/PageDown by a page, and Home/End move to its limits. Those bindings run b
 scrolling. Tab/Shift+Tab leave the thumb; Ctrl+N/Ctrl+P remain traversal keys. Range thumbs stay within each
 other and disabled thumbs are skipped. Progress draws the app's indicator as a solid leaf or hairline in its
 palette color, including indeterminate indicators sized by the app; its track is a container and draws no fill.
-Selected Tabs are reversed over their whole Cell box; Checkboxes, Radios and Switches show their state with
+Selected Tabs show the bar on their label's row; Checkboxes, Radios and Switches show their state with
 terminal glyphs (the terminal look above).
 
 Mouse presses use the same hit regions as other views when the host captures the mouse. The controls
 acceptance covers keyboard and press behavior; Slider dragging and hover feedback require the joint pointer
 acceptance described below. Decorative shadows (including Tailwind rings) and 3D transforms retain
-their documented degradation below; focus is the reversed box, not the gallery's outline-based focus styles.
+their documented degradation below; focus is the bar, not the gallery's outline-based focus styles.
 
 ## Mouse and text selection
 
@@ -797,17 +800,17 @@ permit clipboard writes; `nsh test` uses memory and never writes to the machine'
 | Colors | The terminal's 16-color meanings by `palette.rs`: hue-band accents, the default foreground or dim, read against the opaque fill the app drew them on or the appearance's page |
 | View fills | No color: opaque fills and fills of at least 50% alpha clear the Cells they cover to the terminal background; childless solid leaves reversed in their palette color; lighter fills nothing |
 | Opacity | Ignored, except that a view below 3% draws nothing |
-| Selected, checked and focused views | Reversed over their Cell box; focused fields show the terminal cursor |
+| Selected, checked and focused views | A soft bar on their text rows (else their first row) across their Cell box: palette color 0 (dark) or 7 (light) behind bold text; focused fields show the terminal cursor |
 | Borders | Decorative: straight single lines in per-side palette colors over a reserved inner Cell rect, drawn whole or not at all; boxes without room for a whole border around their content draw none |
 | Buttons | Decorative: `[ label ]` in the button's own Cells around its one row of text, or its accessibility label when it shows only icons; no border or fill |
 | Icons and decorative images | Decorative: canvases with role `image` or no accessibility label and image placeholders under 3 × 2 Cells are not drawn |
-| Outlines, including control focus outlines | Left out; focus is the reversed box |
+| Outlines, including control focus outlines | Left out; focus is the bar |
 | Anchored overlays | Snapped outside the anchor's Cell rect on the core-resolved placement side |
 | Gaps between texts | Positive point gaps between one-line sibling texts or canvas text runs retain at least one Cell; zero gaps keep adjacent text |
 | Childless hairline fills | Below half a Cell, horizontal or vertical line glyphs in the fill's palette color, moved to the nearest row (column) inside their parent that holds no text, or left out |
 | Positive sub-Cell extents | At least one Cell; zero-width progress indicators remain empty |
-| Base control value states and projected part states | Core-resolved checked, mixed, selected and disabled styles; selected tabs reversed |
-| Checkbox, radio and switch states | Decorative: `[x]` / `[ ]` / `[-]`, `(•)` / `( )`, `[on ]` / `[off]` on the label's first row, one Cell before the label (or from a trailing indicator's column), short forms `x`, `-`, `•`, `on`, `off` without room; only focus reverses them |
+| Base control value states and projected part states | Core-resolved checked, mixed, selected and disabled styles; selected tabs show the bar |
+| Checkbox, radio and switch states | Decorative: `[x]` / `[ ]` / `[-]`, `(•)` / `( )`, `[on ]` / `[off]` on the label's first row, one Cell before the label (or from a trailing indicator's column), short forms `x`, `-`, `•`, `on`, `off` without room; only focus puts the bar on them |
 | Slider keyboard input | Component-owned arrows, page and endpoint keys while its thumb has focus |
 | Slider dragging and control hover | Ticket-09 pointer follow-up |
 | Border width, dashes, dots, corner radii | Decorative: solid single-Cell strokes with square corners; radii shape fill coverage only; widths still participate in core layout |
@@ -817,7 +820,7 @@ permit clipboard writes; `nsh test` uses memory and never writes to the machine'
 | Selectable text | Reversed grapheme Cells; copies use the shared clipboard and OSC 52 |
 | Pointer precision | One terminal Cell, converted to its center in points |
 | Input | Editable Paragraph, reversed selection and terminal caret; single-line text and caret centered in the content box; masked text is dots |
-| Searching the screen | The Minibuffer over the bottom row and the match's Cells reversed (underlined inside a reversed box), only while searching |
+| Searching the screen | The Minibuffer over the bottom row and the match's Cells reversed (also inside a bar), only while searching |
 | Keyboard paging and endpoints | The innermost Scroll around focus or a plain-text search point; otherwise the first Scroll in the active scope |
 | Focus and search reveals | Fully visible targets stay in place; vertical scrolling centers the target within the content limits, with core margins for horizontal or oversized targets |
 | Input-method composition | Terminal emulator composition, committed text delivered to the field |
@@ -870,9 +873,9 @@ engine's isolated clipboard, masked Cells, multiline paste and report-only paste
 its own, checks invalid fields and successful account creation.
 The `controls` fixture imports `examples/gallery/demos/Controls.tsx` unchanged, traverses and operates its
 controls with terminal keys, exercises ordinary mouse presses, and reads Cell screenshots. AppView controls
-tests cover reversed focus without app outlines, backward focus-within transitions, projected value/disabled
+tests cover the focus bar without app outlines, backward focus-within transitions, projected value/disabled
 styles, sub-Cell progress indicators and focused Slider keys. The palette module checks each color rule, both
-appearances, attributes, fills and reversed states. These tests do not exercise hover or Slider drags yet.
+appearances, attributes and fills; the bars module checks the selection and focus bar. These tests do not exercise hover or Slider drags yet.
 The search fixture searches forward and backward through a Scroll's rows and checks the Minibuffer row before,
 during and after the search.
 The animation module at the AppView seam checks completion, cancellation, active-frame and idle scheduling,

@@ -275,7 +275,13 @@ fn animated_fills_draw_no_color_and_a_leaf_follows_its_animated_fill() {
     });
     let buffer = terminal.backend().buffer();
     assert!(reversed(buffer, 0, 1));
-    assert!(buffer.content.iter().all(|cell| cell.bg == Color::Reset));
+    // Only the focused button's bar on row 0 has a background.
+    let page = buffer.area.width as usize;
+    assert!(
+        buffer.content[page..]
+            .iter()
+            .all(|cell| cell.bg == Color::Reset)
+    );
 }
 
 #[test]
