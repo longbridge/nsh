@@ -329,8 +329,8 @@ its padding stays on its row). When reservation shortens a child box whose conte
 its vertical point offsets contract into that box while text keeps terminal glyphs; vertical text stacks reserve
 one Cell per measured line, so contraction reduces quantized gaps without collapsing two labels onto one row.
 Moving never stacks rows of content: when a child whose content reaches into a top or bottom border's row would
-land on a sibling's content by moving one row off it (two flush rows filling the box), that border is left out
-and the content keeps its rows. A following inset
+land on a sibling's content by moving one row off it (two flush rows filling the box), the box's border is left
+out whole, all four sides, and the content keeps its rows. A following inset
 starts below already-painted sibling text. Ordinary descendants remain clipped by inherited border limits. Scroll content
 keeps its offset and clips rather than moving back into the viewport. A view's own text, field and canvas use
 its inner Cell rect. `overflow: hidden` clips descendants to that rect and masks rounded corners. A border is

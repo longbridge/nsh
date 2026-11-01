@@ -150,13 +150,9 @@ fn a_boxed_pressable_with_one_row_of_text_reads_as_a_bracketed_label() {
     assert!((0..10).all(|x| !buffer[(x, 0)].modifier.contains(Modifier::REVERSED)));
     assert_eq!(lines[2], "[ Sell ]", "a raised fill is a box");
     // Two rows of text keep the app's box; its three rows hold three rows
-    // of text, so the top and bottom borders are left out, not drawn over
-    // them.
-    assert_eq!(
-        lines[3..6],
-        ["│ Row    │", "│ detai  │", "│ ls     │"],
-        "{lines:?}"
-    );
+    // of text, so its top and bottom borders cannot be drawn over them, and
+    // a border is drawn whole or not at all: no side bars either.
+    assert_eq!(lines[3..6], ["  Row", "  detai", "  ls"], "{lines:?}");
     assert!(
         lines[3..6].iter().all(|line| !line.contains('[')),
         "{lines:?}"

@@ -482,8 +482,9 @@ impl Painter<'_> {
             [widths.top, widths.right, widths.bottom, widths.left][i] > Points::ZERO
                 && !colors[i].is_transparent()
                 && !unboxed
-                && !(i == 0 && blocked.top)
-                && !(i == 2 && blocked.bottom)
+                // Drawn whole or not at all: a side left out leaves out all.
+                && !blocked.top
+                && !blocked.bottom
         });
         let content = i32::from(
             view.kind != ViewKind::View
@@ -1704,10 +1705,10 @@ fn reserved_reach(
     }
 }
 
-/// The top and bottom borders of `id` that are left out because a child
+/// The top and bottom borders of `id` that cannot be drawn because a child
 /// whose content reaches into the border's row cannot move off it without
 /// landing on a sibling's content: stacking two rows of text on one is
-/// worse than a missing rule.
+/// worse than a missing border, which is then left out whole.
 #[derive(Clone, Copy, Default)]
 struct BlockedRows {
     top: bool,
@@ -1760,6 +1761,8 @@ fn blocked_border_rows(
     };
     // A child reaching into the border's `reserved` row moves one row
     // toward `step`; the row it newly covers must hold no sibling's content.
+    // Only content drawn on those rows (covering their Cells' centers)
+    // counts: content that merely comes near is moved or contracted.
     let blocked = |reserved: i32, step: i32| {
         children.iter().any(|&(child, bounds)| {
             if !(bounds.top..bounds.bottom).contains(&reserved)
@@ -1768,7 +1771,7 @@ fn blocked_border_rows(
                     child,
                     projection,
                     cells,
-                    row(bounds, reserved).points(cells, area),
+                    row(bounds, reserved).centers(cells, area),
                 )
             {
                 return false;
@@ -1781,7 +1784,7 @@ fn blocked_border_rows(
             if !(raw.top..raw.bottom).contains(&covered) {
                 return false;
             }
-            let covered = row(bounds, covered).points(cells, area);
+            let covered = row(bounds, covered).centers(cells, area);
             children.iter().any(|&(sibling, _)| {
                 sibling != child
                     && subtree_content_intersects(tree, sibling, projection, cells, covered)
