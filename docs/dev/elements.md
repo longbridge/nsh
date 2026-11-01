@@ -95,7 +95,7 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   with `selectable` makes its texts select together (`text.md` "Selectable views").
 - **Platform modules**: `platform` (`nsh`'s environment, a constant: `os`: `ios` / `android` / `macos` / `windows` / `linux` / `web`, from the platform's
   `Environment::os` (`nsh_engine::Os`; the default is the build's mobile OS, so `nsh test` is iOS); `version` (a string,
-  Android's API level), `idiom` (`phone` / `pad` / `mac` / `tv` / `desktop`), `catalyst`, `select` (the OS, then `mobile` / `desktop`, `native` (not on the web), `default`); the `desktop` idiom, `desktop` and `desktop={{…}}` follow `Environment::desktop()`: a desktop OS, or the web in the desktop idiom), `pixelRatio()` (an accessor: the window moving to another screen writes it), `nsh`'s
+  Android's API level), `idiom` (`phone` / `pad` / `mac` / `tv` / `desktop`: `Environment::reported_idiom()`, `desktop` exactly where `Environment::desktop()` holds, else the platform's idiom, so a test's `Os::Linux` + `Idiom::Phone` reports `desktop`), `desktop` (`Environment::desktop()`), `catalyst` (`Os::is_catalyst()`: an iOS build for `target_abi = "macabi"`, in the iPad and the Mac idiom alike), `select` (the OS, then `desktop` / `mobile` by `Environment::desktop()`, `native` (not on the web), `default`); NSH's one definition of desktop (`api-naming.md`): `Environment::desktop()`, a desktop OS, or the web in the desktop idiom, which `platform.desktop`, the `desktop` idiom, `select`'s `desktop` and `desktop={{…}}` all follow; Mac Catalyst is mobile (the iOS backend, `ios={{…}}`, its idiom `pad` or `mac`); `nsh/desktop`'s `isAvailable` is `Os::is_desktop()`, where its window and menu APIs work), `pixelRatio()` (an accessor: the window moving to another screen writes it), `nsh`'s
   `announce(message)` and `setAccessibilityFocus(ref)` (Rust, the node passed as `{ $node: id }`), reactive `screenReaderEnabled()` / `reduceMotion()`. The environment carries `pixelRatio`,
   `screenReader`, `osVersion` and `idiom` (VoiceOver / TalkBack changes are observed natively).
 - **`disabled`** on any element applies `disabled:` classes and removes its press and `onContextMenu` listeners from what
@@ -237,8 +237,8 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   subroles, a tree is a list of static-text items (as options: AppKit's outline rows need its rows and columns) with
   their disclosure level, `current` and a heading's level are not exposed (AppKit has no attribute for the first, and a
   heading's value is its text, which VoiceOver reads); iOS a pressed toggle carries the selected trait (UIKit's toggle
-  trait is iOS 17's), mixed and `current` are spoken in the value, `group` / `region` / `navigation` / `tree` are
-  semantic-group containers named by their label (never one element hiding their content), no level; Android a toggle
+  trait is iOS 17's), mixed and `current` are spoken in the value, `group` / `region` / `navigation` / `tree` /
+  `toolbar` are semantic-group containers named by their label (never one element hiding their content), no level; Android a toggle
   is a checkable `ToggleButton`, `current` and mixed go in the state description, roles without a widget class in the
   role description, no level; Windows a toggle has the Toggle pattern (and "toggle button"), landmarks
   (`UIA_LandmarkTypePropertyId`), `Tree` / `TreeItem` control types, a heading's `HeadingLevel1`…`9`, a tree item's

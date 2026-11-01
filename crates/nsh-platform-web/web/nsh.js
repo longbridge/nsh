@@ -968,6 +968,7 @@ class Player {
           if (socket) socket.close(code, this.str(p, l));
         }),
         websocket_buffered: (id) => this.websockets.get(id)?.bufferedAmount ?? 0,
+        websocket_pause: (id, paused) => this.websocketPause(id, paused !== 0),
         websocket_cancel: (id) => this.websocketCancel(id),
         load_data: (p, l) => this.loadData(this.str(p, l)),
         // The app's storage (`nsh/storage`): the entries of `localStorage`
@@ -4896,11 +4897,36 @@ class Player {
         return this.withStrings([value], (p, l) => w.nsh_websocket_event(id, kind, p, l, code, clean ? 1 : 0));
       });
     };
-    socket.onopen = () => report(0, socket.protocol);
-    socket.onmessage = (event) => report(typeof event.data === "string" ? 1 : 2,
+    // The browser's WebSocket has no flow control: while the app's unread
+    // messages fill their queue (`websocket_pause`), the socket's events
+    // wait here, in order, outside the engine's memory.
+    const hold = { paused: false, events: [], report };
+    socket.nshHold = hold;
+    const deliver = (...event) => {
+      if (hold.paused || hold.events.length) hold.events.push(event);
+      else report(...event);
+    };
+    socket.onopen = () => deliver(0, socket.protocol);
+    socket.onmessage = (event) => deliver(typeof event.data === "string" ? 1 : 2,
       typeof event.data === "string" ? event.data : new Uint8Array(event.data));
-    socket.onerror = () => report(3, "Browser WebSocket failed (network, TLS, origin or server handshake error)");
-    socket.onclose = (event) => report(4, event.reason, event.code, event.wasClean);
+    socket.onerror = () => deliver(3, "Browser WebSocket failed (network, TLS, origin or server handshake error)");
+    socket.onclose = (event) => deliver(4, event.reason, event.code, event.wasClean);
+  }
+
+  /** Holds (`paused`) or delivers again the events of socket `id`. */
+  websocketPause(id, paused) {
+    const socket = this.websockets.get(id);
+    const hold = socket?.nshHold;
+    if (!hold) return;
+    hold.paused = paused;
+    if (paused || !hold.events.length) return;
+    // The engine resumes from inside a call: the held events enter it in a
+    // task of their own, one at a time, until it pauses the socket again.
+    setTimeout(() => {
+      while (!hold.paused && hold.events.length && this.websockets.get(id) === socket) {
+        hold.report(...hold.events.shift());
+      }
+    });
   }
 
   websocketCancel(id) {

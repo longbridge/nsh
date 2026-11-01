@@ -178,6 +178,10 @@ jobs:
           for app in counter gallery rust-exports; do
             ./target/debug/nsh test "examples/$app"
           done
+      # NSH's generated declarations type-check themselves: apps skip
+      # checking them (`skipLibCheck`), which would hide a broken one.
+      - name: Type-check the generated declarations
+        run: ./target/debug/nsh check examples/counter -- --skipLibCheck false
       # The same tests in the runner's Chrome, headless, with the browser's
       # trusted input (`nsh test --target web`): those a real platform runs
       # (real time).

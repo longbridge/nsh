@@ -28,6 +28,7 @@ const primitives: DemoEntry[] = [
  * (`website/tests/elements.test.ts` holds both lists to the website). */
 const components: DemoEntry[] = [
   { name: "Accordion", detail: "An FAQ one answer at a time, settings sections open together, controls and an accordion inside", icon: "collapsible", screen: lazy(() => import("./demos/AccordionDemo").then((m) => m.AccordionDemo)) },
+  { name: "Avatar", detail: "A team with presence dots, a stacked group and its overflow, a comment thread, a profile, pictures that fail or load slowly", icon: "image", screen: lazy(() => import("./demos/AvatarDemo").then((m) => m.AvatarDemo)) },
   { name: "Button", detail: "Kinds and sizes, icon and split buttons, progress, copying, hold to confirm", icon: "button", screen: lazy(() => import("./demos/ButtonDemo").then((m) => m.ButtonDemo)) },
   { name: "Checkbox", detail: "A filter whose “Select all” shows a partial selection", icon: "checkbox", screen: lazy(() => import("./demos/Controls").then((m) => m.CheckboxDemo)) },
   { name: "Collapsible", detail: "Details under a summary, kept while collapsed", icon: "collapsible", screen: lazy(() => import("./demos/Controls").then((m) => m.CollapsibleDemo)) },
@@ -44,6 +45,7 @@ const components: DemoEntry[] = [
   { name: "NavStack", detail: "Header options, modals, the back button, safe areas", icon: "nav", screen: lazy(() => import("./demos/Navigation").then((m) => m.Navigation)) },
   { name: "NumberInput", detail: "Quantities typed or stepped, within a range, in steps", icon: "stepper", screen: lazy(() => import("./demos/Controls").then((m) => m.NumberInputDemo)) },
   { name: "OtpInput", detail: "A one-time code typed into one field, pasted or filled by the system", icon: "otp", screen: lazy(() => import("./demos/Controls").then((m) => m.OtpInputDemo)) },
+  { name: "Pagination", detail: "Search results with a count, a table footer with its page size, a compact pager, ten thousand pages with jump menus", icon: "lists", screen: lazy(() => import("./demos/PaginationDemo").then((m) => m.PaginationDemo)) },
   { name: "Plot", detail: "A live price, an order book's depth, a drawdown, capacity rings, a donut and bars, built from plot parts", icon: "chart", screen: lazy(() => import("./demos/Charts").then((m) => m.Charts)) },
   { name: "Popover", detail: "A panel anchored to its trigger; a press outside, Escape or back closes it", icon: "popover", screen: lazy(() => import("./demos/Overlays").then((m) => m.PopoverDemo)) },
   { name: "Progress", detail: "A transfer the app drives, and one of unknown size", icon: "progress", screen: lazy(() => import("./demos/Controls").then((m) => m.ProgressDemo)) },
@@ -58,6 +60,7 @@ const components: DemoEntry[] = [
   { name: "TextView", detail: "Markdown and HTML documents, extensions, streaming replies", icon: "document", screen: lazy(() => import("./demos/TextViewDemo").then((m) => m.TextViewDemo)) },
   { name: "Toast", detail: "Notes that close by themselves, by their action, back or a swipe", icon: "bell", screen: lazy(() => import("./demos/Overlays").then((m) => m.ToastDemo)) },
   { name: "Toggle", detail: "A text toolbar, a segmented view switcher, a favorite star, sizes, a locked group", icon: "controls", screen: lazy(() => import("./demos/ToggleDemo").then((m) => m.ToggleDemo)) },
+  { name: "Toolbar", detail: "A text editor's formatting bar, a media player's transport, a vertical tool palette, a locked review bar", icon: "sliders", screen: lazy(() => import("./demos/ToolbarDemo").then((m) => m.ToolbarDemo)) },
   { name: "Tooltip", detail: "A label while the pointer rests on an element, or pinned by the app", icon: "tooltip", screen: lazy(() => import("./demos/Overlays").then((m) => m.TooltipDemo)) },
 ];
 

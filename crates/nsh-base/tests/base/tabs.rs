@@ -8,7 +8,10 @@
 //! layout animation of its frame alone, at once with reduced motion and as
 //! the list is resized; none without `indicatorClass` / `indicatorStyle`.
 
-use std::sync::{Arc, Mutex};
+use std::sync::{
+    Arc, Mutex,
+    atomic::{AtomicUsize, Ordering},
+};
 
 use nsh_base::{tab, tabs};
 use nsh_core::{
@@ -83,17 +86,17 @@ fn tab_enters_the_list_at_the_selected_tab_and_leaves_it_in_one_stop() {
     app.press_key("tab").unwrap();
     // Return presses the tab the focus is on: the selected one.
     app.press_key("enter").unwrap();
-    app.wait_for("presses:1").unwrap();
-    app.wait_for("selected:Two").unwrap();
+    app.wait_for("text:presses:1").unwrap();
+    app.wait_for("text:selected:Two").unwrap();
     // One more Tab leaves the list.
     app.press_key("tab").unwrap();
     app.press_key("enter").unwrap();
-    app.wait_for("pressed:after").unwrap();
+    app.wait_for("text:pressed:after").unwrap();
     // Shift+Tab comes back to the selected tab, not the last one.
     app.press_key("shift+tab").unwrap();
     app.press_key("enter").unwrap();
-    app.wait_for("presses:2").unwrap();
-    app.wait_for("selected:Two").unwrap();
+    app.wait_for("text:presses:2").unwrap();
+    app.wait_for("text:selected:Two").unwrap();
 }
 
 #[test]
@@ -102,27 +105,27 @@ fn arrows_move_and_select_wrapping_and_skipping_disabled_tabs() {
     app.press_key("tab").unwrap();
     app.press_key("tab").unwrap();
     app.press_key("right").unwrap();
-    app.wait_for("selected:Three").unwrap();
+    app.wait_for("text:selected:Three").unwrap();
     // Four is disabled: Right goes on to Five.
     app.press_key("right").unwrap();
-    app.wait_for("selected:Five").unwrap();
+    app.wait_for("text:selected:Five").unwrap();
     // Past the end, around to the first.
     app.press_key("right").unwrap();
-    app.wait_for("selected:One").unwrap();
+    app.wait_for("text:selected:One").unwrap();
     app.press_key("left").unwrap();
-    app.wait_for("selected:Five").unwrap();
+    app.wait_for("text:selected:Five").unwrap();
     app.press_key("left").unwrap();
-    app.wait_for("selected:Three").unwrap();
+    app.wait_for("text:selected:Three").unwrap();
     // Up and Down move as Left and Right do.
     app.press_key("down").unwrap();
-    app.wait_for("selected:Five").unwrap();
+    app.wait_for("text:selected:Five").unwrap();
     app.press_key("up").unwrap();
-    app.wait_for("selected:Three").unwrap();
-    app.wait_for("presses:7").unwrap();
+    app.wait_for("text:selected:Three").unwrap();
+    app.wait_for("text:presses:7").unwrap();
     // The focus moved with the selection: Return presses Three.
     app.press_key("enter").unwrap();
-    app.wait_for("presses:8").unwrap();
-    app.wait_for("selected:Three").unwrap();
+    app.wait_for("text:presses:8").unwrap();
+    app.wait_for("text:selected:Three").unwrap();
 }
 
 #[test]
@@ -131,12 +134,12 @@ fn home_and_end_go_to_the_first_and_last_enabled_tab() {
     app.press_key("tab").unwrap();
     app.press_key("tab").unwrap();
     app.press_key("end").unwrap();
-    app.wait_for("selected:Five").unwrap();
+    app.wait_for("text:selected:Five").unwrap();
     app.press_key("home").unwrap();
-    app.wait_for("selected:One").unwrap();
+    app.wait_for("text:selected:One").unwrap();
     // Home on the first tab moves nothing and reports nothing.
     app.press_key("home").unwrap();
-    app.wait_for("presses:2").unwrap();
+    app.wait_for("text:presses:2").unwrap();
 }
 
 #[test]
@@ -146,15 +149,15 @@ fn the_arrows_do_nothing_while_the_focus_is_outside_the_list() {
     app.press_key("right").unwrap();
     app.press_key("end").unwrap();
     app.wait(std::time::Duration::from_millis(50)).unwrap();
-    app.wait_for("selected:Two").unwrap();
-    app.wait_for("presses:0").unwrap();
+    app.wait_for("text:selected:Two").unwrap();
+    app.wait_for("text:presses:0").unwrap();
     // Leaving the list unbinds its keys again.
     app.press_key("tab").unwrap();
     app.press_key("tab").unwrap();
     app.press_key("left").unwrap();
     app.wait(std::time::Duration::from_millis(50)).unwrap();
-    app.wait_for("selected:Two").unwrap();
-    app.wait_for("presses:0").unwrap();
+    app.wait_for("text:selected:Two").unwrap();
+    app.wait_for("text:presses:0").unwrap();
 }
 
 /// Tabs without a list are stops of their own, as before.
@@ -181,7 +184,74 @@ fn a_tab_outside_a_list_is_a_stop_of_its_own() {
     app.press_key("tab").unwrap();
     app.press_key("tab").unwrap();
     app.press_key("enter").unwrap();
-    app.wait_for("pressed:second").unwrap();
+    app.wait_for("text:pressed:second").unwrap();
+}
+
+#[derive(Clone, PartialEq, Props)]
+struct ManyProps {
+    count: usize,
+}
+
+/// A list of `count` tabs, the first selected; no indicator.
+#[component]
+fn ManyTabs(props: ManyProps) -> impl IntoElement {
+    let selected = signal(0usize);
+    view()
+        .child(tabs().flex_row().children((0..props.count).map(move |i| {
+            tab()
+                .selected(move || selected.get() == i)
+                .on_press(move |_: &()| selected.set(i))
+                .child(text(format!("{i}")))
+        })))
+        .child(text(move || format!("selected:{}", selected.get())))
+}
+
+/// The mount items one Right sends in a list of `count` tabs, and how
+/// many of them made or removed a view.
+fn items_per_key(count: usize) -> (usize, usize) {
+    let mut config = EngineConfig {
+        viewport: Size::new(px(390.0), px(844.0)),
+        ..EngineConfig::new(Root::new::<ManyTabs>(move || ManyProps { count }))
+    };
+    config.environment.os = Os::MacOs;
+    let mut app = Headless::start(config).unwrap();
+    app.first_render().unwrap();
+    let items = Arc::new(AtomicUsize::new(0));
+    let made = Arc::new(AtomicUsize::new(0));
+    let (seen, created) = (items.clone(), made.clone());
+    app.observe(move |_, batch| {
+        seen.fetch_add(batch.items.len(), Ordering::Relaxed);
+        created.fetch_add(
+            batch
+                .items
+                .iter()
+                .filter(|i| matches!(i, MountItem::Create { .. } | MountItem::Delete { .. }))
+                .count(),
+            Ordering::Relaxed,
+        );
+    });
+    app.press_key("tab").unwrap();
+    app.press_key("right").unwrap();
+    app.wait_for("text:selected:1").unwrap();
+    app.idle(std::time::Duration::from_millis(50)).unwrap();
+    items.store(0, Ordering::Relaxed);
+    made.store(0, Ordering::Relaxed);
+    app.press_key("right").unwrap();
+    app.wait_for("text:selected:2").unwrap();
+    app.idle(std::time::Duration::from_millis(50)).unwrap();
+    (items.load(Ordering::Relaxed), made.load(Ordering::Relaxed))
+}
+
+#[test]
+fn an_arrow_changes_the_tab_left_and_the_tab_reached_only() {
+    let (few, made) = items_per_key(3);
+    let (many, _) = items_per_key(40);
+    println!("one Right: {few} mount items among 3 tabs, {many} among 40");
+    assert_eq!(made, 0, "an arrow makes no view");
+    assert_eq!(
+        few, many,
+        "the cost of an arrow does not grow with the tabs"
+    );
 }
 
 /// How the indicator harness lays its list out: no indicator.

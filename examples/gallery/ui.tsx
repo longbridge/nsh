@@ -84,7 +84,7 @@ export const SIDEBAR = 232;
  * Mac Catalyst window); phones never do. Below that it is the phone layout,
  * unchanged. The shell remounts when it changes, so demos read it once.
  */
-export const desktop = computed(() => windowSize().width >= (platform.idiom === "desktop" ? 700 : 900));
+export const desktop = computed(() => windowSize().width >= (platform.desktop ? 700 : 900));
 
 /** Whether the desktop layout shows its sidebar (the toggle in the demo's
  * toolbar and Ctrl+B / Cmd+B hide and show it; kept while the app runs). */

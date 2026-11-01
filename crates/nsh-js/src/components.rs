@@ -509,7 +509,7 @@ pub(crate) fn runtime_module(cx: *mut JsContext, specifier: &str, module: &str) 
 }
 
 /// Puts the functions of module `module` of the runtime registry
-/// `specifier` on `obj` (`Image.getSize` on `nsh/image`'s component).
+/// `specifier` on `obj` (`Image.getSize` on `nsh`'s `Image`).
 pub(crate) fn add_runtime_functions(
     cx: *mut JsContext,
     obj: JsValue,

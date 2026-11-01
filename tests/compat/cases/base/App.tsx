@@ -6,6 +6,7 @@ import { type JSX, View, mount, signal } from "nsh";
 import BaseStatusBar from "./base-status-bar";
 import BaseAccordion from "./base-accordion";
 import BaseAlertDialog from "./base-alert-dialog";
+import BaseAvatar from "./base-avatar";
 import BaseButton from "./base-button";
 import BaseCheckbox from "./base-checkbox";
 import BaseCollapsible from "./base-collapsible";
@@ -22,6 +23,7 @@ import BaseNavPage from "./base-nav-page";
 import BaseNavStack from "./base-nav-stack";
 import BaseNumberInput from "./base-number-input";
 import BaseOtpInput from "./base-otp-input";
+import BasePagination from "./base-pagination";
 import BasePopups from "./base-popups";
 import BaseMenuChecked from "./base-menu-checked";
 import BasePlot from "./base-plot";
@@ -46,12 +48,14 @@ import BaseTabs from "./base-tabs";
 import BaseTextView from "./base-text-view";
 import BaseToast from "./base-toast";
 import BaseToggle from "./base-toggle";
+import BaseToolbar from "./base-toolbar";
 import BaseToken from "./base-token";
 
 const cases: Record<string, () => JSX.Element> = {
   "base-status-bar": BaseStatusBar,
   "base-accordion": BaseAccordion,
   "base-alert-dialog": BaseAlertDialog,
+  "base-avatar": BaseAvatar,
   "base-button": BaseButton,
   "base-dialog": BaseDialog,
   "base-dialog-backdrop": BaseDialogBackdrop,
@@ -64,6 +68,7 @@ const cases: Record<string, () => JSX.Element> = {
   "base-nav-stack": BaseNavStack,
   "base-number-input": BaseNumberInput,
   "base-otp-input": BaseOtpInput,
+  "base-pagination": BasePagination,
   "base-popups": BasePopups,
   "base-menu-checked": BaseMenuChecked,
   "base-safe-area-keyboard": BaseSafeAreaKeyboard,
@@ -80,6 +85,7 @@ const cases: Record<string, () => JSX.Element> = {
   "base-rich-editor-tables": BaseRichEditorTables,
   "base-tabs": BaseTabs,
   "base-toggle": BaseToggle,
+  "base-toolbar": BaseToolbar,
   "base-collapsible": BaseCollapsible,
   "base-color-picker": BaseColorPicker,
   "base-collapsible-reveal": BaseCollapsibleReveal,

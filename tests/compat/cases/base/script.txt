@@ -45,6 +45,77 @@ wait 300
 expect Alert: pending
 expect Sheet: pending
 covers [nsh/base] AlertDialog
+# base-avatar
+tap id:case-base-avatar
+# Ada's image loads: the initials in the fallback (the app's look, as
+# large as the avatar) and the image over it, transparent, as large too.
+expect Ada: loading
+expect AL
+prop id:ada role image
+prop id:ada accessibilityLabel Ada Lovelace
+frame id:ada 0 20 40 40
+frame parent:text:AL 0 0 40 40
+style parent:text:AL backgroundColor #336699ff
+style parent:text:AL opacity 0.5
+frame below:id:ada-dot 0 0 40 40
+style below:id:ada-dot opacity 0
+style below:id:ada-dot borderRadius 20
+style below:id:ada-dot borderWidth 2
+# The avatar says the name once: the fallback and the image are hidden.
+prop parent:text:AL accessibilityElementsHidden true
+prop below:id:ada-dot accessibilityElementsHidden true
+# Loaded: the fallback goes and the image shows.
+event below:id:ada-dot onLoad width=96 height=96
+expect Ada: loaded
+absent AL
+style below:id:ada-dot opacity 1
+# Failed: the fallback is back.
+event below:id:ada-dot onError message="not found"
+expect Ada: error
+expect AL
+style below:id:ada-dot opacity 0
+# Grace's fallback waits 300 ms while her image loads.
+absent GH
+wait 400
+expect GH
+# Edsger has no image: the app's fallback at once, in place of the
+# initials, and the app's label.
+expect ?
+absent ED
+prop id:edsger role image
+prop id:edsger accessibilityLabel Edsger, away
+# A group of three shows two, then its overflow (30 wide, 60 high).
+prop id:team role group
+prop id:team accessibilityLabel Team
+expect AT
+expect BL
+absent CS
+expect +1
+prop label:1 more person accessibilityLabel 1 more person
+frame id:team 0 152 110 60
+# A group of the first two of four: the overflow stands for the others.
+expect DK
+expect FA
+expect +2
+covers [nsh/base] Avatar
+covers [nsh/base] AvatarGroup
+covers [props] src
+covers [props] Avatar.name
+covers [props] accessibilityLabel
+covers [props] Avatar.fallbackDelay
+covers [props] Avatar.imageClass
+covers [props] Avatar.imageStyle
+covers [props] Avatar.fallbackClass
+covers [props] Avatar.fallbackStyle
+covers [props] Avatar.fallback
+covers [events] Avatar.onStatusChange
+covers [props] AvatarGroup.limit
+covers [props] AvatarGroup.total
+covers [props] AvatarGroup.overflowClass
+covers [props] AvatarGroup.overflowStyle
+covers [props] AvatarGroup.overflow
+covers [props] AvatarGroup.overflowAccessibilityLabel
+
 # base-button
 tap id:case-base-button
 # events the platform reports.
@@ -1139,6 +1210,63 @@ covers [props] disabled
 covers [props] accessibilityLabel
 covers [events] onChange
 
+# base-toolbar
+tap id:case-base-toolbar
+expect Pressed: none
+# A toolbar for screen readers, named; its runs are groups, a toggle group
+# inside it one of them; the separator is no element.
+prop id:bar role toolbar
+prop id:bar accessibilityLabel Formatting
+prop id:history role group
+prop id:history accessibilityLabel History
+prop id:marks role group
+prop id:undo role button
+prop id:help role link
+prop id:sep focusable false
+# A row by default: the group's items side by side, then the separator,
+# the toggle group, the disabled group and the link.
+frame id:undo 0 0 20 20
+frame id:redo 20 0 20 20
+frame id:sep 40 0 2 20
+frame id:marks 42 0 20 20
+frame id:help 82 0 20 20
+# `axis="vertical"`: a column.
+prop id:tools role toolbar
+frame id:pen 0 20 20 20
+# One stop of the keyboard focus: its first enabled item.
+prop id:undo focusable true
+prop id:redo focusable false
+prop id:bold focusable false
+prop id:help focusable false
+prop id:select focusable true
+prop id:pen focusable false
+# Its items take presses; a disabled item and a disabled group's do not.
+prop id:redo accessibilityState disabled=true
+prop id:send accessibilityState disabled=true
+tap id:undo
+expect Pressed: undo
+tap id:bold
+expect Bold: true
+tap id:help
+expect Pressed: help
+# A disabled toolbar disables every item in it: no stop of the focus.
+tap id:lock
+prop id:undo accessibilityState disabled=true
+prop id:bold accessibilityState disabled=true
+prop id:help accessibilityState disabled=true
+prop id:undo focusable false
+tap id:lock
+prop id:undo focusable true
+tap id:select
+expect Pressed: select
+covers [nsh/base] Toolbar
+covers [nsh/base] ToolbarGroup
+covers [nsh/base] ToolbarSeparator
+covers [props] Toolbar.axis
+covers [props] disabled
+covers [props] accessibilityLabel
+covers [events] onPress
+
 # A collapsible: the summary always, the details only while the app's
 # `open` holds. Collapsed, the region is the trigger's 20 points.
 tap id:case-base-collapsible
@@ -1343,6 +1471,104 @@ covers [events] OtpInput.onChange
 covers [events] OtpInput.onComplete
 covers [events] OtpInput.onFocus
 covers [events] OtpInput.onBlur
+# base-pagination
+tap id:case-base-pagination
+# A navigation landmark named by `accessibilityLabel`; page 5 of 20 with
+# seven pages shown (`visiblePages`): the first and the last, two on each
+# side of the current one, an ellipsis for each run left out.
+expect Page 5 of 20
+prop id:pager role navigation
+prop id:pager accessibilityLabel Results
+expect 1
+expect 3
+expect 7
+expect 20
+absent 2
+absent 8
+# Each item is as wide as `itemClass` says, in a row with the app's gap:
+# the current page after Previous, 1, the ellipsis, 3 and 4.
+frame parent:text:5 160 0 30 30
+style text:5 fontSize 12
+# The current page is selected for screen readers (`selected:` styles
+# it); every page is a button that takes presses, and so are Previous
+# and Next, named by their accessibility labels.
+prop parent:text:5 role button
+prop parent:text:5 accessibilityState selected=true
+style parent:text:5 backgroundColor #00ff00ff
+prop parent:text:6 role button
+prop parent:text:6 accessibilityState {}
+nostyle parent:text:6 backgroundColor
+listens parent:text:6 onPress
+prop label:Previous role button
+prop label:Next role button
+listens label:Next onPress
+# A press reports the page; the app sets it and the pages move with it.
+tap text:6
+expect Log: 6
+expect Page 6 of 20
+expect 8
+absent 3
+prop parent:text:6 accessibilityState selected=true
+prop parent:text:5 accessibilityState {}
+# Previous and Next report the pages around the current one.
+tap label:Next
+expect Log: 6, 7
+expect Page 7 of 20
+tap label:Previous
+expect Log: 6, 7, 6
+expect Page 6 of 20
+# On the last page Next is disabled (`disabled:` applies): it takes no
+# press.
+tap text:20
+expect Page 20 of 20
+prop label:Next accessibilityState disabled=true
+style label:Next opacity 0.5
+prop label:Previous accessibilityState {}
+tap label:Next
+expect Log: 6, 7, 6, 20
+# `compact`: Previous, the children and Next only.
+tap id:compact
+absent 20
+absent 1
+expect Page 20 of 20
+tap label:Previous
+expect Page 19 of 20
+tap id:compact
+expect 19
+expect 20
+# `disabled`: every item dimmed for screen readers, none takes a press.
+tap id:disable
+prop parent:text:19 accessibilityState disabled=true selected=true
+prop label:Previous accessibilityState disabled=true
+style label:Previous opacity 0.5
+tap id:disable
+prop label:Previous accessibilityState {}
+# `renderItem` draws every item from its state: its kind and page, the
+# current one, what takes no press, the pages an ellipsis leaves out.
+expect previous 1 off
+expect page 1 now
+expect page 3
+expect 4-9999 hidden
+expect page 10000
+expect next 2
+tap text:page 10000
+expect page 10000 now
+expect 2-9997 hidden
+expect next 10000 off
+expect previous 9999
+covers [nsh/base] Pagination
+covers [props] Pagination.page
+covers [props] Pagination.totalPages
+covers [props] Pagination.visiblePages
+covers [props] Pagination.compact
+covers [props] Pagination.previousAccessibilityLabel
+covers [props] Pagination.nextAccessibilityLabel
+covers [props] Pagination.itemClass
+covers [props] Pagination.itemStyle
+covers [props] Pagination.renderItem
+covers [props] accessibilityLabel
+covers [props] disabled
+covers [events] onChange
 # base-progress
 tap id:case-base-progress
 # The progress bar role, its label, range and value for screen readers;

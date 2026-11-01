@@ -1,4 +1,4 @@
-// A case of the API's test suite (docs/dev/compatibility.md): `nsh/list`'s
+// A case of the API's test suite (docs/dev/compatibility.md): `nsh`'s
 // `List` (`nsh:rt`'s `list`): the rows near the viewport rendered from
 // `each`, with a header, a footer and separators, rows added when `each`
 // changes, the padding of its content (`contentStyle`,

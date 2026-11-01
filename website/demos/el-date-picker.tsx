@@ -1,6 +1,6 @@
 import { type JSX, mount, signal, Text, token, View, windowSize } from "nsh";
 import { type CalendarItemState, DatePicker, type DatePickerValue, type DateRangePreset, type HourCycle, type OpenChangeReason, type TimeFieldSegmentState } from "nsh/base";
-import { button, desktop, Log, Panel, Segmented, size, Split, tint, ui, wide } from "./palette";
+import { button, desktop, Icon, Log, Panel, Segmented, size, Split, tint, ui, wide } from "./palette";
 
 // Three date pickers in a card: a due date (weekends disabled, presets
 // beside the calendar, a clear button), a stay picked as a range over two
@@ -91,7 +91,7 @@ function Trigger(props: { title?: string; placeholder: string; open: boolean; cl
   });
   return (
     <View {...look}>
-      <Text style={{ numberOfLines: 1, flex: 1, fontSize: controlText, color: props.title ? ui().text : ui().faint }}>
+      <Text style={{ numberOfLines: 1, flex: 1, fontSize: controlText, color: props.title ? ui().text : ui().muted }}>
         {props.title ?? props.placeholder}
       </Text>
       {/* With a clear button over the end (`cleanable`), an empty lane as wide as the button in place of the chevron. */}
@@ -319,7 +319,7 @@ function App() {
               clearButtonAccessibilityLabel="Clear the due date"
               clearButtonClass="absolute items-center justify-center rounded-full enabled:hover:opacity-70"
               clearButtonStyle={{ top: (size.control - 20) / 2, right: 10, width: 20, height: 20 }}
-              clearButton={<Text style={{ fontSize: 12, color: ui().muted }}>✕</Text>}
+              clearButton={<Icon name="close" size={14} tint={ui().muted} />}
               trigger={<Trigger title={due() ? `${monthDay(due()!)}, ${due()!.slice(0, 4)}` : undefined} placeholder="No due date" open={dueOpen()} clearable={due() !== null} />}
             />
           </Field>

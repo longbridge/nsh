@@ -277,6 +277,21 @@ pub(crate) fn first_responder(window: &UIWindow) -> Option<Retained<AnyObject>> 
     unsafe { msg_send![window, firstResponder] }
 }
 
+/// The text of the focused input (`text` of the first responder), if one
+/// has the focus.
+pub(crate) fn focused_text(window: &UIWindow) -> Option<String> {
+    let responder = first_responder(window)?;
+    // SAFETY: NSObject's method, which every responder has.
+    let has_text: bool = unsafe { msg_send![&*responder, respondsToSelector: objc2::sel!(text)] };
+    if !has_text {
+        return None;
+    }
+    // SAFETY: UITextField's and UITextView's `text`, checked above.
+    let text: Option<Retained<objc2_foundation::NSString>> =
+        unsafe { msg_send![&*responder, text] };
+    text.map(|t| t.to_string())
+}
+
 /// The software keyboard's input manager (`UIKeyboardImpl`, private), which
 /// types into the first responder as its keys do: asking the input's
 /// delegate first (`maxLength`, a controlled value), as UI test tools type.

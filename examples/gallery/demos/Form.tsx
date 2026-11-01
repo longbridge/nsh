@@ -7,7 +7,7 @@ import { nav } from "../nav";
 import { alpha, Appear, Badge, Button, Caption, Card, colors, DemoPage, finish, focusRing, follow, header, hint, IconTile, Inset, Meter, mono, PageHeader, Press, radius, RoundButton, Section, Segmented, Spinner, tints, type Tone, toneColor } from "../ui";
 
 /** A pointer and a keyboard: desktop density. */
-const pointer = platform.idiom === "desktop";
+const pointer = platform.desktop;
 
 /** A field's text size and its side padding. */
 const fieldFont = pointer ? 13 : 15;

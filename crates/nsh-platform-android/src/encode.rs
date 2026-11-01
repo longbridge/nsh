@@ -654,7 +654,9 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
                     | Command::PickScreenColor { .. }
                     // No file dialogs (`Environment::file_requests`): the
                     // core answers first.
-                    | Command::FileRequest { .. } => e.int(-1),
+                    | Command::FileRequest { .. }
+                    // No menus of the platform's own to color.
+                    | Command::Tokens(_) => e.int(-1),
                 }
             }
         }

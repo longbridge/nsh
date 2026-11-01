@@ -2,6 +2,7 @@
 //! what a user does with them and what the app hears and shows.
 
 mod accordion;
+mod avatar;
 mod calendar;
 mod collapsible;
 mod color_picker;
@@ -18,6 +19,7 @@ mod link;
 mod menu;
 mod number_input;
 mod otp_input;
+mod pagination;
 mod plot;
 mod popups;
 mod radio;
@@ -31,3 +33,4 @@ mod tabs;
 mod text_view;
 mod time_field;
 mod toggle;
+mod toolbar;

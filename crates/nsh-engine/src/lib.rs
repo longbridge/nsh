@@ -661,6 +661,11 @@ pub struct EngineConfig {
     pub network: Option<Arc<dyn Network>>,
     /// The host transport for WebSockets, including the browser WebSocket API.
     pub websocket: Option<Arc<dyn nsh_core::websocket::WebSocketTransport>>,
+    /// Refuses the app's connections (`net` sockets and both WebSocket
+    /// APIs) with the error it gives for what they connect to, before they
+    /// reach the network: a test's, which reaches it only when the test
+    /// asks (`nsh test`'s `network: "live"`). `None`: they connect.
+    pub refuse_connections: Option<nsh_core::element::RefuseConnections>,
     /// App-private host filesystem service (for browser storage).
     pub filesystem: Option<Arc<dyn nsh_core::filesystem::FileSystem>>,
     /// Source of bundled files such as fonts; without one, they fail to load.
@@ -794,6 +799,7 @@ impl EngineConfig {
             trace: false,
             network: None,
             websocket: None,
+            refuse_connections: None,
             filesystem: None,
             assets: None,
             environment: Environment::default(),
@@ -877,6 +883,7 @@ const MAX_ADVANCE_ROUNDS: usize = 100_000;
 enum Message {
     Event(NodeId, EventKind, EventPayload),
     Scroll(NodeId, Point<Points>, u32),
+    Kept(Vec<NodeId>),
     InputScroll(NodeId, Point<Points>, Size<Points>, Size<Points>),
     Zoom(NodeId, f32),
     ComponentSize(NodeId, Size<Points>),
@@ -967,6 +974,13 @@ impl EngineControl {
     /// engine frame.
     pub fn scroll(&self, id: NodeId, offset: Point<Points>, applied: u32) {
         let _ = self.tx.send(Message::Scroll(id, offset, applied));
+    }
+
+    /// Keeps the virtual list rows holding `nodes` rendered wherever they
+    /// scroll (`Core::set_kept`): the ends of a text selection. Replaces
+    /// the last call's; none releases them.
+    pub fn keep_rendered(&self, nodes: Vec<NodeId>) {
+        let _ = self.tx.send(Message::Kept(nodes));
     }
 
     /// Reports how far a multiline input's text scrolled: its offset, the
@@ -1567,6 +1581,7 @@ impl<M: TextEngine + 'static> Driver<M> {
                     script::SystemConfig {
                         access: (*access).clone(),
                         websocket: config.websocket.clone(),
+                        refuse_connections: config.refuse_connections.clone(),
                         filesystem: config.filesystem.clone(),
                         data_dir: config
                             .data_dir
@@ -2577,6 +2592,7 @@ fn handle<M: TextEngine>(script: Option<&Script>, state: &mut State<M>, message:
                 event.pending = true;
             }
         }
+        Message::Kept(nodes) => state.core.set_kept(&nodes),
         Message::InputScroll(id, offset, content, viewport) => {
             state.core.set_input_scroll(id, offset, content, viewport);
         }

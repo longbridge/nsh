@@ -18,7 +18,7 @@ Native Shell 为 TSX 提供十一个标准模块，按裸模块名导入（Rust 
 | `fs/promises` | `readFile`、`writeFile`、`readdir`、`exists`、`mkdir`、`rename`、`unlink`、`rmdir`、`stat`、`lstat`、`readlink`、默认导出 |
 | `process` | `run`、`spawn`、`exit`、`platform`、`arch`、`nextTick`、`ChildProcess`、默认导出；默认导出对象还有 `env` 和 `dataDir`，它也是全局 `process` |
 | `net` | `connect`、`Socket`、默认导出 |
-| `websocket` | `WebSocket.connect(url, options?)` 解析为 `WebSocketConnection`（`read`、`write`、`close`）、`WebSocketConnection`；原生宿主上另有全局 `WebSocket` 构造器 |
+| `websocket` | `connect(url, options?)` 解析为 `WebSocketConnection`（`read`、`write`、`close(code?, reason?)`、`closeCode`、`closeReason`）、`WebSocketConnection`、default；原生宿主上另有全局 `WebSocket` 构造器 |
 
 ## 在 Rust 中
 
@@ -183,13 +183,26 @@ child.on("exit", ({ code, signal }) => console.log("done", code, signal));
 
 ## 网络授权与边界
 
-全局 `fetch` 保留 NSH 的流式 HTTP 实现，按 `network.hosts` 或 `network.http` 检查每次请求与重定向。WebSocket 支持 `ws:` / `wss:`、文本及二进制消息、事件监听器与关闭握手。WebSocket 握手是一次 HTTP GET，因此全局 `WebSocket` 与 `websocket` 模块的 `WebSocket.connect` 都使用 HTTP 授权：`ws` 按 `http`、`wss` 按 `https` 以 GET 检查（规则也可以在 `schemes` 中列出 `ws` / `wss`）。NSH 在开始连接前检查初始的规范化 URL。原生握手连接该 URL 并拒绝重定向；浏览器 WebSocket 的重定向与连接策略由浏览器控制。两种 API 都拒绝带有凭据或片段的 URL。每个 VM 的两种 API 合计最多 32 个 WebSocket，两者的单条消息都最多 8 MiB。
+全局 `fetch` 保留 NSH 的流式 HTTP 实现，按 `network.hosts` 或 `network.http` 检查每次请求与重定向。WebSocket 支持 `ws:` / `wss:`、文本及二进制消息、事件监听器与关闭握手。WebSocket 握手是一次 HTTP GET，因此全局 `WebSocket` 与 `websocket` 模块的 `connect` 都使用 HTTP 授权：`ws` 按 `http`、`wss` 按 `https` 以 GET 检查（规则也可以在 `schemes` 中列出 `ws` / `wss`）。NSH 在开始连接前检查初始的规范化 URL。原生握手连接该 URL 并拒绝重定向；浏览器 WebSocket 的重定向与连接策略由浏览器控制。两种 API 都拒绝带有凭据或片段的 URL。每个 VM 的两种 API 合计最多 32 个 WebSocket，两者的单条消息都最多 8 MiB。
 
-未授权的 URL 在任何连接开始之前就被拒绝。全局 `WebSocket` 像浏览器报告连接失败那样报告它：构造函数返回 socket，随后 socket 触发 `error` 和 `close`（code 为 1006，`wasClean` 为 `false`），因此应用在构造函数之后设置的处理函数会收到这两个事件。`WebSocket.connect` 以 `ERR_ACCESS_DENIED` 拒绝（`permission` 为 `"network"`，`resource` 为该 URL）。第 33 个 WebSocket 以 `ERR_NSH_QUOTA_EXCEEDED` 抛出（构造函数）或拒绝（`connect`），格式错误的 URL 为 `SyntaxError`（构造函数）或 `TypeError`（`connect`）。
+未授权的 URL 在任何连接开始之前就被拒绝。全局 `WebSocket` 像浏览器报告连接失败那样报告它：构造函数返回 socket，随后 socket 触发 `error` 和 `close`（code 为 1006，`wasClean` 为 `false`），因此应用在构造函数之后设置的处理函数会收到这两个事件。模块的 `connect` 以 `ERR_ACCESS_DENIED` 拒绝（`permission` 为 `"network"`，`resource` 为该 URL）。第 33 个 WebSocket 以 `ERR_NSH_QUOTA_EXCEEDED` 抛出（构造函数）或拒绝（`connect`），格式错误的 URL 为 `SyntaxError`（构造函数）或 `TypeError`（`connect`）。
 
 全局 `WebSocket` 的发送队列最多 8 条消息、缓冲总量最多 8 MiB（`bufferedAmount`），超出任一项时 `send()` 抛出 `ERR_NSH_QUOTA_EXCEEDED`；socket 进入关闭过程后，`send()` 丢弃其数据，与浏览器一致。握手和每次写入超时为 30 秒，关闭时最多等待 5 秒对端的关闭帧。消息到达时即以 `message` 事件交付。
 
-`websocket` 模块的 `WebSocketConnection` 最多同时有 8 个待完成操作（读、写、关闭），尚未发出的写入合计最多 8 MiB；超过任一上限的 `write()` 以 `ERR_NSH_QUOTA_EXCEEDED` 拒绝，超过 8 MiB 的消息以 `RangeError`（`code` 为 `ERR_OUT_OF_RANGE`）拒绝。同一时间只能有一个 `read()` 等待，第二个以 `TypeError` 拒绝。尚未读取的到达消息最多保留八条且合计 8 MiB；再多一条就关闭连接，因为应用读取得比对端发送得慢。解析、连接与握手合计、每次写入和关闭的超时均为 30 秒。连接结束后（对端关闭、读写失败或未读数据过多），`read()` 仍按顺序返回保留的消息，然后以连接结束的原因拒绝：连接已关闭为 `ERR_SOCKET_CLOSED`，未读数据过多为 `ERR_NSH_QUOTA_EXCEEDED`，超时为 `ETIMEDOUT`，socket 错误为操作系统的错误码，协议错误为 `EPROTO`（握手被拒绝时还带有 HTTP 的 `status`）。
+`websocket` 模块的 `WebSocketConnection` 最多同时有 8 个待完成操作（读、写、关闭），尚未发出的写入合计最多 8 MiB；超过任一上限的 `write()` 以 `ERR_NSH_QUOTA_EXCEEDED` 拒绝，超过 8 MiB 的消息以 `RangeError`（`code` 为 `ERR_OUT_OF_RANGE`）拒绝。同一时间只能有一个 `read()` 等待，第二个以 `TypeError` 拒绝。到达后尚未读取的消息等待应用读取，消息的流量跟随应用的读取：有八条消息或 8 MiB 等待读取时，连接暂停从网络读取，对端的发送也随之等待；应用读取后连接恢复读取。解析、连接与握手合计、每次写入和关闭的超时均为 30 秒。
+
+`read()` 按到达顺序返回消息。连接正常关闭（对端关闭，或应用调用了 `close()`）且此前到达的消息都已读取后，`read()` 返回 `null`，与 `net` socket 在 EOF 时一致；此时 `closeCode` 与 `closeReason` 为关闭帧的 code 与 reason（连接打开时为 `null`；关闭帧不带 code 时为 1005，连接未经关闭握手就结束时为 1006）。`read()` 只在失败时拒绝，排在失败之前到达的消息之后，错误带有 `code`：连接未经关闭握手就结束为 `ERR_SOCKET_CLOSED`，超时为 `ETIMEDOUT`，socket 错误为操作系统的错误码，协议错误为 `EPROTO`（握手被拒绝时还带有 HTTP 的 `status`）。`close(code?, reason?)` 在关闭帧中发送其 code（默认 1000，或 3000 到 4999）与 reason（最多 123 个 UTF-8 字节），与全局 `WebSocket` 的 `close()` 一致；超出这些范围的 code 或 reason 以 `RangeError`（`code` 为 `ERR_OUT_OF_RANGE`）拒绝。它丢弃尚未读取的消息，并在对端应答关闭握手后完成。
+
+```tsx
+import { connect } from "websocket";
+
+const socket = await connect("wss://chat.example.com/socket");
+await socket.write("hello");
+for (let message; (message = await socket.read()) !== null; ) {
+  console.log(message);
+}
+console.log(`closed: ${socket.closeCode} ${socket.closeReason}`);
+```
 
 `net.connect({ host, port })` 只使用 `network.sockets` 授权：一组精确的 `"host:port"` 目标（IPv6 写作 `"[::1]:9000"`），检查发生在 DNS 查询之前。每一项授权一个主机上的一个端口；主机模式、`network.hosts` 与 HTTP 授权只用于 HTTP 流量，没有 `"capabilities"` 的应用同样需要列出它的 socket。返回的 `Socket` 提供 `read(size?)`、`write(text)` 和 `close()`；读取返回 `Uint8Array`，EOF 返回 `null`。所有失败都拒绝 Promise：未授权的目标为 `ERR_ACCESS_DENIED`（`permission` 为 `"network"`，`resource` 为 `"host:port"`），第 33 个 socket 和超过 4 MiB 等待发送量的写入为 `ERR_NSH_QUOTA_EXCEEDED`，超过 1 MiB 的读写为 `RangeError`（`code` 为 `ERR_OUT_OF_RANGE`）；连接与 I/O 失败以带有 Node 的 `code`（`ECONNREFUSED`、`ENOTFOUND`、`ETIMEDOUT`、`ECONNRESET` 等）和 `syscall` 的错误拒绝 Promise，连接失败还带有 `address` 和 `port`，对已关闭 socket 的写入为 `ERR_SOCKET_CLOSED`（读取则返回 `null`）。连接与 I/O 超时为 30 秒，单次读写最多 1 MiB，等待发送的写入合计最多 4 MiB，`close()` 会立即结束待完成的读写。每个 VM 同时最多有 32 个已打开或正在连接的 socket。这是 Promise 客户端 socket 接口。
 

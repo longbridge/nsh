@@ -104,6 +104,7 @@ and take their look from the app.
 |---|---|---|---|
 | `AlertDialog` | `nsh_base::alert_dialog()` | The system's alert and action sheet | [AlertDialog](./alert-dialog.md) |
 | `<Accordion>` and its parts | `nsh_base::accordion()`, `accordion_item()`, ... | Stacked sections that expand and collapse under their headings, one at a time or several | [Accordion](./accordion.md) |
+| `<Avatar>`, `<AvatarGroup>` | `nsh_base::avatar()`, `avatar_group()` | A person's picture, or a fallback while it loads or when it fails, and a row of them that shows the first few | [Avatar](./avatar.md) |
 | `<Button>` | `nsh_base::button()` | A pressable control with its states and its role | [Button](./button.md) |
 | `<Checkbox>` | `nsh_base::checkbox()` | A checked, unchecked or indeterminate control with an indicator | [Checkbox](./checkbox.md) |
 | `<Collapsible>` | `nsh_base::collapsible()` | A region whose content expands and collapses | [Collapsible](./collapsible.md) |
@@ -118,6 +119,7 @@ and take their look from the app.
 | `<NavStack>`, `<NavPage>` | `nsh_base::nav_stack()`, `nsh_base::nav_page()` | Native navigation: a stack of pages with the platform's header and back gestures | [NavStack](./nav-stack.md) |
 | `<NumberInput>` | `nsh_base::number_input()` | A number typed in a field or stepped with buttons and keys | [NumberInput](./number-input.md) |
 | `<OtpInput>` | `nsh_base::otp_input()` | A one-time code of a fixed number of digits, typed, pasted or autofilled into cells | [OtpInput](./otp-input.md) |
+| `<Pagination>` | `nsh_base::pagination()` | The pages of a set: Previous, the pages around the current one, ellipses and Next | [Pagination](./pagination.md) |
 | `<Plot>`, `<Line>`, `<Area>`, `<Bar>`, `<Grid>`, `<Pie>`, `<Arc>` (`nsh/base/plot`) | `nsh_base::plot::{plot, line, area, bar, grid, pie, arc}` | A chart's frame and its marks, drawn natively from the app's rows | [Plot](./plot.md) |
 | `<Popover>` | `nsh_base::popover()` | Content anchored to a trigger, on top of everything | [Popover](./popover.md) |
 | `<Progress>` | `nsh_base::progress()` | A progress bar: how far a task is, or that it is under way | [Progress](./progress.md) |
@@ -133,6 +135,7 @@ and take their look from the app.
 | `<TextView>` | `nsh_base::text_view()` | Shows a Markdown or HTML document with texts and views | [TextView](./text-view.md) |
 | `<Toast>`, `<ToastStack>` | `nsh_base::toast()`, `toast_stack()` | A toast's semantic root; toasts laid out as layers from an edge | [Toast](./toast.md) |
 | `<Toggle>`, `<ToggleGroup>` | `nsh_base::toggle()`, `toggle_group()` | A button that is on or off, and a toolbar of them | [Toggle](./toggle.md) |
+| `<Toolbar>`, `<ToolbarGroup>`, `<ToolbarSeparator>` | `nsh_base::toolbar()`, `toolbar_group()`, `toolbar_separator()` | A bar of buttons, toggles and links, one stop of the keyboard focus | [Toolbar](./toolbar.md) |
 | `<Tooltip>` | `nsh_base::tooltip()` | A hint next to its trigger, on hover or a held finger | [Tooltip](./tooltip.md) |
 
 > [!NOTE]

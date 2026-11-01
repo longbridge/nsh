@@ -3338,7 +3338,7 @@ impl Mounter {
         match (area, was_area) {
             (Some(view), false) => self.areas.push((
                 id,
-                crate::selectable_view::AreaResponder::attach(&view, mtm),
+                crate::selectable_view::AreaResponder::attach(&view, mtm, self.control.clone()),
             )),
             (None, true) => {
                 if let Some(i) = self.areas.iter().position(|(a, _)| *a == id) {
