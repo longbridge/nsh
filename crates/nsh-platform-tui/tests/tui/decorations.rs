@@ -312,3 +312,73 @@ fn a_press_handler_around_a_styled_box_is_a_bracketed_button_whose_label_stays_p
         "dark text designed on its lime fill"
     );
 }
+
+/// An icon tile: a bordered, filled box whose only content is an icon and a
+/// status dot.
+fn tile() -> View {
+    view()
+        .w(px(32.0))
+        .h(px(32.0))
+        .border_1()
+        .rounded(px(8.0))
+        .bg(nsh_core::color::rgb(0x24262a))
+        .border_color(nsh_core::color::rgb(0x8a8f98))
+        .items_center()
+        .justify_center()
+        .child(
+            canvas(Painter::new().fill_rect(0.0, 0.0, 16.0, 16.0))
+                .w(px(16.0))
+                .h(px(16.0)),
+        )
+        .child(
+            view()
+                .absolute()
+                .right(px(0.0))
+                .top(px(0.0))
+                .w(px(8.0))
+                .h(px(8.0))
+                .bg(nsh_core::color::rgb(0x45d49a)),
+        )
+}
+
+#[component]
+fn Tiles() -> impl IntoElement {
+    let header = |tile: View| {
+        view()
+            .flex_row()
+            .items_center()
+            .gap(px(8.0))
+            .child(tile)
+            .child(text("Title"))
+    };
+    view()
+        .flex_1()
+        .child(header(tile()))
+        .child(header(tile().accessibility_state(super::app::selected())))
+        .child(header(view().w(px(32.0)).h(px(32.0))))
+}
+
+#[test]
+fn a_box_whose_only_content_was_dropped_is_not_drawn_and_its_neighbors_stay_put() {
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(16, 6)).unwrap();
+    view.load(App::Rust(Root::new::<Tiles>(|| ()))).unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "Title");
+    let buffer = terminal.backend().buffer();
+    let lines: Vec<_> = (0..6).map(|y| row(buffer, y)).collect();
+    // No border, fill, dot or selection bar: the tile takes no glyphs, and
+    // the title keeps the column it has beside an empty spacer.
+    assert_eq!(lines[0..2], lines[4..6], "{lines:?}");
+    assert_eq!(lines[2..4], lines[4..6], "{lines:?}");
+    assert!(
+        lines.iter().all(|line| !line.contains(['┌', '│', '└'])),
+        "{lines:?}"
+    );
+    assert!(
+        buffer
+            .content
+            .iter()
+            .all(|cell| cell.bg == Color::Reset && !cell.modifier.contains(Modifier::REVERSED)),
+        "{lines:?}"
+    );
+}

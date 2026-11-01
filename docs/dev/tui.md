@@ -416,7 +416,11 @@ Decorations are plain, and each is a documented Decorative feature:
   shows brackets while hovered: the rendering sees the resolved fill, not whether a state set it.
 - **Icons and decorative images** are not drawn, at any size: canvases with role `image` or without an
   accessibility label, and images without an accessibility label (a logo). An image with a label is content: its
-  placeholder is a border titled with the label. A button whose content is only icons shows its
+  placeholder is a border titled with the label. A View whose only content was left out this way (an icon
+  tile, a page header's tile, a square around an icon) is **emptied**: it and everything in it draw no border,
+  fill, leaf or selection bar and take no Cells' glyphs; their neighbors keep their Cells, and the View keeps its
+  hit regions, so keyboard focus still puts the bar on it. Checkboxes, radios and switches are never emptied:
+  their glyph is their content. A button whose content is only icons shows its
   accessibility label as `[ label ]` on its box's middle row, cut with `…` to the box (`[L…]`).
 - **Checkboxes, radios and switches** (roles `checkbox`, `radio`, `switch`) show their state with terminal glyphs
   instead of the bar: a checkbox `[x]`, `[ ]` or `[-]` (mixed), a radio `(•)` or `( )`, a switch `[on ]` or
@@ -804,7 +808,7 @@ permit clipboard writes; `nsh test` uses memory and never writes to the machine'
 | Selected, checked and focused views | A soft bar on their text rows (else their first row) across their Cell box: palette color 0 (dark) or 7 (light) behind bold text; focused fields show the terminal cursor |
 | Borders | Decorative: straight single lines in per-side palette colors over a reserved inner Cell rect, drawn whole or not at all; boxes without room for a whole border around their content draw none |
 | Buttons | Decorative: `[ label ]` in the button's own Cells around its one row of text, or its accessibility label when it shows only icons; no border or fill |
-| Icons and decorative images | Decorative: canvases with role `image` or no accessibility label and images without an accessibility label are not drawn, at any size; a labeled image's placeholder is a border titled with its label |
+| Icons and decorative images | Decorative: canvases with role `image` or no accessibility label and images without an accessibility label are not drawn, at any size; a labeled image's placeholder is a border titled with its label; a View holding nothing else draws no border, fill or selection bar (focus still shows) |
 | Outlines, including control focus outlines | Left out; focus is the bar |
 | Anchored overlays | Snapped outside the anchor's Cell rect on the core-resolved placement side |
 | Gaps between texts | Positive point gaps between one-line sibling texts or canvas text runs retain at least one Cell; zero gaps keep adjacent text |

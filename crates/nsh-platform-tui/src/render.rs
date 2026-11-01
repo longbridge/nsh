@@ -105,6 +105,10 @@ struct Painter<'a> {
     indicators: Vec<NodeId>,
     /// Whether the view being drawn is inside an indicator.
     in_indicator: bool,
+    /// The Views whose only content the terminal leaves out, by node id.
+    emptied: Vec<bool>,
+    /// Whether the view being drawn is inside one of them.
+    in_emptied: bool,
     /// The hairline rules drawn once their parent's subtree is, as a rule
     /// keeps off rows (or columns) that hold text.
     rules: Vec<Rule>,
@@ -146,6 +150,11 @@ pub(crate) fn draw(
         borders: CellBounds::UNBOUNDED,
         fit: false,
     };
+    let mut emptied = vec![false; tree.views.len()];
+    mark_emptied(tree, ROOT_ID, &mut emptied);
+    for &modal in &tree.modals {
+        mark_emptied(tree, modal, &mut emptied);
+    }
     let mut painter = Painter {
         text_runs: HashMap::new(),
         tree,
@@ -160,6 +169,8 @@ pub(crate) fn draw(
         button_boxes: Vec::new(),
         indicators: Vec::new(),
         in_indicator: false,
+        emptied,
+        in_emptied: false,
         rules: Vec::new(),
         parent_box: area,
     };
@@ -213,6 +224,8 @@ impl Painter<'_> {
             .extend(toggle.as_ref().and_then(|toggle| toggle.indicator));
         let outer_in_indicator = self.in_indicator;
         self.in_indicator |= self.indicators.contains(&id);
+        let outer_in_emptied = self.in_emptied;
+        self.in_emptied |= self.emptied.get(id as usize).copied().unwrap_or(false);
         let unboxed = self.button_boxes.contains(&id);
         let mut projection = parent.view(view);
         let local_frame = Bounds::new(Point::default(), view.frame.size);
@@ -510,10 +523,11 @@ impl Painter<'_> {
             Vec::new()
         };
         let decorative = is_decorative(view);
-        let visible_drawn = !visible.is_empty()
+        let shown = !visible.is_empty()
             && opacity >= INVISIBLE_OPACITY
             && !decorative
             && !self.in_indicator;
+        let visible_drawn = shown && !self.in_emptied;
         let outer_background = self.background;
         let own_fill = view
             .animated
@@ -740,12 +754,13 @@ impl Painter<'_> {
             self.button_boxes.pop();
         }
         self.in_indicator = outer_in_indicator;
+        self.in_emptied = outer_in_emptied;
         if let Some(toggle) = &toggle
             && toggle.indicator.is_some()
         {
             self.indicators.pop();
         }
-        if visible_drawn && let Some(button) = button {
+        if shown && let Some(button) = button {
             self.brackets(visible, button, own_geometry);
         }
         if visible_drawn && let Some(toggle) = toggle {
@@ -758,8 +773,9 @@ impl Painter<'_> {
         // A toggle shows its state with its glyph; only focus puts a bar on it.
         let shows_state = !is_toggle(view.props.accessibility.role)
             && (state.selected || state.checked == Some(Checked::True));
-        let barred = shows_state || (self.focused == Some(id) && view.input.is_none());
-        if barred && visible_drawn {
+        // An emptied box shows no selection, but focus stays visible on it.
+        let focused = self.focused == Some(id) && view.input.is_none();
+        if (shows_state && visible_drawn) || (focused && shown) {
             self.bar(visible, own_geometry);
         }
     }
@@ -1094,6 +1110,72 @@ fn is_decorative(view: &crate::view::NshView) -> bool {
         ViewKind::Image => label.is_none(),
         _ => false,
     }
+}
+
+/// What a subtree holds once the terminal leaves out its decorations.
+#[derive(Clone, Copy, Default)]
+struct Holds {
+    /// Something drawn as content: text, a field, a labeled canvas or image,
+    /// a native component, a placeholder, a toggle's glyph.
+    content: bool,
+    /// Something left out: an icon or a decorative image.
+    dropped: bool,
+}
+
+/// Marks in `emptied` the Views under `id` whose only content was left out
+/// (an icon tile, a logo's frame): they draw no border, fill or bar.
+fn mark_emptied(tree: &Mounter, id: NodeId, emptied: &mut [bool]) -> Holds {
+    let Some(view) = tree.get(id) else {
+        return Holds::default();
+    };
+    if view.concealed || view.style.hidden {
+        return Holds::default();
+    }
+    if is_decorative(view) {
+        return Holds {
+            content: false,
+            dropped: true,
+        };
+    }
+    let mut holds = Holds {
+        content: !matches!(
+            view.kind,
+            ViewKind::View
+                | ViewKind::Text
+                | ViewKind::Scroll
+                | ViewKind::Stack
+                | ViewKind::Screen
+                | ViewKind::HeaderItem
+                | ViewKind::Modal
+        ) || view.component.is_some()
+            || view.input.is_some()
+            || is_toggle(view.props.accessibility.role)
+            || view.text.as_ref().is_some_and(|(layout, _)| {
+                layout.downcast::<CellLayout>().is_some_and(|layout| {
+                    layout.rows.iter().any(|row| {
+                        row.glyphs
+                            .iter()
+                            .any(|glyph| !glyph.text.chars().all(char::is_whitespace))
+                    })
+                })
+            }),
+        dropped: false,
+    };
+    for &child in &view.children {
+        if tree
+            .get(child)
+            .is_some_and(|child| child.kind == ViewKind::Modal)
+        {
+            continue;
+        }
+        let child = mark_emptied(tree, child, emptied);
+        holds.content |= child.content;
+        holds.dropped |= child.dropped;
+    }
+    if view.kind == ViewKind::View && holds.dropped && !holds.content {
+        emptied[id as usize] = true;
+    }
+    holds
 }
 
 fn is_toggle(role: AccessibilityRole) -> bool {
