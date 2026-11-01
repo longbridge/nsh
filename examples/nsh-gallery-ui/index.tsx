@@ -517,14 +517,16 @@ export function switchLook(on: () => boolean, size: "small" | "regular" = "regul
   };
 }
 
-/** A horizontal meter with an optional marker (a limit). */
+/** A horizontal meter with an optional marker (a limit); half a row in the
+ * terminal, so its fill is a solid bar rather than a rule. */
 export function Meter(props: { value: number; tone?: Tone; marker?: number }) {
+  const height = terminal ? TERMINAL_ROW / 2 : 6;
   return (
-    <View style={{ height: 6, borderRadius: 3, backgroundColor: colors.raised }}>
+    <View style={{ height, borderRadius: 3, backgroundColor: colors.raised }}>
       <View
         style={{
           width: `${Math.max(0, Math.min(1, props.value)) * 100}%`,
-          height: 6,
+          height,
           borderRadius: 3,
           backgroundColor: toneColor(props.tone ?? "accent"),
         }}
