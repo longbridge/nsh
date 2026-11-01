@@ -397,7 +397,9 @@ added after the view's descendants are drawn and changes no symbol or ink: a mul
 watchlist row, a tab) is not filled, its blank rows stay blank, and every glyph keeps its Cell and its palette
 color (a red change stays red text on the bar; a sparkline keeps its dots). A box with no text gets the bar on
 its first row. Inside a selected or checked view, hairline rules in an accent color (a selection's accent bar)
-and solid leaves (a marker dot) are not drawn, as the bar already marks the selection; neutral dividers stay. A focused text field shows the terminal cursor at its caret instead. Outlines, including the
+and solid leaves (a marker dot) are not drawn, nor is a solid leaf drawn before it whose Cells overlap its box
+(a segmented control's sliding indicator under the selected tab), as the bar already marks the selection;
+neutral dividers stay. A focused text field shows the terminal cursor at its caret instead. Outlines, including the
 app's focus outlines, are not drawn: focus is the bar. A view whose opacity, multiplied through its ancestors,
 is below 3% draws nothing and keeps its hit regions; any other opacity is drawn as opaque.
 
@@ -811,7 +813,7 @@ permit clipboard writes; `nsh test` uses memory and never writes to the machine'
 | Colors | The terminal's 16-color meanings by `palette.rs`: hue-band accents, the default foreground or dim, read against the opaque fill the app drew them on or the appearance's page |
 | View fills | No color: opaque fills and fills of at least 50% alpha clear the Cells they cover to the terminal background; childless solid leaves reversed in their palette color; lighter fills nothing |
 | Opacity | Ignored, except that a view below 3% draws nothing |
-| Selected, checked and focused views | A soft bar on their text rows (else their first row) across their Cell box: palette color 0 (dark) or 7 (light) behind bold text, with no accent bars or solid leaves inside a selected view; focused fields show the terminal cursor |
+| Selected, checked and focused views | A soft bar on their text rows (else their first row) across their Cell box: palette color 0 (dark) or 7 (light) behind bold text, with no accent bars or solid leaves inside or under a selected view; focused fields show the terminal cursor |
 | Borders | Decorative: straight single lines in per-side palette colors over a reserved inner Cell rect, drawn whole or not at all; boxes without room for a whole border around their content draw none |
 | Buttons | Decorative: `[ label ]` in the button's own Cells around its one row of text, or its accessibility label when it shows only icons, only where the whole label fits beside it, else nothing; no border or fill |
 | Icons and decorative images | Decorative: canvases with role `image` or no accessibility label and images without an accessibility label are not drawn, at any size; a labeled image's placeholder is a border titled with its label; a View holding nothing else draws no border, fill or selection bar (focus still shows) |

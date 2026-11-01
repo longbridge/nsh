@@ -233,3 +233,54 @@ fn a_selection_bar_leaves_out_accent_bars_and_leaf_fills_inside_it() {
     assert!(lines[0].contains('─'), "a neutral divider stays: {lines:?}");
     assert_eq!(lines[0..2], lines[2..4], "content never moves");
 }
+
+#[component]
+fn SegmentedTabs() -> impl IntoElement {
+    let tab = |label: &'static str, selection: AccessibilityState| {
+        view()
+            .flex_1()
+            .items_center()
+            .justify_center()
+            .accessibility_state(selection)
+            .child(text(label))
+    };
+    view()
+        .flex_1()
+        .child(
+            view()
+                .w(px(160.0))
+                .h(px(40.0))
+                .p(px(4.0))
+                .flex_row()
+                .child(
+                    view()
+                        .absolute()
+                        .left(px(4.0))
+                        .top(px(4.0))
+                        .bottom(px(4.0))
+                        .w(px(76.0))
+                        .bg(nsh_core::color::rgb(0x8a8f98)),
+                )
+                .child(tab("All", selected()))
+                .child(tab("Gainers", AccessibilityState::default())),
+        )
+        .child(text("end"))
+}
+
+#[test]
+fn a_sliding_indicator_under_a_selected_tab_is_left_to_its_bar() {
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(24, 4)).unwrap();
+    view.load(App::Rust(Root::new::<SegmentedTabs>(|| ())))
+        .unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "end");
+    let buffer = terminal.backend().buffer();
+    let lines: Vec<_> = (0..4).map(|y| row(buffer, y)).collect();
+    assert!(!reversed_anywhere(buffer), "no slab: {lines:?}");
+    let y = lines.iter().position(|line| line.contains("All")).unwrap() as u16;
+    let all = lines[y as usize].find("All").unwrap() as u16;
+    assert!(barred(buffer, y, all..all + 3, Color::Black), "{lines:?}");
+    for other in (0..4).filter(|&other| other != y) {
+        assert!(unbarred(buffer, other), "one bar row: {lines:?}");
+    }
+}

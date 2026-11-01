@@ -111,6 +111,10 @@ struct Painter<'a> {
     /// Whether the view being drawn is inside a selected or checked view,
     /// whose bar marks the selection.
     in_selection: bool,
+    /// The solid leaves drawn so far, and which Cells still show one, by
+    /// buffer index: a selection's bar takes the place of those under it.
+    solids: Vec<Rect>,
+    solid_cells: Vec<bool>,
     /// The hairline rules drawn once their parent's subtree is, as a rule
     /// keeps off rows (or columns) that hold text.
     rules: Vec<Rule>,
@@ -172,6 +176,7 @@ pub(crate) fn draw(
     for &modal in &tree.modals {
         mark_emptied(tree, modal, &mut emptied);
     }
+    let solid_cells = vec![false; buffer.area.area() as usize];
     let mut painter = Painter {
         text_runs: HashMap::new(),
         tree,
@@ -189,6 +194,8 @@ pub(crate) fn draw(
         emptied,
         in_emptied: false,
         in_selection: false,
+        solids: Vec::new(),
+        solid_cells,
         rules: Vec::new(),
         labels: Vec::new(),
         parent_box: area,
@@ -624,6 +631,17 @@ impl Painter<'_> {
                 });
             } else if let Some(fill) = fill {
                 fill_cells(self.buffer, visible, fill, covered);
+                let solid = matches!(fill, Fill::Solid(_));
+                for y in visible.y..visible.bottom() {
+                    for x in visible.x..visible.right() {
+                        if covered(x, y) {
+                            self.solid_cells[self.buffer.index_of(x, y)] = solid;
+                        }
+                    }
+                }
+                if solid {
+                    self.solids.push(visible);
+                }
             }
             let mut borders = Borders::NONE;
             if sides[0] && bounds.top == i32::from(visible.y) {
@@ -824,6 +842,9 @@ impl Painter<'_> {
         // An emptied box shows no selection, but focus stays visible on it;
         // an icon-only button's label takes its bar.
         let focused = focused && view.input.is_none() && !labeled;
+        if shows_state && visible_drawn {
+            self.unmark(visible);
+        }
         if (shows_state && visible_drawn) || (focused && shown) {
             self.bar(visible, own_geometry);
         }
@@ -856,6 +877,27 @@ impl Painter<'_> {
         }
         for y in rows {
             self.bar_row(y, visible.x..visible.right());
+        }
+    }
+
+    /// Takes back the solid leaves whose Cells overlap a selected view's
+    /// `visible` Cells (a sliding indicator under a selected tab): its bar
+    /// marks the selection.
+    fn unmark(&mut self, visible: Rect) {
+        let (under, others): (Vec<_>, Vec<_>) = std::mem::take(&mut self.solids)
+            .into_iter()
+            .partition(|solid| solid.intersects(visible));
+        self.solids = others;
+        for solid in under {
+            for y in solid.y..solid.bottom() {
+                for x in solid.x..solid.right() {
+                    let index = self.buffer.index_of(x, y);
+                    if self.solid_cells[index] {
+                        self.solid_cells[index] = false;
+                        self.buffer[(x, y)].modifier.remove(Modifier::REVERSED);
+                    }
+                }
+            }
         }
     }
 
@@ -974,6 +1016,7 @@ impl Painter<'_> {
                 let cell = &mut self.buffer[position];
                 cell.reset();
                 cell.set_symbol(line).set_style(style);
+                self.solid_cells[self.buffer.index_of(position.0, position.1)] = false;
             }
         }
     }
