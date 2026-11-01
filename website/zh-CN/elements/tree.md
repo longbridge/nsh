@@ -136,7 +136,7 @@ mount(App);
 | 行 | 列表 | `itemClass`、`itemStyle` | `selected:`、`aria-expanded:`（展开的文件夹）、`focus:`（树拥有键盘焦点时选中的行）、`disabled:`、`hover:`、`active:` |
 | 行的内容 | 行 | `renderItem` | 在 `itemClass` 中加上 `group` 后的 `group-selected:`、`group-aria-expanded:`、`group-focus:`、`group-disabled:` |
 
-用 `selected:` 表示选中的行，用 `focus:` 表示键盘所在的位置（见[设计指南](../docs/design-guides.md#interaction-states)）。
+用 `selected:` 表示选中的行，用 `focus:` 表示键盘所在的位置（见[设计指南](../docs/design-guides.md#交互状态)）。
 
 ## Ref
 
