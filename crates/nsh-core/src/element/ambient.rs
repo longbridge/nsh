@@ -69,6 +69,7 @@ struct EnvSignals {
     font_scale: Memo<f32>,
     reduce_motion: Memo<bool>,
     screen_reader: Memo<bool>,
+    rtl: Memo<bool>,
     pixel_ratio: Memo<f32>,
     locale: Memo<Locale>,
     screen_color: Memo<bool>,
@@ -94,6 +95,7 @@ impl EnvSignals {
                 font_scale: part!(font_scale),
                 reduce_motion: part!(reduce_motion),
                 screen_reader: part!(screen_reader),
+                rtl: part!(rtl),
                 pixel_ratio: part!(pixel_ratio),
                 locale: part!(locale),
                 screen_color: part!(screen_color),
@@ -233,6 +235,19 @@ pub fn reduce_motion() -> bool {
 /// A screen reader runs (TS: `screenReaderEnabled()`).
 pub fn screen_reader() -> bool {
     env(|e| e.screen_reader)
+}
+
+/// Whether the surface lays out right to left: the root's direction,
+/// which follows the user's language unless the app sets the root's
+/// `direction` (reading subscribes).
+///
+/// The core's part of `nsh-base`'s controls, which swap Left and Right by
+/// it (WAI-ARIA's arrow keys in a right-to-left layout). Apps set a view's
+/// `direction` and style with logical properties or `rtl:` classes
+/// instead: Rust's `rtl()` is dropped (`docs/dev/api-naming.md`).
+#[doc(hidden)]
+pub fn layout_rtl() -> bool {
+    env(|e| e.rtl)
 }
 
 /// Device pixels per point (TS: `pixelRatio()`).

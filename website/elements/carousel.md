@@ -324,8 +324,9 @@ and so are its controls and pagination items. While one of them has the focus:
 | Home, End | Moves to the first or the last slide. |
 | Space, Return | Presses the focused control or pagination item. |
 
-A control that turns disabled while it has the focus (next on the last slide) hands the focus to the carousel, so the
-keys go on working there.
+In a right-to-left layout a horizontal carousel's slides run from the right, so Left moves to the next slide and Right
+to the previous; a vertical carousel keeps Up and Down. A control that turns disabled while it has the focus (next on
+the last slide) hands the focus to the carousel, so the keys go on working there.
 
 ## Motion
 
