@@ -58,7 +58,7 @@ pub use nsh_core::{
     js::{HostLimits, Limits},
     platform::{
         ColorScheme, Environment, FetchEvent, FetchOp, HostEnvironment, HttpBody, HttpHead,
-        HttpRequest, Idiom, Locale, Os,
+        HttpRequest, Idiom, Lifecycle, Locale, Os,
     },
     storage::{StorageBackend, StorageChange},
     time::Clock,
@@ -723,6 +723,11 @@ pub struct EngineConfig {
     /// platform's picker: the embedding app's own picker, or a test's
     /// files; `None`: the platform's.
     pub picker: Option<Arc<dyn nsh_core::picker::PickerBackend>>,
+    /// Recognizes the app's speech (`Speech.start`) instead of the
+    /// platform's recognizer: the embedding app's own, or a test's fake
+    /// (`nsh_testing`'s). `None` (the default): the platform's, where it
+    /// has one (`Environment::speech`).
+    pub speech: Option<Arc<dyn nsh_core::speech::SpeechBackend>>,
 }
 
 /// Values of the environment an engine keeps whatever its platform reports
@@ -816,6 +821,7 @@ impl EngineConfig {
             clipboard: None,
             host: HostChannel::default(),
             picker: None,
+            speech: None,
         }
     }
 }
@@ -871,6 +877,7 @@ impl std::fmt::Debug for EngineConfig {
             .field("clipboard", &self.clipboard.is_some())
             .field("host", &self.host)
             .field("picker", &self.picker.is_some())
+            .field("speech", &self.speech.is_some())
             .finish()
     }
 }
@@ -1472,6 +1479,7 @@ impl<M: TextEngine + 'static> Driver<M> {
         core.set_storage(app_storage(&config));
         core.set_clipboard(config.clipboard.clone());
         core.set_picker(config.picker.clone());
+        core.set_speech(config.speech.clone());
         core.set_font_scale(config.environment.font_scale);
         core.set_class_environment(class_environment(&config.environment));
         core.set_header_heights(config.header_heights.0, config.header_heights.1);
@@ -2565,8 +2573,10 @@ fn ui_environment(env: &Environment, window: Size<Points>) -> nsh_core::element:
         locale: env.locale,
         apple_keyboard: env.apple_keyboard,
         host: env.host,
+        lifecycle: env.lifecycle,
         screen_color: env.screen_color,
         file_requests: env.file_requests,
+        speech: env.speech,
     }
 }
 

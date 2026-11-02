@@ -1604,6 +1604,9 @@ impl Mounter {
             ) if id == nsh_core::ROOT_ID => {
                 crate::picker::pick_images(request, asked, native.view(), &self.control);
             }
+            (Command::Speech(command), _) if id == nsh_core::ROOT_ID => {
+                crate::speech::command(&self.control, &command);
+            }
             (Command::SetJsResponder { block }, _) => self.set_js_responder(id, block),
             (Command::SetSelection { start, end }, Native::Input(input)) => {
                 input.select(start, end)
