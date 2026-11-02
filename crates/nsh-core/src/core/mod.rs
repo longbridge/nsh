@@ -4251,9 +4251,10 @@ impl<M: TextEngine> Core<M> {
     ) -> Result<(), ApplyError> {
         let parent = self.key(parent_id)?;
         let child = self.key(child_id)?;
-        if self.nodes[child as usize].parent != NO_KEY {
+        let from = self.nodes[child as usize].parent;
+        if from != NO_KEY {
             self.input_bar_moves(child);
-            self.components.moved = true;
+            self.note_move(from, parent);
         }
         let mut before = before.map(|b| self.key(b)).transpose()?;
         // Appended below the built-in bar, which stays on top.

@@ -43,13 +43,13 @@ function Mention() {
 }
 ```
 
-触发元素保留自己的角色、按压和外观：带 `role="link"` 和自己 `onPress` 的视图按下后仍会去往它指向的地方，卡片只是为它加上预览。内容在每次打开时创建，所以可以在那时加载它要显示的东西。
+触发元素保留自己的角色、按压和外观：带 `role="link"` 和自己 `onPress` 的视图按下后仍会去往它指向的地方，卡片只是为它加上预览。内容在每次打开时创建，所以可以在那时加载它要显示的东西。在手机和平板上，按压会打开卡片，触发元素会告诉屏幕阅读器它的卡片是否已打开。在 [Toolbar](./toolbar.md) 中，触发元素可以是工具栏的一项，卡片里的内容则不是：其中的按钮和链接保留自己的 Tab 停靠点，工具栏的 `disabled` 也不会改变它们。
 
 <a id="delays"></a>
 
 ## 延迟
 
-`openDelay` 让指针经过触发元素去往别处时，卡片不会一闪而开；`closeDelay` 给指针留出穿过触发元素与卡片之间空隙的时间。两者都以毫秒为单位。指针和延迟都在原生层跟踪，所以在触发元素上停留、在它与卡片之间移动时，直到卡片打开或关闭之前，都不会运行你的代码。
+`openDelay` 让指针经过触发元素去往别处时，卡片不会一闪而开；`closeDelay` 给指针留出穿过触发元素与卡片之间空隙的时间。两者都以毫秒为单位。指针和延迟都在原生层跟踪，所以在触发元素上停留、在它与卡片之间移动时，直到卡片打开或关闭之前，都不会运行你的代码。`openDelay` 为 `Infinity` 时，打开交给应用（以及触摸屏上对触发元素的按压）；`closeDelay` 为 `Infinity` 时，关闭交给 Escape、外部按压和应用。
 
 ```tsx
 <HoverCard openDelay={300} closeDelay={150} trigger={<Text>AAPL</Text>}>
@@ -98,8 +98,8 @@ const open = signal(false);
 |---|---|---|---|---|
 | `open` | `.open(..)` | `boolean` | 无 | 是否打开，由应用控制。 |
 | `defaultOpen` | `.default_open(..)` | `boolean` | `false` | 没有 `open` 时，初始是否打开。 |
-| `openDelay` | `.open_delay(..)` | `number` | `600` | 指针在触发元素上停留、或焦点停在它上面多少毫秒后打开。 |
-| `closeDelay` | `.close_delay(..)` | `number` | `300` | 指针离开触发元素和卡片多少毫秒后关闭。 |
+| `openDelay` | `.open_delay(..)` | `number` | `600` | 指针在触发元素上停留、或焦点停在它上面多少毫秒后打开；`Infinity`：不会自行打开。 |
+| `closeDelay` | `.close_delay(..)` | `number` | `300` | 指针离开触发元素和卡片多少毫秒后关闭；`Infinity`：不会自行关闭。 |
 | `placement` | `.placement(..)` | `"top" \| "bottom" \| "left" \| "right"` | `"bottom"` | 它位于触发元素的哪一侧。 |
 | `align` | `.align(..)` | `"start" \| "center" \| "end"` | `"center"` | 它沿这一侧如何与触发元素对齐。 |
 | `offset` | `.offset(..)` | `number` | `0` | 触发元素与卡片之间的间距。 |

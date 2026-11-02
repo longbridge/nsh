@@ -1316,6 +1316,25 @@ style label:lib.rs backgroundColor #00ff00ff
 expect Selected: src/lib.rs
 expect Changes: 2
 absent guide.md
+# The list and each row as the app styles them.
+style scroll:label:src backgroundColor #0000ffff
+style scroll:label:src opacity 0.75
+style label:src borderRadius 3
+# The ref's `revealItem`: the collapsed item above it expands, reported
+# as a press's is.
+tap id:reveal
+expect Expanded: src,src/ui
+expect Heard: expand src/ui
+expect Changes: 3
+expect tree.rs
+# The ref's `focus`; with the tree's focus, the selected row shows
+# `focus:`, and stops when it leaves.
+tap id:focus
+event id:files onFocus
+style label:lib.rs opacity 0.5
+nostyle label:src opacity
+event id:files onBlur
+nostyle label:lib.rs opacity
 # The tree's own state, from `defaultExpanded` and `defaultSelected`;
 # `renderItem` draws the rows, given each item's depth.
 prop id:notes role tree
@@ -1326,6 +1345,12 @@ prop label:a.md accessibilityState selected=true
 tap label:notes
 absent a.md@1
 prop label:notes accessibilityState selected=true expanded=false
+# `disabled`: read-only, every row dimmed; a press does nothing.
+tap id:lock
+prop label:notes accessibilityState selected=true disabled=true expanded=false
+prop label:todo.md accessibilityState disabled=true
+tap text:+notes@0
+absent a.md@1
 covers [nsh/base] Tree
 covers [props] Tree.items
 covers [props] Tree.expanded
@@ -1333,8 +1358,12 @@ covers [props] Tree.defaultExpanded
 covers [props] Tree.selected
 covers [props] Tree.defaultSelected
 covers [props] Tree.itemClass
+covers [props] Tree.itemStyle
+covers [props] Tree.listClass
+covers [props] Tree.listStyle
 covers [props] Tree.renderItem
 covers [props] accessibilityLabel
+covers [props] disabled
 covers [events] Tree.onExpandedChange
 covers [events] Tree.onSelectedChange
 covers [events] Tree.onExpand
@@ -1417,6 +1446,33 @@ expect Index: 1
 frame below:id:dot-0 10 0 10 10
 tap id:dot-1
 expect Changes: 3
+# A drag the app pauses its rotation for: `onDragStart`, then `onDragEnd`
+# where the content rests, on the third slide (its rest: 630 + 2 * 210),
+# which `onChange` reports.
+listens id:content onScrollDragStart
+listens id:content onScrollEnd
+event id:content onScrollDragStart x=840 y=0
+expect Events: dragStart
+event id:content onScrollEnd x=1050 y=0
+expect Events: dragStart,dragEnd
+expect Changes: 4
+expect Index: 2
+prop id:dot-2 accessibilityState selected=true
+# The keyboard focus coming to the carousel and leaving it.
+listens id:carousel onFocus
+listens id:carousel onBlur
+event id:carousel onFocus
+expect Events: dragStart,dragEnd,focus
+event id:carousel onBlur
+wait 50
+expect Events: dragStart,dragEnd,focus,blur
+# Its own index from `defaultIndex`: the second slide's item is selected.
+# Along a vertical `axis`, the slides follow each other down the content.
+prop id:vertical role region
+prop id:v-dot-1 accessibilityState selected=true
+prop id:v-dot-0 accessibilityState {}
+frame id:v-slide-0 0 0 100 50
+frame id:v-slide-1 0 50 100 50
 covers [nsh/base] Carousel
 covers [nsh/base] CarouselContent
 covers [nsh/base] CarouselItem
@@ -1425,6 +1481,8 @@ covers [nsh/base] CarouselNext
 covers [nsh/base] CarouselPagination
 covers [nsh/base] CarouselPaginationItem
 covers [props] Carousel.index
+covers [props] Carousel.defaultIndex
+covers [props] Carousel.axis
 covers [props] Carousel.looping
 covers [props] CarouselPaginationItem.index
 covers [props] CarouselPagination.indicatorClass
@@ -1432,6 +1490,10 @@ covers [props] CarouselPagination.indicatorStyle
 covers [props] selectedStyle
 covers [props] accessibilityLabel
 covers [events] onChange
+covers [events] Carousel.onDragStart
+covers [events] Carousel.onDragEnd
+covers [events] Carousel.onFocus
+covers [events] Carousel.onBlur
 
 # base-collapsible-reveal
 # With `reveal`: the clipping region is there while closed, zero high, so
@@ -1872,6 +1934,86 @@ covers [props] accessibilityLabel
 covers [events] onChange
 covers [events] Combobox.onConfirm
 covers [events] Combobox.onQueryChange
+# base-command
+tap id:case-base-command
+# The app's header, search bar (its prefix beside the field) and footer;
+# the items under their sections' headers (the app's rows and headers): a
+# list box of options, a disabled one dimmed, a checked one checked.
+expect PaletteHeader
+expect PaletteFooter
+expect Find:
+expect [Suggestions]
+expect [Settings]
+prop scroll:label:Calendar role listbox
+prop scroll:label:Calendar accessibilityLabel Commands
+style scroll:label:Calendar backgroundColor #0000ffff
+prop label:Calendar role option
+prop label:Search Emoji accessibilityState disabled=true
+prop label:Dark Theme accessibilityState checked=true
+style label:Dark Theme backgroundColor #00ff00ff
+nostyle label:Profile backgroundColor
+# `renderItem` gets the shortcut as shown here.
+expect New File +key
+expect Calendar
+# The first enabled item is highlighted (`focus:`, 40 high), and the app
+# hears it; a disabled row takes `disabled:` (24).
+expect Lit: new
+frame label:New File 0 0 390 40
+frame label:Calendar 0 0 390 30
+frame label:Search Emoji 0 0 390 24
+absent NoCommands
+# A press chooses; a disabled item takes none.
+tap label:Search Emoji
+expect Chosen: none
+tap label:Profile
+expect Chosen: profile
+# The app's query: typing is reported, the app's query filters by label,
+# empty sections go, and its first match is highlighted.
+type text:FindCommand cal
+expect Query: cal
+absent New File +key
+absent [Settings]
+expect [Suggestions]
+expect Lit: calendar
+frame label:Calendar 0 0 390 40
+tap label:Calendar
+expect Chosen: calendar
+# Nothing matches: the app's `empty`.
+type text:FindCommand zz
+expect Query: calzz
+expect NoCommands
+expect Lit: none
+# The field's own query starts from `defaultQuery`, and filters.
+expect Remote Two
+absent Remote One
+# A search the app answers: its query filters nothing, and while it is
+# `loading` the list is busy and `empty` waits.
+expect Server A
+expect Server B
+absent ServerEmpty
+prop scroll:label:Server A accessibilityState busy=true
+# Without a search field every item shows.
+expect Gamma
+absent text:NoField
+covers [nsh/base] Command
+covers [props] Command.items
+covers [props] Command.query
+covers [props] Command.defaultQuery
+covers [props] Command.filterable
+covers [props] Command.loading
+covers [props] Command.placeholder
+covers [props] Command.listClass
+covers [props] Command.itemClass
+covers [props] Command.header
+covers [props] Command.footer
+covers [props] Command.empty
+covers [props] Command.searchPrefix
+covers [props] Command.renderItem
+covers [props] Command.renderGroup
+covers [props] accessibilityLabel
+covers [events] Command.onSelect
+covers [events] Command.onHighlightChange
+covers [events] Command.onQueryChange
 # base-scrollbar
 tap id:case-base-scrollbar
 # Always shown, where the app places its track; a press in its middle
