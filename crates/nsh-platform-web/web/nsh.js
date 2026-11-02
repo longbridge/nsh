@@ -1084,6 +1084,9 @@ class Player {
    * `{type: "trace", items}`).
    */
   testSetup(storage, trace, environment) {
+    // The idiom the test asks for (`open`'s desktop `platform`), in place
+    // of the measured one, for the apps started from now on.
+    this.testIdiom = environment?.idiom;
     if (!this.wasm.nsh_test_setup) return;
     const setup = JSON.stringify({ storage: storage ?? [], trace: !!trace, environment: environment ?? {} });
     this.withStrings([setup], (p, l) => this.wasm.nsh_test_setup(p, l));
@@ -1338,7 +1341,7 @@ class Player {
 
   /** Starts the app with `start(environment)`, which returns the pump delay. */
   begin(width, start, deferEvents = false) {
-    this.idiom = this.options.idiom ?? this.measureIdiom(width);
+    this.idiom = this.options.idiom ?? this.testIdiom ?? this.measureIdiom(width);
     const environment = (this.reported = JSON.stringify(this.environment()));
     this.updateRootClasses();
     // Host events wait for this app's top-level `host.on` listeners, not

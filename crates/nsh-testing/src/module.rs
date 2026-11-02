@@ -410,7 +410,10 @@ pub struct OpenOptions {
     /// The platform the app believes it runs on headless (`"ios"`; a
     /// desktop's: `"macos"`, `"windows"`, `"linux"`, `"web"`). With
     /// `--target`, the app runs on the target's platform: a desktop's runs
-    /// on any desktop and the web, `"ios"` and `"android"` on their own,
+    /// on any desktop and the web, always as a desktop (on the web the page
+    /// starts in the desktop idiom at any width, `platform.os` staying
+    /// `"web"`; without a `platform`, or with `"web"`, the page measures
+    /// its idiom as a browser does), `"ios"` and `"android"` on their own,
     /// and another rejects with `ERR_NSH_TEST_UNSUPPORTED`.
     pub platform: Option<Platform>,
     /// A manual clock for the app (none: the system's): its time moves only
