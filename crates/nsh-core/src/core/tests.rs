@@ -22891,6 +22891,86 @@ fn keyboard_inset_height_pads_and_animates_with_the_keyboard() {
 }
 
 #[test]
+fn styles_that_read_the_keyboard_height_move_with_the_keyboard() {
+    // An app that reads `keyboardFrame()` (not `env()`) restyles in the
+    // commit the keyboard's change starts.
+    let keyboard_curve = |batch: &MountBatch| {
+        matches!(
+            &batch.items[0],
+            MountItem::LayoutAnimation(crate::LayoutAnimation {
+                update: Some(t),
+                ..
+            }) if t.curve == crate::LayoutCurve::Keyboard && t.duration_ms == 250.0
+        )
+    };
+    let mut c = core();
+    c.set_environment(env_with_keyboard(0.0, 250.0));
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 2,
+                tag: Tag::View,
+            },
+            style_op(2, &[("height", StyleValue::Number(100.0))]),
+            Op::Insert {
+                parent: ROOT_ID,
+                child: 2,
+                before: None,
+            },
+        ],
+    );
+    let batch = c.commit().unwrap();
+    assert!(!keyboard_curve(&batch));
+
+    // The keyboard shows; the app shrinks its view by its height.
+    c.set_environment(env_with_keyboard(40.0, 250.0));
+    apply(
+        &mut c,
+        vec![style_op(2, &[("height", StyleValue::Number(60.0))])],
+    );
+    let batch = c.commit().unwrap();
+    assert!(keyboard_curve(&batch), "{:?}", batch.items);
+
+    // A later change of the app's own does not.
+    apply(
+        &mut c,
+        vec![style_op(2, &[("height", StyleValue::Number(50.0))])],
+    );
+    let batch = c.commit().unwrap();
+    assert!(!keyboard_curve(&batch), "{:?}", batch.items);
+
+    // An animation the app configured for the commit wins.
+    c.set_environment(env_with_keyboard(0.0, 250.0));
+    let spring = crate::LayoutAnimation {
+        create: None,
+        update: Some(crate::LayoutTransition {
+            curve: crate::LayoutCurve::EaseIn,
+            property: crate::LayoutProperty::Opacity,
+            duration_ms: 100.0,
+            delay_ms: 0.0,
+        }),
+        delete: None,
+    };
+    apply(
+        &mut c,
+        vec![
+            Op::Command {
+                id: ROOT_ID,
+                command: Command::LayoutAnimation(spring),
+            },
+            style_op(2, &[("height", StyleValue::Number(100.0))]),
+        ],
+    );
+    let batch = c.commit().unwrap();
+    assert!(
+        matches!(&batch.items[0], MountItem::LayoutAnimation(a) if *a == spring),
+        "{:?}",
+        batch.items
+    );
+}
+
+#[test]
 fn calc_adds_a_length_to_the_keyboard_inset() {
     let mut c = core();
     c.set_environment(env_with_keyboard(0.0, 0.0));

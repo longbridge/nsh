@@ -945,6 +945,8 @@ impl<M: TextEngine> Core<M> {
     pub(super) fn apply_environment(&mut self, environment: Environment) {
         let _entered = self.components.runtime.enter();
         let changed = self.components.environment != environment;
+        self.keyboard_moved |=
+            self.components.environment.keyboard_height != environment.keyboard_height;
         let ratio = self.components.environment.pixel_ratio;
         self.components.environment = environment;
         if ratio != environment.pixel_ratio {
@@ -5655,12 +5657,34 @@ impl<M: TextEngine> Core<M> {
     /// The nodes whose padding or margin uses `env()` follow the
     /// environment: restyled where what their terms come to changed (a
     /// safe area, a page's insets, the keyboard, a move to another root
-    /// view). A change of the keyboard's height animates with the
-    /// keyboard, natively. Nothing to do without such nodes.
+    /// view). What a change of the keyboard's height moves (those terms,
+    /// or the styles an app derives from `keyboardFrame()` in the same
+    /// commit) animates with the keyboard, natively, unless the app
+    /// configured this commit's animation itself.
     pub(super) fn sync_env(&mut self) {
-        if self.env_styled.is_empty() {
-            return;
+        let mut keyboard_moved = std::mem::take(&mut self.keyboard_moved);
+        if !self.env_styled.is_empty() {
+            keyboard_moved |= self.restyle_env();
         }
+        let duration = self.components.environment.keyboard_duration;
+        if keyboard_moved && duration > 0.0 && self.layout_animation.is_none() {
+            use crate::props::{LayoutAnimation, LayoutCurve, LayoutProperty, LayoutTransition};
+            self.layout_animation = Some(LayoutAnimation {
+                create: None,
+                update: Some(LayoutTransition {
+                    curve: LayoutCurve::Keyboard,
+                    property: LayoutProperty::Opacity,
+                    duration_ms: duration,
+                    delay_ms: 0.0,
+                }),
+                delete: None,
+            });
+        }
+    }
+
+    /// Restyles the nodes whose `env()` terms came to something else;
+    /// whether the keyboard moved one of them.
+    fn restyle_env(&mut self) -> bool {
         let mut ids = std::mem::take(&mut self.env_scratch);
         ids.extend(self.env_styled.iter().copied());
         let mut keyboard_moved = false;
@@ -5695,20 +5719,7 @@ impl<M: TextEngine> Core<M> {
         }
         ids.clear();
         self.env_scratch = ids;
-        let duration = self.components.environment.keyboard_duration;
-        if keyboard_moved && duration > 0.0 && self.layout_animation.is_none() {
-            use crate::props::{LayoutAnimation, LayoutCurve, LayoutProperty, LayoutTransition};
-            self.layout_animation = Some(LayoutAnimation {
-                create: None,
-                update: Some(LayoutTransition {
-                    curve: LayoutCurve::Keyboard,
-                    property: LayoutProperty::Opacity,
-                    duration_ms: duration,
-                    delay_ms: 0.0,
-                }),
-                delete: None,
-            });
-        }
+        keyboard_moved
     }
 
     /// Applies what handlers, handles (element refs, animated values) and

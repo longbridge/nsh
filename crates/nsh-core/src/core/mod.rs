@@ -1077,6 +1077,10 @@ pub struct Core<M: TextEngine> {
     env_styled: rustc_hash::FxHashSet<NodeId>,
     /// Scratch of [`Core::sync_env`].
     env_scratch: Vec<NodeId>,
+    /// The keyboard's height changed since the last commit: what that
+    /// commit moves (an `env()` term, or a style that reads the keyboard's
+    /// height) moves with the keyboard.
+    keyboard_moved: bool,
     /// The screens and modals with a `statusBar`, in the order they got
     /// it: few, so attaching and detaching only flag them for the commit.
     status_bar_nodes: Vec<Key>,
@@ -1242,6 +1246,7 @@ impl<M: TextEngine> Core<M> {
             resized: Vec::new(),
             env_styled: Default::default(),
             env_scratch: Vec::new(),
+            keyboard_moved: false,
             status_bar_nodes: Vec::new(),
             status_bars_moved: false,
             pointer_none_classes: 0,
