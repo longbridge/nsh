@@ -3534,6 +3534,7 @@ dependencies = [
  "sha2 0.10.9",
  "ttf-parser",
  "unicode-bidi",
+ "unicode-properties",
  "url",
  "zstd",
 ]

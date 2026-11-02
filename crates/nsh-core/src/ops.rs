@@ -1130,7 +1130,7 @@ pub enum PasteBehavior {
 }
 
 /// A bar button UIKit draws itself, with the system's look, symbol or
-/// label (`ios={{ headerRightSystemItem }}`).
+/// label (`ios={{ headerLeftSystemItem }}`, `ios={{ headerRightSystemItem }}`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, PropEnum)]
 pub enum HeaderSystemItem {
     /// A plus (`UIBarButtonSystemItemAdd`).
@@ -1452,6 +1452,21 @@ pub enum ScreenProp {
     /// of `headerRight`. Without a `headerRight`, nothing is drawn there.
     #[prop(ios = "headerRightSystemItem", on = SCREEN)]
     HeaderRightSystemItem(Option<HeaderSystemItem>),
+    /// `ios={{ headerLeftSystemItem }}`: as `headerRightSystemItem`, in the
+    /// leading slot, pressing the first pressable view of `headerLeft`.
+    #[prop(ios = "headerLeftSystemItem", on = SCREEN)]
+    HeaderLeftSystemItem(Option<HeaderSystemItem>),
+    /// `ios={{ headerRightSymbol }}`: UIKit's own bar button showing the SF
+    /// Symbol of that name (`"slider.horizontal.3"`) in the trailing slot,
+    /// in place of the view of `headerRight`; a press on it is a press on
+    /// the first pressable view of `headerRight`. `headerRightSystemItem`
+    /// wins over it; an unknown name draws the view of `headerRight`.
+    #[prop(ios = "headerRightSymbol", on = SCREEN)]
+    HeaderRightSymbol(Option<Arc<str>>),
+    /// `ios={{ headerLeftSymbol }}`: as `headerRightSymbol`, in the leading
+    /// slot, pressing the first pressable view of `headerLeft`.
+    #[prop(ios = "headerLeftSymbol", on = SCREEN)]
+    HeaderLeftSymbol(Option<Arc<str>>),
     /// `headerBackVisible`: the system header's back button shows (default
     /// true; iOS and Android).
     #[prop(js = "headerBackVisible", default = true, on = SCREEN)]
@@ -1579,6 +1594,11 @@ pub enum OverlayProp {
     /// ([`crate::overlay::OverlayConfig::open`]); set by components.
     #[prop(reset = OverlayProp::Open(None))]
     Open(Option<bool>),
+    /// A view inside it laid over the anchor
+    /// ([`crate::overlay::OverlayConfig::cover`]); set by components
+    /// (`nsh-base`'s `Select`: the selected item over the trigger).
+    #[prop(reset = OverlayProp::Cover(None))]
+    Cover(Option<NodeId>),
 }
 
 /// An imperative call on a native view (`ref.focus()` and the like).

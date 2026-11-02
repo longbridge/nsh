@@ -10,8 +10,10 @@ demo: el-select
 A select chooses one value from a list of items: a setting, a filter, a country, a time zone. The app's trigger
 opens the list, presented as each device expects:
 
-- On the desktops and in desktop browsers, a popup at the trigger, at least as wide as the trigger and as tall as its
-  rows up to the room beside it; the keyboard moves through the items and chooses one.
+- On the desktops and in desktop browsers, a popup over the trigger with the selected row laid over the trigger, so
+  the chosen title stays where it was (shadcn/ui's `item-aligned` position), as wide as the trigger (the app's
+  `popupStyle` / `popupClass` width sets another, as `gpui-component`'s `menu_width`) and as tall as its rows up to the room on the screen; with nothing selected it opens below the trigger. The keyboard moves
+  through the items and chooses one.
 - On phones and tablets, a sheet at the bottom of the screen over a backdrop.
 
 The select owns the behavior: the value (the app's, or its own), the open state, the keyboard, typeahead, search,
@@ -182,7 +184,7 @@ opens the list; the app places it (over the trigger's end with `absolute`, where
 The trigger is the app's element, so it shows whatever the app wants for the chosen item: its title, an icon, a
 placeholder while nothing is chosen. In TSX it is the element you pass: it is the combobox and takes the presses, the
 keyboard focus, the expanded state and `disabled` itself, so its own `active:`, `focus:` and `disabled:` classes
-follow the select, its own `onPress` runs too, and the list is placed against it and is at least as wide.
+follow the select, its own `onPress` runs too, and the list is placed against it and is as wide.
 
 ## Open state
 
@@ -334,7 +336,7 @@ pointer highlights the row it moves over; the highlighted row is revealed as the
 
 | | Desktops and desktop browsers | Phones and tablets |
 | --- | --- | --- |
-| The list | a popup at the trigger (`placement`, `align`, `offset`, `margin`), at least as wide as the trigger, as tall as its rows up to the room beside it | a sheet at the bottom over a backdrop, as tall as its rows up to the status bar |
+| The list | a popup over the trigger, the selected row on it (below it while none is), as wide as the trigger unless `popupStyle` sets a width, as tall as its rows up to the room on the screen | a sheet at the bottom over a backdrop, as tall as its rows up to the status bar |
 | Closing it | a choice, Escape, a press outside (which goes on to what is under the pointer) | a choice, the backdrop, the Android back button |
 | Search | the field takes the keyboard as the list opens | the keyboard comes up when the field is pressed |
 | A choice | the press going down chooses, so the search field keeps the keyboard | a tap |
