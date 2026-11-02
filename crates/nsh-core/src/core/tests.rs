@@ -17891,6 +17891,36 @@ fn overlays_anchored_to_content_go_by_what_the_wrapper_draws() {
     let batch = c.commit().unwrap();
     // The trigger (0, 80, 52 × 18) below the first one.
     assert_eq!(frame_of(&batch, 8), Some(rect(0.0, 98.0, 40.0, 20.0)));
+    // A trigger 28 points tall, its 16-point label centered: below its
+    // own bottom edge, not its label's.
+    add(
+        &mut c,
+        16,
+        Tag::View,
+        2,
+        &[
+            ("height", Number(28.0)),
+            ("justifyContent", StyleValue::Str("center")),
+            ("alignSelf", StyleValue::Str("flex-start")),
+        ],
+    );
+    add(
+        &mut c,
+        18,
+        Tag::View,
+        16,
+        &[("width", Number(30.0)), ("height", Number(16.0))],
+    );
+    apply(
+        &mut c,
+        vec![overlay_prop(
+            8,
+            crate::OverlayProp::Anchor(crate::overlay::OverlayAnchor::Content(16)),
+        )],
+    );
+    let batch = c.commit().unwrap();
+    // The trigger (0, 98, 30 × 28) below the second one.
+    assert_eq!(frame_of(&batch, 8), Some(rect(0.0, 126.0, 40.0, 20.0)));
 }
 
 /// The texts a batch lays out.
