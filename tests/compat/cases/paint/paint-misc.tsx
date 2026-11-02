@@ -3,7 +3,7 @@
 // overflow, every pointer cursor, an image's tint, the transform's origin
 // in keywords, percentages, lengths and a list, and backface visibility.
 //
-import { Text, View } from "nsh";
+import { signal, Text, View } from "nsh";
 import { Image } from "nsh";
 
 const CURSORS = [
@@ -33,6 +33,7 @@ const CURSORS = [
 ] as const;
 
 function App() {
+  const hideCursor = signal(false);
   return (
     <View style={{ flex: 1, paddingTop: 64 }}>
       <Text>Misc</Text>
@@ -58,6 +59,11 @@ function App() {
       ))}
       <View testID="cursor-class-nwse" class="cursor-nwse-resize" />
       <View testID="cursor-class-nesw" class="cursor-nesw-resize" />
+      <View
+        testID="cursor-dynamic"
+        style={{ height: 4, cursor: hideCursor() ? "none" : "crosshair" }}
+        onPress={() => hideCursor.set(!hideCursor())}
+      />
       <Image
         testID="tinted"
         src={{ uri: "https://example.com/compat.png" }}
