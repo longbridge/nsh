@@ -2,6 +2,7 @@ import { cleanup, signal, Text, View } from "nsh";
 import { TextView, type TextViewImage } from "nsh/base";
 import { Button, Caption, Card, colors, DemoPage, Segmented } from "../ui";
 import { ImageViewer } from "./ImageViewer";
+import { LucideIcon } from "../icons";
 
 const MARKDOWN = `# Native Shell
 
@@ -179,7 +180,7 @@ mount(Counter);</code></pre>
   </details>
 </article>`;
 
-const EXTENDED = `Thanks @huacnlee and @sunli829 for the review!
+const EXTENDED = `Thanks @huacnlee and @sunli829 for the review! Fixed in #775 and #799.
 
 \`\`\`chart
 Mon 12
@@ -202,6 +203,7 @@ Containers wrap Markdown, like *this*.
 
 const extensions = [
   { name: "mention", pattern: "@(\\w+)" },
+  { name: "issue", pattern: "#(\\d+)" },
   { name: "chart", language: "chart" },
   { name: "callout", tag: "callout" },
   { name: "note", container: "note" },
@@ -294,7 +296,7 @@ function Chart(props: { source: string }) {
 
 function Extensions() {
   return (
-    <Card icon="components" title="Extensions" subtitle="Mentions, a chart block, a <Callout> tag, a :::note container">
+    <Card icon="components" title="Extensions" subtitle="Mentions, issue chips with an icon, a chart block, a <Callout> tag, a :::note container">
       <TextView
         markdown={EXTENDED}
         extensions={extensions}
@@ -304,6 +306,13 @@ function Extensions() {
               return (
                 <View class="translate-y-[7px] rounded-full bg-sky-500/15 px-2">
                   <Text class="text-[14px] font-medium text-sky-700 dark:text-sky-300">@{node.attributes?.["1"]}</Text>
+                </View>
+              );
+            case "issue":
+              return (
+                <View class="flex-row items-center gap-1 rounded-md border border-zinc-500/25 px-1.5" style={{ verticalAlign: "middle", height: 20 }}>
+                  <LucideIcon name="code" size={14} tint={colors.text} />
+                  <Text class="text-[13px] font-semibold">#{node.attributes?.["1"]}</Text>
                 </View>
               );
             case "chart":
