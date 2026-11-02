@@ -1040,7 +1040,11 @@ impl Mounter {
                     }
                     self.animated.retain(|&v| v != id);
                 }
+                let was_screen = self.shaders.draws_screen(id);
                 self.shaders.remove(id);
+                if was_screen {
+                    self.release_root_effect();
+                }
                 self.nav_shaders.remove(&id);
             }
             MountItem::Frame { id, frame } => {
@@ -1372,6 +1376,7 @@ impl Mounter {
             },
             MountItem::Shader { id, layer } => {
                 let scale = self.display_scale();
+                let was_screen = self.shaders.draws_screen(id);
                 let role = layer.as_ref().map(|l| l.role);
                 let screen = matches!(
                     role,
@@ -1400,6 +1405,9 @@ impl Mounter {
                 {
                     self.shaders
                         .set(id, &host, children, &s.style, scale, layer);
+                }
+                if was_screen && !screen {
+                    self.release_root_effect();
                 }
                 // Bindings that came before it.
                 self.push_shader_args(id);
@@ -3097,10 +3105,15 @@ impl Mounter {
                 .topViewController()
                 .and_then(|c| c.downcast::<crate::navigation::ScreenController>().ok())
                 .map(|c| c.screen_id());
-            let shaders = (
-                top.and_then(|id| self.nav_shaders.get(&id)),
-                leaving_id.and_then(|id| self.nav_shaders.get(&id)),
-            );
+            // Less motion asked for: UIKit's own (reduced) motion instead.
+            let shaders = if reduce_motion() {
+                (None, None)
+            } else {
+                (
+                    top.and_then(|id| self.nav_shaders.get(&id)),
+                    leaving_id.and_then(|id| self.nav_shaders.get(&id)),
+                )
+            };
             let scale = self.display_scale();
             let Some(Slot {
                 native: Native::Stack(stack),
@@ -3116,7 +3129,7 @@ impl Mounter {
                     return false;
                 };
                 let rect = view.convertRect_toView(view.bounds(), Some(&window));
-                overlays.nav_overlay(&window, rect, scale, shader, pops)
+                overlays.nav_overlay(id, &window, rect, scale, shader, pops)
             });
             // A page whose options arrive while it is already on screen: the
             // stack itself does not change, and the bar still has to follow.
@@ -3185,12 +3198,12 @@ impl Mounter {
             let shader = self
                 .nav_shaders
                 .get(&id)
-                .filter(|_| modal.changes(shown))
+                .filter(|_| modal.changes(shown) && !reduce_motion())
                 .zip(root.as_ref().and_then(|r| Some((r, r.window()?))));
             let at_once = shader.is_some_and(|(shader, (root, window))| {
                 let rect = root.convertRect_toView(root.bounds(), Some(&window));
                 self.shaders
-                    .nav_overlay(&window, rect, scale, shader, !shown)
+                    .nav_overlay(nsh_core::ROOT_ID, &window, rect, scale, shader, !shown)
             });
             if shown {
                 if let Some(root) = &root {
@@ -3818,6 +3831,18 @@ impl Mounter {
         let scale = self.display_scale();
         if let Some(s) = self.views.get(id as usize).and_then(Option::as_ref) {
             self.shaders.layout(id, &s.style, scale);
+        }
+    }
+
+    /// The root's children leave the container screen shaders draw them
+    /// from once no screen shader is left.
+    fn release_root_effect(&mut self) {
+        if self.shaders.any_screen() {
+            return;
+        }
+        if let Some(root) = self.slot_mut(nsh_core::ROOT_ID) {
+            let view = root.native.view().retain();
+            root.decor.set_effect(&view, false);
         }
     }
 
@@ -4559,4 +4584,10 @@ mod tests {
             320.0
         );
     }
+}
+
+/// The user asked for less motion: pages and dialogs come and go with
+/// UIKit's own motion, not through their `transitionShader`.
+fn reduce_motion() -> bool {
+    objc2_ui_kit::UIAccessibilityIsReduceMotionEnabled()
 }
