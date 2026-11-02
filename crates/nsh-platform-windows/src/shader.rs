@@ -54,7 +54,7 @@ use std::{
 use nsh_core::{
     NodeId, Points,
     animation::AnimationValue,
-    geometry::{Percentage, Size, size},
+    geometry::{Size, size},
     shader::{ShaderInput, ShaderLayer, ShaderRole},
 };
 use nsh_engine::shader::{Renderer, ShaderView};
@@ -76,7 +76,7 @@ use windows_numerics::Matrix3x2;
 
 use crate::{
     geom::Mat4,
-    render::{DrawCx, Pixels, rect_f},
+    render::{DrawCx, Pixels, Readback, rect_f},
     surface::Surface,
     view::{NshView, ViewState},
 };
@@ -107,6 +107,15 @@ pub(crate) struct ShaderState {
     start: Option<(u64, Pixels)>,
     /// The hashes of the pictures it was last given, by input.
     given: [Option<u64>; 4],
+    /// The change stamp its children's picture holds every change up to
+    /// ([`crate::view::change_stamp`]; `None`: it is to be taken): read
+    /// back again only once a view in it changed since.
+    pictured: Option<u64>,
+    /// Where its children are drawn and read back, kept for the next.
+    readback: Readback,
+    /// Where what is behind it is read back, kept for the next, and the
+    /// picture of its box made of it.
+    backdrop: (Readback, Pixels),
 }
 
 /// A frame as a Direct2D bitmap.
@@ -334,6 +343,7 @@ pub(crate) fn set(surface: &Rc<Surface>, view: &NshView, layer: Option<Arc<Shade
         }
         shader.owner = (screen && layer.is_some()).then(|| view.id());
         shader.given = [None; 4];
+        shader.pictured = None;
         shader.view.set_layer(layer);
     }
     target.changed();
@@ -459,6 +469,7 @@ pub(crate) fn start_transition(surface: &Rc<Surface>, view: &NshView, duration: 
         shader.view.start_transition(duration, now);
         shader.until = Some(now + duration);
         shader.given[ShaderInput::To.index()] = None;
+        shader.pictured = None;
     }
     view.changed();
     tick(&view);
@@ -573,8 +584,9 @@ fn frame(surface: &Rc<Surface>, view: &NshView) -> bool {
         }
         shader.view.render(&renderer, now) || ended
     };
+    // Its own frame: no change of the children it pictures.
     if draw {
-        view.changed();
+        view.redraw();
     }
     view.state()
         .shader
@@ -694,11 +706,36 @@ pub(crate) fn draw_effect(cx: &mut DrawCx<'_>, view: &NshView, world: Mat4) -> b
             s.frame.size,
         )
     };
-    if reads
-        && let Some(px) = pixels_of(frame, o, cx.scale)
-        && let Some(pixels) = children(cx, view, o, px)
-    {
-        give(view, input, &pixels);
+    if reads && let Some(px) = pixels_of(frame, o, cx.scale) {
+        // The children are drawn every time (their hosted items take their
+        // places), read back only after a view in it changed.
+        let stamp = crate::view::change_stamp();
+        let (due, mut readback) = {
+            let mut s = view.state_mut();
+            match s.shader.as_mut() {
+                Some(shader) => (
+                    shader.pictured.is_none_or(|at| view.changes() > at),
+                    std::mem::take(&mut shader.readback),
+                ),
+                None => (false, Readback::default()),
+            }
+        };
+        if let Some(target) = children(cx, view, o, px, &mut readback)
+            && due
+        {
+            match readback.read(cx.dc, &target, whole(px)) {
+                Ok(pixels) => {
+                    give(view, input, pixels);
+                    if let Some(shader) = view.state_mut().shader.as_mut() {
+                        shader.pictured = Some(stamp);
+                    }
+                }
+                Err(e) => log::debug!("shader: no picture of the children: {e}"),
+            }
+        }
+        if let Some(shader) = view.state_mut().shader.as_mut() {
+            shader.readback = readback;
+        }
     }
     cx.set_transform(world);
     let state = view.state();
@@ -710,11 +747,17 @@ pub(crate) fn draw_effect(cx: &mut DrawCx<'_>, view: &NshView, world: Mat4) -> b
 }
 
 /// `view`'s children drawn by another context (what is pushed on `cx`
-/// stays as it is) into a bitmap of `px` pixels, `o` points beyond its box,
-/// read back.
-fn children(cx: &mut DrawCx<'_>, view: &NshView, o: f32, px: (u32, u32)) -> Option<Pixels> {
+/// stays as it is) into `readback`'s target bitmap of `px` pixels, `o`
+/// points beyond its box.
+fn children(
+    cx: &mut DrawCx<'_>,
+    view: &NshView,
+    o: f32,
+    px: (u32, u32),
+    readback: &mut Readback,
+) -> Option<ID2D1Bitmap1> {
     let scale = cx.scale;
-    let target = crate::render::target_bitmap(cx.dc, px, scale).ok()?;
+    let target = readback.target(cx.dc, px, scale).ok()?;
     let image: ID2D1Image = target.cast().ok()?;
     let base = Mat4::new().translate(o, o);
     let composed = cx.composed.len();
@@ -723,12 +766,7 @@ fn children(cx: &mut DrawCx<'_>, view: &NshView, o: f32, px: (u32, u32)) -> Opti
     });
     // Web views in it were placed in the picture's coordinates.
     cx.composed.truncate(composed);
-    if !drawn {
-        return None;
-    }
-    crate::render::read_back(cx.dc, &target, whole(px))
-        .map_err(|e| log::debug!("shader: no picture of the children: {e}"))
-        .ok()
+    drawn.then_some(target)
 }
 
 /// Gives `pixels` to `view`'s shader as `input` when they changed.
@@ -789,9 +827,18 @@ pub(crate) fn take_backdrop(cx: &mut DrawCx<'_>, view: &NshView) {
     else {
         return;
     };
+    // Kept from the last read: no bitmap made and nothing allocated again.
+    let Some((mut readback, mut picture)) = view
+        .state_mut()
+        .shader
+        .as_mut()
+        .map(|s| std::mem::take(&mut s.backdrop))
+    else {
+        return;
+    };
     // Layers pushed reach the target when they pop: it is read while they
     // are closed.
-    let pixels = cx.flatten(|dc| {
+    let read = cx.flatten(|dc| {
         // SAFETY: COM calls on the live context and its target; the
         // pending drawing is flushed first.
         let target = unsafe {
@@ -805,35 +852,39 @@ pub(crate) fn take_backdrop(cx: &mut DrawCx<'_>, view: &NshView) {
         let top = y.clamp(0, window.height as i64);
         let right = (x + px.0 as i64).clamp(0, window.width as i64);
         let bottom = (y + px.1 as i64).clamp(0, window.height as i64);
-        let mut data = vec![0; (px.0 * px.1 * 4) as usize];
+        // Transparent beyond the window.
+        picture.width = px.0;
+        picture.height = px.1;
+        picture.data.clear();
+        picture.data.resize((px.0 * px.1 * 4) as usize, 0);
         if right > left && bottom > top {
-            let read = crate::render::read_back(
-                dc,
-                &target,
-                D2D_RECT_U {
-                    left: left as u32,
-                    top: top as u32,
-                    right: right as u32,
-                    bottom: bottom as u32,
-                },
-            )
-            .map_err(|e| log::debug!("shader: backdrop not read: {e}"))
-            .ok()?;
+            let read = readback
+                .read(
+                    dc,
+                    &target,
+                    D2D_RECT_U {
+                        left: left as u32,
+                        top: top as u32,
+                        right: right as u32,
+                        bottom: bottom as u32,
+                    },
+                )
+                .map_err(|e| log::debug!("shader: backdrop not read: {e}"))
+                .ok()?;
             let row = read.width as usize * 4;
             let (dx, dy) = ((left - x) as usize, (top - y) as usize);
             for (i, line) in read.data.chunks(row).enumerate() {
                 let at = ((dy + i) * px.0 as usize + dx) * 4;
-                data[at..at + row].copy_from_slice(line);
+                picture.data[at..at + row].copy_from_slice(line);
             }
         }
-        Some(Pixels {
-            width: px.0,
-            height: px.1,
-            data,
-        })
+        Some(())
     });
-    if let Some(pixels) = pixels {
-        give(view, ShaderInput::Backdrop, &pixels);
+    if read.is_some() {
+        give(view, ShaderInput::Backdrop, &picture);
+    }
+    if let Some(shader) = view.state_mut().shader.as_mut() {
+        shader.backdrop = (readback, picture);
     }
 }
 
@@ -841,9 +892,10 @@ pub(crate) fn take_backdrop(cx: &mut DrawCx<'_>, view: &NshView) {
 /// ([`nsh_core::NavShader`]): an item hosted by a layer view over the
 /// stack (the root for a dialog) that draws recordings of its two sides,
 /// the lower one `sample_from` and the upper one `sample_to`, through the
-/// shader at `nsh.progress`, which navigation moves. Frames come back from
-/// the GPU a frame or two after they are asked for; the side it starts
-/// from shows before the first.
+/// shader as its transition runs (`ShaderView::start_transition`,
+/// backwards when it goes). Frames come back from the GPU a frame or two
+/// after they are asked for; the side it starts from shows before the
+/// first.
 pub(crate) struct NavItem {
     lower: ID2D1Image,
     upper: ID2D1Image,
@@ -855,34 +907,33 @@ pub(crate) struct NavItem {
 struct NavPaint {
     renderer: Rc<Renderer>,
     view: ShaderView,
-    /// The slot that moves `nsh.progress`.
-    slot: u16,
-    progress: f32,
     /// Its sides were read back for the shader.
     given: bool,
     drawn: Option<Drawn>,
 }
 
 impl NavItem {
-    /// `layer` over `lower` and `upper` (recordings in the host's points);
-    /// `None` without a GPU device.
+    /// `layer` over `lower` and `upper` (recordings in the host's points)
+    /// for `duration` from now, `nsh.progress` from 1 to 0 when it goes
+    /// (`reverse`); `None` without a GPU device.
     pub(crate) fn new(
         surface: &Surface,
         layer: &ShaderLayer,
-        lower: ID2D1Image,
-        upper: ID2D1Image,
+        (lower, upper): (ID2D1Image, ID2D1Image),
+        duration: Duration,
         reverse: bool,
     ) -> Option<Self> {
         let renderer = surface.shader_renderer()?;
-        // The pictures cover the host's box; progress moves as an animated
-        // value (one more slot).
-        let layer = layer
-            .clone()
-            .with_overflow(Points::ZERO)
-            .with_progress(Percentage::ZERO, Some(NodeId::MAX));
-        let slot = layer.progress_slot()?;
+        // The pictures cover the host's box.
+        let layer = layer.clone().with_overflow(Points::ZERO);
         let mut view = ShaderView::default();
         view.set_layer(Some(Arc::new(layer)));
+        let now = Instant::now();
+        if reverse {
+            view.start_transition_backwards(duration, now);
+        } else {
+            view.start_transition(duration, now);
+        }
         Some(Self {
             lower,
             upper,
@@ -890,17 +941,10 @@ impl NavItem {
             paint: RefCell::new(NavPaint {
                 renderer,
                 view,
-                slot,
-                progress: if reverse { 1.0 } else { 0.0 },
                 given: false,
                 drawn: None,
             }),
         })
-    }
-
-    /// How much of the upper side shows.
-    pub(crate) fn set_progress(&self, progress: f32) {
-        self.paint.borrow_mut().progress = progress;
     }
 }
 
@@ -965,9 +1009,6 @@ impl crate::view::Hosted for NavItem {
             }
         }
         paint.view.set_size(size(Points(w), Points(h)), cx.scale);
-        paint
-            .view
-            .set_slot(paint.slot, AnimationValue::Number(paint.progress));
         paint.view.render(&renderer, Instant::now());
         let f = paint.view.frame();
         let bitmap = upload(

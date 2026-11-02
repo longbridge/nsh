@@ -195,15 +195,20 @@ Effects, transitions and page shaders sit on the same program, layer and rendere
   (`nsh_core::shader::TransitionShader`, a compiled `Shader`), which sets the same prop. Sources compile once in
   `Core::compile`, the cache `Shader`'s `source` uses too ("Pages and dialogs" below says what the platforms do).
 - **Windows.** Effects and running transitions (screen ones on the root) draw their last frame instead of their
-  children, which are drawn into a target bitmap by a context of their own and read back (`render::read_back`) as
-  the window draws them, and given to the shader when their pixels changed. A transition's `from` is drawn offscreen
+  children, which are drawn into a target bitmap by a context of their own as the window draws them (their hosted
+  items take their places) and read back (`render::Readback`) only once a view in them changed since the last
+  picture (`NshView::changed` stamps the view and every view it is in, `NshView::changes`; a shader's own frame
+  only `redraw`s, which stamps the views it is in), and given to the shader when their pixels changed. The target and
+  the CPU-readable bitmap they are read through, and the pixels, are kept while the size, the scale and the device
+  stay; Direct2D maps the readable bitmap once the GPU has copied into it. A transition's `from` is drawn offscreen
   when it starts (`render::draw_offscreen`). A backdrop is read back from the window's target before the view draws
-  (partial frames draw the view's whole area, overflow included: `render::drawn_area`). Pages and dialogs: recordings
-  (`ID2D1CommandList`) of the host without and with the upper side, drawn into bitmaps and read back once by a
-  hosted `NavItem` over the stack or the root. Without a GPU device an effect draws its children as they are, a
-  transition starts no run and a page or a dialog comes with its own motion. A screen layer leaves the root when the
-  view that mounted it is deleted (unless another screen effect's took its place) or the app stops.
-
+  (partial frames draw the view's whole area, overflow included: `render::drawn_area`), into kept bitmaps and
+  pixels. Pages and dialogs: recordings (`ID2D1CommandList`) of the host without and with the upper side, drawn into
+  bitmaps and read back once by a hosted `NavItem` over the stack or the root, its shader on its own transition
+  clock (`start_transition`, backwards when it goes); a lost device ends them at once. Without a GPU device an
+  effect draws its children as they are, a transition starts no run and a page or a dialog comes with its own
+  motion, as it does when the user asks for less motion. A screen layer leaves the root when the view that mounted
+  it is deleted (unless another screen effect's took its place) or the app stops.
 ## Pages and dialogs
 
 What every platform does with a page's or a dialog's `MountItem::NavShader`, so an app sees the same thing

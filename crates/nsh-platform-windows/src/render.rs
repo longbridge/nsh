@@ -1207,29 +1207,89 @@ pub(crate) fn read_back(
     source: &ID2D1Bitmap1,
     rect: D2D_RECT_U,
 ) -> windows::core::Result<Pixels> {
-    let (width, height) = (rect.right - rect.left, rect.bottom - rect.top);
-    let read = bitmap(
-        dc,
-        (width, height),
-        1.0,
-        D2D1_BITMAP_OPTIONS_CPU_READ | D2D1_BITMAP_OPTIONS_CANNOT_DRAW,
-    )?;
-    // SAFETY: COM calls on bitmaps of the live device; the mapped memory
-    // is copied before `Unmap`.
-    unsafe {
-        read.CopyFromBitmap(Some(&D2D_POINT_2U { x: 0, y: 0 }), source, Some(&rect))?;
-        let mapped = read.Map(D2D1_MAP_OPTIONS_READ)?;
-        let mut data = Vec::with_capacity((width * height * 4) as usize);
-        for row in 0..height {
-            let start = mapped.bits.add((row * mapped.pitch) as usize);
-            data.extend_from_slice(std::slice::from_raw_parts(start, (width * 4) as usize));
+    let mut once = Readback::default();
+    once.read(dc, source, rect)?;
+    Ok(once.pixels)
+}
+
+/// The bitmaps a picture is drawn into and read back through, and the
+/// pixels it is read into: kept while its size, its scale and the device
+/// stay, so a picture taken again makes no bitmap and allocates nothing.
+/// (Direct2D maps a CPU-readable bitmap only once the copy into it is
+/// done: the read waits for the GPU.)
+#[derive(Default)]
+pub(crate) struct Readback {
+    target: Option<(BitmapKey, ID2D1Bitmap1)>,
+    read: Option<(BitmapKey, ID2D1Bitmap1)>,
+    pixels: Pixels,
+}
+
+/// What a kept bitmap was made for: its size in pixels, its scale (an
+/// `f32`'s bits) and the device generation ([`gfx::generation`]).
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct BitmapKey((u32, u32), u32, u64);
+
+impl Readback {
+    /// Its target bitmap: `size` pixels at `scale` pixels per point, made
+    /// again for another size or scale, or after a device loss.
+    pub(crate) fn target(
+        &mut self,
+        dc: &ID2D1DeviceContext,
+        size: (u32, u32),
+        scale: f32,
+    ) -> windows::core::Result<ID2D1Bitmap1> {
+        let key = BitmapKey(size, scale.to_bits(), gfx::generation());
+        if let Some((k, bitmap)) = &self.target
+            && *k == key
+        {
+            return Ok(bitmap.clone());
         }
-        read.Unmap()?;
-        Ok(Pixels {
-            width,
-            height,
-            data,
-        })
+        let bitmap = target_bitmap(dc, size, scale)?;
+        self.target = Some((key, bitmap.clone()));
+        Ok(bitmap)
+    }
+
+    /// `rect` of `source` (a bitmap of `dc`'s device) read back into its
+    /// pixels, rows packed: premultiplied BGRA.
+    pub(crate) fn read(
+        &mut self,
+        dc: &ID2D1DeviceContext,
+        source: &ID2D1Bitmap1,
+        rect: D2D_RECT_U,
+    ) -> windows::core::Result<&Pixels> {
+        let size = (rect.right - rect.left, rect.bottom - rect.top);
+        let key = BitmapKey(size, 1.0f32.to_bits(), gfx::generation());
+        let read = match &self.read {
+            Some((k, bitmap)) if *k == key => bitmap.clone(),
+            _ => {
+                let bitmap = bitmap(
+                    dc,
+                    size,
+                    1.0,
+                    D2D1_BITMAP_OPTIONS_CPU_READ | D2D1_BITMAP_OPTIONS_CANNOT_DRAW,
+                )?;
+                self.read = Some((key, bitmap.clone()));
+                bitmap
+            }
+        };
+        let (width, height) = size;
+        let data = &mut self.pixels.data;
+        data.clear();
+        // SAFETY: COM calls on bitmaps of the live device; the mapped memory
+        // is copied before `Unmap`.
+        unsafe {
+            read.CopyFromBitmap(Some(&D2D_POINT_2U { x: 0, y: 0 }), source, Some(&rect))?;
+            let mapped = read.Map(D2D1_MAP_OPTIONS_READ)?;
+            data.reserve((width * height * 4) as usize);
+            for row in 0..height {
+                let start = mapped.bits.add((row * mapped.pitch) as usize);
+                data.extend_from_slice(std::slice::from_raw_parts(start, (width * 4) as usize));
+            }
+            read.Unmap()?;
+        }
+        self.pixels.width = width;
+        self.pixels.height = height;
+        Ok(&self.pixels)
     }
 }
 
@@ -1458,6 +1518,9 @@ fn touching(a: &RECT, b: &RECT) -> bool {
 }
 
 fn device_lost(surface: &Rc<Surface>) {
+    // The pages and dialogs changing through a shader drew with the lost
+    // device: they end at once.
+    crate::navigation::device_lost(surface);
     *surface.swap.borrow_mut() = None;
     if let Some(c) = surface.composition() {
         c.device_lost();
@@ -1583,6 +1646,7 @@ fn draw_into(
 
 /// Pixels read back (a snapshot, a shader's picture): BGRA,
 /// premultiplied, `width * 4` bytes per row.
+#[derive(Default)]
 pub(crate) struct Pixels {
     /// Width in pixels.
     pub(crate) width: u32,

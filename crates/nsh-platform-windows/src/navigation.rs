@@ -530,25 +530,17 @@ enum Motion {
 
 /// A page's or a dialog's transition through a shader that runs: a layer
 /// view over the stack (the root for a dialog) hosting a
-/// [`crate::shader::NavItem`], which navigation moves on its own clock
-/// while the views stand where they end under it.
+/// [`crate::shader::NavItem`], whose shader runs on its own clock while
+/// the views stand where they end under it.
 struct NavRun {
     layer: NshView,
-    item: Rc<crate::shader::NavItem>,
-    start: std::time::Instant,
     duration: Duration,
-    /// It goes: `nsh.progress` from 1 to 0.
-    reverse: bool,
 }
 
 impl NavRun {
+    /// The item draws its next frame (its shader runs on its own clock).
     fn tick(&self) {
-        let t = (self.start.elapsed().as_secs_f32()
-            / self.duration.as_secs_f32().max(f32::EPSILON))
-        .min(1.0);
-        self.item
-            .set_progress(if self.reverse { 1.0 - t } else { t });
-        self.layer.changed();
+        self.layer.redraw();
     }
 }
 
@@ -559,6 +551,11 @@ impl Drop for NavRun {
 }
 
 impl Motion {
+    /// A dialog's coming or going drawn through its shader.
+    fn modal_through_shader(&self) -> bool {
+        matches!(self, Motion::ModalIn { .. } | Motion::ModalOut { .. }) && self.overlay().is_some()
+    }
+
     fn overlay(&self) -> Option<&NavRun> {
         match self {
             Motion::Push { shader, .. }
@@ -630,8 +627,13 @@ impl Motion {
         ) else {
             return;
         };
-        let Some(item) = crate::shader::NavItem::new(surface, &shader.layer, lower, top, reverse)
-        else {
+        let Some(item) = crate::shader::NavItem::new(
+            surface,
+            &shader.layer,
+            (lower, top),
+            shader.duration,
+            reverse,
+        ) else {
             return;
         };
         let item = Rc::new(item);
@@ -649,10 +651,7 @@ impl Motion {
         layer.insert_before(&host, None);
         let run = NavRun {
             layer,
-            item,
-            start: std::time::Instant::now(),
             duration: shader.duration,
-            reverse,
         };
         match self {
             Motion::Push { shader, .. }
@@ -850,6 +849,16 @@ impl Nav {
         }
     }
 
+    /// The `transitionShader` page or dialog `id` comes and goes through:
+    /// none when the user asks for less motion (it then comes and goes with
+    /// its own reduced `animation`).
+    fn shader(&self, surface: &Surface, id: NodeId) -> Option<nsh_core::NavShader> {
+        if reduce_motion(surface) {
+            return None;
+        }
+        self.shaders.get(&id).cloned()
+    }
+
     /// Shows only the top screen of `stack`, where it belongs.
     fn settle(&mut self, surface: &Surface, stack: NodeId) {
         let Some(st) = self.stacks.get(&stack) else {
@@ -866,22 +875,30 @@ impl Nav {
         }
     }
 
+    /// Starts `motion` through `shader` for the shader's duration; where
+    /// there is none or it cannot be drawn, as the page's or the dialog's
+    /// own motion for `own` (`None`: its `animation` is `"none"`, so it
+    /// ends at once).
     fn start(
         &mut self,
         surface: &Rc<Surface>,
-        duration: Duration,
+        own: Option<Duration>,
         mut motion: Motion,
         shader: Option<&nsh_core::NavShader>,
     ) {
         Self::apply(surface, &motion, 0.0);
-        let mut duration = duration;
         if let Some(shader) = shader {
             motion.add_overlay(surface, shader);
-            if let Some(run) = motion.overlay() {
-                duration = run.duration;
-            }
-            Self::apply(surface, &motion, 0.0);
         }
+        let duration = match (motion.overlay(), own) {
+            (Some(run), _) => run.duration,
+            (None, Some(own)) => own,
+            (None, None) => {
+                self.end(surface, motion);
+                return;
+            }
+        };
+        Self::apply(surface, &motion, 0.0);
         self.transitions.push(duration, motion);
         if self.ticking {
             return;
@@ -935,7 +952,7 @@ impl Nav {
         };
         let leaving_animation = old.and_then(|id| {
             let s = self.screens.get(&id)?;
-            Some((s.config.animation, self.shaders.get(&id).cloned()))
+            Some((s.config.animation, self.shader(surface, id)))
         });
         for id in &prev {
             if find(*id).is_none() {
@@ -965,14 +982,19 @@ impl Nav {
         let animation = if pushing {
             self.screens
                 .get(&new)
-                .map(|s| (s.config.animation, self.shaders.get(&new).cloned()))
+                .map(|s| (s.config.animation, self.shader(surface, new)))
         } else {
             leaving_animation
         };
         let (animation, shader) = animation.unwrap_or_default();
-        let Some((duration, fade)) = screen_motion(animation, reduce_motion(surface)) else {
+        // The shader replaces the page's own motion, which runs where it
+        // does not (`"none"`: at once).
+        let own = screen_motion(animation, reduce_motion(surface));
+        if own.is_none() && shader.is_none() {
             return;
-        };
+        }
+        let fade = own.is_some_and(|(_, fade)| fade);
+        let own = own.map(|(duration, _)| duration);
         let below = if pushing { find(old) } else { find(new) };
         if let Some(b) = &below {
             set_concealed(surface, b, false);
@@ -988,7 +1010,7 @@ impl Nav {
                 fade,
                 shader: None,
             };
-            self.start(surface, duration, motion, shader.as_ref());
+            self.start(surface, own, motion, shader.as_ref());
         } else {
             let leaving = match find(old) {
                 Some(v) => {
@@ -1026,7 +1048,7 @@ impl Nav {
                 popped: None,
                 shader: None,
             };
-            self.start(surface, duration, motion, shader.as_ref());
+            self.start(surface, own, motion, shader.as_ref());
         }
     }
 
@@ -1057,10 +1079,12 @@ impl Nav {
         let (animation, shader) = self
             .screens
             .get(&top)
-            .map(|s| (s.config.animation, self.shaders.get(&top).cloned()))
+            .map(|s| (s.config.animation, self.shader(surface, top)))
             .unwrap_or_default();
-        match (screen_motion(animation, reduce_motion(surface)), find(top)) {
-            (Some((duration, fade)), Some(leaving)) => {
+        let own = screen_motion(animation, reduce_motion(surface));
+        match (own.is_some() || shader.is_some(), find(top)) {
+            (true, Some(leaving)) => {
+                let fade = own.is_some_and(|(_, fade)| fade);
                 if let Some(b) = &below {
                     set_concealed(surface, b, false);
                 }
@@ -1074,7 +1098,7 @@ impl Nav {
                     popped: Some(top),
                     shader: None,
                 };
-                self.start(surface, duration, motion, shader.as_ref());
+                self.start(surface, own.map(|(d, _)| d), motion, shader.as_ref());
             }
             _ => {
                 self.settle(surface, stack_id);
@@ -1102,10 +1126,11 @@ impl Nav {
     /// Takes modal `id` away natively (it leaves as an image of its last
     /// frame), then reports `onDismiss` unless `reported` already.
     fn close_modal(&mut self, surface: &Rc<Surface>, id: NodeId, reported: bool) {
-        self.finish(
-            surface,
-            |m| matches!(m, Motion::ModalIn { view, .. } if view.id() == id),
-        );
+        // Its own coming, and any dialog's change through a shader, end
+        // first.
+        self.finish(surface, |m| {
+            m.modal_through_shader() || matches!(m, Motion::ModalIn { view, .. } if view.id() == id)
+        });
         self.order.retain(|&m| m != id);
         let recorded = self.take_image(id);
         let Some(m) = self.modals.get_mut(&id) else {
@@ -1113,13 +1138,13 @@ impl Nav {
         };
         let Some(view) = m.view.take() else { return };
         let restore = m.restore.take();
-        let motion = modal_motion(m.config.animation, reduce_motion(surface));
-        let shader = self.shaders.get(&id).cloned();
+        let own = modal_motion(m.config.animation, reduce_motion(surface));
+        let shader = self.shader(surface, id);
         let frame = view.state().frame;
         // Recorded when the batch began tearing it down, or now (the user
         // closed it: it is whole).
-        let image = match motion {
-            Some(_) if frame.size.width.0 > 0.0 => {
+        let image = match own.is_some() || shader.is_some() {
+            true if frame.size.width.0 > 0.0 => {
                 recorded.or_else(|| is_shown(&view).then(|| record(surface, &view)).flatten())
             }
             _ => None,
@@ -1136,8 +1161,8 @@ impl Nav {
             // Not while another modal still covers it.
             crate::text_input::focus(&field);
         }
-        match (motion, image) {
-            (Some((duration, fade)), Some(picture)) => {
+        match image {
+            Some(picture) => {
                 let layer = layer_view();
                 set_frame(&layer, frame);
                 let item: Rc<dyn Hosted> = Rc::new(picture);
@@ -1149,12 +1174,12 @@ impl Nav {
                 let motion = Motion::ModalOut {
                     dismiss: (!reported).then_some(id),
                     layer,
-                    fade,
+                    fade: own.is_some_and(|(_, fade)| fade),
                     shader: None,
                 };
-                self.start(surface, duration, motion, shader.as_ref());
+                self.start(surface, own.map(|(d, _)| d), motion, shader.as_ref());
             }
-            _ => {
+            None => {
                 if !reported {
                     surface.event(id, EventKind::Dismiss, EventPayload::None);
                 }
@@ -1168,18 +1193,20 @@ impl Nav {
             return;
         };
         let Some(view) = m.view.clone() else { return };
-        let shader = self.shaders.get(&id).cloned();
-        match modal_motion(m.config.animation, reduce_motion(surface)) {
-            Some((duration, fade)) => {
-                let motion = Motion::ModalIn {
-                    view,
-                    fade,
-                    shader: None,
-                };
-                self.start(surface, duration, motion, shader.as_ref());
-            }
-            None => surface.event(id, EventKind::Show, EventPayload::None),
+        let own = modal_motion(m.config.animation, reduce_motion(surface));
+        // A dialog's change through a shader that still runs ends first.
+        self.finish(surface, Motion::modal_through_shader);
+        let shader = self.shader(surface, id);
+        if own.is_none() && shader.is_none() {
+            surface.event(id, EventKind::Show, EventPayload::None);
+            return;
         }
+        let motion = Motion::ModalIn {
+            view,
+            fade: own.is_some_and(|(_, fade)| fade),
+            shader: None,
+        };
+        self.start(surface, own.map(|(d, _)| d), motion, shader.as_ref());
     }
 
     /// The user asks modal `id` to close (going back): it hears
@@ -1348,10 +1375,11 @@ pub(crate) fn removing(surface: &Rc<Surface>, view: &NshView) {
                         .is_some_and(|st| st.screens.top() == Some(id))
                 });
                 if on_top {
-                    let animated = nav
-                        .screens
-                        .get(&id)
-                        .is_none_or(|s| screen_motion(s.config.animation, reduce).is_some());
+                    let animated = nav.shader(surface, id).is_some()
+                        || nav
+                            .screens
+                            .get(&id)
+                            .is_none_or(|s| screen_motion(s.config.animation, reduce).is_some());
                     nav.capture(surface, &child, animated);
                 }
             }
@@ -1361,7 +1389,8 @@ pub(crate) fn removing(surface: &Rc<Surface>, view: &NshView) {
                     .get(&id)
                     .and_then(|m| m.view.as_ref().map(|v| (v == &child, m.config.animation)));
                 if let Some((true, animation)) = presented {
-                    let animated = modal_motion(animation, reduce).is_some();
+                    let animated = modal_motion(animation, reduce).is_some()
+                        || nav.shader(surface, id).is_some();
                     nav.capture(surface, &child, animated);
                 }
             }
@@ -1430,6 +1459,16 @@ pub(crate) fn modal_config(surface: &Rc<Surface>, view: &NshView, config: &Modal
     let id = view.id();
     nav.modals.entry(id).or_default().config = *config;
     nav.size_modal(surface, id);
+}
+
+/// The graphics device was lost: the changes drawn through a shader end at
+/// once (their recordings and frames were the lost device's), settled and
+/// reported.
+pub(crate) fn device_lost(surface: &Rc<Surface>) {
+    let Ok(mut nav) = surface.nav.try_borrow_mut() else {
+        return;
+    };
+    nav.finish(surface, |m| m.overlay().is_some());
 }
 
 /// `NavShader`: how page or dialog `id` comes and goes through a shader.
@@ -1677,5 +1716,92 @@ mod tests {
             screen.child_views(),
             vec![s.backdrop.clone(), content, more, header]
         );
+    }
+
+    /// A surface without a GPU device (the tests open none), a stack on it
+    /// with screens 4 and 6 (on top), and the shader of screen 6.
+    fn shader_stack() -> (Rc<Surface>, NshView, nsh_core::NavShader) {
+        let surface = Surface::new(Default::default());
+        surface.without_shader_renderer();
+        let stack = stack(&mut surface.nav.borrow_mut(), &surface.root, 2, &[4, 6]);
+        let shader = nsh_core::shader::Shader::compile(
+            "fn shade(uv: vec2f) -> vec4f { return mix(sample_from(uv), sample_to(uv), nsh.progress); }",
+        )
+        .expect("a shader");
+        let layer = nsh_core::shader::ShaderLayer::new(shader, &[], &mut Vec::new());
+        let shader = nsh_core::NavShader {
+            layer: std::sync::Arc::new(layer),
+            duration: Duration::from_millis(500),
+        };
+        (surface, stack, shader)
+    }
+
+    fn push(stack: &NshView) -> Motion {
+        let screens = stack.child_views();
+        Motion::Push {
+            stack: stack.clone(),
+            entering: screens[1].clone(),
+            below: Some(screens[0].clone()),
+            dim: None,
+            fade: false,
+            shader: None,
+        }
+    }
+
+    #[test]
+    fn a_page_shader_without_a_device_keeps_the_pages_own_motion() {
+        let (surface, stack, shader) = shader_stack();
+        let mut nav = surface.nav.borrow_mut();
+        nav.start(
+            &surface,
+            Some(nsh_core::navigation::SLIDE),
+            push(&stack),
+            Some(&shader),
+        );
+        let running = nav.transitions.take(|_| true);
+        assert_eq!(running.len(), 1, "the page slides");
+        assert!(running[0].overlay().is_none());
+        // `animation: "none"`: at once, the page on top settled.
+        nav.start(&surface, None, push(&stack), Some(&shader));
+        assert!(nav.transitions.is_empty());
+        let screens = stack.child_views();
+        assert!(screens[0].state().concealed && !screens[1].state().concealed);
+    }
+
+    #[test]
+    fn less_motion_leaves_the_shader_out() {
+        let (surface, _stack, shader) = shader_stack();
+        let mut nav = surface.nav.borrow_mut();
+        nav.shaders.insert(6, shader);
+        assert!(nav.shader(&surface, 6).is_some());
+        let mut env = surface.environment.get();
+        env.reduce_motion = true;
+        surface.environment.set(env);
+        assert!(nav.shader(&surface, 6).is_none());
+    }
+
+    #[test]
+    fn a_change_that_ends_early_takes_its_overlay_with_it() {
+        let (surface, stack, _shader) = shader_stack();
+        let layer = layer_view();
+        layer.insert_before(&stack, None);
+        let mut motion = push(&stack);
+        if let Motion::Push { shader, .. } = &mut motion {
+            *shader = Some(NavRun {
+                layer: layer.clone(),
+                duration: Duration::from_millis(500),
+            });
+        }
+        surface
+            .nav
+            .borrow_mut()
+            .transitions
+            .push(Duration::from_millis(500), motion);
+        // Another change of the stack, or the device lost, ends it at once.
+        device_lost(&surface);
+        assert!(surface.nav.borrow().transitions.is_empty());
+        assert!(layer.parent_view().is_none(), "its overlay is gone");
+        let screens = stack.child_views();
+        assert!(screens[0].state().concealed && !screens[1].state().concealed);
     }
 }
