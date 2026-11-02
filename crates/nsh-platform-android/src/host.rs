@@ -23,7 +23,7 @@ use nsh_core::{
 };
 use nsh_engine::{
     App, Assets, Bundle, ColorScheme, Edges, Engine, EngineConfig, EngineControl, Environment,
-    Idiom, Locale, MountSink, Policy, Root,
+    Idiom, Lifecycle, Locale, MountSink, Policy, Root,
 };
 
 use crate::{
@@ -1056,7 +1056,7 @@ extern "system" fn Java_com_longbridge_nsh_Native_environment(
 ) {
     // SAFETY: Java passes its live handle.
     let host = unsafe { host(handle) };
-    let mut v = [0f32; 13];
+    let mut v = [0f32; 14];
     if env.get_float_array_region(&values, 0, &mut v).is_err() {
         return;
     }
@@ -1080,6 +1080,12 @@ extern "system" fn Java_com_longbridge_nsh_Native_environment(
         1 => Idiom::Pad,
         3 => Idiom::Tv,
         _ => Idiom::Phone,
+    };
+    // `NshView`'s activity: resumed, paused or stopped.
+    environment.lifecycle = match v[13] as u8 {
+        1 => Lifecycle::Inactive,
+        2 => Lifecycle::Background,
+        _ => Lifecycle::Active,
     };
     if let Ok(tag) = env.get_string(&locale) {
         environment.locale = Locale::parse(&String::from(tag)).unwrap_or_default();

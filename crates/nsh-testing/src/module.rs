@@ -648,6 +648,28 @@ impl From<ColorScheme> for nsh_core::platform::ColorScheme {
     }
 }
 
+/// Whether the app is in use (`lifecycle()`).
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PropEnum)]
+pub enum Lifecycle {
+    /// In the foreground and taking input.
+    #[default]
+    Active,
+    /// Visible without the focus.
+    Inactive,
+    /// Not visible.
+    Background,
+}
+
+impl From<Lifecycle> for nsh_core::platform::Lifecycle {
+    fn from(state: Lifecycle) -> Self {
+        match state {
+            Lifecycle::Active => nsh_core::platform::Lifecycle::Active,
+            Lifecycle::Inactive => nsh_core::platform::Lifecycle::Inactive,
+            Lifecycle::Background => nsh_core::platform::Lifecycle::Background,
+        }
+    }
+}
+
 /// The platform a headless app is opened as.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PropEnum)]
 pub enum Platform {
@@ -1913,6 +1935,13 @@ impl App {
         scheme: ColorScheme,
     ) -> Result<(), JsError> {
         step(&this, move |app| app.set_color_scheme(scheme.into())).await
+    }
+
+    /// Moves the app to `state`, as the system does when the user leaves it
+    /// (`"background"`), switches to another app or window (`"inactive"`)
+    /// and comes back (`"active"`); `lifecycle()` follows. Headless only.
+    pub async fn set_lifecycle(this: Instance<Self>, state: Lifecycle) -> Result<(), JsError> {
+        step(&this, move |app| app.set_lifecycle(state.into())).await
     }
 
     /// The text on the clipboard now, `null` when it holds none.
