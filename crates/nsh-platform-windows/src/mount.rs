@@ -74,6 +74,9 @@ impl Mounter {
                 view.unparent();
             }
         }
+        // A screen effect's or transition's layer is the root's: it goes
+        // with the views that mounted it.
+        root.state_mut().shader = None;
         self.views.insert(ROOT_ID, root);
         self.layout_animation = None;
     }
@@ -169,6 +172,7 @@ impl Mounter {
                 if let Some(view) = self.views.remove(*id) {
                     crate::navigation::removing(surface, &view);
                     crate::native::deleted(surface, &view);
+                    crate::shader::deleted(surface, &view);
                     // A removal animation detaches the view when it ends.
                     if !crate::transition::removing(surface, &view, self.layout_animation.as_ref())
                     {

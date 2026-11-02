@@ -572,6 +572,10 @@ impl Motion {
     /// recordings of its lower side (the upper view concealed) and of its
     /// upper side, the views at rest.
     fn add_overlay(&mut self, surface: &Surface, shader: &nsh_core::NavShader) {
+        // Without a GPU device it keeps its own motion.
+        if surface.shader_renderer().is_none() {
+            return;
+        }
         let rest = |v: &NshView| {
             set_shift(v, (0.0, 0.0));
             set_fade(v, 1.0);
@@ -626,13 +630,11 @@ impl Motion {
         ) else {
             return;
         };
-        let item = Rc::new(crate::shader::NavItem::new(
-            surface,
-            &shader.layer,
-            lower,
-            top,
-            reverse,
-        ));
+        let Some(item) = crate::shader::NavItem::new(surface, &shader.layer, lower, top, reverse)
+        else {
+            return;
+        };
+        let item = Rc::new(item);
         let frame = host.state().frame;
         let layer = layer_view();
         set_frame(

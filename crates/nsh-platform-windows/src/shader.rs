@@ -34,6 +34,11 @@
 //! their two sides through a [`NavItem`] hosted over the stack (the root
 //! for a dialog), `crate::navigation`'s.
 //!
+//! Without a GPU device ([`Surface::shader_renderer`] has none) a view
+//! shows its background and children: an effect draws its children as
+//! they are, a transition starts no run, and a page or a dialog comes with
+//! its own motion.
+//!
 //! Animated uniforms are written while the animation graph is borrowed
 //! ([`set_args`]), so the views they start are queued and started once it
 //! is not ([`start_pending`]).
@@ -225,8 +230,12 @@ impl ShaderState {
             .is_some_and(|l| l.shader.inputs().contains(input))
     }
 
-    /// Whether it draws instead of its children now.
+    /// Whether it draws instead of its children now (never without a GPU
+    /// device: no frame would come).
     fn replaces(&self) -> bool {
+        if self.renderer.is_none() {
+            return false;
+        }
         match self.role() {
             Some(ShaderRole::Effect | ShaderRole::Screen) => true,
             Some(ShaderRole::Transition | ShaderRole::ScreenTransition) => {
@@ -261,17 +270,31 @@ fn is_screen(role: Option<ShaderRole>) -> bool {
     )
 }
 
-/// The view a layer mounted on `view` draws on: the root for a screen
-/// effect's or transition's view.
-fn target(view: &NshView) -> NshView {
+/// The view a layer mounted on `view` draws on: `view`, or the root for a
+/// screen effect's or transition's view while the root draws its layer
+/// (`None` once another screen effect's took its place).
+fn target(view: &NshView) -> Option<NshView> {
     if !view.state().shader.as_ref().is_some_and(|s| s.screen) {
-        return view.clone();
+        return Some(view.clone());
     }
     let mut root = view.clone();
     while let Some(parent) = root.parent_view() {
         root = parent;
     }
-    root
+    let owns = root
+        .state()
+        .shader
+        .as_ref()
+        .is_some_and(|s| s.owner == Some(view.id()));
+    owns.then_some(root)
+}
+
+/// `view` was deleted: the layer of a screen effect or transition it
+/// mounted leaves the root, unless another one's took its place.
+pub(crate) fn deleted(surface: &Rc<Surface>, view: &NshView) {
+    if view.state().shader.as_ref().is_some_and(|s| s.screen) {
+        set(surface, view, None);
+    }
 }
 
 /// Mounts `layer` on `view` (`None`: it shows nothing of its own).
@@ -321,7 +344,9 @@ pub(crate) fn set(surface: &Rc<Surface>, view: &NshView, layer: Option<Arc<Shade
 /// graph is borrowed: a view that starts rendering is queued
 /// ([`start_pending`]).
 pub(crate) fn set_args(view: &NshView, values: &[(u16, AnimationValue)]) {
-    let view = target(view);
+    let Some(view) = target(view) else {
+        return;
+    };
     let mut state = view.state_mut();
     let Some(shader) = state.shader.as_mut() else {
         return;
@@ -380,10 +405,8 @@ fn whole((right, bottom): (u32, u32)) -> D2D_RECT_U {
 /// before the rest of its batch): what shows now becomes its `sample_from`,
 /// and `nsh.progress` goes from 0 to 1 over `duration`.
 pub(crate) fn start_transition(surface: &Rc<Surface>, view: &NshView, duration: Duration) {
-    let view = if view.state().shader.as_ref().is_some_and(|s| s.screen) {
-        surface.root.clone()
-    } else {
-        view.clone()
+    let Some(view) = target(view) else {
+        return;
     };
     let scale = surface.scale();
     let (running, o, frame) = {
@@ -391,10 +414,13 @@ pub(crate) fn start_transition(surface: &Rc<Surface>, view: &NshView, duration: 
         let Some(shader) = s.shader.as_ref() else {
             return;
         };
-        if !matches!(
-            shader.role(),
-            Some(ShaderRole::Transition | ShaderRole::ScreenTransition)
-        ) {
+        // Without a GPU device no run starts: the children change at once.
+        if shader.renderer.is_none()
+            || !matches!(
+                shader.role(),
+                Some(ShaderRole::Transition | ShaderRole::ScreenTransition)
+            )
+        {
             return;
         }
         (shader.replaces(), shader.view.overflow().0, s.frame.size)
@@ -739,7 +765,11 @@ fn give(view: &NshView, input: ShaderInput, pixels: &Pixels) {
 pub(crate) fn take_backdrop(cx: &mut DrawCx<'_>, view: &NshView) {
     let (o, frame) = {
         let s = view.state();
-        let Some(shader) = s.shader.as_ref().filter(|s| s.reads(ShaderInput::Backdrop)) else {
+        let Some(shader) = s
+            .shader
+            .as_ref()
+            .filter(|s| s.renderer.is_some() && s.reads(ShaderInput::Backdrop))
+        else {
             return;
         };
         (shader.view.overflow().0, s.frame.size)
@@ -823,10 +853,10 @@ pub(crate) struct NavItem {
 }
 
 struct NavPaint {
-    renderer: Option<Rc<Renderer>>,
+    renderer: Rc<Renderer>,
     view: ShaderView,
     /// The slot that moves `nsh.progress`.
-    slot: Option<u16>,
+    slot: u16,
     progress: f32,
     /// Its sides were read back for the shader.
     given: bool,
@@ -834,36 +864,38 @@ struct NavPaint {
 }
 
 impl NavItem {
-    /// `layer` over `lower` and `upper` (recordings in the host's points).
+    /// `layer` over `lower` and `upper` (recordings in the host's points);
+    /// `None` without a GPU device.
     pub(crate) fn new(
         surface: &Surface,
         layer: &ShaderLayer,
         lower: ID2D1Image,
         upper: ID2D1Image,
         reverse: bool,
-    ) -> Self {
+    ) -> Option<Self> {
+        let renderer = surface.shader_renderer()?;
         // The pictures cover the host's box; progress moves as an animated
         // value (one more slot).
         let layer = layer
             .clone()
             .with_overflow(Points::ZERO)
             .with_progress(Percentage::ZERO, Some(NodeId::MAX));
-        let slot = layer.progress_slot();
+        let slot = layer.progress_slot()?;
         let mut view = ShaderView::default();
         view.set_layer(Some(Arc::new(layer)));
-        Self {
+        Some(Self {
             lower,
             upper,
             reverse,
             paint: RefCell::new(NavPaint {
-                renderer: surface.shader_renderer(),
+                renderer,
                 view,
                 slot,
                 progress: if reverse { 1.0 } else { 0.0 },
                 given: false,
                 drawn: None,
             }),
-        }
+        })
     }
 
     /// How much of the upper side shows.
@@ -915,44 +947,40 @@ impl crate::view::Hosted for NavItem {
         }
         let mut paint = self.paint.borrow_mut();
         let paint = &mut *paint;
-        let bitmap = match (paint.renderer.clone(), paint.slot) {
-            (Some(renderer), Some(slot)) => {
-                if !paint.given {
-                    paint.given = true;
-                    for (input, image) in [
-                        (ShaderInput::From, &self.lower),
-                        (ShaderInput::To, &self.upper),
-                    ] {
-                        let pixels = read_image(cx, image, (w, h));
-                        paint.view.set_input(
-                            &renderer,
-                            input,
-                            pixels
-                                .as_ref()
-                                .map(|p| (&p.data[..], p.width, p.height, p.width * 4)),
-                        );
-                    }
-                }
-                paint.view.set_size(size(Points(w), Points(h)), cx.scale);
-                paint
-                    .view
-                    .set_slot(slot, AnimationValue::Number(paint.progress));
-                paint.view.render(&renderer, Instant::now());
-                let f = paint.view.frame();
-                upload(
-                    cx.dc,
-                    &mut paint.drawn,
-                    &f.pixels,
-                    (f.width, f.height),
-                    f.stride,
-                    f.serial,
-                )
+        let renderer = paint.renderer.clone();
+        if !paint.given {
+            paint.given = true;
+            for (input, image) in [
+                (ShaderInput::From, &self.lower),
+                (ShaderInput::To, &self.upper),
+            ] {
+                let pixels = read_image(cx, image, (w, h));
+                paint.view.set_input(
+                    &renderer,
+                    input,
+                    pixels
+                        .as_ref()
+                        .map(|p| (&p.data[..], p.width, p.height, p.width * 4)),
+                );
             }
-            _ => None,
-        };
+        }
+        paint.view.set_size(size(Points(w), Points(h)), cx.scale);
+        paint
+            .view
+            .set_slot(paint.slot, AnimationValue::Number(paint.progress));
+        paint.view.render(&renderer, Instant::now());
+        let f = paint.view.frame();
+        let bitmap = upload(
+            cx.dc,
+            &mut paint.drawn,
+            &f.pixels,
+            (f.width, f.height),
+            f.stride,
+            f.serial,
+        );
         match bitmap {
             Some(bitmap) => draw_bitmap(cx, &bitmap, size(Points(w), Points(h)), 0.0),
-            // No frame yet (or no GPU): the side it starts from.
+            // No frame yet: the side it starts from.
             None => {
                 let image = if self.reverse {
                     &self.upper
@@ -976,5 +1004,126 @@ impl crate::view::Hosted for NavItem {
 
     fn hit(&self, _x: f32, _y: f32, _size: (f32, f32)) -> bool {
         false
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use nsh_core::{MountItem, ROOT_ID, ViewKind, shader::Shader};
+
+    use super::*;
+
+    /// A surface without a GPU device: the tests open none.
+    fn surface() -> Rc<Surface> {
+        let surface = Surface::new(Default::default());
+        surface.without_shader_renderer();
+        surface
+    }
+
+    fn layer(role: ShaderRole) -> Arc<ShaderLayer> {
+        let shader =
+            Shader::compile("fn shade(uv: vec2f) -> vec4f {\n    return vec4f(uv, 0.0, 1.0);\n}\n")
+                .expect("a valid shader");
+        let mut layer = ShaderLayer::new(shader, &[], &mut Vec::new());
+        layer.role = role;
+        Arc::new(layer)
+    }
+
+    fn apply(surface: &Rc<Surface>, items: &[MountItem]) {
+        for item in items {
+            surface.mounter.borrow_mut().apply(surface, item);
+        }
+    }
+
+    /// A view `id` under the root, showing a layer of `role`.
+    fn mount(surface: &Rc<Surface>, id: NodeId, role: ShaderRole) -> NshView {
+        apply(
+            surface,
+            &[
+                MountItem::Create {
+                    id,
+                    kind: ViewKind::View,
+                },
+                MountItem::Insert {
+                    parent: ROOT_ID,
+                    child: id,
+                    before: None,
+                },
+                MountItem::Shader {
+                    id,
+                    layer: Some(layer(role)),
+                },
+            ],
+        );
+        surface.view(id).expect("the view")
+    }
+
+    /// The view that gave the layer the root draws, and whether it draws
+    /// one.
+    fn root_layer(surface: &Surface) -> (Option<NodeId>, bool) {
+        let s = surface.root.state();
+        let shader = s.shader.as_ref();
+        (
+            shader.and_then(|s| s.owner),
+            shader.is_some_and(|s| s.view.layer().is_some()),
+        )
+    }
+
+    #[test]
+    fn a_deleted_screen_effect_leaves_the_root() {
+        let surface = surface();
+        for (id, role) in [(2, ShaderRole::Screen), (4, ShaderRole::ScreenTransition)] {
+            mount(&surface, id, role);
+            assert_eq!(root_layer(&surface), (Some(id), true));
+            apply(&surface, &[MountItem::Delete { id }]);
+            assert_eq!(root_layer(&surface), (None, false));
+        }
+    }
+
+    #[test]
+    fn deleting_a_replaced_screen_effect_keeps_the_new_one() {
+        let surface = surface();
+        let first = mount(&surface, 2, ShaderRole::Screen);
+        let second = mount(&surface, 4, ShaderRole::ScreenTransition);
+        assert_eq!(root_layer(&surface), (Some(4), true));
+        // The first one's animated uniforms and transitions no longer
+        // reach the root.
+        assert!(target(&first).is_none());
+        assert!(target(&second).is_some_and(|t| t == surface.root));
+        apply(&surface, &[MountItem::Delete { id: 2 }]);
+        assert_eq!(root_layer(&surface), (Some(4), true));
+        apply(&surface, &[MountItem::Delete { id: 4 }]);
+        assert_eq!(root_layer(&surface), (None, false));
+    }
+
+    #[test]
+    fn a_screen_effect_goes_with_the_views() {
+        let surface = surface();
+        mount(&surface, 2, ShaderRole::Screen);
+        surface.mounter.borrow_mut().clear();
+        assert_eq!(root_layer(&surface), (None, false));
+    }
+
+    /// Without a GPU device an effect and a screen effect draw their
+    /// children as they are, and a transition starts no run.
+    #[test]
+    fn a_shader_that_cannot_draw_shows_the_children() {
+        let surface = surface();
+        let fx = mount(&surface, 2, ShaderRole::Effect);
+        assert!(!effect(&fx.state()));
+        let transition = mount(&surface, 4, ShaderRole::Transition);
+        apply(
+            &surface,
+            &[MountItem::ShaderTransition {
+                id: 4,
+                duration: Duration::from_millis(300),
+            }],
+        );
+        assert!(!effect(&transition.state()));
+        let s = transition.state();
+        assert!(s.shader.as_ref().is_some_and(|s| s.until.is_none()));
+        drop(s);
+        mount(&surface, 6, ShaderRole::Screen);
+        assert!(!effect(&surface.root.state()));
     }
 }

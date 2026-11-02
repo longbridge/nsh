@@ -266,6 +266,13 @@ impl Surface {
             .clone()
     }
 
+    /// Settles [`Surface::shader_renderer`] as opened without a device, as
+    /// on a machine with none (tests open no GPU device).
+    #[cfg(test)]
+    pub(crate) fn without_shader_renderer(&self) {
+        let _ = self.shader_renderer.set(None);
+    }
+
     /// The surface with `key`, if it is alive.
     pub(crate) fn by_key(key: u64) -> Option<Rc<Surface>> {
         SURFACES.with(|s| s.borrow().get(&key).and_then(Weak::upgrade))
