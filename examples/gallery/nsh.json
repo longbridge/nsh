@@ -46,6 +46,7 @@
         "https"
       ]
     },
-    "picker": true
+    "picker": true,
+    "speech": true
   }
 }

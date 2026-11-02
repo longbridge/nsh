@@ -438,6 +438,24 @@ impl AttachmentAlignments {
     }
 }
 
+/// Whether the grapheme cluster `c` is drawn as a color emoji: a character
+/// of emoji presentation or one asked for with U+FE0F, unless U+FE0E asks
+/// for text.
+fn is_emoji_presentation(c: &str) -> bool {
+    use unicode_properties::{EmojiStatus, UnicodeEmoji};
+    !c.contains('\u{FE0E}')
+        && c.chars().any(|ch| {
+            ch == '\u{FE0F}'
+                || matches!(
+                    ch.emoji_status(),
+                    EmojiStatus::EmojiPresentation
+                        | EmojiStatus::EmojiPresentationAndModifierBase
+                        | EmojiStatus::EmojiPresentationAndEmojiComponent
+                        | EmojiStatus::EmojiPresentationAndModifierAndEmojiComponent
+                )
+        })
+}
+
 /// The character standing for an attachment.
 pub const ATTACHMENT_CHAR: char = '\u{FFFC}';
 
@@ -530,12 +548,40 @@ impl AttributedText {
     }
 
     /// Appends `s` with `style`, merging with the previous run when the
-    /// style is identical.
+    /// style is identical. Italic text keeps its color emoji upright, in
+    /// runs of their own.
     pub fn push(&mut self, s: &str, style: ResolvedTextStyle) {
         if s.is_empty() {
             return;
         }
         let s = &*style.transform.apply(s);
+        if !style.italic || s.is_ascii() {
+            self.push_run(s, style);
+            return;
+        }
+        // Emoji fonts have no italic face: Chrome and Android slant them,
+        // WebKit and CoreText keep them upright, as every platform does here.
+        let upright = ResolvedTextStyle {
+            italic: false,
+            ..style
+        };
+        let (mut run, mut at) = (0, 0);
+        while at < s.len() {
+            let end = crate::text_edit::next_cluster(s, at);
+            if is_emoji_presentation(&s[at..end]) {
+                self.push_run(&s[run..at], style);
+                self.push_run(&s[at..end], upright);
+                run = end;
+            }
+            at = end;
+        }
+        self.push_run(&s[run..], style);
+    }
+
+    fn push_run(&mut self, s: &str, style: ResolvedTextStyle) {
+        if s.is_empty() {
+            return;
+        }
         let len = s.encode_utf16().count() as u32;
         self.text.push_str(s);
         match self.spans.last_mut() {
@@ -1235,6 +1281,20 @@ impl MeasureCache {
     }
 }
 
+/// The TrueType or OpenType data of a font file, which the text engines
+/// register: `data` itself, or what a WOFF or WOFF2 file holds,
+/// decompressed (WOFF2's transformed glyph tables rebuilt).
+pub fn font_data(data: &[u8]) -> Result<std::borrow::Cow<'_, [u8]>, String> {
+    let unwrapped = match data.get(..4) {
+        Some(b"wOFF") => wuff::decompress_woff1(data),
+        Some(b"wOF2") => wuff::decompress_woff2(data),
+        _ => return Ok(std::borrow::Cow::Borrowed(data)),
+    };
+    unwrapped
+        .map(std::borrow::Cow::Owned)
+        .map_err(|e| format!("the WOFF font does not decompress: {e:?}"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1255,6 +1315,48 @@ mod tests {
         assert_eq!(t.spans.len(), 2);
         assert_eq!((t.spans[0].start, t.spans[0].end), (0, 4));
         assert_eq!((t.spans[1].start, t.spans[1].end), (4, 5));
+    }
+
+    #[test]
+    fn italic_text_keeps_color_emoji_upright() {
+        let italic = ResolvedTextStyle {
+            italic: true,
+            ..Default::default()
+        };
+        let runs = |s: &str| {
+            let mut t = AttributedText::default();
+            t.push(s, italic);
+            let units: Vec<u16> = t.text.encode_utf16().collect();
+            t.spans
+                .iter()
+                .map(|s| {
+                    let text = String::from_utf16(&units[s.start as usize..s.end as usize]);
+                    (text.unwrap(), s.style.italic)
+                })
+                .collect::<Vec<_>>()
+        };
+        let run = |s: &str, italic: bool| (s.to_owned(), italic);
+        assert_eq!(
+            runs("斜体 abc 😀😀 end"),
+            [
+                run("斜体 abc ", true),
+                run("😀😀", false),
+                run(" end", true)
+            ]
+        );
+        // Sequences stay whole: ZWJ, skin tone, flag, keycap, U+FE0F.
+        assert_eq!(runs("👩‍💻👍🏽🇨🇳#️⃣❤️"), [run("👩‍💻👍🏽🇨🇳#️⃣❤️", false)]);
+        // Text presentation by default, or asked for with U+FE0E.
+        assert_eq!(runs("© ❤ ☺ 😀\u{FE0E}"), [run("© ❤ ☺ 😀\u{FE0E}", true)]);
+
+        // Upright text is one run, and pushes merge across the emoji.
+        let mut t = AttributedText::default();
+        t.push("a😀", ResolvedTextStyle::default());
+        assert_eq!(t.spans.len(), 1);
+        t.push("😀", italic);
+        t.push("b", italic);
+        assert_eq!(t.spans.len(), 2);
+        assert_eq!((t.spans[0].end, t.spans[1].start), (5, 5));
     }
 
     #[test]
@@ -1490,5 +1592,32 @@ mod tests {
                 size(px(5.5), px(12.0))
             )]
         );
+    }
+
+    #[test]
+    fn woff_and_woff2_fonts_decompress_to_the_font_they_hold() {
+        let ttf: &[u8] =
+            include_bytes!("../../../tests/compat/cases/layout/fonts/Pacifico-Regular.ttf");
+        let face = |data: &[u8]| {
+            let face = ttf_parser::Face::parse(data, 0).expect("a font");
+            let family = face
+                .names()
+                .into_iter()
+                .find(|n| n.name_id == ttf_parser::name_id::FAMILY && n.is_unicode())
+                .and_then(|n| n.to_string());
+            (family, face.number_of_glyphs(), face.glyph_index('P'))
+        };
+        let original = face(ttf);
+        assert_eq!(original.0.as_deref(), Some("Pacifico"));
+        // TrueType comes back as it is.
+        assert!(matches!(font_data(ttf), Ok(std::borrow::Cow::Borrowed(_))));
+        for wrapped in [
+            &include_bytes!("../tests/fonts/Pacifico-Regular.woff")[..],
+            &include_bytes!("../tests/fonts/Pacifico-Regular.woff2")[..],
+        ] {
+            let data = font_data(wrapped).expect("decompressed");
+            assert_eq!(face(&data), original);
+        }
+        assert!(font_data(b"wOF2 and nothing else").is_err());
     }
 }

@@ -126,7 +126,7 @@ mount(App);
 ```
 
 
-`Carousel` 及其部件来自 [`nsh/base`](../modules/nsh-base.md)，在 Rust 中是 `nsh-base` crate。显示的幻灯片是应用的 `index`：滑动、控件或按键用 `onChange` 报告下一张，轮播滚动到应用传回的 `index`。在应用回应一次滑动之前，滑动停下的那张保持显示，所以滑动不会弹回。没有 `index` 时，轮播从 `defaultIndex` 开始自己保存。在 Rust 中，`carousel()`、`carousel_content()`、`carousel_item()`、`carousel_previous()`、`carousel_next()`、`carousel_pagination()` 和 `carousel_pagination_item()` 创建这些部件，每个 prop 有一个 setter（`.index(..)`），每个事件有一个监听方法（`.on_change(..)`），另有类型化的样式方法，内容用 `.child(..)`。
+`Carousel` 及其部件来自 [`nsh/base`](../modules/nsh-base.md)，在 Rust 中是 `nsh-base` crate。显示的幻灯片是应用的 `index`：滑动、控件或按键用 `onChange` 报告下一张，轮播滚动到应用传回的 `index`。在应用用新的 `index` 回应一次滑动之前，滑动停下的那张保持显示，所以滑动不会弹回。没有 `index` 时，轮播从 `defaultIndex` 开始自己保存。在 Rust 中，`carousel()`、`carousel_content()`、`carousel_item()`、`carousel_previous()`、`carousel_next()`、`carousel_pagination()` 和 `carousel_pagination_item()` 创建这些部件，每个 prop 有一个 setter（`.index(..)`），每个事件有一个监听方法（`.on_change(..)`），另有类型化的样式方法，内容用 `.child(..)`。
 
 ## Props
 
@@ -193,8 +193,8 @@ mount(App);
 | `onChange`（`Carousel`） | `.on_change(\|index: &u32\| ..)` | 用户切换到了另一张幻灯片：滑动、滚轮或触控板停在它上面，或者控件、分页项或按键请求了它。`{ index }` 就是这张幻灯片。应用设置新的 `index` 不会报告。 |
 | `onDragStart`（`Carousel`） | `.on_drag_start(\|\| ..)` | 用户开始拖动内容（手指、触控板）。 |
 | `onDragEnd`（`Carousel`） | `.on_drag_end(\|\| ..)` | 用户拖动的内容停下了。 |
-| `onFocus`（`Carousel`） | `.on_focus(\|\| ..)` | 键盘焦点进入轮播：轮播本身或它的某个控件。在它们之间移动不会报告。 |
-| `onBlur`（`Carousel`） | `.on_blur(\|\| ..)` | 键盘焦点离开了轮播及其控件。 |
+| `onFocus`（`Carousel`） | `.on_focus(\|\| ..)` | 键盘焦点来到轮播自身的视图、上一张或下一张控件，或某个分页项。在它们之间移动不会报告。幻灯片里可聚焦的视图用它自己的 `onFocus` 报告。 |
+| `onBlur`（`Carousel`） | `.on_blur(\|\| ..)` | 键盘焦点离开了轮播自身的视图、它的控件和分页项。 |
 
 ## 部件
 
@@ -210,7 +210,7 @@ mount(App);
 
 ## 每屏多张幻灯片
 
-幻灯片的宽度由它自己的类决定，因此一排卡片就是视口里的多张幻灯片。每张幻灯片的起点是一个吸附点：内容停下时，这张幻灯片位于第一张所在的位置，所以第一张前的内边距会保留在每一张前面。在滚动范围的末尾，无法到达该位置的幻灯片与最后一张停在一起，下一张也停在那里：
+幻灯片的宽度由它自己的类决定，因此一排卡片就是视口里的多张幻灯片。每张幻灯片的起点是一个吸附点：内容停下时，这张幻灯片位于第一张所在的位置，所以第一张前的内边距会保留在每一张前面。在滚动范围的末尾，无法到达该位置的幻灯片与最后一张停在一起，下一张也停在那里。`index` 指位于第一个位置的幻灯片；与最后一张停在一起的几张显示同一个位置，滑动到那里时报告其中的第一张：
 
 ```tsx
 <Carousel accessibilityLabel="合集">
@@ -236,7 +236,7 @@ mount(App);
 
 ## 自动切换的幻灯片
 
-自动切换的横幅由应用实现：用一个计时器设置 `index`。轮播会报告用户何时在操作它，计时器在这些时候暂停，符合 [WAI-ARIA 轮播模式](https://www.w3.org/WAI/ARIA/apg/patterns/carousel/) 的要求：拖动前后的 `onDragStart` / `onDragEnd`，键盘焦点在其中时的 `onFocus` / `onBlur`，以及包在外面的视图上的指针进出。减少动态效果时请关闭它，并提供一个停止它的按钮（轮换控件）：
+自动切换的横幅由应用实现：用一个计时器设置 `index`。轮播会报告用户何时在操作它，计时器在这些时候暂停，符合 [WAI-ARIA 轮播模式](https://www.w3.org/WAI/ARIA/apg/patterns/carousel/) 的要求：拖动前后的 `onDragStart` / `onDragEnd`，键盘焦点在轮播、它的控件或分页上时的 `onFocus` / `onBlur`，以及包在外面的视图上的指针进出。减少动态效果时请关闭它，并提供一个停止它的按钮（轮换控件）：
 
 ```tsx
 import { cleanup, effect, reduceMotion, signal, Text, View } from "nsh";
@@ -286,13 +286,15 @@ effect(() => {
 
 ## 键盘
 
-在 macOS 和 Web 上，Tab 会到达接受按压的视图，轮播是键盘焦点的一站，它的控件也是。当它或它的某个控件持有焦点时：
+在 macOS 和 Web 上，Tab 会到达接受按压的视图，轮播是键盘焦点的一站，它的控件和分页项也是。当其中之一持有焦点时：
 
 | 按键 | 作用 |
 |---|---|
 | 左、右（纵向时为上、下） | 移到上一张或下一张，循环时越过两端。 |
 | Home、End | 移到第一张或最后一张。 |
 | 空格、回车 | 按下有焦点的控件或分页项。 |
+
+在从右到左的布局里，横向轮播的幻灯片从右边开始，左键移到下一张，右键移到上一张；纵向轮播仍用上、下键。持有焦点的控件变为禁用时（最后一张上的下一张），焦点交给轮播，按键在那里继续生效。
 
 ## 动效
 
