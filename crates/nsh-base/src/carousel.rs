@@ -39,7 +39,7 @@ use nsh_core::{
     prelude::*,
 };
 
-use crate::keys::bind_while;
+use crate::keys::bind_while_directed;
 
 /// How far apart two offsets may be and still be one snap point: layout's
 /// rounding, and a scroll view resting within a point of its target.
@@ -83,7 +83,7 @@ enum Step {
 }
 
 /// The keys of a horizontal carousel (`gpui-component`'s: Left and Right
-/// on its axis, Home and End).
+/// on its axis, traded in a right-to-left layout, Home and End).
 const HORIZONTAL_KEYS: &[(&str, bool, Step)] = &[
     ("left", true, Step::Previous),
     ("right", true, Step::Next),
@@ -1032,8 +1032,9 @@ pub enum CarouselEvent {
 /// The keyboard, as `gpui-component`'s: the carousel is a stop of the
 /// keyboard focus where views are (macOS, the web), and while it, one of
 /// its controls or a pagination item has the focus, Left and Right (Up
-/// and Down when vertical) move to the previous and next slide and Home
-/// and End to the first and last. A control that turns disabled with the
+/// and Down when vertical) move to the previous and next slide (in a
+/// right-to-left layout, where the slides run from the right, Right and
+/// Left) and Home and End to the first and last. A control that turns disabled with the
 /// focus (next on the last slide) hands it to the carousel.
 #[component]
 pub fn Carousel(props: CarouselProps, cx: Scope<CarouselEvent>) -> impl IntoElement {
@@ -1048,7 +1049,7 @@ pub fn Carousel(props: CarouselProps, cx: Scope<CarouselEvent>) -> impl IntoElem
     };
     {
         let (focused, ctl) = (ctl.0.focused, ctl.clone());
-        bind_while(move || focused.get() > 0, keys, move |step| ctl.key(step));
+        bind_while_directed(move || focused.get() > 0, keys, move |step| ctl.key(step));
     }
     let root = ctl.0.root;
     let (focus, blur) = (ctl.clone(), ctl);
