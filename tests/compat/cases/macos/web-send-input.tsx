@@ -1,11 +1,14 @@
 // A case of the API's test suite (docs/dev/compatibility.md): a web view's
 // ref giving its page trusted input with `sendInput`, which the macos
-// domain's capabilities grant (`webview.input`). A script cannot observe
-// a ref's commands; the case checks that the calls of each form are made.
+// domain's capabilities grant (`webview.input`), and `WebView.inputAvailable()`
+// saying so (macOS delivers it). A script cannot observe a ref's commands;
+// the case checks that the calls of each form are made.
 import { Text, View, WebView, signal } from "nsh";
 
 function App() {
   const sent = signal("");
+  const available = signal("asking");
+  WebView.inputAvailable().then((v) => available.set(`Input available: ${v}`));
   let page: any;
   return (
     <View style={{ flex: 1, paddingTop: 64 }}>
@@ -20,6 +23,7 @@ function App() {
       >
         <Text>Send</Text>
       </View>
+      <Text>{available()}</Text>
       <Text>{sent()}</Text>
       <WebView
         ref={(n: any) => (page = n)}

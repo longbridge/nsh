@@ -323,6 +323,22 @@ Trusted input carries user activation (it may open windows, write the clipboard,
 
 Like a click, `sendInput` takes the keyboard focus for the web view, away from the app's own `Input`. The page handles input on its own schedule: a click's events can still be on their way when the next call starts, so let a click settle (a frame or so) before typing after it. macOS delivers the input; the other platforms ignore it for now.
 
+Before offering anything that depends on it, ask whether it works here: `web_input_available()` (`WebView.inputAvailable()`) resolves `true` only where the platform delivers the input and the app holds `webview.input`, so it is `false` on platforms that ignore the call and in apps without the grant.
+
+```rust tabs
+use nsh_core::prelude::*;
+
+let input = signal(false);
+spawn(async move { input.set(web_input_available().await) });
+```
+
+```tsx tabs
+import { signal, WebView } from "nsh";
+
+const input = signal(false);
+WebView.inputAvailable().then((available) => input.set(available));
+```
+
 ### Which sites a web view may show
 
 If your `nsh.json` declares `"capabilities"`, a web view may only show and navigate to the hosts listed under `webview`:

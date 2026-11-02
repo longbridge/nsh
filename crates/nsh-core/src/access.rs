@@ -1912,7 +1912,10 @@ mod tests {
             Capabilities::from_json(&serde_json::json!({ "webview": { "input": "yes" } })).is_err()
         );
         // It round-trips, and the embedding app may withhold it.
-        assert_eq!(Capabilities::from_json(&caps(input).to_json()), Ok(caps(input)));
+        assert_eq!(
+            Capabilities::from_json(&caps(input).to_json()),
+            Ok(caps(input))
+        );
         let narrowed = Access {
             declared: caps(input),
             granted: Some(caps(r#"{ "webview": { "hosts": ["*"] } }"#)),

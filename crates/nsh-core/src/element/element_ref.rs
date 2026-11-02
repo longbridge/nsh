@@ -260,7 +260,9 @@ impl ElementRef {
     }
 
     /// Gives a web view's page `input` as the user's own: its events are
-    /// trusted. macOS delivers it; the other platforms ignore it for now.
+    /// trusted. Needs the `webview.input` capability; macOS delivers it,
+    /// the other platforms ignore it for now
+    /// ([`web_input_available`](super::web_input_available) tells).
     pub fn send_input(&self, input: crate::WebInput) {
         self.send(Command::SendInput(input));
     }

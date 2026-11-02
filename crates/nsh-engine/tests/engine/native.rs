@@ -52,6 +52,14 @@ fn start_with(
     app: &str,
     declared: Option<nsh_core::access::Capabilities>,
 ) -> (Engine, Receiver<MountBatch>) {
+    start_in(app, declared, Default::default())
+}
+
+fn start_in(
+    app: &str,
+    declared: Option<nsh_core::access::Capabilities>,
+    environment: nsh_core::platform::Environment,
+) -> (Engine, Receiver<MountBatch>) {
     // One directory per app started: the tests run in parallel.
     static STARTED: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
     let n = STARTED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -78,7 +86,7 @@ fn start_with(
         refuse_connections: None,
         filesystem: None,
         assets: None,
-        environment: Default::default(),
+        environment,
         header_heights: (nsh_core::Points(44.0), nsh_core::Points(96.0)),
         limits: nsh_engine::Limits::default(),
         ui_sets: Vec::new(),
@@ -390,4 +398,54 @@ fn a_web_view_ref_sends_trusted_input_to_its_view() {
         let (_, sent) = sent_input(declared, Duration::from_secs(1));
         assert_eq!(sent, []);
     }
+}
+
+const WEB_INPUT_AVAILABLE_APP: &str = r#"import { mount, signal, Text, WebView } from "nsh";
+
+function App() {
+  const available = signal("asking");
+  WebView.inputAvailable().then((v: boolean) => available.set(`web input ${v}`));
+  return <Text>{available()}</Text>;
+}
+
+mount(App);
+"#;
+
+/// What `WebView.inputAvailable()` resolves with on a platform that does
+/// (`platform`) or does not deliver trusted web input, with the
+/// capabilities `declared`.
+fn web_input_available(platform: bool, declared: Option<nsh_core::access::Capabilities>) -> String {
+    let environment = nsh_core::platform::Environment {
+        web_input: platform,
+        ..Default::default()
+    };
+    let (_engine, rx) = start_in(WEB_INPUT_AVAILABLE_APP, declared, environment);
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    while std::time::Instant::now() < deadline {
+        let Ok(batch) = rx.recv_timeout(Duration::from_millis(200)) else {
+            continue;
+        };
+        if let Some(shown) = texts(&batch)
+            .into_iter()
+            .find(|t| t.starts_with("web input"))
+        {
+            return shown;
+        }
+    }
+    panic!("WebView.inputAvailable() did not resolve");
+}
+
+#[test]
+fn web_view_input_available_needs_the_platform_and_the_grant() {
+    use nsh_core::access::Capabilities;
+    let granted = || {
+        Some(
+            Capabilities::from_json(&json!({ "webview": { "hosts": [], "input": true } })).unwrap(),
+        )
+    };
+    assert_eq!(web_input_available(true, granted()), "web input true");
+    assert_eq!(web_input_available(false, granted()), "web input false");
+    let hosts = Capabilities::from_json(&json!({ "webview": { "hosts": [] } })).unwrap();
+    assert_eq!(web_input_available(true, Some(hosts)), "web input false");
+    assert_eq!(web_input_available(true, None), "web input false");
 }

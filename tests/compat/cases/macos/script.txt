@@ -165,5 +165,7 @@ covers [nsh] openUrl
 covers [nsh] Image
 # web-send-input
 tap id:case-web-send-input
+expect Input available: true
 tap id:send
 expect Sent input
+covers [nsh] WebView

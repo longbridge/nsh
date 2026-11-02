@@ -2826,6 +2826,7 @@ fn ui_environment(env: &Environment, window: Size<Points>) -> nsh_core::element:
         screen_color: env.screen_color,
         file_requests: env.file_requests,
         speech: env.speech,
+        web_input: env.web_input,
     }
 }
 

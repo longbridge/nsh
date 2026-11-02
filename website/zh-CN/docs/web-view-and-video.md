@@ -318,6 +318,22 @@ setTimeout(() => {
 
 和点击一样，`sendInput` 会把键盘焦点交给网页视图，应用自己的 `Input` 随之失去焦点。页面按自己的节奏处理输入：点击的事件在下一次调用开始时可能仍在途中，所以点击后先等它生效（大约一帧）再输入。目前由 macOS 投递这些输入，其他平台暂时忽略。
 
+在提供依赖它的功能之前，先确认它在当前环境下可用：`web_input_available()`（`WebView.inputAvailable()`）只有在平台会投递输入、并且应用拥有 `webview.input` 授权时才得到 `true`；在忽略这个调用的平台上，或者应用没有这项授权时，结果都是 `false`。
+
+```rust tabs
+use nsh_core::prelude::*;
+
+let input = signal(false);
+spawn(async move { input.set(web_input_available().await) });
+```
+
+```tsx tabs
+import { signal, WebView } from "nsh";
+
+const input = signal(false);
+WebView.inputAvailable().then((available) => input.set(available));
+```
+
 ### 网页视图可以显示哪些网站
 
 如果 `nsh.json` 声明了 `"capabilities"`，网页视图只能显示并导航到 `webview` 下列出的主机：
