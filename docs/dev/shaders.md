@@ -146,7 +146,7 @@ each platform that draws them does it; the others ignore `MountItem::ShaderTrans
 
 | Platform | Pictures | Hides the children, keeps their input | Over them | Pages and dialogs |
 |---|---|---|---|---|
-| macOS (AppKit) | `renderInContext:` of the children's container (`NshView::ensure_container`) without its mask, at the window's backing scale (a screen's: all the root shows but the frames over it); the backdrop: the root with the view's layer hidden | an empty `mask` on the container's layer (AppKit hit-tests views) | the frames' sublayer at `zPosition` 1e6, `overflow` points beyond the box; a screen's on the root | the motion drawn through a layer over the stack (the root for a dialog) from pictures of it without and with the upper side (a page or dialog that left: its last image), taken on the first display frame, the coming side again on each; the views at rest under it until it ends (`navigation::Motion::Shader`); popping and dismissing run backwards |
+| macOS (AppKit) | `renderInContext:` of the children's container (`NshView::ensure_container`) without its mask, at the window's backing scale (a screen's: all the root shows but the frames over it); the backdrop: the root with the view's layer hidden | an empty `mask` on the container's layer (AppKit hit-tests views), which the decoration's clipping leaves in place until they show again (`decor::hide_children`); the root's while any screen shader hides it | the frames' sublayer at `zPosition` 1e6, `overflow` points beyond the box; a screen's on the root, which it leaves when its view is deleted or the app stops | the motion drawn through a layer over the stack (the root for a dialog) from pictures of it without and with the upper side (a page or dialog that left: its last image), taken on the first display frame, the coming side again on each; the views at rest under it until it ends (`navigation::Motion::Shader`); popping and dismissing run backwards |
 
 macOS retakes an effect's pictures on the display frame after the core says they changed (`MountItem::ShaderInput`) or
 the platform changed a view in them (`NshView::changed`, `moved`, `redraw_rect`), at most once per frame; a transition
@@ -154,6 +154,10 @@ pictures its children (or its running frame) as its `from` when it starts and ke
 `renderInContext:` draws no video or web page, nor backdrop blur or glass. The pictures of views AppKit has just shown
 again (navigation hides the screens under the top one) wait for the next display frame: until AppKit displays the
 window their layers are out of the tree, where they draw y up.
+
+Where there is no GPU device (`Renderer::new` is `None`) macOS masks no children: an effect or a screen effect
+shows them as they are, a transition starts no run, and a page's or a dialog's `transitionShader` leaves the change
+to its own `animation`.
 
 On Android the layer stays in `libnsh`: the encoder sends Java only whether a view shows a shader (opcode `SHADER`,
 35, in `encode.rs` ↔ `Mounter.java`), Java reports the size in pixels (`Native.shaderSize`), and the layer goes to

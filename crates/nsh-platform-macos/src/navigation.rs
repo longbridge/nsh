@@ -269,8 +269,8 @@ impl Motion {
 
     /// Draws `self` through `shader` instead: pictures of the view it
     /// happens in without and with the upper side (what comes, or what
-    /// leaves: backwards), its views at rest. `self` when there is no GPU
-    /// device.
+    /// leaves: backwards), its views at rest. `self` when there is nothing
+    /// to draw it over (its views at rest: [`Nav::start`] puts them back).
     fn through(self, surface: &Surface, shader: &nsh_core::NavShader) -> Motion {
         let rest = |v: &NshView| {
             set_shift(v, (0.0, 0.0));
@@ -873,7 +873,15 @@ impl Nav {
     ) {
         self.apply(surface, &motion, 0.0);
         let (duration, motion) = match shader {
-            Some(shader) => (shader.duration, motion.through(surface, shader)),
+            Some(shader) => match motion.through(surface, shader) {
+                motion @ Motion::Shader { .. } => (shader.duration, motion),
+                // Nothing to draw it over: the motion itself, from its
+                // start.
+                motion => {
+                    self.apply(surface, &motion, 0.0);
+                    (duration, motion)
+                }
+            },
             None => (duration, motion),
         };
         self.transitions.push(duration, motion);
@@ -910,10 +918,15 @@ impl Nav {
     }
 
     /// The `transitionShader` page or dialog `id` comes and goes through
-    /// (none when motion is reduced).
+    /// (none when motion is reduced, or where there is no GPU device to
+    /// draw it: the page or dialog then comes and goes with its own
+    /// `animation`).
     fn shader(&self, surface: &Surface, id: NodeId) -> Option<nsh_core::NavShader> {
         let reduce = surface.environment.get().reduce_motion;
-        self.shaders.get(&id).filter(|_| !reduce).cloned()
+        self.shaders
+            .get(&id)
+            .filter(|_| !reduce && surface.shaders.renderer().is_some())
+            .cloned()
     }
 
     /// Shows the app's screens of `stack` after a batch changed them.

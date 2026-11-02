@@ -17,9 +17,14 @@
 //! the shader: the children move into a container (as for clipping,
 //! [`NshView::ensure_container`]) whose layer an empty mask hides while the
 //! shader's frames show (AppKit hit-tests views, not what shows, so they
-//! keep their clicks), and the frames' layer goes above the container,
-//! `overflow` points beyond the box. A screen effect or transition does the
-//! same with the surface's root. The pictures a shader reads are the
+//! keep their clicks; [`crate::decor::hide_children`], which the
+//! decoration's own clipping leaves in place), and the frames' layer goes
+//! above the container, `overflow` points beyond the box. Where there is
+//! no GPU device the children show as they are. A screen effect or
+//! transition does the same with the surface's root, whose children stay
+//! hidden while any of them hides them; its layer leaves the root when it
+//! is deleted ([`deleted`]) or the app stops ([`clear`]). The pictures a
+//! shader reads are the
 //! container rendered with `renderInContext:` (without its mask) and, for
 //! `sample_backdrop`, the root with the view left out, taken again on the
 //! frame after the core says they changed ([`input_changed`]) or the UI
@@ -30,7 +35,8 @@
 //!
 //! A page's or a dialog's `transitionShader` runs over the stack or the
 //! surface as a [`NavOverlay`]: pictures of the lower and the upper side,
-//! from and to.
+//! from and to. Where there is no GPU device, a transition starts no run
+//! and a page or a dialog comes and goes with its own `animation`.
 
 use std::{
     cell::{Cell, OnceCell, RefCell},
@@ -94,12 +100,13 @@ pub(crate) struct ShaderState {
     stale: bool,
     /// The backdrop's picture is due.
     backdrop_stale: bool,
-    /// The children's container is masked: the frames show instead.
+    /// The children's container is masked: the frames show instead
+    /// ([`ShaderState::hides`]).
     masked: bool,
 }
 
 impl ShaderState {
-    fn new(surface: &Rc<Surface>) -> Self {
+    fn new(surface: Weak<Surface>) -> Self {
         let layer = CALayer::new();
         // Clipped to its rounded corners ([`crate::decor`] sets them).
         layer.setMasksToBounds(true);
@@ -109,7 +116,7 @@ impl ShaderState {
         // borders behind the children and the children.
         layer.setZPosition(crate::decor::BEHIND + 0.75);
         ShaderState {
-            surface: Rc::downgrade(surface),
+            surface,
             view: ShaderView::default(),
             layer,
             ticking: false,
@@ -130,6 +137,13 @@ impl ShaderState {
     /// ([`crate::decor`] places it); the others place themselves.
     pub(crate) fn fills(&self) -> bool {
         self.role == ShaderRole::Fill
+    }
+
+    /// Whether the children it draws are hidden now: an effect's always, a
+    /// transition's while it runs; never where there is no GPU device (the
+    /// view shows its background and children as they are).
+    fn hides(&mut self, shaders: &Shaders, now: Instant) -> bool {
+        self.view.replaces_children(now) && shaders.renderer().is_some()
     }
 }
 
@@ -157,19 +171,51 @@ fn host(surface: &Surface, view: &NshView, role: ShaderRole) -> NshView {
     }
 }
 
-/// Hides `host`'s children (their container) while the frames show, or
-/// shows them again.
-fn mask_children(host: &NshView, masked: bool) {
-    let layer = if masked {
-        host.ensure_container().layer()
-    } else {
-        host.container_view().and_then(|c| c.layer())
+/// Hides `host`'s children while a shader drawing them hides them
+/// ([`ShaderState::masked`]): its own, or any of the surface's screen
+/// effects and transitions, which share the root's.
+fn sync_mask(surface: &Surface, host: &NshView) {
+    let masked = surface.shaders.pictured.borrow().iter().any(|v| {
+        v.state()
+            .shader
+            .as_ref()
+            .is_some_and(|s| s.masked && self::host(surface, v, s.role) == *host)
+    });
+    crate::decor::hide_children(host, masked);
+}
+
+/// Whether the children `view`'s shader draws are hidden follows its role
+/// and the device ([`ShaderState::hides`]), and so does their mask.
+fn refresh_mask(surface: &Surface, view: &NshView, now: Instant) {
+    let role = {
+        let mut state = view.state_mut();
+        let Some(shader) = state.shader.as_mut() else {
+            return;
+        };
+        let masked = shader.hides(&surface.shaders, now);
+        if masked == shader.masked {
+            return;
+        }
+        shader.masked = masked;
+        shader.role
     };
-    let Some(layer) = layer else { return };
-    crate::surface::quiet(|| {
-        let mask = masked.then(CALayer::new);
-        // SAFETY: a fresh, empty mask layer owned by the container's layer.
-        unsafe { layer.setMask(mask.as_deref()) };
+    sync_mask(surface, &host(surface, view, role));
+}
+
+/// Keeps `view` among the views whose shaders read pictures, or not.
+fn track(surface: &Surface, view: &NshView, pictures: bool) {
+    let mut pictured = surface.shaders.pictured.borrow_mut();
+    pictured.retain(|v| v != view);
+    if pictures {
+        pictured.push(view.clone());
+    }
+    let key = surface.key();
+    PICTURING.with(|p| {
+        let mut p = p.borrow_mut();
+        p.retain(|&k| k != key);
+        if !pictured.is_empty() {
+            p.push(key);
+        }
     });
 }
 
@@ -185,7 +231,7 @@ pub(crate) fn set(surface: &Rc<Surface>, view: &NshView, layer: Option<Arc<Shade
         }
         let shader = state
             .shader
-            .get_or_insert_with(|| ShaderState::new(surface));
+            .get_or_insert_with(|| ShaderState::new(Rc::downgrade(surface)));
         if layer.is_none() {
             // SAFETY: clearing the contents.
             unsafe { shader.layer.setContents(None) };
@@ -200,19 +246,7 @@ pub(crate) fn set(surface: &Rc<Surface>, view: &NshView, layer: Option<Arc<Shade
         shader.stale = pictures;
         shader.role = role;
         shader.view.set_layer(layer.clone());
-        let mut pictured = surface.shaders.pictured.borrow_mut();
-        pictured.retain(|v| v != view);
-        if pictures {
-            pictured.push(view.clone());
-        }
-        let key = surface.key();
-        PICTURING.with(|p| {
-            let mut p = p.borrow_mut();
-            p.retain(|&k| k != key);
-            if !pictured.is_empty() {
-                p.push(key);
-            }
-        });
+        track(surface, view, pictures);
     }
     let (role, on) = {
         let state = view.state();
@@ -238,12 +272,9 @@ pub(crate) fn set(surface: &Rc<Surface>, view: &NshView, layer: Option<Arc<Shade
             // Its pictures are of the children alone.
             host.ensure_container();
         }
-        // An effect always shows its frames; a transition while it runs.
-        let masked = on && matches!(role, ShaderRole::Effect | ShaderRole::Screen);
-        mask_children(&host, masked);
-        if let Some(shader) = view.state_mut().shader.as_mut() {
-            shader.masked = masked;
-        }
+        // An effect always shows its frames, a transition while it runs (a
+        // new layer mid-run too); without a device, the children.
+        refresh_mask(surface, view, Instant::now());
     }
     // The decoration shapes a fill's layer and adds it to the view's.
     view.restyle();
@@ -397,6 +428,7 @@ pub(crate) fn start_transition(
             })
     };
     let from = from.or_else(|| children_picture(&host, size, overflow.0, scale, is_screen(role)));
+    let now = Instant::now();
     {
         let mut state = view.state_mut();
         let shader = state.shader.as_mut().expect("a shader");
@@ -407,11 +439,10 @@ pub(crate) fn start_transition(
                 Some((rgba, *w as u32, *h as u32, *w as u32 * 4)),
             );
         }
-        shader.view.start_transition(duration, Instant::now());
+        shader.view.start_transition(duration, now);
         shader.stale = true;
-        shader.masked = true;
     }
-    mask_children(&host, true);
+    refresh_mask(surface, view, now);
     if tick_due(view) {
         start(surface);
     }
@@ -618,9 +649,27 @@ pub(crate) fn set_args(view: &NshView, values: &[(u16, AnimationValue)]) {
     tick(view);
 }
 
-/// It was deleted: no more pictures are taken for it.
+/// It was deleted: no more pictures are taken for it. A screen effect's
+/// or transition's frames, on the root rather than in the view, leave with
+/// it, and the root's children show again unless another screen shader
+/// hides them.
 pub(crate) fn deleted(surface: &Surface, view: &NshView) {
-    surface.shaders.pictured.borrow_mut().retain(|v| v != view);
+    let screen = {
+        let mut state = view.state_mut();
+        let Some(shader) = state.shader.as_mut() else {
+            return;
+        };
+        let screen = is_screen(shader.role);
+        if screen {
+            shader.masked = false;
+            crate::surface::quiet(|| shader.layer.removeFromSuperlayer());
+        }
+        screen
+    };
+    track(surface, view, false);
+    if screen {
+        sync_mask(surface, &surface.root);
+    }
 }
 
 /// Its size changed: a frame of the new size is rendered.
@@ -663,10 +712,23 @@ pub(crate) fn wake(surface: &Surface) {
     }
 }
 
-/// The app stopped: its views render no more.
+/// The app stopped: its views render no more, and the screen effects'
+/// and transitions' frames leave the root (which the next app keeps),
+/// showing its children again.
 pub(crate) fn clear(surface: &Surface) {
+    let pictured = std::mem::take(&mut *surface.shaders.pictured.borrow_mut());
+    for view in &pictured {
+        if let Some(shader) = view.state_mut().shader.as_mut()
+            && is_screen(shader.role)
+        {
+            shader.masked = false;
+            crate::surface::quiet(|| shader.layer.removeFromSuperlayer());
+        }
+    }
+    crate::decor::hide_children(&surface.root, false);
+    let key = surface.key();
+    PICTURING.with(|p| p.borrow_mut().retain(|&k| k != key));
     surface.shaders.views.borrow_mut().clear();
-    surface.shaders.pictured.borrow_mut().clear();
     surface.shaders.running.set(false);
 }
 
@@ -801,7 +863,8 @@ fn render_view(surface: &Surface, view: &NshView, renderer: &Renderer, now: Inst
         // SAFETY: a CGImage is a valid `contents` object (none clears it).
         crate::surface::quiet(|| unsafe { shader.layer.setContents(contents.as_deref()) });
     }
-    // A transition that ended: its children show as they are.
+    // A transition that ended: its children show as they are (unless a
+    // screen effect still hides the root's).
     if matches!(role, ShaderRole::Transition | ShaderRole::ScreenTransition)
         && shader.masked
         && !shader.view.replaces_children(now)
@@ -810,7 +873,7 @@ fn render_view(surface: &Surface, view: &NshView, renderer: &Renderer, now: Inst
         // SAFETY: clearing the contents.
         crate::surface::quiet(|| unsafe { shader.layer.setContents(None) });
         drop(state);
-        mask_children(&host, false);
+        sync_mask(surface, &host);
         return false;
     }
     shader.view.wants_frame() || shader.stale || shader.backdrop_stale
@@ -1025,5 +1088,79 @@ impl NavOverlay {
 impl Drop for NavOverlay {
     fn drop(&mut self) {
         crate::surface::quiet(|| self.layer.removeFromSuperlayer());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use nsh_core::shader::Shader;
+
+    use super::*;
+
+    /// A shader view showing a layer of `role`, outside any surface.
+    fn state(role: ShaderRole) -> ShaderState {
+        let shader =
+            Shader::compile("fn shade(uv: vec2f) -> vec4f { return vec4f(uv, 0.0, 1.0); }")
+                .expect("a shader");
+        let mut layer = ShaderLayer::new(shader, &[], &mut Vec::new());
+        layer.role = role;
+        let mut state = ShaderState::new(Weak::new());
+        state.role = role;
+        state.view.set_layer(Some(Arc::new(layer)));
+        state
+    }
+
+    /// Shaders whose GPU device was looked for and not found.
+    fn no_device() -> Shaders {
+        Shaders {
+            renderer: OnceCell::from(None),
+            ..Shaders::default()
+        }
+    }
+
+    #[test]
+    fn without_a_device_nothing_hides_its_children() {
+        let shaders = no_device();
+        let now = Instant::now();
+        for role in [ShaderRole::Effect, ShaderRole::Screen] {
+            assert!(!state(role).hides(&shaders, now), "{role:?}");
+        }
+        for role in [ShaderRole::Transition, ShaderRole::ScreenTransition] {
+            let mut s = state(role);
+            s.view.start_transition(Duration::from_millis(300), now);
+            assert!(!s.hides(&shaders, now), "{role:?}");
+        }
+    }
+
+    #[test]
+    fn an_effect_hides_its_children_and_a_transition_while_it_runs() {
+        let shaders = Shaders::default();
+        if shaders.renderer().is_none() {
+            eprintln!("no GPU: skipped");
+            return;
+        }
+        let now = Instant::now();
+        for role in [ShaderRole::Effect, ShaderRole::Screen] {
+            let mut s = state(role);
+            assert!(s.hides(&shaders, now), "{role:?}");
+            // It shows nothing of its own any more.
+            s.view.set_layer(None);
+            assert!(!s.hides(&shaders, now), "{role:?}");
+        }
+        let duration = Duration::from_millis(300);
+        for role in [ShaderRole::Transition, ShaderRole::ScreenTransition] {
+            let mut s = state(role);
+            assert!(!s.hides(&shaders, now), "{role:?}: idle");
+            s.view.start_transition(duration, now);
+            assert!(s.hides(&shaders, now), "{role:?}");
+            // A new layer while it runs (another uniform) keeps them hidden.
+            let layer = s.view.layer().cloned();
+            s.view.set_layer(layer);
+            assert!(s.hides(&shaders, now), "{role:?}: a new layer");
+            assert!(!s.hides(&shaders, now + duration), "{role:?}: ended");
+        }
+        assert!(!state(ShaderRole::Fill).hides(&shaders, now));
     }
 }
