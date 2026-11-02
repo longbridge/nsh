@@ -4897,7 +4897,7 @@ function App() {
         disabledMatcher={(date) => date.endsWith("-14")}
         accessibilityLabel="Due"
         trigger={<View><Text>Pick</Text></View>}
-        renderItem={(item) => <Text>{item.kind === "day" ? `${item.date}${item.active ? "*" : ""}` : `${item.kind}`}</Text>}
+        renderItem={(item) => <Text>{item.kind === "day" ? `${item.date}` : `${item.kind}`}</Text>}
       />
       <DatePicker
         range
@@ -4918,8 +4918,8 @@ mount(App);
 
 /// `nsh/base`'s `DatePicker` through its JS face: an ISO date the app owns
 /// (`onChange({ value })` with the string), the app's function of a date
-/// disabling days in the next turn, `renderItem`'s state with the day's
-/// date; a range picker's preset reporting `[start, end]`.
+/// disabling days in the next turn, `renderItem` drawing the day's date
+/// and the selected day its button's state; a range picker's preset reporting `[start, end]`.
 #[test]
 fn a_base_date_picker_reports_iso_dates_and_asks_the_apps_matcher() {
     use nsh_core::AccessibilityRole;
@@ -4956,7 +4956,14 @@ fn a_base_date_picker_reports_iso_dates_and_asks_the_apps_matcher() {
     engine
         .control()
         .dispatch_event(due, EventKind::Press, EventPayload::None);
-    let opened = until(&rx, |b| shows(b, "2026-10-10*"));
+    let opened = until(&rx, |b| {
+        find(
+            std::slice::from_ref(b),
+            "2026-10-10",
+            AccessibilityRole::Button,
+        )
+        .is_some_and(|(_, p)| p.accessibility.state.selected)
+    });
     // The app's function disables the 14th, a turn later.
     let disabled = until(&rx, |b| {
         find(

@@ -336,7 +336,7 @@ import type {
 
 ### Calendar
 
-从按周排列的月份中选出一个日期，或在 `range` 时选出一段日期，本身没有外观。并排显示一个或几个月（`numberOfMonths`）；头部翻月，并能打开月份视图或一页年份。值是一个 ISO 日期（`"2026-10-28"`）或 `[start, end]`，由应用持有（`value`、`onChange`），或交给日历自己保存（`defaultValue`）；`disabledMatcher` 让某些日期不能被选中，所有日期作为 Tab 的一站接受键盘操作。应用为各部件设置样式并绘制条目（`renderItem`）。见 [Calendar](../elements/calendar.md)。
+从按周排列的月份中选出一个日期，或在 `range` 时选出一段日期，本身没有外观。并排显示一个或几个月（`numberOfMonths`）；头部翻月，并能打开月份视图或一页年份。值是一个 ISO 日期（`"2026-10-28"`）或 `[start, end]`，由应用持有（`value`、`onChange`），或交给日历自己保存（`defaultValue`）；`disabledMatcher` 让某些日期不能被选中，所有日期作为 Tab 的一站接受键盘操作。应用为各部件设置样式并绘制条目（`renderItem` 只收到条目本身；状态是条目的类，范围中的日期是 `selected:`，并带 `data-range-start:`、`data-range-middle:`、`data-range-end:`）。见 [Calendar](../elements/calendar.md)。
 
 ### TimeField
 

@@ -94,8 +94,8 @@ pub use crate::{
     },
     button::{Button, ButtonElement, ButtonEvent, ButtonProps, button},
     calendar::{
-        Calendar, CalendarElement, CalendarEvent, CalendarItemKind, CalendarItemState,
-        CalendarProps, CalendarValue, Date, Matcher, YearRange, calendar,
+        Calendar, CalendarElement, CalendarEntry, CalendarEvent, CalendarItemKind, CalendarProps,
+        CalendarValue, Date, Matcher, YearRange, calendar,
     },
     carousel::{
         Carousel, CarouselContent, CarouselContentElement, CarouselContentProps,

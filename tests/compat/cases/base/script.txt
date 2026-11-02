@@ -2095,7 +2095,7 @@ expect Open: true triggerPress
 prop label:Due accessibilityState expanded=true
 expect M10
 expect Y2026
-expect D9*
+expect D10.9
 prop label:2026-10-09 role button
 prop label:2026-10-09 accessibilityState selected=true
 # On a phone the calendar spans the sheet: a day is a seventh of its
@@ -2145,20 +2145,30 @@ covers [props] DatePicker.clearButtonAccessibilityLabel
 covers [events] onChange
 covers [events] DatePicker.onOpenChange
 # A range of the picker's own (`defaultValue`), heard as its ends; two
-# months side by side (`numberOfMonths`), the days inside the range in
-# it, its ends selected.
+# months side by side (`numberOfMonths`), every day of the range selected
+# for screen readers, its start, middle and end styled by the item's
+# `data-range-start:`, `data-range-middle:` and `data-range-end:`
+# classes, a middle day's content by `group-data-range-middle:`, and the
+# days of the months around by `data-outside:`.
 prop label:Trip accessibilityValue text=2026/10/05 - 2026/10/07
 tap id:trip
 expect M10
 expect M11
-expect D5*~
-expect D6~
-expect D7*~
+prop label:2026-10-05 accessibilityState selected=true
+prop label:2026-10-06 accessibilityState selected=true
+prop label:2026-10-07 accessibilityState selected=true
+style label:2026-10-05 backgroundColor #ff0000ff
+style label:2026-10-06 backgroundColor #00ff00ff
+style label:2026-10-07 backgroundColor #0000ffff
+style text:D10.6 color #00ff00ff
+style label:2026-09-27 opacity 0.5
 # The first press starts a range, shown but not reported until the
-# second ends it; then the popup closes.
+# second ends it; then the popup closes. Half a range is its start,
+# selected, with no range marked.
 tap label:2026-10-12
-expect D12*
-absent D6~
+prop label:2026-10-12 accessibilityState selected=true
+nostyle label:2026-10-12 backgroundColor
+nostyle label:2026-10-06 backgroundColor
 expect Trip: none
 tap label:2026-10-14
 expect Trip: ["2026-10-12","2026-10-14"]
@@ -2177,6 +2187,7 @@ absent Week
 covers [props] defaultValue
 covers [props] DatePicker.range
 covers [props] DatePicker.numberOfMonths
+covers [props] DatePicker.itemClass
 covers [props] DatePicker.presets
 covers [props] DatePicker.presetsStyle
 covers [props] DatePicker.presetStyle

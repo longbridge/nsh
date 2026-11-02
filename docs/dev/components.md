@@ -1134,7 +1134,14 @@ JS function (`Matcher::Js`, as `gpui-base`'s `Matcher::Custom`) is asked for the
 next JS turn), its answers kept as a set; a newer page's answers replace an older one's. The grid fills the width it
 is given, as a table's columns do: the months share the body and the items of a row (weekdays, days, the months and
 years to pick) share it equally (`flex: 1`; a short last row of years is padded), so a calendar in a phone's sheet
-spans it while one in a popup that fits its content keeps its items' widths; the header's items keep their own.
+spans it while one in a popup that fits its content keeps its items' widths; the header's items keep their own. The
+app's `renderItem` gets a `CalendarEntry`, what an item is (its kind, value, date, month, `today`, `outside`), and the
+states are the item's (`selected` for screen readers and `selected:`, every day of a complete range as React Aria's;
+`disabled`; the real focus; `project_data` for `data-range-start` / `-end` / `-middle`, `data-today`,
+`data-outside`): a day's content is rendered under its month and date, so the keys, a pick and the focus render
+nothing, a turn renders the days it brings once each, and with several months those still shown keep theirs (their
+holders move to the cells that now show them). `TimeField`'s `renderSegment` likewise gets a
+`TimeFieldSegmentEntry` (`segment`, `value`, `label`), its selection `focus:` (`project_focused`).
 `TimeField` (`time_field.rs`) is `gpui-base`'s `SegmentEditor` over one
 transparent native text field, as `OtpInput`'s (its `diff` / `echoed`): what the field gains or loses goes to the
 selected segment, then the field holds the time again; a value the app sets is shown unless it is the user's change

@@ -36,7 +36,7 @@ use nsh_core::{
 };
 
 use crate::{
-    calendar::{self, CalendarItemState, Config, Date, Grid, Matcher, YearRange, iso, parse_date},
+    calendar::{self, CalendarEntry, Config, Date, Grid, Matcher, YearRange, iso, parse_date},
     popup::{self, DropdownFrame, OpenChangeReason, OpenState, Presence},
     time_field::{self, FieldConfig, HourCycle, TimeFieldSegmentEntry, TimeOfDay, TimePrecision},
 };
@@ -444,13 +444,16 @@ pub struct DatePickerProps {
     #[prop(default)]
     pub row_style: Prop<Style>,
     /// The classes of each item of the calendar (`selected:`, `disabled:`,
-    /// `focus:` as `Calendar`'s).
+    /// `focus:` and the days' `data-range-start:`, `data-range-end:`,
+    /// `data-range-middle:`, `data-today:`, `data-outside:` as
+    /// `Calendar`'s).
     pub item_class: Prop<Option<SharedString>>,
     /// The style of each item, its text styles too.
     #[prop(default)]
     pub item_style: Prop<TextPartStyle>,
-    /// Draws each item of the calendar.
-    pub render_item: Prop<Option<Renderer<CalendarItemState>>>,
+    /// Draws each item of the calendar from what it is, never its state
+    /// (`Calendar`'s `renderItem`).
+    pub render_item: Prop<Option<Renderer<CalendarEntry>>>,
     /// The classes of the time's row: its label at the start and the field
     /// at the end (`flex-row items-center justify-between`, `gpui-component`'s).
     pub time_class: Prop<Option<SharedString>>,

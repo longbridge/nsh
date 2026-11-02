@@ -1,5 +1,5 @@
 import { type AnimatedValue, cleanup, computed, createAnimatedValue, createMotion, Easing, effect, type JSX, LayoutAnimation, Scroll, signal, Text, token, View } from "nsh";
-import { Button as BaseButton, type CalendarItemState, Checkbox, Collapsible, Combobox, type DateMatcher, DatePicker, type DateRangePreset, NumberInput, OtpInput, type OtpInputRef, Progress, Radio, RadioGroup, Select, type SelectEntry, type SelectGroup, Slider, Switch, Tab, Tabs } from "nsh/base";
+import { Button as BaseButton, type CalendarEntry, Checkbox, Collapsible, Combobox, type DateMatcher, DatePicker, type DateRangePreset, NumberInput, OtpInput, type OtpInputRef, Progress, Radio, RadioGroup, Select, type SelectEntry, type SelectGroup, Slider, Switch, Tab, Tabs } from "nsh/base";
 import { reduceMotion } from "nsh";
 import { platform, windowSize } from "nsh";
 import { Icon, type IconName } from "../icons";
@@ -2259,16 +2259,22 @@ export function Controls(props: { show: Control }) {
    */
   const toggleWidth = () => Math.floor((windowSize().width - 2 * 10) / 2 - cell);
   /**
-   * An item of the calendar (`renderItem`): Previous and Next as chevrons, the month and year toggles
-   * (or each month's title) by name, the weekdays' initials, and the days: today on the theme's quiet `accent`
-   * fill (gpui-component's), the selected ones on the accent's, the days of a complete range on a band from end to end (`range` says where it
-   * starts and ends), the other months' days and the disabled ones faint.
+   * The calendar's items (`itemClass`): pressed at 70%; `group`, so the drawing inside follows the item's states.
    */
-  function CalendarItem(props: { item: CalendarItemState; range?: [string | null, string | null] | null }) {
+  const calendarItemClass = "group active:opacity-70";
+  /**
+   * An item of the calendar (`renderItem`), drawn once from what it is, its states the item's classes: Previous and
+   * Next as chevrons (faint while they take no press), the month and year toggles (or each month's title, with
+   * `months` over one) by name, the open view's toggle in the accent, the weekdays' initials, and the days: today on
+   * the theme's quiet `accent` fill (gpui-component's), the selected date and a range's ends on the accent's, the days
+   * of a complete range on a band from end to end (`data-range-*`), the other months' days and the disabled ones faint,
+   * the keyboard's day ringed.
+   */
+  function CalendarItem(props: { item: CalendarEntry; months?: number }) {
     const kind = props.item.kind;
     if (kind === "previous" || kind === "next") {
       return (
-        <View style={{ width: cell, height: cell, alignItems: "center", justifyContent: "center", opacity: props.item.disabled ? 0.3 : 1 }}>
+        <View class="group-disabled:opacity-30" style={{ width: cell, height: cell, alignItems: "center", justifyContent: "center" }}>
           <View style={{ transform: [{ rotate: kind === "previous" ? "180deg" : "0deg" }] }}>
             <Icon name="chevron" size={size.check} tint={colors.muted} />
           </View>
@@ -2277,16 +2283,16 @@ export function Controls(props: { show: Control }) {
     }
     if (kind === "monthToggle" || kind === "yearToggle") {
       // A month's title in a calendar of several takes no press: the month and its year, over the month.
-      const title = kind === "monthToggle" && props.item.disabled;
+      const title = kind === "monthToggle" && (props.months ?? 1) > 1;
       return (
         <Text
+          class="text-foreground group-selected:text-brand"
           style={{
             width: !pointer ? toggleWidth() : title ? 6 * cell + monthGap / 2 : kind === "monthToggle" ? 3 * cell : 2 * cell,
             paddingHorizontal: 3,
             textAlign: title ? "center" : kind === "monthToggle" ? "right" : "left",
             fontSize: size.label,
             fontWeight: "600",
-            color: props.item.active ? colors.accent : colors.text,
           }}
         >
           {title ? `${MONTHS[props.item.value - 1]} ${props.item.year}` : kind === "monthToggle" ? MONTHS[props.item.value - 1] : String(props.item.value)}
@@ -2297,55 +2303,45 @@ export function Controls(props: { show: Control }) {
       return <Text style={{ minWidth: cell, paddingVertical: 4, textAlign: "center", fontSize: 11, fontWeight: "600", color: colors.faint }}>{WEEKDAYS[props.item.value]}</Text>;
     }
     if (kind === "month" || kind === "year") {
-      // The month view's months (rows of 3) and the year view's years (rows of 5), as wide as a month.
+      // The month view's months (rows of 3) and the year view's years (rows of 5), as wide as a month; the shown one
+      // filled.
       return (
         <View
-          style={{
-            minWidth: (7 * cell) / (kind === "month" ? 3 : 5),
-            height: cell + 6,
-            alignItems: "center",
-            justifyContent: "center",
-            borderRadius: radius.control,
-            backgroundColor: props.item.active ? colors.accentFill : "transparent",
-          }}
+          class="group-selected:bg-brand-fill"
+          style={{ minWidth: (7 * cell) / (kind === "month" ? 3 : 5), height: cell + 6, alignItems: "center", justifyContent: "center", borderRadius: radius.control }}
         >
-          <Text style={{ fontSize: size.label, color: props.item.active ? colors.onAccent : colors.text }}>
+          <Text class="text-foreground group-selected:text-on-brand" style={{ fontSize: size.label }}>
             {kind === "month" ? MONTHS[props.item.value - 1].slice(0, 3) : String(props.item.value)}
           </Text>
         </View>
       );
     }
-    // A day, as wide as its column (the calendar's columns share its width). The band reaches from the start's middle
-    // to the end's.
-    const band = () => {
-      const r = props.range;
-      if (!props.item.inRange || !r || r[0] === r[1]) return null;
-      return { left: props.item.date === r[0] ? ("50%" as const) : 0, right: props.item.date === r[1] ? ("50%" as const) : 0 };
-    };
+    // A day, as wide as its column (the calendar's columns share its width). The band spans a range's middle days
+    // and reaches from its ends' middles; a range of one day has none. The circle fills for the selected date and a
+    // range's ends (not its middle days), else for today.
+    const own = props.item.outside ? "text-faint" : "text-foreground";
     return (
       <View style={{ minWidth: cell, height: cell, alignItems: "center", justifyContent: "center" }}>
-        <View style={{ position: "absolute", top: 2, bottom: 2, left: band()?.left ?? 0, right: band()?.right ?? 0, backgroundColor: band() ? tints.accent : "transparent" }} />
         <View
-          style={{
-            width: cell - 4,
-            height: cell - 4,
-            borderRadius: (cell - 4) / 2,
-            alignItems: "center",
-            justifyContent: "center",
-            borderWidth: 1.5,
-            // The keyboard's day ringed.
-            borderColor: props.item.focused ? colors.accent : "transparent",
-            backgroundColor: props.item.active ? colors.accentFill : props.item.today ? token("accent") : "transparent",
-          }}
+          class={
+            "absolute inset-y-0.5 left-0 right-0 hidden group-data-range-middle:flex group-data-range-start:flex group-data-range-start:left-1/2 " +
+            "group-data-range-end:flex group-data-range-end:right-1/2 group-data-range-start:group-data-range-end:hidden"
+          }
+          style={{ backgroundColor: tints.accent }}
+        />
+        <View
+          class={
+            `${props.item.today ? "bg-accent" : ""} border-[1.5px] border-transparent group-focus:border-brand ` +
+            "group-selected:bg-brand-fill group-data-range-middle:bg-transparent"
+          }
+          style={{ width: cell - 4, height: cell - 4, borderRadius: (cell - 4) / 2, alignItems: "center", justifyContent: "center" }}
         >
           <Text
-            style={{
-              fontSize: pointer ? 13 : 15,
-              fontVariant: ["tabular-nums"],
-              fontWeight: props.item.active || props.item.today ? "600" : "400",
-              color: props.item.active ? colors.onAccent : props.item.muted ? colors.faint : colors.text,
-              opacity: props.item.disabled ? 0.5 : 1,
-            }}
+            class={
+              `${own} ${props.item.today ? "font-semibold" : "font-normal"} group-selected:font-semibold group-selected:text-on-brand ` +
+              `group-data-range-middle:${own} group-disabled:text-faint group-disabled:opacity-50`
+            }
+            style={{ fontSize: pointer ? 13 : 15, fontVariant: ["tabular-nums"] }}
           >
             {String(props.item.value)}
           </Text>
@@ -2428,7 +2424,7 @@ export function Controls(props: { show: Control }) {
               backdropStyle={backdrop}
               calendarStyle={calendar}
               headerStyle={header}
-              itemClass="active:opacity-70"
+              itemClass={calendarItemClass}
               renderItem={(item) => <CalendarItem item={item} />}
               cleanable
               clearButtonAccessibilityLabel="Clear the due date"
@@ -2464,8 +2460,8 @@ export function Controls(props: { show: Control }) {
               calendarStyle={calendar}
               headerStyle={header}
               bodyStyle={{ gap: monthGap }}
-              itemClass="active:opacity-70"
-              renderItem={(item) => <CalendarItem item={item} range={trip()} />}
+              itemClass={calendarItemClass}
+              renderItem={(item) => <CalendarItem item={item} months={twoMonths() ? 2 : 1} />}
               trigger={<Picker title={tripTitle()} open={tripOpen()} placeholder={!trip()} />}
             />
           </View>
@@ -2490,7 +2486,7 @@ export function Controls(props: { show: Control }) {
               backdropStyle={backdrop}
               calendarStyle={calendar}
               headerStyle={header}
-              itemClass="active:opacity-70"
+              itemClass={calendarItemClass}
               renderItem={(item) => <CalendarItem item={item} />}
               timeStyle={time}
               timeLabel={<Text style={{ fontSize: size.label, color: colors.muted }}>Time</Text>}
@@ -2516,7 +2512,7 @@ export function Controls(props: { show: Control }) {
     backdropStyle: backdrop,
     calendarStyle: calendar,
     headerStyle: header,
-    itemClass: "active:opacity-70",
+    itemClass: calendarItemClass,
   });
   /** A line of a bill: what it is for, and the amount rolling to each new value. */
   function BillLine(props: { label: string; amount: number; total?: boolean }) {
@@ -2584,7 +2580,7 @@ export function Controls(props: { show: Control }) {
           disabledMatcher={closed}
           {...calendarProps("start")}
           bodyStyle={{ gap: monthGap }}
-          renderItem={(item) => <CalendarItem item={item} range={stay()} />}
+          renderItem={(item) => <CalendarItem item={item} months={twoMonths() ? 2 : 1} />}
           trigger={
             // Both ends in one field, parted by a hairline; the whole field opens the calendar.
             <View
