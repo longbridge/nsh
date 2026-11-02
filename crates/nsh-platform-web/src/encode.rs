@@ -879,6 +879,9 @@ fn field_css(c: &InputConfig) -> String {
     if let Some(c) = c.caret_color {
         let _ = write!(css, "caret-color:{};", css_color(c));
     }
+    if input::shows_nothing(c) {
+        css.push_str("opacity:0;");
+    }
     css
 }
 

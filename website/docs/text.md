@@ -169,7 +169,7 @@ others of the same names.
 | `color` | A [color](./styling.md#colors). Default black | `.text_color(..)` |
 | `fontSize` | Points. Default 14 | `.text_size(px(..))`, `.text_sm()`, `.text_lg()`, ... |
 | `fontWeight` | `"normal"` (400), `"bold"` (700), or `100`–`900` (number or string) | `.font_weight(FontWeight::BOLD)` |
-| `fontStyle` | `"normal"`, `"italic"` | `.italic()` |
+| `fontStyle` | `"normal"`, `"italic"`: color emoji stay upright | `.italic()` |
 | `fontFamily` | A system family, a generic family, or an [imported font](./fonts.md) | `.font_family(..)` |
 | `lineHeight` | Points | `.line_height(px(..))` |
 | `letterSpacing` | Points | `.letter_spacing(px(..))` |

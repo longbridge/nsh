@@ -1,7 +1,9 @@
 //! `Calendar`: a press picks a day (a range from two), the value the app's
 //! or the calendar's own; Previous / Next turn the month; the toggles show
 //! the months and years to pick from; disabled dates take no press; the
-//! days are one stop of Tab whose arrows move the keyboard; several months
+//! days are one stop of Tab whose arrows move the keyboard (Left and Right
+//! traded in a right-to-left layout, where the weeks run from the right);
+//! several months
 //! show side by side from the week's first day; a turn of the months and
 //! the keys' moves make no views and draw only the days they change. Today
 //! is 2026-10-28 (the engine's manual clock).
@@ -121,11 +123,17 @@ fn start(props: HarnessProps) -> Headless {
 
 /// `root` on a Mac at noon UTC on 2026-10-28, rendered.
 fn launch(root: Root) -> Headless {
+    launch_in(root, false)
+}
+
+/// [`launch`] in a right-to-left layout with `rtl`.
+fn launch_in(root: Root, rtl: bool) -> Headless {
     let mut config = EngineConfig {
         viewport: Size::new(px(800.0), px(844.0)),
         ..EngineConfig::new(root)
     };
     config.environment.os = Os::MacOs;
+    config.environment.rtl = rtl;
     config.clock = Clock::manual(SystemTime::UNIX_EPOCH + Duration::from_secs(1_793_188_800));
     let mut app = Headless::start(config).expect("the engine starts");
     app.first_render().unwrap();
@@ -270,6 +278,31 @@ fn the_days_are_one_stop_whose_arrows_move_the_keyboard() {
     app.press_key("enter").unwrap();
     see(&mut app, "11-25*^");
     assert_eq!(log(&app), "2026-11-25");
+}
+
+#[test]
+fn right_to_left_left_is_the_next_day_and_right_the_previous() {
+    let props = HarnessProps {
+        value: d(2026, 10, 30).into(),
+        ..props()
+    };
+    let mut app = launch_in(Root::new::<Harness>(move || props.clone()), true);
+    app.wait_for("text:prev").unwrap();
+    for _ in 0..5 {
+        app.press_key("tab").unwrap();
+    }
+    see(&mut app, "10-30*^");
+    app.press_key("left").unwrap();
+    see(&mut app, "10-31^");
+    app.press_key("left").unwrap();
+    see(&mut app, "M11/2026");
+    see(&mut app, "11-1^");
+    app.press_key("right").unwrap();
+    see(&mut app, "M10/2026");
+    see(&mut app, "10-31^");
+    // Up and Down keep the weeks.
+    app.press_key("up").unwrap();
+    see(&mut app, "10-24^");
 }
 
 #[test]

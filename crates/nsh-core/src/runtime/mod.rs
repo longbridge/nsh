@@ -1,6 +1,7 @@
 //! The runtime's modules written in Rust: `nsh/android`'s `BackHandler`,
 //! `nsh/accessibility`'s commands, `nsh/device`'s `openUrl`, `nsh`'s
-//! `Image` functions, all of `nsh/clipboard`, `nsh/picker` and `nsh/storage`,
+//! `Image` functions, all of `nsh/clipboard`, `nsh/picker`, `nsh`'s
+//! `Speech` and `nsh/storage`,
 //! `nsh/desktop`'s `Window`, the surface-independent `os` metadata,
 //! `net`'s sockets, `websocket`'s connections, `fs/promises`' files and
 //! `nsh/host`'s calls. Their JS face is made
@@ -24,6 +25,7 @@ mod net;
 mod os;
 mod picker;
 mod process;
+mod speech;
 mod storage;
 mod websocket;
 
@@ -49,6 +51,7 @@ pub fn registries() -> &'static [Registry] {
             .module::<accessibility::Accessibility>()
             .module::<clipboard::Clipboard>()
             .module::<picker::Picker>()
+            .module::<speech::Speech>()
             .module::<storage::Storage>()
             .module::<host::Host>()
             // The environment's accessors and hooks, made by `nsh-js`.

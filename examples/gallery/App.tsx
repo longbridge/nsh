@@ -35,11 +35,13 @@ const components: DemoEntry[] = [
   { name: "Collapsible", detail: "Details under a summary, kept while collapsed", icon: "collapsible", screen: lazy(() => import("./demos/Controls").then((m) => m.CollapsibleDemo)) },
   { name: "ColorPicker", detail: "An area, sliders of RGB, HSL, HSB or OKLCH, a field and swatches", icon: "styles", screen: lazy(() => import("./demos/ColorPickerDemo").then((m) => m.ColorPickerDemo)) },
   { name: "Combobox", detail: "Topics picked several at once with search, a reviewer picked alone", icon: "select", screen: lazy(() => import("./demos/Controls").then((m) => m.ComboboxDemo)) },
+  { name: "Command", detail: "A Cmd+K palette in a dialog, an inline menu, 5 000 files that filter at every keystroke, a search the server answers", icon: "search", screen: lazy(() => import("./demos/CommandDemo").then((m) => m.CommandDemo)) },
   { name: "DataTable", detail: "A million stocks of sixty columns, their quotes ticking every 33 ms, fixed columns, sorting, selection, resized and moved columns", icon: "table", screen: lazy(() => import("./demos/DataTableDemo").then((m) => m.DataTableDemo)) },
   { name: "DatePicker", detail: "A due date on weekdays, a trip's range with presets, a meeting's day and time", icon: "select", screen: lazy(() => import("./demos/Controls").then((m) => m.DatePickerDemo)) },
   { name: "DiffView", detail: "Two texts side by side or unified, changes navigated, reverted and kept, a patch", icon: "diff", screen: lazy(() => import("./demos/DiffDemo").then((m) => m.DiffDemo)) },
   { name: "Dock", detail: "A workspace of tabs dragged between groups and docks, split, closed, zoomed and resized", icon: "dock", screen: lazy(() => import("./demos/Dock").then((m) => m.Dock)) },
   { name: "Editor", detail: "Code with highlighting, several carets, folding, find and replace, a language server: diagnostics, hover, definitions, completion", icon: "code", screen: lazy(() => import("./demos/EditorDemo").then((m) => m.EditorDemo)) },
+  { name: "HoverCard", detail: "People behind mentions, a link preview, a live stock quote, the delays tried, a card pinned open", icon: "popover", screen: lazy(() => import("./demos/HoverCardDemo").then((m) => m.HoverCardDemo)) },
   { name: "Input", detail: "Live validation, passwords, search, input groups, the keyboard over the content", icon: "form", screen: lazy(() => import("./demos/Form").then((m) => m.Form)) },
   { name: "Link", detail: "Links in a paragraph, a navigation the app routes, sites outside the app, a footer, visited and disabled", icon: "link", screen: lazy(() => import("./demos/LinkDemo").then((m) => m.LinkDemo)) },
   { name: "Menu", detail: "A menu bar, submenus, checkable items, context menus on rows, a scrolling menu", icon: "menu", screen: lazy(() => import("./demos/Menus").then((m) => m.Menus)) },
@@ -63,6 +65,7 @@ const components: DemoEntry[] = [
   { name: "Toggle", detail: "A text toolbar, a segmented view switcher, a favorite star, sizes, a locked group", icon: "controls", screen: lazy(() => import("./demos/ToggleDemo").then((m) => m.ToggleDemo)) },
   { name: "Toolbar", detail: "A text editor's formatting bar, a media player's transport, a vertical tool palette, a locked review bar", icon: "sliders", screen: lazy(() => import("./demos/ToolbarDemo").then((m) => m.ToolbarDemo)) },
   { name: "Tooltip", detail: "A label while the pointer rests on an element, or pinned by the app", icon: "tooltip", screen: lazy(() => import("./demos/Overlays").then((m) => m.TooltipDemo)) },
+  { name: "Tree", detail: "A project explorer, a settings sidebar, 10 100 items that stay fast, a read-only outline", icon: "tree", screen: lazy(() => import("./demos/TreeDemo").then((m) => m.TreeDemo)) },
 ];
 
 /** The demos: the apps built on NSH, then one demo per element in the
