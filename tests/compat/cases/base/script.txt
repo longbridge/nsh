@@ -1413,6 +1413,33 @@ expect Index: 1
 frame below:id:dot-0 10 0 10 10
 tap id:dot-1
 expect Changes: 3
+# A drag the app pauses its rotation for: `onDragStart`, then `onDragEnd`
+# where the content rests, on the third slide (its rest: 630 + 2 * 210),
+# which `onChange` reports.
+listens id:content onScrollDragStart
+listens id:content onScrollEnd
+event id:content onScrollDragStart x=840 y=0
+expect Events: dragStart
+event id:content onScrollEnd x=1050 y=0
+expect Events: dragStart,dragEnd
+expect Changes: 4
+expect Index: 2
+prop id:dot-2 accessibilityState selected=true
+# The keyboard focus coming to the carousel and leaving it.
+listens id:carousel onFocus
+listens id:carousel onBlur
+event id:carousel onFocus
+expect Events: dragStart,dragEnd,focus
+event id:carousel onBlur
+wait 50
+expect Events: dragStart,dragEnd,focus,blur
+# Its own index from `defaultIndex`: the second slide's item is selected.
+# Along a vertical `axis`, the slides follow each other down the content.
+prop id:vertical role region
+prop id:v-dot-1 accessibilityState selected=true
+prop id:v-dot-0 accessibilityState {}
+frame id:v-slide-0 0 0 100 50
+frame id:v-slide-1 0 50 100 50
 covers [nsh/base] Carousel
 covers [nsh/base] CarouselContent
 covers [nsh/base] CarouselItem
@@ -1421,6 +1448,8 @@ covers [nsh/base] CarouselNext
 covers [nsh/base] CarouselPagination
 covers [nsh/base] CarouselPaginationItem
 covers [props] Carousel.index
+covers [props] Carousel.defaultIndex
+covers [props] Carousel.axis
 covers [props] Carousel.looping
 covers [props] CarouselPaginationItem.index
 covers [props] indicatorClass
@@ -1428,6 +1457,10 @@ covers [props] indicatorStyle
 covers [props] selectedStyle
 covers [props] accessibilityLabel
 covers [events] onChange
+covers [events] Carousel.onDragStart
+covers [events] Carousel.onDragEnd
+covers [events] Carousel.onFocus
+covers [events] Carousel.onBlur
 
 # base-collapsible-reveal
 # With `reveal`: the clipping region is there while closed, zero high, so

@@ -1158,7 +1158,11 @@ with no scrolling of its own:
 
 - **The content** (`CarouselContent`) is a `scroll()` along the axis, its indicator off. Each `CarouselItem`
   registers with the carousel through context and reports its frame (`on_layout`: its place in the content, which a
-  scroll does not change); once every slide is laid out, the snap points are their starts less the first one's,
+  scroll does not change). The carousel keeps the slides in the tree's order (`watch_order`, as the roving focus
+  does: a slide inserted before the others or moved by a keyed list renders last), so the last slide's report ends a
+  layout pass and the track is made once from all of its frames, never from old and new ones mixed (a pass that
+  leaves the last slide in place settles on the next turn). Once every slide is laid out, the snap points are their
+  starts less the first one's,
   held to the scroll range, which a `watch_scroll` of the content reports (its content size and viewport, no
   offset). The scroll view gets them as `snap_offsets` (equal ones once) with `disable_interval_momentum`, so a
   fling moves one slide on every platform (`ScrollBehavior::snap_target`, Android's port, the web's `nsh.js`) and a
@@ -1166,17 +1170,24 @@ with no scrolling of its own:
   start along the axis; several resting where the last does (the end of the range with several per view) are one
   stop, the first of them, for previous, next and the keys.
 - **The slide shown** is a memo: a swipe's slide while the app has not answered it (`pending`, cleared by the next
-  `index`), else the app's `index`, else the carousel's own (from `defaultIndex`). An effect scrolls the content to
+  `index`: an app that does not follow it shows the swiped slide until it passes one), else the app's `index`, else
+  the carousel's own (from `defaultIndex`). An effect scrolls the content to
   its snap point when it changes (animated unless `reduce_motion()`) and when the snap points move (at once: a resize
   keeps the slide); it sends nothing while the content rests there (`Ctl::at`).
 - **The user's scroll** is reported where the platform reports it come to rest (`on_scroll_end`): the nearest snap
   point's slide becomes the one shown and goes to `onChange`; a rest between snap points (the headless driver, which
   does not snap) is scrolled onto the slide. Controls, pagination items and keys emit `onChange` and set the own
-  index while uncontrolled.
+  index while uncontrolled. The desktops (the core's scrolling, AppKit's) also report a rest when an animated
+  `ScrollTo` arrives, and one that arrived just before the next `ScrollTo` reached the platform is still on its way:
+  the carousel keeps the target in flight and the few it replaced (`Ctl::superseded_rest`), ignores a rest at a
+  replaced one, and drops them all on a drag's start or any other rest (a mouse wheel's starts no drag).
 - **What the app pauses its own rotation by**: `onDragStart` from `on_scroll_drag_start`, `onDragEnd` where that
   scroll comes to rest; `onFocus` / `onBlur` for the carousel as a whole, from a count of its views with the keyboard
-  focus (a move between them blurs one before it focuses the next, so `onBlur` waits a zero-delay timer and fires
-  only if none of them has it then). Slides that move on by themselves are the app's timer setting `index`
+  focus: its own view, previous, next and the pagination items (a move between them blurs one before it focuses the
+  next, so `onBlur` waits a zero-delay timer and fires only if none of them has it then). Focusable views inside the
+  slides are not counted: the core has no focus-within. A control or pagination item that turns disabled while it
+  has the focus gives it to the carousel's view first (`Ctl::keep_focus`), where the platform would move it out
+  (AppKit to the window). Slides that move on by themselves are the app's timer setting `index`
   (`api-naming.md`).
 - **The pagination** keeps its items for an indicator that follows the item of the slide shown (`View::follow`, as
   `Tabs`' does, with the same spring). A change of slide reruns the selected memo of the two items it concerns; no
