@@ -10,7 +10,9 @@
 //! [`Core::slot_target_of`]), else to the holder. So the app's `active:`,
 //! `focus:` and `disabled:` classes and state styles on its own element
 //! follow the presses, focus and `disabled` the component gives it, and a
-//! ref the component anchors a popup to measures the app's element.
+//! ref the component anchors a popup to measures the app's element: its own
+//! box, also for what it draws ([`Core::content_anchor`]), as for a Rust
+//! app's element.
 //!
 //! The app's element may be a component's host (a `Button` as a popover's
 //! trigger): its props are then its view's root's, the side JS's are, and
@@ -267,18 +269,17 @@ impl<M: TextEngine> Core<M> {
     }
 
     /// The view an overlay anchored to what `id` draws
-    /// ([`crate::overlay::OverlayAnchor::Content`]) goes by: the node a
-    /// view wraps a fill in when `id` is the fill's element taking the
-    /// slot's ref, so the element's own box is what shows (the box around
-    /// its children would leave out its size and padding), else `id`.
+    /// ([`crate::overlay::OverlayAnchor::Content`]) goes by: the slot's
+    /// holder when `id` is the element taking a slot's props (JS's holder
+    /// of the app's element, or the node a view wraps a Rust fill in), so
+    /// the element's own box is what shows, whether a TSX or a Rust app
+    /// passed it (the box around its children would leave out what
+    /// stretches it or its minimum size), else `id`.
     pub(super) fn content_anchor(&self, id: NodeId) -> NodeId {
-        if self.components.fill_holders.is_empty() {
+        if self.components.adopted.is_empty() {
             return id;
         }
-        match self.components.adopted.get(&id) {
-            Some(&holder) if self.components.fill_holders.contains(&holder) => holder,
-            _ => id,
-        }
+        self.components.adopted.get(&id).copied().unwrap_or(id)
     }
 
     /// The events the component listens to on node `id` when it takes a
