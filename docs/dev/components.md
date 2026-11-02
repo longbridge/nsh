@@ -320,7 +320,7 @@ reasons: `reactive-components.md`.
   | async work | `spawn(async move { timer(d).await; value.set(..) })` on the engine thread, tokio inside; `background(fut)` / `blocking(f)` for `Send` work on the runtime's threads (not in WebAssembly) |
   | `fetch(url)` | `fetch(url).await` / `fetch(HttpRequest::post(url, body).header(..)).await` in a task: an `HttpResponse` (`status()`, `ok()`, `header(..)`, `text()`, `body`) or the error; the engine's network stack and capability checks, as JS's, so it works on the web too; the request is cancelled with its task |
   | `cleanup` | `cleanup(f)` (runs before the owner runs again or goes) |
-  | `windowSize()`, `safeArea()`, `keyboardFrame()`, `colorScheme()`, ... | `window()`, `safe_area()`, `keyboard_height()`, `dark()`, `font_scale()`, `reduce_motion()`, `screen_reader()`, `rtl()`: reading subscribes |
+  | `windowSize()`, `safeArea()`, `keyboardFrame()`, `colorScheme()`, ... | `window()`, `safe_area()`, `keyboard_height()`, `dark()`, `font_scale()`, `reduce_motion()`, `screen_reader()`: reading subscribes (`layout_rtl()`, the surface's direction, is a hidden accessor for `nsh-base`'s controls only, which trade Left and Right by it: Rust's `rtl()` is dropped, apps set a view's `direction`) |
   | `Window.setTitleBar({ style, height })`, `titleBar()`, `Window.close()`, `Window.setTitle(..)`, `minimize()`, ... (`nsh/desktop`) | `element::desktop::set_title_bar(style, height)`, `title_bar()`, `close_window()`, `set_title(..)`, `minimize()`, `toggle_maximize()`, `toggle_full_screen()`, `set_frame(..)`, `set_level(..)`, `order_front()`, `set_menu_bar_visibility(..)`; the same root commands and native controls, with title-bar insets forwarded through `element::Environment`; `.window_drag(bool)` on any interactive element marks or excludes a native drag region |
   | `Menu.setApplicationMenu(items)`, `Menu.popup(items, at)` (`nsh/desktop`) | `element::desktop::set_application_menu(vec![MenuItem::submenu(..)])` (`None`: the default menu), `popup_menu(items)` / `popup_menu_at(items, at)` (an `Answer<()>` once it closes); `MenuItem::new(label).shortcut("mod+n").on_select(f)`, `::role(..)`, `::separator()`, `::submenu(..)`. The same `DesktopCommand`s as JS's; a view's item ids start at 2^31, above JS's, and the core runs a view's handler (under the owner that set the menu, while it lives) when the root's `Menu` event reports it; a context menu closing goes to both sides (`element/menus.rs`) |
   | `pixelRatio()`, `Math.round(x * pixelRatio()) / pixelRatio()`, `platform.os` / `version` / `idiom` / `desktop` / `catalyst` | `pixel_ratio()`, `round_to_nearest_pixel(v)`, `os()`, `os_version()`, `idiom()`, `is_desktop()`, `is_catalyst()` |
@@ -354,7 +354,7 @@ reasons: `reactive-components.md`.
 | `<List viewport="parent">` (in a `Scroll` with the rest of the page) | `.viewport(ListViewport::Parent)` (`ListLayout`): laid out at its full length, its rows follow the scroll view around it; fixed when the list is made |
   | `<Feed each={rows} keyExtractor header={Header}>{row}</Feed>` (a component with an `Items` prop) | `feed().items(virtual_list(n, row).keys(move \|\| ids).header(..))` (the `Items` field's setter) |
   | `<Text>a <Text style={link} onPress={f}>b</Text> <View/></Text>` | `text("a ").child(link("b").on_press(..)).child(" ").child(view())`: one paragraph, links and inline views |
-  | `class="group"`, `group-active:`, `dark:`, `disabled:`, `selected:`, `checked:`, `activeStyle` / `hoverStyle` / `focusStyle` / `disabledStyle` | `.group()`, `.group_active(\|s\| ..)`, `.dark(\|s\| ..)`, `.disabled_style(\|s\| ..)`, `.selected(\|s\| ..)`, `.checked(\|s\| ..)` (native, no binding) |
+  | `class="group"`, `group-active:`, `dark:`, `disabled:`, `selected:`, `checked:`, `focus-within:`, `activeStyle` / `hoverStyle` / `focusStyle` / `focusWithinStyle` / `disabledStyle` | `.group()`, `.group_active(\|s\| ..)`, `.dark(\|s\| ..)`, `.disabled_style(\|s\| ..)`, `.selected(\|s\| ..)`, `.checked(\|s\| ..)`, `.focus_within(\|s\| ..)` (native, no binding) |
   | `<Button disabled={saving()} onPress={save} class="px-4 active:opacity-60">Save</Button>` | `button().disabled(move \|\| saving.get()).on_press(move \|\| save()).px_4().active(\|s\| s.opacity(0.6)).child(text("Save"))`: a setter per prop, a listener method per event |
   | `<Button class="bg-blue-500 active:opacity-70 selected:bg-green-500">` (state styles on a component) | `button().bg(..).active(\|s\| s.opacity(0.7))`: `ComponentBuilder`'s `active` / `hover` / `focus` / `disabled_style` and `Styled`'s `selected` / `checked`, on the component's root (`Styled::selected(el, \|s\| ..)` where a `selected` prop's setter comes first) |
   | `<NavPage headerClass="bg-white text-black tint-blue-500">` | `nav_page().header_style_with(\|s\| s.bg(..).text_color(..).tint_color(..))` (theme colors follow the appearance natively; `header_style(Style)`, TS `headerStyle`, wins key by key) |
@@ -810,13 +810,14 @@ what changed.
   holding several nodes, is a box of its own (a column, as any view). A render's holder (`componentRender`) follows
   the same rule in its placeholder. Everything else the element gives (accessibility, `disabled`,
   `focusable` and other host props, listeners, touch responder, element ref: `core/slots.rs` `split`) goes to the
-  slot's target: the app's element when the holder holds exactly one (not raw text, a component's host or a list),
-  else the holder. So the app's `active:` / `focus:` / `disabled:` classes and state styles on its own element follow
+  slot's target: the app's element when the holder holds exactly one (not raw text or a list), else the holder. So the app's `active:` / `focus:` / `disabled:` classes and state styles on its own element follow
   the presses, focus and `disabled` the component gives it, and a ref measures the app's element. The target follows
   the holder's content (JS inserting or removing in it, `Core::retarget_slot`). On the app's element the two sides
   combine (`slots::merged`): the component's values win, the app's fill in what it leaves unset (field by field in
   `accessibilityState`); `disabled`, the state flags and projected states hold when either sets them; both sides'
-  listeners run, the component's first. JS's ops on it go through the core (`Core::js_slot_op`), which keeps JS's
+  listeners run, the component's first. The app's element may be a component's host (a `Button` as a popover's
+  trigger): its own side is its view's root, the slot's component hears its events first, then its own (touch handlers run from the inner component outward, and both participate in responder negotiation); left on the
+  holder, the slot's presses would never come: the root is the innermost press target. JS's ops on it go through the core (`Core::js_slot_op`), which keeps JS's
   own values and sends the combination, and puts them back when the component's part leaves the element (another
   element joins the holder, the element leaves it, the slot or the component goes). JS's values from before are read
   from the node (accessibility, `disabled`, `pointerEvents`, `focusable`, projected states); another host prop the
@@ -829,7 +830,7 @@ what changed.
   (`place(|h| h.px_4())`) or gives it props or listeners makes a node of the nested view's own with them around them,
   which lays one node out through while the place styles none of its layout, as JS's holders. That node is a holder
   as JS's are (`Core::reconcile_wrapper`, `Components::fill_holders`): its styles stay on it, the rest goes to the
-  fill's one element (the same rule: not raw text, a component's host, a list or another holder), combined with what
+  fill's one element (the same rule: not raw text, a list or another holder), combined with what
   the placing view gives that element as JS's side is (`Core::apply_target_attrs`, `Core::target_events`), and follows
   the fill's nodes as they are placed and released. So a component's `on_focus` / `on_blur` on its trigger hear the
   focus of a Rust app's element, which only the focused element gets, as they do a TSX app's. An overlay placed against
@@ -904,6 +905,20 @@ what changed.
   data converted by the `Event` derive's `data_js` when JS hears it; the JS face calls the app's
   `on<Name>(data)`), or, for a nested component, to the
   `on_event` listener of the view that made it, typed, whose own emits are routed in turn until none are left.
+- `after_answer(f)` (`element/ambient.rs`) runs `f` once the app has handled every event emitted so far and the
+  props it set in answer have reached the components: what a view shows of its own until the app's value comes back
+  (a slider's drag value) is let go of there, with no frame of the app's earlier value between. A timer or
+  `next_frame` may fire before that: a component's event to JS is only queued (`Core::events`); the engine's next
+  commit round hands it to JS, applies the ops its handler queued and only then commits, which sets the new props.
+  The executor keeps the closures in two queues: `Core::take_events` (the engine handing the events out) makes the
+  waiting ones due, and the next `Core::commit` runs the due ones first, before its views render, each under the owner
+  current when it was registered (dropped unrun once that owner is disposed), so what they change shows in that
+  commit with the app's props. The engine's commit loop goes on for another round while some are due
+  (`Core::has_due_answers`), so they go out in the batch of the events they waited for. With a Rust owner, whose
+  listener ran when the event was emitted, `f` runs in the commit after the one that rendered what the listener
+  changed. The web's browser engine delivers the events the same way (its JS runs in the engine's call, its ops are
+  taken after it), so it needs nothing of its own. Unused, it costs nothing: the queues stay unallocated and nothing
+  is due, so the engine commits no extra round (`events_nothing_waits_for_cost_no_round`).
 - The back button: `on_back_press` listeners of views run newest first, after modals' and before stacks', then JS's
   (`element/back.rs`).
 - Keys while the control has the keyboard focus: a signal of the focus (`on_focus` / `on_blur`), and
@@ -916,8 +931,8 @@ what changed.
   `Change(true)`, nothing for a toolbar's items: the toolbar pattern only moves the focus); an item outside a group
   stays a stop of its own. A `Menu`'s or `Popover`'s trigger in a bar is one of its items too (`bar_trigger`): the
   popup reads the bar where it is made and registers its trigger slot's element under the ref it anchors to, so the
-  view the app puts there takes the stop's `focusable`, the focus listeners and the bar's `disabled` (a `Button` inside
-  a trigger would be a second pressable: triggers are plain views, as everywhere). A `ToggleGroup` or `ToolbarGroup` inside a toolbar provides the toolbar's `Roving` again
+  view the app puts there takes the stop's `focusable`, the focus listeners and the bar's `disabled`; the popup leaves
+  the bar for what it makes (`popup_bar`), so a `Button` the app puts there is that one item, not one of its own. A `ToggleGroup` or `ToolbarGroup` inside a toolbar provides the toolbar's `Roving` again
   (with its own `disabled` added), so its items are the toolbar's and the toolbar stays one stop. A popup's content
   (`Popover`, `HoverCard`, `Sheet`, `Menu`, the dropdown of `popup.rs`) leaves the bar (`leave_bar`): its controls are stops of
   their own though its trigger is a toolbar's item.
@@ -1188,7 +1203,8 @@ with no scrolling of its own:
   scroll comes to rest; `onFocus` / `onBlur` for the carousel as a whole, from a count of its views with the keyboard
   focus: its own view, previous, next and the pagination items (a move between them blurs one before it focuses the
   next, so `onBlur` waits a zero-delay timer and fires only if none of them has it then). Focusable views inside the
-  slides are not counted: the core has no focus-within. A control or pagination item that turns disabled while it
+  slides are not counted; the core's focus-within can count them (`ElementRef::on_focus_in` / `on_focus_out` on the
+  carousel's view, in place of the count and its timer). A control or pagination item that turns disabled while it
   has the focus gives it to the carousel's view first (`Ctl::keep_focus`), where the platform would move it out
   (AppKit to the window). Slides that move on by themselves are the app's timer setting `index`
   (`api-naming.md`).

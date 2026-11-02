@@ -13,7 +13,7 @@ use crate::{
     NodeId, TextEngine,
     element::{
         ElementRef, ScrollEvent, caught, untracked,
-        watch::{Order, OrderElements, OrderHandler, ScrollHandler},
+        watch::{FocusHandler, Order, OrderElements, OrderHandler, ScrollHandler},
     },
 };
 
@@ -34,13 +34,66 @@ struct Seen {
     last: Option<ScrollEvent>,
 }
 
+/// A focus watch as one round sees it, taken out of the executor's list.
+struct SeenFocus {
+    id: u32,
+    target: Rc<dyn Fn() -> Option<NodeId>>,
+    handler: FocusHandler,
+    last: Option<bool>,
+}
+
 impl<M: TextEngine> Core<M> {
     /// Resolves the watches' targets and runs those whose target moved, was
     /// laid out again or was found; whether a handler ran (another round
     /// sends what it changed).
     pub(super) fn sync_watches(&mut self) -> bool {
         let ordered = self.sync_orders();
-        self.sync_scroll_watches() || ordered
+        let focused = self.sync_focus_watches();
+        self.sync_scroll_watches() || ordered || focused
+    }
+
+    /// Tells the focus watches whose element the focus came into or left
+    /// since they last looked; whether a handler ran. Nothing to do unless
+    /// the focus moved or a watch has not found its element yet.
+    fn sync_focus_watches(&mut self) -> bool {
+        let watches = self.components.executor.watches.clone();
+        let moved = std::mem::take(&mut self.focus_within_changed);
+        if watches.borrow().focus.is_empty() || !moved && !watches.borrow().focus_unresolved() {
+            return false;
+        }
+        let seen: Vec<SeenFocus> = watches
+            .borrow()
+            .focus
+            .iter()
+            .filter(|w| moved || w.last.is_none())
+            .map(|w| SeenFocus {
+                id: w.id,
+                target: w.target.clone(),
+                handler: w.handler.clone(),
+                last: w.last,
+            })
+            .collect();
+        let _entered = self.components.runtime.enter();
+        let mut ran = false;
+        for w in seen {
+            let Some(node) = untracked(|| (w.target)()) else {
+                continue;
+            };
+            let now = self.has_focus_within(node);
+            if let Some(kept) = watches.borrow_mut().focus.iter_mut().find(|k| k.id == w.id) {
+                kept.last = Some(now);
+            }
+            // Found just now: what holds is where it starts, not a move.
+            if w.last.is_none_or(|last| last == now) {
+                continue;
+            }
+            if let Err(message) = caught(|| (w.handler)(now)) {
+                log::error!(target: "js", "a focus watch failed: {message}");
+            }
+            self.apply_actions();
+            ran = true;
+        }
+        ran
     }
 
     /// Notes that a node moved from parent `from` to parent `to`, for the

@@ -31,6 +31,11 @@ fn inline_color(patch: &StylePatch) -> Option<Color> {
 /// The states the platform reports ([`Core::set_states`]).
 const REPORTED: u16 = state::PRESSED | state::HOVERED | state::FOCUSED;
 
+/// The states the platform reports whatever a view tracks
+/// ([`crate::input::reported_states`]): never forgotten when its tracking
+/// changes.
+const ALWAYS_REPORTED: u16 = state::FOCUSED;
+
 /// The `class` and `classList` props as set.
 #[derive(Debug, Default)]
 pub(super) struct ClassNames {
@@ -60,6 +65,8 @@ pub(super) enum Part {
     Expanded,
     /// `pressedStyle`.
     Pressed,
+    /// `focusWithinStyle`.
+    FocusWithin,
     /// A page's `headerStyle` / `headerClass`.
     Header,
     /// A list's `contentClass`.
@@ -79,6 +86,7 @@ impl Part {
             Part::Indeterminate => (state::INDETERMINATE, rank::INDETERMINATE),
             Part::Expanded => (state::EXPANDED, rank::EXPANDED),
             Part::Pressed => (state::ARIA_PRESSED, rank::ARIA_PRESSED),
+            Part::FocusWithin => (state::FOCUS_WITHIN, rank::FOCUS_WITHIN),
             _ => return None,
         })
     }
@@ -89,8 +97,8 @@ impl Part {
 pub(super) struct NodeParts {
     /// The classes as set, before the state styles are merged in.
     base: Option<std::rc::Rc<ClassList>>,
-    /// The state styles, by [`Part`] (the first nine).
-    states: [Option<std::rc::Rc<StylePatch>>; 9],
+    /// The state styles, by [`Part`] (the first ten).
+    states: [Option<std::rc::Rc<StylePatch>>; 10],
     /// The state styles as rules (none without any).
     state_rules: Option<std::rc::Rc<ClassList>>,
     /// The inline styles of the other parts.
@@ -126,7 +134,7 @@ pub(super) fn accessibility_states(s: &crate::AccessibilityState) -> u16 {
 }
 
 /// The state style parts, by their index in [`NodeParts::states`].
-const STATE_PARTS: [Part; 9] = [
+const STATE_PARTS: [Part; 10] = [
     Part::Active,
     Part::Hover,
     Part::Focus,
@@ -136,6 +144,7 @@ const STATE_PARTS: [Part; 9] = [
     Part::Indeterminate,
     Part::Expanded,
     Part::Pressed,
+    Part::FocusWithin,
 ];
 
 impl<M: TextEngine> Core<M> {
@@ -193,7 +202,9 @@ impl<M: TextEngine> Core<M> {
 
     /// The platform reports interaction states of view `id` (`active:`,
     /// `hover:`, `focus:`): state bits for the states it
-    /// tracks ([`MountItem::TrackStates`]); see [`crate::tailwind::state`].
+    /// tracks ([`MountItem::TrackStates`]), and `FOCUSED` whatever it
+    /// tracks ([`crate::input::reported_states`]); see
+    /// [`crate::tailwind::state`].
     pub fn set_states(&mut self, id: NodeId, states: u16) {
         let Ok(key) = self.key(id) else { return };
         self.set_node_states(key, states);
@@ -214,24 +225,89 @@ impl<M: TextEngine> Core<M> {
         node.states = new;
         self.states_changed(key);
         if focus_changed {
-            // `focus-within:` on the node and its ancestors.
-            let focused = new & state::FOCUSED != 0;
-            let mut k = key;
+            self.focus_reported(key, new & state::FOCUSED != 0);
+        }
+    }
+
+    /// View `key` took (or lost) the keyboard focus. A surface has one: a
+    /// view taking it is the focus whether or not the one before reported
+    /// losing it yet, and a view losing it that is not the focus changes
+    /// nothing. The chain is worked out in the next commit round, once for
+    /// all the reports before it, so a move reported as a blur then a
+    /// focus leaves the views both chains share as they were. The root
+    /// view taking it (macOS's first responder when no view has it) is no
+    /// focus.
+    fn focus_reported(&mut self, key: Key, focused: bool) {
+        let id = self.nodes[key as usize].id;
+        if focused {
+            self.focus = (key != self.root).then_some((key, id));
+        } else if self.focus == Some((key, id)) {
+            self.focus = None;
+        } else {
+            return;
+        }
+        self.focus_moved = true;
+    }
+
+    /// Puts `focus-within` on the focus and the views around it, and takes
+    /// it off the views it left (those first, then the new ones): the old
+    /// chain and the new one are walked, nothing else, and the views on
+    /// both are not touched. The views around are the parents in the core's tree,
+    /// where an overlay is its parent's child (whatever root view shows
+    /// it), so the focus in a popup is within the view the popup's overlay
+    /// is in, as in a React portal.
+    pub(super) fn update_focus_within(&mut self) {
+        self.focus_moved = false;
+        let focus = self
+            .focus
+            .filter(|&(k, id)| self.nodes.get(k as usize).is_some_and(|n| n.id == id));
+        if focus.is_none() {
+            self.focus = None;
+        }
+        let mut chain = std::mem::take(&mut self.focus_scratch);
+        chain.clear();
+        if let Some((mut k, _)) = focus {
             while k != NO_KEY {
-                let node = &mut self.nodes[k as usize];
-                let before = node.states;
-                if focused {
-                    node.states |= state::FOCUS_WITHIN;
-                } else {
-                    node.states &= !state::FOCUS_WITHIN;
-                }
-                let parent = node.parent;
-                if node.states != before && k != key {
-                    self.states_changed(k);
-                }
-                k = parent;
+                let node = &self.nodes[k as usize];
+                chain.push((k, node.id));
+                k = node.parent;
             }
         }
+        if chain == self.focus_chain {
+            self.focus_scratch = chain;
+            return;
+        }
+        let old = std::mem::replace(&mut self.focus_chain, chain);
+        for &(k, id) in &old {
+            if self.focus_chain.contains(&(k, id)) {
+                continue;
+            }
+            // A view released since (its key perhaps another's now).
+            let Some(node) = self.nodes.get_mut(k as usize).filter(|n| n.id == id) else {
+                continue;
+            };
+            if node.states & state::FOCUS_WITHIN != 0 {
+                node.states &= !state::FOCUS_WITHIN;
+                self.states_changed(k);
+            }
+        }
+        for i in 0..self.focus_chain.len() {
+            let k = self.focus_chain[i].0;
+            let node = &mut self.nodes[k as usize];
+            if node.states & state::FOCUS_WITHIN == 0 {
+                node.states |= state::FOCUS_WITHIN;
+                self.states_changed(k);
+            }
+        }
+        self.focus_scratch = old;
+        self.focus_within_changed = true;
+    }
+
+    /// Whether the keyboard focus is on view `id` or a view inside it
+    /// (`focus-within`; an overlay is inside the view the app put it in).
+    pub(super) fn has_focus_within(&self, id: NodeId) -> bool {
+        self.key(id)
+            .is_ok_and(|k| self.nodes[k as usize].states & state::FOCUS_WITHIN != 0)
     }
 
     /// The node whose pressed state the touch responder holds.
@@ -737,21 +813,22 @@ impl<M: TextEngine> Core<M> {
     /// Tells the platform which states of `key` to report.
     pub(super) fn update_tracking(&mut self, key: Key) {
         let node = &mut self.nodes[key as usize];
-        let mut tracked = node.classes.as_ref().map_or(0, |c| c.tracked_states());
-        // A text input reports its focus whatever its classes say: the
-        // views around it read it as `focus-within:` (a combobox's field
-        // around its input). Inputs are few and focus changes rarely.
-        if node.kind == Kind::Input {
-            tracked |= state::FOCUSED;
-        }
+        // `focus-within` is the core's own (`update_focus_within`): the
+        // platform reports only the states of the view itself.
+        let tracked = node
+            .classes
+            .as_ref()
+            .map_or(0, |c| c.tracked_states() & REPORTED);
         if tracked != node.tracked {
             node.tracked = tracked;
             // The platform stops reporting the states it no longer tracks,
             // and keeps the rest as they are: forget them here too, or a
             // state set before (a hover, a press) would outlive the pointer
-            // and come back when the classes read it again.
-            let stale = node.states & REPORTED & !tracked;
-            let states = node.states & REPORTED & tracked;
+            // and come back when the classes read it again. The focus it
+            // reports always, so it stays.
+            let kept = tracked | ALWAYS_REPORTED;
+            let stale = node.states & REPORTED & !kept;
+            let states = node.states & REPORTED & kept;
             if node.created {
                 let id = node.id;
                 self.mount.push(MountItem::TrackStates {

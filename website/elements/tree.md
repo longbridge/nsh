@@ -145,6 +145,18 @@ chevron turns with a transition.
 | `onSelectedChange` | `.on_selected_change(..)` | `{ selected: string }` | The user selected another item (a press, the arrow keys, Home, End, typeahead). |
 | `onExpand` | `.on_expand(..)` | `{ id: string }` | The user expanded the item of `id`, after `onExpandedChange`. |
 | `onCollapse` | `.on_collapse(..)` | `{ id: string }` | The user collapsed the item of `id`, after `onExpandedChange`. |
+| `onAction` | `.on_action(..)` | `{ id: string }` | The user acted on the item of `id`: Return on the selected item when it has no children, or a double click or double tap on any item, after the press's own events. Disabled items and a disabled tree never report it. |
+
+The selection follows the arrow keys, so a file explorer opens a file in `onAction`, not in `onSelectedChange`:
+moving through the files previews them one by one, Return or a double click opens the one the user wants.
+
+```tsx
+<Tree
+  items={files}
+  onSelectedChange={({ selected }) => preview.set(selected)}
+  onAction={({ id }) => openFile(id)}
+/>
+```
 
 ## Parts
 
@@ -203,7 +215,8 @@ On the desktops and the web, where Tab reaches the views that take presses, a `T
 | Right | Expands a collapsed folder; on an expanded one, selects its first enabled child. |
 | Left | Collapses an expanded folder; on anything else, selects its parent. |
 | Home, End | Selects the first or the last row. |
-| Return, Space | Expands or collapses the selected folder. |
+| Return | Expands or collapses the selected folder; on an item without children, acts on it (`onAction`). |
+| Space | Expands or collapses the selected folder. |
 | Letters, digits | Selects the next row whose label starts with what was typed. |
 
 While the selection is hidden under a collapsed item (the app collapsed it), the keys act on that item's row: Right
@@ -211,7 +224,8 @@ or Return expands it, Down selects the row after it.
 
 ## Platform notes
 
-- iOS, Android and Mac Catalyst: a tap selects a row and expands or collapses a folder.
+- iOS, Android and Mac Catalyst: a tap selects a row and expands or collapses a folder; a double tap acts on the item
+  (`onAction`).
 - Desktops (macOS, Windows, Linux, GPUI) and the web: a click does the same and gives the tree the keyboard focus, and
-  the keys above move in it.
+  the keys above move in it; a double click acts on the item.
 - Every platform draws what the app styles: the tree, its rows and their content.

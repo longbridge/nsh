@@ -2079,21 +2079,15 @@ pub(crate) fn set_selection(view: &NshView, start: u32, end: u32) {
     }
 }
 
-/// Sets the `focused` interaction state of `view`, if JS tracks it.
+/// Sets the `focused` interaction state of `view`, which the core hears
+/// whatever the view tracks (`nsh_core::input::reported_states`).
 fn set_focused(surface: &Surface, view: &NshView, on: bool) {
     let (id, next) = {
         let mut s = view.state_mut();
-        if s.tracked & state::FOCUSED == 0 {
+        let Some(next) = nsh_core::input::next_states(s.tracked, s.states, state::FOCUSED, on)
+        else {
             return;
-        }
-        let next = if on {
-            s.states | state::FOCUSED
-        } else {
-            s.states & !state::FOCUSED
         };
-        if next == s.states {
-            return;
-        }
         s.states = next;
         (s.id, next)
     };

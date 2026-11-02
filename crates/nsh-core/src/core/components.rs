@@ -1016,6 +1016,33 @@ impl<M: TextEngine> Core<M> {
         }
     }
 
+    /// Runs the closures that waited for the app's answer to the events
+    /// handed to JS before this commit ([`crate::element::after_answer`]),
+    /// each under its owner; one whose owner went is dropped unrun.
+    pub(super) fn run_answers(&mut self) {
+        let _entered = self.components.runtime.enter();
+        for answer in self.components.executor.take_due_answers() {
+            let crate::element::AfterAnswer { owner, f } = answer;
+            let result = if owner == crate::element::Owner::detached() {
+                caught(f)
+            } else if owner.is_live() {
+                caught(|| owner.scope(f))
+            } else {
+                drop_caught(f);
+                continue;
+            };
+            if let Err(message) = result {
+                match self.host_of_owner(owner) {
+                    Some(host) => self.component_failed(host, message),
+                    None => {
+                        log::error!(target: "js", "a closure after the app's answer failed: {message}")
+                    }
+                }
+            }
+            self.apply_actions();
+        }
+    }
+
     /// Whether `id` is a component's host.
     pub(super) fn is_host(&self, id: NodeId) -> bool {
         self.components.instances.contains_key(&id)
@@ -1026,9 +1053,12 @@ impl<M: TextEngine> Core<M> {
     pub(super) fn intercept(&mut self, op: Op) -> Result<Option<Op>, ApplyError> {
         // The app's elements that take a slot's props: their props combine
         // with the component's ([`super::slots`]).
+        // A component's host among them takes them from its view: JS's
+        // ops on it are its component's.
         if !self.components.adopted.is_empty()
             && let Op::SetProp { id, .. } | Op::Listen { id, .. } | Op::Release { id } = &op
             && self.components.adopted.contains_key(id)
+            && !self.is_host(*id)
         {
             return Ok(self.js_slot_op(op));
         }
@@ -1326,10 +1356,11 @@ impl<M: TextEngine> Core<M> {
                     .root
                     .as_ref()
                     .is_some_and(|r| r.events.contains(event));
+                let slot = self.target_listens(base, event, enabled || own);
                 Ok(Some(Op::Listen {
                     id,
                     event,
-                    enabled: enabled || own,
+                    enabled: enabled || own || slot,
                 }))
             }
             Op::Rust(op) => {
@@ -2214,7 +2245,9 @@ impl<M: TextEngine> Core<M> {
         let mut old_over = old_attrs.clone();
         (old_over.inset_padding, old_over.inset_margin) = inst.root_insets_applied;
         let old_over = with_test_id(old_over, &inst.root_test_id_applied);
-        self.apply_attrs_over(host, &attrs, &old_over, app);
+        if !self.apply_target_attrs(host, &attrs, &old_over, app) {
+            self.apply_attrs_over(host, &attrs, &old_over, app);
+        }
         inst.root_insets_applied = (attrs.inset_padding, attrs.inset_margin);
         inst.root_test_id_applied = test_id_of(&attrs);
         // Given an inline style or animated values while its own did not
@@ -3907,7 +3940,7 @@ impl<M: TextEngine> Core<M> {
                 children,
             };
         }
-        if !self.apply_target_attrs(id, &el.attrs, &old_attrs) {
+        if !self.apply_target_attrs(id, &el.attrs, &old_attrs, None) {
             self.apply_attrs(id, &el.attrs, &old_attrs);
         }
         let classes = self.apply_el_styles(
@@ -4452,6 +4485,8 @@ impl<M: TextEngine> Core<M> {
         let Some(mut inst) = self.components.instances.remove(&host) else {
             return;
         };
+        // The app's element in a slot: the holder takes the slot's props.
+        self.target_released(host);
         if self
             .components
             .parked_methods
@@ -4599,8 +4634,12 @@ impl<M: TextEngine> Core<M> {
             return true;
         }
         if self.is_host(id) {
-            // The component whose view makes the host's node handles them.
+            // The component whose view makes the host's node handles them,
+            // after the one whose slot's props it takes.
             let base = self.base_of(id);
+            if let Some(slot) = self.adopted_host(base) {
+                self.handle(slot, base, kind, payload);
+            }
             return self.handle(base, base, kind, payload);
         }
         // A component's own list reports its viewable rows as they settle.
