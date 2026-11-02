@@ -341,6 +341,7 @@ pub(crate) fn host_environment_changed(surface: &Surface) {
 /// Writes `appearance` and the surface's own values into its environment.
 fn update(surface: &Surface, appearance: Appearance) {
     let mut env: Environment = surface.environment.get();
+    let old_ratio = env.pixel_ratio;
     let system = if appearance.dark {
         ColorScheme::Dark
     } else {
@@ -358,6 +359,11 @@ fn update(surface: &Surface, appearance: Appearance) {
     env.keyboard_height = px(0.0);
     env.lifecycle = lifecycle(surface);
     surface.set_environment(env);
+    // Images decoded for the old scale (a Wayland fractional scale arrives
+    // after the first frame) decode again at the new one.
+    if env.pixel_ratio != old_ratio {
+        crate::image::rescaled(surface);
+    }
 }
 
 /// The surface's environment changed (from the system or a test): GTK's
