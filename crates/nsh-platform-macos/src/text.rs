@@ -4,7 +4,7 @@
 use std::{cell::RefCell, ffi::c_void, ops::Range, ptr::NonNull};
 
 use nsh_core::{
-    Affinity, AttributedText, Bounds, Color, EllipsizeMode, FontFamily, Point, Points,
+    Affinity, AttributedText, Bounds, Color, EllipsizeMode, FamilyName, FontFamily, Point, Points,
     ResolvedTextStyle, Size, TextAlign, TextEngine, TextLayout, TextPosition,
 };
 use objc2::rc::Retained;
@@ -23,11 +23,11 @@ use objc2_core_text::{
     CTFontSymbolicTraits, CTFrame, CTFramesetter, CTLine, CTLineTruncationType, CTParagraphStyle,
     CTParagraphStyleSetting, CTParagraphStyleSpecifier, CTRun, CTRunDelegate,
     CTRunDelegateCallbacks, CTRunStatus, CTTextAlignment, CTTypesetter, CTWritingDirection,
-    kCTFontAttributeName, kCTFontFamilyNameAttribute, kCTFontFeatureSettingsAttribute,
-    kCTFontOpenTypeFeatureTag, kCTFontOpenTypeFeatureValue, kCTFontTraitsAttribute,
-    kCTFontWeightTrait, kCTForegroundColorAttributeName, kCTKernAttributeName,
-    kCTParagraphStyleAttributeName, kCTRunDelegateAttributeName, kCTRunDelegateCurrentVersion,
-    kCTUnderlineColorAttributeName, kCTUnderlineStyleAttributeName,
+    kCTFontAttributeName, kCTFontCascadeListAttribute, kCTFontFamilyNameAttribute,
+    kCTFontFeatureSettingsAttribute, kCTFontOpenTypeFeatureTag, kCTFontOpenTypeFeatureValue,
+    kCTFontTraitsAttribute, kCTFontWeightTrait, kCTForegroundColorAttributeName,
+    kCTKernAttributeName, kCTParagraphStyleAttributeName, kCTRunDelegateAttributeName,
+    kCTRunDelegateCurrentVersion, kCTUnderlineColorAttributeName, kCTUnderlineStyleAttributeName,
 };
 use rustc_hash::FxHashMap;
 
@@ -118,14 +118,10 @@ impl FontCache {
 
 pub(crate) fn make_font(style: &ResolvedTextStyle) -> CFRetained<CTFont> {
     let size = style.font_size.0 as CGFloat;
-    let font = style
+    let (font, fallbacks) = style
         .font_family
-        .and_then(|family| {
-            let name = family.name();
-            generic_font(&name, size, style.font_weight)
-                .unwrap_or_else(|| family_font(&name, size, style.font_weight))
-        })
-        .unwrap_or_else(|| system_font(size, style.font_weight));
+        .and_then(|family| listed_fonts(&family.name(), size, style.font_weight))
+        .unwrap_or_else(|| (system_font(size, style.font_weight), Vec::new()));
     let font = if style.italic {
         let italic = CTFontSymbolicTraits::TraitItalic;
         // SAFETY: a valid font; size 0 keeps the size, null matrix keeps it.
@@ -136,7 +132,51 @@ pub(crate) fn make_font(style: &ResolvedTextStyle) -> CFRetained<CTFont> {
     } else {
         font
     };
-    with_features(font, style.font_variant)
+    with_cascade(with_features(font, style.font_variant), &fallbacks)
+}
+
+/// The fonts of a `fontFamily` list ([`nsh_core::font_families`]): the
+/// first family the system has, and the others it has, which CoreText
+/// takes the characters the first lacks from ([`with_cascade`]). `None`
+/// (logged) when it has none of them.
+fn listed_fonts(
+    list: &str,
+    size: CGFloat,
+    weight: u16,
+) -> Option<(CFRetained<CTFont>, Vec<CFRetained<CTFont>>)> {
+    let mut fonts = nsh_core::font_families(list).filter_map(|family| match family {
+        FamilyName::Named(name) => family_font(name, size, weight),
+        generic => Some(generic_font(generic, size, weight)),
+    });
+    let Some(first) = fonts.next() else {
+        log::warn!("font family `{list}` is not available; using the system font");
+        return None;
+    };
+    Some((first, fonts.collect()))
+}
+
+/// `font` with `fallbacks` as its cascade list
+/// (`kCTFontCascadeListAttribute`): a character `font` lacks is taken from
+/// the first of them that has it, before the system's fallback fonts.
+fn with_cascade(font: CFRetained<CTFont>, fallbacks: &[CFRetained<CTFont>]) -> CFRetained<CTFont> {
+    if fallbacks.is_empty() {
+        return font;
+    }
+    // SAFETY: valid fonts.
+    let descriptors: Vec<CFRetained<CTFontDescriptor>> = fallbacks
+        .iter()
+        .map(|f| unsafe { f.font_descriptor() })
+        .collect();
+    let list = CFArray::from_retained_objects(&descriptors);
+    // SAFETY: an immutable CoreText constant.
+    let key = unsafe { kCTFontCascadeListAttribute };
+    let attributes = CFDictionary::<CFString, CFType>::from_slices(&[key], &[list.as_ref()]);
+    // SAFETY: the attribute's value has the type CoreText documents; size 0
+    // and a null matrix keep the font's.
+    unsafe {
+        let descriptor = CTFontDescriptor::with_attributes(attributes.as_opaque());
+        font.copy_with_attributes(0.0, std::ptr::null(), Some(&descriptor))
+    }
 }
 
 /// `font` with the OpenType features of `variant` (`fontVariant`).
@@ -175,23 +215,24 @@ pub(crate) fn ns_font(style: &ResolvedTextStyle) -> Retained<NSFont> {
     unsafe { Retained::from_raw(ptr).expect("non-null font") }
 }
 
-/// CSS generic families (`font-mono`, `font-serif`): the system font's
-/// designs. `Some(None)` is the plain system font; `None` is not generic.
-fn generic_font(family: &str, size: CGFloat, weight: u16) -> Option<Option<CFRetained<CTFont>>> {
+/// A CSS generic family (`font-mono`, `font-serif`): the system font or
+/// one of its designs.
+fn generic_font(family: FamilyName<'_>, size: CGFloat, weight: u16) -> CFRetained<CTFont> {
     use objc2_app_kit::{
         NSFontDescriptorSystemDesign, NSFontDescriptorSystemDesignRounded,
         NSFontDescriptorSystemDesignSerif,
     };
     let design: &NSFontDescriptorSystemDesign = match family {
-        "system-ui" | "sans-serif" | "ui-sans-serif" | "-apple-system" => return Some(None),
-        "monospace" | "ui-monospace" => {
-            let font = NSFont::monospacedSystemFontOfSize_weight(size, font_weight(weight));
-            return Some(Some(bridge(font)));
+        FamilyName::Monospace => {
+            return bridge(NSFont::monospacedSystemFontOfSize_weight(
+                size,
+                font_weight(weight),
+            ));
         }
         // SAFETY: immutable AppKit constants.
-        "serif" | "ui-serif" => unsafe { NSFontDescriptorSystemDesignSerif },
-        "ui-rounded" => unsafe { NSFontDescriptorSystemDesignRounded },
-        _ => return None,
+        FamilyName::Serif => unsafe { NSFontDescriptorSystemDesignSerif },
+        FamilyName::Rounded => unsafe { NSFontDescriptorSystemDesignRounded },
+        FamilyName::System | FamilyName::Named(_) => return system_font(size, weight),
     };
     let base = NSFont::systemFontOfSize_weight(size, font_weight(weight));
     let descriptor = base.fontDescriptor();
@@ -199,7 +240,7 @@ fn generic_font(family: &str, size: CGFloat, weight: u16) -> Option<Option<CFRet
         .fontDescriptorWithDesign(design)
         .and_then(|d| NSFont::fontWithDescriptor_size(&d, size))
         .unwrap_or(base);
-    Some(Some(bridge(font)))
+    bridge(font)
 }
 
 /// A `NSFont` as the `CTFont` it is (toll-free bridged).
@@ -209,8 +250,8 @@ fn bridge(font: Retained<NSFont>) -> CFRetained<CTFont> {
     unsafe { CFRetained::from_raw(NonNull::new(ptr).expect("non-null font")) }
 }
 
-/// A font of an installed or registered family, or `None` (logged) if the
-/// family does not exist.
+/// A font of an installed or registered family, or `None` if the family
+/// does not exist.
 fn family_font(family: &str, size: CGFloat, weight: u16) -> Option<CFRetained<CTFont>> {
     let name = CFString::from_str(family);
     let weight = CFNumber::new_cgfloat(font_weight(weight));
@@ -231,12 +272,7 @@ fn family_font(family: &str, size: CGFloat, weight: u16) -> Option<CFRetained<CT
     // An unknown family silently resolves to a default font: detect it.
     // SAFETY: a valid font.
     let resolved = unsafe { font.family_name() }.to_string();
-    if resolved.eq_ignore_ascii_case(family) {
-        Some(font)
-    } else {
-        log::warn!("font family `{family}` is not available; using the system font");
-        None
-    }
+    resolved.eq_ignore_ascii_case(family).then_some(font)
 }
 
 /// The system font as a `CTFont`. `NSFont` is toll-free bridged with
@@ -2270,6 +2306,39 @@ mod tests {
     use nsh_core::{AttributedText, Points, ResolvedTextStyle, Size, TextEngine, VerticalAlign};
 
     use super::CoreTextEngine;
+
+    /// A `fontFamily` list sets text in the first family the Mac has, the
+    /// others it has its fallbacks for characters the first lacks; a list
+    /// of families it has none of is the system font.
+    #[test]
+    fn a_family_list_sets_text_in_its_first_installed_family() {
+        use objc2_core_foundation::CFArray;
+        let style = |family: &str| ResolvedTextStyle {
+            font_size: Points(14.0),
+            font_family: Some(nsh_core::FontFamily::new(family)),
+            ..ResolvedTextStyle::default()
+        };
+        let font = super::make_font(&style("No Such Family, Menlo, 'Courier', sans-serif"));
+        // SAFETY: valid fonts and descriptors.
+        unsafe {
+            assert_eq!(font.family_name().to_string(), "Menlo");
+            let cascade = font
+                .font_descriptor()
+                .attribute(super::kCTFontCascadeListAttribute)
+                .and_then(|list| list.downcast::<CFArray>().ok())
+                .expect("a cascade list");
+            assert_eq!(cascade.len(), 2);
+            let missing = super::make_font(&style("No Such Family, Nor This"));
+            assert_ne!(missing.family_name().to_string(), "No Such Family");
+            let single = super::make_font(&style("Menlo"));
+            assert!(
+                single
+                    .font_descriptor()
+                    .attribute(super::kCTFontCascadeListAttribute)
+                    .is_none()
+            );
+        }
+    }
 
     /// The baseline of the first line, the attachment's top and the line's
     /// extent above and below the baseline.
