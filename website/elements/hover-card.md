@@ -10,8 +10,10 @@ demo: el-hover-card
 A hover card previews what its trigger points at without leaving the page: the profile behind a mention, the page
 behind a link, the quote behind a ticker. On the desktops and in desktop browsers it opens once the pointer has rested
 on the trigger for `openDelay` (600 ms), or once the keyboard focus comes to the trigger. It stays open while the
-pointer moves from the trigger onto the card and back, so links and buttons in the card can be used, and closes
-`closeDelay` (300 ms) after the pointer has left both. Escape and a press outside close it at once. On phones and
+pointer moves from the trigger onto the card and back, and while the keyboard focus is on the trigger or on a link or
+button in the card, so everything in the card can be used with the pointer and the keyboard alike. It closes
+`closeDelay` (300 ms) after the pointer has left both and the focus is in neither. Escape and a press outside close it
+at once. On phones and
 tablets a press on the trigger opens and closes it, and a press outside closes it.
 
 `HoverCard` from [`nsh/base`](../modules/nsh-base.md) draws nothing of its own: the trigger is your element, the
@@ -50,14 +52,18 @@ function Mention() {
 ```
 
 The trigger keeps its own role, presses and look: a view with `role="link"` and its own `onPress` still goes where it
-goes when pressed, and the card adds a preview to it. The content is made each time the card opens, so it can load what it shows then.
+goes when pressed, and the card adds a preview to it. The content is made each time the card opens, so it can load what it shows then. On
+phones and tablets, where a press opens the card, the trigger tells screen readers whether its card is open. In a
+[Toolbar](./toolbar.md) the trigger can be one of its items; what the card shows is not: its buttons and links keep
+their own Tab stops and the toolbar's `disabled` leaves them as they are.
 
 ## Delays
 
 `openDelay` keeps the card from flashing open as the pointer crosses the trigger on its way elsewhere; `closeDelay`
 gives the pointer time to cross the gap between the trigger and the card. Both are milliseconds. The pointer and the
 delays are followed natively, so resting on a trigger and moving between it and the card run none of your code until
-the card opens or closes.
+the card opens or closes. An `openDelay` of `Infinity` leaves opening to the app (and to a press on a touch screen); a
+`closeDelay` of `Infinity` leaves closing to Escape, a press outside and the app.
 
 ```tsx
 <HoverCard openDelay={300} closeDelay={150} trigger={<Text>AAPL</Text>}>
@@ -108,8 +114,8 @@ inside the safe area. `onPosition({ placement, bounds, available })` says where 
 |---|---|---|---|---|
 | `open` | `.open(..)` | `boolean` | none | Open, controlled by the app. |
 | `defaultOpen` | `.default_open(..)` | `boolean` | `false` | Open at first, without `open`. |
-| `openDelay` | `.open_delay(..)` | `number` | `600` | Milliseconds the pointer rests on the trigger, or the focus stays on it, before it opens. |
-| `closeDelay` | `.close_delay(..)` | `number` | `300` | Milliseconds the pointer is away from the trigger and the card before it closes. |
+| `openDelay` | `.open_delay(..)` | `number` | `600` | Milliseconds the pointer rests on the trigger, or the focus stays on it, before it opens; `Infinity`: never by itself. |
+| `closeDelay` | `.close_delay(..)` | `number` | `300` | Milliseconds the pointer is away from the trigger and the card, with the focus in neither, before it closes; `Infinity`: never by itself. |
 | `placement` | `.placement(..)` | `"top" \| "bottom" \| "left" \| "right"` | `"bottom"` | The side of the trigger it goes on. |
 | `align` | `.align(..)` | `"start" \| "center" \| "end"` | `"center"` | How it lines up with the trigger along that side. |
 | `offset` | `.offset(..)` | `number` | `0` | The gap between the trigger and the card. |
@@ -133,5 +139,6 @@ inside the safe area. `onPosition({ placement, bounds, available })` says where 
 
 A hover card adds to its trigger: the trigger keeps its role and label, and what it opens or does when pressed stays
 the same. Keyboard users get the card when the focus rests on the trigger, and Escape closes it. The card takes no
-focus of its own, so Tab moves on from the trigger as before; what matters in the card should also be reachable from
-the page the trigger leads to.
+focus of its own, so Tab moves on from the trigger as before. Links and buttons in the card take the focus as anywhere
+else, and the card stays open while one of them has it; what matters in the card should also be reachable from the
+page the trigger leads to.

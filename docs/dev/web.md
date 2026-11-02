@@ -41,7 +41,9 @@ and read by `values.rs` `unpack`), and an object's keys in one (op 48).
 Callbacks escaping a stopped run become inert; pending module and host calls reject on disposal.
 
 Browser fetch, streams, WebCrypto, URL, timers and promises use browser implementations, including their
-CORS, secure-context and permission rules. Synchronous hash/compression APIs retain Rust implementations;
+CORS, secure-context and permission rules; the browser knows no `asset:` scheme, so `fetch` of the app's files
+(`asset:/`) goes through the engine's network in every session, which reads them as on the other platforms
+(`web/browser/testing.js`, `src/browser/fetch.rs`). Synchronous hash/compression APIs retain Rust implementations;
 Buffer and POSIX path use pinned vendored implementations with licenses in `third_party/`. Mobile-only APIs
 retain their off-platform behavior. In a test session on a manual clock (`nsh test --target web`), timers,
 `Date`, `performance.now()`, animation frames and `fetch` go through the engine instead, so the test's clock and
@@ -519,7 +521,8 @@ calls (`nsh_set_dark`, `nsh_resize`). Changes come from media query listeners, `
 The idiom is fixed at start, as `Environment::idiom` is everywhere: `desktop` for a fine, hovering pointer and a
 container at least 600 wide (headless Chromium reports no pointer and measures as a tablet or phone unless launched
 with a fine, hovering one, as `nsh test --target web` does), `pad` for a screen whose short side is at least 600, else
-`phone`; the player's `idiom` option overrides it. `Environment::desktop()`
+`phone`; the player's `idiom` option overrides it, and so does a test's setup (`TestEnvironment::idiom`: `open`'s
+desktop `platform` starts the app in the desktop idiom at any width). `Environment::desktop()`
 (desktop OS, or the web in the desktop idiom) decides `desktop={{…}}` props, `platform.select`'s `desktop` key,
 `platform.desktop` and `platform.idiom` (`Environment::reported_idiom()`; the page's `browser/environment.js`
 gets both from the engine's environment); `Os::is_desktop()` stays the desktop backends' OSes (`nsh/desktop`'s windows and menus). Like the
@@ -604,9 +607,16 @@ positions computed here with a line height equal to the font's ascent + descent,
 put it. Canvas text has no numeric variants (its `font` takes only `small-caps`; there is no `fontVariantNumeric`),
 so text with one (`tabular-nums`, ...) is measured by `measure_numeric_text` instead: a hidden span with the run's
 `font` and `font-variant-numeric`, as the run is drawn. Measuring there lays the page out, so a figure (digits and the
-signs numbers are written with: `css::measured_by_char`) is the sum of its characters' widths, each measured once and
-cached, and a live value that changes every frame lays nothing out; text with letters is measured whole, kerning
-included (`web/text-browser.test.mjs` checks both against what Chrome draws). The CSS of runs (`src/text/css.rs`: the `font` shorthand,
+signs numbers are written with: `css::measured_by_char`) is the sum of its characters' widths plus each adjacent pair's
+kerning (the pair's width less its characters': `css::figure_width`), each character and pair measured once and cached,
+and a live value that changes every frame lays nothing out once its pairs have been seen (a font's figures have a few
+hundred at most); text with letters is measured whole. `web/text-browser.test.mjs` checks both against what Chrome
+draws, `tests/text` that a figure's width adds its pairs' kerning and that no figure is measured whole. Color emoji are drawn at the screen's
+pixel ratio, narrower than canvas measures them (Apple Color Emoji at 14px: 18 px on canvas, 14 in the DOM on a 2x
+screen), so text with emoji (`css::is_emoji`: non-ASCII characters with Unicode's `Emoji` property, text by default
+or not, since macOS draws ☝ ✌ ✍ ⛹ with the emoji font too; U+FE0F; U+20E3) is its canvas width plus, for each emoji
+cluster, what the DOM draws it wider, measured once per font and cluster (`emoji_excess`); a change of the pixel
+ratio measures text again once an emoji was measured. The CSS of runs (`src/text/css.rs`: the `font` shorthand,
 generic families such as `monospace` left unquoted,
 names the app quoted kept only when their quotes close them) and line breaking (`src/text/wrap.rs`: break opportunities, the
 line start and end rules of CJK punctuation, the filling of lines) depend on nothing of the browser and are tested on

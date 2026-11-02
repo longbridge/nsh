@@ -63,7 +63,7 @@ test("a swipe reports the photo it rests on", async () => {
   await app.waitFor("Photo: Detail of the weave");
   // Back a little: the second again, nothing reported.
   await app.scroll("role:group[2 of 6: Detail of the weave]", -60);
-  await app.clock.runFor(100);
+  await app.clock!.runFor(100);
   expect(app.shows("2 / 6")).toBe(true);
 });
 
@@ -71,22 +71,22 @@ test("the app's timer rolls the banners on every 4 s, past the last to the first
   await app.waitFor("Playing");
   await app.waitFor("1 / 4");
   // Each change starts the interval again: a little past each 4 s.
-  await app.clock.runFor(4100);
+  await app.clock!.runFor(4100);
   await app.waitFor("2 / 4");
   await app.waitFor("Banner: Up to 40% off");
-  await app.clock.runFor(8200);
+  await app.clock!.runFor(8200);
   await app.waitFor("4 / 4");
   // Past the last, around to the first.
-  await app.clock.runFor(4100);
+  await app.clock!.runFor(4100);
   await app.waitFor("1 / 4");
   // The rotation control stops it.
   await app.press("role:button[Pause slides]");
   await app.waitFor("Paused");
-  await app.clock.runFor(12000);
+  await app.clock!.runFor(12000);
   expect(app.shows("1 / 4")).toBe(true);
   await app.press("role:button[Play slides]");
   await app.waitFor("Playing");
-  await app.clock.runFor(4100);
+  await app.clock!.runFor(4100);
   await app.waitFor("2 / 4");
 });
 
@@ -97,11 +97,11 @@ test("on a desktop the banners are on hold while the pointer is over them", asyn
   await desk.waitFor("Autumn collection");
   await desk.hover("Autumn collection");
   await desk.waitFor("On hold");
-  await desk.clock.runFor(9000);
+  await desk.clock!.runFor(9000);
   expect(desk.shows("1 / 4")).toBe(true);
   // The pointer leaves: a whole interval from then.
   await desk.hover("Last event");
-  await desk.clock.runFor(4100);
+  await desk.clock!.runFor(4100);
   await desk.waitFor("2 / 4");
 });
 
@@ -110,11 +110,11 @@ test("the banners are on hold while a finger drags them", async () => {
   // The carousel reports the drag (onDragStart): the app holds its timer.
   await app.dragAndHold("role:group[1 of 4: Autumn collection]", { x: -40, y: 0 });
   await app.waitFor("On hold");
-  await app.clock.runFor(9000);
+  await app.clock!.runFor(9000);
   expect(app.shows("1 / 4")).toBe(true);
   // Let go: back where it was, the timer runs again (onDragEnd).
   await app.drop();
   await app.waitFor("Playing");
-  await app.clock.runFor(4100);
+  await app.clock!.runFor(4100);
   await app.waitFor("2 / 4");
 });

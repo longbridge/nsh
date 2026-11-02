@@ -959,6 +959,13 @@ class Player {
           this.withStrings([data], (dp, dl) => this.wasm.nsh_asset_bytes(dp, dl));
           return 1;
         },
+        // Where `asset:/…` is served, for the engine to download a file the
+        // page did not preload (Rust's `read_asset`).
+        asset_url: (up, ul, p, cap) => {
+          const url = encoder.encode(this.asset(this.str(up, ul)));
+          if (url.length <= cap) this.bytes(p, cap).set(url);
+          return url.length;
+        },
         fetch_start: (id, mp, ml, up, ul, hp, hl, bp, bl, kind, follow) =>
           this.fetchStart(id, this.str(mp, ml), this.str(up, ul), JSON.parse(this.str(hp, hl)),
             kind === 1 ? this.bytes(bp, bl).slice() : null, kind === 2, follow !== 0),
@@ -1092,6 +1099,9 @@ class Player {
    * `{type: "trace", items}`).
    */
   testSetup(storage, trace, environment) {
+    // The idiom the test asks for (`open`'s desktop `platform`), in place
+    // of the measured one, for the apps started from now on.
+    this.testIdiom = environment?.idiom;
     if (!this.wasm.nsh_test_setup) return;
     const setup = JSON.stringify({ storage: storage ?? [], trace: !!trace, environment: environment ?? {} });
     this.withStrings([setup], (p, l) => this.wasm.nsh_test_setup(p, l));
@@ -1346,7 +1356,7 @@ class Player {
 
   /** Starts the app with `start(environment)`, which returns the pump delay. */
   begin(width, start, deferEvents = false) {
-    this.idiom = this.options.idiom ?? this.measureIdiom(width);
+    this.idiom = this.options.idiom ?? this.testIdiom ?? this.measureIdiom(width);
     const environment = (this.reported = JSON.stringify(this.environment()));
     this.updateRootClasses();
     // Host events wait for this app's top-level `host.on` listeners, not
@@ -1554,6 +1564,11 @@ class Player {
     resolution();
     addEventListener("languagechange", changed);
     addEventListener("resize", changed);
+    // `lifecycle()`: hidden (another tab, a minimized window) or without
+    // the focus.
+    document.addEventListener("visibilitychange", changed);
+    addEventListener("focus", changed);
+    addEventListener("blur", changed);
     visualViewport?.addEventListener("resize", changed);
     visualViewport?.addEventListener("scroll", changed);
     new MutationObserver(changed).observe(document.documentElement, { attributes: true, attributeFilter: ["dir", "lang"] });
@@ -1606,6 +1621,9 @@ class Player {
       keyboard: this.keyboardHeight(),
       appleKeyboard: APPLE,
       host: Boolean(this.options.host),
+      lifecycle: document.visibilityState === "hidden"
+        ? "background"
+        : document.hasFocus() ? "active" : "inactive",
       screenColor: typeof window.EyeDropper === "function",
     };
   }
@@ -2135,7 +2153,9 @@ class Player {
     const el = this.view(id);
     if (!el) return;
     el._tracked = states;
-    el._states = 0;
+    // The focus is reported whatever is tracked (the core works out
+    // `focus-within` from it): it stays; the rest is forgotten.
+    el._states = (el._states || 0) & FOCUSED;
     if (states & HOVERED && !el._hoverListeners) {
       el._hoverListeners = true;
       el.addEventListener("pointerenter", (e) => e.pointerType === "mouse" && this.setState(el, HOVERED, true));
@@ -2144,9 +2164,11 @@ class Player {
   }
 
   setState(el, bit, on) {
-    if (!el._tracked || !(el._tracked & bit)) return;
-    const next = on ? el._states | bit : el._states & ~bit;
-    if (next === el._states) return;
+    // The focus is reported whatever is tracked (`reported_states`).
+    if (!(((el._tracked || 0) | FOCUSED) & bit)) return;
+    const states = el._states || 0;
+    const next = on ? states | bit : states & ~bit;
+    if (next === states) return;
     el._states = next;
     this.call((w) => w.nsh_states(el._id, next));
   }

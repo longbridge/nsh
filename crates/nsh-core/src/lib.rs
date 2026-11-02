@@ -49,6 +49,7 @@ pub mod scroll;
 pub mod selection;
 pub mod shader;
 pub mod shape;
+pub mod speech;
 pub mod storage;
 mod style;
 #[cfg(feature = "svg")]
@@ -102,15 +103,16 @@ pub use crate::{
     },
     style::{
         BorderStyle, Borders, Color, CornerRadii, DecorationStyle, EllipsizeMode, EnvVar,
-        FontFamily, FontVariant, GridTemplateValue, LineHeight, ObjectPosition, PaintStyle,
-        PositionAxis, PropertyValue, Style, StyleDecl, StyleError, StyleKey, StylePatch,
-        StyleValue, SvgPaint, TextAlign, TextDecoration, TextShadow, TextStyle, TextTransform,
-        TransformOrigin, TransformProperty, VerticalAlign, ViewStyle,
+        FamilyName, FontFamily, FontVariant, GridTemplateValue, LineHeight, ObjectPosition,
+        PaintStyle, PositionAxis, PropertyValue, Style, StyleDecl, StyleError, StyleKey,
+        StylePatch, StyleValue, SvgPaint, TextAlign, TextDecoration, TextShadow, TextStyle,
+        TextTransform, TransformOrigin, TransformProperty, VerticalAlign, ViewStyle, font_families,
     },
     text::{
         ATTACHMENT_CHAR, Affinity, ApproxTextEngine, AttachmentAlignments, AttributedText,
         BackgroundBox, FontExtent, LinePiece, ResolvedTextStyle, SpanTestId, TextAttachment,
         TextBackground, TextEngine, TextLayout, TextLine, TextLink, TextPosition, TextSpan,
+        font_data,
     },
     transform::{
         Decomposed, MAX_TRANSFORMS, Matrix, Transform, TransformKind, TransformOp, translation,

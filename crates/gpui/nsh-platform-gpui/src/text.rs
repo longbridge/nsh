@@ -456,25 +456,39 @@ impl GpuiTextEngine {
         if let Some(face) = fonts.faces.get(&key) {
             return face.clone();
         }
-        let family = match style.font_family {
-            Some(f) => {
-                let name = f.name();
-                family_candidates(&name)
-                    .into_iter()
-                    .find_map(|c| {
-                        if c.is_empty() {
-                            Some(fonts.ui.clone())
-                        } else {
-                            fonts
-                                .installed
-                                .get(&c.to_lowercase())
-                                .map(|n| SharedString::from(n.clone()))
-                        }
-                    })
-                    // Not installed: lines take the UI font.
-                    .unwrap_or_else(|| fonts.ui.clone())
+        // The families of the list this system has, in order: text is set
+        // in the first, and the others are its fallbacks, before the
+        // platform's.
+        let listed: Vec<SharedString> = match style.font_family {
+            Some(f) => family_candidates(&f.name())
+                .into_iter()
+                .filter_map(|c| {
+                    if c.is_empty() {
+                        Some(fonts.ui.clone())
+                    } else {
+                        fonts
+                            .installed
+                            .get(&c.to_lowercase())
+                            .map(|n| SharedString::from(n.clone()))
+                    }
+                })
+                .collect(),
+            None => Vec::new(),
+        };
+        // Not installed: lines take the UI font.
+        let family = listed.first().cloned().unwrap_or_else(|| fonts.ui.clone());
+        let mut fallbacks: Vec<String> = Vec::new();
+        for f in listed.iter().skip(1).filter(|f| **f != family) {
+            if !fallbacks.iter().any(|n| n == f.as_ref()) {
+                fallbacks.push(f.to_string());
             }
-            None => fonts.ui.clone(),
+        }
+        let fallbacks = if fallbacks.is_empty() {
+            fonts.fallbacks.clone()
+        } else {
+            let platform = fonts.fallbacks.as_ref().map(|f| f.fallback_list().to_vec());
+            fallbacks.extend(platform.into_iter().flatten());
+            Some(gpui::FontFallbacks::from_fonts(fallbacks))
         };
         let features: Vec<(String, u32)> = style
             .font_variant
@@ -484,7 +498,7 @@ impl GpuiTextEngine {
         let font = Font {
             family,
             features: FontFeatures(Arc::new(features)),
-            fallbacks: fonts.fallbacks.clone(),
+            fallbacks,
             weight: FontWeight(f32::from(style.font_weight)),
             style: if style.italic {
                 FontStyle::Italic
@@ -3934,6 +3948,23 @@ mod tests {
         assert_eq!(&*engine.face(&style).font.family, "Pacifico");
         // Pacifico is tall: its lines are more than 1.5 ems.
         assert!(after.height.0 > 30.0, "{after:?}");
+
+        // A `fontFamily` list sets text in its first family the system has
+        // (a registered one here: registering is process-wide, so this is
+        // the test that registers), the others it has first among the
+        // fallbacks.
+        let listed = ResolvedTextStyle {
+            font_family: Some(nsh_core::FontFamily::new(
+                "No Such Family, Pacifico, 'Pacifico', monospace",
+            )),
+            ..style
+        };
+        let font = engine.font(&listed);
+        assert_eq!(&*font.family, "Pacifico");
+        let fallbacks = font.fallbacks.expect("fallbacks");
+        let list = fallbacks.fallback_list();
+        assert!(!list.iter().any(|f| f == "Pacifico"), "{list:?}");
+        assert!(!list.is_empty());
     }
 
     #[test]

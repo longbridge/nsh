@@ -1463,6 +1463,28 @@ export function Controls(props: { show: Control }) {
    * as under the pointer). `lead` goes before the title (a flag, a status's dot, faces); `error` edges it in the
    * danger tone.
    */
+  /**
+   * A field's focus ring, as the Input demo's: a 2-point accent edge around the border, fading in while the field
+   * (`group-focus:`) or a view in it (`group-focus-within:`) has the focus. It lies over the field and takes no touches.
+   */
+  function FieldRing(props: { within?: boolean; error?: boolean }) {
+    return (
+      <View
+        class={`opacity-0 transition-opacity duration-150 motion-reduce:transition-none ${props.within ? "group-focus-within:opacity-100" : "group-focus:opacity-100"}`}
+        style={{
+          pointerEvents: "none",
+          position: "absolute",
+          top: -2,
+          left: -2,
+          right: -2,
+          bottom: -2,
+          borderRadius: radius.control + 1,
+          borderWidth: 2,
+          borderColor: props.error ? colors.danger : colors.accent,
+        }}
+      />
+    );
+  }
   function Picker(props: { title: string; open: boolean; disabled?: boolean; placeholder?: boolean; clearable?: boolean; lead?: JSX.Element; error?: boolean }) {
     return (
       <View
@@ -1471,6 +1493,8 @@ export function Controls(props: { show: Control }) {
           alignItems: "center",
           gap: 8,
           height: size.line,
+          // Room for the list's rows, which are as wide as the trigger.
+          minWidth: pointer ? 180 : undefined,
           paddingLeft: 10,
           // Room for the clear button, which goes over the trigger's end in place of the chevron.
           paddingRight: props.clearable ? clearInset + size.clear + 8 : 10,
@@ -1486,12 +1510,13 @@ export function Controls(props: { show: Control }) {
         }}
         hoverStyle={props.disabled || props.error ? undefined : { borderColor: colors.faint }}
         activeStyle={pressed}
-        focusStyle={focusRing()}
+        class="group"
         disabledStyle={dimmed}
       >
         {props.lead}
-        <Text style={{ numberOfLines: 1, fontSize: size.label, color: props.placeholder ? colors.faint : colors.text }}>{props.title}</Text>
+        <Text style={{ flex: 1, numberOfLines: 1, fontSize: size.label, color: props.placeholder ? colors.faint : colors.text }}>{props.title}</Text>
         <Chevron open={props.open} hidden={props.clearable} />
+        <FieldRing error={props.error} />
       </View>
     );
   }
@@ -1511,7 +1536,8 @@ export function Controls(props: { show: Control }) {
           gap: 8,
           // The row's 1-point border on each side.
           height: props.detail ? (pointer ? 38 : 52) : pointer ? 30 : 44,
-          paddingHorizontal: 7,
+          // With its border and the popup's padding, the trigger's inset: a select's chosen row lies over the trigger, title on title.
+          paddingHorizontal: pointer ? 3 : 7,
           opacity: props.item.disabled ? 0.35 : 1,
         }}
       >
@@ -1545,6 +1571,33 @@ export function Controls(props: { show: Control }) {
     backgroundColor: colors.field,
     ...finish.field,
   });
+  /**
+   * A combobox's field, shadcn's input group: the root draws the box, the input types inside it, and the chevron
+   * opens and closes the list.
+   */
+  const comboStyle = (open: boolean) => ({
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    // A set width with a pointer, as a select's; the row's on a touch screen.
+    ...(pointer ? { width: 260 } : { alignSelf: "stretch" as const }),
+    minHeight: size.line,
+    paddingLeft: 10,
+    paddingRight: 4,
+    borderRadius: radius.control,
+    borderWidth: 1,
+    borderColor: open ? colors.faint : colors.fieldBorder,
+    backgroundColor: colors.field,
+    ...finish.field,
+  });
+  const comboInputStyle = () => ({ flex: 1, minWidth: 40, height: size.line - 2 });
+  /** A combobox's toggle: the chevron in a square that lights under the pointer. */
+  function ComboToggle(props: { id: string; open: boolean }) {
+    return (
+      <View testID={props.id} style={{ width: 24, height: 24, alignItems: "center", justifyContent: "center", borderRadius: 6 }} hoverStyle={{ backgroundColor: colors.track }}>
+        <Chevron open={props.open} />
+      </View>
+    );
+  }
   /** What a list shows while its search matches nothing. */
   function Empty(props: { label: string }) {
     return <Text style={{ paddingVertical: 20, textAlign: "center", fontSize: 14, color: colors.muted }}>{props.label}</Text>;
@@ -1590,7 +1643,7 @@ export function Controls(props: { show: Control }) {
               margin={8}
               align="end"
               // Wider than the trigger with a pointer: the titles whole.
-              popupStyle={pointer ? { ...surface(), width: 200 } : surface()}
+              popupStyle={surface()}
               backdropStyle={backdrop}
               itemClass={optionClass}
               trigger={<Picker title={titleOf(SORTS, sort())} open={sortOpen()} />}
@@ -1616,7 +1669,7 @@ export function Controls(props: { show: Control }) {
               offset={4}
               margin={8}
               align="end"
-              popupStyle={pointer ? { ...surface(), width: 260 } : surface()}
+              popupStyle={pointer ? { ...surface(), minWidth: 260 } : surface()}
               backdropStyle={backdrop}
               itemClass={optionClass}
               cleanable
@@ -1638,12 +1691,12 @@ export function Controls(props: { show: Control }) {
     );
   }
 
-  /** What the lists of the cards below share: at the trigger's end with a pointer (`width` wide), a sheet on a phone. */
-  const listProps = (width?: number) => ({
+  /** What the lists of the cards below share: as wide as the trigger with a pointer (wider with `minWidth`), a sheet on a phone. */
+  const listProps = (minWidth?: number) => ({
     offset: 4,
     margin: 8,
     align: "end" as const,
-    popupStyle: pointer && width ? { ...surface(), width } : surface(),
+    popupStyle: pointer && minWidth ? { ...surface(), minWidth } : surface(),
     backdropStyle: backdrop,
     itemClass: optionClass,
   });
@@ -1912,25 +1965,27 @@ export function Controls(props: { show: Control }) {
               onConfirm={({ value }) => last.set(`Topics confirmed: ${value.length}`)}
               onOpenChange={opened((open) => topicsOpen.set(open))}
               accessibilityLabel="Topics"
-              searchable
-              searchPlaceholder="Search topics"
-              searchClass={searchClass}
-              searchStyle={searchStyle()}
+              class="group"
+              prefix={<FieldRing within />}
+              style={comboStyle(topicsOpen())}
+              placeholder={topics().length ? topicsTitle() : "Add topics"}
+              inputClass={searchClass}
+              inputStyle={comboInputStyle()}
+              triggerButton={<ComboToggle id="topics-toggle" open={topicsOpen()} />}
               empty={<Empty label="No topic matches" />}
               offset={4}
               margin={8}
               align="end"
-              popupStyle={pointer ? { ...surface(), width: 240 } : surface()}
+              popupStyle={surface()}
               backdropStyle={backdrop}
               itemClass={optionClass}
               cleanable
               clearButtonAccessibilityLabel="Clear the topics"
               clearButtonClass="items-center justify-center rounded-full enabled:hover:bg-accent active:bg-track"
-              clearButtonStyle={{ position: "absolute", top: (size.line - size.clear) / 2, right: clearInset, width: size.clear, height: size.clear }}
+              clearButtonStyle={{ width: size.clear, height: size.clear }}
               clearButton={<Icon name="close" size={size.clear - 6} tint={colors.muted} />}
               footerStyle={{ marginTop: 6, paddingTop: 6, paddingHorizontal: 9, borderTopWidth: 1, borderColor: colors.border }}
               footer={<Text style={{ fontSize: 12, color: colors.muted }}>{`${topics().length} selected`}</Text>}
-              trigger={<Picker title={topics().length ? topicsTitle() : "Add topics"} open={topicsOpen()} placeholder={!topics().length} clearable={topics().length > 0} />}
               renderItem={(item) => <Option item={item} note={item.disabled ? "Archived" : undefined} />}
               renderGroup={(group) => <Header group={group} />}
             />
@@ -1949,10 +2004,16 @@ export function Controls(props: { show: Control }) {
               offset={4}
               margin={8}
               align="end"
-              popupStyle={pointer ? { ...surface(), width: 200 } : surface()}
+              popupStyle={surface()}
               backdropStyle={backdrop}
               itemClass={optionClass}
-              trigger={<Picker title={names(REVIEWERS, reviewer())[0] ?? "Nobody"} open={reviewerOpen()} placeholder={!reviewer().length} />}
+              class="group"
+              prefix={<FieldRing within />}
+              style={comboStyle(reviewerOpen())}
+              placeholder={"Nobody"}
+              inputClass={searchClass}
+              inputStyle={comboInputStyle()}
+              triggerButton={<ComboToggle id="reviewer-toggle" open={reviewerOpen()} />}
               renderItem={(item) => <Option item={item} />}
             />
           </View>
@@ -1987,29 +2048,27 @@ export function Controls(props: { show: Control }) {
             onChange={({ value }) => set(value)}
             onOpenChange={opened((o) => open.set(o))}
             accessibilityLabel="Assignees"
-            searchable
-            searchPlaceholder="Search people"
-            searchClass={searchClass}
-            searchStyle={searchStyle()}
+            class="group"
+            style={comboStyle(open())}
+            placeholder={people().length ? `${people().length} ${people().length === 1 ? "person" : "people"}` : "Assign"}
+            inputClass={searchClass}
+            inputStyle={comboInputStyle()}
+            triggerButton={<ComboToggle id="assignees-toggle" open={open()} />}
+            prefix={
+              <>
+              <FieldRing within />
+              {/* The faces overlap, each ringed in the card's color. */}
+              <If when={people().length}>
+                <View style={{ flexDirection: "row", marginRight: 6 }}>
+                  <Each of={people().slice(0, 3)}>{(v, i) => <View style={{ marginLeft: i() ? -6 : 0 }}><Avatar name={person(v()).title} tone={person(v()).tone} size={pointer ? 20 : 24} ring /></View>}</Each>
+                </View>
+              </If>
+              </>
+            }
             empty={<Empty label="Nobody by that name" />}
-            {...listProps(260)}
+            {...listProps()}
             footerStyle={{ marginTop: 6, paddingTop: 6, paddingHorizontal: 9, borderTopWidth: 1, borderColor: colors.border }}
             footer={<Text style={{ fontSize: 12, color: colors.muted }}>{full() ? "Four assigned: take one off to add another" : `${MAX_PEOPLE - people().length} more can be added`}</Text>}
-            trigger={
-              <Picker
-                title={people().length ? `${people().length} ${people().length === 1 ? "person" : "people"}` : "Assign"}
-                placeholder={!people().length}
-                open={open()}
-                lead={
-                  // The faces overlap, each ringed in the card's color.
-                  <If when={people().length}>
-                    <View style={{ flexDirection: "row" }}>
-                      <Each of={people().slice(0, 3)}>{(v, i) => <View style={{ marginLeft: i() ? -6 : 0 }}><Avatar name={person(v()).title} tone={person(v()).tone} size={pointer ? 20 : 24} ring /></View>}</Each>
-                    </View>
-                  </If>
-                }
-              />
-            }
             renderItem={(item) => (
               <Option
                 item={item}
@@ -2080,12 +2139,14 @@ export function Controls(props: { show: Control }) {
               if (!o) query.set("");
             }}
             accessibilityLabel="Labels"
-            searchable
-            searchPlaceholder="Search or create labels"
-            searchClass={searchClass}
-            searchStyle={searchStyle()}
-            {...listProps(240)}
-            trigger={<Picker title={labels().length ? `${labels().length} ${labels().length === 1 ? "label" : "labels"}` : "Add labels"} placeholder={!labels().length} open={open()} />}
+            class="group"
+            prefix={<FieldRing within />}
+            style={comboStyle(open())}
+            placeholder={"Search or create labels"}
+            inputClass={searchClass}
+            inputStyle={comboInputStyle()}
+            triggerButton={<ComboToggle id="labels-toggle" open={open()} />}
+            {...listProps()}
             renderItem={(item) =>
               item.value.startsWith(NEW_LABEL) && !label(item.value) ? (
                 <Option item={item} lead={<Icon name="plus" size={14} tint={colors.accent} />} note={pointer ? "Return" : undefined} />
@@ -2133,41 +2194,26 @@ export function Controls(props: { show: Control }) {
           }}
           onOpenChange={opened((o) => open.set(o))}
           accessibilityLabel="Command"
-          searchable
-          searchPlaceholder="Type a command"
-          searchClass={searchClass}
-          searchStyle={searchStyle()}
-          empty={<Empty label="No command matches" />}
-          {...listProps(300)}
-          align="start"
-          trigger={
-            // A field that opens the list, as a command palette's: the search icon, a hint, the shortcut.
-            <View
-              style={{
-                flexDirection: "row",
-                alignItems: "center",
-                gap: 8,
-                height: size.line,
-                paddingHorizontal: 10,
-                borderRadius: radius.control,
-                borderWidth: 1,
-                borderColor: open() ? colors.faint : colors.fieldBorder,
-                backgroundColor: colors.field,
-                ...finish.field,
-                transitionProperty: "border-color",
-                transitionDuration: reduceMotion() ? 0 : 120,
-              }}
-              hoverStyle={{ borderColor: colors.faint }}
-              activeStyle={pressed}
-              focusStyle={focusRing()}
-            >
-              <Icon name="search" size={size.check} tint={colors.faint} />
-              <Text style={{ flex: 1, fontSize: size.label, color: colors.faint }}>Search commands…</Text>
-              <If when={pointer}>
-                <Text style={{ paddingHorizontal: 5, borderRadius: 4, borderWidth: 1, borderColor: colors.line, fontSize: 11, color: colors.muted }}>⌘K</Text>
-              </If>
-            </View>
+          class="group"
+          style={comboStyle(open())}
+          placeholder={"Search commands…"}
+          inputClass={searchClass}
+          inputStyle={comboInputStyle()}
+          triggerButton={<ComboToggle id="command-toggle" open={open()} />}
+          prefix={
+            <>
+              <FieldRing within />
+              <View style={{ marginRight: 8 }}><Icon name="search" size={size.check} tint={colors.faint} /></View>
+            </>
           }
+          suffix={
+            <If when={pointer}>
+              <Text style={{ marginHorizontal: 4, paddingHorizontal: 5, borderRadius: 4, borderWidth: 1, borderColor: colors.line, fontSize: 11, color: colors.muted }}>⌘K</Text>
+            </If>
+          }
+          empty={<Empty label="No command matches" />}
+          {...listProps()}
+          align="start"
           renderItem={(item) => (
             <Option item={item} lead={<Icon name={command(item.value).icon} size={14} tint={item.highlighted ? colors.text : colors.muted} />} note={item.disabled ? "At 100%" : pointer ? command(item.value).keys : undefined} />
           )}
