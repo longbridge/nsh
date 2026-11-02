@@ -4,7 +4,7 @@
 //! swipe reports the slide it rests on, between `onDragStart` and
 //! `onDragEnd`, and stays where the app follows it; the rest of a scroll
 //! the carousel replaced reports nothing; the keys move while
-//! it has the focus, which `onFocus` / `onBlur` report for the carousel as
+//! it has the focus (Left and Right traded in a right-to-left layout), which `onFocus` / `onBlur` report for the carousel as
 //! a whole and which a control turning disabled hands to the carousel;
 //! reduced motion scrolls at once; several slides per view rest with the
 //! last at the end of the range; a vertical carousel moves along its
@@ -305,6 +305,10 @@ fn snap_offsets(items: &[MountItem]) -> Vec<f32> {
 }
 
 fn start(props: HarnessProps, reduce_motion: bool) -> App {
+    start_in(props, reduce_motion, false)
+}
+
+fn start_in(props: HarnessProps, reduce_motion: bool, rtl: bool) -> App {
     let mut config = EngineConfig {
         viewport: Size::new(px(390.0), px(844.0)),
         clock: nsh_engine::Clock::manual(std::time::SystemTime::now()),
@@ -312,6 +316,7 @@ fn start(props: HarnessProps, reduce_motion: bool) -> App {
     };
     config.environment.os = Os::MacOs;
     config.environment.reduce_motion = reduce_motion;
+    config.environment.rtl = rtl;
     let mut app = Headless::start(config).expect("the engine starts");
     let seen: Seen = Arc::default();
     let into = seen.clone();
@@ -452,6 +457,25 @@ fn the_keys_move_while_the_carousel_has_the_focus() {
     app.press_key("home").unwrap();
     app.wait_for("text:index:0").unwrap();
     app.wait_for("text:changes:4").unwrap();
+}
+
+#[test]
+fn right_to_left_the_keys_trade_left_and_right() {
+    let mut app = start_in(HarnessProps::default(), false, true);
+    app.press_key("tab").unwrap();
+    app.press_key("tab").unwrap();
+    // The slides run from the right: Left is the next slide.
+    app.press_key("left").unwrap();
+    app.wait_for("text:index:1").unwrap();
+    app.press_key("left").unwrap();
+    app.wait_for("text:index:2").unwrap();
+    app.press_key("right").unwrap();
+    app.wait_for("text:index:1").unwrap();
+    app.press_key("end").unwrap();
+    app.wait_for("text:index:4").unwrap();
+    app.press_key("home").unwrap();
+    app.wait_for("text:index:0").unwrap();
+    app.wait_for("text:changes:5").unwrap();
 }
 
 #[test]
