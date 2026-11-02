@@ -264,3 +264,25 @@ covers [props] HoverCard.popupStartingClass
 covers [props] HoverCard.popupStartingStyle
 covers [props] HoverCard.popupEndingClass
 covers [props] HoverCard.popupEndingStyle
+# base-popup-anchors-desktop
+tap id:case-base-popup-anchors-desktop
+# A trigger its popover's column stretches (20, 300, 200 × 30 around a
+# 20-point box): the popup is centered 4 points below the whole trigger,
+# not below the box around its content (which would put it at 20).
+tap id:stretched-trigger
+expect StretchBody
+frame parent:text:StretchBody 100 334 40 20
+covers [props] Popover.trigger
+covers [props] Popover.offset
+tap id:stretched-trigger
+absent StretchBody
+# An icon trigger 40 points wide by its minWidth (20, 338) around a
+# 16-point icon: the menu starts at the trigger's start (`align` "start"),
+# not the icon's (which would put it at 32).
+tap id:icon-trigger
+expect IconItem
+frame parent:parent:text:IconItem 20 372 90 40
+covers [props] Menu.trigger
+covers [props] Menu.offset
+tap id:icon-trigger
+absent IconItem
