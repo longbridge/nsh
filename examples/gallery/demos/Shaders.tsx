@@ -2,7 +2,7 @@ import { Animated, cleanup, createAnimatedValue, Easing, Image, ScreenEffect, Sh
 import { Dialog, NavPage } from "nsh/base";
 import logo from "../logo-dark.svg";
 import { nav } from "../nav";
-import { Button, Caption, Card, colors, DemoPage, header, mono, PageHeader, Press, Toggle } from "../ui";
+import { Button, Caption, Card, colors, DemoPage, header, isDark, mono, PageHeader, Press, Toggle } from "../ui";
 
 // Every demo below is a WGSL `shade(uv)` function: the core checks it,
 // the platform renders it on the GPU under the view's children, clipped to
@@ -387,10 +387,19 @@ fn shade(uv: vec2f) -> vec4f {
   return vec4f(ink * vignette, c.a);
 }`;
 
+/** The tiles' colors: light, and a deeper shade for dark mode, where the
+ * light ones glare beside the page's dark cards. White text reads on both. */
+const TINTS = {
+  violet: ["#7c3aed", "#5b21b6"],
+  rose: ["#f43f5e", "#be123c"],
+  blue: ["#2563eb", "#1e40af"],
+  teal: ["#0f766e", "#115e59"],
+} as const;
+
 /** Colorful content for the effect and the transition to draw. */
-function Tile(props: { title: string; note: string; tint: string }) {
+function Tile(props: { title: string; note: string; tint: keyof typeof TINTS }) {
   return (
-    <View style={{ flex: 1, borderRadius: 14, padding: 16, justifyContent: "space-between", backgroundColor: props.tint }}>
+    <View style={{ flex: 1, borderRadius: 14, padding: 16, justifyContent: "space-between", backgroundColor: TINTS[props.tint][isDark() ? 1 : 0] }}>
       <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
         <Image src={logo} style={{ width: 26, height: 26 }} />
         <Text style={{ color: "#ffffff", fontSize: 15, fontWeight: "700" }}>{props.title}</Text>
@@ -407,7 +416,7 @@ function Effect() {
     <Card icon="canvas" title="Shader effect" subtitle="Children drawn through a shader">
       <View style={{ gap: 10 }}>
         <ShaderEffect source={PIXELATE} progress={progress} style={{ height: 160 }} {...drag((x) => progress.set(x))}>
-          <Tile title="Pixelated" note="sample_content reads what the children draw" tint="#7c3aed" />
+          <Tile title="Pixelated" note="sample_content reads what the children draw" tint="violet" />
         </ShaderEffect>
         <View style={{ flexDirection: "row", gap: 8 }}>
           <Button flex={1} label="Pixelate" onPress={() => to(1)} />
@@ -420,10 +429,10 @@ function Effect() {
 }
 
 const SLIDES = [
-  { title: "Morning", note: "A wipe from the top left", tint: "#f43f5e" },
-  { title: "Noon", note: "sample_from: what showed", tint: "#2563eb" },
-  { title: "Night", note: "sample_to: what shows now", tint: "#0f766e" },
-];
+  { title: "Morning", note: "A wipe from the top left", tint: "rose" },
+  { title: "Noon", note: "sample_from: what showed", tint: "blue" },
+  { title: "Night", note: "sample_to: what shows now", tint: "teal" },
+] as const;
 
 function Transition() {
   const index = signal(0);
@@ -458,7 +467,7 @@ function IrisPage() {
   return (
     <NavPage title="Iris" {...header} transitionShader={{ source: IRIS, duration: 600 }} header={<PageHeader title="Iris" />}>
       <View style={{ flex: 1, padding: 24, gap: 16, backgroundColor: colors.background }}>
-        <Tile title="Iris" note="This page came, and goes, through transitionShader" tint="#2563eb" />
+        <Tile title="Iris" note="This page came, and goes, through transitionShader" tint="blue" />
         <Button label="Leave the page" onPress={() => nav.pop()} />
       </View>
     </NavPage>
@@ -476,9 +485,9 @@ function Pages() {
         </View>
         <Caption label="They come and go through an iris instead of the platform's animation." />
         <Dialog open={open()} transitionShader={{ source: IRIS, duration: 600 }} onOpenChange={({ open: o }) => !o && open.set(false)} style={{ flex: 1 }}>
-          <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.62)", alignItems: "center", justifyContent: "center", padding: 24 }}>
+          <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.45)", alignItems: "center", justifyContent: "center", padding: 24 }}>
             <View style={{ width: 300, height: 200, gap: 12 }}>
-              <Tile title="Dialog" note="Presented through the iris" tint="#0f766e" />
+              <Tile title="Dialog" note="Presented through the iris" tint="teal" />
               <Button label="Close" onPress={() => open.set(false)} />
             </View>
           </View>
