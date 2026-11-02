@@ -1127,7 +1127,9 @@ impl Overlay {
 
     /// Places it against what the element carrying `anchor` draws: the box
     /// around its children, so a trigger in a wrapper its parent stretches
-    /// is placed against what shows ([`OverlayAnchor::Content`]).
+    /// is placed against what shows ([`OverlayAnchor::Content`]). A ref a
+    /// component gives its slot goes by the app's element's own box,
+    /// whether a TSX or a Rust app filled the slot.
     pub fn anchor_content(self, anchor: &super::ElementRef) -> Self {
         let anchor = *anchor;
         self.bind_prop(

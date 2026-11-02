@@ -4161,6 +4161,61 @@ fn a_popovers_looks_follow_its_presence_from_tsx() {
     );
 }
 
+const POPOVER_TRIGGER_BOX: &str = r##"import { mount, signal, Text, View } from "nsh";
+import { Popover } from "nsh/base";
+
+function App() {
+  const at = signal("At: none");
+  return (
+    <View style={{ paddingTop: 100 }}>
+      <Popover
+        defaultOpen
+        onPosition={({ bounds }) =>
+          at.set(`At: ${bounds.origin.x},${bounds.origin.y} ${bounds.size.width}x${bounds.size.height}`)}
+        trigger={
+          <View style={{ minHeight: 30, paddingHorizontal: 10, justifyContent: "center" }}>
+            <View style={{ width: 50, height: 10 }} />
+          </View>
+        }
+      >
+        <View style={{ width: 40, height: 20 }} />
+      </Popover>
+      <Text style={{ position: "absolute", top: 0 }}>{at()}</Text>
+    </View>
+  );
+}
+
+mount(App);
+"##;
+
+/// A TSX popover is placed against its trigger's own box, as a Rust
+/// app's: the trigger here is as wide as the window (the popover's column
+/// stretches it) and 30 points tall (its minimum height) around a 50 × 10
+/// box, so the popup is centered below all of it (at 175, 130), not below
+/// the box around the trigger's children and their padding (at 15, 120).
+#[test]
+fn a_tsx_popover_is_placed_against_its_triggers_own_box() {
+    let (_engine, rx) = start_in(
+        POPOVER_TRIGGER_BOX,
+        Environment {
+            os: nsh_engine::Os::Windows,
+            ..Environment::default()
+        },
+    );
+    let batches = until(&rx, |b| shows(b, "At: 175,130 40x20"));
+    let last = batches
+        .iter()
+        .flat_map(|b| b.items.iter())
+        .filter_map(|i| match i {
+            MountItem::Text { text, .. } if text.text.starts_with("At: ") => {
+                Some(text.text.clone())
+            }
+            _ => None,
+        })
+        .next_back();
+    assert_eq!(last.as_deref(), Some("At: 175,130 40x20"));
+}
+
 const BASE_PROGRESS: &str = r##"import { mount, signal, Text, View } from "nsh";
 import { Progress } from "nsh/base";
 

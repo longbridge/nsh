@@ -46,6 +46,9 @@ pub enum OverlayAnchor {
     /// padding and border around them (the view itself while it has no
     /// children). A trigger wrapped in a view its parent
     /// stretches is placed against what shows, not the stretched wrapper.
+    /// The element that takes a component's slot (the app's, from TSX or
+    /// Rust) goes by its own box: the slot's holder around it is that
+    /// wrapper.
     Content(NodeId),
     /// Beside a view inside another, as a submenu beside its row: lined
     /// up with `node` along the side it goes on, and outside `edges` (the
