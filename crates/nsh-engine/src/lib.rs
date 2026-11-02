@@ -2323,7 +2323,8 @@ impl FetchTask for AssetTask {
     fn cancel(self: Box<Self>) {}
 }
 
-/// Whether `url` names a bundled file (`asset:/…`).
+/// Whether `url` names a bundled file (`asset:/…`, the scheme in any case,
+/// as URL schemes are).
 fn is_asset(url: &str) -> bool {
     url.get(..6)
         .is_some_and(|scheme| scheme.eq_ignore_ascii_case("asset:"))
@@ -2350,6 +2351,24 @@ fn is_inside_assets(url: &str) -> bool {
     })
 }
 
+/// `url` (an `asset:/` URL) as its response answers at it, and as the
+/// rest of the engine reads it: the scheme in lower case, as URL parsers
+/// write it (schemes are case-insensitive, and JS's `fetch` parses the URL
+/// before the engine sees it), without the fragment, which no request
+/// sends and no response carries.
+fn asset_response_url(url: &str) -> String {
+    let rest = url.get(6..).unwrap_or_default();
+    format!("asset:{}", rest.split('#').next().unwrap_or_default())
+}
+
+/// The bundled file a request reads, by the URL [`asset_response_url`]
+/// wrote: its path alone, as hosts read it. A query is no part of a file's
+/// name, so `asset:/a.json?v=2` reads `asset:/a.json` on every host, as a
+/// web server serves it.
+fn asset_file(url: &str) -> &str {
+    url.split('?').next().unwrap_or_default()
+}
+
 /// A request in flight.
 struct Inflight {
     task: Box<dyn FetchTask>,
@@ -2357,8 +2376,9 @@ struct Inflight {
     hop: u64,
     /// Requests whose redirects the engine follows (to check each hop).
     followed: Option<access::Followed>,
-    /// The bundled file (`asset:/…`) a download is of: a status other than
-    /// a success fails it, as a file the host does not have does.
+    /// The `asset:/` URL a download of a bundled file answers at
+    /// ([`asset_response_url`]): a status other than a success fails it, as
+    /// a file the host does not have does.
     asset: Option<String>,
 }
 
@@ -2469,7 +2489,9 @@ impl Net {
     /// the host's assets: read on the runtime's blocking pool, which reports
     /// with [`Message::AssetRead`] (in WebAssembly, which has no threads,
     /// here).
-    fn asset(&mut self, who: Requester, request: HttpRequest) {
+    fn asset(&mut self, who: Requester, mut request: HttpRequest) {
+        request.url = asset_response_url(&request.url);
+        let file = asset_file(&request.url).to_owned();
         self.hops += 1;
         let hop = self.hops;
         self.inflight.insert(
@@ -2483,7 +2505,7 @@ impl Net {
         );
         // Failed here, before any host reads the file or serves it
         // ([`Assets::url`]): a request no host may answer reaches none.
-        let refused = if !is_inside_assets(&request.url) {
+        let refused = if !is_inside_assets(&file) {
             Some(format!(
                 "{}: bundled files are named by a path inside the app's files",
                 request.url
@@ -2513,13 +2535,13 @@ impl Net {
             let tx = self.tx.clone();
             // The read reports itself; nothing awaits its handle.
             drop(self.runtime.spawn_blocking(move || {
-                let bytes = assets.read(&request.url);
+                let bytes = assets.read(&file);
                 let _ = tx.send(Message::AssetRead(who, hop, request, bytes));
             }));
         }
         #[cfg(target_arch = "wasm32")]
         {
-            let bytes = assets.read(&request.url);
+            let bytes = assets.read(&file);
             self.asset_read(who, hop, request, bytes);
         }
     }
@@ -2548,7 +2570,7 @@ impl Net {
                         ("content-length".to_owned(), bytes.len().to_string()),
                         (
                             "content-type".to_owned(),
-                            content_type(&request.url).to_owned(),
+                            content_type(asset_file(&request.url)).to_owned(),
                         ),
                     ],
                     url: request.url.clone(),
@@ -2561,18 +2583,20 @@ impl Net {
                 events.push(FetchEvent::End);
                 events
             }
-            Err(error) => match self.assets.as_ref().and_then(|a| a.url(&request.url)) {
-                Some(url) => {
-                    self.inflight.remove(&who);
-                    let uri = request.url.clone();
-                    self.start(who, HttpRequest { url, ..request }, None);
-                    if let Some(download) = self.inflight.get_mut(&who) {
-                        download.asset = Some(uri);
+            Err(error) => {
+                match (self.assets.as_ref()).and_then(|a| a.url(asset_file(&request.url))) {
+                    Some(url) => {
+                        self.inflight.remove(&who);
+                        let uri = request.url.clone();
+                        self.start(who, HttpRequest { url, ..request }, None);
+                        if let Some(download) = self.inflight.get_mut(&who) {
+                            download.asset = Some(uri);
+                        }
+                        return;
                     }
-                    return;
+                    None => vec![FetchEvent::Failed(error)],
                 }
-                None => vec![FetchEvent::Failed(error)],
-            },
+            }
         };
         for event in events {
             let _ = self.tx.send(Message::Fetch(who, hop, event));
@@ -2614,8 +2638,8 @@ impl Net {
                         .iter()
                         .any(|(name, _)| name.eq_ignore_ascii_case("content-type"))
                     {
-                        head.headers
-                            .push(("content-type".to_owned(), content_type(uri).to_owned()));
+                        let file_type = content_type(asset_file(uri)).to_owned();
+                        head.headers.push(("content-type".to_owned(), file_type));
                     }
                 }
                 let Some(followed) = &mut inflight.followed else {
