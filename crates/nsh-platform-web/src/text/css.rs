@@ -76,13 +76,13 @@ pub(crate) fn emoji_excess(text: &str, mut excess: impl FnMut(&str) -> f32) -> f
 }
 
 /// Whether text with a numeric variant is measured character by
-/// character (each character's width measured once, then summed) rather
-/// than whole: text of digits and the signs numbers are written with
-/// (prices, times, percentages, counters), whose digits the variant draws
-/// at fixed widths and which nothing kerns. It is what changes on every
-/// update of a live figure; measuring it whole would lay the page out for
-/// every new value (`ffi::measure_numeric_text`). Other text (with letters)
-/// is measured whole, kerning included.
+/// character (each character and each adjacent pair measured once, the
+/// characters summed with the pairs' kerning) rather than whole: text of
+/// digits and the signs numbers are written with (prices, times,
+/// percentages, counters), which no font shapes beyond pairs. It is what
+/// changes on every update of a live figure; measuring it whole would lay
+/// the page out for every new value (`ffi::measure_numeric_text`). Other
+/// text (with letters) is measured whole.
 pub(crate) fn measured_by_char(text: &str) -> bool {
     !text.is_empty()
         && text.chars().all(|c| {
@@ -113,6 +113,26 @@ pub(crate) fn measured_by_char(text: &str) -> bool {
                         | '\u{2009}'
                 )
         })
+}
+
+/// The width of a figure (`measured_by_char`) from `measure`, which is
+/// only asked for its characters and adjacent pairs: each character's
+/// width plus the kerning of each pair (the pair whole, less its two
+/// characters). Fonts without `tnum` still kern digits (Arial and
+/// Liberation Sans: `11`).
+pub(crate) fn figure_width(text: &str, mut measure: impl FnMut(&str) -> f32) -> f32 {
+    let mut sum = 0.0;
+    let mut prev: Option<(usize, f32)> = None;
+    for (i, c) in text.char_indices() {
+        let end = i + c.len_utf8();
+        let w = measure(&text[i..end]);
+        sum += match prev {
+            Some((start, before)) => measure(&text[start..end]) - before,
+            None => w,
+        };
+        prev = Some((i, w));
+    }
+    sum
 }
 
 /// A `fontFamily` value as a CSS family list: one family or a

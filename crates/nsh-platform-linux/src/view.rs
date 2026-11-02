@@ -411,10 +411,10 @@ mod imp {
             }
             crate::shader::draw(snapshot, &state);
             crate::text::draw(snapshot, &state);
-            crate::image::draw(snapshot, &state);
+            // The surface's own scale, fractional ones included.
+            let scale = surface_scale(&*obj) as f64;
+            crate::image::draw(snapshot, &state, scale as f32);
             if state.canvas.is_some() {
-                // The surface's own scale, fractional ones included.
-                let scale = surface_scale(&*obj) as f64;
                 crate::canvas::draw(snapshot, &obj, &state, scale);
             }
             if !clip {

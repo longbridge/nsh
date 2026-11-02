@@ -1275,6 +1275,7 @@ covers [events] onPress
 tap id:case-base-tree
 expect Selected: none
 expect Changes: 0
+expect Acted: none
 # A tree of tree items for screen readers, named; `src` is expanded as the
 # app says, so its children show and `ui`'s do not.
 prop id:files role tree
@@ -1299,15 +1300,20 @@ expect tree.rs
 prop label:ui accessibilityState selected=true expanded=true
 style label:ui backgroundColor #00ff00ff
 nostyle label:src backgroundColor
-# Again: it collapses.
+# Again, later (not the second press of a double press): it collapses.
+wait 600
 tap label:ui
 expect Expanded: src
 expect Heard: collapse src/ui
 expect Changes: 2
 absent tree.rs
-# A leaf is selected only.
+# A leaf is selected only: a press acts on no item. (A double press and
+# Return act on it, `onAction`: this run's presses carry no click count
+# and its keys reach inputs only, so nsh-base's `tree` tests and the
+# gallery's check that.)
 tap label:lib.rs
 expect Selected: src/lib.rs
+expect Acted: none
 prop label:ui accessibilityState expanded=false
 nostyle label:ui backgroundColor
 style label:lib.rs backgroundColor #00ff00ff
@@ -1887,12 +1893,13 @@ covers [events] onBlur
 covers [events] onSubmit
 # base-combobox
 tap id:case-base-combobox
-# The trigger is a combobox whose value is the selected titles.
+# The input is a combobox whose value is the selected titles.
 prop label:Tags role combobox
 prop label:Tags accessibilityValue text=Red
 prop label:One accessibilityValue text=Blue
-# With `multiple`, a press toggles the item and the list stays open; the
-# footer shows below the rows, in the app's look.
+# The trigger button opens the list. With `multiple`, a press toggles the
+# item and the list stays open; the footer shows below the rows, in the
+# app's look.
 tap id:tags
 expect TagFooter
 style parent:parent:text:TagFooter backgroundColor #ff0000ff
@@ -1903,18 +1910,19 @@ expect TagFooter
 prop label:Green accessibilityState selected=true
 tap label:Red
 expect Tags: green
-# The app's query: typing in the field above the rows (its placeholder
-# the app's) is reported, and the app's query filters.
-prop below:scroll:label:Red placeholder FindTag
-type below:scroll:label:Red bl
+# The app's query: typing in the input is reported, and the app's query
+# filters.
+type label:Tags bl
 expect Query: bl
 absent label:Green
-# Closing confirms the value as it is.
-event label:Blue onCancel
+# Closing (the trigger button again) confirms the value as it is.
+tap id:tags
 expect Confirmed: green
 absent TagFooter
-# Without `multiple`, a choice replaces the value and closes the list.
-tap id:one
+# Without `multiple`, typing in the input opens the list, and a choice
+# replaces the value and closes it.
+type label:One re
+expect label:Red
 tap label:Red
 expect One: red
 absent label:Green
@@ -1923,13 +1931,12 @@ covers [props] Combobox.items
 covers [props] Combobox.multiple
 covers [props] value
 covers [props] defaultValue
-covers [props] Combobox.searchable
-covers [props] Combobox.searchPlaceholder
+covers [props] Combobox.placeholder
 covers [props] Combobox.query
 covers [props] Combobox.footer
 covers [props] Combobox.footerClass
 covers [props] Combobox.footerStyle
-covers [props] Combobox.trigger
+covers [props] Combobox.triggerButton
 covers [props] accessibilityLabel
 covers [events] onChange
 covers [events] Combobox.onConfirm

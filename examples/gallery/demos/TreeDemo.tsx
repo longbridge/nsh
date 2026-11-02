@@ -121,6 +121,7 @@ export function TreeDemo() {
   function Files() {
     const expanded = signal(["app", "app/src"]);
     const selected = signal<string | null>("app/src/router.rs");
+    const opened = signal<string | null>(null);
     let tree: TreeRef | undefined;
     const actions = () => (
       <Actions>
@@ -131,7 +132,7 @@ export function TreeDemo() {
     return (
       <Card
         title="Files"
-        subtitle="A project explorer: folders open with their chevron, a build folder kept out of reach"
+        subtitle={`A project explorer: folders open with their chevron, a file opens with ${pointer ? "a double click or Return" : "a double tap"}, a build folder kept out of reach`}
         right={desktop() ? actions() : undefined}
       >
         {desktop() ? null : actions()}
@@ -152,9 +153,19 @@ export function TreeDemo() {
           }}
           onExpand={({ id }) => last.set(`Expanded ${id}`)}
           onCollapse={({ id }) => last.set(`Collapsed ${id}`)}
+          // The arrows select row by row; a file opens only on the action
+          // (a folder's action is its press, which already opened it).
+          onAction={({ id }) => {
+            if (!(id in sizes)) return;
+            opened.set(id);
+            last.set(`Opened ${id}`);
+          }}
           renderItem={(entry) => <TreeRow entry={entry} detail={entry.disabled ? "excluded" : sizes[entry.id]} />}
         />
-        <Caption label={`Selected: ${selected() ?? "none"}`} note={`${expanded().length} open`} />
+        <Caption
+          label={`Selected: ${selected() ?? "none"}`}
+          note={opened() ? `Open: ${opened()!.split("/").pop()}` : `${expanded().length} open`}
+        />
       </Card>
     );
   }

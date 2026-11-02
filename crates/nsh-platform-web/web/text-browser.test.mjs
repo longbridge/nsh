@@ -35,9 +35,9 @@ test('tabular digits are measured as wide as the DOM draws them', { skip: !chrom
       try {
         const font = '400 20px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
         // A run as the mounter draws it: its class's font, then the variant.
-        const drawn = (text) => {
+        const drawn = (text, family = font) => {
           const run = document.createElement('span');
-          run.style.cssText = 'position:absolute;white-space:pre;font:' + font + ';font-variant-numeric:tabular-nums';
+          run.style.cssText = 'position:absolute;white-space:pre;font:' + family + ';font-variant-numeric:tabular-nums';
           run.textContent = text;
           document.body.append(run);
           const width = run.getBoundingClientRect().width;
@@ -49,10 +49,16 @@ test('tabular digits are measured as wide as the DOM draws them', { skip: !chrom
           if (Math.abs(measured - drawn(text)) > 0.01) throw Error(text + ': measured ' + measured + ', drawn ' + drawn(text));
         }
         // Figures are measured character by character (the engine's
-        // \`measured_by_char\`): the sum is what the run draws.
-        for (const text of ['530.92', '1,234.56', '-0.5%', '$1,111.11', '12:30']) {
-          const sum = [...text].reduce((w, c) => w + measureNumericText(font, 'tabular-nums', c), 0);
-          if (Math.abs(sum - drawn(text)) > 0.05) throw Error(text + ': summed ' + sum + ', drawn ' + drawn(text));
+        // \`measured_by_char\` and \`figure_width\`): the characters'
+        // sum with each adjacent pair's kerning is what the run draws. Arial
+        // (Liberation Sans on Linux) has no \`tnum\` and kerns \`11\`.
+        for (const family of [font, '400 20px Arial']) {
+          const width = (text) => measureNumericText(family, 'tabular-nums', text);
+          for (const text of ['530.92', '1,234.56', '-0.5%', '$1,111.11', '12:30']) {
+            const chars = [...text];
+            const sum = chars.reduce((w, c, i) => w + (i ? width(chars[i - 1] + c) - width(chars[i - 1]) : width(c)), 0);
+            if (Math.abs(sum - drawn(text, family)) > 0.05) throw Error(family + ' ' + text + ': summed ' + sum + ', drawn ' + drawn(text, family));
+          }
         }
         document.body.dataset.result = 'passed';
       } catch (e) { document.body.dataset.result = 'failed: ' + e.message; }

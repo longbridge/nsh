@@ -24,7 +24,7 @@ use rustc_hash::FxHashMap;
 
 pub(crate) use self::css::{css_font, font_variant_numeric};
 use self::{
-    css::{emoji_excess, measured_by_char},
+    css::{emoji_excess, figure_width, measured_by_char},
     hit::Stop,
 };
 use crate::ffi;
@@ -84,16 +84,17 @@ impl WebTextEngine {
         if text.is_empty() {
             return 0.0;
         }
-        // A figure is the sum of its characters, each measured once: a live
-        // value lays the page out for no new one, and its strings, new on
-        // every update, stay out of the cache.
+        // A figure is measured by its characters and pairs, each once: a
+        // live value lays the page out for no new one, and its strings, new
+        // on every update, stay out of the cache.
         if numeric.is_some() && text.chars().nth(1).is_some() && measured_by_char(text) {
-            let mut buf = [0u8; 4];
-            return text
-                .chars()
-                .map(|c| self.width(font, numeric, c.encode_utf8(&mut buf)))
-                .sum();
+            return figure_width(text, |part| self.measured(font, numeric, part));
         }
+        self.measured(font, numeric, text)
+    }
+
+    /// The width of `text` measured whole, cached.
+    fn measured(&self, font: &Arc<str>, numeric: Option<&Arc<str>>, text: &str) -> f32 {
         let key = (font.clone(), numeric.cloned(), text.to_owned());
         if let Some(&w) = self.widths.borrow().get(&key) {
             return w;
