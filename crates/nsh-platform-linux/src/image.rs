@@ -1018,7 +1018,9 @@ pub(crate) fn resized(surface: &Rc<Surface>, view: &NshView) {
             .map_or(1.0, |l| l.density());
         let longest = want.longest(picture.natural, density, source.size);
         let shown = picture.texture.width().max(picture.texture.height()) as u32;
-        if longest <= shown {
+        // reload when it is shown larger than decoded, or much smaller (a texture far past its pixels is
+        // drawn with mipmaps and blurs: a frame that shrank after its first decode, e.g. once the ratio is known)
+        if longest <= shown && shown <= longest + longest / 2 {
             return;
         }
         (image.generation, source.clone(), want)
@@ -1204,14 +1206,27 @@ fn fit(
     (r.origin.x.0, r.origin.y.0, r.size.width.0, r.size.height.0)
 }
 
-/// Draws `texture` at `rect` (points); mipmaps when it shrinks more than
-/// a 2× screen would.
-fn draw_texture(snapshot: &gtk::Snapshot, texture: &gdk::Texture, rect: &graphene::Rect) {
-    let filter = if texture.width() as f32 > rect.width() * 2.0 {
+/// The filter for a texture `texture_px` pixels wide drawn `rect_points`
+/// wide on a surface of `scale`: trilinear (mipmaps) only when it shrinks
+/// more than 2× on screen. A texture decoded for its box is at most a
+/// bucket (√2) larger than its device pixels; mipmapping that blends in
+/// the half-size level and blurs it.
+fn scaling_filter(texture_px: f32, rect_points: f32, scale: f32) -> gsk::ScalingFilter {
+    if texture_px > rect_points * scale.max(1.0) * 2.0 {
         gsk::ScalingFilter::Trilinear
     } else {
         gsk::ScalingFilter::Linear
-    };
+    }
+}
+
+/// Draws `texture` at `rect` (points) on a surface of `scale`.
+fn draw_texture(
+    snapshot: &gtk::Snapshot,
+    texture: &gdk::Texture,
+    rect: &graphene::Rect,
+    scale: f32,
+) {
+    let filter = scaling_filter(texture.width() as f32, rect.width(), scale);
     snapshot.append_scaled_texture(texture, filter, rect);
 }
 
@@ -1223,6 +1238,7 @@ fn draw_one(
     image: &ImageState,
     (texture, own): (&gdk::Texture, Natural),
     source: Option<&ImageSource>,
+    scale: f32,
 ) {
     let (w, h) = (state.frame.size.width.0, state.frame.size.height.0);
     let (x, y, fw, fh) = fit(
@@ -1248,12 +1264,12 @@ fn draw_one(
         Some(tint) => {
             // The mask is recorded first, then the source.
             snapshot.push_mask(gsk::MaskMode::Alpha);
-            draw_texture(snapshot, texture, &rect);
+            draw_texture(snapshot, texture, &rect, scale);
             snapshot.pop();
             snapshot.append_color(&crate::decor::rgba(tint), &rect);
             snapshot.pop();
         }
-        None => draw_texture(snapshot, texture, &rect),
+        None => draw_texture(snapshot, texture, &rect, scale),
     }
     if blur > 0.0 {
         snapshot.pop();
@@ -1262,7 +1278,8 @@ fn draw_one(
 }
 
 /// Draws an image view's picture.
-pub(crate) fn draw(snapshot: &gtk::Snapshot, state: &ViewState) {
+/// `scale`: the surface's, fractional ones included.
+pub(crate) fn draw(snapshot: &gtk::Snapshot, state: &ViewState, scale: f32) {
     let Some(image) = &state.image else { return };
     let fading = image.fade.is_some();
     if let Some(placeholder) = &image.placeholder
@@ -1270,7 +1287,7 @@ pub(crate) fn draw(snapshot: &gtk::Snapshot, state: &ViewState) {
     {
         let source = image.options.placeholder.as_ref();
         let shown = (&placeholder.texture, placeholder.natural);
-        draw_one(snapshot, state, image, shown, source);
+        draw_one(snapshot, state, image, shown, source, scale);
     }
     let Some(picture) = &image.image else {
         return;
@@ -1288,7 +1305,7 @@ pub(crate) fn draw(snapshot: &gtk::Snapshot, state: &ViewState) {
         snapshot.push_opacity(alpha as f64);
     }
     let shown = (texture, picture.natural);
-    draw_one(snapshot, state, image, shown, image.source.as_ref());
+    draw_one(snapshot, state, image, shown, image.source.as_ref(), scale);
     if alpha < 1.0 {
         snapshot.pop();
     }
@@ -1458,6 +1475,20 @@ mod tests {
         let alpha = |x: usize, y: usize| data[(y * 96 + x) * 4 + 3];
         assert_eq!(alpha(48, 48), 255);
         assert_eq!(alpha(2, 2), 0);
+    }
+
+    #[test]
+    fn mipmaps_only_textures_much_larger_than_their_device_pixels() {
+        use gsk::ScalingFilter::{Linear, Trilinear};
+        // A 240pt thumbnail on a 2x screen decoded at the next bucket
+        // (√2 over its 480 device pixels) stays sharp.
+        assert_eq!(scaling_filter(679.0, 240.0, 2.0), Linear);
+        assert_eq!(scaling_filter(960.0, 240.0, 2.0), Linear);
+        assert_eq!(scaling_filter(961.0, 240.0, 2.0), Trilinear);
+        // Fractional scales count their device pixels too.
+        assert_eq!(scaling_filter(700.0, 240.0, 1.5), Linear);
+        assert_eq!(scaling_filter(4000.0, 240.0, 1.5), Trilinear);
+        assert_eq!(scaling_filter(481.0, 240.0, 1.0), Trilinear);
     }
 
     #[test]

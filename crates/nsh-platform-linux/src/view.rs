@@ -392,13 +392,13 @@ mod imp {
             }
             crate::shader::draw(snapshot, &state);
             crate::text::draw(snapshot, &state);
-            crate::image::draw(snapshot, &state);
+            // The surface's own scale, fractional ones included.
+            let scale = obj
+                .native()
+                .and_then(|n| n.surface())
+                .map_or(obj.scale_factor() as f64, |s| s.scale());
+            crate::image::draw(snapshot, &state, scale as f32);
             if state.canvas.is_some() {
-                // The surface's own scale, fractional ones included.
-                let scale = obj
-                    .native()
-                    .and_then(|n| n.surface())
-                    .map_or(obj.scale_factor() as f64, |s| s.scale());
                 crate::canvas::draw(snapshot, &obj, &state, scale);
             }
             if !clip {

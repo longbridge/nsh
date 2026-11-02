@@ -69,7 +69,6 @@ Build and install the latest `main` from source (Git, Rust and the
 
 ```sh
 curl -fsSL https://nsh.dev/install.sh | sh -s -- --source
-nsh -V # nsh 0.1.1 (abcdef0)
 ```
 
 Re-run to update. The checkout stays in `~/.nsh/source` for runtime builds.

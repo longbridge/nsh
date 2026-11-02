@@ -657,6 +657,9 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
                     // No file dialogs (`Environment::file_requests`): the
                     // core answers first.
                     | Command::FileRequest { .. }
+                    // No speech recognizer (`Environment::speech`): the core
+                    // ends the sessions first.
+                    | Command::Speech(_)
                     // Trusted web view input is macOS's for now.
                     | Command::SendInput(_) => e.int(-1),
                     // `SystemUi.dialog` draws alerts and action sheets in

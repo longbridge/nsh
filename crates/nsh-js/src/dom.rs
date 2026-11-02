@@ -1258,7 +1258,7 @@ fn set_prop(
         }
         "activeStyle" | "hoverStyle" | "focusStyle" | "disabledStyle" | "selectedStyle"
         | "checkedStyle" | "indeterminateStyle" | "expandedStyle" | "pressedStyle"
-        | "headerStyle" => {
+        | "focusWithinStyle" | "headerStyle" => {
             let patch = part_style(cx, name, value)?;
             let prop = match name {
                 "activeStyle" => nsh_core::Prop::ActiveStyle(patch),
@@ -1270,6 +1270,7 @@ fn set_prop(
                 "indeterminateStyle" => nsh_core::Prop::IndeterminateStyle(patch),
                 "expandedStyle" => nsh_core::Prop::ExpandedStyle(patch),
                 "pressedStyle" => nsh_core::Prop::PressedStyle(patch),
+                "focusWithinStyle" => nsh_core::Prop::FocusWithinStyle(patch),
                 _ => nsh_core::Prop::HeaderStyle(patch),
             };
             return dom(cx).push(cx, Op::SetProp { id, prop });

@@ -868,7 +868,9 @@ pub fn DatePicker(props: DatePickerProps, cx: Scope<DatePickerEvent>) -> impl In
     view()
         .child(trigger)
         .child(clear_button)
-        .child(popup::dropdown(anchor, width, frame, presence, content))
+        .child(popup::dropdown(
+            anchor, width, true, None, frame, presence, content,
+        ))
 }
 
 #[cfg(test)]

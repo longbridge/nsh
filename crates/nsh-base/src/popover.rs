@@ -4,7 +4,7 @@ use nsh_core::{element::Style, prelude::*};
 
 use crate::{
     popup::{OpenChangeReason, OpenState, PopupPresence, StateLooks, lifecycle},
-    roving::{bar, bar_trigger, leave_bar},
+    roving::{bar_trigger, leave_bar, popup_bar},
 };
 
 /// The props of [`Popover`].
@@ -136,7 +136,7 @@ pub fn Popover(props: PopoverProps, cx: Scope<PopoverEvent>) -> impl IntoElement
     let anchor = element_ref();
     let desktop = is_desktop();
     // In a toolbar, the trigger is one of its items.
-    let around = bar();
+    let around = popup_bar();
     view()
         .child(props.trigger.place(move |trigger| {
             let trigger = trigger
