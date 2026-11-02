@@ -34,7 +34,7 @@
 //! - the OS version: `RtlGetVersion`'s major and minor version (10.0 on
 //!   Windows 10 and 11 alike: Windows 11 kept the version number);
 //! - the app's state, followed on `WM_ACTIVATEAPP` and the window's
-//!   `WM_WINDOWPOSCHANGED` ([`app_activated`], [`app_state_changed`]); an
+//!   `WM_WINDOWPOSCHANGED` ([`app_activated`], [`lifecycle_changed`]); an
 //!   embedded surface hears its root window's, whose procedure is
 //!   subclassed to pass them on (`window::observe_root`): background while
 //!   the window (an embedded surface's root window) is minimized or hidden,
@@ -63,7 +63,7 @@ use nsh_core::{
     geometry::px,
     platform::{Appearance, clipboard},
 };
-use nsh_engine::{AppState, ColorScheme, Edges, Environment, Locale};
+use nsh_engine::{ColorScheme, Edges, Environment, Lifecycle, Locale};
 use windows::{
     Win32::{
         Foundation::{LPARAM, WPARAM},
@@ -249,20 +249,20 @@ fn settings() -> Settings {
 /// (`active`), or another app's window was activated.
 pub(crate) fn app_activated(surface: &Surface, active: bool) {
     ACTIVE.with(|a| a.set(Some(active)));
-    app_state_changed(surface);
+    lifecycle_changed(surface);
 }
 
 /// The app may have changed state: activated, or its window shown, hidden,
 /// minimized or restored (`WM_WINDOWPOSCHANGED`).
-pub(crate) fn app_state_changed(surface: &Surface) {
+pub(crate) fn lifecycle_changed(surface: &Surface) {
     let mut env: Environment = surface.environment.get();
-    env.app_state = app_state(surface, env.app_state);
+    env.lifecycle = lifecycle(surface, env.lifecycle);
     surface.set_environment(env);
 }
 
 /// The app's state as `surface` sees it; `current` before its window
 /// exists.
-fn app_state(surface: &Surface, current: AppState) -> AppState {
+fn lifecycle(surface: &Surface, current: Lifecycle) -> Lifecycle {
     let hwnd = surface.hwnd();
     if hwnd.is_invalid() {
         return current;
@@ -272,11 +272,11 @@ fn app_state(surface: &Surface, current: AppState) -> AppState {
     // SAFETY: as above.
     let shown = unsafe { IsWindowVisible(root).as_bool() && !IsIconic(root).as_bool() };
     if !shown {
-        AppState::Background
+        Lifecycle::Background
     } else if ACTIVE.with(Cell::get).unwrap_or_else(foreground_is_ours) {
-        AppState::Active
+        Lifecycle::Active
     } else {
-        AppState::Inactive
+        Lifecycle::Inactive
     }
 }
 
@@ -319,7 +319,7 @@ fn update(surface: &Surface, settings: Settings) {
     env.os_version = os_version();
     env.safe_area = Edges::default();
     env.keyboard_height = px(0.0);
-    env.app_state = app_state(surface, env.app_state);
+    env.lifecycle = lifecycle(surface, env.lifecycle);
     surface.set_environment(env);
 }
 

@@ -74,7 +74,7 @@ use nsh_core::{
     Points, ROOT_ID,
     platform::{Appearance, clipboard},
 };
-use nsh_engine::{AppState, ColorScheme, Edges, Environment, Locale};
+use nsh_engine::{ColorScheme, Edges, Environment, Lifecycle, Locale};
 
 use crate::{
     app::AppView,
@@ -188,7 +188,7 @@ fn settings_changed() {
 /// A surface's window was activated or deactivated, or shown or hidden:
 /// every surface follows, as whether the app is the active one depends on
 /// all of their windows.
-fn app_state_changed() {
+fn lifecycle_changed() {
     let surfaces: Vec<Rc<Surface>> = WATCHED.with(|w| {
         let mut w = w.borrow_mut();
         w.retain(|w| w.surface.strong_count() > 0);
@@ -196,25 +196,25 @@ fn app_state_changed() {
     });
     for surface in surfaces {
         let mut env: Environment = surface.environment.get();
-        env.app_state = app_state(&surface, env.app_state);
+        env.lifecycle = lifecycle(&surface, env.lifecycle);
         surface.set_environment(env);
     }
 }
 
 /// The app's state as `surface` sees it; `current` while it is not
 /// watched.
-fn app_state(surface: &Surface, current: AppState) -> AppState {
+fn lifecycle(surface: &Surface, current: Lifecycle) -> Lifecycle {
     WATCHED.with(|w| {
         let w = w.borrow();
         let Some(this) = w.iter().find(|w| w.key == surface.key()) else {
             return current;
         };
         if !this.visible {
-            AppState::Background
+            Lifecycle::Background
         } else if w.iter().any(|w| w.active && w.surface.strong_count() > 0) {
-            AppState::Active
+            Lifecycle::Active
         } else {
-            AppState::Inactive
+            Lifecycle::Inactive
         }
     })
 }
@@ -276,7 +276,7 @@ pub(crate) fn watch_environment(
     cx.observe_window_activation(window, |view, window, cx| {
         let active = window.is_window_active();
         with_watched(view.surface().key(), |w| w.active = active);
-        app_state_changed();
+        lifecycle_changed();
         crate::rt::flush(cx);
     })
     .detach();
@@ -284,7 +284,7 @@ pub(crate) fn watch_environment(
         with_watched(view.surface().key(), |w| {
             w.visible = visibility.is_visible()
         });
-        app_state_changed();
+        lifecycle_changed();
         crate::rt::flush(cx);
     })
     .detach();
@@ -386,7 +386,7 @@ fn update(surface: &Surface) {
     env.os_version = settings.os_version;
     env.safe_area = Edges::default();
     env.keyboard_height = Points(0.0);
-    env.app_state = app_state(surface, env.app_state);
+    env.lifecycle = lifecycle(surface, env.lifecycle);
     surface.set_environment(env);
 }
 

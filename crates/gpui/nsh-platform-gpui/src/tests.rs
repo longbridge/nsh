@@ -53,12 +53,12 @@ mount(App);
 "#;
 
 /// A focused field that shows the app's state.
-const APP_STATE_FIELD: &str = r#"
-import { appState, mount } from "nsh";
+const LIFECYCLE_FIELD: &str = r#"
+import { lifecycle, mount } from "nsh";
 import { Input } from "nsh/base";
 
 function App() {
-  return <Input autoFocus value={appState()} style={{ height: 30 }} />;
+  return <Input autoFocus value={lifecycle()} style={{ height: 30 }} />;
 }
 mount(App);
 "#;
@@ -1353,7 +1353,7 @@ fn click(cx: &mut VisualTestContext, position: gpui::Point<gpui::Pixels>, count:
 }
 
 fn the_app_s_state_follows_its_window_s_activation_and_visibility(cx: &mut TestAppContext) {
-    let code = nsh_bundler::compile_module("App.tsx", APP_STATE_FIELD, &[]).unwrap();
+    let code = nsh_bundler::compile_module("App.tsx", LIFECYCLE_FIELD, &[]).unwrap();
     let (view, cx) =
         cx.add_window_view(|window, cx| AppView::new(AppOptions::default(), window, cx));
     view.update(cx, |view, _| view.load(App::Js(Bundle::source(code))));

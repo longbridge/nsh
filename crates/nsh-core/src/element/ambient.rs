@@ -28,7 +28,7 @@ use crate::{
     Command, Dialog, EdgeInsets, LayoutAnimation, NodeId, Points, Size,
     canvas::CanvasFont,
     color::Hsla,
-    platform::{AppState, Appearance, Idiom, Locale, Os},
+    platform::{Appearance, Idiom, Lifecycle, Locale, Os},
     time::Instant,
 };
 
@@ -72,7 +72,7 @@ struct EnvSignals {
     rtl: Memo<bool>,
     pixel_ratio: Memo<f32>,
     locale: Memo<Locale>,
-    app_state: Memo<AppState>,
+    lifecycle: Memo<Lifecycle>,
     screen_color: Memo<bool>,
 }
 
@@ -99,7 +99,7 @@ impl EnvSignals {
                 rtl: part!(rtl),
                 pixel_ratio: part!(pixel_ratio),
                 locale: part!(locale),
-                app_state: part!(app_state),
+                lifecycle: part!(lifecycle),
                 screen_color: part!(screen_color),
             }
         })
@@ -270,10 +270,10 @@ pub fn locale() -> Locale {
 }
 
 /// Whether the app is in use: in the foreground, visible without the
-/// focus, or in the background (TS: `appState()`). Reading it subscribes,
+/// focus, or in the background (TS: `lifecycle()`). Reading it subscribes,
 /// so an effect pauses work in the background and resumes it after.
-pub fn app_state() -> AppState {
-    env(|e| e.app_state)
+pub fn lifecycle() -> Lifecycle {
+    env(|e| e.lifecycle)
 }
 
 /// The operating system (TS: `platform.os`); it does not change.

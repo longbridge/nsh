@@ -4,7 +4,7 @@
 // `openUrl`: a promise for a URL it opens (the headless runtime answers none), one rejected with a `TypeError` for
 // a URL it never opens (it never throws). Its script checks each.
 import { Text, View, signal } from "nsh";
-import { appState, colorScheme, fontScale, openUrl, pixelRatio, platform, setColorScheme, windowSize } from "nsh";
+import { colorScheme, fontScale, lifecycle, openUrl, pixelRatio, platform, setColorScheme, windowSize } from "nsh";
 
 function App() {
   const opened = signal("not opened");
@@ -21,7 +21,7 @@ function App() {
       <Text>{`Font scale: ${fontScale()}`}</Text>
       <Text>{`Window: ${windowSize().width}x${windowSize().height}`}</Text>
       <Text>{`Scheme: ${colorScheme()}`}</Text>
-      <Text>{`App state: ${appState()}`}</Text>
+      <Text>{`Lifecycle: ${lifecycle()}`}</Text>
       <View testID="dark" onPress={() => setColorScheme("dark")}>
         <Text>Go dark</Text>
       </View>

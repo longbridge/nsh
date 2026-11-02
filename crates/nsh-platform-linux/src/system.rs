@@ -27,7 +27,7 @@
 //! - the OS version: the kernel's major and minor version (distributions
 //!   number their releases in incomparable ways, some not at all);
 //! - the app's state, from GDK's toplevel states, followed on the root's
-//!   map and unmap and its toplevel's `state` ([`app_state_changed`]):
+//!   map and unmap and its toplevel's `state` ([`lifecycle_changed`]):
 //!   background while the surface's window is not shown (the root
 //!   unmapped, the window minimized, or suspended: on another workspace or
 //!   covered, where the compositor says so), active while one of the
@@ -61,7 +61,7 @@ use nsh_core::{
     geometry::{Point, Size, px},
     platform::clipboard,
 };
-use nsh_engine::{AppState, ColorScheme, Edges, Environment, Locale};
+use nsh_engine::{ColorScheme, Edges, Environment, Lifecycle, Locale};
 
 use crate::{surface::Surface, view::NshView};
 
@@ -204,14 +204,14 @@ pub(crate) fn watch_environment(surface: &Rc<Surface>) {
             }
         });
         if let Some(toplevel) = gdk_surface.downcast_ref::<gdk::Toplevel>() {
-            toplevel.connect_state_notify(|_| app_state_changed());
+            toplevel.connect_state_notify(|_| lifecycle_changed());
         }
         if let Some(surface) = weak.upgrade() {
             update(&surface, appearance());
         }
     });
-    surface.root.connect_map(|_| app_state_changed());
-    surface.root.connect_unmap(|_| app_state_changed());
+    surface.root.connect_map(|_| lifecycle_changed());
+    surface.root.connect_unmap(|_| lifecycle_changed());
     update(surface, appearance());
     environment_applied(surface);
 }
@@ -292,16 +292,16 @@ fn system_changed() {
 /// A surface's window was focused, minimized, suspended, shown or hidden:
 /// tells every surface, as whether the app is the active one depends on
 /// all of its windows.
-fn app_state_changed() {
+fn lifecycle_changed() {
     for surface in surfaces() {
         let mut env: Environment = surface.environment.get();
-        env.app_state = app_state(&surface);
+        env.lifecycle = lifecycle(&surface);
         surface.set_environment(env);
     }
 }
 
 /// The app's state as `surface` sees it.
-fn app_state(surface: &Surface) -> AppState {
+fn lifecycle(surface: &Surface) -> Lifecycle {
     let hidden = gdk::ToplevelState::MINIMIZED | gdk::ToplevelState::SUSPENDED;
     let shown = surface.root.is_mapped()
         && surface
@@ -317,11 +317,11 @@ fn app_state(surface: &Surface) -> AppState {
         })
     };
     if !shown {
-        AppState::Background
+        Lifecycle::Background
     } else if focused() {
-        AppState::Active
+        Lifecycle::Active
     } else {
-        AppState::Inactive
+        Lifecycle::Inactive
     }
 }
 
@@ -356,7 +356,7 @@ fn update(surface: &Surface, appearance: Appearance) {
     env.os_version = OS_VERSION.with(|v| *v);
     env.safe_area = Edges::default();
     env.keyboard_height = px(0.0);
-    env.app_state = app_state(surface);
+    env.lifecycle = lifecycle(surface);
     surface.set_environment(env);
 }
 

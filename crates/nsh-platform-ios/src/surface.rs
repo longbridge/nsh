@@ -9,7 +9,7 @@ use block2::RcBlock;
 use dispatch2::{DispatchQueue, MainThreadBound};
 use nsh_core::{MountBatch, Points, Size};
 use nsh_engine::{
-    App, AppState, ColorScheme, Edges, Engine, EngineConfig, Environment, Idiom, MountSink, Policy,
+    App, ColorScheme, Edges, Engine, EngineConfig, Environment, Idiom, Lifecycle, MountSink, Policy,
 };
 use objc2::{
     DefinedClass, MainThreadMarker, MainThreadOnly, Message, define_class, msg_send,
@@ -127,8 +127,8 @@ pub(crate) struct RootViewIvars {
     keyboard: Cell<(f32, f32)>,
     /// Whether the app is in use where the surface shows, as the
     /// notifications of its window's scene said last (the application's
-    /// while it has none: [`RootView::observe_app_state`]).
-    app_state: Cell<AppState>,
+    /// while it has none: [`RootView::observe_lifecycle`]).
+    lifecycle: Cell<Lifecycle>,
     /// Last environment sent to the engine.
     environment: Cell<Option<Environment>>,
     /// The embedding app's locale and text size over the system's
@@ -200,7 +200,7 @@ define_class!(
             // SAFETY: calling the superclass implementation.
             let _: () = unsafe { msg_send![super(self), didMoveToWindow] };
             // Another window may be another scene, in another state.
-            self.ivars().app_state.set(self.scene_state());
+            self.ivars().lifecycle.set(self.scene_state());
             self.publish_environment();
         }
 
@@ -287,7 +287,7 @@ impl RootView {
             on_error: Arc::new(MainThreadBound::new(RefCell::new(None), mtm)),
             on_hot_failed: Arc::new(MainThreadBound::new(RefCell::new(None), mtm)),
             keyboard: Cell::new((0.0, 250.0)),
-            app_state: Cell::new(app_state(mtm)),
+            lifecycle: Cell::new(lifecycle(mtm)),
             environment: Cell::new(None),
             host: Cell::default(),
             host_tokens: RefCell::new(None),
@@ -357,7 +357,7 @@ impl RootView {
                 _ => Idiom::Phone,
             },
             locale: current_locale(),
-            app_state: self.ivars().app_state.get(),
+            lifecycle: self.ivars().lifecycle.get(),
             // Only read for the web: iOS keys are always Apple's.
             apple_keyboard: true,
             // No host answers `nsh/host` here: an embedding app talks to its
@@ -388,14 +388,14 @@ impl RootView {
     }
 
     /// Tracks whether the app is in use where the surface shows
-    /// (`appState()`): the notifications of its window's scene, so that on
+    /// (`lifecycle()`): the notifications of its window's scene, so that on
     /// an iPad with several windows, and on Catalyst, a surface follows its
     /// own window as the desktop backends do; the application's while the
     /// surface is in no window with a scene. An embedded surface follows
     /// the embedding app's window. The state is the notification's: during
     /// `willResignActive` / `willDeactivate`, the app and the scene still
     /// say active.
-    fn observe_app_state(this: &Retained<Self>) {
+    fn observe_lifecycle(this: &Retained<Self>) {
         let center = NSNotificationCenter::defaultCenter();
         let weak = Weak::from_retained(this);
         let block = RcBlock::new(move |note: NonNull<NSNotification>| {
@@ -406,21 +406,21 @@ impl RootView {
             // SAFETY: immutable UIKit constants.
             let (of_scene, state) = unsafe {
                 if *name == *UISceneDidActivateNotification {
-                    (true, AppState::Active)
+                    (true, Lifecycle::Active)
                 } else if *name == *UISceneDidEnterBackgroundNotification {
-                    (true, AppState::Background)
+                    (true, Lifecycle::Background)
                 } else if *name == *UISceneWillDeactivateNotification
                     || *name == *UISceneWillEnterForegroundNotification
                 {
-                    (true, AppState::Inactive)
+                    (true, Lifecycle::Inactive)
                 } else if *name == *UIApplicationDidBecomeActiveNotification {
-                    (false, AppState::Active)
+                    (false, Lifecycle::Active)
                 } else if *name == *UIApplicationDidEnterBackgroundNotification {
-                    (false, AppState::Background)
+                    (false, Lifecycle::Background)
                 } else {
                     // Resigning active, or coming back to the foreground
                     // before it is active again.
-                    (false, AppState::Inactive)
+                    (false, Lifecycle::Inactive)
                 }
             };
             let scene = view.scene();
@@ -434,7 +434,7 @@ impl RootView {
                 (None, _) => !of_scene,
             };
             if ours {
-                view.ivars().app_state.set(state);
+                view.ivars().lifecycle.set(state);
                 view.publish_environment();
             }
         });
@@ -474,14 +474,14 @@ impl RootView {
     /// The state of the surface's scene now, before its notifications say
     /// more (the application's without one). An unattached scene shows
     /// nothing, as one in the background.
-    fn scene_state(&self) -> AppState {
+    fn scene_state(&self) -> Lifecycle {
         let Some(scene) = self.scene() else {
-            return app_state(self.mtm());
+            return lifecycle(self.mtm());
         };
         match scene.activationState() {
-            UISceneActivationState::ForegroundActive => AppState::Active,
-            UISceneActivationState::ForegroundInactive => AppState::Inactive,
-            _ => AppState::Background,
+            UISceneActivationState::ForegroundActive => Lifecycle::Active,
+            UISceneActivationState::ForegroundInactive => Lifecycle::Inactive,
+            _ => Lifecycle::Background,
         }
     }
 
@@ -853,7 +853,7 @@ impl Surface {
             .spawn(crate::text::prewarm)?;
         let view = RootView::new(mtm, frame, app.into(), options);
         RootView::observe_keyboard(&view);
-        RootView::observe_app_state(&view);
+        RootView::observe_lifecycle(&view);
         Ok(Surface { view })
     }
 
@@ -986,11 +986,11 @@ fn current_locale() -> nsh_engine::Locale {
 
 /// The app's state as UIApplication reports it now, before its
 /// notifications say more.
-fn app_state(mtm: MainThreadMarker) -> AppState {
+fn lifecycle(mtm: MainThreadMarker) -> Lifecycle {
     match UIApplication::sharedApplication(mtm).applicationState() {
-        UIApplicationState::Active => AppState::Active,
-        UIApplicationState::Background => AppState::Background,
-        _ => AppState::Inactive,
+        UIApplicationState::Active => Lifecycle::Active,
+        UIApplicationState::Background => Lifecycle::Background,
+        _ => Lifecycle::Inactive,
     }
 }
 

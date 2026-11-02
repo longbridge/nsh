@@ -22,8 +22,8 @@ use nsh_core::{
     geometry::{DevicePixels, point, px, size},
 };
 use nsh_engine::{
-    App, AppState, Assets, Bundle, ColorScheme, Edges, Engine, EngineConfig, EngineControl,
-    Environment, Idiom, Locale, MountSink, Policy, Root,
+    App, Assets, Bundle, ColorScheme, Edges, Engine, EngineConfig, EngineControl, Environment,
+    Idiom, Lifecycle, Locale, MountSink, Policy, Root,
 };
 
 use crate::{
@@ -1082,10 +1082,10 @@ extern "system" fn Java_com_longbridge_nsh_Native_environment(
         _ => Idiom::Phone,
     };
     // `NshView`'s activity: resumed, paused or stopped.
-    environment.app_state = match v[13] as u8 {
-        1 => AppState::Inactive,
-        2 => AppState::Background,
-        _ => AppState::Active,
+    environment.lifecycle = match v[13] as u8 {
+        1 => Lifecycle::Inactive,
+        2 => Lifecycle::Background,
+        _ => Lifecycle::Active,
     };
     if let Ok(tag) = env.get_string(&locale) {
         environment.locale = Locale::parse(&String::from(tag)).unwrap_or_default();

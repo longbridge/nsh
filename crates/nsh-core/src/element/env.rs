@@ -3,7 +3,7 @@
 
 use crate::{
     EdgeInsets, Points, Size,
-    platform::{AppState, Idiom, Locale, Os},
+    platform::{Idiom, Lifecycle, Locale, Os},
 };
 
 /// The environment of a surface, as the platform reports it.
@@ -48,7 +48,7 @@ pub struct Environment {
     pub host: bool,
     /// Whether the app is in use: in the foreground, visible without the
     /// focus, or in the background.
-    pub app_state: AppState,
+    pub lifecycle: Lifecycle,
     /// The platform picks colors from the screen
     /// ([`crate::platform::Environment::screen_color`]).
     pub screen_color: bool,
@@ -77,7 +77,7 @@ impl Default for Environment {
             locale: Locale::EN_US,
             apple_keyboard: false,
             host: false,
-            app_state: AppState::Active,
+            lifecycle: Lifecycle::Active,
             screen_color: false,
             file_requests: false,
         }

@@ -608,10 +608,10 @@ public class NshView extends FrameLayout {
 
     private float keyboard;
     /**
-     * Whether the app is in use (`appState()`): its activity's state, 0 resumed (active), 1 paused or started
+     * Whether the app is in use (`lifecycle()`): its activity's state, 0 resumed (active), 1 paused or started
      * again (inactive: visible without the focus), 2 stopped (background). Active until the activity says otherwise.
      */
-    private int appState;
+    private int lifecycle;
     /** How long the keyboard's last move took (ms; `keyboardFrame().duration`). */
     private long keyboardDuration = 250;
     /** The host app's locale and text size ({@link #setLocale}, {@link #setFontScale}). */
@@ -725,19 +725,19 @@ public class NshView extends FrameLayout {
             Build.VERSION.SDK_INT,
             (c.uiMode & Configuration.UI_MODE_TYPE_MASK) == Configuration.UI_MODE_TYPE_TELEVISION ? 3
                     : c.smallestScreenWidthDp >= 600 ? 1 : 0,
-            appState,
+            lifecycle,
         }, dark, locale.toLanguageTag());
     }
 
-    /** The view's activity reported `state` (`appState()`'s values). */
+    /** The view's activity reported `state` (`lifecycle()`'s values). */
     private void activityState(Activity activity, int state) {
-        if (activity != activity(getContext()) || state == appState) return;
-        appState = state;
+        if (activity != activity(getContext()) || state == lifecycle) return;
+        lifecycle = state;
         publishEnvironment(getRootWindowInsets());
     }
 
     /**
-     * The activities going through their lifecycle: `appState()`. One callback per application, registered by the
+     * The activities going through their lifecycle: `lifecycle()`. One callback per application, registered by the
      * first view attached and kept for the process, so it knows each activity's last state while views come and go: a
      * view attached again starts from its activity's state then, whatever the activity did while it was detached.
      */

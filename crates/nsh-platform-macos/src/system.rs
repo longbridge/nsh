@@ -14,7 +14,7 @@
 //! - right to left: the user's first preferred language;
 //! - reduce motion and VoiceOver: `NSWorkspace`'s accessibility settings,
 //!   live;
-//! - whether the app is in use (`appState()`): `background` while none of
+//! - whether the app is in use (`lifecycle()`): `background` while none of
 //!   it shows (hidden, or `NSApplication.occlusionState` without
 //!   `visible`: its windows minimized or covered), `active` while it is the
 //!   active app, `inactive` otherwise; live, from `NSApplication`'s
@@ -49,7 +49,7 @@ use nsh_core::{
     Command, Dialog, DialogButtonStyle, EventKind, EventPayload, NodeId, PayloadValue, ROOT_ID,
     geometry::px, platform::clipboard,
 };
-use nsh_engine::{AppState, ColorScheme, Edges, Environment, Idiom, Locale, Os};
+use nsh_engine::{ColorScheme, Edges, Environment, Idiom, Lifecycle, Locale, Os};
 use objc2::{
     AllocAnyThread, MainThreadMarker, MainThreadOnly, define_class, msg_send,
     rc::Retained,
@@ -191,7 +191,7 @@ fn install(mtm: MainThreadMarker) {
             ),
         ]
     };
-    // Whether the app is in use (`app_state`).
+    // Whether the app is in use (`lifecycle`).
     // SAFETY: as above.
     let observers = observers
         .into_iter()
@@ -277,25 +277,25 @@ fn update(surface: &Surface) {
     env.idiom = Idiom::Desktop;
     env.safe_area = Edges::default();
     env.keyboard_height = px(0.0);
-    env.app_state = app_state(surface.mtm);
+    env.lifecycle = lifecycle(surface.mtm);
     surface.set_environment(env);
 }
 
 /// Whether the app is in use: `background` while none of it shows (hidden,
 /// or its windows minimized or covered), `active` while it is the active
 /// app, `inactive` otherwise.
-fn app_state(mtm: MainThreadMarker) -> AppState {
+fn lifecycle(mtm: MainThreadMarker) -> Lifecycle {
     let app = NSApplication::sharedApplication(mtm);
     if app.isHidden()
         || !app
             .occlusionState()
             .contains(NSApplicationOcclusionState::Visible)
     {
-        AppState::Background
+        Lifecycle::Background
     } else if app.isActive() {
-        AppState::Active
+        Lifecycle::Active
     } else {
-        AppState::Inactive
+        Lifecycle::Inactive
     }
 }
 

@@ -120,7 +120,7 @@ let code = std::fs::read_to_string("app/bundle.js").expect("bundle");
 view.load(Bundle::source(code).into());
 ```
 
-视图是一个子窗口：由你的消息循环驱动，父窗口改变大小时用 `MoveWindow` 摆放它的 `hwnd()`。请在它所在窗口的线程上创建它：它的应用状态跟随该窗口的顶层窗口，即创建它时所在的那个窗口。`AppView::load` 会替换正在运行的
+视图是一个子窗口：由你的消息循环驱动，父窗口改变大小时用 `MoveWindow` 摆放它的 `hwnd()`。请在它所在窗口的线程上创建它：它的生命周期跟随该窗口的顶层窗口，即创建它时所在的那个窗口。`AppView::load` 会替换正在运行的
 内容；`stop`（或销毁窗口）结束应用。`asset_base` 指定 `asset:/` URI 从哪里解析（`AssetBase::Directory` 或 `AssetBase::Http`）。
 字节码 bundle（`bundle.nshc`）用 `unsafe { Bundle::bytecode(bytes) }`（或同样是 unsafe 的 `Bundle::read_trusted(path)`）加载：
 QuickJS 字节码是受信任的输入，只能从你自己应用的文件中加载。独立窗口用 `nsh_platform_windows::run_app(source, options)`，传入 `AppSource::Rust(root)` 或

@@ -57,8 +57,8 @@ pub use nsh_core::{
     geometry::{self, Bounds, Edges, Point, Points, Size},
     js::{HostLimits, Limits},
     platform::{
-        AppState, ColorScheme, Environment, FetchEvent, FetchOp, HostEnvironment, HttpBody,
-        HttpHead, HttpRequest, Idiom, Locale, Os,
+        ColorScheme, Environment, FetchEvent, FetchOp, HostEnvironment, HttpBody, HttpHead,
+        HttpRequest, Idiom, Lifecycle, Locale, Os,
     },
     storage::{StorageBackend, StorageChange},
     time::Clock,
@@ -2565,7 +2565,7 @@ fn ui_environment(env: &Environment, window: Size<Points>) -> nsh_core::element:
         locale: env.locale,
         apple_keyboard: env.apple_keyboard,
         host: env.host,
-        app_state: env.app_state,
+        lifecycle: env.lifecycle,
         screen_color: env.screen_color,
         file_requests: env.file_requests,
     }

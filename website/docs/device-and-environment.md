@@ -21,7 +21,7 @@ In Rust the accessors are functions of `nsh_core::prelude`; in TSX they come fro
 | `cx.insets()` | `safeAreaInsets()` (`nsh`) | The insets where the calling component renders (a page, a dialog). |
 | `keyboard_height()`, `keyboard_duration()` | `keyboardFrame()` (`nsh`) | The software keyboard's height and animation duration. |
 | `locale()` | `locale()` (`nsh`) | The user's locale as a BCP 47 tag (`"en-US"`, `"zh-Hans-CN"`): what `Intl` formats for by default. |
-| `app_state()` | `appState()` (`nsh`) | Whether the app is in use: `active`, `inactive` (visible without the focus) or `background` ([In the background](#in-the-background)). |
+| `lifecycle()` | `lifecycle()` (`nsh`) | Whether the app is in use: `active`, `inactive` (visible without the focus) or `background` ([In the background](#in-the-background)). |
 | `reduce_motion()`, `screen_reader()` | `reduceMotion()`, `screenReaderEnabled()` (`nsh`) | See [Accessibility](./accessibility.md). |
 
 ```rust tabs
@@ -253,11 +253,11 @@ An app shown inside a native app follows that app's own settings when it sets th
 
 ## In the background
 
-`app_state()` (TSX: `appState()`) says whether the user is using the app. It is `active` in the foreground, `inactive` while the app is still visible but another app or window has the focus (or the system shows something over it: the app switcher, an incoming call), and `background` while it is not visible: in the background on a phone, minimized on a desktop, a hidden tab on the web. Like every accessor it updates what read it, so an effect pauses a live feed, polling or a video in the background and resumes them when the user comes back:
+`lifecycle()` (the same in TSX) says whether the user is using the app. It is `active` in the foreground, `inactive` while the app is still visible but another app or window has the focus (or the system shows something over it: the app switcher, an incoming call), and `background` while it is not visible: in the background on a phone, minimized on a desktop, a hidden tab on the web. Like every accessor it updates what read it, so an effect pauses a live feed, polling or a video in the background and resumes them when the user comes back:
 
 ```rust tabs
 effect(move || {
-    if app_state() == AppState::Background {
+    if lifecycle() == Lifecycle::Background {
         feed.pause();
     } else {
         feed.resume();
@@ -267,12 +267,12 @@ effect(move || {
 
 ```tsx tabs
 effect(() => {
-  if (appState() === "background") feed.pause();
+  if (lifecycle() === "background") feed.pause();
   else feed.resume();
 });
 ```
 
-Use `background` to pause work, and save what the user changes as they change it: the system may suspend an app seconds after it moves to the background, before an effect that reads the change has run. An app shown inside a native app follows that app's state, and where an app has several windows (an iPad, a desktop) a view follows the window it is in. In tests, `app.setAppState("background")` of `nsh/test` moves the app there ([Testing](./testing-and-trace.md#steps)).
+Use `background` to pause work, and save what the user changes as they change it: the system may suspend an app seconds after it moves to the background, before an effect that reads the change has run. An app shown inside a native app follows that app's state, and where an app has several windows (an iPad, a desktop) a view follows the window it is in. In tests, `app.setLifecycle("background")` of `nsh/test` moves the app there ([Testing](./testing-and-trace.md#steps)).
 
 ## Safe areas
 

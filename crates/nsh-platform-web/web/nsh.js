@@ -1546,7 +1546,7 @@ class Player {
     resolution();
     addEventListener("languagechange", changed);
     addEventListener("resize", changed);
-    // `appState()`: hidden (another tab, a minimized window) or without
+    // `lifecycle()`: hidden (another tab, a minimized window) or without
     // the focus.
     document.addEventListener("visibilitychange", changed);
     addEventListener("focus", changed);
@@ -1603,7 +1603,7 @@ class Player {
       keyboard: this.keyboardHeight(),
       appleKeyboard: APPLE,
       host: Boolean(this.options.host),
-      appState: document.visibilityState === "hidden"
+      lifecycle: document.visibilityState === "hidden"
         ? "background"
         : document.hasFocus() ? "active" : "inactive",
       screenColor: typeof window.EyeDropper === "function",

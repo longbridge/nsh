@@ -34,13 +34,13 @@ test("the appearance and the viewport change while the app runs", async () => {
   expect(app.shows("Size: 844x390")).toBe(true);
 });
 
-test("the app state follows the system's", async () => {
+test("the lifecycle follows the system's", async () => {
   const app = await open("./App.tsx");
-  await app.setAppState("inactive");
+  await app.setLifecycle("inactive");
   expect(app.shows("App: inactive")).toBe(true);
-  await app.setAppState("background");
+  await app.setLifecycle("background");
   expect(app.shows("App: background")).toBe(true);
-  await app.setAppState("active");
+  await app.setLifecycle("active");
   expect(app.shows("App: active")).toBe(true);
 });
 

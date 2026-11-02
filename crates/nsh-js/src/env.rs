@@ -1,6 +1,6 @@
 //! The surface's environment: one signal per part
 //! (window, safe area, keyboard, color scheme, font scale, screen reader,
-//! reduced motion, pixel ratio, locale, app state) written when the platform reports a
+//! reduced motion, pixel ratio, locale, lifecycle) written when the platform reports a
 //! change, read through read-only accessors; `nsh/device` (`platform`) and
 //! `nsh/accessibility`; the layout direction, which follows the user's
 //! language; the insets
@@ -43,7 +43,7 @@ enum Part {
     PixelRatio,
     TitleBar,
     Locale,
-    AppState,
+    Lifecycle,
 }
 
 const PARTS: usize = 11;
@@ -377,8 +377,8 @@ pub(crate) fn set_environment(cx: *mut JsContext, next: &Environment) -> Result<
     if changed(&|p| p.pixel_ratio == next.pixel_ratio) {
         writes.push((Part::PixelRatio, number(next.pixel_ratio)));
     }
-    if changed(&|p| p.app_state == next.app_state) {
-        writes.push((Part::AppState, string(cx, next.app_state.name())));
+    if changed(&|p| p.lifecycle == next.lifecycle) {
+        writes.push((Part::Lifecycle, string(cx, next.lifecycle.name())));
     }
     // The layout direction follows the user's language.
     // SAFETY: the state's renderer, by shared reference.
@@ -630,8 +630,8 @@ pub(crate) const DEVICE_EXPORTS: &[Item] = &[
         ),
     ),
     (
-        "appState",
-        Export::Value(|cx| accessor(cx, Part::AppState)),
+        "lifecycle",
+        Export::Value(|cx| accessor(cx, Part::Lifecycle)),
         Ts::value(
             "Whether the app is in use (reactive): `\"active\"` in the foreground,\n`\"inactive\"` while visible without the focus (another app or window has\nit, or the system shows something over it), `\"background\"` while not\nvisible (in the background, minimized or hidden). An embedded app\nfollows the embedding app's.",
             "Accessor<\"active\" | \"inactive\" | \"background\">",

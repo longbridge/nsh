@@ -853,9 +853,9 @@ fn handle(
         WM_ACTIVATEAPP => crate::system::app_activated(surface, wparam.0 != 0),
         // Shown, hidden, minimized or restored (before default handling
         // sends `WM_SIZE`).
-        WM_WINDOWPOSCHANGED if data.top_level => crate::system::app_state_changed(surface),
+        WM_WINDOWPOSCHANGED if data.top_level => crate::system::lifecycle_changed(surface),
         // An embedded surface's: its root window's ([`observe_root`]).
-        WM_NSH_ROOT => crate::system::app_state_changed(surface),
+        WM_NSH_ROOT => crate::system::lifecycle_changed(surface),
         WM_DESTROY => {
             surface.stop();
             surface.set_hwnd(HWND::default());
