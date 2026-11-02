@@ -480,7 +480,7 @@ States are tracked by the platform only for elements whose classes use them, and
 | `active:` | the element is pressed | `.active(\|s\| …)` |
 | `hover:` | a pointer is over it (iPad pointer, Mac Catalyst, Android mouse) | `.hover(\|s\| …)` |
 | `focus:`, `focus-visible:` | the input has focus | `.focus(\|s\| …)` |
-| `focus-within:` | the element or a descendant has focus |  |
+| `focus-within:` | the element or a descendant has focus (an `Overlay`'s content is a descendant of the element it is in) | `.focus_within(…)` |
 | `disabled:` | the element has the `disabled` prop | `.disabled_style(\|s\| …)` |
 | `enabled:` | the element does not have the `disabled` prop |  |
 | `selected:` | the element is selected: a `Button`'s `selected`, or `accessibilityState.selected` |  |

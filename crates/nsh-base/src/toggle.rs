@@ -119,6 +119,7 @@ pub fn ToggleGroup(props: ToggleGroupProps, _cx: Scope<NoEvent>) -> impl IntoEle
                 roving: Roving::new(Pattern::Toggles),
                 disabled: props.disabled,
                 axis: None,
+                open_menu: Default::default(),
             },
             AccessibilityRole::Toolbar,
         ),

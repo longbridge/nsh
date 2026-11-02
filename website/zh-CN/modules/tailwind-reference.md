@@ -480,7 +480,7 @@ view()
 | `active:` | 元素被按下 | `.active(\|s\| …)` |
 | `hover:` | 指针悬停其上（iPad 指针、Mac Catalyst、Android 鼠标） | `.hover(\|s\| …)` |
 | `focus:`、`focus-visible:` | 输入框获得焦点 | `.focus(\|s\| …)` |
-| `focus-within:` | 元素自身或其后代获得焦点 |  |
+| `focus-within:` | 元素自身或其后代获得焦点（`Overlay` 的内容是它所在元素的后代） | `.focus_within(…)` |
 | `disabled:` | 元素设置了 `disabled` 属性 | `.disabled_style(\|s\| …)` |
 | `enabled:` | 元素没有设置 `disabled` 属性 |  |
 | `selected:` | 元素处于选中状态：`Button` 的 `selected`，或 `accessibilityState.selected` |  |

@@ -260,11 +260,12 @@ pub(crate) fn track_states(surface: &Rc<Surface>, view: &NshView, states: u16) {
     {
         let mut s = view.state_mut();
         s.tracked = states;
-        // The core keeps the states still tracked and forgets the rest
+        // The core keeps the states still reported and forgets the rest
         // (`Core::update_tracking`): so do we, or a change it was not told
         // about (the pointer leaving a view whose hover was tracked
-        // throughout) would never reach it.
-        s.states &= states;
+        // throughout) would never reach it. The focus is reported
+        // whatever is tracked, so it stays.
+        s.states &= input::reported_states(states);
     }
     update_hover_tracking(surface, view);
 }
