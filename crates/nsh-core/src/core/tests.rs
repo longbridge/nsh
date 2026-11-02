@@ -17876,6 +17876,57 @@ fn overlays_in_a_modal_show_in_it() {
 }
 
 #[test]
+fn overlays_beside_a_row_go_outside_the_menu_around_it() {
+    use StyleValue::Number;
+    let mut c = core();
+    // A menu 100 wide at (20, 0) with 6 points of padding, a 20-tall row in
+    // it.
+    add(
+        &mut c,
+        2,
+        Tag::View,
+        ROOT_ID,
+        &[
+            ("marginLeft", Number(20.0)),
+            ("width", Number(100.0)),
+            ("padding", Number(6.0)),
+            ("alignSelf", StyleValue::Str("flex-start")),
+        ],
+    );
+    add(&mut c, 4, Tag::View, 2, &[("height", Number(20.0))]);
+    add(&mut c, 8, Tag::Overlay, ROOT_ID, &[]);
+    add(
+        &mut c,
+        10,
+        Tag::View,
+        8,
+        &[("width", Number(40.0)), ("height", Number(30.0))],
+    );
+    apply(
+        &mut c,
+        vec![
+            overlay_prop(
+                8,
+                crate::OverlayProp::Anchor(crate::overlay::OverlayAnchor::Beside {
+                    node: 4,
+                    edges: 2,
+                }),
+            ),
+            overlay_prop(
+                8,
+                crate::OverlayProp::Placement(crate::overlay::Placement::Right),
+            ),
+            overlay_prop(8, crate::OverlayProp::Align(crate::overlay::Align::Start)),
+            overlay_prop(8, crate::OverlayProp::Offset(crate::geometry::px(4.0))),
+        ],
+    );
+    let batch = c.commit().unwrap();
+    // Past the menu's right edge (120) by the offset, level with the row
+    // (6), not past the row's edge (114).
+    assert_eq!(frame_of(&batch, 8), Some(rect(124.0, 6.0, 40.0, 30.0)));
+}
+
+#[test]
 fn overlays_anchored_to_content_go_by_what_the_wrapper_draws() {
     use StyleValue::Number;
     let mut c = core();
@@ -17961,6 +18012,36 @@ fn overlays_anchored_to_content_go_by_what_the_wrapper_draws() {
     let batch = c.commit().unwrap();
     // The trigger (0, 80, 52 × 18) below the first one.
     assert_eq!(frame_of(&batch, 8), Some(rect(0.0, 98.0, 40.0, 20.0)));
+    // A trigger 28 points tall, its 16-point label centered: below its
+    // own bottom edge, not its label's.
+    add(
+        &mut c,
+        16,
+        Tag::View,
+        2,
+        &[
+            ("height", Number(28.0)),
+            ("justifyContent", StyleValue::Str("center")),
+            ("alignSelf", StyleValue::Str("flex-start")),
+        ],
+    );
+    add(
+        &mut c,
+        18,
+        Tag::View,
+        16,
+        &[("width", Number(30.0)), ("height", Number(16.0))],
+    );
+    apply(
+        &mut c,
+        vec![overlay_prop(
+            8,
+            crate::OverlayProp::Anchor(crate::overlay::OverlayAnchor::Content(16)),
+        )],
+    );
+    let batch = c.commit().unwrap();
+    // The trigger (0, 98, 30 × 28) below the second one.
+    assert_eq!(frame_of(&batch, 8), Some(rect(0.0, 126.0, 40.0, 20.0)));
 }
 
 /// The texts a batch lays out.
