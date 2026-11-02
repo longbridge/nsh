@@ -30,7 +30,8 @@ const engine = (changes = {}) => ({
   titleBar: { height: 0, left: 0, right: 0 }, keyboard: { height: 0, duration: 250 },
   colorScheme: "light", fontScale: 1, rtl: false, reduceMotion: false, pixelRatio: 2, screenReader: false,
   locale: "de-AT", host: false, lifecycle: "active", timeZone: "Europe/Vienna",
-  languages: ["de-AT", "en-US"],
+  languages: ["de-AT", "en-US"], hourCycle: "h23", firstDayOfWeek: 1, measurementSystem: "metric",
+  temperatureUnit: "celsius",
   platform: { os: "web", version: "0.0", idiom: "desktop", desktop: true, appleKeyboard: false },
   ...changes,
 });
@@ -87,6 +88,20 @@ test("the user's languages are the engine's", () => {
   assert.deepEqual(env.api.languages(), ["en-US"]);
   env.update(engine());
   assert.deepEqual(env.api.languages(), ["de-AT", "en-US"]);
+});
+
+test("the user's regional preferences are the engine's", () => {
+  const { env } = environment();
+  // Before the engine reports, the native environment's defaults: en-US's.
+  assert.equal(env.api.hourCycle(), "h12");
+  assert.equal(env.api.firstDayOfWeek(), 7);
+  assert.equal(env.api.measurementSystem(), "us");
+  assert.equal(env.api.temperatureUnit(), "fahrenheit");
+  env.update(engine());
+  assert.equal(env.api.hourCycle(), "h23");
+  assert.equal(env.api.firstDayOfWeek(), 1);
+  assert.equal(env.api.measurementSystem(), "metric");
+  assert.equal(env.api.temperatureUnit(), "celsius");
 });
 
 test("a part is written only when it changed", () => {

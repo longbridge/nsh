@@ -2,7 +2,8 @@ export function createEnvironment(reactive, invoke, dom) {
   const initial = { window: { width: 0, height: 0 }, safeArea: { top: 0, right: 0, bottom: 0, left: 0 },
     titleBar: { height: 0, left: 0, right: 0 }, keyboard: { height: 0, duration: 0.25 },
     colorScheme: "light", fontScale: 1, pixelRatio: 1, locale: "en-US", reduceMotion: false, screenReader: false, host: false,
-    lifecycle: "active", timeZone: "UTC", languages: ["en-US"] };
+    lifecycle: "active", timeZone: "UTC", languages: ["en-US"],
+    hourCycle: "h12", firstDayOfWeek: 7, measurementSystem: "us", temperatureUnit: "fahrenheit" };
   const fields = Object.fromEntries(Object.entries(initial).map(([name, value]) => [name, reactive.signal(value)]));
   const tokens = reactive.signal(0);
   const insets = reactive.context(() => fields.safeArea());
@@ -23,7 +24,9 @@ export function createEnvironment(reactive, invoke, dom) {
   const device = {
     windowSize: () => fields.window(), colorScheme: () => fields.colorScheme(), setColorScheme,
     fontScale: () => fields.fontScale(), pixelRatio: () => fields.pixelRatio(), locale: () => fields.locale(),
-    languages: () => fields.languages(), timeZone: () => fields.timeZone(), lifecycle: () => fields.lifecycle(), platform,
+    languages: () => fields.languages(), hourCycle: () => fields.hourCycle(), firstDayOfWeek: () => fields.firstDayOfWeek(),
+    measurementSystem: () => fields.measurementSystem(), temperatureUnit: () => fields.temperatureUnit(),
+    timeZone: () => fields.timeZone(), lifecycle: () => fields.lifecycle(), platform,
   };
   const accessibility = { reduceMotion: () => fields.reduceMotion(), screenReaderEnabled: () => fields.screenReader() };
   const api = {

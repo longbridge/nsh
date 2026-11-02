@@ -471,7 +471,7 @@ const hapticsSupported = platform.os === "ios" || (platform.os === "android" && 
 按用户的区域格式进行格式化。
 
 在浏览器中（[Web 运行时](./web.md)），`platform.os` 为 `"web"`，`platform.version` 为 `"0.0"`。有鼠标且窗口宽度至少 600 点时界面风格为
-`"desktop"`，平板上为 `"pad"`，手机上为 `"phone"`，在应用启动时确定。区域设置、`languages()`（浏览器的首选语言）、`timeZone()`、`lifecycle()`（标签页隐藏时为
+`"desktop"`，平板上为 `"pad"`，手机上为 `"phone"`，在应用启动时确定。区域设置、`languages()`（浏览器的首选语言）、区域偏好（浏览器按其语言给出的值）、`timeZone()`、`lifecycle()`（标签页隐藏时为
 `"background"`，失去焦点时为 `"inactive"`）、`reduceMotion()`、`fontScale()`（浏览器的文字大小）、`pixelRatio()`、
 安全区域和键盘高度都来自浏览器，并实时跟随。
 
