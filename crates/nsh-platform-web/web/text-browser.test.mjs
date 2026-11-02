@@ -90,10 +90,11 @@ test('emoji are measured as wide as the DOM draws them on a 2x screen', { skip: 
           return width;
         };
         const clusters = (text) => [...new Intl.Segmenter().segment(text)].map((s) => s.segment);
-        const emoji = /[\\u{1F000}-\\u{1FAFF}\\u{FE0F}\\u{20E3}\\u{231A}\\u{2B50}]/u;
-        for (const text of ['🤩'.repeat(22), 'abc🤩def', '👍🏻 1️⃣ ⌚ 🇨🇳 ⭐ ok']) {
+        // The engine's css::is_emoji.
+        const emoji = (cluster) => [...cluster].some((c) => c.codePointAt(0) > 0x7f && (/\\p{Emoji}/u.test(c) || c === '\\u{FE0F}' || c === '\\u{20E3}'));
+        for (const text of ['🤩'.repeat(22), 'abc🤩def', '👍🏻 1️⃣ ⌚ 🇨🇳 ⭐ ok', 'a👨‍👩‍👧‍👦b ❤️ ☝✌✍⛹ 中文 ไทย']) {
           const measured = canvas.measureText(text).width + clusters(text)
-            .filter((c) => emoji.test(c))
+            .filter(emoji)
             .reduce((w, c) => w + measureNumericText(font, 'normal', c) - canvas.measureText(c).width, 0);
           if (Math.abs(measured - drawn(text)) > 0.05) throw Error(text + ': measured ' + measured + ', drawn ' + drawn(text));
         }

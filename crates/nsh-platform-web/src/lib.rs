@@ -431,7 +431,7 @@ pub unsafe extern "C" fn nsh_environment(ptr: *const u8, len: usize) -> f64 {
         e.screen_color = env.screen_color;
         app.control.set_environment(app.environment);
         // The DOM draws emoji as wide as the pixel ratio makes them.
-        if rescaled {
+        if rescaled && app.text.emoji_measured() {
             app.text.clear_caches();
             app.control.fonts_changed();
         }
