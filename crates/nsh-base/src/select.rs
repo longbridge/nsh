@@ -574,13 +574,16 @@ pub fn Select(props: SelectProps, cx: Scope<SelectEvent>) -> impl IntoElement {
         item_style: props.item_style,
         group_class: props.group_class,
         group_style: props.group_style,
-        search_class: props.search_class,
-        search_style: props.search_style,
-        search_placeholder: props.search_placeholder,
+        search: Some(listbox::SearchField {
+            class: props.search_class,
+            style: props.search_style,
+            placeholder: props.search_placeholder,
+        }),
         render_item: props.render_item,
         render_group: props.render_group,
         empty: props.empty,
         footer: None,
+        cover: Some(crate::popup::Cover::new()),
     };
     let toggle = change;
     // Bound on the slot: in a TSX app they go to the app's element in it

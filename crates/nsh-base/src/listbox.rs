@@ -851,15 +851,28 @@ pub(crate) struct Parts {
     pub(crate) item_style: Prop<TextPartStyle>,
     pub(crate) group_class: Prop<Option<SharedString>>,
     pub(crate) group_style: Prop<Style>,
-    pub(crate) search_class: Prop<Option<SharedString>>,
-    pub(crate) search_style: Prop<InputPartStyle>,
-    pub(crate) search_placeholder: Prop<Option<SharedString>>,
+    /// The search field above the rows, while the list is searchable
+    /// (`Select`'s); none when the component's own field searches
+    /// (`Combobox`'s input).
+    pub(crate) search: Option<SearchField>,
     pub(crate) render_item: Prop<Option<Renderer<SelectItemState>>>,
     pub(crate) render_group: Prop<Option<Renderer<SelectGroup>>>,
     pub(crate) empty: Prop<Option<Slot>>,
     /// The content below the rows, in a part of its own (`Combobox`'s
     /// `footer`); none for `Select`.
     pub(crate) footer: Option<Footer>,
+    /// Desktops: the list opens with its selected item over the trigger
+    /// (`Select`'s, as shadcn/ui's item-aligned select), else on a side of
+    /// it (`Combobox`'s). The view the size of that row it lays over.
+    pub(crate) cover: Option<popup::Cover>,
+}
+
+/// The search field's parts.
+#[derive(Clone, Copy)]
+pub(crate) struct SearchField {
+    pub(crate) class: Prop<Option<SharedString>>,
+    pub(crate) style: Prop<InputPartStyle>,
+    pub(crate) placeholder: Prop<Option<SharedString>>,
 }
 
 /// The part below the rows and what it holds.
@@ -906,6 +919,10 @@ pub(crate) fn present(
     popup::dropdown(
         anchor,
         width,
+        // shadcn/ui's: a select's list at least as wide as its trigger (it
+        // grows to its longest item), a combobox's as wide as its input.
+        parts.cover.is_some(),
+        parts.cover,
         frame,
         presence,
         Rc::new(move |sheet| content(lb, sheet, parts, hooks.clone())),
@@ -916,15 +933,17 @@ pub(crate) fn present(
 /// slot while no item shows, and the footer.
 fn content(lb: Listbox, sheet: bool, parts: Parts, hooks: Hooks) -> Vec<AnyElement> {
     let query_changed = hooks.query_changed.clone();
+    let field = parts.search;
     let search = when(
-        move || lb.searchable.get(),
+        move || field.is_some() && lb.searchable.get(),
         move || {
             let query_changed = query_changed.clone();
+            let field = field.expect("a search field");
             input()
                 .value(move || lb.query())
                 .placeholder(move || {
-                    parts
-                        .search_placeholder
+                    field
+                        .placeholder
                         .get()
                         .map(|p| p.to_string())
                         .unwrap_or_default()
@@ -932,8 +951,8 @@ fn content(lb: Listbox, sheet: bool, parts: Parts, hooks: Hooks) -> Vec<AnyEleme
                 // The desktops type into it at once; a touch screen's
                 // keyboard comes when the user asks.
                 .auto_focus(!sheet)
-                .app_class(parts.search_class)
-                .inline_style(move || parts.search_style.get())
+                .app_class(field.class)
+                .inline_style(move || field.style.get())
                 .on_change(move |text: &str| {
                     lb.edited(text);
                     query_changed(text);
@@ -1122,6 +1141,22 @@ fn item_row(lb: Listbox, entry: Memo<Option<Row>>, parts: Parts, hooks: Hooks) -
             text(move || item.with(|i| i.as_ref().map(|i| i.title.clone()).unwrap_or_default()))
                 .into_element()
         }))
+        // The selected row as the popup opens: a view over it, which the
+        // popup lays over the trigger.
+        .when_some(parts.cover, |row, cover| {
+            row.child(when(
+                move || selected.get(),
+                move || {
+                    view()
+                        .absolute()
+                        .inset_0()
+                        .focusable(false)
+                        .pointer_events(PointerEvents::None)
+                        .element_ref(&cover.view)
+                        .on_layout(move |_: &Bounds<Points>| cover.shown.set(true))
+                },
+            ))
+        })
         .into_element()
 }
 

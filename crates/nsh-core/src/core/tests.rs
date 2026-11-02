@@ -17806,6 +17806,63 @@ fn overlays_in_a_modal_show_in_it() {
 }
 
 #[test]
+fn overlays_with_a_cover_lay_that_view_over_the_anchor() {
+    use StyleValue::Number;
+    let mut c = core();
+    // A trigger 80 × 30 at (40, 100).
+    add(
+        &mut c,
+        2,
+        Tag::View,
+        ROOT_ID,
+        &[
+            ("marginLeft", Number(40.0)),
+            ("marginTop", Number(100.0)),
+            ("width", Number(80.0)),
+            ("height", Number(30.0)),
+        ],
+    );
+    // A list of three 20-point rows under 4 points of padding.
+    add(&mut c, 8, Tag::Overlay, ROOT_ID, &[]);
+    add(
+        &mut c,
+        10,
+        Tag::View,
+        8,
+        &[("width", Number(100.0)), ("padding", Number(4.0))],
+    );
+    for id in [12, 14, 16] {
+        add(&mut c, id, Tag::View, 10, &[("height", Number(20.0))]);
+    }
+    apply(
+        &mut c,
+        vec![
+            overlay_prop(
+                8,
+                crate::OverlayProp::Anchor(crate::overlay::OverlayAnchor::Node(2)),
+            ),
+            overlay_prop(8, crate::OverlayProp::Cover(Some(14))),
+        ],
+    );
+    let batch = c.commit().unwrap();
+    // The second row (4, 24 in the list) on the trigger's corner.
+    assert_eq!(frame_of(&batch, 8), Some(rect(36.0, 76.0, 100.0, 68.0)));
+    // Where the row is is kept: a row added before it grows the list
+    // and moves nothing.
+    add(&mut c, 18, Tag::View, 10, &[("height", Number(20.0))]);
+    apply(
+        &mut c,
+        vec![Op::Insert {
+            parent: 10,
+            child: 18,
+            before: Some(12),
+        }],
+    );
+    let batch = c.commit().unwrap();
+    assert_eq!(frame_of(&batch, 8), Some(rect(36.0, 76.0, 100.0, 88.0)));
+}
+
+#[test]
 fn overlays_anchored_to_content_go_by_what_the_wrapper_draws() {
     use StyleValue::Number;
     let mut c = core();

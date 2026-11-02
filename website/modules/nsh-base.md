@@ -245,7 +245,7 @@ walkthroughs, see the [Navigation guide](../docs/navigation.md) and [Forms and k
 | [`Toolbar`](../elements/toolbar.md), [`ToolbarGroup`](../elements/toolbar.md), [`ToolbarSeparator`](../elements/toolbar.md) | `toolbar()`, `toolbar_group()`, `toolbar_separator()` | A bar of buttons, toggles and links: one stop of the keyboard focus whose arrow keys move along it; groups of related items and lines between them. |
 | [`Carousel`](../elements/carousel.md) and its parts | `carousel()`, `carousel_content()`, `carousel_item()`, `carousel_previous()`, `carousel_next()`, `carousel_pagination()`, `carousel_pagination_item()` | Slides shown one place at a time on the platform's own scrolling, with previous / next, a pagination, the keys and a seamless loop; the app owns `index`. |
 | [`Select`](../elements/select.md) | `select()` | One value from a list of items: a popup at the trigger on desktops, a sheet on phones; the app owns `value` and draws the trigger. |
-| [`Combobox`](../elements/combobox.md) | `combobox()` | One value or several (`multiple`) from a searchable list of items, as a select's; the app owns `value` and draws the trigger. |
+| [`Combobox`](../elements/combobox.md) | `combobox()` | One value or several (`multiple`) from a list of items filtered by typing into its input; the app owns `value` and styles the field. |
 | [`Calendar`](../elements/calendar.md) | `calendar()` | A date or a range of dates picked from months of days, with month and year views and the keyboard; the app owns `value` and draws the items. |
 | [`TimeField`](../elements/time-field.md) | `time_field()` | A time of day edited segment by segment (hour, minute, second, AM/PM); the app owns `value`. |
 | [`DatePicker`](../elements/date-picker.md) | `date_picker()` | A date, a range or a date and time from a calendar in a popup at the trigger on desktops, a sheet on phones; the app owns `value` and draws the trigger. |
@@ -372,7 +372,8 @@ to the select (`defaultValue`), and styles each part or draws the rows. See [Sel
 
 ### Combobox
 
-Values chosen from a list of items, as a select's list, with no look: one, or with `multiple` several, a choice then
+Values chosen from a list of items, as a select's list, filtered by typing into the combobox's input, with no look:
+one, or with `multiple` several, a choice then
 toggling the item while the list stays open. The value is an array the app owns (`value`, `onChange`) or leaves to
 the combobox (`defaultValue`); `onConfirm` tells it as the list closes. The query can be the app's (`query`,
 `onQueryChange`), a footer shows below the rows and a clear button empties the value. See

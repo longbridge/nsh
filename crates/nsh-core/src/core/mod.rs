@@ -4004,6 +4004,7 @@ impl<M: TextEngine> Core<M> {
                     OverlayProp::Margin(v) => c.margin = v,
                     OverlayProp::Hint(v) => c.hint = v,
                     OverlayProp::Open(v) => c.open = v,
+                    OverlayProp::Cover(v) => c.cover = v,
                 });
                 return Ok(());
             }

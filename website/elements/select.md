@@ -10,8 +10,10 @@ demo: el-select
 A select chooses one value from a list of items: a setting, a filter, a country, a time zone. The app's trigger
 opens the list, presented as each device expects:
 
-- On the desktops and in desktop browsers, a popup at the trigger, at least as wide as the trigger and as tall as its
-  rows up to the room beside it; the keyboard moves through the items and chooses one.
+- On the desktops and in desktop browsers, a popup over the trigger with the selected row laid over the trigger, so
+  the chosen title stays where it was (shadcn/ui's `item-aligned` position), at least as wide as the trigger and as
+  tall as its rows up to the room on the screen; with nothing selected it opens below the trigger. The keyboard moves
+  through the items and chooses one.
 - On phones and tablets, a sheet at the bottom of the screen over a backdrop.
 
 The select owns the behavior: the value (the app's, or its own), the open state, the keyboard, typeahead, search,

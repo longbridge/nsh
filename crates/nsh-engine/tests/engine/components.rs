@@ -4590,7 +4590,7 @@ function App() {
         onChange={({ value: next }) => value.set(next)}
         onConfirm={({ value: next }) => confirmed.set(next.join(","))}
         accessibilityLabel="Tags"
-        trigger={<View><Text>Pick</Text></View>}
+        triggerButton={<View accessibilityLabel="Toggle"><Text>Pick</Text></View>}
         renderItem={(item) => <Text>{`${item.title}${item.selected ? " on" : ""}!`}</Text>}
         footer={<Text>Footer</Text>}
       />
@@ -4630,7 +4630,7 @@ fn a_base_combobox_toggles_the_apps_array_and_confirms_it_on_close() {
     let first = until(&rx, |b| {
         find(std::slice::from_ref(b), "Tags", AccessibilityRole::Combobox).is_some()
     });
-    let (trigger, props) = find(&first, "Tags", AccessibilityRole::Combobox).unwrap();
+    let (_, props) = find(&first, "Tags", AccessibilityRole::Combobox).unwrap();
     assert_eq!(
         props
             .accessibility
@@ -4640,9 +4640,11 @@ fn a_base_combobox_toggles_the_apps_array_and_confirms_it_on_close() {
         Some("Go")
     );
 
+    // The trigger button opens the list.
+    let (button, _) = find(&first, "Toggle", AccessibilityRole::Button).expect("the button");
     engine
         .control()
-        .dispatch_event(trigger, EventKind::Press, EventPayload::None);
+        .dispatch_event(button, EventKind::Press, EventPayload::None);
     let opened = until(&rx, |b| shows(b, "Swift!"));
     assert!(opened.iter().any(|b| shows(b, "Go on!")));
     assert!(opened.iter().any(|b| shows(b, "Footer")));
@@ -4659,7 +4661,7 @@ fn a_base_combobox_toggles_the_apps_array_and_confirms_it_on_close() {
     // Closing confirms the array.
     engine
         .control()
-        .dispatch_event(trigger, EventKind::Press, EventPayload::None);
+        .dispatch_event(button, EventKind::Press, EventPayload::None);
     until(&rx, |b| shows(b, "Confirmed: go,swift"));
 }
 

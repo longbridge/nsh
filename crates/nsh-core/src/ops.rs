@@ -1579,6 +1579,11 @@ pub enum OverlayProp {
     /// ([`crate::overlay::OverlayConfig::open`]); set by components.
     #[prop(reset = OverlayProp::Open(None))]
     Open(Option<bool>),
+    /// A view inside it laid over the anchor
+    /// ([`crate::overlay::OverlayConfig::cover`]); set by components
+    /// (`nsh-base`'s `Select`: the selected item over the trigger).
+    #[prop(reset = OverlayProp::Cover(None))]
+    Cover(Option<NodeId>),
 }
 
 /// An imperative call on a native view (`ref.focus()` and the like).

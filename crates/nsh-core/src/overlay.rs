@@ -130,6 +130,13 @@ pub struct OverlayConfig {
     /// (`EventKind::Show` / `EventKind::Dismiss`). `None`: the pointer
     /// decides.
     pub open: Option<bool>,
+    /// A view inside it laid over the anchor, as a select's list opens
+    /// with the selected item over the trigger: the overlay goes where that
+    /// view's top left corner meets the anchor's, kept inside the area,
+    /// instead of on a side. Where the view is in the overlay is taken
+    /// once, when it is first laid out, so scrolling the overlay's content
+    /// does not move it. `None`: on a side, as `placement` says.
+    pub cover: Option<NodeId>,
 }
 
 /// The delay of a hint before it shows (500 ms, as the desktops' tooltips).

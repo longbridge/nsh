@@ -231,7 +231,7 @@ import type {
 | [`Toggle`](../elements/toggle.md)、[`ToggleGroup`](../elements/toggle.md) | `toggle()`、`toggle_group()` | 一个处于开或关的按钮，以及由它们组成的工具栏；哪些按下由应用持有。 |
 | [`Toolbar`](../elements/toolbar.md)、[`ToolbarGroup`](../elements/toolbar.md)、[`ToolbarSeparator`](../elements/toolbar.md) | `toolbar()`、`toolbar_group()`、`toolbar_separator()` | 由按钮、开关按钮和链接组成的一栏：在键盘焦点里只占一站，方向键沿着它移动；相关项目的分组，以及它们之间的分隔线。 |
 | [`Select`](../elements/select.md) | `select()` | 从一组条目中选出一个值：桌面上是触发元素处的弹出层，手机上是 sheet；`value` 由应用持有，触发元素由应用绘制。 |
-| [`Combobox`](../elements/combobox.md) | `combobox()` | 从可搜索的一组条目中选出一个或多个（`multiple`）值，列表与选择框的相同；`value` 由应用持有，触发元素由应用绘制。 |
+| [`Combobox`](../elements/combobox.md) | `combobox()` | 从一组条目中选出一个或多个（`multiple`）值，在输入框中输入以筛选它们；`value` 由应用持有，字段的样式由应用设置。 |
 | [`Calendar`](../elements/calendar.md) | `calendar()` | 从按周排列的月份中选出一个日期或一段日期，带月份和年份视图与键盘操作；`value` 由应用持有，条目由应用绘制。 |
 | [`TimeField`](../elements/time-field.md) | `time_field()` | 逐段编辑一天中的时间（时、分、秒、上午/下午）；`value` 由应用持有。 |
 | [`DatePicker`](../elements/date-picker.md) | `date_picker()` | 从日历中选出一个日期、一段日期或一个日期和时间：桌面上是触发元素处的弹出层，手机上是 sheet；`value` 由应用持有，触发元素由应用绘制。 |
@@ -326,7 +326,7 @@ import type {
 
 ### Combobox
 
-从一组条目中选出值，列表与选择框的相同，本身没有外观：选一个，或者在 `multiple` 时选多个，这时一次选择会切换该条目，列表保持打开。值是一个数组，由应用持有（`value`、`onChange`），或交给组合框自己保存（`defaultValue`）；`onConfirm` 在列表关闭时告知它。搜索词可以由应用持有（`query`、`onQueryChange`），行下方可以显示底部区域，清除按钮会清空值。见 [Combobox](../elements/combobox.md)。
+从一组条目中选出值，列表与选择框的相同，在组合框的输入框中输入以筛选，本身没有外观：选一个，或者在 `multiple` 时选多个，这时一次选择会切换该条目，列表保持打开。值是一个数组，由应用持有（`value`、`onChange`），或交给组合框自己保存（`defaultValue`）；`onConfirm` 在列表关闭时告知它。搜索词可以由应用持有（`query`、`onQueryChange`），行下方可以显示底部区域，清除按钮会清空值。见 [Combobox](../elements/combobox.md)。
 
 ### Calendar
 

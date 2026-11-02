@@ -1110,6 +1110,19 @@ impl Overlay {
         )
     }
 
+    /// Lays the element carrying `cover`, inside it, over its anchor (a
+    /// select's selected item over the trigger) instead of placing it on
+    /// a side ([`crate::overlay::OverlayConfig::cover`]). A ref is not
+    /// tracked: `shown` (tracked) says when that element is rendered, as
+    /// its `on_layout` can tell.
+    pub fn cover(self, cover: &super::ElementRef, shown: impl Fn() -> bool + 'static) -> Self {
+        let cover = *cover;
+        self.bind_prop(
+            move || if shown() { cover.node() } else { None },
+            |id| Prop::Overlay(OverlayProp::Cover(id)),
+        )
+    }
+
     /// Places it against what the element carrying `anchor` draws: the box
     /// around its children, so a trigger in a wrapper its parent stretches
     /// is placed against what shows ([`OverlayAnchor::Content`]).

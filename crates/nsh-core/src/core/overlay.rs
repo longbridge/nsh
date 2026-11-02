@@ -36,7 +36,7 @@ use crate::{
     EventKind, EventPayload, NodeId, PayloadValue, Prop, ROOT_ID, Tag, TextEngine, TouchEvent,
     TouchPhase,
     element::task::{Action, Task, act_after},
-    geometry::{Bounds, Point, Points, Size, px, rect},
+    geometry::{Bounds, Point, Points, Size, point, px, rect},
     keymap::{KeyBinding, Keystroke, When},
     mount::MountItem,
     ops::{Op, OverlayProp},
@@ -98,6 +98,8 @@ pub(super) struct OverlayState {
     pub(super) hinted: bool,
     /// A hint: the pointer is on its anchor, resting until it shows.
     pub(super) waiting: Option<HintTimer>,
+    /// Where its `cover` view is in it, once that was laid out.
+    pub(super) covered: Option<Point<Points>>,
 }
 
 /// What the overlays add to the native side: the nodes listening to
@@ -132,6 +134,7 @@ impl<M: TextEngine> Core<M> {
                 placed: None,
                 hinted: false,
                 waiting: None,
+                covered: None,
             }));
         }
         self.overlays.push(key);
@@ -966,13 +969,37 @@ impl<M: TextEngine> Core<M> {
                 insets.left.0 + m,
             ],
         );
-        let placed = place(
-            anchor,
-            frame.size,
-            area,
-            &config,
-            self.nodes[key as usize].rtl,
-        );
+        let placed = match self.covering(key, config) {
+            Some(at) => {
+                // The cover view's corner on the anchor's, inside the area
+                // as far as it fits.
+                let keep = |v: f32, lo: f32, hi: f32, len: f32| v.min(hi - len).max(lo);
+                let x = keep(
+                    anchor.origin.x.0 - at.x.0,
+                    area.origin.x.0,
+                    area.right().0,
+                    frame.size.width.0,
+                );
+                let y = keep(
+                    anchor.origin.y.0 - at.y.0,
+                    area.origin.y.0,
+                    area.bottom().0,
+                    frame.size.height.0,
+                );
+                Placed {
+                    origin: point(Points(x), Points(y)),
+                    placement: config.placement,
+                    available: area.size,
+                }
+            }
+            None => place(
+                anchor,
+                frame.size,
+                area,
+                &config,
+                self.nodes[key as usize].rtl,
+            ),
+        };
         let bounds = Bounds {
             origin: placed.origin,
             size: frame.size,
@@ -998,6 +1025,20 @@ impl<M: TextEngine> Core<M> {
             }
         }
         placed.origin
+    }
+
+    /// Where overlay `key`'s `cover` view is in it: taken the first time
+    /// both are laid out and kept, so its content scrolling moves nothing.
+    fn covering(&mut self, key: Key, config: OverlayConfig) -> Option<Point<Points>> {
+        let cover = config.cover?;
+        if let Some(at) = self.overlay(key)?.covered {
+            return Some(at);
+        }
+        let id = self.nodes[key as usize].id;
+        let (inner, outer) = (self.measure(cover)?, self.measure(id)?);
+        let at = point(inner.page.x - outer.page.x, inner.page.y - outer.page.y);
+        self.overlay_mut(key)?.covered = Some(at);
+        Some(at)
     }
 
     /// The box around what view `id` draws in its root view: around its
