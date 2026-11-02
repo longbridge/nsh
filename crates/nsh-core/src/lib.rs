@@ -49,6 +49,7 @@ pub mod scroll;
 pub mod selection;
 pub mod shader;
 pub mod shape;
+pub mod speech;
 pub mod storage;
 mod style;
 #[cfg(feature = "svg")]

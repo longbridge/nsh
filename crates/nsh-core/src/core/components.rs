@@ -474,6 +474,15 @@ struct PendingFetch {
     answer: AnswerSlot<Result<crate::element::HttpResponse, String>>,
 }
 
+/// The speech recognition session running ([`crate::speech`]).
+struct SpeechSession {
+    id: u32,
+    /// Where its events go, to the app.
+    sink: crate::speech::SpeechSink,
+    /// The embedding app's recognizer's session; `None`: the platform's.
+    control: Option<Box<dyn crate::speech::SpeechControl>>,
+}
+
 /// The core's component state.
 pub(super) struct Components {
     registry: Registry,
@@ -547,6 +556,8 @@ pub(super) struct Components {
         ),
     >,
     next_pick: u32,
+    /// The speech recognition session running, if any.
+    speech: Option<SpeechSession>,
     /// Calls of the embedding app's functions (`nsh/host`), by request id:
     /// their answers.
     host_calls: FxHashMap<u64, AnswerSlot<Result<crate::JsonValue, crate::element::JsError>>>,
@@ -666,6 +677,7 @@ impl Default for Components {
             next_clipboard_read: 1,
             picks: FxHashMap::default(),
             next_pick: 1,
+            speech: None,
             host_calls: FxHashMap::default(),
             next_host_call: 1,
             fetches: FxHashMap::default(),
@@ -4806,6 +4818,101 @@ impl<M: TextEngine> Core<M> {
     }
 
     /// What a component or a task asked of the platform.
+    /// Applies a speech recognition session's request: through the
+    /// embedding app's recognizer when it gave one, else as commands on the
+    /// root the platform answers with [`EventKind::Speech`].
+    fn speech_action(&mut self, action: crate::element::SpeechAction) {
+        use crate::{
+            element::SpeechAction,
+            speech::{SpeechCommand, SpeechError},
+        };
+        match action {
+            SpeechAction::Available(answer) => {
+                let available = match &self.speech {
+                    Some(backend) => backend.available(),
+                    None => self.components.environment.speech,
+                };
+                answer.borrow_mut().deliver(available);
+            }
+            SpeechAction::Start { id, request, sink } => {
+                // One session at a time: the microphone is one.
+                if let Some(running) = self.components.speech.as_ref().map(|s| s.id) {
+                    self.speech_action(SpeechAction::Abort(running));
+                }
+                if !self.access.allows_speech() {
+                    sink.end(Some(SpeechError::NotAllowed));
+                    self.deny(
+                        "speech recognition is not granted: add `\"speech\": true` to \
+                         capabilities in nsh.json"
+                            .into(),
+                    );
+                    return;
+                }
+                if let Some(backend) = self.speech.clone() {
+                    let control = backend.start(request, sink.clone());
+                    self.components.speech = Some(SpeechSession {
+                        id,
+                        sink,
+                        control: Some(control),
+                    });
+                    return;
+                }
+                if !self.components.environment.speech {
+                    sink.end(Some(SpeechError::Unavailable));
+                    return;
+                }
+                self.components.speech = Some(SpeechSession {
+                    id,
+                    sink,
+                    control: None,
+                });
+                let _ = self.apply_op(Op::Command {
+                    id: crate::ROOT_ID,
+                    command: Command::Speech(SpeechCommand::Start { id, request }),
+                });
+            }
+            SpeechAction::Stop(id) => {
+                let Some(session) = self.components.speech.as_mut().filter(|s| s.id == id) else {
+                    return;
+                };
+                if session.sink.is_ended() {
+                    return;
+                }
+                match &mut session.control {
+                    Some(control) => control.stop(),
+                    None => {
+                        let _ = self.apply_op(Op::Command {
+                            id: crate::ROOT_ID,
+                            command: Command::Speech(SpeechCommand::Stop { id }),
+                        });
+                    }
+                }
+            }
+            SpeechAction::Abort(id) => {
+                if self.components.speech.as_ref().is_none_or(|s| s.id != id) {
+                    return;
+                }
+                let Some(mut session) = self.components.speech.take() else {
+                    return;
+                };
+                // Ended for the app now; what the recognizer reports
+                // after this is dropped.
+                if !session.sink.end(None) {
+                    return;
+                }
+                match &mut session.control {
+                    Some(control) => control.abort(),
+                    None => {
+                        let _ = self.apply_op(Op::Command {
+                            id: crate::ROOT_ID,
+                            command: Command::Speech(SpeechCommand::Abort { id }),
+                        });
+                    }
+                }
+            }
+        }
+    }
+
     fn apply_action(&mut self, action: Action) {
         match action {
             Action::Command(id, command) => {
@@ -4966,6 +5073,7 @@ impl<M: TextEngine> Core<M> {
                 self.components.url_opens.insert(id, answer);
                 self.components.url_requests.push((id, url));
             }
+            Action::Speech(action) => self.speech_action(action),
             Action::PickScreenColor(answer) => {
                 if !self.components.environment.screen_color {
                     answer.borrow_mut().deliver(None);
@@ -5281,6 +5389,26 @@ impl<M: TextEngine> Core<M> {
                     (_, _, error) => Err(error.unwrap_or_else(|| "no size".into())),
                 };
                 self.answer_image_info(request as u32, size);
+                true
+            }
+            EventKind::Speech if id == crate::ROOT_ID => {
+                let EventPayload::Speech { id: session, event } = payload else {
+                    return false;
+                };
+                let running = self
+                    .components
+                    .speech
+                    .as_ref()
+                    .is_some_and(|s| s.id == *session);
+                if running {
+                    let ended = matches!(event, crate::speech::SpeechEvent::End { .. });
+                    if let Some(s) = &self.components.speech {
+                        s.sink.send(event.clone());
+                    }
+                    if ended {
+                        self.components.speech = None;
+                    }
+                }
                 true
             }
             EventKind::Pick if id == crate::ROOT_ID => {

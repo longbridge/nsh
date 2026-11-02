@@ -102,6 +102,8 @@ pub(crate) enum Action {
     /// Lets the user pick a color on the screen; the color (none when
     /// cancelled or not supported) resolves the slot.
     PickScreenColor(AnswerSlot<Option<crate::Hsla>>),
+    /// A speech recognition session's request ([`crate::speech`]).
+    Speech(SpeechAction),
     /// A request on local paths for the platform
     /// ([`crate::file_dialog`]); its answer resolves the slot.
     FileRequest(crate::file_dialog::FileRequest, FileAnswer),
@@ -139,6 +141,24 @@ pub(crate) enum Action {
     /// How long the node's transitions run with the styles of the commit
     /// the action goes out with; the time resolves the slot.
     TransitionTime(NodeId, AnswerSlot<std::time::Duration>),
+}
+
+/// What a speech recognition session asks of the core
+/// ([`Action::Speech`]).
+pub(crate) enum SpeechAction {
+    /// Starts session `id`, reporting to `sink`; the session running is
+    /// aborted first.
+    Start {
+        id: u32,
+        request: crate::speech::SpeechRequest,
+        sink: crate::speech::SpeechSink,
+    },
+    /// Stops session `id`: it finishes what it heard, then ends.
+    Stop(u32),
+    /// Ends session `id` at once, without an error.
+    Abort(u32),
+    /// Whether speech can be recognized; the answer resolves the slot.
+    Available(AnswerSlot<bool>),
 }
 
 /// A request on local paths waiting for the platform's answer

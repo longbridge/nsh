@@ -1150,6 +1150,9 @@ pub struct Core<M: TextEngine> {
     /// Answers the app's picks in place of the platform's picker
     /// ([`Core::set_picker`]).
     picker: Option<Arc<dyn crate::picker::PickerBackend>>,
+    /// Recognizes the app's speech in place of the platform
+    /// ([`Core::set_speech`]).
+    speech: Option<Arc<dyn crate::speech::SpeechBackend>>,
     /// Rust components and what they rendered.
     components: components::Components,
     /// Overlay nodes, those shown in the order they were shown (the last
@@ -1200,6 +1203,7 @@ impl<M: TextEngine> Core<M> {
             denied: Default::default(),
             clipboard: None,
             picker: None,
+            speech: None,
             components: components::Components::for_viewport(viewport),
             lists: Vec::new(),
             parent_lists: Vec::new(),
@@ -1412,6 +1416,13 @@ impl<M: TextEngine> Core<M> {
     /// platform's picker (`None`: the platform's, the default).
     pub fn set_picker(&mut self, backend: Option<Arc<dyn crate::picker::PickerBackend>>) {
         self.picker = backend;
+    }
+
+    /// Recognizes the app's speech (`Speech.start`) with `backend`, an
+    /// embedding app's own recognizer or a test's fake, instead of the
+    /// platform's (`None`: the platform's, the default).
+    pub fn set_speech(&mut self, backend: Option<Arc<dyn crate::speech::SpeechBackend>>) {
+        self.speech = backend;
     }
 
     /// Keeps the app's storage (`nsh/storage`) in `backend`; `None`: in
@@ -2784,6 +2795,8 @@ impl<M: TextEngine> Core<M> {
         // An attachment's place in its line is part of its block's text.
         let align_changed =
             node.vertical_align != vertical_align && node.inline && node.kind != Kind::Text;
+        // ... and so is the content's of a render placed there.
+        let content_align_changed = node.vertical_align != vertical_align && !node.inline;
         node.view_style = view;
         node.text_style = text;
         node.paint = paint;
@@ -2792,6 +2805,8 @@ impl<M: TextEngine> Core<M> {
         node.vertical_align = vertical_align;
         if align_changed {
             self.mark_text_block(key);
+        } else if content_align_changed && let Some(place) = self.placed_in_text(key) {
+            self.mark_text_block(place);
         }
         if z_changed {
             self.restack(key);
@@ -5600,13 +5615,53 @@ impl<M: TextEngine> Core<M> {
                         alignments.push(
                             out,
                             crate::geometry::size_pt(size.width, size.height),
-                            child.vertical_align,
+                            self.attachment_align(c),
                             style,
                         );
                     }
                 }
             }
         }
+    }
+
+    /// Where attachment `key` sits in its line (`verticalAlign`). A
+    /// placeholder of a render (`renderCustom`, ...) that sets none takes
+    /// what its content sets: the placeholder and JS's holder around the
+    /// content are not the app's views, so the app styles only the content
+    /// (`<View style={{ verticalAlign: "middle" }}>` in `renderCustom`).
+    fn attachment_align(&self, key: Key) -> crate::style::VerticalAlign {
+        use crate::style::VerticalAlign;
+        let node = &self.nodes[key as usize];
+        if node.vertical_align != VerticalAlign::Baseline
+            || !self.components.renders.is_place(node.id)
+        {
+            return node.vertical_align;
+        }
+        // The placeholder's only child is the holder; the holder's, the
+        // content.
+        let mut key = key;
+        for _ in 0..2 {
+            let mut children = self.nodes[key as usize]
+                .children
+                .iter()
+                .filter(|&&c| !self.nodes[c as usize].is_overlay());
+            match (children.next(), children.next()) {
+                (Some(&only), None) => key = only,
+                _ => return VerticalAlign::Baseline,
+            }
+        }
+        self.nodes[key as usize].vertical_align
+    }
+
+    /// The render placeholder in a text that view `key` is the content of
+    /// (see [`Core::attachment_align`]), if it is one.
+    fn placed_in_text(&self, key: Key) -> Option<Key> {
+        let holder = self.nodes[key as usize].parent;
+        if holder == NO_KEY || !self.is_render_holder(self.nodes[holder as usize].id) {
+            return None;
+        }
+        let place = self.nodes[holder as usize].parent;
+        (place != NO_KEY && self.nodes[place as usize].inline).then_some(place)
     }
 
     /// The attachments of text block `key` (views and images inside it,

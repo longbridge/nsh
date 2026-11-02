@@ -294,6 +294,10 @@ pub fn Combobox(props: ComboboxProps, cx: Scope<ComboboxEvent>) -> impl IntoElem
     let typed = signal(false);
     // What was typed while the list was closed, for it once it opens.
     let pending = stored(None::<String>);
+    // The chosen title the first typed characters followed: while the
+    // input still holds it (its value not written back yet), it is not
+    // part of the query.
+    let replaced = stored(None::<String>);
     let width = signal(None::<Points>);
     let focused = signal(false);
     let opening = stored(Opening::Press);
@@ -371,6 +375,7 @@ pub fn Combobox(props: ComboboxProps, cx: Scope<ComboboxEvent>) -> impl IntoElem
             if !now {
                 lb.closed();
                 typed.set(false);
+                replaced.replace(None);
                 cx.emit(ComboboxEvent::Confirm(latest.with(|l| l.clone())));
                 return;
             }
@@ -561,14 +566,22 @@ pub fn Combobox(props: ComboboxProps, cx: Scope<ComboboxEvent>) -> impl IntoElem
         .on_change(move |text: &str| {
             // Typed after the chosen title (the caret at its end): the
             // characters typed replace it, as they would the selection.
-            let title = if props.multiple.get_untracked() || typed.get_untracked() {
+            let title = if props.multiple.get_untracked() {
                 String::new()
+            } else if typed.get_untracked() {
+                replaced.with(|r| r.clone()).unwrap_or_default()
             } else {
                 untracked(chosen_title)
             };
             let text = match text.strip_prefix(title.as_str()) {
-                Some(rest) if !title.is_empty() && !rest.is_empty() => rest,
-                _ => text,
+                Some(rest) if !title.is_empty() && !rest.is_empty() => {
+                    replaced.replace(Some(title.clone()));
+                    rest
+                }
+                _ => {
+                    replaced.replace(None);
+                    text
+                }
             };
             typed.set(true);
             if open.get_untracked() {
