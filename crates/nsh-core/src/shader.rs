@@ -413,15 +413,18 @@ pub const PROGRESS_WORD: u32 = u32::MAX;
 /// `sample_to` over `nsh.progress`; `None` in a web runtime linked without
 /// shaders ([`set_compile`]).
 pub fn crossfade() -> Option<Shader> {
-    static CROSSFADE: std::sync::OnceLock<Shader> = std::sync::OnceLock::new();
-    if let Some(shader) = CROSSFADE.get() {
-        return Some(shader.clone());
-    }
-    let shader = compile_source(
-        "fn shade(uv: vec2f) -> vec4f {\n    return mix(sample_from(uv), sample_to(uv), nsh.progress);\n}\n",
-    )
-    .ok()?;
-    Some(CROSSFADE.get_or_init(|| shader).clone())
+    // Compiled once, its failure too: the page sets the compiler before the
+    // app runs (`nsh_feature_shader`), so a runtime without one never gets
+    // it.
+    static CROSSFADE: std::sync::OnceLock<Option<Shader>> = std::sync::OnceLock::new();
+    CROSSFADE
+        .get_or_init(|| {
+            compile_source(
+                "fn shade(uv: vec2f) -> vec4f {\n    return mix(sample_from(uv), sample_to(uv), nsh.progress);\n}\n",
+            )
+            .ok()
+        })
+        .clone()
 }
 
 /// Why a shader did not compile: what is wrong and where in the app's

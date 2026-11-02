@@ -24549,3 +24549,118 @@ fn a_layout_animation_alone_takes_no_screen_picture() {
     );
     assert!(c.commit().is_none());
 }
+
+#[test]
+fn a_page_shader_and_a_shader_share_one_compiled_source() {
+    use crate::shader::{NavShaderSpec, Shader, TransitionShader};
+    let mut c = core();
+    let source = "struct Uniforms { amount: f32 }\nfn shade(uv: vec2f) -> vec4f { return mix(sample_from(uv), sample_to(uv), nsh.progress * uniforms.amount); }";
+    let rust = TransitionShader::new(Shader::compile(source).expect("compiles"))
+        .uniform("amount", 0.5)
+        .duration(std::time::Duration::from_millis(500));
+    let spec = || NavShaderSpec {
+        source: source.into(),
+        uniforms: Default::default(),
+        duration: None,
+    };
+    apply(
+        &mut c,
+        vec![
+            // Not a page or a dialog: nothing compiles.
+            Op::Create {
+                id: 4,
+                tag: Tag::View,
+            },
+            Op::SetProp {
+                id: 4,
+                prop: Prop::TransitionShader(Some(spec())),
+            },
+        ],
+    );
+    c.commit();
+    assert!(c.shaders.is_empty());
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 2,
+                tag: Tag::Modal,
+            },
+            Op::SetProp {
+                id: 2,
+                prop: Prop::TransitionShader(Some(rust.into())),
+            },
+            Op::Insert {
+                parent: ROOT_ID,
+                child: 2,
+                before: None,
+            },
+            Op::Create {
+                id: 6,
+                tag: Tag::Screen,
+            },
+            Op::SetProp {
+                id: 6,
+                prop: Prop::TransitionShader(Some(spec())),
+            },
+            Op::Create {
+                id: 8,
+                tag: Tag::Shader,
+            },
+            Op::SetProp {
+                id: 8,
+                prop: Prop::ShaderSource(Some(source.into())),
+            },
+        ],
+    );
+    let batch = c.commit().unwrap();
+    let shader = batch
+        .items
+        .iter()
+        .find_map(|i| match i {
+            MountItem::NavShader {
+                id: 2,
+                shader: Some(s),
+            } => Some(s.clone()),
+            _ => None,
+        })
+        .expect("the dialog's shader");
+    assert_eq!(shader.duration, std::time::Duration::from_millis(500));
+    assert_eq!(shader.layer.uniforms[0], 0.5f32.to_bits());
+    assert_eq!(
+        c.shaders.len(),
+        1,
+        "one compile for the dialog, the page and the view"
+    );
+}
+
+#[test]
+fn a_bad_page_shader_keeps_its_error() {
+    let mut c = core();
+    let spec = || crate::shader::NavShaderSpec {
+        source: "fn shade() {}".into(),
+        uniforms: Default::default(),
+        duration: None,
+    };
+    for id in [2, 4] {
+        apply(
+            &mut c,
+            vec![
+                Op::Create {
+                    id,
+                    tag: Tag::Screen,
+                },
+                Op::SetProp {
+                    id,
+                    prop: Prop::TransitionShader(Some(spec())),
+                },
+            ],
+        );
+    }
+    c.commit();
+    assert!(
+        matches!(c.shaders.values().next(), Some(Err(_))),
+        "its error kept"
+    );
+    assert_eq!(c.shaders.len(), 1);
+}
