@@ -90,6 +90,20 @@ pub(crate) trait Driver: Send {
     fn picks(&mut self) -> Result<Vec<nsh_core::picker::PickRequest>, String> {
         Err(headless_only("`picks()`"))
     }
+    /// What the app's speech sessions asked for, in order.
+    fn speech_requests(&mut self) -> Result<Vec<nsh_core::speech::SpeechRequest>, String> {
+        Err(headless_only("`speechRequests()`"))
+    }
+    /// The user says `text` to the session listening.
+    fn hear(&mut self, text: &str) -> Result<(), String> {
+        let _ = text;
+        Err(headless_only("speaking for the user"))
+    }
+    /// Ends the session listening, with `error` or as the user stops.
+    fn end_speech(&mut self, error: Option<nsh_core::speech::SpeechError>) -> Result<(), String> {
+        let _ = error;
+        Err(headless_only("ending a speech session"))
+    }
     fn texts(&mut self) -> Result<Vec<String>, String>;
     fn count(&mut self, selector: &str) -> Result<usize, String>;
     fn enabled(&mut self, selector: &str) -> Result<bool, String>;
@@ -229,6 +243,16 @@ impl Driver for Headless {
     fn picks(&mut self) -> Result<Vec<nsh_core::picker::PickRequest>, String> {
         self.catch_up();
         Ok(Headless::picks(self))
+    }
+    fn speech_requests(&mut self) -> Result<Vec<nsh_core::speech::SpeechRequest>, String> {
+        self.catch_up();
+        Ok(Headless::speech_requests(self))
+    }
+    fn hear(&mut self, text: &str) -> Result<(), String> {
+        Headless::hear(self, text)
+    }
+    fn end_speech(&mut self, error: Option<nsh_core::speech::SpeechError>) -> Result<(), String> {
+        Headless::end_speech(self, error)
     }
     fn texts(&mut self) -> Result<Vec<String>, String> {
         self.catch_up();

@@ -185,7 +185,7 @@ pub(crate) use self::{
     back::BackListener,
     builder::{ElKind, PlaceFn},
     component::{AnyInstance, caught},
-    task::{Action, AfterAnswer, AnswerSlot, ClipboardRead, Executor, FileAnswer},
+    task::{Action, AfterAnswer, AnswerSlot, ClipboardRead, Executor, FileAnswer, SpeechAction},
 };
 /// The geometry Rust components style with (`crate::geometry`).
 pub use crate::geometry::{

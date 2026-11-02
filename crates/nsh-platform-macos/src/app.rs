@@ -355,6 +355,7 @@ impl AppView {
             clipboard: None,
             host: options.host.clone(),
             picker: None,
+            speech: None,
         };
         crate::image::set_asset_base(&self.surface, options.asset_base.clone());
         *self.surface.chunks.borrow_mut() = options.chunks.clone();
@@ -461,6 +462,7 @@ fn initial_environment() -> Environment {
         idiom: Idiom::Desktop,
         screen_color: true,
         file_requests: true,
+        speech: true,
         ..Environment::default()
     }
 }

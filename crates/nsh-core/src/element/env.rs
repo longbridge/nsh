@@ -55,6 +55,9 @@ pub struct Environment {
     /// The platform shows file dialogs and opens, reveals and trashes local
     /// paths ([`crate::platform::Environment::file_requests`]).
     pub file_requests: bool,
+    /// The platform recognizes speech
+    /// ([`crate::platform::Environment::speech`]).
+    pub speech: bool,
 }
 
 impl Default for Environment {
@@ -80,6 +83,7 @@ impl Default for Environment {
             lifecycle: Lifecycle::Active,
             screen_color: false,
             file_requests: false,
+            speech: false,
         }
     }
 }

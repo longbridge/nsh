@@ -199,6 +199,7 @@ impl Host {
             clipboard: None,
             host: self.host.clone(),
             picker: None,
+            speech: None,
         };
         let density = self.density.clone();
         let sink = Sink(self.clone());

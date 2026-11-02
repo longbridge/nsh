@@ -365,6 +365,8 @@ impl RootView {
             host: false,
             // UIKit has no screen color sampler.
             screen_color: false,
+            // The Speech framework fed by the microphone.
+            speech: true,
             // No file dialogs, file manager or trash (Catalyst included):
             // the default, so the core answers those requests.
             ..Environment::default()
@@ -667,6 +669,7 @@ impl RootView {
             clipboard: None,
             host: self.ivars().options.host.clone(),
             picker: None,
+            speech: None,
         };
         // A test session's app: the test's storage, network and trace.
         #[cfg(feature = "dev")]

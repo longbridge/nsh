@@ -41,6 +41,9 @@ mod picker;
 mod press;
 mod selectable_view;
 mod shader;
+// The Speech framework's recognizer, shared with macOS.
+#[path = "../../nsh-platform-macos/src/speech.rs"]
+mod speech;
 mod surface;
 #[cfg(feature = "dev")]
 mod synth;

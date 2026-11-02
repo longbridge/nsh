@@ -369,6 +369,9 @@ expect(app.texts()).toContain("Saved at 09:00:10");
 | `app.dialogs()` | 应用弹出过的对话框，按顺序排列。 |
 | `app.onPick(handler)` | 回答应用之后发起的选取（`Picker.pickImages`）：`handler` 接收这次选取的要求（`multiple`、`limit`、`maxDimension`、`quality`、`format`），返回用户选中的文件（`{ name, type?, data: Uint8Array }`，原样交给应用），返回 `null` 则取消。没有 handler 时选取都会被取消。仅限无界面运行。 |
 | `app.picks()` | 应用发起过的选取，按顺序排列。 |
+| `app.hear(text)` | 用户对正在运行的语音会话（`Speech.start`）说出 `text`：它的 `result` 把 `text` 报告为到目前为止的完整转写。仅限无界面运行。 |
+| `app.endSpeech(error?)` | 结束正在运行的语音会话：带 `error`（`"no-speech"`、`"network"` 等）时会话失败，否则先到达最后一个最终结果再到达 `end`，什么都没听到时为 `no-speech`。仅限无界面运行。 |
+| `app.speechRequests()` | 应用开始的语音会话，按顺序：`lang`（用户的语言时为 `null`）和 `interim`。 |
 | `app.clipboard()` | 剪贴板当前的文字，没有时为 `null`。 |
 | `app.requests()` | 应用发出的请求，按顺序排列：`method`、`url`、`headers`、`body`。 |
 | `await app.host.send(name, data?)` | 以宿主应用的身份向应用发送事件（`host.on`），然后等待它空闲。见[扮演宿主应用](#扮演宿主应用)。 |
@@ -419,6 +422,7 @@ await expect(app.press("Pay")).rejects.toMatchObject({ code: "ERR_NSH_TEST_DISAB
 - **应用在它的能力下运行**：`nsh.json` 的 `capabilities` 与设备上一样生效，没有声明的都会被拒绝。
 - **URL 只被记录**：应用打开的 URL 以“已打开”回报，`app.openedUrls()` 列出它们。
 - **选取会被回答**：用测试给的文件（`onPick`），否则视为取消，`Picker.pickImages` resolve 为 `[]`。
+- **语音由测试决定**：`Speech.available()` resolve 为 `true`，会话立即开始，听到 `hear` 说的内容。
 - **模态窗口立即出现**：弹出时就会触发 `onShow`。
 - **图片不会加载**：不会有 `onLoad` 或 `onError`，`Image.getSize` 和 `Image.prefetch` 会 reject。
 - **只有真实平台才能回答的请求会让步骤失败**：剪贴板里的图片或文件。

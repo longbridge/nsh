@@ -188,6 +188,13 @@
   reaches it. Where no backend is set, the platform's picker shows (`images.md` "Picked images"): on iOS and Android it
   needs nothing of the embedding app (PhotosUI is loaded on first use; Android's result comes to a headless fragment of
   the view's activity).
+- **The host's own recognizer** (`nsh_core::speech::SpeechBackend`): an embedding app that recognizes speech its own
+  way answers the apps' `Speech` with it: `EngineConfig::speech` gets every session's `SpeechRequest` and a
+  `SpeechSink` it reports to from any thread (`start`, `result` with the whole transcript, one `end`), and returns the
+  `SpeechControl` the core stops and aborts it with; `available` answers `Speech.available()`. No `Command::Speech` is
+  sent then. The capability check comes first. Where no backend is set, macOS and iOS recognize with the Speech
+  framework (the app's Info.plist needs `NSMicrophoneUsageDescription` and `NSSpeechRecognitionUsageDescription`,
+  which `nsh package` writes); other platforms end every session with `unavailable`.
 - **The host's locale and text size** (`nsh_core::platform::HostEnvironment`): an embedding app that lets its users
   pick a language or a text size of its own gives them to its views in place of the system's: Rust `AppView::set_locale(Option<Locale>)`
   / `set_font_scale(Option<f32>)` (GPUI, AppKit, GTK, Win32; GPUI's take `cx`), Swift `NshAppView.locale` / `fontScale`

@@ -1145,6 +1145,9 @@ pub struct Core<M: TextEngine> {
     /// Answers the app's picks in place of the platform's picker
     /// ([`Core::set_picker`]).
     picker: Option<Arc<dyn crate::picker::PickerBackend>>,
+    /// Recognizes the app's speech in place of the platform
+    /// ([`Core::set_speech`]).
+    speech: Option<Arc<dyn crate::speech::SpeechBackend>>,
     /// Rust components and what they rendered.
     components: components::Components,
     /// Overlay nodes, those shown in the order they were shown (the last
@@ -1195,6 +1198,7 @@ impl<M: TextEngine> Core<M> {
             denied: Default::default(),
             clipboard: None,
             picker: None,
+            speech: None,
             components: components::Components::for_viewport(viewport),
             lists: Vec::new(),
             parent_lists: Vec::new(),
@@ -1407,6 +1411,13 @@ impl<M: TextEngine> Core<M> {
     /// platform's picker (`None`: the platform's, the default).
     pub fn set_picker(&mut self, backend: Option<Arc<dyn crate::picker::PickerBackend>>) {
         self.picker = backend;
+    }
+
+    /// Recognizes the app's speech (`Speech.start`) with `backend`, an
+    /// embedding app's own recognizer or a test's fake, instead of the
+    /// platform's (`None`: the platform's, the default).
+    pub fn set_speech(&mut self, backend: Option<Arc<dyn crate::speech::SpeechBackend>>) {
+        self.speech = backend;
     }
 
     /// Keeps the app's storage (`nsh/storage`) in `backend`; `None`: in

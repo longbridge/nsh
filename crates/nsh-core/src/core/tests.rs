@@ -10845,6 +10845,251 @@ mod components {
         assert_eq!(shown.last().unwrap(), "picked 0 []");
     }
 
+    /// Starts a speech session when its first button is pressed (a new
+    /// one each press), stops the last one with its second; shows every
+    /// event.
+    #[component]
+    fn Dictation() -> impl IntoElement {
+        use std::{cell::RefCell, rc::Rc};
+        let heard = signal(String::new());
+        let last: Rc<RefCell<Option<Rc<RefCell<crate::element::SpeechRecognition>>>>> =
+            Rc::default();
+        let stopping = last.clone();
+        view()
+            .child(text(move || format!("heard{}", heard.get())))
+            .child(view().h(px(10.0)).on_press(move |_: &()| {
+                let request = crate::speech::SpeechRequest {
+                    lang: Some("en-US".into()),
+                    ..Default::default()
+                };
+                let recognition = Rc::new(RefCell::new(recognize_speech(request)));
+                *last.borrow_mut() = Some(recognition.clone());
+                spawn(async move {
+                    loop {
+                        let event =
+                            std::future::poll_fn(|cx| recognition.borrow_mut().poll_next(cx)).await;
+                        let Some(event) = event else { break };
+                        let shown = match event {
+                            crate::speech::SpeechEvent::Start => "start".to_owned(),
+                            crate::speech::SpeechEvent::Result { text, is_final } => {
+                                format!("{text}{}", if is_final { "." } else { "" })
+                            }
+                            crate::speech::SpeechEvent::End { error } => {
+                                format!("end {}", error.map_or("ok", |e| e.as_str()))
+                            }
+                        };
+                        heard.set(format!("{} {shown}", untracked(|| heard.get())));
+                    }
+                });
+            }))
+            .child(view().h(px(10.0)).on_press(move |_: &()| {
+                if let Some(recognition) = &*stopping.borrow() {
+                    recognition.borrow().stop();
+                }
+            }))
+    }
+
+    /// Mounts [`Dictation`]: its start and stop buttons.
+    fn mount_dictation(c: &mut Core<FakeEngine>) -> (NodeId, NodeId) {
+        c.mount_root(&crate::element::Root::new::<Dictation>(|| ()));
+        let batch = c.commit().unwrap();
+        let buttons: Vec<NodeId> = batch
+            .items
+            .iter()
+            .filter_map(|i| match i {
+                MountItem::Events { id, events } if events.contains(EventKind::Press) => Some(*id),
+                _ => None,
+            })
+            .collect();
+        (buttons[0], buttons[1])
+    }
+
+    fn press(c: &mut Core<FakeEngine>, button: NodeId) -> Vec<crate::speech::SpeechCommand> {
+        assert!(c.component_event(button, EventKind::Press, &EventPayload::None));
+        c.commit()
+            .map(|b| b.items)
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|i| match i {
+                MountItem::Command {
+                    id: ROOT_ID,
+                    command: Command::Speech(command),
+                } => Some(command),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn hear(c: &mut Core<FakeEngine>, id: u32, event: crate::speech::SpeechEvent) {
+        assert!(c.component_event(
+            ROOT_ID,
+            EventKind::Speech,
+            &EventPayload::Speech { id, event }
+        ));
+    }
+
+    #[test]
+    fn the_platform_recognizes_speech() {
+        use crate::speech::{SpeechCommand, SpeechError, SpeechEvent};
+        let mut c = core();
+        c.set_environment(crate::element::Environment {
+            speech: true,
+            ..Default::default()
+        });
+        let (start, stop) = mount_dictation(&mut c);
+        let commands = press(&mut c, start);
+        let [SpeechCommand::Start { id, request }] = &commands[..] else {
+            panic!("one start: {commands:?}");
+        };
+        let id = *id;
+        assert_eq!(request.lang.as_deref(), Some("en-US"));
+        hear(&mut c, id, SpeechEvent::Start);
+        hear(
+            &mut c,
+            id,
+            SpeechEvent::Result {
+                text: "hel".into(),
+                is_final: false,
+            },
+        );
+        // Another session's events are dropped.
+        hear(
+            &mut c,
+            id + 100,
+            SpeechEvent::End {
+                error: Some(SpeechError::Failed),
+            },
+        );
+        assert_eq!(press(&mut c, stop), vec![SpeechCommand::Stop { id }]);
+        hear(
+            &mut c,
+            id,
+            SpeechEvent::Result {
+                text: "hello".into(),
+                is_final: true,
+            },
+        );
+        hear(&mut c, id, SpeechEvent::End { error: None });
+        let shown = run_until(&mut c, |s| s.iter().any(|t| t.contains("end")));
+        assert_eq!(shown.last().unwrap(), "heard start hel hello. end ok");
+        // Nothing comes after the end; stopping it asks nothing.
+        hear(
+            &mut c,
+            id,
+            SpeechEvent::Result {
+                text: "late".into(),
+                is_final: true,
+            },
+        );
+        assert_eq!(press(&mut c, stop), vec![]);
+
+        // A new session aborts the one running: it ends for the app at once.
+        let first = press(&mut c, start);
+        let [SpeechCommand::Start { id: first, .. }] = first[..] else {
+            panic!("{first:?}");
+        };
+        hear(&mut c, first, SpeechEvent::Start);
+        let second = press(&mut c, start);
+        let [
+            SpeechCommand::Abort { id: aborted },
+            SpeechCommand::Start { id: second, .. },
+        ] = second[..]
+        else {
+            panic!("{second:?}");
+        };
+        assert_eq!(aborted, first);
+        assert_ne!(second, first);
+        let shown = run_until(&mut c, |s| s.iter().any(|t| t.ends_with("start end ok")));
+        assert!(
+            shown.last().unwrap().ends_with("end ok start end ok"),
+            "{shown:?}"
+        );
+    }
+
+    #[test]
+    fn speech_ends_unavailable_where_nothing_recognizes_it() {
+        let mut c = core();
+        let (start, _) = mount_dictation(&mut c);
+        assert_eq!(press(&mut c, start), vec![]);
+        let shown = run_until(&mut c, |s| s.iter().any(|t| t.contains("end")));
+        assert_eq!(shown.last().unwrap(), "heard end unavailable");
+    }
+
+    #[test]
+    fn speech_needs_the_capability() {
+        let mut c = core();
+        c.set_environment(crate::element::Environment {
+            speech: true,
+            ..Default::default()
+        });
+        c.set_access(std::sync::Arc::new(crate::access::Access {
+            declared: crate::access::Capabilities::from_json(&serde_json::json!({})).unwrap(),
+            granted: None,
+        }));
+        let (start, _) = mount_dictation(&mut c);
+        assert_eq!(press(&mut c, start), vec![]);
+        let shown = run_until(&mut c, |s| s.iter().any(|t| t.contains("end")));
+        assert_eq!(shown.last().unwrap(), "heard end not-allowed");
+    }
+
+    /// Recognizes "a b" as the user speaks; stopping it gives "a b c".
+    #[derive(Default)]
+    struct TestSpeech {
+        stopped: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    }
+
+    struct TestSession {
+        sink: crate::speech::SpeechSink,
+        stopped: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    }
+
+    impl crate::speech::SpeechControl for TestSession {
+        fn stop(&mut self) {
+            self.stopped
+                .store(true, std::sync::atomic::Ordering::SeqCst);
+            self.sink.result("a b c", true);
+            self.sink.end(None);
+        }
+
+        fn abort(&mut self) {}
+    }
+
+    impl crate::speech::SpeechBackend for TestSpeech {
+        fn start(
+            &self,
+            request: crate::speech::SpeechRequest,
+            sink: crate::speech::SpeechSink,
+        ) -> Box<dyn crate::speech::SpeechControl> {
+            assert!(request.interim);
+            sink.start();
+            // From another thread, as a recognizer reports.
+            let from = sink.clone();
+            std::thread::spawn(move || from.result("a b", false))
+                .join()
+                .unwrap();
+            Box::new(TestSession {
+                sink,
+                stopped: self.stopped.clone(),
+            })
+        }
+    }
+
+    #[test]
+    fn a_recognizer_of_the_embedder_runs_in_place_of_the_platform() {
+        let mut c = core();
+        let backend = TestSpeech::default();
+        let stopped = backend.stopped.clone();
+        c.set_speech(Some(std::sync::Arc::new(backend)));
+        let (start, stop) = mount_dictation(&mut c);
+        assert_eq!(press(&mut c, start), vec![], "nothing reaches the platform");
+        let shown = run_until(&mut c, |s| s.iter().any(|t| t.contains("a b")));
+        assert_eq!(shown.last().unwrap(), "heard start a b");
+        assert_eq!(press(&mut c, stop), vec![]);
+        assert!(stopped.load(std::sync::atomic::Ordering::SeqCst));
+        let shown = run_until(&mut c, |s| s.iter().any(|t| t.contains("end")));
+        assert_eq!(shown.last().unwrap(), "heard start a b a b c. end ok");
+    }
+
     /// Picks Markdown files, then trashes the first one picked and opens a
     /// relative path, when pressed; shows what each answered.
     #[component]

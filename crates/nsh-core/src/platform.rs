@@ -244,6 +244,10 @@ pub struct Environment {
     /// the desktops); without it, those requests answer at once with an
     /// error.
     pub file_requests: bool,
+    /// The platform recognizes speech ([`crate::Command::Speech`],
+    /// [`crate::speech`]); without it, a session ends at once
+    /// (`unavailable`) unless the core has a [`crate::speech::SpeechBackend`].
+    pub speech: bool,
 }
 
 impl Environment {
@@ -284,6 +288,7 @@ impl Default for Environment {
             lifecycle: Lifecycle::Active,
             screen_color: false,
             file_requests: false,
+            speech: false,
         }
     }
 }

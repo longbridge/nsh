@@ -250,6 +250,7 @@ events! {
     Paste = "onPaste": "The user pasted into an input (payload: [`EventPayload::Paste`]: the text, files with their bytes such as a screenshot, local files' URLs), before the `onChangeText` of the text it inserts.",
     ScreenColor = "onScreenColor": "A [`Command::PickScreenColor`] request finished (root only; payload: `id`, `color`: the color picked, packed `0xRRGGBBAA`, absent when cancelled).",
     FileRequest = "onFileRequest": "A [`Command::FileRequest`] finished (root only; payload: [`EventPayload::FileRequest`]).",
+    Speech = "onSpeech": "A speech recognition session reported (root only; payload: [`EventPayload::Speech`]).",
 
 }
 
@@ -784,6 +785,14 @@ pub enum EventPayload {
         id: u32,
         /// The files, in the order picked; none when cancelled.
         files: Vec<crate::picker::PickedFile>,
+    },
+    /// What a speech recognition session reported ([`EventKind::Speech`],
+    /// [`crate::speech`]).
+    Speech {
+        /// The session ([`crate::speech::SpeechCommand::Start`]).
+        id: u32,
+        /// What it reported.
+        event: crate::speech::SpeechEvent,
     },
     /// The answer to a [`Command::FileRequest`] ([`EventKind::FileRequest`],
     /// [`crate::file_dialog`]).
@@ -1796,6 +1805,11 @@ pub enum Command {
         /// What to do.
         request: Box<crate::file_dialog::FileRequest>,
     },
+    /// Start, stop or abort a speech recognition session (on the root;
+    /// `Speech` of `nsh`, [`crate::speech`]) and report it as
+    /// [`EventKind::Speech`] ([`EventPayload::Speech`]). Sent only on
+    /// platforms whose [`crate::platform::Environment::speech`] is set.
+    Speech(crate::speech::SpeechCommand),
     /// A desktop command (on the root; `nsh/desktop`): the window, its
     /// title bar, menus. Mobile platforms ignore it.
     Desktop(Box<crate::desktop::DesktopCommand>),

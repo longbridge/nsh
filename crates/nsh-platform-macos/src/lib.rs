@@ -48,6 +48,7 @@ mod screen_color;
 mod scroll;
 mod selectable_view;
 mod shader;
+mod speech;
 mod surface;
 #[cfg(feature = "dev")]
 mod synth;

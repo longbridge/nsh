@@ -66,6 +66,16 @@ expect Picked: pending
 wait 300
 expect Picked: pending
 covers [nsh] Picker
+# mod-speech
+tap id:case-mod-speech
+# nothing recognizes speech there: available() resolves false and a session
+# ends at once with "unavailable"; a lang that is no tag throws a RangeError.
+expect Available: false
+expect Speech: not started
+tap id:start
+expect Refused: threw RangeError
+expect Speech: end unavailable "" true
+covers [nsh] Speech
 # mod-desktop
 tap id:case-mod-desktop
 # no title bar area, the window and menu functions do nothing, and a popup

@@ -234,11 +234,11 @@ pub use crate::element::{
     keyboard_height, lifecycle, locale, measure_text, motion, move_to_trash, next_frame,
     on_back_press, on_key, on_key_with, open_path, open_url, os, os_version, pick_images,
     pick_paths, pick_save_path, pick_screen_color, pixel_ratio, prefetch_image, provide_context,
-    reduce_motion, request_animation_frame, resource, resource_with_value, reveal_path,
-    round_to_nearest_pixel, safe_area, screen_reader, set_clipboard, set_clipboard_image,
-    set_color_scheme, set_interval, set_timeout, set_tokens, signal, signal_with, spawn, stored,
-    text_metrics, timer, timer_until, tokens, try_apple_keys, try_global, try_os, untracked,
-    use_context, watch_scroll, when, window,
+    recognize_speech, reduce_motion, request_animation_frame, resource, resource_with_value,
+    reveal_path, round_to_nearest_pixel, safe_area, screen_reader, set_clipboard,
+    set_clipboard_image, set_color_scheme, set_interval, set_timeout, set_tokens, signal,
+    signal_with, spawn, speech_available, stored, text_metrics, timer, timer_until, tokens,
+    try_apple_keys, try_global, try_os, untracked, use_context, watch_scroll, when, window,
 };
 #[cfg(not(target_arch = "wasm32"))]
 pub use crate::element::{background, blocking};
