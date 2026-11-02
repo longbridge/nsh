@@ -1,6 +1,6 @@
 ---
 title: Fonts
-description: The system font and generic families, shipping .ttf and .otf files from a Rust crate's assets or TSX imports, families with several weights and italics, and fonts in typed styles and Tailwind classes.
+description: The system font and generic families, shipping .ttf, .otf, .woff and .woff2 files from a Rust crate's assets or TSX imports, families with several weights and italics, and fonts in typed styles and Tailwind classes.
 order: 37
 group: ui
 ---
@@ -24,7 +24,7 @@ A family installed on the device can be named directly (`"Georgia"`, `"Avenir Ne
 
 ## Shipping a font
 
-A Rust crate ships the files of its `assets/` directory: `registry.assets(assets!())` in its `#[native_module]` function ships them all, and `asset!("fonts/Pacifico-Regular.ttf")` is a `FontAsset` whose `family` is the font's family name, read from the file when the crate compiles. In TSX, import a `.ttf` or `.otf` file: the import evaluates to the font's family name. Either way the font is registered before the first frame, so it is ready when text first renders:
+A Rust crate ships the files of its `assets/` directory: `registry.assets(assets!())` in its `#[native_module]` function ships them all, and `asset!("fonts/Pacifico-Regular.ttf")` is a `FontAsset` whose `family` is the font's family name, read from the file when the crate compiles. In TSX, import a `.ttf`, `.otf`, `.woff` or `.woff2` file: the import evaluates to the font's family name. Either way the font is registered before the first frame, so it is ready when text first renders. WOFF and WOFF2 files are compressed TrueType or OpenType fonts (a WOFF2 file is often half its TrueType's size, which the app's package and the web's downloads save): NSH reads them as the fonts they hold, on every platform:
 
 ```rust tabs
 use nsh_core::{element::FontAsset, prelude::*};
