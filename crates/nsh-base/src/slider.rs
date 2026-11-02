@@ -308,14 +308,20 @@ struct Ctl {
     /// The indicator's frame in the track.
     rail: Stored<Bounds<Points>>,
     drag: Stored<Option<Drag>>,
-    /// The drag's value, shown from its first move to its end: the thumb
-    /// and the range follow the pointer in the same frame, natively,
-    /// rather than after `onChange` has gone through the app and come back
-    /// as `value` (pointer-driven motion, `docs/dev/animation.md`). At the
-    /// end the app's value shows: the events reach the app in order, so it
-    /// has answered every move's change by then, and an app that kept
-    /// another value (or held the drag's) shows it.
+    /// The drag's value, shown from its first move until the app has
+    /// answered the drag's last change: the thumb and the range follow the
+    /// pointer in the same frame, natively, rather than after `onChange` has
+    /// gone through the app and come back as `value` (pointer-driven motion,
+    /// `docs/dev/animation.md`). After the drag's end the app's value shows
+    /// once it has handled every change ([`after_answer`]): a TSX app hears
+    /// the last move's change after the core has handled the release, so no
+    /// frame shows its answer to an earlier move; an app that kept another
+    /// value (or held the drag's) shows it.
     pending: Signal<Option<SliderValue>>,
+    /// The slider's owner: the drag's value is let go of under it, so a
+    /// thumb that went with the drag (a range made a single value) does not
+    /// keep it.
+    owner: Owner,
     cx: Scope<SliderEvent>,
 }
 
@@ -498,7 +504,15 @@ impl Ctl {
             self.cx.emit(SliderEvent::ChangeEnd(drag.value));
         }
         if self.pending.get_untracked().is_some() {
-            self.pending.set(None);
+            let (pending, drag) = (self.pending, self.drag);
+            self.owner.run(|| {
+                after_answer(move || {
+                    // A drag that started since shows its own value.
+                    if drag.get().is_none() {
+                        pending.set(None);
+                    }
+                });
+            });
         }
     }
 
@@ -548,6 +562,7 @@ pub fn Slider(props: SliderProps, cx: Scope<SliderEvent>) -> impl IntoElement {
         rail: stored(Bounds::default()),
         drag: stored(None),
         pending: signal(None),
+        owner: Owner::current(),
         cx,
     };
     // While a drag moves the thumbs and no screen reader runs, the value
