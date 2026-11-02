@@ -806,6 +806,29 @@ fn collect_drag(
     });
 }
 
+/// Whether a view at `(x, y)` (root coordinates) or around it listens to
+/// `onContextMenu` (nearer than a text field): a secondary click on a
+/// window drag area goes to it instead of opening the window menu.
+pub(crate) fn hears_context_menu(surface: &Surface, x: f32, y: f32) -> bool {
+    let Some(hit) = pick(&surface.root, x, y, true) else {
+        return false;
+    };
+    let mut view = Some(hit.view);
+    while let Some(v) = view {
+        {
+            let s = v.state();
+            if s.events.contains(EventKind::ContextMenu) {
+                return true;
+            }
+            if s.kind == ViewKind::Input {
+                return false;
+            }
+        }
+        view = v.parent_view();
+    }
+    false
+}
+
 /// A secondary click at `(x, y)` (root coordinates): the nearest view
 /// around the one under it that listens to `onContextMenu` hears it,
 /// unless a text field or selectable text is nearer: that shows its edit
