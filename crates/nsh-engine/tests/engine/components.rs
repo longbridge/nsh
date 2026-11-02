@@ -4745,7 +4745,7 @@ function App() {
         }}
         accessibilityLabel="Controlled"
         trigger={<View><Text>Pick</Text></View>}
-        renderItem={(item) => <Text>{`${item.title}${item.selected ? " chosen" : ""}!`}</Text>}
+        renderItem={(item) => <Text>{`${item.title}!`}</Text>}
         renderGroup={(group) => <Text>{`[${group.title}]`}</Text>}
       />
       <Select
@@ -4859,7 +4859,7 @@ function App() {
         onConfirm={({ value: next }) => confirmed.set(next.join(","))}
         accessibilityLabel="Tags"
         triggerButton={<View accessibilityLabel="Toggle"><Text>Pick</Text></View>}
-        renderItem={(item) => <Text>{`${item.title}${item.selected ? " on" : ""}!`}</Text>}
+        renderItem={(item) => <Text>{`${item.title}!`}</Text>}
         footer={<Text>Footer</Text>}
       />
       <Text>{`Value: ${value().join(",")}`}</Text>
@@ -4914,7 +4914,9 @@ fn a_base_combobox_toggles_the_apps_array_and_confirms_it_on_close() {
         .control()
         .dispatch_event(button, EventKind::Press, EventPayload::None);
     let opened = until(&rx, |b| shows(b, "Swift!"));
-    assert!(opened.iter().any(|b| shows(b, "Go on!")));
+    // The rows draw what the items are; the selection is the option's state.
+    let (_, go) = find(&opened, "Go", AccessibilityRole::Option).expect("an option");
+    assert!(go.accessibility.state.selected);
     assert!(opened.iter().any(|b| shows(b, "Footer")));
     let (swift, _) = find(&opened, "Swift", AccessibilityRole::Option).expect("an option");
 
@@ -4923,7 +4925,11 @@ fn a_base_combobox_toggles_the_apps_array_and_confirms_it_on_close() {
         .control()
         .dispatch_event(swift, EventKind::Press, EventPayload::None);
     let toggled = until(&rx, |b| shows(b, "Value: go,swift"));
-    assert!(toggled.iter().any(|b| shows(b, "Swift on!")));
+    let selected = |batches: &[MountBatch], label: &str| {
+        find(batches, label, AccessibilityRole::Option)
+            .is_some_and(|(_, p)| p.accessibility.state.selected)
+    };
+    assert!(selected(&toggled, "Swift"));
     assert!(!toggled.iter().any(|b| shows(b, "Confirmed: go,swift")));
 
     // Closing confirms the array.
@@ -4947,7 +4953,7 @@ function App() {
         disabledMatcher={(date) => date.endsWith("-14")}
         accessibilityLabel="Due"
         trigger={<View><Text>Pick</Text></View>}
-        renderItem={(item) => <Text>{item.kind === "day" ? `${item.date}${item.active ? "*" : ""}` : `${item.kind}`}</Text>}
+        renderItem={(item) => <Text>{item.kind === "day" ? `${item.date}` : `${item.kind}`}</Text>}
       />
       <DatePicker
         range
@@ -4968,8 +4974,8 @@ mount(App);
 
 /// `nsh/base`'s `DatePicker` through its JS face: an ISO date the app owns
 /// (`onChange({ value })` with the string), the app's function of a date
-/// disabling days in the next turn, `renderItem`'s state with the day's
-/// date; a range picker's preset reporting `[start, end]`.
+/// disabling days in the next turn, `renderItem` drawing the day's date
+/// and the selected day its button's state; a range picker's preset reporting `[start, end]`.
 #[test]
 fn a_base_date_picker_reports_iso_dates_and_asks_the_apps_matcher() {
     use nsh_core::AccessibilityRole;
@@ -5006,7 +5012,14 @@ fn a_base_date_picker_reports_iso_dates_and_asks_the_apps_matcher() {
     engine
         .control()
         .dispatch_event(due, EventKind::Press, EventPayload::None);
-    let opened = until(&rx, |b| shows(b, "2026-10-10*"));
+    let opened = until(&rx, |b| {
+        find(
+            std::slice::from_ref(b),
+            "2026-10-10",
+            AccessibilityRole::Button,
+        )
+        .is_some_and(|(_, p)| p.accessibility.state.selected)
+    });
     // The app's function disables the 14th, a turn later.
     let disabled = until(&rx, |b| {
         find(

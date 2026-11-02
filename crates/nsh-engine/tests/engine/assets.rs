@@ -44,6 +44,7 @@ fn config(app: App) -> EngineConfig {
         speech: None,
         host: Default::default(),
         picker: None,
+        speech: None,
     }
 }
 
