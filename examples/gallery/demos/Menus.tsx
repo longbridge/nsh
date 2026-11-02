@@ -83,7 +83,7 @@ function Item(props: {
       <If when={props.icon && props.checked === undefined}>
         <LucideIcon name={props.icon!} size={item.icon} tint={props.danger ? colors.danger : colors.muted} />
       </If>
-      <Text style={{ flex: 1, fontSize: item.font, color: props.danger ? colors.danger : colors.text }}>{props.label}</Text>
+      <Text numberOfLines={1} style={{ flexGrow: 1, flexShrink: 0, fontSize: item.font, color: props.danger ? colors.danger : colors.text }}>{props.label}</Text>
       <If when={props.shortcut ?? props.note}>
         <Text style={{ fontSize: item.note, color: colors.faint }}>{props.shortcut ?? props.note}</Text>
       </If>
@@ -105,7 +105,7 @@ function SubmenuOf(props: { label: string; icon?: LucideIconName; children: JSX.
           <If when={props.icon}>
             <LucideIcon name={props.icon!} size={item.icon} tint={colors.muted} />
           </If>
-          <Text style={{ flex: 1, fontSize: item.font, color: colors.text }}>{props.label}</Text>
+          <Text numberOfLines={1} style={{ flexGrow: 1, flexShrink: 0, fontSize: item.font, color: colors.text }}>{props.label}</Text>
           <Icon name="chevron" size={pointer ? 12 : 14} tint={colors.faint} />
         </View>
       }
