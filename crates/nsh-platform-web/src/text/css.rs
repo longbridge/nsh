@@ -45,13 +45,13 @@ pub(crate) fn font_variant_numeric(variant: FontVariant) -> Option<String> {
 }
 
 /// Whether text with a numeric variant is measured character by
-/// character (each character's width measured once, then summed) rather
-/// than whole: text of digits and the signs numbers are written with
-/// (prices, times, percentages, counters), whose digits the variant draws
-/// at fixed widths and which nothing kerns. It is what changes on every
-/// update of a live figure; measuring it whole would lay the page out for
-/// every new value (`ffi::measure_numeric_text`). Other text (with letters)
-/// is measured whole, kerning included.
+/// character (each character and each adjacent pair measured once, the
+/// characters summed with the pairs' kerning) rather than whole: text of
+/// digits and the signs numbers are written with (prices, times,
+/// percentages, counters), which no font shapes beyond pairs. It is what
+/// changes on every update of a live figure; measuring it whole would lay
+/// the page out for every new value (`ffi::measure_numeric_text`). Other
+/// text (with letters) is measured whole.
 pub(crate) fn measured_by_char(text: &str) -> bool {
     !text.is_empty()
         && text.chars().all(|c| {
