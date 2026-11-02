@@ -2,7 +2,7 @@
 //! inside a container view that carries the decoration (background,
 //! border, corners, shadow) like any other view.
 
-use std::cell::Cell;
+use std::{cell::Cell, ffi::CStr};
 
 use nsh_core::{
     AutoCapitalize, AutoFill, Bounds, Color, InputConfig, KeyboardAppearance, KeyboardType, NodeId,
@@ -1136,12 +1136,35 @@ fn content_type(fill: AutoFill) -> Option<&'static NSString> {
             AutoFill::PostalCode => UITextContentTypePostalCode,
             AutoFill::Country => UITextContentTypeCountryName,
             AutoFill::CreditCardNumber => UITextContentTypeCreditCardNumber,
-            AutoFill::CreditCardExpiration => UITextContentTypeCreditCardExpiration,
-            AutoFill::CreditCardSecurityCode => UITextContentTypeCreditCardSecurityCode,
-            AutoFill::CreditCardName => UITextContentTypeCreditCardName,
+            AutoFill::CreditCardExpiration => {
+                return optional_content_type(c"UITextContentTypeCreditCardExpiration");
+            }
+            AutoFill::CreditCardSecurityCode => {
+                return optional_content_type(c"UITextContentTypeCreditCardSecurityCode");
+            }
+            AutoFill::CreditCardName => {
+                return optional_content_type(c"UITextContentTypeCreditCardName");
+            }
             AutoFill::Url => UITextContentTypeURL,
-            AutoFill::Birthdate => UITextContentTypeBirthdate,
+            AutoFill::Birthdate => return optional_content_type(c"UITextContentTypeBirthdate"),
         })
+    }
+}
+
+/// Resolve newer content types without strong imports: these constants are
+/// absent before iOS 17, where the input must leave `textContentType` unset.
+///
+/// # Safety
+/// `symbol` must name an immutable UIKit `NSString *` constant, whose object
+/// lives for the process's lifetime, or a symbol that does not exist.
+unsafe fn optional_content_type(symbol: &CStr) -> Option<&'static NSString> {
+    // SAFETY: the name is NUL-terminated and UIKit is already linked. dlsym
+    // returns the address of the pointer slot, not the NSString itself.
+    unsafe {
+        let slot = libc::dlsym(libc::RTLD_DEFAULT, symbol.as_ptr()).cast::<*const NSString>();
+        let object = slot.as_ref()?;
+        // The constant's pointer may itself be null.
+        (*object).as_ref()
     }
 }
 
@@ -1169,4 +1192,46 @@ fn placeholder(config: &InputConfig, font: &objc2_ui_kit::UIFont) -> Retained<NS
 fn ui_color(color: Color) -> Retained<UIColor> {
     let (r, g, b, a) = color.to_f64();
     UIColor::colorWithRed_green_blue_alpha(r, g, b, a)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn missing_content_type_is_unset() {
+        // SAFETY: this symbol does not exist.
+        assert!(unsafe { optional_content_type(c"NSHMissingUITextContentType") }.is_none());
+    }
+
+    #[test]
+    fn content_type_lookup_reads_the_pointer_slot() {
+        // SAFETY: this immutable UIKit constant exists on every supported OS.
+        unsafe {
+            let expected = objc2_ui_kit::UITextContentTypeEmailAddress;
+            let actual = optional_content_type(c"UITextContentTypeEmailAddress").unwrap();
+            assert!(std::ptr::eq(actual, expected));
+            assert_eq!(actual, expected);
+        }
+    }
+
+    #[test]
+    fn ordinary_autofill_keeps_its_content_types() {
+        assert!(content_type(AutoFill::Default).is_none());
+        assert_eq!(content_type(AutoFill::Off).unwrap().length(), 0);
+        // SAFETY: immutable UIKit constants available on every supported OS.
+        unsafe {
+            for (fill, expected) in [
+                (AutoFill::Username, objc2_ui_kit::UITextContentTypeUsername),
+                (AutoFill::Password, objc2_ui_kit::UITextContentTypePassword),
+                (AutoFill::Email, objc2_ui_kit::UITextContentTypeEmailAddress),
+                (
+                    AutoFill::CreditCardNumber,
+                    objc2_ui_kit::UITextContentTypeCreditCardNumber,
+                ),
+            ] {
+                assert!(std::ptr::eq(content_type(fill).unwrap(), expected));
+            }
+        }
+    }
 }
