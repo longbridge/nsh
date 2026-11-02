@@ -43,11 +43,11 @@ Callbacks escaping a stopped run become inert; pending module and host calls rej
 Browser fetch, streams, WebCrypto, URL, timers and promises use browser implementations, including their
 CORS, secure-context and permission rules; the browser knows no `asset:` scheme, so `fetch` of the app's files
 (`asset:/`) goes through the engine's network in every session, which reads them as on the other platforms
-(`web/browser/testing.js`, `src/browser/fetch.rs`). Synchronous hash/compression APIs retain Rust implementations;
+(`web/browser/fetch.js`, `src/browser/fetch.rs`). Synchronous hash/compression APIs retain Rust implementations;
 Buffer and POSIX path use pinned vendored implementations with licenses in `third_party/`. Mobile-only APIs
 retain their off-platform behavior. In a test session on a manual clock (`nsh test --target web`), timers,
 `Date`, `performance.now()`, animation frames and `fetch` go through the engine instead, so the test's clock and
-routes control them (`web/browser/testing.js`).
+routes control them (`web/browser/testing.js`, `web/browser/fetch.js`).
 
 ### Hot module replacement
 

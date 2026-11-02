@@ -1238,7 +1238,7 @@ class Player {
    */
   testStart() {
     // The apps started from now on send their requests to the test
-    // (`web/browser/testing.js`).
+    // (`web/browser/fetch.js`, `web/browser/testing.js`).
     this.testing = true;
     this.wasm.nsh_test_start?.();
   }
