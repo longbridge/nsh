@@ -15304,6 +15304,50 @@ mod views {
         assert!(press(&mut c).is_empty());
     }
 
+    thread_local! {
+        static REBUILT_PROP_OWNER: Cell<Option<Owner>> = const { Cell::new(None) };
+    }
+
+    #[component]
+    fn RebuiltLabel(props: ShownProps) -> impl IntoElement {
+        REBUILT_PROP_OWNER.with(|owner| owner.set(Some(Owner::current())));
+        text(props.value)
+    }
+
+    #[component]
+    fn RebuiltProp() -> impl IntoElement {
+        let n = signal(0);
+        view()
+            .on_press(move |_: &()| n.update(|n| *n += 1))
+            .child(dynamic(move || {
+                let value = n.get();
+                rebuilt_label().value(move || format!("{value}: {}", n.get()))
+            }))
+    }
+
+    #[test]
+    fn rebuilding_a_region_retires_its_components_property_bindings() {
+        let mut c = core();
+        c.mount_root(&Root::new::<RebuiltProp>(|| ()));
+        let batch = c.commit().unwrap();
+        assert_eq!(texts(&batch), ["0: 0"]);
+        let host = root_host(&batch);
+        for n in 1..=3 {
+            let previous = REBUILT_PROP_OWNER.with(Cell::get).unwrap();
+            assert!(c.component_event(host, EventKind::Press, &EventPayload::None));
+            {
+                let _entered = c.components.runtime.enter();
+                assert!(
+                    !previous.is_live(),
+                    "the old component must retire before the core commits its replacement"
+                );
+            }
+            assert!(c.components.runtime.take_failures().is_empty());
+            let batch = c.commit().expect("the rebuilt component renders");
+            assert_eq!(texts(&batch), [format!("{n}: {n}")]);
+        }
+    }
+
     /// Counts Mod+K while a branch is shown; a press hides the branch.
     #[component]
     fn Shortcuts() -> impl IntoElement {
