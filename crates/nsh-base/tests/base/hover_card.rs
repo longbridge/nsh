@@ -3,7 +3,7 @@
 //! the pointer moves into the card, closes its close delay after the
 //! pointer left both, and at once on Escape; the pointer back on either
 //! within the close delay, or on the trigger while the card goes, keeps
-//! it; a delay of `Infinity` never ends and one of `NaN` is none; a
+//! it, and so does the keyboard focus on the trigger or in the card; a delay of `Infinity` never ends and one of `NaN` is none; a
 //! controlled card shows what the app says; a hover sends the platform
 //! nothing until the card opens; what the card shows is no part of a
 //! toolbar its trigger is in. On a phone a press opens and closes it, and
@@ -40,6 +40,8 @@ struct ScreenProps {
     close_delay: f64,
     /// The card fades out for a second once closed.
     exit: bool,
+    /// The card holds a link the keyboard focus can reach.
+    link: bool,
 }
 
 /// A mention whose card previews a profile, a place away from it, and
@@ -49,6 +51,13 @@ fn HoverScreen(props: ScreenProps) -> impl IntoElement {
     let changes = signal(Vec::<String>::new());
     let life = signal(Vec::<&str>::new());
     let shown = signal(false);
+    let link_focused = signal(false);
+    // The focus coming into the card's place and leaving it, as the view
+    // around the card hears it.
+    let within = signal(Vec::<&str>::new());
+    let place = element_ref();
+    place.on_focus_in(move || within.update(|w| w.push("in")));
+    place.on_focus_out(move || within.update(|w| w.push("out")));
     let card = hover_card()
         .offset(px(4.0))
         .open_delay(props.open_delay)
@@ -76,7 +85,17 @@ fn HoverScreen(props: ScreenProps) -> impl IntoElement {
                 .test_id("card")
                 .w(px(200.0))
                 .h(px(80.0))
-                .child(text("Ada Lovelace")),
+                .child(text("Ada Lovelace"))
+                .when(props.link, |card| {
+                    card.child(
+                        view()
+                            .test_id("profile")
+                            .focusable(true)
+                            .on_focus(move || link_focused.set(true))
+                            .on_blur(move || link_focused.set(false))
+                            .child(text("Profile")),
+                    )
+                }),
         );
     let card = if props.controlled {
         card.open(move || Some(shown.get()))
@@ -86,7 +105,7 @@ fn HoverScreen(props: ScreenProps) -> impl IntoElement {
     view()
         .pt(px(100.0))
         .pl(px(40.0))
-        .child(card)
+        .child(view().element_ref(&place).child(card))
         .child(view().test_id("away").h(px(200.0)).child(text("Away")))
         .child(
             view()
@@ -100,6 +119,10 @@ fn HoverScreen(props: ScreenProps) -> impl IntoElement {
             format!("Changes: {}", changes.get().join(" "))
         }))
         .child(text(move || format!("Life: {}", life.get().join(" "))))
+        .child(text(move || {
+            format!("Profile focused: {}", link_focused.get())
+        }))
+        .child(text(move || format!("Within: {}", within.get().join(" "))))
 }
 
 /// The screen on a Mac (or an iPhone) on a manual clock, counting the
@@ -243,6 +266,90 @@ fn a_blur_of_the_trigger_leaves_the_card_open_while_the_pointer_is_on_it() {
     app.run_for(Duration::from_millis(350)).unwrap();
     assert!(!app.shows("Ada Lovelace"));
     app.wait_for("Changes: true:Focus false:Hover").unwrap();
+}
+
+/// The screen with a link in the card, on a Mac.
+fn start_with_link() -> Headless {
+    start_with(
+        ScreenProps {
+            link: true,
+            ..ScreenProps::default()
+        },
+        true,
+    )
+    .0
+}
+
+#[test]
+fn the_focus_moving_from_the_trigger_into_the_card_keeps_it_open() {
+    let mut app = start_with_link();
+    app.press_key("tab").unwrap();
+    app.run_for(Duration::from_millis(650)).unwrap();
+    assert!(app.shows("Ada Lovelace"), "open after its delay");
+    app.wait_for("Within: in").unwrap();
+    // Back from the trigger, around to the last stop: the card's link. The
+    // card's overlay is inside the hover card's view, so the focus never
+    // leaves it: no `on_focus_out` (the pointer is not on the card, so one
+    // would close it).
+    app.press_key("shift+tab").unwrap();
+    app.wait_for("Profile focused: true").unwrap();
+    app.run_for(Duration::from_millis(1000)).unwrap();
+    assert!(app.shows("Ada Lovelace"), "the focus in the card keeps it");
+    assert!(app.shows("Within: in"), "never out");
+    // From the card to the trigger: still in one of them.
+    app.press_key("tab").unwrap();
+    app.wait_for("Profile focused: false").unwrap();
+    app.run_for(Duration::from_millis(1000)).unwrap();
+    assert!(
+        app.shows("Ada Lovelace"),
+        "the focus on the trigger keeps it"
+    );
+    assert!(app.shows("Within: in"), "never out");
+    app.wait_for("Changes: true:Focus").unwrap();
+    // Out of both: it closes after its close delay.
+    app.press_key("tab").unwrap();
+    app.wait_for("Within: in out").unwrap();
+    app.run_for(Duration::from_millis(250)).unwrap();
+    assert!(app.shows("Ada Lovelace"), "not before 300 ms");
+    app.run_for(Duration::from_millis(100)).unwrap();
+    assert!(!app.shows("Ada Lovelace"));
+    app.wait_for("Changes: true:Focus false:Focus").unwrap();
+}
+
+#[test]
+fn the_focus_in_the_card_keeps_it_open_after_the_pointer_left() {
+    let mut app = start_with_link();
+    open_by_hover(&mut app);
+    app.hover("id:card").unwrap();
+    // With no focus, Shift+Tab goes to the last stop: the card's link.
+    app.press_key("shift+tab").unwrap();
+    app.wait_for("Profile focused: true").unwrap();
+    app.hover("id:away").unwrap();
+    app.run_for(Duration::from_millis(1000)).unwrap();
+    assert!(app.shows("Ada Lovelace"), "the focus keeps it");
+    app.wait_for("Changes: true:Hover").unwrap();
+    // Around to the trigger, then out: closed once the focus left both.
+    app.press_key("tab").unwrap();
+    app.press_key("tab").unwrap();
+    app.run_for(Duration::from_millis(350)).unwrap();
+    assert!(!app.shows("Ada Lovelace"));
+    app.wait_for("Changes: true:Hover false:Focus").unwrap();
+}
+
+#[test]
+fn escape_closes_a_hover_card_with_the_focus_in_it() {
+    let mut app = start_with_link();
+    open_by_hover(&mut app);
+    app.hover("id:card").unwrap();
+    app.press_key("shift+tab").unwrap();
+    app.wait_for("Profile focused: true").unwrap();
+    app.press_key("escape").unwrap();
+    assert!(!app.shows("Ada Lovelace"));
+    app.wait_for("Changes: true:Hover false:Cancel").unwrap();
+    // The focus gone with the card asks nothing more.
+    app.run_for(Duration::from_millis(1000)).unwrap();
+    assert!(!app.shows("Ada Lovelace"));
+    app.wait_for("Changes: true:Hover false:Cancel").unwrap();
 }
 
 #[test]

@@ -28,7 +28,7 @@ use crate::{
     Command, Dialog, EdgeInsets, LayoutAnimation, NodeId, Points, Size,
     canvas::CanvasFont,
     color::Hsla,
-    platform::{Appearance, Idiom, Locale, Os},
+    platform::{Appearance, Idiom, Lifecycle, Locale, Os},
     time::Instant,
 };
 
@@ -72,6 +72,7 @@ struct EnvSignals {
     rtl: Memo<bool>,
     pixel_ratio: Memo<f32>,
     locale: Memo<Locale>,
+    lifecycle: Memo<Lifecycle>,
     screen_color: Memo<bool>,
 }
 
@@ -98,6 +99,7 @@ impl EnvSignals {
                 rtl: part!(rtl),
                 pixel_ratio: part!(pixel_ratio),
                 locale: part!(locale),
+                lifecycle: part!(lifecycle),
                 screen_color: part!(screen_color),
             }
         })
@@ -265,6 +267,13 @@ pub fn round_to_nearest_pixel(points: Points) -> Points {
 /// The user's locale (TS: what `Intl` formats for by default).
 pub fn locale() -> Locale {
     env(|e| e.locale)
+}
+
+/// Whether the app is in use: in the foreground, visible without the
+/// focus, or in the background (TS: `lifecycle()`). Reading it subscribes,
+/// so an effect pauses work in the background and resumes it after.
+pub fn lifecycle() -> Lifecycle {
+    env(|e| e.lifecycle)
 }
 
 /// The operating system (TS: `platform.os`); it does not change.
@@ -619,6 +628,108 @@ pub fn pick_images(request: crate::picker::PickRequest) -> Answer<Vec<crate::pic
     answer
 }
 
+/// Whether speech can be recognized here (TS: `Speech.available()`): the
+/// platform recognizes speech (macOS, iOS), or the embedding app gave the
+/// core its own recognizer. To await in a task.
+pub fn speech_available() -> Answer<bool> {
+    let (answer, slot) = Answer::new();
+    act(Action::Speech(super::SpeechAction::Available(slot)));
+    answer
+}
+
+/// Starts recognizing what the user says (dictation; TS: `Speech.start`),
+/// as `request` asks: the session's events come from
+/// [`SpeechRecognition::next`], in a task. One session runs at a time:
+/// starting another ends this one (its [`SpeechEvent::End`](crate::speech::SpeechEvent::End),
+/// without an error). The core refuses it (an end with
+/// [`SpeechError::NotAllowed`](crate::speech::SpeechError::NotAllowed))
+/// when the app's capabilities do not grant `speech`, and ends it with
+/// [`SpeechError::Unavailable`](crate::speech::SpeechError::Unavailable)
+/// where nothing recognizes speech ([`speech_available`]).
+pub fn recognize_speech(request: crate::speech::SpeechRequest) -> SpeechRecognition {
+    static NEXT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(1);
+    let id = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let (sink, events) = crate::speech::channel();
+    let executor = executor();
+    executor.act(Action::Speech(super::SpeechAction::Start {
+        id,
+        request,
+        sink,
+    }));
+    SpeechRecognition {
+        id,
+        events,
+        executor: Rc::downgrade(&executor),
+        ended: false,
+    }
+}
+
+/// A running speech recognition session ([`recognize_speech`]). Dropping
+/// it before its end aborts it.
+#[must_use = "a dropped recognition is aborted"]
+pub struct SpeechRecognition {
+    id: u32,
+    events: crate::speech::SpeechEvents,
+    executor: std::rc::Weak<Executor>,
+    ended: bool,
+}
+
+impl std::fmt::Debug for SpeechRecognition {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SpeechRecognition")
+            .field("id", &self.id)
+            .field("ended", &self.ended)
+            .finish_non_exhaustive()
+    }
+}
+
+impl SpeechRecognition {
+    /// The session's next event; `None` after its end.
+    pub async fn next(&mut self) -> Option<crate::speech::SpeechEvent> {
+        std::future::poll_fn(|cx| self.poll_next(cx)).await
+    }
+
+    /// Polls for the session's next event ([`Self::next`]).
+    pub fn poll_next(
+        &mut self,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<crate::speech::SpeechEvent>> {
+        let poll = self.events.poll_next(cx);
+        if let std::task::Poll::Ready(None | Some(crate::speech::SpeechEvent::End { .. })) = poll {
+            self.ended = true;
+        }
+        poll
+    }
+
+    /// Stops listening: the recognizer finishes what it heard (a last,
+    /// final result), then the session ends.
+    pub fn stop(&self) {
+        if !self.ended {
+            self.act(super::SpeechAction::Stop(self.id));
+        }
+    }
+
+    /// Ends the session at once, without an error; what was not reported
+    /// is dropped.
+    pub fn abort(&self) {
+        if !self.ended {
+            self.act(super::SpeechAction::Abort(self.id));
+        }
+    }
+
+    fn act(&self, action: super::SpeechAction) {
+        if let Some(executor) = self.executor.upgrade() {
+            executor.act(Action::Speech(action));
+        }
+    }
+}
+
+impl Drop for SpeechRecognition {
+    fn drop(&mut self) {
+        self.abort();
+    }
+}
+
 /// The value function `name` of the embedding app returns for `args`
 /// (TS: `host.call`), to await in a task.
 pub(crate) fn host_call(
@@ -654,7 +765,10 @@ pub fn prefetch_image(src: impl Into<String>) -> super::Prefetch {
 /// on native targets and the browser's on the web, under the app's
 /// `capabilities.network`. `request` is a URL (`GET`) or an
 /// [`HttpRequest`](crate::platform::HttpRequest); the URL is absolute.
-/// The whole body arrives with the response.
+/// The whole body arrives with the response. An `asset:/` URL, as
+/// [`FileAsset::uri`](super::FileAsset::uri) and `assets!()` give it, is a
+/// file the app ships: the engine answers it from the host's assets, with
+/// no capability needed.
 pub fn fetch(request: impl Into<crate::platform::HttpRequest>) -> super::Fetch {
     let (answer, action) = super::services::fetch(request.into());
     act(action);

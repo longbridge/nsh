@@ -48,6 +48,7 @@ mod screen_color;
 mod scroll;
 mod selectable_view;
 mod shader;
+mod speech;
 mod surface;
 #[cfg(feature = "dev")]
 mod synth;
@@ -69,7 +70,10 @@ pub use objc2_foundation;
 #[cfg(feature = "dev")]
 pub use crate::app::set_root;
 pub use crate::{
-    app::{AppOptions, AppSource, AppView, WindowDisplay, quit_app, run_app, set_ui_sets},
+    app::{
+        AppOptions, AppSource, AppView, WindowDisplay, quit_app, run_app, set_components,
+        set_ui_sets,
+    },
     image::AssetBase,
     native::{ComponentContext, ComponentFactory, Components, NativeComponent},
     text::CoreTextEngine,

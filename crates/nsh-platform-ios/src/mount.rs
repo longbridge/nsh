@@ -1051,13 +1051,9 @@ impl Mounter {
                 }) = self.slot(id)
                 {
                     // The header bar positions it; only its size is ours.
-                    let origin = view.frame().origin;
-                    view.setFrame(CGRect::new(
-                        origin,
-                        CGSize::new(
-                            frame.size.width.0 as CGFloat,
-                            frame.size.height.0 as CGFloat,
-                        ),
+                    view.set_layout_size(CGSize::new(
+                        frame.size.width.0 as CGFloat,
+                        frame.size.height.0 as CGFloat,
                     ));
                     return false;
                 }
@@ -1647,6 +1643,9 @@ impl Mounter {
                 native,
             ) if id == nsh_core::ROOT_ID => {
                 crate::picker::pick_images(request, asked, native.view(), &self.control);
+            }
+            (Command::Speech(command), _) if id == nsh_core::ROOT_ID => {
+                crate::speech::command(&self.control, &command);
             }
             (Command::SetJsResponder { block }, _) => self.set_js_responder(id, block),
             (Command::SetSelection { start, end }, Native::Input(input)) => {
@@ -3492,11 +3491,12 @@ impl Mounter {
         })
     }
 
-    /// Presses the element the app put in the trailing header slot, as a tap
-    /// on a system bar button does: the first view inside the slot that
-    /// takes a press (the one made first), resolved now (the slot's content
-    /// arrives after the button is made). A slot with none takes no press.
-    pub(crate) fn press_trailing_header(&mut self, screen: NodeId) {
+    /// Presses the element the app put in a header slot (`leading`: the
+    /// left one), as a tap on a system bar button does: the first view
+    /// inside the slot that takes a press (the one made first), resolved now
+    /// (the slot's content arrives after the button is made). A slot with
+    /// none takes no press.
+    pub(crate) fn press_header(&mut self, screen: NodeId, leading: bool) {
         let Some(Slot {
             native: Native::Screen(host),
             ..
@@ -3504,7 +3504,11 @@ impl Mounter {
         else {
             return;
         };
-        let Some(slot_node) = host.config.right else {
+        let Some(slot_node) = (if leading {
+            host.config.left
+        } else {
+            host.config.right
+        }) else {
             return;
         };
         let Some(container) = self.slot(slot_node).map(|s| s.native.view().retain()) else {

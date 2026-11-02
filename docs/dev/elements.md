@@ -292,7 +292,18 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   offset logic stays left to right.
 - **Environment** (reactive accessors; `nsh` (`safeArea()`, `safeAreaInsets()`, `keyboardFrame()`)): `windowSize()`, `safeArea()`, `keyboardFrame()` (`{ height, duration }`: how
   far the keyboard reaches into the surface, the bottom safe area under it included, on every platform),
-  `colorScheme()`, `fontScale()`. `padding-bottom: env(keyboard-inset-height)` pads a view by the keyboard's height, animated with the keyboard
+  `colorScheme()`, `fontScale()`, `lifecycle()` (`Environment::lifecycle`, `Lifecycle`: `active` / `inactive` /
+  `background`, React Native's states; the platforms write it as the system reports the app's, the web from the
+  page's `visibilityState` and focus, iOS from the notifications of the scene of the surface's window
+  (`UIScene`'s `didActivate` / `willDeactivate` / `didEnterBackground` / `willEnterForeground`, filtered by the view's
+  `window.windowScene`, its `activationState` read when the view moves to a window), UIApplication's
+  (`didBecomeActive` / `willResignActive` / `didEnterBackground` / `willEnterForeground`) while it is in no window
+  with a scene, by the notification: the scene and `applicationState` still say active during `willDeactivate` /
+  `willResignActive`; Android from `NshView`'s activity: resumed is `active`, paused or started again
+  `inactive`, stopped `background`, through one `ActivityLifecycleCallbacks` per application, registered by the first
+  view attached and kept, which remembers each activity's last state: a view attached again starts from it). The change reaches JS through the engine's thread, and iOS may suspend the
+  process seconds after `didEnterBackground` (Android's `onStop` is looser): `background` is for pausing work, and
+  the user-facing docs say to save as changes are made. `padding-bottom: env(keyboard-inset-height)` pads a view by the keyboard's height, animated with the keyboard
   natively, for content outside scroll views (message bars). Inputs inside a scroll view are kept clear of the keyboard natively (bottom inset + scroll to the
   focused input), with no JS involved.
   Both move as one with the keyboard: `LayoutCurve::Keyboard` (`type: "keyboard"`) is the system keyboard's own curve,
@@ -374,12 +385,22 @@ dialog around it (`Modal`). It is the one mechanism popups are built on (`nsh/ba
   `"center"` (default), `"end"`; start and end follow the direction above and below); `offset` from the anchor; then
   moved along the side to stay inside the root view's safe area less `margin`. Rust's `anchor_beside(row, menu)`
   (`OverlayAnchor::Beside`, a submenu's) lines it up with the row along its side and places it outside the menu
-  around the row across it, so `offset` is a gap from the menu's edge, not from the row inside its padding. The anchor's frame is
+  around the row across it, so `offset` is a gap from the menu's edge, not from the row inside its padding. Rust's
+  `anchor_content(r)` (`OverlayAnchor::Content`, `Popover`'s, `HoverCard`'s and a desktop `Menu`'s) places it against
+  what the view draws: the box around its children with its padding and border, along an axis its style leaves `auto`
+  (a wrapper its parent stretches); the element that takes a component's slot goes by its own box, whether a TSX or a
+  Rust app passed it (`Core::content_anchor`: the slot's holder is that wrapper). The anchor's frame is
   `Core::measure`'s (scroll offsets and zoom applied, transforms not), so the overlay follows it as it scrolls and moves:
   `place_overlays` places anchored overlays again at the end of every commit (after the lists and the scroll offsets
   the platform reported). `onPosition` reports where it went (`placement`, the frame as `bounds`, `available`:
   the room on that side, what a menu may grow to). A view inside an overlay measures in the root
   view's coordinates.
+- **Covering the anchor** (`OverlayConfig::cover`, `OverlayProp::Cover`; Rust `overlay().cover(&element_ref, shown)`;
+  no JS prop): instead of on a side, the overlay starts where the anchor does, with a view inside it centered on the
+  anchor vertically (a select's selected row over its trigger, title on title: shadcn/ui's `item-aligned`), then moved
+  to stay inside the safe area less `margin`. The view's frame in the overlay is kept while the overlay keeps its size
+  and the view its place in its parent (`Core::covering`, `OverlayState::covered`), so the overlay stays put while
+  its rows scroll; without the view (not rendered, nothing selected) the overlay is placed on its side as usual.
 - **Dismissal is reported, never decided**: `onPressOutside` (a finger or button went down outside the overlay, its
   anchor and the overlays inside it: while an overlay listens, the shown overlays, its anchor and root view listen to
   touches, and the core reads each touch's path, `overlay_touches`); `onCancel` (Escape, the Android back button or

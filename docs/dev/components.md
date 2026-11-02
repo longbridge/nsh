@@ -52,7 +52,7 @@ Visual rules are changed in the shared layer; `nsh-base` supplies the components
 | Where | What |
 |---|---|
 | `crates/nsh-core/src/element/` | The API (`nsh_core::element`, `prelude`): `Component`, `Module`, `Class` (`class.rs`, `callback.rs`; direct JS values: `js.rs`), elements, `Styled`, `Theme`, `Registry`, the status bar's layers (`status_bar.rs`), the declarations generator `typescript` |
-| `crates/nsh-macros` | `#[component]`, `#[derive(Props)]`, `#[derive(PropEnum)]`, `#[derive(Event)]`, `#[derive(JsObject)]`; `#[methods]`, `#[module]`, `#[class]`; `#[native_module("…")]` (an app crate's set: `docs/dev/tooling.md`); `style_helpers!` (the spacing methods of `Styled`) |
+| `crates/nsh-macros` | `#[component]`, `#[derive(Props)]`, `#[derive(PropEnum)]`, `#[derive(Event)]`, `#[derive(JsObject)]`; `#[methods]`, `#[module]`, `#[class]`; `#[native_module("…")]` (an app crate's set: `docs/dev/tooling.md`); `#[native_components(<platform>)]` (an app crate's native components on Windows, macOS, Linux or iOS: `docs/dev/tooling.md`); `style_helpers!` (the spacing methods of `Styled`) |
 | `crates/nsh-core/src/core/components.rs` | The core side: instances, children and slots, events; `core/views.rs`: views, their bindings' patches and regions |
 | `crates/nsh-base/` | `nsh/base`'s components and modules, one file each (`accordion.rs`, its parts on `collapsible.rs`'s reveal, `alert_dialog.rs`, `button.rs`, `checkbox.rs`, `number_input.rs`, `radio.rs`, `slider.rs`, `switch.rs`, `tabs.rs`, `select.rs` on `listbox.rs`; `command.rs`, its items indexed once and filtered natively per query, its moves of the highlight `listbox.rs`'s; `tree.rs`, its items flattened natively into the rows the expanded items show; `color_picker/`, `ColorPicker` and its parts over a color as each space's channels hold it (`model.rs`: the conversions, OKLCH's gamut mapping, the CSS forms it reads and writes); `numeric.rs`, the rules of a number in a range with a step that `Slider` follows and of a number typed as text that `NumberInput` follows; `keys.rs`, the keys a focused control binds; `TextView`, `ResizablePanelGroup`, `DockArea`, `Editor` and `DiffView` directories, `text_view/`, `resizable/`, `dock/`, `editor/`, `diff/`; `rich_editor/`, `RichEditor`'s headless kernel, `docs/dev/rich-editor.md`; `syntax.rs`, the syntax highlighting `TextView` and `Editor` share), one `Registry` (`lib.rs`) |
 | `crates/nsh-base/` | `nsh/base`'s components and modules, one file each (`accordion.rs`, its parts on `collapsible.rs`'s reveal, `alert_dialog.rs`, `button.rs`, `carousel.rs`, `avatar.rs`, `checkbox.rs`, `number_input.rs`, `radio.rs`, `slider.rs`, `switch.rs`, `tabs.rs`, `select.rs` on `listbox.rs`; `command.rs`, its items indexed once and filtered natively per query, its moves of the highlight `listbox.rs`'s; `tree.rs`, its items flattened natively into the rows the expanded items show; `color_picker/`, `ColorPicker` and its parts over a color as each space's channels hold it (`model.rs`: the conversions, OKLCH's gamut mapping, the CSS forms it reads and writes); `numeric.rs`, the rules of a number in a range with a step that `Slider` follows and of a number typed as text that `NumberInput` follows; `keys.rs`, the keys a focused control binds; `TextView`, `ResizablePanelGroup`, `DockArea`, `Editor` and `DiffView` directories, `text_view/`, `resizable/`, `dock/`, `editor/`, `diff/`; `rich_editor/`, `RichEditor`'s headless kernel, `docs/dev/rich-editor.md`; `syntax.rs`, the syntax highlighting `TextView` and `Editor` share), one `Registry` (`lib.rs`) |
@@ -318,9 +318,9 @@ reasons: `reactive-components.md`.
   | event handlers | closures (`move \|e: &E\| ..`) that write signals; `cx.emit(..)` |
   | `setTimeout` / `setInterval`, `clear*` | `set_timeout(d, f)` / `set_interval(d, f)` return a `Spawned`; `.cancel()` clears it; it ends with the component either way |
   | async work | `spawn(async move { timer(d).await; value.set(..) })` on the engine thread, tokio inside; `background(fut)` / `blocking(f)` for `Send` work on the runtime's threads (not in WebAssembly) |
-  | `fetch(url)` | `fetch(url).await` / `fetch(HttpRequest::post(url, body).header(..)).await` in a task: an `HttpResponse` (`status()`, `ok()`, `header(..)`, `text()`, `body`) or the error; the engine's network stack and capability checks, as JS's, so it works on the web too; the request is cancelled with its task |
+  | `fetch(url)` | `fetch(url).await` / `fetch(HttpRequest::post(url, body).header(..)).await` in a task: an `HttpResponse` (`status()`, `ok()`, `header(..)`, `text()`, `body`) or the error; the engine's network stack and capability checks, as JS's, so it works on the web too; the request is cancelled with its task. `asset:/` URLs (`FileAsset::uri`, `assets!()`), from both, are the app's bundled files: the engine's `Net` answers them from `EngineConfig::assets` on the runtime's blocking pool (in WebAssembly in the turn), with no capability, and downloads what the host serves at `Assets::url` (the web page's files it did not preload); either way the response carries the `asset:/` URL and the type its extension gives (`asset_type`, the dev server's table); a file the host does not have fails as a network error, and so do a path that would leave the host's directory (an empty, `.` or `..` segment, encoded or not, a backslash, a NUL or a colon: `is_inside_assets`; hosts join the path to their directory as it comes) and a method other than `GET` or `HEAD`, refused in `Net::asset` before any host reads the file or is asked where it serves it |
   | `cleanup` | `cleanup(f)` (runs before the owner runs again or goes) |
-  | `windowSize()`, `safeArea()`, `keyboardFrame()`, `colorScheme()`, ... | `window()`, `safe_area()`, `keyboard_height()`, `dark()`, `font_scale()`, `reduce_motion()`, `screen_reader()`: reading subscribes (`layout_rtl()`, the surface's direction, is a hidden accessor for `nsh-base`'s controls only, which trade Left and Right by it: Rust's `rtl()` is dropped, apps set a view's `direction`) |
+  | `windowSize()`, `safeArea()`, `keyboardFrame()`, `colorScheme()`, `lifecycle()`, ... | `window()`, `safe_area()`, `keyboard_height()`, `dark()`, `font_scale()`, `lifecycle()`, `reduce_motion()`, `screen_reader()`: reading subscribes (`layout_rtl()`, the surface's direction, is a hidden accessor for `nsh-base`'s controls only, which trade Left and Right by it: Rust's `rtl()` is dropped, apps set a view's `direction`) |
   | `Window.setTitleBar({ style, height })`, `titleBar()`, `Window.close()`, `Window.setTitle(..)`, `minimize()`, ... (`nsh/desktop`) | `element::desktop::set_title_bar(style, height)`, `title_bar()`, `close_window()`, `set_title(..)`, `minimize()`, `toggle_maximize()`, `toggle_full_screen()`, `set_frame(..)`, `set_level(..)`, `order_front()`, `set_menu_bar_visibility(..)`; the same root commands and native controls, with title-bar insets forwarded through `element::Environment`; `.window_drag(bool)` on any interactive element marks or excludes a native drag region |
   | `Menu.setApplicationMenu(items)`, `Menu.popup(items, at)` (`nsh/desktop`) | `element::desktop::set_application_menu(vec![MenuItem::submenu(..)])` (`None`: the default menu), `popup_menu(items)` / `popup_menu_at(items, at)` (an `Answer<()>` once it closes); `MenuItem::new(label).shortcut("mod+n").on_select(f)`, `::role(..)`, `::separator()`, `::submenu(..)`. The same `DesktopCommand`s as JS's; a view's item ids start at 2^31, above JS's, and the core runs a view's handler (under the owner that set the menu, while it lives) when the root's `Menu` event reports it; a context menu closing goes to both sides (`element/menus.rs`) |
   | `pixelRatio()`, `Math.round(x * pixelRatio()) / pixelRatio()`, `platform.os` / `version` / `idiom` / `desktop` / `catalyst` | `pixel_ratio()`, `round_to_nearest_pixel(v)`, `os()`, `os_version()`, `idiom()`, `is_desktop()`, `is_catalyst()` |
@@ -617,7 +617,7 @@ A crate ships files in its `assets/` directory, as TS imports them: `asset!("log
 relative to `assets/`) reads the file at compile time and is an `ImageAsset { url, size, scales }` (the natural size in
 points, `Size<Points>`: `@2x` / `@3x` divide the pixels; `scales` lists the `@1.5x`–`@4x` siblings of a file named
 without a density, which `assets!()` ships and images pick from by the screen's pixel ratio, as for TS imports), a
-`FontAsset { uri, family }` (`.ttf`, `.otf`: the family from the font's name table) or a `FileAsset { uri }`; a missing
+`FontAsset { uri, family }` (`.ttf`, `.otf`, `.woff`, `.woff2`: the family from the font's name table, a WOFF's of the font it holds) or a `FileAsset { uri }`; a missing
 or unreadable file fails the build (a variant too, and one whose pixels are off its scale), a changed one builds the
 crate again (`include_bytes!`). An `.svg` is an `ImageAsset` too, as TS's import gives, with no `scales` (a vector
 draws for any pixel ratio): its size in points is its root's `width` and `height` in absolute units (else one of them
@@ -810,13 +810,16 @@ what changed.
   holding several nodes, is a box of its own (a column, as any view). A render's holder (`componentRender`) follows
   the same rule in its placeholder. Everything else the element gives (accessibility, `disabled`,
   `focusable` and other host props, listeners, touch responder, element ref: `core/slots.rs` `split`) goes to the
-  slot's target: the app's element when the holder holds exactly one (not raw text, a component's host or a list),
-  else the holder. So the app's `active:` / `focus:` / `disabled:` classes and state styles on its own element follow
-  the presses, focus and `disabled` the component gives it, and a ref measures the app's element. The target follows
+  slot's target: the app's element when the holder holds exactly one (not raw text or a list), else the holder. So the
+  app's `active:` / `focus:` / `disabled:` classes and state styles on its own element follow the presses, focus and
+  `disabled` the component gives it, and a ref measures the app's element (a popup anchored to what it draws goes by
+  its own box, as a Rust fill's: below). The target follows
   the holder's content (JS inserting or removing in it, `Core::retarget_slot`). On the app's element the two sides
   combine (`slots::merged`): the component's values win, the app's fill in what it leaves unset (field by field in
   `accessibilityState`); `disabled`, the state flags and projected states hold when either sets them; both sides'
-  listeners run, the component's first. JS's ops on it go through the core (`Core::js_slot_op`), which keeps JS's
+  listeners run, the component's first. The app's element may be a component's host (a `Button` as a popover's
+  trigger): its own side is its view's root, the slot's component hears its events first, then its own (touch handlers run from the inner component outward, and both participate in responder negotiation); left on the
+  holder, the slot's presses would never come: the root is the innermost press target. JS's ops on it go through the core (`Core::js_slot_op`), which keeps JS's
   own values and sends the combination, and puts them back when the component's part leaves the element (another
   element joins the holder, the element leaves it, the slot or the component goes). JS's values from before are read
   from the node (accessibility, `disabled`, `pointerEvents`, `focusable`, projected states); another host prop the
@@ -829,14 +832,16 @@ what changed.
   (`place(|h| h.px_4())`) or gives it props or listeners makes a node of the nested view's own with them around them,
   which lays one node out through while the place styles none of its layout, as JS's holders. That node is a holder
   as JS's are (`Core::reconcile_wrapper`, `Components::fill_holders`): its styles stay on it, the rest goes to the
-  fill's one element (the same rule: not raw text, a component's host, a list or another holder), combined with what
+  fill's one element (the same rule: not raw text, a list or another holder), combined with what
   the placing view gives that element as JS's side is (`Core::apply_target_attrs`, `Core::target_events`), and follows
   the fill's nodes as they are placed and released. So a component's `on_focus` / `on_blur` on its trigger hear the
   focus of a Rust app's element, which only the focused element gets, as they do a TSX app's. An overlay placed against
-  what that element draws (`anchor_content`, a popup's) goes by the holder (`Core::content_anchor`): the element's own
-  box, its size and padding included, not the box around its children. Any anchor's children only stand for it along
-  an axis its style leaves `auto` (a wrapper its parent stretches); along one it sizes (a trigger 28 points tall, its
-  label centered), its own box is what shows (`Core::content_bounds`). The slot's prop is
+  what the element taking a slot's props draws (`anchor_content`, a popup's) goes by the slot's holder
+  (`Core::content_anchor`), this node or JS's holder alike: the element's own box, as large as the component's layout
+  stretches it or its minimum size makes it, whether a TSX or a Rust app passed it, not the box around its children.
+  Any other anchor's children only stand for it along an axis its style leaves `auto` (a wrapper its parent stretches);
+  along one it sizes (a trigger 28 points tall, its label centered), its own box is what shows
+  (`Core::content_bounds`). The slot's prop is
   `Some` while the fill has nodes. The fill is the placing view's content: reconciled whenever that view reconciles
   the nested element (a new element replaces the old in its place), released with it, and taken out of a place that
   goes before that place's node is deleted. A view passes a slot it is given on to a nested component's slot by
@@ -930,8 +935,8 @@ what changed.
   `Change(true)`, nothing for a toolbar's items: the toolbar pattern only moves the focus); an item outside a group
   stays a stop of its own. A `Menu`'s or `Popover`'s trigger in a bar is one of its items too (`bar_trigger`): the
   popup reads the bar where it is made and registers its trigger slot's element under the ref it anchors to, so the
-  view the app puts there takes the stop's `focusable`, the focus listeners and the bar's `disabled` (a `Button` inside
-  a trigger would be a second pressable: triggers are plain views, as everywhere). A `ToggleGroup` or `ToolbarGroup` inside a toolbar provides the toolbar's `Roving` again
+  view the app puts there takes the stop's `focusable`, the focus listeners and the bar's `disabled`; the popup leaves
+  the bar for what it makes (`popup_bar`), so a `Button` the app puts there is that one item, not one of its own. A `ToggleGroup` or `ToolbarGroup` inside a toolbar provides the toolbar's `Roving` again
   (with its own `disabled` added), so its items are the toolbar's and the toolbar stays one stop. A popup's content
   (`Popover`, `HoverCard`, `Sheet`, `Menu`, the dropdown of `popup.rs`) leaves the bar (`leave_bar`): its controls are stops of
   their own though its trigger is a toolbar's item.
@@ -996,7 +1001,10 @@ compositions of primitives in the core.
 `nsh/base`'s popups (`crates/nsh-base`: `popup.rs`, `popover.rs`, `hover_card.rs`, `menu.rs`, `tooltip.rs`, `sheet.rs`,
 `Select`'s list, `listbox.rs`, and `DatePicker`'s calendar, `date_picker.rs`) are made of the core's overlays (`elements.md` "Overlays"), which place them and
 report presses outside, Escape and back; the components decide to close. They draw nothing: the app styles each
-part (`popupClass` / `popupStyle`, `backdropClass` / `backdropStyle`) and its content.
+part (`popupClass` / `popupStyle`, `backdropClass` / `backdropStyle`) and its content. `Popover`, `HoverCard` and a
+desktop `Menu` are placed against what their trigger draws (`anchor_content`), which for the app's trigger element is
+its own box, whether a TSX or a Rust app passed it (`Core::content_anchor`): a trigger the popup's column stretches, or
+one taller than its label by its minimum height, has its popup lined up with its edges, not its label's.
 
 Their callbacks are one set, as `Dialog`'s (`popup.rs`: `OpenState`, `lifecycle`):
 
