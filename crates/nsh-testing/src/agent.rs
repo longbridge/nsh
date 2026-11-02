@@ -413,6 +413,13 @@ pub trait Scene: Send + Sync {
     /// The scroll views around `id`, innermost first, and whether each
     /// scrolls horizontally.
     fn scroll_ancestors(&self, id: NodeId) -> Result<Vec<(NodeId, bool)>, String>;
+    /// The views inside scroll view `id` that take a finger's drag
+    /// themselves (responders, pans): a finger scrolling it lands
+    /// elsewhere. None where the scene cannot tell.
+    fn drag_takers(&self, id: NodeId) -> Result<Vec<NodeId>, String> {
+        let _ = id;
+        Ok(Vec::new())
+    }
     /// `id`'s long press delay in milliseconds, if it says.
     fn long_press_delay(&self, id: NodeId) -> Result<Option<f32>, String>;
     /// Whether scroll view `id` scrolls horizontally.
@@ -517,6 +524,9 @@ impl Scene for Model {
     }
     fn scroll_ancestors(&self, id: NodeId) -> Result<Vec<(NodeId, bool)>, String> {
         Ok(self.lock().screen.scroll_ancestors(id))
+    }
+    fn drag_takers(&self, id: NodeId) -> Result<Vec<NodeId>, String> {
+        Ok(self.lock().screen.drag_takers(id))
     }
     fn long_press_delay(&self, id: NodeId) -> Result<Option<f32>, String> {
         Ok(self.lock().screen.long_press_delay(id))
@@ -733,6 +743,7 @@ pub fn answer(model: &Model, step: &TestStep) -> Option<Result<serde_json::Value
             SceneQuery::ScrollAncestors { id } => {
                 model.scroll_ancestors(*id).and_then(|a| json(to_value(a)))
             }
+            SceneQuery::DragTakers { id } => model.drag_takers(*id).map(Value::from),
             SceneQuery::LongPressDelay { id } => model.long_press_delay(*id).map(Value::from),
             SceneQuery::Horizontal { id } => model.horizontal(*id).map(Value::from),
             SceneQuery::InputId { selector } => model.input_id(selector).map(Value::from),
@@ -842,6 +853,9 @@ impl Scene for RemoteScene {
     }
     fn scroll_ancestors(&self, id: NodeId) -> Result<Vec<(NodeId, bool)>, String> {
         self.query(SceneQuery::ScrollAncestors { id })
+    }
+    fn drag_takers(&self, id: NodeId) -> Result<Vec<NodeId>, String> {
+        self.query(SceneQuery::DragTakers { id })
     }
     fn long_press_delay(&self, id: NodeId) -> Result<Option<f32>, String> {
         self.query(SceneQuery::LongPressDelay { id })
@@ -1246,6 +1260,38 @@ fn well_inside(bounds: &Bounds<Points>, at: Point<Points>, horizontal: bool) -> 
     (x0..=x1).contains(&at.x.0) && (y0..=y1).contains(&at.y.0)
 }
 
+/// The spot of a scroll view `extent` points long from `start` (along the
+/// axis it scrolls) nearest `along` (a fraction of its length) that no
+/// span of `covered` (in points along it) holds, a finger's margin clear of
+/// each, within the middle 70% of it (where a gesture has room); as a
+/// fraction of its length, `None` when no spot is clear.
+fn clear_spot(start: f32, extent: f32, along: f32, covered: &[(f32, f32)]) -> Option<f32> {
+    const MARGIN: f32 = 8.0;
+    if extent <= 0.0 {
+        return None;
+    }
+    let (lo, hi) = (start + extent * 0.15, start + extent * 0.85);
+    let clear = |p: f32| {
+        (lo..=hi).contains(&p)
+            && covered
+                .iter()
+                .all(|&(from, to)| p <= from - MARGIN || p >= to + MARGIN)
+    };
+    let want = start + extent * along;
+    // The nearest clear spot is `along` itself, an end of the range or
+    // one just past a span.
+    std::iter::once(want)
+        .chain([lo, hi])
+        .chain(
+            covered
+                .iter()
+                .flat_map(|&(from, to)| [from - MARGIN, to + MARGIN]),
+        )
+        .filter(|&p| clear(p))
+        .min_by(|a, b| (a - want).abs().total_cmp(&(b - want).abs()))
+        .map(|p| (p - start) / extent)
+}
+
 /// Takes test steps on a host's app ([`Model`], [`Native`]).
 pub struct Agent {
     scene: std::sync::Arc<dyn Scene>,
@@ -1439,6 +1485,7 @@ impl Agent {
             SceneQuery::ScrollAncestors { id } => {
                 scene.scroll_ancestors(id).and_then(|a| json(to_value(a)))
             }
+            SceneQuery::DragTakers { id } => scene.drag_takers(id).map(Value::from),
             SceneQuery::LongPressDelay { id } => scene.long_press_delay(id).map(Value::from),
             SceneQuery::Horizontal { id } => scene.horizontal(id).map(Value::from),
             SceneQuery::InputId { selector } => scene.input_id(&selector).map(Value::from),
@@ -1654,13 +1701,14 @@ impl Agent {
                 (!well_inside(&window, at, h)).then_some(())?;
                 Some((s, h, self.native.bounds(s)?))
             });
-            let Some((_, horizontal, scroller)) = hiding else {
+            let Some((scroll, horizontal, scroller)) = hiding else {
                 if window.contains(&at) {
                     return Ok((at, before.is_some()));
                 }
                 return Err(not_on_screen());
             };
             let along = anchors.peek().copied().unwrap_or(0.5);
+            let along = self.landing(scroll, &scroller, horizontal, along)?;
             let middle = if horizontal {
                 point(
                     scroller.origin.x + scroller.size.width * along,
@@ -1677,9 +1725,11 @@ impl Agent {
             } else {
                 (at.y.0 - middle.y.0, scroller.size.height.0)
             };
-            // A finger dragging it stays inside it: as far as the nearer
-            // edge less a tenth.
-            let room = extent * (along.min(1.0 - along) - 0.1).max(0.1);
+            // A finger dragging it stays inside it: as far as the edge it
+            // moves towards (the start when the content moves towards its
+            // end) less a tenth, a tenth at least.
+            let toward = if distance > 0.0 { along } else { 1.0 - along };
+            let room = extent * (toward - 0.1).max(0.1);
             let step = distance.clamp(-room, room);
             let delta = if horizontal {
                 Point::new(Points(step), Points(0.0))
@@ -1694,6 +1744,61 @@ impl Agent {
             "`{selector}` did not come into view; {}",
             self.on_screen()
         ))
+    }
+
+    /// Where along scroll view `id` (at `bounds`) a finger lands to scroll
+    /// it, as a fraction of its length, nearest `along`: on a spot clear of
+    /// the views inside that take a drag themselves
+    /// ([`Scene::drag_takers`]), as a user puts the finger on the page and
+    /// not on a slider or a drawing area. On one of those the app's
+    /// responder decides, a moment later, whether the scroll view keeps the
+    /// gesture: it may scroll, stop half way or not move at all. `along`
+    /// where no spot is clear, and on a platform with a mouse
+    /// ([`Native::mouse`]), whose wheel scrolls the scroll view wherever it
+    /// is.
+    fn landing(
+        &self,
+        id: NodeId,
+        bounds: &Bounds<Points>,
+        horizontal: bool,
+        along: f32,
+    ) -> Result<f32, String> {
+        if self.native.mouse() {
+            return Ok(along);
+        }
+        let takers = self.scene.drag_takers(id)?;
+        if takers.is_empty() {
+            return Ok(along);
+        }
+        // Along the scroll view's length, and across it, where the finger
+        // moves: its middle.
+        let axes = |b: &Bounds<Points>| {
+            if horizontal {
+                (
+                    (b.origin.x.0, b.size.width.0),
+                    (b.origin.y.0, b.size.height.0),
+                )
+            } else {
+                (
+                    (b.origin.y.0, b.size.height.0),
+                    (b.origin.x.0, b.size.width.0),
+                )
+            }
+        };
+        let ((start, extent), (across, across_extent)) = axes(bounds);
+        let line = across + across_extent / 2.0;
+        // What the takers cover of the finger's line.
+        let covered: Vec<(f32, f32)> = takers
+            .into_iter()
+            .filter_map(|taker| self.native.bounds(taker))
+            .filter_map(|b| {
+                let ((from, length), (side, width)) = axes(&b);
+                (side..=side + width)
+                    .contains(&line)
+                    .then_some((from, from + length))
+            })
+            .collect();
+        Ok(clear_spot(start, extent, along, &covered).unwrap_or(along))
     }
 
     fn press(&self, selector: &str) -> Result<(), String> {
@@ -2080,6 +2185,26 @@ mod tests {
             Ok(())
         }
         fn quit(&self) {}
+    }
+
+    #[test]
+    fn a_scrolling_finger_lands_clear_of_the_views_that_take_drags() {
+        // A scroll view from 100 to 700: nothing covers its middle.
+        assert_eq!(clear_spot(100.0, 600.0, 0.5, &[]), Some(0.5));
+        assert_eq!(clear_spot(100.0, 600.0, 0.5, &[(500.0, 650.0)]), Some(0.5));
+        // A drawing area over the middle: just past its nearer end.
+        assert_eq!(
+            clear_spot(100.0, 600.0, 0.5, &[(380.0, 560.0)]),
+            Some((372.0 - 100.0) / 600.0)
+        );
+        // Two of them a gap apart, too narrow for a finger's margins.
+        assert_eq!(
+            clear_spot(100.0, 600.0, 0.5, &[(300.0, 395.0), (405.0, 600.0)]),
+            Some((292.0 - 100.0) / 600.0)
+        );
+        // Covered from end to end.
+        assert_eq!(clear_spot(100.0, 600.0, 0.5, &[(0.0, 800.0)]), None);
+        assert_eq!(clear_spot(0.0, 0.0, 0.5, &[]), None);
     }
 
     #[test]

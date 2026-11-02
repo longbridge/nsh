@@ -69,6 +69,7 @@ struct EnvSignals {
     font_scale: Memo<f32>,
     reduce_motion: Memo<bool>,
     screen_reader: Memo<bool>,
+    rtl: Memo<bool>,
     pixel_ratio: Memo<f32>,
     locale: Memo<Locale>,
     app_state: Memo<AppState>,
@@ -95,6 +96,7 @@ impl EnvSignals {
                 font_scale: part!(font_scale),
                 reduce_motion: part!(reduce_motion),
                 screen_reader: part!(screen_reader),
+                rtl: part!(rtl),
                 pixel_ratio: part!(pixel_ratio),
                 locale: part!(locale),
                 app_state: part!(app_state),
@@ -235,6 +237,19 @@ pub fn reduce_motion() -> bool {
 /// A screen reader runs (TS: `screenReaderEnabled()`).
 pub fn screen_reader() -> bool {
     env(|e| e.screen_reader)
+}
+
+/// Whether the surface lays out right to left: the root's direction,
+/// which follows the user's language unless the app sets the root's
+/// `direction` (reading subscribes).
+///
+/// The core's part of `nsh-base`'s controls, which swap Left and Right by
+/// it (WAI-ARIA's arrow keys in a right-to-left layout). Apps set a view's
+/// `direction` and style with logical properties or `rtl:` classes
+/// instead: Rust's `rtl()` is dropped (`docs/dev/api-naming.md`).
+#[doc(hidden)]
+pub fn layout_rtl() -> bool {
+    env(|e| e.rtl)
 }
 
 /// Device pixels per point (TS: `pixelRatio()`).
@@ -1018,9 +1033,11 @@ impl super::NodeRef {
 ///
 /// The core looks at the end of a commit round: in the round the watch is
 /// made in, after [`super::OrderWatch::invalidate`] (an element came), and
-/// after a round that moved a node (an app's keyed reorder), asking
-/// `elements` untracked; what the handler changes goes out in the same
-/// batch. A round that moved nothing and invalidated nothing costs nothing.
+/// after a round that moved a node inside the subtree the elements share
+/// (an app's keyed reorder of them), asking `elements` untracked; what the
+/// handler changes goes out in the same batch. A round that moved nothing
+/// there and invalidated nothing costs nothing: a list of rows reordered,
+/// each row with a group of its own, costs those groups nothing.
 #[doc(hidden)]
 pub fn watch_order(
     elements: impl Fn() -> Vec<super::ElementRef> + 'static,
