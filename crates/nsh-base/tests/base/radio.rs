@@ -1,7 +1,8 @@
 //! `RadioGroup`: one stop of the keyboard focus, at the checked radio (else
 //! the first enabled one); the arrow keys move between the radios past
-//! disabled ones, around the ends, and check the radio they reach. On
-//! macOS, where Tab stops at views that take presses.
+//! disabled ones, around the ends, and check the radio they reach; in a
+//! right-to-left layout Left and Right trade places. On macOS, where Tab
+//! stops at views that take presses.
 
 use std::{
     sync::{
@@ -23,11 +24,16 @@ fn start<C: Component<Props = ()>>() -> Headless {
 }
 
 fn launch(root: Root) -> Headless {
+    launch_in(root, false)
+}
+
+fn launch_in(root: Root, rtl: bool) -> Headless {
     let mut config = EngineConfig {
         viewport: Size::new(px(390.0), px(844.0)),
         ..EngineConfig::new(root)
     };
     config.environment.os = Os::MacOs;
+    config.environment.rtl = rtl;
     let mut app = Headless::start(config).unwrap();
     app.first_render().unwrap();
     app
@@ -100,6 +106,24 @@ fn arrows_move_and_check_wrapping_and_skipping_disabled_radios() {
     app.press_key("up").unwrap();
     app.wait_for("text:plan:Enterprise").unwrap();
     app.press_key("left").unwrap();
+    app.wait_for("text:plan:Plus").unwrap();
+    app.wait_for("text:changes:5").unwrap();
+}
+
+#[test]
+fn right_to_left_trades_left_and_right_and_keeps_up_and_down() {
+    let mut app = launch_in(Root::of::<Plans>(), true);
+    app.press_key("tab").unwrap();
+    // Left is the next radio, Right the previous.
+    app.press_key("left").unwrap();
+    app.wait_for("text:plan:Plus").unwrap();
+    app.press_key("left").unwrap();
+    app.wait_for("text:plan:Enterprise").unwrap();
+    app.press_key("right").unwrap();
+    app.wait_for("text:plan:Plus").unwrap();
+    app.press_key("down").unwrap();
+    app.wait_for("text:plan:Enterprise").unwrap();
+    app.press_key("up").unwrap();
     app.wait_for("text:plan:Plus").unwrap();
     app.wait_for("text:changes:5").unwrap();
 }

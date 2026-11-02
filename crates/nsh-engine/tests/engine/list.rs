@@ -132,6 +132,7 @@ fn config(app: &str) -> (EngineConfig, std::path::PathBuf) {
         clipboard: None,
         host: Default::default(),
         picker: None,
+        speech: None,
     };
     (config, dir)
 }
@@ -391,6 +392,8 @@ struct Paced {
     rx: mpsc::Receiver<MountBatch>,
     seen: std::sync::Arc<Seen>,
     texts: std::collections::HashMap<nsh_core::NodeId, String>,
+    /// Text views made so far.
+    created: usize,
     list: Option<nsh_core::NodeId>,
     pressable: Option<nsh_core::NodeId>,
     dir: std::path::PathBuf,
@@ -409,6 +412,7 @@ impl Paced {
             rx,
             seen,
             texts: Default::default(),
+            created: 0,
             list: None,
             pressable: None,
             dir,
@@ -433,6 +437,10 @@ impl Paced {
                         id,
                         kind: ViewKind::Scroll,
                     } => self.list = self.list.or(Some(*id)),
+                    MountItem::Create {
+                        kind: ViewKind::Text,
+                        ..
+                    } => self.created += 1,
                     MountItem::Events { id, events }
                         if events.contains(nsh_core::EventKind::Press) =>
                     {
@@ -570,6 +578,45 @@ fn prepending_a_row_never_shows_a_cell_with_its_neighbours_row() {
     });
     assert!(wrong.is_empty(), "cells showed another row: {wrong:?}");
     assert!(paced.texts.values().any(|t| t == "new"));
+    assert_eq!(paced.errors(), Vec::<String>::new());
+}
+
+/// A row added at the start of an inverted list (a chat's new message)
+/// leaves the other cells on their rows: rows made again by key
+/// (`<Each of={[key]}>`) are not made again, only the new one is made.
+#[test]
+fn prepending_a_row_makes_only_that_row() {
+    let app = r#"
+import { List, mount, signal, Text, View } from "nsh";
+const rows = signal(Array.from({ length: 100 }, (_, i) => ({ label: `row ${i}` })));
+function App() {
+  return (
+    <View style={{ flex: 1 }}>
+      <View onPress={() => rows.update((r) => [{ label: "new" }, ...r])} style={{ height: 0 }} />
+      <List each={rows()} inverted estimatedItemSize={50} style={{ flex: 1 }}>
+        {(row) => (
+          <Each of={[row().label]}>
+            {(label) => <View style={{ height: 50 }}><Text>{label()}</Text></View>}
+          </Each>
+        )}
+      </List>
+    </View>
+  );
+}
+mount(App);
+"#;
+    let mut paced = Paced::start(app);
+    paced.settle(|_, _| {});
+    assert!(paced.shows(0, 10), "{:?}", paced.texts);
+    let before = paced.created;
+    paced.engine.control().dispatch_event(
+        paced.pressable.expect("the pressable view"),
+        nsh_core::EventKind::Press,
+        nsh_core::EventPayload::None,
+    );
+    paced.settle(|_, _| {});
+    assert!(paced.texts.values().any(|t| t == "new"));
+    assert_eq!(paced.created - before, 1, "rows made again");
     assert_eq!(paced.errors(), Vec::<String>::new());
 }
 

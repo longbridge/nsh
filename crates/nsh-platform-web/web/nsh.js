@@ -805,6 +805,8 @@ class Player {
     // Of the views' own style rules (`op_css`).
     this.classPrefix = `nsh-p${++players}-`;
     this.timer = 0;
+    // The engine trapped: it takes no more calls (`call`).
+    this.trapped = false;
     // An `nsh_pump` is queued (`requestPump`).
     this.pumpRequested = false;
     this.frame = 0;
@@ -936,6 +938,7 @@ class Player {
         request_frame: () => this.requestFrame(),
         request_pump: () => this.requestPump(),
         report_error: (p, l) => this.showError(this.str(p, l)),
+        report_panic: (p, l) => this.reportPanic(this.str(p, l)),
         test_send: (p, l) => this.onTestSend?.(JSON.parse(this.str(p, l))),
         log: (level, p, l) => {
           const message = this.str(p, l);
@@ -947,6 +950,13 @@ class Player {
           if (!data) return 0;
           this.withStrings([data], (dp, dl) => this.wasm.nsh_asset_bytes(dp, dl));
           return 1;
+        },
+        // Where `asset:/…` is served, for the engine to download a file the
+        // page did not preload (Rust's `read_asset`).
+        asset_url: (up, ul, p, cap) => {
+          const url = encoder.encode(this.asset(this.str(up, ul)));
+          if (url.length <= cap) this.bytes(p, cap).set(url);
+          return url.length;
         },
         fetch_start: (id, mp, ml, up, ul, hp, hl, bp, bl, kind, follow) =>
           this.fetchStart(id, this.str(mp, ml), this.str(up, ul), JSON.parse(this.str(hp, hl)),
@@ -1036,6 +1046,7 @@ class Player {
     imports.__wbindgen_placeholder__ && (imports.__wbindgen_placeholder__.__wbindgen_describe = () => {});
     const instance = await WebAssembly.instantiate(module, imports);
     this.wasm = this.browserHost ? this.browserHost.bind(instance.exports) : instance.exports;
+    this.trapped = false;
     // The glue's own setup (its view of the memory, wasm-bindgen's tables)
     // before any of the app's code runs.
     glue?.__nsh_finalize(instance, module);
@@ -1080,6 +1091,9 @@ class Player {
    * `{type: "trace", items}`).
    */
   testSetup(storage, trace, environment) {
+    // The idiom the test asks for (`open`'s desktop `platform`), in place
+    // of the measured one, for the apps started from now on.
+    this.testIdiom = environment?.idiom;
     if (!this.wasm.nsh_test_setup) return;
     const setup = JSON.stringify({ storage: storage ?? [], trace: !!trace, environment: environment ?? {} });
     this.withStrings([setup], (p, l) => this.wasm.nsh_test_setup(p, l));
@@ -1334,7 +1348,7 @@ class Player {
 
   /** Starts the app with `start(environment)`, which returns the pump delay. */
   begin(width, start, deferEvents = false) {
-    this.idiom = this.options.idiom ?? this.measureIdiom(width);
+    this.idiom = this.options.idiom ?? this.testIdiom ?? this.measureIdiom(width);
     const environment = (this.reported = JSON.stringify(this.environment()));
     this.updateRootClasses();
     // Host events wait for this app's top-level `host.on` listeners, not
@@ -1468,9 +1482,13 @@ class Player {
   /**
    * Calls into the engine (`f(exports)` returns its next pump delay). The
    * engine is not reentrant: a call made while it runs (from a batch being
-   * applied) waits until it returns.
+   * applied) waits until it returns. After a trap (a panic) it takes no
+   * calls: the trap left it in the middle of one, its state still borrowed,
+   * so each later call would only panic again (`reportPanic` keeps the
+   * first panic's report on screen whichever entry a later one comes from).
    */
   call(f) {
+    if (this.trapped) return;
     if (this.depth > 0) {
       (this.deferred ??= []).push(f);
       return;
@@ -1478,6 +1496,9 @@ class Player {
     this.depth = 1;
     try {
       this.schedule(f(this.wasm));
+    } catch (err) {
+      if (err instanceof WebAssembly.RuntimeError) this.trap();
+      throw err;
     } finally {
       this.depth = 0;
     }
@@ -1535,6 +1556,11 @@ class Player {
     resolution();
     addEventListener("languagechange", changed);
     addEventListener("resize", changed);
+    // `lifecycle()`: hidden (another tab, a minimized window) or without
+    // the focus.
+    document.addEventListener("visibilitychange", changed);
+    addEventListener("focus", changed);
+    addEventListener("blur", changed);
     visualViewport?.addEventListener("resize", changed);
     visualViewport?.addEventListener("scroll", changed);
     new MutationObserver(changed).observe(document.documentElement, { attributes: true, attributeFilter: ["dir", "lang"] });
@@ -1587,6 +1613,9 @@ class Player {
       keyboard: this.keyboardHeight(),
       appleKeyboard: APPLE,
       host: Boolean(this.options.host),
+      lifecycle: document.visibilityState === "hidden"
+        ? "background"
+        : document.hasFocus() ? "active" : "inactive",
       screenColor: typeof window.EyeDropper === "function",
     };
   }
@@ -1617,10 +1646,31 @@ class Player {
       this.wasm.nsh_event(id, np, nl, pp, pl)));
   }
 
-  showError(message) {
+  /**
+   * The engine panicked (its panic hook): it traps once this returns, its
+   * state still borrowed. The first panic's report stays on screen; what
+   * comes after, from any entry into the engine (a pump, an event, the
+   * app's own timers calling into it in the browser runtime), only panics
+   * again over the borrowed state, so it goes to the console.
+   */
+  reportPanic(message) {
+    const first = !this.trapped;
+    this.trap();
+    this.showError(message, { overlay: first });
+  }
+
+  /** Stops calling an engine that trapped (`call`, `reportPanic`). */
+  trap() {
+    this.trapped = true;
+    this.deferred = [];
+    clearTimeout(this.timer);
+  }
+
+  showError(message, { overlay = !this.trapped } = {}) {
     console.error("[nsh]", message);
     this.options.onError?.(message);
-    if (this.options.overlay === false) return;
+    // After a panic the overlay keeps its report (`reportPanic`).
+    if (this.options.overlay === false || !overlay) return;
     let box = this.root.querySelector(":scope > .nsh-error");
     if (!box) {
       box = document.createElement("div");
@@ -2095,7 +2145,9 @@ class Player {
     const el = this.view(id);
     if (!el) return;
     el._tracked = states;
-    el._states = 0;
+    // The focus is reported whatever is tracked (the core works out
+    // `focus-within` from it): it stays; the rest is forgotten.
+    el._states = (el._states || 0) & FOCUSED;
     if (states & HOVERED && !el._hoverListeners) {
       el._hoverListeners = true;
       el.addEventListener("pointerenter", (e) => e.pointerType === "mouse" && this.setState(el, HOVERED, true));
@@ -2104,9 +2156,11 @@ class Player {
   }
 
   setState(el, bit, on) {
-    if (!el._tracked || !(el._tracked & bit)) return;
-    const next = on ? el._states | bit : el._states & ~bit;
-    if (next === el._states) return;
+    // The focus is reported whatever is tracked (`reported_states`).
+    if (!(((el._tracked || 0) | FOCUSED) & bit)) return;
+    const states = el._states || 0;
+    const next = on ? states | bit : states & ~bit;
+    if (next === states) return;
     el._states = next;
     this.call((w) => w.nsh_states(el._id, next));
   }
@@ -2609,7 +2663,9 @@ class Player {
     gl.bindVertexArray(program.vao);
     if (program.builtins) {
       gl.bindBuffer(gl.UNIFORM_BUFFER, program.builtins);
-      gl.bufferData(gl.UNIFORM_BUFFER, new Float32Array([w, h, Math.max(0, time), pw / Math.max(w, 1e-6)]), gl.DYNAMIC_DRAW);
+      // `struct Nsh` (core's `shader::builtins`, 32 bytes): size, time,
+      // scale, then progress and overflow, which a plain Shader leaves at 0.
+      gl.bufferData(gl.UNIFORM_BUFFER, new Float32Array([w, h, Math.max(0, time), pw / Math.max(w, 1e-6), 0, 0, 0, 0]), gl.DYNAMIC_DRAW);
       gl.bindBufferBase(gl.UNIFORM_BUFFER, 0, program.builtins);
     }
     if (program.uniforms) {

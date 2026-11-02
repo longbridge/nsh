@@ -8,6 +8,7 @@ import BaseAccordion from "./base-accordion";
 import BaseAlertDialog from "./base-alert-dialog";
 import BaseAvatar from "./base-avatar";
 import BaseButton from "./base-button";
+import BaseCarousel from "./base-carousel";
 import BaseCheckbox from "./base-checkbox";
 import BaseCollapsible from "./base-collapsible";
 import BaseColorPicker from "./base-color-picker";
@@ -18,6 +19,7 @@ import BaseDataTable from "./base-data-table";
 import BaseDiff from "./base-diff";
 import BaseDock from "./base-dock";
 import BaseEditor from "./base-editor";
+import BaseHoverCard from "./base-hover-card";
 import BaseLink from "./base-link";
 import BaseNavPage from "./base-nav-page";
 import BaseNavStack from "./base-nav-stack";
@@ -38,6 +40,7 @@ import BaseRichEditorTables from "./base-rich-editor-tables";
 import BaseRichEditorView from "./base-rich-editor-view";
 import BaseSafeAreaKeyboard from "./base-safe-area-keyboard";
 import BaseCombobox from "./base-combobox";
+import BaseCommand from "./base-command";
 import BaseDatePicker from "./base-date-picker";
 import BaseScrollbar from "./base-scrollbar";
 import BaseSelect from "./base-select";
@@ -49,6 +52,7 @@ import BaseTextView from "./base-text-view";
 import BaseToast from "./base-toast";
 import BaseToggle from "./base-toggle";
 import BaseToolbar from "./base-toolbar";
+import BaseTree from "./base-tree";
 import BaseToken from "./base-token";
 
 const cases: Record<string, () => JSX.Element> = {
@@ -57,12 +61,14 @@ const cases: Record<string, () => JSX.Element> = {
   "base-alert-dialog": BaseAlertDialog,
   "base-avatar": BaseAvatar,
   "base-button": BaseButton,
+  "base-carousel": BaseCarousel,
   "base-dialog": BaseDialog,
   "base-dialog-backdrop": BaseDialogBackdrop,
   "base-data-table": BaseDataTable,
   "base-diff": BaseDiff,
   "base-dock": BaseDock,
   "base-editor": BaseEditor,
+  "base-hover-card": BaseHoverCard,
   "base-link": BaseLink,
   "base-nav-page": BaseNavPage,
   "base-nav-stack": BaseNavStack,
@@ -86,12 +92,14 @@ const cases: Record<string, () => JSX.Element> = {
   "base-tabs": BaseTabs,
   "base-toggle": BaseToggle,
   "base-toolbar": BaseToolbar,
+  "base-tree": BaseTree,
   "base-collapsible": BaseCollapsible,
   "base-color-picker": BaseColorPicker,
   "base-collapsible-reveal": BaseCollapsibleReveal,
   "base-plot": BasePlot,
   "base-progress": BaseProgress,
   "base-combobox": BaseCombobox,
+  "base-command": BaseCommand,
   "base-date-picker": BaseDatePicker,
   "base-scrollbar": BaseScrollbar,
   "base-select": BaseSelect,

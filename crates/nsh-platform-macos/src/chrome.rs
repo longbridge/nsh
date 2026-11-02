@@ -164,6 +164,7 @@ fn full_screen(window: &NSWindow) -> bool {
 /// Tells the app the hidden title bar's area (after a style change, a
 /// resize, full screen).
 pub(crate) fn update_area(surface: &Surface) {
+    sync_toolbar_visibility(surface);
     let area = match window(surface) {
         Some(window)
             if surface.chrome.style.get() == TitleBarStyle::Hidden && !full_screen(&window) =>
@@ -209,6 +210,23 @@ pub(crate) fn update_area(surface: &Surface) {
     if env.title_bar != area {
         env.title_bar = area;
         surface.set_environment(env);
+    }
+}
+
+/// Hides our empty toolbar in full screen and shows it again outside it.
+/// Full screen keeps a visible toolbar on screen as an opaque strip over the
+/// app's content; without one, AppKit reveals the title bar on hover instead.
+fn sync_toolbar_visibility(surface: &Surface) {
+    let Some(window) = window(surface) else {
+        return;
+    };
+    let owned = surface.chrome.toolbar.borrow();
+    let Some(owned) = owned.as_ref().filter(|t| t.is_installed(&window)) else {
+        return;
+    };
+    let visible = !full_screen(&window);
+    if owned.toolbar.isVisible() != visible {
+        owned.toolbar.setVisible(visible);
     }
 }
 

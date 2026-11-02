@@ -608,6 +608,9 @@ pub(crate) struct Mounter {
     shaders: crate::shader::Shaders,
     /// Texts whose color transitions.
     text_colors: crate::interaction::TextColors,
+    /// The tint of this surface's alerts and action sheets, from its
+    /// tokens ([`crate::system::alert_tint`]).
+    alert_tint: Option<nsh_core::element::AdaptiveColor>,
     mtm: MainThreadMarker,
 }
 
@@ -665,6 +668,7 @@ impl Mounter {
             frame_link: crate::animation::frame_link(&target_for_link),
             shaders: crate::shader::Shaders::new(&target_for_link),
             text_colors: crate::interaction::TextColors::new(&target_for_link),
+            alert_tint: None,
             hosts: Default::default(),
             dirty_stacks: Vec::new(),
             bottom_bar_dirty: false,
@@ -1042,13 +1046,9 @@ impl Mounter {
                 }) = self.slot(id)
                 {
                     // The header bar positions it; only its size is ours.
-                    let origin = view.frame().origin;
-                    view.setFrame(CGRect::new(
-                        origin,
-                        CGSize::new(
-                            frame.size.width.0 as CGFloat,
-                            frame.size.height.0 as CGFloat,
-                        ),
+                    view.set_layout_size(CGSize::new(
+                        frame.size.width.0 as CGFloat,
+                        frame.size.height.0 as CGFloat,
                     ));
                     return false;
                 }
@@ -1353,6 +1353,8 @@ impl Mounter {
             }
             MountItem::Refreshing { id, refreshing } => self.set_refreshing(id, refreshing),
             MountItem::Canvas { id, drawing } => self.set_drawing(id, drawing),
+            // Effects and transitions: this platform does not draw them yet.
+            MountItem::ShaderTransition { .. } | MountItem::ShaderInput { .. } => {}
             MountItem::Shader { id, layer } => {
                 let scale = self.display_scale();
                 if let Some(s) = self.views.get(id as usize).and_then(Option::as_ref) {
@@ -1591,7 +1593,7 @@ impl Mounter {
                 crate::system::set_status_bar(config, native.view());
             }
             (Command::Dialog(dialog), native) if id == nsh_core::ROOT_ID => {
-                crate::system::show_dialog(&dialog, native.view(), &self.control);
+                crate::system::show_dialog(&dialog, self.alert_tint, native.view(), &self.control);
             }
             (
                 Command::PickImages {
@@ -1602,12 +1604,16 @@ impl Mounter {
             ) if id == nsh_core::ROOT_ID => {
                 crate::picker::pick_images(request, asked, native.view(), &self.control);
             }
+            (Command::Speech(command), _) if id == nsh_core::ROOT_ID => {
+                crate::speech::command(&self.control, &command);
+            }
             (Command::SetJsResponder { block }, _) => self.set_js_responder(id, block),
             (Command::SetSelection { start, end }, Native::Input(input)) => {
                 input.select(start, end)
             }
             (Command::ClearJsResponder, _) => self.clear_js_responder(),
             (Command::Announce(text), _) => crate::system::announce(&text),
+            (Command::Tokens(tokens), _) => self.alert_tint = crate::system::alert_tint(&tokens),
             (Command::ImageInfo { id, uri }, _) => self.images.info(id, &uri),
             (Command::SetClipboard(text), _) => crate::system::set_clipboard(&text),
             (Command::OpenUrl { id, url }, _) => crate::system::open_url(id, &url, &self.control),
@@ -2239,7 +2245,8 @@ impl Mounter {
         self.set_events(id, events);
     }
 
-    /// An interaction state of `id` changed: tells the core if it reads it.
+    /// An interaction state of `id` changed: tells the core if it reads it
+    /// (the focus always: `nsh_core::input::reported_states`).
     fn report_state(&mut self, id: NodeId, bit: u16, on: bool) {
         let Some(s) = self.slot_mut(id) else { return };
         let states = if on { s.states | bit } else { s.states & !bit };
@@ -2247,9 +2254,9 @@ impl Mounter {
             return;
         }
         s.states = states;
-        let tracked = s.tracked;
-        if tracked & bit != 0 {
-            self.control.set_states(id, states & tracked);
+        let reported = nsh_core::input::reported_states(s.tracked);
+        if reported & bit != 0 {
+            self.control.set_states(id, states & reported);
         }
     }
 
@@ -3399,11 +3406,12 @@ impl Mounter {
         })
     }
 
-    /// Presses the element the app put in the trailing header slot, as a tap
-    /// on a system bar button does: the first view inside the slot that
-    /// takes a press (the one made first), resolved now (the slot's content
-    /// arrives after the button is made). A slot with none takes no press.
-    pub(crate) fn press_trailing_header(&mut self, screen: NodeId) {
+    /// Presses the element the app put in a header slot (`leading`: the
+    /// left one), as a tap on a system bar button does: the first view
+    /// inside the slot that takes a press (the one made first), resolved now
+    /// (the slot's content arrives after the button is made). A slot with
+    /// none takes no press.
+    pub(crate) fn press_header(&mut self, screen: NodeId, leading: bool) {
         let Some(Slot {
             native: Native::Screen(host),
             ..
@@ -3411,7 +3419,11 @@ impl Mounter {
         else {
             return;
         };
-        let Some(slot_node) = host.config.right else {
+        let Some(slot_node) = (if leading {
+            host.config.left
+        } else {
+            host.config.right
+        }) else {
             return;
         };
         let Some(container) = self.slot(slot_node).map(|s| s.native.view().retain()) else {

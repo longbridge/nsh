@@ -419,6 +419,13 @@ pub struct ScreenConfig {
     /// UIKit's own bar button in the trailing slot instead of `right`'s
     /// view (iOS); a press on it presses `right`'s first pressable view.
     pub right_system_item: Option<crate::HeaderSystemItem>,
+    /// UIKit's own bar button showing this SF Symbol in the trailing slot
+    /// instead of `right`'s view (iOS); `right_system_item` wins over it.
+    pub right_symbol: Option<Arc<str>>,
+    /// As `right_system_item`, in the leading slot, pressing `left`.
+    pub left_system_item: Option<crate::HeaderSystemItem>,
+    /// As `right_symbol`, in the leading slot, pressing `left`.
+    pub left_symbol: Option<Arc<str>>,
     /// Custom title view.
     pub title_view: Option<NodeId>,
     /// The app's header (`header`): on a platform without a native header
@@ -451,6 +458,9 @@ impl Default for ScreenConfig {
             left: None,
             right: None,
             right_system_item: None,
+            right_symbol: None,
+            left_system_item: None,
+            left_symbol: None,
             title_view: None,
             header_view: None,
             header_height: Points::ZERO,
@@ -842,6 +852,27 @@ pub enum MountItem {
         /// The program and its uniforms.
         layer: Option<Arc<crate::shader::ShaderLayer>>,
     },
+    /// A shader transition starts: its `value` changed. It comes first in
+    /// its batch, so the platform takes the picture of what the view (the
+    /// surface, for a screen transition) shows before the batch's other
+    /// items, `sample_from`, and runs the layer's `nsh.progress` from 0 to
+    /// 1 over `duration`, what it draws from then on as `sample_to`; once
+    /// it ends the children show as they are.
+    ShaderTransition {
+        /// The transition.
+        id: NodeId,
+        /// How long it runs.
+        duration: std::time::Duration,
+    },
+    /// What a shader's pictures show changed, as far as the core knows: a
+    /// view in an effect's or a transition's subtree was in the batch, or
+    /// anything for a shader that reads what is behind it and for a screen
+    /// effect or transition. The platform takes them again; what changes
+    /// on its UI thread (animations, scrolling, loads) it notices itself.
+    ShaderInput {
+        /// The shader's view.
+        id: NodeId,
+    },
     /// Bind visual properties to native animation nodes.
     AnimationBindings {
         /// View.
@@ -960,6 +991,36 @@ pub enum MountItem {
         /// The call.
         command: Command,
     },
+}
+
+impl MountItem {
+    /// The view the item changes (a parent for its children's insertions),
+    /// if it is about one: what [`MountItem::ShaderInput`] is derived from.
+    pub fn view(&self) -> Option<NodeId> {
+        use MountItem as M;
+        match self {
+            M::Create { id, .. }
+            | M::TrackStates { id, .. }
+            | M::Remove { id }
+            | M::Delete { id }
+            | M::Frame { id, .. }
+            | M::Overflow { id, .. }
+            | M::ViewStyle { id, .. }
+            | M::Text { id, .. }
+            | M::Image { id, .. }
+            | M::ScrollContent { id, .. }
+            | M::Canvas { id, .. }
+            | M::Shader { id, .. }
+            | M::ViewProps { id, .. }
+            | M::Input { id, .. }
+            | M::InputValue { id, .. }
+            | M::NativeProps { id, .. }
+            | M::Component { id, .. }
+            | M::ComponentProps { id, .. } => Some(*id),
+            M::Insert { parent, .. } => Some(*parent),
+            _ => None,
+        }
+    }
 }
 
 /// All mount items produced by one commit.

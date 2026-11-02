@@ -53,8 +53,8 @@ use nsh_core::{
     keymap::{Key, KeyMatch, Keymap, Keystroke, Modifiers},
 };
 use nsh_engine::{
-    App, Assets, ColorScheme, EngineConfig, EngineControl, Environment, Idiom, Limits, LocalEngine,
-    MountSink, Os,
+    App, Assets, ColorScheme, EngineConfig, EngineControl, Environment, Idiom, Lifecycle, Limits,
+    LocalEngine, MountSink, Os,
 };
 
 use crate::{animation::UiAnimation, encode::Out, text::WebTextEngine};
@@ -253,12 +253,17 @@ impl MountSink for Sink {
     }
 }
 
-/// Bundled files the page preloaded (fonts, images drawn on a canvas).
+/// Bundled files the page preloaded (fonts, images drawn on a canvas); the
+/// others are downloaded from where the page serves them.
 struct PageAssets;
 
 impl Assets for PageAssets {
     fn read(&self, uri: &str) -> Result<Vec<u8>, String> {
         ffi::read_asset(uri).ok_or_else(|| format!("{uri} is not available on the web"))
+    }
+
+    fn url(&self, uri: &str) -> Option<String> {
+        uri.starts_with("asset:/").then(|| ffi::asset_url(uri))
     }
 }
 
@@ -415,6 +420,12 @@ pub unsafe extern "C" fn nsh_environment(ptr: *const u8, len: usize) -> f64 {
     }
     env.keyboard_height = Points(num("keyboard").unwrap_or(env.keyboard_height.0));
     env.host = flag("host").unwrap_or(env.host);
+    env.lifecycle = match value.get("lifecycle").and_then(|v| v.as_str()) {
+        Some("background") => Lifecycle::Background,
+        Some("inactive") => Lifecycle::Inactive,
+        Some(_) => Lifecycle::Active,
+        None => env.lifecycle,
+    };
     env.screen_color = flag("screenColor").unwrap_or(env.screen_color);
     PAGE.with(|p| p.set(Some(env)));
     send(|app| {
@@ -424,11 +435,18 @@ pub unsafe extern "C" fn nsh_environment(ptr: *const u8, len: usize) -> f64 {
         e.apple_keyboard = env.apple_keyboard;
         e.reduce_motion = env.reduce_motion;
         e.font_scale = env.font_scale;
+        let rescaled = e.pixel_ratio != env.pixel_ratio;
         e.pixel_ratio = env.pixel_ratio;
         e.safe_area = env.safe_area;
         e.keyboard_height = env.keyboard_height;
+        e.lifecycle = env.lifecycle;
         e.screen_color = env.screen_color;
         app.control.set_environment(app.environment);
+        // The DOM draws emoji as wide as the pixel ratio makes them.
+        if rescaled && app.text.emoji_measured() {
+            app.text.clear_caches();
+            app.control.fonts_changed();
+        }
     })
 }
 
@@ -460,7 +478,7 @@ fn init() {
         let _ = log::set_logger(&LOGGER);
         log::set_max_level(log::LevelFilter::Info);
         std::panic::set_hook(Box::new(|info| {
-            ffi::report_error(&format!("nsh panicked: {info}"));
+            ffi::report_panic(&format!("nsh panicked: {info}"));
         }));
         // What this module leaves out (the syntaxes) comes from the page.
         nsh_core::runtime_data::set_loader(ffi::load_data);
@@ -524,6 +542,7 @@ fn run(app: App, width: f32, height: f32, environment: Environment, limits: Limi
         clipboard: None,
         host: Default::default(),
         picker: None,
+        speech: None,
     };
     // A test session's app: the test's storage, network and trace.
     #[cfg(feature = "dev")]

@@ -122,6 +122,8 @@ impl Mounter {
                     crate::scroll::child_inserted(parent);
                 }
                 crate::selectable_view::touched(surface, child);
+                // An attachment's cursor depends on its text's.
+                crate::input::style_changed(child);
             }
             MountItem::Remove { id } => {
                 if let Some(view) = self.get(*id) {
@@ -294,6 +296,8 @@ impl Mounter {
                     crate::canvas::set(surface, view, drawing.clone());
                 }
             }
+            // Effects and transitions: this platform does not draw them yet.
+            MountItem::ShaderTransition { .. } | MountItem::ShaderInput { .. } => {}
             MountItem::Shader { id, layer } => {
                 if let Some(view) = self.get(*id) {
                     crate::shader::set(surface, view, layer.clone());
