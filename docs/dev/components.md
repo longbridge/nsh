@@ -904,6 +904,20 @@ what changed.
   data converted by the `Event` derive's `data_js` when JS hears it; the JS face calls the app's
   `on<Name>(data)`), or, for a nested component, to the
   `on_event` listener of the view that made it, typed, whose own emits are routed in turn until none are left.
+- `after_answer(f)` (`element/ambient.rs`) runs `f` once the app has handled every event emitted so far and the
+  props it set in answer have reached the components: what a view shows of its own until the app's value comes back
+  (a slider's drag value) is let go of there, with no frame of the app's earlier value between. A timer or
+  `next_frame` may fire before that: a component's event to JS is only queued (`Core::events`); the engine's next
+  commit round hands it to JS, applies the ops its handler queued and only then commits, which sets the new props.
+  The executor keeps the closures in two queues: `Core::take_events` (the engine handing the events out) makes the
+  waiting ones due, and the next `Core::commit` runs the due ones first, before its views render, each under the owner
+  current when it was registered (dropped unrun once that owner is disposed), so what they change shows in that
+  commit with the app's props. The engine's commit loop goes on for another round while some are due
+  (`Core::has_due_answers`), so they go out in the batch of the events they waited for. With a Rust owner, whose
+  listener ran when the event was emitted, `f` runs in the commit after the one that rendered what the listener
+  changed. The web's browser engine delivers the events the same way (its JS runs in the engine's call, its ops are
+  taken after it), so it needs nothing of its own. Unused, it costs nothing: the queues stay unallocated and nothing
+  is due, so the engine commits no extra round (`events_nothing_waits_for_cost_no_round`).
 - The back button: `on_back_press` listeners of views run newest first, after modals' and before stacks', then JS's
   (`element/back.rs`).
 - Keys while the control has the keyboard focus: a signal of the focus (`on_focus` / `on_blur`), and

@@ -847,6 +847,33 @@ pub fn next_frame() -> Answer<Instant> {
     answer
 }
 
+/// Runs `f` once the app has handled every event emitted so far
+/// ([`super::Scope::emit`]) and the props it set in answer have reached the
+/// components: a view that shows a value of its own until the app's comes
+/// back (a drag's, before `onChange` returns as `value`) lets go of it here,
+/// with no frame of the app's earlier value between. In a TSX app that is
+/// the commit after the one that hands the events to JS, before the views
+/// render (JS's handlers and the ops they queue run in between); with a
+/// Rust owner, whose listeners run when the event is emitted, the commit
+/// after the one that renders what they changed. What `f` changes renders
+/// in that commit, which goes out in the batch of the app's answer. It runs
+/// under the current owner, once: not when that owner is disposed first
+/// (the view went).
+///
+/// Time does not tell: [`set_timeout`] with no delay and [`next_frame`]
+/// run before the app has answered when the event came in the same turn
+/// (a timer due now fires before the turn's commit, which is where JS
+/// first hears the event), and later than needed otherwise (a frame
+/// after). `after_answer` follows the events themselves, whatever the
+/// clock. It costs nothing when unused: no closure kept, no extra commit
+/// round.
+pub fn after_answer(f: impl FnOnce() + 'static) {
+    executor().after_answer(task::AfterAnswer {
+        owner: Owner::current(),
+        f: Box::new(f),
+    });
+}
+
 /// Runs blocking `f` on the runtime's blocking threads (in a task: await
 /// its result; `tokio::task::spawn_blocking`). Not in WebAssembly: code
 /// that should also run on the web uses the engine's services instead
