@@ -48,6 +48,11 @@ impl Renders {
     pub(super) fn is_empty(&self) -> bool {
         self.places.is_empty()
     }
+
+    /// Whether view `id` is a placeholder.
+    pub(super) fn is_place(&self, id: NodeId) -> bool {
+        !self.places.is_empty() && self.places.contains_key(&id)
+    }
 }
 
 /// A (prop, key) of a component's host.
@@ -131,18 +136,6 @@ impl<M: TextEngine> Core<M> {
     /// `componentRender` on a view: JS's holder of a render.
     pub(super) fn set_render_holder(&mut self, id: NodeId, slot: Arc<str>) {
         self.components.renders.holders.insert(id, (slot, 0));
-    }
-
-    /// Whether `id` is a render's placeholder.
-    pub(super) fn is_render_place(&self, id: NodeId) -> bool {
-        !self.components.renders.places.is_empty()
-            && self.components.renders.places.contains_key(&id)
-    }
-
-    /// Whether `id` only wraps what a render placed: a placeholder (a Rust
-    /// component's `Renderer` output) or JS's holder in it.
-    pub(super) fn is_render_wrapper(&self, id: NodeId) -> bool {
-        self.is_render_place(id) || self.is_render_holder(id)
     }
 
     /// Whether `id` is a render's holder.

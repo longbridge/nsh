@@ -2777,15 +2777,20 @@ impl<M: TextEngine> Core<M> {
         let paint_changed = node.paint != paint;
         let z_changed = node.z_index != z_index;
         // An attachment's place in its line is part of its block's text.
-        let align_changed = node.vertical_align != vertical_align;
+        let align_changed =
+            node.vertical_align != vertical_align && node.inline && node.kind != Kind::Text;
+        // ... and so is the content's of a render placed there.
+        let content_align_changed = node.vertical_align != vertical_align && !node.inline;
         node.view_style = view;
         node.text_style = text;
         node.paint = paint;
         node.animated = animated;
         node.z_index = z_index;
         node.vertical_align = vertical_align;
-        if align_changed && let Some(attachment) = self.aligned_attachment(key) {
-            self.mark_text_block(attachment);
+        if align_changed {
+            self.mark_text_block(key);
+        } else if content_align_changed && let Some(place) = self.placed_in_text(key) {
+            self.mark_text_block(place);
         }
         if z_changed {
             self.restack(key);
@@ -5599,43 +5604,44 @@ impl<M: TextEngine> Core<M> {
         }
     }
 
-    /// The `verticalAlign` of attachment `key`. What a render placed
-    /// (`renderCustom` and other render props) sits in a placeholder (and,
-    /// from JS, a holder) of no style of its own: while the wrappers leave
-    /// it baseline, the alignment of the one view they wrap is theirs, as
-    /// though that view were the attachment.
-    fn attachment_align(&self, mut key: Key) -> crate::style::VerticalAlign {
-        loop {
-            let node = &self.nodes[key as usize];
-            if node.vertical_align != crate::style::VerticalAlign::Baseline
-                || node.children.len() != 1
-                || !self.is_render_wrapper(node.id)
-            {
-                return node.vertical_align;
-            }
-            key = node.children[0];
+    /// Where attachment `key` sits in its line (`verticalAlign`). A
+    /// placeholder of a render (`renderCustom`, ...) that sets none takes
+    /// what its content sets: the placeholder and JS's holder around the
+    /// content are not the app's views, so the app styles only the content
+    /// (`<View style={{ verticalAlign: "middle" }}>` in `renderCustom`).
+    fn attachment_align(&self, key: Key) -> crate::style::VerticalAlign {
+        use crate::style::VerticalAlign;
+        let node = &self.nodes[key as usize];
+        if node.vertical_align != VerticalAlign::Baseline
+            || !self.components.renders.is_place(node.id)
+        {
+            return node.vertical_align;
         }
+        // The placeholder's only child is the holder; the holder's, the
+        // content.
+        let mut key = key;
+        for _ in 0..2 {
+            let mut children = self.nodes[key as usize]
+                .children
+                .iter()
+                .filter(|&&c| !self.nodes[c as usize].is_overlay());
+            match (children.next(), children.next()) {
+                (Some(&only), None) => key = only,
+                _ => return VerticalAlign::Baseline,
+            }
+        }
+        self.nodes[key as usize].vertical_align
     }
 
-    /// The attachment whose alignment is `key`'s ([`Core::attachment_align`]):
-    /// `key` itself when it is inside text, else the render wrapper inside
-    /// text it is the only content of.
-    fn aligned_attachment(&self, mut key: Key) -> Option<Key> {
-        loop {
-            let node = &self.nodes[key as usize];
-            if node.inline {
-                return (node.kind != Kind::Text).then_some(key);
-            }
-            let parent = node.parent;
-            if parent == NO_KEY {
-                return None;
-            }
-            let p = &self.nodes[parent as usize];
-            if p.children.len() != 1 || !self.is_render_wrapper(p.id) {
-                return None;
-            }
-            key = parent;
+    /// The render placeholder in a text that view `key` is the content of
+    /// (see [`Core::attachment_align`]), if it is one.
+    fn placed_in_text(&self, key: Key) -> Option<Key> {
+        let holder = self.nodes[key as usize].parent;
+        if holder == NO_KEY || !self.is_render_holder(self.nodes[holder as usize].id) {
+            return None;
         }
+        let place = self.nodes[holder as usize].parent;
+        (place != NO_KEY && self.nodes[place as usize].inline).then_some(place)
     }
 
     /// The attachments of text block `key` (views and images inside it,

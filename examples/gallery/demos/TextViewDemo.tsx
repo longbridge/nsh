@@ -296,6 +296,15 @@ function Chart(props: { source: string }) {
 
 function Extensions() {
   return (
+    <View style={{ gap: 16 }}>
+      <InlineChips />
+      <Mentions />
+    </View>
+  );
+}
+
+function Mentions() {
+  return (
     <Card icon="components" title="Extensions" subtitle="Mentions, issue chips with an icon, a chart block, a <Callout> tag, a :::note container">
       <TextView
         markdown={EXTENDED}
@@ -304,7 +313,7 @@ function Extensions() {
           switch (node.name) {
             case "mention":
               return (
-                <View class="translate-y-[7px] rounded-full bg-sky-500/15 px-2">
+                <View class="align-middle rounded-full bg-sky-500/15 px-2">
                   <Text class="text-[14px] font-medium text-sky-700 dark:text-sky-300">@{node.attributes?.["1"]}</Text>
                 </View>
               );
@@ -333,6 +342,33 @@ function Extensions() {
               );
           }
         }}
+      />
+    </Card>
+  );
+}
+
+/** Task and PR ids in a chat message (`T-0042`, `nsh#810`): chips in the
+ * middle of the text (`align-middle`) that keep its lines evenly spaced. */
+const CHIPS = `Picked up T-0089 after the review of nsh#810: each chip sits in the middle of the text, and a line holding one is as tall as the others. T-0096 follows up on iOS and macOS, with gpui-kit#3766 next in the queue. 中文段落里的 T-0101 也一样，和文字居中对齐，行距保持一致。`;
+
+const CHIP_EXTENSIONS = [
+  { name: "task", pattern: "\\bT-\\d{4}\\b" },
+  { name: "pr", pattern: "\\b[a-z-]+#\\d+\\b" },
+];
+
+function InlineChips() {
+  return (
+    <Card icon="components" title="Inline chips" subtitle="Chips in the middle of the text; lines stay evenly spaced">
+      <TextView
+        markdown={CHIPS}
+        extensions={CHIP_EXTENSIONS}
+        styles={{ root: { fontSize: 17, lineHeight: 26 } }}
+        renderCustom={(node) => (
+          <View class="align-middle h-5 flex-row items-center gap-1.5 rounded-full border border-border bg-inset px-2">
+            <View class={node.name === "task" ? "size-1.5 rounded-full bg-sky-500" : "size-1.5 rounded-full bg-emerald-500"} />
+            <Text class="font-mono text-[13px] leading-4">{node.text}</Text>
+          </View>
+        )}
       />
     </Card>
   );
