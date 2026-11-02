@@ -28,6 +28,11 @@ fn files() -> impl IntoElement {
         .on_selected_change(move |id: &SharedString| selected.set(Some(id.clone())))
         .accessibility_label("Files")
         .h(px(320.0))
+        .list_class("p-1")
+        .item_class(
+            "group rounded-md hover:bg-accent selected:bg-primary/10 \
+             focus:outline-2 focus:-outline-offset-2 focus:outline-ring disabled:opacity-50",
+        )
         .render_item(|entry: &TreeEntry| {
             view()
                 .flex_row()
@@ -69,8 +74,9 @@ function App() {
       onExpandedChange={({ expanded: next }) => expanded.set(next)}
       onSelectedChange={({ selected: next }) => selected.set(next)}
       accessibilityLabel="Files"
-      class="h-80 w-64 rounded-lg border border-border p-1"
-      itemClass="group h-8 rounded-md hover:bg-accent selected:bg-accent focus:ring-2 focus:ring-ring disabled:opacity-50"
+      class="h-80 w-64 rounded-lg border border-border"
+      listClass="p-1"
+      itemClass="group h-8 rounded-md hover:bg-accent selected:bg-primary/10 focus:outline-2 focus:-outline-offset-2 focus:outline-ring disabled:opacity-50"
       renderItem={(entry) => (
         <View class="h-8 flex-row items-center gap-2" style={{ paddingLeft: 8 + entry.depth * 16 }}>
           <Text class="w-3 text-muted-foreground transition-transform group-aria-expanded:rotate-90">
@@ -94,7 +100,7 @@ mount(App);
 
 | 字段 | 类型 | 说明 |
 |---|---|---|
-| `id` | `string` | 在 `expanded`、`selected` 和事件中标识它：在树中唯一。 |
+| `id` | `string` | 在 `expanded`、`selected` 和事件中标识它：在树中唯一（重复的 id 会记录到日志，只有它的第一个项目会展开或被选中）。 |
 | `label` | `string` | 没有 `renderItem` 时行显示的内容，屏幕阅读器读出的内容，以及按首字母跳转匹配的内容。 |
 | `children` | `TreeItem[]` | 它下面的项目，按顺序。有子项目时它是文件夹：可以展开和收起。 |
 | `disabled` | `boolean` | 用户不能选中、展开或收起它：点按和按键都会跳过它，应用 `disabled:` 样式。它的子项目仍按 `expanded` 显示。 |
@@ -133,17 +139,17 @@ mount(App);
 |---|---|---|---|
 | 树 | | `class`、`style` | |
 | 列表 | 树 | `listClass`、`listStyle` | |
-| 行 | 列表 | `itemClass`、`itemStyle` | `selected:`、`aria-expanded:`（展开的文件夹）、`focus:`（树拥有键盘焦点时选中的行）、`disabled:`、`hover:`、`active:` |
+| 行 | 列表 | `itemClass`、`itemStyle` | `selected:`、`aria-expanded:`（展开的文件夹）、`focus:`（树拥有键盘焦点时按键作用的行：选中的行；选中项被收起的项目隐藏时，是那个项目的行；没有选中项时是第一行）、`disabled:`、`hover:`、`active:` |
 | 行的内容 | 行 | `renderItem` | 在 `itemClass` 中加上 `group` 后的 `group-selected:`、`group-aria-expanded:`、`group-focus:`、`group-disabled:` |
 
-用 `selected:` 表示选中的行，用 `focus:` 表示键盘所在的位置（见[设计指南](../docs/design-guides.md#交互状态)）。
+用 `selected:` 表示选中的行，用 `focus:` 表示键盘所在的位置（见[设计指南](../docs/design-guides.md#交互状态)）。把焦点画在行内（`focus:outline-2 focus:-outline-offset-2`）：列表会裁掉超出两侧的部分。
 
 ## Ref
 
 | 方法 | 说明 |
 |---|---|
 | `focus()` | 获得键盘焦点，与 Tab 到达树时相同。 |
-| `revealItem(id)` | 展开 `id` 对应项目之上的项目（通过 `onExpandedChange` 和 `onExpand` 报告），并在它显示后把它的行滚动到视野中。 |
+| `revealItem(id)` | 展开 `id` 对应项目之上的项目（通过 `onExpandedChange` 和 `onExpand` 报告，由外到内），并在它显示后把它的行滚动到视野中：应用跟随这次变化时立即滚动；应用不跟随时，这次请求就此结束。 |
 
 ```tsx
 let files: TreeRef | undefined;
@@ -163,7 +169,7 @@ files?.revealItem("src/ui/tree.rs");
 ## 无障碍
 
 - 树的角色是 `"tree"`，名字来自 `accessibilityLabel`；每一行是一个 `"treeitem"`，名字是项目的标签，带有层级（深度 + 1）、是否展开（文件夹）、是否选中和是否禁用。
-- 方向键移动选中项时，选中的行获得屏幕阅读器的焦点。
+- 树获得键盘焦点时，以及按键移动选中项时，按键作用的行获得屏幕阅读器的焦点。
 
 标签、角色和播报的一般说明见[无障碍](../docs/accessibility.md)。
 
@@ -173,13 +179,15 @@ files?.revealItem("src/ui/tree.rs");
 
 | 按键 | 作用 |
 |---|---|
-| Tab、Shift+Tab | 一步进入树，一步离开；回来时按键从选中的行继续。 |
+| Tab、Shift+Tab | 一步进入树，一步离开；回来时按键从选中的行继续。没有选中项时，焦点显示在第一行，按 Down 选中它。 |
 | Down、Up | 选中下一行或上一行，跳过禁用的项目，从最后一行回到第一行，反之亦然。 |
-| Right | 展开收起的文件夹；在展开的文件夹上，选中它的第一个子项目。 |
+| Right | 展开收起的文件夹；在展开的文件夹上，选中它的第一个可用的子项目。 |
 | Left | 收起展开的文件夹；在其他项目上，选中它的父项目。 |
 | Home、End | 选中第一行或最后一行。 |
 | Return、Space | 展开或收起选中的文件夹。 |
 | 字母、数字 | 选中下一个标签以所输入内容开头的行。 |
+
+选中项被收起的项目隐藏时（应用收起了它），按键作用于那个项目的行：Right 或 Return 展开它，Down 选中它之后的一行。
 
 ## 平台说明
 

@@ -1312,6 +1312,25 @@ tap text:docs
 expect Selected: src/lib.rs
 expect Changes: 2
 absent guide.md
+# The list and each row as the app styles them.
+style scroll:label:src backgroundColor #0000ffff
+style scroll:label:src opacity 0.75
+style label:src borderRadius 3
+# The ref's `revealItem`: the collapsed item above it expands, reported
+# as a press's is.
+tap id:reveal
+expect Expanded: src,src/ui
+expect Heard: expand src/ui
+expect Changes: 3
+expect tree.rs
+# The ref's `focus`; with the tree's focus, the selected row shows
+# `focus:`, and stops when it leaves.
+tap id:focus
+event id:files onFocus
+style label:lib.rs opacity 0.5
+nostyle label:src opacity
+event id:files onBlur
+nostyle label:lib.rs opacity
 # The tree's own state, from `defaultExpanded` and `defaultSelected`;
 # `renderItem` draws the rows, given each item's depth.
 prop id:notes role tree
@@ -1322,6 +1341,12 @@ prop label:a.md accessibilityState selected=true
 tap label:notes
 absent a.md@1
 prop label:notes accessibilityState selected=true expanded=false
+# `disabled`: read-only, every row dimmed; a press does nothing.
+tap id:lock
+prop label:notes accessibilityState selected=true disabled=true expanded=false
+prop label:todo.md accessibilityState disabled=true
+tap text:+notes@0
+absent a.md@1
 covers [nsh/base] Tree
 covers [props] Tree.items
 covers [props] Tree.expanded
@@ -1329,8 +1354,12 @@ covers [props] Tree.defaultExpanded
 covers [props] Tree.selected
 covers [props] Tree.defaultSelected
 covers [props] Tree.itemClass
+covers [props] Tree.itemStyle
+covers [props] Tree.listClass
+covers [props] Tree.listStyle
 covers [props] Tree.renderItem
 covers [props] accessibilityLabel
+covers [props] disabled
 covers [events] Tree.onExpandedChange
 covers [events] Tree.onSelectedChange
 covers [events] Tree.onExpand
