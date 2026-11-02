@@ -526,7 +526,8 @@ own input at the views their selectors name, as Playwright does in a browser:
   `scroll` is a trackpad gesture over the scroll view, `back` is what a user does (Escape on macOS and Linux, the mouse's
   back button on Windows and in GPUI, the browser's back button on the web, a sheet swiped down, VoiceOver's escape
   gesture while a menu, popover or `Sheet` is open, else the header's back button on iOS, the back button on Android);
-- a view off screen is scrolled into view first, a gesture at a time;
+- a view off screen is scrolled into view first, a gesture at a time; on a touch screen the finger lands where the
+  page itself takes it, beside the views that follow a drag (a slider, a drawing area), as a user scrolls;
 - selectors, waits and queries see the same model of the app as headless runs, built from what the host draws, so
   they find the same views;
 - dialogs are the platform's own: `app.dialogs()` reads them, and answering one (`onDialog`, or its cancel button

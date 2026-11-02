@@ -34,7 +34,7 @@ use std::{
 
 use nsh_core::{
     AccessibilityState,
-    element::{LayoutCurve, LayoutTransition, Style},
+    element::{LayoutCurve, LayoutTransition, OrderWatch, Style, watch_order},
     geometry::Axis,
     prelude::*,
 };
@@ -68,6 +68,11 @@ const INDICATOR_MS: f32 = 362.0;
 const INDICATOR: LayoutTransition =
     LayoutTransition::new(LayoutCurve::Spring { damping: 0.85 }, INDICATOR_MS);
 
+/// How many scrolls replaced before they arrived are remembered: a rest a
+/// platform reported for one is on its way for a frame or two only (see
+/// [`Inner::superseded`]).
+const SUPERSEDED: usize = 3;
+
 /// What the arrow keys and Home / End do while the carousel has the focus.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Step {
@@ -97,6 +102,8 @@ const VERTICAL_KEYS: &[(&str, bool, Step)] = &[
 /// A slide of the content, as it registered.
 struct Slide {
     key: u64,
+    /// Its view, for the slides' order in the tree.
+    node: ElementRef,
     /// Where it is laid out along the axis in the scroll view's content
     /// (its start and its length), once laid out.
     frame: Option<(f32, f32)>,
@@ -184,7 +191,11 @@ struct Inner {
     axis: Axis,
     /// It loops (read when the carousel is made).
     looping: bool,
+    /// The slides, in the tree's order (`order`): components render in the
+    /// order the core makes them, so a slide inserted before the others,
+    /// or moved by a keyed list, registers out of place.
     slides: Rc<RefCell<Vec<Slide>>>,
+    order: OrderWatch,
     next_key: Cell<u64>,
     /// Bumped as slides come and go.
     changed: Signal<u64>,
@@ -212,10 +223,21 @@ struct Inner {
     pending: Signal<Option<usize>>,
     /// The slide shown.
     shown: Memo<usize>,
+    /// The carousel's own view, which takes the keyboard focus from a
+    /// control turning disabled.
+    root: ElementRef,
     /// The scroll view.
     scroller: ElementRef,
     /// Where the scroll view rests, or was last sent.
     at: Cell<f32>,
+    /// Where the animated scroll the carousel sent last is going, until it
+    /// rests there: the desktops report a rest when it arrives.
+    in_flight: Cell<Option<f32>>,
+    /// Where scrolls replaced before they arrived were going (the newest
+    /// last, [`SUPERSEDED`] at most). A platform may have reported one's
+    /// rest just before the next scroll reached it: that rest is on its
+    /// way, and is no slide the user chose.
+    superseded: RefCell<Vec<f32>>,
     /// The index the content last scrolled to, and the loop's period then.
     placed: Cell<Option<usize>>,
     placed_period: Cell<Option<f32>>,
@@ -228,7 +250,7 @@ struct Inner {
     /// The user scrolls it, from the drag's start to the rest.
     dragging: Signal<bool>,
     /// How many of the carousel's views have the keyboard focus (the root,
-    /// its controls).
+    /// its controls, its pagination items).
     focused: Signal<u32>,
     /// `onFocus` was reported, and no `onBlur` after it.
     announced: Cell<bool>,
@@ -310,10 +332,25 @@ impl Ctl {
             controlled.get();
             untracked(|| pending.set(None));
         });
+        // The slides in the tree's order, as they come and as the app moves
+        // them, before the layout reports their frames (the core looks at
+        // the end of the round that made or moved them).
+        let order = {
+            let (listed, sorted) = (slides.clone(), slides.clone());
+            watch_order(
+                move || listed.borrow().iter().map(|s| s.node).collect(),
+                move |order| {
+                    let mut slides = sorted.borrow_mut();
+                    let mut taken: Vec<Option<Slide>> = slides.drain(..).map(Some).collect();
+                    slides.extend(order.iter().filter_map(|&i| taken[i].take()));
+                },
+            )
+        };
         let ctl = Self(Rc::new(Inner {
             axis,
             looping,
             slides,
+            order,
             next_key: Cell::new(1),
             changed,
             count,
@@ -327,8 +364,11 @@ impl Ctl {
             own,
             pending,
             shown,
+            root: element_ref(),
             scroller: element_ref(),
             at: Cell::new(0.0),
+            in_flight: Cell::new(None),
+            superseded: RefCell::new(Vec::new()),
             placed: Cell::new(None),
             placed_period: Cell::new(None),
             wrap: Cell::new(None),
@@ -411,11 +451,12 @@ impl Ctl {
         self.0.shown.get()
     }
 
-    /// Adds a slide, which the carousel forgets when the current owner (the
-    /// slide's component) ends: its key, and, while the carousel loops, the
-    /// translation that draws it in the period nearest the viewport's
-    /// center (made once: the layout sets its inputs).
-    fn register(&self) -> (u64, Option<AnimatedNode>) {
+    /// Adds the slide whose view is `node`, which the carousel forgets when
+    /// the current owner (the slide's component) ends: its key, and, while
+    /// the carousel loops, the translation that draws it in the period
+    /// nearest the viewport's center (made once: the layout sets its
+    /// inputs).
+    fn register(&self, node: ElementRef) -> (u64, Option<AnimatedNode>) {
         let key = self.0.next_key.get();
         self.0.next_key.set(key + 1);
         let (shift, translation) = match (self.0.offset, self.0.period) {
@@ -431,11 +472,13 @@ impl Ctl {
         };
         self.0.slides.borrow_mut().push(Slide {
             key,
+            node,
             frame: None,
             shift,
             sent: Cell::new(STILL_SHIFT),
         });
         self.0.changed.update(|n| *n += 1);
+        self.0.order.invalidate();
         let ctl = self.clone();
         cleanup(move || {
             ctl.0.slides.borrow_mut().retain(|s| s.key != key);
@@ -449,9 +492,12 @@ impl Ctl {
     }
 
     /// Slide `key` was laid out at `frame` in the content. A layout pass
-    /// reports the slides in their order (the core emits frames depth
-    /// first, children in order), so the last slide's report is the end of
-    /// the pass: the track is made from all of it then, once.
+    /// reports the slides in the tree's order (the core emits frames depth
+    /// first, children in order), which `slides` keeps (put in order at the
+    /// end of the round that made or moved one, before its frames come), so
+    /// the last slide's report is the end of the pass: the track is made
+    /// from all of it then, once. A pass that leaves the last slide where
+    /// it was settles on the next turn (`settle_later`).
     fn place(&self, key: u64, frame: &Bounds<Points>) {
         let at = match self.0.axis {
             Axis::Horizontal => (frame.origin.x.0, frame.size.width.0),
@@ -576,17 +622,41 @@ impl Ctl {
         self.go(to);
     }
 
-    /// The user scrolled it: the drag started.
+    /// The user scrolled it: the drag started. It stops the scroll the
+    /// carousel sent, and what rests the platform reports from now on are
+    /// the user's.
     fn drag_started(&self) {
+        self.0.in_flight.set(None);
+        self.0.superseded.borrow_mut().clear();
         if !self.0.dragging.get_untracked() {
             self.0.dragging.set(true);
             self.0.cx.emit(CarouselEvent::DragStart);
         }
     }
 
+    /// Whether a rest at `offset` is that of a scroll the carousel sent and
+    /// then replaced, reported before the next scroll reached the platform
+    /// (previous, then next while the first still arrives): no slide of
+    /// the user's, the scroll in flight goes on. Any other rest ends the
+    /// wait: the scroll in flight arrived, or the user moved the content
+    /// (a mouse wheel reports no drag).
+    fn superseded_rest(&self, offset: f32) -> bool {
+        let near = |at: f32| (at - offset).abs() <= EPSILON;
+        let arrived = self.0.in_flight.get().is_some_and(near);
+        if !arrived && self.0.superseded.borrow().iter().any(|&at| near(at)) {
+            return true;
+        }
+        self.0.in_flight.set(None);
+        self.0.superseded.borrow_mut().clear();
+        false
+    }
+
     /// The scroll came to rest at `offset`: back in the middle period, on a
     /// slide, which shows, and the app hears of it.
     fn settled(&self, offset: f32) {
+        if self.superseded_rest(offset) {
+            return;
+        }
         self.0.at.set(offset);
         if self.0.dragging.get_untracked() {
             self.0.dragging.set(false);
@@ -650,6 +720,20 @@ impl Ctl {
         }
         self.0.at.set(offset);
         self.0.generation.set(self.0.generation.get() + 1);
+        // An animated scroll is in flight until it rests; one sent at once
+        // reports no rest. Either replaces the scroll in flight.
+        let replaced = self
+            .0
+            .in_flight
+            .replace(animated.then_some(offset))
+            .filter(|&at| (at - offset).abs() > EPSILON);
+        if let Some(at) = replaced {
+            let mut superseded = self.0.superseded.borrow_mut();
+            superseded.push(at);
+            if superseded.len() > SUPERSEDED {
+                superseded.remove(0);
+            }
+        }
         let to = match self.0.axis {
             Axis::Horizontal => point(px(offset), px(0.0)),
             Axis::Vertical => point(px(0.0), px(offset)),
@@ -717,6 +801,23 @@ impl Ctl {
                 }
             }
         }
+    }
+
+    /// Tracks whether a part (a control, a pagination item) has the
+    /// keyboard focus, and gives the focus to the carousel when the part
+    /// turns `disabled` while it has it (next on the last slide): the
+    /// platform would move it out of the carousel (macOS to the window),
+    /// which would end the keys and report `onBlur`. The returned flag is
+    /// the part's to set from its focus and blur.
+    fn keep_focus(&self, disabled: Memo<bool>) -> Signal<bool> {
+        let focused = signal(false);
+        let root = self.0.root;
+        effect(move || {
+            if disabled.get() && untracked(|| focused.get()) {
+                root.focus();
+            }
+        });
+        focused
     }
 
     /// One of its views took the keyboard focus: the focus came into the
@@ -856,8 +957,10 @@ pub struct CarouselProps {
     /// the slides there are). The app owns it: a swipe, a control or a key
     /// reports the next one with `onChange`, and the carousel scrolls to
     /// the `index` the app passes back, animated. A swipe shows the slide
-    /// it rests on until then. Without it the carousel keeps its own, from
-    /// `defaultIndex`.
+    /// it rests on until the app passes a new `index`. With several slides
+    /// per view it names the slide in the first place (those that rest
+    /// with the last one show the same place). Without it the carousel
+    /// keeps its own, from `defaultIndex`.
     pub index: Prop<Option<u32>>,
     /// The slide shown at first, while `index` is not set (default `0`).
     #[prop(default)]
@@ -898,10 +1001,12 @@ pub enum CarouselEvent {
     DragStart,
     /// The content the user dragged came to rest.
     DragEnd,
-    /// The keyboard focus came into the carousel: to it or one of its
-    /// controls.
+    /// The keyboard focus came to the carousel's own view, its previous or
+    /// next control or a pagination item from elsewhere. Focusable views of
+    /// the app's inside the slides do not count.
     Focus,
-    /// The keyboard focus left the carousel and its controls.
+    /// The keyboard focus left the carousel's own view, its controls and
+    /// its pagination items.
     Blur,
 }
 
@@ -920,14 +1025,16 @@ pub enum CarouselEvent {
 /// app's `index` scroll the content natively, animated (at once with
 /// reduced motion). Slides that move on by themselves are the app's: a
 /// timer that sets `index`, waiting while `onDragStart` / `onDragEnd`,
-/// `onFocus` / `onBlur` and the pointer over a view around it say the
-/// user is at it.
+/// `onFocus` / `onBlur` (the keyboard focus on the carousel, a control or
+/// a pagination item) and the pointer over a view around it say the user
+/// is at it.
 ///
 /// The keyboard, as `gpui-component`'s: the carousel is a stop of the
-/// keyboard focus where views are (macOS, the web), and while it or one of
-/// its controls has the focus, Left and Right (Up and Down when vertical)
-/// move to the previous and next slide and Home and End to the first and
-/// last.
+/// keyboard focus where views are (macOS, the web), and while it, one of
+/// its controls or a pagination item has the focus, Left and Right (Up
+/// and Down when vertical) move to the previous and next slide and Home
+/// and End to the first and last. A control that turns disabled with the
+/// focus (next on the last slide) hands it to the carousel.
 #[component]
 pub fn Carousel(props: CarouselProps, cx: Scope<CarouselEvent>) -> impl IntoElement {
     let axis = untracked(|| props.axis.get());
@@ -943,8 +1050,10 @@ pub fn Carousel(props: CarouselProps, cx: Scope<CarouselEvent>) -> impl IntoElem
         let (focused, ctl) = (ctl.0.focused, ctl.clone());
         bind_while(move || focused.get() > 0, keys, move |step| ctl.key(step));
     }
+    let root = ctl.0.root;
     let (focus, blur) = (ctl.clone(), ctl);
     view()
+        .element_ref(&root)
         .role(AccessibilityRole::Region)
         .optional_label(props.accessibility_label)
         .focusable(true)
@@ -1003,11 +1112,13 @@ pub struct CarouselItemProps {
 #[component]
 pub fn CarouselItem(props: CarouselItemProps, _cx: Scope<NoEvent>) -> impl IntoElement {
     let ctl = use_context::<CarouselContext>().map(|CarouselContext(ctl)| ctl);
+    let node = element_ref();
     view()
+        .element_ref(&node)
         .role(AccessibilityRole::Group)
         .optional_label(props.accessibility_label)
         .when_some(ctl, |v, ctl| {
-            let (key, translation) = ctl.register();
+            let (key, translation) = ctl.register(node);
             let axis = ctl.0.axis;
             let v = match translation {
                 Some(t) if axis == Axis::Horizontal => v.bind_translate_x(&t),
@@ -1063,10 +1174,17 @@ fn control(props: CarouselControlProps, forward: bool) -> View {
         .disabled(move || none.get());
     match ctl {
         Some(ctl) => {
+            let focused = ctl.keep_focus(none);
             let (press, focus, blur) = (ctl.clone(), ctl.clone(), ctl);
             base.on_press(move || press.go_step(forward))
-                .on_focus(move || focus.focus_in())
-                .on_blur(move || blur.focus_out())
+                .on_focus(move || {
+                    focused.set(true);
+                    focus.focus_in();
+                })
+                .on_blur(move || {
+                    focused.set(false);
+                    blur.focus_out();
+                })
         }
         None => base,
     }
@@ -1225,10 +1343,18 @@ pub fn CarouselPaginationItem(
         .selected_style(props.selected_style);
     match ctl {
         Some(ctl) => {
+            // Its slide may go while it has the focus.
+            let focused = ctl.keep_focus(disabled);
             let (press, focus, blur) = (ctl.clone(), ctl.clone(), ctl);
             base.on_press(move || press.go(index.get_untracked() as usize))
-                .on_focus(move || focus.focus_in())
-                .on_blur(move || blur.focus_out())
+                .on_focus(move || {
+                    focused.set(true);
+                    focus.focus_in();
+                })
+                .on_blur(move || {
+                    focused.set(false);
+                    blur.focus_out();
+                })
         }
         None => base,
     }

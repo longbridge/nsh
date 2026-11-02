@@ -83,6 +83,17 @@ function FileMenu() {
 
 <a id="context-menus"></a>
 
+## 菜单栏
+
+同一个 `Toolbar` 里的多个 `Menu` 组成菜单栏：其中一个菜单打开时，指针移到另一个菜单的触发器上就会改为打开那个菜单，方向键在各触发器之间移动。
+
+```tsx
+<Toolbar accessibilityLabel="Menu bar">
+  <Menu trigger={<View><Text>File</Text></View>}>{/* … */}</Menu>
+  <Menu trigger={<View><Text>Edit</Text></View>}>{/* … */}</Menu>
+</Toolbar>
+```
+
 ## 上下文菜单
 
 ```tsx
@@ -264,6 +275,7 @@ function ViewMenu() {
 | `trigger` | `.trigger(..)` | `JSX.Element` | 无 | 打开它的条目。 |
 | `back` | `.back(..)` | `JSX.Element` | 无 | 手机：它的条目上方返回上一级条目的那一行。 |
 | `disabled` | `.disabled(..)` | `boolean` | `false` | 它不会打开。 |
+| `offset` | `.offset(..)` | `number` | `0` | 桌面端：它的弹出层与外层菜单之间的间距。 |
 | `children` | `.child(..)` | `JSX.Element` | 无 | 它的条目。 |
 
 `MenuSeparator` 是一个由你设置样式（`class`、`style`）的视图，与所在层级的条目一起显示。

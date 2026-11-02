@@ -320,7 +320,10 @@ export function CarouselDemo() {
                   index={i()}
                   accessibilityLabel={`Photo ${i() + 1}: ${p().caption}`}
                   style={{
-                    width: size.thumb,
+                    // Six share the row's width, up to their size: they
+                    // fit a phone and the desktop's narrow column.
+                    flex: 1,
+                    maxWidth: size.thumb,
                     height: size.thumb * 0.75,
                     padding: 2,
                     borderRadius: 8,
