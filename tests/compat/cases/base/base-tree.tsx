@@ -3,7 +3,8 @@
 // names and states screen readers get (a tree of tree items, expanded,
 // selected, disabled), a press selecting a row and expanding or collapsing
 // a folder, the events (`onExpandedChange`, `onSelectedChange`, `onExpand`,
-// `onCollapse`), the app's state (`expanded`, `selected`) or the tree's own
+// `onCollapse`, and `onAction`, which a double press reports and a single
+// one never does), the app's state (`expanded`, `selected`) or the tree's own
 // (`defaultExpanded`, `defaultSelected`), `itemClass` with `selected:` and
 // `focus:` (the row the keys act on while the tree has the focus),
 // `itemStyle`, the list's `listClass` and `listStyle`, `renderItem` given
@@ -34,6 +35,7 @@ function App() {
   const expanded = signal<string[]>(["src"]);
   const selected = signal<string | null>(null);
   const heard = signal("none");
+  const acted = signal("none");
   const changes = signal(0);
   const locked = signal(false);
   let tree!: TreeRef;
@@ -59,6 +61,7 @@ function App() {
         onSelectedChange={({ selected: next }) => selected.set(next)}
         onExpand={({ id }) => heard.set(`expand ${id}`)}
         onCollapse={({ id }) => heard.set(`collapse ${id}`)}
+        onAction={({ id }) => acted.set(id)}
       />
       <Tree
         testID="notes"
@@ -77,6 +80,7 @@ function App() {
       <Text>{`Expanded: ${expanded().join(",")}`}</Text>
       <Text>{`Heard: ${heard()}`}</Text>
       <Text>{`Changes: ${changes()}`}</Text>
+      <Text>{`Acted: ${acted()}`}</Text>
     </View>
   );
 }
