@@ -10,7 +10,10 @@ use std::time::Duration;
 
 use nsh_core::{element::Style, prelude::*};
 
-use crate::popup::{OpenChangeReason, OpenState, PopupPresence, StateLooks, lifecycle};
+use crate::{
+    popup::{OpenChangeReason, OpenState, PopupPresence, StateLooks, lifecycle},
+    roving::leave_bar,
+};
 
 /// The props of [`HoverCard`].
 #[derive(Debug, Clone, PartialEq, Props)]
@@ -22,12 +25,14 @@ pub struct HoverCardProps {
     #[prop(default)]
     pub default_open: Prop<bool>,
     /// Milliseconds the pointer rests on the trigger (or the keyboard
-    /// focus stays on it) before the card opens (default 600).
+    /// focus stays on it) before the card opens (default 600). `Infinity`:
+    /// never by itself, only when the app opens it (or, on touch screens,
+    /// a press on the trigger).
     #[prop(default = 600.0)]
     pub open_delay: Prop<f64>,
     /// Milliseconds the pointer is away from both the trigger and the card
     /// before the card closes (default 300): time to move from one to the
-    /// other.
+    /// other. `Infinity`: only Escape, a press outside or the app close it.
     #[prop(default = 300.0)]
     pub close_delay: Prop<f64>,
     /// The side of the trigger it goes on (default `"bottom"`); the other
@@ -94,6 +99,19 @@ pub enum HoverCardEvent {
     Position(Placement, Bounds<Points>, Size<Points>),
 }
 
+/// `ms` milliseconds as a delay: zero for a negative or NaN one, none (it
+/// never ends) for `Infinity` or one longer than a timer waits (2^31 - 1
+/// ms, about 24.8 days, as the web's `setTimeout`).
+fn delay(ms: f64) -> Option<Duration> {
+    if ms.is_nan() || ms <= 0.0 {
+        Some(Duration::ZERO)
+    } else if ms > f64::from(i32::MAX) {
+        None
+    } else {
+        Some(Duration::from_secs_f64(ms / 1000.0))
+    }
+}
+
 /// Where the pointer is, for the close delay: away from both, the card
 /// closes.
 #[derive(Debug, Clone, Copy, Default)]
@@ -137,10 +155,14 @@ pub fn HoverCard(props: HoverCardProps, cx: Scope<HoverCardEvent>) -> impl IntoE
         if open.get_untracked() == next {
             return;
         }
-        let delay = if next {
+        let ms = if next {
             props.open_delay.get_untracked()
         } else {
             props.close_delay.get_untracked()
+        };
+        // A delay that never ends: nothing to wait for.
+        let Some(delay) = delay(ms) else {
+            return;
         };
         let fire = move || {
             pending.replace(None);
@@ -149,15 +171,15 @@ pub fn HoverCard(props: HoverCardProps, cx: Scope<HoverCardEvent>) -> impl IntoE
             }
             change(next, reason);
         };
-        if delay <= 0.0 {
+        if delay.is_zero() {
             fire();
             return;
         }
-        let task = set_timeout(Duration::from_secs_f64(delay / 1000.0), fire);
+        let task = set_timeout(delay, fire);
         pending.replace(Some(task));
     };
     // At once: Escape, a press outside, a press on a touch screen.
-    let now = move |next: bool, reason: OpenChangeReason| {
+    let at_once = move |next: bool, reason: OpenChangeReason| {
         stop();
         change(next, reason);
     };
@@ -184,9 +206,16 @@ pub fn HoverCard(props: HoverCardProps, cx: Scope<HoverCardEvent>) -> impl IntoE
             let trigger = trigger.element_ref(&anchor);
             if !desktop {
                 // No pointer to rest: a press opens and closes it, and the
-                // trigger's own press runs as well.
+                // trigger's own press runs as well. A disclosure there, it
+                // says whether its card is open.
                 return trigger
-                    .on_press(move || now(!open.get_untracked(), OpenChangeReason::TriggerPress));
+                    .accessibility_state(move || AccessibilityState {
+                        expanded: Some(open.get()),
+                        ..AccessibilityState::default()
+                    })
+                    .on_press(move || {
+                        at_once(!open.get_untracked(), OpenChangeReason::TriggerPress)
+                    });
             }
             trigger
                 .on_mouse_enter(move |_: &MouseEvent| {
@@ -209,6 +238,9 @@ pub fn HoverCard(props: HoverCardProps, cx: Scope<HoverCardEvent>) -> impl IntoE
         .child(when(
             move || presence.mounted(),
             move || {
+                // The trigger may be a toolbar's item; the card's buttons
+                // and links are not.
+                leave_bar();
                 // The card leaves with the pointer on it: it hears no
                 // leave.
                 cleanup(move || over.with(|o| o.card = false));
@@ -241,12 +273,12 @@ pub fn HoverCard(props: HoverCardProps, cx: Scope<HoverCardEvent>) -> impl IntoE
                     })
                     .on_press_outside(move |_: &Point<Points>| {
                         if open.get_untracked() {
-                            now(false, OpenChangeReason::PressOutside);
+                            at_once(false, OpenChangeReason::PressOutside);
                         }
                     })
                     .on_cancel(move || {
                         if open.get_untracked() {
-                            now(false, OpenChangeReason::Cancel);
+                            at_once(false, OpenChangeReason::Cancel);
                         }
                     })
                     .child(props.children)

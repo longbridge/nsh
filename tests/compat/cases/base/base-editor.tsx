@@ -95,6 +95,7 @@ export default function BaseEditor() {
       </View>
       <View style={{ width: 390, height: 100 }}>
         <Editor
+          testID="outline"
           ref={r => (outline = r)}
           defaultValue={"mod a {\n  fn b() {\n    c();\n  }\n}\n"}
           language="rust"

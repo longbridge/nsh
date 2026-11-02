@@ -2500,12 +2500,17 @@ impl<M: TextEngine> State<M> {
                 _ => false,
             };
             let more_paced = script.is_some() && paced.left() && self.core.has_paced_list_binds();
+            // What waited for the app's answer to the events just taken runs
+            // in the next round, once JS has handled them, and shows in this
+            // batch.
+            let answers = self.core.has_due_answers();
             if self.binds.is_empty()
                 && self.events.is_empty()
                 && !posted
                 && !retheme
                 && !more_paced
                 && !urls
+                && !answers
             {
                 break;
             }

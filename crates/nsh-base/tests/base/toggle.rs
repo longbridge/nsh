@@ -3,7 +3,7 @@
 //! group is a toolbar, one stop of the keyboard focus, at the first pressed
 //! toggle (else the first enabled one), whose arrow keys, Home and End move
 //! the focus past disabled toggles, around the ends, without pressing
-//! anything. On macOS, where Tab stops at views that take presses.
+//! anything (Left and Right traded in a right-to-left layout). On macOS, where Tab stops at views that take presses.
 
 use std::time::Duration;
 
@@ -15,11 +15,16 @@ use nsh_testing::Headless;
 const MARKS: [&str; 4] = ["Bold", "Italic", "Strikethrough", "Underline"];
 
 fn start<C: Component<Props = ()>>() -> Headless {
+    start_in::<C>(false)
+}
+
+fn start_in<C: Component<Props = ()>>(rtl: bool) -> Headless {
     let mut config = EngineConfig {
         viewport: Size::new(px(390.0), px(844.0)),
         ..EngineConfig::new(Root::of::<C>())
     };
     config.environment.os = Os::MacOs;
+    config.environment.rtl = rtl;
     let mut app = Headless::start(config).unwrap();
     app.first_render().unwrap();
     app
@@ -149,6 +154,26 @@ fn arrows_move_the_focus_without_pressing_wrapping_and_skipping_disabled_toggles
     app.wait_for("text:marks:Bold,Italic,Underline").unwrap();
     // Left and Up back around the start.
     app.press_key("left").unwrap();
+    app.press_key("up").unwrap();
+    app.press_key("space").unwrap();
+    app.wait_for("text:marks:Bold,Underline").unwrap();
+    app.wait_for("text:changes:3").unwrap();
+}
+
+#[test]
+fn right_to_left_trades_left_and_right_and_keeps_up_and_down() {
+    let mut app = start_in::<Formatting>(true);
+    app.press_key("tab").unwrap();
+    app.press_key("tab").unwrap();
+    // Italic → Underline: Left is the next toggle.
+    app.press_key("left").unwrap();
+    app.press_key("space").unwrap();
+    app.wait_for("text:marks:Italic,Underline").unwrap();
+    // Right back to Italic.
+    app.press_key("right").unwrap();
+    app.press_key("space").unwrap();
+    app.wait_for("text:marks:Underline").unwrap();
+    // Up is still the previous one.
     app.press_key("up").unwrap();
     app.press_key("space").unwrap();
     app.wait_for("text:marks:Bold,Underline").unwrap();

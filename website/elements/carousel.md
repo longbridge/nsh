@@ -134,8 +134,8 @@ mount(App);
 
 `Carousel` and its parts come from [`nsh/base`](../modules/nsh-base.md), the `nsh-base` crate in Rust. The slide
 shown is the app's `index`: a swipe, a control or a key reports the next one with `onChange`, and the
-carousel scrolls to the `index` the app passes back. Until the app answers a swipe, the slide it rests on stays shown,
-so a swipe never springs back. Without `index` the carousel keeps its own, from `defaultIndex`. In Rust,
+carousel scrolls to the `index` the app passes back. Until the app answers a swipe with a new `index`, the slide it
+rests on stays shown, so a swipe never springs back. Without `index` the carousel keeps its own, from `defaultIndex`. In Rust,
 `carousel()`, `carousel_content()`, `carousel_item()`, `carousel_previous()`, `carousel_next()`,
 `carousel_pagination()` and `carousel_pagination_item()` make the parts, with a setter per prop
 (`.index(..)`), a listener per event (`.on_change(..)`), the typed style methods and `.child(..)` for their content.
@@ -205,8 +205,8 @@ so a swipe never springs back. Without `index` the carousel keeps its own, from 
 | `onChange` (`Carousel`) | `.on_change(\|index: &u32\| ..)` | The user moved to another slide: a swipe, the wheel or the touchpad came to rest on it, or a control, a pagination item or a key asked for it. `{ index }` is that slide. A new `index` from the app reports nothing. |
 | `onDragStart` (`Carousel`) | `.on_drag_start(\|\| ..)` | The user started dragging the content (a finger, the touchpad). |
 | `onDragEnd` (`Carousel`) | `.on_drag_end(\|\| ..)` | The content the user dragged came to rest. |
-| `onFocus` (`Carousel`) | `.on_focus(\|\| ..)` | The keyboard focus came into the carousel: to it or one of its controls. Moving between them reports nothing. |
-| `onBlur` (`Carousel`) | `.on_blur(\|\| ..)` | The keyboard focus left the carousel and its controls. |
+| `onFocus` (`Carousel`) | `.on_focus(\|\| ..)` | The keyboard focus came to the carousel's own view, its previous or next control or a pagination item. Moving between them reports nothing. A focusable view inside a slide reports with its own `onFocus`. |
+| `onBlur` (`Carousel`) | `.on_blur(\|\| ..)` | The keyboard focus left the carousel's own view, its controls and its pagination items. |
 
 ## Parts
 
@@ -225,7 +225,8 @@ so a swipe never springs back. Without `index` the carousel keeps its own, from 
 A slide's width is its own class's, so a row of cards is several slides in the viewport. Each slide is a snap point
 where it starts: the content rests with that slide where the first one rests, so a padding before the first is kept
 before each. At the end of the range the slides that cannot reach that place rest with the last one, and next stops
-there:
+there. `index` names the slide in the first place; the slides that rest with the last one show the same place, and a
+swipe there reports the first of them:
 
 ```tsx
 <Carousel accessibilityLabel="Collections">
@@ -259,8 +260,8 @@ third wide). With fewer, previous, next and the keys still go around, scrolling 
 
 A banner that rolls on is the app's: a timer that sets `index`. The carousel reports when the user is at it, so the
 timer waits then, as the [WAI-ARIA carousel pattern](https://www.w3.org/WAI/ARIA/apg/patterns/carousel/) asks:
-`onDragStart` / `onDragEnd` around a drag, `onFocus` / `onBlur` while the keyboard focus is in it, and the pointer
-over a view around it. Leave it off with reduced motion, and give users a button that stops it (the rotation
+`onDragStart` / `onDragEnd` around a drag, `onFocus` / `onBlur` while the keyboard focus is on the carousel, its
+controls or its pagination, and the pointer over a view around it. Leave it off with reduced motion, and give users a button that stops it (the rotation
 control):
 
 ```tsx
@@ -315,13 +316,17 @@ See [Accessibility](../docs/accessibility.md) for labels, roles and announcement
 ## Keyboard
 
 On macOS and the web, where Tab reaches the views that take presses, the carousel is a stop of the keyboard focus,
-and so are its controls. While it or one of its controls has the focus:
+and so are its controls and pagination items. While one of them has the focus:
 
 | Key | What it does |
 |---|---|
 | Left, Right (Up, Down when vertical) | Moves to the previous or the next slide, around the ends while looping. |
 | Home, End | Moves to the first or the last slide. |
 | Space, Return | Presses the focused control or pagination item. |
+
+In a right-to-left layout a horizontal carousel's slides run from the right, so Left moves to the next slide and Right
+to the previous; a vertical carousel keeps Up and Down. A control that turns disabled while it has the focus (next on
+the last slide) hands the focus to the carousel, so the keys go on working there.
 
 ## Motion
 

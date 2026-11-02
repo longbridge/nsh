@@ -130,8 +130,8 @@ pub(crate) fn make_font(style: &ResolvedTextStyle) -> CFRetained<CTFont> {
         let italic = CTFontSymbolicTraits::TraitItalic;
         // SAFETY: a valid font; size 0 keeps the size, null matrix keeps it.
         unsafe { font.copy_with_symbolic_traits(0.0, std::ptr::null(), italic, italic) }
-            // No italic face: keep the upright one, as web browsers do (they
-            // synthesize an oblique; CoreText cannot).
+            // No italic face (CJK fonts): keep the upright one, CoreText
+            // synthesizes no oblique (browsers do).
             .unwrap_or(font)
     } else {
         font

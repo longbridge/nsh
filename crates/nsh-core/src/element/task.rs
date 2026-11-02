@@ -306,6 +306,25 @@ pub(crate) struct Executor {
     /// soonest, as it does for JS's timers.
     timers: RefCell<BinaryHeap<Reverse<Timer>>>,
     next_timer_seq: std::cell::Cell<u64>,
+    /// What waits for the app to answer the events emitted before it
+    /// ([`super::after_answer`]).
+    answers: RefCell<Answers>,
+}
+
+/// The closures of [`super::after_answer`], by how far their events went.
+#[derive(Default)]
+struct Answers {
+    /// Their events have not been handed to JS yet.
+    waiting: Vec<AfterAnswer>,
+    /// Their events went to JS: they run in the next commit, by when JS has
+    /// handled them and its ops are applied.
+    due: Vec<AfterAnswer>,
+}
+
+/// A closure of [`super::after_answer`] and the owner it runs under.
+pub(crate) struct AfterAnswer {
+    pub(crate) owner: super::Owner,
+    pub(crate) f: Box<dyn FnOnce()>,
 }
 
 /// A task's timer: when, and whom to wake (in the order they were made
@@ -485,6 +504,38 @@ impl Executor {
         if let Some(notify) = notify {
             notify();
         }
+    }
+
+    /// Keeps `answer` until the events emitted so far have been handed to
+    /// JS and handled ([`super::after_answer`]).
+    pub(crate) fn after_answer(&self, answer: AfterAnswer) {
+        self.answers.borrow_mut().waiting.push(answer);
+    }
+
+    /// The events emitted so far go to JS: what waited for them is due.
+    pub(crate) fn hand_answers(&self) {
+        let mut answers = self.answers.borrow_mut();
+        let Answers { waiting, due } = &mut *answers;
+        if !waiting.is_empty() {
+            due.append(waiting);
+        }
+    }
+
+    /// Whether closures wait for the next commit to run.
+    pub(crate) fn has_due_answers(&self) -> bool {
+        !self.answers.borrow().due.is_empty()
+    }
+
+    /// Whether the queues ever held a closure (they allocate on the first).
+    #[cfg(test)]
+    pub(crate) fn answers_allocated(&self) -> bool {
+        let answers = self.answers.borrow();
+        answers.waiting.capacity() > 0 || answers.due.capacity() > 0
+    }
+
+    /// The closures whose events JS has handled, in order.
+    pub(crate) fn take_due_answers(&self) -> Vec<AfterAnswer> {
+        std::mem::take(&mut self.answers.borrow_mut().due)
     }
 }
 

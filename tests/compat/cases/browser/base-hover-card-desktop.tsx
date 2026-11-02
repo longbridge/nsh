@@ -13,8 +13,8 @@ function App() {
   return (
     <View style={{ flex: 1, paddingTop: 100, paddingLeft: 20, gap: 8 }}>
       <HoverCard
-        openDelay={1000}
-        closeDelay={500}
+        openDelay={2000}
+        closeDelay={2000}
         onOpenChange={({ open, reason }) => log.set(`Log: card ${open} ${reason}`)}
         trigger={<View style={{ height: 30, width: 100 }}><Text>SlowMention</Text></View>}
       >
