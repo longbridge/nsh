@@ -36,7 +36,7 @@ use nsh_core::{
 };
 
 use crate::{
-    SelectGroup, SelectItem, SelectItemState,
+    SelectEntry, SelectGroup, SelectItem,
     listbox::{self, Footer, Hooks, Listbox, Move, Parts, Query, Shown},
     popup::{DropdownFrame, OpenChangeReason, OpenState},
 };
@@ -116,7 +116,8 @@ pub struct ComboboxProps {
     pub list_style: Prop<Style>,
     /// The classes of each item's row: `focus:` while highlighted (the keys
     /// or the pointer are on it), `selected:` while selected, `disabled:`
-    /// while it cannot be.
+    /// while it cannot be; with `group`, its content follows them
+    /// (`group-focus:`, `group-selected:`, `group-disabled:`).
     pub item_class: Prop<Option<SharedString>>,
     /// The inline style of each item's row, over its classes: its text
     /// styles too (`color`, `fontSize`), which its title inherits.
@@ -165,9 +166,10 @@ pub struct ComboboxProps {
     /// What shows below the rows (`gpui-component`'s `footer`): an action,
     /// a count.
     pub footer: Prop<Option<Slot>>,
-    /// An item's row drawn by the app, for the rows in view; without it
-    /// a row shows the item's title.
-    pub render_item: Prop<Option<Renderer<SelectItemState>>>,
+    /// An item's row drawn by the app from what the item is, never its
+    /// state (the row's classes are), once per item in view; without it a
+    /// row shows the item's title.
+    pub render_item: Prop<Option<Renderer<SelectEntry>>>,
     /// A section's header drawn by the app; without it a header shows its
     /// title.
     pub render_group: Prop<Option<Renderer<SelectGroup>>>,

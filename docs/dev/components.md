@@ -1099,8 +1099,11 @@ typeahead chooses). The rows are a `virtual_list` with `viewport: parent` in the
 tall as its rows up to the room it has, and a list of thousands makes only the rows in view. Each row is an option
 (`selected` the chosen value, `disabled`), shows `focus:` while highlighted (`project_focused`) and takes the screen
 reader's focus when a key highlights it (`set_accessibility_focus`, only while a screen reader runs: on the web it
-moves the DOM focus; while the search field edits, the title is announced instead). The desktops choose on press
-down, so the search field keeps the keyboard focus. The trigger's role, states, focus and presses are bound on the
+moves the DOM focus; while the search field edits, the title is announced instead). The app's `renderItem` gets
+what the item is (`SelectEntry`: its value, title, `disabled`, group and index), never the row's state, as `Tree`'s
+`TreeEntry` and `Command`'s `CommandEntry`: its content is rendered under the item's key once and kept while the
+highlight moves or the value changes, the states being the row's classes (`group-focus:`, `group-selected:` inside).
+The desktops choose on press down, so the search field keeps the keyboard focus. The trigger's role, states, focus and presses are bound on the
 `trigger` slot, so in a TSX app they are the app's element's ("Named slots"): the popup is placed against it
 (`Overlay::anchor`), at least as wide as its layout reports, and waits for that first layout (open at first, it would
 be made before the slot is filled).

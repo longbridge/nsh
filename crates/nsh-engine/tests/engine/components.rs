@@ -4689,7 +4689,7 @@ function App() {
         }}
         accessibilityLabel="Controlled"
         trigger={<View><Text>Pick</Text></View>}
-        renderItem={(item) => <Text>{`${item.title}${item.selected ? " chosen" : ""}!`}</Text>}
+        renderItem={(item) => <Text>{`${item.title}!`}</Text>}
         renderGroup={(group) => <Text>{`[${group.title}]`}</Text>}
       />
       <Select
@@ -4803,7 +4803,7 @@ function App() {
         onConfirm={({ value: next }) => confirmed.set(next.join(","))}
         accessibilityLabel="Tags"
         triggerButton={<View accessibilityLabel="Toggle"><Text>Pick</Text></View>}
-        renderItem={(item) => <Text>{`${item.title}${item.selected ? " on" : ""}!`}</Text>}
+        renderItem={(item) => <Text>{`${item.title}!`}</Text>}
         footer={<Text>Footer</Text>}
       />
       <Text>{`Value: ${value().join(",")}`}</Text>
@@ -4858,7 +4858,9 @@ fn a_base_combobox_toggles_the_apps_array_and_confirms_it_on_close() {
         .control()
         .dispatch_event(button, EventKind::Press, EventPayload::None);
     let opened = until(&rx, |b| shows(b, "Swift!"));
-    assert!(opened.iter().any(|b| shows(b, "Go on!")));
+    // The rows draw what the items are; the selection is the option's state.
+    let (_, go) = find(&opened, "Go", AccessibilityRole::Option).expect("an option");
+    assert!(go.accessibility.state.selected);
     assert!(opened.iter().any(|b| shows(b, "Footer")));
     let (swift, _) = find(&opened, "Swift", AccessibilityRole::Option).expect("an option");
 
@@ -4867,7 +4869,11 @@ fn a_base_combobox_toggles_the_apps_array_and_confirms_it_on_close() {
         .control()
         .dispatch_event(swift, EventKind::Press, EventPayload::None);
     let toggled = until(&rx, |b| shows(b, "Value: go,swift"));
-    assert!(toggled.iter().any(|b| shows(b, "Swift on!")));
+    let selected = |batches: &[MountBatch], label: &str| {
+        find(batches, label, AccessibilityRole::Option)
+            .is_some_and(|(_, p)| p.accessibility.state.selected)
+    };
+    assert!(selected(&toggled, "Swift"));
     assert!(!toggled.iter().any(|b| shows(b, "Confirmed: go,swift")));
 
     // Closing confirms the array.

@@ -1,5 +1,5 @@
 import { type AnimatedValue, cleanup, computed, createAnimatedValue, createMotion, Easing, effect, type JSX, LayoutAnimation, Scroll, signal, Text, token, View } from "nsh";
-import { Button as BaseButton, type CalendarItemState, Checkbox, Collapsible, Combobox, type DateMatcher, DatePicker, type DateRangePreset, NumberInput, OtpInput, type OtpInputRef, Progress, Radio, RadioGroup, Select, type SelectGroup, type SelectItemState, Slider, Switch, Tab, Tabs } from "nsh/base";
+import { Button as BaseButton, type CalendarItemState, Checkbox, Collapsible, Combobox, type DateMatcher, DatePicker, type DateRangePreset, NumberInput, OtpInput, type OtpInputRef, Progress, Radio, RadioGroup, Select, type SelectEntry, type SelectGroup, Slider, Switch, Tab, Tabs } from "nsh/base";
 import { reduceMotion } from "nsh";
 import { platform, windowSize } from "nsh";
 import { Icon, type IconName } from "../icons";
@@ -1521,13 +1521,18 @@ export function Controls(props: { show: Control }) {
     );
   }
   /**
-   * A row of the list, its look on the row (`itemClass`), which the list keeps while it draws the row's content
-   * again: lit while highlighted (`focus:`, the keys or the pointer on it), the fill and edge fading between rows as
-   * the highlight moves; at once with reduced motion.
+   * A row of the list, its look on the row (`itemClass`): lit while highlighted (`focus:`, the keys or the pointer
+   * on it), the fill and edge fading between rows as the highlight moves (at once with reduced motion), dimmed while
+   * disabled. Every state is the row's class (`group`), so the list draws a row's content once per item and the
+   * highlight moves without drawing anything.
    */
-  const optionClass = "rounded-[7px] border border-transparent transition-colors duration-100 motion-reduce:transition-none focus:border-brand/30 focus:bg-brand-tint active:opacity-70";
-  /** A row's content: bolder with a check while chosen; `lead` before the title (a flag, a dot, a face, an icon), `note` after it. */
-  function Option(props: { item: SelectItemState; note?: string; lead?: JSX.Element; detail?: string }) {
+  const optionClass =
+    "group rounded-[7px] border border-transparent transition-colors duration-100 motion-reduce:transition-none focus:border-brand/30 focus:bg-brand-tint active:opacity-70 disabled:opacity-35";
+  /**
+   * A row's content: bolder with a check while chosen (`group-selected:`); `lead` before the title (a flag, a dot, a
+   * face, an icon), `note` after it.
+   */
+  function Option(props: { item: SelectEntry; note?: string; lead?: JSX.Element; detail?: string }) {
     return (
       <View
         style={{
@@ -1538,12 +1543,13 @@ export function Controls(props: { show: Control }) {
           height: props.detail ? (pointer ? 38 : 52) : pointer ? 30 : 44,
           // With its border and the popup's padding, the trigger's inset: a select's chosen row lies over the trigger, title on title.
           paddingHorizontal: pointer ? 3 : 7,
-          opacity: props.item.disabled ? 0.35 : 1,
         }}
       >
         {props.lead}
         <View style={{ flex: 1, minWidth: 0 }}>
-          <Text style={{ numberOfLines: 1, fontSize: 14, fontWeight: props.item.selected ? "600" : "400", color: colors.text }}>{props.item.title}</Text>
+          <Text class="font-normal group-selected:font-semibold" style={{ numberOfLines: 1, fontSize: 14, color: colors.text }}>
+            {props.item.title}
+          </Text>
           <If when={props.detail}>
             <Text style={{ numberOfLines: 1, fontSize: 12, color: colors.muted }}>{props.detail}</Text>
           </If>
@@ -1551,10 +1557,8 @@ export function Controls(props: { show: Control }) {
         <If when={props.note}>
           <Text style={{ fontSize: 12, color: colors.faint, fontVariant: ["tabular-nums"] }}>{props.note}</Text>
         </If>
-        <View style={{ width: 16, alignItems: "center" }}>
-          <If when={props.item.selected}>
-            <Icon name="check" size={14} tint={colors.accent} />
-          </If>
+        <View class="opacity-0 group-selected:opacity-100" style={{ width: 16, alignItems: "center" }}>
+          <Icon name="check" size={14} tint={colors.accent} />
         </View>
       </View>
     );
@@ -2215,7 +2219,21 @@ export function Controls(props: { show: Control }) {
           {...listProps()}
           align="start"
           renderItem={(item) => (
-            <Option item={item} lead={<Icon name={command(item.value).icon} size={14} tint={item.highlighted ? colors.text : colors.muted} />} note={item.disabled ? "At 100%" : pointer ? command(item.value).keys : undefined} />
+            <Option
+              item={item}
+              lead={
+                // The icon takes the text's color while its row is highlighted.
+                <View style={{ width: 14, height: 14 }}>
+                  <View class="group-focus:hidden">
+                    <Icon name={command(item.value).icon} size={14} tint={colors.muted} />
+                  </View>
+                  <View class="hidden group-focus:flex">
+                    <Icon name={command(item.value).icon} size={14} tint={colors.text} />
+                  </View>
+                </View>
+              }
+              note={item.disabled ? "At 100%" : pointer ? command(item.value).keys : undefined}
+            />
           )}
           renderGroup={(group) => <Header group={group} />}
         />

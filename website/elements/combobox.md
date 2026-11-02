@@ -21,7 +21,7 @@ list stays open, so several are picked in one go. The look is the app's: it styl
 the rows, the sections' headers, the input and the footer, or draws the rows itself.
 
 ```rust tabs
-use nsh_base::{SelectItem, SelectItemState, combobox, theme};
+use nsh_base::{SelectEntry, SelectItem, combobox, theme};
 use nsh_core::prelude::*;
 
 const TAGS: [(&str, &str); 5] = [
@@ -68,16 +68,8 @@ fn tag_picker() -> impl IntoElement {
         .border_color(move || theme().input)
         .input_style(|s| s.flex_1().text_sm())
         .trigger_button(text("⌄"))
-        .render_item(|item: &SelectItemState| {
-            view()
-                .flex_row()
-                .justify_between()
-                .px_2()
-                .py_1p5()
-                .when(item.highlighted, |v| v.bg(move || theme().accent))
-                .child(text(item.title.clone()).text_sm())
-                .when(item.selected, |v| v.child(text("✓").text_sm()))
-        })
+        .item_class("rounded-md focus:bg-accent selected:font-medium disabled:opacity-50")
+        .render_item(|item: &SelectEntry| view().px_2().py_1p5().child(text(item.title.clone()).text_sm()))
 }
 ```
 
@@ -108,12 +100,12 @@ function App() {
       backdropClass="bg-black/40"
       class="h-9 w-48 flex-row items-center rounded-md border border-input px-3"
       inputClass="flex-1 text-sm placeholder:text-muted-foreground"
-      itemClass="rounded-md px-2 py-1.5 text-sm focus:bg-accent focus:text-accent-foreground"
+      itemClass="group rounded-md px-2 py-1.5 text-sm focus:bg-accent focus:text-accent-foreground"
       triggerButton={<Text class="px-1 text-muted-foreground">⌄</Text>}
       renderItem={(item) => (
         <View class="flex-row justify-between">
           <Text>{item.title}</Text>
-          <Text>{item.selected ? "✓" : ""}</Text>
+          <Text class="opacity-0 group-selected:opacity-100">✓</Text>
         </View>
       )}
     />
@@ -199,7 +191,7 @@ a count, a hint. It stays in place while the rows scroll.
 | `suffix` | `.suffix(..)` | `JSX.Element` | none | Content after the trigger button. |
 | `empty` | `.empty(..)` | `JSX.Element` | none | What the list shows while no item does. |
 | `footer` | `.footer(..)` | `JSX.Element` | none | What shows below the rows. |
-| `renderItem` | `.render_item(..)` | `(item: SelectItemState) => JSX.Element` | none | An item's row, drawn by the app; the item's title otherwise. |
+| `renderItem` | `.render_item(..)` | `(item: SelectEntry) => JSX.Element` | none | An item's row, drawn by the app from what the item is, never its state: the content follows the row's `group-focus:`, `group-selected:` and `group-disabled:` (`group` in `itemClass`), so a move of the highlight or a toggle draws nothing again; the item's title otherwise. |
 | `renderGroup` | `.render_group(..)` | `(group: SelectGroup) => JSX.Element` | none | A section's header, drawn by the app; its title otherwise. |
 | `class`, `style` | style methods | `string`, `StyleProp<ViewStyle>` | none | The field: the row of the prefix, the input, the buttons and the suffix; the list is as wide as it. |
 
@@ -231,7 +223,7 @@ They come in this order: `onChange` for a choice, or `onCancel` for a close with
 | The backdrop | behind the sheet (touch screens) | `backdropClass`, `backdropStyle` |
 | The list | the popup | `listClass`, `listStyle` |
 | A section's header | the list, before its items | `groupClass`, `groupStyle`, `renderGroup` |
-| An item's row | the list | `itemClass`, `itemStyle`, `renderItem` |
+| An item's row | the list | `itemClass`, `itemStyle`, `renderItem` (`group-focus:`, `group-selected:`, `group-disabled:` inside, under `group` in `itemClass`) |
 | The empty state | the popup, while no item shows | its own element (`empty`) |
 | The footer | the popup, last | `footerClass`, `footerStyle`; its content `footer` |
 

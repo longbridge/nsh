@@ -190,7 +190,7 @@ pub use crate::{
         set_scrollbar_theme,
     },
     select::{
-        Select, SelectElement, SelectEvent, SelectGroup, SelectItem, SelectItemState, SelectProps,
+        Select, SelectElement, SelectEntry, SelectEvent, SelectGroup, SelectItem, SelectProps,
         SelectValue, select,
     },
     sheet::{Sheet, SheetElement, SheetEvent, SheetProps, sheet},

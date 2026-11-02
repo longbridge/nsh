@@ -176,9 +176,9 @@ import type {
   StatusBar,
   RadioGroupProps,
   RadioProps,
+  SelectEntry,
   SelectGroup,
   SelectItem,
-  SelectItemState,
   SelectProps,
   ComboboxProps,
   CommandEntry,
@@ -328,7 +328,7 @@ import type {
 
 ### Select
 
-从以数据形式给出的一组条目（`items`：每个条目有值和标题，可以禁用或归入分组）中选出一个值，本身没有外观。应用的触发元素打开列表：在桌面平台上是触发元素处的弹出层，在手机和平板上是屏幕底部的 sheet。选择框负责键盘（Up、Down、Home、End、Page Up 和 Page Down、输入跳转、Return 和 Escape）、搜索（`searchable`）、高亮的行（`itemClass` 上的 `focus:`，`renderItem` 中的 `highlighted`），以及屏幕阅读器读到的组合框、列表框和选项角色。值由应用持有（`value`、`onChange`），或交给选择框自己保存（`defaultValue`）；应用为每个部件设置样式，或者自己绘制行。见 [Select](../elements/select.md)。
+从以数据形式给出的一组条目（`items`：每个条目有值和标题，可以禁用或归入分组）中选出一个值，本身没有外观。应用的触发元素打开列表：在桌面平台上是触发元素处的弹出层，在手机和平板上是屏幕底部的 sheet。选择框负责键盘（Up、Down、Home、End、Page Up 和 Page Down、输入跳转、Return 和 Escape）、搜索（`searchable`）、高亮的行（`itemClass` 上的 `focus:`；`renderItem` 只收到条目本身，从不收到状态），以及屏幕阅读器读到的组合框、列表框和选项角色。值由应用持有（`value`、`onChange`），或交给选择框自己保存（`defaultValue`）；应用为每个部件设置样式，或者自己绘制行。见 [Select](../elements/select.md)。
 
 ### Combobox
 

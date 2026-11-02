@@ -2265,31 +2265,33 @@ absent Apple
 expect Fruit: Cherry
 prop label:Fruit accessibilityValue text=Cherry
 prop label:Fruit accessibilityState expanded=false
-# Opening again highlights the chosen item (`focus:`, 40 high; the
-# renderer's `highlighted`), which is selected for screen readers.
+# Opening again highlights the chosen item (`focus:`, 40 high; its
+# content's `group-focus:` color: `renderItem` draws what the item is, the
+# row's state its classes), which is selected for screen readers.
 tap id:fruit
-expect >Cherry ✓
+expect Cherry
+style text:Cherry color #ff0000ff
 prop label:Cherry accessibilityState selected=true
 frame label:Cherry 0 0 390 40
 frame label:Apple 0 0 390 30
 # Choosing the chosen item again closes the list and reports no change.
 tap label:Cherry
 expect Open: false select
-absent >Cherry ✓
+absent Cherry
 expect Changed: cherry 1
 # The app opens it (`open`); Escape or back is heard, and closes it.
 tap text:ShowFruit
-expect >Cherry ✓
+expect Cherry
 event label:Cherry onCancel
 expect Heard: cancel
 expect Open: false cancel
-absent >Cherry ✓
+absent Cherry
 # The backdrop closes it too.
 tap id:fruit
-expect >Cherry ✓
+expect Cherry
 tap below:parent:scroll:label:Cherry
 expect Open: false backdropPress
-absent >Cherry ✓
+absent Cherry
 covers [nsh/base] Select
 covers [props] Select.items
 covers [props] value
