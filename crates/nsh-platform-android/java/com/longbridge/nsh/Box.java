@@ -185,9 +185,13 @@ class Box extends ViewGroup implements Node, NshView.ShaderFrames {
         shaderInputs = on ? inputs : 0;
         shaderOverflow = Math.round(Math.max(0, overflow) * mounter.density);
         stale = true;
-        NshView host = mounter.host;
-        if (on && screen()) host.screen = this;
-        else if (host.screen == this) host.screen = null;
+        // A screen shader draws over the surface while it is in the window;
+        // one not in it yet takes the surface once attached.
+        if (on && screen()) {
+            if (isAttachedToWindow()) takeScreen();
+        } else {
+            giveUpScreen();
+        }
         if (on) {
             shaderSize();
         } else {
@@ -203,9 +207,37 @@ class Box extends ViewGroup implements Node, NshView.ShaderFrames {
         watch();
     }
 
+    /** Its node is deleted: its shader goes, with its pictures and the surface it drew over. */
+    void dropShader() {
+        if (shader) setShader(false, FILL, 0, 0);
+    }
+
     /** Whether it draws over the whole surface. */
     boolean screen() {
         return shaderRole == SCREEN || shaderRole == SCREEN_TRANSITION;
+    }
+
+    /**
+     * Draws over the surface (a screen shader's frame, the surface as it is
+     * until one comes), in place of another screen shader's frame.
+     */
+    private void takeScreen() {
+        NshView host = mounter.host;
+        if (host.screen == this) return;
+        host.screen = this;
+        host.invalidate();
+    }
+
+    /**
+     * Stops drawing over the surface, which draws itself again: its display
+     * list holds this shader's frame instead of the views. A screen shader
+     * that replaced this one keeps it.
+     */
+    private void giveUpScreen() {
+        NshView host = mounter.host;
+        if (host.screen != this) return;
+        host.screen = null;
+        host.invalidate();
     }
 
     private boolean reads(int input) {
@@ -261,11 +293,15 @@ class Box extends ViewGroup implements Node, NshView.ShaderFrames {
     @Override
     protected void onAttachedToWindow() {
         super.onAttachedToWindow();
+        if (shader && screen() && mounter.host.screen == null) takeScreen();
         watch();
     }
 
     @Override
     protected void onDetachedFromWindow() {
+        // Its subtree left the window, maybe before its node is deleted:
+        // the surface shows as it is (moved, it takes it back when attached).
+        giveUpScreen();
         if (watching) {
             getViewTreeObserver().removeOnPreDrawListener(picturing);
             watching = false;
@@ -343,11 +379,17 @@ class Box extends ViewGroup implements Node, NshView.ShaderFrames {
         long handle = mounter.handle();
         boolean transition = shaderRole == TRANSITION || shaderRole == SCREEN_TRANSITION;
         if (!shader || !transition || handle == 0 || !Pictures.supported()) return;
-        if (shown().getWidth() <= 0 || shown().getHeight() <= 0 || !picture(FROM, true)) return;
+        if (shown().getWidth() <= 0 || shown().getHeight() <= 0) return;
+        if (!picture(FROM, true) || !Native.shaderTransition(handle, id, ms)) {
+            // No run (no GPU): the children show as they are, not the
+            // picture of what showed.
+            if (!transitioning()) fromBitmap = null;
+            return;
+        }
         transitionEnd = android.os.SystemClock.uptimeMillis() + Math.round(ms);
         stale = true;
         shown().invalidate();
-        if (Native.shaderTransition(handle, id, ms)) mounter.host.requestFrames();
+        mounter.host.requestFrames();
         watch();
     }
 

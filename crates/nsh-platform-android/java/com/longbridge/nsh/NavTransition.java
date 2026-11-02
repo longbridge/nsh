@@ -13,7 +13,9 @@ import android.view.ViewGroup;
  * (`NAV_SHADER`; API 29+): pictures of its lower side (`sample_from`) and
  * of its upper side (`sample_to`) go to libnsh, which runs the shader under
  * the id of the stack or the dialog; this view, over them, shows its frames
- * until it ends.
+ * until it ends. libnsh sends the frames that come back while its clock runs
+ * and, once it ends, one that replaces nothing: until the first frame, what
+ * it covers shows as it is.
  */
 @SuppressLint("ViewConstructor")
 final class NavTransition extends View implements NshView.ShaderFrames {
@@ -41,7 +43,7 @@ final class NavTransition extends View implements NshView.ShaderFrames {
      * from 0 to 1 as the page or the dialog comes, from 1 to 0 as it goes
      * (`reverse`). `covered` runs once its first frame shows (what it covers
      * may hide), `done` when it ends. Null where it does not run (no shader,
-     * Android 9, no picture): the caller animates as it would.
+     * Android 9, no picture, no GPU): the caller animates as it would.
      */
     static NavTransition start(Mounter mounter, ViewGroup parent, int id, int page, View[] lower, View[] upper,
                                boolean reverse, Runnable covered, Runnable done) {
@@ -76,6 +78,11 @@ final class NavTransition extends View implements NshView.ShaderFrames {
         if (getParent() instanceof ViewGroup) ((ViewGroup) getParent()).removeView(this);
     }
 
+    /**
+     * A frame while it runs (`replaces`), or its end. libnsh sends nothing
+     * until the first frame comes back, so waiting for it never ends the
+     * transition.
+     */
     @Override
     public void shaderFrame(java.nio.ByteBuffer pixels, int width, int height, boolean replaces, float overflow) {
         if (!replaces) {

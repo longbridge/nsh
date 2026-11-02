@@ -200,7 +200,12 @@ Effects, transitions and page shaders sit on the same program, layer and rendere
   (`SHADER_TRANSITION`) and shows it until the first frame. Screen layers draw over the app's view (`NshView`);
   dialogs, their own windows, are outside. Pages and dialogs (`NAV_SHADER`): `StackBox` and `ModalHost` run a
   `NavTransition.java` overlay; `nsh.progress` goes through one more slot of the layer, run by a clock of the
-  platform's, 0 to 1 on push and present, 1 to 0 on pop and dismiss.
+  platform's, 0 to 1 on push and present, 1 to 0 on pop and dismiss; the overlay gets only the frames that came back
+  and, once its clock ends, one that replaces nothing, which settles the change (until the first frame, what it covers
+  shows as it is). A screen layer draws over the surface while its view is in the window: detached, deleted or turned
+  off, it gives the surface back and redraws it, unless another screen layer took its place. Without a GPU device
+  `Native.shaderTransition` starts no run (the children show as they are) and `Native.navTransition` declines, so a
+  page moves with its own animation (`StackBox`) and a dialog with its `animation` (`ModalHost`).
 
 ## Pitfalls
 
@@ -216,5 +221,7 @@ Effects, transitions and page shaders sit on the same program, layer and rendere
 - **Premultiplied alpha.** `shade` returns straight alpha; the core premultiplies and the renderers draw with blending
   off, so frames are premultiplied (GPUI's images are straight: its backend converts). Do not premultiply again on a
   platform.
+- **A first frame is not an end.** A run's first frame comes back one or two display frames after it starts, and
+  `ShaderView::frame()` is empty until then: a page's or a dialog's run ends on its clock, never on an empty frame.
 - **Readback latency.** Native frames arrive one or two display frames after `render`; a backend must keep ticking
   while `ShaderView::pending()` is true, or the last frame of a change never shows.

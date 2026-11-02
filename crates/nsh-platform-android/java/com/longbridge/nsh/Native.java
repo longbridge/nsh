@@ -274,7 +274,10 @@ final class Native {
     static native boolean shaderInput(long handle, int id, int input, java.nio.ByteBuffer pixels, int width,
                                       int height, int stride);
 
-    /** Shader view {@code id}'s transition starts, {@code ms} long; whether frames should come. */
+    /**
+     * Shader view {@code id}'s transition starts, {@code ms} long; whether it
+     * runs (not without a GPU: the children show as they are).
+     */
     static native boolean shaderTransition(long handle, int id, float ms);
 
     /**

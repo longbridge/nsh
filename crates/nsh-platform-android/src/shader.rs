@@ -26,7 +26,13 @@
 //! stack or the dialog it plays in (`Native.navTransition`), over its lower
 //! side (`from`) and its upper side (`to`): its own clock moves
 //! `nsh.progress` from 0 to 1 as a page or a dialog comes, from 1 to 0 as it
-//! goes.
+//! goes. Java hears of it when a frame comes back, which replaces what it
+//! covers, and once when its clock ends, with a frame that does not: until
+//! the first frame comes back, what it covers shows as it is.
+//!
+//! Without a device (`Renderer::new` is `None`) shader views show their
+//! background and children: an effect gets no frames, a transition starts
+//! no run, and a page or a dialog comes and goes with its own animation.
 
 use std::{
     hash::{Hash, Hasher},
@@ -140,18 +146,26 @@ impl Shaders {
         }
     }
 
-    /// View `id`'s transition starts (its `from` picture came first).
-    pub(crate) fn start_transition(&mut self, id: u32, duration: Duration) {
-        if let Some(view) = self.views.get_mut(&id) {
-            view.start_transition(duration, Instant::now());
+    /// View `id`'s transition starts (its `from` picture came first);
+    /// whether it runs. Without a device none does: its children show as
+    /// they are.
+    pub(crate) fn start_transition(&mut self, id: u32, duration: Duration) -> bool {
+        if self.renderer().is_none() {
+            return false;
         }
+        let Some(view) = self.views.get_mut(&id).filter(|v| v.layer().is_some()) else {
+            return false;
+        };
+        view.start_transition(duration, Instant::now());
+        true
     }
 
     /// A page or a dialog comes or goes (`reverse`) through `page`'s
     /// `transitionShader` over the view `key` (the stack or the dialog) of
     /// `width` × `height` pixels at `density`: `from` is its lower side (the
     /// page under it, the window without the dialog), `to` its upper side
-    /// (each `(pixels, stride)` at that size). Whether it runs.
+    /// (each `(pixels, stride)` at that size). Whether it runs: not without
+    /// a device, so the page or the dialog comes with its own animation.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn nav_transition(
         &mut self,
@@ -188,7 +202,6 @@ impl Shaders {
         view.set_input(renderer, ShaderInput::From, Some((from.0, w, h, from.1)));
         view.set_input(renderer, ShaderInput::To, Some((to.0, w, h, to.1)));
         self.views.insert(key, view);
-        self.told.insert(key, (false, [0; 4]));
         self.navs.insert(
             key,
             NavRun {
@@ -264,17 +277,27 @@ impl Shaders {
         let mut more = false;
         let mut ended = Vec::new();
         for (&id, view) in &mut self.views {
-            let replaces = match self.navs.get(&id) {
-                // A page or a dialog: until its clock ends.
-                Some(run) => {
-                    let t = run.at(now);
-                    let progress = if run.reverse { 1.0 - t } else { t };
-                    view.set_slot(run.slot, AnimationValue::Number(progress));
-                    t < 1.0
+            if let Some(run) = self.navs.get(&id) {
+                // A page or a dialog: frames while its clock runs, and one
+                // that replaces nothing when it ends (Java settles it). Until
+                // the first frame comes back, what it covers shows as it is,
+                // so an empty frame is never taken for its end.
+                let t = run.at(now);
+                if t >= 1.0 {
+                    deliver(nsh_view, id, &Frame::default(), false, 0.0);
+                    ended.push(id);
+                    continue;
                 }
-                // Until its pictures came, the children show as they are.
-                None => view.replaces_children(now) && pictured(view),
-            };
+                let progress = if run.reverse { 1.0 - t } else { t };
+                view.set_slot(run.slot, AnimationValue::Number(progress));
+                if view.wants_frame() && view.render(renderer, now) && view.frame().width > 0 {
+                    deliver(nsh_view, id, view.frame(), true, view.overflow().0);
+                }
+                more = true;
+                continue;
+            }
+            // Until its pictures came, the children show as they are.
+            let replaces = view.replaces_children(now) && pictured(view);
             let told = self.told.entry(id).or_default();
             let flipped = told.0 != replaces;
             told.0 = replaces;
@@ -288,11 +311,8 @@ impl Shaders {
                     replaces && frame.width > 0,
                     view.overflow().0,
                 );
-                if !replaces && self.navs.contains_key(&id) {
-                    ended.push(id);
-                }
             }
-            more |= view.wants_frame() || self.navs.contains_key(&id);
+            more |= view.wants_frame();
         }
         for id in ended {
             self.delete(id);

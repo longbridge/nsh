@@ -869,7 +869,7 @@ final class Mounter {
         }
         screenOptions.remove(id);
         navShaders.delete(id);
-        if (v != null && host.screen == v) host.screen = null;
+        if (v instanceof Box) ((Box) v).dropShader();
         Animator running = layoutAnimators.get(id);
         if (running != null) running.cancel();
         detach(v);

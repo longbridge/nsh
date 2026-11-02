@@ -130,8 +130,10 @@ final class StackBox extends FrameLayout implements Node {
                             settle(leaving);
                         });
                 if (t == null) {
-                    // No picture: the screens change at once.
-                    settle(leaving);
+                    // No picture, or no GPU: the page moves with its own
+                    // animation.
+                    if (upper.animation == 2) settle(leaving);
+                    else animate(lower, upper, push, upper.animation == 1, 0, leaving);
                     return true;
                 }
                 navTransition = t;

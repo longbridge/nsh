@@ -1641,7 +1641,8 @@ extern "system" fn Java_com_longbridge_nsh_Native_shaderInput(
 }
 
 /// Shader view `id`'s transition starts, `ms` long (its `from` picture came
-/// first). Whether frames should come.
+/// first). Whether it runs (false without a GPU: the children show as they
+/// are); Java then asks for frames.
 #[unsafe(no_mangle)]
 extern "system" fn Java_com_longbridge_nsh_Native_shaderTransition(
     _: JNIEnv<'_>,
@@ -1654,8 +1655,7 @@ extern "system" fn Java_com_longbridge_nsh_Native_shaderTransition(
     let host = unsafe { host(handle) };
     let mut ui = host.ui.lock().expect("ui");
     let duration = std::time::Duration::from_secs_f32(ms.max(0.0) / 1000.0);
-    ui.shaders.start_transition(id as u32, duration);
-    ui.shaders.wants_frame().into()
+    ui.shaders.start_transition(id as u32, duration).into()
 }
 
 /// Page or dialog `page` comes or goes (`reverse`) through its
