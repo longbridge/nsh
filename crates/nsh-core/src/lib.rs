@@ -103,10 +103,10 @@ pub use crate::{
     },
     style::{
         BorderStyle, Borders, Color, CornerRadii, DecorationStyle, EllipsizeMode, EnvVar,
-        FontFamily, FontVariant, GridTemplateValue, LineHeight, ObjectPosition, PaintStyle,
-        PositionAxis, PropertyValue, Style, StyleDecl, StyleError, StyleKey, StylePatch,
-        StyleValue, SvgPaint, TextAlign, TextDecoration, TextShadow, TextStyle, TextTransform,
-        TransformOrigin, TransformProperty, VerticalAlign, ViewStyle,
+        FamilyName, FontFamily, FontVariant, GridTemplateValue, LineHeight, ObjectPosition,
+        PaintStyle, PositionAxis, PropertyValue, Style, StyleDecl, StyleError, StyleKey,
+        StylePatch, StyleValue, SvgPaint, TextAlign, TextDecoration, TextShadow, TextStyle,
+        TextTransform, TransformOrigin, TransformProperty, VerticalAlign, ViewStyle, font_families,
     },
     text::{
         ATTACHMENT_CHAR, Affinity, ApproxTextEngine, AttachmentAlignments, AttributedText,
