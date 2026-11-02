@@ -118,7 +118,7 @@ item as well: the view in its `trigger` slot, which the popup gives its presses,
 `ToggleGroup` inside a toolbar is one of its groups: its toggles are the toolbar's items, screen readers hear a group,
 and its `disabled` still disables its own toggles. Other controls (an `Input`, a `Select`, a `Slider`) stay stops of
 their own and keep their arrow keys; place them at the end of the bar. What a popup an item opens shows (a popover's
-fields and buttons, a menu's items) is no part of the toolbar. The arrow keys go through the items in the order the
+fields and buttons, a menu's items, a hover card's links) is no part of the toolbar. The arrow keys go through the items in the order the
 bar lays them out, however deep each one sits, and an item the app shows later takes its place among them.
 
 ## Parts

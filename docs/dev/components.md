@@ -917,7 +917,7 @@ what changed.
   view the app puts there takes the stop's `focusable`, the focus listeners and the bar's `disabled` (a `Button` inside
   a trigger would be a second pressable: triggers are plain views, as everywhere). A `ToggleGroup` or `ToolbarGroup` inside a toolbar provides the toolbar's `Roving` again
   (with its own `disabled` added), so its items are the toolbar's and the toolbar stays one stop. A popup's content
-  (`Popover`, `Sheet`, `Menu`, the dropdown of `popup.rs`) leaves the bar (`leave_bar`): its controls are stops of
+  (`Popover`, `HoverCard`, `Sheet`, `Menu`, the dropdown of `popup.rs`) leaves the bar (`leave_bar`): its controls are stops of
   their own though its trigger is a toolbar's item.
   Only the stop is `focusable`: the item the focus is on, else the item it last left (a toolbar) or the current one
   (the others), else the first enabled, so Tab passes the group in one step. Each item's `focusable` reads a flag of

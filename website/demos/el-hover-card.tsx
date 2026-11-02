@@ -21,13 +21,15 @@ function App() {
   const log = (name: string) => ({ open, reason }: { open: boolean; reason: OpenChangeReason }) =>
     events.set([`${name} ${open ? "opened" : "closed"} · ${reason}`, ...events()].slice(0, 6));
   const shared = () => ({ ...exit, openDelay: openDelay(), closeDelay: closeDelay(), placement: placement(), offset: 8, margin: 12 });
-  const words = (s: string) => <Text style={{ fontSize: 15, color: ui().text }}>{s}</Text>;
+  // Running text in a wrapping row: one piece per word, so a line breaks
+  // between words, and the row's gap is the space between them.
+  const words = (s: string) => s.split(" ").map((w) => <Text style={{ fontSize: 15, color: ui().text }}>{w}</Text>);
 
   // A mention: the person's card, with a button that works because the
   // pointer can move into the card.
   const mention = () => (
     <HoverCard {...shared()} onOpenChange={log("@ada")} trigger={
-      <View role="link" onPress={() => events.set(["onPress /people/ada", ...events()].slice(0, 6))} focusStyle={focusRing(1)} style={{ borderRadius: 4, borderWidth: 1, borderColor: "transparent", paddingHorizontal: 2 }} hoverStyle={{ backgroundColor: tint(ui().accent, 0.14) }}>
+      <View role="link" onPress={() => events.set(["onPress /people/ada", ...events()].slice(0, 6))} focusStyle={focusRing(1)} style={{ borderRadius: 4, borderWidth: 1, borderColor: "transparent", paddingHorizontal: 2, marginHorizontal: -3 }} hoverStyle={{ backgroundColor: tint(ui().accent, 0.14) }}>
         <Text style={{ fontSize: 15, fontWeight: "600", color: ui().accent }}>@ada</Text>
       </View>
     }>
@@ -100,8 +102,11 @@ function App() {
         {words("Ask")}
         {mention()}
         {words("about the layout engine,")}
-        {preview()}
-        {words(".")}
+        {/* The period stays with the link. */}
+        <View style={{ flexDirection: "row", alignItems: "center" }}>
+          {preview()}
+          {words(".")}
+        </View>
       </View>
       <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
         {words("Today:")}

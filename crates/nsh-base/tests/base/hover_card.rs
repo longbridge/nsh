@@ -1,10 +1,14 @@
 //! `HoverCard` on a Mac: it opens once the pointer rested on the trigger
 //! for its open delay (or the keyboard focus came to it), stays open while
 //! the pointer moves into the card, closes its close delay after the
-//! pointer left both, and at once on Escape; a controlled card shows what
-//! the app says; a hover sends the platform nothing until the card opens.
-//! On a phone a press opens and closes it. On a manual clock: time moves
-//! only as the test says.
+//! pointer left both, and at once on Escape; the pointer back on either
+//! within the close delay, or on the trigger while the card goes, keeps
+//! it; a delay of `Infinity` never ends and one of `NaN` is none; a
+//! controlled card shows what the app says; a hover sends the platform
+//! nothing until the card opens; what the card shows is no part of a
+//! toolbar its trigger is in. On a phone a press opens and closes it, and
+//! the trigger says whether it is open. On a manual clock: time moves only
+//! as the test says.
 
 use std::{
     sync::{
@@ -14,7 +18,7 @@ use std::{
     time::Duration,
 };
 
-use nsh_base::{HoverCardEvent, hover_card};
+use nsh_base::{HoverCardEvent, button, hover_card, toolbar};
 use nsh_core::{
     Size,
     element::Root,
@@ -28,6 +32,14 @@ use nsh_testing::Headless;
 struct ScreenProps {
     /// The app owns `open`, changed only by pressing "Toggle".
     controlled: bool,
+    /// The card's `openDelay`.
+    #[prop(default = 600.0)]
+    open_delay: f64,
+    /// The card's `closeDelay`.
+    #[prop(default = 300.0)]
+    close_delay: f64,
+    /// The card fades out for a second once closed.
+    exit: bool,
 }
 
 /// A mention whose card previews a profile, a place away from it, and
@@ -35,9 +47,16 @@ struct ScreenProps {
 #[component]
 fn HoverScreen(props: ScreenProps) -> impl IntoElement {
     let changes = signal(Vec::<String>::new());
+    let life = signal(Vec::<&str>::new());
     let shown = signal(false);
     let card = hover_card()
         .offset(px(4.0))
+        .open_delay(props.open_delay)
+        .close_delay(props.close_delay)
+        .popup_class("transition-opacity duration-1000")
+        .popup_ending_class(props.exit.then(|| SharedString::from("opacity-0")))
+        .on_open(move || life.update(|l| l.push("open")))
+        .on_close(move || life.update(|l| l.push("close")))
         .on_open_change(move |e: &HoverCardEvent| {
             if let HoverCardEvent::OpenChange(open, reason) = e {
                 let change = format!("{open}:{reason:?}");
@@ -80,15 +99,33 @@ fn HoverScreen(props: ScreenProps) -> impl IntoElement {
         .child(text(move || {
             format!("Changes: {}", changes.get().join(" "))
         }))
+        .child(text(move || format!("Life: {}", life.get().join(" "))))
 }
 
 /// The screen on a Mac (or an iPhone) on a manual clock, counting the
 /// mount items the platform is sent.
 fn start(controlled: bool, desktop: bool) -> (Headless, Arc<AtomicUsize>) {
+    start_with(
+        ScreenProps {
+            controlled,
+            ..ScreenProps::default()
+        },
+        desktop,
+    )
+}
+
+/// [`start`] with `props`.
+fn start_with(props: ScreenProps, desktop: bool) -> (Headless, Arc<AtomicUsize>) {
+    start_root(Root::new::<HoverScreen>(move || props.clone()), desktop)
+}
+
+/// `root` on a Mac (or an iPhone) on a manual clock, counting the mount
+/// items the platform is sent.
+fn start_root(root: Root, desktop: bool) -> (Headless, Arc<AtomicUsize>) {
     let mut config = EngineConfig {
         viewport: Size::new(px(390.0), px(844.0)),
         clock: nsh_engine::Clock::manual(std::time::SystemTime::now()),
-        ..EngineConfig::new(Root::new::<HoverScreen>(move || ScreenProps { controlled }))
+        ..EngineConfig::new(root)
     };
     if desktop {
         config.environment.os = Os::MacOs;
@@ -269,4 +306,185 @@ fn on_a_phone_a_press_opens_and_closes_a_hover_card() {
         "Changes: true:TriggerPress false:TriggerPress true:TriggerPress false:PressOutside",
     )
     .unwrap();
+}
+
+#[test]
+fn the_pointer_back_within_the_close_delay_keeps_a_hover_card_open() {
+    let (mut app, _) = start(false, true);
+    open_by_hover(&mut app);
+    // Off the trigger, then back before the close delay ran out.
+    app.hover("id:away").unwrap();
+    app.run_for(Duration::from_millis(200)).unwrap();
+    app.hover("id:trigger").unwrap();
+    app.run_for(Duration::from_millis(1000)).unwrap();
+    assert!(app.shows("Ada Lovelace"), "back on the trigger in time");
+    // Onto the card, away, and back onto the card in time.
+    app.hover("id:card").unwrap();
+    app.run_for(Duration::from_millis(200)).unwrap();
+    app.hover("id:away").unwrap();
+    app.run_for(Duration::from_millis(200)).unwrap();
+    app.hover("id:card").unwrap();
+    app.run_for(Duration::from_millis(1000)).unwrap();
+    assert!(app.shows("Ada Lovelace"), "back on the card in time");
+    app.wait_for("Changes: true:Hover").unwrap();
+    app.wait_for("Life: open").unwrap();
+}
+
+#[test]
+fn resting_on_the_trigger_while_a_hover_card_goes_takes_it_back() {
+    let (mut app, _) = start_with(
+        ScreenProps {
+            exit: true,
+            ..ScreenProps::default()
+        },
+        true,
+    );
+    open_by_hover(&mut app);
+    app.hover("id:away").unwrap();
+    app.run_for(Duration::from_millis(350)).unwrap();
+    app.wait_for("Changes: true:Hover false:Hover").unwrap();
+    assert!(app.shows("Ada Lovelace"), "kept while its exit runs");
+    // Back on the trigger 50 ms into its second-long exit.
+    app.hover("id:trigger").unwrap();
+    app.run_for(Duration::from_millis(650)).unwrap();
+    app.wait_for("Changes: true:Hover false:Hover true:Hover")
+        .unwrap();
+    app.run_for(Duration::from_millis(2000)).unwrap();
+    assert!(app.shows("Ada Lovelace"), "open again, not gone");
+    assert!(app.shows("Life: open"), "taken back: never closed");
+}
+
+#[test]
+fn an_open_delay_of_infinity_never_opens_a_hover_card_by_itself() {
+    let (mut app, _) = start_with(
+        ScreenProps {
+            open_delay: f64::INFINITY,
+            ..ScreenProps::default()
+        },
+        true,
+    );
+    app.hover("id:trigger").unwrap();
+    app.run_for(Duration::from_secs(10)).unwrap();
+    app.press_key("tab").unwrap();
+    app.run_for(Duration::from_secs(10)).unwrap();
+    assert!(!app.shows("Ada Lovelace"));
+    assert!(app.shows("Changes:"), "nothing asked");
+}
+
+#[test]
+fn a_close_delay_of_infinity_leaves_closing_to_escape() {
+    let (mut app, _) = start_with(
+        ScreenProps {
+            close_delay: f64::INFINITY,
+            ..ScreenProps::default()
+        },
+        true,
+    );
+    open_by_hover(&mut app);
+    app.hover("id:away").unwrap();
+    app.run_for(Duration::from_secs(10)).unwrap();
+    assert!(
+        app.shows("Ada Lovelace"),
+        "the pointer away does not close it"
+    );
+    app.press_key("escape").unwrap();
+    assert!(!app.shows("Ada Lovelace"));
+    app.wait_for("Changes: true:Hover false:Cancel").unwrap();
+}
+
+#[test]
+fn delays_of_nan_are_none() {
+    let (mut app, _) = start_with(
+        ScreenProps {
+            open_delay: f64::NAN,
+            close_delay: f64::NAN,
+            ..ScreenProps::default()
+        },
+        true,
+    );
+    app.hover("id:trigger").unwrap();
+    app.run_for(Duration::from_millis(20)).unwrap();
+    assert!(app.shows("Ada Lovelace"), "open at once");
+    app.hover("id:away").unwrap();
+    app.run_for(Duration::from_millis(20)).unwrap();
+    assert!(!app.shows("Ada Lovelace"), "closed at once");
+    app.wait_for("Changes: true:Hover false:Hover").unwrap();
+}
+
+#[test]
+fn on_a_phone_the_trigger_says_whether_its_hover_card_is_open() {
+    let (mut app, _) = start(false, false);
+    let expanded = |app: &mut Headless| {
+        app.screen()
+            .accessibility_state("id:trigger")
+            .unwrap()
+            .expanded
+    };
+    assert_eq!(expanded(&mut app), Some(false));
+    app.press("id:trigger").unwrap();
+    app.wait_for("Ada Lovelace").unwrap();
+    assert_eq!(expanded(&mut app), Some(true));
+}
+
+#[derive(Clone, PartialEq, Props)]
+struct BarProps {
+    /// The toolbar is disabled.
+    disabled: bool,
+}
+
+/// A toolbar of a button (Bold) and a mention whose hover card is open with
+/// a button (Apply) in it, a button after the toolbar, and which of them
+/// were pressed.
+#[component]
+fn InToolbar(props: BarProps) -> impl IntoElement {
+    let reached = signal(Vec::<&'static str>::new());
+    let note = move |name: &'static str| {
+        move || {
+            reached.update(|r| {
+                if !r.contains(&name) {
+                    r.push(name);
+                    r.sort_unstable();
+                }
+            })
+        }
+    };
+    view()
+        .child(
+            toolbar()
+                .disabled(props.disabled)
+                .child(button().on_press(note("Bold")).child(text("Bold")))
+                .child(
+                    hover_card()
+                        .open(Some(true))
+                        .trigger(text("@ada"))
+                        .child(button().on_press(note("Apply")).child(text("Apply"))),
+                ),
+        )
+        .child(button().on_press(note("After")).child(text("After")))
+        .child(text(move || format!("reached:{}", reached.get().join(","))))
+}
+
+#[test]
+fn what_a_hover_card_shows_is_no_part_of_the_toolbar_its_trigger_is_in() {
+    let (mut app, _) = start_root(
+        Root::new::<InToolbar>(|| BarProps { disabled: false }),
+        true,
+    );
+    app.wait_for("Apply").unwrap();
+    // Three stops, whatever their order: the toolbar (at Bold), the card's
+    // Apply and After. Had Apply joined the toolbar, Tab would never reach
+    // it.
+    for _ in 0..3 {
+        app.press_key("tab").unwrap();
+        app.press_key("enter").unwrap();
+    }
+    app.wait_for("text:reached:After,Apply,Bold").unwrap();
+}
+
+#[test]
+fn a_disabled_toolbar_leaves_its_hover_cards_buttons_enabled() {
+    let (mut app, _) = start_root(Root::new::<InToolbar>(|| BarProps { disabled: true }), true);
+    app.wait_for("Apply").unwrap();
+    app.press("text:Apply").unwrap();
+    app.wait_for("text:reached:Apply").unwrap();
 }
