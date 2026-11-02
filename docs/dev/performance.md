@@ -2,7 +2,14 @@
 
 Performance is the project's first priority; the rules are in `AGENTS.md`. Changes to hot paths come with before /
 after `nsh test --trace` timings and item counts (`nsh trace` before it, in the records below). Current baselines
-(Apple Silicon):
+(Apple Silicon except where noted):
+
+Windows cursor refresh after a style batch, against main `a5036af4`, debug host, one native run per revision:
+`echo 'await app.press("+1")' | nsh test examples/counter/App.tsx --target windows --trace`.
+Both runs produce 56 ops / 50 mount items / 21 nodes initially and 10 ops / 7 mount items / 24 nodes after the press.
+Initial commits measured 1164 → 1139 µs; press commits 380 → 329 µs. These single samples establish unchanged work
+counts on the counter's unchanged-cursor path. A batch compares cursor values while applying view styles, then
+refreshes once if any changed; other batches skip the cursor hit test.
 
 
 Span test-id metadata (macOS arm64, debug CLI, three runs per revision against `e02b40f8`):
