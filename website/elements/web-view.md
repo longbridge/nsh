@@ -92,6 +92,13 @@ A web view takes the props of a [view](./view.md) (it has no children) plus:
 (an attachment, a type the web view does not show, a `download` link) is saved in the app's data directory as
 `downloads/<id>/<filename>`, where `path` points, and the app reads it with `fs/promises`.
 
+On macOS, adding the listener lets any loaded page allowed by the `webview` capability save downloads
+automatically. The app is responsible for its storage budget and for removing completed files from `downloads/`
+when it has finished using them. Removing the web view cancels downloads in progress and removes their partial
+directories. Downloads report through `onDownload`; converting a navigation into a download keeps `onError`
+for actual navigation failures. Filenames have control characters and bidirectional formatting controls removed,
+and long names are shortened to 200 bytes while preserving an extension that fits.
+
 ## Ref methods
 
 | Method | Rust | Description |

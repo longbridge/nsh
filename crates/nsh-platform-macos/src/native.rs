@@ -26,6 +26,8 @@
 //!   WebKit's `WKDownload` into the app's data directory,
 //!   `downloads/<id>/<name>`, and reports it as it starts, finishes or
 //!   fails; without a listener those navigations stay as they were.
+//!   Dropping the host cancels active downloads and removes their partial
+//!   directories after cancellation. The app owns completed files' retention.
 //! - **Registered components**: [`AppView::register_component`] names a
 //!   factory; the core creates a [`ViewKind::Native`] container, names the
 //!   component ([`MountItem::Component`]) and sends its props as JSON as
@@ -1229,12 +1231,15 @@ struct WebIvars {
     downloads: Option<PathBuf>,
     /// The downloads under way, by their `WKDownload`.
     active: RefCell<FxHashMap<usize, Download>>,
+    navigation: Cell<Option<usize>>,
+    /// Response policies that converted a navigation into a download.
+    downloading: RefCell<FxHashSet<usize>>,
 }
 
 /// A download under way: its `WKDownload` (kept alive until it ends) and
 /// what `onDownload` reports of it.
 struct Download {
-    _download: Retained<AnyObject>,
+    download: Retained<AnyObject>,
     id: String,
     url: String,
     filename: String,
@@ -1329,8 +1334,13 @@ define_class!(
             decide: &block2::Block<dyn Fn(isize)>,
         ) {
             let download = self.saves_downloads() && is_download(response);
+            if download && let Some(navigation) = self.ivars().navigation.get() {
+                self.ivars().downloading.borrow_mut().insert(navigation);
+            }
+            // SAFETY: WKNavigationResponse's documented MIME support flag.
+            let shows: Bool = unsafe { msg_send![response, canShowMIMEType] };
             // WKNavigationResponsePolicyCancel = 0, Allow = 1, Download = 2.
-            decide.call((if download { 2 } else { 1 },));
+            decide.call((if download { 2 } else { shows.as_bool() as isize },));
         }
 
         #[unsafe(method(webView:navigationAction:didBecomeDownload:))]
@@ -1409,7 +1419,8 @@ define_class!(
         }
 
         #[unsafe(method(webView:didStartProvisionalNavigation:))]
-        fn did_start(&self, web: &AnyObject, _navigation: Option<&AnyObject>) {
+        fn did_start(&self, web: &AnyObject, navigation: Option<&AnyObject>) {
+            self.ivars().navigation.set(navigation.map(download_key));
             self.emit(EventKind::LoadStart, || navigation_state(web, true));
             self.emit(EventKind::NavigationStateChange, || {
                 navigation_state(web, true)
@@ -1417,7 +1428,10 @@ define_class!(
         }
 
         #[unsafe(method(webView:didFinishNavigation:))]
-        fn did_finish(&self, web: &AnyObject, _navigation: Option<&AnyObject>) {
+        fn did_finish(&self, web: &AnyObject, navigation: Option<&AnyObject>) {
+            if let Some(navigation) = navigation {
+                self.ivars().downloading.borrow_mut().remove(&download_key(navigation));
+            }
             self.emit(EventKind::Load, || navigation_state(web, false));
             self.emit(EventKind::NavigationStateChange, || {
                 navigation_state(web, false)
@@ -1425,18 +1439,18 @@ define_class!(
         }
 
         #[unsafe(method(webView:didFailNavigation:withError:))]
-        fn did_fail(&self, _web: &AnyObject, _navigation: Option<&AnyObject>, error: &AnyObject) {
-            self.failed(error);
+        fn did_fail(&self, _web: &AnyObject, navigation: Option<&AnyObject>, error: &AnyObject) {
+            self.failed(navigation, error);
         }
 
         #[unsafe(method(webView:didFailProvisionalNavigation:withError:))]
         fn did_fail_provisional(
             &self,
             _web: &AnyObject,
-            _navigation: Option<&AnyObject>,
+            navigation: Option<&AnyObject>,
             error: &AnyObject,
         ) {
-            self.failed(error);
+            self.failed(navigation, error);
         }
     }
 );
@@ -1453,6 +1467,8 @@ impl WebHandler {
             access,
             downloads,
             active: RefCell::default(),
+            navigation: Cell::default(),
+            downloading: RefCell::default(),
         });
         // SAFETY: NSObject's designated initializer.
         unsafe { msg_send![super(this), init] }
@@ -1494,7 +1510,7 @@ impl WebHandler {
         let object = unsafe { Retained::retain(download as *const AnyObject as *mut AnyObject) }
             .expect("a download");
         let entry = Download {
-            _download: object,
+            download: object,
             id,
             url,
             filename,
@@ -1506,10 +1522,41 @@ impl WebHandler {
             .insert(download_key(download), entry);
     }
 
-    fn failed(&self, err: &AnyObject) {
+    fn failed(&self, navigation: Option<&AnyObject>, err: &AnyObject) {
+        let downloading = navigation.is_some_and(|navigation| {
+            self.ivars()
+                .downloading
+                .borrow_mut()
+                .remove(&download_key(navigation))
+        });
+        // SAFETY: NSError's documented domain and code. WebKit reports 102
+        // for the navigation we deliberately converted into a download.
+        let (domain, code): (Retained<NSString>, isize) =
+            unsafe { (msg_send![err, domain], msg_send![err, code]) };
+        if downloading && domain.to_string() == "WebKitErrorDomain" && code == 102 {
+            return;
+        }
         // SAFETY: `localizedDescription` of an NSError.
         let message: Retained<NSString> = unsafe { msg_send![err, localizedDescription] };
         self.emit(EventKind::Error, || error(message.to_string()));
+    }
+
+    fn cancel_downloads(&self) {
+        // Release the borrow before WebKit can call back into the delegate.
+        let active = std::mem::take(&mut *self.ivars().active.borrow_mut());
+        for entry in active.into_values() {
+            let done = RcBlock::new(move |_resume: *const AnyObject| {
+                if let Some(dir) = entry.path.parent() {
+                    let _ = std::fs::remove_dir_all(dir);
+                }
+            });
+            // SAFETY: each retained WKDownload is still live; cancel copies
+            // the block and calls it after writing has stopped.
+            unsafe {
+                let _: () = msg_send![&entry.download, setDelegate: std::ptr::null::<AnyObject>()];
+                let _: () = msg_send![&entry.download, cancel: &*done];
+            }
+        }
     }
 }
 
@@ -1557,13 +1604,30 @@ fn file_name(suggested: &str) -> String {
     let last = suggested.rsplit(['/', '\\']).next().unwrap_or_default();
     let mut name: String = last
         .chars()
-        .filter(|c| !c.is_control() && *c != ':')
+        .filter(|c| {
+            !c.is_control()
+                && !matches!(c, ':' | '\u{061c}' | '\u{200e}'..='\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{206f}')
+        })
         .collect::<String>()
         .trim()
         .trim_start_matches('.')
         .to_owned();
-    while name.len() > 200 {
-        name.pop();
+    if name.len() > 200 {
+        // Preserve a normal extension while shortening the stem on UTF-8 boundaries.
+        let extension = name
+            .rsplit_once('.')
+            .map(|(_, ext)| format!(".{ext}"))
+            .filter(|ext| ext.len() + name.chars().next().map_or(0, char::len_utf8) <= 200);
+        if let Some(extension) = &extension {
+            name.truncate(name.len() - extension.len());
+        }
+        let limit = 200 - extension.as_ref().map_or(0, String::len);
+        while name.len() > limit {
+            name.pop();
+        }
+        if let Some(extension) = extension {
+            name.push_str(&extension);
+        }
     }
     if name.is_empty() {
         "download".to_owned()
@@ -1811,6 +1875,7 @@ impl WebHost {
 
 impl Drop for WebHost {
     fn drop(&mut self) {
+        self.handler.cancel_downloads();
         let Some(web) = &self.web else { return };
         // SAFETY: breaks the cycle web view → content controller → handler
         // and stops the page.
@@ -1824,7 +1889,6 @@ impl Drop for WebHost {
                 removeScriptMessageHandlerForName: &*NSString::from_str("nsh")
             ];
         }
-        let _ = &self.handler;
     }
 }
 
@@ -1883,6 +1947,20 @@ mod tests {
         assert_eq!(file_name(""), "download");
         assert_eq!(file_name(".."), "download");
         assert_eq!(file_name(&"x".repeat(300)).len(), 200);
+        assert_eq!(file_name("invoice\u{202e}fdp.exe"), "invoicefdp.exe");
+        assert_eq!(
+            file_name(
+                "\u{061c}\u{200e}\u{200f}\u{202a}\u{202b}\u{202c}\u{202d}\u{2066}\u{2067}\u{2068}\u{2069}report.pdf"
+            ),
+            "report.pdf"
+        );
+        let long = file_name(&format!("{}.pdf", "文".repeat(100)));
+        assert!(long.len() <= 200);
+        assert!(long.ends_with(".pdf"));
+        let long_extension = file_name(&format!("文.{}", "x".repeat(198)));
+        assert!(long_extension.len() <= 200);
+        assert!(!long_extension.starts_with('.'));
+        assert_eq!(file_name(&format!("{}.txt", "\u{7}".repeat(300))), "txt");
         assert_eq!(
             url_file_name("https://example.com/files/report.pdf?v=2#p1"),
             "report.pdf"

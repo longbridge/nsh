@@ -84,6 +84,8 @@ web view 接受 [view](./view.md) 的属性（它没有子元素），另外还�
 
 `WebViewDownload` 为 `{ state, id, url, filename, path, bytes?, message? }`：`state` 为 `"started"`、`"finished"`（带文件大小 `bytes`）或 `"failed"`（带原因 `message`）。设置了 `onDownload` 后，页面下载的内容（附件、web view 不显示的类型、`download` 链接）保存在应用数据目录的 `downloads/<id>/<filename>`，即 `path` 所指的位置，应用用 `fs/promises` 读取。
 
+在 macOS 上，添加监听器后，`webview` 能力允许加载的任何页面都可以自动保存下载文件。应用负责管理存储空间，并在使用完毕后删除 `downloads/` 中已完成的文件。移除 web view 会取消正在进行的下载，并删除其未完成的目录。下载通过 `onDownload` 报告；导航转为下载时，`onError` 只报告实际的导航失败。文件名会移除控制字符和双向格式控制符；过长的名称会缩短到 200 字节，并保留能容纳的扩展名。
+
 ## ref 方法
 
 | 方法 | Rust | 说明 |
