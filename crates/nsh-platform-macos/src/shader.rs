@@ -69,6 +69,9 @@ pub(crate) struct Shaders {
     /// The views whose shaders read pictures (effects, transitions,
     /// screens, backdrops): [`ui_changed`] looks among them.
     pictured: RefCell<Vec<NshView>>,
+    /// The running page and dialog overlays' marks ([`NavOverlay`]), which
+    /// [`ui_changed`] sets when a view under one changes.
+    overlays: RefCell<Vec<Weak<Mark>>>,
     /// Its frame callback runs.
     running: Cell<bool>,
 }
@@ -103,6 +106,11 @@ pub(crate) struct ShaderState {
     /// The children's container is masked: the frames show instead
     /// ([`ShaderState::hides`]).
     masked: bool,
+    /// Where the children's (the root's) pictures are drawn, kept for the
+    /// next.
+    canvas: Option<Canvas>,
+    /// Where the backdrop's pictures are drawn, kept for the next.
+    backdrop_canvas: Option<Canvas>,
 }
 
 impl ShaderState {
@@ -125,6 +133,8 @@ impl ShaderState {
             stale: false,
             backdrop_stale: false,
             masked: false,
+            canvas: None,
+            backdrop_canvas: None,
         }
     }
 
@@ -145,11 +155,34 @@ impl ShaderState {
     fn hides(&mut self, shaders: &Shaders, now: Instant) -> bool {
         self.view.replaces_children(now) && shaders.renderer().is_some()
     }
+
+    /// Whether its program reads the children it draws (an effect's
+    /// `sample_content`, a transition's `sample_to`): only then are they
+    /// pictured again when they change.
+    fn reads_children(&self) -> bool {
+        let inputs = self
+            .view
+            .layer()
+            .map(|l| l.shader.inputs())
+            .unwrap_or_default();
+        match self.role {
+            ShaderRole::Fill => false,
+            ShaderRole::Transition | ShaderRole::ScreenTransition => {
+                inputs.contains(ShaderInput::To)
+            }
+            _ => inputs.contains(ShaderInput::Content),
+        }
+    }
 }
 
 /// Above every child (and a canvas's or text's content), as the frames of
 /// an effect show instead of them.
 const OVER: CGFloat = 1.0e6;
+
+/// The display frames after its first on which a page's or a dialog's
+/// overlay pictures its live side whether or not a view under it changed:
+/// AppKit lays out and draws what navigation just showed over these.
+const SETTLING_FRAMES: u32 = 3;
 
 thread_local! {
     /// The keys of the surfaces with views in [`Shaders::pictured`] (no
@@ -204,16 +237,30 @@ fn refresh_mask(surface: &Surface, view: &NshView, now: Instant) {
 
 /// Keeps `view` among the views whose shaders read pictures, or not.
 fn track(surface: &Surface, view: &NshView, pictures: bool) {
-    let mut pictured = surface.shaders.pictured.borrow_mut();
-    pictured.retain(|v| v != view);
-    if pictures {
-        pictured.push(view.clone());
+    {
+        let mut pictured = surface.shaders.pictured.borrow_mut();
+        pictured.retain(|v| v != view);
+        if pictures {
+            pictured.push(view.clone());
+        }
     }
+    sync_picturing(surface);
+}
+
+/// Keeps the surface among [`PICTURING`] while it has views that read
+/// pictures or overlays running.
+fn sync_picturing(surface: &Surface) {
+    let shaders = &surface.shaders;
+    shaders
+        .overlays
+        .borrow_mut()
+        .retain(|m| m.strong_count() > 0);
+    let picturing = !shaders.pictured.borrow().is_empty() || !shaders.overlays.borrow().is_empty();
     let key = surface.key();
     PICTURING.with(|p| {
         let mut p = p.borrow_mut();
         p.retain(|&k| k != key);
-        if !pictured.is_empty() {
+        if picturing {
             p.push(key);
         }
     });
@@ -332,7 +379,7 @@ pub(crate) fn input_changed(surface: &Rc<Surface>, view: &NshView) {
             .layer()
             .map(|l| l.shader.inputs())
             .unwrap_or_default();
-        s.stale = s.role != ShaderRole::Fill;
+        s.stale = s.reads_children();
         s.backdrop_stale = inputs.contains(ShaderInput::Backdrop);
         s.stale || s.backdrop_stale
     });
@@ -354,6 +401,14 @@ pub(crate) fn ui_changed(view: &NshView) {
 }
 
 fn ui_changed_in(surface: &Rc<Surface>, view: &NshView) {
+    // A page's or a dialog's overlay pictures its side again.
+    for mark in surface.shaders.overlays.borrow().iter() {
+        if let Some(mark) = mark.upgrade()
+            && view.ns().isDescendantOf(&mark.host)
+        {
+            mark.dirty.set(true);
+        }
+    }
     let views = surface.shaders.pictured.borrow().clone();
     if views.is_empty() {
         return;
@@ -369,8 +424,10 @@ fn ui_changed_in(surface: &Rc<Surface>, view: &NshView) {
         let Some(shader) = state.shader.as_mut() else {
             continue;
         };
-        let inside = shader.role != ShaderRole::Fill
-            && (is_screen(shader.role) || view.ns().isDescendantOf(v.ns()));
+        // Only a shader that reads them pictures its children (the whole
+        // surface, for a screen's) again.
+        let inside =
+            shader.reads_children() && (is_screen(shader.role) || view.ns().isDescendantOf(v.ns()));
         let backdrop = shader
             .view
             .layer()
@@ -414,33 +471,31 @@ pub(crate) fn start_transition(
     let scale = host.ns().window().map_or(2.0, |w| w.backingScaleFactor());
     let size = host.state().frame.size;
     // From what shows: the running transition's frame, or the children.
-    let from = {
-        let state = view.state();
-        let shader = state.shader.as_ref().expect("a shader");
-        (shader.masked && shader.view.frame().width > 0)
-            .then(|| shader.view.frame().tight().to_vec())
-            .map(|rgba| {
-                (
-                    rgba,
-                    shader.view.frame().width as usize,
-                    shader.view.frame().height as usize,
-                )
-            })
+    let (frame, mut canvas) = {
+        let mut state = view.state_mut();
+        let shader = state.shader.as_mut().expect("a shader");
+        let frame = (shader.masked && shader.view.frame().width > 0).then(|| {
+            let frame = shader.view.frame();
+            (frame.tight().to_vec(), frame.width, frame.height)
+        });
+        (frame, shader.canvas.take())
     };
-    let from = from.or_else(|| children_picture(&host, size, overflow.0, scale, is_screen(role)));
+    let from = match &frame {
+        Some((rgba, w, h)) => Some((&rgba[..], *w, *h, *w * 4)),
+        None => children_picture(&mut canvas, &host, size, overflow.0, scale, is_screen(role)),
+    };
     let now = Instant::now();
     {
         let mut state = view.state_mut();
         let shader = state.shader.as_mut().expect("a shader");
-        if let Some((rgba, w, h)) = &from {
-            shader.view.set_input(
-                renderer,
-                ShaderInput::From,
-                Some((rgba, *w as u32, *h as u32, *w as u32 * 4)),
-            );
+        if let Some(from) = from {
+            shader
+                .view
+                .set_input(renderer, ShaderInput::From, Some(from));
         }
         shader.view.start_transition(duration, now);
         shader.stale = true;
+        shader.canvas = canvas;
     }
     refresh_mask(surface, view, now);
     if tick_due(view) {
@@ -449,25 +504,25 @@ pub(crate) fn start_transition(
 }
 
 /// `host`'s children (its container, without the mask that hides them),
-/// the box grown by `overflow` points, at `scale`: premultiplied RGBA and
-/// its size in pixels. A screen's (`whole`) is all the root shows (the
-/// dialogs and what navigation hosts are beside the container) but the
-/// frames over it.
-fn children_picture(
+/// the box grown by `overflow` points, at `scale`, drawn into `canvas`. A
+/// screen's (`whole`) is all the root shows (the dialogs and what
+/// navigation hosts are beside the container) but the frames over it.
+fn children_picture<'a>(
+    canvas: &'a mut Option<Canvas>,
     host: &NshView,
     size: nsh_core::Size<nsh_core::Points>,
     overflow: f32,
     scale: CGFloat,
     whole: bool,
-) -> Option<(Vec<u8>, usize, usize)> {
+) -> Option<Pixels<'a>> {
     let container = host.container_view().and_then(|c| c.layer());
     let layer = match (&container, whole) {
         (Some(c), false) => c.clone(),
         _ => host.ns().layer()?,
     };
-    let size = picture_size(size, overflow, scale)?;
+    let canvas = Canvas::of(canvas, picture_size(size, overflow, scale)?)?;
     let origin = (-overflow as f64, -overflow as f64);
-    let rgba = render_with(&layer, origin, size, |context| {
+    Some(canvas.render(&layer, origin, |context| {
         let mask = container.as_ref().and_then(|c| c.mask());
         if let Some(c) = &container {
             // SAFETY: clearing (and below restoring) the container's own mask.
@@ -487,8 +542,7 @@ fn children_picture(
         if let Some(c) = &container {
             unsafe { c.setMask(mask.as_deref()) };
         }
-    });
-    Some((rgba, size.0, size.1))
+    }))
 }
 
 fn picture_size(
@@ -525,46 +579,95 @@ fn display_tree(layer: &CALayer) {
     }
 }
 
-/// `layer` (its views draw y down) rendered into premultiplied RGBA of
-/// `pw` × `ph` pixels at `scale`, top row first: its point `origin` at the
-/// top-left. Its layers that are due to draw draw first; then `draw` renders
-/// into the context (`renderInContext:`), hiding what it leaves out (after
-/// the drawing, which sets the views' layers again).
-fn render_with(
-    layer: &CALayer,
-    origin: (f64, f64),
-    (pw, ph, scale): (usize, usize, CGFloat),
-    draw: impl FnOnce(&objc2_core_graphics::CGContext),
-) -> Vec<u8> {
-    use objc2_core_graphics::{
-        CGBitmapContextCreate, CGColorSpace, CGContext, CGImageAlphaInfo, CGImageByteOrderInfo,
-        kCGColorSpaceSRGB,
-    };
-    display_tree(layer);
-    let mut out = vec![0u8; pw * ph * 4];
-    // SAFETY: `out` holds `pw * 4 * ph` bytes and outlives the context; the
-    // layer is rendered on the main thread, which owns it.
-    unsafe {
-        let Some(space) = CGColorSpace::with_name(Some(kCGColorSpaceSRGB)) else {
-            return out;
-        };
-        let Some(context) = CGBitmapContextCreate(
-            out.as_mut_ptr().cast(),
-            pw,
-            ph,
-            8,
-            pw * 4,
-            Some(&space),
-            CGImageAlphaInfo::PremultipliedLast.0 | CGImageByteOrderInfo::Order32Big.0,
-        ) else {
-            return out;
-        };
-        CGContext::translate_ctm(Some(&context), 0.0, ph as CGFloat);
-        CGContext::scale_ctm(Some(&context), scale, -scale);
-        CGContext::translate_ctm(Some(&context), -origin.0, -origin.1);
-        crate::surface::quiet(|| draw(&context));
+/// A picture's pixels: premultiplied RGBA, its width, height and stride.
+type Pixels<'a> = (&'a [u8], u32, u32, u32);
+
+/// A bitmap context and the pixels it draws into, kept so that a picture
+/// taken again at the same size draws into them again: a picture as large
+/// as the renderer draws is 64 MB, too much to allocate on every display
+/// frame.
+struct Canvas {
+    context: CFRetained<objc2_core_graphics::CGContext>,
+    /// Width and height in pixels, and pixels per point.
+    size: (usize, usize, CGFloat),
+}
+
+impl Canvas {
+    /// `slot`'s canvas, made again when it is not of `size`.
+    fn of(slot: &mut Option<Canvas>, size: (usize, usize, CGFloat)) -> Option<&mut Canvas> {
+        if slot.as_ref().is_none_or(|c| c.size != size) {
+            *slot = Canvas::new(size);
+        }
+        slot.as_mut()
     }
-    out
+
+    fn new((pw, ph, scale): (usize, usize, CGFloat)) -> Option<Canvas> {
+        use objc2_core_graphics::{
+            CGBitmapContextCreate, CGColorSpace, CGImageAlphaInfo, CGImageByteOrderInfo,
+            kCGColorSpaceSRGB,
+        };
+        // SAFETY: a constant of CoreGraphics.
+        let space = CGColorSpace::with_name(Some(unsafe { kCGColorSpaceSRGB }))?;
+        // SAFETY: CoreGraphics allocates the pixels (null data) and frees
+        // them with the context.
+        let context = unsafe {
+            CGBitmapContextCreate(
+                std::ptr::null_mut(),
+                pw,
+                ph,
+                8,
+                pw * 4,
+                Some(&space),
+                CGImageAlphaInfo::PremultipliedLast.0 | CGImageByteOrderInfo::Order32Big.0,
+            )
+        }?;
+        Some(Canvas {
+            context,
+            size: (pw, ph, scale),
+        })
+    }
+
+    /// `layer` (its views draw y down) rendered with its point `origin` at
+    /// the top-left, top row first. Its layers that are due to draw draw
+    /// first; then `draw` renders into the context (`renderInContext:`),
+    /// hiding what it leaves out (after the drawing, which sets the views'
+    /// layers again).
+    fn render(
+        &mut self,
+        layer: &CALayer,
+        origin: (f64, f64),
+        draw: impl FnOnce(&objc2_core_graphics::CGContext),
+    ) -> Pixels<'_> {
+        use objc2_core_graphics::{
+            CGBitmapContextGetBytesPerRow, CGBitmapContextGetData, CGContext,
+        };
+        display_tree(layer);
+        let (pw, ph, scale) = self.size;
+        let context = &self.context;
+        CGContext::clear_rect(
+            Some(context),
+            CGRect::new(
+                CGPoint::new(0.0, 0.0),
+                CGSize::new(pw as CGFloat, ph as CGFloat),
+            ),
+        );
+        CGContext::save_g_state(Some(context));
+        CGContext::translate_ctm(Some(context), 0.0, ph as CGFloat);
+        CGContext::scale_ctm(Some(context), scale, -scale);
+        CGContext::translate_ctm(Some(context), -origin.0, -origin.1);
+        // The layer is rendered on the main thread, which owns it.
+        crate::surface::quiet(|| draw(context));
+        CGContext::restore_g_state(Some(context));
+        let stride = CGBitmapContextGetBytesPerRow(Some(context));
+        let data = CGBitmapContextGetData(Some(context)).cast::<u8>();
+        if data.is_null() {
+            return (&[], 0, 0, 0);
+        }
+        // SAFETY: the context's `stride * ph` bytes, which it keeps while
+        // `self` is borrowed and nothing draws into.
+        let pixels = unsafe { std::slice::from_raw_parts(data, stride * ph) };
+        (pixels, pw as u32, ph as u32, stride as u32)
+    }
 }
 
 /// Takes the pictures `view`'s shader is due ([`ShaderState::stale`]).
@@ -597,8 +700,20 @@ fn take_pictures(surface: &Surface, view: &NshView, renderer: &Renderer, now: In
     };
     let scale = window.backingScaleFactor();
     let size = host.state().frame.size;
+    // The canvases leave the state while they draw (rendering lays out
+    // and draws views, which may look at it).
+    let (mut canvas, mut backdrop_canvas) = {
+        let mut state = view.state_mut();
+        let Some(shader) = state.shader.as_mut() else {
+            return;
+        };
+        (shader.canvas.take(), shader.backdrop_canvas.take())
+    };
     let mut pictures = Vec::new();
-    if stale && let Some(p) = children_picture(&host, size, overflow, scale, is_screen(role)) {
+    if stale
+        && let Some(p) =
+            children_picture(&mut canvas, &host, size, overflow, scale, is_screen(role))
+    {
         let input = match role {
             ShaderRole::Transition | ShaderRole::ScreenTransition => ShaderInput::To,
             _ => ShaderInput::Content,
@@ -608,30 +723,29 @@ fn take_pictures(surface: &Surface, view: &NshView, renderer: &Renderer, now: In
     if backdrop
         && let (Some(root), Some(layer)) = (surface.root.ns().layer(), view.ns().layer())
         && let Some(picture) = picture_size(size, overflow, scale)
+        && let Some(backdrop) = Canvas::of(&mut backdrop_canvas, picture)
     {
         // What is behind: the surface without the view (and what it holds),
         // where the view's layer is.
         let at = layer.convertRect_toLayer(layer.bounds(), Some(&root));
         let origin = (at.origin.x - overflow as f64, at.origin.y - overflow as f64);
-        let rgba = render_with(&root, origin, picture, |context| {
+        let pixels = backdrop.render(&root, origin, |context| {
             let hidden = layer.isHidden();
             layer.setHidden(true);
             root.renderInContext(context);
             layer.setHidden(hidden);
         });
-        pictures.push((ShaderInput::Backdrop, (rgba, picture.0, picture.1)));
+        pictures.push((ShaderInput::Backdrop, pixels));
     }
     let mut state = view.state_mut();
     let Some(shader) = state.shader.as_mut() else {
         return;
     };
-    for (input, (rgba, w, h)) in pictures {
-        shader.view.set_input(
-            renderer,
-            input,
-            Some((&rgba, w as u32, h as u32, w as u32 * 4)),
-        );
+    for (input, pixels) in pictures {
+        shader.view.set_input(renderer, input, Some(pixels));
     }
+    shader.canvas = canvas;
+    shader.backdrop_canvas = backdrop_canvas;
 }
 
 /// The values of the layer's animated slots. The animator is borrowed
@@ -932,14 +1046,16 @@ fn rgba_image<'a>(
 
 /// A page's or a dialog's coming or going drawn through its
 /// `transitionShader` ([`nsh_core::NavShader`]): a layer over `host` (the
-/// stack, or the root for a dialog) showing the shader's frames, which
-/// read the host without its upper side (what comes, or what leaves) as
-/// `from` and with it as `to`; going away runs backwards. Both are pictured
-/// on the first display frame (a view navigation just showed has no layer
-/// in the tree before AppKit displays the window, and out of it its layers
-/// draw y up), the side that comes again on each (it is laid out and drawn
-/// over the next ones). Navigation keeps the views at rest under it and
-/// ends it with its motion.
+/// stack, or the root for a dialog) showing the shader's frames, which read
+/// the host without the upper side as `from` and with it as `to`; going
+/// away runs backwards. Both are pictured on its first display frame (a
+/// view navigation just showed has no layer in the tree before AppKit
+/// displays the window, and out of it its layers draw y up). After that
+/// only the side that stays live is (the upper side coming, the lower
+/// going: the other is what left): on the next few frames, while what just
+/// showed is laid out and drawn, then only after a view under the host
+/// changed ([`Mark`]). Navigation keeps the views at rest under it and ends
+/// it with its motion.
 pub(crate) struct NavOverlay {
     view: RefCell<ShaderView>,
     layer: Retained<CALayer>,
@@ -951,8 +1067,20 @@ pub(crate) struct NavOverlay {
     backwards: bool,
     duration: std::time::Duration,
     picture: (usize, usize, CGFloat),
-    /// The first display frame pictured both sides and started it.
-    started: Cell<bool>,
+    /// The display frames it has run.
+    frames: Cell<u32>,
+    /// Set when a view under the host changes: the live side is pictured
+    /// again.
+    mark: Rc<Mark>,
+    /// Where the sides are drawn.
+    canvas: RefCell<Option<Canvas>>,
+}
+
+/// A running [`NavOverlay`]'s host and whether a view under it changed
+/// since its live side was pictured ([`ui_changed`] sets it).
+pub(crate) struct Mark {
+    host: Retained<objc2_app_kit::NSView>,
+    dirty: Cell<bool>,
 }
 
 impl NavOverlay {
@@ -975,6 +1103,16 @@ impl NavOverlay {
         let mut view = ShaderView::default();
         view.set_layer(Some(shader.layer.clone()));
         view.set_size(size, picture.2 as f32);
+        let mark = Rc::new(Mark {
+            host: Retained::from(host.ns()),
+            dirty: Cell::new(false),
+        });
+        surface
+            .shaders
+            .overlays
+            .borrow_mut()
+            .push(Rc::downgrade(&mark));
+        sync_picturing(surface);
         let overlay = NavOverlay {
             view: RefCell::new(view),
             layer: CALayer::new(),
@@ -984,7 +1122,9 @@ impl NavOverlay {
             backwards,
             duration: shader.duration,
             picture,
-            started: Cell::new(false),
+            frames: Cell::new(0),
+            mark,
+            canvas: RefCell::new(None),
         };
         // SAFETY: an immutable Core Animation constant.
         overlay
@@ -994,9 +1134,17 @@ impl NavOverlay {
         // Until its first frame: what showed. Coming, the lower side (the
         // host as it is, the upper side left out); going, the views at rest
         // show it (the upper side on top).
-        let first = (!backwards).then(|| overlay.side(false));
-        let (pw, ph, _) = picture;
-        let image = first.and_then(|rgba| rgba_image(pw, ph, rgba.chunks(pw * 4)));
+        let image = (!backwards)
+            .then(|| {
+                let mut canvas = overlay.canvas.borrow_mut();
+                let (pixels, w, h, stride) = overlay.side(&mut canvas, false)?;
+                rgba_image(
+                    w as usize,
+                    h as usize,
+                    pixels.chunks(stride as usize).map(|r| &r[..w as usize * 4]),
+                )
+            })
+            .flatten();
         let contents = image.as_deref().map(crate::decor::image_object);
         crate::surface::quiet(|| {
             overlay.layer.setFrame(CGRect::new(
@@ -1011,17 +1159,19 @@ impl NavOverlay {
     }
 
     /// The host without the upper side (`with_upper`: with it on top, drawn
-    /// on its own where its view is), the overlay left out.
-    fn side(&self, with_upper: bool) -> Vec<u8> {
+    /// on its own where its view is), the overlay left out, drawn into
+    /// `canvas`.
+    fn side<'a>(&self, canvas: &'a mut Option<Canvas>, with_upper: bool) -> Option<Pixels<'a>> {
         let (Some(host), Some(upper)) = (self.host.ns().layer(), self.upper.layer()) else {
-            return Vec::new();
+            return None;
         };
         display_tree(&upper);
         let at = self.upper.convertPoint_toView(
             objc2_foundation::NSPoint::new(0.0, 0.0),
             Some(self.host.ns()),
         );
-        render_with(&host, (0.0, 0.0), self.picture, |context| {
+        let canvas = Canvas::of(canvas, self.picture)?;
+        Some(canvas.render(&host, (0.0, 0.0), |context| {
             use objc2_core_graphics::CGContext;
             let hidden = (upper.isHidden(), self.layer.isHidden());
             upper.setHidden(true);
@@ -1045,29 +1195,43 @@ impl NavOverlay {
                 }
                 CGContext::restore_g_state(Some(context));
             }
-        })
+        }))
     }
 
-    /// One display frame: pictures the sides (the first time both, then the
-    /// one that comes), renders and shows a frame that came back.
+    /// The sides display frame `frame` (from 0) pictures: both on the
+    /// first, then the live one (`to` coming, `from` going) while what just
+    /// showed settles ([`SETTLING_FRAMES`]) or once a view under the host
+    /// changed (`dirty`), else none.
+    fn due(frame: u32, backwards: bool, dirty: bool) -> Vec<ShaderInput> {
+        if frame == 0 {
+            vec![ShaderInput::From, ShaderInput::To]
+        } else if !dirty && frame >= SETTLING_FRAMES {
+            Vec::new()
+        } else if backwards {
+            vec![ShaderInput::From]
+        } else {
+            vec![ShaderInput::To]
+        }
+    }
+
+    /// One display frame: pictures the sides that are due ([`Self::due`]),
+    /// renders and shows a frame that came back.
     pub(crate) fn tick(&self, surface: &Surface) {
         let Some(renderer) = surface.shaders.renderer() else {
             return;
         };
-        let first = !self.started.replace(true);
-        let mut sides = Vec::with_capacity(2);
-        if first || self.backwards {
-            sides.push((ShaderInput::From, self.side(false)));
-        }
-        if first || !self.backwards {
-            sides.push((ShaderInput::To, self.side(true)));
-        }
-        let (pw, ph, _) = self.picture;
+        let frame = self.frames.get();
+        self.frames.set(frame.saturating_add(1));
+        let first = frame == 0;
+        let dirty = self.mark.dirty.replace(false);
+        let mut canvas = self.canvas.borrow_mut();
         let mut view = self.view.borrow_mut();
-        for (input, rgba) in &sides {
-            let picture = (&rgba[..], pw as u32, ph as u32, pw as u32 * 4);
-            view.set_input(renderer, *input, Some(picture));
+        for input in Self::due(frame, self.backwards, dirty) {
+            let picture = self.side(&mut canvas, input == ShaderInput::To);
+            view.set_input(renderer, input, picture);
         }
+        // Picturing draws views due to draw, which may mark it again.
+        self.mark.dirty.set(false);
         if first {
             let now = Instant::now();
             if self.backwards {
@@ -1162,5 +1326,87 @@ mod tests {
             assert!(!s.hides(&shaders, now + duration), "{role:?}: ended");
         }
         assert!(!state(ShaderRole::Fill).hides(&shaders, now));
+    }
+
+    /// A layer of `role` drawing with `source`'s `shade`.
+    fn reading(role: ShaderRole, source: &str) -> ShaderState {
+        let mut layer = ShaderLayer::new(
+            Shader::compile(source).expect("a shader"),
+            &[],
+            &mut Vec::new(),
+        );
+        layer.role = role;
+        let mut state = ShaderState::new(Weak::new());
+        state.role = role;
+        state.view.set_layer(Some(Arc::new(layer)));
+        state
+    }
+
+    #[test]
+    fn only_a_shader_that_reads_its_children_pictures_them_again() {
+        let plain = "fn shade(uv: vec2f) -> vec4f { return vec4f(uv, 0.0, 1.0); }";
+        let content = "fn shade(uv: vec2f) -> vec4f { return sample_content(uv); }";
+        let to = "fn shade(uv: vec2f) -> vec4f { return sample_to(uv); }";
+        for role in [ShaderRole::Effect, ShaderRole::Screen] {
+            assert!(!reading(role, plain).reads_children(), "{role:?}");
+            assert!(reading(role, content).reads_children(), "{role:?}");
+        }
+        for role in [ShaderRole::Transition, ShaderRole::ScreenTransition] {
+            assert!(!reading(role, plain).reads_children(), "{role:?}");
+            assert!(reading(role, to).reads_children(), "{role:?}");
+        }
+        assert!(!reading(ShaderRole::Fill, content).reads_children());
+    }
+
+    #[test]
+    fn a_page_overlay_pictures_its_live_side_only_while_it_settles_or_changes() {
+        use ShaderInput::{From, To};
+        assert_eq!(NavOverlay::due(0, false, false), [From, To]);
+        assert_eq!(NavOverlay::due(0, true, false), [From, To]);
+        for frame in 1..SETTLING_FRAMES {
+            assert_eq!(
+                NavOverlay::due(frame, false, false),
+                [To],
+                "coming, {frame}"
+            );
+            assert_eq!(
+                NavOverlay::due(frame, true, false),
+                [From],
+                "going, {frame}"
+            );
+        }
+        // Settled: nothing, unless a view under the host changed.
+        assert!(NavOverlay::due(SETTLING_FRAMES, false, false).is_empty());
+        assert!(NavOverlay::due(100, true, false).is_empty());
+        assert_eq!(NavOverlay::due(100, false, true), [To]);
+        assert_eq!(NavOverlay::due(100, true, true), [From]);
+    }
+
+    #[test]
+    fn pictures_of_one_size_draw_into_the_same_canvas() {
+        use objc2_core_graphics::CGBitmapContextGetData;
+        let mut slot = None;
+        let size = (8, 4, 2.0);
+        let first = CGBitmapContextGetData(Some(&Canvas::of(&mut slot, size).unwrap().context));
+        let again = CGBitmapContextGetData(Some(&Canvas::of(&mut slot, size).unwrap().context));
+        assert_eq!(first, again, "kept");
+        let other = Canvas::of(&mut slot, (16, 4, 2.0)).unwrap();
+        assert_eq!(other.size, (16, 4, 2.0), "made again for another size");
+        // What it drew before is cleared: a layer drawing nothing leaves it
+        // transparent.
+        let layer = CALayer::new();
+        layer.setBounds(CGRect::new(CGPoint::new(0.0, 0.0), CGSize::new(8.0, 2.0)));
+        let (pixels, w, h, stride) = other.render(&layer, (0.0, 0.0), |context| {
+            objc2_core_graphics::CGContext::set_rgb_fill_color(Some(context), 1.0, 0.0, 0.0, 1.0);
+            objc2_core_graphics::CGContext::fill_rect(
+                Some(context),
+                CGRect::new(CGPoint::new(0.0, 0.0), CGSize::new(1.0, 1.0)),
+            );
+        });
+        assert_eq!((w, h), (16, 4));
+        assert!(stride >= 64);
+        assert_eq!(&pixels[..4], &[255, 0, 0, 255], "the drawing, top-left");
+        let (pixels, ..) = other.render(&layer, (0.0, 0.0), |_| {});
+        assert!(pixels.iter().all(|&b| b == 0), "cleared before drawing");
     }
 }

@@ -146,11 +146,17 @@ each platform that draws them does it; the others ignore `MountItem::ShaderTrans
 
 | Platform | Pictures | Hides the children, keeps their input | Over them | Pages and dialogs |
 |---|---|---|---|---|
-| macOS (AppKit) | `renderInContext:` of the children's container (`NshView::ensure_container`) without its mask, at the window's backing scale (a screen's: all the root shows but the frames over it); the backdrop: the root with the view's layer hidden | an empty `mask` on the container's layer (AppKit hit-tests views), which the decoration's clipping leaves in place until they show again (`decor::hide_children`); the root's while any screen shader hides it | the frames' sublayer at `zPosition` 1e6, `overflow` points beyond the box; a screen's on the root, which it leaves when its view is deleted or the app stops | the motion drawn through a layer over the stack (the root for a dialog) from pictures of it without and with the upper side (a page or dialog that left: its last image), taken on the first display frame, the coming side again on each; the views at rest under it until it ends (`navigation::Motion::Shader`); popping and dismissing run backwards |
+| macOS (AppKit) | `renderInContext:` of the children's container (`NshView::ensure_container`) without its mask, at the window's backing scale (a screen's: all the root shows but the frames over it); the backdrop: the root with the view's layer hidden | an empty `mask` on the container's layer (AppKit hit-tests views), which the decoration's clipping leaves in place until they show again (`decor::hide_children`); the root's while any screen shader hides it | the frames' sublayer at `zPosition` 1e6, `overflow` points beyond the box; a screen's on the root, which it leaves when its view is deleted or the app stops | the motion drawn through a layer over the stack (the root for a dialog) from pictures of it without and with the upper side (a page or dialog that left: its last image), taken on the first display frame, the live side again on the next three and after a view under it changed; the views at rest under it until it ends (`navigation::Motion::Shader`); popping and dismissing run backwards |
 
 macOS retakes an effect's pictures on the display frame after the core says they changed (`MountItem::ShaderInput`) or
-the platform changed a view in them (`NshView::changed`, `moved`, `redraw_rect`), at most once per frame; a transition
-pictures its children (or its running frame) as its `from` when it starts and keeps taking `to` while it runs.
+the platform changed a view in them (`NshView::changed`, `moved`, `redraw_rect`), at most once per frame, and only
+those its program reads (`ShaderState::reads_children`: a screen effect that never calls `sample_content` does not
+picture the surface again when a view in it moves); a transition pictures its children (or its running frame) as
+its `from` when it starts and takes `to` again as its children change. Each picture draws into a bitmap context it
+keeps (`Canvas`), made again only when its size changes. A page's or a dialog's overlay (`NavOverlay`) pictures both
+sides on its first display frame; its live side (the upper one coming, the lower going) again on the next three,
+while AppKit lays out and draws what navigation just showed, and after that only when a view under its host changed
+(`Mark`, set by `ui_changed`).
 `renderInContext:` draws no video or web page, nor backdrop blur or glass. The pictures of views AppKit has just shown
 again (navigation hides the screens under the top one) wait for the next display frame: until AppKit displays the
 window their layers are out of the tree, where they draw y up.
