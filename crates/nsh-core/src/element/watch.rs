@@ -17,8 +17,11 @@
 //! item inside a group renders after the toolbar's later children), so a
 //! group that moves the focus between its items asks the core for their
 //! order. Such a watch costs nothing until it is invalidated (an item came)
-//! or a node moves; the core then puts its elements in tree order at the
-//! end of the round.
+//! or a node moves inside the subtree its elements share (their nearest
+//! common ancestor when the core last looked); the core then puts its
+//! elements in tree order at the end of the round. A move elsewhere (a
+//! keyed list of rows reordered, each row with a group of its own) leaves
+//! it alone: nothing outside that subtree orders its elements.
 
 use std::{cell::Cell, rc::Rc};
 
@@ -56,6 +59,11 @@ pub(crate) struct Order {
     pub(crate) handler: OrderHandler,
     /// Whether the core looks at the end of the round.
     pub(crate) dirty: Rc<Cell<bool>>,
+    /// The nearest common ancestor of the elements in the tree when the
+    /// core last looked: only a move inside it can reorder them. `None`
+    /// before the first look and while none of them is in the tree (any
+    /// move makes the core look again).
+    pub(crate) container: Rc<Cell<Option<NodeId>>>,
 }
 
 /// The views' watches, oldest first.
@@ -105,6 +113,7 @@ impl Watches {
             elements,
             handler,
             dirty: dirty.clone(),
+            container: Rc::new(Cell::new(None)),
         });
         (id, dirty)
     }
