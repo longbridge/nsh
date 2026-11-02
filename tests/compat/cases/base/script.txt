@@ -74,9 +74,10 @@ event below:id:ada-dot onError message="not found"
 expect Ada: error
 expect AL
 style below:id:ada-dot opacity 0
-# Grace's fallback waits 300 ms while her image loads.
+# Grace's fallback waits 2 s while her image loads.
+tap id:show-grace
 absent GH
-wait 400
+wait 2000
 expect GH
 # Edsger has no image: the app's fallback at once, in place of the
 # initials, and the app's label.
@@ -91,8 +92,8 @@ expect AT
 expect BL
 absent CS
 expect +1
-prop label:1 more person accessibilityLabel 1 more person
-frame id:team 0 152 110 60
+prop label:"1 more person" accessibilityLabel 1 more person
+frame id:team 0 108 110 60
 # A group of the first two of four: the overflow stands for the others.
 expect DK
 expect FA
@@ -107,7 +108,7 @@ covers [props] Avatar.imageClass
 covers [props] Avatar.imageStyle
 covers [props] Avatar.fallbackClass
 covers [props] Avatar.fallbackStyle
-covers [props] Avatar.fallback
+covers [props] fallback
 covers [events] Avatar.onStatusChange
 covers [props] AvatarGroup.limit
 covers [props] AvatarGroup.total
@@ -1310,8 +1311,8 @@ expect Selected: src/lib.rs
 prop label:ui accessibilityState expanded=false
 nostyle label:ui backgroundColor
 style label:lib.rs backgroundColor #00ff00ff
-# The disabled item takes no press.
-tap text:docs
+# The disabled item takes no press, so it is nothing to tap: the
+# selection stays.
 expect Selected: src/lib.rs
 expect Changes: 2
 absent guide.md
@@ -1426,8 +1427,8 @@ covers [nsh/base] CarouselPaginationItem
 covers [props] Carousel.index
 covers [props] Carousel.looping
 covers [props] CarouselPaginationItem.index
-covers [props] indicatorClass
-covers [props] indicatorStyle
+covers [props] CarouselPagination.indicatorClass
+covers [props] CarouselPagination.indicatorStyle
 covers [props] selectedStyle
 covers [props] accessibilityLabel
 covers [events] onChange
@@ -3196,6 +3197,10 @@ wait 100
 frame id:grow 0 0 300 60
 # The app's fold ranges (the outer one shorter than the indentation's):
 # level 2 folds the inner block alone.
+# The gutter's strip of decorations' marks is `gutterDecorationsWidth`
+# wide, before the line numbers and the fold markers: the gutter is
+# 12 + 4 + 15 + 20 + 4 wide.
+frame below:parent:parent:parent:parent:span:c(); 0 0 55 200
 tap id:fold-level
 expect Folded: 1-2
 # Folding the outer block recursively keeps the inner one folded, so
