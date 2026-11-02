@@ -29,7 +29,7 @@ const engine = (changes = {}) => ({
   window: { width: 390, height: 844 }, safeArea: { top: 0, right: 0, bottom: 0, left: 0 },
   titleBar: { height: 0, left: 0, right: 0 }, keyboard: { height: 0, duration: 250 },
   colorScheme: "light", fontScale: 1, rtl: false, reduceMotion: false, pixelRatio: 2, screenReader: false,
-  locale: "de-AT", host: false, lifecycle: "active",
+  locale: "de-AT", host: false, lifecycle: "active", timeZone: "Europe/Vienna",
   platform: { os: "web", version: "0.0", idiom: "desktop", desktop: true, appleKeyboard: false },
   ...changes,
 });
@@ -60,6 +60,14 @@ test("the lifecycle is the engine's", () => {
   assert.equal(env.api.lifecycle(), "inactive");
 });
 
+test("the time zone is the engine's", () => {
+  const { env } = environment();
+  // Before the engine reports, the native environment's default.
+  assert.equal(env.api.timeZone(), "UTC");
+  env.update(engine());
+  assert.equal(env.api.timeZone(), "Europe/Vienna");
+});
+
 test("a part is written only when it changed", () => {
   const { env, writes } = environment();
   env.update(engine());
@@ -72,4 +80,7 @@ test("a part is written only when it changed", () => {
   writes.length = 0;
   env.update(engine({ lifecycle: "inactive", locale: "fr-FR" }));
   assert.deepEqual(writes, ["fr-FR", "inactive"]);
+  writes.length = 0;
+  env.update(engine({ lifecycle: "inactive", locale: "fr-FR", timeZone: "Asia/Tokyo" }));
+  assert.deepEqual(writes, ["Asia/Tokyo"]);
 });

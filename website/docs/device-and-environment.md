@@ -398,10 +398,10 @@ Settings > Personalization > Colors live, `fontScale()` the Text size setting (1
 animation effects setting, `pixelRatio()` the monitor's scale, and `Intl` formats in the user's regional format.
 
 In a browser ([the web runtime](./web.md)), `platform.os` is `"web"` and `platform.version` `"0.0"`. The idiom is
-`"desktop"` with a mouse and a window at least 600 points wide, `"pad"` on a tablet and `"phone"` on a phone,
-decided when the app starts. The locale, `lifecycle()` (`"background"` in a hidden tab, `"inactive"` without the
-focus), `reduceMotion()`, `fontScale()` (the browser's text size), `pixelRatio()`, the safe area and the keyboard
-height come from the browser and follow it live.
+`"desktop"` with a mouse and a window at least 600 points wide, `"pad"` on a tablet and `"phone"` on a phone, decided
+when the app starts. The locale, `timeZone()`, `lifecycle()` (`"background"` in a hidden tab, `"inactive"` without the
+focus), `reduceMotion()`, `fontScale()` (the browser's text size), `pixelRatio()`, the safe area and the keyboard height
+come from the browser and follow it live.
 
 In a terminal ([the terminal backend](./tui.md)), `platform.idiom` is `"terminal"`, `platform.desktop` is `true` and
 `platform.os` is the machine's own system. `colorScheme()` follows the terminal's background, `reduceMotion()` is
