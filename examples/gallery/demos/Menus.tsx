@@ -425,8 +425,9 @@ export function Menus() {
                         hoverStyle={hovered()}
                         activeStyle={{ backgroundColor: alpha(colors.text, 0.1) }}
                         style={{
-                          paddingHorizontal: 8,
+                          width: 28,
                           height: 28,
+                          alignItems: "center",
                           justifyContent: "center",
                           borderRadius: 6,
                           backgroundColor: isOpen(`${file().name} ⋯`) ? token("accent") : "transparent",
