@@ -586,6 +586,8 @@ function Custom(props: { node: TextViewCustomNode }) {
 
 `BarChart` (`bar_chart` in Rust) stands for the app's own chart. The mention pattern's group is in
 `node.attributes?.["1"]` (`node.attributes["1"]` in Rust: `ada`) and the whole match in `node.text` (`@ada`). A custom node with no render function shows its content.
+A view returned for an inline node (a chip) sits in its line by its own `verticalAlign`: `align-middle`
+(`verticalAlign: "middle"`) centers it on the text, and its line keeps the paragraph's `lineHeight` unless the view is taller.
 
 ### Options
 

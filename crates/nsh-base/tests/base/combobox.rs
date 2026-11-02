@@ -23,7 +23,6 @@ struct HarnessProps {
     /// The app sets `value`, following `onChange`.
     controlled: bool,
     multiple: bool,
-    searchable: bool,
     /// The app sets `query`, following `onQueryChange`.
     controlled_query: bool,
     /// What each opening's query starts with.
@@ -37,7 +36,6 @@ fn props() -> HarnessProps {
         value: Vec::new(),
         controlled: false,
         multiple: false,
-        searchable: false,
         controlled_query: false,
         default_query: None,
         cleanable: false,
@@ -87,20 +85,13 @@ fn Harness(props: HarnessProps) -> impl IntoElement {
     let mut el = combobox()
         .items(tags())
         .multiple(props.multiple)
-        .searchable(props.searchable)
-        .search_placeholder("Search")
+        .placeholder("Search")
         .accessibility_label("Tags")
         .cleanable(props.cleanable)
         .clear_button(text("Clear"))
         .clear_button_accessibility_label("Clear tags")
         .footer(text("Done"))
-        .trigger(
-            view()
-                .test_id("trigger")
-                .w(px(160.0))
-                .h(px(30.0))
-                .child(text("Pick")),
-        )
+        .trigger_button(text("Pick"))
         .render_item(|s: &SelectItemState| {
             text(format!(
                 "{}{}{}",
@@ -194,7 +185,7 @@ impl App {
     }
 
     fn open_list(&mut self) {
-        self.0.press("role:combobox").unwrap();
+        self.0.press("text:Pick").unwrap();
         self.0.wait_for("role:listbox").unwrap();
     }
 
@@ -265,8 +256,14 @@ fn with_multiple_a_choice_toggles_the_item_and_the_list_stays_open() {
         if controlled {
             app.see("Value: swift");
         }
-        // Return toggles the highlighted item, and the list stays open.
-        app.key("home");
+        // Return toggles the highlighted item, and the list stays open
+        // (Home and End are the input's: Down goes around to it).
+        for _ in 0..4 {
+            if app.screen().texts().iter().any(|t| t.starts_with(">Rust")) {
+                break;
+            }
+            app.key("down");
+        }
         app.see(">Rust");
         app.key("enter");
         app.see(">Rust ✓");
@@ -309,9 +306,9 @@ fn every_close_confirms_the_value_once() {
     app.press("id:elsewhere").unwrap();
     app.gone("role:listbox");
     app.log_ends("openChange:false:PressOutside confirm:swift");
-    // The trigger.
+    // The trigger button.
     app.open_list();
-    app.press("role:combobox").unwrap();
+    app.press("text:Pick").unwrap();
     app.gone("role:listbox");
     app.log_ends("openChange:false:TriggerPress confirm:swift");
     assert_eq!(app.log().matches("confirm:").count(), 3);
@@ -330,12 +327,11 @@ fn mod_return_confirms_and_closes() {
 #[test]
 fn the_query_is_the_apps_when_it_sets_one() {
     let mut app = start(HarnessProps {
-        searchable: true,
         controlled_query: true,
         ..multiple()
     });
     app.open_list();
-    app.type_text("text:Search", "ru").unwrap();
+    app.type_text("role:combobox", "ru").unwrap();
     app.see("Query: ru");
     app.log_ends("query:r query:ru");
     // The app's query filters the rows.
@@ -346,14 +342,13 @@ fn the_query_is_the_apps_when_it_sets_one() {
 #[test]
 fn each_opening_starts_from_the_default_query() {
     let mut app = start(HarnessProps {
-        searchable: true,
         default_query: Some("sw".into()),
         ..multiple()
     });
     app.open_list();
     app.see("Swift");
     assert!(!app.shows("Rust"));
-    app.type_text("text:sw", "x").unwrap();
+    app.type_text("role:combobox", "x").unwrap();
     app.gone("role:option[Swift]");
     app.key("escape");
     app.gone("role:listbox");
@@ -396,4 +391,31 @@ fn screen_readers_hear_the_selected_titles() {
     app.open_list();
     assert!(app.screen().selected("role:option[Rust]").unwrap());
     assert!(!app.screen().selected("role:option[Ruby]").unwrap());
+}
+
+#[test]
+fn typing_in_the_input_opens_the_list_and_filters_it() {
+    let mut app = start(multiple());
+    assert_eq!(app.screen().count("role:listbox").unwrap(), 0);
+    app.type_text("role:combobox", "sw").unwrap();
+    app.wait_for("role:listbox").unwrap();
+    app.log_ends("openChange:true:InputChange query:s query:sw");
+    app.wait_for("role:option[Swift]").unwrap();
+    assert_eq!(app.screen().count("role:option").unwrap(), 1);
+    // The first match is highlighted: Return chooses it.
+    app.see(">Swift");
+    app.key("enter");
+    app.log_ends("change:swift");
+}
+
+#[test]
+fn one_value_shows_its_title_in_the_input_until_the_user_types() {
+    let mut app = start(props());
+    app.type_text("role:combobox", "Rub").unwrap();
+    app.wait_for("role:option[Ruby]").unwrap();
+    app.press("role:option[Ruby]").unwrap();
+    app.gone("role:listbox");
+    // Chosen: the input shows its title again.
+    app.wait_for("text:Ruby").unwrap();
+    app.log_ends("change:ruby openChange:false:Select confirm:ruby");
 }
