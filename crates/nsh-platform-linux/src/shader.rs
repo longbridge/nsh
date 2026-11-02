@@ -54,7 +54,7 @@ use gtk4::{self as gtk, gdk, glib, graphene, gsk, prelude::*};
 use nsh_core::{
     NodeId,
     animation::AnimationValue,
-    geometry::{Percentage, Points, Size, size},
+    geometry::{Points, Size, size},
     shader::{ShaderInput, ShaderLayer, ShaderRole},
 };
 use nsh_engine::shader::{Frame, Renderer, ShaderView};
@@ -83,6 +83,10 @@ pub(crate) struct ShaderState {
     until: Option<Instant>,
     /// The hash of the children's picture it was last given.
     children: Option<u64>,
+    /// The children's render nodes that picture was rendered from: while
+    /// GTK draws the same ones (it keeps a widget's node until the widget
+    /// draws again), it is not rendered and downloaded again.
+    drawn: Option<gsk::RenderNode>,
     /// What is behind it is to be taken again once a frame is painted.
     marked: Cell<bool>,
     scheduled: Cell<bool>,
@@ -139,9 +143,9 @@ thread_local! {
     static HIDDEN: RefCell<Vec<glib::WeakRef<NshView>>> = RefCell::default();
     /// Shader views that read what is behind them.
     static BACKDROPS: RefCell<Vec<glib::WeakRef<NshView>>> = RefCell::default();
-    /// While a picture of what is behind a view is drawn: the view, and
-    /// whether the drawing reached it.
-    static TRACE: RefCell<Option<(NshView, bool)>> = const { RefCell::new(None) };
+    /// While a picture of what is behind a view is drawn: the view (none:
+    /// all of it is drawn), and whether the drawing reached it.
+    static TRACE: RefCell<Option<(Option<NshView>, bool)>> = const { RefCell::new(None) };
 }
 
 fn texture(width: u32, height: u32, pixels: &[u8], stride: usize) -> gdk::MemoryTexture {
@@ -223,6 +227,7 @@ pub(crate) fn set(surface: &Rc<Surface>, view: &NshView, layer: Option<Arc<Shade
         }
         shader.owner = (screen && layer.is_some()).then(|| view.id());
         shader.children = None;
+        shader.drawn = None;
         shader.view.set_layer(layer);
         if shader.reads(ShaderInput::Backdrop) {
             BACKDROPS.with(|b| b.borrow_mut().push(target.downgrade()));
@@ -312,6 +317,7 @@ pub(crate) fn start_transition(view: &NshView, duration: Duration) {
         shader.view.start_transition(duration, now);
         shader.until = Some(now + duration);
         shader.children = None;
+        shader.drawn = None;
     }
     view.redraw();
     tick(&view);
@@ -482,27 +488,41 @@ pub(crate) fn draw_effect(snapshot: &gtk::Snapshot, view: &NshView) -> bool {
             s.frame.size,
         )
     };
-    // A picture of what is behind a view draws the last frame.
-    if reads
-        && !tracing()
-        && let Some(pixels) = children(view, overflow, frame, scale_of(view))
+    // A picture of what is behind a view draws the last frame. The
+    // children are pictured again only when GTK drew any of them again (an
+    // effect that reads `nsh.time` draws itself on every frame, its
+    // children as they were).
+    let scale = scale_of(view);
+    let node = (reads && !tracing())
+        .then(|| children_node(view, overflow, scale))
+        .filter(|node| {
+            let s = view.state();
+            let drawn = s.shader.as_ref().and_then(|s| s.drawn.as_ref());
+            drawn.is_none_or(|drawn| !same_nodes(drawn, node))
+        });
+    if let Some(node) = node
+        && let Some(pixels) = render_children(view, node.clone(), overflow, frame, scale)
     {
         let hash = pixels.hash();
         let given = {
             let mut s = view.state_mut();
             match s.shader.as_mut() {
-                Some(shader) if shader.children != Some(hash) => {
-                    shader.children = Some(hash);
-                    if let Some(renderer) = shader.renderer.clone() {
-                        shader.view.set_input(
-                            &renderer,
-                            input,
-                            Some((&pixels.rgba, pixels.width, pixels.height, pixels.width * 4)),
-                        );
+                Some(shader) => {
+                    shader.drawn = Some(node);
+                    let new = shader.children != Some(hash);
+                    if new {
+                        shader.children = Some(hash);
+                        if let Some(renderer) = shader.renderer.clone() {
+                            shader.view.set_input(
+                                &renderer,
+                                input,
+                                Some((&pixels.rgba, pixels.width, pixels.height, pixels.width * 4)),
+                            );
+                        }
                     }
-                    true
+                    new
                 }
-                _ => false,
+                None => false,
             }
         };
         if given {
@@ -520,6 +540,31 @@ pub(crate) fn draw_effect(snapshot: &gtk::Snapshot, view: &NshView) -> bool {
 /// `view`'s children rendered over its box and `overflow` points around
 /// it at `scale`.
 fn children(view: &NshView, overflow: f32, frame: Size<Points>, scale: f32) -> Option<Pixels> {
+    let node = children_node(view, overflow, scale);
+    render_children(view, node, overflow, frame, scale)
+}
+
+/// `view`'s children's render nodes, placed as [`children`] renders them:
+/// GTK's own nodes of the last frame for the widgets it did not draw again.
+fn children_node(view: &NshView, overflow: f32, scale: f32) -> gsk::RenderNode {
+    let inner = gtk::Snapshot::new();
+    inner.scale(scale, scale);
+    inner.translate(&graphene::Point::new(overflow, overflow));
+    view.snapshot_children(&inner);
+    inner
+        .to_node()
+        .unwrap_or_else(|| gsk::ContainerNode::new(&[]).upcast())
+}
+
+/// `node` ([`children_node`]) rendered over `view`'s box and `overflow`
+/// points around it at `scale`.
+fn render_children(
+    view: &NshView,
+    node: gsk::RenderNode,
+    overflow: f32,
+    frame: Size<Points>,
+    scale: f32,
+) -> Option<Pixels> {
     let renderer = view.native()?.renderer()?;
     let (w, h) = (
         frame.width.0 + 2.0 * overflow,
@@ -528,11 +573,60 @@ fn children(view: &NshView, overflow: f32, frame: Size<Points>, scale: f32) -> O
     if w <= 0.0 || h <= 0.0 {
         return None;
     }
-    let inner = gtk::Snapshot::new();
-    inner.scale(scale, scale);
-    inner.translate(&graphene::Point::new(overflow, overflow));
-    view.snapshot_children(&inner);
-    Some(render(&renderer, inner, (w * scale, h * scale)))
+    let viewport = graphene::Rect::new(
+        0.0,
+        0.0,
+        (w * scale).round().max(1.0),
+        (h * scale).round().max(1.0),
+    );
+    Some(Pixels::of(&renderer.render_texture(&node, Some(&viewport))))
+}
+
+/// Whether render nodes `a` and `b` draw the same: they are one node, or
+/// the same kind of node around the same nodes (the wrappers a snapshot
+/// makes anew each time it places what GTK kept).
+fn same_nodes(a: &gsk::RenderNode, b: &gsk::RenderNode) -> bool {
+    use gtk::glib::translate::ToGlibPtr;
+    let (pa, pb): (*mut gsk::ffi::GskRenderNode, *mut gsk::ffi::GskRenderNode) =
+        (a.to_glib_none().0, b.to_glib_none().0);
+    if pa == pb {
+        return true;
+    }
+    if a.node_type() != b.node_type() {
+        return false;
+    }
+    if let (Some(a), Some(b)) = (
+        a.downcast_ref::<gsk::ContainerNode>(),
+        b.downcast_ref::<gsk::ContainerNode>(),
+    ) {
+        return a.n_children() == b.n_children()
+            && (0..a.n_children()).all(|i| same_nodes(&a.child(i), &b.child(i)));
+    }
+    if let (Some(a), Some(b)) = (
+        a.downcast_ref::<gsk::TransformNode>(),
+        b.downcast_ref::<gsk::TransformNode>(),
+    ) {
+        return a.transform() == b.transform() && same_nodes(&a.child(), &b.child());
+    }
+    if let (Some(a), Some(b)) = (
+        a.downcast_ref::<gsk::ClipNode>(),
+        b.downcast_ref::<gsk::ClipNode>(),
+    ) {
+        return a.clip() == b.clip() && same_nodes(&a.child(), &b.child());
+    }
+    if let (Some(a), Some(b)) = (
+        a.downcast_ref::<gsk::OpacityNode>(),
+        b.downcast_ref::<gsk::OpacityNode>(),
+    ) {
+        return a.opacity() == b.opacity() && same_nodes(&a.child(), &b.child());
+    }
+    if let (Some(a), Some(b)) = (
+        a.downcast_ref::<gsk::DebugNode>(),
+        b.downcast_ref::<gsk::DebugNode>(),
+    ) {
+        return same_nodes(&a.child(), &b.child());
+    }
+    false
 }
 
 /// `snapshot` rendered over `pixels` (width, height) by the window's
@@ -557,13 +651,18 @@ pub(crate) fn input_changed(view: &NshView) {
     let Some(view) = target(view) else {
         return;
     };
+    if let Some(shader) = view.state_mut().shader.as_mut() {
+        shader.drawn = None;
+    }
     mark(&view);
     view.redraw();
 }
 
-/// Something on the UI thread changed (an animation, scrolling, an image):
-/// what is behind each view that reads it is taken again.
-pub(crate) fn ui_changed() {
+/// `changed` changed on the UI thread (an animation, scrolling, an image):
+/// what is behind each view that reads it is taken again where `changed`
+/// draws behind that view ([`behind`]); what draws in it or above it does
+/// not show in that picture.
+pub(crate) fn ui_changed(changed: &NshView) {
     if tracing() {
         return;
     }
@@ -579,9 +678,46 @@ pub(crate) fn ui_changed() {
         });
         b.iter().filter_map(|w| w.upgrade()).collect()
     });
-    for view in views {
-        mark(&view);
+    if views.is_empty() {
+        return;
     }
+    let at = draw_path(changed.upcast_ref());
+    for view in views {
+        if behind(&at, &draw_path(view.upcast_ref())) {
+            mark(&view);
+        }
+    }
+}
+
+/// Where `widget` draws among its window's widgets: its place among its
+/// siblings at each level, from the top.
+fn draw_path(widget: &gtk::Widget) -> Vec<usize> {
+    let mut path = Vec::new();
+    let mut widget = widget.clone();
+    while let Some(parent) = widget.parent() {
+        let mut place = 0;
+        let mut sibling = widget.prev_sibling();
+        while let Some(s) = sibling {
+            place += 1;
+            sibling = s.prev_sibling();
+        }
+        path.push(place);
+        widget = parent;
+    }
+    path.reverse();
+    path
+}
+
+/// Whether what draws at `changed` ([`draw_path`]) shows behind the view at
+/// `view`: an ancestor's own drawing, or what draws before it; not the view
+/// itself, what it holds or what draws after it.
+fn behind(changed: &[usize], view: &[usize]) -> bool {
+    for (c, v) in changed.iter().zip(view) {
+        if c != v {
+            return c < v;
+        }
+    }
+    changed.len() < view.len()
 }
 
 /// What is behind `view` is to be taken again, once a frame is painted.
@@ -622,7 +758,7 @@ pub(crate) fn skipped(view: &NshView) -> bool {
         let Some((of, reached)) = t.as_mut() else {
             return false;
         };
-        if !*reached && of == view {
+        if !*reached && of.as_ref() == Some(view) {
             *reached = true;
         }
         *reached
@@ -687,7 +823,7 @@ fn take_backdrop(view: &NshView) {
         snapshot.scale(scale, scale);
         snapshot.translate(&graphene::Point::new(-at.x(), -at.y()));
         if root != *view {
-            TRACE.with(|t| *t.borrow_mut() = Some((view.clone(), false)));
+            TRACE.with(|t| *t.borrow_mut() = Some((Some(view.clone()), false)));
             root.draw(&snapshot);
             TRACE.with(|t| *t.borrow_mut() = None);
         }
@@ -769,15 +905,11 @@ pub(crate) fn nav_picture(
     let size = host.state().frame.size;
     let snapshot = gtk::Snapshot::new();
     snapshot.scale(scale, scale);
-    // A view that is never drawn stands for no upper side.
-    let upper = upper
-        .cloned()
-        .unwrap_or_else(|| NshView::new(NodeId::MAX, nsh_core::ViewKind::View));
     let shown = hidden.map(|w| (w, w.is_child_visible()));
     if let Some((w, _)) = &shown {
         w.set_child_visible(false);
     }
-    TRACE.with(|t| *t.borrow_mut() = Some((upper, false)));
+    TRACE.with(|t| *t.borrow_mut() = Some((upper.cloned(), false)));
     host.draw(&snapshot);
     TRACE.with(|t| *t.borrow_mut() = None);
     if let Some((w, visible)) = shown {
@@ -792,45 +924,44 @@ pub(crate) fn nav_picture(
 
 /// A page's or a dialog's transition through a shader
 /// ([`nsh_core::NavShader`]): pictures of its lower side (`sample_from`)
-/// and upper side (`sample_to`) drawn through the shader at the progress
-/// navigation gives. Frames come back from the GPU a frame or two after
-/// they are asked for; the last one shows meanwhile, the side it starts
-/// from before the first.
+/// and upper side (`sample_to`) drawn through the shader as its transition
+/// runs (`ShaderView::start_transition`, backwards when it goes). Frames
+/// come back from the GPU a frame or two after they are asked for; the last
+/// one shows meanwhile, the side it starts from before the first.
 pub(crate) struct NavPainter {
     renderer: Rc<Renderer>,
     view: ShaderView,
-    /// The slot that moves `nsh.progress`.
-    slot: u16,
     size: Size<Points>,
     texture: gdk::MemoryTexture,
 }
 
 impl NavPainter {
-    /// `layer` over `from` and `to`, pictures of a host of `size`, starting
-    /// from `to` when it goes (`reverse`); `None` without a GPU device.
+    /// `layer` over `from` and `to`, pictures of a host of `size`, for
+    /// `duration` from now, `nsh.progress` from 1 to 0 when it goes
+    /// (`reverse`); `None` without a GPU device.
     pub(crate) fn new(
         surface: &Surface,
         layer: &ShaderLayer,
-        from: &Pixels,
-        to: &Pixels,
+        (from, to): (&Pixels, &Pixels),
         size: Size<Points>,
+        duration: Duration,
         reverse: bool,
     ) -> Option<Self> {
         let renderer = surface.shader_renderer()?;
-        // The pictures cover the host's box; progress moves as an animated
-        // value (one more slot).
-        let layer = layer
-            .clone()
-            .with_overflow(Points::ZERO)
-            .with_progress(Percentage::ZERO, Some(NodeId::MAX));
-        let slot = layer.progress_slot()?;
+        // The pictures cover the host's box.
+        let layer = layer.clone().with_overflow(Points::ZERO);
         let mut view = ShaderView::default();
         view.set_layer(Some(Arc::new(layer)));
+        let now = Instant::now();
+        if reverse {
+            view.start_transition_backwards(duration, now);
+        } else {
+            view.start_transition(duration, now);
+        }
         let first = if reverse { to } else { from };
         let mut painter = Self {
             renderer,
             view,
-            slot,
             size,
             texture: texture(
                 first.width,
@@ -852,16 +983,9 @@ impl NavPainter {
         );
     }
 
-    /// The transition at `progress` (how much of the upper side shows), at
-    /// `widget`'s scale.
-    pub(crate) fn node(
-        &mut self,
-        widget: &impl IsA<gtk::Widget>,
-        progress: f32,
-    ) -> gsk::RenderNode {
+    /// The transition as it is now, at `widget`'s scale.
+    pub(crate) fn node(&mut self, widget: &impl IsA<gtk::Widget>) -> gsk::RenderNode {
         self.view.set_size(self.size, scale_of(widget));
-        self.view
-            .set_slot(self.slot, AnimationValue::Number(progress));
         if self.view.render(&self.renderer, Instant::now()) {
             let f = self.view.frame();
             if f.width > 0 && f.height > 0 {
@@ -903,5 +1027,47 @@ mod tests {
         shader.view.set_layer(Some(layer(ShaderRole::Transition)));
         shader.until = Some(Instant::now() + Duration::from_secs(60));
         assert!(!shader.replaces());
+    }
+
+    /// What is behind a view is pictured again for a change drawn before
+    /// it only.
+    #[test]
+    fn a_backdrop_follows_what_draws_behind_it() {
+        let view = [0, 2, 1];
+        assert!(behind(&[0], &view), "an ancestor's own drawing");
+        assert!(
+            behind(&[0, 1, 5], &view),
+            "a sibling of an ancestor before it"
+        );
+        assert!(
+            behind(&[0, 2, 0, 3], &view),
+            "a sibling before it, and what it holds"
+        );
+        assert!(!behind(&view, &view), "its own frame");
+        assert!(!behind(&[0, 2, 1, 0], &view), "what it holds");
+        assert!(!behind(&[0, 2, 2], &view), "a sibling after it");
+        assert!(!behind(&[1], &view), "what draws after an ancestor");
+    }
+
+    /// The children are pictured again only when GTK drew one of them
+    /// again: wrappers made anew around the nodes it kept draw the same.
+    #[test]
+    fn children_are_pictured_again_when_their_nodes_change() {
+        let rect = graphene::Rect::new(0.0, 0.0, 10.0, 10.0);
+        let kept = gsk::ColorNode::new(&gdk::RGBA::RED, &rect);
+        let other = gsk::ColorNode::new(&gdk::RGBA::RED, &rect);
+        let placed = |node: &gsk::ColorNode, x: f32| -> gsk::RenderNode {
+            let at = gsk::Transform::new().translate(&graphene::Point::new(x, 0.0));
+            gsk::ContainerNode::new(&[gsk::TransformNode::new(node, Some(&at)).upcast()]).upcast()
+        };
+        assert!(same_nodes(&placed(&kept, 4.0), &placed(&kept, 4.0)));
+        assert!(
+            !same_nodes(&placed(&kept, 4.0), &placed(&other, 4.0)),
+            "drawn again"
+        );
+        assert!(
+            !same_nodes(&placed(&kept, 4.0), &placed(&kept, 8.0)),
+            "moved"
+        );
     }
 }

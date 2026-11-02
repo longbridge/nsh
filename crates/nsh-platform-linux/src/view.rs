@@ -594,7 +594,7 @@ impl NshView {
     /// Something it draws changed.
     pub(crate) fn changed(&self) {
         self.redraw();
-        crate::shader::ui_changed();
+        crate::shader::ui_changed(self);
     }
 
     /// Draws again: what it draws changed, and nothing else needs to know
@@ -611,7 +611,7 @@ impl NshView {
             parent.queue_allocate();
         }
         self.queue_draw();
-        crate::shader::ui_changed();
+        crate::shader::ui_changed(self);
     }
 
     /// Draws its child widgets into `snapshot`, bottom to top. While a

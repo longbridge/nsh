@@ -194,17 +194,21 @@ Effects, transitions and page shaders sit on the same program, layer and rendere
   In Rust, `screen()` / `modal()` take `.transition_shader(TransitionShader::new(shader).uniform(..).duration(..))`
   (`nsh_core::shader::TransitionShader`, a compiled `Shader`), which sets the same prop. Sources compile once in
   `Core::compile`, the cache `Shader`'s `source` uses too ("Pages and dialogs" below says what the platforms do).
-- **Linux.** Effects and running transitions draw their last frame instead of their children; whenever GTK draws
-  one again, its children's render node is rendered by the window's renderer into a texture of the box and overflow
-  and downloaded, and given to the shader when its pixels changed. A transition's `from` is that picture taken when it
-  starts (or its last frame, if one runs), shown until the first frame. Screen layers are the root's. A backdrop is the
-  surface's views drawn anew up to the view (`skipped`, `past`) after the frame clock paints, again when the core
-  marks it or anything on the UI thread changes (`NshView::changed`; a shader's own frame only `redraw`s). Pages and
-  dialogs: pictures of the host drawn anew without and with the upper side, through a `NavPainter` (the layer with
-  one more slot for `nsh.progress`) in a layer over the stack or the root; the starting side shows until the first
-  frame. Without a GPU device an effect draws its children as they are, a transition starts no run and a page or a
-  dialog comes with its own motion. A screen layer leaves the root when the view that mounted it is deleted (unless
-  another screen effect's took its place) or the app stops.
+- **Linux.** Effects and running transitions draw their last frame instead of their children; when GTK draws one
+  again, its children's render nodes are taken (GTK's own for the widgets it did not draw again) and, when they are
+  not the nodes the last picture came from (`same_nodes`: the same nodes, in wrappers of the same kind), rendered by
+  the window's renderer into a texture of the box and overflow and downloaded, and given to the shader when its
+  pixels changed: an effect that reads `nsh.time` draws itself every frame without picturing its children again. A
+  transition's `from` is that picture taken when it starts (or its last frame, if one runs), shown until the first
+  frame. Screen layers are the root's. A backdrop is the surface's views drawn anew up to the view (`skipped`,
+  `past`) after the frame clock paints, again when the core marks it or a view that draws behind it changes on the UI
+  thread (`NshView::changed`, `moved`; `behind`: an ancestor or a view before it, not one in it or after it; a
+  shader's own frame only `redraw`s). Pages and dialogs: pictures of the host drawn anew without and with the upper
+  side, through a `NavPainter` on the shader's own transition clock (`start_transition`, backwards when it goes) in
+  a layer over the stack or the root; the starting side shows until the first frame. Without a GPU device an effect
+  draws its children as they are, a transition starts no run and a page or a dialog comes with its own motion, as it
+  does when the user asks for less motion. A screen layer leaves the root when the view that mounted it is deleted
+  (unless another screen effect's took its place) or the app stops.
 
 ## Pages and dialogs
 
