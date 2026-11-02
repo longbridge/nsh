@@ -1903,7 +1903,7 @@ prop label:One accessibilityValue text=Blue
 tap id:tags
 expect TagFooter
 style parent:parent:text:TagFooter backgroundColor #ff0000ff
-frame parent:parent:text:TagFooter 0 68 390 20
+frame parent:parent:text:TagFooter 0 51 390 20
 tap label:Green
 expect Tags: red,green
 expect TagFooter
