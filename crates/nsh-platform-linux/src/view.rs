@@ -3,7 +3,7 @@
 //! The core lays everything out, so a view never measures itself: its
 //! parent places it at the frame the core gave it (`size_allocate`, with
 //! the frame's origin, the scroll offset, a sticky shift and the view's
-//! transform in one `gsk::Transform`; the offset at whole points, see
+//! transform in one `gsk::Transform`; the offset on device pixels, see
 //! [`placement`]). Sizes are kept as `f32` points in
 //! [`ViewState::frame`] and drawing uses them; the integer allocation only
 //! bounds picking.
@@ -278,16 +278,18 @@ fn exact_damage(dx: f32, dy: f32) -> f32 {
 /// The transform that places a child at `(x, y)` (parent coordinates),
 /// then applies its own `transform`.
 ///
-/// The offset is rounded to whole points, as GTK allocates its own widgets
-/// (a `GtkViewport` scrolls by whole pixels): frames already are (the core
-/// rounds layout), scroll offsets and shifts are not, and edges and text
-/// stay sharp while scrolling.
-fn placement(x: f32, y: f32, transform: Option<gsk::Transform>) -> gsk::Transform {
-    let t = gsk::Transform::new().translate(&graphene::Point::new(x.round(), y.round()));
-    let Some(own) = transform else {
-        return t;
+/// The offset is rounded to the surface's device pixels (`scale` of them a
+/// point; [`snap`]): frames already are (the core rounds layout to them),
+/// inline attachments (placed where the text's line puts them), scroll
+/// offsets and shifts are not. A view off the pixel grid has its textures
+/// (a canvas' raster, an image) resampled across pixels, blurred; at a
+/// fractional scale (1.6) a whole point is not a whole pixel either.
+fn placement(x: f32, y: f32, transform: Option<gsk::Transform>, scale: f32) -> gsk::Transform {
+    let t = gsk::Transform::new().translate(&graphene::Point::new(snap(x, scale), snap(y, scale)));
+    let t = match transform {
+        Some(own) => t.transform(Some(&own)),
+        None => t,
     };
-    let t = t.transform(Some(&own));
     if t.category() != gsk::TransformCategory::_2dTranslate {
         return t;
     }
@@ -298,6 +300,23 @@ fn placement(x: f32, y: f32, transform: Option<gsk::Transform>) -> gsk::Transfor
     } else {
         t.translate(&graphene::Point::new(nudge, 0.0))
     }
+}
+
+/// `v` (points) rounded to the nearest device pixel at `scale` pixels a point.
+fn snap(v: f32, scale: f32) -> f32 {
+    if scale <= 0.0 {
+        return v.round();
+    }
+    (v * scale).round() / scale
+}
+
+/// The device pixels per point of `widget`'s surface, fractional scales
+/// included (the integer scale factor before it is mapped).
+fn surface_scale(widget: &impl IsA<gtk::Widget>) -> f32 {
+    widget
+        .native()
+        .and_then(|n| n.surface())
+        .map_or(widget.scale_factor() as f64, |s| s.scale()) as f32
 }
 
 /// How far text may paint outside its node's bounds (points): GSK bounds a
@@ -398,13 +417,10 @@ mod imp {
             }
             crate::shader::draw(snapshot, &state);
             crate::text::draw(snapshot, &state);
-            crate::image::draw(snapshot, &state);
+            // The surface's own scale, fractional ones included.
+            let scale = surface_scale(&*obj) as f64;
+            crate::image::draw(snapshot, &state, scale as f32);
             if state.canvas.is_some() {
-                // The surface's own scale, fractional ones included.
-                let scale = obj
-                    .native()
-                    .and_then(|n| n.surface())
-                    .map_or(obj.scale_factor() as f64, |s| s.scale());
                 crate::canvas::draw(snapshot, &obj, &state, scale);
             }
             if !clip {
@@ -472,11 +488,12 @@ mod imp {
                 .then_some(state.frame.size.width.0);
             let natives: Vec<Native> = state.natives.clone();
             drop(state);
+            let scale = surface_scale(&*self.obj());
             let mut child = self.obj().first_child();
             while let Some(widget) = child {
                 child = widget.next_sibling();
                 if let Some(rect) = natives.iter().find(|n| n.widget == widget).map(|n| n.rect) {
-                    let t = placement(rect.origin.x.0, rect.origin.y.0, None);
+                    let t = placement(rect.origin.x.0, rect.origin.y.0, None, scale);
                     widget.allocate(
                         rect.size.width.0.ceil().max(0.0) as i32,
                         rect.size.height.0.ceil().max(0.0) as i32,
@@ -500,7 +517,7 @@ mod imp {
                 if let Some(w) = mirror {
                     x = w - x - f.size.width.0;
                 }
-                let t = placement(x, f.origin.y.0 - sy + s.shift.1, s.transform());
+                let t = placement(x, f.origin.y.0 - sy + s.shift.1, s.transform(), scale);
                 drop(s);
                 widget.allocate(
                     f.size.width.0.ceil().max(0.0) as i32,
@@ -695,7 +712,23 @@ impl NshView {
 
 #[cfg(test)]
 mod tests {
-    use super::exact_damage;
+    use super::{exact_damage, snap};
+
+    #[test]
+    fn snap_lands_on_device_pixels() {
+        // At 1.6 a point is not a pixel: an inline chip Pango puts at
+        // 441.6963 lands on 707 px, not 442 pt (707.2 px, resampled).
+        let x = snap(441.6963, 1.6);
+        assert_eq!(x * 1.6, (x * 1.6).round());
+        assert!((x - 441.875).abs() < 1e-4);
+        // Frames the core rounded to the grid stay where they are.
+        assert_eq!(snap(16.25, 1.6), 16.25);
+        assert_eq!(snap(0.625, 1.6), 0.625);
+        // Whole scales round as before.
+        assert_eq!(snap(10.4, 1.0), 10.0);
+        assert_eq!(snap(10.3, 2.0), 10.5);
+        assert_eq!(snap(-3.2, 1.0), -3.0);
+    }
 
     #[test]
     fn exact_damage_moves_whole_dx_off_the_truncating_path() {

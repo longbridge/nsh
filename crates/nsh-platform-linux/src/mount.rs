@@ -125,6 +125,8 @@ impl Mounter {
                     crate::scroll::child_inserted(parent);
                 }
                 crate::selectable_view::touched(surface, child);
+                // An attachment's cursor depends on its text's.
+                crate::input::style_changed(child);
             }
             MountItem::Remove { id } => {
                 if let Some(view) = self.get(*id) {

@@ -2,14 +2,18 @@
 //! `defaultIndex`); previous / next stop at the ends unless it loops; a
 //! pagination item moves to its slide and is selected while it shows; a
 //! swipe reports the slide it rests on, between `onDragStart` and
-//! `onDragEnd`; the keys move while it has the focus, which `onFocus` /
-//! `onBlur` report for the carousel as a whole; reduced motion scrolls at
-//! once; several slides per view rest with the last at the end of the
-//! range; a change sends a handful of items. Looping is seamless: runways
-//! of a period, snap points over three periods, each slide's translation
-//! made once, a wrap scrolling one step across the seam and a silent
-//! re-center after it. On macOS (Tab stopping at views that take presses)
-//! and on a manual clock.
+//! `onDragEnd`, and stays where the app follows it; the rest of a scroll
+//! the carousel replaced reports nothing; the keys move while
+//! it has the focus (Left and Right traded in a right-to-left layout), which `onFocus` / `onBlur` report for the carousel as
+//! a whole and which a control turning disabled hands to the carousel;
+//! reduced motion scrolls at once; several slides per view rest with the
+//! last at the end of the range; a vertical carousel moves along its
+//! axis; slides inserted, removed or moved by a keyed list settle at once,
+//! with no scroll between; a change sends a handful of items. Looping is
+//! seamless: runways of a period, snap points over three periods, each
+//! slide's translation made once, a wrap scrolling one step across the
+//! seam and a silent re-center after it. On macOS (Tab stopping at views
+//! that take presses) and on a manual clock.
 
 use std::{
     sync::{Arc, Mutex},
@@ -21,8 +25,8 @@ use nsh_base::{
     carousel_pagination_item, carousel_previous,
 };
 use nsh_core::{
-    Command, MountItem, NodeId, Size, animation::AnimationOp, element::Root, platform::Os,
-    prelude::*,
+    Command, EventKind, EventPayload, MountItem, NodeId, Size, animation::AnimationOp,
+    element::Root, geometry::Axis, platform::Os, prelude::*,
 };
 use nsh_engine::EngineConfig;
 use nsh_testing::Headless;
@@ -30,7 +34,7 @@ use nsh_testing::Headless;
 /// How many slides the harness has.
 const SLIDES: u32 = 5;
 
-/// How wide the content is.
+/// How wide the content is (how high, vertical).
 const WIDTH: f32 = 300.0;
 
 #[derive(Clone, PartialEq, Props)]
@@ -38,6 +42,9 @@ struct HarnessProps {
     /// The app passes `index` (else the carousel keeps its own).
     controlled: bool,
     looping: bool,
+    /// The slides follow each other vertically, in a content 100 wide and
+    /// 300 high.
+    vertical: bool,
     /// Slides per view: 1 (or 0) or 3.
     per_view: u32,
     /// The slide shown at first.
@@ -46,12 +53,14 @@ struct HarnessProps {
     indicator: bool,
 }
 
-/// A button, a carousel of five slides in a 300 by 100 content (each
-/// `300 / per_view` wide), previous and next, a pagination item per slide;
-/// buttons that set the app's index to 3 (`Jump`) and to 0 (`First`) and
-/// one that pads the content's start by 20 (`Pad`). The app's index as
-/// `index:…`, the number of changes as `changes:…`, the drag and focus
-/// events as `events:…`.
+/// A button, a carousel of five slides (`Slide 1` to `Slide 5`, a keyed
+/// list) in a 300 by 100 content (each `300 / per_view` wide), previous
+/// and next, a pagination item per slide; buttons that set the app's index
+/// to 3 (`Jump`) and to 0 (`First`), one that pads the content's start by
+/// 20 (`Pad`), and ones that put a new slide before the others
+/// (`Prepend`), remove the first (`Drop`) and move the last before the
+/// others (`Rotate`). The app's index as `index:…`, the number of changes
+/// as `changes:…`, the drag and focus events as `events:…`.
 #[component]
 fn Harness(props: HarnessProps) -> impl IntoElement {
     let index = signal(props.start);
@@ -59,10 +68,13 @@ fn Harness(props: HarnessProps) -> impl IntoElement {
     let events = signal(Vec::<&'static str>::new());
     let log = move |e: &'static str| events.update(|v| v.push(e));
     let padded = signal(false);
-    let width = WIDTH / props.per_view.max(1) as f32;
+    let slides = signal((1..=SLIDES).collect::<Vec<u32>>());
+    let length = WIDTH / props.per_view.max(1) as f32;
+    let vertical = props.vertical;
     let carousel = carousel()
         .default_index(props.start)
         .looping(props.looping)
+        .when(vertical, |c| c.axis(Axis::Vertical))
         .accessibility_label("Photos")
         .on_change(move |i: &u32| {
             changes.update(|n| *n += 1);
@@ -94,27 +106,29 @@ fn Harness(props: HarnessProps) -> impl IntoElement {
                 })
                 .collect::<Vec<_>>(),
         );
+    let content = carousel_content()
+        .when(vertical, |c| c.w(px(100.0)).h(px(WIDTH)))
+        .when(!vertical, |c| c.w(px(WIDTH)).h(px(100.0)))
+        .style_with(move |s| if padded.get() { s.pl(px(20.0)) } else { s })
+        .child(each(
+            move || slides.get(),
+            |n| *n,
+            move |n, _| {
+                let n = n.get_untracked();
+                let item = carousel_item().accessibility_label(format!("{n} of {SLIDES}"));
+                let item = if vertical {
+                    item.w(px(100.0)).h(px(length))
+                } else {
+                    item.w(px(length)).h(px(100.0))
+                };
+                item.child(text(format!("Slide {n}")))
+            },
+        ));
     view()
         .child(view().on_press(|| {}).child(text("Before")))
         .child(
             carousel
-                .child(
-                    carousel_content()
-                        .w(px(WIDTH))
-                        .h(px(100.0))
-                        .style_with(move |s| if padded.get() { s.pl(px(20.0)) } else { s })
-                        .child(
-                            (0..SLIDES)
-                                .map(|i| {
-                                    carousel_item()
-                                        .accessibility_label(format!("{} of {SLIDES}", i + 1))
-                                        .w(px(width))
-                                        .h(px(100.0))
-                                        .child(text(format!("Slide {}", i + 1)))
-                                })
-                                .collect::<Vec<_>>(),
-                        ),
-                )
+                .child(content)
                 .child(
                     carousel_previous()
                         .accessibility_label("Previous")
@@ -126,6 +140,30 @@ fn Harness(props: HarnessProps) -> impl IntoElement {
         .child(view().on_press(move || index.set(3)).child(text("Jump")))
         .child(view().on_press(move || index.set(0)).child(text("First")))
         .child(view().on_press(move || padded.set(true)).child(text("Pad")))
+        .child(
+            view()
+                .on_press(move || {
+                    slides.update(|v| {
+                        let next = v.iter().max().map_or(1, |m| m + 1);
+                        v.insert(0, next);
+                    })
+                })
+                .child(text("Prepend")),
+        )
+        .child(
+            view()
+                .on_press(move || {
+                    slides.update(|v| {
+                        v.remove(0);
+                    })
+                })
+                .child(text("Drop")),
+        )
+        .child(
+            view()
+                .on_press(move || slides.update(|v| v.rotate_right(1)))
+                .child(text("Rotate")),
+        )
         .child(text(move || format!("index:{}", index.get())))
         .child(text(move || format!("changes:{}", changes.get())))
         .child(text(move || format!("events:{}", events.get().join(","))))
@@ -195,6 +233,45 @@ fn scrolls(items: &[MountItem]) -> Vec<(f32, bool)> {
         .collect()
 }
 
+/// The content's vertical scrolls in `items`: where to, and whether
+/// animated.
+fn vertical_scrolls(items: &[MountItem]) -> Vec<(f32, bool)> {
+    items
+        .iter()
+        .filter_map(|i| match i {
+            MountItem::Command {
+                command: Command::ScrollTo { x, y, animated },
+                ..
+            } => {
+                assert_eq!(x.0, 0.0, "along the axis only");
+                Some((y.0, *animated))
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+/// The content's scroll view, from its behavior in `items`.
+fn content_of(items: &[MountItem]) -> NodeId {
+    items
+        .iter()
+        .find_map(|i| match i {
+            MountItem::ScrollBehavior { id, .. } => Some(*id),
+            _ => None,
+        })
+        .expect("the content's behavior")
+}
+
+/// The platform reports that the content came to rest at `x`.
+fn rest(app: &mut App, content: NodeId, x: f32) {
+    app.engine().control().dispatch_event(
+        content,
+        EventKind::ScrollEnd,
+        EventPayload::Scroll(point(px(x), px(0.0))),
+    );
+    app.run_for(Duration::from_millis(50)).unwrap();
+}
+
 /// The animation graph's nodes `items` make.
 fn made_nodes(items: &[MountItem]) -> usize {
     items
@@ -228,6 +305,10 @@ fn snap_offsets(items: &[MountItem]) -> Vec<f32> {
 }
 
 fn start(props: HarnessProps, reduce_motion: bool) -> App {
+    start_in(props, reduce_motion, false)
+}
+
+fn start_in(props: HarnessProps, reduce_motion: bool, rtl: bool) -> App {
     let mut config = EngineConfig {
         viewport: Size::new(px(390.0), px(844.0)),
         clock: nsh_engine::Clock::manual(std::time::SystemTime::now()),
@@ -235,6 +316,7 @@ fn start(props: HarnessProps, reduce_motion: bool) -> App {
     };
     config.environment.os = Os::MacOs;
     config.environment.reduce_motion = reduce_motion;
+    config.environment.rtl = rtl;
     let mut app = Headless::start(config).expect("the engine starts");
     let seen: Seen = Arc::default();
     let into = seen.clone();
@@ -375,6 +457,25 @@ fn the_keys_move_while_the_carousel_has_the_focus() {
     app.press_key("home").unwrap();
     app.wait_for("text:index:0").unwrap();
     app.wait_for("text:changes:4").unwrap();
+}
+
+#[test]
+fn right_to_left_the_keys_trade_left_and_right() {
+    let mut app = start_in(HarnessProps::default(), false, true);
+    app.press_key("tab").unwrap();
+    app.press_key("tab").unwrap();
+    // The slides run from the right: Left is the next slide.
+    app.press_key("left").unwrap();
+    app.wait_for("text:index:1").unwrap();
+    app.press_key("left").unwrap();
+    app.wait_for("text:index:2").unwrap();
+    app.press_key("right").unwrap();
+    app.wait_for("text:index:1").unwrap();
+    app.press_key("end").unwrap();
+    app.wait_for("text:index:4").unwrap();
+    app.press_key("home").unwrap();
+    app.wait_for("text:index:0").unwrap();
+    app.wait_for("text:changes:5").unwrap();
 }
 
 #[test]
@@ -610,4 +711,186 @@ fn without_looping_there_are_no_runways_or_translations() {
     let items = app.take();
     assert_eq!(made_nodes(&items), 0);
     assert_eq!(snap_offsets(&items).len(), SLIDES as usize);
+}
+
+#[test]
+fn a_swipe_the_app_accepts_stays() {
+    let mut app = start(
+        HarnessProps {
+            controlled: true,
+            ..HarnessProps::default()
+        },
+        false,
+    );
+    app.take();
+    app.scroll("text:Slide 1", px(200.0)).unwrap();
+    app.wait_for("text:index:1").unwrap();
+    app.run_for(Duration::from_millis(50)).unwrap();
+    // Landed on the slide; the app's answer is the slide shown.
+    assert_eq!(scrolls(&app.take()), [(300.0, true)]);
+    assert!(app.screen().selected("role:button[Go to 2]").unwrap());
+}
+
+#[test]
+fn the_rest_of_a_replaced_scroll_reports_nothing() {
+    let mut app = start(HarnessProps::default(), false);
+    let content = content_of(&app.take());
+    app.press_button("Next");
+    app.wait_for("text:index:1").unwrap();
+    app.press_button("Next");
+    app.wait_for("text:index:2").unwrap();
+    // The first scroll's rest, reported just before the second reached the
+    // platform: no slide of the user's.
+    rest(&mut app, content, 300.0);
+    app.wait_for("text:index:2").unwrap();
+    app.wait_for("text:changes:2").unwrap();
+    assert!(app.screen().selected("role:button[Go to 3]").unwrap());
+    // The second's: it arrived, nothing to report.
+    rest(&mut app, content, 600.0);
+    app.wait_for("text:changes:2").unwrap();
+    // A rest of the user's after it (a mouse wheel reports no drag) counts.
+    rest(&mut app, content, 900.0);
+    app.wait_for("text:index:3").unwrap();
+    app.wait_for("text:changes:3").unwrap();
+}
+
+#[test]
+fn a_drag_ends_the_wait_for_a_scroll_in_flight() {
+    let mut app = start(HarnessProps::default(), false);
+    app.take();
+    app.press_button("Next");
+    app.wait_for("text:index:1").unwrap();
+    app.press_button("Next");
+    app.wait_for("text:index:2").unwrap();
+    // The user drags back to the second slide: their rest counts, even
+    // where a replaced scroll was going.
+    app.scroll("text:Slide 3", px(-300.0)).unwrap();
+    app.wait_for("text:index:1").unwrap();
+    app.wait_for("text:changes:3").unwrap();
+}
+
+#[test]
+fn a_control_turning_disabled_with_the_focus_hands_it_to_the_carousel() {
+    let mut app = start(HarnessProps::default(), false);
+    // "Before", the carousel, then next (previous is disabled).
+    for _ in 0..3 {
+        app.press_key("tab").unwrap();
+    }
+    app.run_for(Duration::from_millis(50)).unwrap();
+    app.wait_for("text:events:focus").unwrap();
+    assert!(!app.screen().sent(&Command::Focus));
+    for i in 1..SLIDES {
+        app.press_key("enter").unwrap();
+        app.wait_for(&format!("text:index:{i}")).unwrap();
+    }
+    app.run_for(Duration::from_millis(50)).unwrap();
+    // Next is disabled on the last slide: the focus went to the carousel,
+    // not out of it, so no blur and the keys still move.
+    assert!(!app.enabled("Next"));
+    assert!(app.screen().sent(&Command::Focus));
+    app.wait_for("text:events:focus").unwrap();
+    app.press_key("left").unwrap();
+    app.wait_for("text:index:3").unwrap();
+    // Back out before it: the carousel reports the blur once.
+    app.press_key("shift+tab").unwrap();
+    app.run_for(Duration::from_millis(50)).unwrap();
+    app.wait_for("text:events:focus,blur").unwrap();
+}
+
+#[test]
+fn a_vertical_carousel_moves_along_its_axis() {
+    let mut app = start(
+        HarnessProps {
+            vertical: true,
+            ..HarnessProps::default()
+        },
+        false,
+    );
+    let items = app.take();
+    assert_eq!(snap_offsets(&items), [0.0, 300.0, 600.0, 900.0, 1200.0]);
+    let items = app.press_button("Next");
+    app.wait_for("text:index:1").unwrap();
+    assert_eq!(vertical_scrolls(&items), [(300.0, true)]);
+    // Up and Down are its arrows; Left and Right move nothing.
+    app.press_key("tab").unwrap();
+    app.press_key("tab").unwrap();
+    app.press_key("right").unwrap();
+    app.run_for(Duration::from_millis(50)).unwrap();
+    app.wait_for("text:index:1").unwrap();
+    app.press_key("down").unwrap();
+    app.wait_for("text:index:2").unwrap();
+    app.press_key("up").unwrap();
+    app.wait_for("text:index:1").unwrap();
+    // A swipe along it lands on the slide it rests nearest.
+    app.take();
+    app.scroll("text:Slide 2", px(200.0)).unwrap();
+    app.wait_for("text:index:2").unwrap();
+    assert_eq!(vertical_scrolls(&app.take()), [(600.0, true)]);
+}
+
+/// The harness on its third slide, resting at 600.
+fn on_the_third_slide() -> App {
+    let app = start(
+        HarnessProps {
+            start: 2,
+            ..HarnessProps::default()
+        },
+        false,
+    );
+    assert_eq!(scrolls(&app.take()), [(600.0, false)]);
+    app
+}
+
+#[test]
+fn a_slide_inserted_before_the_others_settles_with_no_scroll_between() {
+    let mut app = on_the_third_slide();
+    // The new slide renders after the others but is laid out first: the
+    // track is made once every slide reported, so the third place still
+    // rests at 600 and nothing scrolls, not even to an offset between.
+    app.press("text:Prepend").unwrap();
+    app.wait_for("text:Slide 6").unwrap();
+    app.run_for(Duration::from_millis(50)).unwrap();
+    let items = app.take();
+    assert_eq!(scrolls(&items), [], "no scroll: {items:#?}");
+    assert_eq!(
+        snap_offsets(&items),
+        [0.0, 300.0, 600.0, 900.0, 1200.0, 1500.0]
+    );
+    // The first place is the new slide.
+    let items = app.press_button("Go to 1");
+    app.wait_for("text:index:0").unwrap();
+    assert_eq!(scrolls(&items), [(0.0, true)]);
+}
+
+#[test]
+fn a_slide_removed_settles_with_no_scroll_between() {
+    let mut app = on_the_third_slide();
+    app.press("text:Drop").unwrap();
+    app.wait_for_gone("text:Slide 1", Duration::from_secs(1))
+        .unwrap();
+    app.run_for(Duration::from_millis(50)).unwrap();
+    let items = app.take();
+    assert_eq!(scrolls(&items), [], "no scroll: {items:#?}");
+    assert_eq!(snap_offsets(&items), [0.0, 300.0, 600.0, 900.0]);
+}
+
+#[test]
+fn a_keyed_reorder_settles_with_no_scroll_between() {
+    let mut app = on_the_third_slide();
+    // The last slide moves before the others: it registered last but is
+    // laid out first.
+    app.press("text:Rotate").unwrap();
+    app.run_for(Duration::from_millis(50)).unwrap();
+    let items = app.take();
+    assert_eq!(scrolls(&items), [], "no scroll: {items:#?}");
+    // A relayout after it moves every slide by 20 and keeps the rests: no
+    // scroll either.
+    app.press("text:Pad").unwrap();
+    app.run_for(Duration::from_millis(50)).unwrap();
+    let items = app.take();
+    assert_eq!(scrolls(&items), [], "no scroll: {items:#?}");
+    // Next goes on along the tree's order.
+    let items = app.press_button("Next");
+    app.wait_for("text:index:3").unwrap();
+    assert_eq!(scrolls(&items), [(900.0, true)]);
 }

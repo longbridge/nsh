@@ -181,6 +181,7 @@ fn edits_replace_modules_and_keep_unrelated_state() {
         clipboard: None,
         host: Default::default(),
         picker: None,
+        speech: None,
     };
     let engine = Engine::start(
         config,
@@ -340,6 +341,7 @@ fn entry_edits_keep_navigation_and_state() {
             clipboard: None,
             host: Default::default(),
             picker: None,
+            speech: None,
         };
         let engine = Engine::start(
             config,
