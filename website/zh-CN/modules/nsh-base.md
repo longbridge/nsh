@@ -18,7 +18,7 @@ use nsh_base::{
     MarkdownExtension, MarkdownOptions, accordion, accordion_header, accordion_item, accordion_panel, accordion_trigger,
     alert_dialog, button, carousel, carousel_content, carousel_item, carousel_next,
     carousel_pagination, carousel_pagination_item, carousel_previous, checkbox, color_area, color_field, color_picker,
-    color_slider, color_swatch, dialog, diff_view, dock_area, editor, link,
+    color_slider, color_swatch, dialog, diff_view, dock_area, editor, hover_card, link,
     calendar, combobox, command, date_picker, h_resizable, nav_page, nav_stack, radio, radio_group, resizable_panel, select, switch, tab, tabs, text_view, theme, time_field, toast, toast_stack, toggle, toggle_group, toolbar, toolbar_group, toolbar_separator, tree, v_resizable,
 };
 ```
@@ -56,6 +56,7 @@ import {
   DiffView,
   DockArea,
   Editor,
+  HoverCard,
   Link,
   Menu,
   OtpInput,
@@ -262,6 +263,7 @@ import type {
 | [`DataTable`](../elements/data-table.md) | `data_table()` | 行列数量不限的表格：选择、排序，列可固定、调整宽度和移动，行由应用分页提供。 |
 | [`Input`](../elements/input.md) | `nsh_base::input()` | 平台原生的文本输入框，单行或多行。 |
 | [`Popover`](../elements/popover.md) | `popover()` | 锚定在触发元素上、显示在一切之上的内容。 |
+| [`HoverCard`](../elements/hover-card.md) | `hover_card()` | 预览触发元素所指向的内容，在指针停留在它上面时显示（触摸屏上为按压）。 |
 | [`Menu`、`ContextMenu`、`MenuItem`、`MenuSeparator`、`Submenu`](../elements/menu.md) | `menu()`、... | 菜单：桌面上是带级联子菜单的弹出层，手机上是 sheet；支持可勾选的条目和单选的一组选项。 |
 | [`Tooltip`](../elements/tooltip.md) | `tooltip()` | 显示在触发元素旁的提示。 |
 | [`Sheet`](../elements/sheet.md) | `sheet()` | 位于屏幕一侧边缘、覆盖在背景层之上的面板。 |
@@ -599,6 +601,6 @@ nav_page()
 
 - [导航指南](../docs/navigation.md)。
 - [表单与键盘](../docs/forms-and-keyboard.md)。
-- [Avatar](../elements/avatar.md)、[Button](../elements/button.md)、[Carousel](../elements/carousel.md)、[Link](../elements/link.md)、[Checkbox](../elements/checkbox.md)、[Radio](../elements/radio.md)、[Switch](../elements/switch.md)、[Tabs](../elements/tabs.md)、[Toggle](../elements/toggle.md)、[Toolbar](../elements/toolbar.md)、[Select](../elements/select.md)、[Combobox](../elements/combobox.md)、[Calendar](../elements/calendar.md)、[TimeField](../elements/time-field.md)、[DatePicker](../elements/date-picker.md)、[Collapsible](../elements/collapsible.md)、[Accordion](../elements/accordion.md)、[Progress](../elements/progress.md)、[Slider](../elements/slider.md)、[ColorPicker](../elements/color-picker.md)、[Scrollbar](../elements/scrollbar.md)、[NumberInput](../elements/number-input.md)、[OtpInput](../elements/otp-input.md)、[Pagination](../elements/pagination.md)、[Tree](../elements/tree.md)、[Plot](../elements/plot.md)、[NavStack](../elements/nav-stack.md)、[Dialog](../elements/dialog.md)、[AlertDialog](../elements/alert-dialog.md)、[TextView](../elements/text-view.md)、[Editor](../elements/editor.md)、[DiffView](../elements/diff-view.md)、[Table](../elements/table.md)、[DataTable](../elements/data-table.md)、[Text](../elements/text.md) 与 [Input](../elements/input.md)。
+- [Avatar](../elements/avatar.md)、[Button](../elements/button.md)、[Carousel](../elements/carousel.md)、[Link](../elements/link.md)、[Checkbox](../elements/checkbox.md)、[Radio](../elements/radio.md)、[Switch](../elements/switch.md)、[Tabs](../elements/tabs.md)、[Toggle](../elements/toggle.md)、[Toolbar](../elements/toolbar.md)、[Select](../elements/select.md)、[Combobox](../elements/combobox.md)、[Calendar](../elements/calendar.md)、[TimeField](../elements/time-field.md)、[DatePicker](../elements/date-picker.md)、[Collapsible](../elements/collapsible.md)、[HoverCard](../elements/hover-card.md)、[Accordion](../elements/accordion.md)、[Progress](../elements/progress.md)、[Slider](../elements/slider.md)、[ColorPicker](../elements/color-picker.md)、[Scrollbar](../elements/scrollbar.md)、[NumberInput](../elements/number-input.md)、[OtpInput](../elements/otp-input.md)、[Pagination](../elements/pagination.md)、[Tree](../elements/tree.md)、[Plot](../elements/plot.md)、[NavStack](../elements/nav-stack.md)、[Dialog](../elements/dialog.md)、[AlertDialog](../elements/alert-dialog.md)、[TextView](../elements/text-view.md)、[Editor](../elements/editor.md)、[DiffView](../elements/diff-view.md)、[Table](../elements/table.md)、[DataTable](../elements/data-table.md)、[Text](../elements/text.md) 与 [Input](../elements/input.md)。
 - [设备与环境](../docs/device-and-environment.md)。
 - [`BackHandler`](./nsh-mobile.md#backhandler)：`BackHandler` 及其他 Android 专用 API。
