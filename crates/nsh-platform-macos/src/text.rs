@@ -380,6 +380,28 @@ impl CoreTextEngine {
         )
     }
 
+    /// The height a line holding the tallest attachment needs: its extent
+    /// around the baseline joined with its placeholder font's. A fixed
+    /// `lineHeight` caps text lines, not these: the view's line grows to
+    /// hold it (as a replaced inline box in CSS) instead of painting over
+    /// its neighbours.
+    fn tallest_attachment_line(
+        &self,
+        text: &AttributedText,
+        alignments: &nsh_core::AttachmentAlignments,
+    ) -> CGFloat {
+        text.attachments.iter().fold(0.0, |tallest: CGFloat, a| {
+            let (_, up, down) = self.attachment_metrics(text, a, alignments);
+            let style = text
+                .span_at(a.index)
+                .map_or_else(Default::default, |s| s.style);
+            let f = self.fonts.get(&style);
+            // SAFETY: a valid font.
+            let (ascent, descent, leading) = unsafe { (f.ascent(), f.descent(), f.leading()) };
+            tallest.max(up.max(ascent) + down.max(descent) + leading)
+        })
+    }
+
     fn attributed_string(
         &self,
         text: &AttributedText,
@@ -404,7 +426,7 @@ impl CoreTextEngine {
             // because span offsets are UTF-16 units, like CFString.
             unsafe { CFMutableAttributedString::set_attribute(s, range, Some(key), Some(value)) }
         };
-        let paragraph = paragraph_style(text);
+        let paragraph = paragraph_style(text, self.tallest_attachment_line(text, alignments));
         // SAFETY: immutable CoreText constants (here and below).
         set(
             CFRange {
@@ -605,7 +627,9 @@ fn attachment_points(
     points
 }
 
-fn paragraph_style(text: &AttributedText) -> CFRetained<CTParagraphStyle> {
+/// `tallest`: the height a line holding an attachment needs (see
+/// `CoreTextEngine::tallest_attachment_line`); lines may grow up to it.
+fn paragraph_style(text: &AttributedText, tallest: CGFloat) -> CFRetained<CTParagraphStyle> {
     let alignment = match text.align {
         // React Native: the right side in right-to-left layouts.
         TextAlign::Auto if text.rtl => CTTextAlignment::Right,
@@ -639,17 +663,18 @@ fn paragraph_style(text: &AttributedText) -> CFRetained<CTParagraphStyle> {
             size_of::<CTWritingDirection>(),
         ),
     ];
+    let max_line_height = line_height.max(tallest);
     if line_height > 0.0 {
-        for spec in [
+        settings.push(setting(
             CTParagraphStyleSpecifier::MinimumLineHeight,
+            (&raw const line_height).cast(),
+            size_of::<CGFloat>(),
+        ));
+        settings.push(setting(
             CTParagraphStyleSpecifier::MaximumLineHeight,
-        ] {
-            settings.push(setting(
-                spec,
-                (&raw const line_height).cast(),
-                size_of::<CGFloat>(),
-            ));
-        }
+            (&raw const max_line_height).cast(),
+            size_of::<CGFloat>(),
+        ));
     }
     // SAFETY: every setting points at a live value of the declared size.
     unsafe { CTParagraphStyle::new(settings.as_ptr(), settings.len()) }
@@ -2278,6 +2303,42 @@ mod tests {
 
         let (baseline, top, _, _) = place(VerticalAlign::Middle);
         assert!(near(top + 15.0, baseline - x / 2.0), "{top} {baseline}");
+    }
+
+    /// A chip taller than a fixed `lineHeight` grows its own line rather
+    /// than painting over the line above; lines without one keep the height.
+    #[test]
+    fn attachments_taller_than_the_line_height_grow_their_line() {
+        let engine = CoreTextEngine::default();
+        let style = ResolvedTextStyle {
+            font_size: Points(15.0),
+            line_height: Points(20.0),
+            ..ResolvedTextStyle::default()
+        };
+        let mut t = AttributedText::default();
+        t.push("Ax\nAx", style);
+        let mut alignments = nsh_core::AttachmentAlignments::default();
+        alignments.push(
+            &mut t,
+            Size::new(Points(40.0), Points(28.0)),
+            VerticalAlign::Middle,
+            style,
+        );
+        t.push(" x\nAx", style);
+        let prepared = engine.prepare_aligned(&t, &alignments);
+        let size = engine.measure(&prepared, None);
+        let layout = engine.layout(&prepared, size);
+        let lines = engine.lines(&layout);
+        assert_eq!(lines.len(), 3);
+        let near = |a: f32, b: f32| (a - b).abs() < 0.5;
+        assert!(near(lines[0].height.0, 20.0), "{:?}", lines[0].height);
+        assert!(near(lines[2].height.0, 20.0), "{:?}", lines[2].height);
+        assert!(lines[1].height.0 >= 28.0, "{:?}", lines[1].height);
+        let top = engine.attachments(&layout)[0].expect("shown").y.0;
+        let first_bottom = lines[0].y.0 + lines[0].height.0;
+        assert!(top >= first_bottom - 0.5, "{top} {first_bottom}");
+        assert!(top + 28.0 <= lines[2].y.0 + 0.5, "{top} {:?}", lines[2].y);
+        assert!(near(size.height.0, 40.0 + lines[1].height.0), "{size:?}");
     }
 }
 
