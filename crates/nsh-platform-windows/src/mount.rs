@@ -222,6 +222,9 @@ impl Mounter {
                 let Some(view) = &self.get(*id) else { return };
                 let old = std::mem::replace(&mut view.state_mut().style, style.clone());
                 crate::input::style_changed(view);
+                if old.cursor != style.cursor {
+                    crate::input::cursor_changed(surface);
+                }
                 crate::transition::style_changed(surface, view, &old);
                 crate::access::style_changed(view, &old);
                 view.moved();
