@@ -715,7 +715,9 @@ define_class!(
         fn is_accessibility_selector_allowed(&self, selector: Sel) -> bool {
             if selector == sel!(accessibilityPerformPress) {
                 self.ivars().state.try_borrow().is_ok()
-                    && crate::input::takes_accessibility_press(&NshView(self.retain()))
+                    && self.keyboard_surface().is_some_and(|surface| {
+                        crate::input::takes_accessibility_press(&surface, &NshView(self.retain()))
+                    })
             } else {
                 // SAFETY: NSView's own answer.
                 unsafe { msg_send![super(self), isAccessibilitySelectorAllowed: selector] }

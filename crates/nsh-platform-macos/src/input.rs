@@ -870,9 +870,11 @@ fn activate(surface: &Surface, view: &NshView, from: &str) {
     }
 }
 
-/// Whether `AXPress` presses `view`: it takes presses, is not disabled and
-/// the pointer could reach it. Other views do not offer the action.
-pub(crate) fn takes_accessibility_press(view: &NshView) -> bool {
+/// Whether `AXPress` presses `view`: it takes presses, is not disabled, the
+/// pointer could reach it and it is inside the newest modal, as Return and
+/// Space need ([`control_activation_target`]). Other views do not offer
+/// the action.
+pub(crate) fn takes_accessibility_press(surface: &Surface, view: &NshView) -> bool {
     {
         let s = view.state();
         if !s.events.contains(EventKind::Press) || s.props.accessibility.state.disabled {
@@ -880,13 +882,16 @@ pub(crate) fn takes_accessibility_press(view: &NshView) -> bool {
         }
     }
     view.can_target()
+        && view
+            .ns()
+            .isDescendantOf(&crate::navigation::focus_scope(surface))
 }
 
 /// `AXPress` from an accessibility client (VoiceOver's VO-Space, UI
 /// automation): presses a view [`takes_accessibility_press`] allows, as
 /// Return does when it has the keyboard focus. Returns whether it did.
 pub(crate) fn accessibility_press(surface: &Surface, view: &NshView) -> bool {
-    if !takes_accessibility_press(view) {
+    if !takes_accessibility_press(surface, view) {
         return false;
     }
     activate(surface, view, "accessibility");
