@@ -654,27 +654,41 @@ impl CoreTextEngine {
         a: &nsh_core::TextAttachment,
         alignments: &nsh_core::AttachmentAlignments,
     ) -> (CGFloat, CGFloat, CGFloat) {
-        let font = if alignments.get(a.index) == nsh_core::VerticalAlign::Baseline {
+        let style = text
+            .span_at(a.index)
+            .map_or_else(Default::default, |s| s.style);
+        let f = self.fonts.get(&style);
+        // SAFETY: a valid font.
+        let (ascent, descent, leading, x) =
+            unsafe { (f.ascent(), f.descent(), f.leading(), f.x_height()) };
+        let align = alignments.get(a.index);
+        let font = if align == nsh_core::VerticalAlign::Baseline {
             nsh_core::FontExtent::default()
         } else {
-            let style = text
-                .span_at(a.index)
-                .map_or_else(Default::default, |s| s.style);
-            let f = self.fonts.get(&style);
-            // SAFETY: a valid font.
-            let (ascent, descent, x) = unsafe { (f.ascent(), f.descent(), f.x_height()) };
             nsh_core::FontExtent::new(
                 Points(ascent as f32),
                 Points(descent as f32),
                 Points(x as f32),
             )
         };
-        let (up, down) = a.extent(font, alignments.get(a.index));
-        (
-            a.ascent(font, alignments.get(a.index)).0 as CGFloat,
-            up.0 as CGFloat,
-            down.0 as CGFloat,
-        )
+        let top = a.ascent(font, align).0 as CGFloat;
+        let (up, down) = a.extent(font, align);
+        let (up, down) = (up.0 as CGFloat, down.0 as CGFloat);
+        // A fixed `lineHeight`: CoreText centers a line's own extent in
+        // it, so a placeholder reaching past the font on one side only
+        // would move its line's baseline (lines unevenly spaced). Its
+        // delegate reserves the font's half-leading box instead (the CSS
+        // strut), and where the attachment reaches past that box, as much
+        // again on the other side: the line grows only when it must,
+        // evenly, its text where other lines' is.
+        let line_height = line_height(text);
+        if line_height <= 0.0 {
+            return (top, up, down);
+        }
+        let half = (line_height - (ascent + descent + leading)) / 2.0;
+        let (strut_up, strut_down) = (ascent + half, descent + half);
+        let grow = (up - strut_up).max(down - strut_down).max(0.0);
+        (top, strut_up + grow, strut_down + grow)
     }
 
     /// The height a line holding the tallest attachment needs: its extent
@@ -960,6 +974,11 @@ fn attachment_points(
     points
 }
 
+/// The text's fixed `lineHeight` (its first span's; 0: none).
+fn line_height(text: &AttributedText) -> CGFloat {
+    text.spans.first().map_or(0.0, |s| s.style.line_height.0) as CGFloat
+}
+
 /// `tallest`: the height a line holding an attachment needs (see
 /// `CoreTextEngine::tallest_attachment_line`); lines may grow up to it.
 fn paragraph_style(text: &AttributedText, tallest: CGFloat) -> CFRetained<CTParagraphStyle> {
@@ -972,7 +991,7 @@ fn paragraph_style(text: &AttributedText, tallest: CGFloat) -> CFRetained<CTPara
         TextAlign::Right => CTTextAlignment::Right,
         TextAlign::Justify => CTTextAlignment::Justified,
     };
-    let line_height = text.spans.first().map_or(0.0, |s| s.style.line_height.0) as CGFloat;
+    let line_height = line_height(text);
     let setting = |spec, value: *const c_void, size| CTParagraphStyleSetting {
         spec,
         valueSize: size,
