@@ -224,6 +224,11 @@ style id:cursor-ne-resize cursor nesw-resize
 style id:cursor-sw-resize cursor nesw-resize
 style id:cursor-class-nwse cursor nwse-resize
 style id:cursor-class-nesw cursor nesw-resize
+style id:cursor-dynamic cursor crosshair
+tap id:cursor-dynamic
+style id:cursor-dynamic cursor none
+tap id:cursor-dynamic
+style id:cursor-dynamic cursor crosshair
 style id:tinted tintColor #ff9500ff
 style id:tinted-hsl tintColor #0080ffff
 style id:origin-center transformOrigin 50% 50% 0

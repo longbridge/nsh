@@ -163,6 +163,10 @@ The environment is a desktop's: the safe area and the keyboard height are 0, `id
 follows Settings > Personalization > Colors live, `fontScale()` the Text size setting, reduce motion the animation
 effects setting and the locale the user's regional format. See [Device and environment](./device-and-environment.md).
 
+The `cursor` style follows updates while the mouse rests over a view. When a batch changes the cursor,
+Windows applies the new shape or `"none"` after the whole batch, using the view under the pointer.
+The title bar and resize borders keep their system cursors.
+
 ### Keyboard
 
 | Keys | Do |

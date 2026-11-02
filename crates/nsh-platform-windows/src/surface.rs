@@ -679,6 +679,7 @@ impl Surface {
             model.apply(batch);
         }
         crate::access::batch_applied(self);
+        crate::input::batch_applied(self);
     }
 
     /// Writes the animated values to the views and reports finished
@@ -789,5 +790,192 @@ impl Drop for Surface {
     fn drop(&mut self) {
         let key = self.key;
         let _ = SURFACES.try_with(|s| s.borrow_mut().remove(&key));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::{Duration, Instant};
+
+    use nsh_core::Cursor;
+    use windows::Win32::{
+        Foundation::{LPARAM, POINT, WPARAM},
+        Graphics::Gdi::ClientToScreen,
+        UI::{
+            Input::KeyboardAndMouse::{GetCapture, ReleaseCapture, SetCapture},
+            WindowsAndMessaging::*,
+        },
+    };
+
+    use super::*;
+
+    // This test uses the desktop's actual cursor; ordinary crate tests open
+    // no windows. Restore it even if an assertion fails.
+    struct Desktop {
+        hwnd: HWND,
+        saved: CURSORINFO,
+        timer: usize,
+    }
+
+    impl Desktop {
+        fn tick(&self) {
+            let deadline = Instant::now() + Duration::from_secs(2);
+            loop {
+                assert!(Instant::now() < deadline, "cursor test timer did not fire");
+                let mut msg = MSG::default();
+                // SAFETY: a local output message, removed from this thread's queue.
+                if unsafe { PeekMessageW(&mut msg, None, 0, 0, PM_REMOVE) }.as_bool() {
+                    if msg.hwnd == self.hwnd
+                        && msg.message == WM_TIMER
+                        && msg.wParam.0 == self.timer
+                    {
+                        return;
+                    }
+                    // SAFETY: dispatching a message obtained from this thread's queue.
+                    unsafe {
+                        let _ = TranslateMessage(&msg);
+                        DispatchMessageW(&msg);
+                    }
+                } else {
+                    std::thread::sleep(Duration::from_millis(1));
+                }
+            }
+        }
+    }
+
+    impl Drop for Desktop {
+        fn drop(&mut self) {
+            // SAFETY: this test owns the timer, capture and window; the saved cursor
+            // and screen position came from GetCursorInfo before it ran.
+            unsafe {
+                if self.timer != 0 {
+                    let _ = KillTimer(Some(self.hwnd), self.timer);
+                }
+                let _ = ReleaseCapture();
+                let _ = DestroyWindow(self.hwnd);
+                let _ = SetCursorPos(self.saved.ptScreenPos.x, self.saved.ptScreenPos.y);
+                SetCursor(Some(self.saved.hCursor));
+            }
+        }
+    }
+
+    fn cursor_info() -> CURSORINFO {
+        let mut info = CURSORINFO {
+            cbSize: std::mem::size_of::<CURSORINFO>() as u32,
+            ..Default::default()
+        };
+        // SAFETY: the output structure declares its size.
+        unsafe { GetCursorInfo(&mut info) }.unwrap();
+        info
+    }
+
+    fn apply_cursor(surface: &Rc<Surface>, cursor: Cursor) {
+        let mut style = surface.root.state().style.clone();
+        style.cursor = cursor;
+        surface.apply(&MountBatch {
+            items: vec![MountItem::ViewStyle { id: ROOT_ID, style }],
+        });
+    }
+
+    #[test]
+    #[ignore = "requires an interactive Windows desktop; moves and restores the mouse"]
+    fn cursor_style_updates_without_mouse_motion() {
+        let saved = cursor_info();
+        let surface = Surface::new(Environment::default());
+        let hwnd =
+            crate::window::create(&surface, "NSH cursor regression", (320, 240), None).unwrap();
+        let mut desktop = Desktop {
+            hwnd,
+            saved,
+            timer: 0,
+        };
+        apply_cursor(&surface, Cursor::Crosshair);
+        crate::window::show(hwnd);
+
+        let mut at = POINT { x: 100, y: 100 };
+        // SAFETY: a live test window and a point in its client area. The
+        // pointer is positioned once; later style batches must update it.
+        unsafe {
+            SetWindowPos(
+                hwnd,
+                Some(HWND_TOPMOST),
+                0,
+                0,
+                0,
+                0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW,
+            )
+            .unwrap();
+            ClientToScreen(hwnd, &mut at).ok().unwrap();
+            SetCursorPos(at.x, at.y).unwrap();
+            let mut msg = MSG::default();
+            while PeekMessageW(&mut msg, None, 0, 0, PM_REMOVE).as_bool() {
+                let _ = TranslateMessage(&msg);
+                DispatchMessageW(&msg);
+            }
+            assert_eq!(
+                WindowFromPoint(at),
+                hwnd,
+                "the test window must be under the mouse"
+            );
+            // Keep mouse input on this thread while observing the global
+            // cursor, rather than relying on foreground activation policy.
+            SetCapture(hwnd);
+            assert_eq!(GetCapture(), hwnd);
+            SendMessageW(
+                hwnd,
+                WM_SETCURSOR,
+                Some(WPARAM(hwnd.0 as usize)),
+                Some(LPARAM(HTCLIENT as isize)),
+            );
+            desktop.timer = SetTimer(Some(hwnd), 1, 30, None);
+        }
+        assert_ne!(desktop.timer, 0);
+        // Let the initial physical move reach this window before checking
+        // updates that must not depend on another move.
+        // SAFETY: loads a shared system cursor.
+        let initial = unsafe { LoadCursorW(None, IDC_CROSS) }.unwrap();
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while cursor_info().hCursor != initial {
+            if Instant::now() >= deadline {
+                // SAFETY: queries this thread's cursor and the desktop's active window.
+                let (local, foreground) = unsafe { (GetCursor(), GetForegroundWindow()) };
+                panic!(
+                    "initial crosshair did not appear: global={:?}, local={local:?}, foreground={foreground:?}, window={hwnd:?}, style={:?}, frame={:?}",
+                    cursor_info().hCursor,
+                    surface.root.state().style.cursor,
+                    surface.root.state().frame
+                );
+            }
+            desktop.tick();
+        }
+
+        for (cursor, expected) in [
+            (Cursor::Pointer, Some(IDC_HAND)),
+            (Cursor::None, None),
+            (Cursor::Crosshair, Some(IDC_CROSS)),
+        ] {
+            desktop.tick();
+            let before = cursor_info().ptScreenPos;
+            assert_eq!(
+                (before.x, before.y),
+                (at.x, at.y),
+                "mouse moved before {cursor:?}"
+            );
+            apply_cursor(&surface, cursor);
+            // Read immediately after the batch, without another mouse event
+            // or cursor request that could make the pre-fix code pass.
+            let info = cursor_info();
+            assert_eq!((info.ptScreenPos.x, info.ptScreenPos.y), (at.x, at.y));
+            match expected {
+                Some(id) => {
+                    // SAFETY: loads a shared system cursor.
+                    let expected = unsafe { LoadCursorW(None, id) }.unwrap();
+                    assert_eq!(info.hCursor, expected, "cursor did not follow {cursor:?}");
+                    assert_ne!(info.flags.0 & CURSOR_SHOWING.0, 0);
+                }
+                None => assert_eq!(info.flags.0 & CURSOR_SHOWING.0, 0, "cursor stayed visible"),
+            }
+        }
     }
 }
