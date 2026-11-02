@@ -14468,6 +14468,61 @@ mod views {
         assert_eq!(config.right_system_item, None);
     }
 
+    /// A screen whose header buttons are UIKit's own: a system item on the
+    /// left, an SF Symbol on the right.
+    #[derive(Default)]
+    struct SymbolPage;
+
+    #[derive(Clone, PartialEq, Props)]
+    struct SymbolPageProps {}
+
+    impl Component for SymbolPage {
+        type Props = SymbolPageProps;
+        type Event = NoEvent;
+
+        #[allow(deprecated)]
+        fn view(_: SymbolPageProps, _: Scope<NoEvent>) -> impl IntoElement {
+            stack().flex_1().child(
+                screen()
+                    .header_left_system_item(crate::HeaderSystemItem::Close)
+                    .header_left(view().on_press(|_: &()| {}))
+                    .header_right_symbol("slider.horizontal.3")
+                    .header_right(view().on_press(|_: &()| {}))
+                    .child(view().flex_1()),
+            )
+        }
+    }
+
+    /// Both slots take a UIKit button: the leading one by a system item, the
+    /// trailing one by an SF Symbol's name; the app's views stay the press
+    /// targets.
+    #[test]
+    fn leading_and_symbol_header_buttons_reach_the_screens_config() {
+        let mut c = core();
+        c.mount_root(&Root::new::<SymbolPage>(|| SymbolPageProps {}));
+        let config = c
+            .commit()
+            .unwrap()
+            .items
+            .iter()
+            .find_map(|i| match i {
+                MountItem::ScreenConfig { config, .. } => Some((**config).clone()),
+                _ => None,
+            })
+            .expect("a screen");
+        assert_eq!(
+            config.left_system_item,
+            Some(crate::HeaderSystemItem::Close)
+        );
+        assert_eq!(config.left_symbol, None);
+        assert_eq!(config.right_system_item, None);
+        assert_eq!(config.right_symbol.as_deref(), Some("slider.horizontal.3"));
+        assert!(
+            config.left.is_some() && config.right.is_some(),
+            "both slots are set"
+        );
+    }
+
     /// A Rust component that renders a native component.
     #[derive(Default)]
     struct NativeHost;
