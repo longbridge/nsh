@@ -49,7 +49,7 @@ use crossbeam_channel::{Receiver, Sender};
 pub use local_storage::local_storage_prefix;
 use nsh_core::{
     ApplyError, Core, EdgeInsets, EventKind, EventPayload, ListBind, MountBatch, NodeId, Op,
-    PayloadValue, TextEngine, element::JsEvent, time::Instant,
+    PayloadValue, TextEngine, element::JsEvent, platform::content_type, time::Instant,
 };
 pub use nsh_core::{
     JsonValue,
@@ -2350,43 +2350,6 @@ fn is_inside_assets(url: &str) -> bool {
     })
 }
 
-/// The media type a bundled file's response carries, from its extension:
-/// the dev server's (`nsh-dev`'s `content_type`), so a file read from the
-/// app's files and one downloaded from where a web app serves them answer
-/// with the same type.
-fn asset_type(url: &str) -> &'static str {
-    let name = url.rsplit('/').next().unwrap_or_default();
-    let extension = name.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase());
-    match extension.as_deref() {
-        Some("html") => "text/html; charset=utf-8",
-        Some("js" | "mjs") => "text/javascript; charset=utf-8",
-        Some("json" | "map") => "application/json",
-        Some("webmanifest") => "application/manifest+json",
-        Some("wasm") => "application/wasm",
-        Some("css") => "text/css; charset=utf-8",
-        Some("txt") => "text/plain; charset=utf-8",
-        Some("png") => "image/png",
-        Some("jpg" | "jpeg") => "image/jpeg",
-        Some("gif") => "image/gif",
-        Some("webp") => "image/webp",
-        Some("avif") => "image/avif",
-        Some("svg") => "image/svg+xml",
-        Some("ico") => "image/x-icon",
-        Some("heic") => "image/heic",
-        Some("ttf") => "font/ttf",
-        Some("otf") => "font/otf",
-        Some("woff") => "font/woff",
-        Some("woff2") => "font/woff2",
-        Some("mp4" | "m4v") => "video/mp4",
-        Some("webm") => "video/webm",
-        Some("mov") => "video/quicktime",
-        Some("mp3") => "audio/mpeg",
-        Some("m4a") => "audio/mp4",
-        Some("wav") => "audio/wav",
-        _ => "application/octet-stream",
-    }
-}
-
 /// A request in flight.
 struct Inflight {
     task: Box<dyn FetchTask>,
@@ -2585,7 +2548,7 @@ impl Net {
                         ("content-length".to_owned(), bytes.len().to_string()),
                         (
                             "content-type".to_owned(),
-                            asset_type(&request.url).to_owned(),
+                            content_type(&request.url).to_owned(),
                         ),
                     ],
                     url: request.url.clone(),
@@ -2652,7 +2615,7 @@ impl Net {
                         .any(|(name, _)| name.eq_ignore_ascii_case("content-type"))
                     {
                         head.headers
-                            .push(("content-type".to_owned(), asset_type(uri).to_owned()));
+                            .push(("content-type".to_owned(), content_type(uri).to_owned()));
                     }
                 }
                 let Some(followed) = &mut inflight.followed else {

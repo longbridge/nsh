@@ -1213,6 +1213,53 @@ pub struct HttpHead {
     pub headers: Vec<(String, String)>,
 }
 
+/// The media type of the file at `path` (a path or an `asset:/` URL), by
+/// its extension: what the dev server serves files with and what the
+/// engine answers requests of the app's files with, so a file has one type
+/// however it arrives. Browsers need it to load scripts, WebAssembly
+/// (compiled while it streams only as `application/wasm`), images, fonts
+/// and media.
+pub fn content_type(path: &str) -> &'static str {
+    match std::path::Path::new(path)
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(str::to_ascii_lowercase)
+        .as_deref()
+    {
+        Some("html") => "text/html; charset=utf-8",
+        Some("js" | "mjs") => "text/javascript; charset=utf-8",
+        Some("json" | "map") => "application/json",
+        Some("webmanifest") => "application/manifest+json",
+        Some("wasm") => "application/wasm",
+        Some("css") => "text/css; charset=utf-8",
+        Some("txt") => "text/plain; charset=utf-8",
+        Some("png") => "image/png",
+        Some("jpg" | "jpeg") => "image/jpeg",
+        Some("gif") => "image/gif",
+        Some("webp") => "image/webp",
+        Some("avif") => "image/avif",
+        Some("svg") => "image/svg+xml",
+        Some("ico") => "image/x-icon",
+        Some("heic") => "image/heic",
+        Some("ttf") => "font/ttf",
+        Some("otf") => "font/otf",
+        Some("woff") => "font/woff",
+        Some("woff2") => "font/woff2",
+        Some("mp4" | "m4v") => "video/mp4",
+        Some("webm") => "video/webm",
+        Some("mov") => "video/quicktime",
+        Some("mp3") => "audio/mpeg",
+        Some("m4a") => "audio/mp4",
+        Some("aac") => "audio/aac",
+        Some("wav") => "audio/wav",
+        Some("ogg" | "oga" | "opus") => "audio/ogg",
+        Some("flac") => "audio/flac",
+        Some("aif" | "aiff") => "audio/aiff",
+        Some("caf") => "audio/x-caf",
+        _ => "application/octet-stream",
+    }
+}
+
 /// What happens to a request, in order: (for a streamed body) any number
 /// of `BodyWanted`; then `Head`, `Data`… and `End` — or `Failed` at any
 /// point.
@@ -1252,7 +1299,7 @@ pub enum FetchOp {
 mod tests {
     use super::{
         Environment, HostEnvironment, HourCycle, Idiom, Languages, Locale, LocaleSettings,
-        MeasurementSystem, Os, TemperatureUnit, TimeZone, Weekday,
+        MeasurementSystem, Os, TemperatureUnit, TimeZone, Weekday, content_type,
     };
 
     #[test]
@@ -1553,5 +1600,28 @@ mod tests {
         }
         assert_eq!(zone(None), "Asia/Singapore");
         assert_eq!(TimeZone::posix(None, || None), TimeZone::UTC);
+    }
+
+    #[test]
+    fn content_types_follow_the_extension_of_paths_and_asset_urls() {
+        assert_eq!(
+            content_type("dist/app.js"),
+            "text/javascript; charset=utf-8"
+        );
+        assert_eq!(content_type("nsh.WASM"), "application/wasm");
+        assert_eq!(
+            content_type("asset:/@app/locales/en.json"),
+            "application/json"
+        );
+        assert_eq!(content_type("asset:/images/flag@2x.png"), "image/png");
+        assert_eq!(content_type("asset:/fonts/Inter.woff2"), "font/woff2");
+        assert_eq!(content_type("asset:/sounds/chime.OGG"), "audio/ogg");
+        for unknown in ["asset:/data.bin", "asset:/README", "asset:/.png"] {
+            assert_eq!(
+                content_type(unknown),
+                "application/octet-stream",
+                "{unknown}"
+            );
+        }
     }
 }

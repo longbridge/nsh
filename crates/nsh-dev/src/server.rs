@@ -474,7 +474,7 @@ async fn asset(
     let Ok(bytes) = tokio::fs::read(&file).await else {
         return StatusCode::NOT_FOUND.into_response();
     };
-    let kind = content_type(&file);
+    let kind = nsh_core::platform::content_type(&file.to_string_lossy());
     let range = headers
         .get(header::RANGE)
         .and_then(|r| r.to_str().ok())
@@ -558,7 +558,7 @@ async fn web_file(
         Some((path, bytes)) => {
             let content_type = match path {
                 "" => "text/html; charset=utf-8",
-                path => content_type(std::path::Path::new(path)),
+                path => nsh_core::platform::content_type(path),
             };
             (
                 [
@@ -594,50 +594,6 @@ pub(crate) fn wants_page(method: &Method, uri: &Uri, headers: &HeaderMap) -> boo
                 kind.eq_ignore_ascii_case("text/html")
                     || kind.eq_ignore_ascii_case("application/xhtml+xml")
             })
-}
-
-/// The media type of a file, by its extension: what browsers need to
-/// load scripts, WebAssembly (compiled while it streams only as
-/// `application/wasm`), images, fonts and media.
-pub(crate) fn content_type(path: &std::path::Path) -> &'static str {
-    match path
-        .extension()
-        .and_then(|e| e.to_str())
-        .map(str::to_ascii_lowercase)
-        .as_deref()
-    {
-        Some("html") => "text/html; charset=utf-8",
-        Some("js" | "mjs") => "text/javascript; charset=utf-8",
-        Some("json" | "map") => "application/json",
-        Some("webmanifest") => "application/manifest+json",
-        Some("wasm") => "application/wasm",
-        Some("css") => "text/css; charset=utf-8",
-        Some("txt") => "text/plain; charset=utf-8",
-        Some("png") => "image/png",
-        Some("jpg" | "jpeg") => "image/jpeg",
-        Some("gif") => "image/gif",
-        Some("webp") => "image/webp",
-        Some("avif") => "image/avif",
-        Some("svg") => "image/svg+xml",
-        Some("ico") => "image/x-icon",
-        Some("heic") => "image/heic",
-        Some("ttf") => "font/ttf",
-        Some("otf") => "font/otf",
-        Some("woff") => "font/woff",
-        Some("woff2") => "font/woff2",
-        Some("mp4" | "m4v") => "video/mp4",
-        Some("webm") => "video/webm",
-        Some("mov") => "video/quicktime",
-        Some("mp3") => "audio/mpeg",
-        Some("m4a") => "audio/mp4",
-        Some("aac") => "audio/aac",
-        Some("wav") => "audio/wav",
-        Some("ogg" | "oga" | "opus") => "audio/ogg",
-        Some("flac") => "audio/flac",
-        Some("aif" | "aiff") => "audio/aiff",
-        Some("caf") => "audio/x-caf",
-        _ => "application/octet-stream",
-    }
 }
 
 async fn upgrade(ws: WebSocketUpgrade, State(shared): State<Arc<Shared>>) -> Response {
