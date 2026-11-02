@@ -4848,6 +4848,30 @@ fn untracked_states_are_forgotten() {
 }
 
 #[test]
+fn inputs_report_their_focus_to_the_views_around_them() {
+    use crate::tailwind::state::FOCUSED;
+    // A field (`focus-within:`) around an input with no classes.
+    let mut c = core();
+    view_with_classes(&mut c, 2, "bg-white focus-within:bg-black");
+    add(&mut c, 4, Tag::Input, 2, &[]);
+    let batch = c.commit().unwrap();
+    // The input reports its focus all the same.
+    assert!(batch.items.iter().any(|i| matches!(
+        i,
+        MountItem::TrackStates {
+            id: 4,
+            states: FOCUSED
+        }
+    )));
+    c.set_states(4, FOCUSED);
+    let batch = c.commit().unwrap();
+    assert_eq!(
+        view_style_of(&batch, 2).unwrap().background_color,
+        Color(0x0000_00ff)
+    );
+}
+
+#[test]
 fn text_inherits_from_views_and_classes_set_props() {
     let mut c = core();
     view_with_classes(&mut c, 2, "text-white text-lg text-center");
@@ -18802,6 +18826,63 @@ fn overlays_in_a_modal_show_in_it() {
     let batch = c.commit().unwrap();
     assert!(inserts(&batch).contains(&(2, 6, None)));
     assert_eq!(frame_of(&batch, 6), Some(rect(190.0, 290.0, 10.0, 10.0)));
+}
+
+#[test]
+fn overlays_with_a_cover_lay_that_view_over_the_anchor() {
+    use StyleValue::Number;
+    let mut c = core();
+    // A trigger 80 × 30 at (40, 100).
+    add(
+        &mut c,
+        2,
+        Tag::View,
+        ROOT_ID,
+        &[
+            ("marginLeft", Number(40.0)),
+            ("marginTop", Number(100.0)),
+            ("width", Number(80.0)),
+            ("height", Number(30.0)),
+        ],
+    );
+    // A list of three 20-point rows under 4 points of padding.
+    add(&mut c, 8, Tag::Overlay, ROOT_ID, &[]);
+    add(
+        &mut c,
+        10,
+        Tag::View,
+        8,
+        &[("width", Number(100.0)), ("padding", Number(4.0))],
+    );
+    for id in [12, 14, 16] {
+        add(&mut c, id, Tag::View, 10, &[("height", Number(20.0))]);
+    }
+    apply(
+        &mut c,
+        vec![
+            overlay_prop(
+                8,
+                crate::OverlayProp::Anchor(crate::overlay::OverlayAnchor::Node(2)),
+            ),
+            overlay_prop(8, crate::OverlayProp::Cover(Some(14))),
+        ],
+    );
+    let batch = c.commit().unwrap();
+    // At the trigger's start, the second row (4, 24 in the list) with
+    // its middle on the trigger's.
+    assert_eq!(frame_of(&batch, 8), Some(rect(40.0, 81.0, 100.0, 68.0)));
+    // A row added before it moves it in the list: it is found again.
+    add(&mut c, 18, Tag::View, 10, &[("height", Number(20.0))]);
+    apply(
+        &mut c,
+        vec![Op::Insert {
+            parent: 10,
+            child: 18,
+            before: Some(12),
+        }],
+    );
+    let batch = c.commit().unwrap();
+    assert_eq!(frame_of(&batch, 8), Some(rect(40.0, 61.0, 100.0, 88.0)));
 }
 
 #[test]

@@ -781,7 +781,12 @@ impl Node {
             classes: None,
             class_props: None,
             states: 0,
-            tracked: 0,
+            // An input reports its focus from the start (`update_tracking`).
+            tracked: if matches!(kind, Kind::Input) {
+                crate::tailwind::state::FOCUSED
+            } else {
+                0
+            },
             projected: 0,
             parts: None,
             positional_children: false,
@@ -4053,6 +4058,7 @@ impl<M: TextEngine> Core<M> {
                     OverlayProp::Margin(v) => c.margin = v,
                     OverlayProp::Hint(v) => c.hint = v,
                     OverlayProp::Open(v) => c.open = v,
+                    OverlayProp::Cover(v) => c.cover = v,
                 });
                 return Ok(());
             }

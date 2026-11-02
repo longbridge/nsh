@@ -1137,6 +1137,19 @@ impl Overlay {
         )
     }
 
+    /// Lays the element carrying `cover`, inside it, over its anchor (a
+    /// select's selected item over the trigger) instead of placing it on
+    /// a side ([`crate::overlay::OverlayConfig::cover`]). A ref is not
+    /// tracked: `shown` (tracked) says when that element is rendered, as
+    /// its `on_layout` can tell.
+    pub fn cover(self, cover: &super::ElementRef, shown: impl Fn() -> bool + 'static) -> Self {
+        let cover = *cover;
+        self.bind_prop(
+            move || if shown() { cover.node() } else { None },
+            |id| Prop::Overlay(OverlayProp::Cover(id)),
+        )
+    }
+
     /// Places it beside the element carrying `anchor`, outside the edges
     /// of the one carrying `edges` (the menu around it), as a submenu
     /// beside its row ([`OverlayAnchor::Beside`]).
