@@ -86,6 +86,18 @@ All five come from [`nsh/base`](../modules/nsh-base.md). The items reach their m
 freely: groups in views, labels, items that come and go with `If`. `popupClass` styles the popup on desktops and the
 sheet on phones; a style that differs between them can compare `platform.idiom` (`nsh`) with `"desktop"`.
 
+## Menu bars
+
+Menus whose triggers are items of one `Toolbar` form a menu bar: with one of its menus open, the pointer over another
+menu's trigger opens that menu in its place, and the arrow keys move between the triggers.
+
+```tsx
+<Toolbar accessibilityLabel="Menu bar">
+  <Menu trigger={<View><Text>File</Text></View>}>{/* … */}</Menu>
+  <Menu trigger={<View><Text>Edit</Text></View>}>{/* … */}</Menu>
+</Toolbar>
+```
+
 ## Context menus
 
 ```tsx

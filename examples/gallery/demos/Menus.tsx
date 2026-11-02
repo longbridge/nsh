@@ -1,5 +1,5 @@
 import { type JSX, LayoutAnimation, reduceMotion, Scroll, setColorScheme, signal, Text, token, View } from "nsh";
-import { ContextMenu, Menu, MenuItem, MenuSeparator, type OpenChangeReason, Submenu } from "nsh/base";
+import { ContextMenu, Menu, MenuItem, MenuSeparator, type OpenChangeReason, Submenu, Toolbar } from "nsh/base";
 import { platform } from "nsh";
 import { keymap } from "nsh";
 import { Icon, LucideIcon, type LucideIconName } from "../icons";
@@ -314,7 +314,8 @@ export function Menus() {
     const key = (k: string) => (platform.desktop ? keymap.label(k) : undefined);
     return (
       <Card icon="lists" title="Menu bar" subtitle={platform.desktop ? "Hover across submenus; the shortcuts work too" : "Each menu a sheet; submenus take its place"}>
-        <View style={{ flexDirection: "row", gap: 2, marginLeft: pointer ? -10 : 0 }}>
+        {/* A toolbar: with one menu open, the pointer over another title opens it. */}
+        <Toolbar accessibilityLabel="Menu bar" style={{ flexDirection: "row", gap: 2, marginLeft: pointer ? -10 : 0 }}>
           <Menu offset={4} margin={8} popupStyle={sheet} backdropStyle={backdrop} onOpenChange={changed("File")} trigger={<Chip bar label="File" open={isOpen("File")} />}>
             <Panel>
               <Item label="New document" icon="file-plus" shortcut={key("mod+alt+n")} onSelect={() => act("New document")} />
@@ -367,7 +368,7 @@ export function Menus() {
               </SubmenuOf>
             </Panel>
           </Menu>
-        </View>
+        </Toolbar>
         <Preview sidebar={sidebar()} minimap={minimap()} sort={sort()} zoom={zoom()} />
         <Caption label={`Sidebar ${sidebar() ? "on" : "off"} · minimap ${minimap() ? "on" : "off"} · by ${sort()} · zoom ${zoom()}`} />
         <Caption label={history().length ? `Done: ${history().join(", ")}` : "Nothing done yet"} />

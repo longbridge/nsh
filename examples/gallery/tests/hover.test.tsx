@@ -13,3 +13,26 @@ test("the pad hears the pointer come in, move and leave", async () => {
   await app.hover("Hover");
   await app.waitFor("Pointer away");
 });
+
+test("with a menu of the menu bar open, the pointer over another title opens it", async () => {
+  const app = await open("../App.tsx", { platform: "macos" });
+  await app.press("role:button[Menu]");
+  await app.waitFor("Menu bar");
+  await app.press("File");
+  await app.waitFor("New document");
+  await app.hover("Edit");
+  await app.waitFor("Undo");
+  expect(app.shows("New document")).toBe(false);
+  await app.hover("View");
+  await app.waitFor("Show sidebar");
+  expect(app.shows("Undo")).toBe(false);
+});
+
+test("the pointer over a closed menu bar opens nothing", async () => {
+  const app = await open("../App.tsx", { platform: "macos" });
+  await app.press("role:button[Menu]");
+  await app.waitFor("Menu bar");
+  await app.hover("Edit");
+  await app.wait(300);
+  expect(app.shows("Undo")).toBe(false);
+});

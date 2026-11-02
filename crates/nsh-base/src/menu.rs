@@ -352,16 +352,41 @@ pub fn Menu(props: MenuProps, cx: Scope<MenuEvent>) -> impl IntoElement {
     let toggle = change.clone();
     // In a toolbar, the trigger is one of its items.
     let around = bar();
+    // In a bar, the menu open is the bar's: the pointer over another
+    // menu's trigger moves it there.
+    if let Some(menus) = around.as_ref().map(|b| b.open_menu.clone()) {
+        let me = change.clone();
+        effect(move || {
+            let on = open.get();
+            let mut menu = menus.borrow_mut();
+            if on {
+                *menu = Some(me.clone());
+            } else if menu.as_ref().is_some_and(|m| Rc::ptr_eq(m, &me)) {
+                *menu = None;
+            }
+        });
+    }
     view()
         .child(props.trigger.place(move |trigger| {
             let toggle = toggle.clone();
+            let menus = around.as_ref().map(|b| b.open_menu.clone());
+            let me = toggle.clone();
             let trigger = trigger
                 .element_ref(&anchor)
                 .accessibility_state(move || AccessibilityState {
                     expanded: Some(open.get()),
                     ..AccessibilityState::default()
                 })
-                .on_press(move || toggle(!open.get_untracked(), OpenChangeReason::TriggerPress));
+                .on_press(move || toggle(!open.get_untracked(), OpenChangeReason::TriggerPress))
+                .on_mouse_enter(move |_: &MouseEvent| {
+                    let shown = menus.as_ref().and_then(|m| m.borrow().clone());
+                    if let Some(shown) = shown
+                        && !Rc::ptr_eq(&shown, &me)
+                    {
+                        shown(false, OpenChangeReason::Hover);
+                        me(true, OpenChangeReason::Hover);
+                    }
+                });
             bar_trigger(around.clone(), trigger, anchor)
         }))
         .child(surface(
