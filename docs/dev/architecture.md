@@ -33,6 +33,11 @@ Input                        native gestures -> EngineControl::dispatch_event ->
 - One `Surface` (Apple, Linux, Windows) / `NshView` (Android) is one engine (one QuickJS runtime), with no global singletons, so NSH can be embedded in
   existing apps with several instances. `AppView` (Apple: a `UIView` or, on macOS, an `NSView`; Linux: a GTK widget; Windows: a window; GPUI: a GPUI view) wraps a surface for embedding and owns its dev session; a standalone app is
   just "one AppView filling the window".
+- **Panels** (`Panel`, `nsh_core::desktop::PanelOptions`): a host's second window. It is created on the app's UI
+  thread — the thread that applies commits and runs the message loop — inside `run_app_with`'s setup hook, before the
+  loop starts; `Panel` is not `Send`, and `Panel::open` anywhere else is `PanelError::WrongThread`. It runs an
+  `AppView` and an engine of its own: the same commit pipeline, one main-queue hop per commit, no thread of a third
+  kind (macOS and Linux use the main thread, Windows the `nsh-ui` thread `run_app` spawns).
 - **Android**: the engine thread typesets with `StaticLayout` through JNI; each commit is one `byte[]` plus an object
   table handed to `Mounter.java` on the UI thread, and animation items stay in Rust (the flow, the units and the JNI
   rules: `crates/nsh-platform-android/src/encode.rs`).

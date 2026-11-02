@@ -1,11 +1,13 @@
 //! `AppView` (one surface as a GTK widget, for embedding) and the
-//! standalone app ([`run_app`]: one `AppView` filling a window).
+//! standalone app ([`run_app`]: one `AppView` filling a window;
+//! [`run_app_with`]: the same, and the panels its setup hook opens).
 
 use std::{
     cell::RefCell,
     path::PathBuf,
     rc::Rc,
-    sync::{Arc, RwLock},
+    sync::{Arc, OnceLock, RwLock},
+    thread::ThreadId,
 };
 
 use gtk4::{self as gtk, glib, prelude::*};
@@ -17,6 +19,7 @@ use nsh_engine::{App, Bundle, ColorScheme, EngineConfig, Environment, Idiom, Lim
 
 use crate::{
     image::{AssetBase, AssetReader},
+    panel::Panel,
     surface::Surface,
 };
 
@@ -372,8 +375,41 @@ fn initial_environment() -> Environment {
     }
 }
 
+/// The thread that runs the GTK main loop, recorded by [`run_app`]: a panel
+/// opens on it ([`crate::Panel::open`]), as its windows and their widgets
+/// belong to the main loop.
+pub(crate) static APP_THREAD: OnceLock<ThreadId> = OnceLock::new();
+
 /// Runs `source` in a window until it is closed.
+///
+/// [`run_app_with`] is the same, with a setup hook that opens the app's
+/// panels.
 pub fn run_app(source: AppSource, options: AppOptions) -> glib::ExitCode {
+    run_app_with(source, options, |_| Vec::new())
+}
+
+/// Runs `source` in a window until it is closed, and keeps the panels
+/// `setup` makes (`docs/dev/linux.md`).
+///
+/// A panel is created on the thread that runs the app's GTK main loop, from
+/// this setup hook: `setup` runs once, in the app's window, when GTK has
+/// started (its display is open) — the thread that runs the main loop, where
+/// [`crate::Panel::open`] may be called and anywhere else returns
+/// [`crate::PanelError::WrongThread`]. [`Panel`] is not `Send`, so the
+/// panels `setup` returns stay on that thread.
+///
+/// The window keeps those panels: they live as long as it, and dropping them
+/// (when it is destroyed) closes them and stops their apps, as dropping a
+/// [`Panel`] does. The host shows them itself ([`crate::Panel::show`], in
+/// `setup` or later), so a panel that is not shown stays hidden.
+pub fn run_app_with(
+    source: AppSource,
+    options: AppOptions,
+    setup: impl FnOnce(&AppOptions) -> Vec<Panel> + Send + 'static,
+) -> glib::ExitCode {
+    // Before GTK starts: every widget of the app is made on this thread, so
+    // a panel opened anywhere else is a mistake (`Panel::open` checks).
+    let _ = APP_THREAD.set(std::thread::current().id());
     prefer_gl_on_nvidia();
     // X11's WM_CLASS comes from the program name: the app's id, as the
     // `StartupWMClass` of the `.desktop` file `nsh package` writes (Wayland's
@@ -384,9 +420,16 @@ pub fn run_app(source: AppSource, options: AppOptions) -> glib::ExitCode {
         .flags(gtk::gio::ApplicationFlags::NON_UNIQUE)
         .build();
     let source = RefCell::new(Some(source));
+    let setup = RefCell::new(Some(setup));
     app.connect_activate(move |app| {
         let Some(source) = source.borrow_mut().take() else {
             return;
+        };
+        // GTK is up (the display is open): the panels may open, and their
+        // apps start beside the window's.
+        let panels = match setup.borrow_mut().take() {
+            Some(setup) => setup(&options),
+            None => Vec::new(),
         };
         let window = gtk::ApplicationWindow::builder()
             .application(app)
@@ -403,8 +446,10 @@ pub fn run_app(source: AppSource, options: AppOptions) -> glib::ExitCode {
             AppSource::DevServer(url) => crate::dev::start(&view, url),
         }
         install_shortcuts(app, &window);
-        // The window keeps the view (and its engine) alive.
+        // The window keeps the view (and its engine) alive, and the panels
+        // the setup hook opened, which go with it.
         unsafe_keep(&window, view);
+        keep_panels(&window, panels);
         window.present();
     });
     // GTK must not parse the host's own arguments.
@@ -471,6 +516,18 @@ fn unsafe_keep(window: &gtk::ApplicationWindow, view: Rc<AppView>) {
     window.connect_destroy(move |_| {
         if let Some(view) = cell.borrow_mut().take() {
             view.stop();
+        }
+    });
+}
+
+/// Ties the panels [`run_app_with`]'s setup hook opened to `window`'s
+/// lifetime: the window keeps them, and destroying it drops them (which
+/// closes their windows and stops their apps).
+fn keep_panels(window: &gtk::ApplicationWindow, panels: Vec<Panel>) {
+    let cell = RefCell::new(Some(panels));
+    window.connect_destroy(move |_| {
+        if let Some(panels) = cell.borrow_mut().take() {
+            drop(panels);
         }
     });
 }

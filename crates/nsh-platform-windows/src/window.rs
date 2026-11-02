@@ -90,6 +90,9 @@ struct WindowData {
     /// Hides the window when it loses the keyboard (a panel's
     /// [`nsh_core::desktop::PanelOptions::hides_on_resign_key`]).
     hides_on_resign_key: Cell<bool>,
+    /// Takes the keyboard when it is clicked without activating the app (a
+    /// panel's [`nsh_core::desktop::PanelOptions::nonactivating`]).
+    no_activate: Cell<bool>,
 }
 
 thread_local! {
@@ -175,6 +178,7 @@ pub(crate) fn create(
         sys_char: Cell::new(false),
         windowed: Cell::new(None),
         hides_on_resign_key: Cell::new(false),
+        no_activate: Cell::new(false),
     });
     let title: Vec<u16> = title.encode_utf16().chain(Some(0)).collect();
     let (style, ex_style) = match parent {
@@ -447,6 +451,15 @@ fn data(hwnd: HWND) -> Option<&'static WindowData> {
 pub(crate) fn set_hides_on_resign_key(hwnd: HWND, hide: bool) {
     if let Some(data) = data(hwnd) {
         data.hides_on_resign_key.set(hide);
+    }
+}
+
+/// Takes the keyboard in the window when it is clicked without activating
+/// the app (a panel's `PanelOptions::nonactivating`), or restores the
+/// default.
+pub(crate) fn set_no_activate(hwnd: HWND, no_activate: bool) {
+    if let Some(data) = data(hwnd) {
+        data.no_activate.set(no_activate);
     }
 }
 
@@ -789,12 +802,30 @@ fn handle(
         WM_KILLFOCUS => {
             crate::text_input::window_focus(surface, false);
             // A panel that hides on resign leaves the screen as it loses
-            // the keyboard, as a nonactivating panel never deactivates the
-            // app (there is no `WM_ACTIVATE` for it to hide on).
-            if data.hides_on_resign_key.get() {
+            // the keyboard, unless the focus moves into the panel itself
+            // (its WebView2 or a native child, whose window comes as the
+            // one receiving the focus): that is not leaving the panel. A
+            // nonactivating panel never deactivates the app, so there is
+            // no `WM_ACTIVATE` for it to hide on.
+            //
+            // `WM_KILLFOCUS`'s `wParam` is the window that takes the focus
+            // (`lParam` is unused).
+            let next = HWND(wparam.0 as *mut _);
+            // SAFETY: a plain query on the window receiving the focus.
+            let is_child = unsafe { IsChild(hwnd, next) }.as_bool();
+            if data.hides_on_resign_key.get() && leaves_focus(hwnd, next, is_child) {
                 // SAFETY: a plain call on the live window.
                 let _ = unsafe { ShowWindow(hwnd, SW_HIDE) };
             }
+        }
+        WM_MOUSEACTIVATE if data.no_activate.get() => {
+            // A `WS_EX_NOACTIVATE` window is clicked without activating
+            // the app, which would also leave it without the keyboard
+            // (the click is aimed at it): take the focus here and tell
+            // Win32 not to activate the window.
+            // SAFETY: a plain call on this window.
+            let _ = unsafe { SetFocus(Some(hwnd)) };
+            return Some(LRESULT(MA_NOACTIVATE as isize));
         }
         WM_GETOBJECT => return crate::access::get_object(surface, hwnd, wparam, lparam),
         WM_SETTINGCHANGE | WM_THEMECHANGED | WM_SYSCOLORCHANGE | WM_DWMCOLORIZATIONCOLORCHANGED => {
@@ -854,6 +885,16 @@ fn count_clicks(data: &WindowData, lparam: LPARAM) -> u32 {
     };
     data.last_press.set((time, p, clicks));
     clicks
+}
+
+/// Whether the keyboard moving from `focus` to the window `next` leaves
+/// `focus` and its children — the window of a panel that hides on resign,
+/// say — so that the keyboard went elsewhere: another of the app's windows,
+/// another app's, or nowhere Win32 names at all (`WM_KILLFOCUS`'s `wParam` is
+/// often `NULL`). A window that is `focus` itself, or one of its children
+/// (`is_child`: `IsChild`'s answer, taken by the caller), keeps it.
+fn leaves_focus(focus: HWND, next: HWND, is_child: bool) -> bool {
+    next != focus && (next.is_invalid() || !is_child)
 }
 
 /// The mouse buttons a mouse message's `wparam` holds (`MK_LBUTTON`,
@@ -1071,6 +1112,19 @@ pub(crate) fn keep<T: 'static>(value: T) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_keyboard_leaves_a_panel_only_for_a_window_outside_it() {
+        let panel = HWND(0x1000 as *mut _);
+        // The panel itself, or a child of it (its WebView2, a native
+        // component), keeps the keyboard: the panel stays.
+        assert!(!leaves_focus(panel, panel, false));
+        assert!(!leaves_focus(panel, HWND(0x2000 as *mut _), true));
+        // Another window of the app's, or another app's, takes it away.
+        assert!(leaves_focus(panel, HWND(0x2000 as *mut _), false));
+        // No window to name: the keyboard left.
+        assert!(leaves_focus(panel, HWND::default(), false));
+    }
 
     #[test]
     fn held_buttons_number_the_buttons_as_presses_do() {

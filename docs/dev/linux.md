@@ -67,6 +67,15 @@ works and its runner only needs GTK.
 - **Embedding**: `AppView` (`app.rs`) is one surface as a widget; `run_app` opens one in a window. `set_ui_sets`
   serves the UI sets beside the runtime's modules (`nsh/base` by default; an app with Rust components of its own passes
   `nsh_base::registry()` and its sets).
+- **Panels** (`run_app_with`, `panel.rs`): GTK's widgets belong to the main loop, so `run_app` records the GTK main
+  thread and a panel opens on it only: `run_app_with`'s setup hook runs at the start of `connect_activate`, with GTK
+  up, and `Panel::open` anywhere else is `PanelError::WrongThread` (it does not start GTK itself). A panel is a GTK
+  window with an `NshView` and engine of its own; GTK 4 has no window positioning and no window levels, so `position`
+  and `set_level` do nothing (`WindowLevel::AboveDock` leaves the stacking to the window manager), as do
+  `movable_by_background` and `nonactivating`. `hides_on_deactivate` hides the panel when it loses the focus, the
+  closest signal GTK 4 has to the app's deactivation (`hides_on_resign_key` asks for the same). `transparent` is
+  best effort: it clears the window's own background (one CSS provider for every panel, added once) and needs a
+  compositing window manager; the app's root still paints its own background.
 
 ## How each area maps to GTK
 

@@ -3,7 +3,7 @@
 //! loop).
 
 use std::{
-    cell::RefCell,
+    cell::{Cell, RefCell},
     path::PathBuf,
     rc::Rc,
     sync::{Arc, RwLock},
@@ -28,6 +28,7 @@ use windows::{
 
 use crate::{
     image::{AssetBase, AssetReader},
+    panel::Panel,
     surface::Surface,
 };
 
@@ -362,6 +363,19 @@ fn initial_environment() -> Environment {
     }
 }
 
+thread_local! {
+    /// Whether this thread runs [`run_app_with`]'s message loop: the thread
+    /// the app's windows, panels included, belong to.
+    static APP_THREAD: Cell<bool> = const { Cell::new(false) };
+}
+
+/// Whether this thread runs the app's message loop ([`run_app_with`]),
+/// where panel windows are opened and dropped. A panel opened elsewhere
+/// fails with [`crate::PanelError::WrongThread`].
+pub(crate) fn in_app_thread() -> bool {
+    APP_THREAD.with(Cell::get)
+}
+
 /// Runs `source` in a window until it is closed.
 ///
 /// The window and its message loop run on a thread of their own, which this
@@ -371,23 +385,49 @@ fn initial_environment() -> Environment {
 /// thread-local destructors instead, they would run inside `ExitProcess`,
 /// after the graphics DLLs and their driver threads are gone, and the
 /// process would end with a stray exit code.
+///
+/// The app has no panels: [`run_app_with`] is the same with a setup hook
+/// that opens them on that thread.
 pub fn run_app(source: AppSource, options: AppOptions) -> std::process::ExitCode {
+    run_app_with(source, options, |_| Vec::new())
+}
+
+/// [`run_app`], with `setup` run on the app's thread once the main window
+/// is shown and before its message loop runs.
+///
+/// `setup` opens the app's panels ([`Panel::open`]): they belong to the
+/// app's thread (the `nsh-ui` thread `run_app` spawns) and its message
+/// loop, as the main window does. The panels it returns stay alive until
+/// the loop ends (the app's last window closes) and are then dropped on
+/// that thread, before OLE is uninitialized and the thread exits: dropping
+/// a panel closes its window and stops its app. Opening a panel on another
+/// thread fails with [`crate::PanelError::WrongThread`].
+pub fn run_app_with(
+    source: AppSource,
+    options: AppOptions,
+    setup: impl FnOnce(&AppOptions) -> Vec<Panel> + Send + 'static,
+) -> std::process::ExitCode {
     /// The app, moved to the UI thread.
-    struct Job(AppSource, AppOptions);
+    struct Job<F>(AppSource, AppOptions, F);
     // SAFETY: the options hold `Rc`s (the native components), so they are
     // not `Send`. They move to the UI thread whole while this thread waits
     // in `join` and never touches them; clones the caller kept are only
     // used again after `join` returns, once the UI thread has ended, so
-    // the reference counts are never changed from two threads at once.
-    unsafe impl Send for Job {}
-    let job = Job(source, options);
+    // the reference counts are never changed from two threads at once. The
+    // setup hook runs on the UI thread too, and the panels it returns never
+    // cross a thread boundary: they are made and dropped there.
+    unsafe impl<F: Send> Send for Job<F> {}
+    let job = Job(source, options, setup);
     let ui = std::thread::Builder::new()
         .name("nsh-ui".into())
         // Deep view trees recurse in drawing and hit testing.
         .stack_size(8 << 20)
         .spawn(move || {
+            // Move the whole job, not its fields: `Job` is the type that is
+            // `Send` (the options are not), as the thread boundary needs.
             let job = job;
-            run_on_this_thread(job.0, job.1)
+            let Job(source, options, setup) = job;
+            run_on_this_thread(source, options, setup)
         });
     match ui.map(std::thread::JoinHandle::join) {
         Ok(Ok(code)) => code,
@@ -399,8 +439,12 @@ pub fn run_app(source: AppSource, options: AppOptions) -> std::process::ExitCode
     }
 }
 
-/// [`run_app`] on the calling thread.
-fn run_on_this_thread(source: AppSource, options: AppOptions) -> std::process::ExitCode {
+/// [`run_app_with`] on the calling thread.
+fn run_on_this_thread(
+    source: AppSource,
+    options: AppOptions,
+    setup: impl FnOnce(&AppOptions) -> Vec<Panel>,
+) -> std::process::ExitCode {
     // SAFETY: process setup before any window exists: per-monitor DPI
     // (points stay sharp on every monitor) and an OLE apartment for the
     // clipboard, drag and drop and WIC.
@@ -409,10 +453,14 @@ fn run_on_this_thread(source: AppSource, options: AppOptions) -> std::process::E
         let _ = OleInitialize(None);
     }
     crate::system::set_app_id(&options.app_id);
+    APP_THREAD.with(|app| app.set(true));
     let view = match AppView::new(None, options.clone()) {
         Ok(view) => view,
         Err(err) => {
+            APP_THREAD.with(|app| app.set(false));
             fatal_error(&format!("Cannot open a window: {err}"));
+            // SAFETY: pairs the `OleInitialize` above.
+            unsafe { windows::Win32::System::Ole::OleUninitialize() };
             return std::process::ExitCode::FAILURE;
         }
     };
@@ -425,8 +473,15 @@ fn run_on_this_thread(source: AppSource, options: AppOptions) -> std::process::E
     crate::system::environment_applied(view.surface());
     install_shortcuts(&view);
     view.show();
+    // The app's panels: opened on this thread, as the main window is, and
+    // closed with the app.
+    let panels = setup(&options);
     let code = crate::window::run_loop();
+    APP_THREAD.with(|app| app.set(false));
     view.stop();
+    // Before OLE goes: a panel's app stops and its window closes here, on
+    // the thread that made them.
+    drop(panels);
     drop(view);
     // SAFETY: pairs the `OleInitialize` above; nothing on this thread uses
     // OLE afterwards.

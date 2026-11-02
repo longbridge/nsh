@@ -101,8 +101,10 @@ pub fn set_frame(frame: WindowFrame) {
 }
 
 /// Sets the window's level on macOS and Windows (TS: `Window.setLevel`):
-/// [`WindowLevel::Floating`] stays above normal windows,
-/// [`WindowLevel::Normal`] restores the normal level.
+/// [`WindowLevel::Normal`] restores the normal level,
+/// [`WindowLevel::Floating`] stays above normal windows, and
+/// [`WindowLevel::AboveDock`] sits just above the Dock or the taskbar
+/// ([`WindowLevel::DesktopIcon`] selects the desktop's level).
 pub fn set_level(level: WindowLevel) {
     super::desktop_command(DesktopCommand::SetLevel(level));
 }

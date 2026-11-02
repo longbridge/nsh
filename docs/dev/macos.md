@@ -141,6 +141,15 @@ server client, log forwarding, the error overlay: `dev.rs`). The runtime needs m
   its stop after the close callback. `set_ui_sets`
   serves the UI sets beside the runtime's modules (`nsh/base` by default; an app with Rust components of its own passes
   `nsh_base::registry()` and its sets).
+- **Panels** (`run_app_with`, `panel.rs`): a host's second window belongs to the main thread, as the app's do:
+  `run_app_with`'s setup hook opens it there before `app.run()`, and `Panel::open` off that thread is
+  `PanelError::WrongThread` (the `MainThreadMarker` check). The panel is an `NSPanel` showing an `AppView` and engine
+  of its own; `WindowLevel` maps `Normal` and `Floating` to `NSNormalWindowLevel` and `NSFloatingWindowLevel`,
+  `AboveDock` to the window server's Dock level plus one (over the other floating windows, under the menu bar) and
+  `DesktopIcon` to the desktop's level, under every window. A transparent panel's surface is transparent; a panel
+  that resigns key orders out (when `hides_on_resign_key`) and forgets the app in front, a decorated panel's close
+  button stops its app and forgets it too, and dropping the panel (or `close`) closes the window and stops the app
+  once.
 
 ## How each area maps to AppKit
 

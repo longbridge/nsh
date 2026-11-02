@@ -1,36 +1,37 @@
-//! Panel windows: a second window of the app, beside [`run_app`]'s.
+//! Panel windows: a second window of the app, beside [`run_app`](crate::run_app)'s.
 //!
 //! A panel is a window of its own, as a floating palette or a popover is:
 //! it shows an [`AppSource`] of its own (a Rust root, a bundle or a dev
 //! server), so it can run a different app than the main window, with an
 //! engine of its own ([`AppView`]). It has no title bar by default, can
-//! float above other apps' windows ([`PanelLevel`]) and can take the
+//! float above other apps' windows ([`WindowLevel`]) and can take the
 //! keyboard without activating the app ([`PanelOptions::nonactivating`]).
 //! A panel lives exactly as long as its [`Panel`] does: dropping it closes
 //! the window and stops its app.
 //!
-//! A panel runs on a thread of its own that pumps its messages, so
-//! [`Panel::open`] may be called from any thread, the host's main thread
-//! included even after [`run_app`] moved the main window to a thread of its
-//! own and blocked in `join`. The panel's methods hand their work to that
-//! thread and wait for it, and [`Drop`] stops the thread and joins it: its
-//! thread-locals (the graphics devices, font faces and the other device
-//! resources cached per thread) are released at a plain thread exit, not
-//! by the main thread's destructors inside `ExitProcess` (see
-//! [`run_app`]'s note on thread-locals). Rust components run on the engine
-//! thread, so the host's main thread never runs one, and neither does the
-//! panel's UI thread.
+//! A panel belongs to the thread that runs the app's message loop: the
+//! `nsh-ui` thread [`run_app`](crate::run_app) spawns, where
+//! [`run_app_with`](crate::run_app_with)'s setup hook opens panels. It has
+//! no thread and no message loop of its own: its methods call Win32
+//! directly on the app's thread, as the main window's do, so they must run
+//! there. [`Panel::open`] elsewhere fails with
+//! [`PanelError::WrongThread`]. Rust components run on the engine thread,
+//! so a panel is opened by the host's code on the app's thread (the setup
+//! hook), not from a component's event handler.
 //!
 //! Win32 has no panel concept, so the window is made to look like one:
 //! a borderless window is a `WS_POPUP` window without a caption, `show`
 //! shows it without activating the app (and `hide` hands the focus back to
-//! the window that was in front), and [`PanelLevel::Floating`] and
-//! [`PanelLevel::AboveDock`] are both `HWND_TOPMOST` (Windows has no
-//! desktop-icon level to float above instead). [`PanelOptions::position`]
-//! places the window's outer frame in screen points at its own scale, and
-//! [`PanelOptions::hides_on_resign_key`] hides it from the window procedure,
-//! as it loses the keyboard (`WM_KILLFOCUS`): a nonactivating panel never
-//! gets an activation message.
+//! the window that was in front), and [`WindowLevel::Floating`] and
+//! [`WindowLevel::AboveDock`] are both `HWND_TOPMOST` (Windows has no
+//! separate band above the taskbar; topmost is the one over the normal
+//! windows). [`WindowLevel::DesktopIcon`] is `HWND_BOTTOM`, the closest
+//! Win32 has, as for the main window. [`PanelOptions::position`] places the
+//! window's top-left corner in screen points at its own scale, and
+//! [`PanelOptions::hides_on_resign_key`] hides it from the window procedure
+//! as it loses the keyboard (`WM_KILLFOCUS`) to a window outside it: the
+//! signal a nonactivating panel has, which never gets an activation
+//! message.
 //!
 //! [`PanelOptions::transparent`], [`PanelOptions::hides_on_deactivate`] and
 //! [`PanelOptions::movable_by_background`] have no Win32 equivalent here
@@ -39,41 +40,26 @@
 //! app's activation, which a panel does not change, and moving by
 //! background would need its hit tests.
 
-use std::{
-    ffi::c_void,
-    rc::Rc,
-    sync::mpsc,
-    thread::{self, JoinHandle},
-};
+use std::{cell::Cell, ffi::c_void, rc::Rc};
 
-pub use nsh_core::desktop::{PanelError, PanelLevel, PanelOptions};
-use nsh_core::{
-    desktop::WindowFrame,
-    geometry::{Points, Size},
-};
+use nsh_core::desktop::WindowFrame;
+pub use nsh_core::desktop::{PanelError, PanelOptions, WindowLevel};
+use nsh_core::geometry::{Point, Points, Size};
 use nsh_engine::App;
 use windows::{
     Win32::{
-        Foundation::{HWND, LPARAM, RECT, WPARAM},
-        System::{
-            Ole::{OleInitialize, OleUninitialize},
-            Threading::GetCurrentThreadId,
-        },
+        Foundation::{HWND, RECT},
         UI::{
-            HiDpi::{
-                AdjustWindowRectExForDpi, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
-                GetDpiForSystem, SetProcessDpiAwarenessContext,
-            },
+            HiDpi::{AdjustWindowRectExForDpi, GetDpiForSystem},
             WindowsAndMessaging::{
-                DestroyWindow, DispatchMessageW, GWL_EXSTYLE, GWL_STYLE, GetForegroundWindow,
-                GetMessageW, GetWindowLongPtrW, GetWindowRect, HWND_NOTOPMOST, HWND_TOPMOST,
-                IsWindow, IsWindowVisible, MSG, PostThreadMessageW, SPI_GETWORKAREA, SW_HIDE,
-                SW_SHOWNA, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER,
+                DestroyWindow, GWL_EXSTYLE, GWL_STYLE, GetForegroundWindow, GetWindowLongPtrW,
+                GetWindowRect, HWND_BOTTOM, HWND_NOTOPMOST, HWND_TOPMOST, IsWindow,
+                IsWindowVisible, SPI_GETWORKAREA, SW_HIDE, SW_SHOWNA, SWP_FRAMECHANGED,
+                SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER,
                 SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SetForegroundWindow, SetWindowLongPtrW,
-                SetWindowPos, SetWindowTextW, ShowWindow, SystemParametersInfoW, TranslateMessage,
-                WM_APP, WINDOW_EX_STYLE, WINDOW_STYLE, WS_CAPTION, WS_EX_NOACTIVATE,
-                WS_EX_TOOLWINDOW, WS_MAXIMIZEBOX, WS_MINIMIZEBOX, WS_POPUP, WS_SYSMENU,
-                WS_THICKFRAME,
+                SetWindowPos, SetWindowTextW, ShowWindow, SystemParametersInfoW, WINDOW_EX_STYLE,
+                WINDOW_STYLE, WS_CAPTION, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_MAXIMIZEBOX,
+                WS_MINIMIZEBOX, WS_POPUP, WS_SYSMENU, WS_THICKFRAME,
             },
         },
     },
@@ -82,35 +68,37 @@ use windows::{
 
 use crate::{AppOptions, AppSource, AppView};
 
-/// A command reached the panel's thread (see [`Panel::wake`]).
-const WM_NSH_PANEL: u32 = WM_APP + 5;
-
 /// A panel window (see the [module](self)'s documentation): its own window
-/// and app, closed and stopped when it is dropped. A panel runs on a thread
-/// of its own with its own message loop; its methods may be called from any
-/// thread and hand their work to that thread (waiting until it is done).
+/// and app, closed and stopped when it is dropped. It is opened and dropped
+/// on the thread that runs the app's message loop, where its window lives.
 ///
 /// The `app`'s [`AppOptions`] are the app's own, not the window's: its
 /// `data_dir`, `limits` and `components` come from the host, as they do for
-/// the [main window](run_app)'s app, and every app keeps its data in
+/// the [main window](crate::run_app)'s app, and every app keeps its data in
 /// `<data_dir>/<app id>` ([`AppOptions::data_dir`]), so apps of different
 /// ids stay apart.
 ///
 /// The window's title is [`PanelOptions::title`]: the `app`'s
-/// [`AppOptions::title`] names the [main window](run_app), which a panel
+/// [`AppOptions::title`] names the [main window](crate::run_app), which a panel
 /// does not have.
 ///
 /// The `app`'s calls and posts reach the host on the engine thread
 /// ([`AppOptions::host`]): a host that shows, hides or closes a panel from
-/// one of them may do so directly, as the panel's methods are safe from any
-/// thread.
+/// one of them hands it back to the app's thread first, as windows belong
+/// to the thread that runs the message loop.
 pub struct Panel {
-    /// The channel to the thread running the window and its message loop.
-    commands: mpsc::Sender<Command>,
-    /// That thread, while it runs.
-    thread: Option<JoinHandle<()>>,
-    /// That thread's id, for waking it when a command arrives.
-    ui: u32,
+    /// The panel's top-level window, made by `app`'s [`AppView::new`].
+    window: HWND,
+    /// The app running in it, on this thread.
+    app: Rc<AppView>,
+    /// The level the window has, to re-assert it when it shows again.
+    level: Cell<WindowLevel>,
+    /// The window in front before the panel showed, to give it the focus
+    /// back.
+    previous: Cell<Option<HWND>>,
+    /// The window is closed: [`close`](Self::close) and [`Drop`] then have
+    /// nothing left to do.
+    closed: Cell<bool>,
 }
 
 impl Panel {
@@ -119,49 +107,46 @@ impl Panel {
     ///
     /// # Errors
     ///
-    /// [`PanelError::Invalid`] when the panel's size is not positive, or
-    /// when Win32 does not create the window (it is logged).
+    /// [`PanelError::WrongThread`] off the thread that runs the app's
+    /// message loop, and [`PanelError::Invalid`] when the panel's size is
+    /// not positive or when Win32 does not create the window (it is
+    /// logged).
     pub fn open(
         options: PanelOptions,
         app: AppOptions,
         source: AppSource,
     ) -> Result<Self, PanelError> {
-        let (commands, received) = mpsc::channel();
-        let (ready, started) = mpsc::channel();
-        let job = Job {
-            options,
-            app,
-            source,
-            commands: received,
-            ready,
-        };
-        let thread = thread::Builder::new()
-            .name("nsh-panel".into())
-            // Deep view trees recurse in drawing and hit testing.
-            .stack_size(8 << 20)
-            .spawn(move || run(job))
-            .map_err(|error| {
-                log::error!("the panel's thread could not be started: {error}");
-                PanelError::Invalid("the panel's thread could not be started")
-            })?;
-        let ui = match started.recv() {
-            Ok(Ok(ui)) => ui,
-            Ok(Err(error)) => {
-                let _ = thread.join();
-                return Err(error);
-            }
-            // The thread ended before it could say whether it started.
-            Err(_) => {
-                let _ = thread.join();
+        if !crate::app::in_app_thread() {
+            return Err(PanelError::WrongThread);
+        }
+        let size = panel_size(options.size)?;
+        let title = options.title.clone();
+        let view = match AppView::new(None, AppOptions { size, title, ..app }) {
+            Ok(view) => view,
+            Err(error) => {
+                log::error!("the panel's window could not be created: {error}");
                 return Err(PanelError::Invalid(
                     "the panel's window could not be created",
                 ));
             }
         };
+        apply(&view, &options, size);
+        if let Some(position) = options.position {
+            place(&view, position);
+        }
+        match source {
+            AppSource::Rust(root) => view.load(App::Rust(root)),
+            AppSource::Bundle(bundle) => view.load(App::Js(bundle)),
+            #[cfg(feature = "dev")]
+            AppSource::DevServer(url) => crate::dev::start(&view, url),
+        }
+        crate::system::environment_applied(view.surface());
         Ok(Self {
-            commands,
-            thread: Some(thread),
-            ui,
+            window: view.hwnd(),
+            app: view,
+            level: Cell::new(options.level),
+            previous: Cell::new(None),
+            closed: Cell::new(false),
         })
     }
 
@@ -169,274 +154,14 @@ impl Panel {
     /// taking the focus or activating the app: a click raises it and gives
     /// it the keyboard, as a panel's click does.
     pub fn show(&self) {
-        self.ask(Command::Show);
-    }
-
-    /// Hides the window and gives the focus back to the window that was in
-    /// front before it showed.
-    pub fn hide(&self) {
-        self.ask(Command::Hide);
-    }
-
-    /// Whether the window is on screen.
-    #[must_use]
-    pub fn is_visible(&self) -> bool {
-        let (reply, done) = mpsc::channel();
-        match self.commands.send(Command::IsVisible(reply)) {
-            Ok(()) => {
-                self.wake();
-                done.recv().unwrap_or(false)
-            }
-            // The thread ended: the window is gone too.
-            Err(_) => false,
-        }
-    }
-
-    /// Moves and sizes the window: a field left out keeps its value. The
-    /// points are pixels at the window's scale; Win32 works on the outer
-    /// frame (non-client area included).
-    pub fn set_frame(&self, frame: WindowFrame) {
-        self.ask(|reply| Command::SetFrame(frame, reply));
-    }
-
-    /// Sets the level the window floats at: `HWND_TOPMOST` for
-    /// [`PanelLevel::Floating`] and [`PanelLevel::AboveDock`] (Windows has
-    /// no desktop-icon level, so both are topmost), `HWND_NOTOPMOST` for
-    /// [`PanelLevel::Normal`].
-    pub fn set_level(&self, level: PanelLevel) {
-        self.ask(|reply| Command::SetLevel(level, reply));
-    }
-
-    /// Sets the window's title.
-    pub fn set_title(&self, title: &str) {
-        let title = title.to_owned();
-        self.ask(|reply| Command::SetTitle(title, reply));
-    }
-
-    /// Closes the window, stops its app and gives the focus back: [`Drop`]
-    /// then has nothing left to do.
-    pub fn close(self) {
-        let mut panel = self;
-        panel.shut();
-    }
-
-    /// Sends a command that takes no answer and waits for it to be done.
-    fn ask(&self, command: impl FnOnce(mpsc::Sender<()>) -> Command) {
-        let (reply, done) = mpsc::channel();
-        if self.commands.send(command(reply)).is_ok() {
-            self.wake();
-            let _ = done.recv();
-        }
-    }
-
-    /// Wakes the panel's thread to take its commands.
-    fn wake(&self) {
-        // SAFETY: a plain message to a live thread; the thread ignores a
-        // failed post (it ends after its window closes).
-        unsafe {
-            let _ = PostThreadMessageW(self.ui, WM_NSH_PANEL, WPARAM(0), LPARAM(0));
-        }
-    }
-
-    /// Closes the panel's window and stops its thread.
-    fn shut(&mut self) {
-        let Some(thread) = self.thread.take() else {
+        let Some(hwnd) = self.live() else {
             return;
         };
-        let (reply, done) = mpsc::channel();
-        if self.commands.send(Command::Close(reply)).is_ok() {
-            self.wake();
-            let _ = done.recv();
-        }
-        let _ = thread.join();
-    }
-}
-
-impl Drop for Panel {
-    fn drop(&mut self) {
-        self.shut();
-    }
-}
-
-/// A command to the panel's thread.
-enum Command {
-    /// Show the window; the answer comes once it is shown.
-    Show(mpsc::Sender<()>),
-    /// Hide the window; the answer comes once it is hidden.
-    Hide(mpsc::Sender<()>),
-    /// Move or size the window.
-    SetFrame(WindowFrame, mpsc::Sender<()>),
-    /// Change the level the window floats at.
-    SetLevel(PanelLevel, mpsc::Sender<()>),
-    /// Set the window's title.
-    SetTitle(String, mpsc::Sender<()>),
-    /// Answer whether the window is on screen.
-    IsVisible(mpsc::Sender<bool>),
-    /// Close the window (and end the panel's thread).
-    Close(mpsc::Sender<()>),
-}
-
-/// What the panel's thread starts with: the app, and the way back to the
-/// caller.
-struct Job {
-    options: PanelOptions,
-    app: AppOptions,
-    source: AppSource,
-    commands: mpsc::Receiver<Command>,
-    ready: mpsc::Sender<Result<u32, PanelError>>,
-}
-
-// SAFETY: the options hold `Rc`s (the native components), so they are not
-// `Send`. They move to the panel's thread whole while the caller waits in
-// [`Panel::open`] and never touches them; the caller holds no clone it
-// could use before that thread ends.
-unsafe impl Send for Job {}
-
-/// The panel's thread: its window, its app and its message loop, until the
-/// window closes.
-fn run(job: Job) {
-    let Job {
-        options,
-        app,
-        source,
-        commands,
-        ready,
-    } = job;
-    // SAFETY: process setup on this thread, before any window: per-monitor
-    // DPI and an OLE apartment for the app's clipboard, drag and drop and
-    // WIC use.
-    let ole = unsafe {
-        let _ = SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
-        OleInitialize(None).is_ok()
-    };
-    let mut worker = match start(options, app, source) {
-        Ok(worker) => worker,
-        Err(error) => {
-            let _ = ready.send(Err(error));
-            if ole {
-                // SAFETY: pairs the `OleInitialize` above.
-                unsafe { OleUninitialize() };
-            }
-            return;
-        }
-    };
-    // SAFETY: a plain query.
-    let _ = ready.send(Ok(unsafe { GetCurrentThreadId() }));
-    let mut msg = MSG::default();
-    loop {
-        // SAFETY: the standard message loop over this thread's messages.
-        let more = unsafe { GetMessageW(&mut msg, None, 0, 0) };
-        if !more.as_bool() {
-            break;
-        }
-        if msg.hwnd.is_invalid() && msg.message == WM_NSH_PANEL {
-            for command in commands.try_iter() {
-                worker.handle(command);
-            }
-            continue;
-        }
-        // SAFETY: the message goes to the window (of this thread) that it
-        // was sent to.
-        unsafe {
-            let _ = TranslateMessage(&msg);
-            DispatchMessageW(&msg);
-        }
-    }
-    worker.stop();
-    drop(worker);
-    if ole {
-        // SAFETY: pairs the `OleInitialize` above; nothing on this thread
-        // uses OLE afterwards.
-        unsafe { OleUninitialize() };
-    }
-}
-
-/// Makes the panel's window and loads the app into it: the window stays on
-/// this thread, whose message loop the caller of [`run`] then runs.
-fn start(options: PanelOptions, app: AppOptions, source: AppSource) -> Result<Worker, PanelError> {
-    let size = panel_size(options.size)?;
-    let title = options.title.clone();
-    let view = AppView::new(None, AppOptions { size, title, ..app }).map_err(|error| {
-        log::error!("the panel's window could not be created: {error}");
-        PanelError::Invalid("the panel's window could not be created")
-    })?;
-    apply(&view, &options, size);
-    if let Some((x, y)) = options.position {
-        place(&view, x, y);
-    }
-    match source {
-        AppSource::Rust(root) => view.load(App::Rust(root)),
-        AppSource::Bundle(bundle) => view.load(App::Js(bundle)),
-        #[cfg(feature = "dev")]
-        AppSource::DevServer(url) => crate::dev::start(&view, url),
-    }
-    crate::system::environment_applied(view.surface());
-    Ok(Worker {
-        view,
-        level: options.level,
-        previous: None,
-        stopped: false,
-    })
-}
-
-/// The window and the state its commands work on, on the panel's thread.
-struct Worker {
-    view: Rc<AppView>,
-    /// The level the window has, to re-assert it when it shows again.
-    level: PanelLevel,
-    /// The window in front before the panel showed, to give it the focus
-    /// back.
-    previous: Option<HWND>,
-    /// Whether the app is stopped, so it stops once.
-    stopped: bool,
-}
-
-impl Worker {
-    /// Runs a command from the host.
-    fn handle(&mut self, command: Command) {
-        match command {
-            Command::Show(reply) => {
-                self.show();
-                let _ = reply.send(());
-            }
-            Command::Hide(reply) => {
-                self.hide();
-                let _ = reply.send(());
-            }
-            Command::SetFrame(frame, reply) => {
-                self.set_frame(frame);
-                let _ = reply.send(());
-            }
-            Command::SetLevel(level, reply) => {
-                self.set_level(level);
-                let _ = reply.send(());
-            }
-            Command::SetTitle(title, reply) => {
-                self.set_title(&title);
-                let _ = reply.send(());
-            }
-            Command::IsVisible(reply) => {
-                let _ = reply.send(self.is_visible());
-            }
-            Command::Close(reply) => {
-                self.close();
-                let _ = reply.send(());
-            }
-        }
-    }
-
-    /// Shows the window above the other windows of its level, without
-    /// taking the focus or activating the app.
-    fn show(&mut self) {
-        let hwnd = self.view.hwnd();
-        if hwnd.is_invalid() {
-            return;
-        }
         // Remember what was in front, so `hide` gives it the focus back.
         // SAFETY: a plain query.
         let foreground = unsafe { GetForegroundWindow() };
         if !foreground.is_invalid() && foreground != hwnd {
-            self.previous = Some(foreground);
+            self.previous.set(Some(foreground));
         }
         // SAFETY: plain calls on the panel's live window; `SW_SHOWNA`
         // shows it without activating it, and the level is re-asserted
@@ -445,7 +170,7 @@ impl Worker {
             let _ = ShowWindow(hwnd, SW_SHOWNA);
             let _ = SetWindowPos(
                 hwnd,
-                Some(order_of(self.level)),
+                Some(order_of(self.level.get())),
                 0,
                 0,
                 0,
@@ -455,46 +180,33 @@ impl Worker {
         }
     }
 
-    /// Hides the window and gives the focus back.
-    fn hide(&mut self) {
-        let hwnd = self.view.hwnd();
-        // SAFETY: a plain query on a window that may have closed.
-        if !hwnd.is_invalid() && unsafe { IsWindow(Some(hwnd)) }.as_bool() {
-            // SAFETY: a plain call on a live window.
-            let _ = unsafe { ShowWindow(hwnd, SW_HIDE) };
-        }
-        if let Some(previous) = self.previous.take()
-            && !previous.is_invalid()
-            // SAFETY: a plain query on a window that may have closed.
-            && unsafe { IsWindow(Some(previous)) }.as_bool()
-        {
-            // SAFETY: a plain call on the window that was in front.
-            let _ = unsafe { SetForegroundWindow(previous) };
-        }
+    /// Hides the window and gives the focus back to the window that was in
+    /// front before it showed.
+    pub fn hide(&self) {
+        self.dismiss();
     }
 
     /// Whether the window is on screen.
-    fn is_visible(&self) -> bool {
-        let hwnd = self.view.hwnd();
-        if hwnd.is_invalid() {
-            return false;
-        }
-        // SAFETY: a plain query.
-        unsafe { IsWindowVisible(hwnd) }.as_bool()
+    #[must_use]
+    pub fn is_visible(&self) -> bool {
+        self.live()
+            // SAFETY: a plain query on the live window.
+            .is_some_and(|hwnd| unsafe { IsWindowVisible(hwnd) }.as_bool())
     }
 
-    /// Moves and sizes the window: a field left out keeps its value.
-    fn set_frame(&self, frame: WindowFrame) {
-        let hwnd = self.view.hwnd();
-        if hwnd.is_invalid() {
+    /// Moves and sizes the window: a field left out keeps its value. The
+    /// points are pixels at the window's scale; Win32 works on the outer
+    /// frame (non-client area included).
+    pub fn set_frame(&self, frame: WindowFrame) {
+        let Some(hwnd) = self.live() else {
             return;
-        }
+        };
         let mut rect = RECT::default();
         // SAFETY: a plain query with a local out value.
         if unsafe { GetWindowRect(hwnd, &mut rect) }.is_err() {
             return;
         }
-        let scale = self.view.surface().scale();
+        let scale = self.app.surface().scale();
         let x = frame.x.map_or(rect.left, |v| (v.0 * scale).round() as i32);
         let y = frame.y.map_or(rect.top, |v| (v.0 * scale).round() as i32);
         let width = frame
@@ -518,13 +230,16 @@ impl Worker {
         };
     }
 
-    /// Sets the level the window floats at.
-    fn set_level(&mut self, level: PanelLevel) {
-        self.level = level;
-        let hwnd = self.view.hwnd();
-        if hwnd.is_invalid() {
+    /// Sets the level the window floats at: `HWND_TOPMOST` for
+    /// [`WindowLevel::Floating`] and [`WindowLevel::AboveDock`] (Windows
+    /// has one band above the normal windows, split with the taskbar),
+    /// `HWND_NOTOPMOST` for [`WindowLevel::Normal`] and `HWND_BOTTOM` for
+    /// [`WindowLevel::DesktopIcon`].
+    pub fn set_level(&self, level: WindowLevel) {
+        self.level.set(level);
+        let Some(hwnd) = self.live() else {
             return;
-        }
+        };
         // SAFETY: plain call on a live window; no other field changes, so
         // its position and size stay.
         let _ = unsafe {
@@ -541,33 +256,62 @@ impl Worker {
     }
 
     /// Sets the window's title.
-    fn set_title(&self, title: &str) {
-        let hwnd = self.view.hwnd();
-        if hwnd.is_invalid() {
+    pub fn set_title(&self, title: &str) {
+        let Some(hwnd) = self.live() else {
             return;
-        }
+        };
         // SAFETY: a plain call on a live window with a temporary string.
         let _ = unsafe { SetWindowTextW(hwnd, &HSTRING::from(title)) };
     }
 
-    /// Closes the window (which ends the message loop) and stops the app.
-    fn close(&mut self) {
-        self.hide();
-        self.stop();
-        let hwnd = self.view.hwnd();
-        if !hwnd.is_invalid() {
-            // SAFETY: the panel's own window, destroyed once (the checks
-            // around it skip a window that is gone).
+    /// Closes the window, stops its app and gives the focus back: [`Drop`]
+    /// then has nothing left to do.
+    pub fn close(self) {
+        self.shut();
+    }
+
+    /// The window, while it exists: the app forgets it in `WM_DESTROY` (the
+    /// user closed a decorated panel), so a window that is gone is never
+    /// touched again.
+    fn live(&self) -> Option<HWND> {
+        let hwnd = self.app.hwnd();
+        (!hwnd.is_invalid() && hwnd == self.window).then_some(hwnd)
+    }
+
+    /// Closes the window (once) and stops the app.
+    fn shut(&self) {
+        if self.closed.replace(true) {
+            return;
+        }
+        self.dismiss();
+        self.app.stop();
+        if let Some(hwnd) = self.live() {
+            // SAFETY: the panel's own window, destroyed once.
             let _ = unsafe { DestroyWindow(hwnd) };
         }
     }
 
-    /// Stops the app, once.
-    fn stop(&mut self) {
-        if !self.stopped {
-            self.stopped = true;
-            self.view.stop();
+    /// Hides the window and gives the focus back to the window that was in
+    /// front before it showed.
+    fn dismiss(&self) {
+        if let Some(hwnd) = self.live() {
+            // SAFETY: a plain call on a live window.
+            let _ = unsafe { ShowWindow(hwnd, SW_HIDE) };
         }
+        if let Some(previous) = self.previous.take()
+            && !previous.is_invalid()
+            // SAFETY: a plain query on a window that may have closed.
+            && unsafe { IsWindow(Some(previous)) }.as_bool()
+        {
+            // SAFETY: a plain call on the window that was in front.
+            let _ = unsafe { SetForegroundWindow(previous) };
+        }
+    }
+}
+
+impl Drop for Panel {
+    fn drop(&mut self) {
+        self.shut();
     }
 }
 
@@ -594,14 +338,16 @@ fn apply(view: &AppView, options: &PanelOptions, size: (i32, i32)) {
         // The panel is a tool window, not an app window.
         ex_style |= WS_EX_TOOLWINDOW.0;
         if options.nonactivating {
-            // Clicks do not activate the app; the panel takes the keyboard
-            // only after the user aims at it.
+            // Clicks do not activate the app; the window procedure takes
+            // the keyboard for the panel instead (`WM_MOUSEACTIVATE`).
             ex_style |= WS_EX_NOACTIVATE.0;
         }
         SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex_style as isize);
-        // The window procedure hides the panel when it loses the keyboard,
-        // when the options ask for it (no activation message reaches a
-        // panel's window otherwise).
+        // The window procedure takes the keyboard for a nonactivating
+        // panel, and hides the panel when it loses the keyboard, when the
+        // options ask for it (no activation message reaches a panel's
+        // window otherwise).
+        crate::window::set_no_activate(hwnd, options.nonactivating);
         crate::window::set_hides_on_resign_key(hwnd, options.hides_on_resign_key);
         // A window's size is its outer frame, a panel's is its content: a
         // borderless popup has the whole window as its client area, so it
@@ -647,13 +393,16 @@ fn apply(view: &AppView, options: &PanelOptions, size: (i32, i32)) {
 
 /// Moves the window: `position` is the screen coordinates, in points at the
 /// window's scale, of its top-left corner (Win32's outer frame).
-fn place(view: &AppView, x: Points, y: Points) {
+fn place(view: &AppView, position: Point<Points>) {
     let hwnd = view.hwnd();
     if hwnd.is_invalid() {
         return;
     }
     let scale = view.surface().scale();
-    let (x, y) = ((x.0 * scale).round() as i32, (y.0 * scale).round() as i32);
+    let (x, y) = (
+        (position.x.0 * scale).round() as i32,
+        (position.y.0 * scale).round() as i32,
+    );
     // SAFETY: a plain call on a live window; its size and level stay.
     let _ = unsafe {
         SetWindowPos(
@@ -669,10 +418,11 @@ fn place(view: &AppView, x: Points, y: Points) {
 }
 
 /// The z-order a level is: the closest Win32 has to a panel's level.
-fn order_of(level: PanelLevel) -> HWND {
+fn order_of(level: WindowLevel) -> HWND {
     match level {
-        PanelLevel::Normal => HWND_NOTOPMOST,
-        PanelLevel::Floating | PanelLevel::AboveDock => HWND_TOPMOST,
+        WindowLevel::Normal => HWND_NOTOPMOST,
+        WindowLevel::Floating | WindowLevel::AboveDock => HWND_TOPMOST,
+        WindowLevel::DesktopIcon => HWND_BOTTOM,
     }
 }
 
@@ -705,4 +455,29 @@ fn panel_size(size: Option<Size<Points>>) -> Result<(i32, i32), PanelError> {
     let width = (rect.right - rect.left) as f32 / scale;
     let height = (rect.bottom - rect.top) as f32 / scale;
     Ok(((width * 0.7).round() as i32, (height * 0.7).round() as i32))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn levels_are_topmost_over_the_normal_windows() {
+        assert_eq!(order_of(WindowLevel::Normal), HWND_NOTOPMOST);
+        assert_eq!(order_of(WindowLevel::Floating), HWND_TOPMOST);
+        // Windows has one band above the normal windows (the taskbar's),
+        // so above-dock is topmost as well.
+        assert_eq!(order_of(WindowLevel::AboveDock), HWND_TOPMOST);
+        // The closest Win32 has to the desktop's icon level, as the main
+        // window's `Window.setLevel` maps it.
+        assert_eq!(order_of(WindowLevel::DesktopIcon), HWND_BOTTOM);
+    }
+
+    #[test]
+    fn sizes_must_be_positive() {
+        let size = |width: f32, height: f32| Some(Size::new(Points(width), Points(height)));
+        assert_eq!(panel_size(size(420.0, 300.0)), Ok((420, 300)));
+        assert!(panel_size(size(0.0, 300.0)).is_err());
+        assert!(panel_size(size(420.0, f32::NAN)).is_err());
+    }
 }

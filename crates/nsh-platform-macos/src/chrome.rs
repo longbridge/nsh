@@ -55,16 +55,15 @@ use objc2::{
     sel,
 };
 use objc2_app_kit::{
-    NSApplication, NSEvent, NSEventModifierFlags, NSFloatingWindowLevel, NSMenu, NSMenuItem,
-    NSNormalWindowLevel, NSRunningApplication, NSScreen, NSToolbar, NSWindow, NSWindowButton,
-    NSWindowCollectionBehavior, NSWindowStyleMask, NSWindowTitleVisibility, NSWindowToolbarStyle,
+    NSApplication, NSEvent, NSEventModifierFlags, NSMenu, NSMenuItem, NSRunningApplication,
+    NSScreen, NSToolbar, NSWindow, NSWindowButton, NSWindowCollectionBehavior, NSWindowStyleMask,
+    NSWindowTitleVisibility, NSWindowToolbarStyle,
 };
-use objc2_core_graphics::kCGDesktopIconWindowLevel;
 use objc2_foundation::{
     NSObject, NSObjectProtocol, NSPoint, NSRect, NSSize, NSString, NSUserDefaults, ns_string,
 };
 
-use crate::surface::Surface;
+use crate::{panel::level_of, surface::Surface};
 
 /// The title bar's height when AppKit cannot tell (macOS 11 and later).
 const TITLE_BAR_HEIGHT: f32 = 28.0;
@@ -294,11 +293,7 @@ pub(crate) fn command(surface: &Rc<Surface>, command: &DesktopCommand) {
         }
         DesktopCommand::SetLevel(level) => {
             if let Some(window) = window(surface) {
-                window.setLevel(match level {
-                    WindowLevel::Normal => NSNormalWindowLevel,
-                    WindowLevel::Floating => NSFloatingWindowLevel,
-                    WindowLevel::DesktopIcon => kCGDesktopIconWindowLevel as isize,
-                });
+                window.setLevel(level_of(*level));
                 // A desktop widget is a part of the desktop, not a window:
                 // it sits on every space, Mission Control does not list it
                 // (it could never be raised above normal windows anyway)

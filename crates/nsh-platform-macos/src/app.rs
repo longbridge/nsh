@@ -1,5 +1,6 @@
 //! `AppView` (one surface as an AppKit view, for embedding) and the
-//! standalone app ([`run_app`]: one `AppView` filling a window).
+//! standalone app ([`run_app`]: one `AppView` filling a window), with the
+//! panels a host opens beside it ([`run_app_with`]).
 
 use std::{
     cell::RefCell,
@@ -29,6 +30,7 @@ use objc2_foundation::{
 
 use crate::{
     image::{AssetBase, AssetReader},
+    panel::Panel,
     surface::Surface,
 };
 
@@ -635,7 +637,33 @@ fn name_app(name: &str) {
 /// main thread. By default closing the window stops the engine and returns;
 /// `keep_alive_on_close` retains the same engine until Quit or [`quit_app`].
 /// The caller can finish cleanup or relaunch after this function returns.
+///
+/// [`run_app_with`] with no panels.
 pub fn run_app(source: AppSource, options: AppOptions) -> std::process::ExitCode {
+    run_app_with(source, options, |_| Vec::new())
+}
+
+/// Runs `source` in a window until it is closed, with the panels `setup`
+/// returns (a host's second window, or more).
+///
+/// `setup` runs on the main thread once the window is up and before the
+/// app's event loop takes over: that is where a panel is opened
+/// ([`Panel::open`]), as a host's runner does, since a panel belongs to the
+/// thread that runs the app's message loop. The panels it returns live for
+/// as long as the app runs and are dropped after the loop returns, which
+/// closes their windows and stops their apps.
+///
+/// Otherwise as [`run_app`]: `source` in [`AppOptions`]'s window, on the
+/// main thread.
+///
+/// # Panics
+///
+/// Off the main thread, as [`run_app`] does.
+pub fn run_app_with(
+    source: AppSource,
+    options: AppOptions,
+    setup: impl FnOnce(&AppOptions) -> Vec<Panel> + Send + 'static,
+) -> std::process::ExitCode {
     let mtm = MainThreadMarker::new().expect("run_app must be called on the main thread");
     let app = NSApplication::sharedApplication(mtm);
     app.setActivationPolicy(NSApplicationActivationPolicy::Regular);
@@ -705,7 +733,13 @@ pub fn run_app(source: AppSource, options: AppOptions) -> std::process::ExitCode
             keep_alive_on_close: options.keep_alive_on_close,
         })
     });
+    // The panels come up on the main thread, with AppKit initialized and the
+    // app's window in place, before the event loop takes the thread.
+    let panels = setup(&options);
     app.run();
+    // The panels outlive the loop: dropping one closes its window and stops
+    // its app, which is AppKit's to do once its loop returned.
+    drop(panels);
     stop_running();
     app.setDelegate(None);
     drop(delegate);

@@ -146,30 +146,19 @@ pub enum WindowLevel {
     Normal,
     /// Above normal windows: a floating palette or a widget.
     Floating,
+    /// Just above the Dock or the taskbar: over it, other floating windows
+    /// and the full-screen windows of other apps.
+    ///
+    /// macOS puts it at the Dock's level (`CGWindowLevelForKey` of
+    /// `kCGDockWindowLevelKey`, 20) plus one; Windows has no level between
+    /// the two and uses `HWND_TOPMOST` as it does for
+    /// [`Floating`](Self::Floating); GTK 4 has no window levels in the same
+    /// way, so Linux ignores it.
+    AboveDock,
     /// macOS's desktop icon level; on Windows, moves to the bottom of
     /// the current z-order (later activation can raise the window).
     #[prop(rename = "desktopIcon")]
     DesktopIcon,
-}
-
-/// How a panel window floats ([`PanelOptions::level`]): its level in the
-/// window server's stacking order, from the lowest to the highest.
-///
-/// The platforms map it: macOS's [`Floating`](PanelLevel::Floating) is
-/// `NSFloatingWindowLevel` (3) and its [`AboveDock`](PanelLevel::AboveDock)
-/// the Dock's level (`CGWindowLevelForKey` of `kCGDockWindowLevelKey`, 20)
-/// plus one; Windows raises the window into the band above the taskbar, and
-/// Linux asks the window manager for the dock's layer.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default)]
-pub enum PanelLevel {
-    /// With the other windows of the app.
-    Normal,
-    /// Above normal windows: a floating palette, above other apps' windows.
-    #[default]
-    Floating,
-    /// Just above the Dock or the taskbar: over it and other floating
-    /// windows.
-    AboveDock,
 }
 
 /// The look of a panel window (`Panel::open`): the part of its options no
@@ -178,13 +167,21 @@ pub enum PanelLevel {
 /// A panel is a second window of the host's own, running an app and engine
 /// of its own beside the main window's; its `AppOptions` and `AppSource`
 /// belong to the platform and come as `Panel::open`'s other arguments.
-#[derive(Debug, Clone)]
+///
+/// The struct is `#[non_exhaustive]`, so a new option is not a breaking
+/// change: set the fields with the builder methods
+/// ([`with_size`](Self::with_size), [`with_level`](Self::with_level), ...),
+/// starting from [`new`](Self::new) or [`Default`].
+#[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub struct PanelOptions {
     /// The window's title.
     pub title: String,
     /// The window's content size in points: a [`Size`] of [`Points`], as
     /// the rest of the API sizes windows. `None` (the default) opens it at
-    /// 70% of the main screen's visible size, centered.
+    /// 70% of the main screen's visible size (macOS centers it; Windows
+    /// takes 70% of the work area and lets Win32 place the window, and Linux
+    /// 70% of the first monitor's).
     pub size: Option<Size<Points>>,
     /// Where the window opens, in points: the screen coordinates of its
     /// top-left corner, measured from the top-left corner of the primary
@@ -192,35 +189,122 @@ pub struct PanelOptions {
     /// [`WindowFrame::y`] measure a window's. `None` (the default) centers
     /// it on the main screen. GTK 4 has no window positioning, so Linux
     /// ignores it.
-    pub position: Option<(Points, Points)>,
-    /// How it floats ([`PanelLevel::Floating`] by default).
-    pub level: PanelLevel,
+    pub position: Option<Point<Points>>,
+    /// How it floats: [`WindowLevel::Floating`] by default, so it stays
+    /// above the app's other windows, unlike a main window's
+    /// [`WindowLevel::Normal`]. [`WindowLevel::AboveDock`] puts it above the
+    /// Dock or the taskbar; Windows has no level between the two and uses
+    /// `HWND_TOPMOST` for both, and GTK 4 has no window levels in the same
+    /// way, so Linux ignores it.
+    pub level: WindowLevel,
     /// No title bar and no frame (the default): the app draws every part of
     /// the window.
     pub borderless: bool,
-    /// The window's background is transparent, so the app draws what it
-    /// wants around it (false by default).
+    /// The window's own background is transparent, so what is behind it
+    /// shows until the app paints over it (false by default). macOS makes
+    /// the window's background clear; Linux clears the GTK window's own
+    /// background — best effort, it needs a compositing window manager, and
+    /// the app's root still paints its own background; Windows has no such
+    /// window and ignores it (a Direct2D swap chain does not draw through a
+    /// layered window).
     pub transparent: bool,
     /// Hides the window while the app is not the active one (false by
     /// default). A nonactivating panel never deactivates the app, so it
     /// never fires for one: a panel that takes the keyboard without
     /// activating the app wants [`hides_on_resign_key`](Self::hides_on_resign_key)
-    /// instead.
+    /// instead. Windows has no per-panel activation to follow and ignores
+    /// it; GTK 4's active window is the one with the keyboard, so Linux
+    /// hides on the same signal as
+    /// [`hides_on_resign_key`](Self::hides_on_resign_key).
     pub hides_on_deactivate: bool,
     /// Hides the window when it loses the keyboard's focus (false by
     /// default): a click on another window, or a shortcut that moves the
     /// focus elsewhere, takes the panel off screen.
     ///
     /// This is the signal a nonactivating panel has, which never deactivates
-    /// the app; a panel that does activate it can use either. GTK 4 has no
-    /// per-window focus notifications in the same way, so Linux hides the
-    /// window when it loses the focus, as it does for
-    /// [`hides_on_deactivate`](Self::hides_on_deactivate).
+    /// the app; a panel that does activate it can use either. macOS hides it
+    /// when it resigns key; Windows when it gets `WM_KILLFOCUS` from outside
+    /// the panel (a click on one of its own views keeps it); Linux when it
+    /// stops being GTK's active window.
     pub hides_on_resign_key: bool,
     /// Moves the window when its background is dragged (false by default).
+    /// macOS does it in the window server; Windows and Linux have no such
+    /// window and ignore it.
     pub movable_by_background: bool,
-    /// Takes the keyboard without activating the app (false by default).
+    /// Takes the keyboard without activating the app (false by default):
+    /// the panel stays above the app's other windows while the app the user
+    /// was in keeps working. macOS makes it a nonactivating panel; Windows
+    /// adds `WS_EX_NOACTIVATE` and focuses the panel on a click so it still
+    /// gets the keyboard; GTK 4 has no nonactivating window, so Linux
+    /// ignores it.
     pub nonactivating: bool,
+}
+
+impl PanelOptions {
+    /// A borderless panel that floats, everything else as [`Default`].
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Sets [the title](Self::title).
+    pub fn with_title(mut self, title: impl Into<String>) -> Self {
+        self.title = title.into();
+        self
+    }
+
+    /// Sets [the content size](Self::size).
+    pub fn with_size(mut self, size: Size<Points>) -> Self {
+        self.size = Some(size);
+        self
+    }
+
+    /// Sets [where the window opens](Self::position).
+    pub fn with_position(mut self, position: Point<Points>) -> Self {
+        self.position = Some(position);
+        self
+    }
+
+    /// Sets [the level](Self::level).
+    pub fn with_level(mut self, level: WindowLevel) -> Self {
+        self.level = level;
+        self
+    }
+
+    /// Sets [whether the window has no frame](Self::borderless).
+    pub fn with_borderless(mut self, borderless: bool) -> Self {
+        self.borderless = borderless;
+        self
+    }
+
+    /// Sets [whether the window's background is transparent](Self::transparent).
+    pub fn with_transparent(mut self, transparent: bool) -> Self {
+        self.transparent = transparent;
+        self
+    }
+
+    /// Sets [whether the window hides while the app is inactive](Self::hides_on_deactivate).
+    pub fn with_hides_on_deactivate(mut self, hides: bool) -> Self {
+        self.hides_on_deactivate = hides;
+        self
+    }
+
+    /// Sets [whether the window hides when it loses the keyboard](Self::hides_on_resign_key).
+    pub fn with_hides_on_resign_key(mut self, hides: bool) -> Self {
+        self.hides_on_resign_key = hides;
+        self
+    }
+
+    /// Sets [whether a background drag moves the window](Self::movable_by_background).
+    pub fn with_movable_by_background(mut self, movable: bool) -> Self {
+        self.movable_by_background = movable;
+        self
+    }
+
+    /// Sets [whether the panel takes the keyboard without activating the app](Self::nonactivating).
+    pub fn with_nonactivating(mut self, nonactivating: bool) -> Self {
+        self.nonactivating = nonactivating;
+        self
+    }
 }
 
 impl Default for PanelOptions {
@@ -229,7 +313,7 @@ impl Default for PanelOptions {
             title: String::new(),
             size: None,
             position: None,
-            level: PanelLevel::default(),
+            level: WindowLevel::Floating,
             borderless: true,
             transparent: false,
             hides_on_deactivate: false,
@@ -247,8 +331,9 @@ pub enum PanelError {
     Unsupported(&'static str),
     /// The options are not usable.
     Invalid(&'static str),
-    /// The caller is not on the thread the platform opens windows on (the
-    /// main thread, on the desktops that have panels).
+    /// The caller is not on the thread that runs the app: a panel is opened
+    /// from the setup hook of the platform's `run_app_with`, on the thread
+    /// that runs the app's message loop, and never moved off it.
     WrongThread,
 }
 
@@ -259,7 +344,9 @@ impl fmt::Display for PanelError {
                 write!(f, "panel windows are not supported here: {message}")
             }
             Self::Invalid(message) => write!(f, "invalid panel options: {message}"),
-            Self::WrongThread => f.write_str("a panel window must be opened on the main thread"),
+            Self::WrongThread => {
+                f.write_str("a panel window must be opened on the thread that runs the app")
+            }
         }
     }
 }
@@ -915,7 +1002,7 @@ mod tests {
         assert_eq!(options.title, "");
         assert_eq!(options.size, None);
         assert_eq!(options.position, None);
-        assert_eq!(options.level, PanelLevel::Floating);
+        assert_eq!(options.level, WindowLevel::Floating);
         assert!(options.borderless);
         assert!(!options.transparent);
         assert!(!options.hides_on_deactivate);
@@ -925,18 +1012,47 @@ mod tests {
     }
 
     #[test]
+    fn panel_options_build() {
+        let options = PanelOptions::new()
+            .with_title("Quick Look")
+            .with_size(Size::new(Points(420.0), Points(300.0)))
+            .with_position(Point::new(Points(10.0), Points(20.0)))
+            .with_level(WindowLevel::AboveDock)
+            .with_borderless(false)
+            .with_transparent(true)
+            .with_hides_on_deactivate(true)
+            .with_hides_on_resign_key(true)
+            .with_movable_by_background(true)
+            .with_nonactivating(true);
+        assert_eq!(options.title, "Quick Look");
+        assert_eq!(options.size, Some(Size::new(Points(420.0), Points(300.0))));
+        assert_eq!(
+            options.position,
+            Some(Point::new(Points(10.0), Points(20.0)))
+        );
+        assert_eq!(options.level, WindowLevel::AboveDock);
+        assert!(!options.borderless);
+        assert!(options.transparent);
+        assert!(options.hides_on_deactivate);
+        assert!(options.hides_on_resign_key);
+        assert!(options.movable_by_background);
+        assert!(options.nonactivating);
+    }
+
+    #[test]
     fn a_panel_reports_the_thread_it_needs() {
         assert_eq!(
             PanelError::WrongThread.to_string(),
-            "a panel window must be opened on the main thread"
+            "a panel window must be opened on the thread that runs the app"
         );
     }
 
     #[test]
-    fn panel_levels_go_from_normal_to_above_the_dock() {
-        assert!(PanelLevel::Normal < PanelLevel::Floating);
-        assert!(PanelLevel::Floating < PanelLevel::AboveDock);
-        assert_eq!(PanelLevel::default(), PanelLevel::Floating);
+    fn window_levels_name_themselves_in_camel_case() {
+        assert_eq!(WindowLevel::Normal.js_name(), "normal");
+        assert_eq!(WindowLevel::Floating.js_name(), "floating");
+        assert_eq!(WindowLevel::AboveDock.js_name(), "aboveDock");
+        assert_eq!(WindowLevel::DesktopIcon.js_name(), "desktopIcon");
     }
 
     #[test]

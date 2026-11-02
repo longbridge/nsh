@@ -1,24 +1,30 @@
-//! Panel windows: a second window of the app, beside [`run_app`]'s.
+//! Panel windows: a second window of the app, beside the main window's.
 //!
 //! A panel is a window of its own, as a floating palette or a popover is:
 //! it shows an [`AppSource`] of its own (a Rust root, a bundle or a dev
 //! server), so it can run a different app than the main window, with an
-//! engine of its own ([`AppView`]). It has no title bar by default and can
-//! be transparent. A panel lives exactly as long as its [`Panel`] does:
-//! dropping it closes the window and stops its app.
+//! engine of its own ([`AppView`]). It has no title bar by default. A panel
+//! lives exactly as long as its [`Panel`] does: dropping it closes the
+//! window and stops its app.
 //!
-//! [`Panel::open`] runs on the thread that runs the GTK main loop, as
-//! [`run_app`] does: windows of one main loop share it, so the host opens a
-//! panel and keeps running. Rust components run on the engine thread, so a
-//! panel is opened by the host's main-thread code (as an app's runner does),
-//! not from a component's event handler.
+//! A panel is opened on the thread that runs the app's GTK main loop, from
+//! [`run_app_with`](crate::run_app_with)'s setup hook: [`Panel::open`]
+//! returns [`PanelError::WrongThread`] on any other thread, and [`Panel`] is
+//! not `Send`. Rust components run on the engine thread, so a panel is
+//! opened by the host's main-loop code (as an app's runner does), not from a
+//! component's event handler.
 //!
 //! GTK 4 has no panel concept, and several options have no equivalent:
 //!
+//! - [`PanelOptions::transparent`]: the window's own background is
+//!   transparent. It is best effort (the compositor must composite the
+//!   windows), and the app's root still paints its own background: one that
+//!   would show what is behind the window gives its root a transparent
+//!   background too.
 //! - [`PanelOptions::level`]: GTK 4 removed the API to keep a window above
-//!   others ([`PanelLevel::Floating`] and [`PanelLevel::AboveDock`] were
-//!   `gtk_window_set_keep_above` in GTK 3), and the compositor stacks
-//!   windows: the level is recorded but has no effect.
+//!   others (GTK 3's `gtk_window_set_keep_above`), and the compositor stacks
+//!   windows: the level has no effect on Linux, and [`Panel::set_level`]
+//!   does nothing.
 //! - [`PanelOptions::nonactivating`]: GTK 4 has no "take the keyboard
 //!   without activating the app"; the panel is a normal window.
 //! - [`PanelOptions::hides_on_deactivate`]: GTK 4 cannot observe the app's
@@ -38,10 +44,10 @@
 //! window to focus next, as there is no API to hand the focus back to the
 //! window that was in front.
 
-use std::{cell::Cell, rc::Rc};
+use std::{cell::Cell, rc::Rc, sync::OnceLock};
 
 use gtk4::{self as gtk, prelude::*};
-pub use nsh_core::desktop::{PanelError, PanelLevel, PanelOptions};
+pub use nsh_core::desktop::{PanelError, PanelOptions, WindowLevel};
 use nsh_core::{
     desktop::WindowFrame,
     geometry::{Points, Size},
@@ -56,13 +62,13 @@ use crate::{AppOptions, AppSource, AppView};
 ///
 /// The `app`'s [`AppOptions`] are the app's own, not the window's: its
 /// `data_dir`, `limits` and `components` come from the host, as they do for
-/// the [main window](run_app)'s app, and every app keeps its data in
+/// the [main window](crate::run_app)'s app, and every app keeps its data in
 /// `<data_dir>/<app id>` ([`AppOptions::data_dir`]), so apps of different
 /// ids stay apart.
 ///
 /// The window's title is [`PanelOptions::title`]: the `app`'s
-/// [`AppOptions::title`] names the [main window](run_app), which a panel
-/// does not have.
+/// [`AppOptions::title`] names the [main window](crate::run_app), which a
+/// panel does not have.
 ///
 /// The `app`'s calls and posts reach the host on the engine thread
 /// ([`AppOptions::host`]): a host that shows, hides or closes a panel from
@@ -82,19 +88,21 @@ impl Panel {
     ///
     /// # Errors
     ///
-    /// [`PanelError::Invalid`] when the panel's size is not positive.
+    /// [`PanelError::WrongThread`] when this is not the thread that runs the
+    /// app's GTK main loop ([`run_app_with`](crate::run_app_with)), where
+    /// GTK is up; [`PanelError::Invalid`] when the panel's size is not
+    /// positive.
     pub fn open(
         options: PanelOptions,
         app: AppOptions,
         source: AppSource,
     ) -> Result<Self, PanelError> {
+        // GTK's widgets belong to the main loop, and the app's GTK is
+        // already initialized there: another thread cannot make a window.
+        if app_thread() != Some(std::thread::current().id()) {
+            return Err(PanelError::WrongThread);
+        }
         let (width, height) = panel_size(options.size)?;
-        // A panel may open before `run_app` (which runs the main loop from
-        // its `gtk::Application`): GTK must be initialized for its widgets.
-        gtk::init().map_err(|error| {
-            log::error!("GTK could not be initialized: {error}");
-            PanelError::Invalid("GTK could not be initialized")
-        })?;
         let window = gtk::Window::builder()
             .title(options.title.as_str())
             .default_width(width)
@@ -102,21 +110,10 @@ impl Panel {
             .decorated(!options.borderless)
             .build();
         if options.transparent {
-            // A transparent GTK window is one whose background the CSS
-            // paints as transparent: GTK 4 draws windows with alpha when
-            // the compositor supports it.
+            // GTK paints the window's own background from this class; the
+            // app's root paints its own, inside the window.
             window.add_css_class("nsh-panel-transparent");
-            if let Some(display) = gtk::gdk::Display::default() {
-                let provider = gtk::CssProvider::new();
-                provider.load_from_string(
-                    "window.nsh-panel-transparent { background-color: transparent; }",
-                );
-                gtk::style_context_add_provider_for_display(
-                    &display,
-                    &provider,
-                    gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
-                );
-            }
+            register_transparent_css();
         }
         if options.hides_on_deactivate || options.hides_on_resign_key {
             // GTK 4 has no app deactivation: the window losing the focus is
@@ -174,9 +171,10 @@ impl Panel {
         }
     }
 
-    /// Does nothing: GTK 4 has no way to keep a window above others (see
-    /// the [module](self)'s documentation).
-    pub fn set_level(&self, _level: PanelLevel) {}
+    /// Does nothing: GTK 4 has no way to keep a window above others, so
+    /// Linux does not ask the window manager for a layer either (see the
+    /// [module](self)'s documentation).
+    pub fn set_level(&self, _level: WindowLevel) {}
 
     /// Sets the window's title.
     pub fn set_title(&self, title: &str) {
@@ -199,6 +197,33 @@ impl Drop for Panel {
             self.window.close();
         }
     }
+}
+
+/// The thread that runs the GTK main loop ([`run_app`](crate::run_app)), if
+/// it runs: the one a panel opens on, where GTK is up.
+fn app_thread() -> Option<std::thread::ThreadId> {
+    crate::app::APP_THREAD.get().copied()
+}
+
+/// Registers the stylesheet that makes a `nsh-panel-transparent` window's
+/// own background transparent, once: a display keeps every provider added
+/// to it, so one provider per panel would pile up and restyle every window
+/// again.
+fn register_transparent_css() {
+    static REGISTERED: OnceLock<()> = OnceLock::new();
+    let _ = REGISTERED.get_or_init(|| {
+        // GTK 4 draws windows with alpha when the compositor supports it.
+        let provider = gtk::CssProvider::new();
+        provider
+            .load_from_string("window.nsh-panel-transparent { background-color: transparent; }");
+        if let Some(display) = gtk::gdk::Display::default() {
+            gtk::style_context_add_provider_for_display(
+                &display,
+                &provider,
+                gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
+            );
+        }
+    });
 }
 
 /// The window's size in points: the options', or 70% of the first monitor's
@@ -230,4 +255,32 @@ fn first_monitor_size() -> Option<(i32, i32)> {
         .ok()?;
     let geometry = monitor.geometry();
     Some((geometry.width(), geometry.height()))
+}
+
+#[cfg(test)]
+mod tests {
+    use nsh_core::geometry::{Points, Size};
+
+    use super::{PanelError, app_thread, panel_size};
+
+    /// Nothing ran the main loop: the test thread is not the app's, which
+    /// `Panel::open` refuses.
+    #[test]
+    fn a_panel_opens_only_on_the_thread_that_runs_the_app() {
+        assert_eq!(app_thread(), None);
+    }
+
+    #[test]
+    fn a_panels_size_must_be_positive() {
+        let size = |width, height| Some(Size::new(Points(width), Points(height)));
+        assert_eq!(panel_size(size(420.0, 300.0)), Ok((420, 300)));
+        assert_eq!(
+            panel_size(size(0.0, 300.0)),
+            Err(PanelError::Invalid("a panel's size must be positive"))
+        );
+        assert_eq!(
+            panel_size(size(f32::NAN, 300.0)),
+            Err(PanelError::Invalid("a panel's size must be positive"))
+        );
+    }
 }

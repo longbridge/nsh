@@ -23,6 +23,8 @@ function App() {
           Window.setTitleBar({ style: "default" });
           Window.setFrame({ origin: { x: 40, y: 60 }, size: { width: 800, height: 600 }, animated: false });
           Window.setLevel("floating");
+          Window.setLevel("aboveDock");
+          Window.setLevel("desktopIcon");
           Window.setLevel("normal");
           Window.orderFront();
           calls.set(`window done, close ${typeof Window.close}, minimize ${typeof Window.minimize}`);

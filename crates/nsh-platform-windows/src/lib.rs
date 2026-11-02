@@ -18,8 +18,10 @@
 //!
 //! [`AppView`] is one surface as a window (top-level or a child of the
 //! embedding app's window); [`run_app`] opens one and runs the message
-//! loop. A panel window ([`Panel`]) is another such view, a second window
-//! of the app on the same message loop. Off Windows this crate is empty.
+//! loop. A panel window ([`Panel`]) is another such view: a second window
+//! of the app on the same thread as its message loop (the one [`run_app`]
+//! creates), created in [`run_app_with`]'s setup and closed with the app.
+//! Off Windows this crate is empty.
 
 #![cfg(windows)]
 
@@ -45,7 +47,7 @@ mod keymap;
 mod mount;
 mod native;
 mod navigation;
-pub mod panel;
+mod panel;
 mod picker;
 mod render;
 mod scroll;
@@ -70,8 +72,11 @@ pub use windows;
 #[cfg(feature = "dev")]
 pub use crate::app::set_root;
 pub use crate::{
-    app::{AppOptions, AppSource, AppView, debug_output, fatal_error, run_app, set_ui_sets},
+    app::{
+        AppOptions, AppSource, AppView, debug_output, fatal_error, run_app, run_app_with,
+        set_ui_sets,
+    },
     image::AssetBase,
     native::{ComponentContext, ComponentFactory, Components, NativeComponent},
-    panel::{Panel, PanelError, PanelLevel, PanelOptions},
+    panel::{Panel, PanelError, PanelOptions, WindowLevel},
 };

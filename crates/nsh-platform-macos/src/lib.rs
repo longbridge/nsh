@@ -16,9 +16,9 @@
 //!   mouse, wheel, trackpad and keyboard and picks views itself
 //!   ([`input`]); scroll views keep offsets of their own ([`scroll`]).
 //!
-//! [`AppView`] is one surface as a view (for embedding); [`run_app`]
-//! opens one in a window, and [`Panel`] opens a second one of its own. Off
-//! macOS this crate is empty.
+//! [`AppView`] is one surface as a view (for embedding); [`run_app`] opens
+//! one in a window, and [`Panel`] a second one of its own, opened from the
+//! setup hook of [`run_app_with`]. Off macOS this crate is empty.
 
 #![cfg(target_os = "macos")]
 
@@ -44,7 +44,7 @@ mod mount;
 mod native;
 mod navigation;
 mod net;
-pub mod panel;
+mod panel;
 mod picker;
 mod screen_color;
 mod scroll;
@@ -71,9 +71,11 @@ pub use objc2_foundation;
 #[cfg(feature = "dev")]
 pub use crate::app::set_root;
 pub use crate::{
-    app::{AppOptions, AppSource, AppView, WindowDisplay, quit_app, run_app, set_ui_sets},
+    app::{
+        AppOptions, AppSource, AppView, WindowDisplay, quit_app, run_app, run_app_with, set_ui_sets,
+    },
     image::AssetBase,
     native::{ComponentContext, ComponentFactory, Components, NativeComponent},
-    panel::{Panel, PanelError, PanelLevel, PanelOptions},
+    panel::{Panel, PanelError, PanelOptions, WindowLevel},
     text::CoreTextEngine,
 };

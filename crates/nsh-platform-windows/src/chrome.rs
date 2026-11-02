@@ -371,13 +371,15 @@ fn set_frame(surface: &Surface, hwnd: HWND, frame: &WindowFrame) {
     };
 }
 
-/// The window's level: `HWND_TOPMOST` floats, `HWND_NOTOPMOST` is the
-/// normal level, `HWND_BOTTOM` is the closest Windows has to the
-/// desktop's icons (nothing draws below them).
+/// The window's level: `HWND_TOPMOST` floats (with [`WindowLevel::AboveDock`]:
+/// Windows has one band above the normal windows, which the taskbar and the
+/// floating windows share), `HWND_NOTOPMOST` is the normal level,
+/// `HWND_BOTTOM` is the closest Windows has to the desktop's icons (nothing
+/// draws below them).
 fn set_level(hwnd: HWND, level: WindowLevel) {
     let order = match level {
         WindowLevel::Normal => HWND_NOTOPMOST,
-        WindowLevel::Floating => HWND_TOPMOST,
+        WindowLevel::Floating | WindowLevel::AboveDock => HWND_TOPMOST,
         WindowLevel::DesktopIcon => HWND_BOTTOM,
     };
     // SAFETY: a plain call on a live window.

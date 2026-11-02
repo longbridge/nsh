@@ -104,10 +104,13 @@ impl Window {
     }
 
     /// Sets the window's level on macOS and Windows: `"normal"` restores the
-    /// normal level; `"floating"` stays above normal windows. `"desktopIcon"`
-    /// selects macOS's desktop icon level or moves a Windows window to the
-    /// bottom of the current z-order, where later activation can raise it.
-    /// Elsewhere the level is left to the host and the window manager.
+    /// normal level; `"floating"` stays above normal windows;
+    /// `"aboveDock"` sits just above the Dock or the taskbar (macOS's Dock
+    /// level plus one; on Windows `"floating"` and `"aboveDock"` are both
+    /// topmost). `"desktopIcon"` selects macOS's desktop icon level or moves
+    /// a Windows window to the bottom of the current z-order, where later
+    /// activation can raise it. Elsewhere the level is left to the host and
+    /// the window manager.
     pub(crate) fn set_level(level: WindowLevel, cx: &mut ModuleCx) {
         desktop(cx, DesktopCommand::SetLevel(level));
     }
