@@ -33,7 +33,7 @@ function App() {
       >
         <View testID="ada-dot" style={{ position: "absolute", right: 0, bottom: 0, width: 10, height: 10 }} />
       </Avatar>
-      <Avatar testID="grace" src="https://example.com/grace.png" name="Grace Hopper" fallbackDelay={300} class={size}>
+      <Avatar testID="grace" src="https://example.com/grace.png" name="Grace Hopper" fallbackDelay={1500} class={size}>
         <View testID="grace-dot" style={{ position: "absolute", right: 0, bottom: 0, width: 10, height: 10 }} />
       </Avatar>
       <Avatar
