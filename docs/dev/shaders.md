@@ -146,12 +146,16 @@ each platform that draws them does it; the others ignore `MountItem::ShaderTrans
 
 | Platform | Pictures | Hides the children, keeps their input | Over them | Pages and dialogs |
 |---|---|---|---|---|
-| iOS | `renderInContext:` of a view holding the children (`Decor::set_effect`, the view children are added to) without its mask, at the screen's scale; the backdrop: the window with the view's layer at opacity 0 | an empty `mask` on that view's layer (UIKit hit-tests views) | the frames' sublayer at `zPosition` 1e6, `overflow` points beyond the box; a screen's on the root view (dialogs, presented by UIKit above it, are outside) | the screens change and the dialog is presented or dismissed at once, under a layer over the window's part where the surface (the stack) is, from pictures before the change and after it (the first tick); popping and dismissing run backwards |
+| iOS | `renderInContext:` of a view holding the children (`Decor::set_effect`, the view children are added to) without its mask, at the screen's scale; the backdrop: the window with the view's layer at opacity 0 | an empty `mask` on that view's layer (UIKit hit-tests views); the root view's while any screen shader hides it | the frames' sublayer at `zPosition` 1e6, `overflow` points beyond the box; a screen's on the root view (dialogs, presented by UIKit above it, are outside) | the screens change and the dialog is presented or dismissed at once, under a layer over the window's part where the surface (the stack) is, from pictures before the change and after it (the first tick); popping and dismissing run backwards |
 
 iOS retakes an effect's pictures on the display frame after the core says they changed (`MountItem::ShaderInput`) or
 the platform changed a view in them (animated values, scrolling, image loads), at most once per frame; a transition
 pictures its children (or its running frame) as its `from` when it starts and keeps taking `to` while it runs.
 `renderInContext:` draws no video or web page, nor backdrop blur or glass.
+
+Where there is no GPU device (`Renderer::new` is `None`) iOS masks no children: an effect or a screen effect shows
+them as they are, a transition starts no run, and a page's or a dialog's `transitionShader` leaves the change to
+its own `animation`.
 
 On Android the layer stays in `libnsh`: the encoder sends Java only whether a view shows a shader (opcode `SHADER`,
 35, in `encode.rs` ↔ `Mounter.java`), Java reports the size in pixels (`Native.shaderSize`), and the layer goes to

@@ -3110,12 +3110,13 @@ impl Mounter {
                 continue;
             };
             let overlays = &mut self.shaders;
-            // Pictured before the change, which happens at once.
+            // Pictured before the change, which then happens at once.
             stack.reconcile(&screens, leaving, shaders, |view, shader, pops| {
-                if let Some(window) = view.window() {
-                    let rect = view.convertRect_toView(view.bounds(), Some(&window));
-                    overlays.nav_overlay(&window, rect, scale, shader, pops);
-                }
+                let Some(window) = view.window() else {
+                    return false;
+                };
+                let rect = view.convertRect_toView(view.bounds(), Some(&window));
+                overlays.nav_overlay(&window, rect, scale, shader, pops)
             });
             // A page whose options arrive while it is already on screen: the
             // stack itself does not change, and the bar still has to follow.
@@ -3179,18 +3180,18 @@ impl Mounter {
                 continue;
             };
             // Through its shader: the window where the surface is, pictured
-            // before it comes or goes at once.
+            // before it comes or goes at once (where the shader cannot
+            // draw, with its own motion).
             let shader = self
                 .nav_shaders
                 .get(&id)
                 .filter(|_| modal.changes(shown))
                 .zip(root.as_ref().and_then(|r| Some((r, r.window()?))));
-            if let Some((shader, (root, window))) = &shader {
-                let rect = root.convertRect_toView(root.bounds(), Some(window));
+            let at_once = shader.is_some_and(|(shader, (root, window))| {
+                let rect = root.convertRect_toView(root.bounds(), Some(&window));
                 self.shaders
-                    .nav_overlay(window, rect, scale, shader, !shown);
-            }
-            let at_once = shader.is_some();
+                    .nav_overlay(&window, rect, scale, shader, !shown)
+            });
             if shown {
                 if let Some(root) = &root {
                     modal.present(root, at_once);

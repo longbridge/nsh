@@ -857,13 +857,14 @@ impl StackHost {
     /// `shaders` are the `transitionShader`s of the screen that comes and of
     /// the one on top until now: through one, the screens change at once,
     /// after `before` was given the navigation controller's view, the
-    /// shader and whether it pops.
+    /// shader and whether it pops, and answered whether it draws it (where
+    /// it cannot, the screens change with their own motion).
     pub(crate) fn reconcile(
         &self,
         screens: &[(NodeId, Retained<ScreenController>, ScreenAnimation)],
         leaving: Option<ScreenAnimation>,
         shaders: (Option<&NavShader>, Option<&NavShader>),
-        before: impl FnOnce(&UIView, &NavShader, bool),
+        before: impl FnOnce(&UIView, &NavShader, bool) -> bool,
     ) {
         let desired: Vec<Retained<UIViewController>> = screens
             .iter()
@@ -892,18 +893,13 @@ impl StackHost {
         .unwrap_or_default();
         let shader = if pushing { shaders.0 } else { shaders.1 }
             .filter(|_| top_changed && current.count() > 0);
-        if let (Some(shader), Some(view)) = (shader, self.nav.view()) {
-            before(&view, shader, !pushing);
-        }
-        let animated = shader.is_none()
-            && top_changed
-            && current.count() > 0
-            && animation == ScreenAnimation::Default;
-        if shader.is_none()
-            && top_changed
-            && current.count() > 0
-            && animation == ScreenAnimation::Fade
-        {
+        let through = match (shader, self.nav.view()) {
+            (Some(shader), Some(view)) => before(&view, shader, !pushing),
+            _ => false,
+        };
+        let animated =
+            !through && top_changed && current.count() > 0 && animation == ScreenAnimation::Default;
+        if !through && top_changed && current.count() > 0 && animation == ScreenAnimation::Fade {
             let fade = CATransition::new();
             fade.setDuration(0.25);
             if let Some(view) = self.nav.view() {
