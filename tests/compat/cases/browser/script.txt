@@ -227,9 +227,9 @@ wait 1000
 expect SlowCard
 # Off the card: closed `closeDelay` later.
 event parent:text:SlowCard onMouseLeave
-wait 300
+wait 1000
 expect SlowCard
-wait 400
+wait 1500
 absent SlowCard
 expect Log: card false hover
 # Escape closes it at once.
