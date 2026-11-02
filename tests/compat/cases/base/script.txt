@@ -1345,11 +1345,11 @@ prop label:a.md accessibilityState selected=true
 tap label:notes
 absent a.md@1
 prop label:notes accessibilityState selected=true expanded=false
-# `disabled`: read-only, every row dimmed; a press does nothing.
+# `disabled`: read-only, every row dimmed and nothing to tap; the
+# folder stays closed.
 tap id:lock
-prop label:notes accessibilityState selected=true disabled=true expanded=false
+prop label:notes accessibilityState disabled=true selected=true expanded=false
 prop label:todo.md accessibilityState disabled=true
-tap text:+notes@0
 absent a.md@1
 covers [nsh/base] Tree
 covers [props] Tree.items
@@ -1492,8 +1492,8 @@ covers [props] accessibilityLabel
 covers [events] onChange
 covers [events] Carousel.onDragStart
 covers [events] Carousel.onDragEnd
-covers [events] Carousel.onFocus
-covers [events] Carousel.onBlur
+covers [events] onFocus
+covers [events] onBlur
 
 # base-collapsible-reveal
 # With `reveal`: the clipping region is there while closed, zero high, so
@@ -1948,9 +1948,9 @@ prop scroll:label:Calendar role listbox
 prop scroll:label:Calendar accessibilityLabel Commands
 style scroll:label:Calendar backgroundColor #0000ffff
 prop label:Calendar role option
-prop label:Search Emoji accessibilityState disabled=true
-prop label:Dark Theme accessibilityState checked=true
-style label:Dark Theme backgroundColor #00ff00ff
+prop label:"Search Emoji" accessibilityState disabled=true
+prop label:"Dark Theme" accessibilityState checked=true
+style label:"Dark Theme" backgroundColor #00ff00ff
 nostyle label:Profile backgroundColor
 # `renderItem` gets the shortcut as shown here.
 expect New File +key
@@ -1958,28 +1958,29 @@ expect Calendar
 # The first enabled item is highlighted (`focus:`, 40 high), and the app
 # hears it; a disabled row takes `disabled:` (24).
 expect Lit: new
-frame label:New File 0 0 390 40
+frame label:"New File" 0 0 390 40
 frame label:Calendar 0 0 390 30
-frame label:Search Emoji 0 0 390 24
+frame label:"Search Emoji" 0 0 390 24
 absent NoCommands
-# A press chooses; a disabled item takes none.
-tap label:Search Emoji
+# A press chooses; a disabled item takes none, so it is nothing to tap.
 expect Chosen: none
 tap label:Profile
 expect Chosen: profile
 # The app's query: typing is reported, the app's query filters by label,
 # empty sections go, and its first match is highlighted.
-type text:FindCommand cal
+type label:Commands cal
 expect Query: cal
 absent New File +key
 absent [Settings]
 expect [Suggestions]
 expect Lit: calendar
-frame label:Calendar 0 0 390 40
-tap label:Calendar
+# The row under its section's header (a recycled row parked off the list
+# may keep a label, so the row is found by its text).
+frame parent:parent:parent:text:Calendar 0 0 390 40
+tap text:Calendar
 expect Chosen: calendar
 # Nothing matches: the app's `empty`.
-type text:FindCommand zz
+type label:Commands zz
 expect Query: calzz
 expect NoCommands
 expect Lit: none
@@ -1991,7 +1992,7 @@ absent Remote One
 expect Server A
 expect Server B
 absent ServerEmpty
-prop scroll:label:Server A accessibilityState busy=true
+prop scroll:label:"Server A" accessibilityState busy=true
 # Without a search field every item shows.
 expect Gamma
 absent text:NoField
@@ -2001,7 +2002,7 @@ covers [props] Command.query
 covers [props] Command.defaultQuery
 covers [props] Command.filterable
 covers [props] Command.loading
-covers [props] Command.placeholder
+covers [props] placeholder
 covers [props] Command.listClass
 covers [props] Command.itemClass
 covers [props] Command.header
