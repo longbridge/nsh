@@ -1903,7 +1903,7 @@ prop label:One accessibilityValue text=Blue
 tap id:tags
 expect TagFooter
 style parent:parent:text:TagFooter backgroundColor #ff0000ff
-frame parent:parent:text:TagFooter 0 68 390 20
+frame parent:parent:text:TagFooter 0 51 390 20
 tap label:Green
 expect Tags: red,green
 expect TagFooter
@@ -1914,7 +1914,7 @@ expect Tags: green
 # filters.
 type label:Tags bl
 expect Query: bl
-absent label:Green
+absent Green
 # Closing (the trigger button again) confirms the value as it is.
 tap id:tags
 expect Confirmed: green
@@ -1922,16 +1922,16 @@ absent TagFooter
 # Without `multiple`, typing in the input opens the list, and a choice
 # replaces the value and closes it.
 type label:One re
-expect label:Red
+expect Red
 tap label:Red
 expect One: red
-absent label:Green
+absent Green
 covers [nsh/base] Combobox
 covers [props] Combobox.items
 covers [props] Combobox.multiple
 covers [props] value
 covers [props] defaultValue
-covers [props] Combobox.placeholder
+covers [props] placeholder
 covers [props] Combobox.query
 covers [props] Combobox.footer
 covers [props] Combobox.footerClass

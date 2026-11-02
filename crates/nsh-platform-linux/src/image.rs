@@ -999,7 +999,7 @@ fn start(surface: &Rc<Surface>, view: &NshView) {
 
 /// `view`'s frame changed: an image now shown larger than it was decoded
 /// loads the larger size, showing the smaller one meanwhile.
-pub(crate) fn resized(surface: &Rc<Surface>, view: &NshView) {
+pub(crate) fn resized(surface: &Surface, view: &NshView) {
     let (generation, source, want) = {
         let s = view.state();
         let frame = s.frame.size;
@@ -1018,9 +1018,7 @@ pub(crate) fn resized(surface: &Rc<Surface>, view: &NshView) {
             .map_or(1.0, |l| l.density());
         let longest = want.longest(picture.natural, density, source.size);
         let shown = picture.texture.width().max(picture.texture.height()) as u32;
-        // reload when it is shown larger than decoded, or much smaller (a texture far past its pixels is
-        // drawn with mipmaps and blurs: a frame that shrank after its first decode, e.g. once the ratio is known)
-        if longest <= shown && shown <= longest + longest / 2 {
+        if !needs_reload(longest, shown) {
             return;
         }
         (image.generation, source.clone(), want)
@@ -1061,6 +1059,33 @@ pub(crate) fn resized(surface: &Rc<Surface>, view: &NshView) {
     {
         i.load = Some(load);
     }
+}
+
+/// Whether a texture `shown` pixels on its longest side must load again
+/// for a view that wants `longest`: it is shown larger than decoded, or
+/// much smaller (a texture far past its pixels is drawn with mipmaps and
+/// blurs: a frame that shrank after its first decode, or a surface whose
+/// scale dropped).
+fn needs_reload(longest: u32, shown: u32) -> bool {
+    shown < longest || shown > longest + longest / 2
+}
+
+/// The surface's scale changed: every image view checks the size it was
+/// decoded at against the one it now shows.
+pub(crate) fn rescaled(surface: &Surface) {
+    fn walk(surface: &Surface, widget: &gtk::Widget) {
+        if let Some(view) = widget.downcast_ref::<NshView>()
+            && view.state().image.is_some()
+        {
+            resized(surface, view);
+        }
+        let mut child = widget.first_child();
+        while let Some(c) = child {
+            walk(surface, &c);
+            child = c.next_sibling();
+        }
+    }
+    walk(surface, surface.root.upcast_ref());
 }
 
 /// The source of `view` loaded (or failed); `waited`: it was not cached,
@@ -1206,13 +1231,19 @@ fn fit(
     (r.origin.x.0, r.origin.y.0, r.size.width.0, r.size.height.0)
 }
 
-/// The filter for a texture `texture_px` pixels wide drawn `rect_points`
-/// wide on a surface of `scale`: trilinear (mipmaps) only when it shrinks
-/// more than 2× on screen. A texture decoded for its box is at most a
-/// bucket (√2) larger than its device pixels; mipmapping that blends in
-/// the half-size level and blurs it.
-fn scaling_filter(texture_px: f32, rect_points: f32, scale: f32) -> gsk::ScalingFilter {
-    if texture_px > rect_points * scale.max(1.0) * 2.0 {
+/// The filter for a texture of `texture_px` pixels drawn in `rect_points`
+/// on a surface of `scale`: trilinear (mipmaps) only when it shrinks more
+/// than 2× on screen on both axes. A texture decoded for its box is at
+/// most a bucket (√2) larger than its device pixels; mipmapping that
+/// blends in the half-size level and blurs it. A stretched image
+/// (`fill`) shrinks on one axis only: mipmaps would blur the other.
+fn scaling_filter(
+    texture_px: (f32, f32),
+    rect_points: (f32, f32),
+    scale: f32,
+) -> gsk::ScalingFilter {
+    let device = scale.max(1.0) * 2.0;
+    if texture_px.0 > rect_points.0 * device && texture_px.1 > rect_points.1 * device {
         gsk::ScalingFilter::Trilinear
     } else {
         gsk::ScalingFilter::Linear
@@ -1226,7 +1257,11 @@ fn draw_texture(
     rect: &graphene::Rect,
     scale: f32,
 ) {
-    let filter = scaling_filter(texture.width() as f32, rect.width(), scale);
+    let filter = scaling_filter(
+        (texture.width() as f32, texture.height() as f32),
+        (rect.width(), rect.height()),
+        scale,
+    );
     snapshot.append_scaled_texture(texture, filter, rect);
 }
 
@@ -1482,13 +1517,36 @@ mod tests {
         use gsk::ScalingFilter::{Linear, Trilinear};
         // A 240pt thumbnail on a 2x screen decoded at the next bucket
         // (√2 over its 480 device pixels) stays sharp.
-        assert_eq!(scaling_filter(679.0, 240.0, 2.0), Linear);
-        assert_eq!(scaling_filter(960.0, 240.0, 2.0), Linear);
-        assert_eq!(scaling_filter(961.0, 240.0, 2.0), Trilinear);
+        assert_eq!(scaling_filter((679.0, 679.0), (240.0, 240.0), 2.0), Linear);
+        assert_eq!(scaling_filter((960.0, 960.0), (240.0, 240.0), 2.0), Linear);
+        assert_eq!(
+            scaling_filter((961.0, 961.0), (240.0, 240.0), 2.0),
+            Trilinear
+        );
         // Fractional scales count their device pixels too.
-        assert_eq!(scaling_filter(700.0, 240.0, 1.5), Linear);
-        assert_eq!(scaling_filter(4000.0, 240.0, 1.5), Trilinear);
-        assert_eq!(scaling_filter(481.0, 240.0, 1.0), Trilinear);
+        assert_eq!(scaling_filter((700.0, 700.0), (240.0, 240.0), 1.5), Linear);
+        assert_eq!(
+            scaling_filter((4000.0, 4000.0), (240.0, 240.0), 1.5),
+            Trilinear
+        );
+        assert_eq!(
+            scaling_filter((481.0, 481.0), (240.0, 240.0), 1.0),
+            Trilinear
+        );
+        // A 2:1 image stretched (`fill`) into a 153×140pt square at 2x:
+        // squeezed only horizontally, it stays sharp vertically.
+        assert_eq!(scaling_filter((724.0, 362.0), (153.0, 140.0), 2.0), Linear);
+    }
+
+    #[test]
+    fn reloads_textures_shown_larger_or_much_smaller_than_decoded() {
+        // Decoded at the bucket it wants, or a little larger: kept.
+        assert!(!needs_reload(724, 724));
+        assert!(!needs_reload(724, 1024));
+        // Decoded for a 1x surface now at 2x (or shown larger): reloads.
+        assert!(needs_reload(724, 362));
+        // Decoded for 2x, now at 1x: far past its pixels, reloads.
+        assert!(needs_reload(362, 724));
     }
 
     #[test]

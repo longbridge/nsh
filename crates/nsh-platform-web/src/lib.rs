@@ -253,12 +253,17 @@ impl MountSink for Sink {
     }
 }
 
-/// Bundled files the page preloaded (fonts, images drawn on a canvas).
+/// Bundled files the page preloaded (fonts, images drawn on a canvas); the
+/// others are downloaded from where the page serves them.
 struct PageAssets;
 
 impl Assets for PageAssets {
     fn read(&self, uri: &str) -> Result<Vec<u8>, String> {
         ffi::read_asset(uri).ok_or_else(|| format!("{uri} is not available on the web"))
+    }
+
+    fn url(&self, uri: &str) -> Option<String> {
+        uri.starts_with("asset:/").then(|| ffi::asset_url(uri))
     }
 }
 
