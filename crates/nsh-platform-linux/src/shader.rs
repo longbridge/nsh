@@ -36,6 +36,11 @@
 //! Pages and dialogs that come and go through a shader draw pictures of
 //! their two sides through a [`NavPainter`] in a layer over the stack (the
 //! root for a dialog), `crate::navigation`'s.
+//!
+//! Without a GPU device ([`Surface::shader_renderer`] has none) a view
+//! shows its background and children: an effect draws its children as
+//! they are, a transition starts no run, and a page or a dialog comes with
+//! its own motion.
 
 use std::{
     cell::{Cell, RefCell},
@@ -94,8 +99,12 @@ impl ShaderState {
             .is_some_and(|l| l.shader.inputs().contains(input))
     }
 
-    /// Whether it draws instead of its children now.
+    /// Whether it draws instead of its children now (never without a GPU
+    /// device: no frame would come).
     fn replaces(&self) -> bool {
+        if self.renderer.is_none() {
+            return false;
+        }
         match self.role() {
             Some(ShaderRole::Effect | ShaderRole::Screen) => true,
             Some(ShaderRole::Transition | ShaderRole::ScreenTransition) => {
@@ -152,17 +161,31 @@ fn is_screen(role: Option<ShaderRole>) -> bool {
     )
 }
 
-/// The view a layer mounted on `view` draws on: the root for a screen
-/// effect's or transition's view.
-fn target(view: &NshView) -> NshView {
+/// The view a layer mounted on `view` draws on: `view`, or the root for a
+/// screen effect's or transition's view while the root draws its layer
+/// (`None` once another screen effect's took its place).
+fn target(view: &NshView) -> Option<NshView> {
     if !view.state().shader.as_ref().is_some_and(|s| s.screen) {
-        return view.clone();
+        return Some(view.clone());
     }
     let mut root = view.clone();
     while let Some(parent) = root.parent_view() {
         root = parent;
     }
-    root
+    let owns = root
+        .state()
+        .shader
+        .as_ref()
+        .is_some_and(|s| s.owner == Some(view.id()));
+    owns.then_some(root)
+}
+
+/// `view` was deleted: the layer of a screen effect or transition it
+/// mounted leaves the root, unless another one's took its place.
+pub(crate) fn deleted(surface: &Rc<Surface>, view: &NshView) {
+    if view.state().shader.as_ref().is_some_and(|s| s.screen) {
+        set(surface, view, None);
+    }
 }
 
 /// Mounts `layer` on `view` (`None`: it shows nothing of its own).
@@ -212,7 +235,9 @@ pub(crate) fn set(surface: &Rc<Surface>, view: &NshView, layer: Option<Arc<Shade
 
 /// The values of the layer's animated slots.
 pub(crate) fn set_args(view: &NshView, values: &[(u16, AnimationValue)]) {
-    let view = target(view);
+    let Some(view) = target(view) else {
+        return;
+    };
     {
         let mut state = view.state_mut();
         let Some(shader) = state.shader.as_mut() else {
@@ -235,21 +260,22 @@ pub(crate) fn resized(view: &NshView) {
 /// A shader transition starts ([`nsh_core::MountItem::ShaderTransition`],
 /// before the rest of its batch): what shows now becomes its `sample_from`,
 /// and `nsh.progress` goes from 0 to 1 over `duration`.
-pub(crate) fn start_transition(surface: &Rc<Surface>, view: &NshView, duration: Duration) {
-    let view = if view.state().shader.as_ref().is_some_and(|s| s.screen) {
-        surface.root.clone()
-    } else {
-        view.clone()
+pub(crate) fn start_transition(view: &NshView, duration: Duration) {
+    let Some(view) = target(view) else {
+        return;
     };
     let (running, overflow, frame) = {
         let s = view.state();
         let Some(shader) = s.shader.as_ref() else {
             return;
         };
-        if !matches!(
-            shader.role(),
-            Some(ShaderRole::Transition | ShaderRole::ScreenTransition)
-        ) {
+        // Without a GPU device no run starts: the children change at once.
+        if shader.renderer.is_none()
+            || !matches!(
+                shader.role(),
+                Some(ShaderRole::Transition | ShaderRole::ScreenTransition)
+            )
+        {
             return;
         }
         (shader.replaces(), shader.view.overflow().0, s.frame.size)
@@ -528,7 +554,9 @@ fn render(renderer: &gsk::Renderer, snapshot: gtk::Snapshot, pixels: (f32, f32))
 /// (`MountItem::ShaderInput`): an effect draws again (its children's
 /// picture is taken then), what is behind a view is taken again.
 pub(crate) fn input_changed(view: &NshView) {
-    let view = target(view);
+    let Some(view) = target(view) else {
+        return;
+    };
     mark(&view);
     view.redraw();
 }
@@ -560,7 +588,11 @@ pub(crate) fn ui_changed() {
 fn mark(view: &NshView) {
     let due = {
         let s = view.state();
-        let Some(shader) = s.shader.as_ref().filter(|s| s.reads(ShaderInput::Backdrop)) else {
+        let Some(shader) = s
+            .shader
+            .as_ref()
+            .filter(|s| s.renderer.is_some() && s.reads(ShaderInput::Backdrop))
+        else {
             return;
         };
         shader.marked.set(true);
@@ -841,5 +873,35 @@ impl NavPainter {
             &graphene::Rect::new(0.0, 0.0, self.size.width.0, self.size.height.0),
         )
         .upcast()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use nsh_core::shader::Shader;
+
+    use super::*;
+
+    fn layer(role: ShaderRole) -> Arc<ShaderLayer> {
+        let shader =
+            Shader::compile("fn shade(uv: vec2f) -> vec4f {\n    return vec4f(uv, 0.0, 1.0);\n}\n")
+                .expect("a valid shader");
+        let mut layer = ShaderLayer::new(shader, &[], &mut Vec::new());
+        layer.role = role;
+        Arc::new(layer)
+    }
+
+    /// Without a GPU device an effect and a screen effect draw their
+    /// children as they are, and so does a transition that would run.
+    #[test]
+    fn a_shader_that_cannot_draw_shows_the_children() {
+        let mut shader = ShaderState::default();
+        for role in [ShaderRole::Effect, ShaderRole::Screen] {
+            shader.view.set_layer(Some(layer(role)));
+            assert!(!shader.replaces());
+        }
+        shader.view.set_layer(Some(layer(ShaderRole::Transition)));
+        shader.until = Some(Instant::now() + Duration::from_secs(60));
+        assert!(!shader.replaces());
     }
 }

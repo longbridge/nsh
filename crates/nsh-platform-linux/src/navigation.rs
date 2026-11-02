@@ -265,6 +265,10 @@ impl Motion {
     /// side, the views at rest.
     fn add_overlay(&mut self, surface: &Surface, shader: &nsh_core::NavShader) {
         use crate::shader::{NavPainter, nav_picture};
+        // Without a GPU device it keeps its own motion.
+        if surface.shader_renderer().is_none() {
+            return;
+        }
         let rest = |v: &NshView| {
             set_shift(v, (0.0, 0.0));
             set_fade(v, 1.0);
