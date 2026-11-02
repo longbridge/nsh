@@ -982,6 +982,65 @@ pub fn watch_scroll(
     add_watch(Rc::new(target), handler);
 }
 
+impl super::ElementRef {
+    /// Listens to the keyboard focus coming into the element: onto it or
+    /// an element inside it, from outside (GPUI's `on_focus_in` of a focus
+    /// handle; the element enters `focus-within`). Moving between elements
+    /// inside it is no new coming in. The content of an overlay is inside
+    /// the element the overlay is in, wherever it shows: a popup's trigger
+    /// and the popup are both inside the view holding them.
+    ///
+    /// It listens while the current owner lives, to whatever element
+    /// carries the ref, and runs at the end of the commit round the focus
+    /// moved in (what it changes goes out in the same batch). The focus is
+    /// what the platform reports: an input's, or a view's that Tab or
+    /// `focus()` reached where the keyboard moves between views (macOS,
+    /// the web).
+    pub fn on_focus_in(&self, listener: impl Fn() + 'static) {
+        let element = *self;
+        watch_focus(
+            move || element.node(),
+            move |within| {
+                if within {
+                    listener();
+                }
+            },
+        );
+    }
+
+    /// Listens to the keyboard focus leaving the element: going from it
+    /// or an element inside it to one outside, or to none (GPUI's
+    /// `on_focus_out`; the element leaves `focus-within`). As
+    /// [`Self::on_focus_in`] otherwise.
+    pub fn on_focus_out(&self, listener: impl Fn() + 'static) {
+        let element = *self;
+        watch_focus(
+            move || element.node(),
+            move |within| {
+                if !within {
+                    listener();
+                }
+            },
+        );
+    }
+}
+
+/// Watches the focus coming into and leaving `target` while the current
+/// owner lives.
+fn watch_focus(target: impl Fn() -> Option<NodeId> + 'static, handler: impl Fn(bool) + 'static) {
+    let owner = Owner::current();
+    let handler = Rc::new(move |within: bool| owner.run(|| handler(within)));
+    let watches = executor().watches.clone();
+    let id = watches.borrow_mut().add_focus(Rc::new(target), handler);
+    let weak = Rc::downgrade(&watches);
+    cleanup(move || {
+        if let Some(watches) = weak.upgrade() {
+            let removed = watches.borrow_mut().remove_focus(id);
+            drop(removed);
+        }
+    });
+}
+
 impl super::NodeRef {
     /// Scrolls the scroll view (or list, along its axis) to a content
     /// offset, as [`super::ElementRef::scroll_to`] does: for a view holding

@@ -165,7 +165,7 @@ const price = signal<[number, number]>([200, 800]);
 - 每个部件：滑块禁用时 `disabled:`。
 
 滑块随数值移动，拖动时立即跟随。滑块各状态的动效由应用决定（例如 `transition` 让滑块在 `hover:` 和 `active:` 时变亮），
-`motion-reduce:` 为要求减少动效的用户保持静止。键盘焦点在滑块上，滑块带有 `focus:` 类时会报告它：这时轨道上的 `focus-within:` 给整条滑轨加上焦点环，滑块的 `focus:outline-none` 取代平台自带的焦点轮廓。
+`motion-reduce:` 为要求减少动效的用户保持静止。键盘焦点在滑块上：滑块持有焦点时，轨道上的 `focus-within:` 给整条滑轨加上焦点环，滑块的 `focus:outline-none` 取代平台自带的焦点轮廓。
 
 ## 键盘
 
