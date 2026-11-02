@@ -1049,6 +1049,15 @@ impl Screen {
         self.bind_prop(animation, |a| Prop::Screen(ScreenProp::Animation(a)))
     }
 
+    /// The program it comes and goes through instead of its
+    /// [`Self::animation`] (TS: `transitionShader`).
+    pub fn transition_shader(
+        self,
+        shader: impl IntoReactive<crate::shader::TransitionShader>,
+    ) -> Self {
+        self.bind_prop(shader, |s| Prop::TransitionShader(Some(s.into())))
+    }
+
     /// What the status bar shows while the screen is up (iOS and Android;
     /// TS: `statusBar`): over the screens below it and the app's default,
     /// field by field, as a view controller's `preferredStatusBarStyle`.
@@ -1226,6 +1235,15 @@ impl Modal {
         self.bind_prop(animation, |animation: ModalAnimation| {
             Prop::Modal(ModalProp::Animation(animation))
         })
+    }
+
+    /// The program it comes and goes through instead of its
+    /// [`Self::animation`] (TS: `transitionShader`).
+    pub fn transition_shader(
+        self,
+        shader: impl IntoReactive<crate::shader::TransitionShader>,
+    ) -> Self {
+        self.bind_prop(shader, |s| Prop::TransitionShader(Some(s.into())))
     }
 
     /// Full screen, or a sheet (iOS).
@@ -2294,6 +2312,7 @@ impl From<Drawing> for Painter {
 }
 
 crate::static_reactive!(ScreenAnimation: ScreenAnimation);
+crate::static_reactive!(crate::shader::TransitionShader: crate::shader::TransitionShader);
 
 #[cfg(test)]
 mod tests {
@@ -2337,6 +2356,34 @@ mod tests {
         u.0.iter()
             .find(|(n, _)| &**n == name)
             .map(|(_, v)| v.clone())
+    }
+
+    #[test]
+    fn screens_and_modals_take_a_transition_shader() {
+        let runtime = Runtime::default();
+        let _entered = runtime.enter();
+        let source = "struct Uniforms { edge: f32 }\n\
+            fn shade(uv: vec2f) -> vec4f {\n    \
+            return select(sample_from(uv), sample_to(uv), uv.x < nsh.progress * uniforms.edge);\n}\n";
+        let shader = crate::shader::Shader::compile(source).expect("compiles");
+        let wipe = crate::shader::TransitionShader::new(shader)
+            .uniform("edge", 1.0_f32)
+            .duration(std::time::Duration::from_millis(400));
+        let expected = crate::shader::NavShaderSpec {
+            source: source.into(),
+            uniforms: ShaderUniforms(vec![("edge".into(), UniformValue::Number(1.0))]),
+            duration: Some(400.0),
+        };
+        let spec = |attrs: &super::super::builder::Attrs| {
+            attrs.props.iter().find_map(|p| match p {
+                Prop::TransitionShader(s) => s.clone(),
+                _ => None,
+            })
+        };
+        let screen = screen().transition_shader(wipe.clone()).0;
+        assert_eq!(spec(&screen.resolved_attrs()), Some(expected.clone()));
+        let modal = modal().transition_shader(wipe).0;
+        assert_eq!(spec(&modal.resolved_attrs()), Some(expected));
     }
 
     #[test]

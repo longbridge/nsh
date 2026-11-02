@@ -363,6 +363,48 @@ pub struct NavShaderSpec {
     pub duration: Option<f32>,
 }
 
+/// A page's or a dialog's transition program, built in Rust
+/// (`Screen::transition_shader`,
+/// `Modal::transition_shader`;
+/// TS: `transitionShader`): a compiled [`Shader`] defining `shade`, which
+/// reads the lower side as `sample_from` and the upper as `sample_to`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TransitionShader(NavShaderSpec);
+
+impl TransitionShader {
+    /// Runs `shader`, with no uniforms, for the platform's own duration.
+    pub fn new(shader: Shader) -> Self {
+        Self(NavShaderSpec {
+            source: shader.source().into(),
+            uniforms: ShaderUniforms::default(),
+            duration: None,
+        })
+    }
+
+    /// Sets the member `name` of the shader's `struct Uniforms` to `value`:
+    /// a number, a color or a list (a vector, an array of `vec4f`).
+    pub fn uniform(mut self, name: &str, value: impl Into<UniformValue>) -> Self {
+        let value = value.into();
+        match self.0.uniforms.0.iter_mut().find(|(n, _)| &**n == name) {
+            Some(entry) => entry.1 = value,
+            None => self.0.uniforms.0.push((name.into(), value)),
+        }
+        self
+    }
+
+    /// How long it runs (the platform's own duration by default).
+    pub fn duration(mut self, duration: std::time::Duration) -> Self {
+        self.0.duration = Some(duration.as_secs_f32() * 1000.0);
+        self
+    }
+}
+
+impl From<TransitionShader> for NavShaderSpec {
+    fn from(shader: TransitionShader) -> Self {
+        shader.0
+    }
+}
+
 /// The word a progress slot writes ([`ShaderLayer::slots`]): not one of the
 /// uniforms, the built-in `nsh.progress`.
 pub const PROGRESS_WORD: u32 = u32::MAX;
