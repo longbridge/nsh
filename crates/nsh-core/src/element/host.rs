@@ -1110,6 +1110,21 @@ impl Overlay {
         )
     }
 
+    /// Places it beside the element carrying `anchor`, outside the edges
+    /// of the one carrying `edges` (the menu around it), as a submenu
+    /// beside its row ([`OverlayAnchor::Beside`]).
+    pub fn anchor_beside(self, anchor: &super::ElementRef, edges: &super::ElementRef) -> Self {
+        let (anchor, edges) = (*anchor, *edges);
+        self.bind_prop(
+            move || match (anchor.node(), edges.node()) {
+                (Some(node), Some(edges)) => OverlayAnchor::Beside { node, edges },
+                (Some(id), None) => OverlayAnchor::Node(id),
+                _ => OverlayAnchor::None,
+            },
+            |a| Prop::Overlay(OverlayProp::Anchor(a)),
+        )
+    }
+
     /// Places it against what the element carrying `anchor` draws: the box
     /// around its children, so a trigger in a wrapper its parent stretches
     /// is placed against what shows ([`OverlayAnchor::Content`]).

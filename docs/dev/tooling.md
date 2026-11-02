@@ -525,7 +525,9 @@ The host's side is `nsh_testing::agent` (feature `agent`: no QuickJS, no network
 `Model` keeps the headless driver's `Screen`, fed every batch the surface applied and every error the app reported,
 so selectors resolve the same everywhere; the `Agent` takes each step on a thread of its own: it resolves the
 selector on the model, scrolls the view into view when it is not (the innermost scroll view around it that hides it,
-a gesture at a time; between gestures it waits only for the view to stop moving, `Agent::stopped`, and once it is in
+a gesture at a time; on a touch screen the finger lands clear of the views inside that take a drag themselves,
+`Scene::drag_takers`: responders and pans, whose app would answer, a moment later, whether the scroll view keeps
+the gesture; between gestures it waits only for the view to stop moving, `Agent::stopped`, and once it is in
 view for the app to settle, so a page that is never quiet, a ticking timer, costs one settling per step rather than
 one per gesture), asks the platform where it is (`Native::bounds`; a span of a text (`Scene::span`) is pressed on its
 characters' first line, `Native::text_bounds`, the rectangles each platform highlights a selection with, and the
