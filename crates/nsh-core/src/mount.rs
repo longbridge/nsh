@@ -868,8 +868,10 @@ pub enum MountItem {
     /// (`transitionShader`; `None`: its `animation`): when it is pushed,
     /// popped, presented or dismissed, the platform draws the change through
     /// the layer for `duration`, the lower side's picture as `sample_from`
-    /// and the upper's as `sample_to`, and its own animation where it
-    /// cannot.
+    /// and the upper's as `sample_to`, whatever the page's `animation`; its
+    /// `animation` runs where it cannot and when the user asks for less
+    /// motion, and a change that starts while one runs ends that one first
+    /// (`docs/dev/shaders.md` "Pages and dialogs").
     NavShader {
         /// The page or dialog.
         id: NodeId,
