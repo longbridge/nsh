@@ -602,9 +602,10 @@ put it. Canvas text has no numeric variants (its `font` takes only `small-caps`;
 so text with one (`tabular-nums`, ...) is measured by `measure_numeric_text` instead: a hidden span with the run's
 `font` and `font-variant-numeric`, as the run is drawn. Measuring there lays the page out, so a figure (digits and the
 signs numbers are written with: `css::measured_by_char`) is the sum of its characters' widths plus each adjacent pair's
-kerning (the pair's width less its characters'), each character and pair measured once and cached, and a live value
-that changes every frame lays nothing out once its pairs have been seen (a font's figures have a few hundred at most);
-text with letters is measured whole (`web/text-browser.test.mjs` checks both against what Chrome draws). The CSS of runs (`src/text/css.rs`: the `font` shorthand,
+kerning (the pair's width less its characters': `css::figure_width`), each character and pair measured once and cached,
+and a live value that changes every frame lays nothing out once its pairs have been seen (a font's figures have a few
+hundred at most); text with letters is measured whole. `web/text-browser.test.mjs` checks both against what Chrome
+draws, `tests/text` that a figure's width adds its pairs' kerning and that no figure is measured whole. The CSS of runs (`src/text/css.rs`: the `font` shorthand,
 generic families such as `monospace` left unquoted,
 names the app quoted kept only when their quotes close them) and line breaking (`src/text/wrap.rs`: break opportunities, the
 line start and end rules of CJK punctuation, the filling of lines) depend on nothing of the browser and are tested on

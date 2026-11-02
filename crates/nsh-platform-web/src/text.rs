@@ -23,7 +23,10 @@ use nsh_core::{
 use rustc_hash::FxHashMap;
 
 pub(crate) use self::css::{css_font, font_variant_numeric};
-use self::{css::measured_by_char, hit::Stop};
+use self::{
+    css::{figure_width, measured_by_char},
+    hit::Stop,
+};
 use crate::ffi;
 
 mod css;
@@ -73,26 +76,11 @@ impl WebTextEngine {
         if text.is_empty() {
             return 0.0;
         }
-        // A figure is the sum of its characters and the kerning of each
-        // adjacent pair, each measured once: a live value lays the page out
-        // for no new one, and its strings, new on every update, stay out of
-        // the cache. Fonts without `tnum` still kern digits (Arial and
-        // Liberation Sans: `11`).
+        // A figure is measured by its characters and pairs, each once: a
+        // live value lays the page out for no new one, and its strings, new
+        // on every update, stay out of the cache.
         if numeric.is_some() && text.chars().nth(1).is_some() && measured_by_char(text) {
-            let mut sum = 0.0;
-            let mut prev: Option<(usize, f32)> = None;
-            for (i, c) in text.char_indices() {
-                let end = i + c.len_utf8();
-                let w = self.measured(font, numeric, &text[i..end]);
-                sum += match prev {
-                    Some((start, before)) => {
-                        self.measured(font, numeric, &text[start..end]) - before
-                    }
-                    None => w,
-                };
-                prev = Some((i, w));
-            }
-            return sum;
+            return figure_width(text, |part| self.measured(font, numeric, part));
         }
         self.measured(font, numeric, text)
     }

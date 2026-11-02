@@ -49,7 +49,7 @@ test('tabular digits are measured as wide as the DOM draws them', { skip: !chrom
           if (Math.abs(measured - drawn(text)) > 0.01) throw Error(text + ': measured ' + measured + ', drawn ' + drawn(text));
         }
         // Figures are measured character by character (the engine's
-        // \`measured_by_char\` and \`WebTextEngine::width\`): the characters'
+        // \`measured_by_char\` and \`figure_width\`): the characters'
         // sum with each adjacent pair's kerning is what the run draws. Arial
         // (Liberation Sans on Linux) has no \`tnum\` and kerns \`11\`.
         for (const family of [font, '400 20px Arial']) {

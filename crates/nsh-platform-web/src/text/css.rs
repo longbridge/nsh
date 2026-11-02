@@ -84,6 +84,26 @@ pub(crate) fn measured_by_char(text: &str) -> bool {
         })
 }
 
+/// The width of a figure (`measured_by_char`) from `measure`, which is
+/// only asked for its characters and adjacent pairs: each character's
+/// width plus the kerning of each pair (the pair whole, less its two
+/// characters). Fonts without `tnum` still kern digits (Arial and
+/// Liberation Sans: `11`).
+pub(crate) fn figure_width(text: &str, mut measure: impl FnMut(&str) -> f32) -> f32 {
+    let mut sum = 0.0;
+    let mut prev: Option<(usize, f32)> = None;
+    for (i, c) in text.char_indices() {
+        let end = i + c.len_utf8();
+        let w = measure(&text[i..end]);
+        sum += match prev {
+            Some((start, before)) => measure(&text[start..end]) - before,
+            None => w,
+        };
+        prev = Some((i, w));
+    }
+    sum
+}
+
 /// A `fontFamily` value as a CSS family list: one family or a
 /// comma-separated stack. Generic families and the system font keywords
 /// stay bare (quoted, `"monospace"` names a font called monospace, which
