@@ -94,7 +94,7 @@ macro_rules! decl {
 
 pub use nsh_macros::{
     Event, JsObject, PropEnum, Props, asset, assets, class, component, methods, module,
-    native_module,
+    native_components, native_module,
 };
 
 // The core's parts of `nsh_base`'s navigation and dialogs.
@@ -185,7 +185,7 @@ pub(crate) use self::{
     back::BackListener,
     builder::{ElKind, PlaceFn},
     component::{AnyInstance, caught},
-    task::{Action, AnswerSlot, ClipboardRead, Executor, FileAnswer},
+    task::{Action, AfterAnswer, AnswerSlot, ClipboardRead, Executor, FileAnswer, SpeechAction},
 };
 /// The geometry Rust components style with (`crate::geometry`).
 pub use crate::geometry::{
@@ -213,7 +213,7 @@ pub use crate::{
         transparent_black, transparent_white, white, yellow,
     },
     overlay::{Align, Placement},
-    platform::{Appearance, HttpBody, HttpHead, HttpRequest, Idiom, Locale, Os},
+    platform::{Appearance, HttpBody, HttpHead, HttpRequest, Idiom, Lifecycle, Locale, Os},
     style::Color,
 };
 
@@ -290,6 +290,28 @@ pub mod __private {
     /// Stands in for `crate::__nsh_native_module` when `#[native_module]`
     /// is not at the crate's root (as [`no_native_module`]).
     pub fn native_module_not_at_root<R: NotAtRoot>() -> R {
+        unreachable!("never compiles")
+    }
+
+    /// Stands in for the entry `#[native_components(…)]` makes for a
+    /// platform (`app::__nsh_native_components_windows`) when the app's
+    /// crate has none: a glob import of the crate in a block shadows it.
+    /// Most crates have no native components, so it registers nothing.
+    pub fn no_native_components<C>(_components: C) {}
+
+    /// Implemented by nothing: `#[native_components]` in a module other
+    /// than the crate's root fails with this message.
+    #[diagnostic::on_unimplemented(
+        message = "`#[native_components]` goes at the root of the crate (lib.rs)",
+        label = "nsh's generated hosts call the entry it makes there",
+        note = "move the function with `#[native_components(…)]` to the crate's lib.rs"
+    )]
+    pub trait NativeComponentsNotAtRoot {}
+
+    /// Stands in for `crate::__nsh_native_components_<platform>` when
+    /// `#[native_components]` is not at the crate's root (as
+    /// [`native_module_not_at_root`]).
+    pub fn native_components_not_at_root<C, R: NativeComponentsNotAtRoot>(_components: C) -> R {
         unreachable!("never compiles")
     }
 }

@@ -191,6 +191,9 @@ Effects, transitions and page shaders sit on the same program, layer and rendere
 - **Pages and dialogs.** `transitionShader` (`NavShaderSpec`) compiles into a `Transition` layer sent as
   `MountItem::NavShader { id, shader }` (350 ms by default); the platform draws a push, pop, presentation or dismissal
   through it, the lower side `from` and the upper `to`.
+  In Rust, `screen()` / `modal()` take `.transition_shader(TransitionShader::new(shader).uniform(..).duration(..))`
+  (`nsh_core::shader::TransitionShader`, a compiled `Shader`), which sets the same prop. Sources compile once in
+  `Core::compile`, the cache `Shader`'s `source` uses too ("Pages and dialogs" below says what the platforms do).
 - **Android** (API 29 and later; Android 9 shows the children as they are). `Pictures.java` records the children
   into a `RenderNode`, renders it with a `HardwareRenderer` into an `ImageReader` and hands the rows to
   `Native.shaderInput`; `libnsh` drops a picture equal to the input's last one. `Box.java` takes the role, overflow
@@ -206,6 +209,33 @@ Effects, transitions and page shaders sit on the same program, layer and rendere
   off, it gives the surface back and redraws it, unless another screen layer took its place. Without a GPU device
   `Native.shaderTransition` starts no run (the children show as they are) and `Native.navTransition` declines, so a
   page moves with its own animation (`StackBox`) and a dialog with its `animation` (`ModalHost`).
+
+## Pages and dialogs
+
+What every platform does with a page's or a dialog's `MountItem::NavShader`, so an app sees the same thing
+everywhere:
+
+- **The sides.** The lower side, `sample_from`, is the page under the one that comes or goes (the surface without the
+  dialog); the upper, `sample_to`, the page that comes or goes (the surface with the dialog). `nsh.progress` runs from 0
+  to 1 as the page is pushed or the dialog presented, and from 1 to 0 as it is popped or dismissed
+  (`ShaderView::start_transition_backwards`): one program draws both ways. Under the frames the views are where the
+  change ends; the frames show over them until the last one.
+- **It replaces `animation`.** A page or dialog with a shader comes and goes through it whatever its `animation`
+  says, `"none"` included. `animation` is what runs where the shader does not: without a GPU device, with a source
+  that did not compile (the core sends `shader: None`), or where the platform cannot take the pictures or put the
+  frames over the change. Such a change takes the page's or the dialog's own motion, at once for `"none"`, never
+  another motion for the shader's duration.
+- **Less motion.** When the user asks for less motion (`Environment::reduce_motion`), the shader does not run: the
+  change takes the page's or the dialog's own `animation` as reduced motion makes it
+  (`nsh_core::navigation::screen_motion` and `modal_motion` with `reduce_motion`: a slide becomes a 200 ms fade,
+  `"none"` stays at once).
+- **Interruptions.** A push, pop, presentation or dismissal that starts while a shader's change of the same stack (a
+  page's) or of the surface (a dialog's) still runs ends that one first, at once: its views settle where it ends, its
+  events go out (`onShow`, `onDismiss`; a page that left is removed), its frames go. The new change starts from there,
+  so its pictures never hold the frames of the one before. The desktops' own motion does the same (`finish` before
+  `reconcile`).
+- **No fallback prop.** `ShaderTransition`'s `fallback` says what runs without a `source`; a `transitionShader`
+  always has one, and where it cannot run the page's `animation` is that fallback.
 
 ## Pitfalls
 

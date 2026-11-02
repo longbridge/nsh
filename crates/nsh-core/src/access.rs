@@ -39,8 +39,8 @@
 //! name), or prefixes of them ending in `*` (`true`: all of them); the
 //! host's events need no grant, the host sends them. An app without
 //! `"capabilities"` (a standalone app, its developer's own) retains
-//! unrestricted HTTP, web views, the status bar, the clipboard, the picker
-//! and opening URLs; raw sockets, processes, the filesystem and the host's
+//! unrestricted HTTP, web views, the status bar, the clipboard, the picker,
+//! speech recognition and opening URLs; raw sockets, processes, the filesystem and the host's
 //! functions always require an explicit declaration.
 
 //! A `network.http` rule names a `host` (a pattern, as in `hosts`); every
@@ -361,6 +361,10 @@ pub struct Capabilities {
     /// The app may show the system's picker (`nsh/picker`): the files the
     /// user picks in it reach the app.
     pub picker: bool,
+    /// The app may recognize the user's speech (`Speech` of `nsh`): the
+    /// microphone listens while a session runs, and the transcript reaches
+    /// the app.
+    pub speech: bool,
     /// The functions of the embedding app `nsh/host` may call: names, or
     /// prefixes ending in `*` (`"*"`: all); empty: none, also for apps
     /// without a declaration ([`Capabilities::all`]).
@@ -460,6 +464,7 @@ impl Capabilities {
             status_bar: true,
             clipboard: true,
             picker: true,
+            speech: true,
             open_url: Some(OpenUrlGrant::default()),
             // The host's functions are never granted without a declaration.
             ..Self::default()
@@ -487,12 +492,13 @@ impl Capabilities {
     /// `dropped`: lenient, recording what unknown keys dropped; `None`:
     /// strict.
     fn parse(value: &Value, mut dropped: Option<&mut Vec<String>>) -> Result<Self, String> {
-        const KNOWN: [&str; 9] = [
+        const KNOWN: [&str; 10] = [
             "network",
             "webview",
             "statusBar",
             "clipboard",
             "picker",
+            "speech",
             "openUrl",
             "process",
             "fs",
@@ -598,6 +604,11 @@ impl Capabilities {
             caps.picker = picker
                 .as_bool()
                 .ok_or("capabilities.picker must be a boolean")?;
+        }
+        if let Some(speech) = obj.get("speech") {
+            caps.speech = speech
+                .as_bool()
+                .ok_or("capabilities.speech must be a boolean")?;
         }
         if let Some(open_url) = obj.get("openUrl") {
             match open_url {
@@ -774,6 +785,9 @@ impl Capabilities {
         obj.insert("clipboard".into(), self.clipboard.into());
         obj.insert("picker".into(), self.picker.into());
         // Only when granted: older runtimes read what newer signers write.
+        if self.speech {
+            obj.insert("speech".into(), true.into());
+        }
         if !self.host.is_empty() {
             obj.insert("host".into(), self.host.clone().into());
         }
@@ -1307,6 +1321,11 @@ impl Access {
         self.each(|c| c.picker)
     }
 
+    /// Whether the app may recognize the user's speech (`Speech` of `nsh`).
+    pub fn allows_speech(&self) -> bool {
+        self.each(|c| c.speech)
+    }
+
     /// Whether `nsh/host` may call the embedding app's function `name`.
     pub fn allows_host(&self, name: &str) -> bool {
         self.each(|c| c.allows_host(name))
@@ -1821,6 +1840,7 @@ mod tests {
         assert!(!access.allows_status_bar());
         assert!(!access.allows_clipboard());
         assert!(!access.allows_picker());
+        assert!(!access.allows_speech());
         assert!(!access.allows_host("getUserInfo"));
         assert!(Access::all().is_unrestricted());
     }
@@ -1909,7 +1929,7 @@ mod tests {
     fn the_embedder_grants_at_most() {
         let a = Access {
             declared: caps(
-                r#"{ "network": { "hosts": ["a.com", "b.com"] }, "statusBar": true, "clipboard": true, "picker": true }"#,
+                r#"{ "network": { "hosts": ["a.com", "b.com"] }, "statusBar": true, "clipboard": true, "picker": true, "speech": true }"#,
             ),
             granted: Some(caps(
                 r#"{ "network": { "hosts": ["b.com"] }, "clipboard": true }"#,
@@ -1918,6 +1938,7 @@ mod tests {
         assert!(a.allows_clipboard());
         assert!(!a.allows_http("GET", "https://a.com/"));
         assert!(!a.allows_picker());
+        assert!(!a.allows_speech());
         assert!(a.allows_http("GET", "https://b.com/"));
         assert!(!a.allows_status_bar());
     }
