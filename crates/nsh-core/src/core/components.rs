@@ -1016,6 +1016,33 @@ impl<M: TextEngine> Core<M> {
         }
     }
 
+    /// Runs the closures that waited for the app's answer to the events
+    /// handed to JS before this commit ([`crate::element::after_answer`]),
+    /// each under its owner; one whose owner went is dropped unrun.
+    pub(super) fn run_answers(&mut self) {
+        let _entered = self.components.runtime.enter();
+        for answer in self.components.executor.take_due_answers() {
+            let crate::element::AfterAnswer { owner, f } = answer;
+            let result = if owner == crate::element::Owner::detached() {
+                caught(f)
+            } else if owner.is_live() {
+                caught(|| owner.scope(f))
+            } else {
+                drop_caught(f);
+                continue;
+            };
+            if let Err(message) = result {
+                match self.host_of_owner(owner) {
+                    Some(host) => self.component_failed(host, message),
+                    None => {
+                        log::error!(target: "js", "a closure after the app's answer failed: {message}")
+                    }
+                }
+            }
+            self.apply_actions();
+        }
+    }
+
     /// Whether `id` is a component's host.
     pub(super) fn is_host(&self, id: NodeId) -> bool {
         self.components.instances.contains_key(&id)

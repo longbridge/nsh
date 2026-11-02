@@ -217,7 +217,7 @@ mount(App);
 | Shift+Page Up / Shift+Page Down | 一年前或一年后的同一天。 |
 | Return、Space | 选中这一天。 |
 
-移出显示的月份时会翻月。"上一个"、切换按钮、"下一个"、月份和年份接受按压。`gpui-base` 的日期只接受按压；这些按键是 NSH 的，参照 WAI-ARIA 的日期选择对话框。
+在从右到左的布局里，每周从右边开始，Left 是后一天，Right 是前一天；Up 和 Down 仍按周移动。移出显示的月份时会翻月。"上一个"、切换按钮、"下一个"、月份和年份接受按压。`gpui-base` 的日期只接受按压；这些按键是 NSH 的，参照 WAI-ARIA 的日期选择对话框。
 
 <a id="accessibility"></a>
 

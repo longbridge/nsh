@@ -320,7 +320,7 @@ reasons: `reactive-components.md`.
   | async work | `spawn(async move { timer(d).await; value.set(..) })` on the engine thread, tokio inside; `background(fut)` / `blocking(f)` for `Send` work on the runtime's threads (not in WebAssembly) |
   | `fetch(url)` | `fetch(url).await` / `fetch(HttpRequest::post(url, body).header(..)).await` in a task: an `HttpResponse` (`status()`, `ok()`, `header(..)`, `text()`, `body`) or the error; the engine's network stack and capability checks, as JS's, so it works on the web too; the request is cancelled with its task |
   | `cleanup` | `cleanup(f)` (runs before the owner runs again or goes) |
-  | `windowSize()`, `safeArea()`, `keyboardFrame()`, `colorScheme()`, ... | `window()`, `safe_area()`, `keyboard_height()`, `dark()`, `font_scale()`, `reduce_motion()`, `screen_reader()`, `rtl()`: reading subscribes |
+  | `windowSize()`, `safeArea()`, `keyboardFrame()`, `colorScheme()`, ... | `window()`, `safe_area()`, `keyboard_height()`, `dark()`, `font_scale()`, `reduce_motion()`, `screen_reader()`: reading subscribes (`layout_rtl()`, the surface's direction, is a hidden accessor for `nsh-base`'s controls only, which trade Left and Right by it: Rust's `rtl()` is dropped, apps set a view's `direction`) |
   | `Window.setTitleBar({ style, height })`, `titleBar()`, `Window.close()`, `Window.setTitle(..)`, `minimize()`, ... (`nsh/desktop`) | `element::desktop::set_title_bar(style, height)`, `title_bar()`, `close_window()`, `set_title(..)`, `minimize()`, `toggle_maximize()`, `toggle_full_screen()`, `set_frame(..)`, `set_level(..)`, `order_front()`, `set_menu_bar_visibility(..)`; the same root commands and native controls, with title-bar insets forwarded through `element::Environment`; `.window_drag(bool)` on any interactive element marks or excludes a native drag region |
   | `Menu.setApplicationMenu(items)`, `Menu.popup(items, at)` (`nsh/desktop`) | `element::desktop::set_application_menu(vec![MenuItem::submenu(..)])` (`None`: the default menu), `popup_menu(items)` / `popup_menu_at(items, at)` (an `Answer<()>` once it closes); `MenuItem::new(label).shortcut("mod+n").on_select(f)`, `::role(..)`, `::separator()`, `::submenu(..)`. The same `DesktopCommand`s as JS's; a view's item ids start at 2^31, above JS's, and the core runs a view's handler (under the owner that set the menu, while it lives) when the root's `Menu` event reports it; a context menu closing goes to both sides (`element/menus.rs`) |
   | `pixelRatio()`, `Math.round(x * pixelRatio()) / pixelRatio()`, `platform.os` / `version` / `idiom` / `desktop` / `catalyst` | `pixel_ratio()`, `round_to_nearest_pixel(v)`, `os()`, `os_version()`, `idiom()`, `is_desktop()`, `is_catalyst()` |
@@ -905,6 +905,20 @@ what changed.
   data converted by the `Event` derive's `data_js` when JS hears it; the JS face calls the app's
   `on<Name>(data)`), or, for a nested component, to the
   `on_event` listener of the view that made it, typed, whose own emits are routed in turn until none are left.
+- `after_answer(f)` (`element/ambient.rs`) runs `f` once the app has handled every event emitted so far and the
+  props it set in answer have reached the components: what a view shows of its own until the app's value comes back
+  (a slider's drag value) is let go of there, with no frame of the app's earlier value between. A timer or
+  `next_frame` may fire before that: a component's event to JS is only queued (`Core::events`); the engine's next
+  commit round hands it to JS, applies the ops its handler queued and only then commits, which sets the new props.
+  The executor keeps the closures in two queues: `Core::take_events` (the engine handing the events out) makes the
+  waiting ones due, and the next `Core::commit` runs the due ones first, before its views render, each under the owner
+  current when it was registered (dropped unrun once that owner is disposed), so what they change shows in that
+  commit with the app's props. The engine's commit loop goes on for another round while some are due
+  (`Core::has_due_answers`), so they go out in the batch of the events they waited for. With a Rust owner, whose
+  listener ran when the event was emitted, `f` runs in the commit after the one that rendered what the listener
+  changed. The web's browser engine delivers the events the same way (its JS runs in the engine's call, its ops are
+  taken after it), so it needs nothing of its own. Unused, it costs nothing: the queues stay unallocated and nothing
+  is due, so the engine commits no extra round (`events_nothing_waits_for_cost_no_round`).
 - The back button: `on_back_press` listeners of views run newest first, after modals' and before stacks', then JS's
   (`element/back.rs`).
 - Keys while the control has the keyboard focus: a signal of the focus (`on_focus` / `on_blur`), and

@@ -275,6 +275,54 @@ fn a_components_keyed_children_keep_their_rows() {
     assert!(!removed, "the moved row stays in its wrapper");
 }
 
+const ANSWERED_PICK: &str = r#"import { mount, signal } from "nsh";
+import { Pick } from "test/ui";
+
+function App() {
+  const value = signal(1);
+  return <Pick value={value()} onChange={({ value: next }) => value.set(next * 10)} />;
+}
+
+mount(App);
+"#;
+
+/// A Rust component's closure after the app's answer runs once the app's
+/// JS handler has set the prop it answers with: it sees that value, and
+/// what it changes goes out in the batch of the event's answer.
+#[test]
+fn a_component_hears_after_the_apps_answer_to_its_event() {
+    let (engine, rx) = start(ANSWERED_PICK);
+    let first = rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("first frame");
+    assert!(shows(&first, "pick 1"));
+    let pick = first
+        .items
+        .iter()
+        .find_map(|i| match i {
+            MountItem::Events { id, events } if events.contains(EventKind::Press) => Some(*id),
+            _ => None,
+        })
+        .expect("the pick");
+    // The press asks for 2; the app answers 20.
+    engine
+        .control()
+        .dispatch_event(pick, EventKind::Press, EventPayload::None);
+    let after = until(&rx, |b| shows(b, "answered 20"));
+    let answered = after.last().expect("a batch");
+    assert!(
+        shows(answered, "answered 20"),
+        "the closure saw the app's value"
+    );
+    assert!(shows(answered, "pick 20"), "in the batch of the answer");
+    assert!(
+        !after
+            .iter()
+            .any(|b| shows(b, "answered 1") || shows(b, "pick 1")),
+        "nothing ran before the app answered"
+    );
+}
+
 const LAZY_SHEET: &str = r#"import { mount, signal, untracked, Text } from "nsh";
 import { Sheet } from "test/ui";
 
