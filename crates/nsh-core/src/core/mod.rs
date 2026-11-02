@@ -1081,6 +1081,21 @@ pub struct Core<M: TextEngine> {
     /// Nodes whose classes say `pointer-events-none`: without any, moving
     /// nodes skips what CSS's inherited `pointer-events` needs.
     pointer_none_classes: u32,
+    /// The view with the keyboard focus, by key and id (keys are reused),
+    /// as the platform reports it (`classes::focus_reported`).
+    focus: Option<(Key, NodeId)>,
+    /// The focus and the views around it, innermost first: the views in
+    /// `focus-within` (`classes::update_focus_within`).
+    focus_chain: Vec<(Key, NodeId)>,
+    /// The chain before, reused.
+    focus_scratch: Vec<(Key, NodeId)>,
+    /// The focus was reported or a view of its chain moved since the
+    /// chain was last worked out: the next commit round does it once,
+    /// whatever order the reports came in.
+    focus_moved: bool,
+    /// The chain changed since the focus watches last looked
+    /// (`ElementRef::on_focus_in`).
+    focus_within_changed: bool,
     /// Nodes whose `position: fixed` changed: made overlays (or views again)
     /// as the commit starts ([`Core::sync_fixed`]).
     fixed_changed: Vec<(Key, NodeId)>,
@@ -1221,6 +1236,11 @@ impl<M: TextEngine> Core<M> {
             status_bar_nodes: Vec::new(),
             status_bars_moved: false,
             pointer_none_classes: 0,
+            focus: None,
+            focus_chain: Vec::new(),
+            focus_scratch: Vec::new(),
+            focus_moved: false,
+            focus_within_changed: false,
             fixed_changed: Vec::new(),
             zero_advances: Default::default(),
             ch_styled: Vec::new(),
@@ -2030,6 +2050,12 @@ impl<M: TextEngine> Core<M> {
         }
         // The views' patches and the views to make first.
         self.render_components();
+        // The focus reported since, after the components made and released
+        // what they did: one change of the chain, the views both chains
+        // share untouched.
+        if self.focus_moved {
+            self.update_focus_within();
+        }
         self.sync_colors();
         self.sync_ch();
         self.sync_fixed();
@@ -3844,6 +3870,10 @@ impl<M: TextEngine> Core<M> {
                 self.set_part_style(key, classes::Part::Expanded, patch);
                 return Ok(());
             }
+            Prop::FocusWithinStyle(patch) => {
+                self.set_part_style(key, classes::Part::FocusWithin, patch);
+                return Ok(());
+            }
             Prop::ProjectedStates(states) => {
                 self.set_projected_states(key, states);
                 return Ok(());
@@ -4333,6 +4363,10 @@ impl<M: TextEngine> Core<M> {
         self.set_inline(child, inline);
         self.nodes[child as usize].parent = parent;
         self.nodes[parent as usize].children.insert(pos, child);
+        if self.nodes[child as usize].states & crate::tailwind::state::FOCUS_WITHIN != 0 {
+            // The focus moved with it: the views around it now.
+            self.focus_moved = true;
+        }
         self.ch_changed(child);
         self.status_bars_moved |= !self.status_bar_nodes.is_empty();
         self.outer_moved |= !self.parent_lists.is_empty() && self.may_hold_page_list(child);
@@ -4455,6 +4489,10 @@ impl<M: TextEngine> Core<M> {
             self.positions_changed(parent);
         }
         self.nodes[key as usize].parent = NO_KEY;
+        if self.nodes[key as usize].states & crate::tailwind::state::FOCUS_WITHIN != 0 {
+            // The focus left the views around it with it.
+            self.focus_moved = true;
+        }
         if self.nodes[parent as usize].child_perspective.is_some() {
             // Without the perspective wherever it goes next.
             self.mark(key, dirty::VIEW | dirty::ANIMATION);
@@ -4641,6 +4679,11 @@ impl<M: TextEngine> Core<M> {
             if let Some(child) = self.nodes.get_mut(c as usize) {
                 child.parent = NO_KEY;
             }
+        }
+        if node.states & crate::tailwind::state::FOCUS_WITHIN != 0 {
+            // The focus went with it, or is inside a child no longer in
+            // it.
+            self.focus_moved = true;
         }
         if let Some(layout) = node.layout {
             self.layout.remove(layout);

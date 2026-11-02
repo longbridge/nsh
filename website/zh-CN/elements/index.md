@@ -174,6 +174,7 @@ TSX 从 `nsh/base` 导入，Rust 从 `nsh_base` crate 导入。它们负责行�
 | `activeStyle` | `.active(\|s\| ..)` | `active:` | 被按下时。 |
 | `hoverStyle` | `.hover(\|s\| ..)` | `hover:` | 指针悬停在视图上时。 |
 | `focusStyle` | `.focus(\|s\| ..)` | `focus:` | 视图获得焦点时。 |
+| `focusWithinStyle` | `.focus_within(\|s\| ..)` | `focus-within:` | 视图自身或其内部的视图获得焦点时（`Overlay` 的内容算在它所在的视图内部）。 |
 | `disabledStyle` | `.disabled_style(\|s\| ..)` | `disabled:` | `disabled` 时。 |
 | `checkedStyle` | `.checked(\|s\| ..)`、`.checked_style(style)` | `checked:` | `accessibilityState.checked` 为 `true` 时（复选框、开关、单选框；`"mixed"` 不算勾选）。 |
 | `indeterminateStyle` | `.indeterminate(\|s\| ..)`、`.indeterminate_style(style)` | `indeterminate:` | `accessibilityState.checked` 为 `"mixed"` 时（既非勾选也非未勾选的复选框）。 |
@@ -314,6 +315,8 @@ import { Menu } from "nsh/desktop";
 焦点和按压相互独立。在获得焦点时接收按键的视图（图表、滑块、用方向键移动选中项的列表）设置 `focusable`，并在获得焦点期间绑定自己的按键（`onFocus` / `onBlur` 配合 [`keymap`](../modules/nsh.md#keymap)）；点击它时，按压照样交给外层可按压的视图，比如一张点开详情页的卡片。
 
 ref 的 `focus()` 像 Tab 一样把键盘焦点移到停靠点上（显示它的焦点样式并触发 `onFocus`），比如在弹层关闭后把焦点还给它的触发器；`blur()` 让焦点离开它。
+
+焦点在某个视图自身或其内部任意视图上时，这个视图可以用 `focus-within:`（`focusWithinStyle`、`.focus_within(..)`）设置样式：比如包住正在编辑的输入框的外框，或其中某个按钮持有焦点时的工具栏。`Overlay` 的内容无论显示在哪里，都算在 overlay 所在的视图内部，所以弹出层属于包含其触发元素的视图。在 Rust 中，组件用 ref 的 `on_focus_in(..)` 和 `on_focus_out(..)` 得知焦点进入、离开一个元素；焦点在元素内部的视图之间移动不算进入或离开。
 
 | 属性 | Rust | 类型 | 默认值 | 说明 |
 |---|---|---|---|---|

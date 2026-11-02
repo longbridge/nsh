@@ -652,6 +652,27 @@ style id:busy backgroundColor #ff0000ff
 style id:checked backgroundColor #00ff00ff
 style id:selected backgroundColor #0000ffff
 covers [props] pressedStyle
+# state-focus-within
+tap id:case-state-focus-within
+# No focus: the frame's own style.
+style id:frame backgroundColor #ccccccff
+style id:frame opacity 0.5
+# The input inside it has the focus: `focus-within:` and
+# `focusWithinStyle` on the frame.
+state id:field focused
+style id:frame backgroundColor #3366ffff
+style id:frame opacity 1
+state id:field none
+style id:frame backgroundColor #ccccccff
+style id:frame opacity 0.5
+# An overlay's content is inside the view the overlay is in.
+style id:holder backgroundColor #ccccccff
+state id:popup-field focused
+style id:holder backgroundColor #00ff00ff
+style id:frame backgroundColor #ccccccff
+state id:popup-field none
+style id:holder backgroundColor #ccccccff
+covers [props] focusWithinStyle
 # paint-inline-align
 tap id:case-paint-inline-align
 # The headless engine's 16.8 pt line has its baseline at the bottom and a

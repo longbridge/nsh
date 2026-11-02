@@ -1536,9 +1536,11 @@ impl Headless {
         }
         if self.screen.focused() != Some(id) {
             if let Some(old) = self.screen.focused() {
+                self.set_focused_state(old, false);
                 self.send(old, EventKind::Blur, EventPayload::None);
             }
             self.screen.set_focused(Some(id));
+            self.set_focused_state(id, true);
             self.send(id, EventKind::Focus, EventPayload::None);
         }
         Ok(id)
@@ -1660,6 +1662,7 @@ impl Headless {
         self.send(id, EventKind::SubmitEditing, payload);
         if behavior == SubmitBehavior::BlurAndSubmit {
             self.screen.set_focused(None);
+            self.set_focused_state(id, false);
             self.send(id, EventKind::Blur, EventPayload::None);
         }
     }

@@ -5910,6 +5910,353 @@ fn a_projected_focus_styles_a_part_as_focused() {
     assert_eq!(view_style_of(&batch, 2).unwrap().opacity, 0.5);
 }
 
+/// A view and the views inside it, `id`'s first: (id, parent, classes).
+fn views(c: &mut Core<FakeEngine>, views: &[(NodeId, NodeId, &str)]) {
+    let mut ops = Vec::new();
+    for &(id, parent, classes) in views {
+        ops.push(Op::Create { id, tag: Tag::View });
+        if !classes.is_empty() {
+            ops.push(class_op(id, classes));
+        }
+        ops.push(Op::Insert {
+            parent,
+            child: id,
+            before: None,
+        });
+    }
+    apply(c, ops);
+}
+
+#[test]
+fn focus_within_follows_a_focus_nothing_tracks() {
+    use crate::tailwind::state::FOCUSED;
+    // A field's frame (2) ringed while the input in it (6, in 4) edits:
+    // the input reads no state of its own.
+    let mut c = core();
+    views(
+        &mut c,
+        &[
+            (2, ROOT_ID, "opacity-50 focus-within:opacity-100"),
+            (4, 2, ""),
+            (6, 4, ""),
+        ],
+    );
+    let batch = c.commit().unwrap();
+    // `focus-within` is the core's: the platform tracks nothing for it.
+    assert!(
+        !batch
+            .items
+            .iter()
+            .any(|i| matches!(i, MountItem::TrackStates { .. })),
+        "{:?}",
+        batch.items
+    );
+    c.set_states(6, FOCUSED);
+    let batch = c.commit().unwrap();
+    assert_eq!(view_style_of(&batch, 2).unwrap().opacity, 1.0);
+    assert!(c.has_focus_within(4) && c.has_focus_within(6) && c.has_focus_within(ROOT_ID));
+    c.set_states(6, 0);
+    let batch = c.commit().unwrap();
+    assert_eq!(view_style_of(&batch, 2).unwrap().opacity, 0.5);
+    assert!(!c.has_focus_within(2) && !c.has_focus_within(ROOT_ID));
+}
+
+#[test]
+fn focus_within_follows_an_input_without_focus_classes() {
+    use crate::tailwind::state::FOCUSED;
+    // A field's frame around an input whose classes read no state: the
+    // platform reports the input's focus all the same.
+    let mut c = core();
+    views(
+        &mut c,
+        &[(2, ROOT_ID, "opacity-50 focus-within:opacity-100")],
+    );
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 4,
+                tag: Tag::Input,
+            },
+            class_op(4, "h-8 border"),
+            Op::Insert {
+                parent: 2,
+                child: 4,
+                before: None,
+            },
+        ],
+    );
+    let batch = c.commit().unwrap();
+    assert!(
+        !batch
+            .items
+            .iter()
+            .any(|i| matches!(i, MountItem::TrackStates { .. })),
+        "{:?}",
+        batch.items
+    );
+    c.set_states(4, FOCUSED);
+    let batch = c.commit().unwrap();
+    assert_eq!(view_style_of(&batch, 2).unwrap().opacity, 1.0);
+    // Only the frame changes: the input reads no state.
+    assert!(view_style_of(&batch, 4).is_none(), "{:?}", batch.items);
+    c.set_states(4, 0);
+    let batch = c.commit().unwrap();
+    assert_eq!(view_style_of(&batch, 2).unwrap().opacity, 0.5);
+}
+
+#[test]
+fn a_focus_nothing_reads_sends_nothing() {
+    use crate::tailwind::state::FOCUSED;
+    // Regression guard of reporting the focus untracked: views whose
+    // classes read no state (no `focus:`, no `focus-within:`) look and
+    // mount as before, whatever focus the platform reports.
+    let mut c = core();
+    views(
+        &mut c,
+        &[(2, ROOT_ID, "p-2 bg-white"), (4, 2, "h-8"), (6, 2, "")],
+    );
+    c.commit();
+    c.set_states(4, FOCUSED);
+    assert!(c.commit().is_none());
+    c.set_states(6, FOCUSED);
+    c.set_states(4, 0);
+    assert!(c.commit().is_none());
+    c.set_states(6, 0);
+    assert!(c.commit().is_none());
+}
+
+/// The items each step of Tab sends, through `n` focusable views in a
+/// frame that reads `focus-within:`: the focus coming in, then moving
+/// from view to view (the new one's focus reported first, then the old
+/// one's blur), then reported again where it is.
+fn tab_steps(n: usize) -> Vec<usize> {
+    use crate::tailwind::state::FOCUSED;
+    let mut c = core();
+    let ids: Vec<NodeId> = (0..n as NodeId).map(|i| 4 + 2 * i).collect();
+    let mut tree = vec![(2, ROOT_ID, "opacity-50 focus-within:opacity-100")];
+    tree.extend(ids.iter().map(|&id| (id, 2, "h-8")));
+    views(&mut c, &tree);
+    c.commit();
+    let mut steps = Vec::new();
+    let count = |c: &mut Core<FakeEngine>| c.commit().map_or(0, |b| b.items.len());
+    c.set_states(ids[0], FOCUSED);
+    steps.push(count(&mut c));
+    for pair in ids.windows(2) {
+        c.set_states(pair[1], FOCUSED);
+        c.set_states(pair[0], 0);
+        steps.push(count(&mut c));
+    }
+    c.set_states(ids[n - 1], FOCUSED);
+    steps.push(count(&mut c));
+    steps
+}
+
+#[test]
+fn tab_costs_the_same_whatever_number_of_views() {
+    let (ten, hundred) = (tab_steps(10), tab_steps(100));
+    // Coming in restyles the frame, and only it.
+    assert!(ten[0] > 0);
+    assert_eq!(hundred[0], ten[0]);
+    // Moving inside and the same focus again send nothing.
+    assert!(ten[1..].iter().all(|&n| n == 0), "{ten:?}");
+    assert!(hundred[1..].iter().all(|&n| n == 0), "{hundred:?}");
+}
+
+#[test]
+fn a_focus_moving_inside_keeps_focus_within_in_either_order() {
+    use crate::tailwind::state::FOCUSED;
+    let mut c = core();
+    views(
+        &mut c,
+        &[
+            (2, ROOT_ID, "opacity-50 focus-within:opacity-100"),
+            (4, 2, ""),
+            (6, 2, ""),
+            (8, ROOT_ID, ""),
+        ],
+    );
+    c.commit();
+    c.set_states(4, FOCUSED);
+    c.commit();
+    // Regression: the new view's focus reported before the old one's blur
+    // took `focus-within` off the views both share.
+    c.set_states(6, FOCUSED);
+    c.set_states(4, 0);
+    assert!(
+        c.commit().is_none(),
+        "the frame keeps its look, nothing sent"
+    );
+    assert!(c.has_focus_within(2) && c.has_focus_within(6) && !c.has_focus_within(4));
+    // The blur reported first: no flash of the frame either.
+    c.set_states(6, 0);
+    c.set_states(4, FOCUSED);
+    assert!(
+        c.commit().is_none(),
+        "the frame keeps its look, nothing sent"
+    );
+    assert!(c.has_focus_within(2) && c.has_focus_within(4) && !c.has_focus_within(6));
+    // Out, the blur reported first.
+    c.set_states(4, 0);
+    c.set_states(8, FOCUSED);
+    let batch = c.commit().unwrap();
+    assert_eq!(view_style_of(&batch, 2).unwrap().opacity, 0.5);
+    assert!(c.has_focus_within(8) && !c.has_focus_within(2));
+    // A blur of a view that no longer has the focus changes nothing.
+    c.set_states(4, FOCUSED);
+    c.set_states(8, 0);
+    c.set_states(8, FOCUSED);
+    c.set_states(4, 0);
+    c.commit();
+    assert!(c.has_focus_within(8) && !c.has_focus_within(2));
+    // The root taking it (no view has it) is no focus.
+    c.set_states(ROOT_ID, FOCUSED);
+    c.set_states(8, 0);
+    c.commit();
+    assert!(!c.has_focus_within(ROOT_ID));
+}
+
+#[test]
+fn an_overlays_content_is_within_the_view_it_is_in() {
+    use crate::tailwind::state::FOCUSED;
+    // Regression: a popup's trigger (4) and the popup (an overlay in the
+    // same view), whose native view is in the root view: the focus in the
+    // popup was not within the view holding the trigger.
+    let mut c = core();
+    views(
+        &mut c,
+        &[
+            (2, ROOT_ID, "opacity-50 focus-within:opacity-100"),
+            (4, 2, ""),
+        ],
+    );
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 6,
+                tag: Tag::Overlay,
+            },
+            Op::Insert {
+                parent: 2,
+                child: 6,
+                before: None,
+            },
+        ],
+    );
+    views(&mut c, &[(8, 6, "")]);
+    let batch = c.commit().unwrap();
+    assert!(
+        inserts(&batch).contains(&(ROOT_ID, 6, None)),
+        "shown in the root view"
+    );
+    c.set_states(8, FOCUSED);
+    let batch = c.commit().unwrap();
+    assert_eq!(view_style_of(&batch, 2).unwrap().opacity, 1.0);
+    // From the popup to the trigger: still within, nothing sent.
+    c.set_states(4, FOCUSED);
+    c.set_states(8, 0);
+    assert!(c.commit().is_none());
+    assert!(c.has_focus_within(2) && !c.has_focus_within(6));
+}
+
+#[test]
+fn focus_within_leaves_with_a_view_moved_or_released() {
+    use crate::tailwind::state::FOCUSED;
+    let mut c = core();
+    views(
+        &mut c,
+        &[
+            (2, ROOT_ID, "opacity-50 focus-within:opacity-100"),
+            (4, 2, ""),
+            (6, 4, ""),
+            (8, ROOT_ID, ""),
+        ],
+    );
+    c.commit();
+    c.set_states(6, FOCUSED);
+    c.commit();
+    // The focused view's parent moves out: the focus goes with it.
+    apply(
+        &mut c,
+        vec![Op::Insert {
+            parent: 8,
+            child: 4,
+            before: None,
+        }],
+    );
+    let batch = c.commit().unwrap();
+    assert_eq!(view_style_of(&batch, 2).unwrap().opacity, 0.5);
+    assert!(c.has_focus_within(8));
+    // And back.
+    apply(
+        &mut c,
+        vec![Op::Insert {
+            parent: 2,
+            child: 4,
+            before: None,
+        }],
+    );
+    let batch = c.commit().unwrap();
+    assert_eq!(view_style_of(&batch, 2).unwrap().opacity, 1.0);
+    assert!(!c.has_focus_within(8));
+    // Released around the focus (the children are released by ops of
+    // their own, later): nothing is within any more.
+    apply(&mut c, vec![Op::Release { id: 4 }]);
+    let batch = c.commit().unwrap();
+    assert_eq!(view_style_of(&batch, 2).unwrap().opacity, 0.5);
+    assert!(!c.has_focus_within(ROOT_ID));
+    apply(&mut c, vec![Op::Release { id: 6 }]);
+    c.commit();
+    assert!(c.focus.is_none() && c.focus_chain.is_empty());
+}
+
+#[test]
+fn a_focus_within_style_applies_while_the_focus_is_inside() {
+    use crate::tailwind::state::FOCUSED;
+    let mut c = core();
+    views(&mut c, &[(2, ROOT_ID, "opacity-50"), (4, 2, "")]);
+    apply(
+        &mut c,
+        vec![Op::SetProp {
+            id: 2,
+            prop: Prop::FocusWithinStyle(patch(&[("opacity", crate::StyleValue::Number(0.8))])),
+        }],
+    );
+    c.commit();
+    c.set_states(4, FOCUSED);
+    let batch = c.commit().unwrap();
+    assert_eq!(view_style_of(&batch, 2).unwrap().opacity, 0.8);
+    c.set_states(4, 0);
+    let batch = c.commit().unwrap();
+    assert_eq!(view_style_of(&batch, 2).unwrap().opacity, 0.5);
+}
+
+#[test]
+fn a_focus_reported_untracked_survives_a_tracking_change() {
+    use crate::tailwind::state::{FOCUSED, HOVERED};
+    // The platform reports the focus whatever is tracked, and keeps it
+    // when the tracking changes: so does the core.
+    let mut c = core();
+    views(
+        &mut c,
+        &[
+            (2, ROOT_ID, "opacity-50 focus-within:opacity-100"),
+            (4, 2, "bg-white"),
+        ],
+    );
+    c.commit();
+    c.set_states(4, FOCUSED);
+    c.commit();
+    apply(&mut c, vec![class_op(4, "bg-white hover:bg-zinc-200")]);
+    c.commit();
+    assert!(c.has_focus_within(2));
+    c.set_states(4, FOCUSED | HOVERED);
+    apply(&mut c, vec![class_op(4, "bg-white")]);
+    c.commit();
+    assert!(c.has_focus_within(2) && c.has_focus_within(4));
+}
+
 #[test]
 fn input_accessories_are_found_by_native_id() {
     let mut c = core();
@@ -14716,6 +15063,76 @@ mod views {
         assert!(c.component_event(second, EventKind::Focus, &EventPayload::None));
         let shown = texts(&c.commit().unwrap());
         assert!(shown.contains(&"focus 2 blur 1".into()), "{shown:?}");
+    }
+
+    /// Logs the focus coming into its area and leaving it, and dims the
+    /// area while the focus is in it: two focusable views and a popup
+    /// inside, one outside.
+    #[component]
+    fn FocusArea() -> impl IntoElement {
+        let log = signal(Vec::<&'static str>::new());
+        let area = element_ref();
+        area.on_focus_in(move || log.update(|l| l.push("in")));
+        area.on_focus_out(move || log.update(|l| l.push("out")));
+        view()
+            .child(text(move || format!("log {}", log.get().join(" "))))
+            .child(
+                view()
+                    .element_ref(&area)
+                    .focus_within(|s| s.opacity(0.5))
+                    .child(view().focusable(true).child(text("first")))
+                    .child(view().focusable(true).child(text("second")))
+                    .child(overlay().child(view().focusable(true).child(text("popup")))),
+            )
+            .child(view().focusable(true).child(text("away")))
+    }
+
+    /// GPUI's `on_focus_in` / `on_focus_out` of an element: the focus
+    /// coming in from outside and leaving to outside, not moving inside it
+    /// (into its popup too); `.focus_within(..)` styles it meanwhile.
+    #[test]
+    fn an_element_hears_the_focus_come_in_and_leave() {
+        use crate::tailwind::state::FOCUSED;
+        let mut c = core();
+        c.mount_root(&Root::new::<FocusArea>(|| ()));
+        let batch = c.commit().unwrap();
+        let first = native_parent(&c, text_node(&batch, "first")).unwrap();
+        let second = native_parent(&c, text_node(&batch, "second")).unwrap();
+        let popup = native_parent(&c, text_node(&batch, "popup")).unwrap();
+        let away = native_parent(&c, text_node(&batch, "away")).unwrap();
+        let area = native_parent(&c, first).unwrap();
+        c.set_states(first, FOCUSED);
+        let batch = c.commit().unwrap();
+        assert!(
+            texts(&batch).contains(&"log in".into()),
+            "{:?}",
+            texts(&batch)
+        );
+        assert_eq!(view_style_of(&batch, area).unwrap().opacity, 0.5);
+        c.set_states(second, FOCUSED);
+        c.set_states(first, 0);
+        c.set_states(popup, FOCUSED);
+        c.set_states(second, 0);
+        let batch = c.commit();
+        assert!(batch.is_none_or(|b| texts(&b).is_empty()), "no news inside");
+        c.set_states(away, FOCUSED);
+        c.set_states(popup, 0);
+        let batch = c.commit().unwrap();
+        assert!(
+            texts(&batch).contains(&"log in out".into()),
+            "{:?}",
+            texts(&batch)
+        );
+        assert_eq!(view_style_of(&batch, area).unwrap().opacity, 1.0);
+        // Back in: the area's own state again.
+        c.set_states(popup, FOCUSED);
+        c.set_states(away, 0);
+        let batch = c.commit().unwrap();
+        assert!(
+            texts(&batch).contains(&"log in out in".into()),
+            "{:?}",
+            texts(&batch)
+        );
     }
 
     #[derive(Clone, PartialEq, Props)]

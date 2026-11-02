@@ -182,9 +182,8 @@ States the parts show:
 
 The thumbs move as the value changes, and follow a drag at once. Motion of the thumbs' states is the app's choice
 (`transition` for a thumb that brightens on `hover:` and `active:`), and `motion-reduce:` keeps it still for
-people who ask for less motion. The keyboard focus is a thumb's, which it reports while it has a `focus:` class:
-`focus-within:` on the track then rings the whole rail, and the thumb's `focus:outline-none` takes the place of the
-platform's own focus outline.
+people who ask for less motion. The keyboard focus is a thumb's: `focus-within:` on the track rings the whole rail
+while a thumb has it, and the thumb's `focus:outline-none` takes the place of the platform's own focus outline.
 
 ## Keyboard
 
