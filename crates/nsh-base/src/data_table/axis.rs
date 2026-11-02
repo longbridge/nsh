@@ -13,8 +13,8 @@
 //! (a million rows of 28 points, nine times). Where the scroll bar is not
 //! dragged (touch), the offset is followed from an [`Anchor`] instead: the
 //! content moves as far as the scroll ([`Axis::content_offset_from`]), and
-//! once the scroll comes to rest the scroll view is moved, unseen, to where
-//! its bar stands for the content ([`Axis::anchor_at`]).
+//! at rest the scroll view is moved only when the anchor needs more room
+//! for the next gesture ([`Axis::needs_anchor`], [`Axis::anchor_at`]).
 
 use nsh_core::Points;
 
@@ -89,20 +89,48 @@ impl Axis {
         at.clamp(0.0, cmax)
     }
 
-    /// The anchor that shows content offset `content` with the scroll view
-    /// where its bar stands for it: [`Self::scroll_offset`] on a device
+    /// The touch anchor showing `content`, with half the native range on
+    /// either side where the content allows it. Near a content edge its
+    /// real distance is kept, so a small reverse drag cannot reach that
+    /// edge through a compressed scroll range. The offset is on a device
     /// pixel of `pixel_ratio`, where the platforms keep a scroll offset.
     pub(crate) fn anchor_at(&self, content: f64, pixel_ratio: f64) -> Anchor {
         let max = (self.total - self.viewport).max(0.0);
         let content = content.clamp(0.0, max);
+        let room = (self.extent() - self.viewport).max(0.0);
+        let origin = (content - room / 2.0).clamp(0.0, (max - room).max(0.0));
         let ratio = pixel_ratio.max(f64::MIN_POSITIVE);
-        let scroll = (self.scroll_offset(content) * ratio).round() / ratio;
+        let scroll = ((content - origin) * ratio).round() / ratio;
         // The `f32` the scroll view reports, so the anchor's offset is met
         // exactly when the scroll comes back to it.
         Anchor {
-            scroll: f64::from(scroll as f32),
+            scroll: f64::from((scroll as f32).clamp(0.0, room as f32)),
             content,
         }
+    }
+
+    /// Whether the followed offset has used enough of the one-to-one
+    /// range to need a new anchor. `follow` starts accelerating halfway
+    /// to a compressed edge; recenter at a quarter, leaving room for the
+    /// next gesture. A real content edge needs no recentering. Keeping
+    /// the anchor for short gestures also avoids a native scroll command
+    /// (and its device-pixel rounding) each time a finger comes to rest.
+    pub(crate) fn needs_anchor(&self, scroll: f64, anchor: Anchor) -> bool {
+        if !self.scaled() {
+            return false;
+        }
+        let smax = (self.extent() - self.viewport).max(0.0);
+        let cmax = (self.total - self.viewport).max(0.0);
+        let a_scroll = anchor.scroll.clamp(0.0, smax);
+        let a_content = anchor.content.clamp(0.0, cmax);
+        let (by, room, content) = if scroll >= a_scroll {
+            (scroll - a_scroll, smax - a_scroll, cmax - a_content)
+        } else {
+            (a_scroll - scroll, a_scroll, a_content)
+        };
+        // An anchor rounded to a native pixel can leave a subpoint
+        // difference at a real edge; that is not a compressed range.
+        content > room + 1.0 && by >= room / 4.0
     }
 
     /// The scroll offset to give a scroll view to show content offset
@@ -225,10 +253,13 @@ mod tests {
     }
 
     #[test]
-    fn an_anchor_stands_where_the_bar_does() {
+    fn an_anchor_preserves_content_on_a_device_pixel() {
         let axis = Axis::new(28_000_000.0, 600.0);
         let anchor = axis.anchor_at(14_000_000.0, 2.625);
-        assert!((anchor.scroll - axis.scroll_offset(14_000_000.0)).abs() < 1.0);
+        assert_eq!(
+            axis.content_offset_from(anchor.scroll, anchor),
+            14_000_000.0
+        );
         // On a device pixel, as near as an `f32` is (an eighth of a point
         // there): what the scroll view reports back moves the content less
         // than a pixel, a finger's scroll being followed one to one.
@@ -239,6 +270,70 @@ mod tests {
         let small = Axis::new(10_000.0, 500.0);
         let a = small.anchor_at(1234.0, 3.0);
         assert_eq!(small.content_offset_from(2000.0, a), 2000.0);
+    }
+
+    #[test]
+    fn resting_near_either_end_keeps_touch_motion_one_to_one() {
+        for total in [28_000_000.0, 240_000_000.0] {
+            for viewport in [400.0, 843.5] {
+                let axis = Axis::new(total, viewport);
+                let end = total - viewport;
+                let native_end = axis.extent() - viewport;
+                for pixel_ratio in [1.0, 2.625, 3.0] {
+                    // A few dozen, hundreds and thousands of rows from
+                    // either end, and a programmatic jump into the middle.
+                    for distance in [49.0 * 28.0, 500.0 * 28.0, 5000.0 * 28.0] {
+                        for content in [distance, end - distance, end / 2.0] {
+                            let anchor = axis.anchor_at(content, pixel_ratio);
+                            for delta in [-10_000.0, -200.0, 200.0, 10_000.0] {
+                                let scroll = (anchor.scroll + delta).clamp(0.0, native_end);
+                                let actual = axis.content_offset_from(scroll, anchor);
+                                let expected = (content + delta).clamp(0.0, end);
+                                // Native offsets round to device pixels
+                                // and f32; they may differ by one pixel.
+                                assert!(
+                                    (actual - expected).abs() <= 1.0 / pixel_ratio,
+                                    "content {content}, delta {delta}: {actual} != {expected}"
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn short_gestures_keep_the_anchor_until_the_linear_range_needs_room() {
+        let axis = Axis::new(28_000_000.0, 843.5);
+        let end = axis.total - axis.viewport;
+        let native_end = axis.extent() - axis.viewport;
+        for content in [0.0, 1372.1, end / 2.0, end - 1372.1, end] {
+            let anchor = axis.anchor_at(content, 2.625);
+            // Repeated short gestures keep their original anchor, even
+            // after a far programmatic jump and at fractional pixels.
+            for delta in [-10_000.0, -200.0, 0.0, 200.0, 10_000.0] {
+                let scroll = (anchor.scroll + delta).clamp(0.0, native_end);
+                assert!(!axis.needs_anchor(scroll, anchor));
+                let actual = axis.content_offset_from(scroll, anchor);
+                assert!((actual - (content + delta).clamp(0.0, end)).abs() < 1.0);
+            }
+            // Recenter well before `follow` starts accelerating, preserving
+            // the content and restoring room in both directions.
+            let direction = if content < end / 2.0 { 1.0 } else { -1.0 };
+            let room = if direction > 0.0 {
+                native_end - anchor.scroll
+            } else {
+                anchor.scroll
+            };
+            let scroll = anchor.scroll + direction * room / 3.0;
+            assert!(axis.needs_anchor(scroll, anchor));
+            let at = axis.content_offset_from(scroll, anchor);
+            assert!((at - (content + direction * room / 3.0)).abs() < 1.0);
+            let next = axis.anchor_at(at, 2.625);
+            assert!(!axis.needs_anchor(next.scroll, next));
+            assert_eq!(axis.content_offset_from(next.scroll, next), at);
+        }
     }
 
     #[test]

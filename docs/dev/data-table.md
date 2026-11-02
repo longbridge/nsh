@@ -66,10 +66,14 @@ Scaled, a finger would move the content as many times as far as itself as the ra
 nine times, a slow drag of 3 rows moving 25). Where no scroll bar is dragged (not `is_desktop()`), offsets are followed
 from an anchor instead (`Anchor`, `Axis::content_offset_from`): the content moves as far as the scroll for half the room
 to the scroll view's end that way, faster past that so the ends still meet. When a scroll comes to rest (`ScrollEnd`,
-`Dt::rest`) the anchor moves to where the bar stands for the content shown (`Axis::anchor_at`, on a device pixel) and the
-scroll view is scrolled there, unseen: the cells are placed from the content offset, which does not change. A scroll the
-table makes takes the anchor of its target the same way; an animated one within reach moves one to one from where it
-is. On the desktops the offset stays scaled: dragging the bar must reach the whole content.
+`Dt::rest`) it keeps its anchor until a quarter of the native distance toward a compressed edge has been used
+(`Axis::needs_anchor`). Short gestures therefore finish without a corrective native scroll or fresh pixel rounding.
+When needed, the new anchor leaves half the native range on either side where the content allows it (`Axis::anchor_at`,
+on a device pixel). Near the real top or bottom it keeps that edge's full distance. The scroll view is scrolled there,
+unseen: the cells are placed from the content offset, which does not change.
+A scroll the table makes takes the anchor of its target the same way; an animated one within reach moves one to one
+from where it is. The touch indicator follows this moving window; on desktops the offset stays proportional to the
+whole content, so dragging the bar reaches every row.
 
 ## Columns' own classes, fitting, bounce
 

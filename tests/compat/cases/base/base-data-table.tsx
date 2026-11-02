@@ -24,6 +24,7 @@ const rows = (descending: boolean) => {
 };
 
 export default function BaseDataTable() {
+  const count = signal(5);
   const sort = signal<DataTableSort | undefined>(undefined);
   const selected = signal("none");
   const visible = signal("none");
@@ -38,7 +39,7 @@ export default function BaseDataTable() {
           ref={r => (table = r)}
           columns={columns}
           data={rows(sort()?.direction === "descending")}
-          rowCount={5}
+          rowCount={count()}
           dataStart={1}
           bounces={false}
           accessibilityLabel="Fruits"
@@ -71,6 +72,9 @@ export default function BaseDataTable() {
         }}
       />
       <View testID="scroll" style={{ height: 20 }} onPress={() => table.scrollToRow(2)} />
+      <View testID="million" style={{ height: 20 }} onPress={() => count.set(1_000_000)} />
+      <View testID="near-start" style={{ height: 20 }} onPress={() => table.scrollToRow(49)} />
+      <View testID="near-end" style={{ height: 20 }} onPress={() => table.scrollToRow(999_950)} />
     </View>
   );
 }

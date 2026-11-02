@@ -5,6 +5,32 @@ import { expect, open, test } from "nsh/test";
 
 const desktop = { platform: "macos", width: 1000, height: 700 } as const;
 
+for (const platform of ["ios", "android"] as const) {
+  test(`the DataTable demo keeps touch scroll distances after resting (${platform})`, async () => {
+    const app = await open("../App.tsx", { platform, width: 390, height: 844 });
+    await app.press("role:button[DataTable]");
+    await app.waitFor("Apple 1");
+    await app.press("label:Toggle live updates");
+    // Row 50 starts at 1372pt. Resting must leave enough native scroll
+    // range to move back by 200pt, rather than reaching the top at 147pt.
+    await app.scroll("id:table", 1372);
+    await app.waitFor("text:/rows 50–/");
+    await app.scroll("id:table", -200);
+    await app.waitFor("text:/rows 42–/");
+    await app.scroll("id:table", 200);
+    await app.waitFor("text:/rows 50–/");
+    await app.scroll("id:table", -1372);
+    await app.waitFor("text:/rows 1–/");
+    // A jump far into the table establishes the same one-to-one motion.
+    await app.press("label:Go to row 500000");
+    await app.waitFor("text:/rows 500000–/");
+    await app.scroll("id:table", 200);
+    await app.waitFor("text:/rows 500007–/");
+    await app.scroll("id:table", -200);
+    await app.waitFor("text:/rows 500000–/");
+  });
+}
+
 test("the DataTable demo makes only the cells in view, and selects a row", async () => {
   const app = await open("../App.tsx", desktop);
   await app.press("role:button[DataTable]");

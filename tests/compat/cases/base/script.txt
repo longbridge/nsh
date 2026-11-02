@@ -3423,6 +3423,13 @@ covers [props] DataTable.renderCell
 covers [events] DataTable.onSortChange
 covers [events] DataTable.onVisibleRowsChange
 
+# A huge table's touch anchors keep scrollToRow exact near either end.
+tap id:million
+tap id:near-start
+expect Visible: 49-55
+tap id:near-end
+expect Visible: 999950-999956
+
 # base-rich-editor-session
 tap id:case-base-rich-editor-session
 tap text:RunSession

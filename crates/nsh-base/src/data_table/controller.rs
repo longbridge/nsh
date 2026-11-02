@@ -787,8 +787,8 @@ impl Dt {
     /// The scroll offset that shows content offset `content`, from `from`.
     /// Followed from an anchor, an animated scroll within reach moves one
     /// to one from where it is (the content glides as far as the scroll);
-    /// any other takes the anchor of `content`, the scroll view going where
-    /// its bar stands for it, and the offset is taken at once so no frame
+    /// any other takes the anchor of `content`, leaving native scroll room
+    /// on either side, and the offset is taken at once so no frame
     /// shows the new anchor with the old offset.
     fn offset_to(
         &self,
@@ -820,15 +820,18 @@ impl Dt {
         Points(a.scroll as f32)
     }
 
-    /// A scroll came to rest: followed from an anchor, the scroll views
-    /// move, unseen, to where their bars stand for the content shown.
+    /// A scroll came to rest: keep its native position while the anchor
+    /// has room. Recenter only before its one-to-one range runs out.
     pub(crate) fn rest(&self) {
         if !self.anchored {
             return;
         }
         let g = untracked(|| self.geo());
         let ratio = f64::from(nsh_core::element::pixel_ratio());
-        if g.y.scaled() {
+        if g.y.needs_anchor(
+            f64::from(self.scroll_y.get_untracked().0),
+            self.anchor_y.get_untracked(),
+        ) {
             let a = g.y.anchor_at(g.cy, ratio);
             let y = Points(a.scroll as f32);
             if y != self.scroll_y.get_untracked() {
@@ -837,7 +840,10 @@ impl Dt {
                 self.vscroll.scroll_to(Point { x: Points::ZERO, y }, false);
             }
         }
-        if g.x.scaled() {
+        if g.x.needs_anchor(
+            f64::from(self.scroll_x.get_untracked().0),
+            self.anchor_x.get_untracked(),
+        ) {
             let a = g.x.anchor_at(g.cx, ratio);
             let x = Points(a.scroll as f32);
             if x != self.scroll_x.get_untracked() {

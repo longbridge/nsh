@@ -135,7 +135,8 @@ For a list that grows at its end, set `hasMore`: `onLoadMore` fires once for eac
 come within `loadMoreThreshold` (default `20`) of the last. While `loading` is true it waits, and the `loadingView`
 slot shows over the rows. The `empty` slot shows when there are no rows.
 
-Past a few million points of content the scroll bars span a scaled range, so a million rows still scroll to every row.
+Past a few million points of content, desktop scroll bars span a scaled range, so a million rows still scroll to every
+row. Touch scrolling follows the finger; its indicator tracks a moving window within the content.
 
 ## Selection
 
