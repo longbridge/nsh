@@ -9,6 +9,7 @@ mod collapsible;
 mod color_picker;
 mod combobox;
 mod command;
+mod data_table;
 mod date_picker;
 mod diff;
 mod dock;
