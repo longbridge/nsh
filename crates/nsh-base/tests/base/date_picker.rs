@@ -17,7 +17,7 @@ use std::{
 use chrono::NaiveDate;
 use nsh_base::{
     CalendarItemKind, CalendarItemState, DatePickerEvent, DateRangePreset, DateTime, PickedDate,
-    TimeFieldSegmentState, TimePrecision, date_picker,
+    TimeFieldSegmentEntry, TimePrecision, date_picker,
 };
 use nsh_core::{
     AccessibilityRole, MountItem, NodeId, Size, ViewKind, element::Root, platform::Os, prelude::*,
@@ -93,7 +93,7 @@ fn Harness(props: HarnessProps) -> impl IntoElement {
                 _ => s.value.to_string(),
             })
         })
-        .render_segment(|s: &TimeFieldSegmentState| text(format!("seg{}", s.label)))
+        .render_segment(|s: &TimeFieldSegmentEntry| text(format!("seg{}", s.label)))
         .trigger(
             view()
                 .test_id("trigger")

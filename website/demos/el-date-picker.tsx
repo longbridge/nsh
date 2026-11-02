@@ -1,5 +1,5 @@
 import { type JSX, mount, signal, Text, token, View, windowSize } from "nsh";
-import { type CalendarItemState, DatePicker, type DatePickerValue, type DateRangePreset, type HourCycle, type OpenChangeReason, type TimeFieldSegmentState } from "nsh/base";
+import { type CalendarItemState, DatePicker, type DatePickerValue, type DateRangePreset, type HourCycle, type OpenChangeReason, type TimeFieldSegmentEntry } from "nsh/base";
 import { button, desktop, Icon, Log, Panel, Segmented, size, Split, tint, ui, wide } from "./palette";
 
 // Three date pickers in a card: a due date (weekends disabled, presets
@@ -207,19 +207,15 @@ function Item(props: { item: CalendarItemState; range?: DatePickerValue }) {
   );
 }
 
-/** A segment of the time: its digits, or AM / PM, filled while it has the keys. */
-function Segment(props: { segment: TimeFieldSegmentState }) {
+/**
+ * A segment of the time: filled while it has the keys (`focus:` on the
+ * segment, `segmentClass`), its digits or AM / PM in the color on the fill
+ * (`group-focus:`), so moving between the segments draws nothing.
+ */
+const segmentClass = "group rounded active:opacity-70 focus:bg-brand-fill";
+function Segment(props: { segment: TimeFieldSegmentEntry }) {
   return (
-    <Text
-      style={{
-        paddingHorizontal: 3,
-        borderRadius: 4,
-        fontSize: controlText,
-        fontVariant: ["tabular-nums"],
-        color: props.segment.selected ? ui().onAccent : ui().text,
-        backgroundColor: props.segment.selected ? ui().accentFill.backgroundColor : "transparent",
-      }}
-    >
+    <Text class="text-foreground group-focus:text-on-brand" style={{ paddingHorizontal: 3, fontSize: controlText, fontVariant: ["tabular-nums"] }}>
       {props.segment.label}
     </Text>
   );
@@ -376,7 +372,7 @@ function App() {
               timeLabel={<Text style={{ fontSize: controlText, color: ui().muted }}>Time</Text>}
               timeAccessibilityLabel="Meeting time"
               timeFieldClass={timeField}
-              segmentClass="rounded active:opacity-70"
+              segmentClass={segmentClass}
               separatorStyle={{ fontSize: controlText, color: ui().faint }}
               renderSegment={(segment) => <Segment segment={segment} />}
               trigger={<Trigger title={meetingTitle()} placeholder="Not scheduled" open={meetingOpen()} />}

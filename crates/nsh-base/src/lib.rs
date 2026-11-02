@@ -213,7 +213,7 @@ pub use crate::{
     theme::{DEFAULT_THEME, Theme, ThemeError, theme, theme_overrides, tokens_of},
     time_field::{
         HourCycle, TimeField, TimeFieldElement, TimeFieldEvent, TimeFieldProps,
-        TimeFieldSegmentState, TimeOfDay, TimePrecision, TimeSegment, time_field,
+        TimeFieldSegmentEntry, TimeOfDay, TimePrecision, TimeSegment, time_field,
     },
     toast::{
         Anchor, SwipeDirection, Toast, ToastAdvance, ToastElement, ToastEvent, ToastManager,

@@ -2353,19 +2353,14 @@ export function Controls(props: { show: Control }) {
       </View>
     );
   }
-  /** The time field's segments (`renderSegment`): the selected one filled while the field has the keys. */
-  function Segment(props: { label: string; selected: boolean }) {
+  /**
+   * The time field's segments: filled while the field has the keys on one (`focus:` on the segment, `segmentClass`),
+   * its digits (`renderSegment`) in the color on the fill (`group-focus:`), so moving between them draws nothing.
+   */
+  const segmentClass = "group rounded-[4px] active:opacity-70 focus:bg-brand-fill";
+  function Segment(props: { label: string }) {
     return (
-      <Text
-        style={{
-          paddingHorizontal: 3,
-          borderRadius: 4,
-          fontSize: size.label,
-          fontVariant: ["tabular-nums"],
-          color: props.selected ? colors.onAccent : colors.text,
-          backgroundColor: props.selected ? colors.accentFill : "transparent",
-        }}
-      >
+      <Text class="text-foreground group-focus:text-on-brand" style={{ paddingHorizontal: 3, fontSize: size.label, fontVariant: ["tabular-nums"] }}>
         {props.label}
       </Text>
     );
@@ -2501,9 +2496,9 @@ export function Controls(props: { show: Control }) {
               timeLabel={<Text style={{ fontSize: size.label, color: colors.muted }}>Time</Text>}
               timeAccessibilityLabel="Meeting time"
               timeFieldClass={timeField}
-              segmentClass="active:opacity-70"
+              segmentClass={segmentClass}
               separatorStyle={{ color: colors.faint, fontSize: size.label }}
-              renderSegment={(segment) => <Segment label={segment.label} selected={segment.selected} />}
+              renderSegment={(segment) => <Segment label={segment.label} />}
               trigger={<Picker title={meeting() ? shortDate(meeting()!) : "Not scheduled"} open={meetingOpen()} placeholder={!meeting()} />}
             />
           </View>
