@@ -2317,33 +2317,43 @@ mod tests {
     #[test]
     fn attachments_sit_by_vertical_align() {
         let engine = PangoTextEngine::new("sans-serif".into());
-        let style = ResolvedTextStyle::default();
-        for height in [4.0, 30.0] {
-            for align in [
-                nsh_core::VerticalAlign::Baseline,
-                nsh_core::VerticalAlign::TextTop,
-                nsh_core::VerticalAlign::TextBottom,
-                nsh_core::VerticalAlign::Middle,
-            ] {
-                let mut text = text(&[("Ax", style)]);
-                let mut alignments = nsh_core::AttachmentAlignments::default();
-                alignments.push(
-                    &mut text,
-                    nsh_core::Size::new(Points(10.0), Points(height)),
-                    align,
-                    style,
-                );
-                let a = text.attachments[0];
-                let font = engine.attachment_font(&engine.ltr, &text, &a);
-                let prepared = engine.prepare_aligned(&text, &alignments);
-                let layout = engine.layout(&prepared, engine.measure(&prepared, None));
-                let line = engine.lines(&layout).remove(0);
-                let top = engine.attachments(&layout)[0].expect("shown").y;
-                let expected = line.y + line.ascender - a.ascent(font, align);
-                assert!(
-                    (top - expected).0.abs() < 0.01,
-                    "{align:?} {height}: {top:?} {expected:?}"
-                );
+        // Also with a line height: its leading must not move the
+        // attachment off the text's baseline.
+        for style in [
+            ResolvedTextStyle::default(),
+            ResolvedTextStyle {
+                font_size: Points(17.0),
+                line_height: Points(26.0),
+                ..Default::default()
+            },
+        ] {
+            for height in [4.0, 20.0, 30.0] {
+                for align in [
+                    nsh_core::VerticalAlign::Baseline,
+                    nsh_core::VerticalAlign::TextTop,
+                    nsh_core::VerticalAlign::TextBottom,
+                    nsh_core::VerticalAlign::Middle,
+                ] {
+                    let mut text = text(&[("Ax", style)]);
+                    let mut alignments = nsh_core::AttachmentAlignments::default();
+                    alignments.push(
+                        &mut text,
+                        nsh_core::Size::new(Points(10.0), Points(height)),
+                        align,
+                        style,
+                    );
+                    let a = text.attachments[0];
+                    let font = engine.attachment_font(&engine.ltr, &text, &a);
+                    let prepared = engine.prepare_aligned(&text, &alignments);
+                    let layout = engine.layout(&prepared, engine.measure(&prepared, None));
+                    let line = engine.lines(&layout).remove(0);
+                    let top = engine.attachments(&layout)[0].expect("shown").y;
+                    let expected = line.y + line.ascender - a.ascent(font, align);
+                    assert!(
+                        (top - expected).0.abs() < 0.01,
+                        "{align:?} {height}: {top:?} {expected:?}"
+                    );
+                }
             }
         }
     }

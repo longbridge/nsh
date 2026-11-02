@@ -419,6 +419,13 @@ pub struct ScreenConfig {
     /// UIKit's own bar button in the trailing slot instead of `right`'s
     /// view (iOS); a press on it presses `right`'s first pressable view.
     pub right_system_item: Option<crate::HeaderSystemItem>,
+    /// UIKit's own bar button showing this SF Symbol in the trailing slot
+    /// instead of `right`'s view (iOS); `right_system_item` wins over it.
+    pub right_symbol: Option<Arc<str>>,
+    /// As `right_system_item`, in the leading slot, pressing `left`.
+    pub left_system_item: Option<crate::HeaderSystemItem>,
+    /// As `right_symbol`, in the leading slot, pressing `left`.
+    pub left_symbol: Option<Arc<str>>,
     /// Custom title view.
     pub title_view: Option<NodeId>,
     /// The app's header (`header`): on a platform without a native header
@@ -451,6 +458,9 @@ impl Default for ScreenConfig {
             left: None,
             right: None,
             right_system_item: None,
+            right_symbol: None,
+            left_system_item: None,
+            left_symbol: None,
             title_view: None,
             header_view: None,
             header_height: Points::ZERO,
@@ -858,8 +868,10 @@ pub enum MountItem {
     /// (`transitionShader`; `None`: its `animation`): when it is pushed,
     /// popped, presented or dismissed, the platform draws the change through
     /// the layer for `duration`, the lower side's picture as `sample_from`
-    /// and the upper's as `sample_to`, and its own animation where it
-    /// cannot.
+    /// and the upper's as `sample_to`, whatever the page's `animation`; its
+    /// `animation` runs where it cannot and when the user asks for less
+    /// motion, and a change that starts while one runs ends that one first
+    /// (`docs/dev/shaders.md` "Pages and dialogs").
     NavShader {
         /// The page or dialog.
         id: NodeId,

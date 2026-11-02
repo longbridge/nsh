@@ -22,7 +22,7 @@ use nsh_core::{
 
 use crate::{
     popup::{OpenChangeReason, OpenState, PopupPresence, SheetMotion, StateLooks, lifecycle},
-    roving::{bar, bar_trigger, leave_bar},
+    roving::{bar_trigger, leave_bar, popup_bar},
 };
 
 /// How long a finger stays on a context menu's trigger before it opens
@@ -354,7 +354,7 @@ pub fn Menu(props: MenuProps, cx: Scope<MenuEvent>) -> impl IntoElement {
     };
     let toggle = change.clone();
     // In a toolbar, the trigger is one of its items.
-    let around = bar();
+    let around = popup_bar();
     // In a bar, the menu open is the bar's: the pointer over another
     // menu's trigger moves it there.
     if let Some(menus) = around.as_ref().map(|b| b.open_menu.clone()) {

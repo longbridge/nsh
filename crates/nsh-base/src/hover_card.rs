@@ -4,7 +4,11 @@
 //! natively: the trigger's and the card's `onMouseEnter` / `onMouseLeave`
 //! are Rust listeners and the delays one timer of the components' executor,
 //! so nothing runs in JS and nothing is sent to the platform until the card
-//! opens or closes.
+//! opens or closes. The keyboard focus is followed the same way: the view
+//! holding the trigger and the card's overlay hears the focus come in and
+//! leave (`ElementRef::on_focus_in` / `on_focus_out`, the core's
+//! `focus-within`), so a focus moving from the trigger into the card keeps
+//! it open.
 
 use std::time::Duration;
 
@@ -112,21 +116,32 @@ fn delay(ms: f64) -> Option<Duration> {
     }
 }
 
-/// Where the pointer is, for the close delay: away from both, the card
+/// Where the pointer and the keyboard focus are, for the close delay:
+/// the pointer away from both parts and the focus in neither, the card
 /// closes.
 #[derive(Debug, Clone, Copy, Default)]
 struct Over {
     trigger: bool,
     card: bool,
+    /// The focus is on the trigger, in it or in the card.
+    focus: bool,
+}
+
+impl Over {
+    /// Something keeps the card open.
+    fn holds(self) -> bool {
+        self.trigger || self.card || self.focus
+    }
 }
 
 /// A card that previews what its trigger points at, shown on top of
 /// everything next to the trigger, as `gpui-base`'s `HoverCard`. On the
 /// desktops it opens once the pointer rested on the trigger for
 /// `openDelay` (or the keyboard focus came to it), stays open while the
-/// pointer moves between the trigger and the card, and closes `closeDelay`
-/// after the pointer left both (or the focus left the trigger); Escape and
-/// a press outside close it at once. On phones and tablets, which have no
+/// pointer is on the trigger or the card or the focus is on either (on the
+/// trigger, or a link or button in the card), and closes `closeDelay`
+/// after the pointer left both and the focus is in neither; Escape and a
+/// press outside close it at once. On phones and tablets, which have no
 /// pointer to rest, pressing the trigger opens and closes it and a press
 /// outside closes it. The card takes the pointer and presses (links and
 /// buttons in it work) and keeps no focus of its own. It looks like
@@ -166,7 +181,7 @@ pub fn HoverCard(props: HoverCardProps, cx: Scope<HoverCardEvent>) -> impl IntoE
         };
         let fire = move || {
             pending.replace(None);
-            if !next && over.with(|o| o.trigger || o.card) {
+            if !next && over.with(|o| o.holds()) {
                 return;
             }
             change(next, reason);
@@ -201,7 +216,24 @@ pub fn HoverCard(props: HoverCardProps, cx: Scope<HoverCardEvent>) -> impl IntoE
     );
     let anchor = element_ref();
     let desktop = is_desktop();
+    // The view holding the trigger and the card's overlay: the focus in
+    // it is on the trigger, inside it or in the card (an overlay is inside
+    // the view it is in).
+    let parts = element_ref();
+    if desktop {
+        parts.on_focus_in(move || {
+            over.with(|o| o.focus = true);
+            after_delay(true, OpenChangeReason::Focus);
+        });
+        parts.on_focus_out(move || {
+            over.with(|o| o.focus = false);
+            if !over.with(|o| o.holds()) {
+                after_delay(false, OpenChangeReason::Focus);
+            }
+        });
+    }
     view()
+        .element_ref(&parts)
         .child(props.trigger.place(move |trigger| {
             let trigger = trigger.element_ref(&anchor);
             if !desktop {
@@ -224,14 +256,8 @@ pub fn HoverCard(props: HoverCardProps, cx: Scope<HoverCardEvent>) -> impl IntoE
                 })
                 .on_mouse_leave(move |_: &MouseEvent| {
                     over.with(|o| o.trigger = false);
-                    if !over.with(|o| o.card) {
+                    if !over.with(|o| o.holds()) {
                         after_delay(false, OpenChangeReason::Hover);
-                    }
-                })
-                .on_focus(move || after_delay(true, OpenChangeReason::Focus))
-                .on_blur(move || {
-                    if !over.with(|o| o.trigger || o.card) {
-                        after_delay(false, OpenChangeReason::Focus);
                     }
                 })
         }))
@@ -263,7 +289,7 @@ pub fn HoverCard(props: HoverCardProps, cx: Scope<HoverCardEvent>) -> impl IntoE
                         })
                         .on_mouse_leave(move |_: &MouseEvent| {
                             over.with(|o| o.card = false);
-                            if !over.with(|o| o.trigger) {
+                            if !over.with(|o| o.holds()) {
                                 after_delay(false, OpenChangeReason::Hover);
                             }
                         })
