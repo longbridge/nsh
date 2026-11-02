@@ -1931,7 +1931,7 @@ covers [props] Combobox.items
 covers [props] Combobox.multiple
 covers [props] value
 covers [props] defaultValue
-covers [props] Combobox.placeholder
+covers [props] placeholder
 covers [props] Combobox.query
 covers [props] Combobox.footer
 covers [props] Combobox.footerClass
