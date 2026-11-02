@@ -144,6 +144,8 @@ enum Op {
     Minimize,
     ToggleMaximize,
     ToggleFullScreen,
+    /// `setFrame`'s width and height (a missing one keeps the window's).
+    Resize(Option<f32>, Option<f32>),
     Close,
     Quit,
     Hide,
@@ -322,9 +324,17 @@ pub(crate) fn command(surface: &Rc<Surface>, command: &DesktopCommand) {
         DesktopCommand::Minimize => push(surface, Op::Minimize),
         DesktopCommand::ToggleMaximize => push(surface, Op::ToggleMaximize),
         DesktopCommand::ToggleFullScreen => push(surface, Op::ToggleFullScreen),
-        // GPUI's window bounds are chosen when the window opens, and it
-        // has no window levels.
-        DesktopCommand::SetFrame(_) | DesktopCommand::SetLevel(_) => {}
+        // GPUI sizes a window but leaves its place to the platform (Wayland
+        // windows cannot place themselves), and it has no window levels.
+        DesktopCommand::SetFrame(frame) => {
+            if frame.width.is_some() || frame.height.is_some() {
+                push(
+                    surface,
+                    Op::Resize(frame.width.map(|w| w.0), frame.height.map(|h| h.0)),
+                );
+            }
+        }
+        DesktopCommand::SetLevel(_) => {}
         DesktopCommand::OrderFront => {
             if let Some(handle) = c.window.get() {
                 // A minimized window may never render the queued chrome ops.
@@ -668,6 +678,13 @@ fn apply_ops(surface: &Surface, window: &mut Window, cx: &mut App) {
                 }
             }
             Op::ToggleFullScreen => window.toggle_fullscreen(),
+            Op::Resize(width, height) => {
+                let now = window.bounds().size;
+                window.resize(gpui::size(
+                    width.map_or(now.width, gpui::px),
+                    height.map_or(now.height, gpui::px),
+                ));
+            }
             Op::Close => {
                 if !ask_to_close(surface, CloseRequest::Close, window, cx) {
                     window.remove_window();
