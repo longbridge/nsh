@@ -52,6 +52,8 @@ struct MenuContext {
     next: Stored<u32>,
     /// The popup part and its states' looks, for the submenus' popups.
     looks: StateLooks,
+    /// Desktops: this level's popup, which its submenus open outside of.
+    popup: ElementRef,
 }
 
 impl MenuContext {
@@ -117,6 +119,7 @@ fn surface(
         let change = change.clone();
         Rc::new(move |reason: OpenChangeReason| change(false, reason))
     };
+    let presence = PopupPresence::new(move || !sheet && open.get(), parts.looks());
     provide_context(MenuContext {
         close,
         sheet,
@@ -126,6 +129,7 @@ fn surface(
         open: computed(move || open.get()),
         next: stored(1),
         looks: parts.looks(),
+        popup: presence.popup(),
     });
     // An attempt to close it: reported, then it closes (none while it
     // goes).
@@ -155,7 +159,6 @@ fn surface(
     // A sheet comes in and goes with its motion; a popup with the app's
     // transitions between its looks.
     let motion = SheetMotion::new(move || sheet && open.get(), || Placement::Bottom);
-    let presence = PopupPresence::new(move || !sheet && open.get(), parts.looks());
     {
         let (opened, closed) = (emit.clone(), emit.clone());
         lifecycle(
@@ -719,8 +722,10 @@ pub fn Submenu(props: SubmenuProps, cx: Scope<NoEvent>) -> impl IntoElement {
     // Open while chosen at its level and every level around it is open:
     // closing the menu closes it, no state written.
     let sub_open = computed(move || around.get() && open_sub.get() == Some(id));
+    let presence = PopupPresence::new(move || sub_open.get(), menu.looks);
     let inner = MenuContext {
         level: id,
+        popup: presence.popup(),
         open_sub: signal(None),
         open: sub_open,
         ..menu.clone()
@@ -765,12 +770,12 @@ pub fn Submenu(props: SubmenuProps, cx: Scope<NoEvent>) -> impl IntoElement {
             .into_element();
     }
     let anchor = element_ref();
+    let edges = menu.popup;
     let open = move || {
         if !props.disabled.get_untracked() {
             open_sub.set(Some(id));
         }
     };
-    let presence = PopupPresence::new(move || sub_open.get(), inner.looks);
     view()
         .child(props.trigger.place(move |t| {
             t.element_ref(&anchor)
@@ -786,7 +791,7 @@ pub fn Submenu(props: SubmenuProps, cx: Scope<NoEvent>) -> impl IntoElement {
             move || presence.mounted(),
             move || {
                 overlay()
-                    .anchor(&anchor)
+                    .anchor_beside(&anchor, &edges)
                     .placement(Placement::Right)
                     .align(Align::Start)
                     .role(AccessibilityRole::Menu)

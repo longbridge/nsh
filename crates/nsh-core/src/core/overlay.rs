@@ -518,7 +518,9 @@ impl<M: TextEngine> Core<M> {
     /// (its parent, unless that is a span of text).
     fn hint_anchor(&self, key: Key) -> Option<Key> {
         match self.overlay(key)?.config.anchor {
-            OverlayAnchor::Node(id) | OverlayAnchor::Content(id) => self.key(id).ok(),
+            OverlayAnchor::Node(id)
+            | OverlayAnchor::Content(id)
+            | OverlayAnchor::Beside { node: id, .. } => self.key(id).ok(),
             OverlayAnchor::Point(_) | OverlayAnchor::Bounds(_) => None,
             OverlayAnchor::None => {
                 let mut k = self.nodes[key as usize].parent;
@@ -949,6 +951,30 @@ impl<M: TextEngine> Core<M> {
                 size: m.frame.size,
             }),
             OverlayAnchor::Content(id) => self.content_bounds(self.content_anchor(id)),
+            OverlayAnchor::Beside { node, edges } => {
+                match (self.measure(node), self.measure(edges)) {
+                    (Some(n), Some(e)) => Some(if config.placement.is_horizontal() {
+                        rect(
+                            e.page.x.0,
+                            n.page.y.0,
+                            e.frame.size.width.0,
+                            n.frame.size.height.0,
+                        )
+                    } else {
+                        rect(
+                            n.page.x.0,
+                            e.page.y.0,
+                            n.frame.size.width.0,
+                            e.frame.size.height.0,
+                        )
+                    }),
+                    (Some(n), None) => Some(Bounds {
+                        origin: n.page,
+                        size: n.frame.size,
+                    }),
+                    _ => None,
+                }
+            }
         };
         let Some(anchor) = anchor else {
             return frame.origin;
@@ -1088,7 +1114,9 @@ impl<M: TextEngine> Core<M> {
 /// The view an overlay is anchored to.
 fn anchor_node(state: &OverlayState) -> Option<NodeId> {
     match state.config.anchor {
-        OverlayAnchor::Node(id) | OverlayAnchor::Content(id) => Some(id),
+        OverlayAnchor::Node(id)
+        | OverlayAnchor::Content(id)
+        | OverlayAnchor::Beside { node: id, .. } => Some(id),
         _ => None,
     }
 }
