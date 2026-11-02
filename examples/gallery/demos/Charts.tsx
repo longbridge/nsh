@@ -1,6 +1,6 @@
 import type { JSX } from "nsh";
-import { cleanup, LayoutAnimation, List, reduceMotion, signal, Text, View } from "nsh";
-import { Arc, Area, Bar, Grid, Line, Pie, Plot, PlotAppearScope, PlotAxis, PlotLabel, RadialGrid, RadialLine, Sankey } from "nsh/base/plot";
+import { Canvas, cleanup, createAnimatedValue, Easing, effect, LayoutAnimation, List, reduceMotion, signal, Text, View } from "nsh";
+import { Arc, Area, Bar, Grid, Line, Pie, Plot, PlotAppearScope, PlotAxis, PlotLabel, RadialGrid, RadialLine, Rule, Sankey } from "nsh/base/plot";
 import { platform } from "nsh";
 import { alpha, Button, Card, chart, colors, DemoPage, finish, focusRing, Legend, mono, Segmented, toneColor, type Tone } from "../ui";
 
@@ -860,6 +860,700 @@ function Sales() {
   );
 }
 
+/** Where band `i` of `n` starts and how wide it is, and the step between
+ * two bands' starts, as shares of the plot's width: the band scale's own
+ * arithmetic (no `maxBandWidth`), so a view of the app's lines up with a
+ * band. */
+function bandAt(i: number, n: number, pad: { inner: number; outer: number }) {
+  const step = 1 / (n - pad.inner + 2 * pad.outer);
+  return { start: step * (pad.outer + i), width: step * (1 - pad.inner), step };
+}
+const share = (v: number): `${number}%` => `${v * 100}%`;
+
+/** The bridge's quarters. */
+const BRIDGE_QUARTERS = [
+  { value: "1Q26", label: "1Q26" },
+  { value: "2Q26", label: "2Q26" },
+  { value: "3Q26", label: "3Q26" },
+  { value: "4Q26", label: "4Q26" },
+] as const;
+type BridgeQuarter = (typeof BRIDGE_QUARTERS)[number]["value"];
+/** Each quarter's revenue and what each line after it adds or takes, in
+ * millions: cost of sales, R&D, SG&A, other income (a loss in 3Q), tax. */
+const STATEMENTS: Record<BridgeQuarter, number[]> = {
+  "1Q26": [118.4, -46.2, -19.8, -24.1, 2.6, -7.4],
+  "2Q26": [126.9, -48.5, -20.6, -25.3, 1.8, -8.1],
+  "3Q26": [131.2, -52.9, -21.9, -26.0, -1.4, -6.6],
+  "4Q26": [142.7, -54.1, -22.8, -27.4, 3.9, -9.2],
+};
+type StepKind = "total" | "increase" | "decrease";
+type Step = { name: string; short: string; kind: StepKind; start: number; end: number };
+/** A quarter's bridge: totals stand on zero, every other step runs from
+ * where the one before it ends to where it leaves the running total. */
+function bridge(q: BridgeQuarter): Step[] {
+  const [revenue, cost, rd, sga, other, tax] = STATEMENTS[q];
+  const steps: Step[] = [];
+  let level = 0;
+  const total = (name: string, short: string) => steps.push({ name, short, kind: "total", start: 0, end: level });
+  const line = (name: string, short: string, v: number) => {
+    const end = Math.round((level + v) * 10) / 10;
+    steps.push({ name, short, kind: v >= 0 ? "increase" : "decrease", start: level, end });
+    level = end;
+  };
+  level = revenue;
+  total("Revenue", "Rev");
+  line("Cost of sales", "COGS", cost);
+  total("Gross profit", "Gross");
+  line("R&D", "R&D", rd);
+  line("SG&A", "SG&A", sga);
+  line(other >= 0 ? "Other income" : "Other loss", "Other", other);
+  line("Tax", "Tax", tax);
+  total("Net profit", "Net");
+  return steps;
+}
+const BRIDGE_PAD = { inner: 0.32, outer: 0.16 };
+const BRIDGE_TOP = 160;
+const BRIDGE_HEIGHT = 176;
+/** How a quarter's steps move into the next one's: the bars and their
+ * labels on the plot's `motion.update`, the connectors with a layout
+ * animation of the same length. */
+const BRIDGE_UPDATE = { duration: 550, easing: "easeInOut" } as const;
+const bridgeLayout = {
+  duration: BRIDGE_UPDATE.duration,
+  update: { type: "easeInEaseOut" },
+  create: { type: "easeInEaseOut", property: "opacity" },
+  delete: { type: "easeInEaseOut", property: "opacity" },
+} as const;
+/** The gaps between the bridge's eight steps, each crossed by a connector. */
+const CONNECTORS = [0, 1, 2, 3, 4, 5, 6];
+const millions = (v: number) => `$${fixed(v, 1)}M`;
+const signedMillions = (v: number) => `${v >= 0 ? "+" : "−"}$${fixed(Math.abs(v), 1)}M`;
+/** What a step shows: a total's level, any other step's change. */
+const amount = (s: Step) => (s.kind === "total" ? s.end : s.end - s.start);
+
+/**
+ * A quarter's profit bridge, as a waterfall: revenue, what each line of
+ * the income statement takes or adds, gross and net profit as totals.
+ * Each step is a `Bar` from its row's `base` (where the running total
+ * stood) to its value (where the step leaves it), colored by kind through
+ * the plot's `colorScale`, its signed change written at its end (above a
+ * rise, below a fall); dashed connectors carry each level to the next
+ * step. The step under the pointer or the arrow keys is read out over the
+ * plot and its share of revenue; the quarters move into each other.
+ */
+function Bridge() {
+  const quarter = signal<BridgeQuarter>("4Q26");
+  const hover = signal<number | null>(null);
+  const steps = () => bridge(quarter());
+  const revenue = () => steps()[0].end;
+  const net = () => steps()[steps().length - 1].end;
+  const operating = () => steps()[4].end;
+  const margin = (v: number) => `${fixed((v / revenue()) * 100, 1)}%`;
+  const shown = () => (hover() == null ? undefined : steps()[hover()!]);
+  const toneOf = (s: Step): Tone => (s.kind === "increase" ? "up" : s.kind === "decrease" ? "down" : "neutral");
+  const labelStyle = { fontSize: 10.5, fontFamily: mono, paddingVertical: 3, color: colors.muted, fontVariant: ["tabular-nums" as const] };
+  return (
+    <Card icon="stocks" title="Profit bridge" subtitle="A quarter's revenue down to net profit, step by step">
+      <View style={{ gap: 4 }}>
+        <Text style={tipTitle}>{(shown()?.name ?? "Net profit").toUpperCase()}</Text>
+        <View style={{ flexDirection: "row", alignItems: "baseline", gap: 10 }}>
+          <Text style={{ fontSize: 22, fontWeight: "600", letterSpacing: -0.4, color: shown() ? toneColor(toneOf(shown()!)) : colors.text, fontVariant: ["tabular-nums"] }}>
+            {shown() ? (shown()!.kind === "total" ? millions(shown()!.end) : signedMillions(amount(shown()!))) : millions(net())}
+          </Text>
+          <Text style={{ fontSize: 12, color: colors.muted, fontVariant: ["tabular-nums"] }}>
+            {shown() ? `${margin(Math.abs(amount(shown()!)))} of revenue` : `${margin(net())} net margin`}
+          </Text>
+        </View>
+      </View>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 16, marginTop: 8 }}>
+        <Legend color={chart.s2} label="Total" />
+        <Legend color={colors.up} label="Adds" />
+        <Legend color={colors.down} label="Takes" />
+      </View>
+      <View style={{ marginTop: size.gap }}>
+        <Plot
+          data={steps()}
+          xScale={{ type: "band", paddingInner: BRIDGE_PAD.inner, paddingOuter: BRIDGE_PAD.outer }}
+          yScale={{ type: "linear", domain: [0, BRIDGE_TOP] }}
+          // Each step's kind takes its color: totals graphite, rises and falls in the day's tones.
+          colorScale={{ type: "ordinal", domain: ["total", "increase", "decrease"], range: [chart.s2, colors.up, colors.down] }}
+          appearGeneration={1}
+          motion={{ appear: { duration: 900, easing: "easeOut" }, update: BRIDGE_UPDATE, enter: { duration: 150 }, exit: { duration: 150 }, pointer: { stiffness: 320, damping: 32 } }}
+          accessibilityLabel={`Profit bridge, ${quarter()}: ${millions(revenue())} revenue to ${millions(net())} net profit, a net margin of ${margin(net())}`}
+          accessibilityValue={{ text: shown() && `${shown()!.name}: ${shown()!.kind === "total" ? millions(shown()!.end) : signedMillions(amount(shown()!))}` }}
+          crossLineClass="w-full h-full"
+          crossLineStyle={{ backgroundColor: alpha(colors.text, 0.05) }}
+          onHoverChange={({ index }) => hover.set(index)}
+          focusStyle={focusRing(4)}
+          style={{ height: BRIDGE_HEIGHT, marginRight: AXIS + 8, marginBottom: BELOW }}
+        >
+          <Grid y={[40, 80, 120]} style={{ stroke: colors.line }} />
+          {/* Connectors: each step's level carried across the gap to the next step. */}
+          {CONNECTORS.map((i) => {
+            const band = bandAt(i, CONNECTORS.length + 1, BRIDGE_PAD);
+            return (
+              <View
+                style={{
+                  position: "absolute",
+                  left: share(band.start + band.width),
+                  width: share(band.step - band.width),
+                  // Read here, so a quarter moves the same view.
+                  top: (1 - steps()[i].end / BRIDGE_TOP) * BRIDGE_HEIGHT,
+                  height: 0,
+                  borderTopWidth: 1,
+                  borderStyle: "dashed",
+                  borderColor: alpha(colors.text, 0.3),
+                  pointerEvents: "none",
+                }}
+              />
+            );
+          })}
+          <Grid y={[0]} style={{ stroke: colors.border }} />
+          <Bar
+            value="end"
+            base="start"
+            color="kind"
+            cornerRadii={2}
+            stagger={0.5}
+            inactiveOpacity={0.4}
+            label={(d: Step) => (d.kind === "total" ? fixed(d.end, 1) : signed(d.end - d.start, 1))}
+            labelStyle={labelStyle}
+          />
+          <PlotAxis placement="right" tickValues={[0, 40, 80, 120]} labelStyle={{ ...axis, width: AXIS + 8, paddingLeft: 8, textAlign: "right" }} />
+          <PlotAxis format={(v) => steps()[v].short} labelStyle={below} />
+        </Plot>
+      </View>
+      <View style={{ marginTop: size.gap + 4 }}>
+        <Figures>
+          <Figure label="Revenue" value={millions(revenue())} />
+          <Figure label="Gross" value={margin(steps()[2].end)} />
+          <Figure label="Operating" value={margin(operating())} />
+          <Figure label="Net" value={margin(net())} tone="up" />
+        </Figures>
+      </View>
+      <View style={{ marginTop: size.gap + 4, alignSelf: pointer ? "flex-start" : "stretch", width: pointer ? 260 : undefined }}>
+        <Segmented
+          options={BRIDGE_QUARTERS}
+          value={quarter()}
+          size={size.switch}
+          onChange={(next) => {
+            if (!reduceMotion()) LayoutAnimation.configureNext(bridgeLayout);
+            quarter.set(next);
+          }}
+        />
+      </View>
+    </Card>
+  );
+}
+
+/** An onboarding funnel's stages, by channel: everyone, the app's, the web's. */
+const CHANNELS = [
+  { value: "all", label: "All" },
+  { value: "app", label: "App" },
+  { value: "web", label: "Web" },
+] as const;
+type Channel = (typeof CHANNELS)[number]["value"];
+const STAGE_NAMES = ["Visits", "Sign-ups", "KYC verified", "Funded", "First trade"];
+const REACHED: Record<Channel, number[]> = {
+  app: [96800, 27110, 19240, 10870, 7830],
+  web: [87400, 15250, 9170, 4150, 2410],
+  all: [184200, 42360, 28410, 15020, 10240],
+};
+/** A stage: how many reached it, the share of the stage before that did,
+ * and its place, the category its color comes from. */
+type Stage = { name: string; count: number; kept: number; tier: string };
+const stages = (c: Channel): Stage[] =>
+  REACHED[c].map((count, i) => ({ name: STAGE_NAMES[i], count, kept: i === 0 ? 1 : count / REACHED[c][i - 1], tier: String(i) }));
+/** Half the widest stage, everyone's visits: every channel on the same scale. */
+const FUNNEL_HALF = REACHED.all[0] / 2;
+const FUNNEL_ROWS = STAGE_NAMES.length;
+/** Bars as high as the gaps between them, where the necks run. */
+const FUNNEL_PAD = { inner: 0.5, outer: 0.08 };
+const FUNNEL_HEIGHT = pointer ? 204 : 216;
+/** Where stage `i`'s bar is down the plot, in points (the band scale's own
+ * arithmetic): its top, height and middle, and the middle of the gap under it. */
+const funnelRow = (i: number) => {
+  const band = bandAt(i, FUNNEL_ROWS, FUNNEL_PAD);
+  const top = band.start * FUNNEL_HEIGHT;
+  const height = band.width * FUNNEL_HEIGHT;
+  return { top, height, middle: top + height / 2, gap: top + height + ((band.step - band.width) * FUNNEL_HEIGHT) / 2 };
+};
+/** The columns beside the bars: each stage's name over its count, and what it keeps. */
+const FUNNEL_LEFT = 86;
+const FUNNEL_RIGHT = 54;
+/** Each stage's depth of the series color, the top stage deepest. */
+const TIERS = [1, 0.8, 0.64, 0.5, 0.38];
+/** A `#rrggbbaa` color (a theme token as `token` gives it) at `a` of its opacity. */
+const fade = (color: string, a: number) => {
+  const own = color.length === 9 ? parseInt(color.slice(7), 16) / 255 : 1;
+  return color.slice(0, 7) + Math.round(own * a * 255).toString(16).padStart(2, "0");
+};
+/** How a channel's stages move into another's: the bars on the plot's
+ * `motion.update`, the necks' ends on animated values with the same curve. */
+const FUNNEL_UPDATE = { duration: 550, easing: "easeInOut" } as const;
+const easeInOut = Easing.bezier(0.42, 0, 0.58, 1);
+/** The plot's appear and the share of it over which the bars start, top down. */
+const FUNNEL_APPEAR = 900;
+const FUNNEL_STAGGER = 0.5;
+/** When stage `i`'s bar starts to grow. */
+const growsAt = (i: number) => (FUNNEL_APPEAR * FUNNEL_STAGGER * i) / (FUNNEL_ROWS - 1);
+/** A bar's half width, a share of the plot's width. */
+const halfOf = (count: number) => count / (4 * FUNNEL_HALF);
+/** Where a stage's bar starts, in points (half of it): a stage of none
+ * would be this wide, so a last stage of a few traders stays a bar. */
+const FUNNEL_MIN_HALF = 5;
+/** The bars' corners, and the necks' edges that follow them. */
+const FUNNEL_RADIUS = 4;
+/** A stage's half width as a share of a plot `width` wide: from
+ * `FUNNEL_MIN_HALF` points for none to the whole width for everyone's
+ * visits, in proportion (so a small stage stays a bar and the small ones
+ * still differ). */
+const halfFor = (count: number, width: number) =>
+  width > 2 * FUNNEL_MIN_HALF ? (FUNNEL_MIN_HALF + (width / 2 - FUNNEL_MIN_HALF) * (count / REACHED.all[0])) / width : halfOf(count);
+/** A stage's bar's ends on the counts' scale, as `halfFor` sizes it: a
+ * new function for each width, so the bars read their rows again. */
+const barEnd = (width: number, side: 1 | -1) => (d: Stage) => side * halfFor(d.count, width) * 2 * FUNNEL_HALF;
+const percentOf = (v: number) => `${fixed(v * 100, 1)}%`;
+
+/**
+ * An onboarding funnel: each stage a bar centered on the middle (a `Bar`
+ * from `-count / 2` to `count / 2`, a base per row), deepest at the top
+ * and lighter down, and between two stages a soft neck from one bar's
+ * ends to the next one's (a `Canvas` under the bars, its ends animated
+ * values), so the stages read as one flow. Beside the bars, each stage's
+ * name over its count, and what it keeps of the stage before; in the gaps,
+ * what is lost there, the biggest drop in the down tone. The bars grow out
+ * of the middle top down, the necks and labels fading in after them; a
+ * channel moves the bars and the necks together on the same scale. The
+ * stage under the pointer or the arrow keys stays lit (the necks, labels
+ * and other bars fade) and is read out over the plot.
+ */
+function Funnel() {
+  const channel = signal<Channel>("all");
+  const hover = signal<number | null>(null);
+  const rows = () => stages(channel());
+  const shown = () => (hover() == null ? undefined : rows()[hover()!]);
+  const overall = () => rows()[FUNNEL_ROWS - 1].count / rows()[0].count;
+  // The stage that keeps the least of the one before it.
+  const leak = () => rows().slice(1).reduce((a, b) => (b.kept < a.kept ? b : a));
+  const lit = (i: number) => hover() == null || hover() === i;
+  const still = reduceMotion();
+  // The necks' ends: each bar's half width, moved with the bars.
+  const halves = REACHED.all.map((c) => createAnimatedValue(halfOf(c)));
+  // The plot's width, for the narrowest stage; the necks' ends follow it
+  // at once (a resize moves nothing).
+  const plotWidth = signal(0);
+  let current: Channel = "all";
+  effect(() => {
+    const width = plotWidth();
+    REACHED[current].forEach((c, i) => halves[i].set(halfFor(c, width)));
+  });
+  // Each neck in after the bar under it has grown; dimmed with the hover
+  // unless it runs into the hovered stage.
+  const necksIn = STAGE_NAMES.slice(1).map(() => createAnimatedValue(still ? 1 : 0));
+  const necksLit = STAGE_NAMES.slice(1).map(() => createAnimatedValue(1));
+  // Each row's labels in once its bar is half grown.
+  const labelsIn = STAGE_NAMES.map(() => createAnimatedValue(still ? 1 : 0));
+  if (!still) {
+    const out = Easing.out(Easing.cubic);
+    labelsIn.forEach((v, i) => v.timing(1, { duration: 360, delay: growsAt(i) + 280, easing: out }));
+    necksIn.forEach((v, k) => v.timing(1, { duration: 420, delay: growsAt(k + 1) + 360, easing: out }));
+  }
+  const move = (v: ReturnType<typeof createAnimatedValue>, to: number, options: { duration: number; easing: ReturnType<typeof Easing.out> }) =>
+    reduceMotion() ? v.set(to) : v.timing(to, options);
+  const onHover = ({ index }: { index: number | null }) => {
+    hover.set(index);
+    necksLit.forEach((v, k) => move(v, index == null || index === k + 1 ? 1 : 0.35, { duration: 160, easing: Easing.out(Easing.quad) }));
+  };
+  const switchTo = (next: Channel) => {
+    current = next;
+    channel.set(next);
+    REACHED[next].forEach((c, i) => move(halves[i], halfFor(c, plotWidth()), { duration: FUNNEL_UPDATE.duration, easing: easeInOut }));
+  };
+  /** A row's fade with the hover. */
+  const dim = (i: number) => ({ opacity: lit(i) ? 1 : 0.35 });
+  const fading = "transition-opacity duration-150 motion-reduce:transition-none";
+  const channelName = () => CHANNELS.find((c) => c.value === channel())!.label;
+  return (
+    <Card icon="stocks" title="Conversion funnel" subtitle="From a first visit to a first trade, and what each stage keeps">
+      <View style={{ gap: 4 }}>
+        <Text style={tipTitle}>{(shown()?.name ?? "Visits to first trade").toUpperCase()}</Text>
+        <View style={{ flexDirection: "row", alignItems: "baseline", gap: 10 }}>
+          <Text style={{ fontSize: 22, fontWeight: "600", letterSpacing: -0.4, color: colors.text, fontVariant: ["tabular-nums"] }}>
+            {shown() ? count(shown()!.count) : percentOf(overall())}
+          </Text>
+          <Text style={{ flexShrink: 1, fontSize: 12, color: colors.muted, fontVariant: ["tabular-nums"] }}>
+            {shown()
+              ? hover() === 0
+                ? "the top of the funnel"
+                : `${percentOf(shown()!.kept)} of ${rows()[hover()! - 1].name.toLowerCase()} · ${percentOf(shown()!.count / rows()[0].count)} of visits`
+              : `${count(rows()[FUNNEL_ROWS - 1].count)} traders of ${count(rows()[0].count)} visits`}
+          </Text>
+        </View>
+      </View>
+      <View style={{ flexDirection: "row", gap: 10, marginTop: size.gap + 6 }}>
+        {/* Each stage's name over its count, end-aligned on its bar's middle. */}
+        <View style={{ width: FUNNEL_LEFT, height: FUNNEL_HEIGHT }}>
+          {STAGE_NAMES.map((name, i) => (
+            <View style={{ position: "absolute", right: 0, left: 0, top: funnelRow(i).middle - 16, height: 32, justifyContent: "center", opacity: labelsIn[i] }}>
+              <View class={fading} style={{ alignItems: "flex-end", gap: 2, ...dim(i) }}>
+                <Text style={{ numberOfLines: 1, fontSize: 11, color: colors.muted }}>{name}</Text>
+                <Text style={{ fontSize: 13, fontWeight: "500", color: colors.text, fontVariant: ["tabular-nums"] }}>{count(rows()[i].count)}</Text>
+              </View>
+            </View>
+          ))}
+        </View>
+        <View style={{ flex: 1, height: FUNNEL_HEIGHT }} onLayout={({ bounds }) => plotWidth.set(bounds.size.width)}>
+          <Plot
+            data={rows()}
+            // Stages down the plot, the counts across it, centered on zero.
+            xScale={{ type: "linear", domain: [-FUNNEL_HALF, FUNNEL_HALF] }}
+            yScale={{ type: "band", paddingInner: FUNNEL_PAD.inner, paddingOuter: FUNNEL_PAD.outer }}
+            // One hue, deepest at the top stage.
+            colorScale={{ type: "ordinal", domain: TIERS.map((_, i) => String(i)), range: TIERS.map((a) => fade(chart.s1, a)) }}
+            appearGeneration={1}
+            motion={{ appear: { duration: FUNNEL_APPEAR, easing: "easeOut" }, update: FUNNEL_UPDATE, enter: { duration: 150 }, exit: { duration: 150 }, pointer: { stiffness: 320, damping: 32 } }}
+            accessibilityLabel={`Conversion funnel, ${channelName()}: ${count(rows()[0].count)} visits to ${count(rows()[FUNNEL_ROWS - 1].count)} first trades, ${percentOf(overall())}`}
+            accessibilityValue={{ text: shown() && `${shown()!.name}: ${count(shown()!.count)}, ${percentOf(shown()!.kept)} of the stage before` }}
+            crossLineClass="w-full h-full"
+            crossLineStyle={{ backgroundColor: alpha(colors.text, 0.045), borderRadius: 6 }}
+            onHoverChange={onHover}
+            focusStyle={focusRing(4)}
+            style={{ height: FUNNEL_HEIGHT }}
+          >
+            {/* The necks, beside the bars: from one bar's ends to the next one's, curving through the gap. Their
+                edges at the bars follow the bars' rounded corners (half a point into them, so no seam shows), so a
+                stage and its necks read as one shape. */}
+            <Canvas
+              style={{ position: "absolute", left: 0, top: 0, right: 0, bottom: 0, pointerEvents: "none" }}
+              draw={(cx, { width }) => {
+                const mid = width / 2;
+                const color = chart.s1;
+                const [r, e] = [FUNNEL_RADIUS, 0.5];
+                const quarter = Math.PI / 2;
+                for (let k = 0; k < FUNNEL_ROWS - 1; k++) {
+                  // The bottom of the bar above, the top of the one below.
+                  const y0 = funnelRow(k).top + funnelRow(k).height;
+                  const y1 = funnelRow(k + 1).top;
+                  const ym = (y0 + y1) / 2;
+                  const a = halves[k].mul(width);
+                  const b = halves[k + 1].mul(width);
+                  const [aR, aL, bR, bL] = [a.add(mid), a.mul(-1).add(mid), b.add(mid), b.mul(-1).add(mid)];
+                  const wash = cx.createLinearGradient(0, y0, 0, y1);
+                  wash.addColorStop(0, fade(color, 0.22 * TIERS[k]));
+                  wash.addColorStop(1, fade(color, 0.22 * TIERS[k + 1]));
+                  cx.fillStyle = wash;
+                  cx.globalAlpha = necksIn[k].mul(necksLit[k]);
+                  cx.beginPath();
+                  // Along the bar above's bottom, its corners included, right to left.
+                  cx.moveTo(aR, y0 - r);
+                  cx.arc(aR.sub(r), y0 - r, r - e, 0, quarter);
+                  cx.arc(aL.add(r), y0 - r, r - e, quarter, 2 * quarter);
+                  cx.lineTo(aL, y0 - r);
+                  // Down its left end and through the gap to the bar below.
+                  cx.lineTo(aL, y0);
+                  cx.bezierCurveTo(aL, ym, bL, ym, bL, y1);
+                  cx.lineTo(bL, y1 + r);
+                  // Along the bar below's top, left to right.
+                  cx.arc(bL.add(r), y1 + r, r - e, 2 * quarter, 3 * quarter);
+                  cx.arc(bR.sub(r), y1 + r, r - e, 3 * quarter, 4 * quarter);
+                  cx.lineTo(bR, y1 + r);
+                  // Up its right end and back.
+                  cx.lineTo(bR, y1);
+                  cx.bezierCurveTo(bR, ym, aR, ym, aR, y0);
+                  cx.closePath();
+                  cx.fill();
+                }
+                cx.globalAlpha = 1;
+              }}
+            />
+            <Bar
+              base={barEnd(plotWidth(), -1)}
+              value={barEnd(plotWidth(), 1)}
+              color="tier"
+              cornerRadii={FUNNEL_RADIUS}
+              stagger={FUNNEL_STAGGER}
+              inactiveOpacity={0.35}
+            />
+          </Plot>
+        </View>
+        {/* What each stage keeps of the one before, on its row; what is lost, in the gap above it. */}
+        <View style={{ width: FUNNEL_RIGHT, height: FUNNEL_HEIGHT }}>
+          {STAGE_NAMES.map((_, i) => (
+            <View style={{ position: "absolute", right: 0, top: funnelRow(i).middle - 9, height: 18, opacity: labelsIn[i] }}>
+              <View
+                class={fading}
+                style={{
+                  height: 18,
+                  justifyContent: "center",
+                  paddingHorizontal: 6,
+                  borderRadius: 9,
+                  backgroundColor: hover() === i ? alpha(chart.s1, 0.22) : alpha(colors.text, 0.06),
+                  ...dim(i),
+                }}
+              >
+                <Text style={{ ...axis, color: colors.text }}>{i === 0 ? "100%" : percentOf(rows()[i].kept)}</Text>
+              </View>
+            </View>
+          ))}
+          {STAGE_NAMES.slice(1).map((name, k) => (
+            <View style={{ position: "absolute", right: 0, top: funnelRow(k).gap - 7, height: 14, justifyContent: "center", opacity: necksIn[k] }}>
+              <Text
+                class={fading}
+                style={{ ...axis, fontSize: 10, paddingRight: 6, color: leak().name === name ? toneColor("down") : colors.faint, ...dim(k + 1) }}
+              >
+                {`−${percentOf(1 - rows()[k + 1].kept)}`}
+              </Text>
+            </View>
+          ))}
+        </View>
+      </View>
+      <View style={{ marginTop: size.gap + 4 }}>
+        <Figures>
+          <Figure label="Overall" value={percentOf(overall())} tone="up" />
+          <Figure label="Biggest drop" value={leak().name} />
+          <Figure label="Lost there" value={`−${percentOf(1 - leak().kept)}`} tone="down" />
+        </Figures>
+      </View>
+      <View style={{ marginTop: size.gap + 4, alignSelf: pointer ? "flex-start" : "stretch", width: pointer ? 200 : undefined }}>
+        <Segmented options={CHANNELS} value={channel()} size={size.switch} onChange={switchTo} />
+      </View>
+    </Card>
+  );
+}
+
+const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+/** The trading days up to Friday, October 30, 2026: weekdays, oldest first. */
+const SESSIONS = (() => {
+  const out: string[] = [];
+  const day = new Date(Date.UTC(2026, 9, 30));
+  while (out.length < 61) {
+    const weekday = day.getUTCDay();
+    if (weekday !== 0 && weekday !== 6) out.unshift(`${MONTH_NAMES[day.getUTCMonth()]} ${day.getUTCDate()}`);
+    day.setUTCDate(day.getUTCDate() - 1);
+  }
+  return out;
+})();
+type Candle = { date: string; open: number; high: number; low: number; close: number; volume: number; dir: "up" | "down"; upVolume?: number; downVolume?: number };
+const cents = (v: number) => Math.round(v * 100) / 100;
+/** A stock's daily candles over those days: a climb, a pullback, a recovery;
+ * volume in millions, heavier on the days that move more. */
+const CANDLES: Candle[] = (() => {
+  const r = random(61);
+  let close = 168;
+  return SESSIONS.map((date, i) => {
+    const open = close * (1 + (r() - 0.5) * 0.012);
+    const drift = i < 24 ? 0.0035 : i < 40 ? -0.0045 : 0.004;
+    close = open * (1 + drift + (r() - 0.5) * 0.026);
+    const high = Math.max(open, close) * (1 + r() * 0.011);
+    const low = Math.min(open, close) * (1 - r() * 0.011);
+    const volume = Math.round((6 + r() * 6) * (1 + (Math.abs(close - open) / open) * 30) * 100) / 100;
+    const dir: Candle["dir"] = close >= open ? "up" : "down";
+    const candle: Candle = { date, open: cents(open), high: cents(high), low: cents(low), close: cents(close), volume, dir };
+    if (dir === "up") candle.upVolume = volume;
+    else candle.downVolume = volume;
+    return candle;
+  });
+})();
+const CANDLE_SPANS = [
+  { value: "1M", label: "1M", days: 21 },
+  { value: "2M", label: "2M", days: 41 },
+  { value: "3M", label: "3M", days: 61 },
+] as const;
+type CandleSpan = (typeof CANDLE_SPANS)[number]["value"];
+const CANDLE_PAD = { inner: 0.3, outer: 0.15 };
+const PRICE_HEIGHT = 168;
+const VOLUME_HEIGHT = 44;
+
+/**
+ * Daily candles over their volume: each day a body from its open to its
+ * close (a `Bar` with a `base` per row) over a wick from its low to its
+ * high (a `Rule`), green up and red down through the plot's `colorScale`,
+ * the last close tagged in the gutter at its height. Under it the day's
+ * volume in the same bands, in the day's tone. The day under the pointer
+ * is marked on both plots and its open, high, low and close read out over
+ * them; a period draws its candles in again.
+ */
+// The x axis's text of a span's days: a new function for each span, so
+// the axis writes its labels again with the rows.
+const dayNames = (rows: { date: string }[]) => (v: number) => rows[v].date;
+
+function Candles() {
+  const span = signal<CandleSpan>("2M");
+  const hover = signal<number | null>(null);
+  // Which plot the pointer is over: the other one marks the day itself.
+  const over = signal<"price" | "volume" | null>(null);
+  const rows = () => CANDLES.slice(-CANDLE_SPANS.find((s) => s.value === span())!.days);
+  const last = () => rows()[rows().length - 1];
+  const shown = () => rows()[hover() != null && hover()! < rows().length ? hover()! : rows().length - 1];
+  /** The close before a day's, what its change is measured from. */
+  const before = (c: Candle) => {
+    const i = CANDLES.indexOf(c);
+    return i > 0 ? CANDLES[i - 1].close : c.open;
+  };
+  const change = () => shown().close - before(shown());
+  const tone = (): Tone => (change() >= 0 ? "up" : "down");
+  const domain = (): [number, number] => {
+    const lo = Math.min(...rows().map((c) => c.low));
+    const hi = Math.max(...rows().map((c) => c.high));
+    const pad = (hi - lo) * 0.08;
+    return [Math.floor(lo - pad), Math.ceil(hi + pad)];
+  };
+  const grid = () => ticks(domain()[0], domain()[1], 4);
+  const y = (v: number) => (1 - (v - domain()[0]) / (domain()[1] - domain()[0])) * PRICE_HEIGHT;
+  const topVolume = () => Math.max(...rows().map((c) => c.volume)) * 1.12;
+  const total = () => (last().close / rows()[0].open - 1) * 100;
+  const ups = () => rows().filter((c) => c.dir === "up").length;
+  const dates = () => {
+    const n = rows().length - 1;
+    return [0, Math.round(n / 3), Math.round((2 * n) / 3), n];
+  };
+  const follow = (which: "price" | "volume") => ({ index }: { index: number | null }) => {
+    hover.set(index);
+    over.set(index == null ? null : which);
+  };
+  // The hovered day's band on the plot the pointer is not over.
+  const mark = (which: "price" | "volume") => (
+    <If when={hover() != null && over() !== which}>
+      <View
+        style={{
+          position: "absolute",
+          left: share(bandAt(hover() ?? 0, rows().length, CANDLE_PAD).start),
+          width: share(bandAt(0, rows().length, CANDLE_PAD).width),
+          top: 0,
+          bottom: 0,
+          backgroundColor: alpha(colors.text, 0.06),
+          pointerEvents: "none",
+        }}
+      />
+    </If>
+  );
+  const ohlc = (label: string, v: number) => (
+    <Text style={{ ...axis, color: colors.faint }}>
+      {`${label} `}
+      <Text style={{ color: colors.text }}>{fixed(v)}</Text>
+    </Text>
+  );
+  const motion = { appear: { duration: 800, easing: "easeOut" }, enter: { duration: 120 }, exit: { duration: 160 } } as const;
+  return (
+    <Card icon="stocks" title="Daily candles" subtitle="Open to close over each day's range, its volume under it">
+      <View style={{ gap: 4 }}>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+          <Text style={{ fontSize: 13, fontFamily: mono, color: colors.muted }}>NSHL</Text>
+          <Text style={tipTitle}>{shown().date.toUpperCase()}</Text>
+        </View>
+        <View style={{ flexDirection: "row", alignItems: "baseline", gap: 10 }}>
+          <Text style={{ fontSize: 22, fontWeight: "600", letterSpacing: -0.4, color: colors.text, fontVariant: ["tabular-nums"] }}>{fixed(shown().close)}</Text>
+          <Text style={{ fontSize: 12, fontWeight: "500", color: toneColor(tone()), fontVariant: ["tabular-nums"] }}>
+            {`${signed(change())}  ${signed((change() / before(shown())) * 100)}%`}
+          </Text>
+        </View>
+        <View style={{ flexDirection: "row", flexWrap: "wrap", columnGap: 12, rowGap: 2 }}>
+          {ohlc("O", shown().open)}
+          {ohlc("H", shown().high)}
+          {ohlc("L", shown().low)}
+          {ohlc("C", shown().close)}
+          <Text style={{ ...axis, color: colors.faint }}>
+            {"VOL "}
+            <Text style={{ color: colors.text }}>{`${fixed(shown().volume, 1)}M`}</Text>
+          </Text>
+        </View>
+      </View>
+      <View style={{ marginTop: size.gap, gap: 6 }}>
+        <Plot
+          data={rows()}
+          xScale={{ type: "band", paddingInner: CANDLE_PAD.inner, paddingOuter: CANDLE_PAD.outer }}
+          yScale={{ type: "linear", domain: domain() }}
+          colorScale={{ type: "ordinal", domain: ["up", "down"], range: [colors.up, colors.down] }}
+          appearGeneration={span()}
+          // No pointer spring: the other plot marks the same day at once, so both move together.
+          motion={motion}
+          accessibilityLabel={`NSHL daily candles, ${span()}: ${fixed(rows()[0].open)} to ${fixed(last().close)}, ${signed(total())}%`}
+          accessibilityValue={{ text: hover() == null ? undefined : `${shown().date}: open ${fixed(shown().open)}, high ${fixed(shown().high)}, low ${fixed(shown().low)}, close ${fixed(shown().close)}` }}
+          crossLineClass="w-full h-full"
+          crossLineStyle={{ backgroundColor: alpha(colors.text, 0.06) }}
+          onHoverChange={follow("price")}
+          focusStyle={focusRing(4)}
+          style={{ height: PRICE_HEIGHT, marginRight: GUTTER }}
+        >
+          <Grid y={grid()} style={{ stroke: colors.line }} />
+          {/* The last close: a dotted level across the days. */}
+          <Grid y={[last().close]} style={{ stroke: alpha(toneColor(last().dir), 0.55), strokeDasharray: "2 3" }} />
+          {/* Wicks under bodies, both in the day's tone. */}
+          <Rule value="high" base="low" color="dir" stagger={0.6} inactiveOpacity={0.3} style={{ strokeWidth: 1 }} />
+          <Bar value="close" base="open" color="dir" cornerRadii={1} stagger={0.6} inactiveOpacity={0.3} />
+          {mark("price")}
+          {/* The gutter: the grid's values clear of the last close's tag. */}
+          <PlotAxis
+            placement="right"
+            tickValues={grid().filter((v) => Math.abs(y(v) - y(last().close)) > 14)}
+            format={(v) => fixed(v, 0)}
+            labelStyle={{ ...axis, paddingLeft: 10 }}
+          />
+          <PlotAxis
+            placement="right"
+            tickValues={[last().close]}
+            format={(v) => fixed(v)}
+            labelStyle={{
+              marginLeft: 6,
+              paddingHorizontal: 5,
+              lineHeight: 18,
+              borderRadius: 5,
+              backgroundColor: toneColor(last().dir),
+              fontSize: 10.5,
+              fontFamily: mono,
+              fontWeight: "600",
+              color: colors.surface,
+              fontVariant: ["tabular-nums"],
+            }}
+          />
+        </Plot>
+        <Plot
+          data={rows()}
+          xScale={{ type: "band", paddingInner: CANDLE_PAD.inner, paddingOuter: CANDLE_PAD.outer }}
+          yScale={{ type: "linear", domain: [0, topVolume()] }}
+          appearGeneration={span()}
+          motion={motion}
+          accessibilityLabel={`NSHL volume, ${span()}: ${fixed(rows().reduce((s, c) => s + c.volume, 0) / rows().length, 1)} million a day`}
+          accessibilityValue={{ text: hover() == null ? undefined : `${shown().date}: ${fixed(shown().volume, 1)} million` }}
+          crossLineClass="w-full h-full"
+          crossLineStyle={{ backgroundColor: alpha(colors.text, 0.06) }}
+          onHoverChange={follow("volume")}
+          focusStyle={focusRing(4)}
+          style={{ height: VOLUME_HEIGHT, marginRight: GUTTER, marginBottom: BELOW }}
+        >
+          {/* A day's volume in one of two series, so each takes its tone, faded under the candles'. */}
+          <Bar value="upVolume" stack="volume" cornerRadii={{ topLeft: 1, topRight: 1 }} stagger={0.6} inactiveOpacity={0.3} style={{ fill: alpha(colors.up, 0.45) }} />
+          <Bar value="downVolume" stack="volume" cornerRadii={{ topLeft: 1, topRight: 1 }} stagger={0.6} inactiveOpacity={0.3} style={{ fill: alpha(colors.down, 0.45) }} />
+          <Grid y={[0]} style={{ stroke: colors.border }} />
+          {mark("volume")}
+          <PlotAxis placement="right" tickValues={[topVolume() / 1.12]} format={(v) => `${fixed(v, 0)}M`} labelStyle={{ ...axis, paddingLeft: 10 }} />
+          <PlotAxis tickValues={dates()} format={dayNames(rows())} labelStyle={below} />
+        </Plot>
+      </View>
+      <View style={{ marginTop: size.gap + 4 }}>
+        <Figures>
+          <Figure label="High" value={fixed(Math.max(...rows().map((c) => c.high)))} />
+          <Figure label="Low" value={fixed(Math.min(...rows().map((c) => c.low)))} />
+          <Figure label="Change" value={`${signed(total(), 1)}%`} tone={total() >= 0 ? "up" : "down"} />
+          <Figure label="Up days" value={`${ups()} / ${rows().length}`} />
+        </Figures>
+      </View>
+      <View style={{ marginTop: size.gap + 4, alignSelf: pointer ? "flex-start" : "stretch", width: pointer ? 180 : undefined }}>
+        <Segmented
+          options={CANDLE_SPANS}
+          value={span()}
+          size={size.switch}
+          onChange={(next) => {
+            span.set(next);
+            hover.set(null);
+          }}
+        />
+      </View>
+    </Card>
+  );
+}
+
 /** A portfolio's lean on six factors, scored 0 to 100, and two benchmarks'. */
 const FACTORS = [
   { name: "Value", ours: 72, index: 46, peers: 64 },
@@ -1220,13 +1914,18 @@ function Watchlist() {
  * pointer read out; a portfolio's value over its underwater plot, the
  * worst run shaded and the hovered day marked on both; capacity rings that
  * sweep in for each period; revenue as a donut whose hovered slice lifts;
- * sales as bars side by side or stacked; a portfolio's factor exposure
- * as a radar against a benchmark, the factor under the pointer read out;
- * a quarter's income as flows from its segments to net income; and a
- * watchlist of sparklines that draw in once. Values on the axes are small
+ * sales as bars side by side or stacked; bars that span a range of their
+ * row (a `base` per row): a quarter's profit bridge from revenue to net
+ * profit, each step from where the last one left the total, an
+ * onboarding funnel centered on its middle, and daily candles, bodies
+ * from open to close over `Rule` wicks from low to high, with their volume
+ * under them; a portfolio's factor exposure as a radar against a
+ * benchmark, the factor under the pointer read out; a quarter's income
+ * as flows from its segments to net income; and a watchlist of
+ * sparklines that draw in once. Values on the axes are small
  * monospaced figures the plots' `PlotAxis` parts lay along their edges,
  * grids hairlines, tooltips floating cards with a caps title.
  */
 export function Charts() {
-  return <DemoPage cards={[Live, Depth, Drawdown, Capacity, Revenue, Sales, Factors, Flows, Watchlist]} />;
+  return <DemoPage cards={[Live, Depth, Drawdown, Capacity, Revenue, Sales, Bridge, Funnel, Candles, Factors, Flows, Watchlist]} />;
 }
