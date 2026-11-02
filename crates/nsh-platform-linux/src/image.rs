@@ -1018,7 +1018,9 @@ pub(crate) fn resized(surface: &Rc<Surface>, view: &NshView) {
             .map_or(1.0, |l| l.density());
         let longest = want.longest(picture.natural, density, source.size);
         let shown = picture.texture.width().max(picture.texture.height()) as u32;
-        if longest <= shown {
+        // reload when it is shown larger than decoded, or much smaller (a texture far past its pixels is
+        // drawn with mipmaps and blurs: a frame that shrank after its first decode, e.g. once the ratio is known)
+        if longest <= shown && shown <= longest + longest / 2 {
             return;
         }
         (image.generation, source.clone(), want)
