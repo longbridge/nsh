@@ -94,8 +94,8 @@ pub use crate::{
     },
     button::{Button, ButtonElement, ButtonEvent, ButtonProps, button},
     calendar::{
-        Calendar, CalendarElement, CalendarEvent, CalendarItemKind, CalendarItemState,
-        CalendarProps, CalendarValue, Date, Matcher, YearRange, calendar,
+        Calendar, CalendarElement, CalendarEntry, CalendarEvent, CalendarItemKind, CalendarProps,
+        CalendarValue, Date, Matcher, YearRange, calendar,
     },
     carousel::{
         Carousel, CarouselContent, CarouselContentElement, CarouselContentProps,
@@ -190,7 +190,7 @@ pub use crate::{
         set_scrollbar_theme,
     },
     select::{
-        Select, SelectElement, SelectEvent, SelectGroup, SelectItem, SelectItemState, SelectProps,
+        Select, SelectElement, SelectEntry, SelectEvent, SelectGroup, SelectItem, SelectProps,
         SelectValue, select,
     },
     sheet::{Sheet, SheetElement, SheetEvent, SheetProps, sheet},
@@ -213,7 +213,7 @@ pub use crate::{
     theme::{DEFAULT_THEME, Theme, ThemeError, theme, theme_overrides, tokens_of},
     time_field::{
         HourCycle, TimeField, TimeFieldElement, TimeFieldEvent, TimeFieldProps,
-        TimeFieldSegmentState, TimeOfDay, TimePrecision, TimeSegment, time_field,
+        TimeFieldSegmentEntry, TimeOfDay, TimePrecision, TimeSegment, time_field,
     },
     toast::{
         Anchor, SwipeDirection, Toast, ToastAdvance, ToastElement, ToastEvent, ToastManager,
