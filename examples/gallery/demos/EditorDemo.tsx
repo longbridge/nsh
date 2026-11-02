@@ -294,9 +294,46 @@ export function EditorDemo() {
   );
   const diagnostics = computed(() => problems().map((p) => p.diagnostic));
   const count = (severity: EditorDiagnostic["severity"]) => diagnostics().filter((d) => (d.severity ?? "error") === severity).length;
+  // The lines edited since the sample, as version control marks them: in
+  // the gutter and the overview ruler's left lane.
+  const edited = signal(0);
+  const changes = computed<EditorDecoration[]>(() => {
+    edited();
+    const lang = language();
+    const before = SAMPLES[lang].text.split("\n");
+    const after = (texts[lang] ?? SAMPLES[lang].text).split("\n");
+    // One changed block: the lines between what the two texts start and
+    // end with alike.
+    let head = 0;
+    while (head < before.length && head < after.length && before[head] === after[head]) head++;
+    let tail = 0;
+    while (tail < before.length - head && tail < after.length - head && before[before.length - 1 - tail] === after[after.length - 1 - tail]) tail++;
+    const removed = before.length - head - tail;
+    const added = after.length - head - tail;
+    const mark = (start: number, end: number, color: string, placement?: "before"): EditorDecoration => ({
+      range: { start: { line: start, column: 0 }, end: { line: end, column: 0 } },
+      gutter: { class: color, placement },
+      overviewRuler: { lane: "left", class: color },
+    });
+    const out: EditorDecoration[] = [];
+    const modified = Math.min(removed, added);
+    if (modified > 0) out.push(mark(head, head + modified, "bg-amber-500"));
+    if (added > removed) out.push(mark(head + modified, head + added, "bg-green-500"));
+    // Deleted lines: a boundary where they were.
+    if (removed > added) out.push(mark(head + added, head + added, "bg-red-500", "before"));
+    return out;
+  });
   const decorations = computed<EditorDecoration[]>(() => {
-    if (!typescript()) return [];
-    const out: EditorDecoration[] = literals().map(({ range, color }) => ({ range, style: { backgroundColor: `${color}40` } }));
+    // The problems on the overview ruler's right lane.
+    const out: EditorDecoration[] = [
+      ...changes(),
+      ...diagnostics().map((d) => ({
+        range: d.range,
+        overviewRuler: { lane: "right" as const, class: (d.severity ?? "error") === "error" ? "bg-red-500" : "bg-amber-500" },
+      })),
+    ];
+    if (!typescript()) return out;
+    out.push(...literals().map(({ range, color }) => ({ range, style: { backgroundColor: `${color}40` } })));
     const lit = flash();
     if (lit) out.push({ range: lit, class: "bg-brand/25", lineClass: "bg-brand/10" });
     return out;
@@ -513,6 +550,7 @@ export function EditorDemo() {
               inlineCompletionDelay={150}
               onChange={({ value }) => {
                 texts[lang] = value;
+                edited.set(edited() + 1);
                 if (lsp) changed(value);
               }}
               onSelectionChange={({ selections: value }) => selections.set(value)}

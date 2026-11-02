@@ -69,6 +69,7 @@ struct EnvSignals {
     font_scale: Memo<f32>,
     reduce_motion: Memo<bool>,
     screen_reader: Memo<bool>,
+    rtl: Memo<bool>,
     pixel_ratio: Memo<f32>,
     locale: Memo<Locale>,
     screen_color: Memo<bool>,
@@ -94,6 +95,7 @@ impl EnvSignals {
                 font_scale: part!(font_scale),
                 reduce_motion: part!(reduce_motion),
                 screen_reader: part!(screen_reader),
+                rtl: part!(rtl),
                 pixel_ratio: part!(pixel_ratio),
                 locale: part!(locale),
                 screen_color: part!(screen_color),
@@ -235,6 +237,19 @@ pub fn screen_reader() -> bool {
     env(|e| e.screen_reader)
 }
 
+/// Whether the surface lays out right to left: the root's direction,
+/// which follows the user's language unless the app sets the root's
+/// `direction` (reading subscribes).
+///
+/// The core's part of `nsh-base`'s controls, which swap Left and Right by
+/// it (WAI-ARIA's arrow keys in a right-to-left layout). Apps set a view's
+/// `direction` and style with logical properties or `rtl:` classes
+/// instead: Rust's `rtl()` is dropped (`docs/dev/api-naming.md`).
+#[doc(hidden)]
+pub fn layout_rtl() -> bool {
+    env(|e| e.rtl)
+}
+
 /// Device pixels per point (TS: `pixelRatio()`).
 pub fn pixel_ratio() -> f32 {
     env(|e| e.pixel_ratio)
@@ -311,7 +326,7 @@ pub fn tokens() -> Arc<Tokens> {
 /// Draws the app with the design tokens `tokens` (the app's own, which an
 /// embedding app's still win over), in place of the UI set's defaults or
 /// the theme file's: Tailwind's token classes, [`tokens`] and the
-/// platform's own controls (Linux's menus) follow. An app that picks its
+/// platform's own controls (Linux's menus, Android's alerts) follow. An app that picks its
 /// theme while it runs sets it here (`set_tokens(theme.into())` of an
 /// `nsh_base::Theme`).
 pub fn set_tokens(tokens: impl Into<Tokens>) {
@@ -832,6 +847,33 @@ pub fn next_frame() -> Answer<Instant> {
     answer
 }
 
+/// Runs `f` once the app has handled every event emitted so far
+/// ([`super::Scope::emit`]) and the props it set in answer have reached the
+/// components: a view that shows a value of its own until the app's comes
+/// back (a drag's, before `onChange` returns as `value`) lets go of it here,
+/// with no frame of the app's earlier value between. In a TSX app that is
+/// the commit after the one that hands the events to JS, before the views
+/// render (JS's handlers and the ops they queue run in between); with a
+/// Rust owner, whose listeners run when the event is emitted, the commit
+/// after the one that renders what they changed. What `f` changes renders
+/// in that commit, which goes out in the batch of the app's answer. It runs
+/// under the current owner, once: not when that owner is disposed first
+/// (the view went).
+///
+/// Time does not tell: [`set_timeout`] with no delay and [`next_frame`]
+/// run before the app has answered when the event came in the same turn
+/// (a timer due now fires before the turn's commit, which is where JS
+/// first hears the event), and later than needed otherwise (a frame
+/// after). `after_answer` follows the events themselves, whatever the
+/// clock. It costs nothing when unused: no closure kept, no extra commit
+/// round.
+pub fn after_answer(f: impl FnOnce() + 'static) {
+    executor().after_answer(task::AfterAnswer {
+        owner: Owner::current(),
+        f: Box::new(f),
+    });
+}
+
 /// Runs blocking `f` on the runtime's blocking threads (in a task: await
 /// its result; `tokio::task::spawn_blocking`). Not in WebAssembly: code
 /// that should also run on the web uses the engine's services instead
@@ -982,6 +1024,65 @@ pub fn watch_scroll(
     add_watch(Rc::new(target), handler);
 }
 
+impl super::ElementRef {
+    /// Listens to the keyboard focus coming into the element: onto it or
+    /// an element inside it, from outside (GPUI's `on_focus_in` of a focus
+    /// handle; the element enters `focus-within`). Moving between elements
+    /// inside it is no new coming in. The content of an overlay is inside
+    /// the element the overlay is in, wherever it shows: a popup's trigger
+    /// and the popup are both inside the view holding them.
+    ///
+    /// It listens while the current owner lives, to whatever element
+    /// carries the ref, and runs at the end of the commit round the focus
+    /// moved in (what it changes goes out in the same batch). The focus is
+    /// what the platform reports: an input's, or a view's that Tab or
+    /// `focus()` reached where the keyboard moves between views (macOS,
+    /// the web).
+    pub fn on_focus_in(&self, listener: impl Fn() + 'static) {
+        let element = *self;
+        watch_focus(
+            move || element.node(),
+            move |within| {
+                if within {
+                    listener();
+                }
+            },
+        );
+    }
+
+    /// Listens to the keyboard focus leaving the element: going from it
+    /// or an element inside it to one outside, or to none (GPUI's
+    /// `on_focus_out`; the element leaves `focus-within`). As
+    /// [`Self::on_focus_in`] otherwise.
+    pub fn on_focus_out(&self, listener: impl Fn() + 'static) {
+        let element = *self;
+        watch_focus(
+            move || element.node(),
+            move |within| {
+                if !within {
+                    listener();
+                }
+            },
+        );
+    }
+}
+
+/// Watches the focus coming into and leaving `target` while the current
+/// owner lives.
+fn watch_focus(target: impl Fn() -> Option<NodeId> + 'static, handler: impl Fn(bool) + 'static) {
+    let owner = Owner::current();
+    let handler = Rc::new(move |within: bool| owner.run(|| handler(within)));
+    let watches = executor().watches.clone();
+    let id = watches.borrow_mut().add_focus(Rc::new(target), handler);
+    let weak = Rc::downgrade(&watches);
+    cleanup(move || {
+        if let Some(watches) = weak.upgrade() {
+            let removed = watches.borrow_mut().remove_focus(id);
+            drop(removed);
+        }
+    });
+}
+
 impl super::NodeRef {
     /// Scrolls the scroll view (or list, along its axis) to a content
     /// offset, as [`super::ElementRef::scroll_to`] does: for a view holding
@@ -1009,9 +1110,11 @@ impl super::NodeRef {
 ///
 /// The core looks at the end of a commit round: in the round the watch is
 /// made in, after [`super::OrderWatch::invalidate`] (an element came), and
-/// after a round that moved a node (an app's keyed reorder), asking
-/// `elements` untracked; what the handler changes goes out in the same
-/// batch. A round that moved nothing and invalidated nothing costs nothing.
+/// after a round that moved a node inside the subtree the elements share
+/// (an app's keyed reorder of them), asking `elements` untracked; what the
+/// handler changes goes out in the same batch. A round that moved nothing
+/// there and invalidated nothing costs nothing: a list of rows reordered,
+/// each row with a group of its own, costs those groups nothing.
 #[doc(hidden)]
 pub fn watch_order(
     elements: impl Fn() -> Vec<super::ElementRef> + 'static,

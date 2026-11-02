@@ -513,9 +513,11 @@ pub(super) struct Components {
     /// While a view's slot content is matched: the nested component's host
     /// and the slot (its regions are the slot's).
     pub(super) filling: Option<(NodeId, &'static str)>,
-    /// A node moved in the tree since the order watches last looked
-    /// (`core/watch.rs`): an app's keyed reorder of their elements.
-    pub(super) moved: bool,
+    /// The parents nodes moved out of and into since the order watches
+    /// last looked (`core/watch.rs`), as an app's keyed reorder moves its
+    /// rows: only a watch whose elements share one of them (or an ancestor
+    /// of one) looks again.
+    pub(super) moved: Vec<NodeId>,
     /// The lists components place (the glue's, of `Items` props) -> the
     /// row function the component's view gave last, and the number of rows
     /// its wrappers last saw.
@@ -644,7 +646,7 @@ impl Default for Components {
             styles: FxHashMap::default(),
             merges: FxHashMap::default(),
             filling: None,
-            moved: false,
+            moved: Vec::new(),
             lists: FxHashMap::default(),
             environment: Environment::default(),
             executor: Rc::new(Executor::default()),
@@ -853,7 +855,8 @@ impl<M: TextEngine> Core<M> {
                 .runtime
                 .set_tokens(self.components.tokens.clone());
         }
-        // The platform's own controls (menus) take their colors from them.
+        // The platform's own controls (menus, Android's alerts) take their
+        // colors from them.
         self.commands.push((
             crate::ROOT_ID,
             Command::Tokens(self.components.tokens.clone()),
@@ -1010,6 +1013,33 @@ impl<M: TextEngine> Core<M> {
             for (host, message) in executor.take_failures() {
                 self.component_failed(host, message);
             }
+        }
+    }
+
+    /// Runs the closures that waited for the app's answer to the events
+    /// handed to JS before this commit ([`crate::element::after_answer`]),
+    /// each under its owner; one whose owner went is dropped unrun.
+    pub(super) fn run_answers(&mut self) {
+        let _entered = self.components.runtime.enter();
+        for answer in self.components.executor.take_due_answers() {
+            let crate::element::AfterAnswer { owner, f } = answer;
+            let result = if owner == crate::element::Owner::detached() {
+                caught(f)
+            } else if owner.is_live() {
+                caught(|| owner.scope(f))
+            } else {
+                drop_caught(f);
+                continue;
+            };
+            if let Err(message) = result {
+                match self.host_of_owner(owner) {
+                    Some(host) => self.component_failed(host, message),
+                    None => {
+                        log::error!(target: "js", "a closure after the app's answer failed: {message}")
+                    }
+                }
+            }
+            self.apply_actions();
         }
     }
 

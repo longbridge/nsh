@@ -273,7 +273,11 @@ impl Kind {
             Tag::Video => Kind::Video,
             Tag::Native => Kind::Native,
             Tag::Overlay => Kind::Overlay,
-            Tag::Shader => Kind::Shader,
+            Tag::Shader
+            | Tag::ShaderEffect
+            | Tag::ShaderTransition
+            | Tag::ScreenEffect
+            | Tag::ScreenTransition => Kind::Shader,
         }
     }
 
@@ -433,8 +437,38 @@ struct ShaderNode {
     shader: Option<crate::shader::Shader>,
     uniforms: crate::shader::ShaderUniforms,
     paused: bool,
+    /// What the layer draws: the element it is (`Shader`, `ShaderEffect`, ...).
+    role: crate::shader::ShaderRole,
+    /// `progress` (effects).
+    progress: crate::shader::ShaderProgress,
+    /// `maxSampleOffset` (effects and transitions).
+    overflow: Points,
+    /// `value` (transitions), and the one the transition last showed
+    /// (`None` before the first: it starts no transition).
+    value: Option<crate::shader::TransitionKey>,
+    shown: Option<crate::shader::TransitionKey>,
+    /// `duration` in milliseconds (transitions).
+    duration: Option<f32>,
+    /// `fallback` (transitions).
+    fallback: crate::TransitionFallback,
     /// What the platform shows (`None`: nothing, as a view).
     layer: Option<Arc<crate::shader::ShaderLayer>>,
+}
+
+/// How long a shader transition runs by default.
+const DEFAULT_TRANSITION_MS: f32 = 300.0;
+
+/// The role of a shader element's layer.
+fn shader_role(tag: Tag) -> Option<crate::shader::ShaderRole> {
+    use crate::shader::ShaderRole as R;
+    Some(match tag {
+        Tag::Shader => R::Fill,
+        Tag::ShaderEffect => R::Effect,
+        Tag::ShaderTransition => R::Transition,
+        Tag::ScreenEffect => R::Screen,
+        Tag::ScreenTransition => R::ScreenTransition,
+        _ => return None,
+    })
 }
 
 #[derive(Debug, Default)]
@@ -984,6 +1018,15 @@ pub struct Core<M: TextEngine> {
     /// Compiled shaders by the hash of their source, with their errors
     /// (an app setting the same source again compiles it once).
     shaders: rustc_hash::FxHashMap<u64, Result<crate::shader::Shader, crate::shader::ShaderError>>,
+    /// Shader transitions this commit starts ([`MountItem::ShaderTransition`]),
+    /// put first in its batch.
+    transition_starts: Vec<MountItem>,
+    /// The shader views whose layers read pictures (`sample_content`, ...).
+    pictured: rustc_hash::FxHashSet<NodeId>,
+    /// The parents views left this commit, while any shader reads
+    /// pictures: what is above them changed though their mount items no
+    /// longer lead there ([`Core::mark_shader_inputs`]).
+    unlinked_from: Vec<NodeId>,
     /// Live screens, modals and header items.
     roots: Vec<Key>,
     /// Attached input accessories by `nativeID`.
@@ -1038,6 +1081,21 @@ pub struct Core<M: TextEngine> {
     /// Nodes whose classes say `pointer-events-none`: without any, moving
     /// nodes skips what CSS's inherited `pointer-events` needs.
     pointer_none_classes: u32,
+    /// The view with the keyboard focus, by key and id (keys are reused),
+    /// as the platform reports it (`classes::focus_reported`).
+    focus: Option<(Key, NodeId)>,
+    /// The focus and the views around it, innermost first: the views in
+    /// `focus-within` (`classes::update_focus_within`).
+    focus_chain: Vec<(Key, NodeId)>,
+    /// The chain before, reused.
+    focus_scratch: Vec<(Key, NodeId)>,
+    /// The focus was reported or a view of its chain moved since the
+    /// chain was last worked out: the next commit round does it once,
+    /// whatever order the reports came in.
+    focus_moved: bool,
+    /// The chain changed since the focus watches last looked
+    /// (`ElementRef::on_focus_in`).
+    focus_within_changed: bool,
     /// Nodes whose `position: fixed` changed: made overlays (or views again)
     /// as the commit starts ([`Core::sync_fixed`]).
     fixed_changed: Vec<(Key, NodeId)>,
@@ -1151,6 +1209,9 @@ impl<M: TextEngine> Core<M> {
             sticky_warned: false,
             inset_warned: false,
             shaders: Default::default(),
+            transition_starts: Vec::new(),
+            pictured: Default::default(),
+            unlinked_from: Vec::new(),
             roots: Vec::new(),
             accessories: Default::default(),
             header_heights: (Points(44.0), Points(96.0)),
@@ -1175,6 +1236,11 @@ impl<M: TextEngine> Core<M> {
             status_bar_nodes: Vec::new(),
             status_bars_moved: false,
             pointer_none_classes: 0,
+            focus: None,
+            focus_chain: Vec::new(),
+            focus_scratch: Vec::new(),
+            focus_moved: false,
+            focus_within_changed: false,
             fixed_changed: Vec::new(),
             zero_advances: Default::default(),
             ch_styled: Vec::new(),
@@ -1565,6 +1631,16 @@ impl<M: TextEngine> Core<M> {
     /// results) into `out`, in order.
     pub fn take_events(&mut self, out: &mut Vec<crate::element::JsEvent>) {
         out.append(&mut self.events);
+        // The caller hands them to JS before the next commit: what waits for
+        // the app's answer to them runs there ([`crate::element::after_answer`]).
+        self.components.executor.hand_answers();
+    }
+
+    /// Whether the next commit runs closures that waited for the app's
+    /// answer to events taken already ([`crate::element::after_answer`]):
+    /// the engine commits again rather than leave them for later input.
+    pub fn has_due_answers(&self) -> bool {
+        self.components.executor.has_due_answers()
     }
 
     /// Registers a custom font (TrueType / OpenType data) with the text
@@ -1917,6 +1993,12 @@ impl<M: TextEngine> Core<M> {
     /// Finishes a turn: rebuilds text, runs layout, updates lists and
     /// returns the mount items, or `None` when nothing changed.
     pub fn commit(&mut self) -> Option<MountBatch> {
+        // JS has handled the events taken before this commit and its ops
+        // are applied: what waited for that sees the app's props, and what
+        // it changes renders with them.
+        if self.components.executor.has_due_answers() {
+            self.run_answers();
+        }
         self.commit_round();
         // The components' own lists bind the cells the layout asked for
         // here, and lay out again (JS's lists ask JS, through the engine);
@@ -1941,6 +2023,13 @@ impl<M: TextEngine> Core<M> {
             self.send_outer_scrolls();
         }
         self.split_scoped_frames();
+        self.mark_shader_inputs();
+        if !self.transition_starts.is_empty() {
+            // Before the changes they are about: the platform pictures what
+            // showed before them.
+            let starts = std::mem::take(&mut self.transition_starts);
+            self.mount.splice(0..0, starts);
+        }
         if self.mount.is_empty() || matches!(self.mount[..], [MountItem::LayoutAnimation(_)]) {
             self.mount.clear();
             None
@@ -1961,6 +2050,12 @@ impl<M: TextEngine> Core<M> {
         }
         // The views' patches and the views to make first.
         self.render_components();
+        // The focus reported since, after the components made and released
+        // what they did: one change of the chain, the views both chains
+        // share untouched.
+        if self.focus_moved {
+            self.update_focus_within();
+        }
         self.sync_colors();
         self.sync_ch();
         self.sync_fixed();
@@ -2239,7 +2334,25 @@ impl<M: TextEngine> Core<M> {
     fn create(&mut self, id: NodeId, tag: Tag) -> Result<(), ApplyError> {
         let kind = Kind::of(tag);
         let key = self.alloc(id, kind)?;
-        let style = crate::style::unstyled_layout();
+        let mut style = crate::style::unstyled_layout();
+        if let Some(role) = shader_role(tag) {
+            self.nodes[key as usize]
+                .shader
+                .as_mut()
+                .expect("a shader node")
+                .role = role;
+            if matches!(
+                role,
+                crate::shader::ShaderRole::Screen | crate::shader::ShaderRole::ScreenTransition
+            ) {
+                // A screen's effect takes no space: the surface is its box.
+                style.position = taffy::Position::Absolute;
+                style.size = taffy::Size {
+                    width: taffy::Dimension::length(0.0),
+                    height: taffy::Dimension::length(0.0),
+                };
+            }
+        }
         let layout = match leaf_context(kind) {
             Some(context) => self.layout.new_leaf_with_context(style.clone(), context),
             None => self.layout.new_leaf(style.clone()),
@@ -3029,8 +3142,82 @@ impl<M: TextEngine> Core<M> {
         }
     }
 
-    /// A shader's `source`, program, `uniforms` or `paused`: the layer is
-    /// made again, and sent when it changed.
+    /// Tells the platform which shaders' pictures this commit changed
+    /// ([`MountItem::ShaderInput`]): the effects and transitions with a
+    /// changed view in their subtree (themselves included) or one that left
+    /// it, and every
+    /// shader that reads what is behind it, and every screen effect or
+    /// transition, once anything changed.
+    fn mark_shader_inputs(&mut self) {
+        let unlinked_from = std::mem::take(&mut self.unlinked_from);
+        // A batch that is only a layout animation is dropped (`commit`):
+        // nothing in it changed what the pictures show.
+        if self.pictured.is_empty()
+            || self
+                .mount
+                .iter()
+                .all(|item| matches!(item, MountItem::LayoutAnimation(_)))
+        {
+            return;
+        }
+        use crate::shader::{ShaderInput as I, ShaderRole as R};
+        let ids: Vec<NodeId> = self.pictured.iter().copied().collect();
+        let mut marked: Vec<NodeId> = Vec::new();
+        let mut subtrees: Vec<(NodeId, Key)> = Vec::new();
+        for id in ids {
+            let Ok(key) = self.key(id) else {
+                self.pictured.remove(&id);
+                continue;
+            };
+            let Some(layer) = self.nodes[key as usize]
+                .shader
+                .as_ref()
+                .and_then(|s| s.layer.as_ref())
+            else {
+                continue;
+            };
+            let inputs = layer.shader.inputs();
+            if inputs.contains(I::Backdrop) || matches!(layer.role, R::Screen | R::ScreenTransition)
+            {
+                marked.push(id);
+            } else if matches!(layer.role, R::Effect | R::Transition) {
+                subtrees.push((id, key));
+            }
+        }
+        if !subtrees.is_empty() {
+            let mut seen = rustc_hash::FxHashSet::default();
+            // A view that left (`Remove`, `Delete`) has no parent to walk
+            // up from any more: its old parent stands in for it.
+            let views = self.mount.iter().filter_map(MountItem::view);
+            for view in views.chain(unlinked_from) {
+                if !seen.insert(view) {
+                    continue;
+                }
+                let Ok(mut key) = self.key(view) else {
+                    continue;
+                };
+                loop {
+                    if let Some(&(id, _)) = subtrees.iter().find(|(_, k)| *k == key)
+                        && !marked.contains(&id)
+                    {
+                        marked.push(id);
+                    }
+                    let parent = self.nodes[key as usize].parent;
+                    if parent == NO_KEY {
+                        break;
+                    }
+                    key = parent;
+                }
+            }
+        }
+        for id in marked {
+            self.mount.push(MountItem::ShaderInput { id });
+        }
+    }
+
+    /// A shader's `source`, program, `uniforms` or `paused`, or an effect's
+    /// or transition's props: the layer is made again, and sent when it
+    /// changed; a transition whose `value` changed starts.
     fn set_shader_prop(&mut self, key: Key, prop: Prop) {
         let id = self.nodes[key as usize].id;
         let Some(state) = self.nodes[key as usize].shader.as_mut() else {
@@ -3080,22 +3267,63 @@ impl<M: TextEngine> Core<M> {
             }
             Prop::Uniforms(uniforms) => state.uniforms = uniforms,
             Prop::ShaderPaused(paused) => state.paused = paused,
+            Prop::ShaderProgress(progress) => state.progress = progress,
+            Prop::MaxSampleOffset(overflow) => state.overflow = overflow.max(Points::ZERO),
+            Prop::TransitionValue(value) => state.value = value,
+            Prop::TransitionDuration(duration) => state.duration = duration,
+            Prop::TransitionFallback(fallback) => state.fallback = fallback,
             _ => return,
         }
         let state = self.nodes[key as usize]
             .shader
             .as_mut()
             .expect("shader node");
-        let layer = state.shader.clone().map(|shader| {
+        use crate::shader::ShaderRole as R;
+        let transition = matches!(state.role, R::Transition | R::ScreenTransition);
+        // A transition without a shader of its own runs its fallback.
+        let program = state.shader.clone().or_else(|| {
+            (transition && state.fallback == crate::TransitionFallback::Fade)
+                .then(crate::shader::crossfade)
+        });
+        let layer = program.map(|shader| {
             let mut warnings = Vec::new();
-            let mut layer =
-                crate::shader::ShaderLayer::new(shader, &state.uniforms.0, &mut warnings);
-            layer.paused = state.paused;
+            let (progress, animated) = match state.progress {
+                crate::shader::ShaderProgress::Number(n) => (n, None),
+                crate::shader::ShaderProgress::Animated(node) => (Percentage(0.0), Some(node)),
+            };
+            let layer = crate::shader::ShaderLayer::new(shader, &state.uniforms.0, &mut warnings)
+                .with_paused(state.paused)
+                .with_role(state.role)
+                .with_overflow(state.overflow)
+                .with_progress(progress, animated);
             for warning in warnings {
                 log::warn!(target: "js", "the shader of node {id}: {warning}");
             }
             Arc::new(layer)
         });
+        if transition && state.value != state.shown {
+            let before = std::mem::replace(&mut state.shown, state.value.clone());
+            let ms = state.duration.unwrap_or(DEFAULT_TRANSITION_MS).max(0.0);
+            if before.is_some() && layer.is_some() && ms > 0.0 {
+                self.transition_starts.push(MountItem::ShaderTransition {
+                    id,
+                    duration: std::time::Duration::from_micros(
+                        (f64::from(ms) * 1000.0).round() as u64
+                    ),
+                });
+            }
+        }
+        let state = self.nodes[key as usize]
+            .shader
+            .as_mut()
+            .expect("shader node");
+        if layer.as_ref().is_some_and(|l| {
+            !l.shader.inputs().is_empty() || matches!(l.role, R::Screen | R::ScreenTransition)
+        }) {
+            self.pictured.insert(id);
+        } else {
+            self.pictured.remove(&id);
+        }
         if layer == state.layer {
             return;
         }
@@ -3146,8 +3374,15 @@ impl<M: TextEngine> Core<M> {
             prop => prop,
         };
         let prop = self.check_prop(key, prop);
-        if let Prop::ShaderSource(_) | Prop::Shader(_) | Prop::Uniforms(_) | Prop::ShaderPaused(_) =
-            prop
+        if let Prop::ShaderSource(_)
+        | Prop::Shader(_)
+        | Prop::Uniforms(_)
+        | Prop::ShaderPaused(_)
+        | Prop::ShaderProgress(_)
+        | Prop::MaxSampleOffset(_)
+        | Prop::TransitionValue(_)
+        | Prop::TransitionDuration(_)
+        | Prop::TransitionFallback(_) = prop
         {
             self.set_shader_prop(key, prop);
             return Ok(());
@@ -3635,6 +3870,10 @@ impl<M: TextEngine> Core<M> {
                 self.set_part_style(key, classes::Part::Expanded, patch);
                 return Ok(());
             }
+            Prop::FocusWithinStyle(patch) => {
+                self.set_part_style(key, classes::Part::FocusWithin, patch);
+                return Ok(());
+            }
             Prop::ProjectedStates(states) => {
                 self.set_projected_states(key, states);
                 return Ok(());
@@ -4058,9 +4297,10 @@ impl<M: TextEngine> Core<M> {
     ) -> Result<(), ApplyError> {
         let parent = self.key(parent_id)?;
         let child = self.key(child_id)?;
-        if self.nodes[child as usize].parent != NO_KEY {
+        let from = self.nodes[child as usize].parent;
+        if from != NO_KEY {
             self.input_bar_moves(child);
-            self.components.moved = true;
+            self.note_move(from, parent);
         }
         let mut before = before.map(|b| self.key(b)).transpose()?;
         // Appended below the built-in bar, which stays on top.
@@ -4076,6 +4316,23 @@ impl<M: TextEngine> Core<M> {
         }
         if child == self.root || self.is_ancestor(child, parent) {
             return Err(ApplyError::Cycle(child_id));
+        }
+        if self.nodes[parent as usize]
+            .shader
+            .as_ref()
+            .is_some_and(|s| {
+                matches!(
+                    s.role,
+                    crate::shader::ShaderRole::Screen | crate::shader::ShaderRole::ScreenTransition
+                )
+            })
+        {
+            // It takes no space, so a child lays out in nothing: the
+            // surface is what it draws through.
+            log::warn!(
+                target: "js",
+                "node {child_id} in screen effect {parent_id}: a screen effect or transition has no children"
+            );
         }
         if let Some(b) = before
             && (b == child || self.nodes[b as usize].parent != parent)
@@ -4106,6 +4363,10 @@ impl<M: TextEngine> Core<M> {
         self.set_inline(child, inline);
         self.nodes[child as usize].parent = parent;
         self.nodes[parent as usize].children.insert(pos, child);
+        if self.nodes[child as usize].states & crate::tailwind::state::FOCUS_WITHIN != 0 {
+            // The focus moved with it: the views around it now.
+            self.focus_moved = true;
+        }
         self.ch_changed(child);
         self.status_bars_moved |= !self.status_bar_nodes.is_empty();
         self.outer_moved |= !self.parent_lists.is_empty() && self.may_hold_page_list(child);
@@ -4228,6 +4489,10 @@ impl<M: TextEngine> Core<M> {
             self.positions_changed(parent);
         }
         self.nodes[key as usize].parent = NO_KEY;
+        if self.nodes[key as usize].states & crate::tailwind::state::FOCUS_WITHIN != 0 {
+            // The focus left the views around it with it.
+            self.focus_moved = true;
+        }
         if self.nodes[parent as usize].child_perspective.is_some() {
             // Without the perspective wherever it goes next.
             self.mark(key, dirty::VIEW | dirty::ANIMATION);
@@ -4242,6 +4507,9 @@ impl<M: TextEngine> Core<M> {
         self.status_bars_moved |= !self.status_bar_nodes.is_empty();
         self.outer_moved |= !self.parent_lists.is_empty() && self.may_hold_page_list(key);
         self.sticky_changed |= !self.sticky_nodes.is_empty();
+        if !self.pictured.is_empty() {
+            self.unlinked_from.push(self.nodes[parent as usize].id);
+        }
         let node = &self.nodes[key as usize];
         let (inline, layout, created, id) = (node.inline, node.layout, node.created, node.id);
         if inline {
@@ -4411,6 +4679,11 @@ impl<M: TextEngine> Core<M> {
             if let Some(child) = self.nodes.get_mut(c as usize) {
                 child.parent = NO_KEY;
             }
+        }
+        if node.states & crate::tailwind::state::FOCUS_WITHIN != 0 {
+            // The focus went with it, or is inside a child no longer in
+            // it.
+            self.focus_moved = true;
         }
         if let Some(layout) = node.layout {
             self.layout.remove(layout);
@@ -7009,10 +7282,14 @@ fn span(from: f32, to: f32, ratio: f32) -> f32 {
 }
 
 /// `value` rounded up to a device pixel of `ratio` pixels per point. A
-/// value a hair over a whole pixel (`56.0 / 2.625 * 2.625` is
-/// `56.000004`) stays that pixel.
+/// value that is a whole pixel but for `f32` (`56.0 / 2.625 * 2.625` is
+/// `56.000004`) stays that pixel; a value really over one gets the next
+/// pixel even when it is over by less than the tolerance: a text measured
+/// `78.000_49` points wide (a PingFang glyph's 1020 / 1028 em beside SF's
+/// 1/128 point advances) wraps in a box of 78.
 fn ceil_to_pixel(value: Points, ratio: f32) -> Points {
-    Points((value.0 * ratio - 1.0e-3).ceil().max(0.0) / ratio)
+    let up = (value.0 * ratio - 1.0e-3).ceil().max(0.0) / ratio;
+    Points(if up < value.0 { up + 1.0 / ratio } else { up })
 }
 
 /// `layout` rounded as Taffy's rounding pass (`taffy::round_layout`) rounds

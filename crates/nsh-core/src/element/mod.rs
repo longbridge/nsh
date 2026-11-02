@@ -142,8 +142,9 @@ pub use self::{
     host::{
         CanvasArg, CanvasPaint, CanvasView, Input, InputAccessoryView, IntoUniform, Modal,
         NativeView, Orientation, Overlay, Painter, Screen, Scroll, ShaderView, Stack, Svg, Uniform,
-        Video, WebView, canvas, input, input_accessory_view, native, overlay, scroll, shader, svg,
-        video, web_view, web_view_html,
+        Video, WebView, canvas, input, input_accessory_view, native, overlay, screen_effect,
+        screen_transition, scroll, shader, shader_effect, shader_transition, svg, video, web_view,
+        web_view_html,
     },
     js::{JsClass, JsHost, JsIn, JsKind, JsOwned, JsPrimitive, JsRaw},
     json_host::from_json,
@@ -184,7 +185,7 @@ pub(crate) use self::{
     back::BackListener,
     builder::{ElKind, PlaceFn},
     component::{AnyInstance, caught},
-    task::{Action, AnswerSlot, ClipboardRead, Executor, FileAnswer},
+    task::{Action, AfterAnswer, AnswerSlot, ClipboardRead, Executor, FileAnswer},
 };
 /// The geometry Rust components style with (`crate::geometry`).
 pub use crate::geometry::{

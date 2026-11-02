@@ -67,8 +67,8 @@
   unknown, NSH has no such states), `group-*:` (named groups `group/name`), `first:` / `last:` /
   `odd:` / `even:` / `only:`, `placeholder:` / `selection:` (a color only, the pseudo-element's: `placeholder:text-*` / `selection:bg-*`, the
   `placeholderColor` / `selectionColor` style keys; other utilities under them are unknown), `!` (important). The state classes have style props of their own (`activeStyle`, `hoverStyle`,
-  `focusStyle`, `disabledStyle`, `checkedStyle`, `indeterminateStyle`, `expandedStyle`, `pressedStyle`, a `Button`'s
-  `selectedStyle`), resolved the same way: later states win, `disabled` over all. `selected`, `checked`, `indeterminate`,
+  `focusStyle`, `focusWithinStyle`, `disabledStyle`, `checkedStyle`, `indeterminateStyle`, `expandedStyle`,
+  `pressedStyle`, a `Button`'s `selectedStyle`), resolved the same way: later states win, `disabled` over all. `selected`, `checked`, `indeterminate`,
   `expanded`, `pressed` (`state::ARIA_PRESSED`) and `busy` are value states (`state::ACCESSIBILITY`, set by
   `Core::set_accessibility_states` from `classes::accessibility_states`) the core sets from the accessibility state (never reported by the platform). The first three are
   below the interaction states: `checked`, then `indeterminate` (Tailwind's order), then `selected`, then `hover`,
@@ -78,7 +78,18 @@
   the node's press listeners from what is mounted, so it shows no press feedback either. A part of a Rust component
   shows its control's `checked`, `indeterminate` and `disabled` to its own classes and state styles
   (`Interactive::project_checked`, `project_indeterminate`, `project_disabled`, and `project_focused` for the part the keys act on; `Prop::ProjectedStates`): a switch's thumb styled `checked:translate-x-4`, with no accessibility
-  state or press change on the part, so screen readers hear the control alone. `dark:` follows the appearance
+  state or press change on the part, so screen readers hear the control alone. `focus-within:` (and
+  `focusWithinStyle`, `.focus_within(..)`) is the core's: the platforms report `FOCUSED` for whatever view the
+  keyboard focus reaches, whether or not it tracks it (`input::reported_states`; one report per focus change), and the
+  core keeps one focus per surface and puts `state::FOCUS_WITHIN` on it and the views around it in the core's tree
+  (`classes::update_focus_within`: a change walks the old and the new chain, nothing else; moving or releasing a view
+  in the chain walks it again), where an overlay is inside the view the app put it in, wherever its native view shows
+  (a popup's content is within the view holding its trigger, as in a React portal). The order a platform reports a
+  move in does not matter (a view taking the focus is the focus; a blur of another view changes nothing), and the root
+  view taking it (AppKit's first responder when no view has it) is no focus. A view whose classes read only
+  `focus-within:` tracks nothing natively. Rust components hear the focus come into an element and leave it with
+  `ElementRef::on_focus_in` / `on_focus_out` (GPUI's names, a focus handle's), watches the core runs at the end of
+  the commit round the focus moved in (`core/watch.rs`). `dark:` follows the appearance
   shown: the app's own when it set one (`nsh.json` `"appearance"`, `setColorScheme`; `Core::set_appearance`), else the
   system's. The theme is Tailwind 4's
   extended by `nsh.json` `"tailwind"` (`colors`, `spacing`, `breakpoints`, `fontSize`, `radius`, `shadow`, ...; unknown
@@ -153,6 +164,10 @@
   `right` stickiness and a zoomable scroll view are not supported. The `sticky` class sets it, as Tailwind's does.
 - **Line heights**: unitless values inherit as multipliers. Percentages and `em` resolve against the element's
   font size before inheritance, so descendants inherit a computed length (`TextStyle::line_height_em`).
+- **`cursor`** keeps resize axes in the core: `nwse-resize` / `nw-resize` / `se-resize` are `Cursor::NwseResize`,
+  `nesw-resize` / `ne-resize` / `sw-resize` are `Cursor::NeswResize`. Windows, Linux, Android, the web and GPUI use
+  the corresponding diagonal cursors. AppKit uses its frame resize cursors on macOS 15 and later; macOS 14 keeps
+  the open-hand fallback. iPad and Mac Catalyst use UIKit's pointer effects.
 - **`pointerEvents`** (the style key and the `pointer-events-*` classes) inherits `none` as CSS's `pointer-events`;
   `box-none` and `box-only`, React Native's, apply to the view alone (the views in it inherit `auto`): a view that is
   `none` by its own value or the nearest one above mounts `box-none` when a view inside it that sets another value is a

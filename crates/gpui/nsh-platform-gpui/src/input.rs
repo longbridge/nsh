@@ -227,6 +227,10 @@ pub(crate) enum Cursor {
     ResizeEw,
     /// Resize up and down.
     ResizeNs,
+    /// Resize northwest and southeast.
+    ResizeNwse,
+    /// Resize northeast and southwest.
+    ResizeNesw,
     /// Busy.
     Wait,
     /// Working in the background.
@@ -488,11 +492,12 @@ pub(crate) fn track_states(surface: &Rc<Surface>, view: &NshView, states: u16) {
     {
         let mut s = view.state_mut();
         s.tracked = states;
-        // The core keeps the states still tracked and forgets the rest
+        // The core keeps the states still reported and forgets the rest
         // (`Core::update_tracking`): so do we, or a change it was not told
         // about (the pointer leaving a view whose hover was tracked
-        // throughout) would never reach it.
-        s.states &= states;
+        // throughout) would never reach it. The focus is reported
+        // whatever is tracked, so it stays.
+        s.states &= input::reported_states(states);
     }
     update_hover_tracking(surface, view);
 }
@@ -621,6 +626,8 @@ fn css_cursor(cursor: nsh_core::Cursor) -> Option<Cursor> {
         C::ZoomIn | C::ZoomOut => Cursor::Crosshair,
         C::ColResize => Cursor::ResizeEw,
         C::RowResize => Cursor::ResizeNs,
+        C::NwseResize => Cursor::ResizeNwse,
+        C::NeswResize => Cursor::ResizeNesw,
         C::None => Cursor::Hidden,
     })
 }
@@ -2783,6 +2790,8 @@ mod tests {
         assert_eq!(css_cursor(C::Pointer), Some(Cursor::Hand));
         assert_eq!(css_cursor(C::NotAllowed), Some(Cursor::NotAllowed));
         assert_eq!(css_cursor(C::None), Some(Cursor::Hidden));
+        assert_eq!(css_cursor(C::NwseResize), Some(Cursor::ResizeNwse));
+        assert_eq!(css_cursor(C::NeswResize), Some(Cursor::ResizeNesw));
     }
 
     #[test]

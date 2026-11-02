@@ -395,6 +395,30 @@ test("virtualized lists recycle owners and preserve the last item while data shr
   close();
 });
 
+test("list cells keep their items when items are inserted before them", { skip: !path }, async () => {
+  const { createLists } = await import("./list.js");
+  const { api, invoke, values, dom, close } = await fixture();
+  const lists = createLists(invoke, values, api, dom, () => true, () => {});
+  const data = api.signal([{ id: "a" }, { id: "b" }]);
+  const shown = [], indices = [];
+  let node, dispose;
+  api.root(stop => {
+    dispose = stop;
+    node = lists.render({ get each() { return data(); },
+      children(item, index) { indices.push(index); return () => { shown.push(item().id); return item().id; }; } });
+  });
+  const id = values.nodeIds.get(node);
+  lists.bind(id, [[0, 0], [1, 1]]);
+  assert.deepEqual(shown, ["a", "b"]);
+  data.set([{ id: "new" }, ...data()]);
+  assert.deepEqual(indices.map(index => index()), [1, 2]);
+  // The core's bindings after the splice move nothing more.
+  lists.bind(id, [[0, 1], [1, 2]]);
+  assert.deepEqual(shown, ["a", "b"]);
+  dispose();
+  close();
+});
+
 test("resources cancel superseded loads, retain values, and ignore settlement after disposal", { skip: !path }, async () => {
   const { createResource } = await import("./resource.js");
   const { api, invoke, close } = await fixture();

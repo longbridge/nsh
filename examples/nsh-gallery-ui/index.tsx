@@ -16,6 +16,8 @@ export * from "./popup";
 export * from "./data-table";
 export * from "./slider";
 export * from "./scrollbar-theme";
+export * from "./tree";
+export * from "./command";
 export * from "./avatar";
 
 /**

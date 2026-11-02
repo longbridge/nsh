@@ -615,6 +615,13 @@ pub enum SceneQuery {
         /// The view.
         id: u32,
     },
+    /// The views inside scroll view `id` that take a finger's drag
+    /// themselves (responders, pans), where a step's scrolling does not
+    /// land.
+    DragTakers {
+        /// The scroll view.
+        id: u32,
+    },
     /// View `id`'s long press delay in milliseconds, if it says.
     LongPressDelay {
         /// The view.

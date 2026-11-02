@@ -79,7 +79,7 @@ Rust 组件（`nsh/base` 的以及应用自己 crate 中的组件）在 TSX 中�
 | `active:` | 视图被按下 | `.active(\|s\| ..)` |
 | `hover:` | 指针悬停在视图上（iPad 和 Mac 的指针） | `.hover(\|s\| ..)` |
 | `focus:`、`focus-visible:` | 输入框获得焦点 | `.focus(\|s\| ..)` |
-| `focus-within:` | 视图或其后代获得焦点 | |
+| `focus-within:` | 视图或其后代获得焦点（`Overlay` 的内容是它所在视图的后代） | `.focus_within(..)` |
 | `disabled:`、`enabled:` | 元素的 `disabled` 属性为 true / false | `.disabled_style(\|s\| ..)` |
 | `selected:` | 元素处于选中状态（`Button` 的 `selected`、`accessibilityState.selected`） | `.selected_style(..)` |
 | `checked:` | 元素处于勾选状态（`accessibilityState.checked` 为 `true`；`"mixed"` 不算） | `.checked_style(..)` |

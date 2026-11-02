@@ -44,7 +44,7 @@ use objc2_app_kit::{
     NSTrackingArea, NSTrackingAreaOptions, NSView, NSViewLayerContentsRedrawPolicy,
     NSWindowOrderingMode,
 };
-use objc2_core_foundation::{CGFloat, CGPoint, CGRect, CGSize};
+use objc2_core_foundation::{CGAffineTransform, CGFloat, CGPoint, CGRect, CGSize};
 use objc2_core_graphics::CGContext;
 use objc2_foundation::{NSArray, NSObject, NSObjectProtocol, NSPoint, NSRect};
 use objc2_quartz_core::{CALayer, CALayerDelegate, CATransform3D};
@@ -350,10 +350,21 @@ define_class!(
             };
             let c = Some(cx);
             CGContext::save_g_state(c);
+            // The layer's space, in points, is the context's base space:
+            // y down where its contents are flipped.
+            let mut base = CGAffineTransform {
+                a: 1.0,
+                b: 0.0,
+                c: 0.0,
+                d: 1.0,
+                tx: 0.0,
+                ty: 0.0,
+            };
             if !layer.contentsAreFlipped() {
                 // Drawing is top down, as in a flipped view.
                 CGContext::translate_ctm(c, 0.0, layer.bounds().size.height);
                 CGContext::scale_ctm(c, 1.0, -1.0);
+                base.d = -1.0;
             }
             crate::text::draw(cx, &state);
             // What Core Animation redraws (all of it, or a canvas's part
@@ -363,10 +374,10 @@ define_class!(
             let asynchronous = layer.drawsAsynchronously();
             if crate::fps::measuring() && state.canvas.is_some() {
                 let start = std::time::Instant::now();
-                crate::canvas::draw(cx, &state, dirty, size, scale, asynchronous);
+                crate::canvas::draw(cx, &state, dirty, size, scale, asynchronous, base);
                 crate::fps::drew_canvas(start.elapsed());
             } else {
-                crate::canvas::draw(cx, &state, dirty, size, scale, asynchronous);
+                crate::canvas::draw(cx, &state, dirty, size, scale, asynchronous, base);
             }
             CGContext::restore_g_state(c);
             // Where the next paint happens (`canvas.rs`): Core Animation's

@@ -879,6 +879,9 @@ fn field_css(c: &InputConfig) -> String {
     if let Some(c) = c.caret_color {
         let _ = write!(css, "caret-color:{};", css_color(c));
     }
+    if input::shows_nothing(c) {
+        css.push_str("opacity:0;");
+    }
     css
 }
 
@@ -1222,6 +1225,8 @@ pub(crate) fn encode(out: &mut Out, item: &MountItem) {
                 .raw(&crate::canvas::encode(drawing))
                 .end();
         }
+        // Effects and transitions: this platform does not draw them yet.
+        MountItem::ShaderTransition { .. } | MountItem::ShaderInput { .. } => {}
         MountItem::Shader { id, layer } => {
             out.item("sh")
                 .num(*id)

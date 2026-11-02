@@ -77,6 +77,6 @@ pub use crate::{
         set_ui_sets,
     },
     image::AssetBase,
-    native::{ComponentContext, ComponentFactory, Components, NativeComponent},
+    native::{ComponentContext, ComponentFactory, Components, NativeComponent, Wheel},
     panel::{Panel, PanelError, PanelOptions, WindowLevel},
 };

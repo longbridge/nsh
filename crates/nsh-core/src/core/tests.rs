@@ -5910,6 +5910,353 @@ fn a_projected_focus_styles_a_part_as_focused() {
     assert_eq!(view_style_of(&batch, 2).unwrap().opacity, 0.5);
 }
 
+/// A view and the views inside it, `id`'s first: (id, parent, classes).
+fn views(c: &mut Core<FakeEngine>, views: &[(NodeId, NodeId, &str)]) {
+    let mut ops = Vec::new();
+    for &(id, parent, classes) in views {
+        ops.push(Op::Create { id, tag: Tag::View });
+        if !classes.is_empty() {
+            ops.push(class_op(id, classes));
+        }
+        ops.push(Op::Insert {
+            parent,
+            child: id,
+            before: None,
+        });
+    }
+    apply(c, ops);
+}
+
+#[test]
+fn focus_within_follows_a_focus_nothing_tracks() {
+    use crate::tailwind::state::FOCUSED;
+    // A field's frame (2) ringed while the input in it (6, in 4) edits:
+    // the input reads no state of its own.
+    let mut c = core();
+    views(
+        &mut c,
+        &[
+            (2, ROOT_ID, "opacity-50 focus-within:opacity-100"),
+            (4, 2, ""),
+            (6, 4, ""),
+        ],
+    );
+    let batch = c.commit().unwrap();
+    // `focus-within` is the core's: the platform tracks nothing for it.
+    assert!(
+        !batch
+            .items
+            .iter()
+            .any(|i| matches!(i, MountItem::TrackStates { .. })),
+        "{:?}",
+        batch.items
+    );
+    c.set_states(6, FOCUSED);
+    let batch = c.commit().unwrap();
+    assert_eq!(view_style_of(&batch, 2).unwrap().opacity, 1.0);
+    assert!(c.has_focus_within(4) && c.has_focus_within(6) && c.has_focus_within(ROOT_ID));
+    c.set_states(6, 0);
+    let batch = c.commit().unwrap();
+    assert_eq!(view_style_of(&batch, 2).unwrap().opacity, 0.5);
+    assert!(!c.has_focus_within(2) && !c.has_focus_within(ROOT_ID));
+}
+
+#[test]
+fn focus_within_follows_an_input_without_focus_classes() {
+    use crate::tailwind::state::FOCUSED;
+    // A field's frame around an input whose classes read no state: the
+    // platform reports the input's focus all the same.
+    let mut c = core();
+    views(
+        &mut c,
+        &[(2, ROOT_ID, "opacity-50 focus-within:opacity-100")],
+    );
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 4,
+                tag: Tag::Input,
+            },
+            class_op(4, "h-8 border"),
+            Op::Insert {
+                parent: 2,
+                child: 4,
+                before: None,
+            },
+        ],
+    );
+    let batch = c.commit().unwrap();
+    assert!(
+        !batch
+            .items
+            .iter()
+            .any(|i| matches!(i, MountItem::TrackStates { .. })),
+        "{:?}",
+        batch.items
+    );
+    c.set_states(4, FOCUSED);
+    let batch = c.commit().unwrap();
+    assert_eq!(view_style_of(&batch, 2).unwrap().opacity, 1.0);
+    // Only the frame changes: the input reads no state.
+    assert!(view_style_of(&batch, 4).is_none(), "{:?}", batch.items);
+    c.set_states(4, 0);
+    let batch = c.commit().unwrap();
+    assert_eq!(view_style_of(&batch, 2).unwrap().opacity, 0.5);
+}
+
+#[test]
+fn a_focus_nothing_reads_sends_nothing() {
+    use crate::tailwind::state::FOCUSED;
+    // Regression guard of reporting the focus untracked: views whose
+    // classes read no state (no `focus:`, no `focus-within:`) look and
+    // mount as before, whatever focus the platform reports.
+    let mut c = core();
+    views(
+        &mut c,
+        &[(2, ROOT_ID, "p-2 bg-white"), (4, 2, "h-8"), (6, 2, "")],
+    );
+    c.commit();
+    c.set_states(4, FOCUSED);
+    assert!(c.commit().is_none());
+    c.set_states(6, FOCUSED);
+    c.set_states(4, 0);
+    assert!(c.commit().is_none());
+    c.set_states(6, 0);
+    assert!(c.commit().is_none());
+}
+
+/// The items each step of Tab sends, through `n` focusable views in a
+/// frame that reads `focus-within:`: the focus coming in, then moving
+/// from view to view (the new one's focus reported first, then the old
+/// one's blur), then reported again where it is.
+fn tab_steps(n: usize) -> Vec<usize> {
+    use crate::tailwind::state::FOCUSED;
+    let mut c = core();
+    let ids: Vec<NodeId> = (0..n as NodeId).map(|i| 4 + 2 * i).collect();
+    let mut tree = vec![(2, ROOT_ID, "opacity-50 focus-within:opacity-100")];
+    tree.extend(ids.iter().map(|&id| (id, 2, "h-8")));
+    views(&mut c, &tree);
+    c.commit();
+    let mut steps = Vec::new();
+    let count = |c: &mut Core<FakeEngine>| c.commit().map_or(0, |b| b.items.len());
+    c.set_states(ids[0], FOCUSED);
+    steps.push(count(&mut c));
+    for pair in ids.windows(2) {
+        c.set_states(pair[1], FOCUSED);
+        c.set_states(pair[0], 0);
+        steps.push(count(&mut c));
+    }
+    c.set_states(ids[n - 1], FOCUSED);
+    steps.push(count(&mut c));
+    steps
+}
+
+#[test]
+fn tab_costs_the_same_whatever_number_of_views() {
+    let (ten, hundred) = (tab_steps(10), tab_steps(100));
+    // Coming in restyles the frame, and only it.
+    assert!(ten[0] > 0);
+    assert_eq!(hundred[0], ten[0]);
+    // Moving inside and the same focus again send nothing.
+    assert!(ten[1..].iter().all(|&n| n == 0), "{ten:?}");
+    assert!(hundred[1..].iter().all(|&n| n == 0), "{hundred:?}");
+}
+
+#[test]
+fn a_focus_moving_inside_keeps_focus_within_in_either_order() {
+    use crate::tailwind::state::FOCUSED;
+    let mut c = core();
+    views(
+        &mut c,
+        &[
+            (2, ROOT_ID, "opacity-50 focus-within:opacity-100"),
+            (4, 2, ""),
+            (6, 2, ""),
+            (8, ROOT_ID, ""),
+        ],
+    );
+    c.commit();
+    c.set_states(4, FOCUSED);
+    c.commit();
+    // Regression: the new view's focus reported before the old one's blur
+    // took `focus-within` off the views both share.
+    c.set_states(6, FOCUSED);
+    c.set_states(4, 0);
+    assert!(
+        c.commit().is_none(),
+        "the frame keeps its look, nothing sent"
+    );
+    assert!(c.has_focus_within(2) && c.has_focus_within(6) && !c.has_focus_within(4));
+    // The blur reported first: no flash of the frame either.
+    c.set_states(6, 0);
+    c.set_states(4, FOCUSED);
+    assert!(
+        c.commit().is_none(),
+        "the frame keeps its look, nothing sent"
+    );
+    assert!(c.has_focus_within(2) && c.has_focus_within(4) && !c.has_focus_within(6));
+    // Out, the blur reported first.
+    c.set_states(4, 0);
+    c.set_states(8, FOCUSED);
+    let batch = c.commit().unwrap();
+    assert_eq!(view_style_of(&batch, 2).unwrap().opacity, 0.5);
+    assert!(c.has_focus_within(8) && !c.has_focus_within(2));
+    // A blur of a view that no longer has the focus changes nothing.
+    c.set_states(4, FOCUSED);
+    c.set_states(8, 0);
+    c.set_states(8, FOCUSED);
+    c.set_states(4, 0);
+    c.commit();
+    assert!(c.has_focus_within(8) && !c.has_focus_within(2));
+    // The root taking it (no view has it) is no focus.
+    c.set_states(ROOT_ID, FOCUSED);
+    c.set_states(8, 0);
+    c.commit();
+    assert!(!c.has_focus_within(ROOT_ID));
+}
+
+#[test]
+fn an_overlays_content_is_within_the_view_it_is_in() {
+    use crate::tailwind::state::FOCUSED;
+    // Regression: a popup's trigger (4) and the popup (an overlay in the
+    // same view), whose native view is in the root view: the focus in the
+    // popup was not within the view holding the trigger.
+    let mut c = core();
+    views(
+        &mut c,
+        &[
+            (2, ROOT_ID, "opacity-50 focus-within:opacity-100"),
+            (4, 2, ""),
+        ],
+    );
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 6,
+                tag: Tag::Overlay,
+            },
+            Op::Insert {
+                parent: 2,
+                child: 6,
+                before: None,
+            },
+        ],
+    );
+    views(&mut c, &[(8, 6, "")]);
+    let batch = c.commit().unwrap();
+    assert!(
+        inserts(&batch).contains(&(ROOT_ID, 6, None)),
+        "shown in the root view"
+    );
+    c.set_states(8, FOCUSED);
+    let batch = c.commit().unwrap();
+    assert_eq!(view_style_of(&batch, 2).unwrap().opacity, 1.0);
+    // From the popup to the trigger: still within, nothing sent.
+    c.set_states(4, FOCUSED);
+    c.set_states(8, 0);
+    assert!(c.commit().is_none());
+    assert!(c.has_focus_within(2) && !c.has_focus_within(6));
+}
+
+#[test]
+fn focus_within_leaves_with_a_view_moved_or_released() {
+    use crate::tailwind::state::FOCUSED;
+    let mut c = core();
+    views(
+        &mut c,
+        &[
+            (2, ROOT_ID, "opacity-50 focus-within:opacity-100"),
+            (4, 2, ""),
+            (6, 4, ""),
+            (8, ROOT_ID, ""),
+        ],
+    );
+    c.commit();
+    c.set_states(6, FOCUSED);
+    c.commit();
+    // The focused view's parent moves out: the focus goes with it.
+    apply(
+        &mut c,
+        vec![Op::Insert {
+            parent: 8,
+            child: 4,
+            before: None,
+        }],
+    );
+    let batch = c.commit().unwrap();
+    assert_eq!(view_style_of(&batch, 2).unwrap().opacity, 0.5);
+    assert!(c.has_focus_within(8));
+    // And back.
+    apply(
+        &mut c,
+        vec![Op::Insert {
+            parent: 2,
+            child: 4,
+            before: None,
+        }],
+    );
+    let batch = c.commit().unwrap();
+    assert_eq!(view_style_of(&batch, 2).unwrap().opacity, 1.0);
+    assert!(!c.has_focus_within(8));
+    // Released around the focus (the children are released by ops of
+    // their own, later): nothing is within any more.
+    apply(&mut c, vec![Op::Release { id: 4 }]);
+    let batch = c.commit().unwrap();
+    assert_eq!(view_style_of(&batch, 2).unwrap().opacity, 0.5);
+    assert!(!c.has_focus_within(ROOT_ID));
+    apply(&mut c, vec![Op::Release { id: 6 }]);
+    c.commit();
+    assert!(c.focus.is_none() && c.focus_chain.is_empty());
+}
+
+#[test]
+fn a_focus_within_style_applies_while_the_focus_is_inside() {
+    use crate::tailwind::state::FOCUSED;
+    let mut c = core();
+    views(&mut c, &[(2, ROOT_ID, "opacity-50"), (4, 2, "")]);
+    apply(
+        &mut c,
+        vec![Op::SetProp {
+            id: 2,
+            prop: Prop::FocusWithinStyle(patch(&[("opacity", crate::StyleValue::Number(0.8))])),
+        }],
+    );
+    c.commit();
+    c.set_states(4, FOCUSED);
+    let batch = c.commit().unwrap();
+    assert_eq!(view_style_of(&batch, 2).unwrap().opacity, 0.8);
+    c.set_states(4, 0);
+    let batch = c.commit().unwrap();
+    assert_eq!(view_style_of(&batch, 2).unwrap().opacity, 0.5);
+}
+
+#[test]
+fn a_focus_reported_untracked_survives_a_tracking_change() {
+    use crate::tailwind::state::{FOCUSED, HOVERED};
+    // The platform reports the focus whatever is tracked, and keeps it
+    // when the tracking changes: so does the core.
+    let mut c = core();
+    views(
+        &mut c,
+        &[
+            (2, ROOT_ID, "opacity-50 focus-within:opacity-100"),
+            (4, 2, "bg-white"),
+        ],
+    );
+    c.commit();
+    c.set_states(4, FOCUSED);
+    c.commit();
+    apply(&mut c, vec![class_op(4, "bg-white hover:bg-zinc-200")]);
+    c.commit();
+    assert!(c.has_focus_within(2));
+    c.set_states(4, FOCUSED | HOVERED);
+    apply(&mut c, vec![class_op(4, "bg-white")]);
+    c.commit();
+    assert!(c.has_focus_within(2) && c.has_focus_within(4));
+}
+
 #[test]
 fn input_accessories_are_found_by_native_id() {
     let mut c = core();
@@ -6878,6 +7225,222 @@ mod components {
         apply(&mut c, vec![label("b")]);
         assert_eq!(texts(&c.commit().unwrap()), ["b"]);
         assert_eq!(ECHOES.with(Cell::get), runs + 1);
+    }
+
+    thread_local! {
+        /// The `value` each of `Pick`'s closures after the app's answer saw.
+        static ANSWERED: std::cell::RefCell<Vec<u32>> = const { std::cell::RefCell::new(Vec::new()) };
+    }
+
+    /// Shows a pick of its own (2) from a press until the app has answered
+    /// it, then the app's `value`, as a slider shows a drag's value.
+    #[derive(Clone, PartialEq, Props)]
+    struct PickProps {
+        #[prop(default)]
+        value: crate::element::Prop<u32>,
+    }
+
+    #[derive(Event)]
+    enum PickEvent {
+        Change(u32),
+    }
+
+    #[component]
+    fn Pick(props: PickProps, cx: Scope<PickEvent>) -> impl IntoElement {
+        let pending = signal(None::<u32>);
+        view()
+            .on_press(move |_: &()| {
+                pending.set(Some(2));
+                cx.emit(PickEvent::Change(2));
+                after_answer(move || {
+                    ANSWERED.with(|a| a.borrow_mut().push(props.value.get_untracked()));
+                    pending.set(None);
+                });
+            })
+            .child(text(move || {
+                format!(
+                    "pick {}",
+                    pending.get().unwrap_or_else(|| props.value.get())
+                )
+            }))
+    }
+
+    /// The app's answer to a `Pick`: its `value`.
+    fn pick_value(value: u32) -> Op {
+        Op::SetProp {
+            id: 2,
+            prop: rust_prop::<PickProps>("value", Some(json!(value))),
+        }
+    }
+
+    /// A `Pick` from JS showing 1, pressed: its pick shows, and its event
+    /// is queued for JS.
+    fn pressed_pick() -> Core<FakeEngine> {
+        ANSWERED.with(|a| a.borrow_mut().clear());
+        let mut c = core();
+        let mut registry = Registry::new();
+        registry.register::<Pick>();
+        c.set_components(registry);
+        apply(
+            &mut c,
+            vec![
+                Op::Create {
+                    id: 2,
+                    tag: Tag::View,
+                },
+                Op::SetProp {
+                    id: 2,
+                    prop: Prop::Component(std::any::type_name::<Pick>().into()),
+                },
+                pick_value(1),
+                Op::Insert {
+                    parent: ROOT_ID,
+                    child: 2,
+                    before: None,
+                },
+            ],
+        );
+        assert_eq!(texts(&c.commit().unwrap()), ["pick 1"]);
+        assert!(c.component_event(2, EventKind::Press, &EventPayload::None));
+        // Shown at once; the event has not gone to JS yet, so nothing that
+        // waits for its answer runs.
+        assert_eq!(texts(&c.commit().unwrap()), ["pick 2"]);
+        assert!(!c.has_due_answers());
+        assert!(ANSWERED.with(|a| a.borrow().is_empty()));
+        c
+    }
+
+    /// A closure after the app's answer runs in the commit after the one
+    /// whose events went to JS, before the views render: it sees the props
+    /// JS set in answer, and no frame shows the app's earlier value.
+    #[test]
+    fn after_answer_runs_once_js_has_answered() {
+        let mut c = pressed_pick();
+        assert_eq!(
+            js_events(&mut c),
+            [(
+                2,
+                EventKind::NativeEvent,
+                EventPayload::Native {
+                    name: "change".into(),
+                    data: json!({ "value": 2 })
+                }
+            )]
+        );
+        assert!(c.has_due_answers(), "due in the next commit");
+        assert!(ANSWERED.with(|a| a.borrow().is_empty()));
+        // JS's handler set `value` to the pick.
+        apply(&mut c, vec![pick_value(2)]);
+        let batch = c.commit();
+        assert_eq!(ANSWERED.with(|a| a.borrow().clone()), [2]);
+        assert!(
+            batch.as_ref().is_none_or(|b| texts(b).is_empty()),
+            "the pick stays: {:?}",
+            batch.map(|b| texts(&b))
+        );
+        assert!(!c.has_due_answers());
+        // Once.
+        assert!(c.commit().is_none());
+        assert_eq!(ANSWERED.with(|a| a.borrow().len()), 1);
+    }
+
+    /// An app that keeps its value (its handler sets nothing) shows it once
+    /// it has answered.
+    #[test]
+    fn after_answer_shows_the_value_an_app_kept() {
+        let mut c = pressed_pick();
+        assert_eq!(js_events(&mut c).len(), 1);
+        assert_eq!(texts(&c.commit().unwrap()), ["pick 1"]);
+        assert_eq!(ANSWERED.with(|a| a.borrow().clone()), [1]);
+    }
+
+    /// A closure whose view went before the app answered never runs.
+    #[test]
+    fn after_answer_goes_with_its_view() {
+        let mut c = pressed_pick();
+        assert_eq!(js_events(&mut c).len(), 1);
+        apply(
+            &mut c,
+            vec![
+                Op::Remove {
+                    parent: ROOT_ID,
+                    child: 2,
+                },
+                Op::Release { id: 2 },
+            ],
+        );
+        c.commit();
+        assert!(ANSWERED.with(|a| a.borrow().is_empty()));
+        assert!(!c.has_due_answers());
+    }
+
+    /// Events of components that wait for nothing leave nothing due (the
+    /// engine commits no extra round for them) and allocate no queue.
+    #[test]
+    fn events_nothing_waits_for_cost_no_round() {
+        let mut c = core_with_tally();
+        apply(
+            &mut c,
+            vec![
+                Op::Create {
+                    id: 2,
+                    tag: Tag::View,
+                },
+                Op::SetProp {
+                    id: 2,
+                    prop: Prop::Component(std::any::type_name::<Tally>().into()),
+                },
+                Op::Insert {
+                    parent: ROOT_ID,
+                    child: 2,
+                    before: None,
+                },
+            ],
+        );
+        c.commit().unwrap();
+        assert!(c.component_event(2, EventKind::Press, &EventPayload::None));
+        assert_eq!(texts(&c.commit().unwrap()), ["Taps 1"]);
+        assert_eq!(js_events(&mut c).len(), 1);
+        assert!(!c.has_due_answers(), "no round of its own");
+        assert!(c.commit().is_none());
+        assert!(!c.components.executor.answers_allocated());
+    }
+
+    /// A Rust view holding a `Pick`, its `value` the view's own.
+    #[component]
+    fn PickHolder() -> impl IntoElement {
+        let value = signal(1u32);
+        pick()
+            .value(crate::element::Prop::bind(move || value.get()))
+            .on_change(move |next: &u32| value.set(*next))
+    }
+
+    /// With a Rust owner, whose listener runs when the event is emitted, the
+    /// closure runs in the commit after the one that rendered what the
+    /// listener changed.
+    #[test]
+    fn after_answer_follows_a_rust_owners_render() {
+        ANSWERED.with(|a| a.borrow_mut().clear());
+        let mut c = core();
+        c.mount_root(&crate::element::Root::new::<PickHolder>(|| ()));
+        let batch = c.commit().unwrap();
+        assert_eq!(texts(&batch), ["pick 1"]);
+        let pick = batch
+            .items
+            .iter()
+            .find_map(|i| match i {
+                MountItem::Events { id, events } if events.contains(EventKind::Press) => Some(*id),
+                _ => None,
+            })
+            .expect("the pick");
+        assert!(c.component_event(pick, EventKind::Press, &EventPayload::None));
+        assert_eq!(texts(&c.commit().unwrap()), ["pick 2"]);
+        assert!(ANSWERED.with(|a| a.borrow().is_empty()));
+        // Nothing for JS; what waited is due all the same.
+        assert!(js_events(&mut c).is_empty());
+        assert!(c.has_due_answers());
+        assert!(c.commit().is_none(), "the holder's value stays");
+        assert_eq!(ANSWERED.with(|a| a.borrow().clone()), [2]);
     }
 
     fn core_with_tally() -> Core<FakeEngine> {
@@ -12421,6 +12984,76 @@ mod views {
         assert_eq!(order(&c, list), ["3@0", "1@1", "2@2", "4@3"]);
     }
 
+    thread_local! {
+        static GROUP: Cell<Option<Signal<Vec<u32>>>> = const { Cell::new(None) };
+        static OTHERS: Cell<Option<Signal<Vec<u32>>>> = const { Cell::new(None) };
+        /// How often the core asked the order watch for its elements.
+        static LOOKS: Cell<u32> = const { Cell::new(0) };
+        static HEARD: std::cell::RefCell<Vec<Vec<usize>>> =
+            const { std::cell::RefCell::new(Vec::new()) };
+    }
+
+    /// A group of three keyed rows whose order a watch follows, beside
+    /// three keyed rows of no group.
+    #[component]
+    fn WatchedRows() -> impl IntoElement {
+        let refs: Rc<Vec<crate::element::ElementRef>> =
+            Rc::new((0..3).map(|_| element_ref()).collect());
+        let group = signal(vec![1u32, 2, 3]);
+        let others = signal(vec![1u32, 2, 3]);
+        GROUP.with(|g| g.set(Some(group)));
+        OTHERS.with(|o| o.set(Some(others)));
+        let listed = refs.clone();
+        let _ = crate::element::watch_order(
+            move || {
+                LOOKS.with(|l| l.set(l.get() + 1));
+                listed.to_vec()
+            },
+            |order| HEARD.with(|h| h.borrow_mut().push(order.to_vec())),
+        );
+        view()
+            .child(view().child(each(
+                group,
+                |n| *n,
+                move |item, _| view().element_ref(&refs[item.get_untracked() as usize - 1]),
+            )))
+            .child(view().child(each(
+                others,
+                |n| *n,
+                |item, _| text(move || item.get().to_string()),
+            )))
+    }
+
+    #[test]
+    fn an_order_watch_looks_again_only_at_moves_among_its_elements() {
+        let mut c = core();
+        c.mount_root(&Root::new::<WatchedRows>(|| ()));
+        c.commit().unwrap();
+        let looks = LOOKS.with(Cell::get);
+        assert!(looks >= 1, "looked at as it is made");
+        assert!(HEARD.with(|h| h.borrow().is_empty()), "in order already");
+        let (group, others) = (
+            GROUP.with(Cell::get).unwrap(),
+            OTHERS.with(Cell::get).unwrap(),
+        );
+        // Rows of no group reordered: the watch is not asked.
+        {
+            let _entered = c.components.runtime.enter();
+            others.set(vec![3, 1, 2]);
+        }
+        c.commit().unwrap();
+        assert_eq!(LOOKS.with(Cell::get), looks, "a move outside the group");
+        assert!(HEARD.with(|h| h.borrow().is_empty()));
+        // The group's rows reordered: the handler hears the tree's order.
+        {
+            let _entered = c.components.runtime.enter();
+            group.set(vec![3, 1, 2]);
+        }
+        c.commit().unwrap();
+        assert_eq!(LOOKS.with(Cell::get), looks + 1, "a move inside the group");
+        assert_eq!(HEARD.with(|h| h.borrow().clone()), [vec![2, 0, 1]]);
+    }
+
     /// Made with `#[component]`: reads the appearance and a timer.
     #[component]
     fn Clock(_props: (), cx: Scope<NoEvent>) -> impl IntoElement {
@@ -14432,6 +15065,76 @@ mod views {
         assert!(shown.contains(&"focus 2 blur 1".into()), "{shown:?}");
     }
 
+    /// Logs the focus coming into its area and leaving it, and dims the
+    /// area while the focus is in it: two focusable views and a popup
+    /// inside, one outside.
+    #[component]
+    fn FocusArea() -> impl IntoElement {
+        let log = signal(Vec::<&'static str>::new());
+        let area = element_ref();
+        area.on_focus_in(move || log.update(|l| l.push("in")));
+        area.on_focus_out(move || log.update(|l| l.push("out")));
+        view()
+            .child(text(move || format!("log {}", log.get().join(" "))))
+            .child(
+                view()
+                    .element_ref(&area)
+                    .focus_within(|s| s.opacity(0.5))
+                    .child(view().focusable(true).child(text("first")))
+                    .child(view().focusable(true).child(text("second")))
+                    .child(overlay().child(view().focusable(true).child(text("popup")))),
+            )
+            .child(view().focusable(true).child(text("away")))
+    }
+
+    /// GPUI's `on_focus_in` / `on_focus_out` of an element: the focus
+    /// coming in from outside and leaving to outside, not moving inside it
+    /// (into its popup too); `.focus_within(..)` styles it meanwhile.
+    #[test]
+    fn an_element_hears_the_focus_come_in_and_leave() {
+        use crate::tailwind::state::FOCUSED;
+        let mut c = core();
+        c.mount_root(&Root::new::<FocusArea>(|| ()));
+        let batch = c.commit().unwrap();
+        let first = native_parent(&c, text_node(&batch, "first")).unwrap();
+        let second = native_parent(&c, text_node(&batch, "second")).unwrap();
+        let popup = native_parent(&c, text_node(&batch, "popup")).unwrap();
+        let away = native_parent(&c, text_node(&batch, "away")).unwrap();
+        let area = native_parent(&c, first).unwrap();
+        c.set_states(first, FOCUSED);
+        let batch = c.commit().unwrap();
+        assert!(
+            texts(&batch).contains(&"log in".into()),
+            "{:?}",
+            texts(&batch)
+        );
+        assert_eq!(view_style_of(&batch, area).unwrap().opacity, 0.5);
+        c.set_states(second, FOCUSED);
+        c.set_states(first, 0);
+        c.set_states(popup, FOCUSED);
+        c.set_states(second, 0);
+        let batch = c.commit();
+        assert!(batch.is_none_or(|b| texts(&b).is_empty()), "no news inside");
+        c.set_states(away, FOCUSED);
+        c.set_states(popup, 0);
+        let batch = c.commit().unwrap();
+        assert!(
+            texts(&batch).contains(&"log in out".into()),
+            "{:?}",
+            texts(&batch)
+        );
+        assert_eq!(view_style_of(&batch, area).unwrap().opacity, 1.0);
+        // Back in: the area's own state again.
+        c.set_states(popup, FOCUSED);
+        c.set_states(away, 0);
+        let batch = c.commit().unwrap();
+        assert!(
+            texts(&batch).contains(&"log in out in".into()),
+            "{:?}",
+            texts(&batch)
+        );
+    }
+
     #[derive(Clone, PartialEq, Props)]
     struct AnchoredCornerProps {
         corner: crate::element::Prop<Option<Slot>>,
@@ -15232,6 +15935,50 @@ mod views {
         assert_eq!(press(&mut c), ["fixed"]);
         // The old `Shown` went with its binding.
         assert!(press(&mut c).is_empty());
+    }
+
+    thread_local! {
+        static REBUILT_PROP_OWNER: Cell<Option<Owner>> = const { Cell::new(None) };
+    }
+
+    #[component]
+    fn RebuiltLabel(props: ShownProps) -> impl IntoElement {
+        REBUILT_PROP_OWNER.with(|owner| owner.set(Some(Owner::current())));
+        text(props.value)
+    }
+
+    #[component]
+    fn RebuiltProp() -> impl IntoElement {
+        let n = signal(0);
+        view()
+            .on_press(move |_: &()| n.update(|n| *n += 1))
+            .child(dynamic(move || {
+                let value = n.get();
+                rebuilt_label().value(move || format!("{value}: {}", n.get()))
+            }))
+    }
+
+    #[test]
+    fn rebuilding_a_region_retires_its_components_property_bindings() {
+        let mut c = core();
+        c.mount_root(&Root::new::<RebuiltProp>(|| ()));
+        let batch = c.commit().unwrap();
+        assert_eq!(texts(&batch), ["0: 0"]);
+        let host = root_host(&batch);
+        for n in 1..=3 {
+            let previous = REBUILT_PROP_OWNER.with(Cell::get).unwrap();
+            assert!(c.component_event(host, EventKind::Press, &EventPayload::None));
+            {
+                let _entered = c.components.runtime.enter();
+                assert!(
+                    !previous.is_live(),
+                    "the old component must retire before the core commits its replacement"
+                );
+            }
+            assert!(c.components.runtime.take_failures().is_empty());
+            let batch = c.commit().expect("the rebuilt component renders");
+            assert_eq!(texts(&batch), [format!("{n}: {n}")]);
+        }
     }
 
     /// Counts Mod+K while a branch is shown; a press hides the branch.
@@ -17806,6 +18553,57 @@ fn overlays_in_a_modal_show_in_it() {
 }
 
 #[test]
+fn overlays_beside_a_row_go_outside_the_menu_around_it() {
+    use StyleValue::Number;
+    let mut c = core();
+    // A menu 100 wide at (20, 0) with 6 points of padding, a 20-tall row in
+    // it.
+    add(
+        &mut c,
+        2,
+        Tag::View,
+        ROOT_ID,
+        &[
+            ("marginLeft", Number(20.0)),
+            ("width", Number(100.0)),
+            ("padding", Number(6.0)),
+            ("alignSelf", StyleValue::Str("flex-start")),
+        ],
+    );
+    add(&mut c, 4, Tag::View, 2, &[("height", Number(20.0))]);
+    add(&mut c, 8, Tag::Overlay, ROOT_ID, &[]);
+    add(
+        &mut c,
+        10,
+        Tag::View,
+        8,
+        &[("width", Number(40.0)), ("height", Number(30.0))],
+    );
+    apply(
+        &mut c,
+        vec![
+            overlay_prop(
+                8,
+                crate::OverlayProp::Anchor(crate::overlay::OverlayAnchor::Beside {
+                    node: 4,
+                    edges: 2,
+                }),
+            ),
+            overlay_prop(
+                8,
+                crate::OverlayProp::Placement(crate::overlay::Placement::Right),
+            ),
+            overlay_prop(8, crate::OverlayProp::Align(crate::overlay::Align::Start)),
+            overlay_prop(8, crate::OverlayProp::Offset(crate::geometry::px(4.0))),
+        ],
+    );
+    let batch = c.commit().unwrap();
+    // Past the menu's right edge (120) by the offset, level with the row
+    // (6), not past the row's edge (114).
+    assert_eq!(frame_of(&batch, 8), Some(rect(124.0, 6.0, 40.0, 30.0)));
+}
+
+#[test]
 fn overlays_anchored_to_content_go_by_what_the_wrapper_draws() {
     use StyleValue::Number;
     let mut c = core();
@@ -17891,6 +18689,36 @@ fn overlays_anchored_to_content_go_by_what_the_wrapper_draws() {
     let batch = c.commit().unwrap();
     // The trigger (0, 80, 52 × 18) below the first one.
     assert_eq!(frame_of(&batch, 8), Some(rect(0.0, 98.0, 40.0, 20.0)));
+    // A trigger 28 points tall, its 16-point label centered: below its
+    // own bottom edge, not its label's.
+    add(
+        &mut c,
+        16,
+        Tag::View,
+        2,
+        &[
+            ("height", Number(28.0)),
+            ("justifyContent", StyleValue::Str("center")),
+            ("alignSelf", StyleValue::Str("flex-start")),
+        ],
+    );
+    add(
+        &mut c,
+        18,
+        Tag::View,
+        16,
+        &[("width", Number(30.0)), ("height", Number(16.0))],
+    );
+    apply(
+        &mut c,
+        vec![overlay_prop(
+            8,
+            crate::OverlayProp::Anchor(crate::overlay::OverlayAnchor::Content(16)),
+        )],
+    );
+    let batch = c.commit().unwrap();
+    // The trigger (0, 98, 30 × 28) below the second one.
+    assert_eq!(frame_of(&batch, 8), Some(rect(0.0, 126.0, 40.0, 20.0)));
 }
 
 /// The texts a batch lays out.
@@ -18233,7 +19061,7 @@ fn image_uris(batch: &MountBatch, id: NodeId) -> Option<(Option<String>, Option<
     })
 }
 
-fn at_ratio(c: &mut Core<FakeEngine>, pixel_ratio: f32) {
+fn at_ratio<M: TextEngine>(c: &mut Core<M>, pixel_ratio: f32) {
     c.set_environment(crate::element::Environment {
         pixel_ratio,
         ..Default::default()
@@ -18493,6 +19321,84 @@ fn rounding_lands_on_device_pixels() {
     let up = super::ceil_to_pixel(measured, ratio);
     assert!((up.0 * ratio - 56.0).abs() < 1.0e-3, "{up:?}");
     assert!((super::round(4.0, ratio) * ratio - 11.0).abs() < 1.0e-3);
+    // A width a hair over a whole pixel is not taken back under it: the
+    // text measured again in that width would no longer fit.
+    assert_eq!(super::ceil_to_pixel(Points(78.000_49), 1.0), Points(79.0));
+    assert_eq!(super::ceil_to_pixel(Points(78.000_49), 2.0), Points(78.5));
+    let up = super::ceil_to_pixel(Points(78.000_49), ratio);
+    assert!(
+        up.0 >= 78.000_49 && up.0 * ratio - (78.000_49 * ratio).ceil() < 1.0e-3,
+        "{up:?}"
+    );
+}
+
+/// One line `.0` points wide, as a platform engine measures a short label;
+/// in a narrower width it takes two lines.
+struct HairEngine(f32);
+
+impl TextEngine for HairEngine {
+    type Prepared = ();
+
+    fn prepare(&self, _: &AttributedText) {}
+
+    fn measure(&self, _: &(), max_width: Option<Points>) -> Size<Points> {
+        match max_width {
+            Some(max) if max.0 < self.0 => size_pt(max.0, 32.0),
+            _ => size_pt(self.0, 16.0),
+        }
+    }
+
+    fn layout(&self, _: &(), _: Size<Points>) -> TextLayout {
+        TextLayout(Arc::new(()))
+    }
+}
+
+#[test]
+fn text_a_hair_over_a_pixel_wide_keeps_its_line() {
+    // A label CoreText measures 78.00049 points wide, in a view as wide as
+    // its content. Rounded to 78 points, the text was measured again in 78
+    // and wrapped onto a second line.
+    for ratio in [1.0, 2.0, 2.625] {
+        let mut c = Core::new(HairEngine(78.000_49), size_pt(320.0, 480.0));
+        at_ratio(&mut c, ratio);
+        apply(
+            &mut c,
+            vec![
+                Op::Create {
+                    id: 2,
+                    tag: Tag::View,
+                },
+                Op::Create {
+                    id: 3,
+                    tag: Tag::Text,
+                },
+                Op::CreateText {
+                    id: 4,
+                    text: "label".into(),
+                },
+                Op::Insert {
+                    parent: 3,
+                    child: 4,
+                    before: None,
+                },
+                Op::Insert {
+                    parent: 2,
+                    child: 3,
+                    before: None,
+                },
+                style_op(2, &[("alignSelf", StyleValue::Str("flex-start"))]),
+                Op::Insert {
+                    parent: ROOT_ID,
+                    child: 2,
+                    before: None,
+                },
+            ],
+        );
+        let batch = c.commit().unwrap();
+        let size = frame_of(&batch, 3).expect("frame").size;
+        assert_eq!(size.height.0, 16.0, "at {ratio}: {size:?}");
+        assert!(size.width.0 >= 78.000_49, "at {ratio}: {size:?}");
+    }
 }
 
 #[test]
@@ -22732,4 +23638,110 @@ fn nothing_follows_while_no_view_follows_an_element() {
     c.set_viewport(size_pt(320.0, 480.0));
     c.commit();
     assert!(!c.follow_changed);
+}
+
+#[test]
+fn an_effect_takes_its_picture_again_when_a_child_leaves() {
+    let mut c = core();
+    let source = "fn shade(uv: vec2f) -> vec4f { return sample_content(uv); }";
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 2,
+                tag: Tag::ShaderEffect,
+            },
+            style_op(
+                2,
+                &[
+                    ("width", StyleValue::Number(100.0)),
+                    ("height", StyleValue::Number(50.0)),
+                ],
+            ),
+            Op::SetProp {
+                id: 2,
+                prop: Prop::ShaderSource(Some(source.into())),
+            },
+            Op::Create {
+                id: 3,
+                tag: Tag::View,
+            },
+            style_op(
+                3,
+                &[
+                    ("position", StyleValue::Str("absolute")),
+                    ("width", StyleValue::Number(10.0)),
+                    ("height", StyleValue::Number(10.0)),
+                ],
+            ),
+            Op::Insert {
+                parent: 2,
+                child: 3,
+                before: None,
+            },
+            Op::Insert {
+                parent: ROOT_ID,
+                child: 2,
+                before: None,
+            },
+        ],
+    );
+    c.commit().unwrap();
+    // An absolute child of a fixed-size effect: only its Remove and Delete
+    // go out, neither of which leads to the effect any more.
+    apply(
+        &mut c,
+        vec![
+            Op::Remove {
+                parent: 2,
+                child: 3,
+            },
+            Op::Release { id: 3 },
+        ],
+    );
+    let batch = c.commit().unwrap();
+    assert!(
+        batch
+            .items
+            .iter()
+            .any(|i| matches!(i, MountItem::ShaderInput { id: 2 })),
+        "{:?}",
+        batch.items
+    );
+}
+
+#[test]
+fn a_layout_animation_alone_takes_no_screen_picture() {
+    let mut c = core();
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 2,
+                tag: Tag::ScreenEffect,
+            },
+            Op::SetProp {
+                id: 2,
+                prop: Prop::ShaderSource(Some(
+                    "fn shade(uv: vec2f) -> vec4f { return sample_content(uv); }".into(),
+                )),
+            },
+            Op::Insert {
+                parent: ROOT_ID,
+                child: 2,
+                before: None,
+            },
+        ],
+    );
+    c.commit().unwrap();
+    // A layout animation with nothing to animate: the batch is dropped, not
+    // kept alive by the screen effect's picture.
+    apply(
+        &mut c,
+        vec![Op::Command {
+            id: 1,
+            command: Command::LayoutAnimation(crate::LayoutAnimation::EASE_IN_EASE_OUT),
+        }],
+    );
+    assert!(c.commit().is_none());
 }
