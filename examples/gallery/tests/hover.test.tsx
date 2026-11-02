@@ -2,6 +2,10 @@
 // runs as macOS; on a real platform, as it).
 import { expect, open, test } from "nsh/test";
 
+// A menu bar is the desktop's: a browser page narrower than 600 points is a
+// phone, whose menus are sheets over a backdrop that covers the bar.
+const desktop = { platform: "macos", width: 1200, height: 800 } as const;
+
 test("the pad hears the pointer come in, move and leave", async () => {
   const app = await open("../App.tsx", { platform: "macos" });
   await app.press("label:Gestures");
@@ -15,7 +19,7 @@ test("the pad hears the pointer come in, move and leave", async () => {
 });
 
 test("with a menu of the menu bar open, the pointer over another title opens it", async () => {
-  const app = await open("../App.tsx", { platform: "macos" });
+  const app = await open("../App.tsx", desktop);
   await app.press("role:button[Menu]");
   await app.waitFor("Menu bar");
   await app.press("File");
@@ -29,7 +33,7 @@ test("with a menu of the menu bar open, the pointer over another title opens it"
 });
 
 test("the pointer over a closed menu bar opens nothing", async () => {
-  const app = await open("../App.tsx", { platform: "macos" });
+  const app = await open("../App.tsx", desktop);
   await app.press("role:button[Menu]");
   await app.waitFor("Menu bar");
   await app.hover("Edit");

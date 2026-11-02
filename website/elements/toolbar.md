@@ -195,7 +195,9 @@ On macOS and the web, where Tab reaches the views that take presses, a `Toolbar`
 | Space, Return | Presses the focused item. |
 
 The arrow keys skip disabled items and press nothing: a toggle changes only when it is pressed. The other pair of
-arrows is left to the items (a menu's trigger opens its menu with Down).
+arrows is left to the items (a menu's trigger opens its menu with Down). In a right-to-left layout a horizontal
+toolbar runs from the right, so Left moves to the next item and Right to the previous; a vertical one keeps Down and
+Up.
 
 ## Platform notes
 

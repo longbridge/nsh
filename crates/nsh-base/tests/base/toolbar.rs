@@ -2,7 +2,8 @@
 //! of the keyboard focus over its `Button`s, `Toggle`s and `Link`s (in its
 //! groups and in a `ToggleGroup` inside it too), at the item the focus last
 //! left, else the first enabled one; its axis's arrows, Home and End move
-//! the focus past disabled items, around the ends, pressing nothing; a
+//! the focus past disabled items, around the ends, pressing nothing (a
+//! row's Left and Right traded in a right-to-left layout); a
 //! `ToggleGroup` inside it is a group of it; `disabled` disables every
 //! item; what a popup an item opens shows is no part of it; a key press
 //! changes the item left and the item reached, however many items there
@@ -25,11 +26,16 @@ use nsh_engine::EngineConfig;
 use nsh_testing::Headless;
 
 fn launch(root: Root) -> Headless {
+    launch_in(root, false)
+}
+
+fn launch_in(root: Root, rtl: bool) -> Headless {
     let mut config = EngineConfig {
         viewport: Size::new(px(800.0), px(844.0)),
         ..EngineConfig::new(root)
     };
     config.environment.os = Os::MacOs;
+    config.environment.rtl = rtl;
     let mut app = Headless::start(config).unwrap();
     app.first_render().unwrap();
     app
@@ -219,6 +225,28 @@ fn right_and_left_move_along_a_row_past_disabled_items_and_around_the_ends() {
 }
 
 #[test]
+fn right_to_left_a_row_trades_left_and_right() {
+    let mut app = launch_in(Root::of::<Formatting>(), true);
+    enter(&mut app);
+    // The row runs from the right: Left is the next item, Right the
+    // previous, Home and End keep the first and the last.
+    app.press_key("left").unwrap();
+    press_focused(&mut app, "Bold");
+    app.press_key("left").unwrap();
+    press_focused(&mut app, "Italic");
+    app.press_key("right").unwrap();
+    press_focused(&mut app, "Bold");
+    app.press_key("right").unwrap();
+    press_focused(&mut app, "Undo");
+    app.press_key("right").unwrap();
+    press_focused(&mut app, "Help");
+    app.press_key("home").unwrap();
+    press_focused(&mut app, "Undo");
+    app.press_key("end").unwrap();
+    press_focused(&mut app, "Help");
+}
+
+#[test]
 fn up_and_down_are_left_to_the_items_of_a_row() {
     let mut app = start::<Formatting>();
     enter(&mut app);
@@ -332,6 +360,21 @@ fn down_and_up_move_along_a_column_and_left_and_right_are_left_to_the_items() {
     press_focused(&mut app, "Select");
     app.press_key("end").unwrap();
     press_focused(&mut app, "Text");
+}
+
+#[test]
+fn right_to_left_a_column_keeps_up_and_down() {
+    let mut app = launch_in(Root::of::<Palette>(), true);
+    app.press_key("tab").unwrap();
+    press_focused(&mut app, "Select");
+    app.press_key("down").unwrap();
+    press_focused(&mut app, "Shape");
+    app.press_key("left").unwrap();
+    app.press_key("right").unwrap();
+    app.press_key("left").unwrap();
+    press_focused(&mut app, "Shape");
+    app.press_key("up").unwrap();
+    press_focused(&mut app, "Select");
 }
 
 /// A toolbar whose first item is a popover's trigger (a view the popover
