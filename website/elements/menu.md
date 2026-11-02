@@ -286,6 +286,7 @@ it in `onOpenChange({ open, reason })`: `"triggerPress"`, `"select"`, `"pressOut
 | `trigger` | `.trigger(..)` | `JSX.Element` | none | The item that opens it. |
 | `back` | `.back(..)` | `JSX.Element` | none | Phones: the row above its items that returns to the items around it. |
 | `disabled` | `.disabled(..)` | `boolean` | `false` | It does not open. |
+| `offset` | `.offset(..)` | `number` | `0` | Desktops: the gap between the menu around it and its popup. |
 | `children` | `.child(..)` | `JSX.Element` | none | Its items. |
 
 `MenuSeparator` is a view you style (`class`, `style`), shown with the items of its level.

@@ -691,6 +691,9 @@ pub struct SubmenuProps {
     /// It does not open.
     #[prop(default)]
     pub disabled: Prop<bool>,
+    /// Desktops: the gap between the menu around it and its popup.
+    #[prop(default)]
+    pub offset: Prop<Points>,
     /// The item that opens it, among its menu's items.
     pub trigger: Prop<Option<Slot>>,
     /// Touch screens: the row above its items that returns to the items
@@ -792,6 +795,7 @@ pub fn Submenu(props: SubmenuProps, cx: Scope<NoEvent>) -> impl IntoElement {
             move || {
                 overlay()
                     .anchor_beside(&anchor, &edges)
+                    .offset(props.offset)
                     .placement(Placement::Right)
                     .align(Align::Start)
                     .role(AccessibilityRole::Menu)

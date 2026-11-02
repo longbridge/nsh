@@ -275,6 +275,7 @@ function ViewMenu() {
 | `trigger` | `.trigger(..)` | `JSX.Element` | 无 | 打开它的条目。 |
 | `back` | `.back(..)` | `JSX.Element` | 无 | 手机：它的条目上方返回上一级条目的那一行。 |
 | `disabled` | `.disabled(..)` | `boolean` | `false` | 它不会打开。 |
+| `offset` | `.offset(..)` | `number` | `0` | 桌面端：它的弹出层与外层菜单之间的间距。 |
 | `children` | `.child(..)` | `JSX.Element` | 无 | 它的条目。 |
 
 `MenuSeparator` 是一个由你设置样式（`class`、`style`）的视图，与所在层级的条目一起显示。
