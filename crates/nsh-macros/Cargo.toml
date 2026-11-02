@@ -20,3 +20,8 @@ proc-macro2.workspace = true
 quote.workspace = true
 syn.workspace = true
 ttf-parser.workspace = true
+
+[dev-dependencies]
+# The integration tests use the macros as an app's crate does, through
+# nsh-core's re-exports and the `__private` items they expand to.
+nsh-core.workspace = true

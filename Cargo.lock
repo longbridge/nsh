@@ -3401,6 +3401,7 @@ name = "nsh-macros"
 version = "0.3.0"
 dependencies = [
  "imagesize 0.15.0",
+ "nsh-core",
  "proc-macro2",
  "quote",
  "syn 2.0.119",
@@ -5704,6 +5705,9 @@ dependencies = [
  "nsh-base",
  "nsh-core",
  "nsh-engine",
+ "nsh-platform-linux",
+ "nsh-platform-macos",
+ "nsh-platform-windows",
  "nsh-testing",
 ]
 
