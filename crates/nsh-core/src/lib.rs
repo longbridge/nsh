@@ -49,6 +49,7 @@ pub mod scroll;
 pub mod selection;
 pub mod shader;
 pub mod shape;
+pub mod speech;
 pub mod storage;
 mod style;
 #[cfg(feature = "svg")]
@@ -111,6 +112,7 @@ pub use crate::{
         ATTACHMENT_CHAR, Affinity, ApproxTextEngine, AttachmentAlignments, AttributedText,
         BackgroundBox, FontExtent, LinePiece, ResolvedTextStyle, SpanTestId, TextAttachment,
         TextBackground, TextEngine, TextLayout, TextLine, TextLink, TextPosition, TextSpan,
+        font_data,
     },
     transform::{
         Decomposed, MAX_TRANSFORMS, Matrix, Transform, TransformKind, TransformOp, translation,

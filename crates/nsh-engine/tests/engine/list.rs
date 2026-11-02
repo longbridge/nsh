@@ -132,6 +132,7 @@ fn config(app: &str) -> (EngineConfig, std::path::PathBuf) {
         clipboard: None,
         host: Default::default(),
         picker: None,
+        speech: None,
     };
     (config, dir)
 }

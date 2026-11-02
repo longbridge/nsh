@@ -9,7 +9,9 @@
 // drag and focus events the app pauses its own rotation with, and the app's
 // look of a pagination item (`selectedStyle`) and of the indicator the core
 // places on the item of the slide shown (`indicatorClass`,
-// `indicatorStyle`; the view below the first item).
+// `indicatorStyle`; the view below the first item). A second carousel keeps
+// its own index from `defaultIndex` and lays its slides out along a
+// vertical `axis`.
 import { Text, View, signal } from "nsh";
 import {
   Carousel,
@@ -74,6 +76,20 @@ function App() {
           {dot(0)}
           {dot(1)}
           {dot(2)}
+        </CarouselPagination>
+      </Carousel>
+      <Carousel testID="vertical" axis="vertical" defaultIndex={1} accessibilityLabel="Sizes">
+        <CarouselContent class="h-[50px] w-[100px]">
+          <CarouselItem testID="v-slide-0" accessibilityLabel="1 of 2" class="h-[50px] w-[100px]">
+            <Text>Small</Text>
+          </CarouselItem>
+          <CarouselItem testID="v-slide-1" accessibilityLabel="2 of 2" class="h-[50px] w-[100px]">
+            <Text>Large</Text>
+          </CarouselItem>
+        </CarouselContent>
+        <CarouselPagination class="flex-row">
+          <CarouselPaginationItem testID="v-dot-0" index={0} accessibilityLabel="Size 1" class="h-[10px] w-[10px]" />
+          <CarouselPaginationItem testID="v-dot-1" index={1} accessibilityLabel="Size 2" class="h-[10px] w-[10px]" />
         </CarouselPagination>
       </Carousel>
       <Text>{`Index: ${index()}`}</Text>

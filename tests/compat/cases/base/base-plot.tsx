@@ -126,7 +126,7 @@ function App() {
       </Plot>
       {/* A band: its bottom edge a value of each row (a field, a function). */}
       <Plot testID="band" data={rows()} y="price" interactive={false} accessibilityLabel="Band" style={{ width: 100, height: 20 }}>
-        <Area y0="avg" curve="linear" />
+        <Area testID="band-low" y0="avg" curve="linear" />
         <Area y1="avg" y0={(d: Row) => d.avg - 2} />
       </Plot>
       {/* Bars in bands: one standing alone, a stack beside it. */}
@@ -168,6 +168,7 @@ function App() {
       <RadarCase />
       <LabelCase />
       <SankeyCase />
+      <StackCase />
       <ScopeCase />
     </View>
   );
@@ -193,6 +194,7 @@ function PieCase() {
         <Arc innerRadius={hole() ? "40%" : 0} outerRadius="80%" class="fill-[#eeeeee]" />
         <Arc testID="gauge" endAngle={hole() ? Math.PI / 2 : Math.PI / 3} innerRadius={42} outerRadius={48} cornerRadius={3} />
         <Pie
+          testID="slices"
           value="share"
           startAngle={Math.PI / 2}
           endAngle={(3 * Math.PI) / 2}
@@ -382,12 +384,19 @@ const MORE_FLOWS = [
   { source: 0, target: 1, value: 70 },
   { source: 1, target: 3, value: 35 },
 ];
+const STEPS: Stage[] = [{ name: "ra" }, { name: "rb" }, { name: "rc" }, { name: "rx" }, { name: "ry" }];
+const STEP_FLOWS = [
+  { source: 0, target: 3, value: 10 },
+  { source: 1, target: 3, value: 10 },
+  { source: 2, target: 4, value: 10 },
+];
 const FILLS = ["fill-[#3366ff]", "fill-[#33aa66]", "fill-[#999999]", "fill-[#ffaa00]"];
 
 /** Flows from visits to trials and away, trials to paid: four nodes in
  * three columns, a ribbon per link, each node its row's fill, each ribbon
- * a gradient from its source's color; and a plot whose links make a
- * cycle. */
+ * outlined over a gradient from its source's color; a plot whose links
+ * make a cycle; and one laid out with no relaxing, each node where the
+ * layout first puts it. */
 function SankeyCase() {
   const flow = signal<number | null>(null);
   const more = signal(false);
@@ -409,11 +418,11 @@ function SankeyCase() {
           nodeAlign="left"
           iterations={4}
           valueScale="sqrt"
-          minLinkWidth={2}
+          minLinkWidth={36}
           nodeCornerRadius={2}
           nodeClass={(_: Stage, i: number) => FILLS[i]}
           nodeStyle={{ stroke: "#ffffff", strokeWidth: 1 }}
-          linkClass="fill-none"
+          linkClass="stroke-[#dddddd]"
           linkStyle={{ opacity: 0.8 }}
           linkBackgroundClass={(link) => `bg-linear-to-r ${FILLS[link.source].replace("fill-", "from-")}/40 to-transparent`}
           linkBackgroundStyle={{ opacity: 0.9 }}
@@ -431,17 +440,34 @@ function SankeyCase() {
       <Plot testID="cycle" data={STAGES} accessibilityLabel="Cycle" style={{ width: 100, height: 50 }}>
         <Sankey links={[{ source: 0, target: 1, value: 1 }, { source: 1, target: 0, value: 1 }]} />
       </Plot>
+      <Plot testID="unrelaxed" data={STEPS} style={{ width: 100, height: 100 }}>
+        <Sankey links={STEP_FLOWS} iterations={0} nodeLabel="name" />
+      </Plot>
     </View>
+  );
+}
+
+/** Two bars in one stack (`stack`), in three bands of a 120 by 80 plot
+ * on -20 to 60 (1 point a value): the second on the first, a negative
+ * first one below the base. */
+function StackCase() {
+  return (
+    <Plot data={SALES} xScale={{ type: "band" }} yScale={{ type: "linear", domain: [-20, 60] }} style={{ width: 120, height: 80 }}>
+      <Bar value="v" stack="t" label={(d: Sale) => `sa${d.v}`} labelClass="h-[14px] w-[30px]" />
+      <Bar value="w" stack="t" label={(d: Sale) => `sb${d.w}`} labelClass="h-[14px] w-[30px]" />
+    </Plot>
   );
 }
 
 /** A sparkline a row of a list would make again: shown and taken away,
  * its period changed, and the scope's `id` changed, over an appear of
- * 100 ms. */
+ * 100 ms, or of an hour easing in (`scope-slow`), which stays at its
+ * start for the seconds a script reads it. */
 function ScopeCase() {
   const shown = signal(false);
   const period = signal("1D");
   const list = signal("watch");
+  const slow = signal(false);
   return (
     <View>
       <PlotAppearScope id={list()}>
@@ -451,7 +477,7 @@ function ScopeCase() {
             y="v"
             interactive={false}
             appearGeneration={`AAPL ${period()}`}
-            motion={{ appear: { duration: 100 } }}
+            motion={{ appear: slow() ? { duration: 3_600_000, easing: "easeIn" } : { duration: 100 } }}
             style={{ width: 100, height: 20 }}
           >
             <Line testID="scoped-line" />
@@ -462,6 +488,7 @@ function ScopeCase() {
       <View testID="scope-toggle" onPress={() => shown.set(!shown())} style={{ height: 20 }} />
       <View testID="scope-period" onPress={() => period.set("1W")} style={{ height: 20 }} />
       <View testID="scope-rename" onPress={() => list.set("hot")} style={{ height: 20 }} />
+      <View testID="scope-slow" onPress={() => slow.set(!slow())} style={{ height: 20 }} />
     </View>
   );
 }

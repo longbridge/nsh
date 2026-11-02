@@ -13,7 +13,7 @@ supplies padding, colors, borders and state feedback through `classes` and `styl
 |---|---|
 | `mod.rs` | The component: `DataTableProps`, `DataTableEvent`, `DataTableApi` (the ref's methods); the values: `DataTableAlign`, `DataTableSortDirection` (`PropEnum`s), `DataTableColumn`, `DataTableColumnGroup`, `DataTableSort`, `DataTableSelection`, `DataTableRange`, `DataTableCell`, ... (`JsObject`s) |
 | `parts.rs` | The parts the app styles: one `parts!` list makes `DataTableClasses`, `DataTableStyles` and `DataTablePart` |
-| `data.rs` | `DataTableRows`: the rows from JS, arrays or objects by the columns' keys, and each field as a `Cell` |
+| `data.rs` | `DataTableRows`: the rows from JS (arrays, or objects by the columns' keys) or from Rust a typed column at a time (`new`, `texts`, `numbers`, `bools`, as the core's `Rows::from_columns`), each field as a `Cell` |
 | `axis.rs` | `Axis`: one axis's real extent against the extent the scroll views get (see "Huge tables") |
 | `columns.rs` | `Columns`: the columns' order, widths and prefix sums, the fixed ones, finding the column at an x, resizing, moving |
 | `selection.rs` | `Selection`, `Selectable` (gpui-component's `rowSelectable`, `columnSelectable`, `cellSelectable`), and `Nav`: what a key moves the selection to |
@@ -67,7 +67,10 @@ nine times, a slow drag of 3 rows moving 25). Where no scroll bar is dragged (no
 from an anchor instead (`Anchor`, `Axis::content_offset_from`): the content moves as far as the scroll for half the room
 to the scroll view's end that way, faster past that so the ends still meet. When a scroll comes to rest (`ScrollEnd`,
 `Dt::rest`) the anchor moves to where the bar stands for the content shown (`Axis::anchor_at`, on a device pixel) and the
-scroll view is scrolled there, unseen: the cells are placed from the content offset, which does not change. A scroll the
+scroll view is scrolled there, unseen: the cells are placed from the content offset, which does not change. The anchor
+moves even when the scroll view is already at that offset. A drag back to the top ends at offset 0, already where the
+bar stands for the top; keeping the anchor that stood for the content before that drag makes the next drag, followed
+from it, jump back toward that content. A scroll the
 table makes takes the anchor of its target the same way; an animated one within reach moves one to one from where it
 is. On the desktops the offset stays scaled: dragging the bar must reach the whole content.
 

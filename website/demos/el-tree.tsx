@@ -71,8 +71,8 @@ function App() {
       <Text style={{ fontSize: 22, fontWeight: "700", color: ui().text }}>tree</Text>
       <Text style={{ color: ui().muted }}>
         {desktop
-          ? "Click a folder, or Tab in and use the arrows: Right opens and enters, Left closes and leaves"
-          : "Tap a folder to open it, a file to select it"}
+          ? "Click a folder, or Tab in and use the arrows: Right opens and enters, Left closes and leaves; double-click a file or press Return to act on it"
+          : "Tap a folder to open it, a file to select it; double-tap a file to act on it"}
       </Text>
 
       <Split
@@ -122,6 +122,7 @@ function App() {
             }}
             onExpand={({ id }) => log(`onExpand({ id: "${id}" })`)}
             onCollapse={({ id }) => log(`onCollapse({ id: "${id}" })`)}
+            onAction={({ id }) => log(`onAction({ id: "${id}" })`)}
             renderItem={(entry) => <TreeRow entry={entry} detail={entry.disabled ? "excluded" : sizes[entry.id]} />}
           />
         </View>
