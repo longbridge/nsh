@@ -246,12 +246,35 @@ take no space and have no children; put them anywhere in the app. The last scree
 draws.
 
 Pages and dialogs come and go through a shader with **`transitionShader`**: `{ source, uniforms, duration }` on a
-`NavPage` or a `Dialog`. When the page is pushed or popped, or the dialog shown or closed, the lower side is
-`sample_from` and the upper `sample_to`; the platform's own `animation` runs where a shader cannot.
+`NavPage` or a `Dialog` (Rust: `.transition_shader(TransitionShader::new(program))` on `nav_page()` or `dialog()`).
+When the page is pushed or popped, or the dialog shown or closed, the lower side (the page under it, the app without
+the dialog) is `sample_from` and the upper `sample_to`; `nsh.progress` goes from 0 to 1 as the page or the dialog
+comes and from 1 to 0 as it goes, so one shader draws both ways.
 
-```tsx
+```rust tabs
+use std::time::Duration;
+
+use nsh_base::nav_page;
+use nsh_core::{prelude::*, shader::{Shader, TransitionShader}};
+
+fn details() -> impl IntoElement {
+    let ripple = Shader::compile(RIPPLE).expect("a valid shader");
+    nav_page()
+        .title("Details")
+        .transition_shader(TransitionShader::new(ripple).duration(Duration::from_millis(500)))
+        .child(text("…"))
+}
+```
+
+```tsx tabs
 <NavPage title="Details" transitionShader={{ source: RIPPLE, duration: 500 }}>…</NavPage>
 ```
+
+The shader takes the place of the page's or the dialog's `animation`, whatever it is (`"none"` too). The `animation`
+runs on a device without a GPU, when the user asks for less motion (Reduce Motion, Remove animations), and for a
+source that does not compile; with `"none"` the change then shows at once. A push, pop, show or close that starts
+while one runs completes that one first: its page or dialog arrives or leaves, its `onShow` or `onDismiss` fires, and
+the new change starts from there.
 
 The platforms take the pictures when what they show changes, at most once per display frame. A picture is drawn by
 the platform's own renderer, so what it cannot draw into a picture (a video, a web page, another app's view) shows
@@ -282,7 +305,11 @@ A shader takes the props of a [view](./view.md) plus:
 | `duration` | `.duration(Duration)` | `number` | How long it runs, in milliseconds. Default 300. |
 | `fallback` | `.fallback(TransitionFallback)` | `"fade" \| "none"` | What runs without a `source`. Default `"fade"`. |
 
-`NavPage` and `Dialog` take `transitionShader`: `{ source: string; uniforms?: Record<string, ShaderUniform>; duration?: number }` (350 ms by default).
+`NavPage` and `Dialog` take:
+
+| Prop | Rust | Type | Description |
+|---|---|---|---|
+| `transitionShader` | `.transition_shader(TransitionShader::new(program))`, `.uniform(name, value)`, `.duration(Duration)` | `{ source: string; uniforms?: Record<string, ShaderUniform>; duration?: number }` | The shader the page or dialog comes and goes through in place of its `animation`. `duration` in milliseconds, 350 by default. |
 
 ## Errors
 

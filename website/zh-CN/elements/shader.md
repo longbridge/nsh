@@ -219,11 +219,28 @@ const gone = createAnimatedValue(0);
 
 **`ScreenEffect`** 和 **`ScreenTransition`** 对整个界面（它的页面、对话框和浮层）做同样的事。它们不占空间，也没有子元素，可以放在应用中的任何位置。最后挂载且带 `source` 的屏幕效果生效。
 
-页面和对话框可以通过 **`transitionShader`** 经过 shader 出现和离开：在 `NavPage` 或 `Dialog` 上设置 `{ source, uniforms, duration }`。页面入栈或出栈、对话框显示或关闭时，下层一侧是 `sample_from`，上层是 `sample_to`；平台无法用 shader 的地方运行它自己的 `animation`。
+页面和对话框可以通过 **`transitionShader`** 经过 shader 出现和离开：在 `NavPage` 或 `Dialog` 上设置 `{ source, uniforms, duration }`（Rust：在 `nav_page()` 或 `dialog()` 上调用 `.transition_shader(TransitionShader::new(program))`）。页面入栈或出栈、对话框显示或关闭时，下层一侧（下面的页面、没有对话框的应用）是 `sample_from`，上层是 `sample_to`；页面或对话框出现时 `nsh.progress` 从 0 走到 1，离开时从 1 走到 0，因此一个 shader 就能画出两个方向。
 
-```tsx
+```rust tabs
+use std::time::Duration;
+
+use nsh_base::nav_page;
+use nsh_core::{prelude::*, shader::{Shader, TransitionShader}};
+
+fn details() -> impl IntoElement {
+    let ripple = Shader::compile(RIPPLE).expect("a valid shader");
+    nav_page()
+        .title("详情")
+        .transition_shader(TransitionShader::new(ripple).duration(Duration::from_millis(500)))
+        .child(text("…"))
+}
+```
+
+```tsx tabs
 <NavPage title="详情" transitionShader={{ source: RIPPLE, duration: 500 }}>…</NavPage>
 ```
+
+shader 取代页面或对话框的 `animation`，无论它是什么（包括 `"none"`）。在没有 GPU 的设备上、用户要求减少动态效果时（减弱动态效果、移除动画），以及源码无法编译时，运行的是 `animation`；若为 `"none"`，变化会立即显示。一次切换进行中又开始新的入栈、出栈、显示或关闭时，先完成正在进行的那一次：它的页面或对话框到达或离开，`onShow` 或 `onDismiss` 触发，新的切换从那里开始。
 
 平台在画面内容变化时重新获取画面，每个显示帧最多一次。画面由平台自己的渲染器绘制，因此它无法画进画面的内容（视频、网页、其他应用的视图）在画面中是透明的。
 
@@ -252,7 +269,11 @@ shader 接受 [view](./view.md) 的属性，另外还有：
 | `duration` | `.duration(Duration)` | `number` | 运行时长（毫秒）。默认 300。 |
 | `fallback` | `.fallback(TransitionFallback)` | `"fade" \| "none"` | 没有 `source` 时运行的内容。默认 `"fade"`。 |
 
-`NavPage` 和 `Dialog` 接受 `transitionShader`：`{ source: string; uniforms?: Record<string, ShaderUniform>; duration?: number }`（默认 350 毫秒）。
+`NavPage` 和 `Dialog` 接受：
+
+| 属性 | Rust | 类型 | 说明 |
+|---|---|---|---|
+| `transitionShader` | `.transition_shader(TransitionShader::new(program))`、`.uniform(name, value)`、`.duration(Duration)` | `{ source: string; uniforms?: Record<string, ShaderUniform>; duration?: number }` | 页面或对话框出现和离开时经过的 shader，取代它的 `animation`。`duration` 以毫秒为单位，默认 350。 |
 
 ## 错误
 
