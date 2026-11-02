@@ -95,7 +95,7 @@ function Item(props: {
 function SubmenuOf(props: { label: string; icon?: LucideIconName; children: JSX.Element; disabled?: boolean }) {
   return (
     <Submenu
-      offset={8}
+      offset={4}
       disabled={props.disabled}
       trigger={
         <View

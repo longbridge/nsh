@@ -58,7 +58,7 @@ function Separator() {
 function Share(props: { onSelect: (what: string) => void }) {
   return (
     <Submenu
-      offset={8}
+      offset={4}
       trigger={
         <View hoverStyle={{ backgroundColor: tint(ui().accent, 0.08), borderColor: tint(ui().accent, 0.24) }} activeStyle={{ backgroundColor: tint(ui().accent, 0.14), borderColor: tint(ui().accent, 0.34) }} style={{ ...row(), borderWidth: 1, borderColor: "transparent" }}>
           <Text style={{ numberOfLines: 1, flexGrow: 1, flexShrink: 0, fontSize: 14, color: ui().text }}>Share</Text>
