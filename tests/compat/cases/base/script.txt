@@ -1863,6 +1863,86 @@ covers [props] accessibilityLabel
 covers [events] onChange
 covers [events] Combobox.onConfirm
 covers [events] Combobox.onQueryChange
+# base-command
+tap id:case-base-command
+# The app's header, search bar (its prefix beside the field) and footer;
+# the items under their sections' headers (the app's rows and headers): a
+# list box of options, a disabled one dimmed, a checked one checked.
+expect PaletteHeader
+expect PaletteFooter
+expect Find:
+expect [Suggestions]
+expect [Settings]
+prop scroll:label:Calendar role listbox
+prop scroll:label:Calendar accessibilityLabel Commands
+style scroll:label:Calendar backgroundColor #0000ffff
+prop label:Calendar role option
+prop label:Search Emoji accessibilityState disabled=true
+prop label:Dark Theme accessibilityState checked=true
+style label:Dark Theme backgroundColor #00ff00ff
+nostyle label:Profile backgroundColor
+# `renderItem` gets the shortcut as shown here.
+expect New File +key
+expect Calendar
+# The first enabled item is highlighted (`focus:`, 40 high), and the app
+# hears it; a disabled row takes `disabled:` (24).
+expect Lit: new
+frame label:New File 0 0 390 40
+frame label:Calendar 0 0 390 30
+frame label:Search Emoji 0 0 390 24
+absent NoCommands
+# A press chooses; a disabled item takes none.
+tap label:Search Emoji
+expect Chosen: none
+tap label:Profile
+expect Chosen: profile
+# The app's query: typing is reported, the app's query filters by label,
+# empty sections go, and its first match is highlighted.
+type text:FindCommand cal
+expect Query: cal
+absent New File +key
+absent [Settings]
+expect [Suggestions]
+expect Lit: calendar
+frame label:Calendar 0 0 390 40
+tap label:Calendar
+expect Chosen: calendar
+# Nothing matches: the app's `empty`.
+type text:FindCommand zz
+expect Query: calzz
+expect NoCommands
+expect Lit: none
+# The field's own query starts from `defaultQuery`, and filters.
+expect Remote Two
+absent Remote One
+# A search the app answers: its query filters nothing, and while it is
+# `loading` the list is busy and `empty` waits.
+expect Server A
+expect Server B
+absent ServerEmpty
+prop scroll:label:Server A accessibilityState busy=true
+# Without a search field every item shows.
+expect Gamma
+absent text:NoField
+covers [nsh/base] Command
+covers [props] Command.items
+covers [props] Command.query
+covers [props] Command.defaultQuery
+covers [props] Command.filterable
+covers [props] Command.loading
+covers [props] Command.placeholder
+covers [props] Command.listClass
+covers [props] Command.itemClass
+covers [props] Command.header
+covers [props] Command.footer
+covers [props] Command.empty
+covers [props] Command.searchPrefix
+covers [props] Command.renderItem
+covers [props] Command.renderGroup
+covers [props] accessibilityLabel
+covers [events] Command.onSelect
+covers [events] Command.onHighlightChange
+covers [events] Command.onQueryChange
 # base-scrollbar
 tap id:case-base-scrollbar
 # Always shown, where the app places its track; a press in its middle

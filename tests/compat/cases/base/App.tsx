@@ -39,6 +39,7 @@ import BaseRichEditorTables from "./base-rich-editor-tables";
 import BaseRichEditorView from "./base-rich-editor-view";
 import BaseSafeAreaKeyboard from "./base-safe-area-keyboard";
 import BaseCombobox from "./base-combobox";
+import BaseCommand from "./base-command";
 import BaseDatePicker from "./base-date-picker";
 import BaseScrollbar from "./base-scrollbar";
 import BaseSelect from "./base-select";
@@ -96,6 +97,7 @@ const cases: Record<string, () => JSX.Element> = {
   "base-plot": BasePlot,
   "base-progress": BaseProgress,
   "base-combobox": BaseCombobox,
+  "base-command": BaseCommand,
   "base-date-picker": BaseDatePicker,
   "base-scrollbar": BaseScrollbar,
   "base-select": BaseSelect,

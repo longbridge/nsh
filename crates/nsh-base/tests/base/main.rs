@@ -8,6 +8,7 @@ mod carousel;
 mod collapsible;
 mod color_picker;
 mod combobox;
+mod command;
 mod date_picker;
 mod diff;
 mod dock;
