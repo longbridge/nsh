@@ -10874,6 +10874,114 @@ mod touch {
         (c, outer, inner)
     }
 
+    thread_local! {
+        static SLOT_TOUCH_LOG: std::cell::RefCell<Vec<&'static str>> = const { std::cell::RefCell::new(Vec::new()) };
+    }
+
+    fn note_slot_touch(s: &'static str) {
+        SLOT_TOUCH_LOG.with(|log| log.borrow_mut().push(s));
+    }
+
+    #[derive(Clone, Copy, PartialEq, Props)]
+    struct TouchSlotProps {
+        trigger: crate::element::Prop<Option<Slot>>,
+    }
+
+    #[component]
+    fn TouchSlot(props: TouchSlotProps) -> impl IntoElement {
+        view().child(props.trigger.place(|t| {
+            t.on_touch(|_: &TouchEvent| note_slot_touch("slot touch"))
+                .claim_touches(TouchClaim::on_move().capture())
+                .on_responder_grant(|_: &ResponderEvent| note_slot_touch("slot grant"))
+        }))
+    }
+
+    #[component]
+    fn TouchTrigger() -> impl IntoElement {
+        view()
+            .on_touch(|_: &TouchEvent| note_slot_touch("trigger touch"))
+            .claim_touches(TouchClaim::on_start())
+            .on_responder_grant(|_: &ResponderEvent| note_slot_touch("trigger grant"))
+            .on_responder_terminate(|_: &ResponderEvent| note_slot_touch("trigger terminate"))
+    }
+
+    #[test]
+    fn a_slotted_component_and_its_slot_both_receive_touches_and_negotiate() {
+        SLOT_TOUCH_LOG.with(|log| log.borrow_mut().clear());
+        let mut c = core();
+        let mut registry = Registry::new();
+        registry.register::<TouchSlot>();
+        registry.register::<TouchTrigger>();
+        c.set_components(registry);
+        let component = |id, name: &str| Op::SetProp {
+            id,
+            prop: super::Prop::Component(name.into()),
+        };
+        apply(
+            &mut c,
+            vec![
+                Op::Create {
+                    id: 2,
+                    tag: Tag::View,
+                },
+                component(2, std::any::type_name::<TouchSlot>()),
+                Op::Insert {
+                    parent: ROOT_ID,
+                    child: 2,
+                    before: None,
+                },
+                Op::Create {
+                    id: 4,
+                    tag: Tag::View,
+                },
+                Op::SetProp {
+                    id: 4,
+                    prop: super::Prop::ComponentSlot("trigger".into()),
+                },
+                Op::Create {
+                    id: 6,
+                    tag: Tag::View,
+                },
+                component(6, std::any::type_name::<TouchTrigger>()),
+                Op::Insert {
+                    parent: 4,
+                    child: 6,
+                    before: None,
+                },
+                Op::Insert {
+                    parent: 2,
+                    child: 4,
+                    before: None,
+                },
+            ],
+        );
+        c.commit();
+        c.component_event(
+            ROOT_ID,
+            EventKind::Touch,
+            &touch(TouchPhase::Start, &[6], 0.0, 0.0),
+        );
+        c.component_event(
+            ROOT_ID,
+            EventKind::Touch,
+            &touch(TouchPhase::Move, &[6], 20.0, 16.0),
+        );
+        SLOT_TOUCH_LOG.with(|log| {
+            assert_eq!(
+                &*log.borrow(),
+                &[
+                    "trigger touch",
+                    "slot touch",
+                    "trigger grant",
+                    "trigger touch",
+                    "slot touch",
+                    "trigger terminate",
+                    "slot grant",
+                ]
+            )
+        });
+    }
+
     #[test]
     fn an_element_claims_the_touches_on_start_and_blocks_scrolling() {
         let (mut c, outer, inner) = mount_pad(false);

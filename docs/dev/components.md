@@ -816,8 +816,8 @@ what changed.
   combine (`slots::merged`): the component's values win, the app's fill in what it leaves unset (field by field in
   `accessibilityState`); `disabled`, the state flags and projected states hold when either sets them; both sides'
   listeners run, the component's first. The app's element may be a component's host (a `Button` as a popover's
-  trigger): its own side is its view's root, the slot's component hears its events first, then its own (left on the
-  holder, the slot's presses would never come: the root is the innermost press target). JS's ops on it go through the core (`Core::js_slot_op`), which keeps JS's
+  trigger): its own side is its view's root, the slot's component hears its events first, then its own (touch handlers run from the inner component outward, and both participate in responder negotiation); left on the
+  holder, the slot's presses would never come: the root is the innermost press target. JS's ops on it go through the core (`Core::js_slot_op`), which keeps JS's
   own values and sends the combination, and puts them back when the component's part leaves the element (another
   element joins the holder, the element leaves it, the slot or the component goes). JS's values from before are read
   from the node (accessibility, `disabled`, `pointerEvents`, `focusable`, projected states); another host prop the
