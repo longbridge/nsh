@@ -461,11 +461,13 @@ function StackCase() {
 
 /** A sparkline a row of a list would make again: shown and taken away,
  * its period changed, and the scope's `id` changed, over an appear of
- * 100 ms. */
+ * 100 ms, or of an hour easing in (`scope-slow`), which stays at its
+ * start for the seconds a script reads it. */
 function ScopeCase() {
   const shown = signal(false);
   const period = signal("1D");
   const list = signal("watch");
+  const slow = signal(false);
   return (
     <View>
       <PlotAppearScope id={list()}>
@@ -475,7 +477,7 @@ function ScopeCase() {
             y="v"
             interactive={false}
             appearGeneration={`AAPL ${period()}`}
-            motion={{ appear: { duration: 100 } }}
+            motion={{ appear: slow() ? { duration: 3_600_000, easing: "easeIn" } : { duration: 100 } }}
             style={{ width: 100, height: 20 }}
           >
             <Line testID="scoped-line" />
@@ -486,6 +488,7 @@ function ScopeCase() {
       <View testID="scope-toggle" onPress={() => shown.set(!shown())} style={{ height: 20 }} />
       <View testID="scope-period" onPress={() => period.set("1W")} style={{ height: 20 }} />
       <View testID="scope-rename" onPress={() => list.set("hot")} style={{ height: 20 }} />
+      <View testID="scope-slow" onPress={() => slow.set(!slow())} style={{ height: 20 }} />
     </View>
   );
 }

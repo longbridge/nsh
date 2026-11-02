@@ -2889,6 +2889,9 @@ frame id:sankey 0 0 200 100
 expect flow null
 event id:flows onMouseMove position.x=4 position.y=50
 expect flow 0
+# The ribbons away from the hovered node fade by `hoverDim`: trials to
+# paid, the last, to 0.4.
+animated below:below:below:below:below:parent:parent:text:visits opacity 0.4
 event id:flows onMouseMove position.x=30 position.y=50
 expect flow null
 event id:flows onMouseLeave
@@ -2933,23 +2936,43 @@ covers [props] Sankey.nodeLabelClass
 covers [props] Sankey.nodeLabelStyle
 covers [props] Sankey.valueLabelClass
 covers [props] Sankey.valueLabelStyle
+covers [props] Sankey.hoverDim
 # A plot inside a `PlotAppearScope`, shown and taken away, its period
-# and the scope's `id` changed: what it draws is the same whether its
-# appear replays or not (the clip's width is the animator's), so the
-# scope's memory is the engine tests'; here the case runs.
+# and the scope's `id` changed. Its line's clip is read as the animation
+# graph runs it: 100 wide once drawn in, 0 at the start of an appear of
+# an hour easing in (`scope-slow`).
 tap id:scope-toggle
 expect scoped true 1D watch
 drawing id:scoped-line clip
+drawing id:scoped-line stroke
+animated id:scoped-line slot.0 100
+# Made again inside the scope, a generation that finished there shows
+# whole at once, even with the slow appear: its line is not clipped.
 tap id:scope-toggle
 expect scoped false 1D watch
+tap id:scope-slow
 tap id:scope-toggle
 expect scoped true 1D watch
+drawing id:scoped-line stroke
+nodrawing id:scoped-line clip
+# Another `appearGeneration` draws in again.
 tap id:scope-period
 expect scoped true 1W watch
+animated id:scoped-line slot.0 0
+# That one never finished, so made again it draws in again (fast).
+tap id:scope-toggle
+tap id:scope-slow
+tap id:scope-toggle
+expect scoped true 1W watch
+animated id:scoped-line slot.0 100
+# Another scope `id`: the scope forgets, and the plot draws in afresh.
+tap id:scope-slow
 tap id:scope-rename
 expect scoped true 1W hot
-drawing id:scoped-line stroke
+animated id:scoped-line slot.0 0
 covers [nsh/base/plot] PlotAppearScope
+covers [props] PlotAppearScope.id
+covers [props] Plot.appearGeneration
 
 # The app's design tokens: shadcn's `neutral` with the app's theme over it.
 tap id:case-base-token
