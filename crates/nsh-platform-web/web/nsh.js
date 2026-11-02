@@ -2127,7 +2127,9 @@ class Player {
     const el = this.view(id);
     if (!el) return;
     el._tracked = states;
-    el._states = 0;
+    // The focus is reported whatever is tracked (the core works out
+    // `focus-within` from it): it stays; the rest is forgotten.
+    el._states = (el._states || 0) & FOCUSED;
     if (states & HOVERED && !el._hoverListeners) {
       el._hoverListeners = true;
       el.addEventListener("pointerenter", (e) => e.pointerType === "mouse" && this.setState(el, HOVERED, true));
@@ -2136,9 +2138,11 @@ class Player {
   }
 
   setState(el, bit, on) {
-    if (!el._tracked || !(el._tracked & bit)) return;
-    const next = on ? el._states | bit : el._states & ~bit;
-    if (next === el._states) return;
+    // The focus is reported whatever is tracked (`reported_states`).
+    if (!(((el._tracked || 0) | FOCUSED) & bit)) return;
+    const states = el._states || 0;
+    const next = on ? states | bit : states & ~bit;
+    if (next === states) return;
     el._states = next;
     this.call((w) => w.nsh_states(el._id, next));
   }

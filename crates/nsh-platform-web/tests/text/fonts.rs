@@ -188,3 +188,47 @@ fn figures_are_measured_with_the_kerning_of_their_pairs() {
     }
     assert!((figure_width("$1,111.11", measure) - 84.546_875).abs() < 1e-3);
 }
+
+#[test]
+fn emoji_are_told_from_text() {
+    use crate::css::is_emoji;
+
+    // What the color emoji font may draw: emoji, text by default or not
+    // (☝ ✌ ✍ ⛹ have no glyph in macOS's text fonts), modifiers, regional
+    // indicators, the emoji variation selector and the keycap.
+    for c in [
+        '🤩', '👍', '🏻', '🇨', '🀄', '⌚', '⭐', '✅', '☝', '✌', '✍', '⛹', '❤', '©', '\u{fe0f}',
+        '\u{20e3}',
+    ] {
+        assert!(is_emoji(c), "{c}");
+    }
+    // Text: letters, CJK, digits, `#` and `*` (text without U+FE0F),
+    // symbols without the `Emoji` property, the joiner.
+    for c in ['a', '中', 'ไ', '1', '#', '*', '★', '✓', '\u{200d}'] {
+        assert!(!is_emoji(c), "{c}");
+    }
+}
+
+#[test]
+fn emoji_excess_adds_each_emoji_cluster_once() {
+    use crate::css::emoji_excess;
+
+    let clusters = |text: &str| {
+        let mut seen = Vec::new();
+        emoji_excess(text, |c| {
+            seen.push(c.to_owned());
+            0.0
+        });
+        seen
+    };
+    // 22 emoji, 4 points each too wide on canvas: the line is 88 narrower.
+    assert_eq!(emoji_excess(&"🤩".repeat(22), |_| 4.0), 88.0);
+    // Sequences are one cluster each: ZWJ, skin tone, flags, a subdivision
+    // flag's tags, a keycap, U+FE0F; text around them is no cluster.
+    assert_eq!(
+        clusters("a👨‍👩‍👧‍👦b 👍🏽🇨🇳🇺🇸 🏴󠁧󠁢󠁥󠁮󠁧󠁿 #️⃣ ❤️ ☝✌ 中"),
+        ["👨‍👩‍👧‍👦", "👍🏽", "🇨🇳", "🇺🇸", "🏴󠁧󠁢󠁥󠁮󠁧󠁿", "#️⃣", "❤️", "☝", "✌"]
+    );
+    // Text without emoji is not split at all.
+    assert!(clusters("Hello 世界 ไทย 123 #*").is_empty());
+}

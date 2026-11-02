@@ -1130,7 +1130,7 @@ pub enum PasteBehavior {
 }
 
 /// A bar button UIKit draws itself, with the system's look, symbol or
-/// label (`ios={{ headerRightSystemItem }}`).
+/// label (`ios={{ headerLeftSystemItem }}`, `ios={{ headerRightSystemItem }}`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, PropEnum)]
 pub enum HeaderSystemItem {
     /// A plus (`UIBarButtonSystemItemAdd`).
@@ -1452,6 +1452,21 @@ pub enum ScreenProp {
     /// of `headerRight`. Without a `headerRight`, nothing is drawn there.
     #[prop(ios = "headerRightSystemItem", on = SCREEN)]
     HeaderRightSystemItem(Option<HeaderSystemItem>),
+    /// `ios={{ headerLeftSystemItem }}`: as `headerRightSystemItem`, in the
+    /// leading slot, pressing the first pressable view of `headerLeft`.
+    #[prop(ios = "headerLeftSystemItem", on = SCREEN)]
+    HeaderLeftSystemItem(Option<HeaderSystemItem>),
+    /// `ios={{ headerRightSymbol }}`: UIKit's own bar button showing the SF
+    /// Symbol of that name (`"slider.horizontal.3"`) in the trailing slot,
+    /// in place of the view of `headerRight`; a press on it is a press on
+    /// the first pressable view of `headerRight`. `headerRightSystemItem`
+    /// wins over it; an unknown name draws the view of `headerRight`.
+    #[prop(ios = "headerRightSymbol", on = SCREEN)]
+    HeaderRightSymbol(Option<Arc<str>>),
+    /// `ios={{ headerLeftSymbol }}`: as `headerRightSymbol`, in the leading
+    /// slot, pressing the first pressable view of `headerLeft`.
+    #[prop(ios = "headerLeftSymbol", on = SCREEN)]
+    HeaderLeftSymbol(Option<Arc<str>>),
     /// `headerBackVisible`: the system header's back button shows (default
     /// true; iOS and Android).
     #[prop(js = "headerBackVisible", default = true, on = SCREEN)]
@@ -2268,6 +2283,10 @@ pub enum Prop {
     /// not mixed: a toggle button that is on), and not disabled. Not
     /// `activeStyle`, a press in progress.
     PressedStyle(Option<std::rc::Rc<StylePatch>>),
+    /// `focusWithinStyle`: the style while the keyboard focus is on the
+    /// view or a view inside it (an overlay's content counting as inside
+    /// the view it is in), and it is not disabled.
+    FocusWithinStyle(Option<std::rc::Rc<StylePatch>>),
     /// The states a part of a control shows its classes and state styles
     /// as its control has them ([`crate::tailwind::state`] bits: `checked`,
     /// `indeterminate`, `disabled`): a switch's thumb styled `checked:`

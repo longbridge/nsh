@@ -32,6 +32,25 @@ pub(crate) fn start_with(
     capabilities: Option<&str>,
     config: Option<&str>,
 ) -> (Engine, Receiver<MountBatch>) {
+    let (tx, rx) = crossbeam_channel::unbounded();
+    (
+        Engine::start(
+            app_config(app, environment, capabilities, config),
+            || ApproxTextEngine,
+            ChannelSink(tx),
+        )
+        .unwrap(),
+        rx,
+    )
+}
+
+/// The engine's configuration of [`start_with`]'s app.
+fn app_config(
+    app: &str,
+    environment: Environment,
+    capabilities: Option<&str>,
+    config: Option<&str>,
+) -> EngineConfig {
     static APPS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
     let dir = std::env::temp_dir().join(format!(
         "nsh-components-{}-{}",
@@ -59,8 +78,7 @@ pub(crate) fn start_with(
     })
     .unwrap();
     let bytecode = nsh_js::compile_bytecode_with(&bundle.code, false, &described).unwrap();
-    let (tx, rx) = crossbeam_channel::unbounded();
-    let config = EngineConfig {
+    EngineConfig {
         // SAFETY: compiled just now by this runtime.
         app: nsh_engine::App::Js(
             unsafe { Bundle::bytecode(bytecode) }
@@ -88,11 +106,7 @@ pub(crate) fn start_with(
         clipboard: None,
         host: Default::default(),
         picker: None,
-    };
-    (
-        Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap(),
-        rx,
-    )
+    }
 }
 
 fn text_ids(batch: &MountBatch, wanted: &str) -> Option<u32> {
@@ -4500,6 +4514,156 @@ fn a_base_slider_moves_the_nearer_thumb_and_tells_screen_readers_each_value() {
     );
     let after = until(&rx, |b| shows(b, "end 21,75"));
     assert!(after.iter().any(|b| shows(b, "Price 21-75")));
+}
+
+const BASE_SLIDER_TENS: &str = r##"import { mount, signal, View } from "nsh";
+import { Slider } from "nsh/base";
+
+function App() {
+  const volume = signal(40);
+  return (
+    <View>
+      <Slider
+        value={volume()}
+        onChange={({ value: next }) => volume.set(Math.round((next as number) / 10) * 10)}
+        accessibilityLabel="Volume"
+        class="w-[200px]"
+        trackClass="h-[20px] justify-center"
+        indicatorClass="h-[4px]"
+        thumbClass="w-[10px] h-[10px]"
+      />
+    </View>
+  );
+}
+
+mount(App);
+"##;
+
+/// `nsh/base`'s `Slider` in a TSX app that rounds what it is given to tens,
+/// a turn at a time: with the drag's last move and its release handled in
+/// one turn, the thumb shows the move's value until the app has answered
+/// it, then the app's answer, and never the app's answer to an earlier move
+/// (its frame and the value screen readers get, which go out on every change
+/// while one runs).
+#[test]
+fn a_base_sliders_drag_ends_on_the_apps_answer_to_its_last_move() {
+    use nsh_core::{AccessibilityRole, TouchEvent, TouchPhase, TouchPoint};
+    let environment = Environment {
+        screen_reader: true,
+        ..Environment::default()
+    };
+    let (tx, rx) = crossbeam_channel::unbounded();
+    let mut engine = nsh_engine::LocalEngine::start(
+        app_config(BASE_SLIDER_TENS, environment, None, None),
+        ApproxTextEngine,
+        ChannelSink(tx),
+    )
+    .expect("the app starts");
+    engine.pump();
+    let first: Vec<MountBatch> = rx.try_iter().collect();
+    let thumb = first
+        .iter()
+        .flat_map(|b| b.items.iter())
+        .find_map(|i| match i {
+            MountItem::ViewProps { id, props }
+                if props.accessibility.role == AccessibilityRole::Adjustable =>
+            {
+                Some(*id)
+            }
+            _ => None,
+        })
+        .expect("the thumb");
+    assert_eq!(frame_of(&first, thumb).map(|f| f.origin.x.0), Some(80.0));
+    let parent = |child: u32| {
+        first
+            .iter()
+            .flat_map(|b| b.items.iter())
+            .find_map(|i| match i {
+                MountItem::Insert {
+                    parent, child: c, ..
+                } if *c == child => Some(*parent),
+                _ => None,
+            })
+            .expect("a parent")
+    };
+    let track = parent(parent(thumb));
+    let touch = |phase, x: f32, timestamp| {
+        let at = nsh_core::geometry::point(px(x), px(10.0));
+        EventPayload::Touch(Box::new(TouchEvent {
+            phase,
+            timestamp,
+            activated: None,
+            points: vec![TouchPoint {
+                id: 1,
+                target: track,
+                path: if phase == TouchPhase::Start {
+                    vec![track]
+                } else {
+                    Vec::new()
+                },
+                page: at,
+                location: at,
+                changed: true,
+            }],
+        }))
+    };
+    // What the thumb was sent, in order: where its frame starts and the
+    // value screen readers get.
+    let sent = |batches: &[MountBatch]| {
+        let mut lefts = Vec::new();
+        let mut said = Vec::new();
+        for item in batches.iter().flat_map(|b| b.items.iter()) {
+            match item {
+                MountItem::Frame { id, frame } if *id == thumb => lefts.push(frame.origin.x.0),
+                MountItem::ViewProps { id, props } if *id == thumb => {
+                    said.push(props.accessibility.value.as_ref().and_then(|v| v.now));
+                }
+                _ => {}
+            }
+        }
+        (lefts, said)
+    };
+    let control = engine.control();
+
+    // A press at 54% of the track: the thumb shows 54 at once, and keeps it
+    // while the drag goes on although the app answered 50.
+    control.dispatch_event(
+        ROOT_ID,
+        EventKind::Touch,
+        touch(TouchPhase::Start, 108.0, 0.0),
+    );
+    engine.pump();
+    let pressed: Vec<MountBatch> = rx.try_iter().collect();
+    let (lefts, said) = sent(&pressed);
+    assert_eq!(lefts.last(), Some(&108.0));
+    assert_eq!(said.last(), Some(&Some(54.0)));
+
+    // A move to 64% and the release, in one turn: 64 shows until the app
+    // has answered it with 60, then 60; never the 50 it answered before.
+    control.dispatch_event(
+        ROOT_ID,
+        EventKind::Touch,
+        touch(TouchPhase::Move, 128.0, 16.0),
+    );
+    control.dispatch_event(
+        ROOT_ID,
+        EventKind::Touch,
+        touch(TouchPhase::End, 128.0, 32.0),
+    );
+    engine.pump();
+    let released: Vec<MountBatch> = rx.try_iter().collect();
+    let (lefts, said) = sent(&released);
+    assert!(
+        !lefts.contains(&100.0),
+        "the thumb went back to 50: {lefts:?}"
+    );
+    assert!(
+        !said.contains(&Some(50.0)),
+        "screen readers heard 50 again: {said:?}"
+    );
+    assert_eq!(lefts.last(), Some(&120.0));
+    assert!(said.contains(&Some(64.0)), "{said:?}");
+    assert_eq!(said.last(), Some(&Some(60.0)));
 }
 
 const BASE_SELECT: &str = r##"import { mount, signal, Text, View } from "nsh";

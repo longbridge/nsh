@@ -605,7 +605,12 @@ signs numbers are written with: `css::measured_by_char`) is the sum of its chara
 kerning (the pair's width less its characters': `css::figure_width`), each character and pair measured once and cached,
 and a live value that changes every frame lays nothing out once its pairs have been seen (a font's figures have a few
 hundred at most); text with letters is measured whole. `web/text-browser.test.mjs` checks both against what Chrome
-draws, `tests/text` that a figure's width adds its pairs' kerning and that no figure is measured whole. The CSS of runs (`src/text/css.rs`: the `font` shorthand,
+draws, `tests/text` that a figure's width adds its pairs' kerning and that no figure is measured whole. Color emoji are drawn at the screen's
+pixel ratio, narrower than canvas measures them (Apple Color Emoji at 14px: 18 px on canvas, 14 in the DOM on a 2x
+screen), so text with emoji (`css::is_emoji`: non-ASCII characters with Unicode's `Emoji` property, text by default
+or not, since macOS draws ☝ ✌ ✍ ⛹ with the emoji font too; U+FE0F; U+20E3) is its canvas width plus, for each emoji
+cluster, what the DOM draws it wider, measured once per font and cluster (`emoji_excess`); a change of the pixel
+ratio measures text again once an emoji was measured. The CSS of runs (`src/text/css.rs`: the `font` shorthand,
 generic families such as `monospace` left unquoted,
 names the app quoted kept only when their quotes close them) and line breaking (`src/text/wrap.rs`: break opportunities, the
 line start and end rules of CJK punctuation, the filling of lines) depend on nothing of the browser and are tested on

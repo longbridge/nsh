@@ -95,8 +95,9 @@ style methods for the slider itself and `.child(..)` for its label. Its value is
 The value is a number, or `[start, end]` for a range with two thumbs; the shape of the value decides how many thumbs
 there are. The app owns it with `value` and sets the one `onChange` reports, as for every control of `nsh/base`; or it
 leaves the value to the slider with `defaultValue`, and hears the changes all the same. During a drag the thumbs and the
-range follow the pointer in the same frame, natively, and the app's `value` shows again when the pointer lifts; screen
-readers hear the drag's values as it goes while one runs, and its end value otherwise.
+range follow the pointer in the same frame, natively; when the pointer lifts, the app's `value` shows again, as the app
+set it for the drag's last change; screen readers hear the drag's values as it goes while one runs, and its end value
+otherwise.
 
 ```tsx
 const price = signal<[number, number]>([200, 800]);
@@ -182,9 +183,8 @@ States the parts show:
 
 The thumbs move as the value changes, and follow a drag at once. Motion of the thumbs' states is the app's choice
 (`transition` for a thumb that brightens on `hover:` and `active:`), and `motion-reduce:` keeps it still for
-people who ask for less motion. The keyboard focus is a thumb's, which it reports while it has a `focus:` class:
-`focus-within:` on the track then rings the whole rail, and the thumb's `focus:outline-none` takes the place of the
-platform's own focus outline.
+people who ask for less motion. The keyboard focus is a thumb's: `focus-within:` on the track rings the whole rail
+while a thumb has it, and the thumb's `focus:outline-none` takes the place of the platform's own focus outline.
 
 ## Keyboard
 

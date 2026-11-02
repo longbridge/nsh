@@ -1,7 +1,8 @@
 //! The CSS that text is measured and drawn with. It depends on nothing of
 //! the browser, so its tests run off WebAssembly too (`tests/text`).
 
-use nsh_core::{FontVariant, ResolvedTextStyle};
+use nsh_core::{FontVariant, ResolvedTextStyle, text_edit::next_cluster};
+use unicode_properties::UnicodeEmoji;
 
 /// The system font stack (what `fontFamily` unset means).
 const SYSTEM_FONT: &str = "-apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \
@@ -42,6 +43,36 @@ pub(crate) fn font_variant_numeric(variant: FontVariant) -> Option<String> {
         }
     }
     (!css.is_empty()).then_some(css)
+}
+
+/// Whether `c` may have its cluster drawn by the color emoji font: a
+/// character with Unicode's `Emoji` property outside ASCII (digits, `#`
+/// and `*` are text), the emoji variation selector and the keycap. Its
+/// default presentation does not tell: ☝ ✌ ✍ ⛹ are text by default, yet
+/// macOS's text fonts have no glyph for them. A symbol a text font draws
+/// costs one measurement in the DOM, no error.
+pub(crate) fn is_emoji(c: char) -> bool {
+    !c.is_ascii() && (c.is_emoji_char() || matches!(c, '\u{FE0F}' | '\u{20E3}'))
+}
+
+/// How much wider the DOM draws `text`'s emoji than canvas measures them:
+/// `excess` of each of its clusters with an emoji ([`is_emoji`]), summed.
+/// The DOM draws them at the screen's pixel ratio, canvas measures them at
+/// 1x (14 against 18 px at 14px on a 2x screen).
+pub(crate) fn emoji_excess(text: &str, mut excess: impl FnMut(&str) -> f32) -> f32 {
+    if !text.chars().any(is_emoji) {
+        return 0.0;
+    }
+    let mut sum = 0.0;
+    let mut at = 0;
+    while at < text.len() {
+        let end = next_cluster(text, at);
+        if text[at..end].chars().any(is_emoji) {
+            sum += excess(&text[at..end]);
+        }
+        at = end;
+    }
+    sum
 }
 
 /// Whether text with a numeric variant is measured character by

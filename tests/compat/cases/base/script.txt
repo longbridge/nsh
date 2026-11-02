@@ -1275,6 +1275,7 @@ covers [events] onPress
 tap id:case-base-tree
 expect Selected: none
 expect Changes: 0
+expect Acted: none
 # A tree of tree items for screen readers, named; `src` is expanded as the
 # app says, so its children show and `ui`'s do not.
 prop id:files role tree
@@ -1299,15 +1300,20 @@ expect tree.rs
 prop label:ui accessibilityState selected=true expanded=true
 style label:ui backgroundColor #00ff00ff
 nostyle label:src backgroundColor
-# Again: it collapses.
+# Again, later (not the second press of a double press): it collapses.
+wait 600
 tap label:ui
 expect Expanded: src
 expect Heard: collapse src/ui
 expect Changes: 2
 absent tree.rs
-# A leaf is selected only.
+# A leaf is selected only: a press acts on no item. (A double press and
+# Return act on it, `onAction`: this run's presses carry no click count
+# and its keys reach inputs only, so nsh-base's `tree` tests and the
+# gallery's check that.)
 tap label:lib.rs
 expect Selected: src/lib.rs
+expect Acted: none
 prop label:ui accessibilityState expanded=false
 nostyle label:ui backgroundColor
 style label:lib.rs backgroundColor #00ff00ff

@@ -199,6 +199,7 @@ an `<Input>`, an `ImageStyle` on an `<Image>`, a `ViewStyle` elsewhere.
 | `activeStyle` | `.active(\|s\| ..)` | `active:` | While pressed. |
 | `hoverStyle` | `.hover(\|s\| ..)` | `hover:` | While a pointer is over the view. |
 | `focusStyle` | `.focus(\|s\| ..)` | `focus:` | While the view has focus. |
+| `focusWithinStyle` | `.focus_within(\|s\| ..)` | `focus-within:` | While the view or a view inside it has focus (the content of an `Overlay` counts as inside the view it is in). |
 | `disabledStyle` | `.disabled_style(\|s\| ..)` | `disabled:` | While `disabled`. |
 | `checkedStyle` | `.checked(\|s\| ..)`, `.checked_style(style)` | `checked:` | While `accessibilityState.checked` is `true` (a checkbox, a switch, a radio; `"mixed"` is not checked). |
 | `indeterminateStyle` | `.indeterminate(\|s\| ..)`, `.indeterminate_style(style)` | `indeterminate:` | While `accessibilityState.checked` is `"mixed"` (a checkbox that is neither checked nor unchecked). |
@@ -366,6 +367,12 @@ opens a page.
 
 A ref's `focus()` moves the keyboard focus to a stop as Tab does (its focus styles show and `onFocus` fires), say to
 give it back to the trigger of a popup that closed, and `blur()` takes it off.
+
+A view around the focus styles itself with `focus-within:` (`focusWithinStyle`, `.focus_within(..)`) while the focus
+is on it or on any view inside it: a field's frame around the input that edits, a toolbar while one of its buttons has
+the focus. The content of an `Overlay` is inside the view the overlay is in, wherever it shows, so a popup counts as
+part of the view that holds its trigger. In Rust, a component hears the focus come into an element and leave it with
+its ref's `on_focus_in(..)` and `on_focus_out(..)`: moving between views inside it is neither.
 
 | Prop | Rust | Type | Default | Description |
 |---|---|---|---|---|
