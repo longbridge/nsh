@@ -390,12 +390,19 @@ browserslist queries). `nsh.js` gives every import it does not know a stub that 
 ## The environment
 
 `nsh.js` reports what the page knows with `nsh_environment(json)` before the app starts and whenever it changes (only
-when the JSON differs): `idiom`, `locale` (`navigator.languages[0]`), `rtl` (`<html dir>`, else the locale's script),
-`reduceMotion`, `fontScale` (the root font size / 16), `pixelRatio`, `safeArea` (`env(safe-area-inset-*)` read
-through a hidden probe element, clipped to the container) and `keyboard` (the container's part below
-`visualViewport`). The Rust side keeps it (`PAGE`) for the next start; the appearance and the window keep their own
-calls (`nsh_set_dark`, `nsh_resize`). Changes come from media query listeners, `languagechange`, `visualViewport`,
-`resize` and a mutation observer on `<html dir lang>`.
+when the JSON differs): `idiom`, `locale` (`navigator.languages[0]`), `lifecycle` (`background` while
+`document.visibilityState` is `hidden`, else `active` with the focus and `inactive` without), `rtl` (`<html dir>`,
+else the locale's script), `reduceMotion`, `fontScale` (the root font size / 16), `pixelRatio`, `safeArea`
+(`env(safe-area-inset-*)` read through a hidden probe element, clipped to the container) and `keyboard` (the
+container's part below `visualViewport`). The Rust side keeps it (`PAGE`) for the next start; the appearance and the
+window keep their own calls (`nsh_set_dark`, `nsh_resize`). Changes come from media query listeners,
+`languagechange`, `visibilitychange`, `focus`, `blur`, `visualViewport`, `resize` and a mutation observer on
+`<html dir lang>`.
+
+The app's side, `browser/environment.js`, gets the engine's environment (`Host::set_environment`,
+`src/browser/engine.rs`) and keeps one signal per part, written only when the part changed, as nsh-js's `env.rs`
+does. `environment.test.mjs` checks that it serves every export of `nsh/device` and `nsh/accessibility` that `env.rs`
+declares: one it lacks fails the browser runtime's apps that import it.
 
 The idiom is fixed at start, as `Environment::idiom` is everywhere: `desktop` for a fine, hovering pointer and a
 container at least 600 wide (headless Chromium reports no pointer and measures as a tablet or phone unless launched

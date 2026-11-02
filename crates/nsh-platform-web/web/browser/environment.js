@@ -1,7 +1,8 @@
 export function createEnvironment(reactive, invoke, dom) {
   const initial = { window: { width: 0, height: 0 }, safeArea: { top: 0, right: 0, bottom: 0, left: 0 },
     titleBar: { height: 0, left: 0, right: 0 }, keyboard: { height: 0, duration: 0.25 },
-    colorScheme: "light", fontScale: 1, pixelRatio: 1, locale: "en-US", reduceMotion: false, screenReader: false, host: false };
+    colorScheme: "light", fontScale: 1, pixelRatio: 1, locale: "en-US", reduceMotion: false, screenReader: false, host: false,
+    lifecycle: "active" };
   const fields = Object.fromEntries(Object.entries(initial).map(([name, value]) => [name, reactive.signal(value)]));
   const tokens = reactive.signal(0);
   const insets = reactive.context(() => fields.safeArea());
@@ -19,6 +20,7 @@ export function createEnvironment(reactive, invoke, dom) {
     keyboardFrame: () => fields.keyboard(), colorScheme: () => fields.colorScheme(), setColorScheme,
     fontScale: () => fields.fontScale(), pixelRatio: () => fields.pixelRatio(), locale: () => fields.locale(),
     reduceMotion: () => fields.reduceMotion(), screenReader: () => fields.screenReader(), screenReaderEnabled: () => fields.screenReader(), platform,
+    lifecycle: () => fields.lifecycle(),
     token(name) { tokens(); return invoke(402, [name, fields.colorScheme() === "dark"]); },
   };
   return {
