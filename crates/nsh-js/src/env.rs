@@ -517,8 +517,10 @@ fn os_version(env: &Environment) -> String {
     }
 }
 
+/// `platform.idiom`: `"desktop"` exactly where desktop behavior applies
+/// ([`nsh_core::platform::Idiom::reported_on`]).
 fn idiom(env: &Environment) -> &'static str {
-    match env.idiom {
+    match env.reported_idiom() {
         Idiom::Phone => "phone",
         Idiom::Pad => "pad",
         Idiom::Mac => "mac",
@@ -537,7 +539,8 @@ fn platform(cx: *mut JsContext) -> JsValue {
             (c"os", string(cx, e.os.name())),
             (c"version", string(cx, &os_version(&e))),
             (c"idiom", string(cx, idiom(&e))),
-            (c"catalyst", boolean(e.idiom == Idiom::Mac)),
+            (c"desktop", boolean(e.desktop())),
+            (c"catalyst", boolean(e.os.is_catalyst())),
             (c"select", select),
         ],
     )
@@ -640,9 +643,11 @@ pub(crate) const DEVICE_TYPES: &str = r#"export interface PlatformSelectSpec<T> 
   windows?: T;
   linux?: T;
   web?: T;
-  /** iOS, Android, and phone and tablet browsers. */
+  /** Where `platform.desktop` is false: iOS (Mac Catalyst included),
+   * Android, and browsers in the phone or tablet idiom. */
   mobile?: T;
-  /** macOS, Windows, Linux, and desktop browsers. */
+  /** Where `platform.desktop` is true: macOS, Windows, Linux, and browsers
+   * in the desktop idiom. */
   desktop?: T;
   /** Every platform but the web. */
   native?: T;
@@ -656,15 +661,23 @@ export interface PlatformInfo {
   /** iOS and desktops: the OS version (`"17.5"`); Android: the API level
    * (`"35"`); the web: `"0.0"`. */
   readonly version: string;
-  /** The kind of device. `"desktop"`: desktop behavior applies (macOS,
-   * Windows, Linux, and browsers with a mouse and a wide viewport); Mac
-   * Catalyst in the Mac idiom is `"mac"`. */
+  /** The kind of device. `"desktop"` exactly where `desktop` is true;
+   * elsewhere the idiom the system reports: `"phone"`, `"pad"`, `"tv"`, and
+   * `"mac"`, UIKit's Mac idiom under Mac Catalyst (a mobile idiom). */
   readonly idiom: "phone" | "pad" | "mac" | "tv" | "desktop";
-  /** Mac Catalyst in the Mac idiom. */
+  /** Desktop behavior applies, NSH's one definition of desktop: macOS,
+   * Windows, Linux, and browsers in the desktop idiom (a mouse and a wide
+   * viewport). `desktop={{…}}` props and `select({ desktop })` follow it.
+   * Mac Catalyst runs the iOS backend and is mobile. `nsh/desktop`'s
+   * `isAvailable` is narrower: its window and menu APIs work on the desktop
+   * OSes, not in browsers. */
+  readonly desktop: boolean;
+  /** The app runs under Mac Catalyst, in the Mac or the iPad idiom
+   * (`os` is `"ios"`, `desktop` false). */
   readonly catalyst: boolean;
   /** The value for this platform: its OS (`ios`, `macos`, `web`, ...),
-   * else `mobile` / `desktop`, else `native` (not on the web), else
-   * `default`. */
+   * else `desktop` / `mobile` (by `platform.desktop`), else `native` (not
+   * on the web), else `default`. */
   select<T>(spec: PlatformSelectSpec<T>): T | undefined;
 }
 "#;

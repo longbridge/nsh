@@ -45,6 +45,77 @@ wait 300
 expect Alert: pending
 expect Sheet: pending
 covers [nsh/base] AlertDialog
+# base-avatar
+tap id:case-base-avatar
+# Ada's image loads: the initials in the fallback (the app's look, as
+# large as the avatar) and the image over it, transparent, as large too.
+expect Ada: loading
+expect AL
+prop id:ada role image
+prop id:ada accessibilityLabel Ada Lovelace
+frame id:ada 0 20 40 40
+frame parent:text:AL 0 0 40 40
+style parent:text:AL backgroundColor #336699ff
+style parent:text:AL opacity 0.5
+frame below:id:ada-dot 0 0 40 40
+style below:id:ada-dot opacity 0
+style below:id:ada-dot borderRadius 20
+style below:id:ada-dot borderWidth 2
+# The avatar says the name once: the fallback and the image are hidden.
+prop parent:text:AL accessibilityElementsHidden true
+prop below:id:ada-dot accessibilityElementsHidden true
+# Loaded: the fallback goes and the image shows.
+event below:id:ada-dot onLoad width=96 height=96
+expect Ada: loaded
+absent AL
+style below:id:ada-dot opacity 1
+# Failed: the fallback is back.
+event below:id:ada-dot onError message="not found"
+expect Ada: error
+expect AL
+style below:id:ada-dot opacity 0
+# Grace's fallback waits 300 ms while her image loads.
+absent GH
+wait 400
+expect GH
+# Edsger has no image: the app's fallback at once, in place of the
+# initials, and the app's label.
+expect ?
+absent ED
+prop id:edsger role image
+prop id:edsger accessibilityLabel Edsger, away
+# A group of three shows two, then its overflow (30 wide, 60 high).
+prop id:team role group
+prop id:team accessibilityLabel Team
+expect AT
+expect BL
+absent CS
+expect +1
+prop label:1 more person accessibilityLabel 1 more person
+frame id:team 0 152 110 60
+# A group of the first two of four: the overflow stands for the others.
+expect DK
+expect FA
+expect +2
+covers [nsh/base] Avatar
+covers [nsh/base] AvatarGroup
+covers [props] src
+covers [props] Avatar.name
+covers [props] accessibilityLabel
+covers [props] Avatar.fallbackDelay
+covers [props] Avatar.imageClass
+covers [props] Avatar.imageStyle
+covers [props] Avatar.fallbackClass
+covers [props] Avatar.fallbackStyle
+covers [props] Avatar.fallback
+covers [events] Avatar.onStatusChange
+covers [props] AvatarGroup.limit
+covers [props] AvatarGroup.total
+covers [props] AvatarGroup.overflowClass
+covers [props] AvatarGroup.overflowStyle
+covers [props] AvatarGroup.overflow
+covers [props] AvatarGroup.overflowAccessibilityLabel
+
 # base-button
 tap id:case-base-button
 # events the platform reports.
@@ -1196,6 +1267,75 @@ covers [props] disabled
 covers [props] accessibilityLabel
 covers [events] onPress
 
+# base-tree
+tap id:case-base-tree
+expect Selected: none
+expect Changes: 0
+# A tree of tree items for screen readers, named; `src` is expanded as the
+# app says, so its children show and `ui`'s do not.
+prop id:files role tree
+prop id:files accessibilityLabel Files
+prop label:src role treeitem
+prop label:src accessibilityState expanded=true
+prop label:ui accessibilityState expanded=false
+prop label:lib.rs role treeitem
+expect lib.rs
+absent tree.rs
+# A disabled item, dimmed: it shows what `expanded` says.
+prop label:docs accessibilityState disabled=true expanded=false
+absent guide.md
+# A press selects a row (`selected:`) and expands a folder: the app hears
+# the selection, the expanded items and the item expanded.
+tap label:ui
+expect Selected: src/ui
+expect Expanded: src,src/ui
+expect Heard: expand src/ui
+expect Changes: 1
+expect tree.rs
+prop label:ui accessibilityState selected=true expanded=true
+style label:ui backgroundColor #00ff00ff
+nostyle label:src backgroundColor
+# Again: it collapses.
+tap label:ui
+expect Expanded: src
+expect Heard: collapse src/ui
+expect Changes: 2
+absent tree.rs
+# A leaf is selected only.
+tap label:lib.rs
+expect Selected: src/lib.rs
+prop label:ui accessibilityState expanded=false
+nostyle label:ui backgroundColor
+style label:lib.rs backgroundColor #00ff00ff
+# The disabled item takes no press.
+tap text:docs
+expect Selected: src/lib.rs
+expect Changes: 2
+absent guide.md
+# The tree's own state, from `defaultExpanded` and `defaultSelected`;
+# `renderItem` draws the rows, given each item's depth.
+prop id:notes role tree
+expect +notes@0
+expect a.md@1
+expect todo.md@0
+prop label:a.md accessibilityState selected=true
+tap label:notes
+absent a.md@1
+prop label:notes accessibilityState selected=true expanded=false
+covers [nsh/base] Tree
+covers [props] Tree.items
+covers [props] Tree.expanded
+covers [props] Tree.defaultExpanded
+covers [props] Tree.selected
+covers [props] Tree.defaultSelected
+covers [props] Tree.itemClass
+covers [props] Tree.renderItem
+covers [props] accessibilityLabel
+covers [events] Tree.onExpandedChange
+covers [events] Tree.onSelectedChange
+covers [events] Tree.onExpand
+covers [events] Tree.onCollapse
+
 # A collapsible: the summary always, the details only while the app's
 # `open` holds. Collapsed, the region is the trigger's 20 points.
 tap id:case-base-collapsible
@@ -1221,6 +1361,73 @@ frame id:region 0 20 390 54
 covers [nsh/base] Collapsible
 covers [props] Collapsible.open
 covers [props] Collapsible.content
+
+# base-carousel
+tap id:case-base-carousel
+# A region named by the app, a stop of the keyboard focus; each slide a
+# group; the controls and the pagination items buttons. The content lays
+# the slides 200 wide out in a row, 10 apart, after a runway of a period
+# (3 slides and 3 gaps: 630) less a gap, as the carousel loops seamlessly;
+# each slide is there once.
+expect Index: 0
+expect Changes: 0
+prop id:carousel role region
+prop id:carousel accessibilityLabel Colors
+prop id:carousel focusable true
+prop id:slide-0 role group
+prop id:slide-0 accessibilityLabel 1 of 3
+frame id:slide-0 630 0 200 100
+frame id:slide-1 840 0 200 100
+frame id:slide-2 1050 0 200 100
+prop id:previous role button
+prop id:previous accessibilityLabel Previous slide
+prop id:next role button
+prop id:dots role group
+prop id:dots accessibilityLabel Choose a slide
+prop id:dot-0 role button
+prop id:dot-0 accessibilityState selected=true
+style id:dot-0 backgroundColor #00ff00ff
+prop id:dot-1 accessibilityState {}
+nostyle id:dot-1 backgroundColor
+listens id:dot-1 onPress
+# The indicator, below the first item: on the item of the slide shown.
+frame below:id:dot-0 0 0 10 10
+style below:id:dot-0 backgroundColor #ff0000ff
+# Looping: previous on the first slide goes to the last; the app follows
+# `onChange` and the item of the slide shown is selected.
+tap id:previous
+expect Changes: 1
+expect Index: 2
+prop id:dot-2 accessibilityState selected=true
+style id:dot-2 backgroundColor #00ff00ff
+prop id:dot-0 accessibilityState {}
+frame below:id:dot-0 20 0 10 10
+# Past the last, the first again.
+tap id:next
+expect Changes: 2
+expect Index: 0
+# A pagination item goes to its slide; its own slide's reports nothing.
+tap id:dot-1
+expect Changes: 3
+expect Index: 1
+frame below:id:dot-0 10 0 10 10
+tap id:dot-1
+expect Changes: 3
+covers [nsh/base] Carousel
+covers [nsh/base] CarouselContent
+covers [nsh/base] CarouselItem
+covers [nsh/base] CarouselPrevious
+covers [nsh/base] CarouselNext
+covers [nsh/base] CarouselPagination
+covers [nsh/base] CarouselPaginationItem
+covers [props] Carousel.index
+covers [props] Carousel.looping
+covers [props] CarouselPaginationItem.index
+covers [props] indicatorClass
+covers [props] indicatorStyle
+covers [props] selectedStyle
+covers [props] accessibilityLabel
+covers [events] onChange
 
 # base-collapsible-reveal
 # With `reveal`: the clipping region is there while closed, zero high, so
@@ -3075,6 +3282,7 @@ covers [events] Editor.onCompletionAccept
 covers [events] Editor.onInlineCompletionRequest
 covers [props] Editor.diagnostics
 covers [props] Editor.styles
+covers [props] Editor.gutterDecorationsWidth
 covers [events] Editor.onDefinitionRequest
 covers [events] Editor.onCodeActionRequest
 
@@ -3141,6 +3349,19 @@ absent BETA
 tap id:file-0
 expect Toggled: a.ts false
 expect BETA
+# A longer diff of every line reports where its rows are once laid out:
+# 30 rows of 20 points, as wide as its 390 × 100 viewport, at the top.
+expect Scrolled: 0 0 390x600 390x100
+# Where each change's row is in them, reported and as the ref gives it.
+expect Moved: 0@0,80 390x20 1@0,480 390x20
+tap id:marks
+expect Marks: 0@0,80 390x20 1@0,480 390x20
+# The ref scrolls them to an offset, reported.
+tap id:scroll-to
+expect Scrolled: 0 470 390x600 390x100
+tap id:read-offset
+expect Offset: 0 470
+expect line TWENTY-FIVE
 covers [props] DiffView.softWrap
 covers [props] DiffView.annotations
 covers [props] DiffView.renderAnnotation
@@ -3156,6 +3377,8 @@ covers [props] DiffView.renderSeparator
 covers [props] DiffView.renderHunkActions
 covers [props] DiffView.renderFileHeader
 covers [events] DiffView.onFileToggle
+covers [events] DiffView.onHunkBoundsChange
+covers [props] DiffView.expandAll
 
 # base-data-table
 tap id:case-base-data-table

@@ -18233,7 +18233,7 @@ fn image_uris(batch: &MountBatch, id: NodeId) -> Option<(Option<String>, Option<
     })
 }
 
-fn at_ratio(c: &mut Core<FakeEngine>, pixel_ratio: f32) {
+fn at_ratio<M: TextEngine>(c: &mut Core<M>, pixel_ratio: f32) {
     c.set_environment(crate::element::Environment {
         pixel_ratio,
         ..Default::default()
@@ -18493,6 +18493,84 @@ fn rounding_lands_on_device_pixels() {
     let up = super::ceil_to_pixel(measured, ratio);
     assert!((up.0 * ratio - 56.0).abs() < 1.0e-3, "{up:?}");
     assert!((super::round(4.0, ratio) * ratio - 11.0).abs() < 1.0e-3);
+    // A width a hair over a whole pixel is not taken back under it: the
+    // text measured again in that width would no longer fit.
+    assert_eq!(super::ceil_to_pixel(Points(78.000_49), 1.0), Points(79.0));
+    assert_eq!(super::ceil_to_pixel(Points(78.000_49), 2.0), Points(78.5));
+    let up = super::ceil_to_pixel(Points(78.000_49), ratio);
+    assert!(
+        up.0 >= 78.000_49 && up.0 * ratio - (78.000_49 * ratio).ceil() < 1.0e-3,
+        "{up:?}"
+    );
+}
+
+/// One line `.0` points wide, as a platform engine measures a short label;
+/// in a narrower width it takes two lines.
+struct HairEngine(f32);
+
+impl TextEngine for HairEngine {
+    type Prepared = ();
+
+    fn prepare(&self, _: &AttributedText) {}
+
+    fn measure(&self, _: &(), max_width: Option<Points>) -> Size<Points> {
+        match max_width {
+            Some(max) if max.0 < self.0 => size_pt(max.0, 32.0),
+            _ => size_pt(self.0, 16.0),
+        }
+    }
+
+    fn layout(&self, _: &(), _: Size<Points>) -> TextLayout {
+        TextLayout(Arc::new(()))
+    }
+}
+
+#[test]
+fn text_a_hair_over_a_pixel_wide_keeps_its_line() {
+    // A label CoreText measures 78.00049 points wide, in a view as wide as
+    // its content. Rounded to 78 points, the text was measured again in 78
+    // and wrapped onto a second line.
+    for ratio in [1.0, 2.0, 2.625] {
+        let mut c = Core::new(HairEngine(78.000_49), size_pt(320.0, 480.0));
+        at_ratio(&mut c, ratio);
+        apply(
+            &mut c,
+            vec![
+                Op::Create {
+                    id: 2,
+                    tag: Tag::View,
+                },
+                Op::Create {
+                    id: 3,
+                    tag: Tag::Text,
+                },
+                Op::CreateText {
+                    id: 4,
+                    text: "label".into(),
+                },
+                Op::Insert {
+                    parent: 3,
+                    child: 4,
+                    before: None,
+                },
+                Op::Insert {
+                    parent: 2,
+                    child: 3,
+                    before: None,
+                },
+                style_op(2, &[("alignSelf", StyleValue::Str("flex-start"))]),
+                Op::Insert {
+                    parent: ROOT_ID,
+                    child: 2,
+                    before: None,
+                },
+            ],
+        );
+        let batch = c.commit().unwrap();
+        let size = frame_of(&batch, 3).expect("frame").size;
+        assert_eq!(size.height.0, 16.0, "at {ratio}: {size:?}");
+        assert!(size.width.0 >= 78.000_49, "at {ratio}: {size:?}");
+    }
 }
 
 #[test]
@@ -22732,4 +22810,110 @@ fn nothing_follows_while_no_view_follows_an_element() {
     c.set_viewport(size_pt(320.0, 480.0));
     c.commit();
     assert!(!c.follow_changed);
+}
+
+#[test]
+fn an_effect_takes_its_picture_again_when_a_child_leaves() {
+    let mut c = core();
+    let source = "fn shade(uv: vec2f) -> vec4f { return sample_content(uv); }";
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 2,
+                tag: Tag::ShaderEffect,
+            },
+            style_op(
+                2,
+                &[
+                    ("width", StyleValue::Number(100.0)),
+                    ("height", StyleValue::Number(50.0)),
+                ],
+            ),
+            Op::SetProp {
+                id: 2,
+                prop: Prop::ShaderSource(Some(source.into())),
+            },
+            Op::Create {
+                id: 3,
+                tag: Tag::View,
+            },
+            style_op(
+                3,
+                &[
+                    ("position", StyleValue::Str("absolute")),
+                    ("width", StyleValue::Number(10.0)),
+                    ("height", StyleValue::Number(10.0)),
+                ],
+            ),
+            Op::Insert {
+                parent: 2,
+                child: 3,
+                before: None,
+            },
+            Op::Insert {
+                parent: ROOT_ID,
+                child: 2,
+                before: None,
+            },
+        ],
+    );
+    c.commit().unwrap();
+    // An absolute child of a fixed-size effect: only its Remove and Delete
+    // go out, neither of which leads to the effect any more.
+    apply(
+        &mut c,
+        vec![
+            Op::Remove {
+                parent: 2,
+                child: 3,
+            },
+            Op::Release { id: 3 },
+        ],
+    );
+    let batch = c.commit().unwrap();
+    assert!(
+        batch
+            .items
+            .iter()
+            .any(|i| matches!(i, MountItem::ShaderInput { id: 2 })),
+        "{:?}",
+        batch.items
+    );
+}
+
+#[test]
+fn a_layout_animation_alone_takes_no_screen_picture() {
+    let mut c = core();
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 2,
+                tag: Tag::ScreenEffect,
+            },
+            Op::SetProp {
+                id: 2,
+                prop: Prop::ShaderSource(Some(
+                    "fn shade(uv: vec2f) -> vec4f { return sample_content(uv); }".into(),
+                )),
+            },
+            Op::Insert {
+                parent: ROOT_ID,
+                child: 2,
+                before: None,
+            },
+        ],
+    );
+    c.commit().unwrap();
+    // A layout animation with nothing to animate: the batch is dropped, not
+    // kept alive by the screen effect's picture.
+    apply(
+        &mut c,
+        vec![Op::Command {
+            id: 1,
+            command: Command::LayoutAnimation(crate::LayoutAnimation::EASE_IN_EASE_OUT),
+        }],
+    );
+    assert!(c.commit().is_none());
 }

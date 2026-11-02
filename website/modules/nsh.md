@@ -940,6 +940,7 @@ interface Platform {
   readonly os: "ios" | "android" | "macos" | "windows" | "linux" | "web";
   readonly version: string;
   readonly idiom: "phone" | "pad" | "mac" | "tv" | "desktop";
+  readonly desktop: boolean;
   readonly catalyst: boolean;
   select<T>(spec: PlatformSelectSpec<T>): T | undefined;
 }
@@ -951,8 +952,9 @@ The platform the app runs on, constant while it runs.
 |---|---|---|
 | `os` | `os() -> Os` (`os().name()` is the TS string) | The operating system. iOS, the iOS simulator and Mac Catalyst report `"ios"`, browsers `"web"`. |
 | `version` | `os_version() -> (u16, u16)` | iOS and desktops: the OS version (`"17.5"`); Android: the API level (`"35"`); the web: `"0.0"`. Rust gives the major and minor version, or the API level and 0 on Android. |
-| `idiom` | `idiom() -> Idiom`; `is_desktop()` for `"desktop"` | The kind of device: `"phone"`, `"pad"` (an iPad, an Android tablet), `"mac"` (Mac Catalyst in the Mac idiom), `"tv"` (Apple TV, Android TV) or `"desktop"`, where desktop behavior applies: macOS, Windows, Linux, and browsers with a mouse and a wide window. |
-| `catalyst` | `idiom() == Idiom::Mac` | Mac Catalyst in the Mac idiom. |
+| `idiom` | `idiom() -> Idiom` | The kind of device: `"desktop"` exactly where `desktop` is `true`; elsewhere `"phone"`, `"pad"` (an iPad, an Android tablet, Mac Catalyst in the iPad idiom), `"mac"` (Mac Catalyst in UIKit's Mac idiom, a mobile idiom) or `"tv"` (Apple TV, Android TV). |
+| `desktop` | `is_desktop() -> bool` | Desktop behavior applies: macOS, Windows, Linux, and browsers with a mouse and a wide window. `desktop={{…}}` props, `select({ desktop })` and `idiom` `"desktop"` all follow it. Mac Catalyst runs the iOS backend, so it is mobile: `ios={{…}}` props apply there. [`nsh/desktop`](./nsh-desktop.md#isavailable)'s `isAvailable` is the narrower check for its window and menu APIs, which macOS, Windows and Linux have. |
+| `catalyst` | `is_catalyst() -> bool` | The app runs under Mac Catalyst, in the Mac or the iPad idiom (`os` is `"ios"`). |
 | `select(spec)` | `match os() { … }` | The value for this platform (see below). |
 
 ```rust tabs
@@ -960,7 +962,7 @@ let columns = if is_desktop() { 3 } else { 1 };
 ```
 
 ```tsx tabs
-const columns = platform.idiom === "desktop" ? 3 : 1;
+const columns = platform.desktop ? 3 : 1;
 ```
 
 #### platform.select
@@ -973,14 +975,14 @@ interface PlatformSelectSpec<T> {
   windows?: T;
   linux?: T;
   web?: T;
-  mobile?: T;   // iOS, Android, and phone and tablet browsers
-  desktop?: T;  // macOS, Windows, Linux, and desktop browsers
+  mobile?: T;   // platform.desktop false: iOS (Mac Catalyst included), Android, phone and tablet browsers
+  desktop?: T;  // platform.desktop true: macOS, Windows, Linux, desktop browsers
   native?: T;   // every platform but the web
   default?: T;
 }
 ```
 
-Returns the value for the current OS (`ios`, `android`, `web`, ...), else `mobile` / `desktop`, else `native` (every platform but the web), else `default`, else `undefined`. In a browser, `mobile` or `desktop` follows the idiom. Rust code matches on `os()` (and `is_desktop()` for `mobile` / `desktop`).
+Returns the value for the current OS (`ios`, `android`, `web`, ...), else `desktop` or `mobile` (by `platform.desktop`), else `native` (every platform but the web), else `default`, else `undefined`. Rust code matches on `os()` (and `is_desktop()` for `mobile` / `desktop`).
 
 ```rust tabs
 use nsh_core::platform::Os;

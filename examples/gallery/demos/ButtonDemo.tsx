@@ -12,7 +12,7 @@ import { alpha, Badge, Button, Caption, Card, colors, DemoPage, finish, focusRin
 // the label's new width eases in (`motion.control`), all at once with
 // reduced motion.
 
-const pointer = platform.idiom === "desktop";
+const pointer = platform.desktop;
 
 /** Waits `ms`, cancelled with the component that started it. */
 function timers() {

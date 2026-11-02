@@ -853,7 +853,8 @@ impl<M: TextEngine> Core<M> {
                 .runtime
                 .set_tokens(self.components.tokens.clone());
         }
-        // The platform's own controls (menus) take their colors from them.
+        // The platform's own controls (menus, Android's alerts) take their
+        // colors from them.
         self.commands.push((
             crate::ROOT_ID,
             Command::Tokens(self.components.tokens.clone()),

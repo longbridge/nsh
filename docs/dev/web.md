@@ -520,8 +520,9 @@ The idiom is fixed at start, as `Environment::idiom` is everywhere: `desktop` fo
 container at least 600 wide (headless Chromium reports no pointer and measures as a tablet or phone unless launched
 with a fine, hovering one, as `nsh test --target web` does), `pad` for a screen whose short side is at least 600, else
 `phone`; the player's `idiom` option overrides it. `Environment::desktop()`
-(desktop OS, or the web in the desktop idiom) decides `desktop={{…}}` props, `platform.select`'s `desktop` key and
-`platform.idiom`; `Os::is_desktop()` stays the desktop backends' OSes (`nsh/desktop`'s windows and menus). Like the
+(desktop OS, or the web in the desktop idiom) decides `desktop={{…}}` props, `platform.select`'s `desktop` key,
+`platform.desktop` and `platform.idiom` (`Environment::reported_idiom()`; the page's `browser/environment.js`
+gets both from the engine's environment); `Os::is_desktop()` stays the desktop backends' OSes (`nsh/desktop`'s windows and menus). Like the
 desktop backends, the web gives the core no header heights (`NO_NATIVE_HEADER`): a page's `header` slot is all
 there is at its top. The browser's bars are the browser's: the web ignores `Command::StatusBar` (pages' and dialogs' `statusBar`).
 
@@ -530,7 +531,12 @@ there is at its top. The browser's bars are the browser's: the web ignores `Comm
 Exports are `nsh_*` functions (`src/lib.rs`); imports are module `nsh` (`src/ffi.rs`). Every export that reaches
 the engine pumps it and returns the next delay in milliseconds (-1: none), which `nsh.js` turns into a `setTimeout`.
 The engine is not reentrant: `nsh.js` routes every call through `Player.call`, which defers calls made while a
-batch is being applied (a batch arrives inside a wasm call).
+batch is being applied (a batch arrives inside a wasm call). A trap (a panic, `panic = "abort"`) ends the call it
+happened in with the engine's state still borrowed, so after one `Player.call` drops every call, the deferred ones
+too: each would only panic again (`RefCell already borrowed`). The panic hook reports through its own import
+(`report_panic`, not `report_error`), so the page knows before the trap: the overlay keeps that first report, and
+what follows from any entry into the engine (the browser runtime's app code calls it outside `Player.call`) goes to
+the console only (`web/nsh.test.mjs`). The page needs a reload to run again.
 
 A commit becomes one JSON array (`src/encode.rs`): `["c", id, kind]`, `["f", id, x, y, w, h]`, `["s", id, class,
 borderClass, tint]`, `["t", id, ...content, runs, styles, selectable, selectionClass]` (`styles`: a class per run

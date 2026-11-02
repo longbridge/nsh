@@ -21,6 +21,9 @@
   works on every backend, and scrolls it with `ScrollTo`. With an app theme (`Scrollbar.setTheme`) or a view's own
   (`scrollbar={{ … }}`) the core draws one over every such view in place of its indicator (`ScrollConfig.replaced`,
   which also hides the horizontal views' kept indicator on the desktops); `docs/dev/components.md` "Scroll bars".
+- **Carousels** (`nsh/base`'s `Carousel`, `docs/dev/components.md` "Carousels"): a horizontal or vertical scroll view
+  whose `snapToOffsets` are its slides' laid-out starts, with `disableIntervalMomentum`; the slide is read where the
+  scroll comes to rest (`onScrollEnd`) and discrete changes are `ScrollTo`s.
 - **Content container** (`<Scroll>`): `contentStyle` / `contentClass` are the renderer's
   (`dom.rs` `scroll_content`): the first one set makes a view the scroll view's children move into (also the ones
   already there; later inserts and removals go to it), and styles it. The core lays a scroll view's children out in
