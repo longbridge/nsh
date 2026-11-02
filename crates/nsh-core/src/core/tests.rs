@@ -4848,6 +4848,30 @@ fn untracked_states_are_forgotten() {
 }
 
 #[test]
+fn inputs_report_their_focus_to_the_views_around_them() {
+    use crate::tailwind::state::FOCUSED;
+    // A field (`focus-within:`) around an input with no classes.
+    let mut c = core();
+    view_with_classes(&mut c, 2, "bg-white focus-within:bg-black");
+    add(&mut c, 4, Tag::Input, 2, &[]);
+    let batch = c.commit().unwrap();
+    // The input reports its focus all the same.
+    assert!(batch.items.iter().any(|i| matches!(
+        i,
+        MountItem::TrackStates {
+            id: 4,
+            states: FOCUSED
+        }
+    )));
+    c.set_states(4, FOCUSED);
+    let batch = c.commit().unwrap();
+    assert_eq!(
+        view_style_of(&batch, 2).unwrap().background_color,
+        Color(0x0000_00ff)
+    );
+}
+
+#[test]
 fn text_inherits_from_views_and_classes_set_props() {
     let mut c = core();
     view_with_classes(&mut c, 2, "text-white text-lg text-center");
@@ -17845,10 +17869,10 @@ fn overlays_with_a_cover_lay_that_view_over_the_anchor() {
         ],
     );
     let batch = c.commit().unwrap();
-    // The second row (4, 24 in the list) on the trigger's corner.
-    assert_eq!(frame_of(&batch, 8), Some(rect(36.0, 76.0, 100.0, 68.0)));
-    // Where the row is is kept: a row added before it grows the list
-    // and moves nothing.
+    // At the trigger's start, the second row (4, 24 in the list) with
+    // its middle on the trigger's.
+    assert_eq!(frame_of(&batch, 8), Some(rect(40.0, 81.0, 100.0, 68.0)));
+    // A row added before it moves it in the list: it is found again.
     add(&mut c, 18, Tag::View, 10, &[("height", Number(20.0))]);
     apply(
         &mut c,
@@ -17859,7 +17883,7 @@ fn overlays_with_a_cover_lay_that_view_over_the_anchor() {
         }],
     );
     let batch = c.commit().unwrap();
-    assert_eq!(frame_of(&batch, 8), Some(rect(36.0, 76.0, 100.0, 88.0)));
+    assert_eq!(frame_of(&batch, 8), Some(rect(40.0, 61.0, 100.0, 88.0)));
 }
 
 #[test]

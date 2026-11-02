@@ -737,7 +737,13 @@ impl<M: TextEngine> Core<M> {
     /// Tells the platform which states of `key` to report.
     pub(super) fn update_tracking(&mut self, key: Key) {
         let node = &mut self.nodes[key as usize];
-        let tracked = node.classes.as_ref().map_or(0, |c| c.tracked_states());
+        let mut tracked = node.classes.as_ref().map_or(0, |c| c.tracked_states());
+        // A text input reports its focus whatever its classes say: the
+        // views around it read it as `focus-within:` (a combobox's field
+        // around its input). Inputs are few and focus changes rarely.
+        if node.kind == Kind::Input {
+            tracked |= state::FOCUSED;
+        }
         if tracked != node.tracked {
             node.tracked = tracked;
             // The platform stops reporting the states it no longer tracks,

@@ -98,8 +98,9 @@ pub(super) struct OverlayState {
     pub(super) hinted: bool,
     /// A hint: the pointer is on its anchor, resting until it shows.
     pub(super) waiting: Option<HintTimer>,
-    /// Where its `cover` view is in it, once that was laid out.
-    pub(super) covered: Option<Point<Points>>,
+    /// Its `cover` view's frame in it, once that was laid out, with the
+    /// overlay's size and the view's origin in its parent then.
+    pub(super) covered: Option<(Bounds<Points>, Size<Points>, Point<Points>)>,
 }
 
 /// What the overlays add to the native side: the nodes listening to
@@ -969,19 +970,23 @@ impl<M: TextEngine> Core<M> {
                 insets.left.0 + m,
             ],
         );
-        let placed = match self.covering(key, config) {
+        let placed = match self.covering(key, config, frame.size) {
             Some(at) => {
-                // The cover view's corner on the anchor's, inside the area
-                // as far as it fits.
+                // Its start on the anchor's (a list as wide as its
+                // trigger lines up with it), the cover view's middle on
+                // the anchor's (a row taller or shorter than the trigger
+                // keeps its text on the trigger's), inside the area as far
+                // as it fits.
                 let keep = |v: f32, lo: f32, hi: f32, len: f32| v.min(hi - len).max(lo);
                 let x = keep(
-                    anchor.origin.x.0 - at.x.0,
+                    anchor.origin.x.0,
                     area.origin.x.0,
                     area.right().0,
                     frame.size.width.0,
                 );
                 let y = keep(
-                    anchor.origin.y.0 - at.y.0,
+                    anchor.origin.y.0 + (anchor.size.height.0 - at.size.height.0) / 2.0
+                        - at.origin.y.0,
                     area.origin.y.0,
                     area.bottom().0,
                     frame.size.height.0,
@@ -1027,17 +1032,35 @@ impl<M: TextEngine> Core<M> {
         placed.origin
     }
 
-    /// Where overlay `key`'s `cover` view is in it: taken the first time
-    /// both are laid out and kept, so its content scrolling moves nothing.
-    fn covering(&mut self, key: Key, config: OverlayConfig) -> Option<Point<Points>> {
+    /// Where overlay `key`'s `cover` view is in it: taken once both are
+    /// laid out and kept while the overlay keeps its size `size` and the
+    /// view its place in its parent, so its content scrolling moves
+    /// nothing (a new width once the trigger's is known, a row inserted
+    /// before it, take it again).
+    fn covering(
+        &mut self,
+        key: Key,
+        config: OverlayConfig,
+        size: Size<Points>,
+    ) -> Option<Bounds<Points>> {
         let cover = config.cover?;
-        if let Some(at) = self.overlay(key)?.covered {
+        let inner = self.measure(cover)?;
+        // Its frame in its parent: a scroll moves the parent's content,
+        // not this; a row inserted before it does.
+        let place = inner.frame.origin;
+        if let Some((at, kept, was)) = self.overlay(key)?.covered
+            && kept == size
+            && was == place
+        {
             return Some(at);
         }
         let id = self.nodes[key as usize].id;
-        let (inner, outer) = (self.measure(cover)?, self.measure(id)?);
-        let at = point(inner.page.x - outer.page.x, inner.page.y - outer.page.y);
-        self.overlay_mut(key)?.covered = Some(at);
+        let outer = self.measure(id)?;
+        let at = Bounds {
+            origin: point(inner.page.x - outer.page.x, inner.page.y - outer.page.y),
+            size: inner.frame.size,
+        };
+        self.overlay_mut(key)?.covered = Some((at, size, place));
         Some(at)
     }
 

@@ -1463,6 +1463,28 @@ export function Controls(props: { show: Control }) {
    * as under the pointer). `lead` goes before the title (a flag, a status's dot, faces); `error` edges it in the
    * danger tone.
    */
+  /**
+   * A field's focus ring, as the Input demo's: a 2-point accent edge around the border, fading in while the field
+   * (`group-focus:`) or a view in it (`group-focus-within:`) has the focus. It lies over the field and takes no touches.
+   */
+  function FieldRing(props: { within?: boolean; error?: boolean }) {
+    return (
+      <View
+        class={`opacity-0 transition-opacity duration-150 motion-reduce:transition-none ${props.within ? "group-focus-within:opacity-100" : "group-focus:opacity-100"}`}
+        style={{
+          pointerEvents: "none",
+          position: "absolute",
+          top: -2,
+          left: -2,
+          right: -2,
+          bottom: -2,
+          borderRadius: radius.control + 1,
+          borderWidth: 2,
+          borderColor: props.error ? colors.danger : colors.accent,
+        }}
+      />
+    );
+  }
   function Picker(props: { title: string; open: boolean; disabled?: boolean; placeholder?: boolean; clearable?: boolean; lead?: JSX.Element; error?: boolean }) {
     return (
       <View
@@ -1471,6 +1493,8 @@ export function Controls(props: { show: Control }) {
           alignItems: "center",
           gap: 8,
           height: size.line,
+          // Room for the list's rows, which are as wide as the trigger.
+          minWidth: pointer ? 180 : undefined,
           paddingLeft: 10,
           // Room for the clear button, which goes over the trigger's end in place of the chevron.
           paddingRight: props.clearable ? clearInset + size.clear + 8 : 10,
@@ -1486,12 +1510,13 @@ export function Controls(props: { show: Control }) {
         }}
         hoverStyle={props.disabled || props.error ? undefined : { borderColor: colors.faint }}
         activeStyle={pressed}
-        focusStyle={focusRing()}
+        class="group"
         disabledStyle={dimmed}
       >
         {props.lead}
-        <Text style={{ numberOfLines: 1, fontSize: size.label, color: props.placeholder ? colors.faint : colors.text }}>{props.title}</Text>
+        <Text style={{ flex: 1, numberOfLines: 1, fontSize: size.label, color: props.placeholder ? colors.faint : colors.text }}>{props.title}</Text>
         <Chevron open={props.open} hidden={props.clearable} />
+        <FieldRing error={props.error} />
       </View>
     );
   }
@@ -1511,7 +1536,8 @@ export function Controls(props: { show: Control }) {
           gap: 8,
           // The row's 1-point border on each side.
           height: props.detail ? (pointer ? 38 : 52) : pointer ? 30 : 44,
-          paddingHorizontal: 7,
+          // With its border and the popup's padding, the trigger's inset: a select's chosen row lies over the trigger, title on title.
+          paddingHorizontal: pointer ? 3 : 7,
           opacity: props.item.disabled ? 0.35 : 1,
         }}
       >
@@ -1617,7 +1643,7 @@ export function Controls(props: { show: Control }) {
               margin={8}
               align="end"
               // Wider than the trigger with a pointer: the titles whole.
-              popupStyle={pointer ? { ...surface(), minWidth: 200 } : surface()}
+              popupStyle={surface()}
               backdropStyle={backdrop}
               itemClass={optionClass}
               trigger={<Picker title={titleOf(SORTS, sort())} open={sortOpen()} />}
@@ -1665,7 +1691,7 @@ export function Controls(props: { show: Control }) {
     );
   }
 
-  /** What the lists of the cards below share: as wide as the trigger with a pointer (a select's at least `minWidth`), a sheet on a phone. */
+  /** What the lists of the cards below share: as wide as the trigger with a pointer (wider with `minWidth`), a sheet on a phone. */
   const listProps = (minWidth?: number) => ({
     offset: 4,
     margin: 8,
@@ -1939,6 +1965,8 @@ export function Controls(props: { show: Control }) {
               onConfirm={({ value }) => last.set(`Topics confirmed: ${value.length}`)}
               onOpenChange={opened((open) => topicsOpen.set(open))}
               accessibilityLabel="Topics"
+              class="group"
+              prefix={<FieldRing within />}
               style={comboStyle(topicsOpen())}
               placeholder={topics().length ? topicsTitle() : "Add topics"}
               inputClass={searchClass}
@@ -1979,6 +2007,8 @@ export function Controls(props: { show: Control }) {
               popupStyle={surface()}
               backdropStyle={backdrop}
               itemClass={optionClass}
+              class="group"
+              prefix={<FieldRing within />}
               style={comboStyle(reviewerOpen())}
               placeholder={"Nobody"}
               inputClass={searchClass}
@@ -2018,18 +2048,22 @@ export function Controls(props: { show: Control }) {
             onChange={({ value }) => set(value)}
             onOpenChange={opened((o) => open.set(o))}
             accessibilityLabel="Assignees"
+            class="group"
             style={comboStyle(open())}
             placeholder={people().length ? `${people().length} ${people().length === 1 ? "person" : "people"}` : "Assign"}
             inputClass={searchClass}
             inputStyle={comboInputStyle()}
             triggerButton={<ComboToggle id="assignees-toggle" open={open()} />}
             prefix={
-              // The faces overlap, each ringed in the card's color.
+              <>
+              <FieldRing within />
+              {/* The faces overlap, each ringed in the card's color. */}
               <If when={people().length}>
                 <View style={{ flexDirection: "row", marginRight: 6 }}>
                   <Each of={people().slice(0, 3)}>{(v, i) => <View style={{ marginLeft: i() ? -6 : 0 }}><Avatar name={person(v()).title} tone={person(v()).tone} size={pointer ? 20 : 24} ring /></View>}</Each>
                 </View>
               </If>
+              </>
             }
             empty={<Empty label="Nobody by that name" />}
             {...listProps()}
@@ -2105,6 +2139,8 @@ export function Controls(props: { show: Control }) {
               if (!o) query.set("");
             }}
             accessibilityLabel="Labels"
+            class="group"
+            prefix={<FieldRing within />}
             style={comboStyle(open())}
             placeholder={"Search or create labels"}
             inputClass={searchClass}
@@ -2158,12 +2194,18 @@ export function Controls(props: { show: Control }) {
           }}
           onOpenChange={opened((o) => open.set(o))}
           accessibilityLabel="Command"
+          class="group"
           style={comboStyle(open())}
           placeholder={"Search commands…"}
           inputClass={searchClass}
           inputStyle={comboInputStyle()}
           triggerButton={<ComboToggle id="command-toggle" open={open()} />}
-          prefix={<View style={{ marginRight: 8 }}><Icon name="search" size={size.check} tint={colors.faint} /></View>}
+          prefix={
+            <>
+              <FieldRing within />
+              <View style={{ marginRight: 8 }}><Icon name="search" size={size.check} tint={colors.faint} /></View>
+            </>
+          }
           suffix={
             <If when={pointer}>
               <Text style={{ marginHorizontal: 4, paddingHorizontal: 5, borderRadius: 4, borderWidth: 1, borderColor: colors.line, fontSize: 11, color: colors.muted }}>⌘K</Text>

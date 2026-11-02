@@ -11,7 +11,7 @@ A combobox chooses values from a list of items, one or, with `multiple`, several
 a channel, the languages of a document. Its trigger is an input: typing opens the list and filters it, as shadcn/ui's
 combobox does. It is [Select](./select.md)'s sibling and shares its list, presented as each device expects:
 
-- On the desktops and in desktop browsers, a popup under the field, as wide as the field and as tall as its rows up
+- On the desktops and in desktop browsers, a popup under the field, as wide as the field (the app's `popupStyle` / `popupClass` width sets another) and as tall as its rows up
   to the room beside it.
 - On phones and tablets, a sheet at the bottom of the screen over a backdrop.
 

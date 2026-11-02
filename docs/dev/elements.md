@@ -377,11 +377,11 @@ dialog around it (`Modal`). It is the one mechanism popups are built on (`nsh/ba
   the room on that side, what a menu may grow to). A view inside an overlay measures in the root
   view's coordinates.
 - **Covering the anchor** (`OverlayConfig::cover`, `OverlayProp::Cover`; Rust `overlay().cover(&element_ref, shown)`;
-  no JS prop): instead of a side, the overlay is placed so that a view inside it lies over the anchor's frame, the
-  view's corner on the anchor's (a select's selected row over its trigger, shadcn/ui's `item-aligned`), then moved to
-  stay inside the safe area less `margin`. The view's offset in the overlay is read once, when it is first laid out
-  (`Core::covering`, `OverlayState::covered`), so the overlay stays put while its rows scroll; without the view (not
-  rendered, nothing selected) the overlay is placed on its side as usual.
+  no JS prop): instead of on a side, the overlay starts where the anchor does, with a view inside it centered on the
+  anchor vertically (a select's selected row over its trigger, title on title: shadcn/ui's `item-aligned`), then moved
+  to stay inside the safe area less `margin`. The view's frame in the overlay is kept while the overlay keeps its size
+  and the view its place in its parent (`Core::covering`, `OverlayState::covered`), so the overlay stays put while
+  its rows scroll; without the view (not rendered, nothing selected) the overlay is placed on its side as usual.
 - **Dismissal is reported, never decided**: `onPressOutside` (a finger or button went down outside the overlay, its
   anchor and the overlays inside it: while an overlay listens, the shown overlays, its anchor and root view listen to
   touches, and the core reads each touch's path, `overlay_touches`); `onCancel` (Escape, the Android back button or

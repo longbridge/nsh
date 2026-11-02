@@ -131,11 +131,11 @@ pub struct OverlayConfig {
     /// decides.
     pub open: Option<bool>,
     /// A view inside it laid over the anchor, as a select's list opens
-    /// with the selected item over the trigger: the overlay goes where that
-    /// view's top left corner meets the anchor's, kept inside the area,
-    /// instead of on a side. Where the view is in the overlay is taken
-    /// once, when it is first laid out, so scrolling the overlay's content
-    /// does not move it. `None`: on a side, as `placement` says.
+    /// with the selected item over the trigger: the overlay starts where
+    /// the anchor does, with that view's middle on the anchor's, kept
+    /// inside the area, instead of on a side. Where the view is in the
+    /// overlay is kept while the overlay keeps its size, so scrolling its
+    /// content does not move it. `None`: on a side, as `placement` says.
     pub cover: Option<NodeId>,
 }
 

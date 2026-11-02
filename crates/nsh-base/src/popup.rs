@@ -611,7 +611,8 @@ pub(crate) struct Presence {
 
 /// A dropdown while it is open (`Select`'s list, `DatePicker`'s calendar):
 /// on the desktops a popup anchored to the trigger `anchor` names, `width`
-/// wide (the trigger's, once it is laid out: a list, as shadcn/ui's) or at
+/// wide (the trigger's, once it is laid out: a list, as shadcn/ui's and
+/// `gpui-component`'s, unless the app's popup style sets a width) or at
 /// least that wide (`fit`: a calendar, as wide as it needs), never past the
 /// room on its side; on touch screens a sheet at the bottom over a
 /// backdrop. It holds what `content` makes (`true` in a sheet).
@@ -701,7 +702,12 @@ pub(crate) fn dropdown(
             .align(frame.align)
             .offset(frame.offset)
             .margin(frame.margin)
-            .min_w(move || Length::from(width.get().unwrap_or_default()))
+            // A list as wide as the trigger, unless the app's popup style
+            // sets a width (`gpui-component`'s `menu_width`); a calendar
+            // at least that wide.
+            .when(fit, |p| {
+                p.min_w(move || Length::from(width.get().unwrap_or_default()))
+            })
             .when(!fit, |p| {
                 p.w(move || Length::from(width.get().unwrap_or_default()))
             })

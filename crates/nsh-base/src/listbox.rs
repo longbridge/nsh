@@ -919,9 +919,9 @@ pub(crate) fn present(
     popup::dropdown(
         anchor,
         width,
-        // shadcn/ui's: a select's list at least as wide as its trigger (it
-        // grows to its longest item), a combobox's as wide as its input.
-        parts.cover.is_some(),
+        // As wide as the trigger (`gpui-component`'s default
+        // `menu_width`); the app's popup style may set another.
+        false,
         parts.cover,
         frame,
         presence,
