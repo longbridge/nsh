@@ -589,22 +589,54 @@ public class NshView extends FrameLayout {
         // Joining the engine needs no Java lock.
         if (taken != 0) Native.destroy(taken);
         mounter.destroyComponents();
+        endShaders();
     }
 
     /**
      * Called by the native side when the running app stopped because another
      * one replaced it ({@code Host::load}). Batches the old app sent before
-     * are already queued, so its components go after them and before the
-     * new app's first batch.
+     * are already queued, so its components and shaders go after them and
+     * before the new app's first batch.
      */
     void appStopped() {
-        main.post(mounter::destroyComponents);
+        main.post(() -> {
+            mounter.destroyComponents();
+            endShaders();
+        });
+    }
+
+    /**
+     * The app stopped: libnsh forgot its shaders, so the frames they left go
+     * too (its page and dialog transitions, its screen shader's, its
+     * effects'), and none stays frozen over the next app.
+     */
+    private void endShaders() {
+        for (int i = navFrames.size() - 1; i >= 0; i--) {
+            ShaderFrames frames = navFrames.valueAt(i);
+            if (frames instanceof NavTransition) ((NavTransition) frames).cancel();
+        }
+        navFrames.clear();
+        mounter.dropShaders();
+    }
+
+    /**
+     * A view in the surface draws anew (its own invalidation brings the
+     * window frame): a screen shader pictures the surface again before it.
+     * The screen shader's own frames invalidate this view, not a descendant.
+     */
+    @Override
+    public void onDescendantInvalidated(View child, View target) {
+        super.onDescendantInvalidated(child, target);
+        if (screen != null) screen.surfaceChanged();
     }
 
     @Override
     protected void onSizeChanged(int w, int h, int oldw, int oldh) {
         super.onSizeChanged(w, h, oldw, oldh);
-        if (screen != null) screen.shaderSize();
+        if (screen != null) {
+            screen.shaderSize();
+            screen.picturesChanged();
+        }
         // The environment follows in onLayout.
         if (handle != 0 && w > 0 && h > 0) Native.resize(handle, w / density, h / density);
     }

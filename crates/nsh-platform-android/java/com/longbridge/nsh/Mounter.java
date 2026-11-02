@@ -717,6 +717,20 @@ final class Mounter {
         }
     }
 
+    /**
+     * The app stopped: its shader views stop picturing and drawing frames
+     * libnsh no longer renders (a screen shader gives the surface back), and
+     * its pages and dialogs no longer go through a shader. No {@code DELETE}
+     * follows for them.
+     */
+    void dropShaders() {
+        for (int i = 0; i < views.size(); i++) {
+            View v = views.valueAt(i);
+            if (v instanceof Box) ((Box) v).dropShader();
+        }
+        navShaders.clear();
+    }
+
     /** Makes registered component {@code name} in box {@code id}. */
     private void component(int id, String name) {
         View v = views.get(id);

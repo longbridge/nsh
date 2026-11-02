@@ -1640,8 +1640,8 @@ extern "system" fn Java_com_longbridge_nsh_Native_shaderInput(
         height.max(0) as u32,
         stride.max(0) as u32,
     );
-    let picture = (w > 0 && h > 0 && bytes.len() >= (stride as usize) * (h as usize))
-        .then_some((bytes, w, h, stride));
+    let picture =
+        crate::shader::picture_fits(bytes.len(), w, h, stride).then_some((bytes, w, h, stride));
     let mut ui = host.ui.lock().expect("ui");
     ui.shaders.input(id as u32, input, picture);
     ui.shaders.wants_frame().into()
@@ -1669,7 +1669,8 @@ extern "system" fn Java_com_longbridge_nsh_Native_shaderTransition(
 /// `transitionShader` over view `key` (its stack, or the dialog), `width` ×
 /// `height` pixels: `from` its lower side, `to` its upper side (RGBA rows
 /// `stride` bytes apart). Whether it runs (false: the platform's own
-/// animation); Java then asks for frames.
+/// animation, as when the user asks for less motion); Java then asks for
+/// frames.
 #[unsafe(no_mangle)]
 #[allow(clippy::too_many_arguments)]
 extern "system" fn Java_com_longbridge_nsh_Native_navTransition(
@@ -1689,11 +1690,13 @@ extern "system" fn Java_com_longbridge_nsh_Native_navTransition(
     // SAFETY: Java passes its live handle.
     let host = unsafe { host(handle) };
     let (from, to) = (direct_bytes(&env, &from), direct_bytes(&env, &to));
-    let rows = height.max(0) as usize;
+    let (w, h) = (width.max(0) as u32, height.max(0) as u32);
     let (fs, ts) = (from_stride.max(0) as u32, to_stride.max(0) as u32);
-    if rows == 0 || from.len() < fs as usize * rows || to.len() < ts as usize * rows {
+    let fits = crate::shader::picture_fits;
+    if !fits(from.len(), w, h, fs) || !fits(to.len(), w, h, ts) {
         return 0;
     }
+    let reduce_motion = host.environment.lock().expect("environment").reduce_motion;
     let mut ui = host.ui.lock().expect("ui");
     let runs = ui.shaders.nav_transition(
         key as u32,
@@ -1703,8 +1706,23 @@ extern "system" fn Java_com_longbridge_nsh_Native_navTransition(
         (from, fs),
         (to, ts),
         reverse != 0,
+        reduce_motion,
     );
     runs.into()
+}
+
+/// The page or dialog transition over view `key` ends at once (a change
+/// that starts while it runs ended it): no more frames come for it.
+#[unsafe(no_mangle)]
+extern "system" fn Java_com_longbridge_nsh_Native_navTransitionEnd(
+    _: JNIEnv<'_>,
+    _: JClass<'_>,
+    handle: jlong,
+    key: jint,
+) {
+    // SAFETY: Java passes its live handle.
+    let host = unsafe { host(handle) };
+    host.ui.lock().expect("ui").shaders.end_nav(key as u32);
 }
 
 /// A scroll view moved: the engine (lists) and its scroll value learn the

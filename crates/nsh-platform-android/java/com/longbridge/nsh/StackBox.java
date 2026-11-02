@@ -39,6 +39,9 @@ final class StackBox extends FrameLayout implements Node {
     private Animator transition;
     /** The page transition through a shader playing, if any. */
     private NavTransition navTransition;
+    /** A page change through a shader waiting for its screens' layout, and the screens it leaves. */
+    private android.view.ViewTreeObserver.OnPreDrawListener navPending;
+    private List<ScreenBox> navLeaving;
 
     StackBox(Context context, Mounter mounter, int id) {
         super(context);
@@ -70,6 +73,9 @@ final class StackBox extends FrameLayout implements Node {
             if (v instanceof ScreenBox) desired.add((ScreenBox) v);
         }
         if (desired.equals(shown)) return;
+        // A change through a shader still running ends first: its screens
+        // settle (one it removed is added again below if it comes back).
+        finishNav();
         ScreenBox oldTop = top();
         ScreenBox newTop = desired.isEmpty() ? null : desired.get(desired.size() - 1);
         for (ScreenBox s : desired) {
@@ -86,8 +92,6 @@ final class StackBox extends FrameLayout implements Node {
         shown.clear();
         shown.addAll(desired);
         if (transition != null) transition.cancel();
-        if (navTransition != null) navTransition.cancel();
-        navTransition = null;
         if (oldTop == newTop || oldTop == null || newTop == null) {
             settle(leaving);
             return;
@@ -104,10 +108,10 @@ final class StackBox extends FrameLayout implements Node {
     /**
      * `upper` comes over `lower` (`push`) or goes from it through its
      * `transitionShader`, once the screens are laid out; false where none
-     * runs.
+     * runs (no shader, Android 9, less motion).
      */
     private boolean shaderAnimate(ScreenBox lower, ScreenBox upper, boolean push, List<ScreenBox> leaving) {
-        if (!mounter.navShaders.get(upper.id) || !Pictures.supported()) return false;
+        if (!NavTransition.wanted(mounter, upper.id)) return false;
         // What showed stays until the shader's first frame covers it.
         lower.setVisibility(push ? VISIBLE : INVISIBLE);
         upper.setVisibility(push ? INVISIBLE : VISIBLE);
@@ -116,10 +120,14 @@ final class StackBox extends FrameLayout implements Node {
             s.setAlpha(1);
         }
         View[] both = {lower, upper}, one = {lower};
-        getViewTreeObserver().addOnPreDrawListener(new android.view.ViewTreeObserver.OnPreDrawListener() {
+        navLeaving = leaving;
+        navPending = new android.view.ViewTreeObserver.OnPreDrawListener() {
             @Override
             public boolean onPreDraw() {
                 getViewTreeObserver().removeOnPreDrawListener(this);
+                if (navPending != this) return true;
+                navPending = null;
+                navLeaving = null;
                 if (shown.isEmpty() || top() != (push ? upper : lower)) return true;
                 NavTransition t = NavTransition.start(mounter, StackBox.this, id, upper.id, one, both,
                         !push, () -> {
@@ -128,20 +136,44 @@ final class StackBox extends FrameLayout implements Node {
                         }, () -> {
                             navTransition = null;
                             settle(leaving);
+                        }, () -> {
+                            navTransition = null;
+                            ownMotion(lower, upper, push, leaving);
                         });
-                if (t == null) {
-                    // No picture, or no GPU: the page moves with its own
-                    // animation.
-                    if (upper.animation == 2) settle(leaving);
-                    else animate(lower, upper, push, upper.animation == 1, 0, leaving);
-                    return true;
-                }
-                navTransition = t;
+                // No picture, or no GPU: the page moves with its own
+                // animation.
+                if (t == null) ownMotion(lower, upper, push, leaving);
+                else navTransition = t;
                 return true;
             }
-        });
+        };
+        getViewTreeObserver().addOnPreDrawListener(navPending);
         invalidate();
         return true;
+    }
+
+    /** `upper` comes over `lower` (`push`) or goes from it with its own animation. */
+    private void ownMotion(ScreenBox lower, ScreenBox upper, boolean push, List<ScreenBox> leaving) {
+        if (upper.animation == 2) settle(leaving);
+        else animate(lower, upper, push, upper.animation == 1, 0, leaving);
+    }
+
+    /**
+     * Ends the page change through a shader that runs, or waits for its
+     * layout to start, at once: its screens settle where it ends (the ones
+     * it leaves are removed), its frames go.
+     */
+    private void finishNav() {
+        if (navPending != null) {
+            getViewTreeObserver().removeOnPreDrawListener(navPending);
+            List<ScreenBox> leaving = navLeaving;
+            navPending = null;
+            navLeaving = null;
+            settle(leaving);
+        }
+        NavTransition t = navTransition;
+        navTransition = null;
+        if (t != null) t.finish();
     }
 
     /** Only the top screen is visible; removed screens leave. */
@@ -241,7 +273,7 @@ final class StackBox extends FrameLayout implements Node {
 
     /** Predictive back: the gesture started. */
     void backStarted() {
-        if (!canSwipe() || transition != null) return;
+        if (!canSwipe() || transition != null || navTransition != null || navPending != null) return;
         backProgress = 0;
         ScreenBox lower = shown.get(shown.size() - 2);
         lower.setVisibility(VISIBLE);
@@ -277,6 +309,8 @@ final class StackBox extends FrameLayout implements Node {
     /** The back button (or a completed back gesture): pops the top screen. */
     void pop() {
         if (!canPop()) return;
+        // A change through a shader still running ends first.
+        finishNav();
         ScreenBox upper = top();
         ScreenBox lower = shown.get(shown.size() - 2);
         float progress = backProgress >= 0 ? upper.getTranslationX() / Math.max(1, getWidth()) : 0;
@@ -285,8 +319,6 @@ final class StackBox extends FrameLayout implements Node {
         popped.add(upper.id);
         List<ScreenBox> leaving = new ArrayList<>();
         leaving.add(upper);
-        if (navTransition != null) navTransition.cancel();
-        navTransition = null;
         if (progress == 0 && shaderAnimate(lower, upper, false, leaving)) {
             // Through its shader.
         } else if (upper.animation == 2) {

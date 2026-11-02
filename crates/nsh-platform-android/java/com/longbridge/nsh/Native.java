@@ -292,6 +292,12 @@ final class Native {
                                         boolean reverse);
 
     /**
+     * The page or dialog transition over {@code key} ends at once (a change
+     * that starts while it runs ended it): no more frames come for it.
+     */
+    static native void navTransitionEnd(long handle, int key);
+
+    /**
      * A scroll view's offset, after applying {@code applied} of the scrolls
      * the core asked for. Returns bound values when a scroll value changed,
      * else null.

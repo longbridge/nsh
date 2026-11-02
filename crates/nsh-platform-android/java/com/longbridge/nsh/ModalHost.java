@@ -32,6 +32,12 @@ final class ModalHost {
     /** The content reaches under the status bar (else it starts below). */
     private boolean translucent;
     private boolean closing;
+    /**
+     * Ends the presentation or dismissal through the shader that runs (or
+     * waits for its layout to start) at once: the dialog settles where it
+     * ends and its event goes out. Null while none does.
+     */
+    private Runnable ending;
 
     ModalHost(Context context, Mounter mounter, int id) {
         this.mounter = mounter;
@@ -78,6 +84,9 @@ final class ModalHost {
 
     void show() {
         if (dialog != null && !closing) return;
+        // A dismissal through the shader still running ends first: its
+        // window goes and `onDismiss` goes out before this one comes.
+        finishChange();
         closing = false;
         Context context = mounter.context;
         dialog = new Dialog(context, android.R.style.Theme_DeviceDefault_Light_NoActionBar);
@@ -132,37 +141,62 @@ final class ModalHost {
         container.post(animateIn);
     }
 
-    /** Whether the dialog comes and goes through its `transitionShader`. */
+    /**
+     * Whether the dialog comes and goes through its `transitionShader` (not
+     * when the user asks for less motion: {@link NavTransition#wanted}).
+     */
     private boolean throughShader() {
-        return mounter.navShaders.get(id) && Pictures.supported();
+        return NavTransition.wanted(mounter, id);
+    }
+
+    /** Ends the change through the shader that runs (or waits to start) at once. */
+    private void finishChange() {
+        Runnable end = ending;
+        ending = null;
+        if (end != null) end.run();
     }
 
     /**
      * The dialog comes through its shader once laid out, from the app to the
-     * app under it (`animateIn` where it cannot); false without one.
+     * app under it (`animateIn` where it cannot, or where no frame came back
+     * by its end); false without one.
      */
     private boolean shaderIn(Dialog d, Runnable animateIn) {
         if (!throughShader()) return false;
         // Its first frame shows the dialog; until then the app shows alone.
         container.setAlpha(0);
-        container.getViewTreeObserver().addOnPreDrawListener(new android.view.ViewTreeObserver.OnPreDrawListener() {
-            @Override
-            public boolean onPreDraw() {
-                container.getViewTreeObserver().removeOnPreDrawListener(this);
-                Window window = d.getWindow();
-                if (dialog != d || closing || window == null) return true;
-                NavTransition t = NavTransition.start(mounter, (ViewGroup) window.getDecorView(), id, id,
-                        new View[] {mounter.host}, new View[] {mounter.host, container}, false, () -> {}, () -> {
-                            container.setAlpha(1);
-                            mounter.event(id, Native.SHOW);
-                        });
-                if (t == null) {
-                    container.setAlpha(animation == 1 ? 0 : 1);
-                    container.post(animateIn);
-                }
-                return true;
-            }
-        });
+        Runnable own = () -> {
+            container.setAlpha(animation == 1 ? 0 : 1);
+            container.post(animateIn);
+        };
+        Runnable presented = () -> {
+            container.setAlpha(1);
+            mounter.event(id, Native.SHOW);
+        };
+        android.view.ViewTreeObserver.OnPreDrawListener[] pending = new android.view.ViewTreeObserver.OnPreDrawListener[1];
+        pending[0] = () -> {
+            container.getViewTreeObserver().removeOnPreDrawListener(pending[0]);
+            Window window = d.getWindow();
+            if (ending == null || dialog != d || closing || window == null) return true;
+            ending = null;
+            NavTransition t = NavTransition.start(mounter, (ViewGroup) window.getDecorView(), id, id,
+                    new View[] {mounter.host}, new View[] {mounter.host, container}, false, () -> {}, () -> {
+                        ending = null;
+                        presented.run();
+                    }, () -> {
+                        ending = null;
+                        own.run();
+                    });
+            if (t == null) own.run();
+            else ending = t::finish;
+            return true;
+        };
+        // Dismissed before it started: it shows at once, then goes.
+        ending = () -> {
+            container.getViewTreeObserver().removeOnPreDrawListener(pending[0]);
+            presented.run();
+        };
+        container.getViewTreeObserver().addOnPreDrawListener(pending[0]);
         return true;
     }
 
@@ -212,6 +246,9 @@ final class ModalHost {
 
     void dismiss() {
         if (dialog == null || closing) return;
+        // A presentation through the shader still running ends first: the
+        // dialog shows and `onShow` goes out before it goes.
+        finishChange();
         closing = true;
         Dialog d = dialog;
         Runnable done = () -> {
@@ -221,11 +258,26 @@ final class ModalHost {
             mounter.event(id, Native.DISMISS);
         };
         Window window = d.getWindow();
-        if (throughShader() && window != null && NavTransition.start(mounter, (ViewGroup) window.getDecorView(),
-                id, id, new View[] {mounter.host}, new View[] {mounter.host, container}, true,
-                () -> container.setAlpha(0), done) != null) {
+        NavTransition t = throughShader() && window != null
+                ? NavTransition.start(mounter, (ViewGroup) window.getDecorView(), id, id,
+                        new View[] {mounter.host}, new View[] {mounter.host, container}, true,
+                        () -> container.setAlpha(0), () -> {
+                            ending = null;
+                            done.run();
+                        }, () -> {
+                            ending = null;
+                            animateOut(done);
+                        })
+                : null;
+        if (t != null) {
+            ending = t::finish;
             return;
         }
+        animateOut(done);
+    }
+
+    /** The dialog goes with its own animation, then `done`. */
+    private void animateOut(Runnable done) {
         if (animation == 2) {
             done.run();
             return;
