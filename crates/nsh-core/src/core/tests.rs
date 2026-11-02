@@ -9973,6 +9973,44 @@ mod components {
     }
 
     #[test]
+    fn components_read_images_over_the_limit_as_none() {
+        let mut c = core();
+        c.mount_root(&crate::element::Root::new::<ImagePaster>(|| ()));
+        let batch = c.commit().unwrap();
+        let button = batch
+            .items
+            .iter()
+            .find_map(|i| match i {
+                MountItem::Events { id, events } if events.contains(EventKind::Press) => Some(*id),
+                _ => None,
+            })
+            .expect("the button");
+        assert!(c.component_event(button, EventKind::Press, &EventPayload::None));
+        c.commit().unwrap();
+        use crate::PayloadValue::{Bool, Number, Str};
+        let limit = crate::platform::clipboard::MAX_IMAGE_BYTES;
+        let answers = [
+            vec![("id", Number(1.0)), ("has", Bool(true))],
+            // The size of an image the platform left out.
+            vec![
+                ("id", Number(2.0)),
+                ("has", Bool(true)),
+                ("tooLarge", Number((limit + 1) as f64)),
+            ],
+            vec![
+                ("id", Number(3.0)),
+                ("has", Bool(false)),
+                ("files", Str(String::new())),
+            ],
+        ];
+        for payload in answers {
+            assert!(c.component_event(ROOT_ID, EventKind::Clipboard, &EventPayload::Map(payload)));
+        }
+        let shown = run_until(&mut c, |s| s.iter().any(|t| t.starts_with("pasted t")));
+        assert_eq!(shown.last().unwrap(), "pasted true None ");
+    }
+
+    #[test]
     fn clipboard_images_need_the_capability() {
         let mut c = core();
         c.set_access(std::sync::Arc::new(crate::access::Access {
@@ -14311,6 +14349,158 @@ mod views {
         }
     }
 
+    #[derive(Clone, PartialEq, Props)]
+    struct FocusCornerProps {
+        corner: crate::element::Prop<Option<Slot>>,
+    }
+
+    /// Counts the focus its corner gets and loses: listeners the place
+    /// gives the slot.
+    #[component]
+    fn FocusCorner(props: FocusCornerProps) -> impl IntoElement {
+        let (focused, blurred) = (signal(0), signal(0));
+        view()
+            .child(text(move || {
+                format!("focus {} blur {}", focused.get(), blurred.get())
+            }))
+            .child(props.corner.place(move |c| {
+                c.on_focus(move || focused.update(|n| *n += 1))
+                    .on_blur(move || blurred.update(|n| *n += 1))
+            }))
+    }
+
+    /// Fills a focus corner with a focusable view it counts the presses
+    /// of, then (pressing "switch") with a focusable text in its place.
+    #[component]
+    fn FocusTop() -> impl IntoElement {
+        let (presses, second) = (signal(0), signal(false));
+        let press = move || presses.update(|n| *n += 1);
+        view()
+            .child(text(move || format!("pressed {}", presses.get())))
+            .child(focus_corner().corner(dynamic(move || {
+                if second.get() {
+                    text("second").focusable(true).into_element()
+                } else {
+                    view()
+                        .focusable(true)
+                        .on_press(press)
+                        .child(text("first"))
+                        .into_element()
+                }
+            })))
+            .child(
+                view()
+                    .on_press(move || second.set(true))
+                    .child(text("switch")),
+            )
+    }
+
+    /// A slot a Rust view fills with one element, whose place gives it
+    /// listeners: they go to that element as to a TSX app's in its holder
+    /// (the node around the fill keeps none), so the focus, which only the
+    /// focused element hears, reaches the component; the element's own
+    /// listeners run too, and an element made in its place takes them.
+    #[test]
+    fn a_fills_one_element_hears_the_listeners_its_place_gives() {
+        let events = |c: &Core<FakeEngine>, id: NodeId| c.nodes[c.key(id).unwrap() as usize].events;
+        let mut c = core();
+        c.mount_root(&Root::new::<FocusTop>(|| ()));
+        let batch = c.commit().unwrap();
+        let switch = native_parent(&c, text_node(&batch, "switch")).expect("placed");
+        let first = native_parent(&c, text_node(&batch, "first")).expect("placed");
+        let holder = native_parent(&c, first).expect("in the node around the fill");
+        assert!(events(&c, first).contains(EventKind::Focus));
+        assert!(events(&c, first).contains(EventKind::Blur));
+        assert!(events(&c, first).contains(EventKind::Press), "its own");
+        assert!(!events(&c, holder).contains(EventKind::Focus));
+        assert!(c.component_event(first, EventKind::Focus, &EventPayload::None));
+        assert!(c.component_event(first, EventKind::Blur, &EventPayload::None));
+        assert!(c.component_event(first, EventKind::Press, &EventPayload::None));
+        let shown = texts(&c.commit().unwrap());
+        assert!(shown.contains(&"focus 1 blur 1".into()), "{shown:?}");
+        assert!(shown.contains(&"pressed 1".into()), "{shown:?}");
+        // Another element in its place: the listeners follow it.
+        assert!(c.component_event(switch, EventKind::Press, &EventPayload::None));
+        let batch = c.commit().unwrap();
+        let second = text_node(&batch, "second");
+        assert!(c.key(first).is_err(), "released");
+        assert_eq!(native_parent(&c, second), Some(holder));
+        assert!(events(&c, second).contains(EventKind::Focus));
+        assert!(!events(&c, holder).contains(EventKind::Focus));
+        assert!(c.component_event(second, EventKind::Focus, &EventPayload::None));
+        let shown = texts(&c.commit().unwrap());
+        assert!(shown.contains(&"focus 2 blur 1".into()), "{shown:?}");
+    }
+
+    #[derive(Clone, PartialEq, Props)]
+    struct AnchoredCornerProps {
+        corner: crate::element::Prop<Option<Slot>>,
+        #[prop(default)]
+        open: crate::element::Prop<bool>,
+    }
+
+    /// Gives its corner a ref and, while `open`, shows a 40 × 20 overlay
+    /// 4 points below what the corner draws, from its start (a popover's).
+    #[component]
+    fn AnchoredCorner(props: AnchoredCornerProps) -> impl IntoElement {
+        let anchor = element_ref();
+        view()
+            .child(props.corner.place(move |c| c.element_ref(&anchor)))
+            .child(when(
+                move || props.open.get(),
+                move || {
+                    overlay()
+                        .anchor_content(&anchor)
+                        .placement(Placement::Bottom)
+                        .align(Align::Start)
+                        .offset(px(4.0))
+                        .w(px(40.0))
+                        .h(px(20.0))
+                        .child(text("pop"))
+                },
+            ))
+    }
+
+    /// Fills an anchored corner, 100 points down, with an 80 × 30 view
+    /// around a 50 × 10 box; a press on the root opens its overlay.
+    #[component]
+    fn AnchoredTop() -> impl IntoElement {
+        let open = signal(false);
+        view().pt(px(100.0)).on_press(move || open.set(true)).child(
+            anchored_corner().open(open).corner(
+                view()
+                    .w(px(80.0))
+                    .h(px(30.0))
+                    .child(view().w(px(50.0)).h(px(10.0)).child(text("box"))),
+            ),
+        )
+    }
+
+    /// The ref a component gives a slot a Rust view fills is the filled
+    /// element's, not its child's, and an overlay placed against what the
+    /// slot draws goes by the element's own box (its size, not its
+    /// content's), as it did while the ref was on the node around it.
+    #[test]
+    fn a_fills_element_takes_the_slots_ref_with_its_own_box() {
+        let mut c = core();
+        c.mount_root(&Root::new::<AnchoredTop>(|| ()));
+        let batch = c.commit().unwrap();
+        let top = root_host(&batch);
+        let inner = native_parent(&c, text_node(&batch, "box")).expect("placed");
+        let element = native_parent(&c, inner).expect("placed");
+        let holder = native_parent(&c, element).expect("in the node around the fill");
+        assert_eq!(
+            c.components.adopted.get(&element),
+            Some(&holder),
+            "the element takes the slot's props"
+        );
+        assert!(c.component_event(top, EventKind::Press, &EventPayload::None));
+        let batch = c.commit().unwrap();
+        let pop = native_parent(&c, text_node(&batch, "pop")).expect("shown");
+        // Below the element (0, 100, 80 × 30), not its 10-point box.
+        assert_eq!(frame_of(&batch, pop), Some(rect(0.0, 134.0, 40.0, 20.0)));
+    }
+
     /// Rows of a list, each with a filled corner, a holder of a text and a
     /// plaque.
     #[component]
@@ -18043,7 +18233,7 @@ fn image_uris(batch: &MountBatch, id: NodeId) -> Option<(Option<String>, Option<
     })
 }
 
-fn at_ratio(c: &mut Core<FakeEngine>, pixel_ratio: f32) {
+fn at_ratio<M: TextEngine>(c: &mut Core<M>, pixel_ratio: f32) {
     c.set_environment(crate::element::Environment {
         pixel_ratio,
         ..Default::default()
@@ -18303,6 +18493,84 @@ fn rounding_lands_on_device_pixels() {
     let up = super::ceil_to_pixel(measured, ratio);
     assert!((up.0 * ratio - 56.0).abs() < 1.0e-3, "{up:?}");
     assert!((super::round(4.0, ratio) * ratio - 11.0).abs() < 1.0e-3);
+    // A width a hair over a whole pixel is not taken back under it: the
+    // text measured again in that width would no longer fit.
+    assert_eq!(super::ceil_to_pixel(Points(78.000_49), 1.0), Points(79.0));
+    assert_eq!(super::ceil_to_pixel(Points(78.000_49), 2.0), Points(78.5));
+    let up = super::ceil_to_pixel(Points(78.000_49), ratio);
+    assert!(
+        up.0 >= 78.000_49 && up.0 * ratio - (78.000_49 * ratio).ceil() < 1.0e-3,
+        "{up:?}"
+    );
+}
+
+/// One line `.0` points wide, as a platform engine measures a short label;
+/// in a narrower width it takes two lines.
+struct HairEngine(f32);
+
+impl TextEngine for HairEngine {
+    type Prepared = ();
+
+    fn prepare(&self, _: &AttributedText) {}
+
+    fn measure(&self, _: &(), max_width: Option<Points>) -> Size<Points> {
+        match max_width {
+            Some(max) if max.0 < self.0 => size_pt(max.0, 32.0),
+            _ => size_pt(self.0, 16.0),
+        }
+    }
+
+    fn layout(&self, _: &(), _: Size<Points>) -> TextLayout {
+        TextLayout(Arc::new(()))
+    }
+}
+
+#[test]
+fn text_a_hair_over_a_pixel_wide_keeps_its_line() {
+    // A label CoreText measures 78.00049 points wide, in a view as wide as
+    // its content. Rounded to 78 points, the text was measured again in 78
+    // and wrapped onto a second line.
+    for ratio in [1.0, 2.0, 2.625] {
+        let mut c = Core::new(HairEngine(78.000_49), size_pt(320.0, 480.0));
+        at_ratio(&mut c, ratio);
+        apply(
+            &mut c,
+            vec![
+                Op::Create {
+                    id: 2,
+                    tag: Tag::View,
+                },
+                Op::Create {
+                    id: 3,
+                    tag: Tag::Text,
+                },
+                Op::CreateText {
+                    id: 4,
+                    text: "label".into(),
+                },
+                Op::Insert {
+                    parent: 3,
+                    child: 4,
+                    before: None,
+                },
+                Op::Insert {
+                    parent: 2,
+                    child: 3,
+                    before: None,
+                },
+                style_op(2, &[("alignSelf", StyleValue::Str("flex-start"))]),
+                Op::Insert {
+                    parent: ROOT_ID,
+                    child: 2,
+                    before: None,
+                },
+            ],
+        );
+        let batch = c.commit().unwrap();
+        let size = frame_of(&batch, 3).expect("frame").size;
+        assert_eq!(size.height.0, 16.0, "at {ratio}: {size:?}");
+        assert!(size.width.0 >= 78.000_49, "at {ratio}: {size:?}");
+    }
 }
 
 #[test]
@@ -22542,4 +22810,110 @@ fn nothing_follows_while_no_view_follows_an_element() {
     c.set_viewport(size_pt(320.0, 480.0));
     c.commit();
     assert!(!c.follow_changed);
+}
+
+#[test]
+fn an_effect_takes_its_picture_again_when_a_child_leaves() {
+    let mut c = core();
+    let source = "fn shade(uv: vec2f) -> vec4f { return sample_content(uv); }";
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 2,
+                tag: Tag::ShaderEffect,
+            },
+            style_op(
+                2,
+                &[
+                    ("width", StyleValue::Number(100.0)),
+                    ("height", StyleValue::Number(50.0)),
+                ],
+            ),
+            Op::SetProp {
+                id: 2,
+                prop: Prop::ShaderSource(Some(source.into())),
+            },
+            Op::Create {
+                id: 3,
+                tag: Tag::View,
+            },
+            style_op(
+                3,
+                &[
+                    ("position", StyleValue::Str("absolute")),
+                    ("width", StyleValue::Number(10.0)),
+                    ("height", StyleValue::Number(10.0)),
+                ],
+            ),
+            Op::Insert {
+                parent: 2,
+                child: 3,
+                before: None,
+            },
+            Op::Insert {
+                parent: ROOT_ID,
+                child: 2,
+                before: None,
+            },
+        ],
+    );
+    c.commit().unwrap();
+    // An absolute child of a fixed-size effect: only its Remove and Delete
+    // go out, neither of which leads to the effect any more.
+    apply(
+        &mut c,
+        vec![
+            Op::Remove {
+                parent: 2,
+                child: 3,
+            },
+            Op::Release { id: 3 },
+        ],
+    );
+    let batch = c.commit().unwrap();
+    assert!(
+        batch
+            .items
+            .iter()
+            .any(|i| matches!(i, MountItem::ShaderInput { id: 2 })),
+        "{:?}",
+        batch.items
+    );
+}
+
+#[test]
+fn a_layout_animation_alone_takes_no_screen_picture() {
+    let mut c = core();
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 2,
+                tag: Tag::ScreenEffect,
+            },
+            Op::SetProp {
+                id: 2,
+                prop: Prop::ShaderSource(Some(
+                    "fn shade(uv: vec2f) -> vec4f { return sample_content(uv); }".into(),
+                )),
+            },
+            Op::Insert {
+                parent: ROOT_ID,
+                child: 2,
+                before: None,
+            },
+        ],
+    );
+    c.commit().unwrap();
+    // A layout animation with nothing to animate: the batch is dropped, not
+    // kept alive by the screen effect's picture.
+    apply(
+        &mut c,
+        vec![Op::Command {
+            id: 1,
+            command: Command::LayoutAnimation(crate::LayoutAnimation::EASE_IN_EASE_OUT),
+        }],
+    );
+    assert!(c.commit().is_none());
 }

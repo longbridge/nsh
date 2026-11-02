@@ -126,6 +126,7 @@ fn a_rust_element_claims_touches_in_a_scroll_view() {
         trace: false,
         network: None,
         websocket: None,
+        refuse_connections: None,
         filesystem: None,
         assets: None,
         environment: Environment::default(),

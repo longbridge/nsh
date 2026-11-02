@@ -153,6 +153,10 @@
   `right` stickiness and a zoomable scroll view are not supported. The `sticky` class sets it, as Tailwind's does.
 - **Line heights**: unitless values inherit as multipliers. Percentages and `em` resolve against the element's
   font size before inheritance, so descendants inherit a computed length (`TextStyle::line_height_em`).
+- **`cursor`** keeps resize axes in the core: `nwse-resize` / `nw-resize` / `se-resize` are `Cursor::NwseResize`,
+  `nesw-resize` / `ne-resize` / `sw-resize` are `Cursor::NeswResize`. Windows, Linux, Android, the web and GPUI use
+  the corresponding diagonal cursors. AppKit uses its frame resize cursors on macOS 15 and later; macOS 14 keeps
+  the open-hand fallback. iPad and Mac Catalyst use UIKit's pointer effects.
 - **`pointerEvents`** (the style key and the `pointer-events-*` classes) inherits `none` as CSS's `pointer-events`;
   `box-none` and `box-only`, React Native's, apply to the view alone (the views in it inherit `auto`): a view that is
   `none` by its own value or the nearest one above mounts `box-none` when a view inside it that sets another value is a

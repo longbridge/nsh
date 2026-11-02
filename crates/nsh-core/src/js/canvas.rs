@@ -348,8 +348,9 @@ pub(crate) fn line_dash<L: HostList<Item: HostInput>>(
     )))
 }
 
-/// The declarations of the recording methods and properties (`nsh/canvas`
-/// declares the classes; `nsh-js` records natively from the same specs).
+/// The declarations of the recording methods and properties (`nsh`
+/// declares the canvas's classes; `nsh-js` records natively from the same
+/// specs).
 pub fn declarations() -> String {
     use std::fmt::Write as _;
     let mut types = TsTypes::default();

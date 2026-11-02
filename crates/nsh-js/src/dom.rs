@@ -1277,6 +1277,7 @@ fn set_prop(
             };
             return dom(cx).push(cx, Op::SetProp { id, prop });
         }
+        "tooltip" if followed(cx, name, value) => return bind_prop_with(cx, node, name, value),
         _ => {}
     }
     if let Some(prop) = crate::touch::touch_prop(name) {
@@ -1356,6 +1357,16 @@ fn set_prop(
         Err(rquickjs::Error::Exception) => Err(qjs::JS_EXCEPTION),
         Err(e) => Err(throw_type(cx, &format!("nsh: prop `{name}`: {e}"))),
     }
+}
+
+/// Whether `set_prop` follows `value` (borrowed) of prop `name` with a
+/// bound prop of its own: a `tooltip` given by a function (in a development
+/// bundle a component's element is its hot proxy's memo). That binding goes
+/// when the computation that set the prop runs again, so such a value is
+/// set again on every run, even unchanged.
+fn followed(cx: *mut JsContext, name: &str, value: JsValue) -> bool {
+    // SAFETY: an inline check of a borrowed value.
+    name == "tooltip" && unsafe { qjs::JS_IsFunction(cx, value) } && node_ptr(cx, value).is_null()
 }
 
 /// Sets the handler of `event` on node `p` to `value` (borrowed; not a
@@ -1620,7 +1631,11 @@ unsafe extern "C" fn bind_prop_run(
     if unsafe { qjs::JS_IsException(next) } {
         return next;
     }
-    if unsafe { qjs::JS_IsStrictEqual(cx, prev, next) } {
+    // The name is read only for an unchanged function ([`followed`]).
+    if unsafe { qjs::JS_IsStrictEqual(cx, prev, next) }
+        && !(unsafe { qjs::JS_IsFunction(cx, next) }
+            && to_string(cx, name).is_some_and(|name| followed(cx, &name, next)))
+    {
         return next;
     }
     let Some(name) = to_string(cx, name) else {
@@ -1721,7 +1736,7 @@ unsafe extern "C" fn spread_run(
             } else {
                 UNDEFINED
             };
-            let r = if qjs::JS_IsStrictEqual(cx, old, v) {
+            let r = if qjs::JS_IsStrictEqual(cx, old, v) && !followed(cx, &name_str, v) {
                 Ok(())
             } else {
                 set_prop(cx, node, &name_str, v, old)
@@ -3129,7 +3144,7 @@ pub(crate) fn handler(cx: *mut JsContext, id: NodeId, event: EventKind) -> Optio
 // --- The primitives as components -----------------------------------------------------
 
 /// A component rendering host element `tag` with its props (children too
-/// when `children`): what `nsh`'s `View`, `nsh/webview`'s `WebView`, ...
+/// when `children`): what `nsh`'s `View`, `WebView`, ...
 /// are as values. Their tags are made in place by the compiler; this is
 /// the path of `<C />` where `C` holds one.
 pub(crate) fn host_component(cx: *mut JsContext, tag: &str, children: bool) -> JsValue {
@@ -3295,9 +3310,10 @@ pub(crate) fn catch_listener_failure(cx: *mut JsContext, id: NodeId) -> bool {
 
 /// `ErrorBoundary({ fallback, children })`: its children, or its fallback
 /// once something under them failed (a component's body, a binding, an
-/// effect, a listener). `fallback(error, reset)` gets the thrown value and
-/// what renders the children again; a fallback that is not a function of
-/// arguments is shown as is. What fails in the fallback goes to the
+/// effect, a listener). A function `fallback` is called with the thrown
+/// value and what renders the children again (`fallback(error, reset)`),
+/// whatever parameters it declares; any other fallback (an element) is
+/// shown as is. What fails in the fallback goes to the
 /// boundary above.
 ///
 /// A memo shows one or the other, reading the boundary's signal (`[error]`
@@ -3359,15 +3375,10 @@ unsafe extern "C" fn boundary_run(
                 qjs::JS_FreeValue(cx, error);
                 return fallback;
             }
-            let mut length = 0i32;
-            let l = qjs::JS_GetPropertyStr(cx, fallback, c"length".as_ptr());
-            qjs::JS_ToInt32(cx, &mut length, l);
-            qjs::JS_FreeValue(cx, l);
-            if length == 0 {
-                // An element to show, as children are.
-                qjs::JS_FreeValue(cx, error);
-                return fallback;
-            }
+            // Every function is called with what failed and the reset,
+            // whatever its parameters say (`(...args) => …` and defaults
+            // count none): one that takes no arguments returns its element
+            // all the same.
             let mut rdata = [failed];
             let reset =
                 qjs::JS_NewCFunctionData(cx, Some(boundary_reset), 0, 0, 1, rdata.as_mut_ptr());
@@ -3803,6 +3814,51 @@ mod tests {
         host.eval_script("body.js", "failBody = true; reset()")
             .unwrap();
         assert_eq!(texts(&host), ["outer caught body"]);
+    }
+
+    /// A function fallback is called with the error and the reset whatever
+    /// parameters it declares (`(...args)` and defaults count none); an
+    /// element is shown as is.
+    #[test]
+    fn a_function_fallback_gets_the_error_whatever_it_declares() {
+        let host = Host::new().unwrap();
+        host.eval_source(
+            r#"
+            import { mount, signal, ErrorBoundary } from "nsh";
+            import { element, insert, text, component } from "nsh:rt";
+            const fail = signal(false);
+            globalThis.fail = fail;
+            const Risky = () => {
+                const t = element("text");
+                insert(t, () => { if (fail()) throw new Error("boom"); return "ok"; });
+                return t;
+            };
+            mount(() => {
+                const v = element("view");
+                insert(v, component(ErrorBoundary, {
+                    fallback: (...args) => text(`rest ${args[0].message} ${typeof args[1]}`),
+                    get children() { return component(Risky, {}); },
+                }));
+                insert(v, component(ErrorBoundary, {
+                    fallback: (error = new Error("none")) => text(`default ${error.message}`),
+                    get children() { return component(Risky, {}); },
+                }));
+                insert(v, component(ErrorBoundary, {
+                    // An element, as compiled JSX passes one: made when read.
+                    get fallback() { return text("element"); },
+                    get children() { return component(Risky, {}); },
+                }));
+                return v;
+            });
+            "#,
+        )
+        .unwrap();
+        assert_eq!(texts(&host), ["ok", "ok", "ok"]);
+        host.eval_script("fail.js", "fail.set(true)").unwrap();
+        assert_eq!(
+            texts(&host),
+            ["rest boom function", "default boom", "element"]
+        );
     }
 
     /// A failure in a fallback goes to the boundary above; with no
@@ -4356,6 +4412,73 @@ mod tests {
                 .any(|o| matches!(o, Op::Animation(AnimationOp::Release { .. }))),
             "{ops:?}"
         );
+    }
+
+    /// A `tooltip` given by a memo (a component's element in a development
+    /// bundle: its hot proxy's) is the element the memo gives, and follows it.
+    #[test]
+    fn a_tooltip_given_by_a_memo_follows_it() {
+        let host = Host::new().unwrap();
+        host.eval_source(
+            r#"
+            import { computed, signal } from "nsh";
+            import { element, prop } from "nsh:rt";
+            const tips = [element("view"), element("view")];
+            const shown = signal(0);
+            prop(element("view"), "tooltip", computed(() => tips[shown()]));
+            shown.set(1);
+            "#,
+        )
+        .unwrap();
+        assert_eq!(tooltips(&host), ["Node(2)", "Node(4)"]);
+    }
+
+    /// A tooltip memo stays followed when what set it runs again with the
+    /// same memo: a spread after another of its props changed, a bound prop
+    /// after something else it read did. Each run sets the memo's element
+    /// again (the core keeps it as it is).
+    #[test]
+    fn a_tooltip_memo_is_followed_after_what_set_it_ran_again() {
+        let host = Host::new().unwrap();
+        host.eval_source(
+            r#"
+            import { computed, signal } from "nsh";
+            import { bindProp, element, spread } from "nsh:rt";
+            const tips = [element("view"), element("view")];
+            const shown = signal(0);
+            const id = signal("a");
+            const tip = computed(() => tips[shown()]);
+            spread(element("view"), {
+                get testID() { return id(); },
+                get tooltip() { return tip; },
+            });
+            bindProp(element("view"), "tooltip", () => (id(), tip));
+            id.set("b");
+            shown.set(1);
+            "#,
+        )
+        .unwrap();
+        assert_eq!(
+            tooltips(&host),
+            [
+                "Node(2)", "Node(2)", "Node(2)", "Node(2)", "Node(4)", "Node(4)"
+            ]
+        );
+    }
+
+    /// The tooltips the ops since the last call set.
+    fn tooltips(host: &Host) -> Vec<String> {
+        let mut ops = Vec::new();
+        host.take_ops(&mut ops);
+        ops.into_iter()
+            .filter_map(|o| match o {
+                Op::SetProp {
+                    prop: nsh_core::Prop::Tooltip(content),
+                    ..
+                } => Some(format!("{content:?}")),
+                _ => None,
+            })
+            .collect()
     }
 
     #[test]

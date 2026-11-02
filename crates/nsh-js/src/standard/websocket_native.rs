@@ -1,5 +1,5 @@
 //! The global `WebSocket`: a capability-checked transport on the owning VM.
-//! (The `websocket` module's `WebSocket.connect` is the runtime's Rust
+//! (The `websocket` module's `connect` is the runtime's Rust
 //! registry, `nsh_core::runtime`; both count under one per-VM cap.)
 //!
 //! The class itself is native, an `EventTarget` (`web/websocket.rs`).
@@ -114,6 +114,9 @@ fn open<'js>(
     // one connected to: the parsed, normalized form.
     if !allowed(&cx, &parsed) {
         return super::refused(cx, callback, super::denial(&parsed));
+    }
+    if let Some(message) = super::host_refusal(&cx, &parsed) {
+        return super::refused(cx, callback, message);
     }
     let slot = super::slot(&cx)?;
     let mut request = parsed

@@ -27,10 +27,10 @@ test("on a manual clock, a loop runs with the clock and never moves it", async (
   expect(angle(app)).toBeLessThan(30);
   expect(Date.now() - started).toBeLessThan(1000);
   // Half a turn in 450 ms of the clock.
-  await app.clock.runFor(450);
+  await app.clock!.runFor(450);
   await app.press("Read");
   expect(angle(app)).toBeGreaterThan(150);
   expect(angle(app)).toBeLessThan(210);
-  await app.clock.runFor(600);
+  await app.clock!.runFor(600);
   expect(app.shows("Status: uploaded")).toBe(true);
 });

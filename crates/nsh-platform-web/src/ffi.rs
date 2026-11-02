@@ -55,6 +55,8 @@ unsafe extern "C" {
     fn js_request_pump();
     #[link_name = "report_error"]
     fn js_report_error(message: *const u8, len: usize);
+    #[link_name = "report_panic"]
+    fn js_report_panic(message: *const u8, len: usize);
     /// A message of a test session's app for the dev server (JSON
     /// `nsh_dev::protocol::ClientMessage`: its requests), sent over the
     /// page's socket.
@@ -99,6 +101,8 @@ unsafe extern "C" {
     fn js_websocket_close(id: u32, code: u32, reason: *const u8, len: usize) -> u32;
     #[link_name = "websocket_buffered"]
     fn js_websocket_buffered(id: u32) -> f64;
+    #[link_name = "websocket_pause"]
+    fn js_websocket_pause(id: u32, paused: u32);
     #[link_name = "websocket_cancel"]
     fn js_websocket_cancel(id: u32);
     #[link_name = "load_data"]
@@ -254,6 +258,13 @@ pub(crate) fn test_send(json: &str) {
 pub(crate) fn report_error(message: &str) {
     // SAFETY: the slice is valid for the call; JS copies it.
     unsafe { js_report_error(message.as_ptr(), message.len()) }
+}
+
+/// Shows a panic: the engine traps right after, its state left borrowed,
+/// so the page stops calling it and keeps this report on screen.
+pub(crate) fn report_panic(message: &str) {
+    // SAFETY: the slice is valid for the call; JS copies it.
+    unsafe { js_report_panic(message.as_ptr(), message.len()) }
 }
 
 /// Logs to the browser's console.
@@ -412,6 +423,12 @@ pub(crate) fn websocket_close(id: u32, code: u16, reason: &str) -> bool {
 pub(crate) fn websocket_buffered(id: u32) -> usize {
     // SAFETY: no pointers.
     unsafe { js_websocket_buffered(id) as usize }
+}
+
+/// Holds (`true`) or delivers again (`false`) the browser socket's events.
+pub(crate) fn websocket_pause(id: u32, paused: bool) {
+    // SAFETY: no pointers.
+    unsafe { js_websocket_pause(id, paused as u32) }
 }
 
 /// Removes callbacks before closing a discarded browser socket.

@@ -2,7 +2,9 @@
 //! what a user does with them and what the app hears and shows.
 
 mod accordion;
+mod avatar;
 mod calendar;
+mod carousel;
 mod collapsible;
 mod color_picker;
 mod combobox;
@@ -14,10 +16,12 @@ mod editor_completion;
 mod editor_definition;
 mod editor_diagnostics;
 mod editor_languages;
+mod hover_card;
 mod link;
 mod menu;
 mod number_input;
 mod otp_input;
+mod pagination;
 mod plot;
 mod popups;
 mod radio;
@@ -31,3 +35,5 @@ mod tabs;
 mod text_view;
 mod time_field;
 mod toggle;
+mod toolbar;
+mod tree;

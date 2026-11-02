@@ -71,6 +71,7 @@ pub(crate) fn start_with(
         trace: false,
         network: None,
         websocket: None,
+        refuse_connections: None,
         filesystem: None,
         assets: None,
         environment,
@@ -1305,6 +1306,109 @@ fn clipboard_images_and_files_reach_js() {
             Command::ReadClipboardFiles { id: 3 },
         ]
     );
+}
+
+/// The image functions, as each settles: `ok` and the value, or the
+/// error's class and `code`.
+const CLIPBOARD_IMAGE_TEXT_ONLY: &str = r#"import { mount, signal, Text } from "nsh";
+import { Clipboard } from "nsh";
+
+const shown = signal("waiting");
+const settled = (p: Promise<unknown>) =>
+  p.then(
+    (value) => `ok ${value}`,
+    (e) => `${e.name} ${e.code}`,
+  );
+setTimeout(async () => {
+  const results = await Promise.all([
+    settled(Clipboard.writeImage("data:image/png;base64,aGk=")),
+    settled(Clipboard.readImage()),
+    settled(Clipboard.hasImage()),
+  ]);
+  shown.set(results.join(" | "));
+}, 0);
+
+mount(() => <Text>{shown()}</Text>);
+"#;
+
+#[test]
+fn clipboard_images_are_unavailable_where_the_clipboard_holds_text_only() {
+    let (_engine, rx) = start_in(
+        CLIPBOARD_IMAGE_TEXT_ONLY,
+        Environment {
+            os: nsh_engine::Os::Android,
+            ..Environment::default()
+        },
+    );
+    // Writing and reading reject, `hasImage` answers no; nothing reaches
+    // the platform.
+    let wanted = "Error ERR_FEATURE_UNAVAILABLE_ON_PLATFORM | Error ERR_FEATURE_UNAVAILABLE_ON_PLATFORM | ok false";
+    let mut commands = 0;
+    let batches = until(&rx, |batch| {
+        commands += batch
+            .items
+            .iter()
+            .filter(|i| {
+                matches!(
+                    i,
+                    MountItem::Command {
+                        id: ROOT_ID,
+                        command: Command::SetClipboardImage(_) | Command::ReadClipboardImage { .. },
+                    }
+                )
+            })
+            .count();
+        shows(batch, wanted)
+    });
+    assert!(batches.iter().any(|b| shows(b, wanted)), "{wanted}");
+    assert_eq!(commands, 0, "an image call reached the platform");
+}
+
+const CLIPBOARD_IMAGE_TOO_LARGE: &str = r#"import { mount, signal, Text } from "nsh";
+import { Clipboard } from "nsh";
+
+const shown = signal("waiting");
+setTimeout(async () => {
+  const has = await Clipboard.hasImage();
+  const read = await Clipboard.readImage().then(
+    () => "resolved",
+    (e) => `${e.name} ${e.code} ${e.message}`,
+  );
+  shown.set(`${has} ${read}`);
+}, 0);
+
+mount(() => <Text>{shown()}</Text>);
+"#;
+
+#[test]
+fn clipboard_images_over_the_limit_reject() {
+    let (engine, rx) = start(CLIPBOARD_IMAGE_TOO_LARGE);
+    let control = engine.control();
+    // A 50 MiB image: the platform answers its size, not its bytes.
+    let size = 50 << 20;
+    let wanted = format!(
+        "true Error ERR_NSH_QUOTA_EXCEEDED Clipboard.readImage: the clipboard's image is {size} bytes (50 MB), over the 48 MB an app reads"
+    );
+    let batches = until(&rx, |batch| {
+        for item in &batch.items {
+            if let MountItem::Command {
+                id: ROOT_ID,
+                command: Command::ReadClipboardImage { id, has_only },
+            } = item
+            {
+                let mut payload = vec![
+                    ("id", PayloadValue::Number(*id as f64)),
+                    ("has", PayloadValue::Bool(true)),
+                ];
+                if !has_only {
+                    payload.push(("tooLarge", PayloadValue::Number(size as f64)));
+                }
+                control.dispatch_event(ROOT_ID, EventKind::Clipboard, EventPayload::Map(payload));
+            }
+        }
+        shows(batch, &wanted)
+    });
+    assert!(batches.iter().any(|b| shows(b, &wanted)), "{wanted}");
 }
 
 const PICKER: &str = r#"import { mount, signal, Text } from "nsh";
@@ -5222,6 +5326,46 @@ fn the_tab_bar_is_the_systems_component_on_ios_and_android() {
             "{os:?}"
         );
         assert_eq!(value("selectedIndex"), Some(serde_json::json!(0)), "{os:?}");
+    }
+}
+
+/// The bar's selected tab takes the theme's `primary`, as the platforms
+/// read one color: the light value, then the dark one when the appearance
+/// turns dark.
+#[test]
+fn the_tab_bar_takes_the_themes_primary_color() {
+    use nsh_core::platform::{ColorScheme, Os};
+
+    let theme = r##"{ "theme": { "cssVars": {
+        "light": { "primary": "#26251E" }, "dark": { "primary": "#EDECE6" } } } }"##;
+    let tint = |batches: &[MountBatch]| {
+        batches
+            .iter()
+            .flat_map(|batch| &batch.items)
+            .filter_map(|item| match item {
+                MountItem::ComponentProps { props, .. } => Some(props),
+                _ => None,
+            })
+            .flatten()
+            .rfind(|(name, _)| &**name == "tint")
+            .and_then(|(_, value)| value.clone())
+    };
+    for os in [Os::Ios, Os::Android] {
+        let environment = Environment {
+            os,
+            ..Environment::default()
+        };
+        let (engine, rx) = start_with(TAB_BAR, environment, None, Some(theme));
+        let batches = until(&rx, |batch| batch.items.iter().any(is_tab_bar));
+        assert_eq!(tint(&batches), Some(serde_json::json!("#26251E")), "{os:?}");
+        engine.control().set_environment(Environment {
+            color_scheme: ColorScheme::Dark,
+            ..environment
+        });
+        let dark = until(&rx, |batch| {
+            tint(std::slice::from_ref(batch)) == Some(serde_json::json!("#EDECE6"))
+        });
+        assert_eq!(tint(&dark), Some(serde_json::json!("#EDECE6")), "{os:?}");
     }
 }
 

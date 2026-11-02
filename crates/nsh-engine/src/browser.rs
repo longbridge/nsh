@@ -222,6 +222,7 @@ impl Script {
                 Default::default(),
             )
             .with_websocket(system.websocket)
+            .with_refuse_connections(system.refuse_connections)
             .with_filesystem(system.filesystem)
             .with_os(environment.os);
             script.0.initialize(Services {

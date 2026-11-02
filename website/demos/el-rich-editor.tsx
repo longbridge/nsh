@@ -4,7 +4,7 @@ import { button, buttonText, desktop, Log, Panel, Split, ui, wide } from "./pale
 
 const CONTENT = `# A document
 
-Type **Markdown** as you go: \`# \` makes a heading, \`- \` a list, \`[ ] \` a task.
+Type **Markdown** as you go: \`#\` makes a heading, \`-\` a list, \`[ ]\` a task, each followed by a space.
 
 - Select text and press Bold
 - Undo and redo keep every step

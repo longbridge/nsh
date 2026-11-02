@@ -1,9 +1,9 @@
 //! `nsh/base`: the behavior and infrastructure foundation of NSH apps' UI,
 //! written in Rust, with no look of its own (as `gpui-base` is GPUI Kit's):
-//! controls (`Button`, a link (`Link`), `Checkbox`, a color picker: `ColorPicker` and its parts, `NumberInput`, `Radio` in a
-//! `RadioGroup`, `Slider`, `Switch`, `Toggle` in a `ToggleGroup`, a scroll bar of the app's own look (`Scrollbar`), `Tab` in `Tabs`, `Select`, `Combobox`, a one-time code: `OtpInput`), a progress bar (`Progress`), disclosure (`Collapsible`, `Accordion` and its parts),
+//! controls (`Button`, a link (`Link`), `Checkbox`, avatars (`Avatar`, `AvatarGroup`), a carousel (`Carousel` and its parts), a color picker: `ColorPicker` and its parts, `NumberInput`, `Radio` in a
+//! `RadioGroup`, `Slider`, `Switch`, `Toggle` in a `ToggleGroup`, a bar of them and of buttons and links (`Toolbar`, `ToolbarGroup`, `ToolbarSeparator`), a scroll bar of the app's own look (`Scrollbar`), `Tab` in `Tabs`, `Select`, `Combobox`, a one-time code: `OtpInput`), the pages of a set (`Pagination`), items that hold items (`Tree`), a progress bar (`Progress`), disclosure (`Collapsible`, `Accordion` and its parts),
 //! the parts of charts (`plot`: `nsh/base/plot`), navigation (stacks and pages), dialogs, popups on the core's overlays
-//! (`Popover`, `Menu`, `ContextMenu`, `Tooltip`, `Sheet`), a code editor
+//! (`Popover`, `HoverCard`, `Menu`, `ContextMenu`, `Tooltip`, `Sheet`), a code editor
 //! (`Editor`), the changes between two texts (`DiffView`), tables over any number of rows and columns (`DataTable`) and static tables
 //! with a table's semantics (`Table` and its parts), toasts (`Toast`,
 //! `ToastStack`, `ToastManager`), text input (`Input`), the system's
@@ -18,8 +18,10 @@
 
 mod accordion;
 mod alert_dialog;
+mod avatar;
 mod button;
 mod calendar;
+mod carousel;
 mod checkbox;
 mod collapsible;
 mod color_picker;
@@ -29,6 +31,7 @@ mod date_picker;
 mod diff;
 pub mod dock;
 pub mod editor;
+mod hover_card;
 mod keys;
 mod link;
 mod listbox;
@@ -37,6 +40,7 @@ mod navigation;
 mod number_input;
 mod numeric;
 mod otp_input;
+mod pagination;
 pub mod plot;
 mod popover;
 mod popup;
@@ -59,7 +63,9 @@ mod theme;
 mod time_field;
 mod toast;
 mod toggle;
+mod toolbar;
 mod tooltip;
+mod tree;
 mod window;
 
 use std::sync::Arc;
@@ -81,10 +87,23 @@ pub use crate::{
         AlertDialog, AlertDialogAction, AlertDialogOptions, AlertDialogPresentation,
         AlertDialogResult, AlertDialogRole, alert_dialog,
     },
+    avatar::{
+        Avatar, AvatarElement, AvatarEvent, AvatarGroup, AvatarGroupElement, AvatarGroupProps,
+        AvatarProps, AvatarStatus, avatar, avatar_group,
+    },
     button::{Button, ButtonElement, ButtonEvent, ButtonProps, button},
     calendar::{
         Calendar, CalendarElement, CalendarEvent, CalendarItemKind, CalendarItemState,
         CalendarProps, CalendarValue, Date, Matcher, YearRange, calendar,
+    },
+    carousel::{
+        Carousel, CarouselContent, CarouselContentElement, CarouselContentProps,
+        CarouselControlProps, CarouselElement, CarouselEvent, CarouselItem, CarouselItemElement,
+        CarouselItemProps, CarouselNext, CarouselNextElement, CarouselPagination,
+        CarouselPaginationElement, CarouselPaginationItem, CarouselPaginationItemElement,
+        CarouselPaginationItemProps, CarouselPaginationProps, CarouselPrevious,
+        CarouselPreviousElement, CarouselProps, carousel, carousel_content, carousel_item,
+        carousel_next, carousel_pagination, carousel_pagination_item, carousel_previous,
     },
     checkbox::{Checkbox, CheckboxElement, CheckboxEvent, CheckboxProps, checkbox},
     collapsible::{Collapsible, CollapsibleElement, CollapsibleProps, collapsible},
@@ -109,21 +128,23 @@ pub use crate::{
         DateRangePreset, DateTime, PickedDate, date_picker,
     },
     diff::{
-        DiffAnnotation, DiffChange, DiffExpand, DiffFile, DiffFileStatus, DiffHunk, DiffIndicators,
-        DiffInline, DiffLayout, DiffLine, DiffLineRange, DiffSeparator, DiffSide, DiffStats,
-        DiffView, DiffViewApi, DiffViewClasses, DiffViewElement, DiffViewEvent, DiffViewPart,
-        DiffViewProps, DiffViewStyles, diff_view,
+        DiffAnnotation, DiffChange, DiffExpand, DiffFile, DiffFileStatus, DiffHunk, DiffHunkBounds,
+        DiffIndicators, DiffInline, DiffLayout, DiffLine, DiffLineRange, DiffSeparator, DiffSide,
+        DiffStats, DiffView, DiffViewApi, DiffViewClasses, DiffViewElement, DiffViewEvent,
+        DiffViewPart, DiffViewProps, DiffViewStyles, diff_view,
     },
     dock::{DockArea, DockAreaElement, DockAreaEvent, DockAreaProps, dock_area},
     editor::{
         Editor, EditorApi, EditorBounds, EditorClasses, EditorCommand, EditorContextMenuEvent,
         EditorDecoration, EditorDiagnostic, EditorDiagnosticCodeDescription,
         EditorDiagnosticRelatedInformation, EditorDiagnosticSeverity, EditorDiagnosticTag,
-        EditorElement, EditorEvent, EditorFoldRange, EditorHoverEvent, EditorLocation, EditorPart,
-        EditorPosition, EditorProps, EditorRange, EditorRect, EditorReplaceAll, EditorScrollBeyond,
-        EditorSearch, EditorSearchResult, EditorSelection, EditorStyles, EditorTextPressEvent,
-        EditorToken, editor,
+        EditorElement, EditorEvent, EditorFoldRange, EditorGutterMark, EditorGutterPlacement,
+        EditorHoverEvent, EditorLocation, EditorOverviewRulerLane, EditorOverviewRulerMark,
+        EditorPart, EditorPosition, EditorProps, EditorRange, EditorRect, EditorReplaceAll,
+        EditorScrollBeyond, EditorSearch, EditorSearchResult, EditorSelection, EditorStyles,
+        EditorTextPressEvent, EditorToken, editor,
     },
+    hover_card::{HoverCard, HoverCardElement, HoverCardEvent, HoverCardProps, hover_card},
     link::{Link, LinkElement, LinkEvent, LinkOpenWith, LinkProps, link},
     menu::{
         ContextMenu, ContextMenuElement, ContextMenuProps, Menu, MenuElement, MenuEvent, MenuItem,
@@ -138,6 +159,10 @@ pub use crate::{
     otp_input::{
         OtpInput, OtpInputApi, OtpInputCompleteEvent, OtpInputElement, OtpInputEvent,
         OtpInputProps, otp_input,
+    },
+    pagination::{
+        Pagination, PaginationElement, PaginationEvent, PaginationItem, PaginationItemKind,
+        PaginationItemState, PaginationProps, pagination, pagination_items,
     },
     popover::{Popover, PopoverElement, PopoverEvent, PopoverProps, popover},
     popup::OpenChangeReason,
@@ -194,7 +219,13 @@ pub use crate::{
         Toggle, ToggleElement, ToggleEvent, ToggleGroup, ToggleGroupElement, ToggleGroupProps,
         ToggleProps, toggle, toggle_group,
     },
+    toolbar::{
+        Toolbar, ToolbarElement, ToolbarGroup, ToolbarGroupElement, ToolbarGroupProps,
+        ToolbarProps, ToolbarSeparator, ToolbarSeparatorElement, ToolbarSeparatorProps, toolbar,
+        toolbar_group, toolbar_separator,
+    },
     tooltip::{Tooltip, TooltipElement, TooltipEvent, TooltipProps, tooltip},
+    tree::{Tree, TreeApi, TreeElement, TreeEntry, TreeEvent, TreeItem, TreeProps, tree},
 };
 
 /// The JS module apps import the foundation as.
@@ -233,13 +264,15 @@ pub mod parts {
 
     use crate::{
         Accordion, AccordionHeader, AccordionItem, AccordionPanel, AccordionTrigger, AlertDialog,
-        Button, Calendar, Checkbox, Collapsible, ColorArea, ColorEyeDropper, ColorField,
-        ColorPicker, ColorSlider, ColorSwatch, Combobox, ContextMenu, DataTable, DatePicker,
-        DiffView, DockArea, Editor, Link, Menu, MenuItem, MenuSeparator, NumberInput, OtpInput, Popover,
-        Progress, Radio, RadioGroup, ResizablePanel, ResizablePanelGroup, Scrollbar, Select, Sheet,
-        Slider, Submenu, Switch, Tab, Table, TableBody, TableCaption, TableCell, TableFooter,
-        TableHead, TableHeader, TableRow, Tabs, TextView, TimeField, Toast, ToastStack, Toggle, ToggleGroup, Tooltip,
-        plot, rich_editor, toast,
+        Avatar, AvatarGroup, Button, Calendar, Carousel, CarouselContent, CarouselItem,
+        CarouselNext, CarouselPagination, CarouselPaginationItem, CarouselPrevious, Checkbox,
+        Collapsible, ColorArea, ColorEyeDropper, ColorField, ColorPicker, ColorSlider, ColorSwatch,
+        Combobox, ContextMenu, DataTable, DatePicker, DiffView, DockArea, Editor, HoverCard, Link,
+        Menu, MenuItem, MenuSeparator, NumberInput, OtpInput, Pagination, Popover, Progress, Radio,
+        RadioGroup, ResizablePanel, ResizablePanelGroup, Scrollbar, Select, Sheet, Slider, Submenu,
+        Switch, Tab, Table, TableBody, TableCaption, TableCell, TableFooter, TableHead,
+        TableHeader, TableRow, Tabs, TextView, TimeField, Toast, ToastStack, Toggle, ToggleGroup,
+        Toolbar, ToolbarGroup, ToolbarSeparator, Tooltip, Tree, plot, rich_editor, toast,
     };
 
     /// What a part does: registers its components, classes and modules.
@@ -260,8 +293,8 @@ pub mod parts {
     ];
 
     /// The controls, popups, toasts and dialogs every app may use: buttons,
-    /// links, checkboxes, color pickers, radios, switches, toggles, sliders, scroll bars, number inputs, one-time code inputs, selects, comboboxes, tabs, collapsibles, accordions, progress,
-    /// menus, popovers, sheets, tooltips, toasts and system alerts.
+    /// links, carousels, checkboxes, color pickers, radios, switches, toggles, toolbars, sliders, scroll bars, number inputs, one-time code inputs, paginations, selects, comboboxes, trees, tabs, collapsibles, accordions, progress,
+    /// menus, popovers, hover cards, sheets, tooltips, toasts and system alerts.
     pub fn core(registry: &mut Registry) {
         registry
             .register::<Accordion>()
@@ -269,6 +302,8 @@ pub mod parts {
             .register::<AccordionHeader>()
             .register::<AccordionTrigger>()
             .register::<AccordionPanel>()
+            .register::<Avatar>()
+            .register::<AvatarGroup>()
             .register::<Button>()
             .register::<Link>()
             .register::<ContextMenu>()
@@ -277,9 +312,17 @@ pub mod parts {
             .register::<MenuSeparator>()
             .register::<Submenu>()
             .register::<Popover>()
+            .register::<HoverCard>()
             .register::<Sheet>()
             .register::<Tooltip>()
             .register::<Calendar>()
+            .register::<Carousel>()
+            .register::<CarouselContent>()
+            .register::<CarouselItem>()
+            .register::<CarouselPrevious>()
+            .register::<CarouselNext>()
+            .register::<CarouselPagination>()
+            .register::<CarouselPaginationItem>()
             .register::<Checkbox>()
             .register::<Collapsible>()
             .register::<DatePicker>()
@@ -293,6 +336,7 @@ pub mod parts {
             .register::<Select>()
             .register::<NumberInput>()
             .register::<OtpInput>()
+            .register::<Pagination>()
             .register::<Radio>()
             .register::<RadioGroup>()
             .register::<Slider>()
@@ -305,7 +349,11 @@ pub mod parts {
             .register::<Tabs>()
             .register::<Toggle>()
             .register::<ToggleGroup>()
+            .register::<Toolbar>()
+            .register::<ToolbarGroup>()
+            .register::<ToolbarSeparator>()
             .register::<TimeField>()
+            .register::<Tree>()
             .register::<Toast>()
             .register::<ToastStack>()
             .class::<toast::ToastManagerClass>()
@@ -392,8 +440,17 @@ mod tests {
                 "AccordionItem",
                 "AccordionPanel",
                 "AccordionTrigger",
+                "Avatar",
+                "AvatarGroup",
                 "Button",
                 "Calendar",
+                "Carousel",
+                "CarouselContent",
+                "CarouselItem",
+                "CarouselNext",
+                "CarouselPagination",
+                "CarouselPaginationItem",
+                "CarouselPrevious",
                 "Checkbox",
                 "Collapsible",
                 "ColorArea",
@@ -409,12 +466,14 @@ mod tests {
                 "DiffView",
                 "DockArea",
                 "Editor",
+                "HoverCard",
                 "Link",
                 "Menu",
                 "MenuItem",
                 "MenuSeparator",
                 "NumberInput",
                 "OtpInput",
+                "Pagination",
                 "Popover",
                 "Progress",
                 "Radio",
@@ -444,7 +503,11 @@ mod tests {
                 "ToastStack",
                 "Toggle",
                 "ToggleGroup",
-                "Tooltip"
+                "Toolbar",
+                "ToolbarGroup",
+                "ToolbarSeparator",
+                "Tooltip",
+                "Tree"
             ]
         );
         let modules: Vec<_> = registry.module_specs().iter().map(|m| m.name).collect();

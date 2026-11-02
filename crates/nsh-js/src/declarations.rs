@@ -124,6 +124,43 @@ export interface ShaderProps extends CommonProps, ViewHostProps, ShaderHostProps
   style?: StyleProp<ViewStyle>;
 }
 
+/** `<ShaderEffect>`: a view whose children draw through a WGSL shader,
+ * which reads what they draw with `sample_content(uv)`. */
+export interface ShaderEffectProps
+  extends CommonProps, ViewHostProps, ShaderHostProps, ShaderEffectHostProps {
+  /** The WGSL defining `fn shade(uv: vec2f) -> vec4f`; without it the
+   * children draw as they are. */
+  source?: string;
+  style?: StyleProp<ViewStyle>;
+}
+
+/** `<ShaderTransition>`: a view whose children change through a WGSL
+ * shader when its `value` changes: `sample_from(uv)` is a picture of what
+ * they drew, `sample_to(uv)` what they draw now, `nsh.progress` 0 to 1. */
+export interface ShaderTransitionProps
+  extends CommonProps, ViewHostProps, ShaderHostProps, ShaderTransitionHostProps {
+  /** The WGSL defining `fn shade(uv: vec2f) -> vec4f`; without it the
+   * transition runs its `fallback` (a cross-fade). */
+  source?: string;
+  style?: StyleProp<ViewStyle>;
+}
+
+/** `<ScreenEffect>`: the whole surface drawn through a WGSL shader, which
+ * reads it with `sample_content(uv)`. It takes no space and has no
+ * children. */
+export interface ScreenEffectProps extends ShaderHostProps, ShaderEffectHostProps {
+  /** The WGSL defining `fn shade(uv: vec2f) -> vec4f`. */
+  source?: string;
+}
+
+/** `<ScreenTransition>`: the whole surface changing through a WGSL shader
+ * when its `value` changes, as `ShaderTransition` does for its children. */
+export interface ScreenTransitionProps extends ShaderHostProps, ShaderTransitionHostProps {
+  /** The WGSL defining `fn shade(uv: vec2f) -> vec4f`; without it the
+   * transition runs its `fallback`. */
+  source?: string;
+}
+
 /** `<Scroll>` */
 export interface ScrollProps extends CommonProps<ViewStyle, ScrollRef>, ScrollingHostProps, ScrollHostProps {
   style?: StyleProp<ViewStyle>;
@@ -433,7 +470,7 @@ fn bodies(ui_sets: &[SetDescription]) -> Vec<(String, String)> {
         }
         files.push((path_of(m.name), body));
     }
-    // The registries that are modules of their own (`nsh/base`, `nsh/image`).
+    // The registries that are modules of their own (`nsh/base`, `os`).
     for registry in registries {
         let Some(specifier) = registry.specifier() else {
             continue;
@@ -658,6 +695,52 @@ fn relative(from: &str, to: &str) -> String {
     path.trim_end_matches(".d.ts").to_owned()
 }
 
+/// The types TypeScript declares itself, which a body naming them means:
+/// an import of a module's name would shadow them in that file.
+const TS_GLOBALS: &[&str] = &[
+    "Array",
+    "ArrayBuffer",
+    "ArrayLike",
+    "Awaited",
+    "Capitalize",
+    "ConstructorParameters",
+    "Date",
+    "Error",
+    "Exclude",
+    "Extract",
+    "Function",
+    "InstanceType",
+    "Iterable",
+    "IterableIterator",
+    "Lowercase",
+    "Map",
+    "NoInfer",
+    "NonNullable",
+    "Omit",
+    "OmitThisParameter",
+    "Parameters",
+    "Partial",
+    "Pick",
+    "Promise",
+    "PromiseLike",
+    "Readonly",
+    "ReadonlyArray",
+    "ReadonlyMap",
+    "ReadonlySet",
+    "Record",
+    "RegExp",
+    "Required",
+    "ReturnType",
+    "Set",
+    "ThisParameterType",
+    "ThisType",
+    "Uint8Array",
+    "Uncapitalize",
+    "Uppercase",
+    "WeakMap",
+    "WeakSet",
+];
+
 /// The files of `.nsh/types` for apps whose hosts serve `ui_sets`
 /// (`nsh/base`, an app's own, as data: their declarations come with
 /// them), as (path relative to it, contents): one per
@@ -679,7 +762,9 @@ pub fn type_definitions(ui_sets: &[SetDescription]) -> Vec<(String, String)> {
             let (used, local) = references(body);
             let mut imports: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
             for name in &used {
-                if local.contains(name) {
+                // TypeScript's own (`Pick<T, K>`): never another module's
+                // name, whatever it exports.
+                if local.contains(name) || TS_GLOBALS.contains(&name.as_str()) {
                     continue;
                 }
                 if let Some(&from) = owner.get(name)
@@ -923,7 +1008,7 @@ declare const text: "export default ignored";
 
     #[test]
     fn paths_are_relative() {
-        assert_eq!(relative("nsh/list.d.ts", "nsh/types.d.ts"), "./types");
+        assert_eq!(relative("nsh/base.d.ts", "nsh/types.d.ts"), "./types");
         assert_eq!(relative("nsh/acme/ui.d.ts", "nsh/types.d.ts"), "../types");
         assert_eq!(relative("nsh/types.d.ts", "nsh/acme/ui.d.ts"), "./acme/ui");
     }
@@ -976,6 +1061,21 @@ declare const text: "export default ignored";
         assert!(unused.is_empty(), "declared but used nowhere: {unused:?}");
         assert!(all.contains("export interface IOSProps extends IOSHostProps {}"));
         assert!(all.contains("export interface DesktopProps extends DesktopHostProps {}"));
+    }
+
+    /// No module exports a name TypeScript declares itself (`Pick`): an
+    /// app importing it would lose TypeScript's in that file.
+    #[test]
+    fn no_module_exports_a_typescript_global() {
+        let files = bodies(&[nsh_base::registry().into()]);
+        for (path, body) in &files {
+            for name in exported_names(body) {
+                assert!(
+                    !TS_GLOBALS.contains(&name.as_str()),
+                    "{path} exports `{name}`, TypeScript's own"
+                );
+            }
+        }
     }
 
     /// A name a file imports is declared in one file only.

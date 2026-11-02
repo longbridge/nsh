@@ -460,7 +460,7 @@ fn init() {
         let _ = log::set_logger(&LOGGER);
         log::set_max_level(log::LevelFilter::Info);
         std::panic::set_hook(Box::new(|info| {
-            ffi::report_error(&format!("nsh panicked: {info}"));
+            ffi::report_panic(&format!("nsh panicked: {info}"));
         }));
         // What this module leaves out (the syntaxes) comes from the page.
         nsh_core::runtime_data::set_loader(ffi::load_data);
@@ -503,6 +503,7 @@ fn run(app: App, width: f32, height: f32, environment: Environment, limits: Limi
         trace: false,
         network: Some(std::sync::Arc::new(net::WebNetwork)),
         websocket: Some(std::sync::Arc::new(websocket::BrowserWebSocket)),
+        refuse_connections: None,
         assets: Some(std::sync::Arc::new(PageAssets)),
         environment,
         // NSH draws no header: a page's `header` sits at its top.

@@ -805,6 +805,8 @@ class Player {
     // Of the views' own style rules (`op_css`).
     this.classPrefix = `nsh-p${++players}-`;
     this.timer = 0;
+    // The engine trapped: it takes no more calls (`call`).
+    this.trapped = false;
     // An `nsh_pump` is queued (`requestPump`).
     this.pumpRequested = false;
     this.frame = 0;
@@ -936,6 +938,7 @@ class Player {
         request_frame: () => this.requestFrame(),
         request_pump: () => this.requestPump(),
         report_error: (p, l) => this.showError(this.str(p, l)),
+        report_panic: (p, l) => this.reportPanic(this.str(p, l)),
         test_send: (p, l) => this.onTestSend?.(JSON.parse(this.str(p, l))),
         log: (level, p, l) => {
           const message = this.str(p, l);
@@ -968,6 +971,7 @@ class Player {
           if (socket) socket.close(code, this.str(p, l));
         }),
         websocket_buffered: (id) => this.websockets.get(id)?.bufferedAmount ?? 0,
+        websocket_pause: (id, paused) => this.websocketPause(id, paused !== 0),
         websocket_cancel: (id) => this.websocketCancel(id),
         load_data: (p, l) => this.loadData(this.str(p, l)),
         // The app's storage (`nsh/storage`): the entries of `localStorage`
@@ -1035,6 +1039,7 @@ class Player {
     imports.__wbindgen_placeholder__ && (imports.__wbindgen_placeholder__.__wbindgen_describe = () => {});
     const instance = await WebAssembly.instantiate(module, imports);
     this.wasm = this.browserHost ? this.browserHost.bind(instance.exports) : instance.exports;
+    this.trapped = false;
     // The glue's own setup (its view of the memory, wasm-bindgen's tables)
     // before any of the app's code runs.
     glue?.__nsh_finalize(instance, module);
@@ -1467,9 +1472,13 @@ class Player {
   /**
    * Calls into the engine (`f(exports)` returns its next pump delay). The
    * engine is not reentrant: a call made while it runs (from a batch being
-   * applied) waits until it returns.
+   * applied) waits until it returns. After a trap (a panic) it takes no
+   * calls: the trap left it in the middle of one, its state still borrowed,
+   * so each later call would only panic again (`reportPanic` keeps the
+   * first panic's report on screen whichever entry a later one comes from).
    */
   call(f) {
+    if (this.trapped) return;
     if (this.depth > 0) {
       (this.deferred ??= []).push(f);
       return;
@@ -1477,6 +1486,9 @@ class Player {
     this.depth = 1;
     try {
       this.schedule(f(this.wasm));
+    } catch (err) {
+      if (err instanceof WebAssembly.RuntimeError) this.trap();
+      throw err;
     } finally {
       this.depth = 0;
     }
@@ -1616,10 +1628,31 @@ class Player {
       this.wasm.nsh_event(id, np, nl, pp, pl)));
   }
 
-  showError(message) {
+  /**
+   * The engine panicked (its panic hook): it traps once this returns, its
+   * state still borrowed. The first panic's report stays on screen; what
+   * comes after, from any entry into the engine (a pump, an event, the
+   * app's own timers calling into it in the browser runtime), only panics
+   * again over the borrowed state, so it goes to the console.
+   */
+  reportPanic(message) {
+    const first = !this.trapped;
+    this.trap();
+    this.showError(message, { overlay: first });
+  }
+
+  /** Stops calling an engine that trapped (`call`, `reportPanic`). */
+  trap() {
+    this.trapped = true;
+    this.deferred = [];
+    clearTimeout(this.timer);
+  }
+
+  showError(message, { overlay = !this.trapped } = {}) {
     console.error("[nsh]", message);
     this.options.onError?.(message);
-    if (this.options.overlay === false) return;
+    // After a panic the overlay keeps its report (`reportPanic`).
+    if (this.options.overlay === false || !overlay) return;
     let box = this.root.querySelector(":scope > .nsh-error");
     if (!box) {
       box = document.createElement("div");
@@ -2608,7 +2641,9 @@ class Player {
     gl.bindVertexArray(program.vao);
     if (program.builtins) {
       gl.bindBuffer(gl.UNIFORM_BUFFER, program.builtins);
-      gl.bufferData(gl.UNIFORM_BUFFER, new Float32Array([w, h, Math.max(0, time), pw / Math.max(w, 1e-6)]), gl.DYNAMIC_DRAW);
+      // `struct Nsh` (core's `shader::builtins`, 32 bytes): size, time,
+      // scale, then progress and overflow, which a plain Shader leaves at 0.
+      gl.bufferData(gl.UNIFORM_BUFFER, new Float32Array([w, h, Math.max(0, time), pw / Math.max(w, 1e-6), 0, 0, 0, 0]), gl.DYNAMIC_DRAW);
       gl.bindBufferBase(gl.UNIFORM_BUFFER, 0, program.builtins);
     }
     if (program.uniforms) {
@@ -4896,11 +4931,36 @@ class Player {
         return this.withStrings([value], (p, l) => w.nsh_websocket_event(id, kind, p, l, code, clean ? 1 : 0));
       });
     };
-    socket.onopen = () => report(0, socket.protocol);
-    socket.onmessage = (event) => report(typeof event.data === "string" ? 1 : 2,
+    // The browser's WebSocket has no flow control: while the app's unread
+    // messages fill their queue (`websocket_pause`), the socket's events
+    // wait here, in order, outside the engine's memory.
+    const hold = { paused: false, events: [], report };
+    socket.nshHold = hold;
+    const deliver = (...event) => {
+      if (hold.paused || hold.events.length) hold.events.push(event);
+      else report(...event);
+    };
+    socket.onopen = () => deliver(0, socket.protocol);
+    socket.onmessage = (event) => deliver(typeof event.data === "string" ? 1 : 2,
       typeof event.data === "string" ? event.data : new Uint8Array(event.data));
-    socket.onerror = () => report(3, "Browser WebSocket failed (network, TLS, origin or server handshake error)");
-    socket.onclose = (event) => report(4, event.reason, event.code, event.wasClean);
+    socket.onerror = () => deliver(3, "Browser WebSocket failed (network, TLS, origin or server handshake error)");
+    socket.onclose = (event) => deliver(4, event.reason, event.code, event.wasClean);
+  }
+
+  /** Holds (`paused`) or delivers again the events of socket `id`. */
+  websocketPause(id, paused) {
+    const socket = this.websockets.get(id);
+    const hold = socket?.nshHold;
+    if (!hold) return;
+    hold.paused = paused;
+    if (paused || !hold.events.length) return;
+    // The engine resumes from inside a call: the held events enter it in a
+    // task of their own, one at a time, until it pauses the socket again.
+    setTimeout(() => {
+      while (!hold.paused && hold.events.length && this.websockets.get(id) === socket) {
+        hold.report(...hold.events.shift());
+      }
+    });
   }
 
   websocketCancel(id) {
