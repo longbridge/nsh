@@ -658,7 +658,10 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
                     | Command::PickScreenColor { .. }
                     // No file dialogs (`Environment::file_requests`): the
                     // core answers first.
-                    | Command::FileRequest { .. } => e.int(-1),
+                    | Command::FileRequest { .. }
+                    // No speech recognizer (`Environment::speech`): the core
+                    // ends the sessions first.
+                    | Command::Speech(_) => e.int(-1),
                     // `SystemUi.dialog` draws alerts and action sheets in
                     // them: each of `DIALOG_TOKENS`, light then dark (0: the
                     // system's). An app without a theme of its own (its

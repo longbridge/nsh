@@ -539,6 +539,7 @@ function Custom(props: { node: TextViewCustomNode }) {
 ````
 
 `BarChart`（Rust 中是 `bar_chart`）代表应用自己的图表。提及（mention）的捕获组在 `node.attributes?.["1"]`（Rust 中是 `node.attributes["1"]`：`ada`）中，完整匹配在 `node.text`（`@ada`）中。没有渲染函数的自定义节点显示其内容。
+为行内节点返回的视图（如芯片）按它自己的 `verticalAlign` 放在行中：`align-middle`（`verticalAlign: "middle"`）让它与文字居中对齐；除非视图比行高更高，它所在的行仍保持段落的 `lineHeight`。
 
 <a id="options"></a>
 

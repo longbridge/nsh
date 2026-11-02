@@ -41,11 +41,13 @@ use chrono::{Datelike, Days, Months, NaiveDate};
 use nsh_core::{
     element::{
         Arg, Callback, JsHost, JsIn, JsKind, JsOwned, JsValue, PropError, Style, TextPartStyle,
-        TsTypes,
+        TsTypes, layout_rtl,
     },
     keymap::When,
     prelude::*,
 };
+
+use crate::keys::directed;
 
 /// How many years a page of the year view shows (`gpui-base`'s 20).
 const YEARS_PER_PAGE: usize = 20;
@@ -942,12 +944,15 @@ impl Grid {
     }
 
     /// The day keys while a day has the focus: bound when the focus comes
-    /// to the days and kept while it moves among them.
+    /// to the days and kept while it moves among them. The weeks run from
+    /// the right in a right-to-left layout, where Left is the next day and
+    /// Right the previous.
     fn bind_keys(self, changed: Rc<dyn Fn(Date)>) {
         effect(move || {
             if !self.days_focused.get() {
                 return;
             }
+            let rtl = layout_rtl();
             let by = move |f: Step| {
                 move |_: &str| {
                     let first_day = self.config.first_day_of_week.get_untracked();
@@ -979,7 +984,7 @@ impl Grid {
             ];
             for (key, f) in keys {
                 on_key_with(
-                    key,
+                    &directed(key, rtl),
                     KeyOptions {
                         when: When::NotEditing,
                         repeat: true,
