@@ -259,6 +259,16 @@ impl Motion {
         }
     }
 
+    /// A dialog's coming or going drawn through its shader (over the
+    /// surface's root).
+    fn through_shader_over_root(&self) -> bool {
+        matches!(self, Motion::Shader { .. })
+            && matches!(
+                self.inner(),
+                Motion::ModalIn { .. } | Motion::ModalOut { .. }
+            )
+    }
+
     /// The motion itself, whether or not drawn through a shader.
     fn inner(&self) -> &Motion {
         match self {
@@ -862,27 +872,34 @@ impl Nav {
         }
     }
 
-    /// Starts `motion` for `duration`, or through `shader` for its
-    /// duration.
+    /// Starts `motion` through `shader` for the shader's duration; where
+    /// there is none or it cannot be drawn, as the page's or the dialog's
+    /// own motion for `own` (`None`: its `animation` is `"none"`, so it
+    /// ends at once, never moving for the shader's duration).
     fn start(
         &mut self,
         surface: &Rc<Surface>,
-        duration: Duration,
+        own: Option<Duration>,
         motion: Motion,
         shader: Option<&nsh_core::NavShader>,
     ) {
         self.apply(surface, &motion, 0.0);
-        let (duration, motion) = match shader {
-            Some(shader) => match motion.through(surface, shader) {
-                motion @ Motion::Shader { .. } => (shader.duration, motion),
+        let motion = match shader {
+            Some(shader) => motion.through(surface, shader),
+            None => motion,
+        };
+        let duration = match (&motion, shader) {
+            (Motion::Shader { .. }, Some(shader)) => shader.duration,
+            _ => {
+                let Some(duration) = own else {
+                    self.end(surface, motion);
+                    return;
+                };
                 // Nothing to draw it over: the motion itself, from its
                 // start.
-                motion => {
-                    self.apply(surface, &motion, 0.0);
-                    (duration, motion)
-                }
-            },
-            None => (duration, motion),
+                self.apply(surface, &motion, 0.0);
+                duration
+            }
         };
         self.transitions.push(duration, motion);
         if self.ticking {
@@ -993,11 +1010,12 @@ impl Nav {
         } else {
             leaving_shader
         };
-        let Some((duration, fade)) = Self::screen_motion(surface, animation.unwrap_or_default())
-            .or(shader.as_ref().map(|s| (s.duration, false)))
-        else {
+        let own = Self::screen_motion(surface, animation.unwrap_or_default());
+        if own.is_none() && shader.is_none() {
             return;
-        };
+        }
+        let fade = own.is_some_and(|(_, fade)| fade);
+        let own = own.map(|(duration, _)| duration);
         if pushing {
             let Some(entering) = find(new) else { return };
             let below = find(old);
@@ -1010,7 +1028,7 @@ impl Nav {
                 below,
                 fade,
             };
-            self.start(surface, duration, motion, shader.as_ref());
+            self.start(surface, own, motion, shader.as_ref());
         } else {
             let leaving = match find(old) {
                 Some(v) => {
@@ -1029,7 +1047,7 @@ impl Nav {
                 fade,
                 popped: None,
             };
-            self.start(surface, duration, motion, shader.as_ref());
+            self.start(surface, own, motion, shader.as_ref());
         }
     }
 
@@ -1060,12 +1078,9 @@ impl Nav {
         st.top = below.clone();
         let animation = self.screens.get(&top).map(|s| s.config.animation);
         let shader = self.shader(surface, top);
-        match (
-            Self::screen_motion(surface, animation.unwrap_or_default())
-                .or(shader.as_ref().map(|s| (s.duration, false))),
-            find(top),
-        ) {
-            (Some((duration, fade)), Some(leaving)) => {
+        let own = Self::screen_motion(surface, animation.unwrap_or_default());
+        match (own.is_some() || shader.is_some(), find(top)) {
+            (true, Some(leaving)) => {
                 if let Some(b) = &below {
                     show(b);
                 }
@@ -1073,10 +1088,10 @@ impl Nav {
                     stack,
                     leaving: Leaving::View(leaving),
                     below,
-                    fade,
+                    fade: own.is_some_and(|(_, fade)| fade),
                     popped: Some(top),
                 };
-                self.start(surface, duration, motion, shader.as_ref());
+                self.start(surface, own.map(|(d, _)| d), motion, shader.as_ref());
             }
             _ => {
                 self.settle(surface, stack_id);
@@ -1118,10 +1133,12 @@ impl Nav {
     /// Takes modal `id` away natively (it leaves as an image of its last
     /// frame), then reports `onDismiss` unless `reported` already.
     fn close_modal(&mut self, surface: &Rc<Surface>, id: NodeId, reported: bool) {
-        self.finish(
-            surface,
-            |m| matches!(m.inner(), Motion::ModalIn { view, .. } if view.id() == id),
-        );
+        // Its own coming, and any dialog's change through a shader, end
+        // first.
+        self.finish(surface, |m| {
+            m.through_shader_over_root()
+                || matches!(m.inner(), Motion::ModalIn { view, .. } if view.id() == id)
+        });
         let newer: Vec<NodeId> = self
             .order
             .iter()
@@ -1138,10 +1155,10 @@ impl Nav {
         let frame = view.state().frame;
         let animation = m.config.animation;
         let shader = self.shader(surface, id);
-        let motion =
-            modal_motion(surface, animation).or(shader.as_ref().map(|s| (s.duration, false)));
+        let own = modal_motion(surface, animation);
+        let animates = own.is_some() || shader.is_some();
         let shown = view.ns().window().is_some();
-        let image = motion.filter(|_| shown).and_then(|_| shot(surface, &view));
+        let image = (animates && shown).then(|| shot(surface, &view)).flatten();
         if view.has_parent() {
             drop_focus(surface, view.ns());
             view.unparent();
@@ -1161,8 +1178,8 @@ impl Nav {
         restore_focus(surface, &self.scope(surface), focus_before);
         set_shift(&view, (0.0, 0.0));
         set_fade(&view, 1.0);
-        match (motion, image) {
-            (Some((duration, fade)), Some(image)) => {
+        match (own, image) {
+            (own, Some(image)) => {
                 surface.root.set_native(
                     &image,
                     rect(
@@ -1176,9 +1193,9 @@ impl Nav {
                     dismiss: (!reported).then_some(id),
                     image,
                     frame,
-                    fade,
+                    fade: own.is_some_and(|(_, fade)| fade),
                 };
-                self.start(surface, duration, motion, shader.as_ref());
+                self.start(surface, own.map(|(d, _)| d), motion, shader.as_ref());
             }
             _ => {
                 if !reported {
@@ -1194,16 +1211,17 @@ impl Nav {
             return;
         };
         let Some(view) = m.view.clone() else { return };
+        let own = modal_motion(surface, m.config.animation);
+        // A dialog's change through a shader that still runs ends first.
+        self.finish(surface, Motion::through_shader_over_root);
         let shader = self.shader(surface, id);
-        match modal_motion(surface, m.config.animation)
-            .or(shader.as_ref().map(|s| (s.duration, false)))
-        {
-            Some((duration, fade)) => {
-                let motion = Motion::ModalIn { view, fade };
-                self.start(surface, duration, motion, shader.as_ref());
-            }
-            None => surface.event(id, EventKind::Show, EventPayload::None),
+        if own.is_none() && shader.is_none() {
+            surface.event(id, EventKind::Show, EventPayload::None);
+            return;
         }
+        let fade = own.is_some_and(|(_, fade)| fade);
+        let motion = Motion::ModalIn { view, fade };
+        self.start(surface, own.map(|(d, _)| d), motion, shader.as_ref());
     }
 
     /// The user asks modal `id` to close (going back): it hears
