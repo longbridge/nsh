@@ -12421,6 +12421,76 @@ mod views {
         assert_eq!(order(&c, list), ["3@0", "1@1", "2@2", "4@3"]);
     }
 
+    thread_local! {
+        static GROUP: Cell<Option<Signal<Vec<u32>>>> = const { Cell::new(None) };
+        static OTHERS: Cell<Option<Signal<Vec<u32>>>> = const { Cell::new(None) };
+        /// How often the core asked the order watch for its elements.
+        static LOOKS: Cell<u32> = const { Cell::new(0) };
+        static HEARD: std::cell::RefCell<Vec<Vec<usize>>> =
+            const { std::cell::RefCell::new(Vec::new()) };
+    }
+
+    /// A group of three keyed rows whose order a watch follows, beside
+    /// three keyed rows of no group.
+    #[component]
+    fn WatchedRows() -> impl IntoElement {
+        let refs: Rc<Vec<crate::element::ElementRef>> =
+            Rc::new((0..3).map(|_| element_ref()).collect());
+        let group = signal(vec![1u32, 2, 3]);
+        let others = signal(vec![1u32, 2, 3]);
+        GROUP.with(|g| g.set(Some(group)));
+        OTHERS.with(|o| o.set(Some(others)));
+        let listed = refs.clone();
+        let _ = crate::element::watch_order(
+            move || {
+                LOOKS.with(|l| l.set(l.get() + 1));
+                listed.to_vec()
+            },
+            |order| HEARD.with(|h| h.borrow_mut().push(order.to_vec())),
+        );
+        view()
+            .child(view().child(each(
+                group,
+                |n| *n,
+                move |item, _| view().element_ref(&refs[item.get_untracked() as usize - 1]),
+            )))
+            .child(view().child(each(
+                others,
+                |n| *n,
+                |item, _| text(move || item.get().to_string()),
+            )))
+    }
+
+    #[test]
+    fn an_order_watch_looks_again_only_at_moves_among_its_elements() {
+        let mut c = core();
+        c.mount_root(&Root::new::<WatchedRows>(|| ()));
+        c.commit().unwrap();
+        let looks = LOOKS.with(Cell::get);
+        assert!(looks >= 1, "looked at as it is made");
+        assert!(HEARD.with(|h| h.borrow().is_empty()), "in order already");
+        let (group, others) = (
+            GROUP.with(Cell::get).unwrap(),
+            OTHERS.with(Cell::get).unwrap(),
+        );
+        // Rows of no group reordered: the watch is not asked.
+        {
+            let _entered = c.components.runtime.enter();
+            others.set(vec![3, 1, 2]);
+        }
+        c.commit().unwrap();
+        assert_eq!(LOOKS.with(Cell::get), looks, "a move outside the group");
+        assert!(HEARD.with(|h| h.borrow().is_empty()));
+        // The group's rows reordered: the handler hears the tree's order.
+        {
+            let _entered = c.components.runtime.enter();
+            group.set(vec![3, 1, 2]);
+        }
+        c.commit().unwrap();
+        assert_eq!(LOOKS.with(Cell::get), looks + 1, "a move inside the group");
+        assert_eq!(HEARD.with(|h| h.borrow().clone()), [vec![2, 0, 1]]);
+    }
+
     /// Made with `#[component]`: reads the appearance and a timer.
     #[component]
     fn Clock(_props: (), cx: Scope<NoEvent>) -> impl IntoElement {
