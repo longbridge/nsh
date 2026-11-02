@@ -17773,6 +17773,124 @@ mod renders {
         assert!(frame_of(&batch, place).is_some(), "{:?}", batch.items);
     }
 
+    /// One render placed straight in a paragraph (as `TextView` places
+    /// `renderCustom`'s inline nodes).
+    #[derive(Clone, PartialEq, Props)]
+    struct MentionProps {
+        render_item: crate::element::Prop<Option<Renderer<String>>>,
+    }
+
+    #[component]
+    fn Mention(props: MentionProps) -> impl IntoElement {
+        text("Hi ").child(dynamic(move || -> Option<Rendered> {
+            props
+                .render_item
+                .get()
+                .map(|r| r.render("a", "Ann".to_owned()))
+        }))
+    }
+
+    /// The placeholder and JS's holder are not the app's views: the
+    /// content's `verticalAlign` places the render in its line.
+    #[test]
+    fn a_render_in_a_paragraph_sits_by_its_contents_vertical_align() {
+        let mut c = core();
+        let mut registry = Registry::new();
+        registry.register::<Mention>();
+        c.set_components(registry);
+        apply(
+            &mut c,
+            vec![
+                Op::Create {
+                    id: 2,
+                    tag: Tag::View,
+                },
+                Op::SetProp {
+                    id: 2,
+                    prop: Prop::Component(std::any::type_name::<Mention>().into()),
+                },
+                Op::SetProp {
+                    id: 2,
+                    prop: Prop::RustProp(
+                        "renderItem",
+                        Some(AnyValue::new(Some(Renderer::<String>::__js_of(
+                            "renderItem",
+                            2,
+                        )))),
+                    ),
+                },
+                Op::Insert {
+                    parent: ROOT_ID,
+                    child: 2,
+                    before: None,
+                },
+            ],
+        );
+        c.commit().unwrap();
+        assert_eq!(asked(&mut c), ["$render a Ann"]);
+        // JS's holder (10) of the content, a chip (12) set in the middle.
+        let chip = |align: &'static str| {
+            style_op(
+                12,
+                &[
+                    ("width", StyleValue::Number(30.0)),
+                    ("height", StyleValue::Number(20.0)),
+                    ("verticalAlign", StyleValue::Str(align)),
+                ],
+            )
+        };
+        apply(
+            &mut c,
+            vec![
+                Op::Create {
+                    id: 10,
+                    tag: Tag::View,
+                },
+                Op::SetProp {
+                    id: 10,
+                    prop: Prop::ComponentRender("renderItem\u{1f}a".into()),
+                },
+                Op::Create {
+                    id: 12,
+                    tag: Tag::View,
+                },
+                chip("middle"),
+                Op::Insert {
+                    parent: 10,
+                    child: 12,
+                    before: None,
+                },
+                Op::Insert {
+                    parent: 2,
+                    child: 10,
+                    before: None,
+                },
+            ],
+        );
+        c.commit().unwrap();
+        let place = parent_of(&c, 10).unwrap();
+        let paragraph = parent_of(&c, place).unwrap();
+        let align = |c: &mut Core<FakeEngine>| {
+            let layout = c.nodes[c.key(paragraph).unwrap() as usize].layout.unwrap();
+            let cx = c.text_cx(layout);
+            assert_eq!(cx.text.attachments.len(), 1);
+            cx.alignments.get(cx.text.attachments[0].index)
+        };
+        assert_eq!(align(&mut c), crate::VerticalAlign::Middle);
+        // A change of the content's builds the text again.
+        apply(&mut c, vec![chip("text-top")]);
+        let batch = c.commit().unwrap();
+        assert!(
+            batch
+                .items
+                .iter()
+                .any(|i| matches!(i, MountItem::Text { id, .. } if *id == paragraph)),
+            "{:?}",
+            batch.items
+        );
+        assert_eq!(align(&mut c), crate::VerticalAlign::TextTop);
+    }
+
     /// A popup's list: a scroll view as long as its rows (up to 300 pt),
     /// the rows in its viewport, each drawn by the app's function, keyed by
     /// their items' keys.
