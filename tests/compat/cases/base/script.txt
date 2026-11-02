@@ -74,9 +74,10 @@ event below:id:ada-dot onError message="not found"
 expect Ada: error
 expect AL
 style below:id:ada-dot opacity 0
-# Grace's fallback waits 300 ms while her image loads.
+# Grace's fallback waits 1.5 s while her image loads: long enough that
+# the steps before reach her within it on a slow build.
 absent GH
-wait 400
+wait 1600
 expect GH
 # Edsger has no image: the app's fallback at once, in place of the
 # initials, and the app's label.
@@ -91,7 +92,7 @@ expect AT
 expect BL
 absent CS
 expect +1
-prop label:1 more person accessibilityLabel 1 more person
+prop parent:parent:text:+1 accessibilityLabel 1 more person
 frame id:team 0 152 110 60
 # A group of the first two of four: the overflow stands for the others.
 expect DK
