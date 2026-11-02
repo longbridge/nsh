@@ -171,7 +171,7 @@ options as the test gives them: one the target's platform cannot honor makes `op
 | `colorScheme` | `"light"` | The system's appearance: `"light"` or `"dark"` (`colorScheme()`, `dark:` classes). |
 | `locale` | `"en-US"` | The device's locale, a BCP 47 tag (`locale()`, `Intl`'s default). |
 | `reducedMotion` | `false` | The user asked for less motion (`reduceMotion()`). |
-| `platform` | `"ios"` | The platform the app runs as headless: `"ios"`, `"android"`, or a desktop's, `"macos"`, `"windows"`, `"linux"`, or `"web"` in the desktop idiom (`platform.os`, `ios={{…}}` / `android={{…}}` / `desktop={{…}}` props, keyboard shortcuts). With `--target`, the app runs as the target's platform: a desktop's `platform` on any desktop and the web, `"ios"` and `"android"` on their own. |
+| `platform` | `"ios"` | The platform the app runs as headless: `"ios"`, `"android"`, or a desktop's, `"macos"`, `"windows"`, `"linux"`, or `"web"` in the desktop idiom (`platform.os`, `ios={{…}}` / `android={{…}}` / `desktop={{…}}` props, keyboard shortcuts). With `--target`, the app runs as the target's platform: a desktop's `platform` on any desktop and the web, always as a desktop (in the browser in the desktop idiom at any width, `platform.os` staying `"web"`), `"ios"` and `"android"` on their own. |
 | `clock` | the system's | A manual clock, whose time moves only as the test moves it: `{}`, or `{ time }` to start at a `Date` (or milliseconds since the Unix epoch). See [Controlling time](#controlling-time). |
 | `host` | none | The embedding app's part, which the test plays: `{ params, handlers }`. See [Playing the host app](#playing-the-host-app). |
 
@@ -562,7 +562,9 @@ headless, where the test answers the app's calls. `open` checks its options agai
 `height` on iOS and Android, a `platform` of another kind of device (a phone's on a desktop or the web, a desktop's or
 the other phone's on iOS or Android) and `host.handlers` reject with `ERR_NSH_TEST_UNSUPPORTED`, so a test runs as it
 is written or says what it needs. A desktop's `platform` (`"macos"` for a desktop's mouse and keys) runs on every
-desktop target and the web, as that target's platform. An app with Rust crates of its own runs in a development host built with its crates, which NSH
+desktop target and the web, as that target's platform and always as a desktop: in the browser the page starts in the
+desktop idiom whatever its width, where without a `platform` (or with `"web"`) it measures its idiom as a browser does
+(a desktop from 600 points wide). An app with Rust crates of its own runs in a development host built with its crates, which NSH
 builds for the platform; a Rust app's host runs its root, so `open(".")` starts it there as it does headless.
 
 On the web, the apps run in the development host's page in a headless Chrome, Edge or Chromium: the one installed
