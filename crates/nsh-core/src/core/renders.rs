@@ -133,6 +133,18 @@ impl<M: TextEngine> Core<M> {
         self.components.renders.holders.insert(id, (slot, 0));
     }
 
+    /// Whether `id` is a render's placeholder.
+    pub(super) fn is_render_place(&self, id: NodeId) -> bool {
+        !self.components.renders.places.is_empty()
+            && self.components.renders.places.contains_key(&id)
+    }
+
+    /// Whether `id` only wraps what a render placed: a placeholder (a Rust
+    /// component's `Renderer` output) or JS's holder in it.
+    pub(super) fn is_render_wrapper(&self, id: NodeId) -> bool {
+        self.is_render_place(id) || self.is_render_holder(id)
+    }
+
     /// Whether `id` is a render's holder.
     pub(super) fn is_render_holder(&self, id: NodeId) -> bool {
         !self.components.renders.holders.is_empty()

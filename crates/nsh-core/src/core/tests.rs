@@ -17497,6 +17497,91 @@ mod renders {
         assert!(frame_of(&batch, place).is_some(), "{:?}", batch.items);
     }
 
+    /// One render (`a:Apple`) right inside a paragraph, wrapped in no view
+    /// of the component's own (as `TextView`'s `renderCustom`).
+    #[component]
+    fn InlineRender(props: ShelfProps) -> impl IntoElement {
+        text("before ").child(dynamic(move || -> Option<Rendered> {
+            props
+                .render_item
+                .get()
+                .map(|r| r.render("a", "Apple".to_owned()))
+        }))
+    }
+
+    #[test]
+    fn a_render_inside_text_aligns_by_the_view_it_placed() {
+        let mut c = core();
+        let mut registry = Registry::new();
+        registry.register::<InlineRender>();
+        c.set_components(registry);
+        apply(
+            &mut c,
+            vec![
+                Op::Create {
+                    id: 2,
+                    tag: Tag::View,
+                },
+                Op::SetProp {
+                    id: 2,
+                    prop: Prop::Component(std::any::type_name::<InlineRender>().into()),
+                },
+                Op::SetProp {
+                    id: 2,
+                    prop: Prop::RustProp(
+                        "renderItem",
+                        Some(AnyValue::new(Some(Renderer::<String>::__js_of(
+                            "renderItem",
+                            2,
+                        )))),
+                    ),
+                },
+                Op::Insert {
+                    parent: ROOT_ID,
+                    child: 2,
+                    before: None,
+                },
+            ],
+        );
+        c.commit().unwrap();
+        assert_eq!(asked(&mut c), ["$render a Apple"]);
+        // JS renders a chip: a sized view the app aligns to the middle.
+        let mut ops = holder(10, "a", "Apple");
+        ops.insert(
+            3,
+            style_op(
+                12,
+                &[
+                    ("height", StyleValue::Number(20.0)),
+                    ("width", StyleValue::Number(40.0)),
+                    ("verticalAlign", StyleValue::Str("middle")),
+                ],
+            ),
+        );
+        apply(&mut c, ops);
+        c.commit().unwrap();
+        let place = parent_of(&c, 10).unwrap();
+        let paragraph = c.nodes[c.key(place).unwrap() as usize].parent;
+        assert_eq!(c.nodes[paragraph as usize].kind, Kind::Text);
+        let align = |c: &mut Core<FakeEngine>| {
+            let layout = c.nodes[paragraph as usize].layout.unwrap();
+            let cx = c.text_cx(layout);
+            cx.alignments.get(cx.text.attachments[0].index)
+        };
+        // The placeholder is the attachment; the chip's alignment is its.
+        assert_eq!(align(&mut c), crate::VerticalAlign::Middle);
+        // A change of the chip's builds the paragraph's text again.
+        apply(
+            &mut c,
+            vec![style_op(
+                12,
+                &[("verticalAlign", StyleValue::Str("text-top"))],
+            )],
+        );
+        c.commit().unwrap();
+        assert_eq!(align(&mut c), crate::VerticalAlign::TextTop);
+    }
+
     /// A popup's list: a scroll view as long as its rows (up to 300 pt),
     /// the rows in its viewport, each drawn by the app's function, keyed by
     /// their items' keys.

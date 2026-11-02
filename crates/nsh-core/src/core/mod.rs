@@ -2772,16 +2772,15 @@ impl<M: TextEngine> Core<M> {
         let paint_changed = node.paint != paint;
         let z_changed = node.z_index != z_index;
         // An attachment's place in its line is part of its block's text.
-        let align_changed =
-            node.vertical_align != vertical_align && node.inline && node.kind != Kind::Text;
+        let align_changed = node.vertical_align != vertical_align;
         node.view_style = view;
         node.text_style = text;
         node.paint = paint;
         node.animated = animated;
         node.z_index = z_index;
         node.vertical_align = vertical_align;
-        if align_changed {
-            self.mark_text_block(key);
+        if align_changed && let Some(attachment) = self.aligned_attachment(key) {
+            self.mark_text_block(attachment);
         }
         if z_changed {
             self.restack(key);
@@ -5582,12 +5581,51 @@ impl<M: TextEngine> Core<M> {
                         alignments.push(
                             out,
                             crate::geometry::size_pt(size.width, size.height),
-                            child.vertical_align,
+                            self.attachment_align(c),
                             style,
                         );
                     }
                 }
             }
+        }
+    }
+
+    /// The `verticalAlign` of attachment `key`. What a render placed
+    /// (`renderCustom` and other render props) sits in a placeholder (and,
+    /// from JS, a holder) of no style of its own: while the wrappers leave
+    /// it baseline, the alignment of the one view they wrap is theirs, as
+    /// though that view were the attachment.
+    fn attachment_align(&self, mut key: Key) -> crate::style::VerticalAlign {
+        loop {
+            let node = &self.nodes[key as usize];
+            if node.vertical_align != crate::style::VerticalAlign::Baseline
+                || node.children.len() != 1
+                || !self.is_render_wrapper(node.id)
+            {
+                return node.vertical_align;
+            }
+            key = node.children[0];
+        }
+    }
+
+    /// The attachment whose alignment is `key`'s ([`Core::attachment_align`]):
+    /// `key` itself when it is inside text, else the render wrapper inside
+    /// text it is the only content of.
+    fn aligned_attachment(&self, mut key: Key) -> Option<Key> {
+        loop {
+            let node = &self.nodes[key as usize];
+            if node.inline {
+                return (node.kind != Kind::Text).then_some(key);
+            }
+            let parent = node.parent;
+            if parent == NO_KEY {
+                return None;
+            }
+            let p = &self.nodes[parent as usize];
+            if p.children.len() != 1 || !self.is_render_wrapper(p.id) {
+                return None;
+            }
+            key = parent;
         }
     }
 
