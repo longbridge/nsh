@@ -1046,13 +1046,9 @@ impl Mounter {
                 }) = self.slot(id)
                 {
                     // The header bar positions it; only its size is ours.
-                    let origin = view.frame().origin;
-                    view.setFrame(CGRect::new(
-                        origin,
-                        CGSize::new(
-                            frame.size.width.0 as CGFloat,
-                            frame.size.height.0 as CGFloat,
-                        ),
+                    view.set_layout_size(CGSize::new(
+                        frame.size.width.0 as CGFloat,
+                        frame.size.height.0 as CGFloat,
                     ));
                     return false;
                 }
@@ -2246,7 +2242,8 @@ impl Mounter {
         self.set_events(id, events);
     }
 
-    /// An interaction state of `id` changed: tells the core if it reads it.
+    /// An interaction state of `id` changed: tells the core if it reads it
+    /// (the focus always: `nsh_core::input::reported_states`).
     fn report_state(&mut self, id: NodeId, bit: u16, on: bool) {
         let Some(s) = self.slot_mut(id) else { return };
         let states = if on { s.states | bit } else { s.states & !bit };
@@ -2254,9 +2251,9 @@ impl Mounter {
             return;
         }
         s.states = states;
-        let tracked = s.tracked;
-        if tracked & bit != 0 {
-            self.control.set_states(id, states & tracked);
+        let reported = nsh_core::input::reported_states(s.tracked);
+        if reported & bit != 0 {
+            self.control.set_states(id, states & reported);
         }
     }
 
@@ -3406,11 +3403,12 @@ impl Mounter {
         })
     }
 
-    /// Presses the element the app put in the trailing header slot, as a tap
-    /// on a system bar button does: the first view inside the slot that
-    /// takes a press (the one made first), resolved now (the slot's content
-    /// arrives after the button is made). A slot with none takes no press.
-    pub(crate) fn press_trailing_header(&mut self, screen: NodeId) {
+    /// Presses the element the app put in a header slot (`leading`: the
+    /// left one), as a tap on a system bar button does: the first view
+    /// inside the slot that takes a press (the one made first), resolved now
+    /// (the slot's content arrives after the button is made). A slot with
+    /// none takes no press.
+    pub(crate) fn press_header(&mut self, screen: NodeId, leading: bool) {
         let Some(Slot {
             native: Native::Screen(host),
             ..
@@ -3418,7 +3416,11 @@ impl Mounter {
         else {
             return;
         };
-        let Some(slot_node) = host.config.right else {
+        let Some(slot_node) = (if leading {
+            host.config.left
+        } else {
+            host.config.right
+        }) else {
             return;
         };
         let Some(container) = self.slot(slot_node).map(|s| s.native.view().retain()) else {

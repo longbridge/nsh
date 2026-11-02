@@ -1214,14 +1214,18 @@ final class Mounter {
                 modifiers(e.getMetaState()));
     }
 
-    /** An interaction state of `id` changed: tells the core if it reads it. */
+    /**
+     * An interaction state of `id` changed: tells the core if it reads it.
+     * The focus it always hears (`nsh_core::input::reported_states`): it
+     * works out `focus-within` from it.
+     */
     void reportState(int id, int bit, boolean on) {
         int states = currentStates.get(id);
         int next = on ? states | bit : states & ~bit;
         if (next == states) return;
         currentStates.put(id, next);
-        int tracked = trackedStates.get(id);
-        if ((tracked & bit) != 0) Native.states(handle(), id, next & tracked);
+        int reported = trackedStates.get(id) | STATE_FOCUSED;
+        if ((reported & bit) != 0) Native.states(handle(), id, next & reported);
     }
 
     /**

@@ -1026,6 +1026,33 @@ impl Screen {
         })
     }
 
+    /// The leading header button is UIKit's own, drawn instead of the
+    /// `header_left` view (iOS; a press on it presses that view's first
+    /// pressable view).
+    pub fn header_left_system_item(self, item: impl IntoReactive<crate::HeaderSystemItem>) -> Self {
+        self.bind_prop(item, |item| {
+            Prop::Screen(ScreenProp::HeaderLeftSystemItem(Some(item)))
+        })
+    }
+
+    /// The trailing header button is UIKit's own showing the SF Symbol of
+    /// this name, drawn instead of the `header_right` view (iOS; a press on
+    /// it presses that view's first pressable view).
+    pub fn header_right_symbol(self, name: impl IntoReactive<super::SharedString>) -> Self {
+        self.bind_prop(name, |n| {
+            Prop::Screen(ScreenProp::HeaderRightSymbol(Some(Arc::from(n.as_str()))))
+        })
+    }
+
+    /// The leading header button is UIKit's own showing the SF Symbol of
+    /// this name, drawn instead of the `header_left` view (iOS; a press on
+    /// it presses that view's first pressable view).
+    pub fn header_left_symbol(self, name: impl IntoReactive<super::SharedString>) -> Self {
+        self.bind_prop(name, |n| {
+            Prop::Screen(ScreenProp::HeaderLeftSymbol(Some(Arc::from(n.as_str()))))
+        })
+    }
+
     /// Whether the back button shows (default true).
     pub fn header_back_visible(self, visible: impl IntoReactive<bool>) -> Self {
         self.bind_prop(visible, |v| Prop::Screen(ScreenProp::HeaderBackVisible(v)))
@@ -1107,6 +1134,19 @@ impl Overlay {
                 None => OverlayAnchor::None,
             },
             |a| Prop::Overlay(OverlayProp::Anchor(a)),
+        )
+    }
+
+    /// Lays the element carrying `cover`, inside it, over its anchor (a
+    /// select's selected item over the trigger) instead of placing it on
+    /// a side ([`crate::overlay::OverlayConfig::cover`]). A ref is not
+    /// tracked: `shown` (tracked) says when that element is rendered, as
+    /// its `on_layout` can tell.
+    pub fn cover(self, cover: &super::ElementRef, shown: impl Fn() -> bool + 'static) -> Self {
+        let cover = *cover;
+        self.bind_prop(
+            move || if shown() { cover.node() } else { None },
+            |id| Prop::Overlay(OverlayProp::Cover(id)),
         )
     }
 

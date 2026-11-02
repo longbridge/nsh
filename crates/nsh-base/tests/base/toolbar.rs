@@ -448,6 +448,57 @@ fn a_popups_trigger_is_an_item_of_the_toolbar() {
     app.wait_for("text:reached:Bold,More").unwrap();
 }
 
+/// A toolbar of A, a popover whose trigger is a `Button` (P, a listener of
+/// its own) and Z. The texts say what was pressed and whether the popover
+/// is open.
+#[component]
+fn WithButtonTrigger() -> impl IntoElement {
+    let pressed = signal(Vec::<&'static str>::new());
+    let open = signal(false);
+    let note = move |name: &'static str| move || pressed.update(|p| p.push(name));
+    view()
+        .child(
+            toolbar()
+                .child(button().on_press(note("A")).child(text("A")))
+                .child(
+                    popover()
+                        .open(move || Some(open.get()))
+                        .on_open_change(move |e: &PopoverEvent| {
+                            if let PopoverEvent::OpenChange(next, _) = e {
+                                open.set(*next);
+                            }
+                        })
+                        .trigger(button().on_press(note("P")).child(text("P")))
+                        .child(text("Popped")),
+                )
+                .child(button().on_press(note("Z")).child(text("Z"))),
+        )
+        .child(text(move || format!("pressed:{}", pressed.get().join(","))))
+        .child(text(move || format!("open:{}", open.get())))
+}
+
+#[test]
+fn a_button_as_a_popups_trigger_opens_it_and_is_one_item() {
+    let mut app = start::<WithButtonTrigger>();
+    // A press on the button opens the popover and runs its own listener.
+    app.press("text:P").unwrap();
+    app.wait_for("text:open:true").unwrap();
+    app.wait_for("text:pressed:P").unwrap();
+    app.press("text:P").unwrap();
+    app.wait_for("text:open:false").unwrap();
+    // The trigger is one item: Right from A reaches it, then Z; Left
+    // twice from Z comes back to A.
+    app.press_key("tab").unwrap();
+    app.press_key("right").unwrap();
+    app.press_key("right").unwrap();
+    app.press_key("enter").unwrap();
+    app.wait_for("text:pressed:P,P,Z").unwrap();
+    app.press_key("left").unwrap();
+    app.press_key("left").unwrap();
+    app.press_key("enter").unwrap();
+    app.wait_for("text:pressed:P,P,Z,A").unwrap();
+}
+
 /// A toolbar of three buttons the app keeps in a keyed list, and a view
 /// that reverses it.
 #[component]

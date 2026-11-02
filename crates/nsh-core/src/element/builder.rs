@@ -1786,6 +1786,16 @@ pub trait Interactive: Element {
         self
     }
 
+    /// Styles while it or an element inside it is focused (Tailwind's
+    /// `focus-within:`; TS: `focusWithinStyle`): a field's frame ringed
+    /// while the input in it edits. An overlay's content is inside the
+    /// element the overlay is in.
+    fn focus_within(mut self, f: impl FnOnce(StyleRefinement) -> StyleRefinement) -> Self {
+        let s = f(StyleRefinement::default());
+        self.style().extend_as(Variant::FOCUS_WITHIN, s);
+        self
+    }
+
     /// Styles while [`Interactive::disabled`] (Tailwind's `disabled:`).
     fn disabled_style(mut self, f: impl FnOnce(StyleRefinement) -> StyleRefinement) -> Self {
         let s = f(StyleRefinement::default());
@@ -2404,6 +2414,14 @@ impl<C: Component> ComponentElement<C> {
         self
     }
 
+    /// Styles while its root or an element inside it has focus
+    /// (`focus-within:`).
+    pub fn focus_within(mut self, f: impl FnOnce(StyleRefinement) -> StyleRefinement) -> Self {
+        let s = f(StyleRefinement::default());
+        self.node.style.extend_as(Variant::FOCUS_WITHIN, s);
+        self
+    }
+
     /// Styles while its root is disabled (`disabled:`): the component's
     /// view disables it ([`Interactive::disabled`], a `disabled` prop).
     pub fn disabled_style(mut self, f: impl FnOnce(StyleRefinement) -> StyleRefinement) -> Self {
@@ -2560,6 +2578,14 @@ pub trait ComponentBuilder: Element {
     fn focus(mut self, f: impl FnOnce(StyleRefinement) -> StyleRefinement) -> Self {
         let s = f(StyleRefinement::default());
         self.node().style.extend_as(Variant::FOCUS, s);
+        self
+    }
+
+    /// Styles while its root or an element inside it has focus
+    /// (`focus-within:`).
+    fn focus_within(mut self, f: impl FnOnce(StyleRefinement) -> StyleRefinement) -> Self {
+        let s = f(StyleRefinement::default());
+        self.node().style.extend_as(Variant::FOCUS_WITHIN, s);
         self
     }
 

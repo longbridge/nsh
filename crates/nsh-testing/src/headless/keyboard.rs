@@ -165,6 +165,7 @@ impl Headless {
         let now = self.screen.focused();
         if now != focused {
             if let Some(old) = focused {
+                self.set_focused_state(old, false);
                 self.send(old, EventKind::Blur, EventPayload::None);
             }
             if let Some(new) = now {
@@ -174,6 +175,7 @@ impl Headless {
                     self.set_focused_state(key, false);
                     self.send(key, EventKind::Blur, EventPayload::None);
                 }
+                self.set_focused_state(new, true);
                 self.send(new, EventKind::Focus, EventPayload::None);
             }
         }
@@ -208,11 +210,12 @@ impl Headless {
         }
     }
 
-    /// A view's `focus:` state, which follows the keyboard focus.
-    fn set_focused_state(&mut self, id: NodeId, on: bool) {
-        if self.screen.input(id).is_none()
-            && let Some(states) = self.screen.set_state(id, FOCUSED, on)
-        {
+    /// A view's or an input's `focus:` state, which follows the keyboard
+    /// focus: reported whatever the view tracks, as the platforms report
+    /// it (`nsh_core::input::reported_states`; the core works out
+    /// `focus-within` from it).
+    pub(super) fn set_focused_state(&mut self, id: NodeId, on: bool) {
+        if let Some(states) = self.screen.set_state(id, FOCUSED, on) {
             self.engine.control().set_states(id, states);
         }
     }

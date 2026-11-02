@@ -90,7 +90,7 @@ mount(App);
 
 值是一个数字，或两个滑块的范围 `[start, end]`；值的形状决定有几个滑块。应用用 `value` 持有它，并设置 `onChange` 报告的值，和 `nsh/base`
 的每个控件一样；也可以用 `defaultValue` 把值交给滑块自己保存，修改照样会报告给应用。拖动时，滑块和范围由原生层与指针在同一帧移动，
-指针抬起后重新显示应用的 `value`；屏幕阅读器运行时随拖动读出每个值，否则在拖动结束时得到最终的值。
+指针抬起后重新显示应用的 `value`，即应用为拖动的最后一次修改设置的值；屏幕阅读器运行时随拖动读出每个值，否则在拖动结束时得到最终的值。
 
 ```tsx
 const price = signal<[number, number]>([200, 800]);
@@ -165,7 +165,7 @@ const price = signal<[number, number]>([200, 800]);
 - 每个部件：滑块禁用时 `disabled:`。
 
 滑块随数值移动，拖动时立即跟随。滑块各状态的动效由应用决定（例如 `transition` 让滑块在 `hover:` 和 `active:` 时变亮），
-`motion-reduce:` 为要求减少动效的用户保持静止。键盘焦点在滑块上，滑块带有 `focus:` 类时会报告它：这时轨道上的 `focus-within:` 给整条滑轨加上焦点环，滑块的 `focus:outline-none` 取代平台自带的焦点轮廓。
+`motion-reduce:` 为要求减少动效的用户保持静止。键盘焦点在滑块上：滑块持有焦点时，轨道上的 `focus-within:` 给整条滑轨加上焦点环，滑块的 `focus:outline-none` 取代平台自带的焦点轮廓。
 
 ## 键盘
 

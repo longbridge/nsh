@@ -1,8 +1,9 @@
 // The Tree demo: a project explorer the app controls (a press opens a
-// folder, `revealItem` opens the folders above a file, a disabled build
-// folder), a settings sidebar with the tree's own state, 10 100 items of
-// which only the rows in view are made, and an outline the app locks. Each
-// tree is one Tab stop whose arrow keys move the selection.
+// folder, a double press or Return opens a file, `revealItem` opens the
+// folders above a file, a disabled build folder), a settings sidebar with
+// the tree's own state, 10 100 items of which only the rows in view are
+// made, and an outline the app locks. Each tree is one Tab stop whose arrow
+// keys move the selection.
 import { beforeEach, expect, open, test } from "nsh/test";
 import type { App } from "nsh/test";
 
@@ -47,6 +48,28 @@ test("the arrow keys move the selection and open folders", async () => {
   await app.waitFor("Selected: app/src/views/inbox.rs");
   await app.keyboard.press("left");
   await app.waitFor("Selected: app/src/views");
+});
+
+test("a double press or Return opens a file; the arrows only select", async () => {
+  // A double press on a file opens it.
+  await app.press("role:treeitem[main.rs]");
+  await app.waitFor("Selected: app/src/main.rs");
+  await app.press("role:treeitem[main.rs]");
+  await app.waitFor("Opened app/src/main.rs");
+  await app.waitFor("Open: main.rs");
+  // The arrows select without opening; Return opens the file selected.
+  await app.keyboard.press("down");
+  await app.waitFor("Selected app/src/router.rs");
+  expect(app.shows("Open: main.rs")).toBe(true);
+  await app.keyboard.press("enter");
+  await app.waitFor("Opened app/src/router.rs");
+  await app.waitFor("Open: router.rs");
+  // Return on a folder opens it, as a press does.
+  await app.keyboard.press("down");
+  await app.waitFor("Selected app/src/views");
+  await app.keyboard.press("enter");
+  await app.waitFor("Expanded app/src/views");
+  expect(app.shows("Open: router.rs")).toBe(true);
 });
 
 test("the settings sidebar keeps its own state and shows the section chosen", async () => {
