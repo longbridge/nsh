@@ -47,6 +47,16 @@ pub enum OverlayAnchor {
     /// children). A trigger wrapped in a view its parent
     /// stretches is placed against what shows, not the stretched wrapper.
     Content(NodeId),
+    /// Beside a view inside another, as a submenu beside its row: lined
+    /// up with `node` along the side it goes on, and outside `edges` (the
+    /// menu around the row) across it, so the gap is measured from the
+    /// menu's edge, not from the row inside its padding.
+    Beside {
+        /// The view it lines up with.
+        node: NodeId,
+        /// The view whose edges it goes outside of.
+        edges: NodeId,
+    },
 }
 
 /// The side of the anchor an overlay goes on (`placement`), as

@@ -12445,6 +12445,76 @@ mod views {
         assert_eq!(order(&c, list), ["3@0", "1@1", "2@2", "4@3"]);
     }
 
+    thread_local! {
+        static GROUP: Cell<Option<Signal<Vec<u32>>>> = const { Cell::new(None) };
+        static OTHERS: Cell<Option<Signal<Vec<u32>>>> = const { Cell::new(None) };
+        /// How often the core asked the order watch for its elements.
+        static LOOKS: Cell<u32> = const { Cell::new(0) };
+        static HEARD: std::cell::RefCell<Vec<Vec<usize>>> =
+            const { std::cell::RefCell::new(Vec::new()) };
+    }
+
+    /// A group of three keyed rows whose order a watch follows, beside
+    /// three keyed rows of no group.
+    #[component]
+    fn WatchedRows() -> impl IntoElement {
+        let refs: Rc<Vec<crate::element::ElementRef>> =
+            Rc::new((0..3).map(|_| element_ref()).collect());
+        let group = signal(vec![1u32, 2, 3]);
+        let others = signal(vec![1u32, 2, 3]);
+        GROUP.with(|g| g.set(Some(group)));
+        OTHERS.with(|o| o.set(Some(others)));
+        let listed = refs.clone();
+        let _ = crate::element::watch_order(
+            move || {
+                LOOKS.with(|l| l.set(l.get() + 1));
+                listed.to_vec()
+            },
+            |order| HEARD.with(|h| h.borrow_mut().push(order.to_vec())),
+        );
+        view()
+            .child(view().child(each(
+                group,
+                |n| *n,
+                move |item, _| view().element_ref(&refs[item.get_untracked() as usize - 1]),
+            )))
+            .child(view().child(each(
+                others,
+                |n| *n,
+                |item, _| text(move || item.get().to_string()),
+            )))
+    }
+
+    #[test]
+    fn an_order_watch_looks_again_only_at_moves_among_its_elements() {
+        let mut c = core();
+        c.mount_root(&Root::new::<WatchedRows>(|| ()));
+        c.commit().unwrap();
+        let looks = LOOKS.with(Cell::get);
+        assert!(looks >= 1, "looked at as it is made");
+        assert!(HEARD.with(|h| h.borrow().is_empty()), "in order already");
+        let (group, others) = (
+            GROUP.with(Cell::get).unwrap(),
+            OTHERS.with(Cell::get).unwrap(),
+        );
+        // Rows of no group reordered: the watch is not asked.
+        {
+            let _entered = c.components.runtime.enter();
+            others.set(vec![3, 1, 2]);
+        }
+        c.commit().unwrap();
+        assert_eq!(LOOKS.with(Cell::get), looks, "a move outside the group");
+        assert!(HEARD.with(|h| h.borrow().is_empty()));
+        // The group's rows reordered: the handler hears the tree's order.
+        {
+            let _entered = c.components.runtime.enter();
+            group.set(vec![3, 1, 2]);
+        }
+        c.commit().unwrap();
+        assert_eq!(LOOKS.with(Cell::get), looks + 1, "a move inside the group");
+        assert_eq!(HEARD.with(|h| h.borrow().clone()), [vec![2, 0, 1]]);
+    }
+
     /// Made with `#[component]`: reads the appearance and a timer.
     #[component]
     fn Clock(_props: (), cx: Scope<NoEvent>) -> impl IntoElement {
@@ -17887,6 +17957,57 @@ fn overlays_with_a_cover_lay_that_view_over_the_anchor() {
 }
 
 #[test]
+fn overlays_beside_a_row_go_outside_the_menu_around_it() {
+    use StyleValue::Number;
+    let mut c = core();
+    // A menu 100 wide at (20, 0) with 6 points of padding, a 20-tall row in
+    // it.
+    add(
+        &mut c,
+        2,
+        Tag::View,
+        ROOT_ID,
+        &[
+            ("marginLeft", Number(20.0)),
+            ("width", Number(100.0)),
+            ("padding", Number(6.0)),
+            ("alignSelf", StyleValue::Str("flex-start")),
+        ],
+    );
+    add(&mut c, 4, Tag::View, 2, &[("height", Number(20.0))]);
+    add(&mut c, 8, Tag::Overlay, ROOT_ID, &[]);
+    add(
+        &mut c,
+        10,
+        Tag::View,
+        8,
+        &[("width", Number(40.0)), ("height", Number(30.0))],
+    );
+    apply(
+        &mut c,
+        vec![
+            overlay_prop(
+                8,
+                crate::OverlayProp::Anchor(crate::overlay::OverlayAnchor::Beside {
+                    node: 4,
+                    edges: 2,
+                }),
+            ),
+            overlay_prop(
+                8,
+                crate::OverlayProp::Placement(crate::overlay::Placement::Right),
+            ),
+            overlay_prop(8, crate::OverlayProp::Align(crate::overlay::Align::Start)),
+            overlay_prop(8, crate::OverlayProp::Offset(crate::geometry::px(4.0))),
+        ],
+    );
+    let batch = c.commit().unwrap();
+    // Past the menu's right edge (120) by the offset, level with the row
+    // (6), not past the row's edge (114).
+    assert_eq!(frame_of(&batch, 8), Some(rect(124.0, 6.0, 40.0, 30.0)));
+}
+
+#[test]
 fn overlays_anchored_to_content_go_by_what_the_wrapper_draws() {
     use StyleValue::Number;
     let mut c = core();
@@ -17972,6 +18093,36 @@ fn overlays_anchored_to_content_go_by_what_the_wrapper_draws() {
     let batch = c.commit().unwrap();
     // The trigger (0, 80, 52 × 18) below the first one.
     assert_eq!(frame_of(&batch, 8), Some(rect(0.0, 98.0, 40.0, 20.0)));
+    // A trigger 28 points tall, its 16-point label centered: below its
+    // own bottom edge, not its label's.
+    add(
+        &mut c,
+        16,
+        Tag::View,
+        2,
+        &[
+            ("height", Number(28.0)),
+            ("justifyContent", StyleValue::Str("center")),
+            ("alignSelf", StyleValue::Str("flex-start")),
+        ],
+    );
+    add(
+        &mut c,
+        18,
+        Tag::View,
+        16,
+        &[("width", Number(30.0)), ("height", Number(16.0))],
+    );
+    apply(
+        &mut c,
+        vec![overlay_prop(
+            8,
+            crate::OverlayProp::Anchor(crate::overlay::OverlayAnchor::Content(16)),
+        )],
+    );
+    let batch = c.commit().unwrap();
+    // The trigger (0, 98, 30 × 28) below the second one.
+    assert_eq!(frame_of(&batch, 8), Some(rect(0.0, 126.0, 40.0, 20.0)));
 }
 
 /// The texts a batch lays out.

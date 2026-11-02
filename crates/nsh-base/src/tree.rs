@@ -4,30 +4,35 @@
 //!
 //! - **The model** (pure, tested on its own): the app's `items` flattened
 //!   once per change of them, depth first ([`Flat`]: each node's parent,
-//!   depth and the end of its subtree, its title folded for typeahead,
-//!   its row key hashed), and the rows the expanded items show
-//!   ([`Shown`]: the nodes in order, a collapsed item's subtree skipped,
-//!   made in the number of rows shown). The moves of the selection
-//!   between the enabled rows ([`Shown::step`]) and typeahead
-//!   ([`Shown::find_typed`]) look rows up by bisection.
+//!   depth and the end of its subtree, its row key hashed), the expanded
+//!   nodes ([`Open`]: as many as are expanded, whatever the items), and
+//!   the rows the expanded items show ([`Shown`]: the nodes in order, a
+//!   collapsed item's subtree skipped, made in the number of rows shown).
+//!   The moves of the selection between the enabled rows
+//!   ([`Shown::step`]) and typeahead ([`Shown::find_typed`]) look rows up
+//!   by bisection.
 //! - **The view**: a virtualized list (`viewport: parent`) in a scroll view
 //!   in the tree's root, as `gpui-base`'s `uniform_list`: only the rows in
 //!   view exist, and the children of a collapsed item are never made. A
 //!   row's look is the app's (`itemClass`, `renderItem`); its states are
 //!   its classes' (`selected:`, `aria-expanded:`, `disabled:`, `focus:`
-//!   for the selected row while the tree has the keyboard focus), so the
+//!   for the keys' row while the tree has the keyboard focus), so the
 //!   app's drawing of a row is made once per item and its chevron turns
 //!   with a transition (`group-aria-expanded:rotate-90`).
-//! - **Its cost**: a move of the selection notifies the two rows it leaves
-//!   and reaches (spread over [`LIT`] signals, as `Select`'s highlight);
+//! - **Its cost**: a move of the selection notifies the rows it leaves and
+//!   reaches (spread over [`LIT`] signals, as `Select`'s highlight);
 //!   expanding or collapsing makes the rows of the subtree that comes into
 //!   view, and the rows after it keep their cells (keyed by id).
 //!
 //! The root is one stop of the keyboard focus (where views that take
 //! presses are: macOS, Windows, Linux, the web), the tree for screen
-//! readers; the arrows move the selection between the rows shown (the
-//! WAI-ARIA tree view pattern, which `gpui-base`'s Left / Right extend),
-//! and the selected row takes the screen reader's focus as it moves.
+//! readers. The keys act on one row, the cursor: the selected row, else
+//! the row of the collapsed item the selection is hidden under, else
+//! (nothing selected) the first enabled row, where Down starts. The arrows
+//! move the selection between the rows shown (the WAI-ARIA tree view
+//! pattern, which `gpui-base`'s Left / Right extend), and the cursor's row
+//! takes the screen reader's focus as it moves and as the tree takes the
+//! keyboard focus.
 
 use std::{
     hash::{Hash, Hasher},
@@ -49,8 +54,12 @@ use crate::{
     select::SelectValue,
 };
 
-/// How many signals the selection is spread over for the rows to read
-/// ([`TreeModel::is_selected`]): more than the rows a tree shows.
+/// How many signals a node the rows follow (the selection, the cursor) is
+/// spread over, by `node % LIT` ([`Lit`]): a move wakes the rows whose
+/// nodes share a signal with the node it leaves or the node it reaches,
+/// about two in `LIT` of the rows made, and those whose state stays send
+/// nothing. Nodes, not rows: the rows in view are not consecutive nodes,
+/// so two of them may share a signal however few there are.
 const LIT: usize = 32;
 
 /// A row is in view when this much of it shows.
@@ -137,8 +146,6 @@ pub struct TreeEntry {
 struct Node {
     id: SharedString,
     label: SharedString,
-    /// The label in lower case, as typeahead matches it.
-    folded: Box<str>,
     /// Its parent's index, [`ROOT`] at the top.
     parent: u32,
     depth: u32,
@@ -165,9 +172,25 @@ pub(crate) struct Flat {
 }
 
 impl Flat {
+    /// The items flattened; ids given twice are logged, once per call.
     pub(crate) fn new(items: &[TreeItem]) -> Self {
         let mut flat = Self::default();
         flat.push(items, ROOT, 0);
+        let duplicates = flat.nodes.len() - flat.index.len();
+        if duplicates > 0 {
+            let first = flat
+                .nodes
+                .iter()
+                .enumerate()
+                .find(|(at, n)| flat.index.get(&n.id).is_some_and(|&i| i as usize != *at))
+                .map(|(_, n)| n.id.clone())
+                .unwrap_or_default();
+            log::warn!(
+                "Tree: {duplicates} item(s) repeat the id of an item before them (the first, \
+                 `{first}`): ids are unique in a tree, and only the first item of an id \
+                 expands or is selected"
+            );
+        }
         flat
     }
 
@@ -177,7 +200,6 @@ impl Flat {
             self.nodes.push(Node {
                 id: item.id.clone(),
                 label: item.label.clone(),
-                folded: item.label.to_lowercase().into(),
                 parent,
                 depth,
                 end: at + 1,
@@ -217,17 +239,25 @@ impl Flat {
         std::iter::successors(self.parent(node), move |&n| self.parent(n))
     }
 
+    /// The children of `node`, in order.
+    fn children(&self, node: usize) -> impl Iterator<Item = usize> + '_ {
+        let end = self.nodes.get(node).map_or(0, |n| n.end as usize);
+        std::iter::successors(Some(node + 1).filter(|&c| c < end), move |&c| {
+            Some(self.nodes[c].end as usize).filter(|&n| n < end)
+        })
+    }
+
     /// Which nodes are expanded: the folders of `ids`.
-    pub(crate) fn open(&self, ids: &[SharedString]) -> Vec<bool> {
-        let mut open = vec![false; self.nodes.len()];
-        for id in ids {
-            if let Some(n) = self.find(id)
-                && self.folder(n)
-            {
-                open[n] = true;
-            }
-        }
-        open
+    pub(crate) fn open(&self, ids: &[SharedString]) -> Open {
+        let mut open: Vec<u32> = ids
+            .iter()
+            .filter_map(|id| self.find(id))
+            .filter(|&n| self.folder(n))
+            .map(|n| n as u32)
+            .collect();
+        open.sort_unstable();
+        open.dedup();
+        Open(open)
     }
 
     /// What `renderItem` gets of `node`.
@@ -260,6 +290,25 @@ fn hash(value: &impl Hash) -> u64 {
     h.finish()
 }
 
+/// The expanded nodes, in order: as many as the items expanded, so an
+/// expansion costs the expanded items, not every item.
+#[derive(Debug, Default, PartialEq)]
+pub(crate) struct Open(Vec<u32>);
+
+impl Open {
+    /// Whether `node` is expanded.
+    pub(crate) fn contains(&self, node: usize) -> bool {
+        self.0.binary_search(&(node as u32)).is_ok()
+    }
+}
+
+/// Whether `label`, in lower case, starts with `prefix` (in lower case):
+/// typeahead folds only the characters it compares.
+fn starts_folded(label: &str, prefix: &str) -> bool {
+    let mut label = label.chars().flat_map(char::to_lowercase);
+    prefix.chars().all(|c| label.next() == Some(c))
+}
+
 /// The rows the items show: every top item, and the children of each
 /// expanded item that shows.
 #[derive(Debug, Default, PartialEq)]
@@ -286,14 +335,17 @@ pub(crate) enum Step {
 impl Shown {
     /// The rows of `flat` with the nodes `open` says are expanded: made in
     /// the number of rows, a collapsed subtree skipped whole.
-    pub(crate) fn new(flat: &Flat, open: &[bool]) -> Self {
+    pub(crate) fn new(flat: &Flat, open: &Open) -> Self {
         let mut shown = Self::default();
+        // The nodes shown only increase: the expanded ones are walked once.
+        let mut expanded = open.0.iter().map(|&n| n as usize).peekable();
         let mut at = 0;
         while at < flat.nodes.len() {
             let node = &flat.nodes[at];
             shown.rows.push(at as u32);
             shown.keys.push(node.key);
-            at = if open.get(at).copied().unwrap_or(false) {
+            while expanded.next_if(|&n| n < at).is_some() {}
+            at = if expanded.peek() == Some(&at) {
                 at + 1
             } else {
                 node.end as usize
@@ -356,7 +408,17 @@ impl Shown {
         };
         (0..count)
             .map(|k| self.rows[(start + k) % count] as usize)
-            .find(|&n| flat.enabled(n) && flat.nodes[n].folded.starts_with(prefix))
+            .find(|&n| flat.enabled(n) && starts_folded(&flat.nodes[n].label, prefix))
+    }
+
+    /// The node the keys act on: `selected`'s row, else (hidden under a
+    /// collapsed item) the row of its nearest ancestor that shows, else
+    /// (nothing selected) the first enabled row.
+    fn cursor(&self, flat: &Flat, selected: Option<usize>) -> Option<usize> {
+        selected
+            .and_then(|n| self.row_near(flat, n))
+            .map(|r| self.rows[r] as usize)
+            .or_else(|| self.step(flat, None, Step::First))
     }
 }
 
@@ -402,8 +464,10 @@ pub struct TreeProps {
     #[prop(default)]
     pub list_style: Prop<Style>,
     /// The classes of each item's row: `selected:` while it is selected,
-    /// `aria-expanded:` while it is expanded, `focus:` while it is
-    /// selected and the tree has the keyboard focus, `disabled:` while it
+    /// `aria-expanded:` while it is expanded, `focus:` while the tree has
+    /// the keyboard focus and the keys act on it (the selected row; the
+    /// collapsed item the selection is hidden under; with nothing
+    /// selected, the first enabled row), `disabled:` while it
     /// cannot be acted on, `hover:` and `active:`; `group` for its content
     /// to follow them (`group-aria-expanded:rotate-90` on a chevron).
     pub item_class: Prop<Option<SharedString>>,
@@ -529,36 +593,69 @@ impl Selected {
     }
 }
 
+/// A node the rows follow (the selection, the cursor), spread over [`LIT`]
+/// signals as Solid's `createSelector` does: a row reads the signal of its
+/// own node only.
+#[derive(Clone, Copy)]
+struct Lit(Stored<[Signal<Option<usize>>; LIT]>);
+
+impl Lit {
+    /// Follows `node` from now on.
+    fn following(node: Memo<Option<usize>>) -> Self {
+        let lit = Self(stored(std::array::from_fn::<_, LIT, _>(|_| signal(None))));
+        let was = stored(None::<usize>);
+        effect(move || {
+            let now = node.get();
+            untracked(|| {
+                let before = was.replace(now);
+                if before == now {
+                    return;
+                }
+                batch(|| {
+                    if let Some(n) = before {
+                        lit.of(n).set(None);
+                    }
+                    if let Some(n) = now {
+                        lit.of(n).set(Some(n));
+                    }
+                });
+            });
+        });
+        lit
+    }
+
+    fn of(self, node: usize) -> Signal<Option<usize>> {
+        self.0.with(|lit| lit[node % LIT])
+    }
+
+    /// Whether the node followed is `node` (tracked): a move notifies only
+    /// the readers of its two nodes' signals.
+    fn is(self, node: usize) -> bool {
+        self.of(node).get() == Some(node)
+    }
+}
+
 /// What the rows read of the tree, and what they ask of it.
 #[derive(Clone)]
 struct TreeModel {
     flat: Memo<Flatted>,
-    open: Memo<Rc<Vec<bool>>>,
+    open: Memo<Rc<Open>>,
     shown: Memo<Shown>,
-    /// The selection as each row reads it ([`TreeModel::is_selected`]).
-    lit: Stored<[Signal<Option<usize>>; LIT]>,
+    /// The selected node.
+    selected: Lit,
+    /// The node the keys act on ([`Shown::cursor`]).
+    cursor: Lit,
     /// The tree has the keyboard focus.
     focused: Signal<bool>,
     disabled: Prop<bool>,
-    /// The node whose row takes the screen reader's focus once it shows.
+    /// The node whose row takes the screen reader's focus once it shows:
+    /// a node that shows, cleared when the items change.
     a11y: Signal<Option<usize>>,
     item_class: Prop<Option<SharedString>>,
     item_style: Prop<TextPartStyle>,
     render_item: Prop<Option<Renderer<TreeEntry>>>,
     /// A press on the row of a node.
     press: Rc<dyn Fn(usize)>,
-}
-
-impl TreeModel {
-    fn lit_of(&self, node: usize) -> Signal<Option<usize>> {
-        self.lit.with(|lit| lit[node % LIT])
-    }
-
-    /// Whether `node` is selected (tracked): a move notifies only the
-    /// readers of its two nodes' signals, the rows that changed.
-    fn is_selected(&self, node: usize) -> bool {
-        self.lit_of(node).get() == Some(node)
-    }
 }
 
 /// Items that hold items (a project's files, a settings sidebar, an
@@ -569,10 +666,11 @@ impl TreeModel {
 /// a row selects it and expands or collapses a folder. The tree is one
 /// stop of the keyboard focus: Up and Down move the selection between the
 /// rows shown (past disabled items, around the ends), Right expands a
-/// folder and then moves to its first child, Left collapses it and then
-/// moves to its parent, Home and End go to the first and last row, Return
-/// and Space expand or collapse a folder, and letters and digits select by
-/// typeahead. It looks like nothing: the app sizes it (`class`), styles the
+/// folder and then moves to its first enabled child, Left collapses it and
+/// then moves to its parent, Home and End go to the first and last row,
+/// Return and Space expand or collapse a folder, and letters and digits
+/// select by typeahead; a selection hidden under a collapsed item is
+/// acted on from that item's row. It looks like nothing: the app sizes it (`class`), styles the
 /// rows (`itemClass` with `selected:`, `aria-expanded:`, `focus:` and
 /// `disabled:`) and draws them (`renderItem`, given each item's depth).
 /// Screen readers hear a tree of items, each with its level, whether it is
@@ -601,34 +699,29 @@ pub fn Tree(props: TreeProps, cx: Scope<TreeEvent>) -> impl IntoElement {
         let id = selected.get()?;
         flat.with(|f| f.0.find(&id))
     });
-    let lit = stored(std::array::from_fn::<_, LIT, _>(|_| signal(None)));
-    let was = stored(None::<usize>);
-    effect(move || {
-        let now = current.get();
-        untracked(|| {
-            let before = was.replace(now);
-            if before == now {
-                return;
-            }
-            batch(|| {
-                if let Some(n) = before {
-                    lit.with(|l| l[n % LIT]).set(None);
-                }
-                if let Some(n) = now {
-                    lit.with(|l| l[n % LIT]).set(Some(n));
-                }
-            });
-        });
+    // The node the keys act on: it shows.
+    let cursor = computed(move || {
+        let node = current.get();
+        flat.with(|f| shown.with(|s| s.cursor(&f.0, node)))
     });
+    let lit_selected = Lit::following(current);
+    let lit_cursor = Lit::following(cursor);
     let root = element_ref();
     let list = element_ref();
     let focused = signal(false);
     let a11y = signal(None::<usize>);
+    // A node of the items before: its row may be another's now.
+    effect(move || {
+        flat.with(|_| ());
+        untracked(|| a11y.set(None));
+    });
     // The rows wholly in view, as the list last said, and a row to bring
     // there once it says.
     let visible = stored(None::<(usize, usize)>);
     let pending_row = stored(None::<usize>);
-    // An item to bring into view once it shows (`revealItem`).
+    // An item to bring into view once it shows (`revealItem`): at the
+    // first change of the rows after the request, then never (an app that
+    // refused the expansion does not see its list jump later).
     let pending = stored(None::<SharedString>);
     let typeahead = stored(Typeahead::default());
 
@@ -646,16 +739,15 @@ pub fn Tree(props: TreeProps, cx: Scope<TreeEvent>) -> impl IntoElement {
             pending_row.replace(Some(row));
         }
     };
-    // The item `revealItem` asked for shows: to its row.
+    // The rows changed after `revealItem`: to its item's row, if it shows.
     effect(move || {
         shown.with(|_| ());
         untracked(|| {
-            let Some(id) = pending.with(|p| p.clone()) else {
+            let Some(id) = pending.replace(None) else {
                 return;
             };
             let row = flat.with(|f| f.0.find(&id).and_then(|n| shown.with(|s| s.row_of(n))));
             if let Some(row) = row {
-                pending.replace(None);
                 bring(row);
             }
         });
@@ -681,14 +773,22 @@ pub fn Tree(props: TreeProps, cx: Scope<TreeEvent>) -> impl IntoElement {
         let Some(id) = id.filter(|_| folder) else {
             return;
         };
-        if open.with_untracked(|o| o.get(node).copied().unwrap_or(false)) == next {
+        if open.with_untracked(|o| o.contains(node)) == next {
             return;
         }
         let mut ids = expanded.get_untracked();
+        let before = ids.len();
         if next {
-            ids.push(id.clone());
+            // Already there: a later item of the same id, which never
+            // expands (`Flat::new` logs it).
+            if !ids.contains(&id) {
+                ids.push(id.clone());
+            }
         } else {
             ids.retain(|i| *i != id);
+        }
+        if ids.len() == before {
+            return;
         }
         expanded.change(ids.clone());
         cx.emit(TreeEvent::ExpandedChange(ids));
@@ -707,10 +807,8 @@ pub fn Tree(props: TreeProps, cx: Scope<TreeEvent>) -> impl IntoElement {
         if selected.choose(id.clone()) {
             cx.emit(TreeEvent::SelectedChange(id));
         }
-        if by_key {
-            if let Some(row) = shown.with_untracked(|s| s.row_of(node)) {
-                bring(row);
-            }
+        if by_key && let Some(row) = shown.with_untracked(|s| s.row_of(node)) {
+            bring(row);
             if untracked(screen_reader) {
                 a11y.set(Some(node));
             }
@@ -723,29 +821,37 @@ pub fn Tree(props: TreeProps, cx: Scope<TreeEvent>) -> impl IntoElement {
             select_node(next, true);
         }
     };
-    let is_open = move |node: usize| open.with_untracked(|o| o.get(node).copied().unwrap_or(false));
+    let is_open = move |node: usize| open.with_untracked(|o| o.contains(node));
+    // The node Right, Left, Return and Space act on: the cursor, while
+    // something is selected (with nothing, Right and Left select the
+    // first row, as Down does).
+    let acted_on = move || current.get_untracked().and(cursor.get_untracked());
     // Right: a collapsed folder expands, an expanded one moves to its
-    // first child (when it is enabled).
+    // first enabled child.
     let right = move || {
-        let Some(node) = current.get_untracked() else {
+        if current.get_untracked().is_none() {
             return step(Step::First);
-        };
+        }
+        let Some(node) = acted_on() else { return };
         let (folder, enabled) = flat.with_untracked(|f| (f.0.folder(node), f.0.enabled(node)));
         if !folder || !enabled {
             return;
         }
         if !is_open(node) {
             set_open(node, true);
-        } else if flat.with_untracked(|f| f.0.enabled(node + 1)) {
-            select_node(node + 1, true);
+        } else if let Some(child) =
+            flat.with_untracked(|f| f.0.children(node).find(|&c| f.0.enabled(c)))
+        {
+            select_node(child, true);
         }
     };
     // Left: an expanded folder collapses, anything else moves to its
     // parent (when it is enabled).
     let left = move || {
-        let Some(node) = current.get_untracked() else {
+        if current.get_untracked().is_none() {
             return step(Step::First);
-        };
+        }
+        let Some(node) = acted_on() else { return };
         let (folder, enabled, parent) =
             flat.with_untracked(|f| (f.0.folder(node), f.0.enabled(node), f.0.parent(node)));
         if folder && enabled && is_open(node) {
@@ -755,9 +861,7 @@ pub fn Tree(props: TreeProps, cx: Scope<TreeEvent>) -> impl IntoElement {
         }
     };
     let toggle_current = move || {
-        let Some(node) = current.get_untracked() else {
-            return;
-        };
+        let Some(node) = acted_on() else { return };
         if flat.with_untracked(|f| f.0.enabled(node)) {
             set_open(node, !is_open(node));
         }
@@ -820,15 +924,18 @@ pub fn Tree(props: TreeProps, cx: Scope<TreeEvent>) -> impl IntoElement {
             let Some(node) = flat.with_untracked(|f| f.0.find(id)) else {
                 return false;
             };
-            let closed: Vec<usize> = flat.with_untracked(|f| {
-                f.0.ancestors(node)
-                    .filter(|&a| !is_open(a))
-                    .collect::<Vec<_>>()
+            let mut ids = expanded.get_untracked();
+            // The collapsed items above it, the outermost first.
+            let added: Vec<SharedString> = flat.with_untracked(|f| {
+                let mut closed: Vec<usize> = f.0.ancestors(node).filter(|&a| !is_open(a)).collect();
+                closed.reverse();
+                closed.into_iter().filter_map(|a| f.0.id(a)).collect()
             });
-            if !closed.is_empty() {
-                let mut ids = expanded.get_untracked();
-                let added: Vec<SharedString> = flat
-                    .with_untracked(|f| closed.iter().rev().filter_map(|&a| f.0.id(a)).collect());
+            let added: Vec<SharedString> = added.into_iter().filter(|a| !ids.contains(a)).collect();
+            let expanding = !added.is_empty();
+            if expanding {
+                // Before the change: the rows may change while it is made.
+                pending.replace(Some(SharedString::from(id.to_owned())));
                 ids.extend(added.iter().cloned());
                 expanded.change(ids.clone());
                 cx.emit(TreeEvent::ExpandedChange(ids));
@@ -836,8 +943,12 @@ pub fn Tree(props: TreeProps, cx: Scope<TreeEvent>) -> impl IntoElement {
                     cx.emit(TreeEvent::Expand(id));
                 }
             }
-            pending.replace(Some(SharedString::from(id.to_owned())));
-            if let Some(row) = shown.with_untracked(|s| s.row_of(node)) {
+            // Shown at once (nothing to expand, or the tree's own state
+            // and the rows not yet followed).
+            let waiting = pending.with(|p| p.is_some());
+            if (waiting || !expanding)
+                && let Some(row) = shown.with_untracked(|s| s.row_of(node))
+            {
                 pending.replace(None);
                 bring(row);
             }
@@ -849,7 +960,8 @@ pub fn Tree(props: TreeProps, cx: Scope<TreeEvent>) -> impl IntoElement {
         flat,
         open,
         shown,
-        lit,
+        selected: lit_selected,
+        cursor: lit_cursor,
         focused,
         disabled: props.disabled,
         a11y,
@@ -886,7 +998,19 @@ pub fn Tree(props: TreeProps, cx: Scope<TreeEvent>) -> impl IntoElement {
             disabled: props.disabled.get(),
             ..AccessibilityState::default()
         })
-        .on_focus(move || focused.set(true))
+        .on_focus(move || {
+            focused.set(true);
+            // The screen reader's focus goes to the row the keys act on.
+            untracked(|| {
+                if screen_reader()
+                    && let Some(node) = cursor.get()
+                    && let Some(row) = shown.with(|s| s.row_of(node))
+                {
+                    bring(row);
+                    a11y.set(Some(node));
+                }
+            });
+        })
         .on_blur(move || focused.set(false))
         .child(
             scroll()
@@ -910,18 +1034,23 @@ fn row(m: TreeModel, at: Position) -> AnyElement {
         computed(move || tree.get() || entry.with(|e| e.as_ref().is_some_and(|e| e.disabled)))
     };
     let selected = {
-        let m = m.clone();
-        computed(move || node.get().is_some_and(|n| m.is_selected(n)))
+        let lit = m.selected;
+        computed(move || node.get().is_some_and(|n| lit.is(n)))
+    };
+    let at_cursor = {
+        let lit = m.cursor;
+        computed(move || node.get().is_some_and(|n| lit.is(n)))
     };
     let open = m.open;
     let expanded = computed(move || {
         let n = node.get()?;
         let folder = entry.with(|e| e.as_ref().is_some_and(|e| e.folder));
-        folder.then(|| open.with(|o| o.get(n).copied().unwrap_or(false)))
+        folder.then(|| open.with(|o| o.contains(n)))
     });
     let focused = m.focused;
     let me = element_ref();
-    // A key moved the selection here: the screen reader's focus follows.
+    // A key moved the cursor here, or the tree took the keyboard focus:
+    // the screen reader's focus follows.
     let a11y = m.a11y;
     effect(move || {
         let Some(n) = node.get() else { return };
@@ -948,7 +1077,7 @@ fn row(m: TreeModel, at: Position) -> AnyElement {
             expanded: expanded.get(),
             ..AccessibilityState::default()
         })
-        .project_focused(move || selected.get() && focused.get())
+        .project_focused(move || at_cursor.get() && focused.get())
         .app_class(m.item_class)
         .inline_style(move || m.item_style.get())
         .element_ref(&me)
@@ -1092,5 +1221,74 @@ mod tests {
         assert_eq!(typed(Some("src"), "l").as_deref(), Some("src/lib.rs"));
         assert_eq!(typed(Some("src/lib.rs"), "o").as_deref(), None);
         assert_eq!(typed(Some("src"), "re").as_deref(), Some("README.md"));
+        // Folded as it is compared: `README.md` by `READ`'s lower case.
+        assert!(super::starts_folded("README.md", "read"));
+        assert!(!super::starts_folded("RE", "read"));
+    }
+
+    #[test]
+    fn children_are_a_folders_items_one_level_under_it() {
+        let flat = Flat::new(&items());
+        let at = |id: &str| flat.find(id).unwrap();
+        let ids = |node| {
+            flat.children(node)
+                .map(|c| flat.nodes[c].id.to_string())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(ids(at("src")), ["src/lib.rs", "src/ui"]);
+        assert_eq!(ids(at("docs")), ["docs/guide.md", "docs/old.md"]);
+        assert!(ids(at("README.md")).is_empty());
+        assert!(ids(at("src/ui/list.rs")).is_empty());
+    }
+
+    #[test]
+    fn the_cursor_is_the_selection_its_nearest_shown_ancestor_or_the_first_row() {
+        let flat = Flat::new(&items());
+        let at = |id: &str| flat.find(id).unwrap();
+        let cursor = |open: &[&str], selected: Option<&str>| {
+            shown(&flat, open)
+                .cursor(&flat, selected.map(at))
+                .map(|n| flat.nodes[n].id.to_string())
+        };
+        assert_eq!(
+            cursor(&["src", "src/ui"], Some("src/ui/tree.rs")).as_deref(),
+            Some("src/ui/tree.rs")
+        );
+        // `src/ui` collapsed: its row; everything collapsed: `src`'s.
+        assert_eq!(
+            cursor(&["src"], Some("src/ui/tree.rs")).as_deref(),
+            Some("src/ui")
+        );
+        assert_eq!(
+            cursor(&["src/ui"], Some("src/ui/tree.rs")).as_deref(),
+            Some("src")
+        );
+        assert_eq!(cursor(&[], None).as_deref(), Some("src"));
+    }
+
+    #[test]
+    fn the_expanded_nodes_are_the_folders_of_the_ids_each_once() {
+        let flat = Flat::new(&items());
+        let at = |id: &str| flat.find(id).unwrap();
+        let ids: Vec<SharedString> = ["docs", "src", "README.md", "docs", "nope"]
+            .into_iter()
+            .map(SharedString::from)
+            .collect();
+        let open = flat.open(&ids);
+        assert_eq!(open.0, [at("src") as u32, at("docs") as u32]);
+        assert!(open.contains(at("docs")));
+        assert!(!open.contains(at("README.md")));
+    }
+
+    #[test]
+    fn an_id_given_twice_names_its_first_item() {
+        let flat = Flat::new(&[
+            TreeItem::new("x", "first").child(TreeItem::new("x/a", "a")),
+            TreeItem::new("x", "second").child(TreeItem::new("x/b", "b")),
+        ]);
+        assert_eq!(flat.nodes.len(), 4);
+        assert_eq!(flat.find("x"), Some(0));
+        let s = shown(&flat, &["x"]);
+        assert_eq!(s.rows, [0, 1, 2]);
     }
 }

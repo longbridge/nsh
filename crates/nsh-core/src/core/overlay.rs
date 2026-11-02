@@ -522,7 +522,9 @@ impl<M: TextEngine> Core<M> {
     /// (its parent, unless that is a span of text).
     fn hint_anchor(&self, key: Key) -> Option<Key> {
         match self.overlay(key)?.config.anchor {
-            OverlayAnchor::Node(id) | OverlayAnchor::Content(id) => self.key(id).ok(),
+            OverlayAnchor::Node(id)
+            | OverlayAnchor::Content(id)
+            | OverlayAnchor::Beside { node: id, .. } => self.key(id).ok(),
             OverlayAnchor::Point(_) | OverlayAnchor::Bounds(_) => None,
             OverlayAnchor::None => {
                 let mut k = self.nodes[key as usize].parent;
@@ -953,6 +955,30 @@ impl<M: TextEngine> Core<M> {
                 size: m.frame.size,
             }),
             OverlayAnchor::Content(id) => self.content_bounds(self.content_anchor(id)),
+            OverlayAnchor::Beside { node, edges } => {
+                match (self.measure(node), self.measure(edges)) {
+                    (Some(n), Some(e)) => Some(if config.placement.is_horizontal() {
+                        rect(
+                            e.page.x.0,
+                            n.page.y.0,
+                            e.frame.size.width.0,
+                            n.frame.size.height.0,
+                        )
+                    } else {
+                        rect(
+                            n.page.x.0,
+                            e.page.y.0,
+                            n.frame.size.width.0,
+                            e.frame.size.height.0,
+                        )
+                    }),
+                    (Some(n), None) => Some(Bounds {
+                        origin: n.page,
+                        size: n.frame.size,
+                    }),
+                    _ => None,
+                }
+            }
         };
         let Some(anchor) = anchor else {
             return frame.origin;
@@ -1066,6 +1092,9 @@ impl<M: TextEngine> Core<M> {
 
     /// The box around what view `id` draws in its root view: around its
     /// children's frames, or its own while it has none (laid out ones only).
+    /// Only along an axis its style leaves the size `auto` (a wrapper its
+    /// parent stretches): along one it sets (a trigger 28 points tall with
+    /// its label centered), its own box is what shows.
     fn content_bounds(&self, id: NodeId) -> Option<Bounds<Points>> {
         let own = self.measure(id)?;
         let key = self.key(id).ok()?;
@@ -1093,10 +1122,24 @@ impl<M: TextEngine> Core<M> {
                 let (left, top) = (own.page.x.0, own.page.y.0);
                 let (right, bottom) =
                     (left + own.frame.size.width.0, top + own.frame.size.height.0);
-                let x0 = (x0 - l.padding.left - l.border.left).max(left);
-                let y0 = (y0 - l.padding.top - l.border.top).max(top);
-                let x1 = (x1 + l.padding.right + l.border.right).min(right);
-                let y1 = (y1 + l.padding.bottom + l.border.bottom).min(bottom);
+                let size = self.layout.style(self.nodes[key as usize].layout?).size;
+                let auto = taffy::Dimension::auto();
+                let (x0, x1) = if size.width == auto {
+                    (
+                        (x0 - l.padding.left - l.border.left).max(left),
+                        (x1 + l.padding.right + l.border.right).min(right),
+                    )
+                } else {
+                    (left, right)
+                };
+                let (y0, y1) = if size.height == auto {
+                    (
+                        (y0 - l.padding.top - l.border.top).max(top),
+                        (y1 + l.padding.bottom + l.border.bottom).min(bottom),
+                    )
+                } else {
+                    (top, bottom)
+                };
                 rect(x0, y0, (x1 - x0).max(0.0), (y1 - y0).max(0.0))
             }
             None => Bounds {
@@ -1135,7 +1178,9 @@ impl<M: TextEngine> Core<M> {
 /// The view an overlay is anchored to.
 fn anchor_node(state: &OverlayState) -> Option<NodeId> {
     match state.config.anchor {
-        OverlayAnchor::Node(id) | OverlayAnchor::Content(id) => Some(id),
+        OverlayAnchor::Node(id)
+        | OverlayAnchor::Content(id)
+        | OverlayAnchor::Beside { node: id, .. } => Some(id),
         _ => None,
     }
 }

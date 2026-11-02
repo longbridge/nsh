@@ -374,7 +374,16 @@ pub(crate) struct Bar {
     /// The toolbar's axis (`None`: a toggle group on its own), which its
     /// groups lay out along.
     pub(crate) axis: Option<Axis>,
+    /// The bar's menu that is open, if any: with one open, the pointer
+    /// over another menu's trigger opens that one instead, as a menu bar
+    /// does.
+    pub(crate) open_menu: OpenMenu,
 }
+
+/// A bar's open menu: what opens or closes it.
+pub(crate) type OpenMenu = std::rc::Rc<
+    std::cell::RefCell<Option<std::rc::Rc<dyn Fn(bool, crate::popup::OpenChangeReason)>>>,
+>;
 
 /// What [`bar`] finds: a bar, or `None` below a popup a bar's item opens
 /// (its content is no part of the bar).

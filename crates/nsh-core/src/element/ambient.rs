@@ -1009,9 +1009,11 @@ impl super::NodeRef {
 ///
 /// The core looks at the end of a commit round: in the round the watch is
 /// made in, after [`super::OrderWatch::invalidate`] (an element came), and
-/// after a round that moved a node (an app's keyed reorder), asking
-/// `elements` untracked; what the handler changes goes out in the same
-/// batch. A round that moved nothing and invalidated nothing costs nothing.
+/// after a round that moved a node inside the subtree the elements share
+/// (an app's keyed reorder of them), asking `elements` untracked; what the
+/// handler changes goes out in the same batch. A round that moved nothing
+/// there and invalidated nothing costs nothing: a list of rows reordered,
+/// each row with a group of its own, costs those groups nothing.
 #[doc(hidden)]
 pub fn watch_order(
     elements: impl Fn() -> Vec<super::ElementRef> + 'static,

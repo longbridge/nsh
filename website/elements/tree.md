@@ -33,6 +33,11 @@ fn files() -> impl IntoElement {
         .on_selected_change(move |id: &SharedString| selected.set(Some(id.clone())))
         .accessibility_label("Files")
         .h(px(320.0))
+        .list_class("p-1")
+        .item_class(
+            "group rounded-md hover:bg-accent selected:bg-primary/10 \
+             focus:outline-2 focus:-outline-offset-2 focus:outline-ring disabled:opacity-50",
+        )
         .render_item(|entry: &TreeEntry| {
             view()
                 .flex_row()
@@ -74,8 +79,9 @@ function App() {
       onExpandedChange={({ expanded: next }) => expanded.set(next)}
       onSelectedChange={({ selected: next }) => selected.set(next)}
       accessibilityLabel="Files"
-      class="h-80 w-64 rounded-lg border border-border p-1"
-      itemClass="group h-8 rounded-md hover:bg-accent selected:bg-accent focus:ring-2 focus:ring-ring disabled:opacity-50"
+      class="h-80 w-64 rounded-lg border border-border"
+      listClass="p-1"
+      itemClass="group h-8 rounded-md hover:bg-accent selected:bg-primary/10 focus:outline-2 focus:-outline-offset-2 focus:outline-ring disabled:opacity-50"
       renderItem={(entry) => (
         <View class="h-8 flex-row items-center gap-2" style={{ paddingLeft: 8 + entry.depth * 16 }}>
           <Text class="w-3 text-muted-foreground transition-transform group-aria-expanded:rotate-90">
@@ -104,7 +110,7 @@ the typed style methods.
 
 | Field | Type | Description |
 |---|---|---|
-| `id` | `string` | What identifies it in `expanded`, `selected` and the events: unique in the tree. |
+| `id` | `string` | What identifies it in `expanded`, `selected` and the events: unique in the tree (an id given twice is logged, and only its first item expands or is selected). |
 | `label` | `string` | What its row shows unless `renderItem` draws it, what screen readers say and what typeahead matches. |
 | `children` | `TreeItem[]` | The items under it, in order. With any, it is a folder: it expands and collapses. |
 | `disabled` | `boolean` | The user cannot select, expand or collapse it: presses and keys pass it by, `disabled:` styles apply. Its children stay as `expanded` says. |
@@ -146,18 +152,19 @@ chevron turns with a transition.
 |---|---|---|---|
 | The tree | | `class`, `style` | |
 | The list | the tree | `listClass`, `listStyle` | |
-| A row | the list | `itemClass`, `itemStyle` | `selected:`, `aria-expanded:` (a folder that is open), `focus:` (the selected row while the tree has the keyboard focus), `disabled:`, `hover:`, `active:` |
+| A row | the list | `itemClass`, `itemStyle` | `selected:`, `aria-expanded:` (a folder that is open), `focus:` (while the tree has the keyboard focus, the row the keys act on: the selected row, the collapsed item a hidden selection is under, or the first row while nothing is selected), `disabled:`, `hover:`, `active:` |
 | A row's content | a row | `renderItem` | `group-selected:`, `group-aria-expanded:`, `group-focus:`, `group-disabled:` under `group` in `itemClass` |
 
 Show the selected row with `selected:` and the keyboard's place with `focus:` (see
-[Design guides](../docs/design-guides.md#interaction-states)).
+[Design guides](../docs/design-guides.md#interaction-states)). Draw the focus inside the row
+(`focus:outline-2 focus:-outline-offset-2`): the list clips what reaches past its sides.
 
 ## Ref
 
 | Method | Description |
 |---|---|
 | `focus()` | Takes the keyboard focus, as Tab reaching the tree does. |
-| `revealItem(id)` | Expands the items above the item of `id` (reported with `onExpandedChange` and `onExpand`) and scrolls its row into view once it shows. |
+| `revealItem(id)` | Expands the items above the item of `id` (reported with `onExpandedChange` and `onExpand`, the outermost first) and scrolls its row into view once it shows: when the app follows the change, at once; when it does not, the request ends there. |
 
 ```tsx
 let files: TreeRef | undefined;
@@ -179,7 +186,8 @@ the tree makes it read-only: it shows what the app's state says and takes no inp
 
 - The tree has the role `"tree"`, named by `accessibilityLabel`; each row is a `"treeitem"` named by its item's label,
   with its level (its depth + 1), whether it is expanded (folders), selected and disabled.
-- As the arrow keys move the selection, the selected row takes the screen reader's focus.
+- As the tree takes the keyboard focus and as the keys move the selection, the row the keys act on takes the screen
+  reader's focus.
 
 See [Accessibility](../docs/accessibility.md) for labels, roles and announcements in general.
 
@@ -190,13 +198,16 @@ On the desktops and the web, where Tab reaches the views that take presses, a `T
 
 | Key | What it does |
 |---|---|
-| Tab, Shift+Tab | Enters the tree in one step, and leaves it in one step; coming back, the keys go on from the selected row. |
+| Tab, Shift+Tab | Enters the tree in one step, and leaves it in one step; coming back, the keys go on from the selected row. With nothing selected, the focus shows on the first row, which Down selects. |
 | Down, Up | Selects the next or the previous row, past disabled items, from the last to the first and back. |
-| Right | Expands a collapsed folder; on an expanded one, selects its first child. |
+| Right | Expands a collapsed folder; on an expanded one, selects its first enabled child. |
 | Left | Collapses an expanded folder; on anything else, selects its parent. |
 | Home, End | Selects the first or the last row. |
 | Return, Space | Expands or collapses the selected folder. |
 | Letters, digits | Selects the next row whose label starts with what was typed. |
+
+While the selection is hidden under a collapsed item (the app collapsed it), the keys act on that item's row: Right
+or Return expands it, Down selects the row after it.
 
 ## Platform notes
 

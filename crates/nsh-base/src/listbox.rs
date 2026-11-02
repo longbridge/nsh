@@ -254,32 +254,8 @@ impl Shown {
     /// disabled or not shown: from its place) by `by`, among the enabled
     /// items shown; `None` when none is.
     pub(crate) fn step(&self, from: Option<usize>, by: Move) -> Option<usize> {
-        let order = &self.enabled;
-        let last = order.len().checked_sub(1)?;
         let at = from.and_then(|f| self.row_of(f)).map(|r| r as u32);
-        // How many of them are before `from`'s row, and whether it is one.
-        let (before, on) = match at {
-            Some(row) => {
-                let before = order.partition_point(|(r, _)| *r < row);
-                (before, order.get(before).is_some_and(|(r, _)| *r == row))
-            }
-            None => (0, false),
-        };
-        let k = match (by, at) {
-            (Move::First, _) | (Move::Next | Move::PageDown(_), None) => 0,
-            (Move::Last, _) | (Move::Previous | Move::PageUp(_), None) => last,
-            (Move::Next, Some(_)) => {
-                let next = if on { before + 1 } else { before };
-                if next > last { 0 } else { next }
-            }
-            (Move::Previous, Some(_)) => before.checked_sub(1).unwrap_or(last),
-            (Move::PageDown(n), Some(_)) => {
-                let from = if on { before } else { before.saturating_sub(1) };
-                (from + n.max(1)).min(last)
-            }
-            (Move::PageUp(n), Some(_)) => before.min(last).saturating_sub(n.max(1)),
-        };
-        Some(order[k].1 as usize)
+        step_among(&self.enabled, at, by)
     }
 
     /// The enabled item `typed` jumps to from item `from`: the first one,
@@ -288,26 +264,8 @@ impl Shown {
     /// on to the next title starting with it, as native lists do; more
     /// characters keep the item while it still matches.
     fn find_typed(&self, folded: &[Box<str>], from: Option<usize>, typed: &str) -> Option<usize> {
-        let mut chars = typed.chars();
-        let first = chars.next()?;
-        let repeated = chars.all(|c| c == first);
-        let prefix = if repeated {
-            &typed[..first.len_utf8()]
-        } else {
-            typed
-        };
-        let order = &self.enabled;
         let at = from.and_then(|f| self.row_of(f)).map(|r| r as u32);
-        let start = match at {
-            // A repeated character moves on; a longer prefix starts at the
-            // item it is on.
-            Some(row) if repeated => order.partition_point(|(r, _)| *r <= row),
-            Some(row) => order.partition_point(|(r, _)| *r < row),
-            None => 0,
-        };
-        (0..order.len())
-            .map(|k| order[(start + k) % order.len()].1 as usize)
-            .find(|&i| folded[i].starts_with(prefix))
+        find_typed_among(&self.enabled, at, folded, typed)
     }
 
     /// Where the highlight goes when the items or the rows change: to the
@@ -320,6 +278,68 @@ impl Shown {
             .or_else(|| self.enabled.first())
             .map(|(_, i)| *i as usize)
     }
+}
+
+/// Where the highlight goes by `by` among `order` (the enabled items
+/// shown, `(row, item)`, both increasing) from the item on row `at` (none,
+/// or a row that is no enabled item's: from its place); `None` when no
+/// item is enabled. `Select`'s and `Command`'s lists share it.
+pub(crate) fn step_among(order: &[(u32, u32)], at: Option<u32>, by: Move) -> Option<usize> {
+    let last = order.len().checked_sub(1)?;
+    // How many of them are before `at`, and whether it is one.
+    let (before, on) = match at {
+        Some(row) => {
+            let before = order.partition_point(|(r, _)| *r < row);
+            (before, order.get(before).is_some_and(|(r, _)| *r == row))
+        }
+        None => (0, false),
+    };
+    let k = match (by, at) {
+        (Move::First, _) | (Move::Next | Move::PageDown(_), None) => 0,
+        (Move::Last, _) | (Move::Previous | Move::PageUp(_), None) => last,
+        (Move::Next, Some(_)) => {
+            let next = if on { before + 1 } else { before };
+            if next > last { 0 } else { next }
+        }
+        (Move::Previous, Some(_)) => before.checked_sub(1).unwrap_or(last),
+        (Move::PageDown(n), Some(_)) => {
+            let from = if on { before } else { before.saturating_sub(1) };
+            (from + n.max(1)).min(last)
+        }
+        (Move::PageUp(n), Some(_)) => before.min(last).saturating_sub(n.max(1)),
+    };
+    Some(order[k].1 as usize)
+}
+
+/// The enabled item of `order` (as [`step_among`]'s) `typed` jumps to from
+/// the item on row `at`: the first one, going on from it and around, whose
+/// `folded` text starts with it. The same character typed again moves on
+/// to the next one starting with it, as native lists do; more characters
+/// keep the item while it still matches.
+pub(crate) fn find_typed_among(
+    order: &[(u32, u32)],
+    at: Option<u32>,
+    folded: &[Box<str>],
+    typed: &str,
+) -> Option<usize> {
+    let mut chars = typed.chars();
+    let first = chars.next()?;
+    let repeated = chars.all(|c| c == first);
+    let prefix = if repeated {
+        &typed[..first.len_utf8()]
+    } else {
+        typed
+    };
+    let start = match at {
+        // A repeated character moves on; a longer prefix starts at the
+        // item it is on.
+        Some(row) if repeated => order.partition_point(|(r, _)| *r <= row),
+        Some(row) => order.partition_point(|(r, _)| *r < row),
+        None => 0,
+    };
+    (0..order.len())
+        .map(|k| order[(start + k) % order.len()].1 as usize)
+        .find(|&i| folded[i].starts_with(prefix))
 }
 
 /// A move of the highlight.
