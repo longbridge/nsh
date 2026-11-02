@@ -227,7 +227,7 @@ logs one `nsh::perf` line a second (`fps.rs`, on `nsh_engine::perf::PerfMonitor`
 backends' shape: frames shown over the compositor's rate (`DwmGetCompositionTimingInfo`), the main thread's time per
 shown frame and its phases (`tick`: the ticker's animations and frame callbacks; `drain`: batches applied as they
 arrived; `paint`: Direct2D drawing the tree, of which `canvas` is the canvases' recording and replay; `present`:
-`Present`, which waits for the vertical blank and is not counted as work), the engine's commits, its busy share, and
+`Present`, which queues the frame and is not counted as work), the engine's commits, its busy share, and
 the process' CPU (`GetProcessTimes`) and working set. While it measures, the ticker runs on every refresh: its ticks
 close the frames. While nothing composes, only the frames deadlines run (`Surface::keep_deadline`) are measured. `examples/gallery/tools/perf.py` runs the gallery under it (`--target windows` is the default on
 Windows).
@@ -250,6 +250,25 @@ What a frame costs then follows what changed: the gallery's Stocks page (~690 vi
 display) changes ~34 views a frame (pulsing sparklines, prices, the chart's live point), drawn in ~1.4 ms of
 `paint`. Canvases record their animated tail only (see the table above), views without content of their
 own push no clip, and the children of a clipping view out of sight are not drawn.
+
+### Frame pacing
+
+Every swap chain (a window's, a transparent window's composed one, a `Window.open` window's) has a frame latency
+waitable object and one frame in flight (two buffers), and a window draws only when its chain holds the free token
+(`SwapChain::ready`, a non-blocking poll). Otherwise `render::frame` returns before drawing, the damage and the
+invalid flag stay, and a thread pool wait on the object posts `WM_NSH_PAINT` to the window when a frame is free
+(posted, not `InvalidateRect`: a posted message comes before the `WM_PAINT`s that wait for the thread's other
+messages). A resized window draws at once, so it never shows stretched pixels.
+
+The gate is what lets several windows share a UI thread (`Window.open`, several `AppView`s in an embedding app): a
+blocking `Present(1)` waited for the vertical blank of the other windows' frames, about 60 presents a second for the
+whole thread, and the window whose `WM_PAINT` came last kept them: with 2 to 8 windows one showed 60 fps and the others
+stopped at their first frames. Each window now shows 60 fps, with 1 to 8 windows on the thread. With the waitable flag
+`Present` never waits, so the gate is also what bounds the queue: an ungated chain queues frames up to the device's
+limit and shows each about 350 ms late. The device allows 16 queued frames (`MAX_DEVICE_LATENCY`) so its own limit
+(three, for all chains together) never gates a window. The frame is shown about 15 ms sooner than with a blocking
+present (PresentMon's present to display, p50: 47 → 32 ms at 60 Hz, one window or several). Two frames in flight were
+measured and are not used: they bring back that latency (48 ms) for the same frame rate.
 
 ## Not implemented, or different
 

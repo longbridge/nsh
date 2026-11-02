@@ -1311,18 +1311,22 @@ impl Readback {
 }
 
 /// Draws the surface's window: the whole tree, then presents it.
-pub(crate) fn frame(surface: &Rc<Surface>) {
+///
+/// Returns true when the frame is deferred: the swap chain has no room for
+/// it yet (`SwapChain::ready`), the surface stays invalid and `WM_NSH_PAINT`
+/// comes when it has.
+pub(crate) fn frame(surface: &Rc<Surface>) -> bool {
     // Shader views that came into sight render for the frames after it.
     crate::shader::reveal();
-    let Ok(gfx) = gfx::get() else { return };
+    let Ok(gfx) = gfx::get() else { return false };
     let hwnd = surface.hwnd();
     if hwnd.is_invalid() {
-        return;
+        return false;
     }
     let scale = surface.scale();
     let size = surface.pixel_size();
     if size.0 == 0 || size.1 == 0 {
-        return;
+        return false;
     }
     let mut swap = surface.swap.borrow_mut();
     if swap.as_ref().is_some_and(|s| s.stale()) {
@@ -1334,15 +1338,24 @@ pub(crate) fn frame(surface: &Rc<Surface>) {
             Ok(s) => *swap = Some(s),
             Err(err) => {
                 log::error!("cannot create the swap chain: {err}");
-                return;
+                return false;
             }
         }
     }
-    let Some(chain) = swap.as_mut() else { return };
+    let Some(chain) = swap.as_mut() else {
+        return false;
+    };
+    let resized = chain.size != (size.0.max(1), size.1.max(1));
     if let Err(err) = chain.resize(&gfx, size) {
         log::error!("cannot resize the swap chain: {err}");
         *swap = None;
-        return;
+        return false;
+    }
+    // A window that is resized draws now (never stretched pixels); the
+    // others wait until the compositor has room, so that no window's
+    // present holds the thread up for another's vblank. The damage stays.
+    if !resized && !chain.ready() {
+        return true;
     }
     if (surface.target_scale.get() - scale).abs() > f32::EPSILON {
         chain.drop_target();
@@ -1352,7 +1365,7 @@ pub(crate) fn frame(surface: &Rc<Surface>) {
         Ok(t) => t,
         Err(err) => {
             log::error!("cannot get the back buffer: {err}");
-            return;
+            return false;
         }
     };
     // Only a window with web views has a composition: without one the
@@ -1367,7 +1380,7 @@ pub(crate) fn frame(surface: &Rc<Surface>) {
     // All of it outside the window (an animation scrolled away): the window
     // already shows this frame, and drawing it whole would cost every frame.
     if changed.as_ref().is_some_and(Vec::is_empty) && chain.shows_a_frame() {
-        return;
+        return false;
     }
     let changed = changed.filter(|rects| !rects.is_empty());
     // What the back buffer, two presents old, needs drawn again, with
@@ -1409,14 +1422,14 @@ pub(crate) fn frame(surface: &Rc<Surface>) {
                 log::warn!("present failed: {err}");
                 drop(swap);
                 device_lost(surface);
-                return;
+                return false;
             }
             let shown = std::time::Instant::now();
             if let Err(err) = chain.present(changed) {
                 log::warn!("present failed: {err}");
                 drop(swap);
                 device_lost(surface);
-                return;
+                return false;
             }
             if let (Some(fps), Some(painted)) = (&fps, painted) {
                 fps.painted(painted, shown.elapsed());
@@ -1436,6 +1449,7 @@ pub(crate) fn frame(surface: &Rc<Surface>) {
             surface.invalidate();
         }
     }
+    false
 }
 
 /// The union of `rects` as one geometry.
@@ -1604,10 +1618,10 @@ pub(crate) fn window_frame(
     target_scale: &std::cell::Cell<f32>,
     size: (u32, u32),
     scale: f32,
-) {
-    let Ok(gfx) = gfx::get() else { return };
+) -> bool {
+    let Ok(gfx) = gfx::get() else { return false };
     if size.0 == 0 || size.1 == 0 {
-        return;
+        return false;
     }
     if swap.as_ref().is_some_and(|s| s.stale()) {
         *swap = None;
@@ -1617,15 +1631,23 @@ pub(crate) fn window_frame(
             Ok(s) => *swap = Some(s),
             Err(err) => {
                 log::error!("cannot create a window's swap chain: {err}");
-                return;
+                return false;
             }
         }
     }
-    let Some(chain) = swap.as_mut() else { return };
+    let Some(chain) = swap.as_mut() else {
+        return false;
+    };
+    let resized = chain.size != (size.0.max(1), size.1.max(1));
     if let Err(err) = chain.resize(&gfx, size) {
         log::error!("cannot resize a window's swap chain: {err}");
         *swap = None;
-        return;
+        return false;
+    }
+    // As the main window's ([`frame`]): resized, it draws now; otherwise it
+    // waits until its swap chain has room.
+    if !resized && !chain.ready() {
+        return true;
     }
     if (target_scale.replace(scale) - scale).abs() > f32::EPSILON {
         chain.drop_target();
@@ -1634,7 +1656,7 @@ pub(crate) fn window_frame(
         Ok(t) => t,
         Err(err) => {
             log::error!("cannot get a window's back buffer: {err}");
-            return;
+            return false;
         }
     };
     match draw_into(surface, &gfx, &target, scale, false, None, None, Some(root)) {
@@ -1651,6 +1673,7 @@ pub(crate) fn window_frame(
         }
         Err(err) => log::error!("drawing a window failed: {err}"),
     }
+    false
 }
 
 /// Draws the tree into `target` (its DPI set for `scale`), and into the
