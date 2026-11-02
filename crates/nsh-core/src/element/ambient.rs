@@ -69,6 +69,7 @@ struct EnvSignals {
     font_scale: Memo<f32>,
     reduce_motion: Memo<bool>,
     screen_reader: Memo<bool>,
+    rtl: Memo<bool>,
     pixel_ratio: Memo<f32>,
     locale: Memo<Locale>,
     screen_color: Memo<bool>,
@@ -94,6 +95,7 @@ impl EnvSignals {
                 font_scale: part!(font_scale),
                 reduce_motion: part!(reduce_motion),
                 screen_reader: part!(screen_reader),
+                rtl: part!(rtl),
                 pixel_ratio: part!(pixel_ratio),
                 locale: part!(locale),
                 screen_color: part!(screen_color),
@@ -233,6 +235,19 @@ pub fn reduce_motion() -> bool {
 /// A screen reader runs (TS: `screenReaderEnabled()`).
 pub fn screen_reader() -> bool {
     env(|e| e.screen_reader)
+}
+
+/// Whether the surface lays out right to left: the root's direction,
+/// which follows the user's language unless the app sets the root's
+/// `direction` (reading subscribes).
+///
+/// The core's part of `nsh-base`'s controls, which swap Left and Right by
+/// it (WAI-ARIA's arrow keys in a right-to-left layout). Apps set a view's
+/// `direction` and style with logical properties or `rtl:` classes
+/// instead: Rust's `rtl()` is dropped (`docs/dev/api-naming.md`).
+#[doc(hidden)]
+pub fn layout_rtl() -> bool {
+    env(|e| e.rtl)
 }
 
 /// Device pixels per point (TS: `pixelRatio()`).
@@ -830,6 +845,33 @@ pub fn next_frame() -> Answer<Instant> {
     let (answer, action) = super::services::frame();
     act(action);
     answer
+}
+
+/// Runs `f` once the app has handled every event emitted so far
+/// ([`super::Scope::emit`]) and the props it set in answer have reached the
+/// components: a view that shows a value of its own until the app's comes
+/// back (a drag's, before `onChange` returns as `value`) lets go of it here,
+/// with no frame of the app's earlier value between. In a TSX app that is
+/// the commit after the one that hands the events to JS, before the views
+/// render (JS's handlers and the ops they queue run in between); with a
+/// Rust owner, whose listeners run when the event is emitted, the commit
+/// after the one that renders what they changed. What `f` changes renders
+/// in that commit, which goes out in the batch of the app's answer. It runs
+/// under the current owner, once: not when that owner is disposed first
+/// (the view went).
+///
+/// Time does not tell: [`set_timeout`] with no delay and [`next_frame`]
+/// run before the app has answered when the event came in the same turn
+/// (a timer due now fires before the turn's commit, which is where JS
+/// first hears the event), and later than needed otherwise (a frame
+/// after). `after_answer` follows the events themselves, whatever the
+/// clock. It costs nothing when unused: no closure kept, no extra commit
+/// round.
+pub fn after_answer(f: impl FnOnce() + 'static) {
+    executor().after_answer(task::AfterAnswer {
+        owner: Owner::current(),
+        f: Box::new(f),
+    });
 }
 
 /// Runs blocking `f` on the runtime's blocking threads (in a task: await

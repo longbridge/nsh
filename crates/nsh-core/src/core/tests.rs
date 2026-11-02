@@ -7227,6 +7227,222 @@ mod components {
         assert_eq!(ECHOES.with(Cell::get), runs + 1);
     }
 
+    thread_local! {
+        /// The `value` each of `Pick`'s closures after the app's answer saw.
+        static ANSWERED: std::cell::RefCell<Vec<u32>> = const { std::cell::RefCell::new(Vec::new()) };
+    }
+
+    /// Shows a pick of its own (2) from a press until the app has answered
+    /// it, then the app's `value`, as a slider shows a drag's value.
+    #[derive(Clone, PartialEq, Props)]
+    struct PickProps {
+        #[prop(default)]
+        value: crate::element::Prop<u32>,
+    }
+
+    #[derive(Event)]
+    enum PickEvent {
+        Change(u32),
+    }
+
+    #[component]
+    fn Pick(props: PickProps, cx: Scope<PickEvent>) -> impl IntoElement {
+        let pending = signal(None::<u32>);
+        view()
+            .on_press(move |_: &()| {
+                pending.set(Some(2));
+                cx.emit(PickEvent::Change(2));
+                after_answer(move || {
+                    ANSWERED.with(|a| a.borrow_mut().push(props.value.get_untracked()));
+                    pending.set(None);
+                });
+            })
+            .child(text(move || {
+                format!(
+                    "pick {}",
+                    pending.get().unwrap_or_else(|| props.value.get())
+                )
+            }))
+    }
+
+    /// The app's answer to a `Pick`: its `value`.
+    fn pick_value(value: u32) -> Op {
+        Op::SetProp {
+            id: 2,
+            prop: rust_prop::<PickProps>("value", Some(json!(value))),
+        }
+    }
+
+    /// A `Pick` from JS showing 1, pressed: its pick shows, and its event
+    /// is queued for JS.
+    fn pressed_pick() -> Core<FakeEngine> {
+        ANSWERED.with(|a| a.borrow_mut().clear());
+        let mut c = core();
+        let mut registry = Registry::new();
+        registry.register::<Pick>();
+        c.set_components(registry);
+        apply(
+            &mut c,
+            vec![
+                Op::Create {
+                    id: 2,
+                    tag: Tag::View,
+                },
+                Op::SetProp {
+                    id: 2,
+                    prop: Prop::Component(std::any::type_name::<Pick>().into()),
+                },
+                pick_value(1),
+                Op::Insert {
+                    parent: ROOT_ID,
+                    child: 2,
+                    before: None,
+                },
+            ],
+        );
+        assert_eq!(texts(&c.commit().unwrap()), ["pick 1"]);
+        assert!(c.component_event(2, EventKind::Press, &EventPayload::None));
+        // Shown at once; the event has not gone to JS yet, so nothing that
+        // waits for its answer runs.
+        assert_eq!(texts(&c.commit().unwrap()), ["pick 2"]);
+        assert!(!c.has_due_answers());
+        assert!(ANSWERED.with(|a| a.borrow().is_empty()));
+        c
+    }
+
+    /// A closure after the app's answer runs in the commit after the one
+    /// whose events went to JS, before the views render: it sees the props
+    /// JS set in answer, and no frame shows the app's earlier value.
+    #[test]
+    fn after_answer_runs_once_js_has_answered() {
+        let mut c = pressed_pick();
+        assert_eq!(
+            js_events(&mut c),
+            [(
+                2,
+                EventKind::NativeEvent,
+                EventPayload::Native {
+                    name: "change".into(),
+                    data: json!({ "value": 2 })
+                }
+            )]
+        );
+        assert!(c.has_due_answers(), "due in the next commit");
+        assert!(ANSWERED.with(|a| a.borrow().is_empty()));
+        // JS's handler set `value` to the pick.
+        apply(&mut c, vec![pick_value(2)]);
+        let batch = c.commit();
+        assert_eq!(ANSWERED.with(|a| a.borrow().clone()), [2]);
+        assert!(
+            batch.as_ref().is_none_or(|b| texts(b).is_empty()),
+            "the pick stays: {:?}",
+            batch.map(|b| texts(&b))
+        );
+        assert!(!c.has_due_answers());
+        // Once.
+        assert!(c.commit().is_none());
+        assert_eq!(ANSWERED.with(|a| a.borrow().len()), 1);
+    }
+
+    /// An app that keeps its value (its handler sets nothing) shows it once
+    /// it has answered.
+    #[test]
+    fn after_answer_shows_the_value_an_app_kept() {
+        let mut c = pressed_pick();
+        assert_eq!(js_events(&mut c).len(), 1);
+        assert_eq!(texts(&c.commit().unwrap()), ["pick 1"]);
+        assert_eq!(ANSWERED.with(|a| a.borrow().clone()), [1]);
+    }
+
+    /// A closure whose view went before the app answered never runs.
+    #[test]
+    fn after_answer_goes_with_its_view() {
+        let mut c = pressed_pick();
+        assert_eq!(js_events(&mut c).len(), 1);
+        apply(
+            &mut c,
+            vec![
+                Op::Remove {
+                    parent: ROOT_ID,
+                    child: 2,
+                },
+                Op::Release { id: 2 },
+            ],
+        );
+        c.commit();
+        assert!(ANSWERED.with(|a| a.borrow().is_empty()));
+        assert!(!c.has_due_answers());
+    }
+
+    /// Events of components that wait for nothing leave nothing due (the
+    /// engine commits no extra round for them) and allocate no queue.
+    #[test]
+    fn events_nothing_waits_for_cost_no_round() {
+        let mut c = core_with_tally();
+        apply(
+            &mut c,
+            vec![
+                Op::Create {
+                    id: 2,
+                    tag: Tag::View,
+                },
+                Op::SetProp {
+                    id: 2,
+                    prop: Prop::Component(std::any::type_name::<Tally>().into()),
+                },
+                Op::Insert {
+                    parent: ROOT_ID,
+                    child: 2,
+                    before: None,
+                },
+            ],
+        );
+        c.commit().unwrap();
+        assert!(c.component_event(2, EventKind::Press, &EventPayload::None));
+        assert_eq!(texts(&c.commit().unwrap()), ["Taps 1"]);
+        assert_eq!(js_events(&mut c).len(), 1);
+        assert!(!c.has_due_answers(), "no round of its own");
+        assert!(c.commit().is_none());
+        assert!(!c.components.executor.answers_allocated());
+    }
+
+    /// A Rust view holding a `Pick`, its `value` the view's own.
+    #[component]
+    fn PickHolder() -> impl IntoElement {
+        let value = signal(1u32);
+        pick()
+            .value(crate::element::Prop::bind(move || value.get()))
+            .on_change(move |next: &u32| value.set(*next))
+    }
+
+    /// With a Rust owner, whose listener runs when the event is emitted, the
+    /// closure runs in the commit after the one that rendered what the
+    /// listener changed.
+    #[test]
+    fn after_answer_follows_a_rust_owners_render() {
+        ANSWERED.with(|a| a.borrow_mut().clear());
+        let mut c = core();
+        c.mount_root(&crate::element::Root::new::<PickHolder>(|| ()));
+        let batch = c.commit().unwrap();
+        assert_eq!(texts(&batch), ["pick 1"]);
+        let pick = batch
+            .items
+            .iter()
+            .find_map(|i| match i {
+                MountItem::Events { id, events } if events.contains(EventKind::Press) => Some(*id),
+                _ => None,
+            })
+            .expect("the pick");
+        assert!(c.component_event(pick, EventKind::Press, &EventPayload::None));
+        assert_eq!(texts(&c.commit().unwrap()), ["pick 2"]);
+        assert!(ANSWERED.with(|a| a.borrow().is_empty()));
+        // Nothing for JS; what waited is due all the same.
+        assert!(js_events(&mut c).is_empty());
+        assert!(c.has_due_answers());
+        assert!(c.commit().is_none(), "the holder's value stays");
+        assert_eq!(ANSWERED.with(|a| a.borrow().clone()), [2]);
+    }
+
     fn core_with_tally() -> Core<FakeEngine> {
         let mut c = core();
         let mut registry = Registry::new();
