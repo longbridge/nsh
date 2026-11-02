@@ -132,6 +132,17 @@ mount(App);
 | `onSelectedChange` | `.on_selected_change(..)` | `{ selected: string }` | 用户选中了另一个项目（点按、方向键、Home、End、按首字母跳转）。 |
 | `onExpand` | `.on_expand(..)` | `{ id: string }` | 用户展开了 `id` 对应的项目，在 `onExpandedChange` 之后。 |
 | `onCollapse` | `.on_collapse(..)` | `{ id: string }` | 用户收起了 `id` 对应的项目，在 `onExpandedChange` 之后。 |
+| `onAction` | `.on_action(..)` | `{ id: string }` | 用户对 `id` 对应的项目执行了操作：在没有子项目的选中项上按 Return，或在任意项目上双击、连续轻点两次，在这次点按自己的事件之后。禁用的项目和禁用的树永远不会报告它。 |
+
+选中项跟随方向键移动，所以文件浏览器在 `onAction` 中打开文件，而不是在 `onSelectedChange` 中：用方向键浏览时逐个预览，按 Return 或双击才打开用户想要的那个文件。
+
+```tsx
+<Tree
+  items={files}
+  onSelectedChange={({ selected }) => preview.set(selected)}
+  onAction={({ id }) => openFile(id)}
+/>
+```
 
 ## 部件
 
@@ -184,13 +195,14 @@ files?.revealItem("src/ui/tree.rs");
 | Right | 展开收起的文件夹；在展开的文件夹上，选中它的第一个可用的子项目。 |
 | Left | 收起展开的文件夹；在其他项目上，选中它的父项目。 |
 | Home、End | 选中第一行或最后一行。 |
-| Return、Space | 展开或收起选中的文件夹。 |
+| Return | 展开或收起选中的文件夹；在没有子项目的项目上，对它执行操作（`onAction`）。 |
+| Space | 展开或收起选中的文件夹。 |
 | 字母、数字 | 选中下一个标签以所输入内容开头的行。 |
 
 选中项被收起的项目隐藏时（应用收起了它），按键作用于那个项目的行：Right 或 Return 展开它，Down 选中它之后的一行。
 
 ## 平台说明
 
-- iOS、Android 和 Mac Catalyst：轻点选中一行，并展开或收起文件夹。
-- 桌面（macOS、Windows、Linux、GPUI）和 Web：点击效果相同，并让树获得键盘焦点，可用上面的按键在其中移动。
+- iOS、Android 和 Mac Catalyst：轻点选中一行，并展开或收起文件夹；连续轻点两次对项目执行操作（`onAction`）。
+- 桌面（macOS、Windows、Linux、GPUI）和 Web：点击效果相同，并让树获得键盘焦点，可用上面的按键在其中移动；双击对项目执行操作。
 - 每个平台都绘制应用设置的样式：树、行以及行的内容。
