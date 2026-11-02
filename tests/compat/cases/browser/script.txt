@@ -215,9 +215,9 @@ expect Ticks: 1
 tap id:case-base-hover-card-desktop
 # Open once the pointer rested on the trigger for `openDelay`.
 event text:SlowMention onMouseEnter
-wait 800
+wait 1000
 absent SlowCard
-wait 400
+wait 1200
 expect SlowCard
 expect Log: card true hover
 # Off the trigger and onto the card within `closeDelay`: it stays.
@@ -234,7 +234,7 @@ absent SlowCard
 expect Log: card false hover
 # Escape closes it at once.
 event text:SlowMention onMouseEnter
-wait 1200
+wait 2200
 expect SlowCard
 event parent:text:SlowCard onCancel
 absent SlowCard

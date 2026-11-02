@@ -3657,7 +3657,8 @@ expect CellD
 tap id:case-base-hover-card
 # `defaultOpen`: open at first; a press outside closes it.
 expect OwnCard
-tap text:Elsewhere
+touch start text:Elsewhere 5 5
+touch end
 absent OwnCard
 # A phone has no pointer to rest: a press on the trigger opens it, above
 # the trigger (20, 300), 6 points away, lined up by its start but kept 30
@@ -3677,7 +3678,8 @@ expect Life: card closed
 # A press outside closes it, and so do Escape and back.
 tap id:mention
 expect AdaCard
-tap text:Elsewhere
+touch start text:Elsewhere 5 5
+touch end
 absent AdaCard
 expect Log: card false pressOutside
 tap id:mention
