@@ -5907,6 +5907,104 @@ fn projected_states_style_a_part_without_its_accessibility() {
 }
 
 #[test]
+fn projected_data_attributes_style_a_part_and_the_group_inside_it() {
+    // A calendar's day at the start of a range: its own `data-*:` classes,
+    // and its content's `group-data-*:` ones.
+    let mut c = core();
+    view_with_classes(
+        &mut c,
+        2,
+        "group bg-white data-range-start:bg-black data-range-start:data-range-end:opacity-50",
+    );
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 3,
+                tag: Tag::View,
+            },
+            class_op(3, "h-4 w-4 group-data-range-start:translate-x-4"),
+            Op::Insert {
+                parent: 2,
+                child: 3,
+                before: None,
+            },
+        ],
+    );
+    c.commit();
+    let data = |names: &[&'static str]| Op::SetProp {
+        id: 2,
+        prop: Prop::ProjectedData(names.into()),
+    };
+    apply(&mut c, vec![data(&["range-start"])]);
+    let batch = c.commit().unwrap();
+    let day = view_style_of(&batch, 2).unwrap();
+    assert_eq!(day.background_color, Color(0x0000_00ff));
+    assert_eq!(day.opacity, 1.0);
+    assert_eq!(
+        view_style_of(&batch, 3).unwrap().transform.ops()[0].value,
+        16.0
+    );
+    // Nothing for screen readers or listeners.
+    assert!(
+        !batch.items.iter().any(|i| matches!(
+            i,
+            MountItem::ViewProps { .. } | MountItem::Events { .. } | MountItem::TrackStates { .. }
+        )),
+        "{:?}",
+        batch.items
+    );
+    // Both: the rule needing both applies.
+    apply(&mut c, vec![data(&["range-end", "range-start"])]);
+    let batch = c.commit().unwrap();
+    assert_eq!(view_style_of(&batch, 2).unwrap().opacity, 0.5);
+    // None: back to its own, and the content's.
+    apply(&mut c, vec![data(&[])]);
+    let batch = c.commit().unwrap();
+    assert_eq!(
+        view_style_of(&batch, 2).unwrap().background_color,
+        Color(0xffff_ffff)
+    );
+    assert!(view_style_of(&batch, 3).unwrap().transform.ops().is_empty());
+}
+
+#[test]
+fn projected_data_attributes_no_class_reads_send_nothing() {
+    // A view whose classes read no attribute (and that is no group), and
+    // one without classes: their attributes change nothing on screen.
+    let mut c = core();
+    view_with_classes(&mut c, 2, "bg-white hover:bg-black");
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 4,
+                tag: Tag::View,
+            },
+            Op::Insert {
+                parent: ROOT_ID,
+                child: 4,
+                before: None,
+            },
+        ],
+    );
+    c.commit();
+    for names in [&["range-start"][..], &["range-start", "today"], &[]] {
+        apply(
+            &mut c,
+            [2, 4]
+                .map(|id| Op::SetProp {
+                    id,
+                    prop: Prop::ProjectedData(names.into()),
+                })
+                .into(),
+        );
+        let items = c.commit().map(|b| b.items).unwrap_or_default();
+        assert!(items.is_empty(), "{names:?}: {items:?}");
+    }
+}
+
+#[test]
 fn a_projected_focus_styles_a_part_as_focused() {
     use crate::tailwind::state;
     // A one-time-code input's cell: `focus:` while it takes the next

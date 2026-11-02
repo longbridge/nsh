@@ -89,6 +89,7 @@ pub(super) fn split(attrs: &Attrs) -> (Attrs, Attrs) {
         element_ref: attrs.element_ref.clone(),
         bound: attrs.bound.clone(),
         projected_states: attrs.projected_states,
+        projected_data: attrs.projected_data.clone(),
         ..Attrs::default()
     };
     let holder = Attrs {
@@ -148,6 +149,13 @@ pub(super) fn merged(js: &Attrs, own: &Attrs) -> Attrs {
         element_ref: own.element_ref.clone(),
         bound: own.bound.clone(),
         projected_states: own.projected_states | js.projected_states,
+        projected_data: {
+            let mut data = own.projected_data.clone();
+            data.extend(&js.projected_data);
+            data.sort_unstable();
+            data.dedup();
+            data
+        },
         ..Attrs::default()
     }
 }
@@ -166,6 +174,7 @@ fn absorb(js: &mut Attrs, prop: &Prop) -> bool {
         Prop::Accessibility(A::Value(v)) => js.value = v.clone(),
         Prop::PointerEvents(v) => js.pointer_events = *v,
         Prop::ProjectedStates(v) => js.projected_states = *v,
+        Prop::ProjectedData(v) => js.projected_data = v.to_vec(),
         p if crate::element::host::reset(p).is_some() => {
             crate::element::host::set_in(&mut js.props, p.clone())
         }
@@ -316,6 +325,7 @@ impl<M: TextEngine> Core<M> {
         let mut js = Attrs {
             disabled: node.states & state::DISABLED != 0,
             projected_states: node.projected,
+            projected_data: node.data.to_vec(),
             ..Attrs::default()
         };
         if let Some(props) = &node.props {

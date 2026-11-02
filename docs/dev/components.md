@@ -677,6 +677,11 @@ it changes, and they are resolved again when the tokens change (`Components::app
   `.project_focused(..)` does the same for `focus:` on the part the keys act on while the control keeps the
   platform's focus (a list's highlighted option, the cell of a code input that takes the next character): NSH has
   no active descendant, and the platform's focus stays where it is.
+  What a part shows beyond the states screen readers hear is a boolean `data-*` attribute:
+  `.project_data("range-start", is_start)` (`Prop::ProjectedData`) applies the part's `data-range-start:` classes and,
+  with `group`, the `group-data-range-start:` ones inside it, as Tailwind's `data-*` variants; a view whose classes
+  read none sends nothing when its attributes change. A component names its attributes in its docs, as a calendar's
+  days do.
 - What never changes is plain Rust, decided when the view is made: `.when(variant == Variant::Ghost, |v| ..)`.
 - The app's `class` / `classList` on a component (Tailwind) is merged after the root's rules; at equal rank it wins.
   The styles a view gives a nested component element merge the same way (bound ones too: `Patch::Nested`).

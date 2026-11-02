@@ -2300,6 +2300,13 @@ pub enum Prop {
     /// components (`Interactive::project_checked`, `project_indeterminate`,
     /// `project_disabled`), never by JS.
     ProjectedStates(u16),
+    /// The boolean `data-*` attributes a part of a component shows, by
+    /// name without `data-` and sorted: its `data-<name>:` classes apply,
+    /// and with `group` the `group-data-<name>:` classes inside it (a
+    /// calendar's day at the start of a range, `data-range-start`). They
+    /// tell screen readers nothing. Set by components
+    /// (`Interactive::project_data`), never by JS.
+    ProjectedData(Box<[&'static str]>),
     /// `headerStyle` of a page: `backgroundColor`, `color` (the title's) and
     /// `tintColor` (the buttons') of its header.
     HeaderStyle(Option<std::rc::Rc<StylePatch>>),
