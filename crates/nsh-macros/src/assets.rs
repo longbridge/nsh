@@ -670,8 +670,8 @@ mod tests {
     #[test]
     fn a_woff_or_woff2_font_names_the_family_it_holds() {
         for data in [
-            &include_bytes!("../../nsh-core/tests/fonts/Pacifico-Regular.woff")[..],
-            &include_bytes!("../../nsh-core/tests/fonts/Pacifico-Regular.woff2")[..],
+            &include_bytes!("../../../tests/compat/cases/layout/fonts/Pacifico-Regular.woff")[..],
+            &include_bytes!("../../../tests/compat/cases/layout/fonts/Pacifico-Regular.woff2")[..],
         ] {
             assert_eq!(font_family(data).as_deref(), Ok("Pacifico"));
         }

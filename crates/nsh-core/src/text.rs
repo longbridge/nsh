@@ -1612,8 +1612,8 @@ mod tests {
         // TrueType comes back as it is.
         assert!(matches!(font_data(ttf), Ok(std::borrow::Cow::Borrowed(_))));
         for wrapped in [
-            &include_bytes!("../tests/fonts/Pacifico-Regular.woff")[..],
-            &include_bytes!("../tests/fonts/Pacifico-Regular.woff2")[..],
+            &include_bytes!("../../../tests/compat/cases/layout/fonts/Pacifico-Regular.woff")[..],
+            &include_bytes!("../../../tests/compat/cases/layout/fonts/Pacifico-Regular.woff2")[..],
         ] {
             let data = font_data(wrapped).expect("decompressed");
             assert_eq!(face(&data), original);
