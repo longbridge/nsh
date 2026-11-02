@@ -5,11 +5,15 @@
 //! collapse, and go to the first child and the parent), Home and End go to
 //! the ends, Return and Space expand and collapse, letters select by
 //! typeahead; the state is the app's when it sets it; `revealItem`
-//! expands what is above an item; and a key press or an expansion costs
-//! the rows it concerns, however many items there are. On macOS, where Tab
-//! stops at the tree.
+//! expands what is above an item; the keys act on the row a hidden
+//! selection is under, and the keyboard's focus shows on the first row
+//! while nothing is selected; screen readers' focus follows the keys;
+//! items that change keep the selection by id; and a key press or an
+//! expansion costs the rows it concerns, however many items there are. On
+//! macOS, where Tab stops at the tree.
 
 use std::{
+    collections::HashMap,
     sync::{
         Arc, Mutex,
         atomic::{AtomicUsize, Ordering},
@@ -18,11 +22,11 @@ use std::{
 };
 
 use nsh_base::{TreeApi, TreeEntry, TreeItem, button, tree};
-use nsh_core::{MountItem, Size, element::Root, platform::Os, prelude::*};
+use nsh_core::{Command, MountItem, NodeId, Size, element::Root, platform::Os, prelude::*};
 use nsh_engine::EngineConfig;
 use nsh_testing::Headless;
 
-/// src (lib.rs, ui (tree.rs, list.rs)), docs (guide.md, old.md disabled),
+/// src (lib.rs, ui (tree.rs, list.rs)), docs (old.md disabled, guide.md),
 /// a disabled folder `vendor` (dep.rs), README.md.
 fn files() -> Vec<TreeItem> {
     vec![
@@ -34,8 +38,8 @@ fn files() -> Vec<TreeItem> {
                     .child(TreeItem::new("src/ui/list.rs", "list.rs")),
             ),
         TreeItem::new("docs", "docs")
-            .child(TreeItem::new("docs/guide.md", "guide.md"))
-            .child(TreeItem::new("docs/old.md", "old.md").disabled(true)),
+            .child(TreeItem::new("docs/old.md", "old.md").disabled(true))
+            .child(TreeItem::new("docs/guide.md", "guide.md")),
         TreeItem::new("vendor", "vendor")
             .child(TreeItem::new("vendor/dep.rs", "dep.rs"))
             .disabled(true),
@@ -53,6 +57,8 @@ struct HarnessProps {
     disabled: bool,
     /// A `renderItem` drawing `▸` / `▾` before a folder's label.
     custom: bool,
+    /// Nothing expanded at first (else `src`).
+    collapsed: bool,
 }
 
 fn props() -> HarnessProps {
@@ -62,18 +68,27 @@ fn props() -> HarnessProps {
         follow: true,
         disabled: false,
         custom: false,
+        collapsed: false,
     }
 }
 
 /// A button `Before`, the tree (`src` expanded at first) in a 300 × 400
-/// box, a button `After`; what the app heard as `log:…`, the selection
-/// and the expanded items as `selected:…` and `expanded:…` (the app's
-/// when it controls, else the events'). F5 reveals `src/ui/tree.rs`, F6
-/// `nope`; F7 toggles `disabled`.
+/// box, its rows `focus:opacity-50`, a button `After`; what the app heard
+/// as `log:…`, the selection and the expanded items as `selected:…` and
+/// `expanded:…` (the app's when it controls, else the events'). F5
+/// reveals `src/ui/tree.rs`, F6 `nope`; F7 toggles `disabled`; F8 adds an
+/// item `new.txt` at the top, F9 takes `docs` away; F10 collapses every
+/// item (when the app controls).
 #[component]
 fn Harness(props: HarnessProps) -> impl IntoElement {
     let selected = signal(None::<SharedString>);
-    let expanded = signal(vec![SharedString::from("src")]);
+    let first: Vec<SharedString> = if props.collapsed {
+        Vec::new()
+    } else {
+        vec![SharedString::from("src")]
+    };
+    let expanded = signal(first.clone());
+    let items = signal(props.items.clone());
     let log = signal(Vec::<String>::new());
     let pressed = signal("none");
     let disabled = signal(props.disabled);
@@ -90,9 +105,17 @@ fn Harness(props: HarnessProps) -> impl IntoElement {
         }
     });
     on_key("f7", move |_| disabled.update(|d| *d = !*d));
+    on_key("f8", move |_| {
+        items.update(|i| i.insert(0, TreeItem::new("new", "new.txt")));
+    });
+    on_key("f9", move |_| {
+        items.update(|i| i.retain(|i| i.id != "docs"))
+    });
+    on_key("f10", move |_| expanded.set(Vec::new()));
     let follow = props.follow;
     let mut el = tree()
-        .items(props.items.clone())
+        .items(move || items.get())
+        .item_class("focus:opacity-50")
         .accessibility_label("Files")
         .disabled(disabled)
         .on_expanded_change(move |ids: &Vec<SharedString>| {
@@ -117,7 +140,7 @@ fn Harness(props: HarnessProps) -> impl IntoElement {
             .expanded(move || Some(expanded.get()))
             .selected(move || selected.get());
     } else {
-        el = el.default_expanded(vec![SharedString::from("src")]);
+        el = el.default_expanded(first);
     }
     if props.custom {
         el = el.render_item(|e: &TreeEntry| {
@@ -157,20 +180,89 @@ fn Harness(props: HarnessProps) -> impl IntoElement {
 }
 
 fn launch(root: Root) -> Headless {
+    launch_with(root, false)
+}
+
+fn launch_with(root: Root, screen_reader: bool) -> Headless {
     let mut config = EngineConfig {
         viewport: Size::new(px(800.0), px(844.0)),
         ..EngineConfig::new(root)
     };
     config.environment.os = Os::MacOs;
+    config.environment.screen_reader = screen_reader;
     let mut app = Headless::start(config).unwrap();
     app.first_render().unwrap();
     app
 }
 
 fn start(props: HarnessProps) -> Headless {
-    let mut app = launch(Root::new::<Harness>(move || props.clone()));
+    start_with(props, false)
+}
+
+fn start_with(props: HarnessProps, screen_reader: bool) -> Headless {
+    let mut app = launch_with(Root::new::<Harness>(move || props.clone()), screen_reader);
     app.wait_for("role:treeitem[src]").unwrap();
     app
+}
+
+/// Each view's opacity as the batches applied from now on set it: a row
+/// shows the keyboard's focus (`focus:opacity-50`) at 0.5.
+type Opacities = Arc<Mutex<HashMap<NodeId, f32>>>;
+
+fn watch(app: &mut Headless) -> Opacities {
+    let opacities = Opacities::default();
+    let into = opacities.clone();
+    app.observe(move |_, batch| {
+        for item in &batch.items {
+            if let MountItem::ViewStyle { id, style } = item {
+                into.lock().unwrap().insert(*id, style.opacity);
+            }
+        }
+    });
+    opacities
+}
+
+/// The view a press on `selector` reaches.
+fn id(app: &Headless, selector: &str) -> NodeId {
+    app.screen()
+        .press_target(selector)
+        .unwrap()
+        .unwrap_or_else(|| panic!("no `{selector}`"))
+}
+
+/// Waits until the row of `label`, alone of `labels`, shows the keyboard's
+/// focus.
+fn see_focus_on(app: &mut Headless, opacities: &Opacities, label: &str, labels: &[&str]) {
+    let ids: Vec<(&str, NodeId)> = labels
+        .iter()
+        .map(|&l| (l, id(app, &format!("role:treeitem[{l}]"))))
+        .collect();
+    let opacities = opacities.clone();
+    app.wait_until(
+        &format!("the focus on {label}"),
+        Duration::from_secs(5),
+        move |_| {
+            let o = opacities.lock().unwrap();
+            ids.iter()
+                .all(|&(l, id)| (o.get(&id).copied().unwrap_or(1.0) < 1.0) == (l == label))
+        },
+    )
+    .unwrap();
+}
+
+/// Waits until the row of `label` takes the screen reader's focus.
+fn see_a11y_focus_on(app: &mut Headless, label: &str) {
+    let row = id(app, &format!("role:treeitem[{label}]"));
+    app.wait_until(
+        &format!("the screen reader's focus on {label}"),
+        Duration::from_secs(5),
+        move |s| {
+            s.commands()
+                .iter()
+                .any(|(id, c)| *id == row && *c == Command::AccessibilityFocus)
+        },
+    )
+    .unwrap();
 }
 
 /// Tab from Before into the tree.
@@ -382,6 +474,12 @@ fn a_controlled_state_is_the_apps() {
     .unwrap();
     // Not followed: nothing is selected, and Down reports the same row.
     assert!(!app.screen().selected("role:treeitem[src]").unwrap());
+    key(&mut app, "down");
+    app.wait_until("the same row reported", Duration::from_secs(5), |s| {
+        s.texts().contains(&"log:selected=src selected=src")
+    })
+    .unwrap();
+    assert!(!app.screen().selected("role:treeitem[src]").unwrap());
     app.press("role:treeitem[docs]").unwrap();
     app.wait(Duration::from_millis(50)).unwrap();
     assert!(log(&app).ends_with("selected=docs expanded=src,docs expand=docs"));
@@ -409,14 +507,213 @@ fn a_disabled_tree_takes_no_press_and_is_no_stop() {
 
 #[test]
 fn reveal_item_expands_the_items_above_it() {
-    let mut app = start(props());
+    let mut app = start(HarnessProps {
+        collapsed: true,
+        ..props()
+    });
     key(&mut app, "f5");
     app.wait_for("role:treeitem[tree.rs]").unwrap();
-    assert!(log(&app).ends_with("expanded=src,src/ui expand=src/ui"));
+    // Every collapsed item above it, in one change, the outermost first.
+    assert_eq!(log(&app), "expanded=src,src/ui expand=src expand=src/ui");
+    // Shown already: nothing to expand.
+    key(&mut app, "f5");
+    app.wait(Duration::from_millis(50)).unwrap();
+    assert_eq!(log(&app), "expanded=src,src/ui expand=src expand=src/ui");
     // An unknown id does nothing.
     key(&mut app, "f6");
     app.wait(Duration::from_millis(50)).unwrap();
-    assert!(log(&app).ends_with("expand=src/ui"));
+    assert_eq!(log(&app), "expanded=src,src/ui expand=src expand=src/ui");
+}
+
+#[test]
+fn reveal_item_only_expands_the_items_above_a_shown_one() {
+    // `src` is expanded: only `src/ui` is.
+    let mut app = start(props());
+    key(&mut app, "f5");
+    app.wait_for("role:treeitem[tree.rs]").unwrap();
+    assert_eq!(log(&app), "expanded=src,src/ui expand=src/ui");
+}
+
+#[test]
+fn keys_on_a_hidden_selection_act_on_the_row_it_is_hidden_under() {
+    let mut app = start(HarnessProps {
+        controlled: true,
+        ..props()
+    });
+    let opacities = watch(&mut app);
+    enter(&mut app);
+    // src/ui/tree.rs selected, then every item collapsed.
+    for _ in 0..3 {
+        key(&mut app, "down");
+    }
+    key(&mut app, "right");
+    key(&mut app, "right");
+    see(&mut app, "selected:src/ui/tree.rs");
+    key(&mut app, "f10");
+    app.wait_for_gone("role:treeitem[lib.rs]", Duration::from_secs(5))
+        .unwrap();
+    let before = log(&app);
+    // The keyboard's focus is on `src`, the row it is hidden under.
+    see_focus_on(&mut app, &opacities, "src", &["src", "docs", "README.md"]);
+    // Left: `src` is collapsed and at the top: nothing (not the hidden
+    // `src/ui`).
+    key(&mut app, "left");
+    app.wait(Duration::from_millis(50)).unwrap();
+    assert_eq!(log(&app), before);
+    // Right expands `src`, then `src/ui`, under which it is now.
+    key(&mut app, "right");
+    app.wait_for("role:treeitem[ui]").unwrap();
+    assert_eq!(log(&app), format!("{before} expanded=src expand=src"));
+    see_focus_on(&mut app, &opacities, "ui", &["src", "lib.rs", "ui"]);
+    key(&mut app, "right");
+    app.wait_for("role:treeitem[tree.rs]").unwrap();
+    assert!(log(&app).ends_with("expanded=src,src/ui expand=src/ui"));
+    see_focus_on(&mut app, &opacities, "tree.rs", &["src", "ui", "tree.rs"]);
+    assert!(app.screen().selected("role:treeitem[tree.rs]").unwrap());
+}
+
+#[test]
+fn return_on_a_hidden_selection_expands_the_row_it_is_hidden_under() {
+    let mut app = start(HarnessProps {
+        controlled: true,
+        ..props()
+    });
+    enter(&mut app);
+    // `src/ui` (a collapsed folder) selected, then `src` collapsed.
+    for _ in 0..3 {
+        key(&mut app, "down");
+    }
+    see(&mut app, "selected:src/ui");
+    key(&mut app, "f10");
+    app.wait_for_gone("role:treeitem[ui]", Duration::from_secs(5))
+        .unwrap();
+    let before = log(&app);
+    key(&mut app, "enter");
+    app.wait_for("role:treeitem[ui]").unwrap();
+    assert_eq!(log(&app), format!("{before} expanded=src expand=src"));
+    assert_eq!(app.screen().count("role:treeitem[tree.rs]"), Ok(0));
+}
+
+#[test]
+fn with_nothing_selected_the_focus_shows_on_the_first_row() {
+    let mut app = start(props());
+    let opacities = watch(&mut app);
+    enter(&mut app);
+    see_focus_on(
+        &mut app,
+        &opacities,
+        "src",
+        &["src", "lib.rs", "ui", "docs"],
+    );
+    assert_eq!(log(&app), "");
+    // Down selects it; the focus moves with the selection.
+    key(&mut app, "down");
+    see(&mut app, "selected:src");
+    see_focus_on(
+        &mut app,
+        &opacities,
+        "src",
+        &["src", "lib.rs", "ui", "docs"],
+    );
+    key(&mut app, "down");
+    see(&mut app, "selected:src/lib.rs");
+    see_focus_on(
+        &mut app,
+        &opacities,
+        "lib.rs",
+        &["src", "lib.rs", "ui", "docs"],
+    );
+    // Out of the tree: no row shows it.
+    key(&mut app, "tab");
+    see_focus_on(&mut app, &opacities, "", &["src", "lib.rs", "ui", "docs"]);
+}
+
+#[test]
+fn the_screen_readers_focus_follows_the_keys() {
+    let mut app = start_with(props(), true);
+    enter(&mut app);
+    // Into the tree: to the row the keys act on.
+    see_a11y_focus_on(&mut app, "src");
+    key(&mut app, "down");
+    key(&mut app, "down");
+    see(&mut app, "selected:src/lib.rs");
+    see_a11y_focus_on(&mut app, "lib.rs");
+    key(&mut app, "end");
+    see(&mut app, "selected:README.md");
+    see_a11y_focus_on(&mut app, "README.md");
+}
+
+#[test]
+fn right_on_an_expanded_folder_goes_to_its_first_enabled_child() {
+    let mut app = start(props());
+    enter(&mut app);
+    key(&mut app, "end");
+    key(&mut app, "up");
+    see(&mut app, "selected:docs");
+    key(&mut app, "right");
+    app.wait_for("role:treeitem[guide.md]").unwrap();
+    // `old.md`, the first child, is disabled.
+    key(&mut app, "right");
+    see(&mut app, "selected:docs/guide.md");
+}
+
+#[test]
+fn items_that_change_keep_the_selection_by_id() {
+    let mut app = start(props());
+    enter(&mut app);
+    key(&mut app, "end");
+    key(&mut app, "up");
+    key(&mut app, "enter");
+    app.wait_for("role:treeitem[guide.md]").unwrap();
+    see(&mut app, "selected:docs");
+    // An item before it: every node moves on by one, the lit row with it.
+    key(&mut app, "f8");
+    app.wait_for("role:treeitem[new.txt]").unwrap();
+    let screen = app.screen();
+    for label in ["new.txt", "src", "lib.rs", "ui", "guide.md", "README.md"] {
+        assert!(
+            !screen.selected(&format!("role:treeitem[{label}]")).unwrap(),
+            "{label} is not selected"
+        );
+    }
+    assert!(screen.selected("role:treeitem[docs]").unwrap());
+    // The keys go on from it (past the disabled `old.md`).
+    key(&mut app, "down");
+    see(&mut app, "selected:docs/guide.md");
+    // The selected item taken away: nothing is selected, Down starts over.
+    key(&mut app, "f9");
+    app.wait_for_gone("role:treeitem[docs]", Duration::from_secs(5))
+        .unwrap();
+    for label in ["new.txt", "src", "lib.rs", "ui", "README.md"] {
+        assert!(
+            !app.screen()
+                .selected(&format!("role:treeitem[{label}]"))
+                .unwrap()
+        );
+    }
+    key(&mut app, "down");
+    see(&mut app, "selected:new");
+}
+
+#[test]
+fn an_id_given_twice_expands_its_first_item_once() {
+    let mut app = start(HarnessProps {
+        items: vec![
+            TreeItem::new("src", "src"),
+            TreeItem::new("x", "first").child(TreeItem::new("x/a", "a")),
+            TreeItem::new("x", "second").child(TreeItem::new("x/b", "b")),
+        ],
+        ..props()
+    });
+    app.press("role:treeitem[second]").unwrap();
+    app.wait_for("role:treeitem[a]").unwrap();
+    // Again: `x` is expanded already, nothing to report (it was pushed
+    // again on each press).
+    app.press("role:treeitem[second]").unwrap();
+    app.wait(Duration::from_millis(50)).unwrap();
+    assert_eq!(log(&app), "selected=x expanded=src,x expand=x");
+    see(&mut app, "expanded:src,x");
+    assert_eq!(app.screen().count("role:treeitem[b]"), Ok(0));
 }
 
 #[test]

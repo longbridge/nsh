@@ -50,14 +50,18 @@ function Mention() {
 ```
 
 The trigger keeps its own role, presses and look: a view with `role="link"` and its own `onPress` still goes where it
-goes when pressed, and the card adds a preview to it. The content is made each time the card opens, so it can load what it shows then.
+goes when pressed, and the card adds a preview to it. The content is made each time the card opens, so it can load what it shows then. On
+phones and tablets, where a press opens the card, the trigger tells screen readers whether its card is open. In a
+[Toolbar](./toolbar.md) the trigger can be one of its items; what the card shows is not: its buttons and links keep
+their own Tab stops and the toolbar's `disabled` leaves them as they are.
 
 ## Delays
 
 `openDelay` keeps the card from flashing open as the pointer crosses the trigger on its way elsewhere; `closeDelay`
 gives the pointer time to cross the gap between the trigger and the card. Both are milliseconds. The pointer and the
 delays are followed natively, so resting on a trigger and moving between it and the card run none of your code until
-the card opens or closes.
+the card opens or closes. An `openDelay` of `Infinity` leaves opening to the app (and to a press on a touch screen); a
+`closeDelay` of `Infinity` leaves closing to Escape, a press outside and the app.
 
 ```tsx
 <HoverCard openDelay={300} closeDelay={150} trigger={<Text>AAPL</Text>}>
@@ -108,8 +112,8 @@ inside the safe area. `onPosition({ placement, bounds, available })` says where 
 |---|---|---|---|---|
 | `open` | `.open(..)` | `boolean` | none | Open, controlled by the app. |
 | `defaultOpen` | `.default_open(..)` | `boolean` | `false` | Open at first, without `open`. |
-| `openDelay` | `.open_delay(..)` | `number` | `600` | Milliseconds the pointer rests on the trigger, or the focus stays on it, before it opens. |
-| `closeDelay` | `.close_delay(..)` | `number` | `300` | Milliseconds the pointer is away from the trigger and the card before it closes. |
+| `openDelay` | `.open_delay(..)` | `number` | `600` | Milliseconds the pointer rests on the trigger, or the focus stays on it, before it opens; `Infinity`: never by itself. |
+| `closeDelay` | `.close_delay(..)` | `number` | `300` | Milliseconds the pointer is away from the trigger and the card before it closes; `Infinity`: never by itself. |
 | `placement` | `.placement(..)` | `"top" \| "bottom" \| "left" \| "right"` | `"bottom"` | The side of the trigger it goes on. |
 | `align` | `.align(..)` | `"start" \| "center" \| "end"` | `"center"` | How it lines up with the trigger along that side. |
 | `offset` | `.offset(..)` | `number` | `0` | The gap between the trigger and the card. |

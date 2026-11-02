@@ -2286,7 +2286,8 @@ impl Mounter {
         self.set_events(id, events);
     }
 
-    /// An interaction state of `id` changed: tells the core if it reads it.
+    /// An interaction state of `id` changed: tells the core if it reads it
+    /// (the focus always: `nsh_core::input::reported_states`).
     fn report_state(&mut self, id: NodeId, bit: u16, on: bool) {
         let Some(s) = self.slot_mut(id) else { return };
         let states = if on { s.states | bit } else { s.states & !bit };
@@ -2294,9 +2295,9 @@ impl Mounter {
             return;
         }
         s.states = states;
-        let tracked = s.tracked;
-        if tracked & bit != 0 {
-            self.control.set_states(id, states & tracked);
+        let reported = nsh_core::input::reported_states(s.tracked);
+        if reported & bit != 0 {
+            self.control.set_states(id, states & reported);
         }
     }
 
