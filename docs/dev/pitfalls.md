@@ -560,6 +560,10 @@ Things that were found the hard way. Read the section of the area you change bef
   text, no caret, 1 px wide) showed a bar at the caret while composing (Chrome 156, `Input.imeSetComposition`). A
   field that shows nothing is `opacity: 0` (`encode/input.rs`, `shows_nothing`); it keeps the focus and the input
   method.
+- **`tabular-nums` does not stop a font kerning its digits**: a font without a `tnum` feature (its digits already of
+  one width) keeps its `kern` pairs, so Arial (macOS) and Liberation Sans, Chrome's `sans-serif` on Linux, draw `11`
+  1.48 px narrower than two `1`s at 20 px (Chrome 156: `$1,111.11` summed 89 from its characters, drawn 84.53). A
+  figure's width adds each adjacent pair's kerning to its characters' (`css::figure_width`).
 
 ## Testing on simulators and emulators
 
