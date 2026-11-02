@@ -21,13 +21,13 @@ test("the FAQ opens one answer at a time and closes the open one", async () => {
   await app.waitFor("FAQ: returns");
   expect(app.shows("role:region[How do I return an item?]")).toBe(true);
   // The answer that was open springs shut, then leaves.
-  await app.clock.runFor(400);
+  await app.clock!.runFor(400);
   expect(app.shows("role:region[When will my order ship?]")).toBe(false);
   expect(app.texts()).toContain("Reading: How do I return an item?");
   // Its own trigger closes it.
   await app.press("role:button[How do I return an item?]");
   await app.waitFor("FAQ: all closed");
-  await app.clock.runFor(400);
+  await app.clock!.runFor(400);
   expect(app.texts()).toContain("All closed");
   expect(app.shows("role:region[How do I return an item?]")).toBe(false);
   expect(app.shows("role:region[When will my order ship?]")).toBe(false);

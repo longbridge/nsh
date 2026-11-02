@@ -71,6 +71,7 @@ mount(() => <Text>{{shown()}}</Text>);
         trace: false,
         network: None,
         websocket: None,
+        refuse_connections: None,
         filesystem: None,
         assets: None,
         environment: Environment {
@@ -641,6 +642,7 @@ mount(() => <Text>{shown()}</Text>);
         trace: false,
         network: None,
         websocket: None,
+        refuse_connections: None,
         filesystem: None,
         assets: None,
         environment: Environment {

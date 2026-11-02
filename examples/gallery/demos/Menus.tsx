@@ -8,7 +8,7 @@ import { alpha, Badge, Button, Caption, Card, colors, DemoPage, finish, isDark, 
 
 // The look of every menu here is the gallery's: `nsh/base` draws none.
 
-const pointer = platform.idiom === "desktop";
+const pointer = platform.desktop;
 
 /** The sheet at the bottom on touch screens; on desktops the popup's box
  * keeps no look, its `Panel` has it. */
@@ -311,9 +311,9 @@ export function Menus() {
       "mod+alt+b": () => arrange(() => sidebar.set(!sidebar())),
       "mod+alt+shift+z": redo,
     });
-    const key = (k: string) => (platform.idiom === "desktop" ? keymap.label(k) : undefined);
+    const key = (k: string) => (platform.desktop ? keymap.label(k) : undefined);
     return (
-      <Card icon="lists" title="Menu bar" subtitle={platform.idiom === "desktop" ? "Hover across submenus; the shortcuts work too" : "Each menu a sheet; submenus take its place"}>
+      <Card icon="lists" title="Menu bar" subtitle={platform.desktop ? "Hover across submenus; the shortcuts work too" : "Each menu a sheet; submenus take its place"}>
         <View style={{ flexDirection: "row", gap: 2, marginLeft: pointer ? -10 : 0 }}>
           <Menu offset={4} margin={8} popupStyle={sheet} backdropStyle={backdrop} onOpenChange={changed("File")} trigger={<Chip bar label="File" open={isOpen("File")} />}>
             <Panel>
@@ -407,7 +407,7 @@ export function Menus() {
       </Panel>
     );
     return (
-      <Card icon="photos" title="On the rows of a list" subtitle={platform.idiom === "desktop" ? "Right click a row, or its ⋯ button" : "Hold a finger on a row, or press its ⋯"}>
+      <Card icon="photos" title="On the rows of a list" subtitle={platform.desktop ? "Right click a row, or its ⋯ button" : "Hold a finger on a row, or press its ⋯"}>
         <If when={files().length > 0} else={<Caption label="No files left" />}>
           <View>
             <Each of={files()} key={(f) => f.id}>
@@ -452,7 +452,7 @@ export function Menus() {
     const placement = signal<"top" | "bottom" | "left" | "right">("bottom");
     const align = signal<"start" | "center" | "end">("start");
     return (
-      <Card icon="components" title="Where it goes" subtitle={platform.idiom === "desktop" ? "The side and alignment; it flips where there is no room" : "Phones show menus as sheets: try a desktop"}>
+      <Card icon="components" title="Where it goes" subtitle={platform.desktop ? "The side and alignment; it flips where there is no room" : "Phones show menus as sheets: try a desktop"}>
         <Segmented
           size="small"
           options={[{ value: "top", label: "Top" }, { value: "bottom", label: "Bottom" }, { value: "left", label: "Left" }, { value: "right", label: "Right" }]}
@@ -484,7 +484,7 @@ export function Menus() {
       <Card icon="scroll" title="A long menu" subtitle="Twenty choices in a menu that scrolls">
         <Menu offset={4} margin={8} popupStyle={sheet} backdropStyle={backdrop} onOpenChange={changed("Time zone")} trigger={<Chip label={zone()} icon="search" open={isOpen("Time zone")} />}>
           <Panel flush>
-            <Scroll style={{ maxHeight: platform.idiom === "desktop" ? 280 : 360 }} contentStyle={{ padding: 6 }}>
+            <Scroll style={{ maxHeight: platform.desktop ? 280 : 360 }} contentStyle={{ padding: 6 }}>
               <Each of={ZONES}>{(z) => <Item label={z()} radio checked={zone() === z()} onSelect={() => zone.set(z())} />}</Each>
             </Scroll>
           </Panel>
@@ -503,7 +503,7 @@ export function Menus() {
     };
     keymap.bind("mod+shift+p", () => open.set(!open()));
     return (
-      <Card icon="spark" title="Opened by the app" subtitle="A controlled menu: a button or a shortcut opens it" right={platform.idiom === "desktop" ? <Badge label={keymap.label("mod+shift+p")} /> : undefined}>
+      <Card icon="spark" title="Opened by the app" subtitle="A controlled menu: a button or a shortcut opens it" right={platform.desktop ? <Badge label={keymap.label("mod+shift+p")} /> : undefined}>
         <Menu
           open={open()}
           onOpenChange={({ open: next, reason }) => {

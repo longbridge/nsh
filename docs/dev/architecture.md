@@ -46,7 +46,7 @@ Input                        native gestures -> EngineControl::dispatch_event ->
   drawn with GSK nodes in `snapshot`; each commit wakes the GTK main loop once (`MainContext::invoke`); native
   animations run on the frame clock.
 - **macOS** (AppKit, `macos.md`): one flipped, layer-backed `NSView` per node at the core's frames, decorated by Core
-  Animation (the iOS backend's), text and canvases drawn in `drawRect:`, desktop input and scroll views as on Linux; each
+  Animation (the iOS backend's), text and canvases drawn into content layers, desktop input and scroll views as on Linux; each
   commit is one main-queue hop; native animations run on the root's display link.
 - **Windows** (Win32, `windows.md`): one retained `NshView` per node, the whole tree drawn by the surface's window
   with Direct2D into a flip-model swap chain (no child windows but web views and components' own windows); each
@@ -74,7 +74,9 @@ Input                        native gestures -> EngineControl::dispatch_event ->
   response), running it before going on, as Playwright's `clock.runFor` and Jest's fake timers do. A manual clock
   that moves with frames (`Clock::with_frames`: a test's app on a real platform, `nsh test --target`) also moves to a
   frame after the last (`time::FRAME`) with each display frame, and runs the frames the app waits for on the way
-  while it is moved. QuickJS reads the
+  while it is moved. `EngineControl::flush` runs what was sent and what is due now without moving the clock, and
+  answers whether the engine is idle (nothing queued or due now, no request in flight): a headless step on a manual clock
+  settles with it instead of waiting for quiet. QuickJS reads the
   system's time in C for `Date` and `performance`, so on a manual clock `nsh-js` replaces them (`clock.rs`: a native
   `Date` constructor that hands the intrinsic the clock's time and shares its prototype, and a `performance` of the
   same shape). The idle collection keeps the system's time.

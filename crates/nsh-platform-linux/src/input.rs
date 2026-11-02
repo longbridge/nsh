@@ -386,6 +386,8 @@ fn cursor_name(cursor: Cursor) -> Option<&'static str> {
         Cursor::ZoomOut => "zoom-out",
         Cursor::ColResize => "col-resize",
         Cursor::RowResize => "row-resize",
+        Cursor::NwseResize => "nwse-resize",
+        Cursor::NeswResize => "nesw-resize",
         Cursor::None => "none",
     })
 }
@@ -2166,6 +2168,8 @@ mod tests {
         assert_eq!(cursor_name(Cursor::Default), Some("default"));
         assert_eq!(cursor_name(Cursor::Pointer), Some("pointer"));
         assert_eq!(cursor_name(Cursor::NotAllowed), Some("not-allowed"));
+        assert_eq!(cursor_name(Cursor::NwseResize), Some("nwse-resize"));
+        assert_eq!(cursor_name(Cursor::NeswResize), Some("nesw-resize"));
     }
 
     #[test]

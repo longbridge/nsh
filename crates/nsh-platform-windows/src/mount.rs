@@ -222,6 +222,9 @@ impl Mounter {
                 let Some(view) = &self.get(*id) else { return };
                 let old = std::mem::replace(&mut view.state_mut().style, style.clone());
                 crate::input::style_changed(view);
+                if old.cursor != style.cursor {
+                    crate::input::cursor_changed(surface);
+                }
                 crate::transition::style_changed(surface, view, &old);
                 crate::access::style_changed(view, &old);
                 view.moved();
@@ -323,6 +326,8 @@ impl Mounter {
                     crate::canvas::set(surface, view, drawing.clone());
                 }
             }
+            // Effects and transitions: this platform does not draw them yet.
+            MountItem::ShaderTransition { .. } | MountItem::ShaderInput { .. } => {}
             MountItem::Shader { id, layer } => {
                 if let Some(view) = &self.get(*id) {
                     crate::shader::set(surface, view, layer.clone());
@@ -494,7 +499,10 @@ fn redrawn(item: &MountItem) -> Redraw {
         | MountItem::LayoutAnimation(_)
         | MountItem::Animation(_)
         | MountItem::AnimationBindings { .. }
-        | MountItem::ComponentPropSlots { .. } => Redraw::Nothing,
+        | MountItem::ComponentPropSlots { .. }
+        // Effects and transitions: this platform does not draw them yet.
+        | MountItem::ShaderTransition { .. }
+        | MountItem::ShaderInput { .. } => Redraw::Nothing,
         MountItem::Frame { id, .. }
         | MountItem::ViewStyle { id, .. }
         | MountItem::Text { id, .. }

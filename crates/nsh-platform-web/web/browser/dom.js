@@ -56,11 +56,26 @@ export function createDom(invoke, values, reactive, live, wake) {
     if (!held) heldProps.set(node, held = new Map());
     if (value === undefined || value === null) held.delete(name); else held.set(name, value);
   };
+  const dynamic = (value, depth = 0) => typeof value === "function" || (depth < 64 && Array.isArray(value) && value.some(item => dynamic(item, depth + 1)));
+  const itemMemo = fn => reactive.computed(() => { const value = fn(); return typeof value === "function" ? itemMemo(value) : value; });
+  const memoize = items => items.length > 1 && items.some(item => typeof item === "function")
+    ? items.map(item => typeof item === "function" ? itemMemo(item) : item)
+    : items;
+  // As QuickJS's insert (Solid's insertExpression): a returned function gets
+  // an effect of its own and each function of an array a memo of its own;
+  // tracked by the outer effect, what they read would make the components again.
   const insert = (parent, value, before = null) => {
     let previous = [];
-    const update = () => { previous = call(308, [parent, value, previous, before]); };
-    // Rust unwraps nested functions in arrays under this tracking owner.
-    reactive.renderEffect(update);
+    const show = value => { previous = call(308, [parent, value, previous, before]); };
+    const run = value => {
+      if (typeof value === "function") {
+        value = value();
+        if (typeof value === "function") { reactive.renderEffect(() => run(value)); return; }
+      }
+      if (Array.isArray(value) && dynamic(value)) { const items = memoize(value); reactive.renderEffect(() => show(items)); }
+      else show(value);
+    };
+    reactive.renderEffect(() => run(value));
   };
   const append = (parent, child) => {
     if (values.nodeIds.has(child)) call(302, [parent, child, null]);

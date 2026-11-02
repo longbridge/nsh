@@ -7,7 +7,7 @@ import { LucideIcon, type LucideIconName } from "../icons";
 import { alpha, Caption, Card, colors, finish, focusRing, hovered, mono, radius, toneColor, toneTint, type Tone } from "../ui";
 
 /** A pointer and a keyboard: desktop density. */
-export const pointer = platform.idiom === "desktop";
+export const pointer = platform.desktop;
 
 /** A tap or a click, as the device says it. */
 export const tap = pointer ? "Click" : "Tap";

@@ -11,7 +11,7 @@ export { Toasts as ToastDemo } from "./Toasts";
 function Trigger(props: { label: string; open?: boolean }) {
   // The gallery's secondary button (`Button`), as a plain view: the overlay
   // and the popover take its presses and anchor to it.
-  const pointer = platform.idiom === "desktop";
+  const pointer = platform.desktop;
   return (
     <View
       hoverStyle={props.open ? undefined : finish.hover}
@@ -49,7 +49,7 @@ export function OverlayDemo() {
     let anchor: ViewRef | undefined;
     return (
       <Card icon="components" title="Overlay" subtitle="A box that clips its content, with an overlay anchored inside it" right={<Badge label="nsh" />}>
-        <View style={{ height: platform.idiom === "desktop" ? 48 : 56, overflow: "hidden", borderRadius: radius.inset, backgroundColor: colors.inset, justifyContent: "center", paddingHorizontal: 10 }}>
+        <View style={{ height: platform.desktop ? 48 : 56, overflow: "hidden", borderRadius: radius.inset, backgroundColor: colors.inset, justifyContent: "center", paddingHorizontal: 10 }}>
           <View ref={anchor} onPress={() => open.set(!open())} style={{ alignSelf: "flex-start" }}>
             <Trigger label={open() ? "Close" : "Open the overlay"} open={open()} />
           </View>

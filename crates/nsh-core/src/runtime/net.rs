@@ -42,24 +42,29 @@ impl Net {
     /// `"network"`, `resource` `"host:port"`, otherwise); at most 32
     /// sockets per VM (`ERR_NSH_QUOTA_EXCEEDED`). A failed connection
     /// rejects with the OS's code (`ECONNREFUSED`, `ENOTFOUND`,
-    /// `ETIMEDOUT`).
+    /// `ETIMEDOUT`); one the host refuses (a test's network,
+    /// `System::refuse_connections`) with the host's error.
     pub(crate) fn connect(options: ConnectOptions, sys: System) -> Result<Later<Socket>, JsError> {
         let ConnectOptions { host, port } = options;
-        if !sys.access.allows_socket(&host, port) {
+        let shown = || {
             let host = host.to_ascii_lowercase();
-            let host = if host.contains(':') && !host.starts_with('[') {
-                format!("[{host}]")
+            if host.contains(':') && !host.starts_with('[') {
+                format!("[{host}]:{port}")
             } else {
-                host
-            };
+                format!("{host}:{port}")
+            }
+        };
+        if !sys.access.allows_socket(&host, port) {
+            let target = shown();
             return Err(JsError::access_denied(
                 format!(
-                    "a socket to `{host}:{port}` is not granted; add \"{host}:{port}\" to capabilities.network.sockets"
+                    "a socket to `{target}` is not granted; add \"{target}\" to capabilities.network.sockets"
                 ),
                 "network",
-                format!("{host}:{port}"),
+                target,
             ));
         }
+        sys.check_connection(&shown())?;
         if cfg!(target_arch = "wasm32") {
             return Err(unavailable());
         }
