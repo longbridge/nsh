@@ -11,7 +11,7 @@
 //! Moving between destinations leaves one and enters the other; leaving the
 //! window, dropping, and the destination's removal or disablement clear it.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 
 use nsh_core::{EventKind, EventPayload, NodeId};
 
@@ -21,14 +21,21 @@ use crate::{surface::Surface, view::NshView};
 #[derive(Default)]
 pub(crate) struct State {
     target: RefCell<Option<NshView>>,
+    /// A [`clear`] is scheduled for a drag that ended ([`needs_clear`]).
+    clearing: Cell<bool>,
 }
 
 fn set_target(surface: &Surface, target: Option<NshView>) {
-    let mut current = surface.file_drop.target.borrow_mut();
-    if current.as_ref().map(NshView::id) == target.as_ref().map(NshView::id) {
-        return;
-    }
-    if let Some(previous) = current.take()
+    let previous = {
+        let mut current = surface.file_drop.target.borrow_mut();
+        if current.as_ref().map(NshView::id) == target.as_ref().map(NshView::id) {
+            return;
+        }
+        std::mem::replace(&mut *current, target.clone())
+    };
+    // The events go out once the destination is stored and no longer
+    // borrowed, so whatever handles them may ask for it again.
+    if let Some(previous) = previous
         && previous.state().events.contains(EventKind::FileDragLeave)
     {
         surface.event(previous.id(), EventKind::FileDragLeave, EventPayload::None);
@@ -38,12 +45,18 @@ fn set_target(surface: &Surface, target: Option<NshView>) {
     {
         surface.event(next.id(), EventKind::FileDragEnter, EventPayload::None);
     }
-    *current = target;
 }
 
-/// Whether a file drag has a destination.
-pub(crate) fn active(surface: &Surface) -> bool {
-    surface.file_drop.target.borrow().is_some()
+/// No drag is active: whether the last one still has a destination for
+/// which no [`clear`] is scheduled yet. Answering yes counts the clear as
+/// scheduled, so a window redrawn again before it runs schedules no other.
+pub(crate) fn needs_clear(surface: &Surface) -> bool {
+    let state = &surface.file_drop;
+    if state.clearing.get() || state.target.borrow().is_none() {
+        return false;
+    }
+    state.clearing.set(true);
+    true
 }
 
 /// The drag moved to `(x, y)` (root points).
@@ -53,6 +66,7 @@ pub(crate) fn update(surface: &Surface, x: f32, y: f32) {
 
 /// The drag left the window or ended.
 pub(crate) fn clear(surface: &Surface) {
+    surface.file_drop.clearing.set(false);
     set_target(surface, None);
 }
 

@@ -819,7 +819,7 @@ impl Render for AppView {
         let dragging = cx.has_active_drag();
         // A file drag that left the window, or ended without a drop, leaves
         // its destination (GPUI redraws the window as it ends).
-        if !dragging && crate::file_drop::active(&self.surface) {
+        if !dragging && crate::file_drop::needs_clear(&self.surface) {
             let surface = self.surface.clone();
             cx.defer(move |cx| {
                 crate::file_drop::clear(&surface);
@@ -838,6 +838,9 @@ impl Render for AppView {
             // While something is dragged, a layer over the surface follows
             // and takes files from other applications: the surface's hitbox
             // blocks the mouse for the elements behind it, this div included.
+            // GPUI does not tell what is dragged, so the layer comes with any
+            // drag; it listens only to `ExternalPaths`, and its hitbox does
+            // not block the mouse, so the surface under it stays hovered.
             .when(dragging, |div| {
                 div.child(
                     gpui::div()
