@@ -777,3 +777,204 @@ test("a page shader that cannot draw leaves the change to the page's own transit
   const stack = { getBoundingClientRect: () => ({ width: 390, height: 844 }) };
   assert.equal(player.shaderNav(stack, {}, { layer: shaderLayer(2), ms: 350 }, false, () => {}), false);
 });
+
+/** A screen of a stack, with a page's `animation` and maybe a shader. */
+function screenOf(stack, id, animation, navShader = null) {
+  const screen = { _id: id, _kind: "screen", _screen: { animation }, _navShader: navShader, style: {}, classList: { remove() {}, add() {} }, parentNode: stack };
+  stack.children.push(screen);
+  return screen;
+}
+
+/** A stack and a player whose page shaders are recorded (`calls`), running or not (`runs`). */
+function stackPlayer(runs) {
+  const { player, sent } = fakePlayer();
+  const calls = [];
+  const stack = { children: [] };
+  Object.assign(player, {
+    shaderNav: (host, upper, nav, reverse, done) => {
+      calls.push({ host, upper, reverse, done });
+      return runs;
+    },
+    syncHistorySoon() {},
+  });
+  return { player, sent, stack, calls };
+}
+
+test("going back with animation \"none\" goes through the page's shader", () => {
+  const { player, stack, calls } = stackPlayer(true);
+  const below = screenOf(stack, 2, "default");
+  const top = screenOf(stack, 4, "none", { layer: shaderLayer(2), ms: 350 });
+  player.goBack(top);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].upper, top);
+  assert.equal(calls[0].reverse, true, "a pop runs backwards");
+  assert.notEqual(top.style.visibility, "hidden", "it shows under the shader until it ends");
+  assert.equal(below.style.transform, "");
+});
+
+test("going back with animation \"none\" and no shader that runs leaves at once", () => {
+  const { player, sent, stack } = stackPlayer(false);
+  screenOf(stack, 2, "default");
+  const top = screenOf(stack, 4, "none", { layer: shaderLayer(2), ms: 350 });
+  player.goBack(top);
+  assert.equal(top.style.visibility, "hidden");
+  assert.ok(sent.some(([name]) => name === "onDismiss"), "dismissed at once");
+});
+
+test("pages and dialogs take their own motion when the user asks for less motion", () => {
+  const { player } = shaderPlayer();
+  player.reducedMotion = { matches: true };
+  let asked = false;
+  player.shaderDraws = () => (asked = true);
+  const stack = { getBoundingClientRect: () => ({ width: 390, height: 844 }) };
+  assert.equal(player.shaderNav(stack, {}, { layer: shaderLayer(2), ms: 350 }, false, () => {}), false);
+  assert.equal(asked, false, "not even tried");
+});
+
+test("a change of a stack whose page shader still runs ends that one first", () => {
+  const { player, stack } = stackPlayer(false);
+  const order = [];
+  const overlay = { _shader: { nav: true, running: { done: () => order.push("ended") } } };
+  stack._navOverlay = overlay;
+  player.shaderViews = new Set([overlay]);
+  const old = screenOf(stack, 2, "none");
+  const top = screenOf(stack, 4, "none");
+  player.moveScreens(old, top, true, () => order.push("pushed"));
+  assert.deepEqual(order, ["ended", "pushed"]);
+  assert.equal(overlay._shader.running, null);
+  assert.ok(!player.shaderViews.has(overlay));
+});
+
+test("a dialog shown or closed while another's shader runs ends that one first", () => {
+  const { player } = fakePlayer();
+  const order = [];
+  const overlay = { _shader: { nav: true, running: { done: () => order.push("ended") } } };
+  player.root = { _navOverlay: overlay };
+  player.shaderViews = new Set([overlay]);
+  player.endNavShader(player.root);
+  assert.deepEqual(order, ["ended"]);
+  // Ended already: nothing more.
+  player.endNavShader(player.root);
+  assert.deepEqual(order, ["ended"]);
+});
+
+test("a dialog closed through its shader stops being watched for the window's size", () => {
+  const { player } = fakePlayer();
+  const unobserved = [];
+  let finish;
+  const el = { _id: 6, _navShader: { layer: shaderLayer(2), ms: 350 }, style: {}, remove() {} };
+  Object.assign(player, {
+    root: {},
+    viewportObserver: { unobserve: (target) => unobserved.push(target) },
+    shaderNav: (_host, _upper, _nav, _reverse, done) => {
+      finish = done;
+      return true;
+    },
+    scopeFocus() {},
+    syncHistorySoon() {},
+    releaseFrame() {},
+    dropLeftWith() {},
+    topModal: () => null,
+  });
+  player.dismiss(el, true);
+  assert.deepEqual(unobserved, [], "it shows under the shader until it ends");
+  finish();
+  assert.deepEqual(unobserved, [el]);
+});
+
+test("a picture of an unchanged size draws into its canvas again without reallocating it", () => {
+  const { player } = fakePlayer();
+  const sizes = [];
+  const drawn = [];
+  const canvas = {
+    _w: 0,
+    _h: 0,
+    get width() { return this._w; },
+    set width(v) { sizes.push(["width", v]); this._w = v; },
+    get height() { return this._h; },
+    set height(v) { sizes.push(["height", v]); this._h = v; },
+    getContext: () => ({ setTransform: () => {}, clearRect: (...r) => drawn.push(r) }),
+  };
+  const el = { _shader: { pictures: [canvas, null, null, null], fresh: [false, false, false, false] } };
+  const saved = globalThis.devicePixelRatio;
+  globalThis.devicePixelRatio = 2;
+  try {
+    player.pictureCanvas(el, 0, [100, 50, 0]);
+    assert.deepEqual(sizes, [["width", 200], ["height", 100]]);
+    assert.deepEqual(drawn, []);
+    player.pictureCanvas(el, 0, [100, 50, 0]);
+    assert.equal(sizes.length, 2, "kept");
+    assert.deepEqual(drawn, [[0, 0, 200, 100]], "cleared instead");
+    player.pictureCanvas(el, 0, [120, 50, 0]);
+    assert.deepEqual(sizes.slice(2), [["width", 240], ["height", 100]]);
+  } finally {
+    globalThis.devicePixelRatio = saved;
+  }
+});
+
+test("a shader's frames upload the built-ins from one buffer", () => {
+  const { player } = fakePlayer();
+  const uploads = [];
+  const gl = new Proxy(
+    {
+      UNIFORM_BUFFER: "uniform",
+      canvas: { width: 0, height: 0, transferToImageBitmap: () => "bitmap" },
+      bufferData: (_target, data) => uploads.push(data),
+    },
+    { get: (gl, name) => (name in gl ? gl[name] : () => {}) },
+  );
+  Object.assign(player, {
+    shaderGl: () => gl,
+    shaderProgram: () => ({ program: {}, builtins: {}, uniforms: null, vao: {}, samplers: [] }),
+    zoomOf: () => 1,
+  });
+  const el = {
+    _frame: [0, 0, 100, 50],
+    _shader: { layer: { role: 0, overflow: 0 }, words: new Uint32Array(0), kept: 0, since: null, progress: 0 },
+    _shaderCanvas: { width: 0, height: 0, getContext: () => ({ transferFromImageBitmap() {} }) },
+  };
+  player.renderShader(el, 0);
+  player.renderShader(el, 16);
+  assert.equal(uploads.length, 2);
+  assert.equal(uploads[0], uploads[1]);
+});
+
+test("a picture taken again reads the styles of what changed only", () => {
+  const { player } = fakePlayer();
+  const read = [];
+  const node = (name, children = []) => ({
+    name,
+    children,
+    classList: { contains: () => false },
+    contains: () => false,
+    getBoundingClientRect: () => ({ left: 0, top: 0, width: 10, height: 10 }),
+  });
+  const leaf = node("leaf");
+  const inner = node("inner", [leaf]);
+  const other = node("other");
+  const host = node("host", [inner, other]);
+  const cx = new Proxy({}, { get: () => () => {} });
+  const saved = globalThis.getComputedStyle;
+  globalThis.getComputedStyle = (el) => {
+    read.push(el.name);
+    return { display: "block", opacity: "1", visibility: "visible", backgroundColor: "transparent", borderTopWidth: "0px" };
+  };
+  player.paintGen = 0;
+  player.paintReset = 0;
+  try {
+    player.paintTree(cx, host, { left: 0, top: 0 }, 1, null, null, 0);
+    assert.deepEqual(read, ["inner", "leaf", "other"]);
+    read.length = 0;
+    player.paintTree(cx, host, { left: 0, top: 0 }, 1, null, null, 0);
+    assert.deepEqual(read, [], "kept");
+    player.touchAll([{ type: "attributes", target: inner }]);
+    player.paintTree(cx, host, { left: 0, top: 0 }, 1, null, null, 0);
+    assert.deepEqual(read, ["inner", "leaf"], "it and what it holds");
+    read.length = 0;
+    player.paintReset = ++player.paintGen;
+    player.paintTree(cx, host, { left: 0, top: 0 }, 1, null, null, 0);
+    assert.deepEqual(read, ["inner", "leaf", "other"], "a new color scheme: all");
+  } finally {
+    globalThis.getComputedStyle = saved;
+  }
+});

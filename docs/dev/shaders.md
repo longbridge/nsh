@@ -235,7 +235,12 @@ dialog's `transitionShader`) take their pictures from the DOM. `shader.rs` also 
   and opacity; no rotations, gradients or shadows; cross-origin images without CORS are left out so the canvas stays
   readable). Pictures cover the box plus `overflow` on each side and are uploaded premultiplied
   (`UNPACK_PREMULTIPLY_ALPHA_WEBGL`), linear and clamped, to the program's sampler uniforms; an input without a
-  picture reads a transparent texture.
+  picture reads a transparent texture. What each element paints with from its computed style is kept
+  (`paintStyle`) until a change reaches it: one `MutationObserver` on the root (`watchPaint`) stamps each element a
+  mutation changes (`_touched`), and a kept style is read again when it or an ancestor carries a newer stamp, or the
+  color scheme changed; the boxes come from `getBoundingClientRect`, after the one layout the first read makes
+  (painting writes nothing). A picture's canvas is resized only when its size changes (setting a canvas's size
+  reallocates it), else cleared and drawn again; the built-ins and the slots' float view are one buffer per view.
 - **Effects.** The output canvas (`nsh-fx-out`) is appended over the children and grows by the overflow; the view
   has `nsh-fx`, which puts its children at opacity 0 (they keep their pointer events and hit testing under the
   canvas) and isolates its stacking. While `paintHost` paints them it lifts `nsh-fx` (`nsh-painting` turns CSS
@@ -253,7 +258,10 @@ dialog's `transitionShader`) take their pictures from the DOM. `shader.rs` also 
 - **Pages and dialogs.** `["shn"]` keeps the page's or the dialog's `transitionShader`. `shaderNav` runs it on an
   overlay over the stack (push, pop) or the root (present, dismiss): `sample_from` is the host painted up to the
   page or dialog, `sample_to` the whole host, and progress goes from 0 to 1, or 1 to 0 when it leaves; the views
-  are where they end under it at once. Dialogs shown in the top layer (`dialogs: "viewport"`) keep their own motion.
+  are where they end under it at once. Dialogs shown in the top layer (`dialogs: "viewport"`) keep their own motion,
+  and so does every page and dialog when the user asks for less motion (`reduceMotion()`). A push, a pop
+  (`moveScreens`, which `goBack` goes through whatever the page's `animation`), a presentation or a dismissal ends a
+  shader's change still running over the same host first (`endNavShader`: its `done` settles and reports it).
 - **Shaders that cannot draw.** A view whose shader cannot draw (`shaderDraws`: no WebGL 2, or a program the driver
   refuses) shows its background and children as they are, as the native backends show them without a device: an
   effect or a screen effect takes no `nsh-fx` (and its canvas is cleared when its new program is refused), a

@@ -2675,9 +2675,14 @@ class Player {
    * alone its `sample_from`, and `nsh.progress` how much of the upper side
    * shows: 0 to 1, or 1 to 0 when `reverse`. The views are where they end
    * at once under it. Calls `done` when it ends; false where it cannot run
-   * (`shaderDraws`).
+   * (`shaderDraws`) and when the user asks for less motion: the page's or
+   * the dialog's own motion runs then. One that still runs over `host`
+   * ends first (its `done` runs), so the new one starts from where it
+   * ends.
    */
   shaderNav(host, upper, nav, reverse, done) {
+    this.endNavShader(host);
+    if (this.reduceMotion()) return false;
     const r = host.getBoundingClientRect();
     if (!r.width || !r.height || !this.shaderDraws(nav.layer)) return false;
     const o = document.createElement("div");
@@ -2698,7 +2703,16 @@ class Player {
       since: performance.now(),
       dirty: true,
       progress: reverse ? 1 : 0,
-      running: { start: performance.now(), ms: Math.max(1, nav.ms), reverse, done: () => { o.remove(); done?.(); } },
+      running: {
+        start: performance.now(),
+        ms: Math.max(1, nav.ms),
+        reverse,
+        done: () => {
+          o.remove();
+          if (host._navOverlay === o) host._navOverlay = null;
+          done?.();
+        },
+      },
       pictures: [null, null, null, null],
       fresh: [false, false, true, true],
       textures: [null, null, null, null],
@@ -2711,6 +2725,7 @@ class Player {
     const to = this.pictureCanvas(o, 3, [r.width, r.height, 0]);
     this.paintHost(to.cx, host, r, null, null);
     host.append(o);
+    host._navOverlay = o;
     this.shaderViews.add(o);
     this.renderShader(o, performance.now());
     this.shaderDirty(o);
@@ -2718,23 +2733,94 @@ class Player {
   }
 
   /**
+   * A page's or a dialog's change through its shader that still runs over
+   * `host` (a stack, the root) ends at once, settled and reported: another
+   * change of it starts from there.
+   */
+  endNavShader(host) {
+    const o = host?._navOverlay;
+    if (o?._shader?.running) this.endTransition(o);
+  }
+
+  /**
    * Paints `host`'s children up to `stop` for a picture: an effect's (or
    * the root with a screen effect) as they show without the effect.
    */
   paintHost(cx, host, r, stop, owner) {
+    this.watchPaint();
+    // What changed since the last picture: its styles are read again.
+    this.touchAll(this._paintObserver.takeRecords());
+    let touched = 0;
+    for (let n = host; n; n = n.parentElement) touched = Math.max(touched, n._touched ?? 0);
     const lifted = host.classList.contains("nsh-fx");
     if (lifted) {
       host.classList.add("nsh-painting");
       host.classList.remove("nsh-fx");
     }
     try {
-      this.paintTree(cx, host, r, 1, stop, owner);
+      this.paintTree(cx, host, r, 1, stop, owner, touched);
     } finally {
       if (lifted) {
         host.classList.add("nsh-fx");
         host.classList.remove("nsh-painting");
       }
+      // Lifting and putting back the host's class is the picture's own
+      // doing, which changes no style it keeps.
+      this._paintObserver.takeRecords();
     }
+  }
+
+  /**
+   * Notices the changes in the surface that make a kept paint style
+   * (`paintStyle`) stale: each mutation stamps its element (`_touched`),
+   * which stales its own style and its descendants'; a change of the color
+   * scheme stales all.
+   */
+  watchPaint() {
+    if (this._paintObserver) return;
+    this.paintGen = 0;
+    this.paintReset = 0;
+    this._paintObserver = new MutationObserver((list) => this.touchAll(list));
+    this._paintObserver.observe(this.root, { subtree: true, childList: true, attributes: true });
+    this._paintScheme = () => {
+      this.paintReset = ++this.paintGen;
+    };
+    globalThis.matchMedia?.("(prefers-color-scheme: dark)").addEventListener?.("change", this._paintScheme);
+  }
+
+  /** Stamps the elements `list`'s mutations changed (`watchPaint`). */
+  touchAll(list) {
+    for (const m of list) if (m.type !== "characterData") m.target._touched = ++this.paintGen;
+  }
+
+  /**
+   * What `el` paints with from its computed style, kept until a change
+   * reaches it: `touched` is the newest stamp of it and its ancestors
+   * (`watchPaint`), so a picture taken again reads the styles of what
+   * changed only.
+   */
+  paintStyle(el, touched) {
+    const kept = el._paintStyle;
+    if (kept && kept.stamp >= touched && kept.stamp >= this.paintReset) return kept;
+    const cs = getComputedStyle(el);
+    const bg = cs.backgroundColor;
+    const bw = parseFloat(cs.borderTopWidth) || 0;
+    const style = {
+      stamp: this.paintGen,
+      shown: cs.display !== "none",
+      opacity: Number(cs.opacity),
+      hidden: cs.visibility === "hidden",
+      radii: [cs.borderTopLeftRadius, cs.borderTopRightRadius, cs.borderBottomRightRadius, cs.borderBottomLeftRadius]
+        .map((v) => parseFloat(v) || 0),
+      background: bg && bg !== "transparent" && !/rgba\([^)]*,\s*0\)$/.test(bg) ? bg : null,
+      border: bw > 0 && cs.borderTopStyle !== "none" && cs.borderTopStyle !== "hidden" ? [bw, cs.borderTopColor] : null,
+      clips: cs.overflowX !== "visible" || cs.overflowY !== "visible",
+      font: cs.font,
+      color: cs.color,
+      objectFit: cs.objectFit,
+    };
+    el._paintStyle = style;
+    return style;
   }
 
   /** A shader view's box: its size in points and its overflow, `[w, h, m]`. */
@@ -2750,9 +2836,18 @@ class Player {
     const s = el._shader;
     const ratio = devicePixelRatio || 1;
     const c = (s.pictures[input] ??= document.createElement("canvas"));
-    c.width = Math.max(1, Math.round((w + 2 * m) * ratio));
-    c.height = Math.max(1, Math.round((h + 2 * m) * ratio));
+    const pw = Math.max(1, Math.round((w + 2 * m) * ratio));
+    const ph = Math.max(1, Math.round((h + 2 * m) * ratio));
     const cx = c.getContext("2d");
+    // Setting a canvas's size reallocates it: only when the size changes,
+    // else the picture is cleared and drawn again in place.
+    if (c.width !== pw || c.height !== ph) {
+      c.width = pw;
+      c.height = ph;
+    } else {
+      cx.setTransform(1, 0, 0, 1, 0, 0);
+      cx.clearRect(0, 0, pw, ph);
+    }
     cx.setTransform(ratio, 0, 0, ratio, m * ratio, m * ratio);
     s.fresh[input] = true;
     return { canvas: c, cx };
@@ -2850,37 +2945,38 @@ class Player {
    * their opacities. Stops at `stop` (returns true); skips `owner`'s own
    * shader canvas. Rotations, gradients and shadows are left out.
    */
-  paintTree(cx, node, base, opacity, stop, owner) {
+  paintTree(cx, node, base, opacity, stop, owner, touched = Infinity) {
     for (const child of node.children) {
       if (child === stop) return true;
       if (child._shaderOutput && (child.parentElement === owner || child.classList.contains("nsh-fx-out") && !child.parentElement.classList.contains("nsh-fx"))) continue;
       if (child.classList.contains("nsh-nav-shader")) continue;
-      const cs = getComputedStyle(child);
-      if (cs.display === "none") continue;
-      const alpha = opacity * Number(cs.opacity);
-      if (alpha <= 0 || cs.visibility === "hidden") {
+      const stamp = Math.max(touched, child._touched ?? 0);
+      const cs = this.paintStyle(child, stamp);
+      if (!cs.shown) continue;
+      const alpha = opacity * cs.opacity;
+      if (alpha <= 0 || cs.hidden) {
         if (stop && child.contains(stop)) return true;
         continue;
       }
+      // Boxes come from the layout the first one reads (painting writes
+      // nothing that would lay it out again).
       const r = child.getBoundingClientRect();
       const x = r.left - base.left, y = r.top - base.top, w = r.width, h = r.height;
-      const radii = [cs.borderTopLeftRadius, cs.borderTopRightRadius, cs.borderBottomRightRadius, cs.borderBottomLeftRadius]
-        .map((v) => Math.min(parseFloat(v) || 0, w / 2, h / 2));
+      const radii = cs.radii.map((v) => Math.min(v, w / 2, h / 2));
       const shape = () => {
         cx.beginPath();
         cx.roundRect(x, y, w, h, radii);
       };
       cx.save();
       cx.globalAlpha = alpha;
-      const bg = cs.backgroundColor;
-      if (bg && bg !== "transparent" && !/rgba\([^)]*,\s*0\)$/.test(bg)) {
-        cx.fillStyle = bg;
+      if (cs.background) {
+        cx.fillStyle = cs.background;
         shape();
         cx.fill();
       }
-      const bw = parseFloat(cs.borderTopWidth) || 0;
-      if (bw > 0 && cs.borderTopStyle !== "none" && cs.borderTopStyle !== "hidden") {
-        cx.strokeStyle = cs.borderTopColor;
+      if (cs.border) {
+        const [bw, color] = cs.border;
+        cx.strokeStyle = color;
         cx.lineWidth = bw;
         cx.beginPath();
         cx.roundRect(x + bw / 2, y + bw / 2, Math.max(0, w - bw), Math.max(0, h - bw), radii.map((v) => Math.max(0, v - bw / 2)));
@@ -2906,11 +3002,11 @@ class Player {
         cx.fillText(text, x, y + (m.fontBoundingBoxAscent ?? m.actualBoundingBoxAscent));
       }
       // A view that clips its content (a scroll view among them) clips it here too.
-      if (cs.overflowX !== "visible" || cs.overflowY !== "visible") {
+      if (cs.clips) {
         shape();
         cx.clip();
       }
-      const done = this.paintTree(cx, child, base, alpha, stop, owner);
+      const done = this.paintTree(cx, child, base, alpha, stop, owner, stamp);
       cx.restore();
       if (done) return true;
     }
@@ -2959,7 +3055,9 @@ class Player {
     const entry = s.layer.slots[slot];
     if (!entry) return;
     const [word, kind] = entry;
-    const f32 = new Float32Array(s.words.buffer);
+    // A view of the words as floats, kept while they are the same words.
+    if (s.f32?.buffer !== s.words.buffer) s.f32 = new Float32Array(s.words.buffer);
+    const f32 = s.f32;
     if (kind >= 3) {
       const c = parseCssColor(value);
       for (let i = 0; i < (kind === 3 ? 3 : 4); i++) f32[word + i] = c[i];
@@ -3176,7 +3274,9 @@ class Player {
       gl.bindBuffer(gl.UNIFORM_BUFFER, program.builtins);
       // `struct Nsh` (core's `shader::builtins`, 32 bytes): size, time,
       // scale, progress and overflow.
-      gl.bufferData(gl.UNIFORM_BUFFER, new Float32Array([w, h, Math.max(0, time), pw / Math.max(w + 2 * m, 1e-6), progress, m, 0, 0]), gl.DYNAMIC_DRAW);
+      const builtins = (s.builtins ??= new Float32Array(8));
+      builtins.set([w, h, Math.max(0, time), pw / Math.max(w + 2 * m, 1e-6), progress, m, 0, 0]);
+      gl.bufferData(gl.UNIFORM_BUFFER, builtins, gl.DYNAMIC_DRAW);
       gl.bindBufferBase(gl.UNIFORM_BUFFER, 0, program.builtins);
     }
     if (program.uniforms) {
@@ -4319,12 +4419,8 @@ class Player {
     screen._popping = true;
     // The screen goes, then the app is told (and removes it).
     const dismissed = () => this.event(screen._id, "onDismiss");
-    if (this.screenMotion(screen)) {
-      this.moveScreens(screen, below, false, dismissed);
-    } else {
-      screen.style.visibility = "hidden";
-      dismissed();
-    }
+    // Through its shader, with its own motion, or at once.
+    this.moveScreens(screen, below, false, dismissed);
     this.syncHistorySoon();
   }
 
@@ -4349,12 +4445,15 @@ class Player {
     // side, the page above its upper one.
     const upper = pushing ? top : old;
     const stack = (top ?? old)?.parentNode;
+    this.endNavShader(stack);
     if (upper?._navShader && stack) {
       if (!pushing) old.style.pointerEvents = "none";
       if (this.shaderNav(stack, upper, upper._navShader, !pushing, done)) return;
     }
     const motion = this.screenMotion(pushing ? top : old);
     if (!motion) {
+      // At once: the screen that leaves shows no more.
+      if (!pushing && old) old.style.visibility = "hidden";
       done?.();
       return;
     }
@@ -4643,6 +4742,7 @@ class Player {
   }
 
   present(el) {
+    this.endNavShader(this.root);
     const motion = this.modalMotion(el);
     el._leaving = false;
     el.style.pointerEvents = "";
@@ -4692,12 +4792,14 @@ class Player {
   /** Takes modal `el` away; `onDismiss` follows unless `reported`. */
   dismiss(el, reported = el._closed) {
     if (el._leaving) return;
+    this.endNavShader(this.root);
     el._leaving = true;
     const motion = this.modalMotion(el);
     // Through its `transitionShader`: pictured as it shows, then gone under it at once.
     const shader = el._navShader && !this.viewportDialogs && this.shaderNav(this.root, el, el._navShader, true, () => {
       if (el._leaving) {
         el.remove();
+        this.viewportObserver?.unobserve(el);
         this.releaseFrame(el);
         this.dropLeftWith(el);
       }
