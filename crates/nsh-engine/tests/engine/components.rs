@@ -106,6 +106,7 @@ fn app_config(
         clipboard: None,
         host: Default::default(),
         picker: None,
+        speech: None,
     }
 }
 

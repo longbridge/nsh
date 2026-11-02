@@ -42,6 +42,7 @@ mod live;
 mod menus;
 mod net;
 mod pointer;
+mod speech;
 mod stub;
 
 use std::{
@@ -279,6 +280,9 @@ pub struct Headless {
     /// The path the user chooses in the save dialog
     /// ([`Headless::on_pick_save_path`]).
     save_path: Option<std::path::PathBuf>,
+    /// The recognizer the test speaks into; `None` when the config gave
+    /// its own (`EngineConfig::speech`).
+    speech: Option<speech::FakeSpeech>,
     step: String,
     applied: u64,
     /// The app left (`process.exit`, `Command::ExitApp`): no more batches
@@ -305,7 +309,11 @@ pub struct Headless {
 
 impl Headless {
     /// Starts `config`'s app ([`start`]).
-    pub fn start(config: EngineConfig) -> std::io::Result<Headless> {
+    pub fn start(mut config: EngineConfig) -> std::io::Result<Headless> {
+        let speech = config.speech.is_none().then(speech::FakeSpeech::default);
+        if let Some(speech) = &speech {
+            config.speech = Some(Arc::new(speech.clone()));
+        }
         let environment = config.environment;
         let viewport = config.viewport;
         let clock = config.clock.clone();
@@ -332,6 +340,7 @@ impl Headless {
             screen_color: None,
             picked_paths: Vec::new(),
             save_path: None,
+            speech,
             step: "open".to_owned(),
             applied: 0,
             exited: false,
@@ -630,6 +639,44 @@ impl Headless {
             EventPayload::Picked { id, files },
         );
         Ok(())
+    }
+
+    /// What the app's speech recognition sessions (`Speech.start`) asked
+    /// for so far, in order. Headless apps recognize speech: a session
+    /// listens at once (its `start`), and the test speaks for the user
+    /// ([`Headless::hear`]).
+    pub fn speech_requests(&self) -> Vec<nsh_core::speech::SpeechRequest> {
+        self.speech
+            .as_ref()
+            .map(speech::FakeSpeech::requests)
+            .unwrap_or_default()
+    }
+
+    /// The user says `text` (the whole transcript so far) to the session
+    /// listening, which reports it as a result that is not final; then
+    /// waits until the app is quiet. Fails when no session listens.
+    pub fn hear(&mut self, text: &str) -> Result<(), String> {
+        self.fake_speech()?.hear(text)?;
+        self.done()
+    }
+
+    /// Ends the session listening: with `error` (`no-speech`,
+    /// `not-allowed`, ...), or (`None`) as when the user stops talking: the
+    /// transcript as the final result, then the end (`no-speech` when
+    /// nothing was heard). Then waits until the app is quiet. The app's
+    /// `stop()` ends it the same way.
+    pub fn end_speech(
+        &mut self,
+        error: Option<nsh_core::speech::SpeechError>,
+    ) -> Result<(), String> {
+        self.fake_speech()?.end(error)?;
+        self.done()
+    }
+
+    fn fake_speech(&self) -> Result<speech::FakeSpeech, String> {
+        self.speech
+            .clone()
+            .ok_or_else(|| "the app recognizes speech with EngineConfig::speech".to_owned())
     }
 
     /// Sends the app's `nsh/host` calls (the root's `Command::HostCall`) to
