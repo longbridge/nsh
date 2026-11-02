@@ -1281,18 +1281,44 @@ impl MeasureCache {
     }
 }
 
+/// The most a WOFF file's tables may declare they hold: what `wuff` lets a
+/// WOFF2 file hold, which it checks itself before it decompresses.
+const MAX_WOFF_TABLES: u64 = 128 * 1024 * 1024;
+
 /// The TrueType or OpenType data of a font file, which the text engines
 /// register: `data` itself, or what a WOFF or WOFF2 file holds,
 /// decompressed (WOFF2's transformed glyph tables rebuilt).
 pub fn font_data(data: &[u8]) -> Result<std::borrow::Cow<'_, [u8]>, String> {
     let unwrapped = match data.get(..4) {
-        Some(b"wOFF") => wuff::decompress_woff1(data),
+        Some(b"wOFF") => {
+            // `wuff` reserves the size each table declares before inflating
+            // it, so a few bytes could otherwise ask for gigabytes.
+            if let Some(size) = woff_tables_size(data).filter(|&size| size > MAX_WOFF_TABLES) {
+                return Err(format!(
+                    "the WOFF font's tables declare {size} bytes, more than a font may hold \
+                     ({MAX_WOFF_TABLES})"
+                ));
+            }
+            wuff::decompress_woff1(data)
+        }
         Some(b"wOF2") => wuff::decompress_woff2(data),
         _ => return Ok(std::borrow::Cow::Borrowed(data)),
     };
     unwrapped
         .map(std::borrow::Cow::Owned)
         .map_err(|e| format!("the WOFF font does not decompress: {e:?}"))
+}
+
+/// The sizes a WOFF file's table directory declares, summed (`None` for a
+/// directory cut short, which `wuff` rejects): after the 44-byte header,
+/// 20 bytes a table, its `origLength` at 12.
+fn woff_tables_size(data: &[u8]) -> Option<u64> {
+    let tables = u16::from_be_bytes(data.get(12..14)?.try_into().ok()?);
+    (0..usize::from(tables)).try_fold(0, |size, table| {
+        let at = 44 + table * 20 + 12;
+        let length = u32::from_be_bytes(data.get(at..at + 4)?.try_into().ok()?);
+        Some(size + u64::from(length))
+    })
 }
 
 #[cfg(test)]
@@ -1619,5 +1645,57 @@ mod tests {
             assert_eq!(face(&data), original);
         }
         assert!(font_data(b"wOF2 and nothing else").is_err());
+    }
+
+    /// A WOFF file of 68 bytes whose one table declares `length` bytes.
+    fn forged_woff(length: u32) -> Vec<u8> {
+        let mut data = Vec::new();
+        data.extend(b"wOFF\0\x01\0\0");
+        data.extend(68u32.to_be_bytes()); // length
+        data.extend(1u16.to_be_bytes()); // numTables
+        data.extend([0; 2]); // reserved
+        data.extend(length.saturating_add(28).to_be_bytes()); // totalSfntSize
+        data.extend([0; 24]); // versions, metadata, private data
+        data.extend(b"glyf");
+        data.extend(64u32.to_be_bytes()); // offset
+        data.extend(4u32.to_be_bytes()); // compLength
+        data.extend(length.to_be_bytes()); // origLength
+        data.extend([0; 4]); // origChecksum
+        data.extend([0x78, 0x9c, 0x03, 0x00]); // zlib
+        data
+    }
+
+    #[test]
+    fn a_woff_font_declaring_more_than_a_font_holds_is_refused_before_it_decompresses() {
+        let forged = forged_woff(u32::MAX);
+        let error = font_data(&forged).expect_err("refused");
+        assert!(error.contains("declare"), "{error}");
+        // A size a font may have goes on to `wuff`, which finds the table
+        // does not hold it.
+        let error = font_data(&forged_woff(1024)).expect_err("refused");
+        assert!(error.contains("does not decompress"), "{error}");
+        // So does a directory cut short, for `wuff` to report.
+        assert!(woff_tables_size(&forged[..56]).is_none());
+        assert!(font_data(&forged[..56]).is_err());
+    }
+
+    #[test]
+    fn a_woff2_font_declaring_more_than_its_size_allows_is_refused() {
+        // One `cmap` table declaring 4 GiB from a brotli stream of 4 bytes
+        // (`wuff` holds what a WOFF2 file decompresses to at most 100 times
+        // the file's size, and 128 MiB).
+        let mut forged = Vec::new();
+        forged.extend(b"wOF2\0\x01\0\0");
+        forged.extend(60u32.to_be_bytes()); // length
+        forged.extend(1u16.to_be_bytes()); // numTables
+        forged.extend([0; 2]); // reserved
+        forged.extend(u32::MAX.to_be_bytes()); // totalSfntSize
+        forged.extend(4u32.to_be_bytes()); // totalCompressedSize
+        forged.extend([0; 24]); // versions, metadata, private data
+        forged.push(0); // cmap, untransformed
+        forged.extend([0x8f, 0xff, 0xff, 0xff, 0x7f]); // origLength, UIntBase128
+        forged.extend([0; 6]); // the stream, padded to 4 bytes
+        assert_eq!(forged.len(), 60);
+        assert!(font_data(&forged).is_err());
     }
 }
