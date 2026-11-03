@@ -897,6 +897,8 @@ pub(crate) struct SearchField {
     pub(crate) class: Prop<Option<SharedString>>,
     pub(crate) style: Prop<InputPartStyle>,
     pub(crate) placeholder: Prop<Option<SharedString>>,
+    /// What screen readers call it.
+    pub(crate) accessibility_label: Prop<Option<SharedString>>,
 }
 
 /// The part below the rows and what it holds.
@@ -972,6 +974,7 @@ fn content(lb: Listbox, sheet: bool, parts: Parts, hooks: Hooks) -> Vec<AnyEleme
                         .map(|p| p.to_string())
                         .unwrap_or_default()
                 })
+                .optional_label(field.accessibility_label)
                 // The desktops type into it at once; a touch screen's
                 // keyboard comes when the user asks.
                 .auto_focus(!sheet)

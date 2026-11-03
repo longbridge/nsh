@@ -219,6 +219,9 @@ pub struct SelectProps {
     pub searchable: Prop<bool>,
     /// The search field's placeholder.
     pub search_placeholder: Prop<Option<SharedString>>,
+    /// What screen readers call the search field (the app's words: what
+    /// it searches); a placeholder is a hint, not its name.
+    pub search_accessibility_label: Prop<Option<SharedString>>,
     /// A clear button while an item is chosen (`gpui-component`'s
     /// `cleanable`): a press clears the value, reported by
     /// `onChange(null)`, and leaves the list closed.
@@ -594,6 +597,7 @@ pub fn Select(props: SelectProps, cx: Scope<SelectEvent>) -> impl IntoElement {
             class: props.search_class,
             style: props.search_style,
             placeholder: props.search_placeholder,
+            accessibility_label: props.search_accessibility_label,
         }),
         render_item: props.render_item,
         render_group: props.render_group,

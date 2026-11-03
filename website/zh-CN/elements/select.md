@@ -184,6 +184,7 @@ mount(App);
   items={zones}
   searchable
   searchPlaceholder="搜索时区"
+  searchAccessibilityLabel="搜索时区"
   searchClass="mx-1 mb-1 rounded-md border border-input px-2 py-1.5 text-sm"
   empty={<Text class="px-2 py-6 text-center text-sm text-muted-foreground">没有找到时区</Text>}
   trigger={trigger}
@@ -226,6 +227,7 @@ mount(App);
 | `defaultOpen` | `.default_open(..)` | `boolean` | `false` | 没有 `open` 时，初始是否打开。 |
 | `searchable` | `.searchable(..)` | `boolean` | `false` | 条目上方的搜索框按标题筛选条目。 |
 | `searchPlaceholder` | `.search_placeholder(..)` | `string` | 无 | 搜索框的占位文字。 |
+| `searchAccessibilityLabel` | `.search_accessibility_label(..)` | `string` | 无 | 屏幕阅读器对搜索框的称呼：它搜索的是什么。 |
 | `cleanable` | `.cleanable(..)` | `boolean` | `false` | 有选中条目时显示清除按钮；按下会清空值（`onChange({ value: null })`）。 |
 | `disabled` | `.disabled(..)` | `boolean` | `false` | 保持关闭：触发元素不接受按压和键盘焦点，并应用 `disabled:` 样式。 |
 | `accessibilityLabel` | `.accessibility_label(..)` | `string` | 无 | 屏幕阅读器对它的称呼：这次选择是关于什么的。 |
@@ -284,7 +286,7 @@ mount(App);
 | 清除按钮 | 选择框的视图，触发元素之后（`cleanable`，有选中条目时） | `clearButtonClass`、`clearButtonStyle`；内容 `clearButton` |
 | 弹出层或 sheet | 位于所有内容之上，在触发元素处（桌面）或屏幕底部（触摸屏） | `popupClass`、`popupStyle` |
 | 背景层 | sheet 后面（触摸屏） | `backdropClass`、`backdropStyle` |
-| 搜索框 | 弹出层中的第一个（`searchable`） | `searchClass`、`searchStyle`、`searchPlaceholder` |
+| 搜索框 | 弹出层中的第一个（`searchable`） | `searchClass`、`searchStyle`、`searchPlaceholder`、`searchAccessibilityLabel` |
 | 列表 | 弹出层中，搜索框之后 | `listClass`、`listStyle` |
 | 分组标题 | 列表中，分组的条目之前 | `groupClass`、`groupStyle`、`renderGroup` |
 | 条目的行 | 列表中 | `itemClass`、`itemStyle`、`renderItem`（其中用 `group-focus:`、`group-selected:`、`group-disabled:`，`itemClass` 里加 `group`） |
@@ -329,6 +331,7 @@ mount(App);
 
 - 触发元素对屏幕阅读器来说是一个组合框（combobox）：它的标签是 `accessibilityLabel`，值是选中条目的标题，并说明列表是否展开。`disabled` 时它显示为不可用。
 - 清除按钮是一个按钮，名称来自 `clearButtonAccessibilityLabel`；它不是 Tab 的一站。
+- 搜索框是一个文本框，名称来自 `searchAccessibilityLabel`；占位文字是它为空时显示的提示。
 - 列表是一个列表框（listbox），每一行是一个选项（option），以标题命名；选中的选项处于选中状态，禁用的选项显示为不可用。分组标题是标题（header）。
 - 按键移动高亮时，屏幕阅读器的焦点移到高亮的行；搜索框有键盘焦点时，改为播报高亮条目的标题，以便继续输入。
 

@@ -227,6 +227,7 @@ function App() {
               accessibilityLabel="Region"
               searchable
               searchPlaceholder="Search regions"
+              searchAccessibilityLabel="Search regions"
               searchClass={`${desktop ? "text-sm" : "text-base"} placeholder:text-[${ui().faint}] text-[${ui().text}]`}
               searchStyle={{ ...ui().inset, borderRadius: 8, height: size.control, paddingHorizontal: 8, marginBottom: 4 }}
               empty={<Text style={{ paddingVertical: 20, textAlign: "center", fontSize: 13, color: ui().muted }}>No region matches</Text>}

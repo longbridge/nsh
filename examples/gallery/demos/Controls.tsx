@@ -1667,6 +1667,7 @@ export function Controls(props: { show: Control }) {
               accessibilityLabel="Font"
               searchable
               searchPlaceholder="Search fonts"
+              searchAccessibilityLabel="Search fonts"
               searchClass={searchClass}
               searchStyle={searchStyle()}
               empty={<Empty label="No font matches" />}
@@ -1845,6 +1846,7 @@ export function Controls(props: { show: Control }) {
             accessibilityLabel="Country"
             searchable
             searchPlaceholder="Search countries"
+            searchAccessibilityLabel="Search countries"
             searchClass={searchClass}
             searchStyle={searchStyle()}
             empty={<Empty label="We do not ship there" />}

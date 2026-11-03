@@ -9,8 +9,9 @@
 // by the app (row heights tell its `focus:` and `disabled:` classes), the roles and
 // states screen readers get, and each change reported with its reason, the
 // lifecycle (`onOpen`, `onClose`) and Escape, back or the backdrop heard
-// (`onCancel`), and the clear button of a select's own value
-// (`cleanable`, `onChange(null)`). Its script checks each.
+// (`onCancel`), the clear button of a select's own value
+// (`cleanable`, `onChange(null)`), and the search field's name for screen
+// readers (`searchAccessibilityLabel`). Its script checks each.
 import { Text, View, signal } from "nsh";
 import { Select } from "nsh/base";
 
@@ -111,6 +112,7 @@ function App() {
         items={FOOD}
         searchable
         searchPlaceholder="Find food"
+        searchAccessibilityLabel="FindField"
         searchClass="bg-[#abcdef]"
         searchStyle={{ borderRadius: 4 }}
         empty={<Text>Nothing found</Text>}

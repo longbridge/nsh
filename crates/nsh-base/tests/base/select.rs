@@ -99,6 +99,7 @@ fn Harness(props: HarnessProps) -> impl IntoElement {
         .disabled(props.disabled)
         .default_open(props.default_open)
         .search_placeholder("Search")
+        .search_accessibility_label("Search food")
         .accessibility_label("Food")
         .trigger(
             view()
@@ -739,6 +740,19 @@ fn search_filters_the_items_and_their_sections() {
     app.key("enter");
     app.gone("role:listbox");
     app.see("Value: rice");
+}
+
+#[test]
+fn screen_readers_hear_the_search_field_by_its_label() {
+    let mut app = desktop(HarnessProps {
+        searchable: true,
+        ..props(fruits())
+    });
+    app.open_list();
+    // The app's words name the field, not its placeholder.
+    assert_eq!(app.screen().count("label:Search food"), Ok(1));
+    app.type_text("label:Search food", "cel").unwrap();
+    app.see_row(">Celery");
 }
 
 #[test]
