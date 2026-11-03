@@ -1,39 +1,8 @@
 //! Splitting the web runtime into a main module and side modules.
 //!
-//! [`split`] keeps in the main module what its exports reach, as
-//! [`prune`](super::prune) does, and puts the rest the lazily loaded gates
-//! reach (exports that register a part of `nsh/base`, a standard module, a
-//! feature or an app's UI set) into side modules: one per gate with what
-//! only that gate reaches, and one per set of gates with what exactly those
-//! gates share (as a bundler splits the chunks several entries share). The
-//! page loads a gate's module, after the shared ones it calls, when an
-//! app's chunk that needs the gate is about to run, and calls the gate.
-//!
-//! Nothing moves, so the modules need no relocating against each other:
-//!
-//! - data keeps the linker's addresses: each module writes its own bytes
-//!   (memory is shared, and starts zeroed);
-//! - the table keeps the linker's slots: each module fills its functions'
-//!   slots (the table is shared);
-//! - globals keep their indices: a side module imports every global of the
-//!   main module, in order;
-//! - only functions are numbered again: each module numbers its own after
-//!   the functions it imports, from the module that has each.
-//!
-//! Code and data live in one module only, so loading a module never writes
-//! over data another one changed. What a set of gates reaches, everything
-//! it calls is reached by at least those gates: a module imports only from
-//! the main module and from modules of larger sets, so the order of
-//! loading is never circular.
-//!
-//! The ABI the page relies on (`nsh.js`): a side module imports from the
-//! module `main` its `memory`, `__indirect_function_table` and
-//! `__nsh_g<i>` for every global; it imports each function it calls as
-//! `__nsh_f<i>` (`i`: the function's index in the linked runtime) from
-//! `main` or from the side module that has it, under that module's name
-//! ([`Side::name`]); it exports the functions other modules call the same
-//! way, and its gate (a gate's module) under the gate's name. It has no
-//! start function.
+//! [`split`] makes the main module from what the first screen needs and a
+//! side module for what the gates loaded later need, which the page loads
+//! (`nsh.js`'s `loadSides`) before the code that uses them runs.
 
 use std::collections::BTreeMap;
 

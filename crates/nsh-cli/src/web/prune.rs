@@ -1,19 +1,6 @@
-//! Reading the web runtime as the linker left it, for [`split`].
-//!
-//! The distribution ships one web runtime with every part of `nsh/base` and
-//! every standard module, linked by wasm-ld with `--emit-relocs`: it keeps
-//! the linker's symbol table (the `linking` section) and every place code
-//! and data refer to a function, a table slot or a data symbol
-//! (`reloc.CODE`, `reloc.DATA`). The parts are only reached through their
-//! registration exports, the gates (`nsh_part_editor`, `nsh_std_zlib`,
-//! ...): [`Module`] reads the module and its relocations, and
-//! [`Module::mark_from`] finds what some functions reach, as
-//! `wasm-ld --gc-sections` would have, without a Rust toolchain or a
-//! linker where apps are packaged. [`split`] makes the main module and the
-//! side modules from that; wasm-ld pads the LEBs it relocates to five
-//! bytes, so patching a reference never changes a size. The output has no
-//! custom sections the linker wrote (`linking`, `reloc.*`, `name`,
-//! `producers`, `target_features`, debug info) and is validated.
+//! Reading the linkable web runtime (`nsh-browser.wasm`, feature
+//! `linkable`) for [`split`]: [`Module`] parses it and
+//! [`Module::mark_from`] finds what some functions reach.
 
 use std::ops::Range;
 
