@@ -679,6 +679,16 @@ impl Painter<'_> {
                     (Some(false), false) => "▸",
                     (None, _) => label.as_str(),
                 };
+                // A label of a name and its detail (`Photo 1: Front`) too
+                // wide for its box (a thumbnail) shows its name.
+                let label = match label.split_once(": ") {
+                    Some((name, _))
+                        if unicode_width::UnicodeWidthStr::width(label) > room as usize =>
+                    {
+                        name
+                    }
+                    _ => label,
+                };
                 if i32::from(x) == inner.left && i32::from(y) == inner.top {
                     let drawn = dialog::put(
                         self.buffer,
@@ -1019,8 +1029,9 @@ fn icon_label<'a>(tree: &Mounter, view: &'a NshView) -> Option<&'a str> {
 }
 
 /// Whether `id` or a view inside it draws anything of its own in the
-/// terminal: a text, a field, a canvas or a native component (a wrapper of
-/// an icon the terminal leaves out draws nothing).
+/// terminal: a text, a field, a canvas, a native component or a fill (a
+/// carousel's pagination bar); a wrapper of an icon the terminal leaves
+/// out draws nothing, and so does a picture (its box stays blank).
 fn draws(tree: &Mounter, id: NodeId) -> bool {
     tree.get(id).is_some_and(|view| {
         view.frame.size.width > Points::ZERO
@@ -1029,6 +1040,14 @@ fn draws(tree: &Mounter, id: NodeId) -> bool {
                 || view.field.is_some()
                 || view.canvas.is_some()
                 || view.component.is_some()
+                || (!matches!(
+                    view.kind,
+                    ViewKind::Image | ViewKind::Video | ViewKind::WebView
+                ) && !view
+                    .animated
+                    .background
+                    .unwrap_or(view.style.background_color)
+                    .is_transparent())
                 || view.children.iter().any(|&child| draws(tree, child)))
     })
 }
