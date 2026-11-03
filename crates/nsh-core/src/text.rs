@@ -1292,8 +1292,11 @@ pub fn font_data(data: &[u8]) -> Result<std::borrow::Cow<'_, [u8]>, String> {
     let unwrapped = match data.get(..4) {
         Some(b"wOFF") => {
             // `wuff` reserves the size each table declares before inflating
-            // it, so a few bytes could otherwise ask for gigabytes.
-            if let Some(size) = woff_tables_size(data).filter(|&size| size > MAX_WOFF_TABLES) {
+            // it, so a few bytes could otherwise ask for gigabytes; and it
+            // copies a table that is not smaller compressed at its compressed
+            // size, so tables sharing one block of data could copy it past
+            // what their sizes add up to.
+            if let Some(size) = woff_tables_size(data)?.filter(|&size| size > MAX_WOFF_TABLES) {
                 return Err(format!(
                     "the WOFF font's tables declare {size} bytes, more than a font may hold \
                      ({MAX_WOFF_TABLES})"
@@ -1311,14 +1314,29 @@ pub fn font_data(data: &[u8]) -> Result<std::borrow::Cow<'_, [u8]>, String> {
 
 /// The sizes a WOFF file's table directory declares, summed (`None` for a
 /// directory cut short, which `wuff` rejects): after the 44-byte header,
-/// 20 bytes a table, its `origLength` at 12.
-fn woff_tables_size(data: &[u8]) -> Option<u64> {
-    let tables = u16::from_be_bytes(data.get(12..14)?.try_into().ok()?);
-    (0..usize::from(tables)).try_fold(0, |size, table| {
-        let at = 44 + table * 20 + 12;
-        let length = u32::from_be_bytes(data.get(at..at + 4)?.try_into().ok()?);
-        Some(size + u64::from(length))
-    })
+/// 20 bytes a table, its `compLength` at 8 and `origLength` at 12. A table
+/// larger compressed than it is, which the format does not allow, is an
+/// error.
+fn woff_tables_size(data: &[u8]) -> Result<Option<u64>, String> {
+    let field = |at: usize| Some(u32::from_be_bytes(data.get(at..at + 4)?.try_into().ok()?));
+    let Some(tables) = data.get(12..14) else {
+        return Ok(None);
+    };
+    let mut size = 0;
+    for table in 0..usize::from(u16::from_be_bytes([tables[0], tables[1]])) {
+        let at = 44 + table * 20;
+        let (Some(compressed), Some(length)) = (field(at + 8), field(at + 12)) else {
+            return Ok(None);
+        };
+        if compressed > length {
+            return Err(format!(
+                "the WOFF font's table {table} is larger compressed ({compressed} bytes) than it is \
+                 ({length})"
+            ));
+        }
+        size += u64::from(length);
+    }
+    Ok(Some(size))
 }
 
 #[cfg(test)]
@@ -1675,8 +1693,33 @@ mod tests {
         let error = font_data(&forged_woff(1024)).expect_err("refused");
         assert!(error.contains("does not decompress"), "{error}");
         // So does a directory cut short, for `wuff` to report.
-        assert!(woff_tables_size(&forged[..56]).is_none());
+        assert!(matches!(woff_tables_size(&forged[..56]), Ok(None)));
         assert!(font_data(&forged[..56]).is_err());
+    }
+
+    #[test]
+    fn a_woff_font_whose_tables_share_data_larger_than_they_are_is_refused() {
+        // Two tables of 4 bytes, each taking the same 8 bytes as stored as
+        // they are: `wuff` would copy those 8 bytes for each, however many
+        // tables there were.
+        let mut forged = Vec::new();
+        forged.extend(b"wOFF\0\x01\0\0");
+        forged.extend(92u32.to_be_bytes()); // length
+        forged.extend(2u16.to_be_bytes()); // numTables
+        forged.extend([0; 2]); // reserved
+        forged.extend(44u32.to_be_bytes()); // totalSfntSize
+        forged.extend([0; 24]); // versions, metadata, private data
+        for tag in [b"cmap", b"glyf"] {
+            forged.extend(tag);
+            forged.extend(84u32.to_be_bytes()); // offset, the same block
+            forged.extend(8u32.to_be_bytes()); // compLength
+            forged.extend(4u32.to_be_bytes()); // origLength
+            forged.extend([0; 4]); // origChecksum
+        }
+        forged.extend([0; 8]);
+        assert_eq!(forged.len(), 92);
+        let error = font_data(&forged).expect_err("refused");
+        assert!(error.contains("larger compressed"), "{error}");
     }
 
     #[test]
