@@ -195,7 +195,7 @@ mount(() => (
         })
         .expect("the cross-fade");
     assert_eq!(layer.role, ShaderRole::Transition);
-    assert_eq!(layer.shader, nsh_core::shader::crossfade());
+    assert_eq!(Some(layer.shader.clone()), nsh_core::shader::crossfade());
     // The change: the start comes first in its batch, before the new text.
     let change = batches.last().expect("a batch");
     assert!(

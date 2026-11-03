@@ -161,20 +161,10 @@ build to the same file) and takes `nsh.js` from the crate.
 
 ### Runtimes linked for each app
 
-A published app's runtime holds only what the app uses: `nsh package --target web` links it from
-`nsh-browser.wasm` without a Rust toolchain or a linker. What is optional is reached only through an exported
-gate, a function that registers it: one per part of `nsh/base` (`nsh_part_core`, `nsh_part_editor`, ...,
-`base_parts!` in `src/lib.rs`) and one per standard module whose operations are Rust (`nsh_std_zlib`,
-`src/browser/standard.rs`). `nsh.js` calls every gate the module exports before anything starts, so a runtime
-with all of them (the website's, the development host's) serves every app.
-
-`nsh-browser.wasm` is built with the feature `linkable`. The CLI's `web::linked_gates` reads which gates an app
-needs from the bundle (`NativeUse`: what it imports from `nsh/base`, `nsh/base/plot`, `zlib`; namespace or computed
-imports keep every gate), and `web/prune.rs` produces the app's runtime from them. Shaders are a gate too
-(`nsh_feature_shader`, `src/shader.rs`: naga's WGSL front end and the translation to GLSL ES); the bundler detects
-shader views itself (`NativeUse::shader`).
-
-Apps with Rust components of their own get a runtime built for them, with every part.
+A published app's runtime holds only what the app uses, and what only later screens use is downloaded apart
+from it. `nsh package --target web` makes these modules from `nsh-browser.wasm` (feature `linkable`) without a
+Rust toolchain or a linker; how is in the module docs of `crates/nsh-cli/src/web/`. A runtime with every
+component (the website's, the development host's) serves every app.
 
 ### Historical QuickJS package sizes
 

@@ -100,6 +100,13 @@ pub struct Bundle {
     /// What the app's code uses of them, by export, and whether it may read
     /// the global `crypto`: what a runtime built for it must serve.
     pub native_use: crate::NativeUse,
+    /// What the entry chunk's own code uses of them: with
+    /// [`Bundle::chunk_native_use`], what a packager splitting the runtime
+    /// by chunk loads first (`native_use` is the union of all of them).
+    pub entry_native_use: crate::NativeUse,
+    /// What each chunk's own code uses of them, by chunk id
+    /// ([`Chunk::id`]); its static imports' are under their own ids.
+    pub chunk_native_use: std::collections::BTreeMap<String, crate::NativeUse>,
     /// What the app declares it may reach (`nsh.json` `capabilities`);
     /// `None` without a declaration.
     pub capabilities: Option<nsh_core::access::Capabilities>,
@@ -456,9 +463,16 @@ pub async fn bundle_async(options: &BundleOptions) -> Result<Bundle, BundleError
     if let Some(warning) = ungranted_host(codes(), capabilities.as_ref()) {
         log::warn!(target: "nsh::build", "{warning}");
     }
-    let mut native_use = crate::NativeUse::default();
-    for code in codes() {
-        native_use.add(code, |specifier| natives.contains(specifier));
+    let is_native = |specifier: &str| natives.contains(specifier);
+    let mut entry_native_use = crate::NativeUse::default();
+    entry_native_use.add(&code, is_native);
+    let mut native_use = entry_native_use.clone();
+    let mut chunk_native_use = std::collections::BTreeMap::new();
+    for chunk in &chunks {
+        let mut uses = crate::NativeUse::default();
+        uses.add(&chunk.code, is_native);
+        native_use.merge(&uses);
+        chunk_native_use.insert(chunk.id.clone(), uses);
     }
     Ok(Bundle {
         code,
@@ -469,6 +483,8 @@ pub async fn bundle_async(options: &BundleOptions) -> Result<Bundle, BundleError
         watch_files: watch_files(&bundler, &cwd_root),
         natives: natives.into_iter().collect(),
         native_use,
+        entry_native_use,
+        chunk_native_use,
         capabilities,
         elapsed_ms: start.elapsed().as_secs_f64() * 1000.0,
     })
