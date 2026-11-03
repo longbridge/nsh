@@ -963,7 +963,7 @@ pub fn ColorField(props: ColorFieldProps, _cx: Scope<NoEvent>) -> impl IntoEleme
 pub struct ColorSwatchProps {
     /// The color it shows; pressing it picks it in the [`ColorPicker`]
     /// around it. Without it, the picker's color, which a press does not
-    /// change (a preview).
+    /// change (a preview, no Tab stop).
     pub color: Prop<Option<Hsla>>,
     /// No presses; `disabled:` styles apply.
     #[prop(default)]
@@ -1029,6 +1029,9 @@ pub fn ColorSwatch(props: ColorSwatchProps, cx: Scope<ColorSwatchEvent>) -> impl
             ..AccessibilityState::default()
         })
         .selected_style(props.selected_style)
+        // A preview (no `color`) has nothing to press: no Tab stop, which
+        // would hold the focus where no key does anything.
+        .focusable(move || props.color.get().is_some())
         .on_press(move |_: &()| {
             let Some(color) = props.color.get_untracked() else {
                 return;
