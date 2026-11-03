@@ -1002,17 +1002,107 @@ impl NavPainter {
 
 #[cfg(test)]
 mod tests {
-    use nsh_core::shader::Shader;
+    use nsh_core::{Bounds, MountItem, ROOT_ID, ViewKind, shader::Shader};
 
     use super::*;
+    use crate::gtk_test::{self, apply, frame};
 
     fn layer(role: ShaderRole) -> Arc<ShaderLayer> {
-        let shader =
-            Shader::compile("fn shade(uv: vec2f) -> vec4f {\n    return vec4f(uv, 0.0, 1.0);\n}\n")
-                .expect("a valid shader");
+        shading(role, "vec4f(uv, 0.0, 1.0)")
+    }
+
+    /// A layer of `role` whose `shade` returns `color` (WGSL, of `uv`).
+    fn shading(role: ShaderRole, color: &str) -> Arc<ShaderLayer> {
+        let source = format!("fn shade(uv: vec2f) -> vec4f {{\n    return {color};\n}}\n");
+        let shader = Shader::compile(&source).expect("a valid shader");
         let mut layer = ShaderLayer::new(shader, &[], &mut Vec::new());
         layer.role = role;
         Arc::new(layer)
+    }
+
+    /// A view `id` under `parent`, at `at`.
+    fn add(surface: &Rc<Surface>, id: NodeId, parent: NodeId, at: Bounds<Points>) -> NshView {
+        apply(
+            surface,
+            &[
+                MountItem::Create {
+                    id,
+                    kind: ViewKind::View,
+                },
+                MountItem::Insert {
+                    parent,
+                    child: id,
+                    before: None,
+                },
+                MountItem::Frame { id, frame: at },
+            ],
+        );
+        gtk_test::view(surface, id)
+    }
+
+    /// A view `id` under the root, 100 points square, showing `layer`.
+    fn mount(surface: &Rc<Surface>, id: NodeId, layer: Arc<ShaderLayer>) -> NshView {
+        let view = add(surface, id, ROOT_ID, frame(0.0, 0.0, 100.0, 100.0));
+        apply(
+            surface,
+            &[MountItem::Shader {
+                id,
+                layer: Some(layer),
+            }],
+        );
+        view
+    }
+
+    /// The view that gave the layer the root draws, and whether it draws
+    /// one.
+    fn root_layer(surface: &Surface) -> (Option<NodeId>, bool) {
+        let s = surface.root.state();
+        let shader = s.shader.as_ref();
+        (
+            shader.and_then(|s| s.owner),
+            shader.is_some_and(|s| s.view.layer().is_some()),
+        )
+    }
+
+    #[test]
+    fn a_deleted_screen_effect_leaves_the_root() {
+        gtk_test::run(|| {
+            let surface = gtk_test::surface();
+            for (id, role) in [(2, ShaderRole::Screen), (4, ShaderRole::ScreenTransition)] {
+                mount(&surface, id, layer(role));
+                assert_eq!(root_layer(&surface), (Some(id), true));
+                apply(&surface, &[MountItem::Delete { id }]);
+                assert_eq!(root_layer(&surface), (None, false));
+            }
+        });
+    }
+
+    #[test]
+    fn deleting_a_replaced_screen_effect_keeps_the_new_one() {
+        gtk_test::run(|| {
+            let surface = gtk_test::surface();
+            let first = mount(&surface, 2, layer(ShaderRole::Screen));
+            let second = mount(&surface, 4, layer(ShaderRole::ScreenTransition));
+            assert_eq!(root_layer(&surface), (Some(4), true));
+            // The first one's animated uniforms and transitions no longer
+            // reach the root.
+            assert!(target(&first).is_none());
+            assert!(target(&second).is_some_and(|t| t == surface.root));
+            apply(&surface, &[MountItem::Delete { id: 2 }]);
+            assert_eq!(root_layer(&surface), (Some(4), true));
+            apply(&surface, &[MountItem::Delete { id: 4 }]);
+            assert_eq!(root_layer(&surface), (None, false));
+        });
+    }
+
+    #[test]
+    fn a_screen_effect_goes_with_the_views() {
+        gtk_test::run(|| {
+            let surface = gtk_test::surface();
+            mount(&surface, 2, layer(ShaderRole::Screen));
+            surface.mounter.borrow_mut().clear();
+            assert_eq!(root_layer(&surface), (None, false));
+        });
     }
 
     /// Without a GPU device an effect and a screen effect draw their

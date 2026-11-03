@@ -16,14 +16,17 @@ Linux:
 ```sh
 cargo clippy -p nsh-platform-linux -p nsh-linux-host -p nsh-linux-app --all-targets   # with web views (the hosts' default)
 cargo clippy -p nsh-platform-linux --all-targets   # without: web views as placeholders
-cargo test -p nsh-platform-linux --features webview   # needs no display: tests do not start GTK
+xvfb-run -a cargo test -p nsh-platform-linux --features webview   # tests that make widgets run where a display opens
 cargo build -p nsh-linux-host             # ./target/debug/nsh-linux-host
 ```
 
 The Linux binaries are built for the machine itself, so the CLI finds them in `target/<profile>` (not
 `target/<triple>/<profile>`) and builds them first in a checkout; `cargo xtask dist` on Linux puts them in
 `dist/nsh/runtime/linux/` (`docs/dev/tooling.md`, `embedding.md`). CI: `.github/workflows/linux.yml` (Ubuntu 24.04:
-clippy and tests of the Linux crates, the CLI, `nsh-dev` and xtask).
+clippy and tests of the Linux crates, the CLI, `nsh-dev` and xtask). The backend's tests that make GTK widgets all run
+on one thread of their own (`gtk_test.rs`: GTK keeps the thread that initialized it as its main thread, and each test
+runs on a thread of its own), in a window where they need GTK to lay out and draw; without a display they do not run,
+and CI runs them on Xvfb.
 
 Features: `js` (default; JS apps; without it the crate only runs Rust apps and links no QuickJS), `dev` (the dev
 server client, log forwarding, the error overlay: `dev.rs`) and `webview` (web views with WebKitGTK 6.0, the `webkit6`
