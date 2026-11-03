@@ -93,6 +93,17 @@ const CARET_WIDTH: f32 = 1.0;
 /// How long the caret shows, and then hides, while it blinks (ms).
 const BLINK_MS: u64 = 530;
 
+/// How many blinks the caret makes after the last edit, caret move or
+/// focus change before it stays shown: GTK's `gtk-cursor-blink-timeout`
+/// (10 s), as GTK apps on Linux do. Each blink draws a frame, so a field
+/// left focused would otherwise wake the process and the GPU twice a second
+/// for as long as the window stays open. macOS and Windows blink for good.
+const BLINKS: Option<u32> = if cfg!(target_os = "linux") {
+    Some((10_000 / BLINK_MS) as u32)
+} else {
+    None
+};
+
 /// What a drag that started with a press selects by.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Drag {
@@ -633,11 +644,15 @@ enum Held {
 }
 
 /// A surface's focused field, and whether the surface has the window's
-/// focus.
+/// focus and its window is presented.
 #[derive(Default)]
 struct Focus {
     view: Option<NshView>,
     inactive: bool,
+    /// The surface's window is not presented (minimized, on another
+    /// workspace, a suspended Wayland toplevel): it may keep the keyboard,
+    /// but nobody sees its caret, which stops blinking.
+    hidden: bool,
     /// Text typed after an action that can move focus, and the editing
     /// keys typed after that text. The field that has the keyboard when
     /// the engine catches up takes them, in order.
@@ -1033,6 +1048,33 @@ pub(crate) fn window_focus(surface: &Rc<Surface>, has_focus: bool) -> bool {
     input.caret_on.set(true);
     view.changed();
     true
+}
+
+/// The surface's window was presented or stopped being presented
+/// (`observe_window_visibility`). A hidden window draws no frames, but a
+/// window that keeps the keyboard while hidden would still blink its
+/// caret: the timer, the view's notify and GPUI's frame request woke the
+/// process twice a second for nothing. Shown again, the caret shows at
+/// once and blinks from there.
+pub(crate) fn window_visibility(surface: &Rc<Surface>, visible: bool) {
+    let changed = FOCUS.with(|f| {
+        let mut f = f.borrow_mut();
+        let entry = f.entry(surface.key()).or_default();
+        let changed = entry.hidden == visible;
+        entry.hidden = !visible;
+        changed
+    });
+    if !changed {
+        return;
+    }
+    if visible
+        && let Some(view) = focused(surface)
+        && let Some(input) = input_of(&view)
+    {
+        input.caret_on.set(true);
+        view.changed();
+    }
+    blink::update();
 }
 
 /// The surface with `key` stopped (its app or its view went): its focus
@@ -2349,7 +2391,8 @@ fn vertical(input: &InputState, down: bool, page: bool) -> usize {
 // --- The caret's blinking ----------------------------------------------------
 
 /// The caret blinks on one main-thread timer for all surfaces, running
-/// only while some field has the focus of a focused surface; restarting
+/// only while some field has the focus of a focused surface whose window
+/// is presented; restarting
 /// it (typing, moving) starts a new generation, and older timers stop.
 mod blink {
     use std::cell::Cell;
@@ -2361,6 +2404,8 @@ mod blink {
         static GENERATION: Cell<u64> = const { Cell::new(0) };
         /// A timer runs.
         static RUNNING: Cell<bool> = const { Cell::new(false) };
+        /// Blinks made since the timer started over.
+        static BLINKED: Cell<u32> = const { Cell::new(0) };
     }
 
     /// The fields whose caret shows now.
@@ -2368,7 +2413,7 @@ mod blink {
         FOCUS.with(|f| {
             f.borrow()
                 .iter()
-                .filter(|(key, f)| !f.inactive && Surface::by_key(**key).is_some())
+                .filter(|(key, f)| !f.inactive && !f.hidden && Surface::by_key(**key).is_some())
                 .filter_map(|(_, f)| f.view.clone())
                 .collect()
         })
@@ -2395,7 +2440,13 @@ mod blink {
             g.get()
         });
         RUNNING.with(|r| r.set(true));
+        BLINKED.with(|b| b.set(0));
         schedule(generation);
+    }
+
+    /// Whether the caret has blinked for long enough: it stays shown.
+    pub(super) fn tired(blinked: u32) -> bool {
+        BLINKS.is_some_and(|n| blinked >= n)
     }
 
     fn schedule(generation: u64) {
@@ -2408,11 +2459,24 @@ mod blink {
                 RUNNING.with(|r| r.set(false));
                 return;
             }
+            let blinked = BLINKED.with(|b| {
+                b.set(b.get() + 1);
+                b.get()
+            });
+            // Done blinking: the caret stays shown (and the timer stops)
+            // until the next edit, caret move or focus change starts it over.
+            let tired = tired(blinked);
             for view in views {
                 if let Some(input) = input_of(&view) {
-                    input.caret_on.set(!input.caret_on.get());
-                    view.changed();
+                    let on = tired || !input.caret_on.get();
+                    if input.caret_on.replace(on) != on {
+                        view.changed();
+                    }
                 }
+            }
+            if tired {
+                RUNNING.with(|r| r.set(false));
+                return;
             }
             schedule(generation);
         });
@@ -2518,6 +2582,41 @@ mod tests {
         assert!(blink::carets().is_empty());
         surface_stopped(key);
         assert!(FOCUS.with(|f| !f.borrow().contains_key(&key)));
+    }
+
+    /// A field keeps the focus of a window that is no longer presented,
+    /// but its caret stops blinking until the window is shown again.
+    #[test]
+    fn hidden_windows_blink_no_caret() {
+        let surface = Surface::new(nsh_engine::Environment::default());
+        let view = NshView::new(2, nsh_core::ViewKind::Input);
+        FOCUS.with(|f| {
+            f.borrow_mut().insert(
+                surface.key(),
+                Focus {
+                    view: Some(view),
+                    ..Default::default()
+                },
+            )
+        });
+        assert_eq!(blink::carets().len(), 1);
+        window_visibility(&surface, false);
+        assert!(blink::carets().is_empty());
+        // The field keeps the focus.
+        assert!(FOCUS.with(|f| f.borrow()[&surface.key()].view.is_some()));
+        // Shown again, it blinks (the test's field, never mounted, is then
+        // dropped as a removed one would be: only the window's state is left).
+        window_visibility(&surface, true);
+        assert!(FOCUS.with(|f| !f.borrow()[&surface.key()].hidden));
+        surface_stopped(surface.key());
+    }
+
+    /// On Linux the caret stops blinking, shown, after GTK's ten seconds.
+    #[test]
+    fn carets_stop_blinking() {
+        assert!(!blink::tired(0));
+        assert_eq!(blink::tired(18), cfg!(target_os = "linux"));
+        assert_eq!(blink::tired(u32::MAX), BLINKS.is_some());
     }
 
     /// What the input method sees of a composition.

@@ -180,7 +180,7 @@ import -window root -display :170 whole.png        # the display, if the window'
 | Canvas | `canvas.rs` | Rasterized with tiny-skia at the window's resolution of the view's whole transform (made again when its linear part changes, moved along with translations), uploaded as a GPUI image; canvas' model kept as on Windows (paths, strokes, anti-aliased clip masks, exact linear / radial / conic gradients, box-blurred shadows, composite operations in layers). Text is GPUI glyphs above the pixmap (GPUI gives no outlines), in the fonts `measureText` uses |
 | Scroll views | `scroll.rs` | The Windows backend's, on `nsh_core::scroll` (the state, physics and gestures; `scroll.rs` draws the indicator and finds the views keys move): offsets of their own, UIKit-like deceleration, snapping, paging, sticky cells, rubber banding for touch drags (mouse drags never scroll: they are the app's), the keyboard, mirrored horizontal lists, the indicator dragged as a scroll bar, shown while the mouse moves over the view and kept on horizontal views with `scrollbar={false}` (as on Linux), run along the part of the view the scroll views and clips around it leave in sight (`NshView::visible_bounds`); touchpad scrolls carry GPUI's phases, touchpad pinches go to pinch gestures |
 | Input | `input.rs`, `events.rs`, `nsh_core::input` | The Windows backend's hit testing, presses, responder and gestures, fed by GPUI's mouse, wheel and pinch events; hover and pressed states and `onMouseEnter` / `onMouseLeave` / `onMouseMove` (hover picked again after every batch for a still mouse), `onContextMenu` (the secondary button, which GPUI's macOS window also makes of a Control-click; a field or selectable text nearer opens its edit menu); the cursor is set from the frame (`set_cursor_style`); the decisions over plain data (what a pointer may start, a press's events, hover changes, hit areas, pinches, wheel latching) are `nsh_core::input`'s, shared with the other desktop backends |
-| Text inputs | `text_input.rs` | The editor shared with the Windows backend (`nsh_core::text_edit`), laid out with GPUI's text system and hosted in the input's view; text arrives through GPUI's input handler (`Window::handle_input`, the `AppView` as `EntityInputHandler`), IME compositions underlined at the caret and the candidate window placed with `bounds_for_range`; the composition stays out of the text until it is committed (`onChangeText` then), `onCompositionChange` reports its start, changes and end (after the committed text's `onChangeText`), and a `value` JS sets while it is in progress is held and applied when it ends, unless the user's commit made it stale; the caret blinks on a timer; Cmd on macOS where Ctrl is used elsewhere |
+| Text inputs | `text_input.rs` | The editor shared with the Windows backend (`nsh_core::text_edit`), laid out with GPUI's text system and hosted in the input's view; text arrives through GPUI's input handler (`Window::handle_input`, the `AppView` as `EntityInputHandler`), IME compositions underlined at the caret and the candidate window placed with `bounds_for_range`; the composition stays out of the text until it is committed (`onChangeText` then), `onCompositionChange` reports its start, changes and end (after the committed text's `onChangeText`), and a `value` JS sets while it is in progress is held and applied when it ends, unless the user's commit made it stale; the caret blinks on a timer while its field has the focus of an active window that is presented (a minimized or suspended window keeps the field, its caret still), and on Linux stays shown after 18 blinks (GTK's `gtk-cursor-blink-timeout` of 10 s) until the next edit, caret move or focus change; Cmd on macOS where Ctrl is used elsewhere |
 | Navigation, dialogs | `navigation.rs` | As on Windows (the decisions in `nsh_core::navigation`): pages slide in and out; NSH draws no header, a page's `header` (the app's view) is placed at its top by the core, full width, with the content below; back natively (Escape, Alt+Left, Cmd+[ on macOS, Browser Back, the mouse's back button: `onBackPress` when the app listens, then a pop unless `popOnBack` is false); dialogs are transparent layers over the window showing only the app's popup and backdrop (`presentation` is ignored). GPUI has no offscreen pictures, so a departing page or dialog keeps its views (their detaching deferred) in a layer drawn moving out |
 | Alerts (`AlertDialog`) | `system.rs` | Drawn in the surface as items the root hosts (the Windows backend's content dialogs), so they stay with an embedded surface and never block the main loop |
 | Video | `native/video.rs` | Feature `video` (Linux): GStreamer `playbin` with an `appsink` of BGRA frames, each frame a `RenderImage` painted as view content (clipped, transformed at its bounds, covered like any view); `controls` draws NSH's own bar |
@@ -203,6 +203,28 @@ mean/p50/p95/max), the paint's milliseconds rasterizing canvases and its paths p
 viewport-sized MSAA pass for GPUI), the animation frames requested and the notifies sent (what made GPUI draw). GPUI's
 own draw and present are not in it: add `ZED_MEASUREMENTS=1` (`frame duration: …` per frame). Measure GPU frames on a
 real display: Xwayland started with `-shm` renders with llvmpipe, and a hidden window gets no frame callbacks.
+
+## Idle windows
+
+A window with nothing animating draws no frames and NSH's threads sleep: the engine thread waits on its channel, the
+main thread on GPUI's event loop, and nothing NSH schedules runs again on its own (the caret's timer stops when its
+window is inactive or hidden, and on Linux after its blinks, above). Measured on Linux (voluntary context switches
+per thread, `/proc/<pid>/task/*/status`, an app showing static text, `nsh-gpui-host --bundle`, software Vulkan):
+
+- Wayland: about 4 a second, all of them the two idle threads of the `blocking` crate's pool (a dependency of
+  GPUI's and zbus' async I/O; 1.7 keeps idle threads, each waking every 500 ms). GPUI Fast's Wayland windows ask
+  for frames only while they are invalidated or have a next-frame callback, and a suspended toplevel gets none.
+- X11: GPUI's main thread wakes at the refresh rate (about 64 a second under Xvfb) with nothing drawn: GPUI Fast's
+  X11 client runs a periodic timer per visible window (`X11Client::start_refresh_loop`, `RefreshState::PeriodicRefresh`)
+  that asks the window for a frame on every tick, and GPUI skips the draw when nothing is invalid. Nothing in NSH
+  can stop it; it stops while the window is unmapped or obscured.
+- Driver threads: with NVIDIA's driver installed its Vulkan ICD loads (wgpu enumerates every adapter) and starts
+  threads that wake about 115 times a second (`libnvidia-glcore`), whichever adapter draws.
+
+A frame costs more than its main-thread wakeup: under lavapipe each one wakes the four `llvmpipe` threads and the
+renderer's (about 30 wakeups a frame), so an app that changes once a second wakes about 35 times a second, and a
+blinking caret about 65. Check an app's idle cost with `--fps` (no `nsh::perf` line while nothing is drawn) and the
+per-thread counts above.
 
 ## Checking a change: `nsh test --target gpui`
 
