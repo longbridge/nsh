@@ -1182,7 +1182,8 @@ crosses to JS in the HTML inputs' forms (`date`, `datetime-local`), at the preci
 
 `Calendar` (`calendar.rs`) is a grid of items (`Grid`: the shown page, the view, the cursor) over `gpui-base`'s
 `Date` and `Matcher`. Its days are one Tab stop: only the cursor's day (`stop`) is focusable, and the arrow, Home / End and
-Page keys move the cursor, turning the months past the shown ones (`gpui-base`'s days take presses only). A
+Page keys move the cursor (past disabled days, which the core never focuses: `Grid::enabled_toward`; the stop
+itself skips a disabled selected day or today), turning the months past the shown ones (`gpui-base`'s days take presses only). A
 JS function (`Matcher::Js`, as `gpui-base`'s `Matcher::Custom`) is asked for the shown days in a spawned task (the
 next JS turn), its answers kept as a set; a newer page's answers replace an older one's. The grid fills the width it
 is given, as a table's columns do: the months share the body and the items of a row (weekdays, days, the months and

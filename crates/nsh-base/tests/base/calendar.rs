@@ -412,6 +412,57 @@ fn the_days_are_one_stop_whose_arrows_move_the_keyboard() {
 }
 
 #[test]
+fn the_keys_pass_over_disabled_days() {
+    // Fridays 2026-10-30 and 2026-11-06, the weekends disabled: a disabled
+    // day takes no focus, so a move goes on to the next day that does.
+    let mut app = start(HarnessProps {
+        value: d(2026, 10, 30).into(),
+        weekends_disabled: true,
+        ..props()
+    });
+    for _ in 0..5 {
+        app.press_key("tab").unwrap();
+    }
+    see(&mut app, "10-30*^");
+    // Over Saturday and Sunday, into the next month.
+    app.press_key("right").unwrap();
+    see(&mut app, "M11/2026");
+    see(&mut app, "11-2^");
+    // The week's end is a Saturday: back to its Friday.
+    app.press_key("end").unwrap();
+    see(&mut app, "11-6^");
+    // Its start a Sunday: on to its Monday.
+    app.press_key("home").unwrap();
+    see(&mut app, "11-2^");
+    app.press_key("left").unwrap();
+    see(&mut app, "M10/2026");
+    see(&mut app, "10-30*^");
+    app.press_key("down").unwrap();
+    see(&mut app, "11-6^");
+    app.press_key("enter").unwrap();
+    see(&mut app, "11-6*^");
+    assert_eq!(log(&app), "2026-11-06");
+}
+
+#[test]
+fn a_disabled_selected_day_leaves_the_stop_to_one_that_takes_the_focus() {
+    // The app's value a Saturday the matcher disables: the stop is the
+    // shown day before it that is not.
+    let mut app = start(HarnessProps {
+        value: d(2026, 10, 31).into(),
+        controlled: true,
+        weekends_disabled: true,
+        ..props()
+    });
+    for _ in 0..5 {
+        app.press_key("tab").unwrap();
+    }
+    see(&mut app, "10-30^");
+    app.press_key("right").unwrap();
+    see(&mut app, "11-2^");
+}
+
+#[test]
 fn right_to_left_left_is_the_next_day_and_right_the_previous() {
     let props = HarnessProps {
         value: d(2026, 10, 30).into(),

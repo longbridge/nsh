@@ -237,7 +237,8 @@ language.
 
 ## Keyboard
 
-The days are one stop of Tab: it lands on the selected day, else today, else the first shown day. Then:
+The days are one stop of Tab: it lands on the selected day, else today, else the first shown day, passing over
+disabled days, which take no focus. Then:
 
 | Key | Action |
 |---|---|
@@ -249,7 +250,8 @@ The days are one stop of Tab: it lands on the selected day, else today, else the
 | Return, Space | Picks the day. |
 
 In a right-to-left layout the weeks run from the right, so Left is the day after and Right the day before; Up and Down
-keep the weeks. Moving past the shown months turns them. Previous, the toggles, Next, the months and the years take
+keep the weeks. A key that reaches a disabled day goes on to the next day that is not, in the direction it moves (Home
+and End back toward the day they left). Moving past the shown months turns them. Previous, the toggles, Next, the months and the years take
 presses.
 `gpui-base`'s days take presses only; the keys are NSH's, after the WAI-ARIA date picker dialog.
 

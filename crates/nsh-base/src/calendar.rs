@@ -21,7 +21,8 @@
 //!   days are one stop of Tab, on the selected day, else today, else the
 //!   first; the arrows move a day or a week, Home and End to the week's
 //!   ends, Page Up and Down a month (with Shift a year), Return and Space
-//!   select. Moving past the shown months turns them.
+//!   select. Disabled days take no focus: a move passes over them, and
+//!   the stop is never on one. Moving past the shown months turns them.
 //! - **Items**: every control is an item the app draws (`renderItem`,
 //!   [`CalendarEntry`]: what it is, its kind, value and date, never its
 //!   state) and styles (`itemClass`): `selected:` on the selected date or
@@ -932,11 +933,37 @@ impl Grid {
         let page = self.page.get();
         let last = page + Months::new(self.months());
         let shown = |d: &NaiveDate| *d >= page && *d < last;
-        self.shown
+        let day = self
+            .shown
             .with(|v| v.start())
             .filter(shown)
             .or(Some(self.today).filter(shown))
-            .unwrap_or(page)
+            .unwrap_or(page);
+        // A disabled day takes no focus: the stop is the next day that
+        // does, else the one before.
+        if !self.disabled(day) {
+            return day;
+        }
+        day.iter_days()
+            .take_while(shown)
+            .chain(day.iter_days().rev().take_while(shown))
+            .find(|d| !self.disabled(*d))
+            .unwrap_or(day)
+    }
+
+    /// The day the keys reach from `to`, a move from `from`: `to` itself,
+    /// else, a disabled day taking no focus, the first that does stepping
+    /// on by `skip` days (in the direction of the move, back toward `from`
+    /// for Home and End), none past `from` nor further than a year.
+    fn enabled_toward(self, to: NaiveDate, from: NaiveDate, skip: i64) -> Option<NaiveDate> {
+        let mut day = to;
+        for _ in 0..=366 / skip.unsigned_abs() {
+            if day == from || !untracked(|| self.disabled(day)) {
+                return Some(day);
+            }
+            day = day.checked_add_signed(chrono::TimeDelta::days(skip))?;
+        }
+        None
     }
 
     /// Gives the days' stop the keyboard focus once it is made (a date
@@ -972,43 +999,62 @@ impl Grid {
                 return;
             }
             let rtl = layout_rtl();
-            let by = move |f: Step| {
+            // A disabled day takes no focus (and a focus sent to one would
+            // leave the days, unbinding these keys): a move past it goes on
+            // to the next day that takes it, `skip` days at a time.
+            let by = move |f: Step, skip: i64| {
                 move |_: &str| {
                     let first_day = self.config.first_day_of_week.get_untracked();
                     let from = untracked(|| self.stop());
-                    if let Some(day) = f(from, first_day) {
+                    if let Some(day) =
+                        f(from, first_day).and_then(|to| self.enabled_toward(to, from, skip))
+                    {
                         self.move_to(day);
                     }
                 }
             };
-            let keys: [(&str, Step); 10] = [
-                ("left", |d, _| d.pred_opt()),
-                ("right", |d, _| d.succ_opt()),
-                ("up", |d, _| d.checked_sub_days(Days::new(7))),
-                ("down", |d, _| d.checked_add_days(Days::new(7))),
-                ("home", |d, f| {
-                    let back = (d.weekday().num_days_from_sunday() + 7 - f % 7) % 7;
-                    d.checked_sub_days(Days::new(back as u64))
-                }),
-                ("end", |d, f| {
-                    let back = (d.weekday().num_days_from_sunday() + 7 - f % 7) % 7;
-                    d.checked_add_days(Days::new(6 - back as u64))
-                }),
-                ("pageup", |d, _| d.checked_sub_months(Months::new(1))),
-                ("pagedown", |d, _| d.checked_add_months(Months::new(1))),
-                ("shift+pageup", |d, _| d.checked_sub_months(Months::new(12))),
-                ("shift+pagedown", |d, _| {
-                    d.checked_add_months(Months::new(12))
-                }),
+            let keys: [(&str, Step, i64); 10] = [
+                ("left", |d, _| d.pred_opt(), -1),
+                ("right", |d, _| d.succ_opt(), 1),
+                ("up", |d, _| d.checked_sub_days(Days::new(7)), -7),
+                ("down", |d, _| d.checked_add_days(Days::new(7)), 7),
+                (
+                    "home",
+                    |d, f| {
+                        let back = (d.weekday().num_days_from_sunday() + 7 - f % 7) % 7;
+                        d.checked_sub_days(Days::new(back as u64))
+                    },
+                    1,
+                ),
+                (
+                    "end",
+                    |d, f| {
+                        let back = (d.weekday().num_days_from_sunday() + 7 - f % 7) % 7;
+                        d.checked_add_days(Days::new(6 - back as u64))
+                    },
+                    -1,
+                ),
+                ("pageup", |d, _| d.checked_sub_months(Months::new(1)), -1),
+                ("pagedown", |d, _| d.checked_add_months(Months::new(1)), 1),
+                (
+                    "shift+pageup",
+                    |d, _| d.checked_sub_months(Months::new(12)),
+                    -1,
+                ),
+                (
+                    "shift+pagedown",
+                    |d, _| d.checked_add_months(Months::new(12)),
+                    1,
+                ),
             ];
-            for (key, f) in keys {
+            for (key, f, skip) in keys {
                 on_key_with(
                     &directed(key, rtl),
                     KeyOptions {
                         when: When::NotEditing,
                         repeat: true,
                     },
-                    by(f),
+                    by(f, skip),
                 );
             }
             for key in ["enter", "space"] {
