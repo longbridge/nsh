@@ -613,6 +613,8 @@ function rememberDemo() {
     (launched != null ? Promise.resolve(launched) : Storage.getItem(LAST_DEMO))
       .then((name) => {
         const wanted = name?.toLowerCase();
+        // Nothing kept (a first launch, a test's clean storage): the index.
+        if (!wanted) return;
         const all = groups.flatMap((g) => g.demos);
         // A demo by its name, else the first under a group's title or a
         // subheading ("Primitives", "Platform"), which name no demo.
