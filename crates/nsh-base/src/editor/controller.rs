@@ -293,6 +293,7 @@ impl Ed {
                 line_height: crate::terminal::row_height(ed.props.line_height.get()),
             };
             let mut st = ed.st.borrow_mut();
+            st.display.set_cells(crate::terminal::is_terminal());
             if st.font != font {
                 st.display.set_measure(measurer(&font));
                 st.font = font;

@@ -16,7 +16,7 @@ use nsh_platform_tui::{App, AppView, CursorStyle, Handled, Input, Modifiers, Roo
 use ratatui_core::{backend::TestBackend, terminal::Terminal};
 
 use super::{
-    app::{draw_until, surface},
+    app::{draw_until, mouse, surface},
     dock::dump,
 };
 
@@ -267,6 +267,26 @@ fn an_editors_caret_is_the_terminal_cursor() {
     terminal
         .backend_mut()
         .assert_cursor_position((start.0 + 1, start.1));
+}
+
+#[test]
+fn a_click_on_a_characters_cell_puts_the_caret_before_it() {
+    use nsh_platform_tui::{MouseButton::Left, MouseKind};
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(48, 12)).unwrap();
+    view.load(App::Rust(Root::new::<Typed>(|| ()))).unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "let total = 42;");
+    let width = terminal.backend().buffer().area.width as usize;
+    let at = contents(&terminal).find("let total").unwrap() + 5;
+    let (x, y) = ((at % width) as u16, (at / width) as u16);
+    // The `o` of `total`: the caret stands on its Cell, before it, as a
+    // terminal's cursor does (not after it, the nearer edge of its center).
+    view.handle(mouse(MouseKind::Down(Left), x, y));
+    view.handle(mouse(MouseKind::Up(Left), x, y));
+    draw_until(&mut view, &mut terminal, &rx, "focus yes");
+    terminal.backend_mut().assert_cursor_position((x, y));
+    assert_eq!(view.handle(key("Q")), Handled::Yes);
+    draw_until(&mut view, &mut terminal, &rx, "let tQotal");
 }
 
 /// A rich editor (an empty document) reporting its focus and changes.
