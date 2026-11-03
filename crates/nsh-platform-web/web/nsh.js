@@ -2611,8 +2611,7 @@ class Player {
       host.removeEventListener("load", el._contentMark, true);
       el._contentMark = null;
     }
-    const gl = this._shaderGl;
-    if (gl) for (const t of s.textures) if (t) gl.deleteTexture(t);
+    this.freeTextures(s);
     el._shader = null;
     this.shaderViews.delete(el);
     this.backdrops?.delete(el);
@@ -3136,16 +3135,30 @@ class Player {
     const run = s.running;
     s.running = null;
     if (s.nav) {
+      // The overlay goes for good, and its pictures' textures with it:
+      // GPU memory the garbage collector does not see.
+      this.freeTextures(s);
       this.shaderViews.delete(el);
-      run.done?.();
+      run?.done?.();
       return;
     }
     const host = this.shaderHost(el);
     if (host !== this.root || !this.screenShader) host.classList.remove("nsh-fx");
     s.pictures[2] = s.pictures[3] = null;
+    this.freeTextures(s, [2, 3]);
     const canvas = el._shaderCanvas;
     canvas._bitmap?.transferFromImageBitmap(null);
     canvas.width = 0;
+  }
+
+  /** Deletes the textures of a view's pictures `inputs` (all of them by default). */
+  freeTextures(s, inputs = [0, 1, 2, 3]) {
+    const gl = this._shaderGl;
+    for (const input of inputs) {
+      const t = s.textures[input];
+      if (t && gl) gl.deleteTexture(t);
+      s.textures[input] = null;
+    }
   }
 
   /** The shared WebGL 2 context; `null` where there is none (said once). */

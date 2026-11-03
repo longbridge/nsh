@@ -252,16 +252,19 @@ dialog's `transitionShader`) take their pictures from the DOM. `shader.rs` also 
 - **Transitions.** `["sht"]` comes first in its batch: the children as they show (or, when one is running, what it
   draws) become `sample_from` and the shader draws over them at once; the children painted after the batch are
   `sample_to`, and `nsh.progress` runs from 0 to 1 over the duration on animation frames. At the end the canvas is
-  cleared and the children show as they are. An animated `progress` (an effect's) is written by `shaderSlot`.
+  cleared, the `from` and `to` pictures go with their textures (`freeTextures`), and the children show as they are.
+  An animated `progress` (an effect's) is written by `shaderSlot`.
 - **Screens.** A `ScreenEffect` or `ScreenTransition` does the same with the root as its host; its canvas is
   appended to the root. A screen effect pictures the surface again whenever another shader in it draws.
 - **Pages and dialogs.** `["shn"]` keeps the page's or the dialog's `transitionShader`. `shaderNav` runs it on an
   overlay over the stack (push, pop) or the root (present, dismiss): `sample_from` is the host painted up to the
   page or dialog, `sample_to` the whole host, and progress goes from 0 to 1, or 1 to 0 when it leaves; the views
-  are where they end under it at once. Dialogs shown in the top layer (`dialogs: "viewport"`) keep their own motion,
-  and so does every page and dialog when the user asks for less motion (`reduceMotion()`). A push, a pop
-  (`moveScreens`, which `goBack` goes through whatever the page's `animation`), a presentation or a dismissal ends a
-  shader's change still running over the same host first (`endNavShader`: its `done` settles and reports it).
+  are where they end under it at once. When it ends the overlay goes, and its pictures' textures are deleted
+  (`endTransition`): GPU memory the garbage collector does not see. Dialogs shown in the top layer
+  (`dialogs: "viewport"`) keep their own motion, and so does every page and dialog when the user asks for less
+  motion (`reduceMotion()`). A push, a pop (`moveScreens`, which `goBack` goes through whatever the page's
+  `animation`), a presentation or a dismissal ends a shader's change still running over the same host first
+  (`endNavShader`: its `done` settles and reports it).
 - **Shaders that cannot draw.** A view whose shader cannot draw (`shaderDraws`: no WebGL 2, or a program the driver
   refuses) shows its background and children as they are, as the native backends show them without a device: an
   effect or a screen effect takes no `nsh-fx` (and its canvas is cleared when its new program is refused), a

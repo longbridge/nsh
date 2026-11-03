@@ -834,7 +834,7 @@ test("pages and dialogs take their own motion when the user asks for less motion
 test("a change of a stack whose page shader still runs ends that one first", () => {
   const { player, stack } = stackPlayer(false);
   const order = [];
-  const overlay = { _shader: { nav: true, running: { done: () => order.push("ended") } } };
+  const overlay = { _shader: { nav: true, running: { done: () => order.push("ended") }, textures: [null, null, null, null] } };
   stack._navOverlay = overlay;
   player.shaderViews = new Set([overlay]);
   const old = screenOf(stack, 2, "none");
@@ -848,7 +848,7 @@ test("a change of a stack whose page shader still runs ends that one first", () 
 test("a dialog shown or closed while another's shader runs ends that one first", () => {
   const { player } = fakePlayer();
   const order = [];
-  const overlay = { _shader: { nav: true, running: { done: () => order.push("ended") } } };
+  const overlay = { _shader: { nav: true, running: { done: () => order.push("ended") }, textures: [null, null, null, null] } };
   player.root = { _navOverlay: overlay };
   player.shaderViews = new Set([overlay]);
   player.endNavShader(player.root);
@@ -856,6 +856,29 @@ test("a dialog shown or closed while another's shader runs ends that one first",
   // Ended already: nothing more.
   player.endNavShader(player.root);
   assert.deepEqual(order, ["ended"]);
+});
+
+test("a page's or a dialog's shader deletes its pictures' textures when its change ends", () => {
+  const { player } = fakePlayer();
+  const deleted = [];
+  player._shaderGl = { deleteTexture: (t) => deleted.push(t) };
+  player.shaderViews = new Set();
+  const overlay = { _shader: { nav: true, running: { done() {} }, textures: [null, null, "from", "to"] } };
+  player.shaderViews.add(overlay);
+  player.endTransition(overlay);
+  assert.deepEqual(deleted, ["from", "to"]);
+  assert.deepEqual(overlay._shader.textures, [null, null, null, null]);
+});
+
+test("a transition deletes its from and to textures when it ends, and keeps its others", () => {
+  const { player, el } = shaderPlayer();
+  const deleted = [];
+  player._shaderGl = { deleteTexture: (t) => deleted.push(t) };
+  withCanvases(() => player.op_sh(["sh", 2, shaderLayer(2)]));
+  el._shader.textures = ["content", null, "from", "to"];
+  player.endTransition(el);
+  assert.deepEqual(deleted, ["from", "to"]);
+  assert.deepEqual(el._shader.textures, ["content", null, null, null]);
 });
 
 test("a dialog closed through its shader stops being watched for the window's size", () => {
