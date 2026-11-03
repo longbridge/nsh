@@ -27110,6 +27110,93 @@ mod terminal_layout {
     }
 
     #[test]
+    fn a_texts_explicit_width_rounds_up_to_hold_its_line() {
+        // A column of curve names, each 84pt (10.5 Cells) wide, then its
+        // track: rounded to the nearest, "cubic inOut" would be cut.
+        for (width, cols) in [(84.0, 11.0), (80.0, 10.0)] {
+            let mut ops = view(
+                2,
+                ROOT_ID,
+                &[
+                    ("flexDirection", V::Str("row")),
+                    ("width", V::Number(400.0)),
+                ],
+            );
+            ops.extend(text(4, 2, "cubic inOut"));
+            ops.push(style_op(
+                4,
+                &[
+                    ("width", V::Number(width)),
+                    ("numberOfLines", V::Number(1.0)),
+                ],
+            ));
+            ops.extend(view(
+                6,
+                2,
+                &[("flexGrow", V::Number(1.0)), ("height", V::Number(16.0))],
+            ));
+            let batch = laid_out(ops);
+            assert_eq!(
+                frame_of(&batch, 4).map(|f| f.size.width),
+                Some(Points(cols * 8.0)),
+                "width: {width}"
+            );
+            assert_eq!(
+                frame_of(&batch, 6).map(|f| f.origin.x),
+                Some(Points(cols * 8.0)),
+                "width: {width}"
+            );
+        }
+    }
+
+    /// A box 86pt (11 Cells) wide holding a label stretched across it
+    /// (absolute, `left` and `right` 0) of `content`.
+    fn a_label_across_a_box(content: &str) -> MountBatch {
+        let mut ops = view(
+            2,
+            ROOT_ID,
+            &[
+                ("alignSelf", V::Str("flex-start")),
+                ("width", V::Number(86.0)),
+                ("height", V::Number(64.0)),
+            ],
+        );
+        ops.extend(view(
+            4,
+            2,
+            &[
+                ("position", V::Str("absolute")),
+                ("left", V::Number(0.0)),
+                ("right", V::Number(0.0)),
+                ("top", V::Number(0.0)),
+                ("alignItems", V::Str("flex-end")),
+            ],
+        ));
+        ops.extend(text(6, 4, content));
+        laid_out(ops)
+    }
+
+    #[test]
+    fn a_box_holds_a_label_stretched_across_it() {
+        // A funnel's stage name in its column: 12 Cells in a box of 11.
+        let batch = a_label_across_a_box("KYC verified");
+        assert_eq!(
+            frame_of(&batch, 2).map(|f| f.size.width),
+            Some(Points(96.0))
+        );
+        assert_eq!(
+            frame_of(&batch, 6).map(|f| f.size.width),
+            Some(Points(96.0))
+        );
+        // A paragraph laid over it still wraps in it.
+        let batch = a_label_across_a_box("A paragraph far wider than the box it is laid over");
+        assert_eq!(
+            frame_of(&batch, 2).map(|f| f.size.width),
+            Some(Points(88.0))
+        );
+    }
+
+    #[test]
     fn an_absolute_ring_its_parent_would_cut_is_left_out() {
         // The stage is shorter than the ring: its outline would be open.
         let batch = ring_in_a_stage(120.0, 64.0, false);

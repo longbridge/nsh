@@ -353,7 +353,10 @@ as tall as its lines at 40 columns).
   space left, shared equally, as CSS's: `margin: 0 auto` centers a box, `marginLeft: auto` pushes it to a row's end.
   A modal's (or a screen's) child keeps its top margin in rows, as given (a dialog's popup 12% down), uncollapsed. A small box of an
   explicit width (under six columns: an avatar, a counter) is at least as wide as its content's longest words, and so
-  is a control of any explicit width (a time slot with its radio's mark): its label never breaks inside a word.
+  is a control of any explicit width (a time slot with its radio's mark): its label never breaks inside a word. A label
+  stretched across a box of an explicit width (absolute, both `left` and `right` set: a funnel's stage name in its
+  column) widens the box to its line when the line is at most a quarter wider than the box, as a GUI's font fit it
+  there; a paragraph laid over a box still wraps in it.
 - **Blocks.** A border is one Cell on each side that has one, only on a card: a container (a box holding views with
   content that are not only texts; spacers and bars do not count) padded 12pt or more above or below, or around two
   rows of content or more, unless all its children are controls (a split button, a toolbar, a tab list, a segmented
@@ -421,7 +424,9 @@ scroll view too; **grids** take their columns from the template
   would be a second frame around the same content.
 - A **bare overlay** with a border (a dock's drop preview) is its outline: its size is the app's, and its border is
   drawn over its outer Cells.
-- Explicit lengths round to the nearest whole Cell, an exact half down (a 300 × 200 canvas is 37 × 12 Cells).
+- Explicit lengths round to the nearest whole Cell, an exact half down (a 300 × 200 canvas is 37 × 12 Cells), but a
+  text's explicit width rounds up: it was set to hold its line in a GUI's font, and the Cell it would round off
+  keeps the line's last column (curve names 84pt wide hold "cubic inOut").
 - What a terminal cannot show well is never emulated. At an icon's size (an explicit width and height both at most
   48pt) images, videos, web views, shaders and canvases are `display: none`, so they take no Cells, no frame and no
   hits, and their margins and the gaps beside them go with them (`Core::grid_role`). Larger, they keep their box: a

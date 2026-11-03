@@ -158,6 +158,11 @@ impl Grid {
         nearest(points / self.height)
     }
 
+    /// `points` in whole columns, rounded up.
+    fn ceil_cols(self, points: f32) -> i32 {
+        ((points / self.width) - EPSILON).ceil() as i32
+    }
+
     /// The whole columns that fit in `points`.
     fn fit_cols(self, points: f32) -> i32 {
         ((points / self.width) + EPSILON).floor().max(0.0) as i32
@@ -1166,7 +1171,18 @@ pub(crate) fn compute(
     let (border, padding) = insets(tree, node, k, parent_w, grid, surface);
     let inset = border.add(padding);
     let s = tree.style(node);
-    let ew = dim(s.size.width, parent_w).map(|v| grid.cols(v).max(0));
+    // A text's explicit width was set to hold its line in a GUI's font:
+    // rounded up, the Cell it rounds off keeps the line's last column (a
+    // column of curve names, each 84pt wide, holds "cubic inOut").
+    let line = role.text && !role.control && k.measures;
+    let ew = dim(s.size.width, parent_w).map(|v| {
+        if line {
+            grid.ceil_cols(v)
+        } else {
+            grid.cols(v)
+        }
+        .max(0)
+    });
     let min_w = lpa(s.min_size.width, parent_w).map(|v| grid.cols(v));
     let max_w = lpa(s.max_size.width, parent_w).map(|v| grid.cols(v));
     let (eh, min_h) = if k.honors_height {
@@ -1517,6 +1533,46 @@ pub(crate) fn compute(
         if need > size.h {
             size.h = explicit.map_or(need, |e| need.min(e.max(size.h)));
             size.h = clamp(size.h, min_h, max_h);
+        }
+    }
+    // A label stretched across a box of an explicit width (both its
+    // horizontal insets set: a funnel's stage name in its column) would be
+    // cut by it: the box holds its line, as it holds the labels placed down
+    // from its top. Only a line a GUI's font fit in that width, at most a
+    // quarter wider in Cells: a paragraph laid over a box (an empty
+    // state's) still wraps in it.
+    if known_w.is_none()
+        && let Some(stated) = ew
+        && !absolute.is_empty()
+    {
+        let mut need = 0;
+        for &(_, child) in &absolute {
+            let cs = tree.style(child);
+            if cs.inset.left.is_auto()
+                || cs.inset.right.is_auto()
+                || !cs.size.width.is_auto()
+                || tree.role(child).overlay
+                || holds_control(tree, child)
+                || first_text(tree, child).is_none()
+            {
+                continue;
+            }
+            let inset = |v: LengthPercentageAuto| lpa(v, None).map_or(0, |v| grid.cols(v).max(0));
+            let (left, right) = (inset(cs.inset.left), inset(cs.inset.right));
+            let (w, _) = measure(
+                tree,
+                grid,
+                child,
+                true,
+                (None, None),
+                (None, None),
+                (None, None),
+            );
+            need = need.max(left + w + right);
+        }
+        let need = need + border.x();
+        if need > size.w && need <= stated + (stated + 3) / 4 {
+            size.w = clamp(need, None, max_w);
         }
     }
     if perform {
