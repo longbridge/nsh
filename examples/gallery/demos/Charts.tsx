@@ -1,6 +1,6 @@
 import type { JSX } from "nsh";
 import { Canvas, cleanup, createAnimatedValue, Easing, effect, LayoutAnimation, List, reduceMotion, signal, Text, token, View } from "nsh";
-import { Arc, Area, Bar, Dot, Grid, Line, Pie, Plot, PlotAppearScope, PlotAxis, PlotLabel, RadialGrid, RadialLine, Rule, Sankey } from "nsh/base/plot";
+import { Arc, Area, Bar, Cell, Dot, Grid, Line, Pie, Plot, PlotAppearScope, PlotAxis, PlotLabel, RadialGrid, RadialLine, Rule, Sankey } from "nsh/base/plot";
 import { platform } from "nsh";
 import { alpha, Button, Card, chart, colors, DemoPage, finish, focusRing, Legend, mono, Segmented, toneColor, type Tone } from "../ui";
 
@@ -2215,6 +2215,415 @@ const mean = (pick: (f: Factor) => number) => FACTORS.reduce((s, f) => s + pick(
 /** A name's side of its place: away from the center. */
 const away = (v: number) => (v > 0.01 ? "flex-start" : v < -0.01 ? "flex-end" : "center");
 
+/** The holdings whose daily returns the correlation matrix pairs. */
+const PAIR_TICKERS = ["NVDA", "AMD", "MSFT", "AAPL", "TSLA", "JPM", "XOM", "GLD"] as const;
+type Ticker = (typeof PAIR_TICKERS)[number];
+const LOOKBACKS = [
+  { value: "1Y", label: "1 year" },
+  { value: "3Y", label: "3 years" },
+] as const;
+type Lookback = (typeof LOOKBACKS)[number]["value"];
+/** Each holding's loadings on six factors (the market, tech, semiconductors,
+ * rates, energy, gold) and the variance of its own news, per lookback: a
+ * factor model, so the matrix it makes is a correlation matrix. */
+const EXPOSURES: Record<Lookback, Record<Ticker, number[]>> = {
+  "1Y": {
+    NVDA: [0.7, 0.45, 0.85, 0, 0, 0, 0.25],
+    AMD: [0.7, 0.4, 0.85, 0, 0, 0, 0.35],
+    MSFT: [0.7, 0.55, 0.15, 0, 0, 0, 0.3],
+    AAPL: [0.65, 0.35, 0, 0, 0, 0, 0.5],
+    TSLA: [0.6, 0.25, 0, 0, 0, 0, 1.1],
+    JPM: [0.65, -0.05, 0, 0.6, 0.2, 0, 0.3],
+    XOM: [0.3, -0.25, 0, 0.3, 0.8, 0.1, 0.3],
+    GLD: [-0.2, -0.1, -0.05, -0.15, 0.15, 0.85, 0.3],
+  },
+  "3Y": {
+    NVDA: [0.75, 0.45, 0.7, 0, 0, 0, 0.35],
+    AMD: [0.75, 0.4, 0.7, 0, 0, 0, 0.45],
+    MSFT: [0.75, 0.5, 0.1, 0, 0, 0, 0.35],
+    AAPL: [0.75, 0.45, 0.05, 0, 0, 0, 0.4],
+    TSLA: [0.7, 0.3, 0, 0, 0, 0, 0.95],
+    JPM: [0.7, 0, 0, 0.55, 0.05, 0, 0.35],
+    XOM: [0.45, -0.1, 0, 0.2, 0.75, 0.05, 0.3],
+    GLD: [0.05, 0, 0, -0.1, 0.1, 0.8, 0.35],
+  },
+};
+/** A cell of the matrix: the holding of its line, of its column, and their correlation. */
+type Pair = { a: Ticker; b: Ticker; r: number };
+/** Every pair of holdings, line by line, each loading nudged a little: symmetric, 1 on the diagonal. */
+function correlations(lookback: Lookback): Pair[] {
+  const r = random(lookback === "1Y" ? 11 : 37);
+  const loads = PAIR_TICKERS.map((t) => EXPOSURES[lookback][t].slice(0, 6).map((l) => (l === 0 ? 0 : l * (0.92 + r() * 0.16))));
+  const own = PAIR_TICKERS.map((t) => EXPOSURES[lookback][t][6]);
+  const cov = (i: number, j: number) => loads[i].reduce((s, l, k) => s + l * loads[j][k], 0) + (i === j ? own[i] : 0);
+  return PAIR_TICKERS.flatMap((a, i) =>
+    PAIR_TICKERS.map((b, j) => ({ a, b, r: i === j ? 1 : Math.round((cov(i, j) / Math.sqrt(cov(i, i) * cov(j, j))) * 100) / 100 })),
+  );
+}
+const CORRELATIONS: Record<Lookback, Pair[]> = { "1Y": correlations("1Y"), "3Y": correlations("3Y") };
+/** The 28 pairs of two holdings, each once: the cells above the diagonal. */
+const pairsOf = (cells: Pair[]) => cells.filter((p) => PAIR_TICKERS.indexOf(p.a) < PAIR_TICKERS.indexOf(p.b));
+const coefficient = (r: number) => (r < 0 ? `−${fixed(-r)}` : fixed(r));
+const kinship = (p: Pair) =>
+  p.a === p.b
+    ? "A holding against itself"
+    : p.r >= 0.7
+      ? "Move together closely"
+      : p.r >= 0.4
+        ? "Move together"
+        : p.r >= 0.15
+          ? "Loosely related"
+          : p.r > -0.15
+            ? "Barely related"
+            : "Move apart: a hedge";
+/** The cells' labels: dark on light cells, white on dark ones (`data-dark`). */
+const CELL_LABEL = "text-black/70 data-dark:text-white/90";
+/** The hover cell: a ring in the text's color around the cell, a little out from its edge. */
+const cellRing = () => ({ outlineWidth: 1.5, outlineOffset: 1.5, outlineColor: colors.text });
+
+/** A ramp's key: its colors left to right over the labels of its ends (and middle). */
+function Ramp(props: { colors: string[]; labels: string[] }) {
+  return (
+    <View style={{ gap: 4 }}>
+      <View style={{ height: 6, borderRadius: 3, backgroundImage: `linear-gradient(to right, ${props.colors.join(", ")})` }} />
+      <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+        {props.labels.map((l) => (
+          <Text style={{ ...axis, fontSize: 10 }}>{l}</Text>
+        ))}
+      </View>
+    </View>
+  );
+}
+
+/**
+ * How a portfolio's holdings move together: a correlation matrix of their
+ * daily returns as a heatmap, a `Cell` per pair in the bands of its two
+ * holdings (band scales with the tickers as their `domain`), colored
+ * along a diverging `colorScale` from −1 (blue) through 0 to +1 (the
+ * accent), its coefficient written in it, white on the dark cells
+ * (`data-dark:`) and left out where it does not fit. The pair under the
+ * pointer or the keys (which step across the grid) is ringed and read out
+ * over the plot, the other cells fading; another lookback glides every
+ * cell to its new color (`motion.update`).
+ */
+function Correlation() {
+  const lookback = signal<Lookback>("1Y");
+  const hover = signal<number | null>(null);
+  const cells = () => CORRELATIONS[lookback()];
+  const shown = () => (hover() == null ? undefined : cells()[hover()!]);
+  const pairs = () => pairsOf(cells());
+  const mean = () => pairs().reduce((s, p) => s + p.r, 0) / pairs().length;
+  const closest = () => pairs().reduce((a, b) => (b.r > a.r ? b : a));
+  const hedge = () => pairs().reduce((a, b) => (b.r < a.r ? b : a));
+  const width = signal(0);
+  // A phone's narrow card: smaller tickers, and the coefficients leave the cells too small for them.
+  const compact = () => width() > 0 && width() < 320;
+  const tick = () => ({ ...axis, fontSize: compact() ? 9 : 10.5, color: colors.muted });
+  const ramp = () => [colors.info, colors.line, chart.s1];
+  return (
+    <Card icon="table" title="Holdings correlation" subtitle="How closely each pair of holdings moves, from their daily returns">
+      <View style={{ gap: 4 }}>
+        <Text style={tipTitle}>{shown() ? `${shown()!.a} × ${shown()!.b}` : `${PAIR_TICKERS.length} HOLDINGS · ${lookback()}`}</Text>
+        <View style={{ flexDirection: "row", alignItems: "baseline", gap: 10 }}>
+          <Text style={{ fontSize: 22, fontWeight: "600", letterSpacing: -0.4, color: colors.text, fontVariant: ["tabular-nums"] }}>
+            {coefficient(shown()?.r ?? mean())}
+          </Text>
+          <Text style={{ flexShrink: 1, fontSize: 12, color: colors.muted }}>{shown() ? kinship(shown()!) : `mean of the ${pairs().length} pairs`}</Text>
+        </View>
+        <Text style={{ fontSize: 12, color: colors.faint }}>{shown() ? `Daily returns over ${lookback() === "1Y" ? "a year" : "three years"}` : "The lower, the more each holding diversifies the rest"}</Text>
+      </View>
+      <View style={{ marginTop: 10 }}>
+        <Ramp colors={ramp()} labels={["−1", "0", "+1"]} />
+      </View>
+      <View style={{ marginTop: size.gap + 4 }} onLayout={({ bounds }) => width.set(bounds.size.width)}>
+        <Plot
+          data={cells()}
+          xScale={{ type: "band", domain: [...PAIR_TICKERS], paddingInner: 0.06 }}
+          yScale={{ type: "band", domain: [...PAIR_TICKERS], paddingInner: 0.06 }}
+          colorScale={{ type: "diverging", domain: [-1, 1], range: ramp() }}
+          appearGeneration={1}
+          motion={{ appear: { duration: 900, easing: "easeOut" }, update: { duration: 650, easing: "easeInOut" }, enter: { duration: 120 }, exit: { duration: 180 }, pointer: { stiffness: 380, damping: 34 } }}
+          accessibilityLabel={`Correlation of ${PAIR_TICKERS.length} holdings over ${lookback()}: closest ${closest().a} and ${closest().b} at ${coefficient(closest().r)}, best hedge ${hedge().a} and ${hedge().b} at ${coefficient(hedge().r)}`}
+          accessibilityValue={{ text: shown() && `${shown()!.a} and ${shown()!.b}: ${coefficient(shown()!.r)}` }}
+          onHoverChange={({ index }) => hover.set(index)}
+          focusStyle={focusRing(4)}
+          style={{ aspectRatio: 1, marginLeft: compact() ? 34 : 40, marginTop: 20 }}
+        >
+          <Cell
+            x="b"
+            y="a"
+            value="r"
+            cornerRadii={3}
+            stagger={0.5}
+            inactiveOpacity={0.35}
+            label={(d: Pair) => coefficient(d.r)}
+            labelClass={CELL_LABEL}
+            labelStyle={{ fontSize: compact() ? 8.5 : 10, fontVariant: ["tabular-nums"] }}
+            hoverCellClass="rounded-[4px]"
+            hoverCellStyle={cellRing()}
+          />
+          <PlotAxis placement="top" labelStyle={{ ...tick(), lineHeight: 14, paddingBottom: 6 }} />
+          <PlotAxis placement="left" labelStyle={{ ...tick(), width: compact() ? 34 : 40, paddingRight: 8, textAlign: "right" }} />
+        </Plot>
+      </View>
+      <View style={{ marginTop: size.gap + 4 }}>
+        <Figures>
+          <Figure label="Closest" value={`${closest().a}·${closest().b} ${coefficient(closest().r)}`} />
+          <Figure label="Best hedge" value={`${hedge().a}·${hedge().b} ${coefficient(hedge().r)}`} tone={hedge().r < 0 ? "down" : undefined} />
+          <Figure label="Mean" value={fixed(mean())} />
+        </Figures>
+      </View>
+      <View style={{ marginTop: size.gap + 4, alignSelf: pointer ? "flex-start" : "stretch", width: pointer ? 180 : undefined }}>
+        <Segmented options={LOOKBACKS} value={lookback()} size={size.switch} onChange={(next) => lookback.set(next)} />
+      </View>
+    </Card>
+  );
+}
+
+/** The years of the returns calendar; this year's months up to the last full one. */
+const CAL_YEARS = ["2020", "2021", "2022", "2023", "2024", "2025", "2026"];
+const MONTHS_2026 = 10;
+const CAL_SYMBOLS = [
+  { value: "SPX", label: "S&P 500" },
+  { value: "NVDA", label: "NVDA" },
+] as const;
+type CalSymbol = (typeof CAL_SYMBOLS)[number]["value"];
+/** Each year's mean monthly return, a month's swing around it, and the months markets remember. */
+const DRIFT: Record<CalSymbol, number[]> = { SPX: [1.3, 2.1, -1.6, 1.8, 1.8, 1.3, 0.9], NVDA: [5, 4.5, -4, 7, 5, 3.5, 2] };
+const SWING: Record<CalSymbol, number> = { SPX: 7, NVDA: 26 };
+const SHOCKS: Record<CalSymbol, Record<string, number>> = {
+  SPX: { "2020 Mar": -12.5, "2020 Apr": 12.7, "2022 Jun": -8.4, "2022 Sep": -9.3, "2022 Oct": 8, "2023 Nov": 8.9, "2025 Apr": -0.8 },
+  NVDA: { "2020 Mar": -2.4, "2022 Sep": -19.6, "2023 May": 36.3, "2024 Feb": 28.6, "2025 Apr": 0.4 },
+};
+/** A month's return, in percent. */
+type MonthReturn = { year: string; month: string; ret: number };
+function monthly(symbol: CalSymbol): MonthReturn[] {
+  const r = random(symbol === "SPX" ? 7 : 29);
+  return CAL_YEARS.flatMap((year, y) =>
+    MONTH_NAMES.slice(0, year === "2026" ? MONTHS_2026 : 12).map((month) => {
+      const swing = (r() - 0.5) * SWING[symbol];
+      const ret = SHOCKS[symbol][`${year} ${month}`] ?? DRIFT[symbol][y] + swing;
+      return { year, month, ret: Math.round(ret * 10) / 10 };
+    }),
+  );
+}
+const MONTHLY: Record<CalSymbol, MonthReturn[]> = { SPX: monthly("SPX"), NVDA: monthly("NVDA") };
+/** A year's return: its months compounded. */
+const yearReturn = (rows: MonthReturn[], year: string) => (rows.filter((r) => r.year === year).reduce((p, r) => p * (1 + r.ret / 100), 1) - 1) * 100;
+/** The right axis' text: each year's return, a new function for each symbol so the axis writes its labels again. */
+const yearsOf = (rows: MonthReturn[]) => (v: number) => pct(yearReturn(rows, CAL_YEARS[v]));
+/** A cell's text: the return without its percent sign, a tenth of a percent
+ * below 10 and whole above, so a big month fits its cell as the rest do. */
+const tenths = (v: number) => {
+  const digits = Math.abs(v) >= 10 ? 0 : 1;
+  return v < 0 ? `−${fixed(-v, digits)}` : fixed(v, digits);
+};
+
+/**
+ * A calendar of monthly returns: a `Cell` per month in the band of its
+ * month across (the x scale's `domain`, January to December, so this
+ * year's months to come stay blank) and of its year down, red for a loss
+ * and green for a gain along a diverging `colorScale` about 0, its domain
+ * the largest move either way (even on both sides, so a loss and a gain
+ * of the same size are as strong), keyed by a ramp under the header. The
+ * months are the top axis' labels, written from the band's categories,
+ * the years the left one's, and each year's return the right one's. The
+ * month under the pointer or the keys is read out; another symbol glides
+ * every month to its new color.
+ */
+function Seasonality() {
+  const symbol = signal<CalSymbol>("SPX");
+  const hover = signal<number | null>(null);
+  const rows = () => MONTHLY[symbol()];
+  const shown = () => (hover() == null ? undefined : rows()[hover()!]);
+  const name = () => CAL_SYMBOLS.find((s) => s.value === symbol())!.label;
+  // The scale's own domain: the largest move either way, even about 0.
+  const reach = () => Math.max(...rows().map((r) => Math.abs(r.ret)));
+  const total = () => (rows().reduce((p, r) => p * (1 + r.ret / 100), 1) - 1) * 100;
+  const best = () => rows().reduce((a, b) => (b.ret > a.ret ? b : a));
+  const worst = () => rows().reduce((a, b) => (b.ret < a.ret ? b : a));
+  const gains = () => rows().filter((r) => r.ret > 0).length;
+  const width = signal(0);
+  // A phone's narrow card: smaller labels, the returns left out of cells too small for them.
+  const compact = () => width() > 0 && width() < 340;
+  const tick = () => ({ ...axis, fontSize: compact() ? 9 : 10.5 });
+  const ramp = () => [colors.down, colors.line, colors.up];
+  const gutter = () => (compact() ? 34 : 36);
+  const totals = () => (compact() ? 46 : 54);
+  return (
+    <Card icon="chart" title="Monthly returns" subtitle="Every month since 2020, red for a loss and green for a gain">
+      <View style={{ gap: 4 }}>
+        <Text style={tipTitle}>{shown() ? `${shown()!.month.toUpperCase()} ${shown()!.year}` : `${name().toUpperCase()} · 2020–2026`}</Text>
+        <View style={{ flexDirection: "row", alignItems: "baseline", gap: 10 }}>
+          <Text style={{ fontSize: 22, fontWeight: "600", letterSpacing: -0.4, color: shown() ? toneColor(shown()!.ret >= 0 ? "up" : "down") : colors.text, fontVariant: ["tabular-nums"] }}>
+            {pct(shown()?.ret ?? total())}
+          </Text>
+          <Text style={{ flexShrink: 1, fontSize: 12, color: colors.muted, fontVariant: ["tabular-nums"] }}>
+            {shown() ? `${name()} · ${shown()!.year} ${pct(yearReturn(rows(), shown()!.year))}` : "total return, months compounded"}
+          </Text>
+        </View>
+      </View>
+      <View style={{ marginTop: 10, marginLeft: gutter(), marginRight: totals() }}>
+        <Ramp colors={ramp()} labels={[`−${fixed(reach(), 1)}%`, "0", `+${fixed(reach(), 1)}%`]} />
+      </View>
+      <View style={{ marginTop: size.gap + 4 }} onLayout={({ bounds }) => width.set(bounds.size.width)}>
+        <Plot
+          data={rows()}
+          xScale={{ type: "band", domain: MONTH_NAMES, paddingInner: 0.1 }}
+          yScale={{ type: "band", domain: CAL_YEARS, paddingInner: 0.12 }}
+          colorScale={{ type: "diverging", range: ramp() }}
+          appearGeneration={1}
+          motion={{ appear: { duration: 1000, easing: "easeOut" }, update: { duration: 650, easing: "easeInOut" }, enter: { duration: 120 }, exit: { duration: 180 }, pointer: { stiffness: 380, damping: 34 } }}
+          accessibilityLabel={`${name()} monthly returns since 2020: best ${best().month} ${best().year} at ${pct(best().ret)}, worst ${worst().month} ${worst().year} at ${pct(worst().ret)}`}
+          accessibilityValue={{ text: shown() && `${shown()!.month} ${shown()!.year}: ${pct(shown()!.ret)}` }}
+          onHoverChange={({ index }) => hover.set(index)}
+          focusStyle={focusRing(4)}
+          style={{ height: CAL_YEARS.length * (compact() ? 22 : 27), marginLeft: gutter(), marginRight: totals(), marginTop: 20 }}
+        >
+          <Cell
+            x="month"
+            y="year"
+            value="ret"
+            cornerRadii={3}
+            stagger={0.6}
+            inactiveOpacity={0.4}
+            // A phone's cells are only the colors: a gain written in some
+            // and a loss (its sign wider) left out of others would read as
+            // missing months.
+            label={compact() ? undefined : (d: MonthReturn) => tenths(d.ret)}
+            labelClass={CELL_LABEL}
+            labelStyle={{ fontSize: 9.5, fontVariant: ["tabular-nums"] }}
+            hoverCellClass="rounded-[4px]"
+            hoverCellStyle={cellRing()}
+          />
+          <PlotAxis placement="top" labelStyle={{ ...tick(), lineHeight: 14, paddingBottom: 6 }} />
+          <PlotAxis placement="left" labelStyle={{ ...tick(), width: gutter(), paddingRight: 8, textAlign: "right" }} />
+          <PlotAxis placement="right" format={yearsOf(rows())} labelStyle={{ ...tick(), width: totals(), paddingLeft: 8, textAlign: "right", color: colors.muted }} />
+        </Plot>
+      </View>
+      <View style={{ marginTop: size.gap + 4 }}>
+        <Figures>
+          <Figure label="Best month" value={`${best().month} ${best().year} ${pct(best().ret)}`} tone="up" />
+          <Figure label="Worst month" value={`${worst().month} ${worst().year} ${pct(worst().ret)}`} tone="down" />
+          <Figure label="Up months" value={`${gains()} / ${rows().length}`} />
+        </Figures>
+      </View>
+      <View style={{ marginTop: size.gap + 4, alignSelf: pointer ? "flex-start" : "stretch", width: pointer ? 180 : undefined }}>
+        <Segmented options={CAL_SYMBOLS} value={symbol()} size={size.switch} onChange={(next) => symbol.set(next)} />
+      </View>
+    </Card>
+  );
+}
+
+/** The half hours of a trading day, from the open; a market closed for lunch has none for 12:00 and 12:30. */
+const SLOTS = ["9:30", "10:00", "10:30", "11:00", "11:30", "12:00", "12:30", "13:00", "13:30", "14:00", "14:30", "15:00", "15:30"];
+const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri"];
+const MARKETS = [
+  { value: "US", label: "US" },
+  { value: "HK", label: "HK" },
+] as const;
+type Market = (typeof MARKETS)[number]["value"];
+/** How busy each half hour is against the open: busy at either end of the day, quiet in its middle, a market's lunch closed. */
+const INTRADAY: Record<Market, (number | null)[]> = {
+  US: [1, 0.74, 0.6, 0.52, 0.46, 0.42, 0.4, 0.41, 0.45, 0.5, 0.58, 0.72, 1.05],
+  HK: [1, 0.7, 0.56, 0.5, 0.58, null, null, 0.66, 0.5, 0.46, 0.5, 0.6, 0.84],
+};
+/** Each weekday against Tuesday: Fridays busiest. */
+const BUSY = [0.92, 1, 0.97, 1.03, 1.1];
+/** Thousands of trades in the open's half hour. */
+const OPENING: Record<Market, number> = { US: 46, HK: 21 };
+type HalfHour = { day: string; slot: string; trades: number };
+/** A week of a market's trades per half hour, in thousands: a row per half hour it is open. */
+function activity(market: Market): HalfHour[] {
+  const r = random(market === "US" ? 5 : 13);
+  return WEEKDAYS.flatMap((day, d) =>
+    SLOTS.flatMap((slot, i) => {
+      const shape = INTRADAY[market][i];
+      return shape == null ? [] : [{ day, slot, trades: Math.round(OPENING[market] * shape * BUSY[d] * (0.9 + r() * 0.2) * 10) / 10 }];
+    }),
+  );
+}
+const ACTIVITY: Record<Market, HalfHour[]> = { US: activity("US"), HK: activity("HK") };
+const thousands = (v: number) => `${fixed(v, 1)}k`;
+/** The half hour after `slot`: its end. */
+const slotEnd = (slot: string) => {
+  const [h, m] = slot.split(":").map(Number);
+  return m === 30 ? `${h + 1}:00` : `${h}:30`;
+};
+
+/**
+ * When a market trades: a week of trades per half hour as a heatmap, a
+ * `Cell` per half hour a market is open, colored along a sequential
+ * `colorScale` from the quietest (the card's line) to the busiest (the
+ * accent), with round corners and no text. The x scale's `domain` is
+ * every half hour of the day, so Hong Kong's lunch break stays blank, and
+ * its cells shrink away when the market changes while the others glide to
+ * their new colors. The half hour under the pointer or the keys is
+ * ringed and read out.
+ */
+function Activity() {
+  const market = signal<Market>("US");
+  const hover = signal<number | null>(null);
+  const rows = () => ACTIVITY[market()];
+  const shown = () => (hover() == null || hover()! >= rows().length ? undefined : rows()[hover()!]);
+  const dayTotal = (day: string) => rows().reduce((s, r) => (r.day === day ? s + r.trades : s), 0);
+  const perDay = () => rows().reduce((s, r) => s + r.trades, 0) / WEEKDAYS.length;
+  const busiest = () => rows().reduce((a, b) => (b.trades > a.trades ? b : a));
+  const quietest = () => rows().reduce((a, b) => (b.trades < a.trades ? b : a));
+  const at = (slot: string) => rows().filter((r) => r.slot === slot);
+  const meanAt = (slot: string) => at(slot).reduce((s, r) => s + r.trades, 0) / at(slot).length;
+  const width = signal(0);
+  const compact = () => width() > 0 && width() < 340;
+  const tick = () => ({ ...axis, fontSize: compact() ? 9 : 10.5 });
+  const ramp = () => [colors.line, chart.s1];
+  return (
+    <Card icon="layers" title="Trading activity" subtitle="Trades every half hour of a week, the busier the brighter">
+      <View style={{ gap: 4 }}>
+        <Text style={tipTitle}>{shown() ? `${shown()!.day.toUpperCase()} ${shown()!.slot}–${slotEnd(shown()!.slot)}` : `${market()} · TRADES PER HALF HOUR`}</Text>
+        <View style={{ flexDirection: "row", alignItems: "baseline", gap: 10 }}>
+          <Text style={{ fontSize: 22, fontWeight: "600", letterSpacing: -0.4, color: colors.text, fontVariant: ["tabular-nums"] }}>{thousands(shown()?.trades ?? perDay())}</Text>
+          <Text style={{ flexShrink: 1, fontSize: 12, color: colors.muted, fontVariant: ["tabular-nums"] }}>
+            {shown() ? `trades · ${fixed((shown()!.trades / dayTotal(shown()!.day)) * 100, 1)}% of ${shown()!.day}'s` : "trades a day"}
+          </Text>
+        </View>
+        <Text style={{ fontSize: 12, color: colors.faint }}>{market() === "HK" ? "9:30 to 16:00, closed 12:00 to 13:00 for lunch" : "9:30 to 16:00, one session"}</Text>
+      </View>
+      <View style={{ marginTop: 10, marginLeft: 36 }}>
+        <Ramp colors={ramp()} labels={[`${thousands(quietest().trades)} quietest`, `${thousands(busiest().trades)} busiest`]} />
+      </View>
+      <View style={{ marginTop: size.gap + 4 }} onLayout={({ bounds }) => width.set(bounds.size.width)}>
+        <Plot
+          data={rows()}
+          xScale={{ type: "band", domain: SLOTS, paddingInner: 0.14 }}
+          yScale={{ type: "band", domain: WEEKDAYS, paddingInner: 0.14 }}
+          colorScale={{ type: "sequential", range: ramp() }}
+          appearGeneration={1}
+          motion={{ appear: { duration: 900, easing: "easeOut" }, update: { duration: 600, easing: "easeInOut" }, enter: { duration: 120 }, exit: { duration: 180 }, pointer: { stiffness: 380, damping: 34 } }}
+          accessibilityLabel={`Trades per half hour in ${market()}: busiest ${busiest().day} at ${busiest().slot} with ${thousands(busiest().trades)}, quietest ${quietest().day} at ${quietest().slot}`}
+          accessibilityValue={{ text: shown() && `${shown()!.day} ${shown()!.slot}: ${thousands(shown()!.trades)} trades` }}
+          onHoverChange={({ index }) => hover.set(index)}
+          focusStyle={focusRing(4)}
+          style={{ height: WEEKDAYS.length * (compact() ? 24 : 28), marginLeft: 36, marginTop: 20 }}
+        >
+          <Cell x="slot" y="day" value="trades" cornerRadii={4} stagger={0.6} inactiveOpacity={0.4} hoverCellClass="rounded-[5px]" hoverCellStyle={cellRing()} />
+          <PlotAxis placement="top" tickValues={compact() ? [0, 4, 8, 12] : [0, 2, 4, 6, 8, 10, 12]} labelStyle={{ ...tick(), lineHeight: 14, paddingBottom: 6 }} />
+          <PlotAxis placement="left" labelStyle={{ ...tick(), width: 36, paddingRight: 8, textAlign: "right" }} />
+        </Plot>
+      </View>
+      <View style={{ marginTop: size.gap + 4 }}>
+        <Figures>
+          <Figure label="Busiest" value={`${busiest().day} ${busiest().slot}`} />
+          <Figure label="Quietest" value={`${quietest().day} ${quietest().slot}`} />
+          <Figure label="Open vs 13:30" value={`${fixed(meanAt("9:30") / meanAt("13:30"), 1)}×`} />
+        </Figures>
+      </View>
+      <View style={{ marginTop: size.gap + 4, alignSelf: pointer ? "flex-start" : "stretch", width: pointer ? 120 : undefined }}>
+        <Segmented options={MARKETS} value={market()} size={size.switch} onChange={(next) => market.set(next)} />
+      </View>
+    </Card>
+  );
+}
+
 /**
  * A portfolio's factor exposure as a radar against a benchmark: hexagonal
  * hairline rings and spokes, the benchmark a dashed outline, the portfolio
@@ -2558,7 +2967,11 @@ function Watchlist() {
  * under them; dots (`Dot`): a portfolio's holdings as bubbles of their
  * market cap by risk and return against the S&P 500, moving with the
  * period, and analysts' price targets as a dot plot, each stock's mean
- * target now and three months ago over the spread of its targets; a portfolio's factor exposure as a radar against a
+ * target now and three months ago over the spread of its targets;
+ * heatmaps (`Cell`): how a portfolio's holdings move together as a
+ * correlation matrix, a calendar of monthly returns red and green about
+ * 0, and a week of a market's trades per half hour, its lunch break
+ * blank; a portfolio's factor exposure as a radar against a
  * benchmark, the factor under the pointer read out; a quarter's income
  * as flows from its segments to net income; and a watchlist of
  * sparklines that draw in once. Values on the axes are small
@@ -2566,5 +2979,5 @@ function Watchlist() {
  * grids hairlines, tooltips floating cards with a caps title.
  */
 export function Charts() {
-  return <DemoPage cards={[Live, Depth, Drawdown, Capacity, Revenue, Sales, Bridge, Funnel, Candles, RiskReturn, Targets, VolumePrice, Margins, Factors, Flows, Watchlist]} />;
+  return <DemoPage cards={[Live, Depth, Drawdown, Capacity, Revenue, Sales, Bridge, Funnel, Candles, RiskReturn, Targets, VolumePrice, Margins, Correlation, Seasonality, Activity, Factors, Flows, Watchlist]} />;
 }
