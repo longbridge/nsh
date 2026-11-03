@@ -288,7 +288,7 @@ pub(crate) fn linked_gates(uses: Option<&nsh_bundler::NativeUse>) -> Vec<String>
             "nsh" => match imported {
                 nsh_bundler::Imported::All => add("nsh_feature_shader".into()),
                 nsh_bundler::Imported::Names(names) => {
-                    if names.iter().any(|n| n == "Shader") {
+                    if names.iter().any(|n| SHADER_EXPORTS.contains(&n.as_str())) {
                         add("nsh_feature_shader".into());
                     }
                 }
@@ -309,6 +309,16 @@ pub(crate) fn linked_gates(uses: Option<&nsh_bundler::NativeUse>) -> Vec<String>
     }
     gates
 }
+
+/// `nsh`'s exports whose views a shader draws: an import of one keeps the
+/// shader compiler.
+const SHADER_EXPORTS: &[&str] = &[
+    "Shader",
+    "ShaderEffect",
+    "ShaderTransition",
+    "ScreenEffect",
+    "ScreenTransition",
+];
 
 /// The part of `nsh/base` beyond its core that exports `name`.
 fn part_of(name: &str) -> Option<&'static str> {

@@ -3315,6 +3315,7 @@ impl<M: TextEngine> Core<M> {
         let program = state.shader.clone().or_else(|| {
             (transition && state.fallback == crate::TransitionFallback::Fade)
                 .then(crate::shader::crossfade)
+                .flatten()
         });
         let layer = program.map(|shader| {
             let mut warnings = Vec::new();

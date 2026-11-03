@@ -151,6 +151,12 @@ macro_rules! base_parts {
 
 base_parts!(
     core => nsh_part_core,
+    pickers => nsh_part_pickers,
+    color_picker => nsh_part_color_picker,
+    select => nsh_part_select,
+    carousel => nsh_part_carousel,
+    tree => nsh_part_tree,
+    fields => nsh_part_fields,
     text_view => nsh_part_text_view,
     editor => nsh_part_editor,
     diff => nsh_part_diff,
@@ -162,11 +168,21 @@ base_parts!(
     plot => nsh_part_plot,
 );
 
-/// `nsh/base` in the lite runtime (feature `base-full` off): its core part,
-/// so the other parts' code stays out of the module.
+/// `nsh/base` in the lite runtime (feature `base-full` off): its controls
+/// (the core and the parts split from it), so the larger parts' code stays
+/// out of the module.
 #[cfg(not(feature = "base-full"))]
 fn base_set() -> Registry {
-    nsh_base::registry_of([nsh_base::parts::core as nsh_base::parts::Part])
+    use nsh_base::parts::{self, Part};
+    nsh_base::registry_of([
+        parts::core as Part,
+        parts::pickers,
+        parts::color_picker,
+        parts::select,
+        parts::carousel,
+        parts::tree,
+        parts::fields,
+    ])
 }
 
 /// Makes this module an app's web runtime that serves `$sets` (an

@@ -287,6 +287,12 @@ pub mod parts {
     /// Every part by its name, the order [`crate::registry`] registers them.
     pub const ALL: &[(&str, Part)] = &[
         ("core", core),
+        ("pickers", pickers),
+        ("color_picker", color_picker),
+        ("select", select),
+        ("carousel", carousel),
+        ("tree", tree),
+        ("fields", fields),
         ("text_view", text_view),
         ("editor", editor),
         ("diff", diff),
@@ -299,8 +305,11 @@ pub mod parts {
     ];
 
     /// The controls, popups, toasts and dialogs every app may use: buttons,
-    /// links, carousels, checkboxes, color pickers, radios, switches, toggles, toolbars, sliders, scroll bars, number inputs, one-time code inputs, paginations, selects, comboboxes, command palettes, trees, tabs, collapsibles, accordions, progress,
-    /// menus, popovers, hover cards, sheets, tooltips, toasts and system alerts.
+    /// links, checkboxes, radios, switches, toggles, toolbars, sliders,
+    /// scroll bars, paginations, tabs, collapsibles, accordions, avatars,
+    /// progress, menus, popovers, hover cards, sheets, tooltips, toasts and
+    /// system alerts. The larger controls are parts of their own, so a web
+    /// runtime linked for an app leaves out those it does not use.
     pub fn core(registry: &mut Registry) {
         registry
             .register::<Accordion>()
@@ -321,28 +330,8 @@ pub mod parts {
             .register::<HoverCard>()
             .register::<Sheet>()
             .register::<Tooltip>()
-            .register::<Calendar>()
-            .register::<Carousel>()
-            .register::<CarouselContent>()
-            .register::<CarouselItem>()
-            .register::<CarouselPrevious>()
-            .register::<CarouselNext>()
-            .register::<CarouselPagination>()
-            .register::<CarouselPaginationItem>()
             .register::<Checkbox>()
             .register::<Collapsible>()
-            .register::<DatePicker>()
-            .register::<Combobox>()
-            .register::<Command>()
-            .register::<ColorPicker>()
-            .register::<ColorArea>()
-            .register::<ColorSlider>()
-            .register::<ColorField>()
-            .register::<ColorSwatch>()
-            .register::<ColorEyeDropper>()
-            .register::<Select>()
-            .register::<NumberInput>()
-            .register::<OtpInput>()
             .register::<Pagination>()
             .register::<Radio>()
             .register::<RadioGroup>()
@@ -359,12 +348,59 @@ pub mod parts {
             .register::<Toolbar>()
             .register::<ToolbarGroup>()
             .register::<ToolbarSeparator>()
-            .register::<TimeField>()
-            .register::<Tree>()
             .register::<Toast>()
             .register::<ToastStack>()
             .class::<toast::ToastManagerClass>()
             .module::<AlertDialog>();
+    }
+
+    /// `Calendar`, `DatePicker` and `TimeField`: dates and times.
+    pub fn pickers(registry: &mut Registry) {
+        registry
+            .register::<Calendar>()
+            .register::<DatePicker>()
+            .register::<TimeField>();
+    }
+
+    /// `ColorPicker` and its parts.
+    pub fn color_picker(registry: &mut Registry) {
+        registry
+            .register::<ColorPicker>()
+            .register::<ColorArea>()
+            .register::<ColorSlider>()
+            .register::<ColorField>()
+            .register::<ColorSwatch>()
+            .register::<ColorEyeDropper>();
+    }
+
+    /// `Select`, `Combobox` and `Command`: lists to pick from.
+    pub fn select(registry: &mut Registry) {
+        registry
+            .register::<Select>()
+            .register::<Combobox>()
+            .register::<Command>();
+    }
+
+    /// `Carousel` and its parts.
+    pub fn carousel(registry: &mut Registry) {
+        registry
+            .register::<Carousel>()
+            .register::<CarouselContent>()
+            .register::<CarouselItem>()
+            .register::<CarouselPrevious>()
+            .register::<CarouselNext>()
+            .register::<CarouselPagination>()
+            .register::<CarouselPaginationItem>();
+    }
+
+    /// `Tree`: items that hold items.
+    pub fn tree(registry: &mut Registry) {
+        registry.register::<Tree>();
+    }
+
+    /// `NumberInput` and `OtpInput`.
+    pub fn fields(registry: &mut Registry) {
+        registry.register::<NumberInput>().register::<OtpInput>();
     }
 
     /// `TextView`: Markdown and HTML documents.
