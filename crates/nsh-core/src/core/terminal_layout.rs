@@ -621,7 +621,9 @@ fn kind(tree: &impl Tree, node: NodeId) -> Kind {
         measures,
         labelled,
         empty,
-        container: boxes && !role.control && !role.text,
+        // A frame stated three rows tall or more is a box around its
+        // text too: a specimen, not a badge.
+        container: (boxes || (visible && framed_box(style))) && !role.control && !role.text,
         // A box whose content is all absolute (a table's header over its
         // cells, a row of them) has no rows of content to size it: its
         // explicit height is what its children are placed in.
@@ -633,6 +635,21 @@ fn kind(tree: &impl Tree, node: NodeId) -> Kind {
             || role.fills
             || role.sized,
     }
+}
+
+/// The height from which a box framed on every side stated in points is a
+/// box whatever it holds: three rows of 16pt.
+const FRAMED_BOX_HEIGHT: f32 = 48.0;
+
+/// `s` frames its box on every side and states a height of
+/// [`FRAMED_BOX_HEIGHT`] or more: a specimen or a tile, which keeps its
+/// border around a single text ([`compute`]).
+fn framed_box(s: &Style) -> bool {
+    let b = s.border;
+    [b.left, b.right, b.top, b.bottom]
+        .iter()
+        .all(|&v| length(v.into_raw()).is_some_and(|v| v > 0.0))
+        && length(s.size.height.into_raw()).is_some_and(|h| h >= FRAMED_BOX_HEIGHT - EPSILON)
 }
 
 /// A box's border and padding, in Cells, within a parent `parent_width`
@@ -1120,13 +1137,9 @@ pub(crate) fn compute(
         // rows.
         surface.is_some() || pad(s.padding.top) || pad(s.padding.bottom)
     };
-    // A frame stated three rows tall or more (a stage a specimen stands
-    // on, a tile) is drawn as a box, whatever little it holds: its border
-    // is what it shows.
-    let tall = {
-        let h = tree.style(node).size.height.into_raw();
-        length(h).is_some_and(|h| h >= 3.0 * grid.height - EPSILON)
-    };
+    // A frame stated three rows tall or more (a specimen, a tile) is drawn
+    // as a box, whatever little it holds: its border is what it shows.
+    let tall = framed_box(tree.style(node));
     let perform = inputs.run_mode == RunMode::PerformLayout;
     let mut flow = Vec::new();
     let mut absolute = Vec::new();
@@ -1260,13 +1273,14 @@ pub(crate) fn compute(
             inset = border.add(padding);
             continue;
         }
-        // A band stated three rows tall or more around a row (a stage, a
-        // specimen) keeps a row above and below it: it reads as a box,
-        // not a chip.
-        if tall && std::env::var_os("NSH_TL_DEBUG").is_some() {
-            log::warn!(target: "nsh::tl", "TALL {node:?} border={border:?} cont={} kcont={} surf={} fixed_h={fixed_h:?} known_h={known_h:?} size={size:?} content={content:?} ctrl={} mode={:?}", attempt_kind.container, k.container, surface.is_some(), role.control, inputs.run_mode);
-        }
-        if tall && surface.is_some() && fixed_h.is_none() && size.h < 3 {
+        // Inside a frame its border gives way to its band: the band keeps
+        // the three rows, a row above and below what it holds.
+        if tall
+            && border == Sides::default()
+            && surface.is_some()
+            && fixed_h.is_none()
+            && size.h < 3
+        {
             fixed_h = Some(clamp(3, None, max_h));
             continue;
         }

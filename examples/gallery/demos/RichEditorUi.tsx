@@ -4,7 +4,7 @@
 // sized to it and two columns from the next.
 import { Text, View } from "nsh";
 import { Button as BaseButton, Toggle as BaseToggle, ToggleGroup as BaseToggleGroup } from "nsh/base";
-import { colors, finish, focusRing, terminal, TERMINAL_GAP } from "../ui";
+import { colors, finish, focusRing, ghostFill, terminal, TERMINAL_GAP } from "../ui";
 import { LucideIcon, type LucideIconName } from "../icons";
 
 export { LucideIcon, type LucideIconName } from "../icons";
@@ -80,7 +80,7 @@ export function IconButton(props: { icon: LucideIconName; label: string; short?:
         onPress={props.onPress}
         hoverStyle={props.disabled ? undefined : { backgroundColor: colors.raised }}
         focusStyle={focusRing(1)}
-        style={{ width: terminal ? undefined : 32, height: terminal ? undefined : 32, borderRadius: 8, alignItems: "center", justifyContent: "center", opacity: props.disabled ? 0.35 : 1 }}
+        style={{ width: terminal ? undefined : 32, height: terminal ? undefined : 32, borderRadius: 8, alignItems: "center", justifyContent: "center", backgroundColor: ghostFill(), opacity: props.disabled ? 0.35 : 1 }}
       >
         <If when={terminal} else={<LucideIcon name={props.icon} size={16} tint={colors.text} />}>
           <Text style={{ color: colors.text }}>{props.short ?? props.label}</Text>

@@ -348,7 +348,9 @@ as tall as its lines at 40 columns).
   content that are not only texts; spacers and bars do not count) padded 12pt or more above or below, or around two
   rows of content or more, unless all its children are controls (a split button, a toolbar, a tab list, a segmented
   control), which is never a card. A pill, a badge, a tab list, a group of buttons or a field's chrome around one row keeps
-  no border, and a compact box's padding. The core mounts each bordered view with the borders its layout gave Cells
+  no border, and a compact box's padding. A box framed on every side and stated 48pt tall or more (three rows: a
+  specimen, a tile, a drop target) is a box around a single text too: it keeps its border, three rows; inside a frame,
+  where its border gives way to its band, the band keeps the three rows, a row above and below its text. The core mounts each bordered view with the borders its layout gave Cells
   only (`Node::cell_border`), so the platform draws a border exactly where the layout reserved one; a control (a control's accessibility role, presses, a text input: `Core::is_control`) and a box of
   text never have one, nor does a round box (a circle: corners of half its explicit width or height or more, or `rounded-full`).
   Horizontal padding and margins are one Cell from 8pt and two from 24pt (at most one on a

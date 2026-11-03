@@ -2,7 +2,7 @@ import { type AnimatedValue, cleanup, Clipboard, createAnimatedValue, Easing, ef
 import { Button as BaseButton, Menu, MenuItem } from "nsh/base";
 import { keymap, platform } from "nsh";
 import { Icon, IconLabel, type IconName } from "../icons";
-import { alpha, Badge, Button, Caption, Card, colors, DemoPage, finish, focusRing, follow, hovered, mono, motion, radius, Spinner, terminal, TERMINAL_GAP, tints, Tip, Toggle } from "../ui";
+import { alpha, Badge, Button, Caption, Card, colors, DemoPage, finish, focusRing, follow, ghostFill, hovered, mono, motion, radius, Spinner, terminal, TERMINAL_GAP, tints, Tip, Toggle } from "../ui";
 
 // `nsh/base`'s `Button` owns presses, the disabled state, keyboard focus and
 // the button role; the look is the gallery's (`Button` of `nsh-gallery-ui`):
@@ -81,7 +81,7 @@ function IconButton(props: { icon: IconName; label: string; short?: string; shor
         borderCurve: "continuous",
         borderWidth: 1,
         borderColor: "transparent",
-        backgroundColor: props.on ? tints.accent : "transparent",
+        backgroundColor: props.on ? tints.accent : ghostFill(),
         ...(raised() && !props.on ? finish.raised : {}),
         transform: [{ scale: press }],
         transitionProperty: "background-color, border-color, box-shadow",

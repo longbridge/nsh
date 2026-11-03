@@ -26848,6 +26848,69 @@ mod terminal_layout {
     }
 
     #[test]
+    fn a_framed_box_stated_three_rows_tall_keeps_its_border_around_a_text() {
+        // A specimen on a pressable stage: a 76pt box framed on every side
+        // around one label (and a circle cut by it). It is a box, not a
+        // badge: its border and the label inside it, three rows.
+        let mut ops = pressable(
+            2,
+            ROOT_ID,
+            &[
+                ("height", V::Number(104.0)),
+                ("alignItems", V::Str("center")),
+                ("justifyContent", V::Str("center")),
+                ("borderWidth", V::Number(1.0)),
+            ],
+            None,
+        );
+        ops.extend(view(
+            3,
+            2,
+            &[
+                ("width", V::Number(112.0)),
+                ("height", V::Number(76.0)),
+                ("alignItems", V::Str("center")),
+                ("justifyContent", V::Str("center")),
+                ("borderWidth", V::Number(1.5)),
+                ("borderRadius", V::Number(22.0)),
+            ],
+        ));
+        ops.extend(view(
+            4,
+            3,
+            &[
+                ("position", V::Str("absolute")),
+                ("left", V::Number(-26.0)),
+                ("top", V::Number(-26.0)),
+                ("width", V::Number(72.0)),
+                ("height", V::Number(72.0)),
+                ("borderRadius", V::Number(36.0)),
+            ],
+        ));
+        ops.extend(text(6, 3, "Click"));
+        let batch = laid_out(ops);
+        let specimen = frame_of(&batch, 3).unwrap();
+        assert_eq!(specimen.size, size_pt(112.0, 48.0));
+        assert_eq!(frame_of(&batch, 6).map(|f| f.origin.y), Some(Points(16.0)));
+        // A badge around its text stays one row, without its border.
+        let mut ops = view(
+            2,
+            ROOT_ID,
+            &[
+                ("alignSelf", V::Str("flex-start")),
+                ("borderWidth", V::Number(1.0)),
+                ("height", V::Number(24.0)),
+            ],
+        );
+        ops.extend(text(4, 2, "New"));
+        let batch = laid_out(ops);
+        assert_eq!(
+            frame_of(&batch, 2).map(|f| f.size.height),
+            Some(Points(16.0))
+        );
+    }
+
+    #[test]
     fn a_box_holds_its_absolute_children_placed_from_its_top() {
         // A step's dot (left out) with its label 24pt under it, then the
         // buttons: the label keeps a row of its own above them.

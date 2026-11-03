@@ -241,6 +241,14 @@ export const motion = {
 export const hovered = (): ViewStyle => ({ backgroundColor: alpha(colors.text, 0.05) });
 
 /**
+ * The resting fill of a ghost control (a bare button, an icon button): none,
+ * bare until the pointer is over it; in the terminal, which shows no hover
+ * until the pointer is there and no outline to hint at one, a faint
+ * `secondary` band, so it reads as pressable.
+ */
+export const ghostFill = () => (terminal ? token("secondary") : "transparent");
+
+/**
  * The keyboard focus (`focusStyle`): the edge turns the theme's muted olive
  * `ring` and a 3-point halo of it lies around the view (`offset` moves the
  * halo out from the edge).
