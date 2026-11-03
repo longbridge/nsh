@@ -70,7 +70,11 @@ export function ToggleGroup<T extends string>(props: {
   );
 }
 
-/** A square icon button for toolbars: its label is what screen readers say and its tooltip. */
+/**
+ * A square icon button for toolbars: its label is what screen readers say and its tooltip. In a terminal it is
+ * its label in the muted color on no band, as the toolbar's toggles that are off are, so the tools read as one row
+ * (a ghost button's band, {@link ghostFill}, would set it apart as if pressed).
+ */
 export function IconButton(props: { icon: LucideIconName; label: string; short?: string; disabled?: boolean; onPress: () => void }) {
   return (
     <View tooltip={props.label}>
@@ -80,10 +84,10 @@ export function IconButton(props: { icon: LucideIconName; label: string; short?:
         onPress={props.onPress}
         hoverStyle={props.disabled ? undefined : { backgroundColor: colors.raised }}
         focusStyle={focusRing(1)}
-        style={{ width: terminal ? undefined : 32, height: terminal ? undefined : 32, borderRadius: 8, alignItems: "center", justifyContent: "center", backgroundColor: ghostFill(), opacity: props.disabled ? 0.35 : 1 }}
+        style={{ width: terminal ? undefined : 32, height: terminal ? undefined : 32, borderRadius: 8, alignItems: "center", justifyContent: "center", backgroundColor: terminal ? undefined : ghostFill(), opacity: props.disabled ? 0.35 : 1 }}
       >
         <If when={terminal} else={<LucideIcon name={props.icon} size={16} tint={colors.text} />}>
-          <Text style={{ color: colors.text }}>{props.short ?? props.label}</Text>
+          <Text style={{ color: colors.muted }}>{props.short ?? props.label}</Text>
         </If>
       </BaseButton>
     </View>
