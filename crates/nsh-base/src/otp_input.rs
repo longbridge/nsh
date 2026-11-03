@@ -295,6 +295,8 @@ pub fn OtpInput(props: OtpInputProps, cx: Scope<OtpInputEvent>) -> impl IntoElem
         code,
         focused,
         blink,
+        terminal: crate::terminal::is_terminal(),
+        frames: signal(Vec::new()),
     };
 
     let changed = move |text: &str| {
@@ -351,11 +353,32 @@ pub fn OtpInput(props: OtpInputProps, cx: Scope<OtpInputEvent>) -> impl IntoElem
     };
 
     let (groups, group_class, group_style) = (props.groups, props.group_class, props.group_style);
+    let per_group = computed(move || {
+        let length = parts.length.get() as usize;
+        length
+            .div_ceil(group_count(length, groups.get() as usize))
+            .max(1)
+    });
+    // A terminal shows its own cursor at the input (`caret(false)`, no
+    // width): on the cell that takes the next digit, where it goes.
+    let group_frames = signal(Vec::new());
+    let sink = computed(move || {
+        let ix = parts.active();
+        let cell = parts.frames.with(|f: &Vec<Bounds<Points>>| f.get(ix).copied())?;
+        let group = group_frames.with(|f: &Vec<Bounds<Points>>| f.get(ix / per_group.get()).copied())?;
+        let metrics = text_metrics("", "0");
+        let (width, height) = (metrics.width, metrics.height);
+        let middle = |size: Points, step: Points| {
+            step * (crate::terminal::columns_in(size, step).saturating_sub(1) / 2) as f32
+        };
+        Some(Point::new(
+            group.origin.x + cell.origin.x + middle(cell.size.width, width),
+            group.origin.y + cell.origin.y + middle(cell.size.height, height),
+        ))
+    });
     let cells = dynamic(move || {
         let length = parts.length.get() as usize;
-        let per_group = length
-            .div_ceil(group_count(length, groups.get() as usize))
-            .max(1);
+        let per_group = per_group.get();
         let mut rows: Vec<Vec<AnyElement>> = Vec::new();
         for ix in 0..length {
             if ix % per_group == 0 {
@@ -364,9 +387,13 @@ pub fn OtpInput(props: OtpInputProps, cx: Scope<OtpInputEvent>) -> impl IntoElem
             rows.last_mut().expect("a group").push(parts.cell(ix));
         }
         rows.into_iter()
-            .map(|cells| {
+            .enumerate()
+            .map(|(g, cells)| {
                 // The field tells screen readers the code.
                 view()
+                    .when(parts.terminal, |v| {
+                        v.on_layout(move |b: &Bounds<Points>| put(group_frames, g, *b))
+                    })
                     .accessibility_elements_hidden(true)
                     .project_disabled(parts.disabled)
                     .app_class(group_class)
@@ -380,7 +407,14 @@ pub fn OtpInput(props: OtpInputProps, cx: Scope<OtpInputEvent>) -> impl IntoElem
         input()
             .element_ref(&field_ref)
             .absolute()
-            .inset_0()
+            .when(!parts.terminal, |v| v.inset_0())
+            .when(parts.terminal, |v| {
+                let at = move || sink.get().unwrap_or_default();
+                v.left(move || Length::from(at().x))
+                    .top(move || Length::from(at().y))
+                    .w(px(0.0))
+                    .h(crate::terminal::cell_height())
+            })
             .p_0()
             .border(px(0.0))
             .bg(AdaptiveColor::TRANSPARENT)
@@ -430,6 +464,22 @@ struct Cells {
     code: Code,
     focused: Signal<bool>,
     blink: Blink,
+    /// In a terminal: the cells' frames (in their group), for its cursor.
+    terminal: bool,
+    frames: Signal<Vec<Bounds<Points>>>,
+}
+
+/// Keeps `bounds` as the frame of item `ix`.
+fn put(frames: Signal<Vec<Bounds<Points>>>, ix: usize, bounds: Bounds<Points>) {
+    if frames.with_untracked(|f| f.get(ix) == Some(&bounds)) {
+        return;
+    }
+    frames.update(|f| {
+        if f.len() <= ix {
+            f.resize(ix + 1, Bounds::default());
+        }
+        f[ix] = bounds;
+    });
 }
 
 impl Cells {
@@ -448,7 +498,11 @@ impl Cells {
     /// the input has the focus.
     fn cell(self, ix: usize) -> AnyElement {
         let digit = move || self.code.get().chars().nth(ix);
+        let frames = self.frames;
         view()
+            .when(self.terminal, |v| {
+                v.on_layout(move |b: &Bounds<Points>| put(frames, ix, *b))
+            })
             .project_focused(move || {
                 self.focused.get() && !self.disabled.get() && self.active() == ix
             })

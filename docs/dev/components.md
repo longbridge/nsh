@@ -638,6 +638,7 @@ accessibility states the components report (listbox, tree and tab rows their sel
 | `Combobox` | the input one row (no `inputClass` / `inputStyle`), ` ×` and ` ▾` in place of `clearButton` and `triggerButton`, on its row; the app's `prefix` and `suffix` a Cell apart from them |
 | list rows (`Select`, `Combobox`) | each item's title after `✓ ` while chosen (two spaces while not), one full-width row; headers their title, bold and muted; the list as wide as its widest row, at least the trigger's width; no `renderItem`, `renderGroup` or row classes |
 | `Command` rows | the app's `renderItem` content, without `itemClass` or `itemStyle`: the terminal marks the highlighted row (its projected `focus:`) as one band over the whole row |
+| `OtpInput` | its field (`caret(false)`) is no wider than a Cell and stands on the middle Cell of the cell that takes the next digit, so the terminal's own cursor shows where it goes |
 | `Tabs` | no indicator; the tabs in a row, two Cells apart; the painter draws the selected tab bold (a band only while focused) and the others muted, from each tab's selected state |
 | `MenuItem` | a checkable item starts with `✓ ` (two spaces unchecked) in place of the indicator |
 | `Submenu` | its trigger is one menu item row: the trigger's content, then ` ›` in the theme's muted foreground |

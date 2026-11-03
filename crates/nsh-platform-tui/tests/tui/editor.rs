@@ -317,3 +317,54 @@ fn tab_enters_a_rich_editor_and_typing_changes_its_document() {
     draw_until(&mut view, &mut terminal, &rx, "changes 1");
     draw_until(&mut view, &mut terminal, &rx, "Q");
 }
+
+/// A four-digit code in a row of framed cells, reporting its focus.
+#[component]
+fn Code() -> impl IntoElement {
+    let focused = signal("no");
+    view()
+        .flex_1()
+        .child(text(move || format!("focus {}", focused.get())))
+        .child(
+            view().flex_row().child(
+                nsh_base::otp_input()
+                    .length(4u32)
+                    .group_class("flex-row gap-2")
+                    .cell_class("w-12 h-12 border items-center justify-center")
+                    .on_focus(move || focused.set("yes")),
+            ),
+        )
+}
+
+#[test]
+fn a_codes_next_cell_holds_the_terminal_cursor() {
+    use ratatui_core::backend::Backend;
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(48, 12)).unwrap();
+    view.load(App::Rust(Root::new::<Code>(|| ()))).unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "focus no");
+    tab_until(&mut view, &mut terminal, &rx, "focus yes");
+    // The hidden field is the sink: the cursor stands where the next
+    // digit goes, so the digit typed lands under it.
+    let first = terminal.backend_mut().get_cursor_position().unwrap();
+    assert!(first.y > 0, "on the cells' row, under the status line");
+    assert_eq!(view.handle(key("2")), Handled::Yes);
+    draw_until(&mut view, &mut terminal, &rx, "2");
+    assert_eq!(
+        terminal.backend().buffer()[(first.x, first.y)].symbol(),
+        "2",
+        "{}",
+        dump(&terminal)
+    );
+    let second = terminal.backend_mut().get_cursor_position().unwrap();
+    assert_eq!(second.y, first.y);
+    assert!(second.x > first.x + 1, "on the next cell: {first:?} {second:?}");
+    assert_eq!(view.handle(key("7")), Handled::Yes);
+    draw_until(&mut view, &mut terminal, &rx, "7");
+    assert_eq!(
+        terminal.backend().buffer()[(second.x, second.y)].symbol(),
+        "7",
+        "{}",
+        dump(&terminal)
+    );
+}
