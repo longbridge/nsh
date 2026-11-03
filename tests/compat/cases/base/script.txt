@@ -3682,6 +3682,14 @@ absent BETA
 tap id:file-0
 expect Toggled: a.ts false
 expect BETA
+# The second file header follows the wrapped rows of the first file.
+frame parent:parent:parent:id:file-1 0 100 390 20
+tap id:wrap-files
+wait 100
+frame parent:parent:parent:id:file-1 0 140 390 20
+tap id:wrap-files
+expect BETA
+frame parent:parent:parent:id:file-1 0 100 390 20
 # A longer diff of every line reports where its rows are once laid out:
 # 30 rows of 20 points, as wide as its 390 × 100 viewport, at the top.
 expect Scrolled: 0 0 390x600 390x100
