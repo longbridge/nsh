@@ -40,6 +40,8 @@ struct HarnessProps {
     soft_wrap: bool,
     /// Use the app-provided file header.
     custom_header: bool,
+    /// Draw each change's actions as `Act <index>`.
+    hunk_actions: bool,
 }
 
 fn texts(old: &str, new: &str) -> HarnessProps {
@@ -51,6 +53,7 @@ fn texts(old: &str, new: &str) -> HarnessProps {
         annotations: Vec::new(),
         soft_wrap: false,
         custom_header: false,
+        hunk_actions: false,
     }
 }
 
@@ -158,6 +161,9 @@ fn Harness(props: HarnessProps) -> impl IntoElement {
         .size_full();
     if props.custom_header {
         el = el.render_file_header(|file: &DiffFile| text(file.path.clone()));
+    }
+    if props.hunk_actions {
+        el = el.render_hunk_actions(|h: &DiffHunk| text(format!("Act {}", h.index)));
     }
     el = match props.patch.clone() {
         Some(patch) => el.patch(patch),
@@ -792,6 +798,40 @@ fn in_a_terminal_a_row_is_one_line_of_the_grid() {
         (collapsed - cell * 17.0).abs() < 0.1,
         "{collapsed} {expanded}"
     );
+}
+
+/// A terminal's hunk actions take a row of their own after each change,
+/// so they never cover its code; elsewhere they overlay its first row.
+#[test]
+fn in_a_terminal_hunk_actions_take_a_row_after_their_change() {
+    let height = |idiom: Idiom, actions: bool| -> f32 {
+        let mut app = start_on(
+            HarnessProps {
+                hunk_actions: actions,
+                ..two_far_changes()
+            },
+            Os::Linux,
+            idiom,
+        );
+        see(&mut app, "line fifty");
+        if actions {
+            see(&mut app, "Act 0");
+        }
+        app.wait(std::time::Duration::from_millis(100)).unwrap();
+        let shown = app
+            .screen()
+            .texts()
+            .iter()
+            .find_map(|t| t.trim().strip_prefix("Scrolled ").map(str::to_string))
+            .unwrap();
+        shown.split(' ').nth(3).unwrap().parse().unwrap()
+    };
+    // 17 rows, then one more for each of the two changes' actions.
+    let plain = height(Idiom::Terminal, false);
+    let cell = plain / 17.0;
+    let with = height(Idiom::Terminal, true);
+    assert!((with - cell * 19.0).abs() < 0.1, "{plain} {with}");
+    assert_eq!(height(Idiom::Desktop, true), height(Idiom::Desktop, false));
 }
 
 #[test]

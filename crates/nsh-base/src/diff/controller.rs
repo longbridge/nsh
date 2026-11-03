@@ -189,6 +189,9 @@ pub(crate) struct State {
     pub(crate) annotation_heights: HashMap<SharedString, Points>,
     /// A patch's files (none for two texts).
     pub(crate) files: Files,
+    /// Each change's last row takes a row below it for the app's hunk
+    /// actions (a terminal's: placed over the rows, they would cover code).
+    pub(crate) action_rows: bool,
 }
 
 impl State {
@@ -216,6 +219,7 @@ impl State {
             placed: Vec::new(),
             annotation_heights: HashMap::new(),
             files: Files::default(),
+            action_rows: false,
         }
     }
 
@@ -393,6 +397,16 @@ impl State {
                     .copied()
                     .unwrap_or_default();
                 extra[row] = extra[row].max(*below);
+            }
+        }
+        if self.action_rows {
+            for row in 0..self.rows.len() {
+                if let Some(Row::Line { hunk: Some(h), .. }) = self.rows.get(row) {
+                    let ends = !matches!(self.rows.get(row + 1), Some(Row::Line { hunk: Some(n), .. }) if n == h);
+                    if ends {
+                        extra[row] += self.font.line_height;
+                    }
+                }
             }
         }
         self.geometry = Geometry::new(&self.row_lines, &extra, self.font.line_height);
@@ -760,6 +774,19 @@ impl Dv {
                 let soft_wrap = dv.props.soft_wrap.get_untracked();
                 st.wrap_columns = wrap_columns(soft_wrap, st.text_box, st.column);
                 st.measure_rows();
+            }
+            dv.bump();
+        });
+        let dv = self.clone();
+        effect(move || {
+            let rows = crate::terminal::is_terminal() && dv.props.render_hunk_actions.get().is_some();
+            {
+                let mut st = dv.st.borrow_mut();
+                if st.action_rows == rows {
+                    return;
+                }
+                st.action_rows = rows;
+                st.place();
             }
             dv.bump();
         });

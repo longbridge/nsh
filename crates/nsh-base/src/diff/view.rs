@@ -737,7 +737,8 @@ fn separator(
     .into_element()
 }
 
-/// The app's actions of the changes whose first row is in view.
+/// The app's actions of the changes whose first row is in view (in a
+/// terminal, whose last row is: they take a row of their own below it).
 fn hunk_actions(dv: Dv, rows: Memo<Vec<usize>>) -> impl IntoElement {
     let props = dv.props;
     let list = {
@@ -755,7 +756,14 @@ fn hunk_actions(dv: Dv, rows: Memo<Vec<usize>>) -> impl IntoElement {
                     let Row::Line { hunk: Some(h), .. } = st.rows.get(row)? else {
                         return None;
                     };
-                    let starts = match row.checked_sub(1).and_then(|r| st.rows.get(r)) {
+                    // A terminal's actions take the row after the change's
+                    // last (`State::action_rows`), others overlay its first.
+                    let neighbour = if st.action_rows {
+                        st.rows.get(row + 1)
+                    } else {
+                        row.checked_sub(1).and_then(|r| st.rows.get(r))
+                    };
+                    let starts = match neighbour {
                         Some(Row::Line { hunk: Some(p), .. }) => p != h,
                         _ => true,
                     };
@@ -775,10 +783,16 @@ fn hunk_actions(dv: Dv, rows: Memo<Vec<usize>>) -> impl IntoElement {
             // A stable view per change, which `each` keeps while the change
             // stays in view.
             part(
-                view()
-                    .absolute()
-                    .right(px(PAD))
-                    .top(move || Length::from(top.row_top(row))),
+                view().absolute().right(px(PAD)).top(move || {
+                    // A terminal's: the row it takes after the change (and
+                    // its annotations).
+                    let at = if top.st.borrow().action_rows {
+                        top.row_top(row + 1) - top.st.borrow().font.line_height
+                    } else {
+                        top.row_top(row)
+                    };
+                    Length::from(at)
+                }),
                 props,
                 DiffViewPart::HunkActions,
             )
