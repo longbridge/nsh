@@ -3892,8 +3892,7 @@ absent Shader dialog
 tap text:Pop
 expect Page home
 absent Page details
-covers [props] NavPage.transitionShader
-covers [props] Dialog.transitionShader
+covers [props] transitionShader
 # base-hover-card
 tap id:case-base-hover-card
 # `defaultOpen`: open at first; a press outside closes it.
