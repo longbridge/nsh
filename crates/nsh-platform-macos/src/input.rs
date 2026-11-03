@@ -500,9 +500,13 @@ fn set_cursor_at(surface: &Surface, x: f32, y: f32, always: bool) {
     }
     let cursor = match pick(&surface.root, x, y) {
         Some(hit) if hit.native => return,
-        Some(hit) => over_link(surface, &hit.view, x, y)
-            .then_some(Cursor::Pointer)
-            .unwrap_or_else(|| cursor_at(&hit)),
+        Some(hit) => {
+            if over_link(surface, &hit.view, x, y) {
+                Cursor::Pointer
+            } else {
+                cursor_at(&hit)
+            }
+        }
         None => Cursor::Default,
     };
     let cursor = ns_cursor(cursor);
