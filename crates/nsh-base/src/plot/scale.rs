@@ -796,7 +796,8 @@ impl JsValue for OrdinalScale {
 /// The colors of a [`Plot`](super::Plot)'s marks (TS `ColorScale`): the
 /// categories' colors (`ordinal`, which the marks' `color` reads), or the
 /// colors of numbers along a ramp (`sequential`, `diverging`, which a
-/// [`Cell`](super::Cell)'s `value` reads), as d3's `scaleOrdinal`,
+/// [`Cell`](super::Cell)'s `value` and a [`Treemap`](super::Treemap)'s
+/// `colorValue` read), as d3's `scaleOrdinal`,
 /// `scaleSequential` and `scaleDiverging`.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ColorScale {
@@ -1005,7 +1006,7 @@ impl JsValue for ColorScale {
         let ordinal = OrdinalScale::ts_type(types);
         types.declare("ColorScale", |_| {
             format!(
-                "/** The colors of a `Plot`'s marks: `ordinal`, a color per category (a mark's `color`); `sequential`, a number's color along the ramp of the `range`'s colors, from the `domain`'s low end to its high end (without one, the extent of the values it colors), the colors spread evenly and mixed in OKLab; `diverging`, the same ramp with its middle at `pivot` (0 by default), the values below the pivot over its first half and those above over its second (without a `domain`, the extent made even on both sides of the pivot). A `Cell`'s `value` takes the colors of `sequential` and `diverging`; values outside the domain take its ends, and a row without one takes `unknown`. */\nexport type ColorScale = {ordinal} | {{ type: \"sequential\"; domain?: [number, number]; range: string[]; unknown?: string }} | {{ type: \"diverging\"; domain?: [number, number]; pivot?: number; range: string[]; unknown?: string }};\n"
+                "/** The colors of a `Plot`'s marks: `ordinal`, a color per category (a mark's `color`); `sequential`, a number's color along the ramp of the `range`'s colors, from the `domain`'s low end to its high end (without one, the extent of the values it colors), the colors spread evenly and mixed in OKLab; `diverging`, the same ramp with its middle at `pivot` (0 by default), the values below the pivot over its first half and those above over its second (without a `domain`, the extent made even on both sides of the pivot). A `Cell`'s `value` and a `Treemap`'s `colorValue` take the colors of `sequential` and `diverging`; values outside the domain take its ends, and a row without one takes `unknown`. */\nexport type ColorScale = {ordinal} | {{ type: \"sequential\"; domain?: [number, number]; range: string[]; unknown?: string }} | {{ type: \"diverging\"; domain?: [number, number]; pivot?: number; range: string[]; unknown?: string }};\n"
             )
         })
     }

@@ -10560,3 +10560,166 @@ fn base_plot_reversed_scales_run_from_the_other_edge() {
     );
     all.extend(until(&rx, |b| shows(b, "hover 2")));
 }
+
+const BASE_PLOT_TREEMAP: &str = r##"import { mount, signal, Text, View } from "nsh";
+import { Plot, Treemap } from "nsh/base/plot";
+
+type Node = { id: string; parent?: string; name: string; cap?: number };
+
+const rows: Node[] = [
+  { id: "tech", name: "Tech" },
+  { id: "fin", name: "Finance" },
+  { id: "AAPL", parent: "tech", name: "Apple", cap: 60 },
+  { id: "MSFT", parent: "tech", name: "Microsoft", cap: 20 },
+  { id: "JPM", parent: "fin", name: "JPMorgan", cap: 20 },
+  { id: "ZERO", parent: "fin", name: "Zero", cap: 0 },
+  { id: "LOSS", parent: "fin", name: "Loss", cap: -5 },
+];
+
+function App() {
+  const hovered = signal<number | null>(null);
+  return (
+    <View>
+      <Plot
+        testID="plot"
+        data={rows}
+        onHoverChange={({ index }) => hovered.set(index)}
+        style={{ width: 300, height: 100 }}
+      >
+        <Treemap
+          id="id"
+          parent="parent"
+          value="cap"
+          paddingInner={[2, 1]}
+          paddingTop={20}
+          label="name"
+          valueLabel={(_: Node, value: number) => `v${value}`}
+          groupLabel="name"
+          inactiveOpacity={0.4}
+          hoverClass="outline-2"
+        />
+      </Plot>
+      <Text>{`hover ${hovered()}`}</Text>
+    </View>
+  );
+}
+
+mount(App);
+"##;
+
+/// `nsh/base/plot`'s `Treemap` (d3's `treemap` of a `stratify`
+/// hierarchy, squarified): the leaves' areas follow their values, a
+/// group's is its leaves' sum, the gaps run between siblings only, a leaf
+/// of 0 or below 0 takes no area, and the bands at the groups' tops hold
+/// their names. The pointer finds the leaf under it, and the group in its
+/// band; the arrows step to the leaf beside on the screen.
+#[test]
+fn base_plot_treemap_lays_out_hovers_and_steps() {
+    use nsh_core::{
+        canvas::{CanvasOp, Num, PathOp},
+        geometry::point,
+        keymap::{KeyMatch, Keymap, Keystroke},
+        platform::Os,
+    };
+    let environment = Environment {
+        os: Os::MacOs,
+        ..Environment::default()
+    };
+    let (engine, rx) = start_in(BASE_PLOT_TREEMAP, environment);
+    let mut all = until(&rx, |b| shows(b, "v60"));
+    all.extend(until(&rx, |_| false));
+    // One canvas of leaves: Apple, Microsoft and JPMorgan, none for the
+    // leaves of 0 and below.
+    let rects: Vec<[f32; 4]> = plot_drawings(&all)
+        .iter()
+        .flat_map(|(_, d)| d.ops.iter())
+        .filter_map(|op| match op {
+            CanvasOp::Path(PathOp::Rect(r)) => Some(r.map(|n| match n {
+                Num::Const(v) => v,
+                _ => f32::NAN,
+            })),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(rects.len(), 3, "{rects:?}");
+    // Tech (80) on the left, Finance (20) right of a 2-point gap; each
+    // group's band of 20 above its leaves.
+    let area = |r: &[f32; 4]| r[2] * r[3];
+    let total: f32 = rects.iter().map(area).sum();
+    assert!(rects.iter().all(|r| r[1] >= 20.0), "{rects:?}");
+    let apple = rects
+        .iter()
+        .copied()
+        .fold([0.0; 4], |a, r| match area(&r) > area(&a) {
+            true => r,
+            false => a,
+        });
+    assert_eq!((apple[0], apple[1]), (0.0, 20.0), "{rects:?}");
+    assert!(total > 0.0 && area(&apple) / total > 0.55, "{rects:?}");
+    for text in ["Tech", "Finance", "Apple", "Microsoft", "JPMorgan", "v60"] {
+        assert!(all.iter().any(|b| text_ids(b, text).is_some()), "{text}");
+    }
+    assert!(!all.iter().any(|b| text_ids(b, "Zero").is_some()));
+
+    let plot = test_view(&all, "plot");
+    let hover = |x: f32, y: f32| {
+        engine.control().dispatch_event(
+            plot,
+            EventKind::MouseMove,
+            EventPayload::Mouse(nsh_core::MouseEvent::new(
+                point(px(x), px(y)),
+                point(px(x), px(y)),
+                Default::default(),
+                None,
+            )),
+        )
+    };
+    // In Tech's band: the group; over Apple: its row.
+    hover(10.0, 5.0);
+    all.extend(until(&rx, |b| shows(b, "hover 0")));
+    hover(apple[0] + 5.0, apple[1] + 5.0);
+    all.extend(until(&rx, |b| shows(b, "hover 2")));
+    engine.control().dispatch_event(
+        plot,
+        EventKind::MouseLeave,
+        EventPayload::Mouse(nsh_core::MouseEvent::default()),
+    );
+    all.extend(until(&rx, |b| shows(b, "hover null")));
+
+    // The keys: Home to the first leaf (Apple), Right to the leaf beside
+    // it, End to the last.
+    let keymap = |all: &[MountBatch]| -> Option<std::sync::Arc<Keymap>> {
+        all.iter()
+            .flat_map(|b| b.items.iter())
+            .filter_map(|i| match i {
+                MountItem::Keymap(k) => Some(k.clone()),
+                _ => None,
+            })
+            .next_back()
+    };
+    let press = |all: &[MountBatch], key: &str| {
+        let found = keymap(all).map_or(KeyMatch::None, |k| {
+            k.find(Keystroke::parse(key, Os::MacOs).unwrap(), false, false)
+        });
+        let KeyMatch::Fire(id) = found else {
+            panic!("{key} is not bound")
+        };
+        engine.control().dispatch_event(
+            ROOT_ID,
+            EventKind::KeyCommand,
+            EventPayload::Value(PayloadValue::Number(f64::from(id))),
+        );
+    };
+    engine
+        .control()
+        .dispatch_event(plot, EventKind::Focus, EventPayload::None);
+    all.extend(until(&rx, |b| {
+        b.items.iter().any(|i| matches!(i, MountItem::Keymap(_)))
+    }));
+    press(&all, "home");
+    all.extend(until(&rx, |b| shows(b, "hover 2")));
+    press(&all, "end");
+    all.extend(until(&rx, |b| shows(b, "hover 4")));
+    press(&all, "left");
+    all.extend(until(&rx, |b| shows(b, "hover 2") || shows(b, "hover 3")));
+}

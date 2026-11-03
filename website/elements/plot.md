@@ -1,6 +1,6 @@
 ---
 title: Plot
-description: "The Plot component of nsh/base/plot, its marks Line, Area, Bar, Rule, Dot, Cell, Grid, Pie, Arc, RadialLine, RadialGrid and Sankey, its PlotAxis and PlotLabel: charts drawn natively from the app's rows, with the scales of the axes and their labels, texts at data points, the row, cell or slice under the pointer, motion and no look of their own."
+description: "The Plot component of nsh/base/plot, its marks Line, Area, Bar, Rule, Dot, Cell, Grid, Pie, Arc, RadialLine, RadialGrid, Sankey and Treemap, its PlotAxis and PlotLabel: charts drawn natively from the app's rows, with the scales of the axes and their labels, texts at data points, the row, cell or slice under the pointer, motion and no look of their own."
 group: base
 demo: el-plot
 ---
@@ -11,7 +11,7 @@ A plot is the frame of a chart: the rows of data it shows, the scales of its x a
 motion. Its marks draw what it holds: a `Line` through a series, an `Area` between a series and a baseline, a `Bar`
 per row in the bands of a band scale, a `Rule` per row from a start to an end (a candle's wick), a `Dot` per row where two of its values meet (a scatter's points, a bubble chart's bubbles), a `Cell` per row in the bands of two categories, colored by its value (a heatmap), a `Grid` of lines across, a `Pie` of the rows' shares (a donut with a hole), an
 `Arc` between two angles, and a `RadialLine` around the center with the rings and spokes of a `RadialGrid` behind it (a
-radar), and a `Sankey` of flows between the rows; a `PlotAxis` labels an edge with the ticks of its scale, and a `PlotLabel` writes texts at
+radar), a `Sankey` of flows between the rows, and a `Treemap` of nested rectangles, each leaf's area its value (a market map); a `PlotAxis` labels an edge with the ticks of its scale, and a `PlotLabel` writes texts at
 points of the scales. Each mark is one canvas filling the plot, drawn natively from the rows: the app's rows are read once when
 it sets them, then scaled, recorded and drawn in Rust, so a chart of a thousand points runs no JS per point. The pointer
 is followed in Rust too: the hover's cross line, dots and tooltip move and fade on the platform's animator, and the app
@@ -81,7 +81,7 @@ function App() {
 mount(App);
 ```
 
-`Plot`, `Line`, `Area`, `Bar`, `Rule`, `Dot`, `Cell`, `Grid`, `Pie`, `Arc`, `RadialLine`, `RadialGrid`, `Sankey`, `PlotAxis` and `PlotLabel` come from `nsh/base/plot`, a module of [`nsh/base`](../modules/nsh-base.md) of their
+`Plot`, `Line`, `Area`, `Bar`, `Rule`, `Dot`, `Cell`, `Grid`, `Pie`, `Arc`, `RadialLine`, `RadialGrid`, `Sankey`, `Treemap`, `PlotAxis` and `PlotLabel` come from `nsh/base/plot`, a module of [`nsh/base`](../modules/nsh-base.md) of their
 own (in Rust, `nsh_base::plot`). In TypeScript a plot's props are generic over the type of its rows: field names are
 checked against them, and a function of a row gets the row's type. In Rust, `plot()` makes one with a setter per prop,
 the rows a `Rows` (columns of numbers by key), the values a `RowAccessor` (a key or a function of the row's index), and
@@ -981,6 +981,175 @@ appear; the plot's size changing moves nothing. Links that make a cycle, or name
 no part in the plot's scales.
 
 
+## Treemap
+
+A `Treemap` draws the plot's rows as a hierarchy of nested rectangles: each row is a node, its `id` and the `parent`
+it names make the tree (d3's `stratify`), each leaf's area is in proportion to its `value`, and each group is the box
+of what is under it, its value the sum of its leaves' (whatever its own row holds). A row without a `parent`, or whose
+parent names no row, is a top-level node; without an `id` a row's id is its index, so `parent` can name a row by its
+index too. A tree in the nested form gpt-vis writes (`{ name, value, children }`) is a few lines of the app's to make
+rows of; there is no limit to the levels.
+
+The tiles are squarified, as d3's `treemapSquarify` makes them: each level's nodes in order of value, largest first
+from the top left (`sort="value"`), near the aspect ratio `ratio` (the golden ratio); `sort="data"` keeps the rows'
+order, so the nodes keep their places as their values change. `paddingInner` is the gap between siblings, along no
+outer edge of their parent; `paddingOuter` is the room inside a group around its children; `paddingTop` is a band at
+the top of each group, where its `groupLabel` is written. Each takes a number for every level or one per level from
+the top one down (`[3, 1]`: 3 between the top-level nodes, 1 below them). A level's band goes on all the siblings of
+a parent or on none, left off where one is too small for it, so the groups of a level read alike.
+
+A leaf whose value is 0, below 0 or not a number takes no area: it is not drawn, has no label and is not found by the
+pointer, and neither is a group whose leaves all are.
+A treemap's areas are shares of a whole, so the app shows what is left out in its own words (a note under the map).
+Negative numbers are for colors: a market map's change of the day.
+
+A node's color is its row's of the plot's `colorScale`: `colorValue` is a number along a ramp (`sequential`,
+`diverging`: losses red, gains green, flat neutral, over the extent of the values without a `domain`), `color` a
+category (`ordinal`: `"parent"` colors a group's leaves alike). The leaves are the `leaf` part (`leafClass`,
+`leafStyle`) and the groups the `group` part (`groupClass`, `groupStyle`), drawn only with a class or a style: a
+rectangle under its children, showing in the gaps, its padding and its band. Each part is the same on every node or a
+function of the node's row. `cornerRadii` rounds every rectangle.
+
+`label` writes each leaf's name and `valueLabel` its value under it, a function of the row and its value (a group's is
+its leaves' sum): at the top left (`labelPlacement="start"`) or in the middle (`"center"`). The `label` part is a box
+as big as its leaf: its padding is the room from the leaf's edges and its text styles the lines'. The name is cut
+with an ellipsis where the leaf is narrower and shown only where it fits; the value is shown whole or not at all. A label whose leaf's color is dark has the attribute `data-dark`,
+so `data-dark:text-white` keeps it readable on a deep red.
+
+Over a treemap, the plot reports the node under the pointer (`onHoverChange`, the node's row): a leaf, or a group in
+its band or padding; across a gap between siblings, one of them, so the hover does not flicker. The others fade
+to `inactiveOpacity` (a leaf keeps its groups, a group what is under it), and the `hover` part, a view as big as the
+node, outlines it. The arrow keys step to the leaf beside on the screen, Home and End to the first and the last.
+With the plot's appear the top-level nodes grow from their middles, one after another with `stagger`; when the rows
+change, every node moves to its new box and color with `motion.update`, known by its `id`: a node new to the rows
+grows from its middle and one that is gone shrinks to its own. The plot's x and y scales are not used.
+
+<!-- demo: el-plot-treemap -->
+
+```tsx
+import { signal } from "nsh";
+import { Plot, Treemap } from "nsh/base/plot";
+
+type Row = { id: string; parent?: string; name: string; cap?: number; chg?: number };
+
+const rows: Row[] = [
+  { id: "tech", name: "Technology" },
+  { id: "fin", name: "Financials" },
+  { id: "NVDA", parent: "tech", name: "NVIDIA", cap: 4300, chg: 2.4 },
+  { id: "MSFT", parent: "tech", name: "Microsoft", cap: 3700, chg: -0.6 },
+  { id: "AVGO", parent: "tech", name: "Broadcom", cap: 1600, chg: 3.1 },
+  { id: "JPM", parent: "fin", name: "JPMorgan", cap: 830, chg: 1.3 },
+  { id: "V", parent: "fin", name: "Visa", cap: 670, chg: -0.3 },
+];
+
+export function MarketMap() {
+  const hovered = signal<number | null>(null);
+  return (
+    <Plot
+      data={rows}
+      colorScale={{ type: "diverging", domain: [-3, 3], range: ["#dc2626", "#e5e5e5", "#16a34a"] }}
+      accessibilityLabel="Market map of 5 stocks in 2 sectors"
+      accessibilityValue={{ text: hovered() == null ? undefined : rows[hovered()!].name }}
+      onHoverChange={({ index }) => hovered.set(index)}
+      appearGeneration={1}
+      motion={{ appear: { duration: 800 }, update: { duration: 500 }, enter: { duration: 120 }, exit: { duration: 160 } }}
+      class="h-72"
+    >
+      <Treemap
+        id="id"
+        parent="parent"
+        value="cap"
+        colorValue="chg"
+        paddingInner={[3, 1]}
+        paddingTop={18}
+        cornerRadii={2}
+        inactiveOpacity={0.35}
+        label="id"
+        valueLabel={(d: Row) => `${d.chg! > 0 ? "+" : ""}${d.chg}%`}
+        labelPlacement="center"
+        labelClass="p-1 text-xs font-semibold text-foreground data-dark:text-white"
+        groupLabel="name"
+        groupLabelClass="px-1 text-xs text-muted-foreground"
+        hoverClass="rounded-xs outline-2 outline-foreground"
+      />
+    </Plot>
+  );
+}
+```
+
+```rust
+use nsh_base::plot::{ColorScale, DivergingScale, TreemapPadding, plot, treemap};
+use nsh_core::{element::{RowAccessor, RowText, Rows}, prelude::*};
+
+const IDS: [&str; 5] = ["tech", "fin", "NVDA", "MSFT", "JPM"];
+const PARENTS: [&str; 5] = ["", "", "tech", "tech", "fin"];
+
+fn market_map() -> impl IntoElement {
+    let rows = Rows::from_columns(
+        5,
+        [
+            ("cap".into(), vec![0.0, 0.0, 4300.0, 3700.0, 830.0]),
+            ("chg".into(), vec![0.0, 0.0, 2.4, -0.6, 1.3]),
+        ],
+    );
+    plot()
+        .data(rows)
+        .color_scale(ColorScale::from(
+            DivergingScale::new([rgb(0xdc2626), rgb(0xe5e5e5), rgb(0x16a34a)]).domain([-3.0, 3.0]),
+        ))
+        .accessibility_label("Market map")
+        .h(px(288.0))
+        .child(
+            treemap()
+                .id(RowText::from_fn(|i| IDS[i].into()))
+                .parent(RowText::from_fn(|i| PARENTS[i].into()))
+                .value(RowAccessor::key("cap"))
+                .color_value(RowAccessor::key("chg"))
+                .padding_inner(TreemapPadding::from([px(3.0), px(1.0)]))
+                .padding_top(TreemapPadding::from(px(18.0)))
+                .label(RowText::from_fn(|i| IDS[i].into())),
+        )
+}
+```
+
+| Prop | Rust | Type | Default | Description |
+|---|---|---|---|---|
+| `id` | `.id(..)` | `keyof T \| (d: T, index: number) => string` | the row's index | The id of each row's node: what `parent` names, and what a node is known by when the rows change. |
+| `parent` | `.parent(..)` | `keyof T \| (d: T, index: number) => string` | none: every row is a top-level node | The id of each row's parent; empty, or no row's id, for a top-level node. |
+| `value` | `.value(..)` | `keyof T \| (d: T, index: number) => number` | required | The size of each leaf; a group's is the sum of its children's. A leaf of 0, below 0 or no number takes no area. |
+| `sort` | `.sort(..)` | `"value" \| "data"` | `"value"` | Siblings largest first from the top left, or in the rows' order. |
+| `ratio` | `.ratio(..)` | `number` | the golden ratio | The aspect ratio the tiles approach, at least 1. |
+| `paddingInner` | `.padding_inner(..)` | `number \| number[]` | `0` | The gap between siblings, in points, per level from the top one down (the last for those below). |
+| `paddingOuter` | `.padding_outer(..)` | `number \| number[]` | `0` | The room inside each group around its children, per level. |
+| `paddingTop` | `.padding_top(..)` | `number \| number[]` | `0` | The band at the top of each group, for its `groupLabel`, per level; on all the siblings of a parent or none. |
+| `cornerRadii` | `.corner_radii(..)` | `number \| { topLeft?, topRight?, bottomRight?, bottomLeft? }` | square | The radius of each corner of its rectangles. |
+| `color` | `.color(..)` | `keyof T \| (d: T, index: number) => string` | none | The category of each node, which an `ordinal` `colorScale` gives a color. |
+| `colorValue` | `.color_value(..)` | `keyof T \| (d: T, index: number) => number` | none | The number of each node, which a `sequential` or `diverging` `colorScale` makes its color. |
+| `leafClass` | `.leaf_class(..)` | `string \| (d: T, index: number) => string` | none | The classes of each leaf (`fill-*`, `stroke-*`), the same on every leaf or a function of its row. |
+| `leafStyle` | `.leaf_style(..)` | `StyleProp<ViewStyle>` | none | The style of every leaf, over its classes. |
+| `groupClass` | `.group_class(..)` | `string \| (d: T, index: number) => string` | none | The classes of each group, a rectangle under its children; groups are drawn only with a class or a style. |
+| `groupStyle` | `.group_style(..)` | `StyleProp<ViewStyle>` | none | The style of every group, over its classes. |
+| `inactiveOpacity` | `.inactive_opacity(..)` | `number` (0 to 1) | none | The opacity of the nodes away from the hovered one, and of their labels, with the hover's fade. |
+| `label` | `.label(..)` | `keyof T \| (d: T, index: number) => string` | none | The name in each leaf, on one line, cut with an ellipsis. |
+| `valueLabel` | `.value_label(..)` | `(d: T, value: number, index: number) => string` | none | The value in each leaf, under its name, shown only where it fits whole. |
+| `labelPlacement` | `.label_placement(..)` | `"start" \| "center"` | `"start"` | The labels at their leaves' top left, or in their middle. |
+| `labelClass` | `.label_class(..)` | `string` | none | The classes of each leaf's label, a box as big as the leaf: its padding and text styles; `data-dark:` on dark leaves. |
+| `labelStyle` | `.label_style(..)` | `StyleProp<TextStyle>` | none | The style of each leaf's label, over its classes. |
+| `valueLabelClass` | `.value_label_class(..)` | `string` | none | The classes of the value line, over the label's. |
+| `valueLabelStyle` | `.value_label_style(..)` | `StyleProp<TextStyle>` | none | The style of the value line, over its classes. |
+| `groupLabel` | `.group_label(..)` | `keyof T \| (d: T, index: number) => string` | none | The name of each group, in its band, cut with an ellipsis. |
+| `groupLabelClass` | `.group_label_class(..)` | `string` | none | The classes of each group's label, a box as big as the band. |
+| `groupLabelStyle` | `.group_label_style(..)` | `StyleProp<TextStyle>` | none | The style of each group's label, over its classes. |
+| `stagger` | `.stagger(..)` | `number` (0 to 0.95) | `0` | How the top-level nodes appear one after another: the share of the appear over which they start. |
+| `hoverClass` | `.hover_class(..)` | `string` | none | The classes of the `hover` part, a view as big as the hovered node over it (`rounded-xs outline-2 outline-foreground`). |
+| `hoverStyle` | `.hover_style(..)` | `StyleProp<ViewStyle>` | none | The style of the hover part, over its classes. |
+
+A rectangle fills with `fill` (the `colorScale`'s color, else `currentColor`, where none is set) and strokes with
+`stroke` (none where none is set), its own over the treemap's and the plot's as CSS inherits them. The layout runs
+again only when the rows, the options or the plot's size change, never for the pointer or the appear; the plot's size
+changing moves nothing. A repeated `id`, a `parent` that names no row and a row that is its own ancestor log a warning
+once: the first row keeps the id, the orphan is a top-level node, the cycle is not drawn.
+
 ## PlotAxis
 
 A `PlotAxis` labels an edge of the plot with the ticks of the scale that edge carries: the bottom and top edges the x
@@ -1179,7 +1348,7 @@ is the app's: a `focus-visible:` class or a `focusStyle` (`focus-visible:outline
 
 | Keys | What they do |
 |---|---|
-| Right, Left | Move to the row on that side: the next or the previous row, the other way round on a reversed x scale, whose first row is at the right (over a pie, its slices in the rows' order; over a sankey, its nodes); with no row hovered, Right starts at the row at the left end and Left at the one at the right end (over a pie, the first and the last slice). |
+| Right, Left | Move to the row on that side: the next or the previous row, the other way round on a reversed x scale, whose first row is at the right (over a pie, its slices in the rows' order; over a sankey, its nodes; over a treemap, the leaf beside on the screen, as Up and Down do); with no row hovered, Right starts at the row at the left end and Left at the one at the right end (over a pie, the first and the last slice). |
 | Home, End | Move to the first or the last row. |
 | Up, Down | Over cells: move to the cell above or below in the same column. Over cells the keys follow the grid on the screen (WAI-ARIA's data grid): Right and Left move to the next cell along the line, Home and End to the line's first and last cell; with no cell hovered, the first key starts at the top left cell (Left, Up and End at the bottom right one). At an edge the hover stays. |
 | Escape | Clears the hover. |
