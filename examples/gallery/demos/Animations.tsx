@@ -646,9 +646,14 @@ function EasingPlot() {
           const b = height - 8;
           const y = (v: number) => b - ((v - lo) / (hi - lo)) * (b - t);
           const x = (v: number) => l + v * (r - l);
-          // Zones outside 0..1: where a curve overshoots.
-          hatch(cx, l, t, r - l, y(1) - t);
-          hatch(cx, l, y(0), r - l, b - y(0));
+          // Zones outside 0..1: where a curve overshoots. A terminal draws
+          // a texture this faint as hairlines at full dot strength, so the
+          // hatching would fill both zones with dots; the dashed lines at
+          // 0 and 1 mark them there.
+          if (!terminal) {
+            hatch(cx, l, t, r - l, y(1) - t);
+            hatch(cx, l, y(0), r - l, b - y(0));
+          }
           cx.strokeStyle = colors.line;
           cx.lineWidth = 1;
           for (const q of [0.25, 0.5, 0.75]) {

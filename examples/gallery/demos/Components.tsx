@@ -348,7 +348,7 @@ function PlatformInfo() {
     ["platform.os", platform.os],
     ["platform.version", platform.version],
     ["platform.idiom / desktop / catalyst", `${platform.idiom} / ${platform.desktop} / ${platform.catalyst}`],
-    ["platform.select", platform.select({ ios: "ios branch", android: "android branch" }) ?? ""],
+    ["platform.select", platform.select({ ios: "ios branch", android: "android branch", default: "default branch" }) ?? ""],
     ["pixelRatio()", String(pixelRatio())],
     ["10.3 on whole pixels", String(Math.round(10.3 * pixelRatio()) / pixelRatio())],
     ["screenReaderEnabled()", String(screenReaderEnabled())],
