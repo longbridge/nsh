@@ -313,8 +313,9 @@ fn a_popup_s_virtualized_list_is_as_tall_as_its_rows() {
     consecutive(&terminal, &rows);
 }
 
-/// A trigger `Pick` 20 Cells wide from column 10, on row 1 or (`low`) the
-/// last row, and an anchored overlay with a fill of its own (no border or
+/// A trigger `Pick` 20 Cells wide after a margin (two Cells: a margin is
+/// spacing in a terminal, [`framed`] reports where it starts), on row 1 or
+/// (`low`) the last row, and an anchored overlay with a fill of its own (no border or
 /// padding: the terminal frames it outside its box) 10 Cells wide,
 /// aligned with the trigger's `align` edge.
 fn framed_popup(align: Align, low: bool) -> impl IntoElement {
@@ -371,11 +372,11 @@ fn framed(root: Root) -> ((u16, u16), Terminal<TestBackend>) {
 #[test]
 fn a_framed_popup_s_frame_goes_below_its_trigger_s_row_at_its_start() {
     let ((x, y), terminal) = framed(Root::new::<FramedStart>(|| ()));
-    assert_eq!(x, 10, "the trigger from column 10\n{}", dump(&terminal));
+    assert_eq!(x, 2, "the trigger after its margin\n{}", dump(&terminal));
     let corner = find(&terminal, "╭").unwrap_or_else(|| panic!("a frame\n{}", dump(&terminal)));
     assert_eq!(
         corner,
-        (10, y + 1),
+        (x, y + 1),
         "the frame's corner on the row after the trigger's, at its start\n{}",
         dump(&terminal)
     );
@@ -390,12 +391,12 @@ fn a_framed_popup_s_frame_goes_below_its_trigger_s_row_at_its_start() {
 
 #[test]
 fn a_framed_popup_aligned_with_its_trigger_s_end_ends_its_frame_there() {
-    let ((_, y), terminal) = framed(Root::new::<FramedEnd>(|| ()));
+    let ((x, y), terminal) = framed(Root::new::<FramedEnd>(|| ()));
     let corner = find(&terminal, "╮").unwrap_or_else(|| panic!("a frame\n{}", dump(&terminal)));
     assert_eq!(
         corner,
-        (29, y + 1),
-        "the frame's corner in the trigger's last column (29)\n{}",
+        (x + 19, y + 1),
+        "the frame's corner in the trigger's last column\n{}",
         dump(&terminal)
     );
 }
@@ -412,7 +413,7 @@ fn a_framed_popup_without_room_below_ends_its_frame_above_its_trigger_s_row() {
     );
 }
 
-/// A trigger `Pick` 20 Cells wide from column 10 on row 3 and, beside it
+/// A trigger `Pick` 20 Cells wide after a margin on row 3 and, beside it
 /// at its right aligned with its start, an overlay with a fill of its own
 /// (a submenu beside its item) of two rows, `Item` and `Next`.
 #[component]
@@ -444,7 +445,7 @@ fn FramedBeside() -> impl IntoElement {
 
 #[test]
 fn a_framed_popup_beside_its_trigger_starts_its_rows_on_the_trigger_s_row() {
-    let ((_, y), terminal) = framed(Root::new::<FramedBeside>(|| ()));
+    let ((start, y), terminal) = framed(Root::new::<FramedBeside>(|| ()));
     let (x, item) = find(&terminal, "Item").unwrap();
     assert_eq!(
         item,
@@ -453,14 +454,14 @@ fn a_framed_popup_beside_its_trigger_starts_its_rows_on_the_trigger_s_row() {
         dump(&terminal)
     );
     assert!(
-        x > 30,
-        "beside the trigger (columns 10 to 29)\n{}",
+        x > start + 20,
+        "beside the trigger (its 20 columns)\n{}",
         dump(&terminal)
     );
     let corner = find(&terminal, "╭").unwrap_or_else(|| panic!("a frame\n{}", dump(&terminal)));
     assert_eq!(
         corner,
-        (30, y - 1),
+        (start + 20, y - 1),
         "the frame's corner after the trigger's last column, a row above it\n{}",
         dump(&terminal)
     );
@@ -680,7 +681,8 @@ fn a_select_s_highlighted_row_is_an_accent_band() {
     );
 }
 
-/// A box in an overlay over rows of page text it cuts across.
+/// A box in an overlay over rows of page text it cuts across, centered
+/// (a margin is at most two Cells in a terminal: spacing, not a place).
 #[component]
 fn OverWords() -> impl IntoElement {
     let mut page = view().flex_1();
@@ -689,12 +691,12 @@ fn OverWords() -> impl IntoElement {
     }
     page.child(
         overlay().left_0().right_0().top_0().child(
-            view()
-                .mt(px(32.0))
-                .ml(px(80.0))
-                .w(px(120.0))
-                .bg(nsh_core::color::rgb(0x333333))
-                .child(text("Box")),
+            view().mt(px(32.0)).flex_row().justify_center().child(
+                view()
+                    .w(px(120.0))
+                    .bg(nsh_core::color::rgb(0x333333))
+                    .child(text("Box")),
+            ),
         ),
     )
 }

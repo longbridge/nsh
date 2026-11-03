@@ -1434,7 +1434,9 @@ pub(crate) fn compute(
     let outer_framed = tree.framed();
     let divided = absolute.iter().any(|&(_, c)| holds_splitter(tree, c));
     // A splitter pinned on an edge (a column header's resize handle) is
-    // that edge's line: its Cell is out of the content, as a border's.
+    // that edge's line: its Cell is out of the content, as a border's,
+    // unless the box's padding on that edge already holds it (a dock's
+    // handle on its top padding).
     let pinned = pinned_splitters(tree, &absolute);
     let (mut border, mut padding) = (border, padding);
     let mut inset = inset;
@@ -1525,6 +1527,12 @@ pub(crate) fn compute(
         if perform {
             tree.set_insets(node, Insets { border, padding });
         }
+        let pinned = Sides {
+            l: if padding.l > 0 { 0 } else { pinned.l },
+            r: if padding.r > 0 { 0 } else { pinned.r },
+            t: if padding.t > 0 { 0 } else { pinned.t },
+            b: if padding.b > 0 { 0 } else { pinned.b },
+        };
         let edges = inset.add(pinned).add(gutter);
         let content_w = inner(fixed_w, edges.x());
         let content_h = inner(fixed_h, edges.y());

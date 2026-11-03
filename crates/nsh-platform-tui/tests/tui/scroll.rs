@@ -164,6 +164,8 @@ fn InitialOffsets() -> impl IntoElement {
                 .w(px(24.0))
                 .h(px(32.0))
                 .content_offset(nsh_core::Point::new(px(0.0), px(16.0)))
+                // No bar: its column would leave the text two Cells.
+                .scrollbar(false)
                 .child(text("one\ntwo\nend").h(px(48.0)).flex_shrink_0()),
         )
 }
