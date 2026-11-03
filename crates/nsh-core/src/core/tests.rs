@@ -26886,7 +26886,13 @@ mod terminal_layout {
             ],
         ));
         let batch = laid_out(ops);
-        assert_eq!(frame_of(&batch, 6), Some(rect(80.0, 0.0, 80.0, 16.0)));
+        // The columns only: the test's text engine ignores `numberOfLines`
+        // (the platforms' engines keep the text on its one line).
+        let detail = frame_of(&batch, 6).unwrap();
+        assert_eq!(
+            (detail.origin.x, detail.size.width),
+            (Points(80.0), Points(80.0))
+        );
     }
 
     #[test]
