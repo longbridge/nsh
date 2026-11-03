@@ -143,7 +143,7 @@ pub(crate) fn package(
             .collect();
         let split = split::split(&linkable, &keep, &lazy)?;
         for side in &split.sides {
-            let file = side_file_name(&side.name);
+            let file = side_file_name(&side.gates);
             let url = site.add(&format!("{file}.wasm"), &side.bytes)?;
             let mut entry = serde_json::json!({ "url": url, "needs": side.needs });
             if let Some(gate) = &side.gate {
@@ -1781,16 +1781,24 @@ mod tests {
     }
 }
 
-/// The file name (without extension) of a side module named `name`: what
-/// it holds, in kebab case, without the gate's kind (`nsh_part_rich_editor`
-/// -> `mod-rich-editor`); an app's UI set keeps `app-` so it never meets one
-/// of NSH's.
-fn side_file_name(name: &str) -> String {
-    let short = ["nsh_part_", "nsh_std_", "nsh_feature_"]
-        .iter()
-        .find_map(|p| name.strip_prefix(p))
-        .map(str::to_owned)
-        .or_else(|| name.strip_prefix("nsh_ui_set_").map(|s| format!("app_{s}")))
-        .unwrap_or_else(|| name.strip_prefix("nsh_").unwrap_or(name).to_owned());
-    format!("mod-{}", short.replace('_', "-"))
+/// The file name (without extension) of a side module holding the code of
+/// `gates`: what it is for, in kebab case, without the gates' kind
+/// (`nsh_part_rich_editor` -> `nsh-rich-editor`); a module several gates
+/// share names them with `+` (`nsh-editor+text-view`), the first three and
+/// how many more. An app's UI set keeps `app-`, so it never meets NSH's.
+fn side_file_name(gates: &[String]) -> String {
+    fn short(gate: &str) -> String {
+        let name = ["nsh_part_", "nsh_std_", "nsh_feature_"]
+            .iter()
+            .find_map(|p| gate.strip_prefix(p))
+            .map(str::to_owned)
+            .or_else(|| gate.strip_prefix("nsh_ui_set_").map(|s| format!("app_{s}")))
+            .unwrap_or_else(|| gate.strip_prefix("nsh_").unwrap_or(gate).to_owned());
+        name.replace('_', "-")
+    }
+    let mut parts: Vec<String> = gates.iter().take(3).map(|g| short(g)).collect();
+    if gates.len() > 3 {
+        parts.push(format!("{}-more", gates.len() - 3));
+    }
+    format!("nsh-{}", parts.join("+"))
 }

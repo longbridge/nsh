@@ -62,6 +62,9 @@ pub(crate) struct Side {
     pub(crate) name: String,
     /// The gate it exports, for a gate's module.
     pub(crate) gate: Option<String>,
+    /// The lazy gates whose code it holds: its gate, or the gates sharing
+    /// it, in the given order.
+    pub(crate) gates: Vec<String>,
     /// The side modules it imports from: loaded before it.
     pub(crate) needs: Vec<String>,
     /// The module.
@@ -270,9 +273,14 @@ pub(crate) fn split(
             .with_context(|| format!("the side module `{name}` is not valid"))?;
         let mut needs: Vec<String> = plan.from.iter().map(|o| name_of(*o)).collect();
         needs.sort();
+        let users = (0..lazy.len())
+            .filter(|&k| plan.owner & (1 << k) != 0)
+            .map(|k| lazy[k].to_owned())
+            .collect();
         sides.push(Side {
             name,
             gate: gate.map(|(_, g)| g.to_owned()),
+            gates: users,
             needs,
             bytes: out,
         });
