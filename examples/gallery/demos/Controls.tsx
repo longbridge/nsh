@@ -2032,7 +2032,7 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
               clearButtonClass="items-center justify-center rounded-full enabled:hover:bg-accent active:bg-track"
               clearButtonStyle={{ width: size.clear, height: size.clear }}
               clearButton={clearGlyph()}
-              footerStyle={{ marginTop: 6, paddingTop: 6, paddingHorizontal: 9, borderTopWidth: 1, borderColor: colors.border }}
+              footerStyle={{ marginTop: 6, paddingTop: 6, paddingHorizontal: terminal ? 0 : 9, borderTopWidth: 1, borderColor: colors.border }}
               footer={<Text style={{ fontSize: 12, color: colors.muted }}>{`${topics().length} selected`}</Text>}
               renderItem={(item) => <Option item={item} note={item.disabled ? "Archived" : undefined} />}
               renderGroup={(group) => <Header group={group} />}
@@ -2115,7 +2115,7 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
             }
             empty={<Empty label="Nobody by that name" />}
             {...listProps()}
-            footerStyle={{ marginTop: 6, paddingTop: 6, paddingHorizontal: 9, borderTopWidth: 1, borderColor: colors.border }}
+            footerStyle={{ marginTop: 6, paddingTop: 6, paddingHorizontal: terminal ? 0 : 9, borderTopWidth: 1, borderColor: colors.border }}
             footer={<Text style={{ fontSize: 12, color: colors.muted }}>{full() ? "Four assigned: take one off to add another" : `${MAX_PEOPLE - people().length} more can be added`}</Text>}
             renderItem={(item) => (
               <Option
@@ -2251,7 +2251,10 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
           prefix={
             <>
               <FieldRing within />
-              <View style={{ marginRight: 8 }}><Icon name="search" size={size.check} tint={colors.faint} /></View>
+              {/* A terminal shows no icons: the placeholder says what the field does. */}
+              <If when={!terminal}>
+                <View style={{ marginRight: 8 }}><Icon name="search" size={size.check} tint={colors.faint} /></View>
+              </If>
             </>
           }
           suffix={

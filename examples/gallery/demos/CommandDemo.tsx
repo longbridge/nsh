@@ -14,6 +14,8 @@ import {
   Icon,
   mono,
   Spinner,
+  TERMINAL_GAP,
+  terminal,
   Toggle as Switch,
 } from "../ui";
 
@@ -160,7 +162,7 @@ export function CommandDemo() {
             renderItem={(entry) => <CommandRow entry={entry} icon={actionOf(entry.id)?.icon} note={entry.disabled ? "Admin" : undefined} />}
             footer={
               desktop() ? (
-                <View class="flex-row gap-4 border-t border-border px-3" style={{ height: 32, alignItems: "center" }}>
+                <View class="flex-row gap-4 border-t border-border px-3" style={{ height: 32, alignItems: "center", ...(terminal ? { gap: TERMINAL_GAP } : {}) }}>
                   <Text style={{ fontSize: 11, color: colors.faint }}>↑↓ to move</Text>
                   <Text style={{ fontSize: 11, color: colors.faint }}>↩ to run</Text>
                   <Text style={{ fontSize: 11, color: colors.faint }}>esc to close</Text>
