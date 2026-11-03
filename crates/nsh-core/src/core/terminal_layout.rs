@@ -589,6 +589,13 @@ fn kind(tree: &impl Tree, node: NodeId) -> Kind {
     let measures = count == 0 && tree.measures(node);
     let labelled = role.label > 0 && icon_control(tree, node);
     let empty = !visible && !measures && !labelled;
+    // An absolutely placed line of no width with a height (a chart's
+    // anchor down the room around a tick): its height is the room its
+    // content is aligned in (centered on the tick), not rows of content.
+    let style = tree.style(node);
+    let anchor = style.position.is_out_of_flow()
+        && length(style.size.width.into_raw()) == Some(0.0)
+        && length(style.size.height.into_raw()).is_some();
     Kind {
         measures,
         labelled,
@@ -598,6 +605,7 @@ fn kind(tree: &impl Tree, node: NodeId) -> Kind {
         // cells, a row of them) has no rows of content to size it: its
         // explicit height is what its children are placed in.
         honors_height: empty
+            || anchor
             || (visible && !in_flow)
             || role.scroll
             || role.root
