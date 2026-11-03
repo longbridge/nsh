@@ -148,6 +148,13 @@ thread_local! {
     static TRACE: RefCell<Option<(Option<NshView>, bool)>> = const { RefCell::new(None) };
 }
 
+#[cfg(test)]
+thread_local! {
+    /// Pictures of an effect's or a transition's children rendered and
+    /// downloaded ([`render_children`]), counted for the tests.
+    static RENDERED: Cell<usize> = const { Cell::new(0) };
+}
+
 fn texture(width: u32, height: u32, pixels: &[u8], stride: usize) -> gdk::MemoryTexture {
     gdk::MemoryTexture::new(
         width as i32,
@@ -586,7 +593,10 @@ fn render_children(
         (w * scale).round().max(1.0),
         (h * scale).round().max(1.0),
     );
-    Some(Pixels::of(&renderer.render_texture(&node, Some(&viewport))))
+    let pixels = Pixels::of(&renderer.render_texture(&node, Some(&viewport)));
+    #[cfg(test)]
+    RENDERED.set(RENDERED.get() + 1);
+    Some(pixels)
 }
 
 /// Whether render nodes `a` and `b` draw the same: they are one node, or
@@ -1147,6 +1157,42 @@ mod tests {
                 }],
             );
             assert_eq!(listed(), 0);
+        });
+    }
+
+    /// An effect that reads `nsh.time` draws itself on every frame (its
+    /// shader's frames only `redraw` it): its children, which GTK did not
+    /// draw again, are rendered and downloaded once, and again only after
+    /// one of them draws again.
+    #[test]
+    fn an_effect_renders_its_children_again_only_after_they_change() {
+        gtk_test::run(|| {
+            let surface = gtk_test::surface();
+            let content = shading(ShaderRole::Effect, "sample_content(uv)");
+            let effect = mount(&surface, 2, content);
+            let child = add(&surface, 4, 2, frame(10.0, 10.0, 40.0, 40.0));
+            child.state_mut().style.background_color = nsh_core::Color(0xff0000ff);
+            child.changed();
+            let window = gtk_test::show(&surface);
+            assert!(
+                gtk_test::wait_until(|| child.width() > 0),
+                "the views are laid out"
+            );
+            let before = RENDERED.get();
+            // One of the effect's frames, as GTK draws it.
+            let draw = || {
+                effect.redraw();
+                draw_effect(&gtk::Snapshot::new(), &effect);
+            };
+            for _ in 0..10 {
+                draw();
+            }
+            assert_eq!(RENDERED.get() - before, 1, "ten frames, one picture");
+            child.changed();
+            draw();
+            draw();
+            assert_eq!(RENDERED.get() - before, 2, "a child drew again");
+            window.destroy();
         });
     }
 
