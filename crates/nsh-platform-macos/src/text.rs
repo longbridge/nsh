@@ -232,7 +232,7 @@ fn generic_font(family: FamilyName<'_>, size: CGFloat, weight: u16) -> CFRetaine
         // SAFETY: immutable AppKit constants.
         FamilyName::Serif => unsafe { NSFontDescriptorSystemDesignSerif },
         FamilyName::Rounded => unsafe { NSFontDescriptorSystemDesignRounded },
-        FamilyName::System | FamilyName::Named(_) => return system_font(size, weight),
+        _ => return system_font(size, weight),
     };
     let base = NSFont::systemFontOfSize_weight(size, font_weight(weight));
     let descriptor = base.fontDescriptor();

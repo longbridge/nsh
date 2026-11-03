@@ -64,7 +64,11 @@
   while its popup is open) / `aria-pressed:` (`accessibilityState.pressed` true: a toggle button that is on; not
   `active:`, a press in progress) / `aria-busy:` / `aria-checked:` / `aria-selected:` (Tailwind v4's
   `&[aria-busy="true"]`, ...: `busy`, `checked` true, `selected`; `aria-current:` and Tailwind's other `aria-*` names are
-  unknown, NSH has no such states), `group-*:` (named groups `group/name`), `first:` / `last:` /
+  unknown, NSH has no such states), `data-<name>:` (Tailwind v4's boolean form, `&[data-<name>]`: a `data-*` attribute
+  a Rust component's part shows, `Interactive::project_data`, `Prop::ProjectedData`, as a calendar's day shows
+  `data-range-start`; names of lower case letters, digits and `-`; the value form `data-[state=open]:` is unknown;
+  after the `aria-*` variants, by name, as Tailwind registers them; `deps::DATA`, and a node whose classes read none
+  sends nothing when its attributes change), `group-*:` (named groups `group/name`; `group-data-<name>:` too), `first:` / `last:` /
   `odd:` / `even:` / `only:`, `placeholder:` / `selection:` (a color only, the pseudo-element's: `placeholder:text-*` / `selection:bg-*`, the
   `placeholderColor` / `selectionColor` style keys; other utilities under them are unknown), `!` (important). The state classes have style props of their own (`activeStyle`, `hoverStyle`,
   `focusStyle`, `focusWithinStyle`, `disabledStyle`, `checkedStyle`, `indeterminateStyle`, `expandedStyle`,
@@ -77,7 +81,7 @@
   after its pseudo-classes, so an open popup's trigger keeps its look while hovered or pressed. `disabled` (any element) applies `disabled:` and drops
   the node's press listeners from what is mounted, so it shows no press feedback either. A part of a Rust component
   shows its control's `checked`, `indeterminate` and `disabled` to its own classes and state styles
-  (`Interactive::project_checked`, `project_indeterminate`, `project_disabled`, and `project_focused` for the part the keys act on; `Prop::ProjectedStates`): a switch's thumb styled `checked:translate-x-4`, with no accessibility
+  (`Interactive::project_checked`, `project_indeterminate`, `project_disabled`, and `project_focused` for the part the keys act on; `Prop::ProjectedStates`; `project_data` its `data-*` attributes, `Prop::ProjectedData`): a switch's thumb styled `checked:translate-x-4`, with no accessibility
   state or press change on the part, so screen readers hear the control alone. `focus-within:` (and
   `focusWithinStyle`, `.focus_within(..)`) is the core's: the platforms report `FOCUSED` for whatever view the
   keyboard focus reaches, whether or not it tracks it (`input::reported_states`; one report per focus change), and the

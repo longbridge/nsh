@@ -521,6 +521,10 @@ struct Node {
     /// States it shows as a part of a control (`Prop::ProjectedStates`):
     /// its classes read them with its own, nothing else does.
     projected: u16,
+    /// The `data-*` attributes it shows as a part of a component
+    /// (`Prop::ProjectedData`), sorted: its `data-*:` classes read them,
+    /// and the `group-data-*:` classes inside it.
+    data: Box<[&'static str]>,
     /// What only some nodes have: state styles, the styles of a page's
     /// header or a list's content ([`classes::NodeParts`]).
     parts: Option<Box<classes::NodeParts>>,
@@ -795,6 +799,7 @@ impl Node {
                 0
             },
             projected: 0,
+            data: Box::default(),
             parts: None,
             positional_children: false,
             spaced: false,
@@ -1084,6 +1089,10 @@ pub struct Core<M: TextEngine> {
     env_styled: rustc_hash::FxHashSet<NodeId>,
     /// Scratch of [`Core::sync_env`].
     env_scratch: Vec<NodeId>,
+    /// The keyboard's height changed since the last commit: what that
+    /// commit moves (an `env()` term, or a style that reads the keyboard's
+    /// height) moves with the keyboard.
+    keyboard_moved: bool,
     /// The screens and modals with a `statusBar`, in the order they got
     /// it: few, so attaching and detaching only flag them for the commit.
     status_bar_nodes: Vec<Key>,
@@ -1249,6 +1258,7 @@ impl<M: TextEngine> Core<M> {
             resized: Vec::new(),
             env_styled: Default::default(),
             env_scratch: Vec::new(),
+            keyboard_moved: false,
             status_bar_nodes: Vec::new(),
             status_bars_moved: false,
             pointer_none_classes: 0,
@@ -3950,6 +3960,10 @@ impl<M: TextEngine> Core<M> {
             }
             Prop::ProjectedStates(states) => {
                 self.set_projected_states(key, states);
+                return Ok(());
+            }
+            Prop::ProjectedData(data) => {
+                self.set_projected_data(key, data);
                 return Ok(());
             }
             Prop::HeaderStyle(patch) => {

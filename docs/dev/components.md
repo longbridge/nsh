@@ -171,7 +171,8 @@ reasons: `reactive-components.md`.
   `onOpenChange?: (event: { open: boolean; reason: OpenChangeReason }) => void`). `#[args(event)]` on a variant of one
   field says its value is the event object itself, passed as it is (`#[args(event)] RowPress(DataTablePress)`); a
   unit variant passes nothing. Value types
-  implement `JsValue` (numbers, `bool`, strings, `Hsla` (a CSS color string, as `Color`), `Option`, `Vec`, `JsonValue`, `element::Style` (an inline
+  implement `JsValue` (numbers, `bool`, strings, `Hsla` (a CSS color string, as `Color`), `EdgeInsets` (`number |
+  Partial<Edges>`, as the host prop `hitSlop` takes it), `Option`, `Vec`, `JsonValue`, `element::Style` (an inline
   `StyleProp<ViewStyle>`, decoded as a host element's `style` is: transforms, shadow offsets and native animated
   values included; Rust builds one with `Style::from_decls` / `with`), `PropEnum`s, `JsObject` structs). A field that can change is a `Prop<T>` (`Copy`): in the
   instance each is a memo of its own, so a new value from JS or from a parent reaches only what read it
@@ -677,6 +678,11 @@ it changes, and they are resolved again when the tokens change (`Components::app
   `.project_focused(..)` does the same for `focus:` on the part the keys act on while the control keeps the
   platform's focus (a list's highlighted option, the cell of a code input that takes the next character): NSH has
   no active descendant, and the platform's focus stays where it is.
+  What a part shows beyond the states screen readers hear is a boolean `data-*` attribute:
+  `.project_data("range-start", is_start)` (`Prop::ProjectedData`) applies the part's `data-range-start:` classes and,
+  with `group`, the `group-data-range-start:` ones inside it, as Tailwind's `data-*` variants; a view whose classes
+  read none sends nothing when its attributes change. A component names its attributes in its docs, as a calendar's
+  days do (`data-range-start`, `data-today`, ...) and a code input's cells (`data-filled`).
 - What never changes is plain Rust, decided when the view is made: `.when(variant == Variant::Ghost, |v| ..)`.
 - The app's `class` / `classList` on a component (Tailwind) is merged after the root's rules; at equal rank it wins.
   The styles a view gives a nested component element merge the same way (bound ones too: `Patch::Nested`).
@@ -1101,8 +1107,11 @@ typeahead chooses). The rows are a `virtual_list` with `viewport: parent` in the
 tall as its rows up to the room it has, and a list of thousands makes only the rows in view. Each row is an option
 (`selected` the chosen value, `disabled`), shows `focus:` while highlighted (`project_focused`) and takes the screen
 reader's focus when a key highlights it (`set_accessibility_focus`, only while a screen reader runs: on the web it
-moves the DOM focus; while the search field edits, the title is announced instead). The desktops choose on press
-down, so the search field keeps the keyboard focus. The trigger's role, states, focus and presses are bound on the
+moves the DOM focus; while the search field edits, the title is announced instead). The app's `renderItem` gets
+what the item is (`SelectEntry`: its value, title, `disabled`, group and index), never the row's state, as `Tree`'s
+`TreeEntry` and `Command`'s `CommandEntry`: its content is rendered under the item's key once and kept while the
+highlight moves or the value changes, the states being the row's classes (`group-focus:`, `group-selected:` inside).
+The desktops choose on press down, so the search field keeps the keyboard focus. The trigger's role, states, focus and presses are bound on the
 `trigger` slot, so in a TSX app they are the app's element's ("Named slots"): the popup is placed against it
 (`Overlay::anchor`), at least as wide as its layout reports, and waits for that first layout (open at first, it would
 be made before the slot is filled).
@@ -1133,7 +1142,14 @@ JS function (`Matcher::Js`, as `gpui-base`'s `Matcher::Custom`) is asked for the
 next JS turn), its answers kept as a set; a newer page's answers replace an older one's. The grid fills the width it
 is given, as a table's columns do: the months share the body and the items of a row (weekdays, days, the months and
 years to pick) share it equally (`flex: 1`; a short last row of years is padded), so a calendar in a phone's sheet
-spans it while one in a popup that fits its content keeps its items' widths; the header's items keep their own.
+spans it while one in a popup that fits its content keeps its items' widths; the header's items keep their own. The
+app's `renderItem` gets a `CalendarEntry`, what an item is (its kind, value, date, month, `today`, `outside`), and the
+states are the item's (`selected` for screen readers and `selected:`, every day of a complete range as React Aria's;
+`disabled`; the real focus; `project_data` for `data-range-start` / `-end` / `-middle`, `data-today`,
+`data-outside`): a day's content is rendered under its month and date, so the keys, a pick and the focus render
+nothing, a turn renders the days it brings once each, and with several months those still shown keep theirs (their
+holders move to the cells that now show them). `TimeField`'s `renderSegment` likewise gets a
+`TimeFieldSegmentEntry` (`segment`, `value`, `label`), its selection `focus:` (`project_focused`).
 `TimeField` (`time_field.rs`) is `gpui-base`'s `SegmentEditor` over one
 transparent native text field, as `OtpInput`'s (its `diff` / `echoed`): what the field gains or loses goes to the
 selected segment, then the field holds the time again; a value the app sets is shown unless it is the user's change
@@ -1195,8 +1211,10 @@ with no scrolling of its own:
   start along the axis; several resting where the last does (the end of the range with several per view) are one
   stop, the first of them, for previous, next and the keys.
 - **The slide shown** is a memo: a swipe's slide while the app has not answered it (`pending`, cleared by the next
-  `index`: an app that does not follow it shows the swiped slide until it passes one), else the app's `index`, else
-  the carousel's own (from `defaultIndex`). An effect scrolls the content to
+  `index`, and by `after_answer` once the app has handled the `onChange`: an app that kept its `index` shows it again,
+  the content springing back to it, animated, as a release; `Ctl::let_go_after_answer`), else the app's `index`, else
+  the carousel's own (from `defaultIndex`). An answer that comes while the user drags again lets go of the swipe's
+  slide where that drag rests, never under the finger (`answered_in_drag`). An effect scrolls the content to
   its snap point when it changes (animated unless `reduce_motion()`) and when the snap points move (at once: a resize
   keeps the slide); it sends nothing while the content rests there (`Ctl::at`).
 - **The user's scroll** is reported where the platform reports it come to rest (`on_scroll_end`): the nearest snap
@@ -1207,11 +1225,11 @@ with no scrolling of its own:
   the carousel keeps the target in flight and the few it replaced (`Ctl::superseded_rest`), ignores a rest at a
   replaced one, and drops them all on a drag's start or any other rest (a mouse wheel's starts no drag).
 - **What the app pauses its own rotation by**: `onDragStart` from `on_scroll_drag_start`, `onDragEnd` where that
-  scroll comes to rest; `onFocus` / `onBlur` for the carousel as a whole, from a count of its views with the keyboard
-  focus: its own view, previous, next and the pagination items (a move between them blurs one before it focuses the
-  next, so `onBlur` waits a zero-delay timer and fires only if none of them has it then). Focusable views inside the
-  slides are not counted; the core's focus-within can count them (`ElementRef::on_focus_in` / `on_focus_out` on the
-  carousel's view, in place of the count and its timer). A control or pagination item that turns disabled while it
+  scroll comes to rest; `onFocus` / `onBlur` for the carousel as a whole: the core's focus-within of the carousel's
+  view (`ElementRef::on_focus_in` / `on_focus_out`), so its controls, its pagination items and the app's focusable
+  views in the slides are all in it, and a move between them (a blur and a focus in one batch) reports nothing. The
+  keys are bound while the carousel's own view, a control or a pagination item has the focus (a count of them), not
+  while a view of the app's in a slide has it (an input there keeps its arrows). A control or pagination item that turns disabled while it
   has the focus gives it to the carousel's view first (`Ctl::keep_focus`), where the platform would move it out
   (AppKit to the window). Slides that move on by themselves are the app's timer setting `index`
   (`api-naming.md`).

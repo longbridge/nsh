@@ -126,7 +126,7 @@ mount(App);
 ```
 
 
-`Carousel` 及其部件来自 [`nsh/base`](../modules/nsh-base.md)，在 Rust 中是 `nsh-base` crate。显示的幻灯片是应用的 `index`：滑动、控件或按键用 `onChange` 报告下一张，轮播滚动到应用传回的 `index`。在应用用新的 `index` 回应一次滑动之前，滑动停下的那张保持显示，所以滑动不会弹回。没有 `index` 时，轮播从 `defaultIndex` 开始自己保存。在 Rust 中，`carousel()`、`carousel_content()`、`carousel_item()`、`carousel_previous()`、`carousel_next()`、`carousel_pagination()` 和 `carousel_pagination_item()` 创建这些部件，每个 prop 有一个 setter（`.index(..)`），每个事件有一个监听方法（`.on_change(..)`），另有类型化的样式方法，内容用 `.child(..)`。
+`Carousel` 及其部件来自 [`nsh/base`](../modules/nsh-base.md)，在 Rust 中是 `nsh-base` crate。显示的幻灯片是应用的 `index`：滑动、控件或按键用 `onChange` 报告下一张，轮播滚动到应用传回的 `index`。滑动停下的那张一直显示到应用回应它的 `onChange` 为止：应用把它作为 `index` 传回时它保持显示；应用保留原来的 `index` 时，内容以动画弹回应用的那张。没有 `index` 时，轮播从 `defaultIndex` 开始自己保存。在 Rust 中，`carousel()`、`carousel_content()`、`carousel_item()`、`carousel_previous()`、`carousel_next()`、`carousel_pagination()` 和 `carousel_pagination_item()` 创建这些部件，每个 prop 有一个 setter（`.index(..)`），每个事件有一个监听方法（`.on_change(..)`），另有类型化的样式方法，内容用 `.child(..)`。
 
 ## Props
 
@@ -193,8 +193,8 @@ mount(App);
 | `onChange`（`Carousel`） | `.on_change(\|index: &u32\| ..)` | 用户切换到了另一张幻灯片：滑动、滚轮或触控板停在它上面，或者控件、分页项或按键请求了它。`{ index }` 就是这张幻灯片。应用设置新的 `index` 不会报告。 |
 | `onDragStart`（`Carousel`） | `.on_drag_start(\|\| ..)` | 用户开始拖动内容（手指、触控板）。 |
 | `onDragEnd`（`Carousel`） | `.on_drag_end(\|\| ..)` | 用户拖动的内容停下了。 |
-| `onFocus`（`Carousel`） | `.on_focus(\|\| ..)` | 键盘焦点来到轮播自身的视图、上一张或下一张控件，或某个分页项。在它们之间移动不会报告。幻灯片里可聚焦的视图用它自己的 `onFocus` 报告。 |
-| `onBlur`（`Carousel`） | `.on_blur(\|\| ..)` | 键盘焦点离开了轮播自身的视图、它的控件和分页项。 |
+| `onFocus`（`Carousel`） | `.on_focus(\|\| ..)` | 键盘焦点进入了轮播：来到轮播自身的视图、上一张或下一张控件、某个分页项，或幻灯片里可聚焦的视图。在它们之间移动不会报告。 |
+| `onBlur`（`Carousel`） | `.on_blur(\|\| ..)` | 键盘焦点离开了轮播：轮播自身的视图、它的控件、分页项和幻灯片的内容。 |
 
 ## 部件
 
@@ -236,7 +236,7 @@ mount(App);
 
 ## 自动切换的幻灯片
 
-自动切换的横幅由应用实现：用一个计时器设置 `index`。轮播会报告用户何时在操作它，计时器在这些时候暂停，符合 [WAI-ARIA 轮播模式](https://www.w3.org/WAI/ARIA/apg/patterns/carousel/) 的要求：拖动前后的 `onDragStart` / `onDragEnd`，键盘焦点在轮播、它的控件或分页上时的 `onFocus` / `onBlur`，以及包在外面的视图上的指针进出。减少动态效果时请关闭它，并提供一个停止它的按钮（轮换控件）：
+自动切换的横幅由应用实现：用一个计时器设置 `index`。轮播会报告用户何时在操作它，计时器在这些时候暂停，符合 [WAI-ARIA 轮播模式](https://www.w3.org/WAI/ARIA/apg/patterns/carousel/) 的要求：拖动前后的 `onDragStart` / `onDragEnd`，键盘焦点在轮播里（轮播本身、它的控件、分页或幻灯片的内容）时的 `onFocus` / `onBlur`，以及包在外面的视图上的指针进出。减少动态效果时请关闭它，并提供一个停止它的按钮（轮换控件）：
 
 ```tsx
 import { cleanup, effect, reduceMotion, signal, Text, View } from "nsh";
@@ -294,7 +294,7 @@ effect(() => {
 | Home、End | 移到第一张或最后一张。 |
 | 空格、回车 | 按下有焦点的控件或分页项。 |
 
-在从右到左的布局里，横向轮播的幻灯片从右边开始，左键移到下一张，右键移到上一张；纵向轮播仍用上、下键。持有焦点的控件变为禁用时（最后一张上的下一张），焦点交给轮播，按键在那里继续生效。
+在从右到左的布局里，横向轮播的幻灯片从右边开始，左键移到下一张，右键移到上一张；纵向轮播仍用上、下键。持有焦点的控件变为禁用时（最后一张上的下一张），焦点交给轮播，按键在那里继续生效。幻灯片里应用自己的可聚焦视图保留它们自己的按键：输入框的方向键移动光标。
 
 ## 动效
 
