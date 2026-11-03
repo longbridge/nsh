@@ -144,8 +144,8 @@ platforms and `f3` / `shift+f3` everywhere, `cmd+alt+[` / `]` or `ctrl+shift+[` 
 `ctrl+u`, `ctrl+shift+cmd+right` / `left` or `shift+alt+right` / `left`, `f12` to go to a definition and `mod+.` for
 code actions). Escape (back to one caret) is bound only while there are several carets or a selection to collapse,
 so with nothing to collapse it reaches the page (a dialog closes; in a terminal the focus leaves the field and Tab
-goes on after it). The gutter's line numbers, fold markers and fold placeholders take presses but are no Tab stops
-(`focusable(false)`). Copy and cut (`mod+c`, `mod+x`) are the
+goes on after it). The gutter, its line numbers, fold markers and fold placeholders, and the rows take presses but are no Tab
+stops (`focusable(false)`): one Tab from the control before an editor enters its text. Copy and cut (`mod+c`, `mod+x`) are the
 controller's, through the clipboard. `run(command)` runs the same commands from the app, plus those that have no
 default keys (fold all, sorting lines, changing case, trimming trailing whitespace, paragraph moves, paste from the
 clipboard), for the app's own bindings and menus.

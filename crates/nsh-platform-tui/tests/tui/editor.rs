@@ -187,6 +187,18 @@ fn Between() -> impl IntoElement {
 }
 
 #[test]
+fn one_tab_goes_from_the_control_before_an_editor_into_its_text() {
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(48, 12)).unwrap();
+    view.load(App::Rust(Root::new::<Between>(|| ()))).unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "focus none");
+    assert_eq!(tab_until(&mut view, &mut terminal, &rx, "focus Before"), 1);
+    // The gutter and the rows take the pointer's presses; neither is a
+    // stop of its own, so the next Tab is the text's.
+    assert_eq!(tab_until(&mut view, &mut terminal, &rx, "focus editor"), 1);
+}
+
+#[test]
 fn escape_then_tab_leaves_an_editor_for_the_next_control() {
     let (mut view, rx) = surface();
     let mut terminal = Terminal::new(TestBackend::new(48, 12)).unwrap();

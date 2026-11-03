@@ -251,8 +251,10 @@ fn gutter(ed: Ed, layer: Layer, pointer: GutterPointer) -> impl IntoElement {
                 },
             )),
             // A press on a number reports its line; the markers take
-            // presses of their own.
+            // presses of their own. The pointer's only: Tab goes into the
+            // text.
             Layer::Hit => inner
+                .focusable(false)
                 .on(EventKind::Press, move |p: &EventPayload| {
                     let EventPayload::Press(e) = p else { return };
                     let x = e.position.x - strip_width();
@@ -892,7 +894,10 @@ fn rows_box(ed: Ed, lh: impl Fn() -> Points + Clone + 'static, layer: Layer) -> 
             }),
         Layer::Paint => el,
     };
+    // The rows take the pointer's presses; the keyboard's focus is the
+    // editor's text input, so the rows are no Tab stop of their own.
     let mut el = el
+        .focusable(false)
         .on(EventKind::PressDown, move |p: &EventPayload| {
             if let (true, EventPayload::Press(e)) = (desktop, p) {
                 // A Mod-click on the definition link keeps the caret where
