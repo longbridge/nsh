@@ -2431,15 +2431,10 @@ const report = (v) => text(String(v));
 
     #[test]
     fn an_interrupt_inside_find_keeps_the_elements_alive() {
-        // QuickJS's `find` family released the element of the iteration
-        // before an interrupt a second time (quickjs-ng #1826): an element
-        // only arrays held was freed while they still held it, and a later
-        // call crashed the VM. With no budget left, the first check of the
-        // handler stops the call. QuickJS checks every 10 000 polls, and an
-        // iteration polls twice (the method, then the call of the callback):
-        // after an interrupt (`views[0]`), the handler stops either every
-        // method's poll or every call's, and one call more before the method
-        // stops the other.
+        // An interrupt inside QuickJS's `find` family must not free the
+        // arrays' elements (quickjs-ng #1826), or a later call crashes the
+        // VM. `views[0]` and the second, offset run of each method make the
+        // interrupt land in the method itself.
         let mut host = sandboxed(Limits {
             call_budget: Duration::ZERO,
             ..Limits::default()
