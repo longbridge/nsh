@@ -1784,7 +1784,7 @@ mod tests {
 /// The file name (without extension) of a side module holding the code of
 /// `gates`: what it is for, in kebab case, without the gates' kind
 /// (`nsh_part_rich_editor` -> `nsh-rich-editor`); a module several gates
-/// share names them with `+` (`nsh-editor+text-view`), the first three and
+/// share names them with `~` (`nsh-editor~text-view`, unreserved in URLs), the first three and
 /// how many more. An app's UI set keeps `app-`, so it never meets NSH's.
 fn side_file_name(gates: &[String]) -> String {
     fn short(gate: &str) -> String {
@@ -1800,5 +1800,5 @@ fn side_file_name(gates: &[String]) -> String {
     if gates.len() > 3 {
         parts.push(format!("{}-more", gates.len() - 3));
     }
-    format!("nsh-{}", parts.join("+"))
+    format!("nsh-{}", parts.join("~"))
 }
