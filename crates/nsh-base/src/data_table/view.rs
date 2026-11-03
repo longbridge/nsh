@@ -897,7 +897,6 @@ fn cell(
     let left_dt = dt.clone();
     let width_dt = dt.clone();
     let col_dt = dt.clone();
-    let dt_sort = dt.clone();
     let el = column_parts(
         view()
             .role(AccessibilityRole::Cell)
@@ -945,7 +944,7 @@ fn cell(
         Some(row),
         list,
     );
-    let el = if custom {
+    if custom {
         let render_dt = dt.clone();
         el.child(dynamic(move || {
             let render = props.render_cell.get()?;
@@ -983,26 +982,7 @@ fn cell(
             .number_of_lines(1)
             .min_w(px(0.0)),
         )
-    };
-    // A terminal keeps a Cell after a value at the column's end, as after
-    // its title, which ends a Cell before the column's line (a sortable
-    // one ends at its sort glyph's Cell).
-    let terminal = crate::terminal::is_terminal();
-    let spaced = computed(move || {
-        terminal && align.get() == DataTableAlign::End && {
-            dt_sort.layout_rev.get();
-            !def.get()
-                .and_then(|def| dt_sort.st.borrow().defs.get(def).map(|c| c.sortable))
-                .unwrap_or(false)
-        }
-    });
-    el.child(when(move || spaced.get(), end_cell))
-}
-
-/// One blank Cell: the room a terminal keeps between a column's end and
-/// what is drawn there (the line between its titles).
-fn end_cell() -> Text {
-    text(" ").flex_none().number_of_lines(1)
+    }
 }
 
 // The header.
@@ -1445,12 +1425,6 @@ fn title_content(
     .when(sortable, move |v| {
         v.child(sort_button(indicator_dt.clone(), def, sorted))
     })
-    // A terminal's title at the column's end keeps a Cell before the line
-    // between the titles (the resize handle's), and its cells one too.
-    .when(
-        !sortable && align == DataTableAlign::End && crate::terminal::is_terminal(),
-        |v| v.child(end_cell()),
-    )
 }
 
 /// The sort button at the end of a sortable title: its hit area and
