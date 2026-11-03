@@ -262,6 +262,10 @@ pub fn PlotAxis(props: PlotAxisProps, _cx: Scope<NoEvent>) -> impl IntoElement {
     let heights = signal(Vec::<(usize, f32)>::new());
     let shares = signal(Vec::<(usize, f32)>::new());
     effect(move || {
+        // The plot's state goes with the plot, which may go first.
+        if plot.size.try_get().is_none() {
+            return;
+        }
         let AxisMap::Linear(linear) = map() else {
             return shares.set(Vec::new());
         };
@@ -288,8 +292,10 @@ pub fn PlotAxis(props: PlotAxisProps, _cx: Scope<NoEvent>) -> impl IntoElement {
         if !beside {
             return [0.0; 2];
         }
-        let height = plot.size.get().height.0;
-        heights.with(|h| shares.with(|s| label_insets(h, s, height)))
+        let Some(size) = plot.size.try_get() else {
+            return [0.0; 2];
+        };
+        heights.with(|h| shares.with(|s| label_insets(h, s, size.height.0)))
     }));
     let side = move || Side {
         placement: placement.get(),
