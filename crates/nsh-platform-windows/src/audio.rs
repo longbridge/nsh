@@ -17,10 +17,10 @@
 //! **Players** are Media Foundation media engines in audio-only mode, made at
 //! the first preload or play, as [`crate::native::video`]'s are. The engine
 //! reports to [`Notify`] on its own threads; each notification is posted to
-//! the main thread ([`crate::window::invoke`]) and finds its player again by
-//! surface key and id, with the serial of the engine it was made for (so a
-//! late notification of a closed or restarted one is dropped). Progress
-//! comes from a small thread that wakes the main thread every
+//! the surface's UI thread ([`crate::window::UiThread`]) and finds its
+//! player again by surface key and id, with the serial of the engine it was
+//! made for (so a late notification of a closed or restarted one is
+//! dropped). Progress comes from a small thread that wakes that thread every
 //! [`PROGRESS_INTERVAL`] while the player plays.
 //!
 //! Everything but the notifications' and the ticker's posts runs on the
@@ -904,6 +904,8 @@ impl Player {
         let generation = self.ticks.fetch_add(1, Ordering::AcqRel) + 1;
         let ticks = self.ticks.clone();
         let (key, id) = (self.key, self.id);
+        // The surface's UI thread, where the ticks are reported.
+        let ui = crate::window::UiThread::current();
         let spawned = std::thread::Builder::new()
             .name("nsh-audio-progress".into())
             .spawn(move || {
@@ -912,7 +914,7 @@ impl Player {
                     if ticks.load(Ordering::Acquire) != generation {
                         return;
                     }
-                    crate::window::invoke(move || {
+                    ui.invoke(move || {
                         let Some(surface) = Surface::by_key(key) else {
                             return;
                         };
@@ -971,7 +973,15 @@ fn make_engine(key: u64, id: u32, serial: u64) -> Result<IMFMediaEngine> {
     if !mf_started() {
         return Err(windows::core::Error::from_hresult(E_FAIL));
     }
-    let notify: IMFMediaEngineNotify = Notify { key, id, serial }.into();
+    // Made on the surface's UI thread, where the events are handled.
+    let ui = crate::window::UiThread::current();
+    let notify: IMFMediaEngineNotify = Notify {
+        key,
+        id,
+        serial,
+        ui,
+    }
+    .into();
     // SAFETY: COM calls with valid attributes; the factory needs Media
     // Foundation started (above).
     unsafe {
@@ -992,12 +1002,13 @@ struct Notify {
     key: u64,
     id: u32,
     serial: u64,
+    ui: crate::window::UiThread,
 }
 
 impl IMFMediaEngineNotify_Impl for Notify_Impl {
     fn EventNotify(&self, event: u32, param1: usize, param2: u32) -> Result<()> {
         let (key, id, serial) = (self.key, self.id, self.serial);
-        crate::window::invoke(move || {
+        self.ui.invoke(move || {
             let Some(surface) = Surface::by_key(key) else {
                 return;
             };
