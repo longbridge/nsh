@@ -124,8 +124,14 @@ impl Decor {
                 );
                 let children = parent.subviews();
                 parent.addSubview(&effect);
+                // The backdrop blur is the view's own, below its background,
+                // not a child the shader draws: masked with the children, it
+                // would show nowhere.
+                let backdrop = self.visual.backdrop_view();
                 for child in children.iter() {
-                    effect.addSubview(&child);
+                    if !backdrop.is_some_and(|b| std::ptr::eq(b, &*child)) {
+                        effect.addSubview(&child);
+                    }
                 }
                 self.effect = Some(effect);
             }

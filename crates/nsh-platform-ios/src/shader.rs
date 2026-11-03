@@ -13,7 +13,8 @@
 //!
 //! Effects and transitions ([`ShaderRole`]) draw their children through
 //! the shader: the children are in a view of their own
-//! ([`crate::decor::Decor::set_effect`]) whose layer an empty mask hides
+//! ([`crate::decor::Decor::set_effect`]; a backdrop blur stays behind the
+//! view's background, under the frames) whose layer an empty mask hides
 //! while the frames show (UIKit hit-tests views, not what shows, so they
 //! keep their touches), and the frames' layer goes above it, `overflow`
 //! points beyond the box. Where there is no GPU device the children show
