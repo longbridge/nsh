@@ -19,7 +19,9 @@ mod terminal;
 pub use terminal::convert;
 
 #[derive(Parser)]
-#[command(about = "Run Native Shell in the terminal (C-h e opens logs; Ctrl+C exits)")]
+#[command(
+    about = "Run Native Shell in the terminal (C-h e opens logs; Ctrl+C copies a selection, else exits)"
+)]
 struct Args {
     #[arg(long, conflicts_with = "dev_server")]
     bundle: Option<PathBuf>,
@@ -36,9 +38,10 @@ struct Args {
     /// Show frame timings and terminal output (C-h p toggles).
     #[arg(long)]
     fps: bool,
-    /// Capture the mouse for clicks, hover, dragging and text selection.
+    /// Leave the mouse to the terminal (its own text selection) instead of capturing
+    /// clicks, hover, dragging and the wheel.
     #[arg(long)]
-    mouse: bool,
+    no_mouse: bool,
 
     /// Render to an in-memory terminal (used by nsh test).
     #[arg(long, requires = "dev_server")]
@@ -79,6 +82,15 @@ pub fn main_with_options(mut options: AppOptions) -> io::Result<()> {
                 .join("assets"),
         )));
     }
+    let _shutdown = shutdown::Guard::install()?;
+    // The terminal answers its startup queries before the surface takes its colors.
+    let session = if args.headless {
+        None
+    } else {
+        let session = terminal::Session::enter(!args.no_mouse)?;
+        options.capabilities = session.capabilities();
+        Some(session)
+    };
     let mut view = AppView::new(options);
     view.set_dev_log_path(log_file);
     let is_dev = args.bundle.is_none();
@@ -87,7 +99,6 @@ pub fn main_with_options(mut options: AppOptions) -> io::Result<()> {
     view.on_app_error(move |error| {
         *reported.borrow_mut() = Some(error.to_string());
     });
-    let _shutdown = shutdown::Guard::install()?;
     if args.headless {
         let (columns, rows) = match args.window_size {
             Some(size) => {
@@ -110,12 +121,20 @@ pub fn main_with_options(mut options: AppOptions) -> io::Result<()> {
                 RunEvent::Idle
             })
         })?;
-    } else {
-        let session = terminal::Session::enter(args.mouse)?;
+    } else if let Some(session) = session {
+        let cursor = Rc::new(std::cell::Cell::new(
+            nsh_platform_tui::CursorStyle::default(),
+        ));
+        let changed = cursor.clone();
+        view.on_cursor_style_changed(move |style| changed.set(style));
+        let mut shown = nsh_platform_tui::CursorStyle::default();
+        let (mut frames, writer) = terminal::Frames::new(terminal::Output, session.synchronized());
         let mut terminal = Terminal::new(view.measure_backend(CrosstermBackend::new(
-            io::BufWriter::new(view.measure_writer(terminal::Output)),
+            io::BufWriter::new(view.measure_writer(writer)),
         )))?;
         let result = run(&mut terminal, &mut view, &args, |timeout| {
+            // The frame just drawn, whole, before any escape written between frames.
+            frames.commit()?;
             if !session.is_active() {
                 Err(io::Error::other("terminal session ended after a panic"))
             } else if shutdown::requested() || (!is_dev && failure.borrow().is_some()) {
@@ -124,10 +143,22 @@ pub fn main_with_options(mut options: AppOptions) -> io::Result<()> {
                 if let Some(clipboard) = &terminal_clipboard {
                     clipboard.flush()?;
                 }
-                terminal::poll(timeout)
+                // Between frames, as the clipboard's escapes: never inside a frame's output.
+                if cursor.get() != shown {
+                    shown = cursor.get();
+                    terminal::set_cursor_style(shown)?;
+                }
+                let event = terminal::poll(timeout)?;
+                if let RunEvent::Input(nsh_platform_tui::Input::Focus(true)) = event {
+                    session.reassert()?;
+                }
+                Ok(event)
             }
         });
         let result = result.and_then(|()| {
+            if !shutdown::requested() {
+                frames.commit()?;
+            }
             if !shutdown::requested()
                 && let Some(clipboard) = &terminal_clipboard
             {

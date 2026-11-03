@@ -15,6 +15,7 @@ fn hover_styles_and_events_follow_the_pointer_and_clear_outside_the_surface() {
         mount(() => <View>
             <View style={{ width: 80, height: 32, backgroundColor: "#123456" }}
                 hoverStyle={{ backgroundColor: "#ef4444" }}
+                onPress={() => {}}
                 onMouseEnter={() => state.set("inside")}
                 onMouseLeave={() => state.set("outside")} />
             <Text>{state()}</Text>
@@ -29,12 +30,18 @@ fn hover_styles_and_events_follow_the_pointer_and_clear_outside_the_surface() {
     draw_until(&mut view, &mut terminal, &rx, "idle");
     view.handle(mouse(MouseKind::Move, 1, 0));
     draw_until(&mut view, &mut terminal, &rx, "inside");
-    // The hovered leaf's fill shows reversed in its palette color.
-    assert!(reversed(terminal.backend().buffer(), 1, 1));
-    assert_eq!(terminal.backend().buffer()[(1, 1)].fg, Color::Red);
+    // A hovered pressable view is a faint band: the terminal's background
+    // (black here) a tenth of the way to its foreground; the app's hover
+    // fill draws nothing.
+    let band = Color::Rgb(26, 26, 26);
+    for (x, y) in [(0, 0), (9, 1)] {
+        assert_eq!(terminal.backend().buffer()[(x, y)].bg, band, "{x},{y}");
+    }
+    assert!(!reversed(terminal.backend().buffer(), 1, 1));
+    assert_eq!(terminal.backend().buffer()[(10, 0)].bg, Color::Reset);
     view.handle(mouse(MouseKind::Move, 41, 0));
     draw_until(&mut view, &mut terminal, &rx, "outside");
-    assert_eq!(terminal.backend().buffer()[(1, 1)].fg, Color::Blue);
+    assert_eq!(terminal.backend().buffer()[(1, 1)].bg, Color::Reset);
 }
 
 #[test]
@@ -207,23 +214,26 @@ fn dragging_clears_active_styles() {
     let mut terminal = Terminal::new(TestBackend::new(40, 8)).unwrap();
     view.load(Bundle::source(code)).unwrap();
     draw_until(&mut view, &mut terminal, &rx, "Hold");
-    let until_color =
-        |view: &mut nsh_platform_tui::AppView, terminal: &mut Terminal<TestBackend>, color| {
-            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-            loop {
-                terminal
-                    .draw(|frame| view.render(frame, frame.area()))
-                    .unwrap();
-                if terminal.backend().buffer()[(1, 1)].fg == color {
-                    break;
-                }
-                rx.recv_deadline(deadline).unwrap();
+    // Pressed is a stronger band than hovered; a drag ends the press.
+    let press = Color::Rgb(46, 46, 46);
+    let until = |view: &mut nsh_platform_tui::AppView,
+                 terminal: &mut Terminal<TestBackend>,
+                 pressed: bool| {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            terminal
+                .draw(|frame| view.render(frame, frame.area()))
+                .unwrap();
+            if (terminal.backend().buffer()[(1, 1)].bg == press) == pressed {
+                break;
             }
-        };
+            rx.recv_deadline(deadline).unwrap();
+        }
+    };
     view.handle(mouse(MouseKind::Down(Left), 1, 0));
-    until_color(&mut view, &mut terminal, Color::Red);
+    until(&mut view, &mut terminal, true);
     view.handle(mouse(MouseKind::Move, 4, 0));
-    until_color(&mut view, &mut terminal, Color::Blue);
+    until(&mut view, &mut terminal, false);
     view.handle(mouse(MouseKind::Up(Left), 4, 0));
 }
 
@@ -256,9 +266,10 @@ fn selectable_text_still_presses_on_a_click_and_only_copies_after_a_drag() {
     view.handle(mouse(MouseKind::Down(Left), 0, 0));
     view.handle(mouse(MouseKind::Up(Left), 0, 0));
     draw_until(&mut view, &mut terminal, &rx, "presses:1");
-    view.handle(mouse(MouseKind::Down(Left), 0, 0));
-    view.handle(mouse(MouseKind::Move, 6, 0));
-    view.handle(mouse(MouseKind::Up(Left), 6, 0));
+    // Another Cell, so the press is no double click (which selects by words).
+    view.handle(mouse(MouseKind::Down(Left), 1, 0));
+    view.handle(mouse(MouseKind::Move, 7, 0));
+    view.handle(mouse(MouseKind::Up(Left), 7, 0));
     view.handle(Input::Key {
         key: "c".into(),
         modifiers: Modifiers {
@@ -268,7 +279,7 @@ fn selectable_text_still_presses_on_a_click_and_only_copies_after_a_drag() {
         },
         release: false,
     });
-    assert_eq!(clipboard.text().as_deref(), Some("select"));
+    assert_eq!(clipboard.text().as_deref(), Some("electa"));
     draw_until(&mut view, &mut terminal, &rx, "presses:1");
 }
 
@@ -300,4 +311,96 @@ fn concealing_a_hovered_view_clears_hover_without_more_mouse_motion() {
     view.handle(mouse(MouseKind::Up(Left), 1, 0));
     draw_until(&mut view, &mut terminal, &rx, "left");
     assert_eq!(terminal.backend().buffer()[(0, 0)].symbol(), " ");
+}
+
+#[test]
+fn a_secondary_press_asks_the_nearest_listener_for_a_context_menu() {
+    use nsh_platform_tui::MouseButton::Right;
+    let code = nsh_bundler::compile_module(
+        "App.tsx",
+        r#"
+        import { mount, signal, View, Text } from "nsh";
+        const at = signal("none");
+        mount(() => <View>
+            <View style={{ width: 80, height: 32 }}
+                onContextMenu={(e) => at.set(`menu ${e.position.x},${e.position.y}`)}>
+                <View style={{ width: 40, height: 16 }}><Text>Row</Text></View>
+            </View>
+            <Text>{at()}</Text>
+        </View>);
+    "#,
+        &[],
+    )
+    .unwrap();
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(40, 8)).unwrap();
+    view.load(Bundle::source(code)).unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "none");
+    view.handle(mouse(MouseKind::Down(Right), 1, 0));
+    view.handle(mouse(MouseKind::Up(Right), 1, 0));
+    // The Cell's middle: half a Cell past its corner.
+    draw_until(&mut view, &mut terminal, &rx, "menu 12,8");
+}
+
+#[test]
+fn a_scroll_bar_jumps_where_its_track_is_pressed_and_its_thumb_follows_a_drag() {
+    use nsh_platform_tui::MouseButton::Left;
+    let code = nsh_bundler::compile_module(
+        "App.tsx",
+        r#"
+        import { mount, signal, Scroll, View, Text } from "nsh";
+        const offset = signal(0);
+        mount(() => <View>
+            <Scroll style={{ width: 160, height: 64 }} onScroll={e => offset.set(e.offset.y)}>
+                {Array.from({ length: 16 }, (_, i) => <Text style={{ height: 16 }}>row {i}</Text>)}
+            </Scroll>
+            <Text>offset:{offset()}</Text>
+        </View>);
+    "#,
+        &[],
+    )
+    .unwrap();
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(40, 8)).unwrap();
+    view.load(Bundle::source(code)).unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "offset:0");
+    // A 4-row track over 16 rows: a one-Cell thumb in the view's last column.
+    view.handle(mouse(MouseKind::Down(Left), 19, 3));
+    view.handle(mouse(MouseKind::Up(Left), 19, 3));
+    draw_until(&mut view, &mut terminal, &rx, "offset:192");
+    view.handle(mouse(MouseKind::Down(Left), 19, 3));
+    view.handle(mouse(MouseKind::Move, 19, 0));
+    draw_until(&mut view, &mut terminal, &rx, "offset:0");
+    view.handle(mouse(MouseKind::Up(Left), 19, 0));
+}
+
+#[test]
+fn pressing_a_field_closes_an_open_popover_as_any_press_outside_it() {
+    use nsh_platform_tui::MouseButton::Left;
+    let code = nsh_bundler::compile_module(
+        "App.tsx",
+        r#"
+        import { mount, signal, View, Text } from "nsh";
+        import { Input, Popover } from "nsh/base";
+        const state = signal("initial");
+        mount(() => <View>
+            <Popover defaultOpen onOpenChange={({ open }) => state.set(open ? "open" : "closed")}
+                trigger={<View style={{ width: 80, height: 16 }}><Text>Open</Text></View>}>
+                <View style={{ width: 80, height: 16 }}><Text>Panel</Text></View>
+            </Popover>
+            <View style={{ height: 32 }} />
+            <Input style={{ width: 160, height: 16 }} />
+            <Text>{state()}</Text>
+        </View>);
+    "#,
+        &[],
+    )
+    .unwrap();
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(40, 8)).unwrap();
+    view.load(Bundle::source(code)).unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "Panel");
+    view.handle(mouse(MouseKind::Down(Left), 2, 3));
+    view.handle(mouse(MouseKind::Up(Left), 2, 3));
+    draw_until(&mut view, &mut terminal, &rx, "closed");
 }

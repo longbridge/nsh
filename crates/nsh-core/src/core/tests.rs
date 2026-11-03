@@ -5521,7 +5521,7 @@ fn selected_style_follows_the_accessibility_state() {
     view_with_classes(&mut c, 2, "bg-white selected:bg-black");
     let selected = |on| Op::SetProp {
         id: 2,
-        prop: Prop::Accessibility(AccessibilityProp::State(AccessibilityState {
+        prop: Prop::Accessibility(AccessibilityProp::State(crate::AccessibilityState {
             selected: on,
             ..AccessibilityState::default()
         })),
@@ -5578,7 +5578,7 @@ fn expanded_style_follows_the_accessibility_state() {
     );
     let state = |expanded| Op::SetProp {
         id: 2,
-        prop: Prop::Accessibility(AccessibilityProp::State(AccessibilityState {
+        prop: Prop::Accessibility(AccessibilityProp::State(crate::AccessibilityState {
             expanded,
             ..AccessibilityState::default()
         })),
@@ -5816,7 +5816,7 @@ fn level_and_new_states_go_with_the_view_props() {
             },
             Op::SetProp {
                 id: 2,
-                prop: Prop::Accessibility(AccessibilityProp::State(AccessibilityState {
+                prop: Prop::Accessibility(AccessibilityProp::State(crate::AccessibilityState {
                     current: Some(AccessibilityCurrent::Step),
                     ..AccessibilityState::default()
                 })),
@@ -5869,7 +5869,7 @@ fn checked_style_follows_the_accessibility_state() {
     );
     let state = |checked, selected| Op::SetProp {
         id: 2,
-        prop: Prop::Accessibility(AccessibilityProp::State(AccessibilityState {
+        prop: Prop::Accessibility(AccessibilityProp::State(crate::AccessibilityState {
             checked,
             selected,
             ..AccessibilityState::default()
@@ -5934,7 +5934,7 @@ fn indeterminate_style_follows_the_accessibility_state() {
     );
     let state = |checked| Op::SetProp {
         id: 2,
-        prop: Prop::Accessibility(AccessibilityProp::State(AccessibilityState {
+        prop: Prop::Accessibility(AccessibilityProp::State(crate::AccessibilityState {
             checked,
             ..AccessibilityState::default()
         })),
@@ -24830,4 +24830,1486 @@ fn a_layout_animation_alone_takes_no_screen_picture() {
         }],
     );
     assert!(c.commit().is_none());
+}
+
+/// Layout in a terminal (`core::terminal_layout`): ratatui's splits in a
+/// terminal's 8×16 point Cells.
+mod terminal_layout {
+    use super::*;
+    use crate::{
+        StyleValue as V,
+        geometry::{Edges, size_pt},
+    };
+
+    fn terminal(c: &mut Core<FakeEngine>, on: bool) {
+        c.set_environment(crate::element::Environment {
+            cell: on.then(|| size_pt(8.0, 16.0)),
+            ..Default::default()
+        });
+    }
+
+    fn node(id: NodeId, tag: Tag, parent: NodeId, props: &[(&str, V<'_>)]) -> Vec<Op> {
+        vec![
+            Op::Create { id, tag },
+            style_op(id, props),
+            Op::Insert {
+                parent,
+                child: id,
+                before: None,
+            },
+        ]
+    }
+
+    fn view(id: NodeId, parent: NodeId, props: &[(&str, V<'_>)]) -> Vec<Op> {
+        node(id, Tag::View, parent, props)
+    }
+
+    /// A text `id` (its raw text `id + 1`) in `parent`.
+    fn text(id: NodeId, parent: NodeId, content: &str) -> Vec<Op> {
+        vec![
+            Op::Create { id, tag: Tag::Text },
+            Op::CreateText {
+                id: id + 1,
+                text: content.into(),
+            },
+            Op::Insert {
+                parent: id,
+                child: id + 1,
+                before: None,
+            },
+            Op::Insert {
+                parent,
+                child: id,
+                before: None,
+            },
+        ]
+    }
+
+    fn laid_out(ops: Vec<Op>) -> MountBatch {
+        let mut c = core();
+        terminal(&mut c, true);
+        apply(&mut c, ops);
+        c.commit().unwrap()
+    }
+
+    /// No frame, or one of no size.
+    fn left_out(batch: &MountBatch, id: NodeId) -> bool {
+        frame_of(batch, id)
+            .is_none_or(|f| f.size.width == Points::ZERO && f.size.height == Points::ZERO)
+    }
+
+    /// A pressable box 40pt high with a 1pt border, 6pt / 12pt padding and
+    /// a label.
+    fn button() -> Vec<Op> {
+        let mut ops = view(
+            2,
+            ROOT_ID,
+            &[
+                ("alignSelf", V::Str("flex-start")),
+                ("height", V::Number(40.0)),
+                ("borderWidth", V::Number(1.0)),
+                ("paddingVertical", V::Number(6.0)),
+                ("paddingHorizontal", V::Number(12.0)),
+            ],
+        );
+        ops.push(Op::Listen {
+            id: 2,
+            event: EventKind::Press,
+            enabled: true,
+        });
+        ops.extend(text(4, 2, "OK"));
+        ops
+    }
+
+    #[test]
+    fn a_button_is_one_row() {
+        let batch = laid_out(button());
+        // No border nor vertical padding, its height its label's; a
+        // column of padding each side.
+        assert_eq!(frame_of(&batch, 2), Some(rect(0.0, 0.0, 32.0, 16.0)));
+        assert_eq!(frame_of(&batch, 4), Some(rect(8.0, 0.0, 16.0, 16.0)));
+    }
+
+    #[test]
+    fn a_card_has_its_border_and_no_padding_rows() {
+        let mut ops = view(
+            2,
+            ROOT_ID,
+            &[
+                ("alignSelf", V::Str("flex-start")),
+                ("borderWidth", V::Number(1.0)),
+                ("padding", V::Number(16.0)),
+            ],
+        );
+        ops.extend(text(3, 2, "Title"));
+        ops.extend(view(5, 2, &[]));
+        ops.extend(text(6, 5, "One"));
+        ops.extend(view(8, 2, &[]));
+        ops.extend(text(9, 8, "Two"));
+        let batch = laid_out(ops);
+        // A border Cell each side, a column of padding, no padding row:
+        // 1 + 3 + 1 rows, 1 + 1 + 5 + 1 + 1 columns.
+        assert_eq!(frame_of(&batch, 2), Some(rect(0.0, 0.0, 72.0, 80.0)));
+        assert_eq!(frame_of(&batch, 3), Some(rect(16.0, 16.0, 40.0, 16.0)));
+        assert_eq!(frame_of(&batch, 5), Some(rect(16.0, 32.0, 40.0, 16.0)));
+        assert_eq!(frame_of(&batch, 8), Some(rect(16.0, 48.0, 40.0, 16.0)));
+    }
+
+    #[test]
+    fn a_sidebar_keeps_its_columns_and_the_content_fills() {
+        let mut ops = view(2, ROOT_ID, &[("flexDirection", V::Str("row"))]);
+        ops.extend(view(3, 2, &[("width", V::Number(240.0))]));
+        ops.extend(text(4, 3, "Nav"));
+        ops.extend(view(6, 2, &[("flexGrow", V::Number(1.0))]));
+        ops.extend(text(7, 6, "Body"));
+        let batch = laid_out(ops);
+        assert_eq!(frame_of(&batch, 3), Some(rect(0.0, 0.0, 240.0, 16.0)));
+        assert_eq!(frame_of(&batch, 6), Some(rect(240.0, 0.0, 80.0, 16.0)));
+    }
+
+    #[test]
+    fn column_gaps_cost_a_row_from_16_points() {
+        for (gap, second) in [(12.0, 16.0), (16.0, 32.0), (32.0, 32.0)] {
+            let mut ops = view(2, ROOT_ID, &[("rowGap", V::Number(gap))]);
+            ops.extend(text(3, 2, "One"));
+            ops.extend(text(5, 2, "Two"));
+            let batch = laid_out(ops);
+            assert_eq!(
+                frame_of(&batch, 5).map(|f| f.origin.y),
+                Some(Points(second)),
+                "a gap of {gap}"
+            );
+        }
+    }
+
+    #[test]
+    fn sections_keep_one_blank_row_and_cards_none() {
+        let mut ops = view(2, ROOT_ID, &[("rowGap", V::Number(24.0))]);
+        // A card: a border, its rows 16pt apart inside.
+        ops.extend(view(
+            3,
+            2,
+            &[
+                ("borderWidth", V::Number(1.0)),
+                ("marginBottom", V::Number(24.0)),
+            ],
+        ));
+        ops.extend(view(4, 3, &[("rowGap", V::Number(16.0))]));
+        ops.extend(text(5, 4, "One"));
+        ops.extend(text(7, 4, "Two"));
+        ops.extend(view(
+            9,
+            2,
+            &[
+                ("borderWidth", V::Number(1.0)),
+                ("padding", V::Number(12.0)),
+            ],
+        ));
+        ops.extend(view(10, 9, &[]));
+        ops.extend(text(11, 10, "Three"));
+        let batch = laid_out(ops);
+        // Inside the card no blank row; between the cards one, the gap
+        // and the margin collapsed into it.
+        assert_eq!(frame_of(&batch, 7).map(|f| f.origin.y), Some(Points(16.0)));
+        assert_eq!(frame_of(&batch, 3), Some(rect(0.0, 0.0, 320.0, 64.0)));
+        assert_eq!(frame_of(&batch, 9), Some(rect(0.0, 80.0, 320.0, 48.0)));
+    }
+
+    #[test]
+    fn a_badge_with_a_dot_is_one_row_of_its_text() {
+        let mut ops = view(
+            2,
+            ROOT_ID,
+            &[
+                ("alignSelf", V::Str("flex-start")),
+                ("flexDirection", V::Str("row")),
+                ("columnGap", V::Number(6.0)),
+                ("height", V::Number(26.0)),
+                ("paddingHorizontal", V::Number(10.0)),
+                ("borderWidth", V::Number(1.0)),
+            ],
+        );
+        ops.extend(view(
+            3,
+            2,
+            &[("width", V::Number(8.0)), ("height", V::Number(8.0))],
+        ));
+        ops.extend(text(4, 2, "2 online"));
+        let batch = laid_out(ops);
+        // The dot draws nothing and is left out; the badge is its text and
+        // a column each side, no border.
+        assert!(left_out(&batch, 3));
+        assert_eq!(frame_of(&batch, 2), Some(rect(0.0, 0.0, 80.0, 16.0)));
+        assert_eq!(frame_of(&batch, 4), Some(rect(8.0, 0.0, 64.0, 16.0)));
+    }
+
+    #[test]
+    fn a_tile_keeps_its_content_stacked() {
+        let mut ops = view(
+            2,
+            ROOT_ID,
+            &[
+                ("alignSelf", V::Str("flex-start")),
+                ("width", V::Str("48%")),
+                ("borderWidth", V::Number(1.0)),
+                ("padding", V::Number(12.0)),
+                ("rowGap", V::Number(2.0)),
+            ],
+        );
+        ops.push(Op::Listen {
+            id: 2,
+            event: EventKind::Press,
+            enabled: true,
+        });
+        // An icon in a ringed circle: its layer holds only the icon.
+        ops.extend(view(
+            3,
+            2,
+            &[
+                ("width", V::Number(32.0)),
+                ("height", V::Number(32.0)),
+                ("borderWidth", V::Number(1.0)),
+                ("marginBottom", V::Number(8.0)),
+            ],
+        ));
+        ops.extend(view(
+            4,
+            3,
+            &[
+                ("position", V::Str("absolute")),
+                ("top", V::Number(0.0)),
+                ("left", V::Number(0.0)),
+                ("right", V::Number(0.0)),
+                ("bottom", V::Number(0.0)),
+            ],
+        ));
+        ops.extend(node(
+            5,
+            Tag::Canvas,
+            4,
+            &[("width", V::Number(16.0)), ("height", V::Number(16.0))],
+        ));
+        ops.extend(text(6, 2, "Focus"));
+        ops.extend(text(8, 2, "Until tomorrow"));
+        let batch = laid_out(ops);
+        // A control: no border, its title above its detail, as tall as
+        // both; 48% of 40 columns is 19.
+        assert_eq!(frame_of(&batch, 2), Some(rect(0.0, 0.0, 152.0, 32.0)));
+        assert_eq!(frame_of(&batch, 6), Some(rect(8.0, 0.0, 136.0, 16.0)));
+        assert_eq!(frame_of(&batch, 8), Some(rect(8.0, 16.0, 136.0, 16.0)));
+        assert!(left_out(&batch, 5));
+        assert!(left_out(&batch, 3));
+    }
+
+    #[test]
+    fn a_bordered_box_around_one_row_has_no_border() {
+        // A tab list: a hairline around a row of tabs, 2pt inside.
+        let mut ops = view(
+            2,
+            ROOT_ID,
+            &[
+                ("alignSelf", V::Str("flex-start")),
+                ("flexDirection", V::Str("row")),
+                ("borderWidth", V::Number(1.0)),
+                ("padding", V::Number(2.0)),
+            ],
+        );
+        for (id, label) in [(3, "One"), (6, "Two")] {
+            ops.extend(view(id, 2, &[("paddingHorizontal", V::Number(8.0))]));
+            ops.push(Op::Listen {
+                id,
+                event: EventKind::Press,
+                enabled: true,
+            });
+            ops.extend(text(id + 1, id, label));
+        }
+        let batch = laid_out(ops);
+        // One row, no border Cells; mounted without its border, so the
+        // platform draws none either.
+        assert_eq!(frame_of(&batch, 2), Some(rect(0.0, 0.0, 80.0, 16.0)));
+        assert_eq!(frame_of(&batch, 3), Some(rect(0.0, 0.0, 40.0, 16.0)));
+        let widths = view_style_of(&batch, 2).unwrap().borders.widths;
+        assert_eq!(widths, Edges::all(Points::ZERO));
+    }
+
+    #[test]
+    fn a_card_keeps_its_border_mounted() {
+        let mut ops = view(2, ROOT_ID, &[("borderWidth", V::Number(1.0))]);
+        ops.extend(view(3, 2, &[]));
+        ops.extend(text(4, 3, "One"));
+        ops.extend(text(6, 3, "Two"));
+        let batch = laid_out(ops);
+        assert_eq!(frame_of(&batch, 2), Some(rect(0.0, 0.0, 320.0, 64.0)));
+        let widths = view_style_of(&batch, 2).unwrap().borders.widths;
+        assert_eq!(widths, Edges::all(Points(1.0)));
+    }
+
+    #[test]
+    fn an_icon_button_shows_its_label_or_is_left_out() {
+        let mut ops = view(2, ROOT_ID, &[("flexDirection", V::Str("row"))]);
+        ops.extend(text(3, 2, "Invoice"));
+        for (id, label) in [(5, Some("More")), (8, None)] {
+            ops.extend(view(
+                id,
+                2,
+                &[("width", V::Number(28.0)), ("height", V::Number(28.0))],
+            ));
+            ops.push(Op::Listen {
+                id,
+                event: EventKind::Press,
+                enabled: true,
+            });
+            if let Some(label) = label {
+                ops.push(Op::SetProp {
+                    id,
+                    prop: Prop::Accessibility(AccessibilityProp::Label(Some(label.into()))),
+                });
+            }
+            ops.extend(node(
+                id + 1,
+                Tag::Canvas,
+                id,
+                &[("width", V::Number(16.0)), ("height", V::Number(16.0))],
+            ));
+        }
+        let batch = laid_out(ops);
+        // One row: the labelled one is its label, the other left out.
+        assert_eq!(
+            frame_of(&batch, 2).map(|f| f.size.height),
+            Some(Points(16.0))
+        );
+        assert_eq!(frame_of(&batch, 5), Some(rect(56.0, 0.0, 32.0, 16.0)));
+        assert!(left_out(&batch, 8));
+    }
+
+    #[test]
+    fn a_badge_in_a_section_head_is_its_text() {
+        let mut ops = view(
+            2,
+            ROOT_ID,
+            &[
+                ("flexDirection", V::Str("row")),
+                ("columnGap", V::Number(16.0)),
+            ],
+        );
+        ops.extend(view(3, 2, &[("flex", V::Number(1.0))]));
+        ops.extend(text(4, 3, "Team"));
+        ops.extend(view(
+            6,
+            2,
+            &[
+                ("height", V::Number(16.0)),
+                ("borderRadius", V::Number(13.0)),
+                ("justifyContent", V::Str("center")),
+                ("borderWidth", V::Number(1.0)),
+            ],
+        ));
+        ops.extend(text(7, 6, "2 online"));
+        let batch = laid_out(ops);
+        assert_eq!(frame_of(&batch, 6), Some(rect(256.0, 0.0, 64.0, 16.0)));
+        assert_eq!(frame_of(&batch, 7), Some(rect(0.0, 0.0, 64.0, 16.0)));
+    }
+
+    #[test]
+    fn a_badge_pinned_over_an_avatar_is_left_out() {
+        let mut ops = view(
+            2,
+            ROOT_ID,
+            &[
+                ("flexDirection", V::Str("row")),
+                ("alignItems", V::Str("center")),
+                ("columnGap", V::Number(16.0)),
+            ],
+        );
+        ops.extend(view(
+            3,
+            2,
+            &[
+                ("width", V::Number(64.0)),
+                ("height", V::Number(64.0)),
+                ("borderWidth", V::Number(2.0)),
+            ],
+        ));
+        ops.extend(view(
+            4,
+            3,
+            &[
+                ("flexGrow", V::Number(1.0)),
+                ("alignItems", V::Str("center")),
+                ("justifyContent", V::Str("center")),
+                ("borderWidth", V::Number(1.0)),
+            ],
+        ));
+        ops.extend(text(5, 4, "M"));
+        ops.extend(view(
+            7,
+            3,
+            &[
+                ("position", V::Str("absolute")),
+                ("right", V::Number(0.0)),
+                ("bottom", V::Number(0.0)),
+                ("paddingHorizontal", V::Number(6.0)),
+                ("height", V::Number(20.0)),
+                ("borderWidth", V::Number(2.0)),
+            ],
+        ));
+        ops.extend(text(8, 7, "PRO"));
+        ops.extend(view(
+            10,
+            2,
+            &[("flexGrow", V::Number(1.0)), ("rowGap", V::Number(3.0))],
+        ));
+        ops.extend(text(11, 10, "Margaret Hamilton"));
+        ops.extend(text(13, 10, "Flight software"));
+        let batch = laid_out(ops);
+        // The badge would cover the initials: left out, the initials kept.
+        assert!(left_out(&batch, 7));
+        assert_eq!(
+            frame_of(&batch, 5).map(|f| f.size),
+            Some(size_pt(8.0, 16.0))
+        );
+        // The name above the role, after the avatar and a gap.
+        let name = frame_of(&batch, 11).unwrap();
+        assert_eq!(name.size, size_pt(248.0, 16.0));
+        assert_eq!(
+            frame_of(&batch, 13).map(|f| f.origin.y),
+            Some(name.origin.y + Points(16.0))
+        );
+        assert_eq!(frame_of(&batch, 10).map(|f| f.origin.x), Some(Points(72.0)));
+    }
+
+    #[test]
+    fn an_icon_is_left_out_with_its_gap_and_margin() {
+        let mut ops = view(
+            2,
+            ROOT_ID,
+            &[
+                ("flexDirection", V::Str("row")),
+                ("columnGap", V::Number(8.0)),
+            ],
+        );
+        ops.extend(node(
+            3,
+            Tag::Canvas,
+            2,
+            &[
+                ("width", V::Number(20.0)),
+                ("height", V::Number(20.0)),
+                ("marginRight", V::Number(16.0)),
+            ],
+        ));
+        ops.extend(text(4, 2, "OK"));
+        let batch = laid_out(ops);
+        assert!(left_out(&batch, 3));
+        assert_eq!(frame_of(&batch, 4), Some(rect(0.0, 0.0, 16.0, 16.0)));
+    }
+
+    #[test]
+    fn an_image_is_left_out() {
+        let mut ops = node(
+            2,
+            Tag::Image,
+            ROOT_ID,
+            &[
+                ("width", V::Number(200.0)),
+                ("height", V::Number(100.0)),
+                ("marginBottom", V::Number(32.0)),
+            ],
+        );
+        ops.extend(text(3, ROOT_ID, "After"));
+        let batch = laid_out(ops);
+        assert!(left_out(&batch, 2));
+        assert_eq!(frame_of(&batch, 3), Some(rect(0.0, 0.0, 320.0, 16.0)));
+    }
+
+    #[test]
+    fn a_chart_sized_canvas_keeps_its_size_in_cells() {
+        let batch = laid_out(node(
+            2,
+            Tag::Canvas,
+            ROOT_ID,
+            &[
+                ("alignSelf", V::Str("flex-start")),
+                ("width", V::Number(300.0)),
+                ("height", V::Number(200.0)),
+            ],
+        ));
+        // 37.5 columns and 12.5 rows, halves rounding down.
+        assert_eq!(frame_of(&batch, 2), Some(rect(0.0, 0.0, 296.0, 192.0)));
+    }
+
+    #[test]
+    fn justify_space_between_puts_the_space_between() {
+        let mut ops = view(
+            2,
+            ROOT_ID,
+            &[
+                ("flexDirection", V::Str("row")),
+                ("justifyContent", V::Str("space-between")),
+            ],
+        );
+        ops.extend(text(3, 2, "A"));
+        ops.extend(text(5, 2, "B"));
+        let batch = laid_out(ops);
+        assert_eq!(frame_of(&batch, 3), Some(rect(0.0, 0.0, 8.0, 16.0)));
+        assert_eq!(frame_of(&batch, 5), Some(rect(312.0, 0.0, 8.0, 16.0)));
+    }
+
+    #[test]
+    fn wrapped_children_take_lines() {
+        let mut ops = view(
+            2,
+            ROOT_ID,
+            &[
+                ("flexDirection", V::Str("row")),
+                ("flexWrap", V::Str("wrap")),
+                ("alignSelf", V::Str("flex-start")),
+                ("width", V::Number(80.0)),
+                ("columnGap", V::Number(8.0)),
+            ],
+        );
+        for id in [3, 5, 7] {
+            ops.extend(text(id, 2, "abcd"));
+        }
+        let batch = laid_out(ops);
+        assert_eq!(frame_of(&batch, 3), Some(rect(0.0, 0.0, 32.0, 16.0)));
+        assert_eq!(frame_of(&batch, 5), Some(rect(40.0, 0.0, 32.0, 16.0)));
+        assert_eq!(frame_of(&batch, 7), Some(rect(0.0, 16.0, 32.0, 16.0)));
+        assert_eq!(frame_of(&batch, 2), Some(rect(0.0, 0.0, 80.0, 32.0)));
+    }
+
+    #[test]
+    fn an_absolute_child_is_placed_by_its_insets() {
+        let mut ops = view(2, ROOT_ID, &[("height", V::Number(100.0))]);
+        ops.extend(text(3, 2, "In flow"));
+        ops.extend(view(
+            5,
+            2,
+            &[
+                ("position", V::Str("absolute")),
+                ("top", V::Number(16.0)),
+                ("left", V::Number(16.0)),
+            ],
+        ));
+        ops.extend(text(6, 5, "X"));
+        let batch = laid_out(ops);
+        // It takes no room: the text in flow stays at the top.
+        assert_eq!(frame_of(&batch, 3), Some(rect(0.0, 0.0, 320.0, 16.0)));
+        assert_eq!(frame_of(&batch, 5), Some(rect(16.0, 16.0, 8.0, 16.0)));
+    }
+
+    #[test]
+    fn a_scroll_view_lays_its_content_out_unbounded() {
+        let mut ops = node(2, Tag::Scroll, ROOT_ID, &[("height", V::Number(64.0))]);
+        for i in 0..10u32 {
+            ops.extend(text(10 + 2 * i, 2, "Line"));
+        }
+        let batch = laid_out(ops);
+        // Four rows of it shown, all ten laid out.
+        assert_eq!(frame_of(&batch, 2), Some(rect(0.0, 0.0, 320.0, 64.0)));
+        assert_eq!(frame_of(&batch, 28), Some(rect(0.0, 144.0, 320.0, 16.0)));
+        let content = batch.items.iter().find_map(|i| match i {
+            MountItem::ScrollContent { id: 2, size } => Some(*size),
+            _ => None,
+        });
+        assert_eq!(content, Some(size_pt(320.0, 160.0)));
+    }
+
+    #[test]
+    fn a_horizontal_scroll_view_lays_its_content_out_unbounded_along_x() {
+        let mut ops = node(2, Tag::Scroll, ROOT_ID, &[("width", V::Number(24.0))]);
+        ops.push(Op::SetProp {
+            id: 2,
+            prop: Prop::Horizontal(true),
+        });
+        ops.extend(node(
+            4,
+            Tag::Text,
+            2,
+            &[("width", V::Number(40.0)), ("flexShrink", V::Number(0.0))],
+        ));
+        ops.push(Op::CreateText {
+            id: 5,
+            text: "ABCDE".into(),
+        });
+        ops.push(Op::Insert {
+            parent: 4,
+            child: 5,
+            before: None,
+        });
+        let batch = laid_out(ops);
+        // Three columns shown, the text's five laid out.
+        assert_eq!(frame_of(&batch, 2), Some(rect(0.0, 0.0, 24.0, 16.0)));
+        assert_eq!(frame_of(&batch, 4), Some(rect(0.0, 0.0, 40.0, 16.0)));
+        let content = batch.items.iter().find_map(|i| match i {
+            MountItem::ScrollContent { id: 2, size } => Some(*size),
+            _ => None,
+        });
+        assert_eq!(content, Some(size_pt(40.0, 16.0)));
+    }
+
+    #[test]
+    fn a_native_component_takes_its_explicit_size() {
+        let mut ops = vec![
+            Op::Create {
+                id: 2,
+                tag: Tag::Native,
+            },
+            Op::SetProp {
+                id: 2,
+                prop: Prop::Component("example.label".into()),
+            },
+        ];
+        ops.push(style_op(
+            2,
+            &[
+                ("alignSelf", V::Str("flex-start")),
+                ("width", V::Number(80.0)),
+                ("height", V::Number(32.0)),
+            ],
+        ));
+        ops.push(Op::Insert {
+            parent: ROOT_ID,
+            child: 2,
+            before: None,
+        });
+        let batch = laid_out(ops);
+        // Laid out where the platform draws it, or leaves it blank.
+        assert_eq!(frame_of(&batch, 2), Some(rect(0.0, 0.0, 80.0, 32.0)));
+    }
+
+    /// The border widths node `id` is mounted with, last.
+    fn widths(batch: &MountBatch, id: NodeId) -> Option<Edges<Points>> {
+        batch.items.iter().rev().find_map(|i| match i {
+            MountItem::ViewStyle { id: v, style } if *v == id => Some(style.borders.widths),
+            _ => None,
+        })
+    }
+
+    /// Laid out in a dark terminal that shows filled boxes as bands.
+    fn laid_out_on_surfaces(ops: Vec<Op>) -> MountBatch {
+        let mut c = core();
+        c.set_environment(crate::element::Environment {
+            cell: Some(size_pt(8.0, 16.0)),
+            cell_surfaces: true,
+            dark: true,
+            ..Default::default()
+        });
+        apply(&mut c, ops);
+        c.commit().unwrap()
+    }
+
+    #[test]
+    fn a_circle_has_no_border_and_keeps_its_initials_on_a_row() {
+        let mut ops = view(2, ROOT_ID, &[("flexDirection", V::Str("row"))]);
+        ops.extend(view(
+            3,
+            2,
+            &[
+                ("width", V::Number(20.0)),
+                ("height", V::Number(20.0)),
+                ("borderRadius", V::Number(10.0)),
+                ("borderWidth", V::Number(1.0)),
+                ("alignItems", V::Str("center")),
+                ("justifyContent", V::Str("center")),
+            ],
+        ));
+        ops.extend(view(4, 3, &[]));
+        ops.extend(text(5, 4, "DK"));
+        let batch = laid_out(ops);
+        // Two columns, no border: its initials on one row.
+        assert_eq!(frame_of(&batch, 3), Some(rect(0.0, 0.0, 16.0, 16.0)));
+        assert_eq!(frame_of(&batch, 5), Some(rect(0.0, 0.0, 16.0, 16.0)));
+    }
+
+    #[test]
+    fn a_text_keeps_its_longest_word_while_a_sibling_can_shrink() {
+        let mut ops = view(
+            2,
+            ROOT_ID,
+            &[
+                ("flexDirection", V::Str("row")),
+                ("width", V::Number(120.0)),
+                ("columnGap", V::Number(24.0)),
+            ],
+        );
+        ops.extend(text(3, 2, "Hello world"));
+        ops.extend(view(5, 2, &[]));
+        ops.extend(text(6, 5, "Description"));
+        let batch = laid_out(ops);
+        // 11 + 2 + 11 columns in 15: the gap gives one, then both texts
+        // their columns down to their longest words.
+        let a = frame_of(&batch, 3).unwrap();
+        let b = frame_of(&batch, 5).unwrap();
+        assert!(a.size.width >= Points(40.0), "{a:?}");
+        assert!(b.size.width >= Points(40.0), "{b:?}");
+        assert!(b.origin.x - (a.origin.x + a.size.width) <= Points(8.0));
+    }
+
+    #[test]
+    fn a_track_over_a_blank_rail_is_placed() {
+        let mut ops = view(
+            2,
+            ROOT_ID,
+            &[
+                ("alignSelf", V::Str("flex-start")),
+                ("width", V::Number(80.0)),
+            ],
+        );
+        ops.push(Op::Listen {
+            id: 2,
+            event: EventKind::Press,
+            enabled: true,
+        });
+        ops.extend(text(3, 2, " "));
+        ops.extend(view(
+            5,
+            2,
+            &[
+                ("position", V::Str("absolute")),
+                ("left", V::Number(0.0)),
+                ("top", V::Number(0.0)),
+                ("width", V::Number(40.0)),
+            ],
+        ));
+        ops.extend(text(6, 5, "━━━━━"));
+        let batch = laid_out(ops);
+        assert_eq!(frame_of(&batch, 5), Some(rect(0.0, 0.0, 40.0, 16.0)));
+    }
+
+    #[test]
+    fn a_bar_pinned_over_a_scroll_view_is_placed() {
+        let mut ops = view(2, ROOT_ID, &[]);
+        ops.extend(node(3, Tag::Scroll, 2, &[("height", V::Number(64.0))]));
+        for i in 0..6u32 {
+            ops.extend(text(10 + 2 * i, 3, "Line"));
+        }
+        ops.extend(view(
+            30,
+            2,
+            &[
+                ("position", V::Str("absolute")),
+                ("left", V::Number(0.0)),
+                ("right", V::Number(0.0)),
+                ("bottom", V::Number(0.0)),
+            ],
+        ));
+        ops.extend(text(31, 30, "Search"));
+        let batch = laid_out(ops);
+        // Over the scroll view's last row, not left out.
+        let bar = frame_of(&batch, 30).unwrap();
+        assert_eq!(
+            (bar.origin.y, bar.size.height),
+            (Points(48.0), Points(16.0))
+        );
+        assert!(!left_out(&batch, 31));
+    }
+
+    #[test]
+    fn a_filled_box_is_a_surface_with_padding_and_no_border() {
+        let mut ops = view(
+            2,
+            ROOT_ID,
+            &[
+                ("backgroundColor", V::Str("#333333")),
+                ("borderWidth", V::Number(1.0)),
+                ("borderColor", V::Str("#3a3a3a")),
+                ("padding", V::Number(16.0)),
+            ],
+        );
+        ops.extend(text(3, 2, "Title"));
+        ops.extend(view(5, 2, &[]));
+        ops.extend(text(6, 5, "Body"));
+        let batch = laid_out_on_surfaces(ops);
+        // A row of padding above and below, two columns each side.
+        assert_eq!(frame_of(&batch, 2), Some(rect(0.0, 0.0, 320.0, 64.0)));
+        assert_eq!(
+            frame_of(&batch, 3).map(|f| f.origin),
+            Some(point(Points(16.0), Points(16.0)))
+        );
+        assert_eq!(widths(&batch, 2), Some(Edges::all(Points::ZERO)));
+    }
+
+    #[test]
+    fn a_filled_box_keeps_a_border_that_stands_out() {
+        let mut ops = view(
+            2,
+            ROOT_ID,
+            &[
+                ("backgroundColor", V::Str("#1a1a1a")),
+                ("borderWidth", V::Number(1.0)),
+                ("borderColor", V::Str("#ffffff")),
+                ("padding", V::Number(16.0)),
+            ],
+        );
+        ops.extend(text(3, 2, "Title"));
+        ops.extend(view(5, 2, &[]));
+        ops.extend(text(6, 5, "Body"));
+        let batch = laid_out_on_surfaces(ops);
+        // Its border Cell, then a surface's padding.
+        assert_eq!(
+            frame_of(&batch, 3).map(|f| f.origin),
+            Some(point(Points(24.0), Points(32.0)))
+        );
+        assert_eq!(widths(&batch, 2), Some(Edges::all(Points(1.0))));
+    }
+
+    #[test]
+    fn a_fill_of_its_parents_color_is_no_surface() {
+        let mut ops = view(2, ROOT_ID, &[("backgroundColor", V::Str("#000000"))]);
+        ops.extend(view(
+            3,
+            2,
+            &[
+                ("alignSelf", V::Str("flex-start")),
+                ("backgroundColor", V::Str("#000000")),
+                ("paddingHorizontal", V::Number(16.0)),
+            ],
+        ));
+        ops.extend(text(4, 3, "Same"));
+        ops.extend(view(6, 3, &[]));
+        ops.extend(text(7, 6, "Box"));
+        let batch = laid_out_on_surfaces(ops);
+        // A column of padding as any box, not a surface's two.
+        assert_eq!(frame_of(&batch, 4).map(|f| f.origin.x), Some(Points(8.0)));
+    }
+
+    #[test]
+    fn stacked_avatars_keep_their_initials_and_a_column_apart() {
+        let mut ops = view(
+            2,
+            ROOT_ID,
+            &[
+                ("flexDirection", V::Str("row")),
+                ("alignItems", V::Str("center")),
+            ],
+        );
+        for (n, initials) in ["DK", "FA", "MH", "+1.3k"].iter().enumerate() {
+            let id = 10 + 10 * n as NodeId;
+            let margin = if n == 0 { 0.0 } else { -8.0 };
+            ops.extend(view(
+                id,
+                2,
+                &[
+                    ("width", V::Number(20.0)),
+                    ("height", V::Number(20.0)),
+                    ("borderRadius", V::Number(10.0)),
+                    ("borderWidth", V::Number(2.0)),
+                    ("marginLeft", V::Number(margin)),
+                    ("flexShrink", V::Number(0.0)),
+                ],
+            ));
+            ops.extend(view(id + 1, id, &[("flexGrow", V::Number(1.0))]));
+            ops.extend(text(id + 2, id + 1, initials));
+        }
+        let batch = laid_out(ops);
+        // `DK FA MH +1.3k`: no borders, the initials on a row, a column
+        // between the avatars the negative margins stacked.
+        assert_eq!(frame_of(&batch, 10), Some(rect(0.0, 0.0, 16.0, 16.0)));
+        assert_eq!(frame_of(&batch, 20), Some(rect(24.0, 0.0, 16.0, 16.0)));
+        assert_eq!(frame_of(&batch, 30), Some(rect(48.0, 0.0, 16.0, 16.0)));
+        assert_eq!(frame_of(&batch, 40), Some(rect(72.0, 0.0, 40.0, 16.0)));
+        assert_eq!(frame_of(&batch, 42), Some(rect(0.0, 0.0, 40.0, 16.0)));
+    }
+
+    /// A pressable view `id` in `parent`, labelled `label` when given.
+    fn pressable(
+        id: NodeId,
+        parent: NodeId,
+        props: &[(&str, V<'_>)],
+        label: Option<&str>,
+    ) -> Vec<Op> {
+        let mut ops = view(id, parent, props);
+        ops.push(Op::Listen {
+            id,
+            event: EventKind::Press,
+            enabled: true,
+        });
+        if let Some(label) = label {
+            ops.push(Op::SetProp {
+                id,
+                prop: Prop::Accessibility(AccessibilityProp::Label(Some(label.into()))),
+            });
+        }
+        ops
+    }
+
+    #[test]
+    fn a_split_button_is_one_row_without_a_border() {
+        let mut ops = view(
+            2,
+            ROOT_ID,
+            &[
+                ("flexDirection", V::Str("row")),
+                ("alignSelf", V::Str("flex-start")),
+                ("borderWidth", V::Number(1.0)),
+                ("paddingVertical", V::Number(12.0)),
+            ],
+        );
+        ops.extend(pressable(
+            3,
+            2,
+            &[("paddingHorizontal", V::Number(12.0))],
+            None,
+        ));
+        ops.extend(text(4, 3, "Squash and merge"));
+        ops.extend(pressable(
+            6,
+            2,
+            &[("width", V::Number(32.0)), ("height", V::Number(32.0))],
+            Some("More"),
+        ));
+        ops.extend(node(
+            7,
+            Tag::Canvas,
+            6,
+            &[("width", V::Number(16.0)), ("height", V::Number(16.0))],
+        ));
+        let batch = laid_out(ops);
+        // A group of controls is never a card: one row, no border.
+        assert_eq!(
+            frame_of(&batch, 2).map(|f| f.size.height),
+            Some(Points(16.0))
+        );
+        assert_eq!(
+            frame_of(&batch, 4).map(|f| f.size),
+            Some(size_pt(128.0, 16.0))
+        );
+        assert!(!left_out(&batch, 6));
+        assert_eq!(widths(&batch, 2), Some(Edges::all(Points::ZERO)));
+        // No band to share: its halves touch, as tabs do.
+        let (main, more) = (frame_of(&batch, 3).unwrap(), frame_of(&batch, 6).unwrap());
+        assert_eq!(more.origin.x, main.origin.x + main.size.width);
+    }
+
+    #[test]
+    fn a_filled_split_buttons_halves_keep_a_column_apart() {
+        let mut ops = view(
+            2,
+            ROOT_ID,
+            &[
+                ("flexDirection", V::Str("row")),
+                ("alignSelf", V::Str("flex-start")),
+                ("backgroundColor", V::Str("#2563eb")),
+            ],
+        );
+        ops.extend(pressable(
+            3,
+            2,
+            &[("paddingHorizontal", V::Number(12.0))],
+            None,
+        ));
+        ops.extend(text(4, 3, "Merge"));
+        ops.extend(pressable(
+            6,
+            2,
+            &[("width", V::Number(32.0)), ("height", V::Number(32.0))],
+            Some("More"),
+        ));
+        ops.extend(node(
+            7,
+            Tag::Canvas,
+            6,
+            &[("width", V::Number(16.0)), ("height", V::Number(16.0))],
+        ));
+        let batch = laid_out_on_surfaces(ops);
+        // One band: a column of the page between its halves, so they read
+        // as two.
+        let (main, more) = (frame_of(&batch, 3).unwrap(), frame_of(&batch, 6).unwrap());
+        assert_eq!(
+            more.origin.x - (main.origin.x + main.size.width),
+            Points(8.0)
+        );
+    }
+
+    #[test]
+    fn icon_buttons_give_their_labels_before_a_text_wraps() {
+        let mut ops = view(
+            2,
+            ROOT_ID,
+            &[
+                ("flexDirection", V::Str("row")),
+                ("width", V::Number(240.0)),
+            ],
+        );
+        ops.extend(view(3, 2, &[("flex", V::Number(1.0))]));
+        ops.extend(text(4, 3, "Harbor at dawn.jpg"));
+        for (id, label) in [(10, "Add to favorites"), (20, "Share"), (30, "Delete")] {
+            ops.extend(pressable(
+                id,
+                2,
+                &[("width", V::Number(28.0)), ("height", V::Number(28.0))],
+                Some(label),
+            ));
+            ops.extend(node(
+                id + 1,
+                Tag::Canvas,
+                id,
+                &[("width", V::Number(16.0)), ("height", V::Number(16.0))],
+            ));
+        }
+        let batch = laid_out(ops);
+        // 30 columns: the name keeps its 18 on one row, the labels share
+        // what is left, cut short or left out.
+        assert_eq!(
+            frame_of(&batch, 4).map(|f| f.size),
+            Some(size_pt(144.0, 16.0))
+        );
+        let labels: i32 = [10, 20, 30]
+            .iter()
+            .map(|&id| frame_of(&batch, id).map_or(0, |f| (f.size.width.0 / 8.0) as i32))
+            .sum();
+        assert!(labels <= 12, "{labels}");
+    }
+
+    #[test]
+    fn a_nested_group_of_icon_buttons_gives_its_labels_before_a_text_wraps() {
+        // The gallery's card: the name and its details in a column that
+        // fills the row, the icon buttons in a row of their own.
+        let mut ops = view(
+            2,
+            ROOT_ID,
+            &[
+                ("flexDirection", V::Str("row")),
+                ("alignItems", V::Str("center")),
+                ("gap", V::Number(12.0)),
+                ("width", V::Number(320.0)),
+            ],
+        );
+        ops.extend(view(
+            3,
+            2,
+            &[("flex", V::Number(1.0)), ("gap", V::Number(2.0))],
+        ));
+        ops.extend(text(4, 3, "Harbor at dawn.jpg"));
+        ops.extend(text(6, 3, "4032 × 3024 · 3.2 MB"));
+        ops.extend(view(
+            8,
+            2,
+            &[
+                ("flexDirection", V::Str("row")),
+                ("alignItems", V::Str("center")),
+                ("gap", V::Number(4.0)),
+            ],
+        ));
+        let labels = [
+            (10, "Add to favorites"),
+            (20, "Share…"),
+            (30, "Download"),
+            (40, "Move to the trash"),
+        ];
+        for (id, label) in labels {
+            ops.extend(pressable(
+                id,
+                8,
+                &[("width", V::Number(40.0)), ("height", V::Number(40.0))],
+                Some(label),
+            ));
+            ops.extend(view(id + 1, id, &[]));
+            ops.extend(node(
+                id + 2,
+                Tag::Canvas,
+                id + 1,
+                &[("width", V::Number(18.0)), ("height", V::Number(18.0))],
+            ));
+        }
+        let batch = laid_out(ops);
+        // 40 columns: both texts keep one row each, the group gives.
+        assert_eq!(
+            frame_of(&batch, 4).map(|f| f.size.height),
+            Some(Points(16.0))
+        );
+        assert_eq!(
+            frame_of(&batch, 6).map(|f| f.size.height),
+            Some(Points(16.0))
+        );
+        let group = frame_of(&batch, 8).unwrap();
+        assert!(group.size.width.0 / 8.0 <= 19.0, "{group:?}");
+    }
+
+    #[test]
+    fn a_badge_of_an_explicit_height_is_not_stretched_down_a_row() {
+        // A section's head: its title and subtitle, the badge beside them.
+        let mut ops = view(
+            2,
+            ROOT_ID,
+            &[("flexDirection", V::Str("row")), ("gap", V::Number(16.0))],
+        );
+        ops.extend(view(3, 2, &[("flex", V::Number(1.0))]));
+        ops.extend(text(4, 3, "Split button"));
+        ops.extend(text(6, 3, "The main action"));
+        ops.extend(view(
+            8,
+            2,
+            &[
+                ("height", V::Number(16.0)),
+                ("justifyContent", V::Str("center")),
+                ("backgroundColor", V::Str("#333333")),
+            ],
+        ));
+        ops.extend(text(9, 8, "Open"));
+        let batch = laid_out_on_surfaces(ops);
+        assert_eq!(
+            frame_of(&batch, 8).map(|f| (f.origin.y, f.size.height)),
+            Some((Points(0.0), Points(16.0)))
+        );
+    }
+
+    #[test]
+    fn a_trigger_whose_chevron_grows_shows_its_label() {
+        let mut ops = view(2, ROOT_ID, &[("flexDirection", V::Str("row"))]);
+        ops.extend(pressable(
+            10,
+            2,
+            &[("width", V::Number(40.0)), ("height", V::Number(40.0))],
+            Some("Merge options"),
+        ));
+        // A layer that grows to center the chevron, as a menu trigger's.
+        ops.extend(view(11, 10, &[("flexGrow", V::Number(1.0))]));
+        ops.extend(node(
+            12,
+            Tag::Canvas,
+            11,
+            &[("width", V::Number(14.0)), ("height", V::Number(14.0))],
+        ));
+        let batch = laid_out(ops);
+        assert_eq!(
+            frame_of(&batch, 10).map(|f| f.size),
+            Some(size_pt(104.0, 16.0))
+        );
+    }
+
+    #[test]
+    fn a_popup_trigger_shown_as_its_chevron_is_one_column() {
+        let mut ops = view(2, ROOT_ID, &[("flexDirection", V::Str("row"))]);
+        ops.extend(pressable(
+            3,
+            2,
+            &[("paddingHorizontal", V::Number(8.0))],
+            Some("Merge options"),
+        ));
+        ops.push(Op::SetProp {
+            id: 3,
+            prop: Prop::Accessibility(AccessibilityProp::State(crate::AccessibilityState {
+                expanded: Some(false),
+                ..Default::default()
+            })),
+        });
+        ops.extend(node(
+            4,
+            Tag::Canvas,
+            3,
+            &[("width", V::Number(16.0)), ("height", V::Number(16.0))],
+        ));
+        let batch = laid_out(ops);
+        // `▾` in place of its label, with its padding's column each side.
+        assert_eq!(
+            frame_of(&batch, 3).map(|f| f.size.width),
+            Some(Points(24.0))
+        );
+    }
+
+    #[test]
+    fn a_band_inside_a_card_draws_no_second_line() {
+        let mut ops = view(
+            2,
+            ROOT_ID,
+            &[
+                ("backgroundColor", V::Str("#262626")),
+                ("borderWidth", V::Number(1.0)),
+                ("borderColor", V::Str("#777777")),
+                ("padding", V::Number(5.0)),
+            ],
+        );
+        ops.extend(view(
+            3,
+            2,
+            &[
+                ("backgroundColor", V::Str("#333333")),
+                ("borderWidth", V::Number(1.0)),
+                ("borderColor", V::Str("#999999")),
+            ],
+        ));
+        ops.extend(view(5, 3, &[]));
+        ops.extend(text(6, 5, "Files"));
+        ops.extend(text(8, 3, "Preview"));
+        let batch = laid_out_on_surfaces(ops);
+        // The card keeps its line; the well in it is its band alone.
+        assert_eq!(widths(&batch, 2), Some(Edges::all(Points(1.0))));
+        assert_eq!(widths(&batch, 3), Some(Edges::all(Points::ZERO)));
+    }
+
+    #[test]
+    fn icon_buttons_shown_as_labels_keep_two_columns_apart() {
+        let mut ops = view(
+            2,
+            ROOT_ID,
+            &[("flexDirection", V::Str("row")), ("gap", V::Number(8.0))],
+        );
+        for (id, label) in [(3, "Search"), (6, "Hide the sidebar")] {
+            ops.extend(pressable(id, 2, &[], Some(label)));
+            ops.extend(node(
+                id + 1,
+                Tag::Canvas,
+                id,
+                &[("width", V::Number(16.0)), ("height", V::Number(16.0))],
+            ));
+        }
+        let batch = laid_out(ops);
+        // Labels read as words: a column between them would make one
+        // phrase of the two.
+        let (a, b) = (frame_of(&batch, 3).unwrap(), frame_of(&batch, 6).unwrap());
+        assert_eq!(b.origin.x - (a.origin.x + a.size.width), Points(16.0));
+    }
+
+    #[test]
+    fn a_bare_overlay_keeps_its_border_as_its_outline() {
+        let ops = node(
+            2,
+            Tag::Overlay,
+            ROOT_ID,
+            &[
+                ("left", V::Number(80.0)),
+                ("top", V::Number(32.0)),
+                ("width", V::Number(160.0)),
+                ("height", V::Number(96.0)),
+                ("borderWidth", V::Number(1.0)),
+                ("borderColor", V::Str("#3b82f6")),
+                ("borderRadius", V::Number(4.0)),
+            ],
+        );
+        let batch = laid_out(ops);
+        // A drop preview: its size the app's, its border sent for the
+        // painter to draw over its outer Cells.
+        assert_eq!(frame_of(&batch, 2), Some(rect(80.0, 32.0, 160.0, 96.0)));
+        assert_eq!(widths(&batch, 2), Some(Edges::all(Points(1.0))));
+        assert!(!left_out(&batch, 2));
+    }
+
+    #[test]
+    fn a_frame_around_one_frame_draws_one_line() {
+        let framed = |pad: f32| {
+            let mut ops = view(
+                2,
+                ROOT_ID,
+                &[("borderWidth", V::Number(1.0)), ("padding", V::Number(pad))],
+            );
+            ops.extend(view(3, 2, &[]));
+            ops.extend(view(
+                4,
+                3,
+                &[
+                    ("borderWidth", V::Number(1.0)),
+                    ("padding", V::Number(16.0)),
+                ],
+            ));
+            ops.extend(text(5, 4, "Dock"));
+            ops.extend(view(8, 4, &[]));
+            ops.extend(text(9, 8, "Panel"));
+            laid_out(ops)
+        };
+        let batch = framed(0.0);
+        assert_eq!(widths(&batch, 2), Some(Edges::all(Points::ZERO)));
+        assert_eq!(widths(&batch, 4), Some(Edges::all(Points(1.0))));
+        assert_eq!(
+            frame_of(&batch, 4).map(|f| f.origin),
+            Some(point(Points::ZERO, Points::ZERO))
+        );
+        // Padding of its own: two frames, the app's.
+        let batch = framed(16.0);
+        assert_eq!(widths(&batch, 2), Some(Edges::all(Points(1.0))));
+        assert_eq!(widths(&batch, 4), Some(Edges::all(Points(1.0))));
+    }
+
+    #[test]
+    fn a_dividers_gap_keeps_its_row_in_a_card() {
+        let mut ops = view(
+            2,
+            ROOT_ID,
+            &[
+                ("borderWidth", V::Number(1.0)),
+                ("padding", V::Number(16.0)),
+                ("gap", V::Number(24.0)),
+            ],
+        );
+        ops.extend(view(3, 2, &[]));
+        ops.extend(text(4, 3, "Editor"));
+        ops.extend(view(6, 2, &[]));
+        ops.extend(text(7, 6, "Console"));
+        ops.extend(view(
+            9,
+            2,
+            &[
+                ("position", V::Str("absolute")),
+                ("left", V::Number(0.0)),
+                ("right", V::Number(0.0)),
+                ("top", V::Number(32.0)),
+                ("cursor", V::Str("row-resize")),
+            ],
+        ));
+        ops.extend(text(10, 9, "─"));
+        let batch = laid_out(ops);
+        let editor = frame_of(&batch, 3).unwrap();
+        let console = frame_of(&batch, 6).unwrap();
+        assert_eq!(
+            console.origin.y - (editor.origin.y + editor.size.height),
+            Points(16.0)
+        );
+    }
+
+    #[test]
+    fn a_resize_handle_is_one_column_between_its_panels() {
+        let mut ops = view(2, ROOT_ID, &[("flexDirection", V::Str("row"))]);
+        ops.extend(view(3, 2, &[("flex", V::Number(1.0))]));
+        ops.extend(text(4, 3, "Left"));
+        ops.extend(view(
+            6,
+            2,
+            &[("width", V::Number(4.0)), ("cursor", V::Str("col-resize"))],
+        ));
+        // Its grip: a small bare view, a decoration elsewhere.
+        ops.extend(view(
+            7,
+            6,
+            &[("width", V::Number(2.0)), ("height", V::Number(12.0))],
+        ));
+        ops.extend(view(8, 2, &[("flex", V::Number(1.0))]));
+        ops.extend(text(9, 8, "Right"));
+        let batch = laid_out(ops);
+        assert_eq!(frame_of(&batch, 6), Some(rect(160.0, 0.0, 8.0, 16.0)));
+        assert_eq!(frame_of(&batch, 8).map(|f| f.origin.x), Some(Points(168.0)));
+    }
+
+    #[test]
+    fn a_flex_basis_is_a_panels_length_both_ways() {
+        let mut ops = view(2, ROOT_ID, &[("flexDirection", V::Str("row"))]);
+        ops.extend(view(
+            3,
+            2,
+            &[
+                ("flexBasis", V::Number(220.0)),
+                ("flexGrow", V::Number(0.0)),
+            ],
+        ));
+        ops.extend(text(4, 3, "Sidebar"));
+        ops.extend(view(
+            6,
+            2,
+            &[("flexBasis", V::Number(0.0)), ("flexGrow", V::Number(1.0))],
+        ));
+        ops.extend(view(7, 6, &[]));
+        ops.extend(view(
+            8,
+            7,
+            &[("flexBasis", V::Number(0.0)), ("flexGrow", V::Number(1.0))],
+        ));
+        ops.extend(text(9, 8, "Editor"));
+        ops.extend(view(
+            11,
+            7,
+            &[
+                ("flexBasis", V::Number(140.0)),
+                ("flexGrow", V::Number(0.0)),
+                ("minHeight", V::Number(64.0)),
+            ],
+        ));
+        ops.extend(text(12, 11, "Console"));
+        let batch = laid_out(ops);
+        // 220pt is 27 columns (27.5, a half down), the rest the editor's;
+        // 140pt is 9 rows, whatever the console holds.
+        assert_eq!(frame_of(&batch, 3), Some(rect(0.0, 0.0, 216.0, 160.0)));
+        assert_eq!(
+            frame_of(&batch, 6).map(|f| (f.origin.x, f.size.width)),
+            Some((Points(216.0), Points(104.0)))
+        );
+        assert_eq!(
+            frame_of(&batch, 11).map(|f| f.size.height),
+            Some(Points(144.0))
+        );
+    }
+
+    #[test]
+    fn an_absolute_box_stretches_between_two_insets() {
+        let mut ops = view(2, ROOT_ID, &[]);
+        for i in 0..3u32 {
+            ops.extend(text(10 + 2 * i, 2, "Line"));
+        }
+        ops.extend(view(
+            20,
+            2,
+            &[
+                ("position", V::Str("absolute")),
+                ("top", V::Number(0.0)),
+                ("bottom", V::Number(0.0)),
+                ("left", V::Number(80.0)),
+                ("width", V::Number(8.0)),
+            ],
+        ));
+        ops.push(Op::SetProp {
+            id: 20,
+            prop: Prop::Accessibility(AccessibilityProp::Role(
+                crate::AccessibilityRole::Adjustable,
+            )),
+        });
+        ops.extend(text(21, 20, "│"));
+        let batch = laid_out(ops);
+        // Down the whole column: a divider's band.
+        assert_eq!(frame_of(&batch, 20), Some(rect(80.0, 0.0, 8.0, 48.0)));
+    }
+
+    #[test]
+    fn every_frame_is_whole_cells() {
+        let mut ops = view(
+            2,
+            ROOT_ID,
+            &[
+                ("flexDirection", V::Str("row")),
+                ("marginLeft", V::Number(5.0)),
+                ("paddingVertical", V::Number(17.0)),
+                ("columnGap", V::Number(3.0)),
+            ],
+        );
+        ops.extend(view(
+            3,
+            2,
+            &[("width", V::Number(37.0)), ("height", V::Number(23.0))],
+        ));
+        ops.extend(text(4, 2, "abc"));
+        ops.extend(view(6, 2, &[("flex", V::Number(1.0))]));
+        let batch = laid_out(ops);
+        let frames: Vec<_> = batch
+            .items
+            .iter()
+            .filter_map(|i| match i {
+                MountItem::Frame { id, frame } => Some((*id, *frame)),
+                _ => None,
+            })
+            .collect();
+        assert!(frames.len() >= 3);
+        for (id, f) in frames {
+            let whole = |v: Points, cell: f32| (v.0 / cell).fract() == 0.0;
+            assert!(
+                whole(f.origin.x, 8.0)
+                    && whole(f.size.width, 8.0)
+                    && whole(f.origin.y, 16.0)
+                    && whole(f.size.height, 16.0),
+                "{id}: {f:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn leaving_the_terminal_lays_out_in_points_again() {
+        let mut c = core();
+        terminal(&mut c, true);
+        apply(&mut c, button());
+        c.commit().unwrap();
+        terminal(&mut c, false);
+        let batch = c.commit().unwrap();
+        // The style as given: 1 + 12 + 16 + 12 + 1 wide, 40 high.
+        assert_eq!(frame_of(&batch, 2), Some(rect(0.0, 0.0, 42.0, 40.0)));
+        terminal(&mut c, true);
+        let batch = c.commit().unwrap();
+        assert_eq!(frame_of(&batch, 2), Some(rect(0.0, 0.0, 32.0, 16.0)));
+    }
 }

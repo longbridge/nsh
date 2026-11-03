@@ -11,6 +11,19 @@ use crate::{
 
 pub(crate) const WHEEL_ROWS: f32 = 3.0;
 pub(crate) const WHEEL_COLUMNS: f32 = 6.0;
+/// Presses of one button on one Cell this close together count as a double or triple click.
+pub(crate) const CLICK_INTERVAL: std::time::Duration = std::time::Duration::from_millis(500);
+
+/// The terminal cursor's shape a frame asks for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
+pub enum CursorStyle {
+    /// The user's own cursor shape: nothing is being edited.
+    #[default]
+    Default,
+    /// A steady bar between Cells, while a text field is edited.
+    Bar,
+}
 
 /// Whether the surface used an event. Ignored events remain the embedder's.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -111,8 +124,36 @@ pub(crate) struct PointerContext<'a> {
     pub(crate) control: &'a EngineControl,
 }
 
+/// Counts consecutive presses of one button on one Cell (1, 2, 3, then 1 again).
+#[derive(Default)]
+struct Clicks {
+    last: Option<(std::time::Instant, Position, MouseButton)>,
+    count: u32,
+}
+
+impl Clicks {
+    fn down(&mut self, mouse: MouseInput) -> u32 {
+        let MouseKind::Down(button) = mouse.kind else {
+            return self.count.max(1);
+        };
+        let at = Position::new(mouse.column, mouse.row);
+        let now = std::time::Instant::now();
+        self.count = match self.last {
+            Some((time, cell, held))
+                if cell == at && held == button && now.duration_since(time) <= CLICK_INTERVAL =>
+            {
+                self.count % 3 + 1
+            }
+            _ => 1,
+        };
+        self.last = Some((now, at, button));
+        self.count
+    }
+}
+
 #[derive(Default)]
 pub(crate) struct Pointer {
+    clicks: Clicks,
     pressed: Option<(Press<NodeId>, Point<Points>)>,
     backdrop: Option<NodeId>,
     hovered: Vec<NodeId>,
@@ -166,6 +207,97 @@ impl Drag {
 }
 
 impl Pointer {
+    /// Counts a press for double and triple clicks; call once per button press, before routing it.
+    pub(crate) fn count_click(&mut self, mouse: MouseInput) -> u32 {
+        self.clicks.down(mouse)
+    }
+
+    /// Consecutive clicks of the last press: 2 for a double click, 3 for a triple click.
+    pub(crate) fn clicks(&self) -> u32 {
+        self.clicks.count.max(1)
+    }
+
+    /// A secondary press: the nearest view around the one under the pointer that listens to
+    /// `onContextMenu` hears it, as on the desktops.
+    pub(crate) fn context_menu(
+        &mut self,
+        mouse: MouseInput,
+        cx: &mut PointerContext<'_>,
+    ) -> Handled {
+        let position = Position::new(mouse.column, mouse.row);
+        if !cx.area.contains(position) {
+            return Handled::Ignored;
+        }
+        self.last = Some(mouse);
+        let scope = crate::navigation::focus_scope(cx.tree);
+        let Some(hit) = cx.hits.iter().rev().find(|hit| {
+            hit.area.contains(position) && crate::keyboard::contains(cx.tree, scope, hit.node)
+        }) else {
+            return Handled::Ignored;
+        };
+        let page = page_point(mouse, cx.area, cx.cells);
+        // The press goes down as a touch first, so an open popover hears a
+        // press outside it, as it does for the primary button.
+        let mut path = Vec::new();
+        let mut node = Some(hit.node);
+        while let Some(id) = node {
+            let Some(view) = cx.tree.get(id) else {
+                break;
+            };
+            if view.events.contains(EventKind::Touch) && !view.props.accessibility.state.disabled {
+                path.push(id);
+            }
+            node = if id == scope { None } else { view.parent };
+        }
+        let touch = Drag {
+            target: hit.node,
+            origin: hit.node_origin,
+            start: page,
+            page,
+            started: std::time::Instant::now(),
+            path,
+            candidates: Vec::new(),
+            gate: None,
+            active: None,
+            velocity: Default::default(),
+            activated: None,
+            scroll_start: Points::ZERO,
+        };
+        touch.report(cx.control, nsh_core::TouchPhase::Start);
+        touch.report(cx.control, nsh_core::TouchPhase::Cancel);
+        let mut node = Some(hit.node);
+        while let Some(id) = node {
+            let Some(view) = cx.tree.get(id) else {
+                break;
+            };
+            if view.events.contains(EventKind::ContextMenu)
+                && !view.props.accessibility.state.disabled
+            {
+                let origin = cx
+                    .geometry
+                    .iter()
+                    .find(|g| g.id == id)
+                    .map_or_else(Point::default, |g| g.frame.origin);
+                cx.control.dispatch_event(
+                    id,
+                    EventKind::ContextMenu,
+                    EventPayload::ContextMenu(nsh_core::ContextMenuEvent {
+                        position: page - origin,
+                        page_position: page,
+                        modifiers: mouse.modifiers,
+                    }),
+                );
+                return Handled::Yes;
+            }
+            node = if id == scope { None } else { view.parent };
+        }
+        if scope == nsh_core::ROOT_ID {
+            Handled::Ignored
+        } else {
+            Handled::Yes
+        }
+    }
+
     pub(crate) fn leave(&mut self, cx: &mut PointerContext<'_>) {
         self.set_hovered(Vec::new(), cx);
         self.last = None;
@@ -533,7 +665,7 @@ impl Pointer {
                     return unused;
                 };
                 let mut press = Press::new(id, id, view.events, view.props.long_press_delay, 0)
-                    .clicked(mouse.modifiers, 1);
+                    .clicked(mouse.modifiers, self.clicks());
                 if let Some(event) = press.press_in() {
                     dispatch(control, &press, event, page, origin);
                 }
@@ -619,5 +751,93 @@ fn visible_target(tree: &Mounter, mut id: NodeId) -> bool {
             return false;
         };
         id = parent;
+    }
+}
+
+/// A press on a scroll bar: dragging its thumb scrolls in proportion, a press on its
+/// track first jumps the thumb under the pointer.
+#[derive(Clone, Copy)]
+pub(crate) struct BarDrag {
+    node: NodeId,
+    vertical: bool,
+    track: Rect,
+    thumb: u16,
+    /// Where the pointer holds the thumb, in Cells from its start.
+    grab: u16,
+}
+
+impl BarDrag {
+    /// The bar under a primary press, if any; a press on its track scrolls at once.
+    pub(crate) fn press(
+        bars: &[crate::scrollbar::ScrollBar],
+        mouse: MouseInput,
+        tree: &mut Mounter,
+    ) -> Option<BarDrag> {
+        if !matches!(mouse.kind, MouseKind::Down(MouseButton::Left)) {
+            return None;
+        }
+        let at = Position::new(mouse.column, mouse.row);
+        let scope = crate::navigation::focus_scope(tree);
+        let bar = bars.iter().rev().find(|bar| {
+            bar.track.contains(at) && crate::keyboard::contains(tree, scope, bar.node)
+        })?;
+        let along = |rect: Rect| {
+            if bar.vertical {
+                (rect.y, rect.height)
+            } else {
+                (rect.x, rect.width)
+            }
+        };
+        let p = if bar.vertical { at.y } else { at.x };
+        let (thumb_start, thumb) = along(bar.thumb);
+        let on_thumb = bar.thumb.contains(at);
+        let drag = BarDrag {
+            node: bar.node,
+            vertical: bar.vertical,
+            track: bar.track,
+            thumb: thumb.max(1),
+            grab: if on_thumb {
+                p - thumb_start
+            } else {
+                thumb.max(1) / 2
+            },
+        };
+        if !on_thumb {
+            drag.moved(mouse, tree);
+        }
+        Some(drag)
+    }
+
+    /// Scrolls so the thumb follows the pointer; returns whether the offset changed.
+    pub(crate) fn moved(&self, mouse: MouseInput, tree: &mut Mounter) -> bool {
+        let Some(view) = tree.get(self.node) else {
+            return false;
+        };
+        let Some(scroll) = view.scroll.as_ref() else {
+            return false;
+        };
+        if scroll.horizontal == self.vertical {
+            return false;
+        }
+        let max = scroll.max(view.frame.size);
+        let max = if self.vertical { max.y } else { max.x };
+        let (start, len) = if self.vertical {
+            (self.track.y, self.track.height)
+        } else {
+            (self.track.x, self.track.width)
+        };
+        let free = len.saturating_sub(self.thumb);
+        if free == 0 || max <= Points::ZERO {
+            return false;
+        }
+        let p = if self.vertical {
+            mouse.row
+        } else {
+            mouse.column
+        };
+        let moved =
+            (i32::from(p) - i32::from(start) - i32::from(self.grab)).clamp(0, i32::from(free));
+        let to = max * (moved as f32 / f32::from(free));
+        crate::keyboard::move_scroll(tree, self.node, to) != Points::ZERO
     }
 }

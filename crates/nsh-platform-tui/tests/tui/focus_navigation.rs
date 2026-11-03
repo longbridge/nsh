@@ -313,7 +313,7 @@ fn wheel(view: &mut AppView, column: u16, row: u16, x: i16, y: i16, shift: bool)
 }
 
 #[test]
-fn the_wheel_keeps_visible_focus_and_replaces_focus_that_scrolls_out_of_sight() {
+fn the_wheel_scrolls_the_pane_under_the_pointer_and_leaves_focus_where_it_is() {
     let (mut view, rx) = surface();
     let mut terminal = Terminal::new(TestBackend::new(60, 12)).unwrap();
     view.load(App::Rust(Root::new::<WheelFocus>(|| ())))
@@ -330,14 +330,12 @@ fn the_wheel_keeps_visible_focus_and_replaces_focus_that_scrolls_out_of_sight() 
     }
     assert_eq!(wheel(&mut view, 0, 2, 0, 1, false), Handled::Yes);
     draw_until(&mut view, &mut terminal, &rx, "focus 3 offset 48");
-    key(&mut view, "Enter", false);
-    draw_until(&mut view, &mut terminal, &rx, "pressed 3");
     wheel(&mut view, 0, 2, 0, 1, false);
-    draw_until(&mut view, &mut terminal, &rx, "focus 6 offset 96");
+    draw_until(&mut view, &mut terminal, &rx, "focus 3 offset 96");
     wheel(&mut view, 0, 2, 0, -1, false);
-    draw_until(&mut view, &mut terminal, &rx, "focus 6 offset 48");
+    draw_until(&mut view, &mut terminal, &rx, "focus 3 offset 48");
     key(&mut view, "Enter", false);
-    draw_until(&mut view, &mut terminal, &rx, "pressed 6");
+    draw_until(&mut view, &mut terminal, &rx, "focus 3 offset 48 pressed 3");
 }
 
 #[component]
@@ -359,7 +357,8 @@ fn NestedWheels() -> impl IntoElement {
                         .on_scroll(move |event: &ScrollEvent| inner.set(event.offset.y.0 as i32))
                         .child(text("one\ntwo\nend").h(px(48.0)).flex_shrink_0()),
                 )
-                .child(view().h(px(64.0)).flex_shrink_0().child(text("tail"))),
+                // Four rows: a box with content is its content's height.
+                .child(view().flex_shrink_0().child(text("tail\n1\n2\n3"))),
         )
 }
 
@@ -479,10 +478,11 @@ fn DemoListNavigation() -> impl IntoElement {
         )
 }
 
+/// The rows of the 30-column Scroll, its scroll bar's column left out.
 fn demo_viewport(terminal: &Terminal<TestBackend>) -> Vec<String> {
     (1..4)
         .map(|row| {
-            (0..30)
+            (0..29)
                 .map(|column| terminal.backend().buffer()[(column, row)].symbol())
                 .collect()
         })
@@ -649,7 +649,16 @@ fn TextOnlyPage() -> impl IntoElement {
                 .w(px(240.0))
                 .h(px(48.0))
                 .on_scroll(move |event: &ScrollEvent| offset.set(event.offset.y.0 as i32))
-                .child(text("plain text").h(px(192.0)).flex_shrink_0()),
+                // Twelve rows of text: a text is as tall as its lines.
+                .child(
+                    text(
+                        std::iter::once("plain text".to_owned())
+                            .chain((1..12).map(|row| row.to_string()))
+                            .collect::<Vec<_>>()
+                            .join("\n"),
+                    )
+                    .flex_shrink_0(),
+                ),
         )
 }
 

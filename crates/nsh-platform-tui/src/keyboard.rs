@@ -182,9 +182,8 @@ impl Keyboard {
             let Some(view) = tree.get(id) else {
                 continue;
             };
-            if view.tracked & (FOCUSED | FOCUS_WITHIN) == 0 {
-                continue;
-            }
+            // FOCUSED is reported whatever the view tracks (`next_states`):
+            // the painter draws every focused control, styled or not.
             let mut states = view.states;
             for (bit, on) in [
                 (FOCUSED, self.focused == Some(id)),
@@ -501,12 +500,9 @@ impl Keyboard {
         } else {
             scroll.y + delta.y
         };
-        if self
-            .focused
-            .is_some_and(|focused| contains(tree, id, focused))
-        {
-            self.queue_scroll_focus(geometry, id, FocusPosition::RetainVisible);
-        }
+        // The wheel scrolls the pane under the pointer and leaves the
+        // keyboard focus where it is, in sight or not.
+        let _ = geometry;
         move_scroll(tree, id, to);
         Handled::Yes
     }
@@ -527,13 +523,27 @@ impl Keyboard {
         tree: &Mounter,
         stroke: Keystroke,
         repeat: bool,
+        command_key: bool,
         control: &EngineControl,
     ) -> bool {
         let editing = self
             .focused
             .and_then(|id| tree.get(id))
             .is_some_and(|v| v.kind == ViewKind::Input);
-        let found = tree.keymap.find(stroke, editing, repeat);
+        let mut found = tree.keymap.find(stroke, editing, repeat);
+        // A terminal that cannot report Cmd sends Ctrl for it on macOS: the
+        // app's `mod-` / `cmd+` bindings take Ctrl there.
+        if matches!(found, KeyMatch::None)
+            && !command_key
+            && crate::app::OS == nsh_core::platform::Os::MacOs
+            && stroke.modifiers.ctrl
+            && !stroke.modifiers.cmd
+        {
+            let mut command = stroke;
+            command.modifiers.ctrl = false;
+            command.modifiers.cmd = true;
+            found = tree.keymap.find(command, editing, repeat);
+        }
         if let KeyMatch::Fire(id) = found {
             control.dispatch_event(
                 ROOT_ID,
@@ -614,6 +624,9 @@ impl Keyboard {
                     reveal(tree, geometry, id);
                 }
                 Handled::Yes
+            }
+            Action::Down | Action::Up => {
+                self.vertical(matches!(action, Action::Down), tree, geometry, control)
             }
             Action::Activate => {
                 if self.pending_scroll_focus.is_some() {
@@ -736,6 +749,138 @@ impl Keyboard {
     }
 }
 
+impl Keyboard {
+    /// Down / Up: the nearest control below / above the focused one, the
+    /// one in an overlapping column first; with none focused, the first /
+    /// last one in sight. A control out of sight is approached one wheel
+    /// step at a time while the scroll view around can still scroll there,
+    /// and focus follows what is in sight then.
+    fn vertical(
+        &mut self,
+        down: bool,
+        tree: &mut Mounter,
+        geometry: &[Geometry],
+        control: &EngineControl,
+    ) -> Handled {
+        self.pending_scroll_focus = None;
+        let scope = crate::navigation::focus_scope(tree);
+        let unused = if scope == ROOT_ID {
+            Handled::Ignored
+        } else {
+            Handled::Yes
+        };
+        let candidates = self.candidates(tree, geometry);
+        let current = candidates
+            .iter()
+            .copied()
+            .find(|g| Some(g.id) == self.focused);
+        let best = match current {
+            Some(from) => candidates
+                .iter()
+                .copied()
+                .filter(|to| {
+                    to.id != from.id
+                        && if down {
+                            to.bounds.top >= from.bounds.bottom
+                        } else {
+                            to.bounds.bottom <= from.bounds.top
+                        }
+                })
+                .min_by_key(|to| {
+                    let gap = if down {
+                        to.bounds.top - from.bounds.bottom
+                    } else {
+                        from.bounds.top - to.bounds.bottom
+                    };
+                    let overlaps =
+                        to.bounds.left < from.bounds.right && from.bounds.left < to.bounds.right;
+                    (
+                        gap,
+                        !overlaps,
+                        (to.bounds.left - from.bounds.left).unsigned_abs(),
+                    )
+                }),
+            None => {
+                let visible = candidates.iter().copied().filter(|g| !g.visible.is_empty());
+                if down {
+                    visible.min_by_key(|g| (g.bounds.top, g.bounds.left))
+                } else {
+                    visible.max_by_key(|g| (g.bounds.bottom, -g.bounds.left))
+                }
+            }
+        };
+        if let Some(to) = best
+            && !to.visible.is_empty()
+        {
+            self.focus(Some(to.id), tree, control);
+            reveal(tree, geometry, to.id);
+            return Handled::Yes;
+        }
+        // Out of sight or nothing there: scroll toward it.
+        let from = self
+            .focused
+            .filter(|&id| geometry.iter().any(|g| g.id == id))
+            .or(best.map(|g| g.id));
+        let scroll = from
+            .and_then(|id| vertical_scroll(tree, id, down))
+            .or_else(|| {
+                geometry
+                    .iter()
+                    .filter(|g| !g.visible.is_empty() && contains(tree, scope, g.id))
+                    .find_map(|g| vertical_scroll(tree, g.id, down).filter(|&id| id == g.id))
+            });
+        let Some(id) = scroll else {
+            if let Some(to) = best {
+                self.focus(Some(to.id), tree, control);
+                reveal(tree, geometry, to.id);
+                return Handled::Yes;
+            }
+            return unused;
+        };
+        let Some(viewport) = geometry.iter().find(|g| g.id == id) else {
+            return unused;
+        };
+        // A control within one step comes into sight as it takes focus.
+        if let Some(to) = best
+            && contains(tree, id, to.id)
+            && if down {
+                to.bounds.bottom - viewport.bounds.bottom
+            } else {
+                viewport.bounds.top - to.bounds.top
+            } <= crate::input::WHEEL_ROWS as i32
+        {
+            self.focus(Some(to.id), tree, control);
+            reveal(tree, geometry, to.id);
+            return Handled::Yes;
+        }
+        let rows = (viewport.bounds.bottom - viewport.bounds.top).max(1) as f32;
+        let row = viewport.frame.size.height / rows;
+        let view = tree.get(id).unwrap();
+        let offset = view.scroll.as_ref().unwrap().y;
+        let step = row * crate::input::WHEEL_ROWS;
+        self.queue_scroll_focus(geometry, id, FocusPosition::RetainVisible);
+        move_scroll(tree, id, if down { offset + step } else { offset - step });
+        Handled::Yes
+    }
+}
+
+/// The innermost vertical scroll view around `id` (itself included) that
+/// can still scroll down (`down`) or up.
+fn vertical_scroll(tree: &Mounter, mut id: NodeId, down: bool) -> Option<NodeId> {
+    loop {
+        let view = tree.get(id)?;
+        if let Some(scroll) = view.scroll.as_ref()
+            && !scroll.horizontal
+        {
+            let max = scroll.max(view.frame.size).y;
+            if (down && scroll.y < max) || (!down && scroll.y > nsh_core::Points::ZERO) {
+                return Some(id);
+            }
+        }
+        id = view.parent?;
+    }
+}
+
 fn scroll_ancestor(tree: &Mounter, mut id: NodeId) -> Option<NodeId> {
     loop {
         let view = tree.get(id)?;
@@ -818,7 +963,15 @@ pub(crate) fn reveal_frame(
                 start - centered_start
                     + nsh_core::scroll::reveal_delta(centered_start, centered_start + len, viewport)
             };
-            let moved = move_scroll(tree, id, offset + delta);
+            // The terminal scrolls by whole Cells: the nearest offset that still
+            // shows the span when it fits.
+            let cells = if horizontal {
+                g.bounds.right - g.bounds.left
+            } else {
+                g.bounds.bottom - g.bounds.top
+            };
+            let to = snap(offset + delta, viewport, cells, start + offset, len);
+            let moved = move_scroll(tree, id, to);
             if horizontal {
                 origin.x -= moved;
             } else {
@@ -826,6 +979,38 @@ pub(crate) fn reveal_frame(
             }
         }
     }
+}
+
+/// `to`, an offset of a viewport `viewport` long that is `cells` Cells, on
+/// whole Cells: the nearest (an exact half back), moved a Cell further when
+/// that leaves part of the span (`start` from the content's start, `len`
+/// long) out of sight while it fits.
+fn snap(
+    to: nsh_core::Points,
+    viewport: nsh_core::Points,
+    cells: i32,
+    start: nsh_core::Points,
+    len: nsh_core::Points,
+) -> nsh_core::Points {
+    if cells <= 0 {
+        return to;
+    }
+    let unit = viewport.0 / cells as f32;
+    let units = to.0 / unit;
+    let whole = units.floor();
+    let mut snapped = if units - whole > 0.5 + 1.0e-4 {
+        whole + 1.0
+    } else {
+        whole
+    } * unit;
+    if len.0 <= viewport.0 + 1.0e-4 {
+        if start.0 - snapped < -1.0e-4 {
+            snapped -= unit;
+        } else if start.0 + len.0 - snapped > viewport.0 + 1.0e-4 {
+            snapped += unit;
+        }
+    }
+    nsh_core::Points(snapped.max(0.0))
 }
 
 pub(crate) fn input_scope(tree: &Mounter, mut id: NodeId) -> NodeId {

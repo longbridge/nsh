@@ -306,6 +306,95 @@
   On Apple everything is drawn by Core Animation, escalating only as needed (`crates/nsh-platform-ios/src/decor.rs`
   describes the paths and their limits); Android draws in `Decor.java`.
 
+## Layout in a terminal
+
+A terminal draws whole character Cells, and a GUI's metrics (spacing, row heights, borders designed in points for a
+screen) cost rows and columns it cannot spare. So in a terminal the core does not run Taffy: it lays out with an
+algorithm of its own, the way ratatui apps are laid out (`core::terminal_layout`). The platform reports the Cell size
+in `Environment::cell` (`None` on every other surface; the terminal backend sets it from its points per Cell, 8 × 16
+by default). Lengths are whole Cells inside (x the Cell's width, y its height); the layouts written back are in
+points, so frames, hits, overlays, scroll views and `onLayout` work as anywhere else. Leaves measure as they always
+do (a text is one row per line).
+
+- **Splits.** A box's content box is split among its children along `flexDirection` (reversed for the `-reverse`
+  ones; `display: block` is a column), as ratatui's `Layout` splits a `Rect`: `flexGrow` is `Fill(grow)`, every other
+  child is its content's size. An explicit width (points, or a percentage) is the child's `Length`, its minimum and
+  maximum `Min` and `Max`. A `flexBasis` (points, or a percentage) is the child's `Length` along the main axis either
+  way, whatever it holds (a resizable panel's size), within its minimum and maximum there; a fill's basis of 0 is
+  its content's where its parent's length is not known. An explicit height counts only on a box without content (a chart's canvas, a spacer) and
+  on a scroll view, as a maximum; a box with content is as tall as its content, and one with a height in points is
+  not stretched across a row (a badge stays a row beside a title and its subtitle). When the children do not fit, those
+  in a row give in this order: the gaps, down to one column; icon buttons shown as their labels, down to three
+  columns (the label cut short) and then out, the last first, and so does a row of them (a toolbar's group) nested
+  in the row, as one; children with `flexShrink`, down to the longest word
+  of their texts; every child down to its words; then the shrinking ones and all of them below (a text wraps, the
+  last resort), never below one Cell for one with content: a box never lays a child across its border. A `flexGrow`
+  child's text counts at its full width for the gaps and labels, so a name next to icon buttons stays on its row.
+  A negative margin (stacked avatars) is none, and keeps a column between the two in a row. A small box of an
+  explicit width (under six columns: an avatar, a counter) is at least as wide as its content's longest words.
+- **Blocks.** A border is one Cell on each side that has one, only on a card: a container (a box holding views with
+  content that are not only texts; spacers and bars do not count) padded 12pt or more above or below, or around two
+  rows of content or more, unless all its children are controls (a split button, a toolbar, a tab list, a segmented
+  control), which is never a card. A pill, a badge, a tab list, a group of buttons or a field's chrome around one row keeps
+  no border, and a compact box's padding. The core mounts each bordered view with the borders its layout gave Cells
+  only (`Node::cell_border`), so the platform draws a border exactly where the layout reserved one; a control (a control's accessibility role, presses, a text input: `Core::is_control`) and a box of
+  text never have one, nor does a round box (a circle: corners of half its explicit width or height or more, or `rounded-full`).
+  Horizontal padding and margins are one Cell from 8pt and two from 24pt (at most one on a
+  control or a box of text); vertical padding is a row from 24pt, none on a control or a box of text. So a bordered
+  40pt button is one row, its label and a column each side, a badge is its text, and a card keeps its border without
+  padding rows.
+- **Surfaces.** Where the terminal shows a fill as a band of its own color (`Environment::cell_surfaces`: 256 colors
+  or more and a known background), a filled container is a surface: its fill is above 3% alpha and unlike the
+  nearest opaque fill around it (the page's at the root: black in a dark app, white in a light one), by 1.5 in CIE L*
+  or as a saturated color of another hue. A surface has no border Cells (mounted with none) unless the app's border
+  is at least twice as far in lightness from the backdrop as the fill, and keeps its padding: a row above and below
+  from 12pt, two columns each side from 12pt, one from 4pt. Without bands a filled box is laid out as any other.
+- **Spacing.** A gap between children in a row is one column from above 0, two from 24pt, their margins added; two controls side
+  by side keep a column apart even without one when they share a band (a split button's halves on its fill) or each
+  paints one, as the bands would read as one; unfilled controls (tabs) touch, their padding sets them apart. Icon controls shown as their labels keep two
+  columns apart, as their labels read as words (one when the row is short). In a
+  column the gap and the margins between two children collapse into one blank row when any of them is 16pt or more,
+  and into none inside a bordered box (a card), whose border already sets its content apart: sections keep a row
+  between them, a card's rows none. The gap a divider sits in (a box with a divider among its absolute children, a
+  vertical resizable group) keeps its row inside a card too.
+- **Flex.** `justifyContent` places the space left (start, center, end, space between, around, evenly: ratatui's
+  `Flex`); across, `alignItems` / `alignSelf` stretch (the default) or place a child at its content's size.
+  `flexWrap` makes lines of children, each split as above.
+- **Absolute** children take no room; their insets (nearest Cell) place them in the padding box, and both insets of
+  an axis without a size along it stretch them between the two (a divider's band down a whole column). A small label (one
+  row, narrower than the sibling it is on, no control in it) pinned on a row of a sibling's text that is not white
+  space (a badge on an avatar's initials) is left out: Cells cannot be seen through, so one of the two would be lost,
+  and the content is kept. Controls (a slider's thumb), bars pinned over a scroll view and boxes over blank Cells are
+  placed.
+- **Scroll views** lay their content out unbounded along their axis; **grids** take their columns from the template
+  (`fr` fills, points are Cells, the rest their content's), their rows their content's height, the items in order.
+- **Screens and modals** fill the stack or window the core sizes them to, and the padding the core gives them below
+  their header converts exactly (the nearest row), not by the spacing rule above. A **native component** takes its
+  explicit size: the platform draws a component registered with it there and leaves the Cells of others blank. A
+  **text input** keeps one column after its text, where the caret is when the text fills a line.
+- A **divider the user drags** (a view whose cursor is `col-resize` or `row-resize`: a resizable panel's handle, a
+  dock's split) is one Cell across its axis, as long as its parent lays it out along it, and never left out; what it
+  holds is laid out as hidden (the platform draws its line).
+- A **frame around one frame** and nothing else (a bordered box without padding of its own whose only child, through
+  boxes without border or padding, is a bordered box: a pane around a bordered list) draws one line, the inner one,
+  as ratatui draws nested blocks once. Frames with padding between them are the app's two, and both are drawn.
+- A **band inside a frame** (a filled well in a card) draws no line of its own: its color sets it apart, and its line
+  would be a second frame around the same content.
+- A **bare overlay** with a border (a dock's drop preview) is its outline: its size is the app's, and its border is
+  drawn over its outer Cells.
+- Explicit lengths round to the nearest whole Cell, an exact half down (a 300 × 200 canvas is 37 × 12 Cells).
+- What a terminal cannot show well is left out, never emulated: images, videos, web views,
+  shaders and icon-sized canvases (an explicit width and height both at most 48pt) are `display: none`, so they take
+  no Cells, no frame and no hits, and their margins and the gaps beside them go with them (`Core::grid_role`). So is
+  a view with nothing in it smaller than a row both ways and not growing (a status dot, a swatch), which draws
+  nothing in a terminal, and a view (no control, not growing) whose content is all left out (an icon's tile or
+  circle). A control whose content is all left out (an icon button; a layer that grows to center its icon, as a menu
+  trigger's chevron, counts as left out) shows its accessibility label in one row, one column per character, and is
+  left out without one; a popup's trigger (its accessibility `expanded` set) shows one chevron, `▾` or `▴`, in one
+  column instead.
+
+The app's style is kept as given; leaving the terminal (`cell` back to `None`) lays it out with Taffy again.
+
 ## Environment variables
 
 CSS's `env()` keeps content clear of system UI and the software keyboard, in place of wrapper components:

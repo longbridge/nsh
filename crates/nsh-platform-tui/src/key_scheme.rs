@@ -4,8 +4,14 @@ use nsh_core::keymap::{Key, Keystroke, Modifiers};
 
 #[derive(Clone, Copy)]
 pub(crate) enum Action {
+    /// The next control in tree order (Tab, Ctrl+N), wrapping.
     Next,
+    /// The previous control in tree order (Shift+Tab, Ctrl+P), wrapping.
     Previous,
+    /// The control below (Down), scrolling to reach it.
+    Down,
+    /// The control above (Up), scrolling to reach it.
+    Up,
     Right,
     Left,
     Activate,
@@ -84,11 +90,11 @@ pub(crate) fn terminal(stroke: Keystroke) -> Option<Action> {
         return None;
     }
     Some(match key {
-        Key::Down => Action::Next,
-        Key::Up => Action::Previous,
+        Key::Down => Action::Down,
+        Key::Up => Action::Up,
         Key::Right => Action::Right,
         Key::Left => Action::Left,
-        Key::Enter => Action::Activate,
+        Key::Enter | Key::Char(' ') => Action::Activate,
         Key::Escape => Action::Back,
         Key::PageDown => Action::PageDown,
         Key::PageUp => Action::PageUp,

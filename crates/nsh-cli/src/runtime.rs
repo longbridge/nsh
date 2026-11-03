@@ -529,8 +529,43 @@ pub(crate) fn file(platform: Platform, runner: bool) -> anyhow::Result<PathBuf> 
         built.push(triple);
     }
     built.push(profile);
-    built.push(file_name);
-    existing(built, platform, name)
+    built.push(&file_name);
+    let built = existing(built, platform, name)?;
+    match checkout(bin) {
+        Some(root) if cfg!(target_os = "macos") && platform.triple().is_none() => stable_copy(
+            &built,
+            &root.join(".nsh/hosts").join(profile).join(&file_name),
+        ),
+        _ => Ok(built),
+    }
+}
+
+/// A copy of the executable `built` at `copy` that changes only when the
+/// build does. Every `cargo build`, even one with nothing to do, links the
+/// binary into `target/<profile>/` again, and macOS checks an executable whose
+/// file changed again the first time it runs: a second or more for a debug
+/// host, on every `nsh run`. The copy keeps its file until the build is new
+/// (its modification time or size differ); on APFS the copy is a clone.
+fn stable_copy(built: &Path, copy: &Path) -> anyhow::Result<PathBuf> {
+    let source = fs::metadata(built).with_context(|| format!("read {}", built.display()))?;
+    let fresh = fs::metadata(copy).is_ok_and(|copied| {
+        copied.len() == source.len() && copied.modified().ok() == source.modified().ok()
+    });
+    if !fresh {
+        if let Some(dir) = copy.parent() {
+            fs::create_dir_all(dir).with_context(|| format!("create {}", dir.display()))?;
+        }
+        // A new file rather than one written over: a running host keeps its own.
+        let _ = fs::remove_file(copy);
+        fs::copy(built, copy).with_context(|| format!("copy {}", built.display()))?;
+        let modified = source.modified().context("modification time")?;
+        fs::File::options()
+            .write(true)
+            .open(copy)
+            .and_then(|file| file.set_modified(modified))
+            .with_context(|| format!("stamp {}", copy.display()))?;
+    }
+    Ok(copy.to_path_buf())
 }
 
 /// The cargo arguments a build of a GPUI host adds: on a Mac
@@ -642,6 +677,29 @@ pub(crate) fn copy_browser_host(source: &Path, target: &Path) -> anyhow::Result<
 #[cfg(test)]
 mod tests {
     use super::Platform;
+
+    #[cfg(unix)]
+    #[test]
+    fn a_stable_copy_changes_only_with_the_build() {
+        use std::{fs, os::unix::fs::MetadataExt as _};
+        let dir = std::env::temp_dir().join(format!("nsh-stable-copy-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let built = dir.join("host");
+        let copy = dir.join("copies/host");
+        fs::write(&built, b"one").unwrap();
+        super::stable_copy(&built, &copy).unwrap();
+        let first = fs::metadata(&copy).unwrap().ino();
+        // What cargo does with nothing to rebuild: the same file linked again.
+        fs::hard_link(&built, dir.join("again")).unwrap();
+        super::stable_copy(&built, &copy).unwrap();
+        assert_eq!(fs::metadata(&copy).unwrap().ino(), first);
+        fs::remove_file(&built).unwrap();
+        fs::write(&built, b"three").unwrap();
+        super::stable_copy(&built, &copy).unwrap();
+        assert_eq!(fs::read(&copy).unwrap(), b"three");
+        fs::remove_dir_all(&dir).unwrap();
+    }
 
     #[test]
     fn published_runtime_variants_use_browser_execution() {

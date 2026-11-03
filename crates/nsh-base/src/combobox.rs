@@ -39,6 +39,7 @@ use crate::{
     SelectEntry, SelectGroup, SelectItem,
     listbox::{self, Footer, Hooks, Listbox, Move, Parts, Query, Shown},
     popup::{DropdownFrame, OpenChangeReason, OpenState},
+    terminal::{CLEAR, SELECT_ARROW, is_terminal},
 };
 
 /// The props of [`Combobox`].
@@ -264,6 +265,13 @@ enum Opening {
 /// is `value` and `onChange` (or the combobox's own, from `defaultValue`),
 /// `onConfirm` tells it as the list closes. It looks like nothing: the app
 /// styles every part or draws the rows (`renderItem`, `renderGroup`).
+///
+/// In a terminal the input is one row as wide as the room left (no
+/// `inputClass` / `inputStyle`), then the terminal's own ` ×` in place of
+/// `clearButton` and ` ▾` in place of `triggerButton`, on the input's row;
+/// the list's rows are the items' titles, one full-width row each, which
+/// the terminal marks while highlighted or chosen (no `renderItem`,
+/// `renderGroup` or row classes there) ([`crate::terminal`]).
 #[component]
 pub fn Combobox(props: ComboboxProps, cx: Scope<ComboboxEvent>) -> impl IntoElement {
     let open = OpenState::new(props.open, props.default_open);
@@ -520,6 +528,7 @@ pub fn Combobox(props: ComboboxProps, cx: Scope<ComboboxEvent>) -> impl IntoElem
     };
     let input_change = change.clone();
     let focus_change = change.clone();
+    let terminal = is_terminal();
     let text_field = input()
         .element_ref(&field)
         .value(shown_text)
@@ -595,8 +604,13 @@ pub fn Combobox(props: ComboboxProps, cx: Scope<ComboboxEvent>) -> impl IntoElem
             }
             cx.emit(ComboboxEvent::QueryChange(text.to_owned().into()));
         })
-        .app_class(props.input_class)
-        .inline_style(move || props.input_style.get());
+        .map(|i| match terminal {
+            // The terminal's field: one row, as wide as the room left.
+            true => i.flex_grow(1.0).min_w(px(0.0)),
+            false => i
+                .app_class(props.input_class)
+                .inline_style(move || props.input_style.get()),
+        });
     // Not a stop of Tab (`gpui-component`'s `tab_stop(false)`): the input
     // keeps the keyboard.
     let clear = when(
@@ -611,28 +625,47 @@ pub fn Combobox(props: ComboboxProps, cx: Scope<ComboboxEvent>) -> impl IntoElem
                     report(Vec::new());
                     field.focus();
                 })
-                .app_class(props.clear_button_class)
-                .inline_style(props.clear_button_style)
-                .child(props.clear_button.place(|c| c))
+                .map(|v| match terminal {
+                    // The terminal's own ` ×`, in place of the app's button.
+                    true => v.child(text(CLEAR)),
+                    false => v
+                        .app_class(props.clear_button_class)
+                        .inline_style(props.clear_button_style)
+                        .child(props.clear_button.place(|c| c)),
+                })
         },
     );
     // The input says whether the list is open: the button is hidden from
     // screen readers, and leaves the keyboard on the input.
     let toggle = change;
-    let trigger_button = props.trigger_button.place(move |t| {
+    let press = move || {
         let toggle = toggle.clone();
-        t.role(AccessibilityRole::Button)
+        move || {
+            opening.replace(Opening::Press);
+            toggle(!open.get_untracked(), OpenChangeReason::TriggerPress);
+            if is_desktop() {
+                field.focus();
+            }
+        }
+    };
+    let trigger_button = match terminal {
+        // The terminal's own button, in place of the app's: ` ▾`.
+        true => view()
+            .role(AccessibilityRole::Button)
             .focusable(false)
             .accessibility_elements_hidden(true)
             .disabled(props.disabled)
-            .on_press(move || {
-                opening.replace(Opening::Press);
-                toggle(!open.get_untracked(), OpenChangeReason::TriggerPress);
-                if is_desktop() {
-                    field.focus();
-                }
-            })
-    });
+            .on_press(press())
+            .child(text(SELECT_ARROW))
+            .into_element(),
+        false => props.trigger_button.place(move |t| {
+            t.role(AccessibilityRole::Button)
+                .focusable(false)
+                .accessibility_elements_hidden(true)
+                .disabled(props.disabled)
+                .on_press(press())
+        }),
+    };
     view()
         .element_ref(&anchor)
         .flex_row()

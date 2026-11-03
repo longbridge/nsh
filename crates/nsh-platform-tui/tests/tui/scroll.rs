@@ -37,8 +37,20 @@ fn scroll_content_is_visible_at_zero_offset_and_clipped_to_its_view() {
     assert_eq!(buffer[(1, 2)].symbol(), "s");
     assert_eq!(
         buffer[(10, 1)].symbol(),
-        " ",
-        "no Scroll placeholder border"
+        "┃",
+        "the scroll bar's thumb on the view's right edge"
+    );
+    assert_eq!(buffer[(10, 2)].symbol(), "│", "its track");
+    assert!(
+        buffer[(10, 2)]
+            .modifier
+            .contains(ratatui_core::style::Modifier::DIM),
+        "the track is dim"
+    );
+    assert!(
+        !buffer[(10, 1)]
+            .modifier
+            .contains(ratatui_core::style::Modifier::DIM)
     );
     assert_eq!(buffer[(1, 3)].symbol(), " ");
     assert_eq!(buffer[(1, 3)].bg, Color::Reset);
@@ -215,16 +227,27 @@ fn scroll_panels(is_control: fn(i32) -> bool) -> impl IntoElement {
                         .on_scroll(move |event: &ScrollEvent| {
                             sidebar_offset.set(event.offset.y.0 as i32)
                         })
-                        .child(text("watchlist").h(px(320.0)).flex_shrink_0()),
+                        // Twenty rows: a text is as tall as its lines.
+                        .child(
+                            text(
+                                std::iter::once("watchlist".to_owned())
+                                    .chain((1..20).map(|row| row.to_string()))
+                                    .collect::<Vec<_>>()
+                                    .join("\n"),
+                            )
+                            .flex_shrink_0(),
+                        ),
                 )
                 .child(
                     view()
                         .w(px(200.0))
                         .h(px(112.0))
                         .child(
+                            // A scroll view's height is its maximum; the box around it
+                            // is as tall as its content.
                             scroll()
                                 .w_full()
-                                .h_full()
+                                .h(px(112.0))
                                 .on_scroll(move |event: &ScrollEvent| {
                                     panel_offset.set(event.offset.y.0 as i32)
                                 })
@@ -243,9 +266,10 @@ fn scroll_panels(is_control: fn(i32) -> bool) -> impl IntoElement {
                                 .absolute()
                                 .bottom(px(0.0))
                                 .w_full()
-                                .h(px(32.0))
                                 .bg(nsh_core::color::rgb(0x884422))
-                                .child(text("trade bar")),
+                                .child(text("trade bar"))
+                                // Its second row: an empty box keeps its height.
+                                .child(view().h(px(16.0))),
                         ),
                 ),
         )
@@ -459,12 +483,12 @@ fn MarginReveals() -> impl IntoElement {
                 .on_scroll(move |event: &ScrollEvent| vertical.set(event.offset.y.0 as i32))
                 .child(view().h(px(80.0)).flex_shrink_0())
                 .child(
+                    // Eight rows, taller than the viewport.
                     view()
-                        .h(px(128.0))
                         .flex_shrink_0()
                         .on_focus(move |_: &()| focused.set("vertical"))
                         .on_press(|_: &()| {})
-                        .child(text("tall control")),
+                        .child(text("tall control\n1\n2\n3\n4\n5\n6\n7")),
                 )
                 .child(view().h(px(160.0)).flex_shrink_0()),
         )
@@ -498,5 +522,6 @@ fn horizontal_and_oversized_reveals_keep_the_core_margin_and_leading_edge() {
     );
     let buffer = terminal.backend().buffer();
     assert_eq!(buffer[(8, 1)].symbol(), "H");
-    assert_eq!(buffer[(0, 4)].symbol(), "t");
+    // The horizontal Scroll is its content's one row, so this one starts at row 2.
+    assert_eq!(buffer[(0, 3)].symbol(), "t");
 }

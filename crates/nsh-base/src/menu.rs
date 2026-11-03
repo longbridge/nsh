@@ -23,6 +23,7 @@ use nsh_core::{
 use crate::{
     popup::{OpenChangeReason, OpenState, PopupPresence, SheetMotion, StateLooks, lifecycle},
     roving::{bar_trigger, leave_bar, popup_bar},
+    terminal::{MENU_CHECK, MENU_UNCHECKED, SUBMENU_ARROW, is_terminal, line, rule},
 };
 
 /// How long a finger stays on a context menu's trigger before it opens
@@ -592,7 +593,9 @@ pub enum MenuItemEvent {
 /// `"menuitemradio"`), as `gpui-component`'s `PopupMenuItem::checked`. Its
 /// look is the app's: `class`, `style`, the `active:`, `hover:`,
 /// `disabled:` and `checked:` states, and the `indicator` it shows checked
-/// with.
+/// with. In a terminal a checkable item starts with the terminal's own
+/// `✓ ` (two spaces unchecked) in place of the indicator, in a row with its
+/// content ([`crate::terminal`]).
 #[component]
 pub fn MenuItem(props: MenuItemProps, cx: Scope<MenuItemEvent>) -> impl IntoElement {
     let menu = use_context::<MenuContext>();
@@ -605,12 +608,24 @@ pub fn MenuItem(props: MenuItemProps, cx: Scope<MenuItemEvent>) -> impl IntoElem
     // The indicator is a part that takes the item's states, as
     // `Checkbox`'s: it is no checkable element of its own for screen
     // readers, and only it restyles when the value changes.
+    let terminal = is_terminal();
     let parts = move || {
-        vec![
+        let mark = match terminal {
+            // The terminal's own check before a checkable item's content,
+            // in place of the app's indicator.
+            true => when(
+                move || checked.get().is_some(),
+                move || {
+                    text(move || match checked.get() {
+                        Some(true) => MENU_CHECK,
+                        _ => MENU_UNCHECKED,
+                    })
+                },
+            ),
             // A view of its own, as `Checkbox`'s indicator: the projected
             // states and the app's classes land on one node, which the
             // mark inside reads as a group.
-            when(
+            false => when(
                 move || indicator.get().is_some(),
                 move || {
                     view()
@@ -620,10 +635,9 @@ pub fn MenuItem(props: MenuItemProps, cx: Scope<MenuItemEvent>) -> impl IntoElem
                         .inline_style(indicator_style)
                         .child(indicator.place(|mark| mark))
                 },
-            )
-            .into_element(),
-            children.into_element(),
-        ]
+            ),
+        };
+        vec![mark.into_element(), children.into_element()]
     };
     let content = match sheet.clone() {
         // Only the items of the level shown are there (for screen readers
@@ -648,6 +662,7 @@ pub fn MenuItem(props: MenuItemProps, cx: Scope<MenuItemEvent>) -> impl IntoElem
         .checked_style(props.checked_style)
         .disabled(disabled)
         .optional_label(props.accessibility_label)
+        .when(terminal, |v| v.flex_row())
         .when_some(sheet, |v, m| {
             v.style_when(move || !m.shown(), |s| s.hidden())
         })
@@ -673,7 +688,8 @@ pub fn MenuItem(props: MenuItemProps, cx: Scope<MenuItemEvent>) -> impl IntoElem
 pub struct MenuSeparatorProps {}
 
 /// A line between groups of a menu's items: a view the app styles (`class`,
-/// `style`), shown with its level's items.
+/// `style`), shown with its level's items. In a terminal it is a row of
+/// `─` across the menu ([`crate::terminal`]).
 #[component]
 pub fn MenuSeparator(_props: MenuSeparatorProps, cx: Scope<NoEvent>) -> impl IntoElement {
     let _ = cx;
@@ -683,6 +699,8 @@ pub fn MenuSeparator(_props: MenuSeparatorProps, cx: Scope<NoEvent>) -> impl Int
         .when_some(menu.filter(|m| m.sheet), |v, m| {
             v.style_when(move || !m.shown(), |s| s.hidden())
         })
+        // The terminal's own separator: a rule across the menu.
+        .when(is_terminal(), |v| v.child(line(rule)))
 }
 
 /// The props of [`Submenu`].
@@ -709,7 +727,8 @@ pub struct SubmenuProps {
 /// touch screens pressing the trigger shows its items in the sheet instead
 /// of the ones around it, with its `back` row first. Its popups take the
 /// menu's `popupClass` / `popupStyle` and its states' looks
-/// (`popupStartingClass`, `popupEndingClass`, ...).
+/// (`popupStartingClass`, `popupEndingClass`, ...). In a terminal its
+/// trigger is a row that ends with ` ›` ([`crate::terminal`]).
 #[component]
 pub fn Submenu(props: SubmenuProps, cx: Scope<NoEvent>) -> impl IntoElement {
     let _ = cx;
@@ -779,8 +798,23 @@ pub fn Submenu(props: SubmenuProps, cx: Scope<NoEvent>) -> impl IntoElement {
             open_sub.set(Some(id));
         }
     };
-    view()
-        .child(props.trigger.place(move |t| {
+    let trigger = match is_terminal() {
+        // The terminal's item: the trigger's content, then ` ›` at the
+        // row's end, one item.
+        true => view()
+            .flex_row()
+            .element_ref(&anchor)
+            .role(AccessibilityRole::Menuitem)
+            .accessibility_state(move || AccessibilityState {
+                expanded: Some(open_sub.get() == Some(id)),
+                ..AccessibilityState::default()
+            })
+            .on_mouse_enter(move |_: &MouseEvent| open())
+            .on_press(open)
+            .child(props.trigger.place(|t| t.flex_grow(1.0)))
+            .child(text(SUBMENU_ARROW).text_color(move || crate::theme::theme().muted_foreground))
+            .into_element(),
+        false => props.trigger.place(move |t| {
             t.element_ref(&anchor)
                 .role(AccessibilityRole::Menuitem)
                 .accessibility_state(move || AccessibilityState {
@@ -789,7 +823,10 @@ pub fn Submenu(props: SubmenuProps, cx: Scope<NoEvent>) -> impl IntoElement {
                 })
                 .on_mouse_enter(move |_: &MouseEvent| open())
                 .on_press(open)
-        }))
+        }),
+    };
+    view()
+        .child(trigger)
         .child(when(
             move || presence.mounted(),
             move || {

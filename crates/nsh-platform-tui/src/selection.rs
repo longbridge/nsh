@@ -18,6 +18,18 @@ use crate::{
     text::CellLayout,
 };
 
+/// What a selection reads of the last frame drawn: the surface's `area` and
+/// Cell size, the views that take the pointer (`hits`), every view's Cells
+/// (`geometry`) and the tree.
+#[derive(Clone, Copy)]
+pub(crate) struct Scene<'a> {
+    pub(crate) area: Rect,
+    pub(crate) cells: CellSize,
+    pub(crate) hits: &'a [Hit],
+    pub(crate) geometry: &'a [Geometry],
+    pub(crate) tree: &'a Mounter,
+}
+
 #[derive(Default)]
 pub(crate) struct Selection {
     root: Option<NodeId>,
@@ -116,19 +128,23 @@ impl SelectionTexts for Texts<'_> {
 }
 
 impl Selection {
+    /// A selection area holds the pointer's last selection.
+    pub(crate) fn is_active(&self) -> bool {
+        self.root.is_some()
+    }
+
     pub(crate) fn clear(&mut self) {
         *self = Self::default();
     }
 
-    pub(crate) fn handle(
-        &mut self,
-        mouse: MouseInput,
-        area: Rect,
-        cells: CellSize,
-        hits: &[Hit],
-        geometry: &[Geometry],
-        tree: &Mounter,
-    ) -> bool {
+    pub(crate) fn handle(&mut self, mouse: MouseInput, scene: Scene<'_>, clicks: u32) -> bool {
+        let Scene {
+            area,
+            cells,
+            hits,
+            geometry,
+            tree,
+        } = scene;
         let scope = crate::navigation::focus_scope(tree);
         if self
             .root
@@ -215,7 +231,8 @@ impl Selection {
             return false;
         }
         self.model.texts_changed(&texts);
-        self.model.press(&texts, point, 1, mouse.modifiers.shift);
+        self.model
+            .press(&texts, point, clicks.max(1), mouse.modifiers.shift);
         self.dragging = true;
         self.start = point;
         self.taking = hit.is_none_or(|hit| hit.target.is_none());
@@ -257,18 +274,19 @@ impl Selection {
             self.model.select_all(&texts);
             return true;
         }
+        // Any other key ends the selection and then acts as usual.
+        self.clear();
         false
     }
 
-    pub(crate) fn draw(
-        &mut self,
-        tree: &Mounter,
-        geometry: &[Geometry],
-        hits: &[Hit],
-        cells: CellSize,
-        area: Rect,
-        buffer: &mut Buffer,
-    ) {
+    pub(crate) fn draw(&mut self, scene: Scene<'_>, buffer: &mut Buffer) {
+        let Scene {
+            area,
+            cells,
+            hits,
+            geometry,
+            tree,
+        } = scene;
         let Some(root) = self.root else {
             return;
         };

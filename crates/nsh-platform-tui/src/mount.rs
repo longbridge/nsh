@@ -22,8 +22,15 @@ pub(crate) struct Mounter {
     pub(crate) pending_modals: Vec<NodeId>,
     pub(crate) back_requests: usize,
     pub(crate) focus_requests: Vec<(NodeId, bool)>,
+    /// The system dialogs shown (`AlertDialog`), oldest first.
+    pub(crate) dialogs: crate::dialog::Dialogs,
+    /// The scroll bars drawn in the last frame, topmost last.
+    pub(crate) scroll_bars: Vec<crate::scrollbar::ScrollBar>,
+    /// The Cells text was drawn on this frame (by buffer index), kept to
+    /// reuse its allocation (`render.rs`).
+    pub(crate) text_cells: Vec<bool>,
     unhandled: HashSet<Discriminant<MountItem>>,
-    placeholders: HashSet<String>,
+    unsupported: HashSet<String>,
 }
 
 impl Default for Mounter {
@@ -43,8 +50,11 @@ impl Default for Mounter {
             pending_modals: Vec::new(),
             back_requests: 0,
             focus_requests: Vec::new(),
+            scroll_bars: Vec::new(),
+            text_cells: Vec::new(),
+            dialogs: Default::default(),
             unhandled: HashSet::new(),
-            placeholders: HashSet::new(),
+            unsupported: HashSet::new(),
         };
         this.insert(ROOT_ID, NshView::new(ViewKind::View));
         this
@@ -104,13 +114,15 @@ impl Mounter {
         self.animator = Default::default();
         self.responder = None;
         self.focus_requests.clear();
+        self.scroll_bars.clear();
+        self.dialogs.clear();
         self.views.clear();
         self.insert(ROOT_ID, NshView::new(ViewKind::View));
         self.appearance = None;
         self.exit = false;
         self.keymap = Default::default();
         self.unhandled.clear();
-        self.placeholders.clear();
+        self.unsupported.clear();
         self.scrolled.clear();
         self.dirty_stacks.clear();
         self.dirty_screens.clear();
@@ -151,9 +163,11 @@ impl Mounter {
                             | ViewKind::HeaderItem
                             | ViewKind::Modal
                             | ViewKind::InputAccessory
-                    ) && self.placeholders.insert(format!("{kind:?}"))
+                    ) && self.unsupported.insert(format!("{kind:?}"))
                     {
-                        log::warn!("terminal: {kind:?} shown as a placeholder");
+                        log::warn!(
+                            "terminal: {kind:?} is not supported in the terminal and is left out"
+                        );
                     }
                     self.insert(id, NshView::new(kind));
                 }
@@ -269,7 +283,8 @@ impl Mounter {
                 MountItem::TrackStates { id, states } => {
                     if let Some(view) = self.get_mut(id) {
                         view.tracked = states;
-                        view.states &= states;
+                        // The focus is reported whatever the view tracks.
+                        view.states &= nsh_core::input::reported_states(states);
                     }
                 }
                 MountItem::Events { id, events } => {
@@ -300,15 +315,22 @@ impl Mounter {
                     id,
                     horizontal,
                     scrollbar_visible,
+                    replaced,
                     mirrored,
                     ..
                 } => {
                     if let Some(scroll) = self.get_mut(id).and_then(|view| view.scroll.as_mut()) {
                         scroll.horizontal = horizontal;
-                        scroll.indicator = scrollbar_visible;
+                        // A bar of the app's own (a themed `Scrollbar`) is
+                        // drawn as the terminal's: `nsh/base`'s Scrollbar
+                        // shows nothing in the terminal idiom.
+                        scroll.indicator = scrollbar_visible || replaced;
                         scroll.mirrored = mirrored;
                     }
                 }
+                // Pictures are content the terminal shows as their label
+                // (`render.rs`).
+                MountItem::Image { .. } => {}
                 MountItem::ScrollContent { id, size } => {
                     if let Some(scroll) = self.get_mut(id).and_then(|view| view.scroll.as_mut()) {
                         scroll.content = size;
@@ -376,8 +398,10 @@ impl Mounter {
                 MountItem::Appearance { appearance } => self.appearance = Some(appearance),
                 MountItem::Component { id, name } => {
                     let component = self.components.get(name.as_ref()).map(|factory| factory());
-                    if component.is_none() && self.placeholders.insert(name.to_string()) {
-                        log::warn!("terminal: native component {name} shown as a placeholder");
+                    if component.is_none() && self.unsupported.insert(name.to_string()) {
+                        log::warn!(
+                            "terminal: native component {name} is not supported in the terminal and is left out"
+                        );
                     }
                     if let Some(view) = self.get_mut(id) {
                         view.component = component;
@@ -393,6 +417,10 @@ impl Mounter {
                     command: Command::ExitApp,
                     ..
                 } => self.exit = true,
+                MountItem::Command {
+                    command: Command::Dialog(dialog),
+                    ..
+                } => self.dialogs.show(*dialog),
                 MountItem::Command { id, ref command }
                     if self
                         .get_mut(id)

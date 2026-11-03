@@ -12,6 +12,7 @@ mod scrollbars;
 mod services;
 mod slots;
 mod sticky;
+mod terminal_layout;
 #[cfg(test)]
 mod tests;
 mod touch;
@@ -546,6 +547,11 @@ struct Node {
     /// out on its own over the viewport, not one of the view's children
     /// for their classes.
     decoration: bool,
+    /// In a terminal, the sides its layout gives a border Cell (bits: top,
+    /// right, bottom, left): the others are mounted without a border, so
+    /// the platform draws one exactly where the layout reserved it. `None`
+    /// off a terminal: the border as styled.
+    cell_border: Option<u8>,
     /// The multiline input a built-in bar is beside, at its frame and just
     /// above it (a bar of a scroll view draws above all of its children).
     beside: Key,
@@ -615,12 +621,13 @@ struct Node {
     /// A list cell whose subtree was laid out again this commit.
     relaid: bool,
     /// Where its layout root had the origin of the view around it (its
-    /// containing block), unrounded, and the pixel ratio, when its frame and
+    /// containing block), unrounded, and the ratio frames were rounded to
+    /// ([`Core::frame_ratio`]), when its frame and
     /// its subtree's were last emitted: while nothing in the subtree is laid
     /// out anew, a move of that origin by whole device pixels leaves every
     /// frame in it as it was ([`Core::emit_frames_in`]). `None` until
     /// emitted, or once they must be emitted again.
-    emitted: Option<(taffy::Point<f32>, f32)>,
+    emitted: Option<(taffy::Point<f32>, taffy::Size<f32>)>,
     /// A view in its subtree is placed in a containing block above it (a
     /// fixed one, or an absolute one in a static parent), so a move of the
     /// subtree can move it in its parent.
@@ -728,6 +735,17 @@ impl Node {
         if self.spare {
             style.hidden = true;
         }
+        if let Some(sides) = self.cell_border {
+            let w = &mut style.borders.widths;
+            for (bit, side) in [&mut w.top, &mut w.right, &mut w.bottom, &mut w.left]
+                .into_iter()
+                .enumerate()
+            {
+                if sides & (1 << bit) == 0 {
+                    *side = Points::ZERO;
+                }
+            }
+        }
         // A canvas whose drawing fills with its background shows it there
         // only (`Painter::fill_background_from_view`).
         if self.kind == Kind::Canvas && self.drawing.as_ref().is_some_and(|d| d.paints_background())
@@ -810,6 +828,7 @@ impl Node {
             wants_fixed: false,
             fixed_view: false,
             decoration: false,
+            cell_border: None,
             beside: NO_KEY,
             class_pointer: crate::props::PointerEvents::Auto,
             pointer_auto_inside: false,
@@ -1199,6 +1218,14 @@ impl<M: TextEngine> Core<M> {
         root.created = true;
         let root = nodes.insert(root) as Key;
         layout.set_tag(root_layout, root);
+        // The root's size is the viewport's, in a terminal too.
+        layout.set_role(
+            root_layout,
+            terminal_layout::Role {
+                root: true,
+                ..terminal_layout::Role::default()
+            },
+        );
         let mut slots = vec![0; 256];
         slots[ROOT_ID as usize] = root + 1;
         Self {
@@ -1847,12 +1874,29 @@ impl<M: TextEngine> Core<M> {
                 Ok(())
             }
             Op::SetStyle { id, style, patch } => self.set_inline_style(id, style, patch),
-            Op::SetProp { id, prop } => self.set_prop(id, prop),
+            Op::SetProp { id, prop } => {
+                let role = matches!(
+                    prop,
+                    Prop::Accessibility(
+                        AccessibilityProp::Role(_)
+                            | AccessibilityProp::Label(_)
+                            | AccessibilityProp::State(_)
+                    )
+                );
+                let result = self.set_prop(id, prop);
+                if role && let Ok(key) = self.key(id) {
+                    self.sync_grid_role(key);
+                }
+                result
+            }
             Op::Listen { id, event, enabled } => {
                 let key = self.key(id)?;
                 let node = &mut self.nodes[key as usize];
                 let before = node.events;
                 node.events.set(event, enabled);
+                if PRESSES.contains(&event) {
+                    self.sync_grid_role(key);
+                }
                 if event == EventKind::Layout && enabled && !before.contains(event) {
                     self.report_frame(key);
                 }
@@ -2414,8 +2458,129 @@ impl<M: TextEngine> Core<M> {
         };
         self.layout.set_tag(layout, key);
         self.nodes[key as usize].layout = Some(layout);
+        self.sync_grid_role(key);
         self.became(key, style);
         Ok(())
+    }
+
+    /// Whether node `key` is a control: a view with a control's
+    /// accessibility role, one that takes presses, or a text input. On a
+    /// grid surface a control is laid out one line of its content high
+    /// ([`grid`]).
+    fn is_control(&self, key: Key) -> bool {
+        use crate::AccessibilityRole as R;
+        let node = &self.nodes[key as usize];
+        node.kind == Kind::Input
+            || (!node.inline && pressable(node.events))
+            || node.props.as_ref().is_some_and(|p| {
+                matches!(
+                    p.accessibility.role,
+                    R::Button
+                        | R::ImageButton
+                        | R::Link
+                        | R::Search
+                        | R::Checkbox
+                        | R::Radio
+                        | R::Switch
+                        | R::Tab
+                        | R::Menuitem
+                        | R::MenuItemCheckbox
+                        | R::MenuItemRadio
+                        | R::Option
+                        | R::Combobox
+                        | R::Adjustable
+                        | R::Spinbutton
+                )
+            })
+    }
+
+    /// What a terminal's layout takes from node `key` besides its style
+    /// ([`terminal_layout::Role`]): whether it is a control
+    /// ([`Self::is_control`]), a text, a scroll view, and whether a
+    /// terminal leaves it out: what it cannot show well is left out, never
+    /// emulated (images, videos, web views, native components, shaders,
+    /// icon-sized canvases).
+    fn grid_role(&self, key: Key) -> terminal_layout::Role {
+        let kind = self.nodes[key as usize].kind;
+        let left_out = match kind {
+            // A native component draws itself where the platform
+            // registered one, and is blank where it did not.
+            Kind::Image | Kind::Video | Kind::WebView | Kind::Shader => {
+                terminal_layout::LeftOut::Always
+            }
+            Kind::Canvas => terminal_layout::LeftOut::IfIcon,
+            _ => terminal_layout::LeftOut::No,
+        };
+        let control = self.is_control(key);
+        // A control's label in columns, one per character: what it shows
+        // when all its content is left out (an icon button).
+        let label = control
+            .then(|| self.nodes[key as usize].props.as_ref())
+            .flatten()
+            .map_or(0, |p| {
+                // A popup's trigger (its `expanded` set) shows as one
+                // chevron, `▾` or `▴`, in place of its label.
+                if p.accessibility.state.expanded.is_some() {
+                    return 1;
+                }
+                p.accessibility.label.as_deref().map_or(0, |l| {
+                    l.trim().chars().count().min(u16::MAX as usize) as u16
+                })
+            });
+        let node = &self.nodes[key as usize];
+        let view = &node.view_style;
+        let c = view.corner_radius;
+        let radius = [c.top_left, c.top_right, c.bottom_right, c.bottom_left]
+            .into_iter()
+            .map(|r| r.unwrap_or(view.border_radius).0)
+            .fold(0.0, f32::max);
+        let w = view.borders.widths;
+        let border_color = [w.top, w.right, w.bottom, w.left]
+            .iter()
+            .position(|&v| v > Points::ZERO)
+            .map_or(crate::Color::TRANSPARENT, |i| view.borders.colors[i]);
+        // A text's characters other than white space, which an absolute
+        // box pinned over it would hide.
+        let glyphs = kind == Kind::Text
+            && node
+                .layout
+                .and_then(|l| self.layout.get_node_context(l))
+                .is_some_and(|cx| match cx {
+                    LeafContext::Text(cx) => cx.text.text.chars().any(|ch| !ch.is_whitespace()),
+                    _ => false,
+                });
+        terminal_layout::Role {
+            control,
+            label,
+            text: matches!(kind, Kind::Text | Kind::Input),
+            scroll: matches!(kind, Kind::Scroll | Kind::List),
+            root: key == self.root,
+            fills: matches!(kind, Kind::Screen | Kind::Modal),
+            sized: kind == Kind::Native,
+            input: kind == Kind::Input,
+            glyphs,
+            radius,
+            fill: view.background_color,
+            border_color,
+            splitter: match view.cursor {
+                crate::Cursor::ColResize => terminal_layout::Splitter::Columns,
+                crate::Cursor::RowResize => terminal_layout::Splitter::Rows,
+                _ => terminal_layout::Splitter::No,
+            },
+            left_out,
+            overlay: kind == Kind::Overlay,
+        }
+    }
+
+    /// Tells the layout what its grid takes from node `key`
+    /// ([`Self::grid_role`]).
+    fn sync_grid_role(&mut self, key: Key) {
+        if let Some(layout) = self.nodes[key as usize].layout {
+            let role = self.grid_role(key);
+            if self.layout.set_role(layout, role) {
+                self.needs_layout = true;
+            }
+        }
     }
 
     /// What a node of its kind needs once made, its layout style `style`.
@@ -2837,6 +3002,8 @@ impl<M: TextEngine> Core<M> {
         node.animated = animated;
         node.z_index = z_index;
         node.vertical_align = vertical_align;
+        // Its fill, border and corners (`terminal_layout::Role`).
+        self.sync_grid_role(key);
         if align_changed {
             self.mark_text_block(key);
         } else if content_align_changed && let Some(place) = self.placed_in_text(key) {
@@ -5094,8 +5261,12 @@ impl<M: TextEngine> Core<M> {
             };
             let mut flags = std::mem::take(&mut node.dirty);
             node.queued = false;
-            if flags & dirty::TEXT_BUILD != 0 && node.layout.is_some() && self.rebuild_text(key) {
-                flags |= dirty::TEXT_MOUNT;
+            if flags & dirty::TEXT_BUILD != 0 && node.layout.is_some() {
+                if self.rebuild_text(key) {
+                    flags |= dirty::TEXT_MOUNT;
+                }
+                // Whether it shows characters (`terminal_layout::Role`).
+                self.sync_grid_role(key);
             }
             let node = &self.nodes[key as usize];
             if !node.created {
@@ -5869,13 +6040,46 @@ impl<M: TextEngine> Core<M> {
     }
 
     /// `layout`'s layout, rounded to the surface's device pixels as Taffy's
-    /// rounding pass rounds to whole points ([`rounded`]).
+    /// rounding pass rounds to whole points ([`rounded`]); on a grid
+    /// surface, to its whole Cells.
     fn rounded_layout(&self, layout: LayoutId) -> taffy::Layout {
         rounded(
             self.layout.unrounded_layout(layout),
             self.layout_origin(layout),
-            self.pixel_ratio(),
+            self.frame_ratio(),
         )
+    }
+
+    /// What frames are rounded to, per axis, in "pixels" per point: the
+    /// surface's device pixels, or on a grid surface its Cells (one Cell a
+    /// pixel: [`terminal_layout::Grid::ratio`]).
+    fn frame_ratio(&self) -> taffy::Size<f32> {
+        match self.layout.grid() {
+            Some(grid) => grid.ratio(),
+            None => {
+                let ratio = self.pixel_ratio();
+                taffy::Size {
+                    width: ratio,
+                    height: ratio,
+                }
+            }
+        }
+    }
+
+    /// The surface's Cell size is now `cell` (`None`: it is no grid):
+    /// styles are put on the grid, or taken off it, and everything is laid
+    /// out again ([`grid`]).
+    fn cell_changed(&mut self, cell: Option<Size<Points>>, surfaces: bool, dark: bool) {
+        let grid = cell
+            .and_then(terminal_layout::Grid::new)
+            .map(|g| g.with_surfaces(surfaces, dark));
+        let cell = grid.map(|g| Size::new(Points(g.width), Points(g.height)));
+        if self.measure_cache.set_cell(cell) {
+            self.fonts_changed();
+        }
+        if self.layout.set_grid(grid) {
+            self.needs_layout = true;
+        }
     }
 
     /// The device pixels per point layouts and text measurements are rounded
@@ -6309,7 +6513,7 @@ impl<M: TextEngine> Core<M> {
         while k != NO_KEY {
             let n = &self.nodes[k as usize];
             if let Some(layout) = n.layout
-                && self.layout.style(layout).display == taffy::Display::None
+                && self.layout.displays_none(layout)
             {
                 return true;
             }
@@ -6556,7 +6760,7 @@ impl<M: TextEngine> Core<M> {
         if !node.created {
             return;
         }
-        let hidden = hidden || self.layout.style(layout).display == taffy::Display::None;
+        let hidden = hidden || self.layout.displays_none(layout);
         if hidden {
             self.layout.emitted(layout);
             self.nodes[key as usize].emitted = None;
@@ -6589,7 +6793,7 @@ impl<M: TextEngine> Core<M> {
                     .layout
                     .parent(layout)
                     .is_some_and(|p| self.layout.style(p).position.is_positioned()));
-        let ratio = self.pixel_ratio();
+        let ratio = self.frame_ratio();
         // Nothing in the subtree was laid out anew and its origin moved by
         // whole device pixels (or not at all): every frame in it, relative to
         // its parent, rounds as it did. A scroll that moves a table's rows
@@ -6600,11 +6804,13 @@ impl<M: TextEngine> Core<M> {
             && node.beside == NO_KEY
             && !self.nodes.get(node.parent as usize).is_some_and(|p| p.rtl)
             && node.emitted.is_some_and(|(at, r)| {
-                let moved = |a: f32, b: f32| {
+                let moved = |a: f32, b: f32, ratio: f32| {
                     let d = (a - b) * ratio;
                     d == d.round()
                 };
-                r == ratio && moved(origin.x, at.x) && moved(origin.y, at.y)
+                r == ratio
+                    && moved(origin.x, at.x, ratio.width)
+                    && moved(origin.y, at.y, ratio.height)
             })
         {
             self.nodes[key as usize].emitted = Some((origin, ratio));
@@ -6622,8 +6828,8 @@ impl<M: TextEngine> Core<M> {
         };
         let l = rounded(&unrounded, containing, ratio);
         let mut frame = rect(
-            l.location.x + span(origin.x, containing.x, ratio),
-            l.location.y + span(origin.y, containing.y, ratio),
+            l.location.x + span(origin.x, containing.x, ratio.width),
+            l.location.y + span(origin.y, containing.y, ratio.height),
             l.size.width,
             l.size.height,
         );
@@ -6662,14 +6868,15 @@ impl<M: TextEngine> Core<M> {
             });
             let m = unrounded.margin;
             let margins = if column {
-                (round(m.top, ratio), round(m.bottom, ratio))
+                (round(m.top, ratio.height), round(m.bottom, ratio.height))
             } else {
-                (round(m.left, ratio), round(m.right, ratio))
+                (round(m.left, ratio.width), round(m.right, ratio.width))
             };
             self.laid_follower(key, Some(frame), column, margins);
         } else {
             self.set_frame(key, frame);
         }
+        self.sync_cell_border(key, &unrounded);
         let kind = self.nodes[key as usize].kind;
         if kind == Kind::Input {
             let content = content_box(&l);
@@ -6716,6 +6923,32 @@ impl<M: TextEngine> Core<M> {
         let node = &mut self.nodes[key as usize];
         node.escapes = escapes;
         node.emitted = Some((origin, ratio));
+    }
+
+    /// In a terminal, mounts node `key` without the borders its layout
+    /// `l` gives no Cell (`Node::cell_border`), again when that changes;
+    /// off a terminal, with its borders as styled again.
+    fn sync_cell_border(&mut self, key: Key, l: &taffy::Layout) {
+        let w = self.nodes[key as usize].view_style.borders.widths;
+        let styled = [w.top, w.right, w.bottom, w.left]
+            .iter()
+            .any(|&v| v > Points::ZERO);
+        // Only a bordered view's style changes.
+        let sides = self.layout.grid().filter(|_| styled).map(|_| {
+            let b = l.border;
+            [b.top, b.right, b.bottom, b.left]
+                .iter()
+                .enumerate()
+                .fold(0u8, |m, (bit, &v)| m | (u8::from(v > 0.0) << bit))
+        });
+        let node = &mut self.nodes[key as usize];
+        if node.cell_border == sides {
+            return;
+        }
+        node.cell_border = sides;
+        let id = node.id;
+        let style = self.mounted_view_style(key);
+        self.mount.push(MountItem::ViewStyle { id, style });
     }
 
     /// Queues node `key`'s frame for its layout listeners once it was laid
@@ -7404,51 +7637,58 @@ fn ceil_to_pixel(value: Points, ratio: f32) -> Points {
 }
 
 /// `layout` rounded as Taffy's rounding pass (`taffy::round_layout`) rounds
-/// it, to device pixels of `ratio` pixels per point ([`round`]), `origin` being the unrounded position of the node around it in its
+/// it, to device pixels of `ratio` pixels per point on each axis
+/// ([`round`]; on a grid surface a Cell is a pixel: [`terminal_layout::Grid::ratio`]),
+/// `origin` being the unrounded position of the node around it in its
 /// layout root: edges are rounded where they are in the root, so adjacent
 /// views stay adjacent. The core rounds itself: Taffy's pass reaches the
 /// absolutely positioned nodes through their containing block's list,
 /// which it can leave holding removed nodes (a panic) or never fill (a
 /// hidden subtree's), while here every node is reached through its parent,
 /// its logical parent; out-of-flow offsets use their Taffy containing block.
-fn rounded(layout: &taffy::Layout, origin: taffy::Point<f32>, ratio: f32) -> taffy::Layout {
+fn rounded(
+    layout: &taffy::Layout,
+    origin: taffy::Point<f32>,
+    ratio: taffy::Size<f32>,
+) -> taffy::Layout {
     let mut out = *layout;
     let (x, y) = (origin.x + layout.location.x, origin.y + layout.location.y);
-    out.location.x = span(origin.x, x, ratio);
-    out.location.y = span(origin.y, y, ratio);
-    out.size.width = span(x, x + layout.size.width, ratio);
-    out.size.height = span(y, y + layout.size.height, ratio);
-    out.scrollbar_size.width = round(layout.scrollbar_size.width, ratio);
-    out.scrollbar_size.height = round(layout.scrollbar_size.height, ratio);
-    out.border.left = span(x, x + layout.border.left, ratio);
+    let (rx, ry) = (ratio.width, ratio.height);
+    out.location.x = span(origin.x, x, rx);
+    out.location.y = span(origin.y, y, ry);
+    out.size.width = span(x, x + layout.size.width, rx);
+    out.size.height = span(y, y + layout.size.height, ry);
+    out.scrollbar_size.width = round(layout.scrollbar_size.width, rx);
+    out.scrollbar_size.height = round(layout.scrollbar_size.height, ry);
+    out.border.left = span(x, x + layout.border.left, rx);
     out.border.right = span(
         x + layout.size.width - layout.border.right,
         x + layout.size.width,
-        ratio,
+        rx,
     );
-    out.border.top = span(y, y + layout.border.top, ratio);
+    out.border.top = span(y, y + layout.border.top, ry);
     out.border.bottom = span(
         y + layout.size.height - layout.border.bottom,
         y + layout.size.height,
-        ratio,
+        ry,
     );
-    out.padding.left = span(x, x + layout.padding.left, ratio);
+    out.padding.left = span(x, x + layout.padding.left, rx);
     out.padding.right = span(
         x + layout.size.width - layout.padding.right,
         x + layout.size.width,
-        ratio,
+        rx,
     );
-    out.padding.top = span(y, y + layout.padding.top, ratio);
+    out.padding.top = span(y, y + layout.padding.top, ry);
     out.padding.bottom = span(
         y + layout.size.height - layout.padding.bottom,
         y + layout.size.height,
-        ratio,
+        ry,
     );
     let o = layout.scrollable_overflow_rect;
-    out.scrollable_overflow_rect.left = span(x, x + o.left, ratio);
-    out.scrollable_overflow_rect.right = span(x, x + o.right, ratio);
-    out.scrollable_overflow_rect.top = span(y, y + o.top, ratio);
-    out.scrollable_overflow_rect.bottom = span(y, y + o.bottom, ratio);
+    out.scrollable_overflow_rect.left = span(x, x + o.left, rx);
+    out.scrollable_overflow_rect.right = span(x, x + o.right, rx);
+    out.scrollable_overflow_rect.top = span(y, y + o.top, ry);
+    out.scrollable_overflow_rect.bottom = span(y, y + o.bottom, ry);
     out
 }
 
@@ -7703,7 +7943,9 @@ fn measure_text<M: TextEngine>(
             // device pixel: to a whole point the box grows past the text by
             // up to a point, all of it below the last line.
             let ratio = cache.pixel_ratio();
-            let size = size.map(|v| ceil_to_pixel(v, ratio));
+            let size = cache
+                .on_cells(size)
+                .unwrap_or_else(|| size.map(|v| ceil_to_pixel(v, ratio)));
             cache.insert(cx.layout_hash, typed, size);
             size
         }

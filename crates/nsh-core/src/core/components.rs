@@ -967,6 +967,12 @@ impl<M: TextEngine> Core<M> {
         }
         // Frames and text measurements are rounded to device pixels.
         self.pixel_ratio_changed(environment.pixel_ratio);
+        // On a grid surface, lengths and frames are put on its Cells.
+        self.cell_changed(
+            environment.cell,
+            environment.cell_surfaces,
+            environment.dark,
+        );
         if changed {
             // What reads a part that changed runs again.
             self.components.runtime.set_environment(environment);

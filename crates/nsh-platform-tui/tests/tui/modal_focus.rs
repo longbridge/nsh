@@ -262,3 +262,68 @@ fn an_empty_modal_clears_focus_and_keeps_navigation_off_the_page() {
     draw_until(&mut view, &mut terminal, &rx, "focus opener presses 1");
     assert!(!terminal.backend().cursor_visible());
 }
+
+/// A system dialog takes every key and press until answered; its answer
+/// resolves `AlertDialog.show` with the chosen action.
+#[cfg(feature = "js")]
+#[test]
+fn system_dialogs_are_answered_with_keys_and_presses() {
+    let code = nsh_bundler::compile_module(
+        "App.tsx",
+        r#"
+        import { mount, signal, Text } from "nsh";
+        import { AlertDialog } from "nsh/base";
+        const shown = signal("waiting");
+        setTimeout(async () => {
+          const { action: a } = await AlertDialog.show({
+            title: "Delete the photo?",
+            actions: [
+              { label: "Cancel", role: "cancel", id: "cancel" },
+              { label: "Delete", role: "destructive", id: "delete" },
+            ],
+          });
+          shown.set(`a ${a}`);
+          const { action: b } = await AlertDialog.show({
+            presentation: "actionSheet",
+            actions: [{ label: "Share", id: "share" }, { label: "Copy", id: "copy" }],
+          });
+          shown.set(`a ${a} b ${b}`);
+          const { action: c } = await AlertDialog.show({ title: "Saved", actions: [{ label: "Done", id: "done" }] });
+          shown.set(`a ${a} b ${b} c ${c}`);
+        }, 0);
+        mount(() => <Text>{shown()}</Text>);
+    "#,
+        &[],
+    )
+    .unwrap();
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(60, 16)).unwrap();
+    view.load(nsh_platform_tui::Bundle::source(code)).unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "Delete the photo?");
+    // Left moves from the destructive button to the cancel one; Enter chooses it.
+    assert_eq!(key(&mut view, "Left", false), Handled::Yes);
+    assert_eq!(key(&mut view, "Enter", false), Handled::Yes);
+    draw_until(&mut view, &mut terminal, &rx, "a cancel");
+    draw_until(&mut view, &mut terminal, &rx, "Copy");
+    // An action sheet's rows: Down to the second, Space chooses it.
+    key(&mut view, "Down", false);
+    key(&mut view, " ", false);
+    draw_until(&mut view, &mut terminal, &rx, "b copy");
+    draw_until(&mut view, &mut terminal, &rx, "Done");
+    // A press on a button chooses it.
+    let (x, y) = {
+        let buffer = terminal.backend().buffer();
+        let width = buffer.area.width;
+        let index = (0..buffer.content.len())
+            .find(|&i| {
+                (0..4).all(|k| {
+                    buffer.content.get(i + k).map(|c| c.symbol()) == Some(&"Done"[k..k + 1])
+                })
+            })
+            .expect("the dialog's button is drawn");
+        (index as u16 % width, index as u16 / width)
+    };
+    view.handle(mouse(MouseKind::Down(MouseButton::Left), x, y));
+    view.handle(mouse(MouseKind::Up(MouseButton::Left), x, y));
+    draw_until(&mut view, &mut terminal, &rx, "a cancel b copy c done");
+}

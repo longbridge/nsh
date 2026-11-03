@@ -641,7 +641,10 @@ The main thread never waits for your code. When the system needs an answer on th
 
 ## Terminal pointer input
 
-The terminal host preserves the terminal emulator's own text selection by default. Start the host with
-`--mouse` to capture mouse input: hover applies the app's `hoverStyle` and `hover:` classes, primary-button drags
-drive native pans and responders, and dragging scroll content moves its viewport. Positions follow the Cell
-grid. Embedding applications choose when to forward mouse events to their NSH surface.
+The terminal host captures the mouse: hover applies the app's `hoverStyle` and `hover:` classes and reports
+`onMouseEnter` / `onMouseMove` / `onMouseLeave`, primary-button drags drive native pans and responders, dragging
+scroll content or a scroll bar's thumb moves its viewport, and the wheel scrolls the innermost scroll view under
+the pointer (Shift scrolls sideways). Double and triple clicks carry their count in `Press` events, and a right
+click reaches `onContextMenu`. Positions follow the Cell grid. Start the host with `--no-mouse` to leave the
+mouse to the terminal emulator and its own text selection. Embedding applications choose when to forward mouse
+events to their NSH surface.

@@ -2,7 +2,15 @@ use nsh_core::prelude::*;
 use nsh_platform_tui::{App, Handled, Input, Modifiers, Root};
 use ratatui_core::{backend::TestBackend, terminal::Terminal};
 
-use super::app::{barred, draw_until, surface};
+use super::app::{draw_until, surface};
+
+/// The Cell is in a focused control's reversed label (its `focus` style
+/// fill is the GUI's and draws nothing).
+fn focus_filled(buffer: &ratatui_core::buffer::Buffer, x: u16, y: u16) -> bool {
+    buffer[(x, y)]
+        .modifier
+        .contains(ratatui_core::style::Modifier::REVERSED)
+}
 
 fn key(name: &str, modifiers: Modifiers) -> Input {
     Input::Key {
@@ -52,7 +60,7 @@ fn FocusPage() -> impl IntoElement {
 }
 
 #[test]
-fn terminal_keys_follow_tree_order_and_horizontal_keys_stay_spatial() {
+fn tab_and_ctrl_keys_follow_tree_order_and_arrows_stay_spatial() {
     let (mut view, rx) = surface();
     let mut terminal = Terminal::new(TestBackend::new(40, 10)).unwrap();
     view.load(App::Rust(Root::new::<FocusPage>(|| ()))).unwrap();
@@ -60,6 +68,8 @@ fn terminal_keys_follow_tree_order_and_horizontal_keys_stay_spatial() {
     for (input, focused, cursor) in [
         (ctrl("n"), "B", (10, 1)),
         (key("Left", Default::default()), "A", (0, 1)),
+        (key("Down", Default::default()), "C", (0, 3)),
+        (key("Up", Default::default()), "A", (0, 1)),
         (key("Down", Default::default()), "C", (0, 3)),
         (ctrl("p"), "A", (0, 1)),
         (key("Right", Default::default()), "B", (10, 1)),
@@ -79,10 +89,16 @@ fn terminal_keys_follow_tree_order_and_horizontal_keys_stay_spatial() {
         assert_eq!(view.handle(input), Handled::Yes);
         draw_until(&mut view, &mut terminal, &rx, &format!("focus {focused}"));
         assert!(!terminal.backend().cursor_visible());
-        assert!(barred(terminal.backend().buffer(), cursor.0, cursor.1));
+        assert!(focus_filled(
+            terminal.backend().buffer(),
+            cursor.0,
+            cursor.1
+        ));
     }
     assert_eq!(view.handle(key("Enter", Default::default())), Handled::Yes);
     draw_until(&mut view, &mut terminal, &rx, "press DUP");
+    assert_eq!(view.handle(key(" ", Default::default())), Handled::Yes);
+    draw_until(&mut view, &mut terminal, &rx, "press DUPDUP");
     assert_eq!(
         view.handle(Input::Key {
             key: "Enter".into(),
@@ -215,6 +231,78 @@ fn focus_reveals_scroll_content_and_page_keys_keep_the_core_offset_protocol() {
             .unwrap();
         draw_until(&mut view, &mut terminal, &rx, expected);
     }
+}
+
+#[test]
+fn arrows_move_down_a_scroll_view_and_scroll_it_to_the_next_control() {
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(40, 10)).unwrap();
+    view.load(App::Rust(Root::new::<ScrollKeys>(|| ())))
+        .unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "offset 0 chosen -1");
+    for _ in 0..3 {
+        assert_eq!(view.handle(key("Down", Default::default())), Handled::Yes);
+        terminal
+            .draw(|frame| view.render(frame, frame.area()))
+            .unwrap();
+    }
+    // Item2 was one row below the view: it scrolled into sight.
+    draw_until(&mut view, &mut terminal, &rx, "offset 16");
+    assert_eq!(view.handle(key(" ", Default::default())), Handled::Yes);
+    draw_until(&mut view, &mut terminal, &rx, "chosen 2");
+    assert_eq!(view.handle(key("Up", Default::default())), Handled::Yes);
+    terminal
+        .draw(|frame| view.render(frame, frame.area()))
+        .unwrap();
+    assert_eq!(view.handle(key("Up", Default::default())), Handled::Yes);
+    draw_until(&mut view, &mut terminal, &rx, "offset 0");
+}
+
+#[component]
+fn ArrowSlider() -> impl IntoElement {
+    let value = signal(nsh_base::SliderValue::Single(60.0));
+    let presses = signal(0);
+    view()
+        .flex_1()
+        .child(
+            nsh_base::slider()
+                .w(px(160.0))
+                .value(move || Some(value.get()))
+                .step(5.0)
+                .track_class("h-8")
+                .thumb_class("w-4 h-2 bg-[#abcdef] focus:bg-[#654321]")
+                .on_change(move |next: &nsh_base::SliderValue| value.set(*next)),
+        )
+        .child(
+            nsh_base::button()
+                .h(px(16.0))
+                .on_press(move |_: &()| presses.update(|n| *n += 1))
+                .child(text("below")),
+        )
+        .child(text(move || {
+            format!("value {} presses {}", value.get().end(), presses.get())
+        }))
+}
+
+#[test]
+fn a_focused_component_gets_arrows_before_spatial_focus_movement() {
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(60, 8)).unwrap();
+    view.load(App::Rust(Root::new::<ArrowSlider>(|| ())))
+        .unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "value 60 presses 0");
+    let idle = super::controls::thumb_color(&terminal).expect("the thumb is drawn");
+    view.handle(key("Tab", Default::default()));
+    super::controls::wait_for_thumb_focus(&mut view, &mut terminal, &rx, idle);
+    // The slider consumes Down: its value steps and focus stays on the thumb, so the
+    // button below it is not pressed by Enter.
+    assert_eq!(view.handle(key("Down", Default::default())), Handled::Yes);
+    draw_until(&mut view, &mut terminal, &rx, "value 55 presses 0");
+    view.handle(key("Enter", Default::default()));
+    draw_until(&mut view, &mut terminal, &rx, "value 55 presses 0");
+    view.handle(key("Tab", Default::default()));
+    view.handle(key("Enter", Default::default()));
+    draw_until(&mut view, &mut terminal, &rx, "value 55 presses 1");
 }
 
 #[component]
@@ -610,7 +698,8 @@ fn enter_reports_a_press_at_the_focused_views_middle() {
     draw_until(&mut view, &mut terminal, &rx, "waiting");
     view.handle(ctrl("n"));
     assert_eq!(view.handle(key("Enter", Default::default())), Handled::Yes);
-    draw_until(&mut view, &mut terminal, &rx, "40,16 at 56,32");
+    // A box with content is one row: its middle is half a row down.
+    draw_until(&mut view, &mut terminal, &rx, "40,8 at 56,24");
 }
 
 #[component]
@@ -704,7 +793,7 @@ fn the_diagnostics_panel_owns_repeated_keys_and_preserves_app_focus() {
     view.handle(key("Escape", Default::default()));
     draw_until(&mut view, &mut terminal, &rx, "focus B");
     assert!(!terminal.backend().cursor_visible());
-    assert!(barred(terminal.backend().buffer(), 10, 1));
+    assert!(focus_filled(terminal.backend().buffer(), 10, 1));
     view.stop();
     std::fs::remove_file(path).unwrap();
 }
@@ -720,10 +809,10 @@ fn draw_focused_cell(
         terminal
             .draw(|frame| view.render(frame, frame.area()))
             .unwrap();
-        if barred(terminal.backend().buffer(), at.0, at.1) {
+        if focus_filled(terminal.backend().buffer(), at.0, at.1) {
             return;
         }
-        rx.recv_deadline(deadline).expect("the focus bar");
+        rx.recv_deadline(deadline).expect("the focus style");
     }
 }
 

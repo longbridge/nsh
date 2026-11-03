@@ -96,17 +96,6 @@ impl CellBounds {
         bottom: i32::MAX,
     };
 
-    pub(crate) fn constrained(self, limits: Self) -> Self {
-        let left = self.left.clamp(limits.left, limits.right);
-        let top = self.top.clamp(limits.top, limits.bottom);
-        Self {
-            left,
-            top,
-            right: self.right.clamp(left, limits.right),
-            bottom: self.bottom.clamp(top, limits.bottom),
-        }
-    }
-
     pub(crate) fn fitted(self, limits: Self) -> Self {
         let width = (self.right - self.left).min(limits.right.saturating_sub(limits.left));
         let height = (self.bottom - self.top).min(limits.bottom.saturating_sub(limits.top));
@@ -118,40 +107,6 @@ impl CellBounds {
             right: left + width,
             bottom: top + height,
         }
-    }
-
-    pub(crate) fn contains_rounded(
-        self,
-        x: u16,
-        y: u16,
-        size: nsh_core::Size<Points>,
-        radii: nsh_core::CornerRadii,
-    ) -> bool {
-        if radii.is_zero() {
-            return true;
-        }
-        if self.right <= self.left || self.bottom <= self.top {
-            return false;
-        }
-        let x = size.width
-            * ((f32::from(x) + 0.5 - self.left as f32) / (self.right - self.left) as f32);
-        let y = size.height
-            * ((f32::from(y) + 0.5 - self.top as f32) / (self.bottom - self.top) as f32);
-        for (dx, dy, radius) in [
-            (x, y, radii.top_left),
-            (size.width - x, y, radii.top_right),
-            (size.width - x, size.height - y, radii.bottom_right),
-            (x, size.height - y, radii.bottom_left),
-        ] {
-            if radius > Points::ZERO && dx < radius && dy < radius {
-                let nx = (radius - dx) / radius;
-                let ny = (radius - dy) / radius;
-                if nx * nx + ny * ny > 1.0 {
-                    return false;
-                }
-            }
-        }
-        true
     }
 
     pub(crate) fn origin(
@@ -176,27 +131,6 @@ impl CellBounds {
             nsh_core::Size::new(
                 cells.width() * self.right.saturating_sub(self.left) as f32,
                 cells.height() * self.bottom.saturating_sub(self.top) as f32,
-            ),
-        )
-    }
-
-    /// The point rect through the centers of these Cells: what is drawn in
-    /// one of them covers its center, what only rounds next to it does not.
-    pub(crate) fn centers(
-        self,
-        cells: CellSize,
-        area: ratatui_core::layout::Rect,
-    ) -> nsh_core::Bounds<Points> {
-        const CENTER: Points = Points(0.5);
-        let origin = self.origin(cells, area);
-        nsh_core::Bounds::new(
-            nsh_core::Point::new(
-                origin.x + cells.width() / 2.0 - CENTER,
-                origin.y + cells.height() / 2.0 - CENTER,
-            ),
-            nsh_core::Size::new(
-                cells.width() * (self.right.saturating_sub(self.left) - 1) as f32 + CENTER * 2.0,
-                cells.height() * (self.bottom.saturating_sub(self.top) - 1) as f32 + CENTER * 2.0,
             ),
         )
     }

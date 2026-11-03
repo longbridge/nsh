@@ -35,7 +35,7 @@ use self::path::{Dash, IDENTITY, Matrix, Outline, apply, distance, mean_scale, m
 use crate::{
     CellSize,
     geometry::{CellBounds, TextRun},
-    palette::{Ground, ink},
+    palette::{self, Ground},
 };
 
 const DOTS_ACROSS: usize = 2;
@@ -87,30 +87,19 @@ impl CanvasView {
 }
 
 /// Draws `canvas` into the `visible` Cells of a view whose Cells are
-/// `bounds`, in the palette on `ground`.
+/// `bounds`, in the paints' own colors over `ground`.
 pub(crate) fn draw(
     canvas: &CanvasView,
     buffer: &mut Buffer,
     bounds: CellBounds,
     visible: Rect,
     cells: CellSize,
-    projection: crate::animation::Projection,
     ground: Ground,
 ) {
     if visible.is_empty() {
         return;
     }
     let mut replay = Replay::new(canvas, bounds, visible, cells, ground);
-    let m = projection.matrix.0;
-    replay.base = [
-        m[0] as f32,
-        m[1] as f32,
-        m[4] as f32,
-        m[5] as f32,
-        m[12] as f32,
-        m[13] as f32,
-    ];
-    replay.state.matrix = replay.base;
     for op in &canvas.drawing.ops {
         replay.op(op);
     }
@@ -466,12 +455,12 @@ impl<'a> Replay<'a> {
         Outline::of(path, &self.state.matrix, &|n| self.n(n))
     }
 
-    /// A paint's palette ink, its alpha including `globalAlpha`; `None`
+    /// A paint's color at the terminal's depth, its alpha including `globalAlpha`; `None`
     /// draws nothing.
     fn ink(&self, paint: &Paint) -> Option<Style> {
         let color = self.canvas.color(paint);
         let alpha = ((color.0 & 255) as f32 * self.state.alpha).round() as u32;
-        (alpha > 0).then(|| ink(nsh_core::Color(color.0 & !255 | alpha), self.ground))
+        (alpha > 0).then(|| palette::paint(nsh_core::Color(color.0 & !255 | alpha), self.ground))
     }
 
     fn clipped_out(&self, index: usize) -> bool {

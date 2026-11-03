@@ -12,13 +12,13 @@ mod performance;
 mod lifecycle;
 
 #[test]
-fn the_host_exposes_opt_in_mouse_capture() {
+fn the_host_captures_the_mouse_unless_asked_not_to() {
     let output = std::process::Command::new(env!("CARGO_BIN_EXE_nsh-tui-host"))
         .arg("--help")
         .output()
         .unwrap();
     assert!(output.status.success());
     let help = String::from_utf8(output.stdout).unwrap();
-    assert!(help.contains("--mouse"));
-    assert!(help.contains("Capture the mouse"));
+    assert!(help.contains("--no-mouse"));
+    assert!(help.contains("Leave the mouse to the terminal"));
 }

@@ -327,7 +327,7 @@ impl<M: TextEngine> Core<M> {
                 if !n.created {
                     return None;
                 }
-                let hidden = self.layout.style(layout).display == taffy::Display::None;
+                let hidden = self.layout.displays_none(layout);
                 if hidden && !n.is_overlay() {
                     return None;
                 }

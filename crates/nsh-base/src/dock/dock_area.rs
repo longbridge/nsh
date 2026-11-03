@@ -555,6 +555,9 @@ pub fn DockArea(props: DockAreaProps, cx: Scope<DockAreaEvent>) -> impl IntoElem
         .overflow_hidden()
         .min_w(px(0.0))
         .min_h(px(0.0))
+        // A terminal keeps no percentage height for a box of content: the
+        // area grows into its parent's room instead.
+        .when(crate::terminal::is_terminal(), |v| v.flex_grow(1.0))
         .on_layout(move |frame: &Bounds<Points>| a.size.set(frame.size))
         .child(
             when(
@@ -1167,6 +1170,7 @@ fn dock_frame(a: AreaCx, placement: DockPlacement) -> AnyElement {
                     .map_or(Points::ZERO, |info| fit_dock(a, placement, info.size)),
             };
             let open = move || info.get().is_some_and(|info| info.open);
+            let terminal = crate::terminal::is_terminal();
             let (axis, edge) = match placement {
                 DockPlacement::Left => (Axis::Horizontal, HandleEdge::Trailing),
                 DockPlacement::Right => (Axis::Horizontal, HandleEdge::Leading),
@@ -1188,6 +1192,13 @@ fn dock_frame(a: AreaCx, placement: DockPlacement) -> AnyElement {
                 .flex_col()
                 .overflow_hidden()
                 .style_with(move |s| match placement {
+                    // A terminal keeps no explicit height for a box of
+                    // content: the dock's rows are its basis in the column.
+                    // Its handle's line takes a Cell of its own on the
+                    // edge it hugs, not one of the dock's tabs or content.
+                    DockPlacement::Bottom if terminal => s.basis(size()).pt(px(24.0)),
+                    DockPlacement::Left if terminal => s.w(size()).pr(px(8.0)),
+                    DockPlacement::Right if terminal => s.w(size()).pl(px(8.0)),
                     DockPlacement::Bottom => s.h(size()),
                     _ => s.w(size()),
                 })

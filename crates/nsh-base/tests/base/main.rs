@@ -38,6 +38,7 @@ mod sheet;
 mod slider;
 mod switch;
 mod tabs;
+mod terminal;
 mod text_view;
 mod time_field;
 mod toggle;

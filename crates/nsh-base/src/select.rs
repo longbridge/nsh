@@ -45,6 +45,7 @@ use nsh_core::{
 use crate::{
     listbox::{self, Hooks, Listbox, Move, Parts, Query, Shown},
     popup::{DropdownFrame, OpenChangeReason, OpenState},
+    terminal::{CLEAR, SELECT_ARROW, is_terminal},
 };
 
 /// An item of a [`Select`]'s or a `Combobox`'s list.
@@ -404,6 +405,14 @@ enum Opening {
 /// (`listClass`), the rows (`itemClass`, with `focus:` for the highlighted
 /// row and `selected:` for the chosen one) and the headers (`groupClass`),
 /// or draws them (`renderItem`, `renderGroup`).
+///
+/// In a terminal the select shows the terminal's own trigger in place of
+/// the app's `trigger`: the chosen title (titles, comma separated), then
+/// ` ▾`, one row; with `cleanable` a ` ×` after it clears the value, in
+/// place of `clearButton`. The list's rows are the items' titles, one
+/// full-width row each, which the terminal marks while highlighted or
+/// chosen (no `renderItem`, `renderGroup` or row classes there)
+/// ([`crate::terminal`]).
 #[component]
 pub fn Select(props: SelectProps, cx: Scope<SelectEvent>) -> impl IntoElement {
     let open = OpenState::new(props.open, props.default_open);
@@ -603,41 +612,76 @@ pub fn Select(props: SelectProps, cx: Scope<SelectEvent>) -> impl IntoElement {
         render_group: props.render_group,
         empty: props.empty,
         footer: None,
-        cover: Some(crate::popup::Cover::new()),
+        // A terminal's list opens under the trigger, never over it.
+        cover: (!is_terminal()).then(crate::popup::Cover::new),
     };
     let toggle = change;
-    // Bound on the slot: in a TSX app they go to the app's element in it
-    // (`docs/dev/components.md` "Named slots"), so its own `active:`,
-    // `focus:` and `disabled:` classes follow the select.
-    let trigger = props.trigger.place(move |t| {
-        let toggle = toggle.clone();
-        t.element_ref(&anchor)
-            .role(AccessibilityRole::Combobox)
-            .optional_label(props.accessibility_label)
-            .disabled(props.disabled)
-            .focusable(move || !props.disabled.get())
-            .accessibility_state(move || AccessibilityState {
-                expanded: Some(open.get()),
-                disabled: props.disabled.get(),
-                ..AccessibilityState::default()
-            })
-            .accessibility_value(move || {
-                current.with(|v| {
-                    props
-                        .items
-                        .with(|items| listbox::selected_titles(items, v.as_slice()))
+    // What makes the trigger the select's: its role, states and value for
+    // screen readers, the keyboard focus, its width for the list, and the
+    // press that opens and closes the list. On the app's element in the
+    // slot, or on the terminal's own trigger.
+    macro_rules! bind_trigger {
+        ($t:expr) => {{
+            let toggle = toggle.clone();
+            $t.element_ref(&anchor)
+                .role(AccessibilityRole::Combobox)
+                .optional_label(props.accessibility_label)
+                .disabled(props.disabled)
+                .focusable(move || !props.disabled.get())
+                .accessibility_state(move || AccessibilityState {
+                    expanded: Some(open.get()),
+                    disabled: props.disabled.get(),
+                    ..AccessibilityState::default()
                 })
-            })
-            .on_layout(move |frame: &Bounds<Points>| width.set(Some(frame.size.width)))
-            .on_focus(move || focused.set(true))
-            .on_blur(move || focused.set(false))
-            .on_press(move || {
-                opening.replace(Opening::Press);
-                toggle(!open.get_untracked(), OpenChangeReason::TriggerPress);
-            })
-    });
+                .accessibility_value(move || {
+                    current.with(|v| {
+                        props
+                            .items
+                            .with(|items| listbox::selected_titles(items, v.as_slice()))
+                    })
+                })
+                .on_layout(move |frame: &Bounds<Points>| width.set(Some(frame.size.width)))
+                .on_focus(move || focused.set(true))
+                .on_blur(move || focused.set(false))
+                .on_press(move || {
+                    opening.replace(Opening::Press);
+                    toggle(!open.get_untracked(), OpenChangeReason::TriggerPress);
+                })
+        }};
+    }
+    let terminal = is_terminal();
+    let trigger = match terminal {
+        // The terminal's own trigger, in place of the app's: the chosen
+        // titles, then ` ▾`, one row.
+        true => {
+            let titles = move || {
+                current.with(|v| {
+                    props.items.with(|items| {
+                        listbox::selected_titles(items, v.as_slice())
+                            .and_then(|value| value.text)
+                            .unwrap_or_default()
+                    })
+                })
+            };
+            bind_trigger!(view())
+                .flex_row()
+                .child(text(titles))
+                .child(text(SELECT_ARROW))
+                .into_element()
+        }
+        // Bound on the slot: in a TSX app they go to the app's element in
+        // it (`docs/dev/components.md` "Named slots"), so its own
+        // `active:`, `focus:` and `disabled:` classes follow the select.
+        false => props.trigger.place(move |t| bind_trigger!(t)),
+    };
+    let clear_press = move || {
+        if value.choose(None) {
+            cx.emit(SelectEvent::Change(None));
+        }
+    };
     // A sibling of the trigger, so a press on it never opens the list; not
-    // a stop of Tab (`gpui-component`'s `tab_stop(false)`).
+    // a stop of Tab (`gpui-component`'s `tab_stop(false)`). In a terminal
+    // the terminal's own ` ×` after the trigger.
     let clear = when(
         move || props.cleanable.get() && current.with(Option::is_some),
         move || {
@@ -646,17 +690,18 @@ pub fn Select(props: SelectProps, cx: Scope<SelectEvent>) -> impl IntoElement {
                 .optional_label(props.clear_button_accessibility_label)
                 .focusable(false)
                 .disabled(props.disabled)
-                .on_press(move || {
-                    if value.choose(None) {
-                        cx.emit(SelectEvent::Change(None));
-                    }
+                .on_press(clear_press)
+                .map(|v| match terminal {
+                    true => v.child(text(CLEAR)),
+                    false => v
+                        .app_class(props.clear_button_class)
+                        .inline_style(props.clear_button_style)
+                        .child(props.clear_button.place(|c| c)),
                 })
-                .app_class(props.clear_button_class)
-                .inline_style(props.clear_button_style)
-                .child(props.clear_button.place(|c| c))
         },
     );
     view()
+        .when(terminal, |v| v.flex_row())
         .child(trigger)
         .child(clear)
         .child(listbox::present(lb, anchor, width, parts, hooks))

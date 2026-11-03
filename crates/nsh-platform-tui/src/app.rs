@@ -38,12 +38,44 @@ pub type WakeCallback = Arc<dyn Fn() + Send + Sync>;
 pub struct TerminalCapabilities {
     /// System appearance; dark when the host has no background information.
     pub background: nsh_core::platform::ColorScheme,
+    /// The colors the terminal can show; app colors are drawn at this depth.
+    pub colors: ColorDepth,
+    /// The terminal's default background (OSC 11). At 256 colors or more
+    /// it is the base of the terminal's surfaces: app fills, selections,
+    /// hover and press drawn as steps of it mixed toward
+    /// [`Self::foreground_color`], secondary text as fades. Without it
+    /// the look is bandless: no fills, reverse video and dim text.
+    pub background_color: Option<[u8; 3]>,
+    /// The terminal's default foreground (OSC 10): what the surfaces' steps
+    /// mix toward (white or black against the background when unknown).
+    pub foreground_color: Option<[u8; 3]>,
+    /// The terminal reports the Command (Super) modifier, through the kitty
+    /// keyboard protocol. Without it, Ctrl stands in for Cmd in the app's
+    /// shortcuts on macOS.
+    pub command_key: bool,
+}
+
+/// The colors a terminal shows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
+pub enum ColorDepth {
+    /// 24-bit RGB (`COLORTERM=truecolor`).
+    #[default]
+    TrueColor,
+    /// The xterm 256-color palette.
+    Ansi256,
+    /// The 16 named colors.
+    Ansi16,
 }
 
 impl Default for TerminalCapabilities {
     fn default() -> Self {
         Self {
             background: nsh_core::platform::ColorScheme::Dark,
+            colors: ColorDepth::default(),
+            background_color: None,
+            foreground_color: None,
+            command_key: false,
         }
     }
 }
@@ -131,8 +163,13 @@ pub struct AppView {
     focused: bool,
     clipboard: Arc<dyn nsh_core::clipboard::ClipboardBackend>,
     kill: String,
-    field_drag: Option<(nsh_core::NodeId, ratatui_core::layout::Position)>,
+    field_drag: Option<FieldDrag>,
+    /// The next `draw_terminal` repaints every Cell (the terminal came back to focus).
+    repaint: bool,
     pointer: Pointer,
+    bar_drag: Option<crate::input::BarDrag>,
+    cursor_style: crate::CursorStyle,
+    on_cursor_style: Option<Box<dyn FnMut(crate::CursorStyle)>>,
     selection: crate::selection::Selection,
     hits: Vec<Hit>,
     geometry: Vec<crate::render::Geometry>,
@@ -158,7 +195,21 @@ impl AppView {
             os: OS,
             idiom: Idiom::Terminal,
             color_scheme: options.appearance.resolve(options.capabilities.background),
-            reduce_motion: true,
+            reduce_motion: false,
+            // The core lays out on the terminal's Cells: every frame here is
+            // whole Cells and every border owns its own.
+            cell: Some(nsh_core::Size::new(
+                options.cells.width(),
+                options.cells.height(),
+            )),
+            // Fills are surfaces (bands, padded, no line) where the painter
+            // has a ramp for them: the same condition as `Ramp::new`.
+            cell_surfaces: crate::palette::Ramp::new(
+                options.capabilities.colors,
+                options.capabilities.background_color,
+                options.capabilities.foreground_color,
+            )
+            .is_some(),
             ..Default::default()
         };
         let clipboard = options
@@ -188,7 +239,11 @@ impl AppView {
             clipboard,
             kill: String::new(),
             field_drag: None,
+            repaint: false,
             pointer: Pointer::default(),
+            bar_drag: None,
+            cursor_style: crate::CursorStyle::Default,
+            on_cursor_style: None,
             selection: Default::default(),
             hits: Vec::new(),
             geometry: Vec::new(),
@@ -330,6 +385,9 @@ impl AppView {
         &mut self,
         terminal: &mut ratatui_core::terminal::Terminal<B>,
     ) -> Result<(), B::Error> {
+        if std::mem::take(&mut self.repaint) {
+            terminal.clear()?;
+        }
         if self.perf.is_none() {
             terminal.draw(|frame| self.render(frame, frame.area()))?;
             return Ok(());
@@ -396,6 +454,7 @@ impl AppView {
         if !focused {
             self.minibuffer.end();
             self.field_drag = None;
+            self.bar_drag = None;
             self.selection.clear();
             if let Some(engine) = &self.surface.engine {
                 self.keyboard.focus(None, &mut self.tree, &engine.control());
@@ -431,6 +490,18 @@ impl AppView {
         self.on_appearance = Some(Box::new(callback));
     }
 
+    /// The terminal cursor's shape the surface wants: a bar while a text
+    /// field is edited, the user's own otherwise.
+    pub fn cursor_style(&self) -> crate::CursorStyle {
+        self.cursor_style
+    }
+
+    /// Receives cursor shape changes during rendering on the embedder's
+    /// thread; hosts write the shape to the terminal (`CSI Ps SP q`).
+    pub fn on_cursor_style_changed(&mut self, callback: impl FnMut(crate::CursorStyle) + 'static) {
+        self.on_cursor_style = Some(Box::new(callback));
+    }
+
     /// Replaces the scheduler notification. It must only enqueue work, never render on the engine thread.
     pub fn set_wake_callback(&mut self, callback: Option<WakeCallback>) {
         self.surface.wake.set(callback);
@@ -458,8 +529,13 @@ impl AppView {
 
     /// Routes input against the last completed render. Unused keys and outside-area events are ignored.
     pub fn handle(&mut self, input: Input) -> Handled {
+        // Ctrl+C is never the diagnostics panel's: it copies or quits.
+        #[cfg(feature = "dev")]
+        let interrupt = matches!(&input, Input::Key { key, modifiers, .. }
+            if key == "c" && modifiers.ctrl && !modifiers.alt && !modifiers.shift && !modifiers.cmd);
         #[cfg(feature = "dev")]
         if (self.dev.is_some() || self.diagnostics.log_path.is_some())
+            && !interrupt
             && self.focused
             && (self.diagnostics.open
                 || (self.editing_field().is_none() && !self.minibuffer.is_open()))
@@ -482,6 +558,11 @@ impl AppView {
             self.surface.wake.notify();
             return Handled::Yes;
         }
+        if self.tree.dialogs.is_shown()
+            && let Some(handled) = self.handle_dialog(&input)
+        {
+            return handled;
+        }
         if self.minibuffer.is_open() {
             match &input {
                 Input::Paste(text) => {
@@ -497,10 +578,18 @@ impl AppView {
         }
         match input {
             Input::Focus(focused) => {
+                // The terminal may have drawn over the surface meanwhile.
+                self.repaint |= focused && !self.focused;
                 self.set_focused(focused);
                 Handled::Yes
             }
             Input::Mouse(mouse) => {
+                if matches!(mouse.kind, crate::MouseKind::Down(_)) {
+                    self.pointer.count_click(mouse);
+                }
+                if let Some(handled) = self.handle_scrollbar(mouse) {
+                    return handled;
+                }
                 if self.handle_field_mouse(mouse) {
                     self.selection.clear();
                     self.surface.wake.notify();
@@ -509,14 +598,14 @@ impl AppView {
                 let Some(engine) = &self.surface.engine else {
                     return Handled::Ignored;
                 };
-                if self.selection.handle(
-                    mouse,
-                    self.area,
-                    self.options.cells,
-                    &self.hits,
-                    &self.geometry,
-                    &self.tree,
-                ) {
+                let scene = crate::selection::Scene {
+                    area: self.area,
+                    cells: self.options.cells,
+                    hits: &self.hits,
+                    geometry: &self.geometry,
+                    tree: &self.tree,
+                };
+                if self.selection.handle(mouse, scene, self.pointer.clicks()) {
                     self.pointer.cancel(&mut self.tree, Some(&engine.control()));
                     self.keyboard.focus(None, &mut self.tree, &engine.control());
                     self.surface.wake.notify();
@@ -525,7 +614,22 @@ impl AppView {
                 if matches!(mouse.kind, crate::MouseKind::Down(crate::MouseButton::Left)) {
                     self.surface.wake.notify();
                 }
-                let handled = if matches!(mouse.kind, crate::MouseKind::Wheel { .. }) {
+                let handled = if matches!(
+                    mouse.kind,
+                    crate::MouseKind::Down(crate::MouseButton::Right)
+                ) {
+                    self.pointer.context_menu(
+                        mouse,
+                        &mut crate::input::PointerContext {
+                            area: self.area,
+                            cells: self.options.cells,
+                            hits: &self.hits,
+                            geometry: &self.geometry,
+                            tree: &mut self.tree,
+                            control: &engine.control(),
+                        },
+                    )
+                } else if matches!(mouse.kind, crate::MouseKind::Wheel { .. }) {
                     let handled = self.keyboard.wheel(
                         mouse,
                         self.area,
@@ -588,24 +692,81 @@ impl AppView {
         }
     }
 
+    /// A shown system dialog is modal: it takes every key and press, and the
+    /// app's views get no input until it is answered. Ctrl+C still quits, and
+    /// focus reports still reach the surface (`None`).
+    fn handle_dialog(&mut self, input: &Input) -> Option<Handled> {
+        let outcome = match input {
+            Input::Focus(_) => return None,
+            Input::Key {
+                key,
+                modifiers,
+                release,
+            } => {
+                if *release || !self.focused {
+                    return Some(Handled::Ignored);
+                }
+                if let Some(stroke) = crate::key_scheme::keystroke(key, *modifiers)
+                    && let Some(crate::key_scheme::Action::Quit) =
+                        crate::key_scheme::terminal(stroke)
+                {
+                    self.tree.exit = true;
+                    return Some(Handled::Yes);
+                }
+                self.tree.dialogs.key(key, *modifiers)
+            }
+            Input::KeyRepeat { key, modifiers } => self.tree.dialogs.key(key, *modifiers),
+            Input::Mouse(mouse) => {
+                let crate::MouseKind::Down(_) = mouse.kind else {
+                    return Some(Handled::Yes);
+                };
+                // Views behind the dialog lose a press or hover they held.
+                self.pointer.cancel(
+                    &mut self.tree,
+                    self.surface.engine.as_ref().map(Engine::control).as_ref(),
+                );
+                self.tree
+                    .dialogs
+                    .press(ratatui_core::layout::Position::new(mouse.column, mouse.row))
+            }
+            Input::Paste(_) => return Some(Handled::Yes),
+        };
+        if let Some(crate::dialog::Outcome::Answered(answer)) = outcome
+            && let Some(engine) = &self.surface.engine
+        {
+            answer.dispatch(&engine.control());
+        }
+        self.surface.wake.notify();
+        Some(Handled::Yes)
+    }
+
     fn handle_key(&mut self, key: &str, modifiers: crate::Modifiers, repeat: bool) -> Handled {
         if !self.focused {
             return Handled::Ignored;
         }
-        let Some(engine) = &self.surface.engine else {
-            return Handled::Ignored;
-        };
-        let control = engine.control();
         let Some(stroke) = crate::key_scheme::keystroke(key, modifiers) else {
             return Handled::Ignored;
         };
+        let Some(engine) = &self.surface.engine else {
+            // No app to ask: Ctrl+C still quits.
+            if let Some(crate::key_scheme::Action::Quit) = crate::key_scheme::terminal(stroke) {
+                self.tree.exit = true;
+                return Handled::Yes;
+            }
+            return Handled::Ignored;
+        };
+        let control = engine.control();
         if self.minibuffer.is_open()
             && let Some(crate::search::Outcome::Consumed) =
                 self.search(|minibuffer, scene| minibuffer.key(key, stroke, scene))
         {
             return Handled::Yes;
         }
-        let handled = if self.keyboard.shortcut(&self.tree, stroke, repeat, &control)
+        let command_key = self.options.capabilities.command_key;
+        let selecting = self.selection.is_active();
+        let handled = if self
+            .keyboard
+            .shortcut(&self.tree, stroke, repeat, command_key, &control)
             || self.handle_field_key(key, stroke, &control)
             || self.selection.key(
                 key,
@@ -626,7 +787,7 @@ impl AppView {
         } else {
             Handled::Ignored
         };
-        if handled == Handled::Yes {
+        if handled == Handled::Yes || (selecting && !self.selection.is_active()) {
             self.surface.wake.notify();
         }
         handled
@@ -673,7 +834,22 @@ impl AppView {
         let view = self.tree.get_mut(id).unwrap();
         let config = view.input.as_ref().unwrap();
         let field = view.field.as_mut().unwrap();
-        if let Some(action) = crate::key_scheme::editing(stroke, config.multiline) {
+        // Ctrl+C copies a selection, as in the terminal's other programs;
+        // without one it is the terminal's interrupt (the Key scheme's quit).
+        let copy = stroke.key == nsh_core::keymap::Key::Char('c')
+            && stroke.modifiers.ctrl
+            && !stroke.modifiers.alt
+            && !stroke.modifiers.shift
+            && !stroke.modifiers.cmd;
+        if copy && !field.model.has_selection() {
+            return false;
+        }
+        let action = if copy {
+            Some(crate::key_scheme::EditAction::Copy)
+        } else {
+            crate::key_scheme::editing(stroke, config.multiline)
+        };
+        if let Some(action) = action {
             if field.edit(
                 action,
                 stroke.modifiers.shift,
@@ -700,6 +876,43 @@ impl AppView {
         }
     }
 
+    /// Presses and drags on the scroll bars of the last render: a press on
+    /// a track jumps there, the thumb follows the pointer while it is held.
+    fn handle_scrollbar(&mut self, mouse: crate::MouseInput) -> Option<Handled> {
+        use crate::{MouseButton, MouseKind};
+        if let Some(drag) = &self.bar_drag {
+            match mouse.kind {
+                MouseKind::Move => {
+                    if drag.moved(mouse, &mut self.tree) {
+                        self.surface.wake.notify();
+                    }
+                    return Some(Handled::Yes);
+                }
+                MouseKind::Up(MouseButton::Left) => {
+                    self.bar_drag = None;
+                    return Some(Handled::Yes);
+                }
+                _ => self.bar_drag = None,
+            }
+        }
+        let position = ratatui_core::layout::Position::new(mouse.column, mouse.row);
+        if !self.area.contains(position) {
+            return None;
+        }
+        if !matches!(mouse.kind, MouseKind::Down(MouseButton::Left)) {
+            return None;
+        }
+        let bars = self.tree.scroll_bars.clone();
+        let drag = crate::input::BarDrag::press(&bars, mouse, &mut self.tree)?;
+        let control = self.surface.engine.as_ref().map(Engine::control);
+        self.pointer.cancel(&mut self.tree, control.as_ref());
+        self.selection.clear();
+        self.minibuffer.end();
+        self.bar_drag = Some(drag);
+        self.surface.wake.notify();
+        Some(Handled::Yes)
+    }
+
     fn handle_field_mouse(&mut self, mouse: crate::MouseInput) -> bool {
         use ratatui_core::layout::Position;
 
@@ -710,7 +923,13 @@ impl AppView {
         let control = engine.control();
         let position = Position::new(mouse.column, mouse.row);
         let scope = crate::navigation::focus_scope(&self.tree);
-        if let Some((id, last)) = self.field_drag {
+        if let Some(FieldDrag {
+            id,
+            last,
+            clicks,
+            anchor,
+        }) = self.field_drag
+        {
             if self.keyboard.focused != Some(id)
                 || !crate::keyboard::contains(&self.tree, scope, id)
             {
@@ -723,13 +942,18 @@ impl AppView {
                     && let Some(view) = self.tree.get_mut(id)
                 {
                     let field = view.field.as_mut().unwrap();
-                    field.click(view.input.as_ref().unwrap(), position, true);
+                    field.drag(view.input.as_ref().unwrap(), position, clicks, anchor);
                     field.report(id, &control, false);
                 }
                 self.field_drag = if matches!(mouse.kind, MouseKind::Up(_)) {
                     None
                 } else {
-                    Some((id, position))
+                    Some(FieldDrag {
+                        id,
+                        last: position,
+                        clicks,
+                        anchor,
+                    })
                 };
                 return true;
             }
@@ -749,17 +973,37 @@ impl AppView {
             })
         });
         if let Some(id) = id {
+            // The press still goes down as a touch, so open popovers hear a
+            // press outside them, then the field takes the pointer.
+            self.pointer.handle(
+                mouse,
+                crate::input::PointerContext {
+                    area: self.area,
+                    cells: self.options.cells,
+                    hits: &self.hits,
+                    geometry: &self.geometry,
+                    tree: &mut self.tree,
+                    control: &control,
+                },
+            );
             self.pointer.cancel(&mut self.tree, Some(&control));
             self.keyboard.focus(Some(id), &mut self.tree, &control);
+            let clicks = self.pointer.clicks();
             let view = self.tree.get_mut(id).unwrap();
             let field = view.field.as_mut().unwrap();
-            field.click(
+            let anchor = field.click(
                 view.input.as_ref().unwrap(),
                 position,
                 mouse.modifiers.shift,
+                clicks,
             );
             field.report(id, &control, false);
-            self.field_drag = Some((id, position));
+            self.field_drag = Some(FieldDrag {
+                id,
+                last: position,
+                clicks: if mouse.modifiers.shift { 1 } else { clicks },
+                anchor,
+            });
             true
         } else {
             if self.editing_field().is_some() {
@@ -775,15 +1019,27 @@ impl AppView {
         self.draw(area, frame.buffer_mut());
         #[cfg(feature = "dev")]
         if self.diagnostics.open {
+            self.set_cursor_style(crate::CursorStyle::Default);
             return;
         }
-        if self.focused
-            && let Some(cursor) = self
-                .minibuffer
-                .cursor()
-                .or_else(|| self.keyboard.cursor(&self.tree, &self.geometry))
-        {
-            frame.set_cursor_position(cursor);
+        let mut style = crate::CursorStyle::Default;
+        if self.focused {
+            if let Some(cursor) = self.minibuffer.cursor() {
+                frame.set_cursor_position(cursor);
+            } else if let Some(cursor) = self.keyboard.cursor(&self.tree, &self.geometry) {
+                frame.set_cursor_position(cursor);
+                style = crate::CursorStyle::Bar;
+            }
+        }
+        self.set_cursor_style(style);
+    }
+
+    fn set_cursor_style(&mut self, style: crate::CursorStyle) {
+        if self.cursor_style != style {
+            self.cursor_style = style;
+            if let Some(callback) = &mut self.on_cursor_style {
+                callback(style);
+            }
         }
     }
 
@@ -905,24 +1161,43 @@ impl AppView {
             }
             now
         });
+        let capabilities = &self.options.capabilities;
+        // The terminal's own colors give its surfaces (OSC 11 and 10, at
+        // 256 colors or more); the bandless look elsewhere.
+        let ramp = crate::palette::Ramp::new(
+            capabilities.colors,
+            capabilities.background_color,
+            capabilities.foreground_color,
+        );
+        let page = crate::palette::Ground::page(self.environment.color_scheme, capabilities.colors)
+            .with_ramp(ramp);
+        let bands = crate::palette::Bands::new(
+            self.environment.color_scheme,
+            capabilities.colors,
+            capabilities.background_color,
+            capabilities.foreground_color,
+        );
+        let look = render::Look {
+            cells: self.options.cells,
+            page,
+            bands,
+        };
         render::draw(
             &mut self.tree,
             buffer,
             area,
-            self.options.cells,
-            self.environment.color_scheme,
-            self.keyboard.focused,
+            look,
             &mut self.hits,
             &mut self.geometry,
         );
-        self.selection.draw(
-            &self.tree,
-            &self.geometry,
-            &self.hits,
-            self.options.cells,
+        let scene = crate::selection::Scene {
             area,
-            buffer,
-        );
+            cells: self.options.cells,
+            hits: &self.hits,
+            geometry: &self.geometry,
+            tree: &self.tree,
+        };
+        self.selection.draw(scene, buffer);
         if let Some(engine) = &self.surface.engine {
             self.pointer.rehover(&mut crate::input::PointerContext {
                 area,
@@ -943,14 +1218,20 @@ impl AppView {
         if let Some(engine) = &self.surface.engine {
             let control = engine.control();
             for (id, focus) in std::mem::take(&mut self.tree.focus_requests) {
-                if focus
-                    && self
-                        .keyboard
-                        .candidates(&self.tree, &self.geometry)
-                        .iter()
-                        .any(|g| g.id == id && !g.visible.is_empty())
-                {
+                // A target scrolled out of sight is focused and revealed,
+                // as keyboard navigation reveals what it moves to.
+                let target = focus
+                    .then(|| {
+                        self.keyboard
+                            .candidates(&self.tree, &self.geometry)
+                            .iter()
+                            .find(|g| g.id == id)
+                            .map(|g| g.frame)
+                    })
+                    .flatten();
+                if let Some(frame) = target {
                     self.keyboard.focus(Some(id), &mut self.tree, &control);
+                    crate::keyboard::reveal_frame(&mut self.tree, &self.geometry, id, frame);
                     self.surface.wake.notify();
                 } else if !focus && self.keyboard.focused == Some(id) {
                     self.keyboard.focus(None, &mut self.tree, &control);
@@ -1013,6 +1294,16 @@ impl AppView {
         self.kill.clear();
         self.field_drag = None;
     }
+}
+
+/// A primary press held in a text field: where it was last, its clicks and
+/// the unit (character, word, line) it pressed, which its drag extends.
+#[derive(Clone, Copy)]
+struct FieldDrag {
+    id: nsh_core::NodeId,
+    last: ratatui_core::layout::Position,
+    clicks: u32,
+    anchor: (usize, usize),
 }
 
 impl Widget for &mut AppView {

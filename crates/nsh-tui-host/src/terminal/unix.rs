@@ -181,3 +181,68 @@ pub(super) fn restore(mut bytes: &[u8]) {
         bytes = &bytes[written as usize..];
     }
 }
+
+/// Writes `query` to the terminal and collects its answers from stdin until the
+/// primary device attributes arrive or `timeout` passes. Runs in raw mode before
+/// crossterm's reader starts, so nothing else reads these bytes.
+pub(super) fn query(query: &[u8], timeout: Duration) -> io::Result<Vec<u8>> {
+    // SAFETY: isatty only inspects the descriptors.
+    if unsafe { libc::isatty(libc::STDIN_FILENO) == 0 || libc::isatty(libc::STDOUT_FILENO) == 0 } {
+        // Nothing would answer: no wait at all.
+        return Ok(Vec::new());
+    }
+    let mut written = 0;
+    let deadline = std::time::Instant::now() + timeout;
+    while written < query.len() {
+        let n = write(&query[written..])?;
+        written += n;
+        if std::time::Instant::now() >= deadline {
+            return Ok(Vec::new());
+        }
+    }
+    let mut replies = Vec::new();
+    let mut chunk = [0u8; 512];
+    loop {
+        let left = deadline.saturating_duration_since(std::time::Instant::now());
+        if left.is_zero() || super::parse_replies(&replies).complete {
+            return Ok(replies);
+        }
+        let mut fd = libc::pollfd {
+            fd: libc::STDIN_FILENO,
+            events: libc::POLLIN,
+            revents: 0,
+        };
+        let wait = left.as_millis().clamp(1, i32::MAX as u128) as libc::c_int;
+        // SAFETY: fd is initialized and live for this bounded wait.
+        let ready = unsafe { libc::poll(&mut fd, 1, wait) };
+        if ready < 0 {
+            let error = io::Error::last_os_error();
+            if error.kind() == io::ErrorKind::Interrupted {
+                continue;
+            }
+            return Err(error);
+        }
+        if ready == 0 {
+            continue;
+        }
+        if fd.revents & (libc::POLLHUP | libc::POLLERR | libc::POLLNVAL) != 0 {
+            return Ok(replies);
+        }
+        // SAFETY: chunk is writable for its length; stdin is nonblocking for the session.
+        let read =
+            unsafe { libc::read(libc::STDIN_FILENO, chunk.as_mut_ptr().cast(), chunk.len()) };
+        if read > 0 {
+            replies.extend_from_slice(&chunk[..read as usize]);
+        } else if read == 0 {
+            return Ok(replies);
+        } else {
+            let error = io::Error::last_os_error();
+            if !matches!(
+                error.kind(),
+                io::ErrorKind::Interrupted | io::ErrorKind::WouldBlock
+            ) {
+                return Err(error);
+            }
+        }
+    }
+}

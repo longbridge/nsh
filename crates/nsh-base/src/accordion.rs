@@ -13,7 +13,10 @@ use std::rc::Rc;
 
 use nsh_core::{AccessibilityState, element::Style, prelude::*};
 
-use crate::collapsible::follow_open;
+use crate::{
+    collapsible::follow_open,
+    terminal::{disclosure, is_terminal},
+};
 
 /// What an [`AccordionItem`] finds of its [`Accordion`] through context.
 #[derive(Clone)]
@@ -192,7 +195,10 @@ pub struct AccordionTriggerProps {
 /// is disabled while its item or the accordion is. Its look is the app's:
 /// `class` and `style`, `aria-expanded:` classes (or `expandedStyle`) while
 /// open, `hover:`, `active:`, `focus:` and `disabled:`; its children are
-/// the title and the chevron.
+/// the title and the chevron. In a terminal it starts with the terminal's
+/// own disclosure, `▸ ` closed and `▾ ` open, in a row with its children
+/// (an app that draws a chevron of its own leaves it out there)
+/// ([`crate::terminal`]).
 #[component]
 pub fn AccordionTrigger(props: AccordionTriggerProps, _cx: Scope<NoEvent>) -> impl IntoElement {
     let item = use_context::<ItemContext>();
@@ -200,6 +206,7 @@ pub fn AccordionTrigger(props: AccordionTriggerProps, _cx: Scope<NoEvent>) -> im
         Some(item) => (item.open, item.disabled),
         None => (computed(|| false), computed(|| false)),
     };
+    let terminal = is_terminal();
     view()
         .disabled(disabled)
         .role(AccessibilityRole::Button)
@@ -213,6 +220,10 @@ pub fn AccordionTrigger(props: AccordionTriggerProps, _cx: Scope<NoEvent>) -> im
             if let Some(item) = &item {
                 (item.toggle)();
             }
+        })
+        // The terminal's own disclosure before the app's title, in a row.
+        .when(terminal, |v| {
+            v.flex_row().child(text(move || disclosure(open.get())))
         })
         .child(props.children)
 }

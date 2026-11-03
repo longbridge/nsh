@@ -40,7 +40,11 @@ pub(crate) struct Field {
     visible: Rect,
     cursor: Option<Position>,
     columns: usize,
-    layout_key: Option<(usize, bool, bool, TextAlign, bool)>,
+    /// The column after the text is the field's: the terminal layout keeps
+    /// it (a text input's extra padding column), and the caret after a full
+    /// line stays there instead of scrolling or wrapping.
+    room: bool,
+    layout_key: Option<(usize, bool, bool, bool, TextAlign, bool)>,
     rows: Vec<Row>,
 }
 
@@ -303,6 +307,7 @@ impl Field {
     fn layout(&mut self, config: &InputConfig) {
         let key = (
             self.columns,
+            self.room,
             config.secure,
             config.multiline,
             config.align,
@@ -353,7 +358,8 @@ impl Field {
                 width,
             });
         }
-        let full_last_line = config.multiline && row.width >= self.columns.max(1);
+        let full_last_line =
+            config.multiline && row.width >= self.columns.max(1) + usize::from(self.room);
         self.rows.push(row);
         if full_last_line {
             self.rows.push(Row {
@@ -405,15 +411,70 @@ impl Field {
         row.end
     }
 
-    pub(crate) fn click(&mut self, config: &InputConfig, position: Position, extend: bool) {
-        let Some(bounds) = self.bounds else {
-            return;
-        };
+    /// The text offset at a Cell of the field, as the last frame drew it.
+    fn offset_at(&mut self, config: &InputConfig, position: Position) -> Option<usize> {
+        let bounds = self.bounds?;
         self.layout(config);
         let column = (i32::from(position.x) - bounds.left).max(0) as usize + self.scroll.0;
         let row = (i32::from(position.y) - bounds.top).max(0) as usize + self.scroll.1;
-        let at = self.at_cell(column, row);
-        self.model.move_to(at, extend);
+        Some(self.at_cell(column, row))
+    }
+
+    /// The unit a press of `clicks` takes around `at`: nothing, the word or
+    /// the line.
+    fn unit_at(&self, at: usize, clicks: u32) -> (usize, usize) {
+        match clicks {
+            0 | 1 => (at, at),
+            2 => self.model.word_at(at),
+            _ => self.model.line_at(at),
+        }
+    }
+
+    /// Places the caret at a pressed Cell: the press's `clicks` (1, 2, 3)
+    /// select nothing, the word or the line there; `extend` keeps the anchor.
+    /// Returns the unit pressed, which a drag of the press extends from.
+    pub(crate) fn click(
+        &mut self,
+        config: &InputConfig,
+        position: Position,
+        extend: bool,
+        clicks: u32,
+    ) -> (usize, usize) {
+        let Some(at) = self.offset_at(config, position) else {
+            return self.model.selection();
+        };
+        let unit = self.unit_at(at, clicks);
+        if extend || clicks <= 1 {
+            self.model.move_to(at, extend);
+        } else {
+            self.model.select(unit.0, unit.1);
+        }
+        self.goal_column = None;
+        unit
+    }
+
+    /// A drag of a press of `clicks` whose unit was `anchor`: by characters,
+    /// words or lines, always holding the whole anchor unit.
+    pub(crate) fn drag(
+        &mut self,
+        config: &InputConfig,
+        position: Position,
+        clicks: u32,
+        anchor: (usize, usize),
+    ) {
+        let Some(at) = self.offset_at(config, position) else {
+            return;
+        };
+        if clicks <= 1 {
+            self.model.move_to(at, true);
+        } else {
+            let unit = self.unit_at(at, clicks);
+            if unit.0 < anchor.0 {
+                self.model.select(anchor.1, unit.0);
+            } else {
+                self.model.select(anchor.0, unit.1.max(anchor.1));
+            }
+        }
         self.goal_column = None;
     }
 
@@ -437,6 +498,7 @@ impl Field {
         self.bounds = Some(bounds);
         self.visible = bounds.clipped(clip);
         self.columns = (bounds.right - bounds.left).max(1) as usize;
+        self.room = bounds.right < i32::from(clip.right());
         self.layout(config);
         let (column, row) = self.caret_cell();
         let height = (bounds.bottom - bounds.top).max(1) as usize;
@@ -445,7 +507,7 @@ impl Field {
                 .scroll
                 .0
                 .min(column)
-                .max((column + 1).saturating_sub(self.columns));
+                .max((column + 1).saturating_sub(self.columns + usize::from(self.room)));
             self.scroll.1 = self.scroll.1.min(row).max((row + 1).saturating_sub(height));
         } else {
             self.scroll = (0, 0);
@@ -456,7 +518,10 @@ impl Field {
             .ok()
             .zip(u16::try_from(y).ok())
             .map(|(x, y)| Position::new(x, y))
-            .filter(|at| self.visible.contains(*at));
+            .filter(|at| {
+                self.visible.contains(*at)
+                    || (self.room && i32::from(at.x) == bounds.right && clip.contains(*at))
+            });
         if self.visible.is_empty() {
             return;
         }
@@ -467,6 +532,10 @@ impl Field {
             color.unwrap_or(config.style.color)
         };
         let mut style = crate::palette::ink(color, ground);
+        if placeholder {
+            // A placeholder is secondary text, whatever its color.
+            style = style.add_modifier(Modifier::DIM);
+        }
         if config.style.font_weight >= 600 {
             style = style.add_modifier(Modifier::BOLD);
         }

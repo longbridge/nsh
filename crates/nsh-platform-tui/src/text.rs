@@ -1,22 +1,14 @@
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use nsh_core::{
     AttachmentAlignments, AttributedText, EllipsizeMode, FontExtent, Point, Points, Size,
     TextAlign, TextEngine, TextLayout, TextLine,
 };
-use ratatui_core::{
-    style::{Modifier, Style},
-    text::{Line, Span},
-};
-use ratatui_widgets::paragraph::Paragraph;
+use ratatui_core::style::{Modifier, Style};
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
-use crate::{CellSize, palette::Ground};
-
-/// How many grounds a text keeps its drawn rows for (a hover or selection
-/// changes the fill under it back and forth).
-const PARAGRAPH_GROUNDS: usize = 4;
+use crate::CellSize;
 
 /// Text measured on a fixed grid, independent of the requested font size.
 #[derive(Default)]
@@ -40,6 +32,7 @@ pub(crate) struct Glyph {
     pub(crate) width: usize,
     style: Style,
     color: Option<nsh_core::Color>,
+    background: Option<nsh_core::Color>,
     attachment: Option<Attachment>,
 }
 
@@ -59,10 +52,7 @@ pub struct PreparedText {
 }
 
 pub(crate) struct CellLayout {
-    /// The rows as drawn in the palette on the grounds they were last drawn
-    /// on, made when first drawn there.
-    paragraphs: Mutex<Vec<(Ground, Arc<Paragraph<'static>>)>>,
-    /// The displayed rows, kept for searching the text on screen.
+    /// The displayed rows: what is drawn, and searched on screen.
     pub(crate) rows: Vec<Row>,
     metrics: Vec<TextLine>,
     attachments: Vec<Option<Point<Points>>>,
@@ -74,35 +64,26 @@ pub(crate) struct Row {
     pub(crate) glyphs: Vec<Glyph>,
 }
 
-impl CellLayout {
-    /// The rows with each glyph's color drawn in the palette on `ground`.
-    pub(crate) fn paragraph(&self, ground: Ground) -> Arc<Paragraph<'static>> {
-        let mut paragraphs = self
-            .paragraphs
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if let Some((_, paragraph)) = paragraphs.iter().find(|(drawn, _)| *drawn == ground) {
-            return paragraph.clone();
-        }
-        let paragraph = Arc::new(Paragraph::new(
-            self.rows
-                .iter()
-                .map(|row| {
-                    let indent = (row.indent > 0).then(|| Span::raw(" ".repeat(row.indent)));
-                    Line::from_iter(indent.into_iter().chain(row.glyphs.iter().map(|glyph| {
-                        let style = glyph.color.map_or(glyph.style, |color| {
-                            glyph.style.patch(crate::palette::ink(color, ground))
-                        });
-                        Span::styled(glyph.text.to_string(), style)
-                    })))
-                })
-                .collect::<Vec<_>>(),
-        ));
-        if paragraphs.len() == PARAGRAPH_GROUNDS {
-            paragraphs.remove(0);
-        }
-        paragraphs.push((ground, paragraph.clone()));
-        paragraph
+impl Glyph {
+    /// Bold, italic, underline and strike-through, as the run sets them.
+    pub(crate) fn modifiers(&self) -> Modifier {
+        self.style.add_modifier
+    }
+
+    /// The run's color.
+    pub(crate) fn color(&self) -> Option<nsh_core::Color> {
+        self.color
+    }
+
+    /// The run's own background.
+    pub(crate) fn background(&self) -> Option<nsh_core::Color> {
+        self.background
+    }
+
+    /// Whether the glyph only reserves Cells for an inline view, which
+    /// draws itself.
+    pub(crate) fn is_attachment(&self) -> bool {
+        self.attachment.is_some()
     }
 }
 
@@ -158,6 +139,9 @@ fn glyphs(text: &AttributedText, cells: CellSize, alignments: &AttachmentAlignme
                 width,
                 style,
                 color: span.map(|span| span.style.color),
+                background: span
+                    .and_then(|span| span.style.background)
+                    .map(|background| background.color),
                 attachment,
             }
         })
@@ -383,7 +367,6 @@ impl TextEngine for CellTextEngine {
             }
         }
         TextLayout(Arc::new(CellLayout {
-            paragraphs: Default::default(),
             rows: displayed,
             metrics,
             attachments,
@@ -443,6 +426,7 @@ fn ellipsize(row: &mut Vec<Glyph>, columns: usize, mode: EllipsizeMode) {
             width: 1,
             style: at.map_or_else(Style::default, |g| g.style),
             color: at.and_then(|g| g.color),
+            background: at.and_then(|g| g.background),
             attachment: None,
         });
     }

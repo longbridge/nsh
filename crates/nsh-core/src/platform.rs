@@ -255,6 +255,19 @@ pub struct Environment {
     /// [`crate::speech`]); without it, a session ends at once
     /// (`unavailable`) unless the core has a [`crate::speech::SpeechBackend`].
     pub speech: bool,
+    /// The size of one Cell of a grid surface (a terminal, whose content is
+    /// whole character Cells), in points; `None` on every other surface.
+    /// With it the core lays out with its terminal algorithm, ratatui's
+    /// splits in whole Cells (x the Cell's width, y its height): a border
+    /// is one Cell and every frame is whole Cells (`docs/dev/styles.md`
+    /// "Layout in a terminal").
+    pub cell: Option<Size<Points>>,
+    /// A grid surface shows a filled box as a band of its own color (a
+    /// terminal with 256 colors or more whose background it knows): there
+    /// a filled container is a surface, padded and with no border; without
+    /// it a filled box is laid out as any other (`docs/dev/styles.md`
+    /// "Layout in a terminal").
+    pub cell_surfaces: bool,
 }
 
 impl Environment {
@@ -296,6 +309,8 @@ impl Default for Environment {
             screen_color: false,
             file_requests: false,
             speech: false,
+            cell: None,
+            cell_surfaces: false,
         }
     }
 }

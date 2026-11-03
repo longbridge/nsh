@@ -106,6 +106,13 @@ nothing. The drop indicator part covers what the panel would take in the target 
 measured, so it draws above the handles, whose lines lie over the edges of the groups beside them, and no frame clips
 it, and the release applies one move (`PaneTree::move_panel` within a tree,
 detach and insert across trees) and one `onLayoutChange`. A gesture the system takes away drops nothing.
+In a terminal a press on a tab arms its drag at once, as on the desktops (a terminal's pointer is a mouse), and the
+area grows into its parent's room (`flex-grow: 1`: a terminal keeps no percentage height for a box of content); a
+bottom dock's size is its basis in the column (its rows), and each dock keeps a Cell on the edge its handle hugs for
+the handle's line. The
+drop indicator is the region's outline: a 1-Cell border in the accent (`terminal::ACCENT`) on the
+region's outer Cells, over what the group shows, which is not cleared; it has no fill and none of the app's
+indicator parts, and it jumps from Cell to Cell instead of easing (`tab_group.rs` `drop_indicator`).
 
 The rules of what may move are `Area::groups`', as `gpui-base`'s: a locked or zoomed area rearranges nothing, and a
 group with nothing beside it in its tree cannot give its last visible panel away (dragging or closing it would empty
@@ -201,6 +208,12 @@ panel where it was, and the app persists one layout.
 - `ResizeHandle` (Rust only) is the same band on a container's edge (`HandleEdge::Leading` / `Trailing` hug it from
   inside, as a clipping dock frame needs), reporting `on_drag_start`, `on_drag_move(offset)` and
   `on_drag_end(offset)`; the dock's edges use it.
+- In a terminal a band is one Cell across, its line the terminal's own: `│` down a horizontal handle's column,
+  `─` along a vertical one's row (`terminal::DIVIDER_VERTICAL` / `DIVIDER_HORIZONTAL`), muted, in the accent while
+  the pointer is over it, holds it or the keyboard focus is on it. A group's panes are a Cell apart (8 points of gap
+  in a row, 24 in a column) and the band sits in that Cell. A drag follows the pointer Cell by Cell; the band is a
+  stop of the keyboard focus whose arrows along its axis move it one Cell, each step one drag (`resize_handle.rs`
+  `terminal_band`).
 
 ## Accessibility
 

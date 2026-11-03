@@ -199,7 +199,12 @@ fn animate_indicator(fade: bool) {
 /// handles' lines, which lie over the edges of the groups beside them,
 /// never cover its edges, and no frame clips it. It moves from place to
 /// place, across groups too. The compact presentation has none.
+///
+/// In a terminal it is the region's outline, one Cell in the accent around
+/// it over what the region shows, which stays as it is: no fill, none of
+/// the app's parts, and it jumps from Cell to Cell.
 pub(crate) fn drop_indicator(a: AreaCx) -> AnyElement {
+    let terminal = crate::terminal::is_terminal();
     let target = computed(move || {
         if a.compact.get() {
             return None;
@@ -224,7 +229,7 @@ pub(crate) fn drop_indicator(a: AreaCx) -> AnyElement {
             effect(move || {
                 let now = place();
                 let before = shown.replace(now);
-                if before != now {
+                if before != now && !terminal {
                     animate_indicator(before.is_none());
                 }
             });
@@ -239,9 +244,19 @@ pub(crate) fn drop_indicator(a: AreaCx) -> AnyElement {
                         .h(p.size.height),
                     None => s,
                 })
-                .app_class(a.props.drop_indicator_class)
-                .inline_style(a.props.drop_indicator_style)
+                .map(|v| match terminal {
+                    true => v
+                        .border(px(1.0))
+                        .border_color(crate::terminal::ACCENT)
+                        .rounded(px(4.0)),
+                    false => v
+                        .app_class(a.props.drop_indicator_class)
+                        .inline_style(a.props.drop_indicator_style),
+                })
                 .child(dynamic(move || {
+                    if terminal {
+                        return None;
+                    }
                     let target = target.get()?;
                     let value = DockDropIndicator {
                         group: target.group.as_u64(),
@@ -278,7 +293,8 @@ pub(crate) fn tab(
                 .retain(|(p, r)| !(*p == panel && *r == me));
         });
     }
-    let desktop = is_desktop();
+    // A terminal's pointer is a mouse: it has no fingers.
+    let desktop = is_desktop() || crate::terminal::is_terminal();
     // A pointer (a mouse, a trackpad, a pen over the screen) hovers the
     // tab before it presses it, and a finger never does: a press of a
     // hovering pointer, or any press on the desktops, arms the drag at

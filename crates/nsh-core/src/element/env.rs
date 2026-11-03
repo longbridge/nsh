@@ -58,6 +58,12 @@ pub struct Environment {
     /// The platform recognizes speech
     /// ([`crate::platform::Environment::speech`]).
     pub speech: bool,
+    /// The Cell size of a grid surface (a terminal): the core lays out in
+    /// its Cells ([`crate::platform::Environment::cell`]); `None` elsewhere.
+    pub cell: Option<Size<Points>>,
+    /// A grid surface shows a filled box as a band of its own color
+    /// ([`crate::platform::Environment::cell_surfaces`]).
+    pub cell_surfaces: bool,
 }
 
 impl Default for Environment {
@@ -84,6 +90,8 @@ impl Default for Environment {
             screen_color: false,
             file_requests: false,
             speech: false,
+            cell: None,
+            cell_surfaces: false,
         }
     }
 }

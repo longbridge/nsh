@@ -55,6 +55,7 @@ use crate::{
     keys::directed,
     listbox::{self, Typeahead},
     select::SelectValue,
+    terminal::{DISCLOSURE_NONE, TREE_INDENT, disclosure, is_terminal},
 };
 
 /// How many signals a node the rows follow (the selection, the cursor) is
@@ -686,7 +687,10 @@ struct TreeModel {
 /// rows (`itemClass` with `selected:`, `aria-expanded:`, `focus:` and
 /// `disabled:`) and draws them (`renderItem`, given each item's depth).
 /// Screen readers hear a tree of items, each with its level, whether it is
-/// expanded and whether it is selected.
+/// expanded and whether it is selected. In a terminal a row the tree draws
+/// itself (no `renderItem`) is its label indented two Cells a level after
+/// the terminal's own disclosure, `▸ ` collapsed, `▾ ` expanded, two
+/// spaces on a leaf ([`crate::terminal`]).
 #[component(methods = TreeApi)]
 pub fn Tree(props: TreeProps, cx: Scope<TreeEvent>) -> impl IntoElement {
     let expanded = Expanded {
@@ -1103,6 +1107,7 @@ fn row(m: TreeModel, at: Position) -> AnyElement {
     let render_item = m.render_item;
     let custom = computed(move || render_item.with(Option::is_some));
     let label = move || entry.with(|e| e.as_ref().map(|e| e.label.clone()).unwrap_or_default());
+    let terminal = is_terminal();
     view()
         .role(AccessibilityRole::TreeItem)
         .focusable(false)
@@ -1131,6 +1136,19 @@ fn row(m: TreeModel, at: Position) -> AnyElement {
                     let entry = entry.get()?;
                     Some(render.render(entry.id.clone(), entry))
                 });
+            }
+            if terminal {
+                return text(move || {
+                    let depth = entry.with(|e| e.as_ref().map_or(0, |e| e.depth)) as usize;
+                    let mark = expanded.get().map_or(DISCLOSURE_NONE, disclosure);
+                    SharedString::from(format!(
+                        "{:indent$}{mark}{}",
+                        "",
+                        label(),
+                        indent = depth * TREE_INDENT
+                    ))
+                })
+                .into_element();
             }
             text(label).into_element()
         }))

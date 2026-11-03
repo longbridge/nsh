@@ -72,6 +72,7 @@ use rustc_hash::FxHasher;
 use crate::{
     popup::{self, DropdownFrame, OpenChangeReason, Presence},
     select::{SelectEntry, SelectGroup, SelectItem},
+    terminal::is_terminal,
 };
 
 /// How long typeahead keeps what was typed before it starts again.
@@ -1051,12 +1052,16 @@ fn header_row(entry: Memo<Option<Row>>, parts: Parts) -> AnyElement {
         Some(Row::Header { title, first }) => Some((title, first)),
         _ => None,
     });
-    let custom = computed(move || parts.render_group.with(Option::is_some));
+    // A terminal's header is its title, one row (`crate::terminal`).
+    let terminal = is_terminal();
+    let custom = computed(move || !terminal && parts.render_group.with(Option::is_some));
     view()
         .role(AccessibilityRole::Header)
         .focusable(false)
-        .app_class(parts.group_class)
-        .inline_style(parts.group_style)
+        .when(!terminal, |v| {
+            v.app_class(parts.group_class)
+                .inline_style(parts.group_style)
+        })
         .child(dynamic(move || {
             if custom.get() {
                 let content = dynamic(move || {
@@ -1117,7 +1122,11 @@ fn item_row(lb: Listbox, entry: Memo<Option<Row>>, parts: Parts, hooks: Hooks) -
         }
     };
     let (down, tap) = (hooks.clone(), hooks);
-    let custom = computed(move || parts.render_item.with(Option::is_some));
+    // A terminal's row is the item's title, one full-width row the terminal
+    // marks while highlighted or chosen (`crate::terminal`): neither the
+    // app's drawing nor its row style.
+    let terminal = is_terminal();
+    let custom = computed(move || !terminal && parts.render_item.with(Option::is_some));
     view()
         .role(AccessibilityRole::Option)
         .focusable(false)
@@ -1129,8 +1138,10 @@ fn item_row(lb: Listbox, entry: Memo<Option<Row>>, parts: Parts, hooks: Hooks) -
             ..AccessibilityState::default()
         })
         .project_focused(highlighted)
-        .app_class(parts.item_class)
-        .inline_style(move || parts.item_style.get())
+        .when(!terminal, |v| {
+            v.app_class(parts.item_class)
+                .inline_style(move || parts.item_style.get())
+        })
         .element_ref(&me)
         // The pointer highlights a row, as long as no button is down.
         .on_mouse_move(move |e: &MouseEvent| {

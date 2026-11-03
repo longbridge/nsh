@@ -55,11 +55,43 @@ fn Shapes() -> impl IntoElement {
                     .fill_rect(0.0, 0.0, 16.0, 16.0),
             )
             .label("drawing")
-            .w(px(16.0))
-            .h(px(16.0))
+            .w(px(64.0))
+            .h(px(32.0))
             .bg(nsh_core::color::rgb(0x000000)),
         )
         .child(text("drawn"))
+}
+
+#[component]
+fn Icon() -> impl IntoElement {
+    view()
+        .flex_1()
+        .child(
+            canvas(
+                Painter::new()
+                    .fill_color(nsh_core::color::rgb(0xffffff))
+                    .fill_rect(0.0, 0.0, 16.0, 16.0),
+            )
+            .w(px(16.0))
+            .h(px(16.0)),
+        )
+        .child(text("ready"))
+}
+
+#[test]
+fn icon_sized_canvases_draw_nothing() {
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(12, 3)).unwrap();
+    view.load(App::Rust(Root::new::<Icon>(|| ()))).unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "ready");
+    let drawn: String = terminal
+        .backend()
+        .buffer()
+        .content
+        .iter()
+        .map(|cell| cell.symbol())
+        .collect();
+    assert_eq!(drawn.replace(' ', ""), "ready", "{drawn:?}");
 }
 
 #[test]
@@ -75,14 +107,14 @@ fn canvas_fills_strokes_dashes_and_text_draw_in_braille_cells() {
             "⣿⣿⣿⣿⣿",
             "the filled rectangle, row {y}"
         );
-        assert_eq!(buffer[(0, y)].fg, Color::Red);
+        assert_eq!(buffer[(0, y)].fg, Color::Rgb(255, 0, 0));
     }
     assert_eq!(
         row(buffer, 0, 6..20),
         "⠉".repeat(14),
         "a line through the top dots"
     );
-    assert_eq!(buffer[(6, 0)].fg, Color::Green);
+    assert_eq!(buffer[(6, 0)].fg, Color::Rgb(0, 255, 0));
     assert_eq!(
         row(buffer, 1, 6..12),
         "⠒ ⠒ ⠒ ",
@@ -93,16 +125,14 @@ fn canvas_fills_strokes_dashes_and_text_draw_in_braille_cells() {
         "Hi",
         "text centered on its x, its top at y"
     );
-    assert_eq!(buffer[(9, 2)].fg, Color::Green);
+    assert_eq!(buffer[(9, 2)].fg, Color::Rgb(0, 255, 0));
     assert_eq!(buffer[(0, 3)].symbol(), "⣿");
-    assert_eq!(buffer[(0, 3)].fg, Color::Reset);
-    assert!(
-        buffer[(0, 3)]
-            .modifier
-            .contains(ratatui_core::style::Modifier::DIM),
-        "globalAlpha blends the paint over the page before it is read"
+    assert_eq!(
+        buffer[(0, 3)].fg,
+        Color::Rgb(128, 128, 128),
+        "globalAlpha blends the paint over the color under it"
     );
-    assert_eq!(buffer[(0, 3)].bg, Color::Reset, "fills draw no color");
+    assert_eq!(buffer[(0, 3)].bg, Color::Reset, "fills draw nothing");
     let contents: String = buffer.content.iter().map(|c| c.symbol()).collect();
     assert!(!contents.contains("Canvas"), "no placeholder is drawn");
 }
@@ -160,7 +190,7 @@ fn a_clip_keeps_fills_and_strokes_inside_and_fill_rules_pick_the_dots() {
     );
     assert_eq!(
         buffer[(4, 1)].fg,
-        Color::Green,
+        Color::Rgb(0, 255, 0),
         "the stroke inside it is drawn"
     );
     assert_eq!(

@@ -13,15 +13,39 @@ cargo build -p nsh-cli -p nsh-tui-host
 
 The CLI serves and watches the app in its own process. It builds `nsh-tui-host` in a checkout, using the CLI's
 profile, and starts it with inherited stdin/stdout. CLI diagnostics, the host's stderr and the host logger append
-to the app's `.nsh/tui.log`, including verbose tool output. The host alone writes the terminal UI. Ctrl+C exits;
+to the app's `.nsh/tui.log`, including verbose tool output. The host alone writes the terminal UI. Ctrl+C copies a selection and otherwise exits;
 Unix stop signals and Windows console breaks ask the host loop to exit so its terminal guard can restore the
 screen and raw mode before the CLI reaps it.
 
 The host enables [alternate scroll mode (DECSET 1007)](https://invisible-island.net/xterm/ctlseqs/ctlseqs.html)
 with `ESC[?1007h` on entering the alternate screen and disables it with `ESC[?1007l` during normal, error and panic
-restoration. When mouse capture is off, terminals supporting this mode can send Up/Down keys for the wheel;
-those keys follow the terminal Key scheme. This prepares the uncaptured-wheel path for the mouse-capture
-setting in ticket 09; captured wheel events keep the three-row/six-column behavior below.
+restoration. With `--no-mouse`, terminals supporting this mode send Up/Down keys for the wheel, which follow the
+terminal Key scheme; captured wheel events keep the three-row/six-column behavior below.
+
+On entering, the host also turns on bracketed paste (`?2004`), focus reports (`?1004`, which reach
+`AppView::set_focused`), mouse capture (any-event tracking `?1003` with SGR coordinates `?1006`; `--no-mouse`
+leaves the mouse to the terminal) and, where the terminal answers its query, the kitty keyboard protocol with
+`DISAMBIGUATE_ESCAPE_CODES | REPORT_EVENT_TYPES | REPORT_ALTERNATE_KEYS`, so Ctrl+I, Ctrl+M and Ctrl+[ arrive
+apart from Tab, Enter and Esc, repeats and releases are reported, and Super arrives as Cmd
+(`TerminalCapabilities::command_key`). The flags are not pushed in Apple Terminal, VS Code's terminal, VTE
+terminals (`VTE_VERSION`) or tmux before 3.3, whose answers are not to be relied on. Without the protocol on
+macOS, a Ctrl keystroke no app binding matches is matched again as Cmd, so `cmd+` bindings stay reachable.
+Every mode is restored on exit, on errors, on a panic and on a stop signal, the kitty flags popped first.
+When the terminal reports focus coming back, the host turns bracketed paste, focus reports and mouse capture on
+again (another program in the same terminal may have turned them off) and the next frame repaints every Cell;
+losing focus cancels a held pointer and a scroll bar drag. The host collects what ratatui writes for a frame
+and writes it between frames as one synchronized update (`?2026h` … `?2026l`), so the terminal never shows half
+a frame; a frame that changes no Cell (only the cursor commands of the frame before) writes nothing at all. Inside
+tmux (`TMUX` set) the markers are written only when tmux reported mode 2026 to DECRQM.
+Before drawing, in raw mode, the host writes one query, `OSC 10 ?`, `OSC 11 ?`, `CSI ? u`, DECRQM 2026
+(`CSI ? 2026 $ p`) and DA1 (`CSI c`),
+and reads the answers for at most 100 ms; DA1's answer, which every terminal gives, ends the wait early. When
+stdin or stdout is not a terminal, nothing is queried and startup does not wait. The
+default foreground and background (`rgb:RRRR/GGGG/BBBB`, one to four hex digits per channel) fill
+`TerminalCapabilities::foreground_color` / `background_color`, and the background's relative luminance (above
+0.4 is light) its `background` scheme. The color depth comes from the environment: `COLORTERM=truecolor` or
+`24bit` is 24-bit, a `TERM` with `256color` the 256-color palette, anything else the 16 colors;
+`NSH_TUI_COLORS=truecolor|256|16` overrides both.
 
 `C-h e` toggles the logs and errors panel. Escape, `C-g` or `q` closes it; arrows and PageUp/PageDown scroll,
 Home/End select the start/end, and `r` reloads the latest build. Errors open the panel automatically and the next
@@ -209,7 +233,7 @@ expect(picture.rows[0][0].symbol).toBe("A");
 
 The terminal's demo is the official `examples/gallery`, the same code every platform runs, so a page can be
 compared side by side with the others. Its layout and colors' meanings are the gallery's own
-(`examples/nsh-gallery-ui`); the terminal backend draws them in the terminal's look (below).
+(`examples/nsh-gallery-ui`); the terminal backend draws them at the terminal's color depth (Drawing below).
 
 ```sh
 ./target/debug/nsh run examples/gallery --target tui
@@ -229,8 +253,8 @@ compared side by side with the others. Its layout and colors' meanings are the g
   app drops its engine and inbox, so messages from the previous app cannot reach the next one.
 - **One retained view per node.** `view.rs` stores tree links, point frames, styles, props, events and laid-out
   text, indexed by node id. `render.rs` walks children in paint order, propagating clipping, visibility, opacity
-  and pointer policy. Borders use `Block`; the text engine prepares styled `Paragraph`s, which are reused on
-  frames, one per appearance. Clipped text uses `Paragraph::scroll`; a clipped border drops the sides outside the clip.
+  and pointer policy, and paints each view's fill, borders, text and content into the buffer Cell by Cell,
+  keeping every Cell's resolved colors so translucent layers blend (Drawing below).
 - **Input belongs to the embedder.** `Input` is independent of a terminal backend. Mouse positions are absolute
   terminal Cells; `handle` localizes them against the last rendered area, follows the painted hit regions and
   uses the core's `input::Press` to deliver PressDown, PressUp and Press. Releasing outside the area cancels the
@@ -243,13 +267,15 @@ compared side by side with the others. Its layout and colors' meanings are the g
 - **The terminal transport stays in the host.** The library depends on `ratatui-core` 0.1 and `ratatui-widgets`
   0.3, the crates behind ratatui 0.30. Feature `run-app` adds a generic loop over `Terminal<B>` and a polling
   callback; it uses only public `AppView` methods. The host supplies `ratatui-crossterm`, event conversion, raw
-  mode, the alternate screen and mouse capture. Since crossterm polling cannot be woken by the engine, the loop
+  mode, the alternate screen, the terminal modes and queries above, and the cursor's shape: it writes
+  `CSI 6 SP q` (a steady bar) when `AppView::on_cursor_style_changed` reports `CursorStyle::Bar`, while a field
+  is edited, and `CSI 0 SP q` (the user's own shape) when it reports `Default` and on restoration. Since crossterm polling cannot be woken by the engine, the loop
   polls at most 16 ms at a time; idle polls draw no frames. An RAII guard restores terminal state on normal and
   error returns; a panic hook restores it before printing the panic. Forced termination cannot run that guard.
 
 `AppOptions` supplies the point scale, appearance/background, limits, UI sets, cache, storage, assets, clipboard
-and host channel. `TerminalCapabilities` starts with the terminal background; capability fields grow with their
-renderers. Embedding defaults to bounded limits; the Development host explicitly selects standalone limits.
+and host channel. `TerminalCapabilities` carries the terminal's background scheme, its default background and
+foreground colors and its color depth (`ColorDepth`); the standalone host fills them from its startup query. Embedding defaults to bounded limits; the Development host explicitly selects standalone limits.
 `register_component` creates per-node widgets with ordered property updates, commands and buffer rendering;
 reserved `nsh/` names are rejected. Native component input, sizing and richer context belong to the native
 component ticket. The Release runner is a separate slice.
@@ -280,80 +306,14 @@ The CLI option wins over `nsh.json`; the default is `8x16`. Both dimensions must
 The development host takes the same `--points-per-cell WIDTHxHEIGHT` option. The selection is made when the
 session starts; restart the run after changing this setting.
 
-Every geometric projection uses **round-half-up**: `floor(points / points_per_cell + 0.5)`. A tie goes toward
-positive coordinates, including negative positions (`-0.5` becomes `0`). The embedding area's integer Cell origin
-is added after conversion. `geometry::CellBounds` is the common boundary for view frames and content boxes;
-input content boxes follow the same rule as text content boxes.
-
-A positive width or height occupies at least one Cell; a zero extent stays zero. This rendering rule keeps thin
-progress rails, slider thumbs and partial indicators visible and operable: the official gallery's 6-point rail
-occupies one Cell row at the default 16-point Cell height. It changes only the Cell projection; layout, app styles
-and the control's numeric value remain the core's.
-
-Each edge rounds from its **absolute, unrounded point coordinate**, after composing ancestor transforms and
-scroll offsets. Parent rounding is never added to a child's point position. The right and bottom edges are
-exclusive. Equal whole-Cell gaps stay equal and nested padding accumulates before rounding; a moving view's Cell
-width or height can vary by one Cell. For example, a box at y = 216pt with height 40pt covers rows 14 and 15;
-its bottom at 256pt rounds to edge 16. A text row after 12pt of padding begins at 228pt, on row 14.
-Alignment follows from these rules, and the alignment tests check it: text starting at the same point x starts
-in the same Cell column on every row (a list's labels, a section's left edge, values under their headings), and
-right-aligned text whose right edge is at the same point x ends in the same column (prices, sizes, totals), since
-the text engine measures whole Cells. Siblings centered on one row share it. Brackets, selection bars, the borders and
-fills the terminal look leaves out and the palette's grounds never move content between Cells. Views at different point
-x keep their own rounding: two cards at different phases can place an icon and its title one Cell closer in one
-than in the other, and a 34-point tile is 2 or 3 rows tall depending on where it starts.
-Consecutive siblings of equal height stacked in one column at an equal point pitch (a list's rows) keep one Cell
-pitch and one Cell height: the first keeps its rounded row, each next one starts the pitch's rounded rows below
-the one before, on a Cell edge, and its content moves with it. The gallery's 36-point sidebar rows 2 points apart
-are 2 rows apart each, where absolute edges alone would space them 2, 3, 2, 3 rows apart. Other views keep their
-absolute edges.
-A positive point gap between sibling one-line texts reserves at least one Cell of separation, including reverse rows;
-a zero gap keeps the texts adjacent. Canvas text calls apply the same minimum gap as whole runs, independently
-of draw order. Existing ancestor and canvas clipping still apply.
-Text measurement still counts the whole Cells that fit within a point width, separately from positioning edges.
-A compact canvas or rounded control (less than one and a half Cells tall) occupies its center row, so a centered icon and a
-one-line label share a row even when their point heights differ.
-
-Selection accents keep their authored dimensions where they are drawn: the gallery's sidebar accent is 3 × 18
-points; its watchlist accent is 3 × 36 points (a 64-point row with 14 points above and below), and their Cell
-heights follow those dimensions and edge rounding. Inside a selected or checked view they are not drawn, as its
-bar marks the selection (the terminal look below). Inspect Cell modifiers as well as symbols when checking solid
-leaves; a reversed Cell can have a space as its symbol.
-
-A drawn border owns one Cell on its side. Child boxes fit inside those reserved Cells, and a border reserves only
-its own side: a child is never pushed past its parent's edge on the other sides, it narrows instead. A child whose
-content reaches into a reserved column or row moves off it, the displacement carried into its contents; one whose
-content stays clear of it only narrows, so its content keeps its columns and rows (a sidebar's right border leaves
-its rows' text where it was, a left border moves only a row whose text starts at the edge, a card's header below
-its padding stays on its row). When reservation shortens a child box whose content reaches into a reserved row,
-its vertical point offsets contract into that box while text keeps terminal glyphs; vertical text stacks reserve
-one Cell per measured line, so contraction reduces quantized gaps without collapsing two labels onto one row.
-Moving never stacks rows of content: when a child whose content reaches into a top or bottom border's row would
-land on a sibling's content by moving one row off it (two flush rows filling the box), the box's border is left
-out whole, all four sides, and the content keeps its rows. A following inset
-starts below already-painted sibling text. Ordinary descendants remain clipped by inherited border limits. Scroll content
-keeps its offset and clips rather than moving back into the viewport. A view's own text, field and canvas use
-its inner Cell rect. `overflow: hidden` clips descendants to that rect and masks rounded corners. A border is
-drawn whole or not at all: each drawn side owns a Cell, and a box holding content keeps one row and one column
-between them, so a one- or two-row box with content (a chip, a compact button) draws no border and its content
-keeps the Cells the layout gave it; an empty two-row box keeps its closed border when no sibling text or content
-is drawn through it. Borders are straight single lines whatever their radii; radii shape
-only fill coverage and `overflow: hidden` clips. A button draws no border (the terminal look below).
-A childless plain View fill thinner than half a Cell draws `─` or `│` in its fill's palette color (the
-Terminal look below). A rule never runs through a row (or, upright, a column) that holds text: it is drawn once
-its parent's subtree is, on its own row when that holds none, else on the nearest row inside its parent that
-holds none (a list's divider at the top of a row moves below the row's text), else not at all. A fill at
-exactly half a Cell is a solid leaf. When both dimensions are thin, the longer
-normalized Cell extent chooses the line direction. Hairlines use absolute edges; rounded controls and compact
-canvases keep their center-row rule.
-A sub-Cell fill preserves already-painted glyphs that it does not overlap in point space, even when both
-quantize to the same Cell; fills that overlap text in points keep their normal paint order.
-Rounded fills sample the Cell centers against circular corner arcs; continuous curves use the same coarse
-approximation. Positive tiny fills still occupy a Cell.
-Text painting, search highlights, selection and the test agent share the projected text content rectangle.
-Anchored overlays use the resolved side and anchor from `ViewProps::overlay_anchor`. Their nearest edge moves
-out to the anchor's Cell boundary when needed, including anchors smaller than one Cell. The core's placement,
-flip decisions and point-layout events remain unchanged.
+In the terminal idiom the core lays out with its terminal algorithm (`docs/dev/styles.md` "Layout in a terminal"),
+so view frames arrive in whole Cells and a container's border takes exactly one Cell on its side. The painter divides frames by the Cell size; where a frame
+is still off the grid (a transform's translation, a scroll offset), each edge rounds from its absolute point
+coordinate with **round-half-up**, `floor(points / points_per_cell + 0.5)`, a tie going toward positive
+coordinates. The embedding area's integer Cell origin is added after conversion. `geometry::CellBounds` is the
+common boundary for view frames and content boxes; input content boxes follow the same rule as text content
+boxes. The painter records each view's Cells (`render::Geometry`: clipped `visible`, unclipped `bounds`) and the
+views that take the pointer (`render::Hit`) for input, focus, search and the test agent.
 
 `CellTextEngine` counts Unicode display width: wide characters take two Cells and grapheme clusters stay whole.
 Ordinary text occupies one row at any font size. Inline attachments reserve their width in whole Cells
@@ -366,89 +326,186 @@ preserve empty rows. A grapheme wider than the available line remains whole and 
 Alignment becomes a whole-Cell indent. Line geometry reports UTF-16 offsets and point dimensions, as the core's
 `TextEngine` contract requires. Custom font registration succeeds with the terminal font remaining in use.
 
-## The terminal look
+## Drawing
 
-The terminal backend follows the terminal's own look, as system UI keeps a platform's look: `palette.rs` maps
-every app color onto the terminal's 16-color meanings, so the user's terminal theme decides the actual colors.
-A color is read against its ground: the opaque fill of the nearest view the app drew it on (what the app
-designed it against: a button label on its button's fill, text on its card), else the page of the app's
-appearance (`ColorScheme`: the terminal's background from OSC 11, dark when unknown, or the app's own choice),
-black when dark and white when light. Text, fields and canvases sit on their own view's fill; fills and borders
-on what is under their view. A color's alpha is blended over the ground before it is read. View opacity never
-changes a color, and the ground decides only the ink, never where anything is drawn.
+`render.rs` draws the retained view tree in the terminal's own look, as terminal apps such as grok-build look:
+the user's terminal theme gives the colors, depth comes from steps of the terminal's own background, and
+box-drawing lines and bold give the rest of the structure and state.
 
-| App color | Terminal ink |
-|---|---|
-| Saturated: chroma (largest minus smallest channel) at least 20% of 255 | The accent of its hue band, at normal intensity: red [335°, 15°), yellow [15°, 75°) (orange, amber), green [75°, 165°) (lime, emerald), cyan [165°, 200°) (teal), blue [200°, 265°) (violet), magenta [265°, 335°) (purple, pink) |
-| Near-neutral, CIE L* at least 75 from the ground's | The default foreground |
-| Near-neutral, closer to the ground (secondary text, placeholders, separators, borders) | The default foreground, dim |
-| Fully transparent | Hidden |
+**Two looks.** A terminal whose background is known (OSC 11, `TerminalCapabilities::background_color`) and that
+shows 256 colors or more has **surfaces** (`palette::Ramp`): steps of its background mixed toward its foreground
+(OSC 10, else white or black against the background), quantized to the xterm palette at 256 colors. The
+terminal's own background (`Color::Reset`) is never painted, so its color and transparency stay:
 
-Text keeps its attributes: weight 600 and above is bold, and italic, underline and strikethrough stay. The text
-engine lays text out once on the engine thread; the styled `Paragraph` for a ground is made when the text is
-first drawn on it, and the last few are kept. Borders, hairlines, canvas dots and text, field text and placeholders and animated colors use
-the same mapping.
+| Step | Mix | Used for |
+|---|---|---|
+| base | 0 | the page, a modal's box |
+| sunken | 3% | a fill darker than its ground, a focused text field without a line |
+| raised | 7% | a fill lighter than its ground, anchored overlays (one step above the ground's step) |
+| hover | 11% | a hovered control |
+| select | 16% | selected rows, focused and pressed controls |
+| border | 22% | box lines |
+| popup line | 45% | a popover's or menu's line |
+| faint / muted | 35% / 50% | disabled text, placeholders / secondary text |
+| focus line | 40% | a focused field's or container's line |
 
-No fill color is drawn; every Cell shows the terminal's background. A view's opaque fill, or a translucent one
-of at least 50% alpha, still clears the Cells it covers, so a popup, a menu, a sticky header or a floating bar
-hides what lies under it. Lighter fills (scrims, tints) draw nothing. A childless View whose opaque fill is its
-content (a progress indicator, a slider thumb, a status
-dot) draws its Cells reversed in the fill's palette color; one thinner than half a Cell draws the hairline glyphs
-above. Gradients are left out.
+Elsewhere (a 16-color terminal, an unknown background) the look is **bandless**: no fills, dim secondary text and
+lines, reverse video for selection and focus, as described with each rule below. The app's design decides what is there and where it is; it is not reproduced Cell by
+Cell. Views draw in tree order (the core orders siblings by `zIndex`), modals after the root, and each view
+draws, in order:
 
-Views whose accessibility state is selected or checked (`checked: true`; mixed is not), other than checkboxes,
-radios and switches (below), and the focused control show a **soft bar**, never reverse video: on the rows of
-their Cell box that hold their text, across the box's width, the Cells' background is the terminal palette's
-color 0 (black) in the dark appearance or color 7 (white) in the light one, and the text is bold. The bar is
-added after the view's descendants are drawn and changes no symbol or ink: a multi-row box (a 64-point
-watchlist row, a tab) is not filled, its blank rows stay blank, and every glyph keeps its Cell and its palette
-color (a red change stays red text on the bar; a sparkline keeps its dots). A box with no text gets the bar on
-its first row. Inside a selected or checked view, hairline rules in an accent color (a selection's accent bar)
-and solid leaves (a marker dot) are not drawn, nor is a solid leaf drawn before it whose Cells overlap its box
-(a segmented control's sliding indicator under the selected tab), as the bar already marks the selection;
-neutral dividers stay. A focused text field shows the terminal cursor at its caret instead. Outlines, including the
-app's focus outlines, are not drawn: focus is the bar. A view whose opacity, multiplied through its ancestors,
-is below 3% draws nothing and keeps its hit regions; any other opacity is drawn as opaque.
+1. when it is the first surface (a border or a fill) of an overlay: its box cleared of what is under it; with
+   surfaces an anchored overlay's box is then raised and a modal's stays base;
+2. with surfaces, its fill as a band over its whole frame (below);
+3. its borders in box drawing on each side wider than zero, one Cell whatever the width: `─` and `│`, `╭╮╰╯` at
+   a corner whose radius is above zero and `┌┐└┘` at a square one, dashed `╌╎`, dotted `┈┊`; a border on one
+   side only is that side's line. Borders draw only where the layout gave them a Cell: in a terminal the core
+   sends a border width only for those sides (`Node::cell_border`), which only cards have (a container with
+   vertical padding of 12 points or two rows of content). A control (a button, link, tab, menu item, option,
+   checkbox, radio, switch, slider, combobox, text field or other pressable view) is its label row, a box of
+   text and a small box have none; a tab's indicator bar takes no Cells, and the selected tab is a reversed
+   band instead;
+4. its content: text runs (below); a text field; a canvas (below; icon-sized ones take no Cells); a native
+   component's terminal rendering; a control whose content is all left out (an icon button such as a `⋯` menu
+   trigger) shows its accessibility label, trimmed, as its label: the layout gives it one row that wide, or narrower (at
+   least three Cells) when its row is short of room, the label then cut and ending in `…`; an icon-only popup
+   trigger (a split button's chevron, a menu's) shows `▾` instead, `▴` while its popup is open. Content counts only when
+   it draws: a wrapper around an icon the terminal leaves out is empty;
+5. its children, offset by a scroll view's offset (and sticky cells' shifts), clipped to the view's content box
+   (inside its border) when it clips, scrolls or has a border; an anchored overlay is clipped only to the surface;
+6. a scroll view's scroll bar (`scrollbar.rs`);
+7. its state (below), over what it and its children drew.
 
-Decorations are plain, and each is a documented Decorative feature:
+**Fills** are steps with surfaces (`palette::surface`): a fill of alpha 0.03 or more that is saturated (its own
+color, however translucent: an accent wash over a selected row) or, blended over its ground, 1.5 L* lighter or
+darker than the ground, is a band over the view's whole frame, behind its children; a text without a background
+of its own paints none. The app's page color (an opaque fill over the whole screen with nothing filled above it)
+is the terminal's background: no band, and the ground the steps below it are taken from. Lighter is
+raised, one step above its ground's step (a fill inside a raised card is lighter still); darker is sunken; a
+saturated fill (a primary button, a badge) is its color mixed 20% into the step under it, its text the accent of
+its hue (the default foreground when the app's text is light), bold on a control. A filled view has no line:
+its band is its edge, unless the app's border stands out at least twice as far from the ground as the fill
+does. A run with its own background (a highlight, inline code) is a band the same way. A text field without a
+line or a fill of its own is a raised band (a search field). Bandless, fills draw nothing.
 
-- **Borders** are straight single lines (`┌─┐`, never `╭╮`) in their palette color: neutral border colors read
-  dim, accent ones (an invalid field's red) keep their accent.
-- **Buttons** read `[ label ]`. A button is a pressable view (role `button` or `imagebutton`, or no role and press
-  handlers) that the app drew as a box, with a border or an opaque fill unlike the fill it sits on, on itself or
-  on the plain View it wraps all its content in (a press handler around a styled View), and whose text sits on
-  one Cell row. List items without a box (sidebar and watchlist rows) and selected or checked views,
-  which show the bar, have no brackets; other roles (link, tab, checkbox, radio, switch, menu item, ...) keep
-  their own look, and a pressable with several rows of text or other content (a field, an image, a labeled canvas)
-  keeps the app's box. The label stays in the Cells the layout gave it; the brackets take the button's own Cells
-  with the same gap on both sides, one Cell when the box has room, else none (`[Sell]`), both or neither: a label
-  flush with its box stays bare. The button draws no border or fill.
-  With mouse capture (opt-in), a hover or pressed fill on a list row makes it a box while it lasts, so the row
-  shows brackets while hovered: the rendering sees the resolved fill, not whether a state set it.
-- **Icons and decorative images** are not drawn, at any size: canvases with role `image` or without an
-  accessibility label, and images without an accessibility label (a logo). An image with a label is content: its
-  placeholder is a border titled with the label. A View whose only content was left out this way (an icon
-  tile, a page header's tile, a square around an icon) is **emptied**: it and everything in it draw no border,
-  fill, leaf or selection bar and take no Cells' glyphs; their neighbors keep their Cells, and the View keeps its
-  hit regions, so keyboard focus still puts the bar on it. Checkboxes, radios and switches are never emptied:
-  their glyph is their content. A button whose content is only icons shows its accessibility label as
-  `[ label ]`, else `[label]`, on its icons' center row, only where the whole label fits: centered in its box, or
-  over the box and the blank Cells beside it inside its parent, a blank Cell away from other glyphs, as close to
-  centered as it can be. It is placed once its siblings are drawn, so it never covers their text. A label that
-  does not fit whole is not drawn at all (never cut to `[L…]`); the button stays focusable, and focus puts the
-  bar on that row, under the label when there is one.
-- **Checkboxes, radios and switches** (roles `checkbox`, `radio`, `switch`) show their state with terminal glyphs
-  instead of the bar: a checkbox `[x]`, `[ ]` or `[-]` (mixed), a radio `(•)` or `( )`, a switch `[on ]` or
-  `[off]`. The glyph takes the place of the indicator, the first view inside the control that the app drew as a
-  box (a border or an opaque fill, not a hairline rule) holding no text; the indicator and everything in it (its
-  border, fill, mark or thumb) are not drawn. The glyph takes the label's first row (the title of a two-line
-  label) and the palette ink of the indicator's fill, else its border. Before the label it ends one Cell from the
-  label's first glyph, reaching left into the control's blank Cells, so a list whose labels share a column puts
-  its glyphs in one column; without room its short form (`x`, `-`, `•`, `on`, `off`) does, then the glyph sits
-  flush with the label, else it is left out. An indicator after the label (a trailing switch) takes the glyph
-  from its left column, extending right only into blank Cells, else the short form. A control without an
-  indicator places its glyph before its label the same way. Keyboard focus still puts the bar on the control.
-- **Shadows, gradients and opacity** are ignored (opacity below 3% still hides).
+**Nothing is drawn** for fills bandless, gradients, radii other than a border's corners, shadows,
+outlines and focus rings, opacity, filters, blend modes, backdrop effects, transforms other than translation
+(rounded to Cells), icons, images, videos, web views and native views without a terminal rendering: the
+terminal cannot show them well, so they are left out rather than imitated (the core gives images, videos and
+icon-sized canvases no Cells; the mounter logs each unsupported kind once). A view that is invisible, concealed (a screen under the top one)
+or nearly transparent (opacity under 0.03) draws nothing. Cells keep the terminal's default foreground and
+background (`Color::Reset`) unless something below sets them.
+
+**Colors** are meanings, not values (`palette.rs`). Each app color is read against its ground, the opaque fill
+the app drew it on (what the app designed it against), else the page of the appearance (black when dark, white
+when light), its alpha first blended over that ground:
+
+- a saturated color (chroma at least 20%) is the accent of its hue band at normal intensity: red, yellow (orange,
+  amber), green (lime, emerald), cyan (teal), blue (violet) or magenta (purple, pink);
+- a near-neutral color is the default foreground, muted when its lightness is within 75 L* of the ground's
+  (secondary text, separators) and faint within 35 L* (placeholders): with surfaces those are fades of the
+  ramp (50% and 35%), bandless both are dim; never a gray of the palette, which themes set without regard to
+  contrast. Black (the core's default text color) and colors within 4 L* of the page's foreground are always
+  the default foreground, so unstyled text reads on dark and light terminals alike;
+- a fully transparent color hides what it draws.
+
+A neutral border is the ramp's border step with surfaces, dim bandless; a border in an accent keeps it. The color depth matters only for canvases, whose
+pictures keep their colors at the terminal's `ColorDepth` (true color, the nearest xterm 256-color cube or gray
+ramp entry, or the nearest of the 16 standard colors). A view's opacity changes no color.
+
+**Text** keeps its weight (bold from 600), italic, underline and strike-through; its color is the meaning of the
+run's color. A run with its own accent background (a highlight) is reversed in that accent; other run backgrounds
+draw nothing.
+
+**State** comes from the view's interaction states and accessibility state, not from the app's state styles.
+With surfaces (`render::mark_surface`) states are bands and bold; a band replaces only the Cells on the view's
+own background, so what its children filled stays, and it is at least one step above the view's own:
+
+- a selected or current item is a select band and bold; a focused control (a button, a row) the same; a focused
+  container three or more rows tall shows its line in the focus color (a hover band without a line); a focused
+  text field shows its line in the focus color, or a sunken band without one, and the caret;
+- a tab is bold when selected or focused and muted otherwise, banded only when focused (select), pressed or
+  hovered;
+- a hovered pressable view is a hover band, a pressed one a select band;
+- in a popup (an anchored overlay: a menu, a select or combobox list, a command palette) the highlighted item,
+  the keyboard's (the item the list projects as focused) or the pointer's, is a full-row accent band, its text in
+  the terminal's background color; a selected item that is not highlighted keeps the select band;
+- the selected row of a list or tree inside the pane holding the focus (the innermost box with a line around the
+  focused view, or the overlay holding it) is the same accent band, as lazygit's: the list the keys go to; the
+  same selection in another pane keeps the select band;
+- a trigger whose popup or menu is open (`expanded`) stands on a raised band;
+- an `adjustable` view (a slider's track, a resize handle's line) shows focus its own way and takes no focus
+  marks;
+- the innermost box with a line around the focused view shows its line in the accent (blue), a popup's only while
+  one is shown; a focused overlay's title, and a system dialog's, is an accent chip;
+- a disabled view is faint, never bold, with no band.
+
+Bandless:
+
+- a selected or current item (`selected`, `current`, a toggle pressed, a checked menu item) is a reversed band
+  over its whole inner box; checkboxes, radios and switches show their state in their own glyphs;
+- a focused view reverses its label, the Cells of each row from its first to its last glyph; inside a band the
+  label is bold and underlined instead; a container three or more rows tall shows focus on its border (bold,
+  not dim) or, without one, as a bold underlined label; a focused text field underlines its text and shows the
+  terminal cursor as its caret (its placeholder is always dim);
+- a hovered pressable view (a button, link, menu item, option, tab or a view with a press handler) is a faint
+  band behind its box: the terminal's background (OSC 11, else black or white by the scheme) mixed 10% toward
+  its foreground (OSC 10, else white or black), at the terminal's depth; a pressed one is the same band at 18%.
+  Modifiers stay as they are. With only the 16 standard colors there is no hover band, and a pressed view
+  reverses its label;
+- a control whose own opaque fill stands out from what it is on (a saturated fill, or one 40 L* from its
+  ground: a primary button) shows its text bold, in the fill's accent when it has one; the fill itself is not
+  drawn;
+- a disabled view is dim and never bold.
+
+**Overlays**: an anchored overlay (a popover, menu, tooltip) or a modal clears its box and frames it with a
+rounded line, in the border step with surfaces (dim bandless); the accessibility label of its first surface is
+the title in the top border, bold, set off by the line with surfaces (`╭─ Title ─`). With surfaces an anchored
+overlay's box is raised, framed in the brighter popup line, and casts a one-Cell drop shadow to its right and
+below (the Cells there keep their glyphs, their background darkened 40% toward black and their text faded); a
+modal's box is the terminal's background. A box without a border of its own gets the
+frame one Cell outside it. Before each visible modal the Cells already drawn are faded half way into the
+terminal's background with surfaces (`dialog::backdrop`), dimmed bandless; anchored overlays leave what is
+behind them as it is, so a tooltip does not dim the screen. A system dialog (`AlertDialog`) is drawn the same
+way; its buttons are `Cancel  OK` with surfaces, the default one bold and the focused one a select band and
+bold, and `< Cancel >  < OK >` bandless, the focused one reversed.
+
+**Scroll bars**: a scroll view whose content overflows along its axis shows a one-Cell bar on its inner right
+edge (bottom edge when it scrolls horizontally), or on its parent's right line when a vertical scroll view reaches
+it (a pane filled by its list, as lazygit's: the thumb over the line, no column of its own), unless its `scrollbar` is off, it is a single Cell across, or
+its content drew a glyph in the column (row) the bar would take (the layout keeps none for it, and content wins):
+the track `│` (`─`) in the border step (dim bandless), the thumb `┃` (`━`) muted (the default foreground
+bandless), as long as the share of the content in
+view (at least one Cell) and placed by the offset. A scroll view the app gave a bar of its own (`nsh/base`'s
+`Scrollbar`, a scroll bar theme) shows the terminal's bar, since `Scrollbar` draws nothing in the terminal
+idiom. Each drawn bar is a `scrollbar::ScrollBar` (the scroll view,
+its track and thumb Cells), which input reads to drag the thumb.
+
+**Clipping**: a text run never draws past its own view's box; a view that clips (`overflow: hidden`), scrolls or has a
+border keeps its children inside its content box, while elsewhere a child placed outside its parent (a badge, an
+absolute label) shows, as in CSS. A one-line text cut
+at its right edge shows `…` in its last Cell, and a text whose rows go past the bottom of the box ends its last
+row shown in `…`; a text a scroll view's viewport cuts is only cut (it scrolls into view), and so is a run of
+glyphs without letters or digits (a slider's track). The content of a disabled view is dim (faint with surfaces)
+even where it stands outside the view's own frame. Where two texts share Cells, the later one wins them whole and the earlier one's Cell just before it becomes
+`…`, so the overlap reads as truncation, never as mixed letters.
+
+An unchanged frame changes no Cell: ratatui's diff then writes nothing.
+
+## System UI
+
+What the system draws on other platforms is drawn in the same look (`dialog.rs`).
+
+- **Alerts** (`AlertDialog.show`, `Command::Dialog`): the screen is dimmed and the dialog is a centered box (at
+  most 64 Cells wide) cleared of what is under it, with a rounded dim border, the title in the top border, the
+  message wrapped inside and the buttons as `< OK >` in a row at the bottom right; a sheet lists them one per row.
+  The focused button is reversed, the default one bold, a destructive one red. An alert puts its cancel button
+  first and a sheet last; focus starts on the default button. Tab and the arrows move between buttons, Enter and
+  Space choose, Escape chooses cancel or dismisses a cancelable dialog; a press on a button chooses it, one
+  outside dismisses a cancelable dialog. The answer is the `dialog` event with the dialog's `id` and the button's
+  `index` (-1 when dismissed). While a dialog is shown it takes every key and press, and nothing behind it is hit.
+- **Scroll bars, selection and the caret**: as above; selected text and the Minibuffer's matches are reversed,
+  a text field's caret is the terminal cursor.
 
 ## Navigation stacks
 
@@ -499,7 +556,7 @@ same Reported contract, and first presentation sends Show. Transitions settle im
 A Scroll draws its children within its viewport, using the current content offset; it starts at zero. The view's
 own fill and border stay fixed. Children are translated by the offset (with content insets from the core's scroll
 behavior), then projected to Cells and clipped to the Scroll and its ancestors. Text that starts outside the
-viewport uses the same Paragraph scrolling path as other clipped text. The hit regions use these translated,
+viewport is clipped Cell by Cell like other clipped text. The hit regions use these translated,
 clipped rectangles, so only visible content receives presses.
 
 The retained view owns the core's `scroll::ScrollState`. `ScrollConfig`, `ScrollContent` and `ScrollBehavior`
@@ -527,11 +584,10 @@ vertical wheel steps horizontally. The core's
 parent can take the event. This search stays inside the newest modal. A vertical wheel uses a horizontal view
 only when no surrounding Scroll takes the vertical axis. Disabled scroll views do not take the wheel.
 
-Wheel scrolling keeps the current keyboard focus while any of its Cells remain visible. If it leaves sight,
-focus moves to the nearest visible focusable view in the current focus scope, measured from its previous Cell
-position. A wheel event with no keyboard focus creates none. Focus selection uses the completed scrolled frame,
-so the next activation cannot target content that has left the viewport. Indicators, sticky cells, gestures and
-scrolling animations remain separate work.
+The wheel scrolls the pane under the pointer and never moves keyboard focus, as on the desktops: a focused
+control that scrolls out of sight stays focused, and the next key that moves focus starts from it. A wheel event
+with no keyboard focus creates none. Gestures and scrolling animations remain
+separate work; the scroll bar is drawn (Drawing above).
 
 ## Native animations
 
@@ -546,16 +602,14 @@ separate from the engine's display-frame request. Embedders arm a timer for that
 standalone loop already uses this contract. Once the graph finishes or is stopped, it schedules no further
 frames. The test agent reports the graph's actual animation state when settling input.
 
-Animated opacity multiplies through descendants. Background, border and text colors override their style values
-and are drawn in the palette like any other color; text fields keep their placeholder color. Canvas numeric and
+Animated opacity hides a view only below 0.03, as static opacity does. Animated border and text colors override
+their style values and are drawn like any other color (animated fills, like fills, draw nothing but decide the
+ground of what is on them); a text field's placeholder stays dim. Canvas numeric and
 color slots are evaluated on the same frame, including the slots used by drawing transforms.
 
-`animation.rs` composes two-dimensional view transforms in CSS order around `transformOrigin`, including bound
-steps. Translation snaps to Cells; scale, rotation and skew project each view and content box to its axis-aligned
-Cell extent. Descendants inherit the transform, and clipping, focus geometry and hit regions use those projected
-boxes. Text keeps upright, unscaled terminal glyphs inside its projected box; borders remain Cell-aligned.
-Canvas paths receive the composed affine transform on the braille grid, including after a canvas `setTransform`.
-Depth rotation and perspective are Decorative features left out silently.
+Animated transform steps override their style values: translation moves a view and its content by whole Cells
+(Drawing above), and clipping, focus geometry and hit regions follow it. Canvas paths receive the canvas's own
+transforms on the braille grid, including after a canvas `setTransform`.
 
 The environment reports reduced motion. Navigation, modal transitions, layout animations and style transitions
 take their final state immediately. Motions honor reduced motion through the core; explicit `Animated` and
@@ -568,8 +622,8 @@ completion callbacks and promises resolve normally.
 down per Cell (4 × 4 points at the default 8 × 16), and ratatui's `canvas::Canvas` with `Marker::Braille` turns
 them into symbols. Only the canvas's visible Cells are replayed onto, so a canvas partly scrolled or clipped keeps
 its dots in place. The widget resets the background of its area, so it draws into a scratch buffer and only its
-symbols and palette inks are copied: what lies under it stays. A canvas with role `image` or without an
-accessibility label is an icon and is not drawn (the terminal look above); label a chart to draw it.
+symbols and inks are copied: what lies under it stays, and the dots keep the background of the Cells they are
+drawn on.
 
 - **State**: the affine transform (`translate`, `scale`, `rotate`, `transform`, `setTransform`), `save` /
   `restore`, `fillStyle` / `strokeStyle`, `globalAlpha`, the line dash and its offset, `font` (its weight and
@@ -585,7 +639,8 @@ accessibility label is an icon and is not drawn (the terminal look above); label
   odd pattern repeats, and every subpath starts the pattern again.
 - **Colors**: a gradient draws its middle stop, and an animated color (`Paint::Slot`) its current value from the
   canvas arguments the native animator writes (transparent until it has one; numbers read 0). A paint's alpha
-  times `globalAlpha` is part of its color, read by the palette; the view's opacity is not. A Cell shows one
+  times `globalAlpha` is part of its color, blended over the page of the appearance and drawn at the terminal's
+  color depth; the view's opacity is not. A Cell shows one
   ink: that of its most recently painted dot.
 - **Text** (`fillText` / `strokeText`) is printed on whole Cells above the dots, one row tall: `textAlign` places
   it by its width in Cells, and `textBaseline` puts its row's top at `y` (`top`, `hanging`), half a row above
@@ -600,25 +655,27 @@ canvas itself included.
 
 `key_scheme.rs` maps keystrokes to actions; `keyboard.rs` applies focus, activation and scrolling, and
 `navigation.rs` handles back. This keeps a future vim scheme independent of the actions, with one scheme selected
-today and no mode switch. The app's `nsh/keymap` table is matched first, including its editing and repeat policy.
-The standalone host reserves Ctrl+C for exit. Outside fields, C-h e opens diagnostics; inside fields,
+today and no mode switch. The app's `nsh/keymap` table is matched first, including its editing and repeat policy, and with it the
+bindings a focused component holds (a slider's or a list's arrows), so a focused component gets its keys before
+the scheme moves focus. Ctrl+C copies a text selection (in a field or selectable text) and otherwise exits. Outside fields, C-h e opens diagnostics; inside fields,
 C-h is Backspace (leave the field with Esc or C-g to open diagnostics). While the diagnostics panel is open,
 it owns keys and the app's field caret is hidden; closing it restores the caret when an editable field has focus.
 
 | Keys | Action |
 |---|---|
-| Ctrl+N, Down, Tab | Next focusable view in tree order |
-| Ctrl+P, Up, Shift+Tab | Previous focusable view in tree order |
+| Ctrl+N, Tab | Next focusable view in tree order |
+| Ctrl+P, Shift+Tab | Previous focusable view in tree order |
+| Down / Up | Nearest focusable view below / above, one in an overlapping column first; with none focused, the first / last one in sight. One out of sight within a wheel step is revealed; one farther away is approached by a wheel step (three rows) of the innermost Scroll that can still move that way, focus then staying on a control in sight |
 | Ctrl+F, Right / Ctrl+B, Left | Nearest focusable view to the right / left on the same row |
-| Enter | Press the focused view, reporting PressDown, PressUp and Press in order, at its middle |
+| Enter, Space | Press the focused view, reporting PressDown, PressUp and Press in order, at its middle |
 | Esc, Ctrl+G | Leave the focused field; otherwise go back through the app handler, stack or newest modal |
 | Ctrl+V, PageDown / Alt+V, PageUp | Scroll one viewport down / up in the innermost Scroll around focus or the search point |
 | Alt+<, Home / Alt+>, End | In that Scroll, focus the first / last control in tree order; center it when a vertical reveal must scroll, or scroll to the endpoint when there are no controls |
 | Ctrl+S / Ctrl+R | Search the text on screen forward / backward in the Minibuffer |
-| Ctrl+C | Quit |
+| Ctrl+C | Copy the selection; with none, quit |
 
 Focus visits pressable and editable views, honoring `focusable` and disabled state, in depth-first document
-order within the focus scope, as NSH's other platforms do. A sidebar's stops stay together before the next
+order within the focus scope, as NSH's other platforms do (Tab and Ctrl+N / Ctrl+P; Up / Down are spatial). A sidebar's stops stay together before the next
 panel's stops, regardless of their Cell positions. Traversal wraps at the ends; horizontal movement stays
 spatial, choosing the nearest control on overlapping row ranges. Traversal centers a control vertically when
 revealing it requires scrolling, and leaves fully visible controls in place (see Scroll content).
@@ -632,20 +689,20 @@ focus styles apply. Pressable views have no platform focus marker: their app-def
 indicator, and their terminal cursor is hidden. `AppView::render` reserves the terminal cursor for a focused
 editable field's caret and respects `caret={false}`. A buffer-only Widget cannot position the terminal cursor.
 Removing an ordinary focused view clears focus. Modal presentation and closing use the focus history described
-above; unfocused surfaces ignore keys.
+above; unfocused surfaces ignore keys. A programmatic `focus()` (a ref's, `autoFocus`) on a view scrolled out of
+sight focuses it and reveals it in its surrounding Scrolls, as keyboard traversal does.
 
 Focus changes clear the old focused state before setting the new one, so the core's derived `focus-within`
-state stays on a shared ancestor when moving backward between its controls. The focused control shows the
-bar on its text rows across its Cell box, transformed with the control before Cell rounding and ancestor clipping; the app's
-outlines and its other focus styles' fills are not drawn (the terminal look above).
+state stays on a shared ancestor when moving backward between its controls. The focused control shows
+as the terminal marks focus: its label reversed, or a large container's border bold (Drawing above).
 
 The host preserves Ctrl, Alt, Shift and known releases; crossterm also decodes an ESC-prefixed character as Alt.
 `Input::KeyRepeat` preserves a repeat identified by the terminal, so a nonrepeating app shortcut consumes it
 without firing again. Navigation activation completes a press in one action; a later release does not press
 again. Legacy terminal presses are independent actions: Ctrl+I/Tab, Ctrl+M/Enter and Ctrl+[/Esc can be
 indistinguishable, and a terminal may consume Ctrl+S/Ctrl+Q for flow control (the host's raw mode turns
-the tty's own flow control off). Kitty negotiation is separate work. Editing uses the keys below while a field
-is focused.
+the tty's own flow control off). With the kitty keyboard protocol the standalone host negotiates, those pairs
+arrive apart. Editing uses the keys below while a field is focused.
 
 ## The Minibuffer
 
@@ -681,7 +738,7 @@ including after the Minibuffer closes.
 While searching, the platform draws the Minibuffer over the bottom row of the surface's area, in the terminal's
 default colors: `/` (forward) or `?` (backward), after less and vim, then as much of the query's end as fits,
 with the terminal cursor after it. A query with no match is crossed out. The current match's Cells are
-reversed, also inside a bar (the focused control it moved to, a selected row).
+reversed, also inside the reversed label of the focused control it moved to or a selected row.
 The prompt is a symbol because the platform draws no built-in strings. The app's layout never changes for the
 Minibuffer, and once the search ends nothing of it, or of the match highlight, is drawn. A match on the bottom
 row lies under the Minibuffer until the search ends. Positions come from the last completed frame.
@@ -697,22 +754,40 @@ ordinary mount batches. The backend supplies interaction states and never substi
 A focused Slider thumb installs its component's keys in the existing app keymap: arrows change by a step,
 PageUp/PageDown by a page, and Home/End move to its limits. Those bindings run before terminal navigation and
 scrolling. Tab/Shift+Tab leave the thumb; Ctrl+N/Ctrl+P remain traversal keys. Range thumbs stay within each
-other and disabled thumbs are skipped. Progress draws the app's indicator as a solid leaf or hairline in its
-palette color, including indeterminate indicators sized by the app; its track is a container and draws no fill.
-Selected Tabs show the bar on their label's row; Checkboxes, Radios and Switches show their state with
-terminal glyphs (the terminal look above).
+other and disabled thumbs are skipped. Progress, Tabs, Checkboxes, Radios and Switches draw their own glyphs; a
+selected tab is a reversed band and a disabled control is dim.
 
 Mouse presses use the same hit regions as other views when the host captures the mouse. The controls
 acceptance covers keyboard and press behavior; Slider dragging and hover feedback require the joint pointer
-acceptance described below. Decorative shadows (including Tailwind rings) and 3D transforms retain
-their documented degradation below; focus is the bar, not the gallery's outline-based focus styles.
+acceptance described below. Shadows, rings and transforms follow "Drawing"; focus, selection and
+disabled states show as the terminal's attributes described there.
 
 ## Mouse and text selection
 
-The standalone host leaves mouse capture off so the terminal emulator owns ordinary selection. Start
-`nsh-tui-host --mouse --bundle <bundle.js>` (or `--mouse --dev-server <url>`) to capture clicks, motion and wheel
-reports. An embedder owns this transport choice and forwards `Input::Mouse`; AppView never changes terminal
-modes. The test agent forwards the same input independently of terminal capture.
+The standalone host captures the mouse: clicks, motion with and without a button down, and the wheel. Start
+`nsh-tui-host --no-mouse --bundle <bundle.js>` (or `--no-mouse --dev-server <url>`) to leave the mouse to the
+terminal emulator and its own text selection. An embedder owns this transport choice and forwards
+`Input::Mouse`; AppView never changes terminal modes. The test agent forwards the same input independently of
+terminal capture.
+
+Presses of one button on one Cell within 500 ms count up to a triple click and start over: `Press` events carry
+the count (`clicks`), a double click in a field selects the word, a triple click its line, and selectable text
+selects its word and paragraph the same way. Dragging after a double or triple click extends the selection by
+whole words or lines, keeping the unit first clicked. A secondary (right) press asks the nearest enabled view around
+the one under the pointer that listens to `onContextMenu`, with the Cell's middle as its position, as the
+desktop backends do; it first goes down and is cancelled as a touch, so an open popover closes on a right
+press outside it. A press in a field still goes down as a touch before the field takes the pointer, so an
+open popover hears a press outside it there as anywhere else.
+
+A scroll bar answers the pointer: a primary press on its track moves the thumb's middle there at once, and a
+held thumb follows the pointer Cell by Cell, the offset proportional to the thumb's place in the track's free
+Cells. The press takes neither focus nor a selection.
+
+The handles of `ResizablePanelGroup` and `DockArea` are their own terminal forms (`docs/dev/dock.md`
+"Resizable"): a `│` or `─` line in the Cell between two panes, lit in the accent while hovered, held or focused.
+A primary press on the line and a drag resize the panes Cell by Cell as the pointer moves, through the Touch
+events below; Tab reaches the line and its arrows step it one Cell. A tab dragged in a `DockArea` outlines where it would land: an unanchored
+overlay with an accent border and no fill, drawn as a frame over the content, which stays as it is.
 
 `input.rs` picks the last painted, clipped hit regions inside the newest modal. Hover follows the ancestor
 chain, reports `HOVERED`, HoverIn/Out/Move and rechecks the pointer after rendering a changed tree. Leaving the
@@ -730,9 +805,8 @@ content moves it directly within its bounds. Selecting text takes precedence ove
 texts (nested groups belong to the outer group); `userSelect: "text"` selects a standalone Text and
 `userSelect: "none"` excludes it. Dragging highlights whole graphemes with reversed Cells, Shift+click extends,
 and Ctrl+Shift+C, Ctrl+Insert, Alt+W or Cmd+C copies through the existing clipboard backend (OSC 52 in the
-standalone host). Ctrl+C also copies at the AppView seam; the standalone host reserves it for quitting.
-Ctrl+A / Cmd+A selects the area's texts and Esc / Ctrl+G clears the selection. Clicking elsewhere or losing
-focus clears it. A click on selectable pressable text still presses; a drag past the shared press slop selects.
+standalone host), and so does Ctrl+C while there is a selection. Ctrl+A / Cmd+A selects the area's texts;
+Esc / Ctrl+G and any other key clear the selection, and so do clicking elsewhere and losing focus. A click on selectable pressable text still presses; a drag past the shared press slop selects.
 The layout retains each painted grapheme's UTF-16 range, including wide characters and ellipsis gaps; copying
 uses original text and joins paragraphs with newlines. Highlights stay within clipped text Cells and below
 covering views. Removed text endpoints clear the selection through the shared model.
@@ -740,7 +814,7 @@ covering views. Removed text endpoints clear the selection through the shared mo
 ## Syntax highlighting
 
 The terminal runtime enables `nsh-base`'s built-in highlighting, as the desktop backends do.
-Editor, DiffView and TextView code blocks draw their language token colors in the palette in both appearances.
+Editor, DiffView and TextView code blocks draw their language token colors at the terminal's color depth in both appearances.
 
 ## Text fields
 
@@ -755,7 +829,10 @@ tracked-state path. `autoFocus`, `focus()`, `blur()` and `setSelection` use the 
 
 Tab / Shift+Tab enter and leave fields. C-n/C-p and Up/Down traverse controls in single-line fields; in multiline
 fields they move between visual lines, retaining the desired Cell column across short lines. A mouse press in a
-field positions its caret; dragging or Shift+click extends the selection. The last painted, clipped hit regions
+field positions its caret; dragging or Shift+click extends the selection, a double click selects the word and a
+triple click the line, and dragging on from either extends by words or lines. While a field is edited the
+terminal cursor is a bar at the caret (`CursorStyle::Bar`, the terminal's own shape restored after), and Ctrl+C
+copies the field's selection. The last painted, clipped hit regions
 respect modal scope and `pointerEvents`. Esc / C-g clears field focus before a later cancellation reaches the app.
 App shortcuts run before editing, with the existing `When::Editing` policy.
 
@@ -787,13 +864,14 @@ C-w treats punctuation within a whitespace-delimited word as part of that word. 
 core's character boundaries, then use the core Model for selection and deletion.
 
 The app's `InputContent` box defines padding and border offsets. Text is a Paragraph with the app's text style;
-empty fields show the placeholder in its palette color. Single-line fields center their text and caret vertically
+empty fields show the placeholder, dim. Single-line fields center their text and caret vertically
 in that content box; drawing, selection and pointer placement use the same row. Multiline fields begin at its top.
 Graphemes stay whole; wide graphemes occupy their display width,
 multiline fields wrap at Cell boundaries, and single-line fields scroll horizontally. The field scrolls its caret
 into sight vertically and horizontally. Selected glyphs are reversed. Masked fields show one `•` per grapheme and
 do not export their selection through copy/cut. `AppView::render` places the terminal cursor at the caret;
-`caret={false}` hides it. Input-method composition belongs to the terminal emulator; committed characters enter
+`caret={false}` hides it. While it shows there, `AppView::cursor_style()` is `CursorStyle::Bar`, which the
+standalone host draws as a steady bar; elsewhere it is `Default`, the user's own shape. Input-method composition belongs to the terminal emulator; committed characters enter
 through the ordinary key/paste path.
 
 Bracketed paste is one model insertion and one ChangeText event; it is clipped by the core's
@@ -808,7 +886,7 @@ reader (`pbpaste`, PowerShell's `Get-Clipboard`, `wl-paste` or `xclip`). Bracket
 clipboard delivery and does not require a remote read. OSC 52 delivery requires the user's terminal/multiplexer to
 permit clipboard writes; `nsh test` uses memory and never writes to the machine's clipboard.
 
-## Degradation in this slice
+## Features in the terminal
 
 | Feature | Terminal representation |
 |---|---|
@@ -816,26 +894,25 @@ permit clipboard writes; `nsh test` uses memory and never writes to the machine'
 | Performance monitor | One corner line, toggled by `C-h p` or enabled by `--fps`; idle draws stop and readings also go to `nsh::perf` |
 | Development logs and connection/build status | Append-only log file, visible in the on-demand `C-h e` panel |
 | Test screenshots | Versioned UTF-8 JSON of Cell symbols, foreground/background/underline colors and modifiers |
+| Alerts (`AlertDialog`) | A centered framed box over the dimmed screen, buttons as `< OK >`, the focused one reversed |
 | Development errors | Dismissible panel, with the mapped message and stack; cleared by the next update |
-| Colors | The terminal's 16-color meanings by `palette.rs`: hue-band accents, the default foreground or dim, read against the opaque fill the app drew them on or the appearance's page |
-| View fills | No color: opaque fills and fills of at least 50% alpha clear the Cells they cover to the terminal background; childless solid leaves reversed in their palette color; lighter fills nothing |
-| Opacity | Ignored, except that a view below 3% draws nothing |
-| Selected, checked and focused views | A soft bar on their text rows (else their first row) across their Cell box: palette color 0 (dark) or 7 (light) behind bold text, with no accent bars or solid leaves inside or under a selected view; focused fields show the terminal cursor |
-| Borders | Decorative: straight single lines in per-side palette colors over a reserved inner Cell rect, drawn whole or not at all; boxes without room for a whole border around their content draw none |
-| Buttons | Decorative: `[ label ]` in the button's own Cells around its one row of text, or its accessibility label when it shows only icons, only where the whole label fits beside it, else nothing; no border or fill |
-| Icons and decorative images | Decorative: canvases with role `image` or no accessibility label and images without an accessibility label are not drawn, at any size; a labeled image's placeholder is a border titled with its label; a View holding nothing else draws no border, fill or selection bar (focus still shows) |
-| Outlines, including control focus outlines | Left out; focus is the bar |
-| Anchored overlays | Snapped outside the anchor's Cell rect on the core-resolved placement side |
+| Colors | The terminal theme's meanings: the default foreground, dim for low contrast, or the accent of a saturated color's hue; canvases keep their colors at the terminal's depth |
+| View fills | Left out; Cells keep the terminal's background |
+| Opacity | Left out (a view under 0.03 is not shown) |
+| Selected, focused, pressed, hovered and disabled views | A reversed band, a reversed label (a bold border on large containers; an underlined text field), a faint background band (none at 16 colors), dim |
+| Borders | Box drawing on each side wider than zero, one Cell, dim (an accent color kept), rounded corners where a radius is set, dashed and dotted lines |
+| Outlines and focus rings | Left out; focus shows as described in "Drawing" |
+| Box shadows | Left out |
+| Images, videos, web views, native components, shaders and icons (canvases at most 48 × 48 points) | Left out: laid out as `display: none` by the terminal layout (no Cells, frame or hits, their margins and gaps gone); larger canvases are drawn |
+| Scroll bars | A one-Cell track `│` (dim) and thumb `┃` on the inner edge of an overflowing scroll view, unless hidden |
+| Anchored overlays | Snapped outside the anchor's Cell rect on the core-resolved placement side; cleared and framed, the label as title |
 | Gaps between texts | Positive point gaps between one-line sibling texts or canvas text runs retain at least one Cell; zero gaps keep adjacent text |
-| Childless hairline fills | Below half a Cell, horizontal or vertical line glyphs in the fill's palette color, moved to the nearest row (column) inside their parent that holds no text, or left out |
-| Positive sub-Cell extents | At least one Cell; zero-width progress indicators remain empty |
-| Base control value states and projected part states | Core-resolved checked, mixed, selected and disabled styles; selected tabs show the bar |
-| Checkbox, radio and switch states | Decorative: `[x]` / `[ ]` / `[-]`, `(•)` / `( )`, `[on ]` / `[off]` on the label's first row, one Cell before the label (or from a trailing indicator's column), short forms `x`, `-`, `•`, `on`, `off` without room; only focus puts the bar on them |
+| Base control value states and projected part states | Drawn by the components' own glyphs; a selected item a reversed band |
 | Slider keyboard input | Component-owned arrows, page and endpoint keys while its thumb has focus |
 | Slider dragging and control hover | Ticket-09 pointer follow-up |
-| Border width, dashes, dots, corner radii | Decorative: solid single-Cell strokes with square corners; radii shape fill coverage only; widths still participate in core layout |
-| Text | Styled Paragraphs: palette foreground, bold at weight 600 and above, italic, underline and strikethrough |
-| Hover and pressed states | App-defined state styles and hover events on the Cell hit regions |
+| Border width | One Cell whatever the width |
+| Text | The run's color as a meaning, an accent background reversed, bold at weight 600 and above, italic, underline and strikethrough |
+| Hover and pressed states | A faint band (10% and 18% toward the terminal's foreground); hover events on the Cell hit regions |
 | Mouse drags | Native pan values, responder moves and bounded content scrolling |
 | Selectable text | Reversed grapheme Cells; copies use the shared clipboard and OSC 52 |
 | Pointer precision | One terminal Cell, converted to its center in points |
@@ -846,28 +923,29 @@ permit clipboard writes; `nsh test` uses memory and never writes to the machine'
 | Input-method composition | Terminal emulator composition, committed text delivered to the field |
 | Input accessories (`InputAccessoryView`) | Left unmounted, as on the desktops: no software keyboard to show them over |
 | Clipboard | OSC 52 writes, desktop reads when available and an in-process copy |
-| Syntax highlighting | The built-in Editor, DiffView and TextView token colors in the palette |
+| Syntax highlighting | The built-in Editor, DiffView and TextView token colors |
 | Inline attachments, mentions and inline math | Measured child content placed in whole Cells, wrapping with the surrounding text |
 | Font size, family, line height and letter spacing | Terminal font, display width and one row per line; imported fonts load from adjacent `assets/` or the development server |
-| Shadows, blur, materials, 3D transforms and blend modes | Decorative features left out silently in this slice |
-| View gradients (`backgroundImage`: linear, radial and conic) | Decorative: left out, as every fill color |
+| Blur, materials, filters, backdrop effects, 3D transforms and blend modes | Left out |
+| View gradients (`backgroundImage`: linear, radial and conic) | Left out |
 | Native animated values | Host-frame opacity, background/border/text colors, transforms and canvas slots; completion and cancellation reported |
-| 2D view transforms | Composed positions and axis-aligned Cell extents; upright terminal glyphs and Cell-aligned borders |
+| 2D view transforms | Translation, rounded to Cells; scale, rotation and skew left out |
 | Canvas transforms | Affine paths on the braille grid, with animated numeric and color slots |
 | Navigation, modal, layout and style transitions | Final state applied immediately under reduced motion |
 | Scroll | Children translated by the current offset and clipped to the viewport |
 | Stack, Screen and HeaderItem | The top screen and its selected header, clipped and styled by the app |
-| Modal | A surface-sized root above the page, with its own focus scope |
+| Modal | A surface-sized root above the page, with its own focus scope; what is behind it dimmed, its box cleared and framed |
 | Canvas | Braille dots (2 × 4 per Cell) for fills and strokes, text on whole Cells above them |
 | Canvas line widths, caps, joins and miters | Decorative features left out: every stroke is one dot wide |
 | Canvas shadows, compositing (`globalCompositeOperation`) and images (`drawImage`) | Decorative features left out silently |
 | Canvas gradients | The gradient's middle stop as a flat color |
-| Canvas colors within a Cell | One palette ink per Cell: the most recently painted dot's |
-| Other view kinds and unregistered native components | Named Blocks, reported once per kind/name, while their Content feature ticket supplies its renderer |
+| Canvas colors within a Cell | One color per Cell: the most recently painted dot's |
+| Videos, web views, other view kinds and unregistered native components | Left out, logged once per kind or name |
+| Icons (canvases at most 48 points both ways) | Left out; an icon button shows its accessibility label |
 
 The trunk applies View/Text geometry, styles, props, text, events, appearance, component registration, core scroll
 positions, top screens and their headers, modal cancellation, terminal navigation, search and editing keys, InputValue/InputContent, field commands and app exit. Other mount operations are reported once per operation kind per loaded app; they are not implemented by
-an empty success path. The full Content feature reporting and degradation policy grows with those renderers.
+an empty success path.
 Safe areas are zero, reduced motion is true and `screen_reader` is false.
 
 ## Checks
@@ -893,9 +971,14 @@ engine's isolated clipboard, masked Cells, multiline paste and report-only paste
 its own, checks invalid fields and successful account creation.
 The `controls` fixture imports `examples/gallery/demos/Controls.tsx` unchanged, traverses and operates its
 controls with terminal keys, exercises ordinary mouse presses, and reads Cell screenshots. AppView controls
-tests cover the focus bar without app outlines, backward focus-within transitions, projected value/disabled
-styles, sub-Cell progress indicators and focused Slider keys. The palette module checks each color rule, both
-appearances, attributes and fills; the bars module checks the selection and focus bar. These tests do not exercise hover or Slider drags yet.
+tests cover focus marks, backward focus-within transitions, projected value/disabled styles and focused
+Slider keys. The palette module checks colors as meanings at each depth (accents by hue, dim
+secondary text, the light and dark pages), translucent text and opacity, text attributes and gradients; the
+painting module checks borders (dim or accented sides, dashed, dotted, single sides), that shadows, outlines and
+rings draw nothing, scroll bars, that images and icons are left out, icon buttons labeled, tiny, round and empty boxes without borders,
+clipping to the parent's content box with an ellipsis, selected bands, focus and disabled marks, overlays cleared
+and framed, unchanged frames and invisible views; `dialog.rs`'s unit tests check alerts' button order, keys,
+presses and drawing. These tests do not exercise hover or Slider drags yet.
 The search fixture searches forward and backward through a Scroll's rows and checks the Minibuffer row before,
 during and after the search.
 The animation module at the AppView seam checks completion, cancellation, active-frame and idle scheduling,

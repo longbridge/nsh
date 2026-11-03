@@ -5,9 +5,9 @@
 //! into the area supplied by the app. [`CellTextEngine`] measures on the
 //! same fixed grid that drawing and input use.
 
-mod animation;
 mod app;
 mod canvas;
+mod dialog;
 mod geometry;
 mod input;
 mod key_scheme;
@@ -20,6 +20,7 @@ mod perf;
 mod render;
 #[cfg(feature = "run-app")]
 mod run;
+mod scrollbar;
 mod search;
 mod selection;
 mod surface;
@@ -34,9 +35,9 @@ pub use perf::{FrameMetrics, MeasuredBackend, MeasuredWriter};
 #[cfg(feature = "run-app")]
 pub use crate::run::{RunEvent, run_app};
 pub use crate::{
-    app::{AppOptions, AppView, TerminalCapabilities, WakeCallback},
+    app::{AppOptions, AppView, ColorDepth, TerminalCapabilities, WakeCallback},
     geometry::CellSize,
-    input::{Handled, Input, Modifiers, MouseButton, MouseInput, MouseKind},
+    input::{CursorStyle, Handled, Input, Modifiers, MouseButton, MouseInput, MouseKind},
     native::{ComponentFactory, NativeComponent},
     text::{CellTextEngine, PreparedText},
 };

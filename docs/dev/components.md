@@ -612,6 +612,41 @@ the language), else the platform's; in a Rust app the core sets the root's direc
 and again when it changes. A view's `direction` style sets its subtree's, and each node's resolved direction is what
 layout, text and overlay placement read.
 
+## In a terminal
+
+In the Terminal idiom (`idiom() == Idiom::Terminal`, the terminal backend) `nsh-base`'s controls show the terminal's
+own form of themselves, as system UI keeps the platform's look elsewhere: text from the terminal's palette, laid out at
+its natural size on the Cell grid, so the painter draws it as any text and never guesses a control from GUI geometry.
+The app's indicator parts are not mounted there (their `*Class` / `*Style` / slot are ignored); the control's `class`,
+`style`, every prop and event, and the app's children (labels) stay. The state the terminal marks natively (the
+focused control, the selected or active row, the hovered item, a disabled control) is the painter's, from the roles and
+accessibility states the components report (listbox, tree and tab rows their selected state, menu items their focus, checkable ones their checked state, every control its disabled one), never a reverse or dim of their own, so the bandless look of a terminal without known colors marks them too. The marks' colors (`terminal::Tone`): what is on in the accent (`terminal::ACCENT`, a saturated blue the terminal draws as its own palette's blue), what is off in the theme's muted foreground; every state also reads by shape alone, and a disabled control is the painter's to fade; a `Select`'s list, a `Combobox`'s popup and menus are anchored overlays, which the painter raises as popovers. The glyphs and the helpers that build them are in one place,
+`crates/nsh-base/src/terminal.rs` (`nsh_base::terminal`), for the components, the painter and these docs.
+
+| Component | Terminal form |
+|---|---|
+| `Checkbox` | `[✓]` (the `✓` in the accent), `[ ]` (muted) or `[–]` (the dash in the accent) and a space in place of the indicator, then the children, in a row |
+| `Radio` | `(●)` (the dot in the accent) or `( )` (muted) and a space before the children, in a row (an app's own dot among its children is the app's to leave out) |
+| `Switch` | three Cells and a space in place of the track and thumb: on `━━●` (the track in the accent, the knob bold), off `●──` (muted); the knob's side tells them apart without colors |
+| `Slider` | one row of `─` as wide as the slider, `━` from `min` to the value (a range: between its thumbs) in the accent, the rest muted, a `●` view per thumb on its value's Cell (focus, keys, drags and screen readers as elsewhere); vertical: a column of `│` / `┃` |
+| `Progress` | one row as wide as the bar: full Cells `█`, the partial Cell by eighths `▏▎▍▌▋▊▉`, then `░`, the filled Cells in the accent; indeterminate: a four-Cell segment moving one Cell every 120 ms (only while indeterminate; reduced motion: `░` only) |
+| `Select` | the terminal's own trigger in place of `trigger`: the chosen titles, then ` ▾`, one row; ` ×` in place of `clearButton`; the list opens under it (no cover) |
+| `Combobox` | the input one row (no `inputClass` / `inputStyle`), ` ×` and ` ▾` in place of `clearButton` and `triggerButton`, on its row |
+| list rows (`Select`, `Combobox`) | each item's title, one full-width row; headers their title; no `renderItem`, `renderGroup` or row classes |
+| `Tabs` | no indicator; the tabs in a row, two Cells apart; the painter draws the selected tab bold (a band only while focused) and the others muted, from each tab's selected state |
+| `MenuItem` | a checkable item starts with `✓ ` (two spaces unchecked) in place of the indicator |
+| `Submenu` | its trigger is one menu item row: the trigger's content, then ` ›` in the theme's muted foreground |
+| `MenuSeparator` | a row of `─` across the menu |
+| `AccordionTrigger` | `▸ ` closed / `▾ ` open before the children (an app's own chevron is the app's to leave out) |
+| `Tree` | a row the tree draws (no `renderItem`): two Cells of indent a level, `▸ ` / `▾ ` on a folder, two spaces on a leaf, the label |
+| `Scrollbar` | nothing: the terminal draws its own scroll bars |
+
+Rows that fill a width (a slider's track, a progress bar, a separator) are `terminal::line`: a view one Cell by
+itself, stretched by its parent, whose text is made for the number of whole Cells its frame holds (`on_layout` over
+the width of one glyph, `measure_text`, which is one Cell in the terminal's text engine), one line, clipped. The checks
+are static (`is_terminal()` once per component): outside a terminal no node or binding of the terminal forms is made.
+Tests: `crates/nsh-base/tests/base/terminal.rs`.
+
 ## Assets
 
 A crate ships files in its `assets/` directory, as TS imports them: `asset!("logo@2x.png")` (`nsh-macros`, the path

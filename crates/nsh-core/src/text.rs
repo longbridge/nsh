@@ -1191,11 +1191,14 @@ impl ApproxLayout {
 ///
 /// It also holds the surface's pixel ratio: measurements are rounded up to
 /// its device pixels ([`MeasureCache::pixel_ratio`]), so they are only
-/// valid for one ratio and go when it changes.
+/// valid for one ratio and go when it changes. On a grid surface (a
+/// terminal) they are rounded up to its whole Cells instead
+/// ([`MeasureCache::set_cell`]).
 pub(crate) struct MeasureCache {
     current: FxHashMap<(u64, u32), Size<Points>>,
     previous: FxHashMap<(u64, u32), Size<Points>>,
     pixel_ratio: f32,
+    cell: Option<Size<Points>>,
 }
 
 impl Default for MeasureCache {
@@ -1204,6 +1207,7 @@ impl Default for MeasureCache {
             current: FxHashMap::default(),
             previous: FxHashMap::default(),
             pixel_ratio: 1.0,
+            cell: None,
         }
     }
 }
@@ -1230,6 +1234,30 @@ impl MeasureCache {
         self.pixel_ratio = ratio;
         self.clear();
         true
+    }
+
+    /// Measures on a grid of `cell` (a terminal's Cells) from now on, or to
+    /// device pixels with `None`; returns whether it changed (the
+    /// measurements cached before are dropped).
+    pub(crate) fn set_cell(&mut self, cell: Option<Size<Points>>) -> bool {
+        if cell == self.cell {
+            return false;
+        }
+        self.cell = cell;
+        self.clear();
+        true
+    }
+
+    /// `size` rounded up to whole Cells on a grid surface: a text is never
+    /// shorter or narrower than the Cells it takes, so the frames rounded
+    /// to Cells never cut its last line or glyph. `None` off a grid.
+    pub(crate) fn on_cells(&self, size: Size<Points>) -> Option<Size<Points>> {
+        let cell = self.cell?;
+        let up = |v: Points, c: Points| Points(((v.0 / c.0) - 1.0e-3).ceil().max(0.0) * c.0);
+        Some(Size::new(
+            up(size.width, cell.width),
+            up(size.height, cell.height),
+        ))
     }
 
     /// Drops every measurement (the fonts changed), keeping the ratio.

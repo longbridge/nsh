@@ -35,7 +35,7 @@ impl Host {
             controlling,
             fps,
             terminal_input,
-            "import { mount, Text } from 'nsh'; mount(() => <Text>PTY ready</Text>);",
+            "import { mount, Text } from 'nsh'; mount(() => <Text>PTY-ready</Text>);",
             &[],
         )
     }
@@ -155,8 +155,8 @@ impl Host {
         loop {
             host.drain(&mut output);
             if output
-                .windows(b"PTY ready".len())
-                .any(|part| part == b"PTY ready")
+                .windows(b"PTY-ready".len())
+                .any(|part| part == b"PTY-ready")
             {
                 break;
             }
@@ -509,7 +509,7 @@ fn bundled_fonts_leave_the_host_running() {
             import { mount, Text } from 'nsh';
             import { font } from 'nsh:rt';
             const family = font('asset:/fonts/Pacifico-Regular.ttf', 'Pacifico');
-            setTimeout(() => mount(() => <Text style={{ fontFamily: family }}>Font ready</Text>), 100);
+            setTimeout(() => mount(() => <Text style={{ fontFamily: family }}>Font-ready</Text>), 100);
         "#,
                 &[(
                     "fonts/Pacifico-Regular.ttf",
@@ -526,8 +526,8 @@ fn bundled_fonts_leave_the_host_running() {
                     String::from_utf8_lossy(&output)
                 );
                 if output
-                    .windows(b"Font ready".len())
-                    .any(|part| part == b"Font ready")
+                    .windows(b"Font-ready".len())
+                    .any(|part| part == b"Font-ready")
                 {
                     break;
                 }

@@ -59,7 +59,8 @@ fn a_surface_draws_a_rust_app_into_the_embedders_buffer() {
     draw_until(&mut view, &mut terminal, &rx, "Count 0");
     assert_eq!(
         terminal.backend().buffer()[(0, 0)].bg,
-        ratatui_core::style::Color::Reset
+        ratatui_core::style::Color::Reset,
+        "fills are the GUI's: the terminal keeps its own background"
     );
     view.stop();
     terminal
@@ -75,9 +76,8 @@ fn a_surface_draws_a_rust_app_into_the_embedders_buffer() {
     );
 }
 
-/// Marks a view selected, which puts the soft bar on its text rows (its first
-/// row without text) across its Cell box: the probe for where a view's Cells
-/// are, now that fills draw no color.
+/// Marks a view selected, which draws a reversed band over its Cells: the
+/// probe for where a view's Cells are, as fills draw no color.
 pub(super) fn selected() -> nsh_core::AccessibilityState {
     nsh_core::AccessibilityState {
         selected: true,
@@ -91,11 +91,10 @@ pub(super) fn reversed(buffer: &ratatui_core::buffer::Buffer, x: u16, y: u16) ->
         .contains(ratatui_core::style::Modifier::REVERSED)
 }
 
-/// Whether the soft bar of a selected or focused view covers `(x, y)`.
+/// Whether the band of a selected view, or the reversed label of a focused
+/// or pressed one, covers `(x, y)`.
 pub(super) fn barred(buffer: &ratatui_core::buffer::Buffer, x: u16, y: u16) -> bool {
-    let cell = &buffer[(x, y)];
-    cell.bg != ratatui_core::style::Color::Reset
-        && cell.modifier.contains(ratatui_core::style::Modifier::BOLD)
+    reversed(buffer, x, y)
 }
 
 pub(super) fn mouse(
@@ -323,26 +322,31 @@ fn Bordered() -> impl IntoElement {
     view().child(
         view()
             .w(px(48.0))
-            .h(px(48.0))
+            .py(px(16.0))
             .border_1()
             .rounded(px(8.0))
             .bg(nsh_core::color::rgb(0x123456))
-            .border_color(nsh_core::color::rgb(0xffffff)),
+            .border_color(nsh_core::color::rgb(0xffffff))
+            .child(view().child(text(" "))),
     )
 }
 
 #[test]
-fn rounded_borders_draw_straight_corners_around_a_solid_leaf() {
+fn rounded_borders_draw_rounded_dim_corners_and_no_fill() {
+    use ratatui_core::style::{Color, Modifier};
     let (mut view, rx) = surface();
     let mut terminal = Terminal::new(TestBackend::new(20, 8)).unwrap();
     view.load(App::Rust(Root::new::<Bordered>(|| ()))).unwrap();
-    draw_until(&mut view, &mut terminal, &rx, "┌────┐");
+    draw_until(&mut view, &mut terminal, &rx, "╭────╮");
     let buffer = terminal.backend().buffer();
-    assert_eq!(buffer[(0, 2)].symbol(), "└");
-    assert_eq!(buffer[(5, 2)].symbol(), "┘");
-    // A leaf's fill is its content: reversed in the fill's palette color.
-    assert!(reversed(buffer, 2, 1));
-    assert_eq!(buffer[(2, 1)].fg, ratatui_core::style::Color::Blue);
+    assert_eq!(buffer[(0, 2)].symbol(), "╰");
+    assert_eq!(buffer[(5, 2)].symbol(), "╯");
+    assert_eq!(buffer[(2, 1)].bg, Color::Reset, "no fill");
+    assert_eq!(buffer[(0, 0)].fg, Color::Reset);
+    assert!(
+        buffer[(0, 0)].modifier.contains(Modifier::DIM),
+        "a neutral border is dim"
+    );
 }
 
 #[cfg(feature = "js")]
@@ -409,8 +413,8 @@ fn PaddedLabel() -> impl IntoElement {
     view().flex_1().child(
         view()
             .absolute()
-            .left(px(4.0))
-            .top(px(216.0))
+            .left(px(8.0))
+            .top(px(224.0))
             .w(px(40.0))
             .py(px(12.0))
             .accessibility_state(selected())
@@ -420,7 +424,7 @@ fn PaddedLabel() -> impl IntoElement {
 }
 
 #[test]
-fn absolute_edges_define_the_padded_box_and_its_hit_cells() {
+fn absolute_edges_place_a_one_row_control_and_its_hit_cells() {
     use nsh_platform_tui::{Handled, MouseButton, MouseKind};
 
     let (mut view, rx) = surface();
@@ -429,15 +433,15 @@ fn absolute_edges_define_the_padded_box_and_its_hit_cells() {
         .unwrap();
     draw_until(&mut view, &mut terminal, &rx, "Tap 0");
     let buffer = terminal.backend().buffer();
+    // At (8, 224) points, 40 wide: columns 1 to 5 of row 14; its 12pt of
+    // vertical padding take no rows, a control being its label row.
     for column in 1..6 {
         assert!(barred(buffer, column, 14), "the bar on the text row");
-        assert!(!barred(buffer, column, 15));
+        assert!(!barred(buffer, column, 13) && !barred(buffer, column, 15));
     }
     assert_eq!(buffer[(1, 14)].symbol(), "T");
-    assert_eq!(buffer[(1, 15)].symbol(), " ");
-    assert_eq!(buffer[(1, 16)].symbol(), " ");
     assert!(!barred(buffer, 0, 14) && !barred(buffer, 6, 14));
-    for (column, row) in [(1, 13), (1, 16), (0, 15), (6, 15)] {
+    for (column, row) in [(1, 13), (1, 15), (0, 14), (6, 14)] {
         assert_eq!(
             view.handle(mouse(MouseKind::Down(MouseButton::Left), column, row)),
             Handled::Ignored
@@ -447,44 +451,17 @@ fn absolute_edges_define_the_padded_box_and_its_hit_cells() {
             Handled::Ignored
         );
     }
-    for (count, row) in [(1, 14), (2, 15)] {
+    for (count, column) in [(1, 1), (2, 5)] {
         assert_eq!(
-            view.handle(mouse(MouseKind::Down(MouseButton::Left), 1, row)),
+            view.handle(mouse(MouseKind::Down(MouseButton::Left), column, 14)),
             Handled::Yes
         );
         assert_eq!(
-            view.handle(mouse(MouseKind::Up(MouseButton::Left), 1, row)),
+            view.handle(mouse(MouseKind::Up(MouseButton::Left), column, 14)),
             Handled::Yes
         );
         draw_until(&mut view, &mut terminal, &rx, &format!("Tap {count}"));
     }
-}
-
-#[component]
-fn PaddedTextContent() -> impl IntoElement {
-    view().flex_1().child(
-        text("Label")
-            .absolute()
-            .left(px(4.0))
-            .top(px(216.0))
-            .w(px(40.0))
-            .py(px(12.0))
-            .accessibility_state(selected()),
-    )
-}
-
-#[test]
-fn text_content_padding_uses_the_unrounded_absolute_origin() {
-    let (mut view, rx) = surface();
-    let mut terminal = Terminal::new(TestBackend::new(100, 34)).unwrap();
-    view.load(App::Rust(Root::new::<PaddedTextContent>(|| ())))
-        .unwrap();
-    draw_until(&mut view, &mut terminal, &rx, "Label");
-    let buffer = terminal.backend().buffer();
-    assert_eq!(buffer[(1, 14)].symbol(), "L");
-    assert_eq!(buffer[(1, 15)].symbol(), " ");
-    assert_eq!(buffer[(1, 16)].symbol(), " ");
-    assert!(barred(buffer, 1, 14) && !barred(buffer, 1, 15));
 }
 
 #[component]

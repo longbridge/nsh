@@ -1,8 +1,12 @@
 use nsh_core::prelude::*;
 use nsh_platform_tui::{App, Handled, Input, Root};
-use ratatui_core::{backend::TestBackend, style::Color, terminal::Terminal};
+use ratatui_core::{
+    backend::TestBackend,
+    style::{Color, Modifier},
+    terminal::Terminal,
+};
 
-use super::app::{barred, draw_until, reversed, selected, surface};
+use super::app::{draw_until, surface};
 
 fn key(name: &str) -> Input {
     Input::Key {
@@ -12,133 +16,47 @@ fn key(name: &str) -> Input {
     }
 }
 
-#[component]
-fn OutlinedButton() -> impl IntoElement {
-    let pressed = signal(false);
-    view().flex_1().child(
-        nsh_base::button()
-            .absolute()
-            .left(px(16.0))
-            .top(px(32.0))
-            .w(px(80.0))
-            .h(px(48.0))
-            .focus(|s| {
-                s.outline(px(2.0))
-                    .outline_offset(px(-2.0))
-                    .outline_color(nsh_core::color::rgb(0x123456))
-            })
-            .on_press(move |_: &()| pressed.set(true))
-            .child(text(
-                move || if pressed.get() { "pressed" } else { "button" },
-            )),
-    )
+/// Whether the focus mark covers `(x, y)`: a reversed label, or a bold,
+/// underlined one where the view is already a band.
+fn focus_marked(buffer: &ratatui_core::buffer::Buffer, x: u16, y: u16) -> bool {
+    let modifier = buffer[(x, y)].modifier;
+    modifier.contains(Modifier::REVERSED)
+        || modifier.contains(Modifier::BOLD | Modifier::UNDERLINED)
 }
 
-#[test]
-fn a_focused_control_shows_the_bar_and_its_app_outline_is_not_drawn() {
-    let (mut view, rx) = surface();
-    let mut terminal = Terminal::new(TestBackend::new(30, 10)).unwrap();
-    view.load(App::Rust(Root::new::<OutlinedButton>(|| ())))
-        .unwrap();
-    draw_until(&mut view, &mut terminal, &rx, "button");
-    assert_eq!(view.handle(key("Tab")), Handled::Yes);
-    assert_eq!(view.handle(key("Enter")), Handled::Yes);
-    draw_until(&mut view, &mut terminal, &rx, "pressed");
-    // Focus puts the bar on the text row across the button's own 10 by 3
-    // Cell box; its outline is the app's focus style, which the terminal's
-    // look leaves out.
-    let buffer = terminal.backend().buffer();
-    for (x, y) in [(2, 2), (11, 2)] {
-        assert!(barred(buffer, x, y), "({x}, {y})");
-        assert_eq!(buffer[(x, y)].fg, Color::Reset);
+/// Waits for the slider's thumb (`●`) to turn the accent: the slider marks
+/// its focus itself (a terminal marks no Adjustable view's), in the batch
+/// that also binds its keys.
+pub(super) fn wait_for_thumb_focus(
+    view: &mut nsh_platform_tui::AppView,
+    terminal: &mut Terminal<TestBackend>,
+    rx: &crossbeam_channel::Receiver<()>,
+    idle: ratatui_core::style::Color,
+) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        terminal
+            .draw(|frame| view.render(frame, frame.area()))
+            .unwrap();
+        if thumb_color(terminal).is_some_and(|fg| fg != idle) {
+            return;
+        }
+        assert!(
+            rx.recv_deadline(deadline).is_ok(),
+            "slider focus did not render"
+        );
     }
-    for (x, y) in [(2, 4), (11, 4)] {
-        assert!(!barred(buffer, x, y), "no bar on the blank row ({x}, {y})");
-        assert_eq!(buffer[(x, y)].fg, Color::Reset);
-    }
-    for (x, y) in [(1, 2), (12, 2), (2, 1), (2, 5)] {
-        assert!(!barred(buffer, x, y), "({x}, {y})");
-        assert_eq!(buffer[(x, y)].symbol(), " ");
-    }
-    assert!(!terminal.backend().cursor_visible());
 }
 
-#[component]
-fn ScaledOutline() -> impl IntoElement {
-    view().flex_1().child(
-        view()
-            .absolute()
-            .left(px(16.0))
-            .top(px(32.0))
-            .w(px(80.0))
-            .h(px(48.0))
-            .origin_top_left()
-            .scale(2.0)
-            .outline(px(2.0))
-            .outline_offset(px(-2.0))
-            .outline_color(nsh_core::color::rgb(0x123456))
-            .accessibility_state(selected())
-            .child(text("scaled")),
-    )
-}
-
-#[test]
-fn a_bar_follows_the_controls_transformed_bounds_without_its_outline() {
-    let (mut view, rx) = surface();
-    let mut terminal = Terminal::new(TestBackend::new(30, 10)).unwrap();
-    view.load(App::Rust(Root::new::<ScaledOutline>(|| ())))
-        .unwrap();
-    draw_until(&mut view, &mut terminal, &rx, "scaled");
-    let buffer = terminal.backend().buffer();
-    assert_eq!(buffer[(2, 2)].symbol(), "s");
-    assert!(barred(buffer, 2, 2) && barred(buffer, 21, 2));
-    assert_eq!(buffer[(21, 2)].symbol(), " ");
-    assert!(!barred(buffer, 1, 2) && !barred(buffer, 22, 2));
-    assert!(!barred(buffer, 21, 7), "no bar on the blank rows");
-}
-
-#[component]
-fn ThinProgress() -> impl IntoElement {
-    let value = signal(0.0f32);
-    view()
-        .flex_1()
-        .child(
-            nsh_base::progress()
-                .w(px(160.0))
-                .value(value)
-                .track_class("h-[6px] bg-[#123456] overflow-hidden")
-                .indicator_class("h-[6px] bg-[#abcdef]"),
-        )
-        .child(
-            nsh_base::button()
-                .absolute()
-                .top(px(32.0))
-                .h(px(16.0))
-                .on_press(move |_: &()| value.set(50.0))
-                .child(text(move || format!("progress {}", value.get()))),
-        )
-}
-
-#[test]
-fn a_subcell_progress_indicator_is_a_rule_and_zero_progress_stays_empty() {
-    let (mut view, rx) = surface();
-    let mut terminal = Terminal::new(TestBackend::new(30, 8)).unwrap();
-    view.load(App::Rust(Root::new::<ThinProgress>(|| ())))
-        .unwrap();
-    draw_until(&mut view, &mut terminal, &rx, "progress 0");
-    assert_eq!(terminal.backend().buffer()[(0, 0)].symbol(), " ");
-    view.handle(key("Tab"));
-    view.handle(key("Enter"));
-    draw_until(&mut view, &mut terminal, &rx, "progress 50");
-    let buffer = terminal.backend().buffer();
-    assert_eq!(buffer[(9, 0)].symbol(), "─");
-    assert_eq!(buffer[(9, 0)].fg, Color::Blue);
-    assert_eq!(buffer[(9, 0)].bg, Color::Reset);
-    assert_eq!(
-        buffer[(10, 0)].symbol(),
-        " ",
-        "the rail is a container: no fill"
-    );
+/// The color of the slider's thumb (`●`), if one is drawn.
+pub(super) fn thumb_color(terminal: &Terminal<TestBackend>) -> Option<ratatui_core::style::Color> {
+    terminal
+        .backend()
+        .buffer()
+        .content
+        .iter()
+        .find(|cell| cell.symbol() == "●")
+        .map(|cell| cell.fg)
 }
 
 #[component]
@@ -181,8 +99,14 @@ fn moving_back_between_controls_keeps_the_groups_focus_within_style() {
         view.handle(input);
         draw_until(&mut view, &mut terminal, &rx, &format!("focus {name}"));
         let buffer = terminal.backend().buffer();
-        assert!(reversed(buffer, 0, 0));
-        assert_eq!(buffer[(0, 0)].fg, Color::Blue);
+        let (row, other) = if name == "first" { (1, 2) } else { (2, 1) };
+        assert!(focus_marked(buffer, 0, row), "{name} is marked");
+        assert!(!focus_marked(buffer, 0, other), "only {name} is marked");
+        assert_eq!(
+            buffer[(0, 0)].bg,
+            Color::Reset,
+            "the group's fill draws nothing"
+        );
     }
 }
 
@@ -239,6 +163,12 @@ fn ValueControls() -> impl IntoElement {
         }))
 }
 
+/// The fills of the first `width` Cells of row `y`: the terminal's own
+/// background, whatever the parts' state styles fill.
+fn unfilled(buffer: &ratatui_core::buffer::Buffer, y: u16, width: u16) -> bool {
+    (0..width).all(|x| buffer[(x, y)].bg == Color::Reset)
+}
+
 #[test]
 fn checkbox_and_switch_project_value_and_disabled_states_to_their_parts() {
     let (mut view, rx) = surface();
@@ -246,52 +176,19 @@ fn checkbox_and_switch_project_value_and_disabled_states_to_their_parts() {
     view.load(App::Rust(Root::new::<ValueControls>(|| ())))
         .unwrap();
     draw_until(&mut view, &mut terminal, &rx, "mixed true");
-    // The 1-Cell indicators show the glyphs' short forms in their palette
-    // colors; checked is a glyph, not reverse.
-    let line = |buffer: &ratatui_core::buffer::Buffer, y: u16| -> String {
-        (0..12).map(|x| buffer[(x, y)].symbol()).collect()
-    };
-    let buffer = terminal.backend().buffer();
-    assert!(
-        line(buffer, 0).starts_with("-check"),
-        "{:?}",
-        line(buffer, 0)
-    );
-    assert_eq!(buffer[(0, 0)].fg, Color::Blue);
-    assert!(!reversed(buffer, 2, 0));
-    assert!(line(buffer, 1).starts_with("  switch"), "no room for off");
+    // The parts' state styles fill nothing in the terminal; the controls
+    // keep their behavior.
+    assert!(unfilled(terminal.backend().buffer(), 0, 4));
     view.handle(key("Tab"));
     view.handle(key("Enter"));
     draw_until(&mut view, &mut terminal, &rx, "check true mixed false");
     view.handle(key("Tab"));
-    terminal
-        .draw(|frame| view.render(frame, frame.area()))
-        .unwrap();
-    let buffer = terminal.backend().buffer();
-    assert!(
-        line(buffer, 0).starts_with("xcheck"),
-        "{:?}",
-        line(buffer, 0)
-    );
-    assert!(!reversed(buffer, 2, 0), "checked is not reversed");
     view.handle(key("Enter"));
     draw_until(&mut view, &mut terminal, &rx, "switch true");
-    let buffer = terminal.backend().buffer();
-    assert!(
-        line(buffer, 1).starts_with("onswitch"),
-        "{:?}",
-        line(buffer, 1)
-    );
-    assert_eq!(buffer[(0, 1)].fg, Color::Blue, "the checked track's color");
+    assert!(unfilled(terminal.backend().buffer(), 1, 4));
     view.handle(key("Tab"));
     view.handle(key("Enter"));
     draw_until(&mut view, &mut terminal, &rx, "disabled true");
-    let buffer = terminal.backend().buffer();
-    assert!(
-        line(buffer, 1).starts_with("onswitch"),
-        "a disabled switch stays on"
-    );
-    assert!(!reversed(buffer, 3, 1));
     view.handle(key("Tab"));
     view.handle(key("Enter"));
     draw_until(
@@ -343,27 +240,9 @@ fn a_focused_slider_handles_arrows_pages_and_endpoints_then_releases_them_on_tab
     view.load(App::Rust(Root::new::<KeyboardSlider>(|| ())))
         .unwrap();
     draw_until(&mut view, &mut terminal, &rx, "value 60");
+    let idle = thumb_color(&terminal).expect("the thumb is drawn");
     view.handle(key("Tab"));
-    // Enter is a no-op thumb press, allowing its focus and keymap batch to arrive.
-    view.handle(key("Enter"));
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-    loop {
-        terminal
-            .draw(|frame| view.render(frame, frame.area()))
-            .unwrap();
-        if terminal.backend().buffer().content.iter().any(|cell| {
-            cell.fg == Color::Yellow
-                && cell
-                    .modifier
-                    .contains(ratatui_core::style::Modifier::REVERSED)
-        }) {
-            break;
-        }
-        assert!(
-            rx.recv_deadline(deadline).is_ok(),
-            "slider focus did not render"
-        );
-    }
+    wait_for_thumb_focus(&mut view, &mut terminal, &rx, idle);
     for (name, value) in [
         ("Right", 65),
         ("Left", 60),
@@ -384,103 +263,4 @@ fn a_focused_slider_handles_arrows_pages_and_endpoints_then_releases_them_on_tab
     view.handle(key("Enter"));
     draw_until(&mut view, &mut terminal, &rx, "value 0 ended 0 presses 1");
     assert_eq!(view.handle(key("Home")), Handled::Ignored);
-}
-
-#[component]
-fn SelectedAccentBars() -> impl IntoElement {
-    let selected = signal(0usize);
-    let accent = nsh_core::color::rgb(0xc8f26d);
-    view()
-        .flex_1()
-        .bg(nsh_core::color::rgb(0x101113))
-        .children((0..2).map(|index| {
-            view()
-                .absolute()
-                .left(px(16.0))
-                .top(px(16.0 + index as f32 * 48.0))
-                .w(px(160.0))
-                .h(px(36.0))
-                .rounded(px(8.0))
-                .bg(nsh_core::color::rgb(0x24262a))
-                .flex_row()
-                .items_center()
-                .px(px(10.0))
-                .on_press(move |_: &()| selected.set(index))
-                .child(
-                    view()
-                        .absolute()
-                        .left(px(0.0))
-                        .top(px(9.0))
-                        .w(px(3.0))
-                        .h(px(18.0))
-                        .rounded(px(1.5))
-                        .bg(accent)
-                        .opacity(move || {
-                            if selected.get() == index {
-                                1.0_f32
-                            } else {
-                                0.0_f32
-                            }
-                        }),
-                )
-                .child(text(format!("Sidebar {index}")))
-        }))
-        .child(
-            view()
-                .absolute()
-                .left(px(216.0))
-                .top(px(16.0))
-                .w(px(160.0))
-                .h(px(64.0))
-                .bg(nsh_core::color::rgb(0x24262a))
-                .flex_row()
-                .items_center()
-                .px(px(16.0))
-                .child(
-                    view()
-                        .absolute()
-                        .left(px(0.0))
-                        .top(px(14.0))
-                        .bottom(px(14.0))
-                        .w(px(3.0))
-                        .rounded(px(1.5))
-                        .bg(accent),
-                )
-                .child(text("Watchlist")),
-        )
-        .child(
-            view()
-                .absolute()
-                .top(px(128.0))
-                .child(text(move || format!("active {}", selected.get()))),
-        )
-}
-
-#[test]
-fn sidebar_and_watchlist_accents_remain_visible_with_their_authored_heights() {
-    let (mut view, rx) = surface();
-    let mut terminal = Terminal::new(TestBackend::new(60, 12)).unwrap();
-    view.load(App::Rust(Root::new::<SelectedAccentBars>(|| ())))
-        .unwrap();
-    draw_until(&mut view, &mut terminal, &rx, "active 0");
-    let marked =
-        |cell: &ratatui_core::buffer::Cell| cell.fg == Color::Green && cell.symbol() == "│";
-    let buffer = terminal.backend().buffer();
-    assert!(marked(&buffer[(2, 2)]));
-    assert!(!marked(&buffer[(2, 1)]));
-    assert!(!marked(&buffer[(2, 3)]));
-    assert!(!marked(&buffer[(2, 5)]));
-    assert!(marked(&buffer[(27, 2)]));
-    assert!(marked(&buffer[(27, 3)]));
-    assert!(!marked(&buffer[(27, 1)]));
-    assert!(!marked(&buffer[(27, 4)]));
-    view.handle(key("Tab"));
-    view.handle(key("Tab"));
-    view.handle(key("Enter"));
-    draw_until(&mut view, &mut terminal, &rx, "active 1");
-    let buffer = terminal.backend().buffer();
-    assert!(!marked(&buffer[(2, 2)]));
-    assert!(marked(&buffer[(2, 5)]));
-    assert!(marked(&buffer[(27, 2)]));
-    assert!(marked(&buffer[(27, 3)]));
 }

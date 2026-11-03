@@ -59,6 +59,7 @@ mod switch;
 mod syntax;
 mod table;
 mod tabs;
+pub mod terminal;
 pub mod text_view;
 mod theme;
 mod time_field;
