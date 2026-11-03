@@ -274,7 +274,8 @@ function compactWidth(folded: number): number {
   return parts.reduce((a, b) => a + b, 0) + (parts.length - 1) * gap + 8 + 8;
 }
 
-const sheet = pointer ? undefined : { backgroundColor: colors.surface, borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingHorizontal: 10, paddingTop: 10, paddingBottom: 34 };
+// A terminal shows a menu as a popup, framed by the terminal: no sheet's look.
+const sheet = pointer || terminal ? undefined : { backgroundColor: colors.surface, borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingHorizontal: 10, paddingTop: 10, paddingBottom: 34 };
 const backdrop = { backgroundColor: "rgba(0,0,0,0.45)" };
 
 /**

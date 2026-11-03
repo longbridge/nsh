@@ -17,11 +17,11 @@ use nsh_core::{
     overlay::{Align, Placement},
     prelude::*,
 };
-use nsh_platform_tui::{App, Root};
+use nsh_platform_tui::{App, MouseKind, Root};
 use ratatui_core::{backend::TestBackend, terminal::Terminal};
 
 use super::{
-    app::{draw_until, surface},
+    app::{draw_until, draw_until_still, mouse, surface},
     dock::{dump, find},
 };
 
@@ -189,6 +189,45 @@ fn a_menu_s_filled_first_item_leaves_the_frame_around_the_whole_menu() {
         dump(&terminal)
     );
     consecutive(&terminal, &rows[1..]);
+}
+
+/// An open menu of a group of choices, its items rows with a gap of the
+/// app's: the first checked.
+#[component]
+fn CheckedMenu() -> impl IntoElement {
+    let item = |label: &'static str, on: bool| {
+        menu_item()
+            .checked(Some(on))
+            .accessibility_label(label)
+            .flex_row()
+            .gap(px(8.0))
+            .child(text(label))
+    };
+    view().flex_1().child(text("above")).child(
+        menu()
+            .default_open(true)
+            .trigger(view().child(text("Block")))
+            .child(item("Paragraph", true))
+            .child(item("Heading", false)),
+    )
+}
+
+#[test]
+fn a_menu_s_checked_and_unchecked_labels_line_up() {
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(40, 20)).unwrap();
+    view.load(App::Rust(Root::new::<CheckedMenu>(|| ())))
+        .unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "Heading");
+    let (check, _) = find(&terminal, "✓ Paragraph")
+        .unwrap_or_else(|| panic!("the check, a space, the label\n{}", dump(&terminal)));
+    let (heading, _) = find(&terminal, "Heading").unwrap();
+    assert_eq!(
+        heading,
+        check + 2,
+        "the labels in one column, the gap after the mark's space\n{}",
+        dump(&terminal)
+    );
 }
 
 /// An open date picker under a trigger `Pick` on row 1.
@@ -845,11 +884,7 @@ fn ChipInOverlay() -> impl IntoElement {
                 view()
                     .bg(nsh_core::color::rgb(0x333333))
                     .flex_row()
-                    .child(
-                        view()
-                            .bg(nsh_core::color::rgb(0x555555))
-                            .child(text("MC")),
-                    )
+                    .child(view().bg(nsh_core::color::rgb(0x555555)).child(text("MC")))
                     .child(text(" Mira Chen")),
             ),
         ),
@@ -866,5 +901,8 @@ fn a_surface_inside_an_overlay_cuts_no_word_of_the_overlay_s_own() {
     let (_, y) = find(&terminal, "Chen").unwrap();
     let buffer = terminal.backend().buffer();
     let line: String = (0..40).map(|x| buffer[(x, y)].symbol()).collect();
-    assert!(line.contains("MC Mira Chen"), "the name stays whole: {line}");
+    assert!(
+        line.contains("MC Mira Chen"),
+        "the name stays whole: {line}"
+    );
 }

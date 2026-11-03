@@ -773,10 +773,18 @@ pub fn MenuItem(props: MenuItemProps, cx: Scope<MenuItemEvent>) -> impl IntoElem
             true => when(
                 move || checked.get().is_some(),
                 move || {
-                    text(move || match checked.get() {
-                        Some(true) => MENU_CHECK,
-                        _ => MENU_UNCHECKED,
-                    })
+                    // The check and its space apart: the space is a blank
+                    // text, which the item's own gap takes as its first
+                    // column, as it does the unchecked item's blank mark,
+                    // so the labels line up whatever the gap.
+                    let (check, space) = MENU_CHECK.split_at(MENU_CHECK.len() - 1);
+                    view()
+                        .flex_row()
+                        .child(text(move || match checked.get() {
+                            Some(true) => check,
+                            _ => &MENU_UNCHECKED[..1],
+                        }))
+                        .child(text(space))
                 },
             ),
             // A view of its own, as `Checkbox`'s indicator: the projected
