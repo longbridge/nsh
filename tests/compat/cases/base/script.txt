@@ -213,6 +213,12 @@ style id:archived opacity 1
 listens id:archived onPress
 tap text:Archived
 expect Log: open https://example.com/docs, press, route /orders/42, route /archive
+# `hitSlop`: presses count this far outside the link, one number for
+# every side or the sides named, following a signal; none without it.
+prop id:help hitSlop top=12 right=12 bottom=12 left=12
+tap text:Help
+prop id:help hitSlop top=4 left=2
+prop id:docs hitSlop {}
 covers [nsh/base] Link
 covers [props] Link.href
 covers [props] accessibilityLabel
@@ -959,6 +965,12 @@ frame text:Locked 32 4 47 17
 listens id:locked onPress
 tap text:Locked
 expect Changes: 12
+# `hitSlop`: presses count this far outside the switch, one number for
+# every side or the sides named, following a signal; none without it.
+prop id:mute hitSlop top=12 right=12 bottom=12 left=12
+tap label:Mute
+prop id:mute hitSlop top=4 left=2
+prop id:wifi hitSlop {}
 covers [nsh/base] Switch
 covers [props] Switch.checked
 covers [props] disabled
@@ -1017,6 +1029,12 @@ frame text:Locked 28 2 47 17
 listens id:locked onPress
 tap text:Locked
 expect Changes: 12
+# `hitSlop`: presses count this far outside the checkbox, one number for
+# every side or the sides named, following a signal; none without it.
+prop id:agree hitSlop top=12 right=12 bottom=12 left=12
+tap label:Agree
+prop id:agree hitSlop top=4 left=2
+prop id:all hitSlop {}
 covers [nsh/base] Checkbox
 covers [props] Checkbox.checked
 covers [props] Checkbox.indeterminate
@@ -1079,6 +1097,12 @@ tap label:Team plan
 expect Changes: 2
 expect Plan: team
 prop id:team accessibilityState selected=true checked=true
+# `hitSlop`: presses count this far outside the radio, one number for
+# every side or the sides named, following a signal; none without it.
+prop id:solo hitSlop top=12 right=12 bottom=12 left=12
+tap label:Solo
+prop id:solo hitSlop top=4 left=2
+prop id:basic hitSlop {}
 covers [nsh/base] Radio
 covers [nsh/base] RadioGroup
 covers [props] Radio.checked
@@ -1213,6 +1237,12 @@ frame text:Italic 18 2 47 17
 prop id:bold focusable false
 tap id:lock
 frame text:Bold 38 2 31 17
+# `hitSlop`: presses count this far outside the toggle, one number for
+# every side or the sides named, following a signal; none without it.
+prop id:pin hitSlop top=12 right=12 bottom=12 left=12
+tap label:Pin
+prop id:pin hitSlop top=4 left=2
+prop id:favorite hitSlop {}
 covers [nsh/base] Toggle
 covers [nsh/base] ToggleGroup
 covers [props] Toggle.pressed
@@ -2921,17 +2951,21 @@ frame below:parent:parent:parent:text:m0i0 175 100 0 0
 frame below:below:parent:parent:parent:text:m0i0 25 100 0 0
 frame below:below:below:parent:parent:parent:text:m0i0 0 100 200 0
 # Left of it: d3's text of the app's values, each against the edge,
-# centered on its tick, the ends' kept within the plot's top and bottom.
-frame parent:parent:parent:text:50 0 0 0 100
-frame parent:parent:text:50 -20 0 20 100
-frame parent:text:50 0 45 20 10
-frame parent:parent:text:100 -20 0 20 0
-frame parent:text:100 0 0 20 10
-frame parent:text:0 0 -10 20 10
+# centered on its tick in room as tall as the plot either way; the
+# plot keeps half a label (5) inside its top and bottom edges, so the
+# scale runs from 95 up to 5 and the ends' labels sit on their ticks
+# within it.
+frame parent:parent:parent:text:50 0 -50 0 200
+frame parent:parent:text:50 -20 0 20 200
+frame parent:text:50 0 95 20 10
+frame parent:parent:parent:text:100 0 -95 0 200
+frame parent:text:100 0 95 20 10
+frame parent:parent:parent:text:0 0 -5 0 200
+frame parent:text:0 0 95 20 10
 # Its tick marks (a style) at 100, 50 and 0, its line (classes).
-frame below:parent:parent:parent:text:0 0 0 0 0
+frame below:parent:parent:parent:text:0 0 5 0 0
 frame below:below:parent:parent:parent:text:0 0 50 0 0
-frame below:below:below:parent:parent:parent:text:0 0 100 0 0
+frame below:below:below:parent:parent:parent:text:0 0 95 0 0
 frame below:below:below:below:parent:parent:parent:text:0 0 0 0 100
 # Inside the right edge: above its grid line, against the edge.
 frame parent:parent:parent:text:in50 200 0 0 50
@@ -3010,6 +3044,44 @@ covers [props] Dot.rScale
 covers [props] Dot.color
 covers [props] Dot.inactiveOpacity
 covers [props] Dot.hitRadius
+# Dual axes on the app's domains: the line, the area's top edge, the
+# rule, the bar's end, the grid line, the label and the right axis's
+# tick on the second scale (y2 0 to 40 from 100 up to 5: the right
+# axis's one label, on the top tick, keeps half its height inside the
+# top edge).
+expect b12
+drawing id:dual-line moveTo 50 71.5
+drawing id:dual-line lineTo 150 35.875
+drawing id:dual-area lineTo 150 35.875
+drawing id:dual-rule moveTo 50 100
+drawing id:dual-rule lineTo 50 71.5
+drawing id:dual-dots arc 50 71.5 3 0 6.283
+frame parent:text:b12 50 72 0 0
+drawing id:dual-grid moveTo 0 52.5
+frame parent:text:y2-label 50 53 0 0
+frame parent:parent:parent:text:y2-r40 200 -95 0 200
+# Automatic domains aligned in two steps of each: y 0 to 200, y2 10 to
+# 30; the right axis ticks every step, the grid d3's ticks of 0 to 200.
+drawing id:aligned-line moveTo 50 86
+drawing id:aligned-line lineTo 150 18.5
+expect p10
+expect p20
+expect p30
+drawing id:aligned-grid moveTo 0 27.5
+# Not aligned: y2 is 12 to 27.
+drawing id:own-line moveTo 50 100
+drawing id:own-line lineTo 150 0
+covers [props] Plot.y2Scale
+covers [props] Plot.alignTicks
+covers [props] Line.scale
+covers [props] Area.scale
+covers [props] Rule.scale
+covers [props] Bar.scale
+covers [props] Dot.scale
+covers [props] Grid.scale
+covers [props] Grid.ticks
+covers [props] PlotLabel.scale
+covers [props] PlotAxis.scale
 # Reversed scales: bands from the right edge (middles 250, 150 and 50)
 # and a y scale of 0 to 40 from the top edge (2 points a value), so the
 # bars hang from the top, each label below its bar's end.

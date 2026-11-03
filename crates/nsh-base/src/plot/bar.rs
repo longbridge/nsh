@@ -14,7 +14,7 @@ use nsh_core::{
 };
 
 use super::{
-    Axis, PlotContext, STROKE_ROOM, layer, mark_canvas, mark_canvas_with,
+    Axis, PlotContext, STROKE_ROOM, ValueScale, layer, mark_canvas, mark_canvas_with,
     scale::extent,
     series::{self, Mark},
 };
@@ -261,6 +261,14 @@ pub struct BarProps {
     /// value adds nothing). Bars in different stacks, or in none, stand
     /// side by side in each band.
     pub stack: Prop<Option<SharedString>>,
+    /// The y scale its upright bars' values go along: `"y"` (the default,
+    /// the plot's `yScale`) or `"y2"` (its second one, `y2Scale`: volumes
+    /// beside a price, revenue beside a margin). Bars on either stand side
+    /// by side in each band, and a `stack` piles only the bars on its
+    /// scale. Bars across (bands down the y axis) put their values along
+    /// x whatever this says.
+    #[prop(default)]
+    pub scale: Prop<ValueScale>,
     /// The radius of each corner of its bars (`gpui-base`'s
     /// `corner_radii`): a number for all four, or the corners named; square
     /// by default.
@@ -315,6 +323,8 @@ pub struct BarProps {
 pub(super) struct BarEntry {
     key: u64,
     stack: Prop<Option<SharedString>>,
+    /// The y scale it is on: its stack is that scale's.
+    scale: Prop<ValueScale>,
     base: Prop<BarBase>,
     values: Signal<Option<Arc<[f64]>>>,
     /// The rows' bases, for a base per row (`None`: not read yet).
@@ -387,7 +397,7 @@ impl BarPlace {
 /// A stack's state while the layout piles its bars: where each row ends so
 /// far, the row's base, and the stack's constant base.
 struct Pile {
-    id: SharedString,
+    id: (ValueScale, SharedString),
     ends: Vec<f64>,
     origins: Vec<f64>,
     floor: Option<f64>,
@@ -400,12 +410,14 @@ struct Pile {
 pub(super) fn layout(bars: Signal<Vec<BarEntry>>) -> Memo<Arc<BarLayout>> {
     computed(move || {
         let all = bars.get();
-        // A slot per bar outside any stack, one per stack.
-        let mut slots: Vec<Option<SharedString>> = Vec::new();
+        // A slot per bar outside any stack, one per stack (a stack of each
+        // y scale its own).
+        let mut slots: Vec<Option<(ValueScale, SharedString)>> = Vec::new();
         let mut piles: Vec<Pile> = Vec::new();
         let mut places = Vec::with_capacity(all.len());
         for bar in &all {
             let (stack, base) = (bar.stack.get(), bar.base.get());
+            let stack = stack.map(|id| (bar.scale.get(), id));
             let values = bar.values.get().unwrap_or_else(|| Arc::from([]));
             let bases = bar.bases.get();
             let base_at = |row: usize| base.at(bases.as_deref(), row);
@@ -523,6 +535,8 @@ impl BarRect {
 struct Geometry {
     /// Bars across the plot (bands down the y axis).
     across: bool,
+    /// The axis of the scale its values go along.
+    axis: Axis,
     /// The distance between the middles of two bands.
     step: f32,
     /// The rows the bands are laid out for (the appear's order).
@@ -557,7 +571,7 @@ pub fn Bar(props: BarProps, _cx: Scope<NoEvent>) -> impl IntoElement {
         move || plot.rows.get(),
         move || accessor.get().or_else(|| plot.y.get()),
     );
-    let (stack, base) = (props.stack, props.base);
+    let (stack, base, scale) = (props.stack, props.base, props.scale);
     let layout = plot.bar_layout;
     let key = plot.add(move |key| Mark {
         key,
@@ -566,7 +580,7 @@ pub fn Bar(props: BarProps, _cx: Scope<NoEvent>) -> impl IntoElement {
         // Along the axis without bands.
         value_axis: computed(move || match plot.band_axis.get() {
             Some(Axis::Y) => Axis::X,
-            _ => Axis::Y,
+            _ => Axis::from(scale.get()),
         }),
         points: computed(|| Arc::from([])),
         dot_x: animated_value(0.0),
@@ -579,6 +593,7 @@ pub fn Bar(props: BarProps, _cx: Scope<NoEvent>) -> impl IntoElement {
         all.push(BarEntry {
             key,
             stack,
+            scale,
             base,
             values,
             bases,
@@ -598,9 +613,9 @@ pub fn Bar(props: BarProps, _cx: Scope<NoEvent>) -> impl IntoElement {
             return None;
         }
         let (x_map, y_map) = (plot.x_map.get(), plot.y_map.get());
-        let (band, value_map, across) = match (x_map.band(), y_map.band()) {
-            (Some(band), _) => (band, y_map, false),
-            (None, Some(band)) => (band, x_map, true),
+        let (band, value_map, axis) = match (x_map.band(), y_map.band()) {
+            (Some(band), _) => (band, plot.y_map_of(scale.get()), Axis::from(scale.get())),
+            (None, Some(band)) => (band, x_map, Axis::X),
             _ => {
                 if !warned.get() {
                     warned.replace(true);
@@ -633,7 +648,8 @@ pub fn Bar(props: BarProps, _cx: Scope<NoEvent>) -> impl IntoElement {
                 })
                 .collect();
             Some(Geometry {
-                across,
+                across: axis == Axis::X,
+                axis,
                 step: band.step(),
                 rows: band.len(),
                 bars,
@@ -652,10 +668,7 @@ pub fn Bar(props: BarProps, _cx: Scope<NoEvent>) -> impl IntoElement {
     let draw = move |mut p: Painter, fill: &dyn Fn(Painter, &BarRect) -> Painter| {
         let Some(g) = geometry.get() else { return p };
         let appearing = plot.appearing.get();
-        let tween = match g.across {
-            true => plot.x_tween,
-            false => plot.y_tween,
-        };
+        let tween = plot.tween_of(g.axis);
         let moving = tween.moving.get();
         let corners = radii.get().corners().map(|r| Num::Const(r.0));
         let square = corners.iter().all(|r| *r == Num::Const(0.0));
@@ -765,7 +778,7 @@ pub fn Bar(props: BarProps, _cx: Scope<NoEvent>) -> impl IntoElement {
                 // appear staggers over or the bars' direction change.
                 let shown = move || {
                     geometry.with(|g| match g {
-                        Some(g) => g.bars.iter().map(|b| (b.row, g.rows, g.across)).collect(),
+                        Some(g) => g.bars.iter().map(|b| (b.row, g.rows, g.axis)).collect(),
                         None => Vec::new(),
                     })
                 };
@@ -773,13 +786,13 @@ pub fn Bar(props: BarProps, _cx: Scope<NoEvent>) -> impl IntoElement {
                     shown,
                     |at| *at,
                     move |at, _| {
-                        let (row, rows, across) = at.get_untracked();
+                        let (row, rows, axis) = at.get_untracked();
                         bar_label(BarLabel {
                             plot,
                             geometry,
                             row,
                             rows,
-                            across,
+                            axis,
                             stagger,
                             text: move || {
                                 texts.with(|t| {
@@ -840,7 +853,8 @@ struct BarLabel<F> {
     geometry: Memo<Option<Geometry>>,
     row: usize,
     rows: usize,
-    across: bool,
+    /// The axis of the scale the bar's value goes along.
+    axis: Axis,
     stagger: Prop<Percentage>,
     text: F,
     class: Prop<Option<SharedString>>,
@@ -857,7 +871,7 @@ fn bar_label(label: BarLabel<impl Fn() -> SharedString + 'static>) -> View {
         geometry,
         row,
         rows,
-        across,
+        axis,
         stagger,
         text: content,
         class,
@@ -883,10 +897,8 @@ fn bar_label(label: BarLabel<impl Fn() -> SharedString + 'static>) -> View {
     let left = grown.mul(-1.0).add(1.0);
     let ride = back.mul(&left);
     // And it moves with the value axis's domain, where its bar's end goes.
-    let tween = match across {
-        true => plot.x_tween,
-        false => plot.y_tween,
-    };
+    let tween = plot.tween_of(axis);
+    let across = axis == Axis::X;
     let ride = ride.add(&tween.moved(&end.add(&ride)));
     let anchor = view()
         .absolute()
@@ -943,6 +955,7 @@ mod tests {
         BarEntry {
             key,
             stack: Prop::new(stack.map(SharedString::from)),
+            scale: Prop::new(ValueScale::Y),
             base: Prop::new(BarBase::Value(base)),
             values: signal(Some(Arc::from(values))),
             bases: signal(None),
@@ -953,6 +966,7 @@ mod tests {
         BarEntry {
             key,
             stack: Prop::new(stack.map(SharedString::from)),
+            scale: Prop::new(ValueScale::Y),
             base: Prop::new(BarBase::Row("lo".into())),
             values: signal(Some(Arc::from(values))),
             bases: signal(Some(Arc::from(bases))),
@@ -984,6 +998,34 @@ mod tests {
             assert_eq!(second.segments[0], [10.0, 30.0]);
             assert!(second.segments[1][0].is_nan());
             assert_eq!(&*place(3).segments, &[[30.0, 60.0], [15.0, 50.0]]);
+        });
+    }
+
+    /// A stack piles only the bars on its y scale: bars of the same
+    /// `stack` on the second one make a stack of their own, side by side
+    /// with the first.
+    #[test]
+    fn stacks_of_each_y_scale_are_their_own() {
+        let runtime = Runtime::default();
+        let _entered = runtime.enter();
+        let _ = create_root(|| {
+            let on = |key, scale, values: &[f64]| BarEntry {
+                scale: Prop::new(scale),
+                ..entry(key, Some("all"), 0.0, values)
+            };
+            let bars = signal(vec![
+                on(0, ValueScale::Y, &[10.0]),
+                on(1, ValueScale::Y2, &[1.0]),
+                on(2, ValueScale::Y, &[5.0]),
+                on(3, ValueScale::Y2, &[2.0]),
+            ]);
+            let layout = layout(bars).get();
+            assert_eq!(layout.slots, 2);
+            let place = |key: u64| layout.bars.iter().find(|b| b.key == key).unwrap().clone();
+            assert_eq!((place(0).slot, place(2).slot), (0, 0));
+            assert_eq!((place(1).slot, place(3).slot), (1, 1));
+            assert_eq!(&*place(2).segments, &[[10.0, 15.0]]);
+            assert_eq!(&*place(3).segments, &[[1.0, 3.0]]);
         });
     }
 

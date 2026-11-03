@@ -945,6 +945,12 @@ function Bridge() {
   const quarter = signal<BridgeQuarter>("4Q26");
   const hover = signal<number | null>(null);
   const steps = () => bridge(quarter());
+  // The plot's width, for the gap between two bands a connector spans.
+  const plotWidth = signal(0);
+  const gap = () => {
+    const band = bandAt(0, CONNECTORS.length + 1, BRIDGE_PAD);
+    return (band.step - band.width) * plotWidth();
+  };
   const revenue = () => steps()[0].end;
   const net = () => steps()[steps().length - 1].end;
   const operating = () => steps()[4].end;
@@ -970,7 +976,7 @@ function Bridge() {
         <Legend color={colors.up} label="Adds" />
         <Legend color={colors.down} label="Takes" />
       </View>
-      <View style={{ marginTop: size.gap }}>
+      <View style={{ marginTop: size.gap }} onLayout={({ bounds }) => plotWidth.set(bounds.size.width - AXIS - 8)}>
         <Plot
           data={steps()}
           xScale={{ type: "band", paddingInner: BRIDGE_PAD.inner, paddingOuter: BRIDGE_PAD.outer }}
@@ -988,26 +994,17 @@ function Bridge() {
           style={{ height: BRIDGE_HEIGHT, marginRight: AXIS + 8, marginBottom: BELOW }}
         >
           <Grid y={[40, 80, 120]} style={{ stroke: colors.line }} />
-          {/* Connectors: each step's level carried across the gap to the next step. */}
-          {CONNECTORS.map((i) => {
-            const band = bandAt(i, CONNECTORS.length + 1, BRIDGE_PAD);
-            return (
-              <View
-                style={{
-                  position: "absolute",
-                  left: share(band.start + band.width),
-                  width: share(band.step - band.width),
-                  // Read here, so a quarter moves the same view.
-                  top: (1 - steps()[i].end / BRIDGE_TOP) * BRIDGE_HEIGHT,
-                  height: 0,
-                  borderTopWidth: 1,
-                  borderStyle: "dashed",
-                  borderColor: alpha(colors.text, 0.3),
-                  pointerEvents: "none",
-                }}
-              />
-            );
-          })}
+          {/* Connectors: each step's level carried across the gap to the next step, placed on the
+              scales (from a band's right edge, half a band past its middle) so they follow the
+              plot's ranges and glide with a new quarter. */}
+          <PlotLabel
+            texts={CONNECTORS.map((i) => ({
+              text: "",
+              x: i + (1 - BRIDGE_PAD.inner) / 2,
+              y: steps()[i].end,
+              style: { width: gap(), height: 0, borderTopWidth: 1, borderStyle: "dashed", borderColor: alpha(colors.text, 0.3) },
+            }))}
+          />
           <Grid y={[0]} style={{ stroke: colors.border }} />
           <Bar
             value="end"
@@ -1932,6 +1929,267 @@ function Targets() {
   );
 }
 
+/** Two years of a stock's trading days up to Friday, October 30, 2026:
+ * each day's close and its volume in millions of shares. */
+const TAPE = (() => {
+  const days: Date[] = [];
+  const day = new Date(Date.UTC(2026, 9, 30));
+  while (days.length < 504) {
+    const weekday = day.getUTCDay();
+    if (weekday !== 0 && weekday !== 6) days.unshift(new Date(day));
+    day.setUTCDate(day.getUTCDate() - 1);
+  }
+  const r = random(97);
+  let close = 118;
+  return days.map((date, i) => {
+    const before = close;
+    const drift = i < 180 ? 0.0011 : i < 300 ? -0.0016 : 0.0021;
+    close = cents(close * (1 + drift + (r() - 0.5) * 0.03));
+    // Heavier on the days that move more, and through the sell-off.
+    const move = Math.abs(close / before - 1);
+    const volume = Math.round((32 + r() * 18) * (1 + move * 22) * (i >= 180 && i < 300 ? 1.25 : 1) * 10) / 10;
+    return { date, close, volume };
+  });
+})();
+type Session = { label: string; title: string; close: number; volume: number; dir: "up" | "down" };
+/** `n` rows of `size` days each, the latest last: the last day's close, the
+ * days' volume summed, up or down from the row before. */
+function sessions(n: number, size: number, name: (d: Date) => [string, string]): Session[] {
+  const out: Session[] = [];
+  for (let k = n; k >= 1; k--) {
+    const end = TAPE.length - (k - 1) * size;
+    const days = TAPE.slice(end - size, end);
+    const lastDay = days[days.length - 1];
+    const prior = TAPE[end - size - 1]?.close ?? days[0].close;
+    const [label, title] = name(lastDay.date);
+    out.push({
+      label,
+      title,
+      close: lastDay.close,
+      volume: Math.round(days.reduce((sum, d) => sum + d.volume, 0) * 10) / 10,
+      dir: lastDay.close >= prior ? "up" : "down",
+    });
+  }
+  return out;
+}
+const dayLabel = (d: Date): [string, string] => [`${MONTH_NAMES[d.getUTCMonth()]} ${d.getUTCDate()}`, `${MONTH_NAMES[d.getUTCMonth()]} ${d.getUTCDate()}, ${d.getUTCFullYear()}`];
+type TapeSpan = "1M" | "6M" | "2Y";
+const TAPE_SPANS: { value: TapeSpan; label: string; unit: string; rows: Session[] }[] = [
+  { value: "1M", label: "1M", unit: "day", rows: sessions(22, 1, dayLabel) },
+  { value: "6M", label: "6M", unit: "week", rows: sessions(26, 5, (d) => [dayLabel(d)[0], `Week to ${dayLabel(d)[0]}`]) },
+  { value: "2Y", label: "2Y", unit: "month", rows: sessions(24, 21, (d) => [`${MONTH_NAMES[d.getUTCMonth()]} ’${String(d.getUTCFullYear()).slice(2)}`, `${MONTH_NAMES[d.getUTCMonth()]} ${d.getUTCFullYear()}`]) },
+];
+const TAPE_HEIGHT = 176;
+/** The width of each side's axis labels. */
+const SIDE = 40;
+/** Shares in millions, as a chart writes them: 40M, 1.2B. */
+const shares = (m: number) => (m === 0 ? "0" : m >= 1000 ? `${fixed(m / 1000, m % 1000 === 0 ? 0 : 1)}B` : `${fixed(m, 0)}M`);
+const AXIS_TITLE = { fontSize: 10, fontFamily: mono, letterSpacing: 0.8, color: colors.faint };
+const DUAL_UPDATE = { duration: 600, easing: "easeInOut" } as const;
+
+/** A line's swatch in a legend: a short stroke with a dot on it. */
+function LineKey(props: { color: string; label: string; value?: string }) {
+  return (
+    <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+      <View style={{ width: 14, height: 2, borderRadius: 1, backgroundColor: props.color, alignItems: "center", justifyContent: "center" }}>
+        <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: props.color }} />
+      </View>
+      <Text style={{ fontSize: 13, color: colors.muted }}>
+        {props.label}
+        <If when={props.value}>
+          <Text style={{ color: colors.text, fontVariant: ["tabular-nums"] }}> {props.value}</Text>
+        </If>
+      </Text>
+    </View>
+  );
+}
+
+/**
+ * Volume and price on two y scales: a bar of the shares traded per day,
+ * week or month on the left scale, in the tone of the close's move, and the
+ * close as a line on the right one (`y2Scale`, the line's `scale="y2"`).
+ * Neither scale names a domain: the plot widens both to the same nice
+ * steps (`alignTicks`), so one grid (`<Grid />`, which follows them) serves
+ * both axes. The row under the pointer reads out both values; a period
+ * moves both scales to their new domains as its bars and line draw in.
+ */
+function VolumePrice() {
+  const span = signal<TapeSpan>("6M");
+  const hover = signal<number | null>(null);
+  const spec = () => TAPE_SPANS.find((s) => s.value === span())!;
+  const rows = () => spec().rows;
+  const shown = () => rows()[hover() != null && hover()! < rows().length ? hover()! : rows().length - 1];
+  const prior = () => {
+    const i = rows().indexOf(shown());
+    return i > 0 ? rows()[i - 1].close : rows()[0].close;
+  };
+  const change = () => (shown().close / prior() - 1) * 100;
+  const total = () => (rows()[rows().length - 1].close / rows()[0].close - 1) * 100;
+  const dates = () => {
+    const n = rows().length - 1;
+    return [0, Math.round(n / 3), Math.round((2 * n) / 3), n];
+  };
+  const average = () => rows().reduce((sum, d) => sum + d.volume, 0) / rows().length;
+  return (
+    <Card icon="stocks" title="Volume and price" subtitle="Shares traded on the left scale, the close on the right">
+      <View style={{ gap: 4 }}>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+          <Text style={{ fontSize: 13, fontFamily: mono, color: colors.muted }}>ORBX</Text>
+          <Text style={tipTitle}>{shown().title.toUpperCase()}</Text>
+        </View>
+        <View style={{ flexDirection: "row", alignItems: "baseline", gap: 10 }}>
+          <Text style={{ fontSize: 22, fontWeight: "600", letterSpacing: -0.4, color: colors.text, fontVariant: ["tabular-nums"] }}>{`$${fixed(shown().close)}`}</Text>
+          <Text style={{ fontSize: 12, fontWeight: "500", color: toneColor(change() >= 0 ? "up" : "down"), fontVariant: ["tabular-nums"] }}>{`${signed(change())}%`}</Text>
+        </View>
+        <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", columnGap: 16, rowGap: 4, marginTop: 4 }}>
+          <Legend color={alpha(toneColor(shown().dir), 0.6)} label="Volume" value={shares(shown().volume)} />
+          <LineKey color={chart.s1} label="Close" value={`$${fixed(shown().close)}`} />
+        </View>
+      </View>
+      {/* Each scale's title over its own axis. */}
+      <View style={{ flexDirection: "row", justifyContent: "space-between", marginTop: size.gap + 2, marginBottom: 6 }}>
+        <Text style={AXIS_TITLE}>SHARES</Text>
+        <Text style={AXIS_TITLE}>USD</Text>
+      </View>
+      <Plot
+        data={rows()}
+        xScale={{ type: "band", paddingInner: 0.28, paddingOuter: 0.14 }}
+        colorScale={{ type: "ordinal", domain: ["up", "down"], range: [alpha(colors.up, 0.5), alpha(colors.down, 0.5)] }}
+        appearGeneration={span()}
+        motion={{ appear: { duration: 700, easing: "easeOut" }, update: DUAL_UPDATE, enter: { duration: 120 }, exit: { duration: 160 }, pointer: { stiffness: 320, damping: 32 } }}
+        accessibilityLabel={`ORBX volume and close, ${span()}: ${signed(total(), 1)}%, ${shares(average())} shares a ${spec().unit} on average`}
+        accessibilityValue={{ text: hover() == null ? undefined : `${shown().title}: close $${fixed(shown().close)}, ${shares(shown().volume)} shares` }}
+        crossLineClass="w-full h-full"
+        crossLineStyle={{ backgroundColor: alpha(colors.text, 0.05) }}
+        dotStyle={{ width: 9, height: 9, borderRadius: 4.5, borderWidth: 2, borderColor: chart.s1, backgroundColor: colors.surface }}
+        onHoverChange={({ index }) => hover.set(index)}
+        focusStyle={focusRing(4)}
+        style={{ height: TAPE_HEIGHT, marginLeft: SIDE, marginRight: SIDE, marginBottom: BELOW }}
+      >
+        {/* No values: the lines follow the aligned steps both axes share. */}
+        <Grid style={{ stroke: colors.line }} />
+        <Bar value="volume" color="dir" cornerRadii={{ topLeft: 1.5, topRight: 1.5 }} stagger={0.5} inactiveOpacity={0.4} />
+        <Line y="close" scale="y2" curve="linear" style={{ stroke: chart.s1, strokeWidth: 2 }} />
+        <PlotAxis placement="left" format={shares} labelStyle={{ ...axis, width: SIDE, paddingRight: 8, textAlign: "right" }} />
+        <PlotAxis placement="right" scale="y2" format={(v) => fixed(v, 0)} labelStyle={{ ...axis, width: SIDE, paddingLeft: 8 }} />
+        <PlotAxis tickValues={dates()} format={(v) => rows()[v]?.label ?? ""} labelStyle={below} />
+      </Plot>
+      <View style={{ marginTop: size.gap + 4 }}>
+        <Figures>
+          <Figure label="Change" value={`${signed(total(), 1)}%`} tone={total() >= 0 ? "up" : "down"} />
+          <Figure label={`Avg / ${spec().unit}`} value={shares(average())} />
+          <Figure label="High" value={`$${fixed(Math.max(...rows().map((d) => d.close)))}`} />
+        </Figures>
+      </View>
+      <View style={{ marginTop: size.gap + 4, alignSelf: pointer ? "flex-start" : "stretch", width: pointer ? 180 : undefined }}>
+        <Segmented
+          options={TAPE_SPANS.map(({ value, label }) => ({ value, label }))}
+          value={span()}
+          size={size.switch}
+          onChange={(next) => {
+            span.set(next);
+            hover.set(null);
+          }}
+        />
+      </View>
+    </Card>
+  );
+}
+
+const QUARTER_NAMES = ["Q1 25", "Q2 25", "Q3 25", "Q4 25", "Q1 26", "Q2 26", "Q3 26", "Q4 26"];
+/** Two segments' revenue per quarter in billions and their net margin in
+ * percent: a growing cloud business, and devices that lose money outside
+ * the holiday quarter. */
+const SEGMENTS = {
+  cloud: { revenue: [4.1, 4.4, 4.8, 5.3, 5.7, 6.2, 6.6, 7.2], margin: [18.0, 19.5, 21.0, 22.4, 23.0, 24.8, 25.5, 27.1] },
+  devices: { revenue: [3.2, 2.9, 3.4, 4.6, 3.1, 2.8, 3.3, 4.9], margin: [-6.5, -9.2, -2.1, 5.8, -4.0, -7.4, 1.2, 8.6] },
+} as const;
+type Segment = keyof typeof SEGMENTS;
+const MARGIN_HEIGHT = 184;
+
+/**
+ * Revenue bars on the left scale and the net margin as a line with dots on
+ * the right one. Both domains are the plot's: aligned, and when the margin
+ * goes below zero (devices) both scales put zero on the same grid line,
+ * the revenue axis writing no values under it. Switching the segment
+ * moves both scales and the marks to the new values.
+ */
+function Margins() {
+  const segment = signal<Segment>("devices");
+  const hover = signal<number | null>(null);
+  const rows = () =>
+    QUARTER_NAMES.map((quarter, i) => ({ quarter, revenue: SEGMENTS[segment()].revenue[i], margin: SEGMENTS[segment()].margin[i] }));
+  const at = () => hover() ?? QUARTER_NAMES.length - 1;
+  const shown = () => rows()[at()];
+  const year = () => rows().slice(4).reduce((sum, d) => sum + d.revenue, 0);
+  const losses = () => rows().filter((d) => d.margin < 0).length;
+  return (
+    <Card icon="stocks" title="Revenue and margin" subtitle="Quarterly revenue on the left, net margin on the right">
+      <View style={{ gap: 4 }}>
+        <Text style={tipTitle}>{shown().quarter.replace(" ", " 20").toUpperCase()}</Text>
+        <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", columnGap: 16, rowGap: 4, marginTop: 2 }}>
+          <Legend color={alpha(chart.s2, 0.5)} label="Revenue" value={`$${fixed(shown().revenue, 1)}B`} />
+          <LineKey color={chart.s1} label="Net margin" value={`${signed(shown().margin, 1)}%`} />
+        </View>
+      </View>
+      <View style={{ flexDirection: "row", justifyContent: "space-between", marginTop: size.gap + 2, marginBottom: 6 }}>
+        <Text style={AXIS_TITLE}>USD</Text>
+        <Text style={AXIS_TITLE}>MARGIN</Text>
+      </View>
+      <Plot
+        data={rows()}
+        xScale={{ type: "band", paddingInner: 0.4, paddingOuter: 0.2, maxBandWidth: 44 }}
+        appearGeneration={0}
+        motion={{ appear: { duration: 700, easing: "easeOut" }, update: DUAL_UPDATE, enter: { duration: 120 }, exit: { duration: 160 }, pointer: { stiffness: 320, damping: 32 } }}
+        accessibilityLabel={`${segment() === "cloud" ? "Cloud" : "Devices"} revenue and net margin by quarter: $${fixed(year(), 1)}B over the last four, ${losses()} quarters at a loss`}
+        accessibilityValue={{ text: hover() == null ? undefined : `${shown().quarter}: revenue $${fixed(shown().revenue, 1)}B, net margin ${fixed(shown().margin, 1)}%` }}
+        crossLineClass="w-full h-full"
+        crossLineStyle={{ backgroundColor: alpha(colors.text, 0.05) }}
+        onHoverChange={({ index }) => hover.set(index)}
+        focusStyle={focusRing(4)}
+        style={{ height: MARGIN_HEIGHT, marginLeft: SIDE, marginRight: SIDE, marginBottom: 2 * BELOW + 2 }}
+      >
+        <Grid style={{ stroke: colors.line }} />
+        {/* Zero, the same line on both scales. */}
+        <Grid y={[0]} style={{ stroke: colors.border }} />
+        <Bar value="revenue" cornerRadii={{ topLeft: 3, topRight: 3 }} stagger={0.4} inactiveOpacity={0.45} style={{ fill: alpha(chart.s2, 0.5) }} />
+        <Line
+          y="margin"
+          scale="y2"
+          curve="linear"
+          dot
+          dotStyle={{ width: 7, height: 7, borderRadius: 3.5, borderWidth: 1.5, borderColor: chart.s1, backgroundColor: colors.surface }}
+          hoverDotStyle={{ width: 11, height: 11, borderRadius: 5.5, borderWidth: 2, borderColor: chart.s1, backgroundColor: colors.surface }}
+          style={{ stroke: chart.s1, strokeWidth: 2 }}
+        />
+        <PlotAxis placement="left" format={(v) => (v < 0 ? "" : v === 0 ? "$0" : `$${fixed(v, 0)}B`)} labelStyle={{ ...axis, width: SIDE, paddingRight: 8, textAlign: "right" }} />
+        <PlotAxis placement="right" scale="y2" format={(v) => `${v < 0 ? "−" : ""}${fixed(Math.abs(v), 0)}%`} labelStyle={{ ...axis, width: SIDE, paddingLeft: 8 }} />
+        {/* The quarters, and under them each year in the middle of its four, so the labels fit a phone. */}
+        <PlotAxis format={(v) => QUARTER_NAMES[v].slice(0, 2)} labelStyle={below} />
+        <PlotAxis tickValues={[1.5, 5.5]} format={(v) => (v < 4 ? "2025" : "2026")} labelStyle={{ ...below, paddingTop: BELOW + 2, color: colors.muted }} />
+      </Plot>
+      <View style={{ marginTop: size.gap + 4 }}>
+        <Figures>
+          <Figure label="Last 4Q" value={`$${fixed(year(), 1)}B`} />
+          <Figure label="Best margin" value={`${signed(Math.max(...rows().map((d) => d.margin)), 1)}%`} tone="up" />
+          <Figure label="Loss quarters" value={`${losses()} / ${rows().length}`} tone={losses() > 0 ? "down" : undefined} />
+        </Figures>
+      </View>
+      <View style={{ marginTop: size.gap + 4, alignSelf: pointer ? "flex-start" : "stretch", width: pointer ? 220 : undefined }}>
+        <Segmented
+          options={[
+            { value: "cloud", label: "Cloud" },
+            { value: "devices", label: "Devices" },
+          ]}
+          value={segment()}
+          size={size.switch}
+          onChange={(next) => segment.set(next)}
+        />
+      </View>
+    </Card>
+  );
+}
+
 /** A portfolio's lean on six factors, scored 0 to 100, and two benchmarks'. */
 const FACTORS = [
   { name: "Value", ours: 72, index: 46, peers: 64 },
@@ -2308,5 +2566,5 @@ function Watchlist() {
  * grids hairlines, tooltips floating cards with a caps title.
  */
 export function Charts() {
-  return <DemoPage cards={[Live, Depth, Drawdown, Capacity, Revenue, Sales, Bridge, Funnel, Candles, RiskReturn, Targets, Factors, Flows, Watchlist]} />;
+  return <DemoPage cards={[Live, Depth, Drawdown, Capacity, Revenue, Sales, Bridge, Funnel, Candles, RiskReturn, Targets, VolumePrice, Margins, Factors, Flows, Watchlist]} />;
 }
