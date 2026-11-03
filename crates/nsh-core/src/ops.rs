@@ -2069,7 +2069,7 @@ pub enum Prop {
     /// `transitionShader` (pages and dialogs): `{ source, uniforms,
     /// duration }`, a shader the page or dialog comes and goes through
     /// (the lower side `sample_from`, the upper `sample_to`) instead of its
-    /// `animation`.
+    /// `animation`, for `duration` milliseconds (350 by default).
     #[prop(js = "transitionShader", on = SCREEN | MODAL)]
     TransitionShader(Option<crate::shader::NavShaderSpec>),
     /// `src`: a URL, `asset:/path`, or an imported asset.
