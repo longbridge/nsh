@@ -25689,6 +25689,103 @@ mod terminal_layout {
     }
 
     #[test]
+    fn a_presence_dot_on_an_avatar_is_one_cell_at_its_corner() {
+        // A 32pt avatar (round: its one row of initials, 4 Cells wide)
+        // with a 10pt dot of a color of its own at its bottom right: one
+        // Cell, the avatar's last; a neutral dot (an offline one) is left
+        // out, and so is one in flow.
+        let avatar = |dot: &str, absolute: bool| {
+            let mut ops = view(2, ROOT_ID, &[("flexDirection", V::Str("row"))]);
+            ops.extend(view(
+                3,
+                2,
+                &[
+                    ("width", V::Number(32.0)),
+                    ("height", V::Number(32.0)),
+                    ("borderRadius", V::Number(16.0)),
+                    ("alignItems", V::Str("center")),
+                    ("justifyContent", V::Str("center")),
+                ],
+            ));
+            ops.extend(text(4, 3, "AL"));
+            let mut style = vec![
+                ("width", V::Number(10.0)),
+                ("height", V::Number(10.0)),
+                ("borderRadius", V::Number(5.0)),
+                ("backgroundColor", V::Str(dot)),
+            ];
+            if absolute {
+                style.extend([
+                    ("position", V::Str("absolute")),
+                    ("right", V::Number(-1.0)),
+                    ("bottom", V::Number(-1.0)),
+                ]);
+            }
+            ops.extend(view(6, 3, &style));
+            laid_out(ops)
+        };
+        let online = avatar("#22c55e", true);
+        assert!(!left_out(&online, 6));
+        assert_eq!(frame_of(&online, 6), Some(rect(24.0, 0.0, 8.0, 16.0)));
+        // A square one row high (a list's avatar), beside its initials.
+        let mut ops = view(2, ROOT_ID, &[("flexDirection", V::Str("row"))]);
+        ops.extend(view(
+            3,
+            2,
+            &[
+                ("width", V::Number(32.0)),
+                ("height", V::Number(16.0)),
+                ("alignItems", V::Str("center")),
+                ("justifyContent", V::Str("center")),
+            ],
+        ));
+        ops.extend(text(4, 3, "AL"));
+        ops.extend(view(
+            6,
+            3,
+            &[
+                ("width", V::Number(10.0)),
+                ("height", V::Number(10.0)),
+                ("borderRadius", V::Number(5.0)),
+                ("backgroundColor", V::Str("#22c55e")),
+                ("position", V::Str("absolute")),
+                ("right", V::Number(-1.0)),
+                ("bottom", V::Number(-1.0)),
+            ],
+        ));
+        let row = laid_out(ops);
+        assert_eq!(frame_of(&row, 4).map(|f| f.origin.x), Some(Points(8.0)));
+        assert_eq!(frame_of(&row, 6), Some(rect(24.0, 0.0, 8.0, 16.0)));
+        assert!(left_out(&avatar("#888888", true), 6));
+        assert!(left_out(&avatar("#22c55e", false), 6));
+        // Leading a title in a row (an issue's status), one Cell, the
+        // row's gap after it.
+        let mut ops = view(
+            2,
+            ROOT_ID,
+            &[
+                ("flexDirection", V::Str("row")),
+                ("alignItems", V::Str("center")),
+                ("columnGap", V::Number(8.0)),
+            ],
+        );
+        ops.extend(view(
+            3,
+            2,
+            &[
+                ("width", V::Number(8.0)),
+                ("height", V::Number(8.0)),
+                ("borderRadius", V::Number(4.0)),
+                ("backgroundColor", V::Str("#f59e0b")),
+            ],
+        ));
+        ops.extend(text(4, 2, "In progress"));
+        let status = laid_out(ops);
+        assert_eq!(frame_of(&status, 3), Some(rect(0.0, 0.0, 8.0, 16.0)));
+        assert_eq!(frame_of(&status, 4).map(|f| f.origin.x), Some(Points(16.0)));
+    }
+
+    #[test]
     fn an_icon_is_left_out_with_its_gap_and_margin() {
         let mut ops = view(
             2,
@@ -25823,9 +25920,10 @@ mod terminal_layout {
             ops.extend(text(10 + 2 * i, 2, "Line"));
         }
         let batch = laid_out(ops);
-        // Four rows of it shown, all ten laid out.
+        // Four rows of it shown, all ten laid out, a column narrower than
+        // the view for its bar.
         assert_eq!(frame_of(&batch, 2), Some(rect(0.0, 0.0, 320.0, 64.0)));
-        assert_eq!(frame_of(&batch, 28), Some(rect(0.0, 144.0, 320.0, 16.0)));
+        assert_eq!(frame_of(&batch, 28), Some(rect(0.0, 144.0, 312.0, 16.0)));
         let content = batch.items.iter().find_map(|i| match i {
             MountItem::ScrollContent { id: 2, size } => Some(*size),
             _ => None,
@@ -27439,6 +27537,153 @@ mod terminal_layout {
         let batch = laid_out(ops);
         assert_eq!(
             frame_of(&batch, 2).map(|f| f.size.height),
+            Some(Points(16.0))
+        );
+    }
+
+    #[test]
+    fn a_code_cell_keeps_its_frame_with_its_digit() {
+        // A one-time code's cells, 36 × 44pt and framed: the one that holds
+        // a digit is the same box as the empty one, three rows with its
+        // border, its digit on the middle row.
+        let cell = |digit: Option<&str>| {
+            let mut ops = view(2, ROOT_ID, &[("flexDirection", V::Str("row"))]);
+            ops.extend(view(
+                3,
+                2,
+                &[
+                    ("width", V::Number(36.0)),
+                    ("height", V::Number(44.0)),
+                    ("borderWidth", V::Number(1.0)),
+                    ("borderRadius", V::Number(8.0)),
+                    ("alignItems", V::Str("center")),
+                    ("justifyContent", V::Str("center")),
+                ],
+            ));
+            if let Some(digit) = digit {
+                ops.extend(text(4, 3, digit));
+            }
+            laid_out(ops)
+        };
+        let (empty, filled) = (cell(None), cell(Some("2")));
+        assert_eq!(
+            frame_of(&empty, 3).map(|f| f.size),
+            Some(size_pt(32.0, 48.0))
+        );
+        assert_eq!(
+            frame_of(&filled, 3).map(|f| f.size),
+            Some(size_pt(32.0, 48.0))
+        );
+        assert_eq!(widths(&filled, 3), Some(Edges::all(Points(1.0))));
+        assert_eq!(frame_of(&filled, 4).map(|f| f.origin.y), Some(Points(16.0)));
+        // On a band of its own (a filled cell's fill, unlike the empty
+        // ones') it keeps its frame as well.
+        let mut ops = view(2, ROOT_ID, &[("flexDirection", V::Str("row"))]);
+        ops.extend(view(
+            3,
+            2,
+            &[
+                ("width", V::Number(36.0)),
+                ("height", V::Number(44.0)),
+                ("borderWidth", V::Number(1.0)),
+                ("borderColor", V::Str("#3a3a3a")),
+                ("backgroundColor", V::Str("#2a2a2a")),
+                ("alignItems", V::Str("center")),
+                ("justifyContent", V::Str("center")),
+            ],
+        ));
+        ops.extend(text(4, 3, "2"));
+        let banded = laid_out_on_surfaces(ops);
+        assert_eq!(
+            frame_of(&banded, 3).map(|f| f.size),
+            Some(size_pt(32.0, 48.0))
+        );
+        assert_eq!(widths(&banded, 3), Some(Edges::all(Points(1.0))));
+        // In a card, an inset well whose line stands out: a band inside a
+        // frame drops its line, a code's cell keeps it.
+        let mut ops = view(
+            2,
+            ROOT_ID,
+            &[
+                ("borderWidth", V::Number(1.0)),
+                ("borderColor", V::Str("#505050")),
+                ("padding", V::Number(16.0)),
+                ("alignItems", V::Str("center")),
+            ],
+        );
+        ops.extend(view(8, 2, &[("flexDirection", V::Str("row"))]));
+        ops.extend(view(
+            3,
+            8,
+            &[
+                ("width", V::Number(36.0)),
+                ("height", V::Number(44.0)),
+                ("borderWidth", V::Number(1.0)),
+                ("borderRadius", V::Number(8.0)),
+                ("borderColor", V::Str("#b0b0b0")),
+                ("backgroundColor", V::Str("#2a2a2a")),
+                ("alignItems", V::Str("center")),
+                ("justifyContent", V::Str("center")),
+            ],
+        ));
+        ops.extend(text(4, 3, "2"));
+        ops.extend(text(6, 2, "The code is 246810"));
+        let carded = laid_out_on_surfaces(ops);
+        assert_eq!(widths(&carded, 2), Some(Edges::all(Points(1.0))));
+        assert_eq!(
+            frame_of(&carded, 3).map(|f| f.size),
+            Some(size_pt(32.0, 48.0))
+        );
+        assert_eq!(widths(&carded, 3), Some(Edges::all(Points(1.0))));
+        // A round one on its band (an avatar's ring around its initials) is
+        // the band alone, its initials on its first row with its badge
+        // under them.
+        let mut ops = view(2, ROOT_ID, &[("flexDirection", V::Str("row"))]);
+        ops.extend(view(
+            3,
+            2,
+            &[
+                ("width", V::Number(64.0)),
+                ("height", V::Number(64.0)),
+                ("borderRadius", V::Number(32.0)),
+                ("borderWidth", V::Number(2.0)),
+                ("borderColor", V::Str("#3a3a3a")),
+                ("backgroundColor", V::Str("#2a2a2a")),
+            ],
+        ));
+        ops.extend(text(4, 3, "MH"));
+        let ring = laid_out_on_surfaces(ops);
+        assert!(widths(&ring, 3).is_none_or(|w| w == Edges::all(Points::ZERO)));
+        assert_eq!(frame_of(&ring, 4).map(|f| f.origin.y), Some(Points(0.0)));
+        // A circle that low (a group's overflow count) is a badge, one row.
+        let mut ops = view(2, ROOT_ID, &[("flexDirection", V::Str("row"))]);
+        ops.extend(view(
+            3,
+            2,
+            &[
+                ("width", V::Number(40.0)),
+                ("height", V::Number(40.0)),
+                ("borderRadius", V::Number(20.0)),
+                ("borderWidth", V::Number(2.0)),
+                ("alignItems", V::Str("center")),
+                ("justifyContent", V::Str("center")),
+            ],
+        ));
+        ops.extend(text(4, 3, "+5"));
+        assert_eq!(
+            frame_of(&laid_out(ops), 3).map(|f| f.size.height),
+            Some(Points(16.0))
+        );
+        // Without a width a frame that low is a badge's, one row.
+        let mut ops = view(2, ROOT_ID, &[("alignSelf", V::Str("flex-start"))]);
+        ops.extend(view(
+            3,
+            2,
+            &[("height", V::Number(44.0)), ("borderWidth", V::Number(1.0))],
+        ));
+        ops.extend(text(4, 3, "Tag"));
+        assert_eq!(
+            frame_of(&laid_out(ops), 3).map(|f| f.size.height),
             Some(Points(16.0))
         );
     }

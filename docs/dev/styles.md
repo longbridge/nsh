@@ -362,7 +362,8 @@ as tall as its lines at 40 columns).
   rows of content or more, unless all its children are controls (a split button, a toolbar, a tab list, a segmented
   control), which is never a card. A pill, a badge, a tab list, a group of buttons or a field's chrome around one row keeps
   no border, and a compact box's padding. A box framed on every side and stated 48pt tall or more (three rows: a
-  specimen, a tile, a drop target) is a box around a single text too: it keeps its border, three rows; inside a frame,
+  specimen, a tile, a drop target), or 40pt, of a stated width and not round too (a one-time code's cell, the same box
+  with its digit as without), is a box around a single text too: it keeps its border, three rows; inside a frame,
   where its border gives way to its band, the band keeps the three rows, a row above and below its text. The core mounts each bordered view with the borders its layout gave Cells
   only (`Node::cell_border`), so the platform draws a border exactly where the layout reserved one; a control (a control's accessibility role, presses, a text input: `Core::is_control`) and a box of
   text never have one, nor does a round box (a circle: corners of half its explicit width or height or more, or `rounded-full`), except a ring: a round box larger than an icon (over 48pt either way), no control, with nothing shown in it and a border of a color of its own (a pulse's ring, an orbit around its dot), absolute or not, which is that outline, drawn as a rounded box; an absolute one its parent's box would cut is left out.
@@ -375,7 +376,8 @@ as tall as its lines at 40 columns).
   or more and a known background), a filled container is a surface: its fill is above 3% alpha and unlike the
   nearest opaque fill around it (the page's at the root: black in a dark app, white in a light one), by 1.5 in CIE L*
   or as a saturated color of another hue. A surface has no border Cells (mounted with none) unless the app's border
-  is hued or at least twice as far in lightness from the backdrop as the fill, and keeps its padding: a row above and below
+  is hued or at least twice as far in lightness from the backdrop as the fill, or it is a framed box that is not round (a
+  specimen, a code's cell: its border is what it shows, empty or not), and keeps its padding: a row above and below
   from 12pt, two columns each side from 12pt, one from 4pt. A filled box around only a text (a popup's box, framed outside it) keeps
   that column from 4pt too, so its text never touches the band's edge or frame. Without bands a filled box is laid out as any other.
 - **Spacing.** A gap between children in a row is one column from above 0, two from 24pt, their margins added; two controls side
@@ -434,7 +436,9 @@ scroll view too; **grids** take their columns from the template
   puts them instead of closing up over it. An empty box in flow (no control) with an explicit size of two Cells or
   more each way and a border draws its outline, as its size is its own: a code cell waiting for its digit (an absolute
   one, a selection's box over its items, draws none). So is
-  a view with nothing in it smaller than a row both ways and not growing (a status dot, a swatch), or a circle with
+  a view with nothing in it smaller than a row both ways and not growing (a status dot in a row, a swatch), except a
+  dot of a hued fill (round, 4pt or more) pinned on a box (absolute: an avatar's presence, which moves nothing) or
+  leading a text in a row (an issue's status before its title), which is one Cell, drawn as a `●` in its color; or a circle with
   nothing in it at most 48pt across that is no control (a radio's ring, an avatar's placeholder), which draws
   nothing in a terminal, and a view (no control, not growing) whose content is all left out (an icon's tile or
   circle), unless it is larger than an icon (over 48pt either way) and what it shows is its own: an opaque fill the user

@@ -20,7 +20,8 @@
 //!   [`ICON`]) is laid out as `display: none`, taking no Cells and no
 //!   spacing; larger ones keep their box, blank (a canvas drawn in
 //!   braille), so what is around them stays apart; and so are a view with nothing in it smaller than a row
-//!   both ways (a status dot, a swatch) and a view whose content is all
+//!   both ways (a status dot, a swatch: a hued dot pinned on a box or
+//!   leading a text in a row is one Cell, [`pin`]) and a view whose content is all
 //!   left out (an icon's tile), which would be blank Cells, unless it is
 //!   larger than an icon with a fill the user handles, an animated fill
 //!   or a ring's outline; a control
@@ -607,7 +608,7 @@ const SMALL_CIRCLE: f32 = 48.0;
 /// swatch, a tick): it draws nothing in a terminal, so it takes no Cells
 /// and no spacing.
 fn decoration(tree: &impl Tree, node: NodeId) -> bool {
-    if !bare(tree, node) || tree.role(node).root {
+    if !bare(tree, node) || tree.role(node).root || pin(tree, node) {
         return false;
     }
     let style = tree.style(node);
@@ -634,6 +635,43 @@ fn decoration(tree: &impl Tree, node: NodeId) -> bool {
         _ => false,
     };
     circle || (small(style.size.width) && small(style.size.height))
+}
+
+/// A dot of a color of its own: bare, round, [`THIN_BAR`] or more and
+/// smaller than a row both ways, of a hued fill, no control, pinned on a
+/// box (an avatar's presence, absolute: placed over the box it moves
+/// nothing) or leading a text in a row (an issue's status before its
+/// title, the row's gap after it). It is kept as one Cell, which the
+/// painter draws as a `●` in its color. Any other dot (one of a neutral
+/// fill, one in a column, which would add a row) is a decoration
+/// ([`decoration`]).
+fn pin(tree: &impl Tree, node: NodeId) -> bool {
+    let (role, style) = (tree.role(node), tree.style(node));
+    let side = |d: Dimension| {
+        length(d.into_raw()).filter(|&v| (THIN_BAR - EPSILON..16.0 - EPSILON).contains(&v))
+    };
+    let (Some(w), Some(h)) = (side(style.size.width), side(style.size.height)) else {
+        return false;
+    };
+    (style.position.is_out_of_flow() || leads_text(tree, node))
+        && bare(tree, node)
+        && !role.control
+        && role.radius * 2.0 >= w.min(h) - EPSILON
+        && saturated(role.fill)
+        && role.fill.0 & 0xff > 0x80
+}
+
+/// Whether `node` is in the flow of a row beside a text (a status dot
+/// before its title).
+fn leads_text(tree: &impl Tree, node: NodeId) -> bool {
+    let Some(parent) = tree.parent(node) else {
+        return false;
+    };
+    matches!(tree.style(parent).flex_direction, FlexDirection::Row)
+        && (0..tree.child_count(parent)).any(|i| {
+            let sibling = tree.child(parent, i);
+            sibling != node && holds_glyphs(tree, sibling)
+        })
 }
 
 /// What a box is, as the algorithm sees it.
@@ -693,7 +731,7 @@ fn kind(tree: &impl Tree, node: NodeId) -> Kind {
         empty,
         // A frame stated three rows tall or more is a box around its
         // text too: a specimen, not a badge.
-        container: (boxes || (visible && framed_box(style))) && !role.control && !role.text,
+        container: (boxes || (visible && framed_box(style, role))) && !role.control && !role.text,
         // A box whose content is all absolute (a table's header over its
         // cells, a row of them) has no rows of content to size it: its
         // explicit height is what its children are placed in.
@@ -714,15 +752,27 @@ fn kind(tree: &impl Tree, node: NodeId) -> Kind {
 /// box whatever it holds: three rows of 16pt.
 const FRAMED_BOX_HEIGHT: f32 = 48.0;
 
+/// The height from which a box framed on every side and stated in points
+/// both ways is a cell whatever it holds (a one-time code's cell): the
+/// same box with its digit as without, whose frame is kept empty.
+const FRAMED_CELL_HEIGHT: f32 = 40.0;
+
 /// `s` frames its box on every side and states a height of
-/// [`FRAMED_BOX_HEIGHT`] or more: a specimen or a tile, which keeps its
-/// border around a single text ([`compute`]).
-fn framed_box(s: &Style) -> bool {
+/// [`FRAMED_BOX_HEIGHT`] or more, or of [`FRAMED_CELL_HEIGHT`] or more and
+/// a width and no round corners: a specimen, a tile or a code's cell,
+/// which keeps its border around a single text ([`compute`]). A circle
+/// that low (a group's overflow count) is a badge's, one row.
+fn framed_box(s: &Style, role: Role) -> bool {
     let b = s.border;
+    let least = if length(s.size.width.into_raw()).is_some() && !round(s, role, None) {
+        FRAMED_CELL_HEIGHT
+    } else {
+        FRAMED_BOX_HEIGHT
+    };
     [b.left, b.right, b.top, b.bottom]
         .iter()
         .all(|&v| length(v.into_raw()).is_some_and(|v| v > 0.0))
-        && length(s.size.height.into_raw()).is_some_and(|h| h >= FRAMED_BOX_HEIGHT - EPSILON)
+        && length(s.size.height.into_raw()).is_some_and(|h| h >= least - EPSILON)
 }
 
 /// A box's border and padding, in Cells, within a parent `parent_width`
@@ -740,7 +790,13 @@ fn insets(
     if let Some(surface) = surface {
         // A band of its color is its edge: a row of padding above and
         // below from 12pt, two columns each side from 12pt, one from 4pt.
-        let has = |v: LengthPercentage| i32::from(surface.border && lp(v, parent_width) > 0.0);
+        // A framed box with corners (a specimen, a code's cell) keeps its
+        // border on its band: the border is what it shows, and the same
+        // box empty, no band of content, has it (a code's filled cell
+        // beside its empty ones). A round one (an avatar's ring) is its
+        // band, as any surface.
+        let framed = surface.border || (framed_box(s, role) && !round(s, role, parent_width));
+        let has = |v: LengthPercentage| i32::from(framed && lp(v, parent_width) > 0.0);
         let border = Sides {
             l: has(s.border.left),
             r: has(s.border.right),
@@ -1219,6 +1275,12 @@ pub(crate) fn compute(
         Some(v) if eh.is_none_or(|h| h == 0) && bar(tree, node, grid, parent_w, v) => Some(1),
         _ => eh,
     };
+    // A pinned dot is one Cell ([`pin`]), whatever its points round to.
+    let (ew, eh) = if pin(tree, node) {
+        (Some(1), Some(1))
+    } else {
+        (ew, eh)
+    };
     // A maximum adds no rows, so it holds for any box: a popup bounded by
     // the room below its anchor.
     let max_h = lpa(s.max_size.height, parent_h).map(|v| grid.rows(v));
@@ -1354,7 +1416,7 @@ pub(crate) fn compute(
     };
     // A frame stated three rows tall or more (a specimen, a tile) is drawn
     // as a box, whatever little it holds: its border is what it shows.
-    let tall = framed_box(tree.style(node));
+    let tall = framed_box(tree.style(node), role);
     let perform = inputs.run_mode == RunMode::PerformLayout;
     let mut flow = Vec::new();
     let mut absolute = Vec::new();
@@ -1399,7 +1461,12 @@ pub(crate) fn compute(
     }
     // A band inside a frame (an inset well in a card) is set apart by its
     // color: its line would be a second frame around the same content.
-    if surface.is_some_and(|s| s.border) && tree.framed() {
+    // A framed box with corners (a code's cell) keeps it: its border is
+    // what it shows, as the same box empty does.
+    if surface.is_some_and(|s| s.border)
+        && tree.framed()
+        && !(tall && !round(tree.style(node), role, parent_w))
+    {
         border = Sides::default();
         inset = border.add(padding);
     }
@@ -2597,6 +2664,9 @@ fn place_absolute(
     // sibling is drawn over it, its text kept.
     let at = (origin.0 + x, origin.1 + y, w, h);
     let under = !holds_glyphs(tree, node) || holds_meter(tree, node);
+    // A pinned dot ([`pin`]) hides only the Cell it is on: it is placed
+    // beside an avatar's initials, not over them.
+    let dot = pin(tree, node);
     let hides = w > 0
         && h == 1
         && !holds_control(tree, node)
@@ -2610,7 +2680,11 @@ fn place_absolute(
                 && sx < at.0 + w
                 && at.1 < sy + sh
                 && sy < at.1 + h
-                && glyphs_on(tree, grid, sibling, sy, at.1)
+                && if dot {
+                    glyphs_at(tree, grid, sibling, (sx, sy), (at.0, at.1))
+                } else {
+                    glyphs_on(tree, grid, sibling, sy, at.1)
+                }
         });
     // A ring that does not fit in its parent's box would be cut, its
     // outline open: it is left out.
@@ -2745,6 +2819,32 @@ fn glyphs_on(tree: &impl Tree, grid: Grid, node: NodeId, top: i32, row: i32) -> 
         let child = tree.child(node, i);
         let (_, y, ..) = cells_of(grid, &tree.placed(child));
         glyphs_on(tree, grid, child, top + y, row)
+    })
+}
+
+/// Whether a text with characters `node` holds, its box's top left at
+/// `origin` Cells, has a Cell at `cell`.
+fn glyphs_at(
+    tree: &impl Tree,
+    grid: Grid,
+    node: NodeId,
+    origin: (i32, i32),
+    cell: (i32, i32),
+) -> bool {
+    let role = tree.role(node);
+    if role.scroll {
+        return false;
+    }
+    if role.text && tree.measures(node) {
+        let (.., w, h) = cells_of(grid, &tree.placed(node));
+        return role.glyphs
+            && (origin.0..origin.0 + w).contains(&cell.0)
+            && (origin.1..origin.1 + h).contains(&cell.1);
+    }
+    (0..tree.child_count(node)).any(|i| {
+        let child = tree.child(node, i);
+        let (x, y, ..) = cells_of(grid, &tree.placed(child));
+        glyphs_at(tree, grid, child, (origin.0 + x, origin.1 + y), cell)
     })
 }
 
