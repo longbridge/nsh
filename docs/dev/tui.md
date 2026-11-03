@@ -914,7 +914,7 @@ permit clipboard writes; `nsh test` uses memory and never writes to the machine'
 | Alerts (`AlertDialog`) | A centered framed box over the dimmed screen, buttons as `< OK >`, the focused one reversed |
 | Development errors | Dismissible panel, with the mapped message and stack; cleared by the next update |
 | Colors | The terminal theme's meanings: the default foreground, dim for low contrast, or the accent of a saturated color's hue; canvases keep their colors at the terminal's depth |
-| View fills | Left out; Cells keep the terminal's background |
+| View fills | With surfaces (256 colors or more and a known background): a band of the ramp's step over the view's frame (lighter raised, darker sunken, a saturated fill mixed 20% into the step under it), the app's page color the terminal's own background; bandless (16 colors or an unknown background): left out, Cells keep the terminal's background (Drawing, "Fills") |
 | Opacity | Left out (a view under 0.03 is not shown) |
 | Selected, focused, pressed, hovered and disabled views | A reversed band, a reversed label (a bold border on large containers; an underlined text field), a faint background band (none at 16 colors), dim |
 | Borders | Box drawing on each side wider than zero, one Cell, dim (an accent color kept), rounded corners where a radius is set, dashed and dotted lines |
@@ -926,10 +926,10 @@ permit clipboard writes; `nsh test` uses memory and never writes to the machine'
 | Gaps between texts | Positive point gaps between one-line sibling texts or canvas text runs retain at least one Cell; zero gaps keep adjacent text |
 | Base control value states and projected part states | Drawn by the components' own glyphs; a selected item a reversed band |
 | Slider keyboard input | Component-owned arrows, page and endpoint keys while its thumb has focus |
-| Slider dragging and control hover | Ticket-09 pointer follow-up |
+| Slider dragging and control hover | A primary press on a slider's track moves the nearest thumb there and a drag moves it Cell by Cell, through the responder events the Touch path feeds (`nsh-base`'s `Slider`); hover reports `HOVERED` (`hover:` styles) and HoverIn/Out/Move on the Cell hit regions (Mouse and text selection) |
 | Border width | One Cell whatever the width |
 | Text | The run's color as a meaning, an accent background reversed, bold at weight 600 and above, italic, underline and strikethrough |
-| Hover and pressed states | A faint band (10% and 18% toward the terminal's foreground); hover events on the Cell hit regions |
+| Hover and pressed states | With surfaces the ramp's hover and select steps; bandless a faint band (10% and 18% toward the terminal's foreground, none at 16 colors); hover events on the Cell hit regions |
 | Mouse drags | Native pan values, responder moves and bounded content scrolling |
 | Selectable text | Reversed grapheme Cells; copies use the shared clipboard and OSC 52 |
 | Pointer precision | One terminal Cell, converted to its center in points |

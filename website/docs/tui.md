@@ -127,11 +127,21 @@ The terminal reports the mouse at Cell precision, and NSH turns each Cell into t
   (`onContextMenu`) of the nearest view that listens for one.
 - **The wheel** scrolls the scroll view under the pointer by three rows (six columns sideways; Shift turns a vertical
   wheel sideways), and leaves the keyboard focus where it is.
-- **Hover** tracks the pointer: `hover:` styles, `onMouseEnter` / `onMouseLeave`, and tooltips and hover cards on the
-  views under it.
-- **Dragging** selects text in selectable views, moves a scroll bar's thumb, scrolls content that nothing else claims,
-  resizes the panes of a `ResizablePanelGroup` or `DockArea` by their handle lines, and drives the app's gestures
-  (`panActivation`, the responder system) Cell by Cell. Selected text copies with Ctrl+C, Ctrl+Shift+C or Cmd+C.
+- **Hover** tracks the pointer Cell by Cell: the view under it and its ancestors take `hover:` styles and
+  `onMouseEnter` / `onMouseMove` / `onMouseLeave`, a hovered control stands on a lighter band, and tooltips and hover
+  cards open on the views under it. Leaving the terminal, or the terminal losing focus, clears hover.
+- **Dragging** follows the pointer Cell by Cell:
+  - a `Slider` (and a `ColorSlider` or `ColorArea`): a press on the track moves the nearest thumb there, and a drag
+    moves it with the pointer; a range slider's thumbs stay within each other;
+  - a scroll bar: a press on the track jumps the thumb there, and a held thumb follows the pointer;
+  - the handle lines of a `ResizablePanelGroup` or `DockArea` resize their panes, and a `DockArea` tab dragged over a
+    group outlines where it lands;
+  - text in selectable views and fields is selected; Shift+click extends the selection, and Ctrl+C, Ctrl+Shift+C or
+    Cmd+C copies it;
+  - content that nothing else claims scrolls with the drag, and the app's gestures (`panActivation`, the responder
+    system) get every move; a drag keeps its target while the pointer is outside the app.
+
+  A drag never presses what it started on.
 
 ## Colors and themes
 
