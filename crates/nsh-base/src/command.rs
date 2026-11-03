@@ -1223,8 +1223,13 @@ fn item_row(p: Palette, entry: Memo<Option<Row>>, parts: Parts) -> AnyElement {
         })
         .project_focused(highlighted)
         .project_checked(checked)
-        .app_class(parts.item_class)
-        .inline_style(move || parts.item_style.get())
+        // A terminal marks the highlighted row itself (a band over the
+        // whole row, `crate::terminal`): the app's row look would paint
+        // a band of its own beside it. Its content (`render_item`) stays.
+        .when(!crate::terminal::is_terminal(), |v| {
+            v.app_class(parts.item_class)
+                .inline_style(move || parts.item_style.get())
+        })
         .element_ref(&me)
         // The pointer highlights a row, as long as no button is down.
         .on_mouse_move(move |e: &MouseEvent| {

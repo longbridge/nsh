@@ -816,3 +816,59 @@ fn a_checkboxs_children_keep_their_column_beside_the_mark() {
     // The mark is still beside them.
     assert!(joined(&app).starts_with("[ ] Push"), "{:?}", joined(&app));
 }
+
+/// A command whose rows the app paints red, green while highlighted.
+#[component]
+fn Painted() -> impl IntoElement {
+    nsh_base::command()
+        .items(vec![
+            nsh_base::CommandItem::new("new", "New File"),
+            nsh_base::CommandItem::new("open", "Open File"),
+        ])
+        .item_class("bg-[#ff0000] focus:bg-[#00ff00]")
+        .h(px(200.0))
+}
+
+/// The backgrounds of the views the first render mounts in `idiom`.
+fn backgrounds<C: Component<Props = ()>>(idiom: Idiom) -> Vec<nsh_core::Color> {
+    let viewport = Size::new(px(390.0), px(844.0));
+    let config = EngineConfig {
+        viewport,
+        environment: Environment {
+            window: viewport,
+            os: Os::Linux,
+            idiom,
+            ..Environment::default()
+        },
+        ..EngineConfig::new(Root::of::<C>())
+    };
+    let mut app = Headless::start(config).unwrap();
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let into = seen.clone();
+    app.observe(move |_, batch| {
+        for item in &batch.items {
+            if let MountItem::ViewStyle { style, .. } = item {
+                into.lock().unwrap().push(style.background_color);
+            }
+        }
+    });
+    app.first_render().unwrap();
+    app.wait_for("text:New File").unwrap();
+    app.idle(Duration::from_millis(50)).unwrap();
+    seen.lock().unwrap().clone()
+}
+
+#[test]
+fn a_terminals_command_rows_leave_the_highlight_to_the_terminal() {
+    // The terminal bands the highlighted row itself (its projected
+    // focus): the app's row look would paint a band beside it.
+    const RED: nsh_core::Color = nsh_core::Color(0xff0000ff);
+    const GREEN: nsh_core::Color = nsh_core::Color(0x00ff00ff);
+    let desktop = backgrounds::<Painted>(Idiom::Desktop);
+    assert!(desktop.contains(&RED), "{desktop:?}");
+    let terminal = backgrounds::<Painted>(Idiom::Terminal);
+    assert!(
+        !terminal.contains(&RED) && !terminal.contains(&GREEN),
+        "{terminal:?}"
+    );
+}
