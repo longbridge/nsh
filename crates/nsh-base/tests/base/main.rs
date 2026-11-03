@@ -3,6 +3,7 @@
 
 mod accordion;
 mod avatar;
+mod button;
 mod calendar;
 mod carousel;
 mod collapsible;

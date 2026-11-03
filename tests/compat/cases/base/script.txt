@@ -161,7 +161,17 @@ tap text:Blocked
 expect Blocked presses: 1
 prop id:off accessibilityState disabled=true
 style id:off opacity 1
+# `hitSlop`: presses count this far outside the button, one number for
+# every side or the sides named, following a signal; none without it.
+prop id:close hitSlop top=12 right=12 bottom=12 left=12
+tap id:close
+expect Presses: 111
+prop id:sides hitSlop {}
+tap text:Widen
+prop id:sides hitSlop top=4 left=2
+prop id:plain hitSlop {}
 covers [nsh/base] Button
+covers [props] hitSlop
 covers [props] role
 covers [props] accessibilityLabel
 covers [props] disabled

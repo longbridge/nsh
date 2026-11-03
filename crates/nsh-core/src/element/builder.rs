@@ -1705,8 +1705,8 @@ pub trait Interactive: Element {
     }
 
     /// Presses also count this far outside it.
-    fn hit_slop(mut self, insets: EdgeInsets) -> Self {
-        super::host::set(self.node(), Prop::HitSlop(insets));
+    fn hit_slop(mut self, insets: impl IntoReactive<EdgeInsets>) -> Self {
+        super::host::bind_prop(self.node(), insets, Prop::HitSlop);
         self
     }
 
