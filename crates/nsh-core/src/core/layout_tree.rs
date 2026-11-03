@@ -701,6 +701,10 @@ where
         self.framed = framed;
     }
 
+    fn page(&self) -> crate::Color {
+        self.tree.grid.map_or(crate::Color::BLACK, |g| g.page)
+    }
+
     fn backdrop(&self, node: NodeId) -> Option<crate::Color> {
         let mut at = self.tree.parent(node);
         while let Some(n) = at {

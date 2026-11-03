@@ -25491,6 +25491,45 @@ mod terminal_layout {
     }
 
     #[test]
+    fn a_gray_key_before_its_name_keeps_its_cell() {
+        // A legend's key: an 8pt round dot of a gray series before its
+        // name. It is the series' only mark, so it keeps a Cell (a `●`)
+        // though its fill has no hue; between two texts, or as light as
+        // the page, it is a decoration.
+        let row = |fill: &'static str, before: bool| {
+            let mut ops = view(
+                2,
+                ROOT_ID,
+                &[
+                    ("alignSelf", V::Str("flex-start")),
+                    ("flexDirection", V::Str("row")),
+                    ("columnGap", V::Number(8.0)),
+                ],
+            );
+            if before {
+                ops.extend(text(6, 2, "A"));
+            }
+            ops.extend(view(
+                3,
+                2,
+                &[
+                    ("width", V::Number(8.0)),
+                    ("height", V::Number(8.0)),
+                    ("borderRadius", V::Number(4.0)),
+                    ("backgroundColor", V::Str(fill)),
+                ],
+            ));
+            ops.extend(text(4, 2, "Memory"));
+            laid_out(ops)
+        };
+        let key = row("#8a8a8a", false);
+        assert_eq!(frame_of(&key, 3), Some(rect(0.0, 0.0, 8.0, 16.0)));
+        assert_eq!(frame_of(&key, 4), Some(rect(16.0, 0.0, 48.0, 16.0)));
+        assert!(left_out(&row("#8a8a8a", true), 3), "between two texts");
+        assert!(left_out(&row("#f4f4f4", false), 3), "as light as the page");
+    }
+
+    #[test]
     fn a_tile_keeps_its_content_stacked() {
         let mut ops = view(
             2,

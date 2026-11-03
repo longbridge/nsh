@@ -1209,10 +1209,18 @@ impl<M: TextEngine> Core<M> {
                 });
                 return Some((ring, Bounds { origin, size }));
             }
-            let Some(&first) = n.children.iter().find(|&&c| {
-                let c = &self.nodes[c as usize];
-                !c.is_overlay() && c.layout.is_some()
-            }) else {
+            // The list itself with no box of its own: its options are
+            // not the popup's box (a highlighted first option's fill
+            // would take the frame), so the popup is framed as below.
+            let first = if self.is_options(at) {
+                None
+            } else {
+                n.children.iter().find(|&&c| {
+                    let c = &self.nodes[c as usize];
+                    !c.is_overlay() && c.layout.is_some()
+                })
+            };
+            let Some(&first) = first else {
                 // No box of the app's: a popup holding a list (a select's,
                 // a menu) is framed around its own box all the same, a
                 // terminal's surface for the list.
@@ -1246,13 +1254,22 @@ impl<M: TextEngine> Core<M> {
     /// Whether `key` or a view `depth` levels below it is a list of
     /// options or a menu (`nsh-platform-tui` frames the same popups).
     fn holds_list(&self, key: Key, depth: usize) -> bool {
-        let n = &self.nodes[key as usize];
-        n.props.as_ref().is_some_and(|p| {
+        self.is_options(key)
+            || (depth > 0
+                && self.nodes[key as usize]
+                    .children
+                    .iter()
+                    .any(|&c| self.holds_list(c, depth - 1)))
+    }
+
+    /// Whether `key` is a list of options or a menu.
+    fn is_options(&self, key: Key) -> bool {
+        self.nodes[key as usize].props.as_ref().is_some_and(|p| {
             matches!(
                 p.accessibility.role,
                 crate::AccessibilityRole::Listbox | crate::AccessibilityRole::Menu
             )
-        }) || (depth > 0 && n.children.iter().any(|&c| self.holds_list(c, depth - 1)))
+        })
     }
 
     fn set_native_overlay_anchor(

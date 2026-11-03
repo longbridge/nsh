@@ -352,6 +352,8 @@ pub(crate) trait Tree {
     /// The background behind `node`: the nearest opaque fill of a box
     /// around it ([`Role::fill`]), `None` for the page's.
     fn backdrop(&self, node: NodeId) -> Option<Color>;
+    /// The page's color, behind the root ([`Grid::page`]).
+    fn page(&self) -> Color;
     /// Where its last layout placed it, relative to its parent.
     fn placed(&self, node: NodeId) -> Layout;
     /// The box it is laid out in, `None` for a root.
@@ -642,9 +644,11 @@ fn decoration(tree: &impl Tree, node: NodeId) -> bool {
 /// box (an avatar's presence, absolute: placed over the box it moves
 /// nothing) or leading a text in a row (an issue's status before its
 /// title, the row's gap after it). It is kept as one Cell, which the
-/// painter draws as a `●` in its color. Any other dot (one of a neutral
-/// fill, one in a column, which would add a row) is a decoration
-/// ([`decoration`]).
+/// painter draws as a `●` in its color. A dot of a neutral fill is kept
+/// only first in its row, before its text, and apart from its backdrop
+/// (a gray series' key in a legend, [`stands_out`]). Any other dot (a
+/// neutral one between texts, one in a column, which would add a row) is
+/// a decoration ([`decoration`]).
 fn pin(tree: &impl Tree, node: NodeId) -> bool {
     let (role, style) = (tree.role(node), tree.style(node));
     let side = |d: Dimension| {
@@ -657,8 +661,43 @@ fn pin(tree: &impl Tree, node: NodeId) -> bool {
         && bare(tree, node)
         && !role.control
         && role.radius * 2.0 >= w.min(h) - EPSILON
-        && saturated(role.fill)
-        && role.fill.0 & 0xff > 0x80
+        && ((saturated(role.fill) && role.fill.0 & 0xff > 0x80)
+            || (!style.position.is_out_of_flow()
+                && leads_first(tree, node)
+                && stands_out(tree, node, role.fill)))
+}
+
+/// Whether a neutral dot's fill reads apart from what is behind it (a
+/// gray series' key on a card): its L* over the backdrop, blended, at
+/// least [`DOT_CONTRAST`] from the backdrop's.
+fn stands_out(tree: &impl Tree, node: NodeId, fill: Color) -> bool {
+    if fill.0 & 0xff == 0 {
+        return false;
+    }
+    let back = tree.backdrop(node).unwrap_or_else(|| tree.page());
+    (lightness(blend(fill, back)) - lightness(back)).abs() >= DOT_CONTRAST
+}
+
+/// How far apart in L* a neutral dot's fill and its backdrop are for the
+/// dot to be a key ([`stands_out`]).
+const DOT_CONTRAST: f32 = 15.0;
+
+/// Whether `node` leads the texts of its row: a text after it, none
+/// before it (a legend's key before its name). A dot between two texts
+/// (a separator) does not.
+fn leads_first(tree: &impl Tree, node: NodeId) -> bool {
+    let Some(parent) = tree.parent(node) else {
+        return false;
+    };
+    if !matches!(tree.style(parent).flex_direction, FlexDirection::Row) {
+        return false;
+    }
+    let count = tree.child_count(parent);
+    let Some(at) = (0..count).position(|i| tree.child(parent, i) == node) else {
+        return false;
+    };
+    !(0..at).any(|i| holds_glyphs(tree, tree.child(parent, i)))
+        && (at + 1..count).any(|i| holds_glyphs(tree, tree.child(parent, i)))
 }
 
 /// Whether `node` is in the flow of a row beside a text (a status dot
