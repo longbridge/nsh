@@ -81,6 +81,9 @@ pub(crate) struct Shaders {
     views: FxHashMap<NodeId, ShaderState>,
     /// Pages and dialogs coming or going through a shader.
     overlays: Vec<NavOverlay>,
+    /// Pictures of what showed before pages and dialogs leave, taken
+    /// before their views go ([`Shaders::hold`]).
+    held: Vec<Held>,
     link: Retained<CADisplayLink>,
     /// The link is unpaused.
     running: bool,
@@ -130,6 +133,7 @@ impl Shaders {
             renderer: OnceCell::new(),
             views: FxHashMap::default(),
             overlays: Vec::new(),
+            held: Vec::new(),
             link,
             running: false,
         }
@@ -320,13 +324,60 @@ impl Shaders {
         self.overlays.retain(|o| o.key != key);
         let others: Vec<Retained<CALayer>> =
             self.overlays.iter().map(|o| o.layer.clone()).collect();
-        let Some(overlay) = NavOverlay::new(key, host, rect, scale, shader, backwards, &others)
+        let held = self
+            .held
+            .iter()
+            .position(|h| h.key == key)
+            .map(|i| self.held.swap_remove(i))
+            .filter(|h| h.rect == rect)
+            .map(|h| h.pixels);
+        let Some(overlay) =
+            NavOverlay::new(key, host, rect, scale, shader, backwards, &others, held)
         else {
             return false;
         };
         self.overlays.push(overlay);
         self.wake();
         true
+    }
+
+    /// Pictures `rect` of `host` (the window) as it shows now, every
+    /// overlay left out, for a page or a dialog of `key` (as
+    /// [`Shaders::nav_overlay`]'s) that leaves through its shader in this
+    /// batch: the views it showed go before the change is made (the app
+    /// removed and released them), so the picture before it is taken now.
+    /// The first picture held for `key` stays until the change uses it.
+    pub(crate) fn hold(&mut self, key: NodeId, host: &UIView, rect: CGRect, scale: CGFloat) {
+        if self.held.iter().any(|h| h.key == key)
+            || self
+                .renderer
+                .get_or_init(|| Renderer::new(PixelFormat::Rgba))
+                .is_none()
+        {
+            return;
+        }
+        let Some((pw, ph)) = picture_size(rect.size.width, rect.size.height, scale) else {
+            return;
+        };
+        let layers: Vec<Retained<CALayer>> =
+            self.overlays.iter().map(|o| o.layer.clone()).collect();
+        let pixels = without(&layers, || {
+            render(&host.layer(), (rect.origin.x, rect.origin.y), pw, ph, scale)
+        });
+        self.held.push(Held { key, rect, pixels });
+    }
+
+    /// Lets go of the pictures [`Shaders::hold`] took that no change used,
+    /// but those of the keys `keep` keeps (a stack whose change waits for
+    /// UIKit's transition to end).
+    pub(crate) fn release_held(&mut self, keep: impl Fn(NodeId) -> bool) {
+        self.held.retain(|h| keep(h.key));
+    }
+
+    /// Views may be back in a window (a page shown again, the surface
+    /// moved): the link runs if a picture or a frame is due.
+    pub(crate) fn revisit(&mut self) {
+        self.wake();
     }
 
     /// The values of the animated slots of shader view `id`.
@@ -417,7 +468,8 @@ impl Shaders {
             if !state.due() {
                 continue;
             }
-            // Out of every window: rendered once it is back in one.
+            // Out of every window: rendered once it is back in one, which
+            // wakes the link ([`Shaders::revisit`]); its pictures stay due.
             if state.host.window().is_none() {
                 wants |= state.view.wants_frame();
                 continue;
@@ -753,6 +805,7 @@ fn children_picture<'a>(
         // SAFETY: clearing and restoring the view's own mask.
         unsafe { layer.setMask(None) };
         let picture = canvas.render(&layer, (-o, -o));
+        // SAFETY: the view's own mask, cleared above, set back.
         unsafe { layer.setMask(mask.as_deref()) };
         picture
     }))
@@ -880,12 +933,21 @@ fn render(
     out
 }
 
+/// A picture of `rect` of the window taken before a change of `key`
+/// ([`Shaders::hold`]).
+struct Held {
+    key: NodeId,
+    rect: CGRect,
+    pixels: Vec<u8>,
+}
+
 /// A page's or a dialog's coming or going drawn through its
 /// `transitionShader` ([`nsh_core::NavShader`]): a layer over `rect` of
 /// `host` (the window) showing the shader's frames, which read the lower
 /// side as `from` and the upper as `to`. It pictures `rect` before the
 /// change and, on the first tick, after it; going away (the upper side is
-/// the one before) runs backwards.
+/// the one before) runs backwards. It stays until the frames on their way
+/// when the run ends have shown.
 struct NavOverlay {
     /// What it changes: a stack, or the surface (`ROOT_ID`) for a dialog.
     key: NodeId,
@@ -903,7 +965,8 @@ struct NavOverlay {
 
 impl NavOverlay {
     /// Pictures `rect` of `host` as it shows now, the other overlays
-    /// (`others`, of other stacks) left out.
+    /// (`others`, of other stacks) left out, unless `held` is that picture.
+    #[allow(clippy::too_many_arguments)]
     fn new(
         key: NodeId,
         host: &UIView,
@@ -912,10 +975,13 @@ impl NavOverlay {
         shader: &nsh_core::NavShader,
         backwards: bool,
         others: &[Retained<CALayer>],
+        held: Option<Vec<u8>>,
     ) -> Option<NavOverlay> {
         let (pw, ph) = picture_size(rect.size.width, rect.size.height, scale)?;
-        let before = without(others, || {
-            render(&host.layer(), (rect.origin.x, rect.origin.y), pw, ph, scale)
+        let before = held.filter(|p| p.len() == pw * ph * 4).unwrap_or_else(|| {
+            without(others, || {
+                render(&host.layer(), (rect.origin.x, rect.origin.y), pw, ph, scale)
+            })
         });
         let layer = CALayer::new();
         // SAFETY: an immutable Core Animation constant.
@@ -952,11 +1018,15 @@ impl NavOverlay {
     }
 
     /// One tick: on the first, pictures the change (every overlay, `layers`,
-    /// left out) and starts; renders and shows the frames. Whether it still
-    /// runs.
+    /// left out) and starts; renders and shows the frames, and once the run
+    /// ended only those still on their way. Whether it is still needed.
     fn tick(&mut self, renderer: &Renderer, now: Instant, layers: &[Retained<CALayer>]) -> bool {
         if let Some(before) = self.before.take() {
             let (pw, ph) = self.size;
+            // What the change put in the window is laid out before it is
+            // pictured (a dialog UIKit just presented, the screen it put in
+            // the stack).
+            self.host.layoutIfNeeded();
             let after = without(layers, || {
                 render(
                     &self.host.layer(),
@@ -983,10 +1053,19 @@ impl NavOverlay {
                 self.view.start_transition(self.duration, now);
             }
         }
-        if self.view.render(renderer, now) {
+        let running = self.view.transitioning(now);
+        // Past its end the run renders nothing more (a program reading
+        // `nsh.time` would draw on), and the frames still coming back show.
+        let shown = if running {
+            self.view.render(renderer, now)
+        } else {
+            self.view.collect_frame(renderer)
+        };
+        if shown {
             set_image(&self.layer, rgba_image(self.view.frame()).as_deref());
         }
-        self.view.transitioning(now)
+        // A frame shown on this tick is on screen at the next.
+        running || shown || self.view.pending()
     }
 }
 

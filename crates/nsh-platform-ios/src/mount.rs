@@ -523,6 +523,15 @@ impl Slot {
     }
 }
 
+/// The screen a stack showed when the app removed it
+/// ([`Mounter::remove_hosted`]).
+struct LeavingScreen {
+    id: NodeId,
+    /// Its `transitionShader`, unless less motion is asked for.
+    shader: Option<nsh_core::NavShader>,
+    animation: nsh_core::ScreenAnimation,
+}
+
 /// Applies mount batches to UIKit views. Main thread only.
 pub(crate) struct Mounter {
     /// Indexed by node id (ids are dense).
@@ -611,6 +620,10 @@ pub(crate) struct Mounter {
     text_colors: crate::interaction::TextColors,
     /// The `transitionShader`s of pages and dialogs.
     nav_shaders: rustc_hash::FxHashMap<NodeId, nsh_core::NavShader>,
+    /// The screen each stack showed when the app removed it: the app
+    /// releases it in the same batch, before [`Mounter::finish_navigation`]
+    /// changes the stack.
+    leaving_screens: rustc_hash::FxHashMap<NodeId, LeavingScreen>,
     /// The tint of this surface's alerts and action sheets, from its
     /// tokens ([`crate::system::alert_tint`]).
     alert_tint: Option<nsh_core::element::AdaptiveColor>,
@@ -672,6 +685,7 @@ impl Mounter {
             shaders: crate::shader::Shaders::new(&target_for_link),
             text_colors: crate::interaction::TextColors::new(&target_for_link),
             nav_shaders: rustc_hash::FxHashMap::default(),
+            leaving_screens: rustc_hash::FxHashMap::default(),
             alert_tint: None,
             hosts: Default::default(),
             dirty_stacks: Vec::new(),
@@ -1025,10 +1039,14 @@ impl Mounter {
                     self.areas.remove(i).1.detach();
                 }
                 if let Some(mut s) = self.views.get_mut(id as usize).and_then(Option::take) {
-                    // A modal deleted while presented (its subtree released
-                    // without a remove) goes away too, as on Android.
+                    // A modal deleted while presented (the app closed it and
+                    // released it, or released its subtree without a
+                    // remove) goes away too, as on Android: through its
+                    // shader (from the picture held when it was removed) or
+                    // with its own motion.
                     if let Native::Modal(modal) = &mut s.native {
-                        modal.dismiss(false, || {});
+                        let at_once = modal.changes(false) && self.dialog_overlay(id, false);
+                        modal.dismiss(at_once, || {});
                     }
                     if s.events.contains(EventKind::Touch) {
                         self.touch_listener_changed(false);
@@ -2483,6 +2501,12 @@ impl Mounter {
         root.window().map_or(2.0, |w| w.screen().scale())
     }
 
+    /// The surface moved to a window (or out of one): the shaders in it
+    /// take the pictures they missed.
+    pub(crate) fn window_changed(&mut self) {
+        self.shaders.revisit();
+    }
+
     /// The surface's traits changed: on a screen of another scale (an
     /// external display, Catalyst), images decode again for it.
     pub(crate) fn traits_changed(&mut self) {
@@ -3026,25 +3050,105 @@ impl Mounter {
             return false;
         };
         match self.slot(id).map(|s| &s.native) {
-            Some(Native::Screen(_)) => {
-                if let Some(Slot {
+            Some(Native::Screen(screen)) => {
+                let animation = screen.config.animation;
+                let shader = self
+                    .nav_shaders
+                    .get(&id)
+                    .filter(|_| !reduce_motion())
+                    .cloned();
+                let Some(Slot {
                     native: Native::Stack(stack),
                     ..
                 }) = self.slot_mut(parent)
+                else {
+                    return true;
+                };
+                let shown = stack
+                    .nav
+                    .topViewController()
+                    .and_then(|c| c.downcast::<crate::navigation::ScreenController>().ok())
+                    .is_some_and(|c| c.screen_id() == id);
+                stack.screens.retain(|&s| s != id);
+                stack.popped.retain(|&s| s != id);
+                let view = stack.nav.view();
+                self.dirty_stacks.push(parent);
+                if !shown {
+                    return true;
+                }
+                // The app may release it in this batch, its views first:
+                // what the stack's change needs of it is kept, and what
+                // showed is pictured now when it leaves through a shader.
+                let through = shader.is_some();
+                self.leaving_screens.insert(
+                    parent,
+                    LeavingScreen {
+                        id,
+                        shader,
+                        animation,
+                    },
+                );
+                if through
+                    && let Some(view) = view
+                    && let Some(window) = view.window()
                 {
-                    stack.screens.retain(|&s| s != id);
-                    stack.popped.retain(|&s| s != id);
-                    self.dirty_stacks.push(parent);
+                    let rect = view.convertRect_toView(view.bounds(), Some(&window));
+                    let scale = self.display_scale();
+                    self.shaders.hold(parent, &window, rect, scale);
                 }
             }
             Some(Native::HeaderItem(view)) => {
                 view.removeFromSuperview();
                 self.dirty_headers.push(parent);
             }
-            Some(Native::Modal(_)) => self.dirty_modals.push(id),
+            Some(Native::Modal(modal)) => {
+                let closes = modal.changes(false);
+                self.dirty_modals.push(id);
+                // Pictured with its content, which the app may release
+                // before it closes.
+                if closes
+                    && !reduce_motion()
+                    && self.nav_shaders.contains_key(&id)
+                    && let Some(root) = self
+                        .slot(nsh_core::ROOT_ID)
+                        .map(|s| s.native.view().retain())
+                    && let Some(window) = root.window()
+                {
+                    let rect = root.convertRect_toView(root.bounds(), Some(&window));
+                    let scale = self.display_scale();
+                    self.shaders.hold(nsh_core::ROOT_ID, &window, rect, scale);
+                }
+            }
             _ => {}
         }
         true
+    }
+
+    /// Starts dialog `id` coming (`shown`) or going through its
+    /// `transitionShader`, over the window's part where the surface is;
+    /// whether it does (the dialog then changes at once). Not where less
+    /// motion is asked for, nor where the shader cannot draw: the dialog
+    /// keeps its own motion.
+    fn dialog_overlay(&mut self, id: NodeId, shown: bool) -> bool {
+        if reduce_motion() {
+            return false;
+        }
+        let Some(root) = self
+            .slot(nsh_core::ROOT_ID)
+            .map(|s| s.native.view().retain())
+        else {
+            return false;
+        };
+        let Some(window) = root.window() else {
+            return false;
+        };
+        let rect = root.convertRect_toView(root.bounds(), Some(&window));
+        let scale = self.display_scale();
+        let Some(shader) = self.nav_shaders.get(&id) else {
+            return false;
+        };
+        self.shaders
+            .nav_overlay(nsh_core::ROOT_ID, &window, rect, scale, shader, !shown)
     }
 
     /// Applies the navigation changes of a batch once all its views exist
@@ -3105,13 +3209,22 @@ impl Mounter {
                 .topViewController()
                 .and_then(|c| c.downcast::<crate::navigation::ScreenController>().ok())
                 .map(|c| c.screen_id());
+            // The screen the app removed and released keeps its animation
+            // and shader ([`Mounter::remove_hosted`]).
+            let recorded = self
+                .leaving_screens
+                .remove(&id)
+                .filter(|l| Some(l.id) == leaving_id);
+            let leaving = leaving.or(recorded.as_ref().map(|l| l.animation));
             // Less motion asked for: UIKit's own (reduced) motion instead.
             let shaders = if reduce_motion() {
                 (None, None)
             } else {
                 (
                     top.and_then(|id| self.nav_shaders.get(&id)),
-                    leaving_id.and_then(|id| self.nav_shaders.get(&id)),
+                    leaving_id
+                        .and_then(|id| self.nav_shaders.get(&id))
+                        .or(recorded.as_ref().and_then(|l| l.shader.as_ref())),
                 )
             };
             let scale = self.display_scale();
@@ -3181,9 +3294,15 @@ impl Mounter {
         let root = self
             .slot(nsh_core::ROOT_ID)
             .map(|s| s.native.view().retain());
-        let scale = self.display_scale();
         for id in modals {
             let shown = self.hosts.contains_key(&id);
+            let changes = matches!(
+                self.slot(id).map(|s| &s.native),
+                Some(Native::Modal(modal)) if modal.changes(shown)
+            );
+            // Through its shader, pictured before it comes or goes at once
+            // (where the shader cannot draw, with its own motion).
+            let at_once = changes && self.dialog_overlay(id, shown);
             let control = self.control.clone();
             let Some(Slot {
                 native: Native::Modal(modal),
@@ -3192,19 +3311,6 @@ impl Mounter {
             else {
                 continue;
             };
-            // Through its shader: the window where the surface is, pictured
-            // before it comes or goes at once (where the shader cannot
-            // draw, with its own motion).
-            let shader = self
-                .nav_shaders
-                .get(&id)
-                .filter(|_| modal.changes(shown) && !reduce_motion())
-                .zip(root.as_ref().and_then(|r| Some((r, r.window()?))));
-            let at_once = shader.is_some_and(|(shader, (root, window))| {
-                let rect = root.convertRect_toView(root.bounds(), Some(&window));
-                self.shaders
-                    .nav_overlay(nsh_core::ROOT_ID, &window, rect, scale, shader, !shown)
-            });
             if shown {
                 if let Some(root) = &root {
                     modal.present(root, at_once);
@@ -3215,6 +3321,12 @@ impl Mounter {
                 });
             }
         }
+        // What no change used goes, but for stacks whose change waits for
+        // UIKit's transition to end.
+        let deferred = &self.deferred_stacks;
+        self.leaving_screens
+            .retain(|stack, _| deferred.contains(stack));
+        self.shaders.release_held(|key| deferred.contains(&key));
     }
 
     /// A stack is about to show a screen: its header options apply.
@@ -3224,6 +3336,9 @@ impl Mounter {
         controller: &objc2_ui_kit::UIViewController,
         animated: bool,
     ) {
+        // A page shown again is back in the window: the shaders in it take
+        // the pictures they missed.
+        self.shaders.revisit();
         let Some(screen) = controller.downcast_ref::<crate::navigation::ScreenController>() else {
             return;
         };
@@ -3242,6 +3357,7 @@ impl Mounter {
     /// A stack finished a transition: screens the user popped (back button,
     /// swipe) are reported so the app removes them.
     pub(crate) fn stack_did_show(&mut self, id: NodeId) {
+        self.shaders.revisit();
         self.report_popped(id);
         if self.deferred_stacks.contains(&id) {
             Self::finish_deferred(&self.shared, id);

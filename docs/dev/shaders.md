@@ -146,16 +146,20 @@ each platform that draws them does it; the others ignore `MountItem::ShaderTrans
 
 | Platform | Pictures | Hides the children, keeps their input | Over them | Pages and dialogs |
 |---|---|---|---|---|
-| iOS | `renderInContext:` of a view holding the children (`Decor::set_effect`, the view children are added to) without its mask, at the screen's scale; the backdrop: the window with the view's layer at opacity 0 | an empty `mask` on that view's layer (UIKit hit-tests views); the root view's while any screen shader hides it | the frames' sublayer at `zPosition` 1e6, `overflow` points beyond the box; a screen's on the root view (dialogs, presented by UIKit above it, are outside) | the screens change and the dialog is presented or dismissed at once, under a layer over the window's part where the surface (the stack) is, from pictures before the change and after it (the first tick), every other overlay left out of both; a change of the same stack (of the surface, for a dialog) that starts while one runs ends that one first; popping and dismissing run backwards |
+| iOS | `renderInContext:` of a view holding the children (`Decor::set_effect`, the view children are added to) without its mask, at the screen's scale; the backdrop: the window with the view's layer at opacity 0 | an empty `mask` on that view's layer (UIKit hit-tests views); the root view's while any screen shader hides it | the frames' sublayer at `zPosition` 1e6, `overflow` points beyond the box; a screen's on the root view (dialogs, presented by UIKit above it, are outside) | the screens change and the dialog is presented or dismissed at once, under a layer over the window's part where the surface (the stack) is, from pictures before the change (taken when the app removes the page or the dialog, before its views go: `Shaders::hold`) and after it (the first tick, the window laid out first), every other overlay left out of both; it stays until the frames on their way when the run ends have shown; a change of the same stack (of the surface, for a dialog) that starts while one runs ends that one first; popping and dismissing run backwards |
 
 iOS retakes an effect's pictures on the display frame after the core says they changed (`MountItem::ShaderInput`) or
 the platform changed a view in them (animated values, scrolling, image loads), at most once per frame, and only those
 its program reads (`reads_children`: a screen effect that never calls `sample_content` does not picture the root again
 when a view in it changes); a transition pictures its children (or its running frame) as its `from` when it starts
 and takes `to` again as its children change. Each picture draws into a bitmap context it keeps (`Canvas`), made again
-only when its size changes. `renderInContext:` draws no video or web page, nor backdrop blur or glass. The overlays
-leave the window when the app stops or reloads (`Shaders` drops them), and the root's children leave the view screen
-shaders draw them from (`Decor::set_effect`) when the last screen shader goes.
+only when its size changes. `renderInContext:` draws no video or web page, nor backdrop blur or glass. A shader view
+outside any window keeps its pictures due and takes them once a page shows again or the surface moves to a window
+(`Shaders::revisit`). The app usually releases a page or a dialog it removes in the same batch: the mounter keeps the
+page's shader and animation and the picture of what showed from the removal on (`Mounter::remove_hosted`), and a
+dialog released while it shows closes through its shader too. The overlays leave the window when the app stops or
+reloads (`Shaders` drops them), and the root's children leave the view screen shaders draw them from
+(`Decor::set_effect`) when the last screen shader goes.
 
 Where there is no GPU device (`Renderer::new` is `None`) iOS masks no children: an effect or a screen effect shows
 them as they are, a transition starts no run, and a page's or a dialog's `transitionShader` leaves the change to
