@@ -374,6 +374,8 @@ export function StockView(props: { market: Market; stock: Stock; wide?: boolean;
                 </Block>
               </If>
               <Ranges market={props.market} stock={props.stock} />
+              {/* A terminal's columns are framed: the footer stays in the first one, not under both. */}
+              <If when={terminal}>{footer}</If>
             </View>
             <View style={{ width: split() ? 380 : undefined, borderLeftWidth: split() ? 1 : 0, borderLeftColor: colors.line }}>
               <OrderBook market={props.market} stock={props.stock} />
@@ -382,7 +384,7 @@ export function StockView(props: { market: Market; stock: Stock; wide?: boolean;
               <Flow market={props.market} />
             </View>
           </View>
-          {footer}
+          <If when={!terminal}>{footer}</If>
         </Scroll>
       </If>
       {/* The trade bar, over the content. */}
