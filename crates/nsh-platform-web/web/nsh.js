@@ -151,7 +151,12 @@ const KEYFRAMES = `
 .nsh-bar { position: sticky; left: 0; top: 0; width: 0; height: 0; z-index: 2147483000; pointer-events: none; }
 .nsh-bar > div { position: absolute; border-radius: 2px; background: rgba(0,0,0,.45); transition: opacity .3s; }
 .nsh-dark .nsh-bar > div { background: rgba(255,255,255,.55); }
-.nsh-run { position: absolute; white-space: pre; }
+/* Underlines unbroken, as the native backends draw them (skipping
+   descenders left a link's "gp" without one), and clear of the text: a
+   browser's auto position touches the baseline. A run's own
+   textUnderlineOffset (its style class) replaces the offset. */
+.nsh-run { position: absolute; white-space: pre; text-decoration-skip-ink: none;
+  text-underline-offset: 0.2em; }
 .nsh-run-bg { position: absolute; pointer-events: none; }
 .nsh-border { position: absolute; inset: 0; pointer-events: none; }
 /* The mounter's own styles: no element has an inline style but its frame
