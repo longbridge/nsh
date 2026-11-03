@@ -2,11 +2,19 @@
 //! calendar go on the row after their trigger's (or the rows above it
 //! when there is no room below), never over it, as tall as their rows; a
 //! dialog's popup with `auto` side margins is centered, its top margin
-//! kept; a command's search field has a rule under it.
+//! kept; a command's search field has a rule under it, and so has a
+//! searchable select's. A popup the terminal frames outside its box is
+//! placed with that frame: beside its trigger, never on its row, lined up
+//! with its start or end. A sheet is a solid panel the height of the
+//! screen over a cleared page; a toast at the bottom shows its whole frame.
 
-use nsh_base::{CommandItem, SelectItem, combobox, command, date_picker, menu, menu_item};
+use nsh_base::{
+    Anchor, CommandItem, SelectItem, combobox, command, date_picker, menu, menu_item, select,
+    sheet, toast, toast_stack,
+};
 use nsh_core::{
     geometry::{auto, relative},
+    overlay::{Align, Placement},
     prelude::*,
 };
 use nsh_platform_tui::{App, Root};
@@ -303,4 +311,236 @@ fn a_popup_s_virtualized_list_is_as_tall_as_its_rows() {
         &["Pick", "row 0", "row 1", "row 2", "row 3", "Done"],
     );
     consecutive(&terminal, &rows);
+}
+
+/// A trigger `Pick` 20 Cells wide from column 10, on row 1 or (`low`) the
+/// last row, and an anchored overlay with a fill of its own (no border or
+/// padding: the terminal frames it outside its box) 10 Cells wide,
+/// aligned with the trigger's `align` edge.
+fn framed_popup(align: Align, low: bool) -> impl IntoElement {
+    let anchor = element_ref();
+    view()
+        .flex_1()
+        .child(text("above"))
+        .child(view().when(low, |v| v.flex_1()))
+        .child(
+            view()
+                .ml(px(80.0))
+                .w(px(160.0))
+                .element_ref(&anchor)
+                .child(text("Pick")),
+        )
+        .child(
+            overlay()
+                .anchor(&anchor)
+                .placement(Placement::Bottom)
+                .align(align)
+                .w(px(80.0))
+                .bg(nsh_core::color::rgb(0x333333))
+                .child(text("Item")),
+        )
+}
+
+#[component]
+fn FramedStart() -> impl IntoElement {
+    framed_popup(Align::Start, false)
+}
+
+#[component]
+fn FramedEnd() -> impl IntoElement {
+    framed_popup(Align::End, false)
+}
+
+#[component]
+fn FramedLow() -> impl IntoElement {
+    framed_popup(Align::Start, true)
+}
+
+/// Draws `root` on a 40 × 16 terminal until `Item` shows: the trigger's
+/// Cell, and the terminal.
+fn framed(root: Root) -> ((u16, u16), Terminal<TestBackend>) {
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(40, 16)).unwrap();
+    view.load(App::Rust(root)).unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "Item");
+    let trigger = find(&terminal, "Pick")
+        .unwrap_or_else(|| panic!("the trigger's row shows\n{}", dump(&terminal)));
+    (trigger, terminal)
+}
+
+#[test]
+fn a_framed_popup_s_frame_goes_below_its_trigger_s_row_at_its_start() {
+    let ((x, y), terminal) = framed(Root::new::<FramedStart>(|| ()));
+    assert_eq!(x, 10, "the trigger from column 10\n{}", dump(&terminal));
+    let corner = find(&terminal, "╭").unwrap_or_else(|| panic!("a frame\n{}", dump(&terminal)));
+    assert_eq!(
+        corner,
+        (10, y + 1),
+        "the frame's corner on the row after the trigger's, at its start\n{}",
+        dump(&terminal)
+    );
+    let (_, item) = find(&terminal, "Item").unwrap();
+    assert_eq!(
+        item,
+        y + 2,
+        "the content inside the frame\n{}",
+        dump(&terminal)
+    );
+}
+
+#[test]
+fn a_framed_popup_aligned_with_its_trigger_s_end_ends_its_frame_there() {
+    let ((_, y), terminal) = framed(Root::new::<FramedEnd>(|| ()));
+    let corner = find(&terminal, "╮").unwrap_or_else(|| panic!("a frame\n{}", dump(&terminal)));
+    assert_eq!(
+        corner,
+        (29, y + 1),
+        "the frame's corner in the trigger's last column (29)\n{}",
+        dump(&terminal)
+    );
+}
+
+#[test]
+fn a_framed_popup_without_room_below_ends_its_frame_above_its_trigger_s_row() {
+    let ((x, y), terminal) = framed(Root::new::<FramedLow>(|| ()));
+    let corner = find(&terminal, "╰").unwrap_or_else(|| panic!("a frame\n{}", dump(&terminal)));
+    assert_eq!(
+        corner,
+        (x, y - 1),
+        "the frame's bottom on the row before the trigger's\n{}",
+        dump(&terminal)
+    );
+}
+
+/// A page with a row of `z` across the screen, under a sheet at the right
+/// with a panel 10 Cells wide: a fill, a line on its leading edge.
+#[component]
+fn RightSheet() -> impl IntoElement {
+    view()
+        .flex_1()
+        .child(text("top"))
+        .child(text("z".repeat(40)))
+        .child(
+            sheet()
+                .open(|| Some(true))
+                .side(Placement::Right)
+                .popup_style(|s| {
+                    s.w(px(80.0))
+                        .p(px(16.0))
+                        .border_l_1()
+                        .bg(nsh_core::color::rgb(0x333333))
+                })
+                .child(text("Panel")),
+        )
+}
+
+#[test]
+fn a_sheet_is_a_solid_panel_the_height_of_the_screen_over_a_cleared_page() {
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(40, 12)).unwrap();
+    view.load(App::Rust(Root::new::<RightSheet>(|| ())))
+        .unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "Panel");
+    let (panel, _) = find(&terminal, "Panel").unwrap();
+    let buffer = terminal.backend().buffer();
+    // Its leading line: the column before its text where every row has
+    // one.
+    let edge = (0..panel)
+        .rev()
+        .find(|&x| (0..12).all(|y| buffer[(x, y)].symbol() == "│"))
+        .unwrap_or_else(|| panic!("a line down the panel's edge\n{}", dump(&terminal)));
+    assert!(edge >= 28, "the panel at the right\n{}", dump(&terminal));
+    for y in 0..12 {
+        for x in edge..40 {
+            assert_ne!(
+                buffer[(x, y)].symbol(),
+                "z",
+                "the page cleared under the panel at {x},{y}\n{}",
+                dump(&terminal)
+            );
+        }
+    }
+    let (_, row) = find(&terminal, "zzzz").unwrap();
+    assert_eq!(
+        buffer[(edge - 1, row)].symbol(),
+        "z",
+        "the page beside it\n{}",
+        dump(&terminal)
+    );
+}
+
+/// A toast in a stack at the bottom right of the screen, in an overlay
+/// along the bottom edge: a fill, no border, so the terminal frames it
+/// outside its box.
+#[component]
+fn BottomToast() -> impl IntoElement {
+    view().flex_1().child(text("page")).child(
+        overlay().left_0().right_0().bottom_0().items_end().child(
+            toast_stack()
+                .placement(Anchor::BottomRight)
+                .w(px(160.0))
+                .child(
+                    toast()
+                        .bg(nsh_core::color::rgb(0x333333))
+                        .px(px(8.0))
+                        .child(text("Saved")),
+                ),
+        ),
+    )
+}
+
+#[test]
+fn a_toast_at_the_bottom_shows_with_its_whole_frame() {
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(40, 12)).unwrap();
+    view.load(App::Rust(Root::new::<BottomToast>(|| ())))
+        .unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "Saved");
+    let (_, saved) = find(&terminal, "Saved").unwrap();
+    let (_, top) = find(&terminal, "╭").unwrap_or_else(|| panic!("a frame\n{}", dump(&terminal)));
+    let (_, bottom) =
+        find(&terminal, "╰").unwrap_or_else(|| panic!("the frame's bottom\n{}", dump(&terminal)));
+    assert!(
+        top < saved && saved < bottom && bottom <= 11,
+        "the toast inside its frame, on the screen: {top} {saved} {bottom}\n{}",
+        dump(&terminal)
+    );
+}
+
+/// An open searchable select of four tags, its search field `Search tags`.
+#[component]
+fn SearchSelect() -> impl IntoElement {
+    view().flex_1().child(text("above")).child(
+        select()
+            .items(tags())
+            .searchable(true)
+            .search_placeholder("Search tags")
+            .accessibility_label("Tags")
+            .default_open(true)
+            .w(px(200.0)),
+    )
+}
+
+#[test]
+fn a_searchable_select_s_search_field_has_a_rule_under_it() {
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(40, 20)).unwrap();
+    view.load(App::Rust(Root::new::<SearchSelect>(|| ())))
+        .unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "Swift");
+    let (x, field) = find(&terminal, "Search tags")
+        .unwrap_or_else(|| panic!("the search field\n{}", dump(&terminal)));
+    assert_eq!(
+        terminal.backend().buffer()[(x, field + 1)].symbol(),
+        "─",
+        "a rule under the field\n{}",
+        dump(&terminal)
+    );
+    let (_, first) = find(&terminal, "Rust").unwrap();
+    assert_eq!(
+        first,
+        field + 2,
+        "the rows under the rule\n{}",
+        dump(&terminal)
+    );
 }

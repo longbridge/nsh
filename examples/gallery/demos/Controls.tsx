@@ -3327,6 +3327,31 @@ export function Controls(props: { show: Control }) {
     };
     return (
       <Card title="Vertical" subtitle="An equalizer: five bands from −12 to +12 dB, and presets" right={<Segmented options={EQ_PRESETS} value={preset()} onChange={apply} size="small" />}>
+        {/* A terminal's controls are one row each: a band a row, its name, its slider across, its value. */}
+        <If when={terminal}>
+          <View style={{ gap: 4 }}>
+            {BANDS.map((name, i) => (
+              <View style={{ flexDirection: "row", alignItems: "center", gap: TERMINAL_GAP }}>
+                <Text style={{ width: 3 * TERMINAL_COLUMN, textAlign: "right", fontSize: size.detail, color: colors.muted }}>{name}</Text>
+                <Slider
+                  value={bands[i]()}
+                  min={-12}
+                  max={12}
+                  accessibilityLabel={`${name} band`}
+                  onChange={({ value }) => bands[i].set(value as number)}
+                  onChangeEnd={({ value }) => last.set(`${name}: ${value} dB`)}
+                  rangeStyle={sliderFill(0, (bands[i]() + 12) / 24)}
+                  {...sliderLook()}
+                  style={{ flex: 1 }}
+                />
+                <Text style={{ width: 3 * TERMINAL_COLUMN, textAlign: "right", fontSize: size.detail, color: bands[i]() === 0 ? colors.faint : colors.text, fontVariant: ["tabular-nums"] }}>
+                  {`${bands[i]() > 0 ? "+" : ""}${bands[i]()}`}
+                </Text>
+              </View>
+            ))}
+          </View>
+        </If>
+        <If when={!terminal}>
         <View style={{ flexDirection: "row", justifyContent: "space-around", paddingTop: 4 }}>
           {BANDS.map((name, i) => (
             <View style={{ alignItems: "center", gap: 6 }}>
@@ -3348,6 +3373,7 @@ export function Controls(props: { show: Control }) {
             </View>
           ))}
         </View>
+        </If>
       </Card>
     );
   }

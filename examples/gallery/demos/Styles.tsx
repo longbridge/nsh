@@ -1,5 +1,5 @@
 import { cleanup, Image, type JSX, List, Scroll, signal, Text, View, type ViewStyle } from "nsh";
-import { Animated, createAnimatedValue, Easing } from "nsh";
+import { Animated, createAnimatedValue, Easing, platform } from "nsh";
 import { alpha, Badge, Button, Caption, Card, colors, DemoPage, finish, hint, isDark, mono, Press, radius, Segmented, tints, Toggle } from "../ui";
 
 /** The stage every specimen stands on: the card's light, without its drop shadow. */
@@ -533,6 +533,10 @@ function RightToLeft() {
 }
 
 export function Styles() {
-  const sections = [Corners, Borders, Shadows, Layers, Transforms, Numerals, RightToLeft];
+  // A terminal's Cells draw no curves, shadows or depth: it shows the
+  // cards its Cells hold (borders, clipping and layers, numerals, the
+  // writing direction) and leaves the others out.
+  const sections =
+    platform.idiom === "terminal" ? [Borders, Layers, Numerals, RightToLeft] : [Corners, Borders, Shadows, Layers, Transforms, Numerals, RightToLeft];
   return <DemoPage cards={sections} />;
 }
