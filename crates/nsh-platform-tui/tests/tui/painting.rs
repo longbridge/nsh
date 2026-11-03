@@ -3,7 +3,7 @@
 //! nothing for what the terminal cannot show, the state of selected, focused and disabled views, and
 //! overlays over what is behind them.
 
-use nsh_core::{BoxShadow, prelude::*};
+use nsh_core::{AccessibilityState, BoxShadow, prelude::*};
 use nsh_platform_tui::{App, Input, Root};
 use ratatui_core::{
     backend::TestBackend,
@@ -691,4 +691,55 @@ fn an_icon_button_short_of_room_cuts_its_label_with_an_ellipsis() {
         !first[..first.find('…').unwrap()].ends_with(' '),
         "{first:?}"
     );
+}
+
+#[component]
+fn Disclosures() -> impl IntoElement {
+    let trigger = |label: &'static str, state: AccessibilityState| {
+        view()
+            .h(px(16.0))
+            .flex_row()
+            .role(AccessibilityRole::Button)
+            .accessibility_state(state)
+            .on_press(|_: &()| {})
+            .child(view().w(px(16.0)))
+            .child(text(label))
+    };
+    view()
+        .flex_1()
+        .child(trigger(
+            "Storage",
+            AccessibilityState {
+                expanded: Some(false),
+                ..AccessibilityState::default()
+            },
+        ))
+        .child(trigger(
+            "Advanced",
+            AccessibilityState {
+                expanded: Some(true),
+                ..AccessibilityState::default()
+            },
+        ))
+        .child(trigger(
+            "Options",
+            AccessibilityState {
+                expanded: Some(false),
+                has_popup: true,
+                ..AccessibilityState::default()
+            },
+        ))
+        .child(text("ready"))
+}
+
+#[test]
+fn a_disclosure_says_which_way_it_goes_and_a_popup_trigger_does_not() {
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(20, 5)).unwrap();
+    view.load(App::Rust(Root::new::<Disclosures>(|| ()))).unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "ready");
+    let buffer = terminal.backend().buffer();
+    assert_eq!(row(buffer, 0, 0..9), "▸ Storage");
+    assert_eq!(row(buffer, 1, 0..10), "▾ Advanced");
+    assert_eq!(row(buffer, 2, 0..9), "  Options", "a popup's trigger has no disclosure");
 }

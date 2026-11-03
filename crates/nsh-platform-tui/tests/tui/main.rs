@@ -10,6 +10,7 @@ mod app;
 
 mod canvas;
 mod controls;
+mod data_table;
 mod dock;
 mod focus_navigation;
 mod geometry;
@@ -20,5 +21,6 @@ mod painting;
 mod palette;
 mod performance;
 mod pointer;
+mod popup;
 mod scroll;
 mod search;

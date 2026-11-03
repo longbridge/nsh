@@ -504,6 +504,10 @@ fn hollow(tree: &impl Tree, node: NodeId) -> bool {
     count > 0 && (0..count).all(|i| hidden(tree, tree.child(node, i)))
 }
 
+/// The largest circle a terminal leaves out when it holds nothing, in
+/// points: an avatar's placeholder (three rows).
+const SMALL_CIRCLE: f32 = 48.0;
+
 /// A bare view smaller than a row both ways, not growing (a status dot, a
 /// swatch, a tick): it draws nothing in a terminal, so it takes no Cells
 /// and no spacing.
@@ -516,9 +520,10 @@ fn decoration(tree: &impl Tree, node: NodeId) -> bool {
     if style.flex_grow > 0.0 {
         return false;
     }
-    // A circle with nothing in it (a radio's ring, an avatar's
+    // A small circle with nothing in it (a radio's ring, an avatar's
     // placeholder): a terminal draws no circle, and its blank Cells would
-    // move what follows it by whether it holds a dot.
+    // move what follows it by whether it holds a dot. A larger one is a
+    // box like any (a band covers its corners).
     let (w, h) = (
         length(style.size.width.into_raw()),
         length(style.size.height.into_raw()),
@@ -526,7 +531,10 @@ fn decoration(tree: &impl Tree, node: NodeId) -> bool {
     let circle = match (w, h) {
         (Some(w), Some(h)) => {
             let role = tree.role(node);
-            !role.control && w.max(h) <= w.min(h) * 1.5 && role.radius * 2.0 >= w.min(h) - EPSILON
+            !role.control
+                && w.min(h) <= SMALL_CIRCLE + EPSILON
+                && w.max(h) <= w.min(h) * 1.5
+                && role.radius * 2.0 >= w.min(h) - EPSILON
         }
         _ => false,
     };
@@ -820,15 +828,17 @@ pub(crate) fn compute(
     let ew = dim(s.size.width, parent_w).map(|v| grid.cols(v).max(0));
     let min_w = lpa(s.min_size.width, parent_w).map(|v| grid.cols(v));
     let max_w = lpa(s.max_size.width, parent_w).map(|v| grid.cols(v));
-    let (eh, min_h, max_h) = if k.honors_height {
+    let (eh, min_h) = if k.honors_height {
         (
             dim(s.size.height, parent_h).map(|v| grid.rows(v).max(0)),
             lpa(s.min_size.height, parent_h).map(|v| grid.rows(v)),
-            lpa(s.max_size.height, parent_h).map(|v| grid.rows(v)),
         )
     } else {
-        (None, None, None)
+        (None, None)
     };
+    // A maximum adds no rows, so it holds for any box: a popup bounded by
+    // the room below its anchor.
+    let max_h = lpa(s.max_size.height, parent_h).map(|v| grid.rows(v));
     let known_w = inputs.known_dimensions.width.map(|v| grid.fit_cols(v));
     let known_h = inputs.known_dimensions.height.map(|v| grid.fit_rows(v));
     let avail_w = definite(inputs.available_space.width).map(|v| grid.fit_cols(v));
@@ -836,9 +846,15 @@ pub(crate) fn compute(
     // A root (a list's cell) takes the width it has, as Taffy's roots do.
     let root_w = tree.is_root(node).then_some(avail_w).flatten();
     // A small box of an explicit width (an avatar, a counter) takes its
-    // content's words if they are wider: its initials stay on a row.
+    // content's words if they are wider: its initials stay on a row. So
+    // does a control (a time slot with a radio's mark before it): its label
+    // is never broken inside a word.
     let ew = match ew {
-        Some(w) if k.container && known_w.is_none() && w < SMALL_BOX => {
+        Some(w)
+            if known_w.is_none()
+                && ((k.container && w < SMALL_BOX)
+                    || (role.control && !k.labelled && !k.empty && !k.measures)) =>
+        {
             Some(w.max(children_words(tree, grid, node) + inset.x()))
         }
         ew => ew,
@@ -1035,6 +1051,7 @@ pub(crate) fn compute(
             },
             grid: s.display == Display::Grid,
             banded: surface.is_some(),
+            fills: role.fills,
         };
         let content_w = inner(fixed_w, inset.x());
         let content_h = inner(fixed_h, inset.y());
@@ -1121,6 +1138,9 @@ struct Spec {
     /// It paints a band of its own (a surface): controls side by side on
     /// it keep a column apart.
     banded: bool,
+    /// It is a screen or a modal (`Role::fills`): a top margin of its
+    /// children (a dialog's popup) is kept in rows, as given.
+    fills: bool,
 }
 
 /// A container's content box: its size where known, the room it has
@@ -1179,6 +1199,14 @@ struct Item {
     control: bool,
     /// It paints a band of its own (a surface).
     filled: bool,
+    /// Its last column is a blank text's (a mark's trailing space).
+    trails: bool,
+    /// Which of its margins are `auto` (left, right, top, bottom): they
+    /// take the space left, as CSS's.
+    auto: [bool; 4],
+    /// The blank columns at its start and end along a row: its border
+    /// and padding, and a trailing blank text (a mark's space).
+    edges: (i32, i32),
     /// Its `flexBasis` along the main axis, in Cells: its `Length`.
     basis: Option<i32>,
     /// Its minimum and maximum along the main axis, in Cells.
@@ -1203,6 +1231,18 @@ impl Item {
         } else {
             (self.margin.l, self.margin.r)
         }
+    }
+
+    /// Whether its margins along the main axis are `auto`.
+    fn auto_main(&self, row: bool) -> (bool, bool) {
+        let [l, r, t, b] = self.auto;
+        if row { (l, r) } else { (t, b) }
+    }
+
+    /// Whether its margins across are `auto`.
+    fn auto_cross(&self, row: bool) -> (bool, bool) {
+        let [l, r, t, b] = self.auto;
+        if row { (t, b) } else { (l, r) }
     }
 }
 
@@ -1392,14 +1432,39 @@ fn arrange_flex(
                 style.size.width.is_auto()
             };
             let a = align(style.align_self.map_or(spec.align, |a| a.keyword));
+            let edges = if row {
+                blank_edges(tree, grid, node, k, parent_w)
+            } else {
+                (0, 0)
+            };
+            let style = tree.style(node);
+            let m = style.margin;
+            let auto = [m.left, m.right, m.top, m.bottom].map(|v| v.is_auto());
+            let mut margin = margins(style, parent_w, framed);
+            if spec.fills
+                && let Some(t) = lpa(m.top, parent_w)
+            {
+                margin.t = grid.rows(t).max(0);
+            }
+            let cross_auto_margin = {
+                let (a, b) = if row {
+                    (auto[2], auto[3])
+                } else {
+                    (auto[0], auto[1])
+                };
+                a || b
+            };
             Item {
+                edges,
+                auto,
+                trails: row && trails(tree, node),
                 order,
                 node,
                 grow: style.flex_grow,
                 shrink: style.flex_shrink,
-                margin: margins(style, parent_w, framed),
+                margin,
                 align: a,
-                stretches: a == Align::Stretch && cross_auto,
+                stretches: a == Align::Stretch && cross_auto && !cross_auto_margin,
                 content: !k.empty || tree.role(node).splitter != Splitter::No,
                 floor: 0,
                 labels: labels_held(tree, node),
@@ -1565,12 +1630,20 @@ fn split_line(
                         || (item.control
                             && items[i - 1].control
                             && (spec.banded || (item.filled && items[i - 1].filled)));
-                    // Icon controls shown as their labels read as words: two
-                    // columns set them apart (one when the row is short).
-                    let labels = item.labels > 0 && items[i - 1].labels > 0;
-                    (end + spec.gap_main + start)
-                        .max(i32::from(pulled))
-                        .max(2 * i32::from(labels))
+                    let prev = &items[i - 1];
+                    // A mark's own trailing space is the first column of
+                    // the gap after it.
+                    let trail = prev.edges.1.min(1).min(i32::from(prev.trails));
+                    let base = (end + spec.gap_main + start - trail).max(0);
+                    // Controls read as words (a checkbox and its label, an
+                    // icon button shown as its label): two blank columns
+                    // between their texts, theirs included (one when the
+                    // row is short).
+                    let words =
+                        (item.control || item.labels > 0) && (prev.control || prev.labels > 0);
+                    let need = 2 - prev.edges.1 - item.edges.0;
+                    base.max(i32::from(pulled))
+                        .max(if words { need } else { 0 })
                 } else {
                     end.max(spec.gap_main).max(start).min(1)
                 }
@@ -1681,7 +1754,27 @@ fn split_line(
         }
     }
     let total = used(items, &before);
-    let free = known_main.map_or(0, |b| (b - total).max(0));
+    let mut free = known_main.map_or(0, |b| (b - total).max(0));
+    // `auto` margins take the space left first, shared equally (a box
+    // centered by `margin: auto`), as CSS's.
+    let autos: i32 = items
+        .iter()
+        .map(|i| {
+            let (a, b) = i.auto_main(row);
+            i32::from(a) + i32::from(b)
+        })
+        .sum();
+    let mut auto_share = (0, 0);
+    if autos > 0 {
+        auto_share = (free / autos, free % autos);
+        free = 0;
+    }
+    let mut auto_given = 0;
+    let mut auto_take = || {
+        let extra = i32::from(auto_given < auto_share.1);
+        auto_given += 1;
+        auto_share.0 + extra
+    };
     // Flex: where the space left goes.
     let (lead, between, between_extra) = match spec.justify {
         J::End | J::FlexEnd => (free, 0, 0),
@@ -1734,8 +1827,12 @@ fn split_line(
         if item.stretches {
             item.cross = (line_cross - cs - ce).max(0);
         }
-        let main_at = at + before[i];
+        let (auto_start, auto_end) = item.auto_main(row);
+        let main_at = at + before[i] + if auto_start { auto_take() } else { 0 };
         at = main_at + item.main + between + i32::from((i as i32) < between_extra);
+        if auto_end {
+            at += auto_take();
+        }
         if !perform {
             continue;
         }
@@ -1744,8 +1841,14 @@ fn split_line(
         } else {
             main_at
         };
+        let align = match item.auto_cross(row) {
+            (true, true) => Align::Center,
+            (true, false) => Align::End,
+            (false, true) => Align::Start,
+            (false, false) => item.align,
+        };
         let cross_pos = cross_at
-            + match item.align {
+            + match align {
                 Align::Start | Align::Stretch => cs,
                 Align::Center => (line_cross - item.cross - cs - ce) / 2 + cs,
                 Align::End => line_cross - item.cross - ce,
@@ -1965,6 +2068,48 @@ fn frames_one_frame(tree: &impl Tree, node: NodeId, grid: Grid, parent_w: Option
         }
         at = child;
     }
+}
+
+/// The blank columns at the start and end of `node` in a row: its border
+/// and padding, and a trailing blank text (a mark's space).
+fn blank_edges(
+    tree: &impl Tree,
+    grid: Grid,
+    node: NodeId,
+    k: Kind,
+    parent_w: Option<f32>,
+) -> (i32, i32) {
+    let role = tree.role(node);
+    let surface = k
+        .container
+        .then(|| surface(grid, role, tree.backdrop(node).unwrap_or(grid.page)))
+        .flatten();
+    let (b, p) = insets(tree, node, k, parent_w, grid, surface);
+    let (l, r) = (b.l + p.l, b.r + p.r + i32::from(trails(tree, node)));
+    // An icon shown as its label in an explicit width wider than it (a
+    // chevron in its square) has blank columns around it.
+    let wide = k.labelled
+        && dim(tree.style(node).size.width, parent_w)
+            .is_some_and(|w| grid.cols(w) > i32::from(role.label) + l + r);
+    if wide { (l.max(1), r.max(1)) } else { (l, r) }
+}
+
+/// Whether the last thing `node` shows along a row is a blank text (the
+/// space after a checkbox's `[ ]`).
+fn trails(tree: &impl Tree, node: NodeId) -> bool {
+    let role = tree.role(node);
+    if role.text {
+        return !role.input && !role.glyphs && tree.measures(node);
+    }
+    let s = tree.style(node);
+    if !matches!(s.flex_direction, FlexDirection::Row) || role.scroll {
+        return false;
+    }
+    let last = (0..tree.child_count(node))
+        .rev()
+        .map(|i| tree.child(node, i))
+        .find(|&c| !hidden(tree, c) && !tree.style(c).position.is_out_of_flow());
+    last.is_some_and(|c| trails(tree, c))
 }
 
 /// Whether `node` is a control or holds one.

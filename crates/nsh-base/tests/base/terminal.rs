@@ -2,7 +2,10 @@
 //! terminal-native form, text the terminal draws (`nsh_base::terminal`),
 //! in place of the app's indicator parts; elsewhere they show none of it.
 
-use std::time::Duration;
+use std::{
+    sync::{Arc, Mutex},
+    time::Duration,
+};
 
 use nsh_base::{
     ColorChannel, ColorPickerEvent, ColorSpace, SelectItem, TreeItem, accordion, accordion_header,
@@ -12,7 +15,7 @@ use nsh_base::{
     tree,
 };
 use nsh_core::{
-    Size,
+    MountItem, NodeId, Size,
     element::Root,
     geometry::point,
     platform::{Environment, Idiom, Os},
@@ -294,7 +297,9 @@ fn Colors() -> impl IntoElement {
                         .color_space(ColorSpace::Hsb)
                         .channel(ColorChannel::Hue)
                         .accessibility_label("Hue")
-                        .w(px(200.0)),
+                        .w(px(200.0))
+                        // What shows the slider has the keyboard focus.
+                        .focus(|s| s.opacity(0.5)),
                 )
                 .child(color_swatch().accessibility_label("Current")),
         )
@@ -337,11 +342,44 @@ fn a_color_slider_is_a_row_of_its_colors_with_a_thumb() {
         hue_track(s).starts_with('●')
     })
     .unwrap();
+    // A drag gives no keyboard focus: Tab to the slider (its `focus:`
+    // style says when it has it), then End: the largest hue, on the last
+    // Cell, `━` before it.
+    let slider = app
+        .screen()
+        .press_target("label:Hue")
+        .unwrap()
+        .expect("the slider takes presses");
+    let opacity = Arc::new(Mutex::new(1.0_f32));
+    let into = opacity.clone();
+    app.observe(move |_, batch| {
+        for item in &batch.items {
+            if let MountItem::ViewStyle { id, style } = item
+                && *id == slider
+            {
+                *into.lock().unwrap() = style.opacity;
+            }
+        }
+    });
+    let mut tabs = 0;
+    while *opacity.lock().unwrap() == 1.0 {
+        assert!(tabs < 3, "Tab never reached the slider");
+        app.press_key("tab").unwrap();
+        let o = opacity.clone();
+        let _ = app.wait_until(
+            "Tab moves the focus",
+            Duration::from_millis(200),
+            move |_| *o.lock().unwrap() < 1.0,
+        );
+        tabs += 1;
+    }
     app.press_key("end").unwrap();
-    app.wait_until("the thumb at the end", wait, |s| {
-        hue_track(s).ends_with('●')
-    })
-    .unwrap();
+    let at_end = |s: &Screen| {
+        let track = hue_track(s);
+        track.ends_with('●') && track.chars().filter(|&c| c == '━').count() == columns - 1
+    };
+    app.wait_until("the thumb at the end", wait, at_end)
+        .unwrap();
 }
 
 #[test]
@@ -368,4 +406,75 @@ fn outside_a_terminal_the_color_parts_draw_no_cells() {
     let shown = joined(&app);
     assert!(!shown.contains(terminal::AREA_PICKED), "{shown:?}");
     assert!(!shown.contains('●'), "{shown:?}");
+}
+
+/// A choice card: a checkbox whose children are a title over a
+/// description, as the app lays them out.
+#[component]
+fn Choice() -> impl IntoElement {
+    let on = signal(false);
+    view().child(
+        checkbox()
+            .checked(on)
+            .on_change(move |next: &bool| on.set(*next))
+            .w(px(300.0))
+            .child(text("Push"))
+            .child(text("As it happens")),
+    )
+}
+
+#[test]
+fn a_checkboxs_children_keep_their_column_beside_the_mark() {
+    let viewport = Size::new(px(390.0), px(844.0));
+    let config = EngineConfig {
+        viewport,
+        environment: Environment {
+            window: viewport,
+            os: Os::Linux,
+            idiom: Idiom::Terminal,
+            ..Environment::default()
+        },
+        ..EngineConfig::new(Root::of::<Choice>())
+    };
+    let mut app = Headless::start(config).unwrap();
+    // Each text's frame, in its parent, as the batches set it.
+    let seen = Arc::new(Mutex::new((
+        std::collections::HashMap::<NodeId, String>::new(),
+        std::collections::HashMap::<NodeId, Bounds<Points>>::new(),
+    )));
+    let into = seen.clone();
+    app.observe(move |_, batch| {
+        let mut seen = into.lock().unwrap();
+        for item in &batch.items {
+            match item {
+                MountItem::Text { id, text, .. } => {
+                    seen.0.insert(*id, text.text.to_string());
+                }
+                MountItem::Frame { id, frame } => {
+                    seen.1.insert(*id, *frame);
+                }
+                _ => {}
+            }
+        }
+    });
+    app.first_render().unwrap();
+    let seen = seen.lock().unwrap();
+    let frame = |label: &str| {
+        let id = seen
+            .0
+            .iter()
+            .find(|(_, t)| t.as_str() == label)
+            .map(|(id, _)| *id)
+            .unwrap_or_else(|| panic!("no text {label:?} in {:?}", seen.0));
+        seen.1[&id]
+    };
+    let (title, description) = (frame("Push"), frame("As it happens"));
+    // The description under the title, at its start: a column, not a row.
+    assert!(
+        description.origin.y >= title.origin.y + title.size.height,
+        "{title:?} {description:?}"
+    );
+    assert_eq!(description.origin.x, title.origin.x);
+    // The mark is still beside them.
+    assert!(joined(&app).starts_with("[ ] Push"), "{:?}", joined(&app));
 }

@@ -322,7 +322,8 @@ do (a text is one row per line).
   maximum `Min` and `Max`. A `flexBasis` (points, or a percentage) is the child's `Length` along the main axis either
   way, whatever it holds (a resizable panel's size), within its minimum and maximum there; a fill's basis of 0 is
   its content's where its parent's length is not known. An explicit height counts only on a box without content (a chart's canvas, a spacer) and
-  on a scroll view, as a maximum; a box with content is as tall as its content, and one with a height in points is
+  on a scroll view, as a maximum; a box with content is as tall as its content, at most its `maxHeight` (a popup bounded by the room
+  below its anchor), and one with a height in points is
   not stretched across a row (a badge stays a row beside a title and its subtitle). When the children do not fit, those
   in a row give in this order: the gaps, down to one column; icon buttons shown as their labels, down to three
   columns (the label cut short) and then out, the last first, and so does a row of them (a toolbar's group) nested
@@ -330,8 +331,11 @@ do (a text is one row per line).
   of their texts; every child down to its words; then the shrinking ones and all of them below (a text wraps, the
   last resort), never below one Cell for one with content: a box never lays a child across its border. A `flexGrow`
   child's text counts at its full width for the gaps and labels, so a name next to icon buttons stays on its row.
-  A negative margin (stacked avatars) is none, and keeps a column between the two in a row. A small box of an
-  explicit width (under six columns: an avatar, a counter) is at least as wide as its content's longest words.
+  A negative margin (stacked avatars) is none, and keeps a column between the two in a row. `auto` margins take the
+  space left, shared equally, as CSS's: `margin: 0 auto` centers a box, `marginLeft: auto` pushes it to a row's end.
+  A modal's (or a screen's) child keeps its top margin in rows, as given (a dialog's popup 12% down), uncollapsed. A small box of an
+  explicit width (under six columns: an avatar, a counter) is at least as wide as its content's longest words, and so
+  is a control of any explicit width (a time slot with its radio's mark): its label never breaks inside a word.
 - **Blocks.** A border is one Cell on each side that has one, only on a card: a container (a box holding views with
   content that are not only texts; spacers and bars do not count) padded 12pt or more above or below, or around two
   rows of content or more, unless all its children are controls (a split button, a toolbar, a tab list, a segmented
@@ -351,8 +355,10 @@ do (a text is one row per line).
   from 12pt, two columns each side from 12pt, one from 4pt. Without bands a filled box is laid out as any other.
 - **Spacing.** A gap between children in a row is one column from above 0, two from 24pt, their margins added; two controls side
   by side keep a column apart even without one when they share a band (a split button's halves on its fill) or each
-  paints one, as the bands would read as one; unfilled controls (tabs) touch, their padding sets them apart. Icon controls shown as their labels keep two
-  columns apart, as their labels read as words (one when the row is short). In a
+  paints one, as the bands would read as one; unfilled controls (tabs) touch, their padding sets them apart. Controls side by side read as words (checkboxes
+  and their labels, icon buttons shown as their labels): two blank columns between their texts, their padding
+  included (one when the row is short). A mark's trailing space (`[ ] `, `( ) `) is the first column of the gap after
+  it, so a mark and its label are one column apart. In a
   column the gap and the margins between two children collapse into one blank row when any of them is 16pt or more,
   and into none inside a bordered box (a card), whose border already sets its content apart: sections keep a row
   between them, a card's rows none. The gap a divider sits in (a box with a divider among its absolute children, a
@@ -386,7 +392,8 @@ do (a text is one row per line).
 - What a terminal cannot show well is left out, never emulated: images, videos, web views,
   shaders and icon-sized canvases (an explicit width and height both at most 48pt) are `display: none`, so they take
   no Cells, no frame and no hits, and their margins and the gaps beside them go with them (`Core::grid_role`). So is
-  a view with nothing in it smaller than a row both ways and not growing (a status dot, a swatch), which draws
+  a view with nothing in it smaller than a row both ways and not growing (a status dot, a swatch), or a circle with
+  nothing in it at most 48pt across that is no control (a radio's ring, an avatar's placeholder), which draws
   nothing in a terminal, and a view (no control, not growing) whose content is all left out (an icon's tile or
   circle). A control whose content is all left out (an icon button; a layer that grows to center its icon, as a menu
   trigger's chevron, counts as left out) shows its accessibility label in one row, one column per character, and is

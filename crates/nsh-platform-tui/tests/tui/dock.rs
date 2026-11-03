@@ -280,7 +280,7 @@ fn Docked() -> impl IntoElement {
 }
 
 /// The buffer's rows, each with its number, and the Cells drawn in a color.
-fn dump(terminal: &Terminal<TestBackend>) -> String {
+pub(super) fn dump(terminal: &Terminal<TestBackend>) -> String {
     let buffer = terminal.backend().buffer();
     let mut out = String::new();
     for y in 0..buffer.area.height {
@@ -297,7 +297,7 @@ fn dump(terminal: &Terminal<TestBackend>) -> String {
 }
 
 /// Where `word` starts, in Cells.
-fn find(terminal: &Terminal<TestBackend>, word: &str) -> Option<(u16, u16)> {
+pub(super) fn find(terminal: &Terminal<TestBackend>, word: &str) -> Option<(u16, u16)> {
     let buffer = terminal.backend().buffer();
     (0..buffer.area.height).find_map(|y| {
         let row: String = (0..buffer.area.width)

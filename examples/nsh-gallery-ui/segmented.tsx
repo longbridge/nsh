@@ -38,7 +38,7 @@ export function Segmented<T extends string>(props: {
               onPress={() => {
                 if (option().value !== props.value) props.onChange(option().value);
               }}
-              style={{ flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8 }}
+              style={{ flex: props.fill ? 1 : undefined, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8 }}
             >
               <Text style={{ numberOfLines: 1, fontSize: 13, fontWeight: "500", color: props.value === option().value ? colors.text : colors.muted }}>
                 {option().label}

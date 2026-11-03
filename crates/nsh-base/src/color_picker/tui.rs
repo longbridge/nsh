@@ -36,12 +36,20 @@ fn cell_size() -> Size<Points> {
 }
 
 /// A Cell of `color` showing `glyph`: a picture of the color, which the
-/// terminal fills with it.
+/// terminal fills with it. It is one Cell (`cell`) whatever its glyph
+/// measures: the track's and the grid's Cells are counted from the Cell's
+/// size, and a glyph measured wider (`━` and `●` are of ambiguous width)
+/// would push the last of them out of the row.
 fn color_cell(
+    cell: Size<Points>,
     glyph: impl Fn() -> &'static str + 'static,
     color: impl Fn() -> Hsla + 'static,
 ) -> View {
     view()
+        .w(cell.width)
+        .h(cell.height)
+        .flex_shrink(0.0)
+        .overflow_hidden()
         .role(AccessibilityRole::Image)
         .style_with(move |s| s.bg(AdaptiveColor::from(color())))
         .child(text(move || SharedString::from(glyph())))
@@ -101,6 +109,7 @@ pub(super) fn slider(
         move |shown: ReadSignal<usize>, _| {
             let at = move || logical(shown.get());
             color_cell(
+                cell,
                 move || {
                     let (i, thumb) = (at(), thumb.get());
                     match i.cmp(&thumb) {
@@ -271,6 +280,7 @@ pub(super) fn area(
             move |shown: ReadSignal<usize>, _| {
                 let column = move || column_of(shown.get(), grid.get().0, mirrored.get());
                 color_cell(
+                    cell,
                     move || match picked.get() == (column(), row.get()) {
                         true => terminal::AREA_PICKED,
                         false => " ",

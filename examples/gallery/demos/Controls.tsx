@@ -436,7 +436,7 @@ const LABEL_WIDTH = 16 * TERMINAL_COLUMN;
 function Label(props: { label: string; detail?: string }) {
   return (
     <View style={terminal ? { flex: 1, flexDirection: "row", gap: 2 * TERMINAL_COLUMN } : { flex: 1, gap: 2 }}>
-      <Text style={{ width: terminal ? LABEL_WIDTH : undefined, fontSize: size.label, color: colors.text }}>{props.label}</Text>
+      <Text style={{ minWidth: terminal ? LABEL_WIDTH : undefined, flexShrink: 0, fontSize: size.label, color: colors.text }}>{props.label}</Text>
       <If when={props.detail}>
         <Text style={{ numberOfLines: 1, flexShrink: 1, fontSize: size.detail, color: colors.muted }}>{props.detail}</Text>
       </If>

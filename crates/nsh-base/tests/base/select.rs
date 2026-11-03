@@ -902,6 +902,7 @@ fn screen_readers_hear_a_combobox_a_listbox_and_its_options() {
     assert_eq!(trigger.accessibility.role, AccessibilityRole::Combobox);
     assert_eq!(trigger.accessibility.label.as_deref(), Some("Food"));
     assert_eq!(trigger.accessibility.state.expanded, Some(false));
+    assert!(trigger.accessibility.state.has_popup, "it opens a popup");
     assert_eq!(
         trigger
             .accessibility

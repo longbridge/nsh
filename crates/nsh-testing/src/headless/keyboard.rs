@@ -114,10 +114,11 @@ impl Headless {
         self.done()
     }
 
-    /// Whether Tab stops at views (not only inputs), as on macOS and the
-    /// web (the other platforms move it between fields only).
+    /// Whether Tab stops at views (not only inputs), as on macOS, the web
+    /// and in a terminal (the other platforms move it between fields only).
     fn tabs_to_views(&self) -> bool {
         matches!(self.environment.os, Os::MacOs | Os::Web)
+            || self.environment.idiom == nsh_core::platform::Idiom::Terminal
     }
 
     /// Tab (`back`: Shift+Tab): the keyboard focus moves to the next stop

@@ -171,6 +171,22 @@ pub(crate) fn tone_color(tone: Tone) -> AdaptiveColor {
     }
 }
 
+/// A control's children after its mark: in a terminal, in a view of
+/// their own beside the mark (the control is a row there), laid out in a
+/// column as they would be in the control (a choice card's title over its
+/// description); elsewhere, as they are.
+pub(crate) fn beside_mark(terminal: bool, children: Prop<Children>) -> AnyElement {
+    match terminal {
+        true => view()
+            .flex_grow(1.0)
+            .flex_shrink(1.0)
+            .min_w(px(0.0))
+            .child(children)
+            .into_element(),
+        false => children.into_element(),
+    }
+}
+
 /// A mark in a row, its parts in their tones (tracked: `mark` follows the
 /// control's state), then [`MARK_GAP`] before the label.
 pub(crate) fn mark_view(mark: impl Fn() -> Mark + Copy + 'static) -> View {

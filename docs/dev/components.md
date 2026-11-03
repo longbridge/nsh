@@ -625,7 +625,7 @@ accessibility states the components report (listbox, tree and tab rows their sel
 
 | Component | Terminal form |
 |---|---|
-| `Checkbox` | `[✓]` (the `✓` in the accent), `[ ]` (muted) or `[–]` (the dash in the accent) and a space in place of the indicator, then the children, in a row |
+| `Checkbox` | `[✓]` (the `✓` in the accent), `[ ]` (muted) or `[–]` (the dash in the accent) and a space in place of the indicator, then the children in a view of their own beside it (a column: a choice card's title over its description) |
 | `Radio` | `(●)` (the dot in the accent) or `( )` (muted) and a space before the children, in a row (an app's own dot among its children is the app's to leave out) |
 | `Switch` | three Cells and a space in place of the track and thumb: on `━━●` (the track in the accent, the knob bold), off `●──` (muted); the knob's side tells them apart without colors |
 | `Slider` | one row of `─` as wide as the slider, `━` from `min` to the value (a range: between its thumbs) in the accent, the rest muted, a `●` view per thumb on its value's Cell (focus, keys, drags and screen readers as elsewhere); vertical: a column of `│` / `┃` |

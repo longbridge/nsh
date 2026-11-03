@@ -112,7 +112,7 @@ pub fn Radio(props: RadioProps, cx: Scope<RadioEvent>) -> impl IntoElement {
             v.flex_row()
                 .child(mark_view(move || radio_mark(checked.get())))
         })
-        .child(props.children)
+        .child(crate::terminal::beside_mark(terminal, props.children))
 }
 
 /// The props of [`RadioGroup`].

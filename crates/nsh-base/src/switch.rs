@@ -105,5 +105,5 @@ pub fn Switch(props: SwitchProps, cx: Scope<SwitchEvent>) -> impl IntoElement {
                 )
                 .into_element(),
         })
-        .child(props.children)
+        .child(crate::terminal::beside_mark(terminal, props.children))
 }

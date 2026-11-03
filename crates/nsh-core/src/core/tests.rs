@@ -25777,9 +25777,13 @@ mod terminal_layout {
         );
         assert!(!left_out(&batch, 6));
         assert_eq!(widths(&batch, 2), Some(Edges::all(Points::ZERO)));
-        // No band to share: its halves touch, as tabs do.
+        // Its label and the menu's, `More`, two blank columns apart: the
+        // label's padding and one.
         let (main, more) = (frame_of(&batch, 3).unwrap(), frame_of(&batch, 6).unwrap());
-        assert_eq!(more.origin.x, main.origin.x + main.size.width);
+        assert_eq!(
+            more.origin.x - (main.origin.x + main.size.width),
+            Points(8.0)
+        );
     }
 
     #[test]
@@ -25977,6 +25981,225 @@ mod terminal_layout {
             frame_of(&batch, 10).map(|f| f.size),
             Some(size_pt(104.0, 16.0))
         );
+    }
+
+    /// A terminal mark, `[ ]` or `( )` and its space, as `nsh-base`'s
+    /// `mark_view`: texts `id`, `id + 2`, `id + 4`, `id + 6` in view `id - 1`.
+    fn mark(id: NodeId, parent: NodeId, ends: (&str, &str, &str)) -> Vec<Op> {
+        let mut ops = view(id - 1, parent, &[("flexDirection", V::Str("row"))]);
+        ops.extend(text(id, id - 1, ends.0));
+        ops.extend(text(id + 2, id - 1, ends.1));
+        ops.extend(text(id + 4, id - 1, ends.2));
+        ops.extend(text(id + 6, id - 1, " "));
+        ops
+    }
+
+    #[test]
+    fn radios_in_a_group_line_up_whether_their_ring_holds_a_dot() {
+        let mut ops = view(2, ROOT_ID, &[]);
+        for (row, on) in [(10, false), (30, true), (50, false)] {
+            ops.extend(pressable(
+                row,
+                2,
+                &[
+                    ("flexDirection", V::Str("row")),
+                    ("alignItems", V::Str("center")),
+                    ("gap", V::Number(12.0)),
+                    ("marginHorizontal", V::Number(-8.0)),
+                    ("paddingStart", V::Number(8.0)),
+                    ("paddingEnd", V::Number(8.0)),
+                ],
+                None,
+            ));
+            ops.extend(mark(row + 2, row, ("(", if on { "●" } else { " " }, ")")));
+            // The app's own ring, a circle the terminal draws none of.
+            ops.extend(view(
+                row + 10,
+                row,
+                &[
+                    ("width", V::Number(32.0)),
+                    ("height", V::Number(32.0)),
+                    ("borderRadius", V::Number(16.0)),
+                    ("borderWidth", V::Number(1.0)),
+                ],
+            ));
+            if on {
+                ops.extend(view(
+                    row + 11,
+                    row + 10,
+                    &[
+                        ("width", V::Number(10.0)),
+                        ("height", V::Number(10.0)),
+                        ("borderRadius", V::Number(5.0)),
+                    ],
+                ));
+            }
+            ops.extend(text(row + 12, row, "Choice"));
+        }
+        let batch = laid_out(ops);
+        // `( ) Choice` on every row: the mark's space is the gap's column.
+        for row in [10, 30, 50] {
+            assert!(left_out(&batch, row + 10), "the ring of row {row}");
+            assert_eq!(
+                frame_of(&batch, row + 12).map(|f| f.origin.x),
+                Some(Points(40.0)),
+                "the label of row {row}"
+            );
+        }
+    }
+
+    #[test]
+    fn checkboxes_side_by_side_keep_two_columns_and_their_marks_one() {
+        let mut ops = view(
+            2,
+            ROOT_ID,
+            &[("flexDirection", V::Str("row")), ("gap", V::Number(12.0))],
+        );
+        for (id, label) in [(10, "Small"), (30, "Regular")] {
+            ops.extend(pressable(
+                id,
+                2,
+                &[("flexDirection", V::Str("row")), ("gap", V::Number(8.0))],
+                None,
+            ));
+            ops.extend(mark(id + 2, id, ("[", " ", "]")));
+            ops.extend(text(id + 12, id, label));
+        }
+        let batch = laid_out(ops);
+        // `[ ] Small  [ ] Regular`.
+        assert_eq!(frame_of(&batch, 22).map(|f| f.origin.x), Some(Points(32.0)));
+        let (a, b) = (frame_of(&batch, 10).unwrap(), frame_of(&batch, 30).unwrap());
+        assert_eq!(a.size.width, Points(72.0));
+        assert_eq!(b.origin.x - (a.origin.x + a.size.width), Points(16.0));
+    }
+
+    #[test]
+    fn a_control_of_an_explicit_width_keeps_its_label_whole() {
+        let mut ops = view(
+            2,
+            ROOT_ID,
+            &[
+                ("flexDirection", V::Str("row")),
+                ("flexWrap", V::Str("wrap")),
+                ("gap", V::Number(6.0)),
+                ("width", V::Number(320.0)),
+            ],
+        );
+        for (id, slot) in [(10, "09:00"), (30, "09:30"), (50, "10:00"), (70, "10:30")] {
+            ops.extend(pressable(
+                id,
+                2,
+                &[
+                    ("flexDirection", V::Str("row")),
+                    ("width", V::Number(62.0)),
+                    ("height", V::Number(30.0)),
+                    ("borderWidth", V::Number(1.0)),
+                    ("borderRadius", V::Number(8.0)),
+                ],
+                None,
+            ));
+            ops.extend(mark(id + 2, id, ("(", " ", ")")));
+            ops.extend(text(id + 12, id, slot));
+        }
+        let batch = laid_out(ops);
+        // `( ) 09:00` on one row: the slots wrap, their labels do not.
+        for id in [10, 30, 50, 70] {
+            let slot = frame_of(&batch, id).unwrap();
+            assert!(slot.size.width >= Points(72.0), "slot {id}: {slot:?}");
+            assert_eq!(
+                frame_of(&batch, id + 12).map(|f| f.size.height),
+                Some(Points(16.0)),
+                "slot {id}"
+            );
+        }
+    }
+
+    #[test]
+    fn tiles_and_their_labels_share_a_center_in_equal_columns() {
+        let mut ops = view(
+            2,
+            ROOT_ID,
+            &[
+                ("flexDirection", V::Str("row")),
+                ("justifyContent", V::Str("space-between")),
+                ("width", V::Number(320.0)),
+            ],
+        );
+        let cases = [
+            (10, "KJ", "Loads"),
+            (30, "AT", "Fails"),
+            (50, "DK", "No picture"),
+            (70, "", "No name"),
+        ];
+        for (id, initials, title) in cases {
+            ops.extend(view(
+                id,
+                2,
+                &[
+                    ("flex", V::Number(1.0)),
+                    ("alignItems", V::Str("center")),
+                    ("gap", V::Number(6.0)),
+                ],
+            ));
+            ops.extend(view(
+                id + 2,
+                id,
+                &[
+                    ("width", V::Number(52.0)),
+                    ("height", V::Number(52.0)),
+                    ("flexShrink", V::Number(0.0)),
+                    ("alignItems", V::Str("center")),
+                    ("justifyContent", V::Str("center")),
+                ],
+            ));
+            if !initials.is_empty() {
+                ops.extend(text(id + 4, id + 2, initials));
+            }
+            ops.extend(text(id + 6, id, title));
+            ops.extend(text(id + 8, id, "idle"));
+        }
+        let batch = laid_out(ops);
+        let center = |id| {
+            let f = frame_of(&batch, id).unwrap();
+            f.origin.x.0 + f.size.width.0 / 2.0
+        };
+        for (id, ..) in cases {
+            let column = frame_of(&batch, id).unwrap();
+            assert_eq!(column.size.width, Points(80.0), "column {id}");
+            assert!(
+                (center(id + 2) - center(id + 6)).abs() <= 8.0,
+                "column {id}: tile {:?}, label {:?}",
+                frame_of(&batch, id + 2),
+                frame_of(&batch, id + 6)
+            );
+        }
+    }
+
+    #[test]
+    fn auto_margins_take_the_space_left() {
+        let mut ops = view(
+            2,
+            ROOT_ID,
+            &[("width", V::Number(320.0)), ("height", V::Number(320.0))],
+        );
+        ops.extend(view(
+            3,
+            2,
+            &[
+                ("width", V::Number(160.0)),
+                ("marginHorizontal", V::Str("auto")),
+            ],
+        ));
+        ops.extend(text(4, 3, "Command"));
+        ops.extend(view(6, 2, &[("flexDirection", V::Str("row"))]));
+        ops.extend(text(7, 6, "Title"));
+        ops.extend(view(9, 6, &[("marginLeft", V::Str("auto"))]));
+        ops.extend(text(10, 9, "Close"));
+        let batch = laid_out(ops);
+        // Centered across a column, as CSS's `margin: 0 auto`.
+        assert_eq!(frame_of(&batch, 3), Some(rect(80.0, 0.0, 160.0, 16.0)));
+        // Pushed to a row's end.
+        assert_eq!(frame_of(&batch, 9).map(|f| f.origin.x), Some(Points(280.0)));
     }
 
     #[test]

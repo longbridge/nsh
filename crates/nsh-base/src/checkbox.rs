@@ -122,5 +122,5 @@ pub fn Checkbox(props: CheckboxProps, cx: Scope<CheckboxEvent>) -> impl IntoElem
                 .child(props.indicator.place(|mark| mark))
                 .into_element(),
         })
-        .child(props.children)
+        .child(crate::terminal::beside_mark(terminal, props.children))
 }

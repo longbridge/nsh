@@ -128,6 +128,14 @@ impl<M: TextEngine> Core<M> {
         let wrapper = self
             .layout
             .new_with_children(taffy::Style::default(), &[layout]);
+        // A terminal sizes a box by its content unless told its explicit
+        // size is its size: the wrapper's is its host's, the box the
+        // overlay's room is measured in (without it, 0 rows, and the
+        // overlay's content shrinks to a row apiece).
+        self.layout.set_role(wrapper, super::terminal_layout::Role {
+            sized: true,
+            ..Default::default()
+        });
         if let Some(root) = self.nodes[key as usize].root.as_mut() {
             root.overlay = Some(Box::new(OverlayState {
                 config: OverlayConfig::default(),
