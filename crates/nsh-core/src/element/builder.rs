@@ -974,6 +974,27 @@ impl Style {
         style
     }
 
+    /// The color it fills its view with in no state (`backgroundColor`,
+    /// Rust's `bg`), if it sets one that is no gradient and not
+    /// transparent: what a part's terminal form draws its text in (a
+    /// progress bar's run in its indicator's color). The typed styles'
+    /// over the declarations; their bound parts are left out.
+    pub fn background_color(&self) -> Option<crate::element::AdaptiveColor> {
+        let typed = self.1.static_color(crate::StyleKey::BackgroundColor);
+        let declared = || {
+            self.decls().iter().rev().find_map(|decl| match decl {
+                crate::StyleDecl::Set(
+                    crate::StyleKey::BackgroundColor,
+                    crate::PropertyValue::Color(color),
+                ) => Some(color.map(crate::element::AdaptiveColor::from)),
+                _ => None,
+            })?
+        };
+        typed
+            .or_else(declared)
+            .filter(|c| *c != crate::element::AdaptiveColor::from(crate::Color::TRANSPARENT))
+    }
+
     /// Its declarations, in order (not its typed styles').
     pub fn decls(&self) -> &[crate::StyleDecl] {
         self.0.as_deref().map_or(&[], crate::StylePatch::decls)

@@ -309,6 +309,15 @@ pub fn idiom() -> Idiom {
         .with_untracked(|e| e.idiom.reported_on(e.os))
 }
 
+/// The size of one Cell of a grid surface (a terminal), in points, as
+/// the core lays out on it ([`Environment::cell`]); `None` on every other
+/// surface. Components that size themselves in whole Cells read it.
+pub fn cell_size() -> Option<Size<Points>> {
+    with_data(|d| d.ambient.env.as_ref().map(|e| e.env))
+        .expect("the core sets the environment")
+        .with_untracked(|e| e.cell)
+}
+
 /// Whether the app runs under Mac Catalyst, in every idiom (TS:
 /// `platform.catalyst`, [`Os::is_catalyst`]); Catalyst is mobile, not
 /// desktop.
