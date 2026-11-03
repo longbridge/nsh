@@ -202,8 +202,10 @@ pub(crate) fn key(surface: &Rc<Surface>, window: &NSWindow, name: &str) {
         other => {
             let mut chars = other.chars();
             let code = match (chars.next(), chars.next()) {
-                (Some(c), None) => crate::input::us_key_code(c).unwrap_or(0),
-                _ => 0,
+                (Some(c), None) => {
+                    crate::input::us_typing_key(c).map_or(crate::input::NO_KEY, |(code, _)| code)
+                }
+                _ => crate::input::NO_KEY,
             };
             if flags.contains(NSEventModifierFlags::Shift) {
                 let mut one = other.chars();

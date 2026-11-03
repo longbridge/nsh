@@ -91,7 +91,7 @@ one for `unified`), each a gutter of line numbers (two columns in `unified`: old
 a viewport (at least 16 rows) on each side, with at least 40 rows' height before the viewport is known, in a window
 that stays put while it covers the rows in view (`RowWindow`, as the `Editor`'s); `each` keeps the rows that stay in
 it. A row's text is one `Text` of spans per wrapped line: runs of one syntax token and one inline state
-(`controller::spans`). Widths are columns of the font's `0` (tabs as 4 columns); the split sides are as wide as the
+(`controller::spans`). Widths are columns of the font's `0` (tabs as 4 columns, wide characters, CJK, fullwidth forms and emoji, as 2: their East Asian Width, so a side's box is never narrower than its text, which would wrap over the rows below; a line number's column is rounded up to a whole point and a half more, as the platforms round a text's measured width up); the split sides are as wide as the
 wider side's widest line and scroll sideways together (each side's `onScroll` scrolls the other, a move of under half a
 point ending the echo).
 
@@ -177,6 +177,6 @@ time (after a frame on WebAssembly). A patch's files each have a highlighter per
 
 ## Limits
 
-- Widths are columns of the font's `0`: exact for monospaced fonts. Soft wrap counts characters as columns, so wide
-  characters (CJK) wrap later than they fill the line.
+- Widths are columns of the font's `0`: exact for monospaced fonts. Wide characters count as two columns, which fonts
+  draw them about as wide as (a little less with a narrow `0`), so a line of them may end short of the box's edge.
 - Text is shown, not edited: changes revert or keep a hunk at a time.

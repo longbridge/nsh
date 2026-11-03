@@ -14,6 +14,21 @@ import { createEnvironment } from "./environment.js";
 import { createComponents } from "./components.js";
 
 const path = process.env.NSH_BROWSER_WASM;
+
+test("browser web view refs forward sendInput to the command bridge", () => {
+  const values = new Values();
+  const calls = [];
+  createDom((op, args) => calls.push([op, args]), values, { getOwner: () => null }, () => true, () => {});
+  const page = values.makeNode(2);
+  const inputs = [
+    { type: "click", x: 20, y: 20 },
+    { type: "text", text: "a b!" },
+    { type: "key", key: "Enter" },
+  ];
+  for (const input of inputs) page.sendInput(input);
+  assert.deepEqual(calls, inputs.map(input => [314, [2, "sendInput", input]]));
+});
+
 async function fixture() {
   const module = await WebAssembly.compile(await readFile(path));
   let bridge;

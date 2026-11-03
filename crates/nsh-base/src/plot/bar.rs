@@ -49,7 +49,7 @@ impl BarCornerRadii {
         }
     }
 
-    fn corners(&self) -> [Points; 4] {
+    pub(super) fn corners(&self) -> [Points; 4] {
         [
             self.top_left,
             self.top_right,

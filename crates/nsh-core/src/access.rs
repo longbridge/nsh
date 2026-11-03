@@ -15,7 +15,7 @@
 //!     "http": [{ "host": "quotes.example.com", "methods": ["GET"], "pathPrefix": "/v1/" }],
 //!     "sockets": ["mqtt.example.com:8883"]
 //!   },
-//!   "webview": { "hosts": ["*.example.com"] },
+//!   "webview": { "hosts": ["*.example.com"], "input": true },
 //!   "statusBar": true,
 //!   "host": ["getUserInfo", "bridge.*"],
 //!   "openUrl": { "schemes": ["https", "mailto"] }
@@ -33,7 +33,10 @@
 //! `network.sockets` grants raw TCP (`net.connect`) to exact `host:port`
 //! pairs only: no wildcards, and neither `hosts` nor `http` grants imply
 //! one. `webview` lists the hosts a web view may show and navigate to (its
-//! pages' own subresources are the web content's business). `host` lists
+//! pages' own subresources are the web content's business); its `input`
+//! lets a web view's ref give the page trusted input (`sendInput`), which
+//! carries user activation and is granted only when declared, also for
+//! apps without a declaration. `host` lists
 //! the functions of the embedding app `nsh/host` may call: names (1 to 128
 //! of `[A-Za-z0-9_.:-]`, without `..`; the core refuses calls of any other
 //! name), or prefixes of them ending in `*` (`true`: all of them); the
@@ -354,6 +357,9 @@ pub struct Capabilities {
     pub network: NetworkGrants,
     /// The hosts web views may show; `None`: no web views.
     pub webview: Option<Vec<HostPattern>>,
+    /// Web views may take trusted input (`sendInput`, `webview.input`):
+    /// never without a declaration ([`Capabilities::all`] leaves it off).
+    pub webview_input: bool,
     /// The app may set the status bar.
     pub status_bar: bool,
     /// The app may read and write the system clipboard (`nsh/clipboard`).
@@ -581,13 +587,18 @@ impl Capabilities {
             if check(
                 webview,
                 "capabilities.webview",
-                &["hosts"],
+                &["hosts", "input"],
                 "capabilities.webview",
             )? {
                 caps.webview = Some(match webview.get("hosts") {
                     Some(hosts) => patterns(hosts, "capabilities.webview.hosts")?,
                     None => Vec::new(),
                 });
+                if let Some(input) = webview.get("input") {
+                    caps.webview_input = input
+                        .as_bool()
+                        .ok_or("capabilities.webview.input must be a boolean")?;
+                }
             }
         }
         if let Some(status_bar) = obj.get("statusBar") {
@@ -779,6 +790,10 @@ impl Capabilities {
         if let Some(hosts) = &self.webview {
             let mut w = Map::new();
             w.insert("hosts".into(), list(hosts));
+            // Only when granted: older runtimes read what newer signers write.
+            if self.webview_input {
+                w.insert("input".into(), true.into());
+            }
             obj.insert("webview".into(), Value::Object(w));
         }
         obj.insert("statusBar".into(), self.status_bar.into());
@@ -1304,6 +1319,12 @@ impl Access {
             return false;
         };
         self.each(|c| c.allows_webview(&parts))
+    }
+
+    /// Whether a web view's ref may give its page trusted input
+    /// (`sendInput`): declared and granted, never by default.
+    pub fn allows_web_input(&self) -> bool {
+        self.each(|c| c.webview.is_some() && c.webview_input)
     }
 
     /// Whether the app may set the status bar.
@@ -1872,6 +1893,34 @@ mod tests {
             granted: Some(caps(r#"{ "host": ["bridge.*"] }"#)),
         };
         assert!(narrowed.allows_host("bridge.call") && !narrowed.allows_host("getUserInfo"));
+    }
+
+    #[test]
+    fn trusted_web_input_needs_an_explicit_grant() {
+        // Undeclared, web views are granted; their trusted input is not.
+        let all = Access::all();
+        assert!(all.allows_webviews() && !all.allows_web_input());
+        let access = |json: &str| Access {
+            declared: caps(json),
+            granted: None,
+        };
+        let input = r#"{ "webview": { "hosts": ["example.com"], "input": true } }"#;
+        assert!(access(input).allows_web_input());
+        assert!(!access(r#"{ "webview": { "hosts": ["example.com"] } }"#).allows_web_input());
+        assert!(!access(r#"{ "webview": { "input": false } }"#).allows_web_input());
+        assert!(
+            Capabilities::from_json(&serde_json::json!({ "webview": { "input": "yes" } })).is_err()
+        );
+        // It round-trips, and the embedding app may withhold it.
+        assert_eq!(
+            Capabilities::from_json(&caps(input).to_json()),
+            Ok(caps(input))
+        );
+        let narrowed = Access {
+            declared: caps(input),
+            granted: Some(caps(r#"{ "webview": { "hosts": ["*"] } }"#)),
+        };
+        assert!(!narrowed.allows_web_input());
     }
 
     #[test]
