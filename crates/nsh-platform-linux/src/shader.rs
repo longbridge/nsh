@@ -31,7 +31,7 @@
 //! frame is painted after something changed (the core's `ShaderInput`,
 //! [`ui_changed`]), the surface's views are drawn anew up to the view
 //! ([`skipped`]: the view and what comes after it are above it), rendered
-//! and downloaded alike.
+//! and downloaded alike, and given to the shader when its pixels changed.
 //!
 //! Pages and dialogs that come and go through a shader draw pictures of
 //! their two sides through a [`NavPainter`] in a layer over the stack (the
@@ -87,6 +87,9 @@ pub(crate) struct ShaderState {
     /// GTK draws the same ones (it keeps a widget's node until the widget
     /// draws again), it is not rendered and downloaded again.
     drawn: Option<gsk::RenderNode>,
+    /// The hash of the picture of what is behind it it was last given: one
+    /// with the same pixels is not given again.
+    backdrop: Option<u64>,
     /// What is behind it is to be taken again once a frame is painted.
     marked: Cell<bool>,
     scheduled: Cell<bool>,
@@ -235,6 +238,7 @@ pub(crate) fn set(surface: &Rc<Surface>, view: &NshView, layer: Option<Arc<Shade
         shader.owner = (screen && layer.is_some()).then(|| view.id());
         shader.children = None;
         shader.drawn = None;
+        shader.backdrop = None;
         shader.view.set_layer(layer);
         // Listed once while it reads what is behind it: the core sends the
         // layer again for every change of it, a uniform's included.
@@ -808,7 +812,8 @@ fn schedule(view: &NshView) {
 }
 
 /// Draws the surface's views anew up to `view` (what is behind it) over its
-/// box and overflow and gives the picture to its shader.
+/// box and overflow and gives the picture to its shader when its pixels
+/// changed.
 fn take_backdrop(view: &NshView) {
     let scale = scale_of(view);
     let (overflow, frame) = {
@@ -846,6 +851,7 @@ fn take_backdrop(view: &NshView) {
         }
         Some(render(&renderer, snapshot, (w * scale, h * scale)))
     })();
+    let hash = picture.as_ref().map(Pixels::hash);
     {
         let mut s = view.state_mut();
         let Some(shader) = s.shader.as_mut() else {
@@ -854,6 +860,12 @@ fn take_backdrop(view: &NshView) {
         let Some(renderer) = shader.renderer.clone() else {
             return;
         };
+        // What is behind it looks as it did (what changed is outside its
+        // box or above it, or drew the same): its frame stands.
+        if hash.is_some() && hash == shader.backdrop {
+            return;
+        }
+        shader.backdrop = hash;
         shader.view.set_input(
             &renderer,
             ShaderInput::Backdrop,

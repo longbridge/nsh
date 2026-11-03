@@ -203,12 +203,12 @@ Effects, transitions and page shaders sit on the same program, layer and rendere
   frame. Screen layers are the root's. A backdrop is the surface's views drawn anew up to the view (`skipped`,
   `past`) after the frame clock paints, again when the core marks it or a view that draws behind it changes on the UI
   thread (`NshView::changed`, `moved`; `behind`: an ancestor or a view before it, not one in it or after it; a
-  shader's own frame only `redraw`s). Pages and dialogs: pictures of the host drawn anew without and with the upper
-  side, through a `NavPainter` on the shader's own transition clock (`start_transition`, backwards when it goes) in
-  a layer over the stack or the root; the starting side shows until the first frame. Without a GPU device an effect
-  draws its children as they are, a transition starts no run and a page or a dialog comes with its own motion, as it
-  does when the user asks for less motion. A screen layer leaves the root when the view that mounted it is deleted
-  (unless another screen effect's took its place) or the app stops.
+  shader's own frame only `redraw`s), and given to the shader when its pixels changed. Pages and dialogs: pictures of
+  the host drawn anew without and with the upper side, through a `NavPainter` on the shader's own transition clock
+  (`start_transition`, backwards when it goes) in a layer over the stack or the root; the starting side shows until
+  the first frame. Without a GPU device an effect draws its children as they are, a transition starts no run and a
+  page or a dialog comes with its own motion, as it does when the user asks for less motion. A screen layer leaves
+  the root when the view that mounted it is deleted (unless another screen effect's took its place) or the app stops.
 
 ## Pages and dialogs
 
