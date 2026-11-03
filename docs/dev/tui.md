@@ -682,7 +682,7 @@ it owns keys and the app's field caret is hidden; closing it restores the caret 
 |---|---|
 | Ctrl+N, Tab | Next focusable view in tree order |
 | Ctrl+P, Shift+Tab | Previous focusable view in tree order |
-| Down / Up | Nearest focusable view below / above, one in an overlapping column first; with none focused, the first / last one in sight. One out of sight within a wheel step is revealed; one farther away is approached by a wheel step (three rows) of the innermost Scroll that can still move that way, focus then staying on a control in sight |
+| Down / Up | Nearest focusable view below / above, one in an overlapping column first; with none focused, the first / last one in sight, inside an open anchored popup (a menu or select opened by a click) when one is open. One out of sight within a wheel step is revealed; one farther away is approached by a wheel step (three rows) of the innermost Scroll that can still move that way, focus then staying on a control in sight |
 | Ctrl+F, Right / Ctrl+B, Left | Nearest focusable view to the right / left on the same row |
 | Enter, Space | Press the focused view, reporting PressDown, PressUp and Press in order, at its middle |
 | Esc, Ctrl+G | Leave the focused field; otherwise go back through the app handler, stack or newest modal |

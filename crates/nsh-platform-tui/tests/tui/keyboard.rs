@@ -866,3 +866,74 @@ fn only_an_editable_field_with_a_visible_caret_shows_the_terminal_cursor() {
     draw_until(&mut view, &mut terminal, &rx, "focused hidden caret");
     assert!(!terminal.backend().cursor_visible());
 }
+
+/// A wide control over a narrow one in its column, and a nearer one beside
+/// that column; and a popup anchored under a trigger, open from the start.
+#[component]
+fn ColumnsPage() -> impl IntoElement {
+    let focused = signal("none");
+    let anchor = element_ref();
+    let button = move |label: &'static str, x, y, w| {
+        view()
+            .absolute()
+            .left(px(x))
+            .top(px(y))
+            .w(px(w))
+            .h(px(16.0))
+            .on_focus(move |_: &()| focused.set(label))
+            .on_press(|_: &()| {})
+            .child(text(label))
+    };
+    view()
+        .flex_1()
+        .child(button("T", 0.0, 0.0, 64.0))
+        .child(button("N", 160.0, 16.0, 64.0))
+        .child(button("O", 0.0, 64.0, 64.0))
+        .child(
+            view()
+                .absolute()
+                .left(px(240.0))
+                .top(px(0.0))
+                .w(px(64.0))
+                .h(px(16.0))
+                .element_ref(&anchor)
+                .child(text("Open")),
+        )
+        .child(
+            overlay()
+                .anchor(&anchor)
+                .placement(nsh_core::overlay::Placement::Bottom)
+                .w(px(64.0))
+                .child(
+                    view()
+                        .h(px(16.0))
+                        .on_focus(move |_: &()| focused.set("P"))
+                        .on_press(|_: &()| {})
+                        .child(text("Item")),
+                ),
+        )
+        .child(
+            text(move || format!("focus {}", focused.get()))
+                .absolute()
+                .top(px(128.0)),
+        )
+}
+
+#[test]
+fn down_enters_an_open_popup_then_keeps_to_the_column() {
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(48, 10)).unwrap();
+    view.load(App::Rust(Root::new::<ColumnsPage>(|| ())))
+        .unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "focus none");
+    // Nothing focused: the popup's item before the page's first control.
+    assert_eq!(view.handle(key("Down", Default::default())), Handled::Yes);
+    draw_until(&mut view, &mut terminal, &rx, "focus P");
+    // From T, the control below in its column, past a nearer one beside it.
+    assert_eq!(view.handle(ctrl("p")), Handled::Yes);
+    assert_eq!(view.handle(ctrl("p")), Handled::Yes);
+    assert_eq!(view.handle(ctrl("p")), Handled::Yes);
+    draw_until(&mut view, &mut terminal, &rx, "focus T");
+    assert_eq!(view.handle(key("Down", Default::default())), Handled::Yes);
+    draw_until(&mut view, &mut terminal, &rx, "focus O");
+}

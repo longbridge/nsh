@@ -70,6 +70,23 @@ fn sink_cursor(tree: &Mounter, geometry: &[Geometry], id: NodeId) -> Option<Posi
     None
 }
 
+/// The view is inside an overlay anchored to another view (a menu's, a
+/// select's or a popover's popup).
+fn in_anchored_overlay(tree: &Mounter, mut id: NodeId) -> bool {
+    loop {
+        let Some(view) = tree.get(id) else {
+            return false;
+        };
+        if view.props.overlay_anchor.is_some() {
+            return true;
+        }
+        let Some(parent) = view.parent else {
+            return false;
+        };
+        id = parent;
+    }
+}
+
 pub(crate) fn contains(tree: &Mounter, ancestor: NodeId, mut id: NodeId) -> bool {
     loop {
         if id == ancestor {
@@ -795,7 +812,7 @@ impl Keyboard {
 impl Keyboard {
     /// Down / Up: the nearest control below / above the focused one, the
     /// one in an overlapping column first; with none focused, the first /
-    /// last one in sight. A control out of sight is approached one wheel
+    /// last one in sight, in an open anchored popup when there is one. A control out of sight is approached one wheel
     /// step at a time while the scroll view around can still scroll there,
     /// and focus follows what is in sight then.
     fn vertical(
@@ -838,13 +855,22 @@ impl Keyboard {
                     let overlaps =
                         to.bounds.left < from.bounds.right && from.bounds.left < to.bounds.right;
                     (
-                        gap,
                         !overlaps,
+                        gap,
                         (to.bounds.left - from.bounds.left).unsigned_abs(),
                     )
                 }),
             None => {
-                let visible = candidates.iter().copied().filter(|g| !g.visible.is_empty());
+                // A popup opened by a click (a menu, a select) holds what
+                // the arrows are for: enter it before the page around.
+                let in_popup = |g: &&Geometry| in_anchored_overlay(tree, g.id);
+                let popup = candidates
+                    .iter()
+                    .any(|g| !g.visible.is_empty() && in_popup(g));
+                let visible = candidates
+                    .iter()
+                    .copied()
+                    .filter(|g| !g.visible.is_empty() && (!popup || in_popup(g)));
                 if down {
                     visible.min_by_key(|g| (g.bounds.top, g.bounds.left))
                 } else {
