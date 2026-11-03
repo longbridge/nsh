@@ -173,6 +173,7 @@ impl Mounter {
                     crate::navigation::removing(surface, &view);
                     crate::native::deleted(surface, &view);
                     crate::shader::deleted(surface, &view);
+                    crate::navigation::deleted(surface, &view);
                     // A removal animation detaches the view when it ends.
                     if !crate::transition::removing(surface, &view, self.layout_animation.as_ref())
                     {

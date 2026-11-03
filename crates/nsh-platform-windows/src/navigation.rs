@@ -688,6 +688,9 @@ pub(crate) struct Nav {
     images: Vec<(NodeId, Picture)>,
     /// How pages and dialogs come and go through a shader, by node.
     shaders: FxHashMap<NodeId, nsh_core::NavShader>,
+    /// Pages and dialogs deleted in this batch: their shaders go at its
+    /// end, once a page that left has started leaving through its own.
+    deleted: Vec<NodeId>,
 }
 
 impl Nav {
@@ -1474,10 +1477,23 @@ pub(crate) fn device_lost(surface: &Rc<Surface>) {
 /// `NavShader`: how page or dialog `id` comes and goes through a shader.
 pub(crate) fn nav_shader(surface: &Rc<Surface>, id: NodeId, shader: Option<nsh_core::NavShader>) {
     let mut nav = surface.nav.borrow_mut();
+    // A new page or dialog may take a deleted one's id: its shader stays.
+    nav.deleted.retain(|&d| d != id);
     match shader {
         Some(shader) => nav.shaders.insert(id, shader),
         None => nav.shaders.remove(&id),
     };
+}
+
+/// `view` was deleted: the shader it comes and goes through goes at the
+/// end of the batch ([`end_batch`]), once a page that left has started
+/// leaving through it.
+pub(crate) fn deleted(surface: &Rc<Surface>, view: &NshView) {
+    let mut nav = surface.nav.borrow_mut();
+    let id = view.id();
+    if nav.shaders.contains_key(&id) && !nav.deleted.contains(&id) {
+        nav.deleted.push(id);
+    }
 }
 
 /// A modal was inserted: present it.
@@ -1588,6 +1604,9 @@ pub(crate) fn end_batch(surface: &Rc<Surface>) {
     }
     // Images of screens and modals that stayed are of no use.
     nav.images.clear();
+    for id in std::mem::take(&mut nav.deleted) {
+        nav.shaders.remove(&id);
+    }
 }
 
 #[cfg(test)]
@@ -1778,6 +1797,28 @@ mod tests {
         env.reduce_motion = true;
         surface.environment.set(env);
         assert!(nav.shader(&surface, 6).is_none());
+    }
+
+    #[test]
+    fn a_deleted_page_or_dialog_lets_go_of_its_shader() {
+        let (surface, stack, shader) = shader_stack();
+        let page = stack.child_views()[1].clone();
+        let dialog = child(&surface.root, 30, ViewKind::Modal);
+        nav_shader(&surface, page.id(), Some(shader.clone()));
+        nav_shader(&surface, 30, Some(shader.clone()));
+        deleted(&surface, &page);
+        deleted(&surface, &dialog);
+        // Kept while the batch lasts: a page that left goes through it at
+        // its end.
+        assert_eq!(surface.nav.borrow().shaders.len(), 2);
+        end_batch(&surface);
+        assert!(surface.nav.borrow().shaders.is_empty());
+        // A dialog that takes a deleted one's id in the batch keeps its own.
+        nav_shader(&surface, 30, Some(shader.clone()));
+        deleted(&surface, &dialog);
+        nav_shader(&surface, 30, Some(shader));
+        end_batch(&surface);
+        assert!(surface.nav.borrow().shaders.contains_key(&30));
     }
 
     #[test]
