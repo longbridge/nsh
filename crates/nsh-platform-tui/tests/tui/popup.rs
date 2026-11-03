@@ -467,14 +467,16 @@ fn a_framed_popup_beside_its_trigger_starts_its_rows_on_the_trigger_s_row() {
     );
 }
 
-/// A page with a row of `z` across the screen, under a sheet at the right
+/// A page with a row of `zzz` words across the screen, under a sheet at the right
 /// with a panel 10 Cells wide: a fill, a line on its leading edge.
 #[component]
 fn RightSheet() -> impl IntoElement {
     view()
         .flex_1()
         .child(text("top"))
-        .child(text("z".repeat(40)))
+        // Words, as an overlay's box leaves out a word it cuts: one word
+        // across the screen would go whole.
+        .child(text("zzz ".repeat(10)))
         .child(
             sheet()
                 .open(|| Some(true))
@@ -496,6 +498,8 @@ fn a_sheet_is_a_solid_panel_the_height_of_the_screen_over_a_cleared_page() {
     view.load(App::Rust(Root::new::<RightSheet>(|| ())))
         .unwrap();
     draw_until(&mut view, &mut terminal, &rx, "Panel");
+    // It slides in from the edge: look once it is in place.
+    super::app::draw_until_still(&mut view, &mut terminal, &rx);
     let (panel, _) = find(&terminal, "Panel").unwrap();
     let buffer = terminal.backend().buffer();
     // Its leading line: the column before its text where every row has
@@ -515,10 +519,10 @@ fn a_sheet_is_a_solid_panel_the_height_of_the_screen_over_a_cleared_page() {
             );
         }
     }
-    let (_, row) = find(&terminal, "zzzz").unwrap();
-    assert_eq!(
-        buffer[(edge - 1, row)].symbol(),
-        "z",
+    let (_, row) = find(&terminal, "zzz ")
+        .unwrap_or_else(|| panic!("the page's row beside the panel\n{}", dump(&terminal)));
+    assert!(
+        (edge - 4..edge).any(|x| buffer[(x, row)].symbol() == "z"),
         "the page beside it\n{}",
         dump(&terminal)
     );

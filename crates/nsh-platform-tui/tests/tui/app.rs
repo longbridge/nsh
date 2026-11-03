@@ -45,9 +45,32 @@ pub(super) fn draw_until(
             return;
         }
         assert!(
-            rx.recv_deadline(deadline).is_ok(),
+            Instant::now() < deadline,
             "expected {expected:?}, got {contents:?}"
         );
+        // A passive surface wakes for the engine's batches; its animation
+        // frames are deadlines the embedder draws at, as the runner does.
+        let due = view.next_frame_deadline().map_or(deadline, |due| due.min(deadline));
+        let _ = rx.recv_deadline(due);
+    }
+}
+
+/// Draws until no animation asks for another frame.
+pub(super) fn draw_until_still(
+    view: &mut AppView,
+    terminal: &mut Terminal<TestBackend>,
+    rx: &crossbeam_channel::Receiver<()>,
+) {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        terminal
+            .draw(|frame| view.render(frame, frame.area()))
+            .unwrap();
+        let Some(due) = view.next_frame_deadline() else {
+            return;
+        };
+        assert!(Instant::now() < deadline, "the animations did not finish");
+        let _ = rx.recv_deadline(due.min(deadline));
     }
 }
 
