@@ -2,7 +2,7 @@
 //! `plot` module, with no look of their own. A [`Plot`] holds the rows of
 //! data, the scales of its two axes (and a second y scale for dual-axis
 //! charts, the marks choosing theirs), the pointer over it and its motion;
-//! its marks ([`Line`], [`Area`], [`Bar`], [`Rule`], [`Dot`], [`Grid`], the radial [`Pie`],
+//! its marks ([`Line`], [`Area`], [`Bar`], [`Rule`], [`Dot`], [`Cell`], [`Grid`], the radial [`Pie`],
 //! [`Arc`], [`RadialLine`] and [`RadialGrid`], and the [`Sankey`] of
 //! flows) draw what it holds, each a canvas filling the plot (a pie one
 //! per slice, a sankey one per node and ribbon), its [`PlotAxis`]es label
@@ -28,6 +28,7 @@ mod appear;
 mod area;
 mod axis;
 mod bar;
+mod cell;
 mod class;
 mod dot;
 mod grid;
@@ -61,6 +62,7 @@ pub use self::{
         PlotAxisProps, TickFormat, plot_axis,
     },
     bar::{Bar, BarBase, BarCornerRadii, BarElement, BarLabelStyle, BarProps, bar},
+    cell::{Cell, CellElement, CellLabelStyle, CellProps, cell},
     class::RowClass,
     dot::{Dot, DotElement, DotProps, DotRadius, RadiusScale, dot},
     grid::{Grid, GridElement, GridProps, grid},
@@ -78,10 +80,13 @@ pub use self::{
         Sankey, SankeyAlign, SankeyElement, SankeyLinkClass, SankeyLinks, SankeyProps,
         SankeyValueLabel, SankeyValueScale, sankey,
     },
-    scale::{BandScale, LinearScale, OrdinalScale, Scale},
+    scale::{
+        BandScale, ColorScale, DivergingScale, LinearScale, OrdinalScale, Scale, SequentialScale,
+    },
 };
 use self::{
     bar::{BarEntry, BarLayout},
+    cell::CellEntry,
     scale::{AxisMap, Band, Linear, extent},
     series::{HoverDot, Mark},
     tween::Tween,
@@ -102,6 +107,7 @@ pub fn registry() -> Registry {
         .register::<Bar>()
         .register::<Rule>()
         .register::<Dot>()
+        .register::<Cell>()
         .register::<Grid>()
         .register::<Pie>()
         .register::<Arc>()
@@ -308,14 +314,19 @@ pub struct PlotProps {
     /// the pointer for `"pointer"`; 0 by default.
     #[prop(default)]
     pub tooltip_offset: Prop<Points>,
-    /// The colors of the categories the marks' `color` reads of their
-    /// rows (`gpui-base`'s `ScaleOrdinal`, d3's `scaleOrdinal`): `{ type:
-    /// "ordinal", domain?, range, unknown? }`. A slice's or a bar's color
-    /// is its row's, a line's or an area's its first row's; it is the
-    /// mark's `fill` (a line's `stroke`) where nothing sets one, so the
-    /// app's classes and styles, the mark's or inherited from the plot,
-    /// win over it. None by default: the marks take no color of a scale.
-    pub color_scale: Prop<Option<OrdinalScale>>,
+    /// The colors of the marks: of the categories the marks' `color`
+    /// reads of their rows (`gpui-base`'s `ScaleOrdinal`, d3's
+    /// `scaleOrdinal`), `{ type: "ordinal", domain?, range, unknown? }`;
+    /// or of the numbers a `Cell`'s `value` reads, along a ramp of colors
+    /// mixed in OKLab (d3's `scaleSequential` and `scaleDiverging`), `{
+    /// type: "sequential", domain?, range, unknown? }` or `{ type:
+    /// "diverging", domain?, pivot?, range, unknown? }`. A slice's, a
+    /// bar's or a cell's color is its row's, a line's or an area's its
+    /// first row's; it is the mark's `fill` (a line's `stroke`) where
+    /// nothing sets one, so the app's classes and styles, the mark's or
+    /// inherited from the plot, win over it. None by default: the marks
+    /// take no color of a scale.
+    pub color_scale: Prop<Option<ColorScale>>,
     /// The marks, drawn in order over each other (each fills the plot),
     /// and whatever the app lays over them.
     pub children: Prop<Children>,
@@ -327,8 +338,8 @@ pub enum PlotEvent {
     /// The pointer came over another row (`gpui-base`'s
     /// `TooltipState::index`): the index of the row nearest to it along
     /// the x axis (the y axis when only that one has bands), of the slice
-    /// of a `Pie` under it, or of a `RadialLine`'s row nearest to it by
-    /// angle; `null` once it leaves the plot (or, over a pie, its slices;
+    /// of a `Pie`, the dot of a `Dot` or the cell of a `Cell` under it, or
+    /// of a `RadialLine`'s row nearest to it by angle; `null` once it leaves the plot (or, over a pie, its slices;
     /// over a radial line, its outer radius).
     #[args(index)]
     HoverChange(Option<u32>),
@@ -474,12 +485,21 @@ struct PlotContext {
     dot: HoverDot,
     /// The axis with bands (the x axis when both have them).
     band_axis: Memo<Option<Axis>>,
-    /// The colors of the marks' categories.
-    color_scale: Prop<Option<OrdinalScale>>,
+    /// The colors of the marks' categories and of the cells' values.
+    color_scale: Prop<Option<ColorScale>>,
     /// The categories outside `color_scale`'s domain the marks have met,
     /// in order, and the scale they were met for (d3's implicit domain:
     /// they keep their colors while the scale stays).
     met: Stored<(Option<OrdinalScale>, Vec<SharedString>)>,
+    /// Its cells, which name the bands' categories and whose values the
+    /// ramps of `color_scale` spread over.
+    cells: Signal<Vec<CellEntry>>,
+    /// The categories of the bands along each axis (`None`: a band per
+    /// row, or no bands).
+    x_categories: Memo<Option<std::sync::Arc<[SharedString]>>>,
+    y_categories: Memo<Option<std::sync::Arc<[SharedString]>>>,
+    /// The extent of the cells' values.
+    cell_extent: Memo<Option<[f64; 2]>>,
 }
 
 /// A radial mark's test of the row under a point of the plot
@@ -491,7 +511,15 @@ struct Hit {
     key: u64,
     at: Rc<dyn Fn(Point<Points>) -> Option<u32>>,
     center: Rc<dyn Fn(u32) -> Option<Point<Points>>>,
+    /// Where a key steps from a row across a grid of them (cells): the row
+    /// beside it on the screen (the arrows, Up and Down too) or at either
+    /// end of its line (Home, End). `None`: the keys step through the rows
+    /// in order.
+    grid: Option<GridStep>,
 }
+
+/// Where a key steps from a row across a grid of rows ([`Hit::grid`]).
+type GridStep = Rc<dyn Fn(Option<u32>, keys::Step) -> Option<u32>>;
 
 impl PartialEq for Hit {
     fn eq(&self, other: &Self) -> bool {
@@ -581,6 +609,17 @@ impl PlotContext {
         at: impl Fn(Point<Points>) -> Option<u32> + 'static,
         center: impl Fn(u32) -> Option<Point<Points>> + 'static,
     ) {
+        self.add_hit_with(at, center, None);
+    }
+
+    /// [`Self::add_hit`], the keys stepping across a grid of rows with
+    /// `grid` when given.
+    fn add_hit_with(
+        &self,
+        at: impl Fn(Point<Points>) -> Option<u32> + 'static,
+        center: impl Fn(u32) -> Option<Point<Points>> + 'static,
+        grid: Option<GridStep>,
+    ) {
         let key = self.next.get();
         self.next.replace(key + 1);
         let hits = self.hits;
@@ -589,6 +628,7 @@ impl PlotContext {
                 key,
                 at: Rc::new(at),
                 center: Rc::new(center),
+                grid,
             })
         });
         cleanup(move || {
@@ -661,7 +701,7 @@ impl PlotContext {
     /// scale), a category met first taking the next color (d3's implicit
     /// domain).
     fn colors(&self, categories: &[SharedString]) -> Option<std::sync::Arc<[Option<Hsla>]>> {
-        let scale = self.color_scale.get()?;
+        let scale = self.color_scale.with(|s| s.as_ref()?.ordinal().cloned())?;
         Some(self.met.with(|(of, met)| {
             if of.as_ref() != Some(&scale) {
                 *of = Some(scale.clone());
@@ -670,13 +710,56 @@ impl PlotContext {
             categories.iter().map(|c| scale.color(met, c)).collect()
         }))
     }
+
+    /// The colors a ramp of `colorScale` (`sequential`, `diverging`) gives
+    /// `values`, over its domain (the app's, or the extent of the plot's
+    /// cells' values); `None` without such a scale or any value.
+    fn shades(&self, values: &[f64]) -> Option<std::sync::Arc<[Option<Hsla>]>> {
+        self.color_scale.with(|scale| {
+            let scale = scale.as_ref()?;
+            let domain = scale.domain(self.cell_extent.get())?;
+            Some(values.iter().map(|&v| scale.shade(v, domain)).collect())
+        })
+    }
+}
+
+/// The categories of the bands of an axis whose scale is `scale`: its
+/// `domain`, else the categories the plot's `cells` read along the axis,
+/// in the order met (a band per row without any).
+fn band_categories(
+    scale: Option<Scale>,
+    cells: Signal<Vec<CellEntry>>,
+    axis: Axis,
+) -> Option<std::sync::Arc<[SharedString]>> {
+    let Some(Scale::Band(band)) = scale else {
+        return None;
+    };
+    if let Some(domain) = band.domain {
+        return Some(domain);
+    }
+    cells.with(|all| {
+        let mut met: Vec<SharedString> = Vec::new();
+        let mut any = false;
+        for cell in all {
+            let Some(texts) = cell.categories(axis).and_then(|c| c.try_get().flatten()) else {
+                continue;
+            };
+            any = true;
+            for t in texts.iter() {
+                if !t.is_empty() && !met.contains(t) {
+                    met.push(t.clone());
+                }
+            }
+        }
+        any.then(|| met.into())
+    })
 }
 
 /// A plot (`gpui-base`'s `Plot`): the rows of data a chart shows, the
 /// scales of its x and y axes, its size as their range, the pointer over
 /// it and its motion. It draws nothing itself: its marks, the children
-/// (`Line`, `Area`, `Bar`, `Rule`, `Dot`, `Grid`, `Pie`, `Arc`, `RadialLine`,
-/// `RadialGrid`), each fill it and draw in order over each other. It
+/// (`Line`, `Area`, `Bar`, `Rule`, `Dot`, `Cell`, `Grid`, `Pie`, `Arc`,
+/// `RadialLine`, `RadialGrid`), each fill it and draw in order over each other. It
 /// reports the row nearest to the pointer, the slice of a pie under it, or
 /// a radial line's row nearest to it by angle (`onHoverChange`), and
 /// shows the hover's parts the app styles (`crossLineClass`, `dotClass` or
@@ -731,6 +814,13 @@ pub fn Plot(props: PlotProps, cx: Scope<PlotEvent>) -> impl IntoElement {
             )
         })
     };
+    // The bands' categories: a band scale's domain, or its cells'.
+    let cells = signal(Vec::<CellEntry>::new());
+    let x_categories = computed(move || band_categories(x_scale.get(), cells, Axis::X));
+    let y_categories = computed(move || band_categories(y_scale.get(), cells, Axis::Y));
+    let bands = move |categories: Memo<Option<std::sync::Arc<[SharedString]>>>, rows: usize| {
+        categories.with(|c| c.as_ref().map_or(rows, |c| c.len()))
+    };
     let x_map = computed(move || {
         let width = size.get().width.0;
         let len = data.with(|rows| rows.len());
@@ -750,7 +840,7 @@ pub fn Plot(props: PlotProps, cx: Scope<PlotEvent>) -> impl IntoElement {
         };
         match scale {
             Scale::Point { .. } => AxisMap::Point { len, range },
-            Scale::Band(band) => AxisMap::Band(Band::new(len, range, band)),
+            Scale::Band(band) => AxisMap::Band(Band::new(bands(x_categories, len), range, &band)),
             Scale::Linear { domain, .. } => {
                 // The rows' `x`, or the values of bars across the plot.
                 let domain = domain
@@ -795,13 +885,15 @@ pub fn Plot(props: PlotProps, cx: Scope<PlotEvent>) -> impl IntoElement {
         // Rows from the top edge down, values from the bottom edge up (the
         // axes' labels' inset in from both); reversed, the other way.
         let [top, bottom] = inset.get();
-        let (down, up) = match scale.is_some_and(|s| s.reversed()) {
+        let (down, up) = match scale.as_ref().is_some_and(|s| s.reversed()) {
             true => ([height, 0.0], [top, height - bottom]),
             false => ([0.0, height], [height - bottom, top]),
         };
         match scale {
             Some(Scale::Point { .. }) => AxisMap::Point { len, range: down },
-            Some(Scale::Band(band)) => AxisMap::Band(Band::new(len, down, band)),
+            Some(Scale::Band(band)) => {
+                AxisMap::Band(Band::new(bands(y_categories, len), down, &band))
+            }
             Some(Scale::Linear {
                 domain: Some(domain),
                 ..
@@ -941,6 +1033,18 @@ pub fn Plot(props: PlotProps, cx: Scope<PlotEvent>) -> impl IntoElement {
         band_axis,
         color_scale: props.color_scale,
         met: stored((None, Vec::new())),
+        cells,
+        x_categories,
+        y_categories,
+        cell_extent: computed(move || {
+            cells.with(|all| {
+                extent(
+                    all.iter()
+                        .filter_map(|c| c.values.try_get().flatten())
+                        .flat_map(|v| v.to_vec()),
+                )
+            })
+        }),
     });
 
     let place = TooltipPlace::new(props.tooltip_placement, props.tooltip_offset);
@@ -1116,11 +1220,22 @@ pub fn Plot(props: PlotProps, cx: Scope<PlotEvent>) -> impl IntoElement {
             && hover_axis.get_untracked() == Axis::X
             && x_map.with_untracked(AxisMap::backward)
     };
+    // Over a grid of cells, the keys step across it on the screen; screen
+    // readers' increment and decrement keep the rows' order.
+    let grid = computed(move || hits.with(|all| all.iter().any(|h| h.grid.is_some())));
+    let key_step = move |step: keys::Step| {
+        let on_grid = hits.with_untracked(|all| all.iter().rev().find_map(|h| h.grid.clone()));
+        match on_grid {
+            Some(grid) => grid(hovered.get_untracked(), step),
+            None => step_to(step),
+        }
+    };
     keys::bind(
         move || focused.get() && interactive.get(),
         mirrored,
+        move || grid.get(),
         hovered,
-        step_to,
+        key_step,
         key_to,
     );
     // Decided when the plot is made: a sparkline offers none of it and
