@@ -454,10 +454,13 @@ const labelColumn = (names: readonly string[]) => Math.max(LABEL_WIDTH, ...names
 /** A label, and a quieter line under it (after it in the terminal). */
 function Label(props: { label: string; detail?: string; width?: number }) {
   return (
-    <View style={terminal ? { flex: 1, flexDirection: "row", gap: TERMINAL_GAP } : { flex: 1, gap: 2 }}>
-      <Text style={{ minWidth: terminal ? (props.width ?? LABEL_WIDTH) : undefined, flexShrink: 0, fontSize: size.label, color: colors.text }}>{props.label}</Text>
+    // A terminal's gap is in the label's column: a row's gaps give first
+    // when its detail wraps, which would move the details off their column.
+    <View style={terminal ? { flex: 1, flexDirection: "row" } : { flex: 1, gap: 2 }}>
+      <Text style={{ minWidth: terminal ? (props.width ?? LABEL_WIDTH) + TERMINAL_GAP : undefined, flexShrink: 0, fontSize: size.label, color: colors.text }}>{props.label}</Text>
       <If when={props.detail}>
-        <Text style={{ numberOfLines: 1, flexShrink: 1, fontSize: size.detail, color: colors.muted }}>{props.detail}</Text>
+        {/* Beside the label in a terminal, it wraps rather than lose its end to `…`. */}
+        <Text style={{ numberOfLines: terminal ? undefined : 1, flexShrink: 1, fontSize: size.detail, color: colors.muted }}>{props.detail}</Text>
       </If>
     </View>
   );
@@ -3298,24 +3301,27 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
             </View>
           </Level>
           <Level label="Price" detail={`${listings(price())} listings between the two`} value={`$${price()[0]} – $${price()[1]}`}>
-            {/* How many listings each price has: the bars in the range light up as the thumbs move. */}
-            <View style={{ flexDirection: "row", alignItems: "flex-end", gap: 2, height: 36, paddingHorizontal: pointer ? 7 : 10, marginBottom: -4 }}>
-              <Each of={HISTOGRAM}>
-                {(n, i) => (
-                  <View
-                    class="transition-colors duration-150 motion-reduce:transition-none"
-                    style={{
-                      flex: 1,
-                      height: `${Math.round((n() / HISTOGRAM_MAX) * 100)}%`,
-                      minHeight: 2,
-                      borderTopLeftRadius: 2,
-                      borderTopRightRadius: 2,
-                      backgroundColor: inRange(i(), price()) ? colors.accentFill : colors.track,
-                    }}
-                  />
-                )}
-              </Each>
-            </View>
+            {/* How many listings each price has: the bars in the range light up as the thumbs move.
+                A terminal's two rows would draw them as blank Cells: the count in the label says it. */}
+            <If when={!terminal}>
+              <View style={{ flexDirection: "row", alignItems: "flex-end", gap: 2, height: 36, paddingHorizontal: pointer ? 7 : 10, marginBottom: -4 }}>
+                <Each of={HISTOGRAM}>
+                  {(n, i) => (
+                    <View
+                      class="transition-colors duration-150 motion-reduce:transition-none"
+                      style={{
+                        flex: 1,
+                        height: `${Math.round((n() / HISTOGRAM_MAX) * 100)}%`,
+                        minHeight: 2,
+                        borderTopLeftRadius: 2,
+                        borderTopRightRadius: 2,
+                        backgroundColor: inRange(i(), price()) ? colors.accentFill : colors.track,
+                      }}
+                    />
+                  )}
+                </Each>
+              </View>
+            </If>
             <Slider
               value={price()}
               min={0}
