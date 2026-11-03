@@ -232,7 +232,7 @@ fn generic_font(family: FamilyName<'_>, size: CGFloat, weight: u16) -> CFRetaine
         // SAFETY: immutable UIKit constants.
         FamilyName::Serif => unsafe { UIFontDescriptorSystemDesignSerif },
         FamilyName::Rounded => unsafe { UIFontDescriptorSystemDesignRounded },
-        FamilyName::System | FamilyName::Named(_) => return system_font(size, weight),
+        _ => return system_font(size, weight),
     };
     let base = UIFont::systemFontOfSize_weight(size, font_weight(weight));
     // SAFETY: a plain getter of a valid font.
