@@ -27044,6 +27044,69 @@ mod terminal_layout {
         assert!(left_out(&ball(32.0), 3));
     }
 
+    /// A 188pt stage `stage_h` high holding an absolute ring `size` points
+    /// across at 34pt, framed by a 1pt line, with a 10pt dot in it when
+    /// `dot` (an orbit).
+    fn ring_in_a_stage(size: f32, stage_h: f32, dot: bool) -> MountBatch {
+        let mut ops = view(
+            2,
+            ROOT_ID,
+            &[("width", V::Number(188.0)), ("height", V::Number(stage_h))],
+        );
+        ops.extend(view(
+            3,
+            2,
+            &[
+                ("position", V::Str("absolute")),
+                ("left", V::Number(34.0)),
+                ("top", V::Number(34.0)),
+                ("width", V::Number(size)),
+                ("height", V::Number(size)),
+                ("borderRadius", V::Number(size / 2.0)),
+                ("borderWidth", V::Number(1.0)),
+                ("borderColor", V::Str("#888888")),
+            ],
+        ));
+        if dot {
+            ops.extend(view(
+                4,
+                3,
+                &[
+                    ("width", V::Number(10.0)),
+                    ("height", V::Number(10.0)),
+                    ("borderRadius", V::Number(5.0)),
+                    ("backgroundColor", V::Str("#3b82f6")),
+                ],
+            ));
+        }
+        laid_out(ops)
+    }
+
+    #[test]
+    fn an_absolute_ring_larger_than_an_icon_is_its_outline() {
+        // A pulse's ring: nothing in it, round, its own line; and an orbit
+        // around the dot on it, which is left out.
+        for dot in [false, true] {
+            let batch = ring_in_a_stage(120.0, 188.0, dot);
+            assert!(!left_out(&batch, 3), "dot: {dot}");
+            assert_eq!(
+                widths(&batch, 3),
+                Some(Edges::all(Points(1.0))),
+                "dot: {dot}"
+            );
+        }
+        assert!(left_out(&ring_in_a_stage(120.0, 188.0, true), 4));
+        // An icon's ring is left out as before.
+        assert!(left_out(&ring_in_a_stage(40.0, 188.0, false), 3));
+    }
+
+    #[test]
+    fn an_absolute_ring_its_parent_would_cut_is_left_out() {
+        // The stage is shorter than the ring: its outline would be open.
+        let batch = ring_in_a_stage(120.0, 64.0, false);
+        assert!(left_out(&batch, 3));
+    }
+
     /// A vertical scroll view 160pt (20 Cells) wide and 64pt high in a
     /// view of `parent` styles, holding a row whose text is at its right and
     /// a view `tall` points high; `scrollbar` set when given.

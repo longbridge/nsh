@@ -510,14 +510,15 @@ pub(crate) enum Splitter {
 
 /// A view that is no control and does not grow whose content is all left
 /// out (an icon's tile, circle or layer): it would be blank Cells, so it is
-/// left out with it. One of an opaque fill of its own larger than an icon
-/// ([`ICON`]) stays a box (a draggable ball around its dot): its fill is
-/// what it shows.
+/// left out with it. One larger than an icon ([`ICON`]) that draws
+/// something of its own, an opaque fill (a draggable ball around its dot)
+/// or an outline (an orbit around the dot on it), stays a box: that is what
+/// it shows.
 fn icon_layer(tree: &impl Tree, node: NodeId) -> bool {
     let role = tree.role(node);
     let style = tree.style(node);
-    let filled =
-        (role.fill.0 & 0xff == 0xff || role.animated_fill) && !left_out(style, LeftOut::IfIcon);
+    let filled = (role.fill.0 & 0xff == 0xff || role.animated_fill || outlined(role, style))
+        && !left_out(style, LeftOut::IfIcon);
     !role.control
         && !role.root
         && !role.scroll
@@ -748,7 +749,9 @@ fn insets(
         cells(dim(s.size.width, parent_width), Grid::cols)
             && cells(dim(s.size.height, None), Grid::rows)
     };
-    let bordered = (kind.container || outline || framed_empty) && !round(s, role, parent_width);
+    let ring = ring(tree, node, kind, parent_width);
+    let bordered =
+        ((kind.container || outline || framed_empty) && !round(s, role, parent_width)) || ring;
     let has = |v: LengthPercentage| i32::from(bordered && lp(v, parent_width) > 0.0);
     let border = Sides {
         l: has(s.border.left),
@@ -844,6 +847,18 @@ fn round(s: &Style, role: Role, parent_width: Option<f32>) -> bool {
         (None, None) => return role.radius >= FULLY_ROUND,
     };
     role.radius > 0.0 && role.radius * 2.0 >= side - EPSILON
+}
+
+/// A round box with nothing shown in it larger than an icon, of an
+/// outline of its own (a pulse's ring, an orbit): it is that outline,
+/// absolute or not, which the painter draws as a rounded box.
+fn ring(tree: &impl Tree, node: NodeId, kind: Kind, parent_width: Option<f32>) -> bool {
+    let (s, role) = (tree.style(node), tree.role(node));
+    round(s, role, parent_width)
+        && kind.empty
+        && !role.control
+        && outlined(role, s)
+        && !left_out(s, LeftOut::IfIcon)
 }
 
 /// Below this many columns a box of an explicit width is small
@@ -1050,6 +1065,16 @@ pub(crate) fn list_bar_room(
     }
 }
 
+/// Whether a box `role` styled `style` draws an outline of its own: a
+/// border of a color that shows, on any side.
+fn outlined(role: Role, style: &Style) -> bool {
+    let b = style.border;
+    !role.border_color.is_transparent()
+        && [b.left, b.right, b.top, b.bottom]
+            .iter()
+            .any(|&v| length(v.into_raw()).is_some_and(|v| v > 0.0))
+}
+
 /// The thinnest bar a terminal keeps a row for, in points: a quarter of a
 /// row (a progress line, a track). A hairline (a divider) takes none.
 const THIN_BAR: f32 = 4.0;
@@ -1061,12 +1086,7 @@ const THIN_BAR: f32 = 4.0;
 fn bar(tree: &impl Tree, node: NodeId, grid: Grid, parent_w: Option<f32>, height: f32) -> bool {
     let role = tree.role(node);
     let style = tree.style(node);
-    let outlined = !role.border_color.is_transparent() && {
-        let b = style.border;
-        [b.left, b.right, b.top, b.bottom]
-            .iter()
-            .any(|&v| length(v.into_raw()).is_some_and(|v| v > 0.0))
-    };
+    let outlined = outlined(role, style);
     (THIN_BAR - EPSILON..16.0 - EPSILON).contains(&height)
         && !role.control
         && !role.text
@@ -2425,7 +2445,8 @@ fn place(
 /// (laid out hidden) where it would cover the children in flow, `flow`
 /// (x, y, width, height in the padding box): a badge pinned on an avatar's
 /// corner, a layer over a box's content. Cells cannot be seen through, so
-/// one of the two would be lost; the content is kept.
+/// one of the two would be lost; the content is kept. A ring
+/// ([`ring`]) its parent's box would cut is left out too.
 fn place_absolute(
     tree: &mut impl Tree,
     grid: Grid,
@@ -2511,7 +2532,10 @@ fn place_absolute(
                 && sy < at.1 + h
                 && glyphs_on(tree, grid, sibling, sy, at.1)
         });
-    if hides {
+    // A ring that does not fit in its parent's box would be cut, its
+    // outline open: it is left out.
+    let cut = x < 0 || y < 0 || x + w > area.w || y + h > area.h;
+    if hides || (cut && ring(tree, node, kind(tree, node), pw)) {
         tree.layout(node, LayoutInput::HIDDEN);
         return;
     }

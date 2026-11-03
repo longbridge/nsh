@@ -362,7 +362,7 @@ as tall as its lines at 40 columns).
   specimen, a tile, a drop target) is a box around a single text too: it keeps its border, three rows; inside a frame,
   where its border gives way to its band, the band keeps the three rows, a row above and below its text. The core mounts each bordered view with the borders its layout gave Cells
   only (`Node::cell_border`), so the platform draws a border exactly where the layout reserved one; a control (a control's accessibility role, presses, a text input: `Core::is_control`) and a box of
-  text never have one, nor does a round box (a circle: corners of half its explicit width or height or more, or `rounded-full`).
+  text never have one, nor does a round box (a circle: corners of half its explicit width or height or more, or `rounded-full`), except a ring: a round box larger than an icon (over 48pt either way), no control, with nothing shown in it and a border of a color of its own (a pulse's ring, an orbit around its dot), absolute or not, which is that outline, drawn as a rounded box; an absolute one its parent's box would cut is left out.
   Horizontal padding and margins are one Cell from 8pt and two from 24pt (at most one on a
   control or a box of text); the margins of a box of layers (all its content absolute: a chart, whose axes' labels
   overflow it into them) are gutters of their size, whole Cells and rows, inside a bordered box too; vertical padding is a row from 24pt, none on a control or a box of text. So a bordered
@@ -432,8 +432,8 @@ scroll view too; **grids** take their columns from the template
   a view with nothing in it smaller than a row both ways and not growing (a status dot, a swatch), or a circle with
   nothing in it at most 48pt across that is no control (a radio's ring, an avatar's placeholder), which draws
   nothing in a terminal, and a view (no control, not growing) whose content is all left out (an icon's tile or
-  circle), unless it has an opaque fill of its own and is larger than an icon (over 48pt either way: a draggable
-  ball around its dot), which stays a box of that fill. A control whose content is all left out (an icon button; a layer that grows to center its icon, as a menu
+  circle), unless it is larger than an icon (over 48pt either way) and draws something of its own, an opaque fill (a
+  draggable ball around its dot) or an outline (an orbit around the dot on it), which stays a box. A control whose content is all left out (an icon button; a layer that grows to center its icon, as a menu
   trigger's chevron, counts as left out) shows its accessibility label in one row, one column per character, and is
   left out without one; a popup's trigger (its accessibility `expanded` set) shows one chevron, `▾` or `▴`, in one
   column instead. A disclosure (a control with `expanded` set and no `hasPopup`: a collapsible's or an accordion's

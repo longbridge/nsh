@@ -309,6 +309,13 @@ pub fn idiom() -> Idiom {
         .with_untracked(|e| e.idiom.reported_on(e.os))
 }
 
+/// [`idiom`] where an engine runs, else `None` (as [`try_os`]).
+pub(crate) fn try_idiom() -> Option<Idiom> {
+    super::reactive::try_with_data(|d| d.ambient.env.as_ref().map(|e| e.env))
+        .flatten()
+        .map(|env| env.with_untracked(|e| e.idiom.reported_on(e.os)))
+}
+
 /// Whether the app runs under Mac Catalyst, in every idiom (TS:
 /// `platform.catalyst`, [`Os::is_catalyst`]); Catalyst is mobile, not
 /// desktop.
