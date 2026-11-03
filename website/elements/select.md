@@ -243,6 +243,7 @@ choice draws nothing again. `renderGroup` draws a section's header the same way:
 | `defaultValue` | `.default_value(..)` | `string` | none | The value at first, without `value`. |
 | `open` | `.open(..)` | `boolean` | none | Open, owned by the app. |
 | `defaultOpen` | `.default_open(..)` | `boolean` | `false` | Open at first, without `open`. |
+| `placeholder` | `.placeholder(..)` | `string` | none | What the trigger says while no item is chosen: shown by a terminal's trigger without `trigger`, and heard by screen readers as its value. |
 | `searchable` | `.searchable(..)` | `boolean` | `false` | A search field above the items filters them by title. |
 | `searchPlaceholder` | `.search_placeholder(..)` | `string` | none | The search field's placeholder. |
 | `searchAccessibilityLabel` | `.search_accessibility_label(..)` | `string` | none | What screen readers call the search field: what it searches. |
@@ -346,8 +347,8 @@ pointer highlights the row it moves over; the highlighted row is revealed as the
 
 ## Accessibility
 
-- The trigger is a combobox for screen readers: its label is `accessibilityLabel`, its value the chosen item's title,
-  and it says whether the list is expanded. `disabled` dims it.
+- The trigger is a combobox for screen readers: its label is `accessibilityLabel`, its value the chosen item's title
+  (the `placeholder` while none is chosen), and it says whether the list is expanded. `disabled` dims it.
 - The clear button is a button named by `clearButtonAccessibilityLabel`; it is no stop of Tab.
 - The search field is a text field named by `searchAccessibilityLabel`; its placeholder is a hint shown while it is
   empty.

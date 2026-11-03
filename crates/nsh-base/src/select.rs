@@ -45,7 +45,7 @@ use nsh_core::{
 use crate::{
     listbox::{self, Hooks, Listbox, Move, Parts, Query, Shown},
     popup::{DropdownFrame, OpenChangeReason, OpenState},
-    terminal::{CLEAR, SELECT_ARROW, is_terminal},
+    terminal::{CLEAR, SELECT_ARROW, Tone, is_terminal, tone_color},
 };
 
 /// An item of a [`Select`]'s or a `Combobox`'s list.
@@ -214,6 +214,11 @@ pub struct SelectProps {
     /// Open at first, while `open` is not set.
     #[prop(default)]
     pub default_open: Prop<bool>,
+    /// What the trigger says while no item is chosen (`gpui-component`'s
+    /// `placeholder`): the app's words ("Choose a country"). A terminal's
+    /// trigger shows it, muted, where the app gives no `trigger`; screen
+    /// readers hear it as the trigger's value then.
+    pub placeholder: Prop<Option<SharedString>>,
     /// A search field above the items filters them by title (ignoring
     /// case); `empty` shows while none matches.
     #[prop(default)]
@@ -406,9 +411,9 @@ enum Opening {
 /// row and `selected:` for the chosen one) and the headers (`groupClass`),
 /// or draws them (`renderItem`, `renderGroup`).
 ///
-/// In a terminal the select shows the terminal's own trigger in place of
-/// the app's `trigger`: the chosen title (titles, comma separated), then
-/// ` ▾`, one row; with `cleanable` a ` ×` after it clears the value, in
+/// In a terminal the trigger is one row: the app's `trigger` content, or
+/// without one the chosen title (titles, comma separated) or, while nothing
+/// is chosen, the app's `placeholder`, muted; then ` ▾`; with `cleanable` a ` ×` after it clears the value, in
 /// place of `clearButton`. The list's rows are the items' titles, after
 /// `✓ ` while chosen, one full-width row each, which the terminal marks
 /// while highlighted (no `renderItem`, `renderGroup` or row classes there)
@@ -635,11 +640,21 @@ pub fn Select(props: SelectProps, cx: Scope<SelectEvent>) -> impl IntoElement {
                     ..AccessibilityState::default()
                 })
                 .accessibility_value(move || {
-                    current.with(|v| {
-                        props
-                            .items
-                            .with(|items| listbox::selected_titles(items, v.as_slice()))
-                    })
+                    current
+                        .with(|v| {
+                            props
+                                .items
+                                .with(|items| listbox::selected_titles(items, v.as_slice()))
+                        })
+                        .or_else(|| {
+                            props
+                                .placeholder
+                                .get()
+                                .map(|text| nsh_core::AccessibilityValue {
+                                    text: Some(std::sync::Arc::from(text.as_ref())),
+                                    ..nsh_core::AccessibilityValue::default()
+                                })
+                        })
                 })
                 .on_layout(move |frame: &Bounds<Points>| width.set(Some(frame.size.width)))
                 .on_focus(move || focused.set(true))
@@ -652,21 +667,40 @@ pub fn Select(props: SelectProps, cx: Scope<SelectEvent>) -> impl IntoElement {
     }
     let terminal = is_terminal();
     let trigger = match terminal {
-        // The terminal's own trigger, in place of the app's: the chosen
-        // titles, then ` ▾`, one row.
+        // The terminal's trigger, one row: the app's `trigger` (its
+        // content: a status's dot, its words), else the chosen titles or
+        // the placeholder (muted); then ` ▾`.
         true => {
             let titles = move || {
                 current.with(|v| {
                     props.items.with(|items| {
-                        listbox::selected_titles(items, v.as_slice())
-                            .and_then(|value| value.text)
-                            .unwrap_or_default()
+                        listbox::selected_titles(items, v.as_slice()).and_then(|value| value.text)
                     })
                 })
             };
+            let chosen = computed(move || titles().is_some());
+            let content = match untracked(|| props.trigger.with(Option::is_some)) {
+                true => props.trigger.place(|t| t),
+                false => text(move || {
+                    titles()
+                        .or_else(|| {
+                            props
+                                .placeholder
+                                .get()
+                                .map(|p| std::sync::Arc::from(p.as_ref()))
+                        })
+                        .unwrap_or_default()
+                })
+                .style_when(
+                    move || !chosen.get(),
+                    |s| s.text_color(tone_color(Tone::Muted)),
+                )
+                .into_element(),
+            };
             bind_trigger!(view())
                 .flex_row()
-                .child(text(titles))
+                .items_center()
+                .child(content)
                 .child(text(SELECT_ARROW))
                 .into_element()
         }
