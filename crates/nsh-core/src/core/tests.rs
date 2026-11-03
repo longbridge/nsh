@@ -25119,39 +25119,42 @@ mod terminal_layout {
         );
         // `col-span-2`, then one track; `row-span-2` under the span, then
         // two tracks beside it.
+        // (A text takes two ids, its own and its raw text's.)
         ops.extend(view(3, 2, &[("gridColumn", s("span 2"))]));
         ops.extend(text(4, 3, "wide"));
-        ops.extend(text(5, 2, "a"));
-        ops.extend(view(6, 2, &[("gridRow", s("span 2"))]));
-        ops.extend(text(7, 6, "tall"));
-        ops.extend(text(8, 2, "b"));
-        ops.extend(text(9, 2, "c"));
-        ops.extend(text(10, 2, "d"));
+        ops.extend(text(6, 2, "a"));
+        ops.extend(view(8, 2, &[("gridRow", s("span 2"))]));
+        ops.extend(text(10, 8, "tall"));
+        ops.extend(text(12, 2, "b"));
+        ops.extend(text(14, 2, "c"));
+        ops.extend(text(16, 2, "d"));
         let batch = laid_out(ops);
         let at = |id| {
             frame_of(&batch, id)
                 .map(|f| (f.origin.x.0, f.origin.y.0, f.size.width.0, f.size.height.0))
         };
         assert_eq!(at(3), Some((0.0, 0.0, 160.0, 16.0)));
-        assert_eq!(at(5), Some((160.0, 0.0, 80.0, 16.0)));
-        assert_eq!(at(6), Some((0.0, 16.0, 80.0, 32.0)));
-        assert_eq!(at(8), Some((80.0, 16.0, 80.0, 16.0)));
-        assert_eq!(at(9), Some((160.0, 16.0, 80.0, 16.0)));
+        assert_eq!(at(6), Some((160.0, 0.0, 80.0, 16.0)));
+        assert_eq!(at(8), Some((0.0, 16.0, 80.0, 32.0)));
+        assert_eq!(at(12), Some((80.0, 16.0, 80.0, 16.0)));
+        assert_eq!(at(14), Some((160.0, 16.0, 80.0, 16.0)));
         // The next row's first free track is beside the tall item.
-        assert_eq!(at(10), Some((80.0, 32.0, 80.0, 16.0)));
+        assert_eq!(at(16), Some((80.0, 32.0, 80.0, 16.0)));
     }
 
     #[test]
     fn a_charts_margins_are_gutters_of_their_size() {
-        // A chart (a box of layers) 400pt wide keeping 58pt at its right
-        // and 21pt below for its axes' labels, in a bordered card: seven
-        // Cells and a row; a box of content keeps two Cells of spacing.
+        // A chart (a box of layers) keeping 58pt at its right and 21pt
+        // below for its axes' labels, in a bordered card as wide as the
+        // 320pt viewport (a box never lays a child out past its own
+        // border, so a wider card would be held to it): seven Cells and a
+        // row; a box of content keeps two Cells of spacing.
         let mut ops = view(
             2,
             ROOT_ID,
             &[
                 ("alignSelf", V::Str("flex-start")),
-                ("width", V::Number(400.0)),
+                ("width", V::Number(320.0)),
                 ("borderWidth", V::Number(1.0)),
             ],
         );
@@ -25179,8 +25182,8 @@ mod terminal_layout {
         let batch = laid_out(ops);
         let chart = frame_of(&batch, 3).unwrap();
         let below = frame_of(&batch, 10).unwrap();
-        assert_eq!(chart.size.width, px(400.0 - 16.0 - 56.0), "{chart:?}");
-        assert_eq!(below.size.width, px(400.0 - 16.0 - 16.0), "{below:?}");
+        assert_eq!(chart.size.width, px(320.0 - 16.0 - 56.0), "{chart:?}");
+        assert_eq!(below.size.width, px(320.0 - 16.0 - 16.0), "{below:?}");
         assert_eq!(
             below.origin.y,
             chart.origin.y + chart.size.height + px(16.0)
