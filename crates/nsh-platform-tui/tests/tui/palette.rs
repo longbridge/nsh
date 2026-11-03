@@ -1599,3 +1599,60 @@ fn a_color_area_s_picked_cell_is_reversed_while_it_has_the_focus() {
         |buffer| mark(buffer).contains(Modifier::REVERSED),
     );
 }
+
+/// A palette row of pale tints (Tailwind's `red-100` and `sky-100`, leaf
+/// boxes), and a card of the same pale red holding text.
+#[component]
+fn PaleTints() -> impl IntoElement {
+    view()
+        .flex_1()
+        .child(
+            view()
+                .flex_row()
+                .child(
+                    view()
+                        .w(px(32.0))
+                        .h(px(16.0))
+                        .bg(nsh_core::color::rgb(0xfee2e2)),
+                )
+                .child(
+                    view()
+                        .w(px(32.0))
+                        .h(px(16.0))
+                        .bg(nsh_core::color::rgb(0xe0f2fe)),
+                ),
+        )
+        .child(
+            view()
+                .bg(nsh_core::color::rgb(0xfee2e2))
+                .child(text("card")),
+        )
+        .child(text("ready"))
+}
+
+#[test]
+fn a_pale_leaf_box_keeps_its_hue_and_a_pale_card_is_a_step() {
+    let (mut view, rx) = surfaces();
+    let mut terminal = Terminal::new(TestBackend::new(16, 6)).unwrap();
+    view.load(App::Rust(Root::new::<PaleTints>(|| ()))).unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "ready");
+    let buffer = terminal.backend().buffer();
+    assert_eq!(
+        buffer[(0, 0)].bg,
+        Color::Rgb(0xfe, 0xe2, 0xe2),
+        "red-100 is its own color"
+    );
+    assert_eq!(
+        buffer[(4, 0)].bg,
+        Color::Rgb(0xe0, 0xf2, 0xfe),
+        "sky-100 is its own color"
+    );
+    let card = buffer[(0, row_of(buffer, "card"))].bg;
+    let Color::Rgb(r, g, b) = card else {
+        panic!("the card is a step of the ramp: {card:?}");
+    };
+    assert!(
+        r == g && g == b,
+        "a card holding text is a gray step: {card:?}"
+    );
+}

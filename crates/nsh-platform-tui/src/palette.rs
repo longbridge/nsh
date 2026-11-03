@@ -37,6 +37,10 @@ use crate::ColorDepth;
 /// The chroma (largest minus smallest channel, of 255) from which a color
 /// reads as an accent rather than a shade of gray.
 const SATURATED_CHROMA: f32 = 0.2 * 255.0;
+/// The chroma from which a fill too faint to be an accent still has a hue
+/// of its own (Tailwind's pale `-100` tints); its neutral grays and its
+/// lightest slates stay under it.
+const PALE_CHROMA: f32 = 16.0;
 /// The CIE L* distance from the ground from which a neutral color is the
 /// default foreground rather than dim.
 const DEFAULT_CONTRAST: f32 = 75.0;
@@ -559,6 +563,15 @@ pub(crate) fn surface(fill: nsh_core::Color, ground: Ground) -> Surface {
     } else {
         Surface::None
     }
+}
+
+/// Whether `color` is a pale tint: a fill of some hue (its channels at
+/// least [`PALE_CHROMA`] apart) too faint to read as an accent
+/// ([`SATURATED_CHROMA`]), such as Tailwind's `red-100`.
+pub(crate) fn pale_tint(color: nsh_core::Color) -> bool {
+    let [r, g, b, alpha] = color.0.to_be_bytes();
+    let chroma = f32::from(r.max(g).max(b) - r.min(g).min(b));
+    alpha >= FILLED_ALPHA && (PALE_CHROMA..SATURATED_CHROMA).contains(&chroma)
 }
 
 /// Whether `color` is hued (its channels 51 or more apart), the terminal

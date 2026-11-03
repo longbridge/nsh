@@ -425,7 +425,17 @@ impl Painter<'_> {
         // A view in the image role is a picture, which keeps its colors:
         // its fill is its own color at the terminal's depth, not a step of
         // the ramp (a color picker's swatches and track Cells).
-        let swatch = (view.props.accessibility.role == AccessibilityRole::Image)
+        // A leaf box (no children, no text: a palette's color block) of a
+        // pale tint keeps its own color too: as a step of the ramp it would
+        // be the same gray as every other light fill and lose its hue. Only
+        // a box that holds content is a surface of the ramp.
+        let pale_leaf = !page
+            && !dot
+            && !control
+            && view.children.is_empty()
+            && view.text.is_none()
+            && palette::pale_tint(fill);
+        let swatch = (view.props.accessibility.role == AccessibilityRole::Image || pale_leaf)
             .then(|| palette::swatch(fill, parent))
             .flatten();
         if filled != Surface::None {
@@ -1957,12 +1967,14 @@ fn mark_surface(
     // whose row has no room for its line (a button's focus ring) is banded.
     let framed = focused && recolor_border(buffer, bounds, visible, edges, ramp.focus_line());
     // A covered control, and one with no glyph no label to underline:
-    // its focus is an accent underline under its Cells.
+    // its focus is an accent underline under its Cells. A swatch (all
+    // fill, no glyph) may be the accent's own color: its underline is in
+    // the color that reads on the fill, as its check is.
     let glyphs = (inner.y..inner.bottom())
         .any(|y| (inner.x..inner.right()).any(|x| buffer[(x, y)].symbol() != " "));
     let marked = focused && !framed && !container && (covered || !glyphs);
     if marked {
-        focus_underline(buffer, visible);
+        focus_underline(buffer, visible, covered && !glyphs);
     }
     if selected {
         band(buffer, visible, step(SELECT), own);
@@ -2077,13 +2089,17 @@ fn holds_list(tree: &Mounter, id: NodeId, depth: usize) -> bool {
 }
 
 /// The accent underline under every Cell of `rect`: the focus of a
-/// control a band cannot show.
-fn focus_underline(buffer: &mut Buffer, rect: Rect) {
+/// control a band cannot show. On a `fill` (a swatch's color) the
+/// underline is in the color that reads on it (`palette::mark_on`).
+fn focus_underline(buffer: &mut Buffer, rect: Rect, fill: bool) {
     for y in rect.y..rect.bottom() {
         for x in rect.x..rect.right() {
             let cell = &mut buffer[(x, y)];
             cell.modifier.insert(Modifier::UNDERLINED);
-            cell.underline_color = ACCENT;
+            cell.underline_color = match fill.then(|| palette::mark_on(cell.bg)) {
+                Some(color) if color != Color::Reset => color,
+                _ => ACCENT,
+            };
         }
     }
 }
