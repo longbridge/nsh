@@ -394,3 +394,34 @@ fn a_terminals_quote_has_a_bar_and_its_rule_is_a_row_of_lines() {
     let texts = started(Idiom::Desktop);
     assert!(!texts.iter().any(|t| t == "│" || rule(t)), "{texts:?}");
 }
+
+#[test]
+fn a_terminals_caret_is_a_cell_holding_the_character_after_it() {
+    let started = |idiom: Idiom| {
+        let mut config = EngineConfig {
+            viewport: Size::new(px(800.0), px(900.0)),
+            ..EngineConfig::new(Root::new::<Harness>(|| HarnessProps {
+                session: Some(session(json!({"type": "doc", "content": [
+                    {"type": "paragraph", "content": [{"type": "text", "text": "Hi"}]},
+                ]}))),
+            }))
+        };
+        config.environment.os = Os::Linux;
+        config.environment.idiom = idiom;
+        let mut app = Headless::start(config).expect("the engine starts");
+        app.wait_for("text:Ready").unwrap();
+        app.screen()
+            .texts()
+            .into_iter()
+            .map(str::to_owned)
+            .collect::<Vec<_>>()
+    };
+    // The caret at the document's start holds its first character, over
+    // the text, which stays whole.
+    let texts = started(Idiom::Terminal);
+    assert!(texts.iter().any(|t| t == "H"), "no caret cell in {texts:?}");
+    assert!(texts.iter().any(|t| t == "Hi"), "{texts:?}");
+    // Elsewhere the caret is a bar, with no text.
+    let texts = started(Idiom::Desktop);
+    assert!(!texts.iter().any(|t| t == "H"), "{texts:?}");
+}

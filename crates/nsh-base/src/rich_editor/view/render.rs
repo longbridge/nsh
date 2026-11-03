@@ -1306,6 +1306,33 @@ fn caret(rv: Rv) -> impl IntoElement {
         if !empty_text {
             return None;
         }
+        let visible = move || {
+            if focused.get() && blink.get() {
+                1.0_f32
+            } else {
+                0.0
+            }
+        };
+        // A terminal's caret is the terminal's own: one Cell in inverse
+        // colors holding the character after it (a space at a line's end),
+        // so it shows on the grid and hides no text.
+        if crate::terminal::is_terminal() {
+            let b = rv.caret_rect()?;
+            let after = rv.char_after_caret();
+            let width = measure_text("", &after).max(measure_text("", "0"));
+            return Some(part(
+                rect(Bounds::new(b.origin, Size::new(width, b.size.height)))
+                    .bg(move || theme().foreground)
+                    .opacity(visible)
+                    .child(
+                        text(after)
+                            .number_of_lines(1u32)
+                            .text_color(move || theme().background),
+                    ),
+                &rv,
+                Part::Caret,
+            ));
+        }
         let b = rv.caret_glyph_rect()?;
         // On whole device pixels: a caret between pixels is drawn smeared
         // over two, wider or narrower as it moves (gpui-kit's fix).
@@ -1317,13 +1344,7 @@ fn caret(rv: Rv) -> impl IntoElement {
                 Size::new(width, snap(b.size.height)),
             ))
             .bg(move || theme().foreground)
-            .opacity(move || {
-                if focused.get() && blink.get() {
-                    1.0_f32
-                } else {
-                    0.0
-                }
-            }),
+            .opacity(visible),
             &rv,
             Part::Caret,
         ))

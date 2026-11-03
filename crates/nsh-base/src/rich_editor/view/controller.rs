@@ -2079,6 +2079,29 @@ impl Rv {
         self.geo.borrow().caret_rect(sel.head(), sel.affinity())
     }
 
+    /// The character after the caret in its textblock, as a terminal's
+    /// caret holds it: a space at the block's end or before what is not
+    /// text (a line break, an atom).
+    pub(crate) fn char_after_caret(&self) -> String {
+        let state = self.st.borrow();
+        let head = state.selection().head();
+        let doc = state.doc();
+        let Ok(at) = doc.resolve(head) else {
+            return " ".into();
+        };
+        let left = at
+            .parent()
+            .content()
+            .size()
+            .saturating_sub(at.parent_offset);
+        // Two units at most: a character beyond the BMP is two of UTF-16.
+        let text = doc.text_between(head, head + left.min(2), None, None);
+        match text.chars().next() {
+            Some(c) if !c.is_control() => c.to_string(),
+            _ => " ".into(),
+        }
+    }
+
     /// The caret as drawn: the glyphs' height of its line.
     pub(crate) fn caret_glyph_rect(&self) -> Option<Bounds<Points>> {
         let state = self.st.borrow();
