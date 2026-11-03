@@ -1,8 +1,8 @@
-import { type Bounds, Canvas, type CanvasRenderingContext2D, cleanup, Scroll, signal, Text, View } from "nsh";
+import { type Bounds, Canvas, type CanvasRenderingContext2D, cleanup, type JSX, Scroll, signal, Text, View } from "nsh";
 import { Animated, type AnimatedNode, type CompositeAnimation, createAnimatedValue, createMotion, Easing, LayoutAnimation, type LayoutAnimationConfig, type MotionName, type MotionPreset, type MotionSpec, motions } from "nsh";
 import { Button as BaseButton, Tab, Tabs } from "nsh/base";
 import { Icon } from "../icons";
-import { alpha, Badge, Button, Caption, Card, colors, DemoPage, finish, isDark, Legend, mono, type Palette, radius, Segmented, tabPress, tints } from "../ui";
+import { alpha, Badge, Button, Caption, Card, colors, DemoPage, finish, isDark, Legend, mono, type Palette, radius, Segmented, tabPress, TERMINAL_GAP, terminal, tints } from "../ui";
 
 /** The tones of the demos' dots and tiles (call in a reactive scope). */
 const tones = () => [colors.accent, colors.info, colors.warn, colors.danger, colors.up];
@@ -231,8 +231,7 @@ function MotionPresets() {
   const names = () => presetNames.filter((n) => motions[n].kind === kind());
   return (
     <Card icon="spark" title="Motion presets" subtitle={`${presetNames.length} ready-made motions, played natively`} right={<Badge label={status()} tone="accent" />}>
-      <Scroll horizontal scrollbar={false}>
-        <Tabs style={{ flexDirection: "row", gap: 8 }}>
+      <ChipRow>
           <Each of={kinds}>
             {(k) => (
               <Chip
@@ -245,8 +244,7 @@ function MotionPresets() {
               />
             )}
           </Each>
-        </Tabs>
-      </Scroll>
+      </ChipRow>
       <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
         <Each of={names()}>{(name, i) => <PresetTile name={name()} tone={tones()[i() % tones().length]} onPlay={(s) => status.set(s)} />}</Each>
       </View>
@@ -719,8 +717,7 @@ function EasingPlot() {
           cx.fill();
         }}
       />
-      <Scroll horizontal scrollbar={false}>
-        <Tabs style={{ flexDirection: "row", gap: 8 }}>
+      <ChipRow>
           <Each of={curves}>
             {(c, i) => (
               <Chip
@@ -733,8 +730,7 @@ function EasingPlot() {
               />
             )}
           </Each>
-        </Tabs>
-      </Scroll>
+      </ChipRow>
       <Button label="Play" icon="play" onPress={play} />
     </Card>
   );
@@ -784,6 +780,17 @@ function EasingRace() {
 }
 
 /** A selectable capsule, a tab of the curves (36 pt, with hit slop up to 44). */
+/** A row of chips: scrolled sideways, or wrapped in a terminal, whose
+ * columns would cut the last chips off. */
+function ChipRow(props: { children: JSX.Element }) {
+  if (terminal) return <Tabs style={{ flexDirection: "row", flexWrap: "wrap", columnGap: TERMINAL_GAP }}>{props.children}</Tabs>;
+  return (
+    <Scroll horizontal scrollbar={false}>
+      <Tabs style={{ flexDirection: "row", gap: 8 }}>{props.children}</Tabs>
+    </Scroll>
+  );
+}
+
 function Chip(props: { label: string; active?: boolean; onPress: () => void }) {
   return (
     <Tab

@@ -298,6 +298,12 @@ fn a_focused_component_gets_arrows_before_spatial_focus_movement() {
     // button below it is not pressed by Enter.
     assert_eq!(view.handle(key("Down", Default::default())), Handled::Yes);
     draw_until(&mut view, &mut terminal, &rx, "value 55 presses 0");
+    // Ctrl+F and Ctrl+B are the terminal's Right and Left: the slider's own
+    // bindings of the arrows answer them, before they move the focus.
+    assert_eq!(view.handle(ctrl("f")), Handled::Yes);
+    draw_until(&mut view, &mut terminal, &rx, "value 60 presses 0");
+    assert_eq!(view.handle(ctrl("b")), Handled::Yes);
+    draw_until(&mut view, &mut terminal, &rx, "value 55 presses 0");
     view.handle(key("Enter", Default::default()));
     draw_until(&mut view, &mut terminal, &rx, "value 55 presses 0");
     view.handle(key("Tab", Default::default()));

@@ -49,6 +49,22 @@ pub(crate) fn keystroke(name: &str, mut modifiers: Modifiers) -> Option<Keystrok
     Some(Keystroke { key, modifiers })
 }
 
+/// The arrow key a terminal alias stands for (`Ctrl+F` is Right, `Ctrl+B`
+/// Left), so the app's bindings of the arrows (a tab list's, a radio
+/// group's roving keys) answer the alias as they answer the arrow before it
+/// falls back to moving the focus.
+pub(crate) fn arrow(stroke: Keystroke) -> Option<Keystroke> {
+    let key = match terminal(stroke)? {
+        Action::Right if stroke.modifiers.ctrl => Key::Right,
+        Action::Left if stroke.modifiers.ctrl => Key::Left,
+        _ => return None,
+    };
+    Some(Keystroke {
+        key,
+        modifiers: Modifiers::default(),
+    })
+}
+
 pub(crate) fn terminal(stroke: Keystroke) -> Option<Action> {
     let Keystroke { key, modifiers: m } = stroke;
     if m.cmd {

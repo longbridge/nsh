@@ -168,6 +168,9 @@ pub struct AppView {
     repaint: bool,
     pointer: Pointer,
     bar_drag: Option<crate::input::BarDrag>,
+    /// Scroll views moved since they last came to rest: settled (the
+    /// animator's `scroll_ended`) once no drag holds them.
+    unsettled: Vec<nsh_core::NodeId>,
     cursor_style: crate::CursorStyle,
     on_cursor_style: Option<Box<dyn FnMut(crate::CursorStyle)>>,
     selection: crate::selection::Selection,
@@ -242,6 +245,7 @@ impl AppView {
             repaint: false,
             pointer: Pointer::default(),
             bar_drag: None,
+            unsettled: Vec::new(),
             cursor_style: crate::CursorStyle::Default,
             on_cursor_style: None,
             selection: Default::default(),
@@ -774,7 +778,11 @@ impl AppView {
                 &self.tree,
                 &self.geometry,
                 self.clipboard.as_ref(),
-            ) {
+            )
+            || crate::key_scheme::arrow(stroke).is_some_and(|arrow| {
+                self.keyboard
+                    .shortcut(&self.tree, arrow, repeat, command_key, &control)
+            }) {
             Handled::Yes
         } else if let Some(crate::key_scheme::Action::Search(forward)) =
             crate::key_scheme::terminal(stroke)
@@ -1115,7 +1123,29 @@ impl AppView {
                 }
             }
         }
+        // A scroll view's offset feeds the animation graph's scroll values
+        // (a looping carousel's runway follows it), as on every platform; a
+        // terminal's scrolling is instant, so it comes to rest as soon as
+        // no drag holds it.
+        for &id in &self.tree.scrolled {
+            if let Some(view) = self.tree.get(id)
+                && let Some(scroll) = &view.scroll
+            {
+                let offset = scroll.reported(view.frame.size);
+                self.tree.animator.scrolled(id, offset);
+                if !self.unsettled.contains(&id) {
+                    self.unsettled.push(id);
+                }
+            }
+        }
         self.tree.scrolled.clear();
+        if !self.pointer.dragging() && self.bar_drag.is_none() {
+            for id in std::mem::take(&mut self.unsettled) {
+                if self.tree.animator.scroll_ended(id) {
+                    self.surface.request_frame();
+                }
+            }
+        }
         if let Some(engine) = &self.surface.engine {
             for _ in 0..std::mem::take(&mut self.tree.back_requests) {
                 crate::navigation::back(&mut self.tree, &engine.control(), false);

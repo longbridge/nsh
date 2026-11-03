@@ -1120,6 +1120,13 @@ pub(crate) fn compute(
         // rows.
         surface.is_some() || pad(s.padding.top) || pad(s.padding.bottom)
     };
+    // A frame stated three rows tall or more (a stage a specimen stands
+    // on, a tile) is drawn as a box, whatever little it holds: its border
+    // is what it shows.
+    let tall = {
+        let h = tree.style(node).size.height.into_raw();
+        length(h).is_some_and(|h| h >= 3.0 * grid.height - EPSILON)
+    };
     let perform = inputs.run_mode == RunMode::PerformLayout;
     let mut flow = Vec::new();
     let mut absolute = Vec::new();
@@ -1247,7 +1254,7 @@ pub(crate) fn compute(
                 clamp(eh.map_or(h, |e| h.min(e)), min_h, max_h)
             }),
         };
-        if !card && border != Sides::default() && content.h < 2 {
+        if !card && !tall && border != Sides::default() && content.h < 2 {
             attempt_kind.container = false;
             (border, padding) = insets(tree, node, attempt_kind, parent_w, grid, None);
             inset = border.add(padding);

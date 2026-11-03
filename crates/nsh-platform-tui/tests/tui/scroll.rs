@@ -525,3 +525,62 @@ fn horizontal_and_oversized_reveals_keep_the_core_margin_and_leading_edge() {
     // The horizontal Scroll is its content's one row, so this one starts at row 2.
     assert_eq!(buffer[(0, 3)].symbol(), "t");
 }
+
+/// A scroll view whose offset drives a mark's translation through the
+/// animation graph (as a looping carousel's runway follows its offset).
+#[component]
+fn ScrollValue() -> impl IntoElement {
+    let offset = animated_value(0.0);
+    let mut rows = scroll()
+        .absolute()
+        .left(px(0.0))
+        .top(px(0.0))
+        .w(px(80.0))
+        .h(px(32.0))
+        .scroll_value(&offset);
+    for index in 0..12 {
+        rows = rows.child(
+            view()
+                .h(px(16.0))
+                .flex_shrink_0()
+                .child(text(format!("row {index}"))),
+        );
+    }
+    view().flex_1().child(rows).child(
+        view()
+            .absolute()
+            .left(px(120.0))
+            .top(px(0.0))
+            .bind_translate_y(&offset)
+            .child(text("mark")),
+    )
+}
+
+#[test]
+fn a_scroll_views_offset_feeds_its_bound_scroll_value() {
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(24, 12)).unwrap();
+    view.load(App::Rust(Root::new::<ScrollValue>(|| ())))
+        .unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "mark");
+    let row_of_mark = |terminal: &Terminal<TestBackend>| {
+        let buffer = terminal.backend().buffer();
+        (0..buffer.area.height).find(|&y| buffer[(15, y)].symbol() == "m")
+    };
+    assert_eq!(row_of_mark(&terminal), Some(0));
+    let mut input = nsh_platform_tui::MouseInput::default();
+    input.column = 2;
+    input.row = 1;
+    input.kind = nsh_platform_tui::MouseKind::Wheel { x: 0, y: 1 };
+    assert_eq!(view.handle(Input::Mouse(input)), Handled::Yes);
+    for _ in 0..20 {
+        let _ = rx.recv_timeout(std::time::Duration::from_millis(50));
+        terminal
+            .draw(|frame| view.render(frame, frame.area()))
+            .unwrap();
+        if row_of_mark(&terminal).is_some_and(|row| row > 0) {
+            return;
+        }
+    }
+    panic!("the mark follows the offset: {:?}", row_of_mark(&terminal));
+}

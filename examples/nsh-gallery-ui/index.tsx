@@ -333,11 +333,13 @@ export function Badge(props: { label: string; tone?: Tone; outline?: boolean }) 
 /** A label above a value, for grids of figures; on one row in the terminal,
  * the value right-aligned. */
 export function Stat(props: { label: string; value: string; tone?: Tone; width?: `${number}%` }) {
+  // The label above its value in the terminal too: two rows, so stats set
+  // side by side keep apart and each value stays under its label.
   return (
     <View
       style={
         terminal
-          ? { width: props.width, height: TERMINAL_ROW, flexDirection: "row", gap: TERMINAL_COLUMN }
+          ? { width: props.width }
           : { width: props.width, gap: 3, paddingVertical: 4 }
       }
     >

@@ -213,6 +213,11 @@ impl Pointer {
     }
 
     /// Consecutive clicks of the last press: 2 for a double click, 3 for a triple click.
+    /// Whether a drag is held: a scroll view it moves has not come to rest.
+    pub(crate) fn dragging(&self) -> bool {
+        self.drag.is_some()
+    }
+
     pub(crate) fn clicks(&self) -> u32 {
         self.clicks.count.max(1)
     }

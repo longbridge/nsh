@@ -1719,7 +1719,7 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
               clearButtonAccessibilityLabel="Clear the font"
               clearButtonClass="items-center justify-center rounded-full enabled:hover:bg-accent active:bg-track"
               clearButtonStyle={terminal ? undefined : { position: "absolute", top: (size.line - size.clear) / 2, right: clearInset, width: size.clear, height: size.clear }}
-              clearButton={<Icon name="close" size={size.clear - 6} tint={colors.muted} />}
+              clearButton={clearGlyph()}
               trigger={<Picker title={font() === null ? "Default" : titleOf(FONTS, font())} open={fontOpen()} placeholder={font() === null} clearable={font() !== null} />}
               renderItem={(item) => <Option item={item} note={item.disabled ? "Not installed" : undefined} />}
               renderGroup={(group) => <Header group={group} />}
@@ -1744,6 +1744,8 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
     itemClass: optionClass,
   });
   /** A clear button over the trigger's end, in place of its chevron (`Picker`'s `clearable`). */
+  /** A clear button's mark: an × in a terminal, which draws no icons. */
+  const clearGlyph = () => (terminal ? <Text style={{ color: colors.muted }}>×</Text> : <Icon name="close" size={size.clear - 6} tint={colors.muted} />);
   const clearProps = (label: string) => ({
     cleanable: true,
     clearButtonAccessibilityLabel: label,
@@ -1751,7 +1753,7 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
     // A terminal sets the clear button after the value, in the row: placed
     // over it, its label ("Clear the deadline") would cover the value.
     clearButtonStyle: terminal ? undefined : { position: "absolute" as const, top: (size.line - size.clear) / 2, right: clearInset, width: size.clear, height: size.clear },
-    clearButton: <Icon name="close" size={size.clear - 6} tint={colors.muted} />,
+    clearButton: clearGlyph(),
   });
 
   function Downloads() {
@@ -2029,7 +2031,7 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
               clearButtonAccessibilityLabel="Clear the topics"
               clearButtonClass="items-center justify-center rounded-full enabled:hover:bg-accent active:bg-track"
               clearButtonStyle={{ width: size.clear, height: size.clear }}
-              clearButton={<Icon name="close" size={size.clear - 6} tint={colors.muted} />}
+              clearButton={clearGlyph()}
               footerStyle={{ marginTop: 6, paddingTop: 6, paddingHorizontal: 9, borderTopWidth: 1, borderColor: colors.border }}
               footer={<Text style={{ fontSize: 12, color: colors.muted }}>{`${topics().length} selected`}</Text>}
               renderItem={(item) => <Option item={item} note={item.disabled ? "Archived" : undefined} />}
@@ -2472,7 +2474,7 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
               clearButtonAccessibilityLabel="Clear the due date"
               clearButtonClass="items-center justify-center rounded-full enabled:hover:bg-accent active:bg-track"
               clearButtonStyle={terminal ? undefined : { position: "absolute", top: (size.line - size.clear) / 2, right: clearInset, width: size.clear, height: size.clear }}
-              clearButton={<Icon name="close" size={size.clear - 6} tint={colors.muted} />}
+              clearButton={clearGlyph()}
               trigger={<Picker title={due() ? shortDate(due()!) : "No due date"} open={dueOpen()} placeholder={!due()} clearable={due() !== null} />}
             />
           </View>
