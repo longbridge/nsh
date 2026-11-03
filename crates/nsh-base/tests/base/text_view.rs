@@ -2,8 +2,7 @@
 //! inline links are stops of Tab, pressed with Return.
 
 use nsh_base::{
-    TextViewClasses, TextViewLinkPressEvent, TextViewPart, TextViewParts, TextViewStyles,
-    text_view,
+    TextViewClasses, TextViewLinkPressEvent, TextViewPart, TextViewParts, TextViewStyles, text_view,
 };
 use nsh_core::{
     StyleKey,
@@ -107,7 +106,9 @@ fn Links() -> impl IntoElement {
                 .on_focus(move || after.set(true))
                 .child(text("After")),
         )
-        .child(text(move || format!("Pressed: {}", pressed.get().join(" "))))
+        .child(text(move || {
+            format!("Pressed: {}", pressed.get().join(" "))
+        }))
         .child(text(move || format!("After focused: {}", after.get())))
 }
 
@@ -123,7 +124,8 @@ fn tab_reaches_a_documents_links_in_order_and_return_presses_them() {
     app.wait_for("Pressed: https://example.com/guide").unwrap();
     app.press_key("tab").unwrap();
     app.press_key("enter").unwrap();
-    app.wait_for("Pressed: https://example.com/guide #notes").unwrap();
+    app.wait_for("Pressed: https://example.com/guide #notes")
+        .unwrap();
     assert!(app.shows("After focused: false"), "the links came first");
     app.press_key("tab").unwrap();
     app.wait_for("After focused: true").unwrap();

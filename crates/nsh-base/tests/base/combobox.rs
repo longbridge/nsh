@@ -13,7 +13,12 @@ use std::{
 };
 
 use nsh_base::{ComboboxEvent, SelectEntry, SelectItem, combobox};
-use nsh_core::{AccessibilityRole, MountItem, Size, element::Root, platform::{Idiom, Os}, prelude::*};
+use nsh_core::{
+    AccessibilityRole, MountItem, Size,
+    element::Root,
+    platform::{Idiom, Os},
+    prelude::*,
+};
 use nsh_engine::EngineConfig;
 use nsh_testing::Headless;
 
@@ -579,5 +584,10 @@ fn the_tap_that_focuses_the_input_on_a_phone_opens_the_list_once() {
     // sheet's backdrop covers the input after that).
     app.wait(Duration::from_millis(300)).unwrap();
     app.wait_for("role:listbox").unwrap();
-    assert_eq!(app.log().matches("openChange").count(), 1, "the log: {}", app.log());
+    assert_eq!(
+        app.log().matches("openChange").count(),
+        1,
+        "the log: {}",
+        app.log()
+    );
 }

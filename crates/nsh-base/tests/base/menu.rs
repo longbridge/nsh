@@ -5,7 +5,8 @@
 //! closes the menu unless `closeOnSelect` is false; toggling one item sends
 //! only that item and its indicator; opening it from the keyboard (Return,
 //! Space or Down on its trigger) focuses its first enabled item, Up its
-//! last, a press none. A desktop menu, on a Mac.
+//! last, a press none; closing it with Escape or a choice gives the focus
+//! back to its trigger. A desktop menu, on a Mac.
 
 use std::{
     collections::HashMap,
@@ -381,6 +382,30 @@ fn opening_from_the_keyboard_focuses_the_first_enabled_item() {
 fn up_on_the_trigger_focuses_the_last_item() {
     let mut app = open_with_key_and_choose("up");
     app.app.wait_for("text:chose:Quit").unwrap();
+}
+
+#[test]
+fn escape_and_a_choice_give_the_focus_back_to_the_trigger() {
+    let mut app = start_with(Root::of::<FileMenu>());
+    app.app.press_key("tab").unwrap();
+    app.app.press_key("enter").unwrap();
+    app.app.wait_for("Open").unwrap();
+    // Escape closes it, and the focus, gone with its item, is the
+    // trigger's again: its keys open it once more.
+    app.app.press_key("escape").unwrap();
+    app.app
+        .wait_for_gone("Open", std::time::Duration::from_secs(2))
+        .unwrap();
+    app.app.press_key("enter").unwrap();
+    app.app.wait_for("Open").unwrap();
+    // So does a choice.
+    app.app.press_key("space").unwrap();
+    app.app.wait_for("text:chose:Open").unwrap();
+    app.app
+        .wait_for_gone("Save", std::time::Duration::from_secs(2))
+        .unwrap();
+    app.app.press_key("up").unwrap();
+    app.app.wait_for("Quit").unwrap();
 }
 
 #[test]

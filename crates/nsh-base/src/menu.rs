@@ -210,6 +210,14 @@ fn surface(
     children: Prop<Children>,
 ) -> AnyElement {
     let sheet = !is_desktop();
+    // Why it last closed: a press outside put the focus where it pressed.
+    let closed_by = stored(None::<OpenChangeReason>);
+    let change: Rc<dyn Fn(bool, OpenChangeReason)> = Rc::new(move |next, reason| {
+        if !next {
+            closed_by.replace(Some(reason));
+        }
+        change(next, reason);
+    });
     let path = signal(Vec::<u32>::new());
     let open_sub = signal(None::<u32>);
     let close = {
@@ -257,6 +265,28 @@ fn surface(
     // A sheet comes in and goes with its motion; a popup with the app's
     // transitions between its looks.
     let motion = SheetMotion::new(move || sheet && open.get(), || Placement::Bottom);
+    // The keyboard focus in a trigger's popup as it closes (Escape, an
+    // item chosen) goes back to the trigger once the popup is gone, as a
+    // select's does: the item it was on goes with the popup.
+    let trigger = match &at {
+        At::Trigger(anchor) if !sheet => Some(*anchor),
+        _ => None,
+    };
+    let inside = stored(false);
+    let refocus = stored(false);
+    if trigger.is_some() {
+        presence.popup().on_focus_in(move || {
+            inside.replace(true);
+        });
+        presence.popup().on_focus_out(move || {
+            inside.replace(false);
+        });
+        effect(move || {
+            if !open.get() {
+                refocus.replace(inside.get());
+            }
+        });
+    }
     {
         let (opened, closed) = (emit.clone(), emit.clone());
         lifecycle(
@@ -267,8 +297,21 @@ fn surface(
                     presence.mounted()
                 }
             },
-            move || opened(MenuEvent::Open),
-            move || closed(MenuEvent::Close),
+            move || {
+                closed_by.replace(None);
+                opened(MenuEvent::Open);
+            },
+            move || {
+                closed(MenuEvent::Close);
+                let pressed_outside =
+                    closed_by.replace(None) == Some(OpenChangeReason::PressOutside);
+                if let Some(anchor) = trigger
+                    && refocus.replace(false)
+                    && !pressed_outside
+                {
+                    anchor.focus();
+                }
+            },
         );
     }
     let placed = emit.clone();
