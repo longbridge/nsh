@@ -2600,6 +2600,10 @@ impl<M: TextEngine> Core<M> {
             clamped,
             radius,
             fill: view.background_color,
+            animated_fill: self.nodes[key as usize]
+                .animated
+                .iter()
+                .any(|(p, _)| matches!(p, AnimationProp::BackgroundColor)),
             border_color,
             splitter: match view.cursor {
                 crate::Cursor::ColResize => terminal_layout::Splitter::Columns,

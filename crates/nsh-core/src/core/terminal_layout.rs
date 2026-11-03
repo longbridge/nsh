@@ -21,7 +21,8 @@
 //!   spacing; larger ones keep their box, blank (a canvas drawn in
 //!   braille), so what is around them stays apart; and so are a view with nothing in it smaller than a row
 //!   both ways (a status dot, a swatch) and a view whose content is all
-//!   left out (an icon's tile), which would be blank Cells; a control
+//!   left out (an icon's tile), which would be blank Cells, unless it is
+//!   larger than an icon with an opaque fill of its own; a control
 //!   whose content is all left out (an icon button) is its accessibility
 //!   label in one row, left out without one;
 //! - **block**: a border is one Cell on each side that has one, only on a
@@ -247,6 +248,9 @@ pub(crate) struct Role {
     pub(crate) radius: f32,
     /// Its background color (transparent without one).
     pub(crate) fill: Color,
+    /// Its background color is animated (bound to the animation graph),
+    /// so [`Role::fill`] does not say it: it shows a fill.
+    pub(crate) animated_fill: bool,
     /// The color of its first bordered side.
     pub(crate) border_color: Color,
     /// A divider the user drags ([`Splitter`]).
@@ -506,13 +510,19 @@ pub(crate) enum Splitter {
 
 /// A view that is no control and does not grow whose content is all left
 /// out (an icon's tile, circle or layer): it would be blank Cells, so it is
-/// left out with it.
+/// left out with it. One of an opaque fill of its own larger than an icon
+/// ([`ICON`]) stays a box (a draggable ball around its dot): its fill is
+/// what it shows.
 fn icon_layer(tree: &impl Tree, node: NodeId) -> bool {
     let role = tree.role(node);
+    let style = tree.style(node);
+    let filled =
+        (role.fill.0 & 0xff == 0xff || role.animated_fill) && !left_out(style, LeftOut::IfIcon);
     !role.control
         && !role.root
         && !role.scroll
-        && tree.style(node).flex_grow <= 0.0
+        && !filled
+        && style.flex_grow <= 0.0
         && hollow(tree, node)
 }
 

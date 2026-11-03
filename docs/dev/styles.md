@@ -432,7 +432,8 @@ scroll view too; **grids** take their columns from the template
   a view with nothing in it smaller than a row both ways and not growing (a status dot, a swatch), or a circle with
   nothing in it at most 48pt across that is no control (a radio's ring, an avatar's placeholder), which draws
   nothing in a terminal, and a view (no control, not growing) whose content is all left out (an icon's tile or
-  circle). A control whose content is all left out (an icon button; a layer that grows to center its icon, as a menu
+  circle), unless it has an opaque fill of its own and is larger than an icon (over 48pt either way: a draggable
+  ball around its dot), which stays a box of that fill. A control whose content is all left out (an icon button; a layer that grows to center its icon, as a menu
   trigger's chevron, counts as left out) shows its accessibility label in one row, one column per character, and is
   left out without one; a popup's trigger (its accessibility `expanded` set) shows one chevron, `▾` or `▴`, in one
   column instead. A disclosure (a control with `expanded` set and no `hasPopup`: a collapsible's or an accordion's

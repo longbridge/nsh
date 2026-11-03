@@ -27006,6 +27006,44 @@ mod terminal_layout {
         assert!(left_out(&batch, 10));
     }
 
+    #[test]
+    fn a_ball_of_its_own_fill_stays_when_its_dot_is_left_out() {
+        // A 60pt ball of an opaque fill around an 18pt dot: the dot is a
+        // decoration, the ball keeps its box; an icon's tile of the same
+        // fill, 32pt, goes with its icon.
+        let ball = |size: f32| {
+            let mut ops = view(2, ROOT_ID, &[("alignItems", V::Str("flex-start"))]);
+            ops.extend(view(
+                3,
+                2,
+                &[
+                    ("width", V::Number(size)),
+                    ("height", V::Number(size)),
+                    ("borderRadius", V::Number(size / 2.0)),
+                    ("backgroundColor", V::Str("#3b82f6")),
+                    ("alignItems", V::Str("center")),
+                    ("justifyContent", V::Str("center")),
+                ],
+            ));
+            ops.extend(view(
+                4,
+                3,
+                &[
+                    ("width", V::Number(18.0)),
+                    ("height", V::Number(18.0)),
+                    ("borderRadius", V::Number(9.0)),
+                    ("backgroundColor", V::Str("#ffffff")),
+                ],
+            ));
+            laid_out_on_surfaces(ops)
+        };
+        let batch = ball(60.0);
+        assert!(!left_out(&batch, 3));
+        assert!(frame_of(&batch, 3).is_some_and(|f| f.size.height.0 >= 48.0));
+        assert!(left_out(&batch, 4));
+        assert!(left_out(&ball(32.0), 3));
+    }
+
     /// A vertical scroll view 160pt (20 Cells) wide and 64pt high in a
     /// view of `parent` styles, holding a row whose text is at its right and
     /// a view `tall` points high; `scrollbar` set when given.
