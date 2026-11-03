@@ -33,7 +33,7 @@
 use std::time::Duration;
 
 use nsh_core::{
-    AutoFill,
+    AutoFill, TouchEvent, TouchPhase,
     element::{Style, TextPartStyle},
     prelude::*,
 };
@@ -403,7 +403,20 @@ pub fn OtpInput(props: OtpInputProps, cx: Scope<OtpInputEvent>) -> impl IntoElem
             .collect::<Vec<_>>()
     });
 
-    view().disabled(props.disabled).child(cells).child(
+    view()
+        .disabled(props.disabled)
+        // In a terminal the field is no wider than a Cell, under none of
+        // the cells: a press on them gives it the keys, as the field
+        // over them does elsewhere.
+        .when(parts.terminal, |v| {
+            v.on_touch(move |e: &TouchEvent| {
+                if e.phase == TouchPhase::Start && !parts.disabled.get_untracked() {
+                    field_ref.focus();
+                }
+            })
+        })
+        .child(cells)
+        .child(
         input()
             .element_ref(&field_ref)
             .absolute()

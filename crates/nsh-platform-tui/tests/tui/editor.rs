@@ -368,3 +368,25 @@ fn a_codes_next_cell_holds_the_terminal_cursor() {
         dump(&terminal)
     );
 }
+
+#[test]
+fn a_click_on_a_codes_cells_gives_it_the_keys() {
+    use nsh_platform_tui::{MouseButton::Left, MouseKind};
+    use ratatui_core::backend::Backend;
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(48, 12)).unwrap();
+    view.load(App::Rust(Root::new::<Code>(|| ()))).unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "focus no");
+    // The last cell's frame: its field is a Cell wide, at the first cell,
+    // so the press lands on the cells alone.
+    let width = terminal.backend().buffer().area.width as usize;
+    let at = contents(&terminal).rfind('╭').expect("the cells' frames");
+    let (x, y) = ((at % width) as u16 + 1, (at / width) as u16 + 1);
+    view.handle(mouse(MouseKind::Down(Left), x, y));
+    view.handle(mouse(MouseKind::Up(Left), x, y));
+    draw_until(&mut view, &mut terminal, &rx, "focus yes");
+    let cursor = terminal.backend_mut().get_cursor_position().unwrap();
+    assert!(cursor.x < x, "on the first cell, the next to fill: {cursor:?}");
+    assert_eq!(view.handle(key("5")), Handled::Yes);
+    draw_until(&mut view, &mut terminal, &rx, "5");
+}
