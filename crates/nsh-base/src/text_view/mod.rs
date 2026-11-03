@@ -8,6 +8,7 @@ mod extension;
 mod highlight;
 mod html;
 mod markdown;
+mod math;
 mod parts;
 mod view;
 

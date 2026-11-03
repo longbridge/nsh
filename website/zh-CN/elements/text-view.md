@@ -218,8 +218,8 @@ fn reply(markdown: Signal<SharedString>) -> impl IntoElement {
 | `superscript`、`subscript` | `Superscript`, `Subscript` | 上标和下标（字号更小）。 |
 | `link` | `Link` | 链接（主题的 `primary` 色，带下划线）。 |
 | `image` | `Image` | 图片。 |
-| `math` | `Math` | 文本中的公式；没有 `renderMath` 时以等宽字体显示其 TeX。 |
-| `mathBlock` | `MathBlock` | 公式块；没有 `renderMath` 时以等宽字体显示其 TeX。 |
+| `math` | `Math` | 文本中的公式；没有 `renderMath` 时由 TextView 排版。 |
+| `mathBlock` | `MathBlock` | 公式块；没有 `renderMath` 时由 TextView 排版并居中。 |
 | `table` | `Table` | 表格：`renderTableActions` 的内容，然后是单元格的滚动视图。 |
 | `tableScroll` | `TableScroll` | 表格单元格的横向滚动视图：空间足够时各列适应内容宽度，较窄时换行收缩到每列的下限，再窄则横向滚动。 |
 | `tableRow` | `TableRow` | 表格的每一行：位于单元格后面的视图，用于背景和边框（文本样式设在 `tableCell` 上）。 |
@@ -415,7 +415,7 @@ import { Image, View } from "nsh";
 />
 ```
 
-`Highlighted` 和 `MathView`（Rust 中是 `highlighted` 和 `math_view`）代表应用自己的组件（高亮器、公式渲染器，或应用 Rust crate 中的组件）。没有 `renderMath` 时，公式以等宽字体显示其 TeX（`math` 和 `mathBlock` 部件）。
+`Highlighted` 和 `MathView`（Rust 中是 `highlighted` 和 `math_view`）代表应用自己的组件（高亮器、公式渲染器，或应用 Rust crate 中的组件）。没有 `renderMath` 时，`TextView` 自己排版公式（`math` 和 `mathBlock` 部件）：支持文档中常见的 TeX（符号和希腊字母、上下标、分式、根式、带上下限的大型运算符、`\left` / `\right`、重音、`\mathbb` 等字体、`\text`、矩阵、`cases` 和 `aligned`），使用文本颜色和系统衬线字体；超出这些的 TeX 以等宽字体显示其源码。
 
 <a id="markdown-extensions"></a>
 

@@ -606,8 +606,24 @@ impl Cx {
                         },
                     )
                     .into_element(),
-                // Its TeX in a box as a code block's, as gpui-kit shows a
-                // formula it has no renderer for.
+                // Typeset, centered, scrolling sideways when wider than
+                // the view.
+                None if let Ok(node) = super::math::parse(tex) => self
+                    .part(
+                        scroll().horizontal().scrollbar(false).child(
+                            view()
+                                .flex_row()
+                                .justify_center()
+                                .min_w(relative(1.0))
+                                .py(px(BODY_SIZE * 0.25))
+                                .label(tex.clone())
+                                .child(super::math::render(&node, BODY_SIZE * 1.1, true)),
+                        ),
+                        Part::MathBlock,
+                    )
+                    .into_element(),
+                // TeX it cannot read: in a box as a code block's, as gpui-kit
+                // shows a formula it has no renderer for.
                 None => self
                     .part(
                         view()
@@ -1271,9 +1287,22 @@ impl Cx {
                         },
                     )
                     .into_element(),
-                None => self
-                    .part(code_span(text(tex.clone())), Part::Math)
-                    .into_element(),
+                // Typeset in the line, its middle on the text's.
+                None => match super::math::parse(tex) {
+                    Ok(node) => self
+                        .part(
+                            view()
+                                .flex_row()
+                                .align_middle()
+                                .label(tex.clone())
+                                .child(super::math::render(&node, BODY_SIZE, false)),
+                            Part::Math,
+                        )
+                        .into_element(),
+                    Err(_) => self
+                        .part(code_span(text(tex.clone())), Part::Math)
+                        .into_element(),
+                },
             },
             Inline::Break => text("\n").into_element(),
             Inline::FootnoteReference { label, index } => {
