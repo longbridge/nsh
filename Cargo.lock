@@ -3244,6 +3244,7 @@ version = "0.3.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
+ "brotli",
  "clap",
  "crossbeam-channel",
  "dunce",

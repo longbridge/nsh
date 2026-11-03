@@ -354,15 +354,21 @@ impl From<bool> for TransitionKey {
 pub const PROGRESS_WORD: u32 = u32::MAX;
 
 /// The transitions' default program: a cross-fade from `sample_from` to
-/// `sample_to` over `nsh.progress`.
-pub fn crossfade() -> Shader {
-    static CROSSFADE: std::sync::LazyLock<Shader> = std::sync::LazyLock::new(|| {
-        Shader::compile(
-            "fn shade(uv: vec2f) -> vec4f {\n    return mix(sample_from(uv), sample_to(uv), nsh.progress);\n}\n",
-        )
-        .expect("the cross-fade compiles")
-    });
-    CROSSFADE.clone()
+/// `sample_to` over `nsh.progress`. `None` only in a web runtime linked
+/// without shaders ([`set_compile`]), which has no transition to run it
+/// on: compiled with this module's compiler, so the cross-fade does not
+/// link naga into every web runtime.
+pub fn crossfade() -> Option<Shader> {
+    static CROSSFADE: std::sync::OnceLock<Option<Shader>> = std::sync::OnceLock::new();
+    CROSSFADE
+        .get_or_init(|| {
+            compile_source(
+                "fn shade(uv: vec2f) -> vec4f {\n    return mix(sample_from(uv), sample_to(uv), nsh.progress);\n}\n",
+            )
+            .map_err(|e| log::warn!(target: "js", "the cross-fade: {e}"))
+            .ok()
+        })
+        .clone()
 }
 
 /// Why a shader did not compile: what is wrong and where in the app's

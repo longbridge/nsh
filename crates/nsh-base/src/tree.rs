@@ -31,9 +31,10 @@
 //! (nothing selected) the first enabled row, where Down starts. The arrows
 //! move the selection between the rows shown (the WAI-ARIA tree view
 //! pattern, which `gpui-base`'s Left / Right extend; Return on a leaf and
-//! a double press are its default action, `onAction`), and the cursor's row
-//! takes the screen reader's focus as it moves and as the tree takes the
-//! keyboard focus.
+//! a double press are its default action, `onAction`; in a right-to-left
+//! layout Left and Right trade places, as the pattern says), and the
+//! cursor's row takes the screen reader's focus as it moves and as the
+//! tree takes the keyboard focus.
 
 use std::{
     hash::{Hash, Hasher},
@@ -42,7 +43,7 @@ use std::{
 
 use nsh_core::{
     AccessibilityState,
-    element::{Style, TextPartStyle},
+    element::{Style, TextPartStyle, layout_rtl},
     keymap::When,
     prelude::*,
     time::now,
@@ -51,6 +52,7 @@ use rustc_hash::{FxHashMap, FxHasher};
 
 use crate::{
     collapsible::REVEAL,
+    keys::directed,
     listbox::{self, Typeahead},
     select::SelectValue,
 };
@@ -900,6 +902,10 @@ pub fn Tree(props: TreeProps, cx: Scope<TreeEvent>) -> impl IntoElement {
         if !active.get() {
             return;
         }
+        // The rows run from the right in a right-to-left layout: Left and
+        // Right trade places (WAI-ARIA's tree view). Read only while
+        // bound: a direction change binds the keys again.
+        let rtl = layout_rtl();
         let bind = |keys: &str, repeat: bool, f: Rc<dyn Fn()>| {
             on_key_with(
                 keys,
@@ -914,8 +920,8 @@ pub fn Tree(props: TreeProps, cx: Scope<TreeEvent>) -> impl IntoElement {
         bind("up", true, Rc::new(move || step(Step::Previous)));
         bind("home", false, Rc::new(move || step(Step::First)));
         bind("end", false, Rc::new(move || step(Step::Last)));
-        bind("right", true, Rc::new(right));
-        bind("left", true, Rc::new(left));
+        bind(&directed("right", rtl), true, Rc::new(right));
+        bind(&directed("left", rtl), true, Rc::new(left));
         bind("enter", false, Rc::new(activate));
         bind("space", false, Rc::new(toggle_current));
     });

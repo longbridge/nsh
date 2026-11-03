@@ -71,9 +71,11 @@ pub struct NativeUse {
     /// It loads a module whose specifier is computed (`import(name)`),
     /// which may be any native module, whole.
     pub computed_import: bool,
-    /// It may make a shader view: it spells `shader` in a string or a
-    /// template, as the compiled `<Shader>` tags do (they pass it to
-    /// `nsh:rt`'s `element`, and the import of `Shader` is gone).
+    /// It may make a shader view: it spells the tag of one (`shader`,
+    /// `shadereffect`, `shadertransition`, `screeneffect`,
+    /// `screentransition`) in a string or a template, as the compiled
+    /// `<Shader>`, `<ShaderEffect>`, ... tags do (they pass it to `nsh:rt`'s
+    /// `element`, and the import is gone).
     pub shader: bool,
 }
 
@@ -90,12 +92,38 @@ impl NativeUse {
         finder.visit_program(&parsed.program);
     }
 
+    /// Adds what `other` uses: the use of code made of both.
+    pub fn merge(&mut self, other: &NativeUse) {
+        for (specifier, imported) in &other.imports {
+            match (self.import(specifier), imported) {
+                (Imported::All, _) => {}
+                (mine, Imported::All) => *mine = Imported::All,
+                (Imported::Names(mine), Imported::Names(names)) => {
+                    mine.extend(names.iter().cloned())
+                }
+            }
+        }
+        self.global_crypto |= other.global_crypto;
+        self.computed_import |= other.computed_import;
+        self.shader |= other.shader;
+    }
+
     fn import(&mut self, specifier: &str) -> &mut Imported {
         self.imports
             .entry(specifier.to_owned())
             .or_insert_with(|| Imported::Names(BTreeSet::new()))
     }
 }
+
+/// The host tags of the views a shader draws (`jsx::PRIMITIVES`): each
+/// needs the runtime's shader compiler.
+const SHADER_TAGS: &[&str] = &[
+    "shader",
+    "shadereffect",
+    "shadertransition",
+    "screeneffect",
+    "screentransition",
+];
 
 /// The global object's names: what is read from it by a name the code does
 /// not spell may be a global of `crypto`.
@@ -107,9 +135,9 @@ struct Finder<'u, F> {
 }
 
 impl<F> Finder<'_, F> {
-    /// A string in the code: the tag of a shader view, if it is `shader`.
+    /// A string in the code: the tag of a shader view, if it is one.
     fn quoted(&mut self, value: &str) {
-        if value == "shader" {
+        if SHADER_TAGS.contains(&value) {
             self.uses.shader = true;
         }
     }
@@ -265,6 +293,24 @@ mod tests {
     }
 
     #[test]
+    fn merged_uses_are_those_of_both() {
+        let mut a = uses(r#"import { Button } from "nsh/base"; import d from "zlib";"#);
+        let b =
+            uses(r#"import { Tabs } from "nsh/base"; import * as n from "nsh"; import("x" + y);"#);
+        let mut whole = uses(
+            r#"import { Button } from "nsh/base"; import d from "zlib";
+            import { Tabs } from "nsh/base"; import * as n from "nsh"; import("x" + y);"#,
+        );
+        a.merge(&b);
+        assert_eq!(a, whole);
+        // Merging is idempotent and keeps `All`.
+        a.merge(&b);
+        assert_eq!(a, whole);
+        whole.merge(&uses(r#"import { View } from "nsh";"#));
+        assert_eq!(whole.imports.get("nsh"), Some(&Imported::All));
+    }
+
+    #[test]
     fn named_imports_count_by_the_names_the_module_exports() {
         let uses = uses(
             r#"import { Button, Tabs as T } from "nsh/base"; import { View } from "nsh";
@@ -314,6 +360,14 @@ mod tests {
     fn a_shader_tag_counts_as_a_shader() {
         assert!(uses("_$element(\"shader\");").shader);
         assert!(uses("u(`shader`);").shader);
+        for tag in [
+            "shadereffect",
+            "shadertransition",
+            "screeneffect",
+            "screentransition",
+        ] {
+            assert!(uses(&format!("_$element(\"{tag}\");")).shader, "{tag}");
+        }
         assert!(!uses("const shader = view;").shader);
     }
 
