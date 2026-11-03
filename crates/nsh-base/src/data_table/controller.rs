@@ -152,7 +152,9 @@ impl Dt {
             vscroll: element_ref(),
             hscroll: element_ref(),
             strip: element_ref(),
-            anchored: !nsh_core::element::is_desktop(),
+            // A terminal's pointer is a mouse that drags the bar, as a
+            // desktop's does.
+            anchored: !nsh_core::element::is_desktop() && !crate::terminal::is_terminal(),
             anchor_x: signal(Anchor::default()),
             anchor_y: signal(Anchor::default()),
             // Rows are short, columns wide: a window of columns reaches
