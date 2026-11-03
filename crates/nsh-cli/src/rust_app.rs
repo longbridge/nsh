@@ -1705,17 +1705,25 @@ opt-level = \"s\"
             }
             return Err(error);
         }
-        let mut path = self.target_dir()?;
-        if let Some(triple) = triple {
-            path.push(triple);
+        let place = |mut path: PathBuf| {
+            if let Some(triple) = triple {
+                path.push(triple);
+            }
+            path.push(match profile {
+                Some(profile) => profile,
+                None if release => "release",
+                None => "debug",
+            });
+            path.push(artifact);
+            path
+        };
+        let path = place(self.target_dir()?);
+        if path.exists() {
+            return Ok(path);
         }
-        path.push(match profile {
-            Some(profile) => profile,
-            None if release => "release",
-            None => "debug",
-        });
-        path.push(artifact);
-        Ok(path)
+        // A cargo that keeps its own target directory (a wrapper ignoring
+        // CARGO_TARGET_DIR) built it elsewhere: Cargo says where.
+        Ok(cargo_target_directory(workspace).map(place).unwrap_or(path))
     }
 
     /// The development host (`runner` false) or release runner of the app,
@@ -2237,6 +2245,24 @@ fn install_stripped(
 }
 
 /// The cargo to run.
+/// The target directory Cargo reports for the workspace at `workspace`.
+fn cargo_target_directory(workspace: &Path) -> Option<PathBuf> {
+    let out = Command::new(cargo())
+        .args([
+            "metadata",
+            "--format-version",
+            "1",
+            "--no-deps",
+            "--manifest-path",
+        ])
+        .arg(workspace.join("Cargo.toml"))
+        .output()
+        .ok()
+        .filter(|out| out.status.success())?;
+    let json: serde_json::Value = serde_json::from_slice(&out.stdout).ok()?;
+    json.get("target_directory")?.as_str().map(PathBuf::from)
+}
+
 fn cargo() -> std::ffi::OsString {
     env::var_os("CARGO").unwrap_or_else(|| "cargo".into())
 }
