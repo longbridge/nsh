@@ -11369,14 +11369,11 @@ mod components {
         assert_eq!(requests.len(), 1);
         let (pick, request) = requests.into_iter().next().unwrap();
         assert_eq!(request, FileRequest::OpenDialog(expected));
-        let picked = vec![
-            std::path::PathBuf::from("/notes/a.md"),
-            std::path::PathBuf::from("/notes/b.md"),
-        ];
+        let picked = vec![note_path("a.md"), note_path("b.md")];
         assert!(c.component_event(
             ROOT_ID,
             EventKind::FileRequest,
-            &EventPayload::file_answer(pick, picked)
+            &EventPayload::file_answer(pick, picked.clone())
         ));
         // The task goes on to the trash.
         let mut trash = None;
@@ -11387,7 +11384,7 @@ mod components {
             trash = file_requests(items).into_iter().next();
         }
         let (trash, request) = trash.expect("the trash request");
-        assert_eq!(request, FileRequest::MoveToTrash("/notes/a.md".into()));
+        assert_eq!(request, FileRequest::MoveToTrash(note_path("a.md")));
         assert!(c.component_event(
             ROOT_ID,
             EventKind::FileRequest,
@@ -11397,8 +11394,17 @@ mod components {
         let shown = run_until(&mut c, |s| s.iter().any(|t| t.starts_with("paths O")));
         assert_eq!(
             shown.last().unwrap(),
-            r#"paths Ok(Some(["/notes/a.md", "/notes/b.md"])) Some(Err("no trash on this volume")) Err("`notes.md` is not an absolute path")"#
+            &format!(
+                r#"paths Ok(Some({picked:?})) Some(Err("no trash on this volume")) Err("`notes.md` is not an absolute path")"#
+            )
         );
+    }
+
+    /// A picked note's path, absolute where the tests run: the platform
+    /// refuses a rooted path without a drive on Windows.
+    fn note_path(name: &str) -> std::path::PathBuf {
+        let notes = if cfg!(windows) { r"C:\notes" } else { "/notes" };
+        std::path::Path::new(notes).join(name)
     }
 
     #[test]
