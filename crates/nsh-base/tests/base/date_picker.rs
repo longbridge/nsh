@@ -20,7 +20,10 @@ use nsh_base::{
     TimeFieldSegmentEntry, TimePrecision, date_picker,
 };
 use nsh_core::{
-    AccessibilityRole, MountItem, NodeId, Size, ViewKind, element::Root, platform::Os, prelude::*,
+    AccessibilityRole, MountItem, NodeId, Size, ViewKind,
+    element::Root,
+    platform::{Environment, Idiom, Os},
+    prelude::*,
     time::Clock,
 };
 use nsh_engine::EngineConfig;
@@ -556,4 +559,85 @@ fn on_a_phone_the_calendar_spans_the_sheet() {
     assert_eq!(seen.frames[&week].size.width, px(800.0));
     let width = seen.frames[&day].size.width;
     assert!((width.0 - 800.0 / 7.0).abs() <= 1.0, "a day {width:?} wide");
+}
+
+/// A date picker with a date chosen and a clear button `Clear`.
+#[component]
+fn ClearableDate() -> impl IntoElement {
+    date_picker()
+        .accessibility_label("Deadline")
+        .default_value(DateTime::Single(Some(
+            d(2026, 11, 6).and_hms_opt(0, 0, 0).unwrap(),
+        )))
+        .cleanable(true)
+        .clear_button(text("Clear"))
+        .trigger(view().child(text("Deadline")))
+}
+
+#[test]
+fn a_terminals_date_picker_has_its_clear_button_after_its_value_in_its_row() {
+    let viewport = Size::new(px(390.0), px(844.0));
+    let config = EngineConfig {
+        viewport,
+        environment: Environment {
+            window: viewport,
+            os: Os::Linux,
+            idiom: Idiom::Terminal,
+            cell: Some(Size::new(px(8.0), px(16.0))),
+            ..Environment::default()
+        },
+        ..EngineConfig::new(Root::of::<ClearableDate>())
+    };
+    let mut app = Headless::start(config).unwrap();
+    // The texts, frames and parents the batches set.
+    #[derive(Default)]
+    struct Seen {
+        texts: HashMap<NodeId, String>,
+        frames: HashMap<NodeId, Bounds<Points>>,
+        parents: HashMap<NodeId, NodeId>,
+    }
+    let seen = Arc::new(Mutex::new(Seen::default()));
+    let into = seen.clone();
+    app.observe(move |_, batch| {
+        let mut seen = into.lock().unwrap();
+        for item in &batch.items {
+            match item {
+                MountItem::Text { id, text, .. } => {
+                    seen.texts.insert(*id, text.text.to_string());
+                }
+                MountItem::Frame { id, frame } => {
+                    seen.frames.insert(*id, *frame);
+                }
+                MountItem::Insert { parent, child, .. } => {
+                    seen.parents.insert(*child, *parent);
+                }
+                _ => {}
+            }
+        }
+    });
+    app.first_render().unwrap();
+    let seen = seen.lock().unwrap();
+    // Where the text `t` starts in the window.
+    let at = |t: &str| {
+        let (id, _) = seen
+            .texts
+            .iter()
+            .find(|(_, s)| s.as_str() == t)
+            .unwrap_or_else(|| panic!("no {t} in {:?}", seen.texts));
+        let mut id = *id;
+        let (mut x, mut y) = (0.0, 0.0);
+        loop {
+            if let Some(f) = seen.frames.get(&id) {
+                x += f.origin.x.0;
+                y += f.origin.y.0;
+            }
+            match seen.parents.get(&id) {
+                Some(parent) => id = *parent,
+                None => return (x, y),
+            }
+        }
+    };
+    let (value, clear) = (at("Deadline"), at("Clear"));
+    assert_eq!(clear.1, value.1, "one row: {value:?} {clear:?}");
+    assert!(clear.0 > value.0, "after the value: {value:?} {clear:?}");
 }

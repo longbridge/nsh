@@ -871,6 +871,9 @@ pub fn DatePicker(props: DatePickerProps, cx: Scope<DatePickerEvent>) -> impl In
         },
     );
     view()
+        // A terminal's clear button goes after the value, in its row, as a
+        // `Select`'s does (the popup is an overlay: no part of the row).
+        .when(crate::terminal::is_terminal(), |v| v.flex_row())
         .child(trigger)
         .child(clear_button)
         .child(popup::dropdown(
