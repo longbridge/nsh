@@ -191,6 +191,14 @@
   engine makes its context its thread's for its whole run (`EngineContext::enter`, as its clock); work sent to other
   threads (`background`) reads it first and moves the value there. The engine's `host_modules` tests and the GPUI
   backend's window tests run two engines reading their own.
+- **State the engines share** (`nsh_core::shared::SharedStore`): signals belong to one engine's graph, so surfaces (the
+  windows of an app, panels side by side) cannot share them; a host that wants them to share state makes one
+  `SharedStore` and gives each engine a clone in its context (`EngineContext::default().with(store.clone())`; without
+  one an engine has a store of its own). Keys map to immutable `SharedValue`s changed in versioned transactions from
+  any thread (a data source's, any engine's); an engine's subscriber is woken when a key it watches changes, and takes
+  the latest value of each at its next turn, all at one version, so a slow engine skips versions and a writer never
+  waits. Events (`emit`) are one-off and ordered. Rust components use `shared::signal` / `prefix` / `on_event`, TSX apps
+  `nsh/shared`, both on the same store (`js-modules.md`); the engine's `shared` tests run both.
 - **The host's own picker** (`nsh_core::picker::PickerBackend`): an embedding app that has a picker of its own answers
   the apps' `Picker.pickImages` with it: `EngineConfig::picker` (GPUI: `AppView::set_picker`, from the next load) gets
   every pick's `PickRequest` and returns a future of `PickedFile`s (bytes as `ImageData`, which may come from any

@@ -18,6 +18,10 @@ pub(crate) struct SystemConfig {
     pub(crate) wake: std::sync::Arc<dyn Fn() + Send + Sync>,
     /// The embedding app's side of `nsh/host`.
     pub(crate) host: std::rc::Rc<dyn nsh_core::host_channel::HostBridge>,
+    /// The engine's shared store: the VM's `nsh/shared` reads the same one
+    /// as the core's components.
+    #[cfg_attr(not(feature = "js-core"), allow(dead_code))]
+    pub(crate) shared: nsh_core::shared::SharedStore,
 }
 
 #[cfg(not(any(feature = "js-core", all(feature = "browser", target_arch = "wasm32"))))]
@@ -112,6 +116,7 @@ mod imp {
             host.set_filesystem(system.filesystem);
             host.set_updater(system.updater);
             host.set_system_wake(system.wake);
+            host.set_shared_store(system.shared);
             host.set_host_bridge(system.host);
             host.set_stop_flag(stop.clone());
             let exit_requested = Rc::new(Cell::new(false));

@@ -134,6 +134,13 @@ impl super::Runtime {
         });
     }
 
+    /// The store the engine shares: what [`Self::set_shared`] set, else one
+    /// of its own (the same from then on).
+    pub(crate) fn shared(&self) -> crate::shared::SharedStore {
+        let _entered = self.enter();
+        shared_state().0
+    }
+
     /// How text is measured (the core's text engine).
     pub(crate) fn set_measure(&self, measure: MeasureFn) {
         let _entered = self.enter();

@@ -781,10 +781,30 @@ impl Host {
         *self.shared.system_wake.borrow_mut() = Some(wake);
     }
 
-    /// Drains pending promise jobs (the runtime modules' work runs as core
-    /// tasks, whose results arrive through the core).
+    /// Gives this VM the store `nsh/shared` reads and writes (the engine's:
+    /// the one its core's components use). Without one, the VM makes a
+    /// store of its own when the app first uses the module.
+    pub fn set_shared_store(&self, store: nsh_core::shared::SharedStore) {
+        if self.fatal().is_some() || !self.cx.is_live() {
+            return;
+        }
+        self.cx
+            .with(|cx| crate::shared::set_store(cx.as_raw().as_ptr(), store));
+    }
+
+    /// Takes in what other threads and engines changed in the shared store
+    /// (`nsh/shared`: writes the signals of the keys the app watches, calls
+    /// its event listeners), then drains pending promise jobs (the runtime
+    /// modules' work runs as core tasks, whose results arrive through the
+    /// core). The store's wake (`set_system_wake`) asks for a turn that
+    /// calls this.
     pub fn run_system(&self) {
-        self.guarded(Phase::Call, || self.run_jobs());
+        self.guarded(Phase::Call, || {
+            if self.cx.is_live() {
+                self.cx.with(|cx| crate::shared::pump(cx.as_raw().as_ptr()));
+            }
+            self.run_jobs();
+        });
     }
 
     /// Whether JS work is still pending in this VM: evaluations, timers or

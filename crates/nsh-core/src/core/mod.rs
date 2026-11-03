@@ -1542,6 +1542,13 @@ impl<M: TextEngine> Core<M> {
         self.components.runtime.set_shared(store);
     }
 
+    /// The store this engine shares ([`Self::set_shared_store`]): the VM of
+    /// a JS app reads the very same one (`nsh/shared`), so the app's JS and
+    /// its Rust components see one state.
+    pub fn shared_store(&self) -> crate::shared::SharedStore {
+        self.components.runtime.shared()
+    }
+
     /// Logs (once) that the app was refused `what`.
     fn deny(&mut self, what: String) {
         if self.denied.len() < 256 && self.denied.insert(what.clone()) {

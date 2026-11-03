@@ -30,7 +30,7 @@ use rquickjs::{Ctx, JsLifetime, Module, qjs};
 use crate::{
     animated, canvas, components, desktop, dom, env, keymap, list, platform_modules,
     reactive::{self, Native},
-    touch,
+    shared, touch,
 };
 
 type JsValue = qjs::JSValue;
@@ -507,6 +507,13 @@ pub(crate) const MODULES: &[NativeModule] = &[
         also: &[],
         moved_to: Some("nsh"),
         types: decl!(keymap::TYPES),
+    },
+    NativeModule {
+        name: "nsh/shared",
+        exports: shared::EXPORTS,
+        also: &[],
+        moved_to: None,
+        types: decl!(shared::TYPES),
     },
 ];
 

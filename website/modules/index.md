@@ -39,6 +39,7 @@ Types are generated from the runtime: `nsh init`, `nsh build`, `nsh dev` and `ns
 | `nsh/mobile` | `isAvailable`, `TabBar` (the system's tab bar, iOS and Android), `InputAccessoryView` (iOS), `BackHandler` (Android) | [nsh/mobile](./nsh-mobile.md) |
 | `nsh/desktop` | `isAvailable`, `Window` (title, title bar, maximize, full screen), `titleBar`, `Menu` (application menu, context menus) | [nsh/desktop](./nsh-desktop.md) |
 | `nsh/updater` | `checkForUpdate`, `downloadUpdate`, `installAndRestart` (a packaged app updates itself) | [nsh/updater](./nsh-updater.md) |
+| `nsh/shared` | `signal`, `prefix`, `get`, `set`, `remove`, `transaction`, `version`, `emit`, `on` (state several surfaces share) | [nsh/shared](./nsh-shared.md) |
 | Standard modules | `buffer`, `console`, `crypto`, `fs/promises`, `net`, `os`, `path`, `process`, `url`, `websocket`, `zlib` | [Standard modules](./standard-modules.md) |
 | Globals | `fetch`, `URL`, `TextEncoder`, `Blob`, `FormData`, `AbortController`, `Intl`, timers, `console`, `requestAnimationFrame`, ... (no import) | [Global APIs](./globals.md) |
 
