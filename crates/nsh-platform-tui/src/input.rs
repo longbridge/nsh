@@ -394,7 +394,11 @@ impl Pointer {
             let Some(view) = cx.tree.get(id) else {
                 break;
             };
-            if nsh_core::input::hoverable(view.tracked, view.events) {
+            // A control that takes presses shows a hover band in a
+            // terminal (the painter's), whether or not it styles `hover:`.
+            if nsh_core::input::hoverable(view.tracked, view.events)
+                || nsh_core::input::has_press(view.events)
+            {
                 hovered.push(id);
             }
             node = if id == scope { None } else { view.parent };
@@ -466,8 +470,10 @@ impl Pointer {
         let scope = crate::navigation::focus_scope(tree);
         let modal = scope != nsh_core::ROOT_ID;
         // A move off the last hovered view onto Cells no view claims is
-        // still used: the view's hover band must go.
-        let unused = if modal || rehovered || !self.hovered.is_empty() {
+        // still used: the view's hover band must go. A press there stays
+        // the embedder's (its hover goes with the next draw).
+        let moved_off = rehovered && matches!(mouse.kind, MouseKind::Move);
+        let unused = if modal || moved_off || !self.hovered.is_empty() {
             Handled::Yes
         } else {
             Handled::Ignored
