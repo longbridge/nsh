@@ -316,6 +316,13 @@ class Box extends ViewGroup implements Node, NshView.ShaderFrames {
             getViewTreeObserver().removeOnPreDrawListener(picturing);
             watching = false;
         }
+        // Each holds a HardwareRenderer and an ImageReader: they go now and
+        // are made again for the first picture once it is back, which is
+        // due then (what it shows may have changed out of the window).
+        if (pictures != null) pictures.release();
+        if (backdropPictures != null) backdropPictures.release();
+        pictures = backdropPictures = null;
+        stale = true;
         super.onDetachedFromWindow();
     }
 

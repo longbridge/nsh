@@ -213,7 +213,8 @@ Effects, transitions and page shaders sit on the same program, layer and rendere
   and the page's own animation is at once, as the system's animator scale makes it. An app that stops takes its
   overlays and screen layer with it (`NshView.endShaders`). A screen layer draws over the surface while its view is in
   the window: detached, deleted or turned off, it gives the surface back and redraws it, unless another screen layer
-  took its place. Without a GPU device `Native.shaderTransition` starts no run (the children show as they are) and
+  took its place. A view leaving the window lets its `Pictures` go (a `HardwareRenderer` and an `ImageReader` each)
+  and takes its pictures again once it is back. Without a GPU device `Native.shaderTransition` starts no run (the children show as they are) and
   `Native.navTransition` declines, so a page moves with its own animation (`StackBox`) and a dialog with its
   `animation` (`ModalHost`).
 
