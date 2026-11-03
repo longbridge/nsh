@@ -141,7 +141,7 @@ pub(crate) fn package(
             .into_iter()
             .filter(|gate| exports.iter().any(|e| e == gate))
             .collect();
-        let split = split::split(&linkable, &keep, &lazy)?;
+        let split = link(&linkable, runtime.glue.is_some(), &keep, &lazy)?;
         for side in &split.sides {
             let file = side_file_name(&side.gates);
             let url = site.add(&format!("{file}.wasm"), &side.bytes)?;
@@ -269,6 +269,26 @@ pub(crate) fn package(
         serve(&dir)?;
     }
     Ok(())
+}
+
+/// The modules published for an app from its linkable runtime: the main
+/// module with `keep` and side modules for `lazy` ([`split::split`]). A
+/// runtime wasm-bindgen ran on (`bindgen`) is published whole, every gate
+/// in it: wasm-bindgen rewrites the module and keeps the `linking` and
+/// `reloc.*` sections of the one it read, which no longer describe it.
+pub(crate) fn link(
+    linkable: &[u8],
+    bindgen: bool,
+    keep: &[&str],
+    lazy: &[&str],
+) -> anyhow::Result<prune::split::Split> {
+    if bindgen {
+        return Ok(prune::split::Split {
+            main: prune::unlinked(linkable)?,
+            sides: Vec::new(),
+        });
+    }
+    split::split(linkable, keep, lazy)
 }
 
 /// Whether `name` is the export of a part of `nsh/base`, of a standard
@@ -1341,6 +1361,33 @@ mod tests {
         computed.computed_import = true;
         assert_eq!(linked_gates(Some(&computed)).len(), every);
         assert_eq!(linked_gates(None).len(), every);
+    }
+
+    #[test]
+    fn a_runtime_wasm_bindgen_ran_on_is_published_whole() {
+        // `run`, a function `() -> ()` that returns at once.
+        let mut module = b"\0asm\x01\0\0\0".to_vec();
+        module.extend([1, 4, 1, 0x60, 0, 0]);
+        module.extend([3, 2, 1, 0]);
+        module.extend([7, 7, 1, 3, b'r', b'u', b'n', 0, 0]);
+        module.extend([10, 4, 1, 2, 0, 0x0b]);
+        // The linker's sections of the module wasm-bindgen read, which it
+        // keeps: their symbol names function 7, which it removed.
+        let mut runtime = module.clone();
+        runtime.extend([0, 19, 7]);
+        runtime.extend(b"linking");
+        runtime.extend([2, 8, 8, 1, 0, 0, 7, 3, b'r', b'u', b'n']);
+        runtime.extend([0, 13, 10]);
+        runtime.extend(b"reloc.CODE");
+        runtime.extend([3, 0]);
+        let error = link(&runtime, false, &["run"], &[]).err().unwrap();
+        assert_eq!(
+            error.to_string(),
+            "a symbol names function 7, which the web runtime does not have"
+        );
+        let published = link(&runtime, true, &["run"], &[]).unwrap();
+        assert_eq!(published.main, module);
+        assert!(published.sides.is_empty());
     }
 
     #[test]

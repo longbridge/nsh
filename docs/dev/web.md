@@ -163,7 +163,9 @@ build to the same file) and takes `nsh.js` from the crate.
 
 A published app's runtime holds only what the app uses, and what only later screens use is downloaded apart
 from it. `nsh package --target web` makes these modules from `nsh-browser.wasm` (feature `linkable`) without a
-Rust toolchain or a linker; how is in the module docs of `crates/nsh-cli/src/web/`. A runtime with every
+Rust toolchain or a linker; how is in the module docs of `crates/nsh-cli/src/web/`. A runtime wasm-bindgen ran on
+(`crates/nsh-cli/src/bindgen.rs`) is published whole (`web::link`): wasm-bindgen rewrites the module and keeps the
+`linking` and `reloc.*` sections of the one it read, which no longer describe it. A runtime with every
 component (the website's, the development host's) serves every app.
 
 ### Historical QuickJS package sizes
