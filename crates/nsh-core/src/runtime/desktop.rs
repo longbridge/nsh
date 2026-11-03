@@ -5,7 +5,7 @@
 use crate::{
     Command, ROOT_ID,
     desktop::{DesktopCommand, MenuBarMode, TitleBarStyle, WindowFrame, WindowLevel},
-    element::{JsObject, ModuleCx, module, task::Action},
+    element::{JsError, JsObject, ModuleCx, module, task::Action},
     geometry::Points,
 };
 
@@ -147,5 +147,98 @@ impl Application {
     /// that app.
     pub(crate) fn quit(cx: &mut ModuleCx) {
         desktop(cx, DesktopCommand::Quit);
+    }
+}
+
+/// `openWindow`'s options, in one object so more can join them.
+#[derive(Debug, Clone, Default, PartialEq, JsObject)]
+pub(crate) struct OpenWindowOptions {
+    /// The app's name for the window: the new instance reads it in
+    /// `currentWindow()` to choose what to show.
+    pub(crate) name: Option<String>,
+    /// What the new instance reads in `currentWindow().params`.
+    pub(crate) params: Option<crate::JsonValue>,
+    /// The title; the app's name without one.
+    pub(crate) title: Option<String>,
+    /// The size of its content in points.
+    pub(crate) size: Option<crate::geometry::Size<Points>>,
+    /// Its top-left corner on the screen, in points; cascaded from this
+    /// window without one.
+    pub(crate) position: Option<crate::geometry::Point<Points>>,
+    /// The smallest size of its content the user can make it.
+    pub(crate) min_size: Option<crate::geometry::Size<Points>>,
+    /// Whether the user can resize it (`true` unless set).
+    pub(crate) resizable: Option<bool>,
+    /// Whether it becomes the active window (`true` unless set).
+    pub(crate) focus: Option<bool>,
+    /// When a window of the same name is open: focuses that one and returns
+    /// its id instead of opening another.
+    pub(crate) single: Option<bool>,
+}
+
+/// What `currentWindow()` returns.
+#[derive(Debug, Clone, Default, PartialEq, JsObject)]
+pub(crate) struct CurrentWindow {
+    /// Its id (what `focusWindow` and `closeWindow` take).
+    pub(crate) id: f64,
+    /// The name it was opened with (empty for the main window).
+    pub(crate) name: String,
+    /// What it was opened with (`null` for the main window).
+    pub(crate) params: crate::JsonValue,
+    /// Whether it is the main window: the app ends when it closes.
+    pub(crate) main: bool,
+}
+
+/// The app's windows (desktops).
+#[module]
+pub(crate) struct Windows;
+
+#[module(flat)]
+impl Windows {
+    /// Opens a window of the app: a new instance of the app, with an engine
+    /// of its own, in a new top-level window; its entry runs again and
+    /// chooses what to show by `currentWindow()`. Returns the window's id.
+    /// The windows share the state of `nsh/shared`, and the open ones are
+    /// its keys `nsh/windows/<id>` (`{ name, title }`): a key goes when its
+    /// window closes. Throws an `Error` where the app cannot open windows
+    /// (outside the desktops, or in a host that shows surfaces its own way).
+    pub(crate) fn open_window(options: OpenWindowOptions) -> Result<f64, JsError> {
+        let defaults = crate::window::WindowOptions::default();
+        let options = crate::window::WindowOptions {
+            name: options.name.unwrap_or_default(),
+            params: options.params.unwrap_or(crate::JsonValue::Null),
+            title: options.title,
+            size: options.size,
+            position: options.position,
+            min_size: options.min_size,
+            resizable: options.resizable.unwrap_or(defaults.resizable),
+            focus: options.focus.unwrap_or(defaults.focus),
+            single: options.single.unwrap_or(defaults.single),
+        };
+        crate::window::open(options, crate::window::WindowContent::App)
+            .map(|id| id.0 as f64)
+            .map_err(JsError::Error)
+    }
+
+    /// The window this instance of the app runs in: `{ id, name, params,
+    /// main }`; `null` where the app has no windows of its own (outside the
+    /// desktops, in a host that shows surfaces its own way).
+    pub(crate) fn current_window() -> Option<CurrentWindow> {
+        crate::window::current().map(|w| CurrentWindow {
+            id: w.id.0 as f64,
+            name: w.name,
+            params: w.params,
+            main: w.main,
+        })
+    }
+
+    /// Makes window `id` the active window.
+    pub(crate) fn focus_window(id: f64) {
+        crate::window::focus(crate::window::WindowId(id as u64));
+    }
+
+    /// Closes window `id`; closing the main window ends the app.
+    pub(crate) fn close_window(id: f64) {
+        crate::window::close(crate::window::WindowId(id as u64));
     }
 }
