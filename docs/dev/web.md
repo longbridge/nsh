@@ -76,6 +76,10 @@ list's `contentClass`.
 `browser-tests` contains ownership fixtures: never measure or publish that artifact. Rebuild with `browser`
 and use the supported `nsh package --target web` flow for shipping and size measurements.
 
+`browser-check.py` also mounts a view with all four platform props and checks that only the web's and, in the
+desktop idiom (Playwright's Chromium has a fine, hovering pointer, and the check's page is 1280 wide), the desktop's
+apply.
+
 Measure the supported CLI package with `node crates/nsh-platform-web/web/browser/package-size.mjs SITE
 --require-browser`. It reports raw bytes, gzip level 9 and Brotli quality 11 independently for every Wasm,
 JavaScript and bytecode file, including all optional chunks. `--requests=FILE` accepts a JSON array of URLs

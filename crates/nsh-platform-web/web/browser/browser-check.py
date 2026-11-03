@@ -20,6 +20,18 @@ async def check(wasm, chrome):
         source = pathlib.Path(__file__).resolve().parent.parent
         shutil.copytree(source, root, dirs_exist_ok=True)
         shutil.copyfile(wasm, root / "nsh.wasm")
+        (root / "platform.js").write_text('''import {mount,signal} from 'nsh';
+import {element,prop,bindProp,append} from 'nsh:rt';
+mount(()=>{const root=element('view');const view=element('view');prop(view,'testID','platform');
+// A platform object replaces the element's prop, it does not merge with it: each sets the whole style.
+const style=backgroundColor=>({width:60,height:20,backgroundColor});
+const web=signal({style:style('#00ff00')});window.dropWebStyle=()=>web.set({});
+bindProp(view,'web',()=>web());prop(view,'desktop',{accessibilityLabel:'desktop'});
+// Set last, so either would override the web's style if it applied.
+prop(view,'ios',{style:style('#ff0000'),accessibilityLabel:'ios'});
+prop(view,'android',{style:style('#ff0000'),accessibilityLabel:'android'});
+append(root,view);return root;});
+''')
         (root / "index.html").write_text('''<!doctype html><style>html,body,#app{height:100%;margin:0}</style><div id="app"></div><script type="module">
 import {createPlayer} from './nsh.js';
 window.errors=[]; window.player=await createPlayer(document.querySelector('#app'),{wasm:'./nsh.wasm',onError:e=>errors.push(e)});
@@ -78,9 +90,38 @@ return root;});
         try:
             async with async_playwright() as playwright:
                 browser = await playwright.chromium.launch(executable_path=chrome, args=["--no-sandbox"])
-                page = await browser.new_page()
+                # A mouse and a viewport at least 600 wide: the desktop idiom, which the platform props check needs.
+                page = await browser.new_page(viewport={"width": 1280, "height": 720})
                 await page.goto(f"http://127.0.0.1:{server.server_port}/index.html")
                 await page.wait_for_function("window.ready")
+                # The web's and, in the desktop idiom, the desktop's platform props apply; iOS' and Android's do not.
+                from playwright.async_api import TimeoutError as PlaywrightTimeoutError
+                warnings = []
+                listen = lambda message: warnings.append(message.text)
+                page.on("console", listen)
+                await page.evaluate("player.runModule('./platform.js')")
+                view = page.locator("[data-testid=platform]")
+                # Attached, not visible: without the web's style it has no size.
+                await view.wait_for(state="attached")
+                read = lambda: view.evaluate("el => [getComputedStyle(el).backgroundColor, el.getAttribute('aria-label')]")
+                seen = {"set": await read()}
+                # A key the new object no longer has is unset.
+                await page.evaluate("document.querySelector('iframe').contentWindow.dropWebStyle()")
+                try:
+                    await page.wait_for_function(
+                        "getComputedStyle(document.querySelector('[data-testid=platform]')).backgroundColor !== 'rgb(0, 255, 0)'",
+                        timeout=2000)
+                except PlaywrightTimeoutError:
+                    pass  # The assertion below says what it read.
+                seen["web emptied"] = await read()
+                page.remove_listener("console", listen)
+                assert seen == {
+                    "set": ["rgb(0, 255, 0)", "desktop"],
+                    "web emptied": ["rgba(0, 0, 0, 0)", "desktop"],
+                }, seen
+                assert not [w for w in warnings if "unsupported prop" in w], warnings
+                assert await page.evaluate("errors.length") == 0, await page.evaluate("errors.map(String)")
+                await page.evaluate("player.stop()")
                 result = await page.evaluate('''async()=>{
                   window.result={events:[],runs:0,cleaned:0,failedCleaned:0};
                   for(let i=0;i<3;i++) {
