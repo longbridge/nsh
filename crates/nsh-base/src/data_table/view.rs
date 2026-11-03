@@ -1456,10 +1456,22 @@ fn sort_button(
 
 /// The original pair of Lucide chevrons. Paint follows the app's inherited
 /// stroke/text color; each direction exposes its selected state for styling.
+/// In a terminal, a glyph of the direction (`↑`, `↓`, `↕` unsorted).
 fn sort_icon(
     props: DataTableProps,
     sorted: Memo<Option<DataTableSortDirection>>,
-) -> impl IntoElement {
+) -> AnyElement {
+    // A terminal draws no chevrons: the direction is a glyph, the pair's
+    // when the column is not sorted.
+    if crate::terminal::is_terminal() {
+        return text(move || match sorted.get() {
+            Some(DataTableSortDirection::Ascending) => "↑",
+            Some(DataTableSortDirection::Descending) => "↓",
+            None => "↕",
+        })
+        .number_of_lines(1)
+        .into_element();
+    }
     const K: f32 = 12.0 / 24.0;
     let chevron = move |points: [f32; 6], direction, which| {
         part(
@@ -1501,6 +1513,7 @@ fn sort_icon(
             DataTableSortDirection::Descending,
             DataTablePart::SortDescending,
         ))
+        .into_element()
 }
 
 /// The band at a title's trailing edge that a drag resizes the column

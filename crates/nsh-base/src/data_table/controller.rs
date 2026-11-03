@@ -351,8 +351,12 @@ impl Dt {
 
     // Geometry.
 
+    /// A body row's height: the app's, or in a terminal one Cell, so rows
+    /// land on the grid's lines whatever the app gave.
     pub(crate) fn row_height(&self) -> f32 {
-        self.props.row_height.get().0.max(1.0)
+        crate::terminal::row_height(self.props.row_height.get())
+            .0
+            .max(1.0)
     }
 
     /// The height of one title row.
@@ -360,7 +364,10 @@ impl Dt {
         self.props
             .header_height
             .get()
-            .map_or_else(|| self.row_height(), |h| h.0.max(1.0))
+            .map_or_else(
+                || self.row_height(),
+                |h| crate::terminal::row_height(h).0.max(1.0),
+            )
     }
 
     /// How many title rows there are: the group levels and the titles.

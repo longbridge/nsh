@@ -2910,7 +2910,8 @@ export function Controls(props: { show: Control }) {
         <Collapsible
           open={open() === props.q}
           content={
-            <View style={{ ...settle(t), paddingBottom: size.padding + 4, paddingEnd: 24 }}>
+            // A terminal's answer lines up under the question, past its mark.
+            <View style={{ ...settle(t), paddingBottom: size.padding + 4, paddingEnd: 24, paddingStart: terminal ? TERMINAL_GAP : undefined }}>
               <Text style={{ fontSize: size.label, lineHeight: Math.round(size.label * 1.5), color: colors.muted }}>{props.a}</Text>
             </View>
           }

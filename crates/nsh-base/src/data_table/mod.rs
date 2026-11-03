@@ -297,10 +297,12 @@ pub struct DataTableProps {
     /// order muted, an alert highlighted) with no call into JS per row.
     #[prop(default)]
     pub row_classes: Prop<Vec<SharedString>>,
-    /// The height of a body row, in points (default 32).
+    /// The height of a body row, in points (default 32; in a terminal a
+    /// row is one Cell, whatever this is).
     #[prop(default = Points(32.0))]
     pub row_height: Prop<Points>,
-    /// The height of a title row, in points (default the row height).
+    /// The height of a title row, in points (default the row height; in a
+    /// terminal one Cell).
     pub header_height: Prop<Option<Points>>,
     /// Labels above the columns, the lowest level first: each level spans
     /// the columns as the `span`s say (a level's spans add up to the number

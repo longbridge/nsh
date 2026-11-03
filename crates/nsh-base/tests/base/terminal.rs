@@ -339,6 +339,15 @@ fn an_accordions_disclosure_leads_its_title_and_the_panel_lines_up_under_it() {
 /// Where each text starts across the window in a terminal, from the
 /// frames and parents the batches set.
 fn text_starts<C: Component<Props = ()>>() -> std::collections::HashMap<String, f32> {
+    text_origins::<C>()
+        .into_iter()
+        .map(|(t, (x, _))| (t, x))
+        .collect()
+}
+
+/// Where each text starts in the window in a terminal (x, y), from the
+/// frames and parents the batches set.
+fn text_origins<C: Component<Props = ()>>() -> std::collections::HashMap<String, (f32, f32)> {
     let viewport = Size::new(px(390.0), px(844.0));
     let config = EngineConfig {
         viewport,
@@ -377,17 +386,20 @@ fn text_starts<C: Component<Props = ()>>() -> std::collections::HashMap<String, 
     });
     app.first_render().unwrap();
     let seen = seen.lock().unwrap();
-    let x = |mut id: NodeId| {
-        let mut x = 0.0;
+    let at = |mut id: NodeId| {
+        let (mut x, mut y) = (0.0, 0.0);
         loop {
-            x += seen.1.get(&id).map_or(0.0, |f| f.origin.x.0);
+            if let Some(f) = seen.1.get(&id) {
+                x += f.origin.x.0;
+                y += f.origin.y.0;
+            }
             match seen.2.get(&id) {
                 Some(parent) => id = *parent,
-                None => return x,
+                None => return (x, y),
             }
         }
     };
-    seen.0.iter().map(|(id, t)| (t.clone(), x(*id))).collect()
+    seen.0.iter().map(|(id, t)| (t.clone(), at(*id))).collect()
 }
 
 #[test]
@@ -467,6 +479,22 @@ fn a_terminal_reads_a_formula_as_text_not_its_tex() {
     // Elsewhere the TeX as written, for want of a renderer.
     let gui = start::<Formulas>(Idiom::Desktop);
     assert!(joined(&gui).contains("\\text{ms}"));
+}
+
+/// A paragraph, then a heading and its paragraph.
+#[component]
+fn Sections() -> impl IntoElement {
+    text_view().markdown("Intro text.\n\n## How it works\n\nBody text.")
+}
+
+#[test]
+fn a_terminals_heading_after_a_block_has_a_blank_row_before_it() {
+    let at = text_origins::<Sections>();
+    let row = |t: &str| at.get(t).unwrap_or_else(|| panic!("no {t} in {at:?}")).1;
+    let cell = row("Body text.") - row("How it works");
+    assert!(cell > 0.0, "{at:?}");
+    // The heading two rows under the paragraph (one blank), its body right under it.
+    assert_eq!(row("How it works") - row("Intro text."), 2.0 * cell, "{at:?}");
 }
 
 /// A picker of `#3b82f6` (HSB hue 217) with an area, a hue slider and a

@@ -12,7 +12,8 @@
 //!   (`Color::Reset`); app colors become the default foreground, DIM or a
 //!   named accent. Fills, radii, shadows, gradients, outlines, opacity
 //!   tints and filters are the GUI's and draw nothing; an opaque fill only
-//!   decides what the colors drawn on it are read against.
+//!   decides what the colors drawn on it are read against. A gradient
+//!   over no fill of its own is a fill of its first stop.
 //! - **Borders** are single-line box drawing in the dim default color (an
 //!   accent when the app colored them), rounded `╭╮╰╯` where a corner has a
 //!   radius, on the sides the layout gave a Cell: the core sends a border
@@ -269,6 +270,20 @@ impl Painter<'_> {
             .get(id)
             .and_then(|view| icon_label(self.tree, view))
             .map(str::to_owned);
+        // Only an overlay's box takes a title, so only there is it asked
+        // whether its label is already its text.
+        let label_shown = self.tree.get(id).is_some_and(|view| {
+            let boxes = view.props.overlay_anchor.is_some()
+                || view.kind == ViewKind::Modal
+                || (layer.overlay && !layer.boxed);
+            boxes
+                && view
+                    .props
+                    .accessibility
+                    .label
+                    .as_deref()
+                    .is_some_and(|label| shown(self.tree, id, label))
+        });
         let Some(view) = self
             .tree
             .views
@@ -322,9 +337,20 @@ impl Painter<'_> {
         let fill = if blank {
             nsh_core::Color::TRANSPARENT
         } else {
-            view.animated
+            let color = view
+                .animated
                 .background
-                .unwrap_or(view.style.background_color)
+                .unwrap_or(view.style.background_color);
+            // A terminal draws one color per Cell: a gradient over no
+            // fill of its own fills with its first stop.
+            match view.style.effects.as_deref() {
+                Some(effects) if color.0 & 255 == 0 => effects
+                    .background_images
+                    .first()
+                    .and_then(|gradient| gradient.stops.first())
+                    .map_or(color, |stop| stop.color),
+                _ => color,
+            }
         };
         let control = control(view);
         let emphasis = if control {
@@ -443,7 +469,14 @@ impl Painter<'_> {
             layer.overlay = true;
             layer.modal = view.kind == ViewKind::Modal;
             layer.boxed = false;
-            layer.title = view.props.accessibility.label.clone();
+            // A label the overlay already shows as its text (a toast's,
+            // made of its lines) is no title: the frame would repeat it.
+            layer.title = view
+                .props
+                .accessibility
+                .label
+                .clone()
+                .filter(|_| !label_shown);
         }
         let surface = edges.any() || fill.0 & 255 == 255 || filled != Surface::None;
         let mut framed = None;
@@ -499,6 +532,7 @@ impl Painter<'_> {
                     .accessibility
                     .label
                     .clone()
+                    .filter(|_| !label_shown)
                     .or_else(|| layer.title.take())
                     .unwrap_or_default();
                 if edges.any() {
@@ -813,6 +847,37 @@ impl Painter<'_> {
 
 /// The innermost view with a border line around the focused view (or the
 /// overlay holding it): the pane the keys go to.
+/// Whether every word of `label` is in the text drawn under `id`: an
+/// overlay's label that only gathers its lines for a screen reader.
+fn shown(tree: &Mounter, id: NodeId, label: &str) -> bool {
+    fn gather(tree: &Mounter, id: NodeId, into: &mut String, depth: usize) {
+        let Some(view) = tree.get(id) else { return };
+        if let Some(content) = &view.text_content {
+            into.push_str(&content.text);
+            into.push(' ');
+        }
+        if depth < 32 {
+            for &child in &view.children {
+                gather(tree, child, into, depth + 1);
+            }
+        }
+    }
+    let mut drawn = String::new();
+    gather(tree, id, &mut drawn, 0);
+    let words: Vec<&str> = drawn.split_whitespace().collect();
+    let mut label_words = label
+        .split(|c: char| c.is_whitespace())
+        .map(|w| w.trim_matches(|c: char| !c.is_alphanumeric()))
+        .filter(|w| !w.is_empty())
+        .peekable();
+    label_words.peek().is_some()
+        && label_words.all(|word| {
+            words
+                .iter()
+                .any(|drawn| drawn.trim_matches(|c: char| !c.is_alphanumeric()) == word)
+        })
+}
+
 fn focus_pane(tree: &Mounter) -> Option<NodeId> {
     let focused = tree.views.iter().position(|view| {
         view.as_ref()

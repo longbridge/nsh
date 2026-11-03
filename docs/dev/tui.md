@@ -398,7 +398,9 @@ the color alone. A run with its own background (a
 highlight, inline code) is a band the same way. A text field without a
 line or a fill of its own is a raised band (a search field). Bandless, fills draw nothing.
 
-**Nothing is drawn** for fills bandless, gradients, radii other than a border's corners, shadows,
+A view's gradient over no fill of its own is a fill of its first stop, a band as any fill is.
+
+**Nothing is drawn** for fills bandless, radii other than a border's corners, shadows,
 outlines and focus rings, opacity, filters, blend modes, backdrop effects, transforms other than translation
 (rounded to Cells), icons, images, videos, web views and native views without a terminal rendering: the
 terminal cannot show them well, so they are left out rather than imitated (the core gives icon-sized images, videos,
@@ -942,7 +944,7 @@ permit clipboard writes; `nsh test` uses memory and never writes to the machine'
 | Inline attachments, mentions and inline math | Measured child content placed in whole Cells, wrapping with the surrounding text |
 | Font size, family, line height and letter spacing | Terminal font, display width and one row per line; imported fonts load from adjacent `assets/` or the development server |
 | Blur, materials, filters, backdrop effects, 3D transforms and blend modes | Left out |
-| View gradients (`backgroundImage`: linear, radial and conic) | Left out |
+| View gradients (`backgroundImage`: linear, radial and conic) | The first stop as a fill, where the view has no fill of its own |
 | Native animated values | Host-frame opacity, background/border/text colors, transforms and canvas slots; completion and cancellation reported |
 | 2D view transforms | Translation, rounded to Cells; scale, rotation and skew left out |
 | Canvas transforms | Affine paths on the braille grid, with animated numeric and color slots |

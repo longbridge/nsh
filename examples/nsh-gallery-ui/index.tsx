@@ -8,7 +8,7 @@ import { Button as BaseButton, Sheet as BaseSheet, Switch, Tooltip } from "nsh/b
 import { safeArea } from "nsh";
 import { Icon, type IconName } from "./icons";
 import { createPresence, type PopupSide } from "./popup";
-import { alpha, colors, finish, focusRing, hovered, isDark, mono, motion, radius, TERMINAL_COLUMN, TERMINAL_ROW, terminal, tints, toneColor, toneTint, type Tone, wholeRows } from "./theme";
+import { alpha, colors, finish, focusRing, hovered, isDark, mono, motion, radius, TERMINAL_COLUMN, TERMINAL_GAP, TERMINAL_ROW, terminal, tints, toneColor, toneTint, type Tone, wholeRows } from "./theme";
 
 export * from "./theme";
 export { Segmented } from "./segmented";
@@ -282,7 +282,8 @@ export function Inset(props: { gap?: number; padding?: number; children: JSX.Ele
 /** A caption row: a label on the left, a quieter note on the right. */
 export function Caption(props: { label: JSX.Element; note?: JSX.Element }) {
   return (
-    <View style={{ flexDirection: "row", alignItems: "baseline", gap: 8 }}>
+    // The terminal keeps the note two columns from the label it follows.
+    <View style={{ flexDirection: "row", alignItems: "baseline", gap: terminal ? TERMINAL_GAP : 8 }}>
       <Text style={{ flex: 1, fontSize: density.body, color: colors.muted }}>{props.label}</Text>
       <If when={props.note}>
         <Text style={{ fontSize: density.note, color: colors.faint, fontVariant: ["tabular-nums"] }}>{props.note}</Text>

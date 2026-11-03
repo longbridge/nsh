@@ -572,7 +572,18 @@ impl Cx {
                     .letter_spacing(px(h.size * h.tracking))
                     .mt(px(h.margin_top(before)))
                     .role(AccessibilityRole::Header);
-                self.parts(el, &[Part::Heading, part]).into_element()
+                let el = self.parts(el, &[Part::Heading, part]);
+                // A terminal's rows have no room between blocks of a box:
+                // a heading after a block takes a blank row before it, as
+                // a Markdown source has.
+                if is_terminal() && !matches!(before, Before::Nothing) {
+                    return view()
+                        .flex_col()
+                        .child(view().h(crate::terminal::cell_height()))
+                        .child(el)
+                        .into_element();
+                }
+                el.into_element()
             }
             Block::Blockquote {
                 children,

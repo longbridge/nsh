@@ -600,6 +600,9 @@ const glyphs: Record<IconName, Draw> = {
 /** A glyph, stroked with `tint`; `weight` is the stroke in the glyphs' 20-unit box (1.6 by default). */
 export function Icon(props: { name: IconName; size?: number; tint: string; weight?: number }) {
   const size = props.size ?? 20;
+  // The terminal draws no icons; a check is a mark there too (a chosen
+  // option, the command in effect, a step done), so it keeps its glyph.
+  if (terminal && props.name === "check") return <Text style={{ color: props.tint }}>✓</Text>;
   return (
     <Canvas
       style={{ pointerEvents: "none", width: size, height: size }}

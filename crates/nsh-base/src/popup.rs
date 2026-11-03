@@ -693,6 +693,10 @@ pub(crate) fn dropdown(
         }
         let room = signal(None::<Points>);
         let dismiss = presence.dismiss.clone();
+        // A terminal's trigger is only as wide as its value: a list there
+        // is at least that wide, so its rows keep what is beside their
+        // titles (the chosen item's mark).
+        let fit = fit || crate::terminal::is_terminal();
         let popup = overlay()
             // The trigger itself: in a TSX app the app's element, whose
             // box is what shows (not the slot's view, which a column
