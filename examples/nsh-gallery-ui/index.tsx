@@ -207,9 +207,9 @@ const surface = (): ViewStyle => ({
 });
 
 /**
- * The one section shown, by its title (null: all of them): the gallery sets
- * it from its launch parameters (`host.params.section`), so a test or a
- * screenshot opens straight at a section instead of scrolling to it.
+ * The one section shown, by its title in any case (null: all of them): the
+ * gallery sets it from `cargo run -- <demo> --section <title>`, so a check
+ * or a screenshot opens straight at a section instead of scrolling to it.
  */
 export const focusedSection = signal<string | null>(null);
 
@@ -229,7 +229,7 @@ export function Card(props: {
   children: JSX.Element;
 }) {
   return (
-    <If when={focusedSection() == null || focusedSection() === props.title}>
+    <If when={focusedSection() == null || focusedSection()!.toLowerCase() === props.title?.toLowerCase()}>
     <View style={[{ gap: 8 }, props.style ?? null]}>
       <If when={props.title}>
         <SectionHead title={props.title!} subtitle={props.subtitle} right={props.right} />

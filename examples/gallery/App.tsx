@@ -1,6 +1,7 @@
 import { type Bounds, computed, effect, type InputRef, mount, Scroll, signal, Text, untracked, View, type ScrollRef } from "nsh";
 import { Animated, createAnimatedValue, Easing } from "nsh";
-import { host, platform, windowSize } from "nsh";
+import { platform, windowSize } from "nsh";
+import process from "process";
 import { isAvailable as hasWindow, titleBar, Window } from "nsh/desktop";
 import { Input, NavPage, NavStack, Scrollbar } from "nsh/base";
 import { keymap } from "nsh";
@@ -527,10 +528,10 @@ function Desktop() {
 /** The key of the demo left open, shown again on the next launch. */
 const LAST_DEMO = "lastDemo";
 
-/** A launch parameter (`host.params`) that is text, else null. */
-function param(name: string): string | null {
-  const value = host.params[name];
-  return typeof value === "string" && value !== "" ? value : null;
+/** A variable of the environment the gallery runs in that is set, else null. */
+function launch(name: string): string | null {
+  const value = process.env[name];
+  return value ? value : null;
 }
 
 /**
@@ -538,15 +539,15 @@ function param(name: string): string | null {
  * a phone), then keeps the key current: the demo shown, or none when a
  * phone is back on the index. A name no demo has any more is ignored.
  *
- * The launch parameters open another (`host.params`, as a test's
- * `open("App.tsx", { host: { params: { demo: "TextView", section: "Markdown" } } })`):
- * `demo` by its name (any case) instead of the last one, and `section`
- * shows only that section of it (`focusedSection`, a card's title), so a
- * test or a screenshot needs no taps or scrolling to reach it.
+ * `cargo run -- <demo> [--section <title>]` opens another, as GPUI Kit's
+ * story does: the runner sets `NSH_GALLERY_DEMO` (a demo's name, any case),
+ * opened instead of the last one, and `NSH_GALLERY_SECTION` (a card's
+ * title), the only section of it shown (`focusedSection`), so checking a
+ * demo needs no taps or scrolling. `nsh test` reads them as well.
  */
 function rememberDemo() {
-  const launched = param("demo");
-  focusedSection.set(param("section"));
+  const launched = launch("NSH_GALLERY_DEMO");
+  focusedSection.set(launch("NSH_GALLERY_SECTION"));
   const restored = signal(false);
   let asked = false;
   effect(() => {

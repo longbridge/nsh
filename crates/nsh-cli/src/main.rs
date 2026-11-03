@@ -186,11 +186,6 @@ enum Command {
         /// the primary one when there is no other.
         #[arg(long, value_name = "N", value_parser = clap::value_parser!(u32).range(1..))]
         display: Option<u32>,
-        /// With an app's entry: a launch parameter the app reads as
-        /// `host.params` (`--param demo=TextView`, repeated for more), as an
-        /// embedding app sets it; a test file gives its own in `open`.
-        #[arg(long = "param", value_name = "KEY=VALUE", value_parser = parse_param)]
-        params: Vec<(String, String)>,
     },
     /// Type check an app with TypeScript's native compiler (TypeScript 7,
     /// downloaded once from the npm registry; no Node needed); an app with
@@ -653,7 +648,6 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
             browser,
             web_host,
             display,
-            params,
         } => test::test(
             &path,
             &entry,
@@ -665,7 +659,6 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
             browser.as_deref(),
             web_host,
             display.map(|n| n as usize),
-            &params,
         ),
         Command::Dev {
             entry,
@@ -910,13 +903,5 @@ mod command_tests {
             }
         ));
         assert!(Cli::try_parse_from(["nsh", "dev", "--server-only", "--target", "ios"]).is_err());
-    }
-}
-
-/// `nsh test --param`'s `KEY=VALUE`.
-fn parse_param(arg: &str) -> Result<(String, String), String> {
-    match arg.split_once('=') {
-        Some((key, value)) if !key.is_empty() => Ok((key.to_owned(), value.to_owned())),
-        _ => Err(format!("`{arg}` is not KEY=VALUE")),
     }
 }

@@ -66,7 +66,6 @@ pub(crate) fn test(
     browser: Option<&Path>,
     web_host: Option<PathBuf>,
     display: Option<usize>,
-    params: &[(String, String)],
 ) -> anyhow::Result<()> {
     let app_dir = entry.parent().unwrap_or(Path::new(".")).to_path_buf();
     let work_dir = app_dir.join(".nsh/test");
@@ -80,11 +79,6 @@ pub(crate) fn test(
             .collect(),
         _ => Vec::new(),
     };
-    if !params.is_empty() && (is_test_file(path) || path.is_dir()) {
-        bail!(
-            "--param is for an app's entry: a test file gives the app's launch parameters in `open(entry, {{ host: {{ params }} }})`"
-        );
-    }
     let files = if is_test_file(path) {
         vec![path.to_owned()]
     } else if path.is_dir() {
@@ -104,7 +98,7 @@ pub(crate) fn test(
         }
         files
     } else {
-        vec![steps_file(&work_dir, path, params)?]
+        vec![steps_file(&work_dir, path)?]
     };
     // How the files are shown: an entry's steps by the entry.
     let shown = |file: &Path| {
@@ -738,15 +732,10 @@ fn find_tests(dir: &Path, out: &mut Vec<PathBuf>) {
     }
 }
 
-/// A test file that opens the app at `entry` on the network with the
-/// launch parameters `params` (`host.params`), lets it run for a while,
-/// then takes the steps standard input gives (none from a terminal), with
-/// `app` the app.
-fn steps_file(
-    work_dir: &Path,
-    entry: &Path,
-    params: &[(String, String)],
-) -> anyhow::Result<PathBuf> {
+/// A test file that opens the app at `entry` on the network, lets it run
+/// for a while, then takes the steps standard input gives (none from a
+/// terminal), with `app` the app.
+fn steps_file(work_dir: &Path, entry: &Path) -> anyhow::Result<PathBuf> {
     let mut steps = String::new();
     let stdin = std::io::stdin();
     if !stdin.is_terminal() {
@@ -759,23 +748,11 @@ fn steps_file(
         .file_name()
         .map_or("app".into(), |n| n.to_string_lossy().into_owned());
     let entry_js = serde_json::to_string(&entry.to_string_lossy().replace('\\', "/"))?;
-    let params: serde_json::Map<String, serde_json::Value> = params
-        .iter()
-        .map(|(k, v)| (k.clone(), serde_json::Value::String(v.clone())))
-        .collect();
-    let options = if params.is_empty() {
-        "{ network: \"live\" }".to_owned()
-    } else {
-        format!(
-            "{{ network: \"live\", host: {{ params: {} }} }}",
-            serde_json::Value::Object(params)
-        )
-    };
     let code = format!(
         "// Made by `nsh test {name}`: the steps of standard input.\n\
          import {{ expect, open, test }} from \"nsh/test\";\n\n\
          test(\"steps\", async () => {{\n\
-         const app = await open({entry_js}, {options});\n\
+         const app = await open({entry_js}, {{ network: \"live\" }});\n\
          await app.wait({IDLE_MS});\n\
          {steps}\n\
          }});\n"
