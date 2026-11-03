@@ -475,9 +475,8 @@ Bandless:
 **Overlays**: an anchored overlay (a popover, menu, tooltip) or a modal clears its box and frames it with a
 rounded line, in the border step with surfaces (dim bandless); the accessibility label of its first surface is
 the title in the top border, bold, set off by the line with surfaces (`╭─ Title ─`). With surfaces an anchored
-overlay's box is raised, framed in the brighter popup line, and casts a one-Cell drop shadow to its right and
-below (the Cells there keep their glyphs, their background darkened 40% toward black and their text faded); a
-modal's box is the terminal's background. A box without a border of its own gets the
+overlay's box is raised and framed in the brighter popup line, with no shadow: what is around it stays as it
+is; a modal's box is the terminal's background. A box without a border of its own gets the
 frame one Cell outside it. Before each visible modal the Cells already drawn are faded half way into the
 terminal's background with surfaces (`dialog::backdrop`), dimmed bandless; anchored overlays leave what is
 behind them as it is, so a tooltip does not dim the screen. A system dialog (`AlertDialog`) is drawn the same

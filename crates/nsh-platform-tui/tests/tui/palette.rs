@@ -455,7 +455,7 @@ fn Raised() -> impl IntoElement {
 }
 
 #[test]
-fn a_popup_is_raised_framed_brighter_and_casts_a_shadow() {
+fn a_popup_is_raised_framed_brighter_and_casts_no_shadow() {
     let (mut view, rx) = surfaces();
     let mut terminal = Terminal::new(TestBackend::new(24, 8)).unwrap();
     view.load(App::Rust(Root::new::<Raised>(|| ()))).unwrap();
@@ -478,18 +478,9 @@ fn a_popup_is_raised_framed_brighter_and_casts_a_shadow() {
         "the popup's line"
     );
     assert!(rows[usize::from(y) - 1].contains("─ Menu ─"), "{rows:#?}");
-    let shadow = Color::Rgb(14, 14, 14);
-    assert_eq!(
-        buffer[(x + 11, y)].bg,
-        shadow,
-        "right of the frame: {rows:#?}"
-    );
-    assert_eq!(
-        buffer[(x + 4, y + 2)].bg,
-        shadow,
-        "below the frame: {rows:#?}"
-    );
-    assert_eq!(buffer[(x + 4, y + 3)].bg, Color::Reset);
+    // Nothing around the frame changes: no shadow covers what is there.
+    assert_eq!(buffer[(x + 11, y)].bg, Color::Reset, "right of the frame: {rows:#?}");
+    assert_eq!(buffer[(x + 4, y + 2)].bg, Color::Reset, "below the frame: {rows:#?}");
 }
 
 fn pane(name: &'static str) -> impl IntoElement {

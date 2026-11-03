@@ -360,6 +360,7 @@ impl Painter<'_> {
             }
         };
         let control = control(view);
+        let hidden = hidden_input(view);
         let emphasis = if control {
             stands_out(fill, ground)
         } else {
@@ -430,6 +431,7 @@ impl Painter<'_> {
             && view.input.is_some()
             && filled == Surface::None
             && !edges.any()
+            && !hidden
         {
             ground.level = Ramp::above(parent.level, palette::RAISED);
             ground.surface = ramp.level(ground.level);
@@ -490,10 +492,8 @@ impl Painter<'_> {
         let surface = edges.any() || fill.0 & 255 == 255 || filled != Surface::None;
         let mut framed = None;
         let mut frame_look = None;
-        // The overlay's box: whether it is a popup's (a drop shadow, a
-        // brighter line) and where its title is (an accent chip while the
-        // focus is inside).
-        let mut popup_box = false;
+        // Where the overlay's title is: an accent chip while the focus is
+        // inside. A terminal draws no shadow under a popup.
         let mut title_at = None;
         if layer.overlay && surface && !visible.is_empty() {
             dialog::clear(self.buffer, visible);
@@ -557,8 +557,7 @@ impl Painter<'_> {
                         ramp.popover_line()
                     };
                     frame_look = Some((line, ground.surface));
-                    popup_box = !layer.modal;
-                    if popup_box {
+                    if !layer.modal {
                         self.popup = true;
                     }
                 }
@@ -633,7 +632,9 @@ impl Painter<'_> {
                 };
                 text(self.buffer, &mut self.text_cells, place, view, ground);
             }
-            if let (Some(field), Some(config)) = (&mut view.field, &view.input) {
+            if let (Some(field), Some(config)) = (&mut view.field, &view.input)
+                && !hidden
+            {
                 let content = CellBounds::new(
                     Bounds::new(at + field.content.origin, field.content.size),
                     cells,
@@ -843,7 +844,7 @@ impl Painter<'_> {
             };
             mark_disclosure(self.buffer, inner_visible, open, look);
         }
-        if !visible.is_empty() {
+        if !visible.is_empty() && !hidden {
             let marks = Marks {
                 bands: self.bands,
                 emphasis,
@@ -896,15 +897,6 @@ impl Painter<'_> {
                     cell.bg = ACCENT;
                     cell.fg = ramp.base();
                 }
-            }
-            if popup_box {
-                shadow(
-                    self.buffer,
-                    visible,
-                    frame_look.is_some() && !edges.any(),
-                    self.screen,
-                    ramp,
-                );
             }
         }
         if self.focus == Focus::None && view.states & state::FOCUSED != 0 {
@@ -988,32 +980,6 @@ enum Focus {
     None,
     Within,
     Shown,
-}
-
-/// A popup's drop shadow, one Cell to the right of and below its box
-/// (`visible`, framed one Cell outside it when `around`): the glyphs there
-/// stay, darkened, after Turbo Vision.
-fn shadow(buffer: &mut Buffer, visible: Rect, around: bool, screen: Rect, ramp: Ramp) {
-    let grow = u16::from(around);
-    let left = visible.x.saturating_sub(grow);
-    let top = visible.y.saturating_sub(grow);
-    let right = visible.right() + grow;
-    let bottom = visible.bottom() + grow;
-    let screen = screen.intersection(buffer.area);
-    let mut shade = |x: u16, y: u16| {
-        if screen.contains(Position::new(x, y)) {
-            let cell = &mut buffer[(x, y)];
-            cell.bg = ramp.shade(cell.bg);
-            cell.fg = ramp.fade(cell.fg, true);
-            cell.modifier -= Modifier::BOLD | Modifier::REVERSED;
-        }
-    };
-    for y in top + 1..=bottom {
-        shade(right, y);
-    }
-    for x in left + 1..right {
-        shade(x, bottom);
-    }
 }
 
 /// The label an icon button shows: its accessibility label, trimmed, when
@@ -1535,6 +1501,20 @@ fn pressable(view: &NshView) -> bool {
     ) || nsh_core::input::has_press(view.events)
 }
 
+/// Whether the view is a text input drawn by others: no fill and text in
+/// a transparent color (a one-time code's field under its cells, which
+/// show what it holds). It draws nothing: no band, no text, no state.
+fn hidden_input(view: &NshView) -> bool {
+    view.input.as_ref().is_some_and(|config| {
+        view.animated.color.unwrap_or(config.style.color).is_transparent()
+            && view
+                .animated
+                .background
+                .unwrap_or(view.style.background_color)
+                .is_transparent()
+    })
+}
+
 /// Whether the view is a control: something the user presses, chooses or
 /// types in, drawn as its label row.
 fn control(view: &NshView) -> bool {
@@ -1576,9 +1556,19 @@ fn mark_state(
     let disabled = view.props.accessibility.state.disabled || flags & state::DISABLED != 0;
     let selected = banded(view);
     let field = view.input.is_some();
-    let focused = flags & state::FOCUSED != 0
-        && !disabled
-        && view.props.accessibility.role != AccessibilityRole::Adjustable;
+    let adjustable = view.props.accessibility.role == AccessibilityRole::Adjustable;
+    if flags & state::FOCUSED != 0 && !disabled && adjustable {
+        // A focused slider's thumb is reversed, as with surfaces.
+        for y in visible.y..visible.bottom() {
+            for x in visible.x..visible.right() {
+                let cell = &mut buffer[(x, y)];
+                if cell.symbol() == "●" {
+                    cell.modifier.insert(Modifier::REVERSED | Modifier::BOLD);
+                }
+            }
+        }
+    }
+    let focused = flags & state::FOCUSED != 0 && !disabled && !adjustable;
     let pressed = flags & state::PRESSED != 0 && !disabled;
     let hovered = flags & state::HOVERED != 0 && !disabled && pressable(view);
     // A disabled view's own content (its text, when the view is the text)
@@ -1712,6 +1702,15 @@ fn mark_surface(
     // A focusable view showing focus its own way (a resize handle's line,
     // a slider's track) takes no marks for focus.
     let adjustable = view.props.accessibility.role == AccessibilityRole::Adjustable;
+    if focused && adjustable {
+        // A focused slider's (a color channel's) thumb is reversed: the
+        // track already shows the value, the thumb shows the keys go here.
+        drawn(buffer, visible, |cell| {
+            if cell.symbol() == "●" {
+                cell.modifier.insert(Modifier::REVERSED | Modifier::BOLD);
+            }
+        });
+    }
     let focused = focused && !adjustable;
     // The same for the selected row of a list in the pane the keys go to
     // (lazygit's): elsewhere selection is the gray select band.
@@ -1756,6 +1755,9 @@ fn mark_surface(
         }
         if selected || focused {
             drawn(buffer, inner, |cell| cell.modifier.insert(Modifier::BOLD));
+            if selected && focused {
+                drawn(buffer, inner, |cell| cell.modifier.insert(Modifier::UNDERLINED));
+            }
         } else {
             drawn(buffer, inner, |cell| {
                 if cell.fg == Color::Reset {
@@ -1774,6 +1776,12 @@ fn mark_surface(
     if selected {
         band(buffer, visible, step(SELECT), own);
         drawn(buffer, inner, |cell| cell.modifier.insert(Modifier::BOLD));
+        // Focused as well as chosen (the page of a pagination, a
+        // segment): the label is underlined, as the band alone is the
+        // selection's.
+        if focused && !container {
+            drawn(buffer, inner, |cell| cell.modifier.insert(Modifier::UNDERLINED));
+        }
     }
     if focused && container {
         if edges.any() {

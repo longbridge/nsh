@@ -314,8 +314,6 @@ const BORDER_SHARE: f32 = 0.22;
 const FOCUS_LINE_SHARE: f32 = 0.40;
 /// A popover's or menu's line: clearly brighter than a card's.
 const POPOVER_LINE_SHARE: f32 = 0.45;
-/// How far a popover's drop shadow darkens what it falls on toward black.
-const SHADOW_SHARE: f32 = 0.40;
 /// Barely there text (disabled, placeholders).
 const FAINT_SHARE: f32 = 0.35;
 /// Secondary text.
@@ -437,17 +435,6 @@ impl Ramp {
     /// The terminal's own background as a color: text on an accent band.
     pub(crate) fn base(&self) -> Color {
         convert(self.background, self.depth)
-    }
-
-    /// A popover's drop shadow over a Cell of background `color`: darkened
-    /// toward black.
-    pub(crate) fn shade(&self, color: Color) -> Color {
-        let rgb = match color {
-            Color::Rgb(r, g, b) => [r, g, b],
-            Color::Indexed(index) if index >= 16 => indexed_rgb(index),
-            _ => self.background,
-        };
-        convert(mix(rgb, [0; 3], SHADOW_SHARE), self.depth)
     }
 
     /// Secondary text.
