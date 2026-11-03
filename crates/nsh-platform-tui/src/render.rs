@@ -503,25 +503,50 @@ impl Painter<'_> {
             dialog::clear(self.buffer, visible);
             // A word behind it that the box cuts at its sides (or the
             // frame drawn a Cell around it) is left out whole: no half of
-            // it is glued to the frame.
+            // it is glued to the frame. A longer run (a URL, a path) would
+            // leave nothing of itself: it keeps what shows, ending in `…`
+            // by the frame.
             let area = self.buffer.area;
             let (left, right) = (i32::from(visible.x), i32::from(visible.right()));
-            let starts = [(left - 1, -1), (left - 2, -1), (right, 1), (right + 1, 1)];
             let rows =
                 visible.y.saturating_sub(1)..visible.bottom().saturating_add(1).min(area.bottom());
+            let word = |buffer: &Buffer, text_cells: &[bool], column: i32, y: u16| {
+                column >= i32::from(area.x) && column < i32::from(area.right()) && {
+                    let at = buffer.index_of(column as u16, y);
+                    text_cells[at]
+                        && buffer.content[at]
+                            .symbol()
+                            .chars()
+                            .any(|c| !c.is_whitespace())
+                }
+            };
             for y in rows {
-                for (start, step) in starts {
-                    let mut column = start;
-                    while column >= i32::from(area.x) && column < i32::from(area.right()) {
-                        let at = self.buffer.index_of(column as u16, y);
-                        let word = self.text_cells[at]
-                            && self.buffer.content[at]
-                                .symbol()
-                                .chars()
-                                .any(|c| !c.is_whitespace());
-                        if !word {
-                            break;
+                // The frame's Cell, else the one beyond it (a word touching
+                // the frame).
+                for (frame, step) in [(left - 1, -1), (right, 1)] {
+                    let start = match word(self.buffer, &self.text_cells, frame, y) {
+                        true => frame,
+                        false => frame + step,
+                    };
+                    let mut end = start;
+                    while word(self.buffer, &self.text_cells, end, y) {
+                        end += step;
+                    }
+                    let length = (end - start).unsigned_abs();
+                    if length > CUT_WORD_CELLS {
+                        if start == frame {
+                            let at = self.buffer.index_of(frame as u16, y);
+                            self.buffer.content[at].set_symbol(" ");
+                            self.text_cells[at] = false;
                         }
+                        let next = (frame + step) as u16;
+                        let at = self.buffer.index_of(next, y);
+                        self.buffer.content[at].set_symbol("…");
+                        continue;
+                    }
+                    let mut column = start;
+                    while column != end {
+                        let at = self.buffer.index_of(column as u16, y);
                         self.buffer.content[at].set_symbol(" ");
                         self.text_cells[at] = false;
                         column += step;
@@ -1000,6 +1025,11 @@ fn dot(view: &NshView, bounds: CellBounds, fill: nsh_core::Color) -> bool {
 
 /// The accent the focus shows in: a box's line around it, an overlay's
 /// title, a popup's highlighted item.
+/// The widest word an overlay leaves out whole where it cuts it, in
+/// Cells: a longer run (a URL, a path) keeps the part that shows, ending
+/// in `…` by the overlay.
+const CUT_WORD_CELLS: u32 = 12;
+
 const ACCENT: Color = Color::Blue;
 
 /// Where the focus is, as the views around it are marked (their children

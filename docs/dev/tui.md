@@ -488,7 +488,10 @@ rounded line, in the border step with surfaces (dim bandless); the accessibility
 the title in the top border, bold, set off by the line with surfaces (`╭─ Title ─`). With surfaces an anchored
 overlay's box is raised and framed in the brighter popup line, with no shadow: what is around it stays as it
 is; a modal's box is the terminal's background. A box without a border of its own gets the
-frame one Cell outside it. Before each visible modal the Cells already drawn are faded half way into the
+frame one Cell outside it; so does a popup holding a list or menu with no box of the app's, its own box,
+and the layout keeps the frame's Cells (`Core::framed_box`). A word behind the box that it or its frame cuts is
+left out whole, no half of it glued to the frame; a run longer than 12 Cells (a URL, a path) keeps the part that
+shows, ending in `…` by the frame. Before each visible modal the Cells already drawn are faded half way into the
 terminal's background with surfaces (`dialog::backdrop`), dimmed bandless; anchored overlays leave what is
 behind them as it is, so a tooltip does not dim the screen. A system dialog (`AlertDialog`) is drawn the same
 way; its buttons are `Cancel  OK` with surfaces, the default one bold and the focused one a select band and

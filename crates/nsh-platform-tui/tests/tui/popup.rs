@@ -743,3 +743,56 @@ fn an_overlay_s_box_leaves_out_the_words_it_cuts_at_its_sides() {
         "whole words before it stay: {line}"
     );
 }
+
+/// A box in an overlay over rows of one long unbroken run (a URL), which
+/// it cuts in the middle.
+#[component]
+fn OverUrl() -> impl IntoElement {
+    let mut page = view().flex_1();
+    for _ in 0..6 {
+        page = page.child(text("https://example.com/abcdefghijklmnop/q"));
+    }
+    page.child(
+        overlay().left_0().right_0().top_0().child(
+            view().mt(px(32.0)).flex_row().justify_center().child(
+                view()
+                    .w(px(80.0))
+                    .bg(nsh_core::color::rgb(0x333333))
+                    .child(text("Box")),
+            ),
+        ),
+    )
+}
+
+#[test]
+fn an_overlay_s_box_keeps_the_shown_part_of_a_long_run_it_cuts_with_an_ellipsis() {
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(40, 8)).unwrap();
+    view.load(App::Rust(Root::new::<OverUrl>(|| ()))).unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "Box");
+    let (_, y) = find(&terminal, "Box").unwrap();
+    let buffer = terminal.backend().buffer();
+    let line: String = (0..40).map(|x| buffer[(x, y)].symbol()).collect();
+    let cells: Vec<&str> = (0..40).map(|x| buffer[(x, y)].symbol()).collect();
+    let first = cells.iter().position(|c| *c == "│").expect(&line) as u16;
+    let last = cells.iter().rposition(|c| *c == "│").expect(&line) as u16;
+    assert!(
+        line.starts_with("https://exam"),
+        "the part before the box stays: {line}"
+    );
+    assert_eq!(
+        buffer[(first - 1, y)].symbol(),
+        "…",
+        "ending in an ellipsis by the frame: {line}"
+    );
+    assert_eq!(
+        buffer[(last + 1, y)].symbol(),
+        "…",
+        "and starting in one after it: {line}"
+    );
+    assert_ne!(
+        buffer[(last + 2, y)].symbol(),
+        " ",
+        "the part after the box stays: {line}"
+    );
+}
