@@ -273,10 +273,15 @@ fn block(rv: Rv, item: ReadSignal<BlockItem>) -> AnyElement {
                 parts::merge(&list)
             })
         });
-    // A list's item carries its marker, placed in the indent before it.
-    let wrapper = match list_marker(&rv, &first) {
-        Some(_) => wrapper.relative().child(marker(rv.clone(), item)),
-        None => wrapper,
+    // A list's item carries its marker, placed in the indent before it;
+    // a terminal's goes in flow before the content instead, as TextView
+    // sets its markers, since its Cells round the indent down.
+    let terminal = crate::terminal::is_terminal();
+    let marked = list_marker(&rv, &first).is_some();
+    let wrapper = match marked {
+        true if terminal => wrapper.flex_row().child(marker(rv.clone(), item, true)),
+        true => wrapper.relative().child(marker(rv.clone(), item, false)),
+        false => wrapper,
     };
     // Tables are grids of their cells (`table.rs`).
     let wrapper = match (table_role(first.node.ty()), &kind) {
@@ -300,6 +305,11 @@ fn block(rv: Rv, item: ReadSignal<BlockItem>) -> AnyElement {
         return wrapper
             .flex_row()
             .child(task_checkbox(rv, item))
+            .child(view().flex_1().min_w(px(0.0)).children(content))
+            .into_element();
+    }
+    if marked && terminal {
+        return wrapper
             .child(view().flex_1().min_w(px(0.0)).children(content))
             .into_element();
     }
@@ -425,8 +435,10 @@ fn marker_kind(node: &Node) -> Option<ListMarker> {
 /// The text of `it`'s marker: a bullet by its depth among bulleted lists
 /// (disc, circle, square, around again deeper), or its number from
 /// the list's start (`extra.listMarkerStart` names that attribute,
-/// `order` by default; 1., a., i. by depth).
-fn marker_text(rv: &Rv, it: &BlockItem) -> Option<String> {
+/// `order` by default; 1., a., i. by depth). In a terminal the number is
+/// right-aligned to the list's widest and a space follows the marker, so
+/// the items' content lines up after it.
+fn marker_text(rv: &Rv, it: &BlockItem, terminal: bool) -> Option<String> {
     let state = rv.st.borrow();
     let at = state.doc().resolve(it.pos).ok()?;
     let list = at.parent();
@@ -446,20 +458,38 @@ fn marker_text(rv: &Rv, it: &BlockItem) -> Option<String> {
             let depth = (0..at.depth)
                 .filter(|&d| marker_kind(at.node(d)) == Some(ListMarker::Ordered))
                 .count();
-            let label = match (depth % 3, n) {
-                (1, 1..) => alpha(n as u64),
-                (2, 1..) => roman(n as u64),
-                _ => n.to_string(),
-            };
-            Some(format!("{label}."))
+            let label = format!("{}.", ordered_label(depth, n));
+            if !terminal {
+                return Some(label);
+            }
+            let widest = (0..list.child_count() as i64)
+                .map(|i| ordered_label(depth, start + i).chars().count() + 1)
+                .max()
+                .unwrap_or(0);
+            Some(format!("{label:>widest$} "))
         }
         ListMarker::Bullet => {
             let depth = (0..at.depth)
                 .filter(|&d| marker_kind(at.node(d)) == Some(ListMarker::Bullet))
                 .count();
             // Disc, circle, square, and around again deeper down.
-            Some(["•", "◦", "▪"][depth % 3].to_owned())
+            let bullet = ["•", "◦", "▪"][depth % 3];
+            Some(if terminal {
+                format!("{bullet} ")
+            } else {
+                bullet.to_owned()
+            })
         }
+    }
+}
+
+/// Item `n`'s number in an ordered list `depth` ordered lists deep: 1,
+/// then a, then i, and around again.
+fn ordered_label(depth: usize, n: i64) -> String {
+    match (depth % 3, n) {
+        (1, 1..) => alpha(n as u64),
+        (2, 1..) => roman(n as u64),
+        _ => n.to_string(),
     }
 }
 
@@ -504,12 +534,14 @@ fn roman(mut n: u64) -> String {
 
 /// A list item's marker: in the indent before its content, its end
 /// against it, as a browser places it (the app's classes give the item
-/// its indent). The view draws it; the document has no marker.
-fn marker(rv: Rv, item: ReadSignal<BlockItem>) -> impl IntoElement {
+/// its indent); in a `terminal`, in flow before the content, where Cells
+/// would round the indent below a number's width. The view draws it; the
+/// document has no marker.
+fn marker(rv: Rv, item: ReadSignal<BlockItem>, terminal: bool) -> impl IntoElement {
     dynamic(move || {
         rv.doc_rev.get();
         let it = item.get();
-        let label = marker_text(&rv, &it)?;
+        let label = marker_text(&rv, &it, terminal)?;
         // The first line's typography (and the space above it), so the
         // marker sits on that line's baseline as a browser's does; the
         // marker's part comes after it.
@@ -530,22 +562,23 @@ fn marker(rv: Rv, item: ReadSignal<BlockItem>) -> impl IntoElement {
                 parts::join(list)
             })
         };
-        Some(
-            text(label)
-                .app_class(typography)
+        let marker = text(label).app_class(typography);
+        // A terminal's is in flow before the content, its own spaces
+        // aligning it (`marker_text`).
+        let marker = match terminal {
+            true => marker.flex_none(),
+            false => marker
                 .absolute()
                 .top(px(0.0))
                 .right(relative(1.0))
                 // A box wide enough for numbers, the marker at its end, as
                 // TextView places its markers.
                 .w(px(32.0))
-                // A Cell between the marker and the content in a terminal.
-                .pe(px(if crate::terminal::is_terminal() {
-                    8.0
-                } else {
-                    6.0
-                }))
-                .text_right()
+                .pe(px(6.0))
+                .text_right(),
+        };
+        Some(
+            marker
                 .pointer_events(PointerEvents::None)
                 .inline_style(move || {
                     props

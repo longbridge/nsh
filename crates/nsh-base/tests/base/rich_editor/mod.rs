@@ -337,3 +337,26 @@ fn list_items_show_their_markers() {
     // The markers are the view's: the document's text has none.
     see(&mut app, &doc("one|inner|two|three|four"));
 }
+
+#[test]
+fn a_terminals_markers_are_in_flow_their_numbers_right_aligned() {
+    let mut config = EngineConfig {
+        viewport: Size::new(px(800.0), px(900.0)),
+        ..EngineConfig::new(Root::new::<Harness>(|| HarnessProps {
+            session: Some(session(json!({"type": "doc", "content": [
+                {"type": "bulletList", "content": [item("one", None)]},
+                {"type": "orderedList", "attrs": {"start": 9}, "content": [item("nine", None), item("ten", None)]},
+            ]}))),
+        }))
+    };
+    config.environment.os = Os::Linux;
+    config.environment.idiom = Idiom::Terminal;
+    let mut app = Headless::start(config).expect("the engine starts");
+    app.wait_for("text:Ready").unwrap();
+    // A space after each marker, and the numbers right-aligned to the
+    // widest of their list, so the items' text starts in one column.
+    let texts = app.screen().texts();
+    for marker in ["• ", " 9. ", "10. "] {
+        assert!(texts.contains(&marker), "{marker:?} in {texts:?}");
+    }
+}

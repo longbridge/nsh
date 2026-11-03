@@ -3372,7 +3372,11 @@ export function Controls(props: { show: Control }) {
     color: colors.text,
     placeholderColor: colors.faint,
     fontVariant: ["tabular-nums" as const],
+    // A terminal sets every number at the end, as a column of numbers reads.
+    ...(terminal ? { textAlign: "right" as const } : {}),
   });
+  /** Centered between its steppers, but at the end in a terminal (as {@link field}). */
+  const stepAlign = terminal ? ("right" as const) : ("center" as const);
   /** A step button's glyph: the gallery's icon, in the muted text color. */
   function Step(props: { name: "plus" | "minus" | "chevron-up" | "chevron-down"; size: number }) {
     return <Icon name={props.name} size={props.size} tint={colors.muted} />;
@@ -3422,7 +3426,7 @@ export function Controls(props: { show: Control }) {
                 last.set(`Seats: ${show(next)}`);
               }}
               class={`${frame} disabled:opacity-50`}
-              inputStyle={{ ...field(), textAlign: "center" }}
+              inputStyle={{ ...field(), textAlign: stepAlign }}
               decrementButtonClass={`${pointer ? "w-8" : "w-11"} ${press} border-r border-line`}
               incrementButtonClass={`${pointer ? "w-8" : "w-11"} ${press} border-l border-line`}
               decrementButton={<Step name="minus" size={pointer ? 14 : 16} />}
@@ -3502,7 +3506,7 @@ export function Controls(props: { show: Control }) {
                 last.set(`${item.name}: ${value ?? "none"}`);
               }}
               class={frame}
-              inputStyle={{ ...field(), paddingHorizontal: 2, textAlign: "center" }}
+              inputStyle={{ ...field(), paddingHorizontal: 2, textAlign: stepAlign }}
               decrementButtonClass={`${pointer ? "w-7" : "w-9"} ${press} border-r border-line`}
               incrementButtonClass={`${pointer ? "w-7" : "w-9"} ${press} border-l border-line`}
               decrementButton={<Step name="minus" size={pointer ? 12 : 14} />}

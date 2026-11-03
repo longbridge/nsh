@@ -244,7 +244,9 @@ export function Photos() {
               numColumns={n}
               estimatedItemSize={tile}
               style={{ flex: 1 }}
-              contentStyle={{ padding: 24, gap: 16 }}
+              // Two columns between tiles in the terminal (from 24pt): a
+              // tile's count is not read as the next tile's title.
+              contentStyle={{ padding: 24, rowGap: 16, columnGap: platform.idiom === "terminal" ? 24 : 16 }}
               scrollValue={scrollY}
               refreshing={refreshing()}
               onRefresh={refresh}

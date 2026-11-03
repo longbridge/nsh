@@ -30,6 +30,17 @@ pub(crate) fn cell_height() -> Points {
     text_metrics("", "0").height
 }
 
+/// The height of a code view's row (an editor's, a diff's): the app's
+/// `line_height`, or one Cell in a terminal, where a row is one line of
+/// the grid (a height of another step would land rows on Cells unevenly,
+/// leaving blank rows between).
+pub(crate) fn row_height(line_height: Points) -> Points {
+    match is_terminal() {
+        true => cell_height(),
+        false => line_height,
+    }
+}
+
 /// How many whole Cells `width` holds, Cells `cell` wide.
 pub(crate) fn columns_in(width: Points, cell: Points) -> usize {
     match cell.0 > 0.0 {

@@ -644,7 +644,7 @@ accessibility states the components report (listbox, tree and tab rows their sel
 | `AccordionPanel` | its content after two blank Cells, under the trigger's title |
 | `Tree` | a row the tree draws (no `renderItem`): two Cells of indent a level, `▸ ` / `▾ ` on a folder, two spaces on a leaf, the label; an app's row (`renderItem`) is the app's, its folders marked by the painter in the leading columns the terminal's layout gives a disclosure |
 | `TextView` | list markers are text a Cell before the content (`1. ` right-aligned to the widest number, `• ` / `◦ ` / `▪ ` by depth), a task's the checkbox's marks; a footnote reference `[1]`; a table is rows of Cells, each column as wide as its widest cell's text, ruled `┌─┬─┐`, `│`, `├─┼─┤`, `└─┴─┘`, the header bold, scrolling when wider than the view |
-| `RichEditor` | a list marker a Cell before its item; a table's box closed on every side |
+| `RichEditor` | a list marker in flow before its item's content, a space after it, numbers right-aligned to the list's widest (Cells round the indent it sits in elsewhere); a table's box closed on every side |
 | `Scrollbar` | nothing: the terminal draws its own scroll bars |
 
 Rows that fill a width (a slider's track, a progress bar, a separator) are `terminal::line`: a view one Cell by

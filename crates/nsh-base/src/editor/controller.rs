@@ -128,7 +128,7 @@ impl Ed {
         let font = Font {
             family: font_family(props.font_family.get_untracked()),
             size: props.font_size.get_untracked(),
-            line_height: props.line_height.get_untracked(),
+            line_height: crate::terminal::row_height(props.line_height.get_untracked()),
         };
         let measure = measurer(&font);
         let text = props
@@ -290,7 +290,7 @@ impl Ed {
             let font = Font {
                 family: font_family(ed.props.font_family.get()),
                 size: ed.props.font_size.get(),
-                line_height: ed.props.line_height.get(),
+                line_height: crate::terminal::row_height(ed.props.line_height.get()),
             };
             let mut st = ed.st.borrow_mut();
             if st.font != font {

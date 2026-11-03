@@ -92,7 +92,8 @@ finger or a wheel on a row's glyphs scrolls as on blank space. Only the rows in 
 (`window.rs`'s `RowWindow`, which the `DiffView` shares); each row is an absolutely placed view holding one `Text`
 whose spans are the row's runs of one token and one set of decorations (`State::row_content`). The rows' box draws,
 from back to front: the rulers, indent guides, search matches, selections, the matching brackets, the rows, the
-whitespace marks, diagnostics' marks, the placeholder, the carets and the composition.
+whitespace marks, diagnostics' marks, the placeholder, the carets and the composition. In a terminal a row is one Cell, whatever `lineHeight` is (`terminal::row_height`, the `DiffView`'s too):
+rows on another step would land on the Cell grid unevenly, a blank row every few lines.
 
 `showWhitespaces` draws a `·` per space and a `→` per tab over the rows in view: one `Text` per run of spaces and per
 tab, placed and sized by the display map (`DisplayMap::whitespace`), so the row's own text and its measuring stay as
