@@ -1995,10 +1995,9 @@ absent New File +key
 absent [Settings]
 expect [Suggestions]
 expect Lit: calendar
-# The row under its section's header (a recycled row parked off the list
-# may keep a label, so the row is found by its text).
-frame parent:parent:parent:text:Calendar 0 0 390 40
-tap text:Calendar
+# The row under its section's header.
+frame label:Calendar 0 0 390 40
+tap label:Calendar
 expect Chosen: calendar
 # Nothing matches: the app's `empty`.
 type label:Commands zz
