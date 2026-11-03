@@ -808,7 +808,12 @@ impl Painter<'_> {
                 crate::scrollbar::bar(id, scroll, view.frame.size, bar_inner, bar_clip)
             && (on_line.is_some() || !covers_content(self.buffer, bar.track))
         {
-            scroll_bar(self.buffer, bar, ground.ramp);
+            scroll_bar(
+                self.buffer,
+                bar,
+                ground.ramp,
+                view.states & state::FOCUSED != 0,
+            );
             self.bars.push(bar);
         }
         let popup_item = layer.overlay && !layer.modal;
@@ -1435,7 +1440,9 @@ fn covers_content(buffer: &Buffer, track: Rect) -> bool {
 
 /// A track with its thumb: dim and the default color, or the ramp's border
 /// and muted steps where the terminal has surfaces.
-fn scroll_bar(buffer: &mut Buffer, bar: ScrollBar, ramp: Option<Ramp>) {
+/// A focused scroll view (keys scroll it) shows its thumb in the accent:
+/// the view itself keeps its look, as a focused box's line does.
+fn scroll_bar(buffer: &mut Buffer, bar: ScrollBar, ramp: Option<Ramp>, focused: bool) {
     let (track, thumb) = if bar.vertical {
         ("│", "┃")
     } else {
@@ -1455,8 +1462,10 @@ fn scroll_bar(buffer: &mut Buffer, bar: ScrollBar, ramp: Option<Ramp>) {
             match (on_thumb, ramp) {
                 (true, ramp) => {
                     cell.set_symbol(thumb);
-                    if let Some(ramp) = ramp {
-                        cell.fg = ramp.muted();
+                    match ramp {
+                        _ if focused => cell.fg = ACCENT,
+                        Some(ramp) => cell.fg = ramp.muted(),
+                        None => {}
                     }
                 }
                 (false, Some(ramp)) => {

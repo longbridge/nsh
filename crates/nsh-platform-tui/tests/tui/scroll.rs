@@ -584,3 +584,47 @@ fn a_scroll_views_offset_feeds_its_bound_scroll_value() {
     }
     panic!("the mark follows the offset: {:?}", row_of_mark(&terminal));
 }
+
+#[component]
+fn FocusableScrollPage() -> impl IntoElement {
+    view().flex_1().child(
+        scroll()
+            .focusable(true)
+            .absolute()
+            .left(px(8.0))
+            .top(px(16.0))
+            .w(px(80.0))
+            .h(px(32.0))
+            .child(view().h(px(16.0)).flex_shrink_0().child(text("first")))
+            .child(view().h(px(16.0)).flex_shrink_0().child(text("second")))
+            .child(view().h(px(16.0)).flex_shrink_0().child(text("third"))),
+    )
+}
+
+#[test]
+fn a_focused_scroll_view_shows_its_thumb_in_the_accent() {
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(20, 8)).unwrap();
+    view.load(App::Rust(Root::new::<FocusableScrollPage>(|| ())))
+        .unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "second");
+    let thumb = terminal.backend().buffer()[(10, 1)].clone();
+    assert_eq!(thumb.symbol(), "┃");
+    assert_ne!(thumb.fg, Color::Blue, "unfocused, the thumb is plain");
+    view.handle(Input::Key {
+        key: "Tab".into(),
+        modifiers: Modifiers::default(),
+        release: false,
+    });
+    terminal
+        .draw(|frame| view.render(frame, frame.area()))
+        .unwrap();
+    let buffer = terminal.backend().buffer();
+    assert_eq!(buffer[(10, 1)].symbol(), "┃");
+    assert_eq!(
+        buffer[(10, 1)].fg,
+        Color::Blue,
+        "focused, the thumb is the accent"
+    );
+    assert_ne!(buffer[(10, 2)].fg, Color::Blue, "the track keeps its look");
+}

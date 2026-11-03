@@ -488,7 +488,7 @@ edge (bottom edge when it scrolls horizontally), or on its parent's right line w
 it (a pane filled by its list, as lazygit's: the thumb over the line, no column of its own), unless its `scrollbar` is off, it is a single Cell across, or
 its content drew a glyph in the column (row) the bar would take (the layout keeps none for it, and content wins):
 the track `│` (`─`) in the border step (dim bandless), the thumb `┃` (`━`) muted (the default foreground
-bandless), as long as the share of the content in
+bandless; the accent while the scroll view has the focus, its keys scrolling it), as long as the share of the content in
 view (at least one Cell) and placed by the offset. A scroll view the app gave a bar of its own (`nsh/base`'s
 `Scrollbar`, a scroll bar theme) shows the terminal's bar, since `Scrollbar` draws nothing in the terminal
 idiom. Each drawn bar is a `scrollbar::ScrollBar` (the scroll view,
