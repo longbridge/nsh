@@ -1723,8 +1723,9 @@ fn mark_state(
 
 /// Draws the view's state on a terminal with surfaces (`ramp`, and the
 /// view's own step and background): bands of the ramp and bold, after
-/// grok-build's look. Selected and focused items take the select band,
-/// hovered ones the hover band, pressed ones the select band; a focused
+/// grok-build's look. Selected items take the select band, focused ones
+/// the accent band, hovered ones the hover band, pressed ones the select
+/// band; a focused
 /// field brightens its line (or sinks); tabs are bold when chosen and on
 /// the select band unless the app underlines them, muted otherwise;
 /// disabled views are faint, with no band.
@@ -1795,19 +1796,26 @@ fn mark_surface(
     // inline list, a palette in a dialog) where the keys go: in a dialog or
     // the pane holding the focus, so two lists never band at once; and for
     // the selected row of a list in that pane (lazygit's): elsewhere
-    // selection is the gray select band.
+    // selection is the gray select band. A pressable control that is on
+    // (a toolbar's toggle) is no row: it keeps the gray band, the accent
+    // being the focus's.
     // Only a list's item: a one-time code's next cell, focused the same
     // way, shows focus its own way.
-    let highlighted = view.projected & state::FOCUSED != 0
-        && matches!(
-            view.props.accessibility.role,
-            AccessibilityRole::Option
-                | AccessibilityRole::Menuitem
-                | AccessibilityRole::MenuItemCheckbox
-                | AccessibilityRole::MenuItemRadio
-                | AccessibilityRole::Row
-                | AccessibilityRole::TreeItem
-        );
+    let item = matches!(
+        view.props.accessibility.role,
+        AccessibilityRole::Option
+            | AccessibilityRole::Menuitem
+            | AccessibilityRole::MenuItemCheckbox
+            | AccessibilityRole::MenuItemRadio
+            | AccessibilityRole::Row
+            | AccessibilityRole::TreeItem
+    );
+    let highlighted = view.projected & state::FOCUSED != 0 && item;
+    // The accent marks the view's own focus: a focus it only shows for
+    // its control (a command's highlighted item while its field has no
+    // focus yet) is a gray step; where the keys do go (the focused pane,
+    // a dialog), `highlighted` bands it in the accent above.
+    let keys = view.states & state::FOCUSED != 0;
     // A control whose Cells are all its children's fills (a swatch's
     // color, a chip's raised fill, a pagination's bar) leaves a band
     // nowhere to show: the selected one keeps its fill, not the accent.
@@ -1815,25 +1823,9 @@ fn mark_surface(
         .any(|y| (visible.x..visible.right()).any(|x| buffer[(x, y)].bg == own));
     let active = (popup && (focused || hovered || pressed) && pressable(view))
         || ((dialog || pane) && !popup && highlighted)
-        || (pane && !popup && selected && !tab && !covered);
+        || (pane && !popup && selected && !tab && !covered && (item || !pressable(view)));
     if active {
-        band(buffer, visible, ACCENT, own);
-        // Its text turns the terminal's background color, so the band is
-        // under all of it, over the whole row: a child's fill (a shortcut's
-        // key chip, today's circle in a calendar) takes the row's band, no
-        // fill of its own beside it.
-        for y in visible.y..visible.bottom() {
-            for x in visible.x..visible.right() {
-                buffer[(x, y)].bg = ACCENT;
-            }
-        }
-        drawn(buffer, visible, |cell| {
-            cell.fg = ramp.base();
-            cell.modifier -= Modifier::BOLD;
-        });
-        if selected {
-            drawn(buffer, inner, |cell| cell.modifier.insert(Modifier::BOLD));
-        }
+        accent_band(buffer, visible, inner, ramp, selected);
         return;
     }
     // A trigger whose popup or menu is open stands raised.
@@ -1865,7 +1857,9 @@ fn mark_surface(
                 }
             });
         }
-        if focused || pressed {
+        if focused && keys {
+            accent_band(buffer, visible, inner, ramp, selected);
+        } else if focused || pressed {
             band(buffer, visible, step(SELECT), own);
         } else if hovered {
             band(buffer, visible, step(HOVER), own);
@@ -1888,6 +1882,20 @@ fn mark_surface(
     if selected {
         band(buffer, visible, step(SELECT), own);
         drawn(buffer, inner, |cell| cell.modifier.insert(Modifier::BOLD));
+        // A chosen control all of whose Cells are its fill (a swatch) has
+        // no band or label to show it: a check sits in its middle, in
+        // the color that reads on the fill.
+        let shown = inner.intersection(visible);
+        if covered && !glyphs && !shown.is_empty() {
+            let cell = &mut buffer[(
+                shown.x + (shown.width - 1) / 2,
+                shown.y + (shown.height - 1) / 2,
+            )];
+            let fg = palette::mark_on(cell.bg);
+            cell.set_symbol("✓");
+            cell.fg = fg;
+            cell.modifier.insert(Modifier::BOLD);
+        }
         // Focused as well as chosen (the page of a pagination, a
         // segment): the label is underlined, as the band alone is the
         // selection's.
@@ -1903,6 +1911,8 @@ fn mark_surface(
         if !selected {
             band(buffer, visible, step(HOVER), own);
         }
+    } else if focused && !covered && keys {
+        accent_band(buffer, visible, inner, ramp, selected);
     } else if focused && !covered {
         band(buffer, visible, step(SELECT), own);
         drawn(buffer, inner, |cell| cell.modifier.insert(Modifier::BOLD));
@@ -1915,8 +1925,31 @@ fn mark_surface(
     }
 }
 
+/// The accent band of what the keys act on (a focused control, the
+/// highlighted item of a list): its text turns the terminal's background
+/// color, so the band is under all of it, over the whole row: a child's
+/// fill (a shortcut's key chip, today's circle in a calendar) takes the
+/// row's band, no fill of its own beside it. Bold only when it is also
+/// selected (a toggle that is on), so on and off still differ.
+fn accent_band(buffer: &mut Buffer, visible: Rect, inner: Rect, ramp: Ramp, selected: bool) {
+    for y in visible.y..visible.bottom() {
+        for x in visible.x..visible.right() {
+            buffer[(x, y)].bg = ACCENT;
+        }
+    }
+    drawn(buffer, visible, |cell| {
+        cell.fg = ramp.base();
+        cell.modifier -= Modifier::BOLD;
+    });
+    if selected {
+        drawn(buffer, inner, |cell| cell.modifier.insert(Modifier::BOLD));
+    }
+}
+
 /// Whether `id` or a view down its first children has a fill or a border:
-/// the box a terminal frames in an overlay, as the layout finds it.
+/// the box a terminal frames in an overlay, as the layout finds it. A list
+/// of options with no box of its own ends the search: its first option's
+/// fill (a highlighted row) is not the popup's box.
 fn has_box(tree: &Mounter, id: NodeId) -> bool {
     let mut at = id;
     loop {
@@ -1928,6 +1961,12 @@ fn has_box(tree: &Mounter, id: NodeId) -> bool {
             || view.style.background_color.0 & 255 != 0
         {
             return true;
+        }
+        if matches!(
+            view.props.accessibility.role,
+            AccessibilityRole::Listbox | AccessibilityRole::Menu
+        ) {
+            return false;
         }
         let Some(&first) = view.children.first() else {
             return false;

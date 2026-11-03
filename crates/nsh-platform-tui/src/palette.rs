@@ -628,6 +628,25 @@ pub(crate) fn swatch_text(ground: Ground) -> Color {
     convert(rgb, ground.depth)
 }
 
+/// The color a mark takes on a Cell filled with `fill` (the check of a
+/// selected swatch): black on a light fill, white on a dark one, in the
+/// fill's own kind of color. The default foreground on a themable color.
+pub(crate) fn mark_on(fill: Color) -> Color {
+    let rgb = match fill {
+        Color::Rgb(red, green, blue) => [red, green, blue],
+        Color::Indexed(index) if index >= 16 => indexed_rgb(index),
+        _ => return Color::Reset,
+    };
+    let [red, green, blue] = rgb.map(f32::from);
+    let light = lightness(red, green, blue) >= 55.0;
+    match (fill, light) {
+        (Color::Rgb(..), true) => Color::Rgb(0, 0, 0),
+        (Color::Rgb(..), false) => Color::Rgb(255, 255, 255),
+        (_, true) => Color::Indexed(16),
+        (_, false) => Color::Indexed(231),
+    }
+}
+
 fn over_f32(top: Rgb, alpha: u8, under: Rgb) -> [f32; 3] {
     let alpha = f32::from(alpha) / 255.0;
     std::array::from_fn(|i| f32::from(top[i]) * alpha + f32::from(under[i]) * (1.0 - alpha))

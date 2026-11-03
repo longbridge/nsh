@@ -319,14 +319,12 @@ fn FaintTrack() -> impl IntoElement {
 fn a_fill_fainter_than_a_wash_is_left_out() {
     let (mut view, rx) = surface();
     let mut terminal = Terminal::new(TestBackend::new(12, 4)).unwrap();
-    view.load(App::Rust(Root::new::<FaintTrack>(|| ()))).unwrap();
+    view.load(App::Rust(Root::new::<FaintTrack>(|| ())))
+        .unwrap();
     draw_until(&mut view, &mut terminal, &rx, "drawn");
     let buffer = terminal.backend().buffer();
     let first = row(buffer, 0, 0..8);
-    assert!(
-        first.chars().all(|c| c == ' '),
-        "no dots: {first:?}"
-    );
+    assert!(first.chars().all(|c| c == ' '), "no dots: {first:?}");
 }
 
 #[component]

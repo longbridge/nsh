@@ -436,15 +436,17 @@ draw nothing.
 With surfaces (`render::mark_surface`) states are bands and bold; a band replaces only the Cells on the view's
 own background, so what its children filled stays, and it is at least one step above the view's own:
 
-- a selected or current item is a select band and bold; a focused control (a button, a row) the same; a focused
+- a selected or current item (a toggle that is on included) is a select band and bold, never the accent; a
+  focused control (a button, a row, a tab) is the accent band, its text in the terminal's background color, bold
+  when it is also selected, so focus is the accent and on or chosen a gray step wherever they meet; a focused
   container three or more rows tall shows its line in the focus color (a hover band without a line); a focused
   text field shows its line in the focus color, or a sunken band without one, and the caret; a framed box of any
   size (a one-time code's cell) shows focus with its line alone; a focused control whose Cells are all its
   children's fills (a swatch's color, a chip's own fill, a pagination's bar) or that holds no glyph shows it as an
   accent underline under its Cells, its fills kept;
 - a tab is bold when selected or focused and muted otherwise; a selected tab is a select band, unless the app
-  underlines its label (an underlined tab strip keeps the underline alone), and others are banded when focused
-  (select), pressed or hovered;
+  underlines its label (an underlined tab strip keeps the underline alone); a focused tab is the accent band, a
+  pressed or hovered one banded (select, hover);
 - a hovered pressable view is a hover band, a pressed one a select band;
 - in a popup (an anchored overlay: a menu, a select or combobox list, a command palette) the highlighted item,
   the keyboard's (the item the list projects as focused, which the sink opts into as `MountItem::ProjectStates`:
@@ -455,8 +457,10 @@ own background, so what its children filled stays, and it is at least one step a
   same full-row accent band inside a dialog or the pane holding the focus, so two lists never band at once;
 - the selected row of a list or tree inside the pane holding the focus (the innermost box with a line around the
   focused view, or the overlay holding it) is the same accent band, as lazygit's: the list the keys go to; the
-  same selection in another pane keeps the select band; a selected control covered by its children's fills (the
-  chosen swatch) keeps its fill;
+  same selection in another pane keeps the select band; a pressable control that is on (a toolbar's toggle) is
+  not a row and keeps the select band there too; a selected control covered by its children's fills
+  (the chosen swatch) keeps its fill, and one with no glyph shows a `✓` in its middle, black on a light fill and
+  white on a dark one (`palette::mark_on`), focused or not;
 - a trigger whose popup or menu is open (`expanded`) stands on a raised band;
 - an `adjustable` view (a slider's track, a resize handle's line) shows focus its own way and takes no focus
   marks; a slider's thumb `●` and a color area's picked Cell `◆` are reversed while it has the focus;

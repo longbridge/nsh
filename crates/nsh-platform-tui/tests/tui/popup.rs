@@ -153,6 +153,44 @@ fn a_menu_goes_on_the_rows_below_its_trigger() {
     consecutive(&terminal, &rows[1..]);
 }
 
+/// The open menu with its first item filled (a highlighted row's look,
+/// the app's): the item is not the popup's box.
+#[component]
+fn FilledFirstItem() -> impl IntoElement {
+    view().flex_1().child(text("above")).child(
+        menu()
+            .default_open(true)
+            .trigger(view().child(text("View")))
+            .child(
+                menu_item()
+                    .accessibility_label("About")
+                    .bg(nsh_core::color::rgb(0x2563eb))
+                    .child(text("About")),
+            )
+            .child(menu_item().accessibility_label("Quit").child(text("Quit"))),
+    )
+}
+
+#[test]
+fn a_menu_s_filled_first_item_leaves_the_frame_around_the_whole_menu() {
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(40, 20)).unwrap();
+    view.load(App::Rust(Root::new::<FilledFirstItem>(|| ())))
+        .unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "Quit");
+    let rows = rows_of(&terminal, &["View", "About", "Quit"]);
+    let (_, top) =
+        find(&terminal, "╭").unwrap_or_else(|| panic!("the menu is framed\n{}", dump(&terminal)));
+    let (_, bottom) = find(&terminal, "╰").unwrap();
+    assert!(
+        top > rows[0] && top < rows[1] && bottom > rows[2],
+        "one frame around both items, below the trigger's row: {rows:?}, \
+         frame rows {top}..={bottom}\n{}",
+        dump(&terminal)
+    );
+    consecutive(&terminal, &rows[1..]);
+}
+
 /// An open date picker under a trigger `Pick` on row 1.
 #[component]
 fn OpenPicker() -> impl IntoElement {

@@ -397,7 +397,7 @@ fn Banded() -> impl IntoElement {
 }
 
 #[test]
-fn selection_and_focus_are_select_bands_and_bold_on_surfaces() {
+fn selection_is_a_select_band_and_bold_and_focus_the_accent_on_surfaces() {
     let (mut view, rx) = surfaces();
     let mut terminal = Terminal::new(TestBackend::new(12, 4)).unwrap();
     view.load(App::Rust(Root::new::<Banded>(|| ()))).unwrap();
@@ -418,14 +418,20 @@ fn selection_and_focus_are_select_bands_and_bold_on_surfaces() {
         terminal
             .draw(|frame| view.render(frame, frame.area()))
             .unwrap();
-        if terminal.backend().buffer()[(0, 1)].bg == select {
+        if terminal.backend().buffer()[(0, 1)].bg == Color::Blue {
             break;
         }
         assert!(rx.recv_deadline(deadline).is_ok(), "focus did not show");
     }
     let buffer = terminal.backend().buffer();
-    assert!(buffer[(0, 1)].modifier.contains(Modifier::BOLD));
+    assert_eq!(buffer[(9, 1)].bg, Color::Blue, "the band spans the row");
+    assert!(!buffer[(0, 1)].modifier.contains(Modifier::BOLD));
     assert!(!buffer[(0, 1)].modifier.contains(Modifier::REVERSED));
+    assert_eq!(
+        buffer[(0, 0)].bg,
+        select,
+        "the selection keeps its gray band"
+    );
 }
 
 #[component]
@@ -1364,6 +1370,20 @@ fn a_selected_swatch_in_the_focused_pane_keeps_its_color() {
     };
     let color = terminal.backend().buffer()[chosen(terminal.backend().buffer())].bg;
     assert_ne!(color, Color::Blue, "its own color, not the accent");
+    {
+        // Unfocused, the chosen swatch shows a check in its middle, in a
+        // color that reads on it; the other has none.
+        let buffer = terminal.backend().buffer();
+        let (x, y) = chosen(buffer);
+        let check = &buffer[(x + 1, y)];
+        assert_eq!(check.symbol(), "✓", "the chosen swatch's check");
+        assert_eq!(check.bg, color);
+        assert_ne!(check.fg, color);
+        let row: String = (0..buffer.area.width)
+            .map(|x| buffer[(x, y)].symbol())
+            .collect();
+        assert_eq!(row.matches('✓').count(), 1, "only the chosen one: {row}");
+    }
     tab_until(
         &mut view,
         &mut terminal,
@@ -1385,6 +1405,59 @@ fn a_selected_swatch_in_the_focused_pane_keeps_its_color() {
         );
         assert_eq!(buffer[(x, y)].underline_color, Color::Blue);
     }
+}
+
+/// A framed bar of toggles, the first on (a toolbar's Bold).
+#[component]
+fn ToggleBar() -> impl IntoElement {
+    let toggle = |label: &'static str, on: bool| {
+        view()
+            .on_press(|_: &()| {})
+            .accessibility_state(nsh_core::AccessibilityState {
+                pressed: on.then_some(nsh_core::Checked::True),
+                ..Default::default()
+            })
+            .child(text(label))
+    };
+    view()
+        .flex_1()
+        .child(
+            view()
+                .border_1()
+                .border_color(nsh_core::color::rgb(0x3f3f46))
+                .flex_row()
+                .gap(px(8.0))
+                .child(toggle("Bold", true))
+                .child(toggle("Italic", false)),
+        )
+        .child(text("ready"))
+}
+
+#[test]
+fn a_toggle_that_is_on_is_bold_on_a_gray_band_and_the_focus_is_the_accent() {
+    let (mut view, rx) = surfaces();
+    let mut terminal = Terminal::new(TestBackend::new(24, 6)).unwrap();
+    view.load(App::Rust(Root::new::<ToggleBar>(|| ()))).unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "ready");
+    let at = |buffer: &Buffer, word: &str| buffer[cell_of(buffer, word)].clone();
+    let gray = at(terminal.backend().buffer(), "Bold").bg;
+    tab_until(&mut view, &mut terminal, &rx, "Bold's focus", |buffer| {
+        at(buffer, "Bold").bg == Color::Blue
+    });
+    let bold = at(terminal.backend().buffer(), "Bold");
+    assert!(bold.modifier.contains(Modifier::BOLD), "on, and focused");
+    // The focus moves on: the toggle that is on keeps its gray band and
+    // bold in the focused pane, never the accent; the focused one, off,
+    // takes the accent without bold.
+    tab_until(&mut view, &mut terminal, &rx, "Italic's focus", |buffer| {
+        at(buffer, "Italic").bg == Color::Blue
+    });
+    let buffer = terminal.backend().buffer();
+    let bold = at(buffer, "Bold");
+    assert_ne!(bold.bg, Color::Blue, "on is not the accent");
+    assert_eq!(bold.bg, gray, "on keeps its gray band");
+    assert!(bold.modifier.contains(Modifier::BOLD));
+    assert!(!at(buffer, "Italic").modifier.contains(Modifier::BOLD));
 }
 
 /// A color area's grid: an adjustable view whose picked Cell is `◆` on a

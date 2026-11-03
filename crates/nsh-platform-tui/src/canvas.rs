@@ -540,7 +540,8 @@ impl<'a> Replay<'a> {
         let mut inside = Vec::new();
         self.dots.inside(outline, rule, |index| inside.push(index));
         for index in inside {
-            let sparse = (index % width).is_multiple_of(2) && index / width % DOTS_DOWN == DOTS_DOWN - 1;
+            let sparse =
+                (index % width).is_multiple_of(2) && index / width % DOTS_DOWN == DOTS_DOWN - 1;
             if !self.clipped_out(index) && (!wash || sparse) {
                 self.dots.paint(index, ink);
             }
