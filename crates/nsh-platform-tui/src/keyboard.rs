@@ -76,10 +76,15 @@ impl Keyboard {
                 input_scope(tree, g.id) == scope
                     && tree.get(g.id).is_some_and(|view| {
                         let editable = view.input.as_ref().is_some_and(|config| config.editable);
+                        // A field narrower than a Cell (an editor's sink
+                        // at its caret, 1 pt wide) is laid out without
+                        // columns, yet takes the typing as on the other
+                        // platforms; a control without Cells is not there.
                         !view.props.accessibility.state.disabled
                             && view.props.focus_stop(has_press(view.events) || editable)
-                            && g.bounds.right > g.bounds.left
-                            && g.bounds.bottom > g.bounds.top
+                            && (editable
+                                || (g.bounds.right > g.bounds.left
+                                    && g.bounds.bottom > g.bounds.top))
                     })
             })
             .collect();

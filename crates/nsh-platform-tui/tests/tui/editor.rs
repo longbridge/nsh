@@ -1,13 +1,18 @@
 //! An `Editor` in a terminal: its rows and line numbers sit on absolute
 //! layers over its scroll views, inside a box sized only by its column,
-//! and the Cells draw their text, alone and as a dock's panel.
+//! and the Cells draw their text, alone and as a dock's panel. It and a
+//! `RichEditor` take the typing through their sink, a field narrower than
+//! a Cell.
+
+use std::time::{Duration, Instant};
 
 use nsh_base::{
     dock::{DockAreaLayout, DockLayout, DockPanel, DockPlacement, DockRegion, dock_area},
     editor::editor,
+    rich_editor::view::{RichEditorChange, rich_editor},
 };
 use nsh_core::prelude::*;
-use nsh_platform_tui::{App, Root};
+use nsh_platform_tui::{App, AppView, Handled, Input, Modifiers, Root};
 use ratatui_core::{backend::TestBackend, terminal::Terminal};
 
 use super::{
@@ -76,4 +81,108 @@ fn an_editor_in_a_dock_panel_draws_its_rows() {
         .unwrap();
     draw_until(&mut view, &mut terminal, &rx, "No problems");
     draw_until(&mut view, &mut terminal, &rx, "let total = 42;");
+}
+
+fn key(name: &str) -> Input {
+    Input::Key {
+        key: name.into(),
+        modifiers: Modifiers::default(),
+        release: false,
+    }
+}
+
+fn contents(terminal: &Terminal<TestBackend>) -> String {
+    terminal
+        .backend()
+        .buffer()
+        .content
+        .iter()
+        .map(|c| c.symbol())
+        .collect()
+}
+
+/// Presses Tab until the buffer shows `expected` (the editor reporting its
+/// focus): the editor's rows may take Tab stops before its sink.
+fn tab_until(
+    view: &mut AppView,
+    terminal: &mut Terminal<TestBackend>,
+    rx: &crossbeam_channel::Receiver<()>,
+    expected: &str,
+) {
+    for _ in 0..12 {
+        assert_eq!(view.handle(key("Tab")), Handled::Yes);
+        let deadline = Instant::now() + Duration::from_millis(300);
+        loop {
+            terminal
+                .draw(|frame| view.render(frame, frame.area()))
+                .unwrap();
+            if contents(terminal).contains(expected) {
+                return;
+            }
+            if rx.recv_deadline(deadline).is_err() {
+                break;
+            }
+        }
+    }
+    panic!("Tab never reached {expected:?}: {:?}", contents(terminal));
+}
+
+/// An editor reporting its focus and each change.
+#[component]
+fn Typed() -> impl IntoElement {
+    let focused = signal("no");
+    let value = signal(SharedString::from(TEXT));
+    view()
+        .flex_1()
+        .child(text(move || format!("focus {}", focused.get())))
+        .child(text(move || {
+            format!("typed {}", if value.get().contains('Q') { "yes" } else { "no" })
+        }))
+        .child(
+            editor()
+                .default_value(SharedString::from(TEXT))
+                .on_focus(move |_: &()| focused.set("yes"))
+                .on_change(move |next: &SharedString| value.set(next.clone()))
+                .flex_1(),
+        )
+}
+
+#[test]
+fn tab_enters_an_editor_and_typing_changes_its_text() {
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(48, 12)).unwrap();
+    view.load(App::Rust(Root::new::<Typed>(|| ()))).unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "let total = 42;");
+    tab_until(&mut view, &mut terminal, &rx, "focus yes");
+    assert_eq!(view.handle(key("Q")), Handled::Yes);
+    draw_until(&mut view, &mut terminal, &rx, "typed yes");
+}
+
+/// A rich editor (an empty document) reporting its focus and changes.
+#[component]
+fn RichTyped() -> impl IntoElement {
+    let focused = signal("no");
+    let changes = signal(0u32);
+    view()
+        .flex_1()
+        .child(text(move || format!("focus {} changes {}", focused.get(), changes.get())))
+        .child(
+            rich_editor()
+                .on_focus(move |_: &()| focused.set("yes"))
+                .on_change(move |_: &RichEditorChange| changes.update(|n| *n += 1))
+                .flex_1(),
+        )
+}
+
+#[test]
+fn tab_enters_a_rich_editor_and_typing_changes_its_document() {
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(48, 12)).unwrap();
+    view.load(App::Rust(Root::new::<RichTyped>(|| ())))
+        .unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "focus no changes 0");
+    tab_until(&mut view, &mut terminal, &rx, "focus yes");
+    assert_eq!(view.handle(key("Q")), Handled::Yes);
+    draw_until(&mut view, &mut terminal, &rx, "changes 1");
+    draw_until(&mut view, &mut terminal, &rx, "Q");
 }
