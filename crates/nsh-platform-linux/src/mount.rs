@@ -139,6 +139,7 @@ impl Mounter {
             }
             MountItem::Delete { id } => {
                 crate::file_drop::deleted(surface, *id);
+                crate::navigation::deleted(surface, *id);
                 if let Some(view) = self.views.remove(id) {
                     crate::selectable_view::touched(surface, &view);
                     crate::native::deleted(surface, &view);

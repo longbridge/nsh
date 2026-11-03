@@ -375,6 +375,9 @@ pub(crate) struct Nav {
     dark: Option<bool>,
     /// How pages and dialogs come and go through a shader, by node.
     shaders: FxHashMap<NodeId, nsh_core::NavShader>,
+    /// Pages and dialogs with a shader deleted in this batch: their shaders
+    /// go at its end, once their leave in it went through them.
+    deleted: Vec<NodeId>,
 }
 
 fn dark(surface: &Surface) -> bool {
@@ -1347,6 +1350,16 @@ pub(crate) fn nav_shader(surface: &Rc<Surface>, id: NodeId, shader: Option<nsh_c
     };
 }
 
+/// Node `id` was deleted: the shader it came and went through as a page or
+/// a dialog goes at the end of the batch, after its leave (a stack
+/// reconciles its pages then) went through it.
+pub(crate) fn deleted(surface: &Surface, id: NodeId) {
+    let mut nav = surface.nav.borrow_mut();
+    if nav.shaders.contains_key(&id) {
+        nav.deleted.push(id);
+    }
+}
+
 /// A modal was inserted: present it.
 pub(crate) fn present(surface: &Rc<Surface>, view: &NshView) {
     let mut nav = surface.nav.borrow_mut();
@@ -1456,6 +1469,11 @@ pub(crate) fn end_batch(surface: &Rc<Surface>) {
     for id in std::mem::take(&mut nav.presenting) {
         nav.show_modal(surface, id);
     }
+    // The pages and dialogs this batch deleted left through their shaders
+    // above (a dialog when it was removed).
+    for id in std::mem::take(&mut nav.deleted) {
+        nav.shaders.remove(&id);
+    }
     // Screen sizes change with the app's layout.
     for s in nav.screens.values_mut() {
         s.layout();
@@ -1463,5 +1481,56 @@ pub(crate) fn end_batch(surface: &Rc<Surface>) {
     }
     if !nav.order.is_empty() || !nav.transitions.is_empty() {
         nav.raise_modals(surface);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use nsh_core::{
+        MountItem,
+        shader::{Shader, ShaderLayer},
+    };
+
+    use super::*;
+    use crate::gtk_test::{self, apply};
+
+    /// A page's shader goes with the page, at the end of the batch that
+    /// deletes it: its leave in that batch (the stack reconciles at the
+    /// end) still goes through it.
+    #[test]
+    fn a_deleted_page_takes_its_shader_along() {
+        gtk_test::run(|| {
+            let surface = gtk_test::surface();
+            let shader = Shader::compile(
+                "fn shade(uv: vec2f) -> vec4f { return mix(sample_from(uv), sample_to(uv), nsh.progress); }",
+            )
+            .expect("a shader");
+            let shader = nsh_core::NavShader {
+                layer: Arc::new(ShaderLayer::new(shader, &[], &mut Vec::new())),
+                duration: Duration::from_millis(500),
+            };
+            apply(
+                &surface,
+                &[
+                    MountItem::Create {
+                        id: 6,
+                        kind: ViewKind::Screen,
+                    },
+                    MountItem::NavShader {
+                        id: 6,
+                        shader: Some(shader),
+                    },
+                ],
+            );
+            end_batch(&surface);
+            let kept = || surface.nav.borrow().shaders.contains_key(&6);
+            assert!(kept());
+            apply(&surface, &[MountItem::Delete { id: 6 }]);
+            assert!(kept(), "while the batch that deletes it is applied");
+            end_batch(&surface);
+            assert!(!kept());
+        });
     }
 }
