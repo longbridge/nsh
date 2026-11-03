@@ -3,7 +3,7 @@ import { createAnimatedValue } from "nsh";
 import { platform } from "nsh";
 import logo from "../logo@2x.png";
 import { Icon } from "../icons";
-import { Badge, bindRefresh, Button, colors, columnsFor, desktop, finish, paneWidth, Press, radius, scrollbarTheme, Stat, type Tone, toneColor } from "../ui";
+import { Badge, bindRefresh, Button, colors, columnsFor, desktop, finish, paneWidth, Press, radius, scrollbarTheme, Stat, TERMINAL_COLUMN, TERMINAL_ROW, terminal, type Tone, toneColor } from "../ui";
 
 /** The gallery's scroll bar, starting below the compact bar laid over the list's top. */
 const belowBar = {
@@ -145,17 +145,23 @@ export function Photos() {
         translate: [0, scrollY.interpolate({ inputRange: [-200, 0, 300], outputRange: [0, 0, 150] })],
       }}
     >
+      {/* The terminal frames the card as the gallery's sections are: a
+          filled box there is a band with no border. */}
       <View
-        style={{
-          backgroundColor: colors.surface,
-          borderRadius: radius.card,
-          borderCurve: "continuous",
-          borderWidth: 1,
-          borderColor: colors.border,
-          padding: 16,
-          gap: 12,
-          ...finish.card,
-        }}
+        style={
+          terminal
+            ? { borderWidth: 1, borderColor: colors.border, paddingVertical: TERMINAL_ROW - 1, paddingHorizontal: 2 * TERMINAL_COLUMN - 1 }
+            : {
+                backgroundColor: colors.surface,
+                borderRadius: radius.card,
+                borderCurve: "continuous",
+                borderWidth: 1,
+                borderColor: colors.border,
+                padding: 16,
+                gap: 12,
+                ...finish.card,
+              }
+        }
       >
         <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
           <View
