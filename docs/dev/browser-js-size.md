@@ -98,4 +98,3 @@ fails to compile against current upstream APIs (42 errors, including removed sty
 container, and the two text tests also time out on the pinned baseline. Playwright checks above pass.
 No macOS/iOS/Android device validation was performed. CI results are recorded on the PR at its exact head.
 
-Implemented with ChatGPT assistance and reviewed by a separate ChatGPT reviewer.
