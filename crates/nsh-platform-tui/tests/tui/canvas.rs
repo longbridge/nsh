@@ -411,3 +411,56 @@ fn a_canvas_over_a_text_leaves_it_and_a_cell_each_side_clear() {
     assert_eq!(row(buffer, 0, 5..7), "⣿⣿", "the fill goes on: {line}");
     assert_eq!(row(buffer, 0, 11..13), "⣿⣿", "the fill goes on: {line}");
 }
+
+/// A filled card over a canvas, as a photo card over a stage's dots.
+#[component]
+fn Covered() -> impl IntoElement {
+    view()
+        .flex_1()
+        .child(
+            view()
+                .w(px(96.0))
+                .h(px(32.0))
+                .child(
+                    canvas(
+                        Painter::new()
+                            .fill_color(nsh_core::color::rgb(GREEN))
+                            .fill_rect(0.0, 0.0, 96.0, 32.0),
+                    )
+                    .label("dots")
+                    .absolute()
+                    .top(px(0.0))
+                    .left(px(0.0))
+                    .w(px(96.0))
+                    .h(px(32.0)),
+                )
+                .child(
+                    view()
+                        .absolute()
+                        .top(px(0.0))
+                        .left(px(32.0))
+                        .w(px(32.0))
+                        .h(px(32.0))
+                        .bg(nsh_core::color::rgb(0x27272a))
+                        .border_1()
+                        .border_color(nsh_core::color::rgb(0x52525b)),
+                ),
+        )
+        .child(text("drawn"))
+}
+
+#[test]
+fn an_opaque_box_over_a_canvas_hides_its_dots() {
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(16, 4)).unwrap();
+    view.load(App::Rust(Root::new::<Covered>(|| ()))).unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "drawn");
+    let buffer = terminal.backend().buffer();
+    assert_eq!(row(buffer, 0, 0..4), "⣿⣿⣿⣿", "the dots beside it");
+    assert!(
+        row(buffer, 0, 4..8).chars().all(|c| !('\u{2801}'..='\u{28ff}').contains(&c)),
+        "no dots under the box: {:?}",
+        row(buffer, 0, 0..12)
+    );
+    assert_eq!(row(buffer, 0, 8..12), "⣿⣿⣿⣿", "the dots past it");
+}

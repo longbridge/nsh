@@ -303,7 +303,14 @@ impl Painter<'_> {
         }
         let at = origin + view.frame.origin + translation(view);
         let frame = Bounds::new(at, view.frame.size);
-        let bounds = CellBounds::new(frame, cells, area);
+        // A box with nothing in it shows its scale (a progress fill's
+        // `scaleX`): its Cells are the scaled box's, rounded to whole ones.
+        // A box with children keeps its frame, so its content stays put.
+        let bounds = if view.children.is_empty() {
+            CellBounds::new(scaled(view, frame), cells, area)
+        } else {
+            CellBounds::new(frame, cells, area)
+        };
         let visible = bounds.clipped(clip);
         let cell_origin = bounds.origin(cells, area);
 
@@ -572,6 +579,17 @@ impl Painter<'_> {
         }
 
         if !visible.is_empty() {
+            // An opaque fill covers what was drawn under it before: a card
+            // over a canvas's dots shows the card, not the dots through it.
+            if fill.0 & 255 == 255 && !page {
+                clear_symbols(self.buffer, visible);
+                for y in visible.y..visible.bottom() {
+                    for x in visible.x..visible.right() {
+                        let at = self.buffer.index_of(x, y);
+                        self.text_cells[at] = false;
+                    }
+                }
+            }
             if parent.ramp.is_some() && ground.surface != parent.surface {
                 self::fill(self.buffer, visible, ground.surface);
             }
@@ -1034,6 +1052,43 @@ fn translation(view: &NshView) -> Point<Points> {
         }
     }
     offset
+}
+
+/// `frame` scaled by the view's `scale` / `scaleX` / `scaleY` around its
+/// transform origin; other steps of its transform are left out.
+fn scaled(view: &NshView, frame: Bounds<Points>) -> Bounds<Points> {
+    let (mut sx, mut sy) = (1.0f32, 1.0f32);
+    for (index, step) in view.style.transform.ops().iter().enumerate() {
+        let value = view
+            .animated
+            .transform
+            .get(index)
+            .copied()
+            .flatten()
+            .unwrap_or(step.value);
+        match step.kind {
+            TransformKind::Scale => {
+                sx *= value;
+                sy *= value;
+            }
+            TransformKind::ScaleX => sx *= value,
+            TransformKind::ScaleY => sy *= value,
+            _ => {}
+        }
+    }
+    if (sx - 1.0).abs() < 1e-4 && (sy - 1.0).abs() < 1e-4 {
+        return frame;
+    }
+    let (sx, sy) = (sx.max(0.0), sy.max(0.0));
+    let size = frame.size;
+    let (offset, _) = view.style.transform_origin.offset(size);
+    // The origin, from the frame's top left.
+    let ox = size.width / 2.0 + offset.x;
+    let oy = size.height / 2.0 + offset.y;
+    Bounds::new(
+        frame.origin + Point::new(ox - ox * sx, oy - oy * sy),
+        nsh_core::Size::new(size.width * sx, size.height * sy),
+    )
 }
 
 /// The view's borders, read on `ground`: a neutral color is dim, an accent
@@ -1885,6 +1940,20 @@ fn gradient(
         }
     }
     Some(color_at((size.width.0 / 2.0, size.height.0 / 2.0)))
+}
+
+/// Blanks the symbols in `rect`, keeping each Cell's background.
+fn clear_symbols(buffer: &mut Buffer, rect: Rect) {
+    for y in rect.y..rect.bottom() {
+        for x in rect.x..rect.right() {
+            let cell = &mut buffer[(x, y)];
+            if cell.symbol() != " " {
+                let bg = cell.bg;
+                cell.reset();
+                cell.bg = bg;
+            }
+        }
+    }
 }
 
 fn fill(buffer: &mut Buffer, rect: Rect, color: Color) {

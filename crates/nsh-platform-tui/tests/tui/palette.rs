@@ -719,3 +719,32 @@ fn a_gradient_fills_each_cell_with_its_color_there() {
     assert!(matches!(buffer[(0, 0)].bg, Color::Indexed(_)));
     assert_ne!(buffer[(0, 0)].bg, buffer[(19, 0)].bg, "a ramp in 256 colors");
 }
+
+#[component]
+fn Fill() -> impl IntoElement {
+    view()
+        .flex_1()
+        .child(
+            view().w(px(160.0)).h(px(16.0)).child(
+                view()
+                    .w(px(160.0))
+                    .h(px(16.0))
+                    .bg(nsh_core::color::rgb(0x3b82f6))
+                    .origin_left()
+                    .scale_x(0.5),
+            ),
+        )
+        .child(text("ready"))
+}
+
+#[test]
+fn a_scaled_fill_takes_the_cells_of_its_scaled_box() {
+    let (mut view, rx) = surfaces();
+    let mut terminal = Terminal::new(TestBackend::new(24, 4)).unwrap();
+    view.load(App::Rust(Root::new::<Fill>(|| ()))).unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "ready");
+    let buffer = terminal.backend().buffer();
+    assert_ne!(buffer[(0, 0)].bg, Color::Reset, "the fill from the left");
+    assert_ne!(buffer[(9, 0)].bg, Color::Reset, "half of it");
+    assert_eq!(buffer[(10, 0)].bg, Color::Reset, "the other half is not filled");
+}
