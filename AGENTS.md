@@ -222,7 +222,8 @@ including the user-facing pages in `website/` (English and `zh-CN`). User-facing
 positive terms: what a platform or feature is and does, never what it is not or lacks, and name the product Native
 Shell in formal places and NSH elsewhere (`nsh` only in code) ("Writing documentation" in `website/README.md`).
 
-NSH's core architecture and design details are kept in the private repository
+NSH's core design is not open source: the design thinking and the taste behind it are the project's core asset.
+Its core architecture and design details are kept in the private repository
 [`longbridge/nsh-docs`](https://github.com/longbridge/nsh-docs), checked out beside this one at `../nsh-docs`
 (`gh repo clone longbridge/nsh-docs ../nsh-docs`), never in this repository. That covers the core design work of
 the core developers (`huacnlee`, `sunli829`, `madcodelife`): the key algorithms and inner mechanisms, formats and
