@@ -1,6 +1,6 @@
 import { type Bounds, computed, effect, type InputRef, mount, Scroll, signal, Text, untracked, View, type ScrollRef } from "nsh";
 import { Animated, createAnimatedValue, Easing } from "nsh";
-import { platform, windowSize } from "nsh";
+import { host, platform, windowSize } from "nsh";
 import { isAvailable as hasWindow, titleBar, Window } from "nsh/desktop";
 import { Input, NavPage, NavStack, Scrollbar } from "nsh/base";
 import { keymap } from "nsh";
@@ -10,7 +10,7 @@ import { TitleBar } from "./TitleBar";
 import { Toaster } from "./toast";
 import { type DemoEntry, nav, shownDemo } from "./nav";
 import { field } from "../nsh-gallery-ui/demo";
-import { Appear, colors, desktop, focusRing, header, hovered, IconTile, lazy, Logo, PageHeader, Press, scrollbarTheme, SIDEBAR, sidebarOpen, ThemeToggle, ToolButton } from "./ui";
+import { Appear, colors, desktop, focusedSection, focusRing, header, hovered, IconTile, lazy, Logo, PageHeader, Press, scrollbarTheme, SIDEBAR, sidebarOpen, ThemeToggle, ToolButton } from "./ui";
 
 /** `nsh`'s primitives, from the simplest, in the website's order. */
 const primitives: DemoEntry[] = [
@@ -527,12 +527,26 @@ function Desktop() {
 /** The key of the demo left open, shown again on the next launch. */
 const LAST_DEMO = "lastDemo";
 
+/** A launch parameter (`host.params`) that is text, else null. */
+function param(name: string): string | null {
+  const value = host.params[name];
+  return typeof value === "string" && value !== "" ? value : null;
+}
+
 /**
  * Reopens the demo left open last time (selected on a desktop, pushed on
  * a phone), then keeps the key current: the demo shown, or none when a
  * phone is back on the index. A name no demo has any more is ignored.
+ *
+ * The launch parameters open another (`host.params`, as a test's
+ * `open("App.tsx", { host: { params: { demo: "TextView", section: "Markdown" } } })`):
+ * `demo` by its name (any case) instead of the last one, and `section`
+ * shows only that section of it (`focusedSection`, a card's title), so a
+ * test or a screenshot needs no taps or scrolling to reach it.
  */
 function rememberDemo() {
+  const launched = param("demo");
+  focusedSection.set(param("section"));
   const restored = signal(false);
   let asked = false;
   effect(() => {
@@ -540,9 +554,10 @@ function rememberDemo() {
     // (a demo pushed in the phone layout would open again in the desktop's).
     if (asked || windowSize().width === 0) return;
     asked = true;
-    Storage.getItem(LAST_DEMO)
+    (launched != null ? Promise.resolve(launched) : Storage.getItem(LAST_DEMO))
       .then((name) => {
-        const demo = groups.flatMap((g) => g.demos).find((d) => d.name === name);
+        const wanted = name?.toLowerCase();
+        const demo = groups.flatMap((g) => g.demos).find((d) => d.name.toLowerCase() === wanted);
         // Only on a fresh start: not over what the user already opened.
         if (demo && untracked(nav.routes).length === 1) {
           if (untracked(desktop)) selected.set(demo);
