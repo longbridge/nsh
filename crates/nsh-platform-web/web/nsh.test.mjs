@@ -696,7 +696,7 @@ test("a plain Shader uploads the whole built-ins block, progress and overflow at
 });
 
 /** A player whose shaders draw with `gl` and `program(layer)` (`null`: none), and the view they go on. */
-function shaderPlayer({ gl = {}, program = () => ({}) } = {}) {
+function shaderPlayer({ gl = { isContextLost: () => false }, program = () => ({}) } = {}) {
   const { player } = fakePlayer();
   const classes = () => {
     const names = new Set();
@@ -776,6 +776,61 @@ test("a page shader that cannot draw leaves the change to the page's own transit
   const { player } = shaderPlayer({ program: () => null });
   const stack = { getBoundingClientRect: () => ({ width: 390, height: 844 }) };
   assert.equal(player.shaderNav(stack, {}, { layer: shaderLayer(2), ms: 350 }, false, () => {}), false);
+});
+
+/**
+ * Runs `f` with the player's real `shaderGl` on a context `f` can lose
+ * (`context.lost`) and the listeners its canvas got, warnings kept apart.
+ */
+function withLosableContext(player, f) {
+  const context = { lost: false, listeners: {} };
+  const gl = new Proxy({ isContextLost: () => context.lost }, { get: (gl, name) => (name in gl ? gl[name] : () => {}) });
+  const saved = [globalThis.OffscreenCanvas, console.warn];
+  globalThis.OffscreenCanvas = class {
+    getContext = () => gl;
+    addEventListener = (type, listener) => (context.listeners[type] = listener);
+  };
+  console.warn = () => {};
+  delete player.shaderGl;
+  try {
+    f(context);
+  } finally {
+    [globalThis.OffscreenCanvas, console.warn] = saved;
+  }
+}
+
+test("a lost WebGL context shows the views' children until it is back", () => {
+  const { player, el } = shaderPlayer();
+  el.isConnected = true;
+  withLosableContext(player, (context) => {
+    withCanvases(() => player.op_sh(["sh", 2, shaderLayer(1)]));
+    assert.ok(el.classList.contains("nsh-fx"));
+    const ended = [];
+    const overlay = { _shader: { nav: true, running: { done: () => ended.push("page") }, textures: [null, null, null, null] } };
+    player.shaderViews.add(overlay);
+    context.lost = true;
+    let asked = false;
+    context.listeners.webglcontextlost({ preventDefault: () => (asked = true) });
+    assert.ok(asked, "asked back");
+    assert.ok(!el.classList.contains("nsh-fx"), "children shown");
+    assert.equal(el._shaderCanvas.width, 0, "without the last frame over them");
+    assert.deepEqual(ended, ["page"], "a running change ends, reported");
+    assert.equal(player.shaderDraws(shaderLayer(1)), false);
+    context.lost = false;
+    context.listeners.webglcontextrestored();
+    assert.ok(el.classList.contains("nsh-fx"), "drawn through its shader again");
+    assert.equal(player.shaderDraws(shaderLayer(1)), true);
+  });
+});
+
+test("a lost WebGL context is noticed on the next shader frame without its event", () => {
+  const { player, el } = shaderPlayer();
+  withLosableContext(player, (context) => {
+    withCanvases(() => player.op_sh(["sh", 2, shaderLayer(1)]));
+    context.lost = true;
+    player.shaderFrame(0);
+    assert.ok(!el.classList.contains("nsh-fx"));
+  });
 });
 
 /** A screen of a stack, with a page's `animation` and maybe a shader. */

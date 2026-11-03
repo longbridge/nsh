@@ -3077,6 +3077,12 @@ class Player {
 
   shaderFrame(t) {
     this.shaderFrameQueued = false;
+    // A loss or a restore whose event has not come yet (`shaderLost`).
+    const gl = this._shaderGl;
+    if (gl && gl.isContextLost() !== Boolean(this._shaderLost)) {
+      if (this._shaderLost) this.shaderRestored();
+      else this.shaderLost();
+    }
     let again = false;
     const now = performance.now();
     for (const el of [...this.shaderViews]) {
@@ -3166,20 +3172,76 @@ class Player {
     if (this._shaderGl !== undefined) return this._shaderGl;
     const canvas = typeof OffscreenCanvas !== "undefined" ? new OffscreenCanvas(1, 1) : document.createElement("canvas");
     const gl = canvas.getContext("webgl2", { premultipliedAlpha: true, antialias: false, preserveDrawingBuffer: false });
-    if (!gl) console.warn("[nsh] shaders: no WebGL 2; shader views draw nothing");
+    if (!gl) {
+      console.warn("[nsh] shaders: no WebGL 2; shader views draw nothing");
+    } else {
+      // The browser takes the context away on a GPU reset or when it
+      // evicts the tab's; `preventDefault` asks for it back.
+      canvas.addEventListener("webglcontextlost", (e) => {
+        e.preventDefault();
+        this.shaderLost();
+      });
+      canvas.addEventListener("webglcontextrestored", () => this.shaderRestored());
+    }
     this._shaderGl = gl;
     this._shaderPrograms = new Map();
     return gl;
   }
 
   /**
-   * Whether `layer`'s shader draws: there is WebGL 2 and the driver takes
-   * its program. Effects and transitions hide their children under their
-   * canvas only then.
+   * Whether `layer`'s shader draws: there is WebGL 2, its context is not
+   * lost, and the driver takes its program. Effects and transitions hide
+   * their children under their canvas only then.
    */
   shaderDraws(layer) {
     const gl = this.shaderGl();
-    return Boolean(gl && this.shaderProgram(gl, layer));
+    return Boolean(gl && !gl.isContextLost() && this.shaderProgram(gl, layer));
+  }
+
+  /**
+   * The shared context is lost: what was made on it went with it, and
+   * every shader view shows its children as one that cannot draw does (a
+   * running change ends, settled and reported) until it comes back.
+   */
+  shaderLost() {
+    if (this._shaderLost) return;
+    this._shaderLost = true;
+    console.warn("[nsh] shaders: the WebGL context was lost; shader views show their children until it is back");
+    this._shaderPrograms = new Map();
+    this._emptyTexture = null;
+    this.screenShader = null;
+    this.root.classList.remove("nsh-fx");
+    for (const el of [...this.shaderViews]) {
+      const s = el._shader;
+      if (!s) continue;
+      s.textures = [null, null, null, null];
+      this.endTransition(el);
+    }
+  }
+
+  /**
+   * The shared context is back: programs and textures are made again as
+   * the views draw, and effects hide their children under their canvas
+   * again.
+   */
+  shaderRestored() {
+    if (!this._shaderLost) return;
+    this._shaderLost = false;
+    // Programs the driver refused while the context was gone are tried again.
+    this._shaderPrograms = new Map();
+    this._emptyTexture = null;
+    for (const el of this.shaderViews) {
+      const s = el._shader;
+      if (!s) continue;
+      s.textures = [null, null, null, null];
+      s.stale |= s.reads;
+      const role = s.layer.role;
+      if ((role === 1 || role === 3) && el.isConnected && this.shaderDraws(s.layer)) {
+        if (role === 3) this.screenShader = el;
+        this.shaderHost(el).classList.add("nsh-fx");
+      }
+      this.shaderDirty(el);
+    }
   }
 
   shaderProgram(gl, layer) {

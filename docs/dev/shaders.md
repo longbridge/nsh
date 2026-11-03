@@ -265,11 +265,17 @@ dialog's `transitionShader`) take their pictures from the DOM. `shader.rs` also 
   motion (`reduceMotion()`). A push, a pop (`moveScreens`, which `goBack` goes through whatever the page's
   `animation`), a presentation or a dismissal ends a shader's change still running over the same host first
   (`endNavShader`: its `done` settles and reports it).
-- **Shaders that cannot draw.** A view whose shader cannot draw (`shaderDraws`: no WebGL 2, or a program the driver
-  refuses) shows its background and children as they are, as the native backends show them without a device: an
-  effect or a screen effect takes no `nsh-fx` (and its canvas is cleared when its new program is refused), a
-  transition starts no run, a page's or a dialog's `transitionShader` leaves the change to its own motion, and
-  `shaderFrame` paints no pictures and takes no frames for it.
+- **Shaders that cannot draw.** A view whose shader cannot draw (`shaderDraws`: no WebGL 2, a lost context, or a
+  program the driver refuses) shows its background and children as they are, as the native backends show them
+  without a device: an effect or a screen effect takes no `nsh-fx` (and its canvas is cleared when its new program is
+  refused), a transition starts no run, a page's or a dialog's `transitionShader` leaves the change to its own
+  motion, and `shaderFrame` paints no pictures and takes no frames for it.
+- **A lost context.** When the browser takes the context away (a GPU reset, a tab it evicts: `webglcontextlost`, or
+  `isContextLost()` at the next `shaderFrame` where the event has not come), the programs and textures go with it
+  and every view shows its children (`shaderLost`): effects and screen effects lose `nsh-fx` and their last frame, a
+  running transition ends, and a page's or a dialog's change ends, settled and reported. The handler's
+  `preventDefault` asks for the context back; once it is restored (`webglcontextrestored`) the programs and textures
+  are made again as the views draw, and effects hide their children under their canvas again (`shaderRestored`).
 
 ## Pitfalls
 
