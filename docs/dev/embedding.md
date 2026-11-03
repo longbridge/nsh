@@ -184,7 +184,7 @@
   reads and changes the same channel, so a change from the host, or from any app, reaches all of them. `examples/embed-gpui` keeps its
   selected symbol and orders this way (`src/trading.rs`); the engine's `host_modules` tests run it with two engines.
 - **Each engine's own part of the host** (`nsh_core::element::EngineContext`): a host serving several engines (windows,
-  panels) gives each one typed values when it builds it (`EngineConfig::context`; GPUI `AppOptions::context`):
+  panels) gives each one typed values when it builds it (`EngineConfig::context`; GPUI and Windows `AppOptions::context`; on Windows `run_app` adds the shared store and the window host):
   `EngineContext::default().with(MyLink { .. })`, at most one value per type, `Send + Sync`. The set's Rust code
   reads the context of the engine running it with `engine_context::<MyLink>()` (`Option<Arc<MyLink>>`): plain
   functions in the call, `cx` functions as ops, `async` ones in their task, after awaits too, and components. The

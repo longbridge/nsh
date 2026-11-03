@@ -4,7 +4,7 @@
 // callable and do nothing, so an app that calls them runs on. Its script checks
 // each.
 import { Text, View, signal } from "nsh";
-import { Application, Menu, Window, isAvailable, titleBar } from "nsh/desktop";
+import { Application, Menu, Window, closeWindow, currentWindow, focusWindow, isAvailable, openWindow, titleBar } from "nsh/desktop";
 
 function App() {
   const calls = signal("not called");
@@ -15,6 +15,7 @@ function App() {
       <Text>{`Title bar: ${titleBar().height} ${titleBar().left} ${titleBar().right}`}</Text>
       <Text>{`Calls: ${calls()}`}</Text>
       <Text>{`Popup: ${popup()}`}</Text>
+      <Text>{`Current window: ${currentWindow() === null ? "null" : "a window"}`}</Text>
       <View
         testID="window"
         onPress={() => {
@@ -66,6 +67,24 @@ function App() {
         }}
       >
         <Text>Toggle calls</Text>
+      </View>
+      <View
+        testID="windows"
+        onPress={() => {
+          // A surface whose host has no windows of its own: opening one
+          // throws, focusing and closing do nothing.
+          let opened = "opened";
+          try {
+            openWindow({ name: "panel", params: { n: 1 }, title: "Panel", size: { width: 400, height: 300 }, position: { x: 10, y: 20 }, minSize: { width: 200, height: 100 }, resizable: false, focus: false, single: true });
+          } catch (e) {
+            opened = (e as Error).name;
+          }
+          focusWindow(1);
+          closeWindow(1);
+          calls.set(`windows: open ${opened}`);
+        }}
+      >
+        <Text>Window functions</Text>
       </View>
     </View>
   );

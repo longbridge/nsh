@@ -253,6 +253,34 @@ display) changes ~34 views a frame (pulsing sparklines, prices, the chart's live
 `paint`. Canvases record their animated tail only (see the table above), views without content of their
 own push no clip, and the children of a clipping view out of sight are not drawn.
 
+## Windows of an app
+
+`run_app` gives the app a window host (`app_windows.rs`, `nsh_core::window::WindowHost`) that an engine reaches with
+`openWindow` / `nsh_core::window`: its `EngineConfig::context` holds the app's `SharedStore` and a `Windows`. A window
+opened that way is **one UI thread per window**: `open` spawns `nsh-window-<id>` (8 MiB stack) and returns the id at
+once; the thread runs `OleInitialize`, makes the window with its own `AppView` and engine, loads the app's source
+again (`WindowContent::App`: the bundle, the Rust root or the dev server) or a Rust root, shows it and runs its
+message loop. A window and its surface never leave their thread, so the thread-locals (devices, `OPEN`, the
+dispatcher) are per window.
+
+- **What crosses threads** is `Send`: the app's source (`Bundle` / `Root` / the dev server URL), the `Send` options
+  (trace, fps, asset base, app id, title, size, appearance, limits, data directory, cache, storage), the store
+  and the window table (a mutex: id, name, `HWND`, the thread's `UiThread`, its `JoinHandle`). Engines never wait for a
+  window's thread: `focus` posts a closure to its `UiThread` (restore if minimized, `SetForegroundWindow`), `close`
+  posts `WM_CLOSE`; nothing else touches another thread's window.
+- **Options**: `size` and `position` are points (a missing position cascades in 32 px steps from the default),
+  `resizable: false` drops `WS_THICKFRAME | WS_MAXIMIZEBOX`, `min_size` is the content's minimum (the frame is
+  added in `WM_GETMINMAXINFO`; 200 x 150 without one), `focus: false` shows it with `SW_SHOWNOACTIVATE`, `single`
+  focuses the open window of that name.
+- **The store** lists open windows under `nsh/windows/<id>` (`{ name, title }`; the main window is 0), published when a
+  window is shown and deleted when its loop ends (also after a panic, which is logged).
+- **Closing the main window ends the app**: its loop ends, `WM_CLOSE` goes to every other window and their threads are
+  joined for at most 2 seconds (a late one is logged and left; the process exits anyway).
+- **Native components** (`AppOptions::components`, `Rc`s of one thread) are not carried: a window the host opens
+  registers none beyond what `set_components` registers for every view. Each window has its own `HostChannel`.
+- A view an embedding app makes with `AppView::new` has only `AppOptions::context` (what the app puts there) and no
+  window host, so opening windows there fails with a reason.
+
 ## Not implemented, or different
 
 - **Web views** are composed (above), with these limits: a web view inside a view drawn with a projective transform

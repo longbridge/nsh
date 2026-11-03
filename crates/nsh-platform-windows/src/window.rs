@@ -103,6 +103,9 @@ struct WindowData {
     /// The dialog root a window of the app's own shows
     /// ([`crate::app_window`]); none for the surface's window.
     window: Option<NodeId>,
+    /// The smallest size of the window's content in points an app asked for
+    /// ([`set_min_size`]); the fixed minimum of the frame without one.
+    min_size: Cell<Option<(f32, f32)>>,
 }
 
 thread_local! {
@@ -194,6 +197,7 @@ pub(crate) fn create(
         windowed: Cell::new(None),
         root: Cell::new(None),
         window: None,
+        min_size: Cell::new(None),
     });
     let title: Vec<u16> = title.encode_utf16().chain(Some(0)).collect();
     let (style, ex_style) = match parent {
@@ -284,6 +288,7 @@ pub(crate) fn create_app_window(
         windowed: Cell::new(None),
         root: Cell::new(None),
         window: Some(id),
+        min_size: Cell::new(None),
     });
     let title: Vec<u16> = title.encode_utf16().chain(Some(0)).collect();
     let style = if framed {
@@ -493,6 +498,87 @@ pub(crate) fn set_icon(hwnd: HWND, path: Option<&std::path::Path>) {
                 );
             }
         }
+    }
+}
+
+/// Shows a top-level window without making it the active one.
+pub(crate) fn show_no_activate(hwnd: HWND) {
+    // SAFETY: plain calls on a live window of this thread.
+    unsafe {
+        let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+        let _ = UpdateWindow(hwnd);
+    }
+}
+
+/// Makes a window of this thread the active one, restoring it first when it
+/// is minimized (a maximized one keeps its bounds).
+pub(crate) fn activate(hwnd: HWND) {
+    // SAFETY: plain calls on a window of this thread; they fail harmlessly
+    // when it is gone.
+    unsafe {
+        if IsIconic(hwnd).as_bool() {
+            let _ = ShowWindow(hwnd, SW_RESTORE);
+        }
+        let _ = SetForegroundWindow(hwnd);
+    }
+}
+
+/// Moves a top-level window of this thread so its top-left corner is at
+/// `(x, y)` points of the screen (at the window's own DPI), or, with
+/// `by_pixels`, by that many pixels from where it is.
+pub(crate) fn move_to(hwnd: HWND, x: f32, y: f32, by_pixels: bool) {
+    let s = dpi(hwnd) as f32 / 96.0;
+    let mut rect = RECT::default();
+    // SAFETY: plain calls on a live window with a local out value.
+    unsafe {
+        let (x, y) = if by_pixels {
+            if GetWindowRect(hwnd, &mut rect).is_err() {
+                return;
+            }
+            (rect.left + x as i32, rect.top + y as i32)
+        } else {
+            ((x * s).round() as i32, (y * s).round() as i32)
+        };
+        let _ = SetWindowPos(
+            hwnd,
+            None,
+            x,
+            y,
+            0,
+            0,
+            SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
+        );
+    }
+}
+
+/// Whether the user can resize a top-level window of this thread (its
+/// sizing border and maximize button).
+pub(crate) fn set_resizable(hwnd: HWND, resizable: bool) {
+    if resizable {
+        return;
+    }
+    let remove = (WS_THICKFRAME | WS_MAXIMIZEBOX).0 as isize;
+    // SAFETY: plain calls on a live window of this thread.
+    unsafe {
+        let style = GetWindowLongPtrW(hwnd, GWL_STYLE);
+        SetWindowLongPtrW(hwnd, GWL_STYLE, style & !remove);
+        let _ = SetWindowPos(
+            hwnd,
+            None,
+            0,
+            0,
+            0,
+            0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED,
+        );
+    }
+}
+
+/// The smallest size of a window's content, in points, the user can make it
+/// (`None`: the frame's fixed minimum).
+pub(crate) fn set_min_size(hwnd: HWND, min: Option<(f32, f32)>) {
+    if let Some(data) = data(hwnd) {
+        data.min_size.set(min);
     }
 }
 
@@ -864,9 +950,30 @@ fn handle(
             // SAFETY: `lparam` is the window's MINMAXINFO.
             let info = unsafe { &mut *(lparam.0 as *mut MINMAXINFO) };
             let s = dpi(hwnd) as f32 / 96.0;
-            info.ptMinTrackSize = POINT {
-                x: (200.0 * s) as i32,
-                y: (150.0 * s) as i32,
+            info.ptMinTrackSize = match data.min_size.get() {
+                // The content's minimum plus the frame around it.
+                Some((w, h)) => {
+                    let mut rect = RECT {
+                        left: 0,
+                        top: 0,
+                        right: (w * s).round() as i32,
+                        bottom: (h * s).round() as i32,
+                    };
+                    // SAFETY: plain calls on the window with a local rect.
+                    unsafe {
+                        let style = WINDOW_STYLE(GetWindowLongPtrW(hwnd, GWL_STYLE) as u32);
+                        let ex = WINDOW_EX_STYLE(GetWindowLongPtrW(hwnd, GWL_EXSTYLE) as u32);
+                        let _ = AdjustWindowRectExForDpi(&mut rect, style, false, ex, dpi(hwnd));
+                    }
+                    POINT {
+                        x: rect.right - rect.left,
+                        y: rect.bottom - rect.top,
+                    }
+                }
+                None => POINT {
+                    x: (200.0 * s) as i32,
+                    y: (150.0 * s) as i32,
+                },
             };
             return Some(LRESULT(0));
         }
