@@ -1540,14 +1540,13 @@ fn touching(a: &RECT, b: &RECT) -> bool {
 }
 
 /// `rects` (what a partial frame draws, in pixels) with every reader's
-/// area (where a shader reads what is behind it) that they meet, again
-/// until they meet no more: outside the rectangles the back buffer still
-/// holds an earlier frame, the reader's own output of it included.
+/// area (where a shader reads what is behind it) that they meet, merged,
+/// again until they meet no more: outside the rectangles the back buffer
+/// still holds an earlier frame, the reader's own output of it included.
 fn with_backdrops(mut rects: Vec<RECT>, readers: &[RECT]) -> Vec<RECT> {
     let mut added = vec![false; readers.len()];
-    let mut grew = true;
-    while grew {
-        grew = false;
+    loop {
+        let mut grew = false;
         for (reader, done) in readers.iter().zip(added.iter_mut()) {
             if !*done && rects.iter().any(|r| overlap(r, reader)) {
                 rects.push(*reader);
@@ -1555,11 +1554,12 @@ fn with_backdrops(mut rects: Vec<RECT>, readers: &[RECT]) -> Vec<RECT> {
                 grew = true;
             }
         }
-    }
-    if added.contains(&true) {
-        merged(rects)
-    } else {
-        rects
+        if !grew {
+            return rects;
+        }
+        // A merge draws the box around what it joins, which may meet a
+        // reader none of its parts met.
+        rects = merged(rects);
     }
 }
 
@@ -1965,6 +1965,29 @@ mod tests {
         // Rectangles that meet no reader stay as they are.
         let alone = vec![r(0, 0, 10, 10)];
         assert_eq!(with_backdrops(alone.clone(), &[panel, far]), alone);
+    }
+
+    #[test]
+    fn a_reader_the_merged_areas_meet_is_drawn_whole() {
+        let r = |l, t, w, h| RECT {
+            left: l,
+            top: t,
+            right: l + w,
+            bottom: t + h,
+        };
+        // The strip meets neither the spinner nor the panel, but the box
+        // their merge draws.
+        let spinner = r(0, 0, 10, 10);
+        let panel = r(5, 5, 45, 45);
+        let strip = r(40, 0, 20, 4);
+        assert!(!overlap(&spinner, &strip) && !overlap(&panel, &strip));
+        let drawn = with_backdrops(vec![spinner], &[panel, strip]);
+        let covered = |a: &RECT| {
+            drawn.iter().any(|d| {
+                d.left <= a.left && d.top <= a.top && d.right >= a.right && d.bottom >= a.bottom
+            })
+        };
+        assert!(covered(&panel) && covered(&strip), "{drawn:?}");
     }
 
     #[test]
