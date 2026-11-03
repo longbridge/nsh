@@ -22,7 +22,8 @@
 //!   braille), so what is around them stays apart; and so are a view with nothing in it smaller than a row
 //!   both ways (a status dot, a swatch) and a view whose content is all
 //!   left out (an icon's tile), which would be blank Cells, unless it is
-//!   larger than an icon with an opaque fill of its own; a control
+//!   larger than an icon with a fill the user handles, an animated fill
+//!   or a ring's outline; a control
 //!   whose content is all left out (an icon button) is its accessibility
 //!   label in one row, left out without one;
 //! - **block**: a border is one Cell on each side that has one, only on a
@@ -251,6 +252,8 @@ pub(crate) struct Role {
     /// Its background color is animated (bound to the animation graph),
     /// so [`Role::fill`] does not say it: it shows a fill.
     pub(crate) animated_fill: bool,
+    /// It handles presses, gestures or touches (a draggable ball).
+    pub(crate) interactive: bool,
     /// The color of its first bordered side.
     pub(crate) border_color: Color,
     /// A divider the user drags ([`Splitter`]).
@@ -510,14 +513,16 @@ pub(crate) enum Splitter {
 
 /// A view that is no control and does not grow whose content is all left
 /// out (an icon's tile, circle or layer): it would be blank Cells, so it is
-/// left out with it. One larger than an icon ([`ICON`]) that draws
-/// something of its own, an opaque fill (a draggable ball around its dot)
-/// or an outline (an orbit around the dot on it), stays a box: that is what
-/// it shows.
+/// left out with it. One larger than an icon ([`ICON`]) stays a box where
+/// what it shows is its own: an opaque fill the user handles (a draggable
+/// ball around its dot), an animated fill, or a ring's outline (an orbit
+/// around the dot on it). A decorative tile goes with its icon.
 fn icon_layer(tree: &impl Tree, node: NodeId) -> bool {
     let role = tree.role(node);
     let style = tree.style(node);
-    let filled = (role.fill.0 & 0xff == 0xff || role.animated_fill || outlined(role, style))
+    let filled = ((role.interactive && role.fill.0 & 0xff == 0xff)
+        || role.animated_fill
+        || (round(style, role, None) && outlined(role, style)))
         && !left_out(style, LeftOut::IfIcon);
     !role.control
         && !role.root

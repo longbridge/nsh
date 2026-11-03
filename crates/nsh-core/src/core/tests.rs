@@ -27007,11 +27007,12 @@ mod terminal_layout {
     }
 
     #[test]
-    fn a_ball_of_its_own_fill_stays_when_its_dot_is_left_out() {
-        // A 60pt ball of an opaque fill around an 18pt dot: the dot is a
-        // decoration, the ball keeps its box; an icon's tile of the same
-        // fill, 32pt, goes with its icon.
-        let ball = |size: f32| {
+    fn a_ball_the_user_drags_stays_when_its_dot_is_left_out() {
+        // A 60pt ball of an opaque fill around an 18pt dot, with touch
+        // handlers (a PanResponder's): the dot is a decoration, the ball
+        // keeps its box. The same tile without handlers (an onboarding
+        // slide's icon tile) goes with its icon, and so does a 32pt one.
+        let ball = |size: f32, handled: bool| {
             let mut ops = view(2, ROOT_ID, &[("alignItems", V::Str("flex-start"))]);
             ops.extend(view(
                 3,
@@ -27019,12 +27020,19 @@ mod terminal_layout {
                 &[
                     ("width", V::Number(size)),
                     ("height", V::Number(size)),
-                    ("borderRadius", V::Number(size / 2.0)),
+                    ("borderRadius", V::Number(16.0)),
                     ("backgroundColor", V::Str("#3b82f6")),
                     ("alignItems", V::Str("center")),
                     ("justifyContent", V::Str("center")),
                 ],
             ));
+            if handled {
+                ops.push(Op::Listen {
+                    id: 3,
+                    event: EventKind::Touch,
+                    enabled: true,
+                });
+            }
             ops.extend(view(
                 4,
                 3,
@@ -27037,11 +27045,12 @@ mod terminal_layout {
             ));
             laid_out_on_surfaces(ops)
         };
-        let batch = ball(60.0);
+        let batch = ball(60.0, true);
         assert!(!left_out(&batch, 3));
         assert!(frame_of(&batch, 3).is_some_and(|f| f.size.height.0 >= 48.0));
         assert!(left_out(&batch, 4));
-        assert!(left_out(&ball(32.0), 3));
+        assert!(left_out(&ball(60.0, false), 3));
+        assert!(left_out(&ball(32.0, true), 3));
     }
 
     /// A 188pt stage `stage_h` high holding an absolute ring `size` points

@@ -1900,7 +1900,7 @@ impl<M: TextEngine> Core<M> {
                 let node = &mut self.nodes[key as usize];
                 let before = node.events;
                 node.events.set(event, enabled);
-                if PRESSES.contains(&event) {
+                if PRESSES.contains(&event) || HANDLED.contains(&event) {
                     self.sync_grid_role(key);
                 }
                 if event == EventKind::Layout && enabled && !before.contains(event) {
@@ -2605,6 +2605,10 @@ impl<M: TextEngine> Core<M> {
             clamped,
             radius,
             fill: view.background_color,
+            interactive: {
+                let events = self.nodes[key as usize].events;
+                pressable(events) || HANDLED.iter().any(|&e| events.contains(e))
+            },
             animated_fill: self.nodes[key as usize]
                 .animated
                 .iter()
@@ -8150,6 +8154,19 @@ fn directed_align(align: TextAlign, rtl: bool) -> TextAlign {
 }
 
 /// The press events.
+/// The gestures and touches a view handles besides presses: one with a
+/// handler of them is something the user moves (a draggable ball), which a
+/// terminal keeps (`terminal_layout::Role::interactive`).
+const HANDLED: [EventKind; 7] = [
+    EventKind::PanStart,
+    EventKind::PanEnd,
+    EventKind::PinchStart,
+    EventKind::PinchEnd,
+    EventKind::RotationStart,
+    EventKind::RotationEnd,
+    EventKind::Touch,
+];
+
 const PRESSES: [EventKind; 4] = [
     EventKind::Press,
     EventKind::LongPress,
