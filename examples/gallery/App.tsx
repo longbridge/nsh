@@ -486,7 +486,8 @@ function Sidebar() {
           ]}
         >
           <Logo size={22} />
-          <View style={terminal ? { flex: 1, flexDirection: "row", gap: TERMINAL_GAP } : { flex: 1, gap: 0 }}>
+          {/* Its name over the platform's, as elsewhere: side by side they do not fit a terminal's sidebar. */}
+          <View style={{ flex: 1, gap: 0 }}>
             <Text style={{ fontSize: 12, fontWeight: "600", color: colors.text }}>Gallery</Text>
             <Text style={{ numberOfLines: 1, fontSize: 11, color: colors.muted }}>NSH · {osName[platform.os] ?? platform.os}</Text>
           </View>

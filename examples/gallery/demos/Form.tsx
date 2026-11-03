@@ -115,7 +115,8 @@ function Field(
         : { height: pointer ? 28 : 46 };
   return (
     <View style={{ gap: terminal ? 0 : 6, translate: [shake, 0], opacity: props.disabled ? 0.5 : 1 }}>
-      <View style={{ flexDirection: "row", alignItems: "baseline", gap: 8 }}>
+      {/* The terminal keeps two columns between the label, the API and the hint: one would run them together. */}
+      <View style={{ flexDirection: "row", alignItems: "baseline", gap: terminal ? TERMINAL_GAP : 8 }}>
         <Text style={{ flex: 1, fontSize: 13, fontWeight: "500", color: colors.muted }}>{own.label}</Text>
         <If when={own.api}>
           <Text style={{ fontSize: 12, color: colors.faint, fontFamily: mono }}>{own.api}</Text>

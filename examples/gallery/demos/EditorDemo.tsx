@@ -639,7 +639,12 @@ export function EditorDemo() {
   const menuOpen = signal<"language" | "options" | null>(null);
   return (
     <View class="flex-1 bg-background">
-      <View ref={(node: ViewRef) => (toolbar = node)} class="h-10 flex-row items-center gap-0.5 border-b border-border px-1.5">
+      {/* A terminal's 6pt is no column: its language menu would touch the line before it, so it keeps one. */}
+      <View
+        ref={(node: ViewRef) => (toolbar = node)}
+        class="h-10 flex-row items-center gap-0.5 border-b border-border px-1.5"
+        style={platform.idiom === "terminal" ? { paddingHorizontal: 8 } : undefined}
+      >
         <Menu
           offset={4}
           margin={8}
