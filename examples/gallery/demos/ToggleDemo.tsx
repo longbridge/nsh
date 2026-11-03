@@ -303,7 +303,7 @@ export function ToggleDemo() {
       <View
         style={
           grid()
-            ? { flexGrow: 1, flexBasis: terminal ? 0 : "28%", height: pointer ? 76 : 88, padding: 10, gap: 4, borderRadius: 10, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.inset, justifyContent: "flex-end" }
+            ? { flexGrow: 1, flexBasis: "28%", height: pointer ? 76 : 88, padding: 10, gap: 4, borderRadius: 10, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.inset, justifyContent: "flex-end" }
             : { flexDirection: "row", alignItems: "center", gap: 10, height: pointer ? 36 : 48, borderTopWidth: i() === 0 ? 0 : 1, borderTopColor: colors.line }
         }
       >
@@ -359,23 +359,9 @@ export function ToggleDemo() {
           {segment("grid", "Grid view", (tint) => <GridGlyph tint={tint} size={pointer ? 15 : 17} />)}
           {segment("list", "List view", (tint) => <LucideIcon name="list" size={pointer ? 15 : 17} tint={tint} />)}
         </ToggleGroup>
-        {/* A terminal's grid: rows of three, whole Cells each. */}
-        <If when={terminal && grid()}>
-          <View style={{ gap: TERMINAL_ROW }}>
-            <Each of={[FILES.slice(0, 3), FILES.slice(3)]}>
-              {(row, r) => (
-                <View style={{ flexDirection: "row", gap: TERMINAL_GAP }}>
-                  <Each of={row()}>{(f, j) => tile(f, () => r() * 3 + j())}</Each>
-                </View>
-              )}
-            </Each>
-          </View>
-        </If>
-        <If when={!(terminal && grid())}>
-          <View style={{ flexDirection: grid() ? "row" : "column", flexWrap: grid() ? "wrap" : "nowrap", gap: grid() ? 8 : 0 }}>
-            <Each of={FILES}>{(f, i) => tile(f, i)}</Each>
-          </View>
-        </If>
+        <View style={{ flexDirection: grid() ? "row" : "column", flexWrap: grid() ? "wrap" : "nowrap", gap: grid() ? (terminal ? TERMINAL_GAP : 8) : 0 }}>
+          <Each of={FILES}>{(f, i) => tile(f, i)}</Each>
+        </View>
       </Card>
     );
   }

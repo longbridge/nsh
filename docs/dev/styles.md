@@ -375,7 +375,8 @@ as tall as its lines at 40 columns).
   vertical resizable group) keeps its row inside a card too.
 - **Flex.** `justifyContent` places the space left (start, center, end, space between, around, evenly: ratatui's
   `Flex`); across, `alignItems` / `alignSelf` stretch (the default) or place a child at its content's size.
-  `flexWrap` makes lines of children, each split as above.
+  `flexWrap` makes lines of children at their bases (or contents), as CSS's, each then split as above (its fills
+  share what is left on it).
 - **Absolute** children take no room; their insets (nearest Cell) place them in the padding box, and both insets of
   an axis without a size along it stretch them between the two (a divider's band down a whole column). A box that holds
   only absolute children (a table's header over its cells, each of its rows) keeps its explicit height, which a box
@@ -398,7 +399,8 @@ scroll view too; **grids** take their columns from the template
   **text input** keeps one column after its text, where the caret is when the text fills a line.
 - A **divider the user drags** (a view whose cursor is `col-resize` or `row-resize`: a resizable panel's handle, a
   dock's split) is one Cell across its axis, as long as its parent lays it out along it, and never left out; what it
-  holds is laid out as hidden (the platform draws its line).
+  holds is laid out as hidden (the platform draws its line). One pinned on its parent's edge (absolute at `right: 0`,
+  a column header's resize handle) is that edge's line: its Cell is out of the parent's content, as a border's.
 - A **frame around one frame** and nothing else (a bordered box without padding of its own whose only child, through
   boxes without border or padding, is a bordered box: a pane around a bordered list) draws one line, the inner one,
   as ratatui draws nested blocks once. Frames with padding between them are the app's two, and both are drawn.
