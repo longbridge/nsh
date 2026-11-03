@@ -1561,7 +1561,9 @@ fn mark_state(
     edges: &Edges,
     marks: Marks,
 ) {
-    let flags = view.states;
+    // A part shows its control's states as its own (a list's highlighted
+    // option is focused while the keys stay in the search field).
+    let flags = view.states | view.projected;
     let disabled = view.props.accessibility.state.disabled || flags & state::DISABLED != 0;
     let selected = banded(view);
     let field = view.input.is_some();
@@ -1671,7 +1673,9 @@ fn mark_surface(
     popup: bool,
     pane: bool,
 ) {
-    let flags = view.states;
+    // A part shows its control's states as its own (a list's highlighted
+    // option is focused while the keys stay in the search field).
+    let flags = view.states | view.projected;
     let disabled = view.props.accessibility.state.disabled || flags & state::DISABLED != 0;
     let selected = banded(view);
     let field = view.input.is_some();

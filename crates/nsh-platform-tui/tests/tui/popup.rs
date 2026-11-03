@@ -646,6 +646,40 @@ fn a_select_s_chosen_row_has_a_check_and_its_list_fits_the_widest_title() {
     );
 }
 
+#[test]
+fn a_select_s_highlighted_row_is_an_accent_band() {
+    // The option is focused only as a part of the list (the keys stay
+    // with the select): the core mounts that for the terminal to mark.
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(40, 20)).unwrap();
+    view.load(App::Rust(Root::new::<ChosenSelect>(|| ())))
+        .unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "Swift");
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        // The row's title, not the trigger's above it.
+        let (x, y) = find(&terminal, "✓ Go").unwrap();
+        if terminal.backend().buffer()[(x, y)].bg == ratatui_core::style::Color::Blue {
+            break;
+        }
+        assert!(
+            rx.recv_deadline(deadline).is_ok(),
+            "the chosen row, highlighted as the list opens, on the accent\n{}",
+            dump(&terminal)
+        );
+        terminal
+            .draw(|frame| view.render(frame, frame.area()))
+            .unwrap();
+    }
+    let (x, y) = find(&terminal, "Swift").unwrap();
+    assert_ne!(
+        terminal.backend().buffer()[(x, y)].bg,
+        ratatui_core::style::Color::Blue,
+        "the other rows off it\n{}",
+        dump(&terminal)
+    );
+}
+
 /// A box in an overlay over rows of page text it cuts across.
 #[component]
 fn OverWords() -> impl IntoElement {

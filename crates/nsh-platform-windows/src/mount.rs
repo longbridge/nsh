@@ -390,7 +390,8 @@ impl Mounter {
             MountItem::Animation(_)
             | MountItem::AnimationBindings { .. }
             | MountItem::ComponentPropSlots { .. }
-            | MountItem::TreeOrder(_) => {}
+            | MountItem::TreeOrder(_)
+            | MountItem::ProjectStates { .. } => {}
         }
         // What the item may change on screen is drawn again, whether or not
         // what applied it said so: a partial frame draws only that.
@@ -502,6 +503,7 @@ fn redrawn(item: &MountItem) -> Redraw {
         | MountItem::AnimationBindings { .. }
         | MountItem::ComponentPropSlots { .. }
         | MountItem::TreeOrder(_)
+        | MountItem::ProjectStates { .. }
         // Effects and transitions: this platform does not draw them yet.
         | MountItem::ShaderTransition { .. }
         | MountItem::ShaderInput { .. } => Redraw::Nothing,

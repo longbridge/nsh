@@ -1346,6 +1346,7 @@ pub(crate) fn encode(out: &mut Out, item: &MountItem) {
         | MountItem::ComponentPropSlots { .. }
         | MountItem::Keymap(_)
         | MountItem::TreeOrder(_)
+        | MountItem::ProjectStates { .. }
         | MountItem::Overflow { .. }
         | MountItem::AnimationBindings { .. }
         | MountItem::Animation(_) => {}

@@ -125,7 +125,7 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
     };
     for item in batch.items {
         match item {
-            MountItem::TreeOrder(_) => {}
+            MountItem::TreeOrder(_) | MountItem::ProjectStates { .. } => {}
             MountItem::Create { id, kind } => {
                 e.int(CREATE);
                 e.int(id as i32);

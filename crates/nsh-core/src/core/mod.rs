@@ -1097,6 +1097,9 @@ pub struct Core<M: TextEngine> {
     mount: Vec<MountItem>,
     track_tree_order: bool,
     tree_order_changed: bool,
+    /// Mount the states nodes show as parts of a control
+    /// ([`MountItem::ProjectStates`]).
+    mount_projected: bool,
     /// Batches handed out so far: tells this batch's mount indexes from
     /// earlier ones'.
     batches: u64,
@@ -1285,6 +1288,7 @@ impl<M: TextEngine> Core<M> {
             mount: Vec::new(),
             track_tree_order: false,
             tree_order_changed: false,
+            mount_projected: false,
             batches: 0,
             commands: Vec::new(),
             layout_animation: None,
@@ -2144,6 +2148,15 @@ impl<M: TextEngine> Core<M> {
     pub fn set_tree_order_tracking(&mut self, enabled: bool) {
         self.track_tree_order = enabled;
         self.tree_order_changed = enabled;
+    }
+
+    /// Mount the states views show as parts of a control
+    /// ([`MountItem::ProjectStates`]: a list's highlighted option, the
+    /// code input's next cell) for a platform that marks them itself, as
+    /// a terminal does: elsewhere the app's classes alone show them. Set
+    /// before the first commit.
+    pub fn set_projected_state_mounting(&mut self, enabled: bool) {
+        self.mount_projected = enabled;
     }
 
     /// One round of a commit: views, layout, lists, commands, into the
@@ -5166,6 +5179,13 @@ impl<M: TextEngine> Core<M> {
         }
         if let Some(item) = self.creation_tracking(key) {
             self.mount.push(item);
+        }
+        let projected = self.nodes[key as usize].projected;
+        if self.mount_projected && projected != 0 {
+            self.mount.push(MountItem::ProjectStates {
+                id,
+                states: projected,
+            });
         }
         self.mark(key, flags);
         if !kind.is_container() {

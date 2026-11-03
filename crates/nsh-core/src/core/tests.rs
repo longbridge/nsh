@@ -6130,6 +6130,68 @@ fn a_projected_focus_styles_a_part_as_focused() {
     assert_eq!(view_style_of(&batch, 2).unwrap().opacity, 0.5);
 }
 
+#[test]
+fn projected_states_are_mounted_only_for_a_platform_that_asks() {
+    use crate::tailwind::state;
+    let projected = |id, states| Op::SetProp {
+        id,
+        prop: Prop::ProjectedStates(states),
+    };
+    let sent = |items: &[MountItem]| {
+        items
+            .iter()
+            .filter_map(|i| match i {
+                MountItem::ProjectStates { id, states } => Some((*id, *states)),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    };
+    // Elsewhere the classes show them and nothing more is sent.
+    let mut c = core();
+    view_with_classes(&mut c, 2, "focus:opacity-50");
+    c.commit();
+    apply(&mut c, vec![projected(2, state::FOCUSED)]);
+    let items = c.commit().map(|b| b.items).unwrap_or_default();
+    assert_eq!(sent(&items), []);
+
+    // A terminal marks a list's highlighted option itself.
+    let mut c = core();
+    c.set_projected_state_mounting(true);
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 2,
+                tag: Tag::View,
+            },
+            projected(2, state::FOCUSED),
+            Op::Insert {
+                parent: ROOT_ID,
+                child: 2,
+                before: None,
+            },
+        ],
+    );
+    let items = c.commit().unwrap().items;
+    let create = items
+        .iter()
+        .position(|i| matches!(i, MountItem::Create { id: 2, .. }))
+        .unwrap();
+    let shown = items
+        .iter()
+        .position(|i| matches!(i, MountItem::ProjectStates { id: 2, .. }))
+        .unwrap();
+    assert!(create < shown, "{items:?}");
+    assert_eq!(sent(&items), [(2, state::FOCUSED)]);
+    apply(&mut c, vec![projected(2, 0)]);
+    let items = c.commit().unwrap().items;
+    assert_eq!(sent(&items), [(2, 0)]);
+    // An unchanged value sends nothing.
+    apply(&mut c, vec![projected(2, 0)]);
+    let items = c.commit().map(|b| b.items).unwrap_or_default();
+    assert_eq!(sent(&items), []);
+}
+
 /// A view and the views inside it, `id`'s first: (id, parent, classes).
 fn views(c: &mut Core<FakeEngine>, views: &[(NodeId, NodeId, &str)]) {
     let mut ops = Vec::new();

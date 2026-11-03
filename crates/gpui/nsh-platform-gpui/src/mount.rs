@@ -378,7 +378,8 @@ impl Mounter {
             MountItem::Animation(_)
             | MountItem::AnimationBindings { .. }
             | MountItem::ComponentPropSlots { .. }
-            | MountItem::TreeOrder(_) => {}
+            | MountItem::TreeOrder(_)
+            | MountItem::ProjectStates { .. } => {}
         }
     }
 

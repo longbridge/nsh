@@ -19,6 +19,9 @@ pub(crate) struct NshView {
     pub(crate) gestures: nsh_core::GestureValues,
     pub(crate) tracked: u16,
     pub(crate) states: u16,
+    /// The states it shows as a part of a control (`MountItem::ProjectStates`:
+    /// a list's highlighted option), drawn as its own and never reported.
+    pub(crate) projected: u16,
     pub(crate) input: Option<Box<nsh_core::InputConfig>>,
     pub(crate) field: Option<Box<crate::text_input::Field>>,
     pub(crate) text_content: Option<std::sync::Arc<nsh_core::AttributedText>>,
@@ -48,6 +51,7 @@ impl NshView {
             gestures: Default::default(),
             tracked: 0,
             states: 0,
+            projected: 0,
             input: None,
             field: (kind == ViewKind::Input).then(Default::default),
             text_content: None,

@@ -287,6 +287,11 @@ impl Mounter {
                         view.states &= nsh_core::input::reported_states(states);
                     }
                 }
+                MountItem::ProjectStates { id, states } => {
+                    if let Some(view) = self.get_mut(id) {
+                        view.projected = states;
+                    }
+                }
                 MountItem::Events { id, events } => {
                     if let Some(view) = self.get_mut(id) {
                         view.events = events;

@@ -678,6 +678,17 @@ pub enum MountItem {
         /// The states.
         states: u16,
     },
+    /// The states the view shows as a part of a control (`tailwind::state`
+    /// bits: a list's highlighted option is focused while the focus stays
+    /// on its search field), for a platform that marks them itself. Opt-in
+    /// through `Core::set_projected_state_mounting`; the platform shows
+    /// them and never reports them back.
+    ProjectStates {
+        /// View id.
+        id: NodeId,
+        /// The states.
+        states: u16,
+    },
     /// Insert (or move) `child` into `parent`, below sibling `before` (or
     /// on top when `None`). Siblings rather than indices, so platform-owned
     /// subviews (refresh controls, scroll indicators) cannot shift positions.

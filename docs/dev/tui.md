@@ -442,7 +442,9 @@ own background, so what its children filled stays, and it is at least one step a
   (select), pressed or hovered;
 - a hovered pressable view is a hover band, a pressed one a select band;
 - in a popup (an anchored overlay: a menu, a select or combobox list, a command palette) the highlighted item,
-  the keyboard's (the item the list projects as focused) or the pointer's, is a full-row accent band, its text in
+  the keyboard's (the item the list projects as focused, which the sink opts into as `MountItem::ProjectStates`:
+  `MountSink::needs_projected_states`; the view keeps them apart from the states it reports, so they never go
+  back to the core) or the pointer's, is a full-row accent band, its text in
   the terminal's background color; a selected item that is not highlighted keeps the select band;
 - the selected row of a list or tree inside the pane holding the focus (the innermost box with a line around the
   focused view, or the overlay holding it) is the same accent band, as lazygit's: the list the keys go to; the

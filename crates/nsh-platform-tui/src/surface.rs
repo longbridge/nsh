@@ -72,6 +72,10 @@ impl MountSink for Sink {
         true
     }
 
+    fn needs_projected_states(&self) -> bool {
+        true
+    }
+
     fn submit(&self, batch: MountBatch) {
         self.send(Message::Batch(batch));
     }
