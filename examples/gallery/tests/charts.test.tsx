@@ -279,12 +279,17 @@ test("the risk-return bubbles read out the holding under the pointer and move wi
   // A year: every holding's numbers change, the best Sharpe with them.
   await app.press("role:tab[1Y]");
   await app.waitFor("label:/^Risk and return of 17 holdings, 1Y: best Sharpe GS, 2 ahead of the S&P 500/");
-  // The pointer stays on Amazon, read out with its numbers over a year.
+  expect(app.texts()).toContain("GS 1.31");
+  // Back over the middle of the plot once the bubbles have moved (pressing
+  // the period took the pointer off the plot in a real window): Eli Lilly
+  // is there over a year, read out with its numbers.
+  await app.wait(1200);
+  await app.hover("label:/^Risk and return of 17 holdings, 1Y/");
+  await app.waitFor("LLY · ELI LILLY");
   texts = app.texts();
-  expect(texts).toContain("AMZN · AMAZON");
-  expect(texts).toContain("+8.0%");
-  expect(texts).toContain("31.0% vol · Sharpe 0.13");
-  expect(texts).toContain("GS 1.31");
+  expect(texts).toContain("+12.0%");
+  expect(texts).toContain("33.0% vol · Sharpe 0.24");
+  expect(texts).toContain("Healthcare · $820B market cap");
 });
 
 test("the risk-return bubbles step with the arrow keys from the least volatile", async () => {
