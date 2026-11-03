@@ -104,6 +104,10 @@ pub(crate) enum Action {
     PickScreenColor(AnswerSlot<Option<crate::Hsla>>),
     /// A speech recognition session's request ([`crate::speech`]).
     Speech(SpeechAction),
+    /// Whether a web view's ref gives its page trusted input here
+    /// (`sendInput`): the platform delivers it and the app holds
+    /// `webview.input`; the answer resolves the slot.
+    WebInputAvailable(AnswerSlot<bool>),
     /// A request on local paths for the platform
     /// ([`crate::file_dialog`]); its answer resolves the slot.
     FileRequest(crate::file_dialog::FileRequest, FileAnswer),

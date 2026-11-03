@@ -177,9 +177,10 @@ pub struct PlotAxisProps {
     /// scale's domain have no place and no tick.
     pub tick_values: Prop<Option<Vec<f64>>>,
     /// The text of each tick (d3's `axis.tickFormat`): the app's function
-    /// of the tick's value and index. Without one, d3's default: the value
-    /// with the decimals the step between ticks needs, thousands grouped
-    /// (`1,500`, `0.25`, `−2`).
+    /// of the tick's value and index. Without one, the category of a band
+    /// on a band scale of categories (its `domain`, or its cells'), else
+    /// d3's default: the value with the decimals the step between ticks
+    /// needs, thousands grouped (`1,500`, `0.25`, `−2`).
     pub format: Prop<Option<TickFormat>>,
     /// The Tailwind classes of its labels, the `label` part: a text per
     /// tick, centered on it along the edge (along the x scale's edge the
@@ -247,13 +248,23 @@ pub fn PlotAxis(props: PlotAxisProps, _cx: Scope<NoEvent>) -> impl IntoElement {
         true => plot.x_map.get(),
         false => plot.y_map_of(value_scale.get()),
     };
-    // The ticks follow the scale's domain (or its rows), not the plot's
-    // size: a resize moves the labels without writing them again.
-    let scale = computed(move || ScaleTicks::of(&map(), plot.rows.with(|r| r.len())));
+    // The categories of the scale's bands, which its labels write.
+    let categories = computed(move || match placement.get().along_x() {
+        true => plot.x_categories.get(),
+        false if value_scale.get() == ValueScale::Y => plot.y_categories.get(),
+        false => None,
+    });
+    // The ticks follow the scale's domain (or its rows, or its bands'
+    // categories), not the plot's size: a resize moves the labels without
+    // writing them again.
+    let scale = computed(move || {
+        let rows = categories.with(|c| c.as_ref().map(|c| c.len()));
+        ScaleTicks::of(&map(), rows.unwrap_or_else(|| plot.rows.with(|r| r.len())))
+    });
     let ticks = computed(move || {
         tick_values.with(|values| scale.get().ticks(count.get(), values.as_deref()))
     });
-    let labels = label_texts(ticks, format);
+    let labels = label_texts(ticks, format, categories);
     // Beside the y scale's edge, outside, a label on its tick reaches half
     // its height above and below it: the plot keeps what would pass its
     // top and bottom edges inside them (`add_inset`), from each label's
@@ -485,7 +496,11 @@ struct Label {
 /// or a Rust function, in the next JS turn for the app's function. A
 /// label keeps the value its text was written for, so it shows at that
 /// value's place until the new texts come.
-fn label_texts(ticks: Memo<TickValues>, format: Prop<Option<TickFormat>>) -> Signal<Arc<[Label]>> {
+fn label_texts(
+    ticks: Memo<TickValues>,
+    format: Prop<Option<TickFormat>>,
+    categories: Memo<Option<Arc<[SharedString]>>>,
+) -> Signal<Arc<[Label]>> {
     let out = signal(Arc::<[Label]>::from([]));
     // A newer run wins over the answers of an older one.
     let generation = stored(0u64);
@@ -495,10 +510,21 @@ fn label_texts(ticks: Memo<TickValues>, format: Prop<Option<TickFormat>>) -> Sig
         generation.replace(run);
         let values = ticks.values.clone();
         match format.get() {
-            None => out.set(paired(
-                &values,
-                values.iter().map(|&v| default_text(v, ticks.precision)),
-            )),
+            // A band's category, or d3's default text.
+            None => out.set(categories.with(|c| {
+                let category = |v: f64| {
+                    let c = c.as_ref()?;
+                    (v.fract() == 0.0 && v >= 0.0)
+                        .then(|| c.get(v as usize).cloned())
+                        .flatten()
+                };
+                paired(
+                    &values,
+                    values
+                        .iter()
+                        .map(|&v| category(v).unwrap_or_else(|| default_text(v, ticks.precision))),
+                )
+            })),
             Some(TickFormat::Rust(f)) => out.set(paired(
                 &values,
                 values.iter().enumerate().map(|(i, &v)| f(v, i)),

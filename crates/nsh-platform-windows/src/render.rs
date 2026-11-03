@@ -992,7 +992,7 @@ pub(crate) fn draw_content(cx: &mut DrawCx<'_>, view: &NshView, world: Mat4) {
         cx.realize();
     }
     cx.set_transform(world);
-    crate::scroll::draw_indicator(cx, &state);
+    crate::scroll::draw_indicator(cx, view, &state);
     if clip {
         cx.pop();
     }
