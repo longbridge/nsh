@@ -158,8 +158,8 @@ nsh package App.tsx --target web --run
 | `manifest.webmanifest` | 浏览器安装应用时使用的名称、id、图标和颜色 |
 | `nsh.<digest>.js` | DOM 运行时，已压缩（79 KB，brotli 后 22.5 KB） |
 | `nsh.<digest>.wasm` | Rust 引擎、布局和组件，以及 Rust 应用自己的 crate。TSX 应用使用浏览器 JS；打包时只链接应用首屏导入的组件和标准模块。 |
-| `nsh-<part>.<digest>.wasm` | 之后的分块导入的组件、标准模块和着色器，在第一个需要它的分块运行前加载一次（`nsh-shared_<hash>` 模块存放其中几个共用的部分） |
-| `<file>.br`、`<file>.gz` | 每个文件预先用 Brotli（质量 11）和 gzip（级别 9）压缩的副本，供能直接发送预压缩文件的托管服务使用 |
+| `nsh-<name>.<digest>.wasm` | 应用在首屏之外用到的组件、标准模块和着色器：首屏显示后在后台下载 |
+| `<file>.br`、`<file>.gz` | 每个文件预先压缩的副本，供能直接发送预压缩文件的托管服务使用 |
 | `nsh-syntaxes.<digest>.bin` | 代码高亮用的语法定义（bat 的语法集：0.92 MB，brotli 后 0.8 MB），代码块、`Editor` 或 `DiffView` 第一次显示某种语言的代码时下载 |
 | `nsh-bindgen.<digest>.js` | 应用的 crate [在 Rust 中调用浏览器 API](#在-rust-中使用浏览器-api) 时所需的 wasm-bindgen 胶水代码，已压缩 |
 | `snippets.<digest>/<crate>-<hash>/…` | 胶水代码导入的这些 crate 的 JS（`inline_js`、`module = "/js/…"`），保留 wasm-bindgen 给它们的路径 |
@@ -173,12 +173,12 @@ nsh package App.tsx --target web --run
 
 ### 运行时大小
 
-打包时为每个应用链接一个专属的 `nsh.<digest>.wasm`：其中包含引擎，以及应用首屏导入的 `nsh/base` 组件、标准模块和着色器。应用其他分块导入的部分作为附属模块发布，第一个需要它的分块运行时才下载。以下数据由 `nsh package --target web` 实测（MB 按 10^6 字节计）：
+打包时为每个应用链接一个专属的 `nsh.<digest>.wasm`：其中包含引擎，以及应用首屏导入的 `nsh/base` 组件、标准模块和着色器。应用其他页面导入的部分在首屏显示后于后台下载。以下数据由 `nsh package --target web` 实测（MB 按 10^6 字节计）：
 
 | 应用 | 用到的功能 | `nsh.<digest>.wasm` | gzip | Brotli |
 |---|---|---|---|---|
 | `examples/counter` | 基础组件 | 3.96 MB | 1.32 MB | 0.97 MB |
-| `examples/gallery` | 全部组件、`zlib` 和着色器，分在 16 个附属模块中 | 4.13 MB | 1.36 MB | 1.01 MB |
+| `examples/gallery` | 全部组件、`zlib` 和着色器 | 4.13 MB | 1.36 MB | 1.01 MB |
 
 ### 部署
 

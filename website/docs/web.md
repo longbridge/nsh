@@ -149,8 +149,8 @@ page and files named after their content.
 | `manifest.webmanifest` | The name, id, icons and colors browsers install the app with |
 | `nsh.<digest>.js` | The DOM runtime, minified (79 KB, 22.5 KB with brotli) |
 | `nsh.<digest>.wasm` | The Rust engine, layout and components, plus a Rust app’s own crate. TSX runs in browser JavaScript; packaging links it with only the components and standard modules the app's first screen imports. |
-| `nsh-<part>.<digest>.wasm` | The components, standard modules and shaders that later chunks import, each loaded once, right before the first chunk that needs it runs (`nsh-shared_<hash>` modules hold what several of them share) |
-| `<file>.br`, `<file>.gz` | Each file compressed ahead of time with Brotli (quality 11) and gzip (level 9), for hosts that send precompressed files |
+| `nsh-<name>.<digest>.wasm` | Components, standard modules and shaders the app uses beyond its first screen: downloaded in the background after it shows |
+| `<file>.br`, `<file>.gz` | Each file compressed ahead of time, for hosts that send precompressed files |
 | `nsh-syntaxes.<digest>.bin` | The syntaxes code is highlighted with (bat's set: 0.92 MB, 0.8 MB with brotli), downloaded the first time a code block, an `Editor` or a `DiffView` shows code in a language |
 | `nsh-bindgen.<digest>.js` | The wasm-bindgen glue of an app whose crates call [browser APIs from Rust](#browser-apis-from-rust), minified |
 | `snippets.<digest>/<crate>-<hash>/…` | The JS of those crates that the glue imports (`inline_js`, `module = "/js/…"`), under the paths wasm-bindgen gives it |
@@ -167,14 +167,14 @@ works from any directory of any host (`https://example.com/apps/counter/`).
 ### Runtime size
 
 Packaging links each app its own `nsh.<digest>.wasm`, holding the engine and the `nsh/base` components, standard
-modules and shaders the app's first screen imports. What the app's other chunks import comes as side modules,
-each downloaded the first time a chunk that needs it runs. Measured with `nsh package --target web` (MB = 10^6
+modules and shaders the app's first screen imports. What the app's other screens import is downloaded in the
+background once the first screen shows. Measured with `nsh package --target web` (MB = 10^6
 bytes):
 
 | App | Uses | `nsh.<digest>.wasm` | gzip | Brotli |
 |---|---|---|---|---|
 | `examples/counter` | The core components | 3.96 MB | 1.32 MB | 0.97 MB |
-| `examples/gallery` | Every component, `zlib` and shaders, in 16 side modules | 4.13 MB | 1.36 MB | 1.01 MB |
+| `examples/gallery` | Every component, `zlib` and shaders | 4.13 MB | 1.36 MB | 1.01 MB |
 
 ### Deploy it
 
