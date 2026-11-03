@@ -37,11 +37,6 @@ use crate::{
 /// cleared when full.
 const STYLE_CACHE: usize = 4096;
 
-/// Why an image's size cannot be known in a terminal, which decodes no
-/// images (`Image.getSize` / `prefetch` reject with
-/// `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` there, `runtime/image.rs`).
-pub(crate) const NO_IMAGES_IN_A_TERMINAL: &str = "a terminal decodes no images";
-
 /// Rounds of polls and updates per run of the tasks, at most.
 const MAX_TASK_ROUNDS: u32 = 64;
 
@@ -4990,7 +4985,9 @@ impl<M: TextEngine> Core<M> {
             Action::ImageInfo(_, answer)
                 if self.components.environment.idiom == crate::platform::Idiom::Terminal =>
             {
-                answer.borrow_mut().deliver(Err(NO_IMAGES_IN_A_TERMINAL.into()));
+                answer
+                    .borrow_mut()
+                    .deliver(Err(super::NO_IMAGES_IN_A_TERMINAL.into()));
             }
             Action::ImageInfo(uri, answer) => {
                 let id = self.components.next_image_info;

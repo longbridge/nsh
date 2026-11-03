@@ -14,7 +14,8 @@
   views decoding at different sizes) and report `onProgress` at most every 100ms; `Image.getSize` / `Image.prefetch` (Rust,
   `nsh_core::runtime`) ask with `Command::ImageInfo`, are answered by the root's `ImageInfo` event (which the core
   resolves, never JS) and keep the downloaded bytes in a data cache (32 MB) until a view
-  decodes them. Android `ImageBox` draws its borders above the
+  decodes them; in a terminal (`Idiom::Terminal`) the core answers them at once and sends no command, and `Image`'s
+  functions reject with `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`. Android `ImageBox` draws its borders above the
   image (as Core Animation's layer border).
 - **Loading and memory** (`nsh_core::image`, the design in `image-loading-design.md`; Linux, Windows, macOS and
   GPUI: iOS and Android keep their own loaders, above). One loader per process (`image::loader`) reads every view's, canvas's, `getSize` / `prefetch`'s and `element::svg`'s bytes: a

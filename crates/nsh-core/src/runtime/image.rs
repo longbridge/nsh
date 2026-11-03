@@ -12,7 +12,6 @@ use crate::{
         codes, module,
     },
     geometry::DevicePixels,
-    platform::Idiom,
 };
 
 /// Image information and loading ahead.
@@ -115,10 +114,9 @@ impl Image {
         let imported_size = src.size;
         let (url, scale) = src.pick();
         granted(&sys, &url)?;
-        decoded("getSize")?;
         let size = crate::prelude::image_size(url)
             .await
-            .map_err(JsError::Error)?;
+            .map_err(|e| failed("getSize", e))?;
         if let Some(size) = imported_size {
             return Ok(size);
         }
@@ -138,24 +136,20 @@ impl Image {
     pub(crate) async fn prefetch(src: ImageUrl, sys: System) -> Result<(), JsError> {
         let url = src.pick().0;
         granted(&sys, &url)?;
-        decoded("prefetch")?;
         crate::prelude::prefetch_image(url)
             .await
-            .map_err(JsError::Error)
+            .map_err(|e| failed("prefetch", e))
     }
 }
 
-/// Why `Image.{call}` cannot answer where images are not decoded: in a
-/// terminal ([`Idiom::Terminal`]).
-fn decoded(call: &str) -> Result<(), JsError> {
-    if crate::element::ambient::try_idiom() != Some(Idiom::Terminal) {
-        return Ok(());
+/// The rejection of `Image.{call}` for the core's answer `error`: coded
+/// `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` where the platform decodes no
+/// images (a terminal, which the core answers at once).
+fn failed(call: &str, error: String) -> JsError {
+    if error == crate::core::NO_IMAGES_IN_A_TERMINAL {
+        return JsError::Error(format!("Image.{call}: {error}")).with_code(codes::UNAVAILABLE);
     }
-    Err(JsError::Error(format!(
-        "Image.{call}: {}",
-        crate::core::NO_IMAGES_IN_A_TERMINAL
-    ))
-    .with_code(codes::UNAVAILABLE))
+    JsError::Error(error)
 }
 
 /// Whether the app may load the image at `url`: why not when it may not.

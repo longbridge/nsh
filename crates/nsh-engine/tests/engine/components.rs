@@ -1070,6 +1070,53 @@ fn image_loads_stay_within_the_capabilities() {
     assert!(!asked, "a refused image load reached the platform");
 }
 
+const IMAGE_IN_A_TERMINAL: &str = r#"import { mount, signal, Text } from "nsh";
+import { Image } from "nsh";
+
+const shown = signal("waiting");
+const settled = (p: Promise<unknown>) => p.then(() => "ok", (e) => `${e.name} ${e.code}`);
+setTimeout(async () => {
+  const results = await Promise.all([
+    settled(Image.getSize("https://example.com/a.png")),
+    settled(Image.prefetch("https://example.com/b.png")),
+  ]);
+  shown.set(results.join(" | "));
+}, 0);
+
+mount(() => <Text>{shown()}</Text>);
+"#;
+
+/// A terminal decodes no images: `Image.getSize` and `prefetch` reject at
+/// once, coded, and no request reaches the platform (whose answer would
+/// never come).
+#[test]
+fn image_queries_reject_at_once_in_a_terminal() {
+    let (_engine, rx) = start_in(
+        IMAGE_IN_A_TERMINAL,
+        Environment {
+            idiom: nsh_engine::Idiom::Terminal,
+            ..Environment::default()
+        },
+    );
+    let wanted = "Error ERR_FEATURE_UNAVAILABLE_ON_PLATFORM | \
+                  Error ERR_FEATURE_UNAVAILABLE_ON_PLATFORM";
+    let mut asked = false;
+    let batches = until(&rx, |batch| {
+        asked |= batch.items.iter().any(|i| {
+            matches!(
+                i,
+                MountItem::Command {
+                    command: Command::ImageInfo { .. },
+                    ..
+                }
+            )
+        });
+        shows(batch, wanted)
+    });
+    assert!(batches.iter().any(|b| shows(b, wanted)));
+    assert!(!asked, "an image query reached a terminal");
+}
+
 const MEASURE: &str = r#"import { mount, signal, Scroll, Text, View, type ViewRef } from "nsh";
 
 const shown = signal("waiting");
