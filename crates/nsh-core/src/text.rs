@@ -460,7 +460,11 @@ fn is_emoji_presentation(c: &str) -> bool {
 pub const ATTACHMENT_CHAR: char = '\u{FFFC}';
 
 /// A nested `<text>` span with press listeners: presses on its characters
-/// go to it rather than to the block.
+/// go to it rather than to the block. It is a stop of the keyboard focus
+/// of its own ([`Self::focus_stop`]): Tab reaches it after its text view,
+/// in text order, the platform reports `FOCUSED` (`focus:`) and `Focus` /
+/// `Blur` for the span's node and presses it on Return, as a view that
+/// takes presses.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct TextLink {
     /// Start offset (UTF-16 units, inclusive).
@@ -471,6 +475,9 @@ pub struct TextLink {
     pub node: NodeId,
     /// Its listeners.
     pub events: EventMask,
+    /// A stop of Tab (`ViewProps::focus_stop` of the span: unless
+    /// `focusable={false}` or disabled).
+    pub focus_stop: bool,
 }
 
 /// A nested `<Text>` span with a `testID` ([`AttributedText::test_ids`]).

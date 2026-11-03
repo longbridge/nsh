@@ -594,6 +594,7 @@ impl Screen {
                 View {
                     parent: Some(parent),
                     events: link.events,
+                    focusable: Some(link.focus_stop),
                     span: Some(Span {
                         view: id,
                         text: utf16_slice(&text.text, link.start, link.end),
@@ -1811,13 +1812,17 @@ impl Screen {
                 if let Some(input) = &v.input {
                     return input.config.editable && !self.disabled_from(id, None);
                 }
+                // A link in a text view is a stop after it, in text order
+                // (`TextLink::focus_stop`).
+                if v.span.is_some() {
+                    return v.focusable == Some(true) && !self.disabled_from(id, None);
+                }
                 // Disabled is the ancestors' too here (`disabled_from`).
                 let props = nsh_core::ViewProps {
                     focusable: v.focusable,
                     ..Default::default()
                 };
-                v.span.is_none()
-                    && props.focus_stop(v.events.contains(EventKind::Press))
+                props.focus_stop(v.events.contains(EventKind::Press))
                     && !self.disabled_from(id, None)
             })
             .collect()
@@ -2175,6 +2180,7 @@ mod tests {
             end,
             node,
             events,
+            focus_stop: true,
         };
         let linked = |links: Vec<nsh_core::TextLink>| MountItem::Text {
             id: 4,

@@ -66,14 +66,12 @@ fn rows_made_in_rust_show_their_cells() {
 /// in a terminal.
 #[component]
 fn Handles() -> impl IntoElement {
-    view()
-        .child(quotes())
-        .child(
-            view()
-                .relative()
-                .h(px(40.0))
-                .child(resize_handle().child(view().test_id("lone").w(px(1.0)))),
-        )
+    view().child(quotes()).child(
+        view()
+            .relative()
+            .h(px(40.0))
+            .child(resize_handle().child(view().test_id("lone").w(px(1.0)))),
+    )
 }
 
 #[test]

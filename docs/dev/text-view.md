@@ -67,6 +67,9 @@ colored with the theme's tokens; the app restyles each part over it.
   footnote reference `#footnote-<label>`. By default nothing opens a URL: the app decides. `links="open"`
   (`TextViewLinks::Open`, opt-in) also opens a link with a scheme after reporting it (`nsh_core::element::open_url`,
   under the `openUrl` capability and the embedding app's URL handler), never an anchor (`#…`): `Cx::link_press`.
+  Each link (and footnote reference) is a pressable span, so it is a stop of the keyboard focus where the platform
+  walks links (`elements.md` "Keyboard focus": `TextLink::focus_stop`): Tab reaches it, Return presses it, and the
+  press goes through `onLinkPress` and `links` as a pointer's does.
 
 ## Parts and their default styles
 
