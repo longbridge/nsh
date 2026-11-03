@@ -222,6 +222,16 @@ including the user-facing pages in `website/` (English and `zh-CN`). User-facing
 positive terms: what a platform or feature is and does, never what it is not or lacks, and name the product Native
 Shell in formal places and NSH elsewhere (`nsh` only in code) ("Writing documentation" in `website/README.md`).
 
+NSH's core architecture and design details (the key algorithms and inner mechanisms, formats, tuning and the
+reasoning behind them) are kept in the private repository
+[`longbridge/nsh-docs`](https://github.com/longbridge/nsh-docs), checked out beside this one at `../nsh-docs`
+(`gh repo clone longbridge/nsh-docs ../nsh-docs` for core developers who have access). Before changing an area,
+read its page there as well as `docs/dev/`: `dev/<page>.md` (the full version of `docs/dev/<page>.md`) and the
+design notes (`web/runtime-split.md`, ...). A change to those details updates nsh-docs in the same piece of work
+(commit and push there, to its `main`); `docs/dev/` keeps what every contributor needs: concepts, which component
+does what, rules, code locations, commands and verification. Without access, `docs/dev/` and the code's module
+docs are enough to work from.
+
 ## Commands
 
 ```sh
