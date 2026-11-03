@@ -6,7 +6,7 @@
 //! under the marks, only a sparse floor of them), strokes the dots along each
 //! segment, and text is printed on whole Cells above the dots, with the
 //! Cell before and after it cleared of dots so a label never runs into a
-//! mark.
+//! mark. A nearly transparent stroke (hatching) is texture and left out.
 //!
 //! Only the part of the canvas inside its visible Cells is replayed onto,
 //! so a canvas partly scrolled away keeps its dots where they were. A Cell
@@ -46,6 +46,10 @@ const DOTS_DOWN: usize = 4;
 /// Below this alpha (its paint's, times `globalAlpha`) a fill is a wash:
 /// a sparse floor of dots rather than a solid area.
 const WASH_ALPHA: f32 = 0.5;
+/// Below this alpha a stroke is a texture (hatching, a hairline at a few
+/// percent): a dot shows at full strength, so its lines would bury the
+/// marks over them, and it is left out.
+const TEXTURE_ALPHA: f32 = 0.15;
 
 /// How far below a row's top the alphabetic baseline sits, in rows.
 const ALPHABETIC_BASELINE: f32 = 0.75;
@@ -537,7 +541,12 @@ impl<'a> Replay<'a> {
     }
 
     fn stroke(&mut self, outline: &Outline) {
-        let Some(ink) = self.ink(&self.state.stroke.clone()) else {
+        let paint = self.state.stroke.clone();
+        let alpha = (self.canvas.color(&paint).0 & 255) as f32 / 255.0 * self.state.alpha;
+        if alpha < TEXTURE_ALPHA {
+            return;
+        }
+        let Some(ink) = self.ink(&paint) else {
             return;
         };
         let dash = Dash::new(

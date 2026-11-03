@@ -328,6 +328,50 @@ fn a_translucent_fill_is_a_sparse_floor_of_dots() {
     );
 }
 
+/// Hatching at a few percent over a zone, and a line drawn over it.
+#[component]
+fn Hatched() -> impl IntoElement {
+    let mut painter = Painter::new()
+        .stroke_color(nsh_core::color::rgba(0xffffff0f))
+        .begin_path();
+    for i in (-32..64).step_by(7) {
+        painter = painter
+            .move_to(i as f32, 32.0)
+            .line_to(i as f32 + 32.0, 0.0);
+    }
+    view()
+        .flex_1()
+        .child(
+            canvas(
+                painter
+                    .stroke()
+                    .stroke_color(nsh_core::color::rgb(GREEN))
+                    .begin_path()
+                    .move_to(0.0, 2.0)
+                    .line_to(64.0, 2.0)
+                    .stroke(),
+            )
+            .label("drawing")
+            .w(px(64.0))
+            .h(px(32.0)),
+        )
+        .child(text("drawn"))
+}
+
+#[test]
+fn a_nearly_transparent_stroke_is_texture_left_out() {
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(12, 4)).unwrap();
+    view.load(App::Rust(Root::new::<Hatched>(|| ()))).unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "drawn");
+    let buffer = terminal.backend().buffer();
+    assert!(
+        row(buffer, 0, 0..4).chars().all(|c| c != ' '),
+        "the line is drawn"
+    );
+    assert_eq!(row(buffer, 1, 0..4), "    ", "no hatching under it");
+}
+
 /// A label under a canvas drawn after it, as a ring's value in its middle.
 #[component]
 fn Under() -> impl IntoElement {
