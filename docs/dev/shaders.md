@@ -210,9 +210,11 @@ Effects, transitions and page shaders sit on the same program, layer and rendere
   earlier frame that the rest of the back buffer holds. Pages and dialogs: recordings (`ID2D1CommandList`) of the
   host without and with the upper side, drawn into bitmaps and read back once by a hosted `NavItem` over the stack
   or the root, its shader on its own transition clock (`start_transition`, backwards when it goes); a lost device
-  ends them at once. Without a GPU device an effect draws its children as they are, a transition starts no run and a
-  page or a dialog comes with its own motion, as it does when the user asks for less motion. A screen layer leaves
-  the root when the view that mounted it is deleted (unless another screen effect's took its place) or the app stops.
+  ends them at once in the window that finds it lost, and one of another window draws no recording of the lost
+  device (`NavItem`'s generation), only its shader's frames. Without a GPU device an effect draws its children as
+  they are, a transition starts no run and a page or a dialog comes with its own motion, as it does when the user
+  asks for less motion. A screen layer leaves the root when the view that mounted it is deleted (unless another
+  screen effect's took its place) or the app stops.
 ## Pages and dialogs
 
 What every platform does with a page's or a dialog's `MountItem::NavShader`, so an app sees the same thing

@@ -968,6 +968,9 @@ pub(crate) fn take_backdrop(cx: &mut DrawCx<'_>, view: &NshView) {
 pub(crate) struct NavItem {
     lower: ID2D1Image,
     upper: ID2D1Image,
+    /// The device generation `lower` and `upper` were recorded in
+    /// ([`crate::gfx::generation`]).
+    generation: u64,
     /// It goes: it starts from its upper side.
     reverse: bool,
     paint: RefCell<NavPaint>,
@@ -1006,6 +1009,7 @@ impl NavItem {
         Some(Self {
             lower,
             upper,
+            generation: crate::gfx::generation(),
             reverse,
             paint: RefCell::new(NavPaint {
                 renderer,
@@ -1061,7 +1065,12 @@ impl crate::view::Hosted for NavItem {
         let mut paint = self.paint.borrow_mut();
         let paint = &mut *paint;
         let renderer = paint.renderer.clone();
-        if !paint.given {
+        // Recordings of a lost device fail the frame that draws them. The
+        // window that finds the device lost ends its own changes; one of
+        // another window still runs and shows only the shader's frames,
+        // made of the sides read while the device lived, if they were.
+        let recorded = self.generation == crate::gfx::generation();
+        if !paint.given && recorded {
             paint.given = true;
             for (input, image) in [
                 (ShaderInput::From, &self.lower),
@@ -1091,7 +1100,7 @@ impl crate::view::Hosted for NavItem {
         match bitmap {
             Some(bitmap) => draw_bitmap(cx, &bitmap, size(Points(w), Points(h)), 0.0),
             // No frame yet: the side it starts from.
-            None => {
+            None if recorded => {
                 let image = if self.reverse {
                     &self.upper
                 } else {
@@ -1109,6 +1118,7 @@ impl crate::view::Hosted for NavItem {
                     )
                 };
             }
+            None => {}
         }
     }
 
