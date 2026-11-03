@@ -461,6 +461,7 @@ and `Input`'s React Native names follow the rules as well.
 | `CheckboxIndicatorStyles` `checked`, `indeterminate`, `disabled` | `checked:` / `indeterminate:` / `disabled:` in `indicatorClass`; Rust `.checked(..)` / `.indeterminate(..)` / `.disabled_style(..)` in `indicator_style` | `CheckboxStyles::checked` → `checkedStyle` | As `Switch`'s parts |
 | `Checkbox::role(RoleOverride)` | `role` (default `"checkbox"`) | `Button::role` | `RoleOverride::Presentational` is `role="none"` |
 | `Checkbox::tab_index`, `tab_stop`, `track_focus` | (left out) | | The keyboard focus follows the view tree, as `Button`'s does |
+| (new) | `hitSlop: number \| Partial<Edges>`; Rust `.hit_slop(..)` | the host prop `hitSlop` (every view's), passed to the checkbox's view (the indicator inside it takes none of its own); `Button`'s `hitSlop` | Neither `gpui-base`'s nor `gpui-component`'s `Checkbox` has one, as with `Button`: GPUI hit-tests a pointer against the bounds, which a mouse needs. A finger needs more around a small target (a box with no label), so it is the host prop's name, type and meaning, with no new concept |
 | **Radio** (`nsh/base`) | | | |
 | `Radio::on_change(bool, &ClickEvent, ..)` | `onChange({ checked: boolean })` | `radio.rs` `Radio::on_change` | Only an unchecked, enabled radio reports, and always `true`: a radio cannot uncheck itself |
 | `Radio::set_position(position, size)` | (left out) | | NSH's accessibility state has no position in a set yet; added when every platform can carry it |
