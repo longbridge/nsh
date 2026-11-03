@@ -1,7 +1,7 @@
 import { Canvas, type CanvasRenderingContext2D, cleanup, type GestureResponderEvent, Path2D, signal, Text, View } from "nsh";
 import { Animated, createAnimatedValue, Easing, type AnimatedValue } from "nsh";
 import logo from "../logo@2x.png";
-import { alpha, Button, Caption, Card, colors, DemoPage, Figure, finish, hint, isDark, Legend, type Palette, Segmented, Stat } from "../ui";
+import { alpha, Button, Caption, Card, colors, DemoPage, Figure, finish, hint, isDark, Legend, type Palette, Segmented, Stat, terminal } from "../ui";
 
 const TAU = Math.PI * 2;
 const SANS = (size: number, weight = "400") => `${weight} ${size}px system-ui`;
@@ -602,6 +602,10 @@ function Clock() {
 // ---------------------------------------------------------------------------
 // Path2D: SVG path data, filled or stroked.
 
+/** A glyph's side: a terminal leaves an icon-sized canvas out, so there
+ * it is larger, a block of braille dots with no tile around it. */
+const GLYPH = terminal ? 64 : 30;
+
 const glyphs: { name: string; d: string; color: keyof Palette; stroke?: boolean }[] = [
   { name: "Heart", d: "M12 21s-7-4.35-9.5-8.5C.5 8.5 3 4 7 4c2 0 3.5 1 5 3 1.5-2 3-3 5-3 4 0 6.5 4.5 4.5 8.5C19 16.65 12 21 12 21z", color: "danger" },
   { name: "Star", d: "M12 2l3.09 6.26L22 9.27l-5 4.87L18.18 21 12 17.27 5.82 21 7 14.14l-5-4.87 6.91-1.01z", color: "warn" },
@@ -619,23 +623,27 @@ function Glyphs() {
             return (
               <View style={{ alignItems: "center", gap: 8 }}>
                 <View
-                  style={{
-                    width: 60,
-                    height: 60,
-                    borderRadius: 18,
-                    borderCurve: "continuous",
-                    backgroundColor: colors.raised,
-                    ...finish.raised,
-                    borderWidth: 1,
-                    borderColor: colors.border,
-                    alignItems: "center",
-                    justifyContent: "center",
-                  }}
+                  style={
+                    terminal
+                      ? { alignItems: "center" }
+                      : {
+                          width: 60,
+                          height: 60,
+                          borderRadius: 18,
+                          borderCurve: "continuous",
+                          backgroundColor: colors.raised,
+                          ...finish.raised,
+                          borderWidth: 1,
+                          borderColor: colors.border,
+                          alignItems: "center",
+                          justifyContent: "center",
+                        }
+                  }
                 >
                   <Canvas
-                    style={{ width: 30, height: 30 }}
+                    style={{ width: GLYPH, height: GLYPH }}
                     draw={(cx) => {
-                      cx.scale(30 / 24, 30 / 24);
+                      cx.scale(GLYPH / 24, GLYPH / 24);
                       if (glyph().stroke) {
                         cx.strokeStyle = colors[glyph().color];
                         cx.lineWidth = 2.5;

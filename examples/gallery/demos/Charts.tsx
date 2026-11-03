@@ -564,7 +564,9 @@ const RESOURCES: { name: string; color: string; unit: string; total: number; use
   { name: "Memory", color: chart.s2, unit: "GB", total: 256, used: { now: 141, day: 188, week: 214 } },
   { name: "Network", color: chart.s3, unit: "Gbps", total: 10, used: { now: 3.2, day: 7.4, week: 8.9 } },
 ];
-const RINGS = pointer ? 164 : 172;
+/** In a terminal the rings take more Cells, so the average and its
+ * caption fit in the innermost ring's hole, clear of its arcs. */
+const RINGS = platform.idiom === "terminal" ? 224 : pointer ? 164 : 172;
 /** Each ring's width and the gap between rings, in points. */
 const RING_WIDTH = 11;
 const RING_GAP = 5;
