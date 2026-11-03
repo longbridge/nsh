@@ -268,6 +268,10 @@ pub struct Environment {
     /// it a filled box is laid out as any other (`docs/dev/styles.md`
     /// "Layout in a terminal").
     pub cell_surfaces: bool,
+    /// The platform gives web views trusted input
+    /// ([`crate::Command::SendInput`], macOS); without it, the command
+    /// does nothing.
+    pub web_input: bool,
 }
 
 impl Environment {
@@ -311,6 +315,7 @@ impl Default for Environment {
             speech: false,
             cell: None,
             cell_surfaces: false,
+            web_input: false,
         }
     }
 }

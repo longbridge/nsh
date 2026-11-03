@@ -587,7 +587,8 @@ mod tests {
                 "RadialGrid",
                 "RadialLine",
                 "Rule",
-                "Sankey"
+                "Sankey",
+                "Treemap"
             ]
         );
     }

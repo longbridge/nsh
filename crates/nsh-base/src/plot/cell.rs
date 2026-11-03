@@ -660,7 +660,7 @@ pub fn Cell(props: CellProps, _cx: Scope<NoEvent>) -> impl IntoElement {
 }
 
 /// `color` is dark: light text reads better on it.
-fn is_dark(color: Hsla) -> bool {
+pub(super) fn is_dark(color: Hsla) -> bool {
     oklab_lightness(color) < 0.65
 }
 

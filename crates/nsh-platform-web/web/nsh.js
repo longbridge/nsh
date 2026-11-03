@@ -206,6 +206,7 @@ img.nsh-fill { pointer-events: none; }
   resize: none; font: inherit; color: inherit; -webkit-user-select: text; user-select: text; }
 .nsh-selectable, .nsh-selectable * { -webkit-user-select: text; user-select: text; -webkit-touch-callout: default; }
 .nsh-selectable ::selection { background: var(--nsh-selection, Highlight); }
+.nsh-link { cursor: pointer; }
 /* With the desktop idiom text is selectable as on a web page unless it is
    set off (selectable={false}) or inside something that takes presses
    or touches (nsh-press). */
@@ -478,6 +479,9 @@ function fillRun(run, text, parts, links) {
     const span = document.createElement("span");
     span.textContent = text.slice(from, to);
     span._link = links[link];
+    // A link's pointer over the I-beam of selectable text, as a browser's
+    // `<a>` and the other desktops' link spans.
+    if (PRESS_EVENTS.some((e) => span._link.events.has(e))) span.classList.add("nsh-link");
     run.append(span);
     at = to;
   }

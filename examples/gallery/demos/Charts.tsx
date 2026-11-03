@@ -1,6 +1,6 @@
 import type { JSX } from "nsh";
 import { Canvas, cleanup, createAnimatedValue, Easing, effect, LayoutAnimation, List, reduceMotion, signal, Text, token, View } from "nsh";
-import { Arc, Area, Bar, Cell, Dot, Grid, Line, Pie, Plot, PlotAppearScope, PlotAxis, PlotLabel, RadialGrid, RadialLine, Rule, Sankey } from "nsh/base/plot";
+import { Arc, Area, Bar, Cell, Dot, Grid, Line, Pie, Plot, PlotAppearScope, PlotAxis, PlotLabel, RadialGrid, RadialLine, Rule, Sankey, Treemap } from "nsh/base/plot";
 import { platform } from "nsh";
 import { alpha, Button, Card, chart, colors, DemoPage, finish, focusRing, Legend, mono, Segmented, toneColor, type Tone } from "../ui";
 
@@ -2951,6 +2951,306 @@ function Watchlist() {
   );
 }
 
+/** The periods a market map's changes are measured over. */
+const MAP_PERIODS = [
+  { value: "1D", label: "Day" },
+  { value: "1W", label: "Week" },
+  { value: "1M", label: "Month" },
+] as const;
+type MapPeriod = (typeof MAP_PERIODS)[number]["value"];
+/** How far a period's changes run before their color is full: a day's 3%, a month's 12%. */
+const MAP_RANGE: Record<MapPeriod, number> = { "1D": 3, "1W": 6, "1M": 12 };
+/** A listed stock: its market cap in billions at the start of the periods and its change over each, in percent. */
+type Listed = [ticker: string, name: string, cap: number, d: number, w: number, m: number];
+const MARKET: { sector: string; stocks: Listed[] }[] = [
+  {
+    sector: "Technology",
+    stocks: [
+      ["NVDA", "NVIDIA", 4300, 2.41, 5.8, 11.2],
+      ["MSFT", "Microsoft", 3700, -0.62, 1.4, 4.1],
+      ["AAPL", "Apple", 3600, 0.35, -1.9, 6.3],
+      ["AVGO", "Broadcom", 1600, 3.12, 7.4, 14.8],
+      ["ORCL", "Oracle", 720, -2.84, -5.1, -9.6],
+      ["AMD", "AMD", 380, 1.76, 9.2, 3.4],
+      ["CRM", "Salesforce", 240, -1.21, -3.3, -7.8],
+      ["ADBE", "Adobe", 150, -0.44, 0.6, -4.2],
+    ],
+  },
+  {
+    sector: "Communication",
+    stocks: [
+      ["GOOGL", "Alphabet", 3100, 1.05, 3.2, 8.7],
+      ["META", "Meta", 1800, -1.48, 2.1, -3.6],
+      ["NFLX", "Netflix", 480, 0.22, -2.7, 5.1],
+      ["DIS", "Disney", 200, -0.31, -1.1, 1.9],
+    ],
+  },
+  {
+    sector: "Consumer",
+    stocks: [
+      ["AMZN", "Amazon", 2400, 0.86, -0.8, 2.6],
+      ["TSLA", "Tesla", 1400, -3.65, -8.4, 18.9],
+      ["COST", "Costco", 420, 0.12, 0.9, -1.4],
+      ["WMT", "Walmart", 820, 0.48, 1.6, 3.8],
+      ["HD", "Home Depot", 380, -0.73, -2.2, -4.9],
+      ["MCD", "McDonald's", 220, 0.05, 0.4, 1.1],
+    ],
+  },
+  {
+    sector: "Financials",
+    stocks: [
+      ["BRK.B", "Berkshire", 1050, 0.18, 0.7, 2.2],
+      ["JPM", "JPMorgan", 830, 1.34, 2.9, 6.6],
+      ["V", "Visa", 670, -0.27, 1.2, 3.1],
+      ["MA", "Mastercard", 520, -0.39, 0.8, 2.4],
+      ["BAC", "Bank of America", 390, 1.92, 3.8, 7.9],
+      ["GS", "Goldman Sachs", 240, 2.65, 4.4, 9.8],
+    ],
+  },
+  {
+    sector: "Healthcare",
+    stocks: [
+      ["LLY", "Eli Lilly", 820, -1.94, -4.6, 7.2],
+      ["UNH", "UnitedHealth", 300, -4.12, -9.3, -16.4],
+      ["JNJ", "Johnson & Johnson", 460, 0.41, 1.3, 2.8],
+      ["ABBV", "AbbVie", 380, -0.58, 0.2, -2.1],
+      ["MRK", "Merck", 210, -1.07, -2.8, -6.3],
+    ],
+  },
+  {
+    sector: "Energy",
+    stocks: [
+      ["XOM", "Exxon Mobil", 470, -0.96, 1.8, -3.2],
+      ["CVX", "Chevron", 300, -1.33, 0.9, -4.7],
+      ["COP", "ConocoPhillips", 120, -2.18, -0.6, -8.1],
+    ],
+  },
+];
+/** A market map's row: a sector (no `parent`), or a stock in one, its cap at the end of the period and its change over it. */
+type MapRow = { id: string; parent?: string; name: string; cap?: number; chg?: number };
+const changeOf = (s: Listed, p: MapPeriod) => (p === "1D" ? s[3] : p === "1W" ? s[4] : s[5]);
+const marketRows = (p: MapPeriod): MapRow[] => [
+  ...MARKET.map((m) => ({ id: m.sector, name: m.sector })),
+  ...MARKET.flatMap((m) =>
+    m.stocks.map((s) => ({ id: s[0], parent: m.sector, name: s[1], cap: s[2] * (1 + changeOf(s, p) / 100), chg: changeOf(s, p) })),
+  ),
+];
+const MAP_HEIGHT = pointer ? 300 : 340;
+
+/**
+ * A market map: the S&P 500's largest stocks as a `Treemap` of sectors,
+ * each stock's area its market cap and its color the period's change
+ * along a diverging `colorScale` (losses red, gains green, flat the
+ * card's inset gray), its ticker and change centered on it where they
+ * fit, light on the dark tiles (`data-dark`). Each sector's name sits in
+ * a band over its stocks. The stock or sector under the pointer or the
+ * arrow keys is read out over the map, the others fading; another period
+ * recolors the tiles and moves them to their new caps (`motion.update`).
+ */
+function MarketMap() {
+  const period = signal<MapPeriod>("1D");
+  const hover = signal<number | null>(null);
+  const rows = () => marketRows(period());
+  const shown = () => (hover() == null ? undefined : rows()[hover()!]);
+  const stocks = () => rows().filter((r) => r.parent != null);
+  /** A set of stocks' cap-weighted change. */
+  const weighted = (of: MapRow[]) => of.reduce((s, r) => s + r.chg! * r.cap!, 0) / of.reduce((s, r) => s + r.cap!, 0);
+  const sector = (name: string) => stocks().filter((r) => r.parent === name);
+  const capOfRows = (of: MapRow[]) => of.reduce((s, r) => s + r.cap!, 0);
+  const advancing = () => stocks().filter((r) => r.chg! > 0).length;
+  const range = () => MAP_RANGE[period()];
+  const readout = () => {
+    const r = shown();
+    if (!r) return { title: `S&P 500 · TOP ${stocks().length} · ${period()}`, value: weighted(stocks()), note: `${advancing()} up, ${stocks().length - advancing()} down · ${capOf(capOfRows(stocks()))} in all` };
+    if (r.parent == null) {
+      const of = sector(r.id);
+      return { title: `${r.name.toUpperCase()} · ${of.length} STOCKS`, value: weighted(of), note: `${capOf(capOfRows(of))} market cap · cap-weighted` };
+    }
+    return { title: `${r.id} · ${r.name.toUpperCase()}`, value: r.chg!, note: `${r.parent} · ${capOf(r.cap!)} market cap` };
+  };
+  const tone = (v: number): Tone => (v > 0 ? "up" : v < 0 ? "down" : "neutral");
+  return (
+    <Card icon="stocks" title="Market map" subtitle="The largest stocks by sector, sized by market cap and colored by their change">
+      <View style={{ gap: 4 }}>
+        <Text style={tipTitle}>{readout().title}</Text>
+        <View style={{ flexDirection: "row", alignItems: "baseline", gap: 10 }}>
+          <Text style={{ fontSize: 22, fontWeight: "600", letterSpacing: -0.4, color: toneColor(tone(readout().value)), fontVariant: ["tabular-nums"] }}>
+            {pct(readout().value, 2)}
+          </Text>
+          <Text style={{ flexShrink: 1, fontSize: 12, color: colors.muted, fontVariant: ["tabular-nums"] }}>{readout().note}</Text>
+        </View>
+      </View>
+      <Plot
+        data={rows()}
+        colorScale={{ type: "diverging", domain: [-range(), range()], range: [colors.down, colors.inset, colors.up] }}
+        appearGeneration={1}
+        motion={{ appear: { duration: 900, easing: "easeOut" }, update: { duration: 650, easing: "easeInOut" }, enter: { duration: 120 }, exit: { duration: 180 }, pointer: { stiffness: 380, damping: 36 } }}
+        accessibilityLabel={`Market map of ${stocks().length} stocks in ${MARKET.length} sectors, ${period()}: ${advancing()} up`}
+        accessibilityValue={{ text: shown() && `${shown()!.name}: ${pct(readout().value, 2)}, ${readout().note}` }}
+        onHoverChange={({ index }) => hover.set(index)}
+        focusStyle={focusRing(4)}
+        style={{ height: MAP_HEIGHT, marginTop: size.gap + 4 }}
+      >
+        <Treemap
+          id="id"
+          parent="parent"
+          value="cap"
+          colorValue="chg"
+          paddingInner={[3, 1]}
+          paddingTop={18}
+          cornerRadii={2}
+          stagger={0.4}
+          inactiveOpacity={0.35}
+          label={(d: MapRow) => d.id}
+          valueLabel={(d: MapRow) => pct(d.chg ?? 0, 2)}
+          labelPlacement="center"
+          labelClass="p-1 text-foreground data-dark:text-white"
+          labelStyle={{ fontSize: 11.5, fontWeight: "600", letterSpacing: 0.2 }}
+          valueLabelStyle={{ fontSize: 10, fontWeight: "400", opacity: 0.85, fontVariant: ["tabular-nums"] }}
+          groupLabel="name"
+          groupLabelClass="px-1 text-muted-foreground"
+          groupLabelStyle={{ ...axis, lineHeight: 18, letterSpacing: 0.6 }}
+          hoverClass="rounded-xs outline-2 outline-foreground"
+        />
+      </Plot>
+      {/* The color's key: the period's range, from its full loss to its full gain. */}
+      <View style={{ marginTop: 10, gap: 4, alignSelf: pointer ? "flex-start" : "stretch", width: pointer ? 260 : undefined }}>
+        <View class="h-2 rounded-full bg-linear-to-r from-down via-inset to-up" />
+        <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+          {[-range(), -range() / 2, 0, range() / 2, range()].map((v) => (
+            <Text style={axis}>{v === 0 ? "0" : `${signed(v, v % 1 ? 1 : 0)}%`}</Text>
+          ))}
+        </View>
+      </View>
+      <View style={{ marginTop: size.gap + 4, alignSelf: pointer ? "flex-start" : "stretch", width: pointer ? 220 : undefined }}>
+        <Segmented options={MAP_PERIODS} value={period()} size={size.switch} onChange={(next) => period.set(next)} />
+      </View>
+    </Card>
+  );
+}
+
+/** What a portfolio's allocation is shown at. */
+const ALLOCATION_VIEWS = [
+  { value: "now", label: "Today" },
+  { value: "year", label: "A year ago" },
+] as const;
+type AllocationView = (typeof ALLOCATION_VIEWS)[number]["value"];
+const ASSET_CLASSES = ["Equities", "Bonds", "Alternatives", "Cash"] as const;
+type AssetClass = (typeof ASSET_CLASSES)[number];
+const ASSET_COLOR: Record<AssetClass, string> = { Equities: chart.s1, Bonds: chart.s2, Alternatives: chart.s4, Cash: chart.s3 };
+const ASSET_GROUP: Record<AssetClass, string> = {
+  Equities: "fill-chart-1/15",
+  Bonds: "fill-chart-2/15",
+  Alternatives: "fill-chart-4/15",
+  Cash: "fill-chart-3/15",
+};
+/** A holding: its asset class and its value in thousands, today and a year ago (none: not held then). */
+type Position = [ticker: string, name: string, cls: AssetClass, now: number | null, year: number | null];
+const POSITIONS: Position[] = [
+  ["VOO", "S&P 500 ETF", "Equities", 182, 140],
+  ["QQQ", "Nasdaq 100 ETF", "Equities", 96, 64],
+  ["VXUS", "Intl. stocks", "Equities", 58, 61],
+  ["NVDA", "NVIDIA", "Equities", 41, null],
+  ["ARKK", "Innovation ETF", "Equities", null, 22],
+  ["BND", "Total bond", "Bonds", 74, 88],
+  ["TLT", "20Y Treasuries", "Bonds", 31, null],
+  ["TIP", "TIPS", "Bonds", 18, 24],
+  ["GLD", "Gold", "Alternatives", 34, 21],
+  ["VNQ", "Real estate", "Alternatives", 16, 19],
+  ["BTC", "Bitcoin", "Alternatives", 12, 5],
+  ["SGOV", "T-bills", "Cash", 44, 52],
+  ["USD", "Cash", "Cash", 14, 18],
+];
+type AllocationRow = { id: string; parent?: string; name: string; cls: AssetClass; value?: number };
+const allocationRows = (v: AllocationView): AllocationRow[] => [
+  ...ASSET_CLASSES.map((c) => ({ id: c, name: c, cls: c })),
+  ...POSITIONS.filter((p) => (v === "now" ? p[3] : p[4]) != null).map((p) => ({
+    id: p[0],
+    parent: p[2],
+    name: p[1],
+    cls: p[2],
+    value: (v === "now" ? p[3] : p[4])!,
+  })),
+];
+const kUsd = (k: number) => (k >= 1000 ? `$${fixed(k / 1000, 2)}M` : `$${fixed(k, 0)}k`);
+const ALLOCATION_HEIGHT = pointer ? 260 : 300;
+
+/**
+ * A portfolio's allocation: asset classes holding their positions, as a
+ * `Treemap` whose groups are drawn too, a wash of their class's color
+ * showing in their padding and in the band that names them, the
+ * positions in it at full color (an ordinal `colorScale` of the asset
+ * classes), named at their top left with their weight. The position or
+ * class under the pointer gets a tooltip by it; a year ago the portfolio
+ * held other positions, and the switch moves the tiles to their old
+ * values, growing the ones bought since and shrinking the ones sold.
+ */
+function Allocation() {
+  const view = signal<AllocationView>("now");
+  const tip = signal(0);
+  const rows = () => allocationRows(view());
+  const total = () => rows().reduce((s, r) => s + (r.value ?? 0), 0);
+  const valueOf = (r: AllocationRow) => r.value ?? rows().filter((p) => p.parent === r.id).reduce((s, p) => s + p.value!, 0);
+  const weight = (k: number) => `${fixed((k / total()) * 100, 1)}%`;
+  const shown = () => rows()[tip()] ?? rows()[0];
+  return (
+    <Card icon="stocks" title="Allocation" subtitle="A portfolio's asset classes and the positions in each, by value">
+      <Figures>
+        {ASSET_CLASSES.map((c) => (
+          <Figure label={c} value={weight(valueOf(rows().find((r) => r.id === c)!))} />
+        ))}
+      </Figures>
+      <Plot
+        data={rows()}
+        colorScale={{ type: "ordinal", domain: [...ASSET_CLASSES], range: ASSET_CLASSES.map((c) => ASSET_COLOR[c]) }}
+        appearGeneration={1}
+        motion={{ appear: { duration: 900, easing: "easeOut" }, update: { duration: 700, easing: "easeInOut" }, enter: { duration: 120 }, exit: { duration: 160 }, pointer: { stiffness: 380, damping: 36 } }}
+        tooltipPlacement="pointer"
+        tooltipOffset={12}
+        tooltipContent={
+          <View style={tipCard}>
+            <Text style={tipTitle}>{shown().parent == null ? `${shown().name.toUpperCase()} · ${rows().filter((p) => p.parent === shown().id).length} POSITIONS` : `${shown().id} · ${shown().cls.toUpperCase()}`}</Text>
+            <Text style={{ fontSize: 13, fontWeight: "500", color: colors.text }}>{shown().parent == null ? shown().name : shown().name}</Text>
+            <Text style={{ fontSize: 12, color: colors.muted, fontVariant: ["tabular-nums"] }}>{`${kUsd(valueOf(shown()))} · ${weight(valueOf(shown()))} of the portfolio`}</Text>
+          </View>
+        }
+        accessibilityLabel={`Allocation of ${kUsd(total())} across ${ASSET_CLASSES.length} asset classes`}
+        accessibilityValue={{ text: `${shown().name}: ${kUsd(valueOf(shown()))}, ${weight(valueOf(shown()))}` }}
+        onHoverChange={({ index }) => {
+          if (index != null) tip.set(index);
+        }}
+        focusStyle={focusRing(4)}
+        style={{ height: ALLOCATION_HEIGHT, marginTop: size.gap + 4 }}
+      >
+        <Treemap
+          id="id"
+          parent="parent"
+          value="value"
+          color="cls"
+          paddingInner={[6, 2]}
+          paddingOuter={3}
+          paddingTop={20}
+          cornerRadii={4}
+          inactiveOpacity={0.4}
+          groupClass={(d: AllocationRow) => ASSET_GROUP[d.cls]}
+          label={(d: AllocationRow) => d.id}
+          valueLabel={(_: AllocationRow, value: number) => weight(value)}
+          labelClass="px-2 py-1.5 text-foreground data-dark:text-white"
+          labelStyle={{ fontSize: 12, fontWeight: "600" }}
+          valueLabelStyle={{ fontSize: 11, fontWeight: "400", opacity: 0.8, fontVariant: ["tabular-nums"] }}
+          groupLabel={(d: AllocationRow) => d.name}
+          groupLabelClass="px-2 text-foreground"
+          groupLabelStyle={{ fontSize: 11, fontWeight: "500", lineHeight: 20 }}
+          hoverClass="rounded-md outline-2 outline-foreground"
+        />
+      </Plot>
+      <View style={{ marginTop: size.gap + 4, alignSelf: pointer ? "flex-start" : "stretch", width: pointer ? 220 : undefined }}>
+        <Segmented options={ALLOCATION_VIEWS} value={view()} size={size.switch} onChange={(next) => view.set(next)} />
+      </View>
+    </Card>
+  );
+}
+
 /**
  * Charts: what an app builds from `nsh/base/plot`'s parts and its own
  * views, with no chart component in between. A live price streamed a tick
@@ -2973,11 +3273,13 @@ function Watchlist() {
  * 0, and a week of a market's trades per half hour, its lunch break
  * blank; a portfolio's factor exposure as a radar against a
  * benchmark, the factor under the pointer read out; a quarter's income
- * as flows from its segments to net income; and a watchlist of
+ * as flows from its segments to net income; a market map of the largest
+ * stocks by sector, colored by their change, and a portfolio's allocation
+ * by asset class (`Treemap`); and a watchlist of
  * sparklines that draw in once. Values on the axes are small
  * monospaced figures the plots' `PlotAxis` parts lay along their edges,
  * grids hairlines, tooltips floating cards with a caps title.
  */
 export function Charts() {
-  return <DemoPage cards={[Live, Depth, Drawdown, Capacity, Revenue, Sales, Bridge, Funnel, Candles, RiskReturn, Targets, VolumePrice, Margins, Correlation, Seasonality, Activity, Factors, Flows, Watchlist]} />;
+  return <DemoPage cards={[Live, Depth, Drawdown, Capacity, Revenue, Sales, Bridge, Funnel, Candles, RiskReturn, Targets, VolumePrice, Margins, Correlation, Seasonality, Activity, Factors, Flows, MarketMap, Allocation, Watchlist]} />;
 }

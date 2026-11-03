@@ -1,13 +1,13 @@
 ---
 title: Plot
-description: "nsh/base/plot 的 Plot 组件、它的图形 Line、Area、Bar、Rule、Dot、Cell、Grid、Pie、Arc、RadialLine、RadialGrid 和 Sankey，以及 PlotAxis 和 PlotLabel：根据应用的数据行原生绘制图表，负责坐标轴的比例尺和标签、数据点上的文字、指针下的数据行、格子或扇区和动效，没有自己的外观。"
+description: "nsh/base/plot 的 Plot 组件、它的图形 Line、Area、Bar、Rule、Dot、Cell、Grid、Pie、Arc、RadialLine、RadialGrid、Sankey 和 Treemap，以及 PlotAxis 和 PlotLabel：根据应用的数据行原生绘制图表，负责坐标轴的比例尺和标签、数据点上的文字、指针下的数据行、格子或扇区和动效，没有自己的外观。"
 group: base
 demo: el-plot
 ---
 
 # Plot
 
-Plot 是图表的框架：它持有要显示的数据行、x 轴和 y 轴的比例尺、指针在它上面的位置以及动效。它的图形负责绘制这些内容：`Line` 是穿过一个系列的折线，`Area` 是系列与基线之间的区域，`Bar` 是 band 比例尺条带里每行一根的柱子，`Rule` 是每行一条从起点到终点的线段（K 线的影线），`Dot` 是每行在两个数值交汇处的一个圆点（散点图的点、气泡图的气泡），`Cell` 是每行在两个类别的条带里的一个格子，按数值上色（热力图），`Grid` 是横跨图表的网格线，`Pie` 是各行所占份额的饼图（中间留空即为环形图），`Arc` 是两个角度之间的一段扇形，`RadialLine` 是围绕中心的一条线，背后是 `RadialGrid` 的圆环和辐条（雷达图），`Sankey` 是各行之间的流向图；`PlotAxis` 用比例尺的刻度为一条边加上标签，`PlotLabel` 在比例尺的点上写文字。每个图形都是一个铺满 plot 的画布，根据数据行原生绘制：应用设置数据行时只读取一次，之后在 Rust 中完成缩放、录制和绘制，所以一千个点的图表也不会为每个点运行 JS。指针同样在 Rust 中跟踪：悬停的十字线、圆点和提示框由平台的动画器移动和淡入淡出，应用只会在指针移到另一行时收到通知。外观由应用决定：图形使用 CSS 中 SVG 图形的绘制属性（`stroke-*`、`fill-*`），没有设置时使用 `currentColor`；area 和柱子可以在自己的形状内显示背景（渐变，`bg-linear-*`）；悬停部件（包括每个图形自己的圆点）以及坐标轴的标签、刻度线和轴线都由应用设置样式和内容。
+Plot 是图表的框架：它持有要显示的数据行、x 轴和 y 轴的比例尺、指针在它上面的位置以及动效。它的图形负责绘制这些内容：`Line` 是穿过一个系列的折线，`Area` 是系列与基线之间的区域，`Bar` 是 band 比例尺条带里每行一根的柱子，`Rule` 是每行一条从起点到终点的线段（K 线的影线），`Dot` 是每行在两个数值交汇处的一个圆点（散点图的点、气泡图的气泡），`Cell` 是每行在两个类别的条带里的一个格子，按数值上色（热力图），`Grid` 是横跨图表的网格线，`Pie` 是各行所占份额的饼图（中间留空即为环形图），`Arc` 是两个角度之间的一段扇形，`RadialLine` 是围绕中心的一条线，背后是 `RadialGrid` 的圆环和辐条（雷达图），`Sankey` 是各行之间的流向图，`Treemap` 是嵌套矩形，每个叶子的面积就是它的值（市场热力图）；`PlotAxis` 用比例尺的刻度为一条边加上标签，`PlotLabel` 在比例尺的点上写文字。每个图形都是一个铺满 plot 的画布，根据数据行原生绘制：应用设置数据行时只读取一次，之后在 Rust 中完成缩放、录制和绘制，所以一千个点的图表也不会为每个点运行 JS。指针同样在 Rust 中跟踪：悬停的十字线、圆点和提示框由平台的动画器移动和淡入淡出，应用只会在指针移到另一行时收到通知。外观由应用决定：图形使用 CSS 中 SVG 图形的绘制属性（`stroke-*`、`fill-*`），没有设置时使用 `currentColor`；area 和柱子可以在自己的形状内显示背景（渐变，`bg-linear-*`）；悬停部件（包括每个图形自己的圆点）以及坐标轴的标签、刻度线和轴线都由应用设置样式和内容。
 
 ```rust tabs
 use nsh_base::{
@@ -70,7 +70,7 @@ function App() {
 mount(App);
 ```
 
-`Plot`、`Line`、`Area`、`Bar`、`Rule`、`Dot`、`Cell`、`Grid`、`Pie`、`Arc`、`RadialLine`、`RadialGrid`、`Sankey`、`PlotAxis` 和 `PlotLabel` 来自 `nsh/base/plot`，这是 [`nsh/base`](../modules/nsh-base.md) 中单独的一个模块（Rust 中是 `nsh_base::plot`）。在 TypeScript 中，plot 的属性对数据行的类型是泛型的：字段名会按数据行做类型检查，行的函数会拿到行的类型。在 Rust 中，`plot()` 为每个属性提供一个 setter，数据行是 `Rows`（按键名存放的数字列），取值方式是 `RowAccessor`（键名，或以行序号为参数的函数），图形使用带类型的绘制方法（`.stroke_color(..)`、`.fill_color(..)`、`.stroke_width(..)`）。
+`Plot`、`Line`、`Area`、`Bar`、`Rule`、`Dot`、`Cell`、`Grid`、`Pie`、`Arc`、`RadialLine`、`RadialGrid`、`Sankey`、`Treemap`、`PlotAxis` 和 `PlotLabel` 来自 `nsh/base/plot`，这是 [`nsh/base`](../modules/nsh-base.md) 中单独的一个模块（Rust 中是 `nsh_base::plot`）。在 TypeScript 中，plot 的属性对数据行的类型是泛型的：字段名会按数据行做类型检查，行的函数会拿到行的类型。在 Rust 中，`plot()` 为每个属性提供一个 setter，数据行是 `Rows`（按键名存放的数字列），取值方式是 `RowAccessor`（键名，或以行序号为参数的函数），图形使用带类型的绘制方法（`.stroke_color(..)`、`.fill_color(..)`、`.stroke_width(..)`）。
 
 ## Plot
 
@@ -825,6 +825,142 @@ fn funnel() -> impl IntoElement {
 节点和流带用 `fill` 填充（没有设置时为 `currentColor`），用 `stroke` 描边（没有设置时不描边）；像 CSS 的继承一样，自己设置的值优先于 sankey 和 plot 上的值。没有任何流经过的节点高 1 点。只有 links、选项或 plot 的尺寸变化时才会重新布局，指针和出场动画都不会触发布局；plot 的尺寸变化不会产生移动。构成环的 links，或指向 plot 中不存在的行的 links，什么也不画，并记录一条警告。它的数值不计入 plot 的比例尺。
 
 
+## Treemap
+
+`Treemap` 把 plot 的数据行画成嵌套矩形组成的层级：每一行是一个节点，它的 `id` 和它指向的 `parent` 组成一棵树（d3 的 `stratify`），每个叶子的面积与它的 `value` 成正比，每个组是它下面所有节点的外框，组的值是其叶子之和（不管组自己那一行写了什么）。没有 `parent` 的行，或 `parent` 指向不存在的行，是顶层节点；不给 `id` 时，行的 id 就是它的序号，所以 `parent` 也可以用序号指向父行。gpt-vis 写的嵌套形式（`{ name, value, children }`）由应用用几行代码拍平成数据行即可；层数没有上限。
+
+矩形按 squarify 方式铺排（同 d3 的 `treemapSquarify`）：每一层的节点按值从大到小、从左上角开始（`sort="value"`），长宽比接近 `ratio`（黄金比）；`sort="data"` 保持数据行的顺序，值变化时节点的位置更稳定。`paddingInner` 是兄弟节点之间的缝，父节点的外缘不留；`paddingOuter` 是组内围绕子节点的留白；`paddingTop` 是每个组顶部的标题带，`groupLabel` 写在里面。三者都可以给一个数（所有层相同），或从顶层往下每层一个（`[3, 1]`：顶层节点之间 3，下面各层 1）。同一个父节点的兄弟组，标题带要么都留要么都不留，有一个组放不下时都不留，这样同一层的组看起来一致。
+
+值为 0、负数或不是数字的叶子不占面积：不画、没有标签、指针找不到它；叶子全是这种情况的组也一样。treemap 的面积是整体中的份额，被省略的部分由应用自己说明（地图下方的一行注释）。负数可以用来上色：市场热力图的当日涨跌。
+
+节点的颜色来自 plot 的 `colorScale`：`colorValue` 是沿色带取色的数值（`sequential`、`diverging`：跌为红、涨为绿、持平为中性色；没有 `domain` 时取数值的范围），`color` 是类别（`ordinal`：`"parent"` 让同组的叶子同色）。叶子是 `leaf` 部件（`leafClass`、`leafStyle`），组是 `group` 部件（`groupClass`、`groupStyle`），只有设置了类或样式才画：组是位于子节点下面的矩形，露在缝里、留白里和标题带里。每个部件可以对所有节点相同，也可以是节点所在行的函数。`cornerRadii` 给所有矩形加圆角。
+
+`label` 在每个叶子里写名字，`valueLabel` 在名字下面写数值，它是行和值的函数（组的值是其叶子之和）：放在左上角（`labelPlacement="start"`）或居中（`"center"`）。`label` 部件是一个和叶子一样大的框：它的内边距是离叶子边缘的距离，文字样式作用于各行。叶子比名字窄时名字用省略号截断，只在放得下时显示；数值要么完整显示，要么不显示。叶子颜色较深时标签带有 `data-dark` 属性，所以 `data-dark:text-white` 能让它在深红色上依然清晰。
+
+在 treemap 上，plot 报告指针下的节点（`onHoverChange`，节点所在的行）：叶子，或位于标题带、留白中的组；在兄弟节点之间的缝里取其中一个，所以悬停不会闪烁。其他节点淡到 `inactiveOpacity`（叶子保留它所在的组，组保留它下面的节点），和节点一样大的 `hover` 部件给它描边。方向键移动到屏幕上旁边的叶子，Home 和 End 移动到第一个和最后一个。plot 出场时顶层节点从中心长出，`stagger` 让它们依次出现；数据行变化时，每个节点按 `id` 对应，以 `motion.update` 移动到新的位置和颜色：新出现的节点从中心长出，消失的节点缩回自己的中心。plot 的 x 和 y 比例尺不使用。
+
+<!-- demo: el-plot-treemap -->
+
+```tsx
+import { signal } from "nsh";
+import { Plot, Treemap } from "nsh/base/plot";
+
+type Row = { id: string; parent?: string; name: string; cap?: number; chg?: number };
+
+const rows: Row[] = [
+  { id: "tech", name: "Technology" },
+  { id: "fin", name: "Financials" },
+  { id: "NVDA", parent: "tech", name: "NVIDIA", cap: 4300, chg: 2.4 },
+  { id: "MSFT", parent: "tech", name: "Microsoft", cap: 3700, chg: -0.6 },
+  { id: "AVGO", parent: "tech", name: "Broadcom", cap: 1600, chg: 3.1 },
+  { id: "JPM", parent: "fin", name: "JPMorgan", cap: 830, chg: 1.3 },
+  { id: "V", parent: "fin", name: "Visa", cap: 670, chg: -0.3 },
+];
+
+export function MarketMap() {
+  const hovered = signal<number | null>(null);
+  return (
+    <Plot
+      data={rows}
+      colorScale={{ type: "diverging", domain: [-3, 3], range: ["#dc2626", "#e5e5e5", "#16a34a"] }}
+      accessibilityLabel="Market map of 5 stocks in 2 sectors"
+      accessibilityValue={{ text: hovered() == null ? undefined : rows[hovered()!].name }}
+      onHoverChange={({ index }) => hovered.set(index)}
+      appearGeneration={1}
+      motion={{ appear: { duration: 800 }, update: { duration: 500 }, enter: { duration: 120 }, exit: { duration: 160 } }}
+      class="h-72"
+    >
+      <Treemap
+        id="id"
+        parent="parent"
+        value="cap"
+        colorValue="chg"
+        paddingInner={[3, 1]}
+        paddingTop={18}
+        cornerRadii={2}
+        inactiveOpacity={0.35}
+        label="id"
+        valueLabel={(d: Row) => `${d.chg! > 0 ? "+" : ""}${d.chg}%`}
+        labelPlacement="center"
+        labelClass="p-1 text-xs font-semibold text-foreground data-dark:text-white"
+        groupLabel="name"
+        groupLabelClass="px-1 text-xs text-muted-foreground"
+        hoverClass="rounded-xs outline-2 outline-foreground"
+      />
+    </Plot>
+  );
+}
+```
+
+```rust
+use nsh_base::plot::{ColorScale, DivergingScale, TreemapPadding, plot, treemap};
+use nsh_core::{element::{RowAccessor, RowText, Rows}, prelude::*};
+
+const IDS: [&str; 5] = ["tech", "fin", "NVDA", "MSFT", "JPM"];
+const PARENTS: [&str; 5] = ["", "", "tech", "tech", "fin"];
+
+fn market_map() -> impl IntoElement {
+    let rows = Rows::from_columns(
+        5,
+        [
+            ("cap".into(), vec![0.0, 0.0, 4300.0, 3700.0, 830.0]),
+            ("chg".into(), vec![0.0, 0.0, 2.4, -0.6, 1.3]),
+        ],
+    );
+    plot()
+        .data(rows)
+        .color_scale(ColorScale::from(
+            DivergingScale::new([rgb(0xdc2626), rgb(0xe5e5e5), rgb(0x16a34a)]).domain([-3.0, 3.0]),
+        ))
+        .accessibility_label("Market map")
+        .h(px(288.0))
+        .child(
+            treemap()
+                .id(RowText::from_fn(|i| IDS[i].into()))
+                .parent(RowText::from_fn(|i| PARENTS[i].into()))
+                .value(RowAccessor::key("cap"))
+                .color_value(RowAccessor::key("chg"))
+                .padding_inner(TreemapPadding::from([px(3.0), px(1.0)]))
+                .padding_top(TreemapPadding::from(px(18.0)))
+                .label(RowText::from_fn(|i| IDS[i].into())),
+        )
+}
+```
+
+| 属性 | Rust | 类型 | 默认值 | 说明 |
+|---|---|---|---|---|
+| `id` | `.id(..)` | `keyof T \| (d: T, index: number) => string` | 行的序号 | 每行节点的 id：`parent` 指向的就是它，数据行变化时也靠它认出同一个节点。 |
+| `parent` | `.parent(..)` | `keyof T \| (d: T, index: number) => string` | 无：每行都是顶层节点 | 每行父节点的 id；为空或不是任何行的 id 时是顶层节点。 |
+| `value` | `.value(..)` | `keyof T \| (d: T, index: number) => number` | 必填 | 每个叶子的大小；组的值是其子节点之和。值为 0、负数或不是数字的叶子不占面积。 |
+| `sort` | `.sort(..)` | `"value" \| "data"` | `"value"` | 兄弟节点按值从大到小从左上角开始，或保持数据行的顺序。 |
+| `ratio` | `.ratio(..)` | `number` | 黄金比 | 矩形追求的长宽比，至少为 1。 |
+| `paddingInner` | `.padding_inner(..)` | `number \| number[]` | `0` | 兄弟节点之间的缝，单位为点，从顶层往下每层一个（更深的层用最后一个）。 |
+| `paddingOuter` | `.padding_outer(..)` | `number \| number[]` | `0` | 每个组内围绕子节点的留白，按层给。 |
+| `paddingTop` | `.padding_top(..)` | `number \| number[]` | `0` | 每个组顶部的标题带，放 `groupLabel`，按层给；同一父节点的兄弟要么都留要么都不留。 |
+| `cornerRadii` | `.corner_radii(..)` | `number \| { topLeft?, topRight?, bottomRight?, bottomLeft? }` | 直角 | 矩形每个角的半径。 |
+| `color` | `.color(..)` | `keyof T \| (d: T, index: number) => string` | 无 | 每个节点的类别，`ordinal` 的 `colorScale` 为它取色。 |
+| `colorValue` | `.color_value(..)` | `keyof T \| (d: T, index: number) => number` | 无 | 每个节点的数值，`sequential` 或 `diverging` 的 `colorScale` 把它变成颜色。 |
+| `leafClass` | `.leaf_class(..)` | `string \| (d: T, index: number) => string` | 无 | 每个叶子的类（`fill-*`、`stroke-*`），所有叶子相同或是叶子所在行的函数。 |
+| `leafStyle` | `.leaf_style(..)` | `StyleProp<ViewStyle>` | 无 | 所有叶子的样式，优先于它们的类。 |
+| `groupClass` | `.group_class(..)` | `string \| (d: T, index: number) => string` | 无 | 每个组的类，即子节点下面的矩形；只有设置了类或样式才画组。 |
+| `groupStyle` | `.group_style(..)` | `StyleProp<ViewStyle>` | 无 | 所有组的样式，优先于它们的类。 |
+| `inactiveOpacity` | `.inactive_opacity(..)` | `number`（0 到 1） | 无 | 有节点悬停时，其他节点及其标签的不透明度，随悬停淡入淡出。 |
+| `label` | `.label(..)` | `keyof T \| (d: T, index: number) => string` | 无 | 每个叶子里的名字，单行，放不下时用省略号截断。 |
+| `valueLabel` | `.value_label(..)` | `(d: T, value: number, index: number) => string` | 无 | 每个叶子里名字下面的数值，只有完整放得下时才显示。 |
+| `labelPlacement` | `.label_placement(..)` | `"start" \| "center"` | `"start"` | 标签放在叶子的左上角或居中。 |
+| `labelClass` | `.label_class(..)` | `string` | 无 | 叶子标签的类，标签是和叶子一样大的框：内边距和文字样式；深色叶子上带 `data-dark:`。 |
+| `labelStyle` | `.label_style(..)` | `StyleProp<TextStyle>` | 无 | 叶子标签的样式，优先于它的类。 |
+| `valueLabelClass` | `.value_label_class(..)` | `string` | 无 | 数值那一行的类，优先于标签的类。 |
+| `valueLabelStyle` | `.value_label_style(..)` | `StyleProp<TextStyle>` | 无 | 数值那一行的样式，优先于它的类。 |
+| `groupLabel` | `.group_label(..)` | `keyof T \| (d: T, index: number) => string` | 无 | 每个组的名字，写在标题带里，放不下时用省略号截断。 |
+| `groupLabelClass` | `.group_label_class(..)` | `string` | 无 | 组标签的类，标签是和标题带一样大的框。 |
+| `groupLabelStyle` | `.group_label_style(..)` | `StyleProp<TextStyle>` | 无 | 组标签的样式，优先于它的类。 |
+| `stagger` | `.stagger(..)` | `number`（0 到 0.95） | `0` | 顶层节点依次出现：它们的开始时间分布在出场动画的这个比例里。 |
+| `hoverClass` | `.hover_class(..)` | `string` | 无 | `hover` 部件的类，一个和悬停节点一样大、盖在它上面的视图（`rounded-xs outline-2 outline-foreground`）。 |
+| `hoverStyle` | `.hover_style(..)` | `StyleProp<ViewStyle>` | 无 | hover 部件的样式，优先于它的类。 |
+
+矩形用 `fill` 填充（没有设置时用 `colorScale` 的颜色，再没有时为 `currentColor`），用 `stroke` 描边（没有设置时不描边）；像 CSS 的继承一样，自己设置的值优先于 treemap 和 plot 上的值。只有数据行、选项或 plot 的尺寸变化时才会重新布局，指针和出场动画都不会触发布局；plot 的尺寸变化不会产生移动。重复的 `id`、指向不存在的行的 `parent`，以及自己是自己祖先的行，都会记录一次警告：第一行保留这个 id，孤立的行作为顶层节点，成环的行不画。
+
 ## PlotAxis
 
 `PlotAxis` 用某条边所对应比例尺的刻度为这条边加上标签：底边和顶边用 x 比例尺的刻度，左边和右边用 y 比例尺的刻度，就像 d3 的 `axisBottom`、`axisTop`、`axisLeft` 和 `axisRight`。刻度来自比例尺：`linear` 比例尺上是定义域内的整齐数值（1、2 或 5 乘以 10 的幂），`point` 或 `band` 比例尺上是数据行。标签是由 plot 的布局摆放的文字：应用决定它写什么、长什么样，布局负责把它放到位置上。每个标签沿边居中对齐自己的刻度。在底边和顶边上，第一个和最后一个只向内移动必要的距离，从而留在 plot 的两端之内；在左边和右边上，每个标签都对在自己的刻度上，读起来就是那条网格线的值；靠近两端的标签如果会超出 plot 的顶边或底边，plot 的线性 y 比例尺就从那条边向内缩进超出的距离（刻度在端点上时是标签高度的一半），所以每个标签都留在 plot 之内，对在自己的网格线上。
@@ -977,7 +1113,7 @@ import { Line, Plot, PlotAppearScope } from "nsh/base/plot";
 
 | 按键 | 作用 |
 |---|---|
-| 右方向键、左方向键 | 移动到屏幕上那一侧的行：下一行或上一行，在第一行位于右侧的反向 x 比例尺上则反过来（饼图按行的顺序移动到各扇区，sankey 移动到各节点）；没有悬停的行时，右方向键从最左端的行开始，左方向键从最右端的行开始（饼图上是第一个和最后一个扇区）。 |
+| 右方向键、左方向键 | 移动到屏幕上那一侧的行：下一行或上一行，在第一行位于右侧的反向 x 比例尺上则反过来（饼图按行的顺序移动到各扇区，sankey 移动到各节点，treemap 和上下方向键一样移动到屏幕上旁边的叶子）；没有悬停的行时，右方向键从最左端的行开始，左方向键从最右端的行开始（饼图上是第一个和最后一个扇区）。 |
 | Home、End | 移动到第一行或最后一行。 |
 | 上方向键、下方向键 | 在格子上：移动到同一列中上方或下方的格子。在格子上，按键按屏幕上的网格移动（WAI-ARIA 的数据网格）：右方向键和左方向键移动到同一行中旁边的格子，Home 和 End 移动到这一行的第一个和最后一个格子；没有悬停的格子时，第一次按键从左上角的格子开始（左方向键、上方向键和 End 从右下角开始）。到达边缘时悬停保持不动。 |
 | Escape | 清除悬停。 |
