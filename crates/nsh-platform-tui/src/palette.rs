@@ -147,10 +147,14 @@ pub(crate) fn tone(color: nsh_core::Color, ground: Ground) -> Tone {
     if alpha == 0 {
         return Tone::Hidden;
     }
+    // Whether it is an accent is the color's own: a translucent black or
+    // white over a hued fill (a caption on a lime header) takes the fill's
+    // hue but is ink, not an accent of that hue on its own color.
+    let own_chroma = f32::from(red.max(green).max(blue)) - f32::from(red.min(green).min(blue));
     let [red, green, blue] = over_f32([red, green, blue], alpha, ground.rgb);
     let max = red.max(green).max(blue);
     let min = red.min(green).min(blue);
-    if max - min >= SATURATED_CHROMA {
+    if max - min >= SATURATED_CHROMA && own_chroma >= SATURATED_CHROMA {
         let accent = HUE_BANDS
             .iter()
             .find(|(bound, _)| hue(red, green, blue, max, min) < *bound)
@@ -182,7 +186,23 @@ pub(crate) fn ink(color: nsh_core::Color, ground: Ground) -> Style {
     if ground.swatch && !color.is_transparent() {
         return plain.fg(swatch_text(ground)).remove_modifier(Modifier::DIM);
     }
-    match (tone(color, ground), ground.ramp) {
+    let tone = match tone(color, ground) {
+        // The terminal's fades of its foreground are made for its page: on
+        // a hued band (a lime header) a secondary caption reads only at
+        // full strength.
+        Tone::Muted
+            if hued(nsh_core::Color(u32::from_be_bytes([
+                ground.rgb[0],
+                ground.rgb[1],
+                ground.rgb[2],
+                255,
+            ]))) =>
+        {
+            Tone::Default
+        }
+        tone => tone,
+    };
+    match (tone, ground.ramp) {
         (Tone::Hidden, _) => Style::new()
             .fg(Color::Reset)
             .add_modifier(Modifier::HIDDEN)
@@ -723,6 +743,11 @@ mod tests {
         let label = ink(Rgba(0x13160cff), lime);
         assert_eq!(label.fg, Some(Color::Reset));
         assert!(!label.add_modifier.contains(Modifier::DIM));
+        // A translucent black over the lime takes its hue, but is ink, at
+        // full strength on the band.
+        let caption = ink(Rgba(0x13160c9e), lime);
+        assert_eq!(caption.fg, Some(Color::Reset));
+        assert!(!caption.add_modifier.contains(Modifier::DIM));
         assert!(
             ink(Rgba(0xa1a1aaff), lime)
                 .add_modifier

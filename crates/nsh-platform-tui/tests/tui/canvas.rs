@@ -458,7 +458,9 @@ fn an_opaque_box_over_a_canvas_hides_its_dots() {
     let buffer = terminal.backend().buffer();
     assert_eq!(row(buffer, 0, 0..4), "⣿⣿⣿⣿", "the dots beside it");
     assert!(
-        row(buffer, 0, 4..8).chars().all(|c| !('\u{2801}'..='\u{28ff}').contains(&c)),
+        row(buffer, 0, 4..8)
+            .chars()
+            .all(|c| !('\u{2801}'..='\u{28ff}').contains(&c)),
         "no dots under the box: {:?}",
         row(buffer, 0, 0..12)
     );

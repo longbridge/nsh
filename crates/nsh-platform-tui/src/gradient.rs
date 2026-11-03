@@ -134,7 +134,11 @@ impl Sampler {
 pub(crate) fn over(under: Rgb, layers: impl Iterator<Item = [f32; 4]>) -> Rgb {
     let mut rgb = under.map(|c| f32::from(c) / 255.0);
     for [r, g, b, a] in layers {
-        rgb = [r + rgb[0] * (1.0 - a), g + rgb[1] * (1.0 - a), b + rgb[2] * (1.0 - a)];
+        rgb = [
+            r + rgb[0] * (1.0 - a),
+            g + rgb[1] * (1.0 - a),
+            b + rgb[2] * (1.0 - a),
+        ];
     }
     rgb.map(|c| (c.clamp(0.0, 1.0) * 255.0).round() as u8)
 }
@@ -157,7 +161,11 @@ fn sample(stops: &[([f32; 4], f32)], t: f32) -> [f32; 4] {
     for pair in stops.windows(2) {
         let ((a, pa), (b, pb)) = (pair[0], pair[1]);
         if t <= pb {
-            let k = if pb - pa > 1e-6 { (t - pa) / (pb - pa) } else { 1.0 };
+            let k = if pb - pa > 1e-6 {
+                (t - pa) / (pb - pa)
+            } else {
+                1.0
+            };
             return std::array::from_fn(|i| a[i] + (b[i] - a[i]) * k);
         }
     }
@@ -255,6 +263,9 @@ mod tests {
             &[0xffff_ff00, 0xffff_ff00],
         );
         let s = Sampler::new(&g, Size::new(Points(10.0), Points(10.0))).unwrap();
-        assert_eq!(over([10, 20, 30], std::iter::once(s.at((5.0, 5.0)))), [10, 20, 30]);
+        assert_eq!(
+            over([10, 20, 30], std::iter::once(s.at((5.0, 5.0)))),
+            [10, 20, 30]
+        );
     }
 }

@@ -1896,7 +1896,10 @@ fn gradient(
     if effects.background_images.is_empty()
         || parent.ramp.is_none()
         || visible.is_empty()
-        || matches!(view.kind, ViewKind::Image | ViewKind::Video | ViewKind::WebView)
+        || matches!(
+            view.kind,
+            ViewKind::Image | ViewKind::Video | ViewKind::WebView
+        )
         || !effects.background_images.iter().any(crate::gradient::shows)
     {
         return None;
@@ -1931,7 +1934,8 @@ fn gradient(
         let top = f32::from([red, green, blue][i]);
         (top * alpha + f32::from(parent.rgb[i]) * (1.0 - alpha)).round() as u8
     });
-    let color_at = |point: (f32, f32)| crate::gradient::over(under, layers.iter().map(|l| l.at(point)));
+    let color_at =
+        |point: (f32, f32)| crate::gradient::over(under, layers.iter().map(|l| l.at(point)));
     for y in visible.y..visible.bottom() {
         let py = (i32::from(y) - bounds.top) as f32 * ch + ch / 2.0;
         for x in visible.x..visible.right() {

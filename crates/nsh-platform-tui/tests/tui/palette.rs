@@ -717,7 +717,11 @@ fn a_gradient_fills_each_cell_with_its_color_there() {
     draw_until(&mut view, &mut terminal, &rx, "ready");
     let buffer = terminal.backend().buffer();
     assert!(matches!(buffer[(0, 0)].bg, Color::Indexed(_)));
-    assert_ne!(buffer[(0, 0)].bg, buffer[(19, 0)].bg, "a ramp in 256 colors");
+    assert_ne!(
+        buffer[(0, 0)].bg,
+        buffer[(19, 0)].bg,
+        "a ramp in 256 colors"
+    );
 }
 
 #[component]
@@ -746,5 +750,9 @@ fn a_scaled_fill_takes_the_cells_of_its_scaled_box() {
     let buffer = terminal.backend().buffer();
     assert_ne!(buffer[(0, 0)].bg, Color::Reset, "the fill from the left");
     assert_ne!(buffer[(9, 0)].bg, Color::Reset, "half of it");
-    assert_eq!(buffer[(10, 0)].bg, Color::Reset, "the other half is not filled");
+    assert_eq!(
+        buffer[(10, 0)].bg,
+        Color::Reset,
+        "the other half is not filled"
+    );
 }
