@@ -25011,6 +25011,58 @@ mod terminal_layout {
     }
 
     #[test]
+    fn an_absolute_box_on_its_bottom_inset_is_as_tall_as_its_content() {
+        // A toast stack as tall as its toasts measured, none at first: the
+        // toast's slot pinned to its bottom, the toast two texts in
+        // padding.
+        let mut ops = view(
+            2,
+            ROOT_ID,
+            &[
+                ("alignSelf", V::Str("flex-start")),
+                ("width", V::Number(160.0)),
+                ("height", V::Number(0.0)),
+            ],
+        );
+        ops.extend(view(
+            3,
+            2,
+            &[
+                ("position", V::Str("absolute")),
+                ("left", V::Number(0.0)),
+                ("right", V::Number(0.0)),
+                ("bottom", V::Number(0.0)),
+            ],
+        ));
+        ops.extend(view(
+            5,
+            3,
+            &[
+                ("paddingVertical", V::Number(12.0)),
+                ("backgroundColor", V::Str("#333333")),
+            ],
+        ));
+        ops.extend(text(6, 5, "Saved"));
+        ops.extend(text(8, 5, "Q3"));
+        let batch = laid_out(ops);
+        let frame = frame_of(&batch, 3).expect("the slot is laid out");
+        assert!(
+            frame.size.height >= px(32.0),
+            "its two rows at least, not the stack's height: {frame:?}"
+        );
+        assert_eq!(
+            frame.origin.y + frame.size.height,
+            Points::ZERO,
+            "its bottom on the stack's: {frame:?}"
+        );
+        assert_eq!(
+            frame_of(&batch, 8).map(|f| f.size.height),
+            Some(px(16.0)),
+            "its second text shows"
+        );
+    }
+
+    #[test]
     fn a_grids_one_row_stretches_over_its_known_height() {
         // A dock's panel: a slot 96pt high, the panel a grid of one cell
         // over all of it (inset 0), the cell a box whose content is all

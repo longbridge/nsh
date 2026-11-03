@@ -152,6 +152,10 @@ pub(crate) fn draw(
         index += 1;
         if crate::navigation::modal_visible(painter.tree, modal) {
             dialog::backdrop(painter.buffer, clip, page.ramp);
+            // The page behind the backdrop holds no text the modal's own
+            // can cut short: no `…` lands on the modal's frame where its
+            // text starts beside a page's words.
+            painter.text_cells.fill(false);
             let layer = Layer {
                 overlay: true,
                 modal: true,
@@ -1092,12 +1096,16 @@ fn text(
                 modifier = (modifier | Modifier::REVERSED) - Modifier::DIM;
             }
             // Text drawn over an earlier text's Cells wins them whole; the
-            // earlier one reads as cut short rather than mixed in.
+            // earlier one reads as cut short rather than mixed in. Only
+            // words read cut: a run of glyphs (a slider's track under its
+            // thumb) is only covered.
             if std::mem::take(&mut first) && !glyph.text.trim().is_empty() {
                 let at = buffer.index_of(start as u16, y);
                 if text_cells[at] && start > i32::from(buffer.area.x) {
                     let before = buffer.index_of(start as u16 - 1, y);
-                    if text_cells[before] && buffer.content[before].symbol() != " " {
+                    if text_cells[before]
+                        && buffer.content[before].symbol().chars().any(char::is_alphanumeric)
+                    {
                         buffer.content[before].set_symbol("…");
                     }
                 }

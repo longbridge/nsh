@@ -449,6 +449,26 @@ fn a_documents_markers_rules_and_notes_are_the_terminals_text() {
     assert!(!shown.contains("[ ]") && !shown.contains('┌'), "{shown:?}");
 }
 
+/// A paragraph with a formula in it and a display formula.
+#[component]
+fn Formulas() -> impl IntoElement {
+    text_view().markdown(
+        "Each frame takes $16.7\\,\\text{ms}$.\n\n$$\nt_{\\text{frame}} = \\tfrac{1000}{60}\n$$",
+    )
+}
+
+#[test]
+fn a_terminal_reads_a_formula_as_text_not_its_tex() {
+    let app = start::<Formulas>(Idiom::Terminal);
+    let shown = joined(&app);
+    assert!(shown.contains("16.7 ms"), "{shown:?}");
+    assert!(shown.contains("t_frame = 1000/60"), "{shown:?}");
+    assert!(!shown.contains("\\text"), "{shown:?}");
+    // Elsewhere the TeX as written, for want of a renderer.
+    let gui = start::<Formulas>(Idiom::Desktop);
+    assert!(joined(&gui).contains("\\text{ms}"));
+}
+
 /// A picker of `#3b82f6` (HSB hue 217) with an area, a hue slider and a
 /// swatch of the picked color; the color in hex as the app keeps it.
 #[component]

@@ -610,7 +610,7 @@ impl Cx {
                     )
                     .into_element(),
                 // Its TeX in a box as a code block's, as gpui-kit shows a
-                // formula it has no renderer for.
+                // formula it has no renderer for (a terminal's as text).
                 None => self
                     .part(
                         view()
@@ -621,8 +621,11 @@ impl Cx {
                             .border_color(move || theme().border)
                             .bg(move || theme().muted)
                             .child(
-                                text(tex.clone())
-                                    .font_family(mono_font)
+                                text(match is_terminal() {
+                                    true => super::math::tex_text(tex).into(),
+                                    false => tex.clone(),
+                                })
+                                .font_family(mono_font)
                                     .text_size(px(CODE_SIZE))
                                     .line_height(px(CODE_SIZE * CODE_LINE))
                                     .when(self.selectable, |t| t.select_text()),
@@ -1396,6 +1399,11 @@ impl Cx {
                             display: false,
                         },
                     )
+                    .into_element(),
+                // A terminal reads the formula as text (`16.7 ms`), not
+                // its source.
+                None if is_terminal() => self
+                    .part(text(super::math::tex_text(tex)), Part::Math)
                     .into_element(),
                 None => self
                     .part(code_span(text(tex.clone())), Part::Math)
