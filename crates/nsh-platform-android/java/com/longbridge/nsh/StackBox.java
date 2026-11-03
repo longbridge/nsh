@@ -78,6 +78,8 @@ final class StackBox extends FrameLayout implements Node {
         finishNav();
         ScreenBox oldTop = top();
         ScreenBox newTop = desired.isEmpty() ? null : desired.get(desired.size() - 1);
+        // The page on top leaves (a pop, a replace): its keyboard hides with the transition.
+        if (oldTop != null && !desired.contains(oldTop)) mounter.hideKeyboardIn(oldTop);
         for (ScreenBox s : desired) {
             if (s.getParent() != this) {
                 if (s.getParent() instanceof ViewGroup) ((ViewGroup) s.getParent()).removeView(s);
@@ -313,6 +315,7 @@ final class StackBox extends FrameLayout implements Node {
         finishNav();
         ScreenBox upper = top();
         ScreenBox lower = shown.get(shown.size() - 2);
+        mounter.hideKeyboardIn(upper);
         float progress = backProgress >= 0 ? upper.getTranslationX() / Math.max(1, getWidth()) : 0;
         backProgress = -1;
         shown.remove(shown.size() - 1);

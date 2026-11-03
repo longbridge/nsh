@@ -1979,6 +1979,19 @@ final class Mounter {
                 multiline, maxLength, editable, autoFocus, hasSelection, selection, hasCaret, caret, submit);
     }
 
+    /**
+     * A page or dialog leaves with the field that has the keyboard: the
+     * keyboard hides with it, as with a native back, not once the field is
+     * gone (which leaves it up). Focus goes to the host, as `blur()` does.
+     */
+    void hideKeyboardIn(View leaving) {
+        View f = leaving.findFocus();
+        if (f == null || !f.onCheckIsTextEditor()) return;
+        InputMethodManager imm = (InputMethodManager) context.getSystemService(Context.INPUT_METHOD_SERVICE);
+        imm.hideSoftInputFromWindow(f.getWindowToken(), 0);
+        if (f.getRootView() == host.getRootView()) host.requestFocus();
+    }
+
     private void command(ByteBuffer b, Object[] objects) {
         int id = b.getInt(), kind = b.getInt();
         View v = views.get(id);

@@ -161,7 +161,17 @@ tap text:Blocked
 expect Blocked presses: 1
 prop id:off accessibilityState disabled=true
 style id:off opacity 1
+# `hitSlop`: presses count this far outside the button, one number for
+# every side or the sides named, following a signal; none without it.
+prop id:close hitSlop top=12 right=12 bottom=12 left=12
+tap id:close
+expect Presses: 111
+prop id:sides hitSlop {}
+tap text:Widen
+prop id:sides hitSlop top=4 left=2
+prop id:plain hitSlop {}
 covers [nsh/base] Button
+covers [props] hitSlop
 covers [props] role
 covers [props] accessibilityLabel
 covers [props] disabled
@@ -203,6 +213,12 @@ style id:archived opacity 1
 listens id:archived onPress
 tap text:Archived
 expect Log: open https://example.com/docs, press, route /orders/42, route /archive
+# `hitSlop`: presses count this far outside the link, one number for
+# every side or the sides named, following a signal; none without it.
+prop id:help hitSlop top=12 right=12 bottom=12 left=12
+tap text:Help
+prop id:help hitSlop top=4 left=2
+prop id:docs hitSlop {}
 covers [nsh/base] Link
 covers [props] Link.href
 covers [props] accessibilityLabel
@@ -409,7 +425,7 @@ covers [events] NavPage.onBackPress
 covers [events] NavPage.onDismiss
 # base-nav-stack
 tap id:case-base-nav-stack
-# on screen headless (no platform hides the covered ones).
+# Only the top page is on screen; the controls sit outside the stack.
 expect Routes: home
 expect Depth: 1
 expect Renders: 1
@@ -425,7 +441,6 @@ expect Renders: 2
 tap text:Push
 expect Page p2 at 2
 expect Routes: home > p1 > p2
-expect Bumps of home: 1
 # pop: one page.
 tap text:Pop
 expect Routes: home > p1
@@ -435,7 +450,6 @@ expect Renders: 3
 # The same route twice is two pages; remove takes the topmost.
 tap text:Push twice
 expect Routes: home > p1 > twice > twice
-expect Page twice at 2
 expect Page twice at 3
 expect Renders: 5
 tap text:Remove twice
@@ -476,7 +490,6 @@ expect Cleanups: p1 p2 p3 p4 p5 twice twice
 # setRoutes: all pages.
 tap text:Set routes
 expect Routes: home > a > b
-expect Page a at 1
 expect Page b at 2
 absent Page swapped at 1
 # remove below: the pages above follow with their index.
@@ -952,6 +965,12 @@ frame text:Locked 32 4 47 17
 listens id:locked onPress
 tap text:Locked
 expect Changes: 12
+# `hitSlop`: presses count this far outside the switch, one number for
+# every side or the sides named, following a signal; none without it.
+prop id:mute hitSlop top=12 right=12 bottom=12 left=12
+tap label:Mute
+prop id:mute hitSlop top=4 left=2
+prop id:wifi hitSlop {}
 covers [nsh/base] Switch
 covers [props] Switch.checked
 covers [props] disabled
@@ -1010,6 +1029,12 @@ frame text:Locked 28 2 47 17
 listens id:locked onPress
 tap text:Locked
 expect Changes: 12
+# `hitSlop`: presses count this far outside the checkbox, one number for
+# every side or the sides named, following a signal; none without it.
+prop id:agree hitSlop top=12 right=12 bottom=12 left=12
+tap label:Agree
+prop id:agree hitSlop top=4 left=2
+prop id:all hitSlop {}
 covers [nsh/base] Checkbox
 covers [props] Checkbox.checked
 covers [props] Checkbox.indeterminate
@@ -1072,6 +1097,12 @@ tap label:Team plan
 expect Changes: 2
 expect Plan: team
 prop id:team accessibilityState selected=true checked=true
+# `hitSlop`: presses count this far outside the radio, one number for
+# every side or the sides named, following a signal; none without it.
+prop id:solo hitSlop top=12 right=12 bottom=12 left=12
+tap label:Solo
+prop id:solo hitSlop top=4 left=2
+prop id:basic hitSlop {}
 covers [nsh/base] Radio
 covers [nsh/base] RadioGroup
 covers [props] Radio.checked
@@ -1206,6 +1237,12 @@ frame text:Italic 18 2 47 17
 prop id:bold focusable false
 tap id:lock
 frame text:Bold 38 2 31 17
+# `hitSlop`: presses count this far outside the toggle, one number for
+# every side or the sides named, following a signal; none without it.
+prop id:pin hitSlop top=12 right=12 bottom=12 left=12
+tap label:Pin
+prop id:pin hitSlop top=4 left=2
+prop id:favorite hitSlop {}
 covers [nsh/base] Toggle
 covers [nsh/base] ToggleGroup
 covers [props] Toggle.pressed
@@ -1464,13 +1501,18 @@ expect Events: dragStart,dragEnd
 expect Changes: 4
 expect Index: 2
 prop id:dot-2 accessibilityState selected=true
-# The keyboard focus coming to the carousel and leaving it.
+# The keyboard focus coming into the carousel and leaving it, as the
+# platform reports it: on the carousel's view, then on a view in a slide
+# (still in it: nothing), then on none.
 listens id:carousel onFocus
 listens id:carousel onBlur
-event id:carousel onFocus
+state id:carousel focused
 expect Events: dragStart,dragEnd,focus
-event id:carousel onBlur
+state id:open focused
+state id:carousel none
 wait 50
+expect Events: dragStart,dragEnd,focus
+state id:open none
 expect Events: dragStart,dragEnd,focus,blur
 # Its own index from `defaultIndex`: the second slide's item is selected.
 # Along a vertical `axis`, the slides follow each other down the content.
@@ -1479,6 +1521,15 @@ prop id:v-dot-1 accessibilityState selected=true
 prop id:v-dot-0 accessibilityState {}
 frame id:v-slide-0 0 0 100 50
 frame id:v-slide-1 0 50 100 50
+# An app that keeps its `index`: a rest on the second slide asks for it
+# (`onChange`), and once the app has answered, its own slide shows again,
+# the content springing back to it.
+prop id:k-dot-0 accessibilityState selected=true
+listens id:kept-content onScrollEnd
+event id:kept-content onScrollEnd x=100 y=0
+expect Asks: 1
+prop id:k-dot-0 accessibilityState selected=true
+prop id:k-dot-1 accessibilityState {}
 covers [nsh/base] Carousel
 covers [nsh/base] CarouselContent
 covers [nsh/base] CarouselItem
@@ -1640,6 +1691,9 @@ prop label:Own accessibilityState disabled=true
 type label:Code 12a
 expect Code [12]
 prop label:Code value 12
+# The cells that hold a digit have `data-filled` (`data-filled:`).
+style parent:text:1 opacity 0.5
+style parent:text:2 opacity 0.5
 # The focus: the caret (50 high, 4 below the cell's top) in the cell that
 # takes the next digit; it stays while it blinks (its opacity moves
 # natively), so the layout holds still.
@@ -1654,6 +1708,7 @@ expect Code [1234]
 expect Done [1234]
 prop label:Code value 1234
 style parent:text:4 backgroundColor #00ff00ff
+style parent:text:4 opacity 0.5
 # Two groups of two cells: the last cell 2 + 30 + 4 into the second group,
 # which is 10 after the first (2 + 30 + 4 + 30 + 2 wide).
 frame parent:text:4 36 4 30 20
@@ -1981,19 +2036,20 @@ absent New File +key
 absent [Settings]
 expect [Suggestions]
 expect Lit: calendar
-# The row under its section's header (a recycled row parked off the list
-# may keep a label, so the row is found by its text).
-frame parent:parent:parent:text:Calendar 0 0 390 40
-tap text:Calendar
+# The row under its section's header.
+frame label:Calendar 0 0 390 40
+tap label:Calendar
 expect Chosen: calendar
 # Nothing matches: the app's `empty`.
 type label:Commands zz
 expect Query: calzz
 expect NoCommands
 expect Lit: none
-# The field's own query starts from `defaultQuery`, and filters.
+# The field's own query starts from `defaultQuery`, and filters; the
+# field has its own name for screen readers.
 expect Remote Two
 absent Remote One
+prop label:SearchRemote placeholder FindRemote
 # A search the app answers: its query filters nothing, and while it is
 # `loading` the list is busy and `empty` waits.
 expect Server A
@@ -2007,6 +2063,7 @@ covers [nsh/base] Command
 covers [props] Command.items
 covers [props] Command.query
 covers [props] Command.defaultQuery
+covers [props] Command.searchAccessibilityLabel
 covers [props] Command.filterable
 covers [props] Command.loading
 covers [props] placeholder
@@ -2095,7 +2152,7 @@ expect Open: true triggerPress
 prop label:Due accessibilityState expanded=true
 expect M10
 expect Y2026
-expect D9*
+expect D10.9
 prop label:2026-10-09 role button
 prop label:2026-10-09 accessibilityState selected=true
 # On a phone the calendar spans the sheet: a day is a seventh of its
@@ -2145,20 +2202,30 @@ covers [props] DatePicker.clearButtonAccessibilityLabel
 covers [events] onChange
 covers [events] DatePicker.onOpenChange
 # A range of the picker's own (`defaultValue`), heard as its ends; two
-# months side by side (`numberOfMonths`), the days inside the range in
-# it, its ends selected.
+# months side by side (`numberOfMonths`), every day of the range selected
+# for screen readers, its start, middle and end styled by the item's
+# `data-range-start:`, `data-range-middle:` and `data-range-end:`
+# classes, a middle day's content by `group-data-range-middle:`, and the
+# days of the months around by `data-outside:`.
 prop label:Trip accessibilityValue text=2026/10/05 - 2026/10/07
 tap id:trip
 expect M10
 expect M11
-expect D5*~
-expect D6~
-expect D7*~
+prop label:2026-10-05 accessibilityState selected=true
+prop label:2026-10-06 accessibilityState selected=true
+prop label:2026-10-07 accessibilityState selected=true
+style label:2026-10-05 backgroundColor #ff0000ff
+style label:2026-10-06 backgroundColor #00ff00ff
+style label:2026-10-07 backgroundColor #0000ffff
+style text:D10.6 color #00ff00ff
+style label:2026-09-27 opacity 0.5
 # The first press starts a range, shown but not reported until the
-# second ends it; then the popup closes.
+# second ends it; then the popup closes. Half a range is its start,
+# selected, with no range marked.
 tap label:2026-10-12
-expect D12*
-absent D6~
+prop label:2026-10-12 accessibilityState selected=true
+nostyle label:2026-10-12 backgroundColor
+nostyle label:2026-10-06 backgroundColor
 expect Trip: none
 tap label:2026-10-14
 expect Trip: ["2026-10-12","2026-10-14"]
@@ -2177,6 +2244,7 @@ absent Week
 covers [props] defaultValue
 covers [props] DatePicker.range
 covers [props] DatePicker.numberOfMonths
+covers [props] DatePicker.itemClass
 covers [props] DatePicker.presets
 covers [props] DatePicker.presetsStyle
 covers [props] DatePicker.presetStyle
@@ -2265,31 +2333,33 @@ absent Apple
 expect Fruit: Cherry
 prop label:Fruit accessibilityValue text=Cherry
 prop label:Fruit accessibilityState expanded=false
-# Opening again highlights the chosen item (`focus:`, 40 high; the
-# renderer's `highlighted`), which is selected for screen readers.
+# Opening again highlights the chosen item (`focus:`, 40 high; its
+# content's `group-focus:` color: `renderItem` draws what the item is, the
+# row's state its classes), which is selected for screen readers.
 tap id:fruit
-expect >Cherry ✓
+expect Cherry
+style text:Cherry color #ff0000ff
 prop label:Cherry accessibilityState selected=true
 frame label:Cherry 0 0 390 40
 frame label:Apple 0 0 390 30
 # Choosing the chosen item again closes the list and reports no change.
 tap label:Cherry
 expect Open: false select
-absent >Cherry ✓
+absent Cherry
 expect Changed: cherry 1
 # The app opens it (`open`); Escape or back is heard, and closes it.
 tap text:ShowFruit
-expect >Cherry ✓
+expect Cherry
 event label:Cherry onCancel
 expect Heard: cancel
 expect Open: false cancel
-absent >Cherry ✓
+absent Cherry
 # The backdrop closes it too.
 tap id:fruit
-expect >Cherry ✓
+expect Cherry
 tap below:parent:scroll:label:Cherry
 expect Open: false backdropPress
-absent >Cherry ✓
+absent Cherry
 covers [nsh/base] Select
 covers [props] Select.items
 covers [props] value
@@ -2355,14 +2425,15 @@ covers [props] Select.clearButtonAccessibilityLabel
 # `disabled`: dimmed for screen readers.
 prop label:Locked accessibilityState disabled=true expanded=false
 covers [props] disabled
-# `searchable`: a field above the items (its placeholder and look the
-# app's; on a phone the keyboard comes when it is pressed) filters them by
-# title, ignoring case, and a section without a match goes; `empty` shows
-# in the list's place while none matches.
+# `searchable`: a field above the items (its placeholder, name for screen
+# readers and look the app's; on a phone the keyboard comes when it is
+# pressed) filters them by title, ignoring case, and a section without a
+# match goes; `empty` shows in the list's place while none matches.
 tap id:find
 expect Find: true triggerPress
 expect Apple
 prop below:scroll:label:Apple placeholder Find food
+prop below:scroll:label:Apple accessibilityLabel FindField
 prop below:scroll:label:Apple autoFocus false
 style below:scroll:label:Apple backgroundColor #abcdefff
 style below:scroll:label:Apple borderRadius 4
@@ -2387,6 +2458,7 @@ expect Find: false backdropPress
 absent Apple
 covers [props] Select.searchable
 covers [props] Select.searchPlaceholder
+covers [props] Select.searchAccessibilityLabel
 covers [props] Select.searchClass
 covers [props] Select.searchStyle
 covers [props] Select.empty
@@ -2879,17 +2951,21 @@ frame below:parent:parent:parent:text:m0i0 175 100 0 0
 frame below:below:parent:parent:parent:text:m0i0 25 100 0 0
 frame below:below:below:parent:parent:parent:text:m0i0 0 100 200 0
 # Left of it: d3's text of the app's values, each against the edge,
-# centered on its tick, the ends' kept within the plot's top and bottom.
-frame parent:parent:parent:text:50 0 0 0 100
-frame parent:parent:text:50 -20 0 20 100
-frame parent:text:50 0 45 20 10
-frame parent:parent:text:100 -20 0 20 0
-frame parent:text:100 0 0 20 10
-frame parent:text:0 0 -10 20 10
+# centered on its tick in room as tall as the plot either way; the
+# plot keeps half a label (5) inside its top and bottom edges, so the
+# scale runs from 95 up to 5 and the ends' labels sit on their ticks
+# within it.
+frame parent:parent:parent:text:50 0 -50 0 200
+frame parent:parent:text:50 -20 0 20 200
+frame parent:text:50 0 95 20 10
+frame parent:parent:parent:text:100 0 -95 0 200
+frame parent:text:100 0 95 20 10
+frame parent:parent:parent:text:0 0 -5 0 200
+frame parent:text:0 0 95 20 10
 # Its tick marks (a style) at 100, 50 and 0, its line (classes).
-frame below:parent:parent:parent:text:0 0 0 0 0
+frame below:parent:parent:parent:text:0 0 5 0 0
 frame below:below:parent:parent:parent:text:0 0 50 0 0
-frame below:below:below:parent:parent:parent:text:0 0 100 0 0
+frame below:below:below:parent:parent:parent:text:0 0 95 0 0
 frame below:below:below:below:parent:parent:parent:text:0 0 0 0 100
 # Inside the right edge: above its grid line, against the edge.
 frame parent:parent:parent:text:in50 200 0 0 50
@@ -2916,6 +2992,96 @@ drawing below:parent:text:r10 fillStyle #00ff00ff
 drawing below:parent:text:r10 fillStyle #ff0000ff
 covers [props] Plot.colorScale
 covers [props] Bar.color
+# Candles: each body spans its open to its close, its label at the
+# close, above the first (growing up from 20 to 40), below the second
+# (growing down from 40 to 30).
+expect c40
+frame parent:text:c40 50 60 0 0
+frame text:c40 -10 -10 20 10
+frame parent:text:c30 150 70 0 0
+frame text:c30 -10 0 20 10
+# Each wick from its low to its high in the middle of its band, green
+# up and red down.
+drawing id:wicks moveTo 50 90
+drawing id:wicks lineTo 50 50
+drawing id:wicks moveTo 150 75
+drawing id:wicks lineTo 150 25
+drawing id:wicks strokeStyle #00ff00ff
+drawing id:wicks strokeStyle #ff0000ff
+# Over the first candle the second's wick fades to `inactiveOpacity`.
+expect candle null
+event id:candles onMouseMove position.x=50 position.y=50
+expect candle 0
+animated id:wicks slot.0 1
+animated id:wicks slot.1 0.25
+event id:candles onMouseLeave
+expect candle null
+covers [nsh/base/plot] Rule
+covers [props] Rule.base
+covers [props] Rule.color
+covers [props] Rule.inactiveOpacity
+# Bubbles: the bigger one (cap 400, radius 20) drawn first, the other a
+# quarter of its cap, half its radius; each filled by its sector.
+drawing id:dots arc 150 60 20 0 6.283
+drawing id:dots arc 50 80 10 0 6.283
+drawing id:dots fillStyle #00ff00ff
+drawing id:dots fillStyle #ff0000ff
+# Over the big bubble, off its center: the small one fades to
+# `inactiveOpacity`.
+expect bubble null
+event id:bubbles onMouseMove position.x=140 position.y=70
+expect bubble 1
+animated id:dots slot.0 1
+animated id:dots slot.1 0.25
+# 15 past the small one's edge, within `hitRadius`; far from both, none.
+event id:bubbles onMouseMove position.x=75 position.y=80
+expect bubble 0
+event id:bubbles onMouseMove position.x=100 position.y=5
+expect bubble null
+covers [nsh/base/plot] Dot
+covers [props] Dot.r
+covers [props] Dot.rScale
+covers [props] Dot.color
+covers [props] Dot.inactiveOpacity
+covers [props] Dot.hitRadius
+# Dual axes on the app's domains: the line, the area's top edge, the
+# rule, the bar's end, the grid line, the label and the right axis's
+# tick on the second scale (y2 0 to 40 from 100 up to 5: the right
+# axis's one label, on the top tick, keeps half its height inside the
+# top edge).
+expect b12
+drawing id:dual-line moveTo 50 71.5
+drawing id:dual-line lineTo 150 35.875
+drawing id:dual-area lineTo 150 35.875
+drawing id:dual-rule moveTo 50 100
+drawing id:dual-rule lineTo 50 71.5
+drawing id:dual-dots arc 50 71.5 3 0 6.283
+frame parent:text:b12 50 72 0 0
+drawing id:dual-grid moveTo 0 52.5
+frame parent:text:y2-label 50 53 0 0
+frame parent:parent:parent:text:y2-r40 200 -95 0 200
+# Automatic domains aligned in two steps of each: y 0 to 200, y2 10 to
+# 30; the right axis ticks every step, the grid d3's ticks of 0 to 200.
+drawing id:aligned-line moveTo 50 86
+drawing id:aligned-line lineTo 150 18.5
+expect p10
+expect p20
+expect p30
+drawing id:aligned-grid moveTo 0 27.5
+# Not aligned: y2 is 12 to 27.
+drawing id:own-line moveTo 50 100
+drawing id:own-line lineTo 150 0
+covers [props] Plot.y2Scale
+covers [props] Plot.alignTicks
+covers [props] Line.scale
+covers [props] Area.scale
+covers [props] Rule.scale
+covers [props] Bar.scale
+covers [props] Dot.scale
+covers [props] Grid.scale
+covers [props] Grid.ticks
+covers [props] PlotLabel.scale
+covers [props] PlotAxis.scale
 # Reversed scales: bands from the right edge (middles 250, 150 and 50)
 # and a y scale of 0 to 40 from the top edge (2 points a value), so the
 # bars hang from the top, each label below its bar's end.
@@ -3585,6 +3751,14 @@ absent BETA
 tap id:file-0
 expect Toggled: a.ts false
 expect BETA
+# The second file header follows the wrapped rows of the first file.
+frame parent:parent:parent:id:file-1 0 100 390 20
+tap id:wrap-files
+wait 100
+frame parent:parent:parent:id:file-1 0 140 390 20
+tap id:wrap-files
+expect BETA
+frame parent:parent:parent:id:file-1 0 100 390 20
 # A longer diff of every line reports where its rows are once laid out:
 # 30 rows of 20 points, as wide as its 390 × 100 viewport, at the top.
 expect Scrolled: 0 0 390x600 390x100
