@@ -574,6 +574,7 @@ mod tests {
                 "Arc",
                 "Area",
                 "Bar",
+                "Cell",
                 "Dot",
                 "Grid",
                 "Line",
@@ -585,7 +586,8 @@ mod tests {
                 "RadialGrid",
                 "RadialLine",
                 "Rule",
-                "Sankey"
+                "Sankey",
+                "Treemap"
             ]
         );
     }

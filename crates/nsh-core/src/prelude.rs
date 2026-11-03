@@ -238,7 +238,8 @@ pub use crate::element::{
     reveal_path, round_to_nearest_pixel, safe_area, screen_reader, set_clipboard,
     set_clipboard_image, set_color_scheme, set_interval, set_timeout, set_tokens, signal,
     signal_with, spawn, speech_available, stored, text_metrics, timer, timer_until, tokens,
-    try_apple_keys, try_global, try_os, untracked, use_context, watch_scroll, when, window,
+    try_apple_keys, try_global, try_os, untracked, use_context, watch_scroll, web_input_available,
+    when, window,
 };
 #[cfg(not(target_arch = "wasm32"))]
 pub use crate::element::{background, blocking};

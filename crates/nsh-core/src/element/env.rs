@@ -58,6 +58,9 @@ pub struct Environment {
     /// The platform recognizes speech
     /// ([`crate::platform::Environment::speech`]).
     pub speech: bool,
+    /// The platform gives web views trusted input
+    /// ([`crate::platform::Environment::web_input`]).
+    pub web_input: bool,
 }
 
 impl Default for Environment {
@@ -84,6 +87,7 @@ impl Default for Environment {
             screen_color: false,
             file_requests: false,
             speech: false,
+            web_input: false,
         }
     }
 }
