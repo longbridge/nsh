@@ -3,7 +3,9 @@
 //! readers hear as checked or not, whose `checked:` styles and indicator
 //! part follow the value the app owns; choosing one reports `onSelect` and
 //! closes the menu unless `closeOnSelect` is false; toggling one item sends
-//! only that item and its indicator. A desktop menu, on a Mac.
+//! only that item and its indicator; opening it from the keyboard (Return,
+//! Space or Down on its trigger) focuses its first enabled item, Up its
+//! last, a press none. A desktop menu, on a Mac.
 
 use std::{
     collections::HashMap,
@@ -70,9 +72,13 @@ impl App {
 }
 
 fn start() -> App {
+    start_with(Root::of::<ViewMenu>())
+}
+
+fn start_with(root: Root) -> App {
     let mut config = EngineConfig {
         viewport: Size::new(px(390.0), px(844.0)),
-        ..EngineConfig::new(Root::of::<ViewMenu>())
+        ..EngineConfig::new(root)
     };
     config.environment.os = Os::MacOs;
     config.environment.idiom = Idiom::Desktop;
@@ -316,4 +322,73 @@ fn toggling_one_item_sends_only_what_it_shows() {
         touched.iter().all(|&id| id == item || id == indicator),
         "only the item and its indicator: {touched:?}"
     );
+}
+
+/// A File menu whose first item is disabled: New (disabled), Open, Save,
+/// Quit. The text says the item chosen last.
+#[component]
+fn FileMenu() -> impl IntoElement {
+    let chose = signal("none");
+    let item = move |label: &'static str, disabled: bool| {
+        menu_item()
+            .accessibility_label(label)
+            .disabled(disabled)
+            .on_select(move || chose.set(label))
+            .child(text(label))
+    };
+    view()
+        .pt(px(100.0))
+        .pl(px(40.0))
+        .child(
+            menu()
+                .trigger(
+                    view()
+                        .test_id("file")
+                        .w(px(80.0))
+                        .h(px(30.0))
+                        .child(text("File")),
+                )
+                .child(item("New", true))
+                .child(item("Open", false))
+                .child(item("Save", false))
+                .child(item("Quit", false)),
+        )
+        .child(text(move || format!("chose:{}", chose.get())))
+}
+
+/// Opens the File menu with `key` on its focused trigger, then presses
+/// the item the keyboard focus is on (Space).
+fn open_with_key_and_choose(key: &str) -> App {
+    let mut app = start_with(Root::of::<FileMenu>());
+    app.app.press_key("tab").unwrap();
+    app.app.press_key(key).unwrap();
+    app.app.wait_for("Open").unwrap();
+    app.app.press_key("space").unwrap();
+    app
+}
+
+#[test]
+fn opening_from_the_keyboard_focuses_the_first_enabled_item() {
+    for key in ["enter", "space", "down"] {
+        let mut app = open_with_key_and_choose(key);
+        app.app
+            .wait_for("text:chose:Open")
+            .unwrap_or_else(|e| panic!("{key}: {e}"));
+    }
+}
+
+#[test]
+fn up_on_the_trigger_focuses_the_last_item() {
+    let mut app = open_with_key_and_choose("up");
+    app.app.wait_for("text:chose:Quit").unwrap();
+}
+
+#[test]
+fn a_press_on_the_trigger_focuses_no_item() {
+    let mut app = start_with(Root::of::<FileMenu>());
+    app.app.press("id:file").unwrap();
+    app.app.wait_for("Open").unwrap();
+    app.app.press_key("space").unwrap();
+    assert!(app.app.shows("chose:none"), "no item had the focus");
+    assert!(app.app.shows("Open"), "still open");
 }

@@ -13,10 +13,17 @@
 //! choice of a group by its `role`): the value is the app's, its indicator
 //! a part that takes the item's state.
 
-use std::{rc::Rc, time::Duration};
+use std::{
+    cell::{Cell, RefCell},
+    rc::Rc,
+    time::Duration,
+};
 
 use nsh_core::{
-    AccessibilityState, Checked, ContextMenuEvent, TouchEvent, TouchPhase, element::Style,
+    AccessibilityState, Checked, ContextMenuEvent, TouchEvent, TouchPhase,
+    element::{OrderWatch, Style, watch_order},
+    geometry::Axis,
+    keymap::When,
     prelude::*,
 };
 
@@ -55,6 +62,94 @@ struct MenuContext {
     looks: StateLooks,
     /// Desktops: this level's popup, which its submenus open outside of.
     popup: ElementRef,
+    /// Every level's items, which an opening from the keyboard focuses
+    /// one of.
+    items: Items,
+}
+
+/// Which item an opening from the keyboard focuses, as WAI-ARIA's menu
+/// button and `gpui-base`'s menus do: the first enabled one (Return,
+/// Space, Down on the trigger) or the last (Up).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Keyed {
+    First,
+    Last,
+}
+
+/// An item of a menu, or a submenu's trigger among its menu's items.
+#[derive(Clone, Copy)]
+struct Entry {
+    key: u64,
+    node: ElementRef,
+    /// The submenu it is in (0: the menu).
+    level: u32,
+    disabled: Prop<bool>,
+}
+
+/// A menu's items, kept in tree order (`watch_order`): items render in
+/// the order the core makes them, which conditions and groups change.
+#[derive(Clone)]
+struct Items {
+    list: Rc<RefCell<Vec<Entry>>>,
+    next: Rc<Cell<u64>>,
+    order: Rc<OrderWatch>,
+}
+
+impl Items {
+    /// The items of an opening, focusing the first or last enabled one of
+    /// the menu once they are there when `keyed` asks for it.
+    fn new(keyed: Stored<Option<Keyed>>) -> Self {
+        let list = Rc::new(RefCell::new(Vec::<Entry>::new()));
+        let (listed, sorted) = (list.clone(), list.clone());
+        let order = watch_order(
+            move || listed.borrow().iter().map(|e| e.node).collect(),
+            move |order| {
+                let pick = {
+                    let mut list = sorted.borrow_mut();
+                    let mut taken: Vec<Option<Entry>> = list.drain(..).map(Some).collect();
+                    list.extend(order.iter().filter_map(|&i| taken[i].take()));
+                    let Some(how) = keyed.get() else {
+                        return;
+                    };
+                    let mut enabled = list
+                        .iter()
+                        .filter(|e| e.level == 0 && !e.disabled.get_untracked());
+                    match how {
+                        Keyed::First => enabled.next().copied(),
+                        Keyed::Last => enabled.last().copied(),
+                    }
+                };
+                if let Some(entry) = pick {
+                    keyed.replace(None);
+                    entry.node.focus();
+                }
+            },
+        );
+        Self {
+            list,
+            next: Rc::new(Cell::new(0)),
+            order: Rc::new(order),
+        }
+    }
+
+    /// Adds an item of submenu `level`, which the menu forgets when the
+    /// current owner (the item's component) ends.
+    fn add(&self, node: ElementRef, level: u32, disabled: Prop<bool>) {
+        let key = self.next.get() + 1;
+        self.next.set(key);
+        self.list.borrow_mut().push(Entry {
+            key,
+            node,
+            level,
+            disabled,
+        });
+        self.order.invalidate();
+        let (list, order) = (self.list.clone(), self.order.clone());
+        cleanup(move || {
+            list.borrow_mut().retain(|e| e.key != key);
+            order.invalidate();
+        });
+    }
 }
 
 impl MenuContext {
@@ -111,6 +206,7 @@ fn surface(
     emit: Rc<dyn Fn(MenuEvent)>,
     at: At,
     parts: Surface,
+    keyed: Stored<Option<Keyed>>,
     children: Prop<Children>,
 ) -> AnyElement {
     let sheet = !is_desktop();
@@ -131,6 +227,7 @@ fn surface(
         next: stored(1),
         looks: parts.looks(),
         popup: presence.popup(),
+        items: Items::new(keyed),
     });
     // An attempt to close it: reported, then it closes (none while it
     // goes).
@@ -329,13 +426,22 @@ pub enum MenuEvent {
 /// backdrop), whose items are `MenuItem`s, `MenuSeparator`s and `Submenu`s
 /// (cascading popups on the desktops, the sheet's next items on touch
 /// screens). Choosing an item, a press outside, Escape and the Android back
-/// button close it. It looks like nothing: style the popup or sheet with
+/// button close it. Return, Space or Down on the focused trigger opens it
+/// with the keyboard focus on its first enabled item, Up on its last
+/// (WAI-ARIA's menu button); a press opens it with none. It looks like
+/// nothing: style the popup or sheet with
 /// `popupClass` / `popupStyle`, the backdrop with `backdropClass` /
 /// `backdropStyle`, and the items.
 #[component]
 pub fn Menu(props: MenuProps, cx: Scope<MenuEvent>) -> impl IntoElement {
     let open = OpenState::new(props.open, props.default_open);
+    // An opening from the keyboard: which item it focuses once they are
+    // there.
+    let keyed = stored(None::<Keyed>);
     let change: Rc<dyn Fn(bool, OpenChangeReason)> = Rc::new(move |next, reason| {
+        if !next {
+            keyed.replace(None);
+        }
         open.request(next, || cx.emit(MenuEvent::OpenChange(next, reason)));
     });
     let anchor = element_ref();
@@ -356,6 +462,43 @@ pub fn Menu(props: MenuProps, cx: Scope<MenuEvent>) -> impl IntoElement {
     let toggle = change.clone();
     // In a toolbar, the trigger is one of its items.
     let around = popup_bar();
+    // The trigger's keys while it has the keyboard focus and the menu is
+    // closed: open it at its first item (Return, Space, Down) or its last
+    // (Up), as WAI-ARIA's menu button does; a press opens it with none.
+    let focused = signal(false);
+    let vertical = around
+        .as_ref()
+        .is_some_and(|b| b.axis == Some(Axis::Vertical));
+    {
+        let change = change.clone();
+        effect(move || {
+            if !focused.get() || open.get() {
+                return;
+            }
+            let keys = [
+                ("enter", Keyed::First),
+                ("space", Keyed::First),
+                ("down", Keyed::First),
+                ("up", Keyed::Last),
+            ];
+            // A column toolbar's Up and Down move along it.
+            let keys = if vertical { &keys[..2] } else { &keys[..] };
+            for &(key, how) in keys {
+                let change = change.clone();
+                on_key_with(
+                    key,
+                    KeyOptions {
+                        when: When::NotEditing,
+                        repeat: false,
+                    },
+                    move |_| {
+                        keyed.replace(Some(how));
+                        change(true, OpenChangeReason::TriggerPress);
+                    },
+                );
+            }
+        });
+    }
     // In a bar, the menu open is the bar's: the pointer over another
     // menu's trigger moves it there.
     if let Some(menus) = around.as_ref().map(|b| b.open_menu.clone()) {
@@ -382,7 +525,12 @@ pub fn Menu(props: MenuProps, cx: Scope<MenuEvent>) -> impl IntoElement {
                     has_popup: true,
                     ..AccessibilityState::default()
                 })
-                .on_press(move || toggle(!open.get_untracked(), OpenChangeReason::TriggerPress))
+                .on_focus(move || focused.set(true))
+                .on_blur(move || focused.set(false))
+                .on_press(move || {
+                    keyed.replace(None);
+                    toggle(!open.get_untracked(), OpenChangeReason::TriggerPress)
+                })
                 .on_mouse_enter(move |_: &MouseEvent| {
                     let shown = menus.as_ref().and_then(|m| m.borrow().clone());
                     if let Some(shown) = shown
@@ -400,6 +548,7 @@ pub fn Menu(props: MenuProps, cx: Scope<MenuEvent>) -> impl IntoElement {
             Rc::new(move |e| cx.emit(e)),
             At::Trigger(anchor),
             parts,
+            keyed,
             props.children,
         ))
 }
@@ -535,6 +684,9 @@ pub fn ContextMenu(props: ContextMenuProps, cx: Scope<MenuEvent>) -> impl IntoEl
             Rc::new(move |e| cx.emit(e)),
             At::Pointer(point),
             parts,
+            // The secondary button and a held finger open it with no item
+            // focused.
+            stored(None),
             props.children,
         ))
 }
@@ -604,6 +756,10 @@ pub fn MenuItem(props: MenuItemProps, cx: Scope<MenuItemEvent>) -> impl IntoElem
     let chosen = menu.clone();
     let sheet = menu.filter(|m| m.sheet);
     let (checked, disabled) = (props.checked, props.disabled);
+    let node = element_ref();
+    if let Some(m) = &hover {
+        m.items.add(node, m.level, disabled);
+    }
     let (indicator, children) = (props.indicator, props.children);
     let (indicator_class, indicator_style) = (props.indicator_class, props.indicator_style);
     // The indicator is a part that takes the item's states, as
@@ -660,6 +816,7 @@ pub fn MenuItem(props: MenuItemProps, cx: Scope<MenuItemEvent>) -> impl IntoElem
                 .map(|on| if on { Checked::True } else { Checked::False }),
             ..AccessibilityState::default()
         })
+        .element_ref(&node)
         .checked_style(props.checked_style)
         .disabled(disabled)
         .optional_label(props.accessibility_label)
@@ -793,6 +950,7 @@ pub fn Submenu(props: SubmenuProps, cx: Scope<NoEvent>) -> impl IntoElement {
             .into_element();
     }
     let anchor = element_ref();
+    menu.items.add(anchor, menu.level, props.disabled);
     let edges = menu.popup;
     let open = move || {
         if !props.disabled.get_untracked() {

@@ -17,6 +17,9 @@ A menu is a list of actions its trigger opens. One structure serves every device
 Choosing an item, a press outside, Escape, the Android back button and VoiceOver's escape gesture close it. `ContextMenu` is the same menu opened
 by the secondary button (a right click) at the pointer, or by a finger held on its trigger on touch screens.
 
+Return, Space or Down on the focused trigger opens the menu with the keyboard focus on its first enabled item, and Up
+with it on its last; the arrow keys then move between the items. A press opens it with no item focused.
+
 ```rust tabs
 use nsh_base::{menu, menu_item, menu_separator, submenu};
 use nsh_core::prelude::*;
