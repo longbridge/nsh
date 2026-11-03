@@ -2463,6 +2463,30 @@ mod tests {
     }
 
     #[test]
+    fn a_tall_scroll_views_bar_stays_in_view() {
+        // A horizontal scroll view 1000 tall in a vertical one 200 tall
+        // scrolled down by 600: the bar runs along the bottom of what is
+        // visible of it, where the mouse grabs it.
+        let root = root();
+        let outer = view(&root, 2, ViewKind::Scroll, rect(10.0, 10.0, 200.0, 200.0));
+        outer.state_mut().scroll.as_mut().unwrap().y = Points(600.0);
+        let inner = view(&outer, 4, ViewKind::Scroll, rect(0.0, 0.0, 200.0, 1000.0));
+        {
+            let mut s = inner.state_mut();
+            let scroll = s.scroll.as_mut().unwrap();
+            scroll.horizontal = true;
+            scroll.indicator = true;
+            scroll.content = nsh_core::geometry::size(Points(800.0), Points(1000.0));
+        }
+        let visible = inner.visible_bounds();
+        assert!((visible.origin.y.0 - 600.0).abs() < 1e-3, "{visible:?}");
+        assert!((visible.size.height.0 - 200.0).abs() < 1e-3, "{visible:?}");
+        assert!((visible.size.width.0 - 200.0).abs() < 1e-3, "{visible:?}");
+        assert!(crate::scroll::grabs_thumb(&inner, 20.0, 797.0));
+        assert!(!crate::scroll::grabs_thumb(&inner, 20.0, 997.0));
+    }
+
+    #[test]
     fn local_points_go_through_the_chain() {
         let root = root();
         let s = view(&root, 2, ViewKind::Scroll, rect(10.0, 10.0, 200.0, 200.0));

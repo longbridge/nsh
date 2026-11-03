@@ -161,7 +161,17 @@ tap text:Blocked
 expect Blocked presses: 1
 prop id:off accessibilityState disabled=true
 style id:off opacity 1
+# `hitSlop`: presses count this far outside the button, one number for
+# every side or the sides named, following a signal; none without it.
+prop id:close hitSlop top=12 right=12 bottom=12 left=12
+tap id:close
+expect Presses: 111
+prop id:sides hitSlop {}
+tap text:Widen
+prop id:sides hitSlop top=4 left=2
+prop id:plain hitSlop {}
 covers [nsh/base] Button
+covers [props] hitSlop
 covers [props] role
 covers [props] accessibilityLabel
 covers [props] disabled
@@ -203,6 +213,12 @@ style id:archived opacity 1
 listens id:archived onPress
 tap text:Archived
 expect Log: open https://example.com/docs, press, route /orders/42, route /archive
+# `hitSlop`: presses count this far outside the link, one number for
+# every side or the sides named, following a signal; none without it.
+prop id:help hitSlop top=12 right=12 bottom=12 left=12
+tap text:Help
+prop id:help hitSlop top=4 left=2
+prop id:docs hitSlop {}
 covers [nsh/base] Link
 covers [props] Link.href
 covers [props] accessibilityLabel
@@ -409,7 +425,7 @@ covers [events] NavPage.onBackPress
 covers [events] NavPage.onDismiss
 # base-nav-stack
 tap id:case-base-nav-stack
-# on screen headless (no platform hides the covered ones).
+# Only the top page is on screen; the controls sit outside the stack.
 expect Routes: home
 expect Depth: 1
 expect Renders: 1
@@ -425,7 +441,6 @@ expect Renders: 2
 tap text:Push
 expect Page p2 at 2
 expect Routes: home > p1 > p2
-expect Bumps of home: 1
 # pop: one page.
 tap text:Pop
 expect Routes: home > p1
@@ -435,7 +450,6 @@ expect Renders: 3
 # The same route twice is two pages; remove takes the topmost.
 tap text:Push twice
 expect Routes: home > p1 > twice > twice
-expect Page twice at 2
 expect Page twice at 3
 expect Renders: 5
 tap text:Remove twice
@@ -476,7 +490,6 @@ expect Cleanups: p1 p2 p3 p4 p5 twice twice
 # setRoutes: all pages.
 tap text:Set routes
 expect Routes: home > a > b
-expect Page a at 1
 expect Page b at 2
 absent Page swapped at 1
 # remove below: the pages above follow with their index.
@@ -952,6 +965,12 @@ frame text:Locked 32 4 47 17
 listens id:locked onPress
 tap text:Locked
 expect Changes: 12
+# `hitSlop`: presses count this far outside the switch, one number for
+# every side or the sides named, following a signal; none without it.
+prop id:mute hitSlop top=12 right=12 bottom=12 left=12
+tap label:Mute
+prop id:mute hitSlop top=4 left=2
+prop id:wifi hitSlop {}
 covers [nsh/base] Switch
 covers [props] Switch.checked
 covers [props] disabled
@@ -1010,6 +1029,12 @@ frame text:Locked 28 2 47 17
 listens id:locked onPress
 tap text:Locked
 expect Changes: 12
+# `hitSlop`: presses count this far outside the checkbox, one number for
+# every side or the sides named, following a signal; none without it.
+prop id:agree hitSlop top=12 right=12 bottom=12 left=12
+tap label:Agree
+prop id:agree hitSlop top=4 left=2
+prop id:all hitSlop {}
 covers [nsh/base] Checkbox
 covers [props] Checkbox.checked
 covers [props] Checkbox.indeterminate
@@ -1072,6 +1097,12 @@ tap label:Team plan
 expect Changes: 2
 expect Plan: team
 prop id:team accessibilityState selected=true checked=true
+# `hitSlop`: presses count this far outside the radio, one number for
+# every side or the sides named, following a signal; none without it.
+prop id:solo hitSlop top=12 right=12 bottom=12 left=12
+tap label:Solo
+prop id:solo hitSlop top=4 left=2
+prop id:basic hitSlop {}
 covers [nsh/base] Radio
 covers [nsh/base] RadioGroup
 covers [props] Radio.checked
@@ -1206,6 +1237,12 @@ frame text:Italic 18 2 47 17
 prop id:bold focusable false
 tap id:lock
 frame text:Bold 38 2 31 17
+# `hitSlop`: presses count this far outside the toggle, one number for
+# every side or the sides named, following a signal; none without it.
+prop id:pin hitSlop top=12 right=12 bottom=12 left=12
+tap label:Pin
+prop id:pin hitSlop top=4 left=2
+prop id:favorite hitSlop {}
 covers [nsh/base] Toggle
 covers [nsh/base] ToggleGroup
 covers [props] Toggle.pressed
@@ -1654,6 +1691,9 @@ prop label:Own accessibilityState disabled=true
 type label:Code 12a
 expect Code [12]
 prop label:Code value 12
+# The cells that hold a digit have `data-filled` (`data-filled:`).
+style parent:text:1 opacity 0.5
+style parent:text:2 opacity 0.5
 # The focus: the caret (50 high, 4 below the cell's top) in the cell that
 # takes the next digit; it stays while it blinks (its opacity moves
 # natively), so the layout holds still.
@@ -1668,6 +1708,7 @@ expect Code [1234]
 expect Done [1234]
 prop label:Code value 1234
 style parent:text:4 backgroundColor #00ff00ff
+style parent:text:4 opacity 0.5
 # Two groups of two cells: the last cell 2 + 30 + 4 into the second group,
 # which is 10 after the first (2 + 30 + 4 + 30 + 2 wide).
 frame parent:text:4 36 4 30 20
@@ -2910,17 +2951,21 @@ frame below:parent:parent:parent:text:m0i0 175 100 0 0
 frame below:below:parent:parent:parent:text:m0i0 25 100 0 0
 frame below:below:below:parent:parent:parent:text:m0i0 0 100 200 0
 # Left of it: d3's text of the app's values, each against the edge,
-# centered on its tick, the ends' kept within the plot's top and bottom.
-frame parent:parent:parent:text:50 0 0 0 100
-frame parent:parent:text:50 -20 0 20 100
-frame parent:text:50 0 45 20 10
-frame parent:parent:text:100 -20 0 20 0
-frame parent:text:100 0 0 20 10
-frame parent:text:0 0 -10 20 10
+# centered on its tick in room as tall as the plot either way; the
+# plot keeps half a label (5) inside its top and bottom edges, so the
+# scale runs from 95 up to 5 and the ends' labels sit on their ticks
+# within it.
+frame parent:parent:parent:text:50 0 -50 0 200
+frame parent:parent:text:50 -20 0 20 200
+frame parent:text:50 0 95 20 10
+frame parent:parent:parent:text:100 0 -95 0 200
+frame parent:text:100 0 95 20 10
+frame parent:parent:parent:text:0 0 -5 0 200
+frame parent:text:0 0 95 20 10
 # Its tick marks (a style) at 100, 50 and 0, its line (classes).
-frame below:parent:parent:parent:text:0 0 0 0 0
+frame below:parent:parent:parent:text:0 0 5 0 0
 frame below:below:parent:parent:parent:text:0 0 50 0 0
-frame below:below:below:parent:parent:parent:text:0 0 100 0 0
+frame below:below:below:parent:parent:parent:text:0 0 95 0 0
 frame below:below:below:below:parent:parent:parent:text:0 0 0 0 100
 # Inside the right edge: above its grid line, against the edge.
 frame parent:parent:parent:text:in50 200 0 0 50
@@ -2999,6 +3044,104 @@ covers [props] Dot.rScale
 covers [props] Dot.color
 covers [props] Dot.inactiveOpacity
 covers [props] Dot.hitRadius
+# Dual axes on the app's domains: the line, the area's top edge, the
+# rule, the bar's end, the grid line, the label and the right axis's
+# tick on the second scale (y2 0 to 40 from 100 up to 5: the right
+# axis's one label, on the top tick, keeps half its height inside the
+# top edge).
+expect b12
+drawing id:dual-line moveTo 50 71.5
+drawing id:dual-line lineTo 150 35.875
+drawing id:dual-area lineTo 150 35.875
+drawing id:dual-rule moveTo 50 100
+drawing id:dual-rule lineTo 50 71.5
+drawing id:dual-dots arc 50 71.5 3 0 6.283
+frame parent:text:b12 50 72 0 0
+drawing id:dual-grid moveTo 0 52.5
+frame parent:text:y2-label 50 53 0 0
+frame parent:parent:parent:text:y2-r40 200 -95 0 200
+# Automatic domains aligned in two steps of each: y 0 to 200, y2 10 to
+# 30; the right axis ticks every step, the grid d3's ticks of 0 to 200.
+drawing id:aligned-line moveTo 50 86
+drawing id:aligned-line lineTo 150 18.5
+expect p10
+expect p20
+expect p30
+drawing id:aligned-grid moveTo 0 27.5
+# Not aligned: y2 is 12 to 27.
+drawing id:own-line moveTo 50 100
+drawing id:own-line lineTo 150 0
+covers [props] Plot.y2Scale
+covers [props] Plot.alignTicks
+covers [props] Line.scale
+covers [props] Area.scale
+covers [props] Rule.scale
+covers [props] Bar.scale
+covers [props] Dot.scale
+covers [props] Grid.scale
+covers [props] Grid.ticks
+covers [props] PlotLabel.scale
+covers [props] PlotAxis.scale
+# Heatmaps: four cells of 100 by 50, `col-b` left of `col-a` (the x
+# scale's `domain`), `row-a` over `row-b` (the order the cells name them),
+# each label's box its cell's; the axes write the bands' categories.
+expect col-a
+expect col-b
+expect row-a
+expect row-b
+frame parent:text:v-15 150 25 0 0
+frame parent:text:v5 50 25 0 0
+frame parent:text:v45 150 75 0 0
+frame parent:text:vnone 50 75 0 0
+# Round corners (the canvas: the sibling below the first label). Colors
+# along the diverging ramp over -15 to 25: -15 at its dark red end, 5 at
+# its white middle (`pivot`), 45 past the domain at its dark green end,
+# the row without a value navy (`unknown`).
+drawing below:parent:text:v-15 roundRect 100 0 100 50 4 4 4 4
+drawing below:parent:text:v-15 roundRect 0 50 100 50 4 4 4 4
+drawing below:parent:text:v-15 fillStyle #990000ff
+drawing below:parent:text:v-15 fillStyle #ffffffff
+drawing below:parent:text:v-15 fillStyle #006600ff
+drawing below:parent:text:v-15 fillStyle #000080ff
+# The labels: black, white on the dark cells (`data-dark`), 9 points.
+style text:v5 color #000000ff
+style text:v-15 color #ffffffff
+style text:v45 color #ffffffff
+style text:vnone color #ffffffff
+style text:v5 fontSize 9
+# Over the first cell: the others' labels fade to `inactiveOpacity`.
+expect cell null
+event id:heat onMouseMove position.x=150 position.y=25
+expect cell 0
+animated parent:text:v-15 opacity 1
+animated parent:text:v5 opacity 0.25
+event id:heat onMouseMove position.x=50 position.y=75
+expect cell 3
+event id:heat onMouseLeave
+expect cell null
+# Cells colored by category through an ordinal scale, square, the x
+# scale's bands in the order the cells name them.
+frame parent:text:tag-a 50 25 0 0
+frame parent:text:tag-b 150 25 0 0
+drawing below:parent:text:tag-a rect 0 0 100 50
+drawing below:parent:text:tag-a fillStyle #00ff00ff
+drawing below:parent:text:tag-a fillStyle #ff0000ff
+# Along a sequential ramp over 0 to 20: 0 white, 10 gray, 40 past the
+# domain black, the row without a value magenta (`unknown`).
+frame parent:text:lv-c 125 10 0 0
+drawing below:parent:text:lv-a fillStyle #ffffffff
+drawing below:parent:text:lv-a fillStyle #808080ff
+drawing below:parent:text:lv-a fillStyle #000000ff
+drawing below:parent:text:lv-a fillStyle #ff00ffff
+covers [nsh/base/plot] Cell
+covers [props] Cell.x
+covers [props] Cell.y
+covers [props] Cell.color
+covers [props] Cell.cornerRadii
+covers [props] Cell.inactiveOpacity
+covers [props] Cell.label
+covers [props] Cell.labelClass
+covers [props] Cell.labelStyle
 # Reversed scales: bands from the right edge (middles 250, 150 and 50)
 # and a y scale of 0 to 40 from the top edge (2 points a value), so the
 # bars hang from the top, each label below its bar's end.
@@ -3170,6 +3313,82 @@ covers [props] Sankey.nodeLabelStyle
 covers [props] Sankey.valueLabelClass
 covers [props] Sankey.valueLabelStyle
 covers [props] Sankey.hoverDim
+# A treemap fills its plot: `Grow` (80 of 100) left, `Hold` right of a
+# gap of 4 (`paddingInner`'s first level), their corners on whole points;
+# each with a band of 20 (`paddingTop`) for its name, its leaves 2 apart
+# (the second level) inside a padding of 1 (`paddingOuter`), `Ant` (50)
+# over `Bee` (30) at `ratio` 4 (side by side at the default). The labels come after the canvases: the
+# leaves' (by their classes: `Bee` and `Cat` outlined blue, `Ant` black),
+# then the groups' (`groupClass`'s fill, `groupStyle`'s opacity). Each
+# leaf is colored by its change (`colorValue`) on the plot's diverging
+# scale, its corners `cornerRadii`; `Zed` (0) takes no area.
+drawing below:parent:parent:text:Grow roundRect 1 71 237 28 3 3 3 3
+drawing below:parent:parent:text:Grow roundRect 244 21 55 78 3 3 3 3
+drawing below:parent:parent:text:Grow fillStyle #ff0000ff
+drawing below:parent:parent:text:Grow fillStyle #ffffffff
+drawing below:parent:parent:text:Grow strokeStyle #0000ffff
+style below:parent:parent:text:Grow opacity 0.9
+drawing below:below:parent:parent:text:Grow roundRect 1 21 237 48 3 3 3 3
+drawing below:below:parent:parent:text:Grow fillStyle #00ff00ff
+drawing below:below:parent:parent:text:Grow strokeStyle #000000ff
+drawing below:below:below:parent:parent:text:Grow roundRect 0 0 239 100 3 3 3 3
+drawing below:below:below:parent:parent:text:Grow roundRect 243 0 57 100 3 3 3 3
+drawing below:below:below:parent:parent:text:Grow fillStyle #eeeeeeff
+style below:below:below:parent:parent:text:Grow opacity 0.5
+absent Zed
+# The labels: a leaf's box as big as it, padded by `labelClass`, its
+# name and value (`valueLabel`, of its value) centered in it; a group's
+# name in its band (a group writes no value).
+frame parent:parent:text:Ant 1 21 237 48
+frame parent:parent:text:Grow 0 0 239 20
+style text:Ant fontSize 10
+style text:t50 fontWeight 600
+style text:t50 color #333333ff
+style text:Grow fontSize 9
+expect Hold
+prop id:tree accessibilityLabel Tree
+frame id:treemap 0 0 300 100
+# The pointer over `Ant` reports its row, and the other nodes' labels
+# fade to `inactiveOpacity`; in `Grow`'s band, the group.
+expect node null
+event id:tree onMouseMove position.x=50 position.y=50
+expect node 2
+animated parent:parent:text:Bee opacity 0.25
+animated parent:parent:text:Ant opacity 1
+event id:tree onMouseMove position.x=50 position.y=10
+expect node 0
+event id:tree onMouseLeave
+expect node null
+# `Bee` grows to 60 and moves to its new box; its label follows.
+tap id:grow-tree
+expect t60
+absent t30
+# The rows' order (`sort="data"`), colored by kind (`color`): `Grow`'s
+# leaves in its fill, `Hold`'s in the other.
+expect d-Ant
+expect d-Cat
+covers [nsh/base/plot] Treemap
+covers [props] Treemap.id
+covers [props] Treemap.parent
+covers [props] Treemap.ratio
+covers [props] Treemap.paddingInner
+covers [props] Treemap.paddingOuter
+covers [props] Treemap.paddingTop
+covers [props] Treemap.cornerRadii
+covers [props] Treemap.colorValue
+covers [props] Treemap.leafClass
+covers [props] Treemap.leafStyle
+covers [props] Treemap.groupClass
+covers [props] Treemap.groupStyle
+covers [props] Treemap.inactiveOpacity
+covers [props] Treemap.label
+covers [props] Treemap.valueLabel
+covers [props] Treemap.labelClass
+covers [props] Treemap.labelStyle
+covers [props] Treemap.valueLabelClass
+covers [props] Treemap.valueLabelStyle
+covers [props] Treemap.groupLabel
+covers [props] Treemap.groupLabelStyle
 # A plot inside a `PlotAppearScope`, shown and taken away, its period
 # and the scope's `id` changed. Its line's clip is read as the animation
 # graph runs it: 100 wide once drawn in, 0 at the start of an appear of
@@ -3668,6 +3887,14 @@ absent BETA
 tap id:file-0
 expect Toggled: a.ts false
 expect BETA
+# The second file header follows the wrapped rows of the first file.
+frame parent:parent:parent:id:file-1 0 100 390 20
+tap id:wrap-files
+wait 100
+frame parent:parent:parent:id:file-1 0 140 390 20
+tap id:wrap-files
+expect BETA
+frame parent:parent:parent:id:file-1 0 100 390 20
 # A longer diff of every line reports where its rows are once laid out:
 # 30 rows of 20 points, as wide as its 390 × 100 viewport, at the top.
 expect Scrolled: 0 0 390x600 390x100

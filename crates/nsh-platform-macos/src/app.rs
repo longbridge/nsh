@@ -477,6 +477,7 @@ fn initial_environment() -> Environment {
         screen_color: true,
         file_requests: true,
         speech: true,
+        web_input: true,
         ..Environment::default()
     }
 }

@@ -12,7 +12,7 @@ use nsh_core::{
 };
 
 use super::{
-    Axis, PlotContext, STROKE_ROOM,
+    Axis, PlotContext, STROKE_ROOM, ValueScale,
     bar::{BarBase, grown, row_opacity},
     layer, mark_canvas,
     scale::extent,
@@ -36,6 +36,13 @@ pub struct RuleProps {
     /// [`Bar`]: super::Bar
     #[prop(default)]
     pub base: Prop<BarBase>,
+    /// The y scale its values go along, as [`Bar`]'s `scale`: `"y"` (the
+    /// default, the plot's `yScale`) or `"y2"` (its second one,
+    /// `y2Scale`); lines across the plot put their values along x.
+    ///
+    /// [`Bar`]: super::Bar
+    #[prop(default)]
+    pub scale: Prop<ValueScale>,
     /// How its lines appear one after another (as `Bar`'s `stagger`, 0 to
     /// 0.95): the share of the plot's appear over which they start, row by
     /// row, each growing from its start for the rest of it; 0 (the
@@ -113,7 +120,7 @@ pub fn Rule(props: RuleProps, _cx: Scope<NoEvent>) -> impl IntoElement {
     let Some(plot) = PlotContext::of("Rule") else {
         return layer();
     };
-    let (accessor, base) = (props.value, props.base);
+    let (accessor, base, scale) = (props.value, props.base, props.scale);
     let rows = move || plot.rows.get();
     let values = series::values(rows, move || accessor.get().or_else(|| plot.y.get()));
     let bases = series::values(rows, move || base.with(BarBase::row));
@@ -138,7 +145,7 @@ pub fn Rule(props: RuleProps, _cx: Scope<NoEvent>) -> impl IntoElement {
     // Along the axis without bands.
     let value_axis = computed(move || match plot.band_axis.get() {
         Some(Axis::Y) => Axis::X,
-        _ => Axis::Y,
+        _ => Axis::from(scale.get()),
     });
     plot.add(move |key| Mark {
         key,
@@ -159,6 +166,7 @@ pub fn Rule(props: RuleProps, _cx: Scope<NoEvent>) -> impl IntoElement {
             return None;
         }
         let (x_map, y_map) = (plot.x_map.get(), plot.y_map.get());
+        let values_y = plot.y_map_of(scale.get());
         let len = plot.rows.with(|rows| rows.len());
         let (places, step, value_map, across): (Arc<[f32]>, f32, _, bool) =
             match (x_map.band(), y_map.band()) {
@@ -167,7 +175,7 @@ pub fn Rule(props: RuleProps, _cx: Scope<NoEvent>) -> impl IntoElement {
                         .map(|i| band.center(i).unwrap_or(f32::NAN))
                         .collect(),
                     band.step(),
-                    y_map,
+                    values_y,
                     false,
                 ),
                 (None, Some(band)) => (
@@ -181,7 +189,7 @@ pub fn Rule(props: RuleProps, _cx: Scope<NoEvent>) -> impl IntoElement {
                 _ => {
                     let xs = plot.xs.get();
                     let step = spacing(&xs);
-                    (xs, step, y_map, false)
+                    (xs, step, values_y, false)
                 }
             };
         let stems = spans.with(|spans| {
@@ -241,14 +249,19 @@ pub fn Rule(props: RuleProps, _cx: Scope<NoEvent>) -> impl IntoElement {
                 };
                 let (at, from) = (Num::Const(stem.at), Num::Const(stem.from));
                 p = plot
-                    .traced(p.begin_path(), true, true, |p| match g.across {
-                        true => p
-                            .op(CanvasOp::Path(PathOp::MoveTo(from, at)))
-                            .op(CanvasOp::Path(PathOp::LineTo(end, at))),
-                        false => p
-                            .op(CanvasOp::Path(PathOp::MoveTo(at, from)))
-                            .op(CanvasOp::Path(PathOp::LineTo(at, end))),
-                    })
+                    .traced(
+                        p.begin_path(),
+                        true,
+                        (!g.across).then_some(scale.get()),
+                        |p| match g.across {
+                            true => p
+                                .op(CanvasOp::Path(PathOp::MoveTo(from, at)))
+                                .op(CanvasOp::Path(PathOp::LineTo(end, at))),
+                            false => p
+                                .op(CanvasOp::Path(PathOp::MoveTo(at, from)))
+                                .op(CanvasOp::Path(PathOp::LineTo(at, end))),
+                        },
+                    )
                     .stroke();
             }
             p

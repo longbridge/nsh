@@ -42,6 +42,20 @@
 // through a square root scale (`r`, `rScale`), its fill from its row's
 // category (`color`), the others fading with the hover
 // (`inactiveOpacity`), found past its edge within `hitRadius`.
+// Dual axes: marks on the plot's second y scale (`y2Scale`, a mark's
+// `scale="y2"`): a line, an area, a rule, a bar, dots, a grid line, a label
+// and a right-hand axis; automatic domains aligned in the same steps
+// (`alignTicks`), a `Grid` without values on their ticks (`ticks`), and
+// a plot that does not align.
+// Heatmaps: a `Cell` per row in the bands of its two categories (`x`,
+// `y`), the x scale's bands in the order of its `domain`, the y scale's
+// in the order the cells name them, which the `PlotAxis`es write; colored
+// by its `value` along a diverging `colorScale` about its `pivot` (a value
+// past the `domain` at its end, a row without one `unknown`), along a
+// sequential one, or by its `color` category through an ordinal one; its
+// corners round (`cornerRadii`), a `label` in each cell (`labelClass`,
+// `labelStyle`) light on dark cells (`data-dark:`), the others fading with
+// the hover (`inactiveOpacity`).
 // Reversed scales (`reverse`): bars hanging from the top of a reversed
 // linear y scale in bands from the right edge, and bars across from the
 // right edge of a reversed x; the axis's labels and the hover follow.
@@ -57,11 +71,18 @@
 // flows between the plot's rows, reports the node under the pointer and
 // steps through its nodes with a screen reader's increment, and moves to
 // new flows with `motion.update`; links that make a cycle draw nothing.
+// A `Treemap` (`id`, `parent`, `value`, `sort`, `ratio`, `paddingInner`,
+// `paddingOuter`, `paddingTop`, `cornerRadii`, `color`, `colorValue`,
+// `inactiveOpacity`, its `leaf`, `group` and `hover` parts, its labels:
+// `label`, `valueLabel`, `labelPlacement`, `groupLabel` and their parts)
+// tiles the plot's rows as a hierarchy, reports the node under the
+// pointer and moves to new rows with `motion.update`; a leaf of 0 takes
+// no area.
 // A `PlotAppearScope` (`id`) remembers the appears that finished in it: a
 // plot made again there shows whole at once, a new `appearGeneration` (a
 // string) and a new `id` draw it in again.
 import { Text, View, signal } from "nsh";
-import { Arc, Area, Bar, Dot, Grid, Line, Pie, Plot, PlotAppearScope, PlotAxis, PlotLabel, RadialGrid, RadialLine, Rule, Sankey } from "nsh/base/plot";
+import { Arc, Area, Bar, Cell, Dot, Grid, Line, Pie, Plot, PlotAppearScope, PlotAxis, PlotLabel, RadialGrid, RadialLine, Rule, Sankey, Treemap } from "nsh/base/plot";
 
 type Row = { t: number; price: number; avg: number };
 type Sale = { v: number; w: number };
@@ -173,10 +194,15 @@ function App() {
       <ColorCase />
       <RangeCase />
       <DotCase />
+      <CellCase />
+      <CellColorCase />
+      <CellRampCase />
+      <DualCase />
       <ReverseCase />
       <RadarCase />
       <LabelCase />
       <SankeyCase />
+      <TreemapCase />
       <StackCase />
       <ScopeCase />
     </View>
@@ -456,6 +482,78 @@ function SankeyCase() {
   );
 }
 
+type Node = { key: string; group?: string; name: string; size?: number; chg?: number; kind?: string };
+
+const TREE: Node[] = [
+  { key: "g", name: "Grow", kind: "a" },
+  { key: "h", name: "Hold", kind: "b" },
+  { key: "a", group: "g", name: "Ant", size: 50, chg: 2, kind: "a" },
+  { key: "b", group: "g", name: "Bee", size: 30, chg: -2, kind: "a" },
+  { key: "c", group: "h", name: "Cat", size: 20, chg: 0, kind: "b" },
+  { key: "z", group: "h", name: "Zed", size: 0, chg: 1, kind: "b" },
+];
+const RETREE: Node[] = TREE.map((n) => (n.key === "b" ? { ...n, size: 60 } : n));
+
+/** Two groups of leaves on a 300 by 100 plot: `Grow` (80) on the left,
+ * `Hold` (20) right of a 4-point gap, each with a band of 20 for its
+ * name, its leaves 2 apart inside a padding of 1; colored by their change
+ * on a diverging scale, red to white to green; `Zed` (0) takes no area.
+ * At a `ratio` of 4, `Ant` lies over `Bee` (side by side by default).
+ * `Bee` grows to 60 with the next rows. A second plot tiles the same
+ * leaves in the rows' order, colored by kind, without bands. */
+function TreemapCase() {
+  const node = signal<number | null>(null);
+  const grown = signal(false);
+  return (
+    <View>
+      <Plot
+        testID="tree"
+        data={grown() ? RETREE : TREE}
+        accessibilityLabel="Tree"
+        colorScale={{ type: "diverging", domain: [-2, 2], range: ["#ff0000", "#ffffff", "#00ff00"] }}
+        motion={{ update: { duration: 200 } }}
+        onHoverChange={({ index }) => node.set(index)}
+        style={{ width: 300, height: 100 }}
+      >
+        <Treemap
+          testID="treemap"
+          id="key"
+          parent="group"
+          value="size"
+          ratio={4}
+          paddingInner={[4, 2]}
+          paddingOuter={1}
+          paddingTop={20}
+          cornerRadii={3}
+          colorValue="chg"
+          leafClass={(d: Node) => (d.key === "a" ? "stroke-[#000000]" : "stroke-[#0000ff]")}
+          leafStyle={{ opacity: 0.9 }}
+          groupClass="fill-[#eeeeee]"
+          groupStyle={{ opacity: 0.5 }}
+          inactiveOpacity={0.25}
+          label="name"
+          valueLabel={(_: Node, value: number) => `t${value}`}
+          labelPlacement="center"
+          labelClass="p-1"
+          labelStyle={{ fontSize: 10 }}
+          valueLabelClass="font-semibold"
+          valueLabelStyle={{ color: "#333333" }}
+          groupLabel="name"
+          groupLabelClass="px-1"
+          groupLabelStyle={{ fontSize: 9 }}
+          hoverClass="border"
+          hoverStyle={{ borderColor: "#ff00ff" }}
+        />
+      </Plot>
+      <Text>{`node ${node()}`}</Text>
+      <View testID="grow-tree" onPress={() => grown.set(true)} style={{ height: 20 }} />
+      <Plot testID="tree-data" data={TREE} colorScale={{ type: "ordinal", domain: ["a", "b"], range: ["#ff0000", "#00ff00"] }} style={{ width: 100, height: 100 }}>
+        <Treemap id="key" parent="group" value="size" sort="data" color="kind" label={(d: Node) => `d-${d.name}`} />
+      </Plot>
+    </View>
+  );
+}
+
 type Candle = { o: number; c: number; l: number; h: number; dir: string };
 
 const CANDLES: Candle[] = [
@@ -524,6 +622,147 @@ function DotCase() {
         />
       </Plot>
       <Text>{`bubble ${hovered()}`}</Text>
+    </View>
+  );
+}
+
+type Heat = { col: string; line: string; v: number | null };
+
+const HEAT: Heat[] = [
+  { col: "col-a", line: "row-a", v: -15 },
+  { col: "col-b", line: "row-a", v: 5 },
+  { col: "col-a", line: "row-b", v: 45 },
+  { col: "col-b", line: "row-b", v: null },
+];
+
+/** Four cells of a 200 by 100 plot, in two bands of 100 across and two of
+ * 50 down: the columns in the order of the x scale's `domain` (`col-b` at
+ * the left), the lines in the order the cells name them (`row-a` at the
+ * top). Colored along a ramp from dark red through white to dark green
+ * over -15 to 25, white at 5 (`pivot`), 45 past the domain at its green
+ * end and the row without a value navy (`unknown`); round corners of 4; a
+ * label in each, black, or white on the dark cells; the other cells'
+ * labels fading to 0.25 with the hover. */
+function CellCase() {
+  const hovered = signal<number | null>(null);
+  return (
+    <View>
+      <Plot
+        testID="heat"
+        data={HEAT}
+        xScale={{ type: "band", domain: ["col-b", "col-a"] }}
+        yScale={{ type: "band" }}
+        colorScale={{ type: "diverging", domain: [-15, 25], pivot: 5, range: ["#990000", "#ffffff", "#006600"], unknown: "#000080" }}
+        onHoverChange={({ index }) => hovered.set(index)}
+        style={{ width: 200, height: 100 }}
+      >
+        <Cell
+          x="col"
+          y="line"
+          value="v"
+          cornerRadii={4}
+          inactiveOpacity={0.25}
+          label={(d: Heat) => (d.v == null ? "vnone" : `v${d.v}`)}
+          labelClass="text-[#000000] data-dark:text-[#ffffff]"
+          labelStyle={{ fontSize: 9 }}
+        />
+        <PlotAxis placement="top" labelClass="h-[10px] w-[40px]" />
+        <PlotAxis placement="left" labelClass="h-[10px] w-[40px]" />
+      </Plot>
+      <Text>{`cell ${hovered()}`}</Text>
+    </View>
+  );
+}
+
+type Tagged = { col: string; tag: string };
+
+const TAGGED: Tagged[] = [
+  { col: "tag-a", tag: "q" },
+  { col: "tag-b", tag: "p" },
+];
+
+/** Two square cells of 100 by 50 in one line, colored by their category
+ * through an ordinal scale: `q` green, `p` red. */
+function CellColorCase() {
+  return (
+    <Plot
+      data={TAGGED}
+      xScale={{ type: "band" }}
+      yScale={{ type: "band" }}
+      colorScale={{ type: "ordinal", domain: ["p", "q"], range: ["#ff0000", "#00ff00"] }}
+      interactive={false}
+      style={{ width: 200, height: 50 }}
+    >
+      <Cell x="col" y={() => "all"} color="tag" label="col" labelClass="h-[10px] w-[30px]" />
+    </Plot>
+  );
+}
+
+type Level = { at: string; v: number | null };
+
+const LEVELS: Level[] = [
+  { at: "lv-a", v: 0 },
+  { at: "lv-b", v: 10 },
+  { at: "lv-c", v: 40 },
+  { at: "lv-d", v: null },
+];
+
+/** Four cells of 50 by 20 colored along a sequential ramp from white
+ * through gray to black over 0 to 20: 0 white, 10 gray, 40 past the domain
+ * black, the row without a value magenta (`unknown`). */
+function CellRampCase() {
+  return (
+    <Plot
+      data={LEVELS}
+      xScale={{ type: "band" }}
+      yScale={{ type: "band" }}
+      colorScale={{ type: "sequential", domain: [0, 20], range: ["#ffffff", "#808080", "#000000"], unknown: "#ff00ff" }}
+      interactive={false}
+      style={{ width: 200, height: 20 }}
+    >
+      <Cell x="at" y={() => "level"} value="v" label="at" labelClass="h-[10px] w-[30px]" />
+    </Plot>
+  );
+}
+
+type Dual = { v: number; p: number };
+
+const DUAL: Dual[] = [
+  { v: 100, p: 12 },
+  { v: 200, p: 27 },
+];
+
+/** Dual axes in bands of 100 of 200 by 100 plots, the y scales kept
+ * half a label (5) inside an edge a right axis's label sits on: on the
+ * app's domains (y 0 to 200, y2 0 to 40, from 100 up to 5: 12 at 71.5,
+ * 27 at 35.875, 20 at 52.5) every part that names `y2` places its values
+ * there; on automatic ones the two are aligned in two steps (y 0 to 200,
+ * y2 10 to 30, from 95 up to 5: 12 at 86), the right axis ticks every
+ * step and a `Grid` with `ticks` takes d3's; not aligned (no axis: over
+ * the whole height), the second scale is 12 to 27. */
+function DualCase() {
+  return (
+    <View>
+      <Plot testID="dual" data={DUAL} xScale={{ type: "band" }} yScale={{ type: "linear", domain: [0, 200] }} y2Scale={{ type: "linear", domain: [0, 40] }} style={{ width: 200, height: 100 }}>
+        <Grid testID="dual-grid" y={[20]} scale="y2" />
+        <Area testID="dual-area" y1="p" scale="y2" curve="linear" />
+        <Rule testID="dual-rule" value="p" scale="y2" />
+        <Bar value="p" scale="y2" label={(d: Dual) => `b${d.p}`} labelClass="h-[10px] w-[20px]" />
+        <Line testID="dual-line" y="p" scale="y2" curve="linear" />
+        <Dot testID="dual-dots" value="p" scale="y2" />
+        <PlotLabel scale="y2" texts={[{ text: "y2-label", x: 0, y: 20 }]} />
+        <PlotAxis placement="right" scale="y2" tickValues={[40]} format={(v) => `y2-r${v}`} labelStyle={{ width: 20, height: 10 }} />
+      </Plot>
+      <Plot data={DUAL} xScale={{ type: "band" }} style={{ width: 200, height: 100 }}>
+        <Grid testID="aligned-grid" ticks={4} />
+        <Bar value="v" />
+        <Line testID="aligned-line" y="p" scale="y2" curve="linear" />
+        <PlotAxis placement="right" scale="y2" format={(v) => `p${v}`} labelStyle={{ width: 20, height: 10 }} />
+      </Plot>
+      <Plot data={DUAL} xScale={{ type: "band" }} alignTicks={false} style={{ width: 200, height: 100 }}>
+        <Bar value="v" />
+        <Line testID="own-line" y="p" scale="y2" curve="linear" />
+      </Plot>
     </View>
   );
 }

@@ -18,7 +18,7 @@ places its first `limit` avatars.
   (`Toast`, `ToastStack` and the class `ToastManager`: "Toasts" below) and the
   module `AlertDialog`, beside the navigation `nsh-js` makes for it (`NavStack`, `NavPage`, `Dialog`, `createNavStack`); controls
   (toggles, sliders, selects, popovers, sheets, ...) join as their behavior is written. It is a UI set
-  (`Registry::ui_set("nsh/base")`), with the charts' parts `Plot`, `Line`, `Area`, `Bar`, `Grid`, `Pie`, `Arc`, `RadialLine`, `RadialGrid`, `Sankey`, `PlotAxis`, `PlotLabel` and `PlotAppearScope` in its submodule `nsh/base/plot` (`Registry::submodule`, `js-modules.md`), every host serves by default (`set_ui_sets`' default; embedders with a list of their
+  (`Registry::ui_set("nsh/base")`), with the charts' parts `Plot`, `Line`, `Area`, `Bar`, `Grid`, `Pie`, `Arc`, `RadialLine`, `RadialGrid`, `Sankey`, `Treemap`, `PlotAxis`, `PlotLabel` and `PlotAppearScope` in its submodule `nsh/base/plot` (`Registry::submodule`, `js-modules.md`), every host serves by default (`set_ui_sets`' default; embedders with a list of their
   own add `nsh_base::registry()` to it). `nsh_base::registry_of` makes it of some of its parts only
   (`nsh_base::parts`: `core`, the controls, popups, toasts and alerts every app has, and one part per larger
   component, `text_view`, `editor`, `diff`, `rich_editor`, `data_table`, `table`, `dock`, `resizable`, `plot`): a
@@ -171,7 +171,8 @@ reasons: `reactive-components.md`.
   `onOpenChange?: (event: { open: boolean; reason: OpenChangeReason }) => void`). `#[args(event)]` on a variant of one
   field says its value is the event object itself, passed as it is (`#[args(event)] RowPress(DataTablePress)`); a
   unit variant passes nothing. Value types
-  implement `JsValue` (numbers, `bool`, strings, `Hsla` (a CSS color string, as `Color`), `Option`, `Vec`, `JsonValue`, `element::Style` (an inline
+  implement `JsValue` (numbers, `bool`, strings, `Hsla` (a CSS color string, as `Color`), `EdgeInsets` (`number |
+  Partial<Edges>`, as the host prop `hitSlop` takes it), `Option`, `Vec`, `JsonValue`, `element::Style` (an inline
   `StyleProp<ViewStyle>`, decoded as a host element's `style` is: transforms, shadow offsets and native animated
   values included; Rust builds one with `Style::from_decls` / `with`), `PropEnum`s, `JsObject` structs). A field that can change is a `Prop<T>` (`Copy`): in the
   instance each is a memo of its own, so a new value from JS or from a parent reaches only what read it
@@ -681,7 +682,7 @@ it changes, and they are resolved again when the tokens change (`Components::app
   `.project_data("range-start", is_start)` (`Prop::ProjectedData`) applies the part's `data-range-start:` classes and,
   with `group`, the `group-data-range-start:` ones inside it, as Tailwind's `data-*` variants; a view whose classes
   read none sends nothing when its attributes change. A component names its attributes in its docs, as a calendar's
-  days do.
+  days do (`data-range-start`, `data-today`, ...) and a code input's cells (`data-filled`).
 - What never changes is plain Rust, decided when the view is made: `.when(variant == Variant::Ghost, |v| ..)`.
 - The app's `class` / `classList` on a component (Tailwind) is merged after the root's rules; at equal rank it wins.
   The styles a view gives a nested component element merge the same way (bound ones too: `Patch::Nested`).

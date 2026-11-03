@@ -11238,6 +11238,57 @@ mod components {
         assert_eq!(shown.last().unwrap(), "heard end not-allowed");
     }
 
+    /// Shows whether a web view's ref gives trusted input here.
+    #[component]
+    fn WebInputCheck() -> impl IntoElement {
+        let available = signal(String::from("asking"));
+        spawn(async move {
+            available.set(format!("web input {}", web_input_available().await));
+        });
+        text(move || available.get())
+    }
+
+    /// What [`WebInputCheck`] shows on a platform that does (`platform`)
+    /// or does not deliver trusted web input, with the capabilities
+    /// `declared` (`None`: none declared).
+    fn web_input_available_with(platform: bool, declared: Option<serde_json::Value>) -> String {
+        let mut c = core();
+        c.set_environment(crate::element::Environment {
+            web_input: platform,
+            ..Default::default()
+        });
+        if let Some(declared) = declared {
+            c.set_access(std::sync::Arc::new(crate::access::Access {
+                declared: crate::access::Capabilities::from_json(&declared).unwrap(),
+                granted: None,
+            }));
+        }
+        c.mount_root(&crate::element::Root::new::<WebInputCheck>(|| ()));
+        let shown = run_until(&mut c, |s| s.iter().any(|t| t.starts_with("web input")));
+        shown.last().unwrap().clone()
+    }
+
+    #[test]
+    fn web_input_is_available_where_the_platform_delivers_it_and_the_app_holds_the_grant() {
+        let granted = || Some(serde_json::json!({ "webview": { "hosts": [], "input": true } }));
+        assert_eq!(web_input_available_with(true, granted()), "web input true");
+        // The platform does not deliver it.
+        assert_eq!(
+            web_input_available_with(false, granted()),
+            "web input false"
+        );
+        // Web views without `input`, or no declaration at all: not granted.
+        assert_eq!(
+            web_input_available_with(
+                true,
+                Some(serde_json::json!({ "webview": { "hosts": [] } }))
+            ),
+            "web input false"
+        );
+        assert_eq!(web_input_available_with(true, None), "web input false");
+        assert_eq!(web_input_available_with(false, None), "web input false");
+    }
+
     /// Recognizes "a b" as the user speaks; stopping it gives "a b c".
     #[derive(Default)]
     struct TestSpeech {
@@ -23100,6 +23151,86 @@ fn keyboard_inset_height_pads_and_animates_with_the_keyboard() {
     assert!(c.env_styled.is_empty());
     c.set_environment(env_with_keyboard(40.0, 250.0));
     assert!(c.commit().is_none());
+}
+
+#[test]
+fn styles_that_read_the_keyboard_height_move_with_the_keyboard() {
+    // An app that reads `keyboardFrame()` (not `env()`) restyles in the
+    // commit the keyboard's change starts.
+    let keyboard_curve = |batch: &MountBatch| {
+        matches!(
+            &batch.items[0],
+            MountItem::LayoutAnimation(crate::LayoutAnimation {
+                update: Some(t),
+                ..
+            }) if t.curve == crate::LayoutCurve::Keyboard && t.duration_ms == 250.0
+        )
+    };
+    let mut c = core();
+    c.set_environment(env_with_keyboard(0.0, 250.0));
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 2,
+                tag: Tag::View,
+            },
+            style_op(2, &[("height", StyleValue::Number(100.0))]),
+            Op::Insert {
+                parent: ROOT_ID,
+                child: 2,
+                before: None,
+            },
+        ],
+    );
+    let batch = c.commit().unwrap();
+    assert!(!keyboard_curve(&batch));
+
+    // The keyboard shows; the app shrinks its view by its height.
+    c.set_environment(env_with_keyboard(40.0, 250.0));
+    apply(
+        &mut c,
+        vec![style_op(2, &[("height", StyleValue::Number(60.0))])],
+    );
+    let batch = c.commit().unwrap();
+    assert!(keyboard_curve(&batch), "{:?}", batch.items);
+
+    // A later change of the app's own does not.
+    apply(
+        &mut c,
+        vec![style_op(2, &[("height", StyleValue::Number(50.0))])],
+    );
+    let batch = c.commit().unwrap();
+    assert!(!keyboard_curve(&batch), "{:?}", batch.items);
+
+    // An animation the app configured for the commit wins.
+    c.set_environment(env_with_keyboard(0.0, 250.0));
+    let spring = crate::LayoutAnimation {
+        create: None,
+        update: Some(crate::LayoutTransition {
+            curve: crate::LayoutCurve::EaseIn,
+            property: crate::LayoutProperty::Opacity,
+            duration_ms: 100.0,
+            delay_ms: 0.0,
+        }),
+        delete: None,
+    };
+    apply(
+        &mut c,
+        vec![
+            Op::Command {
+                id: ROOT_ID,
+                command: Command::LayoutAnimation(spring),
+            },
+            style_op(2, &[("height", StyleValue::Number(100.0))]),
+        ],
+    );
+    let batch = c.commit().unwrap();
+    assert!(
+        matches!(&batch.items[0], MountItem::LayoutAnimation(a) if *a == spring),
+        "{:?}",
+        batch.items
+    );
 }
 
 #[test]
