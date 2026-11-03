@@ -49,7 +49,9 @@ const DOTS_DOWN: usize = 4;
 const WASH_ALPHA: f32 = 0.5;
 /// Below this alpha a stroke or a fill is a texture (hatching, a hairline
 /// or a track at a few percent): a dot shows at full strength, so its
-/// dots would bury the marks over them, and it is left out.
+/// dots would bury the marks over them. It is drawn as a hairline in the
+/// faintest gray under the other marks: a stroke along its path, a fill
+/// along its outline.
 const TEXTURE_ALPHA: f32 = 0.15;
 
 /// How far below a row's top the alphabetic baseline sits, in rows.
@@ -256,6 +258,14 @@ impl Dots {
     fn paint(&mut self, index: usize, ink: Style) {
         self.painted += 1;
         self.inks[index] = Some((ink, self.painted));
+    }
+
+    /// Paints a dot that every other in its Cell outranks (a texture's):
+    /// only where no dot is, and its Cell keeps any other dot's ink.
+    fn paint_under(&mut self, index: usize, ink: Style) {
+        if self.inks[index].is_none() {
+            self.inks[index] = Some((ink, 0));
+        }
     }
 
     /// The ink of each Cell's latest dot, row by row.
@@ -529,10 +539,13 @@ impl<'a> Replay<'a> {
         // one at the bottom of every other dot column, which a stroke
         // over it still reads through.
         let alpha = (self.canvas.color(&paint).0 & 255) as f32 / 255.0 * self.state.alpha;
-        // Fainter still (a ring's track at a few percent) it is texture,
-        // as a stroke is: its floor of dots would only scatter round the
-        // marks and the text over them.
+        // Fainter still (a ring's track at a few percent) its floor of
+        // dots would only scatter round the marks and the text over them:
+        // its outline is a hairline in the faintest gray instead, so a
+        // track still shows the full scale.
         if alpha < TEXTURE_ALPHA {
+            let faint = self.faint();
+            self.trace(outline, faint, None, true);
             return;
         }
         let wash = alpha < WASH_ALPHA;
@@ -551,17 +564,33 @@ impl<'a> Replay<'a> {
     fn stroke(&mut self, outline: &Outline) {
         let paint = self.state.stroke.clone();
         let alpha = (self.canvas.color(&paint).0 & 255) as f32 / 255.0 * self.state.alpha;
-        if alpha < TEXTURE_ALPHA {
-            return;
-        }
         let Some(ink) = self.ink(&paint) else {
             return;
         };
+        // A stroke is drawn however faint (a track, a hairline): below
+        // `TEXTURE_ALPHA` in the faintest gray, under what else shares
+        // its Cells, so it never buries the marks over it.
+        let under = alpha < TEXTURE_ALPHA;
+        let ink = if under { self.faint() } else { ink };
         let dash = Dash::new(
             &self.state.dash,
             self.state.dash_offset,
             mean_scale(&self.state.matrix),
         );
+        self.trace(outline, ink, dash, under);
+    }
+
+    /// The faintest gray of the terminal: a texture's hairline.
+    fn faint(&self) -> Style {
+        match self.ground.ramp {
+            Some(ramp) => Style::new().fg(ramp.faint()),
+            None => Style::new().add_modifier(Modifier::DIM),
+        }
+    }
+
+    /// Paints the dots along `outline` in `ink`, `dash` on; `under`, a
+    /// dot only where none is and below every other in its Cell.
+    fn trace(&mut self, outline: &Outline, ink: Style, dash: Option<Dash>, under: bool) {
         let mut on = Vec::new();
         for subpath in &outline.subpaths {
             let count = subpath.points.len();
@@ -589,7 +618,11 @@ impl<'a> Replay<'a> {
         on.dedup();
         for index in on {
             if !self.clipped_out(index) {
-                self.dots.paint(index, ink);
+                if under {
+                    self.dots.paint_under(index, ink);
+                } else {
+                    self.dots.paint(index, ink);
+                }
             }
         }
     }

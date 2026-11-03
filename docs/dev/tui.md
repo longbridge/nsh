@@ -672,7 +672,10 @@ drawn on.
   canvas arguments the native animator writes (transparent until it has one; numbers read 0). A paint's alpha
   times `globalAlpha` is part of its color, blended over the page of the appearance and drawn at the terminal's
   color depth; the view's opacity is not. A Cell shows one
-  ink: that of its most recently painted dot.
+  ink: that of its most recently painted dot. A fill under half opaque is a wash, a sparse floor of dots;
+  under 15% (a ring's track, hatching) a fill is its outline and a stroke its path, both a hairline in the faintest
+  gray, drawn only where no other dot is and never the ink of a Cell another mark shares, so a track still shows
+  the full scale without burying the marks over it.
 - **Text** (`fillText` / `strokeText`) is printed on whole Cells above the dots, one row tall: `textAlign` places
   it by its width in Cells, and `textBaseline` puts its row's top at `y` (`top`, `hanging`), half a row above
   (`middle`), three quarters of a row above (`alphabetic`) or a whole row above (`ideographic`, `bottom`). A weight

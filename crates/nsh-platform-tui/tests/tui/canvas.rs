@@ -4,7 +4,12 @@ use nsh_core::{
     prelude::*,
 };
 use nsh_platform_tui::{App, Root};
-use ratatui_core::{backend::TestBackend, buffer::Buffer, style::Color, terminal::Terminal};
+use ratatui_core::{
+    backend::TestBackend,
+    buffer::Buffer,
+    style::{Color, Modifier},
+    terminal::Terminal,
+};
 
 use super::app::{draw_until, mouse, surface};
 
@@ -316,15 +321,74 @@ fn FaintTrack() -> impl IntoElement {
 }
 
 #[test]
-fn a_fill_fainter_than_a_wash_is_left_out() {
+fn a_fill_fainter_than_a_wash_is_its_outline_in_the_faintest_gray() {
     let (mut view, rx) = surface();
     let mut terminal = Terminal::new(TestBackend::new(12, 4)).unwrap();
     view.load(App::Rust(Root::new::<FaintTrack>(|| ())))
         .unwrap();
     draw_until(&mut view, &mut terminal, &rx, "drawn");
     let buffer = terminal.backend().buffer();
+    // A track's full scale shows: its outline is drawn, its inside not.
     let first = row(buffer, 0, 0..8);
-    assert!(first.chars().all(|c| c == ' '), "no dots: {first:?}");
+    assert!(
+        first.chars().all(|c| c != ' '),
+        "the outline's top: {first:?}"
+    );
+    assert!(
+        first.chars().skip(1).take(6).all(|c| c != '⣿'),
+        "a hairline, not the inside: {first:?}"
+    );
+    assert!(
+        buffer[(1, 0)].modifier.contains(Modifier::DIM),
+        "in the faintest gray"
+    );
+}
+
+/// A faint track under a mark that crosses it, the mark last.
+#[component]
+fn TrackUnderMark() -> impl IntoElement {
+    view()
+        .flex_1()
+        .child(
+            canvas(
+                Painter::new()
+                    .stroke_color(nsh_core::color::rgba(0xffffff10))
+                    .begin_path()
+                    .move_to(0.0, 2.0)
+                    .line_to(64.0, 2.0)
+                    .stroke()
+                    .stroke_color(nsh_core::color::rgb(0xff0000))
+                    .begin_path()
+                    .move_to(0.0, 0.0)
+                    .line_to(64.0, 0.0)
+                    .stroke()
+                    .stroke_color(nsh_core::color::rgba(0xffffff10))
+                    .begin_path()
+                    .move_to(0.0, 4.0)
+                    .line_to(64.0, 4.0)
+                    .stroke(),
+            )
+            .label("drawing")
+            .w(px(64.0))
+            .h(px(16.0)),
+        )
+        .child(text("drawn"))
+}
+
+#[test]
+fn a_faint_stroke_is_drawn_under_the_marks_it_shares_cells_with() {
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(12, 4)).unwrap();
+    view.load(App::Rust(Root::new::<TrackUnderMark>(|| ())))
+        .unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "drawn");
+    let buffer = terminal.backend().buffer();
+    let cell = &buffer[(2, 0)];
+    assert_ne!(cell.symbol(), " ", "the strokes are drawn");
+    assert!(
+        !cell.modifier.contains(Modifier::DIM),
+        "the mark's ink, not the track's, even drawn before the last track"
+    );
 }
 
 #[component]
@@ -390,7 +454,7 @@ fn Hatched() -> impl IntoElement {
 }
 
 #[test]
-fn a_nearly_transparent_stroke_is_texture_left_out() {
+fn a_nearly_transparent_stroke_is_texture_in_the_faintest_gray_under_the_marks() {
     let (mut view, rx) = surface();
     let mut terminal = Terminal::new(TestBackend::new(12, 4)).unwrap();
     view.load(App::Rust(Root::new::<Hatched>(|| ()))).unwrap();
@@ -400,7 +464,19 @@ fn a_nearly_transparent_stroke_is_texture_left_out() {
         row(buffer, 0, 0..4).chars().all(|c| c != ' '),
         "the line is drawn"
     );
-    assert_eq!(row(buffer, 1, 0..4), "    ", "no hatching under it");
+    for x in 0..4 {
+        assert!(
+            !buffer[(x, 0)].modifier.contains(Modifier::DIM),
+            "the line keeps its own color over the hatching"
+        );
+    }
+    let hatching = (0..4).filter(|&x| buffer[(x, 1)].symbol() != " ");
+    for x in hatching {
+        assert!(
+            buffer[(x, 1)].modifier.contains(Modifier::DIM),
+            "the hatching is the faintest gray"
+        );
+    }
 }
 
 /// A label under a canvas drawn after it, as a ring's value in its middle.
