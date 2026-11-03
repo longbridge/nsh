@@ -222,18 +222,20 @@ including the user-facing pages in `website/` (English and `zh-CN`). User-facing
 positive terms: what a platform or feature is and does, never what it is not or lacks, and name the product Native
 Shell in formal places and NSH elsewhere (`nsh` only in code) ("Writing documentation" in `website/README.md`).
 
-NSH's core design is not open source: the design thinking and the taste behind it are the project's core asset.
-Its core architecture and design details are kept in the private repository
+Two homes for documentation. This repository's documentation (`docs/dev/`, `website/`, module docs, pull request
+text) describes NSH at the level every contributor needs: the direction, concepts, which component does what,
+rules, code locations, commands and verification. The core design record lives in the private repository
 [`longbridge/nsh-docs`](https://github.com/longbridge/nsh-docs), checked out beside this one at `../nsh-docs`
-(`gh repo clone longbridge/nsh-docs ../nsh-docs`), never in this repository. That covers the core design work of
-the core developers (`huacnlee`, `sunli829`, `madcodelife`): the key algorithms and inner mechanisms, formats and
-ABIs, tuning and thresholds, and the reasoning and alternatives behind them. Working with one of them on such a
-design, write its details to nsh-docs (commit and push to its `main`), not to `docs/dev/`, `website/`, code
-comments or pull request text here. `docs/dev/` gives the general direction and what every contributor needs:
-concepts, which component does what, rules, code locations, commands and verification. Before changing an area,
-read its page in nsh-docs too (`dev/<page>.md`, the full version of `docs/dev/<page>.md`, and design notes such as
-`web/runtime-split.md`) when you have access; without it, `docs/dev/` and the code's module docs are enough to work
-from.
+(`gh repo clone longbridge/nsh-docs ../nsh-docs`): the design thinking behind NSH's architecture and the details of
+its core mechanisms — key algorithms, inner data structures and protocols, formats and ABIs, tuning and
+thresholds, and the reasoning and alternatives behind them.
+
+When the core developers (`huacnlee`, `sunli829`, `madcodelife`) design or change something at that level with
+you, write the details to nsh-docs (its `dev/<page>.md`, the full version of `docs/dev/<page>.md`, or a design
+note such as `web/runtime-split.md`; commit and push to its `main`), and give this repository only the summary a
+contributor needs: what the part does and where its code is. If you are unsure which side something belongs
+to, put the details in nsh-docs and the summary here. Before changing an area, read its nsh-docs page as well as
+`docs/dev/` when you have access; without it, `docs/dev/` and the code's module docs are enough to work from.
 
 ## Commands
 
