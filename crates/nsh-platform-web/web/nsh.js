@@ -1075,21 +1075,31 @@ class Player {
   // Side modules --------------------------------------------------------
 
   /**
-   * Loads the side modules `sides` (`[{ gate, url }]`, as `nsh package
-   * --target web` maps them per chunk: the parts of `nsh/base`, standard
-   * modules and features the main module was published without) in
-   * parallel, and calls each one's gate once. A page awaits it before a
-   * chunk that needs them runs (its `prepareChunk`).
+   * Loads the side modules `names` (as `nsh package --target web` maps
+   * them per chunk: the parts of `nsh/base`, standard modules and features
+   * the main module was published without) in parallel, each after the
+   * side modules it imports from, and calls each gate once. `table` is the
+   * page's `sides`: by name, `{ url, gate?, needs }`. A page awaits it
+   * before a chunk that needs them runs (its `prepareChunk`).
    */
-  loadSides(sides) {
-    return Promise.all((sides ?? []).map(({ gate, url }) => {
-      if (!this.sideLoads.has(url)) this.sideLoads.set(url, this.loadSide(gate, url));
-      return this.sideLoads.get(url);
-    }));
+  loadSides(names, table) {
+    return Promise.all((names ?? []).map((name) => this.loadSide(name, table)));
   }
 
-  async loadSide(gate, url) {
+  /** The exports of side module `name`, once it and what it needs loaded. */
+  loadSide(name, table) {
+    if (!this.sideLoads.has(name)) {
+      const side = table?.[name];
+      if (!side) return Promise.reject(new Error(`no side module ${name}`));
+      this.sideLoads.set(name, this.instantiateSide(name, side, table));
+    }
+    return this.sideLoads.get(name);
+  }
+
+  async instantiateSide(name, { url, gate, needs }, table) {
     const imports = { main: this.mainExports };
+    const from = await Promise.all((needs ?? []).map((need) => this.loadSide(need, table)));
+    (needs ?? []).forEach((need, i) => { imports[need] = from[i]; });
     let instance;
     try {
       ({ instance } = await WebAssembly.instantiateStreaming(fetch(url), imports));
@@ -1100,10 +1110,13 @@ class Player {
       if (!response.ok) throw new Error(`${url}: HTTP ${response.status}`);
       ({ instance } = await WebAssembly.instantiate(await response.arrayBuffer(), imports));
     }
-    const register = instance.exports[gate];
-    if (typeof register !== "function") throw new Error(`${url} exports no ${gate}`);
-    register();
-    this.afterGate(gate);
+    if (gate) {
+      const register = instance.exports[gate];
+      if (typeof register !== "function") throw new Error(`${url} exports no ${gate}`);
+      register();
+      this.afterGate(gate);
+    }
+    return instance.exports;
   }
 
   /**

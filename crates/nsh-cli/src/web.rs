@@ -121,8 +121,10 @@ pub(crate) fn package(
         fs::read(&runtime.wasm).with_context(|| format!("read {}", runtime.wasm.display()))?;
     // The gates the entry needs are linked into `nsh.wasm`; each other one
     // an app's chunks use is a side module of its own, which the page
-    // loads before the first chunk that needs it runs (`chunkSides`).
-    let mut sides = BTreeMap::new();
+    // loads before the first chunk that needs it runs (`chunkSides`), after
+    // the side modules of the code it shares with other gates (`sides`).
+    let mut sides = serde_json::Map::new();
+    let mut published = BTreeSet::new();
     // An app with Rust components of its own has a runtime built for it,
     // linkable as nsh's own, with a gate per UI set (`nsh_ui_set_*`).
     let linked = {
@@ -139,11 +141,17 @@ pub(crate) fn package(
             .filter(|gate| exports.iter().any(|e| e == gate))
             .collect();
         let split = split::split(&linkable, &keep, &lazy)?;
-        for (gate, bytes) in &split.sides {
-            let name = gate.strip_prefix("nsh_").unwrap_or(gate);
-            sides.insert(gate.clone(), site.add(&format!("nsh-{name}.wasm"), bytes)?);
+        for side in &split.sides {
+            let file = side.name.strip_prefix("nsh_").unwrap_or(&side.name);
+            let url = site.add(&format!("nsh-{file}.wasm"), &side.bytes)?;
+            let mut entry = serde_json::json!({ "url": url, "needs": side.needs });
+            if let Some(gate) = &side.gate {
+                entry["gate"] = gate.as_str().into();
+                published.insert(gate.clone());
+            }
+            sides.insert(side.name.clone(), entry);
         }
-        chunk_sides = plan.chunk_sides(&sides);
+        chunk_sides = plan.chunk_sides(&published);
         split.main
     };
     let wasm = site.add("nsh.wasm", &linked)?;
@@ -220,6 +228,7 @@ pub(crate) fn package(
         "fonts": fonts,
         "chunkFonts": chunk_fonts,
         "chunks": chunks,
+        "sides": sides,
         "chunkSides": chunk_sides,
         "nativeExports": native_exports(built.native_use.as_ref()),
         "entryChunks": built.entry_imports,
@@ -345,21 +354,19 @@ impl GatePlan {
         set.into_iter().collect()
     }
 
-    /// The page's map, chunk id -> `[{ gate, url }]`, of the side modules
-    /// published (`sides`: gate -> URL); a gate the runtime does not have
-    /// (no side module) is left out.
+    /// The page's map, chunk id -> the side modules (named by their gates)
+    /// it loads, of those `published`; a gate without a side module (the
+    /// main module has it) is left out.
     fn chunk_sides(
         &self,
-        sides: &BTreeMap<String, String>,
+        published: &BTreeSet<String>,
     ) -> serde_json::Map<String, serde_json::Value> {
         let mut map = serde_json::Map::new();
         for (id, gates) in &self.chunks {
             let list: Vec<serde_json::Value> = gates
                 .iter()
-                .filter_map(|gate| {
-                    let url = sides.get(gate)?;
-                    Some(serde_json::json!({ "gate": gate, "url": url }))
-                })
+                .filter(|gate| published.contains(*gate))
+                .map(|gate| gate.as_str().into())
                 .collect();
             if !list.is_empty() {
                 map.insert(id.clone(), list.into());
@@ -1360,15 +1367,12 @@ mod tests {
         );
         assert_eq!(plan.lazy(), ["nsh_part_editor", "nsh_part_text_view"]);
         // The page's map: only gates with a published side module.
-        let sides = BTreeMap::from([(
-            "nsh_part_editor".to_owned(),
-            "nsh-part_editor.0123.wasm".to_owned(),
-        )]);
+        let published = BTreeSet::from(["nsh_part_editor".to_owned()]);
         assert_eq!(
-            serde_json::Value::Object(plan.chunk_sides(&sides)),
+            serde_json::Value::Object(plan.chunk_sides(&published)),
             serde_json::json!({
-                "Docs.js": [{ "gate": "nsh_part_editor", "url": "nsh-part_editor.0123.wasm" }],
-                "Editor.js": [{ "gate": "nsh_part_editor", "url": "nsh-part_editor.0123.wasm" }],
+                "Docs.js": ["nsh_part_editor"],
+                "Editor.js": ["nsh_part_editor"],
             })
         );
 

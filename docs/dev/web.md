@@ -169,21 +169,41 @@ gate, a function that registers it: one per part of `nsh/base` (`nsh_part_core`,
 with all of them (the website's, the development host's) serves every app.
 
 `nsh-browser.wasm` is built with the feature `linkable`: `build.rs` passes `--emit-relocs`, so the module keeps
-its symbol table and relocations. The CLI's `web::linked_gates` reads which gates an app needs from the bundle
-(`NativeUse`: the names it imports from `nsh/base`, each mapped to the part that exports it, `nsh/base/plot`,
-`zlib`; `import * as`, a computed `import()` or no analysis keep every gate), and `web/prune.rs` keeps what the
-other exports and those gates reach, as `wasm-ld --gc-sections` would have: functions, table entries, data and
-globals reachable through the relocations, then renumbers functions and table slots, moves the kept data
-together and patches every relocated site. The output carries no symbols or relocations.
+its symbol table and relocations. The bundler records what each chunk uses of the native modules (`NativeUse`:
+the names it imports from `nsh/base`, each mapped to the part that exports it, `nsh/base/plot`, `zlib`;
+`import * as`, a computed `import()` or no analysis keep every gate), and `web::GatePlan` sorts the gates: those
+of the entry and the chunks it imports statically are the main module's, every other one a chunk uses is
+loaded with that chunk. `web/prune/split.rs` then makes the modules, as `wasm-ld --gc-sections` would have
+linked them, from the relocations:
 
-Measured with `nsh package --target web` (2026-10-28, MB of 10^6 bytes, gzip -9):
+- the **main module** (`nsh.<digest>.wasm`): what the other exports and the main gates reach;
+- a **gate's side module** (`nsh-part_editor.<digest>.wasm`, ...): what only that gate reaches;
+- a **shared side module** (`nsh-shared_<hash>.<digest>.wasm`): what exactly one set of gates reaches and
+  nothing else, as a bundler splits what several chunks share. One under 32 KB that calls only the main
+  module goes to the main module (a request of its own costs more than its bytes).
 
-| The app | Uses | Runtime | gzip |
+Nothing moves between them: data keeps the linker's addresses, the table its slots, globals their indices
+(memory, table and globals are the main module's, which side modules import); only functions are numbered
+again, and a module imports each function it calls (`__nsh_f<index in the linked runtime>`) from the module
+that has it. What a set of gates reaches calls only what at least those gates reach, so a module imports only
+from the main module and from modules of larger sets: loading never goes in a circle. Each function and byte
+of data lives in one module, so loading one never writes over data another changed.
+
+The page carries `sides` (by name: `{ url, gate?, needs }`) and `chunkSides` (by chunk: the gates' module
+names). Before a chunk runs (`prepareChunk`), `nsh.js`'s `loadSides` instantiates each of its side modules
+once, after the ones it `needs`, with the main module's exports (`main`) and theirs as imports, then calls the
+gate.
+
+Measured with `nsh package --target web` (2026-11-03, MB of 10^6 bytes, gzip -9):
+
+| The app | Uses | First load (main module) | gzip |
 |---|---|---|---|
-| `examples/counter` | `nsh/base`'s core | 3.40 | 1.12 |
-| a `Shader` view | the core, shaders | 4.34 | 1.42 |
-| `Editor`, `Plot`, `zlib` | the core, two parts, `zlib` | 7.02 | 2.32 |
-| `examples/gallery` | every part, `zlib`, shaders | 11.22 | 3.56 |
+| `examples/counter` | `nsh/base`'s core | 3.96 | 1.32 |
+| `examples/gallery` | every part, `zlib`, shaders (16 side modules, 9 shared) | 4.13 | 1.36 |
+
+Before the split (2026-11-02), the gallery's single module was 13.03 MB (4.01 MB gzipped). The gallery's
+largest side modules: `zlib` 1.42 MB, `RichEditor` 1.36 MB, shaders 0.95 MB, the code highlighting and
+regular expressions three of the editors share 0.98 MB.
 
 Shaders are a gate too (`nsh_feature_shader`, `src/shader.rs`): it sets the core's compiler of shader sources
 (`nsh_core::shader::set_compile`, naga's WGSL front end) and the translation to GLSL ES, about 0.9 MB of naga. The
@@ -199,7 +219,8 @@ map's facades export the names a namespace has at start; names a later gate brin
 `run`'s `nativeExports` (`{ specifier: [name] }`) as live bindings that the `registry` event fills. Standard
 modules' operations and the shader compiler are read at each call, so their gates need nothing more.
 
-Apps with Rust components of their own get a runtime built for them, with every part.
+Apps with Rust components of their own get a runtime built for them, linkable as nsh's own, in which each UI
+set is a gate (`nsh_ui_set_<specifier>`, `ui_set!`): it is split the same way.
 The QuickJS measurements below are historical (the web ran QuickJS in WebAssembly until 2026-10) and do not
 measure these runtimes.
 

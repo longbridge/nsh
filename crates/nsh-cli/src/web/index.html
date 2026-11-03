@@ -91,7 +91,7 @@
         // The chunk's fonts and the side modules of the runtime it needs.
         prepareChunk: (id) => Promise.all([
           ...(app.chunkFonts[id] ?? []).map(loadFont),
-          player.loadSides(app.chunkSides?.[id]),
+          player.loadSides(app.chunkSides?.[id], app.sides),
         ]),
         // A release shows no error box; an app that could not start says so.
         overlay: false,

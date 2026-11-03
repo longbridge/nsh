@@ -1,33 +1,41 @@
 //! Splitting the web runtime into a main module and side modules.
 //!
 //! [`split`] keeps in the main module what its exports reach, as
-//! [`prune`](super::prune) does, and gives each lazily loaded gate (an
-//! export that registers a part of `nsh/base`, a standard module, a
-//! feature or an app's UI set) a side module of its own: what the gate
-//! reaches that the main module does not. The page loads a side module
-//! when an app's chunk that needs the gate is about to run, and calls the
-//! gate.
+//! [`prune`](super::prune) does, and puts the rest the lazily loaded gates
+//! reach (exports that register a part of `nsh/base`, a standard module, a
+//! feature or an app's UI set) into side modules: one per gate with what
+//! only that gate reaches, and one per set of gates with what exactly those
+//! gates share (as a bundler splits the chunks several entries share). The
+//! page loads a gate's module, after the shared ones it calls, when an
+//! app's chunk that needs the gate is about to run, and calls the gate.
 //!
 //! Nothing moves, so the modules need no relocating against each other:
 //!
-//! - data keeps the linker's addresses: the main module writes its bytes,
-//!   each side module its own (memory is shared, and starts zeroed);
-//! - the table keeps the linker's slots: the main module fills its
-//!   functions' slots, each side module its own (the table is shared);
+//! - data keeps the linker's addresses: each module writes its own bytes
+//!   (memory is shared, and starts zeroed);
+//! - the table keeps the linker's slots: each module fills its functions'
+//!   slots (the table is shared);
 //! - globals keep their indices: a side module imports every global of the
 //!   main module, in order;
-//! - only functions are numbered again: the main module's close up as
-//!   pruning does, and a side module imports each main function it calls
-//!   (`__nsh_f<index>`, which the main module exports) before its own.
+//! - only functions are numbered again: each module numbers its own after
+//!   the functions it imports, from the module that has each.
 //!
-//! What two side modules both reach goes to the main module, with what it
-//! reaches: code and data live in one module only, so loading a side module
-//! never writes over data another one changed.
+//! Code and data live in one module only, so loading a module never writes
+//! over data another one changed. What a set of gates reaches, everything
+//! it calls is reached by at least those gates: a module imports only from
+//! the main module and from modules of larger sets, so the order of
+//! loading is never circular.
 //!
 //! The ABI the page relies on (`nsh.js`): a side module imports from the
-//! module `main` its `memory`, `__indirect_function_table`, `__nsh_g<i>`
-//! for every global and `__nsh_f<i>` for the functions it calls; it exports
-//! its gate under the gate's name and has no start function.
+//! module `main` its `memory`, `__indirect_function_table` and
+//! `__nsh_g<i>` for every global; it imports each function it calls as
+//! `__nsh_f<i>` (`i`: the function's index in the linked runtime) from
+//! `main` or from the side module that has it, under that module's name
+//! ([`Side::name`]); it exports the functions other modules call the same
+//! way, and its gate (a gate's module) under the gate's name. It has no
+//! start function.
+
+use std::collections::BTreeMap;
 
 use anyhow::{Context as _, bail, ensure};
 use wasmparser::{
@@ -35,29 +43,47 @@ use wasmparser::{
 };
 
 use super::{
-    Live, Module, check, dropped_custom, put_limits, put_sleb, put_uleb, put_uleb5, read_u32,
-    read_uleb5,
+    Module, check, dropped_custom, put_limits, put_sleb, put_uleb, put_uleb5, read_u32, read_uleb5,
 };
 
 /// The main module and the side modules [`split`] made.
 pub(crate) struct Split {
     /// The main module.
     pub(crate) main: Vec<u8>,
-    /// Each lazily loaded gate whose code is not in the main module, and its
-    /// side module, in the order the gates were given.
-    pub(crate) sides: Vec<(String, Vec<u8>)>,
+    /// The side modules: the gates' (in the order the gates were given),
+    /// then the shared ones.
+    pub(crate) sides: Vec<Side>,
 }
 
-/// No module owns it (yet).
-const NONE: u16 = u16::MAX;
-/// Several side modules reach it: it goes to the main module.
-const SHARED: u16 = u16::MAX - 1;
-/// The main module's.
-const MAIN: u16 = 0;
+/// A side module.
+pub(crate) struct Side {
+    /// Its name: its gate's, or `nsh_shared_<digest of its gates>`; the
+    /// module name the modules importing from it use.
+    pub(crate) name: String,
+    /// The gate it exports, for a gate's module.
+    pub(crate) gate: Option<String>,
+    /// The side modules it imports from: loaded before it.
+    pub(crate) needs: Vec<String>,
+    /// The module.
+    pub(crate) bytes: Vec<u8>,
+}
+
+/// Who has a function or a byte: no module ([`NONE`]), the main module
+/// ([`MAIN`]), or the side module of the set of lazy gates whose bits are
+/// set.
+type Owner = u128;
+const NONE: Owner = 0;
+const MAIN: Owner = 1 << 127;
+/// Lazy gates past this many are kept in the main module.
+const MAX_LAZY: usize = 127;
+/// The fewest bytes of code and data a module of what several gates share
+/// has: less goes to the main module (a request of its own, with a copy of
+/// the types, costs more than the bytes).
+const MIN_SHARED: usize = 32 * 1024;
 
 /// Splits a runtime linked with `--emit-relocs` into a main module that
-/// keeps `main_exports` (what [`prune`](super::prune) keeps) and a side
-/// module per gate of `lazy_gates` ([module docs](self)).
+/// keeps `main_exports` (what [`prune`](super::prune) keeps) and side
+/// modules for `lazy_gates` ([module docs](self)).
 ///
 /// A lazy gate the main module reaches anyway stays an export of the main
 /// module and gets no side module.
@@ -87,34 +113,86 @@ pub(crate) fn split(
             );
         }
     }
-    let gates: Vec<u32> = lazy_gates
-        .iter()
-        .map(|g| export(g))
-        .collect::<Result<_, _>>()?;
-    let marks: Vec<Live> = gates
+    let mut kept_main: Vec<&str> = Vec::new();
+    let mut lazy: Vec<&str> = Vec::new();
+    for gate in lazy_gates {
+        if lazy.len() < MAX_LAZY {
+            lazy.push(gate);
+        } else {
+            roots.push(export(gate)?);
+            kept_main.push(gate);
+        }
+    }
+    let gates: Vec<u32> = lazy.iter().map(|g| export(g)).collect::<Result<_, _>>()?;
+
+    // Who reaches what: the main module first, then each gate. What a set
+    // of several gates shares that is too small to be worth a request of
+    // its own goes to the main module, with what it reaches.
+    let base = module.data_low();
+    let marks: Vec<super::Live> = gates
         .iter()
         .map(|&gate| module.mark_from(vec![gate], Vec::new()))
         .collect::<Result<_, _>>()?;
-
-    // The main module's closure, grown by what several side modules share
-    // until nothing is shared.
+    let body_relocs = module.body_relocs()?;
     let mut data_roots = Vec::new();
     let (funcs, bytes) = loop {
         let main = module.mark_from(roots.clone(), data_roots.clone())?;
         let (funcs, bytes) = owners(&module, &main, &marks);
+        let mut size: BTreeMap<Owner, usize> = BTreeMap::new();
+        for (func, owner) in funcs.iter().enumerate() {
+            if owner.count_ones() > 1 && *owner != MAIN {
+                let defined = func - module.imported_funcs as usize;
+                *size.entry(*owner).or_default() += module.bodies[defined].len();
+            }
+        }
+        for owner in &bytes {
+            if owner.count_ones() > 1 && *owner != MAIN {
+                *size.entry(*owner).or_default() += 1;
+            }
+        }
+        // Only a small set whose code and data call nothing outside it and
+        // the main module: the main module then grows by it alone.
+        let mut leaf: BTreeMap<Owner, bool> = size.keys().map(|o| (*o, true)).collect();
+        let mut call = |owner: Owner, entry: &RelocationEntry| -> anyhow::Result<()> {
+            if matches!(
+                entry.ty,
+                RelocationType::FunctionIndexLeb | RelocationType::FunctionIndexI32
+            ) {
+                let callee = funcs[module.func_of(entry)? as usize];
+                if callee != owner && callee != MAIN && callee != NONE {
+                    leaf.insert(owner, false);
+                }
+            }
+            Ok(())
+        };
+        for (func, owner) in funcs.iter().enumerate() {
+            if size.contains_key(owner) {
+                let defined = func - module.imported_funcs as usize;
+                for entry in &module.code_relocs[body_relocs[defined].clone()] {
+                    call(*owner, entry)?;
+                }
+            }
+        }
+        for reloc in &module.data_relocs {
+            let owner = bytes[(reloc.address - base) as usize];
+            if size.contains_key(&owner) {
+                call(owner, &reloc.entry)?;
+            }
+        }
+        let small = |owner: Owner| {
+            size.get(&owner).is_some_and(|s| *s < MIN_SHARED) && leaf.get(&owner) == Some(&true)
+        };
         let mut grew = false;
         for (func, owner) in funcs.iter().enumerate() {
-            if *owner == SHARED {
+            if small(*owner) {
                 roots.push(func as u32);
                 grew = true;
             }
         }
         for mark in &marks {
-            for &(segment, start, end, symbol) in &mark.data {
-                let base = module.data_low();
-                let shared = (start..end).any(|a| bytes[(a - base) as usize] == SHARED);
-                if shared {
-                    data_roots.push((segment, start, end, symbol));
+            for &range @ (_, start, end, _) in &mark.data {
+                if (start..end).any(|at| small(bytes[(at - base) as usize])) {
+                    data_roots.push(range);
                     grew = true;
                 }
             }
@@ -124,7 +202,6 @@ pub(crate) fn split(
         }
     };
 
-    let body_relocs = module.body_relocs()?;
     // The main module's function indices: imports keep theirs.
     let mut remap = vec![u32::MAX; module.func_count()];
     let mut next = 0;
@@ -135,30 +212,80 @@ pub(crate) fn split(
         }
     }
 
-    // The side modules, and the main functions they call.
-    let mut called = vec![false; module.func_count()];
-    let mut sides = Vec::new();
-    for (k, (&gate, name)) in gates.iter().zip(lazy_gates).enumerate() {
-        let owner = k as u16 + 1;
-        if funcs[gate as usize] != owner {
-            continue;
+    // The side modules: every set of gates something belongs to.
+    let mut owners: Vec<Owner> = funcs
+        .iter()
+        .chain(&bytes)
+        .copied()
+        .filter(|o| *o != NONE && *o != MAIN)
+        .collect();
+    owners.sort_unstable();
+    owners.dedup();
+    let name_of = |owner: Owner| -> String {
+        if owner.count_ones() == 1 {
+            return lazy[owner.trailing_zeros() as usize].to_owned();
         }
-        let side = Side::new(
+        // Named by its gates, so a module's name (and file) stays while
+        // they do.
+        let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+        for (k, gate) in lazy.iter().enumerate() {
+            if owner & (1 << k) != 0 {
+                for byte in gate.bytes().chain([0]) {
+                    hash = (hash ^ u64::from(byte)).wrapping_mul(0x100_0000_01b3);
+                }
+            }
+        }
+        format!("nsh_shared_{hash:016x}")
+    };
+    let mut exported = vec![false; module.func_count()];
+    let mut plans = Vec::new();
+    for &owner in &owners {
+        plans.push(Plan::new(
             &module,
-            &extra,
             &body_relocs,
             &funcs,
             &bytes,
             owner,
-            &marks[k],
-            &mut called,
+            &mut exported,
+        )?);
+    }
+    let mut sides = Vec::new();
+    for plan in &plans {
+        let gate = (plan.owner.count_ones() == 1).then(|| {
+            let k = plan.owner.trailing_zeros() as usize;
+            (gates[k], lazy[k])
+        });
+        let name = name_of(plan.owner);
+        let out = plan.write(
+            &module,
+            &extra,
+            &body_relocs,
+            &bytes,
+            &exported,
+            gate,
+            &name_of,
         )?;
-        let out = side.write(&module, &extra, &body_relocs, &remap, gate, name)?;
         wasmparser::Validator::new()
             .validate_all(&out)
-            .with_context(|| format!("the side module of `{name}` is not valid"))?;
-        sides.push(((*name).to_owned(), out));
+            .with_context(|| format!("the side module `{name}` is not valid"))?;
+        let mut needs: Vec<String> = plan.from.iter().map(|o| name_of(*o)).collect();
+        needs.sort();
+        sides.push(Side {
+            name,
+            gate: gate.map(|(_, g)| g.to_owned()),
+            needs,
+            bytes: out,
+        });
     }
+    // Gates' modules first, in the given order; then the shared ones.
+    sides.sort_by_key(|side| match &side.gate {
+        Some(gate) => (
+            0,
+            lazy.iter().position(|g| g == gate).unwrap_or(0),
+            String::new(),
+        ),
+        None => (1, 0, side.name.clone()),
+    });
 
     let kept: Vec<&str> = module
         .exports
@@ -166,6 +293,7 @@ pub(crate) fn split(
         .filter(|e| {
             e.kind != ExternalKind::Func
                 || main_exports.contains(&e.name)
+                || kept_main.contains(&e.name)
                 || (lazy_gates.contains(&e.name) && funcs[e.index as usize] == MAIN)
         })
         .map(|e| e.name)
@@ -177,7 +305,7 @@ pub(crate) fn split(
         &funcs,
         &bytes,
         &remap,
-        &called,
+        &exported,
         &kept,
     )?;
     wasmparser::Validator::new()
@@ -263,45 +391,12 @@ impl Module<'_> {
     }
 }
 
-/// Who owns each function and each byte of data: [`MAIN`], side module
-/// `k + 1` of `marks[k]`, [`SHARED`] or [`NONE`].
-fn owners(module: &Module<'_>, main: &Live, marks: &[Live]) -> (Vec<u16>, Vec<u16>) {
-    let base = module.data_low();
-    let mut funcs = vec![NONE; module.func_count()];
-    let mut bytes = vec![NONE; (module.data_high() - base) as usize];
-    let claim = |slot: &mut u16, owner: u16| {
-        *slot = match *slot {
-            NONE => owner,
-            MAIN => MAIN,
-            same if same == owner => owner,
-            _ => SHARED,
-        }
-    };
-    let add = |live: &Live, owner: u16, funcs: &mut Vec<u16>, bytes: &mut Vec<u16>| {
-        for (func, live) in live.funcs.iter().enumerate() {
-            if *live && func >= module.imported_funcs as usize {
-                claim(&mut funcs[func], owner);
-            }
-        }
-        for &(_, start, end, _) in &live.data {
-            for at in start..end {
-                claim(&mut bytes[(at - base) as usize], owner);
-            }
-        }
-    };
-    add(main, MAIN, &mut funcs, &mut bytes);
-    for (k, mark) in marks.iter().enumerate() {
-        add(mark, k as u16 + 1, &mut funcs, &mut bytes);
-    }
-    (funcs, bytes)
-}
-
 /// The runs of bytes `owner` has, as (address, bytes) with their data
 /// relocations patched by `patch`.
 fn runs(
     module: &Module<'_>,
-    bytes: &[u16],
-    owner: u16,
+    bytes: &[Owner],
+    owner: Owner,
     patch: &dyn Fn(&mut [u8], &RelocationEntry) -> anyhow::Result<()>,
 ) -> anyhow::Result<Vec<(u32, Vec<u8>)>> {
     let base = module.data_low();
@@ -441,10 +536,10 @@ fn write_main(
     module: &Module<'_>,
     extra: &Extra,
     body_relocs: &[std::ops::Range<usize>],
-    funcs: &[u16],
-    bytes: &[u16],
+    funcs: &[Owner],
+    bytes: &[Owner],
     remap: &[u32],
-    called: &[bool],
+    exported: &[bool],
     kept: &[&str],
 ) -> anyhow::Result<Vec<u8>> {
     let index = |func: u32| -> anyhow::Result<u32> {
@@ -506,10 +601,9 @@ fn write_main(
                 for g in 0..extra.globals.len() {
                     entries.push((format!("__nsh_g{g}"), 3, g as u32));
                 }
-                for (func, called) in called.iter().enumerate() {
-                    if *called {
-                        let new = remap[func];
-                        entries.push((format!("__nsh_f{new}"), 0, new));
+                for (func, exported) in exported.iter().enumerate() {
+                    if *exported && (func < module.imported_funcs as usize || funcs[func] == MAIN) {
+                        entries.push((format!("__nsh_f{func}"), 0, remap[func]));
                     }
                 }
                 put_uleb(&mut section, entries.len() as u64);
@@ -546,31 +640,30 @@ fn write_main(
     Ok(out)
 }
 
-/// One side module's functions: the main ones it imports, then its own.
-struct Side {
-    imports: Vec<u32>,
+/// One side module's functions: those it imports, then its own.
+struct Plan {
+    owner: Owner,
+    /// What it imports, by the module that has it ([`MAIN`] for the main
+    /// module and its imports).
+    imports: Vec<(Owner, u32)>,
+    /// The side modules it imports from.
+    from: Vec<Owner>,
     own: Vec<u32>,
     index: Vec<u32>,
-    table: Vec<(u32, u32)>,
-    segments: Vec<(u32, Vec<u8>)>,
 }
 
-impl Side {
-    #[allow(clippy::too_many_arguments)]
+impl Plan {
     fn new(
         module: &Module<'_>,
-        _extra: &Extra,
         body_relocs: &[std::ops::Range<usize>],
-        funcs: &[u16],
-        bytes: &[u16],
-        owner: u16,
-        mark: &Live,
-        called: &mut [bool],
-    ) -> anyhow::Result<Side> {
+        funcs: &[Owner],
+        bytes: &[Owner],
+        owner: Owner,
+        exported: &mut [bool],
+    ) -> anyhow::Result<Plan> {
         let own: Vec<u32> = (0..module.func_count() as u32)
             .filter(|&f| funcs[f as usize] == owner)
             .collect();
-        // The functions of the main module (or imports) its code and data call.
         let mut wanted = vec![false; module.func_count()];
         let mut note = |entry: &RelocationEntry| -> anyhow::Result<()> {
             if matches!(
@@ -596,44 +689,43 @@ impl Side {
                 note(&reloc.entry)?;
             }
         }
-        let imports: Vec<u32> = (0..module.func_count() as u32)
-            .filter(|&f| wanted[f as usize])
-            .collect();
+        let mut imports = Vec::new();
+        let mut from = Vec::new();
+        for func in (0..module.func_count() as u32).filter(|&f| wanted[f as usize]) {
+            let has = if func < module.imported_funcs {
+                MAIN
+            } else {
+                funcs[func as usize]
+            };
+            // What a module reaches, its callees reach with at least the
+            // same gates: never a module it is itself imported by.
+            ensure!(
+                has == MAIN || (has & owner == owner && has != owner),
+                "a side module calls function {func}, which no module it may import from has"
+            );
+            exported[func as usize] = true;
+            if has != MAIN && !from.contains(&has) {
+                from.push(has);
+            }
+            imports.push((has, func));
+        }
+        // Grouped by module, as they are imported.
+        imports.sort_by_key(|&(has, func)| (has, func));
         let mut index = vec![u32::MAX; module.func_count()];
-        for (i, &func) in imports.iter().chain(&own).enumerate() {
+        for (i, func) in imports
+            .iter()
+            .map(|(_, f)| *f)
+            .chain(own.iter().copied())
+            .enumerate()
+        {
             index[func as usize] = i as u32;
         }
-        for &func in &imports {
-            ensure!(
-                func < module.imported_funcs || funcs[func as usize] == MAIN,
-                "a side module calls function {func}, which no module it can reach has"
-            );
-            called[func as usize] = true;
-        }
-        let slots = module.slots();
-        let mut table: Vec<(u32, u32)> = own
-            .iter()
-            .filter(|&&f| mark.taken[f as usize] && slots[f as usize] != u32::MAX)
-            .map(|&f| (slots[f as usize], index[f as usize]))
-            .collect();
-        table.sort_unstable();
-        let lookup = |func: u32| -> anyhow::Result<u32> {
-            let i = index[func as usize];
-            ensure!(
-                i != u32::MAX,
-                "a side module calls function {func}, which it does not import"
-            );
-            Ok(i)
-        };
-        let segments = runs(module, bytes, owner, &|b, e| {
-            patch_funcs(module, b, e, &lookup)
-        })?;
-        Ok(Side {
+        Ok(Plan {
+            owner,
             imports,
+            from,
             own,
             index,
-            table,
-            segments,
         })
     }
 
@@ -643,9 +735,10 @@ impl Side {
         module: &Module<'_>,
         extra: &Extra,
         body_relocs: &[std::ops::Range<usize>],
-        remap: &[u32],
-        gate: u32,
-        name: &str,
+        bytes: &[Owner],
+        exported: &[bool],
+        gate: Option<(u32, &str)>,
+        name_of: &dyn Fn(Owner) -> String,
     ) -> anyhow::Result<Vec<u8>> {
         let lookup = |func: u32| -> anyhow::Result<u32> {
             let i = self.index[func as usize];
@@ -689,9 +782,14 @@ impl Side {
             put_name(&mut section, &format!("__nsh_g{g}"));
             section.extend_from_slice(&[3, *ty, u8::from(*mutable)]);
         }
-        for &func in &self.imports {
-            put_name(&mut section, "main");
-            put_name(&mut section, &format!("__nsh_f{}", remap[func as usize]));
+        for &(has, func) in &self.imports {
+            let from = if has == MAIN {
+                "main".to_owned()
+            } else {
+                name_of(has)
+            };
+            put_name(&mut section, &from);
+            put_name(&mut section, &format!("__nsh_f{func}"));
             section.push(0);
             put_uleb(&mut section, module.type_of(extra, func).into());
         }
@@ -704,18 +802,42 @@ impl Side {
         }
         put_section(&mut out, 3, &section);
 
-        let mut section = Vec::new();
-        put_uleb(&mut section, 1);
-        put_name(&mut section, name);
-        section.push(0);
-        put_uleb(&mut section, lookup(gate)?.into());
-        put_section(&mut out, 7, &section);
-
-        if !self.table.is_empty() {
-            put_section(&mut out, 9, &elements(&self.table));
+        let mut entries: Vec<(String, u32)> = Vec::new();
+        if let Some((func, name)) = gate {
+            entries.push((name.to_owned(), lookup(func)?));
+        }
+        for &func in &self.own {
+            if exported[func as usize] {
+                entries.push((format!("__nsh_f{func}"), lookup(func)?));
+            }
         }
         let mut section = Vec::new();
-        put_uleb(&mut section, self.segments.len() as u64);
+        put_uleb(&mut section, entries.len() as u64);
+        for (name, index) in entries {
+            put_name(&mut section, &name);
+            section.push(0);
+            put_uleb(&mut section, index.into());
+        }
+        put_section(&mut out, 7, &section);
+
+        // Every own function the linker gave a slot: other modules take
+        // their addresses too.
+        let slots = module.slots();
+        let mut table: Vec<(u32, u32)> = self
+            .own
+            .iter()
+            .filter(|&&f| slots[f as usize] != u32::MAX)
+            .map(|&f| (slots[f as usize], self.index[f as usize]))
+            .collect();
+        table.sort_unstable();
+        if !table.is_empty() {
+            put_section(&mut out, 9, &elements(&table));
+        }
+        let segments = runs(module, bytes, self.owner, &|b, e| {
+            patch_funcs(module, b, e, &lookup)
+        })?;
+        let mut section = Vec::new();
+        put_uleb(&mut section, segments.len() as u64);
         put_section(&mut out, 12, &section);
 
         let mut section = Vec::new();
@@ -731,9 +853,41 @@ impl Side {
             section.extend_from_slice(&bytes);
         }
         put_section(&mut out, 10, &section);
-        put_section(&mut out, 11, &data_section(&self.segments));
+        put_section(&mut out, 11, &data_section(&segments));
         Ok(out)
     }
+}
+
+/// Who has each function and each byte: the main module what `main`
+/// reaches, the set of gates of `marks` that reach it otherwise.
+fn owners(
+    module: &Module<'_>,
+    main: &super::Live,
+    marks: &[super::Live],
+) -> (Vec<Owner>, Vec<Owner>) {
+    let base = module.data_low();
+    let mut funcs = vec![NONE; module.func_count()];
+    let mut bytes = vec![NONE; (module.data_high() - base) as usize];
+    let mut claim = |live: &super::Live, owner: Owner| {
+        for (func, live) in live.funcs.iter().enumerate() {
+            if *live && func >= module.imported_funcs as usize && funcs[func] != MAIN {
+                funcs[func] |= owner;
+            }
+        }
+        for &(_, start, end, _) in &live.data {
+            for at in start..end {
+                let byte = &mut bytes[(at - base) as usize];
+                if *byte != MAIN {
+                    *byte |= owner;
+                }
+            }
+        }
+    };
+    claim(main, MAIN);
+    for (k, mark) in marks.iter().enumerate() {
+        claim(mark, 1 << k);
+    }
+    (funcs, bytes)
 }
 
 #[cfg(test)]
@@ -773,8 +927,14 @@ mod tests {
             e.finish().unwrap().len()
         };
         println!("main {} gz {}", split.main.len(), gz(&split.main));
-        for (gate, side) in &split.sides {
-            println!("{gate} {} gz {}", side.len(), gz(side));
+        for side in &split.sides {
+            println!(
+                "{} {} gz {} needs {:?}",
+                side.name,
+                side.bytes.len(),
+                gz(&side.bytes),
+                side.needs
+            );
         }
     }
 }
