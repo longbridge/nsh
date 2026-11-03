@@ -15,7 +15,7 @@ demo: el-combobox
 组合框负责行为：值（应用的，或它自己的）、展开状态、键盘、搜索、分组、高亮的行，以及屏幕阅读器听到的内容。在 `multiple` 时，一次选择会把该条目加入或移出值，列表保持打开，所以可以一次选好多个。外观由应用决定：应用为字段、弹出层、列表、行、分组标题、输入框和底部区域设置样式，或者自己绘制行。
 
 ```rust tabs
-use nsh_base::{SelectItem, SelectItemState, combobox, theme};
+use nsh_base::{SelectEntry, SelectItem, combobox, theme};
 use nsh_core::prelude::*;
 
 const TAGS: [(&str, &str); 5] = [
@@ -62,16 +62,8 @@ fn tag_picker() -> impl IntoElement {
         .border_color(move || theme().input)
         .input_style(|s| s.flex_1().text_sm())
         .trigger_button(text("⌄"))
-        .render_item(|item: &SelectItemState| {
-            view()
-                .flex_row()
-                .justify_between()
-                .px_2()
-                .py_1p5()
-                .when(item.highlighted, |v| v.bg(move || theme().accent))
-                .child(text(item.title.clone()).text_sm())
-                .when(item.selected, |v| v.child(text("✓").text_sm()))
-        })
+        .item_class("rounded-md focus:bg-accent selected:font-medium disabled:opacity-50")
+        .render_item(|item: &SelectEntry| view().px_2().py_1p5().child(text(item.title.clone()).text_sm()))
 }
 ```
 
@@ -102,12 +94,12 @@ function App() {
       backdropClass="bg-black/40"
       class="h-9 w-48 flex-row items-center rounded-md border border-input px-3"
       inputClass="flex-1 text-sm placeholder:text-muted-foreground"
-      itemClass="rounded-md px-2 py-1.5 text-sm focus:bg-accent focus:text-accent-foreground"
+      itemClass="group rounded-md px-2 py-1.5 text-sm focus:bg-accent focus:text-accent-foreground"
       triggerButton={<Text class="px-1 text-muted-foreground">⌄</Text>}
       renderItem={(item) => (
         <View class="flex-row justify-between">
           <Text>{item.title}</Text>
-          <Text>{item.selected ? "✓" : ""}</Text>
+          <Text class="opacity-0 group-selected:opacity-100">✓</Text>
         </View>
       )}
     />
@@ -183,7 +175,7 @@ mount(App);
 | `suffix` | `.suffix(..)` | `JSX.Element` | 无 | 触发按钮之后的内容。 |
 | `empty` | `.empty(..)` | `JSX.Element` | 无 | 没有条目显示时列表显示的内容。 |
 | `footer` | `.footer(..)` | `JSX.Element` | 无 | 显示在行下方的内容。 |
-| `renderItem` | `.render_item(..)` | `(item: SelectItemState) => JSX.Element` | 无 | 由应用绘制的条目行；否则显示条目标题。 |
+| `renderItem` | `.render_item(..)` | `(item: SelectEntry) => JSX.Element` | 无 | 由应用根据条目本身绘制的条目行，从不收到状态：内容用 `group-focus:`、`group-selected:`、`group-disabled:` 跟随行的状态（`itemClass` 里加 `group`），所以高亮移动或切换选中时不再重新绘制；否则显示条目标题。 |
 | `renderGroup` | `.render_group(..)` | `(group: SelectGroup) => JSX.Element` | 无 | 由应用绘制的分组标题；否则显示其标题。 |
 | `class`、`style` | 样式方法 | `string`、`StyleProp<ViewStyle>` | 无 | 字段：前缀、输入框、按钮和后缀所在的一行；列表和它一样宽。 |
 
@@ -218,7 +210,7 @@ mount(App);
 | 背景层 | sheet 后面（触屏设备） | `backdropClass`、`backdropStyle` |
 | 列表 | 弹出层中 | `listClass`、`listStyle` |
 | 分组标题 | 列表中，它的条目之前 | `groupClass`、`groupStyle`、`renderGroup` |
-| 条目的行 | 列表中 | `itemClass`、`itemStyle`、`renderItem` |
+| 条目的行 | 列表中 | `itemClass`、`itemStyle`、`renderItem`（其中用 `group-focus:`、`group-selected:`、`group-disabled:`，`itemClass` 里加 `group`） |
 | 空状态 | 弹出层中，没有条目显示时 | 它自己的元素（`empty`） |
 | 底部区域 | 弹出层中的最后一个 | `footerClass`、`footerStyle`；内容 `footer` |
 

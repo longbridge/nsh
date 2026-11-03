@@ -35,6 +35,18 @@
 // `motion.update` as rows come.
 // Bars take their colors from their rows' regions through the plot's
 // `colorScale` (`color` on the mark, an ordinal scale on the plot).
+// Candles: a `Bar` from each row's open to its close (`base` a field), a
+// `Rule` from its low to its high (`value`, `base` a function, `color`,
+// `inactiveOpacity`).
+// Bubbles: a `Dot` per row at its `x` and `value`, its radius from a field
+// through a square root scale (`r`, `rScale`), its fill from its row's
+// category (`color`), the others fading with the hover
+// (`inactiveOpacity`), found past its edge within `hitRadius`.
+// Dual axes: marks on the plot's second y scale (`y2Scale`, a mark's
+// `scale="y2"`): a line, an area, a rule, a bar, dots, a grid line, a label
+// and a right-hand axis; automatic domains aligned in the same steps
+// (`alignTicks`), a `Grid` without values on their ticks (`ticks`), and
+// a plot that does not align.
 // Reversed scales (`reverse`): bars hanging from the top of a reversed
 // linear y scale in bands from the right edge, and bars across from the
 // right edge of a reversed x; the axis's labels and the hover follow.
@@ -54,7 +66,7 @@
 // plot made again there shows whole at once, a new `appearGeneration` (a
 // string) and a new `id` draw it in again.
 import { Text, View, signal } from "nsh";
-import { Arc, Area, Bar, Grid, Line, Pie, Plot, PlotAppearScope, PlotAxis, PlotLabel, RadialGrid, RadialLine, Sankey } from "nsh/base/plot";
+import { Arc, Area, Bar, Dot, Grid, Line, Pie, Plot, PlotAppearScope, PlotAxis, PlotLabel, RadialGrid, RadialLine, Rule, Sankey } from "nsh/base/plot";
 
 type Row = { t: number; price: number; avg: number };
 type Sale = { v: number; w: number };
@@ -164,6 +176,9 @@ function App() {
       <PieLabelCase />
       <AxisCase />
       <ColorCase />
+      <RangeCase />
+      <DotCase />
+      <DualCase />
       <ReverseCase />
       <RadarCase />
       <LabelCase />
@@ -442,6 +457,120 @@ function SankeyCase() {
       </Plot>
       <Plot testID="unrelaxed" data={STEPS} style={{ width: 100, height: 100 }}>
         <Sankey links={STEP_FLOWS} iterations={0} nodeLabel="name" />
+      </Plot>
+    </View>
+  );
+}
+
+type Candle = { o: number; c: number; l: number; h: number; dir: string };
+
+const CANDLES: Candle[] = [
+  { o: 20, c: 40, l: 10, h: 50, dir: "up" },
+  { o: 40, c: 30, l: 25, h: 75, dir: "down" },
+];
+
+/** Two candles in bands of 100 of a 200 by 100 plot on 0 to 100 (a value
+ * at 100 - value): bodies from the open to the close, the second growing
+ * down, labeled at the close; wicks from the low to the high, green up
+ * and red down, the other row's fading to 0.25 with the hover. */
+function RangeCase() {
+  const hovered = signal<number | null>(null);
+  return (
+    <View>
+      <Plot
+        testID="candles"
+        data={CANDLES}
+        xScale={{ type: "band" }}
+        yScale={{ type: "linear", domain: [0, 100] }}
+        colorScale={{ type: "ordinal", domain: ["up", "down"], range: ["#00ff00", "#ff0000"] }}
+        onHoverChange={({ index }) => hovered.set(index)}
+        style={{ width: 200, height: 100 }}
+      >
+        <Rule testID="wicks" value="h" base={(d: Candle) => d.l} color="dir" inactiveOpacity={0.25} />
+        <Bar value="c" base="o" label={(d: Candle) => `c${d.c}`} labelClass="h-[10px] w-[20px]" />
+      </Plot>
+      <Text>{`candle ${hovered()}`}</Text>
+    </View>
+  );
+}
+
+type Holding = { risk: number; ret: number; cap: number; sector: string };
+
+const HOLDINGS: Holding[] = [
+  { risk: 10, ret: 20, cap: 100, sector: "a" },
+  { risk: 30, ret: 40, cap: 400, sector: "b" },
+];
+
+/** Two bubbles on a 200 by 100 plot, x from 0 to 40 (5 points a value),
+ * y from 0 to 100 (at 100 - value): radii from the caps' square roots, up
+ * to 20, the bigger drawn first; red and green by sector; the pointer finds
+ * a bubble 20 past its edge. */
+function DotCase() {
+  const hovered = signal<number | null>(null);
+  return (
+    <View>
+      <Plot
+        testID="bubbles"
+        data={HOLDINGS}
+        x="risk"
+        xScale={{ type: "linear", domain: [0, 40] }}
+        yScale={{ type: "linear", domain: [0, 100] }}
+        colorScale={{ type: "ordinal", domain: ["a", "b"], range: ["#ff0000", "#00ff00"] }}
+        onHoverChange={({ index }) => hovered.set(index)}
+        style={{ width: 200, height: 100 }}
+      >
+        <Dot
+          testID="dots"
+          value="ret"
+          r="cap"
+          rScale={{ type: "sqrt", range: [0, 20] }}
+          color="sector"
+          inactiveOpacity={0.25}
+          hitRadius={20}
+        />
+      </Plot>
+      <Text>{`bubble ${hovered()}`}</Text>
+    </View>
+  );
+}
+
+type Dual = { v: number; p: number };
+
+const DUAL: Dual[] = [
+  { v: 100, p: 12 },
+  { v: 200, p: 27 },
+];
+
+/** Dual axes in bands of 100 of 200 by 100 plots, the y scales kept
+ * half a label (5) inside an edge a right axis's label sits on: on the
+ * app's domains (y 0 to 200, y2 0 to 40, from 100 up to 5: 12 at 71.5,
+ * 27 at 35.875, 20 at 52.5) every part that names `y2` places its values
+ * there; on automatic ones the two are aligned in two steps (y 0 to 200,
+ * y2 10 to 30, from 95 up to 5: 12 at 86), the right axis ticks every
+ * step and a `Grid` with `ticks` takes d3's; not aligned (no axis: over
+ * the whole height), the second scale is 12 to 27. */
+function DualCase() {
+  return (
+    <View>
+      <Plot testID="dual" data={DUAL} xScale={{ type: "band" }} yScale={{ type: "linear", domain: [0, 200] }} y2Scale={{ type: "linear", domain: [0, 40] }} style={{ width: 200, height: 100 }}>
+        <Grid testID="dual-grid" y={[20]} scale="y2" />
+        <Area testID="dual-area" y1="p" scale="y2" curve="linear" />
+        <Rule testID="dual-rule" value="p" scale="y2" />
+        <Bar value="p" scale="y2" label={(d: Dual) => `b${d.p}`} labelClass="h-[10px] w-[20px]" />
+        <Line testID="dual-line" y="p" scale="y2" curve="linear" />
+        <Dot testID="dual-dots" value="p" scale="y2" />
+        <PlotLabel scale="y2" texts={[{ text: "y2-label", x: 0, y: 20 }]} />
+        <PlotAxis placement="right" scale="y2" tickValues={[40]} format={(v) => `y2-r${v}`} labelStyle={{ width: 20, height: 10 }} />
+      </Plot>
+      <Plot data={DUAL} xScale={{ type: "band" }} style={{ width: 200, height: 100 }}>
+        <Grid testID="aligned-grid" ticks={4} />
+        <Bar value="v" />
+        <Line testID="aligned-line" y="p" scale="y2" curve="linear" />
+        <PlotAxis placement="right" scale="y2" format={(v) => `p${v}`} labelStyle={{ width: 20, height: 10 }} />
+      </Plot>
+      <Plot data={DUAL} xScale={{ type: "band" }} alignTicks={false} style={{ width: 200, height: 100 }}>
+        <Bar value="v" />
+        <Line testID="own-line" y="p" scale="y2" curve="linear" />
       </Plot>
     </View>
   );

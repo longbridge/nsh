@@ -222,10 +222,27 @@ including the user-facing pages in `website/` (English and `zh-CN`). User-facing
 positive terms: what a platform or feature is and does, never what it is not or lacks, and name the product Native
 Shell in formal places and NSH elsewhere (`nsh` only in code) ("Writing documentation" in `website/README.md`).
 
+Two homes for documentation. This repository's documentation (`docs/dev/`, `website/`, module docs, pull request
+text) describes NSH at the level every contributor needs: the direction, concepts, which component does what,
+rules, code locations, commands and verification. The core design record lives in the private repository
+[`longbridge/nsh-docs`](https://github.com/longbridge/nsh-docs), checked out beside this one at `../nsh-docs`
+(`gh repo clone longbridge/nsh-docs ../nsh-docs`): the design thinking behind NSH's architecture and the details of
+its core mechanisms — key algorithms, inner data structures and protocols, formats and ABIs, tuning and
+thresholds, and the reasoning and alternatives behind them.
+
+When the core developers (`huacnlee`, `sunli829`, `madcodelife`) design or change something at that level with
+you, write the details to nsh-docs (its `dev/<page>.md`, the full version of `docs/dev/<page>.md`, or a design
+note such as `web/runtime-split.md`; commit and push to its `main`), and give this repository only the summary a
+contributor needs: what the part does and where its code is. If you are unsure which side something belongs
+to, put the details in nsh-docs and the summary here. Before changing an area, read its nsh-docs page as well as
+`docs/dev/` when you have access; without it, `docs/dev/` and the code's module docs are enough to work from.
+
 ## Commands
 
 ```sh
 cargo run [-- <app>] [-- --target catalyst|ios|android|gpui]                       # the gallery on this machine's backend (AppKit / GTK / Win32), hot reload; rebuilt and restarted on Rust changes
+cargo run -- accordion [--section settings]                                        # the gallery opened at one demo (by name), only its section with that title: no taps or scrolling
+NSH_GALLERY_DEMO=accordion NSH_GALLERY_SECTION=settings ./target/debug/nsh test examples/gallery/App.tsx --target linux   # the same under nsh test (steps on stdin)
 cargo xtask [<app>] [--target catalyst|ios|android|gpui] [-v]                      # the same without cargo's own two lines; -v (any nsh / xtask command): all output
 cargo build -p nsh-cli                                                             # build the nsh CLI
 ./target/debug/nsh init my-app --template ts|rust|mixed                            # new app: TSX, Rust (a Cargo project, "root"), or TSX that is also a crate ("rust": "."); asks on a terminal without --template
