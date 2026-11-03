@@ -38,6 +38,7 @@ tungstenite.workspace = true
 serde_json.workspace = true
 plist.workspace = true
 zip.workspace = true
+brotli.workspace = true
 flate2.workspace = true
 tar.workspace = true
 sha2.workspace = true

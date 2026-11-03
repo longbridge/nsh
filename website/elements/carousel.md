@@ -134,8 +134,9 @@ mount(App);
 
 `Carousel` and its parts come from [`nsh/base`](../modules/nsh-base.md), the `nsh-base` crate in Rust. The slide
 shown is the app's `index`: a swipe, a control or a key reports the next one with `onChange`, and the
-carousel scrolls to the `index` the app passes back. Until the app answers a swipe with a new `index`, the slide it
-rests on stays shown, so a swipe never springs back. Without `index` the carousel keeps its own, from `defaultIndex`. In Rust,
+carousel scrolls to the `index` the app passes back. The slide a swipe rests on shows until the app has answered its
+`onChange`: it stays when the app passes it back as `index`, and the content springs back to the app's slide,
+animated, when the app keeps the `index` it had. Without `index` the carousel keeps its own, from `defaultIndex`. In Rust,
 `carousel()`, `carousel_content()`, `carousel_item()`, `carousel_previous()`, `carousel_next()`,
 `carousel_pagination()` and `carousel_pagination_item()` make the parts, with a setter per prop
 (`.index(..)`), a listener per event (`.on_change(..)`), the typed style methods and `.child(..)` for their content.
@@ -205,8 +206,8 @@ rests on stays shown, so a swipe never springs back. Without `index` the carouse
 | `onChange` (`Carousel`) | `.on_change(\|index: &u32\| ..)` | The user moved to another slide: a swipe, the wheel or the touchpad came to rest on it, or a control, a pagination item or a key asked for it. `{ index }` is that slide. A new `index` from the app reports nothing. |
 | `onDragStart` (`Carousel`) | `.on_drag_start(\|\| ..)` | The user started dragging the content (a finger, the touchpad). |
 | `onDragEnd` (`Carousel`) | `.on_drag_end(\|\| ..)` | The content the user dragged came to rest. |
-| `onFocus` (`Carousel`) | `.on_focus(\|\| ..)` | The keyboard focus came to the carousel's own view, its previous or next control or a pagination item. Moving between them reports nothing. A focusable view inside a slide reports with its own `onFocus`. |
-| `onBlur` (`Carousel`) | `.on_blur(\|\| ..)` | The keyboard focus left the carousel's own view, its controls and its pagination items. |
+| `onFocus` (`Carousel`) | `.on_focus(\|\| ..)` | The keyboard focus came into the carousel: to its own view, its previous or next control, a pagination item or a focusable view in a slide. Moving between them reports nothing. |
+| `onBlur` (`Carousel`) | `.on_blur(\|\| ..)` | The keyboard focus left the carousel: its own view, its controls, its pagination items and the slides' content. |
 
 ## Parts
 
@@ -260,8 +261,8 @@ third wide). With fewer, previous, next and the keys still go around, scrolling 
 
 A banner that rolls on is the app's: a timer that sets `index`. The carousel reports when the user is at it, so the
 timer waits then, as the [WAI-ARIA carousel pattern](https://www.w3.org/WAI/ARIA/apg/patterns/carousel/) asks:
-`onDragStart` / `onDragEnd` around a drag, `onFocus` / `onBlur` while the keyboard focus is on the carousel, its
-controls or its pagination, and the pointer over a view around it. Leave it off with reduced motion, and give users a button that stops it (the rotation
+`onDragStart` / `onDragEnd` around a drag, `onFocus` / `onBlur` while the keyboard focus is in the carousel (on it,
+its controls, its pagination or the slides' content), and the pointer over a view around it. Leave it off with reduced motion, and give users a button that stops it (the rotation
 control):
 
 ```tsx
@@ -326,7 +327,8 @@ and so are its controls and pagination items. While one of them has the focus:
 
 In a right-to-left layout a horizontal carousel's slides run from the right, so Left moves to the next slide and Right
 to the previous; a vertical carousel keeps Up and Down. A control that turns disabled while it has the focus (next on
-the last slide) hands the focus to the carousel, so the keys go on working there.
+the last slide) hands the focus to the carousel, so the keys go on working there. Focusable views of the app's in the
+slides keep their own keys: an input's arrows move its caret.
 
 ## Motion
 

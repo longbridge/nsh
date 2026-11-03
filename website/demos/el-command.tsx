@@ -96,6 +96,7 @@ function App() {
             }}
             placeholder="Type a command or search…"
             accessibilityLabel="Commands"
+            searchAccessibilityLabel="Search commands"
             class={commandClasses.root}
             searchBarClass={commandClasses.searchBar}
             searchClass={commandClasses.search}

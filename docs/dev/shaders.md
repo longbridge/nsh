@@ -84,14 +84,9 @@ member's offset (`Packer::pack`):
 | `vec3f` / `vec4f` | a color (red, green, blue, and alpha for `vec4f`, 0..1 sRGB), an animated color, or a list of 3 / 4 numbers or animated values |
 | `array<vec4f, N>` | a list of at most `N` colors or 4-number lists; the rest stay zero |
 
-An animated value (`UniformValue::Animated`) becomes a value slot: a `UniformSlot { word, kind }` (`SlotKind::F32`,
-`I32`, `U32`, `Rgb`, `Rgba`) and its node in `ShaderLayer::nodes`. Slot `n` is bound to the view as
-`AnimationProp::CanvasArg(n)` in the node's animation bindings, next to a canvas drawing's slots (a view is one or
-the other). The platform's animator hands each slot's value to the shader view, which writes it into its copy of the
-words with `ShaderLayer::write_slot` and renders again: an animated uniform moves with no JS and no engine work per
-frame. A new layer with the same program and slots keeps the values written into the animated slots
-(`nsh_engine::shader::ShaderView::set_layer`, `op_sh` on the web), so a re-render of the app's component does not snap them
-back.
+An animated value (`UniformValue::Animated`) is bound to the view through the animation graph, so an animated
+uniform moves with no JS and no engine work per frame, and a re-render of the app's component keeps its current
+value (`ShaderLayer::write_slot`, `nsh_engine::shader::ShaderView::set_layer`).
 
 In JS, `uniforms` is decoded natively (`host_values.rs`, `impl HostValue for ShaderUniforms`): numbers, CSS color
 strings, animated nodes and lists of them, two levels deep. `dom.rs` keeps the animation nodes a view's `uniforms`
@@ -108,16 +103,14 @@ app loads), so an app without shaders opens no device. `Renderer::new` requests 
 backends and GL (`WGPU_BACKEND` overrides) with WebGL 2's downlevel limits; where no adapter or device is found it is
 `None` and shader views show their background and children. Uncaptured device errors are warnings, never panics.
 
-`nsh_engine::shader::ShaderView` is one view's state on the main thread: the layer, its words with the animated slots
-written in, size and scale, the clock of `nsh.time` (`Clock`: kept while paused), and its frames.
+`nsh_engine::shader::ShaderView` is one view's state on the main thread: the layer, its uniforms, size and scale, the
+clock of `nsh.time` (kept while paused), and its frames.
 
-- **Rendering never waits for the GPU.** `render` draws into a texture and copies it into one of two read-back
-  buffers mapped asynchronously; a later call finds a mapped buffer, copies the newest frame into `frame()` and
-  returns `true`. A frame shows one or two display frames after it is rendered. With both buffers in flight the
-  frame is skipped, so a slow GPU drops frames instead of stalling the main thread.
-- **Frame pacing.** `wants_frame` is true while something it reads changed (`dirty`: layer, uniforms, an animated
-  slot, size or scale), while it is animated and not paused, or while a frame is on its way back. Backends call
-  `render` on their frame clock only while it is true, at most once per display frame.
+- **Rendering never waits for the GPU.** Frames are read back asynchronously; a slow GPU drops frames instead of
+  stalling the main thread.
+- **Frame pacing.** `wants_frame` is true while something it reads changed, while it is animated and not paused, or
+  while a frame is on its way back. Backends call `render` on their frame clock only while it is true, at most once
+  per display frame.
 - **Pixels.** Frames are 8-bit premultiplied, in the `PixelFormat` the backend asked for (`Rgba`: GDK, Core Graphics,
   Android; `Bgra`: Direct2D, GPUI), rows `stride` bytes apart (`Frame::rows`, `Frame::tight`).
 

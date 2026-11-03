@@ -1507,10 +1507,10 @@ mod tests {
                 "fn shade(uv: vec2f) -> vec4f { return mix(sample_from(uv), sample_to(uv), nsh.progress); }",
             )
             .expect("a shader");
-            let shader = nsh_core::NavShader {
-                layer: Arc::new(ShaderLayer::new(shader, &[], &mut Vec::new())),
-                duration: Duration::from_millis(500),
-            };
+            let shader = nsh_core::NavShader::new(
+                Arc::new(ShaderLayer::new(shader, &[], &mut Vec::new())),
+                Duration::from_millis(500),
+            );
             apply(
                 &surface,
                 &[
