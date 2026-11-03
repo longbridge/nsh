@@ -830,7 +830,9 @@ pub struct EngineConfig {
     /// What the host gives this engine's Rust code, which its UI sets'
     /// functions and components read while it runs them
     /// (`nsh_core::element::engine_context`): a host serving several engines
-    /// tells them apart by it.
+    /// tells them apart by it. A `nsh_core::shared::SharedStore` in it is
+    /// the state the engine shares with the engines given the same one (an
+    /// app's windows); without one the engine has a store of its own.
     pub context: EngineContext,
     /// Values of the environment kept whatever the platform reports (a
     /// test's locale, reduced motion and safe area: `nsh test --target`).
@@ -1627,6 +1629,16 @@ impl<M: TextEngine + 'static> Driver<M> {
             transport: None,
         });
         core.set_storage(app_storage(&config));
+        // The state it shares with other engines: the store its maker put in
+        // its context (the same for each surface that shares it), or one of
+        // its own.
+        core.set_shared_store(
+            config
+                .context
+                .get::<nsh_core::shared::SharedStore>()
+                .map(|store| (*store).clone())
+                .unwrap_or_default(),
+        );
         core.set_clipboard(config.clipboard.clone());
         core.set_picker(config.picker.clone());
         core.set_speech(config.speech.clone());

@@ -1536,6 +1536,12 @@ impl<M: TextEngine> Core<M> {
             .set_storage(crate::storage::Store::new(backend));
     }
 
+    /// Shares `store` with the other engines given it ([`crate::shared`]):
+    /// what this engine's components watch of it.
+    pub fn set_shared_store(&mut self, store: crate::shared::SharedStore) {
+        self.components.runtime.set_shared(store);
+    }
+
     /// Logs (once) that the app was refused `what`.
     fn deny(&mut self, what: String) {
         if self.denied.len() < 256 && self.denied.insert(what.clone()) {

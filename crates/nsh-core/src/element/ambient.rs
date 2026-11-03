@@ -47,6 +47,10 @@ pub(crate) struct Ambient {
     measure: Option<MeasureFn>,
     /// The app's key-value storage (`nsh/storage`).
     storage: Option<crate::storage::Store>,
+    /// The store the engine shares with others ([`crate::shared`]), and
+    /// its side of it once something watches.
+    shared: Option<crate::shared::SharedStore>,
+    shared_client: Option<Rc<crate::shared::Client>>,
 }
 
 impl Ambient {
@@ -119,6 +123,15 @@ impl super::Runtime {
     pub(crate) fn set_storage(&self, storage: crate::storage::Store) {
         let _entered = self.enter();
         with_data(|d| d.ambient.storage = Some(storage));
+    }
+
+    /// The store the engine shares ([`crate::shared::store`]).
+    pub(crate) fn set_shared(&self, store: crate::shared::SharedStore) {
+        let _entered = self.enter();
+        with_data(|d| {
+            d.ambient.shared = Some(store);
+            d.ambient.shared_client = None;
+        });
     }
 
     /// How text is measured (the core's text engine).
@@ -379,6 +392,27 @@ pub fn text_metrics(font: &str, text: &str) -> crate::canvas::TextMetrics {
     let font = CanvasFont::parse(font).unwrap_or_default();
     let measure = with_data(|d| d.ambient.measure.clone()).expect("the core sets the text engine");
     measure(&font, text)
+}
+
+/// The engine's shared store (one of its own until the core is given one)
+/// and its side of it, if made ([`crate::shared`]).
+pub(crate) fn shared_state() -> (
+    crate::shared::SharedStore,
+    Option<Rc<crate::shared::Client>>,
+) {
+    with_data(|d| {
+        let store = d
+            .ambient
+            .shared
+            .get_or_insert_with(Default::default)
+            .clone();
+        (store, d.ambient.shared_client.clone())
+    })
+}
+
+/// Keeps the engine's side of its shared store.
+pub(crate) fn set_shared_client(client: Rc<crate::shared::Client>) {
+    with_data(|d| d.ambient.shared_client = Some(client));
 }
 
 /// The surface's `G`: one signal per type, made with `Default` the first

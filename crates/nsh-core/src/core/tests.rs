@@ -10048,6 +10048,85 @@ mod components {
         panic!("not done: {shown:?}");
     }
 
+    /// Shows a shared key, how many keys a shared prefix has, and how many
+    /// events of a topic arrived.
+    #[derive(Clone, PartialEq, Props)]
+    struct SharedViewProps {}
+
+    #[component]
+    fn SharedView(_props: SharedViewProps) -> impl IntoElement {
+        let price = crate::shared::signal("price");
+        let rows = crate::shared::prefix("row/");
+        let pings = signal(0u32);
+        crate::shared::on_event("ping", move |_| pings.update(|n| *n += 1));
+        view().child(text(move || {
+            let price = price.get().and_then(|v| v.as_f64()).unwrap_or(-1.0);
+            format!("{price}|{}|{}", rows.with(|r| r.len()), pings.get())
+        }))
+    }
+
+    #[test]
+    fn components_follow_a_shared_store() {
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(1)
+            .enable_time()
+            .build()
+            .unwrap();
+        let store = crate::shared::SharedStore::new();
+        store.set("price", 1);
+        let mut c = core();
+        c.set_shared_store(store.clone());
+        let mut registry = Registry::new();
+        registry.register::<SharedView>();
+        c.set_components(registry);
+        c.set_task_runtime(runtime.handle().clone());
+        apply(
+            &mut c,
+            vec![
+                Op::Create {
+                    id: 2,
+                    tag: Tag::View,
+                },
+                Op::SetProp {
+                    id: 2,
+                    prop: Prop::Component(std::any::type_name::<SharedView>().into()),
+                },
+                Op::Insert {
+                    parent: ROOT_ID,
+                    child: 2,
+                    before: None,
+                },
+            ],
+        );
+        assert_eq!(texts(&c.commit().unwrap()), ["1|0|0"]);
+
+        // Another thread writes: many versions, one of which the engine
+        // shows, with the keys a transaction changed together.
+        let writer = {
+            let store = store.clone();
+            std::thread::spawn(move || {
+                for i in 0..50 {
+                    store.transaction(|tx| {
+                        tx.set("price", i);
+                        tx.set("row/a", i);
+                    });
+                }
+                store.transaction(|tx| {
+                    tx.set("price", 2);
+                    tx.set("row/b", true);
+                });
+                store.emit("ping", crate::shared::SharedValue::Null);
+            })
+        };
+        writer.join().unwrap();
+        let shown = run_until(&mut c, |s| s.iter().any(|t| t == "2|2|1"));
+        assert!(shown.iter().all(|t| t != "2|1|1"), "torn: {shown:?}");
+
+        // Deleted keys leave the prefix.
+        store.delete("row/a");
+        run_until(&mut c, |s| s.iter().any(|t| t == "2|1|1"));
+    }
+
     #[test]
     fn state_tasks_props_and_the_environment() {
         let runtime = tokio::runtime::Builder::new_multi_thread()
