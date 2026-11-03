@@ -785,11 +785,12 @@ fn paints_one_shape(view: &NshView, state: &ViewState) -> bool {
 }
 
 /// Where a view paints itself (not its children), in its coordinates: its
-/// bounds, out by its shadows and outline, and the items it hosts.
+/// bounds, out by its shadows, outline and shader's overflow (an effect's
+/// frames reach beyond its box), and the items it hosts.
 fn own_area(state: &ViewState) -> D2D_RECT_F {
     let (w, h) = (state.frame.size.width.0, state.frame.size.height.0);
     // A point more for the antialiased edges.
-    let o = crate::decor::outset(state) + 1.0;
+    let o = crate::decor::outset(state).max(crate::shader::overflow(state)) + 1.0;
     let mut area = D2D_RECT_F {
         left: -o,
         top: -o,
@@ -2029,6 +2030,30 @@ mod tests {
         a.state_mut().style.hidden = false;
         parent.state_mut().style.overflow_hidden = true;
         assert_eq!(area(&parent), (-1.0, -1.0, 101.0, 101.0));
+    }
+
+    #[test]
+    fn a_shader_effect_paints_its_overflow() {
+        let surface = Surface::new(Default::default());
+        surface.without_shader_renderer();
+        let v = view(
+            Some(&surface.root),
+            2,
+            ViewKind::View,
+            rect(0.0, 0.0, 16.0, 16.0),
+        );
+        let shader = nsh_core::shader::Shader::compile(
+            "fn shade(uv: vec2f) -> vec4f { return sample_content(uv); }",
+        )
+        .expect("a shader");
+        let layer = nsh_core::shader::ShaderLayer::new(shader, &[], &mut Vec::new())
+            .with_role(nsh_core::shader::ShaderRole::Effect)
+            .with_overflow(Points(8.0));
+        crate::shader::set(&surface, &v, Some(std::sync::Arc::new(layer)));
+        // Where it was painted, drawn again when it moves: its frames too.
+        let a = own_area(&v.state());
+        assert_eq!((a.left, a.top, a.right, a.bottom), (-9.0, -9.0, 25.0, 25.0));
+        assert_eq!(area(&v), (-9.0, -9.0, 25.0, 25.0));
     }
 
     #[test]

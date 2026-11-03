@@ -227,15 +227,15 @@ frame:
 
 - **What changed** (`Surface::take_damage`): `NshView::changed` (and `moved`, which every frame, style, content,
   animation, transition and scroll change goes through) puts the view on its surface's list. A view records where the
-  window's frame painted it (`set_painted`: its bounds out by shadows and outline, with the items it hosts, clipped
-  to what was visible; in a pass drawn offscreen for a filter or a 3D transform, that view's area). The damage of a
-  changed view is where it and its subtree were painted (`painted_subtree`) and where its subtree draws now
-  (`to_root` and `drawn_area`). A view taken out of its parent queues itself before it leaves; one inserted queues
-  itself after. The mounter queues the view of every applied item that may change what is drawn (`mount.rs`
-  `redrawn`), whatever applied it, and an item for the whole window (`Appearance`, `LayoutDirection`)
-  invalidates all of it. `Surface::invalidate` (theme, size, scale, chrome, device loss, composition) draws the
-  whole window; so do a change below a projective transform or in a subtree whose area is not known (a hosted item:
-  text editors, alerts), and the system's own `WM_PAINT` with nothing queued.
+  window's frame painted it (`set_painted`: its bounds out by shadows, outline and a shader's overflow, with the items
+  it hosts, clipped to what was visible; in a pass drawn offscreen for a filter or a 3D transform, that view's area).
+  The damage of a changed view is where it and its subtree were painted (`painted_subtree`) and where its subtree
+  draws now (`to_root` and `drawn_area`). A view taken out of its parent queues itself before it leaves; one inserted
+  queues itself after. The mounter queues the view of every applied item that may change what is drawn (`mount.rs`
+  `redrawn`), whatever applied it, and an item for the whole window (`Appearance`, `LayoutDirection`) invalidates all
+  of it. `Surface::invalidate` (theme, size, scale, chrome, device loss, composition) draws the whole window; so do a
+  change below a projective transform or in a subtree whose area is not known (a hosted item: text editors, alerts),
+  and the system's own `WM_PAINT` with nothing queued.
 - **What is drawn** (`render::frame`): the swap chain is `FLIP_SEQUENTIAL` with two buffers, so the back buffer
   holds the frame of two presents ago and a frame draws its own damage and the last frame's (`SwapChain::to_draw`;
   a new or resized chain, a window with web views and the frame after a whole one draw everything). The rectangles,
