@@ -27053,6 +27053,51 @@ mod terminal_layout {
         assert!(left_out(&ball(32.0, true), 3));
     }
 
+    #[test]
+    fn an_icons_lit_backing_goes_with_its_icon() {
+        // A quick settings tile's 32pt circle: a lit layer over it (absolute,
+        // nothing in it, filled) and its 16pt icon centered on it. Without
+        // the icon the layer would be a solid block beside the switch.
+        let tile = |size: f32| {
+            let mut ops = view(2, ROOT_ID, &[("alignItems", V::Str("flex-start"))]);
+            ops.extend(view(
+                3,
+                2,
+                &[
+                    ("width", V::Number(size)),
+                    ("height", V::Number(size)),
+                    ("borderRadius", V::Number(size / 2.0)),
+                    ("borderWidth", V::Number(1.0)),
+                    ("borderColor", V::Str("#3a3a3a")),
+                ],
+            ));
+            ops.extend(view(
+                4,
+                3,
+                &[
+                    ("position", V::Str("absolute")),
+                    ("top", V::Number(-1.0)),
+                    ("left", V::Number(-1.0)),
+                    ("right", V::Number(-1.0)),
+                    ("bottom", V::Number(-1.0)),
+                    ("backgroundColor", V::Str("#3b82f6")),
+                ],
+            ));
+            ops.extend(node(
+                5,
+                Tag::Image,
+                3,
+                &[("width", V::Number(16.0)), ("height", V::Number(16.0))],
+            ));
+            laid_out_on_surfaces(ops)
+        };
+        let batch = tile(32.0);
+        assert!(left_out(&batch, 3));
+        assert!(left_out(&batch, 4));
+        // Larger than an icon, its fill is the box's own: it stays.
+        assert!(!left_out(&tile(80.0), 3));
+    }
+
     /// A 188pt stage `stage_h` high holding an absolute ring `size` points
     /// across at 34pt, framed by a 1pt line, with a 10pt dot in it when
     /// `dot` (an orbit).

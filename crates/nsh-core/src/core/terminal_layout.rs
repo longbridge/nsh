@@ -521,7 +521,8 @@ pub(crate) enum Splitter {
 /// left out with it. One larger than an icon ([`ICON`]) stays a box where
 /// what it shows is its own: an opaque fill the user handles (a draggable
 /// ball around its dot), an animated fill, or a ring's outline (an orbit
-/// around the dot on it). A decorative tile goes with its icon.
+/// around the dot on it). A decorative tile goes with its icon, and so
+/// does an icon's backing at an icon's size ([`backing`]).
 fn icon_layer(tree: &impl Tree, node: NodeId) -> bool {
     let role = tree.role(node);
     let style = tree.style(node);
@@ -534,7 +535,25 @@ fn icon_layer(tree: &impl Tree, node: NodeId) -> bool {
         && !role.scroll
         && !filled
         && style.flex_grow <= 0.0
-        && hollow(tree, node)
+        && (hollow(tree, node) || (left_out(style, LeftOut::IfIcon) && backing(tree, node)))
+}
+
+/// Whether `node` is what an icon shows on: its content in flow left out,
+/// and nothing else in it but absolute layers with nothing in them (a
+/// tile's lit backing under its icon, which would be a solid block of
+/// Cells without the icon).
+fn backing(tree: &impl Tree, node: NodeId) -> bool {
+    let count = tree.child_count(node);
+    let mut icon = false;
+    for i in 0..count {
+        let child = tree.child(node, i);
+        if hidden(tree, child) {
+            icon = true;
+        } else if !(tree.style(child).position.is_out_of_flow() && bare(tree, child)) {
+            return false;
+        }
+    }
+    icon
 }
 
 /// A control whose content is all left out (an icon button): it shows its
