@@ -355,6 +355,15 @@ pub(crate) fn change_stamp() -> u64 {
     CHANGES.with(Cell::get)
 }
 
+/// A change stamp newer than every one before ([`NshView::changed`],
+/// [`crate::surface::Surface::invalidate`]).
+pub(crate) fn next_change_stamp() -> u64 {
+    CHANGES.with(|c| {
+        c.set(c.get() + 1);
+        c.get()
+    })
+}
+
 /// The smallest rectangle holding `a` and `b`.
 pub(crate) fn union(a: &WindowRect, b: &WindowRect) -> WindowRect {
     WindowRect {
@@ -436,10 +445,7 @@ impl NshView {
     /// again (if it is in one), and it and the views it is in hold a newer
     /// change ([`Self::changes`]: a shader picturing them takes them again).
     pub(crate) fn changed(&self) {
-        let stamp = CHANGES.with(|c| {
-            c.set(c.get() + 1);
-            c.get()
-        });
+        let stamp = next_change_stamp();
         let mut node = self.0.clone();
         loop {
             node.changes.set(stamp);
@@ -462,10 +468,7 @@ impl NshView {
     /// of what the views it is in hold, not of what it holds (a shader
     /// picturing its children does not take them again for its own frame).
     pub(crate) fn redraw(&self) {
-        let stamp = CHANGES.with(|c| {
-            c.set(c.get() + 1);
-            c.get()
-        });
+        let stamp = next_change_stamp();
         let mut node = self.0.clone();
         loop {
             let parent = node.parent.borrow().upgrade();

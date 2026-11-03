@@ -197,11 +197,14 @@ Effects, transitions and page shaders sit on the same program, layer and rendere
 - **Windows.** Effects and running transitions (screen ones on the root) draw their last frame instead of their
   children, which are drawn into a target bitmap by a context of their own as the window draws them (their hosted
   items take their places) and read back (`render::Readback`) only once a view in them changed since the last
-  picture (`NshView::changed` stamps the view and every view it is in, `NshView::changes`; a shader's own frame
-  only `redraw`s, which stamps the views it is in), and given to the shader when their pixels changed. The target and
-  the CPU-readable bitmap they are read through, and the pixels, are kept while the size, the scale and the device
-  stay; Direct2D maps the readable bitmap once the GPU has copied into it. A transition's `from` is drawn offscreen
-  when it starts (`render::draw_offscreen`). A backdrop is read back from the window's target before the view draws
+  picture (`NshView::changed` stamps the view and every view it is in, `NshView::changes`, and a `ShaderInput`
+  item stamps the shader's view; a shader's own frame only `redraw`s, which stamps the views it is in) or the whole
+  window was asked to draw again (`Surface::whole_change`: a video's frame, a native component, the theme), and
+  given to the shader when their pixels changed. A shader reading `nsh.time` over still children reads them once
+  (`shader.rs`'s `an_effect_reads_its_children_back_only_after_a_change`). The target and the CPU-readable bitmap
+  they are read through, and the pixels, are kept while the size, the scale and the device stay; Direct2D maps the
+  readable bitmap once the GPU has copied into it. A transition's `from` is drawn offscreen when it starts
+  (`render::draw_offscreen`). A backdrop is read back from the window's target before the view draws
   (partial frames draw the view's whole area, overflow included: `render::drawn_area`), into kept bitmaps and
   pixels. Pages and dialogs: recordings (`ID2D1CommandList`) of the host without and with the upper side, drawn into
   bitmaps and read back once by a hosted `NavItem` over the stack or the root, its shader on its own transition

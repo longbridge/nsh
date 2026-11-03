@@ -133,6 +133,9 @@ pub(crate) struct Surface {
     invalid: Cell<bool>,
     /// The next frame draws the whole window ([`Surface::invalidate`]).
     full_damage: Cell<bool>,
+    /// The change stamp of the last request to draw the whole window
+    /// ([`Surface::whole_change`]).
+    whole_change: Cell<u64>,
     /// Views that changed since the last frame
     /// ([`Surface::invalidate_view`]).
     dirty: RefCell<Vec<NshView>>,
@@ -219,6 +222,7 @@ impl Surface {
             invalid: Cell::new(false),
             // The first frame draws everything.
             full_damage: Cell::new(true),
+            whole_change: Cell::new(0),
             dirty: RefCell::default(),
             environment: Cell::new(environment),
             appearance: Cell::default(),
@@ -476,7 +480,17 @@ impl Surface {
     /// asked before it is).
     pub(crate) fn invalidate(&self) {
         self.full_damage.set(true);
+        self.whole_change.set(crate::view::next_change_stamp());
         self.request_paint();
+    }
+
+    /// The change stamp of the last request to draw the whole window
+    /// ([`Surface::invalidate`]). What such a request redraws may have
+    /// changed without a view saying so (a video's frame, a native
+    /// component, the theme): a shader's picture of its children taken
+    /// before it is taken again.
+    pub(crate) fn whole_change(&self) -> u64 {
+        self.whole_change.get()
     }
 
     /// Asks for `view` and its subtree to be drawn again: where it was

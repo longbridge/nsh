@@ -19,8 +19,10 @@
 //!   rounded box as a background is ([`draw`]).
 //! - An effect draws instead of its children ([`draw_effect`]): as the
 //!   window draws it, its children are drawn into a bitmap of the box and
-//!   its overflow by a context of their own and read back; when the pixels
-//!   changed, they are the shader's `sample_content`.
+//!   its overflow by a context of their own, and read back once a view in
+//!   them or the whole window changed since they last were (its own frames
+//!   do not count); when the pixels changed, they are the shader's
+//!   `sample_content`.
 //! - A transition draws as an effect while one runs ([`start_transition`],
 //!   before the rest of its batch): its children drawn then are its
 //!   `sample_from`, its children as they are drawn its `sample_to`.
@@ -261,6 +263,17 @@ impl ShaderState {
             Some(ShaderRole::Transition | ShaderRole::ScreenTransition) => ShaderInput::To,
             _ => ShaderInput::Content,
         }
+    }
+
+    /// Whether its children are read back again as the window draws it:
+    /// never read yet, or a view in it (`changes`, [`NshView::changes`],
+    /// which a `ShaderInput` item stamps too) or the whole window
+    /// ([`Surface::whole_change`]) changed since. Its own frames change
+    /// neither: a shader reading `nsh.time` over still children reads
+    /// them once.
+    fn picture_due(&self, changes: u64) -> bool {
+        let whole = self.surface.upgrade().map_or(0, |s| s.whole_change());
+        self.pictured.is_none_or(|at| changes > at || whole > at)
     }
 }
 
@@ -714,7 +727,7 @@ pub(crate) fn draw_effect(cx: &mut DrawCx<'_>, view: &NshView, world: Mat4) -> b
             let mut s = view.state_mut();
             match s.shader.as_mut() {
                 Some(shader) => (
-                    shader.pictured.is_none_or(|at| view.changes() > at),
+                    shader.picture_due(view.changes()),
                     std::mem::take(&mut shader.readback),
                 ),
                 None => (false, Readback::default()),
@@ -1166,5 +1179,61 @@ mod tests {
         drop(s);
         mount(&surface, 6, ShaderRole::Screen);
         assert!(!effect(&surface.root.state()));
+    }
+
+    /// What [`draw_effect`] does with an effect's children each time the
+    /// window draws it: whether it read them back.
+    fn picture(fx: &NshView) -> bool {
+        let stamp = crate::view::change_stamp();
+        let mut s = fx.state_mut();
+        let shader = s.shader.as_mut().expect("its shader");
+        let due = shader.picture_due(fx.changes());
+        if due {
+            shader.pictured = Some(stamp);
+        }
+        due
+    }
+
+    /// An effect whose shader reads `nsh.time` draws a frame of its own
+    /// every display frame: its children are read back once, then only
+    /// after one of them, its `ShaderInput` or the whole window changed.
+    #[test]
+    fn an_effect_reads_its_children_back_only_after_a_change() {
+        let surface = surface();
+        let fx = mount(&surface, 2, ShaderRole::Effect);
+        apply(
+            &surface,
+            &[
+                MountItem::Create {
+                    id: 4,
+                    kind: ViewKind::View,
+                },
+                MountItem::Insert {
+                    parent: 2,
+                    child: 4,
+                    before: None,
+                },
+            ],
+        );
+        let child = surface.view(4).expect("the child");
+        let sibling = mount(&surface, 6, ShaderRole::Fill);
+        let mut read = 0;
+        for _ in 0..120 {
+            // Its own frame, and one of a shader beside it.
+            fx.redraw();
+            sibling.redraw();
+            read += usize::from(picture(&fx));
+        }
+        assert_eq!(read, 1, "120 frames of its own, one read");
+        child.changed();
+        assert!(picture(&fx), "a view in it changed");
+        assert!(!picture(&fx));
+        apply(&surface, &[MountItem::ShaderInput { id: 2 }]);
+        assert!(picture(&fx), "the core says its pictures changed");
+        assert!(!picture(&fx));
+        // A video's frame, a native component or the theme.
+        surface.invalidate();
+        assert!(picture(&fx), "the whole window draws again");
+        assert!(!picture(&fx));
     }
 }
