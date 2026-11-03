@@ -213,6 +213,12 @@ style id:archived opacity 1
 listens id:archived onPress
 tap text:Archived
 expect Log: open https://example.com/docs, press, route /orders/42, route /archive
+# `hitSlop`: presses count this far outside the link, one number for
+# every side or the sides named, following a signal; none without it.
+prop id:help hitSlop top=12 right=12 bottom=12 left=12
+tap text:Help
+prop id:help hitSlop top=4 left=2
+prop id:docs hitSlop {}
 covers [nsh/base] Link
 covers [props] Link.href
 covers [props] accessibilityLabel
