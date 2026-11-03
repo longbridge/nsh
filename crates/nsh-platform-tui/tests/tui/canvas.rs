@@ -573,3 +573,72 @@ fn an_opaque_box_over_a_canvas_hides_its_dots() {
     );
     assert_eq!(row(buffer, 0, 8..12), "⣿⣿⣿⣿", "the dots past it");
 }
+
+/// A plot's rising line in a box with a Cell of padding each side, and a
+/// mark after the box.
+#[component]
+fn PaddedPlot() -> impl IntoElement {
+    let rows = nsh_core::element::Rows::from_columns(3, [("value".into(), vec![1.0, 2.0, 3.0])]);
+    view()
+        .flex_1()
+        .child(
+            view()
+                .flex_row()
+                .child(
+                    view().px(px(8.0)).child(
+                        nsh_base::plot::plot()
+                            .data(rows)
+                            .y(nsh_core::element::RowAccessor::key("value"))
+                            .w(px(128.0))
+                            .h(px(32.0))
+                            .stroke_width(px(2.0))
+                            .child(
+                                nsh_base::plot::line()
+                                    .curve(nsh_base::plot::Curve::Linear)
+                                    .stroke_color(nsh_core::color::rgb(GREEN)),
+                            ),
+                    ),
+                )
+                .child(text("|")),
+        )
+        .child(text("drawn"))
+}
+
+#[test]
+fn a_plots_marks_stay_inside_the_plot_and_off_its_padding() {
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(24, 4)).unwrap();
+    view.load(App::Rust(Root::new::<PaddedPlot>(|| ())))
+        .unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "drawn");
+    super::app::draw_until_still(&mut view, &mut terminal, &rx);
+    let buffer = terminal.backend().buffer();
+    let braille = |x: u16, y: u16| {
+        buffer[(x, y)]
+            .symbol()
+            .chars()
+            .next()
+            .is_some_and(|c| ('\u{2801}'..='\u{28ff}').contains(&c))
+    };
+    // The padding Cell, the plot's 16 Cells, the padding Cell, the mark.
+    assert_eq!(buffer[(18, 0)].symbol(), "|", "{:?}", row(buffer, 0, 0..24));
+    let drawn = |x: u16| (0..2).any(|y| braille(x, y));
+    assert!(
+        drawn(1),
+        "the line starts at the plot's left: {:?}",
+        row(buffer, 1, 0..24)
+    );
+    assert!(
+        drawn(16),
+        "and reaches its right: {:?}",
+        row(buffer, 0, 0..24)
+    );
+    for x in [0, 17] {
+        assert!(
+            !drawn(x),
+            "no dot in the padding at column {x}: {:?} / {:?}",
+            row(buffer, 0, 0..24),
+            row(buffer, 1, 0..24)
+        );
+    }
+}

@@ -330,10 +330,25 @@ impl Dots {
             .max((to[1] - from[1]).abs())
             .ceil()
             .max(1.0) as usize;
+        // Each axis is half open, as a pixel grid is: a segment that ends
+        // on a dot's left or top edge (a line to the plot's right edge,
+        // which is the next Cell's start) stops before that dot.
+        let dot = |x: f32, from: f32, to: f32| {
+            let floor = x.floor();
+            if x == from.max(to) && from != to && floor == x {
+                floor - 1.0
+            } else {
+                floor
+            }
+        };
         for step in 0..=steps {
             let t = step as f32 / steps as f32;
-            let column = (from[0] + (to[0] - from[0]) * t).floor();
-            let row = (from[1] + (to[1] - from[1]) * t).floor();
+            let at = |axis: usize| match step == steps {
+                true => to[axis],
+                false => from[axis] + (to[axis] - from[axis]) * t,
+            };
+            let column = dot(at(0), from[0], to[0]);
+            let row = dot(at(1), from[1], to[1]);
             if column < 0.0
                 || row < 0.0
                 || column as usize >= self.width
@@ -861,5 +876,32 @@ mod tests {
             clip_segment([-10.0, 5.0], [30.0, 5.0], [-1.0, -1.0], [20.0, 10.0]).unwrap();
         assert_eq!([from[0], to[0]], [-1.0, 20.0]);
         assert!(clip_segment([-10.0, 50.0], [30.0, 50.0], [-1.0, -1.0], [20.0, 10.0]).is_none());
+    }
+
+    #[test]
+    fn a_segment_to_a_dots_edge_stops_before_that_dot() {
+        let dots = Dots {
+            width: 8,
+            height: 4,
+            origin: [0.0, 0.0],
+            step: [4.0, 4.0],
+            inks: vec![None; 32],
+            painted: 0,
+        };
+        let lit = |a: [f32; 2], b: [f32; 2]| {
+            let mut lit = Vec::new();
+            dots.trace(a, b, |index, _| lit.push(index));
+            lit.sort_unstable();
+            lit.dedup();
+            lit
+        };
+        // Across four dots' width from the left edge: those four, not the
+        // fifth, whose left edge the segment ends on, either way it runs.
+        assert_eq!(lit([0.0, 2.0], [16.0, 2.0]), vec![0, 1, 2, 3]);
+        assert_eq!(lit([16.0, 2.0], [0.0, 2.0]), vec![0, 1, 2, 3]);
+        // Down to a row's top edge: the rows above it.
+        assert_eq!(lit([2.0, 0.0], [2.0, 8.0]), vec![0, 8]);
+        // Ending inside a dot lights it.
+        assert_eq!(lit([0.0, 2.0], [17.0, 2.0]), vec![0, 1, 2, 3, 4]);
     }
 }
