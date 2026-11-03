@@ -115,6 +115,17 @@ struct Item {
 
 /// The stack's height collapsed and expanded, for items of `heights`
 /// (oldest first), as `gpui-base`'s.
+/// The distance between expanded toasts: the motion's, or in a terminal
+/// three rows, as a toast's frame is drawn on the row outside its box at
+/// either edge and a blank row keeps one toast's frame apart from the
+/// next's.
+fn expanded_gap(m: ToastMotion) -> Points {
+    match crate::terminal::is_terminal() {
+        true => crate::terminal::cell_height() * 3.0,
+        false => m.expanded_gap,
+    }
+}
+
 fn stack_heights(heights: &[Points], gap: Points, peek: Points) -> (Points, Points) {
     let count = heights.len();
     let expanded =
@@ -190,7 +201,7 @@ pub fn ToastStack(props: ToastStackProps, cx: Scope<ToastStackEvent>) -> impl In
     let height = move || {
         let m = props.motion.get();
         let (collapsed, full) =
-            heights.with(|h| stack_heights(h, m.expanded_gap, m.collapsed_peek));
+            heights.with(|h| stack_heights(h, expanded_gap(m), m.collapsed_peek));
         if expanded.get() { full } else { collapsed }
     };
     let any = move || !props.children.get().is_empty();
@@ -248,7 +259,7 @@ pub fn ToastStack(props: ToastStackProps, cx: Scope<ToastStackEvent>) -> impl In
                     // Heights not measured yet count as nothing.
                     let mut h = h.clone();
                     h.resize(count, Points::ZERO);
-                    distance(&h, index, m.expanded_gap, m.collapsed_peek)
+                    distance(&h, index, expanded_gap(m), m.collapsed_peek)
                 });
                 let rank = count.saturating_sub(1 + index);
                 let visible = m.collapsed_visible.max(1);

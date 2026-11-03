@@ -643,6 +643,50 @@ fn a_toast_at_the_bottom_shows_with_its_whole_frame() {
     );
 }
 
+/// Two toasts in a stack at the top of the screen, each framed by the
+/// terminal outside its box.
+#[component]
+fn TwoToasts() -> impl IntoElement {
+    let item = |label: &'static str| {
+        toast()
+            .bg(nsh_core::color::rgb(0x333333))
+            .px(px(8.0))
+            .child(text(label))
+    };
+    view().flex_1().child(
+        overlay().left_0().right_0().top_0().items_start().child(
+            toast_stack()
+                .placement(Anchor::TopLeft)
+                .w(px(160.0))
+                .child(item("Older"))
+                .child(item("Newer")),
+        ),
+    )
+}
+
+#[test]
+fn expanded_toasts_keep_a_blank_row_between_their_frames() {
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(40, 16)).unwrap();
+    view.load(App::Rust(Root::new::<TwoToasts>(|| ()))).unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "Newer");
+    view.handle(mouse(MouseKind::Move, 4, 1));
+    draw_until(&mut view, &mut terminal, &rx, "Older");
+    draw_until_still(&mut view, &mut terminal, &rx);
+    let buffer = terminal.backend().buffer();
+    let rows = |corner: &str| -> Vec<u16> {
+        (0..buffer.area.height)
+            .filter(|&y| (0..buffer.area.width).any(|x| buffer[(x, y)].symbol() == corner))
+            .collect()
+    };
+    let (tops, bottoms) = (rows("╭"), rows("╰"));
+    assert!(
+        tops.len() == 2 && bottoms.len() == 2 && tops[1] == bottoms[0] + 2,
+        "two frames, a blank row between them: {tops:?} {bottoms:?}\n{}",
+        dump(&terminal)
+    );
+}
+
 /// An open searchable select of four tags, its search field `Search tags`.
 #[component]
 fn SearchSelect() -> impl IntoElement {
