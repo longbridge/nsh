@@ -517,6 +517,22 @@ fn a_terminals_blocks_are_a_blank_row_apart_but_a_lists_are_not() {
     assert_eq!(row("first") - row("Two."), 2.0 * cell, "{at:?}");
 }
 
+/// An image alone in its paragraph, between two paragraphs.
+#[component]
+fn Picture() -> impl IntoElement {
+    text_view().markdown("Intro.\n\n![Green mountains](https://example.com/a.png)\n\nAfter.")
+}
+
+#[test]
+fn a_terminals_block_image_reads_as_its_alt_text_on_a_line() {
+    let at = text_origins::<Picture>();
+    let row = |t: &str| at.get(t).unwrap_or_else(|| panic!("no {t} in {at:?}")).1;
+    // A line of its own, a blank row on each side as any block has.
+    let image = row("[Green mountains]");
+    assert!(image > row("Intro."), "{at:?}");
+    assert_eq!(image - row("Intro."), row("After.") - image, "{at:?}");
+}
+
 /// A number input with both buttons at the field's end.
 #[component]
 fn Stepper() -> impl IntoElement {

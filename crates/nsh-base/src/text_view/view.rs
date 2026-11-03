@@ -1527,6 +1527,22 @@ impl Cx {
                 None => el.into_element(),
             };
         }
+        // A terminal's block image reads as its alt text in brackets, as a
+        // text browser shows one: a line of text, pressable as the image.
+        if is_terminal() && matches!(flow, ImageFlow::Block) {
+            let alt = match image.alt.trim() {
+                "" => "image".to_owned(),
+                alt => alt.to_owned(),
+            };
+            let el = text(format!("[{alt}]"))
+                .text_color(move || theme().muted_foreground)
+                .label(SharedString::from(image.alt.clone()));
+            let el = match press {
+                Some(press) => el.role(role).on_press(press),
+                None => el.role(AccessibilityRole::Image),
+            };
+            return self.part(el, Part::Image).into_element();
+        }
         let (width, height) = (image.width, image.height);
         // Its natural size (a pixel a point, as a browser takes it), once
         // known, for what its own size leaves to its aspect ratio.
