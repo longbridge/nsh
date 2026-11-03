@@ -24,7 +24,10 @@
 // step across and whose market changes, a radar of factor
 // exposure that reads out the factor nearest the pointer and changes its
 // benchmark, a quarter's income as flows between its accounts, read out
-// under the arrow keys and moving into the next quarter's, and a
+// under the arrow keys and moving into the next quarter's, a market map
+// of stocks by sector that reads out the stock or sector under the pointer
+// or the arrow keys and recolors with the period, a portfolio's allocation
+// by asset class that moves to a year ago, and a
 // watchlist whose sparklines come with their rows as its list scrolls and
 // show each period.
 import { beforeEach, expect, open, test } from "nsh/test";
@@ -552,6 +555,60 @@ test("the flows read out the account the arrow keys step to", async () => {
   await app.wait(100);
   expect(app.texts()).not.toContain("TAX");
 }, 120000);
+
+test("the market map reads out the stock or sector under the pointer and recolors with the period", async () => {
+  // Nothing hovered: the cap-weighted change of the day and how many rose.
+  expect(app.count("label:/^Market map of 32 stocks in 6 sectors, 1D: 15 up/")).toBe(1);
+  let texts = app.texts();
+  expect(texts).toContain("S&P 500 · TOP 32 · 1D");
+  expect(texts).toContain("+0.29%");
+  // Each stock's ticker and change on its tile, each sector's name over its stocks.
+  expect(texts).toContain("NVDA");
+  expect(texts).toContain("+2.41%");
+  expect(texts).toContain("Healthcare");
+  // The middle of the map once the tiles have grown in: Broadcom.
+  await app.wait(1200);
+  await app.hover("label:/^Market map of 32 stocks/");
+  await app.waitFor("AVGO · BROADCOM");
+  expect(app.texts()).toContain("Technology · $1.6T market cap");
+  // A month: the tiles' changes and the count of risers follow.
+  await app.press("role:tab[Month]");
+  await app.waitFor("label:/^Market map of 32 stocks in 6 sectors, 1M: 20 up/");
+  texts = app.texts();
+  expect(texts).toContain("+14.80%");
+  expect(texts).toContain("+12%");
+});
+
+test("the market map steps across its stocks with the arrow keys", async () => {
+  // The first Right starts at the largest stock, at the top left.
+  await tabTo("NVDA · NVIDIA");
+  expect(app.texts()).toContain("Technology · $4.4T market cap");
+  await app.keyboard.press("down");
+  await app.waitFor("MSFT · MICROSOFT");
+  await app.keyboard.press("escape");
+  await app.waitFor("S&P 500 · TOP 32 · 1D");
+}, 120000);
+
+test("the allocation names its asset classes over their positions and moves to a year ago", async () => {
+  expect(app.count("label:/^Allocation of \\$620k across 4 asset classes/")).toBe(1);
+  let texts = app.texts();
+  // The classes' weights over the map, their names in their bands, the positions' weights on them.
+  expect(texts).toContain("60.8%");
+  expect(texts).toContain("Equities");
+  expect(texts).toContain("VOO");
+  expect(texts).toContain("29.4%");
+  expect(texts).toContain("TLT");
+  expect(texts).not.toContain("ARKK");
+  // A year ago: Treasuries not yet bought, the innovation fund still held.
+  await app.press("role:tab[A year ago]");
+  await app.waitFor("label:/^Allocation of \\$514k/");
+  await app.wait(800);
+  texts = app.texts();
+  expect(texts).toContain("55.8%");
+  expect(texts).toContain("13.6%");
+  expect(texts).toContain("ARKK");
+  expect(texts).not.toContain("TLT");
+});
 
 test("the watchlist's sparklines come with their rows and show each period", async () => {
   await app.waitFor("label:/^AAPL, 1D: /");
