@@ -296,6 +296,39 @@ fn a_canvas_label_keeps_a_cell_clear_of_dots_each_side() {
     );
 }
 
+/// A ring's track at 13%: a fill too faint to read as a wash.
+#[component]
+fn FaintTrack() -> impl IntoElement {
+    view()
+        .flex_1()
+        .child(
+            canvas(
+                Painter::new()
+                    .global_alpha(0.13)
+                    .fill_color(nsh_core::color::rgb(0xffffff))
+                    .fill_rect(0.0, 0.0, 64.0, 32.0),
+            )
+            .label("drawing")
+            .w(px(64.0))
+            .h(px(32.0)),
+        )
+        .child(text("drawn"))
+}
+
+#[test]
+fn a_fill_fainter_than_a_wash_is_left_out() {
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(12, 4)).unwrap();
+    view.load(App::Rust(Root::new::<FaintTrack>(|| ()))).unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "drawn");
+    let buffer = terminal.backend().buffer();
+    let first = row(buffer, 0, 0..8);
+    assert!(
+        first.chars().all(|c| c == ' '),
+        "no dots: {first:?}"
+    );
+}
+
 #[component]
 fn Wash() -> impl IntoElement {
     view()

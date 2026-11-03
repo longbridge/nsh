@@ -6,7 +6,8 @@
 //! under the marks, only a sparse floor of them), strokes the dots along each
 //! segment, and text is printed on whole Cells above the dots, with the
 //! Cell before and after it cleared of dots so a label never runs into a
-//! mark. A nearly transparent stroke (hatching) is texture and left out.
+//! mark. A nearly transparent stroke or fill (hatching, a faint track) is
+//! texture and left out.
 //!
 //! Only the part of the canvas inside its visible Cells is replayed onto,
 //! so a canvas partly scrolled away keeps its dots where they were. A Cell
@@ -46,9 +47,9 @@ const DOTS_DOWN: usize = 4;
 /// Below this alpha (its paint's, times `globalAlpha`) a fill is a wash:
 /// a sparse floor of dots rather than a solid area.
 const WASH_ALPHA: f32 = 0.5;
-/// Below this alpha a stroke is a texture (hatching, a hairline at a few
-/// percent): a dot shows at full strength, so its lines would bury the
-/// marks over them, and it is left out.
+/// Below this alpha a stroke or a fill is a texture (hatching, a hairline
+/// or a track at a few percent): a dot shows at full strength, so its
+/// dots would bury the marks over them, and it is left out.
 const TEXTURE_ALPHA: f32 = 0.15;
 
 /// How far below a row's top the alphabetic baseline sits, in rows.
@@ -528,12 +529,18 @@ impl<'a> Replay<'a> {
         // one at the bottom of every other dot column, which a stroke
         // over it still reads through.
         let alpha = (self.canvas.color(&paint).0 & 255) as f32 / 255.0 * self.state.alpha;
+        // Fainter still (a ring's track at a few percent) it is texture,
+        // as a stroke is: its floor of dots would only scatter round the
+        // marks and the text over them.
+        if alpha < TEXTURE_ALPHA {
+            return;
+        }
         let wash = alpha < WASH_ALPHA;
         let width = self.dots.width;
         let mut inside = Vec::new();
         self.dots.inside(outline, rule, |index| inside.push(index));
         for index in inside {
-            let sparse = index % width % 2 == 0 && index / width % DOTS_DOWN == DOTS_DOWN - 1;
+            let sparse = (index % width).is_multiple_of(2) && index / width % DOTS_DOWN == DOTS_DOWN - 1;
             if !self.clipped_out(index) && (!wash || sparse) {
                 self.dots.paint(index, ink);
             }
