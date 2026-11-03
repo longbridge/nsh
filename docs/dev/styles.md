@@ -323,7 +323,8 @@ as tall as its lines at 40 columns).
   maximum `Min` and `Max`. A `flexBasis` (points, or a percentage) is the child's `Length` along the main axis either
   way, whatever it holds (a resizable panel's size), within its minimum and maximum there; a fill's basis of 0 is
   its content's where its parent's length is not known. An explicit height counts only on a box without content (a chart's canvas, a spacer) and
-  on a scroll view, as a maximum; a list's is its height (its cells are laid out apart, in the size it is given). So
+  on a scroll view, as a maximum, and on a clip of no height (`overflow: hidden`, height 0: a collapsible's or an
+  accordion's panel sprung shut), which shows none of its content; a list's is its height (its cells are laid out apart, in the size it is given). So
   does one whose content in flow is only images, videos, web views, shaders, lists or native components with no
   height in points (a photo's card around its `flex: 1` image): what it holds is as tall as it is. A bar thinner than
   a row, from 4pt (a quarter of one) and wider than high, no control, holding nothing but views with nothing in them
@@ -368,7 +369,8 @@ as tall as its lines at 40 columns).
   only (`Node::cell_border`), so the platform draws a border exactly where the layout reserved one; a control (a control's accessibility role, presses, a text input: `Core::is_control`) and a box of
   text never have one, nor does a round box (a circle: corners of half its explicit width or height or more, or `rounded-full`), except a ring: a round box larger than an icon (over 48pt either way), no control, with nothing shown in it and a border of a color of its own (a pulse's ring, an orbit around its dot), absolute or not, which is that outline, drawn as a rounded box; an absolute one its parent's box would cut is left out.
   Horizontal padding and margins are one Cell from 8pt and two from 24pt (at most one on a
-  control or a box of text); the margins of a box of layers (all its content absolute: a chart, whose axes' labels
+  control or a box of text), and one from 4pt on a side where the box lies against its parent's border with no
+  padding of the parent's there (a tree's list inside its bordered box: its rows never start or end on the line); the margins of a box of layers (all its content absolute: a chart, whose axes' labels
   overflow it into them) are gutters of their size, whole Cells and rows, inside a bordered box too; vertical padding is a row from 24pt, none on a control or a box of text. So a bordered
   40pt button is one row, its label and a column each side, a badge is its text, and a card keeps its border without
   padding rows.
@@ -438,7 +440,8 @@ scroll view too; **grids** take their columns from the template
   one, a selection's box over its items, draws none). So is
   a view with nothing in it smaller than a row both ways and not growing (a status dot in a row, a swatch), except a
   dot of a hued fill (round, 4pt or more) pinned on a box (absolute: an avatar's presence, which moves nothing) or
-  leading a text in a row (an issue's status before its title), which is one Cell, drawn as a `●` in its color; or a circle with
+  leading a text in a row (an issue's status before its title), or of a neutral fill first in its row before its
+  text and apart from what is behind it (a gray series' key in a legend), which is one Cell, drawn as a `●` in its color; or a circle with
   nothing in it at most 48pt across that is no control (a radio's ring, an avatar's placeholder), which draws
   nothing in a terminal, and a view (no control, not growing) whose content is all left out (an icon's tile or
   circle), unless it is larger than an icon (over 48pt either way) and what it shows is its own: an opaque fill the user

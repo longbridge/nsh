@@ -25530,6 +25530,58 @@ mod terminal_layout {
     }
 
     #[test]
+    fn a_list_against_a_frame_s_line_keeps_a_column_from_it() {
+        // A tree's box: a border with no padding of its own around a list
+        // padded 6pt (no Cell by itself): the rows keep a column from
+        // the line on each side, never start or end on it.
+        let mut ops = view(
+            2,
+            ROOT_ID,
+            &[
+                ("alignSelf", V::Str("flex-start")),
+                ("width", V::Number(160.0)),
+                ("borderWidth", V::Number(1.0)),
+            ],
+        );
+        ops.extend(view(4, 2, &[("padding", V::Number(6.0))]));
+        ops.extend(view(
+            6,
+            4,
+            &[
+                ("flexDirection", V::Str("row")),
+                ("justifyContent", V::Str("space-between")),
+            ],
+        ));
+        ops.extend(text(8, 6, "app"));
+        ops.extend(text(10, 6, "1.4 KB"));
+        ops.extend(text(12, 4, "nsh.json"));
+        let c = laid_out(ops);
+        // 20 columns: the line's, 18 for the list, a column each side of
+        // its rows.
+        assert_eq!(frame_of(&c, 4), Some(rect(8.0, 16.0, 144.0, 32.0)));
+        assert_eq!(frame_of(&c, 6), Some(rect(8.0, 0.0, 128.0, 16.0)));
+        assert_eq!(frame_of(&c, 12), Some(rect(8.0, 16.0, 128.0, 16.0)));
+    }
+
+    #[test]
+    fn a_closed_reveal_takes_no_row() {
+        // An accordion's panel sprung shut: a clip of no height around
+        // its content, which shows none of it; the next title follows.
+        let mut ops = view(2, ROOT_ID, &[("alignSelf", V::Str("flex-start"))]);
+        ops.extend(text(4, 2, "Shipping"));
+        ops.extend(view(
+            6,
+            2,
+            &[("height", V::Number(0.0)), ("overflow", V::Str("hidden"))],
+        ));
+        ops.extend(text(8, 6, "Two to five days"));
+        ops.extend(text(10, 2, "Returns"));
+        let c = laid_out(ops);
+        assert_eq!(frame_of(&c, 6).map(|f| f.size.height), Some(Points(0.0)));
+        assert_eq!(frame_of(&c, 10).map(|f| f.origin.y), Some(Points(16.0)));
+    }
+
+    #[test]
     fn a_tile_keeps_its_content_stacked() {
         let mut ops = view(
             2,

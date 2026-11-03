@@ -41,15 +41,17 @@
 //!   as its fill, a row of padding above and below from 12pt, two columns
 //!   each side from 12pt and one from 4pt. Horizontal padding and margins are one
 //!   Cell from 8pt, two from 24pt (at most one on a control or a box of
-//!   text); vertical padding a row from 24pt (none on a control or a box
+//!   text), one from 4pt against a parent's border with no padding of the
+//!   parent's there ([`framing`]: a tree's list in its box); vertical padding a row from 24pt (none on a control or a box
 //!   of text);
 //! - **split** along `flexDirection` (reversed for the `-reverse` ones):
 //!   `flexGrow` is ratatui's `Fill(grow)`, every other child its content's
 //!   size; a child's explicit width (points, or a percentage) is its
 //!   `Length`, its minimum and maximum `Min` and `Max`; a `flexBasis` is
 //!   a `Length` along the main axis either way. An explicit height
-//!   counts only on boxes without content (charts, spacers) and on scroll
-//!   views (as a maximum); a box with content is its content's height.
+//!   counts only on boxes without content (charts, spacers), on scroll
+//!   views (as a maximum) and on a clip of no height (a closed reveal);
+//!   a box with content is its content's height.
 //!   When the children of a row do not fit, the gaps give first (down to
 //!   a column), then icon controls shown as labels (down to three
 //!   columns, then out), then those with `flexShrink` down to their
@@ -92,8 +94,8 @@
 use taffy::{
     AlignContentKeyword as J, AlignItemsKeyword as A, AvailableSpace, CompactLength, Dimension,
     Display, FlexDirection, FlexWrap, GridTemplateComponent, Layout, LayoutInput, LayoutOutput,
-    LengthPercentage, LengthPercentageAuto, Line, NodeId, Position, Rect, RepetitionCount,
-    RequestedAxis, RunMode, Size, SizingMode, Style,
+    LengthPercentage, LengthPercentageAuto, Line, NodeId, Overflow, Position, Rect,
+    RepetitionCount, RequestedAxis, RunMode, Size, SizingMode, Style,
 };
 
 use crate::Color;
@@ -726,7 +728,7 @@ struct Kind {
     /// may have a border.
     container: bool,
     /// Its explicit height counts (empty, all its content absolute or
-    /// filling it, an anchor of no width, or a scroll view's maximum).
+    /// filling it, an anchor of no width, a clip of no height, or a scroll view's maximum).
     honors_height: bool,
 }
 
@@ -764,6 +766,10 @@ fn kind(tree: &impl Tree, node: NodeId) -> Kind {
     let anchor = style.position.is_out_of_flow()
         && length(style.size.width.into_raw()) == Some(0.0)
         && length(style.size.height.into_raw()).is_some();
+    // A clip of no height (a closed reveal: a collapsible's or an
+    // accordion's panel springing shut) shows none of its content.
+    let shut = length(style.size.height.into_raw()) == Some(0.0)
+        && matches!(style.overflow.y, Overflow::Hidden | Overflow::Clip);
     Kind {
         measures,
         labelled,
@@ -778,6 +784,7 @@ fn kind(tree: &impl Tree, node: NodeId) -> Kind {
         // around its image): what it holds is as tall as it is.
         honors_height: empty
             || anchor
+            || shut
             || (visible && !in_flow)
             || (in_flow && fillers)
             || role.scroll
@@ -890,10 +897,14 @@ fn insets(
     let band = !role.control
         && !bordered
         && self::surface(grid, role, tree.backdrop(node).unwrap_or(grid.page)).is_some();
-    let px = |v: LengthPercentage| {
+    // A box against a frame's line with no padding of the frame's own
+    // there (a tree's list inside its bordered box) keeps a column from
+    // 4pt too: its rows never start or end on the line.
+    let lined = framing(tree, node);
+    let px = |v: LengthPercentage, lined: bool| {
         let p = lp(v, parent_width);
         let c = space_x(p);
-        let c = if band && p >= 4.0 - EPSILON {
+        let c = if (band || lined) && p >= 4.0 - EPSILON {
             c.max(1)
         } else {
             c
@@ -911,12 +922,44 @@ fn insets(
         }
     };
     let padding = Sides {
-        l: px(s.padding.left).max(disclosure_lead(tree, node)),
-        r: px(s.padding.right) + i32::from(role.input),
+        l: px(s.padding.left, lined.0).max(disclosure_lead(tree, node)),
+        r: px(s.padding.right, lined.1) + i32::from(role.input),
         t: py(s.padding.top),
         b: py(s.padding.bottom),
     };
     (border, padding)
+}
+
+/// Whether `node` lies against its parent's left and right lines with no
+/// padding of the parent's between (its parent's insets as its last
+/// layout gave them): in a column every child does, in a row the first
+/// at the left and the last at the right.
+fn framing(tree: &impl Tree, node: NodeId) -> (bool, bool) {
+    let Some(parent) = tree.parent(node) else {
+        return (false, false);
+    };
+    if tree.style(node).position.is_out_of_flow() {
+        return (false, false);
+    }
+    let Insets { border, padding } = tree.insets(parent);
+    let (mut l, mut r) = (
+        border.l > 0 && padding.l == 0,
+        border.r > 0 && padding.r == 0,
+    );
+    let direction = tree.style(parent).flex_direction;
+    if matches!(direction, FlexDirection::Row | FlexDirection::RowReverse) {
+        let count = tree.child_count(parent);
+        let first = count > 0 && tree.child(parent, 0) == node;
+        let last = count > 0 && tree.child(parent, count - 1) == node;
+        let (start, end) = if direction == FlexDirection::Row {
+            (first, last)
+        } else {
+            (last, first)
+        };
+        l &= start;
+        r &= end;
+    }
+    (l, r)
 }
 
 /// The columns a disclosure (a collapsible's or an accordion's trigger,

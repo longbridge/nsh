@@ -920,12 +920,18 @@ impl ListState {
     }
 
     /// Size and position of each cell across the main axis: `(offset,
-    /// size)` of column `col`.
-    pub(super) fn column(&self, cross: f32, col: u32) -> (f32, f32) {
+    /// size)` of column `col`. On a terminal's grid of `cell` points
+    /// across, every column is as many whole Cells (the share rounded
+    /// down, the Cells left over after the last column): rounded each on
+    /// its own, they would run into the padding at the end.
+    pub(super) fn column(&self, cross: f32, col: u32, cell: Option<f32>) -> (f32, f32) {
         let (start, end) = self.cross_padding();
         let gap = self.cross_gap();
         let n = self.columns as f32;
-        let width = ((cross - start - end - gap * (n - 1.0)) / n).max(0.0);
+        let mut width = ((cross - start - end - gap * (n - 1.0)) / n).max(0.0);
+        if let Some(cell) = cell.filter(|&c| c > 0.0) {
+            width = (width / cell + 1e-3).floor() * cell;
+        }
         (start + col as f32 * (width + gap), width)
     }
 
@@ -1800,6 +1806,21 @@ mod tests {
     }
 
     #[test]
+    fn a_terminal_s_columns_are_whole_equal_cells() {
+        // 9 columns in 1360pt (170 Cells) padded a Cell each side, 2 Cells
+        // apart: 16.9 Cells each, rounded down. Each rounded on its own,
+        // the last would end in the padding.
+        let mut l = list(90, 50.0, 1000.0);
+        l.set_columns(9);
+        l.content.padding.left = crate::Points(8.0);
+        l.content.padding.right = crate::Points(8.0);
+        l.content.column_gap = crate::Points(16.0);
+        assert_eq!(l.column(1360.0, 1, Some(8.0)), (8.0 + 128.0 + 16.0, 128.0));
+        let (x, width) = l.column(1360.0, 8, Some(8.0));
+        assert!(x + width <= 1360.0 - 8.0, "the last inside the padding");
+    }
+
+    #[test]
     fn columns_share_rows() {
         let mut l = list(10, 50.0, 1000.0);
         l.set_columns(3);
@@ -1810,7 +1831,7 @@ mod tests {
         // A row is as tall as its tallest item.
         l.measured(4, 80.0);
         assert_eq!(l.item_at(6), 130.0);
-        assert_eq!(l.column(320.0, 2), (320.0 * 2.0 / 3.0, 320.0 / 3.0));
+        assert_eq!(l.column(320.0, 2, None), (320.0 * 2.0 / 3.0, 320.0 / 3.0));
         let mut binds = Vec::new();
         l.update_window(&mut binds);
         assert_eq!(binds.len(), 10);

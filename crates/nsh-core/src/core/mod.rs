@@ -6564,7 +6564,11 @@ impl<M: TextEngine> Core<M> {
                     cross
                 }
             };
-            let item_cross = state.column(cross, 0).1;
+            let cell = self
+                .layout
+                .grid()
+                .map(|g| if horizontal { g.height } else { g.width });
+            let item_cross = state.column(cross, 0, cell).1;
             let extra_cross = state.full_width(cross).1;
             let available = |c: f32| {
                 if horizontal {
@@ -7581,10 +7585,29 @@ impl<M: TextEngine> Core<M> {
             }
             Some(main_of(size))
         };
+        // In a terminal the columns are whole Cells of the width the cells
+        // were laid out at (`layout_cells`: without the scroll bar's
+        // column).
+        let unit = self
+            .layout
+            .grid()
+            .map(|g| if horizontal { g.height } else { g.width });
+        let columns_cross = {
+            let laid = self.nodes[key as usize]
+                .list
+                .as_ref()
+                .expect("list")
+                .cells_cross;
+            if unit.is_some() && laid.is_finite() {
+                laid
+            } else {
+                cross
+            }
+        };
         for &(index, cell) in &ready {
             let list = self.nodes[key as usize].list.as_ref().expect("list");
             let (at, row) = (list.item_at(index), list.row_extent(index));
-            let column = list.column(cross, list.column_of(index));
+            let column = list.column(columns_cross, list.column_of(index), unit);
             let Some(size) = place(self, cell, at, row, column) else {
                 continue;
             };
@@ -7598,7 +7621,7 @@ impl<M: TextEngine> Core<M> {
             .list
             .as_ref()
             .expect("list")
-            .full_width(cross);
+            .full_width(columns_cross);
         for (extra, at) in extras
             .iter()
             .zip([blocks.header, blocks.footer, blocks.body])
