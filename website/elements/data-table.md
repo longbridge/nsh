@@ -170,7 +170,7 @@ selected.
 
 Pressing the table, or reaching it with Tab (macOS, the web), gives it the keyboard until another press, the focus
 moving elsewhere or `blur()`; `focus()` gives it from the app. The table is one stop of Tab: inside it Tab moves the
-selection, and Escape gives the keyboard back.
+selection, and Escape gives the keyboard back. Its columns' resize handles take the pointer only, in a terminal too.
 
 | Keys | What they do |
 |---|---|

@@ -308,12 +308,21 @@ fn terminal_band(
             })
             .child(line),
     )
-    // A press makes it a stop of the keyboard focus (Tab); the drag is the
+    // A press makes it a stop of the keyboard focus (Tab), unless its
+    // owner keeps it to the pointer ([`PointerOnly`]); the drag is the
     // responder's.
     .on_press(|| {})
+    .focusable(use_context::<PointerOnly>().is_none())
     .on_focus(move || focused.set(true))
     .on_blur(move || focused.set(false))
 }
+
+/// Provided around a [`ResizeHandle`], it keeps the handle to the pointer:
+/// no stop of Tab in a terminal either (a table's column handles, which
+/// would otherwise put a stop per column after the table, as
+/// `gpui-component`'s table resizes with the mouse only).
+#[derive(Clone, Copy)]
+pub(crate) struct PointerOnly;
 
 /// The props of [`ResizeHandle`].
 #[derive(Debug, Clone, PartialEq, Props)]

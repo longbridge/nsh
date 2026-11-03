@@ -1530,6 +1530,9 @@ fn resize_handle(dt: Dt, def: usize) -> impl IntoElement {
 
 fn handle(props: DataTableProps, start: Dt, drag: Dt, end: Dt, def: usize) -> impl IntoElement {
     let id = format!("resize:{}", drag.st.borrow().defs[def].key);
+    // The mouse's alone, as `gpui-component`'s: a terminal's handle would
+    // be a stop of Tab per column after the table.
+    provide_context(crate::resizable::PointerOnly);
     resize_handle_component()
         .edge(HandleEdge::Trailing)
         .on_drag_start(move || start.resize_start(def))
