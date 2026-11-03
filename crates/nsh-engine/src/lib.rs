@@ -1365,6 +1365,21 @@ impl<M: TextEngine + 'static> LocalEngine<M> {
         self.wake = Some(wake);
     }
 
+    /// Serves `ui_sets` (a superset of the config's, after a UI set or
+    /// part was registered while the app runs: the web runtime's late
+    /// gates) to what is mounted from now on.
+    pub fn extend_ui_sets(&mut self, ui_sets: &[nsh_core::element::Registry]) {
+        let sets: Vec<_> = nsh_core::runtime::registries()
+            .iter()
+            .chain(ui_sets)
+            .cloned()
+            .collect();
+        self.driver
+            .state
+            .core
+            .extend_components(nsh_core::element::Registry::merged(&sets));
+    }
+
     /// Handles the input sent since the last call, runs what is due
     /// (timers, tasks) and commits. Returns when to call again at the
     /// latest (sooner if input arrives); `None`: only for input.

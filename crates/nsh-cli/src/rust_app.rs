@@ -1152,6 +1152,8 @@ panic = \"abort\"
             &format!(
                 "[package]\nname = {:?}\nversion = \"0.0.0\"\nedition = \"2024\"\npublish = false\n\n\
                  [lib]\nname = {:?}\npath = \"lib.rs\"\ncrate-type = [\"cdylib\"]\n\n\
+                 [features]\n# What `nsh package` links the app's runtime from (its relocations kept).\n\
+                 linkable = [\"nsh-platform-web/linkable\"]\n\n\
                  [dependencies]\nnsh-core = {}\nnsh-base = {}\n{app}\n\n\
                  [target.'cfg(target_arch = \"wasm32\")'.dependencies]\n\
                  nsh-platform-web = {}\n",
@@ -1290,7 +1292,8 @@ panic = \"abort\"
                  [features]\n# The runtime of published apps: TSX on the browser's JavaScript engine.\n\
                  browser = [\"nsh-platform-web/browser\"]\n\
                  # The development host's: hot updates, and what `nsh test --target web` asks about.\n\
-                 dev = [\"nsh-platform-web/dev\"]\n\n\
+                 dev = [\"nsh-platform-web/dev\"]\n                 # What `nsh package` links the app's runtime from (its relocations kept).\n\
+                 linkable = [\"nsh-platform-web/linkable\"]\n\n\
                  [dependencies]\nnsh-core = {}\nnsh-base = {}\n{app}\n\n\
                  [target.'cfg(target_arch = \"wasm32\")'.dependencies]\nnsh-platform-web = {}\n",
                 self.bin("web"),
@@ -1309,19 +1312,18 @@ panic = \"abort\"
         // when a test session says so (`nsh test --target web`).
         let (register, root) = match &self.root {
             Some(root) => (
-                format!("nsh_platform_web::rust_app!({sets}, app_root());"),
+                format!("{wasm}nsh_platform_web::rust_app!({sets}, app_root());\n"),
                 self.root_fn(wasm, root),
             ),
-            None => (
-                format!("nsh_platform_web::ui_sets!({sets});"),
-                String::new(),
-            ),
+            // One gate per set (`nsh_ui_set_*`), as `nsh/base`'s parts have:
+            // `nsh package` keeps those of the sets the app imports.
+            None => (self.set_gates(wasm), String::new()),
         };
         write(
             &ws.join("web/lib.rs"),
             &format!(
                 "//! The app's web runtime: `nsh.wasm` with `nsh/base` and the app's\n//! Rust components.\n\n\
-                 {wasm}{register}\n{}{root}\n\
+                 {register}{}{root}\n\
                  // Off WebAssembly it is empty, as nsh-platform-web is.\n\
                  #[cfg(not(target_arch = \"wasm32\"))]\nuse nsh_core as _;\n\
                  #[cfg(not(target_arch = \"wasm32\"))]\nuse nsh_base as _;\n",
@@ -1439,9 +1441,12 @@ opt-level = \"s\"
             cmd.env(&ar, "llvm-ar");
         }
         // A Rust app's runtime is one: it has no JS, so no hot updates.
+        // The published one is linkable, as nsh's own (`runtime::WebKind`):
+        // `nsh package` drops the parts and sets the app does not use.
         let features: &[&str] = match kind {
+            crate::runtime::WebKind::Browser if rust => &["--features", "linkable"],
             _ if rust => &[],
-            crate::runtime::WebKind::Browser => &["--features", "browser"],
+            crate::runtime::WebKind::Browser => &["--features", "browser,linkable"],
             crate::runtime::WebKind::Dev => &["--features", "dev"],
         };
         let (package, artifact) = if rust {
@@ -1963,6 +1968,25 @@ impl RustApp {
         let mut sets = vec!["nsh_base::registry()".to_owned()];
         sets.extend(self.crates.iter().map(|c| format!("{}()", set_fn(c))));
         format!("vec![{}]", sets.join(", "))
+    }
+
+    /// The web runtime's gates of the app's sets: one
+    /// `nsh_platform_web::ui_set!` per crate, exporting
+    /// [`crate::web::ui_set_gate`] of its specifier, which registers the
+    /// crate's set ([`Self::app_sets`]). `nsh/base` is the runtime's own
+    /// (its parts' `nsh_part_*`).
+    fn set_gates(&self, cfg: &str) -> String {
+        self.crates
+            .iter()
+            .map(|krate| {
+                let specifier = specifier_of(&krate.dir).unwrap_or_else(|| krate.name());
+                format!(
+                    "{cfg}nsh_platform_web::ui_set!({}, {}());\n",
+                    crate::web::ui_set_gate(&specifier),
+                    set_fn(krate)
+                )
+            })
+            .collect()
     }
 
     /// A function per crate (`set_app_charts()`), for the generated code
@@ -2734,6 +2758,8 @@ mod tests {
         let web = read("rust-web/lib.rs");
         assert!(web.contains("nsh_platform_web::rust_app!(vec![nsh_base::registry(), set_app_app_native()], app_root());"), "{web}");
         assert!(read("rust-web/Cargo.toml").contains("default-features = false"));
+        // Linkable for `nsh package`, as the TSX app's runtime.
+        assert!(read("rust-web/Cargo.toml").contains("linkable = [\"nsh-platform-web/linkable\"]"));
         assert!(read("rust-web/build.rs").contains("-zstack-size=8388608"));
         // Its headless runner opens the root for the tests.
         let test = read("test/main.rs");
@@ -3129,7 +3155,18 @@ panic = \"abort\"
         assert!(web.contains("dev = [\"nsh-platform-web/dev\"]"), "{web}");
         let build = read("web/build.rs");
         assert!(build.contains("-zstack-size=8388608"), "{build}");
-        assert!(read("web/lib.rs").contains("nsh_platform_web::ui_sets!("));
+        // The web runtime: linkable, with a gate per set (`nsh/base`'s are
+        // the runtime's own parts), which `nsh package` keeps when imported.
+        assert!(
+            web.contains("linkable = [\"nsh-platform-web/linkable\"]"),
+            "{web}"
+        );
+        let lib = read("web/lib.rs");
+        assert!(
+            lib.contains("#[cfg(target_arch = \"wasm32\")]\nnsh_platform_web::ui_set!(nsh_ui_set_app_app_native, set_app_app_native());"),
+            "{lib}"
+        );
+        assert!(!lib.contains("nsh_base::registry()"), "{lib}");
         assert!(!app.workspace.join("gpui").exists());
         assert_eq!(app.gpui_workspace().unwrap(), app.workspace.join("gpui"));
         assert!(read("gpui/Cargo.toml").contains("members = [\"gpui-host\"]"));
@@ -3151,8 +3188,14 @@ panic = \"abort\"
             ("web/lib.rs", "#[cfg(target_arch = \"wasm32\")]\n"),
         ] {
             let code = read(file);
+            // The web runtime registers each set through its gate.
+            let sets = if file == "web/lib.rs" {
+                "set_app_app_native()".to_owned()
+            } else {
+                "vec![nsh_base::registry(), set_app_app_native()]".to_owned()
+            };
             for line in [
-                "vec![nsh_base::registry(), set_app_app_native()]".to_owned(),
+                sets,
                 format!(
                     "{cfg}fn set_app_app_native() -> nsh_core::element::Registry {{\n    #[allow(unused_imports)]\n    use app_app_native::*;\n    __nsh_native_module() // the crate app-native (nsh.json \"rust\")\n}}"
                 ),

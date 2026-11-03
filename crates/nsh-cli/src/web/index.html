@@ -88,7 +88,11 @@
         assets: app.assets,
         data: app.data,
         readAsset: (uri) => fonts.get(path(uri)) ?? null,
-        prepareChunk: (id) => Promise.all((app.chunkFonts[id] ?? []).map(loadFont)),
+        // The chunk's fonts and the side modules of the runtime it needs.
+        prepareChunk: (id) => Promise.all([
+          ...(app.chunkFonts[id] ?? []).map(loadFont),
+          player.loadSides(app.chunkSides?.[id]),
+        ]),
         // A release shows no error box; an app that could not start says so.
         overlay: false,
         onError: (message) => {
@@ -107,7 +111,7 @@
     }
     status.hidden = true;
     if (app.rust) player.runRust();
-    else await player.runModule(app.code, { capabilities: app.capabilities ?? "", appId: app.id ?? "", chunks: app.chunks });
+    else await player.runModule(app.code, { capabilities: app.capabilities ?? "", appId: app.id ?? "", chunks: app.chunks, nativeExports: app.nativeExports });
   } catch (err) {
     fail("This app could not be loaded.", String(err?.message ?? err));
   }

@@ -92,6 +92,22 @@ impl NativeUse {
         finder.visit_program(&parsed.program);
     }
 
+    /// Adds what `other` uses: the use of code made of both.
+    pub fn merge(&mut self, other: &NativeUse) {
+        for (specifier, imported) in &other.imports {
+            match (self.import(specifier), imported) {
+                (Imported::All, _) => {}
+                (mine, Imported::All) => *mine = Imported::All,
+                (Imported::Names(mine), Imported::Names(names)) => {
+                    mine.extend(names.iter().cloned())
+                }
+            }
+        }
+        self.global_crypto |= other.global_crypto;
+        self.computed_import |= other.computed_import;
+        self.shader |= other.shader;
+    }
+
     fn import(&mut self, specifier: &str) -> &mut Imported {
         self.imports
             .entry(specifier.to_owned())
@@ -274,6 +290,24 @@ mod tests {
 
     fn names(list: &[&str]) -> Imported {
         Imported::Names(list.iter().map(|s| s.to_string()).collect())
+    }
+
+    #[test]
+    fn merged_uses_are_those_of_both() {
+        let mut a = uses(r#"import { Button } from "nsh/base"; import d from "zlib";"#);
+        let b =
+            uses(r#"import { Tabs } from "nsh/base"; import * as n from "nsh"; import("x" + y);"#);
+        let mut whole = uses(
+            r#"import { Button } from "nsh/base"; import d from "zlib";
+            import { Tabs } from "nsh/base"; import * as n from "nsh"; import("x" + y);"#,
+        );
+        a.merge(&b);
+        assert_eq!(a, whole);
+        // Merging is idempotent and keeps `All`.
+        a.merge(&b);
+        assert_eq!(a, whole);
+        whole.merge(&uses(r#"import { View } from "nsh";"#));
+        assert_eq!(whole.imports.get("nsh"), Some(&Imported::All));
     }
 
     #[test]

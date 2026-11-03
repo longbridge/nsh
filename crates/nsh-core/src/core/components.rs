@@ -808,6 +808,19 @@ impl<M: TextEngine> Core<M> {
         self.components.registry = registry;
     }
 
+    /// Replaces the components of a running core with `registry`, a
+    /// superset of what it had (a UI set registered after the app started:
+    /// a web runtime's late `nsh_part_*`). What is mounted from then on may
+    /// use the new components; the tokens stay the app's, and only the
+    /// setup functions the old sets did not bring run.
+    pub fn extend_components(&mut self, registry: Registry) {
+        {
+            let _entered = self.components.runtime.enter();
+            registry.run_setups_not_in(&self.components.registry);
+        }
+        self.components.registry = registry;
+    }
+
     /// `uiTheme` on the root: the app's theme file (`nsh.json`), which the
     /// UI set that reads themes makes tokens of.
     pub(super) fn set_ui_theme(&mut self, json: &str) {

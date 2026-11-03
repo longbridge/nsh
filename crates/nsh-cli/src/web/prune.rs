@@ -35,6 +35,8 @@ use wasmparser::{
     Validator,
 };
 
+pub(crate) mod split;
+
 const PAGE: u64 = 65536;
 /// What wasm-ld aligns `__heap_base` to (the stack's alignment).
 const HEAP_ALIGN: u32 = 16;
@@ -523,16 +525,7 @@ impl<'a> Module<'a> {
     }
 
     fn mark(&self, exports: &[&str]) -> anyhow::Result<Live> {
-        let body_relocs = self.body_relocs()?;
-        let mut live = Live {
-            funcs: vec![false; self.func_count()],
-            taken: vec![false; self.func_count()],
-            data: Vec::new(),
-        };
-        let mut live_symbols = vec![false; self.symbols.len()];
         let mut funcs = Vec::new();
-        let mut ranges = Vec::new();
-
         for name in exports {
             let export = self
                 .exports
@@ -543,6 +536,24 @@ impl<'a> Module<'a> {
                 funcs.push(export.index);
             }
         }
+        self.mark_from(funcs, Vec::new())
+    }
+
+    /// What `funcs` and the data `ranges` reach, with the start function,
+    /// what the linker keeps whatever (`NO_STRIP`, init functions) and the
+    /// bytes no symbol covers.
+    fn mark_from(
+        &self,
+        mut funcs: Vec<u32>,
+        mut ranges: Vec<(usize, u32, u32, bool)>,
+    ) -> anyhow::Result<Live> {
+        let body_relocs = self.body_relocs()?;
+        let mut live = Live {
+            funcs: vec![false; self.func_count()],
+            taken: vec![false; self.func_count()],
+            data: Vec::new(),
+        };
+        let mut live_symbols = vec![false; self.symbols.len()];
         funcs.extend(self.start);
         for &symbol in &self.no_strip {
             match self.symbols.get(symbol as usize) {

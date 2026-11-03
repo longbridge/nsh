@@ -190,6 +190,15 @@ Shaders are a gate too (`nsh_feature_shader`, `src/shader.rs`): it sets the core
 compiled `<Shader>` tag leaves no import of `Shader` (it calls `nsh:rt`'s `element("shader")`), so the bundler
 counts a string `shader` anywhere in the bundle as a shader view (`NativeUse::shader`).
 
+A gate may also run after the app started (a side module loaded before the chunk that needs it). The page then
+calls `nsh_after_gate(gate)`: the running engine takes the UI sets as they are now
+(`LocalEngine::extend_ui_sets`, `Core::extend_components`: the app's tokens stay, only new setup functions run),
+and the browser host tells the realm (`registry` event), whose `modules.refresh()` asks `describe` (op 200) again,
+which gives only what it had not given (`Modules::described`), added to the same namespace objects. The import
+map's facades export the names a namespace has at start; names a later gate brings are declared up front through
+`run`'s `nativeExports` (`{ specifier: [name] }`) as live bindings that the `registry` event fills. Standard
+modules' operations and the shader compiler are read at each call, so their gates need nothing more.
+
 Apps with Rust components of their own get a runtime built for them, with every part.
 The QuickJS measurements below are historical (the web ran QuickJS in WebAssembly until 2026-10) and do not
 measure these runtimes.

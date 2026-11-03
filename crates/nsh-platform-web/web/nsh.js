@@ -1046,15 +1046,18 @@ class Player {
     imports.__wbindgen_placeholder__ && (imports.__wbindgen_placeholder__.__wbindgen_describe = () => {});
     const instance = await WebAssembly.instantiate(module, imports);
     this.wasm = this.browserHost ? this.browserHost.bind(instance.exports) : instance.exports;
+    // What side modules import (`main`): the instance's own exports.
+    this.mainExports = instance.exports;
+    this.sideLoads = new Map();
     this.trapped = false;
     // The glue's own setup (its view of the memory, wasm-bindgen's tables)
     // before any of the app's code runs.
     glue?.__nsh_finalize(instance, module);
-    // The parts of `nsh/base`, the standard modules and the features
-    // (shaders) this runtime has:
+    // The parts of `nsh/base`, the standard modules, the features
+    // (shaders) and an app's own UI sets this runtime has:
     // one linked for an app (`nsh package`) exports only those it uses.
     for (const name of Object.keys(instance.exports)) {
-      if (/^nsh_(part|std|feature)_/.test(name)) instance.exports[name]();
+      if (/^nsh_(part|std|feature|ui_set)_/.test(name)) instance.exports[name]();
     }
     // An app's own runtime (Rust components: nsh.json "rust") registers
     // its UI sets before anything starts.
@@ -1067,6 +1070,49 @@ class Player {
     });
     this.installEnvironment();
     this.installInput();
+  }
+
+  // Side modules --------------------------------------------------------
+
+  /**
+   * Loads the side modules `sides` (`[{ gate, url }]`, as `nsh package
+   * --target web` maps them per chunk: the parts of `nsh/base`, standard
+   * modules and features the main module was published without) in
+   * parallel, and calls each one's gate once. A page awaits it before a
+   * chunk that needs them runs (its `prepareChunk`).
+   */
+  loadSides(sides) {
+    return Promise.all((sides ?? []).map(({ gate, url }) => {
+      if (!this.sideLoads.has(url)) this.sideLoads.set(url, this.loadSide(gate, url));
+      return this.sideLoads.get(url);
+    }));
+  }
+
+  async loadSide(gate, url) {
+    const imports = { main: this.mainExports };
+    let instance;
+    try {
+      ({ instance } = await WebAssembly.instantiateStreaming(fetch(url), imports));
+    } catch (err) {
+      // Served without `application/wasm`: compiled from its bytes.
+      if (!(err instanceof TypeError)) throw err;
+      const response = await fetch(url);
+      if (!response.ok) throw new Error(`${url}: HTTP ${response.status}`);
+      ({ instance } = await WebAssembly.instantiate(await response.arrayBuffer(), imports));
+    }
+    const register = instance.exports[gate];
+    if (typeof register !== "function") throw new Error(`${url} exports no ${gate}`);
+    register();
+    this.afterGate(gate);
+  }
+
+  /**
+   * What the runtime does once a gate ran after the app started: makes
+   * what it registered visible to the running engines.
+   */
+  afterGate(gate) {
+    if (typeof this.wasm.nsh_after_gate !== "function") return;
+    this.withStrings([gate], (p, l) => this.wasm.nsh_after_gate(p, l));
   }
 
   // Tests ---------------------------------------------------------------

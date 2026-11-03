@@ -92,6 +92,9 @@ thread_local! {
     static KEYMAP: RefCell<Option<std::sync::Arc<Keymap>>> = const { RefCell::new(None) };
     /// The UI sets apps import ([`set_ui_sets`]; by default `nsh/base`).
     static UI_SETS: RefCell<Option<Vec<nsh_core::element::Registry>>> = const { RefCell::new(None) };
+    /// The app's own UI sets their gates added ([`add_ui_set`], [`ui_set!`]),
+    /// served after `nsh/base`'s parts.
+    static APP_SETS: RefCell<Vec<nsh_core::element::Registry>> = const { RefCell::new(Vec::new()) };
     /// What makes the Rust app's root ([`set_root`]), for [`nsh_start_rust`].
     static ROOT: RefCell<Option<Box<dyn Fn() -> nsh_core::element::Root>>> = const { RefCell::new(None) };
     /// What the last [`nsh_compile`] made: the module or the error.
@@ -109,11 +112,26 @@ pub fn set_ui_sets(sets: Vec<Registry>) {
     UI_SETS.with(|s| *s.borrow_mut() = Some(sets));
 }
 
-/// The UI sets engines serve: [`set_ui_sets`]'s, else nsh's own.
+/// Adds one of the app's own UI sets to the apps started from now on,
+/// after `nsh/base`'s parts ([`ui_set!`]'s gate calls it). A set added
+/// again replaces nothing: the first stays.
+pub fn add_ui_set(set: Registry) {
+    APP_SETS.with(|s| {
+        let mut sets = s.borrow_mut();
+        if !sets.iter().any(|t| t.specifier() == set.specifier()) {
+            sets.push(set);
+        }
+    });
+}
+
+/// The UI sets engines serve: [`set_ui_sets`]'s, else `nsh/base`'s parts
+/// and the app's sets their gates added ([`add_ui_set`]).
 fn ui_sets() -> Vec<Registry> {
-    UI_SETS
-        .with(|s| s.borrow().clone())
-        .unwrap_or_else(|| vec![base_set()])
+    UI_SETS.with(|s| s.borrow().clone()).unwrap_or_else(|| {
+        let mut sets = vec![base_set()];
+        APP_SETS.with(|a| sets.extend(a.borrow().iter().cloned()));
+        sets
+    })
 }
 
 /// `nsh/base`: the parts the page asked for (`nsh_part_*`, which it calls
@@ -197,6 +215,22 @@ macro_rules! ui_sets {
         #[unsafe(no_mangle)]
         pub extern "C" fn nsh_app_init() {
             $crate::set_ui_sets($sets);
+        }
+    };
+}
+
+/// Exports `$export`, the gate of one of the app's own UI sets (`$set`, an
+/// expression giving its [`Registry`]): `nsh.js` calls it as it calls the
+/// `nsh_part_*` of `nsh/base`'s parts, and a runtime linked for the app
+/// (`nsh package`) keeps only the gates of the sets it imports. `nsh`
+/// names it `nsh_ui_set_<specifier>` (non-alphanumerics as `_`).
+#[macro_export]
+macro_rules! ui_set {
+    ($export:ident, $set:expr) => {
+        /// Adds this UI set of the app to the apps started from now on.
+        #[unsafe(no_mangle)]
+        pub extern "C" fn $export() {
+            $crate::add_ui_set($set);
         }
     };
 }
@@ -593,6 +627,39 @@ fn run(app: App, width: f32, height: f32, environment: Environment, limits: Limi
             inline_images: Default::default(),
         });
     });
+    pump()
+}
+
+/// What the page calls after a gate (`nsh_part_*`, `nsh_std_*`,
+/// `nsh_feature_*`, an app UI set's) ran once an app had started, as when
+/// a side module loads before a chunk that needs it: the running engine
+/// and its JavaScript host serve the UI sets as they are now to what is
+/// mounted and imported from then on. `gate` names it (for the log only);
+/// the standard modules and the shader compiler need nothing more, as
+/// their calls read what the gate set. Returns the delay (ms) until
+/// [`nsh_pump`] is due, or -1.
+///
+/// # Safety
+///
+/// `ptr..ptr + len` is memory from [`nsh_alloc`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn nsh_after_gate(ptr: *const u8, len: usize) -> f64 {
+    // SAFETY: guaranteed by the caller.
+    let gate = unsafe { string(ptr, len) };
+    let running = APP.with(|a| a.borrow().is_some());
+    if !running {
+        return pump();
+    }
+    log::debug!(target: "nsh::perf", "{gate} registered after the app started");
+    let sets = ui_sets();
+    APP.with(|a| {
+        if let Some(app) = a.borrow_mut().as_mut() {
+            app.engine.extend_ui_sets(&sets);
+        }
+    });
+    // The JavaScript host describes the new exports to the app's realm.
+    #[cfg(feature = "browser-core")]
+    browser::extend_registries(&sets);
     pump()
 }
 
