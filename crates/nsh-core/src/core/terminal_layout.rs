@@ -66,7 +66,9 @@
 //!   its content's size;
 //! - **wrap** (`flexWrap`): lines of children, each split as above;
 //! - **absolute** children take no room, placed by their insets (both
-//!   of an axis without a size stretch them between); a small
+//!   of an axis without a size stretch them between); a box that holds
+//!   only absolute children (a table's header, its rows) keeps its
+//!   explicit height, as it has no rows of content to size it; a small
 //!   label (one row, narrower than the sibling, no control in it) pinned
 //!   on a row of a sibling's text that is not white space (a badge on an
 //!   avatar's initials) is left out, as Cells cannot be seen through;
@@ -553,7 +555,8 @@ struct Kind {
     /// It holds views that are not only texts, and is no control: it
     /// may have a border.
     container: bool,
-    /// Its explicit height counts (empty, or a scroll view's maximum).
+    /// Its explicit height counts (empty, all its content absolute, or a
+    /// scroll view's maximum).
     honors_height: bool,
 }
 
@@ -561,6 +564,7 @@ fn kind(tree: &impl Tree, node: NodeId) -> Kind {
     let role = tree.role(node);
     let count = tree.child_count(node);
     let mut visible = false;
+    let mut in_flow = false;
     let mut boxes = false;
     for i in 0..count {
         let child = tree.child(node, i);
@@ -568,6 +572,7 @@ fn kind(tree: &impl Tree, node: NodeId) -> Kind {
             continue;
         }
         visible = true;
+        in_flow |= !tree.style(child).position.is_out_of_flow();
         // Texts, bare views (spacers, bars) and views whose content is all
         // left out (an icon's circle) make no box of it.
         boxes |= !tree.role(child).text && !bare(tree, child) && !hollow(tree, child);
@@ -580,7 +585,15 @@ fn kind(tree: &impl Tree, node: NodeId) -> Kind {
         labelled,
         empty,
         container: boxes && !role.control && !role.text,
-        honors_height: empty || role.scroll || role.root || role.fills || role.sized,
+        // A box whose content is all absolute (a table's header over its
+        // cells, a row of them) has no rows of content to size it: its
+        // explicit height is what its children are placed in.
+        honors_height: empty
+            || (visible && !in_flow)
+            || role.scroll
+            || role.root
+            || role.fills
+            || role.sized,
     }
 }
 

@@ -367,7 +367,9 @@ do (a text is one row per line).
   `Flex`); across, `alignItems` / `alignSelf` stretch (the default) or place a child at its content's size.
   `flexWrap` makes lines of children, each split as above.
 - **Absolute** children take no room; their insets (nearest Cell) place them in the padding box, and both insets of
-  an axis without a size along it stretch them between the two (a divider's band down a whole column). A small label (one
+  an axis without a size along it stretch them between the two (a divider's band down a whole column). A box that holds
+  only absolute children (a table's header over its cells, each of its rows) keeps its explicit height, which a box
+  of content rows otherwise takes from them: nothing in it is in flow to size it. A small label (one
   row, narrower than the sibling it is on, no control in it) pinned on a row of a sibling's text that is not white
   space (a badge on an avatar's initials) is left out: Cells cannot be seen through, so one of the two would be lost,
   and the content is kept. Controls (a slider's thumb), bars pinned over a scroll view and boxes over blank Cells are

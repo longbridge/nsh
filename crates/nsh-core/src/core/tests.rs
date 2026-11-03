@@ -24931,6 +24931,32 @@ mod terminal_layout {
     }
 
     #[test]
+    fn a_box_of_absolute_children_keeps_its_explicit_height() {
+        // A table's header: 32pt high, its one cell absolute in it.
+        let mut ops = view(
+            2,
+            ROOT_ID,
+            &[("alignSelf", V::Str("stretch")), ("height", V::Number(32.0))],
+        );
+        ops.extend(view(
+            3,
+            2,
+            &[
+                ("position", V::Str("absolute")),
+                ("left", V::Number(0.0)),
+                ("top", V::Number(0.0)),
+                ("bottom", V::Number(0.0)),
+                ("width", V::Number(80.0)),
+            ],
+        ));
+        ops.extend(text(4, 3, "Symbol"));
+        let batch = laid_out(ops);
+        // Two rows, as its content has none to give it.
+        assert_eq!(frame_of(&batch, 2).map(|f| f.size.height), Some(px(32.0)));
+        assert_eq!(frame_of(&batch, 3), Some(rect(0.0, 0.0, 80.0, 32.0)));
+    }
+
+    #[test]
     fn a_card_has_its_border_and_no_padding_rows() {
         let mut ops = view(
             2,
