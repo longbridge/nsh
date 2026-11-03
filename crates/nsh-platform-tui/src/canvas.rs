@@ -237,6 +237,16 @@ pub(crate) fn draw(
     }
 }
 
+/// The bounds `[left, top, right, bottom]` of `outline`'s points; `None`
+/// when it has none.
+fn extent(outline: &Outline) -> Option<[f32; 4]> {
+    let mut points = outline.subpaths.iter().flat_map(|s| s.points.iter());
+    let &[x, y] = points.next()?;
+    Some(points.fold([x, y, x, y], |[l, t, r, b], &[x, y]| {
+        [l.min(x), t.min(y), r.max(x), b.max(y)]
+    }))
+}
+
 /// The dots of the visible Cells, each with its palette ink and when it was
 /// painted (the Cell takes the ink of its latest dot).
 struct Dots {
@@ -567,6 +577,36 @@ impl<'a> Replay<'a> {
         let width = self.dots.width;
         let mut inside = Vec::new();
         self.dots.inside(outline, rule, |index| inside.push(index));
+        // A fill that holds no dot's center (a dot matrix's 1.5pt squares,
+        // a 1pt rule) would draw nothing, or only where it happens to
+        // cover a center: the marks of a regular grid would come and go
+        // with their phase. It takes the dots along its middle instead,
+        // the one under it when it is smaller than a dot.
+        if inside.is_empty() {
+            if let Some([left, top, right, bottom]) = extent(outline) {
+                let [across, down] = self.dots.step;
+                let (a, b) = if right - left <= across && bottom - top <= down {
+                    // Smaller than a dot: the one under its middle.
+                    let middle = [(left + right) / 2.0, (top + bottom) / 2.0];
+                    (middle, middle)
+                } else if right - left >= bottom - top {
+                    let y = (top + bottom) / 2.0;
+                    ([left, y], [right, y])
+                } else {
+                    let x = (left + right) / 2.0;
+                    ([x, top], [x, bottom])
+                };
+                self.dots.trace(a, b, |index, _| inside.push(index));
+                inside.sort_unstable();
+                inside.dedup();
+            }
+            for index in inside {
+                if !self.clipped_out(index) {
+                    self.dots.paint(index, ink);
+                }
+            }
+            return;
+        }
         for index in inside {
             let sparse =
                 (index % width).is_multiple_of(2) && index / width % DOTS_DOWN == DOTS_DOWN - 1;

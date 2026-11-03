@@ -642,3 +642,40 @@ fn a_plots_marks_stay_inside_the_plot_and_off_its_padding() {
         );
     }
 }
+
+/// A dot matrix of 1.5pt squares and a 1pt rule, neither holding a dot's
+/// center.
+#[component]
+fn Specks() -> impl IntoElement {
+    let mut painter = Painter::new().fill_color(nsh_core::color::rgb(0xffffff));
+    for x in [8.0, 24.0, 40.0, 56.0] {
+        painter = painter.fill_rect(x - 0.75, 7.25, 1.5, 1.5);
+    }
+    view()
+        .flex_1()
+        .child(
+            canvas(painter.fill_rect(0.0, 20.5, 64.0, 1.0))
+                .label("drawing")
+                .w(px(64.0))
+                .h(px(32.0)),
+        )
+        .child(text("drawn"))
+}
+
+#[test]
+fn fills_smaller_than_a_dot_take_the_dots_under_them() {
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(12, 4)).unwrap();
+    view.load(App::Rust(Root::new::<Specks>(|| ()))).unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "drawn");
+    let buffer = terminal.backend().buffer();
+    // Each square is one dot, every other Cell, in one phase.
+    let specks = row(buffer, 0, 0..8);
+    assert_eq!(specks, " ⠄ ⠄ ⠄ ⠄", "one dot per square: {specks:?}");
+    // The rule is a line of dots across the canvas.
+    let rule = row(buffer, 1, 0..8);
+    assert!(
+        rule.chars().all(|c| c != ' '),
+        "the rule shows in every Cell: {rule:?}"
+    );
+}
