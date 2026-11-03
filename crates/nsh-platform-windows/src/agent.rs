@@ -2,8 +2,8 @@
 //! (`nsh_testing::agent`): where a node's view is in the window, and the
 //! input a user's hands give there, through the handlers the window's
 //! messages go through ([`crate::synth`]). The agent calls from a thread
-//! of its own; each call does its work on the main thread
-//! ([`crate::window::invoke`]) and returns once it is done.
+//! of its own; each call does its work on the surface's UI thread
+//! ([`crate::window::UiThread::invoke`]) and returns once it is done.
 
 use std::{rc::Rc, sync::mpsc, time::Duration};
 
@@ -17,6 +17,7 @@ use crate::{
     input::{Modifiers, PointerKind, WheelEvent},
     surface::Surface,
     synth,
+    window::UiThread,
 };
 
 /// How long a call waits for the main thread at most.
@@ -47,14 +48,16 @@ const VK_A: u16 = 0x41;
 /// The surface the agent acts on, by key (its calls must be `Send`).
 pub(crate) struct WindowsNative {
     key: u64,
+    /// The UI thread the surface lives on.
+    ui: UiThread,
 }
 
 impl WindowsNative {
-    pub(crate) fn new(key: u64) -> Self {
-        WindowsNative { key }
+    pub(crate) fn new(key: u64, ui: UiThread) -> Self {
+        WindowsNative { key, ui }
     }
 
-    /// `f` with the surface on the main thread, waited for; `None` once
+    /// `f` with the surface on its UI thread, waited for; `None` once
     /// the surface is gone.
     fn on_main<R: Send + 'static>(
         &self,
@@ -62,7 +65,7 @@ impl WindowsNative {
     ) -> Option<R> {
         let (tx, rx) = mpsc::channel();
         let key = self.key;
-        crate::window::invoke(move || {
+        self.ui.invoke(move || {
             let _ = tx.send(Surface::by_key(key).map(|surface| f(&surface)));
         });
         rx.recv_timeout(MAIN).ok().flatten()

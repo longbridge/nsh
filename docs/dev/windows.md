@@ -75,8 +75,11 @@ server client, log forwarding, the error overlay: `dev.rs`). The host turns on `
   posts one `WM_NSH_WAKE` to the window, and the main thread applies every queued batch in order (`surface.rs`,
   `mount.rs`). The table of views by node id belongs to the mounter and is shared with the surface (`Rc<Views>`), so
   input and hosted items find views by id while a batch is being applied. Worker threads (image decoding, media
-  callbacks, the dev client) run code on the main thread with `window::invoke` (a message-only dispatcher window) and
-  find their surface by key in a thread-local map; no globals are shared between surfaces.
+  callbacks, the dev client) run code back on a UI thread with `UiThread::invoke`: each UI thread has a message-only
+  dispatcher window of its own, a surface records the `UiThread` it was made on (`Surface::ui_thread`), and work
+  started on a UI thread carries that handle to wherever it finishes, so its closure runs where the surface's
+  thread-locals are (the surface is found by key in the thread-local map of that thread). The process-wide image cache
+  returns each load to the thread that asked, and releases a frame's bitmaps on every thread that drew it.
 - **Resizes wait for the layout** (`Surface::resized`, the one place the main thread waits for the engine, as on
   macOS): `WM_SIZE` waits for the layout at the new size (`MountSink::resized`), at most 16 ms, and applies it before
   it draws. An engine that misses the deadline (JS busy, a costly layout) is not waited for again until it reports a
@@ -189,7 +192,7 @@ focused text field counts as editing (`when`). With feature `dev`, Ctrl+R is nev
 ## Checking a change: `nsh test --target windows`
 
 The development host takes the steps of `nsh/test` tests (`docs/dev/tooling.md`, "On a real platform"): `agent.rs`
-implements `nsh_testing::agent::Native`, each call on the main thread (`window::invoke`), with the input `synth.rs`
+implements `nsh_testing::agent::Native`, each call on the surface's UI thread (`UiThread::invoke`), with the input `synth.rs`
 makes at the input module's entry points, so it works while the window is in the background or covered (and goes
 through NSH's hit testing to web views, as real input does):
 
