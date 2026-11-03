@@ -1457,10 +1457,7 @@ fn sort_button(
 /// The original pair of Lucide chevrons. Paint follows the app's inherited
 /// stroke/text color; each direction exposes its selected state for styling.
 /// In a terminal, a glyph of the direction (`↑`, `↓`, `↕` unsorted).
-fn sort_icon(
-    props: DataTableProps,
-    sorted: Memo<Option<DataTableSortDirection>>,
-) -> AnyElement {
+fn sort_icon(props: DataTableProps, sorted: Memo<Option<DataTableSortDirection>>) -> AnyElement {
     // A terminal draws no chevrons: the direction is a glyph, the pair's
     // when the column is not sorted.
     if crate::terminal::is_terminal() {

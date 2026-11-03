@@ -122,9 +122,9 @@ impl Reader {
         }
         let name: String = self.chars[start..self.at].iter().collect();
         match name.as_str() {
-            "text" | "textrm" | "textit" | "textbf" | "mathrm" | "mathbf" | "mathit"
-            | "mathsf" | "mathtt" | "mathcal" | "mathbb" | "mathfrak" | "operatorname"
-            | "boldsymbol" | "bm" | "mbox" | "hbox" | "displaystyle" | "textstyle" => {
+            "text" | "textrm" | "textit" | "textbf" | "mathrm" | "mathbf" | "mathit" | "mathsf"
+            | "mathtt" | "mathcal" | "mathbb" | "mathfrak" | "operatorname" | "boldsymbol"
+            | "bm" | "mbox" | "hbox" | "displaystyle" | "textstyle" => {
                 if matches!(name.as_str(), "displaystyle" | "textstyle") {
                     return;
                 }

@@ -10,7 +10,8 @@ use std::{
 use nsh_base::{
     ColorChannel, ColorPickerEvent, ColorSpace, SelectItem, TreeEntry, TreeItem, accordion,
     accordion_header, accordion_item, accordion_panel, accordion_trigger, checkbox, color_area,
-    color_picker, color_slider, color_swatch, number_input, progress, radio, radio_group, select, slider, switch,
+    color_picker, color_slider, color_swatch, number_input, progress, radio, radio_group, select,
+    slider, switch,
     terminal::{self, PROGRESS_EIGHTHS, PROGRESS_EMPTY, SLIDER_FILL, SLIDER_TRACK},
     text_view, tree,
 };
@@ -494,7 +495,11 @@ fn a_terminals_heading_after_a_block_has_a_blank_row_before_it() {
     let cell = row("Body text.") - row("How it works");
     assert!(cell > 0.0, "{at:?}");
     // The heading two rows under the paragraph (one blank), its body right under it.
-    assert_eq!(row("How it works") - row("Intro text."), 2.0 * cell, "{at:?}");
+    assert_eq!(
+        row("How it works") - row("Intro text."),
+        2.0 * cell,
+        "{at:?}"
+    );
 }
 
 /// Blocks after blocks, and a list whose items hold blocks of their own.
@@ -531,6 +536,25 @@ fn a_terminals_block_image_reads_as_its_alt_text_on_a_line() {
     let image = row("[Green mountains]");
     assert!(image > row("Intro."), "{at:?}");
     assert_eq!(image - row("Intro."), row("After.") - image, "{at:?}");
+}
+
+/// The same with an image without alt text.
+#[component]
+fn Unlabeled() -> impl IntoElement {
+    text_view().markdown("Intro.\n\n![](https://example.com/a.png)\n\nNext.\n\nAfter.")
+}
+
+#[test]
+fn a_terminal_leaves_out_an_image_without_alt_text_and_its_row() {
+    let at = text_origins::<Unlabeled>();
+    let row = |t: &str| at.get(t).unwrap_or_else(|| panic!("no {t} in {at:?}")).1;
+    assert!(!at.keys().any(|t| t.contains('[')), "{at:?}");
+    // One blank row from Intro to Next, as from Next to After.
+    assert_eq!(
+        row("Next.") - row("Intro."),
+        row("After.") - row("Next."),
+        "{at:?}"
+    );
 }
 
 /// A number input with both buttons at the field's end.

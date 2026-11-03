@@ -528,6 +528,15 @@ impl Cx {
     }
 
     fn block(&self, block: &Block, key: &str, tail: bool, before: Before) -> AnyElement {
+        // A terminal draws no images: one has its alt text (`image`), and a
+        // paragraph of images without any is left out, its row with it.
+        if is_terminal()
+            && let Block::Paragraph { content } = block
+            && only_images(content)
+                .is_some_and(|images| images.iter().all(|(i, _)| i.alt.trim().is_empty()))
+        {
+            return view().into_element();
+        }
         let el = self.block_content(block, key, tail, before);
         // A terminal's rows have no room between the blocks of a box: a
         // block after another takes a blank row before it, as a Markdown
@@ -535,10 +544,7 @@ impl Cx {
         // list (its items' blocks stay together), nor next to an alert,
         // whose own padding is that row.
         let alert = matches!(block, Block::Blockquote { alert: Some(_), .. });
-        let el = if is_terminal()
-            && self.list_depth.get() == 0
-            && before == Before::Block
-            && !alert
+        let el = if is_terminal() && self.list_depth.get() == 0 && before == Before::Block && !alert
         {
             view()
                 .flex_col()
@@ -645,9 +651,9 @@ impl Cx {
                                     false => tex.clone(),
                                 })
                                 .font_family(mono_font)
-                                    .text_size(px(CODE_SIZE))
-                                    .line_height(px(CODE_SIZE * CODE_LINE))
-                                    .when(self.selectable, |t| t.select_text()),
+                                .text_size(px(CODE_SIZE))
+                                .line_height(px(CODE_SIZE * CODE_LINE))
+                                .when(self.selectable, |t| t.select_text()),
                             ),
                         Part::MathBlock,
                     )
@@ -1528,13 +1534,13 @@ impl Cx {
             };
         }
         // A terminal's block image reads as its alt text in brackets, as a
-        // text browser shows one: a line of text, pressable as the image.
+        // text browser shows one: a line of text, pressable as the image
+        // (`block` leaves out a paragraph of images without alt text).
         if is_terminal() && matches!(flow, ImageFlow::Block) {
-            let alt = match image.alt.trim() {
-                "" => "image".to_owned(),
-                alt => alt.to_owned(),
-            };
-            let el = text(format!("[{alt}]"))
+            if image.alt.trim().is_empty() {
+                return view().into_element();
+            }
+            let el = text(format!("[{}]", image.alt.trim()))
                 .text_color(move || theme().muted_foreground)
                 .label(SharedString::from(image.alt.clone()));
             let el = match press {

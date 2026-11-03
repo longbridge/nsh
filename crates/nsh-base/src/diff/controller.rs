@@ -779,7 +779,8 @@ impl Dv {
         });
         let dv = self.clone();
         effect(move || {
-            let rows = crate::terminal::is_terminal() && dv.props.render_hunk_actions.get().is_some();
+            let rows =
+                crate::terminal::is_terminal() && dv.props.render_hunk_actions.get().is_some();
             {
                 let mut st = dv.st.borrow_mut();
                 if st.action_rows == rows {
