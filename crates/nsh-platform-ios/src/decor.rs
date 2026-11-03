@@ -407,7 +407,11 @@ impl Decor {
         // Core Animation's continuous corners differ slightly from the
         // shared outline (`nsh_core::shape`): a stroke drawn along the latter
         // gets its background from the same outline, so none shows outside.
-        let fill = (shared.is_none() || (raw.continuous && stroke)) && kind != Kind::Text;
+        // A backdrop blur is a subview, above the layer's own background:
+        // the background moves to a fill layer above the blur.
+        let fill =
+            (shared.is_none() || (raw.continuous && stroke) || crate::visual::has_backdrop(style))
+                && kind != Kind::Text;
         let mask = shared.is_none() && (style.overflow_hidden || kind == Kind::Text) && !content;
 
         self.sized = kind == Kind::Image
