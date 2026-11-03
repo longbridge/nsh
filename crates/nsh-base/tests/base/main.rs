@@ -35,6 +35,7 @@ mod scrollbar;
 mod select;
 mod sheet;
 mod slider;
+mod switch;
 mod tabs;
 mod text_view;
 mod time_field;

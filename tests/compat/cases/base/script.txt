@@ -968,6 +968,12 @@ frame text:Locked 32 4 47 17
 listens id:locked onPress
 tap text:Locked
 expect Changes: 12
+# `hitSlop`: presses count this far outside the switch, one number for
+# every side or the sides named, following a signal; none without it.
+prop id:mute hitSlop top=12 right=12 bottom=12 left=12
+tap label:Mute
+prop id:mute hitSlop top=4 left=2
+prop id:wifi hitSlop {}
 covers [nsh/base] Switch
 covers [props] Switch.checked
 covers [props] disabled
