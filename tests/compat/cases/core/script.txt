@@ -157,6 +157,13 @@ expect Nothing here
 expect Long 0
 expect Long 4
 absent Long 6
+drawing id:sep-0 fillStyle #ff0000ff
+drawing id:sep-1 fillStyle #ff0000ff
+tap id:reload
+expect Separator cleanups: 0
+tap id:theme
+drawing id:sep-0 fillStyle #0000ffff
+drawing id:sep-1 fillStyle #0000ffff
 tap id:add
 expect 4. Item 4
 expect 3. Cherry
