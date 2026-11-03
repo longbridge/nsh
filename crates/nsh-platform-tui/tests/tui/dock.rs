@@ -379,6 +379,59 @@ fn a_tab_dragged_to_a_group_s_right_edge_outlines_the_half_and_splits_there() {
     }
 }
 
+#[test]
+fn a_tab_dragged_onto_a_group_s_tabs_outlines_it_over_what_it_shows() {
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(80, 12)).unwrap();
+    view.load(App::Rust(Root::new::<Docked>(|| ()))).unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "Panel c");
+    let (tab_x, tab_y) = find(&terminal, "Tab a").expect("tab a is drawn");
+    let (c_x, c_y) = find(&terminal, "Tab c").expect("tab c is drawn");
+    let (panel_x, panel_y) = find(&terminal, "Panel c").expect("c's panel is drawn");
+    // The handle's line between the groups, on c's panel row.
+    let buffer = terminal.backend().buffer();
+    let line = (0..panel_x)
+        .rev()
+        .find(|&x| buffer[(x, panel_y)].symbol() == "│")
+        .expect("the handle's line is drawn");
+    // Over c's tabs the drop merges into c: the outline is around all of
+    // c's content.
+    view.handle(mouse(MouseKind::Down(MouseButton::Left), tab_x + 1, tab_y));
+    for x in (tab_x + 2..=c_x + 4).step_by(4).chain([c_x + 4]) {
+        view.handle(mouse(MouseKind::Move, x, c_y));
+    }
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        terminal
+            .draw(|frame| view.render(frame, frame.area()))
+            .unwrap();
+        if outline_corner(&terminal).is_some() {
+            break;
+        }
+        assert!(
+            rx.recv_deadline(deadline).is_ok(),
+            "the drop preview's outline did not show:\n{}",
+            dump(&terminal)
+        );
+    }
+    // The outline only draws its lines, on the content's outer Cells: c's
+    // text inside them and the handle beside them stay.
+    let buffer = terminal.backend().buffer();
+    let inside: String = (panel_x + 1..panel_x + 4)
+        .map(|x| buffer[(x, panel_y + 1)].symbol())
+        .collect();
+    assert_eq!(inside, "ore", "{}", dump(&terminal));
+    assert_eq!(
+        terminal.backend().buffer()[(line, panel_y)].symbol(),
+        "│",
+        "the handle's line beside the outline\n{}",
+        dump(&terminal)
+    );
+    view.handle(mouse(MouseKind::Up(MouseButton::Left), c_x + 4, c_y));
+    // a left its group for c's: b is all its group has.
+    draw_until(&mut view, &mut terminal, &rx, "Layout h([*b] [");
+}
+
 /// A center `c` over a bottom dock `t` of 160 points (10 rows) in a
 /// 24-row terminal.
 #[component]

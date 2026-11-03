@@ -560,7 +560,15 @@ impl Painter<'_> {
 
         // An overlay's boxes stand on their own over what is behind them.
         let mut layer = layer;
-        if view.props.overlay_anchor.is_some() || view.kind == ViewKind::Modal {
+        // An overlay the pointer passes through with nothing filling it (a
+        // dock's drop outline) marks what is under it: it is lines over the
+        // page, which stays whole under it and beside it, and its lines keep
+        // the app's colors.
+        let marks = view.props.overlay_anchor.is_some()
+            && view.props.pointer_events == PointerEvents::None
+            && fill.0 & 255 != 255
+            && filled == Surface::None;
+        if (view.props.overlay_anchor.is_some() || view.kind == ViewKind::Modal) && !marks {
             layer.overlay = true;
             layer.modal = view.kind == ViewKind::Modal;
             layer.boxed = false;
