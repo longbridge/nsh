@@ -332,7 +332,11 @@ do (a text is one row per line).
   columns (the label cut short) and then out, the last first, and so does a row of them (a toolbar's group) nested
   in the row, as one; children with `flexShrink`, down to the longest word
   of their texts; every child down to its words; then the shrinking ones and all of them below (a text wraps, the
-  last resort), never below one Cell for one with content: a box never lays a child across its border. A `flexGrow`
+  last resort), never below one Cell for one with content: a box never lays a child across its border. A grid's
+  columns are its template's tracks (`fr` tracks fill, lengths are theirs, the others their items' widest), its rows
+  as many as the items take, each as tall as its tallest item and stretched over a known height; items are placed in
+  order along the rows, each in the first place its `span` of columns and rows fits (CSS's auto placement), an item
+  over several tracks taking them and the gaps between. A `flexGrow`
   child's text counts at its full width for the gaps and labels, so a name next to icon buttons stays on its row.
   A negative margin (stacked avatars) is none, and keeps a column between the two in a row. `auto` margins take the
   space left, shared equally, as CSS's: `margin: 0 auto` centers a box, `marginLeft: auto` pushes it to a row's end.
@@ -347,7 +351,8 @@ do (a text is one row per line).
   only (`Node::cell_border`), so the platform draws a border exactly where the layout reserved one; a control (a control's accessibility role, presses, a text input: `Core::is_control`) and a box of
   text never have one, nor does a round box (a circle: corners of half its explicit width or height or more, or `rounded-full`).
   Horizontal padding and margins are one Cell from 8pt and two from 24pt (at most one on a
-  control or a box of text); vertical padding is a row from 24pt, none on a control or a box of text. So a bordered
+  control or a box of text); a side margin from 48pt is a gutter (a chart's room for its axis's labels), its width in
+  whole Cells; vertical padding is a row from 24pt, none on a control or a box of text. So a bordered
   40pt button is one row, its label and a column each side, a badge is its text, and a card keeps its border without
   padding rows.
 - **Surfaces.** Where the terminal shows a fill as a band of its own color (`Environment::cell_surfaces`: 256 colors

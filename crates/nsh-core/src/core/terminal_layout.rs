@@ -343,6 +343,10 @@ fn nearest(value: f32) -> i32 {
     (units as i32) * if value < 0.0 { -1 } else { 1 }
 }
 
+/// A side margin from which it is a gutter, whole Cells of its width
+/// ([`margins`]), rather than spacing.
+const GUTTER: f32 = 48.0;
+
 /// Horizontal padding or margin of `points`: a Cell from 8pt, two from 24.
 fn space_x(points: f32) -> i32 {
     if points >= 24.0 - EPSILON {
@@ -832,8 +836,15 @@ fn saturated(c: Color) -> bool {
 
 /// A box's margins, in Cells (auto and negative margins are none),
 /// inside a bordered box or not (`framed`).
-fn margins(style: &Style, parent_width: Option<f32>, framed: bool) -> Sides {
-    let x = |v| lpa(v, parent_width).map_or(0, space_x);
+fn margins(grid: Grid, style: &Style, parent_width: Option<f32>, framed: bool) -> Sides {
+    // From 48pt a side margin is a gutter (the room a chart keeps for its
+    // axis's labels beside it), not spacing: its Cells are its width.
+    let x = |v| {
+        lpa(v, parent_width).map_or(0, |p| match p >= GUTTER - EPSILON {
+            true => grid.cols(p),
+            false => space_x(p),
+        })
+    };
     let y = |v| lpa(v, parent_width).map_or(0, |p| space_between(p, framed));
     Sides {
         l: x(style.margin.left),
@@ -1583,7 +1594,7 @@ fn arrange_flex(
             let style = tree.style(node);
             let m = style.margin;
             let auto = [m.left, m.right, m.top, m.bottom].map(|v| v.is_auto());
-            let mut margin = margins(style, parent_w, framed);
+            let mut margin = margins(grid, style, parent_w, framed);
             if spec.fills
                 && let Some(t) = lpa(m.top, parent_w)
             {
@@ -2067,7 +2078,7 @@ fn place(
         }
     }
     let Insets { border, padding } = tree.insets(node);
-    let margin = margins(tree.style(node), parent_w, tree.framed());
+    let margin = margins(grid, tree.style(node), parent_w, tree.framed());
     let mut layout = Layout::with_order(order);
     layout.location = taffy::Point {
         x: grid.x(x),

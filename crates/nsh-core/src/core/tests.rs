@@ -25036,6 +25036,46 @@ mod terminal_layout {
     }
 
     #[test]
+    fn a_wide_side_margin_is_a_gutter_of_its_width() {
+        // A chart 400pt wide keeping 58pt at its right for its axis's
+        // labels: seven Cells, not the two of spacing.
+        let mut ops = view(2, ROOT_ID, &[("alignSelf", V::Str("flex-start")), ("width", V::Number(400.0))]);
+        ops.extend(view(3, 2, &[("marginRight", V::Number(58.0)), ("height", V::Number(32.0))]));
+        ops.extend(view(10, 2, &[("marginRight", V::Number(24.0)), ("height", V::Number(32.0))]));
+        let batch = laid_out(ops);
+        assert_eq!(frame_of(&batch, 3).map(|f| f.size.width), Some(px(400.0 - 56.0)));
+        assert_eq!(frame_of(&batch, 10).map(|f| f.size.width), Some(px(400.0 - 16.0)));
+    }
+
+    #[test]
+    fn an_anchor_of_no_width_keeps_its_height_to_center_its_label_in() {
+        // An axis's tick label: an absolute line of no width 64pt high
+        // (four rows), its label centered in it by automatic margins.
+        let mut ops = view(2, ROOT_ID, &[("alignSelf", V::Str("stretch")), ("height", V::Number(96.0))]);
+        ops.extend(view(
+            3,
+            2,
+            &[
+                ("position", V::Str("absolute")),
+                ("left", V::Number(80.0)),
+                ("top", V::Number(0.0)),
+                ("width", V::Number(0.0)),
+                ("height", V::Number(64.0)),
+                ("flexDirection", V::Str("row")),
+            ],
+        ));
+        ops.extend(view(4, 3, &[]));
+        ops.extend(view(5, 4, &[("marginVertical", V::Str("auto"))]));
+        ops.extend(text(6, 5, "41.83"));
+        let batch = laid_out(ops);
+        assert_eq!(frame_of(&batch, 3).map(|f| f.size.height), Some(px(64.0)));
+        let label = frame_of(&batch, 5).unwrap();
+        // Rows 1 or 2 of the four: centered, not at the anchor's top.
+        assert!(label.origin.y == px(16.0) || label.origin.y == px(32.0), "{label:?}");
+        assert_eq!(label.size.width, px(40.0), "{label:?}");
+    }
+
+    #[test]
     fn a_card_has_its_border_and_no_padding_rows() {
         let mut ops = view(
             2,
