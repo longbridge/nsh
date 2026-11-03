@@ -497,6 +497,26 @@ fn a_terminals_heading_after_a_block_has_a_blank_row_before_it() {
     assert_eq!(row("How it works") - row("Intro text."), 2.0 * cell, "{at:?}");
 }
 
+/// Blocks after blocks, and a list whose items hold blocks of their own.
+#[component]
+fn Blocks() -> impl IntoElement {
+    text_view().markdown("One.\n\n```\ncode\n```\n\nTwo.\n\n- first\n  - nested\n- second")
+}
+
+#[test]
+fn a_terminals_blocks_are_a_blank_row_apart_but_a_lists_are_not() {
+    let at = text_origins::<Blocks>();
+    let row = |t: &str| at.get(t).unwrap_or_else(|| panic!("no {t} in {at:?}")).1;
+    // An item's blocks one under the other, as the list's items are.
+    let cell = row("nested") - row("first");
+    assert!(cell > 0.0, "{at:?}");
+    assert_eq!(row("second") - row("nested"), cell, "{at:?}");
+    // A paragraph, a code block and a paragraph: a blank row between each.
+    assert_eq!(row("code") - row("One."), 2.0 * cell, "{at:?}");
+    assert_eq!(row("Two.") - row("code"), 2.0 * cell, "{at:?}");
+    assert_eq!(row("first") - row("Two."), 2.0 * cell, "{at:?}");
+}
+
 /// A number input with both buttons at the field's end.
 #[component]
 fn Stepper() -> impl IntoElement {

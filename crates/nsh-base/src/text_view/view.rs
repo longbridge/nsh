@@ -529,6 +529,25 @@ impl Cx {
 
     fn block(&self, block: &Block, key: &str, tail: bool, before: Before) -> AnyElement {
         let el = self.block_content(block, key, tail, before);
+        // A terminal's rows have no room between the blocks of a box: a
+        // block after another takes a blank row before it, as a Markdown
+        // source has. Not after a heading (which leads what follows), in a
+        // list (its items' blocks stay together), nor next to an alert,
+        // whose own padding is that row.
+        let alert = matches!(block, Block::Blockquote { alert: Some(_), .. });
+        let el = if is_terminal()
+            && self.list_depth.get() == 0
+            && before == Before::Block
+            && !alert
+        {
+            view()
+                .flex_col()
+                .child(view().h(crate::terminal::cell_height()))
+                .child(el)
+                .into_element()
+        } else {
+            el
+        };
         // A block with no text of its own at its end (a rule, the app's
         // content): the caret goes on a line after it.
         if tail && self.caret.is_some() && !self.caret_placed.get() {
@@ -572,18 +591,7 @@ impl Cx {
                     .letter_spacing(px(h.size * h.tracking))
                     .mt(px(h.margin_top(before)))
                     .role(AccessibilityRole::Header);
-                let el = self.parts(el, &[Part::Heading, part]);
-                // A terminal's rows have no room between blocks of a box:
-                // a heading after a block takes a blank row before it, as
-                // a Markdown source has.
-                if is_terminal() && !matches!(before, Before::Nothing) {
-                    return view()
-                        .flex_col()
-                        .child(view().h(crate::terminal::cell_height()))
-                        .child(el)
-                        .into_element();
-                }
-                el.into_element()
+                self.parts(el, &[Part::Heading, part]).into_element()
             }
             Block::Blockquote {
                 children,
@@ -1831,6 +1839,8 @@ enum Before {
     Heading,
     /// Another block.
     Block,
+    /// An alert (another block, whose padding a terminal's blank row is).
+    Alert,
 }
 
 impl Before {
@@ -1838,6 +1848,7 @@ impl Before {
         match block {
             None => Self::Nothing,
             Some(Block::Heading { .. }) => Self::Heading,
+            Some(Block::Blockquote { alert: Some(_), .. }) => Self::Alert,
             Some(_) => Self::Block,
         }
     }
@@ -1890,7 +1901,7 @@ impl Heading {
         let above = match before {
             Before::Nothing => return 0.0,
             Before::Heading => 0.6,
-            Before::Block => self.above,
+            Before::Block | Before::Alert => self.above,
         };
         (self.size * above - BLOCK_GAP).max(0.0)
     }
