@@ -444,6 +444,8 @@ function titles(count: number) {
 
 /** The terminal's labels' column, so the details after them line up. */
 const LABEL_WIDTH = 16 * TERMINAL_COLUMN;
+/** The least a terminal's detail keeps beside its label: narrower, it wraps under it. */
+const DETAIL_WIDTH = 24 * TERMINAL_COLUMN;
 
 /** A terminal's name column for `names`: the longest of them (at least {@link LABEL_WIDTH}), so the details after it line up. */
 /** The terminal's text for each step button's icon. */
@@ -456,11 +458,12 @@ function Label(props: { label: string; detail?: string; width?: number }) {
   return (
     // A terminal's gap is in the label's column: a row's gaps give first
     // when its detail wraps, which would move the details off their column.
-    <View style={terminal ? { flex: 1, flexDirection: "row" } : { flex: 1, gap: 2 }}>
+    <View style={terminal ? { flex: 1, flexDirection: "row", flexWrap: "wrap" } : { flex: 1, gap: 2 }}>
       <Text style={{ minWidth: terminal ? (props.width ?? LABEL_WIDTH) + TERMINAL_GAP : undefined, flexShrink: 0, fontSize: size.label, color: colors.text }}>{props.label}</Text>
       <If when={props.detail}>
-        {/* Beside the label in a terminal, it wraps rather than lose its end to `…`. */}
-        <Text style={{ numberOfLines: terminal ? undefined : 1, flexShrink: 1, fontSize: size.detail, color: colors.muted }}>{props.detail}</Text>
+        {/* Beside the label in a terminal, it wraps rather than lose its end to `…`;
+            with less than DETAIL_WIDTH beside it, it goes under the label, as on a phone. */}
+        <Text style={{ numberOfLines: terminal ? undefined : 1, flexShrink: 1, ...(terminal ? { flexGrow: 1, flexBasis: DETAIL_WIDTH } : {}), fontSize: size.detail, color: colors.muted }}>{props.detail}</Text>
       </If>
     </View>
   );
@@ -2322,6 +2325,18 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
    */
   function CalendarItem(props: { item: CalendarEntry; months?: number }) {
     const kind = props.item.kind;
+    if (terminal) {
+      // The terminal's calendar draws its days, years and arrows itself, on its grid of two-Cell columns: the
+      // labels are plain text at their own size (the painter bands the open view's toggle, from its state).
+      if (kind === "weekday") return <Text style={{ color: colors.faint }}>{WEEKDAYS[props.item.value]}</Text>;
+      if (kind === "month") return <Text>{MONTHS[props.item.value - 1].slice(0, 3)}</Text>;
+      const title = kind === "monthToggle" && (props.months ?? 1) > 1;
+      return (
+        <Text style={{ fontWeight: "600" }}>
+          {title ? `${MONTHS[props.item.value - 1]} ${props.item.year}` : kind === "monthToggle" ? MONTHS[props.item.value - 1] : String(props.item.value)}
+        </Text>
+      );
+    }
     if (kind === "previous" || kind === "next") {
       return (
         <View class="group-disabled:opacity-30" style={{ width: cell, height: cell, alignItems: "center", justifyContent: "center" }}>
@@ -3168,7 +3183,10 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
             <Each of={STEPS}>
               {(name, i) => (
                 <View style={{ width: DOT }}>
-                  <StepDot done={i() < step()} current={i() === step()} />
+                  {/* A terminal shows the steps by their labels: a dot would sit on the bar's row. */}
+                  <If when={!terminal}>
+                    <StepDot done={i() < step()} current={i() === step()} />
+                  </If>
                   <View
                     style={
                       terminal && i() === 0

@@ -255,10 +255,10 @@ export function DemoPage(props: {
                 // A terminal's columns take the pane's width: its Cells are the
                 // density, and a cap would leave a band of blank columns.
                 { width: "100%", maxWidth: n === 1 ? 880 : terminal ? undefined : n * 540 + 64 },
-                // The scroll bar takes the last column: one more keeps a
-                // blank column before it, as on the left.
+                // A blank column on either side: the scroll bar, when there
+                // is one, takes a column of its own past it.
                 terminal
-                  ? { paddingLeft: TERMINAL_COLUMN, paddingRight: 3 * TERMINAL_COLUMN, paddingVertical: TERMINAL_ROW, gap: TERMINAL_ROW }
+                  ? { paddingHorizontal: TERMINAL_COLUMN, paddingVertical: TERMINAL_ROW, gap: TERMINAL_ROW }
                   : { paddingHorizontal: 32, paddingTop: 24, paddingBottom: 48, gap: 24 },
               ]}
             >
