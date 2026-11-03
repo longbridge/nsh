@@ -450,6 +450,12 @@ Things that were found the hard way. Read the section of the area you change bef
   reconciles the content view's size with `contentRectForFrameRect:` on the next main-queue turn, using the window's
   current frame and style (including any later title bar change in the same batch).
 
+- **`contentLayoutRect` lags the frame while a window resizes**: read in the resize (the root view's new size), it is
+  still laid out for the old frame, so the frame's height minus its top is the bar plus the change in height (a
+  400-pt bar after growing a window, none after shrinking it), and it stays so until something measures again.
+  `chrome::update_area` reads a toolbar's height from the title bar view around the window's buttons, which has
+  the bar's height whatever the window's, and uses `contentLayoutRect` only without one.
+
 - A layer-backed `NSView`'s layer belongs to AppKit: moving or resizing the view sets its layer's anchor point,
   position and transform again. `NshView::place` sets the frame first, then anchor (top left), position, transform and
   opacity, every time; a transform set elsewhere is lost on the next move.
