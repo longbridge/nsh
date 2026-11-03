@@ -392,7 +392,7 @@ import type {
 
 定长的数字一次性验证码，没有外观：一个原生文本框覆盖在格子之上接收键盘输入，因此打字、粘贴、数字键盘和系统的验证码自动填充
 都是平台自己的，屏幕阅读器也只看到一个文本框。只有数字能输入，最多 `length` 位；退格键删除最后一位。`value` 由应用持有（或给
-`defaultValue`），应用接收 `onChange` 和 `onComplete`，并为格子（接收下一位数字的格子带 `focus:`）、分组和光标设置样式。见
+`defaultValue`），应用接收 `onChange` 和 `onComplete`，并为格子（接收下一位数字的格子带 `focus:`，已填入数字的格子带 `data-filled:`）、分组和光标设置样式。见
 [OtpInput](../elements/otp-input.md)。
 
 ### Pagination

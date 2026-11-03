@@ -3630,12 +3630,13 @@ export function Controls(props: { show: Control }) {
 
   // The codes' cells, shared by their cards: recessed wells, the one that
   // takes the next digit ringed while the code has the focus, its caret
-  // blinking there (steady with reduced motion: the input's own). A verdict
-  // edges and tints them all in its tone, the change faded
-  // (`transition-colors`).
+  // blinking there (steady with reduced motion: the input's own). A cell
+  // that holds a digit (a bullet too) lifts out of its well, a card's fill
+  // under a firmer edge (`data-filled:`). A verdict edges and tints them
+  // all in its tone, over that; each change fades (`transition-colors`).
   const cellClass = (cells: string) =>
-    `${cells} items-center justify-center rounded-lg font-semibold text-foreground transition-colors motion-reduce:transition-none focus:outline-2 focus:outline-info focus:-outline-offset-2 disabled:opacity-50`;
-  const cellStyle = (tone?: Tone) => ({ ...finish.inset, backgroundColor: tone ? toneTint(tone) : colors.inset, borderWidth: 1, borderColor: tone ? toneColor(tone) : colors.line });
+    `${cells} items-center justify-center rounded-lg border border-line bg-inset font-semibold text-foreground transition-colors motion-reduce:transition-none data-filled:border-input data-filled:bg-card focus:outline-2 focus:outline-info focus:-outline-offset-2 disabled:opacity-50`;
+  const cellStyle = (tone?: Tone) => (tone ? { ...finish.inset, backgroundColor: toneTint(tone), borderColor: toneColor(tone) } : finish.inset);
   const sixCells = pointer ? "w-9 h-11 text-lg" : "w-11 h-13 text-xl";
 
   function Verify() {
@@ -3905,6 +3906,7 @@ export function Controls(props: { show: Control }) {
               }}
               accessibilityLabel="PIN, 4 digits"
               class="flex-row items-center gap-2"
+              groupClass="flex-row gap-2"
               cellClass={cellClass(pinCells)}
               cellStyle={cellStyle(step() === "mismatch" ? "danger" : step() === "set" ? "up" : undefined)}
               caretClass="w-0.5 h-6 rounded-full"
