@@ -397,6 +397,27 @@ impl<M: TextEngine> Core<M> {
         }
     }
 
+    /// The `data-*` attributes `key` shows as a part of a component
+    /// (`Prop::ProjectedData`): its `data-*:` classes read them, and the
+    /// `group-data-*:` classes inside it when it is a group. A node whose
+    /// classes read none sends nothing.
+    pub(super) fn set_projected_data(&mut self, key: Key, data: Box<[&'static str]>) {
+        let node = &mut self.nodes[key as usize];
+        if node.data == data {
+            return;
+        }
+        node.data = data;
+        let Some(classes) = node.classes.clone() else {
+            return;
+        };
+        if classes.deps() & deps::DATA != 0 {
+            self.restyle(key);
+        }
+        if !classes.groups().is_empty() {
+            self.restyle_subtree(key, deps::GROUP);
+        }
+    }
+
     /// The steps of its parent's perspective that `key`'s transform starts
     /// with as mounted ([`Self::mounted_view_style`]): 5, or 0 without one.
     /// Only a view that turns out of its plane (`rotateX`, `rotateY`) shows
@@ -903,7 +924,7 @@ impl<M: TextEngine> Core<M> {
                 return;
             }
             let n = &self.nodes[k as usize];
-            if n.states | n.projected != 0
+            if (n.states | n.projected != 0 || !n.data.is_empty())
                 && n.classes.as_ref().is_some_and(|c| !c.groups().is_empty())
             {
                 break;
@@ -984,6 +1005,24 @@ impl<M: TextEngine> Core<M> {
             k = node.parent;
         }
         0
+    }
+
+    /// The `data-*` attributes of the nearest ancestor of `key` that is
+    /// group `name`.
+    fn group_data(&self, key: Key, name: &str) -> &[&'static str] {
+        let mut k = self.nodes[key as usize].parent;
+        while k != NO_KEY {
+            let node = &self.nodes[k as usize];
+            if node
+                .classes
+                .as_ref()
+                .is_some_and(|c| c.groups().iter().any(|g| **g == *name))
+            {
+                return &node.data;
+            }
+            k = node.parent;
+        }
+        &[]
     }
 
     /// The margins `key`'s parent gives it (`space-*`): it is an element
@@ -1201,6 +1240,10 @@ impl<M: TextEngine> Core<M> {
         let node = &self.nodes[key as usize];
         if let Some(classes) = node.classes.clone() {
             let group = |name: &str| self.group_states(key, name);
+            let data = |group: Option<&str>, name: &str| match group {
+                None => node.data.contains(&name),
+                Some(group) => self.group_data(key, group).contains(&name),
+            };
             let pos = if classes.deps() & deps::POSITION != 0 {
                 self.position_bits(key)
             } else {
@@ -1224,16 +1267,25 @@ impl<M: TextEngine> Core<M> {
                 inherited: node.inherited_color,
                 inline: inline_color(inline),
             };
-            let text_color = classes.current_color(&cx, current);
+            let text_color = classes.current_color(&cx, &data, current);
             inline.apply_defaults(style, text_color);
             let rtl = cx.rtl;
-            classes.apply_with(&cx, self.tailwind.theme(), current, ch, style, props, |s| {
-                inline.apply(s);
-                s.apply_current_color(text_color);
-                if let Some(space) = self.space_of(key) {
-                    space.apply(s, true, rtl);
-                }
-            });
+            classes.apply_with(
+                &cx,
+                &data,
+                self.tailwind.theme(),
+                current,
+                ch,
+                style,
+                props,
+                |s| {
+                    inline.apply(s);
+                    s.apply_current_color(text_color);
+                    if let Some(space) = self.space_of(key) {
+                        space.apply(s, true, rtl);
+                    }
+                },
+            );
             if positional {
                 let parent = self.nodes[key as usize].parent;
                 self.nodes[parent as usize].positional_children = true;

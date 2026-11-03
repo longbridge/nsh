@@ -25,6 +25,13 @@ server client, log forwarding, the error overlay: `dev.rs`). The runtime needs m
 
 ## Architecture
 
+Web view downloads (`native.rs`) are opt-in through `onDownload`. Response policy uses WebKit's MIME support
+flag when it does not select a download, preserving the default cancellation of unshowable types. A response
+converted into a download suppresses only its own `WebKitErrorDomain` 102 navigation failure. Downloads are
+tracked from adoption through completion or failure; dropping `WebHost` cancels all active `WKDownload`s and
+removes their directories in cancellation completion handlers, after WebKit stops writing. Completed files
+belong to the app, which owns retention and its storage budget.
+
 - **One view per node.** Each node is an `NshView` (`view.rs`, a flipped, layer-backed `NSView` subclass holding the
   node's `ViewState`). The core lays everything out: a view sits at its frame (`place()`: the origin, a sticky shift,
   mirrored lists), and its transform, opacity and visibility are its layer's. AppKit resets a layer-backed view's
@@ -146,7 +153,7 @@ server client, log forwarding, the error overlay: `dev.rs`). The runtime needs m
 
 | Area | Module | AppKit |
 |---|---|---|
-| Text | `text.rs` | CoreText on the engine thread, `CTLine`s drawn into the view's content layer (`drawLayer:inContext:`); decorations CoreText lacks drawn by hand (iOS); selectable text's range selection, desktop style: drag, double-click word, triple-click paragraph, Shift extends, Cmd+A / Cmd+C (the root's `selectAll:` / `copy:`), Escape clears; selectable views (`selectable_view.rs`, `ViewProps::selectable_view`): the same gestures across the texts of an area's subtree in document order, driving `nsh_core::selection`'s model (frames from the views' origins and container offsets, hit tests on the drawn `CTLine`s), each text highlighting its part as a single text's selection; the texts are listed again after each batch while something is selected; a drag past the edge of a scroll view around the area scrolls it on the display link (0.4 pt per pt past the edge per 60 Hz frame, at most 40), held still too, extending the selection each frame |
+| Text | `text.rs` | CoreText on the engine thread, `CTLine`s drawn into the view's content layer (`drawLayer:inContext:`); decorations CoreText lacks drawn by hand (iOS); selectable text's range selection, desktop style: drag, double-click word, triple-click paragraph, Shift extends, Cmd+A / Cmd+C (the root's `selectAll:` / `copy:`), Escape clears; selectable views (`selectable_view.rs`, `ViewProps::selectable_view`): the same gestures across the texts of an area's subtree in document order, driving `nsh_core::selection`'s model (frames from the views' origins and container offsets, hit tests on the drawn `CTLine`s), each text highlighting its part as a single text's selection; the texts are listed again after each batch while something is selected; a drag past the edge of a scroll view around the area scrolls it on the display link (0.4 pt per pt past the edge per 60 Hz frame, at most 40), held still too, extending the selection each frame; `fontFamily` lists (`nsh_core::font_families`): the first family CoreText has is the font, the others it has its cascade list (`kCTFontCascadeListAttribute`), iOS's engine too |
 | Decoration | `decor.rs`, `visual.rs` | The view's layer for one radius (circular or continuous), shape layers for differing radii and borders whose sides differ or are dashed / dotted; box and inset shadows, gradients, outlines, filters (iOS's `visual.rs`); backdrop blur as an `NSVisualEffectView` subview, with the background moved to a fill layer above it; `apply` caches what it set, so per-frame calls are cheap |
 | Images | `image.rs`, `blur.rs` | Loaded through the core's shared loader and decoded images (`docs/dev/images.md` "Loading and memory"): ImageIO thumbnails at the view's size bucket, in the process's image budget, downloaded with `NSURLSession` (the core loader's transport hook, so the system's proxies, authentication and ATS apply), leased by the views showing them; blur and color filters baked into variants in the same budget; `asset:/`, http(s), `file:`, `data:`; tint as a colored layer masked by the image; animated GIF / APNG / WebP as a keyframe animation of `contents` |
 | Canvas | `canvas.rs` | The recorded drawing replayed with Core Graphics (iOS); drawings that clear or composite go into a transparency layer, so they only touch the canvas's own pixels |
