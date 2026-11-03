@@ -16,7 +16,7 @@ colored with the theme's tokens; the app restyles each part over it.
 | `markdown/` | Markdown into the model (markdown-rs's mdast); `container.rs`: `:::` containers, split out before parsing (markdown-rs has no such syntax); `streaming.rs`: streaming repair |
 | `html/` | HTML into the model (html5ever, as a reader mode reads a page) |
 | `common.rs` | What both parsers share: `pattern` extensions on inline content, headings' anchors |
-| `math.rs` | Formulas without a `renderMath`: RaTeX's parse and layout, drawn on a canvas with the embedded KaTeX fonts (`fonts/katex`) |
+| `math.rs` | Formulas without a `renderMath`: RaTeX's parse and layout, drawn on a canvas with the embedded KaTeX fonts (`fonts/katex.pack.zst`); feature `math`, which the platforms turn on |
 
 ## How it works
 

@@ -4,7 +4,7 @@
 //! [`typeset`] parses and lays out the TeX into RaTeX's display list
 //! (glyphs of KaTeX's fonts, rules and paths, placed in ems from the
 //! formula's top left); [`render`] draws it on a canvas, each glyph as its
-//! outline from the KaTeX fonts embedded here (`fonts/katex`, OFL), so a
+//! outline from the KaTeX fonts embedded here (`fonts/katex.pack.zst`, OFL), so a
 //! formula looks the same on every platform and needs no font installed.
 //! Glyphs and rules take the text's color (`currentColor`), but where the
 //! TeX sets one (`\color`). TeX RaTeX cannot read fails, and the view shows
@@ -58,39 +58,60 @@ fn paint(p: Painter, color: &TexColor) -> Painter {
     }
 }
 
-/// The KaTeX font a display list names.
+/// The KaTeX fonts, in the order of `fonts/katex.pack.zst`.
+const FONTS: [(FontId, &str); 19] = [
+    (FontId::AmsRegular, "AMS-Regular"),
+    (FontId::CaligraphicRegular, "Caligraphic-Regular"),
+    (FontId::FrakturRegular, "Fraktur-Regular"),
+    (FontId::FrakturBold, "Fraktur-Bold"),
+    (FontId::MainBold, "Main-Bold"),
+    (FontId::MainBoldItalic, "Main-BoldItalic"),
+    (FontId::MainItalic, "Main-Italic"),
+    (FontId::MainRegular, "Main-Regular"),
+    (FontId::MathBoldItalic, "Math-BoldItalic"),
+    (FontId::MathItalic, "Math-Italic"),
+    (FontId::SansSerifBold, "SansSerif-Bold"),
+    (FontId::SansSerifItalic, "SansSerif-Italic"),
+    (FontId::SansSerifRegular, "SansSerif-Regular"),
+    (FontId::ScriptRegular, "Script-Regular"),
+    (FontId::Size1Regular, "Size1-Regular"),
+    (FontId::Size2Regular, "Size2-Regular"),
+    (FontId::Size3Regular, "Size3-Regular"),
+    (FontId::Size4Regular, "Size4-Regular"),
+    (FontId::TypewriterRegular, "Typewriter-Regular"),
+];
+
+/// The KaTeX fonts in one file, zstd-compressed (about 230 kB of 500 kB; license in `fonts/katex.LICENSE.txt`):
+/// each font's length (`u32`, little endian), then its bytes, in the order
+/// of [`FONTS`]. `pack_katex_fonts` (a test, ignored) writes it from
+/// KaTeX's `fonts/` directory.
+const PACK: &[u8] = include_bytes!("../../fonts/katex.pack.zst");
+
+/// The KaTeX font a display list names, unpacked on the first formula.
 fn face(font: &str) -> Option<&'static ttf_parser::Face<'static>> {
     static FACES: OnceLock<HashMap<FontId, ttf_parser::Face<'static>>> = OnceLock::new();
     let faces = FACES.get_or_init(|| {
-        macro_rules! fonts {
-            ($($id:ident => $file:literal),* $(,)?) => {
-                [$((FontId::$id, &include_bytes!(concat!("../../fonts/katex/KaTeX_", $file, ".ttf"))[..])),*]
+        let Ok(pack) = zstd::decode_all(PACK) else {
+            log::error!("the KaTeX fonts do not unpack");
+            return HashMap::new();
+        };
+        // Faces borrow their bytes for good: one buffer, kept for the process.
+        let mut rest: &'static [u8] = Vec::leak(pack);
+        let mut faces = HashMap::new();
+        for (id, _) in FONTS {
+            let Some((len, tail)) = rest.split_first_chunk::<4>() else {
+                break;
             };
+            let len = u32::from_le_bytes(*len) as usize;
+            let Some((bytes, tail)) = (len <= tail.len()).then(|| tail.split_at(len)) else {
+                break;
+            };
+            rest = tail;
+            if let Ok(face) = ttf_parser::Face::parse(bytes, 0) {
+                faces.insert(id, face);
+            }
         }
-        fonts![
-            AmsRegular => "AMS-Regular",
-            CaligraphicRegular => "Caligraphic-Regular",
-            FrakturRegular => "Fraktur-Regular",
-            FrakturBold => "Fraktur-Bold",
-            MainBold => "Main-Bold",
-            MainBoldItalic => "Main-BoldItalic",
-            MainItalic => "Main-Italic",
-            MainRegular => "Main-Regular",
-            MathBoldItalic => "Math-BoldItalic",
-            MathItalic => "Math-Italic",
-            SansSerifBold => "SansSerif-Bold",
-            SansSerifItalic => "SansSerif-Italic",
-            SansSerifRegular => "SansSerif-Regular",
-            ScriptRegular => "Script-Regular",
-            Size1Regular => "Size1-Regular",
-            Size2Regular => "Size2-Regular",
-            Size3Regular => "Size3-Regular",
-            Size4Regular => "Size4-Regular",
-            TypewriterRegular => "Typewriter-Regular",
-        ]
-        .into_iter()
-        .filter_map(|(id, bytes)| Some((id, ttf_parser::Face::parse(bytes, 0).ok()?)))
-        .collect()
+        faces
     });
     faces.get(&FontId::parse(font)?)
 }
@@ -306,5 +327,30 @@ mod tests {
         assert!(typeset("\\frac{a}", false).is_none());
         assert!(typeset("{a", false).is_none());
         assert!(typeset(&"{".repeat(10_000), false).is_none());
+    }
+
+    /// Writes `fonts/katex.pack.zst` from KaTeX's fonts:
+    /// `KATEX_FONTS=<katex>/fonts cargo test -p nsh-base --features math pack_katex_fonts -- --ignored`.
+    #[test]
+    #[ignore = "writes the font pack"]
+    fn pack_katex_fonts() {
+        let dir = std::path::PathBuf::from(
+            std::env::var("KATEX_FONTS").expect("KATEX_FONTS: KaTeX's fonts/"),
+        );
+        let mut pack = Vec::new();
+        for (_, name) in FONTS {
+            let bytes = std::fs::read(dir.join(format!("KaTeX_{name}.ttf"))).unwrap();
+            pack.extend_from_slice(&(bytes.len() as u32).to_le_bytes());
+            pack.extend_from_slice(&bytes);
+        }
+        let out = concat!(env!("CARGO_MANIFEST_DIR"), "/fonts/katex.pack.zst");
+        std::fs::write(out, zstd::encode_all(&pack[..], 19).unwrap()).unwrap();
+    }
+
+    #[test]
+    fn every_font_unpacks() {
+        for (_, name) in FONTS {
+            assert!(face(name).is_some(), "{name}");
+        }
     }
 }
