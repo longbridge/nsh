@@ -11,29 +11,37 @@
 //! mounted (`popOnSwipe`, `popOnBack`, `closeOnSwipe`, `closeOnEscape`),
 //! never from JS.
 
-use std::cell::{Cell, RefCell};
+use std::{
+    cell::{Cell, RefCell},
+    ptr::NonNull,
+    rc::Rc,
+    sync::Arc,
+};
 
+use block2::RcBlock;
 use nsh_core::{
     Color, EdgeInsets, EventKind, EventPayload, HeaderSystemItem, ModalAnimation, ModalConfig,
     ModalPresentation, NodeId, PayloadValue, Points, ScreenAnimation, ScreenConfig, Size,
 };
 use nsh_engine::EngineControl;
 use objc2::{
-    DefinedClass, MainThreadMarker, MainThreadOnly, Message, define_class, msg_send,
+    ClassType, DefinedClass, MainThreadMarker, MainThreadOnly, Message, define_class, msg_send,
     rc::{Retained, Weak},
     runtime::{AnyClass, AnyObject, ProtocolObject},
+    sel,
 };
 use objc2_core_foundation::{CGFloat, CGSize};
 use objc2_foundation::{NSArray, NSObject, NSObjectProtocol, NSString};
 use objc2_quartz_core::{CAMediaTiming, CATransition};
 use objc2_ui_kit::{
     NSForegroundColorAttributeName, UIAdaptivePresentationControllerDelegate, UIBarButtonItem,
-    UIBarButtonSystemItem, UIBehavioralStyle, UIColor, UIEdgeInsets, UIGestureRecognizer,
-    UIGestureRecognizerDelegate, UIInterfaceOrientationMask, UIModalPresentationStyle,
-    UIModalTransitionStyle, UINavigationBar, UINavigationBarAppearance, UINavigationController,
-    UINavigationControllerDelegate, UINavigationItem, UINavigationItemLargeTitleDisplayMode,
-    UIPresentationController, UIResponder, UIScrollView, UIView, UIViewAutoresizing,
-    UIViewController,
+    UIBarButtonItemStyle, UIBarButtonSystemItem, UIBehavioralStyle, UIColor, UIEdgeInsets,
+    UIGestureRecognizer, UIGestureRecognizerDelegate, UIImage, UIInterfaceOrientationMask,
+    UIModalPresentationStyle, UIModalTransitionStyle, UINavigationBar, UINavigationBarAppearance,
+    UINavigationController, UINavigationControllerDelegate, UINavigationItem,
+    UINavigationItemLargeTitleDisplayMode, UIPresentationController, UIResponder, UIScrollView,
+    UIView, UIViewAutoresizing, UIViewController, UIViewControllerTransitionCoordinator,
+    UIViewControllerTransitionCoordinatorContext,
 };
 
 use crate::{mount::SharedMounter, native_view::NshView};
@@ -538,6 +546,12 @@ define_class!(
             if stay {
                 false
             } else {
+                // The page goes: its keyboard hides with the pop, as a
+                // native back button's does, not once the page has left
+                // the window.
+                if press && let Some(view) = self.topViewController().and_then(|c| c.view()) {
+                    view.endEditing(true);
+                }
                 // SAFETY: calling the superclass implementation.
                 unsafe { msg_send![super(self), navigationBar: bar, shouldPopItem: item] }
             }
@@ -603,6 +617,29 @@ define_class!(
             controller: &UIViewController,
             animated: bool,
         ) {
+            // UIKit's own hook for this: it runs for pushes and pops, before
+            // the transition starts, with a live `transitionCoordinator` — the
+            // place a `UITabBarController` moves its bar from.
+            slide_bottom_bar(nav, bottom_bar_hidden(nav));
+            // A swipe back that the user cancels ends without `didShow`, so the
+            // bar has to be put back where the stack now says it belongs once
+            // the interaction ends (a completed one lands on the same value).
+            if let Some(coordinator) = nav.transitionCoordinator() {
+                let nav = unsafe {
+                    Retained::retain(
+                        nav as *const UINavigationController as *mut UINavigationController,
+                    )
+                }
+                .expect("the navigation controller lives");
+                let block = RcBlock::new(
+                    move |_context: NonNull<
+                        ProtocolObject<dyn UIViewControllerTransitionCoordinatorContext>,
+                    >| {
+                        slide_bottom_bar(&nav, bottom_bar_hidden(&nav));
+                    },
+                );
+                coordinator.notifyWhenInteractionChangesUsingBlock(&block);
+            }
             self.with_mounter(|m| m.stack_will_show(nav, controller, animated));
         }
 
@@ -629,6 +666,9 @@ define_class!(
             // it brought in is only reachable here.
             size_screens(nav);
             defer_to_back_swipe(nav);
+            // Safety net: whatever the transition did, the bar ends where the
+            // stack says it goes.
+            slide_bottom_bar(nav, bottom_bar_hidden(nav));
             let stack = self.ivars().stack;
             self.with_mounter(|m| m.stack_did_show(stack));
             // UIKit installs its own pop delegate while loading the navigation
@@ -668,13 +708,15 @@ define_class!(
     }
 );
 
-/// The target of the UIKit bar button `ios={{ headerRightSystemItem }}`
-/// draws: a press on it presses the screen's `headerRight`, whose element
-/// the app listens to.
+/// The target of a UIKit bar button (`ios={{ headerRightSystemItem }}`,
+/// `ios={{ headerLeftSymbol }}`, ...): a press on it presses the screen's
+/// `headerLeft` or `headerRight`, whose element the app listens to.
 struct BarItemIvars {
     mounter: SharedMounter,
-    /// The screen whose trailing slot the button presses.
+    /// The screen whose slot the button presses.
     screen: NodeId,
+    /// The leading slot (`headerLeft`), else the trailing one.
+    leading: bool,
 }
 
 define_class!(
@@ -690,26 +732,92 @@ define_class!(
             if let Ok(mut m) = ivars.mounter.get(self.mtm()).try_borrow_mut()
                 && let Some(m) = m.as_mut()
             {
-                m.press_trailing_header(ivars.screen);
+                m.press_header(ivars.screen, ivars.leading);
             }
         }
     }
 );
 
 impl BarItemTarget {
-    fn new(mtm: MainThreadMarker, screen: NodeId, mounter: SharedMounter) -> Retained<Self> {
-        let this = Self::alloc(mtm).set_ivars(BarItemIvars { mounter, screen });
+    fn new(
+        mtm: MainThreadMarker,
+        screen: NodeId,
+        leading: bool,
+        mounter: SharedMounter,
+    ) -> Retained<Self> {
+        let this = Self::alloc(mtm).set_ivars(BarItemIvars {
+            mounter,
+            screen,
+            leading,
+        });
         // SAFETY: NSObject's designated initializer.
         unsafe { msg_send![super(this), init] }
     }
 }
 
-/// A system bar button: its item, the button and its target.
+/// What a UIKit bar button shows.
+#[derive(Debug, Clone, PartialEq)]
+enum BarButton {
+    /// `headerLeftSystemItem` / `headerRightSystemItem`.
+    System(HeaderSystemItem),
+    /// `headerLeftSymbol` / `headerRightSymbol`: an SF Symbol's name.
+    Symbol(Arc<str>),
+}
+
+/// A system bar button: what it shows, the button and its target.
 type SystemBarItem = (
-    HeaderSystemItem,
+    BarButton,
     Retained<UIBarButtonItem>,
     Retained<BarItemTarget>,
 );
+
+/// UIKit's bar button showing `kind`, pressing `target`; `None` for a
+/// symbol name SF Symbols does not have.
+fn make_bar_button(
+    mtm: MainThreadMarker,
+    kind: &BarButton,
+    target: &BarItemTarget,
+) -> Option<Retained<UIBarButtonItem>> {
+    let action = Some(objc2::sel!(nshPress:));
+    match kind {
+        // SAFETY: UIKit's designated initializer of a system bar button;
+        // the caller keeps the target as long as the button, and `nshPress:`
+        // is the target's action.
+        BarButton::System(item) => Some(unsafe {
+            UIBarButtonItem::initWithBarButtonSystemItem_target_action(
+                UIBarButtonItem::alloc(mtm),
+                system_bar_item(*item),
+                Some(target),
+                action,
+            )
+        }),
+        BarButton::Symbol(name) => {
+            let image = UIImage::systemImageNamed(&NSString::from_str(name))?;
+            // SAFETY: as above, with an image.
+            Some(unsafe {
+                UIBarButtonItem::initWithImage_style_target_action(
+                    UIBarButtonItem::alloc(mtm),
+                    Some(&image),
+                    UIBarButtonItemStyle::Plain,
+                    Some(target),
+                    action,
+                )
+            })
+        }
+    }
+}
+
+/// The accessibility label of the first labelled view in `view` (itself
+/// first): what VoiceOver reads for the bar button standing in for it.
+fn first_label(view: &UIView) -> Option<Retained<NSString>> {
+    // SAFETY: `accessibilityLabel` is UIView's (NSObject's informal
+    // protocol), returning an optional string.
+    let label: Option<Retained<NSString>> = unsafe { msg_send![view, accessibilityLabel] };
+    if let Some(label) = label.filter(|l| l.length() > 0) {
+        return Some(label);
+    }
+    view.subviews().iter().find_map(|v| first_label(&v))
+}
 
 /// UIKit's bar button of `item`.
 fn system_bar_item(item: HeaderSystemItem) -> UIBarButtonSystemItem {
@@ -858,11 +966,23 @@ impl StackHost {
                 view.layer().addAnimation_forKey(&fade, None);
             }
         }
+        // The page on top leaves (a pop, a replace): its keyboard hides with
+        // the transition.
+        if top_changed
+            && let Some(top) = current.lastObject()
+            && !desired
+                .iter()
+                .any(|c| std::ptr::eq::<UIViewController>(&**c, &*top))
+            && let Some(view) = top.view()
+        {
+            view.endEditing(true);
+        }
         let array = NSArray::from_retained_slice(&desired);
         *self.applied.borrow_mut() = screens.iter().map(|(id, _, _)| *id).collect();
         self.nav.ivars().applying.set(true);
         self.nav.setViewControllers_animated(&array, animated);
         self.nav.ivars().applying.set(false);
+
         // A stack whose size is settled is never laid out again for the
         // screens it is given, so nothing would size a screen UIKit left
         // empty until something unrelated (a rotation, a change of
@@ -870,14 +990,153 @@ impl StackHost {
         size_screens(&self.nav);
         defer_to_back_swipe(&self.nav);
     }
+
+    /// Puts the bar where this stack says it goes, if it is the stack on
+    /// screen and no transition is running: a page can turn
+    /// `hidesBottomBarWhenPushed` on while it is already shown, and nothing was
+    /// pushed or popped for `reconcile` to follow.
+    pub(crate) fn sync_bottom_bar(&self) {
+        let Some(view) = self.nav.view() else {
+            return;
+        };
+        if view.window().is_none() || view.isHidden() || self.nav.transitionCoordinator().is_some()
+        {
+            return;
+        }
+        slide_bottom_bar(&self.nav, bottom_bar_hidden(&self.nav));
+    }
+}
+
+/// A retained tab can be hidden at any enclosing container.
+fn ancestors_visible(view: &UIView) -> bool {
+    if view.isHidden() {
+        return false;
+    }
+    let mut ancestor = view.superview();
+    while let Some(view) = ancestor {
+        if view.isHidden() {
+            return false;
+        }
+        ancestor = view.superview();
+    }
+    true
+}
+
+/// Whether the bar belongs off screen: UIKit's own rule for
+/// `hidesBottomBarWhenPushed` — the bar stays hidden while **any** screen of
+/// the stack asks for it, until that screen is popped (Apple: "the bottom bar
+/// remains hidden until the view controller is popped from the stack").
+pub(crate) fn bottom_bar_hidden(nav: &UINavigationController) -> bool {
+    let controllers = nav.viewControllers();
+    controllers.iter().any(|controller| {
+        // SAFETY: asking UIKit for the property it defines for every screen.
+        let hides: bool = unsafe { msg_send![&*controller, hidesBottomBarWhenPushed] };
+        hides
+    })
+}
+
+/// Slides the app's system tab bars out (`hiding`) or back in, in the
+/// running transition's animation: same duration, same curve, one step with
+/// the page. Nothing is unmounted, so the bar is never rebuilt.
+///
+/// Called from `navigationController:willShowViewController:animated:` — the
+/// hook UIKit runs for both pushes and pops, before the transition starts —
+/// which is where a `UITabBarController` moves its own bar from — and from
+/// `sync_bottom_bar` for a stack that did not move. The app owns its
+/// independent `hidden` prop throughout both paths.
+pub(crate) fn slide_bottom_bar(nav: &UINavigationController, hiding: bool) {
+    let Some(view) = nav.view() else {
+        return;
+    };
+    // NSH hides the stack's container (or a retained tab's ancestor), not
+    // UINavigationController's own view. Apply this guard to transitions as
+    // well as option syncs, so background stacks never control the shared bar.
+    if view.window().is_none() || !ancestors_visible(&view) {
+        return;
+    }
+    let Some(parent) = view.superview() else {
+        return;
+    };
+    // The bar is a component's view, nested in the container the component
+    // system puts it in: look through the siblings' subtrees for it.
+    fn collect_tab_bars(view: &UIView, depth: usize, out: &mut Vec<Retained<UIView>>) {
+        if depth == 0 || view.isHidden() {
+            return;
+        }
+        for sub in view.subviews().iter() {
+            if sub.isHidden() {
+                continue;
+            }
+            // SAFETY: asking UIKit for the class of a subview.
+            let is_bar: bool =
+                unsafe { msg_send![&*sub, isKindOfClass: objc2_ui_kit::UITabBar::class()] };
+            if is_bar {
+                out.push(sub.clone());
+            } else {
+                collect_tab_bars(&sub, depth - 1, out);
+            }
+        }
+    }
+    // The bar is not a direct sibling of the nav view: both sit in the
+    // component containers of the app's root view, so walk up until an
+    // ancestor holds one.
+    let mut bars: Vec<Retained<UIView>> = Vec::new();
+    let mut ancestor = Some(parent.clone());
+    for _ in 0..6 {
+        let Some(view) = ancestor else { break };
+        collect_tab_bars(&view, 4, &mut bars);
+        if !bars.is_empty() {
+            break;
+        }
+        ancestor = view.superview();
+    }
+    if bars.is_empty() {
+        return;
+    }
+    // The bar moves itself (`nshSetBottomHidden:`): its own layout sets the
+    // frame on every pass, so a transform set from here would be undone by
+    // the next one whenever a screen below it changes size.
+    let bars = Rc::new(bars);
+    let apply = Rc::new(move || {
+        // A retained tab may have been hidden since the coordinator queued us.
+        if view.window().is_none() || !ancestors_visible(&view) {
+            return;
+        }
+        for bar in bars.iter() {
+            // SAFETY: asking a view whether it is ours before messaging it.
+            let ours: bool =
+                unsafe { msg_send![&**bar, respondsToSelector: sel!(nshSetBottomHidden:)] };
+            if ours {
+                let _: () = unsafe { msg_send![&**bar, nshSetBottomHidden: hiding] };
+            }
+        }
+    });
+    let apply = apply.clone();
+    match nav.transitionCoordinator() {
+        Some(coordinator) => {
+            let block = RcBlock::new(
+                move |_context: NonNull<
+                    ProtocolObject<dyn UIViewControllerTransitionCoordinatorContext>,
+                >| {
+                    apply();
+                },
+            );
+            coordinator.animateAlongsideTransition_completion(Some(&block), None);
+        }
+        // Not in a transition (the first screen, a change with nothing to
+        // animate): place it at once.
+        None => apply(),
+    }
 }
 
 /// One screen.
 pub(crate) struct ScreenHost {
     pub(crate) controller: Retained<ScreenController>,
-    /// The bar button of `ios={{ headerRightSystemItem }}`, made once per
-    /// item and kept while it stays, with its target (UIKit keeps a bar
-    /// button's target weakly).
+    /// The UIKit bar buttons standing in for `headerLeft` and `headerRight`
+    /// (`ios={{ headerLeftSystemItem }}`, `ios={{ headerRightSymbol }}`,
+    /// ...), made once per look and kept while it stays, with their targets
+    /// (UIKit keeps a bar button's target weakly).
+    left_system: RefCell<Option<SystemBarItem>>,
     right_system: RefCell<Option<SystemBarItem>>,
     /// The screen's root view, placed by the core.
     pub(crate) view: Retained<NshView>,
@@ -896,6 +1155,7 @@ impl ScreenHost {
             controller,
             view,
             config: ScreenConfig::default(),
+            left_system: RefCell::new(None),
             right_system: RefCell::new(None),
         }
     }
@@ -914,44 +1174,56 @@ impl ScreenHost {
         nav_item.setTitle(c.title.as_deref().map(NSString::from_str).as_deref());
         let title_view = c.title_view.and_then(&item);
         nav_item.setTitleView(title_view.as_deref());
-        let bar_item = |id: Option<NodeId>| {
+        let custom = |id: Option<NodeId>| {
             id.and_then(&item)
                 .map(|v| UIBarButtonItem::initWithCustomView(UIBarButtonItem::alloc(mtm), &v))
         };
-        nav_item.setLeftBarButtonItem(bar_item(c.left).as_deref());
-        nav_item.setLeftItemsSupplementBackButton(true);
-        // `ios={{ headerRightSystemItem }}`: UIKit's button, which presses
-        // the app's `headerRight` (none without it). The same item keeps its
-        // button: rebuilding it on every header change would flash it.
-        let system = match (c.right_system_item, c.right, press) {
-            (Some(kind), Some(_), Some(mounter)) => {
-                let mut kept = self.right_system.borrow_mut();
-                if kept.as_ref().is_none_or(|(k, ..)| *k != kind) {
-                    let target = BarItemTarget::new(mtm, self.controller.screen_id(), mounter);
-                    // SAFETY: UIKit's designated initializer of a system bar
-                    // button; the target lives in `right_system` as long as
-                    // the button, and `nshPress:` is its action's selector.
-                    let item = unsafe {
-                        UIBarButtonItem::initWithBarButtonSystemItem_target_action(
-                            UIBarButtonItem::alloc(mtm),
-                            system_bar_item(kind),
-                            Some(&target),
-                            Some(objc2::sel!(nshPress:)),
-                        )
-                    };
-                    *kept = Some((kind, item, target));
-                }
-                kept.as_ref().map(|(_, item, _)| item.clone())
+        // UIKit's own button in place of the app's view, pressing that view
+        // (none without one). The same look keeps its button: rebuilding it
+        // on every header change would flash it.
+        let system = |leading: bool,
+                      kept: &RefCell<Option<SystemBarItem>>,
+                      slot: Option<NodeId>,
+                      kind: Option<BarButton>| {
+            let (Some(kind), Some(slot), Some(mounter)) = (kind, slot, press.clone()) else {
+                kept.borrow_mut().take();
+                return None;
+            };
+            let mut kept = kept.borrow_mut();
+            if kept.as_ref().is_none_or(|(k, ..)| *k != kind) {
+                let target = BarItemTarget::new(mtm, self.controller.screen_id(), leading, mounter);
+                *kept = make_bar_button(mtm, &kind, &target).map(|b| (kind, b, target));
             }
-            _ => {
-                self.right_system.borrow_mut().take();
-                None
+            let (_, button, _) = kept.as_ref()?;
+            // VoiceOver reads the app's label of the view it stands in for.
+            let label = item(slot).and_then(|v| first_label(&v));
+            {
+                use objc2_ui_kit::NSObjectUIAccessibility;
+                button.setAccessibilityLabel(label.as_deref(), mtm);
             }
+            Some(button.clone())
         };
-        match system {
-            Some(item) => nav_item.setRightBarButtonItem(Some(&item)),
-            None => nav_item.setRightBarButtonItem(bar_item(c.right).as_deref()),
-        }
+        let look = |item: Option<HeaderSystemItem>, symbol: &Option<Arc<str>>| {
+            item.map(BarButton::System)
+                .or_else(|| symbol.clone().map(BarButton::Symbol))
+        };
+        let left = system(
+            true,
+            &self.left_system,
+            c.left,
+            look(c.left_system_item, &c.left_symbol),
+        )
+        .or_else(|| custom(c.left));
+        nav_item.setLeftBarButtonItem(left.as_deref());
+        nav_item.setLeftItemsSupplementBackButton(true);
+        let right = system(
+            false,
+            &self.right_system,
+            c.right,
+            look(c.right_system_item, &c.right_symbol),
+        )
+        .or_else(|| custom(c.right));
+        nav_item.setRightBarButtonItem(right.as_deref());
         nav_item.setHidesBackButton(!c.back_visible);
         nav_item.setBackButtonTitle(c.back_title.as_deref().map(NSString::from_str).as_deref());
         nav_item.setLargeTitleDisplayMode(if c.large_title {
@@ -990,6 +1262,17 @@ impl ScreenHost {
 /// idiom UIKit otherwise moves a navigation bar's contents into the window's
 /// toolbar (the back button next to the traffic lights), where the title,
 /// the header's colors and the core's layout do not apply.
+impl ScreenHost {
+    /// UIKit's own `hidesBottomBarWhenPushed`, so
+    /// `navigationController:willShowViewController:` reads the page's choice
+    /// the way it would inside a `UITabBarController`. Set as soon as the
+    /// screen's options arrive — before the push that shows it.
+    pub(crate) fn set_hides_bottom_bar(&self, hides: bool) {
+        // SAFETY: UIKit's property on the controller this screen wraps.
+        let _: () = unsafe { msg_send![&*self.controller, setHidesBottomBarWhenPushed: hides] };
+    }
+}
+
 pub(crate) fn keep_in_window(bar: &UINavigationBar) {
     // `preferredBehavioralStyle` is iOS 16+ (nsh supports iOS 15, where
     // bars always stay in the window).
@@ -1178,6 +1461,10 @@ impl ModalHost {
         // Closed by the user already (and reported).
         if self.controller.ivars().closed.replace(false) {
             return;
+        }
+        // Its keyboard hides with it.
+        if let Some(view) = self.controller.view() {
+            view.endEditing(true);
         }
         let block = block2::RcBlock::new(done);
         let animated = self.config.animation != ModalAnimation::None;

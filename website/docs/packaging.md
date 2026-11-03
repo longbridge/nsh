@@ -88,6 +88,7 @@ nsh package --target android --app-version 1.4.0 --build 42
 | `--keystore <file>` | Android: a release keystore (default: the debug key). |
 | `--key-alias <alias>` | Android: the key alias in the keystore. |
 | `--keystore-password <password>` | Android: the keystore password; also read from `NSH_KEYSTORE_PASSWORD`. |
+| `--abi <abi>` | Android: the ABIs of the APK, repeated or separated by commas (default: `arm64-v8a` and `armeabi-v7a`). |
 | `--run` | Install and launch afterwards: in the iOS simulator, or on the Android device or emulator `adb` sees; macOS, Linux and Windows apps are launched on this machine; a web site is served on this machine and opened in the browser. Not for `--target ios`. |
 
 ## iOS simulator
@@ -142,7 +143,13 @@ without Gradle. Requirements:
 - For a Rust app, the Android NDK (`sdkmanager "ndk;<version>"`, or `ANDROID_NDK_HOME`), which builds its
   `libnsh.so`.
 
-The app targets API 35 and needs API 28 (Android 9) or newer; it contains native code for `arm64-v8a`, `armeabi-v7a` and `x86_64`.
+The app targets API 35 and needs API 28 (Android 9) or newer. It contains native code for the ABIs of phones,
+`arm64-v8a` and `armeabi-v7a`; with `--run`, also the device's, such as an emulator's `x86_64`. `--abi` picks them
+yourself, for example `--abi arm64-v8a` for 64-bit phones only, the smallest APK:
+
+```sh
+nsh package --target android --abi arm64-v8a
+```
 
 ### Signing for release
 
@@ -199,8 +206,8 @@ nsh package --target web --run
 ```
 
 Writes `.nsh/out/<Name>/`, a static site: `index.html`, `manifest.webmanifest`, the page script (`nsh.<digest>.js`)
-and `nsh.<digest>.wasm` (a Rust app's engine and crate; for a TSX app the runtime, next to the app's bytecode
-`app.<digest>.nshc`), its assets and icons, each named after its content
+and `nsh.<digest>.wasm` (a Rust app's engine and crate; for a TSX app the runtime, next to the app's ES module
+`app.<digest>.js`), its assets and icons, each named after its content
 so hosts can cache them for good. Deploy the directory to any web server or CDN; `--run` serves it on
 `http://127.0.0.1:4173/` for you to open. Cache headers and embedding: [Web](./web.md#publish-an-app).
 
@@ -228,11 +235,11 @@ assets it imports, next to the prebuilt runtime:
 | Target | Runtime | A TSX app |
 |---|---|---|
 | iOS | the `nsh-ios-app` executable | `<Name>.app/nsh/bundle.nshc`, `nsh/assets/…` |
-| Android | `classes.dex`, `lib/<abi>/libnsh.so` (stored uncompressed, 16 KB aligned) | `assets/nsh/bundle.nshc`, `assets/nsh/assets/…` |
+| Android | `classes.dex`, `lib/<abi>/libnsh.so` (without symbols, stored uncompressed, 16 KB aligned) | `assets/nsh/bundle.nshc`, `assets/nsh/assets/…` |
 | macOS | the `nsh-macos-app` executable, renamed `<Name>` | `<Name>.app/Contents/Resources/nsh/bundle.nshc`, `nsh/assets/…` |
 | Linux | the `nsh-linux-app` executable, renamed `<Name>` | `<Name>/nsh/bundle.nshc`, `nsh/assets/…` |
 | Windows | the `nsh-windows-app.exe` executable, renamed `<Name>.exe` | `<Name>\nsh\bundle.nshc`, `nsh\assets\…` |
-| Web | `nsh.<digest>.wasm`, `nsh.<digest>.js` | `<Name>/app.<digest>.nshc`, `assets/…`, `index.html` |
+| Web | `nsh.<digest>.wasm`, `nsh.<digest>.js` | `<Name>/app.<digest>.js`, `assets/…`, `index.html` |
 
 A packaged app registers no [native components](./native-components.md); for those, embed NSH in your own app.
 

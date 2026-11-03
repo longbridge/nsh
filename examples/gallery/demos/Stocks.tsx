@@ -109,7 +109,8 @@ function MarketStrip(props: { market: Market }) {
           onPress={toggle}
           role="button"
           accessibilityLabel={opened() ? "Hide breadth" : "Show breadth"}
-          style={{ flex: 1, flexDirection: "row", alignItems: "center", gap: terminal ? TERMINAL_COLUMN : 8, height }}
+          hoverStyle={{ opacity: 0.72 }}
+          style={{ flex: 1, flexDirection: "row", alignItems: "center", gap: terminal ? TERMINAL_COLUMN : 8, height, transitionProperty: "opacity", transitionDuration: 120 }}
         >
           <Text style={{ numberOfLines: 1, fontSize: 13, color: colors.muted }}>
             Composite
@@ -129,10 +130,14 @@ function MarketStrip(props: { market: Market }) {
           when={!terminal}
           else={<Button label={running() ? "Pause" : "Resume"} accessibilityLabel={running() ? "Pause the market" : "Resume the market"} variant="secondary" onPress={pause} />}
         >
-          <Press onPress={pause} hitSlop={6} accessibilityLabel={running() ? "Pause the market" : "Resume the market"}>
-            <View style={[{ width: 32, height: 32, borderRadius: 16, alignItems: "center", justifyContent: "center" }, running() ? { ...finish.pill, borderWidth: 1 } : finish.accent]}>
-              <Icon name={running() ? "pause" : "play"} size={13} tint={running() ? colors.muted : colors.onAccent} />
-            </View>
+          <Press
+            onPress={pause}
+            hitSlop={6}
+            accessibilityLabel={running() ? "Pause the market" : "Resume the market"}
+            hoverStyle={running() ? finish.hover : { opacity: 0.94 }}
+            style={{ width: 32, height: 32, borderRadius: 16, alignItems: "center", justifyContent: "center", borderWidth: 1, ...(running() ? finish.pill : finish.accent) }}
+          >
+            <Icon name={running() ? "pause" : "play"} size={13} tint={running() ? colors.muted : colors.onAccent} />
           </Press>
         </If>
       </View>

@@ -1,7 +1,7 @@
 ---
 title: List
 description: "The virtualized, recycling list: rows, columns, sticky headers, inverted chat lists, viewability and scrolling to items."
-order: 7
+order: 50
 group: primitives
 demo: el-list
 ---
@@ -123,12 +123,12 @@ touches and UI tests meet each row once.
 | `onRefresh` | `.on_refresh(..)` | `() => void` | | The user pulled to refresh. |
 | `refreshIndicator` | `.refresh_indicator(Some(height))` | `{ height: number }` | | The app draws its own indicator, `height` points tall: the platform's spinner is hidden, a pull refreshes once it reaches `height`, and refreshing keeps `height` above the content. A height of 0 or less is none. |
 | `pullValue` | `.pull_value(&value)` | `AnimatedValue` | | An animated value fed with how far the list is pulled past its top (0 at rest, growing with the pull; the room kept above the content while it refreshes: `height` with `refreshIndicator`), for the app's indicator. |
-| `scrollbar` | `.scrollbar(..)` | `boolean` | `true` | The scroll indicator shows. On the desktop and in desktop browsers a horizontal view keeps it: it is the mouse's scroll bar. |
+| `scrollbar` | `.scrollbar(..)` | `boolean \| ScrollbarTheme` | `true` | The scroll indicator shows: the platform's, or the app's [built-in bar](./scrollbar.md#built-in-bars) once it set a theme; an object is a theme of the view's own. On the desktop and in desktop browsers a horizontal view keeps it: it is the mouse's scroll bar. |
 | `scrollValue` | `.scroll_value(&value)` | `AnimatedValue` | | An animated value fed with the scroll offset, for scroll-linked animations. |
 | `keyboardDismissMode` | `.keyboard_dismiss_mode(..)` | `"none" \| "on-drag" \| "interactive"` | `"none"` | Whether dragging dismisses the keyboard. |
 | `style` | `Styled` methods | `StyleProp<ViewStyle>` | | The list's own style (it needs a bounded size: `flex: 1` or a height). |
 | `testID` | `.test_id(id)` | `string` | | The id UI tests find the list's scroll view by (`nsh test`'s `id:`, XCUITest, UI Automator). |
-| `ref` | `.element_ref(&handle)` | `YNode \| (node: YNode) => void` | | The list's node (see [ref methods](#ref-methods)). |
+| `ref` | `.element_ref(&handle)` | `ListRef \| (node: ListRef) => void` | | The list's ref (see [ref methods](#ref-methods)). |
 
 Lists also take the scrolling props of [`Scroll`](./scroll.md#scrolling) (the `Scrollable` methods in Rust):
 `pagingEnabled`, `snapToInterval`, `snapToOffsets`, `snapToAlignment`, `disableIntervalMomentum`, `decelerationRate`,
@@ -139,12 +139,12 @@ The props every element takes ([common props](./index.md#common-props)) go to th
 `testID`, `accessibilityLabel` and the other accessibility props, the styles, `onLayout`, touch and responder props.
 UI tests find a list by its `testID` as they find any view.
 
-`ViewabilityConfig` (Rust: `Viewability { item_visible_percent, view_area_percent }` and `.minimum_view_time(..)`):
+`ViewabilityConfig` (Rust: `Viewability { item_visible_threshold, view_area_coverage_threshold }` and `.minimum_view_time(..)`):
 
 | Field | Type | Description |
 |---|---|---|
-| `itemVisiblePercentThreshold` | `number` | Percent of an item that must be visible. |
-| `viewAreaCoveragePercentThreshold` | `number` | Percent of the viewport an item must cover. Without either threshold, any visible pixel counts. |
+| `itemVisibleThreshold` | `number` | How much of an item must be visible, from 0 to 1. |
+| `viewAreaCoverageThreshold` | `number` | How much of the viewport an item must cover, from 0 to 1. Without either threshold, any visible pixel counts. |
 | `minimumViewTime` | `number` | Milliseconds items must stay viewable before they are reported. |
 
 `ViewToken<T>` is `{ item, key, index, isViewable }`. Rust's listener gets `ViewableItems`: `indices()` is the range of
@@ -155,9 +155,9 @@ viewable rows, `changed()` the rows that came or went.
 | Event | Rust | Payload | When |
 |---|---|---|---|
 | `onScroll` | `.on_scroll` | `ScrollEvent` | The offset changed. |
-| `onScrollDragStart` / `onScrollDragEnd` | `.on_scroll_drag_start` / `.on_scroll_drag_end` | `{ x, y }` | Dragging started / stopped. |
-| `onMomentumStart` / `onMomentumEnd` | `.on_momentum_start` / `.on_momentum_end` | `{ x, y }` | A glide started / stopped. |
-| `onScrollEnd` | `.on_scroll_end` | `{ x, y }` | Scrolling came to rest. |
+| `onScrollDragStart` / `onScrollDragEnd` | `.on_scroll_drag_start` / `.on_scroll_drag_end` | `{ offset }` | Dragging started / stopped. |
+| `onMomentumStart` / `onMomentumEnd` | `.on_momentum_start` / `.on_momentum_end` | `{ offset }` | A glide started / stopped. |
+| `onScrollEnd` | `.on_scroll_end` | `{ offset }` | Scrolling came to rest. |
 | `onLoadMore` | `.on_load_more` | none | Within `loadMoreThreshold` viewports of the end. |
 | `onLoadMoreAtStart` | `.on_load_more_at_start` | none | Within `loadMoreAtStartThreshold` viewports of the start, once per approach after a scroll. |
 | `onViewableItemsChange` | `.on_viewable_items_change` | `{ viewableItems, changed }` (`ViewableItems`) | Viewability changed. |
@@ -189,7 +189,7 @@ virtual_list(move || photos.with(|p| p.len()), move |at| {
 .content_padding(px(12.0))
 .row_gap(px(8.0))
 .column_gap(px(8.0))
-.viewability(Viewability { item_visible_percent: Some(50.0), ..Viewability::default() })
+.viewability(Viewability { item_visible_threshold: Some(Percentage(0.5)), ..Viewability::default() })
 .on_viewable_items_change(move |items: &ViewableItems| {
     visible.set(format!("{} visible", items.indices().count()).into())
 })
@@ -202,7 +202,7 @@ virtual_list(move || photos.with(|p| p.len()), move |at| {
 
 ```tsx tabs
 const visible = signal("");
-let list!: YNode;
+let list!: ListRef;
 
 <List
   ref={list}
@@ -210,7 +210,7 @@ let list!: YNode;
   numColumns={3}
   estimatedItemSize={120}
   contentStyle={{ padding: 12, gap: 8 }}
-  viewabilityConfig={{ itemVisiblePercentThreshold: 50 }}
+  viewabilityConfig={{ itemVisibleThreshold: 0.5 }}
   onViewableItemsChange={({ viewableItems }) => visible.set(`${viewableItems.length} visible`)}
   header={<Text onPress={() => list.scrollToIndex({ index: 60, viewPosition: 0.5 })}>Jump to 60</Text>}
   style={{ flex: 1 }}

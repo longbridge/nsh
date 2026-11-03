@@ -25,7 +25,13 @@
 //! - right to left: GTK's default text direction (the locale's);
 //! - the screen reader: the AT-SPI bus's `ScreenReaderEnabled`;
 //! - the OS version: the kernel's major and minor version (distributions
-//!   number their releases in incomparable ways, some not at all).
+//!   number their releases in incomparable ways, some not at all);
+//! - the app's state, from GDK's toplevel states, followed on the root's
+//!   map and unmap and its toplevel's `state` ([`lifecycle_changed`]):
+//!   background while the surface's window is not shown (the root
+//!   unmapped, the window minimized, or suspended: on another workspace or
+//!   covered, where the compositor says so), active while one of the
+//!   app's windows has the focus, inactive otherwise.
 //!
 //! Safe area and keyboard height are zero: desktop windows have neither.
 //!
@@ -55,7 +61,7 @@ use nsh_core::{
     geometry::{Point, Size, px},
     platform::clipboard,
 };
-use nsh_engine::{ColorScheme, Edges, Environment, Locale};
+use nsh_engine::{ColorScheme, Edges, Environment, Lifecycle, Locale};
 
 use crate::{surface::Surface, view::NshView};
 
@@ -153,6 +159,8 @@ struct System {
     /// The D-Bus proxies, kept for their signals.
     proxies: Vec<gio::DBusProxy>,
     overlays: Vec<Overlay>,
+    /// The menus' style sheet, in the app's colors ([`crate::menu_style`]).
+    menu_style: Option<gtk::CssProvider>,
 }
 
 thread_local! {
@@ -195,10 +203,15 @@ pub(crate) fn watch_environment(surface: &Rc<Surface>) {
                 update(&surface, appearance());
             }
         });
+        if let Some(toplevel) = gdk_surface.downcast_ref::<gdk::Toplevel>() {
+            toplevel.connect_state_notify(|_| lifecycle_changed());
+        }
         if let Some(surface) = weak.upgrade() {
             update(&surface, appearance());
         }
     });
+    surface.root.connect_map(|_| lifecycle_changed());
+    surface.root.connect_unmap(|_| lifecycle_changed());
     update(surface, appearance());
     environment_applied(surface);
 }
@@ -219,6 +232,14 @@ fn install() {
         &provider,
         gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
     );
+    let menus = gtk::CssProvider::new();
+    menus.load_from_string(&crate::menu_style::css(&Default::default()));
+    gtk::style_context_add_provider_for_display(
+        &display,
+        &menus,
+        gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
+    );
+    SYSTEM.with(|s| s.borrow_mut().menu_style = Some(menus));
     let settings = gtk::Settings::for_display(&display);
     let initial_dark = interface_scheme(&settings)
         .map_or(settings.is_gtk_application_prefer_dark_theme(), |s| {
@@ -251,17 +272,63 @@ fn appearance() -> Appearance {
     }
 }
 
-/// A system setting changed: tells every surface.
-fn system_changed() {
-    let appearance = appearance();
-    let surfaces: Vec<Rc<Surface>> = SYSTEM.with(|s| {
+/// This thread's surfaces.
+fn surfaces() -> Vec<Rc<Surface>> {
+    SYSTEM.with(|s| {
         let mut s = s.borrow_mut();
         s.surfaces.retain(|w| w.strong_count() > 0);
         s.surfaces.iter().filter_map(Weak::upgrade).collect()
-    });
-    for surface in surfaces {
+    })
+}
+
+/// A system setting changed: tells every surface.
+fn system_changed() {
+    let appearance = appearance();
+    for surface in surfaces() {
         update(&surface, appearance);
     }
+}
+
+/// A surface's window was focused, minimized, suspended, shown or hidden:
+/// tells every surface, as whether the app is the active one depends on
+/// all of its windows.
+fn lifecycle_changed() {
+    for surface in surfaces() {
+        let mut env: Environment = surface.environment.get();
+        env.lifecycle = lifecycle(&surface);
+        surface.set_environment(env);
+    }
+}
+
+/// The app's state as `surface` sees it.
+fn lifecycle(surface: &Surface) -> Lifecycle {
+    let hidden = gdk::ToplevelState::MINIMIZED | gdk::ToplevelState::SUSPENDED;
+    let shown = surface.root.is_mapped()
+        && surface
+            .root
+            .native()
+            .and_then(|n| toplevel_state(&n))
+            .is_none_or(|s| !s.intersects(hidden));
+    let focused = || {
+        gtk::Window::list_toplevels().iter().any(|w| {
+            w.downcast_ref::<gtk::Native>()
+                .and_then(toplevel_state)
+                .is_some_and(|s| s.contains(gdk::ToplevelState::FOCUSED))
+        })
+    };
+    if !shown {
+        Lifecycle::Background
+    } else if focused() {
+        Lifecycle::Active
+    } else {
+        Lifecycle::Inactive
+    }
+}
+
+/// The state of `native`'s toplevel surface, once it is realized.
+fn toplevel_state(native: &gtk::Native) -> Option<gdk::ToplevelState> {
+    let surface = native.surface()?;
+    Some(surface.downcast_ref::<gdk::Toplevel>()?.state())
 }
 
 /// The embedding app set its locale or text size
@@ -274,6 +341,7 @@ pub(crate) fn host_environment_changed(surface: &Surface) {
 /// Writes `appearance` and the surface's own values into its environment.
 fn update(surface: &Surface, appearance: Appearance) {
     let mut env: Environment = surface.environment.get();
+    let old_ratio = env.pixel_ratio;
     let system = if appearance.dark {
         ColorScheme::Dark
     } else {
@@ -289,7 +357,13 @@ fn update(surface: &Surface, appearance: Appearance) {
     env.os_version = OS_VERSION.with(|v| *v);
     env.safe_area = Edges::default();
     env.keyboard_height = px(0.0);
+    env.lifecycle = lifecycle(surface);
     surface.set_environment(env);
+    // Images decoded for the old scale (a Wayland fractional scale arrives
+    // after the first frame) decode again at the new one.
+    if env.pixel_ratio != old_ratio {
+        crate::image::rescaled(surface);
+    }
 }
 
 /// The surface's environment changed (from the system or a test): GTK's
@@ -304,6 +378,11 @@ pub(crate) fn environment_applied(surface: &Surface) {
     };
     root.remove_css_class(remove);
     root.add_css_class(add);
+    // The menu bar's menus are outside the root.
+    if let Some(slot) = crate::chrome::menu_bar_slot(surface) {
+        slot.remove_css_class(remove);
+        slot.add_css_class(add);
+    }
     let Some(settings) = gtk::Settings::default() else {
         return;
     };
@@ -492,7 +571,11 @@ pub(crate) fn command(surface: &Rc<Surface>, _id: NodeId, command: &Command) {
         Command::ReadClipboardFiles { id } => read_clipboard_files(surface, *id),
         Command::PickImages { id, request } => pick_images(surface, *id, *request),
         Command::OpenUrl { id, url } => open_url(surface, *id, url),
+        Command::FileRequest { id, request } => {
+            crate::file_requests::request(surface, *id, request)
+        }
         Command::Back => crate::navigation::default_back(surface),
+        Command::Tokens(tokens) => set_menu_tokens(tokens),
         Command::ExitApp => {
             // Closing destroys the window, whose handler stops the surface:
             // not while the surface is applying this batch.
@@ -505,6 +588,18 @@ pub(crate) fn command(surface: &Rc<Surface>, _id: NodeId, command: &Command) {
         Command::StatusBar(_) | Command::SetStatusBar(_) | Command::LayoutAnimation(_) => {}
         other => log::debug!("linux: command {other:?} is not supported"),
     }
+}
+
+/// The app's design tokens changed: the menus take their colors. One
+/// style sheet serves every surface of the process, in the colors of the
+/// last app to set them (an app's surfaces share its tokens).
+fn set_menu_tokens(tokens: &nsh_core::element::Tokens) {
+    let css = crate::menu_style::css(tokens);
+    SYSTEM.with(|s| {
+        if let Some(provider) = &s.borrow().menu_style {
+            provider.load_from_string(&css);
+        }
+    });
 }
 
 /// The batch is applied: overlays stay over views mounted on the root.

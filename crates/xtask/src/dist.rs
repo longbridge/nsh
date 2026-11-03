@@ -9,8 +9,10 @@
 //! dist/nsh/runtime/linux/{nsh-linux-host,nsh-linux-app}        development host, packaged app runner
 //! dist/nsh/runtime/windows/{nsh-windows-host,nsh-windows-app}.exe  development host, packaged app runner
 //! dist/nsh/runtime/gpui/nsh-gpui-host[.exe]                   development host (GPUI; apps embed it, never package it)
-//! dist/nsh/runtime/android/{release,dev}/                      classes.dex, lib/<abi>/libnsh.so
-//! dist/nsh/runtime/web/{nsh.wasm,nsh-dev.wasm,nsh.js}          the web runtimes (published apps', the dev host's)
+//! dist/nsh/runtime/android/{release,dev}/                      classes.dex, lib/<abi>/libnsh.so (stripped),
+//!                                                              symbols/<abi>/libnsh.so (with symbols)
+//! dist/nsh/runtime/web/{nsh-browser.wasm,nsh-dev.wasm,nsh.js,browser/}  the web runtimes (published apps' to link from, the dev host's)
+//! dist/nsh/runtime/web/nsh-syntaxes.bin                       the syntaxes they fetch to highlight code
 //! dist/nsh/embed/ios/{NativeShell,NativeShellDev}.xcframework  embedding in iOS apps
 //! dist/nsh/embed/android/{nsh,nsh-dev}.aar                     embedding in Android apps
 //! ```
@@ -130,12 +132,20 @@ pub(crate) fn dist() -> anyhow::Result<()> {
         )?;
     }
 
-    // The web runtimes: the same files on every machine. Published apps'
-    // (no QuickJS parser: bytecode only) and the development host's (JS
-    // source and hot updates). Both build to the same file, copied in turn.
+    // The web runtimes, the same files on every machine, all running TSX on
+    // the browser's JavaScript engine: the linkable one `nsh package` links
+    // each published app's from (only what the app uses), and the
+    // development host's (hot updates, `nsh test --target web`). They build
+    // to the same file, copied in turn.
     for (features, file) in [
-        (&["--features", "bytecode-only"][..], "nsh.wasm"),
-        (&["--features", "dev"][..], "nsh-dev.wasm"),
+        (
+            &["--no-default-features", "--features", "browser,linkable"][..],
+            "nsh-browser.wasm",
+        ),
+        (
+            &["--no-default-features", "--features", "dev"][..],
+            "nsh-dev.wasm",
+        ),
     ] {
         let mut web = Command::new(env::var_os("CARGO").unwrap_or_else(|| "cargo".into()));
         web.current_dir(&root)
@@ -155,6 +165,26 @@ pub(crate) fn dist() -> anyhow::Result<()> {
         &root.join("crates/nsh-platform-web/web/nsh.js"),
         &out.join("runtime/web/nsh.js"),
     )?;
+    // The syntaxes the web runtime leaves out and fetches when it first
+    // highlights code: two-face's dump, as this workspace resolves it.
+    copy(
+        &package_dir(&root, "two-face")?.join("generated/syntaxes-fancy-newlines.bin"),
+        &out.join("runtime/web/nsh-syntaxes.bin"),
+    )?;
+
+    for entry in fs::read_dir(root.join("crates/nsh-platform-web/web/browser"))? {
+        let entry = entry?;
+        if entry
+            .path()
+            .extension()
+            .is_some_and(|ext| ext == "js" || ext == "txt")
+        {
+            copy(
+                &entry.path(),
+                &out.join("runtime/web/browser").join(entry.file_name()),
+            )?;
+        }
+    }
 
     // Android runtimes. Windows machines often have no Android SDK: the
     // distribution is then made without them.
@@ -171,10 +201,12 @@ pub(crate) fn dist() -> anyhow::Result<()> {
         let dest = out.join("runtime/android").join(name);
         copy(&built.join("classes.dex"), &dest.join("classes.dex"))?;
         for abi in &abis {
-            copy(
-                &built.join("lib").join(abi).join("libnsh.so"),
-                &dest.join("lib").join(abi).join("libnsh.so"),
-            )?;
+            for dir in ["lib", "symbols"] {
+                copy(
+                    &built.join(dir).join(abi).join("libnsh.so"),
+                    &dest.join(dir).join(abi).join("libnsh.so"),
+                )?;
+            }
         }
         let aar = out
             .join("embed/android")
@@ -239,7 +271,19 @@ fn ios_runtimes(release: &Path, out: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// An Android library archive: the Java runtime and `libnsh.so` per ABI.
+/// R8 rules the archive carries (`proguard.txt`), which an app's Gradle
+/// build applies when it shrinks the app: `libnsh.so` finds the runtime's
+/// classes, methods and fields by name over JNI (`TextLayouts` in
+/// `JNI_OnLoad`) and binds `native` methods by their Java names, which R8
+/// would remove or rename, Java code never naming most of them.
+const AAR_KEEP_RULES: &str = "\
+# Native Shell: libnsh.so finds these classes and members by name over JNI
+# and binds native methods by their Java names.
+-keep class com.longbridge.nsh.** { *; }
+";
+
+/// An Android library archive: the Java runtime and `libnsh.so` per ABI,
+/// with the R8 rules that keep the runtime ([`AAR_KEEP_RULES`]).
 ///
 /// The development library allows cleartext HTTP (merged into the app's
 /// manifest): it loads assets from the `nsh dev` server over plain HTTP.
@@ -267,10 +311,13 @@ fn make_aar(built: &Path, abis: &[String], dev: bool, aar: &Path) -> anyhow::Res
         ),
     )?;
     fs::write(work.join("R.txt"), "")?;
+    fs::write(work.join("proguard.txt"), AAR_KEEP_RULES)?;
     copy(&built.join("classes.jar"), &work.join("classes.jar"))?;
+    // With their symbols: the app's Gradle build strips what it packages
+    // and keeps them for its crash reports.
     for abi in abis {
         copy(
-            &built.join("lib").join(abi).join("libnsh.so"),
+            &built.join("symbols").join(abi).join("libnsh.so"),
             &work.join("jni").join(abi).join("libnsh.so"),
         )?;
     }
@@ -326,10 +373,74 @@ fn exe(name: &str) -> String {
     format!("{name}{}", env::consts::EXE_SUFFIX)
 }
 
+/// The directory of package `name` as the workspace at `root` resolves
+/// it (`cargo metadata`).
+fn package_dir(root: &Path, name: &str) -> anyhow::Result<std::path::PathBuf> {
+    let output = Command::new(env::var_os("CARGO").unwrap_or_else(|| "cargo".into()))
+        .current_dir(root)
+        .args(["metadata", "--format-version", "1"])
+        .output()
+        .context("run cargo metadata")?;
+    anyhow::ensure!(
+        output.status.success(),
+        "cargo metadata: {}",
+        String::from_utf8_lossy(&output.stderr).trim()
+    );
+    let metadata: serde_json::Value =
+        serde_json::from_slice(&output.stdout).context("cargo metadata's output")?;
+    let mut found = metadata["packages"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|p| p["name"].as_str() == Some(name));
+    let package = found
+        .next()
+        .with_context(|| format!("the workspace resolves no {name}"))?;
+    anyhow::ensure!(
+        found.next().is_none(),
+        "the workspace resolves several versions of {name}"
+    );
+    let manifest = package["manifest_path"]
+        .as_str()
+        .context("cargo metadata: a package without manifest_path")?;
+    Ok(Path::new(manifest)
+        .parent()
+        .context("a manifest without directory")?
+        .to_path_buf())
+}
+
 pub(crate) fn copy(from: &Path, to: &Path) -> anyhow::Result<()> {
     if let Some(dir) = to.parent() {
         fs::create_dir_all(dir)?;
     }
     fs::copy(from, to).with_context(|| format!("copy {} -> {}", from.display(), to.display()))?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{fs, io::Read as _};
+
+    use super::{AAR_KEEP_RULES, make_aar};
+
+    #[test]
+    fn an_aar_carries_the_rules_that_keep_the_runtime() {
+        let dir = std::env::temp_dir().join(format!("nsh-aar-test-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let built = dir.join("built");
+        fs::create_dir_all(built.join("symbols/arm64-v8a")).unwrap();
+        fs::write(built.join("classes.jar"), b"jar").unwrap();
+        fs::write(built.join("symbols/arm64-v8a/libnsh.so"), b"so").unwrap();
+        let aar = dir.join("nsh.aar");
+        make_aar(&built, &["arm64-v8a".to_string()], false, &aar).unwrap();
+        let mut zip = zip::ZipArchive::new(fs::File::open(&aar).unwrap()).unwrap();
+        let mut rules = String::new();
+        zip.by_name("proguard.txt")
+            .unwrap()
+            .read_to_string(&mut rules)
+            .unwrap();
+        assert_eq!(rules, AAR_KEEP_RULES);
+        assert!(rules.contains("-keep class com.longbridge.nsh.** { *; }"));
+        fs::remove_dir_all(&dir).unwrap();
+    }
 }

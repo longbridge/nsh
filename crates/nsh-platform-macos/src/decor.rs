@@ -11,10 +11,13 @@
 //! views always have a container: there it clips too, and the decoration
 //! stays in the view's own layer, where it does not scroll.
 //!
-//! Text and canvas views draw into their layer's contents (`drawRect:`),
-//! which Core Animation shows below every sublayer: their background is the
-//! layer's own, never a fill layer, and nothing inside the box is drawn over
-//! them but borders.
+//! A shader view's frames are the contents of a sublayer
+//! ([`crate::shader`]) shaped here as an image view's image layer is.
+//!
+//! Text and canvas views draw into a content sublayer
+//! ([`NshView::redraw`]: `drawLayer:inContext:`) at `BEHIND / 2`, above the
+//! decoration behind them and below their children and the borders in
+//! front. Their background is the layer's own, never a fill layer.
 //!
 //! A `drop-shadow()` filter is the layer's own shadow: it follows the
 //! content.
@@ -39,7 +42,7 @@ use objc2_quartz_core::{
 };
 
 use crate::{
-    image::Decoded,
+    image::Picture,
     surface::quiet,
     view::{NshView, ViewState},
 };
@@ -88,9 +91,15 @@ struct Shape {
     border_style: BorderStyle,
     /// Whether every side has the same color (one ring layer, or four).
     one_color: bool,
+    /// Whether a side draws something: [`Decor::shape`] gives the layers a
+    /// border only then, so a transparent border turning visible (a
+    /// `border-transparent` row's `focus:border-*`) shapes them again.
+    border_visible: bool,
     tint: Option<Color>,
     outline: nsh_core::Outline,
     effects: Option<std::sync::Arc<nsh_core::Effects>>,
+    /// It shows a shader's frames ([`crate::shader`]).
+    shader: bool,
 }
 
 /// The colors [`apply`] set last.
@@ -118,7 +127,7 @@ pub(crate) struct Decor {
     /// mode and the position put it.
     picture: Option<Retained<CALayer>>,
     /// The image shown, and its natural size in points.
-    contents: Option<(Decoded, (f32, f32))>,
+    contents: Option<(Picture, (f32, f32))>,
     /// How the image fits.
     mode: ResizeMode,
     /// Where the fitted image sits.
@@ -156,7 +165,7 @@ impl Decor {
 
     /// Shows `image` (natural size `natural` in points), fading in over
     /// `fade` seconds; an animated image plays its frames, forever.
-    pub(crate) fn set_image(&mut self, image: Option<(&Decoded, (f32, f32))>, fade: f64) {
+    pub(crate) fn set_image(&mut self, image: Option<(&Picture, (f32, f32))>, fade: f64) {
         self.contents = image.map(|(d, n)| (d.clone(), n));
         self.image_layer();
         let Some(layer) = self.picture.clone() else {
@@ -526,6 +535,26 @@ impl Decor {
             self.fit_contents();
         }
 
+        // A shader's frames fill the view's shape, as a background does
+        // (clipped even when the children are not).
+        if let Some(shader) = s.shader.as_ref() {
+            let l = shader.layer();
+            l.setFrame(local);
+            set_corners(l, r, continuous);
+            if shared.is_some() {
+                // SAFETY: clearing the mask.
+                unsafe { l.setMask(None) };
+            } else {
+                let m = CAShapeLayer::new();
+                m.setPath(Some(&rounded(local, radii)));
+                // SAFETY: a fresh mask layer, owned by the shader layer.
+                unsafe { l.setMask(Some(&m)) };
+            }
+            if l.superlayer().is_none() {
+                layer.addSublayer(l);
+            }
+        }
+
         if let Some((x, y, blur, color)) = crate::visual::drop_shadow(style) {
             // `drop-shadow()`: follows the content's shape (no path).
             layer.setShadowColor(cg_color(Color(color.0 | 0xff)).as_deref());
@@ -685,9 +714,11 @@ fn shape_of(s: &ViewState, kind: Kind) -> Shape {
         widths: borders.widths,
         border_style: borders.style,
         one_color: borders.colors.iter().all(|&c| c == borders.colors[0]),
+        border_visible: borders.is_visible(),
         tint: style.tint_color,
         outline: style.outline,
         effects: style.effects.clone(),
+        shader: s.shader.is_some(),
     }
 }
 
@@ -724,7 +755,7 @@ pub(crate) fn cg_color(color: Color) -> Option<CFRetained<CGColor>> {
 }
 
 /// A CGImage as an object (`contents` values).
-fn image_object(image: &objc2_core_graphics::CGImage) -> Retained<AnyObject> {
+pub(crate) fn image_object(image: &objc2_core_graphics::CGImage) -> Retained<AnyObject> {
     let ptr = image as *const objc2_core_graphics::CGImage as *mut AnyObject;
     // SAFETY: CF objects are Objective-C objects; retained for the result.
     unsafe { Retained::retain(ptr) }.expect("image")

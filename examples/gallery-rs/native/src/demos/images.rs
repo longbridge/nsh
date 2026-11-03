@@ -3,7 +3,7 @@
 //! `demos/Images.tsx`).
 
 use nsh_core::{
-    Points, Size,
+    Size,
     element::{AnyElement, Image, ImageProgress, ImageSize},
     prelude::*,
 };
@@ -269,8 +269,12 @@ fn info() -> AnyElement {
         prefetched.set("loading…".into());
         let loaded = prefetch_image(big());
         let wait = spawn(async move {
-            let loaded = loaded.await;
-            prefetched.set(if loaded { "in memory" } else { "failed" }.into());
+            let shown = if loaded.await.is_ok() {
+                "in memory"
+            } else {
+                "failed"
+            };
+            prefetched.set(shown.into());
         });
         if let Some(last) = prefetching.replace(Some(wait)) {
             last.cancel();
@@ -285,7 +289,7 @@ fn info() -> AnyElement {
                 .on_progress(move |e: &ImageProgress| {
                     progress.set(e.loaded / e.total.max(1.0));
                 })
-                .on_load(move |_: &Size<Points>| {
+                .on_load(move |_: &Size<DevicePixels>| {
                     status.set(if progress.get_untracked() == 0.0 {
                         "loaded (no download)"
                     } else {
@@ -361,7 +365,7 @@ fn events() -> AnyElement {
     let thumb = |image: Image| frame(image).w(px(96.0)).h(px(64.0));
     let loads = thumb(image(photo(1084, 600, 400)))
         .on_load_start(log("onLoadStart"))
-        .on_load(move |size: &Size<Points>| {
+        .on_load(move |size: &Size<DevicePixels>| {
             events.update(|e| e.push("onLoad"));
             loaded.set(format!("{}×{}", size.width.0, size.height.0));
         })

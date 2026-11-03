@@ -1,12 +1,11 @@
+#[cfg(not(debug_assertions))]
+use std::time::Duration;
 use std::{
     cell::RefCell,
     io::{self, Write},
     rc::Rc,
     time::Instant,
 };
-
-#[cfg(not(debug_assertions))]
-use std::time::Duration;
 
 use nsh_platform_tui::{AppOptions, AppView, MeasuredBackend, MeasuredWriter};
 #[cfg(not(debug_assertions))]

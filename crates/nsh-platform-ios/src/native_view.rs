@@ -7,8 +7,8 @@ use std::cell::RefCell;
 
 use block2::RcBlock;
 use nsh_core::{
-    Accessibility, AccessibilityRole, Checked, EventKind, EventPayload, NodeId, PayloadValue,
-    PointerEvents, ViewProps,
+    Accessibility, AccessibilityCurrent, AccessibilityRole, Checked, EventKind, EventPayload,
+    NodeId, PayloadValue, PointerEvents, ViewProps,
 };
 use nsh_engine::EngineControl;
 use objc2::{
@@ -18,10 +18,11 @@ use objc2::{
 use objc2_core_foundation::{CGPoint, CGRect, CGSize};
 use objc2_foundation::{NSArray, NSObject, NSString};
 use objc2_ui_kit::{
-    UIAccessibilityCustomAction, UIAccessibilityTraitAdjustable, UIAccessibilityTraitButton,
-    UIAccessibilityTraitHeader, UIAccessibilityTraitImage, UIAccessibilityTraitKeyboardKey,
-    UIAccessibilityTraitLink, UIAccessibilityTraitNone, UIAccessibilityTraitNotEnabled,
-    UIAccessibilityTraitSearchField, UIAccessibilityTraitSelected, UIAccessibilityTraitStaticText,
+    NSLayoutConstraint, UIAccessibilityContainerType, UIAccessibilityCustomAction,
+    UIAccessibilityTraitAdjustable, UIAccessibilityTraitButton, UIAccessibilityTraitHeader,
+    UIAccessibilityTraitImage, UIAccessibilityTraitKeyboardKey, UIAccessibilityTraitLink,
+    UIAccessibilityTraitNone, UIAccessibilityTraitNotEnabled, UIAccessibilityTraitSearchField,
+    UIAccessibilityTraitSelected, UIAccessibilityTraitStaticText,
     UIAccessibilityTraitSummaryElement, UIAccessibilityTraitUpdatesFrequently,
     UIAccessibilityTraits, UIEvent, UIResponder, UIView,
 };
@@ -40,6 +41,9 @@ pub(crate) struct NshViewIvars {
     /// An `increment` / `decrement` reported whose value has not arrived
     /// yet, and the value VoiceOver read since (`Some` once it asked).
     step: RefCell<Option<Option<String>>>,
+    /// A header bar button's custom view: its width and height constraints
+    /// (the bar sizes such a view with Auto Layout).
+    size: RefCell<Option<[Retained<NSLayoutConstraint>; 2]>>,
 }
 
 define_class!(
@@ -101,6 +105,15 @@ define_class!(
         #[unsafe(method(accessibilityTraits))]
         fn accessibility_traits(&self) -> UIAccessibilityTraits {
             self.a11y_traits()
+        }
+
+        #[unsafe(method(accessibilityContainerType))]
+        fn accessibility_container_type(&self) -> UIAccessibilityContainerType {
+            if is_container(&self.ivars().props.borrow().accessibility) {
+                UIAccessibilityContainerType::SemanticGroup
+            } else {
+                UIAccessibilityContainerType::None
+            }
         }
 
         #[unsafe(method(accessibilityElementsHidden))]
@@ -215,15 +228,24 @@ impl NshView {
     fn a11y_element(&self) -> bool {
         let props = self.ivars().props.borrow();
         let a = &props.accessibility;
+        // A container's label names the group VoiceOver enters, not one
+        // element that would hide what is inside it.
         !a.hidden
-            && a.accessible
-                .unwrap_or_else(|| self.ivars().pressable.get() || a.label.is_some())
+            && a.accessible.unwrap_or_else(|| {
+                self.ivars().pressable.get() || (a.label.is_some() && !is_container(a))
+            })
     }
 
     fn a11y_label(&self) -> Option<Retained<NSString>> {
-        if let Some(label) = &self.ivars().props.borrow().accessibility.label {
+        let props = self.ivars().props.borrow();
+        if let Some(label) = &props.accessibility.label {
             return Some(NSString::from_str(label));
         }
+        // A group's elements read their own text.
+        if is_container(&props.accessibility) {
+            return None;
+        }
+        drop(props);
         // Like React Native: an element without a label reads the text
         // inside it.
         let mut text = String::new();
@@ -298,6 +320,36 @@ impl NshView {
         unsafe {
             msg_send![Self::alloc(mtm), initWithFrame: CGRect::new(CGPoint::ZERO, CGSize::ZERO)]
         }
+    }
+
+    /// Sizes a view the system lays out with Auto Layout (a header bar
+    /// button's custom view): width and height constraints, made once and
+    /// updated after, so the bar lays it out again when its size changes —
+    /// a frame set later is not read, and the view keeps the size, the hit
+    /// area and the place the bar gave it at first.
+    pub(crate) fn set_layout_size(&self, size: CGSize) {
+        let mut kept = self.ivars().size.borrow_mut();
+        match kept.as_ref() {
+            Some([w, h]) => {
+                if w.constant() != size.width {
+                    w.setConstant(size.width);
+                }
+                if h.constant() != size.height {
+                    h.setConstant(size.height);
+                }
+            }
+            None => {
+                self.setTranslatesAutoresizingMaskIntoConstraints(false);
+                let w = self.widthAnchor().constraintEqualToConstant(size.width);
+                let h = self.heightAnchor().constraintEqualToConstant(size.height);
+                w.setActive(true);
+                h.setActive(true);
+                *kept = Some([w, h]);
+            }
+        }
+        // The content lays out from the bounds; the bar places the origin.
+        let origin = self.frame().origin;
+        self.setFrame(CGRect::new(origin, size));
     }
 
     /// Sets the touch, accessibility and test properties.
@@ -402,6 +454,19 @@ fn steps(a: &Accessibility) -> bool {
         .any(|x| matches!(&*x.name, "increment" | "decrement"))
 }
 
+/// Roles of groups whose elements stay VoiceOver's own: a semantic
+/// group, which VoiceOver names by its label as it moves into it.
+fn is_container(a: &Accessibility) -> bool {
+    matches!(
+        a.role,
+        AccessibilityRole::Group
+            | AccessibilityRole::Region
+            | AccessibilityRole::Navigation
+            | AccessibilityRole::Tree
+            | AccessibilityRole::Toolbar
+    )
+}
+
 /// The traits of `props`' role, state and actions.
 fn traits(props: &ViewProps) -> UIAccessibilityTraits {
     let a = &props.accessibility;
@@ -415,6 +480,11 @@ fn traits(props: &ViewProps) -> UIAccessibilityTraits {
             | AccessibilityRole::Switch
             | AccessibilityRole::Tab
             | AccessibilityRole::Menuitem
+            | AccessibilityRole::MenuItemCheckbox
+            | AccessibilityRole::MenuItemRadio
+            // UIKit has no tree item trait: an item is expanded or chosen
+            // by activating it.
+            | AccessibilityRole::TreeItem
             // UIKit has no option trait: an option is chosen by activating
             // it, and the selected one carries the Selected trait below.
             | AccessibilityRole::Option => UIAccessibilityTraitButton,
@@ -444,7 +514,9 @@ fn traits(props: &ViewProps) -> UIAccessibilityTraits {
         if a.state.disabled {
             t |= UIAccessibilityTraitNotEnabled;
         }
-        if a.state.selected {
+        // A toggle button that is on reads as selected, as WebKit reads
+        // ARIA's `aria-pressed` (UIKit's toggle trait is iOS 17's).
+        if a.state.selected || a.state.pressed == Some(Checked::True) {
             t |= UIAccessibilityTraitSelected;
         }
         if a.state.busy {
@@ -454,8 +526,9 @@ fn traits(props: &ViewProps) -> UIAccessibilityTraits {
     }
 }
 
-/// The spoken value: an explicit `accessibilityValue`, plus checked and
-/// expanded states (UIKit has no traits for those).
+/// The spoken value: an explicit `accessibilityValue`, plus checked,
+/// mixed pressed, expanded and current states (UIKit has no traits for
+/// those).
 fn accessibility_value(props: &ViewProps) -> Option<String> {
     let a = &props.accessibility;
     let mut parts: Vec<String> = Vec::new();
@@ -480,10 +553,26 @@ fn accessibility_value(props: &ViewProps) -> Option<String> {
         Some(Checked::Mixed) => parts.push("mixed".into()),
         None => {}
     }
+    if a.state.pressed == Some(Checked::Mixed) {
+        parts.push("mixed".into());
+    }
     match a.state.expanded {
         Some(true) => parts.push("expanded".into()),
         Some(false) => parts.push("collapsed".into()),
         None => {}
+    }
+    if let Some(current) = a.state.current {
+        parts.push(
+            match current {
+                AccessibilityCurrent::True => "current",
+                AccessibilityCurrent::Page => "current page",
+                AccessibilityCurrent::Step => "current step",
+                AccessibilityCurrent::Location => "current location",
+                AccessibilityCurrent::Date => "current date",
+                AccessibilityCurrent::Time => "current time",
+            }
+            .into(),
+        );
     }
     (!parts.is_empty()).then(|| parts.join(", "))
 }
@@ -565,5 +654,36 @@ mod tests {
             button
         );
         assert_eq!(traits_of(AccessibilityRole::None, &["magicTap"]), 0);
+    }
+
+    /// A toggle button that is on is selected; its mixed state and a
+    /// current item are spoken in the value.
+    #[test]
+    fn pressed_and_current_states() {
+        // SAFETY: immutable UIKit constants.
+        let (button, selected) =
+            unsafe { (UIAccessibilityTraitButton, UIAccessibilityTraitSelected) };
+        let mut on = props(AccessibilityRole::Button, &[]);
+        on.accessibility.state.pressed = Some(Checked::True);
+        assert_eq!(traits(&on), button | selected);
+        assert_eq!(accessibility_value(&on), None);
+        let mut mixed = props(AccessibilityRole::Button, &[]);
+        mixed.accessibility.state.pressed = Some(Checked::Mixed);
+        assert_eq!(traits(&mixed), button);
+        assert_eq!(accessibility_value(&mixed).as_deref(), Some("mixed"));
+        let mut page = props(AccessibilityRole::Link, &[]);
+        page.accessibility.state.current = Some(AccessibilityCurrent::Page);
+        assert_eq!(accessibility_value(&page).as_deref(), Some("current page"));
+        // Groups and toolbars are containers (a labelled toolbar names the
+        // controls VoiceOver enters), others are not.
+        assert!(is_container(
+            &props(AccessibilityRole::Navigation, &[]).accessibility
+        ));
+        assert!(is_container(
+            &props(AccessibilityRole::Toolbar, &[]).accessibility
+        ));
+        assert!(!is_container(
+            &props(AccessibilityRole::Button, &[]).accessibility
+        ));
     }
 }

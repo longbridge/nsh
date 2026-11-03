@@ -35,6 +35,7 @@ fn config() -> EngineConfig {
         trace: false,
         network: None,
         websocket: None,
+        refuse_connections: None,
         filesystem: None,
         assets: None,
         environment: Default::default(),
@@ -51,6 +52,7 @@ fn config() -> EngineConfig {
         clipboard: None,
         host: Default::default(),
         picker: None,
+        speech: None,
     }
 }
 

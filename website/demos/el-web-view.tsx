@@ -1,4 +1,4 @@
-import { mount, signal, Text, View, WebView, type WebViewNavigation, type YNode } from "nsh";
+import { mount, signal, Text, View, WebView, type WebViewNavigation, type WebViewRef } from "nsh";
 import { platform, windowSize } from "nsh";
 import { button, buttonText, ui } from "./palette";
 
@@ -43,7 +43,7 @@ function App() {
   const nav = signal<WebViewNavigation | null>(null);
   const sent = signal(0);
   let painted = 0;
-  let web!: YNode;
+  let web!: WebViewRef;
   const wide = () => windowSize().width >= 700;
 
   return (
@@ -61,7 +61,7 @@ function App() {
         />
         <View style={{ gap: 12, width: wide() ? 320 : undefined }}>
           <Text style={{ color: ui().muted }}>
-            {platform.idiom === "desktop" ? "Click" : "Tap"} the button in the page to post to the app; these buttons call the ref's methods.
+            {platform.desktop ? "Click" : "Tap"} the button in the page to post to the app; these buttons call the ref's methods.
           </Text>
           <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
             <Button

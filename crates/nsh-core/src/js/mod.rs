@@ -11,10 +11,10 @@
 /// nsh's own native ES modules, which bundles compiled with nsh's JSX
 /// compiler import (served by `nsh-js`, left as imports by the bundler):
 /// `nsh`, the API apps write against; `nsh:rt`, the renderer compiled JSX
-/// calls; `nsh/device` and `nsh/accessibility`, the environment; the
-/// platforms' and host elements' modules. Registries add theirs
-/// (`Registry::specifier`: `nsh/base`, an app's set) or
-/// the functions of nsh's own (`nsh/image`, `nsh/android`).
+/// calls; `nsh/desktop` and `nsh/mobile`, the platforms' APIs. Registries
+/// add theirs (`Registry::specifier`: `nsh/base`, an app's set) or the
+/// functions of nsh's own (`Image.getSize` on `nsh`, `nsh/mobile`'s
+/// `BackHandler`).
 pub const NATIVE_MODULES: &[&str] = &["nsh", "nsh:rt", "nsh/desktop", "nsh/mobile"];
 
 /// The exact gpui-shell standard catalog, using canonical bare specifiers.
@@ -37,6 +37,12 @@ pub const STANDARD_MODULES: &[&str] = &[
 pub fn is_standard_module(name: &str) -> bool {
     STANDARD_MODULES.contains(&name)
 }
+
+/// The globals the standard module `crypto` defines: Web Crypto's `crypto`
+/// and its classes. A runtime built without `crypto` (`nsh-js`'s feature)
+/// has none of them, so code that names one needs a runtime with it (the
+/// bundler's `NativeUse::global_crypto`).
+pub const CRYPTO_GLOBALS: &[&str] = &["crypto", "Crypto", "SubtleCrypto", "CryptoKey"];
 
 /// The module name of an app's bundle (its entry chunk): stack traces show
 /// `bundle.js:LINE:COL`, and the chunks of a split bundle import it as
@@ -117,15 +123,18 @@ mod tests {
         // Each host prop and event in the interface of the elements it is for.
         let elements = super::host::declarations();
         for (interface, prop) in [
-            ("HostProps", "  onPress?: (e?: PressEvent) => void;"),
-            ("HostProps", "  onLongPress?: (e?: PressEvent) => void;"),
-            ("HostProps", "  onPressDown?: (e?: PressEvent) => void;"),
-            ("HostProps", "  onPressUp?: (e?: PressEvent) => void;"),
-            ("HostProps", "  onLayout?: (bounds: Bounds) => void;"),
+            ("HostProps", "  onPress?: (e: PressEvent) => void;"),
+            ("HostProps", "  onLongPress?: (e: PressEvent) => void;"),
+            ("HostProps", "  onPressDown?: (e: PressEvent) => void;"),
+            ("HostProps", "  onPressUp?: (e: PressEvent) => void;"),
+            ("HostProps", "  onLayout?: (e: { bounds: Bounds }) => void;"),
             ("AndroidHostProps", "  elevation?: number;"),
             ("IOSHostProps", "  backdropMaterial?: BackdropMaterial;"),
             ("InputHostProps", "  keyboardType?: KeyboardType;"),
-            ("InputHostProps", "  onChange?: (text: string) => void;"),
+            (
+                "InputHostProps",
+                "  onChange?: (e: { value: string }) => void;",
+            ),
             (
                 "InputHostProps",
                 "  onSubmit?: (e: { text: string }) => void;",
@@ -137,10 +146,13 @@ mod tests {
                 "IOSInputHostProps",
                 "  keyboardAppearance?: KeyboardAppearance;",
             ),
-            ("ImageHostProps", "  onLoad?: (e: Size) => void;"),
+            (
+                "ImageHostProps",
+                "  onLoad?: (e: { size: PixelSize }) => void;",
+            ),
             (
                 "VideoHostProps",
-                "  onLoad?: (e: { duration: number; size: Size }) => void;",
+                "  onLoad?: (e: { duration: number; size: PixelSize }) => void;",
             ),
             ("VideoHostProps", "  audioSession?: AudioSession;"),
             (

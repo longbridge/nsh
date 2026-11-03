@@ -58,20 +58,42 @@
   `flow-root` use Taffy's block layout, and so do `inline` / `inline-block`: a browser blockifies inline boxes in flex
   and grid containers, which every NSH parent but a block is (there is no inline formatting context). Variants: `dark:`, `sm:`…`2xl:` / `max-*:` / `min-[..]:`, `portrait:` /
   `landscape:`, `ios:` / `android:` / `web:`, `rtl:` / `ltr:`, `motion-safe:` / `motion-reduce:`, `active:` / `hover:` /
-  `focus:` / `focus-within:` / `disabled:` / `enabled:` / `selected:` (`accessibilityState.selected`, a `Button`'s
+  `focus:` / `focus-within:` (text inputs always report their focus, so the views around one read it) / `disabled:` / `enabled:` / `selected:` (`accessibilityState.selected`, a `Button`'s
   `selected`) / `checked:` (`accessibilityState.checked`, not mixed) / `indeterminate:` (`accessibilityState.checked`
-  mixed, CSS's `:indeterminate`), `group-*:` (named groups `group/name`), `first:` / `last:` /
+  mixed, CSS's `:indeterminate`) / `aria-expanded:` (`accessibilityState.expanded`: a `Popover`'s or `Menu`'s trigger
+  while its popup is open) / `aria-pressed:` (`accessibilityState.pressed` true: a toggle button that is on; not
+  `active:`, a press in progress) / `aria-busy:` / `aria-checked:` / `aria-selected:` (Tailwind v4's
+  `&[aria-busy="true"]`, ...: `busy`, `checked` true, `selected`; `aria-current:` and Tailwind's other `aria-*` names are
+  unknown, NSH has no such states), `data-<name>:` (Tailwind v4's boolean form, `&[data-<name>]`: a `data-*` attribute
+  a Rust component's part shows, `Interactive::project_data`, `Prop::ProjectedData`, as a calendar's day shows
+  `data-range-start`; names of lower case letters, digits and `-`; the value form `data-[state=open]:` is unknown;
+  after the `aria-*` variants, by name, as Tailwind registers them; `deps::DATA`, and a node whose classes read none
+  sends nothing when its attributes change), `group-*:` (named groups `group/name`; `group-data-<name>:` too), `first:` / `last:` /
   `odd:` / `even:` / `only:`, `placeholder:` / `selection:` (a color only, the pseudo-element's: `placeholder:text-*` / `selection:bg-*`, the
   `placeholderColor` / `selectionColor` style keys; other utilities under them are unknown), `!` (important). The state classes have style props of their own (`activeStyle`, `hoverStyle`,
-  `focusStyle`, `disabledStyle`, `checkedStyle`, `indeterminateStyle`, a `Button`'s `selectedStyle`), resolved the same
-  way: later states win, `disabled` over all. `selected`, `checked` and `indeterminate` are value states the core sets
-  from the accessibility state (never reported by the platform), below the interaction states: `checked`, then
-  `indeterminate` (Tailwind's order), then `selected`, then `hover`, `focus`, `active` (gpui-base's order of value
-  states). `disabled` (any element) applies `disabled:` and drops
+  `focusStyle`, `focusWithinStyle`, `disabledStyle`, `checkedStyle`, `indeterminateStyle`, `expandedStyle`,
+  `pressedStyle`, a `Button`'s `selectedStyle`), resolved the same way: later states win, `disabled` over all. `selected`, `checked`, `indeterminate`,
+  `expanded`, `pressed` (`state::ARIA_PRESSED`) and `busy` are value states (`state::ACCESSIBILITY`, set by
+  `Core::set_accessibility_states` from `classes::accessibility_states`) the core sets from the accessibility state (never reported by the platform). The first three are
+  below the interaction states: `checked`, then `indeterminate` (Tailwind's order), then `selected`, then `hover`,
+  `focus`, `active` (gpui-base's order of value states); the `aria-*` variants are above them (`aria-busy`,
+  `aria-checked`, `aria-expanded`, `aria-pressed`, `aria-selected`, by name), as Tailwind's `aria-*` variants come
+  after its pseudo-classes, so an open popup's trigger keeps its look while hovered or pressed. `disabled` (any element) applies `disabled:` and drops
   the node's press listeners from what is mounted, so it shows no press feedback either. A part of a Rust component
   shows its control's `checked`, `indeterminate` and `disabled` to its own classes and state styles
-  (`Interactive::project_checked`, `project_indeterminate`, `project_disabled`, and `project_focused` for the part the keys act on; `Prop::ProjectedStates`): a switch's thumb styled `checked:translate-x-4`, with no accessibility
-  state or press change on the part, so screen readers hear the control alone. `dark:` follows the appearance
+  (`Interactive::project_checked`, `project_indeterminate`, `project_disabled`, and `project_focused` for the part the keys act on; `Prop::ProjectedStates`; `project_data` its `data-*` attributes, `Prop::ProjectedData`): a switch's thumb styled `checked:translate-x-4`, with no accessibility
+  state or press change on the part, so screen readers hear the control alone. `focus-within:` (and
+  `focusWithinStyle`, `.focus_within(..)`) is the core's: the platforms report `FOCUSED` for whatever view the
+  keyboard focus reaches, whether or not it tracks it (`input::reported_states`; one report per focus change), and the
+  core keeps one focus per surface and puts `state::FOCUS_WITHIN` on it and the views around it in the core's tree
+  (`classes::update_focus_within`: a change walks the old and the new chain, nothing else; moving or releasing a view
+  in the chain walks it again), where an overlay is inside the view the app put it in, wherever its native view shows
+  (a popup's content is within the view holding its trigger, as in a React portal). The order a platform reports a
+  move in does not matter (a view taking the focus is the focus; a blur of another view changes nothing), and the root
+  view taking it (AppKit's first responder when no view has it) is no focus. A view whose classes read only
+  `focus-within:` tracks nothing natively. Rust components hear the focus come into an element and leave it with
+  `ElementRef::on_focus_in` / `on_focus_out` (GPUI's names, a focus handle's), watches the core runs at the end of
+  the commit round the focus moved in (`core/watch.rs`). `dark:` follows the appearance
   shown: the app's own when it set one (`nsh.json` `"appearance"`, `setColorScheme`; `Core::set_appearance`), else the
   system's. The theme is Tailwind 4's
   extended by `nsh.json` `"tailwind"` (`colors`, `spacing`, `breakpoints`, `fontSize`, `radius`, `shadow`, ...; unknown
@@ -146,6 +168,10 @@
   `right` stickiness and a zoomable scroll view are not supported. The `sticky` class sets it, as Tailwind's does.
 - **Line heights**: unitless values inherit as multipliers. Percentages and `em` resolve against the element's
   font size before inheritance, so descendants inherit a computed length (`TextStyle::line_height_em`).
+- **`cursor`** keeps resize axes in the core: `nwse-resize` / `nw-resize` / `se-resize` are `Cursor::NwseResize`,
+  `nesw-resize` / `ne-resize` / `sw-resize` are `Cursor::NeswResize`. Windows, Linux, Android, the web and GPUI use
+  the corresponding diagonal cursors. AppKit uses its frame resize cursors on macOS 15 and later; macOS 14 keeps
+  the open-hand fallback. iPad and Mac Catalyst use UIKit's pointer effects.
 - **`pointerEvents`** (the style key and the `pointer-events-*` classes) inherits `none` as CSS's `pointer-events`;
   `box-none` and `box-only`, React Native's, apply to the view alone (the views in it inherit `auto`): a view that is
   `none` by its own value or the nearest one above mounts `box-none` when a view inside it that sets another value is a
@@ -191,9 +217,13 @@
   styles keep their own.
 - **Effects** (styles and classes; `effects.rs`): `boxShadow` (CSS syntax, several, `inset`; also `shadow-*` / `ring-*`; a style also takes its layers, `[{ x, y, blur, spread, color, inset }]`, which `nsh-js`'s `shadow_list` writes as the same CSS, so both forms mean one thing),
   `backgroundImage` (linear / radial / conic gradients and their `repeating-` forms,
-  drawn over `backgroundColor` as in CSS; stops at percentages, at lengths along linear and radial gradients
+  drawn over `backgroundColor` as in CSS; a repeating gradient's stops repeat with period last − first both ways
+  over the whole box, a radial one's rings out to its farthest corner: Core Animation's gradient layers and Android's
+  shaders repeat nothing, so macOS and iOS take `Gradient::unrolled_stops` (the stops repeated over the line, cut at
+  its ends with the colors there, at most 16384; a period of at most 1e-4 of the line is drawn once) and Android's
+  `Decor.Gradient.place` does the same; stops at percentages, at lengths along linear and radial gradients
   (a `DefiniteLength::Absolute` position: `Gradient::resolve_stops` places them against `Gradient::line_length` of the box when it is
-  drawn, so every native backend passes the view's size; Android's `Decor.Gradient.resolve` does the same for the
+  drawn, so every native backend passes the view's size; Android's `Decor.Gradient.place` does the same for the
   gradients `encode.rs` sends as written, with their stop count negated; the web hands them to the browser as `px`), or
   at angles around conic ones (fractions of a turn), up to two per stop; transition hints are not parsed; colors mix as in
   CSS (`in <space>`: `color-mix()`'s spaces and hue methods; without one, sRGB when every color is a legacy one, else
@@ -241,7 +271,9 @@
   and `blur`, applied while decoding); iOS texts draw no gradients or inset shadows; Android has no backdrop blur, `blur` or
   `drop-shadow` before API 31; Linux and GPUI draw no backdrop filter, GPUI no `blur()` or `mixBlendMode`; iOS, macOS and Android draw one `drop-shadow()`,
   the widest of the chain's (the last of equals; the web, Linux, Windows and GPUI draw every layer a class or
-  style gives); a text shadow is one layer everywhere (`text-shadow-*` keep the theme's widest).
+  style gives); a text shadow is one layer everywhere (`text-shadow-*` keep the theme's widest); a text's `color`
+  transitions (`transition-colors`) on every backend when the whole text is one color before and after (a text of
+  several colors, and spans with their own `transition`, take the new colors at once).
 - **View styles**: `backgroundColor`, `borderWidth` / `borderColor` (also per side: `borderTopWidth`, `borderLeftColor`, ...),
   `borderStyle` (`solid` / `dashed` / `dotted`; `none` / `hidden` zero the used widths in layout and paint whatever
   order the widths come in, as `outlineStyle: "none"` does, `Pending`), `borderRadius` + the four `borderTopLeftRadius`-style corners, `borderCurve`

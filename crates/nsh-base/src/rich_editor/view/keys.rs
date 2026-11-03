@@ -8,7 +8,10 @@
 //! Characters typed without those modifiers are text, which the native
 //! input takes; `mod+v` is left to it too (the paste comes as an event).
 
-use nsh_core::{element::Os, keymap::Keystroke, prelude::os};
+use nsh_core::{
+    keymap::Keystroke,
+    prelude::{apple_keys, os},
+};
 
 use crate::rich_editor::state::KeyEvent;
 
@@ -53,7 +56,7 @@ struct Mods {
 
 /// Every keystroke the view binds on this platform.
 pub(crate) fn key_table() -> Vec<KeySpec> {
-    let apple = matches!(os(), Os::MacOs | Os::Ios);
+    let apple = apple_keys();
     let os = os();
     let mut out = Vec::with_capacity(1024);
     let combos: Vec<Mods> = (0..if apple { 16 } else { 8 })
@@ -155,7 +158,7 @@ pub(crate) struct Move {
 
 /// The movement a key makes when no plugin took it.
 pub(crate) fn movement(e: &KeyEvent) -> Option<Move> {
-    let apple = matches!(os(), Os::MacOs | Os::Ios);
+    let apple = apple_keys();
     let extend = e.shift;
     let (unit, dir) = match e.key.as_str() {
         "ArrowLeft" | "ArrowRight" => {

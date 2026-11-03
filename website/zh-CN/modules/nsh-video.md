@@ -17,7 +17,7 @@ import { Video, type VideoProps } from "nsh";
 ## Video
 
 ```ts
-const Video: (props: VideoProps) => YNode;
+const Video: (props: VideoProps) => JSX.Element;
 
 interface VideoProps extends Omit<ViewProps, "children">, VideoHostProps {
   src: string;
@@ -25,12 +25,12 @@ interface VideoProps extends Omit<ViewProps, "children">, VideoHostProps {
 ```
 
 ```tsx
-import { mount, signal, Text, Video, View, type YNode } from "nsh";
+import { mount, signal, Text, Video, type VideoRef, View } from "nsh";
 
 function Player() {
   const paused = signal(true);
   const time = signal("");
-  let video!: YNode;
+  let video!: VideoRef;
   return (
     <View style={{ flex: 1, padding: 16, gap: 12 }}>
       <Video
@@ -93,7 +93,7 @@ mount(Player);
 | 事件 | 数据 | 时机 |
 |---|---|---|
 | `onLoadStart` | | 视频开始加载。 |
-| `onLoad` | `{ duration: number; size: Size }` | 可以播放：时长（秒）和尺寸。 |
+| `onLoad` | `{ duration: number; size: PixelSize }` | 可以播放：时长（秒）和像素尺寸。 |
 | `onProgress` | `{ currentTime: number; duration: number }` | 播放期间，每 `progressUpdateInterval` 毫秒一次。单位为秒。 |
 | `onBuffer` | `{ isBuffering: boolean }` | 播放在等待数据，或恢复播放。 |
 | `onEnd` | | 播放到达结尾。 |

@@ -1,4 +1,4 @@
-import { effect, List, mount, signal, Text, View, type YNode } from "nsh";
+import { effect, List, type ListRef, mount, signal, Text, View } from "nsh";
 import { windowSize } from "nsh";
 import { focusRing, hoverFill, size, tint, ui, wide } from "./palette";
 
@@ -20,7 +20,7 @@ function Feed() {
   const posts = signal(make(40));
   const refreshing = signal(false);
   const visible = signal("");
-  let list!: YNode;
+  let list!: ListRef;
   effect(() => {
     if (toTop() > 0) list.scrollToOffset({ offset: 0 });
   });
@@ -43,7 +43,7 @@ function Feed() {
           refreshing.set(false);
         }, 800);
       }}
-      viewabilityConfig={{ itemVisiblePercentThreshold: 50 }}
+      viewabilityConfig={{ itemVisibleThreshold: 0.5 }}
       onViewableItemsChange={({ viewableItems }) =>
         visible.set(viewableItems.length ? `${viewableItems[0].index}–${viewableItems[viewableItems.length - 1].index}` : "")
       }

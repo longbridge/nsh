@@ -1,4 +1,4 @@
-import { Canvas, type CanvasRenderingContext2D } from "nsh";
+import { Canvas, Image, type CanvasRenderingContext2D } from "nsh";
 
 /** Line glyphs drawn in a 20 × 20 box with the tint as stroke. */
 export type IconName =
@@ -24,9 +24,13 @@ export type IconName =
   | "stocks"
   | "chat"
   | "chevron"
+  | "pipette"
+  | "chevron-up"
+  | "chevron-down"
   | "back"
   | "check"
   | "plus"
+  | "minus"
   | "arrow-up"
   | "arrow-down"
   | "play"
@@ -38,13 +42,53 @@ export type IconName =
   | "sidebar"
   | "sun"
   | "moon"
+  | "volume-low"
+  | "volume-high"
   | "code"
   | "sliders"
+  | "stepper"
+  | "otp"
   | "panel-bottom"
   | "replace"
   | "replace-all"
   | "diagnostics"
-  | "close";
+  | "close"
+  | "copy"
+  | "trash"
+  | "share"
+  | "download"
+  | "link"
+  | "eye"
+  | "eye-off"
+  | "mail"
+  | "lock"
+  | "merge"
+  | "checkbox"
+  | "radio"
+  | "switch"
+  | "tabs"
+  | "select"
+  | "collapsible"
+  | "progress"
+  | "chart"
+  | "layers"
+  | "document"
+  | "richtext"
+  | "diff"
+  | "table"
+  | "menu"
+  | "dock"
+  | "header"
+  | "terminal"
+  | "popover"
+  | "tooltip"
+  | "sheet"
+  | "button"
+  | "external"
+  | "folder"
+  | "folder-open"
+  | "file"
+  | "tree";
 
 type Draw = (cx: CanvasRenderingContext2D) => void;
 
@@ -66,7 +110,153 @@ const circle = (cx: CanvasRenderingContext2D, x: number, y: number, r: number, f
   else cx.stroke();
 };
 
+/** A speaker's cone, facing right, its waves from (9.5, 10). */
+const speaker = (cx: CanvasRenderingContext2D) => line(cx, [3, 8, 6, 8, 9.5, 4.5, 9.5, 15.5, 6, 12, 3, 12, 3, 8]);
+/** A sound wave of radius `r` out of the speaker. */
+const wave = (cx: CanvasRenderingContext2D, r: number) => {
+  cx.beginPath();
+  cx.arc(9.5, 10, r, -0.9, 0.9);
+  cx.stroke();
+};
+
 const glyphs: Record<IconName, Draw> = {
+  popover: (c) => {
+    rect(c, 3, 3, 14, 9, 2.5);
+    line(c, [8, 12, 10, 14.5, 12, 12]);
+    rect(c, 7, 16, 6, 2, 1);
+  },
+  tooltip: (c) => {
+    rect(c, 3, 4, 14, 8, 2.5);
+    line(c, [8.5, 12, 10, 14, 11.5, 12]);
+    line(c, [6.5, 8, 13.5, 8]);
+  },
+  sheet: (c) => {
+    rect(c, 2.5, 3, 15, 14, 2.5);
+    line(c, [2.5, 10, 17.5, 10]);
+    line(c, [8.5, 12.5, 11.5, 12.5]);
+  },
+  button: (c) => {
+    rect(c, 2.5, 6, 15, 8, 3);
+    line(c, [7, 10, 13, 10]);
+  },
+  external: (c) => {
+    // An arrow out of the top right corner of a box.
+    line(c, [9, 4, 4, 4, 4, 16, 16, 16, 16, 11]);
+    line(c, [11.5, 3.5, 16.5, 3.5, 16.5, 8.5]);
+    line(c, [16.5, 3.5, 9.5, 10.5]);
+  },
+  folder: (c) => {
+    // A tab on the left of the back.
+    line(c, [2.5, 6, 2.5, 15, 3.5, 16, 16.5, 16, 17.5, 15, 17.5, 7.5, 16.5, 6.5, 9.5, 6.5, 8, 4.5, 3.5, 4.5, 2.5, 6]);
+  },
+  "folder-open": (c) => {
+    // The back, and its front tipped open.
+    line(c, [2.5, 15, 2.5, 6, 3.5, 4.5, 8, 4.5, 9.5, 6.5, 15.5, 6.5, 16.5, 7.5, 16.5, 9]);
+    line(c, [2.5, 15, 5, 9.5, 18, 9.5, 15.5, 16, 3.5, 16, 2.5, 15]);
+  },
+  file: (c) => {
+    // A sheet with its corner folded.
+    line(c, [5, 2.5, 11.5, 2.5, 15.5, 6.5, 15.5, 17.5, 5, 17.5, 5, 2.5]);
+    line(c, [11.5, 2.5, 11.5, 6.5, 15.5, 6.5]);
+  },
+  tree: (c) => {
+    // A root, two branches off its stem.
+    rect(c, 3, 3, 5, 4, 1);
+    rect(c, 11, 8.5, 6, 3.5, 1);
+    rect(c, 11, 14, 6, 3.5, 1);
+    line(c, [5.5, 7, 5.5, 15.75, 11, 15.75]);
+    line(c, [5.5, 10.25, 11, 10.25]);
+  },
+  checkbox: (c) => {
+    rect(c, 3.5, 3.5, 13, 13, 3);
+    line(c, [6.5, 10, 9, 12.5, 13.5, 7.5]);
+  },
+  radio: (c) => {
+    circle(c, 10, 10, 6.5);
+    circle(c, 10, 10, 2.4, true);
+  },
+  switch: (c) => {
+    rect(c, 2.5, 6, 15, 8, 4);
+    circle(c, 13.5, 10, 2.2, true);
+  },
+  tabs: (c) => {
+    rect(c, 2.5, 5, 15, 11, 2.5);
+    line(c, [2.5, 9, 17.5, 9]);
+    line(c, [8, 5, 8, 9]);
+  },
+  select: (c) => {
+    // A closed field and its up / down chevrons.
+    rect(c, 2.5, 5.5, 15, 9, 2.5);
+    line(c, [12, 9, 13.75, 7.5, 15.5, 9]);
+    line(c, [12, 11, 13.75, 12.5, 15.5, 11]);
+  },
+  collapsible: (c) => {
+    line(c, [4, 5, 16, 5]);
+    line(c, [6, 9, 10, 13, 14, 9]);
+    line(c, [4, 16, 16, 16]);
+  },
+  progress: (c) => {
+    rect(c, 2.5, 8, 15, 4, 2);
+    line(c, [4.5, 10, 10.5, 10]);
+  },
+  chart: (c) => {
+    line(c, [3, 3, 3, 17, 17, 17]);
+    line(c, [6, 13, 9, 9, 12, 11, 16, 5]);
+  },
+  layers: (c) => {
+    line(c, [10, 3, 17, 7, 10, 11, 3, 7, 10, 3]);
+    line(c, [3, 10.5, 10, 14.5, 17, 10.5]);
+    line(c, [3, 14, 10, 18, 17, 14]);
+  },
+  document: (c) => {
+    rect(c, 4.5, 2.5, 11, 15, 2.5);
+    line(c, [7.5, 7, 12.5, 7]);
+    line(c, [7.5, 10, 12.5, 10]);
+    line(c, [7.5, 13, 10.5, 13]);
+  },
+  richtext: (c) => {
+    line(c, [4, 5, 4, 4, 12, 4, 12, 5]);
+    line(c, [8, 4, 8, 15]);
+    line(c, [6.5, 15, 9.5, 15]);
+    line(c, [13, 11, 17, 11]);
+    line(c, [13, 15, 17, 15]);
+  },
+  diff: (c) => {
+    line(c, [6, 3, 6, 9]);
+    line(c, [3, 6, 9, 6]);
+    line(c, [3, 15, 9, 15]);
+    line(c, [12, 3, 12, 17]);
+    line(c, [14, 7, 17, 7]);
+    line(c, [14, 13, 17, 13]);
+  },
+  table: (c) => {
+    rect(c, 2.5, 3.5, 15, 13, 2.5);
+    line(c, [2.5, 8, 17.5, 8]);
+    line(c, [2.5, 12.5, 17.5, 12.5]);
+    line(c, [8, 3.5, 8, 16.5]);
+  },
+  menu: (c) => {
+    rect(c, 3.5, 2.5, 13, 15, 2.5);
+    line(c, [6.5, 6.5, 13.5, 6.5]);
+    line(c, [6.5, 10, 13.5, 10]);
+    line(c, [6.5, 13.5, 11, 13.5]);
+  },
+  dock: (c) => {
+    rect(c, 2.5, 3.5, 15, 13, 2.5);
+    line(c, [7.5, 3.5, 7.5, 16.5]);
+    line(c, [7.5, 11, 17.5, 11]);
+  },
+  header: (c) => {
+    rect(c, 3.5, 2.5, 13, 15, 2.5);
+    line(c, [3.5, 7, 16.5, 7]);
+    line(c, [10, 10, 10, 15]);
+    line(c, [8, 13, 10, 15, 12, 13]);
+  },
+  terminal: (c) => {
+    rect(c, 2.5, 3.5, 15, 13, 2.5);
+    line(c, [6, 8, 8.5, 10, 6, 12]);
+    line(c, [10.5, 13, 14, 13]);
+  },
   photos: (c) => {
     rect(c, 3, 4, 14, 12, 3);
     line(c, [3, 13, 8, 9, 12, 12, 14, 10, 17, 13]);
@@ -190,12 +380,15 @@ const glyphs: Record<IconName, Draw> = {
     line(c, [7, 10.5, 11, 10.5]);
   },
   chevron: (c) => line(c, [7.5, 5, 12.5, 10, 7.5, 15]),
+  "chevron-up": (c) => line(c, [5, 12.5, 10, 7.5, 15, 12.5]),
+  "chevron-down": (c) => line(c, [5, 7.5, 10, 12.5, 15, 7.5]),
   back: (c) => line(c, [12.5, 5, 7.5, 10, 12.5, 15]),
   check: (c) => line(c, [4.5, 10.5, 8.5, 14, 15.5, 6]),
   plus: (c) => {
     line(c, [10, 4, 10, 16]);
     line(c, [4, 10, 16, 10]);
   },
+  minus: (c) => line(c, [4, 10, 16, 10]),
   "arrow-up": (c) => {
     line(c, [10, 16, 10, 4]);
     line(c, [5, 9, 10, 4, 15, 9]);
@@ -256,6 +449,25 @@ const glyphs: Record<IconName, Draw> = {
     line(c, [13, 6, 17, 10, 13, 14]);
     line(c, [11.5, 4.5, 8.5, 15.5]);
   },
+  stepper: (c) => {
+    // A field with its minus and plus.
+    rect(c, 2.5, 5.5, 15, 9, 2.5);
+    line(c, [10, 5.5, 10, 14.5]);
+    line(c, [4.5, 10, 7.5, 10]);
+    line(c, [12.5, 10, 15.5, 10]);
+    line(c, [14, 8.5, 14, 11.5]);
+  },
+  otp: (c) => {
+    // Four cells, two of them filled.
+    for (const [i, x] of [2, 6.25, 10.5, 14.75].entries()) {
+      rect(c, x, 6, 3.25, 8, 1);
+      if (i < 2) {
+        c.beginPath();
+        c.arc(x + 1.625, 10, 0.9, 0, Math.PI * 2);
+        c.fill();
+      }
+    }
+  },
   sliders: (c) => {
     for (const [y, x] of [[6, 12.5], [14, 7.5]]) {
       line(c, [3, y, 17, y]);
@@ -285,9 +497,94 @@ const glyphs: Record<IconName, Draw> = {
     line(c, [10, 8, 10, 11.5]);
     circle(c, 10, 13.8, 0.7, true);
   },
+  // An eyedropper: the bulb up right, the glass down to its tip.
+  pipette: (c) => {
+    line(c, [11.5, 5.5, 14.5, 8.5]);
+    line(c, [13, 7, 5, 15, 4, 16, 4.5, 15.5]);
+    line(c, [13.2, 4.3, 14.6, 2.9, 17.1, 5.4, 15.7, 6.8]);
+  },
   close: (c) => {
     line(c, [5.5, 5.5, 14.5, 14.5]);
     line(c, [14.5, 5.5, 5.5, 14.5]);
+  },
+  copy: (c) => {
+    rect(c, 7, 7, 10, 10, 2);
+    line(c, [13, 4.5, 13, 4, 12, 3, 4, 3, 3, 4, 3, 12, 4, 13, 4.5, 13]);
+  },
+  trash: (c) => {
+    line(c, [3.5, 5.5, 16.5, 5.5]);
+    line(c, [8, 5.5, 8, 3.5, 12, 3.5, 12, 5.5]);
+    line(c, [5, 5.5, 6, 16.5, 14, 16.5, 15, 5.5]);
+    line(c, [8.5, 8.5, 8.5, 13.5]);
+    line(c, [11.5, 8.5, 11.5, 13.5]);
+  },
+  share: (c) => {
+    line(c, [10, 12, 10, 3]);
+    line(c, [6.5, 6.5, 10, 3, 13.5, 6.5]);
+    line(c, [7, 9, 4.5, 9, 4.5, 17, 15.5, 17, 15.5, 9, 13, 9]);
+  },
+  download: (c) => {
+    line(c, [10, 3, 10, 12.5]);
+    line(c, [6, 8.5, 10, 12.5, 14, 8.5]);
+    line(c, [3.5, 13, 3.5, 16.5, 16.5, 16.5, 16.5, 13]);
+  },
+  link: (c) => {
+    // Two links of a chain, across the box.
+    c.save();
+    c.translate(10, 10);
+    c.rotate(-Math.PI / 4);
+    rect(c, -8, -3, 9, 6, 3);
+    rect(c, -1, -3, 9, 6, 3);
+    c.restore();
+  },
+  eye: (c) => {
+    c.beginPath();
+    c.moveTo(2.5, 10);
+    c.quadraticCurveTo(10, 2, 17.5, 10);
+    c.quadraticCurveTo(10, 18, 2.5, 10);
+    c.stroke();
+    circle(c, 10, 10, 2.5);
+  },
+  "eye-off": (c) => {
+    c.beginPath();
+    c.moveTo(2.5, 10);
+    c.quadraticCurveTo(10, 2, 17.5, 10);
+    c.quadraticCurveTo(10, 18, 2.5, 10);
+    c.stroke();
+    circle(c, 10, 10, 2.5);
+    line(c, [4, 16, 16, 4]);
+  },
+  mail: (c) => {
+    rect(c, 2.5, 4.5, 15, 11, 2.5);
+    line(c, [3.5, 6, 10, 11, 16.5, 6]);
+  },
+  lock: (c) => {
+    rect(c, 4, 9, 12, 8.5, 2);
+    line(c, [6.5, 9, 6.5, 6.5]);
+    c.beginPath();
+    c.arc(10, 6.5, 3.5, Math.PI, 0);
+    c.stroke();
+    line(c, [13.5, 6.5, 13.5, 9]);
+  },
+  merge: (c) => {
+    // Two branches joining into one.
+    circle(c, 5.5, 4.5, 1.8);
+    circle(c, 5.5, 15.5, 1.8);
+    circle(c, 14.5, 10, 1.8);
+    line(c, [5.5, 6.3, 5.5, 13.7]);
+    c.beginPath();
+    c.moveTo(5.5, 6.3);
+    c.quadraticCurveTo(5.5, 10, 12.7, 10);
+    c.stroke();
+  },
+  "volume-low": (c) => {
+    speaker(c);
+    wave(c, 3.2);
+  },
+  "volume-high": (c) => {
+    speaker(c);
+    wave(c, 3.2);
+    wave(c, 6.2);
   },
   moon: (c) => {
     // A disc less the one up and to its right: the arcs meet where the circles cross.
@@ -299,8 +596,8 @@ const glyphs: Record<IconName, Draw> = {
   },
 };
 
-/** A glyph, stroked with `tint`. */
-export function Icon(props: { name: IconName; size?: number; tint: string }) {
+/** A glyph, stroked with `tint`; `weight` is the stroke in the glyphs' 20-unit box (1.6 by default). */
+export function Icon(props: { name: IconName; size?: number; tint: string; weight?: number }) {
   const size = props.size ?? 20;
   return (
     <Canvas
@@ -309,11 +606,23 @@ export function Icon(props: { name: IconName; size?: number; tint: string }) {
         cx.scale(width / 20, width / 20);
         cx.strokeStyle = props.tint;
         cx.fillStyle = props.tint;
-        cx.lineWidth = 1.6;
+        cx.lineWidth = props.weight ?? 1.6;
         cx.lineCap = "round";
         cx.lineJoin = "round";
         glyphs[props.name](cx);
       }}
     />
   );
+}
+
+/** The check mark as an SVG in one color, recolored by `tintColor`: the same stroke as the `check` glyph. */
+const checkSvg = (weight: number) =>
+  `data:image/svg+xml,${encodeURIComponent(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 20 20"><path d="M4.5 10.5 8.5 14 15.5 6" fill="none" stroke="#000" stroke-width="${weight}" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+  )}`;
+
+/** A check mark drawn as SVG, in `tint`; `weight` is the stroke in its 20-unit box (2 by default). */
+export function CheckMark(props: { size?: number; tint: string; weight?: number }) {
+  const size = props.size ?? 20;
+  return <Image src={checkSvg(props.weight ?? 2)} style={{ pointerEvents: "none", width: size, height: size, tintColor: props.tint }} />;
 }

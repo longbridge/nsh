@@ -358,7 +358,16 @@ An app may declare in `nsh.json` which hosts it talks to. Once `"capabilities"` 
 
 The checks are enforced in NSH's runtime, outside your app's code, before a request reaches the network:
 
-- A refused `fetch` fails (in TSX with a `TypeError`) with a message naming the key to add, such as ``Network request failed: fetch GET https://evil.io/ is not granted: add `evil.io` to capabilities.network in nsh.json``.
+- A refused `fetch` fails (in TSX with a `TypeError`, as every failed request) with a message naming the key to add, such as ``Network request failed: fetch GET https://evil.io/ is not granted: add `evil.io` to capabilities.network in nsh.json``. In TSX the error's `code` is `"ERR_ACCESS_DENIED"`, its `permission` `"network"` and its `resource` the URL refused (the request's, or a redirect's), so the app tells a refusal apart from a lost connection:
+
+  ```ts
+  try {
+    await fetch(url);
+  } catch (error) {
+    if (error.code === "ERR_ACCESS_DENIED") console.warn(`not granted: ${error.resource}`);
+    else throw error;
+  }
+  ```
 - **Every redirect is checked again.** NSH follows redirects itself (up to 20) instead of letting the platform do it, so a granted host cannot redirect your app to one that is not.
 - The same `network` grants cover remote images (also in canvases and `Image.getSize` / `prefetch`) and video sources. `asset:` URIs of your own bundle are always allowed.
 - The host is taken after the last `@`, so `https://ok.com@evil.io` counts as `evil.io`.
@@ -373,6 +382,7 @@ TSX's `fetch` follows the Fetch standard with the differences that make sense fo
 - **No forbidden headers.** An app may set `Cookie`, `User-Agent`, `Origin` and others.
 - **`redirect: "manual"`** gives the 3xx response itself (with its `Location` header) rather than an opaque redirect. `redirect: "error"` rejects on a redirect.
 - **`data:` and `blob:` URLs** are answered locally. `URL.createObjectURL(blob)` makes a `blob:` URL that `fetch` can read until you revoke it.
+- **`asset:/` URLs** are the files the app ships, read from the app's own files with no capability needed ([Reading a file at run time](./images-and-assets.md#reading-a-file-at-run-time)).
 - Browser-only options (`mode`, `credentials`, `cache`, `referrer`, `integrity`, `keepalive`, `priority`) are accepted for compatibility with libraries.
 
 Libraries built on `fetch` (and on `AbortController`, `FormData` and streams) generally work unchanged. There is no `XMLHttpRequest`; native hosts provide the global `WebSocket` and the [`websocket` module](../modules/standard-modules.md), checked against the same grants as `fetch`.

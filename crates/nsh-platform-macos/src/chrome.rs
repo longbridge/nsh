@@ -56,7 +56,7 @@ use objc2::{
 };
 use objc2_app_kit::{
     NSApplication, NSEvent, NSEventModifierFlags, NSFloatingWindowLevel, NSMenu, NSMenuItem,
-    NSNormalWindowLevel, NSRunningApplication, NSToolbar, NSWindow, NSWindowButton,
+    NSNormalWindowLevel, NSRunningApplication, NSScreen, NSToolbar, NSWindow, NSWindowButton,
     NSWindowCollectionBehavior, NSWindowStyleMask, NSWindowTitleVisibility, NSWindowToolbarStyle,
 };
 use objc2_core_graphics::kCGDesktopIconWindowLevel;
@@ -164,6 +164,7 @@ fn full_screen(window: &NSWindow) -> bool {
 /// Tells the app the hidden title bar's area (after a style change, a
 /// resize, full screen).
 pub(crate) fn update_area(surface: &Surface) {
+    sync_toolbar_visibility(surface);
     let area = match window(surface) {
         Some(window)
             if surface.chrome.style.get() == TitleBarStyle::Hidden && !full_screen(&window) =>
@@ -179,8 +180,14 @@ pub(crate) fn update_area(surface: &Surface) {
             // A toolbar's native height is determined by AppKit, not the
             // requested height that selected its style. Include a host's
             // toolbar too, so the app reserves its actual obscured area.
+            // The title bar view that holds the window's buttons and the
+            // toolbar has that height whatever the window's: the content
+            // layout rectangle is only laid out for the new frame later,
+            // so read during a resize it gives the old one's.
             let height = if window.toolbar().is_some() {
-                toolbar_height(frame.size.height, window.contentLayoutRect(), natural)
+                title_bar_view_height(&window).unwrap_or_else(|| {
+                    toolbar_height(frame.size.height, window.contentLayoutRect(), natural)
+                })
             } else {
                 natural
             };
@@ -210,6 +217,31 @@ pub(crate) fn update_area(surface: &Surface) {
         env.title_bar = area;
         surface.set_environment(env);
     }
+}
+
+/// Hides our empty toolbar in full screen and shows it again outside it.
+/// Full screen keeps a visible toolbar on screen as an opaque strip over the
+/// app's content; without one, AppKit reveals the title bar on hover instead.
+fn sync_toolbar_visibility(surface: &Surface) {
+    let Some(window) = window(surface) else {
+        return;
+    };
+    let owned = surface.chrome.toolbar.borrow();
+    let Some(owned) = owned.as_ref().filter(|t| t.is_installed(&window)) else {
+        return;
+    };
+    let visible = !full_screen(&window);
+    if owned.toolbar.isVisible() != visible {
+        owned.toolbar.setVisible(visible);
+    }
+}
+
+/// The height of the title bar view around the window's buttons (with a
+/// toolbar, the toolbar's row too), when the window has one.
+fn title_bar_view_height(window: &NSWindow) -> Option<f32> {
+    let button = window.standardWindowButton(NSWindowButton::CloseButton)?;
+    let height = crate::view::superview(&button)?.frame().size.height;
+    (height.is_finite() && height > 0.0).then_some(height as f32)
 }
 
 /// The unobscured rectangle is in window coordinates, including its origin.
@@ -355,34 +387,41 @@ pub(crate) fn command(surface: &Rc<Surface>, command: &DesktopCommand) {
     }
 }
 
-/// Moves and sizes the window: a field left out keeps its value
-/// (`setFrame`'s screen coordinates are the bottom left corner's).
+/// Moves and sizes the window: a field left out keeps its value.
 fn set_frame(window: &NSWindow, frame: &WindowFrame) {
-    let current = window.frame();
-    let points = |v: nsh_core::Points| f64::from(v.0);
+    let primary_height = NSScreen::screens(MainThreadMarker::from(window))
+        .firstObject()
+        .map_or(0.0, |s| s.frame().size.height);
+    window.setFrame_display_animate(
+        appkit_frame(window.frame(), frame, primary_height),
+        true,
+        frame.animated.unwrap_or(false),
+    );
+}
+
+/// The AppKit frame of `frame`'s fields merged with the window's `current`
+/// one. NSH's origin is the top left corner, measured down from the primary
+/// screen's top; Cocoa's screen coordinates go up from the primary
+/// screen's bottom (`NSScreen.screens[0]`, `primary_height` tall, on every
+/// display arrangement), its origin the bottom left corner. A height
+/// changed without a `y` keeps the top edge where it is.
+fn appkit_frame(current: NSRect, frame: &WindowFrame, primary_height: f64) -> NSRect {
+    let points = |v: Points| f64::from(v.0);
     let size = NSSize::new(
         frame.width.map_or(current.size.width, points),
         frame.height.map_or(current.size.height, points),
     );
-    // `anchorTop` keeps the top edge where it is: the bottom left origin
-    // would otherwise pin the bottom edge, and a content-height window
-    // resized around its middle.
-    let y = frame.y.map_or_else(
-        || {
-            if frame.anchor_top == Some(true) {
-                current.origin.y + current.size.height - size.height
-            } else {
-                current.origin.y
-            }
-        },
-        points,
-    );
-    let point = NSPoint::new(frame.x.map_or(current.origin.x, points), y);
-    window.setFrame_display_animate(
-        NSRect::new(point, size),
-        true,
-        frame.animated.unwrap_or(false),
-    );
+    let top = frame.y.map_or(current.origin.y + current.size.height, |y| {
+        flip_y(points(y), primary_height)
+    });
+    let x = frame.x.map_or(current.origin.x, points);
+    NSRect::new(NSPoint::new(x, top - size.height), size)
+}
+
+/// A screen `y` between NSH's coordinates (down from the primary screen's
+/// top) and Cocoa's (up from its bottom); the same in both directions.
+fn flip_y(y: f64, primary_height: f64) -> f64 {
+    primary_height - y
 }
 
 /// The window's style for the title bar's.
@@ -840,6 +879,59 @@ mod tests {
             let layout = NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(1200.0, height));
             assert_eq!(toolbar_height(800.0, layout, 22.0), 22.0);
         }
+    }
+
+    #[test]
+    fn screen_ys_flip_at_the_primary_screens_height() {
+        assert_eq!(flip_y(0.0, 1080.0), 1080.0);
+        assert_eq!(flip_y(1080.0, 1080.0), 0.0);
+        assert_eq!(flip_y(flip_y(250.0, 1080.0), 1080.0), 250.0);
+        // A display above the primary one: NSH's y is negative there.
+        assert_eq!(flip_y(-400.0, 1080.0), 1480.0);
+    }
+
+    #[test]
+    fn frames_are_placed_by_their_top_left_corner() {
+        let rect = |x, y, w, h| NSRect::new(NSPoint::new(x, y), NSSize::new(w, h));
+        // AppKit's frame: bottom left at (100, 380), 800×600, so its top
+        // edge is 980 up, 100 down from the top of a 1080-point screen.
+        let current = rect(100.0, 380.0, 800.0, 600.0);
+        let frame = |x: Option<f32>, y: Option<f32>, w: Option<f32>, h: Option<f32>| WindowFrame {
+            x: x.map(Points),
+            y: y.map(Points),
+            width: w.map(Points),
+            height: h.map(Points),
+            ..WindowFrame::default()
+        };
+        // Nothing given: the frame stays.
+        assert_eq!(
+            appkit_frame(current, &frame(None, None, None, None), 1080.0),
+            current
+        );
+        // The top left corner at (20, 40): the top edge 1040 up.
+        assert_eq!(
+            appkit_frame(current, &frame(Some(20.0), Some(40.0), None, None), 1080.0),
+            rect(20.0, 440.0, 800.0, 600.0)
+        );
+        // A height without a y keeps the top edge where it is.
+        assert_eq!(
+            appkit_frame(current, &frame(None, None, None, Some(400.0)), 1080.0),
+            rect(100.0, 580.0, 800.0, 400.0)
+        );
+        // An origin and a size together.
+        assert_eq!(
+            appkit_frame(
+                current,
+                &frame(Some(0.0), Some(0.0), Some(640.0), Some(480.0)),
+                1080.0
+            ),
+            rect(0.0, 600.0, 640.0, 480.0)
+        );
+        // On a display below the primary one, y goes past its height.
+        assert_eq!(
+            appkit_frame(current, &frame(None, Some(1200.0), None, None), 1080.0),
+            rect(100.0, -720.0, 800.0, 600.0)
+        );
     }
 
     #[test]

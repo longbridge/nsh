@@ -111,7 +111,7 @@ function App() {
         renderCodeBlock={(code) => <Text>{`Code ${code.language}: ${code.code}`}</Text>}
         renderMath={(math) => <Text>{`Math ${math.display ? "block" : "inline"}: ${math.tex}`}</Text>}
         renderImage={(image) => <Text>{`Image ${image.alt}: ${image.src}`}</Text>}
-        onImagePress={(pressed) => image.set(pressed.alt ?? "")}
+        onImagePress={(e) => image.set(e.image.alt ?? "")}
       />
       <TextView
         markdown={"# Classed heading\n\nStyled paragraph."}

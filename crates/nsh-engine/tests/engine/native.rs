@@ -66,6 +66,7 @@ fn start(app: &str) -> (Engine, Receiver<MountBatch>) {
         trace: false,
         network: None,
         websocket: None,
+        refuse_connections: None,
         filesystem: None,
         assets: None,
         environment: Default::default(),
@@ -82,6 +83,7 @@ fn start(app: &str) -> (Engine, Receiver<MountBatch>) {
         clipboard: None,
         host: Default::default(),
         picker: None,
+        speech: None,
     };
     (
         Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap(),

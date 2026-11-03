@@ -90,6 +90,7 @@ Press feedback is the app's: styles the view takes while it is pressed, hovered,
 | `.active(\|s\| ..)` | `activeStyle` | `active:` | While pressed. |
 | `.hover(\|s\| ..)` | `hoverStyle` | `hover:` | While a pointer is over it (desktops, iPad pointers, browsers). |
 | `.focus(\|s\| ..)` | `focusStyle` | `focus:` | While it has focus. |
+| `.focus_within(\|s\| ..)` | `focusWithinStyle` | `focus-within:` | While it or a view inside it has focus: a field's frame around the input that edits. |
 | `.disabled_style(\|s\| ..)` | `disabledStyle` | `disabled:` | While disabled. |
 | `.ripple(Ripple { .. })` | `android={{ ripple }}` | | Android's material ripple (`color`, `borderless`, `radius`, `foreground`), in addition to the styles. |
 
@@ -274,8 +275,8 @@ function App() {
         pan={{ x, y }}
         onPanEnd={(e) => {
           // Spring back, starting at the speed the finger let go with.
-          x.spring(0, { velocity: e.velocityX });
-          y.spring(0, { velocity: e.velocityY });
+          x.spring(0, { velocity: e.velocity.x });
+          y.spring(0, { velocity: e.velocity.y });
         }}
         style={{ width: 120, height: 120, borderRadius: 24, backgroundColor: "#8250df", translate: [x, y] }}
       />
@@ -295,7 +296,7 @@ mount(App);
 | `.on_pinch_start` / `.on_pinch_end` | `onPinchStart` / `onPinchEnd` | The pinch started / ended: its scale and velocity (`GestureEvent`). |
 | `.on_rotation_start` / `.on_rotation_end` | `onRotationStart` / `onRotationEnd` | The rotation started / ended: its angle (Rust: `GestureEvent<Radians>`) and velocity. |
 
-A pan event has the translation (`translation`; TSX: `translationX` / `translationY`, points since the start), the velocity (`velocity_x` / `velocity_y`; TSX: `velocityX` / `velocityY`, points per **second**) and the bound values at that moment (`value_x` / `value_y`; TSX: `valueX` / `valueY`).
+A pan event has the translation (`translation`, a `Point`: points since the start), the velocity (`velocity_x` / `velocity_y`; TSX: `velocity`, a `Point`: points per **second**) and the bound values at that moment (`value_x` / `value_y`; TSX: `value`, `{ x?, y? }` with the axes `pan` binds).
 
 What the native side does for you:
 
@@ -321,8 +322,8 @@ view()
 <View
   pan={{ x }}
   onPanEnd={(e) => {
-    const projected = (e.valueX ?? 0) + e.velocityX * 0.2;
-    x.spring(projected > 0 ? 140 : -140, { velocity: e.velocityX });
+    const projected = (e.value?.x ?? 0) + e.velocity.x * 0.2;
+    x.spring(projected > 0 ? 140 : -140, { velocity: e.velocity.x });
   }}
   style={{ translate: [x, 0] }}
 />
@@ -402,7 +403,7 @@ view()
 ```
 
 ```tsx tabs
-let track!: YNode;
+let track!: ViewRef;
 let origin = 0;
 <View
   ref={track}
@@ -548,7 +549,7 @@ fn ball() -> impl IntoElement {
             pos.set((x + d.x.0, y + d.y.0));
         })
         .on_responder_release(move |e: &ResponderEvent| {
-            log::info!("released at {} {} pt/ms", e.gesture.vx, e.gesture.vy)
+            log::info!("released at {} {} pt/s", e.gesture.vx, e.gesture.vy)
         })
 }
 ```
@@ -566,7 +567,7 @@ function Ball() {
       start = pos();
     },
     onPanResponderMove: (_, g) => pos.set({ x: start.x + g.dx, y: start.y + g.dy }),
-    onPanResponderRelease: (_, g) => console.log("released at", g.vx, g.vy, "pt/ms"),
+    onPanResponderRelease: (_, g) => console.log("released at", g.vx, g.vy, "pt/s"),
   });
   return (
     <View
@@ -587,7 +588,7 @@ The gesture state:
 | `position` | `moveX`, `moveY` | The latest position of the touches' centroid, in surface points. |
 | `origin` | `x0`, `y0` | Where the centroid was when the responder was granted. |
 | `delta` | `dx`, `dy` | Distance moved since the grant. |
-| `vx`, `vy` | `vx`, `vy` | Velocity, in points per **millisecond**. |
+| `vx`, `vy` | `vx`, `vy` | Velocity, in points per second. |
 | `active_touches` | `numberActiveTouches` | Fingers down. |
 
 `PanGesture::begin` and `PanGesture::update` follow a gesture from raw touches (`.on_touch`) in Rust. The TSX callbacks get `(event, gestureState)`: `onStartShouldSetPanResponder(Capture)`, `onMoveShouldSetPanResponder(Capture)`, `onPanResponderGrant`, `onPanResponderReject`, `onPanResponderStart`, `onPanResponderMove`, `onPanResponderEnd`, `onPanResponderRelease`, `onPanResponderTerminate`, `onPanResponderTerminationRequest` and `onShouldBlockNativeResponder`. The last one defaults to `true`: a granted PanResponder keeps native scroll views from taking its touches.
@@ -624,7 +625,7 @@ view()
 `PanActivation::horizontal(active, fail)` and `PanActivation::vertical(active, fail)` set the usual pairs. Without active offsets the pan activates after 10 points in any direction. Until it activates, the scroll views around wait for it (iOS) and the view's other claims are not asked. When it activates, the scroll views can no longer take these touches and the view becomes the responder (the grant, then the moves); when it fails, the scroll view scrolls as usual. In TSX, `PanResponder`'s `panHandlers` work with it too: spread them next to the prop, and `onPanResponderGrant` runs at the activation.
 
 > [!NOTE]
-> Velocities differ by API: the responder gesture's `vx` / `vy` are points per millisecond, while the pan end's velocity and a spring's or a decay's velocity are points per second. Multiply `vx` by 1000 before passing it to a spring.
+> Every velocity is in points per second: the responder gesture's `vx` / `vy`, a pan's velocity and a spring's or a decay's, so `vx` goes to a spring or a decay as it is.
 
 ## Why some answers are props
 

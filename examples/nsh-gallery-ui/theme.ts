@@ -14,12 +14,6 @@ import finishes from "./finishes.json";
  */
 export const terminal = platform.idiom === "terminal";
 
-/**
- * A desktop's layout, density and keys: the Desktop idiom, or the Terminal
- * idiom, which takes the desktop's wherever the desktop does.
- */
-export const desktopIdiom = platform.idiom === "desktop" || terminal;
-
 /** One Cell row and one Cell column in points (the default 8 × 16 points
  * per Cell): the terminal's line height and its unit of spacing. */
 export const TERMINAL_ROW = 16;
@@ -76,6 +70,12 @@ export interface Palette {
   light: string;
   /** Text on `light`. */
   onLight: string;
+  /** The app's sidebar, beside the page. */
+  sidebar: string;
+  /** The selected row of the sidebar. */
+  sidebarSelected: string;
+  /** The sidebar's edge and the toolbar's hairline. */
+  sidebarBorder: string;
   /** A switch's track when off. */
   track: string;
   /** A switch's knob when off. */
@@ -102,9 +102,9 @@ function tokens<K extends string>(names: Record<K, keyof Tokens>): Record<K, str
 /**
  * The shared example UI's look: a graphite page (or a paper one in light
  * appearance), cards with an inset surface, tabular numbers and one citrus
- * accent, its colors the tokens of `theme.json`. Sizes are for phones:
- * 16 pt gutters, 44 pt touch targets, 15 pt body text. The desktop layout
- * (`desktop`) keeps them and puts more side by side.
+ * accent, its colors the tokens of `theme.json`. Desktops are compact
+ * (28-point controls, 13-point labels), touch screens roomier (36 to 40
+ * points).
  */
 export const colors: Palette = tokens<keyof Palette>({
   background: "background",
@@ -123,6 +123,9 @@ export const colors: Palette = tokens<keyof Palette>({
   onAccent: "on-brand",
   light: "primary",
   onLight: "primary-foreground",
+  sidebar: "sidebar",
+  sidebarSelected: "sidebar-accent",
+  sidebarBorder: "sidebar-border",
   track: "track",
   knob: "knob",
   code: "code",
@@ -137,6 +140,17 @@ export const colors: Palette = tokens<keyof Palette>({
 export function alpha(color: string, a: number) {
   return `color-mix(in srgb, ${color} ${a * 100}%, transparent)`;
 }
+
+/** The charts' series colors, in order (`theme.json`'s `chart-1` to
+ * `chart-5`): the brand's citrus first, then graphite from dark to light,
+ * so one series leads and the rest stay as quiet as the interface. */
+export const chart = tokens({
+  s1: "chart-1",
+  s2: "chart-2",
+  s3: "chart-3",
+  s4: "chart-4",
+  s5: "chart-5",
+});
 
 /** Translucent tints of the tones, for fills behind text. */
 export const tints = tokens({
@@ -158,11 +172,15 @@ export interface Finish {
 }
 
 /**
- * Light and depth: gentle top-to-bottom gradients, a highlight along top
- * edges and soft shadows, so cards, controls and buttons read as surfaces.
+ * Light and depth, kept quiet: one-color edges (corners join cleanly), a
+ * hard 1-point drop under what stands up and a 1-point inner shade in what
+ * is sunk; only floating surfaces (menus, glass) cast a soft
+ * shadow. `hover` and `pressed` are a raised control's states, `fill` a
+ * slider's or a meter's run of the accent.
  */
-export const finish = themed<Record<"card" | "inset" | "field" | "raised" | "light" | "accent" | "track" | "knob" | "pill" | "chip" | "glass" | "menu", Finish>>(finishes.dark, finishes.light
-);
+export const finish = themed<
+  Record<"card" | "inset" | "field" | "raised" | "hover" | "pressed" | "light" | "accent" | "track" | "fill" | "knob" | "pill" | "chip" | "glass" | "menu", Finish>
+>(finishes.dark, finishes.light);
 
 export type Tone = "neutral" | "accent" | "info" | "warn" | "danger" | "up" | "down";
 
@@ -195,10 +213,18 @@ export const header = {
 };
 
 
-/** The motion every control shares: quick, slightly springy. */
+/**
+ * The motion every control shares: quick, slightly springy. `control` and
+ * `move` are gpui-kit's `spring_control` (a 180 ms response, no overshoot:
+ * a mark or a fill coming and going) and `spring_move` (280 ms, a damping
+ * ratio of 0.85: a thumb or an indicator traveling) as a unit mass's
+ * stiffness (2π / response)² and damping 2 · ratio · 2π / response.
+ */
 export const motion = {
   press: { stiffness: 520, damping: 34 },
   settle: { stiffness: 320, damping: 30 },
+  control: { stiffness: 1218, damping: 70 },
+  move: { stiffness: 504, damping: 38 },
   enter: { duration: 420, easing: Easing.out(Easing.cubic) },
 } as const;
 
@@ -210,9 +236,15 @@ export const motion = {
 export const hovered = (): ViewStyle => ({ backgroundColor: alpha(colors.text, 0.05) });
 
 /**
- * The keyboard focus (`focusStyle`): a 2-point ring of `info` inside the
- * view's edge, so a card's rounded clip does not cut it (`offset` 2 puts it
- * outside, around a filled button).
+ * The keyboard focus (`focusStyle`): the edge turns the theme's muted olive
+ * `ring` and a 3-point halo of it lies around the view (`offset` moves the
+ * halo out from the edge).
  */
-export const focusRing = (offset = -2): ViewStyle => ({ outlineStyle: "solid", outlineWidth: 2, outlineColor: colors.info, outlineOffset: offset });
+export const focusRing = (offset = 0): ViewStyle => ({
+  borderColor: token("ring"),
+  outlineStyle: "solid",
+  outlineWidth: 3,
+  outlineColor: isDark() ? "rgba(170,210,90,0.10)" : "rgba(150,190,70,0.15)",
+  outlineOffset: offset,
+});
 

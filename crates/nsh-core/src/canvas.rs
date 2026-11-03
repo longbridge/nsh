@@ -311,80 +311,16 @@ impl CanvasGradient {
                 }
             }
         };
-        let stops = gradient
-            .resolved_stops(size)
-            .into_iter()
-            .map(|(color, at)| (at.0, color))
-            .collect();
-        let mut out = Self::new(shape);
-        for (offset, color) in line_stops(stops, gradient.repeating) {
-            out.stops.push((Percentage(offset), color));
+        let mut stops = gradient.unrolled_stops(size, Percentage(1.0));
+        // A canvas gradient clamps offsets, which would squeeze stops past
+        // either end: they are cut there, at the color between.
+        if !stops.iter().all(|s| (0.0..=1.0).contains(&s.1.0)) {
+            stops = crate::effects::cut_stops(&stops, Percentage(1.0));
         }
+        let mut out = Self::new(shape);
+        out.stops = stops.into_iter().map(|(color, at)| (at, color)).collect();
         Some(out)
     }
-}
-
-/// A gradient's stops `stops` (ascending offsets along its line) as a
-/// canvas gradient takes them, within 0..1: a repeating gradient's
-/// repeated along the whole line, and those past either end cut there at
-/// the color between (a canvas gradient clamps offsets, which would
-/// squeeze them).
-fn line_stops(stops: Vec<(f32, Color)>, repeating: bool) -> Vec<(f32, Color)> {
-    let (Some(&(first, _)), Some(&(last, _))) = (stops.first(), stops.last()) else {
-        return stops;
-    };
-    let period = last - first;
-    // The copies that reach into the line, from the one ending before it
-    // to the one starting after it.
-    let (start, end) = if period > 0.0 {
-        (
-            ((0.0 - last) / period).floor(),
-            ((1.0 - first) / period).ceil(),
-        )
-    } else {
-        (0.0, 0.0)
-    };
-    // A period too short to repeat sensibly draws the stops once.
-    let all = if repeating && period > 1e-4 && end - start < 256.0 {
-        (start as i32..=end as i32)
-            .flat_map(|k| {
-                let shift = k as f32 * period;
-                stops.iter().map(move |&(o, c)| (o + shift, c))
-            })
-            .collect()
-    } else {
-        stops
-    };
-    if all.iter().all(|&(o, _)| (0.0..=1.0).contains(&o)) {
-        return all;
-    }
-    // The color at `t`: past the last stop at or before it, toward the
-    // next (a hard edge, two stops at one offset, takes the later color).
-    let color_at = |t: f32| {
-        let Some(i) = all.iter().rposition(|&(o, _)| o <= t) else {
-            return all[0].1;
-        };
-        match all.get(i + 1) {
-            Some(&(o, c)) if o > all[i].0 => mix(all[i].1, c, (t - all[i].0) / (o - all[i].0)),
-            _ => all[i].1,
-        }
-    };
-    let mut out = vec![(0.0, color_at(0.0))];
-    out.extend(all.iter().copied().filter(|&(o, _)| o > 0.0 && o < 1.0));
-    out.push((1.0, color_at(1.0)));
-    out
-}
-
-/// `a` mixed with `b` by `t` (0: `a`), channel by channel.
-fn mix(a: Color, b: Color, t: f32) -> Color {
-    let channel = |shift: u32| {
-        let (x, y) = ((a.0 >> shift) & 0xff, (b.0 >> shift) & 0xff);
-        ((x as f32 + (y as f32 - x as f32) * t)
-            .round()
-            .clamp(0.0, 255.0) as u32)
-            << shift
-    };
-    Color(channel(24) | channel(16) | channel(8) | channel(0))
 }
 
 /// `fillStyle` / `strokeStyle`.
@@ -944,6 +880,17 @@ pub enum ViewPaint {
     /// The line dash is the view's `strokeDasharray` (solid where nothing
     /// sets one).
     StrokeDasharray,
+    /// `fillStyle` is the view's text color: a shape filled with
+    /// `currentColor` (an SVG's, [`crate::element::svg`]), which follows
+    /// the text color whatever the view's `fill`.
+    FillCurrentColor,
+    /// `strokeStyle` is the view's text color
+    /// ([`ViewPaint::FillCurrentColor`]).
+    StrokeCurrentColor,
+    /// `transform` maps a view box onto the canvas's box: the operations
+    /// after it draw in the view box's coordinates, and the canvas lays
+    /// out at its natural size ([`ViewBoxFit`]).
+    Fit(ViewBoxFit),
     /// Fills the current path by `rule` with the view's background: its
     /// `backgroundColor`, then its `backgroundImage` layers over it (the
     /// last one first, as CSS stacks them), each positioned over `area`
@@ -958,6 +905,58 @@ pub enum ViewPaint {
         /// Which parts of the path are inside.
         rule: FillRule,
     },
+}
+
+/// How a drawing in the coordinates of a view box fills its canvas, as
+/// SVG's `viewBox` and `preserveAspectRatio` fit an `<svg>` into its box
+/// ([`ViewPaint::Fit`]). The canvas lays out as an image does: at
+/// [`Self::size`] where its style sets no size, keeping that aspect ratio
+/// where it sets one side; the core maps the view box onto the box it gets
+/// and sends the drawing again when that box changes.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ViewBoxFit {
+    /// The view box (`viewBox`), of a positive width and height.
+    pub view_box: Bounds<Points>,
+    /// Where the view box sits in the box along each axis, its aspect
+    /// ratio kept: 0 at the start, 0.5 in the middle, 1 at the end
+    /// (`xMidYMid` is 50% and 50%). `None` (`none`) stretches it to the
+    /// box.
+    pub align: Option<(Percentage, Percentage)>,
+    /// It covers the box (`slice`) rather than fits inside it (`meet`).
+    pub slice: bool,
+    /// The natural size: the `<svg>`'s `width` and `height`.
+    pub size: Size<Points>,
+}
+
+impl ViewBoxFit {
+    /// The matrix `[a, b, c, d, e, f]` (`transform`'s) mapping the view box
+    /// onto a box of `size` at the origin.
+    pub fn transform(&self, size: Size<Points>) -> [f32; 6] {
+        let Size { width, height } = self.view_box.size;
+        let (vw, vh) = (width.0, height.0);
+        let (w, h) = (size.width.0.max(0.0), size.height.0.max(0.0));
+        if !(vw > 0.0 && vh > 0.0) {
+            return [0.0; 6];
+        }
+        let (mut sx, mut sy) = (w / vw, h / vh);
+        let (ax, ay) = match self.align {
+            None => (0.0, 0.0),
+            Some((x, y)) => {
+                let s = if self.slice { sx.max(sy) } else { sx.min(sy) };
+                (sx, sy) = (s, s);
+                (x.0, y.0)
+            }
+        };
+        let origin = self.view_box.origin;
+        [
+            sx,
+            0.0,
+            0.0,
+            sy,
+            (w - vw * sx) * ax - origin.x.0 * sx,
+            (h - vh * sy) * ay - origin.y.0 * sy,
+        ]
+    }
 }
 
 /// A part of a canvas's drawing that assistive technologies and UI tests
@@ -1019,18 +1018,28 @@ impl Drawing {
             .any(|(_, v)| matches!(v, ViewPaint::Background { .. }))
     }
 
+    /// The view box it fits into its canvas ([`ViewPaint::Fit`]), if any.
+    pub fn fit(&self) -> Option<ViewBoxFit> {
+        self.view_paints.iter().find_map(|&(_, v)| match v {
+            ViewPaint::Fit(fit) => Some(fit),
+            _ => None,
+        })
+    }
+
     /// The drawing as a platform replays it: its [`Drawing::view_paints`]
     /// given the paint properties `paint` of its view, whose text color is
-    /// `current` (`currentColor`), and its background, the color
-    /// `background` under the gradients `images` (top layer first). `none`
-    /// paints nothing (a transparent paint). Its own `view_paints` are
-    /// resolved, so it has none.
+    /// `current` (`currentColor`), its background, the color `background`
+    /// under the gradients `images` (top layer first), and the size of its
+    /// box, `size` (what a view box fits into). `none` paints nothing (a
+    /// transparent paint). Its own `view_paints` are resolved, so it has
+    /// none.
     pub fn painted(
         &self,
         paint: &crate::style::PaintStyle,
         current: Color,
         background: Color,
         images: &[crate::effects::Gradient],
+        size: Size<Points>,
     ) -> Drawing {
         use crate::style::SvgPaint;
         let color = |p: SvgPaint| {
@@ -1061,6 +1070,9 @@ impl Drawing {
                         .clone()
                         .unwrap_or_else(|| Arc::from([])),
                 ),
+                ViewPaint::FillCurrentColor => CanvasOp::FillStyle(Paint::Color(current)),
+                ViewPaint::StrokeCurrentColor => CanvasOp::StrokeStyle(Paint::Color(current)),
+                ViewPaint::Fit(fit) => CanvasOp::Transform(fit.transform(size).map(Num::Const)),
                 // Expanded below: its place holds the fill it becomes.
                 ViewPaint::Background { .. } => continue,
             };
@@ -1573,11 +1585,11 @@ mod tests {
                 .all(|(p, _)| (0.0..=1.0).contains(&p.0))
         );
         // Stops past the end: cut there, at the color between.
-        let cut = line_stops(
-            vec![(0.0, Color(0x0000_00ff)), (2.0, Color(0xffff_ffff))],
-            false,
+        let cut = gradient("linear-gradient(to bottom, #000000 0%, #ffffff 200%)").unwrap();
+        assert_eq!(
+            cut.stops[cut.stops.len() - 1],
+            (Percentage(1.0), Color(0x8080_80ff))
         );
-        assert_eq!(cut[cut.len() - 1], (1.0, Color(0x8080_80ff)));
         assert!(gradient("radial-gradient(#ff0000, #0000ff)").is_none());
         let circle = gradient("radial-gradient(circle, #ff0000, #0000ff)").unwrap();
         assert!(matches!(circle.shape, GradientShape::Radial { .. }));
@@ -1597,7 +1609,13 @@ mod tests {
         assert!(drawing.paints_background());
         let images = crate::css::gradients("linear-gradient(#ff0000, #0000ff)").unwrap();
         let none = crate::style::PaintStyle::default();
-        let painted = drawing.painted(&none, Color::TRANSPARENT, Color(0x00ff_00ff), &images);
+        let painted = drawing.painted(
+            &none,
+            Color::TRANSPARENT,
+            Color(0x00ff_00ff),
+            &images,
+            Size::default(),
+        );
         assert!(painted.view_paints.is_empty());
         let ops = &painted.ops[1..];
         assert_eq!(ops[0], CanvasOp::Save);
@@ -1610,7 +1628,13 @@ mod tests {
         assert_eq!(ops[4], CanvasOp::Fill(None, FillRule::NonZero));
         assert_eq!(ops[5], CanvasOp::Restore);
         // No background: nothing fills.
-        let bare = drawing.painted(&none, Color::TRANSPARENT, Color::TRANSPARENT, &[]);
+        let bare = drawing.painted(
+            &none,
+            Color::TRANSPARENT,
+            Color::TRANSPARENT,
+            &[],
+            Size::default(),
+        );
         assert_eq!(&bare.ops[1..], [CanvasOp::Save, CanvasOp::Restore]);
     }
 

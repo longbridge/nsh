@@ -69,7 +69,7 @@ pub(crate) struct ThemeSetup {
 pub(crate) const IMAGE_EXTENSIONS: &[&str] = &["png", "jpg", "jpeg", "gif", "webp", "heic", "svg"];
 
 /// File types imported as fonts.
-pub(crate) const FONT_EXTENSIONS: &[&str] = &["ttf", "otf"];
+pub(crate) const FONT_EXTENSIONS: &[&str] = &["ttf", "otf", "woff", "woff2"];
 
 fn has_extension(path: &Path, extensions: &[&str]) -> bool {
     path.extension()
@@ -78,9 +78,11 @@ fn has_extension(path: &Path, extensions: &[&str]) -> bool {
 }
 
 /// The family name a font registers under: the typographic family (name
-/// 16) when present, else the legacy family (name 1).
+/// 16) when present, else the legacy family (name 1). A WOFF or WOFF2 font
+/// is read from what it holds.
 fn font_family(data: &[u8]) -> Result<String, String> {
-    let face = ttf_parser::Face::parse(data, 0).map_err(|e| e.to_string())?;
+    let data = nsh_core::font_data(data)?;
+    let face = ttf_parser::Face::parse(&data, 0).map_err(|e| e.to_string())?;
     let name = |id| {
         face.names()
             .into_iter()
@@ -402,12 +404,20 @@ impl Plugin for NshPlugin {
                 "{from}`{spec}` is not part of nsh apps: import signal, computed, effect, batch, untracked, cleanup, context and mount from \"nsh\""
             )));
         }
+        if spec.starts_with("nsh/") {
+            // Named as nsh's modules are, and none of them: name the ones
+            // there are.
+            let modules: Vec<String> = self.modules.nsh().map(|m| format!("`{m}`")).collect();
+            return Err(self.refuse(format!(
+                "{from}nsh has no module `{spec}`: nsh's modules are {}",
+                modules.join(", ")
+            )));
+        }
         // Rolldown may otherwise replace unsupported Node builtins with browser
         // shims. These are absent from the reference runtime catalog.
         if ["events", "assert", "util", "string_decoder", "fs"].contains(&spec)
             || spec.starts_with("node:")
             || spec.starts_with("@nsh/llrt-types/")
-            || spec.starts_with("nsh/")
             || spec.starts_with("nsh:")
         {
             return Err(self.refuse(format!("{from}nsh has no module `{spec}`")));
@@ -811,5 +821,20 @@ mod tests {
         let bundle = bundled(&dir);
         assert!(!bundle.code.contains("scales"), "{}", bundle.code);
         assert_eq!(assets(&bundle), ["img/mark.svg"]);
+    }
+
+    #[test]
+    fn a_font_import_names_its_family_from_truetype_woff_and_woff2() {
+        for data in [
+            &include_bytes!("../../../tests/compat/cases/layout/fonts/Pacifico-Regular.ttf")[..],
+            &include_bytes!("../../../tests/compat/cases/layout/fonts/Pacifico-Regular.woff")[..],
+            &include_bytes!("../../../tests/compat/cases/layout/fonts/Pacifico-Regular.woff2")[..],
+        ] {
+            assert_eq!(font_family(data).as_deref(), Ok("Pacifico"));
+        }
+        assert!(has_extension(
+            Path::new("fonts/Inter.WOFF2"),
+            FONT_EXTENSIONS
+        ));
     }
 }

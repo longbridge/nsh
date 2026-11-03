@@ -1,7 +1,8 @@
 import { cleanup, signal, Text, View } from "nsh";
 import { TextView, type TextViewImage } from "nsh/base";
-import { Button, Caption, Card, colors, DemoPage } from "../ui";
+import { Button, Caption, Card, colors, DemoPage, Segmented } from "../ui";
 import { ImageViewer } from "./ImageViewer";
+import { LucideIcon } from "../icons";
 
 const MARKDOWN = `# Native Shell
 
@@ -179,7 +180,7 @@ mount(Counter);</code></pre>
   </details>
 </article>`;
 
-const EXTENDED = `Thanks @huacnlee and @sunli829 for the review!
+const EXTENDED = `Thanks @huacnlee and @sunli829 for the review! Fixed in #775 and #799.
 
 \`\`\`chart
 Mon 12
@@ -202,6 +203,7 @@ Containers wrap Markdown, like *this*.
 
 const extensions = [
   { name: "mention", pattern: "@(\\w+)" },
+  { name: "issue", pattern: "#(\\d+)" },
   { name: "chart", language: "chart" },
   { name: "callout", tag: "callout" },
   { name: "note", container: "note" },
@@ -251,7 +253,7 @@ function Markdown() {
         codeBlockActions={[{ id: "copy", label: "Copy code" }]}
         renderMath={(math) => <Tex tex={math.tex} display={math.display} />}
         onLinkPress={({ url }) => pressed.set(url)}
-        onImagePress={(image) => viewing.set(image)}
+        onImagePress={({ image }) => viewing.set(image)}
       />
       <Caption label="Link pressed" note={pressed()} />
       <ImageViewer image={viewing()} onClose={() => viewing.set(null)} />
@@ -263,7 +265,7 @@ function Html() {
   const viewing = signal<TextViewImage | null>(null);
   return (
     <Card icon="text" title="HTML" subtitle="An article page: sections, figures, lists, tables, code">
-      <TextView html={HTML} selectable classes={links} onImagePress={(image) => viewing.set(image)} />
+      <TextView html={HTML} selectable classes={links} onImagePress={({ image }) => viewing.set(image)} />
       <ImageViewer image={viewing()} onClose={() => viewing.set(null)} />
     </Card>
   );
@@ -294,7 +296,16 @@ function Chart(props: { source: string }) {
 
 function Extensions() {
   return (
-    <Card icon="components" title="Extensions" subtitle="Mentions, a chart block, a <Callout> tag, a :::note container">
+    <View style={{ gap: 16 }}>
+      <InlineChips />
+      <Mentions />
+    </View>
+  );
+}
+
+function Mentions() {
+  return (
+    <Card icon="components" title="Extensions" subtitle="Mentions, issue chips with an icon, a chart block, a <Callout> tag, a :::note container">
       <TextView
         markdown={EXTENDED}
         extensions={extensions}
@@ -302,8 +313,15 @@ function Extensions() {
           switch (node.name) {
             case "mention":
               return (
-                <View class="translate-y-[7px] rounded-full bg-sky-500/15 px-2">
+                <View class="align-middle rounded-full bg-sky-500/15 px-2">
                   <Text class="text-[14px] font-medium text-sky-700 dark:text-sky-300">@{node.attributes?.["1"]}</Text>
+                </View>
+              );
+            case "issue":
+              return (
+                <View class="flex-row items-center gap-1 rounded-md border border-zinc-500/25 px-1.5" style={{ verticalAlign: "middle", height: 20 }}>
+                  <LucideIcon name="code" size={14} tint={colors.text} />
+                  <Text class="text-[13px] font-semibold">#{node.attributes?.["1"]}</Text>
                 </View>
               );
             case "chart":
@@ -324,6 +342,33 @@ function Extensions() {
               );
           }
         }}
+      />
+    </Card>
+  );
+}
+
+/** Task and PR ids in a chat message (`T-0042`, `nsh#810`): chips in the
+ * middle of the text (`align-middle`) that keep its lines evenly spaced. */
+const CHIPS = `Picked up T-0089 after the review of nsh#810: each chip sits in the middle of the text, and a line holding one is as tall as the others. T-0096 follows up on iOS and macOS, with gpui-kit#3766 next in the queue. 中文段落里的 T-0101 也一样，和文字居中对齐，行距保持一致。`;
+
+const CHIP_EXTENSIONS = [
+  { name: "task", pattern: "\\bT-\\d{4}\\b" },
+  { name: "pr", pattern: "\\b[a-z-]+#\\d+\\b" },
+];
+
+function InlineChips() {
+  return (
+    <Card icon="components" title="Inline chips" subtitle="Chips in the middle of the text; lines stay evenly spaced">
+      <TextView
+        markdown={CHIPS}
+        extensions={CHIP_EXTENSIONS}
+        styles={{ root: { fontSize: 17, lineHeight: 26 } }}
+        renderCustom={(node) => (
+          <View class="align-middle h-5 flex-row items-center gap-1.5 rounded-full border border-border bg-inset px-2">
+            <View class={node.name === "task" ? "size-1.5 rounded-full bg-sky-500" : "size-1.5 rounded-full bg-emerald-500"} />
+            <Text class="font-mono text-[13px] leading-4">{node.text}</Text>
+          </View>
+        )}
       />
     </Card>
   );
@@ -392,6 +437,24 @@ function Selection() {
   );
 }
 
+const TABS = [
+  { value: "Markdown", label: "Markdown", body: Markdown },
+  { value: "HTML", label: "HTML", body: Html },
+  { value: "Extensions", label: "Extensions", body: Extensions },
+  { value: "Streaming", label: "Streaming", body: Streaming },
+  { value: "Selection", label: "Selection", body: Selection },
+] as const;
+
+type Tab = (typeof TABS)[number]["value"];
+
+/** One document at a time, a tab each: a document wants the page's width. */
 export function TextViewDemo() {
-  return <DemoPage cards={[Streaming, Markdown, Selection, Extensions, Html]} />;
+  const tab = signal<Tab>("Markdown");
+  const Shown = () => (
+    <View style={{ gap: 16 }}>
+      <Segmented options={TABS} value={tab()} onChange={(t) => tab.set(t)} fill />
+      <Each of={TABS.filter((t) => t.value === tab())}>{(t) => t().body()}</Each>
+    </View>
+  );
+  return <DemoPage columns={1} cards={[Shown]} />;
 }

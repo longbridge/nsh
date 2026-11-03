@@ -1,7 +1,7 @@
 ---
 title: Keyboard
 description: "The keyboard-inset-height environment variable, Keyboard.dismiss and the keyboard's height: content kept above the software keyboard, moving with it."
-order: 10.7
+order: 120
 group: primitives
 demo: el-keyboard
 ---
@@ -58,7 +58,7 @@ function App() {
       <View style={{ flexDirection: "row", gap: 8, padding: 8, borderTopWidth: 1, borderTopColor: "#e5e5e5" }}>
         <Input
           value={draft()}
-          onChange={(v) => draft.set(v)}
+          onChange={({ value }) => draft.set(value)}
           placeholder="Message"
           style={{ flex: 1, fontSize: 16, padding: 8 }}
         />
@@ -148,7 +148,7 @@ function Done() {
 
 | TSX | Rust | Returns |
 |---|---|---|
-| `keyboardFrame()` | `keyboard_height()`, `keyboard_duration()` | The height of the software keyboard over the NSH surface, in points (0 while it is hidden), and the duration of its show or hide animation, in seconds. |
+| `keyboardFrame()` | `keyboard_height()`, `keyboard_duration()` | The height of the software keyboard over the NSH surface, in points (0 while it is hidden), and the duration of its show or hide animation, in milliseconds. |
 
 Both are reactive: an effect, a JSX expression or a style closure that reads them runs again when the keyboard shows,
 hides or changes height.

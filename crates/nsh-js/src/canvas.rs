@@ -1,4 +1,4 @@
-//! `nsh/canvas`: `Canvas` (a view drawn with an HTML Canvas 2D context,
+//! `nsh`'s `Canvas` (a view drawn with an HTML Canvas 2D context,
 //! replayed natively), `Path2D` and the classes of the context and
 //! gradients.
 //!
@@ -173,7 +173,7 @@ fn literal(text: &str) -> Rec {
     }
 }
 
-/// The classes and prototypes of `nsh/canvas` (per context).
+/// The classes and prototypes of the canvas (per context).
 pub(crate) struct Canvases {
     classes: Cell<Option<Classes>>,
     /// Prototypes (owned): context, path, gradient.
@@ -1298,10 +1298,12 @@ unsafe extern "C" fn canvas_layout(
             qjs::JS_FreeValue(cx, v);
             n
         };
-        // `e` is the view's `Bounds`.
-        let bounds_size = qjs::JS_GetPropertyStr(cx, e, c"size".as_ptr());
+        // `e` is `onLayout`'s `{ bounds }`.
+        let bounds = qjs::JS_GetPropertyStr(cx, e, c"bounds".as_ptr());
+        let bounds_size = qjs::JS_GetPropertyStr(cx, bounds, c"size".as_ptr());
         let (w, h) = (field(bounds_size, c"width"), field(bounds_size, c"height"));
         qjs::JS_FreeValue(cx, bounds_size);
+        qjs::JS_FreeValue(cx, bounds);
         let current = reactive::peek(cx, size);
         let same = qjs::JS_IsObject(current)
             && field(current, c"width") == w
@@ -1428,14 +1430,14 @@ fn send(cx: *mut JsContext, node: JsValue, out: Rc<Vec<Rec>>, mut used: Vec<JsVa
     }
 }
 
-/// `nsh/canvas`.
+/// `nsh`'s `Canvas`, `Path2D` and the classes of the context and gradients.
 pub(crate) const EXPORTS: &[Item] = &[
     (
         "Canvas",
         Export::Function(canvas, 1),
         Ts::function(
             "A view drawn with a 2D context (HTML Canvas 2D API). `draw` records the\ndrawing in one go; the platform replays it natively (CGContext, Android\nCanvas), at the screen's resolution.",
-            &["(props: CanvasProps): YNode"],
+            &["(props: CanvasProps): JSX.Element"],
         ),
     ),
     (
@@ -1523,7 +1525,7 @@ export interface CanvasRenderingContext2D extends CanvasPath, CanvasContextMetho
     ),
 ];
 
-/// `nsh/canvas`'s types (with the recording methods' and properties' of
+/// The canvas's types (with the recording methods' and properties' of
 /// `nsh_core::js::canvas::declarations`).
 pub(crate) const TYPES: &str = r#"/** A color, a gradient, or an animated value interpolating colors. */
 export type CanvasPaint = string | CanvasGradient | AnimatedNode;

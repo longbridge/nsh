@@ -1,7 +1,6 @@
 ---
 title: TextView
 description: TextView 组件：用原生文本和视图显示 Markdown、HTML 或由文档块组成的文档，按部件设定样式，适用于 AI 聊天回复、文章和帮助页面。
-order: 26
 group: base
 demo: text-view
 ---
@@ -540,6 +539,7 @@ function Custom(props: { node: TextViewCustomNode }) {
 ````
 
 `BarChart`（Rust 中是 `bar_chart`）代表应用自己的图表。提及（mention）的捕获组在 `node.attributes?.["1"]`（Rust 中是 `node.attributes["1"]`：`ada`）中，完整匹配在 `node.text`（`@ada`）中。没有渲染函数的自定义节点显示其内容。
+为行内节点返回的视图（如芯片）按它自己的 `verticalAlign` 放在行中：`align-middle`（`verticalAlign: "middle"`）让它与文字居中对齐；除非视图比行高更高，它所在的行仍保持段落的 `lineHeight`。
 
 <a id="options"></a>
 
@@ -756,7 +756,7 @@ fn chat() -> impl IntoElement {
 |---|---|---|
 | `onLinkPress` | `.on_link_press(\|event: &TextViewLinkPressEvent\| ..)` | 链接被点击：`{ url }`，其 URL；标题为 `#anchor`，脚注为 `#footnote-<label>`。 |
 | `onCodeBlockAction` | `.on_code_block_action(\|event: &TextViewCodeActionEvent\| ..)` | 代码块的操作被按下（`copy` 会在复制后报告）。 |
-| `onImagePress` | `.on_image_press(\|image: &Image\| ..)` | 不在链接中的图片被点击：该图片，由应用放大显示（应用自己的可缩放查看器）。 |
+| `onImagePress` | `.on_image_press(\|image: &Image\| ..)` | 不在链接中的图片被点击：`{ image }` 是该图片，由应用放大显示（应用自己的可缩放查看器）。 |
 
 <a id="accessibility"></a>
 

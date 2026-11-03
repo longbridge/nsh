@@ -11,6 +11,7 @@ use crossbeam_channel::Sender;
 use nsh_core::MountBatch;
 use nsh_engine::MountSink;
 
+mod assets;
 mod canvas;
 mod class_bench;
 mod clock;
@@ -55,6 +56,7 @@ mod rust_renderers;
 mod rust_scrolling;
 mod rust_styles;
 mod rust_touch;
+mod shader;
 mod shutdown;
 mod split;
 mod storage;

@@ -1,17 +1,20 @@
-//! The table's view, in layers:
+//! The table's view, in layers, from the bottom:
 //!
-//! - the *hit layer*: a vertical scroll view of a horizontal one of an empty
-//!   box of the content's size (scaled past a few million points: `axis.rs`).
-//!   The platforms scroll it, and its box takes presses, hovers and the
-//!   context menu;
-//! - the *body* over it, receiving no pointer: the cells of the rows and
-//!   columns in view (and a reach around them), placed where the table last
-//!   scrolled to. A scroll view moves its content at once, and the cells a
-//!   move needs come with the next commit, which moves the body with them,
-//!   so no frame shows the content without its cells. Its three regions are
-//!   the row headers, the fixed columns (which move with the rows only) and
-//!   the scrolling columns (which move both ways);
-//! - the *header* above it, interactive: group labels and titles, in the
+//! - the *body*, receiving no pointer: the cells of the rows and columns in
+//!   view (and a reach around them), placed where the table last scrolled
+//!   to. A scroll view moves its content at once, and the cells a move needs
+//!   come with the next commit, which moves the body with them, so no frame
+//!   shows the content without its cells. Its three regions are the row
+//!   headers, the fixed columns (which move with the rows only) and the
+//!   scrolling columns (which move both ways);
+//! - the *hit layer* over it: a vertical scroll view of a horizontal one of
+//!   an empty box of the content's size (scaled past a few million points:
+//!   `axis.rs`). The platforms scroll it, and its box takes presses, hovers
+//!   and the context menu. It draws nothing but its scroll bars (the
+//!   platform's indicator or the app's built-in `Scrollbar`, children of the
+//!   scroll view), which lie over the rows' backgrounds this way; under the
+//!   body, the rows would cover them;
+//! - the *header* above them, interactive: group labels and titles, in the
 //!   same three regions, the columns' resize handles and the drop line of a
 //!   column being moved;
 //! - on the desktops, a horizontal scroll bar over the body's bottom edge,
@@ -194,7 +197,6 @@ pub(crate) fn render(dt: Dt) -> impl IntoElement {
             .absolute()
             .inset_0()
             .on_layout(move |b: &Bounds<Points>| layout.viewport.set(b.size))
-            .child(hit_layer(hit_dt, strip_x.clone()))
             .child(
                 when(
                     move || custom_cell.get(),
@@ -202,6 +204,9 @@ pub(crate) fn render(dt: Dt) -> impl IntoElement {
                 )
                 .otherwise(move || body(body_dt2.clone(), false)),
             )
+            // Over the body, which takes no pointer: the scroll view's bars
+            // draw above the rows.
+            .child(hit_layer(hit_dt, strip_x.clone()))
             .child(
                 when(
                     move || custom_head.get(),
@@ -245,6 +250,10 @@ fn hit_layer(dt: Dt, lead: Lead) -> impl IntoElement {
         .on_scroll(move |e: &ScrollEvent| {
             scroll_dt.scroll_y.set(e.offset.y);
         })
+        .on_scroll_end({
+            let dt = dt.clone();
+            move |_: &Point<Points>| dt.rest()
+        })
         .child(
             view()
                 .flex_row()
@@ -285,8 +294,14 @@ fn hit_layer(dt: Dt, lead: Lead) -> impl IntoElement {
                                 // (a `tab_stop` focus handle): its keys follow.
                                 .on_focus(move || focus.set_focus(true))
                                 .on_blur(move || blur.set_focus(false))
-                                .on_hover_move(move |e: &HoverEvent| hover.hover_at(e.position))
-                                .on_hover_out(move || {
+                                // The hovered row stays put while a drag
+                                // selects or moves.
+                                .on_mouse_move(move |e: &MouseEvent| {
+                                    if e.pressed_button.is_none() {
+                                        hover.hover_at(e.position);
+                                    }
+                                })
+                                .on_mouse_leave(move |_: &MouseEvent| {
                                     if leave.hover.get_untracked().is_some() {
                                         leave.hover.set(None);
                                     }
@@ -620,22 +635,22 @@ fn region(dt: Dt, which: Region, w: Windows, custom: bool) -> impl IntoElement {
             })
             .child(
                 // The rows' origin: the first row of its chunk, scrolled
-                // by the content offsets, in whole points as layout rounds
-                // frames: at a fraction the cells' texts would round to
-                // another point in their cells as it changes, and every
+                // by the content offsets, on the device pixels layout rounds
+                // frames to: at a fraction the cells' texts would round to
+                // another pixel in their cells as it changes, and every
                 // cell's frame would be sent again at each scroll frame.
                 view()
                     .absolute()
                     .top(move || {
                         let g = content_dt.geo();
                         let origin = w.row_origin.get() as f64 * g.row_height as f64;
-                        Length::from(px((origin - g.cy).round() as f32))
+                        on_pixel(origin - g.cy)
                     })
                     .left(move || match which {
                         Region::Scroll => {
                             let g = x_dt.geo();
                             let origin = x_dt.scroll_start(w.col_origin.get());
-                            Length::from(px((origin - g.cx).round() as f32))
+                            on_pixel(origin - g.cx)
                         }
                         _ => Length::from(px(0.0)),
                     })
@@ -1127,7 +1142,7 @@ fn header_region(dt: Dt, which: Region, w: Windows, custom: bool) -> impl IntoEl
                         Region::Scroll => {
                             let g = x_dt.geo();
                             let origin = x_dt.scroll_start(w.col_origin.get());
-                            Length::from(px((origin - g.cx).round() as f32))
+                            on_pixel(origin - g.cx)
                         }
                         _ => Length::from(px(0.0)),
                     })
@@ -1597,4 +1612,12 @@ fn overlays(dt: Dt) -> impl IntoElement {
                 .inset_0()
                 .child(props.loading_view.place(|slot| slot))
         }))
+}
+
+/// `points` on the nearest device pixel, as layout rounds frames
+/// ([`nsh_core::element::pixel_ratio`]); in `f64` up to there, for
+/// the extents of huge tables.
+fn on_pixel(points: f64) -> Length {
+    let ratio = f64::from(nsh_core::element::pixel_ratio().max(f32::MIN_POSITIVE));
+    Length::from(px(((points * ratio).round() / ratio) as f32))
 }

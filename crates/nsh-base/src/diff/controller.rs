@@ -731,6 +731,8 @@ impl Dv {
             rows_window: Default::default(),
         };
         dv.follow_props();
+        dv.report_scroll();
+        dv.report_hunk_bounds();
         dv
     }
 
@@ -851,7 +853,37 @@ impl Dv {
         }
     }
 
+    // A ref's command cannot throw: a change, gap or file the diff does
+    // not have does nothing and is logged.
+
+    fn has_hunk(&self, method: &str, index: usize) -> bool {
+        let count = self.st.borrow().model.hunks.len();
+        if index >= count {
+            log::warn!("DiffView.{method}: change {index} out of range (the diff has {count})");
+        }
+        index < count
+    }
+
+    fn has_gap(&self, method: &str, gap: usize) -> bool {
+        let count = self.st.borrow().model.hunks.len() + 1;
+        if gap >= count {
+            log::warn!("DiffView.{method}: separator {gap} out of range (the diff has {count})");
+        }
+        gap < count
+    }
+
+    fn has_file(&self, method: &str, path: &str) -> bool {
+        let has = self.st.borrow().files.index(path).is_some();
+        if !has {
+            log::warn!("DiffView.{method}: no file `{path}` in the diff");
+        }
+        has
+    }
+
     pub(crate) fn go_to_hunk(&self, index: usize) {
+        if !self.has_hunk("goToHunk", index) {
+            return;
+        }
         let collapsed = self.st.borrow().files.collapsed_file_of_hunk(index);
         if let Some(path) = collapsed {
             self.set_file_collapsed(&path, Some(false));
@@ -867,6 +899,9 @@ impl Dv {
     }
 
     pub(crate) fn revert_hunk(&self, index: usize) {
+        if !self.has_hunk("revertHunk", index) {
+            return;
+        }
         let change = {
             let st = self.st.borrow();
             let Some(hunk) = st.model.hunks.get(index) else {
@@ -881,6 +916,9 @@ impl Dv {
     }
 
     pub(crate) fn accept_hunk(&self, index: usize) {
+        if !self.has_hunk("acceptHunk", index) {
+            return;
+        }
         let change = {
             let st = self.st.borrow();
             let Some(hunk) = st.model.hunks.get(index) else {
@@ -919,6 +957,9 @@ impl Dv {
     }
 
     pub(crate) fn expand(&self, gap: usize, direction: DiffExpand, lines: usize) {
+        if !self.has_gap("expand", gap) {
+            return;
+        }
         {
             let mut st = self.st.borrow_mut();
             match direction {
@@ -963,6 +1004,14 @@ impl Dv {
     /// Collapses, expands or toggles (`None`) the file at `path`, and
     /// reports it when that changed it.
     pub(crate) fn set_file_collapsed(&self, path: &str, collapsed: Option<bool>) {
+        let method = match collapsed {
+            Some(true) => "collapseFile",
+            Some(false) => "expandFile",
+            None => "toggleFile",
+        };
+        if !self.has_file(method, path) {
+            return;
+        }
         let file = {
             let mut st = self.st.borrow_mut();
             let Some(file) = st.files.set_collapsed(path, collapsed) else {
@@ -977,6 +1026,9 @@ impl Dv {
     }
 
     pub(crate) fn scroll_to_file(&self, path: &str) {
+        if !self.has_file("scrollToFile", path) {
+            return;
+        }
         let y = {
             let st = self.st.borrow();
             let Some(row) = st
@@ -1004,15 +1056,7 @@ impl Dv {
         }
         let dv = self.clone();
         spawn(async move {
-            #[cfg(not(target_arch = "wasm32"))]
-            {
-                let _ = blocking(Highlighter::load).await;
-            }
-            #[cfg(target_arch = "wasm32")]
-            {
-                next_frame().await;
-                Highlighter::load();
-            }
+            Highlighter::load_async().await;
             dv.st.borrow_mut().make_highlighters();
             dv.schedule_highlight();
         });

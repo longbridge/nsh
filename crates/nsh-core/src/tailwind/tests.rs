@@ -17,7 +17,7 @@ fn ui_theme() -> crate::element::Tokens {
     crate::element::tokens::sample()
 }
 
-fn cx(states: u8) -> (ClassEnvironment, u8) {
+fn cx(states: u16) -> (ClassEnvironment, u16) {
     (ClassEnvironment::default(), states)
 }
 
@@ -26,7 +26,7 @@ fn styled_with(
     classes: &str,
     env: ClassEnvironment,
     window: (f32, f32),
-    states: u8,
+    states: u16,
 ) -> (Style, ClassProps) {
     let theme = themed();
     let list = parse(&theme, classes);
@@ -212,6 +212,7 @@ fn widths_without_a_color_are_current_color() {
         let mut style = Style::default();
         list.apply_with(
             &cx,
+            &no_data,
             &theme,
             current,
             DEFAULT_CH,
@@ -853,6 +854,38 @@ fn effects_and_interaction() {
 }
 
 #[test]
+fn diagonal_resize_cursors_keep_their_axes() {
+    use crate::style::StyleValue;
+
+    for (name, expected) in [
+        ("nwse-resize", Cursor::NwseResize),
+        ("nw-resize", Cursor::NwseResize),
+        ("se-resize", Cursor::NwseResize),
+        ("nesw-resize", Cursor::NeswResize),
+        ("ne-resize", Cursor::NeswResize),
+        ("sw-resize", Cursor::NeswResize),
+        ("ew-resize", Cursor::ColResize),
+        ("ns-resize", Cursor::RowResize),
+        ("move", Cursor::Move),
+    ] {
+        let mut inline = Style::default();
+        inline.set("cursor", StyleValue::Str(name)).unwrap();
+        assert_eq!(inline.view.cursor, expected, "inline {name}");
+        assert_eq!(
+            styled(&format!("cursor-{name}")).view.cursor,
+            expected,
+            "{name}"
+        );
+        assert_eq!(
+            styled(&format!("cursor-[{name}]")).view.cursor,
+            expected,
+            "arbitrary {name}"
+        );
+        assert_eq!(Cursor::parse(expected.name()), Some(expected));
+    }
+}
+
+#[test]
 fn transitions_and_animations() {
     let s = styled("transition-colors duration-300 ease-out delay-75");
     let t = s.view.transition.unwrap();
@@ -1167,6 +1200,243 @@ fn checked_variants() {
         hovered,
     );
     assert_eq!(s.view.background_color, Color(0xffff_ffff));
+}
+
+#[test]
+fn expanded_variants() {
+    let theme = themed();
+    let list = parse(
+        &theme,
+        "aria-expanded:bg-black group-aria-expanded:rotate-180",
+    );
+    assert!(list.unknown().is_empty(), "{:?}", list.unknown());
+    assert!(list.deps() & deps::STATE != 0 && list.deps() & deps::GROUP != 0);
+    // The core sets it: nothing for the platform to report.
+    assert_eq!(list.tracked_states(), 0);
+    let env = ClassEnvironment::default();
+    let (s, _) = styled_with(
+        "bg-white aria-expanded:bg-black",
+        env,
+        (390.0, 844.0),
+        state::EXPANDED,
+    );
+    assert_eq!(s.view.background_color, Color(0x0000_00ff));
+    // Tailwind's `aria-*` variants come after the pseudo-classes: an open
+    // trigger keeps its look while hovered or pressed.
+    let pressed = state::EXPANDED | state::HOVERED | state::PRESSED;
+    let (s, _) = styled_with(
+        "hover:bg-white active:bg-white aria-expanded:bg-black",
+        env,
+        (390.0, 844.0),
+        pressed,
+    );
+    assert_eq!(s.view.background_color, Color(0x0000_00ff));
+}
+
+/// Applies `classes` to a node with the `data-*` attributes `own`, inside
+/// a group (unnamed) with `group`, in `states`.
+fn styled_data(classes: &str, own: &[&str], group: &[&str], states: u16) -> Style {
+    let theme = themed();
+    let list = parse(&theme, classes);
+    assert!(list.unknown().is_empty(), "{:?}", list.unknown());
+    let mut style = Style::default();
+    let mut props = ClassProps::default();
+    let groups = |_: &str| 0;
+    let data = |g: Option<&str>, name: &str| match g {
+        None => own.contains(&name),
+        Some("") => group.contains(&name),
+        Some(_) => false,
+    };
+    let context = Context {
+        env: ClassEnvironment::default(),
+        window: crate::geometry::size_pt(390.0, 844.0),
+        rtl: false,
+        states,
+        position: 0,
+        group: &groups,
+    };
+    list.apply_with(
+        &context,
+        &data,
+        &theme,
+        CurrentColor::default(),
+        DEFAULT_CH,
+        &mut style,
+        &mut props,
+        |_| {},
+    );
+    style
+}
+
+/// `data-<name>:` and `group-data-<name>:` as Tailwind v4 has them in their
+/// boolean form (`&[data-range-start]`, `:where(.group)[data-range-start]
+/// &`): the attributes a component's part shows (`project_data`), ordered
+/// after the `aria-*` variants and by their names.
+#[test]
+fn data_variants() {
+    let theme = themed();
+    let list = parse(
+        &theme,
+        "data-range-start:bg-black data-range-end:rounded-r-md group-data-range-middle:opacity-50 \
+         group-data-today/day:font-bold data-a1-b2:p-1",
+    );
+    assert!(list.unknown().is_empty(), "{:?}", list.unknown());
+    assert!(list.deps() & deps::DATA != 0 && list.deps() & deps::GROUP != 0);
+    // Not a state: nothing for the platform to report.
+    assert_eq!(list.tracked_states(), 0);
+    // Only the boolean form: a value (`data-[state=open]:`), an empty or an
+    // upper case name are unknown.
+    let unknown = parse(
+        &theme,
+        "data-[state=open]:bg-black data-:bg-black data-Open:bg-black group-data-[x]:p-1",
+    );
+    assert_eq!(unknown.unknown().len(), 4, "{:?}", unknown.unknown());
+    // A view's own.
+    let s = styled_data(
+        "bg-white data-range-start:bg-black",
+        &["range-start"],
+        &[],
+        0,
+    );
+    assert_eq!(s.view.background_color, Color(0x0000_00ff));
+    let s = styled_data("bg-white data-range-start:bg-black", &["range-end"], &[], 0);
+    assert_eq!(s.view.background_color, Color(0xffff_ffff));
+    // Two: both are needed.
+    let both = "bg-white data-range-start:data-range-end:bg-black";
+    let s = styled_data(both, &["range-start"], &[], 0);
+    assert_eq!(s.view.background_color, Color(0xffff_ffff));
+    let s = styled_data(both, &["range-end", "range-start"], &[], 0);
+    assert_eq!(s.view.background_color, Color(0x0000_00ff));
+    // The group's, not the view's own.
+    let grouped = "opacity-100 group-data-range-middle:opacity-50";
+    let s = styled_data(grouped, &["range-middle"], &[], 0);
+    assert_eq!(s.view.opacity, 1.0);
+    let s = styled_data(grouped, &[], &["range-middle"], 0);
+    assert_eq!(s.view.opacity, 0.5);
+    // With a state of the same group.
+    let hovered = "opacity-100 group-hover:group-data-range-middle:opacity-50";
+    let s = styled_data(hovered, &[], &["range-middle"], 0);
+    assert_eq!(s.view.opacity, 1.0);
+    // After the `aria-*` variants: a selected day at the start of a range
+    // keeps the start's look.
+    let s = styled_data(
+        "data-range-start:bg-black aria-selected:bg-white selected:bg-white",
+        &["range-start"],
+        &[],
+        state::SELECTED,
+    );
+    assert_eq!(s.view.background_color, Color(0x0000_00ff));
+    // Among themselves by their names, before `motion-safe:`.
+    let s = styled_data("data-b:bg-black data-a:bg-white", &["a", "b"], &[], 0);
+    assert_eq!(s.view.background_color, Color(0x0000_00ff));
+    let s = styled_data("motion-safe:bg-white data-a:bg-black", &["a"], &[], 0);
+    assert_eq!(s.view.background_color, Color(0xffff_ffff));
+}
+
+/// `aria-pressed:`, `aria-busy:`, `aria-checked:` and `aria-selected:`
+/// as Tailwind v4 has them (`&[aria-pressed="true"]`, ...): the core's
+/// states from the accessibility state, ordered by their names after the
+/// pseudo-classes.
+#[test]
+fn aria_state_variants() {
+    let theme = themed();
+    let list = parse(
+        &theme,
+        "aria-pressed:bg-black aria-busy:opacity-50 aria-checked:p-1 aria-selected:p-2 \
+         group-aria-pressed:rotate-180 group-aria-busy:opacity-0 group-aria-checked:p-3 \
+         group-aria-selected:p-4",
+    );
+    assert!(list.unknown().is_empty(), "{:?}", list.unknown());
+    assert!(list.deps() & deps::STATE != 0 && list.deps() & deps::GROUP != 0);
+    // The core sets them: nothing for the platform to report.
+    assert_eq!(list.tracked_states(), 0);
+    // `aria-current:` and the states NSH does not have are unknown, as
+    // Tailwind has no `aria-current` variant (`aria-[current=page]:` is
+    // an arbitrary one).
+    let unknown = parse(&theme, "aria-current:bg-black aria-readonly:bg-black");
+    assert_eq!(unknown.unknown().len(), 2, "{:?}", unknown.unknown());
+    let env = ClassEnvironment::default();
+    let at = (390.0, 844.0);
+    let (s, _) = styled_with(
+        "bg-white aria-pressed:bg-black",
+        env,
+        at,
+        state::ARIA_PRESSED,
+    );
+    assert_eq!(s.view.background_color, Color(0x0000_00ff));
+    // Not a press in progress: `active:` waits for its own state.
+    let (s, _) = styled_with("bg-white aria-pressed:bg-black", env, at, state::PRESSED);
+    assert_eq!(s.view.background_color, Color(0xffff_ffff));
+    let (s, _) = styled_with(
+        "active:bg-white aria-pressed:bg-black",
+        env,
+        at,
+        state::PRESSED,
+    );
+    assert_eq!(s.view.background_color, Color(0xffff_ffff));
+    // The `aria-*` variants come after the pseudo-classes: a toggle that
+    // is on keeps its look while pressed or hovered.
+    let pressed = state::ARIA_PRESSED | state::HOVERED | state::PRESSED;
+    let (s, _) = styled_with(
+        "hover:bg-white active:bg-white aria-pressed:bg-black",
+        env,
+        at,
+        pressed,
+    );
+    assert_eq!(s.view.background_color, Color(0x0000_00ff));
+    // Among themselves, by their names: busy, checked, expanded, pressed,
+    // selected.
+    let all =
+        state::BUSY | state::CHECKED | state::EXPANDED | state::ARIA_PRESSED | state::SELECTED;
+    let order = [
+        ("aria-busy", Color(0xfb2c_36ff)),
+        ("aria-checked", Color(0x0000_00ff)),
+        ("aria-expanded", Color(0xffff_ffff)),
+        ("aria-pressed", Color(0x00bc_7dff)),
+        ("aria-selected", Color(0x2b7f_ffff)),
+    ];
+    let classes = |order: &[(&str, Color)]| {
+        let names = ["red-500", "black", "white", "emerald-500", "blue-500"];
+        order
+            .iter()
+            .zip(names)
+            .map(|((v, _), c)| format!("{v}:bg-{c}"))
+            .collect::<Vec<_>>()
+    };
+    let mut reversed = classes(&order);
+    reversed.reverse();
+    let (s, _) = styled_with(&reversed.join(" "), env, at, all);
+    assert_eq!(s.view.background_color, order[4].1);
+    for i in 0..4 {
+        let below = order[..=i].iter().fold(0, |states, (v, _)| {
+            states
+                | match *v {
+                    "aria-busy" => state::BUSY,
+                    "aria-checked" => state::CHECKED,
+                    "aria-expanded" => state::EXPANDED,
+                    "aria-pressed" => state::ARIA_PRESSED,
+                    _ => state::SELECTED,
+                }
+        });
+        let (s, _) = styled_with(&reversed.join(" "), env, at, below);
+        assert_eq!(s.view.background_color, order[i].1, "{}", order[i].0);
+    }
+    // `aria-checked:` is checked, after `checked:`; `aria-selected:` is
+    // selected, after `selected:`.
+    let (s, _) = styled_with(
+        "aria-checked:bg-black checked:bg-white",
+        env,
+        at,
+        state::CHECKED,
+    );
+    assert_eq!(s.view.background_color, Color(0x0000_00ff));
+    let (s, _) = styled_with(
+        "aria-selected:bg-black selected:bg-white",
+        env,
+        at,
+        state::SELECTED,
+    );
+    assert_eq!(s.view.background_color, Color(0x0000_00ff));
 }
 
 #[test]
@@ -1591,7 +1861,7 @@ fn object_positions() {
 /// variant decides, then its next highest; one more variant comes later.
 #[test]
 fn variants_sort_as_tailwind_sorts_them() {
-    let pad = |classes: &str, dark: bool, width: f32, states: u8| {
+    let pad = |classes: &str, dark: bool, width: f32, states: u16| {
         let env = ClassEnvironment {
             dark,
             ..Default::default()

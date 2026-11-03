@@ -13,9 +13,9 @@ use std::{
 };
 
 use nsh_core::{
-    AccessibilityRole, Bounds, Command, Dialog, EventKind, EventMask, GestureValues, InputConfig,
-    MountBatch, MountItem, NodeId, PanActivation, Point, PointerEvents, Points, Size, ViewKind,
-    element::PropEnum,
+    AccessibilityRole, AccessibilityState, Bounds, Command, Dialog, EventKind, EventMask,
+    GestureValues, InputConfig, MountBatch, MountItem, NodeId, PanActivation, Point, PointerEvents,
+    Points, Size, ViewKind, element::PropEnum,
 };
 
 use crate::selector::{Matcher, Selector, TextMatch};
@@ -70,16 +70,6 @@ fn utf16_slice(text: &str, start: u32, end: u32) -> String {
             here >= start && at <= end
         })
         .collect()
-}
-
-/// Why a [`Pick::Disabled`] match takes no step on `what` (the kind of
-/// view the step looks for).
-pub(crate) fn disabled(what: &str) -> &'static str {
-    if what == "scroll view" {
-        "does not scroll: the user cannot scroll it (`scrollable` is false)"
-    } else {
-        "is disabled"
-    }
 }
 
 /// What a back does ([`Screen::back_target`]).
@@ -141,6 +131,13 @@ pub struct Screen {
     opened_urls: Vec<String>,
     /// The `openUrl` requests to answer.
     url_opens: Vec<u32>,
+    /// The screen colors asked for (`pick_screen_color`), to answer.
+    screen_colors: Vec<u32>,
+    /// The requests on local paths that reached the platform
+    /// (`pick_paths`, `open_path`, ...), in order.
+    file_requests: Vec<nsh_core::file_dialog::FileRequest>,
+    /// Those to answer.
+    file_answers: Vec<(u32, nsh_core::file_dialog::FileRequest)>,
     /// What the app asked that only a real platform answers, since the
     /// last call.
     unsupported: Vec<&'static str>,
@@ -194,6 +191,10 @@ struct View {
     /// It is selected (`selected`, its accessibility state; a canvas node's
     /// `selected`).
     selected: bool,
+    /// Its `accessibilityState`.
+    accessibility_state: AccessibilityState,
+    /// Its `accessibilityLevel`.
+    level: Option<u32>,
     /// How long a press must last to be a long one (`delayLongPress`), in
     /// milliseconds.
     long_press_delay: Option<f32>,
@@ -201,9 +202,9 @@ struct View {
     /// one selection.
     selectable_view: bool,
     /// The interaction states it tracks (`TrackStates`: pressed, hovered).
-    tracked: u8,
+    tracked: u16,
     /// The interaction states it is in (of those it tracks).
-    states: u8,
+    states: u16,
     /// The values its drags, pinches and rotations drive natively.
     gestures: GestureValues,
     /// When a drag on it activates its JS responder (`panActivation`).
@@ -387,6 +388,8 @@ impl Screen {
                 view.disabled = props.accessibility.state.disabled;
                 view.focusable = props.focusable;
                 view.selected = props.accessibility.state.selected;
+                view.accessibility_state = props.accessibility.state;
+                view.level = props.accessibility.level;
                 view.long_press_delay = props.long_press_delay;
                 view.selectable_view = props.selectable_view;
                 view.pan_activation = props.pan_activation;
@@ -522,6 +525,13 @@ impl Screen {
             Command::OpenUrl { id, url } => {
                 self.opened_urls.push(url.clone());
                 self.url_opens.push(*id);
+            }
+            Command::PickScreenColor { id } => self.screen_colors.push(*id),
+            // Recorded, never carried out: a test's machine opens, shows
+            // and trashes nothing.
+            Command::FileRequest { id, request } => {
+                self.file_requests.push((**request).clone());
+                self.file_answers.push((*id, (**request).clone()));
             }
             Command::Back => self.back_asked = true,
             Command::Desktop(desktop) => {
@@ -689,7 +699,7 @@ impl Screen {
         let (id, start) = match hits.as_slice() {
             [(id, Some(start))] => (*id, *start),
             [(_, None)] => return Err(format!("span `{selector}` has no characters")),
-            [] => return Err(format!("no span matches `{selector}`")),
+            [] => return Err(crate::failure::not_found("span", selector)),
             many => {
                 return Err(format!(
                     "`{selector}` matches {} spans; add `nth=<n>` or name the text views to look in",
@@ -702,7 +712,7 @@ impl Screen {
             .and_then(|v| v.attributed.as_ref())
             .and_then(|text| text.span_at(start))
             .map(|span| span.style)
-            .ok_or_else(|| format!("no span matches `{selector}`"))
+            .ok_or_else(|| crate::failure::not_found("span", selector))
     }
 
     fn detach(&mut self, id: NodeId) {
@@ -985,6 +995,24 @@ impl Screen {
         &self.opened_urls
     }
 
+    /// The requests on local paths that reached the platform, in order
+    /// (`pick_paths`, `pick_save_path`, `open_path`, `reveal_path`,
+    /// `move_to_trash`; only once the environment has
+    /// [`nsh_core::platform::Environment::file_requests`]).
+    pub fn file_requests(&self) -> &[nsh_core::file_dialog::FileRequest] {
+        &self.file_requests
+    }
+
+    /// The requests on local paths to answer since the last call.
+    pub(crate) fn take_file_answers(&mut self) -> Vec<(u32, nsh_core::file_dialog::FileRequest)> {
+        std::mem::take(&mut self.file_answers)
+    }
+
+    /// The screen color requests to answer since the last call.
+    pub(crate) fn take_screen_colors(&mut self) -> Vec<u32> {
+        std::mem::take(&mut self.screen_colors)
+    }
+
     /// The `openUrl` requests to answer since the last call.
     pub(crate) fn take_url_opens(&mut self) -> Vec<u32> {
         std::mem::take(&mut self.url_opens)
@@ -1132,7 +1160,7 @@ impl Screen {
                 Ok(!self.disabled_from(id, None)
                     && self.input(id).is_none_or(|i| i.config.editable))
             }
-            [] => Err(format!("no view matches `{selector}`")),
+            [] => Err(crate::failure::not_found("view", selector)),
             ref all => Err(format!("`{selector}` matches {} views", all.len())),
         }
     }
@@ -1155,7 +1183,7 @@ impl Screen {
                     None => return Ok(false),
                 }
             },
-            [] => Err(format!("no view matches `{selector}`")),
+            [] => Err(crate::failure::not_found("view", selector)),
             ref all => Err(format!("`{selector}` matches {} views", all.len())),
         }
     }
@@ -1167,7 +1195,35 @@ impl Screen {
         let parsed = Selector::parse(selector)?;
         match self.resolve(&parsed)[..] {
             [id] => Ok(self.nodes.get(&id).is_some_and(|v| v.selected)),
-            [] => Err(format!("no view matches `{selector}`")),
+            [] => Err(crate::failure::not_found("view", selector)),
+            ref all => Err(format!("`{selector}` matches {} views", all.len())),
+        }
+    }
+
+    /// The accessibility state of the view `selector` names (its
+    /// `accessibilityState`: a toggle button's `pressed`, a page's
+    /// `current`, ...); an error when none or several match.
+    pub fn accessibility_state(&self, selector: &str) -> Result<AccessibilityState, String> {
+        let parsed = Selector::parse(selector)?;
+        match self.resolve(&parsed)[..] {
+            [id] => Ok(self
+                .nodes
+                .get(&id)
+                .map(|v| v.accessibility_state)
+                .unwrap_or_default()),
+            [] => Err(crate::failure::not_found("view", selector)),
+            ref all => Err(format!("`{selector}` matches {} views", all.len())),
+        }
+    }
+
+    /// The level of the view `selector` names (its `accessibilityLevel`:
+    /// a heading's, a tree item's depth); an error when none or several
+    /// match.
+    pub fn accessibility_level(&self, selector: &str) -> Result<Option<u32>, String> {
+        let parsed = Selector::parse(selector)?;
+        match self.resolve(&parsed)[..] {
+            [id] => Ok(self.nodes.get(&id).and_then(|v| v.level)),
+            [] => Err(crate::failure::not_found("view", selector)),
             ref all => Err(format!("`{selector}` matches {} views", all.len())),
         }
     }
@@ -1442,6 +1498,47 @@ impl Screen {
         out
     }
 
+    /// The views inside scroll view `id` that take a finger's drag
+    /// themselves: they hear touches (a responder, JS's or a component's,
+    /// which may keep them from the scroll view) or pan natively. A finger
+    /// that lands on one to scroll may move it instead, or the scroll view
+    /// only until the app's answer comes, so a step's scrolling lands
+    /// elsewhere. What one holds lands on it, and is not listed.
+    #[cfg(feature = "agent")]
+    pub(crate) fn drag_takers(&self, id: NodeId) -> Vec<NodeId> {
+        let attached: HashSet<NodeId> = self.attached().into_iter().collect();
+        let mut out = Vec::new();
+        let mut stack: Vec<NodeId> = self.children.get(&id).cloned().unwrap_or_default();
+        while let Some(id) = stack.pop() {
+            let Some(view) = self.nodes.get(&id) else {
+                continue;
+            };
+            let receives = view.pointer_events;
+            if !attached.contains(&id)
+                || view.canvas_node
+                || view.hidden
+                || receives == PointerEvents::None
+            {
+                continue;
+            }
+            let takes = view.events.contains(EventKind::Touch)
+                || view.events.contains(EventKind::PanStart)
+                || view.events.contains(EventKind::PanEnd)
+                || view.gestures.pan_x.is_some()
+                || view.gestures.pan_y.is_some();
+            if takes && receives != PointerEvents::BoxNone {
+                out.push(id);
+                continue;
+            }
+            if receives != PointerEvents::BoxOnly
+                && let Some(children) = self.children.get(&id)
+            {
+                stack.extend(children.iter().copied());
+            }
+        }
+        out
+    }
+
     fn up_to(&self, mut id: NodeId, test: impl Fn(&View) -> bool) -> Option<NodeId> {
         loop {
             let view = self.nodes.get(&id)?;
@@ -1575,7 +1672,7 @@ impl Screen {
     /// View `id`'s interaction states with `bit` set (or cleared), when it
     /// tracks it and they change.
     #[cfg(not(target_arch = "wasm32"))]
-    pub(crate) fn set_state(&mut self, id: NodeId, bit: u8, on: bool) -> Option<u8> {
+    pub(crate) fn set_state(&mut self, id: NodeId, bit: u16, on: bool) -> Option<u16> {
         let view = self.nodes.get_mut(&id)?;
         let next = nsh_core::input::next_states(view.tracked, view.states, bit, on)?;
         view.states = next;
@@ -1835,6 +1932,49 @@ mod tests {
         screen.nodes.get_mut(&2).unwrap().clips = false;
         screen.nodes.get_mut(&2).unwrap().pointer_events = PointerEvents::BoxOnly;
         assert_eq!(screen.pressable(&selector), Pick::None);
+    }
+
+    #[test]
+    #[cfg(feature = "agent")]
+    fn a_scroll_views_drag_takers_are_the_views_that_take_touches_or_pan() {
+        let mut screen = Screen::default();
+        let mut items = vec![create(2, ViewKind::Scroll), insert(1, 2)];
+        for id in [4, 6, 8, 10, 12, 14, 16] {
+            items.extend([create(id, ViewKind::View), insert(2, id)]);
+        }
+        // Inside the responder at 4, and inside the view at 12 that keeps
+        // touches from what it holds.
+        items.extend([
+            create(18, ViewKind::View),
+            insert(4, 18),
+            create(20, ViewKind::View),
+            insert(12, 20),
+        ]);
+        screen.apply(&batch(items));
+        let events = |screen: &mut Screen, id: NodeId, kind: EventKind| {
+            screen.nodes.get_mut(&id).unwrap().events.set(kind, true);
+        };
+        // A responder, a native pan, a button, a responder no touch
+        // reaches, a responder only what it holds hears, and a drag that
+        // moves a value.
+        for (id, kind) in [
+            (4, EventKind::Touch),
+            (6, EventKind::PanStart),
+            (8, EventKind::Press),
+            (10, EventKind::Touch),
+            (14, EventKind::Touch),
+            (18, EventKind::Touch),
+            (20, EventKind::Touch),
+        ] {
+            events(&mut screen, id, kind);
+        }
+        screen.nodes.get_mut(&10).unwrap().pointer_events = PointerEvents::None;
+        screen.nodes.get_mut(&12).unwrap().pointer_events = PointerEvents::BoxOnly;
+        screen.nodes.get_mut(&14).unwrap().pointer_events = PointerEvents::BoxNone;
+        screen.nodes.get_mut(&16).unwrap().gestures.pan_y = Some(1);
+        let mut takers = screen.drag_takers(2);
+        takers.sort_unstable();
+        assert_eq!(takers, [4, 6, 16]);
     }
 
     fn batch(items: Vec<MountItem>) -> MountBatch {

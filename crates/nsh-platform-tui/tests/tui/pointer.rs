@@ -15,8 +15,8 @@ fn hover_styles_and_events_follow_the_pointer_and_clear_outside_the_surface() {
         mount(() => <View>
             <View style={{ width: 80, height: 32, backgroundColor: "#123456" }}
                 hoverStyle={{ backgroundColor: "#ef4444" }}
-                onHoverIn={() => state.set("inside")}
-                onHoverOut={() => state.set("outside")} />
+                onMouseEnter={() => state.set("inside")}
+                onMouseLeave={() => state.set("outside")} />
             <Text>{state()}</Text>
         </View>);
     "##,
@@ -78,7 +78,7 @@ fn a_native_pan_reports_values_and_a_drag_does_not_press() {
             <View pan={{x}} style={{ width: 80, height: 32 }}
                 onPress={() => presses.set(presses()+1)}
                 onPanStart={() => result.set("panning")}
-                onPanEnd={e => result.set(`pan ${e.translationX}:${e.valueX}`)}><Text>Pan</Text></View>
+                onPanEnd={e => result.set(`pan ${e.translation.x}:${e.value?.x}`)}><Text>Pan</Text></View>
             <Text>{result()} presses:{presses()}</Text>
         </View>);
     "#, &[]).unwrap();
@@ -282,7 +282,7 @@ fn concealing_a_hovered_view_clears_hover_without_more_mouse_motion() {
         const visible = signal(true), state = signal("ready");
         mount(() => <View>
             <View style={{width: 80, height: 32, opacity: visible() ? 1 : 0}}
-                onHoverIn={() => state.set("inside")} onHoverOut={() => state.set("left")}
+                onMouseEnter={() => state.set("inside")} onMouseLeave={() => state.set("left")}
                 onPress={() => visible.set(false)}><Text>Hide</Text></View>
             <Text>{state()}</Text>
         </View>);

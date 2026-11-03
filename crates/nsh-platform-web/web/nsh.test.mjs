@@ -53,6 +53,33 @@ const failing = () => {
 const events = (sent) =>
   sent.filter(([name, p]) => name === "onHost" && p.type === "event").map(([, p]) => p.event);
 
+test("input autofill hints are set, changed and cleared on both field kinds", () => {
+  const { player } = fakePlayer();
+  const attrs = new Map();
+  const field = {
+    classList: { toggle() {} },
+    setAttribute: (name, value) => attrs.set(name, value),
+    removeAttribute: (name) => attrs.delete(name),
+  };
+  const el = { _field: field };
+  player.view = () => el;
+  for (const multiline of [false, true]) {
+    field.tagName = multiline ? "TEXTAREA" : "INPUT";
+    const config = { multiline };
+    const update = () => player.op_in(["in", 1, config, null]);
+    update();
+    assert.equal(attrs.has("autocomplete"), false, "the browser decides by default");
+    for (const token of ["username", "current-password", "new-password", "one-time-code", "off"]) {
+      config.autoComplete = token;
+      update();
+      assert.equal(attrs.get("autocomplete"), token);
+    }
+    delete config.autoComplete;
+    update();
+    assert.equal(attrs.has("autocomplete"), false, "returning to default clears the hint");
+  }
+});
+
 test("events sent before the app runs reach it in order once it starts, later ones at once", () => {
   const { player, sent } = fakePlayer();
   player.hostEvent("a", 1);
@@ -109,6 +136,61 @@ test("events sent after the app stopped wait for the next app", () => {
   assert.deepEqual(events(sent), ["running"]);
   player.begin(390, started);
   assert.deepEqual(events(sent), ["running", "stopped"]);
+});
+
+const trap = () => {
+  throw new WebAssembly.RuntimeError("unreachable");
+};
+
+test("an engine that trapped takes no more calls, nor the ones it deferred", () => {
+  const { player } = fakePlayer();
+  const reached = [];
+  assert.throws(
+    () =>
+      player.call(() => {
+        player.call(() => reached.push("deferred"));
+        trap();
+      }),
+    WebAssembly.RuntimeError,
+  );
+  player.call(() => reached.push("later"));
+  assert.deepEqual(reached, []);
+});
+
+test("an error that is not a trap leaves the engine taking calls", () => {
+  const { player } = fakePlayer();
+  const reached = [];
+  assert.throws(() => player.call(failing));
+  player.call(() => {
+    reached.push("later");
+    return -1;
+  });
+  assert.deepEqual(reached, ["later"]);
+});
+
+test("the overlay keeps the first panic, whichever entry the next one comes from", () => {
+  const { player } = fakePlayer();
+  const shown = [];
+  const box = { replaceChildren: (_copy, message) => shown.push(message) };
+  player.root = { querySelector: () => box, append() {} };
+  const document = globalThis.document;
+  globalThis.document = { createElement: () => ({ addEventListener() {} }) };
+  const error = console.error;
+  console.error = () => {};
+  try {
+    player.reportPanic("nsh panicked: the real one");
+    // The engine is left borrowed: an app's own timer calling into it in
+    // the browser runtime panics again, and the engine reports an error.
+    player.reportPanic("nsh panicked: RefCell already borrowed");
+    player.showError("a later error");
+  } finally {
+    globalThis.document = document;
+    console.error = error;
+  }
+  assert.deepEqual(shown, ["nsh panicked: the real one"]);
+  const reached = [];
+  player.call(() => reached.push("later"));
+  assert.deepEqual(reached, []);
 });
 
 async function reply(host) {
@@ -183,29 +265,23 @@ test("a browser-cancelled pan reports cancellation rather than a release", () =>
   }
 });
 
-test("run stages static source and bytecode chunks before starting the entry", () => {
+test("compileAndRun hands the compiled module to runSource, or returns the compile error", async () => {
   const { player } = fakePlayer();
-  const calls = [];
-  const text = (ptr, len) => new TextDecoder().decode(new Uint8Array(player.wasm.memory.buffer, ptr, len));
-  player.reset = () => [800, 600];
-  player.begin = () => calls.push(["start"]);
-  player.wasm.nsh_bundle_options = () => calls.push(["options"]);
-  player.wasm.nsh_bundle_chunk = (np, nl, cp, cl, bytecode) => {
-    calls.push([text(np, nl), bytecode, [...new Uint8Array(player.wasm.memory.buffer, cp, cl)]]);
-  };
-  player.run("entry", {
-    chunkBase: "https://example.test/",
-    preloadedChunks: {
-      "source.js": "export {}",
-      "bytecode.js": new Uint8Array([1, 2, 3]).buffer,
-    },
-  });
-  assert.deepEqual(calls, [
-    ["options"],
-    ["source.js", 0, [...new TextEncoder().encode("export {}")]],
-    ["bytecode.js", 1, [1, 2, 3]],
-    ["start"],
-  ]);
+  const ran = [];
+  player.compile = (source) => (source === "bad" ? { error: "1 | bad" } : { code: `compiled ${source}` });
+  player.browserHost = { runSource: async (code, options) => { ran.push([code, options]); } };
+  assert.equal(await player.compileAndRun("bad"), "1 | bad");
+  assert.equal(await player.compileAndRun("good", "Demo.tsx", { appId: "demo" }), null);
+  assert.deepEqual(ran, [["compiled good", { appId: "demo", capabilities: "", sourceMap: "", name: "Demo.tsx" }]]);
+});
+
+test("hotUpdate goes to the browser host, and is not applied without one", async () => {
+  const { player } = fakePlayer();
+  assert.equal(await player.hotUpdate("__nsh_hot.update({});"), false);
+  const updates = [];
+  player.browserHost = { hotUpdate: async (...args) => { updates.push(args); return true; } };
+  assert.equal(await player.hotUpdate("code", "hot-2.js", null), true);
+  assert.deepEqual(updates, [["code", "hot-2.js", ""]]);
 });
 
 /** A view element as `updateFocusable` and `keyDown` see it. */
@@ -290,4 +366,331 @@ test("Return presses a focused pressable, not a focused stop that takes no press
   assert.deepEqual(pressed, [button]);
   assert.equal(key(chart), false);
   assert.deepEqual(pressed, [button]);
+});
+
+/**
+ * Runs `f` in a page with a window of 1280 × 720 whose system UI covers 44
+ * points at the top and 34 at the bottom; `f` gets the `ResizeObserver`s
+ * made meanwhile.
+ */
+function inPage(f) {
+  const observers = [];
+  const page = {
+    innerWidth: 1280,
+    innerHeight: 720,
+    getComputedStyle: () => ({ paddingTop: "44px", paddingRight: "0px", paddingBottom: "34px", paddingLeft: "0px" }),
+    getSelection: () => null,
+    document: { activeElement: null, body: {} },
+    requestAnimationFrame: () => 0,
+    ResizeObserver: class {
+      constructor(callback) {
+        this.callback = callback;
+        observers.push(this);
+      }
+      observe() {}
+      unobserve() {}
+    },
+  };
+  Object.assign(globalThis, page);
+  try {
+    f(observers);
+  } finally {
+    for (const name of Object.keys(page)) delete globalThis[name];
+  }
+}
+
+/**
+ * A player presenting dialogs over the window (`viewportDialogs`) or over
+ * its container: 320 × 240 at (100, 400) in the window. `reported` holds
+ * what `nsh_root_size` got.
+ */
+function dialogPlayer(viewportDialogs) {
+  const { player, sent } = fakePlayer();
+  const reported = [];
+  player.wasm.nsh_root_size = (...args) => {
+    reported.push(args);
+    return -1;
+  };
+  Object.assign(player, {
+    viewportDialogs,
+    size: [320, 240],
+    safeProbe: {},
+    pointers: new Map(),
+    root: {
+      getBoundingClientRect: () => ({ left: 100, top: 400, right: 420, bottom: 640 }),
+      // Moving a popover in the DOM takes it out of the top layer.
+      append: (el) => el.hidePopover(),
+      contains: () => false,
+    },
+    scopeFocus() {},
+    syncHistorySoon() {},
+    dropLeftWith() {},
+  });
+  return { player, sent, reported };
+}
+
+/**
+ * A modal's (or an alert's) element, `width` × `height` while it is in the
+ * top layer, where the CSS sizes it; `shown` logs each time it goes there.
+ */
+function dialogView(id, width, height, shown = []) {
+  const classes = new Set();
+  let open = false;
+  return {
+    _id: id,
+    _kind: "modal",
+    style: {},
+    isConnected: true,
+    listeners: [],
+    classList: { add: (name) => classes.add(name), contains: (name) => classes.has(name) },
+    setAttribute() {},
+    addEventListener(type, _listener, options) {
+      this.listeners.push([type, options]);
+    },
+    get clientWidth() {
+      return open ? width : 0;
+    },
+    get clientHeight() {
+      return open ? height : 0;
+    },
+    matches: (selector) => selector === ":popover-open" && open,
+    showPopover() {
+      open = true;
+      shown.push(id);
+    },
+    hidePopover() {
+      open = false;
+    },
+    resize(w, h) {
+      [width, height] = [w, h];
+    },
+  };
+}
+
+test("a dialog over the window lays out at the window's size and safe area, wherever the container is", () => {
+  inPage(() => {
+    const { player, reported } = dialogPlayer(true);
+    const dialog = dialogView(7, 1280, 720);
+    player.present(dialog);
+    assert.deepEqual(reported, [[7, 1280, 720, 44, 0, 34, 0]]);
+    assert.equal(dialog.popover, "manual");
+    assert.ok(dialog.classList.contains("nsh-viewport"));
+    // The browser waits for blocking wheel listeners only over the boxes of
+    // the elements that have them: the layer needs one of its own.
+    assert.deepEqual(dialog.listeners, [["wheel", { passive: false }]]);
+    // The CSS places it: no frame of the container's.
+    assert.equal(dialog.style.width, undefined);
+    assert.equal(dialog.style.transform, "translateY(720px)", "it slides in from the window's bottom edge");
+  });
+});
+
+test("a dialog over the container keeps the container's size, place and safe area", () => {
+  inPage(() => {
+    const { player, reported } = dialogPlayer(false);
+    const dialog = dialogView(7, 1280, 720);
+    player.present(dialog);
+    assert.deepEqual(reported, [[7, 320, 240, 0, 0, 0, 0]]);
+    assert.equal(dialog.popover, undefined);
+    const s = dialog.style;
+    assert.deepEqual([s.left, s.top, s.width, s.height], ["0px", "0px", "320px", "240px"]);
+    assert.equal(s.transform, "translateY(240px)");
+  });
+});
+
+test("a dialog over the window follows the window's size, scroll bars included", () => {
+  inPage((observers) => {
+    const { player, reported } = dialogPlayer(true);
+    const dialog = dialogView(7, 1280, 720);
+    player.present(dialog);
+    const [observer] = observers;
+    // The page grew a scroll bar: no `resize`, a narrower top layer.
+    dialog.resize(1265, 720);
+    observer.callback([{ target: dialog }]);
+    assert.deepEqual(reported.at(-1), [7, 1265, 720, 44, 0, 34, 0]);
+    observer.callback([{ target: dialog }]);
+    assert.equal(reported.length, 2, "an unchanged size is not reported again");
+    dialog._leaving = true;
+    dialog.resize(800, 600);
+    observer.callback([{ target: dialog }]);
+    assert.equal(reported.length, 2, "nor is a leaving dialog's");
+  });
+});
+
+test("alerts stay above a dialog presented over the window after them", () => {
+  inPage(() => {
+    const shown = [];
+    const { player } = dialogPlayer(true);
+    const alert = dialogView(2, 1280, 720, shown);
+    player.raise(alert);
+    player.dialogs = [alert];
+    player.present(dialogView(7, 1280, 720, shown));
+    assert.deepEqual(shown, [2, 7, 2]);
+  });
+});
+
+test("a press in a dialog over the window reports its place in the window", () => {
+  inPage(() => {
+    for (const [viewport, pagePosition] of [[true, { x: 642, y: 321 }], [false, { x: 542, y: -79 }]]) {
+      const { player, sent } = dialogPlayer(viewport);
+      const dialog = dialogView(7, 1280, 720);
+      const button = {
+        _id: 9,
+        _events: new Set(["onPress"]),
+        _props: {},
+        _tracked: 0,
+        getBoundingClientRect: () => ({ left: 600, top: 300, right: 700, bottom: 340 }),
+        closest: (selector) => (selector === ".nsh-modal.nsh-viewport" ? dialog : null),
+      };
+      player.editable = () => false;
+      player.viewOf = () => button;
+      player.ancestors = () => [button];
+      player.pointerDown({ pointerId: 1, pointerType: "touch", button: 0, clientX: 640, clientY: 320, target: button });
+      // Released elsewhere on the page: still in the dialog's coordinates.
+      player.pointerUp({ pointerId: 1, clientX: 642, clientY: 321, target: {} }, false);
+      const [, payload] = sent.find(([name]) => name === "onPress");
+      assert.deepEqual(payload.position, { x: 42, y: 21 });
+      assert.deepEqual(payload.pagePosition, pagePosition);
+    }
+  });
+});
+
+test("the page does not scroll under a dialog or an alert over the window", () => {
+  const cases = [
+    [true, true, true],
+    [true, false, false],
+    [false, true, false],
+  ];
+  for (const [viewport, onDialog, prevented] of cases) {
+    const { player } = dialogPlayer(viewport);
+    player.scrollChain = () => [];
+    const target = { closest: (selector) => (onDialog && selector === ".nsh-viewport" ? {} : null) };
+    let wasPrevented = false;
+    const e = { deltaX: 0, deltaY: 120, deltaMode: 0, ctrlKey: false, shiftKey: false, target };
+    player.wheel({ ...e, preventDefault: () => (wasPrevented = true) });
+    assert.equal(wasPrevented, prevented, `viewport ${viewport}, on a dialog ${onDialog}`);
+  }
+});
+
+/** A fake engine's `nsh_data`: what was handed over, as `[name, bytes, ok]`. */
+function dataSink(player) {
+  const handed = [];
+  player.wasm.nsh_data = (np, nl, dp, dl, ok) => {
+    handed.push([player.str(np, nl), [...player.bytes(dp, dl)], ok]);
+    return -1;
+  };
+  return handed;
+}
+
+/** Runs `f` with `fetch` answering `respond(url)`; the URLs it was asked for. */
+async function withFetch(respond, f) {
+  const fetched = [];
+  const saved = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    fetched.push(String(url));
+    return respond(url);
+  };
+  try {
+    await f();
+  } finally {
+    globalThis.fetch = saved;
+  }
+  return fetched;
+}
+
+test("the runtime's data comes from the URL the page names and reaches the engine", async () => {
+  const { player } = fakePlayer({ data: { syntaxes: "https://example.test/nsh-syntaxes.0123456789.bin" } });
+  const handed = dataSink(player);
+  const fetched = await withFetch(
+    () => ({ ok: true, arrayBuffer: async () => new Uint8Array([1, 2, 3]).buffer }),
+    () => player.loadData("syntaxes"),
+  );
+  assert.deepEqual(fetched, ["https://example.test/nsh-syntaxes.0123456789.bin"]);
+  assert.deepEqual(handed, [["syntaxes", [1, 2, 3], 1]]);
+});
+
+test("data that does not load reaches the engine as none", async () => {
+  const { player } = fakePlayer({ data: { syntaxes: "https://example.test/missing.bin" } });
+  const handed = dataSink(player);
+  const warn = console.warn;
+  console.warn = () => {};
+  try {
+    await withFetch(() => ({ ok: false, status: 404, statusText: "Not Found" }), () => player.loadData("syntaxes"));
+  } finally {
+    console.warn = warn;
+  }
+  assert.deepEqual(handed, [["syntaxes", [], 0]]);
+});
+
+test("a paused WebSocket holds its events, in order, until the engine resumes it", async () => {
+  const { player } = fakePlayer();
+  const sockets = [];
+  const saved = globalThis.WebSocket;
+  globalThis.WebSocket = class {
+    constructor(url) {
+      this.url = url;
+      this.protocol = "";
+      sockets.push(this);
+    }
+    close() {}
+  };
+  const got = [];
+  // As the engine does: it pauses the socket from inside the event that
+  // fills its queue (after "a", and again after "b").
+  player.wasm.nsh_websocket_event = (id, kind, p, l) => {
+    got.push(`${kind}:${new TextDecoder().decode(new Uint8Array(player.wasm.memory.buffer, p, l))}`);
+    if (got.length === 2 || got.length === 3) player.websocketPause(id, true);
+    return -1;
+  };
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+  try {
+    player.websocketStart(1, { url: "ws://example.test/", protocols: [] });
+    const [socket] = sockets;
+    socket.onopen();
+    for (const data of ["a", "b", "c"]) socket.onmessage({ data });
+    socket.onclose({ reason: "done", code: 4000, wasClean: true });
+    assert.deepEqual(got, ["0:", "1:a"]);
+    player.websocketPause(1, false);
+    assert.deepEqual(got, ["0:", "1:a"], "held events enter the engine in a task of their own");
+    await settle();
+    assert.deepEqual(got, ["0:", "1:a", "1:b"]);
+    player.websocketPause(1, false);
+    await settle();
+    assert.deepEqual(got, ["0:", "1:a", "1:b", "1:c", "4:done"]);
+  } finally {
+    clearTimeout(player.timer);
+    globalThis.WebSocket = saved;
+  }
+});
+
+test("a plain Shader uploads the whole built-ins block, progress and overflow at 0", () => {
+  const { player } = fakePlayer();
+  const uploads = [];
+  const gl = new Proxy(
+    {
+      UNIFORM_BUFFER: "uniform",
+      canvas: { width: 0, height: 0, transferToImageBitmap: () => "bitmap" },
+      bufferData: (target, data) => uploads.push([target, Array.from(data)]),
+    },
+    { get: (gl, name) => (name in gl ? gl[name] : () => {}) },
+  );
+  Object.assign(player, {
+    shaderGl: () => gl,
+    shaderProgram: () => ({ program: {}, builtins: {}, uniforms: null, vao: {} }),
+    zoomOf: () => 1,
+  });
+  const el = {
+    _frame: [0, 0, 100, 50],
+    _shader: { layer: {}, words: new Uint32Array(0), kept: 1500, since: null },
+    _shaderCanvas: { width: 0, height: 0, getContext: () => ({ transferFromImageBitmap() {} }) },
+  };
+  const saved = globalThis.devicePixelRatio;
+  globalThis.devicePixelRatio = 2;
+  try {
+    player.renderShader(el, 0);
+  } finally {
+    globalThis.devicePixelRatio = saved;
+  }
+  // `struct Nsh`, 32 bytes as core's `shader::builtins` lays it out: size,
+  // time, scale, progress, overflow and padding.
+  assert.deepEqual(uploads, [["uniform", [100, 50, 1.5, 2, 0, 0, 0, 0]]]);
 });

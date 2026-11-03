@@ -15,8 +15,8 @@ function DragCard() {
         onPanEnd={(e) => {
           flings.update((n) => n + 1);
           // Spring home, starting with the release velocity.
-          x.spring(0, { velocity: e.velocityX, stiffness: 200, damping: 16 });
-          y.spring(0, { velocity: e.velocityY, stiffness: 200, damping: 16 });
+          x.spring(0, { velocity: e.velocity.x, stiffness: 200, damping: 16 });
+          y.spring(0, { velocity: e.velocity.y, stiffness: 200, damping: 16 });
         }}
         style={{
           width: 120,
@@ -47,7 +47,7 @@ function ResponderDot() {
       state.set("dragging");
     },
     onPanResponderMove: (_, g) => pos.set({ x: start.x + g.dx, y: start.y + g.dy }),
-    onPanResponderRelease: (_, g) => state.set(`released, vx ${g.vx.toFixed(2)} pt/ms`),
+    onPanResponderRelease: (_, g) => state.set(`released, vx ${g.vx.toFixed(0)} pt/s`),
     onPanResponderTerminate: () => state.set("taken over"),
   });
   return (

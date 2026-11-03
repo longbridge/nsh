@@ -4,11 +4,11 @@
 
 use super::host::{HostCx, HostInput, HostList, HostValue, field};
 use crate::{
-    AccessibilityProp, AccessibilityRole, AccessibilityState, AutoFill, CellSlot, EdgeInsets,
-    ImageScales, ImageSource, KeyboardTaps, ListContentStyle, ModalProp, Prop, ScrollProp,
-    StatusBarSetting, StatusBarStyle, Viewability,
+    AccessibilityCurrent, AccessibilityProp, AccessibilityRole, AccessibilityState, AutoFill,
+    CellSlot, EdgeInsets, ImageScales, ImageSource, KeyboardTaps, ListContentStyle, ModalProp,
+    Prop, ScrollProp, StatusBarSetting, StatusBarStyle, Viewability,
     element::TsTypes,
-    geometry::{Bounds, Points, point, size},
+    geometry::{Bounds, Percentage, Points, point, size},
     mount::ModalConfig,
     ops::OverlayProp,
     overlay::{OverlayAnchor, TooltipContent},
@@ -132,8 +132,9 @@ impl HostValue for StatusBarSetting {
 impl HostValue for Viewability {
     fn decode<I: HostInput>(input: &I, _: &mut HostCx) -> Option<Self> {
         Some(Viewability {
-            view_area_percent: number(input, "viewAreaCoveragePercentThreshold"),
-            item_visible_percent: number(input, "itemVisiblePercentThreshold"),
+            view_area_coverage_threshold: number(input, "viewAreaCoverageThreshold")
+                .map(Percentage),
+            item_visible_threshold: number(input, "itemVisibleThreshold").map(Percentage),
         })
     }
 
@@ -163,24 +164,44 @@ impl HostValue for PanActivation {
     }
 }
 
-/// `{ disabled, selected, checked: true | false | "mixed", busy, expanded }`.
+/// `{ disabled, selected, checked: true | false | "mixed", busy, expanded,
+/// pressed: true | false | "mixed", current: true | false | "page" | ... }`.
 impl HostValue for AccessibilityState {
     fn decode<I: HostInput>(input: &I, _: &mut HostCx) -> Option<Self> {
         let flag = |key| input.field(key).and_then(|v| v.as_bool()).unwrap_or(false);
-        let checked = input.field("checked");
-        Some(AccessibilityState {
-            disabled: flag("disabled"),
-            selected: flag("selected"),
-            checked: match checked.as_ref().and_then(|c| c.as_bool()) {
+        let tristate = |key| {
+            let value = input.field(key);
+            match value.as_ref().and_then(|c| c.as_bool()) {
                 Some(true) => Some(Checked::True),
                 Some(false) => Some(Checked::False),
-                None => checked
+                None => value
                     .and_then(|c| c.as_string())
                     .filter(|s| s == "mixed")
                     .map(|_| Checked::Mixed),
-            },
+            }
+        };
+        let current = input.field("current");
+        Some(AccessibilityState {
+            disabled: flag("disabled"),
+            selected: flag("selected"),
+            checked: tristate("checked"),
             busy: flag("busy"),
             expanded: input.field("expanded").and_then(|v| v.as_bool()),
+            pressed: tristate("pressed"),
+            // `false` and unknown words are no current item, as ARIA has it.
+            current: match current.as_ref().and_then(|c| c.as_bool()) {
+                Some(true) => Some(AccessibilityCurrent::True),
+                Some(false) => None,
+                None => match current.and_then(|c| c.as_string()).as_deref() {
+                    Some("page") => Some(AccessibilityCurrent::Page),
+                    Some("step") => Some(AccessibilityCurrent::Step),
+                    Some("location") => Some(AccessibilityCurrent::Location),
+                    Some("date") => Some(AccessibilityCurrent::Date),
+                    Some("time") => Some(AccessibilityCurrent::Time),
+                    Some("true") => Some(AccessibilityCurrent::True),
+                    _ => None,
+                },
+            },
         })
     }
 
@@ -188,7 +209,11 @@ impl HostValue for AccessibilityState {
         types.declare("AccessibilityState", |_| {
             "/** The state assistive technologies report (`accessibilityState`). */\n\
              export interface AccessibilityState {\n  disabled?: boolean;\n  selected?: boolean;\n  \
-             checked?: boolean | \"mixed\";\n  busy?: boolean;\n  expanded?: boolean;\n}"
+             checked?: boolean | \"mixed\";\n  busy?: boolean;\n  expanded?: boolean;\n  \
+             /** A toggle button that is on or off (ARIA's `aria-pressed`). */\n  \
+             pressed?: boolean | \"mixed\";\n  \
+             /** The current item of a set (ARIA's `aria-current`): a pagination's page, a wizard's step. */\n  \
+             current?: boolean | \"page\" | \"step\" | \"location\" | \"date\" | \"time\";\n}"
                 .into()
         })
     }
@@ -513,6 +538,18 @@ pub(crate) fn role<I: HostInput>(input: &I, cx: &mut HostCx) -> Option<Accessibi
     Some(AccessibilityProp::Role(role.unwrap_or_default()))
 }
 
+/// `accessibilityLevel`: a whole number from 1; anything else is none.
+pub(crate) fn accessibility_level<I: HostInput>(
+    input: &I,
+    _: &mut HostCx,
+) -> Option<AccessibilityProp> {
+    let level = input
+        .as_number()
+        .filter(|n| *n >= 1.0 && n.fract() == 0.0 && *n <= f64::from(u32::MAX))
+        .map(|n| n as u32);
+    Some(AccessibilityProp::Level(level))
+}
+
 /// `importantForAccessibility`.
 pub(crate) fn important<I: HostInput>(input: &I, _: &mut HostCx) -> Option<AccessibilityProp> {
     Some(match input.as_string().as_deref() {
@@ -556,6 +593,46 @@ pub(crate) fn content_offset<I: HostInput>(input: &I, _: &mut HostCx) -> Option<
     Some(ScrollProp::ContentOffset(point(n("x"), n("y"))))
 }
 
+/// `scrollbar`: a boolean, or the object of a theme (kept as JSON for the
+/// set that draws the built-in bar).
+pub(crate) fn scrollbar<I: HostInput>(input: &I, _: &mut HostCx) -> Option<Prop> {
+    Some(Prop::Scrollbar(match input.as_bool() {
+        Some(shows) => shows.into(),
+        None if input.is_object() => {
+            crate::ScrollbarSetting::Themed(std::sync::Arc::new(json_of(input)))
+        }
+        None => crate::ScrollbarSetting::Shown,
+    }))
+}
+
+/// `input` as JSON: what is neither a boolean, number, string, array nor
+/// object (a function) is `null`.
+fn json_of<I: HostInput>(input: &I) -> crate::JsonValue {
+    use crate::JsonValue;
+    if let Some(b) = input.as_bool() {
+        return JsonValue::Bool(b);
+    }
+    if let Some(n) = input.as_number() {
+        return serde_json::Number::from_f64(n).map_or(JsonValue::Null, JsonValue::Number);
+    }
+    if let Some(s) = input.as_string() {
+        return JsonValue::String(s);
+    }
+    if input.as_list().is_some() {
+        return JsonValue::Array(input.items().iter().map(json_of).collect());
+    }
+    if input.is_object() {
+        return JsonValue::Object(
+            input
+                .entries()
+                .into_iter()
+                .map(|(k, v)| (k, json_of(&v)))
+                .collect(),
+        );
+    }
+    JsonValue::Null
+}
+
 /// `keyboardShouldPersistTaps`: a boolean or `"never"` / `"always"` /
 /// `"handled"`.
 pub(crate) fn keyboard_taps<I: HostInput>(input: &I, _: &mut HostCx) -> Option<ScrollProp> {
@@ -584,4 +661,98 @@ pub(crate) fn orientations<I: HostInput>(input: &I, _: &mut HostCx) -> Option<Mo
         };
     }
     Some(ModalProp::Orientations(bits))
+}
+
+/// A shader's `uniforms`: `{ name: value }`, a value a number, a CSS color,
+/// an animated value or a list of them; what is none of them is left out
+/// with a warning.
+impl HostValue for crate::shader::ShaderUniforms {
+    fn decode<I: HostInput>(input: &I, cx: &mut HostCx) -> Option<Self> {
+        if !input.is_object() {
+            return None;
+        }
+        let mut values = Vec::new();
+        for (name, value) in input.entries() {
+            match uniform_value(&value, 0) {
+                Some(v) => values.push((name.as_str().into(), v)),
+                None => cx.warn(format!(
+                    "uniform `{name}`: a number, a color, an animated value or a list of them"
+                )),
+            }
+        }
+        Some(crate::shader::ShaderUniforms(values))
+    }
+
+    fn ts_type(types: &mut TsTypes) -> String {
+        let value = types.declare("ShaderUniform", |_| {
+            "/** A value of a shader's uniform: a number (`f32`, `i32`, `u32`), a color\n \
+             * (`vec3f` / `vec4f`, sRGB 0..1), an animated value, or a list of them (a\n \
+             * vector's components, an `array<vec4f, N>`'s items). */\n\
+             export type ShaderUniform = number | ColorValue | AnimatedNode | readonly ShaderUniform[];"
+                .into()
+        });
+        format!("Record<string, {value}>")
+    }
+}
+
+/// An effect's `progress`: a number or an animated value.
+impl HostValue for crate::shader::ShaderProgress {
+    fn decode<I: HostInput>(input: &I, _: &mut HostCx) -> Option<Self> {
+        if let Some(n) = input.as_number() {
+            return Some(crate::shader::ShaderProgress::Number(
+                crate::geometry::Percentage(n as f32),
+            ));
+        }
+        input
+            .animated_node()
+            .map(crate::shader::ShaderProgress::Animated)
+    }
+
+    fn ts_type(_: &mut TsTypes) -> String {
+        "number | AnimatedNode".into()
+    }
+}
+
+/// A transition's `value`: a string, a number or a boolean.
+impl HostValue for crate::shader::TransitionKey {
+    fn decode<I: HostInput>(input: &I, _: &mut HostCx) -> Option<Self> {
+        if let Some(b) = input.as_bool() {
+            return Some(crate::shader::TransitionKey::Bool(b));
+        }
+        if let Some(n) = input.as_number() {
+            return Some(crate::shader::TransitionKey::number(n));
+        }
+        input
+            .as_string()
+            .map(|s| crate::shader::TransitionKey::String(s.as_str().into()))
+    }
+
+    fn ts_type(_: &mut TsTypes) -> String {
+        "string | number | boolean".into()
+    }
+}
+
+fn uniform_value<I: HostInput>(input: &I, depth: u32) -> Option<crate::shader::UniformValue> {
+    use crate::shader::UniformValue;
+    if let Some(n) = input.as_number() {
+        return Some(UniformValue::Number(n as f32));
+    }
+    if let Some(s) = input.as_string() {
+        return crate::Color::parse(&s).map(UniformValue::Color);
+    }
+    if let Some(node) = input.animated_node() {
+        return Some(UniformValue::Animated(node));
+    }
+    let list = input.as_list()?;
+    // Vectors in arrays: two levels.
+    if depth > 1 {
+        return None;
+    }
+    (0..list.len())
+        .map(|i| {
+            list.item(i)
+                .and_then(|item| uniform_value(&item, depth + 1))
+        })
+        .collect::<Option<Vec<_>>>()
+        .map(UniformValue::List)
 }

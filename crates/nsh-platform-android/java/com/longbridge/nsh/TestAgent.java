@@ -97,17 +97,23 @@ final class TestAgent {
 
     /** The time the finger went down, for the events of one gesture. */
     private static long downTime;
+    /** The window that received the current finger's down. */
+    private static View touchTarget;
 
     /** One finger's `action` (`MotionEvent.ACTION_*`) at `x`, `y` in the window. */
     static void touch(NshView host, int action, float x, float y) {
         onMain(() -> {
             long now = SystemClock.uptimeMillis();
-            if (action == MotionEvent.ACTION_DOWN) downTime = now;
-            View root = target(host);
+            if (action == MotionEvent.ACTION_DOWN) {
+                downTime = now;
+                touchTarget = target(host);
+            }
+            View root = touchTarget != null ? touchTarget : target(host);
             MotionEvent e = MotionEvent.obtain(downTime, now, action, x, y, 0);
             e.setSource(android.view.InputDevice.SOURCE_TOUCHSCREEN);
             root.dispatchTouchEvent(e);
             e.recycle();
+            if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) touchTarget = null;
             return null;
         });
     }
@@ -116,25 +122,29 @@ final class TestAgent {
      * A finger's drag along ({@code xs}, {@code ys}): down at the first
      * point, a move to each next one a frame ({@code frameMs}) apart, up at
      * the last; scheduled on the UI thread as the display paces real ones.
-     * Returns when it is done.
+     * Each event carries the time it is due, as a touchscreen stamps its
+     * samples: a busy UI thread takes them late and close together, and
+     * the velocity the views compute (a scroll view's fling) still follows
+     * the finger. Returns when it is done.
      */
     static void drag(NshView host, float[] xs, float[] ys, int frameMs) {
         java.util.concurrent.CountDownLatch done = new java.util.concurrent.CountDownLatch(1);
         MAIN.post(() -> {
             long start = SystemClock.uptimeMillis();
+            View window = target(host);
             int last = xs.length - 1;
             for (int i = 0; i <= last; i++) {
                 final int at = i;
+                final long due = start + (long) at * frameMs;
                 MAIN.postAtTime(() -> {
                     int action = at == 0 ? MotionEvent.ACTION_DOWN
                             : at == last ? MotionEvent.ACTION_UP : MotionEvent.ACTION_MOVE;
-                    long now = SystemClock.uptimeMillis();
-                    MotionEvent e = MotionEvent.obtain(start, now, action, xs[at], ys[at], 0);
+                    MotionEvent e = MotionEvent.obtain(start, due, action, xs[at], ys[at], 0);
                     e.setSource(android.view.InputDevice.SOURCE_TOUCHSCREEN);
-                    target(host).dispatchTouchEvent(e);
+                    window.dispatchTouchEvent(e);
                     e.recycle();
                     if (at == last) done.countDown();
-                }, start + (long) at * frameMs);
+                }, due);
             }
         });
         try {
@@ -144,11 +154,15 @@ final class TestAgent {
         }
     }
 
-    /** Where touches go: the dialog shown over the app, else the app's window. */
+    /**
+     * Where touches go: the system dialog shown over the app, else the
+     * app's topmost `Dialog` (a window of its own), else the app's window.
+     */
     private static View target(NshView host) {
         Dialog d = shownDialog;
         if (d != null && d.isShowing() && d.getWindow() != null) return d.getWindow().getDecorView();
-        return host.getRootView();
+        View modal = host.mounter().topModalWindow();
+        return modal != null ? modal : host.getRootView();
     }
 
     /** Types `text` into the focused field, key by key where keys type it. */

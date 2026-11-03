@@ -1,4 +1,4 @@
-//! `nsh/canvas` end to end: what a `draw` records (the generated methods and
+//! `Canvas` end to end: what a `draw` records (the generated methods and
 //! properties, and the hand-written ones) as the core decodes it.
 
 use std::time::Duration;
@@ -44,7 +44,7 @@ mount(
 "##;
 
 /// The app, compiled by nsh and loaded as bytecode.
-fn start(app: &str) -> (Engine, crossbeam_channel::Receiver<MountBatch>) {
+pub(crate) fn start(app: &str) -> (Engine, crossbeam_channel::Receiver<MountBatch>) {
     static APPS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
     let dir = std::env::temp_dir().join(format!(
         "nsh-canvas-{}-{}",
@@ -72,6 +72,7 @@ fn start(app: &str) -> (Engine, crossbeam_channel::Receiver<MountBatch>) {
         trace: false,
         network: None,
         websocket: None,
+        refuse_connections: None,
         filesystem: None,
         assets: None,
         environment: Default::default(),
@@ -88,6 +89,7 @@ fn start(app: &str) -> (Engine, crossbeam_channel::Receiver<MountBatch>) {
         clipboard: None,
         host: Default::default(),
         picker: None,
+        speech: None,
     };
     (
         Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap(),
@@ -343,9 +345,7 @@ fn redrawing_derives_the_same_nodes() {
 
 /// Hit tests answered natively while drawing and, on a kept context,
 /// afterwards; `fontVariantNumeric` records with the font kept apart.
-/// (Imported from `nsh/canvas`, where they were first: they still are.)
-const HIT: &str = r#"import { signal, mount } from "nsh";
-import { Canvas, Path2D, CanvasRenderingContext2D } from "nsh";
+const HIT: &str = r#"import { Canvas, CanvasRenderingContext2D, mount, Path2D, signal } from "nsh";
 
 const later = signal("");
 const p = new Path2D();

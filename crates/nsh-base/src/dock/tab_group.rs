@@ -304,10 +304,10 @@ pub(crate) fn tab(
         .inline_style(a.props.tab_style)
         .element_ref(&me)
         .on_press(move || a.select(&pressed))
-        .on_hover_in(move || {
+        .on_mouse_enter(move |_: &MouseEvent| {
             hovered.replace(true);
         })
-        .on_hover_out(move || {
+        .on_mouse_leave(move |_: &MouseEvent| {
             hovered.replace(false);
         })
         .on_press_down(move || {
@@ -362,7 +362,7 @@ fn slot_at(
     let mut others: Vec<&(PanelId, Bounds<Points>)> =
         tabs.iter().filter(|(p, _)| p != panel).collect();
     let key = |b: &Bounds<Points>| if across { b.center().y } else { b.center().x };
-    others.sort_by(|x, y| key(&x.1).0.total_cmp(&key(&y.1).0));
+    crate::sort::sort_by(&mut others, |x, y| key(&x.1).0.total_cmp(&key(&y.1).0));
     let pointer = if across { at.y } else { at.x };
     let index = others.iter().filter(|(_, b)| key(b) < pointer).count();
     (index, others.into_iter().map(|(p, _)| p.clone()).collect())

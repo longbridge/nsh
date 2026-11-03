@@ -36,32 +36,12 @@
   into the `drawRect:` context, keeping its own transform and path in view space; Android `CanvasBox.java` interprets an `int[]` (`encode.rs`). Not
   supported: `getImageData` / `putImageData`, filters.
 
-**Partial redraws.** While animated values animate, iOS (`setNeedsDisplayInRect:`) and macOS (`NshView::redraw_rect`:
-`setNeedsDisplayInRect:` on the content layer) redraw only what changes: `nsh_core::canvas::DamageScan` replays the
-operations for their geometry (transform with `save` / `restore`, bounds of the current path and of `Path2D`s, line
-width / joins / caps, shadows) and adds up the bounds of the painting operations that read a slot whose value changed,
-through their own numbers or the state they paint with (transform, current path, `globalAlpha`, paint, line width,
-dash offset). The platform scans with the old values and the new ones and invalidates the union, inflated for
-anti-aliasing (2 pt) and rounded out to whole points; the platform then replays the whole drawing clipped to it
-(`drawRect:` on iOS, the content layer's `drawLayer:inContext:` on macOS; Core Graphics skips what falls outside), so
-the pixels are those of a full redraw (on macOS also with `drawsAsynchronously`: checked against a full redraw by
-screen capture). Bounds are conservative: curves by their control points, arcs by their circle, strokes by half the
-width under the transform's largest scale times the miter limit (miter joins) or √2 (square caps), shadows by twice
-their blur past their offset, text by 1.5 em per character and 1.5 em above and below the baseline (no text engine at
-hand). The scan falls back to a full redraw (`Damage::All`) for a clip that reads a changed value, a painting
-operation that reads one under a composite operation other than `source-over` (`copy`, `source-in`, ... change pixels
-outside the shape), an image at its natural size and bounds that are not finite. A scan allocates nothing (its save
-stack is kept); two per changed frame cost microseconds next to the replay. Linux rasterizes each canvas into an
-image surface at the surface's scale, shown as textures of 256 pixel tiles (`canvas.rs` `Raster`): an animation
-clears the damaged area and replays the drawing clipped to it, and only the tiles it touches become new textures
-(GSK keeps the others on the GPU). There, what the operations before the first one reading a slot painted
-(`canvas::first_animated`) is kept from the last full replay and copied back into the area, so only the painting from
-that operation on runs again (the operations before it still set the state; their path ops are skipped too when the
-animated part begins a path of its own). macOS keeps that part too, as a `CGLayer` (`canvas.rs` `Prefix`), when it
-is long (128 operations or more: drawing a layer costs about what replaying a sparkline does) and the drawing has been
-painted unchanged 30 times (a drawing that keeps changing would rasterize it on the main thread more often than it
-draws from it); such a canvas draws at once, where its layer is made. Other canvases draw at once too unless they
-paint 10 times a second or more (`canvas.rs` `Cadence`), when Core Animation replays them on its threads
+**Partial redraws.** While animated values animate, iOS and macOS (`NshView::redraw_rect`) redraw only the area the
+changed values affect: `nsh_core::canvas::DamageScan` finds it from the recorded operations, falling back to a full
+redraw (`Damage::All`) when it cannot bound the change, and the platform replays the whole drawing clipped to it, so
+the pixels are those of a full redraw. Linux rasterizes each canvas into tiled textures (`canvas.rs` `Raster`) and
+replays only the damaged area; Linux and macOS (`canvas.rs` `Prefix`) also keep what is painted before the first
+animated operation, for long drawings; canvases macOS repaints often are replayed by Core Animation on its threads (`canvas.rs` `Cadence`)
 (`docs/dev/macos.md`). On Linux, a canvas out of sight (outside a clipping ancestor or the window) is not
 drawn until it comes into sight: its animations ask for no frames. Android, the web runtime and the GPUI backend (which rasterizes the drawing, text outlines
 included, with tiny-skia into a pixmap in device pixels: `nsh-platform-gpui` `canvas.rs`) still redraw the
@@ -84,6 +64,35 @@ height, from the first line the core's text engine lays it out in: `canvas::line
 `path_contains` / `stroke_contains` for a `Path`; animated values count as 0 there too).
 
 The drawing format is documented in `crates/nsh-core/src/canvas.rs`.
+
+**SVGs** (Rust components: `element::svg(src)`, `Svg`, in the prelude; `src` an `ImageSrc`, as `image`'s:
+`asset!("icon.svg")`, a URL, a file, or `ImageSrc::svg_markup(text)`). An SVG document drawn as authored, in
+its own colors, as an `<svg>` written inline in a web page: a canvas whose drawing `nsh_core::svg::drawing`
+(feature `svg`) records from usvg's tree (paths, solid colors, linear and radial gradients, opacity, groups and their
+transforms, stroke properties, clip paths, blend modes as composite operations), so every platform replays vectors
+at its device pixels and an icon is sharp at any size and scale (an image of an SVG is a raster: Linux draws one at
+its view's size bucket, Windows and GPUI one at `svg::OVERSAMPLE` per point and scale it). Its bytes come through the
+shared image loader (`images.md` "Loading and memory": dedup, L3, the disk cache for remote ones; the engine gives the
+core its assets, access policy and disk cache with `Core::set_image_context`), and the document is parsed once per
+source key on a decode thread (`svg/drawings.rs`) and kept in the image budget, costed by its operations, leased while
+an element shows it and shared by every size. Inline markup, and a drawing in memory, show in the first frame; another
+source draws nothing until it loads (an `svg()` of a static source re-renders nothing: its drawing is a signal the
+canvas reads). `currentColor` is the canvas view's text color (`color`, inherited), so
+`stroke="currentColor"` icons follow the theme and `text-*` classes: usvg resolves `currentColor` while it parses, so
+the root gets a `color` of a color the document does not write (where it sets none itself) and the paints of that
+color become `ViewPaint::FillCurrentColor` / `StrokeCurrentColor`, which the core resolves as it resolves the other
+view paints (and sends again when the text color changes). The drawing is in the `viewBox`'s coordinates (usvg's
+mapping onto the SVG's size undone) after one `ViewPaint::Fit` (`canvas::ViewBoxFit`): the core maps the view box
+onto the canvas's box by `preserveAspectRatio` (`xMidYMid meet` by default; an SVG without a `viewBox` scales as an
+image of its size) and sends such a drawing after the round's layout, and again when the layout gives the canvas
+another size (`Core::send_fitted`). The canvas lays out as an image: at the SVG's `width` × `height` (else its
+`viewBox`'s size) where its style sets no size, keeping that ratio where it sets one side (`LeafContext::Image`).
+What a canvas has no operation for is drawn as near as it can be: a group's opacity multiplies its shapes' (exact
+where they do not overlap), a clip path of several shapes clips to them as one path, gradients pad
+(`spreadMethod` aside) and a gradient stop of `currentColor` is black; masks and filters are left out (what they
+apply to is drawn as it is) and a pattern paints nothing (each logged); `<text>` and `<image>` are not drawn. The
+web runtime, without the feature, shows it as an `image()` of a `data:` URI, contained in its box, where the browser
+draws it and `currentColor` is black.
 
 **Nodes** (Rust components). A drawing can name parts of what it draws as elements of their own
 (`Painter::node(CanvasNode::new(bounds, role, label))`, with `test_id` and `selected`): a grid's cells, a chart's bars.

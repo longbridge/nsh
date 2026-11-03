@@ -8,17 +8,33 @@ use super::*;
 
 /// [`start`] for documents that may hold bold text already.
 fn start_any(doc: Value) -> Headless {
-    let session = session(doc);
     let mut config = EngineConfig {
         viewport: Size::new(px(800.0), px(900.0)),
+        // Made in the engine, as `start`'s.
         ..EngineConfig::new(Root::new::<Harness>(move || HarnessProps {
-            session: Some(session.clone()),
+            session: Some(session(doc.clone())),
         }))
     };
     config.environment.os = Os::Linux;
     config.environment.idiom = Idiom::Desktop;
     let mut app = Headless::start(config).expect("the engine starts");
     app.wait_for("text:Sel 1-1").unwrap();
+    app
+}
+
+/// [`start`] on a manual clock, which moves only as the test moves it.
+fn start_manual(doc: Value) -> Headless {
+    let mut config = EngineConfig {
+        viewport: Size::new(px(800.0), px(900.0)),
+        clock: nsh_engine::Clock::manual(std::time::SystemTime::now()),
+        ..EngineConfig::new(Root::new::<Harness>(move || HarnessProps {
+            session: Some(session(doc.clone())),
+        }))
+    };
+    config.environment.os = Os::Linux;
+    config.environment.idiom = Idiom::Desktop;
+    let mut app = Headless::start(config).expect("the engine starts");
+    app.wait_for("text:Ready").unwrap();
     app
 }
 
@@ -399,11 +415,11 @@ fn typing_elsewhere_starts_a_new_undo_group() {
 
 #[test]
 fn a_pause_starts_a_new_undo_group() {
-    let mut app = start(paragraphs(&[""]));
+    let mut app = start_manual(paragraphs(&[""]));
     typed(&mut app, "ab");
-    // Transactions take the wall clock's time, not the app's manual
-    // clock: the pause is real (the history's delay is 500 ms).
-    std::thread::sleep(Duration::from_millis(600));
+    // Past the history's delay (500 ms) on the engine's clock, which
+    // transactions take their time from (`Date.now()` on the web).
+    app.fast_forward(Duration::from_millis(600)).unwrap();
     typed(&mut app, "cd");
     tree(&mut app, r#"doc(paragraph("abcd"))"#);
     keys(&mut app, &["mod+z"]);

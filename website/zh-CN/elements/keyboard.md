@@ -1,7 +1,7 @@
 ---
 title: 键盘
 description: keyboard-inset-height 环境变量、Keyboard.dismiss 和键盘高度：让内容保持在软键盘之上，并随键盘移动。
-order: 10.7
+order: 120
 group: primitives
 demo: el-keyboard
 ---
@@ -53,7 +53,7 @@ function App() {
       <View style={{ flexDirection: "row", gap: 8, padding: 8, borderTopWidth: 1, borderTopColor: "#e5e5e5" }}>
         <Input
           value={draft()}
-          onChange={(v) => draft.set(v)}
+          onChange={({ value }) => draft.set(value)}
           placeholder="Message"
           style={{ flex: 1, fontSize: 16, padding: 8 }}
         />
@@ -136,7 +136,7 @@ function Done() {
 
 | TSX | Rust | 返回 |
 |---|---|---|
-| `keyboardFrame()` | `keyboard_height()`、`keyboard_duration()` | 软键盘覆盖在 NSH 界面上的高度，单位为点（隐藏时为 0），以及其显示或隐藏动画的时长，单位为秒。 |
+| `keyboardFrame()` | `keyboard_height()`、`keyboard_duration()` | 软键盘覆盖在 NSH 界面上的高度，单位为点（隐藏时为 0），以及其显示或隐藏动画的时长，单位为毫秒。 |
 
 两者都是响应式的：读取它们的 effect、JSX 表达式或样式闭包会在键盘显示、隐藏或改变高度时重新运行。
 

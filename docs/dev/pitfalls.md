@@ -20,9 +20,9 @@ Things that were found the hard way. Read the section of the area you change bef
 - **Nodes are released by GC, not by Remove.** A memo may keep removed nodes and insert them again, so `Remove` only detaches;
   `Release` (queued by the node's finalizer) frees the node and its native view.
 - **`nsh_js::BUNDLE_NAME` (`bundle.js`)** is the module name of every bundle and is how stacks are matched for symbolication; `BYTECODE_VERSION`
-  names the QuickJS-NG release and revision, `BC_VERSION` and the byte order, never the binding. Native and
-  browser targets use `quickjs-jit` (the browser uses its interpreter and pregenerated bindings) and must build
-  the same QuickJS-NG, as the web runtime loads what the native CLI compiles. Tests hold it to the linked release, the bytecode's format byte and the `-sys` versions
+  names the QuickJS-NG release and revision, `BC_VERSION` and the byte order, never the binding. The native
+  targets use `quickjs-jit` and must build the same QuickJS-NG as the CLI that compiles their bytecode (the web
+  runs no QuickJS). Tests hold it to the linked release, the bytecode's format byte and the `-sys` versions
   in `Cargo.lock` (`ENGINES`): update them together when upgrading either.
 - **Encoded operations' codes** (`ANIMATION_*`, `CV_*`) come from `nsh_core::js` (`protocol.rs`, `canvas.rs`): never write a code's value
   by hand in `nsh-js`.
@@ -52,6 +52,19 @@ Things that were found the hard way. Read the section of the area you change bef
   layout could round a node from stale values (a frame one point off from a layout from scratch). The core reaches every node through
   its parent, its containing block (there is no `position: static`), and sums the origins from the root down, in Taffy's order, so the
   `f32` sums and the rounding are Taffy's to the bit (`--trace` output is unchanged).
+- **Layout rounds to device pixels, not whole points** (`round`, `rounded` and `ceil_to_pixel` in `core/mod.rs`, at the
+  environment's `pixelRatio`). Android's densities are not whole numbers (2.625 on a 420 dpi phone), and its views sit on whole
+  pixels, each frame rounded in its parent (`Mounter.frame`): rounded to whole points, a box 4 points down (10.5 pixels) and 30
+  tall was 78 pixels while a child as tall was 79, so a scroll view cut the child's last row of pixels off; and a text measured
+  21⅓ points (56 pixels) laid out at 22 (58), the 2 pixels below its last line. Text measurements are rounded up to a device
+  pixel (`MeasureCache` holds the ratio and drops its sizes when the ratio changes, which lays everything out again); at one
+  pixel per point this is Taffy's rounding, but for a value within a 64th of a half, which rounds up. Android's `lineHeight` is a whole number of pixels, rounded to the
+  nearest as a TextView's dp line height is (`ExactLineHeight`): rounded up, 21 points at 2.625 were 56 pixels, a third of
+  a point per line taller than the design. Sizes and offsets are counted in whole pixels before they become points
+  (`pixel`, `span`): `round(to) - round(from)` in points differs in its last bits with where the edges are, and a 28 point
+  row at 2.625 (73.5 pixels) has every other edge on a half pixel, which an `f32`'s hair rounds either way. As a scroll
+  moved DataTable's body a pixel, every frame in it was sent again (460–1000 mount items a frame on a Pixel 10 Pro instead
+  of 3); a half pixel is snapped first, so it always rounds up.
 - **The core keeps its own layout tree** (`core/layout_tree.rs`: Taffy's algorithms over the core's nodes through Taffy's low-level
   traits, as `TaffyTree` runs them, call for call). `TaffyTree::mark_dirty` stops at the first node whose cache is already empty, taking
   its ancestors for dirty too; nodes of a `display: none` subtree and absolutely positioned ones always have empty caches while the nodes
@@ -124,6 +137,17 @@ Things that were found the hard way. Read the section of the area you change bef
   f64"); integers decode either way. A new float field in a message takes the same attribute.
 
 ## iOS, UIKit and Mac Catalyst
+
+- **An input's `pointerEvents` is UIKit's, not `NshView`'s**: inputs are a plain container around a text view, with no
+  `hitTest:` of NSH's, so `none` / `box-none` turn the container's user interaction off (`set_view_props`); it can still
+  become the first responder and take typed text. Without it a hidden input (the `Editor`'s sink at its caret) takes
+  the touches of whatever lies under it. A JS responder that blocks also cancels the `PressRecognizer`s of the views
+  around it (`set_js_responder`): they keep tracking a finger a descendant took, and its lift was a press on them.
+
+- **Retained navigation tabs hide the stack's container or an ancestor, not the navigation controller's view**:
+  check the entire ancestor chain before a stack updates a shared system tab bar, including from transition
+  callbacks. Visibility changes synchronize the newly visible stack after the batch. `TabBar.hidden` and the
+  visible stack's request are independent reasons: each updates its own state, and either keeps the bar hidden.
 
 - **A standalone `UITabBar` can establish its natural height before its native component host is sized** (verified on
   the iOS 27 simulator). Flexible-height autoresizing then adds the host's height to that initial height. In
@@ -258,8 +282,18 @@ Things that were found the hard way. Read the section of the area you change bef
   line, so a hit past its end is snapped to the line's end (`TextLayouts.hitTest`, upstream); `getSelectionPath` adds
   margin rectangles when a range ends at a wrapped line's end, so range boxes come from the run's carets
   (`TextLayouts.rangeRects`), not from the path.
+- **Android, view properties set every frame**: `setAlpha`, `setTranslationX`, `setScaleX`, `setRotation` and the like
+  return early on an unchanged value, `setCameraDistance` does not: it invalidates the view on every call. Animated
+  values and transitions write a view's whole transform each frame, so `Mounter.setPerspective` sets it only when it
+  moves (it was a fifth of the UI thread's time on the gallery's Animations demo).
+- **Android, shadows moved by fractions of a pixel**: Skia caches a shadow's blurred mask keyed on the subpixel part
+  of its position, so a view moved by a fractional offset each frame blurs its shadows again every frame (on the GPU,
+  each into a new render target, slow on PowerVR). `StackBox`'s push / pop slides move by whole pixels; going back to
+  the gallery's index ran at about half the frame rate before (#519).
 - **Android, JNI event maps intern their keys from a fixed list** (`Java_com_longbridge_nsh_Native_eventMap`): a new payload key must be
   added there or it is dropped silently.
+- **Android, inputs' `pointerEvents`**: `InputBox` is a `FrameLayout`, not a `Box`: it keeps `pointerEvents` itself and
+  refuses touches in `dispatchTouchEvent` for `none` / `box-none`, and `TouchTracker.deepest` reads it as a `Box`'s.
 - **Android, inputs**: `EditText` reconfiguration (input type, filters, single line) sets the same text again and fires
   `afterTextChanged`: only text that differs from the last known one counts as an edit, or JS values are rejected as stale.
   Soft keyboards edit through the input connection (`KeyConnection`: composing text, commits, deletes), hardware keys arrive
@@ -401,6 +435,17 @@ Things that were found the hard way. Read the section of the area you change bef
 - **A view's motion is not observable as one value**: scroll views fling with a private `OverScroller` and views
   animate with `ViewPropertyAnimator`s, so the agent compares a signature of every shown view's place, offset,
   scroll position and opacity between looks.
+- **A drag's events carry the time they are due, not the time they are dispatched**: a touchscreen stamps each
+  sample when the finger was there, and views compute velocity from those stamps (`VelocityTracker`). A busy UI
+  thread (an emulator's software renderer) takes the scheduled events late and close together; stamped with the
+  dispatch time, the swipe's rest before it lifts looked like motion, the scroll view flung (backwards too), and a
+  step's gestures undid each other until scrolling a view into view gave up.
+- **A scroll view that takes a gesture from a child scrolls from the move that passed the slop**: when the finger
+  lands on a view that takes the touch (a field, a button), `ScrollView.onInterceptTouchEvent` takes the gesture at
+  the first move past the touch slop, and what the finger moved up to that event is lost; from a bare spot its own
+  `onTouchEvent` loses only the slop. A swipe that eased out jumped a quarter of its length or more in its first
+  frame, all of it lost on a field. The agent's swipes ease in and out, a quarter frame apart as a drag's samples,
+  so their first moves stay within the slop and each loses about the slop wherever it lands.
 
 ## macOS, AppKit
 
@@ -412,6 +457,12 @@ Things that were found the hard way. Read the section of the area you change bef
   a hidden title bar then leaves a strip of window background until the next resize. `chrome::apply_title_bar`
   reconciles the content view's size with `contentRectForFrameRect:` on the next main-queue turn, using the window's
   current frame and style (including any later title bar change in the same batch).
+
+- **`contentLayoutRect` lags the frame while a window resizes**: read in the resize (the root view's new size), it is
+  still laid out for the old frame, so the frame's height minus its top is the bar plus the change in height (a
+  400-pt bar after growing a window, none after shrinking it), and it stays so until something measures again.
+  `chrome::update_area` reads a toolbar's height from the title bar view around the window's buttons, which has
+  the bar's height whatever the window's, and uses `contentLayoutRect` only without one.
 
 - A layer-backed `NSView`'s layer belongs to AppKit: moving or resizing the view sets its layer's anchor point,
   position and transform again. `NshView::place` sets the frame first, then anchor (top left), position, transform and
@@ -516,6 +567,23 @@ Things that were found the hard way. Read the section of the area you change bef
   to 40.5. A half-pixel stationary tolerance therefore ends the scroll early and duplicates `onScrollEnd`.
   `stopGlide` compares clamped offsets exactly; a quiet-period fallback covers targets rounded back to the
   current offset, for which the browser emits no `scrollend`.
+- **A blocking `wheel` listener holds the page's scrolling only over the box of the element that has it**: a
+  descendant shown in the top layer (a dialog over the window, `dialogs: "viewport"`) outside the root's box got
+  `wheel` events that were not cancelable, and the page scrolled under it although the root's listener prevented
+  them (headless Chrome 156: `cancelable: false`, `scrollY` 300 after a 300 px wheel). The layer has a blocking
+  listener of its own (`raise`).
+- **Canvas `measureText` gives color emoji their 1x advance, the DOM draws them at the screen's pixel ratio**:
+  Apple Color Emoji at 14px measures 18 px on canvas and draws 14 at DPR 2 (16.8 at 1.25; Chrome 156 on macOS;
+  emulating the ratio over the DevTools protocol does not show it, `--force-device-scale-factor` does), so a line of
+  22 emoji was laid out 88 px too wide. Emoji clusters are measured in the DOM (`text.rs`, `emoji_excess`).
+- **A field paints an input method's marks on its composing text whatever its colors**: an editor's sink (transparent
+  text, no caret, 1 px wide) showed a bar at the caret while composing (Chrome 156, `Input.imeSetComposition`). A
+  field that shows nothing is `opacity: 0` (`encode/input.rs`, `shows_nothing`); it keeps the focus and the input
+  method.
+- **`tabular-nums` does not stop a font kerning its digits**: a font without a `tnum` feature (its digits already of
+  one width) keeps its `kern` pairs, so Arial (macOS) and Liberation Sans, Chrome's `sans-serif` on Linux, draw `11`
+  1.48 px narrower than two `1`s at 20 px (Chrome 156: `$1,111.11` summed 89 from its characters, drawn 84.53). A
+  figure's width adds each adjacent pair's kerning to its characters' (`css::figure_width`).
 
 ## Testing on simulators and emulators
 

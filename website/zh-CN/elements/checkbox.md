@@ -1,7 +1,6 @@
 ---
 title: Checkbox
 description: Checkbox 组件：一个勾选、未勾选或半选的控件，负责按压、键盘激活、禁用状态以及屏幕阅读器的角色和值，指示器及其中的标记由应用设置样式。
-order: 20.25
 group: base
 demo: el-checkbox
 ---
@@ -46,7 +45,7 @@ function App() {
   return (
     <Checkbox
       checked={on()}
-      onChange={(next) => on.set(next)}
+      onChange={({ checked }) => on.set(checked)}
       class="flex-row items-center gap-2"
       indicatorClass="size-5 items-center justify-center rounded-md border-2 border-border transition-colors checked:border-primary checked:bg-primary"
       indicator={<Text class="text-primary-foreground">{on() ? "✓" : ""}</Text>}
@@ -76,6 +75,7 @@ mount(App);
 | `role` | `.role(..)` | `AccessibilityRole` | `"checkbox"` | 它对屏幕阅读器而言是什么，用于更具体的情形（可勾选的菜单项：`"menuitem"`）。 |
 | `indicatorClass`、`indicatorStyle` | `.indicator_style(\|s\| ..)` | `string`、`StyleProp<ViewStyle>` | 无 | 指示器，显示值的方框。 |
 | `indicator` | `.indicator(..)` | `JSX.Element` | 无 | 指示器里的内容：标记（对勾、短横），由应用按它持有的值显示。 |
+| `hitSlop` | `.hit_slop(..)` | `number \| Partial<Edges>` | 无 | 按压在边界之外多远仍然算数，单位为点：一个数字表示每一边，或分别指定各边。与视图的 `hitSlop` 相同。 |
 | `children` | `.child(..)` | `JSX.Element` | 无 | 指示器之后的内容：一个标签，屏幕阅读器会读出。 |
 | `class`、`style` | 样式方法 | `string`、`StyleProp<ViewStyle>` | 无 | 复选框自身：包住指示器和标签的那一行。 |
 | `activeStyle`、`hoverStyle`、`focusStyle`、`disabledStyle` | `.active(\|s\| ..)`、`.hover(..)`、`.focus(..)`、`.disabled_style(..)` | `StyleProp<ViewStyle>` | 无 | 复选框按下、悬停、获得焦点或禁用时的样式，与对应的 `<state>:` 类相同。 |
@@ -86,7 +86,7 @@ mount(App);
 
 | 事件 | Rust | 说明 |
 |---|---|---|
-| `onChange` | `.on_change(\|checked: &bool\| ..)` | 复选框被按下：轻点、点击、拥有键盘焦点时按 Space 或 Return，或屏幕阅读器的激活。它报告复选框请求的值：从未勾选和半选时为 `true`，从勾选时为 `false`。 |
+| `onChange` | `.on_change(\|checked: &bool\| ..)` | 复选框被按下：轻点、点击、拥有键盘焦点时按 Space 或 Return，或屏幕阅读器的激活。它以 `checked` 报告复选框请求的值：从未勾选和半选时为 `true`，从勾选时为 `false`。 |
 
 禁用的复选框不报告任何事件。
 
@@ -117,7 +117,7 @@ const some = () => selected().length > 0 && !all();
 <Checkbox
   checked={all()}
   indeterminate={some()}
-  onChange={(next) => selected.set(next ? items.map((i) => i.id) : [])}
+  onChange={({ checked }) => selected.set(checked ? items.map((i) => i.id) : [])}
   class="flex-row items-center gap-2"
   indicatorClass="group size-5 items-center justify-center rounded-md border-2 border-border checked:border-primary checked:bg-primary indeterminate:border-primary indeterminate:bg-primary"
   indicator={
@@ -141,12 +141,28 @@ const some = () => selected().length > 0 && !all();
 <Checkbox
   checked={on()}
   disabled={locked()}
-  onChange={(next) => on.set(next)}
+  onChange={({ checked }) => on.set(checked)}
   class="flex-row items-center gap-2 disabled:opacity-50"
   indicatorClass="size-5 rounded-md border-2 border-border checked:border-primary checked:bg-primary disabled:border-border disabled:bg-muted"
 >
   <Text>Share usage data</Text>
 </Checkbox>
+```
+
+<a id="a-small-target-with-hitslop"></a>
+
+## 用 hitSlop 扩大小目标
+
+旁边没有标签的复选框（列表行的选择框）可能比手指还小。`hitSlop` 让落在它附近的按压也算数，单位为超出每一边的点数，不改变它的布局和外观：一个数字表示每一边，或分别指定各边（`{ top: 8, bottom: 8 }`），与[视图的 `hitSlop`](./index.md#按压与反馈) 取值相同。
+
+```tsx
+<Checkbox
+  checked={selected()}
+  hitSlop={12}
+  accessibilityLabel="Select row"
+  onChange={({ checked }) => selected.set(checked)}
+  indicatorClass="size-4 rounded border border-border checked:bg-primary"
+/>
 ```
 
 <a id="accessibility"></a>

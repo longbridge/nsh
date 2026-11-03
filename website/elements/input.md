@@ -1,7 +1,6 @@
 ---
 title: Input
 description: "The native text field: controlled and uncontrolled text, keyboards, autofill, selection, multiline inputs and focus."
-order: 20.1
 group: base
 demo: el-input
 ---
@@ -41,7 +40,7 @@ function NameField() {
   return (
     <Input
       value={name()}
-      onChange={(text) => name.set(text)}
+      onChange={({ value }) => name.set(value)}
       placeholder="Your name"
       autoCapitalize="words"
       returnKeyType="done"
@@ -76,6 +75,7 @@ view styles apply):
 | `defaultValue` | `.default_value(..)` | `string` | | The initial text. |
 | `placeholder` | `.placeholder(..)` | `string` | | Shown while the input is empty. |
 | `multiline` | `.multiline(..)` | `boolean` | `false` | Several lines; return inserts a line break unless `submitBehavior` says otherwise. |
+| `scrollbar` | `.scrollbar(..)` | `boolean \| ScrollbarTheme` | `true` | A multiline input's scroll bar: the platform's indicator, or the app's built-in bar once it set one ([Scrollbar](./scrollbar.md#built-in-bars)); an object is a theme of its own, `false` none. |
 | `maxLength` | `.max_length(..)` | `number` | | The most characters the user can enter. |
 | `readonly` | `.readonly(..)` | `boolean` | `false` | The user can select and copy the text but not change it. |
 | `masked` | `.masked(..)` | `boolean` | `false` | The text is hidden (passwords). |
@@ -90,7 +90,7 @@ view styles apply):
 | `returnKeyType` | `.return_key_type(ReturnKeyType::Next)` | `"default" \| "done" \| "go" \| "next" \| "search" \| "send"` | `"default"` | The label of the return key. |
 | `autoCapitalize` | `.auto_capitalize(AutoCapitalize::None)` | `"none" \| "sentences" \| "words" \| "characters"` | `"sentences"` | Automatic capitalization. |
 | `autoCorrect` | `.auto_correct(..)` | `boolean` | `true` | The system's corrections. |
-| `autoComplete` | `.auto_fill(AutoFill::OneTimeCode)` | `AutoComplete \| TextContentType` | | What the input holds, for autofill: `"username"`, `"current-password"`, `"new-password"`, `"one-time-code"`, `"email"`, `"tel"`, `"postal-code"`, `"cc-number"`, `"off"`, … |
+| `autoComplete` | `.auto_fill(AutoFill::OneTimeCode)` | `AutoComplete \| TextContentType` | | What the input holds, for autofill on iOS, Android and the web: `"username"`, `"current-password"`, `"new-password"`, `"one-time-code"`, `"email"`, `"tel"`, `"postal-code"`, `"cc-number"`, `"off"`, … |
 | `pasteBehavior` | `.paste_behavior(PasteBehavior::Report)` | `"insert" \| "report"` | `"insert"` | What a paste does: `"insert"` inserts the pasted text, `"report"` inserts nothing, for the app to handle what `onPaste` reports. Images and files are never inserted. |
 | `submitBehavior` | `.submit_behavior(SubmitBehavior::Submit)` | `"submit" \| "blurAndSubmit" \| "newline"` | `"blurAndSubmit"` (single line), `"newline"` (multiline) | What return does: `"submit"` reports `onSubmit` and keeps the focus, `"blurAndSubmit"` also unfocuses, `"newline"` inserts a line break (multiline; a single line submits). A multiline input that submits still takes line breaks from Shift+Return or Option / Alt+Return on hardware keyboards. `"submit"` keeps the keyboard up (e.g. to send several messages). |
 | `autoFocus` | `.auto_focus(..)` | `boolean` | `false` | Focused when it appears. |
@@ -149,14 +149,14 @@ input().auto_fill(AutoFill::OneTimeCode).keyboard_type(KeyboardType::Number)
 
 | Event | Rust | Payload | When |
 |---|---|---|---|
-| `onChange` | `.on_change(\|text: &str\| ..)` | `(text: string)` | The user changed the text. |
+| `onChange` | `.on_change(\|text: &str\| ..)` | `{ value }` | The user changed the text: `value` is the text now. |
 | `onSubmit` | `.on_submit(\|text: &str\| ..)` | `{ text }` | The return key was pressed in an input that submits (single line, or `submitBehavior` `"submit"` / `"blurAndSubmit"`). |
 | `onFocus` / `onBlur` | `.on_focus` / `.on_blur` | none | The input gained / lost focus. |
 | `onSelectionChange` | `.on_selection_change(\|s: &Selection\| ..)` | `{ start, end }` | The caret or selection moved (UTF-16 units). |
 | `onPaste` | `.on_paste(\|e: &PasteEvent\| ..)` | `{ text, html, files, uris }` | The user pasted: the text, its formatting as HTML (Linux, web), images (a screenshot) as `File`s, local files' `file:` URLs. Before the `onChange` of the text it inserts ([forms and keyboard](../docs/forms-and-keyboard.md#pasting-images-and-files)). |
 | `onCaretMove` | `.on_caret_move(\|e: &CaretEvent\| ..)` | `{ bounds, pageBounds }` | The caret moved, with the selection or as the text scrolled or wrapped: `bounds` is where it is in the input, `pageBounds` in the window, an `Overlay`'s `anchor` ([forms and keyboard](../docs/forms-and-keyboard.md#the-caret)). |
 | `onKeyPress` | `.on_key_press(\|key: &str\| ..)` | `{ key }` | Before the text changes: `key` is the typed text, `"Backspace"` or `"Enter"`. |
-| `onContentSizeChange` | `.on_content_size_change(\|size: &Size<Points>\| ..)` | `{ width, height }` | The size of the text changed (at the input's width when multiline), as it is typed; an empty input reports one empty line, whatever its placeholder. |
+| `onContentSizeChange` | `.on_content_size_change(\|size: &Size<Points>\| ..)` | `{ size }` | The size of the text changed (at the input's width when multiline), as it is typed; an empty input reports one empty line, whatever its placeholder. |
 | `onCompositionChange` | `.on_composition_change(\|e: &Composition\| ..)` | `{ composing, text }` | An input method's composition started, changed or ended: `text` is what is being composed (pinyin before a character is chosen, kana before conversion), `""` once it ends. The committed text reaches `onChange` before the end. |
 
 A multiline input that grows with its text:
@@ -178,7 +178,7 @@ input()
 const height = signal(40);
 <Input
   multiline
-  onContentSizeChange={(e) => height.set(Math.min(120, Math.max(40, e.height + 16)))}
+  onContentSizeChange={({ size }) => height.set(Math.min(120, Math.max(40, size.height + 16)))}
   style={{ height: height(), paddingHorizontal: 12, paddingVertical: 8 }}
 />;
 ```
@@ -204,7 +204,7 @@ view()
 ```
 
 ```tsx tabs
-let password!: YNode;
+let password!: InputRef;
 <>
   <Input returnKeyType="next" onSubmit={() => password.focus()} />
   <Input ref={password} masked autoComplete="current-password" />

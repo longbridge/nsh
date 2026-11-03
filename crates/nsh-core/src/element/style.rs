@@ -156,10 +156,10 @@ impl Hash for Bits {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub(crate) struct Variant {
     /// [`state`] bits of the element itself.
-    states: u8,
+    states: u16,
     /// [`state`] bits of the nearest ancestor group (none: no group
     /// condition).
-    group_states: u8,
+    group_states: u16,
     /// That group's name: 0 unnamed, else 1 + its index in
     /// [`StyleRefinement::names`].
     group: u8,
@@ -171,6 +171,8 @@ impl Variant {
     pub(crate) const HOVER: Self = Self::states(state::HOVERED);
     /// While focused.
     pub(crate) const FOCUS: Self = Self::states(state::FOCUSED);
+    /// While it or a view inside it is focused.
+    pub(crate) const FOCUS_WITHIN: Self = Self::states(state::FOCUS_WITHIN);
     /// While pressed.
     pub(crate) const ACTIVE: Self = Self::states(state::PRESSED);
     /// While disabled.
@@ -181,6 +183,11 @@ impl Variant {
     pub(crate) const CHECKED: Self = Self::states(state::CHECKED);
     /// While indeterminate (set by the core from the accessibility state).
     pub(crate) const INDETERMINATE: Self = Self::states(state::INDETERMINATE);
+    /// While expanded (set by the core from the accessibility state).
+    pub(crate) const EXPANDED: Self = Self::states(state::EXPANDED);
+    /// While a toggle button is on (set by the core from the
+    /// accessibility state).
+    pub(crate) const ARIA_PRESSED: Self = Self::states(state::ARIA_PRESSED);
     /// In dark appearance.
     const DARK: Self = Self {
         states: 0,
@@ -189,7 +196,7 @@ impl Variant {
         dark: true,
     };
 
-    const fn states(states: u8) -> Self {
+    const fn states(states: u16) -> Self {
         Self {
             states,
             group_states: 0,
@@ -220,11 +227,15 @@ impl Variant {
         let keys = [
             (state::HOVERED, rank::HOVER),
             (state::FOCUSED, rank::FOCUS),
+            (state::FOCUS_WITHIN, rank::FOCUS_WITHIN),
             (state::PRESSED, rank::ACTIVE),
             (state::DISABLED, rank::DISABLED),
             (state::SELECTED, rank::SELECTED),
             (state::CHECKED, rank::CHECKED),
             (state::INDETERMINATE, rank::INDETERMINATE),
+            (state::EXPANDED, rank::EXPANDED),
+            (state::ARIA_PRESSED, rank::ARIA_PRESSED),
+            (state::BUSY, rank::ARIA_BUSY),
         ];
         for (bit, key) in keys {
             if self.group_states & bit != 0 {
@@ -1556,6 +1567,15 @@ pub trait Styled: Sized {
             StyleKey::Display,
             PropertyValue::Display(taffy::Display::None),
         );
+        self
+    }
+
+    /// Laid out but not shown, nor what is inside it (CSS's `visibility:
+    /// hidden`, Tailwind's `invisible`, GPUI's `Styled::invisible`): it
+    /// keeps its place and frame, and takes no presses or keyboard focus.
+    fn invisible(mut self) -> Self {
+        self.style()
+            .value(StyleKey::Visibility, PropertyValue::Bool(true));
         self
     }
 
@@ -4031,6 +4051,25 @@ pub trait Styled: Sized {
         self
     }
 
+    /// Styles while expanded (Tailwind's `aria-expanded:`): the element's
+    /// accessibility state says so (a `Popover`'s or `Menu`'s trigger
+    /// while its popup is open, a collapsible's header).
+    fn expanded(mut self, f: impl FnOnce(StyleRefinement) -> StyleRefinement) -> Self {
+        let s = f(StyleRefinement::default());
+        self.style().extend_as(Variant::EXPANDED, s);
+        self
+    }
+
+    /// Styles while a toggle button is on (Tailwind's `aria-pressed:`):
+    /// the element's accessibility state says it is pressed, not mixed
+    /// (`gpui-base`'s `Toggle` styled `pressed`). Not `.active(..)`, a
+    /// press in progress.
+    fn aria_pressed(mut self, f: impl FnOnce(StyleRefinement) -> StyleRefinement) -> Self {
+        let s = f(StyleRefinement::default());
+        self.style().extend_as(Variant::ARIA_PRESSED, s);
+        self
+    }
+
     /// Makes it a group: the `group_*` styles of the elements inside follow
     /// its press, hover and focus (Tailwind's `group`).
     fn group(mut self) -> Self {
@@ -4155,7 +4194,7 @@ fn transition<S: Styled>(mut s: S, props: u8) -> S {
 fn in_group<S: Styled>(
     mut s: S,
     name: &'static str,
-    states: u8,
+    states: u16,
     f: impl FnOnce(StyleRefinement) -> StyleRefinement,
 ) -> S {
     let styles = f(StyleRefinement::default());
@@ -4191,7 +4230,7 @@ mod tests {
 
     /// What `list` resolves to in `dark` appearance, in [`state`] `states`,
     /// inside a group in `group` (as text, to compare).
-    fn resolve(list: &ClassList, dark: bool, states: u8, group: u8) -> String {
+    fn resolve(list: &ClassList, dark: bool, states: u16, group: u16) -> String {
         resolve_with(list, dark, states, group, &|_| {})
     }
 
@@ -4199,8 +4238,8 @@ mod tests {
     fn resolve_with(
         list: &ClassList,
         dark: bool,
-        states: u8,
-        group: u8,
+        states: u16,
+        group: u16,
         inline: &dyn Fn(&mut Style),
     ) -> String {
         let cx = Context {

@@ -40,13 +40,11 @@ pub(crate) enum Region {
 }
 
 /// An element of a region's new run: one made in this run (with the owner
-/// its bindings belong to), or one kept from before ([`ElKind::Keep`]).
+/// its bindings belong to: the run's, or its row's), or one kept from
+/// before ([`ElKind::Keep`]).
 pub(crate) struct RegionElement {
     pub(crate) owner: Option<Owner>,
     pub(crate) element: AnyElement,
-    /// Whether the run that made it is still the region's current one
-    /// (none: an [`Each`]'s, whose rows go with their owners).
-    pub(crate) current: Option<Current>,
 }
 
 impl RegionElement {
@@ -55,28 +53,20 @@ impl RegionElement {
     /// listener that flips a branch there and back queues both runs; what
     /// the first made, its props too, went with it).
     pub(crate) fn applies(&self) -> bool {
-        self.current.as_ref().is_none_or(Current::holds)
-            && self.owner.is_none_or(|owner| owner.is_live())
+        self.owner.is_none_or(|owner| owner.is_live())
     }
 }
 
-/// Whether a run of a region is still its current one: ends when the
-/// region runs again or goes (the run's owner cleans up).
-#[derive(Clone)]
-pub(crate) struct Current(Rc<Cell<bool>>);
-
-impl Current {
-    /// The run under way's (in the region's binding).
-    fn of_run() -> Self {
-        let current = Rc::new(Cell::new(true));
-        let ended = current.clone();
-        cleanup(move || ended.set(false));
-        Current(current)
-    }
-
-    fn holds(&self) -> bool {
-        self.0.get()
-    }
+/// An owner of its own for a run of a region, under its binding: what the
+/// run makes (signals, the listeners and bindings of its elements, tasks)
+/// is its and goes when the region runs again or goes, while the binding
+/// stays, as an [`each`]'s rows are theirs. A node of a replaced run keeps
+/// its handlers until the core reconciles the region, in the commit; an
+/// event already queued for it then finds its listener's owner gone.
+fn run_owner() -> Owner {
+    let (owner, ()) = create_root(|| ());
+    cleanup(move || owner.dispose());
+    owner
 }
 
 impl Region {
@@ -87,14 +77,14 @@ impl Region {
             Region::Dynamic(f) => {
                 let f = f.clone();
                 super::reactive::render_effect(move || {
-                    let owner = Owner::current();
-                    let current = Current::of_run();
-                    let elements = f()
+                    let owner = run_owner();
+                    // `scope` keeps the binding tracking what `f` reads.
+                    let elements = owner
+                        .scope(|| f())
                         .into_iter()
                         .map(|element| RegionElement {
                             owner: Some(owner),
                             element,
-                            current: Some(current.clone()),
                         })
                         .collect();
                     show(elements);
@@ -115,16 +105,15 @@ impl Region {
                     } else {
                         otherwise.as_ref()
                     };
-                    let owner = Owner::current();
-                    let current = Current::of_run();
-                    let elements = untracked(|| branch.map(|f| f()).unwrap_or_default())
-                        .into_iter()
-                        .map(|element| RegionElement {
-                            owner: Some(owner),
-                            element,
-                            current: Some(current.clone()),
-                        })
-                        .collect();
+                    let owner = run_owner();
+                    let elements =
+                        untracked(|| owner.scope(|| branch.map(|f| f()).unwrap_or_default()))
+                            .into_iter()
+                            .map(|element| RegionElement {
+                                owner: Some(owner),
+                                element,
+                            })
+                            .collect();
                     show(elements);
                 });
             }
@@ -139,17 +128,19 @@ impl Region {
                     if error.is_none() {
                         super::reactive::register_boundary(failed);
                     }
-                    let owner = Owner::current();
-                    let current = Current::of_run();
-                    let elements = untracked(|| match error {
-                        Some(error) => fallback(error, Reset(failed)),
-                        None => view(),
+                    // The run's owner is under the binding, where the
+                    // boundary is: `boundary_of` finds it from there.
+                    let owner = run_owner();
+                    let elements = untracked(|| {
+                        owner.scope(|| match error {
+                            Some(error) => fallback(error, Reset(failed)),
+                            None => view(),
+                        })
                     })
                     .into_iter()
                     .map(|element| RegionElement {
                         owner: Some(owner),
                         element,
-                        current: Some(current.clone()),
                     })
                     .collect();
                     show(elements);
@@ -373,6 +364,34 @@ fn element_key(id: u64, i: usize) -> super::SharedString {
     format!("\u{1}{id}.{i}").into()
 }
 
+/// Keeps the `count` elements of row `id` where they are, in `out`. Out of
+/// line, as [`show_row`]: [`Rows::update`] is made for every item and key
+/// type.
+#[cfg_attr(target_arch = "wasm32", inline(never))]
+fn keep_row(out: &mut Vec<RegionElement>, id: u64, count: usize) {
+    for i in 0..count {
+        let mut kept = super::ElNode::new(Tag::View);
+        kept.kind = ElKind::Keep;
+        kept.key = Some(element_key(id, i));
+        out.push(RegionElement {
+            owner: None,
+            element: AnyElement(kept),
+        });
+    }
+}
+
+/// Adds the elements a new row `id`, of `owner`, made to `out`.
+#[cfg_attr(target_arch = "wasm32", inline(never))]
+fn show_row(out: &mut Vec<RegionElement>, id: u64, owner: Owner, elements: Vec<AnyElement>) {
+    for (i, mut element) in elements.into_iter().enumerate() {
+        element.0.key = Some(element_key(id, i));
+        out.push(RegionElement {
+            owner: Some(owner),
+            element,
+        });
+    }
+}
+
 impl<T: Clone + PartialEq + 'static, K: Hash + Eq + Clone + 'static> EachRows for Rows<T, K> {
     fn bind(self: Rc<Self>, show: Rc<dyn Fn(Vec<RegionElement>)>) {
         // The rows go with the region's owner.
@@ -409,16 +428,7 @@ impl<T: Clone + PartialEq + 'static, K: Hash + Eq + Clone + 'static> Rows<T, K> 
                 Some(row) => {
                     row.item.set(item);
                     row.index.set(index);
-                    for i in 0..row.count {
-                        let mut kept = super::ElNode::new(Tag::View);
-                        kept.kind = ElKind::Keep;
-                        kept.key = Some(element_key(row.id, i));
-                        out.push(RegionElement {
-                            owner: None,
-                            element: AnyElement(kept),
-                            current: None,
-                        });
-                    }
+                    keep_row(&mut out, row.id, row.count);
                     rows.push(row);
                 }
                 None => {
@@ -431,14 +441,7 @@ impl<T: Clone + PartialEq + 'static, K: Hash + Eq + Clone + 'static> Rows<T, K> 
                         (item, index, elements)
                     });
                     let count = elements.len();
-                    for (i, mut element) in elements.into_iter().enumerate() {
-                        element.0.key = Some(element_key(id, i));
-                        out.push(RegionElement {
-                            owner: Some(owner),
-                            element,
-                            current: None,
-                        });
-                    }
+                    show_row(&mut out, id, owner, elements);
                     rows.push(Row {
                         key,
                         id,

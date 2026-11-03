@@ -23,7 +23,7 @@ fn tab_enters_a_field_and_typing_moves_the_caret_and_reports_text() {
         const value = signal(""), focus = signal("idle");
         mount(() => <View>
             <Input value={value()} placeholder="Name" style={{ width: 160, height: 16 }}
-                onChange={(text) => value.set(text)} onFocus={() => focus.set("editing")}
+                onChange={({ value: text }) => value.set(text)} onFocus={() => focus.set("editing")}
                 onBlur={() => focus.set("idle")} />
             <Text>{focus()}:{value()}</Text>
         </View>);
@@ -77,7 +77,7 @@ fn field(
         const submitted = signal("no"), pressed = signal("none");
         mount(() => <View>
             <Input {props} style={{{{ width: 160, height: 48, placeholderColor: "#123456" }}}}
-                onChange={{(v) => {{ value.set(v); changes.set(changes()+1); }}}}
+                onChange={{({{ value: v }}) => {{ value.set(v); changes.set(changes()+1); }}}}
                 onSelectionChange={{(e) => selection.set(`${{e.start}}-${{e.end}}`)}}
                 onKeyPress={{(e) => pressed.set(e.key)}} onSubmit={{() => submitted.set("yes")}} />
             <Text>{{JSON.stringify(value())}}</Text>
@@ -223,7 +223,7 @@ fn controlled_round_trips_do_not_erase_a_burst_of_typing() {
         import { mount, signal, View, Text } from "nsh";
         import { Input } from "nsh/base";
         const value = signal("");
-        mount(() => <View><Input value={value()} onChange={(v) => value.set(v.toUpperCase())}
+        mount(() => <View><Input value={value()} onChange={({ value: v }) => value.set(v.toUpperCase())}
             style={{ width: 160, height: 16 }} /><Text>value:{value()}</Text></View>);
     "#,
         &[],
@@ -274,7 +274,7 @@ fn input_content_padding_and_embedding_origin_position_the_real_cursor() {
         import { mount, View, Text, signal } from "nsh";
         import { Input } from "nsh/base";
         const value = signal("界a");
-        mount(() => <View><Input autoFocus value={value()} onChange={(v) => value.set(v)}
+        mount(() => <View><Input autoFocus value={value()} onChange={({ value: v }) => value.set(v)}
             style={{ width: 160, height: 48, paddingLeft: 8, paddingTop: 16 }} />
             <Text>{value()}</Text></View>);
     "#,

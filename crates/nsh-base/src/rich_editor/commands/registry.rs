@@ -132,9 +132,7 @@ impl<'a> Args<'a> {
     fn attrs(&self, key: &str) -> Result<Attrs, String> {
         match self.get(key) {
             None => Ok(Attrs::new()),
-            Some(Value::Object(map)) => {
-                Ok(map.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
-            }
+            Some(Value::Object(map)) => Ok(crate::rich_editor::model::object_attrs(map)),
             Some(other) => Err(format!("{}: `{key}` is an object, got {other}", self.name)),
         }
     }
@@ -520,6 +518,7 @@ fn builtin_registry() -> CommandRegistry {
     crate::rich_editor::extensions::link::register_commands(&mut r);
     crate::rich_editor::extensions::character_count::register_commands(&mut r);
     crate::rich_editor::extensions::suggestion::register_commands(&mut r);
+    crate::rich_editor::tables::commands::register_commands(&mut r);
     r
 }
 

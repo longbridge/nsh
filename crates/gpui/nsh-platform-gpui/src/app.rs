@@ -323,6 +323,7 @@ impl AppView {
             trace: options.trace,
             network: Some(nsh_engine::net::network()),
             websocket: None,
+            refuse_connections: None,
             filesystem: None,
             assets: Some(Arc::new(AssetReader(options.asset_base.clone()))),
             environment: self.surface.environment.get(),
@@ -340,6 +341,7 @@ impl AppView {
             clipboard: None,
             host: options.host.clone(),
             picker: self.picker.borrow().clone(),
+            speech: None,
         };
         crate::image::set_asset_base(&self.surface, options.asset_base.clone());
         self.surface
@@ -808,6 +810,7 @@ fn initial_environment() -> Environment {
             Os::Linux
         },
         idiom: Idiom::Desktop,
+        file_requests: true,
         ..Environment::default()
     }
 }

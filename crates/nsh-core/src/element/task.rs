@@ -90,7 +90,7 @@ pub(crate) enum Action {
     HostCall {
         name: String,
         args: crate::JsonValue,
-        answer: AnswerSlot<Result<crate::JsonValue, String>>,
+        answer: AnswerSlot<Result<crate::JsonValue, super::JsError>>,
     },
     /// Drops the slots of the host calls whose answers are gone (they
     /// timed out).
@@ -99,6 +99,14 @@ pub(crate) enum Action {
     /// [`crate::open_url::check_url`]); whether it opened resolves the
     /// slot.
     OpenUrl(String, AnswerSlot<bool>),
+    /// Lets the user pick a color on the screen; the color (none when
+    /// cancelled or not supported) resolves the slot.
+    PickScreenColor(AnswerSlot<Option<crate::Hsla>>),
+    /// A speech recognition session's request ([`crate::speech`]).
+    Speech(SpeechAction),
+    /// A request on local paths for the platform
+    /// ([`crate::file_dialog`]); its answer resolves the slot.
+    FileRequest(crate::file_dialog::FileRequest, FileAnswer),
     /// An operation on the native animation graph.
     Animation(crate::animation::AnimationOp),
     /// Starts an animation; its end resolves the slot.
@@ -122,9 +130,73 @@ pub(crate) enum Action {
     Frame(AnswerSlot<Instant>),
     /// Sets the app's appearance.
     Appearance(crate::platform::Appearance),
+    /// Sets the app's design tokens.
+    Tokens(super::Tokens),
+    /// Draws the scroll views' bars with the built-in bar the source makes
+    /// of the theme, or (no theme) with the platform's indicator.
+    BuiltInScrollbars(super::ScrollbarSource, Option<super::AnyValue>),
     /// Measures the node with the layout of the commit the action goes out
     /// with; the measurement resolves the slot.
     Measure(NodeId, AnswerSlot<Option<crate::Measurement>>),
+    /// How long the node's transitions run with the styles of the commit
+    /// the action goes out with; the time resolves the slot.
+    TransitionTime(NodeId, AnswerSlot<std::time::Duration>),
+}
+
+/// What a speech recognition session asks of the core
+/// ([`Action::Speech`]).
+pub(crate) enum SpeechAction {
+    /// Starts session `id`, reporting to `sink`; the session running is
+    /// aborted first.
+    Start {
+        id: u32,
+        request: crate::speech::SpeechRequest,
+        sink: crate::speech::SpeechSink,
+    },
+    /// Stops session `id`: it finishes what it heard, then ends.
+    Stop(u32),
+    /// Ends session `id` at once, without an error.
+    Abort(u32),
+    /// Whether speech can be recognized; the answer resolves the slot.
+    Available(AnswerSlot<bool>),
+}
+
+/// A request on local paths waiting for the platform's answer
+/// ([`Action::FileRequest`]).
+pub(crate) enum FileAnswer {
+    /// The paths picked in the open dialog, none when cancelled.
+    OpenDialog(AnswerSlot<Result<Option<Vec<std::path::PathBuf>>, String>>),
+    /// The path chosen in the save dialog, none when cancelled.
+    SaveDialog(AnswerSlot<Result<Option<std::path::PathBuf>, String>>),
+    /// The path opened or showed in the file manager, or why not.
+    Done(AnswerSlot<Result<(), String>>),
+    /// Where the trashed item went, or why it was not.
+    Trash(AnswerSlot<Result<Option<std::path::PathBuf>, String>>),
+}
+
+impl FileAnswer {
+    /// Answers with the platform's `paths` (none: cancelled), or its
+    /// `error`.
+    pub(crate) fn deliver(self, mut paths: Vec<std::path::PathBuf>, error: Option<String>) {
+        match self {
+            FileAnswer::OpenDialog(slot) => slot.borrow_mut().deliver(match error {
+                Some(error) => Err(error),
+                None => Ok((!paths.is_empty()).then_some(paths)),
+            }),
+            FileAnswer::SaveDialog(slot) => slot.borrow_mut().deliver(match error {
+                Some(error) => Err(error),
+                None => Ok((!paths.is_empty()).then(|| paths.swap_remove(0))),
+            }),
+            FileAnswer::Done(slot) => slot.borrow_mut().deliver(match error {
+                Some(error) => Err(error),
+                None => Ok(()),
+            }),
+            FileAnswer::Trash(slot) => slot.borrow_mut().deliver(match error {
+                Some(error) => Err(error),
+                None => Ok((!paths.is_empty()).then(|| paths.swap_remove(0))),
+            }),
+        }
+    }
 }
 
 /// A clipboard read waiting for the platform's answer.
@@ -133,8 +205,12 @@ pub(crate) enum ClipboardRead {
     Text(AnswerSlot<String>),
     /// Whether it holds text.
     Has(AnswerSlot<bool>),
-    /// The image (`None` when it holds none).
+    /// The image (`None` when it holds none, or one over
+    /// [`crate::platform::clipboard::MAX_IMAGE_BYTES`]).
     Image(AnswerSlot<Option<ClipboardImage>>),
+    /// The image for `Clipboard.readImage`: `Err` with the size in encoded
+    /// bytes of one over [`crate::platform::clipboard::MAX_IMAGE_BYTES`].
+    CheckedImage(AnswerSlot<Result<Option<ClipboardImage>, usize>>),
     /// Whether it holds an image.
     HasImage(AnswerSlot<bool>),
     /// The `file:` URLs of the local files on it.
@@ -144,15 +220,14 @@ pub(crate) enum ClipboardRead {
 /// An image read from the system clipboard (`Clipboard.readImage`).
 #[derive(Debug, Clone, Default, PartialEq, super::JsObject)]
 pub struct ClipboardImage {
-    /// The image as a `data:` URL (`data:image/png;base64,…`): an image's
-    /// `src`, and `fetch(url)` gives its bytes.
+    /// A URL of the image that an `Image` shows (its `src`) and `fetch`
+    /// reads the bytes of; `Clipboard.writeImage` takes it back.
     pub url: String,
-    /// Its size in pixels.
+    /// Its size in pixels, as decoded.
     pub size: Size<DevicePixels>,
 }
 
-/// An image's size in pixels (`Image.getSize`); TS: `ImageSize`, an alias of
-/// `Size`.
+/// An image's size in pixels (`Image.getSize`); TS: `PixelSize`.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct ImageSize {
     /// Width.
@@ -174,13 +249,10 @@ impl From<ImageSize> for Size<DevicePixels> {
     }
 }
 
-/// TS: `type ImageSize = Size` (`{ width, height }`, in pixels here).
+/// TS: `PixelSize` (`{ width, height }`).
 impl super::JsValue for ImageSize {
     fn ts_type(types: &mut super::TsTypes) -> String {
-        types.declare("ImageSize", |_| {
-            "/** An image's size in pixels (`Image.getSize`). */\nexport type ImageSize = Size;"
-                .into()
-        })
+        <Size<DevicePixels> as super::JsValue>::ts_type(types)
     }
 
     fn from_js(value: super::JsIn<'_>) -> Result<Self, super::PropError> {
@@ -245,11 +317,34 @@ pub(crate) struct Executor {
     pub(crate) back: Rc<RefCell<super::back::BackListeners>>,
     /// The views' keyboard shortcuts.
     pub(crate) keys: Rc<RefCell<super::keys::ViewKeys>>,
+    /// The views' menus' handlers.
+    pub(crate) menus: Rc<RefCell<super::menus::ViewMenus>>,
+    /// The views' watches of nodes they did not make.
+    pub(crate) watches: Rc<RefCell<super::watch::Watches>>,
     /// The timers tasks wait for ([`super::timer`]), soonest first: the core
     /// fires them as they come due, and the engine's loop wakes for the
     /// soonest, as it does for JS's timers.
     timers: RefCell<BinaryHeap<Reverse<Timer>>>,
     next_timer_seq: std::cell::Cell<u64>,
+    /// What waits for the app to answer the events emitted before it
+    /// ([`super::after_answer`]).
+    answers: RefCell<Answers>,
+}
+
+/// The closures of [`super::after_answer`], by how far their events went.
+#[derive(Default)]
+struct Answers {
+    /// Their events have not been handed to JS yet.
+    waiting: Vec<AfterAnswer>,
+    /// Their events went to JS: they run in the next commit, by when JS has
+    /// handled them and its ops are applied.
+    due: Vec<AfterAnswer>,
+}
+
+/// A closure of [`super::after_answer`] and the owner it runs under.
+pub(crate) struct AfterAnswer {
+    pub(crate) owner: super::Owner,
+    pub(crate) f: Box<dyn FnOnce()>,
 }
 
 /// A task's timer: when, and whom to wake (in the order they were made
@@ -430,6 +525,38 @@ impl Executor {
             notify();
         }
     }
+
+    /// Keeps `answer` until the events emitted so far have been handed to
+    /// JS and handled ([`super::after_answer`]).
+    pub(crate) fn after_answer(&self, answer: AfterAnswer) {
+        self.answers.borrow_mut().waiting.push(answer);
+    }
+
+    /// The events emitted so far go to JS: what waited for them is due.
+    pub(crate) fn hand_answers(&self) {
+        let mut answers = self.answers.borrow_mut();
+        let Answers { waiting, due } = &mut *answers;
+        if !waiting.is_empty() {
+            due.append(waiting);
+        }
+    }
+
+    /// Whether closures wait for the next commit to run.
+    pub(crate) fn has_due_answers(&self) -> bool {
+        !self.answers.borrow().due.is_empty()
+    }
+
+    /// Whether the queues ever held a closure (they allocate on the first).
+    #[cfg(test)]
+    pub(crate) fn answers_allocated(&self) -> bool {
+        let answers = self.answers.borrow();
+        answers.waiting.capacity() > 0 || answers.due.capacity() > 0
+    }
+
+    /// The closures whose events JS has handled, in order.
+    pub(crate) fn take_due_answers(&self) -> Vec<AfterAnswer> {
+        std::mem::take(&mut self.answers.borrow_mut().due)
+    }
 }
 
 /// A running task of the core. Dropping it cancels the
@@ -571,7 +698,7 @@ pub(crate) fn act_after(
     let id = executor.spawn(
         host,
         Box::pin(async move {
-            super::ambient::timer_until(at).await;
+            super::timer_until(at).await;
             if let Some(executor) = acting.upgrade() {
                 executor.act(action);
             }

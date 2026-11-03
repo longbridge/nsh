@@ -38,14 +38,14 @@ function App() {
     <View style={{ flex: 1, backgroundColor: ui().page, padding: 20, paddingTop: 24, gap: 14 }}>
       <Text style={{ fontSize: 22, fontWeight: "700", color: ui().text }}>canvas</Text>
       <Text style={{ color: ui().muted }}>
-        {platform.idiom === "desktop" ? "Drag across the chart with the mouse" : "Drag your finger across the chart"} · {months[picked()]}{" "}
+        {platform.desktop ? "Drag across the chart with the mouse" : "Drag your finger across the chart"} · {months[picked()]}{" "}
         = {values[picked()]}
       </Text>
 
       <View style={{ flex: 1, flexDirection: wide() ? "row" : "column", gap: 14 }}>
         <Canvas
           style={{ ...ui().inset, flex: 1, minHeight: 200, borderRadius: 14 }}
-          onLayout={(e) => (chartWidth = e.size.width)}
+          onLayout={({ bounds }) => (chartWidth = bounds.size.width)}
           onStartShouldSetResponder={() => true}
           onResponderGrant={(e) => {
             pick(e.locationX, chartWidth);

@@ -1,7 +1,14 @@
 //! `Radio` and `RadioGroup`: a set of options the user picks one of, with
-//! no look of their own.
+//! no look of their own. The group is one stop of the keyboard focus whose
+//! arrow keys move between its radios and check them (`roving.rs`).
 
 use nsh_core::{AccessibilityState, Checked, element::Style, prelude::*};
+
+use crate::roving::{Pattern, Roving, member};
+
+/// What a [`Radio`] finds of its [`RadioGroup`] through context.
+#[derive(Clone)]
+struct RadioGroupContext(Roving);
 
 /// The props of [`Radio`].
 #[derive(Debug, Clone, PartialEq, Props)]
@@ -21,6 +28,12 @@ pub struct RadioProps {
     /// What screen readers say: the option, when its children have no text
     /// that says it.
     pub accessibility_label: Prop<Option<SharedString>>,
+    /// How far outside its bounds presses still count, as a view's
+    /// `hitSlop`: one number for every side, or the sides named (each left
+    /// out 0). A small radio (a dot with no label) takes presses a finger
+    /// lands near it, with no change to its layout or look.
+    #[prop(default)]
+    pub hit_slop: Prop<EdgeInsets>,
     /// The content: the app's indicator (a dot, styled with
     /// `group-checked:` classes under `group` on the radio) and its label,
     /// which screen readers say.
@@ -30,10 +43,11 @@ pub struct RadioProps {
 /// The events of a [`Radio`].
 #[derive(Debug, Clone, PartialEq, Event)]
 pub enum RadioEvent {
-    /// An unchecked radio was pressed (a tap, a click, Space or Return): it
-    /// asks to be checked, so the value is `true`. It runs before anything
-    /// changes: the radio shows the `checked` the app passes back. A
-    /// checked radio stays checked and reports nothing, as a radio cannot
+    /// An unchecked radio was pressed (a tap, a click, Space or Return), or
+    /// an arrow key of its [`RadioGroup`] moved the keyboard focus to it:
+    /// it asks to be checked, so the value is `true`. It runs before
+    /// anything changes: the radio shows the `checked` the app passes back.
+    /// A checked radio stays checked and reports nothing, as a radio cannot
     /// uncheck itself.
     #[args(checked)]
     Change(bool),
@@ -47,11 +61,22 @@ pub enum RadioEvent {
 /// app's `class` and `style` style it, `checked:` and `disabled:` classes
 /// (or `checkedStyle` and `disabledStyle`) its states, and its children are
 /// the app's indicator and label, whose `group-checked:` classes follow the
-/// radio under `group` in its `class`.
+/// radio under `group` in its `class`. `hitSlop` widens where presses count
+/// past its bounds, as a view's does. In a [`RadioGroup`], it is a stop of
+/// the keyboard focus only while it is the radio Tab enters the group at
+/// (see [`RadioGroup`]).
 #[component]
 pub fn Radio(props: RadioProps, cx: Scope<RadioEvent>) -> impl IntoElement {
     let checked = props.checked;
-    view()
+    let node = element_ref();
+    let set = use_context::<RadioGroupContext>().map(|RadioGroupContext(set)| {
+        set.register(node, checked, props.disabled, move || {
+            if !checked.get_untracked() {
+                cx.emit(RadioEvent::Change(true));
+            }
+        })
+    });
+    member(view(), &node, set)
         .disabled(props.disabled)
         .role(AccessibilityRole::Radio)
         .optional_label(props.accessibility_label)
@@ -67,6 +92,7 @@ pub fn Radio(props: RadioProps, cx: Scope<RadioEvent>) -> impl IntoElement {
             }
         })
         .checked_style(props.checked_style)
+        .hit_slop(props.hit_slop)
         .on_press(move |_: &()| {
             if !checked.get_untracked() {
                 cx.emit(RadioEvent::Change(true));
@@ -87,8 +113,17 @@ pub struct RadioGroupProps {
 /// value: each radio is told whether it is checked and reports a press
 /// with `onChange`, and the app keeps which one is. Its layout and look are
 /// the app's `class` and `style` (`flex-row` for a row).
+///
+/// The keyboard, as WAI-ARIA's radio group pattern has it, where views
+/// that take presses are stops of the keyboard focus (macOS, the web): the
+/// group is one stop of Tab, at the checked radio (else the first that is
+/// not disabled); Down and Right move the focus to the next radio, Up and
+/// Left to the previous, around the ends and past disabled radios, and the
+/// radio the focus moves to asks to be checked (`onChange`); Space checks
+/// the focused radio.
 #[component]
 pub fn RadioGroup(props: RadioGroupProps, _cx: Scope<NoEvent>) -> impl IntoElement {
+    provide_context(RadioGroupContext(Roving::new(Pattern::Radios)));
     view()
         .role(AccessibilityRole::Radiogroup)
         .child(props.children)

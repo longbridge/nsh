@@ -1,4 +1,4 @@
-import { List, mount, signal, Text, View, type YNode } from "nsh";
+import { List, type ListRef, mount, signal, Text, View } from "nsh";
 import { button, buttonText, desktop, Inspector, Panel, size, tint, ui, wide } from "./palette";
 
 type Trade = { id: string; symbol: string; shares: number; change: number };
@@ -20,7 +20,7 @@ function App() {
   const loads = signal(0);
   const refreshing = signal(false);
   const visible = signal("");
-  let list!: YNode;
+  let list!: ListRef;
 
   const loadMore = () => {
     if (loading() || trades().length >= LIMIT) return;
@@ -70,7 +70,7 @@ function App() {
         loadMoreThreshold={0.5}
         refreshing={refreshing()}
         onRefresh={refresh}
-        viewabilityConfig={{ itemVisiblePercentThreshold: 50 }}
+        viewabilityConfig={{ itemVisibleThreshold: 0.5 }}
         onViewableItemsChange={viewable}
         header={
           <View style={{ ...ui().card, borderRadius: 14, padding: 14, gap: 10, marginBottom: 4 }}>
@@ -155,7 +155,7 @@ function App() {
             loadMoreThreshold={0.5}
             refreshing={refreshing()}
             onRefresh={refresh}
-            viewabilityConfig={{ itemVisiblePercentThreshold: 50 }}
+            viewabilityConfig={{ itemVisibleThreshold: 0.5 }}
             onViewableItemsChange={viewable}
             footer={<Text style={{ color: ui().faint, fontSize: 13, textAlign: "center", paddingVertical: 12 }}>{status()}</Text>}
           >

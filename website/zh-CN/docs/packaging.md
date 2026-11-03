@@ -80,6 +80,7 @@ nsh package --target android --app-version 1.4.0 --build 42
 | `--keystore <file>` | Android：release keystore（默认使用 debug 密钥）。 |
 | `--key-alias <alias>` | Android：keystore 中的密钥别名。 |
 | `--keystore-password <password>` | Android：keystore 密码；也可从 `NSH_KEYSTORE_PASSWORD` 读取。 |
+| `--abi <abi>` | Android：APK 包含的 ABI，可重复或用逗号分隔（默认：`arm64-v8a` 和 `armeabi-v7a`）。 |
 | `--run` | 构建完成后安装并启动：在 iOS 模拟器中，或在 `adb` 能看到的 Android 设备或模拟器上；macOS、Linux 和 Windows 应用在本机启动；Web 站点在本机提供服务并在浏览器中打开。不适用于 `--target ios`。 |
 
 ## iOS 模拟器
@@ -128,7 +129,12 @@ nsh package --target android --run
 - 一个 JDK，用于首次创建 debug keystore。
 - Rust 应用还需要 Android NDK（`sdkmanager "ndk;<version>"`，或 `ANDROID_NDK_HOME`），用它构建应用的 `libnsh.so`。
 
-应用的目标 API 为 35，要求 API 28（Android 9）或更高版本；包含适用于 `arm64-v8a`、`armeabi-v7a` 和 `x86_64` 的原生代码。
+应用的目标 API 为 35，要求 API 28（Android 9）或更高版本。它包含适用于手机 ABI `arm64-v8a` 和 `armeabi-v7a` 的原生代码；
+加上 `--run` 时还包含设备的 ABI，例如模拟器的 `x86_64`。用 `--abi` 可以自己选择，例如 `--abi arm64-v8a` 只面向 64 位手机，APK 最小：
+
+```sh
+nsh package --target android --abi arm64-v8a
+```
 
 ### 发布签名
 
@@ -182,7 +188,7 @@ nsh package --target web --run
 ```
 
 写出 `.nsh/out/<Name>/`，一个静态站点：`index.html`、`manifest.webmanifest`、页面脚本（`nsh.<digest>.js`）和 `nsh.<digest>.wasm`
-（Rust 应用的引擎和 crate；TSX 应用则是运行时，旁边是应用的字节码 `app.<digest>.nshc`）、资源和图标，每个文件都以其内容命名，托管方可以永久缓存它们。把目录部署到任意 Web 服务器或 CDN
+（Rust 应用的引擎和 crate；TSX 应用则是运行时，旁边是应用的 ES 模块 `app.<digest>.js`）、资源和图标，每个文件都以其内容命名，托管方可以永久缓存它们。把目录部署到任意 Web 服务器或 CDN
 即可；`--run` 在 `http://127.0.0.1:4173/` 上提供服务，自行在浏览器中打开即可。缓存头和嵌入方式见 [Web](./web.md#发布应用)。
 
 ## 图标
@@ -206,11 +212,11 @@ Rust 应用的包就是它的 runner：用你的 crate 构建，挂载好根组�
 | 目标 | 运行时 | TSX 应用 |
 |---|---|---|
 | iOS | `nsh-ios-app` 可执行文件 | `<Name>.app/nsh/bundle.nshc`、`nsh/assets/…` |
-| Android | `classes.dex`、`lib/<abi>/libnsh.so`（不压缩存储，16 KB 对齐） | `assets/nsh/bundle.nshc`、`assets/nsh/assets/…` |
+| Android | `classes.dex`、`lib/<abi>/libnsh.so`（不带符号，不压缩存储，16 KB 对齐） | `assets/nsh/bundle.nshc`、`assets/nsh/assets/…` |
 | macOS | `nsh-macos-app` 可执行文件，重命名为 `<Name>` | `<Name>.app/Contents/Resources/nsh/bundle.nshc`、`nsh/assets/…` |
 | Linux | `nsh-linux-app` 可执行文件，重命名为 `<Name>` | `<Name>/nsh/bundle.nshc`、`nsh/assets/…` |
 | Windows | `nsh-windows-app.exe` 可执行文件，重命名为 `<Name>.exe` | `<Name>\nsh\bundle.nshc`、`nsh\assets\…` |
-| Web | `nsh.<digest>.wasm`、`nsh.<digest>.js` | `<Name>/app.<digest>.nshc`、`assets/…`、`index.html` |
+| Web | `nsh.<digest>.wasm`、`nsh.<digest>.js` | `<Name>/app.<digest>.js`、`assets/…`、`index.html` |
 
 打包出的应用不注册任何[原生组件](./native-components.md)；如需使用原生组件，请把 NSH 嵌入你自己的应用。
 

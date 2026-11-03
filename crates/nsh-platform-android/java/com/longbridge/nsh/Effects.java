@@ -81,9 +81,10 @@ final class Effects {
                 case 2: g.circle = b.getInt() != 0; g.size = b.getInt(); g.x = b.getFloat(); g.y = b.getFloat(); break;
                 default: g.angle = b.getFloat(); g.x = b.getFloat(); g.y = b.getFloat(); break;
             }
+            g.repeating = b.getInt() != 0;
             int stops = b.getInt();
             // Negative: stops as written, some in points, placed when the
-            // box is known (`Decor.Gradient.resolve`).
+            // box is known (`Decor.Gradient.place`).
             boolean written = stops < 0;
             if (written) stops = -stops;
             g.colors = new int[stops];
@@ -248,6 +249,8 @@ final class Effects {
             case 14: type = PointerIcon.TYPE_HORIZONTAL_DOUBLE_ARROW; break;
             case 15: type = PointerIcon.TYPE_VERTICAL_DOUBLE_ARROW; break;
             case 16: type = PointerIcon.TYPE_NULL; break;
+            case 17: type = PointerIcon.TYPE_TOP_LEFT_DIAGONAL_DOUBLE_ARROW; break;
+            case 18: type = PointerIcon.TYPE_TOP_RIGHT_DIAGONAL_DOUBLE_ARROW; break;
             default: type = PointerIcon.TYPE_ARROW;
         }
         v.setPointerIcon(PointerIcon.getSystemIcon(v.getContext(), type));

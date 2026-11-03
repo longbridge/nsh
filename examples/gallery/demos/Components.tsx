@@ -1,4 +1,4 @@
-import { type JSX, signal, Text, View, type YNode } from "nsh";
+import { type InputRef, type JSX, signal, Text, View, type ViewRef } from "nsh";
 import { announce, reduceMotion, screenReaderEnabled, setAccessibilityFocus } from "nsh";
 import { LayoutAnimation } from "nsh";
 import { locale, pixelRatio, platform } from "nsh";
@@ -8,7 +8,7 @@ import { safeArea } from "nsh";
 import { Icon, type IconName } from "../icons";
 import { nav } from "../nav";
 import { TitleBar } from "../TitleBar";
-import { Appear, Badge, Button, Caption, Card, colors, DemoPage, desktopIdiom, finish, header, hint, IconTile, Inset, isDark, mono, PageHeader, Press, radius, Row, Segmented, tints, Toggle, type Tone, toneColor, toneTint } from "../ui";
+import { Appear, Badge, Button, Caption, Card, colors, DemoPage, finish, header, hint, IconTile, Inset, isDark, mono, PageHeader, Press, radius, Row, Segmented, tints, Toggle, type Tone, toneColor, toneTint } from "../ui";
 
 // One device pixel, in points (reading it in a binding follows the screen).
 const hairline = () => 1 / pixelRatio();
@@ -125,7 +125,7 @@ function PressableSheet() {
       <Caption label="Scales and darkens while pressed" note="active:scale-[0.97]" />
       <Sheet
         open={sheet()}
-        onOpenChange={(open) => sheet.set(open)}
+        onOpenChange={({ open }) => sheet.set(open)}
         backdropStyle={{ backgroundColor: "rgba(0,0,0,0.5)" }}
         popupStyle={{
           gap: 16,
@@ -204,18 +204,18 @@ function PressFeedback() {
 
 function Accessory() {
   const text = signal("");
-  let input: YNode | undefined;
+  let input: InputRef | undefined;
   return (
     <Card icon="text" title="Input accessory" subtitle="A bar over the iOS keyboard" right={<Badge label="nsh/ios" />}>
       <Field
         ref={(node) => (input = node)}
         value={text()}
-        onChange={(v) => text.set(v)}
+        onChange={({ value }) => text.set(value)}
         placeholder="Focus me"
         ios={{ inputAccessoryViewID: "counter" }}
       />
       <Caption
-        label={desktopIdiom ? "Desktops have no input accessories" : platform.os === "android" ? "Android has no input accessories" : "The bar counts what you type"} note='inputAccessoryViewID="counter"' />
+        label={platform.desktop ? "Desktops have no input accessories" : platform.os === "android" ? "Android has no input accessories" : "The bar counts what you type"} note='inputAccessoryViewID="counter"' />
       <InputAccessoryView nativeID="counter" style={{ backgroundColor: colors.surface }}>
         <View
           style={{
@@ -295,7 +295,7 @@ function ModalOptions() {
         animation="slide"
         android={{ statusBarTranslucent: translucent() }}
         ios={{ supportedOrientations: ["portrait", "landscape"] }}
-        onOpenChange={(open) => visible.set(open)}
+        onOpenChange={({ open }) => visible.set(open)}
         style={{ flex: 1 }}
       >
         <View style={{ flex: 1, backgroundColor: isDark() ? "#16200d" : "#eef5dc" }}>
@@ -331,7 +331,7 @@ function PlatformInfo() {
   const rows = (): [string, string][] => [
     ["platform.os", platform.os],
     ["platform.version", platform.version],
-    ["platform.idiom / catalyst", `${platform.idiom} / ${platform.catalyst}`],
+    ["platform.idiom / desktop / catalyst", `${platform.idiom} / ${platform.desktop} / ${platform.catalyst}`],
     ["platform.select", platform.select({ ios: "ios branch", android: "android branch" }) ?? ""],
     ["pixelRatio()", String(pixelRatio())],
     ["10.3 on whole pixels", String(Math.round(10.3 * pixelRatio()) / pixelRatio())],
@@ -340,7 +340,7 @@ function PlatformInfo() {
     ["locale()", locale()],
   ];
   const announced = signal(0);
-  let target: YNode | undefined;
+  let target: ViewRef | undefined;
   return (
     <Card icon="spark" title="Platform" subtitle="platform, pixelRatio, announce" right={<Badge label={platform.os} tone="accent" />}>
       <View>

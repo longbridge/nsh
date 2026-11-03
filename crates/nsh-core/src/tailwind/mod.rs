@@ -12,8 +12,8 @@
 //! Each class string is parsed once into rules, cached in an LRU of up to
 //! 4096 strings, with what the rules depend on (appearance, window width and
 //! height, direction, the node's own states, a group's states, sibling
-//! position, reduce motion): the core (`core/classes.rs`) resolves a node again only when
-//! one of those changes. Interaction states are reported by the platforms
+//! position, reduce motion, the `data-*` attributes it or a group shows): the core
+//! (`core/classes.rs`) resolves a node again only when one of those changes. Interaction states are reported by the platforms
 //! only for the bits a node's classes read (`MountItem::TrackStates`), and
 //! `focus-within` propagates to ancestors in the core. A node's style is the
 //! default, then its class rules, then its inline `style` replayed on top
@@ -45,28 +45,44 @@ use crate::{
 /// Interaction states a class can depend on (`active:`, `hover:`, ...).
 pub mod state {
     /// The view is pressed (`active:`).
-    pub const PRESSED: u8 = 1;
+    pub const PRESSED: u16 = 1;
     /// A pointer is over the view (`hover:`).
-    pub const HOVERED: u8 = 2;
+    pub const HOVERED: u16 = 2;
     /// The input has focus (`focus:`).
-    pub const FOCUSED: u8 = 4;
+    pub const FOCUSED: u16 = 4;
     /// The view is disabled (`disabled:`).
-    pub const DISABLED: u8 = 8;
+    pub const DISABLED: u16 = 8;
     /// The view or a descendant has focus (`focus-within:`).
-    pub const FOCUS_WITHIN: u8 = 16;
+    pub const FOCUS_WITHIN: u16 = 16;
     /// The view is selected (`selected:`): its
     /// `accessibilityState.selected`, a `Button`'s `selected`. Set by the
     /// core, never reported by the platform.
-    pub const SELECTED: u8 = 32;
+    pub const SELECTED: u16 = 32;
     /// The view is checked (`checked:`): its `accessibilityState.checked`
     /// (a checkbox, a switch, a radio; not when mixed). Set by the core,
     /// never reported by the platform.
-    pub const CHECKED: u8 = 64;
+    pub const CHECKED: u16 = 64;
     /// The view is indeterminate (`indeterminate:`): its
     /// `accessibilityState.checked` is mixed (a checkbox that is neither
     /// checked nor unchecked, as CSS's `:indeterminate`). Set by the core,
     /// never reported by the platform.
-    pub const INDETERMINATE: u8 = 128;
+    pub const INDETERMINATE: u16 = 128;
+    /// The view's popup, menu or section is open (`aria-expanded:`): its
+    /// `accessibilityState.expanded`, which `Popover` and `Menu` set on
+    /// their trigger. Set by the core, never reported by the platform.
+    pub const EXPANDED: u16 = 256;
+    /// The view is a toggle button that is on (`aria-pressed:`): its
+    /// `accessibilityState.pressed` is `true` (not mixed). Not
+    /// [`PRESSED`], a press in progress (`active:`). Set by the core,
+    /// never reported by the platform.
+    pub const ARIA_PRESSED: u16 = 512;
+    /// The view is busy (`aria-busy:`): its `accessibilityState.busy`.
+    /// Set by the core, never reported by the platform.
+    pub const BUSY: u16 = 1024;
+    /// The states the core sets from the accessibility state, which the
+    /// platforms never report.
+    pub(crate) const ACCESSIBILITY: u16 =
+        SELECTED | CHECKED | INDETERMINATE | EXPANDED | ARIA_PRESSED | BUSY;
 }
 
 /// The view's place among its siblings (`first:`, `odd:`, ...).
@@ -110,6 +126,9 @@ pub mod deps {
     pub const CURRENT_COLOR: u16 = 512;
     /// The advance of its font's `0` (CSS's `ch`: `max-w-prose`).
     pub const CH: u16 = 1024;
+    /// The view's own `data-*` attributes (`data-range-start:`); a group's
+    /// are [`GROUP`].
+    pub const DATA: u16 = 2048;
 }
 
 /// CSS's `ch` where no font is known ([`ClassList::apply`]): half a `rem`,
@@ -160,12 +179,24 @@ pub struct Context<'a> {
     /// Right-to-left layout.
     pub rtl: bool,
     /// [`state`] bits of the node.
-    pub states: u8,
+    pub states: u16,
     /// [`position`] bits of the node.
     pub position: u8,
     /// [`state`] bits of the nearest ancestor group with this name (`""`
     /// for unnamed groups).
-    pub group: &'a dyn Fn(&str) -> u8,
+    pub group: &'a dyn Fn(&str) -> u16,
+}
+
+/// Whether the node (`None`) or the nearest ancestor group with this name
+/// (`Some`, `""` for unnamed groups) has the boolean `data-*` attribute
+/// named (without `data-`): `data-range-start:`, `group-data-range-start:`.
+/// Components set them on their parts (`Interactive::project_data`); only
+/// the core has them, so they stay out of the public [`Context`].
+pub(crate) type Data<'a> = &'a dyn Fn(Option<&str>, &str) -> bool;
+
+/// No `data-*` attribute: what classes resolved outside a tree see.
+pub(crate) fn no_data(_: Option<&str>, _: &str) -> bool {
+    false
 }
 
 /// Conditions of one rule (all must hold).
@@ -179,11 +210,16 @@ pub(crate) struct Condition {
     rtl: Option<bool>,
     reduce_motion: Option<bool>,
     /// Required [`state`] bits.
-    states: u8,
+    states: u16,
     /// [`state`] bits that must be off (`enabled:`).
-    not_states: u8,
+    not_states: u16,
     /// A group name and its required states.
-    group: Option<(Box<str>, u8)>,
+    group: Option<(Box<str>, u16)>,
+    /// `data-*` attributes the node must have (`data-<name>:`), by name.
+    data: Vec<Box<str>>,
+    /// `data-*` attributes the group of [`Condition::group`] must have
+    /// (`group-data-<name>:`).
+    group_data: Vec<Box<str>>,
     /// Allowed [`position`] bits (any of them).
     position: u8,
     /// Applies to an input's placeholder.
@@ -193,7 +229,7 @@ pub(crate) struct Condition {
 }
 
 impl Condition {
-    fn matches(&self, cx: &Context<'_>) -> bool {
+    fn matches(&self, cx: &Context<'_>, data: Data<'_>) -> bool {
         if self.dark.is_some_and(|d| d != cx.env.dark)
             || self.platform.is_some_and(|p| p != cx.env.platform)
             || self.rtl.is_some_and(|r| r != cx.rtl)
@@ -213,8 +249,12 @@ impl Condition {
         if self.position != 0 && cx.position & self.position == 0 {
             return false;
         }
+        if !self.data.iter().all(|d| data(None, d)) {
+            return false;
+        }
         if let Some((name, states)) = &self.group
-            && (cx.group)(name) & states != *states
+            && ((cx.group)(name) & states != *states
+                || !self.group_data.iter().all(|d| data(Some(name), d)))
         {
             return false;
         }
@@ -242,7 +282,7 @@ impl Condition {
     /// Applies only while the view (or its group) is pressed, hovered or
     /// focused: press feedback.
     fn interactive(&self) -> bool {
-        const INTERACTION: u8 =
+        const INTERACTION: u16 =
             state::PRESSED | state::HOVERED | state::FOCUSED | state::FOCUS_WITHIN;
         self.states & INTERACTION != 0
             || self
@@ -273,6 +313,9 @@ impl Condition {
         }
         if self.group.is_some() {
             d |= deps::GROUP;
+        }
+        if !self.data.is_empty() {
+            d |= deps::DATA;
         }
         if self.position != 0 {
             d |= deps::POSITION;
@@ -305,7 +348,8 @@ pub(crate) struct Key {
     /// A breakpoint's value (thousandths, negated for `max-*`), or a
     /// group's inner variant.
     value: i64,
-    /// A group's name (`group-hover/item`), `None` unnamed.
+    /// A group's name (`group-hover/item`), `None` unnamed; a `data-*`
+    /// attribute's ([`Key::data`]).
     name: Option<Box<str>>,
 }
 
@@ -316,6 +360,14 @@ impl Key {
             unit: 0,
             value: 0,
             name: None,
+        }
+    }
+
+    /// `data-<name>:`'s place: [`rank::DATA`], then by name.
+    fn data(name: &str) -> Self {
+        Self {
+            name: Some(name.into()),
+            ..Self::new(rank::DATA)
         }
     }
 }
@@ -380,8 +432,18 @@ pub(crate) mod rank {
     pub(crate) const ACTIVE: Key = Key::new(37);
     pub(crate) const ENABLED: Key = Key::new(38);
     pub(crate) const DISABLED: Key = Key::new(39);
-    pub(crate) const MOTION_SAFE: Key = Key::new(40);
-    pub(crate) const MOTION_REDUCE: Key = Key::new(41);
+    /// Tailwind's `aria-*` variants come after the pseudo-classes, in the
+    /// order of their names.
+    pub(crate) const ARIA_BUSY: Key = Key::new(40);
+    pub(crate) const ARIA_CHECKED: Key = Key::new(41);
+    pub(crate) const EXPANDED: Key = Key::new(42);
+    pub(crate) const ARIA_PRESSED: Key = Key::new(43);
+    pub(crate) const ARIA_SELECTED: Key = Key::new(44);
+    /// `data-*`, after `aria-*` as Tailwind registers them, in the order
+    /// of their names ([`Key::data`]).
+    pub(crate) const DATA: u16 = 45;
+    pub(crate) const MOTION_SAFE: Key = Key::new(46);
+    pub(crate) const MOTION_REDUCE: Key = Key::new(47);
     /// `max-*` breakpoints, widest first.
     pub(crate) const MAX: u16 = 50;
     /// Breakpoints and `min-*`, narrowest first.
@@ -400,7 +462,7 @@ pub(crate) mod rank {
 impl Rule {
     /// A rule applying `decls` while the node is in all of [`state`]
     /// `states`, ordered by `rank`.
-    pub(crate) fn new(states: u8, rank: impl Into<Rank>, decls: Vec<Decl>) -> Self {
+    pub(crate) fn new(states: u16, rank: impl Into<Rank>, decls: Vec<Decl>) -> Self {
         Self {
             cond: Condition {
                 states,
@@ -417,7 +479,7 @@ impl Rule {
     /// `states` (and, unless `disabled`, not disabled), applied over the
     /// inline style as `!` utilities are, ordered by `rank`.
     pub(crate) fn state_style(
-        states: u8,
+        states: u16,
         rank: impl Into<Rank>,
         decls: Vec<crate::StyleDecl>,
     ) -> Self {
@@ -442,8 +504,8 @@ impl Rule {
     /// [`Rule::new`], also requiring the nearest ancestor group `group`
     /// (`""`: unnamed) in its states, and dark appearance when `dark`.
     pub(crate) fn with(
-        states: u8,
-        group: Option<(&str, u8)>,
+        states: u16,
+        group: Option<(&str, u16)>,
         dark: bool,
         rank: Rank,
         decls: Vec<Decl>,
@@ -557,7 +619,7 @@ pub struct ClassList {
     /// [`deps`] bits.
     deps: u16,
     /// [`state`] bits the platform must report for this view.
-    tracked: u8,
+    tracked: u16,
     /// The view is a `group` (`""`) or named groups (`group/item`).
     groups: Vec<Box<str>>,
     /// Classes that are not known utilities.
@@ -573,7 +635,7 @@ impl ClassList {
 
     /// [`state`] bits whose changes the platform must report.
     #[inline]
-    pub fn tracked_states(&self) -> u8 {
+    pub fn tracked_states(&self) -> u16 {
         self.tracked
     }
 
@@ -606,6 +668,7 @@ impl ClassList {
     ) {
         self.apply_with(
             cx,
+            &no_data,
             theme,
             CurrentColor::default(),
             DEFAULT_CH,
@@ -621,6 +684,7 @@ impl ClassList {
     pub(crate) fn apply_with(
         &self,
         cx: &Context<'_>,
+        data: Data<'_>,
         theme: &Theme,
         current: CurrentColor,
         ch: f32,
@@ -632,13 +696,13 @@ impl ClassList {
         parts.ch = ch;
         let mut important = false;
         let current = if self.deps & deps::CURRENT_COLOR != 0 {
-            self.current_color(cx, current)
+            self.current_color(cx, data, current)
         } else {
             Color::BLACK
         };
         parts.current = current;
         for rule in &self.rules {
-            if rule.cond.pseudo() || !rule.cond.matches(cx) {
+            if rule.cond.pseudo() || !rule.cond.matches(cx, data) {
                 continue;
             }
             for decl in &rule.decls {
@@ -657,7 +721,7 @@ impl ClassList {
         let mut state_background = false;
         let mut state_image = false;
         for rule in &self.rules {
-            if rule.cond.pseudo() || !rule.cond.matches(cx) {
+            if rule.cond.pseudo() || !rule.cond.matches(cx, data) {
                 continue;
             }
             important |= rule.important;
@@ -679,7 +743,7 @@ impl ClassList {
         let state_color = style.view.background_color;
         // `placeholder:` and `selection:` rules only carry a color.
         for rule in self.rules.iter().filter(|r| r.cond.pseudo()) {
-            if !rule.cond.matches(cx) {
+            if !rule.cond.matches(cx, data) {
                 continue;
             }
             if let Some(c) = rule.cond.pseudo_color(&rule.decls) {
@@ -709,7 +773,7 @@ impl ClassList {
                 .iter()
                 .filter(|r| r.important && !r.cond.pseudo())
             {
-                if rule.cond.matches(cx) {
+                if rule.cond.matches(cx, data) {
                     for decl in &rule.decls {
                         decl.apply(cx.env.dark, rule.important, style, props, &mut parts);
                     }
@@ -731,8 +795,13 @@ impl ClassList {
     /// CSS's `currentColor` of a node with these classes in `cx`: the text
     /// color of its `!` classes, its inline style, its classes, else the
     /// one it inherits, else black.
-    pub(crate) fn current_color(&self, cx: &Context<'_>, current: CurrentColor) -> Color {
-        let [plain, important] = self.text_colors(cx);
+    pub(crate) fn current_color(
+        &self,
+        cx: &Context<'_>,
+        data: Data<'_>,
+        current: CurrentColor,
+    ) -> Color {
+        let [plain, important] = self.text_colors(cx, data);
         important
             .or(current.inline)
             .or(plain)
@@ -742,10 +811,10 @@ impl ClassList {
 
     /// The text colors the rules matching `cx` set: the plain ones' and
     /// the `!` ones' (which win over the inline style).
-    fn text_colors(&self, cx: &Context<'_>) -> [Option<Color>; 2] {
+    fn text_colors(&self, cx: &Context<'_>, data: Data<'_>) -> [Option<Color>; 2] {
         let mut out = [None; 2];
         for rule in &self.rules {
-            if rule.cond.pseudo() || !rule.cond.matches(cx) {
+            if rule.cond.pseudo() || !rule.cond.matches(cx, data) {
                 continue;
             }
             for decl in &rule.decls {
@@ -775,8 +844,7 @@ impl ClassList {
 
     fn add(&mut self, rule: Rule) {
         self.deps |= rule.cond.deps();
-        self.tracked |= rule.cond.states
-            & !(state::DISABLED | state::SELECTED | state::CHECKED | state::INDETERMINATE);
+        self.tracked |= rule.cond.states & !(state::DISABLED | state::ACCESSIBILITY);
         if rule.cond.states & state::FOCUS_WITHIN != 0 {
             self.tracked |= state::FOCUS_WITHIN;
         }
@@ -1041,10 +1109,20 @@ fn themed(
     ))
 }
 
+/// Whether `name` names a boolean `data-*` attribute (`data-<name>:`):
+/// lower case letters, digits and `-`. Tailwind's `data-[state=open]:`,
+/// an attribute's value, is not supported.
+fn data_name(name: &str) -> bool {
+    !name.is_empty()
+        && name
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+}
+
 /// Applies variant `v` to `cond`; returns its place in Tailwind's order.
 fn variant(theme: &Theme, v: &str, cond: &mut Condition) -> Option<Key> {
     use state::*;
-    let states = |cond: &mut Condition, s: u8| {
+    let states = |cond: &mut Condition, s: u16| {
         cond.states |= s;
     };
     // Tailwind registers `group-*` first, then the pseudo-elements, then
@@ -1118,6 +1196,26 @@ fn variant(theme: &Theme, v: &str, cond: &mut Condition) -> Option<Key> {
             states(cond, DISABLED);
             rank::DISABLED
         }
+        "aria-busy" => {
+            states(cond, BUSY);
+            rank::ARIA_BUSY
+        }
+        "aria-checked" => {
+            states(cond, CHECKED);
+            rank::ARIA_CHECKED
+        }
+        "aria-expanded" => {
+            states(cond, EXPANDED);
+            rank::EXPANDED
+        }
+        "aria-pressed" => {
+            states(cond, ARIA_PRESSED);
+            rank::ARIA_PRESSED
+        }
+        "aria-selected" => {
+            states(cond, SELECTED);
+            rank::ARIA_SELECTED
+        }
         "motion-safe" => {
             cond.reduce_motion = Some(false);
             rank::MOTION_SAFE
@@ -1159,12 +1257,31 @@ fn variant(theme: &Theme, v: &str, cond: &mut Condition) -> Option<Key> {
             rank::WEB
         }
         v => {
+            // `data-range-start`: Tailwind 4's boolean form, `[data-range-start]`.
+            if let Some(name) = v.strip_prefix("data-").filter(|n| data_name(n)) {
+                if !cond.data.iter().any(|d| **d == *name) {
+                    cond.data.push(name.into());
+                }
+                return Some(Key::data(name));
+            }
             if let Some(rest) = v.strip_prefix("group-") {
                 // `group-hover`, `group-hover/item`.
                 let (s, name) = match rest.split_once('/') {
                     Some((s, n)) => (s, n),
                     None => (rest, ""),
                 };
+                if let Some(data) = s.strip_prefix("data-").filter(|n| data_name(n)) {
+                    let entry = cond.group.get_or_insert_with(|| (name.into(), 0));
+                    if *entry.0 != *name {
+                        return None;
+                    }
+                    if !cond.group_data.iter().any(|d| **d == *data) {
+                        cond.group_data.push(data.into());
+                    }
+                    let mut group = Rank::default();
+                    group.add_group(&Key::data(data), name);
+                    return group.0.pop();
+                }
                 let (bit, inner) = match s {
                     "hover" => (HOVERED, rank::HOVER),
                     "active" => (PRESSED, rank::ACTIVE),
@@ -1175,6 +1292,11 @@ fn variant(theme: &Theme, v: &str, cond: &mut Condition) -> Option<Key> {
                     "selected" => (SELECTED, rank::SELECTED),
                     "checked" => (CHECKED, rank::CHECKED),
                     "indeterminate" => (INDETERMINATE, rank::INDETERMINATE),
+                    "aria-busy" => (BUSY, rank::ARIA_BUSY),
+                    "aria-checked" => (CHECKED, rank::ARIA_CHECKED),
+                    "aria-expanded" => (EXPANDED, rank::EXPANDED),
+                    "aria-pressed" => (ARIA_PRESSED, rank::ARIA_PRESSED),
+                    "aria-selected" => (SELECTED, rank::ARIA_SELECTED),
                     _ => return None,
                 };
                 let entry = cond.group.get_or_insert_with(|| (name.into(), 0));

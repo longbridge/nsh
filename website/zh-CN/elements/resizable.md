@@ -1,7 +1,6 @@
 ---
 title: Resizable
 description: ResizablePanelGroup 与 ResizablePanel：并排或上下排列的面板，每两个面板之间有一个手柄，用户拖动它来分配空间。分组负责拖动、面板的尺寸限制、调整大小的光标以及手柄面向屏幕阅读器的角色；尺寸、手柄的外观和面板的内容都属于应用。
-order: 29.5
 group: base
 demo: el-resizable
 ---
@@ -46,7 +45,7 @@ function App() {
       handleClass="bg-border group-hover:bg-ring group-active:bg-primary"
       handleAccessibilityLabel="Resize the sidebar"
     >
-      <ResizablePanel size={sidebar()} minSize={160} maxSize={480} onResize={(v) => sidebar.set(v)} class="p-4">
+      <ResizablePanel size={sidebar()} minSize={160} maxSize={480} onResize={({ size }) => sidebar.set(size)} class="p-4">
         <Text class="text-muted-foreground">Files</Text>
       </ResizablePanel>
       <ResizablePanel class="p-4">
@@ -148,8 +147,8 @@ mount(App);
 
 | 事件 | Rust | 说明 |
 |---|---|---|
-| `onResize`（`ResizablePanelGroup`） | `.on_resize(\|sizes: &Vec<Points>\| ..)` | 一次拖动结束并移动了手柄，或屏幕阅读器调整了手柄：按布局顺序（从左到右、从上到下）给出每个可见面板的尺寸。 |
-| `onResize`（`ResizablePanel`） | `.on_resize(\|size: &Points\| ..)` | 一次拖动结束并改变了这个面板的尺寸：新的尺寸，作为它的 `size` 传回。 |
+| `onResize`（`ResizablePanelGroup`） | `.on_resize(\|sizes: &Vec<Points>\| ..)` | 一次拖动结束并移动了手柄，或屏幕阅读器调整了手柄：`sizes` 按布局顺序（从左到右、从上到下）给出每个可见面板的尺寸。 |
+| `onResize`（`ResizablePanel`） | `.on_resize(\|size: &Points\| ..)` | 一次拖动结束并改变了这个面板的尺寸：`size` 是新的尺寸，作为它的 `size` 传回。 |
 
 <a id="parts"></a>
 

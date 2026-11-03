@@ -1,7 +1,7 @@
 //! Checkboxes, radios and switches show their state with terminal glyphs.
 
 use nsh_core::{AccessibilityRole, AccessibilityState, Checked, prelude::*};
-use nsh_platform_tui::{App, Handled, Input, Root};
+use nsh_platform_tui::{App, AppView, Handled, Input, Root};
 use ratatui_core::{
     backend::TestBackend,
     buffer::Buffer,
@@ -135,9 +135,15 @@ fn radios_put_their_glyphs_in_one_column_and_focus_puts_the_bar_on_them() {
     ];
     assert_eq!(rows(buffer), titles);
     assert!(!reversed_anywhere(buffer));
+    // Tab enters the group at the checked radio; the arrow moves the focus
+    // to the one before and checks it.
     assert_eq!(view.handle(key("Tab")), Handled::Yes);
-    assert_eq!(view.handle(key("Enter")), Handled::Yes);
+    // The group binds its arrows once the focus reached the radio.
+    settle(&mut view, &mut terminal, &rx);
+    assert_eq!(view.handle(key("Up")), Handled::Yes);
     draw_until(&mut view, &mut terminal, &rx, "(•) Free");
+    // The focus follows the radio the arrow checked.
+    settle(&mut view, &mut terminal, &rx);
     let buffer = terminal.backend().buffer();
     assert_eq!(rows(buffer)[0..3], ["(•) Free", "    detail", "( ) Plus"]);
     assert!(!reversed_anywhere(buffer));
@@ -148,6 +154,25 @@ fn radios_put_their_glyphs_in_one_column_and_focus_puts_the_bar_on_them() {
             "keyboard focus: the bar on the glyph's and the label's rows"
         );
     }
+}
+
+/// Draws what the engine sends until it has been quiet for a moment.
+fn settle(
+    view: &mut AppView,
+    terminal: &mut Terminal<TestBackend>,
+    rx: &crossbeam_channel::Receiver<()>,
+) {
+    while rx
+        .recv_timeout(std::time::Duration::from_millis(300))
+        .is_ok()
+    {
+        terminal
+            .draw(|frame| view.render(frame, frame.area()))
+            .unwrap();
+    }
+    terminal
+        .draw(|frame| view.render(frame, frame.area()))
+        .unwrap();
 }
 
 #[component]

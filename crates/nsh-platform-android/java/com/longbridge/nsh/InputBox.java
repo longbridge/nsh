@@ -7,9 +7,12 @@ import android.os.Build;
 import android.text.Editable;
 import android.text.InputFilter;
 import android.text.InputType;
+import android.text.Layout;
 import android.text.TextWatcher;
+import android.text.method.ArrowKeyMovementMethod;
 import android.util.TypedValue;
 import android.view.Gravity;
+import android.view.MotionEvent;
 import android.view.View;
 import android.view.inputmethod.BaseInputConnection;
 import android.view.inputmethod.EditorInfo;
@@ -49,6 +52,26 @@ final class InputBox extends FrameLayout implements Node {
     private boolean watching;
     /** `pasteBehavior` is `"insert"`: a paste inserts its text. */
     boolean pasteInserts = true;
+    /** Whether the EditText shows a vertical scroll bar of its own by default. */
+    private final boolean defaultVerticalBar;
+    /**
+     * A built-in bar replaces the scroll indicator (`InputConfig::replaced`):
+     * how far the text scrolled is reported to the engine.
+     */
+    private boolean replaced;
+    /** What was last reported (px): offset, text height, viewport width and height; -1 for nothing. */
+    private int reportedY = -1, reportedContent = -1, reportedWidth = -1, reportedHeight = -1;
+    /** `pointerEvents` (`Box`'s codes): `none` and `box-none` let touches through to the views below. */
+    int pointerEvents;
+
+    @Override
+    public boolean dispatchTouchEvent(MotionEvent e) {
+        // No target (an editor's hidden input at its caret, over the
+        // selection's handles): the touch goes to the views below. It
+        // still takes focus and typed text.
+        if (pointerEvents == 1 || pointerEvents == 2) return false;
+        return super.dispatchTouchEvent(e);
+    }
 
     InputBox(Context context, Mounter mounter, int id) {
         super(context);
@@ -122,13 +145,30 @@ final class InputBox extends FrameLayout implements Node {
             protected void onScrollChanged(int left, int top, int oldLeft, int oldTop) {
                 super.onScrollChanged(left, top, oldLeft, oldTop);
                 reportCaret(this);
+                if (replaced) reportScroll();
             }
 
             @Override
             protected void onSizeChanged(int w, int h, int oldW, int oldH) {
                 super.onSizeChanged(w, h, oldW, oldH);
                 // The text wraps again once laid out at the new size.
-                post(() -> reportCaret(this));
+                post(() -> {
+                    reportCaret(this);
+                    if (replaced) reportScroll();
+                });
+            }
+
+            @Override
+            protected void onLayout(boolean changed, int left, int top, int right, int bottom) {
+                super.onLayout(changed, left, top, right, bottom);
+                if (replaced) reportScroll();
+            }
+
+            @Override
+            protected void onTextChanged(CharSequence text, int start, int before, int after) {
+                super.onTextChanged(text, start, before, after);
+                // The text's height is known once it is laid out again.
+                if (replaced) post(InputBox.this::reportScroll);
             }
         };
         edit.setBackground(new ColorDrawable(0));
@@ -138,6 +178,7 @@ final class InputBox extends FrameLayout implements Node {
         // fallback fonts' taller metrics (HyperOS's sans-serif has them) would
         // put the centered text above the middle of the field.
         if (Build.VERSION.SDK_INT >= 28) edit.setFallbackLineSpacing(false);
+        defaultVerticalBar = edit.isVerticalScrollBarEnabled();
         edit.addTextChangedListener(new TextWatcher() {
             @Override
             public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
@@ -338,7 +379,18 @@ final class InputBox extends FrameLayout implements Node {
         }
         edit.setImeOptions(ime);
         edit.setFilters(maxLength >= 0 ? new InputFilter[] {new InputFilter.LengthFilter(maxLength)} : new InputFilter[0]);
-        edit.setEnabled(editable);
+        // `readonly` keeps focus and selection, as the docs say: the text selects as a selectable TextView's does (a
+        // long press on a word, the handles, Copy) while no key listener edits it and no keyboard comes up. Disabling
+        // the EditText instead, as before, took the selection away too.
+        if (!editable) {
+            edit.setKeyListener(null);
+            edit.setTextIsSelectable(true);
+        } else if (edit.isTextSelectable()) {
+            edit.setTextIsSelectable(false);
+            edit.setInputType(type);
+            edit.setMovementMethod(ArrowKeyMovementMethod.getInstance());
+            edit.setFocusableInTouchMode(true);
+        }
         if (hasCaretColor && Build.VERSION.SDK_INT >= 29) {
             edit.setTextCursorDrawable(new ColorDrawable(caretColor) {
                 @Override
@@ -559,9 +611,70 @@ final class InputBox extends FrameLayout implements Node {
         applying = false;
     }
 
-    void setContent(int left, int top, int right, int bottom) {
-        // Padding of the container: the EditText fills the content box.
-        setPadding(left, top, right, bottom);
+    /**
+     * `InputConfig`'s `scrollbarVisible` (whether the text's own scroll bar
+     * shows; the text scrolls either way) and `replaced` (a built-in bar takes
+     * its place: how far the text scrolled is reported, at once and on every
+     * change).
+     */
+    void setScrollbar(boolean visible, boolean replaced) {
+        edit.setVerticalScrollBarEnabled(visible && defaultVerticalBar);
+        this.replaced = replaced;
+        if (!replaced) return;
+        reportedY = reportedContent = reportedWidth = reportedHeight = -1;
+        // After the rest of the config (multiline, font) is applied.
+        post(this::reportScroll);
+    }
+
+    /** The text's scrolled height (px), at least the viewport's. */
+    private int textHeight() {
+        Layout layout = edit.getLayout();
+        int text = (layout == null ? 0 : layout.getHeight()) + edit.getTotalPaddingTop() + edit.getTotalPaddingBottom();
+        return Math.max(text, edit.getHeight());
+    }
+
+    /** Reports how far the text scrolled when that, its height or the viewport changed. */
+    private void reportScroll() {
+        if (!replaced || mounter == null) return;
+        int y = edit.getScrollY(), content = textHeight(), width = edit.getWidth(), height = edit.getHeight();
+        if (y == reportedY && content == reportedContent && width == reportedWidth && height == reportedHeight) {
+            return;
+        }
+        reportedY = y;
+        reportedContent = content;
+        reportedWidth = width;
+        reportedHeight = height;
+        float d = mounter.density;
+        mounter.inputScroll(id, y / d, width / d, content / d, width / d, height / d);
+    }
+
+    /** `Command::ScrollTo` (a built-in bar's drags): scrolls the text to {@code yDp}, within its range. */
+    void scrollTextTo(float yDp) {
+        if (!multiline) return;
+        int max = Math.max(0, textHeight() - edit.getHeight());
+        int y = Math.max(0, Math.min(Math.round(yDp * mounter.density), max));
+        edit.scrollTo(edit.getScrollX(), y);
+    }
+
+    /** The content box in the input's frame (px), kept so that the padding follows the frame's size. */
+    private int contentX, contentY, contentW = -1, contentH = -1;
+
+    void setContent(int x, int y, int w, int h) {
+        contentX = x; contentY = y; contentW = w; contentH = h;
+        applyContent(getWidth(), getHeight());
+    }
+
+    // Padding of the container: the EditText fills the content box. A new box can arrive before the frame it
+    // belongs to (an input that shrinks), so the insets come from the size being laid out, not from the old frame.
+    private void applyContent(int width, int height) {
+        if (contentW < 0) return;
+        setPadding(contentX, contentY, Math.max(0, width - contentX - contentW), Math.max(0, height - contentY - contentH));
+    }
+
+    @Override
+    protected void onMeasure(int widthSpec, int heightSpec) {
+        applyContent(MeasureSpec.getSize(widthSpec), MeasureSpec.getSize(heightSpec));
+        super.onMeasure(widthSpec, heightSpec);
     }
 
     void focus() {

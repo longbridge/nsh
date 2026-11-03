@@ -1,9 +1,9 @@
 import type { JSX as __JSX } from "nsh";
 import { Text as __Text, View as __View } from "nsh";
-import { windowSize as __windowSize } from "nsh";
+import { platform as __platform, windowSize as __windowSize } from "nsh";
 import { Segmented as GallerySegmented } from "./segmented";
 import { ui, tint } from "./palette";
-import { desktopIdiom, focusRing } from "./theme";
+import { colors, finish, focusRing } from "./theme";
 export { ui, tint } from "./palette";
 
 /** A pressable under the pointer (`hoverStyle`): a whisper of the text
@@ -18,11 +18,15 @@ export { focusRing } from "./theme";
 
 /** A pointer and a keyboard: desktop density and copy ("Click", "Tab to it
  * and press Space"); touch density and copy ("Tap") otherwise. */
-export const desktop = desktopIdiom;
+export const desktop = __platform.desktop;
 
 /** A window wide enough for the desktop layout (the site's Desktop frame is
- * 1024 points): the subject on a stage, its state and options beside it. */
+ * the documentation column's width, about 720 points). */
 export const wide = () => __windowSize().width >= 700;
+
+/** Wide enough to put a `Split`'s inspector beside its stage rather than
+ * under it: in the site's Desktop frame the subject keeps the whole width. */
+const sideBySide = () => __windowSize().width >= 900;
 
 /** Heights and type of the idiom (Design Guides, "Density tiers"): compact
  * with a pointer, 44-point targets on a touch screen. */
@@ -56,12 +60,13 @@ const __kind = (kind: ButtonKind, o?: ButtonOptions): ButtonKind => (__read<bool
 
 /** A button's props (spread them: `<Button {...button("primary")}>`): its
  * style and its states, the same in every demo. Desktop density with a
- * pointer (32 points, 28 compact, radius 8, label 13); 44-point targets
- * and a radius of 12 on a touch screen. States: hover (a lit border on a
- * raised button, a fill on a ghost, a touch of transparency on a filled
- * one), pressed (opacity 0.7), keyboard focus (`focusRing()`, one ring for
- * every control) and disabled (opacity 0.4). Pair it with `buttonText` for
- * the label. */
+ * pointer (28 points, 24 compact, radius 7, label 13); 40-point targets
+ * (36 compact) and a radius of 10 on a touch screen. States: hover (a
+ * raised button lightens, a ghost gets a fill, a filled one a touch of
+ * transparency), pressed (a raised button sinks into an inner shade, a
+ * filled one dims), keyboard focus (`focusRing()`, one ring for every
+ * control) and disabled (opacity 0.4). Pair it with `buttonText` for the
+ * label. */
 export function button(kind: ButtonKind = "secondary", o?: ButtonOptions) {
   return {
     get style() {
@@ -70,20 +75,24 @@ export function button(kind: ButtonKind = "secondary", o?: ButtonOptions) {
       const compact = o?.size === "sm";
       return {
         ...fill,
-        height: desktop ? (compact ? size.controlSm : size.control) : size.control,
-        paddingHorizontal: desktop ? (compact ? 10 : 12) : 16,
-        borderRadius: desktop ? 8 : 12,
+        height: desktop ? (compact ? 24 : 28) : compact ? 36 : 40,
+        paddingHorizontal: desktop ? (compact ? 8 : 12) : 16,
+        borderRadius: desktop ? 7 : 10,
         alignItems: "center" as const,
         justifyContent: "center" as const,
+        transitionProperty: "background-color, border-color, box-shadow, opacity",
+        transitionDuration: 120,
         ...(desktop ? { alignSelf: o?.align ?? ("flex-start" as const) } : o?.align ? { alignSelf: o.align } : {}),
         ...(__read<object | undefined>(o?.style) ?? {}),
       };
     },
     get hoverStyle() {
       const k = __kind(kind, o);
-      return k === "ghost" ? hoverFill() : k === "secondary" ? { borderColor: ui().faint } : { opacity: 0.9 };
+      return k === "ghost" ? hoverFill() : k === "secondary" ? finish.hover : { opacity: 0.94 };
     },
-    activeStyle: { opacity: 0.7 },
+    get activeStyle() {
+      return __kind(kind, o) === "secondary" ? finish.pressed : { opacity: 0.85 };
+    },
     get focusStyle() {
       return focusRing();
     },
@@ -99,7 +108,7 @@ export function buttonText(kind: ButtonKind = "secondary", o?: ButtonOptions) {
       return k === "primary" ? ui().onPrimary : k === "accent" ? ui().onAccent : k === "danger" ? "#ffffff" : ui().text;
     },
     fontSize: desktop ? 13 : size.label,
-    fontWeight: "600" as const,
+    fontWeight: "500" as const,
   };
 }
 
@@ -111,28 +120,32 @@ export interface FieldOptions {
   style?: object | (() => object);
 }
 
-/** A text field's props (spread them: `<Input {...field()} />`): a recessed
- * well, desktop density with a pointer (text 14, radius 8, about 32 points
- * high), touch density otherwise (16, radius 12, about 44). States: hover
+/** A text field's props (spread them: `<Input {...field()} />`): a field
+ * on the surface, a hair sunk, desktop density with a pointer (text 13,
+ * radius 7, 28 points high), touch density otherwise (16, radius 10, about
+ * 40). States: hover
  * (a stronger border), keyboard focus (`focusRing()`, as every control's),
  * invalid (a `down` border) and disabled (opacity 0.5). */
 export function field(o?: FieldOptions) {
   return {
     get style() {
       return {
-        ...ui().inset,
-        fontSize: desktop ? 14 : 16,
+        backgroundColor: colors.field,
+        borderWidth: 1,
+        borderColor: colors.fieldBorder,
+        ...finish.field,
+        fontSize: desktop ? 13 : 16,
         color: ui().text,
         placeholderColor: ui().faint,
-        borderRadius: desktop ? 8 : 12,
-        paddingHorizontal: desktop ? 10 : 12,
-        paddingVertical: desktop ? 7 : 10,
+        borderRadius: desktop ? 7 : 10,
+        paddingHorizontal: desktop ? 8 : 12,
+        paddingVertical: desktop ? 5 : 9,
         ...(__read<boolean | undefined>(o?.invalid) ? { borderColor: ui().down } : {}),
         ...(__read<object | undefined>(o?.style) ?? {}),
       };
     },
     get hoverStyle() {
-      return __read<boolean | undefined>(o?.invalid) ? {} : { borderColor: ui().border };
+      return __read<boolean | undefined>(o?.invalid) ? {} : { borderColor: ui().faint };
     },
     get focusStyle() {
       return focusRing();
@@ -188,10 +201,10 @@ export function Inspector(props: { children?: __JSX.Element }) {
 export function Split(props: { children?: __JSX.Element; inspector?: __JSX.Element; gap?: number; width?: number; grow?: boolean }) {
   return __View({
     get style() {
-      return wide() ? { flex: 1, flexDirection: "row" as const, gap: 16 } : { flex: props.grow ? 1 : 0, gap: props.gap ?? 14 };
+      return sideBySide() ? { flex: 1, flexDirection: "row" as const, gap: 16 } : { flex: props.grow ? 1 : undefined, gap: props.gap ?? 14 };
     },
     get children() {
-      if (!wide()) return [props.children, props.inspector];
+      if (!sideBySide()) return [props.children, props.inspector];
       return [
         Stage({
           get width() {
@@ -227,7 +240,7 @@ export function Panel(props: { title: string; children?: __JSX.Element; minHeigh
   });
   return __View({
     get style() {
-      return { ...ui().inset, borderRadius: 12, padding: 12, gap: 4, minHeight: props.minHeight, flex: props.grow ? 1 : 0 };
+      return { ...ui().inset, borderRadius: 12, padding: 12, gap: 4, minHeight: props.minHeight, flex: props.grow ? 1 : undefined };
     },
     get children() {
       return [title, props.children];
@@ -236,7 +249,7 @@ export function Panel(props: { title: string; children?: __JSX.Element; minHeigh
 }
 
 /** An event log, newest first: the newest line in the text color, older
- * ones faint. In a wide window it takes the inspector's free height. */
+ * ones faint. Beside a stage it takes the inspector's free height. */
 export function Log(props: { title: string; lines: string[]; minHeight?: number; grow?: boolean }) {
   return Panel({
     get title() {
@@ -246,7 +259,7 @@ export function Log(props: { title: string; lines: string[]; minHeight?: number;
       return props.minHeight;
     },
     get grow() {
-      return props.grow ?? wide();
+      return props.grow ?? sideBySide();
     },
     get children() {
       return props.lines.map((line, i) =>
@@ -281,3 +294,4 @@ export function Segmented<T extends string | number>(props: { label?: string; op
 
 export { dataTableClasses, dataTableFitPadding } from "./data-table";
 export { sliderFill, sliderLook, sliderValueClass, sliderValueStyle, type SliderLookOptions } from "./slider";
+export { avatarHue, avatarIdentity, avatarPortrait, AVATAR_BROKEN } from "./avatar";

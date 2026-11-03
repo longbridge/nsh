@@ -18,12 +18,12 @@
 
 use jni::objects::GlobalRef;
 use nsh_core::{
-    AccessibilityRole, AudioSession, AutoCapitalize, AutoFill, BorderStyle, Checked, Color,
-    Command, DialogButtonStyle, InputConfig, KeyboardDismissMode, KeyboardTaps, KeyboardType,
-    LayoutCurve, LayoutProperty, LayoutTransition, LiveRegion, ModalAnimation, ModalPresentation,
-    MountBatch, MountItem, NativeProps, PointerEvents, ResizeMode, ReturnKeyType, ScreenAnimation,
-    ScreenConfig, SnapAlignment, StatusBarStyle, SubmitBehavior, TextAlign, ViewKind, ViewProps,
-    ViewStyle, WebSource,
+    AccessibilityCurrent, AccessibilityRole, AudioSession, AutoCapitalize, AutoFill, BorderStyle,
+    Checked, Color, Command, DialogButtonStyle, InputConfig, KeyboardDismissMode, KeyboardTaps,
+    KeyboardType, LayoutCurve, LayoutProperty, LayoutTransition, LiveRegion, ModalAnimation,
+    ModalPresentation, MountBatch, MountItem, NativeProps, PointerEvents, ResizeMode,
+    ReturnKeyType, ScreenAnimation, ScreenConfig, SnapAlignment, StatusBarStyle, SubmitBehavior,
+    TextAlign, ViewKind, ViewProps, ViewStyle, WebSource,
     geometry::{DefiniteLength, REM_SIZE},
 };
 
@@ -67,6 +67,7 @@ const OVERFLOW: i32 = 31;
 const ACCESSIBILITY_LABEL: i32 = 32;
 const APPEARANCE: i32 = 33;
 const COMPONENT_PROP_SLOTS: i32 = 34;
+const SHADER: i32 = 35;
 
 /// An entry of the object table.
 pub(crate) enum Obj {
@@ -224,6 +225,9 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
                     None => 2,
                 });
                 opt_color(&mut e, text.selection_color);
+                // The one color all of it is drawn in, if there is one: a
+                // change of it transitions (`transition-colors`, `TextBox`).
+                opt_color(&mut e, text.uniform_color());
             }
             MountItem::Events { id, events } => {
                 e.int(EVENTS);
@@ -268,6 +272,7 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
                 id,
                 horizontal,
                 scrollbar_visible,
+                replaced,
                 scroll_value,
                 pull_value,
                 keyboard_dismiss,
@@ -287,6 +292,7 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
                     id,
                     horizontal,
                     scrollbar_visible,
+                    replaced,
                     scroll_value,
                     pull_value,
                     keyboard_dismiss,
@@ -324,6 +330,16 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
                 e.int(CANVAS);
                 e.int(id as i32);
                 canvas(&mut e, &drawing);
+            }
+            // Effects and transitions: this platform does not draw them yet.
+            MountItem::ShaderTransition { .. } | MountItem::ShaderInput { .. } => {}
+            MountItem::Shader { id, layer } => {
+                // Java learns only whether the view shows a shader; the
+                // layer goes to the UI-thread renderer (`crate::shader`).
+                e.int(SHADER);
+                e.int(id as i32);
+                e.bool(layer.is_some());
+                e.animation.push(MountItem::Shader { id, layer });
             }
             MountItem::Overflow { id, extent } => {
                 e.int(OVERFLOW);
@@ -635,13 +651,47 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
                     | Command::Desktop(_)
                     // No host answers `nsh/host` here (`Environment::host`):
                     // the core rejects the calls first.
-                    | Command::HostCall { .. } => e.int(-1),
+                    | Command::HostCall { .. }
+                    // No eyedropper (`Environment::screen_color`): the core
+                    // answers no color first.
+                    | Command::PickScreenColor { .. }
+                    // No file dialogs (`Environment::file_requests`): the
+                    // core answers first.
+                    | Command::FileRequest { .. }
+                    // No speech recognizer (`Environment::speech`): the core
+                    // ends the sessions first.
+                    | Command::Speech(_) => e.int(-1),
+                    // `SystemUi.dialog` draws alerts and action sheets in
+                    // them: each of `DIALOG_TOKENS`, light then dark (0: the
+                    // system's). An app without a theme of its own (its
+                    // tokens the default theme's) keeps the system's colors.
+                    Command::Tokens(tokens) => {
+                        e.int(27);
+                        let themed = nsh_base::tokens_of(None).is_ok_and(|d| *tokens != d);
+                        for name in DIALOG_TOKENS {
+                            let color = tokens.color(name).filter(|_| themed);
+                            for c in [color.map(|c| c.light), color.map(|c| c.dark)] {
+                                e.int(c.map_or(0, |c| argb(c.into())));
+                            }
+                        }
+                    }
                 }
             }
         }
     }
     e
 }
+
+/// The tokens alerts and action sheets are drawn in (`SystemUi.java`'s
+/// order): the dialog, its title, its message, its buttons and a
+/// destructive action.
+const DIALOG_TOKENS: [&str; 5] = [
+    "popover",
+    "popover-foreground",
+    "muted-foreground",
+    "primary",
+    "destructive",
+];
 
 /// The event kind with index `index` (`EventKind as u8`, the order of the
 /// constants in `Native.java`).
@@ -754,11 +804,13 @@ fn effects(e: &mut Encoded, s: &ViewStyle) {
                 e.float(y.0);
             }
         }
+        // Repeated by `Decor.Gradient.place`, over the box it knows.
+        e.bool(g.repeating);
         if g.has_lengths() {
             // Stops placed in points depend on the box, which `Decor`
             // knows when it draws: they go as written, their count
             // negated, each with its unit (0 spread, 1 fraction, 2
-            // points), and `Decor.Gradient.resolve` places them.
+            // points), and `Decor.Gradient.place` places them.
             e.int(-(g.stops.len() as i32));
             for s in &g.stops {
                 e.int(argb(s.color));
@@ -859,6 +911,8 @@ fn effects(e: &mut Encoded, s: &ViewStyle) {
         Cursor::ColResize => 14,
         Cursor::RowResize => 15,
         Cursor::None => 16,
+        Cursor::NwseResize => 17,
+        Cursor::NeswResize => 18,
     });
     match s.transition.filter(|t| t.duration > 0.0) {
         Some(t) => {
@@ -1027,6 +1081,23 @@ fn view_props(e: &mut Encoded, p: &ViewProps) {
         Some(true) => flags |= 64 | 128,
         None => {}
     }
+    match s.pressed {
+        Some(Checked::False) => flags |= 256,
+        Some(Checked::True) => flags |= 256 | 512,
+        Some(Checked::Mixed) => flags |= 256 | 1024,
+        None => {}
+    }
+    // The current item's kind, in bits 11 to 13 (`A11y.java`
+    // `CURRENT_DESCRIPTIONS`).
+    flags |= match s.current {
+        None => 0,
+        Some(AccessibilityCurrent::True) => 1,
+        Some(AccessibilityCurrent::Page) => 2,
+        Some(AccessibilityCurrent::Step) => 3,
+        Some(AccessibilityCurrent::Location) => 4,
+        Some(AccessibilityCurrent::Date) => 5,
+        Some(AccessibilityCurrent::Time) => 6,
+    } << 11;
     e.int(flags);
     match &a.value {
         Some(v) => {
@@ -1116,6 +1187,13 @@ fn role_index(role: AccessibilityRole) -> i32 {
         RowGroup => 33,
         Listbox => 34,
         Option => 35,
+        Group => 36,
+        Region => 37,
+        Navigation => 38,
+        Tree => 39,
+        TreeItem => 40,
+        MenuItemCheckbox => 41,
+        MenuItemRadio => 42,
     }
 }
 
@@ -1235,6 +1313,10 @@ fn input(e: &mut Encoded, c: &InputConfig) {
     e.bool(c.caret_hidden);
     // `pasteBehavior`: whether a paste inserts its text.
     e.bool(c.paste_behavior == nsh_core::PasteBehavior::Insert);
+    // A multiline input's own scroll bar shows; a built-in bar replaces it
+    // (the input then reports how far its text scrolled).
+    e.bool(c.scrollbar_visible);
+    e.bool(c.replaced);
 }
 
 // --- Canvas drawings (`CanvasBox.java`) -------------------------------------

@@ -10,6 +10,7 @@
 use std::{
     any::{Any, TypeId},
     future::Future,
+    path::PathBuf,
     rc::Rc,
     sync::Arc,
     time::Duration,
@@ -21,13 +22,13 @@ use super::{
     AdaptiveColor, Environment, Memo, Owner, Signal, SignalEquals, Tokens, cleanup, computed,
     reactive::with_data,
     signal_with,
-    task::{self, Action, Answer, ClipboardImage, DialogAnswer, Executor, ImageSize},
+    task::{self, Action, Answer, ClipboardImage, DialogAnswer, Executor, FileAnswer, ImageSize},
 };
 use crate::{
     Command, Dialog, EdgeInsets, LayoutAnimation, NodeId, Points, Size,
     canvas::CanvasFont,
     color::Hsla,
-    platform::{Appearance, Idiom, Locale, Os},
+    platform::{Appearance, Idiom, Lifecycle, Locale, Os},
     time::Instant,
 };
 
@@ -68,8 +69,11 @@ struct EnvSignals {
     font_scale: Memo<f32>,
     reduce_motion: Memo<bool>,
     screen_reader: Memo<bool>,
+    rtl: Memo<bool>,
     pixel_ratio: Memo<f32>,
     locale: Memo<Locale>,
+    lifecycle: Memo<Lifecycle>,
+    screen_color: Memo<bool>,
 }
 
 impl EnvSignals {
@@ -92,8 +96,11 @@ impl EnvSignals {
                 font_scale: part!(font_scale),
                 reduce_motion: part!(reduce_motion),
                 screen_reader: part!(screen_reader),
+                rtl: part!(rtl),
                 pixel_ratio: part!(pixel_ratio),
                 locale: part!(locale),
+                lifecycle: part!(lifecycle),
+                screen_color: part!(screen_color),
             }
         })
     }
@@ -199,7 +206,7 @@ pub fn keyboard_height() -> Points {
     env(|e| e.keyboard_height)
 }
 
-/// How long the keyboard's show / hide animation takes, in seconds.
+/// How long the keyboard's show / hide animation takes, in milliseconds.
 pub fn keyboard_duration() -> f32 {
     env(|e| e.keyboard_duration)
 }
@@ -232,6 +239,19 @@ pub fn screen_reader() -> bool {
     env(|e| e.screen_reader)
 }
 
+/// Whether the surface lays out right to left: the root's direction,
+/// which follows the user's language unless the app sets the root's
+/// `direction` (reading subscribes).
+///
+/// The core's part of `nsh-base`'s controls, which swap Left and Right by
+/// it (WAI-ARIA's arrow keys in a right-to-left layout). Apps set a view's
+/// `direction` and style with logical properties or `rtl:` classes
+/// instead: Rust's `rtl()` is dropped (`docs/dev/api-naming.md`).
+#[doc(hidden)]
+pub fn layout_rtl() -> bool {
+    env(|e| e.rtl)
+}
+
 /// Device pixels per point (TS: `pixelRatio()`).
 pub fn pixel_ratio() -> f32 {
     env(|e| e.pixel_ratio)
@@ -249,11 +269,27 @@ pub fn locale() -> Locale {
     env(|e| e.locale)
 }
 
+/// Whether the app is in use: in the foreground, visible without the
+/// focus, or in the background (TS: `lifecycle()`). Reading it subscribes,
+/// so an effect pauses work in the background and resumes it after.
+pub fn lifecycle() -> Lifecycle {
+    env(|e| e.lifecycle)
+}
+
 /// The operating system (TS: `platform.os`); it does not change.
 pub fn os() -> Os {
     with_data(|d| d.ambient.env.as_ref().map(|e| e.env))
         .expect("the core sets the environment")
         .with_untracked(|e| e.os)
+}
+
+/// [`os`] where an engine runs (its thread, while it runs Rust code),
+/// else `None`: for code that also runs outside an engine (a unit test of
+/// a component's model).
+pub fn try_os() -> Option<Os> {
+    super::reactive::try_with_data(|d| d.ambient.env.as_ref().map(|e| e.env))
+        .flatten()
+        .map(|env| env.with_untracked(|e| e.os))
 }
 
 /// The OS version: major and minor on iOS, the API level and 0 on Android
@@ -264,16 +300,26 @@ pub fn os_version() -> (u16, u16) {
         .with_untracked(|e| e.os_version)
 }
 
-/// The kind of device (TS: `platform.idiom`, `platform.catalyst`).
+/// The kind of device (TS: `platform.idiom`): [`Idiom::Terminal`] in a
+/// terminal, else [`Idiom::Desktop`] exactly where [`is_desktop`] holds
+/// ([`Idiom::reported_on`]).
 pub fn idiom() -> Idiom {
     with_data(|d| d.ambient.env.as_ref().map(|e| e.env))
         .expect("the core sets the environment")
-        .with_untracked(|e| e.idiom)
+        .with_untracked(|e| e.idiom.reported_on(e.os))
 }
 
-/// Whether desktop behavior applies: a desktop OS, a browser in the
-/// desktop idiom (TS: `platform.idiom` `"desktop"`) or a terminal
-/// (`"terminal"`); it does not change.
+/// Whether the app runs under Mac Catalyst, in every idiom (TS:
+/// `platform.catalyst`, [`Os::is_catalyst`]); Catalyst is mobile, not
+/// desktop.
+pub fn is_catalyst() -> bool {
+    os().is_catalyst()
+}
+
+/// Whether desktop behavior applies, NSH's one definition of desktop: a
+/// desktop OS (macOS, Windows, Linux), a browser in the desktop idiom or
+/// a terminal (TS: `platform.desktop`, [`Idiom::desktop_on`]); it does not
+/// change.
 pub fn is_desktop() -> bool {
     with_data(|d| d.ambient.env.as_ref().map(|e| e.env))
         .expect("the core sets the environment")
@@ -288,11 +334,32 @@ pub fn tokens() -> Arc<Tokens> {
         .get()
 }
 
+/// Draws the app with the design tokens `tokens` (the app's own, which an
+/// embedding app's still win over), in place of the UI set's defaults or
+/// the theme file's: Tailwind's token classes, [`tokens`] and the
+/// platform's own controls (Linux's menus, Android's alerts) follow. An app that picks its
+/// theme while it runs sets it here (`set_tokens(theme.into())` of an
+/// `nsh_base::Theme`).
+pub fn set_tokens(tokens: impl Into<Tokens>) {
+    act(Action::Tokens(tokens.into()));
+}
+
 /// The width of `text` on one line in `font` (the CSS `font` shorthand; an
 /// invalid one measures in `10px sans-serif`), by the platform's text engine
 /// (TS: a canvas's `measureText(text).width`).
 pub fn measure_text(font: &str, text: &str) -> Points {
     text_metrics(font, text).width
+}
+
+/// Captures the platform text measurer while a component's runtime is entered.
+/// The returned function can also be called by synchronous JS session queries,
+/// where the Rust reactive runtime is not entered.
+pub fn text_measurer() -> impl Fn(&str, &str) -> Points + Clone {
+    let measure = with_data(|d| d.ambient.measure.clone()).expect("the core sets the text engine");
+    move |font, text| {
+        let font = CanvasFont::parse(font).unwrap_or_default();
+        measure(&font, text).width
+    }
 }
 
 /// How `text` sits on one line in `font` (the CSS `font` shorthand; an
@@ -422,16 +489,28 @@ pub fn clipboard_has_string() -> Answer<bool> {
     answer
 }
 
-/// Puts the image of a `data:` URI (as [`clipboard_image`] gives) on the
-/// system clipboard (TS: `Clipboard.writeImage`).
+/// Puts the image of a base64 `data:` URI, or of the URL
+/// [`clipboard_image`] gave, on the system clipboard (TS:
+/// `Clipboard.writeImage`). Where the platform puts no images on the
+/// clipboard (Android) nothing happens.
 pub fn set_clipboard_image(uri: impl Into<String>) {
     act(super::services::set_clipboard_image(uri.into()));
 }
 
-/// The image on the system clipboard, `None` when it holds none (TS:
-/// `Clipboard.readImage`), to await in a task.
+/// The image on the system clipboard, `None` when it holds none, when it
+/// is over [`crate::platform::clipboard::MAX_IMAGE_BYTES`] encoded or the
+/// platform reads no images (Android) (TS: `Clipboard.readImage`), to
+/// await in a task.
 pub fn clipboard_image() -> Answer<Option<ClipboardImage>> {
     let (answer, action) = super::services::clipboard_image();
+    act(action);
+    answer
+}
+
+/// [`clipboard_image`] for `Clipboard.readImage`: `Err` with the size in
+/// encoded bytes of an image over the limit.
+pub(crate) fn clipboard_checked_image() -> Answer<Result<Option<ClipboardImage>, usize>> {
+    let (answer, action) = super::services::clipboard_checked_image();
     act(action);
     answer
 }
@@ -444,10 +523,100 @@ pub fn clipboard_has_image() -> Answer<bool> {
     answer
 }
 
+/// Whether the platform lets the user pick a color on the screen
+/// ([`pick_screen_color`]): macOS and browsers with an `EyeDropper`.
+pub fn can_pick_screen_color() -> bool {
+    env(|e| e.screen_color)
+}
+
+/// The color the user picks anywhere on the screen (the system's color
+/// sampler, a browser's `EyeDropper`), to await in a task: `None` when the
+/// user cancelled or the platform has no sampler
+/// ([`can_pick_screen_color`]).
+pub fn pick_screen_color() -> Answer<Option<crate::Hsla>> {
+    let (answer, action) = super::services::pick_screen_color();
+    act(action);
+    answer
+}
+
 /// The `file:` URLs of the local files on the system clipboard (files
 /// copied in a file manager; TS: `Clipboard.readFiles`), to await in a task.
 pub fn clipboard_files() -> Answer<Vec<String>> {
     let (answer, action) = super::services::clipboard_files();
+    act(action);
+    answer
+}
+
+/// Shows the system's open dialog and gives the files (or folders,
+/// [`OpenDialog::folders`](crate::file_dialog::OpenDialog::folders)) the
+/// user picked, to await in a task: `None` when cancelled, the error when
+/// the dialog could not show (on Linux without a file chooser portal, or
+/// on a platform without file dialogs: iOS, Android, the web;
+/// [`crate::platform::Environment::file_requests`]). GPUI's
+/// `prompt_for_paths`.
+pub fn pick_paths(
+    dialog: crate::file_dialog::OpenDialog,
+) -> Answer<Result<Option<Vec<PathBuf>>, String>> {
+    file_request(
+        crate::file_dialog::FileRequest::OpenDialog(dialog),
+        FileAnswer::OpenDialog,
+    )
+}
+
+/// Shows the system's save dialog and gives the path the user chose to
+/// save to, to await in a task: `None` when cancelled, the error when the
+/// dialog could not show ([`pick_paths`]). The file is not created. GPUI's
+/// `prompt_for_new_path`.
+pub fn pick_save_path(
+    dialog: crate::file_dialog::SaveDialog,
+) -> Answer<Result<Option<PathBuf>, String>> {
+    file_request(
+        crate::file_dialog::FileRequest::SaveDialog(dialog),
+        FileAnswer::SaveDialog,
+    )
+}
+
+/// Opens the local file or folder at `path` (absolute) in its default app
+/// (GPUI's `open_with_system`), to await in a task or drop: `Ok` once it
+/// opened, the error when it did not (no app for it, a relative path, a
+/// platform that opens no local paths). [`open_url`] opens no `file:`
+/// URLs; this is their way.
+pub fn open_path(path: impl Into<PathBuf>) -> Answer<Result<(), String>> {
+    file_request(
+        crate::file_dialog::FileRequest::OpenPath(path.into()),
+        FileAnswer::Done,
+    )
+}
+
+/// Shows the item at `path` (absolute) selected in the file manager
+/// (Finder, File Explorer, the desktop's file manager; GPUI's
+/// `reveal_path`), to await in a task or drop: `Ok` once it showed, the
+/// error when it did not (it does not exist, a relative path, a platform
+/// without a file manager).
+pub fn reveal_path(path: impl Into<PathBuf>) -> Answer<Result<(), String>> {
+    file_request(
+        crate::file_dialog::FileRequest::RevealPath(path.into()),
+        FileAnswer::Done,
+    )
+}
+
+/// Moves the item at `path` (absolute) to the trash (the Recycle Bin on
+/// Windows), to await in a task: where it went when the platform says
+/// (macOS), else `None`, which is no failure; the error when it could not
+/// (it does not exist, the volume has no trash, the platform has none).
+pub fn move_to_trash(path: impl Into<PathBuf>) -> Answer<Result<Option<PathBuf>, String>> {
+    file_request(
+        crate::file_dialog::FileRequest::MoveToTrash(path.into()),
+        FileAnswer::Trash,
+    )
+}
+
+/// Sends file request `request`, answered through `answer`.
+fn file_request<T>(
+    request: crate::file_dialog::FileRequest,
+    answer: impl FnOnce(super::AnswerSlot<T>) -> FileAnswer,
+) -> Answer<T> {
+    let (answer, action) = super::services::file_request(request, answer);
     act(action);
     answer
 }
@@ -461,12 +630,114 @@ pub fn pick_images(request: crate::picker::PickRequest) -> Answer<Vec<crate::pic
     answer
 }
 
+/// Whether speech can be recognized here (TS: `Speech.available()`): the
+/// platform recognizes speech (macOS, iOS), or the embedding app gave the
+/// core its own recognizer. To await in a task.
+pub fn speech_available() -> Answer<bool> {
+    let (answer, slot) = Answer::new();
+    act(Action::Speech(super::SpeechAction::Available(slot)));
+    answer
+}
+
+/// Starts recognizing what the user says (dictation; TS: `Speech.start`),
+/// as `request` asks: the session's events come from
+/// [`SpeechRecognition::next`], in a task. One session runs at a time:
+/// starting another ends this one (its [`SpeechEvent::End`](crate::speech::SpeechEvent::End),
+/// without an error). The core refuses it (an end with
+/// [`SpeechError::NotAllowed`](crate::speech::SpeechError::NotAllowed))
+/// when the app's capabilities do not grant `speech`, and ends it with
+/// [`SpeechError::Unavailable`](crate::speech::SpeechError::Unavailable)
+/// where nothing recognizes speech ([`speech_available`]).
+pub fn recognize_speech(request: crate::speech::SpeechRequest) -> SpeechRecognition {
+    static NEXT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(1);
+    let id = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let (sink, events) = crate::speech::channel();
+    let executor = executor();
+    executor.act(Action::Speech(super::SpeechAction::Start {
+        id,
+        request,
+        sink,
+    }));
+    SpeechRecognition {
+        id,
+        events,
+        executor: Rc::downgrade(&executor),
+        ended: false,
+    }
+}
+
+/// A running speech recognition session ([`recognize_speech`]). Dropping
+/// it before its end aborts it.
+#[must_use = "a dropped recognition is aborted"]
+pub struct SpeechRecognition {
+    id: u32,
+    events: crate::speech::SpeechEvents,
+    executor: std::rc::Weak<Executor>,
+    ended: bool,
+}
+
+impl std::fmt::Debug for SpeechRecognition {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SpeechRecognition")
+            .field("id", &self.id)
+            .field("ended", &self.ended)
+            .finish_non_exhaustive()
+    }
+}
+
+impl SpeechRecognition {
+    /// The session's next event; `None` after its end.
+    pub async fn next(&mut self) -> Option<crate::speech::SpeechEvent> {
+        std::future::poll_fn(|cx| self.poll_next(cx)).await
+    }
+
+    /// Polls for the session's next event ([`Self::next`]).
+    pub fn poll_next(
+        &mut self,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<crate::speech::SpeechEvent>> {
+        let poll = self.events.poll_next(cx);
+        if let std::task::Poll::Ready(None | Some(crate::speech::SpeechEvent::End { .. })) = poll {
+            self.ended = true;
+        }
+        poll
+    }
+
+    /// Stops listening: the recognizer finishes what it heard (a last,
+    /// final result), then the session ends.
+    pub fn stop(&self) {
+        if !self.ended {
+            self.act(super::SpeechAction::Stop(self.id));
+        }
+    }
+
+    /// Ends the session at once, without an error; what was not reported
+    /// is dropped.
+    pub fn abort(&self) {
+        if !self.ended {
+            self.act(super::SpeechAction::Abort(self.id));
+        }
+    }
+
+    fn act(&self, action: super::SpeechAction) {
+        if let Some(executor) = self.executor.upgrade() {
+            executor.act(Action::Speech(action));
+        }
+    }
+}
+
+impl Drop for SpeechRecognition {
+    fn drop(&mut self) {
+        self.abort();
+    }
+}
+
 /// The value function `name` of the embedding app returns for `args`
 /// (TS: `host.call`), to await in a task.
 pub(crate) fn host_call(
     name: String,
     args: crate::JsonValue,
-) -> Answer<Result<crate::JsonValue, String>> {
+) -> Answer<Result<crate::JsonValue, super::JsError>> {
     let (answer, action) = super::services::host_call(name, args);
     act(action);
     answer
@@ -496,7 +767,10 @@ pub fn prefetch_image(src: impl Into<String>) -> super::Prefetch {
 /// on native targets and the browser's on the web, under the app's
 /// `capabilities.network`. `request` is a URL (`GET`) or an
 /// [`HttpRequest`](crate::platform::HttpRequest); the URL is absolute.
-/// The whole body arrives with the response.
+/// The whole body arrives with the response. An `asset:/` URL, as
+/// [`FileAsset::uri`](super::FileAsset::uri) and `assets!()` give it, is a
+/// file the app ships: the engine answers it from the host's assets, with
+/// no capability needed.
 pub fn fetch(request: impl Into<crate::platform::HttpRequest>) -> super::Fetch {
     let (answer, action) = super::services::fetch(request.into());
     act(action);
@@ -507,6 +781,17 @@ pub fn fetch(request: impl Into<crate::platform::HttpRequest>) -> super::Fetch {
 /// `setColorScheme`).
 pub fn set_color_scheme(appearance: Appearance) {
     act(Action::Appearance(appearance));
+}
+
+/// Draws the bar of every scroll view and list whose `scrollbar` is `true`
+/// with the built-in bar `source` makes of `theme` (the UI set's, which
+/// `source` gets back: [`BuiltInScrollbar::app_theme`](super::BuiltInScrollbar::app_theme)),
+/// or (`None`, the default) with the platform's indicator. A view whose `scrollbar` is a theme shows the bar
+/// of the UI set that makes one
+/// ([`Registry::scrollbars_from`](super::Registry::scrollbars_from)).
+/// `nsh-base`'s `set_scrollbar_theme` calls it.
+pub fn set_builtin_scrollbars(source: super::ScrollbarSource, theme: Option<super::AnyValue>) {
+    act(Action::BuiltInScrollbars(source, theme));
 }
 
 // --- Tasks and timers --------------------------------------------------------
@@ -678,6 +963,33 @@ pub fn next_frame() -> Answer<Instant> {
     answer
 }
 
+/// Runs `f` once the app has handled every event emitted so far
+/// ([`super::Scope::emit`]) and the props it set in answer have reached the
+/// components: a view that shows a value of its own until the app's comes
+/// back (a drag's, before `onChange` returns as `value`) lets go of it here,
+/// with no frame of the app's earlier value between. In a TSX app that is
+/// the commit after the one that hands the events to JS, before the views
+/// render (JS's handlers and the ops they queue run in between); with a
+/// Rust owner, whose listeners run when the event is emitted, the commit
+/// after the one that renders what they changed. What `f` changes renders
+/// in that commit, which goes out in the batch of the app's answer. It runs
+/// under the current owner, once: not when that owner is disposed first
+/// (the view went).
+///
+/// Time does not tell: [`set_timeout`] with no delay and [`next_frame`]
+/// run before the app has answered when the event came in the same turn
+/// (a timer due now fires before the turn's commit, which is where JS
+/// first hears the event), and later than needed otherwise (a frame
+/// after). `after_answer` follows the events themselves, whatever the
+/// clock. It costs nothing when unused: no closure kept, no extra commit
+/// round.
+pub fn after_answer(f: impl FnOnce() + 'static) {
+    executor().after_answer(task::AfterAnswer {
+        owner: Owner::current(),
+        f: Box::new(f),
+    });
+}
+
 /// Runs blocking `f` on the runtime's blocking threads (in a task: await
 /// its result; `tokio::task::spawn_blocking`). Not in WebAssembly: code
 /// that should also run on the web uses the engine's services instead
@@ -746,12 +1058,20 @@ pub struct KeyOptions {
 }
 
 /// Whether shortcuts follow Apple's conventions here (`mod` is Command):
-/// the OS, or for a browser the platform it runs on.
-fn apple_keys() -> bool {
+/// the OS, or for a browser the platform it runs on
+/// ([`crate::keymap::apple_keys`]).
+pub fn apple_keys() -> bool {
     let (os, apple) = with_data(|d| d.ambient.env.as_ref().map(|e| e.env))
         .expect("the core sets the environment")
         .with_untracked(|e| (e.os, e.apple_keyboard));
     crate::keymap::apple_keys(os, apple)
+}
+
+/// [`apple_keys`] where an engine runs, else `None` (as [`try_os`]).
+pub fn try_apple_keys() -> Option<bool> {
+    super::reactive::try_with_data(|d| d.ambient.env.as_ref().map(|e| e.env))
+        .flatten()
+        .map(|env| env.with_untracked(|e| crate::keymap::apple_keys(e.os, e.apple_keyboard)))
 }
 
 /// Runs `handler` when `keystroke` is pressed while the current owner
@@ -799,6 +1119,149 @@ pub fn on_key_with(keystroke: &str, options: KeyOptions, handler: impl Fn(&str) 
     });
 }
 
+/// Watches the scroll view or list `target` names while the current owner
+/// lives: `handler` hears its offset, content size and viewport (zoomed, as
+/// `on_scroll` reports them) when it is first found and whenever one of
+/// them changes, whether or not anything listens to its `on_scroll`. A
+/// view of the app's own that follows a scroll view it did not make (a
+/// scroll bar) watches it this way.
+///
+/// `target` is asked again in every commit (untracked), so a ref set later
+/// in the same render is found when its element is mounted; while it names
+/// no scroll view, nothing is heard. The handler runs at the end of the
+/// commit round that saw the change, and what it changes goes out in the
+/// same batch.
+pub fn watch_scroll(
+    target: impl Fn() -> Option<NodeId> + 'static,
+    handler: impl Fn(&crate::element::ScrollEvent) + 'static,
+) {
+    let owner = Owner::current();
+    let handler = Rc::new(move |e: &crate::element::ScrollEvent| owner.run(|| handler(e)));
+    add_watch(Rc::new(target), handler);
+}
+
+impl super::ElementRef {
+    /// Listens to the keyboard focus coming into the element: onto it or
+    /// an element inside it, from outside (GPUI's `on_focus_in` of a focus
+    /// handle; the element enters `focus-within`). Moving between elements
+    /// inside it is no new coming in. The content of an overlay is inside
+    /// the element the overlay is in, wherever it shows: a popup's trigger
+    /// and the popup are both inside the view holding them.
+    ///
+    /// It listens while the current owner lives, to whatever element
+    /// carries the ref, and runs at the end of the commit round the focus
+    /// moved in (what it changes goes out in the same batch). The focus is
+    /// what the platform reports: an input's, or a view's that Tab or
+    /// `focus()` reached where the keyboard moves between views (macOS,
+    /// the web).
+    pub fn on_focus_in(&self, listener: impl Fn() + 'static) {
+        let element = *self;
+        watch_focus(
+            move || element.node(),
+            move |within| {
+                if within {
+                    listener();
+                }
+            },
+        );
+    }
+
+    /// Listens to the keyboard focus leaving the element: going from it
+    /// or an element inside it to one outside, or to none (GPUI's
+    /// `on_focus_out`; the element leaves `focus-within`). As
+    /// [`Self::on_focus_in`] otherwise.
+    pub fn on_focus_out(&self, listener: impl Fn() + 'static) {
+        let element = *self;
+        watch_focus(
+            move || element.node(),
+            move |within| {
+                if !within {
+                    listener();
+                }
+            },
+        );
+    }
+}
+
+/// Watches the focus coming into and leaving `target` while the current
+/// owner lives.
+fn watch_focus(target: impl Fn() -> Option<NodeId> + 'static, handler: impl Fn(bool) + 'static) {
+    let owner = Owner::current();
+    let handler = Rc::new(move |within: bool| owner.run(|| handler(within)));
+    let watches = executor().watches.clone();
+    let id = watches.borrow_mut().add_focus(Rc::new(target), handler);
+    let weak = Rc::downgrade(&watches);
+    cleanup(move || {
+        if let Some(watches) = weak.upgrade() {
+            let removed = watches.borrow_mut().remove_focus(id);
+            drop(removed);
+        }
+    });
+}
+
+impl super::NodeRef {
+    /// Scrolls the scroll view (or list, along its axis) to a content
+    /// offset, as [`super::ElementRef::scroll_to`] does: for a view holding
+    /// a node, not a ref (a prop a JS `ref` fills, a watch's target).
+    pub fn scroll_to(&self, offset: crate::geometry::Point<Points>, animated: bool) {
+        act(Action::Command(
+            self.0,
+            Command::ScrollTo {
+                x: offset.x,
+                y: offset.y,
+                animated,
+            },
+        ));
+    }
+}
+
+/// Watches the order the tree has the elements `elements` gives in, while
+/// the current owner lives: `handler` hears it as indices into that list
+/// (`[2, 0, 1]`: the third element comes first; elements carried by no
+/// node in the tree last, in the order given) whenever it differs from the
+/// list's own. `nsh-base`'s roving focus keeps a group's items (a
+/// toolbar's) in order this way: components render in the order the core
+/// makes them, which is not the tree's (an item inside a group renders
+/// after the toolbar's later children).
+///
+/// The core looks at the end of a commit round: in the round the watch is
+/// made in, after [`super::OrderWatch::invalidate`] (an element came), and
+/// after a round that moved a node inside the subtree the elements share
+/// (an app's keyed reorder of them), asking `elements` untracked; what the
+/// handler changes goes out in the same batch. A round that moved nothing
+/// there and invalidated nothing costs nothing: a list of rows reordered,
+/// each row with a group of its own, costs those groups nothing.
+#[doc(hidden)]
+pub fn watch_order(
+    elements: impl Fn() -> Vec<super::ElementRef> + 'static,
+    handler: impl Fn(&[usize]) + 'static,
+) -> super::OrderWatch {
+    let owner = Owner::current();
+    let handler = Rc::new(move |order: &[usize]| owner.run(|| handler(order)));
+    let watches = executor().watches.clone();
+    let (id, dirty) = watches.borrow_mut().add_order(Rc::new(elements), handler);
+    let weak = Rc::downgrade(&watches);
+    cleanup(move || {
+        if let Some(watches) = weak.upgrade() {
+            let removed = watches.borrow_mut().remove_order(id);
+            drop(removed);
+        }
+    });
+    super::OrderWatch::new(dirty)
+}
+
+fn add_watch(target: Rc<dyn Fn() -> Option<NodeId>>, handler: super::watch::ScrollHandler) {
+    let watches = executor().watches.clone();
+    let id = watches.borrow_mut().add(target, handler);
+    let weak = Rc::downgrade(&watches);
+    cleanup(move || {
+        if let Some(watches) = weak.upgrade() {
+            let removed = watches.borrow_mut().remove(id);
+            drop(removed);
+        }
+    });
+}
+
 /// `keystroke` as menus and hints show it here (TS: `keymap.label`):
 /// `"⇧⌘L"` on Apple platforms (and in a browser on one), `"Ctrl+Shift+L"`
 /// elsewhere, for `"mod+shift+l"`.
@@ -815,7 +1278,7 @@ pub fn key_label(keystroke: &str) -> String {
 }
 
 /// Listens to the Android back button while the current owner lives (TS:
-/// `BackHandler.onBackPress(f)`): when no modal is
+/// `BackHandler.on("press", f)`): when no modal is
 /// shown, `f` runs before the stack pops, newest listener first, and returns
 /// true when it handled the press. While one listens, a back gesture does
 /// not preview the pop.
@@ -832,9 +1295,34 @@ pub(crate) fn title_bar() -> crate::geometry::Edges<crate::geometry::Points> {
     env(|e| e.title_bar)
 }
 
+/// The views' menu handlers.
+pub(crate) fn view_menus() -> Rc<std::cell::RefCell<super::menus::ViewMenus>> {
+    executor().menus.clone()
+}
+
 pub(crate) fn desktop_command(command: crate::desktop::DesktopCommand) {
     act(Action::Command(
         crate::ROOT_ID,
         Command::Desktop(Box::new(command)),
     ));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{element::Runtime, geometry::px};
+
+    #[test]
+    fn captured_text_measurer_works_without_runtime_entry() {
+        let runtime = Runtime::default();
+        runtime.set_measure(Rc::new(|_, text| crate::canvas::TextMetrics {
+            width: px(text.chars().count() as f32),
+            ..Default::default()
+        }));
+        let measure = {
+            let _entered = runtime.enter();
+            text_measurer()
+        };
+        assert_eq!(measure("16px sans-serif", "选择 text"), px(7.0));
+    }
 }

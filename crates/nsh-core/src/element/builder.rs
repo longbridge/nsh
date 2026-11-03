@@ -11,16 +11,18 @@ use super::{
 };
 use crate::{
     AccessibilityProp, AccessibilityRole, AccessibilityState, AccessibilityValue, Bounds,
-    ContextMenuEvent, EdgeInsets, EventKind, EventPayload, HoverEvent, Hsla, ImageSource,
-    ListContentStyle, NativeProp, NodeId, PointerEvents, Points, Prop, Size, Tag, TouchEvent,
-    geometry::Radians, style::Color,
+    ContextMenuEvent, EdgeInsets, EventKind, EventPayload, Hsla, ImageSource, ListContentStyle,
+    MouseEvent, NativeProp, NodeId, PointerEvents, Points, PressEvent, Prop, Size, Tag, TouchEvent,
+    geometry::{DevicePixels, Radians},
+    style::Color,
 };
 
 /// A handler of `E` on an element: a closure (`move |e: &E| ..`) that
 /// writes the signals it captured. It runs under the owner current when it
-/// was made (the component, region or row whose view made it), so what it
-/// makes (signals, animated values, element refs, tasks) is that owner's
-/// and goes with it; once that owner is disposed it no longer runs.
+/// was made (the component, the run of a region or the row whose view made
+/// it), so what it makes (signals, animated values, element refs, tasks) is
+/// that owner's and goes with it; once that owner is disposed it no longer
+/// runs, not even for an event already queued for its node.
 pub struct Listener<E: ?Sized> {
     f: Rc<dyn Fn(&E)>,
     owner: super::Owner,
@@ -37,6 +39,16 @@ impl<E: ?Sized + 'static> Listener<E> {
             f,
             owner: super::Owner::current_or_detached(),
         }
+    }
+
+    /// Whether both listeners belong to the same region run or component.
+    pub(crate) fn same_owner(&self, other: &Self) -> bool {
+        self.owner == other.owner
+    }
+
+    /// Whether this is the same installed callback (including its owner).
+    pub(crate) fn ptr_eq(&self, other: &Self) -> bool {
+        self.same_owner(other) && Rc::ptr_eq(&self.f, &other.f)
     }
 
     /// Calls it with `event`, under its owner; not once that owner is
@@ -77,7 +89,8 @@ impl<E: ?Sized + 'static, F: Fn(&E) + 'static> From<F> for Listener<E> {
 /// What a listener method takes (`on_press`, `on_change`,
 /// `on_event`, ...): a closure of the event, `move |text: &str| ..`; for an
 /// event without data also one without arguments, `move || ..` (or
-/// `move |_: &()| ..`); or a [`Listener`]. `M` tells them apart: it is
+/// `move |_: &()| ..`), and so for a press, whose [`PressEvent`] such a
+/// closure leaves out; or a [`Listener`]. `M` tells them apart: it is
 /// inferred, never written. (One conversion could not take both closures:
 /// a type may implement `Fn()` and `Fn(&())`.)
 #[diagnostic::on_unimplemented(
@@ -117,6 +130,32 @@ impl<F: Fn() + 'static> IntoListener<(), WithoutEvent> for F {
     }
 }
 
+/// How a closure of `&()` is a listener of a press, which reports a
+/// [`PressEvent`] ([`IntoListener`]).
+#[doc(hidden)]
+pub struct OfUnit(());
+
+/// A press's listener may leave its [`PressEvent`] out: `move || ..`.
+impl<F: Fn() + 'static> IntoListener<PressEvent, WithoutEvent> for F {
+    fn into_listener(self) -> Listener<PressEvent> {
+        Listener::new(Rc::new(move |_: &PressEvent| self()))
+    }
+}
+
+/// A press's listener may leave its [`PressEvent`] out: `move |_: &()| ..`.
+impl<F: Fn(&()) + 'static> IntoListener<PressEvent, OfUnit> for F {
+    fn into_listener(self) -> Listener<PressEvent> {
+        Listener::new(Rc::new(move |_: &PressEvent| self(&())))
+    }
+}
+
+/// A listener of `()` listens to presses too, without their [`PressEvent`].
+impl IntoListener<PressEvent, ()> for Listener<()> {
+    fn into_listener(self) -> Listener<PressEvent> {
+        self.map(|_: &PressEvent| ())
+    }
+}
+
 impl<E: ?Sized> Clone for Listener<E> {
     fn clone(&self) -> Self {
         Self {
@@ -139,10 +178,6 @@ impl<E: Event> super::EventToJs for E {
 
     fn data_js<'a>(&self, host: &'a dyn super::JsHost) -> Result<super::JsOwned<'a>, PropError> {
         Event::data_js(self, host)
-    }
-
-    fn spread(&self) -> bool {
-        Event::spread(self)
     }
 }
 
@@ -190,7 +225,10 @@ pub struct Attrs {
     pub(crate) selectable_view: bool,
     /// The states it shows as its control's part
     /// ([`Interactive::project_checked`]).
-    pub(crate) projected_states: u8,
+    pub(crate) projected_states: u16,
+    /// The `data-*` attributes it shows as a component's part, sorted
+    /// ([`Interactive::project_data`]).
+    pub(crate) projected_data: Vec<&'static str>,
     /// Where a JS renderer's content goes (the element is its
     /// placeholder: [`super::Renderer::render`]).
     pub(crate) render: Option<super::renderer::RenderAt>,
@@ -233,7 +271,7 @@ impl Attrs {
                 uri: src.uri.to_arc(),
                 size: src.size.map(|(w, h)| crate::geometry::size_pt(w, h)),
                 scales: src.scales,
-                data: None,
+                data: src.data.clone(),
             })));
         }
         if self.inset_padding != old.inset_padding {
@@ -247,6 +285,9 @@ impl Attrs {
         }
         if self.projected_states != old.projected_states {
             out.push(Prop::ProjectedStates(self.projected_states));
+        }
+        if self.projected_data != old.projected_data {
+            out.push(Prop::ProjectedData(self.projected_data.as_slice().into()));
         }
         // Host props: the ones no longer set go back to their defaults,
         // then the new and changed ones.
@@ -402,7 +443,9 @@ impl ListConfig {
             out.push(Prop::Inverted(self.inverted.unwrap_or(false)));
         }
         if self.scrollbar_visible != old.scrollbar_visible {
-            out.push(Prop::Scrollbar(self.scrollbar_visible.unwrap_or(true)));
+            out.push(Prop::Scrollbar(
+                self.scrollbar_visible.unwrap_or(true).into(),
+            ));
         }
         if self.content != old.content {
             out.push(Prop::ListContent(self.content.unwrap_or_default()));
@@ -822,6 +865,21 @@ pub trait Element: IntoElement + Sized {
         self
     }
 
+    /// [`Self::inline_style`] for a style that changes with the
+    /// component's own state (a popup's `popupEndingStyle` over its
+    /// `popupStyle`, [`Style::then`]): the typed styles it has at any time
+    /// apply, also those it has only later.
+    fn state_inline_style(mut self, style: impl Fn() -> Style + 'static) -> Self {
+        Style::apply_bound(
+            self.node(),
+            Rc::new(style),
+            Variant::default(),
+            true,
+            |a, patch| a.inline = patch,
+        );
+        self
+    }
+
     /// Makes the texts in the view select together, as a browser page's
     /// do (TSX `<View selectable>`): a selection runs from text to text,
     /// across views and `TextView`s; texts that are not selectable stay
@@ -893,6 +951,29 @@ impl Style {
         style
     }
 
+    /// This style with `over` after it: where both set a property,
+    /// `over`'s declarations and typed styles win (a state's style over a
+    /// part's).
+    pub fn then(&self, over: &Style) -> Self {
+        if over.0.is_none() && over.1.is_empty() {
+            return self.clone();
+        }
+        if self.0.is_none() && self.1.is_empty() {
+            return over.clone();
+        }
+        let mut style = if self.0.is_none() {
+            Self(over.0.clone(), StyleRefinement::default())
+        } else if over.0.is_none() {
+            Self(self.0.clone(), StyleRefinement::default())
+        } else {
+            Self::from_decls(self.decls().iter().chain(over.decls()).cloned())
+        };
+        let mut typed = self.1.clone();
+        typed.extend_as(Variant::default(), over.1.clone());
+        style.1 = typed;
+        style
+    }
+
     /// Its declarations, in order (not its typed styles').
     pub fn decls(&self) -> &[crate::StyleDecl] {
         self.0.as_deref().map_or(&[], crate::StylePatch::decls)
@@ -916,17 +997,27 @@ impl Style {
                     node.style.extend_as(variant, typed);
                 }
             }
-            Reactive::Bound(f) => {
-                let typed = super::untracked(|| !f().1.is_empty());
-                let patch = f.clone();
-                node.bind_attr(move || patch().0, attr);
-                if typed {
-                    // Resolved here: the bound parts of what it adds would
-                    // not run in this resolution.
-                    node.style
-                        .bind(move |s| s.extend_as(variant, f().1.resolved()));
-                }
-            }
+            Reactive::Bound(f) => Self::apply_bound(node, f, variant, false, attr),
+        }
+    }
+
+    /// [`Style::apply`] of a bound style; `typed_later`: its typed styles
+    /// are followed even when it has none as the element is made.
+    pub(crate) fn apply_bound(
+        node: &mut ElNode,
+        f: Rc<dyn Fn() -> Style>,
+        variant: Variant,
+        typed_later: bool,
+        attr: impl Fn(&mut Attrs, Option<std::rc::Rc<crate::StylePatch>>) + 'static,
+    ) {
+        let typed = typed_later || super::untracked(|| !f().1.is_empty());
+        let patch = f.clone();
+        node.bind_attr(move || patch().0, attr);
+        if typed {
+            // Resolved here: the bound parts of what it adds would not run
+            // in this resolution.
+            node.style
+                .bind(move |s| s.extend_as(variant, f().1.resolved()));
         }
     }
 }
@@ -960,6 +1051,90 @@ impl JsValue for Style {
     /// A style is JS's to give, not to get back.
     fn to_js<'a>(&self, _host: &'a dyn super::JsHost) -> Result<super::JsOwned<'a>, PropError> {
         Err(PropError("a style does not convert back to JS".to_owned()))
+    }
+}
+
+/// The style of a component's part that shows text (a select's rows, a
+/// one-time code's cells): a [`Style`] whose TypeScript type takes the text
+/// styles too (`StyleProp<TextStyle>`: `color`, `fontSize`, `textAlign`),
+/// which the part's texts inherit. A part that edits text takes an
+/// [`InputPartStyle`]. Its setter takes
+/// the typed styles' closure, as a `Style`'s does; the part applies it with
+/// [`Element::inline_style`] (it is `Into<Style>`).
+#[derive(Debug, Clone, Default, PartialEq)]
+#[non_exhaustive]
+pub struct TextPartStyle(pub Style);
+
+impl From<Style> for TextPartStyle {
+    fn from(style: Style) -> Self {
+        Self(style)
+    }
+}
+
+impl From<StyleRefinement> for TextPartStyle {
+    fn from(style: StyleRefinement) -> Self {
+        Self(Style::from(style))
+    }
+}
+
+impl From<TextPartStyle> for Style {
+    fn from(style: TextPartStyle) -> Self {
+        style.0
+    }
+}
+
+impl JsValue for TextPartStyle {
+    fn ts_type(_types: &mut super::TsTypes) -> String {
+        "StyleProp<TextStyle>".into()
+    }
+
+    fn from_js(value: super::JsIn<'_>) -> Result<Self, PropError> {
+        Style::from_js(value).map(Self)
+    }
+
+    fn to_js<'a>(&self, host: &'a dyn super::JsHost) -> Result<super::JsOwned<'a>, PropError> {
+        self.0.to_js(host)
+    }
+}
+
+/// The style of a component's part that edits text (a number input's
+/// field, a select's search field): a [`Style`] whose TypeScript type takes
+/// the input styles too (`StyleProp<InputStyle>`: the text styles and
+/// `placeholderColor`, `caretColor`, `selectionColor`). As
+/// [`TextPartStyle`], its setter takes the typed styles' closure.
+#[derive(Debug, Clone, Default, PartialEq)]
+#[non_exhaustive]
+pub struct InputPartStyle(pub Style);
+
+impl From<Style> for InputPartStyle {
+    fn from(style: Style) -> Self {
+        Self(style)
+    }
+}
+
+impl From<StyleRefinement> for InputPartStyle {
+    fn from(style: StyleRefinement) -> Self {
+        Self(Style::from(style))
+    }
+}
+
+impl From<InputPartStyle> for Style {
+    fn from(style: InputPartStyle) -> Self {
+        style.0
+    }
+}
+
+impl JsValue for InputPartStyle {
+    fn ts_type(_types: &mut super::TsTypes) -> String {
+        "StyleProp<InputStyle>".into()
+    }
+
+    fn from_js(value: super::JsIn<'_>) -> Result<Self, PropError> {
+        Style::from_js(value).map(Self)
+    }
+
+    fn to_js<'a>(&self, host: &'a dyn super::JsHost) -> Result<super::JsOwned<'a>, PropError> {
+        self.0.to_js(host)
     }
 }
 
@@ -1080,6 +1255,19 @@ pub trait Accessible: Element {
         self
     }
 
+    /// Its level for screen readers (TS: `accessibilityLevel`): a
+    /// heading's (1 the top; `gpui-base`'s `aria_level`), a tree item's
+    /// depth (1 at the top); 0 has none.
+    fn accessibility_level(mut self, level: impl IntoReactive<u32>) -> Self {
+        self.node().bind_attr(level, |a, level| {
+            super::host::set_in(
+                &mut a.props,
+                Prop::Accessibility(AccessibilityProp::Level((level > 0).then_some(level))),
+            )
+        });
+        self
+    }
+
     /// Its value for screen readers, for a range (a progress bar, a
     /// slider: `min`, `max` and `now`) or as a text; `None` has none (an
     /// indeterminate progress bar keeps its range and leaves out `now`).
@@ -1196,37 +1384,32 @@ pub trait Interactive: Element {
         )
     }
 
-    /// The mouse came over it or an element inside it (never on touches).
-    fn on_hover_in<M>(self, listener: impl IntoListener<(), M>) -> Self {
+    /// The mouse came over it or an element inside it (never on touches):
+    /// where (the DOM's `mouseenter`).
+    fn on_mouse_enter<M>(self, listener: impl IntoListener<MouseEvent, M>) -> Self {
         self.on(
-            EventKind::HoverIn,
-            events::typed(listener.into_listener(), events::unit),
+            EventKind::MouseEnter,
+            events::typed(listener.into_listener(), events::mouse),
         )
     }
 
-    /// The mouse left it and the elements inside it, or the window.
-    fn on_hover_out<M>(self, listener: impl IntoListener<(), M>) -> Self {
+    /// The mouse left it and the elements inside it, or the window: where
+    /// it was last (the DOM's `mouseleave`).
+    fn on_mouse_leave<M>(self, listener: impl IntoListener<MouseEvent, M>) -> Self {
         self.on(
-            EventKind::HoverOut,
-            events::typed(listener.into_listener(), events::unit),
+            EventKind::MouseLeave,
+            events::typed(listener.into_listener(), events::mouse),
         )
     }
 
-    /// The mouse moved over it (or an element inside it) with no button
-    /// down: where, in it and in its root view, at most once per frame.
-    fn on_hover_move<M>(self, listener: impl IntoListener<HoverEvent, M>) -> Self {
-        self.on(
-            EventKind::HoverMove,
-            events::typed(listener.into_listener(), events::hover),
-        )
-    }
-
-    /// The mouse moved inside it, including while dragging: local coordinates
-    /// in points, at most once per frame (desktops and web).
-    fn on_mouse_move<M>(self, listener: impl IntoListener<crate::Point<crate::Points>, M>) -> Self {
+    /// The mouse moved over it (or an element inside it), with or without
+    /// a button down ([`MouseEvent::pressed_button`]), or a modifier key
+    /// changed while it rests there with none down: where, in it and in its
+    /// root view, at most once per frame.
+    fn on_mouse_move<M>(self, listener: impl IntoListener<MouseEvent, M>) -> Self {
         self.on(
             EventKind::MouseMove,
-            events::typed(listener.into_listener(), events::mouse_position),
+            events::typed(listener.into_listener(), events::mouse),
         )
     }
 
@@ -1259,35 +1442,39 @@ pub trait Interactive: Element {
         )
     }
 
-    /// Handles presses.
-    fn on_press<M>(self, listener: impl IntoListener<(), M>) -> Self {
+    /// Handles presses: `move || ..`, or `move |e: &PressEvent| ..` for
+    /// where the pointer was, the modifier keys held and the click count
+    /// (`e.modifiers.shift` for a Shift-click). A press from the keyboard or
+    /// an assistive technology, and backends that do not report one, give
+    /// [`PressEvent::default`].
+    fn on_press<M>(self, listener: impl IntoListener<PressEvent, M>) -> Self {
         self.on(
             EventKind::Press,
-            events::typed(listener.into_listener(), events::unit),
+            events::typed(listener.into_listener(), events::press),
         )
     }
 
     /// Handles presses held for about half a second.
-    fn on_long_press<M>(self, listener: impl IntoListener<(), M>) -> Self {
+    fn on_long_press<M>(self, listener: impl IntoListener<PressEvent, M>) -> Self {
         self.on(
             EventKind::LongPress,
-            events::typed(listener.into_listener(), events::unit),
+            events::typed(listener.into_listener(), events::press),
         )
     }
 
     /// A finger went down on the element.
-    fn on_press_down<M>(self, listener: impl IntoListener<(), M>) -> Self {
+    fn on_press_down<M>(self, listener: impl IntoListener<PressEvent, M>) -> Self {
         self.on(
             EventKind::PressDown,
-            events::typed(listener.into_listener(), events::unit),
+            events::typed(listener.into_listener(), events::press),
         )
     }
 
     /// The press ended, inside or outside the element.
-    fn on_press_up<M>(self, listener: impl IntoListener<(), M>) -> Self {
+    fn on_press_up<M>(self, listener: impl IntoListener<PressEvent, M>) -> Self {
         self.on(
             EventKind::PressUp,
-            events::typed(listener.into_listener(), events::unit),
+            events::typed(listener.into_listener(), events::press),
         )
     }
 
@@ -1518,8 +1705,8 @@ pub trait Interactive: Element {
     }
 
     /// Presses also count this far outside it.
-    fn hit_slop(mut self, insets: EdgeInsets) -> Self {
-        super::host::set(self.node(), Prop::HitSlop(insets));
+    fn hit_slop(mut self, insets: impl IntoReactive<EdgeInsets>) -> Self {
+        super::host::bind_prop(self.node(), insets, Prop::HitSlop);
         self
     }
 
@@ -1605,6 +1792,16 @@ pub trait Interactive: Element {
         self
     }
 
+    /// Styles while it or an element inside it is focused (Tailwind's
+    /// `focus-within:`; TS: `focusWithinStyle`): a field's frame ringed
+    /// while the input in it edits. An overlay's content is inside the
+    /// element the overlay is in.
+    fn focus_within(mut self, f: impl FnOnce(StyleRefinement) -> StyleRefinement) -> Self {
+        let s = f(StyleRefinement::default());
+        self.style().extend_as(Variant::FOCUS_WITHIN, s);
+        self
+    }
+
     /// Styles while [`Interactive::disabled`] (Tailwind's `disabled:`).
     fn disabled_style(mut self, f: impl FnOnce(StyleRefinement) -> StyleRefinement) -> Self {
         let s = f(StyleRefinement::default());
@@ -1646,6 +1843,26 @@ pub trait Interactive: Element {
     fn indeterminate_style(mut self, style: impl IntoReactive<Style>) -> Self {
         Style::apply(self.node(), style, Variant::INDETERMINATE, |a, patch| {
             super::host::set_in(&mut a.props, Prop::IndeterminateStyle(patch))
+        });
+        self
+    }
+
+    /// An app's style while expanded (`accessibility_state` `expanded`: a
+    /// `Popover`'s or `Menu`'s trigger while its popup is open), as
+    /// `aria-expanded:` classes apply.
+    fn expanded_style(mut self, style: impl IntoReactive<Style>) -> Self {
+        Style::apply(self.node(), style, Variant::EXPANDED, |a, patch| {
+            super::host::set_in(&mut a.props, Prop::ExpandedStyle(patch))
+        });
+        self
+    }
+
+    /// An app's style while a toggle button is on (`accessibility_state`
+    /// `pressed`, not mixed), as `aria-pressed:` classes apply. Not
+    /// `.active(..)`, a press in progress.
+    fn pressed_style(mut self, style: impl IntoReactive<Style>) -> Self {
+        Style::apply(self.node(), style, Variant::ARIA_PRESSED, |a, patch| {
+            super::host::set_in(&mut a.props, Prop::PressedStyle(patch))
         });
         self
     }
@@ -1696,10 +1913,32 @@ pub trait Interactive: Element {
         });
         self
     }
+
+    /// Gives it the boolean `data-*` attribute `name` (without `data-`)
+    /// while `on` holds, as Tailwind's `data-<name>:` variant reads it: its
+    /// `data-<name>:` classes apply, and with `group` the
+    /// `group-data-<name>:` classes inside it (a calendar's day at the
+    /// start of a range: `project_data("range-start", ..)`). For what a
+    /// component's part shows beyond the states screen readers hear; the
+    /// attribute tells them nothing. A view whose classes read none of its
+    /// attributes sends nothing when they change.
+    fn project_data(mut self, name: &'static str, on: impl IntoReactive<bool>) -> Self {
+        self.node().bind_attr(on, move |a, on| {
+            let at = a.projected_data.binary_search(&name);
+            match (at, on) {
+                (Err(i), true) => a.projected_data.insert(i, name),
+                (Ok(i), false) => {
+                    a.projected_data.remove(i);
+                }
+                _ => {}
+            }
+        });
+        self
+    }
 }
 
 /// Sets or clears `bit` of the states an element shows as a part.
-fn project(a: &mut Attrs, bit: u8, on: bool) {
+fn project(a: &mut Attrs, bit: u16, on: bool) {
     if on {
         a.projected_states |= bit;
     } else {
@@ -1763,6 +2002,42 @@ element! {
 
 impl Interactive for View {}
 impl ParentElement for View {}
+
+impl View {
+    /// Its frame follows the element carrying `target` (a tab list's
+    /// indicator on the selected tab): along the main axis of its parent
+    /// (vertical in a flex column, else horizontal) it spans that element's
+    /// frame, inside its own margins on that axis, wherever the element is
+    /// inside its parent; across it, its style places it (`bottom(px(0.))`
+    /// and a height for an underline, top and bottom insets for a pill),
+    /// so its style makes it [`Styled::absolute`]. The core places it after
+    /// each layout, with no layout of its own and no JS: following another
+    /// element changes its frame alone, and a layout that moves the element
+    /// moves it in the same batch. While `target` is `None`, or no laid
+    /// out element carries it, its style alone places it; hidden
+    /// (`display: none`) and shown again, it is placed at once. A view
+    /// that follows nothing costs no work after layout.
+    pub fn follow(mut self, target: impl IntoReactive<Option<super::ElementRef>>) -> Self {
+        let target = (target.into_reactive()).map(|t: Option<super::ElementRef>| {
+            t.and_then(|t| t.target()).map(super::FollowTarget)
+        });
+        super::host::bind_prop(&mut self.0, target, Prop::Follow);
+        self
+    }
+
+    /// How it moves when [`Self::follow`] names another element: natively,
+    /// with `transition` as a layout animation of its own frame alone (the
+    /// rest of that commit changes at once); `None` (the default) jumps.
+    /// Following an element for the first time, and a layout that moves
+    /// it, place it at once.
+    pub fn follow_transition(
+        mut self,
+        transition: impl IntoReactive<Option<crate::LayoutTransition>>,
+    ) -> Self {
+        super::host::bind_prop(&mut self.0, transition, Prop::FollowTransition);
+        self
+    }
+}
 impl Interactive for SlotElement {}
 impl Interactive for Text {}
 impl Interactive for Image {}
@@ -1846,7 +2121,7 @@ impl Image {
                 uri: src.uri.to_arc(),
                 size: src.size.map(|(w, h)| crate::geometry::size_pt(w, h)),
                 scales: src.scales,
-                data: None,
+                data: src.data,
             })))
         });
         self
@@ -1875,10 +2150,10 @@ impl Image {
     }
 
     /// It loaded: its size in pixels.
-    pub fn on_load<M>(self, listener: impl IntoListener<Size<Points>, M>) -> Self {
+    pub fn on_load<M>(self, listener: impl IntoListener<Size<DevicePixels>, M>) -> Self {
         self.on(
             EventKind::Load,
-            events::typed(listener.into_listener(), events::size),
+            events::typed(listener.into_listener(), events::pixel_size),
         )
     }
 
@@ -2061,10 +2336,11 @@ impl IntoElement for Children {
 /// Another component in a view ([`Component::element`]). Its styles go
 /// after the component's own, like an app's classes, and so do its inline
 /// style, animated values and insets ([`Element`]'s), on the component's
-/// root; its state styles ([`Self::active`], [`Self::hover`],
-/// [`Self::focus`], [`Self::disabled_style`], [`Styled::selected`],
-/// [`Styled::checked`]) follow the states of that root, as an app's
-/// `active:` / `hover:` classes on a TSX component do. It hears and is to
+/// root, which also takes its [`Self::test_id`] over its own; its state
+/// styles ([`Self::active`], [`Self::hover`], [`Self::focus`],
+/// [`Self::disabled_style`], [`Styled::selected`], [`Styled::checked`])
+/// follow the states of that root, as an app's `active:` / `hover:`
+/// classes on a TSX component do. It hears and is to
 /// assistive technologies what the component says (its events and props):
 /// it is not [`Interactive`] or [`Accessible`]. The element a
 /// `#[component]`'s constructor makes (`button()`) wraps one
@@ -2166,11 +2442,26 @@ impl<C: Component> ComponentElement<C> {
         self
     }
 
+    /// Styles while its root or an element inside it has focus
+    /// (`focus-within:`).
+    pub fn focus_within(mut self, f: impl FnOnce(StyleRefinement) -> StyleRefinement) -> Self {
+        let s = f(StyleRefinement::default());
+        self.node.style.extend_as(Variant::FOCUS_WITHIN, s);
+        self
+    }
+
     /// Styles while its root is disabled (`disabled:`): the component's
     /// view disables it ([`Interactive::disabled`], a `disabled` prop).
     pub fn disabled_style(mut self, f: impl FnOnce(StyleRefinement) -> StyleRefinement) -> Self {
         let s = f(StyleRefinement::default());
         self.node.style.extend_as(Variant::DISABLED, s);
+        self
+    }
+
+    /// The id UI tests find its root by (TS: `testID` given the component),
+    /// as [`Interactive::test_id`] names a view.
+    pub fn test_id(mut self, id: &str) -> Self {
+        super::host::set(&mut self.node, Prop::TestId(Some(id.into())));
         self
     }
 
@@ -2315,6 +2606,14 @@ pub trait ComponentBuilder: Element {
     fn focus(mut self, f: impl FnOnce(StyleRefinement) -> StyleRefinement) -> Self {
         let s = f(StyleRefinement::default());
         self.node().style.extend_as(Variant::FOCUS, s);
+        self
+    }
+
+    /// Styles while its root or an element inside it has focus
+    /// (`focus-within:`).
+    fn focus_within(mut self, f: impl FnOnce(StyleRefinement) -> StyleRefinement) -> Self {
+        let s = f(StyleRefinement::default());
+        self.node().style.extend_as(Variant::FOCUS_WITHIN, s);
         self
     }
 

@@ -276,7 +276,7 @@ Animated GIF, WebP and APNG files play automatically, as assets or from URLs. Th
 |---|---|---|---|
 | `onLoadStart` | `.on_load_start(..)` | | Loading starts |
 | `onProgress` | `.on_progress(..)` | `{ loaded, total }` in bytes (`total` 0 when unknown) | During a download, at most every 100 ms |
-| `onLoad` | `.on_load(..)` | `{ width, height }` | The image is ready; the source's size in pixels (an SVG's in points, [on the web as the browser measures it](#svg-images)) |
+| `onLoad` | `.on_load(..)` | `{ size }` | The image is ready; the source's size in pixels (an SVG's in points, [on the web as the browser measures it](#svg-images)) |
 | `onError` | `.on_error(..)` | `{ message }` (a `&str` in Rust) | Loading or decoding failed |
 | `onLoadEnd` | `.on_load_end(..)` | | After `onLoad` or `onError` |
 
@@ -284,7 +284,7 @@ Animated GIF, WebP and APNG files play automatically, as assets or from URLs. Th
 let status = signal(SharedString::from("loading…"));
 
 image(url)
-    .on_load(move |size: &Size<Points>| status.set(format!("{}×{}", size.width.0, size.height.0).into()))
+    .on_load(move |size: &Size<DevicePixels>| status.set(format!("{}×{}", size.width.0, size.height.0).into()))
     .on_error(move |message: &str| status.set(message.to_owned().into()))
     .w(px(90.0))
     .h(px(60.0))
@@ -295,7 +295,7 @@ const status = signal("loading…");
 
 <Image
   src={url}
-  onLoad={(e) => status.set(`${e.width}×${e.height}`)}
+  onLoad={({ size }) => status.set(`${size.width}×${size.height}`)}
   onError={(e) => status.set(e.message)}
   style={{ width: 90, height: 60 }}
 />
@@ -313,8 +313,8 @@ Images that are not on screen can be measured and loaded ahead: `image_size(..)`
 spawn(async move {
     // Ok(ImageSize { width, height }), in pixels.
     let size = image_size("https://example.com/photo.jpg").await;
-    // true once the bytes are in memory.
-    let ok = prefetch_image("https://example.com/next.jpg").await;
+    // Ok(()) once the bytes are in memory.
+    let loaded = prefetch_image("https://example.com/next.jpg").await;
 });
 ```
 
@@ -322,13 +322,13 @@ spawn(async move {
 import { Image } from "nsh";
 
 const size = await Image.getSize("https://example.com/photo.jpg");   // { width, height } in pixels
-const ok = await Image.prefetch("https://example.com/next.jpg");      // true once the bytes are in memory
+await Image.prefetch("https://example.com/next.jpg");                // once the bytes are in memory
 ```
 
 | Rust | TSX | Returns |
 |---|---|---|
 | `image_size(src)` | `Image.getSize(src)` | The image's size in pixels (an SVG's in points, [on the web as the browser measures it](#svg-images)); an error when it cannot be loaded |
-| `prefetch_image(src)` | `Image.prefetch(src)` | `true` once the image's bytes are loaded |
+| `prefetch_image(src)` | `Image.prefetch(src)` | Nothing, once the image's bytes are loaded; an error when it cannot be loaded |
 
 In TSX, `src` is a URL string or an imported image. For an imported image with [variants](#pixel-densities), both load the variant the views load on this screen, and `getSize` gives the imported file's size. Both keep the downloaded bytes for the views that show the image next, so an image prefetched before it is shown appears without a download.
 
@@ -358,10 +358,38 @@ function RemoteImage(props: { url: string }) {
 
 | File | Rust (`asset!`) | TSX import | Page |
 |---|---|---|---|
-| `.ttf`, `.otf` | A `FontAsset` with its family name | The font's family name | [Fonts](./fonts.md) |
+| `.ttf`, `.otf`, `.woff`, `.woff2` | A `FontAsset` with its family name | The font's family name | [Fonts](./fonts.md) |
 | `.json` and other files | A `FileAsset` with its URI | `.json`: the parsed value, bundled into the script | [Project structure](./project-structure.md#modules) |
 
 Fonts are registered before the first frame in both.
+
+### Reading a file at run time
+
+`fetch` reads a file the app ships by its `asset:/` URL, in TSX and in Rust alike, on every platform. An imported image carries its URL (`url`), a Rust crate's files have theirs from `asset!` (`FileAsset::uri`) and `assets!()`:
+
+```rust tabs
+const GREETING: FileAsset = asset!("locales/en.txt");
+
+#[component]
+fn Greeting() -> impl IntoElement {
+    let greeting = signal(String::new());
+    spawn(async move {
+        match fetch(GREETING.uri).await {
+            Ok(response) => greeting.set(response.text()),
+            Err(error) => greeting.set(error),
+        }
+    });
+    text(move || greeting.get())
+}
+```
+
+```tsx tabs
+import flag from "./images/flag.png";
+
+const bytes = await (await fetch(flag.url)).bytes();
+```
+
+The engine reads the file from the app's files off its thread (from the dev server during `nsh run`), with no capability needed: they are the app's own. A web app downloads what the page did not preload from where it serves its assets. The response is `200` with the file's bytes, its `Content-Length` and the `Content-Type` its extension gives (`image/png`, `application/json`, ...), and its `url` is the `asset:/` URL however the file arrived; a file the app does not ship rejects as a network error that names it. The URL names the file by its path inside the app's files, and the request reads it with `GET` (or `HEAD`): a URL whose path leaves them (`..`, an absolute path) and a request with another method reject the same way, before anything is read or downloaded.
 
 ### A module's own URL
 

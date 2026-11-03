@@ -157,19 +157,21 @@ test declared inside a test or a hook throws.
 ### Opening the app
 
 `open(entry, options?)` builds the app at `entry` (relative to the test file; each entry is built once per run),
-starts it on a 390×844 viewport and resolves once it rendered and is quiet.
+starts it on a 390×844 viewport and resolves once it rendered and is quiet. With `--target`, the app runs with the
+options as the test gives them: one the target's platform cannot honor makes `open` reject with
+`ERR_NSH_TEST_UNSUPPORTED`, naming it (see [On a real platform](#on-a-real-platform)).
 
 | Option | Default | Description |
 |---|---|---|
 | `storage` | empty | What `Storage` holds at the start: `{ todos: "[]" }`. |
-| `network` | none | What the app's requests get, by route: see [Stubbing the network](#stubbing-the-network). `"live"`: the real network. |
-| `width`, `height` | 390, 844 | The viewport in points. |
+| `network` | none | What the app's requests get, by route: see [Stubbing the network](#stubbing-the-network). `"live"`: the real network, for its requests, sockets and WebSockets. |
+| `width`, `height` | 390, 844 | The viewport in points: headless, the desktops' window, the web's page. On iOS and Android the app fills the device's screen. |
 | `safeArea` | 0 | The safe area insets in points: `{ top: 47, bottom: 34 }`. |
 | `clipboard` | empty | The text on the clipboard at the start. |
 | `colorScheme` | `"light"` | The system's appearance: `"light"` or `"dark"` (`colorScheme()`, `dark:` classes). |
 | `locale` | `"en-US"` | The device's locale, a BCP 47 tag (`locale()`, `Intl`'s default). |
 | `reducedMotion` | `false` | The user asked for less motion (`reduceMotion()`). |
-| `platform` | `"ios"` | The platform the app runs as headless: `"ios"`, `"android"`, or a desktop's, `"macos"`, `"windows"`, `"linux"`, or `"web"` in the desktop idiom (`platform.os`, `ios={{…}}` / `android={{…}}` / `desktop={{…}}` props, keyboard shortcuts). On a real platform the app runs as that one. |
+| `platform` | `"ios"` | The platform the app runs as headless: `"ios"`, `"android"`, or a desktop's, `"macos"`, `"windows"`, `"linux"`, or `"web"` in the desktop idiom (`platform.os`, `ios={{…}}` / `android={{…}}` / `desktop={{…}}` props, keyboard shortcuts). With `--target`, the app runs as the target's platform: a desktop's `platform` on any desktop and the web, always as a desktop (in the browser in the desktop idiom at any width, `platform.os` staying `"web"`), `"ios"` and `"android"` on their own. |
 | `clock` | the system's | A manual clock, whose time moves only as the test moves it: `{}`, or `{ time }` to start at a `Date` (or milliseconds since the Unix epoch). See [Controlling time](#controlling-time). |
 | `host` | none | The embedding app's part, which the test plays: `{ params, handlers }`. See [Playing the host app](#playing-the-host-app). |
 
@@ -273,12 +275,20 @@ A route's function gets the request (`method`, `url`, `headers`, `body` as text)
 count requests or answer from what the test set up. A function that throws fails the request and the step that made
 it. `app.requests()` lists the requests the app made, in order, the same way.
 
+Connections stay in the test too: the app's sockets (`net`) and WebSockets (the global `WebSocket` and the `websocket`
+module) open none unless `network` is `"live"`. After the capability checks the app's own runs pass, `net.connect`
+and the `websocket` module's `connect` reject with `code` `ERR_NSH_TEST_NETWORK`, and a global `WebSocket` fires `error`, then
+`close` (1006, not clean), as for a connection the network refused. With `"live"`, they connect to the real network
+along with the app's requests. In Rust, `EngineConfig::refuse_connections` does the same for a `Headless` app: a
+function of what the app connects to (a WebSocket's URL, a socket's `host:port`) that returns the error its call
+fails with.
+
 ### Controlling time
 
 On the system's clock, an app's timers and native animations take as long as on a device, and so do the tests that
 wait for them. With a manual clock (`EngineConfig::clock` in Rust, `open`'s `clock` in TypeScript), the app runs on a
 clock whose time moves only as the test moves it, and at once, as with Jest's fake timers or Playwright's
-`page.clock`:
+`page.clock`. `app.clock` is that clock, and `null` when the app runs on the system's:
 
 ```rust tabs
 use std::time::{Duration, SystemTime};
@@ -300,7 +310,7 @@ fn autosaves() {
 ```tsx tabs
 const app = await open("./App.tsx", { clock: { time: new Date("2026-01-01T09:00:00Z") } });
 await app.type("label:Note", "Milk");
-await app.clock.runFor(10_000);            // the autosave, ten seconds later
+await app.clock!.runFor(10_000);           // the autosave, ten seconds later
 expect(app.texts()).toContain("Saved at 09:00:10");
 ```
 
@@ -315,10 +325,14 @@ are `nsh test`'s; `Headless` has each of them (`run_for`, `fast_forward`, `set_s
 
 `Date`, `performance.now()` and `Intl`'s default date follow the clock. Steps finish what is running without waiting
 for it: while the app asks for frames or a native animation runs, frames come one after another, each a frame's time
-(1/60 s) later on the clock. A 300 ms transition takes a few milliseconds, and a timer due during it runs. `app.wait(ms)`
+(1/60 s) later on the clock. A 300 ms transition takes a few milliseconds, and a timer due during it runs. An
+animation that loops forever (a spinner) runs along with the clock: it turns as the test moves the clock. `app.wait(ms)`
 and a long press move the clock by their time. A timer that comes due later runs only when the test moves the clock
-there. `waitFor`'s timeout stays real time, as it also waits for what comes from outside (a route's function, the
-network). The gallery's tests run this way (`examples/gallery/tests`): its twelve tests that wait for animations
+there. `waitFor` and `waitUntil` move the clock while they wait, a display frame at a time, looking after each frame,
+so what a timer shows comes as they wait for it, in a moment: `waitFor("Saved", { timeout: 15_000 })` moves the clock
+by up to fifteen seconds. Their timeout counts on both clocks: a wait moves the app's clock by it at most, and rejects
+once as much real time passed too, so what comes from outside the app (a route's function, the network) has as long
+as on the system's clock. The gallery's tests run this way (`examples/gallery/tests`): its twelve tests that wait for animations
 take 6 s instead of 28 s.
 
 ### Steps
@@ -334,10 +348,16 @@ Steps name views with **selectors**, written as Playwright's:
 | `view:<id>` | The view with that id in `--trace` output. |
 | anything else | A `testID`, else a label, else a text, as written. |
 
-`label:`, `text:` and a role's name also take a regex: `text:/^Buy/i`. ` >> ` looks inside what the part before matched
-(`id:cart >> role:button[Remove]`), and `nth=<n>` keeps one of the matches, from 0 (`text:Delete >> nth=1`). A
-selector finds the views a user would look at first: in the top modal, then on screen, and of a navigation stack only
-the top screen. It matches what the user sees: views with an area, outside `visibility: hidden`, inside the window and
+A part that starts with a lowercase word and a colon names a prefix (`id`, `label`, `role`, `text`, `view`), so
+`tapped: solo` is a step error that lists them. A text, label or test id that starts this way takes its prefix, which
+reads the rest as written: `text:tapped: solo`, `label:note: draft`, `id:row:2`. Selectors keep their meaning as new
+prefixes arrive.
+
+`label:`, `text:` and a role's name also take a regex: `text:/^Buy/i`, written in the syntax of Rust's `regex` crate
+(JavaScript's classes, groups, anchors and quantifiers, matched in linear time; flags `i`, `m` and `s`). ` >> ` looks
+inside what the part before matched (`id:cart >> role:button[Remove]`), and `nth=<n>` keeps one of the matches, from 0
+(`text:Delete >> nth=1`). A selector finds the views a user would look at first: in the top modal, then on screen,
+and of a navigation stack only the top screen. It matches what the user sees: views with an area, outside `visibility: hidden`, inside the window and
 the views that clip them (`overflow: hidden`), or anywhere in the content of a scroll view the user can scroll, which
 scrolling brings in (`opacity` and transforms aside, as in Playwright). A step that acts on a view (`press`, `type`, `clear`, `submit`, `scroll`, `longPress`) needs exactly
 one: a selector matching several fails the step, and the error says how to narrow it.
@@ -350,29 +370,35 @@ one: a selector matching several fails the step, and the error says how to narro
 | `await app.type(selector, text)` | Types into the input (or the first input inside the view; `text:` also matches an input's text or placeholder) at the end of what it holds, key by key: it takes the focus, then each character is an `onKeyPress` and an `onChange`, within `maxLength`. A `\n` in a single-line input is the return key. |
 | `await app.submit(selector)` | The return key in the input, as its `submitBehavior` says: `onSubmit` (and the focus leaves a single-line input), or a line break in a multiline one. |
 | `await app.scroll(selector, distance)` | Drags the scroll view or list (the view, the one around it, or the first inside it) by `distance` points along its axis, 10 points per frame, within its content, as the user may (`scrollable`). Negative scrolls back. |
-| `await app.hover(selector)` | Moves the mouse over the middle of the view: the views under it that it left hear `onHoverOut`, those it came over `onHoverIn` and take their `hover:` styles, and those listening hear `onHoverMove` with where it is. The desktops and the web at any width, a browser in the phone idiom included (headless: a desktop or `"web"` `platform`); an iOS or Android phone has no mouse: there it rejects. |
+| `await app.hover(selector)` | Moves the mouse over the middle of the view: the views under it that it left hear `onMouseLeave`, those it came over `onMouseEnter` and take their `hover:` styles, and those listening hear `onMouseMove` with where it is and no button down. The desktops and the web at any width, a browser in the phone idiom included (headless: a desktop or `"web"` `platform`); an iOS or Android phone has no mouse: there it rejects. |
 | `await app.rightClick(selector)` | The mouse's secondary button over the middle of the view: it, or the nearest view around it listening, hears `onContextMenu`. The desktops and the web (headless: a desktop `platform`); a phone has no mouse: there it rejects. |
-| `await app.paste(selector, { text?, html?, files?, uris? })` | Pastes into the input as the user does with that on the clipboard: it takes the focus and hears `onPaste` (`html` the same content with its formatting, `files` are paths whose bytes it gets as `File`s, `uris` `file:` URLs), then its text goes in as `pasteBehavior` says. Headless, on macOS and on iOS; the machine's clipboard stays as it was. |
+| `await app.paste(selector, { text?, html?, files?, uris? })` | Pastes into the input as the user does with that on the clipboard: it takes the focus and hears `onPaste` (`html` the same content with its formatting, `files` are paths whose bytes it gets as `File`s, `uris` `file:` URLs), then its text goes in as `pasteBehavior` says. Headless, on macOS, on iOS and on the web; the machine's clipboard stays as it was. |
 | `app.menu()` | The actions of the context menu the app shows (`Menu.popup`): `label` (a submenu's after its own, `"Share > Mail"`), `disabled`, and `checked` for a checkable item; `null` when none is open. |
 | `await app.chooseMenuItem(label)` | Chooses the open context menu's action, as a click on it does: the app hears `onMenu` (its `onSelect` runs), then the menu closes. Rejects when the item is disabled or missing. |
 | `await app.closeMenu()` | Closes the open context menu with nothing chosen, as Escape does. |
 | `await app.keyboard.press(keys)` | Presses a key with its modifiers, as `keymap` names it (`"mod+k"`, `"shift+/"`, `"escape"`; `mod` is the platform's command key), on a hardware keyboard, on every platform (phones and tablets have one too): the app's shortcut of it hears it (`keymap.bind`, `onKeyCommand`), else on macOS and the web Tab and Shift+Tab move the keyboard focus between the inputs and the views that take presses (`onFocus`, `onBlur`, `focus:` styles) and Return or Space presses the view it is on, else the focused input takes a character, Backspace or the return key, else Escape goes back. |
+| `await app.keyboard.down(keys)` / `up(keys)` | Holds modifier keys (`"mod"`, `"shift"`, `"alt"`, `"ctrl"`, `"meta"`, joined by `+`) down until `up`: the presses, drags and hovers meanwhile carry them, as a Mod-click or a Shift-drag does. Headless and on Linux for now. |
+| `await app.dragAndHold(selector, by)` / `app.drop()` | Drags as `drag` does and keeps the finger down until `drop()`, which lifts it where it is: the steps between look at the screen mid-drag (a drag preview, a drop line). Headless and on Linux for now. |
+| `await app.dropFiles(selector, uris)` | Drops local files (`file:` URLs, as a file manager drags them) on the middle of the view: it, or the nearest view around it listening, hears `onFileDrop`. Desktops, headless and on Linux for now. |
 | `await app.drag(selector, { x, y })` | A finger lands on the middle of the view, rests for 100 ms, moves by `x`, `y` points, 10 per frame, and lifts, as the platform's input takes it: a pan follows it (`pan={{ x, y }}`, `onPanStart`, `onPanEnd` with the release velocity), the views listening to touches hear it (`onTouchStart`, `PanResponder`), a scroll view scrolls with it and, pulled far enough past its top, refreshes (`onRefresh`), and a press under it is cancelled once it moves away. On the desktops and the web it is the mouse. |
 | `await app.wait(ms)` | Lets the app run for `ms` milliseconds: timers, animations, requests. On a manual clock, moves it by `ms` (`app.clock.runFor`). |
-| `await app.waitFor(selector, options?)` | Resolves once a view matches, or with `{ state: "gone" }` once none does; rejects after `timeout` ms (5000). |
-| `await app.waitUntil(condition, options?)` | Resolves once `condition()` returns true, looking again after each change of the app: for what no selector says (`() => app.storage().note === "Milk"`). |
+| `await app.waitFor(selector, options?)` | Resolves once a view matches, or with `{ state: "gone" }` once none does; rejects after `timeout` ms (5000). On a manual clock, moves it a display frame at a time while it waits, by `timeout` at most. |
+| `await app.waitUntil(condition, options?)` | Resolves once `condition()` returns true, looking again after each change of the app: for what no selector says (`() => app.storage().note === "Milk"`). On a manual clock, moves it a display frame between two looks, by `timeout` at most. |
 | `app.shows(selector)` | Whether a view matches now. |
 | `app.count(selector)` | How many views match now. |
 | `app.enabled(selector)` | Whether the view takes input: neither it nor a view around it is disabled, and an input is not `readonly`. |
 | `app.texts()` | The texts on screen now, in order. |
 | `app.value(selector)` | The text of an input, `null` when none matches. |
-| `app.spanStyle(selector)` | In headless tests, the first matched character’s resolved style: `color`, optional `backgroundColor`, `fontSize`, `fontWeight`, `italic`, `underline`, and `lineThrough`. Colors are `#rrggbbaa`; sizes are in points. |
+| `app.spanStyle(selector)` | The first matched character’s resolved style, headless and on every `--target`: `color`, optional `backgroundColor`, `fontSize`, `fontWeight`, `italic`, `underline`, and `lineThrough`. Colors are `#rrggbbaa`; sizes are in points. |
 | `app.storage()` | What the app's storage holds now. |
 | `await app.back()` | Goes back as the user does (a header's back button, swiping a sheet down): the innermost stack of the newest modal, else of the screen, pops its top screen (`onDismiss`), or asks it (`onBackRequest`) when it has `preventBack`; without one, the newest modal asks to close (`onRequestClose`). Rejects when there is nothing to go back from. |
 | `app.onDialog(handler)` | Answers the dialogs the app shows from now on (`Alert.alert`, action sheets): `handler` gets the dialog (`title`, `message`, `buttons`, `cancelable`, `sheet`) and returns the text of the button to press, or `null` to close it without one. |
 | `app.dialogs()` | The dialogs the app showed, in order. |
 | `app.onPick(handler)` | Answers the picks the app asks for from now on (`Picker.pickImages`): `handler` gets what the pick asks (`multiple`, `limit`, `maxDimension`, `quality`, `format`) and returns the files the user picks (`{ name, type?, data: Uint8Array }`, given to the app as they are), or `null` to cancel. Without a handler, picks are cancelled. Headless runs. |
 | `app.picks()` | The picks the app asked for, in order. |
+| `app.hear(text)` | The user says `text` into the running speech session (`Speech.start`): its `result` reports `text` as the whole transcript so far. Headless runs. |
+| `app.endSpeech(error?)` | Ends the running speech session: with `error` (`"no-speech"`, `"network"`, ...) it fails, else a last final result and `end` come, `no-speech` when nothing was heard. Headless runs. |
+| `app.speechRequests()` | The speech sessions the app started, in order: `lang` (`null` for the user's) and `interim`. |
 | `app.clipboard()` | The text on the clipboard now, `null` when it holds none. |
 | `app.requests()` | The requests the app made, in order: `method`, `url`, `headers`, `body`. |
 | `await app.host.send(name, data?)` | Sends an event of the host app's to the app (`host.on`), then waits until it is quiet. See [Playing the host app](#playing-the-host-app). |
@@ -380,13 +406,35 @@ one: a selector matching several fails the step, and the error says how to narro
 | `app.openedUrls()` | The URLs the app opened (`openUrl`), in order: recorded, never opened. |
 | `await app.setViewport(width, height)` | Resizes the viewport, as rotating the device or resizing a window does (`windowSize()`). |
 | `await app.setColorScheme(scheme)` | Switches the system's appearance to `"light"` or `"dark"`, as the user does. |
-| `await app.screenshot(path?)` | A picture of the app as a `Uint8Array`: PNG on graphical targets, UTF-8 Cell JSON on `tui`, also saved at `path` on this machine when given (relative to the current directory). Only a real platform draws the app: see [On a real platform](#on-a-real-platform). |
+| `await app.setLifecycle(state)` | Moves the app to `"background"`, `"inactive"` or `"active"`, as the system does when the user leaves it, switches to another app or window and comes back (`lifecycle()`). Headless runs only. |
+| `await app.screenshot(path?)` | A picture of the app as a `Uint8Array`: PNG of its window on graphical targets, UTF-8 Cell JSON on `tui`, also saved at `path` on this machine when given (relative to the current directory). Only a real platform draws the app: see [On a real platform](#on-a-real-platform). |
 
-A step resolves once the app rendered nothing for 100 ms and no native animation runs (2 s at most, for apps that
-render all the time; on a manual clock, also 2 s of the app's time), so what it changed is on screen when the next
-line runs; use `waitFor` for what comes later (a
-response, a timer). A step rejects, failing the test, when nothing matches its selector (the error lists the texts on
+A step resolves once the app rendered nothing for 100 ms and no native animation runs that ends by itself (2 s at
+most, for apps that render all the time; on a manual clock, also 2 s of the app's time), so what it changed is on
+screen when the next line runs; use `waitFor` for what comes later (a response, a timer). On a manual clock a step
+does not wait for those 100 ms: it resolves as soon as the app has run everything the step and the clock's time made
+due (timers due now, promises, a stubbed response answered at once) and wants no frame, unless a request is still in
+flight, so tests on a manual clock run without pauses between their steps. What another thread answers (an
+`nsh/host` call, a file read, a Rust task's work on a thread) arrives after the step resolves: `waitFor` what it
+shows. An animation that loops
+forever, such as a loading spinner, keeps running in the background while steps and `waitFor` go on, as an infinite
+CSS animation does in a browser's tests. A step rejects, failing the test, when nothing matches its selector (the error lists the texts on
 screen), when the app threw an exception meanwhile, and when the app asked for what only a real platform answers.
+
+The failures a test may expect carry a `code`, which stays as it is; their messages are for people and may change, so
+a test matches the code:
+
+| `code` | The step or query |
+|---|---|
+| `ERR_NSH_TEST_NOT_FOUND` | Nothing on screen matches the selector, or the open menu has no such item. |
+| `ERR_NSH_TEST_DISABLED` | The view the selector names is disabled (a scroll view the user cannot scroll, a disabled menu item). |
+| `ETIMEDOUT` | `waitFor` or `waitUntil` ran out of time, or the app rendered nothing after `open`. |
+| `ERR_NSH_TEST_NO_BACK` | `back()` found nothing to go back from. |
+| `ERR_NSH_TEST_UNSUPPORTED` | `open` with `--target` was given an option the target's platform cannot honor: `width` or `height` on iOS and Android, a phone's `platform` on a desktop or the web, a desktop's or the other phone's on iOS or Android, `host.handlers`. The message names it. |
+
+```tsx
+await expect(app.press("Pay")).rejects.toMatchObject({ code: "ERR_NSH_TEST_DISABLED" });
+```
 
 `app.spanStyle("id:guide")` reads a nested `<Text testID="guide">`; `text:word` reads the first character
 of that match. Scope queries with `id:note >> text:word` and select repeated matches with `>> nth=0`.
@@ -399,7 +447,7 @@ A headless run has the real runtime and no platform. It plays the platform's par
 that only a real platform can do:
 
 - **Native animations run** frame by frame, to their end: `start(callback)` callbacks run, and so does what waits for
-  them.
+  them. Loops without an end run until the app stops them.
 - **Going back** pops screens and closes modals as a platform does (`app.back()`).
 - **Dialogs are answered**: by the test's `onDialog`, else by their cancel button, else they are closed when they can
   be; a dialog that only its other buttons answer fails the step that showed it until the test says which to press.
@@ -410,6 +458,7 @@ that only a real platform can do:
   so what it does not declare is refused.
 - **URLs are recorded**: what the app opens is reported opened, and `app.openedUrls()` lists it.
 - **Picks are answered**: with the test's files (`onPick`), else cancelled, so `Picker.pickImages` resolves `[]`.
+- **Speech is the test's**: `Speech.available()` resolves `true`, a session starts at once and hears what `hear` says.
 - **Modals show at once**: `onShow` comes when one is presented.
 - **Images are not loaded**: no `onLoad` or `onError` comes, and `Image.getSize` and `Image.prefetch` reject.
 - **What only a real platform answers fails the step**: an image or files on the clipboard.
@@ -442,20 +491,35 @@ test("calls reach the page's host", async () => {
 
 ### Expectations
 
-`expect(value)` compares values as JSON does (`undefined` is `null`, numbers by value), and each check throws when it
-does not hold. `.not` turns them around: `expect(app.texts()).not.toContain("Error")`.
+`expect(value)` checks values as Jest does, as JS made them: `toBe` is `Object.is`, `toEqual` compares member by
+member, and a `Date`, a `Map` or a `Uint8Array` is compared as what it is. Each check throws when it does not hold.
+`.not` turns them around: `expect(app.texts()).not.toContain("Error")`. Given a function, `toThrow` checks what calling
+it throws; given a promise, or a function that returns one, `rejects` and `resolves` check what it settles to, as in
+Jest: `await expect(save()).rejects.toMatchObject({ code: "ERR_ACCESS_DENIED" })`.
 
 | Check | Holds when |
 |---|---|
-| `toBe(expected)`, `toEqual(expected)` | The value equals `expected`, member by member. |
-| `toContain(item)` | An array holds `item`, or a string contains it. |
+| `toBe(expected)` | The value is `expected`, as `Object.is` says: the same primitive (`NaN` is `NaN`, `0` is not `-0`) or the same object. |
+| `toEqual(expected)` | The value equals `expected` member by member, as Jest's `toEqual`: objects by their own enumerable properties (a property that is `undefined` counts as missing), arrays item by item, dates by their time, regular expressions by source and flags, maps and sets by their entries in any order, `ArrayBuffer`s and typed arrays by their bytes, errors by name and message; `NaN` equals `NaN`. An instance of a class equals a plain object with its properties. |
+| `toMatchObject(subset)` | The value has every property of `subset`, each equal as `toEqual` says, and objects in it match in turn; other properties are not looked at, and arrays match item by item, all of them. |
+| `toContain(item)` | An array, a `Set`, a typed array or another iterable holds `item` (`===`), or a string contains it. |
+| `toContainEqual(item)` | An array, a `Set` or another iterable holds an item equal to `item`, as `toEqual` says. |
 | `toBeTruthy()`, `toBeFalsy()` | The value is truthy / falsy, as JS sees it. |
-| `toMatch(pattern)` | A string contains `pattern` (a string), or matches it (a `RegExp`). |
-| `toHaveLength(n)` | An array has `n` items, or a string `n` UTF-16 units. |
-| `toBeNull()` | The value is `null` (or `undefined`). |
+| `toMatch(pattern)` | A string contains `pattern` (a string), or matches it (a `RegExp`, run by the JS engine: look-behind, backreferences and named groups work as in JavaScript). |
+| `toHaveLength(n)` | The value's `length` is `n`: a string's UTF-16 units, an array's or a typed array's items. |
+| `toBeNull()` | The value is `null`. |
+| `toBeUndefined()`, `toBeDefined()` | The value is `undefined` / anything else. |
+| `toBeNaN()` | The value is `NaN`. |
 | `toBeGreaterThan(n)`, `toBeGreaterThanOrEqual(n)`, `toBeLessThan(n)`, `toBeLessThanOrEqual(n)` | A number compares so with `n`. |
-| `toThrow(message?)` | `expect(fn)`: calling `fn` throws, with a message matching `message` when given. |
-| `rejects.toThrow(message?)` | `expect(fn)`: the promise `fn` returns rejects: `await expect(() => app.press("Pay")).rejects.toThrow("is disabled")`. |
+| `toThrow(expected?)` | `expect(fn)`: calling `fn` throws. Given `expected`, the error matches it: its message contains a string or matches a `RegExp`; an error class (`TypeError`, a class of the app's) is the error's `name`, and `Error` matches every error; an error has the same message. |
+| `rejects.toThrow(expected?)` | `expect(promise)`: the promise rejects, with an error matching `expected` as `toThrow` says. |
+| `rejects.toMatchObject(subset)` | `expect(promise)`: the promise rejects with a value matching `subset` as `toMatchObject` says: an error's own properties (`code`, `permission`, ...) with its `name` and `message`. |
+| `resolves.toBe(expected)`, `resolves.toEqual(expected)`, `resolves.toMatchObject(subset)` | `expect(promise)`: the promise resolves to a value that holds the check. |
+
+A failing check says what it got and what it expected, written as JS would write them:
+`expected Date(2024-01-02T00:00:00.000Z) to equal Date(2024-01-01T00:00:00.000Z)`.
+
+`rejects` and `resolves` have a `.not` of their own too: `await expect(load()).resolves.not.toBe(null)`.
 
 ### On a real platform
 
@@ -467,7 +531,8 @@ own input at the views their selectors name, as Playwright does in a browser:
   `scroll` is a trackpad gesture over the scroll view, `back` is what a user does (Escape on macOS and Linux, the mouse's
   back button on Windows and in GPUI, the browser's back button on the web, a sheet swiped down, VoiceOver's escape
   gesture while a menu, popover or `Sheet` is open, else the header's back button on iOS, the back button on Android);
-- a view off screen is scrolled into view first, a gesture at a time;
+- a view off screen is scrolled into view first, a gesture at a time; on a touch screen the finger lands where the
+  page itself takes it, beside the views that follow a drag (a slider, a drawing area), as a user scrolls;
 - selectors, waits and queries see the same model of the app as headless runs, built from what the host draws, so
   they find the same views;
 - dialogs are the platform's own: `app.dialogs()` reads them, and answering one (`onDialog`, or its cancel button
@@ -485,18 +550,26 @@ nsh test --target web                         # in a headless Chrome, Edge or Ch
 nsh test tests/form.test.tsx --target macos   # one file
 ```
 
-The window opens at the viewport's size (390 × 844 unless `open` says), within the screen. A manual `clock` works as
+The window opens at the viewport's size (390 × 844 unless `open` says), within the screen; on iOS and Android the app
+fills the device's screen, at the device's size. The app runs as the target's platform (`platform.os`). A manual `clock` works as
 it does headless: `app.clock.runFor`, `fastForward` and `setSystemTime` move the app's time at once (timers,
-`requestAnimationFrame` a frame apart, `Date`), `app.wait(ms)` moves it too, and each frame the platform shows moves
-it a frame (1/60 s), so the app's time passes while it animates. The platform's own animations, and a route's
+`requestAnimationFrame` a frame apart, `Date`), `app.wait(ms)`, `waitFor` and `waitUntil` move it too, and each frame
+the platform shows moves it a frame (1/60 s), so the app's time passes while it animates. The platform's own animations, and a route's
 `delay`, take real time. The app's requests come to the test as they do headless: `network` routes answer them,
 a request no route matches fails, and `"live"` lets them through to the host's network; `app.requests()` lists them
-all. `storage` is in the app's storage when it starts, and `app.storage()` reads it from the app. `locale`,
-`reducedMotion` and `safeArea` hold whatever the platform reports, and the app's clipboard calls are served from the
+all. Sockets and WebSockets connect on the host's network with `"live"`, and are refused as headless otherwise. `storage` is in the app's storage when it starts, and `app.storage()` reads it from the app. `locale`,
+`reducedMotion` and `safeArea`, when `open` gives them (a default value included), hold whatever the platform reports,
+and a `colorScheme` it gives switches the system's appearance (`"light"` too); what it leaves out is the platform's, and the app's clipboard calls are served from the
 test's own clipboard (`clipboard` is its text at first, `app.clipboard()` reads it), so the machine's clipboard stays
 as it was; a text input's own copy and paste use the system's. `host.params` reaches the app, `app.host.send` sends
 events, and the URLs the app opens are recorded for `app.openedUrls()` instead of being opened. `host.handlers` runs
-headless: the development host answers no calls, and `open` rejects handlers there. An app with Rust crates of its own runs in a development host built with its crates, which NSH
+headless, where the test answers the app's calls. `open` checks its options against the target: `width` and
+`height` on iOS and Android, a `platform` of another kind of device (a phone's on a desktop or the web, a desktop's or
+the other phone's on iOS or Android) and `host.handlers` reject with `ERR_NSH_TEST_UNSUPPORTED`, so a test runs as it
+is written or says what it needs. A desktop's `platform` (`"macos"` for a desktop's mouse and keys) runs on every
+desktop target and the web, as that target's platform and always as a desktop: in the browser the page starts in the
+desktop idiom whatever its width, where without a `platform` (or with `"web"`) it measures its idiom as a browser does
+(a desktop from 600 points wide). An app with Rust crates of its own runs in a development host built with its crates, which NSH
 builds for the platform; a Rust app's host runs its root, so `open(".")` starts it there as it does headless.
 
 `nsh test --target tui` runs the tests against the terminal renderer in an in-memory terminal, suitable for CI.
@@ -723,7 +796,8 @@ view()
 | iOS | The view's `accessibilityIdentifier` (`app.otherElements["add-to-cart"]` in XCUITest). |
 | Android | The accessibility node's view id resource name (`By.res("add-to-cart")` in UI Automator). |
 
-The test id is a method of every element in Rust, and `testID` a prop of every element and of every Rust component (`Button`, `Dialog`, ...). It does not change what screen readers
+The test id is a method of every element in Rust, components' elements included (`button().test_id("save")`, which
+names the component's root), and `testID` a prop of every element and of every Rust component (`Button`, `Dialog`, ...). It does not change what screen readers
 say; use `accessibilityLabel` for that (see [Accessibility](./accessibility.md)). In `--trace` output it appears in
 the view's `ViewProps` item as `test_id: Some("add-to-cart")`.
 

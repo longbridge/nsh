@@ -177,7 +177,7 @@ NSH 不需要 `node_modules`。取而代之的是，每个构建应用的命令�
 | `.nsh/types/nsh/` 中的文件 | 声明的内容 |
 |---|---|
 | `index.d.ts` | `nsh`：`signal`、`computed`、`effect`、`mount`、`View`、`Text` 等，并重新导出下列类型 |
-| `types.d.ts` | 样式（`ViewStyle`、`TextStyle` 等）、每个元素的 props 和事件、`YNode`（`ref` 接收到的对象） |
+| `types.d.ts` | 样式（`ViewStyle`、`TextStyle` 等）、每个元素的 props 和事件、各个 ref（`ViewRef`、`InputRef` 等：`ref` 接收到的对象） |
 | `jsx-runtime.d.ts` | TypeScript 通过 `jsxImportSource` 解析的 JSX 运行时（`JSX` 命名空间） |
 | `globals.d.ts` | `If` 和 `Each`；`console`、定时器、`requestAnimationFrame`、`fetch` 及其他[全局 API](../modules/globals.md) |
 | `assets.d.ts` | 导入图片或字体得到的值 |
@@ -278,7 +278,7 @@ import Inter from "./assets/Inter.ttf";     // "Inter"
 |---|---|
 | `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`, `.heic` | 一个 `ImageAsset`：`{ url, size, scales? }`，单位为点。文件名带 `@2x` / `@3x` 后缀时，像素尺寸除以 2 / 3。不带后缀的文件还会发布它的 `@1.5x`–`@4x` 同名文件（列在 `scales` 中），并加载适合屏幕的变体（[像素密度](./images-and-assets.md#像素密度)）。 |
 | `.svg` | 一个 `ImageAsset`，尺寸取自 SVG 的 `width` 和 `height`（或 `viewBox`），单位为点。 |
-| `.ttf`, `.otf` | 字体的族名，一个字符串。字体会在第一帧之前注册。 |
+| `.ttf`, `.otf`, `.woff`, `.woff2` | 字体的族名，一个字符串。字体会在第一帧之前注册。 |
 | `.json` | 解析后的 JSON |
 
 参见 [图片与资源](./images-and-assets.md) 和 [字体](./fonts.md)。

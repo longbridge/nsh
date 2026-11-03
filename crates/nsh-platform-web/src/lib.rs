@@ -4,6 +4,10 @@
 //! the page reports the idiom (phone, tablet or desktop browser), locale
 //! and the user's settings ([`nsh_environment`]).
 //!
+//! - The app's TSX runs on the browser's own JavaScript engine (feature
+//!   `browser`): the page imports its ES modules, which reach the Rust
+//!   engine, reactive graph and components through `src/browser/`. The
+//!   module has no JS interpreter of its own.
 //! - The engine runs on the page's main thread ([`nsh_engine::LocalEngine`]):
 //!   the JS runtime (`web/nsh.js`) calls [`nsh_pump`] after input and when
 //!   the deadline it returned is reached.
@@ -15,20 +19,25 @@
 //!   `requestAnimationFrame` ([`animation`]).
 //!
 //! - `fetch` runs on the browser's `fetch` ([`net`]).
+//! - What the module leaves out, the syntaxes code is highlighted with,
+//!   comes from the page the first time it is needed ([`nsh_data`],
+//!   `nsh_core::runtime_data`).
 //!
 //! There are no native components; web views are `<iframe>`s and scroll
 //! views use the browser's scrolling. Off WebAssembly this crate is empty.
 
 #![cfg(target_arch = "wasm32")]
 
+#[cfg(feature = "browser-core")]
+mod browser;
+
 mod animation;
 mod canvas;
 mod encode;
 mod ffi;
 mod filesystem;
-#[cfg(feature = "js")]
-mod local_time;
 mod net;
+mod shader;
 mod storage;
 mod text;
 mod websocket;
@@ -44,11 +53,9 @@ use nsh_core::{
     keymap::{Key, KeyMatch, Keymap, Keystroke, Modifiers},
 };
 use nsh_engine::{
-    App, Assets, ColorScheme, EngineConfig, EngineControl, Environment, Idiom, Limits, LocalEngine,
-    MountSink, Os,
+    App, Assets, ColorScheme, EngineConfig, EngineControl, Environment, Idiom, Lifecycle, Limits,
+    LocalEngine, MountSink, Os,
 };
-#[cfg(feature = "js")]
-use nsh_engine::{Bundle, BundleCode, Chunk, HotUpdate, Policy};
 
 use crate::{animation::UiAnimation, encode::Out, text::WebTextEngine};
 pub use crate::{
@@ -76,14 +83,8 @@ thread_local! {
     static TEST_ANSWER: RefCell<String> = const { RefCell::new(String::new()) };
     /// The page's URL, which relative request URLs resolve against.
     static BASE_URL: RefCell<Option<String>> = const { RefCell::new(None) };
-    /// How the next [`nsh_start`] runs its bundle ([`nsh_bundle_options`]).
-    #[cfg(feature = "js")]
-    static OPTIONS: RefCell<BundleOptions> = RefCell::new(BundleOptions::default());
-    /// A hot update could not be applied in place ([`nsh_hot_failed`]).
-    #[cfg(feature = "js")]
-    static HOT_FAILED: Cell<bool> = const { Cell::new(false) };
     /// What the page reported last ([`nsh_environment`]), kept for the
-    /// next [`nsh_start`].
+    /// next start ([`nsh_start_rust`], `nsh_browser_start`).
     static PAGE: Cell<Option<Environment>> = const { Cell::new(None) };
     /// The app's keyboard shortcuts (`MountItem::Keymap`), matched in
     /// [`nsh_key`] while a key event is being handled. Apart from [`APP`]
@@ -91,6 +92,9 @@ thread_local! {
     static KEYMAP: RefCell<Option<std::sync::Arc<Keymap>>> = const { RefCell::new(None) };
     /// The UI sets apps import ([`set_ui_sets`]; by default `nsh/base`).
     static UI_SETS: RefCell<Option<Vec<nsh_core::element::Registry>>> = const { RefCell::new(None) };
+    /// The app's own UI sets their gates added ([`add_ui_set`], [`ui_set!`]),
+    /// served after `nsh/base`'s parts.
+    static APP_SETS: RefCell<Vec<nsh_core::element::Registry>> = const { RefCell::new(Vec::new()) };
     /// What makes the Rust app's root ([`set_root`]), for [`nsh_start_rust`].
     static ROOT: RefCell<Option<Box<dyn Fn() -> nsh_core::element::Root>>> = const { RefCell::new(None) };
     /// What the last [`nsh_compile`] made: the module or the error.
@@ -108,11 +112,93 @@ pub fn set_ui_sets(sets: Vec<Registry>) {
     UI_SETS.with(|s| *s.borrow_mut() = Some(sets));
 }
 
-/// The UI sets engines serve: [`set_ui_sets`]'s, else nsh's own.
+/// Adds one of the app's own UI sets to the apps started from now on,
+/// after `nsh/base`'s parts ([`ui_set!`]'s gate calls it). A set added
+/// again replaces nothing: the first stays.
+pub fn add_ui_set(set: Registry) {
+    APP_SETS.with(|s| {
+        let mut sets = s.borrow_mut();
+        if !sets.iter().any(|t| t.specifier() == set.specifier()) {
+            sets.push(set);
+        }
+    });
+}
+
+/// The UI sets engines serve: [`set_ui_sets`]'s, else `nsh/base`'s parts
+/// and the app's sets their gates added ([`add_ui_set`]).
 fn ui_sets() -> Vec<Registry> {
-    UI_SETS
-        .with(|s| s.borrow().clone())
-        .unwrap_or_else(|| vec![nsh_base::registry()])
+    UI_SETS.with(|s| s.borrow().clone()).unwrap_or_else(|| {
+        let mut sets = vec![base_set()];
+        APP_SETS.with(|a| sets.extend(a.borrow().iter().cloned()));
+        sets
+    })
+}
+
+/// `nsh/base`: the parts the page asked for (`nsh_part_*`, which it calls
+/// for each the module exports before it starts anything).
+#[cfg(feature = "base-full")]
+fn base_set() -> Registry {
+    nsh_base::registry_of(PARTS.with(|p| p.borrow().clone()))
+}
+
+thread_local! {
+    /// The `nsh/base` parts `nsh_part_*` asked for.
+    #[cfg(feature = "base-full")]
+    static PARTS: RefCell<Vec<nsh_base::parts::Part>> = const { RefCell::new(Vec::new()) };
+}
+
+/// Exports one `nsh_part_<name>` per part of `nsh/base`: the page calls
+/// those of the parts its app uses, and a runtime linked for the app keeps
+/// only the parts it exports.
+macro_rules! base_parts {
+    ($($name:ident => $export:ident),* $(,)?) => {$(
+        /// Adds this part of `nsh/base` to the apps started from now on.
+        #[cfg(feature = "base-full")]
+        #[unsafe(no_mangle)]
+        pub extern "C" fn $export() {
+            PARTS.with(|p| {
+                let mut parts = p.borrow_mut();
+                let part = nsh_base::parts::$name as nsh_base::parts::Part;
+                if !parts.iter().any(|q| std::ptr::fn_addr_eq(*q, part)) {
+                    parts.push(part);
+                }
+            });
+        }
+    )*};
+}
+
+base_parts!(
+    core => nsh_part_core,
+    pickers => nsh_part_pickers,
+    color_picker => nsh_part_color_picker,
+    carousel => nsh_part_carousel,
+    tree => nsh_part_tree,
+    fields => nsh_part_fields,
+    text_view => nsh_part_text_view,
+    editor => nsh_part_editor,
+    diff => nsh_part_diff,
+    rich_editor => nsh_part_rich_editor,
+    data_table => nsh_part_data_table,
+    table => nsh_part_table,
+    dock => nsh_part_dock,
+    resizable => nsh_part_resizable,
+    plot => nsh_part_plot,
+);
+
+/// `nsh/base` in the lite runtime (feature `base-full` off): its controls
+/// (the core and the parts split from it), so the larger parts' code stays
+/// out of the module.
+#[cfg(not(feature = "base-full"))]
+fn base_set() -> Registry {
+    use nsh_base::parts::{self, Part};
+    nsh_base::registry_of([
+        parts::core as Part,
+        parts::pickers,
+        parts::color_picker,
+        parts::carousel,
+        parts::tree,
+        parts::fields,
+    ])
 }
 
 /// Makes this module an app's web runtime that serves `$sets` (an
@@ -131,6 +217,22 @@ macro_rules! ui_sets {
     };
 }
 
+/// Exports `$export`, the gate of one of the app's own UI sets (`$set`, an
+/// expression giving its [`Registry`]): `nsh.js` calls it as it calls the
+/// `nsh_part_*` of `nsh/base`'s parts, and a runtime linked for the app
+/// (`nsh package`) keeps only the gates of the sets it imports. `nsh`
+/// names it `nsh_ui_set_<specifier>` (non-alphanumerics as `_`).
+#[macro_export]
+macro_rules! ui_set {
+    ($export:ident, $set:expr) => {
+        /// Adds this UI set of the app to the apps started from now on.
+        #[unsafe(no_mangle)]
+        pub extern "C" fn $export() {
+            $crate::add_ui_set($set);
+        }
+    };
+}
+
 /// Sets the Rust app [`nsh_start_rust`] runs: `root` makes its root
 /// component (with its theme), each time the page starts it.
 pub fn set_root(root: impl Fn() -> nsh_core::element::Root + 'static) {
@@ -141,9 +243,8 @@ pub fn set_root(root: impl Fn() -> nsh_core::element::Root + 'static) {
 /// it serves `$sets` (`nsh/base` and the app's own set) and runs the
 /// root component `$root` makes (an expression giving a
 /// [`nsh_core::element::Root`]) when the page calls [`nsh_start_rust`]. Built
-/// without the feature `js`, the module has no QuickJS: the app is Rust
-/// and the browser's own JS from start to end. Exports `nsh_app_init`, as
-/// [`ui_sets!`].
+/// without the feature `browser-core`, the module runs no TSX: the app is
+/// Rust from start to end. Exports `nsh_app_init`, as [`ui_sets!`].
 #[macro_export]
 macro_rules! rust_app {
     ($sets:expr, $root:expr) => {
@@ -154,29 +255,6 @@ macro_rules! rust_app {
             $crate::set_root(|| $root);
         }
     };
-}
-
-/// What [`nsh_bundle_options`] set for the next [`nsh_start`].
-#[cfg(feature = "js")]
-#[derive(Default)]
-struct BundleOptions {
-    /// Run as a release: hardened, as packaged apps run (default:
-    /// development settings, for the player and the dev server).
-    release: bool,
-    /// What the app declares (`capabilities.json`).
-    capabilities: Option<String>,
-    /// The bundle's source map (JSON).
-    source_map: Option<String>,
-    /// The hardening as bytecode ([`nsh_bundle_harden`]).
-    harden: Option<Vec<u8>>,
-    /// The app's id (`nsh.json` `"id"`): it names where the app keeps its
-    /// data ([`storage::LocalStorage`]).
-    app_id: Option<String>,
-    /// The VM limits the page runs the app with ([`nsh_bundle_limits`]);
-    /// `None`: none, as an app on its own.
-    limits: Option<String>,
-    /// Static chunks staged before the entry starts.
-    chunks: Vec<nsh_engine::Chunk>,
 }
 
 struct Running {
@@ -221,24 +299,19 @@ impl MountSink for Sink {
     fn request_frame(&self) {
         FRAME_REQUESTED.with(|f| f.set(true));
     }
-
-    #[cfg(feature = "js")]
-    fn hot_update_failed(&self) {
-        HOT_FAILED.with(|f| f.set(true));
-    }
-
-    fn load_chunk(&self, id: &str) -> bool {
-        ffi::load_chunk(id);
-        true
-    }
 }
 
-/// Bundled files the page preloaded (fonts, images drawn on a canvas).
+/// Bundled files the page preloaded (fonts, images drawn on a canvas); the
+/// others are downloaded from where the page serves them.
 struct PageAssets;
 
 impl Assets for PageAssets {
     fn read(&self, uri: &str) -> Result<Vec<u8>, String> {
         ffi::read_asset(uri).ok_or_else(|| format!("{uri} is not available on the web"))
+    }
+
+    fn url(&self, uri: &str) -> Option<String> {
+        uri.starts_with("asset:/").then(|| ffi::asset_url(uri))
     }
 }
 
@@ -337,8 +410,9 @@ fn page() -> Environment {
 /// `reduceMotion`, `fontScale`, `pixelRatio`, `safeArea` (`[top, right,
 /// bottom, left]`), `keyboard` (the height the on-screen keyboard
 /// covers), `appleKeyboard` (the browser runs on an Apple platform: its
-/// shortcuts are Apple's) and `host` (the page answers `nsh/host` calls:
-/// `createPlayer`'s `host`); missing keys keep their value. Called before [`nsh_start`]
+/// shortcuts are Apple's), `host` (the page answers `nsh/host` calls:
+/// `createPlayer`'s `host`) and `screenColor` (the browser has an
+/// `EyeDropper`); missing keys keep their value. Called before the app starts
 /// and on every change; the idiom and `host` are the ones at start, as on every
 /// platform. Returns the pump delay.
 ///
@@ -394,6 +468,13 @@ pub unsafe extern "C" fn nsh_environment(ptr: *const u8, len: usize) -> f64 {
     }
     env.keyboard_height = Points(num("keyboard").unwrap_or(env.keyboard_height.0));
     env.host = flag("host").unwrap_or(env.host);
+    env.lifecycle = match value.get("lifecycle").and_then(|v| v.as_str()) {
+        Some("background") => Lifecycle::Background,
+        Some("inactive") => Lifecycle::Inactive,
+        Some(_) => Lifecycle::Active,
+        None => env.lifecycle,
+    };
+    env.screen_color = flag("screenColor").unwrap_or(env.screen_color);
     PAGE.with(|p| p.set(Some(env)));
     send(|app| {
         let e = &mut app.environment;
@@ -402,56 +483,19 @@ pub unsafe extern "C" fn nsh_environment(ptr: *const u8, len: usize) -> f64 {
         e.apple_keyboard = env.apple_keyboard;
         e.reduce_motion = env.reduce_motion;
         e.font_scale = env.font_scale;
+        let rescaled = e.pixel_ratio != env.pixel_ratio;
         e.pixel_ratio = env.pixel_ratio;
         e.safe_area = env.safe_area;
         e.keyboard_height = env.keyboard_height;
+        e.lifecycle = env.lifecycle;
+        e.screen_color = env.screen_color;
         app.control.set_environment(app.environment);
+        // The DOM draws emoji as wide as the pixel ratio makes them.
+        if rescaled && app.text.emoji_measured() {
+            app.text.clear_caches();
+            app.control.fonts_changed();
+        }
     })
-}
-
-/// Starts the app in `bundle` (JS source, an ES module as `nsh build`
-/// writes it) in a `width` × `height` surface. Returns the delay (ms) until
-/// [`nsh_pump`] is due, or -1.
-///
-/// # Safety
-///
-/// `ptr..ptr + len` is memory from [`nsh_alloc`].
-#[cfg(feature = "js")]
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn nsh_start(
-    ptr: *const u8,
-    len: usize,
-    width: f32,
-    height: f32,
-    dark: u32,
-    pixel_ratio: f32,
-) -> f64 {
-    // SAFETY: guaranteed by the caller.
-    let code = unsafe { string(ptr, len) };
-    start(BundleCode::Source(code), width, height, dark, pixel_ratio)
-}
-
-/// [`nsh_start`] for a bundle compiled to QuickJS bytecode (`bundle.nshc`
-/// from `nsh build`; what `nsh package --target web` ships). The runtime of
-/// published apps (feature `bytecode-only`) runs nothing else.
-///
-/// # Safety
-///
-/// `ptr..ptr + len` is memory from [`nsh_alloc`] holding bytecode the CLI
-/// of this runtime's `nsh_js::BYTECODE_VERSION` wrote: QuickJS trusts it.
-#[cfg(feature = "js")]
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn nsh_start_bytecode(
-    ptr: *const u8,
-    len: usize,
-    width: f32,
-    height: f32,
-    dark: u32,
-    pixel_ratio: f32,
-) -> f64 {
-    // SAFETY: guaranteed by the caller.
-    let code = unsafe { bytes(ptr, len) }.to_vec();
-    start(BundleCode::Bytecode(code), width, height, dark, pixel_ratio)
 }
 
 /// Starts the Rust app this module was built for ([`rust_app!`]) in a
@@ -475,60 +519,40 @@ pub extern "C" fn nsh_start_rust(width: f32, height: f32, dark: u32, pixel_ratio
     )
 }
 
-/// Sets up logging and panics once.
+/// Sets up logging, panics and the runtime's data once.
 fn init() {
     static INIT: std::sync::Once = std::sync::Once::new();
     INIT.call_once(|| {
         let _ = log::set_logger(&LOGGER);
         log::set_max_level(log::LevelFilter::Info);
         std::panic::set_hook(Box::new(|info| {
-            ffi::report_error(&format!("nsh panicked: {info}"));
+            ffi::report_panic(&format!("nsh panicked: {info}"));
         }));
+        // What this module leaves out (the syntaxes) comes from the page.
+        nsh_core::runtime_data::set_loader(ffi::load_data);
     });
 }
 
-#[cfg(feature = "js")]
-fn start(code: BundleCode, width: f32, height: f32, dark: u32, pixel_ratio: f32) -> f64 {
-    init();
-    APP.with(|a| a.borrow_mut().take());
-    let environment = environment(width, height, dark != 0, pixel_ratio);
-    let options = OPTIONS.with(|o| std::mem::take(&mut *o.borrow_mut()));
-    let policy = if options.release {
-        Policy::default()
-    } else {
-        Policy::development()
-    };
-    let mut bundle = match code {
-        BundleCode::Source(code) => Bundle::source(code),
-        // SAFETY: trusted, per `nsh_start_bytecode`'s contract.
-        BundleCode::Bytecode(bytes) => unsafe { Bundle::bytecode(bytes) },
-    }
-    .with_policy(policy)
-    .with_chunks(options.chunks);
-    if let Some(harden) = options.harden {
-        // SAFETY: trusted, per `nsh_bundle_harden`'s contract.
-        bundle = unsafe { bundle.with_harden_bytecode(harden) };
-    }
-    if let Some(map) = options.source_map {
-        bundle = bundle.with_source_map(map);
-    }
-    let mut bundle = match bundle.with_capabilities_json(options.capabilities.as_deref()) {
-        Ok(bundle) => bundle,
-        Err(err) => {
-            ffi::report_error(&err);
-            return -1.0;
-        }
-    };
-    let limits = match Limits::development(options.limits.as_deref()) {
-        Ok(limits) => limits,
-        Err(err) => {
-            ffi::report_error(&format!("invalid limits: {err}"));
-            return -1.0;
-        }
-    };
-    bundle.base_url = BASE_URL.with(|b| b.borrow().as_deref().map(Into::into));
-    let bundle = bundle.with_app_id(options.app_id.as_deref());
-    run(App::Js(bundle), width, height, environment, limits)
+/// Hands over the runtime's data `name` that the page fetched for
+/// `load_data` (`nsh_core::runtime_data`): its bytes when `ok` is 1; with 0
+/// the page has no such file or it did not load. Returns the delay (ms)
+/// until [`nsh_pump`] is due, or -1.
+///
+/// # Safety
+///
+/// Both ranges are memory from [`nsh_alloc`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn nsh_data(
+    name: *const u8,
+    name_len: usize,
+    ptr: *const u8,
+    len: usize,
+    ok: u32,
+) -> f64 {
+    // SAFETY: guaranteed by the caller.
+    let (name, data) = unsafe { (string(name, name_len), bytes(ptr, len)) };
+    nsh_core::runtime_data::deliver(&name, (ok != 0).then(|| data.to_vec()));
+    pump()
 }
 
 /// Starts `app` in the page's surface.
@@ -545,6 +569,7 @@ fn run(app: App, width: f32, height: f32, environment: Environment, limits: Limi
         trace: false,
         network: Some(std::sync::Arc::new(net::WebNetwork)),
         websocket: Some(std::sync::Arc::new(websocket::BrowserWebSocket)),
+        refuse_connections: None,
         assets: Some(std::sync::Arc::new(PageAssets)),
         environment,
         // NSH draws no header: a page's `header` sits at its top.
@@ -565,6 +590,7 @@ fn run(app: App, width: f32, height: f32, environment: Environment, limits: Limi
         clipboard: None,
         host: Default::default(),
         picker: None,
+        speech: None,
     };
     // A test session's app: the test's storage, network and trace.
     #[cfg(feature = "dev")]
@@ -602,6 +628,39 @@ fn run(app: App, width: f32, height: f32, environment: Environment, limits: Limi
     pump()
 }
 
+/// What the page calls after a gate (`nsh_part_*`, `nsh_std_*`,
+/// `nsh_feature_*`, an app UI set's) ran once an app had started, as when
+/// a side module loads before a chunk that needs it: the running engine
+/// and its JavaScript host serve the UI sets as they are now to what is
+/// mounted and imported from then on. `gate` names it (for the log only);
+/// the standard modules and the shader compiler need nothing more, as
+/// their calls read what the gate set. Returns the delay (ms) until
+/// [`nsh_pump`] is due, or -1.
+///
+/// # Safety
+///
+/// `ptr..ptr + len` is memory from [`nsh_alloc`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn nsh_after_gate(ptr: *const u8, len: usize) -> f64 {
+    // SAFETY: guaranteed by the caller.
+    let gate = unsafe { string(ptr, len) };
+    let running = APP.with(|a| a.borrow().is_some());
+    if !running {
+        return pump();
+    }
+    log::debug!(target: "nsh::perf", "{gate} registered after the app started");
+    let sets = ui_sets();
+    APP.with(|a| {
+        if let Some(app) = a.borrow_mut().as_mut() {
+            app.engine.extend_ui_sets(&sets);
+        }
+    });
+    // The JavaScript host describes the new exports to the app's realm.
+    #[cfg(feature = "browser-core")]
+    browser::extend_registries(&sets);
+    pump()
+}
+
 /// Sets the page's URL (`document.baseURI`): relative request URLs
 /// (`fetch("/api")`) of the apps started next resolve against it.
 ///
@@ -615,189 +674,8 @@ pub unsafe extern "C" fn nsh_set_base_url(ptr: *const u8, len: usize) {
     BASE_URL.with(|b| *b.borrow_mut() = Some(url));
 }
 
-/// Sets how the next [`nsh_start`] runs its bundle: as a release
-/// (`release` 1: hardened, as `nsh package --target web` ships apps) or
-/// with development settings (0, the default), under the capabilities the
-/// app declares (`capabilities.json`; empty: no declaration), with the
-/// bundle's source map (empty: none) and the app's id (`nsh.json` `"id"`,
-/// which names where it keeps its data; empty: none, its page's path does).
-///
-/// # Safety
-///
-/// The three ranges are memory from [`nsh_alloc`].
-#[cfg(feature = "js")]
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn nsh_bundle_options(
-    release: u32,
-    capabilities: *const u8,
-    capabilities_len: usize,
-    map: *const u8,
-    map_len: usize,
-    app_id: *const u8,
-    app_id_len: usize,
-) {
-    // SAFETY: guaranteed by the caller.
-    let (capabilities, map, app_id) = unsafe {
-        (
-            string(capabilities, capabilities_len),
-            string(map, map_len),
-            string(app_id, app_id_len),
-        )
-    };
-    OPTIONS.with(|o| {
-        *o.borrow_mut() = BundleOptions {
-            release: release != 0,
-            capabilities: (!capabilities.is_empty()).then_some(capabilities),
-            source_map: (!map.is_empty()).then_some(map),
-            harden: None,
-            app_id: (!app_id.is_empty()).then_some(app_id),
-            limits: None,
-            chunks: Vec::new(),
-        }
-    });
-}
-
-/// Stages a static dependency for the next app, after [`nsh_bundle_options`].
-///
-/// # Safety
-///
-/// Both ranges are memory from [`nsh_alloc`]. Bytecode must be trusted output
-/// from the matching CLI, as required by [`nsh_start_bytecode`].
-#[cfg(feature = "js")]
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn nsh_bundle_chunk(
-    name: *const u8,
-    name_len: usize,
-    code: *const u8,
-    code_len: usize,
-    bytecode: u32,
-) {
-    // SAFETY: the caller provides allocated ranges and trusted bytecode.
-    let chunk = unsafe {
-        let name = string(name, name_len);
-        if bytecode != 0 {
-            nsh_engine::Chunk::bytecode(name, std::slice::from_raw_parts(code, code_len).to_vec())
-        } else {
-            nsh_engine::Chunk::source(name, string(code, code_len))
-        }
-    };
-    OPTIONS.with(|o| o.borrow_mut().chunks.push(chunk));
-}
-
-/// Sets the VM limits the next [`nsh_start`] / [`nsh_start_bytecode`]
-/// (after [`nsh_bundle_options`]) runs the app with, as an embedding app
-/// sets them (`nsh_core::js::HostLimits`' syntax, `memory=128MB,call=2s`;
-/// empty: the embedding defaults): the page decides, as the playground
-/// does for the code it runs. Without a call: none, as an app on its own.
-///
-/// # Safety
-///
-/// `ptr..ptr + len` is memory from [`nsh_alloc`].
-#[cfg(feature = "js")]
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn nsh_bundle_limits(ptr: *const u8, len: usize) {
-    // SAFETY: guaranteed by the caller.
-    let limits = unsafe { string(ptr, len) };
-    OPTIONS.with(|o| o.borrow_mut().limits = Some(limits));
-}
-
-/// Sets the hardening the next [`nsh_start`] / [`nsh_start_bytecode`] of a
-/// release ([`nsh_bundle_options`]) runs, as bytecode
-/// (`nsh_js::compile_harden`, which `nsh package` ships with the app): the
-/// runtime of published apps cannot compile it.
-///
-/// # Safety
-///
-/// `ptr..ptr + len` is memory from [`nsh_alloc`] holding what the CLI of
-/// this runtime's `nsh_js::BYTECODE_VERSION` compiled.
-#[cfg(feature = "js")]
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn nsh_bundle_harden(ptr: *const u8, len: usize) {
-    // SAFETY: guaranteed by the caller.
-    let harden = unsafe { bytes(ptr, len) }.to_vec();
-    OPTIONS.with(|o| o.borrow_mut().harden = Some(harden));
-}
-
-/// Applies a development update (a script from the dev server's hot
-/// updates, named `name` in stack traces, with its source map or none)
-/// to the running app. Returns the pump delay; [`nsh_hot_failed`] then
-/// tells whether the app must be loaded again instead.
-///
-/// # Safety
-///
-/// The three ranges are memory from [`nsh_alloc`].
-#[cfg(feature = "js")]
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn nsh_hot_update(
-    name: *const u8,
-    name_len: usize,
-    code: *const u8,
-    code_len: usize,
-    map: *const u8,
-    map_len: usize,
-) -> f64 {
-    // SAFETY: guaranteed by the caller.
-    let (name, code, map) = unsafe {
-        (
-            string(name, name_len),
-            string(code, code_len),
-            string(map, map_len),
-        )
-    };
-    HOT_FAILED.with(|f| f.set(false));
-    let update = HotUpdate {
-        name,
-        code,
-        source_map: (!map.is_empty()).then(|| map.into()),
-    };
-    send(|app| app.control.hot_update(update))
-}
-
-/// Whether the last [`nsh_hot_update`] could not be applied in place (1):
-/// the app must be started again with the new bundle.
-#[cfg(feature = "js")]
-#[unsafe(no_mangle)]
-pub extern "C" fn nsh_hot_failed() -> u32 {
-    HOT_FAILED.with(|f| f.replace(false)) as u32
-}
-
-/// Hands over chunk `id` of a split bundle that the page fetched after
-/// `load_chunk` (`ok` 1: `code` is its source; 2: its bytecode, from the
-/// CLI as for [`nsh_start_bytecode`]; 0: `code` says why it could not be
-/// loaded). Returns the pump delay.
-///
-/// # Safety
-///
-/// Both ranges are memory from [`nsh_alloc`]; bytecode (`ok` 2) is
-/// trusted as in [`nsh_start_bytecode`].
-#[cfg(feature = "js")]
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn nsh_chunk(
-    id: *const u8,
-    id_len: usize,
-    code: *const u8,
-    code_len: usize,
-    ok: u32,
-) -> f64 {
-    // SAFETY: guaranteed by the caller.
-    let (id, code) = unsafe { (string(id, id_len), bytes(code, code_len)) };
-    let chunk = match ok {
-        0 => Err(String::from_utf8_lossy(code).into_owned()),
-        // SAFETY: trusted, per the contract.
-        2 => Ok(unsafe { Chunk::bytecode(id.clone(), code.to_vec()) }),
-        _ => Ok(Chunk::source(
-            id.clone(),
-            String::from_utf8_lossy(code).into_owned(),
-        )),
-    };
-    send(|app| match chunk {
-        Ok(chunk) => app.control.chunk_loaded(chunk),
-        Err(why) => app.control.chunk_failed(id, why),
-    })
-}
-
 /// Compiles one module (`name`'s extension says TSX, TS, JSX or JS) to the
-/// ES module [`nsh_start`] runs, for the playground. Returns 1 when it
+/// ES module the browser host runs (`runSource`), for the playground. Returns 1 when it
 /// compiled, 0 for an error; [`nsh_compiled_ptr`] / [`nsh_compiled_len`]
 /// give the module or the error text.
 ///
@@ -870,7 +748,7 @@ pub unsafe extern "C" fn nsh_test_answer(ptr: *const u8, len: usize) -> usize {
             query: nsh_dev::protocol::SceneQuery::Animating,
         }) => {
             let animating =
-                APP.with(|a| a.borrow().as_ref().is_some_and(|r| r.animation.animating()));
+                APP.with(|a| a.borrow().as_ref().is_some_and(|r| r.animation.finishing()));
             serde_json::json!({ "done": animating })
         }
         Ok(step) => {
@@ -1152,47 +1030,32 @@ pub unsafe extern "C" fn nsh_event(
         EventKind::Error => EventPayload::Error {
             message: text("message"),
         },
-        EventKind::HoverMove
-        | EventKind::ContextMenu
+        // `{ position, pagePosition, modifiers, pressedButton }`, as handlers
+        // get it.
+        EventKind::MouseEnter | EventKind::MouseLeave | EventKind::MouseMove => {
+            let (position, page_position, modifiers) = pointer_at(&value);
+            let pressed_button = value
+                .get("pressedButton")
+                .and_then(|v| v.as_str())
+                .and_then(mouse_button);
+            EventPayload::Mouse(nsh_core::MouseEvent::new(
+                position,
+                page_position,
+                modifiers,
+                pressed_button,
+            ))
+        }
+        EventKind::ContextMenu
         | EventKind::Press
         | EventKind::LongPress
         | EventKind::PressDown
         | EventKind::PressUp
-            if matches!(kind, EventKind::HoverMove | EventKind::ContextMenu)
-                || value.get("pagePosition").is_some() =>
+            if kind == EventKind::ContextMenu || value.get("pagePosition").is_some() =>
         {
             // `{ position, pagePosition, modifiers }` (presses: and
             // `clicks`), as handlers get it.
-            let at = |k: &str| {
-                let p = value.get(k);
-                let n = |c: &str| {
-                    p.and_then(|p| p.get(c))
-                        .and_then(|v| v.as_f64())
-                        .unwrap_or(0.0) as f32
-                };
-                point(Points(n("x")), Points(n("y")))
-            };
-            let flag = |k: &str| {
-                value
-                    .get("modifiers")
-                    .and_then(|m| m.get(k))
-                    .and_then(|v| v.as_bool())
-                    .unwrap_or(false)
-            };
-            let (position, page_position) = (at("position"), at("pagePosition"));
-            let modifiers = nsh_core::keymap::Modifiers {
-                ctrl: flag("control"),
-                alt: flag("alt"),
-                shift: flag("shift"),
-                cmd: flag("platform"),
-            };
-            if kind == EventKind::HoverMove {
-                EventPayload::Hover(nsh_core::HoverEvent {
-                    position,
-                    page_position,
-                    modifiers,
-                })
-            } else if kind != EventKind::ContextMenu {
+            let (position, page_position, modifiers) = pointer_at(&value);
+            if kind != EventKind::ContextMenu {
                 EventPayload::Press(nsh_core::PressEvent {
                     position,
                     page_position,
@@ -1263,6 +1126,7 @@ pub unsafe extern "C" fn nsh_event(
                             "canGoForward" => "canGoForward",
                             "loaded" => "loaded",
                             "total" => "total",
+                            "color" => "color",
                             _ => return None,
                         };
                         let v = match v {
@@ -1281,6 +1145,53 @@ pub unsafe extern "C" fn nsh_event(
         },
     };
     send(|app| app.control.dispatch_event(id, kind, payload))
+}
+
+/// The pointer of a mouse or press payload: its `position`, `pagePosition`
+/// and `modifiers`.
+fn pointer_at(
+    value: &serde_json::Value,
+) -> (
+    nsh_core::Point<Points>,
+    nsh_core::Point<Points>,
+    nsh_core::keymap::Modifiers,
+) {
+    let at = |k: &str| {
+        let p = value.get(k);
+        let n = |c: &str| {
+            p.and_then(|p| p.get(c))
+                .and_then(|v| v.as_f64())
+                .unwrap_or(0.0) as f32
+        };
+        point(Points(n("x")), Points(n("y")))
+    };
+    let flag = |k: &str| {
+        value
+            .get("modifiers")
+            .and_then(|m| m.get(k))
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false)
+    };
+    let modifiers = nsh_core::keymap::Modifiers {
+        ctrl: flag("control"),
+        alt: flag("alt"),
+        shift: flag("shift"),
+        cmd: flag("platform"),
+    };
+    (at("position"), at("pagePosition"), modifiers)
+}
+
+/// The button a mouse payload's `pressedButton` names (`nsh.js` names the
+/// first of the DOM's `buttons` bits held).
+fn mouse_button(name: &str) -> Option<nsh_core::MouseButton> {
+    Some(match name {
+        "left" => nsh_core::MouseButton::Left,
+        "right" => nsh_core::MouseButton::Right,
+        "middle" => nsh_core::MouseButton::Middle,
+        "back" => nsh_core::MouseButton::Back,
+        "forward" => nsh_core::MouseButton::Forward,
+        _ => return None,
+    })
 }
 
 /// `onPaste` of input `id`: what the user pasted, as JSON `{ text, files:
@@ -1559,6 +1470,27 @@ pub extern "C" fn nsh_scroll(id: u32, x: f32, y: f32, applied: u32) -> f64 {
     })
 }
 
+/// The text of multiline input `id` scrolled to `y`, or its height
+/// (`content`) or its viewport's changed, while a built-in bar takes the
+/// place of its indicator.
+#[unsafe(no_mangle)]
+pub extern "C" fn nsh_input_scroll(
+    id: u32,
+    y: f32,
+    width: f32,
+    content: f32,
+    viewport: f32,
+) -> f64 {
+    send(|app| {
+        app.control.input_scroll(
+            id,
+            point(px(0.0), px(y)),
+            size(px(width), px(content.max(viewport))),
+            size(px(width), px(viewport)),
+        );
+    })
+}
+
 /// Vertical scroll view `id` is pulled `distance` past its top: its pull
 /// value (`pullValue`) follows.
 #[unsafe(no_mangle)]
@@ -1702,7 +1634,7 @@ pub extern "C" fn nsh_root_size(
 /// classes).
 #[unsafe(no_mangle)]
 pub extern "C" fn nsh_states(id: u32, states: u32) -> f64 {
-    send(|app| app.control.set_states(id, states as u8))
+    send(|app| app.control.set_states(id, states as u16))
 }
 
 /// The surface was resized (points).

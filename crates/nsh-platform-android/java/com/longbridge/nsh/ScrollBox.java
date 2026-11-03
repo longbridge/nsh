@@ -43,6 +43,8 @@ final class ScrollBox extends FrameLayout implements Node {
     private boolean pulling;
     private float startY;
     private boolean touching;
+    /** The down time of the touch whose DOWN this view took (-1: none yet). */
+    private long downTime = -1;
     private final Runnable settled = this::settled;
 
     // `ScrollBehavior`; offsets and lengths in dp.
@@ -136,6 +138,9 @@ final class ScrollBox extends FrameLayout implements Node {
         // The view or its content changed size: scroll what was clamped.
         scroller.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> payOwed());
         scroller.setOnScrollChangeListener((v, x, y, ox, oy) -> {
+            // Layout may clamp against a mixture of old and new pixel
+            // sizes. Report only after restoring the logical offset.
+            if (rescaling) return;
             if (stickyCells.length > 0) pinSticky();
             if (touching && !dragging && !swallowing) {
                 dragging = true;
@@ -167,6 +172,10 @@ final class ScrollBox extends FrameLayout implements Node {
     }
 
     void setContentSize(int width, int height) {
+        if (rescaling) {
+            rescaledContent = true;
+            requestLayout();
+        }
         content.contentWidth = width;
         content.contentHeight = height;
         if (scroller instanceof ZScroll) {
@@ -280,6 +289,18 @@ final class ScrollBox extends FrameLayout implements Node {
         return true;
     }
 
+    /** Whether this view took the DOWN of the touch that went down at {@code downTime}. */
+    boolean took(long downTime) {
+        return this.downTime == downTime;
+    }
+
+    /** Whether a drag by ({@code dx}, {@code dy}) px along this view's axis has content to move. */
+    boolean scrolls(float dx, float dy) {
+        if (scroller == null || !enabled) return false;
+        if (horizontal) return Math.abs(dx) > Math.abs(dy) && scroller.canScrollHorizontally(dx < 0 ? 1 : -1);
+        return Math.abs(dy) > Math.abs(dx) && scroller.canScrollVertically(dy < 0 ? 1 : -1);
+    }
+
     /** Glides to the snap point for a release at {@code velocity} (px/s). */
     private void snap(int velocity) {
         if (scroller instanceof ZScroll) return;
@@ -364,6 +385,12 @@ final class ScrollBox extends FrameLayout implements Node {
             if (!ScrollBox.this.fling(velocity)) super.fling(velocity);
         }
 
+        void stop() {
+            // Bypass snapping: a zero-velocity native fling replaces the
+            // previous scroller animation at its current position.
+            super.fling(0);
+        }
+
         @Override
         public void draw(Canvas canvas) {
             super.draw(canvas);
@@ -394,6 +421,12 @@ final class ScrollBox extends FrameLayout implements Node {
         @Override
         public void fling(int velocity) {
             if (!ScrollBox.this.fling(velocity)) super.fling(velocity);
+        }
+
+        void stop() {
+            // Bypass snapping: a zero-velocity native fling replaces the
+            // previous scroller animation at its current position.
+            super.fling(0);
         }
 
         @Override
@@ -457,6 +490,47 @@ final class ScrollBox extends FrameLayout implements Node {
         return true;
     }
 
+    /** Saved pixel target in the new density, until content and viewport are laid out. */
+    private boolean rescaling, rescaledContent;
+    private int rescaledX, rescaledY;
+
+    void rescale(float scale) {
+        rescaledX = Math.round((rescaling ? rescaledX : scroller.getScrollX() + owedX) * scale);
+        rescaledY = Math.round((rescaling ? rescaledY : scroller.getScrollY() + owedY) * scale);
+        rescaling = true;
+        rescaledContent = false;
+        owedX = owedY = 0;
+        removeCallbacks(settled);
+        // Native motion also uses pixels: end it before restoring the
+        // position, so an old fling cannot move it back on the next frame.
+        stopMotion();
+    }
+
+    private void stopMotion() {
+        if (scroller instanceof ZScroll) ((ZScroll) scroller).stop();
+        else if (scroller instanceof VScroll) ((VScroll) scroller).stop();
+        else if (scroller instanceof HScroll) ((HScroll) scroller).stop();
+    }
+
+    @Override
+    protected void onLayout(boolean changed, int l, int t, int r, int b) {
+        super.onLayout(changed, l, t, r, b);
+        if (!rescaling || !rescaledContent) return;
+        // Unlike a core scroll command, changing coordinate systems does
+        // not increment `applied`. A smaller content area may clamp this
+        // final offset; tell the core so virtual lists follow the result.
+        if (scroller instanceof ZScroll) ((ZScroll) scroller).scrollToPx(rescaledX, rescaledY, false);
+        else scroller.scrollTo(rescaledX, rescaledY);
+        // The zero-velocity native scroller must also start at this new
+        // position, rather than writing its pre-rescale position next frame.
+        stopMotion();
+        rescaling = false;
+        pinSticky();
+        float d = mounter.density;
+        mounter.scroll(id, scroller.getScrollX() / d, scroller.getScrollY() / d, applied);
+        postDelayed(settled, 120);
+    }
+
     /** Scrolls the core asked for that were applied (reported with offsets). */
     private int applied;
 
@@ -469,6 +543,11 @@ final class ScrollBox extends FrameLayout implements Node {
 
     void scrollByPx(int dx, int dy) {
         applied++;
+        if (rescaling) {
+            rescaledX += dx;
+            rescaledY += dy;
+            return;
+        }
         int x = scroller.getScrollX() + dx + owedX, y = scroller.getScrollY() + dy + owedY;
         scroller.scrollTo(x, y);
         owedX = x - scroller.getScrollX();
@@ -477,7 +556,7 @@ final class ScrollBox extends FrameLayout implements Node {
 
     /** Pays what clamping kept back, as far as the current size allows. */
     private void payOwed() {
-        if (owedX == 0 && owedY == 0) return;
+        if (rescaling || (owedX == 0 && owedY == 0)) return;
         int x = scroller.getScrollX() + owedX, y = scroller.getScrollY() + owedY;
         scroller.scrollTo(x, y);
         owedX = x - scroller.getScrollX();
@@ -486,6 +565,11 @@ final class ScrollBox extends FrameLayout implements Node {
 
     void scrollToPx(int x, int y, boolean animated) {
         applied++;
+        if (rescaling) {
+            rescaledX = x;
+            rescaledY = y;
+            return;
+        }
         if (scroller instanceof ZScroll) {
             ((ZScroll) scroller).scrollToPx(x, y, animated);
         } else if (scroller instanceof ScrollView) {
@@ -938,6 +1022,9 @@ final class ScrollBox extends FrameLayout implements Node {
         } else {
             handled = super.dispatchTouchEvent(e);
         }
+        // For a pan around this view (Box.scrollTakes): a touch that a view
+        // above took never comes here, and leaves the time of an older one.
+        if (action == MotionEvent.ACTION_DOWN) downTime = handled ? e.getDownTime() : -1;
         if (action == MotionEvent.ACTION_UP && tapMode >= 0 && !dragging
                 && (tapMode == 0 || !handlesTap(this, e.getX(), e.getY()))) {
             hideKeyboard();
@@ -1007,7 +1094,9 @@ final class ScrollBox extends FrameLayout implements Node {
     }
 
     private void hideKeyboard() {
-        View focused = findFocus();
+        // The focused field is usually outside this scroll view (a chat's composer below its list).
+        View focused = getRootView().findFocus();
+        if (focused == null) focused = mounter.focusedInput();
         if (focused == null) return;
         InputMethodManager imm = (InputMethodManager) getContext().getSystemService(Context.INPUT_METHOD_SERVICE);
         imm.hideSoftInputFromWindow(focused.getWindowToken(), 0);

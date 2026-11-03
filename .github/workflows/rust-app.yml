@@ -125,8 +125,8 @@ jobs:
         run: |
           mkdir -p "$RUNNER_TEMP/nsh-test-tmp"
           echo "TMPDIR=$RUNNER_TEMP/nsh-test-tmp" >> "$GITHUB_ENV"
-      # QuickJS is C: bindgen needs libclang, its WebAssembly build clang
-      # and llvm-ar. The describe program links the gallery's crate,
+      # QuickJS is C: bindgen needs libclang for the CLI; the web runtime's
+      # C code (zstd) clang and llvm-ar. The describe program links the gallery's crate,
       # whose native entry (`cargo run`) uses GTK 4 on Linux.
       - name: Install clang, LLVM and GTK 4
         run: sudo apt-get update && sudo apt-get install -y clang llvm libclang-dev libgtk-4-dev
@@ -178,17 +178,24 @@ jobs:
           for app in counter gallery rust-exports; do
             ./target/debug/nsh test "examples/$app"
           done
+      # NSH's generated declarations type-check themselves: apps skip
+      # checking them (`skipLibCheck`), which would hide a broken one.
+      - name: Type-check the generated declarations
+        run: ./target/debug/nsh check examples/counter -- --skipLibCheck false
       # The same tests in the runner's Chrome, headless, with the browser's
       # trusted input (`nsh test --target web`): those a real platform runs
       # (real time).
       - name: Run the examples' tests in Chrome
         run: |
           ./target/debug/nsh test examples/counter --target web
-          for file in device dock form gestures hover navigation network photos resizable shortcuts storage timers; do
+          for file in device dock form gestures hover links navigation network photos resizable shortcuts storage timers; do
             ./target/debug/nsh test "examples/gallery/tests/$file.test.tsx" --target web
           done
+          ./target/debug/nsh test examples/gallery/tests/data-table-interactions.test.tsx --target web --filter "column's classes style"
           ./target/debug/nsh test examples/gallery/tests/environment.test.tsx --target web --filter appearance
+          ./target/debug/nsh test examples/gallery/tests/controls.test.tsx --target web --filter 'one-time code'
           ./target/debug/nsh test examples/gallery/tests/overlays.test.tsx --target web --filter 'Escape cancels'
+          ./target/debug/nsh test examples/gallery/tests/rich-editor.test.tsx --target web --filter 'Backspace after the caret moves'
           # Apps with Rust crates, in their hosts' runtime: a TSX app and a
           # Rust app (its root).
           ./target/debug/nsh test examples/rust-exports --target web
@@ -196,9 +203,10 @@ jobs:
           ./target/debug/nsh test examples/gallery-rs/shortcuts.test.tsx --target web
       - name: Publish a TSX app with a Rust crate for the web
         run: |
-          # A TSX entry and the app's crate: QuickJS runs App.tsx, the
-          # crate's set is compiled into the app's runtime.
+          # A TSX entry runs in the browser; the app's Rust UI set is
+          # compiled into its browser-only runtime.
           ./target/debug/nsh package examples/rust-exports --target web -o target/rust-exports-web
           site="target/rust-exports-web/Rust Exports"
-          ls "$site"/app.*.nshc
+          ls "$site"/app.*.js
+          node crates/nsh-platform-web/web/browser/package-size.mjs "$site" --require-browser
           grep -q rust-exports/native "$site"/nsh.*.wasm

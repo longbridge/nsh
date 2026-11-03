@@ -25,7 +25,7 @@ use crate::{
         CanvasFont, CanvasGradient, CanvasImage, CanvasOp, CanvasTextAlign, CanvasTextBaseline,
         Composite, Drawing, FillRule, LineCap, LineJoin, Num, Paint, Path, PathOp, ViewPaint,
     },
-    geometry::{Bounds, Corners, Point, Radians, ScaledPixels},
+    geometry::{Bounds, Corners, Percentage, Point, Radians, ScaledPixels},
     js::host::HostProps,
     overlay::{Align, OverlayAnchor, Placement},
     style::SvgPaint,
@@ -210,6 +210,17 @@ host_element! {
 }
 
 host_element! {
+    /// An SVG drawn as authored, made by [`svg`].
+    Svg
+}
+
+host_element! {
+    /// A view whose box a shader draws under its children (`<shader>`, TS:
+    /// `Shader` of `nsh`), made by [`shader`] ([`crate::shader`]).
+    ShaderView
+}
+
+host_element! {
     /// A web page (`<webview>`), made by [`web_view`].
     WebView
 }
@@ -234,6 +245,7 @@ host_element! {
 }
 
 impl ParentElement for Overlay {}
+impl ParentElement for ShaderView {}
 impl ParentElement for Scroll {}
 impl ParentElement for Stack {}
 impl ParentElement for Screen {}
@@ -351,6 +363,284 @@ pub fn canvas(painter: impl IntoReactive<Painter>) -> CanvasView {
 
 crate::static_reactive!(Painter: Painter, Drawing);
 
+/// An SVG image drawn as authored, in its own colors, as an `<svg>` written
+/// inline in a web page draws: `svg(asset!("logo.svg"))`, a URL, a file or
+/// the markup itself (`svg(ImageSrc::svg_markup(include_str!("logo.svg")))`).
+/// Its `currentColor` is the element's text color (`color`, inherited), so
+/// an icon drawn with `stroke="currentColor"` follows the theme and the
+/// app's `text-*` classes. It lays out at the SVG's `width` and `height`
+/// (else its `viewBox`'s size) where its style sets no size, keeping that
+/// aspect ratio where it sets one side, as an image does; its `viewBox`
+/// is fitted into the box it gets as its `preserveAspectRatio` says.
+///
+/// On the native backends it is a canvas of the SVG's shapes, which the
+/// platform draws at its device pixels: sharp at every size and scale. Its
+/// bytes load as an image's do (the shared loader and its caches); the
+/// drawing is parsed once per source and kept in the decoded images'
+/// budget (`docs/dev/images.md`), leased while an element shows it. Inline
+/// markup and a drawing in memory show in the first frame; others when
+/// they load. A source that cannot be drawn draws nothing (logged). The
+/// web runtime shows it as an image the browser draws, where
+/// `currentColor` is black.
+pub fn svg(src: impl IntoReactive<super::ImageSrc>) -> Svg {
+    #[cfg(all(feature = "svg", not(target_arch = "wasm32")))]
+    {
+        let mut node = ElNode::new(Tag::Canvas);
+        let shown = svg_drawing(src);
+        node.bind_attr(
+            move || shown.get(),
+            |attrs, drawing| attrs.drawing = drawing,
+        );
+        Svg(node)
+    }
+    #[cfg(not(all(feature = "svg", not(target_arch = "wasm32"))))]
+    {
+        let mut node = ElNode::new(Tag::Image);
+        node.style.value(
+            crate::StyleKey::ObjectFit,
+            crate::PropertyValue::ObjectFit(Some(ResizeMode::Contain)),
+        );
+        node.bind_attr(src, |attrs, src| attrs.src = Some(src));
+        Svg(node)
+    }
+}
+
+/// The drawing an [`svg`] of `src` shows: here and now when its bytes are
+/// in hand (inline markup) or it is in memory, else once it loads. A
+/// source that changes drops the load running and the lease of the
+/// drawing shown.
+#[cfg(all(feature = "svg", not(target_arch = "wasm32")))]
+fn svg_drawing(
+    src: impl IntoReactive<super::ImageSrc>,
+) -> super::reactive::Signal<Option<Arc<Drawing>>> {
+    use super::reactive::{SignalEquals, render_effect, signal_with, stored, untracked};
+    let src = src.into_reactive();
+    let shown = signal_with(None::<Arc<Drawing>>, SignalEquals::Never);
+    let lease = stored(crate::image::Lease::none());
+    let task = stored(None::<super::Spawned<()>>);
+    render_effect(move || {
+        let src = match &src {
+            super::Reactive::Static(src) => src.clone(),
+            super::Reactive::Bound(f) => f(),
+        };
+        untracked(|| {
+            drop(task.replace(None));
+            let context = crate::image::loader::context();
+            let source = crate::ImageSource {
+                uri: src.uri.as_str().into(),
+                size: None,
+                scales: crate::ImageScales::NONE,
+                data: None,
+            }
+            .inline();
+            let Some(location) = context.locate(&source) else {
+                log::warn!("svg: unsupported source `{}`", source.uri);
+                shown.set(None);
+                lease.replace(crate::image::Lease::none());
+                return;
+            };
+            if let Some((drawing, held)) = crate::svg::drawings::now(&location) {
+                shown.set(Some(drawing));
+                lease.replace(held);
+                return;
+            }
+            let load = crate::svg::drawings::load(location, context);
+            task.replace(Some(super::spawn(async move {
+                let (drawing, held) = load.await;
+                shown.set(Some(drawing));
+                lease.replace(held);
+            })));
+        });
+    });
+    shown
+}
+
+/// A view whose box a shader draws, under its children: give it the
+/// program with [`ShaderView::source`] and its uniforms with
+/// [`ShaderView::uniform`]. Without a program it draws nothing of its own.
+pub fn shader() -> ShaderView {
+    ShaderView(ElNode::new(Tag::Shader))
+}
+
+/// A view whose children draw through a shader: give it the program with
+/// [`ShaderView::source`], which reads what they draw with
+/// `sample_content`. Without a program the children draw as they are.
+pub fn shader_effect() -> ShaderView {
+    ShaderView(ElNode::new(Tag::ShaderEffect))
+}
+
+/// A view whose children change through a shader when its
+/// [`ShaderView::value`] changes: `sample_from` is a picture of what they
+/// drew, `sample_to` what they draw now, `nsh.progress` how far it is.
+/// Without a program it cross-fades ([`ShaderView::fallback`]).
+pub fn shader_transition() -> ShaderView {
+    ShaderView(ElNode::new(Tag::ShaderTransition))
+}
+
+/// The whole surface drawn through a shader, which reads it with
+/// `sample_content`. It takes no space and has no children.
+pub fn screen_effect() -> ShaderView {
+    ShaderView(ElNode::new(Tag::ScreenEffect))
+}
+
+/// The whole surface changing through a shader when its
+/// [`ShaderView::value`] changes, as [`shader_transition`] does for its
+/// children. It takes no space and has no children.
+pub fn screen_transition() -> ShaderView {
+    ShaderView(ElNode::new(Tag::ScreenTransition))
+}
+
+crate::static_reactive!(crate::shader::Shader: crate::shader::Shader);
+
+/// A value [`ShaderView::uniform`] takes ([`IntoUniform`]).
+pub struct Uniform(UniformSource);
+
+enum UniformSource {
+    Value(super::Reactive<crate::shader::UniformValue>),
+    Animated(super::AnimatedNode),
+}
+
+/// What [`ShaderView::uniform`] takes: a number, a color or a list, bound
+/// or not, or an animated value (`&AnimatedValue`, `&AnimatedNode`).
+pub trait IntoUniform {
+    /// As a [`Uniform`].
+    fn into_uniform(self) -> Uniform;
+}
+
+impl<T: IntoReactive<crate::shader::UniformValue>> IntoUniform for T {
+    fn into_uniform(self) -> Uniform {
+        Uniform(UniformSource::Value(self.into_reactive()))
+    }
+}
+
+impl IntoUniform for &super::AnimatedValue {
+    fn into_uniform(self) -> Uniform {
+        Uniform(UniformSource::Animated(super::Animated::animated_node(
+            self,
+        )))
+    }
+}
+
+impl IntoUniform for &super::AnimatedNode {
+    fn into_uniform(self) -> Uniform {
+        Uniform(UniformSource::Animated(*self))
+    }
+}
+crate::static_reactive!(
+    crate::shader::UniformValue: crate::shader::UniformValue,
+    f32,
+    i32,
+    Color,
+    Hsla,
+    [f32; 2],
+    [f32; 3],
+    [f32; 4],
+    Vec<crate::shader::UniformValue>
+);
+
+impl ShaderView {
+    /// The program that draws its box, compiled once with
+    /// [`Shader::compile`](crate::shader::Shader::compile) (a bound one
+    /// draws the new program when it changes).
+    pub fn source(self, shader: impl IntoReactive<crate::shader::Shader>) -> Self {
+        self.bind_prop(shader, |s| Prop::Shader(Some(s)))
+    }
+
+    /// Sets the member `name` of the shader's `struct Uniforms` to `value`
+    /// ([`IntoUniform`]): a number, a color or a list (a vector, an array of
+    /// `vec4f`), which a bound value (`move || …`) sets again when it
+    /// changes; or an animated value (`&wave`, a number, or colors for a
+    /// `vec3f` / `vec4f`), which the platform writes on every frame it
+    /// changes, without the engine (one whose owner is gone counts as 0).
+    pub fn uniform(mut self, name: &str, value: impl IntoUniform) -> Self {
+        let name: Arc<str> = name.into();
+        let value = match value.into_uniform().0 {
+            UniformSource::Value(value) => value,
+            UniformSource::Animated(node) => {
+                let value = match node.live() {
+                    Some(node) => {
+                        let id = node.id();
+                        self.0.attrs.bound.push(node);
+                        crate::shader::UniformValue::Animated(id)
+                    }
+                    None => crate::shader::UniformValue::Number(0.0),
+                };
+                super::Reactive::Static(value)
+            }
+        };
+        self.0.bind_attr(value, move |attrs, value| {
+            let mut uniforms = attrs
+                .props
+                .iter()
+                .find_map(|p| match p {
+                    Prop::Uniforms(u) => Some(u.clone()),
+                    _ => None,
+                })
+                .unwrap_or_default();
+            match uniforms.0.iter_mut().find(|(n, _)| *n == name) {
+                Some(entry) => entry.1 = value,
+                None => uniforms.0.push((name.clone(), value)),
+            }
+            set_in(&mut attrs.props, Prop::Uniforms(uniforms));
+        });
+        self
+    }
+
+    /// Stops its clock (`nsh.time` keeps its value), or starts it again.
+    pub fn paused(self, paused: impl IntoReactive<bool>) -> Self {
+        self.bind_prop(paused, Prop::ShaderPaused)
+    }
+
+    /// An effect's `nsh.progress`, a fraction (a bound one sets it again
+    /// when it changes).
+    pub fn progress(self, progress: impl IntoReactive<Percentage>) -> Self {
+        self.bind_prop(progress, |p| {
+            Prop::ShaderProgress(crate::shader::ShaderProgress::Number(p))
+        })
+    }
+
+    /// An effect's `nsh.progress` moved by an animated value, which the
+    /// platform writes on every frame it changes, without the engine.
+    pub fn animated_progress(mut self, value: &impl super::Animated) -> Self {
+        let progress = match value.animated_node().live() {
+            Some(node) => {
+                let id = node.id();
+                self.0.attrs.bound.push(node);
+                crate::shader::ShaderProgress::Animated(id)
+            }
+            None => crate::shader::ShaderProgress::Number(Percentage(0.0)),
+        };
+        self.set(Prop::ShaderProgress(progress))
+    }
+
+    /// How far beyond its box, in points, an effect or a transition draws
+    /// and its pictures reach (`maxSampleOffset`).
+    pub fn max_sample_offset(self, offset: Points) -> Self {
+        self.set(Prop::MaxSampleOffset(offset))
+    }
+
+    /// A transition's value: when it changes, the transition runs (not for
+    /// the first one).
+    pub fn value(self, value: impl IntoReactive<crate::shader::TransitionKey>) -> Self {
+        self.bind_prop(value, |v| Prop::TransitionValue(Some(v)))
+    }
+
+    /// How long a transition runs (300 ms by default).
+    pub fn duration(self, duration: std::time::Duration) -> Self {
+        self.set(Prop::TransitionDuration(Some(
+            duration.as_secs_f32() * 1000.0,
+        )))
+    }
+
+    /// What a transition without a program runs: a cross-fade (the
+    /// default) or nothing.
+    pub fn fallback(self, fallback: crate::TransitionFallback) -> Self {
+        self.set(Prop::TransitionFallback(fallback))
+    }
+}
+
+crate::static_reactive!(crate::shader::TransitionKey: crate::shader::TransitionKey);
+
 /// A web view loading `url` (a bound one loads again when it changes).
 pub fn web_view(url: impl IntoReactive<String>) -> WebView {
     WebView(ElNode::new(Tag::WebView)).bind_prop(url, |url: String| {
@@ -455,6 +745,12 @@ impl Input {
     /// Several lines, growing with the text (return adds a line).
     pub fn multiline(self, multiline: impl IntoReactive<bool>) -> Self {
         self.bind_prop(multiline, |multiline: bool| Prop::Multiline(multiline))
+    }
+
+    /// Whether a multiline input's scroll bar shows (default yes): the
+    /// platform's indicator, or the app's built-in bar once it set one.
+    pub fn scrollbar(self, shows: impl IntoReactive<bool>) -> Self {
+        self.bind_prop(shows, |shows: bool| Prop::Scrollbar(shows.into()))
     }
 
     /// At most `length` characters.
@@ -588,7 +884,7 @@ impl Scroll {
 
     /// Whether the scroll indicator shows (default yes).
     pub fn scrollbar(self, shows: impl IntoReactive<bool>) -> Self {
-        self.bind_prop(shows, |shows: bool| Prop::Scrollbar(shows))
+        self.bind_prop(shows, |shows: bool| Prop::Scrollbar(shows.into()))
     }
 
     /// Pinch zoom between `min` and `max`.
@@ -647,6 +943,14 @@ impl Screen {
     /// Whether the header shows (default true).
     pub fn header_visible(self, shown: impl IntoReactive<bool>) -> Self {
         self.bind_prop(shown, |v| Prop::Screen(ScreenProp::HeaderVisible(v)))
+    }
+
+    /// Whether the system tab bar leaves while this page is on top (default
+    /// false), moving with the transition (iOS and Android).
+    pub fn hides_bottom_bar_when_pushed(self, hides: impl IntoReactive<bool>) -> Self {
+        self.bind_prop(hides, |v| {
+            Prop::Screen(ScreenProp::HidesBottomBarWhenPushed(v))
+        })
     }
 
     /// A large title (iOS); the content scrolls under the header.
@@ -719,6 +1023,33 @@ impl Screen {
     ) -> Self {
         self.bind_prop(item, |item| {
             Prop::Screen(ScreenProp::HeaderRightSystemItem(Some(item)))
+        })
+    }
+
+    /// The leading header button is UIKit's own, drawn instead of the
+    /// `header_left` view (iOS; a press on it presses that view's first
+    /// pressable view).
+    pub fn header_left_system_item(self, item: impl IntoReactive<crate::HeaderSystemItem>) -> Self {
+        self.bind_prop(item, |item| {
+            Prop::Screen(ScreenProp::HeaderLeftSystemItem(Some(item)))
+        })
+    }
+
+    /// The trailing header button is UIKit's own showing the SF Symbol of
+    /// this name, drawn instead of the `header_right` view (iOS; a press on
+    /// it presses that view's first pressable view).
+    pub fn header_right_symbol(self, name: impl IntoReactive<super::SharedString>) -> Self {
+        self.bind_prop(name, |n| {
+            Prop::Screen(ScreenProp::HeaderRightSymbol(Some(Arc::from(n.as_str()))))
+        })
+    }
+
+    /// The leading header button is UIKit's own showing the SF Symbol of
+    /// this name, drawn instead of the `header_left` view (iOS; a press on
+    /// it presses that view's first pressable view).
+    pub fn header_left_symbol(self, name: impl IntoReactive<super::SharedString>) -> Self {
+        self.bind_prop(name, |n| {
+            Prop::Screen(ScreenProp::HeaderLeftSymbol(Some(Arc::from(n.as_str()))))
         })
     }
 
@@ -806,9 +1137,39 @@ impl Overlay {
         )
     }
 
+    /// Lays the element carrying `cover`, inside it, over its anchor (a
+    /// select's selected item over the trigger) instead of placing it on
+    /// a side ([`crate::overlay::OverlayConfig::cover`]). A ref is not
+    /// tracked: `shown` (tracked) says when that element is rendered, as
+    /// its `on_layout` can tell.
+    pub fn cover(self, cover: &super::ElementRef, shown: impl Fn() -> bool + 'static) -> Self {
+        let cover = *cover;
+        self.bind_prop(
+            move || if shown() { cover.node() } else { None },
+            |id| Prop::Overlay(OverlayProp::Cover(id)),
+        )
+    }
+
+    /// Places it beside the element carrying `anchor`, outside the edges
+    /// of the one carrying `edges` (the menu around it), as a submenu
+    /// beside its row ([`OverlayAnchor::Beside`]).
+    pub fn anchor_beside(self, anchor: &super::ElementRef, edges: &super::ElementRef) -> Self {
+        let (anchor, edges) = (*anchor, *edges);
+        self.bind_prop(
+            move || match (anchor.node(), edges.node()) {
+                (Some(node), Some(edges)) => OverlayAnchor::Beside { node, edges },
+                (Some(id), None) => OverlayAnchor::Node(id),
+                _ => OverlayAnchor::None,
+            },
+            |a| Prop::Overlay(OverlayProp::Anchor(a)),
+        )
+    }
+
     /// Places it against what the element carrying `anchor` draws: the box
     /// around its children, so a trigger in a wrapper its parent stretches
-    /// is placed against what shows ([`OverlayAnchor::Content`]).
+    /// is placed against what shows ([`OverlayAnchor::Content`]). A ref a
+    /// component gives its slot goes by the app's element's own box,
+    /// whether a TSX or a Rust app filled the slot.
     pub fn anchor_content(self, anchor: &super::ElementRef) -> Self {
         let anchor = *anchor;
         self.bind_prop(
@@ -1348,7 +1709,7 @@ impl<A: super::Animated> From<&A> for CanvasPaint {
 /// may be animated values (the canvas draws again natively as they move);
 /// operations without a method here are built by hand with
 /// [`Painter::num`], [`Painter::paint`] and [`Painter::op`]. Text is
-/// measured with [`super::ambient::measure_text`].
+/// measured with [`super::measure_text`].
 #[derive(Debug, Clone, Default)]
 pub struct Painter {
     drawing: Drawing,
@@ -1990,3 +2351,110 @@ impl From<Drawing> for Painter {
 }
 
 crate::static_reactive!(ScreenAnimation: ScreenAnimation);
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        element::{
+            AnimatedValue,
+            reactive::{Runtime, create_root, signal},
+        },
+        shader::{ShaderUniforms, UniformValue},
+    };
+
+    fn uniforms(attrs: &super::super::builder::Attrs) -> ShaderUniforms {
+        attrs
+            .props
+            .iter()
+            .find_map(|p| match p {
+                Prop::Uniforms(u) => Some(u.clone()),
+                _ => None,
+            })
+            .unwrap_or_default()
+    }
+
+    /// The animation nodes released since the last call.
+    fn released(executor: &super::super::task::Executor) -> usize {
+        executor
+            .take_actions()
+            .into_iter()
+            .filter(|a| {
+                matches!(
+                    a,
+                    super::super::task::Action::Animation(
+                        crate::animation::AnimationOp::Release { .. }
+                    )
+                )
+            })
+            .count()
+    }
+
+    fn value(u: &ShaderUniforms, name: &str) -> Option<UniformValue> {
+        u.0.iter()
+            .find(|(n, _)| &**n == name)
+            .map(|(_, v)| v.clone())
+    }
+
+    #[test]
+    fn uniform_takes_static_bound_and_animated_values() {
+        let runtime = Runtime::default();
+        let _entered = runtime.enter();
+        let executor = std::rc::Rc::new(super::super::task::Executor::default());
+        let (value_owner, wave) = create_root(|| AnimatedValue::new(&executor, 0.0));
+        let speed = signal(1.0_f32);
+        let view = shader()
+            .uniform("center", [0.5_f32, 0.5])
+            .uniform("wave", &wave)
+            .uniform("speed", move || speed.get());
+        let node = view.0;
+
+        // The static and animated ones are set at once; the animated one by
+        // its node, which the element holds.
+        let set = uniforms(&node.attrs);
+        assert_eq!(
+            value(&set, "center"),
+            Some(UniformValue::List(vec![
+                UniformValue::Number(0.5),
+                UniformValue::Number(0.5)
+            ]))
+        );
+        let id = wave.node().live().expect("live").id();
+        assert_eq!(value(&set, "wave"), Some(UniformValue::Animated(id)));
+        assert_eq!(
+            node.attrs.bound.len(),
+            1,
+            "the element holds the animated node"
+        );
+        assert_eq!(
+            value(&set, "speed"),
+            None,
+            "a bound one is applied when resolved"
+        );
+
+        // The bound one follows its signal.
+        assert_eq!(
+            value(&uniforms(&node.resolved_attrs()), "speed"),
+            Some(UniformValue::Number(1.0))
+        );
+        speed.set(2.0);
+        assert_eq!(
+            value(&uniforms(&node.resolved_attrs()), "speed"),
+            Some(UniformValue::Number(2.0))
+        );
+
+        // The node outlives the owner of the handle it came from.
+        value_owner.dispose();
+        assert_eq!(released(&executor), 0, "the view keeps the animated node");
+        drop(node);
+        assert_eq!(released(&executor), 1, "and lets it go with the view");
+    }
+
+    #[test]
+    fn a_later_uniform_replaces_one_of_the_same_name() {
+        let view = shader().uniform("speed", 1.0_f32).uniform("speed", 3.0_f32);
+        let set = uniforms(&view.0.attrs);
+        assert_eq!(set.0.len(), 1);
+        assert_eq!(value(&set, "speed"), Some(UniformValue::Number(3.0)));
+    }
+}

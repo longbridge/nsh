@@ -8,7 +8,8 @@
 //! Views form a tree of reference-counted nodes: a parent holds its
 //! children in drawing order (bottom to top), a child its parent weakly.
 //! A view draws itself in [`crate::render`]: shadows and background
-//! ([`crate::decor`]), its content (text, image, canvas), its children
+//! ([`crate::decor`]), its shader ([`crate::shader`]), its content (text,
+//! image, canvas), its children
 //! (clipped to the rounded bounds when `overflow: hidden`), the items it
 //! hosts ([`ViewState::natives`]: text editors, web views, ...), then its
 //! border, as UIKit draws layer borders over the content.
@@ -117,9 +118,10 @@ pub(crate) trait Hosted {
         false
     }
 
-    /// A wheel or touchpad scroll at `(x, y)` (item coordinates) for a
-    /// [`Hosted::raw`] item; true when it took it (else the scroll views
-    /// around it get it).
+    /// A wheel or touchpad scroll at `(x, y)` (item coordinates): for a
+    /// [`Hosted::raw`] item under the pointer, or any other item of the
+    /// view under it (a native component); true when it took it (else the
+    /// scroll views around it get it).
     fn wheel(&self, x: f32, y: f32, event: &crate::input::WheelEvent) -> bool {
         let _ = (x, y, event);
         false
@@ -152,9 +154,9 @@ pub(crate) struct ViewState {
     /// Touch, accessibility and test properties.
     pub(crate) props: Box<ViewProps>,
     /// States to report (`TrackStates`), and the current ones.
-    pub(crate) tracked: u8,
+    pub(crate) tracked: u16,
     /// Current interaction states (pressed, hovered, focused).
-    pub(crate) states: u8,
+    pub(crate) states: u16,
     /// Extra translation (sticky list cells, screen transitions).
     pub(crate) shift: (f32, f32),
     /// Extra opacity (press feedback, screen and modal transitions).
@@ -169,6 +171,9 @@ pub(crate) struct ViewState {
     pub(crate) image: Option<crate::image::ImageState>,
     /// Canvas content.
     pub(crate) canvas: Option<crate::canvas::CanvasState>,
+    /// What a shader draws under the content and children
+    /// ([`crate::shader`]).
+    pub(crate) shader: Option<crate::shader::ShaderState>,
     /// Text field (input views).
     pub(crate) input: Option<Rc<crate::text_input::InputState>>,
     /// Hosted items, drawn above the children.
@@ -201,6 +206,7 @@ impl ViewState {
             text: None,
             image: None,
             canvas: None,
+            shader: None,
             input: None,
             natives: Vec::new(),
             overflow: None,

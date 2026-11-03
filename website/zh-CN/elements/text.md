@@ -1,7 +1,7 @@
 ---
 title: Text
 description: 绘制文本的元素：嵌套片段、链接、行数限制、字体缩放、行内视图和文本布局事件。
-order: 3
+order: 20
 group: primitives
 demo: el-text
 ---
@@ -190,8 +190,8 @@ import Inter from "./fonts/Inter-Regular.ttf";
 | 事件 | Rust | 载荷 | 触发时机 |
 |---|---|---|---|
 | `onTextLayout` | | `{ lines: TextLayoutLine[] }` | 段落每次布局之后。 |
-| `onPress`、`onLongPress` 等 | `.on_press`、`.on_long_press` 等 | 无 | 与 [view](./view.md#事件) 相同；在片段上时，指按在其字符上的按压。 |
-| `onLayout` | `.on_layout` | `Bounds` | 文本块的 frame 发生变化。 |
+| `onPress`、`onLongPress` 等 | `.on_press`、`.on_long_press` 等 | `PressEvent`（Rust 中无） | 与 [view](./view.md#事件) 相同；在片段上时，指按在其字符上的按压。 |
+| `onLayout` | `.on_layout` | `{ bounds }` | 文本块的 frame 发生变化。 |
 
 `TextLayoutLine` 为 `{ text, x, y, width, height, ascender, descender, capHeight, xHeight }`，坐标位于文本的内容盒中：
 

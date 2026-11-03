@@ -63,6 +63,7 @@ fn launch(
         trace: false,
         network: None,
         websocket: None,
+        refuse_connections: None,
         filesystem: None,
         assets: None,
         environment: Environment::default(),
@@ -79,6 +80,7 @@ fn launch(
         clipboard: None,
         host: Default::default(),
         picker: None,
+        speech: None,
     };
     (
         Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap(),
@@ -115,7 +117,7 @@ setTimeout(async () => {
     Storage.removeItem("scratch");
     const keys = await Storage.keys();
     let full = "fits";
-    await Storage.setItem("big", "x".repeat(6 * 1024 * 1024)).catch(() => (full = "full"));
+    await Storage.setItem("big", "x".repeat(6 * 1024 * 1024)).catch((e) => (full = e.code));
     shown.set(`done ${launches} ${keys.join(",")} ${full} ${await Storage.getItem("missing")}`);
   } catch (e) {
     shown.set(`done error ${e}`);
@@ -133,7 +135,7 @@ fn entries_last_across_launches() {
         let (engine, rx) = start("counter", COUNTER, Some("{}"), &data);
         assert_eq!(
             shown(&rx, "done"),
-            format!("done {launch} launches full null")
+            format!("done {launch} launches ERR_NSH_QUOTA_EXCEEDED null")
         );
         // Stopping the engine drops the storage, which writes what is left.
         drop(engine);
@@ -160,7 +162,10 @@ fn Reader(_props: ReaderProps) -> impl IntoElement {
 fn rust_shares_the_entries_of_js() {
     let data = scratch("shared");
     let (engine, rx) = start("shared", COUNTER, None, &data);
-    assert_eq!(shown(&rx, "done"), "done 1 launches full null");
+    assert_eq!(
+        shown(&rx, "done"),
+        "done 1 launches ERR_NSH_QUOTA_EXCEEDED null"
+    );
     drop(engine);
     let (tx, rx) = crossbeam_channel::unbounded();
     let config = EngineConfig {
@@ -169,6 +174,7 @@ fn rust_shares_the_entries_of_js() {
         trace: false,
         network: None,
         websocket: None,
+        refuse_connections: None,
         filesystem: None,
         assets: None,
         environment: Environment::default(),
@@ -185,13 +191,17 @@ fn rust_shares_the_entries_of_js() {
         clipboard: None,
         host: Default::default(),
         picker: None,
+        speech: None,
     };
     let engine = Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap();
     assert_eq!(shown(&rx, "rust"), "rust saw 1 from_rust,launches");
     drop(engine);
     // And the JS sees what Rust wrote.
     let (_engine, rx) = start("shared-again", COUNTER, None, &data);
-    assert_eq!(shown(&rx, "done"), "done 3 from_rust,launches full null");
+    assert_eq!(
+        shown(&rx, "done"),
+        "done 3 from_rust,launches ERR_NSH_QUOTA_EXCEEDED null"
+    );
 }
 
 const EDGES: &str = r#"import { mount, signal, Text } from "nsh";
@@ -265,6 +275,7 @@ fn rust_edits_the_storage() {
         trace: false,
         network: None,
         websocket: None,
+        refuse_connections: None,
         filesystem: None,
         assets: None,
         environment: Environment::default(),
@@ -282,6 +293,7 @@ fn rust_edits_the_storage() {
         clipboard: None,
         host: Default::default(),
         picker: None,
+        speech: None,
     };
     let _engine = Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap();
     assert_eq!(shown(&rx, "rust"), "rust b true 0 true");
@@ -295,7 +307,10 @@ fn each_app_keeps_its_data_under_its_id() {
         ("notes", Some("com.example.notes")),
     ] {
         let (engine, rx) = launch(name, COUNTER, None, id, Some(&root), None);
-        assert_eq!(shown(&rx, "done"), "done 1 launches full null");
+        assert_eq!(
+            shown(&rx, "done"),
+            "done 1 launches ERR_NSH_QUOTA_EXCEEDED null"
+        );
         drop(engine);
     }
     // A second launch of one app finds its own data, not the other's.
@@ -307,7 +322,10 @@ fn each_app_keeps_its_data_under_its_id() {
         Some(&root),
         None,
     );
-    assert_eq!(shown(&rx, "done"), "done 2 launches full null");
+    assert_eq!(
+        shown(&rx, "done"),
+        "done 2 launches ERR_NSH_QUOTA_EXCEEDED null"
+    );
     drop(engine);
     // Without an id, or with one that is no directory name: `default`.
     for id in [None, Some("../escape")] {
@@ -341,6 +359,7 @@ fn a_rust_root_keeps_its_data_under_its_id() {
         trace: false,
         network: None,
         websocket: None,
+        refuse_connections: None,
         filesystem: None,
         assets: None,
         environment: Environment::default(),
@@ -357,6 +376,7 @@ fn a_rust_root_keeps_its_data_under_its_id() {
         clipboard: None,
         host: Default::default(),
         picker: None,
+        speech: None,
     };
     let engine = Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap();
     assert_eq!(shown(&rx, "rust"), "rust wrote");

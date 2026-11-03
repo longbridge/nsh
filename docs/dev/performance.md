@@ -2,7 +2,14 @@
 
 Performance is the project's first priority; the rules are in `AGENTS.md`. Changes to hot paths come with before /
 after `nsh test --trace` timings and item counts (`nsh trace` before it, in the records below). Current baselines
-(Apple Silicon):
+(Apple Silicon except where noted):
+
+Windows cursor refresh after a style batch, against main `a5036af4`, debug host, one native run per revision:
+`echo 'await app.press("+1")' | nsh test examples/counter/App.tsx --target windows --trace`.
+Both runs produce 56 ops / 50 mount items / 21 nodes initially and 10 ops / 7 mount items / 24 nodes after the press.
+Initial commits measured 1164 → 1139 µs; press commits 380 → 329 µs. These single samples establish unchanged work
+counts on the counter's unchanged-cursor path. A batch compares cursor values while applying view styles, then
+refreshes once if any changed; other batches skip the cursor hit test.
 
 
 Span test-id metadata (macOS arm64, debug CLI, three runs per revision against `e02b40f8`):
@@ -16,13 +23,14 @@ matching the item-count baseline below. Its minimum initial / press times were 3
 These noisy single-frame timings establish stable work counts rather than a speedup.
 
 
-`onMouseMove` (Desktop and web): Linux x86_64, debug CLI, five interleaved runs of
+The first `onMouseMove` (moves with a button down too, desktops and web; since merged with the hover moves into one
+`onMouseMove`): Linux x86_64, debug CLI, five interleaved runs of
 `echo 'await app.press("+1")' | nsh test examples/counter/App.tsx --trace`, against main `fd772aef`.
 The first commit stays at 56 ops / 49 mount items / 21 nodes; the press stays at 10 ops / 7 items / 24 nodes.
 Minimum first-commit times were 277 → 280 µs, press times 180 → 189 µs (medians 189 → 202 µs for the press).
 Cold-start timings varied widely (277–633 µs), so these runs establish unchanged work counts rather than a speedup.
 Without mouse listeners, each backend skips the new mouse hit test. Mouse moves share the existing 8 ms hover
-coalescing interval, with the latest coordinates kept independently per view and event kind.
+coalescing interval, with the latest coordinates kept independently per view and event kind (one kind since the merge).
 
 
 `Editor` and `DiffView` at 200 000 lines (15 MB of Rust, Linux x86_64, release CLI, headless, `--trace`; the apps
@@ -86,6 +94,15 @@ message or a due timer (7, none between pastes).
   3.85 → 4.09 ms; first-frame totals were 127.3 → 124.5 ms. These noisy single runs establish unchanged
   engine work counts, not a speedup or a measurement of Java touch dispatch. Passive feedback reuses the root's
   touch tracker; observers are picked at finger-down and cancelled when a native gesture takes over.
+- Android, animated values (Pixel 10 Pro, 120 Hz, release-dev host, the gallery's Animations demo with its three loops,
+  `simpleperf stat` over 10 s, three runs each): the UI thread runs ~4.09 G instructions before setting the camera
+  distance only when it moves and ~2.99 G after (-27%), its CPU time ~2.22 → ~2.04 s; `Mounter.outputs` gets 1000+
+  values a frame there (ART allocates the array as a large object), every bound value of the page, moved or not.
+  RenderThread is unchanged (~18.2 G).
+- Android, going back (Pixel 10 Pro, 120 Hz, dev host, Text → the gallery's index with the back button, `gfxinfo
+  framestats` over the 300 ms slide, three runs each): 23 → 33 frames, mean frame time ~35 → ~13 ms, RenderThread
+  issue ~12 → ~5.5 ms a frame once the slides move by whole pixels; after a back gesture's release ~13–19 → ~4–5 ms.
+  The first frame still records the index again (it was `INVISIBLE`): 20–44 ms of UI-thread drawing.
 - Android emulator (arm64, release): rebinding one gallery row while scrolling ~0.3–0.4ms (JS ~60µs); text costs per new
   text: `PrecomputedText` ~120µs, measure ~50µs, final layout reused. First gallery frame 20–50ms (noisy on the emulator).
 
@@ -215,6 +232,23 @@ message or a due timer (7, none between pastes).
   `<If>`, a 3-row `<Each>`) on both: bundle 886 B JS / 1.7 KB bytecode vs 14 KB / 19.6 KB, eval ~95µs vs ~390µs, tap
   median ~5µs vs ~14µs in JS, commit ~15µs vs ~22µs. Scrolling a 1000-row `List` (avatar, two texts, a bound color)
   6000 pt: ~77µs vs ~150µs of JS per rebinding frame, commit ~205µs vs ~276µs.
+
+## The browser engine (published web apps)
+
+Headless Chromium over CDP, a published package (`nsh package --target web`), 2026-10-28:
+
+- A call from app code into the runtime (a signal read or set, an element made) outside a Wasm entry costs ~1µs
+  however many values the app holds: the weak tracing runs at most every 100ms after the call
+  (`values.js` `schedule`), not inside it. With a full trace per call it cost ~0.11ms at 1 700 retained values and
+  ~1.2ms at 14 400 (a chat of 165 messages of 20 signals each), and a message pushed every second froze the page.
+- The gallery's DataTable demo, quotes ticking every 33ms and no scroll, 10s: the rows are read a row per call
+  (`JsHost::primitives`, op 49), ~220 000 value calls in 3s instead of ~8.7 million (a cell took five), script
+  ~2.65s instead of ~3.86s, main thread ~4.7s instead of ~5.95s, garbage collection ~52ms instead of ~162ms.
+- The same demo scrolled, the frame rate unlimited (`--disable-frame-rate-limit`): the animator sends every bound
+  value with each batch (the gallery's sidebar: ~69 canvas slots, ~26 transforms, ~7 opacities), and `nsh.js` writes
+  and draws only those that changed, and draws a canvas again when its size changes, not when it moves. The wheel,
+  300 steps of 30pt: main thread ~3.8s instead of ~4.5s, median frame ~9.2ms instead of ~12.2ms; its scroll bar
+  dragged 150 steps: script ~4.3ms per batch instead of ~5.6ms.
 
 ## The performance monitor (`nsh_engine::perf`)
 

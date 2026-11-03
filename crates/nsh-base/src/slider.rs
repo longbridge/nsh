@@ -3,13 +3,13 @@
 
 use nsh_core::{
     AccessibilityActionDef, AccessibilityValue,
-    element::{JsHost, JsIn, JsOwned, JsValue, PropError, Style, TsTypes},
+    element::{JsHost, JsIn, JsOwned, JsValue, PropError, Style, TsTypes, layout_rtl},
     geometry::{Along, Axis},
     prelude::*,
 };
 
 use crate::{
-    keys::bind_while,
+    keys::{bind_while, bind_while_directed},
     numeric::{self, Range},
 };
 
@@ -181,8 +181,9 @@ pub struct SliderProps {
     #[prop(default)]
     pub scale: Prop<SliderScale>,
     /// The direction of the track (default `"horizontal"`, `min` at the
-    /// left); a vertical slider has `min` at the bottom. Read when the
-    /// slider is made.
+    /// start: the left, the right in a right-to-left layout, where Left
+    /// raises the value and Right lowers it); a vertical slider has `min`
+    /// at the bottom. Read when the slider is made.
     #[prop(default = Axis::Horizontal)]
     pub axis: Prop<Axis>,
     /// No pointer, keyboard or screen reader changes; `disabled:` styles
@@ -263,8 +264,9 @@ enum Nudge {
     Max,
 }
 
-/// WAI-ARIA's slider keys (Right and Up raise, also on a vertical slider);
-/// arrows and pages repeat while held.
+/// WAI-ARIA's slider keys (Right and Up raise, also on a vertical slider;
+/// Left and Up on a horizontal one in a right-to-left layout, which has its
+/// `min` at the right); arrows and pages repeat while held.
 const KEYS: &[(&str, bool, Nudge)] = &[
     ("right", true, Nudge::Up),
     ("up", true, Nudge::Up),
@@ -305,9 +307,26 @@ struct Ctl {
     scale: Prop<SliderScale>,
     disabled: Prop<bool>,
     axis: Axis,
+    /// The track runs from the right: a horizontal slider in a
+    /// right-to-left layout.
+    mirrored: Memo<bool>,
     /// The indicator's frame in the track.
     rail: Stored<Bounds<Points>>,
     drag: Stored<Option<Drag>>,
+    /// The drag's value, shown from its first move until the app has
+    /// answered the drag's last change: the thumb and the range follow the
+    /// pointer in the same frame, natively, rather than after `onChange` has
+    /// gone through the app and come back as `value` (pointer-driven motion,
+    /// `docs/dev/animation.md`). After the drag's end the app's value shows
+    /// once it has handled every change ([`after_answer`]): a TSX app hears
+    /// the last move's change after the core has handled the release, so no
+    /// frame shows its answer to an earlier move; an app that kept another
+    /// value (or held the drag's) shows it.
+    pending: Signal<Option<SliderValue>>,
+    /// The slider's owner: the drag's value is let go of under it, so a
+    /// thumb that went with the drag (a range made a single value) does not
+    /// keep it.
+    owner: Owner,
     cx: Scope<SliderEvent>,
 }
 
@@ -322,9 +341,13 @@ impl Ctl {
         )
     }
 
-    /// The value shown (tracked).
+    /// The value shown (tracked): a drag's, else the app's, else its own.
     fn shown(self) -> SliderValue {
-        let raw = self.controlled.get().unwrap_or_else(|| self.own.get());
+        let raw = self
+            .pending
+            .get()
+            .or_else(|| self.controlled.get())
+            .unwrap_or_else(|| self.own.get());
         raw.held(&self.range())
     }
 
@@ -377,10 +400,14 @@ impl Ctl {
     }
 
     /// Points from the indicator's `min` end of `at`, a point in the
-    /// track (bottom up on a vertical slider).
+    /// track (bottom up on a vertical slider, right to left on a mirrored
+    /// one).
     fn along(self, at: Point<Points>) -> f64 {
         let rail = self.rail.get();
         f64::from(match self.axis {
+            Axis::Horizontal if self.mirrored.get_untracked() => {
+                (rail.origin.x + rail.size.width - at.x).0
+            }
             Axis::Horizontal => (at.x - rail.origin.x).0,
             Axis::Vertical => (rail.origin.y + rail.size.height - at.y).0,
         })
@@ -389,6 +416,7 @@ impl Ctl {
     /// How far a drag went toward `max`.
     fn offset(self, e: &ResponderEvent) -> f64 {
         f64::from(match self.axis {
+            Axis::Horizontal if self.mirrored.get_untracked() => -e.gesture.delta.x.0,
             Axis::Horizontal => e.gesture.delta.x.0,
             Axis::Vertical => -e.gesture.delta.y.0,
         })
@@ -472,6 +500,8 @@ impl Ctl {
         drag.value = next;
         self.drag.replace(Some(drag));
         if changed {
+            // Shown at once, natively: no wait for the app's `value`.
+            self.pending.set(Some(next));
             self.request(next);
         }
     }
@@ -482,6 +512,17 @@ impl Ctl {
             && drag.moved
         {
             self.cx.emit(SliderEvent::ChangeEnd(drag.value));
+        }
+        if self.pending.get_untracked().is_some() {
+            let (pending, drag) = (self.pending, self.drag);
+            self.owner.run(|| {
+                after_answer(move || {
+                    // A drag that started since shows its own value.
+                    if drag.get().is_none() {
+                        pending.set(None);
+                    }
+                });
+            });
         }
     }
 
@@ -519,6 +560,7 @@ impl Ctl {
 /// `hover:`, `active:` and `focus:`.
 #[component]
 pub fn Slider(props: SliderProps, cx: Scope<SliderEvent>) -> impl IntoElement {
+    let axis = props.axis.get_untracked();
     let ctl = Ctl {
         controlled: props.value,
         own: signal(props.default_value.get_untracked()),
@@ -527,22 +569,30 @@ pub fn Slider(props: SliderProps, cx: Scope<SliderEvent>) -> impl IntoElement {
         step: props.step,
         scale: props.scale,
         disabled: props.disabled,
-        axis: props.axis.get_untracked(),
+        axis,
+        mirrored: computed(move || axis == Axis::Horizontal && layout_rtl()),
         rail: stored(Bounds::default()),
         drag: stored(None),
+        pending: signal(None),
+        owner: Owner::current(),
         cx,
     };
+    // While a drag moves the thumbs and no screen reader runs, the value
+    // screen readers get waits for the drag's end: no props item per move.
+    let quiet = computed(move || ctl.pending.with(Option::is_some) && !screen_reader());
     let disabled = props.disabled;
     let focused = signal(None::<Thumb>);
-    bind_while(
-        move || focused.get().is_some(),
-        KEYS,
-        move |nudge| {
-            if let Some(thumb) = focused.get_untracked() {
-                ctl.nudge(thumb, nudge);
-            }
-        },
-    );
+    let nudge = move |nudge| {
+        if let Some(thumb) = focused.get_untracked() {
+            ctl.nudge(thumb, nudge);
+        }
+    };
+    // A horizontal slider runs along the reading direction, a vertical one
+    // keeps Right raising (WAI-ARIA's keys).
+    match axis {
+        Axis::Horizontal => bind_while_directed(move || focused.get().is_some(), KEYS, nudge),
+        Axis::Vertical => bind_while(move || focused.get().is_some(), KEYS, nudge),
+    }
     let thumb = move |which: Thumb| {
         let label = move || match which {
             Thumb::Start => props
@@ -555,6 +605,7 @@ pub fn Slider(props: SliderProps, cx: Scope<SliderEvent>) -> impl IntoElement {
             name: name.into(),
             label: None,
         };
+        let said = stored(None::<AccessibilityValue>);
         view()
             .absolute()
             .map(|v| match ctl.axis {
@@ -566,6 +617,7 @@ pub fn Slider(props: SliderProps, cx: Scope<SliderEvent>) -> impl IntoElement {
             .style_with(move |s| {
                 let f = ctl.fraction(which) as f32;
                 match ctl.axis {
+                    Axis::Horizontal if ctl.mirrored.get() => s.left(relative(1.0 - f)),
                     Axis::Horizontal => s.left(relative(f)),
                     Axis::Vertical => s.top(relative(1.0 - f)),
                 }
@@ -574,7 +626,16 @@ pub fn Slider(props: SliderProps, cx: Scope<SliderEvent>) -> impl IntoElement {
             .accessible(true)
             .role(AccessibilityRole::Adjustable)
             .optional_label(label)
-            .accessibility_value(move || Some(ctl.accessibility_value(which)))
+            .accessibility_value(move || {
+                if quiet.get()
+                    && let Some(value) = said.get()
+                {
+                    return Some(value);
+                }
+                let value = ctl.accessibility_value(which);
+                said.replace(Some(value.clone()));
+                Some(value)
+            })
             .accessibility_actions(vec![action("increment"), action("decrement")])
             .on_accessibility_action(move |name: &str| match name {
                 "increment" => ctl.nudge(which, Nudge::Up),
@@ -620,6 +681,9 @@ pub fn Slider(props: SliderProps, cx: Scope<SliderEvent>) -> impl IntoElement {
             };
             let end = ctl.fraction(Thumb::End) as f32;
             match ctl.axis {
+                Axis::Horizontal if ctl.mirrored.get() => {
+                    s.left(relative(1.0 - end)).right(relative(start))
+                }
                 Axis::Horizontal => s.left(relative(start)).right(relative(1.0 - end)),
                 Axis::Vertical => s.bottom(relative(start)).top(relative(1.0 - end)),
             }

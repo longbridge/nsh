@@ -19,6 +19,34 @@ use nsh_core::{
 use super::Headless;
 
 impl Headless {
+    /// The steps `keyboard.down(<keys>)` / `keyboard.up(<keys>)`: holds or
+    /// lets go of modifier keys (`"mod"`, `"shift"`, `"alt"`, `"ctrl"`,
+    /// `"meta"`, joined by `+`), which the presses, drags and hovers until
+    /// then carry, as a hand on the keyboard does while the pointer acts.
+    pub fn hold_keys(&mut self, keys: &str, down: bool) -> Result<(), String> {
+        self.step(format!(
+            "keyboard.{}({keys})",
+            if down { "down" } else { "up" }
+        ));
+        let apple = matches!(self.environment.os, Os::MacOs | Os::Ios);
+        for name in keys.split('+') {
+            let flag = match name.trim().to_ascii_lowercase().as_str() {
+                "mod" if apple => &mut self.held.cmd,
+                "mod" | "ctrl" | "control" => &mut self.held.ctrl,
+                "alt" | "option" => &mut self.held.alt,
+                "shift" => &mut self.held.shift,
+                "meta" | "cmd" | "command" => &mut self.held.cmd,
+                other => {
+                    return Err(format!(
+                        "`{other}` is no modifier key: mod, shift, alt, ctrl or meta"
+                    ));
+                }
+            };
+            *flag = down;
+        }
+        self.done()
+    }
+
     /// The step `keyboard.press(<keys>)`: presses `keys`, a keystroke as
     /// `nsh/keymap` names it (`"mod+k"`, `"shift+tab"`, `"escape"`; `mod` is
     /// the app's platform's command key). A binding of the app's keymap
@@ -137,6 +165,7 @@ impl Headless {
         let now = self.screen.focused();
         if now != focused {
             if let Some(old) = focused {
+                self.set_focused_state(old, false);
                 self.send(old, EventKind::Blur, EventPayload::None);
             }
             if let Some(new) = now {
@@ -146,6 +175,7 @@ impl Headless {
                     self.set_focused_state(key, false);
                     self.send(key, EventKind::Blur, EventPayload::None);
                 }
+                self.set_focused_state(new, true);
                 self.send(new, EventKind::Focus, EventPayload::None);
             }
         }
@@ -180,11 +210,12 @@ impl Headless {
         }
     }
 
-    /// A view's `focus:` state, which follows the keyboard focus.
-    fn set_focused_state(&mut self, id: NodeId, on: bool) {
-        if self.screen.input(id).is_none()
-            && let Some(states) = self.screen.set_state(id, FOCUSED, on)
-        {
+    /// A view's or an input's `focus:` state, which follows the keyboard
+    /// focus: reported whatever the view tracks, as the platforms report
+    /// it (`nsh_core::input::reported_states`; the core works out
+    /// `focus-within` from it).
+    pub(super) fn set_focused_state(&mut self, id: NodeId, on: bool) {
+        if let Some(states) = self.screen.set_state(id, FOCUSED, on) {
             self.engine.control().set_states(id, states);
         }
     }

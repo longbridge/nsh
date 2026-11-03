@@ -29,7 +29,12 @@ fn inline_color(patch: &StylePatch) -> Option<Color> {
 }
 
 /// The states the platform reports ([`Core::set_states`]).
-const REPORTED: u8 = state::PRESSED | state::HOVERED | state::FOCUSED;
+const REPORTED: u16 = state::PRESSED | state::HOVERED | state::FOCUSED;
+
+/// The states the platform reports whatever a view tracks
+/// ([`crate::input::reported_states`]): never forgotten when its tracking
+/// changes.
+const ALWAYS_REPORTED: u16 = state::FOCUSED;
 
 /// The `class` and `classList` props as set.
 #[derive(Debug, Default)]
@@ -56,6 +61,12 @@ pub(super) enum Part {
     Checked,
     /// `indeterminateStyle`.
     Indeterminate,
+    /// `expandedStyle`.
+    Expanded,
+    /// `pressedStyle`.
+    Pressed,
+    /// `focusWithinStyle`.
+    FocusWithin,
     /// A page's `headerStyle` / `headerClass`.
     Header,
     /// A list's `contentClass`.
@@ -64,7 +75,7 @@ pub(super) enum Part {
 
 impl Part {
     /// The state bits and rank of a state style.
-    fn state(self) -> Option<(u8, crate::tailwind::Key)> {
+    fn state(self) -> Option<(u16, crate::tailwind::Key)> {
         Some(match self {
             Part::Active => (state::PRESSED, rank::ACTIVE),
             Part::Hover => (state::HOVERED, rank::HOVER),
@@ -73,6 +84,9 @@ impl Part {
             Part::Selected => (state::SELECTED, rank::SELECTED),
             Part::Checked => (state::CHECKED, rank::CHECKED),
             Part::Indeterminate => (state::INDETERMINATE, rank::INDETERMINATE),
+            Part::Expanded => (state::EXPANDED, rank::EXPANDED),
+            Part::Pressed => (state::ARIA_PRESSED, rank::ARIA_PRESSED),
+            Part::FocusWithin => (state::FOCUS_WITHIN, rank::FOCUS_WITHIN),
             _ => return None,
         })
     }
@@ -83,8 +97,8 @@ impl Part {
 pub(super) struct NodeParts {
     /// The classes as set, before the state styles are merged in.
     base: Option<std::rc::Rc<ClassList>>,
-    /// The state styles, by [`Part`] (the first seven).
-    states: [Option<std::rc::Rc<StylePatch>>; 7],
+    /// The state styles, by [`Part`] (the first ten).
+    states: [Option<std::rc::Rc<StylePatch>>; 10],
     /// The state styles as rules (none without any).
     state_rules: Option<std::rc::Rc<ClassList>>,
     /// The inline styles of the other parts.
@@ -93,8 +107,34 @@ pub(super) struct NodeParts {
     classes: Vec<(Part, std::rc::Rc<ClassList>)>,
 }
 
+/// The [`state`] bits an element is in by its accessibility state `s`:
+/// selected, checked (true), indeterminate (checked mixed), expanded,
+/// pressed (true: a toggle button that is on) and busy.
+pub(super) fn accessibility_states(s: &crate::AccessibilityState) -> u16 {
+    use crate::Checked;
+    let mut states = 0;
+    if s.selected {
+        states |= state::SELECTED;
+    }
+    match s.checked {
+        Some(Checked::True) => states |= state::CHECKED,
+        Some(Checked::Mixed) => states |= state::INDETERMINATE,
+        _ => {}
+    }
+    if s.expanded == Some(true) {
+        states |= state::EXPANDED;
+    }
+    if s.pressed == Some(Checked::True) {
+        states |= state::ARIA_PRESSED;
+    }
+    if s.busy {
+        states |= state::BUSY;
+    }
+    states
+}
+
 /// The state style parts, by their index in [`NodeParts::states`].
-const STATE_PARTS: [Part; 7] = [
+const STATE_PARTS: [Part; 10] = [
     Part::Active,
     Part::Hover,
     Part::Focus,
@@ -102,6 +142,9 @@ const STATE_PARTS: [Part; 7] = [
     Part::Selected,
     Part::Checked,
     Part::Indeterminate,
+    Part::Expanded,
+    Part::Pressed,
+    Part::FocusWithin,
 ];
 
 impl<M: TextEngine> Core<M> {
@@ -124,7 +167,7 @@ impl<M: TextEngine> Core<M> {
     }
 
     /// The appearance the app asks for (`nsh.json` `"appearance"`, TS
-    /// `setColorScheme`, [`crate::element::ambient::set_color_scheme`]): what
+    /// `setColorScheme`, [`crate::element::set_color_scheme`]): what
     /// `dark:` variants and the components' theme follow in place of the
     /// system's; the platform applies it to its own controls
     /// ([`MountItem::Appearance`]).
@@ -159,14 +202,16 @@ impl<M: TextEngine> Core<M> {
 
     /// The platform reports interaction states of view `id` (`active:`,
     /// `hover:`, `focus:`): state bits for the states it
-    /// tracks ([`MountItem::TrackStates`]); see [`crate::tailwind::state`].
-    pub fn set_states(&mut self, id: NodeId, states: u8) {
+    /// tracks ([`MountItem::TrackStates`]), and `FOCUSED` whatever it
+    /// tracks ([`crate::input::reported_states`]); see
+    /// [`crate::tailwind::state`].
+    pub fn set_states(&mut self, id: NodeId, states: u16) {
         let Ok(key) = self.key(id) else { return };
         self.set_node_states(key, states);
     }
 
     /// [`Self::set_states`] by key.
-    fn set_node_states(&mut self, key: Key, states: u8) {
+    fn set_node_states(&mut self, key: Key, states: u16) {
         let held = self.held_pressed() == Some(key);
         let node = &mut self.nodes[key as usize];
         let mut new = node.states & !REPORTED | states & REPORTED;
@@ -180,24 +225,89 @@ impl<M: TextEngine> Core<M> {
         node.states = new;
         self.states_changed(key);
         if focus_changed {
-            // `focus-within:` on the node and its ancestors.
-            let focused = new & state::FOCUSED != 0;
-            let mut k = key;
+            self.focus_reported(key, new & state::FOCUSED != 0);
+        }
+    }
+
+    /// View `key` took (or lost) the keyboard focus. A surface has one: a
+    /// view taking it is the focus whether or not the one before reported
+    /// losing it yet, and a view losing it that is not the focus changes
+    /// nothing. The chain is worked out in the next commit round, once for
+    /// all the reports before it, so a move reported as a blur then a
+    /// focus leaves the views both chains share as they were. The root
+    /// view taking it (macOS's first responder when no view has it) is no
+    /// focus.
+    fn focus_reported(&mut self, key: Key, focused: bool) {
+        let id = self.nodes[key as usize].id;
+        if focused {
+            self.focus = (key != self.root).then_some((key, id));
+        } else if self.focus == Some((key, id)) {
+            self.focus = None;
+        } else {
+            return;
+        }
+        self.focus_moved = true;
+    }
+
+    /// Puts `focus-within` on the focus and the views around it, and takes
+    /// it off the views it left (those first, then the new ones): the old
+    /// chain and the new one are walked, nothing else, and the views on
+    /// both are not touched. The views around are the parents in the core's tree,
+    /// where an overlay is its parent's child (whatever root view shows
+    /// it), so the focus in a popup is within the view the popup's overlay
+    /// is in, as in a React portal.
+    pub(super) fn update_focus_within(&mut self) {
+        self.focus_moved = false;
+        let focus = self
+            .focus
+            .filter(|&(k, id)| self.nodes.get(k as usize).is_some_and(|n| n.id == id));
+        if focus.is_none() {
+            self.focus = None;
+        }
+        let mut chain = std::mem::take(&mut self.focus_scratch);
+        chain.clear();
+        if let Some((mut k, _)) = focus {
             while k != NO_KEY {
-                let node = &mut self.nodes[k as usize];
-                let before = node.states;
-                if focused {
-                    node.states |= state::FOCUS_WITHIN;
-                } else {
-                    node.states &= !state::FOCUS_WITHIN;
-                }
-                let parent = node.parent;
-                if node.states != before && k != key {
-                    self.states_changed(k);
-                }
-                k = parent;
+                let node = &self.nodes[k as usize];
+                chain.push((k, node.id));
+                k = node.parent;
             }
         }
+        if chain == self.focus_chain {
+            self.focus_scratch = chain;
+            return;
+        }
+        let old = std::mem::replace(&mut self.focus_chain, chain);
+        for &(k, id) in &old {
+            if self.focus_chain.contains(&(k, id)) {
+                continue;
+            }
+            // A view released since (its key perhaps another's now).
+            let Some(node) = self.nodes.get_mut(k as usize).filter(|n| n.id == id) else {
+                continue;
+            };
+            if node.states & state::FOCUS_WITHIN != 0 {
+                node.states &= !state::FOCUS_WITHIN;
+                self.states_changed(k);
+            }
+        }
+        for i in 0..self.focus_chain.len() {
+            let k = self.focus_chain[i].0;
+            let node = &mut self.nodes[k as usize];
+            if node.states & state::FOCUS_WITHIN == 0 {
+                node.states |= state::FOCUS_WITHIN;
+                self.states_changed(k);
+            }
+        }
+        self.focus_scratch = old;
+        self.focus_within_changed = true;
+    }
+
+    /// Whether the keyboard focus is on view `id` or a view inside it
+    /// (`focus-within`; an overlay is inside the view the app put it in).
+    pub(super) fn has_focus_within(&self, id: NodeId) -> bool {
+        self.key(id)
+            .is_ok_and(|k| self.nodes[k as usize].states & state::FOCUS_WITHIN != 0)
     }
 
     /// The node whose pressed state the touch responder holds.
@@ -265,57 +375,46 @@ impl<M: TextEngine> Core<M> {
         }
     }
 
-    /// `selected` of `key`'s accessibility state: the `selected:` variant.
-    pub(super) fn set_selected(&mut self, key: Key, selected: bool) {
+    /// The states `key`'s accessibility state puts it in
+    /// ([`accessibility_states`]): the `selected:`, `checked:`,
+    /// `indeterminate:` and `aria-*:` variants.
+    pub(super) fn set_accessibility_states(&mut self, key: Key, states: u16) {
         let node = &mut self.nodes[key as usize];
-        let before = node.states;
-        if selected {
-            node.states |= state::SELECTED;
-        } else {
-            node.states &= !state::SELECTED;
-        }
-        if node.states != before {
-            self.states_changed(key);
-        }
-    }
-
-    /// `checked` of `key`'s accessibility state (true, not mixed): the
-    /// `checked:` variant.
-    pub(super) fn set_checked(&mut self, key: Key, checked: bool) {
-        let node = &mut self.nodes[key as usize];
-        let before = node.states;
-        if checked {
-            node.states |= state::CHECKED;
-        } else {
-            node.states &= !state::CHECKED;
-        }
-        if node.states != before {
-            self.states_changed(key);
-        }
-    }
-
-    /// `checked` of `key`'s accessibility state is mixed: the
-    /// `indeterminate:` variant.
-    pub(super) fn set_indeterminate(&mut self, key: Key, indeterminate: bool) {
-        let node = &mut self.nodes[key as usize];
-        let before = node.states;
-        if indeterminate {
-            node.states |= state::INDETERMINATE;
-        } else {
-            node.states &= !state::INDETERMINATE;
-        }
-        if node.states != before {
+        let now = (node.states & !state::ACCESSIBILITY) | states;
+        if node.states != now {
+            node.states = now;
             self.states_changed(key);
         }
     }
 
     /// The states `key` shows as a part of a control: its classes and
     /// state styles read them, its events and accessibility do not.
-    pub(super) fn set_projected_states(&mut self, key: Key, states: u8) {
+    pub(super) fn set_projected_states(&mut self, key: Key, states: u16) {
         let node = &mut self.nodes[key as usize];
         if node.projected != states {
             node.projected = states;
             self.states_changed(key);
+        }
+    }
+
+    /// The `data-*` attributes `key` shows as a part of a component
+    /// (`Prop::ProjectedData`): its `data-*:` classes read them, and the
+    /// `group-data-*:` classes inside it when it is a group. A node whose
+    /// classes read none sends nothing.
+    pub(super) fn set_projected_data(&mut self, key: Key, data: Box<[&'static str]>) {
+        let node = &mut self.nodes[key as usize];
+        if node.data == data {
+            return;
+        }
+        node.data = data;
+        let Some(classes) = node.classes.clone() else {
+            return;
+        };
+        if classes.deps() & deps::DATA != 0 {
+            self.restyle(key);
+        }
+        if !classes.groups().is_empty() {
+            self.restyle_subtree(key, deps::GROUP);
         }
     }
 
@@ -640,6 +739,25 @@ impl<M: TextEngine> Core<M> {
         }
     }
 
+    /// How long the transitions of view `id` run, its delay included, with
+    /// its styles now (a component waiting for its exit,
+    /// [`crate::element::ElementRef::transition_time`]); zero for a view
+    /// with none, or gone.
+    pub(super) fn transition_time(&self, id: NodeId) -> std::time::Duration {
+        let Ok(key) = self.key(id) else {
+            return std::time::Duration::ZERO;
+        };
+        self.nodes[key as usize]
+            .view_style
+            .transition
+            .filter(|t| t.properties.0 != 0)
+            .map_or(std::time::Duration::ZERO, |t| {
+                std::time::Duration::from_secs_f32(
+                    (t.duration.max(0.0) + t.delay.max(0.0)) / 1000.0,
+                )
+            })
+    }
+
     /// Replaces the theme: every class is resolved again.
     pub(super) fn set_tailwind_theme(&mut self, json: &str) {
         let theme = match Theme::from_json(json) {
@@ -716,15 +834,22 @@ impl<M: TextEngine> Core<M> {
     /// Tells the platform which states of `key` to report.
     pub(super) fn update_tracking(&mut self, key: Key) {
         let node = &mut self.nodes[key as usize];
-        let tracked = node.classes.as_ref().map_or(0, |c| c.tracked_states());
+        // `focus-within` is the core's own (`update_focus_within`): the
+        // platform reports only the states of the view itself.
+        let tracked = node
+            .classes
+            .as_ref()
+            .map_or(0, |c| c.tracked_states() & REPORTED);
         if tracked != node.tracked {
             node.tracked = tracked;
             // The platform stops reporting the states it no longer tracks,
             // and keeps the rest as they are: forget them here too, or a
             // state set before (a hover, a press) would outlive the pointer
-            // and come back when the classes read it again.
-            let stale = node.states & REPORTED & !tracked;
-            let states = node.states & REPORTED & tracked;
+            // and come back when the classes read it again. The focus it
+            // reports always, so it stays.
+            let kept = tracked | ALWAYS_REPORTED;
+            let stale = node.states & REPORTED & !kept;
+            let states = node.states & REPORTED & kept;
             if node.created {
                 let id = node.id;
                 self.mount.push(MountItem::TrackStates {
@@ -799,7 +924,7 @@ impl<M: TextEngine> Core<M> {
                 return;
             }
             let n = &self.nodes[k as usize];
-            if n.states | n.projected != 0
+            if (n.states | n.projected != 0 || !n.data.is_empty())
                 && n.classes.as_ref().is_some_and(|c| !c.groups().is_empty())
             {
                 break;
@@ -844,9 +969,7 @@ impl<M: TextEngine> Core<M> {
             .children
             .iter()
             .copied()
-            .filter(|&c| {
-                self.nodes[c as usize].kind != Kind::RawText && !self.is_tooltip_overlay(c)
-            })
+            .filter(|&c| self.is_element_child(c))
             .collect();
         let i = siblings.iter().position(|&c| c == key).unwrap_or(0);
         let n = siblings.len();
@@ -868,7 +991,7 @@ impl<M: TextEngine> Core<M> {
     }
 
     /// The states of the nearest ancestor of `key` that is group `name`.
-    fn group_states(&self, key: Key, name: &str) -> u8 {
+    fn group_states(&self, key: Key, name: &str) -> u16 {
         let mut k = self.nodes[key as usize].parent;
         while k != NO_KEY {
             let node = &self.nodes[k as usize];
@@ -882,6 +1005,24 @@ impl<M: TextEngine> Core<M> {
             k = node.parent;
         }
         0
+    }
+
+    /// The `data-*` attributes of the nearest ancestor of `key` that is
+    /// group `name`.
+    fn group_data(&self, key: Key, name: &str) -> &[&'static str] {
+        let mut k = self.nodes[key as usize].parent;
+        while k != NO_KEY {
+            let node = &self.nodes[k as usize];
+            if node
+                .classes
+                .as_ref()
+                .is_some_and(|c| c.groups().iter().any(|g| **g == *name))
+            {
+                return &node.data;
+            }
+            k = node.parent;
+        }
+        &[]
     }
 
     /// The margins `key`'s parent gives it (`space-*`): it is an element
@@ -906,9 +1047,10 @@ impl<M: TextEngine> Core<M> {
     }
 
     /// A child that counts among its siblings (`:last-child`, `first:`):
-    /// not a raw text, not a tooltip's overlay.
+    /// not a raw text, a tooltip's overlay or a scroll view's built-in bar.
     fn is_element_child(&self, key: Key) -> bool {
-        self.nodes[key as usize].kind != Kind::RawText && !self.is_tooltip_overlay(key)
+        let node = &self.nodes[key as usize];
+        node.kind != Kind::RawText && !node.decoration && !self.is_tooltip_overlay(key)
     }
 
     /// `parent`'s children changed (`moved` joined it, or one left): the
@@ -1098,6 +1240,10 @@ impl<M: TextEngine> Core<M> {
         let node = &self.nodes[key as usize];
         if let Some(classes) = node.classes.clone() {
             let group = |name: &str| self.group_states(key, name);
+            let data = |group: Option<&str>, name: &str| match group {
+                None => node.data.contains(&name),
+                Some(group) => self.group_data(key, group).contains(&name),
+            };
             let pos = if classes.deps() & deps::POSITION != 0 {
                 self.position_bits(key)
             } else {
@@ -1121,16 +1267,25 @@ impl<M: TextEngine> Core<M> {
                 inherited: node.inherited_color,
                 inline: inline_color(inline),
             };
-            let text_color = classes.current_color(&cx, current);
+            let text_color = classes.current_color(&cx, &data, current);
             inline.apply_defaults(style, text_color);
             let rtl = cx.rtl;
-            classes.apply_with(&cx, self.tailwind.theme(), current, ch, style, props, |s| {
-                inline.apply(s);
-                s.apply_current_color(text_color);
-                if let Some(space) = self.space_of(key) {
-                    space.apply(s, true, rtl);
-                }
-            });
+            classes.apply_with(
+                &cx,
+                &data,
+                self.tailwind.theme(),
+                current,
+                ch,
+                style,
+                props,
+                |s| {
+                    inline.apply(s);
+                    s.apply_current_color(text_color);
+                    if let Some(space) = self.space_of(key) {
+                        space.apply(s, true, rtl);
+                    }
+                },
+            );
             if positional {
                 let parent = self.nodes[key as usize].parent;
                 self.nodes[parent as usize].positional_children = true;

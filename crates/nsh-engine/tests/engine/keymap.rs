@@ -48,6 +48,7 @@ fn start(app: &str) -> (Engine, Receiver<MountBatch>) {
         trace: false,
         network: None,
         websocket: None,
+        refuse_connections: None,
         filesystem: None,
         assets: None,
         environment: Environment {
@@ -67,6 +68,7 @@ fn start(app: &str) -> (Engine, Receiver<MountBatch>) {
         clipboard: None,
         host: Default::default(),
         picker: None,
+        speech: None,
     };
     (
         Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap(),
@@ -122,11 +124,11 @@ for (const k of ["cmd+kk", "mod+q"]) {
 }
 say(errors.join(" | "));
 
-keymap.bind("mod+k", (k) => say(`k ${k}`));
-keymap.bind({ "mod+s": (k) => say(`saved ${k}`), "escape": (k) => say(`esc ${k}`) }, { when: "always" });
+keymap.bind("mod+k", ({ keystroke: k }) => say(`k ${k}`));
+keymap.bind({ "mod+s": ({ keystroke: k }) => say(`saved ${k}`), "escape": ({ keystroke: k }) => say(`esc ${k}`) }, { when: "always" });
 keymap.bind("alt+down", () => {}, { repeat: true });
 // Any case; the handler gets the keystroke as written.
-keymap.bind("Mod+Shift+J", (k) => say(`written ${k}`));
+keymap.bind("Mod+Shift+J", ({ keystroke: k }) => say(`written ${k}`));
 
 function Panel() {
   keymap.bind("mod+p", () => say("panel"));

@@ -34,6 +34,7 @@ mod decor;
 #[cfg(feature = "dev")]
 pub mod dev;
 mod file_drop;
+mod file_requests;
 mod fps;
 mod geom;
 mod gfx;
@@ -47,6 +48,7 @@ mod picker;
 mod render;
 mod scroll;
 mod selectable_view;
+mod shader;
 mod surface;
 #[cfg(feature = "dev")]
 mod synth;
@@ -66,7 +68,10 @@ pub use windows;
 #[cfg(feature = "dev")]
 pub use crate::app::set_root;
 pub use crate::{
-    app::{AppOptions, AppSource, AppView, debug_output, fatal_error, run_app, set_ui_sets},
+    app::{
+        AppOptions, AppSource, AppView, debug_output, fatal_error, run_app, set_components,
+        set_ui_sets,
+    },
     image::AssetBase,
-    native::{ComponentContext, ComponentFactory, Components, NativeComponent},
+    native::{ComponentContext, ComponentFactory, Components, NativeComponent, Wheel},
 };

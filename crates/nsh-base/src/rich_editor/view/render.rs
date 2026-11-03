@@ -24,24 +24,28 @@ use super::{
     geometry::{DOC, InlineMap, Run},
     node_view::{MarkView, NodeView, NodeViewCx},
     parts::{self, Part},
+    table,
 };
 use crate::{
     input,
     rich_editor::{
         model::{Mark, Node, utf16_len},
         state::{Decoration, DecorationKind},
+        tables::{CellSelection, TableRole, table_role},
     },
     theme,
 };
 
 /// The caret's width.
-const CARET_WIDTH: f32 = 2.0;
+const CARET_WIDTH: f32 = 1.5;
+/// The height of the sink, the native input that takes typed text.
+const SINK_HEIGHT: f32 = 16.0;
 
 /// The gap cursor's width (prosemirror-gapcursor's).
 const GAP_WIDTH: f32 = 20.0;
 
 /// `el` with part `part`'s classes and style.
-fn part<E: Element>(el: E, rv: &Rv, part: Part) -> E {
+pub(crate) fn part<E: Element>(el: E, rv: &Rv, part: Part) -> E {
     let props = rv.props;
     el.app_class(move || props.classes.with(|c| c.part(part).cloned()))
         .inline_style(move || {
@@ -79,6 +83,7 @@ pub(crate) fn render(rv: Rv) -> impl IntoElement {
             .flex_1()
             .on_scroll(move |e: &ScrollEvent| {
                 scroll_rv.scroll_y.set(e.offset.y);
+                scroll_rv.scrolled.set(e.offset.y);
                 scroll_rv.viewport.set(e.size);
             })
             .on_layout(move |b: &Bounds<Points>| layout_rv.viewport.set(b.size))
@@ -91,11 +96,16 @@ pub(crate) fn render(rv: Rv) -> impl IntoElement {
 fn content(rv: Rv) -> impl IntoElement {
     let desktop = is_desktop();
     let (down, tap, mov, up, end) = (rv.clone(), rv.clone(), rv.clone(), rv.clone(), rv.clone());
+    let over = rv.clone();
+    let placed = rv.clone();
     let height = rv.content_height;
     part(
         view()
             .element_ref(&rv.content)
-            .on_layout(move |b: &Bounds<Points>| height.set(b.size.height))
+            .on_layout(move |b: &Bounds<Points>| {
+                height.set(b.size.height);
+                placed.place();
+            })
             .relative()
             .cursor(Cursor::Text),
         &rv,
@@ -104,6 +114,12 @@ fn content(rv: Rv) -> impl IntoElement {
     .on(EventKind::PressDown, move |p: &EventPayload| {
         if let (true, EventPayload::Press(e)) = (desktop, p) {
             down.press(e.position, e.page_position, e.modifiers, e.clicks.max(1));
+        }
+    })
+    // Where the pointer is, for drags the app starts from a page point.
+    .on(EventKind::MouseMove, move |p: &EventPayload| {
+        if let EventPayload::Mouse(e) = p {
+            over.note_pointer(e.position, e.page_position);
         }
     })
     .on(EventKind::Press, move |p: &EventPayload| {
@@ -126,10 +142,10 @@ fn content(rv: Rv) -> impl IntoElement {
     .on_responder_terminate(move |_: &ResponderEvent| end.release())
     .child(selection_rects(rv.clone()))
     .child(blocks(rv.clone(), DOC))
+    .child(table::controls(rv.clone()))
     .child(gap_cursor(rv.clone()))
     .child(drop_cursor(rv.clone()))
     .child(caret(rv.clone()))
-    .child(composition(rv.clone()))
     .children(bubble_menu(rv))
 }
 
@@ -262,6 +278,13 @@ fn block(rv: Rv, item: ReadSignal<BlockItem>) -> AnyElement {
         Some(_) => wrapper.relative().child(marker(rv.clone(), item)),
         None => wrapper,
     };
+    // Tables are grids of their cells (`table.rs`).
+    let wrapper = match (table_role(first.node.ty()), &kind) {
+        (_, Kind::View(_)) => wrapper,
+        (Some(TableRole::Table), _) => table::grid(wrapper, &rv, item),
+        (Some(TableRole::Cell | TableRole::HeaderCell), _) => table::cell(wrapper, &rv, item),
+        _ => wrapper,
+    };
     let task = render_kind(&first.node) == Some("task");
     let content = match kind {
         Kind::View(view) => Some(node_view_block(rv.clone(), item, view).into_element()),
@@ -328,8 +351,10 @@ fn task_checkbox(rv: Rv, item: ReadSignal<BlockItem>) -> impl IntoElement {
             .unwrap_or(false)
     };
     let press_rv = rv.clone();
-    // The part is the checkbox's box; the checkbox fills it.
+    // The part is the checkbox's box; the checkbox fills it. The box
+    // follows the item's state, so the app's `checked:` classes show it.
     view()
+        .project_checked(checked)
         .app_class(move || props.classes.with(|c| c.part(Part::TaskCheckbox).cloned()))
         .inline_style(move || {
             props
@@ -398,9 +423,9 @@ fn marker_kind(node: &Node) -> Option<ListMarker> {
 }
 
 /// The text of `it`'s marker: a bullet by its depth among bulleted lists
-/// (disc, circle, square, as a browser draws them), or its number from
+/// (disc, circle, square, around again deeper), or its number from
 /// the list's start (`extra.listMarkerStart` names that attribute,
-/// `order` by default).
+/// `order` by default; 1., a., i. by depth).
 fn marker_text(rv: &Rv, it: &BlockItem) -> Option<String> {
     let state = rv.st.borrow();
     let at = state.doc().resolve(it.pos).ok()?;
@@ -415,22 +440,66 @@ fn marker_text(rv: &Rv, it: &BlockItem) -> Option<String> {
                 .and_then(Value::as_str)
                 .unwrap_or("start");
             let start = list.attrs().get(attr).and_then(Value::as_i64).unwrap_or(1);
-            Some(format!("{}.", start + at.index(at.depth) as i64))
+            let n = start + at.index(at.depth) as i64;
+            // Nested numbered lists count 1., a., i. in turn, as Google Docs
+            // and Notion do, so each level reads apart.
+            let depth = (0..at.depth)
+                .filter(|&d| marker_kind(at.node(d)) == Some(ListMarker::Ordered))
+                .count();
+            let label = match (depth % 3, n) {
+                (1, 1..) => alpha(n as u64),
+                (2, 1..) => roman(n as u64),
+                _ => n.to_string(),
+            };
+            Some(format!("{label}."))
         }
         ListMarker::Bullet => {
             let depth = (0..at.depth)
                 .filter(|&d| marker_kind(at.node(d)) == Some(ListMarker::Bullet))
                 .count();
-            Some(
-                match depth {
-                    0 => "•",
-                    1 => "◦",
-                    _ => "▪",
-                }
-                .to_owned(),
-            )
+            // Disc, circle, square, and around again deeper down.
+            Some(["•", "◦", "▪"][depth % 3].to_owned())
         }
     }
+}
+
+/// `n` in lower-case letters: a … z, aa, ab, ….
+fn alpha(mut n: u64) -> String {
+    let mut out = Vec::new();
+    while n > 0 {
+        n -= 1;
+        out.push(b'a' + (n % 26) as u8);
+        n /= 26;
+    }
+    out.reverse();
+    String::from_utf8(out).unwrap_or_default()
+}
+
+/// `n` in lower-case Roman numerals.
+fn roman(mut n: u64) -> String {
+    const DIGITS: [(u64, &str); 13] = [
+        (1000, "m"),
+        (900, "cm"),
+        (500, "d"),
+        (400, "cd"),
+        (100, "c"),
+        (90, "xc"),
+        (50, "l"),
+        (40, "xl"),
+        (10, "x"),
+        (9, "ix"),
+        (5, "v"),
+        (4, "iv"),
+        (1, "i"),
+    ];
+    let mut out = String::new();
+    for (value, digits) in DIGITS {
+        while n >= value {
+            out.push_str(digits);
+            n -= value;
+        }
+    }
+    out
 }
 
 /// A list item's marker: in the indent before its content, its end
@@ -546,10 +615,18 @@ enum Piece {
         marks: Vec<Mark>,
         classes: Vec<String>,
     },
-    /// An inline leaf node at `offset` of the content.
-    Leaf { node: Node, offset: usize },
+    /// An inline leaf node at `offset` of the content, drawn as `text`
+    /// where it has one ([`Rv::leaf_text`]).
+    Leaf {
+        node: Node,
+        offset: usize,
+        text: Option<String>,
+    },
     /// A widget decoration (its `class`).
     Widget { class: Option<String> },
+    /// What an input method is composing at the caret, before the
+    /// document holds it: drawn in the line, in its block's typography.
+    Composition { text: String },
     /// What keeps an empty textblock a line high.
     Filler,
 }
@@ -562,14 +639,22 @@ struct Inline {
 }
 
 /// The pieces of textblock `node` whose content starts at `start`, under
-/// `decorations`.
-fn inline_of(node: &Node, start: usize, decorations: &[Decoration]) -> Inline {
+/// `decorations`, with `composition` (its position and text) where it is
+/// in the block; `leaf_text` is the text an inline leaf is drawn as.
+fn inline_of(
+    node: &Node,
+    start: usize,
+    decorations: &[Decoration],
+    composition: Option<(usize, &str)>,
+    leaf_text: impl Fn(&Node) -> Option<String>,
+) -> Inline {
     let size = node.content().size();
     let end = start + size;
     // Where inline decorations start and end, and widgets sit.
     let mut cuts: Vec<usize> = Vec::new();
     let mut inline: Vec<(usize, usize, Option<String>)> = Vec::new();
-    let mut widgets: Vec<(usize, i32, Option<String>)> = Vec::new();
+    // A widget's class, or the composition's text.
+    let mut widgets: Vec<(usize, i32, Result<Option<String>, String>)> = Vec::new();
     for d in decorations {
         match &d.kind {
             DecorationKind::Inline { attrs, .. }
@@ -585,16 +670,26 @@ fn inline_of(node: &Node, start: usize, decorations: &[Decoration]) -> Inline {
                 widgets.push((
                     at,
                     *side,
-                    d.spec
+                    Ok(d.spec
                         .get("class")
                         .and_then(Value::as_str)
-                        .map(str::to_owned),
+                        .map(str::to_owned)),
                 ));
             }
             _ => {}
         }
     }
-    widgets.sort_by_key(|w| (w.0, w.1));
+    // After the caret's position, so the caret (and the input method's
+    // candidates at it) stays at the composition's start.
+    if let Some((pos, text)) = composition
+        && pos >= start
+        && pos <= end
+        && !text.is_empty()
+    {
+        cuts.push(pos - start);
+        widgets.push((pos - start, i32::MAX, Err(text.to_owned())));
+    }
+    crate::sort::sort_by_key(&mut widgets, |w| (w.0, w.1));
     let mut out = Inline::default();
     let mut text_at = 0u32;
     let mut emitted = 0usize;
@@ -602,16 +697,23 @@ fn inline_of(node: &Node, start: usize, decorations: &[Decoration]) -> Inline {
         while emitted < widgets.len()
             && (widgets[emitted].0 < upto || (inclusive && widgets[emitted].0 == upto))
         {
-            let (at, side, class) = widgets[emitted].clone();
-            out.pieces.push(Piece::Widget { class });
+            let (at, side, kind) = widgets[emitted].clone();
+            let len = match &kind {
+                Ok(_) => 1,
+                Err(text) => utf16_len(text) as u32,
+            };
+            out.pieces.push(match kind {
+                Ok(class) => Piece::Widget { class },
+                Err(text) => Piece::Composition { text },
+            });
             out.map.runs.push(Run {
                 doc: at,
                 doc_len: 0,
                 text: *text_at,
-                text_len: 1,
+                text_len: len,
                 side,
             });
-            *text_at += 1;
+            *text_at += len;
             emitted += 1;
         }
     };
@@ -656,17 +758,20 @@ fn inline_of(node: &Node, start: usize, decorations: &[Decoration]) -> Inline {
             }
             None => {
                 emit_widgets(&mut out, &mut text_at, offset, true);
+                let text = leaf_text(child);
+                let units = text.as_deref().map_or(len, utf16_len) as u32;
                 out.map.runs.push(Run {
                     doc: offset,
                     doc_len: len,
                     text: text_at,
-                    text_len: len as u32,
+                    text_len: units,
                     side: 0,
                 });
-                text_at += len as u32;
+                text_at += units;
                 out.pieces.push(Piece::Leaf {
                     node: child.clone(),
                     offset,
+                    text,
                 });
             }
         }
@@ -705,7 +810,17 @@ fn text_block(rv: Rv, item: ReadSignal<BlockItem>, owner: u64) -> impl IntoEleme
         let it = item.get();
         let start = it.pos + 1;
         let decorations = inline_rv.decorations_in(start, start + it.node.content().size());
-        let inline = inline_of(&it.node, start, &decorations);
+        let composition = inline_rv.composition.get();
+        let head = composition
+            .as_ref()
+            .map(|_| inline_rv.st.borrow().selection().head());
+        let inline = inline_of(
+            &it.node,
+            start,
+            &decorations,
+            head.zip(composition.as_deref()),
+            |n| inline_rv.leaf_text(n),
+        );
         if let Some(geo) = inline_rv.geo.borrow_mut().texts.get_mut(&id) {
             geo.map = inline.map.clone();
         }
@@ -747,7 +862,10 @@ fn text_block(rv: Rv, item: ReadSignal<BlockItem>, owner: u64) -> impl IntoEleme
 /// The placeholder of an empty textblock that shows one (Tiptap's
 /// placeholder extension: `placeholders` by type, else `placeholder`;
 /// while editable, in the anchor's block, at the top level, unless the
-/// flags say otherwise).
+/// flags say otherwise). The block an input method composes in shows
+/// none: the composition, drawn at the caret before the document holds
+/// it, would sit over it (a native input hides its placeholder once it
+/// has marked text).
 fn placeholder_text(rv: &Rv, it: &BlockItem) -> Option<String> {
     let props = rv.props;
     if !it.node.is_textblock() || it.node.content().size() != 0 {
@@ -756,24 +874,42 @@ fn placeholder_text(rv: &Rv, it: &BlockItem) -> Option<String> {
     if props.show_only_when_editable.get() && !props.editable.get() {
         return None;
     }
-    let label = props
+    let by_type = props
         .placeholders
-        .with(|m| m.as_ref().and_then(|m| m.get(it.node.ty().name()).cloned()))
-        .or_else(|| props.placeholder.get().map(|s| s.to_string()))?;
+        .with(|m| m.as_ref().and_then(|m| m.get(it.node.ty().name()).cloned()));
+    let general = by_type.is_none();
+    let label = by_type.or_else(|| props.placeholder.get().map(|s| s.to_string()))?;
     let include_children = props.include_children.get();
     let only_current = props.show_only_current.get();
-    if only_current {
+    let composing = rv.composition.with(Option::is_some);
+    if only_current || composing {
         rv.sel_rev.get();
     }
+    if general {
+        rv.doc_rev.get();
+    }
     let state = rv.st.borrow();
+    // `placeholder` is the empty document's: an empty line in a document
+    // with content (text or an inline node) stays blank.
+    if general {
+        let mut content = false;
+        state.doc().descendants(&mut |n, _, _, _| {
+            content |= n.is_inline();
+            !content
+        });
+        if content {
+            return None;
+        }
+    }
     if !include_children && state.doc().resolve(it.pos).ok()?.depth != 0 {
         return None;
     }
-    if only_current {
-        let anchor = state.selection().anchor();
-        if anchor < it.pos || anchor > it.pos + it.node.node_size() {
-            return None;
-        }
+    let inside = |pos: usize| pos >= it.pos && pos <= it.pos + it.node.node_size();
+    if only_current && !inside(state.selection().anchor()) {
+        return None;
+    }
+    if composing && inside(state.selection().head()) {
+        return None;
     }
     Some(label)
 }
@@ -818,18 +954,22 @@ fn spans(rv: &Rv, pieces: Vec<Piece>, start: usize) -> Vec<AnyElement> {
                     })
                     .into_element()
             }
-            Piece::Leaf { node, offset } => leaf(rv, node, start + offset),
+            Piece::Leaf { node, offset, text } => leaf(rv, node, start + offset, text),
             Piece::Widget { class } => view()
                 .app_class(class.map(SharedString::from))
                 .into_element(),
+            Piece::Composition { text: t } => {
+                part(text(t).underline(), rv, Part::Composition).into_element()
+            }
             Piece::Filler => text("\u{200B}").into_element(),
         })
         .collect()
 }
 
 /// An inline leaf: its one-character text (a line break), its node view,
-/// else a box of its part.
-fn leaf(rv: &Rv, node: Node, pos: usize) -> AnyElement {
+/// the text it is drawn as (`drawn`, [`Rv::leaf_text`]), else a box of its
+/// part.
+fn leaf(rv: &Rv, node: Node, pos: usize, drawn: Option<String>) -> AnyElement {
     let props = rv.props;
     let classes_node = node.clone();
     let styled = move |el: View| {
@@ -862,6 +1002,21 @@ fn leaf(rv: &Rv, node: Node, pos: usize) -> AnyElement {
     }
     if render_kind(&node) == Some("image") {
         return styled(view_box()).child(image_of(&node)).into_element();
+    }
+    if let Some(drawn) = drawn {
+        let (class_node, style_node) = (node.clone(), node);
+        return text(drawn)
+            .app_class(move || {
+                props
+                    .classes
+                    .with(|c| parts::join(parts::node_classes(c, &class_node)))
+            })
+            .inline_style(move || {
+                props
+                    .styles
+                    .with(|s| parts::merge(&parts::node_styles(s, &style_node)))
+            })
+            .into_element();
     }
     match node.ty().spec().leaf_text.as_deref() {
         Some(t) if utf16_len(t) == 1 => {
@@ -984,7 +1139,9 @@ fn selection_rects(rv: Rv) -> impl IntoElement {
         let (from, to, text) = {
             let state = rv.st.borrow();
             let s = state.selection();
-            (s.from(), s.to(), s.as_node().is_none())
+            // Selected cells are painted in the cells (`selectedCell`).
+            let cells = s.as_custom::<CellSelection>().is_some();
+            (s.from(), s.to(), s.as_node().is_none() && !cells)
         };
         if from == to || !text {
             return Vec::new();
@@ -1061,8 +1218,11 @@ fn drop_cursor(rv: Rv) -> impl IntoElement {
                 Size::new(line.size.width, px(CARET_WIDTH)),
             )
         };
+        // Tests find the line mid-drag by its id (`nsh/test`'s `dragAndHold`).
         Some(part(
-            rect(b).bg(move || theme().foreground),
+            rect(b)
+                .test_id("rich-editor-drop-cursor")
+                .bg(move || theme().foreground),
             &rv,
             Part::DropCursor,
         ))
@@ -1086,11 +1246,15 @@ fn caret(rv: Rv) -> impl IntoElement {
         if !empty_text {
             return None;
         }
-        let b = rv.caret_rect()?;
+        let b = rv.caret_glyph_rect()?;
+        // On whole device pixels: a caret between pixels is drawn smeared
+        // over two, wider or narrower as it moves (gpui-kit's fix).
+        let snap = nsh_core::element::round_to_nearest_pixel;
+        let width = snap(px(CARET_WIDTH)).max(px(1.0 / nsh_core::element::pixel_ratio().max(1.0)));
         Some(part(
             rect(Bounds::new(
-                Point::new(b.origin.x - px(CARET_WIDTH / 2.0), b.origin.y),
-                Size::new(px(CARET_WIDTH), b.size.height),
+                Point::new(snap(b.origin.x - width * 0.5), snap(b.origin.y)),
+                Size::new(width, snap(b.size.height)),
             ))
             .bg(move || theme().foreground)
             .opacity(move || {
@@ -1102,26 +1266,6 @@ fn caret(rv: Rv) -> impl IntoElement {
             }),
             &rv,
             Part::Caret,
-        ))
-    })
-}
-
-/// What an input method is composing, at the caret over the text.
-fn composition(rv: Rv) -> impl IntoElement {
-    dynamic(move || {
-        let composing = rv.composition.get()?;
-        rv.layout_rev.get();
-        let b = rv.caret_rect()?;
-        Some(part(
-            text(composing)
-                .absolute()
-                .left(Length::from(b.origin.x))
-                .top(Length::from(b.origin.y))
-                .pointer_events(PointerEvents::None)
-                .bg(move || theme().background)
-                .underline(),
-            &rv,
-            Part::Composition,
         ))
     })
 }
@@ -1138,7 +1282,11 @@ fn sink(rv: Rv) -> impl IntoElement {
             rv.layout_rev.get();
             let caret = rv.caret_rect().unwrap_or_default();
             let size = rv.viewport.get();
-            let y = caret.origin.y - rv.scroll_y.get();
+            // At the bottom of the caret's line: input methods open their
+            // candidates under the field's line, which would cover the
+            // lower part of a taller line (a heading's).
+            let y = caret.origin.y + (caret.size.height - px(SINK_HEIGHT)).max(px(0.0))
+                - rv.scroll_y.get();
             Point::new(
                 caret.origin.x.min(size.width - px(1.0)).max(px(0.0)),
                 y.min(size.height - px(1.0)).max(px(0.0)),
@@ -1161,7 +1309,7 @@ fn sink(rv: Rv) -> impl IntoElement {
         .left(move || Length::from(at.get().x))
         .top(move || Length::from(at.get().y))
         .w(px(1.0))
-        .h(px(16.0))
+        .h(px(SINK_HEIGHT))
         .pointer_events(PointerEvents::None)
         .p_0()
         .border(px(0.0))
@@ -1169,6 +1317,10 @@ fn sink(rv: Rv) -> impl IntoElement {
         .text_color(AdaptiveColor::TRANSPARENT)
         .caret(false)
         .multiline(true)
+        // The app's scroll bars (`Scrollbar.setTheme`) are for what people
+        // see: a thumb here would show at the caret once the text it
+        // holds overflows.
+        .scrollbar(false)
         .auto_correct(false)
         .auto_capitalize(AutoCapitalize::None)
         .paste_behavior(PasteBehavior::Report)
@@ -1179,12 +1331,30 @@ fn sink(rv: Rv) -> impl IntoElement {
             composition.composition_changed(c.composing, &c.text)
         })
         .on_key_press(move |k: &str| key.sink_key(k))
-        .on_paste(move |p: &PasteEvent| paste.paste(&p.text, &p.html))
+        .on_paste(move |p: &PasteEvent| paste.paste_event(p))
         .on_focus(move || focus.focus_changed(true))
         .on_blur(move || blur.focus_changed(false))
 }
 
 impl Rv {
+    /// The text inline leaf `node` is drawn as: its type's `render_text` (a
+    /// mention's `@name`), unless its node view, an image or a
+    /// one-character `leaf_text` draws it. It stays one position, however
+    /// many characters it shows.
+    fn leaf_text(&self, node: &Node) -> Option<String> {
+        let spec = node.ty().spec();
+        if self.node_view(node.ty().name()).is_some()
+            || render_kind(node) == Some("image")
+            || spec.leaf_text.as_deref().is_some_and(|t| utf16_len(t) == 1)
+        {
+            return None;
+        }
+        spec.render_text
+            .as_ref()
+            .map(|render| render.text(node))
+            .filter(|t| !t.is_empty())
+    }
+
     /// Block (or slot) `id`'s frame in box `parent` (`None`: the content
     /// box).
     pub(crate) fn set_frame(&self, id: u64, parent: Option<u64>, frame: Bounds<Points>) {
@@ -1279,7 +1449,7 @@ mod tests {
             Decoration::inline(2, 4, attrs),
             Decoration::widget(4, "w", -1),
         ];
-        let inline = inline_of(&p, 1, &decorations);
+        let inline = inline_of(&p, 1, &decorations, None, |_| None);
         let texts: Vec<_> = inline
             .pieces
             .iter()
@@ -1301,8 +1471,22 @@ mod tests {
         let p = schema
             .node("paragraph", None, Default::default(), vec![])
             .unwrap();
-        let inline = inline_of(&p, 1, &[]);
+        let inline = inline_of(&p, 1, &[], None, |_| None);
         assert_eq!(inline.pieces, [Piece::Filler]);
         assert_eq!(inline.map.to_text(0), 1);
+    }
+}
+
+#[cfg(test)]
+mod marker_tests {
+    use super::{alpha, roman};
+
+    #[test]
+    fn nested_numbers_count_in_letters_and_roman_numerals() {
+        assert_eq!(alpha(1), "a");
+        assert_eq!(alpha(26), "z");
+        assert_eq!(alpha(28), "ab");
+        assert_eq!(roman(4), "iv");
+        assert_eq!(roman(14), "xiv");
     }
 }

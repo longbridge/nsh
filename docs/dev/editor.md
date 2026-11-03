@@ -77,34 +77,22 @@ user-facing page is `website/elements/editor.md`; how each module works inside i
 
 ### The display map
 
-`DisplayMap` lays the text out in display rows: one vector of rows, with the first row of every line beside it, so
-line → row is an index and row → line a field. Tabs advance to the next stop; widths come from the editor's font,
-measured per char with the platform's text engine (`measure_text`) and cached, and summed along a row (exact for
-monospaced fonts, close for others). Without soft wrap a row is a line and nothing is measured while laying out (a
-row's width is measured when the scroll width first needs it; above 20 000 rows only the rows in view are measured,
-as they show, and the scroll width grows to the widest seen), so 200 000 lines lay out in about 30 ms. With
-`softWrap`, a line breaks after whitespace where the row would overflow, else between graphemes, and its continuation
-rows start at its indentation unless that is over half the width. A folded line shows as one row and the lines it
-hides as none. An edit lays out only the lines of its `LineSpan` and shifts the rows after them.
+`DisplayMap` (`display_map.rs`) lays the text out in display rows: tabs advance to the next stop, widths come from
+the editor's font measured with the platform's text engine, and large files lay out without measuring every row.
+With `softWrap`, a line breaks after whitespace where the row would overflow, else between graphemes, and its
+continuation rows start at its indentation unless that is over half the width. A folded line shows as one row and the
+lines it hides as none. An edit lays out only the lines it touched.
 
 ### Rendering and virtualization
 
 The view is a vertical `Scroll` of a row of the gutter and the text area (a horizontal `Scroll` without soft wrap).
-The scroll views hold the hit layer: boxes of the rows' size that take the wheel, the scroll bars, touches,
-presses and the pointer's cursor. The active-line backgrounds are drawn in these boxes, below the scroll indicators.
-The text and foreground decorations are the paint layer, drawn over the scroll views (`pointer_events(None)`)
-and moved by the offsets they report (`top(-scroll_y)`, `left(-scroll_x)`): the rows the offset needs and the offset
-itself come in the same commit, so a scroll bar dragged across a long file or a paste of many lines never shows a
-frame where the platform moved the content before the rows it needs were made. The paint layer's views keep the hit
-layer's handlers, so tests that press a row's text reach the same code. Only the rows in view are made, plus a
-viewport and a half (at least 16 rows) ahead in the way they scroll and half a viewport behind, and at least 40 rows'
-height before the viewport is known. That window (`window.rs`'s `RowWindow`, which the `DiffView` shares) stays put
-while it covers the rows in view with half a viewport to spare, so most scroll frames change no rows and commit
-nothing; the row list is a memo of the window, and `each` keeps the views of rows that stay in it. Each row is an absolutely placed view holding one `Text` whose spans are
-the row's runs of one token and one set of decorations (`State::row_content`). The rows' box draws, from back to
-front: the rulers, indent guides, search matches, selections, the matching brackets,
-the rows, the whitespace marks, diagnostics' marks, the placeholder, the carets and the composition. Each layer is a
-`dynamic` over the revisions it depends on.
+The scroll views take the wheel, the scroll bars, touches, presses and the pointer's cursor; the text and foreground
+decorations are drawn over them and take no input (only a folded row's text takes presses, for its placeholder), so a
+finger or a wheel on a row's glyphs scrolls as on blank space. Only the rows in view and a margin around them are made
+(`window.rs`'s `RowWindow`, which the `DiffView` shares); each row is an absolutely placed view holding one `Text`
+whose spans are the row's runs of one token and one set of decorations (`State::row_content`). The rows' box draws,
+from back to front: the rulers, indent guides, search matches, selections, the matching brackets, the rows, the
+whitespace marks, diagnostics' marks, the placeholder, the carets and the composition.
 
 `showWhitespaces` draws a `·` per space and a `→` per tab over the rows in view: one `Text` per run of spaces and per
 tab, placed and sized by the display map (`DisplayMap::whitespace`), so the row's own text and its measuring stay as
@@ -131,7 +119,8 @@ itself lives in an `Rc<RefCell<State>>` outside the reactive graph.
 ### Typed text and input methods
 
 A native `Input` (the sink), invisible, 1 point wide and a row tall, is kept at the primary caret, so input methods
-open their candidate windows there and soft keyboards show. It lies over the scroll views, not in them, placed in the
+open their candidate windows there and soft keyboards show. It takes no pointer (`pointer_events(None)`, which the
+mobile platforms honor on inputs too): over the caret it would take the touches of the selection's end handle. It lies over the scroll views, not in them, placed in the
 editor's box (`Ed::in_editor`) and held inside it: the platforms scroll the scroll views around a focused field to
 show it, which the editor does itself for its caret, and doing it again moved the text under the caret by a margin,
 animated, when the editor took the focus. It holds only what was just typed: each `onChange` is
@@ -233,10 +222,11 @@ glyphs) and the hit layer's cursor turns into a hand (`style_when` over the link
 pointer leaves the range or the editor, or the text, its layout or the scrolling changes (`follow_definition`), or
 `hideDefinitionLink()`; each of these also drops the request out, so an answer to any but the last request, or one
 arriving after an edit, is ignored. The platforms report a modifier key pressed or released under a still mouse as a
-hover move where it is (`elements.md`), so pressing Mod over a word asks without moving the mouse; `hover_move` then
-also reports `onHover` again for the word shown, with the new modifiers. A Mod-click on a word asks with trigger
-`press` after `onTextPress`: on the link the caret stays where it is (as GPUI Kit's editor does), elsewhere the press
-places it first. `goToDefinition` (F12) asks with trigger `key` at the primary caret, for the word there (the word
+mouse move (`onMouseMove`) where it is (`elements.md`), so pressing Mod over a word asks without moving the mouse;
+`hover_move` then also reports `onHover` again for the word shown, with the new modifiers. Moves with a button down
+(a drag selecting text, `pressed_button`) are not hovers: `hover_move` ignores them. A Mod-click on a word asks with
+trigger `press` after `onTextPress`: on the link the caret stays where it is (as GPUI Kit's editor does), elsewhere the
+press places it first. `goToDefinition` (F12) asks with trigger `key` at the primary caret, for the word there (the word
 before it at a word's end). Answers to `press` and `key` are the app's to act on (`revealPosition`, `setSelections`,
 opening another file). `showCodeActions` (Mod+.) reports `onCodeActionRequest`: the primary selection, start first,
 the caret, and the caret's box (`caretBounds`), where the app opens its menu of the language server's actions, whose
@@ -273,8 +263,9 @@ The built-in highlighter keeps syntect's state every 16 lines (and on lines that
 marks the lines from its first one dirty; parsing starts at the nearest state kept before it and stops as soon as a
 line ends in the state the next line started with before, so typing in a function costs a few lines. Only an edit that
 changes what follows (opening a block comment or a string) parses on. The syntaxes load on a blocking thread the
-first time a language needs them. Without feature `highlight` the built-in languages are plain; the app's
-highlighters still run.
+first time a language needs them (`Highlighter::load_async`, which `DiffView` uses too); on the web they come from the
+page then (`nsh-syntaxes.bin`, `text-view.md` "Syntax highlighting"), and the text stays plain until they arrive.
+Without feature `highlight` the built-in languages are plain; the app's highlighters still run.
 
 The app's highlighters and languages (`highlighter.rs`, `languages.rs`) are kept per engine, in a value of the
 surface (`nsh_core::element::global`), never process-wide. `register_language` adds an `EditorLanguage` (a
@@ -303,7 +294,7 @@ again for the echo of a controlled `value`. Building it is the one cost of an ed
 Unicode case folding, linear time whatever the query, `^` / `$` at every line's start and end, whole words by word
 boundaries. `findNext` / `findPrevious` (commands) select the next / previous match from the primary selection,
 wrapping; `replace(text)` replaces the current match and selects the next, `replaceAll(text)` replaces every match as
-one edit and returns how many. Replacements expand `$1` and `${name}` for regular expressions. `inSelection` keeps
+one edit and returns `{ count }` (`EditorReplaceAll`), how many. Replacements expand `$1` and `${name}` for regular expressions. `inSelection` keeps
 the matches inside a scope: what was selected when the search turned to the selection (the carets' lines when nothing
 was), kept while it stays on and carried through edits as marks are (`State::set_search`). The find bar is the app's;
 `findWithSelection` (`cmd+e`) reports the selected text (a caret: its word) with `onFindWithSelection` for it to take
@@ -320,6 +311,22 @@ empty line a short line a space wide is drawn under the row (`diagnostic_rects`)
 bounds), its `lineClass` / `lineStyle` the rows of its lines behind the text. A row looks for its decorations by two
 binary searches over the marks (sorted by start): those starting from the longest mark's length before the row
 (`decoration_reach`) up to its end, so thousands of short ones (semantic tokens) cost a row only its own.
+
+A decoration's `gutter` and `overviewRuler` marks follow GPUI Kit's gutter and overview ruler decorations (#3704) on
+the decorations NSH already has, as Monaco puts both on one decoration: one list keeps one place for a range and its
+marks. The gutter's strip (`gutterDecorationsWidth`) is reserved while any decoration has a gutter mark, so the text
+does not move as marks come and go. Each painted gutter row asks for its marks with the same windowed search
+(`State::gutter_marks`): a row's lines are its fold's when folded, so a range or boundary inside a fold marks the
+fold's row; a non-empty range ending at a line's start leaves that line out; an empty range is a line across the top of
+its line's first row at a line start, across the bottom of its last row elsewhere (the end of a text without a final
+line break); that boundary is `placement: "before"`, and by default an empty range covers its line, as it does for
+`lineClass` (one decoration, one meaning of its range). Empty ranges are kept through edits (`adjust` collapses a deleted range to its boundary). The overview
+ruler (`view::overview_ruler`, the `overviewRuler` part, 14 points wide unless the part sets a width; its lanes are
+shares of that width, so a width the app's classes set moves them too) lies over the scroll view's right edge, receiving no pointer;
+its marks' display rows (`State::overview_ruler_marks`) are worked out again only when the text, folds, wrapping or
+decorations change (`text_rev`, `marks_rev`), and their places (`layout::ruler_place`: the rows scaled from the
+rows' box to the viewport's height, at least 6 points; `layout::ruler_lane`, Monaco's lanes) when the viewport does. GPUI Kit's folded
+color and the theme's status colors are left out: a mark's look is the app's `class` / `style`.
 
 A diagnostic is LSP's `Diagnostic` with names for its enums: `codeDescription` and `relatedInformation` are data the
 hover hands back (related ranges as the app gave them, as they may be in other documents), and `tags` style its text.

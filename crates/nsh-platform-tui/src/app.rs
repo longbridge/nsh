@@ -399,7 +399,14 @@ impl AppView {
             self.selection.clear();
             if let Some(engine) = &self.surface.engine {
                 self.keyboard.focus(None, &mut self.tree, &engine.control());
-                self.pointer.leave(&mut self.tree, &engine.control());
+                self.pointer.leave(&mut crate::input::PointerContext {
+                    area: self.area,
+                    cells: self.options.cells,
+                    hits: &self.hits,
+                    geometry: &self.geometry,
+                    tree: &mut self.tree,
+                    control: &engine.control(),
+                });
             }
             self.surface.wake.notify();
             self.pointer.cancel(
@@ -917,8 +924,14 @@ impl AppView {
             buffer,
         );
         if let Some(engine) = &self.surface.engine {
-            self.pointer
-                .rehover(area, &self.hits, &mut self.tree, &engine.control());
+            self.pointer.rehover(&mut crate::input::PointerContext {
+                area,
+                cells: self.options.cells,
+                hits: &self.hits,
+                geometry: &self.geometry,
+                tree: &mut self.tree,
+                control: &engine.control(),
+            });
         }
         if let Some(engine) = &self.surface.engine
             && self

@@ -53,12 +53,27 @@ final class ModalHost {
         container.requestLayout();
     }
 
+    /** A density change changes dp sizes even when the pixels stay put. */
+    void densityChanged() {
+        container.reported = null;
+        // Report after the host has published its new environment, and
+        // request layout even if Android keeps the dialog's pixel bounds.
+        container.requestLayout();
+        container.post(container::report);
+    }
+
     TouchTracker touches() {
         return container.touches;
     }
 
     boolean shown() {
         return dialog != null && !closing;
+    }
+
+    /** The shown dialog's window (its decor view), or null. */
+    View window() {
+        Window window = shown() && dialog.isShowing() ? dialog.getWindow() : null;
+        return window == null ? null : window.getDecorView();
     }
 
     void show() {
@@ -162,6 +177,8 @@ final class ModalHost {
     void dismiss() {
         if (dialog == null || closing) return;
         closing = true;
+        // Its keyboard hides with it, not once the dialog's window is gone.
+        mounter.hideKeyboardIn(container);
         Dialog d = dialog;
         Runnable done = () -> {
             d.dismiss();

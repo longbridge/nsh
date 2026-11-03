@@ -1,10 +1,10 @@
 // A case of the API's test suite (docs/dev/compatibility.md): `nsh/device`
 // as the headless runtime reports it (iOS, a phone, 1 pixel per point, the
-// script's viewport), the color scheme an app sets and `openUrl`: a promise
-// for a URL it opens (the headless runtime answers none), a `TypeError` for
-// one it never opens. Its script checks each.
+// script's viewport; mobile, so `platform.desktop` is false; the app in use), the color scheme an app sets and
+// `openUrl`: a promise for a URL it opens (the headless runtime answers none), one rejected with a `TypeError` for
+// a URL it never opens (it never throws). Its script checks each.
 import { Text, View, signal } from "nsh";
-import { colorScheme, fontScale, openUrl, pixelRatio, platform, setColorScheme, windowSize } from "nsh";
+import { colorScheme, fontScale, lifecycle, openUrl, pixelRatio, platform, setColorScheme, windowSize } from "nsh";
 
 function App() {
   const opened = signal("not opened");
@@ -12,6 +12,7 @@ function App() {
     <View style={{ flex: 1, paddingTop: 64 }}>
       <Text>{`OS: ${platform.os}`}</Text>
       <Text>{`Idiom: ${platform.idiom}`}</Text>
+      <Text>{`Desktop: ${platform.desktop}`}</Text>
       <Text>{`Catalyst: ${platform.catalyst}`}</Text>
       <Text>{`Version: ${platform.version}`}</Text>
       <Text>{`Select: ${platform.select({ ios: "ios", android: "android", default: "other" })}`}</Text>
@@ -20,6 +21,7 @@ function App() {
       <Text>{`Font scale: ${fontScale()}`}</Text>
       <Text>{`Window: ${windowSize().width}x${windowSize().height}`}</Text>
       <Text>{`Scheme: ${colorScheme()}`}</Text>
+      <Text>{`Lifecycle: ${lifecycle()}`}</Text>
       <View testID="dark" onPress={() => setColorScheme("dark")}>
         <Text>Go dark</Text>
       </View>
@@ -31,13 +33,12 @@ function App() {
         testID="open"
         onPress={() => {
           const pending = openUrl("https://example.com/docs?page=1");
-          let refused = "none";
+          opened.set(`${typeof pending.then}, refused pending`);
           try {
-            openUrl("javascript:alert(1)");
+            openUrl("javascript:alert(1)").catch((e: Error) => opened.set(`${typeof pending.then}, refused ${e.name}`));
           } catch (e) {
-            refused = (e as Error).name;
+            opened.set(`${typeof pending.then}, threw ${(e as Error).name}`);
           }
-          opened.set(`${typeof pending.then}, refused ${refused}`);
         }}
       >
         <Text>Open a link</Text>

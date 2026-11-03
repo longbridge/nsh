@@ -74,8 +74,9 @@ The defaults are a reading typography modeled on Allsum's documents (the constan
 20 / 17 / 15 with lines of 1.25 (level 1) or 1.35 and letter spacing of -0.02 em (level 1) or -0.012 em, with room
 above them after a block (1.1 / 1.6 / 1.4 em, 0.6 em after a heading, none first: their top margin less the gap,
 from `Before`, which the top level's rows keep as a memo); strong text semibold; links underlined 1 pt at 40 % of
-their color, 3 pt below; `<mark>` on a rounded yellow (a marker's, `HIGHLIGHT`); code, keys and TeX at 13 in the
-theme's `font-mono` (else the system's `monospace`) on a faint rounded
+their color, at the platform's automatic underline position (or an offset an ancestor sets, which links inherit;
+the `Link` part's own wins); `<mark>` on a rounded yellow (a marker's,
+`HIGHLIGHT`); code, keys and TeX at 13 in the theme's `font-mono` (else the system's `monospace`) on a faint rounded
 background (spans have no padding); lists indented 1.4 em, their markers (`•`, `◦`, `▪` by depth, or numbers) right-aligned against the content in
 the indent (so `10.` reaches further left and the items stay in line), items 0.25 em apart, tasks a
 15 pt box drawn as a view (filled with a `✓` when done, the item's text then muted and struck); quotes a 2 pt line at
@@ -155,6 +156,11 @@ syntaxes takes tens of milliseconds more. So the engine thread parses only what 
   that has a language. A block that goes away before its colors arrive leaves its tokens in the cache.
 - WebAssembly has no threads: there the work is done after the frame that shows the block plain (`next_frame`), so
   the block appears at once but that later frame pays for the parsing.
+- The web runtime gets the syntaxes from its page: `nsh-syntaxes.bin`, two-face's dump, next to `nsh.wasm` (the
+  build that makes the module copies it from the two-face its workspace resolves, so it matches the module's syntect;
+  `nsh package --target web` publishes it as `nsh-syntaxes.<digest>.bin` and names it in the page's `data`). The
+  first block with a language asks for it (`syntax::load_async`, `nsh_core::runtime_data`), the page fetches it once
+  and every block waiting is highlighted when it arrives. A page that cannot serve it keeps code plain (one warning).
 
 `bench_highlight` (ignored: `cargo test --release -p nsh-base bench_highlight -- --ignored --nocapture`) prints these
 numbers.

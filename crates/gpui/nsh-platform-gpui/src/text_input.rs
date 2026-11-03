@@ -36,6 +36,9 @@
 //! Focus is one field per surface. The window's (and the embedding app's)
 //! focus is followed apart from it: a surface that is not focused keeps
 //! its focused field (with no caret) and gets it back when focused again.
+//! Text typed after Enter, a binding, or a focus move waits until the
+//! engine has handled that key, then goes to the field that has the
+//! keyboard.
 //!
 //! Return follows the config's `submit()`: a single line submits; a
 //! multiline input whose return submits does so on a plain return (or
@@ -57,6 +60,7 @@ mod layout;
 
 use std::{
     cell::{Cell, RefCell},
+    collections::VecDeque,
     ops::Range,
     rc::Rc,
     sync::Arc,
@@ -64,7 +68,7 @@ use std::{
 
 use gpui::{Font, FontFeatures, FontStyle, FontWeight, SharedString, TextSystem, px};
 use nsh_core::{
-    AutoCapitalize, Color, EventKind, EventPayload, InputConfig, PayloadValue, Points,
+    AutoCapitalize, Color, EventKind, EventPayload, InputConfig, NodeId, PayloadValue, Points,
     ReturnKeyType, SubmitBehavior, TextAlign,
     tailwind::state,
     text_edit::{self as model, Composition, Model, Unit, key_of, pasted, utf16_to_byte},
@@ -76,7 +80,7 @@ use crate::{
     input::{KeyEvent, Modifiers, PointerKind},
     keys::{
         VK_BACK, VK_DELETE, VK_DOWN, VK_END, VK_ESCAPE, VK_HOME, VK_INSERT, VK_LEFT, VK_NEXT,
-        VK_PRIOR, VK_RETURN, VK_RIGHT, VK_UP,
+        VK_PRIOR, VK_RETURN, VK_RIGHT, VK_TAB, VK_UP,
     },
     render::DrawCx,
     surface::Surface,
@@ -114,6 +118,8 @@ pub(crate) struct InputState {
     /// The surface's key ([`Surface::by_key`]): `focus()` and `blur()`
     /// come with the view only.
     surface: u64,
+    /// The input view's node (`EngineControl::input_scroll`).
+    id: NodeId,
     /// The app's text system (`None` outside a GPUI app: nothing is laid
     /// out).
     system: Option<Arc<TextSystem>>,
@@ -149,6 +155,10 @@ pub(crate) struct InputState {
     /// Scroll offset of the text: horizontal for one line, vertical for
     /// several.
     scroll: Cell<f32>,
+    /// The scroll of several lines as last reported to a built-in bar
+    /// (`InputConfig::replaced`): offset, text height, width, viewport
+    /// height. `None` until reported (again).
+    reported_scroll: Cell<Option<(f32, f32, f32, f32)>>,
     /// The x the caret keeps while it moves up and down lines.
     goal_x: Cell<Option<f32>>,
     /// A press is selecting.
@@ -162,9 +172,10 @@ pub(crate) struct InputState {
 }
 
 impl InputState {
-    fn new(surface: u64, system: Option<Arc<TextSystem>>) -> Self {
+    fn new(surface: u64, id: NodeId, system: Option<Arc<TextSystem>>) -> Self {
         InputState {
             surface,
+            id,
             system,
             model: RefCell::default(),
             config: RefCell::default(),
@@ -181,6 +192,7 @@ impl InputState {
             active: Cell::new(true),
             caret_on: Cell::new(true),
             scroll: Cell::new(0.0),
+            reported_scroll: Cell::new(None),
             goal_x: Cell::new(None),
             drag: Cell::new(None),
             style: RefCell::new(None),
@@ -380,6 +392,39 @@ impl InputState {
         self.origin(&layout);
     }
 
+    /// Reports how far several lines scrolled, the text's height and the
+    /// viewport's to the built-in bar that takes the place of an
+    /// indicator (`InputConfig::replaced`), when any of them changed since
+    /// last reported. Called with the clamped scroll ([`InputState::origin`]).
+    fn report_scroll(&self, layout: &Layout) {
+        {
+            let config = self.config.borrow();
+            if !config.replaced || !config.multiline {
+                return;
+            }
+        }
+        let (w, h) = self.size.get();
+        if w <= 0.0 || h <= 0.0 {
+            return;
+        }
+        let content = layout.height.max(h);
+        let now = (self.scroll.get(), content, w, h);
+        if self.reported_scroll.replace(Some(now)) == Some(now) {
+            return;
+        }
+        let Some(surface) = Surface::by_key(self.surface) else {
+            return;
+        };
+        surface.control(|c| {
+            c.input_scroll(
+                self.id,
+                nsh_core::geometry::point(Points::ZERO, Points(now.0)),
+                nsh_core::geometry::size(Points(w), Points(content)),
+                nsh_core::geometry::size(Points(w), Points(h)),
+            );
+        });
+    }
+
     /// The caret shows (again) for a whole blink: typing and moving never
     /// leave it hidden.
     fn wake_caret(&self) {
@@ -408,6 +453,9 @@ impl Hosted for InputState {
             cx.push_clip_rect(0.0, -1.0e4, w, 2.0e4);
         }
         let (ox, oy) = self.origin(&layout);
+        // Every change of the scroll, the text or the size draws again, so
+        // a built-in bar hears of each here.
+        self.report_scroll(&layout);
         let config = self.config.borrow();
         let model = self.model.borrow();
         let secure = config.secure;
@@ -578,12 +626,32 @@ fn xalign(config: &InputConfig) -> f32 {
 
 // --- Focus -------------------------------------------------------------------
 
+/// What waits for the next field.
+enum Held {
+    Text(String),
+    Key(KeyEvent),
+}
+
 /// A surface's focused field, and whether the surface has the window's
 /// focus.
 #[derive(Default)]
 struct Focus {
     view: Option<NshView>,
     inactive: bool,
+    /// Text typed after an action that can move focus, and the editing
+    /// keys typed after that text. The field that has the keyboard when
+    /// the engine catches up takes them, in order.
+    pending: VecDeque<Held>,
+    /// [`Surface::clock`] time after which `pending` is dropped. None when
+    /// nothing armed the queue.
+    until: Option<f64>,
+    /// The events sent up to the action that armed the queue
+    /// ([`Surface::events_sent`]). Until the engine has handled them, the
+    /// field with the keyboard may be about to lose it.
+    after: u64,
+    /// `set_focus` is on the stack. Text typed now waits for the field it
+    /// settles on.
+    changing: bool,
 }
 
 thread_local! {
@@ -657,19 +725,41 @@ fn window_active(surface: &Surface) -> bool {
     FOCUS.with(|f| f.borrow().get(&surface.key()).is_none_or(|f| !f.inactive))
 }
 
+/// How long text waits for a field after the action that armed it, in
+/// seconds of [`Surface::clock`].
+const HOLD: f64 = 3.0;
+
 /// Moves the surface's focus to `view` (or nowhere), reporting the blur of
-/// the field that had it, then the focus of the new one.
+/// the field that had it, then the focus of the new one. Text typed while
+/// this runs, or while the queue is armed, is given to the field that ends
+/// up focused, ahead of text it receives later.
 fn set_focus(surface: &Rc<Surface>, view: Option<&NshView>) {
     let old = focused(surface);
-    if old.as_ref() == view {
+    set_changing(surface, true);
+    if old.as_ref() != view {
+        move_focus(surface, view, old.as_ref());
+        // The new field's value may still be on its way from the engine,
+        // after what the old one reported. Text typed now waits for it.
         if view.is_some() {
-            // The host can own the window's focus while this field keeps the surface's.
-            surface.window_focus_requested.set(true);
-            surface.invalidate();
+            arm(surface);
         }
-        return;
+    } else if view.is_some() {
+        // The host can own the window's focus while this field keeps the surface's.
+        surface.window_focus_requested.set(true);
+        surface.invalidate();
     }
-    if let Some(old) = &old {
+    set_changing(surface, false);
+    flush_pending(surface);
+}
+
+fn set_changing(surface: &Surface, changing: bool) {
+    FOCUS.with(|f| {
+        f.borrow_mut().entry(surface.key()).or_default().changing = changing;
+    });
+}
+
+fn move_focus(surface: &Rc<Surface>, view: Option<&NshView>, old: Option<&NshView>) {
+    if let Some(old) = old {
         if let Some(input) = input_of(old) {
             input.focused.set(false);
             input.drag.set(None);
@@ -705,6 +795,213 @@ fn set_focus(surface: &Rc<Surface>, view: Option<&NshView>) {
     surface.invalidate();
 }
 
+/// An action that can move focus just ran. Text typed now waits for the
+/// field that takes the keyboard.
+pub(crate) fn arm(surface: &Surface) {
+    let until = surface.clock() + HOLD;
+    let after = surface.events_sent();
+    FOCUS.with(|f| {
+        let mut map = f.borrow_mut();
+        let focus = map.entry(surface.key()).or_default();
+        focus.until = Some(until);
+        focus.after = after;
+    });
+}
+
+/// The engine has not yet handled the action that armed the queue. The
+/// field with the keyboard may be about to lose it.
+fn behind(surface: &Surface) -> bool {
+    let after = FOCUS.with(|f| f.borrow().get(&surface.key()).map_or(0, |f| f.after));
+    surface.events_handled() < after
+}
+
+/// The engine handled more events ([`Surface::events_handled`]), and what
+/// they changed is applied. What waits goes to the field that now has the
+/// keyboard.
+pub(crate) fn engine_caught_up(surface: &Rc<Surface>) {
+    if armed(surface) && !behind(surface) {
+        flush_pending(surface);
+    }
+}
+
+/// Keeps a key down for the next field when text typed before it waits
+/// there. The key comes after that text. True when kept. A key that types
+/// a character is not kept. Its text comes through the input method, and
+/// waits as text.
+pub(crate) fn hold_key(surface: &Surface, event: &KeyEvent) -> bool {
+    let m = event.modifiers;
+    let edits = matches!(
+        event.vk,
+        VK_RETURN
+            | VK_BACK
+            | VK_DELETE
+            | VK_TAB
+            | VK_LEFT
+            | VK_RIGHT
+            | VK_UP
+            | VK_DOWN
+            | VK_HOME
+            | VK_END
+            | VK_PRIOR
+            | VK_NEXT
+    );
+    let chord = (m.ctrl || m.alt || m.meta) && !crate::keymap::modifier(event.vk);
+    if !(edits || chord) || !armed(surface) {
+        return false;
+    }
+    FOCUS.with(|f| {
+        let mut map = f.borrow_mut();
+        let Some(focus) = map.get_mut(&surface.key()) else {
+            return false;
+        };
+        if focus.pending.is_empty() {
+            return false;
+        }
+        focus.pending.push_back(Held::Key(*event));
+        true
+    })
+}
+
+/// The app is taking `view` out. When the field with the keyboard is in
+/// it, text typed before the next field takes the keyboard waits for that
+/// field, as after an action that can move focus.
+pub(crate) fn removing(surface: &Surface, view: &NshView) {
+    let Some(field) = FOCUS.with(|f| f.borrow().get(&surface.key()).and_then(|f| f.view.clone()))
+    else {
+        return;
+    };
+    let mut at = Some(field);
+    while let Some(node) = at {
+        if node == *view {
+            arm(surface);
+            return;
+        }
+        at = node.parent_view();
+    }
+}
+
+/// Drops text waiting for a field. Escape, or the window going inactive.
+pub(crate) fn disarm(surface: &Surface) {
+    FOCUS.with(|f| {
+        if let Some(focus) = f.borrow_mut().get_mut(&surface.key()) {
+            focus.pending.clear();
+            focus.until = None;
+        }
+    });
+}
+
+/// Drops the queue when its time has passed. True while `set_focus` is
+/// on the stack or the queue is still inside that time.
+fn armed(surface: &Surface) -> bool {
+    let now = surface.clock();
+    FOCUS.with(|f| {
+        let mut map = f.borrow_mut();
+        let Some(focus) = map.get_mut(&surface.key()) else {
+            return false;
+        };
+        if focus.changing {
+            return true;
+        }
+        match focus.until {
+            Some(until) if now < until => true,
+            Some(_) => {
+                focus.pending.clear();
+                focus.until = None;
+                false
+            }
+            None => false,
+        }
+    })
+}
+
+/// Queues `text` while the queue is armed and the engine has not handled
+/// the key that armed it, or while focus is moving. False when the
+/// character goes to the focused field, or nowhere.
+fn queue_if_unsettled(surface: &Surface, text: &str) -> bool {
+    let plain: String = text.chars().filter(|c| !c.is_control()).collect();
+    if plain.is_empty() {
+        return false;
+    }
+    let waiting = armed(surface);
+    if wants_text(surface) && !waiting {
+        return false;
+    }
+    if wants_text(surface) {
+        let (changing, waits) = FOCUS.with(|f| {
+            f.borrow()
+                .get(&surface.key())
+                .map_or((false, false), |focus| {
+                    (focus.changing, !focus.pending.is_empty())
+                })
+        });
+        if !changing && !waits && !behind(surface) {
+            // The field has the keyboard. Later text is its own.
+            disarm(surface);
+            return false;
+        }
+    }
+    if !waiting {
+        return false;
+    }
+    FOCUS.with(|f| {
+        let mut map = f.borrow_mut();
+        let pending = &mut map.entry(surface.key()).or_default().pending;
+        match pending.back_mut() {
+            Some(Held::Text(text)) => text.push_str(&plain),
+            _ => pending.push_back(Held::Text(plain)),
+        }
+    });
+    true
+}
+
+/// Gives what waits to the focused field, in order. Text is inserted. A
+/// key goes to the field as if typed now. It stops while the engine has
+/// not handled a key that armed the queue again, and with no field yet,
+/// while the queue is armed. A field taking the last of it ends the wait.
+fn flush_pending(surface: &Rc<Surface>) {
+    if !armed(surface) && !wants_text(surface) {
+        disarm(surface);
+    }
+    let mut taken = false;
+    loop {
+        if behind(surface) {
+            return;
+        }
+        let next = FOCUS.with(|f| {
+            f.borrow_mut()
+                .get_mut(&surface.key())
+                .and_then(|focus| focus.pending.pop_front())
+        });
+        let Some(next) = next else {
+            break;
+        };
+        match next {
+            Held::Text(text) => {
+                let Some((view, input)) =
+                    ime::field(surface).filter(|(_, input)| input.config.borrow().editable)
+                else {
+                    if armed(surface) {
+                        FOCUS.with(|f| {
+                            let mut map = f.borrow_mut();
+                            let focus = map.entry(surface.key()).or_default();
+                            focus.pending.push_front(Held::Text(text));
+                        });
+                    }
+                    return;
+                };
+                insert(surface, &view, &input, &text, true);
+            }
+            Held::Key(event) => {
+                crate::input::key_now(surface, event);
+            }
+        }
+        taken = true;
+    }
+    if taken && !behind(surface) {
+        disarm(surface);
+    }
+}
+
 /// The surface's focus in its window (the window is active and the
 /// surface's view has GPUI's focus): the focused field keeps the focus
 /// when it goes (an app in the background keeps its field), without a
@@ -718,6 +1015,9 @@ pub(crate) fn window_focus(surface: &Rc<Surface>, has_focus: bool) -> bool {
         entry.inactive = !has_focus;
         changed
     });
+    if changed && !has_focus {
+        disarm(surface);
+    }
     if !changed {
         return false;
     }
@@ -761,7 +1061,7 @@ pub(crate) mod ime {
     use super::*;
 
     /// The focused field and its input.
-    fn field(surface: &Surface) -> Option<(NshView, Rc<InputState>)> {
+    pub(super) fn field(surface: &Surface) -> Option<(NshView, Rc<InputState>)> {
         let view = focused(surface)?;
         let input = input_of(&view)?;
         Some((view, input))
@@ -858,6 +1158,12 @@ pub(crate) mod ime {
         range: Option<Range<usize>>,
         text: &str,
     ) {
+        // No field yet, or the engine has not handled the key that may
+        // move focus. Keep the text, in order, for the field that has the
+        // keyboard when that key is handled.
+        if super::queue_if_unsettled(surface, text) {
+            return;
+        }
         let Some((view, input)) = field(surface) else {
             return;
         };
@@ -897,6 +1203,12 @@ pub(crate) mod ime {
         text: &str,
         selected: Option<Range<usize>>,
     ) {
+        // A composition needs a settled field. Text typed while the
+        // engine has not handled the key that may move focus is committed
+        // onto the next field instead of marking the one that is leaving.
+        if super::queue_if_unsettled(surface, text) {
+            return;
+        }
         let Some((view, input)) = field(surface) else {
             return;
         };
@@ -1217,6 +1529,8 @@ fn submit(surface: &Rc<Surface>, view: &NshView, input: &InputState, blur: bool)
     send(surface, view, EventKind::SubmitEditing, || {
         EventPayload::Text { text, count }
     });
+    // A submit may move focus, so text typed after it waits.
+    arm(surface);
     if blur {
         set_focus(surface, None);
     }
@@ -1240,7 +1554,7 @@ fn return_key(behavior: SubmitBehavior, multiline: bool, modifiers: Modifiers) -
 /// Sets up an input view.
 pub(crate) fn create(surface: &Rc<Surface>, view: &NshView) {
     let system = surface.text_system.borrow().clone();
-    let input = Rc::new(InputState::new(surface.key(), system));
+    let input = Rc::new(InputState::new(surface.key(), view.id(), system));
     input.active.set(window_active(surface));
     view.state_mut().input = Some(input);
 }
@@ -1280,6 +1594,16 @@ pub(crate) fn config(surface: &Rc<Surface>, view: &NshView, config: &InputConfig
         auto_focus(surface, view);
     }
     place(view, &input);
+    // A built-in bar (newly) taking the indicator's place hears where the
+    // text is now, once placed (else on the first draw).
+    input.reported_scroll.set(None);
+    if config.replaced
+        && config.multiline
+        && let Some(layout) = input.layout()
+    {
+        input.origin(&layout);
+        input.report_scroll(&layout);
+    }
 }
 
 /// Focuses the field once it is on screen (the batch that made it may
@@ -1571,6 +1895,7 @@ pub(crate) fn wheel(view: &NshView, dy: f32) -> bool {
     let moved = input.scroll.get() != before;
     if moved {
         view.changed();
+        input.report_scroll(&layout);
         if input.focused.get()
             && let Some(surface) = surface_of(view)
         {
@@ -1578,6 +1903,33 @@ pub(crate) fn wheel(view: &NshView, dy: f32) -> bool {
         }
     }
     moved
+}
+
+/// `Command::ScrollTo` for a multiline input: scrolls its text to `y`,
+/// clamped to the lines that do not fit (a built-in bar's drags).
+pub(crate) fn scroll_to(view: &NshView, y: Points) {
+    let Some(input) = input_of(view) else {
+        return;
+    };
+    if !input.multiline() {
+        return;
+    }
+    let Some(layout) = input.layout() else {
+        return;
+    };
+    let before = input.scroll.get();
+    input.scroll.set(y.0);
+    // Clamped to the text.
+    input.origin(&layout);
+    if input.scroll.get() != before {
+        view.changed();
+        input.report_scroll(&layout);
+        if input.focused.get()
+            && let Some(surface) = surface_of(view)
+        {
+            report_caret(&surface, view, &input);
+        }
+    }
 }
 
 /// A right click on field `view`: it takes the focus (keeping its
@@ -2158,6 +2510,7 @@ mod tests {
                 Focus {
                     view: Some(view),
                     inactive: false,
+                    ..Default::default()
                 },
             )
         });

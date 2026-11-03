@@ -44,8 +44,9 @@ pub use completion::{
 pub use data::{
     EditorDecoration, EditorDiagnostic, EditorDiagnosticCodeDescription,
     EditorDiagnosticRelatedInformation, EditorDiagnosticSeverity, EditorDiagnosticTag, EditorEdit,
-    EditorFoldRange, EditorLocation, EditorPosition, EditorRange, EditorSearch, EditorSearchResult,
-    EditorSelection, EditorToken,
+    EditorFoldRange, EditorGutterMark, EditorGutterPlacement, EditorLocation,
+    EditorOverviewRulerLane, EditorOverviewRulerMark, EditorPosition, EditorRange, EditorSearch,
+    EditorSearchResult, EditorSelection, EditorToken,
 };
 pub use definition::{EditorCodeActionRequest, EditorDefinitionRequest, EditorDefinitionTrigger};
 pub use highlighter::{
@@ -142,6 +143,11 @@ pub struct EditorProps {
     /// run), carried through edits until the app sets new ones.
     #[prop(default)]
     pub decorations: Prop<Vec<EditorDecoration>>,
+    /// The width of the gutter's strip of decorations' marks
+    /// ([`EditorDecoration::gutter`]), in points (default 3). The strip,
+    /// before the line numbers, shows while a decoration has a mark there.
+    #[prop(default = Points(3.0))]
+    pub gutter_decorations_width: Prop<Points>,
     /// Classes of the editor's parts, after their own styles.
     #[prop(default)]
     pub classes: Prop<EditorClasses>,
@@ -265,6 +271,14 @@ pub enum EditorEvent {
     /// (`showCodeActions`, Mod+.): the app shows its menu at `bounds`.
     #[args(event)]
     CodeActionRequest(EditorCodeActionRequest),
+}
+
+/// What an [`Editor`]'s `replaceAll` did.
+#[derive(Debug, Clone, Copy, Default, PartialEq, JsObject)]
+#[non_exhaustive]
+pub struct EditorReplaceAll {
+    /// How many matches it replaced.
+    pub count: u32,
 }
 
 /// Where a context menu was asked for in an [`Editor`].
@@ -489,6 +503,20 @@ pub struct EditorApi {
     ed: Ed,
 }
 
+impl EditorApi {
+    /// Whether the text has line `line`: a ref's command runs at the
+    /// commit and cannot throw, so one given a line past the text does
+    /// nothing and is logged.
+    fn has_line(&self, method: &str, line: u32) -> bool {
+        let count = self.ed.st.borrow().buffer.line_count();
+        let has = (line as usize) < count;
+        if !has {
+            log::warn!("Editor.{method}: line {line} out of range (the text has {count})");
+        }
+        has
+    }
+}
+
 #[methods]
 impl EditorApi {
     /// Takes the focus.
@@ -547,24 +575,33 @@ impl EditorApi {
         self.ed.replace_current(&text);
     }
 
-    /// Replaces every match with `text`, as one edit: how many.
-    pub fn replace_all(&self, text: String) -> u32 {
-        self.ed.replace_all(&text)
+    /// Replaces every match with `text`, as one edit: `{ count }`, how
+    /// many.
+    pub fn replace_all(&self, text: String) -> EditorReplaceAll {
+        EditorReplaceAll {
+            count: self.ed.replace_all(&text),
+        }
     }
 
     /// Folds the lines under line `line` (from 0).
     pub fn fold(&self, line: u32) {
-        self.ed.fold(line as usize, Some(true));
+        if self.has_line("fold", line) {
+            self.ed.fold(line as usize, Some(true));
+        }
     }
 
     /// Unfolds line `line`.
     pub fn unfold(&self, line: u32) {
-        self.ed.fold(line as usize, Some(false));
+        if self.has_line("unfold", line) {
+            self.ed.fold(line as usize, Some(false));
+        }
     }
 
     /// Scrolls line `line` (from 0) into view.
     pub fn scroll_to_line(&self, line: u32) {
-        self.ed.scroll_to_line(line as usize);
+        if self.has_line("scrollToLine", line) {
+            self.ed.scroll_to_line(line as usize);
+        }
     }
 
     /// Whether there is an edit to take back.
@@ -634,18 +671,26 @@ impl EditorApi {
     /// Puts the caret at the start of line `line` (from 0) and scrolls it
     /// to the middle of the viewport.
     pub fn go_to_line(&self, line: u32) {
-        self.ed.go_to_line(line);
+        if self.has_line("goToLine", line) {
+            self.ed.go_to_line(line);
+        }
     }
 
     /// Folds the fold on line `line` (starting there, else the innermost
     /// one around it) and every fold inside it.
     pub fn fold_recursive(&self, line: u32) {
+        if !self.has_line("foldRecursive", line) {
+            return;
+        }
         let line = line as usize;
         self.ed.fold_with(|st| st.fold_recursive(line));
     }
 
     /// Unfolds the fold on line `line` and every fold inside it.
     pub fn unfold_recursive(&self, line: u32) {
+        if !self.has_line("unfoldRecursive", line) {
+            return;
+        }
         let line = line as usize;
         self.ed.fold_with(|st| st.unfold_recursive(line));
     }
@@ -658,6 +703,11 @@ impl EditorApi {
 
     /// Folds the lines of `range`, whether a fold can start there or not.
     pub fn fold_range(&self, range: EditorFoldRange) {
+        if !self.has_line("foldRange", range.start_line)
+            || !self.has_line("foldRange", range.end_line)
+        {
+            return;
+        }
         let (start, end) = (range.start_line as usize, range.end_line as usize);
         self.ed.fold_with(|st| st.fold_lines(start, end));
     }

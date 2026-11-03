@@ -18,7 +18,9 @@
 //! runtime/android/release/             classes.dex + lib/<abi>/libnsh.so
 //! runtime/android/dev/                 the same with development support
 //! runtime/web/nsh.wasm                 the web runtime (`nsh-platform-web`)
+//!                                      (`nsh-browser.wasm`: linkable, `nsh package` links each app's from it)
 //! runtime/web/nsh.js                   the DOM runtime that loads it
+//! runtime/web/nsh-syntaxes.bin         the syntaxes it fetches to highlight code
 //! ```
 //!
 //! In a cargo checkout, the same files come from `target/<triple>/<profile>`
@@ -157,12 +159,13 @@ pub(crate) fn cli_exe() -> std::io::Result<PathBuf> {
 }
 
 /// The Android runtime directory (`classes.dex`, `lib/<abi>/libnsh.so`),
-/// with development support or not.
-pub(crate) fn android(dev: bool) -> anyhow::Result<PathBuf> {
+/// with development support or not; a Rust app's library is built for
+/// `abis` (empty: every ABI of the prebuilt runtime).
+pub(crate) fn android(dev: bool, abis: &[String]) -> anyhow::Result<PathBuf> {
     let prebuilt = prebuilt_android(dev)?;
     match crate::rust_app::current() {
         // The app's own library with the prebuilt Java runtime.
-        Some(app) => app.android(&prebuilt, dev),
+        Some(app) => app.android(&prebuilt, dev, abis),
         None => Ok(prebuilt),
     }
 }
@@ -241,17 +244,99 @@ pub(crate) struct WebRuntime {
     /// through wasm-bindgen (`crate::bindgen`), served and packaged next to
     /// `nsh.js`.
     pub(crate) glue: Option<PathBuf>,
+    /// The syntaxes the module leaves out ([`SYNTAXES`]), which the page
+    /// fetches the first time code is highlighted.
+    pub(crate) syntaxes: Option<PathBuf>,
 }
 
-/// Which web runtime: the two differ in QuickJS only.
+/// The file of the syntaxes the web runtime leaves out of `nsh.wasm`:
+/// two-face's dump of bat's, which `nsh-base` embeds on the native
+/// platforms. It sits next to the module of the build that made it.
+pub(crate) const SYNTAXES: &str = "nsh-syntaxes.bin";
+
+/// The syntaxes file of the runtime in `dir`, if it has one.
+pub(crate) fn syntaxes_in(dir: &Path) -> Option<PathBuf> {
+    Some(dir.join(SYNTAXES)).filter(|path| path.exists())
+}
+
+/// Writes [`SYNTAXES`] into `dir`: two-face's dump as the workspace of
+/// `manifest` resolves it, so it matches the syntect the runtime built
+/// there reads it with. A copy written after the workspace's lock file last
+/// changed is kept: the resolution is the same, and `cargo metadata` takes
+/// longer than an incremental build of a development runtime.
+pub(crate) fn write_syntaxes(manifest: &Path, dir: &Path) -> anyhow::Result<PathBuf> {
+    let to = dir.join(SYNTAXES);
+    let modified = |path: &Path| fs::metadata(path).and_then(|m| m.modified()).ok();
+    if let (Some(copy), Some(lock)) = (
+        modified(&to),
+        modified(&manifest.with_file_name("Cargo.lock")),
+    ) && copy > lock
+    {
+        return Ok(to);
+    }
+    let package = package_dir(manifest, "two-face", None)?;
+    let dump = package.join("generated/syntaxes-fancy-newlines.bin");
+    // Written, not copied: a copy may keep the source's time, which is
+    // what tells this copy's age.
+    let bytes = fs::read(&dump).with_context(|| format!("read {}", dump.display()))?;
+    fs::write(&to, bytes).with_context(|| format!("write {}", to.display()))?;
+    Ok(to)
+}
+
+/// The directory of package `name` (at `version`, when given) in the
+/// workspace of `manifest`, as `cargo metadata` resolves it.
+pub(crate) fn package_dir(
+    manifest: &Path,
+    name: &str,
+    version: Option<&str>,
+) -> anyhow::Result<PathBuf> {
+    let cargo = env::var_os("CARGO").unwrap_or_else(|| OsString::from("cargo"));
+    let output = Command::new(cargo)
+        .args(["metadata", "--format-version", "1", "--manifest-path"])
+        .arg(manifest)
+        .output()
+        .context("run cargo metadata")?;
+    if !output.status.success() {
+        bail!(
+            "cargo metadata of {}:\n{}",
+            manifest.display(),
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+    }
+    let metadata: serde_json::Value =
+        serde_json::from_slice(&output.stdout).context("cargo metadata's output")?;
+    let mut found = metadata["packages"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|p| p["name"].as_str() == Some(name))
+        .filter(|p| version.is_none_or(|v| p["version"].as_str() == Some(v)));
+    let package = found.next();
+    if found.next().is_some() {
+        bail!("{} resolves several versions of {name}", manifest.display());
+    }
+    package
+        .and_then(|p| {
+            Path::new(p["manifest_path"].as_str()?)
+                .parent()
+                .map(Path::to_path_buf)
+        })
+        .with_context(|| match version {
+            Some(version) => format!("{} resolves no {name} {version}", manifest.display()),
+            None => format!("{} resolves no {name}", manifest.display()),
+        })
+}
+
+/// Which web runtime.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum WebKind {
-    /// Published apps' (`nsh package --target web`): without QuickJS'
-    /// parser (feature `bytecode-only`), it runs the bytecode the CLI
-    /// compiled. `nsh.wasm`.
-    Release,
+    /// Published apps': every part of `nsh/base` and every standard
+    /// module, linkable (feature `linkable`): `nsh package` drops what the
+    /// app does not use (`web/prune.rs`). `nsh-browser.wasm`.
+    Browser,
     /// The development host's (`nsh dev`, `nsh run --target web`): it runs
-    /// JS source and hot updates. `nsh-dev.wasm`.
+    /// development bundles on the browser's JavaScript engine, with hot
+    /// updates. `nsh-dev.wasm`.
     Dev,
 }
 
@@ -260,10 +345,23 @@ impl WebKind {
     /// next to the build's output.
     pub(crate) fn file(self) -> &'static str {
         match self {
-            WebKind::Release => "nsh.wasm",
+            WebKind::Browser => "nsh-browser.wasm",
             WebKind::Dev => "nsh-dev.wasm",
         }
     }
+
+    /// The features `nsh-platform-web` is built with for it.
+    pub(crate) fn features(self) -> &'static [&'static str] {
+        match self {
+            WebKind::Browser => &["--no-default-features", "--features", "browser,linkable"],
+            WebKind::Dev => &["--no-default-features", "--features", "dev"],
+        }
+    }
+}
+
+/// The web runtime `nsh package` links an app's from ([`WebKind::Browser`]).
+pub(crate) fn package_web() -> anyhow::Result<WebRuntime> {
+    web(WebKind::Browser, true)?.context("no web runtime")
 }
 
 /// The web runtime ([`WebRuntime`]) of `kind`. In a checkout it is built
@@ -289,6 +387,7 @@ pub(crate) fn web(kind: WebKind, build: bool) -> anyhow::Result<Option<WebRuntim
             wasm: dir.join(kind.file()),
             js: dir.join("nsh.js"),
             glue: None,
+            syntaxes: syntaxes_in(&dir),
         };
         (runtime.wasm.exists() && runtime.js.exists()).then_some(runtime)
     };
@@ -319,10 +418,7 @@ pub(crate) fn web(kind: WebKind, build: bool) -> anyhow::Result<Option<WebRuntim
         .context("cli is not in a target directory")?
         .join(WASM)
         .join("web");
-    let features: &[&str] = match kind {
-        WebKind::Release => &["--features", "bytecode-only"],
-        WebKind::Dev => &["--features", "dev"],
-    };
+    let features = kind.features();
     if build {
         let cargo = env::var_os("CARGO").unwrap_or_else(|| OsString::from("cargo"));
         let mut command = Command::new(&cargo);
@@ -332,7 +428,8 @@ pub(crate) fn web(kind: WebKind, build: bool) -> anyhow::Result<Option<WebRuntim
             .args(["--target", WASM])
             .current_dir(&root);
         web_build_flags(&mut command);
-        // QuickJS' archive needs an `ar` that knows WebAssembly objects.
+        // The C code of the dependencies (zstd) needs an `ar` that knows
+        // WebAssembly objects.
         let ar = format!("AR_{}", WASM.replace('-', "_"));
         if env::var_os(&ar).is_none() && env::var_os("AR").is_none() {
             command.env(&ar, "llvm-ar");
@@ -342,11 +439,13 @@ pub(crate) fn web(kind: WebKind, build: bool) -> anyhow::Result<Option<WebRuntim
         let built = out.join("nsh_platform_web.wasm");
         fs::copy(&built, out.join(kind.file()))
             .with_context(|| format!("copy {}", built.display()))?;
+        write_syntaxes(&root.join("Cargo.toml"), &out)?;
     }
     let runtime = WebRuntime {
         wasm: out.join(kind.file()),
         js: root.join("crates/nsh-platform-web/web/nsh.js"),
         glue: None,
+        syntaxes: syntaxes_in(&out),
     };
     if runtime.wasm.exists() {
         return Ok(Some(runtime));
@@ -522,9 +621,37 @@ fn existing(path: PathBuf, platform: Platform, name: &str) -> anyhow::Result<Pat
     )
 }
 
+/// The browser facade ships with the runtime, including registry-built apps.
+pub(crate) fn copy_browser_host(source: &Path, target: &Path) -> anyhow::Result<()> {
+    let from = source.join("browser");
+    let to = target.join("browser");
+    fs::create_dir_all(&to)?;
+    for entry in fs::read_dir(from)? {
+        let entry = entry?;
+        if entry
+            .path()
+            .extension()
+            .is_some_and(|ext| ext == "js" || ext == "txt")
+        {
+            fs::copy(entry.path(), to.join(entry.file_name()))?;
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::Platform;
+
+    #[test]
+    fn published_runtime_variants_use_browser_execution() {
+        use super::WebKind;
+        assert_eq!(
+            WebKind::Browser.features(),
+            ["--no-default-features", "--features", "browser,linkable"]
+        );
+        assert_eq!(WebKind::Browser.file(), "nsh-browser.wasm");
+    }
 
     #[test]
     fn web_entropy_flags_preserve_existing_rustflags() {
@@ -578,5 +705,38 @@ mod tests {
             format!("nsh-gpui-host{}", std::env::consts::EXE_SUFFIX)
         );
         assert_eq!(Platform::Gpui.host(false), "the development host for GPUI");
+    }
+
+    /// A rebuild of a development runtime keeps the syntaxes it has rather
+    /// than asking `cargo metadata` again, until the lock file changes.
+    #[test]
+    fn syntaxes_newer_than_the_lock_file_are_kept() {
+        use std::{
+            fs,
+            time::{Duration, SystemTime},
+        };
+
+        let dir = std::env::temp_dir().join(format!("nsh-syntaxes-kept-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let touch = |name: &str, contents: &str, secs: u64| {
+            let path = dir.join(name);
+            fs::write(&path, contents).unwrap();
+            let time = SystemTime::UNIX_EPOCH + Duration::from_secs(secs);
+            fs::File::options()
+                .write(true)
+                .open(&path)
+                .unwrap()
+                .set_modified(time)
+                .unwrap();
+        };
+        // No workspace there: asking `cargo metadata` about it fails.
+        let manifest = dir.join("Cargo.toml");
+        touch("Cargo.lock", "", 1_000);
+        touch(super::SYNTAXES, "kept", 2_000);
+        let path = super::write_syntaxes(&manifest, &dir).unwrap();
+        assert_eq!(fs::read_to_string(path).unwrap(), "kept");
+        touch("Cargo.lock", "", 3_000);
+        assert!(super::write_syntaxes(&manifest, &dir).is_err());
+        let _ = fs::remove_dir_all(&dir);
     }
 }

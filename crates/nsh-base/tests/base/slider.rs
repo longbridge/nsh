@@ -3,11 +3,15 @@
 //! at one value part the way a drag starting on them goes; the keyboard moves the
 //! focused thumb by WAI-ARIA's slider keys, and a screen reader's
 //! increment and decrement step it; a disabled slider takes none of it; the
-//! app owns a controlled value, and an uncontrolled slider keeps its own.
+//! app owns a controlled value, and an uncontrolled slider keeps its own. In
+//! a right-to-left layout a horizontal slider runs from the right: its
+//! `min` at the right, drags and Left raising it.
+
+use std::sync::{Arc, Mutex};
 
 use nsh_base::{SliderValue, slider};
 use nsh_core::{
-    EventKind, EventPayload, PayloadValue, Size,
+    EventKind, EventPayload, MountItem, PayloadValue, Size,
     element::Root,
     geometry::{Axis, point},
     platform::Os,
@@ -102,11 +106,17 @@ fn Harness(props: HarnessProps) -> impl IntoElement {
 /// The harness of `props` on a headless macOS surface (Tab stops at the
 /// thumbs there).
 fn start(props: HarnessProps) -> Headless {
+    start_in(props, false)
+}
+
+/// [`start`] in a right-to-left layout with `rtl`.
+fn start_in(props: HarnessProps, rtl: bool) -> Headless {
     let mut config = EngineConfig {
         viewport: Size::new(px(400.0), px(844.0)),
         ..EngineConfig::new(Root::new::<Harness>(move || props.clone()))
     };
     config.environment.os = Os::MacOs;
+    config.environment.rtl = rtl;
     let mut app = Headless::start(config).expect("the engine starts");
     app.wait_for("text:Ends").unwrap();
     app
@@ -209,6 +219,39 @@ fn keys_move_the_focused_thumb_and_each_is_a_whole_change() {
 }
 
 #[test]
+fn right_to_left_left_raises_a_horizontal_slider() {
+    let mut app = start_in(controlled(40.0), true);
+    app.press_key("tab").unwrap();
+    app.press_key("left").unwrap();
+    app.wait_for("text:Value 45").unwrap();
+    app.press_key("right").unwrap();
+    app.wait_for("text:Value 40").unwrap();
+    // Up and Down, Home and End keep their meaning.
+    app.press_key("up").unwrap();
+    app.wait_for("text:Value 45").unwrap();
+    app.press_key("down").unwrap();
+    app.wait_for("text:Value 40").unwrap();
+    app.press_key("end").unwrap();
+    app.wait_for("text:Value 100").unwrap();
+    assert!(app.shows("Ends 45, 40, 45, 40, 100"));
+}
+
+#[test]
+fn right_to_left_a_vertical_slider_keeps_its_keys() {
+    let mut props = controlled(40.0);
+    props.vertical = true;
+    let mut app = start_in(props, true);
+    app.press_key("tab").unwrap();
+    app.press_key("right").unwrap();
+    app.wait_for("text:Value 45").unwrap();
+    app.press_key("left").unwrap();
+    app.wait_for("text:Value 40").unwrap();
+    // A drag up raises it, as in a left-to-right layout.
+    app.drag("label:Volume", point(px(0.0), px(-40.0))).unwrap();
+    app.wait_for("text:Value 60").unwrap();
+}
+
+#[test]
 fn a_screen_reader_steps_each_thumb() {
     let mut app = start(controlled((20.0, 60.0)));
     accessibility_action(&mut app, "label:Low", "increment");
@@ -264,4 +307,96 @@ fn an_uncontrolled_slider_keeps_its_own_value() {
     app.press_key("tab").unwrap();
     app.press_key("right").unwrap();
     app.wait_for("text:Ends 60, 70, 75").unwrap();
+}
+
+/// What the thumb `Volume` was sent: where its frame starts along the
+/// track, and the values screen readers were given, in order.
+#[derive(Default)]
+struct Sent {
+    lefts: Vec<f32>,
+    said: Vec<Option<f32>>,
+}
+
+/// The harness of `props`, recording what its thumb is sent.
+fn start_watching(props: HarnessProps) -> (Headless, Arc<Mutex<Sent>>) {
+    start_watching_in(props, false)
+}
+
+/// [`start_watching`] in a right-to-left layout with `rtl`.
+fn start_watching_in(props: HarnessProps, rtl: bool) -> (Headless, Arc<Mutex<Sent>>) {
+    let mut app = start_in(props, rtl);
+    let thumb = app
+        .screen()
+        .press_target("label:Volume")
+        .unwrap()
+        .expect("a thumb");
+    let sent = Arc::new(Mutex::new(Sent::default()));
+    let into = sent.clone();
+    app.observe(move |_, batch| {
+        let mut sent = into.lock().unwrap();
+        for item in &batch.items {
+            match item {
+                MountItem::Frame { id, frame } if *id == thumb => sent.lefts.push(frame.origin.x.0),
+                MountItem::ViewProps { id, props } if *id == thumb => sent
+                    .said
+                    .push(props.accessibility.value.as_ref().and_then(|v| v.now)),
+                _ => {}
+            }
+        }
+    });
+    (app, sent)
+}
+
+#[test]
+fn a_drag_moves_the_thumb_natively_before_the_app_answers() {
+    // An app that keeps 40: the thumb still follows the pointer during the
+    // drag (no wait for `onChange` to come back as `value`), and goes back
+    // to the app's value when the drag ends.
+    let mut props = controlled(40.0);
+    props.refusing = true;
+    let (mut app, sent) = start_watching(props);
+    // 40 points of 200 from 40%: 60%, 120 points along the indicator.
+    app.drag_and_hold("label:Volume", point(px(40.0), px(0.0)))
+        .unwrap();
+    app.wait_for("text:Changes 45, 50, 55, 60").unwrap();
+    assert_eq!(sent.lock().unwrap().lefts.last(), Some(&120.0));
+    assert!(app.shows("Value 40"));
+    app.drop_held().unwrap();
+    app.wait_for("text:Ends 60").unwrap();
+    assert_eq!(sent.lock().unwrap().lefts.last(), Some(&80.0));
+}
+
+#[test]
+fn right_to_left_the_thumb_sits_from_the_right_and_a_drag_left_raises_it() {
+    let mut props = controlled(40.0);
+    props.refusing = true;
+    let (mut app, sent) = start_watching_in(props, true);
+    // 40% from the right end of 200: 80 from it, 120 from the left.
+    app.drag_and_hold("label:Volume", point(px(-40.0), px(0.0)))
+        .unwrap();
+    app.wait_for("text:Changes 45, 50, 55, 60").unwrap();
+    // 60% from the right: 80 from the left.
+    assert_eq!(sent.lock().unwrap().lefts.last(), Some(&80.0));
+    app.drop_held().unwrap();
+    app.wait_for("text:Ends 60").unwrap();
+    assert_eq!(sent.lock().unwrap().lefts.last(), Some(&120.0));
+}
+
+#[test]
+fn screen_readers_hear_a_drags_value_at_its_end() {
+    let (mut app, sent) = start_watching(controlled(40.0));
+    app.drag_and_hold("label:Volume", point(px(40.0), px(0.0)))
+        .unwrap();
+    app.wait_for("text:Value 60").unwrap();
+    // No screen reader runs: the moves send the thumb no value.
+    assert!(
+        sent.lock()
+            .unwrap()
+            .said
+            .iter()
+            .all(|now| *now == Some(40.0)),
+    );
+    app.drop_held().unwrap();
+    app.wait_for("text:Ends 60").unwrap();
+    assert_eq!(sent.lock().unwrap().said.last(), Some(&Some(60.0)));
 }

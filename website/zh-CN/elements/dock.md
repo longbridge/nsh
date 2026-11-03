@@ -1,7 +1,6 @@
 ---
 title: Dock
 description: DockArea：由分栏、标签组以及左、右、下三条边上的停靠区组成的可停靠工作区，布局是应用持有的数据。区域负责标签页的拖放、调整大小、停靠区、放大和锁定，面板移动时保留它的内容，并适配手机；外观和面板的内容都属于应用。
-order: 29.6
 group: base
 demo: el-dock
 ---
@@ -66,7 +65,7 @@ function App() {
     <DockArea
       class="size-full bg-background"
       layout={layout()}
-      onLayoutChange={(v) => layout.set(v)}
+      onLayoutChange={(e) => layout.set(e.layout)}
       handleClass="bg-border group-active:bg-primary"
       tabBarClass="flex-row border-b border-border"
       tabClass="px-3 py-1.5 selected:bg-muted"
@@ -107,10 +106,10 @@ mount(App);
 ```tsx
 <DockArea
   layout={layout()}
-  onLayoutChange={(v) => layout.set(v)}
+  onLayoutChange={(e) => layout.set(e.layout)}
   renderPanel={(panel) => (panel.id === "terminal" ? <Terminal /> : <Editor file={panel.id} />)}
-  onPanelActiveChange={(panel, active) => active && setTitle(panel)}
-  onPanelRemove={(panel) => closeFile(panel)}
+  onPanelActiveChange={({ panel, active }) => active && setTitle(panel)}
+  onPanelRemove={({ panel }) => closeFile(panel)}
 />
 ```
 
@@ -144,7 +143,7 @@ let area!: DockAreaRef;
 <DockArea
   ref={area}
   layout={layout()}
-  onLayoutChange={(v) => layout.set(v)}
+  onLayoutChange={(e) => layout.set(e.layout)}
   renderTab={(tab) => (
     <View class="flex-row items-center gap-2">
       <Text class="text-sm">{titles[tab.panel]}</Text>
@@ -189,8 +188,8 @@ const terminalOpen = signal(true);
 <DockArea
   ref={area}
   layout={layout()}
-  onLayoutChange={(v) => layout.set(v)}
-  onDockOpenChange={(placement, open) => placement === "bottom" && terminalOpen.set(open)}
+  onLayoutChange={(e) => layout.set(e.layout)}
+  onDockOpenChange={({ placement, open }) => placement === "bottom" && terminalOpen.set(open)}
   renderPanel={(panel) => <Editor file={panel.id} />}
 />
 
@@ -215,7 +214,7 @@ const terminalOpen = signal(true);
 
 ## 方法
 
-`ref={area}` 提供区域的方法（`DockAreaRef`），供应用自己的命令、快捷键和菜单使用。每次编辑都和用户的操作一样通过 `onLayoutChange` 报告。
+`ref={area}` 提供区域的方法（`DockAreaRef`），供应用自己的命令、快捷键和菜单使用。每次编辑都和用户的操作一样通过 `onLayoutChange` 报告。方法收到布局中没有的面板、组、标签页序号或停靠区时，布局保持不变，并在日志中记一条警告，写明方法和那个值。
 
 | 方法 | 说明 |
 |---|---|
@@ -260,7 +259,7 @@ const terminalOpen = signal(true);
 ```tsx
 <DockArea
   layout={layout()}
-  onLayoutChange={(v) => layout.set(v)}
+  onLayoutChange={(e) => layout.set(e.layout)}
   drawerClass="bg-background border-r border-border"
   sheetClass="rounded-t-(--radius-lg) bg-background"
   backdropClass="bg-black/40"
@@ -307,11 +306,11 @@ const terminalOpen = signal(true);
 
 | 事件 | Rust | 说明 |
 |---|---|---|
-| `onLayoutChange` | `.on_layout_change(\|layout: &DockAreaLayout\| ..)` | 布局改变了（拖动、选中、调整大小、打开或关闭停靠区、调用方法）：完整的新布局，带有每个 id。 |
-| `onPanelActiveChange` | `.on_panel_active_change(\|e: &DockAreaEvent\| ..)`（`PanelActiveChange(panel, active)`） | 面板成为或不再是它所在组当前显示的标签页（关闭的停靠区不显示任何面板）。每次变化报告一次；离开的面板不会收到 `false`：`onPanelRemove` 就是它的结束。 |
-| `onPanelRemove` | `.on_panel_remove(\|panel: &PanelId\| ..)` | 面板永久离开了区域：被关闭、被移除，或不在新的布局中。移动的面板不会收到它。 |
-| `onZoomChange` | `.on_zoom_change(\|panel: &Option<PanelId>\| ..)` | 一个组放大（它显示的面板）或还原（`null`）。 |
-| `onDockOpenChange` | `.on_dock_open_change(\|e: &DockAreaEvent\| ..)`（`DockOpenChange(placement, open)`） | 停靠区显示或隐藏了：完整方式中它布局的 `open` 改变，紧凑方式中它的抽屉或底部面板被显示或收起，或者呈现方式切换了。 |
+| `onLayoutChange` | `.on_layout_change(\|layout: &DockAreaLayout\| ..)` | 布局改变了（拖动、选中、调整大小、打开或关闭停靠区、调用方法）：`{ layout }`，完整的新布局，带有每个 id。 |
+| `onPanelActiveChange` | `.on_panel_active_change(\|e: &DockAreaEvent\| ..)`（`PanelActiveChange(panel, active)`） | `{ panel, active }`：面板成为或不再是它所在组当前显示的标签页（关闭的停靠区不显示任何面板）。每次变化报告一次；离开的面板不会收到 `false`：`onPanelRemove` 就是它的结束。 |
+| `onPanelRemove` | `.on_panel_remove(\|panel: &PanelId\| ..)` | `{ panel }`：面板永久离开了区域：被关闭、被移除，或不在新的布局中。移动的面板不会收到它。 |
+| `onZoomChange` | `.on_zoom_change(\|panel: &Option<PanelId>\| ..)` | 一个组放大或还原：`{ panel }`，它显示的面板，或 `null`。 |
+| `onDockOpenChange` | `.on_dock_open_change(\|e: &DockAreaEvent\| ..)`（`DockOpenChange(placement, open)`） | `{ placement, open }`：停靠区显示或隐藏了：完整方式中它布局的 `open` 改变，紧凑方式中它的抽屉或底部面板被显示或收起，或者呈现方式切换了。 |
 
 <a id="parts"></a>
 

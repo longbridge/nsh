@@ -358,7 +358,16 @@ Rust 组件、`#[module]` 函数和 `#[class]` 成员在任务中调用 `fetch`�
 
 这些检查在 NSH 的运行时中、在应用代码之外执行，请求到达网络之前就已完成：
 
-- 被拒绝的 `fetch` 会失败（TSX 中为 `TypeError`），消息中指出需要添加的键，例如 ``Network request failed: fetch GET https://evil.io/ is not granted: add `evil.io` to capabilities.network in nsh.json``。
+- 被拒绝的 `fetch` 会失败（TSX 中与每个失败的请求一样为 `TypeError`），消息中指出需要添加的键，例如 ``Network request failed: fetch GET https://evil.io/ is not granted: add `evil.io` to capabilities.network in nsh.json``。TSX 中错误的 `code` 为 `"ERR_ACCESS_DENIED"`，`permission` 为 `"network"`，`resource` 为被拒绝的 URL（请求的或重定向的），应用借此区分被拒绝与连接中断：
+
+  ```ts
+  try {
+    await fetch(url);
+  } catch (error) {
+    if (error.code === "ERR_ACCESS_DENIED") console.warn(`not granted: ${error.resource}`);
+    else throw error;
+  }
+  ```
 - **每次重定向都会再次检查。** NSH 自己跟随重定向（最多 20 次），而不交给平台处理，所以获准的主机无法把应用重定向到未获准的主机。
 - 同样的 `network` 授权也适用于远程图片（包括画布中的图片和 `Image.getSize` / `prefetch`）和视频来源。应用自身包中的 `asset:` URI 始终允许。
 - 主机取最后一个 `@` 之后的部分，所以 `https://ok.com@evil.io` 被视为 `evil.io`。
@@ -373,6 +382,7 @@ TSX 的 `fetch` 遵循 Fetch 标准，但在对应用（而不是网页）有意
 - **没有禁止的请求头。** 应用可以设置 `Cookie`、`User-Agent`、`Origin` 等。
 - **`redirect: "manual"`** 返回 3xx 响应本身（带有 `Location` 头），而不是不透明重定向。`redirect: "error"` 遇到重定向时拒绝。
 - **`data:` 和 `blob:` URL** 在本地应答。`URL.createObjectURL(blob)` 生成一个 `blob:` URL，在撤销之前 `fetch` 都可以读取它。
+- **`asset:/` URL** 指应用随附的文件，从应用自身的文件中读取，无需任何能力授权（[运行时读取文件](./images-and-assets.md#运行时读取文件)）。
 - 浏览器专用的选项（`mode`、`credentials`、`cache`、`referrer`、`integrity`、`keepalive`、`priority`）为兼容各种库而被接受。
 
 基于 `fetch`（以及 `AbortController`、`FormData` 和流）构建的库通常无需修改即可使用。没有 `XMLHttpRequest`；原生宿主提供全局 `WebSocket` 和 [`websocket` 模块](../modules/standard-modules.md)，按与 `fetch` 相同的授权检查。

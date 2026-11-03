@@ -11,7 +11,7 @@
 //! UAX #14, enough for app text.
 
 use std::{
-    cell::RefCell,
+    cell::{Cell, RefCell},
     ops::Range,
     sync::{Arc, OnceLock},
 };
@@ -23,7 +23,10 @@ use nsh_core::{
 use rustc_hash::FxHashMap;
 
 pub(crate) use self::css::{css_font, font_variant_numeric};
-use self::{css::measured_by_char, hit::Stop};
+use self::{
+    css::{emoji_excess, figure_width, measured_by_char},
+    hit::Stop,
+};
 use crate::ffi;
 
 mod css;
@@ -40,6 +43,12 @@ type WidthKey = (Arc<str>, Option<Arc<str>>, String);
 pub(crate) struct WebTextEngine {
     /// Width of `(font, font-variant-numeric, text)`.
     widths: RefCell<FxHashMap<WidthKey, f32>>,
+    /// How much wider the DOM draws an emoji cluster in a font than canvas
+    /// measures it.
+    emoji: RefCell<FxHashMap<(Arc<str>, String), f32>>,
+    /// Whether a width since the caches were cleared has an emoji's excess:
+    /// those are stale once the pixel ratio changes.
+    emoji_measured: Cell<bool>,
     /// Ascent and descent of a font.
     metrics: RefCell<FxHashMap<Arc<str>, (f32, f32)>>,
     /// The x height of a font (attachments in the middle of a line).
@@ -51,6 +60,8 @@ impl WebTextEngine {
     /// measured with a fallback font is stale.
     pub(crate) fn clear_caches(&self) {
         self.widths.borrow_mut().clear();
+        self.emoji.borrow_mut().clear();
+        self.emoji_measured.set(false);
         self.metrics.borrow_mut().clear();
         self.x_heights.borrow_mut().clear();
     }
@@ -73,16 +84,17 @@ impl WebTextEngine {
         if text.is_empty() {
             return 0.0;
         }
-        // A figure is the sum of its characters, each measured once: a live
-        // value lays the page out for no new one, and its strings, new on
-        // every update, stay out of the cache.
+        // A figure is measured by its characters and pairs, each once: a
+        // live value lays the page out for no new one, and its strings, new
+        // on every update, stay out of the cache.
         if numeric.is_some() && text.chars().nth(1).is_some() && measured_by_char(text) {
-            let mut buf = [0u8; 4];
-            return text
-                .chars()
-                .map(|c| self.width(font, numeric, c.encode_utf8(&mut buf)))
-                .sum();
+            return figure_width(text, |part| self.measured(font, numeric, part));
         }
+        self.measured(font, numeric, text)
+    }
+
+    /// The width of `text` measured whole, cached.
+    fn measured(&self, font: &Arc<str>, numeric: Option<&Arc<str>>, text: &str) -> f32 {
         let key = (font.clone(), numeric.cloned(), text.to_owned());
         if let Some(&w) = self.widths.borrow().get(&key) {
             return w;
@@ -91,7 +103,10 @@ impl WebTextEngine {
             // Canvas cannot measure numeric variants: tabular digits are
             // wider than the proportional ones it measures.
             Some(numeric) => ffi::measure_numeric_text(font, numeric, text),
-            None => ffi::measure_text(font, text),
+            None => {
+                ffi::measure_text(font, text)
+                    + emoji_excess(text, |cluster| self.cluster_excess(font, cluster))
+            }
         };
         let mut widths = self.widths.borrow_mut();
         // Bounded: a long-running app measures many distinct strings.
@@ -100,6 +115,31 @@ impl WebTextEngine {
         }
         widths.insert(key, w);
         w
+    }
+
+    /// Whether a width measured since the caches were cleared has an
+    /// emoji's excess ([`emoji_excess`]).
+    pub(crate) fn emoji_measured(&self) -> bool {
+        self.emoji_measured.get()
+    }
+
+    /// How much wider the DOM draws emoji `cluster` than canvas measures
+    /// it: measured in the DOM once per font, so a line being typed is
+    /// still measured on canvas.
+    fn cluster_excess(&self, font: &Arc<str>, cluster: &str) -> f32 {
+        self.emoji_measured.set(true);
+        let key = (font.clone(), cluster.to_owned());
+        if let Some(&e) = self.emoji.borrow().get(&key) {
+            return e;
+        }
+        let e =
+            ffi::measure_numeric_text(font, "normal", cluster) - ffi::measure_text(font, cluster);
+        let mut emoji = self.emoji.borrow_mut();
+        if emoji.len() > 20_000 {
+            emoji.clear();
+        }
+        emoji.insert(key, e);
+        e
     }
 
     fn run_width(&self, run: &RunStyle, text: &str) -> f32 {
@@ -262,6 +302,9 @@ pub(crate) struct Prepared {
     ellipsize: EllipsizeMode,
     no_wrap: bool,
     rtl: bool,
+    /// The UTF-16 ranges of the text's links (`AttributedText::links`), in
+    /// their order.
+    links: Box<[(u32, u32)]>,
 }
 
 /// One drawn run.
@@ -272,6 +315,15 @@ pub(crate) struct Run {
     pub(crate) y: f32,
     pub(crate) text: String,
     pub(crate) style: u16,
+    /// Offset of its first character (UTF-16 units); `None` when it begins
+    /// with a truncated line's `…`, which belongs to no offset.
+    pub(crate) start: Option<u32>,
+    /// Its characters in links: `(from, to, link)`, UTF-16 units in the
+    /// run and an index into `AttributedText::links` (the innermost).
+    /// They stay in the run, whose shaping and bidi order they keep.
+    pub(crate) links: Vec<(u32, u32, u16)>,
+    /// It ends with a truncated line's `…`, which belongs to no offset.
+    ellipsis: bool,
     /// What follows the run when the text is copied: the line's break (a
     /// newline, or the spaces a wrap dropped) after its last run.
     pub(crate) after: String,
@@ -378,6 +430,39 @@ struct Part {
     /// The `…` of a truncated last line, which is drawn but belongs to no
     /// offset.
     ellipsis: bool,
+}
+
+/// The characters of a run starting at `start` that are in `links`:
+/// `(from, to, link)` in the run, each part in one innermost link.
+fn link_parts(links: &[(u32, u32)], start: u32, text: &str) -> Vec<(u32, u32, u16)> {
+    let end = start + text.encode_utf16().count() as u32;
+    let mut cuts: Vec<u32> = links
+        .iter()
+        .flat_map(|&(s, e)| [s, e])
+        .filter(|&b| b > start && b < end)
+        .collect();
+    cuts.push(start);
+    cuts.push(end);
+    cuts.sort_unstable();
+    cuts.dedup();
+    let mut parts: Vec<(u32, u32, u16)> = Vec::new();
+    for pair in cuts.windows(2) {
+        let (from, to) = (pair[0], pair[1]);
+        let Some(link) = links
+            .iter()
+            .enumerate()
+            .filter(|(_, (s, e))| from >= *s && from < *e)
+            .min_by_key(|(_, (s, e))| e - s)
+            .and_then(|(i, _)| u16::try_from(i).ok())
+        else {
+            continue;
+        };
+        match parts.last_mut() {
+            Some(last) if last.1 == from - start && last.2 == link => last.1 = to - start,
+            _ => parts.push((from - start, to - start, link)),
+        }
+    }
+    parts
 }
 
 impl WebTextEngine {
@@ -646,6 +731,7 @@ impl TextEngine for WebTextEngine {
             ellipsize: text.ellipsize,
             no_wrap: text.no_wrap,
             rtl: text.writing_direction.unwrap_or(text.rtl),
+            links: text.links.iter().map(|l| (l.start, l.end)).collect(),
         }
     }
 
@@ -708,7 +794,11 @@ impl TextEngine for WebTextEngine {
                 })
                 .collect();
             let mut width = line.width;
+            // Not drawn, but a caret after them stands past them: the line
+            // reports them in its width, as CoreText's lines do.
+            let mut hanging: f32 = atoms[end..line.end].iter().map(|a| a.width).sum();
             if last && truncated && prepared.ellipsize != EllipsizeMode::Clip {
+                hanging = 0.0;
                 let style = pieces.last().map_or(0, |p| p.style);
                 let ellipsis = self.run_width(&styles[style as usize], "…");
                 // Drop characters from the end until the ellipsis fits.
@@ -795,6 +885,7 @@ impl TextEngine for WebTextEngine {
                     Some(r) if merge && r.style == style => {
                         let byte = r.text.len();
                         r.text.push_str(&text);
+                        r.ellipsis |= ellipsis;
                         (index.saturating_sub(1), byte)
                     }
                     _ => {
@@ -803,6 +894,9 @@ impl TextEngine for WebTextEngine {
                             y: baseline - s.ascent,
                             text,
                             style,
+                            start: (!ellipsis).then_some(start),
+                            links: Vec::new(),
+                            ellipsis,
                             after: String::new(),
                         });
                         (index, 0)
@@ -872,7 +966,7 @@ impl TextEngine for WebTextEngine {
                 end: line_end,
                 x: Points(x0),
                 y: Points(y),
-                width: Points(width),
+                width: Points(width + hanging),
                 height: Points(line.height),
                 ascender: Points(first.ascent),
                 descender: Points(first.descent),
@@ -884,6 +978,17 @@ impl TextEngine for WebTextEngine {
                 stops: OnceLock::new(),
             });
             y += line.height;
+        }
+        if !prepared.links.is_empty() {
+            for run in &mut runs {
+                if let Some(start) = run.start {
+                    let text = match run.ellipsis {
+                        true => run.text.strip_suffix('…').unwrap_or(&run.text),
+                        false => &run.text,
+                    };
+                    run.links = link_parts(&prepared.links, start, text);
+                }
+            }
         }
         TextLayout(Arc::new(WebLayout {
             runs,
@@ -945,5 +1050,15 @@ impl TextEngine for WebTextEngine {
         // when the face finishes loading: `nsh_fonts_loaded`).
         self.clear_caches();
         Ok(())
+    }
+}
+
+/// Canvas drawings use the same font and numeric-variant measurements as text.
+#[cfg(feature = "browser-core")]
+pub(crate) fn canvas_width(font: &nsh_core::canvas::CanvasFont, text: &str) -> f32 {
+    let css = crate::canvas::font(font);
+    match css::font_variant_numeric(font.variant) {
+        Some(numeric) => ffi::measure_numeric_text(&css, &numeric, text),
+        None => ffi::measure_text(&css, text),
     }
 }

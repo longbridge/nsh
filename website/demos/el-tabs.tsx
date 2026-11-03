@@ -48,12 +48,16 @@ function App() {
     <View style={{ flex: 1, backgroundColor: ui().page, padding: 20, paddingTop: 24, gap: 14 }}>
       <Text style={{ fontSize: 22, fontWeight: "700", color: ui().text }}>tabs</Text>
       <Text style={{ color: ui().muted }}>
-        {desktop ? "Click a tab, or Tab to one and press Space" : "Tap a tab to show its section"}
+        {desktop ? "Click a tab, or Tab to a list and move with the arrow keys" : "Tap a tab to show its section"}
       </Text>
 
       <Split gap={14} inspector={<Log title={`onPress · ${section()}, ${folder()}`} lines={events()} minHeight={76} />}>
-        {/* A segmented tab list: each tab is a segment, `selectedStyle` raises the selected one. */}
-        <Tabs style={{ flexDirection: "row", gap: 4, padding: 3, borderRadius: 10, ...ui().inset, ...(desktop ? { alignSelf: "flex-start" } : {}) }}>
+        {/* A segmented tab list: each tab is a segment, and the list's indicator is the raised one, inside the
+            list's padding, which springs to the tab the app selects. */}
+        <Tabs
+          style={{ flexDirection: "row", gap: 4, padding: 3, borderRadius: 10, ...ui().inset, ...(desktop ? { alignSelf: "flex-start" } : {}) }}
+          indicatorStyle={{ top: 3, bottom: 3, borderRadius: 7, ...ui().raised }}
+        >
           <Each of={sections}>
             {(s) => (
               <Tab
@@ -70,7 +74,6 @@ function App() {
                 class="active:opacity-70"
                 hoverStyle={section() === s().id ? undefined : hoverFill()}
                 focusStyle={focusRing()}
-                selectedStyle={ui().raised}
               >
                 <Text style={{ fontSize: 13, fontWeight: "500", color: section() === s().id ? ui().text : ui().muted }}>
                   {s().label}

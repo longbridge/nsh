@@ -94,6 +94,14 @@ pub enum Input {
     Focus(bool),
 }
 
+/// Where `mouse` is in the surface `area`, in points: the middle of its Cell.
+fn page_point(mouse: MouseInput, area: Rect, cells: CellSize) -> Point<Points> {
+    Point::new(
+        cells.width() * (f32::from(mouse.column) - f32::from(area.x) + 0.5),
+        cells.height() * (f32::from(mouse.row) - f32::from(area.y) + 0.5),
+    )
+}
+
 pub(crate) struct PointerContext<'a> {
     pub(crate) area: Rect,
     pub(crate) cells: CellSize,
@@ -158,19 +166,45 @@ impl Drag {
 }
 
 impl Pointer {
-    pub(crate) fn leave(&mut self, tree: &mut Mounter, control: &EngineControl) {
+    pub(crate) fn leave(&mut self, cx: &mut PointerContext<'_>) {
+        self.set_hovered(Vec::new(), cx);
         self.last = None;
-        self.set_hovered(Vec::new(), tree, control);
     }
 
-    fn set_hovered(&mut self, hovered: Vec<NodeId>, tree: &mut Mounter, control: &EngineControl) {
+    /// The mouse at its last place, as view `id` hears it (`onMouseEnter`,
+    /// `onMouseLeave`, `onMouseMove`): a drag holds the primary button.
+    fn mouse_event(&self, id: NodeId, cx: &PointerContext<'_>) -> EventPayload {
+        let (page, modifiers) = self.last.map_or_else(Default::default, |mouse| {
+            (page_point(mouse, cx.area, cx.cells), mouse.modifiers)
+        });
+        let origin = cx
+            .geometry
+            .iter()
+            .find(|g| g.id == id)
+            .map_or_else(Point::default, |g| g.frame.origin);
+        let pressed = self.drag.is_some().then_some(nsh_core::MouseButton::Left);
+        EventPayload::Mouse(nsh_core::MouseEvent::new(
+            page - origin,
+            page,
+            modifiers,
+            pressed,
+        ))
+    }
+
+    fn set_hovered(&mut self, hovered: Vec<NodeId>, cx: &mut PointerContext<'_>) {
         let (left, entered) = nsh_core::input::hover_changes(&self.hovered, &hovered);
-        for (&id, active, event) in left
+        let changes: Vec<_> = left
             .into_iter()
-            .map(|id| (id, false, EventKind::HoverOut))
-            .chain(entered.into_iter().map(|id| (id, true, EventKind::HoverIn)))
-        {
-            if let Some(view) = tree.get_mut(id) {
+            .map(|&id| (id, false, EventKind::MouseLeave))
+            .chain(
+                entered
+                    .into_iter()
+                    .map(|&id| (id, true, EventKind::MouseEnter)),
+            )
+            .collect();
+        for (id, active, event) in changes {
+            let payload = self.mouse_event(id, cx);
+            if let Some(view) = cx.tree.get_mut(id) {
                 let bit = nsh_core::tailwind::state::HOVERED;
                 if active {
                     view.states |= bit;
@@ -178,47 +212,43 @@ impl Pointer {
                     view.states &= !bit;
                 }
                 if view.tracked & bit != 0 {
-                    control.set_states(id, view.states);
+                    cx.control.set_states(id, view.states);
                 }
                 if view.events.contains(event) {
-                    control.dispatch_event(id, event, EventPayload::None);
+                    cx.control.dispatch_event(id, event, payload);
                 }
             }
         }
         self.hovered = hovered;
     }
 
-    pub(crate) fn rehover(
-        &mut self,
-        area: Rect,
-        hits: &[Hit],
-        tree: &mut Mounter,
-        control: &EngineControl,
-    ) {
+    pub(crate) fn rehover(&mut self, cx: &mut PointerContext<'_>) {
         if self
             .drag
             .as_ref()
-            .is_some_and(|drag| !visible_target(tree, drag.target))
+            .is_some_and(|drag| !visible_target(cx.tree, drag.target))
         {
-            self.cancel(tree, Some(control));
+            self.cancel(cx.tree, Some(cx.control));
         }
         let Some(mouse) = self.last else {
             return;
         };
         let position = Position::new(mouse.column, mouse.row);
-        let scope = crate::navigation::focus_scope(tree);
+        let scope = crate::navigation::focus_scope(cx.tree);
         let mut hovered = Vec::new();
-        let mut node = area
+        let mut node = cx
+            .area
             .contains(position)
             .then(|| {
-                hits.iter().rev().find(|hit| {
-                    hit.area.contains(position) && crate::keyboard::contains(tree, scope, hit.node)
+                cx.hits.iter().rev().find(|hit| {
+                    hit.area.contains(position)
+                        && crate::keyboard::contains(cx.tree, scope, hit.node)
                 })
             })
             .flatten()
             .map(|hit| hit.node);
         while let Some(id) = node {
-            let Some(view) = tree.get(id) else {
+            let Some(view) = cx.tree.get(id) else {
                 break;
             };
             if nsh_core::input::hoverable(view.tracked, view.events) {
@@ -226,7 +256,7 @@ impl Pointer {
             }
             node = if id == scope { None } else { view.parent };
         }
-        self.set_hovered(hovered, tree, control);
+        self.set_hovered(hovered, cx);
     }
 
     pub(crate) fn cancel(&mut self, tree: &mut Mounter, control: Option<&EngineControl>) {
@@ -267,43 +297,29 @@ impl Pointer {
         }
     }
 
-    pub(crate) fn handle(&mut self, mouse: MouseInput, cx: PointerContext<'_>) -> Handled {
+    pub(crate) fn handle(&mut self, mouse: MouseInput, mut cx: PointerContext<'_>) -> Handled {
+        self.last = Some(mouse);
+        self.rehover(&mut cx);
+        if matches!(mouse.kind, MouseKind::Move) {
+            for &id in &self.hovered {
+                if cx
+                    .tree
+                    .get(id)
+                    .is_some_and(|view| view.events.contains(EventKind::MouseMove))
+                {
+                    let payload = self.mouse_event(id, &cx);
+                    cx.control.dispatch_event(id, EventKind::MouseMove, payload);
+                }
+            }
+        }
         let PointerContext {
             area,
             cells,
             hits,
-            geometry,
+            geometry: _,
             tree,
             control,
         } = cx;
-        self.last = Some(mouse);
-        self.rehover(area, hits, tree, control);
-        if matches!(mouse.kind, MouseKind::Move) {
-            let page = Point::new(
-                cells.width() * (f32::from(mouse.column) - f32::from(area.x) + 0.5),
-                cells.height() * (f32::from(mouse.row) - f32::from(area.y) + 0.5),
-            );
-            for &id in &self.hovered {
-                if tree
-                    .get(id)
-                    .is_some_and(|view| view.events.contains(EventKind::HoverMove))
-                {
-                    let origin = geometry
-                        .iter()
-                        .find(|g| g.id == id)
-                        .map_or_else(Point::default, |g| g.frame.origin);
-                    control.dispatch_event(
-                        id,
-                        EventKind::HoverMove,
-                        EventPayload::Hover(nsh_core::HoverEvent {
-                            position: page - origin,
-                            page_position: page,
-                            modifiers: mouse.modifiers,
-                        }),
-                    );
-                }
-            }
-        }
         let scope = crate::navigation::focus_scope(tree);
         let modal = scope != nsh_core::ROOT_ID;
         let unused = if modal || !self.hovered.is_empty() {
@@ -319,10 +335,7 @@ impl Pointer {
             self.cancel(tree, Some(control));
         }
         let position = Position::new(mouse.column, mouse.row);
-        let page = Point::new(
-            cells.width() * (f32::from(mouse.column) - f32::from(area.x) + 0.5),
-            cells.height() * (f32::from(mouse.row) - f32::from(area.y) + 0.5),
-        );
+        let page = page_point(mouse, area, cells);
         if self
             .drag
             .as_ref()

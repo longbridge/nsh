@@ -62,10 +62,16 @@ final class Mounter {
     private static final int ACCESSIBILITY_LABEL = 32;
     private static final int APPEARANCE = 33;
     private static final int COMPONENT_PROP_SLOTS = 34;
+    private static final int SHADER = 35;
     /** The surface lays out right to left: native widgets mirror. */
     boolean rtl;
     /** The app's appearance (`nsh_core::platform::Appearance`): 0 the system's, 1 light, 2 dark. */
     int appearance;
+    /**
+     * The app's colors for alerts and action sheets ({@code encode.rs} {@code DIALOG_TOKENS}): the dialog, its title,
+     * its message, its buttons and a destructive action, each light then dark ARGB (0: the system's).
+     */
+    final int[] dialogColors = new int[10];
     /** The status bar the app asked for last (style, hidden), applied again when the appearance changes. */
     private int barStyle = -1;
     private boolean barHidden;
@@ -117,7 +123,8 @@ final class Mounter {
     }
 
     final NshView host;
-    final float density;
+    /** Pixels per dp; {@link NshView} updates it when the display density changes. */
+    float density;
     final Context context;
     final Images images;
     final SparseArray<View> views = new SparseArray<>();
@@ -233,6 +240,17 @@ final class Mounter {
         return Math.round(dp * density);
     }
 
+    /** Keeps pixel-based native state in the new coordinate system. */
+    void setDensity(float next) {
+        float scale = next / density;
+        density = next;
+        for (int i = 0; i < views.size(); i++) {
+            View view = views.valueAt(i);
+            if (view instanceof ScrollBox) ((ScrollBox) view).rescale(scale);
+        }
+        for (int i = 0; i < modals.size(); i++) modals.valueAt(i).densityChanged();
+    }
+
     void apply(byte[] bytes, Object[] objects, long seq) {
         ByteBuffer b = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN);
         while (b.hasRemaining()) {
@@ -268,10 +286,16 @@ final class Mounter {
                     // `selectable`: 1 asked for, 0 refused, 2 unset (`encode.rs`).
                     int selectable = b.getInt();
                     Integer selectionColor = optColor(b);
+                    // The one color all of it is drawn in, if there is one
+                    // (`opt_color`: a flag, then the color), unboxed: a text
+                    // updating live allocates nothing for it.
+                    boolean uniform = b.getInt() != 0;
+                    int uniformColor = b.getInt();
                     if (v instanceof TextBox) {
                         TextBox t = (TextBox) v;
                         t.setSelectable(selectable == 1, selectable == 0, selectionColor);
                         t.setLayout((Layout) layout, x * density, y * density, w * density, h * density);
+                        t.recolor(uniform, uniformColor, effects.get(t.id));
                         t.setLinks(linkData, linkEvents);
                         if (links > 0 && t.press == null) t.press = new Pressable(t, this, t.id);
                         t.setClickable(links > 0 || (t.press != null && t.press.ownWanted()));
@@ -502,18 +526,20 @@ final class Mounter {
                 case INPUT_CONTENT: {
                     View v = views.get(b.getInt());
                     float x = b.getFloat(), y = b.getFloat(), w = b.getFloat(), h = b.getFloat();
-                    if (v instanceof InputBox) {
-                        InputBox in = (InputBox) v;
-                        Box.Frame f = Box.frame(in);
-                        int width = f.right - f.left, height = f.bottom - f.top;
-                        in.setContent(px(x), px(y), Math.max(0, width - px(x + w)), Math.max(0, height - px(y + h)));
-                    }
+                    if (v instanceof InputBox) ((InputBox) v).setContent(px(x), px(y), px(x + w) - px(x), px(y + h) - px(y));
                     break;
                 }
                 case COMMAND: command(b, objects); break;
                 case COMPONENT: {
                     int id = b.getInt();
                     component(id, string(objects, b.getInt()));
+                    break;
+                }
+                case SHADER: {
+                    // The layer stays in libnsh, which renders it (`shader.rs`).
+                    View v = views.get(b.getInt());
+                    boolean on = b.getInt() != 0;
+                    if (v instanceof Box) ((Box) v).setShader(on);
                     break;
                 }
                 case COMPONENT_PROP_SLOTS: {
@@ -865,7 +891,9 @@ final class Mounter {
         }
         Box.Frame f = Box.frame(v);
         Transition t = layoutAnimation != null ? layoutAnimation[1] : null;
-        boolean moves = t != null && !created.contains(id) && f.right > f.left && f.bottom > f.top;
+        // A view never placed has no frame to move from; one placed zero
+        // high (a collapsed reveal) or zero wide grows from it, as on iOS.
+        boolean moves = t != null && !created.contains(id) && (f.right > f.left || f.bottom > f.top);
         int[] from = {f.left, f.top, f.right, f.bottom};
         int[] to = {px(x), px(y), px(x + w), px(y + h)};
         Animator running = layoutAnimators.get(id);
@@ -1026,7 +1054,7 @@ final class Mounter {
         }
     }
 
-    private static int lerpColor(int a, int b, float t) {
+    static int lerpColor(int a, int b, float t) {
         int r = 0;
         for (int shift = 0; shift < 32; shift += 8) {
             int ca = (a >>> shift) & 0xff, cb = (b >>> shift) & 0xff;
@@ -1138,54 +1166,66 @@ final class Mounter {
         updateHover(id, v);
     }
 
-    private static final long HOVER_EVENTS =
-            (1L << Native.HOVER_IN) | (1L << Native.HOVER_OUT) | (1L << Native.HOVER_MOVE);
+    private static final long MOUSE_EVENTS =
+            (1L << Native.MOUSE_ENTER) | (1L << Native.MOUSE_LEAVE) | (1L << Native.MOUSE_MOVE);
 
     /**
-     * Mice and styluses hovering `v`: its `hover:` state and its hover events
-     * (moves come with no button down).
+     * Mice and styluses hovering `v`: its `hover:` state and its mouse events
+     * (`onMouseEnter`, `onMouseMove`, `onMouseLeave`; hover events come with no
+     * button down).
      */
     private void updateHover(int id, View v) {
-        if ((trackedStates.get(id) & STATE_HOVERED) == 0 && (events.get(id) & HOVER_EVENTS) == 0) {
+        if ((trackedStates.get(id) & STATE_HOVERED) == 0 && (events.get(id) & MOUSE_EVENTS) == 0) {
             v.setOnHoverListener(null);
             return;
         }
         v.setOnHoverListener((view, e) -> {
             int action = e.getActionMasked();
+            int kind;
             if (action == android.view.MotionEvent.ACTION_HOVER_ENTER) {
                 reportState(id, STATE_HOVERED, true);
-                if (wants(id, Native.HOVER_IN)) event(id, Native.HOVER_IN);
+                kind = Native.MOUSE_ENTER;
             } else if (action == android.view.MotionEvent.ACTION_HOVER_EXIT) {
                 reportState(id, STATE_HOVERED, false);
-                if (wants(id, Native.HOVER_OUT)) event(id, Native.HOVER_OUT);
+                kind = Native.MOUSE_LEAVE;
+            } else if (action == android.view.MotionEvent.ACTION_HOVER_MOVE) {
+                kind = Native.MOUSE_MOVE;
+            } else {
                 return false;
             }
-            if (wants(id, Native.HOVER_MOVE)) hoverMove(id, view, e);
+            if (wants(id, kind)) mouse(id, kind, view, e);
+            // The movement that brings the pointer in is a move too, as on
+            // the desktops and in the DOM.
+            if (kind == Native.MOUSE_ENTER && wants(id, Native.MOUSE_MOVE)) mouse(id, Native.MOUSE_MOVE, view, e);
             return false;
         });
     }
 
-    /** `onHoverMove`: where the pointer is in `v` and in its root view (dp). */
-    private void hoverMove(int id, View v, android.view.MotionEvent e) {
+    /** Mouse event `kind`: where the pointer is in `v` and in its root view (dp). */
+    private void mouse(int id, int kind, View v, android.view.MotionEvent e) {
         // The surface, or the window of the modal the view is in.
         View root = v.getRootView() == host.getRootView() ? host : v.getRootView();
         int[] at = new int[2], rootAt = new int[2];
         v.getLocationOnScreen(at);
         root.getLocationOnScreen(rootAt);
         float d = density;
-        Native.hover(handle(), id, e.getX() / d, e.getY() / d,
+        Native.mouse(handle(), id, kind, e.getX() / d, e.getY() / d,
                 (e.getX() + at[0] - rootAt[0]) / d, (e.getY() + at[1] - rootAt[1]) / d,
                 modifiers(e.getMetaState()));
     }
 
-    /** An interaction state of `id` changed: tells the core if it reads it. */
+    /**
+     * An interaction state of `id` changed: tells the core if it reads it.
+     * The focus it always hears (`nsh_core::input::reported_states`): it
+     * works out `focus-within` from it.
+     */
     void reportState(int id, int bit, boolean on) {
         int states = currentStates.get(id);
         int next = on ? states | bit : states & ~bit;
         if (next == states) return;
         currentStates.put(id, next);
-        int tracked = trackedStates.get(id);
-        if ((tracked & bit) != 0) Native.states(handle(), id, next & tracked);
+        int reported = trackedStates.get(id) | STATE_FOCUSED;
+        if ((reported & bit) != 0) Native.states(handle(), id, next & reported);
     }
 
     /**
@@ -1247,11 +1287,18 @@ final class Mounter {
         if (v instanceof TextBox) ((TextBox) v).setColor(false, 0);
     }
 
-    /** `perspective` as a camera distance (React Native's normalization). */
+    /**
+     * `perspective` as a camera distance (React Native's normalization), set
+     * only when it moves: `setCameraDistance` invalidates the view on every
+     * call, and animated values and transitions come here each frame with
+     * the distance unchanged.
+     */
     private void setPerspective(View v, float term) {
         if (term == 0) term = 0.00078125f;
-        float distance = -1 / term;
-        v.setCameraDistance(density * density * distance * (float) Math.sqrt(5));
+        float distance = Math.abs(density * density * (-1 / term) * (float) Math.sqrt(5));
+        // The view keeps it divided by the screen's dpi: equal within a hair.
+        if (Math.abs(Math.abs(v.getCameraDistance()) - distance) <= distance * 1e-5f) return;
+        v.setCameraDistance(distance);
     }
 
     /** Press feedback of a view: `delayLongPress`, `android_ripple`. */
@@ -1416,6 +1463,7 @@ final class Mounter {
             Box box = (Box) v;
             box.pointerEvents = pointerEvents;
         }
+        if (v instanceof InputBox) ((InputBox) v).pointerEvents = pointerEvents;
         if (v instanceof TextBox) ((TextBox) v).a11y = a;
         a11y.put(id, a);
         a.apply(v);
@@ -1699,6 +1747,15 @@ final class Mounter {
         return !shownModals.isEmpty();
     }
 
+    /** The window of the topmost dialog shown, or null. */
+    View topModalWindow() {
+        for (int i = shownModals.size() - 1; i >= 0; i--) {
+            View window = shownModals.get(i).window();
+            if (window != null) return window;
+        }
+        return null;
+    }
+
     /** The stack the back button acts on (pops, or asks to leave), if any. */
     StackBox backStack() {
         for (int i = stacks.size() - 1; i >= 0; i--) {
@@ -1868,8 +1925,10 @@ final class Mounter {
         boolean inputRtl = b.getInt() != 0;
         boolean caretHidden = b.getInt() != 0;
         boolean pasteInserts = b.getInt() != 0;
+        boolean scrollbarVisible = b.getInt() != 0, replaced = b.getInt() != 0;
         if (!(v instanceof InputBox)) return;
         ((InputBox) v).pasteInserts = pasteInserts;
+        ((InputBox) v).setScrollbar(scrollbarVisible, replaced);
         ((InputBox) v).edit.setCursorVisible(!caretHidden);
         ((InputBox) v).setAutofill(autofill);
         ((InputBox) v).edit.setLayoutDirection(inputRtl ? View.LAYOUT_DIRECTION_RTL : View.LAYOUT_DIRECTION_LTR);
@@ -1877,6 +1936,19 @@ final class Mounter {
         ((InputBox) v).configure(size, weight, italic, color, family, spacing, align, placeholder,
                 hasPlaceholderColor, placeholderColor, secure, keyboard, returnKey, capitalize, autoCorrect,
                 multiline, maxLength, editable, autoFocus, hasSelection, selection, hasCaret, caret, submit);
+    }
+
+    /**
+     * A page or dialog leaves with the field that has the keyboard: the
+     * keyboard hides with it, as with a native back, not once the field is
+     * gone (which leaves it up). Focus goes to the host, as `blur()` does.
+     */
+    void hideKeyboardIn(View leaving) {
+        View f = leaving.findFocus();
+        if (f == null || !f.onCheckIsTextEditor()) return;
+        InputMethodManager imm = (InputMethodManager) context.getSystemService(Context.INPUT_METHOD_SERVICE);
+        imm.hideSoftInputFromWindow(f.getWindowToken(), 0);
+        if (f.getRootView() == host.getRootView()) host.requestFocus();
     }
 
     private void command(ByteBuffer b, Object[] objects) {
@@ -1890,11 +1962,19 @@ final class Mounter {
                 if (v instanceof InputBox) {
                     ((InputBox) v).blur();
                 } else if (id == 1) {
+                    // Keyboard.dismiss(): hide the keyboard even when the field that showed it is gone (a page that
+                    // closed with it), which leaves no focused view in the host but the keyboard still up. Not when
+                    // an editor outside the host has it (the embedding app's, another NshView's): they share the window.
                     View f = host.findFocus();
-                    if (f != null && f != host) {
-                        InputMethodManager imm = (InputMethodManager) context.getSystemService(Context.INPUT_METHOD_SERVICE);
+                    InputMethodManager imm = (InputMethodManager) context.getSystemService(Context.INPUT_METHOD_SERVICE);
+                    if (f != null) {
                         imm.hideSoftInputFromWindow(f.getWindowToken(), 0);
-                        host.requestFocus();
+                        if (f != host) host.requestFocus();
+                    } else {
+                        View other = host.getRootView().findFocus();
+                        if (other == null || !other.onCheckIsTextEditor() || !imm.isActive(other)) {
+                            imm.hideSoftInputFromWindow(host.getWindowToken(), 0);
+                        }
                     }
                 }
                 break;
@@ -1902,6 +1982,7 @@ final class Mounter {
                 float x = b.getFloat(), y = b.getFloat();
                 boolean animated = b.getInt() != 0;
                 if (v instanceof ScrollBox) ((ScrollBox) v).scrollToPx(px(x), px(y), animated);
+                else if (v instanceof InputBox) ((InputBox) v).scrollTextTo(y);
                 break;
             }
             case 3: host.exitApp(); break;
@@ -1993,6 +2074,10 @@ final class Mounter {
                 request.current = b.getInt() != 0;
                 request.view = host;
                 Picker.show(context, request);
+                break;
+            }
+            case 27: {
+                for (int i = 0; i < dialogColors.length; i++) dialogColors[i] = b.getInt();
                 break;
             }
             case 26: {
@@ -2219,7 +2304,7 @@ final class Mounter {
     }
 
     void event(int id, int kind) {
-        Native.event(handle(), id, kind, null, 0, 0, 0);
+        event(id, kind, null, 0, 0, 0);
     }
 
     /** A press's touch: where it is now and the modifier keys it began with. */
@@ -2272,11 +2357,20 @@ final class Mounter {
     }
 
     void eventMap(int id, int kind, String[] keys, Object[] values) {
-        Native.eventMap(handle(), id, kind, keys, values);
+        long handle = handle();
+        if (handle == 0) return;
+        Native.eventMap(handle, id, kind, keys, values);
     }
 
+    /**
+     * Sends a node's event. Loads finish on their own time (an image's {@code
+     * onLoad}, a video's, a web view's): once the view is destroyed there is
+     * no app to tell, and the native side takes a live handle only.
+     */
     void event(int id, int kind, String text, int count, float x, float y) {
-        Native.event(handle(), id, kind, text, count, x, y);
+        long handle = handle();
+        if (handle == 0) return;
+        Native.event(handle, id, kind, text, count, x, y);
     }
 
     void zoom(int id, float scale) {
@@ -2285,6 +2379,10 @@ final class Mounter {
 
     void scroll(int id, float x, float y, int applied) {
         outputs(Native.scroll(handle(), id, x, y, applied));
+    }
+
+    void inputScroll(int id, float y, float contentWidth, float contentHeight, float width, float height) {
+        Native.inputScroll(handle(), id, y, contentWidth, contentHeight, width, height);
     }
 
     void pull(int id, float distance) {

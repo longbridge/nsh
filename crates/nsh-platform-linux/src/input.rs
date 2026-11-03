@@ -58,8 +58,8 @@ use std::{
 
 use gtk4::{self as gtk, gdk, glib, glib::translate::ToGlibPtr, graphene, prelude::*};
 use nsh_core::{
-    Command, Cursor, EventKind, EventPayload, GestureValues, NodeId, PayloadValue, PointerEvents,
-    ROOT_ID, TouchEvent, TouchPhase, TouchPoint, ViewKind,
+    Command, Cursor, EventKind, EventPayload, GestureValues, MouseButton, NodeId, PayloadValue,
+    PointerEvents, ROOT_ID, TouchEvent, TouchPhase, TouchPoint, ViewKind,
     geometry::{Points, point},
     input::{
         self, Candidate, Gate, Grab, GrabOptions, HitArea, Link, PAN_SLOP, PRESS_SLOP, Pinch,
@@ -116,10 +116,12 @@ pub(crate) struct Input {
     /// The scroll view mouse wheel notches go to while they keep coming,
     /// whether they scroll horizontally, and when the last one came (ms).
     latch: RefCell<Option<(NshView, bool, f64)>>,
-    /// Views that track `HOVERED` or listen to hover events (hover is only
-    /// tested while there are).
+    /// Views that track `HOVERED` or listen to `onMouseEnter` /
+    /// `onMouseLeave` / `onMouseMove` (hover is only tested while there
+    /// are).
     hover_tracked: RefCell<FxHashSet<NodeId>>,
-    /// Views listening to mouse motion; other apps skip the extra hit test.
+    /// Views listening to `onMouseMove`; other apps skip looking for
+    /// listeners on every move.
     mouse_tracked: RefCell<FxHashSet<NodeId>>,
     /// Views that are hovered now.
     hovered: RefCell<Vec<NshView>>,
@@ -130,6 +132,14 @@ pub(crate) struct Input {
     /// Where the pointer last was (root coordinates), for events GTK
     /// gives no position (wheels, touchpad gestures).
     last: Cell<Option<(f32, f32)>>,
+    /// The modifier and button state of the last pointer or modifier key
+    /// event, for the mouse events of views the pointer comes over or
+    /// leaves.
+    last_state: Cell<Option<gdk::ModifierType>>,
+    /// The mouse button pressed and not yet released, as GDK's events or
+    /// a simulated press said (the side buttons have no state mask, and
+    /// simulated moves no state).
+    button: Cell<Option<MouseButton>>,
     /// The last mouse press (time, root position, click count), for
     /// counting double and triple clicks.
     click: Cell<Option<(f64, f32, f32, u32)>>,
@@ -218,7 +228,9 @@ pub(crate) fn install(surface: &Rc<Surface>) {
     let weak = Rc::downgrade(surface);
     motion.connect_leave(move |_| {
         if let Some(surface) = weak.upgrade() {
-            set_hovered(&surface, Vec::new());
+            // Where the mouse was last: GTK's leave carries no position.
+            let (x, y) = surface.input.last.get().unwrap_or_default();
+            set_hovered(&surface, Vec::new(), x, y);
         }
     });
     root.add_controller(motion);
@@ -237,26 +249,30 @@ pub(crate) fn reset(surface: &Surface) {
     input.hover_tracked.borrow_mut().clear();
     input.mouse_tracked.borrow_mut().clear();
     input.hovered.borrow_mut().clear();
+    input.last_state.set(None);
+    input.button.set(None);
     input.gestures.borrow_mut().clear();
     input.js_block.set(false);
 }
 
 /// `TrackStates`.
-pub(crate) fn track_states(surface: &Rc<Surface>, view: &NshView, states: u8) {
+pub(crate) fn track_states(surface: &Rc<Surface>, view: &NshView, states: u16) {
     {
         let mut s = view.state_mut();
         s.tracked = states;
-        // The core keeps the states still tracked and forgets the rest
+        // The core keeps the states still reported and forgets the rest
         // (`Core::update_tracking`): so do we, or a change it was not told
         // about (the pointer leaving a view whose hover was tracked
-        // throughout) would never reach it.
-        s.states &= states;
+        // throughout) would never reach it. The focus is reported
+        // whatever is tracked, so it stays.
+        s.states &= input::reported_states(states);
     }
     update_hover_tracking(surface, view);
 }
 
 /// Whether hovering `view` matters: for its `hover:` styles (the
-/// `HOVERED` state) or its `onHoverIn` / `onHoverOut` / `onHoverMove`.
+/// `HOVERED` state) or its `onMouseEnter` / `onMouseLeave` /
+/// `onMouseMove`.
 fn hoverable(view: &NshView) -> bool {
     let s = view.state();
     input::hoverable(s.tracked, s.events)
@@ -282,7 +298,7 @@ fn update_hover_tracking(surface: &Surface, view: &NshView) {
 
 /// Sets or clears interaction state `bit` of `view` and reports the
 /// states when they changed and the view tracks the bit.
-pub(crate) fn set_state(surface: &Surface, view: &NshView, bit: u8, on: bool) {
+pub(crate) fn set_state(surface: &Surface, view: &NshView, bit: u16, on: bool) {
     let (id, next) = {
         let mut s = view.state_mut();
         let Some(next) = input::next_states(s.tracked, s.states, bit, on) else {
@@ -305,7 +321,7 @@ pub(crate) fn gestures(surface: &Rc<Surface>, view: &NshView, values: GestureVal
     }
 }
 
-/// The view's events changed (hover handlers have it hovered, from the
+/// The view's events changed (mouse handlers have it hovered, from the
 /// next mouse move).
 pub(crate) fn events_changed(surface: &Rc<Surface>, view: &NshView) {
     update_hover_tracking(surface, view);
@@ -371,21 +387,67 @@ fn cursor_name(cursor: Cursor) -> Option<&'static str> {
         Cursor::ZoomOut => "zoom-out",
         Cursor::ColResize => "col-resize",
         Cursor::RowResize => "row-resize",
+        Cursor::NwseResize => "nwse-resize",
+        Cursor::NeswResize => "nesw-resize",
         Cursor::None => "none",
     })
 }
 
 fn update_cursor(view: &NshView) {
-    let name = {
+    set_cursor(view, false);
+}
+
+/// The cursor name of `view`, `over_link` when the mouse is on one of its
+/// pressable link spans.
+fn cursor_of(view: &NshView, over_link: bool) -> Option<&'static str> {
+    let (own, ibeam, is_text) = {
         let s = view.state();
-        // Selectable text and the texts of selectable views show the
-        // I-beam (a press target its pointer).
-        cursor_name(s.style.cursor).or_else(|| {
-            let selects = crate::text::selectable(&s)
-                || (s.text.is_some() && crate::selectable_view::takes_part(view));
-            selects.then_some("text")
-        })
+        (
+            s.style.cursor,
+            shows_ibeam_state(view, &s),
+            s.text.is_some(),
+        )
     };
+    // Only asked for views that are not text and would inherit.
+    let in_ibeam = || !is_text && view.parent_view().is_some_and(|p| shows_ibeam(&p));
+    choose_cursor(own, over_link, ibeam, in_ibeam)
+}
+
+/// The cursor name of a view whose own cursor is `own`: then, the mouse
+/// on a pressable link span of it (`over_link`), the pointer, which wins
+/// over the I-beam of selectable text (`ibeam`); a view inside text that
+/// shows the I-beam (`in_ibeam`: an attachment, such as a render's
+/// placeholder around a chip) the arrow, as `auto` over what is not text
+/// in CSS, rather than inheriting its text's I-beam. `None` inherits.
+fn choose_cursor(
+    own: Cursor,
+    over_link: bool,
+    ibeam: bool,
+    in_ibeam: impl FnOnce() -> bool,
+) -> Option<&'static str> {
+    cursor_name(own).or_else(|| {
+        if over_link {
+            Some("pointer")
+        } else if ibeam {
+            Some("text")
+        } else {
+            in_ibeam().then_some("default")
+        }
+    })
+}
+
+/// Whether text view `view` shows the I-beam of selectable text.
+fn shows_ibeam(view: &NshView) -> bool {
+    let s = view.state();
+    cursor_name(s.style.cursor).is_none() && shows_ibeam_state(view, &s)
+}
+
+fn shows_ibeam_state(view: &NshView, s: &crate::view::ViewState) -> bool {
+    s.text.is_some() && (crate::text::selectable(s) || crate::selectable_view::takes_part(view))
+}
+
+fn set_cursor(view: &NshView, over_link: bool) {
+    let name = cursor_of(view, over_link);
     let current = view.cursor().and_then(|c| c.name());
     if current.as_deref() != name {
         view.set_cursor_from_name(name);
@@ -460,6 +522,7 @@ fn dispatch(surface: &Rc<Surface>, event: &gdk::Event) -> glib::Propagation {
         | T::TouchpadHold => {}
         T::GrabBroken => {
             cancel_all(surface);
+            release_buttons(surface);
             return glib::Propagation::Proceed;
         }
         T::KeyPress | T::KeyRelease => {
@@ -480,6 +543,9 @@ fn dispatch(surface: &Rc<Surface>, event: &gdk::Event) -> glib::Propagation {
         }
         None => None,
     };
+    if !event.is_pointer_emulated() {
+        record_button(surface, event);
+    }
     let Some((x, y)) = point else {
         return glib::Propagation::Proceed;
     };
@@ -491,6 +557,9 @@ fn dispatch(surface: &Rc<Surface>, event: &gdk::Event) -> glib::Propagation {
         T::ButtonPress | T::ButtonRelease | T::MotionNotify if event.is_pointer_emulated() => {}
         // On a view that drags the window: the window's, not the app's.
         T::ButtonPress if crate::chrome::press(surface, event, x, y) => {
+            // The compositor moves the window or shows its menu and keeps
+            // the release: the button is not the app's to report as held.
+            release_buttons(surface);
             return glib::Propagation::Stop;
         }
         T::ButtonPress if button() == Some(gdk::BUTTON_PRIMARY) => {
@@ -506,6 +575,12 @@ fn dispatch(surface: &Rc<Surface>, event: &gdk::Event) -> glib::Propagation {
             up(surface, Key::Mouse, x, y, time, false)
         }
         T::MotionNotify => {
+            let state = event.modifier_state();
+            surface.input.last_state.set(Some(state));
+            // `onMouseEnter` / `onMouseLeave` first (`motion` hovers), as
+            // in browsers; `onMouseMove` then goes to the views hovered.
+            motion(surface, Key::Mouse, x, y, time);
+            link_cursor(surface, x, y);
             if event.device_tool().is_none()
                 && !event.device().is_some_and(|device| {
                     matches!(
@@ -516,15 +591,7 @@ fn dispatch(surface: &Rc<Surface>, event: &gdk::Event) -> glib::Propagation {
                     )
                 })
             {
-                mouse_moved(surface, x, y);
-            }
-            motion(surface, Key::Mouse, x, y, time);
-            let state = event.modifier_state();
-            let buttons = gdk::ModifierType::BUTTON1_MASK
-                | gdk::ModifierType::BUTTON2_MASK
-                | gdk::ModifierType::BUTTON3_MASK;
-            if !state.intersects(buttons) {
-                hover_moved(surface, x, y, state);
+                mouse_moved(surface, x, y, state);
             }
         }
         T::TouchBegin => down(
@@ -693,13 +760,36 @@ pub(crate) enum Simulated {
     ContextMenu(f32, f32),
 }
 
+#[cfg(feature = "dev")]
+thread_local! {
+    /// The modifier keys a test holds down (`keyboard.down`), which its
+    /// simulated presses and hovers carry.
+    static HELD: std::cell::Cell<gdk::ModifierType> = const { std::cell::Cell::new(gdk::ModifierType::empty()) };
+}
+
+/// Holds (`down`) or lets go of `keys` for the simulated pointer.
+#[cfg(feature = "dev")]
+pub(crate) fn hold(keys: gdk::ModifierType, down: bool) {
+    HELD.with(|held| {
+        let mut now = held.get();
+        now.set(keys, down);
+        held.set(now);
+    });
+}
+
 /// Feeds a simulated pointer action through the same path as real input.
 #[cfg(feature = "dev")]
 pub(crate) fn simulate(surface: &Rc<Surface>, action: Simulated) {
     let time = glib::monotonic_time() as f64 / 1000.0;
+    let held = HELD.with(std::cell::Cell::get);
     match action {
-        Simulated::Down(x, y) => down(surface, Key::Mouse, x, y, time, gdk::ModifierType::empty()),
+        Simulated::Down(x, y) => {
+            // Simulated drags carry no state: the button held is recorded.
+            surface.input.button.set(Some(MouseButton::Left));
+            down(surface, Key::Mouse, x, y, time, held);
+        }
         Simulated::Up(x, y) => {
+            release_buttons(surface);
             up(surface, Key::Mouse, x, y, time, false);
             // GTK never sees simulated input: a release on a hosted widget
             // (a text field) focuses it, as a real click would.
@@ -708,20 +798,25 @@ pub(crate) fn simulate(surface: &Rc<Surface>, action: Simulated) {
             }
         }
         Simulated::Move(x, y) => {
-            mouse_moved(surface, x, y);
+            // No state: the button held is the one `Down` recorded.
+            surface
+                .input
+                .last_state
+                .set(Some(gdk::ModifierType::empty()));
             motion(surface, Key::Mouse, x, y, time);
+            mouse_moved(surface, x, y, gdk::ModifierType::empty());
         }
         Simulated::Wheel(x, y, dx, dy) => {
             let step = WheelInput::Step { notches: false };
             wheel_input(surface, x, y, dx, dy, time, step);
         }
         Simulated::Hover(x, y) => {
-            mouse_moved(surface, x, y);
+            surface.input.last_state.set(Some(held));
             hover(surface, x, y);
-            hover_moved(surface, x, y, gdk::ModifierType::empty());
+            mouse_moved(surface, x, y, held);
         }
         Simulated::ContextMenu(x, y) => {
-            context_menu(surface, x, y, gdk::ModifierType::empty());
+            context_menu(surface, x, y, held);
         }
     }
 }
@@ -863,6 +958,28 @@ fn chain(view: &NshView) -> Vec<NshView> {
 }
 
 /// A point in root coordinates in `view`'s.
+/// The cursor is per widget: a text with pressable link spans shows the
+/// pointer while the mouse at `(x, y)` (root coordinates) is on one, its
+/// own cursor elsewhere.
+fn link_cursor(surface: &Surface, x: f32, y: f32) {
+    let Some(hit) = pick(&surface.root, x, y) else {
+        return;
+    };
+    let view = &hit.view;
+    let over = {
+        let s = view.state();
+        let Some(text) = &s.text else { return };
+        if text.text.links.is_empty() {
+            return;
+        }
+        let (lx, ly) = local(surface, view, x, y);
+        crate::text::char_at(&s, lx, ly)
+            .and_then(|i| text.text.link_at(i))
+            .is_some_and(|l| has_press(l.events))
+    };
+    set_cursor(view, over);
+}
+
 fn local(surface: &Surface, view: &NshView, x: f32, y: f32) -> (f32, f32) {
     surface
         .root
@@ -1703,8 +1820,8 @@ fn wheel_zoom(surface: &Rc<Surface>, x: f32, y: f32, dy: f32) -> bool {
 
 // --- Hover --------------------------------------------------------------------------
 
-/// The mouse moved to `(x, y)`: updates `HOVERED` and raises `onHoverIn` /
-/// `onHoverOut` along the views under it.
+/// The mouse moved to `(x, y)`: updates `HOVERED` and raises
+/// `onMouseEnter` / `onMouseLeave` along the views under it.
 fn hover(surface: &Rc<Surface>, x: f32, y: f32) {
     let input = &surface.input;
     let views = pick(&surface.root, x, y)
@@ -1719,79 +1836,54 @@ fn hover(surface: &Rc<Surface>, x: f32, y: f32) {
         return;
     }
     let views = views.into_iter().filter(hoverable).collect();
-    set_hovered(surface, views);
+    set_hovered(surface, views, x, y);
 }
 
-/// The views under the mouse are `views` (innermost first): those it left
-/// hear so from the inside out, then those it came over from the outside
-/// in, as with the DOM's `pointerleave` / `pointerenter`.
-fn set_hovered(surface: &Surface, views: Vec<NshView>) {
+/// The views under the mouse at `(x, y)` (root coordinates) are `views`
+/// (innermost first): those it left hear so from the inside out, then
+/// those it came over from the outside in, as with the DOM's
+/// `pointerleave` / `pointerenter`.
+fn set_hovered(surface: &Surface, views: Vec<NshView>, x: f32, y: f32) {
     let old = std::mem::replace(&mut *surface.input.hovered.borrow_mut(), views.clone());
     let (left, entered) = input::hover_changes(&old, &views);
+    let state = surface
+        .input
+        .last_state
+        .get()
+        .unwrap_or(gdk::ModifierType::empty());
     for v in left {
         set_state(surface, v, HOVERED, false);
-        hover_event(surface, v, EventKind::HoverOut);
+        mouse_event(surface, v, EventKind::MouseLeave, x, y, state);
     }
     for v in entered {
         set_state(surface, v, HOVERED, true);
-        hover_event(surface, v, EventKind::HoverIn);
+        mouse_event(surface, v, EventKind::MouseEnter, x, y, state);
     }
 }
 
-/// Real mouse motion only: content re-picking must not synthesize moves.
-fn mouse_moved(surface: &Surface, x: f32, y: f32) {
+/// `onMouseMove` of the views under the mouse at `(x, y)` (root
+/// coordinates) and the views they are inside, inside out, each with the
+/// mouse in its own coordinates; `state` holds the modifiers and the
+/// buttons down. Real mouse motion and modifier changes only: content
+/// re-picking must not synthesize moves.
+///
+/// The hovered views are those views, as [`hover`] picked them at this
+/// position just before (listening to `onMouseMove` makes a view
+/// hoverable), so a move does not pick again.
+fn mouse_moved(surface: &Surface, x: f32, y: f32, state: gdk::ModifierType) {
     if surface.input.mouse_tracked.borrow().is_empty() {
         return;
     }
-    let Some(hit) = pick(&surface.root, x, y) else {
-        return;
-    };
-    for view in chain(&hit.view) {
-        let id = {
-            let state = view.state();
-            if !state.events.contains(EventKind::MouseMove) {
-                continue;
-            }
-            state.id
-        };
-        let (x, y) = local(surface, &view, x, y);
-        surface.event(
-            id,
-            EventKind::MouseMove,
-            EventPayload::Map(vec![
-                ("x", PayloadValue::Number(f64::from(x))),
-                ("y", PayloadValue::Number(f64::from(y))),
-            ]),
-        );
-    }
-}
-
-/// `onHoverMove` of the hovered views that listen, with the mouse at
-/// `(x, y)` (root coordinates) in each.
-fn hover_moved(surface: &Surface, x: f32, y: f32, state: gdk::ModifierType) {
     let hovered = surface.input.hovered.borrow().clone();
-    for v in hovered {
-        let id = {
-            let s = v.state();
-            if !s.events.contains(EventKind::HoverMove) {
-                continue;
-            }
-            s.id
-        };
-        let (location_x, location_y) = local(surface, &v, x, y);
-        let event = nsh_core::HoverEvent {
-            position: point(Points(location_x), Points(location_y)),
-            page_position: point(Points(x), Points(y)),
-            modifiers: modifiers(state),
-        };
-        surface.event(id, EventKind::HoverMove, EventPayload::Hover(event));
+    for view in &hovered {
+        mouse_event(surface, view, EventKind::MouseMove, x, y, state);
     }
 }
 
-/// A modifier key pressed or released while the mouse rests: the hovered
-/// views that listen hear `onHoverMove` again where it is, with the
-/// modifiers as they are now (an editor underlines a definition while
-/// Control is held), as they would on the next move.
+/// A modifier key pressed or released while the mouse rests with no
+/// button down: the views under it that listen hear `onMouseMove` again
+/// where it is, with the modifiers as they are now (an editor underlines
+/// a definition while Control is held), as they would on the next move.
 fn modifiers_changed(surface: &Surface, event: &gdk::Event, pressed: bool) {
     let Some(key) = event.downcast_ref::<gdk::KeyEvent>() else {
         return;
@@ -1805,28 +1897,124 @@ fn modifiers_changed(surface: &Surface, event: &gdk::Event, pressed: bool) {
         gdk::Key::Super_L | gdk::Key::Super_R => gdk::ModifierType::SUPER_MASK,
         _ => return,
     };
-    let Some((x, y)) = surface.input.last.get() else {
-        return;
-    };
     // A key event's state is the one before it.
     let mut state = event.modifier_state();
     state.set(mask, pressed);
-    let buttons = gdk::ModifierType::BUTTON1_MASK
-        | gdk::ModifierType::BUTTON2_MASK
-        | gdk::ModifierType::BUTTON3_MASK;
-    if !state.intersects(buttons) {
-        hover_moved(surface, x, y, state);
+    surface.input.last_state.set(Some(state));
+    let Some((x, y)) = surface.input.last.get() else {
+        return;
+    };
+    if pressed_button(surface, state).is_none() {
+        mouse_moved(surface, x, y, state);
     }
 }
 
-/// `onHoverIn` / `onHoverOut` of `view`, if it listens.
-fn hover_event(surface: &Surface, view: &NshView, kind: EventKind) {
+/// `kind` (`onMouseEnter`, `onMouseMove`, `onMouseLeave`) of `view`, if
+/// it listens, with the mouse at `(x, y)` (root coordinates) and `state`
+/// holding the modifiers and the buttons down.
+fn mouse_event(
+    surface: &Surface,
+    view: &NshView,
+    kind: EventKind,
+    x: f32,
+    y: f32,
+    state: gdk::ModifierType,
+) {
     let (id, listens) = {
         let s = view.state();
         (s.id, s.events.contains(kind))
     };
-    if listens {
-        surface.event(id, kind, EventPayload::None);
+    if !listens {
+        return;
+    }
+    let (location_x, location_y) = local(surface, view, x, y);
+    let event = nsh_core::MouseEvent::new(
+        point(Points(location_x), Points(location_y)),
+        point(Points(x), Points(y)),
+        modifiers(state),
+        pressed_button(surface, state),
+    );
+    surface.event(id, kind, EventPayload::Mouse(event));
+}
+
+/// The mouse button held down: the one `state` holds (GDK's button masks),
+/// else the one the backend recorded (a press GDK sent, whose button may
+/// have no mask, as the side buttons; or a simulated press, whose drags
+/// carry no state).
+fn pressed_button(surface: &Surface, state: gdk::ModifierType) -> Option<MouseButton> {
+    held_button(state).or(surface.input.button.get())
+}
+
+/// The mouse button GDK's button masks in `state` say is down.
+fn held_button(state: gdk::ModifierType) -> Option<MouseButton> {
+    [MouseButton::Left, MouseButton::Right, MouseButton::Middle]
+        .into_iter()
+        .find(|&button| state.contains(button_mask(button)))
+}
+
+/// GDK's mouse button `button`: 1 left, 2 middle, 3 right, 8 back and 9
+/// forward (4 to 7 are wheel steps on X11).
+fn mouse_button(button: u32) -> Option<MouseButton> {
+    Some(match button {
+        gdk::BUTTON_PRIMARY => MouseButton::Left,
+        gdk::BUTTON_MIDDLE => MouseButton::Middle,
+        gdk::BUTTON_SECONDARY => MouseButton::Right,
+        8 => MouseButton::Back,
+        9 => MouseButton::Forward,
+        _ => return None,
+    })
+}
+
+/// The mask of `button` in GDK's modifier state (none for the side
+/// buttons).
+fn button_mask(button: MouseButton) -> gdk::ModifierType {
+    match button {
+        MouseButton::Left => gdk::ModifierType::BUTTON1_MASK,
+        MouseButton::Middle => gdk::ModifierType::BUTTON2_MASK,
+        MouseButton::Right => gdk::ModifierType::BUTTON3_MASK,
+        MouseButton::Back | MouseButton::Forward => gdk::ModifierType::empty(),
+    }
+}
+
+/// Records the mouse button a press leaves down, and forgets it at its
+/// release; the state the mouse events of views the pointer comes over or
+/// leaves before it moves again report holds it from now on (a button
+/// event's state is the one before it).
+fn record_button(surface: &Surface, event: &gdk::Event) {
+    use gdk::EventType as T;
+    let ty = event.event_type();
+    if !matches!(ty, T::ButtonPress | T::ButtonRelease) {
+        return;
+    }
+    let Some(button) = event
+        .downcast_ref::<gdk::ButtonEvent>()
+        .and_then(|b| mouse_button(b.button()))
+    else {
+        return;
+    };
+    let input = &surface.input;
+    let pressed = ty == T::ButtonPress;
+    let mut state = event.modifier_state();
+    state.set(button_mask(button), pressed);
+    input.last_state.set(Some(state));
+    if pressed {
+        input.button.set(Some(button));
+    } else if input.button.get() == Some(button) {
+        input.button.set(None);
+    }
+}
+
+/// Forgets the mouse buttons held (the window lost the grab, or a
+/// simulated press ended).
+fn release_buttons(surface: &Surface) {
+    let input = &surface.input;
+    input.button.set(None);
+    if let Some(mut state) = input.last_state.get() {
+        let buttons = gdk::ModifierType::BUTTON1_MASK
+            | gdk::ModifierType::BUTTON2_MASK
+            | gdk::ModifierType::BUTTON3_MASK;
+        state.set(buttons, false);
+        input.last_state.set(Some(state));
     }
 }
 
@@ -2048,6 +2236,69 @@ mod tests {
         assert_eq!(cursor_name(Cursor::Default), Some("default"));
         assert_eq!(cursor_name(Cursor::Pointer), Some("pointer"));
         assert_eq!(cursor_name(Cursor::NotAllowed), Some("not-allowed"));
+        assert_eq!(cursor_name(Cursor::NwseResize), Some("nwse-resize"));
+        assert_eq!(cursor_name(Cursor::NeswResize), Some("nesw-resize"));
+    }
+
+    #[test]
+    fn links_and_attachments_win_over_the_ibeam() {
+        // Selectable text: the I-beam, the pointer over a pressable link.
+        assert_eq!(
+            choose_cursor(Cursor::Auto, false, true, || false),
+            Some("text")
+        );
+        assert_eq!(
+            choose_cursor(Cursor::Auto, true, true, || false),
+            Some("pointer")
+        );
+        // The text's own cursor wins everywhere.
+        assert_eq!(
+            choose_cursor(Cursor::Help, true, true, || false),
+            Some("help")
+        );
+        // A view inline in selectable text (a chip's placeholder, its
+        // margins): the arrow, not its text's I-beam; its own cursor first.
+        assert_eq!(
+            choose_cursor(Cursor::Auto, false, false, || true),
+            Some("default")
+        );
+        assert_eq!(
+            choose_cursor(Cursor::Pointer, false, false, || true),
+            Some("pointer")
+        );
+        // Elsewhere views inherit.
+        assert_eq!(choose_cursor(Cursor::Auto, false, false, || false), None);
+    }
+
+    #[test]
+    fn mouse_buttons() {
+        assert_eq!(mouse_button(1), Some(MouseButton::Left));
+        assert_eq!(mouse_button(2), Some(MouseButton::Middle));
+        assert_eq!(mouse_button(3), Some(MouseButton::Right));
+        // X11's wheel steps.
+        assert_eq!(mouse_button(4), None);
+        assert_eq!(mouse_button(7), None);
+        assert_eq!(mouse_button(8), Some(MouseButton::Back));
+        assert_eq!(mouse_button(9), Some(MouseButton::Forward));
+    }
+
+    #[test]
+    fn buttons_held_in_the_state() {
+        type M = gdk::ModifierType;
+        assert_eq!(held_button(M::empty()), None);
+        assert_eq!(held_button(M::CONTROL_MASK), None);
+        assert_eq!(
+            held_button(M::BUTTON1_MASK | M::SHIFT_MASK),
+            Some(MouseButton::Left)
+        );
+        assert_eq!(held_button(M::BUTTON2_MASK), Some(MouseButton::Middle));
+        assert_eq!(held_button(M::BUTTON3_MASK), Some(MouseButton::Right));
+        // The side buttons have no mask: the backend records them.
+        assert_eq!(button_mask(MouseButton::Back), M::empty());
+        assert_eq!(button_mask(MouseButton::Forward), M::empty());
+        for button in [MouseButton::Left, MouseButton::Middle, MouseButton::Right] {
+            assert_eq!(held_button(button_mask(button)), Some(button));
+        }
     }
 
     #[test]

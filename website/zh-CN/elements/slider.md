@@ -1,7 +1,6 @@
 ---
 title: Slider
 description: "Slider 组件：沿轨道选取一个值或两个值组成的范围；支持触摸屏和鼠标的按压与拖动、WAI-ARIA 的滑块按键，每个滑块向屏幕阅读器报告自己的数值；轨道、指示条、范围和滑块由应用设置样式。"
-order: 20.85
 group: base
 demo: el-slider
 ---
@@ -66,7 +65,7 @@ function App() {
   return (
     <Slider
       value={strength()}
-      onChange={(next) => strength.set(next as number)}
+      onChange={({ value }) => strength.set(value as number)}
       accessibilityLabel="选项强度"
       class="flex-row items-center gap-2"
       trackClass="h-2 flex-1 px-2 rounded-full bg-muted focus-within:ring-2 focus-within:ring-primary/36 focus-within:ring-offset-2 focus-within:ring-offset-background disabled:opacity-35"
@@ -90,15 +89,16 @@ mount(App);
 ## 值
 
 值是一个数字，或两个滑块的范围 `[start, end]`；值的形状决定有几个滑块。应用用 `value` 持有它，并设置 `onChange` 报告的值，和 `nsh/base`
-的每个控件一样；也可以用 `defaultValue` 把值交给滑块自己保存，修改照样会报告给应用。
+的每个控件一样；也可以用 `defaultValue` 把值交给滑块自己保存，修改照样会报告给应用。拖动时，滑块和范围由原生层与指针在同一帧移动，
+指针抬起后重新显示应用的 `value`，即应用为拖动的最后一次修改设置的值；屏幕阅读器运行时随拖动读出每个值，否则在拖动结束时得到最终的值。
 
 ```tsx
 const price = signal<[number, number]>([200, 800]);
 
 <Slider
   value={price()}
-  onChange={(next) => price.set(next as [number, number])}
-  onChangeEnd={(next) => save(next)}
+  onChange={({ value }) => price.set(value as [number, number])}
+  onChangeEnd={({ value }) => save(value)}
   min={0}
   max={1000}
   step={10}
@@ -124,7 +124,7 @@ const price = signal<[number, number]>([200, 800]);
 | `max` | `.max(..)` | `number` | `100` | 最大值；小于 `min` 时取 `min`。 |
 | `step` | `.step(..)` | `number` | `1` | 数值对齐的步长，从 `min` 起算；`0` 可取任意值。 |
 | `scale` | `.scale(..)` | `"linear" \| "logarithmic"` | `"linear"` | 数值沿轨道的分布：均匀，或按数量级（从 1 到 1000，三分之一处是 10）。对数刻度需要 `min` 大于 0；`min` 更小时为线性。 |
-| `axis` | `.axis(..)` | `"horizontal" \| "vertical"` | `"horizontal"` | 轨道的方向：`min` 在左边，或在底部。创建滑块时读取。 |
+| `axis` | `.axis(..)` | `"horizontal" \| "vertical"` | `"horizontal"` | 轨道的方向：`min` 在起始端（左边；从右到左的布局里是右边），或在底部。创建滑块时读取。 |
 | `disabled` | `.disabled(..)` | `boolean` | `false` | 指针、键盘和屏幕阅读器都不能修改；`disabled:` 类作用于滑块及其部件。 |
 | `accessibilityLabel` | `.accessibility_label(..)` | `string` | 无 | 屏幕阅读器为滑块（范围时为终点的滑块）读出的内容。 |
 | `startAccessibilityLabel` | `.start_accessibility_label(..)` | `string` | `accessibilityLabel` | 屏幕阅读器为范围起点的滑块读出的内容。 |
@@ -139,8 +139,8 @@ const price = signal<[number, number]>([200, 800]);
 
 | 事件 | Rust | 参数 | 何时 |
 |---|---|---|---|
-| `onChange` | `.on_change(\|value: &SliderValue\| ..)` | `number \| [number, number]` | 用户要一个新值：按压轨道、拖动的一步、按键、屏幕阅读器的增加或减少。 |
-| `onChangeEnd` | `.on_change_end(\|value: &SliderValue\| ..)` | `number \| [number, number]` | 修改结束：指针抬起，一次按键或屏幕阅读器的步进完成。每次修改一次。 |
+| `onChange` | `.on_change(\|value: &SliderValue\| ..)` | `{ value: number \| [number, number] }` | 用户要一个新值：按压轨道、拖动的一步、按键、屏幕阅读器的增加或减少。 |
+| `onChangeEnd` | `.on_change_end(\|value: &SliderValue\| ..)` | `{ value: number \| [number, number] }` | 修改结束：指针抬起，一次按键或屏幕阅读器的步进完成。每次修改一次。 |
 
 ## 部件
 
@@ -165,7 +165,7 @@ const price = signal<[number, number]>([200, 800]);
 - 每个部件：滑块禁用时 `disabled:`。
 
 滑块随数值移动，拖动时立即跟随。滑块各状态的动效由应用决定（例如 `transition` 让滑块在 `hover:` 和 `active:` 时变亮），
-`motion-reduce:` 为要求减少动效的用户保持静止。键盘焦点在滑块上，滑块带有 `focus:` 类时会报告它：这时轨道上的 `focus-within:` 给整条滑轨加上焦点环，滑块的 `focus:outline-none` 取代平台自带的焦点轮廓。
+`motion-reduce:` 为要求减少动效的用户保持静止。键盘焦点在滑块上：滑块持有焦点时，轨道上的 `focus-within:` 给整条滑轨加上焦点环，滑块的 `focus:outline-none` 取代平台自带的焦点轮廓。
 
 ## 键盘
 
@@ -177,6 +177,8 @@ const price = signal<[number, number]>([200, 800]);
 | 左、下 | 减少一步。 |
 | Page Up、Page Down | 增加或减少范围的十分之一（沿刻度），至少一步。 |
 | Home、End | 滑块能到达的最低或最高处（范围的起点最高到终点）。 |
+
+在从右到左的布局里，横向滑块从右边开始，`min` 在右端：左键增加一步，右键减少一步，向左拖动增大数值。垂直滑块仍是右、上键增加一步。
 
 每次改变数值的按键都先报告 `onChange`，再报告 `onChangeEnd`。按住方向键和翻页键会重复。只有在没有文本输入框正在编辑时，按键才会到达滑块。
 

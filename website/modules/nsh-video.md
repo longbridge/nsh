@@ -17,7 +17,7 @@ See [Web view and video](../docs/web-view-and-video.md) for the guide and [`<Vid
 ## Video
 
 ```ts
-const Video: (props: VideoProps) => YNode;
+const Video: (props: VideoProps) => JSX.Element;
 
 interface VideoProps extends Omit<ViewProps, "children">, VideoHostProps {
   src: string;
@@ -25,12 +25,12 @@ interface VideoProps extends Omit<ViewProps, "children">, VideoHostProps {
 ```
 
 ```tsx
-import { mount, signal, Text, Video, View, type YNode } from "nsh";
+import { mount, signal, Text, Video, type VideoRef, View } from "nsh";
 
 function Player() {
   const paused = signal(true);
   const time = signal("");
-  let video!: YNode;
+  let video!: VideoRef;
   return (
     <View style={{ flex: 1, padding: 16, gap: 12 }}>
       <Video
@@ -93,7 +93,7 @@ The setting takes effect while the video plays. On iOS, the first such video to 
 | Event | Payload | When |
 |---|---|---|
 | `onLoadStart` | | The video starts loading. |
-| `onLoad` | `{ duration: number; size: Size }` | It is ready to play: its length in seconds and its size. |
+| `onLoad` | `{ duration: number; size: PixelSize }` | It is ready to play: its length in seconds and its size in pixels. |
 | `onProgress` | `{ currentTime: number; duration: number }` | While playing, every `progressUpdateInterval` ms. Seconds. |
 | `onBuffer` | `{ isBuffering: boolean }` | Playback waits for data, or resumes. |
 | `onEnd` | | Playback reached the end. |

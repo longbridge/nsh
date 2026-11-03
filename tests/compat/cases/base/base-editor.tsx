@@ -74,19 +74,19 @@ export default function BaseEditor() {
           language="rust"
           search={{ query: query(), caseSensitive: true }}
           accessibilityLabel="Code"
-          onChange={v => value.set(v)}
-          onSelectionChange={selections => {
+          onChange={e => value.set(e.value)}
+          onSelectionChange={({ selections }) => {
             const head = selections[selections.length - 1].head;
             caret.set(`${head.line}:${head.column}`);
           }}
-          onSearchChange={result => found.set(`${result.count}`)}
+          onSearchChange={({ result }) => found.set(`${result.count}`)}
           onHover={e =>
             hovered.set(
               `${e.position.line}:${e.position.column} ${e.range.start.column}-${e.range.end.column} ${e.diagnostics.length}`,
             )
           }
           onHoverEnd={() => hovered.set("ended")}
-          onFindWithSelection={q => asked.set(q)}
+          onFindWithSelection={({ query }) => asked.set(query)}
           onContextMenu={e =>
             menu.set(`${e.position.line}:${e.position.column} ${e.selection ? `touch ${e.selection.width}` : "pointer"}`)
           }
@@ -95,6 +95,7 @@ export default function BaseEditor() {
       </View>
       <View style={{ width: 390, height: 100 }}>
         <Editor
+          testID="outline"
           ref={r => (outline = r)}
           defaultValue={"mod a {\n  fn b() {\n    c();\n  }\n}\n"}
           language="rust"
@@ -103,8 +104,18 @@ export default function BaseEditor() {
             { startLine: 0, endLine: 2 },
             { startLine: 1, endLine: 2 },
           ]}
-          decorations={[{ range: { start: { line: 0, column: 0 }, end: { line: 0, column: 3 } }, token: "keyword" }]}
-          onFoldChange={folds => folded.set(show(folds))}
+          decorations={[
+            { range: { start: { line: 0, column: 0 }, end: { line: 0, column: 3 } }, token: "keyword" },
+            {
+              range: { start: { line: 1, column: 0 }, end: { line: 2, column: 0 } },
+              gutter: { class: "bg-green-500" },
+              overviewRuler: { lane: "left", style: { backgroundColor: "#22c55e" } },
+            },
+            { range: { start: { line: 3, column: 0 }, end: { line: 3, column: 0 } }, gutter: { placement: "before", style: { backgroundColor: "#ef4444" } } },
+          ]}
+          gutterDecorationsWidth={4}
+          classes={{ overviewRuler: "w-[12px]" }}
+          onFoldChange={({ folds }) => folded.set(show(folds))}
           style={{ flex: 1 }}
         />
       </View>
@@ -171,7 +182,7 @@ export default function BaseEditor() {
         }}
       />
       <View testID="find" style={{ height: 20 }} onPress={() => query.set("x")} />
-      <View testID="replace-all" style={{ height: 20 }} onPress={async () => read.set(`replaced ${await editor.replaceAll("y")}`)} />
+      <View testID="replace-all" style={{ height: 20 }} onPress={async () => read.set(`replaced ${(await editor.replaceAll("y")).count}`)} />
       <View
         testID="read"
         style={{ height: 20 }}
@@ -222,7 +233,7 @@ export default function BaseEditor() {
           completion
           completionTriggerCharacters={["."]}
           inlineCompletionDelay={50}
-          onChange={v => completed.set(v)}
+          onChange={({ value }) => completed.set(value)}
           onCompletionRequest={e => {
             requested.set(`${e.id} ${e.query || "-"} ${e.trigger}`);
             completer.presentCompletions(e.id, [

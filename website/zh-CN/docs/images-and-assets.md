@@ -267,7 +267,7 @@ image(cover).blur_radius(px(16.0)).absolute().inset_0()
 |---|---|---|---|
 | `onLoadStart` | `.on_load_start(..)` | | 开始加载 |
 | `onProgress` | `.on_progress(..)` | `{ loaded, total }`，单位为字节（未知时 `total` 为 0） | 下载过程中，最多每 100 ms 一次 |
-| `onLoad` | `.on_load(..)` | `{ width, height }` | 图片就绪；源图的像素尺寸（SVG 为点，[在 Web 上为浏览器测得的尺寸](#svg-图片)） |
+| `onLoad` | `.on_load(..)` | `{ size }` | 图片就绪；源图的像素尺寸（SVG 为点，[在 Web 上为浏览器测得的尺寸](#svg-图片)） |
 | `onError` | `.on_error(..)` | `{ message }`（Rust 中为 `&str`） | 加载或解码失败 |
 | `onLoadEnd` | `.on_load_end(..)` | | 在 `onLoad` 或 `onError` 之后 |
 
@@ -275,7 +275,7 @@ image(cover).blur_radius(px(16.0)).absolute().inset_0()
 let status = signal(SharedString::from("loading…"));
 
 image(url)
-    .on_load(move |size: &Size<Points>| status.set(format!("{}×{}", size.width.0, size.height.0).into()))
+    .on_load(move |size: &Size<DevicePixels>| status.set(format!("{}×{}", size.width.0, size.height.0).into()))
     .on_error(move |message: &str| status.set(message.to_owned().into()))
     .w(px(90.0))
     .h(px(60.0))
@@ -286,7 +286,7 @@ const status = signal("loading…");
 
 <Image
   src={url}
-  onLoad={(e) => status.set(`${e.width}×${e.height}`)}
+  onLoad={({ size }) => status.set(`${size.width}×${size.height}`)}
   onError={(e) => status.set(e.message)}
   style={{ width: 90, height: 60 }}
 />
@@ -304,8 +304,8 @@ const status = signal("loading…");
 spawn(async move {
     // Ok(ImageSize { width, height })，单位为像素。
     let size = image_size("https://example.com/photo.jpg").await;
-    // 字节进入内存后为 true。
-    let ok = prefetch_image("https://example.com/next.jpg").await;
+    // 字节进入内存后为 Ok(())。
+    let loaded = prefetch_image("https://example.com/next.jpg").await;
 });
 ```
 
@@ -313,13 +313,13 @@ spawn(async move {
 import { Image } from "nsh";
 
 const size = await Image.getSize("https://example.com/photo.jpg");   // { width, height } in pixels
-const ok = await Image.prefetch("https://example.com/next.jpg");      // true once the bytes are in memory
+await Image.prefetch("https://example.com/next.jpg");                // once the bytes are in memory
 ```
 
 | Rust | TSX | 返回值 |
 |---|---|---|
 | `image_size(src)` | `Image.getSize(src)` | 图片的像素尺寸（SVG 为点，[在 Web 上为浏览器测得的尺寸](#svg-图片)）；无法加载时返回错误 |
-| `prefetch_image(src)` | `Image.prefetch(src)` | 图片字节加载完成后为 `true` |
+| `prefetch_image(src)` | `Image.prefetch(src)` | 图片字节加载完成后完成，不带值；无法加载时返回错误 |
 
 在 TSX 中，`src` 是 URL 字符串或导入的图片。对于带有[变体](#像素密度)的导入图片，两者都会加载视图在当前屏幕上加载的那个变体，`getSize` 返回导入文件的尺寸。两者都会为接下来显示该图片的视图保留已下载的字节，因此先预取再显示的图片无需再次下载。
 
@@ -349,10 +349,38 @@ function RemoteImage(props: { url: string }) {
 
 | 文件 | Rust（`asset!`） | TSX 导入 | 页面 |
 |---|---|---|---|
-| `.ttf`、`.otf` | 带字体族名的 `FontAsset` | 字体的字体族名 | [字体](./fonts.md) |
+| `.ttf`、`.otf`、`.woff`、`.woff2` | 带字体族名的 `FontAsset` | 字体的字体族名 | [字体](./fonts.md) |
 | `.json` 及其他文件 | 带 URI 的 `FileAsset` | `.json`：解析后的值，打包进脚本 | [项目结构](./project-structure.md#模块) |
 
 两种方式下，字体都在第一帧之前注册。
+
+### 运行时读取文件
+
+`fetch` 通过 `asset:/` URL 读取应用随附的文件，TSX 和 Rust 中都一样，在每个平台上都是如此。导入的图片带有它的 URL（`url`），Rust crate 的文件则由 `asset!`（`FileAsset::uri`）和 `assets!()` 给出：
+
+```rust tabs
+const GREETING: FileAsset = asset!("locales/en.txt");
+
+#[component]
+fn Greeting() -> impl IntoElement {
+    let greeting = signal(String::new());
+    spawn(async move {
+        match fetch(GREETING.uri).await {
+            Ok(response) => greeting.set(response.text()),
+            Err(error) => greeting.set(error),
+        }
+    });
+    text(move || greeting.get())
+}
+```
+
+```tsx tabs
+import flag from "./images/flag.png";
+
+const bytes = await (await fetch(flag.url)).bytes();
+```
+
+引擎在自身线程之外从应用的文件中读取该文件（`nsh run` 期间从开发服务器读取），无需任何能力授权：这些是应用自己的文件。Web 应用会从页面提供资源的位置下载页面未预加载的文件。响应状态为 `200`，带有文件的字节、`Content-Length` 以及由扩展名给出的 `Content-Type`（`image/png`、`application/json` 等），无论文件以何种方式到达，其 `url` 都是该 `asset:/` URL；应用没有随附的文件会以指明该文件的网络错误拒绝。URL 以文件在应用文件中的路径来指明它，请求以 `GET`（或 `HEAD`）读取它：路径离开应用文件的 URL（`..`、绝对路径）和使用其他方法的请求都会以同样的方式拒绝，且不会读取或下载任何内容。
 
 ### 模块自身的 URL
 

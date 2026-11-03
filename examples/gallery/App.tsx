@@ -1,17 +1,77 @@
-import { effect, mount, Scroll, signal, Text, untracked, View } from "nsh";
+import { type Bounds, computed, effect, type InputRef, mount, Scroll, signal, Text, untracked, View, type ScrollRef } from "nsh";
 import { Animated, createAnimatedValue, Easing } from "nsh";
 import { platform, windowSize } from "nsh";
-import { isAvailable as hasWindow, Window } from "nsh/desktop";
-import { NavPage, NavStack } from "nsh/base";
+import process from "process";
+import { isAvailable as hasWindow, titleBar, Window } from "nsh/desktop";
+import { Input, NavPage, NavStack, Scrollbar } from "nsh/base";
 import { keymap } from "nsh";
 import { Storage } from "nsh";
 import { Icon } from "./icons";
 import { TitleBar } from "./TitleBar";
 import { Toaster } from "./toast";
-import { type DemoEntry, nav } from "./nav";
-import { Appear, Badge, Button, colors, desktop, focusRing, header, IconTile, lazy, Logo, mono, PageHeader, Press, radius, SIDEBAR, sidebarOpen, TERMINAL_COLUMN, TERMINAL_ROW, terminal, ThemeToggle } from "./ui";
+import { type DemoEntry, nav, shownDemo } from "./nav";
+import { field } from "../nsh-gallery-ui/demo";
+import { Appear, colors, desktop, focusedSection, focusRing, header, hovered, IconTile, lazy, Logo, PageHeader, Press, scrollbarTheme, SIDEBAR, sidebarOpen, TERMINAL_COLUMN, TERMINAL_ROW, terminal, ThemeToggle, ToolButton } from "./ui";
 
-/** The demos, by what they show; each module loads when first shown (`lazy`). */
+/** `nsh`'s primitives, from the simplest, in the website's order. */
+const primitives: DemoEntry[] = [
+  { name: "Text", detail: "Fonts, spans, inline views and images, decorations, truncation, languages", icon: "text", screen: lazy(() => import("./demos/TextDemo").then((m) => m.TextDemo)) },
+  { name: "Image", detail: "Resize modes, tint, GIF / WebP, placeholders, blur, fade", icon: "image", screen: lazy(() => import("./demos/Images").then((m) => m.Images)) },
+  { name: "Scroll", detail: "Paging, snapping, zoom, scroll events, prepending, keyboard taps", icon: "scroll", screen: lazy(() => import("./demos/Scrolling").then((m) => m.Scrolling)) },
+  { name: "List", detail: "Columns, sticky sections, a chat, horizontal lists", icon: "lists", screen: lazy(() => import("./demos/Lists").then((m) => m.Lists)) },
+  { name: "Canvas", detail: "2D context: paths, gradients, text, images, native animation", icon: "canvas", screen: lazy(() => import("./demos/CanvasDemo").then((m) => m.CanvasDemo)) },
+  { name: "Shader", detail: "WGSL shaders on the GPU: noise, gradients, animated uniforms", icon: "spark", screen: lazy(() => import("./demos/Shaders").then((m) => m.Shaders)) },
+  { name: "WebView and Video", detail: "WKWebView / WebView, AVPlayer / MediaPlayer", icon: "media", screen: lazy(() => import("./demos/Media").then((m) => m.Media)) },
+  { name: "Overlay", detail: "Content on top of the screen, outside the box that clips it", icon: "layers", screen: lazy(() => import("./demos/Overlays").then((m) => m.OverlayDemo)) },
+];
+
+/** `nsh/base`'s components, by name, as the website lists them
+ * (`website/tests/elements.test.ts` holds both lists to the website). */
+const components: DemoEntry[] = [
+  { name: "Accordion", detail: "An FAQ one answer at a time, settings sections open together, controls and an accordion inside", icon: "collapsible", screen: lazy(() => import("./demos/AccordionDemo").then((m) => m.AccordionDemo)) },
+  { name: "Avatar", detail: "A team with presence dots, a stacked group and its overflow, a comment thread, a profile, pictures that fail or load slowly", icon: "image", screen: lazy(() => import("./demos/AvatarDemo").then((m) => m.AvatarDemo)) },
+  { name: "Button", detail: "Kinds and sizes, icon and split buttons, progress, copying, hold to confirm", icon: "button", screen: lazy(() => import("./demos/ButtonDemo").then((m) => m.ButtonDemo)) },
+  { name: "Carousel", detail: "An onboarding stepped by its buttons, a product's photos with thumbnails, banners that roll on, cards three to a view, a ticker", icon: "image", screen: lazy(() => import("./demos/CarouselDemo").then((m) => m.CarouselDemo)) },
+  { name: "Checkbox", detail: "A filter whose “Select all” shows a partial selection", icon: "checkbox", screen: lazy(() => import("./demos/Controls").then((m) => m.CheckboxDemo)) },
+  { name: "Collapsible", detail: "Details under a summary, kept while collapsed", icon: "collapsible", screen: lazy(() => import("./demos/Controls").then((m) => m.CollapsibleDemo)) },
+  { name: "ColorPicker", detail: "An area, sliders of RGB, HSL, HSB or OKLCH, a field and swatches", icon: "styles", screen: lazy(() => import("./demos/ColorPickerDemo").then((m) => m.ColorPickerDemo)) },
+  { name: "Combobox", detail: "Topics picked several at once with search, a reviewer picked alone", icon: "select", screen: lazy(() => import("./demos/Controls").then((m) => m.ComboboxDemo)) },
+  { name: "Command", detail: "A Cmd+K palette in a dialog, an inline menu, 5 000 files that filter at every keystroke, a search the server answers", icon: "search", screen: lazy(() => import("./demos/CommandDemo").then((m) => m.CommandDemo)) },
+  { name: "DataTable", detail: "A million stocks of sixty columns, their quotes ticking every 33 ms, fixed columns, sorting, selection, resized and moved columns", icon: "table", screen: lazy(() => import("./demos/DataTableDemo").then((m) => m.DataTableDemo)) },
+  { name: "DatePicker", detail: "A due date on weekdays, a trip's range with presets, a meeting's day and time", icon: "select", screen: lazy(() => import("./demos/Controls").then((m) => m.DatePickerDemo)) },
+  { name: "DiffView", detail: "Two texts side by side or unified, changes navigated, reverted and kept, a patch", icon: "diff", screen: lazy(() => import("./demos/DiffDemo").then((m) => m.DiffDemo)) },
+  { name: "Dock", detail: "A workspace of tabs dragged between groups and docks, split, closed, zoomed and resized", icon: "dock", screen: lazy(() => import("./demos/Dock").then((m) => m.Dock)) },
+  { name: "Editor", detail: "Code with highlighting, several carets, folding, find and replace, a language server: diagnostics, hover, definitions, completion", icon: "code", screen: lazy(() => import("./demos/EditorDemo").then((m) => m.EditorDemo)) },
+  { name: "HoverCard", detail: "People behind mentions, a link preview, a live stock quote, the delays tried, a card pinned open", icon: "popover", screen: lazy(() => import("./demos/HoverCardDemo").then((m) => m.HoverCardDemo)) },
+  { name: "Input", detail: "Live validation, passwords, search, input groups, the keyboard over the content", icon: "form", screen: lazy(() => import("./demos/Form").then((m) => m.Form)) },
+  { name: "Link", detail: "Links in a paragraph, a navigation the app routes, sites outside the app, a footer, visited and disabled", icon: "link", screen: lazy(() => import("./demos/LinkDemo").then((m) => m.LinkDemo)) },
+  { name: "Menu", detail: "A menu bar, submenus, checkable items, context menus on rows, a scrolling menu", icon: "menu", screen: lazy(() => import("./demos/Menus").then((m) => m.Menus)) },
+  { name: "NavStack", detail: "Header options, modals, the back button, safe areas", icon: "nav", screen: lazy(() => import("./demos/Navigation").then((m) => m.Navigation)) },
+  { name: "NumberInput", detail: "Quantities typed or stepped, within a range, in steps", icon: "stepper", screen: lazy(() => import("./demos/Controls").then((m) => m.NumberInputDemo)) },
+  { name: "OtpInput", detail: "A one-time code typed into one field, pasted or filled by the system", icon: "otp", screen: lazy(() => import("./demos/Controls").then((m) => m.OtpInputDemo)) },
+  { name: "Pagination", detail: "Search results with a count, a table footer with its page size, a compact pager, ten thousand pages with jump menus", icon: "lists", screen: lazy(() => import("./demos/PaginationDemo").then((m) => m.PaginationDemo)) },
+  { name: "Plot", detail: "A live price, an order book's depth, a drawdown, capacity rings, a donut, bars, a profit bridge, a funnel, candles, risk-return bubbles, price targets and dual-axis charts, built from plot parts", icon: "chart", screen: lazy(() => import("./demos/Charts").then((m) => m.Charts)) },
+  { name: "Popover", detail: "A panel anchored to its trigger; a press outside, Escape or back closes it", icon: "popover", screen: lazy(() => import("./demos/Overlays").then((m) => m.PopoverDemo)) },
+  { name: "Progress", detail: "A transfer the app drives, and one of unknown size", icon: "progress", screen: lazy(() => import("./demos/Controls").then((m) => m.ProgressDemo)) },
+  { name: "Radio", detail: "A plan picker: one of a small set, a disabled plan", icon: "radio", screen: lazy(() => import("./demos/Controls").then((m) => m.RadioDemo)) },
+  { name: "Resizable", detail: "Panels resized by dragging the lines between them, within their ranges", icon: "sidebar", screen: lazy(() => import("./demos/Resizable").then((m) => m.Resizable)) },
+  { name: "RichEditor", detail: "A document editor on Tiptap's extensions: lists, links, tables, Markdown shortcuts, undo and redo", icon: "richtext", screen: lazy(() => import("./demos/RichEditorDemo").then((m) => m.RichEditorDemo)) },
+  { name: "Select", detail: "A sort order, fonts in sections with search, a disabled language", icon: "select", screen: lazy(() => import("./demos/Controls").then((m) => m.SelectDemo)) },
+  { name: "Sheet", detail: "A panel at an edge, over a backdrop; a swipe, the backdrop, Escape or back closes it", icon: "sheet", screen: lazy(() => import("./demos/Overlays").then((m) => m.SheetDemo)) },
+  { name: "Slider", detail: "A level and a price range the app owns", icon: "sliders", screen: lazy(() => import("./demos/Controls").then((m) => m.SliderDemo)) },
+  { name: "Switch", detail: "Settings that take effect at once, one that needs another on", icon: "switch", screen: lazy(() => import("./demos/Controls").then((m) => m.SwitchDemo)) },
+  { name: "Tabs", detail: "A section switcher, a disabled tab", icon: "tabs", screen: lazy(() => import("./demos/Controls").then((m) => m.TabsDemo)) },
+  { name: "TextView", detail: "Markdown and HTML documents, extensions, streaming replies", icon: "document", screen: lazy(() => import("./demos/TextViewDemo").then((m) => m.TextViewDemo)) },
+  { name: "Toast", detail: "Notes that close by themselves, by their action, back or a swipe", icon: "bell", screen: lazy(() => import("./demos/Overlays").then((m) => m.ToastDemo)) },
+  { name: "Toggle", detail: "A text toolbar, a segmented view switcher, a favorite star, sizes, a locked group", icon: "controls", screen: lazy(() => import("./demos/ToggleDemo").then((m) => m.ToggleDemo)) },
+  { name: "Toolbar", detail: "A text editor's formatting bar, a media player's transport, a vertical tool palette, a locked review bar", icon: "sliders", screen: lazy(() => import("./demos/ToolbarDemo").then((m) => m.ToolbarDemo)) },
+  { name: "Tooltip", detail: "A label while the pointer rests on an element, or pinned by the app", icon: "tooltip", screen: lazy(() => import("./demos/Overlays").then((m) => m.TooltipDemo)) },
+  { name: "Tree", detail: "A project explorer, a settings sidebar, 10 100 items that stay fast, a read-only outline", icon: "tree", screen: lazy(() => import("./demos/TreeDemo").then((m) => m.TreeDemo)) },
+];
+
+/** The demos: the apps built on NSH, then one demo per element in the
+ * website's order (`nsh`'s primitives, then `nsh/base`'s components), styling,
+ * motion and the platform's APIs. Each module loads when first shown (`lazy`). */
 const groups: { title: string; demos: DemoEntry[] }[] = [
   {
     title: "Apps",
@@ -22,78 +82,65 @@ const groups: { title: string; demos: DemoEntry[] }[] = [
     ],
   },
   {
-    title: "Layout and lists",
-    demos: [
-      { name: "Lists", detail: "Columns, sticky sections, a chat, horizontal lists", icon: "lists", screen: lazy(() => import("./demos/Lists").then((m) => m.Lists)) },
-      { name: "Scrolling", detail: "Paging, snapping, zoom, scroll events, prepending, keyboard taps", icon: "scroll", screen: lazy(() => import("./demos/Scrolling").then((m) => m.Scrolling)) },
-      { name: "Collapsing header", detail: "A header that shrinks to a bar as the page scrolls, headings sticking below it", icon: "scroll", screen: lazy(() => import("./demos/CollapsingHeader").then((m) => m.CollapsingHeader)) },
-      { name: "Navigation", detail: "Header options, modals, the back button, safe areas", icon: "nav", screen: lazy(() => import("./demos/Navigation").then((m) => m.Navigation)) },
-      { name: "Form", detail: "Inputs, keyboard types, the keyboard over the content", icon: "form", screen: lazy(() => import("./demos/Form").then((m) => m.Form)) },
-      { name: "Resizable", detail: "Panels resized by dragging the lines between them, within their ranges", icon: "sidebar", screen: lazy(() => import("./demos/Resizable").then((m) => m.Resizable)) },
-      { name: "Dock", detail: "A workspace of tabs dragged between groups and docks, split, closed, zoomed and resized", icon: "components", screen: lazy(() => import("./demos/Dock").then((m) => m.Dock)) },
-    ],
+    title: "Elements",
+    demos: [...primitives, ...components],
   },
   {
-    title: "Touch and motion",
+    title: "Styling",
     demos: [
-      { name: "Gestures", detail: "Pinch, rotate, press states, hit slop, pointer events", icon: "gestures", screen: lazy(() => import("./demos/Gestures").then((m) => m.Gestures)) },
-      { name: "Physics", detail: "Drags and springs on the UI thread", icon: "physics", screen: lazy(() => import("./demos/Physics").then((m) => m.Physics)) },
-      { name: "Animations", detail: "Easing, sequence / parallel / stagger / loop, springs, interpolation", icon: "animation", screen: lazy(() => import("./demos/Animations").then((m) => m.Animations)) },
-    ],
-  },
-  {
-    title: "Drawing and type",
-    demos: [
-      { name: "Canvas", detail: "2D context: paths, gradients, text, images, native animation", icon: "canvas", screen: lazy(() => import("./demos/CanvasDemo").then((m) => m.CanvasDemo)) },
-      { name: "Charts", detail: "A line and area plot with hover, grid lines and motion, sparklines in a list", icon: "stocks", screen: lazy(() => import("./demos/Charts").then((m) => m.Charts)) },
       { name: "Styles", detail: "Corners, borders, shadows, clipping, 3D transforms", icon: "styles", screen: lazy(() => import("./demos/Styles").then((m) => m.Styles)) },
       { name: "Tailwind", detail: "class=\"…\" resolved natively: variants, grid, shadows, motion", icon: "tailwind", screen: lazy(() => import("./demos/Tailwind").then((m) => m.Tailwind)) },
-      { name: "Text", detail: "Fonts, spans, inline views and images, decorations, truncation, languages", icon: "text", screen: lazy(() => import("./demos/TextDemo").then((m) => m.TextDemo)) },
-      { name: "Text View", detail: "Markdown and HTML documents, extensions, streaming replies", icon: "text", screen: lazy(() => import("./demos/TextViewDemo").then((m) => m.TextViewDemo)) },
-      { name: "Editor", detail: "Code with highlighting, several carets, folding, find and replace, a language server: diagnostics, hover, definitions, completion", icon: "text", screen: lazy(() => import("./demos/EditorDemo").then((m) => m.EditorDemo)) },
-      { name: "Rich Editor", detail: "A document editor on Tiptap's extensions: lists, links, tables, Markdown shortcuts, undo and redo", icon: "text", screen: lazy(() => import("./demos/RichEditorDemo").then((m) => m.RichEditorDemo)) },
-      { name: "DataTable", detail: "A million stocks of sixty columns, their quotes ticking every 33 ms, fixed columns, sorting, selection, resized and moved columns", icon: "lists", screen: lazy(() => import("./demos/DataTableDemo").then((m) => m.DataTableDemo)) },
-      { name: "Diff", detail: "Two texts side by side or unified, changes navigated, reverted and kept, a patch", icon: "text", screen: lazy(() => import("./demos/DiffDemo").then((m) => m.DiffDemo)) },
-      { name: "Images", detail: "Resize modes, tint, GIF / WebP, placeholders, blur, fade", icon: "image", screen: lazy(() => import("./demos/Images").then((m) => m.Images)) },
+      { name: "Patterns", detail: "Press feedback, a sheet, layout animation, input accessory, dialog options", icon: "components", screen: lazy(() => import("./demos/Components").then((m) => m.Components)) },
+    ],
+  },
+  {
+    title: "Motion",
+    demos: [
+      { name: "Animations", detail: "Easing, sequence / parallel / stagger / loop, springs, interpolation", icon: "animation", screen: lazy(() => import("./demos/Animations").then((m) => m.Animations)) },
+      { name: "Gestures", detail: "Pinch, rotate, press states, hit slop, pointer events", icon: "gestures", screen: lazy(() => import("./demos/Gestures").then((m) => m.Gestures)) },
+      { name: "Physics", detail: "Drags and springs on the UI thread", icon: "physics", screen: lazy(() => import("./demos/Physics").then((m) => m.Physics)) },
+      { name: "Collapsing header", detail: "A header that shrinks to a bar as the page scrolls, headings sticking below it", icon: "header", screen: lazy(() => import("./demos/CollapsingHeader").then((m) => m.CollapsingHeader)) },
     ],
   },
   {
     title: "Platform",
     demos: [
-      { name: "Components", detail: "Press feedback, a sheet, layout animation, input accessory, dialog options", icon: "components", screen: lazy(() => import("./demos/Components").then((m) => m.Components)) },
-      { name: "Overlays", detail: "Overlay, popovers, tooltips, sheets, toasts", icon: "components", screen: lazy(() => import("./demos/Overlays").then((m) => m.Overlays)) },
-      { name: "Menus", detail: "A menu bar, submenus, checkable items, context menus on rows, a scrolling menu", icon: "lists", screen: lazy(() => import("./demos/Menus").then((m) => m.Menus)) },
-      { name: "Controls", detail: "Switches in settings, a filter with select all, a plan picker, tabs, collapsible sections, progress bars, sliders", icon: "controls", screen: lazy(() => import("./demos/Controls").then((m) => m.Controls)) },
-      { name: "Web and video", detail: "WKWebView / WebView, AVPlayer / MediaPlayer", icon: "media", screen: lazy(() => import("./demos/Media").then((m) => m.Media)) },
       { name: "System", detail: "Status bar, alerts, action sheets, environment, timers, fetch", icon: "system", screen: lazy(() => import("./demos/System").then((m) => m.System)) },
-      { name: "Standard APIs", detail: "Files, processes, TCP, WebSockets, buffers, crypto and utilities", icon: "system", screen: lazy(() => import("./demos/Standard").then((m) => m.StandardDemo)) },
       { name: "Storage", detail: "nsh/storage: a launch count, a note saved as you type, the stored keys", icon: "storage", screen: lazy(() => import("./demos/Storage").then((m) => m.StorageDemo)) },
+      { name: "Standard APIs", detail: "Files, processes, TCP, WebSockets, buffers, crypto and utilities", icon: "terminal", screen: lazy(() => import("./demos/Standard").then((m) => m.StandardDemo)) },
     ],
   },
 ];
 
+/** The subheadings Elements lists its demos under. */
+const parts = new Map<DemoEntry, string>([...primitives.map((d) => [d, "Primitives"] as const), ...components.map((d) => [d, "Components"] as const)]);
+
+/** A group's demos (all of them, or those the search found) in runs under
+ * their subheadings: one run without a subheading outside Elements. */
+function runs(demos: DemoEntry[]): { title?: string; demos: DemoEntry[] }[] {
+  const out: { title?: string; demos: DemoEntry[] }[] = [];
+  for (const demo of demos) {
+    const title = parts.get(demo);
+    if (out.length === 0 || out[out.length - 1].title !== title) out.push({ title, demos: [] });
+    out[out.length - 1].demos.push(demo);
+  }
+  return out;
+}
+
+/** A demo of the phone's index: its icon, its name and one line of what it shows. */
 function DemoRow(props: { demo: DemoEntry; first: boolean }) {
   return (
     <Press onPress={() => nav.push({ name: "demo", demo: props.demo })} scale={0.98} accessibilityLabel={props.demo.name}>
-      <View
-        style={{
-          flexDirection: "row",
-          alignItems: "center",
-          gap: 14,
-          paddingVertical: 12,
-          paddingHorizontal: 12,
-          borderTopWidth: props.first ? 0 : 1,
-          borderTopColor: colors.line,
-        }}
-      >
-        <IconTile name={props.demo.icon} size={38} />
-        <View style={{ flex: 1, gap: 2 }}>
+      <View style={{ minHeight: 60, flexDirection: "row", alignItems: "center", gap: 14, paddingHorizontal: 16 }}>
+        <If when={!props.first}>
+          <View style={{ position: "absolute", top: 0, left: 60, right: 0, height: 1, backgroundColor: colors.line }} />
+        </If>
+        <IconTile name={props.demo.icon} size={30} />
+        <View style={{ flex: 1, gap: 1 }}>
           <Text style={{ fontSize: 16, fontWeight: "500", color: colors.text }}>{props.demo.name}</Text>
-          <Text style={{ numberOfLines: 2, fontSize: 13, lineHeight: 18, color: colors.muted }}>
-            {props.demo.detail}
-          </Text>
+          <Text style={{ numberOfLines: 1, fontSize: 13, color: colors.muted }}>{props.demo.detail}</Text>
         </View>
-        <Icon name="chevron" size={16} tint={colors.faint} />
+        <Icon name="chevron" size={14} tint={colors.faint} />
       </View>
     </Press>
   );
@@ -101,31 +148,39 @@ function DemoRow(props: { demo: DemoEntry; first: boolean }) {
 
 function Home() {
   return (
-    <NavPage title="Gallery" {...header} headerRight={<ThemeToggle bar />} header={<PageHeader title="Gallery" root right={<ThemeToggle />} />}>
+    <NavPage title="Gallery" {...header} headerLargeTitle headerRight={<ThemeToggle bar />} header={<PageHeader title="Gallery" root right={<ThemeToggle />} />}>
       <Scroll style={{ flex: 1, backgroundColor: colors.background }}>
-        <View style={{ padding: 16, paddingBottom: 40, gap: 20 }}>
+        <View style={{ paddingTop: 12, paddingBottom: 40, gap: 28 }}>
           <Each of={groups}>
             {(group, g) => (
-              <Appear index={g() + 1}>
+              <Appear index={g()}>
                 <View style={{ gap: 8 }}>
-                  <View style={{ flexDirection: "row", alignItems: "baseline", paddingHorizontal: 4 }}>
-                    <Text style={{ flex: 1, fontSize: 13, fontWeight: "600", color: colors.muted, letterSpacing: 0.4 }}>
-                      {group().title.toUpperCase()}
-                    </Text>
-                    <Text style={{ fontSize: 12, color: colors.faint, fontFamily: mono }}>{group().demos.length}</Text>
+                  <View style={{ flexDirection: "row", alignItems: "baseline", paddingHorizontal: 20 }}>
+                    <Text style={{ flex: 1, fontSize: 13, fontWeight: "600", color: colors.muted, letterSpacing: 0.3 }}>{group().title.toUpperCase()}</Text>
+                    <Text style={{ fontSize: 13, color: colors.faint, fontVariant: ["tabular-nums"] }}>{group().demos.length}</Text>
                   </View>
-                  <View
-                    style={{
-                      backgroundColor: colors.surface,
-                      borderRadius: radius.card,
-                      borderCurve: "continuous",
-                      borderWidth: 1,
-                      borderColor: colors.border,
-                      overflow: "hidden",
-                    }}
-                  >
-                    <Each of={group().demos}>{(demo, i) => <DemoRow demo={demo()} first={i() === 0} />}</Each>
-                  </View>
+                  <Each of={runs(group().demos)}>
+                    {(run, r) => (
+                      <>
+                        <If when={run().title}>
+                          {(title) => <Text style={{ fontSize: 13, fontWeight: "500", color: colors.muted, paddingHorizontal: 20, paddingTop: r() === 0 ? 0 : 8 }}>{title()}</Text>}
+                        </If>
+                        <View
+                          style={{
+                            marginHorizontal: 16,
+                            backgroundColor: colors.surface,
+                            borderRadius: 16,
+                            borderCurve: "continuous",
+                            borderWidth: 1,
+                            borderColor: colors.border,
+                            overflow: "hidden",
+                          }}
+                        >
+                          <Each of={run().demos}>{(demo, i) => <DemoRow demo={demo()} first={i() === 0} />}</Each>
+                        </View>
+                      </>
+                    )}
+                  </Each>
                 </View>
               </Appear>
             )}
@@ -140,6 +195,7 @@ function Home() {
 function Phone() {
   // Back from the desktop layout: the demo it showed stays open.
   if (untracked(wasDesktop)) nav.setRoutes([untracked(nav.routes)[0], { name: "demo", demo: untracked(selected) }]);
+  effect(() => shownDemo.set(nav.routes().find((r) => r.name === "demo")?.demo ?? null));
   return (
     <NavStack state={nav} style={{ flex: 1 }}>
       {(route) => {
@@ -166,6 +222,9 @@ function Phone() {
   );
 }
 
+/** The platforms' names as people write them. */
+const osName: Record<string, string> = { macos: "macOS", ios: "iOS", android: "Android", windows: "Windows", linux: "Linux", web: "Web" };
+
 /** The demo the desktop layout shows. */
 const selected = signal<DemoEntry>(groups[0].demos[0]);
 /** Whether the desktop layout has been shown (for the switch back). */
@@ -177,15 +236,30 @@ const select = (demo: DemoEntry) => {
   selected.set(demo);
 };
 
-/** A demo in the sidebar: an accent bar and a raised fill when selected,
- * a fill under the pointer otherwise. One row of text in the terminal,
- * which shows the selection as a bar of its own. */
-function SidebarRow(props: { demo: DemoEntry }) {
+/** What the sidebar's search field holds. */
+const query = signal("");
+
+/** The groups and demos whose name or group matches the search, groups left empty dropped. */
+const found = computed(() => {
+  const q = query().trim().toLowerCase();
+  if (!q) return groups;
+  return groups
+    .map((g) => ({ title: g.title, demos: g.title.toLowerCase().includes(q) ? g.demos : g.demos.filter((d) => d.name.toLowerCase().includes(q)) }))
+    .filter((g) => g.demos.length > 0);
+});
+
+/** A demo in the sidebar: 28 pt, a fill under the pointer, a raised row with
+ * an edge and the accent icon when selected, the focus ring too while the
+ * list has the keyboard focus (`focused`). No stop of Tab: the list is. One
+ * row of text in the terminal, which shows the selection as a bar of its own. */
+function SidebarRow(props: { demo: DemoEntry; focused: boolean; onLayout: (bounds: Bounds) => void }) {
   const active = () => selected().name === props.demo.name;
   if (terminal) {
     return (
       <View
         onPress={() => select(props.demo)}
+        focusable={false}
+        onLayout={({ bounds }) => props.onLayout(bounds)}
         role="button"
         accessibilityLabel={props.demo.name}
         accessibilityState={{ selected: active() }}
@@ -200,18 +274,29 @@ function SidebarRow(props: { demo: DemoEntry }) {
   return (
     <View
       onPress={() => select(props.demo)}
+      focusable={false}
+      onLayout={({ bounds }) => props.onLayout(bounds)}
       role="button"
       accessibilityLabel={props.demo.name}
       accessibilityState={{ selected: active() }}
-      class={active() ? "bg-accent" : "hover:bg-hover active:bg-accent"}
-      focusStyle={focusRing()}
-      style={{ height: 36, flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 10, borderRadius: radius.control, cursor: "pointer" }}
+      hoverStyle={active() ? undefined : hovered()}
+      style={{
+        height: 28,
+        marginHorizontal: 8,
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 9,
+        paddingHorizontal: 8,
+        borderRadius: 6,
+        borderWidth: 1,
+        borderColor: active() ? colors.border : "transparent",
+        backgroundColor: active() ? colors.sidebarSelected : "transparent",
+        boxShadow: active() ? "0 1px 0 rgba(0,0,0,0.04)" : undefined,
+        ...(active() && props.focused ? focusRing() : {}),
+      }}
     >
-      <View style={{ position: "absolute", left: 0, top: 9, width: 3, height: 18, borderRadius: 1.5, backgroundColor: colors.accent, opacity: active() ? 1 : 0 }} />
-      <Icon name={props.demo.icon} size={17} tint={active() ? colors.accent : colors.muted} />
-      <Text style={{ numberOfLines: 1, flex: 1, fontSize: 14, fontWeight: active() ? "600" : "400", color: active() ? colors.text : colors.muted }}>
-        {props.demo.name}
-      </Text>
+      <Icon name={props.demo.icon} size={15} tint={active() ? colors.accent : colors.muted} />
+      <Text style={{ numberOfLines: 1, flex: 1, fontSize: 13, fontWeight: active() ? "500" : "400", color: colors.text }}>{props.demo.name}</Text>
     </View>
   );
 }
@@ -221,28 +306,140 @@ function SidebarRow(props: { demo: DemoEntry }) {
  * room first), so no gap shows while it moves. */
 const toggleSidebar = () => sidebarOpen.set(!untracked(sidebarOpen));
 
-/** The title bar's button that hides and shows the sidebar, where desktop
- * apps put it: at the title bar's leading edge, after the logo. The
- * terminal, which has no title bar, puts it first in the demo's toolbar. */
+/** The button that hides and shows the sidebar: at the sidebar's top row,
+ * and in the toolbar while the sidebar is hidden. */
 function SidebarToggle() {
-  if (terminal) return <Button label="Sidebar" accessibilityLabel="Toggle sidebar" variant="secondary" onPress={toggleSidebar} />;
+  return <ToolButton icon="sidebar" label="Toggle sidebar" title="Sidebar" shortcut={keymap.label("mod+b")} on={sidebarOpen()} onPress={toggleSidebar} />;
+}
+
+/** The sidebar's search: filters the demos by name or group as you type
+ * (Ctrl+K / Cmd+K focuses it, Escape clears it). */
+function Search() {
+  let input: InputRef | undefined;
+  keymap.bind("mod+k", () => input?.focus());
   return (
-    <View
-      onPress={toggleSidebar}
-      role="button"
-      accessibilityLabel="Toggle sidebar"
-      accessibilityState={{ selected: sidebarOpen() }}
-      class="hover:bg-hover active:bg-accent"
-      style={{ width: 28, height: 28, alignItems: "center", justifyContent: "center", borderRadius: radius.control, cursor: "pointer" }}
-    >
-      <Icon name="sidebar" size={18} tint={colors.muted} />
+    <View style={terminal ? { paddingHorizontal: TERMINAL_COLUMN, paddingBottom: TERMINAL_ROW } : { paddingHorizontal: 12, paddingBottom: 8 }}>
+      <Input
+        ref={(node) => (input = node)}
+        {...field({ style: terminal ? undefined : { paddingLeft: 26 } })}
+        value={query()}
+        onChange={({ value }) => query.set(value)}
+        onKeyPress={(e) => e.key === "Escape" && query.set("")}
+        placeholder={`Search demos  ${keymap.label("mod+k")}`}
+        accessibilityLabel="Search demos"
+      />
+      <If when={!terminal}>
+        <View style={{ position: "absolute", left: 20, top: 7, pointerEvents: "none" }}>
+          <Icon name="search" size={14} tint={colors.faint} />
+        </View>
+      </If>
     </View>
   );
 }
 
-/** The desktop layout's sidebar: the app, the demos by group, the window.
- * Its place in the row changes at once (0 pt collapsed); the panel slides
- * natively, over the content pane. */
+/**
+ * The sidebar's demos by group (those the search finds): one stop of Tab,
+ * as a macOS source list is. While the list has the keyboard focus, Up and
+ * Down select the demo before and after, Home and End the first and the
+ * last, scrolled into view. Tab moves on past all of them, so the demo's
+ * page is a few stops away rather than one per demo.
+ */
+function DemoList() {
+  const focused = signal(false);
+  let scroller: ScrollRef | undefined;
+  // The offset and the height the list shows, and where each group and
+  // each demo in its group is: what scrolls the selected demo into view.
+  let offset = 0;
+  let height = 0;
+  const groupTops = new Map<string, number>();
+  const rows = new Map<string, { group: string; bounds: Bounds }>();
+  const reveal = (name: string) => {
+    const row = rows.get(name);
+    if (!row || !scroller) return;
+    const top = (groupTops.get(row.group) ?? 0) + row.bounds.origin.y;
+    const bottom = top + row.bounds.size.height;
+    if (top < offset) scroller.scrollTo({ y: top, animated: true });
+    else if (bottom > offset + height) scroller.scrollTo({ y: bottom - height, animated: true });
+  };
+  /** Selects the demo at `to(at, last)` of those shown: `at` the selected one's place (-1 when the search hides it). */
+  const move = (to: (at: number, last: number) => number) => {
+    const demos = found().flatMap((g) => g.demos);
+    if (demos.length === 0) return;
+    const at = demos.findIndex((d) => d.name === selected().name);
+    const demo = demos[Math.min(Math.max(to(at, demos.length - 1), 0), demos.length - 1)];
+    if (demo.name === selected().name) return;
+    select(demo);
+    reveal(demo.name);
+  };
+  // Bound only while the list has the focus: elsewhere the arrows are the
+  // page's (a plot's, a scroll view's).
+  effect(() => {
+    if (!focused()) return;
+    keymap.bind(
+      {
+        up: () => move((at) => at - 1),
+        down: () => move((at) => at + 1),
+        home: () => move(() => 0),
+        end: () => move((_, last) => last),
+      },
+      { repeat: true },
+    );
+  });
+  return (
+    <Scroll
+      ref={(node) => (scroller = node)}
+      onLayout={({ bounds }) => (height = bounds.size.height)}
+      onScroll={(e) => (offset = e.offset.y)}
+      style={{ flex: 1 }}
+    >
+      <View focusable={true} onFocus={() => focused.set(true)} onBlur={() => focused.set(false)} style={{ paddingBottom: terminal ? 0 : 12 }}>
+        <Each of={found()}>
+          {(group) => (
+            <View onLayout={({ bounds }) => groupTops.set(group().title, bounds.origin.y)} style={{ gap: terminal ? 0 : 1 }}>
+              <Text
+                style={[
+                  { fontSize: 11, fontWeight: "600", color: colors.muted, letterSpacing: 0.4 },
+                  terminal ? { height: TERMINAL_ROW, paddingHorizontal: TERMINAL_COLUMN } : { paddingHorizontal: 20, paddingTop: 14, paddingBottom: 4 },
+                ]}
+              >
+                {group().title.toUpperCase()}
+              </Text>
+              <Each of={runs(group().demos)}>
+                {(run, r) => (
+                  <>
+                    <If when={run().title}>
+                      {(title) => (
+                        <Text
+                          style={[
+                            { fontSize: 12, fontWeight: "500", color: colors.faint },
+                            terminal ? { height: TERMINAL_ROW, paddingHorizontal: TERMINAL_COLUMN } : { paddingHorizontal: 20, paddingTop: r() === 0 ? 2 : 10, paddingBottom: 3 },
+                          ]}
+                        >
+                          {title()}
+                        </Text>
+                      )}
+                    </If>
+                    <Each of={run().demos}>
+                      {(demo) => <SidebarRow demo={demo()} focused={focused()} onLayout={(bounds) => rows.set(demo().name, { group: group().title, bounds })} />}
+                    </Each>
+                  </>
+                )}
+              </Each>
+            </View>
+          )}
+        </Each>
+        <If when={found().length === 0}>
+          <Text style={{ fontSize: 12, color: colors.muted, paddingHorizontal: terminal ? TERMINAL_COLUMN : 20, paddingTop: terminal ? 0 : 14 }}>No demo matches “{query().trim()}”</Text>
+        </If>
+      </View>
+    </Scroll>
+  );
+}
+
+/** The desktop layout's sidebar: the window's controls and the toggle, the
+ * search, the demos by group, the app and its appearance. Its place in the
+ * row changes at once (0 pt collapsed); the panel slides natively, over the
+ * content pane. */
 function Sidebar() {
   const slide = createAnimatedValue(untracked(sidebarOpen) ? 0 : -SIDEBAR);
   let first = true;
@@ -264,101 +461,79 @@ function Sidebar() {
           left: 0,
           width: SIDEBAR,
           translate: [slide, 0],
-          backgroundColor: colors.inset,
+          backgroundColor: colors.sidebar,
           borderRightWidth: 1,
-          borderRightColor: colors.line,
+          borderRightColor: colors.sidebarBorder,
         }}
       >
-        <If
-          when={terminal}
-          else={
-            <View style={{ flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 20, paddingTop: 20, paddingBottom: 12 }}>
-              <Logo size={32} />
-              <View style={{ flex: 1, gap: 1 }}>
-                <Text style={{ fontSize: 16, fontWeight: "600", color: colors.text }}>Gallery</Text>
-                <Text style={{ fontSize: 12, color: colors.muted }}>NSH · {platform.os}</Text>
-              </View>
-              <ThemeToggle />
-            </View>
+        <View
+          desktop={{ windowDrag: true }}
+          style={
+            terminal
+              ? { height: TERMINAL_ROW, flexDirection: "row", alignItems: "center", justifyContent: "flex-end", paddingHorizontal: TERMINAL_COLUMN, marginBottom: TERMINAL_ROW }
+              : { height: 44, flexDirection: "row", alignItems: "center", justifyContent: "flex-end", paddingLeft: titleBar().left + 12, paddingRight: 10 }
           }
         >
-          <View style={{ height: TERMINAL_ROW, flexDirection: "row", alignItems: "center", gap: 2 * TERMINAL_COLUMN, paddingRight: TERMINAL_COLUMN, marginBottom: TERMINAL_ROW }}>
-            <Text style={{ fontSize: 16, fontWeight: "600", color: colors.text }}>Gallery</Text>
-            <Text style={{ numberOfLines: 1, flex: 1, fontSize: 12, color: colors.muted }}>NSH · {platform.os}</Text>
-            <ThemeToggle />
-          </View>
-        </If>
-        <Scroll style={{ flex: 1 }}>
-          <View style={terminal ? undefined : { paddingHorizontal: 12, paddingBottom: 16 }}>
-            <Each of={groups}>
-              {(group) => (
-                <View style={{ gap: terminal ? 0 : 2 }}>
-                  <Text
-                    style={[
-                      { fontSize: 11, fontWeight: "600", color: colors.faint, letterSpacing: 0.6 },
-                      terminal ? { height: TERMINAL_ROW } : { paddingHorizontal: 10, paddingTop: 16, paddingBottom: 6 },
-                    ]}
-                  >
-                    {group().title.toUpperCase()}
-                  </Text>
-                  <Each of={group().demos}>{(demo) => <SidebarRow demo={demo()} />}</Each>
-                </View>
-              )}
-            </Each>
-          </View>
-        </Scroll>
+          <SidebarToggle />
+        </View>
+        <Search />
+        <DemoList />
         <View
           style={[
-            { borderTopWidth: 1, borderTopColor: colors.line },
+            { flexDirection: "row", alignItems: "center", borderTopWidth: 1, borderTopColor: colors.sidebarBorder },
             // The rule takes a whole row in the terminal: the rest of it is padding.
-            terminal ? { paddingTop: TERMINAL_ROW - 1 } : { paddingHorizontal: 20, paddingVertical: 12, gap: 2 },
+            terminal ? { gap: 2 * TERMINAL_COLUMN, paddingTop: TERMINAL_ROW - 1, paddingHorizontal: TERMINAL_COLUMN } : { height: 48, gap: 10, paddingLeft: 16, paddingRight: 10 },
           ]}
         >
-          <Text style={{ fontSize: 12, color: colors.muted, fontFamily: mono }}>
-            {Math.round(windowSize().width)} × {Math.round(windowSize().height)} pt
-          </Text>
-          <Text style={{ fontSize: 11, color: colors.faint }}>Narrower than 700 pt: the phone layout</Text>
+          <Logo size={22} />
+          <View style={terminal ? { flex: 1, flexDirection: "row", gap: 2 * TERMINAL_COLUMN } : { flex: 1, gap: 0 }}>
+            <Text style={{ fontSize: 12, fontWeight: "600", color: colors.text }}>Gallery</Text>
+            <Text style={{ numberOfLines: 1, fontSize: 11, color: colors.muted }}>NSH · {osName[platform.os] ?? platform.os}</Text>
+          </View>
+          <ThemeToggle />
         </View>
       </View>
     </View>
   );
 }
 
-/** The demo pane's toolbar in the terminal: one row with the sidebar's
- * toggle (the terminal has no title bar for it), the name and what the demo
- * shows, then a rule. */
-function TerminalToolbar(props: { group: string }) {
-  return (
-    <View style={{ height: 2 * TERMINAL_ROW, borderBottomWidth: 1, borderBottomColor: colors.line }}>
-      <View style={{ height: TERMINAL_ROW, flexDirection: "row", alignItems: "center", gap: 2 * TERMINAL_COLUMN, paddingHorizontal: TERMINAL_COLUMN }}>
-        <SidebarToggle />
-        <Text style={{ numberOfLines: 1, fontSize: 18, fontWeight: "600", color: colors.text }}>{selected().name}</Text>
-        <Text style={{ numberOfLines: 1, flex: 1, fontSize: 13, color: colors.muted }}>{selected().detail}</Text>
-        <Badge label={props.group} />
-      </View>
-    </View>
-  );
-}
-
-/** The selected demo under a toolbar with its name and what it shows. */
+/** The selected demo under the window's toolbar: where it is (its group and
+ * its name), and the sidebar's toggle while the sidebar is hidden. The
+ * terminal's toolbar is one row, then the rule on a row of its own. */
 function DemoPane() {
   const group = () => groups.find((g) => g.demos.some((demo) => demo.name === selected().name))?.title ?? "Gallery";
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
-      <If when={!terminal} else={<TerminalToolbar group={group()} />}>
-        <View style={{ height: 64, flexDirection: "row", alignItems: "center", gap: 14, paddingHorizontal: 24, borderBottomWidth: 1, borderBottomColor: colors.line }}>
-          <IconTile name={selected().icon} size={36} />
-          <View style={{ flex: 1, gap: 2 }}>
-            <Text style={{ numberOfLines: 1, fontSize: 18, fontWeight: "600", color: colors.text }}>
-              {selected().name}
-            </Text>
-            <Text style={{ numberOfLines: 1, fontSize: 13, color: colors.muted }}>
-              {selected().detail}
-            </Text>
-          </View>
-          <Badge label={group()} />
+      <View style={terminal ? { height: 2 * TERMINAL_ROW, borderBottomWidth: 1, borderBottomColor: colors.line } : undefined}>
+        <View
+          desktop={{ windowDrag: true }}
+          style={
+            terminal
+              ? { height: TERMINAL_ROW, flexDirection: "row", alignItems: "center", gap: TERMINAL_COLUMN, paddingHorizontal: TERMINAL_COLUMN }
+              : {
+                  height: 44,
+                  flexDirection: "row",
+                  alignItems: "center",
+                  gap: 6,
+                  paddingLeft: sidebarOpen() ? 32 : titleBar().left + 12,
+                  paddingRight: 16,
+                  borderBottomWidth: 1,
+                  borderBottomColor: colors.line,
+                }
+          }
+        >
+          <If when={!sidebarOpen()}>
+            <View style={{ marginRight: terminal ? TERMINAL_COLUMN : 8 }}>
+              <SidebarToggle />
+            </View>
+          </If>
+          <Text style={{ fontSize: 13, color: colors.muted }}>{group()}</Text>
+          <If when={!terminal} else={<Text style={{ fontSize: 13, color: colors.faint }}>›</Text>}>
+            <Icon name="chevron" size={12} tint={colors.faint} />
+          </If>
+          <Text style={{ numberOfLines: 1, flex: 1, fontSize: 13, fontWeight: "600", color: colors.text }}>{selected().name}</Text>
         </View>
-      </If>
+      </View>
       <View style={{ flex: 1 }}>
         {(() => {
           const Demo = selected().screen;
@@ -381,9 +556,10 @@ function Desktop() {
   if (open) selected.set(open.demo);
   if (routes.length > 1) nav.setRoutes([routes[0]]);
   wasDesktop.set(true);
+  effect(() => shownDemo.set(selected()));
   keymap.bind("mod+b", toggleSidebar);
   return (
-    <View style={{ flex: 1, flexDirection: "row", backgroundColor: colors.inset }}>
+    <View style={{ flex: 1, flexDirection: "row", backgroundColor: colors.background }}>
       <Sidebar />
       <NavStack state={nav} style={{ flex: 1 }}>
         {(route) => {
@@ -405,12 +581,26 @@ function Desktop() {
 /** The key of the demo left open, shown again on the next launch. */
 const LAST_DEMO = "lastDemo";
 
+/** A variable of the environment the gallery runs in that is set, else null. */
+function launch(name: string): string | null {
+  const value = process.env[name];
+  return value ? value : null;
+}
+
 /**
  * Reopens the demo left open last time (selected on a desktop, pushed on
  * a phone), then keeps the key current: the demo shown, or none when a
  * phone is back on the index. A name no demo has any more is ignored.
+ *
+ * `cargo run -- <demo> [--section <title>]` opens another, as GPUI Kit's
+ * story does: the runner sets `NSH_GALLERY_DEMO` (a demo's name, any case),
+ * opened instead of the last one, and `NSH_GALLERY_SECTION` (a card's
+ * title), the only section of it shown (`focusedSection`), so checking a
+ * demo needs no taps or scrolling. `nsh test` reads them as well.
  */
 function rememberDemo() {
+  const launched = launch("NSH_GALLERY_DEMO");
+  focusedSection.set(launch("NSH_GALLERY_SECTION"));
   const restored = signal(false);
   let asked = false;
   effect(() => {
@@ -418,9 +608,10 @@ function rememberDemo() {
     // (a demo pushed in the phone layout would open again in the desktop's).
     if (asked || windowSize().width === 0) return;
     asked = true;
-    Storage.getItem(LAST_DEMO)
+    (launched != null ? Promise.resolve(launched) : Storage.getItem(LAST_DEMO))
       .then((name) => {
-        const demo = groups.flatMap((g) => g.demos).find((d) => d.name === name);
+        const wanted = name?.toLowerCase();
+        const demo = groups.flatMap((g) => g.demos).find((d) => d.name.toLowerCase() === wanted);
         // Only on a fresh start: not over what the user already opened.
         if (demo && untracked(nav.routes).length === 1) {
           if (untracked(desktop)) selected.set(demo);
@@ -440,18 +631,16 @@ function rememberDemo() {
 function App() {
   if (hasWindow) {
     Window.setTitle("Gallery");
-    Window.setTitleBar("hidden", 40);
+    Window.setTitleBar({ style: "hidden", height: 44 });
   }
   rememberDemo();
+  // Every scroll view and list draws the gallery's bar.
+  Scrollbar.setTheme(scrollbarTheme);
   return (
-    <View style={{ flex: 1, backgroundColor: colors.inset }}>
-      <TitleBar
-        leading={
-          <If when={desktop()}>
-            <SidebarToggle />
-          </If>
-        }
-      />
+    <View style={{ flex: 1, backgroundColor: colors.background }}>
+      <If when={!desktop()}>
+        <TitleBar />
+      </If>
       <If when={desktop()} else={<Phone />}>
         <Desktop />
       </If>

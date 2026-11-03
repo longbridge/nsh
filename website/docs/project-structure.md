@@ -178,7 +178,7 @@ NSH does not need `node_modules`. Instead, every command that builds the app (`i
 | File in `.nsh/types/nsh/` | Declares |
 |---|---|
 | `index.d.ts` | `nsh`: `signal`, `computed`, `effect`, `mount`, `View`, `Text`, ... and re-exports the types below |
-| `types.d.ts` | Styles (`ViewStyle`, `TextStyle`, ...), every element's props and events, `YNode` (what a `ref` receives) |
+| `types.d.ts` | Styles (`ViewStyle`, `TextStyle`, ...), every element's props and events, the refs (`ViewRef`, `InputRef`, ...: what a `ref` receives) |
 | `jsx-runtime.d.ts` | The JSX runtime TypeScript resolves through `jsxImportSource` (the `JSX` namespace) |
 | `globals.d.ts` | `If` and `Each`; `console`, timers, `requestAnimationFrame`, `fetch` and the other [global APIs](../modules/globals.md) |
 | `assets.d.ts` | What importing an image or font gives |
@@ -279,7 +279,7 @@ import Inter from "./assets/Inter.ttf";     // "Inter"
 |---|---|
 | `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`, `.heic` | An `ImageAsset`: `{ url, size, scales? }`, sized in points. An `@2x` / `@3x` suffix divides the pixel size by 2 / 3. A file without a suffix also ships its `@1.5x`–`@4x` siblings, listed in `scales`, and the screen's variant is loaded ([pixel densities](./images-and-assets.md#pixel-densities)). |
 | `.svg` | An `ImageAsset` sized in points by the SVG's `width` and `height` (or `viewBox`). |
-| `.ttf`, `.otf` | The font's family name, a string. The font is registered before the first frame. |
+| `.ttf`, `.otf`, `.woff`, `.woff2` | The font's family name, a string. The font is registered before the first frame. |
 | `.json` | The parsed JSON |
 
 See [Images and assets](./images-and-assets.md) and [Fonts](./fonts.md).

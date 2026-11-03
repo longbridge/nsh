@@ -99,6 +99,7 @@ impl Platform {
             trace: false,
             network: None,
             websocket: None,
+            refuse_connections: None,
             filesystem: None,
             assets: None,
             environment: Environment::default(),
@@ -115,6 +116,7 @@ impl Platform {
             clipboard: None,
             host: Default::default(),
             picker: None,
+            speech: None,
         };
         let engine = Engine::start(config, || ApproxTextEngine, ChannelSink(tx)).unwrap();
         let mut platform = Self {

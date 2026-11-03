@@ -13,16 +13,16 @@ mod tiptap;
 mod typing;
 mod view_features;
 
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 
 use nsh_base::rich_editor::{
-    extensions::{markdown::markdown, starter},
+    extensions::{markdown::markdown, starter, suggestion::mention_node},
     model::{Node, NodeSpec, Schema},
     state::{EditorState, EditorStateConfig},
     view::{EditorSession, NodeView, NodeViewCx, NodeViews, rich_editor},
 };
 use nsh_core::{
-    PasteEvent, Size,
+    PasteEvent, PayloadValue, Size,
     element::Root,
     platform::{Idiom, Os},
     prelude::*,
@@ -45,7 +45,7 @@ impl NodeView for StockCard {
     }
 }
 
-/// The starter schema with a block atom `stock`.
+/// The starter schema with a block atom `stock` and Tiptap's `mention`.
 fn schema() -> Schema {
     let mut spec = starter::schema_spec();
     let mut stock = NodeSpec::default();
@@ -55,6 +55,7 @@ fn schema() -> Schema {
     symbol.default = Some(json!(""));
     stock.attrs = vec![("symbol".into(), symbol)];
     spec.nodes.push(("stock".into(), stock));
+    spec.nodes.push(mention_node("mention", "@"));
     Schema::new(spec).unwrap()
 }
 
@@ -132,14 +133,22 @@ fn Harness(props: HarnessProps) -> impl IntoElement {
 }
 
 fn start(doc: Value) -> Headless {
-    let session = session(doc);
+    start_on(doc, Os::Linux, false)
+}
+
+/// [`start`] on `os`; in a browser, on an Apple platform or not
+/// (`apple_keyboard`).
+fn start_on(doc: Value, os: Os, apple_keyboard: bool) -> Headless {
     let mut config = EngineConfig {
         viewport: Size::new(px(800.0), px(900.0)),
+        // Made in the engine, so its keymaps are the platform's the engine
+        // says, not the machine's.
         ..EngineConfig::new(Root::new::<Harness>(move || HarnessProps {
-            session: Some(session.clone()),
+            session: Some(session(doc.clone())),
         }))
     };
-    config.environment.os = Os::Linux;
+    config.environment.os = os;
+    config.environment.apple_keyboard = apple_keyboard;
     config.environment.idiom = Idiom::Desktop;
     let mut app = Headless::start(config).expect("the engine starts");
     app.wait_for("text:Ready").unwrap();
@@ -171,6 +180,41 @@ fn keys(app: &mut Headless, list: &[&str]) {
     }
 }
 
+/// An input method's composition in the editor's sink: started or
+/// changed (`composing`) with `text`, or ended. The headless driver has
+/// no composition step and does not expose an input's node id, so the
+/// event goes to every node; only the sink listens to it.
+fn compose(app: &mut Headless, composing: bool, text: &str) {
+    for id in 1..4096 {
+        app.engine().control().dispatch_event(
+            id,
+            EventKind::CompositionChange,
+            EventPayload::Map(vec![
+                ("composing", PayloadValue::Bool(composing)),
+                ("text", PayloadValue::Str(text.to_owned())),
+            ]),
+        );
+    }
+    app.wait(Duration::from_millis(50)).unwrap();
+}
+
+/// The sink's text changed to `text`, as platforms report it while an
+/// input method composes (the uncommitted text in it). Sent to every node,
+/// as [`compose`] is.
+fn sink_text(app: &mut Headless, text: &str) {
+    for id in 1..4096 {
+        app.engine().control().dispatch_event(
+            id,
+            EventKind::ChangeText,
+            EventPayload::Text {
+                text: text.to_owned(),
+                count: 0,
+            },
+        );
+    }
+    app.wait(Duration::from_millis(50)).unwrap();
+}
+
 #[test]
 fn typing_inserts_text_into_the_document() {
     let mut app = start(paragraphs(&[""]));
@@ -200,6 +244,30 @@ fn mod_b_toggles_bold() {
     see(&mut app, "Bold 1");
     keys(&mut app, &["mod+b"]);
     see(&mut app, "Bold 0");
+}
+
+#[test]
+fn a_browser_on_a_mac_takes_apples_keys() {
+    let mut app = start_on(paragraphs(&["one two"]), Os::Web, true);
+    app.type_text("id:editor", "").unwrap();
+    keys(&mut app, &["cmd+right"]);
+    see(&mut app, "Sel 8-8");
+    keys(&mut app, &["alt+left"]);
+    see(&mut app, "Sel 5-5");
+    keys(&mut app, &["cmd+left"]);
+    see(&mut app, "Sel 1-1");
+    keys(&mut app, &["cmd+a", "cmd+b"]);
+    see(&mut app, "Bold 1");
+    keys(&mut app, &["cmd+z"]);
+    see(&mut app, "Bold 0");
+}
+
+#[test]
+fn a_browser_elsewhere_takes_pc_keys() {
+    let mut app = start_on(paragraphs(&["word"]), Os::Web, false);
+    app.type_text("id:editor", "").unwrap();
+    keys(&mut app, &["ctrl+a", "ctrl+b"]);
+    see(&mut app, "Bold 1");
 }
 
 #[test]

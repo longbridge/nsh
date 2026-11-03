@@ -9,15 +9,15 @@ order: 2.2
 `nsh` exports `Image`, the [`<Image>`](../elements/image.md) element that shows images. The same `Image` also asks the native image loader about images without showing them: their size, and loading them before they are shown.
 
 ```ts
-import { Image, type ImageSize } from "nsh";
+import { Image, type PixelSize } from "nsh";
 ```
 
 `Image` is a component carrying two functions: `<Image src=…>` renders the native image view (the compiler makes it in place, as it does `<View>`), and `Image.getSize` / `Image.prefetch` are called on it directly.
 
 ```ts
-const Image: ((props: ImageProps) => YNode) & {
-  getSize(src: string | ImageAsset): Promise<ImageSize>;
-  prefetch(src: string | ImageAsset): Promise<boolean>;
+const Image: ((props: ImageProps) => JSX.Element) & {
+  getSize(src: string | ImageAsset): Promise<PixelSize>;
+  prefetch(src: string | ImageAsset): Promise<void>;
 };
 ```
 
@@ -26,9 +26,9 @@ See [Images and assets](../docs/images-and-assets.md) for the guide.
 ## Image.getSize
 
 ```ts
-getSize(src: string | ImageAsset): Promise<ImageSize>;
+getSize(src: string | ImageAsset): Promise<PixelSize>;
 
-interface ImageSize {
+interface PixelSize {
   width: number;   // pixels (an SVG's: points)
   height: number;
 }
@@ -50,14 +50,14 @@ Image.getSize(url).then(({ width, height }) => ratio.set(width / height));
 ## Image.prefetch
 
 ```ts
-prefetch(src: string | ImageAsset): Promise<boolean>;
+prefetch(src: string | ImageAsset): Promise<void>;
 ```
 
-Loads an image ahead of showing it. Resolves with `true` once its bytes are in memory (`false` when it could not be loaded). For an imported image with pixel-density variants, it loads the variant the views load on this screen. Use it for the next page of a gallery or the image behind a tap.
+Loads an image ahead of showing it. Resolves once its bytes are in memory, and rejects with the error when the image cannot be loaded. For an imported image with pixel-density variants, it loads the variant the views load on this screen. Use it for the next page of a gallery or the image behind a tap.
 
 ```ts
 const next = photos.slice(index + 1, index + 4);
-next.forEach((p) => Image.prefetch(p.url));
+next.forEach((p) => Image.prefetch(p.url).catch(() => {})); // the <Image> reports its own error later
 ```
 
 ## Related
@@ -66,4 +66,4 @@ next.forEach((p) => Image.prefetch(p.url));
 - Importing an image file (`import logo from "./logo.png"`) gives an `ImageAsset` (`{ url, size, scales? }`, sized in points) that `<Image src>` and canvas `drawImage` accept.
 
 > [!NOTE]
-> When your app declares `capabilities` in `nsh.json`, `getSize` and `prefetch` of remote URLs must be allowed under `network`, like `fetch`. See [Sandbox and capabilities](../docs/sandbox-and-capabilities.md).
+> When your app declares `capabilities` in `nsh.json`, `getSize` and `prefetch` of remote URLs must be allowed under `network`, like `fetch`. A URL outside them is never requested: the promise rejects with an `Error` whose `code` is `"ERR_ACCESS_DENIED"`, `permission` `"network"` and `resource` the URL. See [Sandbox and capabilities](../docs/sandbox-and-capabilities.md).

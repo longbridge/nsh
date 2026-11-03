@@ -3,7 +3,8 @@
 //! byte stream filled as the stack delivers chunks (the request is paused
 //! while more than [`QUEUE_LIMIT`] bytes wait unread), and a request body
 //! that is a `ReadableStream` is sent chunk by chunk as the stack asks for
-//! them. `data:` and `blob:` URLs are answered locally. Relative URLs
+//! them. `data:` and `blob:` URLs are answered locally, and `asset:/` URLs
+//! (the app's bundled files) by the engine from the host's assets. Relative URLs
 //! resolve against `HostOptions::base_url` (the page's URL on the web);
 //! hosts without one reject them.
 //!
@@ -1498,7 +1499,8 @@ fn start_fetch(cx: Ctx, input: Raw, init: Raw) -> R<V> {
             let r = local_response(cx, &url, b.bytes().to_vec(), &mime)?;
             return js::resolved(cx, r.raw());
         }
-        "http" | "https" => {}
+        // The engine answers `asset:` from the host's assets.
+        "http" | "https" | "asset" => {}
         other => {
             return js::rejected(
                 cx,
@@ -1644,19 +1646,45 @@ pub(crate) fn event(cx: Ctx, id: RequestId, event: FetchEvent) -> R<()> {
             Ok(())
         }
         FetchEvent::Failed(message) => {
-            let Some(entry) = finish(cx, id)? else {
-                return Ok(());
-            };
             let e = network_error(cx, &message);
-            if let Some(d) = &entry.deferred {
-                d.reject(cx, e.raw());
-            }
-            if let Some(c) = controller(cx, &entry)? {
-                readable::error_controller(cx, c.raw(), e.raw())?;
-            }
-            Ok(())
+            fail(cx, id, e)
         }
     }
+}
+
+/// Fails request `id`, which the app's capabilities do not grant
+/// (`message` says why; `url` is the request's or the redirect's): a
+/// `TypeError`, as every failed fetch, with `code` `ERR_ACCESS_DENIED`,
+/// `permission` `"network"` and `resource` the URL.
+pub(crate) fn refused(cx: Ctx, id: RequestId, message: &str, url: &str) -> R<()> {
+    forget_dropped(cx);
+    if !web(cx).fetches.contains_key(&id) {
+        return Ok(());
+    }
+    let e = network_error(cx, message);
+    for (key, value) in [
+        ("code", nsh_core::element::codes::ACCESS_DENIED),
+        ("permission", "network"),
+        ("resource", url),
+    ] {
+        let value = js::string(cx, value)?;
+        js::define(cx, e.raw(), key, value, true)?;
+    }
+    fail(cx, id, e)
+}
+
+/// Ends request `id` with error `e`: its promise rejects, its body errors.
+fn fail(cx: Ctx, id: RequestId, e: V) -> R<()> {
+    let Some(entry) = finish(cx, id)? else {
+        return Ok(());
+    };
+    if let Some(d) = &entry.deferred {
+        d.reject(cx, e.raw());
+    }
+    if let Some(c) = controller(cx, &entry)? {
+        readable::error_controller(cx, c.raw(), e.raw())?;
+    }
+    Ok(())
 }
 
 /// Removes request `id` (completed): its entry.
@@ -2020,7 +2048,7 @@ pub(crate) const FUNCTIONS: &[super::Function] = &[super::Function {
     native: fetch,
     length: 1,
     doc: nsh_core::decl!(
-        "HTTP through the platform's network stack (NSURLSession,\nHttpURLConnection), streaming both ways; `data:` and `blob:` URLs are\nanswered locally."
+        "HTTP through the platform's network stack (NSURLSession,\nHttpURLConnection), streaming both ways; `data:` and `blob:` URLs are\nanswered locally, and `asset:/` URLs with the app's bundled files."
     ),
     signature: nsh_core::decl!(
         "(input: string | URL | Request, init?: RequestInit): Promise<Response>"

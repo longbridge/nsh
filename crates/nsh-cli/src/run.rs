@@ -414,6 +414,7 @@ fn run_rust_app(
                 crate::package::PackageTarget::IosSimulator,
                 &out,
                 config,
+                &[],
             )?;
             let bundle = out.join(format!("{name}.app"));
             let step = ui::Step::start(format!("installing {id} in the simulator"));
@@ -439,7 +440,18 @@ fn run_rust_app(
             let sdk = android::Sdk::find()?;
             let serial = android::device(&sdk)?;
             let out = run.join("android");
-            package_for_run(&entry, crate::package::PackageTarget::Android, &out, config)?;
+            // The device's ABI alone: each one is a build of the app's crate.
+            let abi = android::device_abis(&sdk, &serial)?
+                .into_iter()
+                .find(|abi| android::ABIS.contains(&abi.as_str()))
+                .with_context(|| format!("{serial} runs none of {}", android::ABIS.join(", ")))?;
+            package_for_run(
+                &entry,
+                crate::package::PackageTarget::Android,
+                &out,
+                config,
+                std::slice::from_ref(&abi),
+            )?;
             let apk = out.join(format!("{name}.apk"));
             let step = ui::Step::start(format!("installing {id} on {serial}"));
             android::adb(&sdk, &serial, &["install", "-r", &apk.to_string_lossy()])?;
@@ -472,12 +484,13 @@ fn run_rust_app(
 }
 
 /// Packages the Rust app at `entry` for `target` into `out` (as `nsh
-/// package` does), for `nsh run` to install.
+/// package` does), for `nsh run` to install; Android: for `abis`.
 fn package_for_run(
     entry: &Path,
     target: crate::package::PackageTarget,
     out: &Path,
     config: crate::package::AppConfig,
+    abis: &[String],
 ) -> anyhow::Result<()> {
     crate::package::package(crate::package::PackageOptions {
         entry,
@@ -487,6 +500,7 @@ fn package_for_run(
         sign: None,
         profile: None,
         keystore: None,
+        abis,
         run: false,
     })
 }
@@ -727,7 +741,7 @@ fn run_android(
     // As on iOS: the host of a previous session must not connect first.
     let _ = android::adb(&sdk, &serial, &["shell", "am", "force-stop", BUNDLE_ID]);
     let session = DevSession::start(entry, port, release, limits)?;
-    install_android_host(&sdk, &serial, work, &crate::runtime::android(true)?)?;
+    install_android_host(&sdk, &serial, work, &crate::runtime::android(true, &[])?)?;
     // The device reaches the dev server on its own 127.0.0.1, until the
     // run ends.
     let _reverse = android::Reverse::add(&sdk, &serial, session.port())?;
@@ -789,6 +803,7 @@ pub(crate) fn install_android_host(
                 rust: false,
                 dark: false,
                 runtime,
+                abis: &[],
                 icon: None,
                 assets: Vec::new(),
                 signing: Signing::Debug,
@@ -1032,6 +1047,12 @@ fn info_plist(target: Target) -> String {
              <key>NSAppTransportSecurity</key><dict><key>NSAllowsLocalNetworking</key><true/></dict>"
         }
     };
+    // The host runs any app: it may recognize speech.
+    let usage = crate::package::USAGE_DESCRIPTIONS
+        .iter()
+        .map(|(key, text)| format!("<key>{key}</key><string>{text}</string>"))
+        .collect::<Vec<_>>()
+        .join("\n    ");
     format!(
         r#"<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -1044,6 +1065,7 @@ fn info_plist(target: Target) -> String {
     <key>CFBundleShortVersionString</key><string>0.1.0</string>
     <key>CFBundleVersion</key><string>1</string>
     <key>UIApplicationSupportsMultipleScenes</key><false/>
+    {usage}
     {platform}
 </dict>
 </plist>

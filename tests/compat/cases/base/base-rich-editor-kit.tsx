@@ -18,13 +18,13 @@ import {
   History,
   HorizontalRule,
   Italic,
-  Link,
   ListItem,
   ListKeymap,
   OrderedList,
   Paragraph,
   RichExtension,
   RichImage,
+  RichLink,
   StarterKit,
   Strike,
   Subscript,
@@ -73,14 +73,14 @@ function App() {
       let bold = "ran";
       try {
         editor.can(command("toggleBold"));
-      } catch {
-        bold = "unknown";
+      } catch (e) {
+        bold = e instanceof TypeError ? "unknown" : "other";
       }
       return `${editor.can(command("toggleHeading", { level: 3 }))} ${editor.can(command("toggleHeading", { level: 2 }))} ${bold}`;
     });
     step("Extension", () => {
       const bold: RichExtension = Bold.configure({});
-      return `${bold.name} ${bold.type} ${bold.priority}`;
+      return `${bold.name} ${bold.type} ${bold.priority} ${bold instanceof RichExtension}`;
     });
     step("Extend", () => {
       const underline = Underline.extend({
@@ -151,7 +151,7 @@ function App() {
         Strike,
         Code,
         Underline,
-        Link,
+        RichLink,
         Highlight,
         Subscript,
         Superscript,

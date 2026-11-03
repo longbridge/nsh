@@ -43,7 +43,7 @@ function App() {
           </Button>
           <Switch
             checked={enabled()}
-            onChange={(next) => enabled.set(next)}
+            onChange={({ checked }) => enabled.set(checked)}
             class="flex-row items-center gap-2 px-1 active:opacity-70"
             trackClass="w-9 rounded-full p-0.5 transition-colors motion-reduce:transition-none"
             trackStyle={enabled() ? ui().accentFill : ui().inset}
@@ -54,7 +54,7 @@ function App() {
           </Switch>
         </View>
         <Text style={{ color: ui().accent, fontSize: 13 }}>
-          keyboardFrame(): height {Math.round(keyboardFrame().height)} · duration {keyboardFrame().duration.toFixed(2)} s
+          keyboardFrame(): height {Math.round(keyboardFrame().height)} · duration {Math.round(keyboardFrame().duration)} ms
         </Text>
       </View>
 
@@ -73,7 +73,7 @@ function App() {
       <View style={{ flexDirection: "row", gap: 8, padding: 12, paddingHorizontal: desktop ? 20 : 12, borderTopWidth: 1, borderTopColor: ui().border, backgroundColor: ui().page }}>
         <Input
           value={draft()}
-          onChange={(text) => draft.set(text)}
+          onChange={({ value }) => draft.set(value)}
           onSubmit={send}
           testID="message"
           returnKeyType="send"

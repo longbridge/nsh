@@ -13,7 +13,7 @@ supplies padding, colors, borders and state feedback through `classes` and `styl
 |---|---|
 | `mod.rs` | The component: `DataTableProps`, `DataTableEvent`, `DataTableApi` (the ref's methods); the values: `DataTableAlign`, `DataTableSortDirection` (`PropEnum`s), `DataTableColumn`, `DataTableColumnGroup`, `DataTableSort`, `DataTableSelection`, `DataTableRange`, `DataTableCell`, ... (`JsObject`s) |
 | `parts.rs` | The parts the app styles: one `parts!` list makes `DataTableClasses`, `DataTableStyles` and `DataTablePart` |
-| `data.rs` | `DataTableRows`: the rows from JS, arrays or objects by the columns' keys, and each field as a `Cell` |
+| `data.rs` | `DataTableRows`: the rows from JS (arrays, or objects by the columns' keys) or from Rust a typed column at a time (`new`, `texts`, `numbers`, `bools`, as the core's `Rows::from_columns`), each field as a `Cell` |
 | `axis.rs` | `Axis`: one axis's real extent against the extent the scroll views get (see "Huge tables") |
 | `columns.rs` | `Columns`: the columns' order, widths and prefix sums, the fixed ones, finding the column at an x, resizing, moving |
 | `selection.rs` | `Selection`, `Selectable` (gpui-component's `rowSelectable`, `columnSelectable`, `cellSelectable`), and `Nav`: what a key moves the selection to |
@@ -22,41 +22,34 @@ supplies padding, colors, borders and state feedback through `classes` and `styl
 
 ## Layers
 
-The table is a hit layer, a body and a header (`view.rs`):
+The table is a body, a hit layer over it and a header (`view.rs`), from the bottom:
 
-- the *hit layer* is a vertical scroll view of a horizontal one of an empty box of the content's size. The platforms
-  scroll it as they scroll any scroll view (inertia, scroll bars, wheel, touch), and its box takes presses, hovers and
-  the context menu;
-- the *body* over it receives no pointer and draws the cells of the rows and columns in view, placed where the table
-  last scrolled to. Its regions are the row headers, the fixed columns (which move with the rows only) and the scrolling
+- the *body* receives no pointer and draws the cells of the rows and columns in view, placed where the table last
+  scrolled to. Its regions are the row headers, the fixed columns (which move with the rows only) and the scrolling
   columns (which move both ways). The cells a scroll needs come with the next commit, which moves the body with them;
-- the *header* above it is interactive: group labels, titles, resize handles and the drop line of a column being moved.
+- the *hit layer* over it is a vertical scroll view of a horizontal one of an empty box of the content's size. The
+  platforms scroll it as they scroll any scroll view (inertia, scroll bars, wheel, touch), and its box takes presses,
+  hovers and the context menu. It draws nothing but its scroll bars (the platform's indicator, or the built-in
+  `Scrollbar` of the app's theme, both the scroll view's own), which lie over the rows' backgrounds this way: with
+  the body above, a striped, hovered or selected row would cover the bar;
+- the *header* above them is interactive: group labels, titles, resize handles and the drop line of a column being moved.
 
 The fixed-column separator sits above each row background and below its cells, so app-supplied cell borders
 remain visible at the fixed boundary.
 
-Rows come from `RowWindow` (`window.rs`, `reaching(margin, ahead)`), columns from the same with a reach of 1 and 3, so
-a scroll inside the window made commits a few mount items only.
-
-The rows' and the scrolling columns' origins move in whole points (`region`, `view.rs`), as layout rounds frames: at a
-fraction, the cells' texts would round to another point in their cells as the origin moves, and every cell's frame would
-be sent again at each scroll frame.
-
-The rows and the scrolling columns are *slots* (`Slots`, `view.rs`): views made once, each showing the item of the
-window whose index leaves its slot number when divided by their count (the most the window has held). When the window
-moves by `k` rows, `k` row slots take other rows: their texts and places change, and no view is made or dropped while
-scrolling, however far. This is the retained tree's form of gpui-component's `uniform_list`, which draws the rows in
-view each frame: the cost of a scroll is the cells that change, never the views that would have to be built.
+Rows come from `RowWindow::following` (`window.rs`): the rows and columns in view and a few past each edge. The rows'
+and the scrolling columns' origins move by whole device pixels (`region`, `on_pixel`, `view.rs`). The rows and the
+scrolling columns are *slots* (`Slots`, `view.rs`): views made once and reused for the items the window brings into
+reach, so no view is made or dropped while scrolling, however far, and the cost of a scroll is the cells that change.
 
 ## Huge tables
 
-Platforms keep scroll offsets and content sizes in 32-bit floats, so ten million rows (a quarter of a billion points)
-cannot be a scroll view's content. Past `MAX_EXTENT` (3 000 000 points) the scroll view gets that extent and its offset
-is scaled to the content's (`Axis::ratio`); the table finds the rows from the scaled offset and places them relative to
-the first row in view, so what is drawn is exact at any size and the scroll bar still spans the content. The columns
-work the same way on the horizontal axis. Offsets the table scrolls to (`scrollToRow`, revealing the selection) are
-`Axis::scroll_points`: the 32-bit float that does not stop short of the row, since far down a scaled axis one step of
-that float is several content points. Columns hold prefix sums, so finding the column at an x is a binary search.
+Platforms keep scroll offsets and content sizes in 32-bit floats, so ten million rows cannot be a scroll view's
+content. Past `MAX_EXTENT` the scroll view gets a bounded extent and the table maps its offset to the content's
+(`Axis`, `Anchor` in the table's code), so what is drawn is exact at any size, the scroll bar still spans the content
+and offsets the table scrolls to (`scrollToRow`, revealing the selection) land on the row. The columns work the same
+way on the horizontal axis. On touch devices drags move the content one to one; on the desktops dragging the bar
+reaches the whole content.
 
 ## Columns' own classes, fitting, bounce
 
@@ -88,9 +81,11 @@ show keep the quote they opened with, computed from their id.
 ## Performance
 
 Headless, debug build, the gallery's demo (`nsh test examples/gallery/App.tsx --trace`, 390 × 844): a scroll frame
-inside the window made commits 4 mount items in ~1.2 ms; a window shift (row slots taking other rows) ~340 items in
-~4 ms, with no views made (before the slots: ~2000 items in ~14 ms, every row of the window rebuilt); the first window
-~4000 items. A tick commits ~33 items in a median 1.7 ms (at most 2.7 ms); scrolling while it ticks, a frame with a
+that crosses no row commits 4 mount items in ~1.2 ms; one that crosses a few rows (10 points of scroll bar, three rows
+of the scaled million) ~35–50 items in ~2 ms, with no views made (before the slots: ~2000 items in ~14 ms, every row
+of the window rebuilt; with a window jumping a viewport and a half ahead, ~340 items at each jump). On a Pixel 10 Pro
+(release, scripted swipes) the table holds ~870 views instead of ~2350, commits take 3 ms at the median and 7 ms at
+the 90th percentile, and no frame misses its deadline. A tick commits ~33 items in a median 1.7 ms (at most 2.7 ms); scrolling while it ticks, a frame with a
 tick ~44 items in ~3 ms. Before the origins moved in whole points, a scroll frame at a fraction sent ~470 items: every
 cell text's frame.
 
@@ -120,7 +115,7 @@ methods the ref's. Deliberate differences:
   keyless, once at the end).
 - `onLoadMore` fires once per number of rows and waits while `loading` (gpui-component's `load_more` comes again on
   every range change, for the delegate to guard).
-- One `onSelectionChange` with a `{ row?, column? }` value replaces `SelectRow` / `SelectColumn` / `SelectCell` /
+- One `onSelectionChange` with `{ selection }`, a `{ row?, column? }` or `null`, replaces `SelectRow` / `SelectColumn` / `SelectCell` /
   `ClearSelection`; the arrow keys skip columns that do not select (gpui-component's land on them).
 - No strings and no fixed look: the empty and loading slots are the app's, and every part (the sort button
   among them) takes the app's classes for its appearance (gpui-component draws an inbox icon, a skeleton

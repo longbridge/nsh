@@ -1,7 +1,7 @@
 ---
 title: WebView
 description: WebView 元素：在应用中显示网页和内联 HTML，并支持双向通信。
-order: 9
+order: 80
 group: primitives
 demo: el-web-view
 ---
@@ -75,11 +75,16 @@ web view 接受 [view](./view.md) 的属性（它没有子元素），另外还�
 |---|---|---|---|
 | `onLoadStart` | `.on_load_start` | `WebViewNavigation` | 页面开始加载。 |
 | `onLoad` | `.on_load` | `WebViewNavigation` | 页面加载完成。 |
-| `onError` | `.on_error` | `{ message }`（`&str`） | 加载失败。 |
+| `onError` | `.on_error` | `{ message, code? }`（`&str`，即消息） | 加载失败；页面或 `html` 不在应用的能力范围内时 `code` 为 `"ERR_ACCESS_DENIED"`。 |
 | `onNavigationStateChange` | `.on_navigation_state_change` | `WebViewNavigation` | URL、标题、加载状态或历史记录发生变化。 |
 | `onMessage` | `.on_message` | `{ data: string }`（`&str`） | 页面调用了 `window.nsh.postMessage(data)`。 |
+| `onDownload` | | `WebViewDownload` | 下载开始、完成或失败（macOS）。 |
 
 `WebViewNavigation` 为 `{ url, title, loading, canGoBack, canGoForward }`；Rust 中为 `WebNavigation`，字段是 `url`、`title`、`loading`、`can_go_back` 和 `can_go_forward`。
+
+`WebViewDownload` 为 `{ state, id, url, filename, path, bytes?, message? }`：`state` 为 `"started"`、`"finished"`（带文件大小 `bytes`）或 `"failed"`（带原因 `message`）。设置了 `onDownload` 后，页面下载的内容（附件、web view 不显示的类型、`download` 链接）保存在应用数据目录的 `downloads/<id>/<filename>`，即 `path` 所指的位置，应用用 `fs/promises` 读取。
+
+在 macOS 上，添加监听器后，`webview` 能力允许加载的任何页面都可以自动保存下载文件。应用负责管理存储空间，并在使用完毕后删除 `downloads/` 中已完成的文件。移除 web view 会取消正在进行的下载，并删除其未完成的目录。下载通过 `onDownload` 报告；导航转为下载时，`onError` 只报告实际的导航失败。文件名会移除控制字符和双向格式控制符；过长的名称会缩短到 200 字节，并保留能容纳的扩展名。
 
 ## ref 方法
 
@@ -125,7 +130,7 @@ fn bridge() -> impl IntoElement {
 ```
 
 ```tsx tabs
-import { signal, Text, View, WebView, type YNode } from "nsh";
+import { signal, Text, View, WebView, type WebViewRef } from "nsh";
 
 const page = `<!doctype html>
 <meta name="viewport" content="width=device-width">
@@ -137,7 +142,7 @@ const page = `<!doctype html>
 
 function Bridge() {
   const message = signal("");
-  let web!: YNode;
+  let web!: WebViewRef;
   return (
     <View style={{ gap: 12 }}>
       <WebView ref={web} html={page} style={{ height: 200 }} onMessage={(e) => message.set(e.data)} />
@@ -149,7 +154,7 @@ function Bridge() {
 
 ## 能力声明
 
-应用在 `nsh.json` 中声明了[能力](../docs/sandbox-and-capabilities.md)时，web view 显示和跳转到 `webview` 下列出的主机。指向其他主机的 `src` 显示为空视图；跳到其他主机的顶层导航（用户点击的链接）会在原生侧取消。
+应用在 `nsh.json` 中声明了[能力](../docs/sandbox-and-capabilities.md)时，web view 显示和跳转到 `webview` 下列出的主机。指向其他主机的 `src`，或未声明 `webview` 的应用中的 `html`，显示为空视图；跳到其他主机的顶层导航（用户点击的链接）会在原生侧取消。每种情况都会触发 `onError`，其 `code` 为 `"ERR_ACCESS_DENIED"`。
 
 ```json
 {
@@ -162,5 +167,6 @@ function Bridge() {
 ## 平台说明
 
 - iOS 在第一次创建 web view 时才加载 WebKit，应用在显示 web view 时才为此付出开销。
+- 在 macOS 上，`onDownload` 通过 WebKit 的 `WKDownload` 保存下载内容。
 - 在 Android 上，页面的 `postMessage` 调用会到达后台线程，再按顺序转发给应用。
 - 要给 web view 加圆角，设置圆角半径和 `overflow: "hidden"`（`.overflow_hidden()`）。
