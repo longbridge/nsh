@@ -1,7 +1,7 @@
 //! `nsh/base`: the behavior and infrastructure foundation of NSH apps' UI,
 //! written in Rust, with no look of its own (as `gpui-base` is GPUI Kit's):
 //! controls (`Button`, a link (`Link`), `Checkbox`, avatars (`Avatar`, `AvatarGroup`), a carousel (`Carousel` and its parts), a color picker: `ColorPicker` and its parts, `NumberInput`, `Radio` in a
-//! `RadioGroup`, `Slider`, `Switch`, `Toggle` in a `ToggleGroup`, a bar of them and of buttons and links (`Toolbar`, `ToolbarGroup`, `ToolbarSeparator`), a scroll bar of the app's own look (`Scrollbar`), `Tab` in `Tabs`, `Select`, `Combobox`, a one-time code: `OtpInput`), the pages of a set (`Pagination`), items that hold items (`Tree`), a progress bar (`Progress`), disclosure (`Collapsible`, `Accordion` and its parts),
+//! `RadioGroup`, `Slider`, `Switch`, `Toggle` in a `ToggleGroup`, a bar of them and of buttons and links (`Toolbar`, `ToolbarGroup`, `ToolbarSeparator`), a scroll bar of the app's own look (`Scrollbar`), `Tab` in `Tabs`, `Select`, `Combobox`, a command palette (`Command`), a one-time code: `OtpInput`), the pages of a set (`Pagination`), items that hold items (`Tree`), a progress bar (`Progress`), disclosure (`Collapsible`, `Accordion` and its parts),
 //! the parts of charts (`plot`: `nsh/base/plot`), navigation (stacks and pages), dialogs, popups on the core's overlays
 //! (`Popover`, `HoverCard`, `Menu`, `ContextMenu`, `Tooltip`, `Sheet`), a code editor
 //! (`Editor`), the changes between two texts (`DiffView`), tables over any number of rows and columns (`DataTable`) and static tables
@@ -26,6 +26,7 @@ mod checkbox;
 mod collapsible;
 mod color_picker;
 mod combobox;
+mod command;
 mod data_table;
 mod date_picker;
 mod diff;
@@ -93,8 +94,8 @@ pub use crate::{
     },
     button::{Button, ButtonElement, ButtonEvent, ButtonProps, button},
     calendar::{
-        Calendar, CalendarElement, CalendarEvent, CalendarItemKind, CalendarItemState,
-        CalendarProps, CalendarValue, Date, Matcher, YearRange, calendar,
+        Calendar, CalendarElement, CalendarEntry, CalendarEvent, CalendarItemKind, CalendarProps,
+        CalendarValue, Date, Matcher, YearRange, calendar,
     },
     carousel::{
         Carousel, CarouselContent, CarouselContentElement, CarouselContentProps,
@@ -116,6 +117,10 @@ pub use crate::{
         color_area, color_eye_dropper, color_field, color_picker, color_slider, color_swatch,
     },
     combobox::{Combobox, ComboboxElement, ComboboxEvent, ComboboxProps, combobox},
+    command::{
+        Command, CommandApi, CommandElement, CommandEntry, CommandEvent, CommandGroup, CommandItem,
+        CommandProps, command,
+    },
     data_table::{
         DataTable, DataTableAlign, DataTableApi, DataTableCell, DataTableClasses, DataTableColumn,
         DataTableColumnGroup, DataTableColumnMove, DataTableContextMenu, DataTableDump,
@@ -185,7 +190,7 @@ pub use crate::{
         set_scrollbar_theme,
     },
     select::{
-        Select, SelectElement, SelectEvent, SelectGroup, SelectItem, SelectItemState, SelectProps,
+        Select, SelectElement, SelectEntry, SelectEvent, SelectGroup, SelectItem, SelectProps,
         SelectValue, select,
     },
     sheet::{Sheet, SheetElement, SheetEvent, SheetProps, sheet},
@@ -208,7 +213,7 @@ pub use crate::{
     theme::{DEFAULT_THEME, Theme, ThemeError, theme, theme_overrides, tokens_of},
     time_field::{
         HourCycle, TimeField, TimeFieldElement, TimeFieldEvent, TimeFieldProps,
-        TimeFieldSegmentState, TimeOfDay, TimePrecision, TimeSegment, time_field,
+        TimeFieldSegmentEntry, TimeOfDay, TimePrecision, TimeSegment, time_field,
     },
     toast::{
         Anchor, SwipeDirection, Toast, ToastAdvance, ToastElement, ToastEvent, ToastManager,
@@ -267,12 +272,13 @@ pub mod parts {
         Avatar, AvatarGroup, Button, Calendar, Carousel, CarouselContent, CarouselItem,
         CarouselNext, CarouselPagination, CarouselPaginationItem, CarouselPrevious, Checkbox,
         Collapsible, ColorArea, ColorEyeDropper, ColorField, ColorPicker, ColorSlider, ColorSwatch,
-        Combobox, ContextMenu, DataTable, DatePicker, DiffView, DockArea, Editor, HoverCard, Link,
-        Menu, MenuItem, MenuSeparator, NumberInput, OtpInput, Pagination, Popover, Progress, Radio,
-        RadioGroup, ResizablePanel, ResizablePanelGroup, Scrollbar, Select, Sheet, Slider, Submenu,
-        Switch, Tab, Table, TableBody, TableCaption, TableCell, TableFooter, TableHead,
-        TableHeader, TableRow, Tabs, TextView, TimeField, Toast, ToastStack, Toggle, ToggleGroup,
-        Toolbar, ToolbarGroup, ToolbarSeparator, Tooltip, Tree, plot, rich_editor, toast,
+        Combobox, Command, ContextMenu, DataTable, DatePicker, DiffView, DockArea, Editor,
+        HoverCard, Link, Menu, MenuItem, MenuSeparator, NumberInput, OtpInput, Pagination, Popover,
+        Progress, Radio, RadioGroup, ResizablePanel, ResizablePanelGroup, Scrollbar, Select, Sheet,
+        Slider, Submenu, Switch, Tab, Table, TableBody, TableCaption, TableCell, TableFooter,
+        TableHead, TableHeader, TableRow, Tabs, TextView, TimeField, Toast, ToastStack, Toggle,
+        ToggleGroup, Toolbar, ToolbarGroup, ToolbarSeparator, Tooltip, Tree, plot, rich_editor,
+        toast,
     };
 
     /// What a part does: registers its components, classes and modules.
@@ -281,6 +287,11 @@ pub mod parts {
     /// Every part by its name, the order [`crate::registry`] registers them.
     pub const ALL: &[(&str, Part)] = &[
         ("core", core),
+        ("pickers", pickers),
+        ("color_picker", color_picker),
+        ("carousel", carousel),
+        ("tree", tree),
+        ("fields", fields),
         ("text_view", text_view),
         ("editor", editor),
         ("diff", diff),
@@ -293,8 +304,11 @@ pub mod parts {
     ];
 
     /// The controls, popups, toasts and dialogs every app may use: buttons,
-    /// links, carousels, checkboxes, color pickers, radios, switches, toggles, toolbars, sliders, scroll bars, number inputs, one-time code inputs, paginations, selects, comboboxes, trees, tabs, collapsibles, accordions, progress,
-    /// menus, popovers, hover cards, sheets, tooltips, toasts and system alerts.
+    /// links, checkboxes, radios, switches, toggles, toolbars, sliders,
+    /// scroll bars, paginations, tabs, collapsibles, accordions, avatars,
+    /// progress, menus, popovers, hover cards, sheets, tooltips, toasts and
+    /// system alerts. The larger controls are parts of their own, so a web
+    /// runtime linked for an app leaves out those it does not use.
     pub fn core(registry: &mut Registry) {
         registry
             .register::<Accordion>()
@@ -315,27 +329,8 @@ pub mod parts {
             .register::<HoverCard>()
             .register::<Sheet>()
             .register::<Tooltip>()
-            .register::<Calendar>()
-            .register::<Carousel>()
-            .register::<CarouselContent>()
-            .register::<CarouselItem>()
-            .register::<CarouselPrevious>()
-            .register::<CarouselNext>()
-            .register::<CarouselPagination>()
-            .register::<CarouselPaginationItem>()
             .register::<Checkbox>()
             .register::<Collapsible>()
-            .register::<DatePicker>()
-            .register::<Combobox>()
-            .register::<ColorPicker>()
-            .register::<ColorArea>()
-            .register::<ColorSlider>()
-            .register::<ColorField>()
-            .register::<ColorSwatch>()
-            .register::<ColorEyeDropper>()
-            .register::<Select>()
-            .register::<NumberInput>()
-            .register::<OtpInput>()
             .register::<Pagination>()
             .register::<Radio>()
             .register::<RadioGroup>()
@@ -344,6 +339,10 @@ pub mod parts {
             .module::<Scrollbar>()
             .scrollbars_from(crate::scrollbar::built_in)
             .register::<Switch>()
+            // Lists to pick from: in every app's forms, so never apart.
+            .register::<Select>()
+            .register::<Combobox>()
+            .register::<Command>()
             .register::<Progress>()
             .register::<Tab>()
             .register::<Tabs>()
@@ -352,12 +351,51 @@ pub mod parts {
             .register::<Toolbar>()
             .register::<ToolbarGroup>()
             .register::<ToolbarSeparator>()
-            .register::<TimeField>()
-            .register::<Tree>()
             .register::<Toast>()
             .register::<ToastStack>()
             .class::<toast::ToastManagerClass>()
             .module::<AlertDialog>();
+    }
+
+    /// `Calendar`, `DatePicker` and `TimeField`: dates and times.
+    pub fn pickers(registry: &mut Registry) {
+        registry
+            .register::<Calendar>()
+            .register::<DatePicker>()
+            .register::<TimeField>();
+    }
+
+    /// `ColorPicker` and its parts.
+    pub fn color_picker(registry: &mut Registry) {
+        registry
+            .register::<ColorPicker>()
+            .register::<ColorArea>()
+            .register::<ColorSlider>()
+            .register::<ColorField>()
+            .register::<ColorSwatch>()
+            .register::<ColorEyeDropper>();
+    }
+
+    /// `Carousel` and its parts.
+    pub fn carousel(registry: &mut Registry) {
+        registry
+            .register::<Carousel>()
+            .register::<CarouselContent>()
+            .register::<CarouselItem>()
+            .register::<CarouselPrevious>()
+            .register::<CarouselNext>()
+            .register::<CarouselPagination>()
+            .register::<CarouselPaginationItem>();
+    }
+
+    /// `Tree`: items that hold items.
+    pub fn tree(registry: &mut Registry) {
+        registry.register::<Tree>();
+    }
+
+    /// `NumberInput` and `OtpInput`.
+    pub fn fields(registry: &mut Registry) {
+        registry.register::<NumberInput>().register::<OtpInput>();
     }
 
     /// `TextView`: Markdown and HTML documents.
@@ -460,6 +498,7 @@ mod tests {
                 "ColorSlider",
                 "ColorSwatch",
                 "Combobox",
+                "Command",
                 "ContextMenu",
                 "DataTable",
                 "DatePicker",
@@ -535,6 +574,7 @@ mod tests {
                 "Arc",
                 "Area",
                 "Bar",
+                "Dot",
                 "Grid",
                 "Line",
                 "Pie",
@@ -544,6 +584,7 @@ mod tests {
                 "PlotLabel",
                 "RadialGrid",
                 "RadialLine",
+                "Rule",
                 "Sankey"
             ]
         );

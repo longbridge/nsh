@@ -53,8 +53,8 @@ use nsh_core::{
     keymap::{Key, KeyMatch, Keymap, Keystroke, Modifiers},
 };
 use nsh_engine::{
-    App, Assets, ColorScheme, EngineConfig, EngineControl, Environment, Idiom, Limits, LocalEngine,
-    MountSink, Os,
+    App, Assets, ColorScheme, EngineConfig, EngineControl, Environment, Idiom, Lifecycle, Limits,
+    LocalEngine, MountSink, Os,
 };
 
 use crate::{animation::UiAnimation, encode::Out, text::WebTextEngine};
@@ -92,6 +92,9 @@ thread_local! {
     static KEYMAP: RefCell<Option<std::sync::Arc<Keymap>>> = const { RefCell::new(None) };
     /// The UI sets apps import ([`set_ui_sets`]; by default `nsh/base`).
     static UI_SETS: RefCell<Option<Vec<nsh_core::element::Registry>>> = const { RefCell::new(None) };
+    /// The app's own UI sets their gates added ([`add_ui_set`], [`ui_set!`]),
+    /// served after `nsh/base`'s parts.
+    static APP_SETS: RefCell<Vec<nsh_core::element::Registry>> = const { RefCell::new(Vec::new()) };
     /// What makes the Rust app's root ([`set_root`]), for [`nsh_start_rust`].
     static ROOT: RefCell<Option<Box<dyn Fn() -> nsh_core::element::Root>>> = const { RefCell::new(None) };
     /// What the last [`nsh_compile`] made: the module or the error.
@@ -109,11 +112,26 @@ pub fn set_ui_sets(sets: Vec<Registry>) {
     UI_SETS.with(|s| *s.borrow_mut() = Some(sets));
 }
 
-/// The UI sets engines serve: [`set_ui_sets`]'s, else nsh's own.
+/// Adds one of the app's own UI sets to the apps started from now on,
+/// after `nsh/base`'s parts ([`ui_set!`]'s gate calls it). A set added
+/// again replaces nothing: the first stays.
+pub fn add_ui_set(set: Registry) {
+    APP_SETS.with(|s| {
+        let mut sets = s.borrow_mut();
+        if !sets.iter().any(|t| t.specifier() == set.specifier()) {
+            sets.push(set);
+        }
+    });
+}
+
+/// The UI sets engines serve: [`set_ui_sets`]'s, else `nsh/base`'s parts
+/// and the app's sets their gates added ([`add_ui_set`]).
 fn ui_sets() -> Vec<Registry> {
-    UI_SETS
-        .with(|s| s.borrow().clone())
-        .unwrap_or_else(|| vec![base_set()])
+    UI_SETS.with(|s| s.borrow().clone()).unwrap_or_else(|| {
+        let mut sets = vec![base_set()];
+        APP_SETS.with(|a| sets.extend(a.borrow().iter().cloned()));
+        sets
+    })
 }
 
 /// `nsh/base`: the parts the page asked for (`nsh_part_*`, which it calls
@@ -151,6 +169,11 @@ macro_rules! base_parts {
 
 base_parts!(
     core => nsh_part_core,
+    pickers => nsh_part_pickers,
+    color_picker => nsh_part_color_picker,
+    carousel => nsh_part_carousel,
+    tree => nsh_part_tree,
+    fields => nsh_part_fields,
     text_view => nsh_part_text_view,
     editor => nsh_part_editor,
     diff => nsh_part_diff,
@@ -162,11 +185,20 @@ base_parts!(
     plot => nsh_part_plot,
 );
 
-/// `nsh/base` in the lite runtime (feature `base-full` off): its core part,
-/// so the other parts' code stays out of the module.
+/// `nsh/base` in the lite runtime (feature `base-full` off): its controls
+/// (the core and the parts split from it), so the larger parts' code stays
+/// out of the module.
 #[cfg(not(feature = "base-full"))]
 fn base_set() -> Registry {
-    nsh_base::registry_of([nsh_base::parts::core as nsh_base::parts::Part])
+    use nsh_base::parts::{self, Part};
+    nsh_base::registry_of([
+        parts::core as Part,
+        parts::pickers,
+        parts::color_picker,
+        parts::carousel,
+        parts::tree,
+        parts::fields,
+    ])
 }
 
 /// Makes this module an app's web runtime that serves `$sets` (an
@@ -181,6 +213,22 @@ macro_rules! ui_sets {
         #[unsafe(no_mangle)]
         pub extern "C" fn nsh_app_init() {
             $crate::set_ui_sets($sets);
+        }
+    };
+}
+
+/// Exports `$export`, the gate of one of the app's own UI sets (`$set`, an
+/// expression giving its [`Registry`]): `nsh.js` calls it as it calls the
+/// `nsh_part_*` of `nsh/base`'s parts, and a runtime linked for the app
+/// (`nsh package`) keeps only the gates of the sets it imports. `nsh`
+/// names it `nsh_ui_set_<specifier>` (non-alphanumerics as `_`).
+#[macro_export]
+macro_rules! ui_set {
+    ($export:ident, $set:expr) => {
+        /// Adds this UI set of the app to the apps started from now on.
+        #[unsafe(no_mangle)]
+        pub extern "C" fn $export() {
+            $crate::add_ui_set($set);
         }
     };
 }
@@ -253,12 +301,17 @@ impl MountSink for Sink {
     }
 }
 
-/// Bundled files the page preloaded (fonts, images drawn on a canvas).
+/// Bundled files the page preloaded (fonts, images drawn on a canvas); the
+/// others are downloaded from where the page serves them.
 struct PageAssets;
 
 impl Assets for PageAssets {
     fn read(&self, uri: &str) -> Result<Vec<u8>, String> {
         ffi::read_asset(uri).ok_or_else(|| format!("{uri} is not available on the web"))
+    }
+
+    fn url(&self, uri: &str) -> Option<String> {
+        uri.starts_with("asset:/").then(|| ffi::asset_url(uri))
     }
 }
 
@@ -415,6 +468,12 @@ pub unsafe extern "C" fn nsh_environment(ptr: *const u8, len: usize) -> f64 {
     }
     env.keyboard_height = Points(num("keyboard").unwrap_or(env.keyboard_height.0));
     env.host = flag("host").unwrap_or(env.host);
+    env.lifecycle = match value.get("lifecycle").and_then(|v| v.as_str()) {
+        Some("background") => Lifecycle::Background,
+        Some("inactive") => Lifecycle::Inactive,
+        Some(_) => Lifecycle::Active,
+        None => env.lifecycle,
+    };
     env.screen_color = flag("screenColor").unwrap_or(env.screen_color);
     PAGE.with(|p| p.set(Some(env)));
     send(|app| {
@@ -424,11 +483,18 @@ pub unsafe extern "C" fn nsh_environment(ptr: *const u8, len: usize) -> f64 {
         e.apple_keyboard = env.apple_keyboard;
         e.reduce_motion = env.reduce_motion;
         e.font_scale = env.font_scale;
+        let rescaled = e.pixel_ratio != env.pixel_ratio;
         e.pixel_ratio = env.pixel_ratio;
         e.safe_area = env.safe_area;
         e.keyboard_height = env.keyboard_height;
+        e.lifecycle = env.lifecycle;
         e.screen_color = env.screen_color;
         app.control.set_environment(app.environment);
+        // The DOM draws emoji as wide as the pixel ratio makes them.
+        if rescaled && app.text.emoji_measured() {
+            app.text.clear_caches();
+            app.control.fonts_changed();
+        }
     })
 }
 
@@ -524,6 +590,7 @@ fn run(app: App, width: f32, height: f32, environment: Environment, limits: Limi
         clipboard: None,
         host: Default::default(),
         picker: None,
+        speech: None,
     };
     // A test session's app: the test's storage, network and trace.
     #[cfg(feature = "dev")]
@@ -558,6 +625,39 @@ fn run(app: App, width: f32, height: f32, environment: Environment, limits: Limi
             inline_images: Default::default(),
         });
     });
+    pump()
+}
+
+/// What the page calls after a gate (`nsh_part_*`, `nsh_std_*`,
+/// `nsh_feature_*`, an app UI set's) ran once an app had started, as when
+/// a side module loads before a chunk that needs it: the running engine
+/// and its JavaScript host serve the UI sets as they are now to what is
+/// mounted and imported from then on. `gate` names it (for the log only);
+/// the standard modules and the shader compiler need nothing more, as
+/// their calls read what the gate set. Returns the delay (ms) until
+/// [`nsh_pump`] is due, or -1.
+///
+/// # Safety
+///
+/// `ptr..ptr + len` is memory from [`nsh_alloc`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn nsh_after_gate(ptr: *const u8, len: usize) -> f64 {
+    // SAFETY: guaranteed by the caller.
+    let gate = unsafe { string(ptr, len) };
+    let running = APP.with(|a| a.borrow().is_some());
+    if !running {
+        return pump();
+    }
+    log::debug!(target: "nsh::perf", "{gate} registered after the app started");
+    let sets = ui_sets();
+    APP.with(|a| {
+        if let Some(app) = a.borrow_mut().as_mut() {
+            app.engine.extend_ui_sets(&sets);
+        }
+    });
+    // The JavaScript host describes the new exports to the app's realm.
+    #[cfg(feature = "browser-core")]
+    browser::extend_registries(&sets);
     pump()
 }
 

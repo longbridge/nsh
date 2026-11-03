@@ -260,11 +260,12 @@ pub(crate) fn track_states(surface: &Rc<Surface>, view: &NshView, states: u16) {
     {
         let mut s = view.state_mut();
         s.tracked = states;
-        // The core keeps the states still tracked and forgets the rest
+        // The core keeps the states still reported and forgets the rest
         // (`Core::update_tracking`): so do we, or a change it was not told
         // about (the pointer leaving a view whose hover was tracked
-        // throughout) would never reach it.
-        s.states &= states;
+        // throughout) would never reach it. The focus is reported
+        // whatever is tracked, so it stays.
+        s.states &= input::reported_states(states);
     }
     update_hover_tracking(surface, view);
 }
@@ -705,14 +706,7 @@ fn context_menu(surface: &Surface, x: f32, y: f32, flags: NSEventModifierFlags) 
 pub(crate) fn key(surface: &Rc<Surface>, event: &NSEvent, down: bool) -> bool {
     if let Some(view) = control_activation_target(surface, event) {
         if down && !event.isARepeat() {
-            let events = view.state().events;
-            for kind in [EventKind::PressDown, EventKind::PressUp, EventKind::Press] {
-                if events.contains(kind) {
-                    // From the keyboard: no pointer to report.
-                    log::debug!(target: "nsh::input", "{} on {} (keyboard)", kind.prop_name(), view.id());
-                    surface.event(view.id(), kind, EventPayload::None);
-                }
-            }
+            activate(surface, &view, "keyboard");
         }
         return true;
     }
@@ -862,6 +856,47 @@ pub(crate) fn control_activation_target(surface: &Surface, event: &NSEvent) -> O
         return None;
     }
     NshView::from_ns(native).filter(is_key_control)
+}
+
+/// Presses `view` with no pointer to report, as Return and Space press a
+/// focused control and `AXPress` presses any: its `onPressDown`,
+/// `onPressUp` and `onPress`. `from` names the source in the log.
+fn activate(surface: &Surface, view: &NshView, from: &str) {
+    let events = view.state().events;
+    for kind in [EventKind::PressDown, EventKind::PressUp, EventKind::Press] {
+        if events.contains(kind) {
+            log::debug!(target: "nsh::input", "{} on {} ({from})", kind.prop_name(), view.id());
+            surface.event(view.id(), kind, EventPayload::None);
+        }
+    }
+}
+
+/// Whether `AXPress` presses `view`: it takes presses, is not disabled, the
+/// pointer could reach it and it is inside the newest modal, as Return and
+/// Space need ([`control_activation_target`]). Other views do not offer
+/// the action.
+pub(crate) fn takes_accessibility_press(surface: &Surface, view: &NshView) -> bool {
+    {
+        let s = view.state();
+        if !s.events.contains(EventKind::Press) || s.props.accessibility.state.disabled {
+            return false;
+        }
+    }
+    view.can_target()
+        && view
+            .ns()
+            .isDescendantOf(&crate::navigation::focus_scope(surface))
+}
+
+/// `AXPress` from an accessibility client (VoiceOver's VO-Space, UI
+/// automation): presses a view [`takes_accessibility_press`] allows, as
+/// Return does when it has the keyboard focus. Returns whether it did.
+pub(crate) fn accessibility_press(surface: &Surface, view: &NshView) -> bool {
+    if !takes_accessibility_press(surface, view) {
+        return false;
+    }
+    activate(surface, view, "accessibility");
+    true
 }
 
 /// Tab / Shift+Tab (or with Control) with the root focused: moves into

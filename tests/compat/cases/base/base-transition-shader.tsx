@@ -3,7 +3,9 @@
 // shader they come and go through (the lower side `sample_from`, the upper
 // `sample_to`) instead of their `animation`. A headless run presents
 // nothing and renders no pixels, so the script checks that the pages and
-// the dialog with one show, go and come back as without it.
+// the dialog with one show, go and come back as without it, and sees each
+// prop reach the core through the warning it logs for a uniform the
+// program does not declare (`pageTint`, `dialogTint`).
 import { Text, View, signal } from "nsh";
 import { Button, Dialog, NavPage, NavStack, createNavStack } from "nsh/base";
 
@@ -20,8 +22,10 @@ fn shade(uv: vec2f) -> vec4f {
   let d = distance(uv, vec2f(0.5));
   return mix(sample_to(uv), sample_from(uv), smoothstep(nsh.progress - uniforms.softness, nsh.progress, d));
 }`,
-  uniforms: { softness: 0.05 },
+  uniforms: { softness: 0.05, pageTint: 1 },
 };
+
+const DIALOG = { ...WIPE, uniforms: { dialogTint: 1 } };
 
 const nav = createNavStack<string>(["home"]);
 
@@ -45,7 +49,7 @@ function App() {
           </NavPage>
         )}
       </NavStack>
-      <Dialog open={open()} onOpenChange={e => open.set(e.open)} transitionShader={WIPE}>
+      <Dialog open={open()} onOpenChange={e => open.set(e.open)} transitionShader={DIALOG}>
         <Text>Shader dialog</Text>
         <Button onPress={() => open.set(false)}>
           <Text>Close dialog</Text>

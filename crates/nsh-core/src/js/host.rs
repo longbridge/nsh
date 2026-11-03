@@ -543,6 +543,19 @@ export interface WebViewNavigation {
   canGoBack: boolean;
   canGoForward: boolean;
 }
+
+/** A web view's download (`onDownload`): where it is saved, in the app's data directory's `downloads`. */
+export interface WebViewDownload {
+  state: "started" | "finished" | "failed";
+  id: string;
+  url: string;
+  filename: string;
+  path: string;
+  /** Once finished: the file's size in bytes. */
+  bytes?: number;
+  /** When it failed: why. */
+  message?: string;
+}
 "#;
 
 /// The events of the host elements, as their handler props: the event, the
@@ -835,6 +848,12 @@ pub const EVENTS: &[(EventKind, u32, &str, &str)] = &[
         "(e: WebViewNavigation) => void",
         "",
     ),
+    (
+        EventKind::Download,
+        on::WEBVIEW,
+        "(e: WebViewDownload) => void",
+        "With a listener, what the page downloads (an attachment, a type the web view cannot show, a `download` link) is saved as a file in the app's data directory, `downloads/<id>/<filename>`: reported as it starts, finishes and fails. Without one, those navigations behave as before.",
+    ),
     (EventKind::End, on::VIDEO, "() => void", ""),
     (
         EventKind::Buffer,
@@ -879,6 +898,7 @@ pub const INTERNAL_EVENTS: &[EventKind] = &[
     EventKind::OpenUrl,
     EventKind::ScreenColor,
     EventKind::FileRequest,
+    EventKind::Speech,
     EventKind::KeyCommand,
     EventKind::Menu,
     EventKind::ViewableItemsChange,

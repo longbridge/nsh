@@ -151,7 +151,12 @@ const KEYFRAMES = `
 .nsh-bar { position: sticky; left: 0; top: 0; width: 0; height: 0; z-index: 2147483000; pointer-events: none; }
 .nsh-bar > div { position: absolute; border-radius: 2px; background: rgba(0,0,0,.45); transition: opacity .3s; }
 .nsh-dark .nsh-bar > div { background: rgba(255,255,255,.55); }
-.nsh-run { position: absolute; white-space: pre; }
+/* Underlines unbroken, as the native backends draw them (skipping
+   descenders left a link's "gp" without one), and clear of the text: a
+   browser's auto position touches the baseline. A run's own
+   textUnderlineOffset (its style class) replaces the offset. */
+.nsh-run { position: absolute; white-space: pre; text-decoration-skip-ink: none;
+  text-underline-offset: 0.2em; }
 .nsh-run-bg { position: absolute; pointer-events: none; }
 .nsh-border { position: absolute; inset: 0; pointer-events: none; }
 /* The mounter's own styles: no element has an inline style but its frame
@@ -951,6 +956,13 @@ class Player {
           this.withStrings([data], (dp, dl) => this.wasm.nsh_asset_bytes(dp, dl));
           return 1;
         },
+        // Where `asset:/…` is served, for the engine to download a file the
+        // page did not preload (Rust's `read_asset`).
+        asset_url: (up, ul, p, cap) => {
+          const url = encoder.encode(this.asset(this.str(up, ul)));
+          if (url.length <= cap) this.bytes(p, cap).set(url);
+          return url.length;
+        },
         fetch_start: (id, mp, ml, up, ul, hp, hl, bp, bl, kind, follow) =>
           this.fetchStart(id, this.str(mp, ml), this.str(up, ul), JSON.parse(this.str(hp, hl)),
             kind === 1 ? this.bytes(bp, bl).slice() : null, kind === 2, follow !== 0),
@@ -1039,15 +1051,20 @@ class Player {
     imports.__wbindgen_placeholder__ && (imports.__wbindgen_placeholder__.__wbindgen_describe = () => {});
     const instance = await WebAssembly.instantiate(module, imports);
     this.wasm = this.browserHost ? this.browserHost.bind(instance.exports) : instance.exports;
+    // What side modules import (`main`): the instance's own exports.
+    this.mainExports = instance.exports;
+    this.sideLoads = new Map();
+    // Side modules compiled ahead (`prefetchSides`), by name.
+    this.sideModules = new Map();
     this.trapped = false;
     // The glue's own setup (its view of the memory, wasm-bindgen's tables)
     // before any of the app's code runs.
     glue?.__nsh_finalize(instance, module);
-    // The parts of `nsh/base`, the standard modules and the features
-    // (shaders) this runtime has:
+    // The parts of `nsh/base`, the standard modules, the features
+    // (shaders) and an app's own UI sets this runtime has:
     // one linked for an app (`nsh package`) exports only those it uses.
     for (const name of Object.keys(instance.exports)) {
-      if (/^nsh_(part|std|feature)_/.test(name)) instance.exports[name]();
+      if (/^nsh_(part|std|feature|ui_set)_/.test(name)) instance.exports[name]();
     }
     // An app's own runtime (Rust components: nsh.json "rust") registers
     // its UI sets before anything starts.
@@ -1060,6 +1077,97 @@ class Player {
     });
     this.installEnvironment();
     this.installInput();
+  }
+
+  // Side modules --------------------------------------------------------
+
+  /**
+   * Loads the side modules `names` (as `nsh package --target web` maps
+   * them per chunk: the parts of `nsh/base`, standard modules and features
+   * the main module was published without) in parallel, each after the
+   * side modules it imports from, and calls each gate once. `table` is the
+   * page's `sides`: by name, `{ url, gate?, needs }`. A page awaits it
+   * before a chunk that needs them runs (its `prepareChunk`).
+   */
+  loadSides(names, table) {
+    return Promise.all((names ?? []).map((name) => this.loadSide(name, table)));
+  }
+
+  /**
+   * Downloads and compiles every side module of `table` in the background,
+   * at a low priority, so the main module and the app's first screen come
+   * first. Failures here are left to the load that needs the module,
+   * which tries again. `preloadSides` then instantiates them.
+   */
+  prefetchSides(table) {
+    const names = Object.keys(table ?? {});
+    for (const name of names) {
+      if (this.sideModules.has(name) || this.sideLoads.has(name)) continue;
+      const compiled = this.compileSide(table[name].url, { priority: "low" });
+      compiled.catch(() => this.sideModules.delete(name));
+      this.sideModules.set(name, compiled);
+    }
+  }
+
+  /**
+   * Instantiates every side module of `table` once the browser is idle
+   * (call it after the app started), so a screen that needs one finds its
+   * components registered.
+   */
+  preloadSides(table) {
+    const names = Object.keys(table ?? {});
+    if (!names.length) return;
+    const idle = globalThis.requestIdleCallback ?? ((f) => setTimeout(f, 200));
+    idle(() => this.loadSides(names, table).catch((err) => console.warn(`[nsh] preloading side modules: ${err?.message ?? err}`)));
+  }
+
+  async compileSide(url, init) {
+    try {
+      return await WebAssembly.compileStreaming(fetch(url, init));
+    } catch (err) {
+      // Served without `application/wasm`: compiled from its bytes.
+      if (!(err instanceof TypeError)) throw err;
+      const response = await fetch(url, init);
+      if (!response.ok) throw new Error(`${url}: HTTP ${response.status}`);
+      return WebAssembly.compile(await response.arrayBuffer());
+    }
+  }
+
+  /** The exports of side module `name`, once it and what it needs loaded. */
+  loadSide(name, table) {
+    if (!this.sideLoads.has(name)) {
+      const side = table?.[name];
+      if (!side) return Promise.reject(new Error(`no side module ${name}`));
+      this.sideLoads.set(name, this.instantiateSide(name, side, table));
+    }
+    return this.sideLoads.get(name);
+  }
+
+  async instantiateSide(name, { url, gate, needs }, table) {
+    const imports = { main: this.mainExports };
+    const from = await Promise.all((needs ?? []).map((need) => this.loadSide(need, table)));
+    (needs ?? []).forEach((need, i) => { imports[need] = from[i]; });
+    // Compiled ahead when it was prefetched; else now, at full priority.
+    const ahead = this.sideModules.get(name);
+    this.sideModules.delete(name);
+    const module = await (ahead?.catch(() => null) ?? null) ?? await this.compileSide(url);
+    const instance = await WebAssembly.instantiate(module, imports);
+    if (gate) {
+      const register = instance.exports[gate];
+      if (typeof register !== "function") throw new Error(`${url} exports no ${gate}`);
+      register();
+      this.afterGate(gate);
+    }
+    return instance.exports;
+  }
+
+  /**
+   * What the runtime does once a gate ran after the app started: makes
+   * what it registered visible to the running engines.
+   */
+  afterGate(gate) {
+    if (typeof this.wasm.nsh_after_gate !== "function") return;
+    this.withStrings([gate], (p, l) => this.wasm.nsh_after_gate(p, l));
   }
 
   // Tests ---------------------------------------------------------------
@@ -1084,6 +1192,9 @@ class Player {
    * `{type: "trace", items}`).
    */
   testSetup(storage, trace, environment) {
+    // The idiom the test asks for (`open`'s desktop `platform`), in place
+    // of the measured one, for the apps started from now on.
+    this.testIdiom = environment?.idiom;
     if (!this.wasm.nsh_test_setup) return;
     const setup = JSON.stringify({ storage: storage ?? [], trace: !!trace, environment: environment ?? {} });
     this.withStrings([setup], (p, l) => this.wasm.nsh_test_setup(p, l));
@@ -1338,7 +1449,7 @@ class Player {
 
   /** Starts the app with `start(environment)`, which returns the pump delay. */
   begin(width, start, deferEvents = false) {
-    this.idiom = this.options.idiom ?? this.measureIdiom(width);
+    this.idiom = this.options.idiom ?? this.testIdiom ?? this.measureIdiom(width);
     const environment = (this.reported = JSON.stringify(this.environment()));
     this.updateRootClasses();
     // Host events wait for this app's top-level `host.on` listeners, not
@@ -1546,6 +1657,11 @@ class Player {
     resolution();
     addEventListener("languagechange", changed);
     addEventListener("resize", changed);
+    // `lifecycle()`: hidden (another tab, a minimized window) or without
+    // the focus.
+    document.addEventListener("visibilitychange", changed);
+    addEventListener("focus", changed);
+    addEventListener("blur", changed);
     visualViewport?.addEventListener("resize", changed);
     visualViewport?.addEventListener("scroll", changed);
     new MutationObserver(changed).observe(document.documentElement, { attributes: true, attributeFilter: ["dir", "lang"] });
@@ -1598,6 +1714,9 @@ class Player {
       keyboard: this.keyboardHeight(),
       appleKeyboard: APPLE,
       host: Boolean(this.options.host),
+      lifecycle: document.visibilityState === "hidden"
+        ? "background"
+        : document.hasFocus() ? "active" : "inactive",
       screenColor: typeof window.EyeDropper === "function",
     };
   }
@@ -2127,7 +2246,9 @@ class Player {
     const el = this.view(id);
     if (!el) return;
     el._tracked = states;
-    el._states = 0;
+    // The focus is reported whatever is tracked (the core works out
+    // `focus-within` from it): it stays; the rest is forgotten.
+    el._states = (el._states || 0) & FOCUSED;
     if (states & HOVERED && !el._hoverListeners) {
       el._hoverListeners = true;
       el.addEventListener("pointerenter", (e) => e.pointerType === "mouse" && this.setState(el, HOVERED, true));
@@ -2136,9 +2257,11 @@ class Player {
   }
 
   setState(el, bit, on) {
-    if (!el._tracked || !(el._tracked & bit)) return;
-    const next = on ? el._states | bit : el._states & ~bit;
-    if (next === el._states) return;
+    // The focus is reported whatever is tracked (`reported_states`).
+    if (!(((el._tracked || 0) | FOCUSED) & bit)) return;
+    const states = el._states || 0;
+    const next = on ? states | bit : states & ~bit;
+    if (next === states) return;
     el._states = next;
     this.call((w) => w.nsh_states(el._id, next));
   }

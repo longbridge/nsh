@@ -97,7 +97,7 @@ export function HoverCardDemo() {
           onPress={() => log(`onPress /people/${p.handle}`)}
           hoverStyle={{ backgroundColor: alpha(colors.accent, 0.12) }}
           focusStyle={focusRing(1)}
-          style={{ borderRadius: 4, paddingHorizontal: 2, borderWidth: 1, borderColor: "transparent", transitionProperty: "background-color", transitionDuration: 120 }}
+          style={{ borderRadius: 4, paddingHorizontal: 2, marginHorizontal: -3, borderWidth: 1, borderColor: "transparent", transitionProperty: "background-color", transitionDuration: 120 }}
         >
           <Text style={{ fontSize: body, fontWeight: "500", color: colors.accent }}>@{p.name}</Text>
         </View>
@@ -165,7 +165,17 @@ export function HoverCardDemo() {
     );
   }
 
-  const words = (s: string) => <Text style={{ fontSize: body, color: colors.text }}>{s}</Text>;
+  // Running text in a wrapping row: one piece per word, so a line breaks
+  // between words, and the row's gap is the space between them. A
+  // mention's highlight reaches into that gap (its negative margin), and a
+  // link keeps the punctuation after it (`attached`).
+  const words = (s: string) => s.split(" ").map((w) => <Text style={{ fontSize: body, color: colors.text }}>{w}</Text>);
+  const attached = (link: JSX.Element, after: string) => (
+    <View style={{ flexDirection: "row", alignItems: "center" }}>
+      {link}
+      <Text style={{ fontSize: body, color: colors.text }}>{after}</Text>
+    </View>
+  );
 
   function Thread() {
     return (
@@ -231,12 +241,11 @@ export function HoverCardDemo() {
       <Card icon="link" title="A link preview" subtitle="The page behind a link, before going there: the link still opens on a press">
         <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", columnGap: 4, rowGap: 4 }}>
           {words("Layout runs on")}
-          <Preview site={sites.taffy} label="Taffy" />
-          {words(", scripts on")}
+          {attached(<Preview site={sites.taffy} label="Taffy" />, ",")}
+          {words("scripts on")}
           <Preview site={sites.quickjs} label="QuickJS" />
           {words("and shaders are written in")}
-          <Preview site={sites.wgsl} label="WGSL" />
-          {words(".")}
+          {attached(<Preview site={sites.wgsl} label="WGSL" />, ".")}
         </View>
         <Caption label="Opened after 400 ms here, above the link" />
       </Card>

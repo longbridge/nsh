@@ -1026,6 +1026,33 @@ impl Screen {
         })
     }
 
+    /// The leading header button is UIKit's own, drawn instead of the
+    /// `header_left` view (iOS; a press on it presses that view's first
+    /// pressable view).
+    pub fn header_left_system_item(self, item: impl IntoReactive<crate::HeaderSystemItem>) -> Self {
+        self.bind_prop(item, |item| {
+            Prop::Screen(ScreenProp::HeaderLeftSystemItem(Some(item)))
+        })
+    }
+
+    /// The trailing header button is UIKit's own showing the SF Symbol of
+    /// this name, drawn instead of the `header_right` view (iOS; a press on
+    /// it presses that view's first pressable view).
+    pub fn header_right_symbol(self, name: impl IntoReactive<super::SharedString>) -> Self {
+        self.bind_prop(name, |n| {
+            Prop::Screen(ScreenProp::HeaderRightSymbol(Some(Arc::from(n.as_str()))))
+        })
+    }
+
+    /// The leading header button is UIKit's own showing the SF Symbol of
+    /// this name, drawn instead of the `header_left` view (iOS; a press on
+    /// it presses that view's first pressable view).
+    pub fn header_left_symbol(self, name: impl IntoReactive<super::SharedString>) -> Self {
+        self.bind_prop(name, |n| {
+            Prop::Screen(ScreenProp::HeaderLeftSymbol(Some(Arc::from(n.as_str()))))
+        })
+    }
+
     /// Whether the back button shows (default true).
     pub fn header_back_visible(self, visible: impl IntoReactive<bool>) -> Self {
         self.bind_prop(visible, |v| Prop::Screen(ScreenProp::HeaderBackVisible(v)))
@@ -1047,6 +1074,18 @@ impl Screen {
     /// How the screen enters and leaves.
     pub fn animation(self, animation: impl IntoReactive<ScreenAnimation>) -> Self {
         self.bind_prop(animation, |a| Prop::Screen(ScreenProp::Animation(a)))
+    }
+
+    /// The program it comes and goes through instead of its
+    /// [`Self::animation`] (TS: `transitionShader`); `None` (a binding can
+    /// go back to it) leaves the change to the animation.
+    pub fn transition_shader(
+        self,
+        shader: impl IntoReactive<Option<crate::shader::TransitionShader>>,
+    ) -> Self {
+        self.bind_prop(shader, |s: Option<crate::shader::TransitionShader>| {
+            Prop::TransitionShader(s.map(Into::into))
+        })
     }
 
     /// What the status bar shows while the screen is up (iOS and Android;
@@ -1110,9 +1149,39 @@ impl Overlay {
         )
     }
 
+    /// Lays the element carrying `cover`, inside it, over its anchor (a
+    /// select's selected item over the trigger) instead of placing it on
+    /// a side ([`crate::overlay::OverlayConfig::cover`]). A ref is not
+    /// tracked: `shown` (tracked) says when that element is rendered, as
+    /// its `on_layout` can tell.
+    pub fn cover(self, cover: &super::ElementRef, shown: impl Fn() -> bool + 'static) -> Self {
+        let cover = *cover;
+        self.bind_prop(
+            move || if shown() { cover.node() } else { None },
+            |id| Prop::Overlay(OverlayProp::Cover(id)),
+        )
+    }
+
+    /// Places it beside the element carrying `anchor`, outside the edges
+    /// of the one carrying `edges` (the menu around it), as a submenu
+    /// beside its row ([`OverlayAnchor::Beside`]).
+    pub fn anchor_beside(self, anchor: &super::ElementRef, edges: &super::ElementRef) -> Self {
+        let (anchor, edges) = (*anchor, *edges);
+        self.bind_prop(
+            move || match (anchor.node(), edges.node()) {
+                (Some(node), Some(edges)) => OverlayAnchor::Beside { node, edges },
+                (Some(id), None) => OverlayAnchor::Node(id),
+                _ => OverlayAnchor::None,
+            },
+            |a| Prop::Overlay(OverlayProp::Anchor(a)),
+        )
+    }
+
     /// Places it against what the element carrying `anchor` draws: the box
     /// around its children, so a trigger in a wrapper its parent stretches
-    /// is placed against what shows ([`OverlayAnchor::Content`]).
+    /// is placed against what shows ([`OverlayAnchor::Content`]). A ref a
+    /// component gives its slot goes by the app's element's own box,
+    /// whether a TSX or a Rust app filled the slot.
     pub fn anchor_content(self, anchor: &super::ElementRef) -> Self {
         let anchor = *anchor;
         self.bind_prop(
@@ -1225,6 +1294,18 @@ impl Modal {
     pub fn animation(self, animation: impl IntoReactive<ModalAnimation>) -> Self {
         self.bind_prop(animation, |animation: ModalAnimation| {
             Prop::Modal(ModalProp::Animation(animation))
+        })
+    }
+
+    /// The program it comes and goes through instead of its
+    /// [`Self::animation`] (TS: `transitionShader`); `None` (a binding can
+    /// go back to it) leaves the change to the animation.
+    pub fn transition_shader(
+        self,
+        shader: impl IntoReactive<Option<crate::shader::TransitionShader>>,
+    ) -> Self {
+        self.bind_prop(shader, |s: Option<crate::shader::TransitionShader>| {
+            Prop::TransitionShader(s.map(Into::into))
         })
     }
 
@@ -2295,6 +2376,13 @@ impl From<Drawing> for Painter {
 
 crate::static_reactive!(ScreenAnimation: ScreenAnimation);
 
+/// A program where an optional one goes (`.transition_shader(wipe)`).
+impl IntoReactive<Option<crate::shader::TransitionShader>> for crate::shader::TransitionShader {
+    fn into_reactive(self) -> super::Reactive<Option<crate::shader::TransitionShader>> {
+        super::Reactive::Static(Some(self))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2337,6 +2425,42 @@ mod tests {
         u.0.iter()
             .find(|(n, _)| &**n == name)
             .map(|(_, v)| v.clone())
+    }
+
+    #[test]
+    fn screens_and_modals_take_a_transition_shader() {
+        let runtime = Runtime::default();
+        let _entered = runtime.enter();
+        let source = "struct Uniforms { edge: f32 }\n\
+            fn shade(uv: vec2f) -> vec4f {\n    \
+            return select(sample_from(uv), sample_to(uv), uv.x < nsh.progress * uniforms.edge);\n}\n";
+        let shader = crate::shader::Shader::compile(source).expect("compiles");
+        let wipe = crate::shader::TransitionShader::new(shader)
+            .uniform("edge", 1.0_f32)
+            .duration(std::time::Duration::from_millis(400));
+        let expected = crate::shader::NavShaderSpec {
+            source: source.into(),
+            uniforms: ShaderUniforms(vec![("edge".into(), UniformValue::Number(1.0))]),
+            duration: Some(400.0),
+        };
+        let spec = |attrs: &super::super::builder::Attrs| {
+            attrs.props.iter().find_map(|p| match p {
+                Prop::TransitionShader(s) => Some(s.clone()),
+                _ => None,
+            })
+        };
+        let page = screen().transition_shader(wipe.clone()).0;
+        assert_eq!(spec(&page.resolved_attrs()), Some(Some(expected.clone())));
+        let dialog = modal().transition_shader(wipe.clone()).0;
+        assert_eq!(spec(&dialog.resolved_attrs()), Some(Some(expected.clone())));
+        // A binding goes back to the page's or the dialog's own animation.
+        let on = signal(true);
+        let bound = screen()
+            .transition_shader(move || on.get().then(|| wipe.clone()))
+            .0;
+        assert_eq!(spec(&bound.resolved_attrs()), Some(Some(expected)));
+        on.set(false);
+        assert_eq!(spec(&bound.resolved_attrs()), Some(None));
     }
 
     #[test]

@@ -10,8 +10,10 @@ import { Icon, type IconName } from "./icons";
 import { colors } from "./theme";
 
 /**
- * A row: quiet until hovered, the selected one tinted in the brand color,
- * the keyboard's ring while the tree has the focus, disabled ones dimmed.
+ * A row: quiet until hovered, the selected one tinted in the brand color
+ * with its label in the strong text color (a color, not a weight: the
+ * labels keep their widths), the keyboard's ring while the tree has the
+ * focus, disabled ones dimmed.
  * The ring is drawn inside the row: the rows fill the list's width, whose
  * scroll view clips what reaches past its sides.
  */
@@ -27,7 +29,8 @@ export const treeIndent = 14;
  * that opens with it or a file), its label and a `detail` at the end.
  */
 export function TreeRow(props: { entry: TreeEntry; icon?: IconName; tint?: string; detail?: string }) {
-  const height = size.rowSm - 4;
+  // Compact with a pointer; a 44-point target on a touch screen.
+  const height = desktop ? size.rowSm - 4 : size.rowSm;
   return (
     <View style={{ height, flexDirection: "row", alignItems: "center", gap: 6, paddingRight: 8, paddingLeft: 4 + props.entry.depth * treeIndent }}>
       <View
@@ -51,8 +54,8 @@ export function TreeRow(props: { entry: TreeEntry; icon?: IconName; tint?: strin
         <Icon name="file" size={16} tint={colors.muted} />
       )}
       <Text
-        class="flex-1 group-selected:font-semibold"
-        style={{ fontSize: desktop ? 13 : size.label, color: colors.text, numberOfLines: 1 }}
+        class="flex-1 text-muted-foreground group-selected:text-foreground"
+        style={{ fontSize: desktop ? 13 : size.label, numberOfLines: 1 }}
       >
         {props.entry.label}
       </Text>

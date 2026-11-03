@@ -1214,14 +1214,18 @@ final class Mounter {
                 modifiers(e.getMetaState()));
     }
 
-    /** An interaction state of `id` changed: tells the core if it reads it. */
+    /**
+     * An interaction state of `id` changed: tells the core if it reads it.
+     * The focus it always hears (`nsh_core::input::reported_states`): it
+     * works out `focus-within` from it.
+     */
     void reportState(int id, int bit, boolean on) {
         int states = currentStates.get(id);
         int next = on ? states | bit : states & ~bit;
         if (next == states) return;
         currentStates.put(id, next);
-        int tracked = trackedStates.get(id);
-        if ((tracked & bit) != 0) Native.states(handle(), id, next & tracked);
+        int reported = trackedStates.get(id) | STATE_FOCUSED;
+        if ((reported & bit) != 0) Native.states(handle(), id, next & reported);
     }
 
     /**
@@ -1932,6 +1936,19 @@ final class Mounter {
         ((InputBox) v).configure(size, weight, italic, color, family, spacing, align, placeholder,
                 hasPlaceholderColor, placeholderColor, secure, keyboard, returnKey, capitalize, autoCorrect,
                 multiline, maxLength, editable, autoFocus, hasSelection, selection, hasCaret, caret, submit);
+    }
+
+    /**
+     * A page or dialog leaves with the field that has the keyboard: the
+     * keyboard hides with it, as with a native back, not once the field is
+     * gone (which leaves it up). Focus goes to the host, as `blur()` does.
+     */
+    void hideKeyboardIn(View leaving) {
+        View f = leaving.findFocus();
+        if (f == null || !f.onCheckIsTextEditor()) return;
+        InputMethodManager imm = (InputMethodManager) context.getSystemService(Context.INPUT_METHOD_SERVICE);
+        imm.hideSoftInputFromWindow(f.getWindowToken(), 0);
+        if (f.getRootView() == host.getRootView()) host.requestFocus();
     }
 
     private void command(ByteBuffer b, Object[] objects) {

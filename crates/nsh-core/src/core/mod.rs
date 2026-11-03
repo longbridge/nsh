@@ -521,6 +521,10 @@ struct Node {
     /// States it shows as a part of a control (`Prop::ProjectedStates`):
     /// its classes read them with its own, nothing else does.
     projected: u16,
+    /// The `data-*` attributes it shows as a part of a component
+    /// (`Prop::ProjectedData`), sorted: its `data-*:` classes read them,
+    /// and the `group-data-*:` classes inside it.
+    data: Box<[&'static str]>,
     /// What only some nodes have: state styles, the styles of a page's
     /// header or a list's content ([`classes::NodeParts`]).
     parts: Option<Box<classes::NodeParts>>,
@@ -788,8 +792,14 @@ impl Node {
             classes: None,
             class_props: None,
             states: 0,
-            tracked: 0,
+            // An input reports its focus from the start (`update_tracking`).
+            tracked: if matches!(kind, Kind::Input) {
+                crate::tailwind::state::FOCUSED
+            } else {
+                0
+            },
             projected: 0,
+            data: Box::default(),
             parts: None,
             positional_children: false,
             spaced: false,
@@ -1079,6 +1089,10 @@ pub struct Core<M: TextEngine> {
     env_styled: rustc_hash::FxHashSet<NodeId>,
     /// Scratch of [`Core::sync_env`].
     env_scratch: Vec<NodeId>,
+    /// The keyboard's height changed since the last commit: what that
+    /// commit moves (an `env()` term, or a style that reads the keyboard's
+    /// height) moves with the keyboard.
+    keyboard_moved: bool,
     /// The screens and modals with a `statusBar`, in the order they got
     /// it: few, so attaching and detaching only flag them for the commit.
     status_bar_nodes: Vec<Key>,
@@ -1088,6 +1102,21 @@ pub struct Core<M: TextEngine> {
     /// Nodes whose classes say `pointer-events-none`: without any, moving
     /// nodes skips what CSS's inherited `pointer-events` needs.
     pointer_none_classes: u32,
+    /// The view with the keyboard focus, by key and id (keys are reused),
+    /// as the platform reports it (`classes::focus_reported`).
+    focus: Option<(Key, NodeId)>,
+    /// The focus and the views around it, innermost first: the views in
+    /// `focus-within` (`classes::update_focus_within`).
+    focus_chain: Vec<(Key, NodeId)>,
+    /// The chain before, reused.
+    focus_scratch: Vec<(Key, NodeId)>,
+    /// The focus was reported or a view of its chain moved since the
+    /// chain was last worked out: the next commit round does it once,
+    /// whatever order the reports came in.
+    focus_moved: bool,
+    /// The chain changed since the focus watches last looked
+    /// (`ElementRef::on_focus_in`).
+    focus_within_changed: bool,
     /// Nodes whose `position: fixed` changed: made overlays (or views again)
     /// as the commit starts ([`Core::sync_fixed`]).
     fixed_changed: Vec<(Key, NodeId)>,
@@ -1132,6 +1161,9 @@ pub struct Core<M: TextEngine> {
     /// Answers the app's picks in place of the platform's picker
     /// ([`Core::set_picker`]).
     picker: Option<Arc<dyn crate::picker::PickerBackend>>,
+    /// Recognizes the app's speech in place of the platform
+    /// ([`Core::set_speech`]).
+    speech: Option<Arc<dyn crate::speech::SpeechBackend>>,
     /// Rust components and what they rendered.
     components: components::Components,
     /// Overlay nodes, those shown in the order they were shown (the last
@@ -1182,6 +1214,7 @@ impl<M: TextEngine> Core<M> {
             denied: Default::default(),
             clipboard: None,
             picker: None,
+            speech: None,
             components: components::Components::for_viewport(viewport),
             lists: Vec::new(),
             parent_lists: Vec::new(),
@@ -1225,9 +1258,15 @@ impl<M: TextEngine> Core<M> {
             resized: Vec::new(),
             env_styled: Default::default(),
             env_scratch: Vec::new(),
+            keyboard_moved: false,
             status_bar_nodes: Vec::new(),
             status_bars_moved: false,
             pointer_none_classes: 0,
+            focus: None,
+            focus_chain: Vec::new(),
+            focus_scratch: Vec::new(),
+            focus_moved: false,
+            focus_within_changed: false,
             fixed_changed: Vec::new(),
             zero_advances: Default::default(),
             ch_styled: Vec::new(),
@@ -1389,6 +1428,13 @@ impl<M: TextEngine> Core<M> {
     /// platform's picker (`None`: the platform's, the default).
     pub fn set_picker(&mut self, backend: Option<Arc<dyn crate::picker::PickerBackend>>) {
         self.picker = backend;
+    }
+
+    /// Recognizes the app's speech (`Speech.start`) with `backend`, an
+    /// embedding app's own recognizer or a test's fake, instead of the
+    /// platform's (`None`: the platform's, the default).
+    pub fn set_speech(&mut self, backend: Option<Arc<dyn crate::speech::SpeechBackend>>) {
+        self.speech = backend;
     }
 
     /// Keeps the app's storage (`nsh/storage`) in `backend`; `None`: in
@@ -1618,12 +1664,23 @@ impl<M: TextEngine> Core<M> {
     /// results) into `out`, in order.
     pub fn take_events(&mut self, out: &mut Vec<crate::element::JsEvent>) {
         out.append(&mut self.events);
+        // The caller hands them to JS before the next commit: what waits for
+        // the app's answer to them runs there ([`crate::element::after_answer`]).
+        self.components.executor.hand_answers();
     }
 
-    /// Registers a custom font (TrueType / OpenType data) with the text
-    /// engine. Text measured before is measured again.
+    /// Whether the next commit runs closures that waited for the app's
+    /// answer to events taken already ([`crate::element::after_answer`]):
+    /// the engine commits again rather than leave them for later input.
+    pub fn has_due_answers(&self) -> bool {
+        self.components.executor.has_due_answers()
+    }
+
+    /// Registers a custom font (TrueType, OpenType, WOFF or WOFF2 data) with
+    /// the text engine. Text measured before is measured again.
     pub fn register_font(&mut self, data: &[u8]) -> Result<(), String> {
-        self.text_engine.register_font(data)?;
+        self.text_engine
+            .register_font(&crate::text::font_data(data)?)?;
         self.fonts_changed();
         Ok(())
     }
@@ -1970,6 +2027,12 @@ impl<M: TextEngine> Core<M> {
     /// Finishes a turn: rebuilds text, runs layout, updates lists and
     /// returns the mount items, or `None` when nothing changed.
     pub fn commit(&mut self) -> Option<MountBatch> {
+        // JS has handled the events taken before this commit and its ops
+        // are applied: what waited for that sees the app's props, and what
+        // it changes renders with them.
+        if self.components.executor.has_due_answers() {
+            self.run_answers();
+        }
         self.commit_round();
         // The components' own lists bind the cells the layout asked for
         // here, and lay out again (JS's lists ask JS, through the engine);
@@ -2021,6 +2084,12 @@ impl<M: TextEngine> Core<M> {
         }
         // The views' patches and the views to make first.
         self.render_components();
+        // The focus reported since, after the components made and released
+        // what they did: one change of the chain, the views both chains
+        // share untouched.
+        if self.focus_moved {
+            self.update_focus_within();
+        }
         self.sync_colors();
         self.sync_ch();
         self.sync_fixed();
@@ -2739,6 +2808,8 @@ impl<M: TextEngine> Core<M> {
         // An attachment's place in its line is part of its block's text.
         let align_changed =
             node.vertical_align != vertical_align && node.inline && node.kind != Kind::Text;
+        // ... and so is the content's of a render placed there.
+        let content_align_changed = node.vertical_align != vertical_align && !node.inline;
         node.view_style = view;
         node.text_style = text;
         node.paint = paint;
@@ -2747,6 +2818,8 @@ impl<M: TextEngine> Core<M> {
         node.vertical_align = vertical_align;
         if align_changed {
             self.mark_text_block(key);
+        } else if content_align_changed && let Some(place) = self.placed_in_text(key) {
+            self.mark_text_block(place);
         }
         if z_changed {
             self.restack(key);
@@ -3107,24 +3180,41 @@ impl<M: TextEngine> Core<M> {
         }
     }
 
+    /// `source` compiled, once per source while the cache keeps it (its
+    /// error too): views that share a source, a source set again and the
+    /// pages and dialogs that come through it use the compiled shader.
+    fn compile(
+        &mut self,
+        source: &str,
+    ) -> Result<crate::shader::Shader, crate::shader::ShaderError> {
+        let hash = crate::shader::source_hash(source);
+        let cached = self.shaders.get(&hash).filter(|c| match c {
+            Ok(shader) => shader.source() == source,
+            Err(_) => true,
+        });
+        if let Some(compiled) = cached {
+            return compiled.clone();
+        }
+        let compiled = crate::shader::compile_source(source);
+        // Bounded: an app making sources on the fly does not keep them all.
+        if self.shaders.len() >= 64 {
+            self.shaders.clear();
+        }
+        self.shaders.insert(hash, compiled.clone());
+        compiled
+    }
+
     /// A page's or a dialog's `transitionShader`: compiled (once per source)
     /// into the layer the platform draws its coming and going through.
     fn set_nav_shader(&mut self, key: Key, spec: Option<crate::shader::NavShaderSpec>) {
         let id = self.nodes[key as usize].id;
+        if self.nodes[key as usize].root.is_none() {
+            log::warn!(target: "js", "`transitionShader` is a page's or a dialog's; node {id} is neither");
+            return;
+        }
         let shader = spec.and_then(|spec| {
-            let hash = crate::shader::source_hash(&spec.source);
-            let compiled = match self.shaders.get(&hash) {
-                Some(Ok(shader)) if shader.source() == &*spec.source => Ok(shader.clone()),
-                _ => {
-                    let compiled = crate::shader::compile_source(&spec.source);
-                    if self.shaders.len() >= 64 {
-                        self.shaders.clear();
-                    }
-                    self.shaders.insert(hash, compiled.clone());
-                    compiled
-                }
-            };
-            let shader = compiled
+            let shader = self
+                .compile(&spec.source)
                 .map_err(|e| log::warn!(target: "js", "the transitionShader of node {id}: {e}"))
                 .ok()?;
             let mut warnings = Vec::new();
@@ -3139,10 +3229,10 @@ impl<M: TextEngine> Core<M> {
                 duration: std::time::Duration::from_micros((f64::from(ms) * 1000.0).round() as u64),
             })
         });
-        let Some(root) = self.nodes[key as usize].root.as_mut() else {
-            log::warn!(target: "js", "`transitionShader` is a page's or a dialog's; node {id} is neither");
-            return;
-        };
+        let root = self.nodes[key as usize]
+            .root
+            .as_mut()
+            .expect("checked above");
         if root.nav_shader != shader {
             root.nav_shader = shader;
             self.mark(key, dirty::NAV_SHADER);
@@ -3236,28 +3326,10 @@ impl<M: TextEngine> Core<M> {
                 if state.source == source {
                     return;
                 }
-                state.source = source;
+                state.source = source.clone();
                 state.shader = None;
-                if let Some(source) = &state.source {
-                    let hash = crate::shader::source_hash(source);
-                    let compiled = self
-                        .shaders
-                        .get(&hash)
-                        .filter(|c| match c {
-                            Ok(shader) => shader.source() == &**source,
-                            Err(_) => true,
-                        })
-                        .cloned();
-                    let compiled = compiled.unwrap_or_else(|| {
-                        let compiled = crate::shader::compile_source(source);
-                        // Bounded: an app making sources on the fly does not
-                        // keep them all.
-                        if self.shaders.len() >= 64 {
-                            self.shaders.clear();
-                        }
-                        self.shaders.insert(hash, compiled.clone());
-                        compiled
-                    });
+                if let Some(source) = source {
+                    let compiled = self.compile(&source);
                     let state = self.nodes[key as usize]
                         .shader
                         .as_mut()
@@ -3882,8 +3954,16 @@ impl<M: TextEngine> Core<M> {
                 self.set_part_style(key, classes::Part::Expanded, patch);
                 return Ok(());
             }
+            Prop::FocusWithinStyle(patch) => {
+                self.set_part_style(key, classes::Part::FocusWithin, patch);
+                return Ok(());
+            }
             Prop::ProjectedStates(states) => {
                 self.set_projected_states(key, states);
+                return Ok(());
+            }
+            Prop::ProjectedData(data) => {
+                self.set_projected_data(key, data);
                 return Ok(());
             }
             Prop::HeaderStyle(patch) => {
@@ -4006,6 +4086,9 @@ impl<M: TextEngine> Core<M> {
                         ScreenProp::HeaderBackTitle(v) => c.back_title = v,
                         ScreenProp::HeaderBackVisible(v) => c.back_visible = v,
                         ScreenProp::HeaderRightSystemItem(v) => c.right_system_item = v,
+                        ScreenProp::HeaderRightSymbol(v) => c.right_symbol = v,
+                        ScreenProp::HeaderLeftSystemItem(v) => c.left_system_item = v,
+                        ScreenProp::HeaderLeftSymbol(v) => c.left_symbol = v,
                         ScreenProp::PopOnSwipe(v) => c.gesture_enabled = v,
                         ScreenProp::PopOnBack(v) => c.prevent_back = !v,
                         ScreenProp::Animation(v) => c.animation = v,
@@ -4058,6 +4141,7 @@ impl<M: TextEngine> Core<M> {
                     OverlayProp::Margin(v) => c.margin = v,
                     OverlayProp::Hint(v) => c.hint = v,
                     OverlayProp::Open(v) => c.open = v,
+                    OverlayProp::Cover(v) => c.cover = v,
                 });
                 return Ok(());
             }
@@ -4305,9 +4389,10 @@ impl<M: TextEngine> Core<M> {
     ) -> Result<(), ApplyError> {
         let parent = self.key(parent_id)?;
         let child = self.key(child_id)?;
-        if self.nodes[child as usize].parent != NO_KEY {
+        let from = self.nodes[child as usize].parent;
+        if from != NO_KEY {
             self.input_bar_moves(child);
-            self.components.moved = true;
+            self.note_move(from, parent);
         }
         let mut before = before.map(|b| self.key(b)).transpose()?;
         // Appended below the built-in bar, which stays on top.
@@ -4370,6 +4455,10 @@ impl<M: TextEngine> Core<M> {
         self.set_inline(child, inline);
         self.nodes[child as usize].parent = parent;
         self.nodes[parent as usize].children.insert(pos, child);
+        if self.nodes[child as usize].states & crate::tailwind::state::FOCUS_WITHIN != 0 {
+            // The focus moved with it: the views around it now.
+            self.focus_moved = true;
+        }
         self.ch_changed(child);
         self.status_bars_moved |= !self.status_bar_nodes.is_empty();
         self.outer_moved |= !self.parent_lists.is_empty() && self.may_hold_page_list(child);
@@ -4492,6 +4581,10 @@ impl<M: TextEngine> Core<M> {
             self.positions_changed(parent);
         }
         self.nodes[key as usize].parent = NO_KEY;
+        if self.nodes[key as usize].states & crate::tailwind::state::FOCUS_WITHIN != 0 {
+            // The focus left the views around it with it.
+            self.focus_moved = true;
+        }
         if self.nodes[parent as usize].child_perspective.is_some() {
             // Without the perspective wherever it goes next.
             self.mark(key, dirty::VIEW | dirty::ANIMATION);
@@ -4678,6 +4771,11 @@ impl<M: TextEngine> Core<M> {
             if let Some(child) = self.nodes.get_mut(c as usize) {
                 child.parent = NO_KEY;
             }
+        }
+        if node.states & crate::tailwind::state::FOCUS_WITHIN != 0 {
+            // The focus went with it, or is inside a child no longer in
+            // it.
+            self.focus_moved = true;
         }
         if let Some(layout) = node.layout {
             self.layout.remove(layout);
@@ -5582,13 +5680,53 @@ impl<M: TextEngine> Core<M> {
                         alignments.push(
                             out,
                             crate::geometry::size_pt(size.width, size.height),
-                            child.vertical_align,
+                            self.attachment_align(c),
                             style,
                         );
                     }
                 }
             }
         }
+    }
+
+    /// Where attachment `key` sits in its line (`verticalAlign`). A
+    /// placeholder of a render (`renderCustom`, ...) that sets none takes
+    /// what its content sets: the placeholder and JS's holder around the
+    /// content are not the app's views, so the app styles only the content
+    /// (`<View style={{ verticalAlign: "middle" }}>` in `renderCustom`).
+    fn attachment_align(&self, key: Key) -> crate::style::VerticalAlign {
+        use crate::style::VerticalAlign;
+        let node = &self.nodes[key as usize];
+        if node.vertical_align != VerticalAlign::Baseline
+            || !self.components.renders.is_place(node.id)
+        {
+            return node.vertical_align;
+        }
+        // The placeholder's only child is the holder; the holder's, the
+        // content.
+        let mut key = key;
+        for _ in 0..2 {
+            let mut children = self.nodes[key as usize]
+                .children
+                .iter()
+                .filter(|&&c| !self.nodes[c as usize].is_overlay());
+            match (children.next(), children.next()) {
+                (Some(&only), None) => key = only,
+                _ => return VerticalAlign::Baseline,
+            }
+        }
+        self.nodes[key as usize].vertical_align
+    }
+
+    /// The render placeholder in a text that view `key` is the content of
+    /// (see [`Core::attachment_align`]), if it is one.
+    fn placed_in_text(&self, key: Key) -> Option<Key> {
+        let holder = self.nodes[key as usize].parent;
+        if holder == NO_KEY || !self.is_render_holder(self.nodes[holder as usize].id) {
+            return None;
+        }
+        let place = self.nodes[holder as usize].parent;
+        (place != NO_KEY && self.nodes[place as usize].inline).then_some(place)
     }
 
     /// The attachments of text block `key` (views and images inside it,

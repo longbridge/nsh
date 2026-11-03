@@ -84,14 +84,9 @@ member's offset (`Packer::pack`):
 | `vec3f` / `vec4f` | a color (red, green, blue, and alpha for `vec4f`, 0..1 sRGB), an animated color, or a list of 3 / 4 numbers or animated values |
 | `array<vec4f, N>` | a list of at most `N` colors or 4-number lists; the rest stay zero |
 
-An animated value (`UniformValue::Animated`) becomes a value slot: a `UniformSlot { word, kind }` (`SlotKind::F32`,
-`I32`, `U32`, `Rgb`, `Rgba`) and its node in `ShaderLayer::nodes`. Slot `n` is bound to the view as
-`AnimationProp::CanvasArg(n)` in the node's animation bindings, next to a canvas drawing's slots (a view is one or
-the other). The platform's animator hands each slot's value to the shader view, which writes it into its copy of the
-words with `ShaderLayer::write_slot` and renders again: an animated uniform moves with no JS and no engine work per
-frame. A new layer with the same program and slots keeps the values written into the animated slots
-(`nsh_engine::shader::ShaderView::set_layer`, `op_sh` on the web), so a re-render of the app's component does not snap them
-back.
+An animated value (`UniformValue::Animated`) is bound to the view through the animation graph, so an animated
+uniform moves with no JS and no engine work per frame, and a re-render of the app's component keeps its current
+value (`ShaderLayer::write_slot`, `nsh_engine::shader::ShaderView::set_layer`).
 
 In JS, `uniforms` is decoded natively (`host_values.rs`, `impl HostValue for ShaderUniforms`): numbers, CSS color
 strings, animated nodes and lists of them, two levels deep. `dom.rs` keeps the animation nodes a view's `uniforms`
@@ -108,16 +103,14 @@ app loads), so an app without shaders opens no device. `Renderer::new` requests 
 backends and GL (`WGPU_BACKEND` overrides) with WebGL 2's downlevel limits; where no adapter or device is found it is
 `None` and shader views show their background and children. Uncaptured device errors are warnings, never panics.
 
-`nsh_engine::shader::ShaderView` is one view's state on the main thread: the layer, its words with the animated slots
-written in, size and scale, the clock of `nsh.time` (`Clock`: kept while paused), and its frames.
+`nsh_engine::shader::ShaderView` is one view's state on the main thread: the layer, its uniforms, size and scale, the
+clock of `nsh.time` (kept while paused), and its frames.
 
-- **Rendering never waits for the GPU.** `render` draws into a texture and copies it into one of two read-back
-  buffers mapped asynchronously; a later call finds a mapped buffer, copies the newest frame into `frame()` and
-  returns `true`. A frame shows one or two display frames after it is rendered. With both buffers in flight the
-  frame is skipped, so a slow GPU drops frames instead of stalling the main thread.
-- **Frame pacing.** `wants_frame` is true while something it reads changed (`dirty`: layer, uniforms, an animated
-  slot, size or scale), while it is animated and not paused, or while a frame is on its way back. Backends call
-  `render` on their frame clock only while it is true, at most once per display frame.
+- **Rendering never waits for the GPU.** Frames are read back asynchronously; a slow GPU drops frames instead of
+  stalling the main thread.
+- **Frame pacing.** `wants_frame` is true while something it reads changed, while it is animated and not paused, or
+  while a frame is on its way back. Backends call `render` on their frame clock only while it is true, at most once
+  per display frame.
 - **Pixels.** Frames are 8-bit premultiplied, in the `PixelFormat` the backend asked for (`Rgba`: GDK, Core Graphics,
   Android; `Bgra`: Direct2D, GPUI), rows `stride` bytes apart (`Frame::rows`, `Frame::tight`).
 
@@ -191,8 +184,38 @@ Effects, transitions and page shaders sit on the same program, layer and rendere
 - **Pages and dialogs.** `transitionShader` (`NavShaderSpec`) compiles into a `Transition` layer sent as
   `MountItem::NavShader { id, shader }` (350 ms by default); the platform draws a push, pop, presentation or dismissal
   through it, the lower side `from` and the upper `to`.
+  In Rust, `screen()` / `modal()` take `.transition_shader(TransitionShader::new(shader).uniform(..).duration(..))`
+  (`nsh_core::shader::TransitionShader`, a compiled `Shader`), which sets the same prop. Sources compile once in
+  `Core::compile`, the cache `Shader`'s `source` uses too ("Pages and dialogs" below says what the platforms do).
 - **GPUI.** Fills only: an effect's or a transition's children show as they are, a screen layer draws nothing, pages
   and dialogs come and go without their shader.
+
+## Pages and dialogs
+
+What every platform does with a page's or a dialog's `MountItem::NavShader`, so an app sees the same thing
+everywhere:
+
+- **The sides.** The lower side, `sample_from`, is the page under the one that comes or goes (the surface without the
+  dialog); the upper, `sample_to`, the page that comes or goes (the surface with the dialog). `nsh.progress` runs from 0
+  to 1 as the page is pushed or the dialog presented, and from 1 to 0 as it is popped or dismissed
+  (`ShaderView::start_transition_backwards`): one program draws both ways. Under the frames the views are where the
+  change ends; the frames show over them until the last one.
+- **It replaces `animation`.** A page or dialog with a shader comes and goes through it whatever its `animation`
+  says, `"none"` included. `animation` is what runs where the shader does not: without a GPU device, with a source
+  that did not compile (the core sends `shader: None`), or where the platform cannot take the pictures or put the
+  frames over the change. Such a change takes the page's or the dialog's own motion, at once for `"none"`, never
+  another motion for the shader's duration.
+- **Less motion.** When the user asks for less motion (`Environment::reduce_motion`), the shader does not run: the
+  change takes the page's or the dialog's own `animation` as reduced motion makes it
+  (`nsh_core::navigation::screen_motion` and `modal_motion` with `reduce_motion`: a slide becomes a 200 ms fade,
+  `"none"` stays at once).
+- **Interruptions.** A push, pop, presentation or dismissal that starts while a shader's change of the same stack (a
+  page's) or of the surface (a dialog's) still runs ends that one first, at once: its views settle where it ends, its
+  events go out (`onShow`, `onDismiss`; a page that left is removed), its frames go. The new change starts from there,
+  so its pictures never hold the frames of the one before. The desktops' own motion does the same (`finish` before
+  `reconcile`).
+- **No fallback prop.** `ShaderTransition`'s `fallback` says what runs without a `source`; a `transitionShader`
+  always has one, and where it cannot run the page's `animation` is that fallback.
 
 ## Pitfalls
 
