@@ -465,7 +465,8 @@ fn a_popup_is_raised_framed_brighter_and_casts_a_shadow() {
     let rows: Vec<String> = (0..8)
         .map(|y| (0..24).map(|x| buffer[(x, y)].symbol()).collect())
         .collect();
-    let x = rows[usize::from(y)].find("pop").unwrap() as u16;
+    let row = &rows[usize::from(y)];
+    let x = row[..row.find("pop").unwrap()].chars().count() as u16;
     assert_eq!(
         buffer[(x, y)].bg,
         Color::Rgb(38, 38, 38),

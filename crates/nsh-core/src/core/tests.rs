@@ -25002,6 +25002,40 @@ mod terminal_layout {
     }
 
     #[test]
+    fn a_grids_items_span_their_columns_and_rows() {
+        let s = |v: &'static str| V::Str(v);
+        let mut ops = view(
+            2,
+            ROOT_ID,
+            &[
+                ("alignSelf", s("flex-start")),
+                ("width", V::Number(240.0)),
+                ("display", s("grid")),
+                ("gridTemplateColumns", s("1fr 1fr 1fr")),
+            ],
+        );
+        // `col-span-2`, then one track; `row-span-2` under the span, then
+        // two tracks beside it.
+        ops.extend(view(3, 2, &[("gridColumn", s("span 2"))]));
+        ops.extend(text(4, 3, "wide"));
+        ops.extend(text(5, 2, "a"));
+        ops.extend(view(6, 2, &[("gridRow", s("span 2"))]));
+        ops.extend(text(7, 6, "tall"));
+        ops.extend(text(8, 2, "b"));
+        ops.extend(text(9, 2, "c"));
+        ops.extend(text(10, 2, "d"));
+        let batch = laid_out(ops);
+        let at = |id| frame_of(&batch, id).map(|f| (f.origin.x.0, f.origin.y.0, f.size.width.0, f.size.height.0));
+        assert_eq!(at(3), Some((0.0, 0.0, 160.0, 16.0)));
+        assert_eq!(at(5), Some((160.0, 0.0, 80.0, 16.0)));
+        assert_eq!(at(6), Some((0.0, 16.0, 80.0, 32.0)));
+        assert_eq!(at(8), Some((80.0, 16.0, 80.0, 16.0)));
+        assert_eq!(at(9), Some((160.0, 16.0, 80.0, 16.0)));
+        // The next row's first free track is beside the tall item.
+        assert_eq!(at(10), Some((80.0, 32.0, 80.0, 16.0)));
+    }
+
+    #[test]
     fn a_card_has_its_border_and_no_padding_rows() {
         let mut ops = view(
             2,

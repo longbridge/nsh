@@ -450,6 +450,23 @@ impl Painter<'_> {
         let mut title_at = None;
         if layer.overlay && surface && !visible.is_empty() {
             dialog::clear(self.buffer, visible);
+            // What was behind holds no text any more, under the box or its
+            // frame a Cell around it: text drawn next to it is not cut
+            // short by it (no `…` on the frame).
+            let area = self.buffer.area;
+            let ring = Rect::new(
+                visible.x.saturating_sub(1),
+                visible.y.saturating_sub(1),
+                visible.width + 2,
+                visible.height + 2,
+            )
+            .intersection(area);
+            for y in ring.y..ring.bottom() {
+                for x in ring.x..ring.right() {
+                    let at = self.buffer.index_of(x, y);
+                    self.text_cells[at] = false;
+                }
+            }
             if !layer.boxed {
                 layer.boxed = true;
                 // A modal's box is the terminal's background, an anchored

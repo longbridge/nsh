@@ -2335,6 +2335,70 @@ fn tracks(style: &Style, grid: Grid, width: Option<i32>) -> Vec<Track> {
     out
 }
 
+/// How many tracks an item placed on `line` covers: its span
+/// (`col-span-2`, `span 2`), or the lines it runs between (`1 / -1`, a
+/// negative line counted from the end of the `count` explicit tracks); 1
+/// otherwise. At most `count` where the tracks are explicit (columns).
+fn grid_span(line: &Line<taffy::GridPlacement<String>>, count: Option<usize>) -> usize {
+    use taffy::GridPlacement as P;
+    let lines = count.map_or(1, |n| n as i32 + 1);
+    let at = |n: i16| if n < 0 { lines + 1 + i32::from(n) } else { i32::from(n) };
+    let span = match (&line.start, &line.end) {
+        (P::Span(n), _) | (_, P::Span(n)) => i32::from(*n),
+        // Lines past the explicit tracks (rows, which are as many as the
+        // items take) count as one.
+        (P::Line(a), P::Line(b)) if count.is_some() || (a.as_i16() > 0 && b.as_i16() > 0) => {
+            (at(b.as_i16()) - at(a.as_i16())).abs()
+        }
+        _ => 1,
+    };
+    let span = usize::try_from(span.max(1)).unwrap_or(1);
+    count.map_or(span.min(64), |n| span.min(n.max(1)))
+}
+
+/// Where a grid's items go: `(row, column, rows, columns)` each, placed in
+/// order along the rows, an item in the first place from the last one's
+/// where its span fits (CSS's auto placement, not dense).
+fn grid_places(
+    tree: &impl Tree,
+    flow: &[(u32, NodeId)],
+    cols: usize,
+) -> Vec<(usize, usize, usize, usize)> {
+    let mut taken: Vec<Vec<bool>> = Vec::new();
+    let free = |taken: &Vec<Vec<bool>>, r: usize, c: usize, rs: usize, cs: usize| {
+        (r..r + rs).all(|r| (c..c + cs).all(|c| taken.get(r).is_none_or(|row| !row[c])))
+    };
+    let (mut r, mut c) = (0, 0);
+    let mut out = Vec::with_capacity(flow.len());
+    for &(_, node) in flow {
+        let s = tree.style(node);
+        let cs = grid_span(&s.grid_column, Some(cols));
+        // Rows are as many as the items take.
+        let rs = grid_span(&s.grid_row, None);
+        loop {
+            if c + cs > cols {
+                r += 1;
+                c = 0;
+            }
+            if free(&taken, r, c, rs, cs) {
+                break;
+            }
+            c += 1;
+        }
+        while taken.len() < r + rs {
+            taken.push(vec![false; cols]);
+        }
+        for row in &mut taken[r..r + rs] {
+            for cell in &mut row[c..c + cs] {
+                *cell = true;
+            }
+        }
+        out.push((r, c, rs, cs));
+        c += cs;
+    }
+    out
+}
+
 #[allow(clippy::too_many_arguments)]
 fn arrange_grid(
     tree: &mut impl Tree,
@@ -2351,15 +2415,18 @@ fn arrange_grid(
     let (col_gap, row_gap) = if spec.row { s_gap } else { (s_gap.1, s_gap.0) };
     let cols = tracks.len();
     let parent = (area.known.0.or(area.room.0), area.known.1.or(area.room.1));
+    let places = grid_places(tree, flow, cols);
+    // A track's width is its items' of one column; an item over several
+    // takes theirs and the gaps between.
     let mut widths: Vec<i32> = vec![0; cols];
     for (c, track) in tracks.iter().enumerate() {
         widths[c] = match *track {
             Track::Length(n) => n,
             _ => flow
                 .iter()
-                .skip(c)
-                .step_by(cols)
-                .map(|&(_, node)| {
+                .zip(&places)
+                .filter(|(_, p)| p.1 == c && p.3 == 1)
+                .map(|(&(_, node), _)| {
                     measure(
                         tree,
                         grid,
@@ -2412,29 +2479,31 @@ fn arrange_grid(
             }
         }
     }
+    let span = |sizes: &[i32], at: usize, n: usize, gap: i32| {
+        sizes[at..at + n].iter().sum::<i32>() + gap * (n as i32 - 1)
+    };
     let total_w = widths.iter().sum::<i32>() + col_gap * (cols as i32 - 1).max(0);
-    let mut heights: Vec<i32> = flow
-        .chunks(cols)
-        .map(|cells| {
-            cells
-                .iter()
-                .enumerate()
-                .map(|(c, &(_, node))| {
-                    measure(
-                        tree,
-                        grid,
-                        node,
-                        true,
-                        (Some(widths[c]), None),
-                        (Some(widths[c]), None),
-                        parent,
-                    )
-                    .1
-                })
-                .max()
-                .unwrap_or(0)
-        })
-        .collect();
+    let rows = places.iter().map(|p| p.0 + p.2).max().unwrap_or(0);
+    let mut heights: Vec<i32> = vec![0; rows];
+    let mut item_h = Vec::with_capacity(flow.len());
+    for (&(_, node), &(r, c, rs, cs)) in flow.iter().zip(&places) {
+        let w = span(&widths, c, cs, col_gap);
+        let h = measure(tree, grid, node, true, (Some(w), None), (Some(w), None), parent).1;
+        if rs == 1 {
+            heights[r] = heights[r].max(h);
+        }
+        item_h.push(h);
+    }
+    // An item over several rows makes its last one taller when they are
+    // short of it.
+    for (&h, &(r, _, rs, _)) in item_h.iter().zip(&places) {
+        if rs > 1 {
+            let have = span(&heights, r, rs, row_gap);
+            if h > have {
+                heights[r + rs - 1] += h - have;
+            }
+        }
+    }
     // Rows stretch over a known height, as CSS's auto rows: a panel's one
     // cell (a dock's) fills it, whatever its content's own height (an
     // editor's layers, all absolute).
@@ -2450,33 +2519,30 @@ fn arrange_grid(
             }
         }
     }
-    let mut y = 0;
-    for (r, cells) in flow.chunks(cols).enumerate() {
-        if r > 0 {
-            y += row_gap;
+    if perform {
+        let start = |sizes: &[i32], at: usize, gap: i32| {
+            sizes[..at].iter().sum::<i32>() + gap * at as i32
+        };
+        for (&(order, node), &(r, c, rs, cs)) in flow.iter().zip(&places) {
+            place(
+                tree,
+                grid,
+                order,
+                node,
+                (
+                    origin.0 + start(&widths, c, col_gap),
+                    origin.1 + start(&heights, r, row_gap),
+                ),
+                Cells {
+                    w: span(&widths, c, cs, col_gap),
+                    h: span(&heights, r, rs, row_gap),
+                },
+                parent,
+            );
         }
-        let height = heights[r];
-        if perform {
-            let mut x = 0;
-            for (c, &(order, node)) in cells.iter().enumerate() {
-                place(
-                    tree,
-                    grid,
-                    order,
-                    node,
-                    (origin.0 + x, origin.1 + y),
-                    Cells {
-                        w: widths[c],
-                        h: height,
-                    },
-                    parent,
-                );
-                x += widths[c] + col_gap;
-            }
-        }
-        y += height;
     }
-    Cells { w: total_w, h: y }
+    let total_h = heights.iter().sum::<i32>() + row_gap * (rows as i32 - 1).max(0);
+    Cells { w: total_w, h: total_h }
 }
 
 #[cfg(test)]

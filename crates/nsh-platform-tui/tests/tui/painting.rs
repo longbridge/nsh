@@ -575,11 +575,15 @@ fn an_overlays_box_clears_what_is_behind_it_and_is_framed_with_its_title() {
     let buffer = terminal.backend().buffer();
     let rows: Vec<String> = (0..8).map(|y| row(buffer, y, 0..24)).collect();
     let y = rows.iter().position(|r| r.contains("pop")).unwrap();
-    let x = rows[y].find("pop").unwrap() as u16;
+    let at = rows[y].find("pop").unwrap();
+    let x = rows[y][..at].chars().count() as u16;
     let y = y as u16;
     assert_eq!(row(buffer, y, x..x + 10), "pop       ", "{rows:#?}");
     // The box is its content's row; its frame stands one Cell around it,
-    // over what was behind.
+    // over what was behind, and is placed with it: on the screen, beside
+    // the anchor's row.
+    assert_eq!(x, 1, "the box a Cell in, its frame on column 0: {rows:#?}");
+    assert_eq!(buffer[(0, y)].symbol(), "│", "its frame's side: {rows:#?}");
     assert_eq!(
         buffer[(x + 10, y)].symbol(),
         "│",
