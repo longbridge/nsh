@@ -1680,7 +1680,7 @@ fn mark_surface(
     let focused = flags & state::FOCUSED != 0 && !disabled;
     let pressed = flags & state::PRESSED != 0 && !disabled;
     let hovered = flags & state::HOVERED != 0 && !disabled && pressable(view);
-    let step = |target: usize| ramp.level(Ramp::above(level, target));
+    let step = |target: usize| ramp.band(own, level, target);
     if let Some(accent) = emphasis {
         drawn(buffer, inner, |cell| {
             if accent != Color::Reset {

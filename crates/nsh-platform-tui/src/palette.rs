@@ -163,14 +163,28 @@ pub(crate) fn tone(color: nsh_core::Color, ground: Ground) -> Tone {
     }
     let own = lightness(red, green, blue);
     let [fg_red, fg_green, fg_blue] = ground.foreground.map(f32::from);
-    if own <= NEAR_DEFAULT || (own - lightness(fg_red, fg_green, fg_blue)).abs() <= NEAR_DEFAULT {
+    // The terminal's own foreground, where its surfaces say it.
+    let [term_red, term_green, term_blue] = ground
+        .ramp
+        .map_or(ground.foreground, |ramp| ramp.foreground)
+        .map(f32::from);
+    let terminal = lightness(term_red, term_green, term_blue);
+    if own <= NEAR_DEFAULT
+        || (own - lightness(fg_red, fg_green, fg_blue)).abs() <= NEAR_DEFAULT
+        || (own - terminal).abs() <= NEAR_DEFAULT
+    {
         return Tone::Default;
     }
     let [under_red, under_green, under_blue] = ground.rgb.map(f32::from);
-    let contrast = (own - lightness(under_red, under_green, under_blue)).abs();
+    let under = lightness(under_red, under_green, under_blue);
+    let contrast = (own - under).abs();
+    // Text that stands off its ground as far as the terminal's foreground
+    // does is the foreground: the app's body text on a raised button, not
+    // a secondary caption.
+    let foreground = (terminal - under).abs();
     if contrast < FAINT_CONTRAST {
         Tone::Faint
-    } else if contrast < DEFAULT_CONTRAST {
+    } else if contrast < DEFAULT_CONTRAST.min(foreground).max(FAINT_CONTRAST) {
         Tone::Muted
     } else {
         Tone::Default
@@ -277,6 +291,10 @@ impl Bands {
     }
 }
 
+/// The chroma (largest minus smallest channel) from which a view's own
+/// fill is a tint whose state bands keep its hue ([`Ramp::band`]).
+const TINTED: u8 = 12;
+
 /// The steps of a terminal's surfaces: how far each one mixes the
 /// terminal's background toward its foreground. 0 is the terminal's own
 /// background (never painted), 1 sunken, 2 raised, 3 hover, 4 select;
@@ -368,6 +386,31 @@ impl Ramp {
         } else {
             self.color(LADDER[level.min(LADDER.len() - 1)])
         }
+    }
+
+    /// The band of `target` over a view whose own surface at `level` is
+    /// `own`: the ramp's step ([`Ramp::above`]), or, on a tinted fill of
+    /// its own (a primary button's lime, a danger button's red), the tint
+    /// lightened by as much as that step lightens the ramp, so the
+    /// control keeps its color hovered, pressed or focused.
+    pub(crate) fn band(&self, own: Color, level: usize, target: usize) -> Color {
+        let step = Self::above(level, target);
+        let band = self.level(step);
+        let Color::Rgb(r, g, b) = own else {
+            return band;
+        };
+        if r.max(g).max(b) - r.min(g).min(b) < TINTED {
+            return band;
+        }
+        let (to, from) = (
+            self.mix(LADDER[step]),
+            self.mix(LADDER[level.min(LADDER.len() - 1)]),
+        );
+        let lifted: Rgb = std::array::from_fn(|i| {
+            let channel = i16::from([r, g, b][i]) + i16::from(to[i]) - i16::from(from[i]);
+            channel.clamp(0, 255) as u8
+        });
+        convert(lifted, self.depth)
     }
 
     /// The step a band of `target` takes over a surface at `level`: the
@@ -908,6 +951,36 @@ mod tests {
         );
         assert_eq!(step(Surface::Sunken, 0), SUNKEN);
         assert_eq!(step(Surface::Sunken, RAISED + 1), RAISED);
+    }
+
+    #[test]
+    fn a_tinted_controls_state_bands_keep_its_hue() {
+        let ramp = ramp();
+        // A gray surface takes the ramp's step.
+        assert_eq!(
+            ramp.band(ramp.level(RAISED), RAISED, super::HOVER),
+            ramp.level(super::HOVER)
+        );
+        // A lime one is lightened by the same amount, still lime.
+        let Color::Rgb(r, g, b) = ramp.band(Color::Rgb(55, 63, 37), 0, super::HOVER) else {
+            panic!("a color of the terminal's depth");
+        };
+        let lift = ramp.mix(super::LADDER[super::HOVER])[0] - ramp.mix(super::LADDER[0])[0];
+        assert_eq!((r, g, b), (55 + lift, 63 + lift, 37 + lift));
+    }
+
+    #[test]
+    fn body_text_on_a_raised_button_reads_as_the_terminals_foreground() {
+        // A terminal whose foreground is a light gray, and a secondary
+        // button's raised fill: the app's body text stands off it as far
+        // as that foreground does, its muted caption does not.
+        let ramp = Ramp::new(ColorDepth::TrueColor, Some([20; 3]), Some([225; 3])).unwrap();
+        let mut ground = page(ColorScheme::Dark).with_ramp(Some(ramp));
+        ground.rgb = [0x2d, 0x2e, 0x32];
+        assert_eq!(tone(Rgba(0xeceef1ff), ground), Tone::Default);
+        assert_eq!(tone(Rgba(0xe1e1e1ff), ground), Tone::Default);
+        assert_eq!(tone(Rgba(0x9a9ea5ff), ground), Tone::Muted);
+        assert_eq!(tone(Rgba(0x6b6f76ff), ground), Tone::Faint);
     }
 
     #[test]
