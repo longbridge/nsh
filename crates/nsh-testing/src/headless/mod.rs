@@ -529,6 +529,21 @@ impl Headless {
         &self.screen
     }
 
+    /// The view a pointer at `at` would land on, without pressing.
+    pub fn hit(&self, at: Point<Points>) -> Option<NodeId> {
+        self.screen.hit(at)
+    }
+
+    /// View `id`'s bounds in the root's points.
+    pub fn bounds(&self, id: NodeId) -> Option<nsh_core::Bounds<Points>> {
+        self.screen.bounds(id)
+    }
+
+    /// Whether `id` takes pointer input.
+    pub fn is_interactive(&self, id: NodeId) -> bool {
+        self.screen.is_interactive(id)
+    }
+
     /// The engine and the batches not applied yet, for a model of the
     /// test's own.
     pub fn into_parts(self) -> (Engine, Receiver<MountBatch>) {

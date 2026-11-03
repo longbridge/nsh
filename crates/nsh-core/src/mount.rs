@@ -1030,10 +1030,52 @@ pub struct MountBatch {
     pub items: Vec<MountItem>,
 }
 
+impl MountBatch {
+    /// A stable digest of the batch's items (FNV-1a 64 over their debug
+    /// form, as 16 hex digits): two runs that build the same views digest
+    /// alike, whatever made them. For tests that compare runs, not a
+    /// security boundary.
+    pub fn digest(&self) -> String {
+        let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+        for item in &self.items {
+            for byte in format!("{item:?}").bytes() {
+                h ^= u64::from(byte);
+                h = h.wrapping_mul(0x0000_0100_0000_01b3);
+            }
+        }
+        format!("{h:016x}")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::geometry::px;
+
+    #[test]
+    fn batch_digest_is_stable_and_sees_a_change() {
+        let a = MountBatch {
+            items: vec![MountItem::Create {
+                id: 2,
+                kind: crate::ViewKind::View,
+            }],
+        };
+        let b = MountBatch {
+            items: vec![MountItem::Create {
+                id: 2,
+                kind: crate::ViewKind::View,
+            }],
+        };
+        let c = MountBatch {
+            items: vec![MountItem::Create {
+                id: 4,
+                kind: crate::ViewKind::View,
+            }],
+        };
+        assert_eq!(a.digest(), b.digest());
+        assert_ne!(a.digest(), c.digest());
+        assert_eq!(MountBatch::default().digest().len(), 16);
+    }
 
     #[test]
     fn snap_targets() {

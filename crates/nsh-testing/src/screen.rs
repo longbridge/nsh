@@ -1628,6 +1628,32 @@ impl Screen {
     /// View `id`'s bounds in the root's points: its frame moved by those
     /// of the views around it and the offsets of the scroll views around
     /// it (transforms aside).
+    /// The view a pointer at `at` (the root's points) lands on: the topmost
+    /// shown view there, or `None` when nothing is. Side-effect free: the
+    /// same walk a press takes ([`Self::hit_pointer`]), without the press.
+    pub fn hit(&self, at: Point<Points>) -> Option<NodeId> {
+        let attached: HashSet<NodeId> = self.attached().into_iter().collect();
+        self.hit_in(ROOT, at, &attached).filter(|&id| id != ROOT)
+    }
+
+    /// View `id`'s bounds in the root's points ([`Self::bounds_in_root`]).
+    pub fn bounds(&self, id: NodeId) -> Option<Bounds<Points>> {
+        self.bounds_in_root(id)
+    }
+
+    /// Whether `id` takes pointer input: it or its nearest pressable
+    /// ancestor hears presses, and neither it nor a view on the way is
+    /// disabled or hidden.
+    pub fn is_interactive(&self, id: NodeId) -> bool {
+        if self.nodes.get(&id).is_none_or(|v| v.hidden) {
+            return false;
+        }
+        let Some(target) = self.up_to(id, |v| v.events.contains(EventKind::Press)) else {
+            return false;
+        };
+        !self.disabled_from(id, Some(target))
+    }
+
     pub(crate) fn bounds_in_root(&self, id: NodeId) -> Option<Bounds<Points>> {
         if let Some((text, ..)) = self.span(id) {
             return self.bounds_in_root(text);
@@ -2205,5 +2231,88 @@ mod tests {
         screen.apply(&batch(vec![linked(Vec::new())]));
         assert_eq!(pick(&screen, "Privacy"), Pick::None);
         assert_eq!(screen.span(102), None);
+    }
+
+    /// A walkthrough-shaped tree for the hit seam: a container, a pressable
+    /// Resume button in it, and optionally an overlay over both.
+    fn walk_screen(overlay: bool, button_size: (f32, f32)) -> Screen {
+        let mut screen = Screen::default();
+        let mut items = vec![
+            create(2, ViewKind::View),
+            create(4, ViewKind::View),
+            frame(2, 0.0, 0.0, 400.0, 300.0),
+            frame(4, 10.0, 10.0, button_size.0, button_size.1),
+            insert(1, 2),
+            insert(2, 4),
+        ];
+        if overlay {
+            items.extend([
+                create(6, ViewKind::View),
+                frame(6, 0.0, 0.0, 400.0, 300.0),
+                insert(2, 6),
+            ]);
+        }
+        screen.apply(&batch(items));
+        screen
+            .nodes
+            .get_mut(&4)
+            .unwrap()
+            .events
+            .set(EventKind::Press, true);
+        screen
+    }
+
+    #[test]
+    fn hit_bounds_and_interactive_are_public_queries() {
+        let screen = walk_screen(false, (100.0, 40.0));
+        let at = Point::new(Points(60.0), Points(30.0));
+        assert_eq!(screen.hit(at), Some(4));
+        assert_eq!(
+            screen.bounds(4),
+            Some(Bounds::new(
+                Point::new(Points(10.0), Points(10.0)),
+                Size::new(Points(100.0), Points(40.0))
+            ))
+        );
+        assert!(screen.is_interactive(4));
+        assert!(!screen.is_interactive(2));
+        // The id is stable across a re-render that only moves the view.
+        let mut moved = walk_screen(false, (100.0, 40.0));
+        moved.apply(&batch(vec![frame(4, 20.0, 10.0, 100.0, 40.0)]));
+        assert_eq!(moved.hit(Point::new(Points(70.0), Points(30.0))), Some(4));
+    }
+
+    #[test]
+    fn hit_chip_zero_size_button_takes_no_press() {
+        // Planted bug class: layout collapses the button to zero size. The
+        // model still calls it interactive; the hit test is what refuses.
+        let screen = walk_screen(false, (0.0, 0.0));
+        assert!(screen.is_interactive(4));
+        assert_ne!(screen.hit(Point::new(Points(10.0), Points(10.0))), Some(4));
+    }
+
+    #[test]
+    fn hit_chip_overlay_occludes_the_resume_target() {
+        // Planted bug class: an overlay covers the button. A press at the
+        // button's centre lands on the overlay, not the named target.
+        let screen = walk_screen(true, (100.0, 40.0));
+        assert!(screen.is_interactive(4));
+        assert_eq!(screen.hit(Point::new(Points(60.0), Points(30.0))), Some(6));
+    }
+
+    #[test]
+    fn hit_chip_missing_binding_is_not_interactive() {
+        // Planted bug class: the view is in the tree with real bounds, but
+        // its press binding never landed (no Press event). Geometry alone
+        // cannot see it; the tree can.
+        let mut screen = walk_screen(false, (100.0, 40.0));
+        screen
+            .nodes
+            .get_mut(&4)
+            .unwrap()
+            .events
+            .set(EventKind::Press, false);
+        assert_eq!(screen.hit(Point::new(Points(60.0), Points(30.0))), Some(4));
+        assert!(!screen.is_interactive(4));
     }
 }

@@ -15,6 +15,8 @@ pub(crate) struct SystemConfig {
     pub(crate) wake: std::sync::Arc<dyn Fn() + Send + Sync>,
     /// The embedding app's side of `nsh/host`.
     pub(crate) host: std::rc::Rc<dyn nsh_core::host_channel::HostBridge>,
+    /// The engine's seed for the VM's `Math.random` ([`crate::EngineConfig::seed`]).
+    pub(crate) seed: Option<u64>,
 }
 
 #[cfg(not(any(feature = "js-core", all(feature = "browser", target_arch = "wasm32"))))]
@@ -90,6 +92,7 @@ mod imp {
                 ui_sets: ui_sets.to_vec(),
                 posts,
                 base_url: bundle.base_url.as_deref().map(str::to_owned),
+                seed: system.seed,
             };
             let mut host = match Host::with_options(options) {
                 Ok(host) => host,
