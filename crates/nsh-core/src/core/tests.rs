@@ -5907,6 +5907,104 @@ fn projected_states_style_a_part_without_its_accessibility() {
 }
 
 #[test]
+fn projected_data_attributes_style_a_part_and_the_group_inside_it() {
+    // A calendar's day at the start of a range: its own `data-*:` classes,
+    // and its content's `group-data-*:` ones.
+    let mut c = core();
+    view_with_classes(
+        &mut c,
+        2,
+        "group bg-white data-range-start:bg-black data-range-start:data-range-end:opacity-50",
+    );
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 3,
+                tag: Tag::View,
+            },
+            class_op(3, "h-4 w-4 group-data-range-start:translate-x-4"),
+            Op::Insert {
+                parent: 2,
+                child: 3,
+                before: None,
+            },
+        ],
+    );
+    c.commit();
+    let data = |names: &[&'static str]| Op::SetProp {
+        id: 2,
+        prop: Prop::ProjectedData(names.into()),
+    };
+    apply(&mut c, vec![data(&["range-start"])]);
+    let batch = c.commit().unwrap();
+    let day = view_style_of(&batch, 2).unwrap();
+    assert_eq!(day.background_color, Color(0x0000_00ff));
+    assert_eq!(day.opacity, 1.0);
+    assert_eq!(
+        view_style_of(&batch, 3).unwrap().transform.ops()[0].value,
+        16.0
+    );
+    // Nothing for screen readers or listeners.
+    assert!(
+        !batch.items.iter().any(|i| matches!(
+            i,
+            MountItem::ViewProps { .. } | MountItem::Events { .. } | MountItem::TrackStates { .. }
+        )),
+        "{:?}",
+        batch.items
+    );
+    // Both: the rule needing both applies.
+    apply(&mut c, vec![data(&["range-end", "range-start"])]);
+    let batch = c.commit().unwrap();
+    assert_eq!(view_style_of(&batch, 2).unwrap().opacity, 0.5);
+    // None: back to its own, and the content's.
+    apply(&mut c, vec![data(&[])]);
+    let batch = c.commit().unwrap();
+    assert_eq!(
+        view_style_of(&batch, 2).unwrap().background_color,
+        Color(0xffff_ffff)
+    );
+    assert!(view_style_of(&batch, 3).unwrap().transform.ops().is_empty());
+}
+
+#[test]
+fn projected_data_attributes_no_class_reads_send_nothing() {
+    // A view whose classes read no attribute (and that is no group), and
+    // one without classes: their attributes change nothing on screen.
+    let mut c = core();
+    view_with_classes(&mut c, 2, "bg-white hover:bg-black");
+    apply(
+        &mut c,
+        vec![
+            Op::Create {
+                id: 4,
+                tag: Tag::View,
+            },
+            Op::Insert {
+                parent: ROOT_ID,
+                child: 4,
+                before: None,
+            },
+        ],
+    );
+    c.commit();
+    for names in [&["range-start"][..], &["range-start", "today"], &[]] {
+        apply(
+            &mut c,
+            [2, 4]
+                .map(|id| Op::SetProp {
+                    id,
+                    prop: Prop::ProjectedData(names.into()),
+                })
+                .into(),
+        );
+        let items = c.commit().map(|b| b.items).unwrap_or_default();
+        assert!(items.is_empty(), "{names:?}: {items:?}");
+    }
+}
+
+#[test]
 fn a_projected_focus_styles_a_part_as_focused() {
     use crate::tailwind::state;
     // A one-time-code input's cell: `focus:` while it takes the next
@@ -8167,6 +8265,114 @@ mod components {
         assert_eq!(props_of(&c, 6).accessibility.state.expanded, Some(false));
         press(&mut c);
         assert_eq!(props_of(&c, 6).accessibility.state.expanded, Some(true));
+    }
+
+    #[derive(Clone, PartialEq, Props)]
+    struct AnchoredTriggerProps {
+        trigger: crate::element::Prop<Option<Slot>>,
+    }
+
+    /// Gives its trigger a ref and, once the trigger is pressed, shows a
+    /// 40 × 20 overlay 4 points below what the trigger draws, centered on
+    /// it (a popover's).
+    #[component]
+    fn AnchoredTrigger(props: AnchoredTriggerProps) -> impl IntoElement {
+        let anchor = element_ref();
+        let open = signal(false);
+        view()
+            .child(
+                props
+                    .trigger
+                    .place(move |t| t.element_ref(&anchor).on_press(move || open.set(true))),
+            )
+            .child(when(
+                move || open.get(),
+                move || {
+                    overlay()
+                        .anchor_content(&anchor)
+                        .placement(Placement::Bottom)
+                        .align(Align::Center)
+                        .offset(px(4.0))
+                        .w(px(40.0))
+                        .h(px(20.0))
+                        .child(text("pop"))
+                },
+            ))
+    }
+
+    /// An overlay placed against what a slot's element draws goes by the
+    /// TSX app's element's own box, as by a Rust app's: here the component's
+    /// column stretches it to the root's 320 points and its minimum height
+    /// makes it 30 tall around a 50 × 10 box (with 10 points of padding on
+    /// each side), so the box around its children (0, 10, 70 × 10) is not
+    /// what shows.
+    #[test]
+    fn a_tsx_slots_element_anchors_overlays_by_its_own_box() {
+        let mut c = mount_host::<AnchoredTrigger>();
+        apply(
+            &mut c,
+            vec![
+                Op::Create {
+                    id: 4,
+                    tag: Tag::View,
+                },
+                Op::SetProp {
+                    id: 4,
+                    prop: Prop::ComponentSlot("trigger".into()),
+                },
+                Op::Create {
+                    id: 6,
+                    tag: Tag::View,
+                },
+                class_op(6, "min-h-[30px] px-[10px] justify-center"),
+                Op::Create {
+                    id: 8,
+                    tag: Tag::View,
+                },
+                class_op(8, "w-[50px] h-[10px]"),
+                Op::Insert {
+                    parent: 6,
+                    child: 8,
+                    before: None,
+                },
+                Op::Insert {
+                    parent: 4,
+                    child: 6,
+                    before: None,
+                },
+                Op::Insert {
+                    parent: 2,
+                    child: 4,
+                    before: None,
+                },
+            ],
+        );
+        c.commit().unwrap();
+        assert_eq!(
+            c.components.adopted.get(&6),
+            Some(&4),
+            "the app's element takes the slot's ref"
+        );
+        let trigger = c.measure(6).expect("laid out");
+        assert_eq!(
+            (trigger.page, trigger.frame.size),
+            (Point::new(px(0.0), px(0.0)), size_pt(320.0, 30.0))
+        );
+        c.component_event(6, EventKind::Press, &EventPayload::None);
+        let batch = c.commit().unwrap();
+        let text = batch
+            .items
+            .iter()
+            .find_map(|i| match i {
+                MountItem::Text { id, text, .. } if text.text == "pop" => Some(*id),
+                _ => None,
+            })
+            .expect("shown");
+        let parent = c.nodes[c.key(text).unwrap() as usize].parent;
+        let pop = c.nodes[parent as usize].id;
+        // Centered below the element (0, 0, 320 × 30): not at (15, 24),
+        // below the box around its children.
+        assert_eq!(frame_of(&batch, pop), Some(rect(140.0, 34.0, 40.0, 20.0)));
     }
 
     /// On the app's element the component's props win and the app's fill
@@ -10845,6 +11051,251 @@ mod components {
         assert_eq!(shown.last().unwrap(), "picked 0 []");
     }
 
+    /// Starts a speech session when its first button is pressed (a new
+    /// one each press), stops the last one with its second; shows every
+    /// event.
+    #[component]
+    fn Dictation() -> impl IntoElement {
+        use std::{cell::RefCell, rc::Rc};
+        let heard = signal(String::new());
+        let last: Rc<RefCell<Option<Rc<RefCell<crate::element::SpeechRecognition>>>>> =
+            Rc::default();
+        let stopping = last.clone();
+        view()
+            .child(text(move || format!("heard{}", heard.get())))
+            .child(view().h(px(10.0)).on_press(move |_: &()| {
+                let request = crate::speech::SpeechRequest {
+                    lang: Some("en-US".into()),
+                    ..Default::default()
+                };
+                let recognition = Rc::new(RefCell::new(recognize_speech(request)));
+                *last.borrow_mut() = Some(recognition.clone());
+                spawn(async move {
+                    loop {
+                        let event =
+                            std::future::poll_fn(|cx| recognition.borrow_mut().poll_next(cx)).await;
+                        let Some(event) = event else { break };
+                        let shown = match event {
+                            crate::speech::SpeechEvent::Start => "start".to_owned(),
+                            crate::speech::SpeechEvent::Result { text, is_final } => {
+                                format!("{text}{}", if is_final { "." } else { "" })
+                            }
+                            crate::speech::SpeechEvent::End { error } => {
+                                format!("end {}", error.map_or("ok", |e| e.as_str()))
+                            }
+                        };
+                        heard.set(format!("{} {shown}", untracked(|| heard.get())));
+                    }
+                });
+            }))
+            .child(view().h(px(10.0)).on_press(move |_: &()| {
+                if let Some(recognition) = &*stopping.borrow() {
+                    recognition.borrow().stop();
+                }
+            }))
+    }
+
+    /// Mounts [`Dictation`]: its start and stop buttons.
+    fn mount_dictation(c: &mut Core<FakeEngine>) -> (NodeId, NodeId) {
+        c.mount_root(&crate::element::Root::new::<Dictation>(|| ()));
+        let batch = c.commit().unwrap();
+        let buttons: Vec<NodeId> = batch
+            .items
+            .iter()
+            .filter_map(|i| match i {
+                MountItem::Events { id, events } if events.contains(EventKind::Press) => Some(*id),
+                _ => None,
+            })
+            .collect();
+        (buttons[0], buttons[1])
+    }
+
+    fn press(c: &mut Core<FakeEngine>, button: NodeId) -> Vec<crate::speech::SpeechCommand> {
+        assert!(c.component_event(button, EventKind::Press, &EventPayload::None));
+        c.commit()
+            .map(|b| b.items)
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|i| match i {
+                MountItem::Command {
+                    id: ROOT_ID,
+                    command: Command::Speech(command),
+                } => Some(command),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn hear(c: &mut Core<FakeEngine>, id: u32, event: crate::speech::SpeechEvent) {
+        assert!(c.component_event(
+            ROOT_ID,
+            EventKind::Speech,
+            &EventPayload::Speech { id, event }
+        ));
+    }
+
+    #[test]
+    fn the_platform_recognizes_speech() {
+        use crate::speech::{SpeechCommand, SpeechError, SpeechEvent};
+        let mut c = core();
+        c.set_environment(crate::element::Environment {
+            speech: true,
+            ..Default::default()
+        });
+        let (start, stop) = mount_dictation(&mut c);
+        let commands = press(&mut c, start);
+        let [SpeechCommand::Start { id, request }] = &commands[..] else {
+            panic!("one start: {commands:?}");
+        };
+        let id = *id;
+        assert_eq!(request.lang.as_deref(), Some("en-US"));
+        hear(&mut c, id, SpeechEvent::Start);
+        hear(
+            &mut c,
+            id,
+            SpeechEvent::Result {
+                text: "hel".into(),
+                is_final: false,
+            },
+        );
+        // Another session's events are dropped.
+        hear(
+            &mut c,
+            id + 100,
+            SpeechEvent::End {
+                error: Some(SpeechError::Failed),
+            },
+        );
+        assert_eq!(press(&mut c, stop), vec![SpeechCommand::Stop { id }]);
+        hear(
+            &mut c,
+            id,
+            SpeechEvent::Result {
+                text: "hello".into(),
+                is_final: true,
+            },
+        );
+        hear(&mut c, id, SpeechEvent::End { error: None });
+        let shown = run_until(&mut c, |s| s.iter().any(|t| t.contains("end")));
+        assert_eq!(shown.last().unwrap(), "heard start hel hello. end ok");
+        // Nothing comes after the end; stopping it asks nothing.
+        hear(
+            &mut c,
+            id,
+            SpeechEvent::Result {
+                text: "late".into(),
+                is_final: true,
+            },
+        );
+        assert_eq!(press(&mut c, stop), vec![]);
+
+        // A new session aborts the one running: it ends for the app at once.
+        let first = press(&mut c, start);
+        let [SpeechCommand::Start { id: first, .. }] = first[..] else {
+            panic!("{first:?}");
+        };
+        hear(&mut c, first, SpeechEvent::Start);
+        let second = press(&mut c, start);
+        let [
+            SpeechCommand::Abort { id: aborted },
+            SpeechCommand::Start { id: second, .. },
+        ] = second[..]
+        else {
+            panic!("{second:?}");
+        };
+        assert_eq!(aborted, first);
+        assert_ne!(second, first);
+        let shown = run_until(&mut c, |s| s.iter().any(|t| t.ends_with("start end ok")));
+        assert!(
+            shown.last().unwrap().ends_with("end ok start end ok"),
+            "{shown:?}"
+        );
+    }
+
+    #[test]
+    fn speech_ends_unavailable_where_nothing_recognizes_it() {
+        let mut c = core();
+        let (start, _) = mount_dictation(&mut c);
+        assert_eq!(press(&mut c, start), vec![]);
+        let shown = run_until(&mut c, |s| s.iter().any(|t| t.contains("end")));
+        assert_eq!(shown.last().unwrap(), "heard end unavailable");
+    }
+
+    #[test]
+    fn speech_needs_the_capability() {
+        let mut c = core();
+        c.set_environment(crate::element::Environment {
+            speech: true,
+            ..Default::default()
+        });
+        c.set_access(std::sync::Arc::new(crate::access::Access {
+            declared: crate::access::Capabilities::from_json(&serde_json::json!({})).unwrap(),
+            granted: None,
+        }));
+        let (start, _) = mount_dictation(&mut c);
+        assert_eq!(press(&mut c, start), vec![]);
+        let shown = run_until(&mut c, |s| s.iter().any(|t| t.contains("end")));
+        assert_eq!(shown.last().unwrap(), "heard end not-allowed");
+    }
+
+    /// Recognizes "a b" as the user speaks; stopping it gives "a b c".
+    #[derive(Default)]
+    struct TestSpeech {
+        stopped: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    }
+
+    struct TestSession {
+        sink: crate::speech::SpeechSink,
+        stopped: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    }
+
+    impl crate::speech::SpeechControl for TestSession {
+        fn stop(&mut self) {
+            self.stopped
+                .store(true, std::sync::atomic::Ordering::SeqCst);
+            self.sink.result("a b c", true);
+            self.sink.end(None);
+        }
+
+        fn abort(&mut self) {}
+    }
+
+    impl crate::speech::SpeechBackend for TestSpeech {
+        fn start(
+            &self,
+            request: crate::speech::SpeechRequest,
+            sink: crate::speech::SpeechSink,
+        ) -> Box<dyn crate::speech::SpeechControl> {
+            assert!(request.interim);
+            sink.start();
+            // From another thread, as a recognizer reports.
+            let from = sink.clone();
+            std::thread::spawn(move || from.result("a b", false))
+                .join()
+                .unwrap();
+            Box::new(TestSession {
+                sink,
+                stopped: self.stopped.clone(),
+            })
+        }
+    }
+
+    #[test]
+    fn a_recognizer_of_the_embedder_runs_in_place_of_the_platform() {
+        let mut c = core();
+        let backend = TestSpeech::default();
+        let stopped = backend.stopped.clone();
+        c.set_speech(Some(std::sync::Arc::new(backend)));
+        let (start, stop) = mount_dictation(&mut c);
+        assert_eq!(press(&mut c, start), vec![], "nothing reaches the platform");
+        let shown = run_until(&mut c, |s| s.iter().any(|t| t.contains("a b")));
+        assert_eq!(shown.last().unwrap(), "heard start a b");
+        assert_eq!(press(&mut c, stop), vec![]);
+        assert!(stopped.load(std::sync::atomic::Ordering::SeqCst));
+        let shown = run_until(&mut c, |s| s.iter().any(|t| t.contains("end")));
+        assert_eq!(shown.last().unwrap(), "heard start a b a b c. end ok");
+    }
+
     /// Picks Markdown files, then trashes the first one picked and opens a
     /// relative path, when pressed; shows what each answered.
     #[component]
@@ -10918,14 +11369,11 @@ mod components {
         assert_eq!(requests.len(), 1);
         let (pick, request) = requests.into_iter().next().unwrap();
         assert_eq!(request, FileRequest::OpenDialog(expected));
-        let picked = vec![
-            std::path::PathBuf::from("/notes/a.md"),
-            std::path::PathBuf::from("/notes/b.md"),
-        ];
+        let picked = vec![note_path("a.md"), note_path("b.md")];
         assert!(c.component_event(
             ROOT_ID,
             EventKind::FileRequest,
-            &EventPayload::file_answer(pick, picked)
+            &EventPayload::file_answer(pick, picked.clone())
         ));
         // The task goes on to the trash.
         let mut trash = None;
@@ -10936,7 +11384,7 @@ mod components {
             trash = file_requests(items).into_iter().next();
         }
         let (trash, request) = trash.expect("the trash request");
-        assert_eq!(request, FileRequest::MoveToTrash("/notes/a.md".into()));
+        assert_eq!(request, FileRequest::MoveToTrash(note_path("a.md")));
         assert!(c.component_event(
             ROOT_ID,
             EventKind::FileRequest,
@@ -10946,8 +11394,17 @@ mod components {
         let shown = run_until(&mut c, |s| s.iter().any(|t| t.starts_with("paths O")));
         assert_eq!(
             shown.last().unwrap(),
-            r#"paths Ok(Some(["/notes/a.md", "/notes/b.md"])) Some(Err("no trash on this volume")) Err("`notes.md` is not an absolute path")"#
+            &format!(
+                r#"paths Ok(Some({picked:?})) Some(Err("no trash on this volume")) Err("`notes.md` is not an absolute path")"#
+            )
         );
+    }
+
+    /// A picked note's path, absolute where the tests run: the platform
+    /// refuses a rooted path without a drive on Windows.
+    fn note_path(name: &str) -> std::path::PathBuf {
+        let notes = if cfg!(windows) { r"C:\notes" } else { "/notes" };
+        std::path::Path::new(notes).join(name)
     }
 
     #[test]
@@ -17771,6 +18228,124 @@ mod renders {
         assert_eq!(c.nodes[key as usize].kind, Kind::Text);
         // Laid out as an attachment of the paragraph: it has a frame.
         assert!(frame_of(&batch, place).is_some(), "{:?}", batch.items);
+    }
+
+    /// One render placed straight in a paragraph (as `TextView` places
+    /// `renderCustom`'s inline nodes).
+    #[derive(Clone, PartialEq, Props)]
+    struct MentionProps {
+        render_item: crate::element::Prop<Option<Renderer<String>>>,
+    }
+
+    #[component]
+    fn Mention(props: MentionProps) -> impl IntoElement {
+        text("Hi ").child(dynamic(move || -> Option<Rendered> {
+            props
+                .render_item
+                .get()
+                .map(|r| r.render("a", "Ann".to_owned()))
+        }))
+    }
+
+    /// The placeholder and JS's holder are not the app's views: the
+    /// content's `verticalAlign` places the render in its line.
+    #[test]
+    fn a_render_in_a_paragraph_sits_by_its_contents_vertical_align() {
+        let mut c = core();
+        let mut registry = Registry::new();
+        registry.register::<Mention>();
+        c.set_components(registry);
+        apply(
+            &mut c,
+            vec![
+                Op::Create {
+                    id: 2,
+                    tag: Tag::View,
+                },
+                Op::SetProp {
+                    id: 2,
+                    prop: Prop::Component(std::any::type_name::<Mention>().into()),
+                },
+                Op::SetProp {
+                    id: 2,
+                    prop: Prop::RustProp(
+                        "renderItem",
+                        Some(AnyValue::new(Some(Renderer::<String>::__js_of(
+                            "renderItem",
+                            2,
+                        )))),
+                    ),
+                },
+                Op::Insert {
+                    parent: ROOT_ID,
+                    child: 2,
+                    before: None,
+                },
+            ],
+        );
+        c.commit().unwrap();
+        assert_eq!(asked(&mut c), ["$render a Ann"]);
+        // JS's holder (10) of the content, a chip (12) set in the middle.
+        let chip = |align: &'static str| {
+            style_op(
+                12,
+                &[
+                    ("width", StyleValue::Number(30.0)),
+                    ("height", StyleValue::Number(20.0)),
+                    ("verticalAlign", StyleValue::Str(align)),
+                ],
+            )
+        };
+        apply(
+            &mut c,
+            vec![
+                Op::Create {
+                    id: 10,
+                    tag: Tag::View,
+                },
+                Op::SetProp {
+                    id: 10,
+                    prop: Prop::ComponentRender("renderItem\u{1f}a".into()),
+                },
+                Op::Create {
+                    id: 12,
+                    tag: Tag::View,
+                },
+                chip("middle"),
+                Op::Insert {
+                    parent: 10,
+                    child: 12,
+                    before: None,
+                },
+                Op::Insert {
+                    parent: 2,
+                    child: 10,
+                    before: None,
+                },
+            ],
+        );
+        c.commit().unwrap();
+        let place = parent_of(&c, 10).unwrap();
+        let paragraph = parent_of(&c, place).unwrap();
+        let align = |c: &mut Core<FakeEngine>| {
+            let layout = c.nodes[c.key(paragraph).unwrap() as usize].layout.unwrap();
+            let cx = c.text_cx(layout);
+            assert_eq!(cx.text.attachments.len(), 1);
+            cx.alignments.get(cx.text.attachments[0].index)
+        };
+        assert_eq!(align(&mut c), crate::VerticalAlign::Middle);
+        // A change of the content's builds the text again.
+        apply(&mut c, vec![chip("text-top")]);
+        let batch = c.commit().unwrap();
+        assert!(
+            batch
+                .items
+                .iter()
+                .any(|i| matches!(i, MountItem::Text { id, .. } if *id == paragraph)),
+            "{:?}",
+            batch.items
+        );
+        assert_eq!(align(&mut c), crate::VerticalAlign::TextTop);
     }
 
     /// A popup's list: a scroll view as long as its rows (up to 300 pt),

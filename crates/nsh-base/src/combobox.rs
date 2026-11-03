@@ -36,7 +36,7 @@ use nsh_core::{
 };
 
 use crate::{
-    SelectGroup, SelectItem, SelectItemState,
+    SelectEntry, SelectGroup, SelectItem,
     listbox::{self, Footer, Hooks, Listbox, Move, Parts, Query, Shown},
     popup::{DropdownFrame, OpenChangeReason, OpenState},
 };
@@ -116,7 +116,8 @@ pub struct ComboboxProps {
     pub list_style: Prop<Style>,
     /// The classes of each item's row: `focus:` while highlighted (the keys
     /// or the pointer are on it), `selected:` while selected, `disabled:`
-    /// while it cannot be.
+    /// while it cannot be; with `group`, its content follows them
+    /// (`group-focus:`, `group-selected:`, `group-disabled:`).
     pub item_class: Prop<Option<SharedString>>,
     /// The inline style of each item's row, over its classes: its text
     /// styles too (`color`, `fontSize`), which its title inherits.
@@ -165,9 +166,10 @@ pub struct ComboboxProps {
     /// What shows below the rows (`gpui-component`'s `footer`): an action,
     /// a count.
     pub footer: Prop<Option<Slot>>,
-    /// An item's row drawn by the app, for the rows in view; without it
-    /// a row shows the item's title.
-    pub render_item: Prop<Option<Renderer<SelectItemState>>>,
+    /// An item's row drawn by the app from what the item is, never its
+    /// state (the row's classes are), once per item in view; without it a
+    /// row shows the item's title.
+    pub render_item: Prop<Option<Renderer<SelectEntry>>>,
     /// A section's header drawn by the app; without it a header shows its
     /// title.
     pub render_group: Prop<Option<Renderer<SelectGroup>>>,
@@ -294,6 +296,10 @@ pub fn Combobox(props: ComboboxProps, cx: Scope<ComboboxEvent>) -> impl IntoElem
     let typed = signal(false);
     // What was typed while the list was closed, for it once it opens.
     let pending = stored(None::<String>);
+    // The chosen title the first typed characters followed: while the
+    // input still holds it (its value not written back yet), it is not
+    // part of the query.
+    let replaced = stored(None::<String>);
     let width = signal(None::<Points>);
     let focused = signal(false);
     let opening = stored(Opening::Press);
@@ -371,6 +377,7 @@ pub fn Combobox(props: ComboboxProps, cx: Scope<ComboboxEvent>) -> impl IntoElem
             if !now {
                 lb.closed();
                 typed.set(false);
+                replaced.replace(None);
                 cx.emit(ComboboxEvent::Confirm(latest.with(|l| l.clone())));
                 return;
             }
@@ -561,14 +568,22 @@ pub fn Combobox(props: ComboboxProps, cx: Scope<ComboboxEvent>) -> impl IntoElem
         .on_change(move |text: &str| {
             // Typed after the chosen title (the caret at its end): the
             // characters typed replace it, as they would the selection.
-            let title = if props.multiple.get_untracked() || typed.get_untracked() {
+            let title = if props.multiple.get_untracked() {
                 String::new()
+            } else if typed.get_untracked() {
+                replaced.with(|r| r.clone()).unwrap_or_default()
             } else {
                 untracked(chosen_title)
             };
             let text = match text.strip_prefix(title.as_str()) {
-                Some(rest) if !title.is_empty() && !rest.is_empty() => rest,
-                _ => text,
+                Some(rest) if !title.is_empty() && !rest.is_empty() => {
+                    replaced.replace(Some(title.clone()));
+                    rest
+                }
+                _ => {
+                    replaced.replace(None);
+                    text
+                }
             };
             typed.set(true);
             if open.get_untracked() {

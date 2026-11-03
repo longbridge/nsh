@@ -68,6 +68,7 @@ function App() {
       items={commands}
       placeholder="Type a command or search…"
       accessibilityLabel="Commands"
+      searchAccessibilityLabel="Search commands"
       autoFocus
       onSelect={({ id }) => chosen.set(id)}
       class="w-96 overflow-hidden rounded-lg border border-border bg-popover"
@@ -130,7 +131,8 @@ item and keeps its views while the highlight moves.
 | `placeholder` | `.placeholder(..)` | `string` | none | The search field's placeholder. |
 | `autoFocus` | `.auto_focus(..)` | `boolean` | `false` | The search field takes the keyboard focus once shown: a palette that opens to be typed in. |
 | `separator` | `.separator(..)` | `boolean` | `true` | A separator row between two sections shown, styled by `separatorClass`; never first, last or doubled. |
-| `accessibilityLabel` | `.accessibility_label(..)` | `string` | none | What screen readers call the search field and the list ("Commands"). |
+| `accessibilityLabel` | `.accessibility_label(..)` | `string` | none | What screen readers call the list ("Commands"), and the search field while `searchAccessibilityLabel` is not set. |
+| `searchAccessibilityLabel` | `.search_accessibility_label(..)` | `string` | `accessibilityLabel` | What screen readers call the search field: what it searches ("Search commands"). |
 | `header`, `footer` | `.header(..)`, `.footer(..)` | `JSX.Element` | none | What shows above the search field (a title) and below the rows (the keys' hints, a count). |
 | `empty` | `.empty(..)` | `JSX.Element` | none | What shows while no item does: a query that matches nothing, no items. |
 | `searchPrefix`, `searchSuffix` | `.search_prefix(..)`, `.search_suffix(..)` | `JSX.Element` | none | What shows before and after the search field in its bar: a search icon, a spinner while `loading`. |
@@ -230,6 +232,8 @@ and sets `items` with the results, `loading` while it waits.
 
 - The list has the role `"listbox"`, named by `accessibilityLabel`; each row is an `"option"` named by its item's
   label, checked and disabled as its item is; a section's header is a `"header"`, a separator is hidden.
+- The search field is a text field named by `searchAccessibilityLabel` (else `accessibilityLabel`); its placeholder is
+  a hint shown while it is empty.
 - The search field keeps the keyboard focus while the arrow keys move the highlight, and screen readers hear the
   highlighted label. Without a search field, the highlighted row takes the screen reader's focus.
 - While `loading`, the list is busy.

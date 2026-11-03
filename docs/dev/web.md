@@ -41,7 +41,9 @@ and read by `values.rs` `unpack`), and an object's keys in one (op 48).
 Callbacks escaping a stopped run become inert; pending module and host calls reject on disposal.
 
 Browser fetch, streams, WebCrypto, URL, timers and promises use browser implementations, including their
-CORS, secure-context and permission rules. Synchronous hash/compression APIs retain Rust implementations;
+CORS, secure-context and permission rules; the browser knows no `asset:` scheme, so `fetch` of the app's files
+(`asset:/`) goes through the engine's network in every session, which reads them as on the other platforms
+(`web/browser/testing.js`, `src/browser/fetch.rs`). Synchronous hash/compression APIs retain Rust implementations;
 Buffer and POSIX path use pinned vendored implementations with licenses in `third_party/`. Mobile-only APIs
 retain their off-platform behavior. In a test session on a manual clock (`nsh test --target web`), timers,
 `Date`, `performance.now()`, animation frames and `fetch` go through the engine instead, so the test's clock and
@@ -519,7 +521,8 @@ calls (`nsh_set_dark`, `nsh_resize`). Changes come from media query listeners, `
 The idiom is fixed at start, as `Environment::idiom` is everywhere: `desktop` for a fine, hovering pointer and a
 container at least 600 wide (headless Chromium reports no pointer and measures as a tablet or phone unless launched
 with a fine, hovering one, as `nsh test --target web` does), `pad` for a screen whose short side is at least 600, else
-`phone`; the player's `idiom` option overrides it. `Environment::desktop()`
+`phone`; the player's `idiom` option overrides it, and so does a test's setup (`TestEnvironment::idiom`: `open`'s
+desktop `platform` starts the app in the desktop idiom at any width). `Environment::desktop()`
 (desktop OS, or the web in the desktop idiom) decides `desktop={{…}}` props, `platform.select`'s `desktop` key,
 `platform.desktop` and `platform.idiom` (`Environment::reported_idiom()`; the page's `browser/environment.js`
 gets both from the engine's environment); `Os::is_desktop()` stays the desktop backends' OSes (`nsh/desktop`'s windows and menus). Like the

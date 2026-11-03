@@ -35,6 +35,13 @@
 // `motion.update` as rows come.
 // Bars take their colors from their rows' regions through the plot's
 // `colorScale` (`color` on the mark, an ordinal scale on the plot).
+// Candles: a `Bar` from each row's open to its close (`base` a field), a
+// `Rule` from its low to its high (`value`, `base` a function, `color`,
+// `inactiveOpacity`).
+// Bubbles: a `Dot` per row at its `x` and `value`, its radius from a field
+// through a square root scale (`r`, `rScale`), its fill from its row's
+// category (`color`), the others fading with the hover
+// (`inactiveOpacity`), found past its edge within `hitRadius`.
 // Reversed scales (`reverse`): bars hanging from the top of a reversed
 // linear y scale in bands from the right edge, and bars across from the
 // right edge of a reversed x; the axis's labels and the hover follow.
@@ -54,7 +61,7 @@
 // plot made again there shows whole at once, a new `appearGeneration` (a
 // string) and a new `id` draw it in again.
 import { Text, View, signal } from "nsh";
-import { Arc, Area, Bar, Grid, Line, Pie, Plot, PlotAppearScope, PlotAxis, PlotLabel, RadialGrid, RadialLine, Sankey } from "nsh/base/plot";
+import { Arc, Area, Bar, Dot, Grid, Line, Pie, Plot, PlotAppearScope, PlotAxis, PlotLabel, RadialGrid, RadialLine, Rule, Sankey } from "nsh/base/plot";
 
 type Row = { t: number; price: number; avg: number };
 type Sale = { v: number; w: number };
@@ -164,6 +171,8 @@ function App() {
       <PieLabelCase />
       <AxisCase />
       <ColorCase />
+      <RangeCase />
+      <DotCase />
       <ReverseCase />
       <RadarCase />
       <LabelCase />
@@ -443,6 +452,78 @@ function SankeyCase() {
       <Plot testID="unrelaxed" data={STEPS} style={{ width: 100, height: 100 }}>
         <Sankey links={STEP_FLOWS} iterations={0} nodeLabel="name" />
       </Plot>
+    </View>
+  );
+}
+
+type Candle = { o: number; c: number; l: number; h: number; dir: string };
+
+const CANDLES: Candle[] = [
+  { o: 20, c: 40, l: 10, h: 50, dir: "up" },
+  { o: 40, c: 30, l: 25, h: 75, dir: "down" },
+];
+
+/** Two candles in bands of 100 of a 200 by 100 plot on 0 to 100 (a value
+ * at 100 - value): bodies from the open to the close, the second growing
+ * down, labeled at the close; wicks from the low to the high, green up
+ * and red down, the other row's fading to 0.25 with the hover. */
+function RangeCase() {
+  const hovered = signal<number | null>(null);
+  return (
+    <View>
+      <Plot
+        testID="candles"
+        data={CANDLES}
+        xScale={{ type: "band" }}
+        yScale={{ type: "linear", domain: [0, 100] }}
+        colorScale={{ type: "ordinal", domain: ["up", "down"], range: ["#00ff00", "#ff0000"] }}
+        onHoverChange={({ index }) => hovered.set(index)}
+        style={{ width: 200, height: 100 }}
+      >
+        <Rule testID="wicks" value="h" base={(d: Candle) => d.l} color="dir" inactiveOpacity={0.25} />
+        <Bar value="c" base="o" label={(d: Candle) => `c${d.c}`} labelClass="h-[10px] w-[20px]" />
+      </Plot>
+      <Text>{`candle ${hovered()}`}</Text>
+    </View>
+  );
+}
+
+type Holding = { risk: number; ret: number; cap: number; sector: string };
+
+const HOLDINGS: Holding[] = [
+  { risk: 10, ret: 20, cap: 100, sector: "a" },
+  { risk: 30, ret: 40, cap: 400, sector: "b" },
+];
+
+/** Two bubbles on a 200 by 100 plot, x from 0 to 40 (5 points a value),
+ * y from 0 to 100 (at 100 - value): radii from the caps' square roots, up
+ * to 20, the bigger drawn first; red and green by sector; the pointer finds
+ * a bubble 20 past its edge. */
+function DotCase() {
+  const hovered = signal<number | null>(null);
+  return (
+    <View>
+      <Plot
+        testID="bubbles"
+        data={HOLDINGS}
+        x="risk"
+        xScale={{ type: "linear", domain: [0, 40] }}
+        yScale={{ type: "linear", domain: [0, 100] }}
+        colorScale={{ type: "ordinal", domain: ["a", "b"], range: ["#ff0000", "#00ff00"] }}
+        onHoverChange={({ index }) => hovered.set(index)}
+        style={{ width: 200, height: 100 }}
+      >
+        <Dot
+          testID="dots"
+          value="ret"
+          r="cap"
+          rScale={{ type: "sqrt", range: [0, 20] }}
+          color="sector"
+          inactiveOpacity={0.25}
+          hitRadius={20}
+        />
+      </Plot>
+      <Text>{`bubble ${hovered()}`}</Text>
     </View>
   );
 }

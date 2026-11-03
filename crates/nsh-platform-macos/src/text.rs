@@ -4,7 +4,7 @@
 use std::{cell::RefCell, ffi::c_void, ops::Range, ptr::NonNull};
 
 use nsh_core::{
-    Affinity, AttributedText, Bounds, Color, EllipsizeMode, FontFamily, Point, Points,
+    Affinity, AttributedText, Bounds, Color, EllipsizeMode, FamilyName, FontFamily, Point, Points,
     ResolvedTextStyle, Size, TextAlign, TextEngine, TextLayout, TextPosition,
 };
 use objc2::rc::Retained;
@@ -23,11 +23,11 @@ use objc2_core_text::{
     CTFontSymbolicTraits, CTFrame, CTFramesetter, CTLine, CTLineTruncationType, CTParagraphStyle,
     CTParagraphStyleSetting, CTParagraphStyleSpecifier, CTRun, CTRunDelegate,
     CTRunDelegateCallbacks, CTRunStatus, CTTextAlignment, CTTypesetter, CTWritingDirection,
-    kCTFontAttributeName, kCTFontFamilyNameAttribute, kCTFontFeatureSettingsAttribute,
-    kCTFontOpenTypeFeatureTag, kCTFontOpenTypeFeatureValue, kCTFontTraitsAttribute,
-    kCTFontWeightTrait, kCTForegroundColorAttributeName, kCTKernAttributeName,
-    kCTParagraphStyleAttributeName, kCTRunDelegateAttributeName, kCTRunDelegateCurrentVersion,
-    kCTUnderlineColorAttributeName, kCTUnderlineStyleAttributeName,
+    kCTFontAttributeName, kCTFontCascadeListAttribute, kCTFontFamilyNameAttribute,
+    kCTFontFeatureSettingsAttribute, kCTFontOpenTypeFeatureTag, kCTFontOpenTypeFeatureValue,
+    kCTFontTraitsAttribute, kCTFontWeightTrait, kCTForegroundColorAttributeName,
+    kCTKernAttributeName, kCTParagraphStyleAttributeName, kCTRunDelegateAttributeName,
+    kCTRunDelegateCurrentVersion, kCTUnderlineColorAttributeName, kCTUnderlineStyleAttributeName,
 };
 use rustc_hash::FxHashMap;
 
@@ -118,14 +118,10 @@ impl FontCache {
 
 pub(crate) fn make_font(style: &ResolvedTextStyle) -> CFRetained<CTFont> {
     let size = style.font_size.0 as CGFloat;
-    let font = style
+    let (font, fallbacks) = style
         .font_family
-        .and_then(|family| {
-            let name = family.name();
-            generic_font(&name, size, style.font_weight)
-                .unwrap_or_else(|| family_font(&name, size, style.font_weight))
-        })
-        .unwrap_or_else(|| system_font(size, style.font_weight));
+        .and_then(|family| listed_fonts(&family.name(), size, style.font_weight))
+        .unwrap_or_else(|| (system_font(size, style.font_weight), Vec::new()));
     let font = if style.italic {
         let italic = CTFontSymbolicTraits::TraitItalic;
         // SAFETY: a valid font; size 0 keeps the size, null matrix keeps it.
@@ -136,7 +132,51 @@ pub(crate) fn make_font(style: &ResolvedTextStyle) -> CFRetained<CTFont> {
     } else {
         font
     };
-    with_features(font, style.font_variant)
+    with_cascade(with_features(font, style.font_variant), &fallbacks)
+}
+
+/// The fonts of a `fontFamily` list ([`nsh_core::font_families`]): the
+/// first family the system has, and the others it has, which CoreText
+/// takes the characters the first lacks from ([`with_cascade`]). `None`
+/// (logged) when it has none of them.
+fn listed_fonts(
+    list: &str,
+    size: CGFloat,
+    weight: u16,
+) -> Option<(CFRetained<CTFont>, Vec<CFRetained<CTFont>>)> {
+    let mut fonts = nsh_core::font_families(list).filter_map(|family| match family {
+        FamilyName::Named(name) => family_font(name, size, weight),
+        generic => Some(generic_font(generic, size, weight)),
+    });
+    let Some(first) = fonts.next() else {
+        log::warn!("font family `{list}` is not available; using the system font");
+        return None;
+    };
+    Some((first, fonts.collect()))
+}
+
+/// `font` with `fallbacks` as its cascade list
+/// (`kCTFontCascadeListAttribute`): a character `font` lacks is taken from
+/// the first of them that has it, before the system's fallback fonts.
+fn with_cascade(font: CFRetained<CTFont>, fallbacks: &[CFRetained<CTFont>]) -> CFRetained<CTFont> {
+    if fallbacks.is_empty() {
+        return font;
+    }
+    // SAFETY: valid fonts.
+    let descriptors: Vec<CFRetained<CTFontDescriptor>> = fallbacks
+        .iter()
+        .map(|f| unsafe { f.font_descriptor() })
+        .collect();
+    let list = CFArray::from_retained_objects(&descriptors);
+    // SAFETY: an immutable CoreText constant.
+    let key = unsafe { kCTFontCascadeListAttribute };
+    let attributes = CFDictionary::<CFString, CFType>::from_slices(&[key], &[list.as_ref()]);
+    // SAFETY: the attribute's value has the type CoreText documents; size 0
+    // and a null matrix keep the font's.
+    unsafe {
+        let descriptor = CTFontDescriptor::with_attributes(attributes.as_opaque());
+        font.copy_with_attributes(0.0, std::ptr::null(), Some(&descriptor))
+    }
 }
 
 /// `font` with the OpenType features of `variant` (`fontVariant`).
@@ -175,23 +215,24 @@ pub(crate) fn ns_font(style: &ResolvedTextStyle) -> Retained<NSFont> {
     unsafe { Retained::from_raw(ptr).expect("non-null font") }
 }
 
-/// CSS generic families (`font-mono`, `font-serif`): the system font's
-/// designs. `Some(None)` is the plain system font; `None` is not generic.
-fn generic_font(family: &str, size: CGFloat, weight: u16) -> Option<Option<CFRetained<CTFont>>> {
+/// A CSS generic family (`font-mono`, `font-serif`): the system font or
+/// one of its designs.
+fn generic_font(family: FamilyName<'_>, size: CGFloat, weight: u16) -> CFRetained<CTFont> {
     use objc2_app_kit::{
         NSFontDescriptorSystemDesign, NSFontDescriptorSystemDesignRounded,
         NSFontDescriptorSystemDesignSerif,
     };
     let design: &NSFontDescriptorSystemDesign = match family {
-        "system-ui" | "sans-serif" | "ui-sans-serif" | "-apple-system" => return Some(None),
-        "monospace" | "ui-monospace" => {
-            let font = NSFont::monospacedSystemFontOfSize_weight(size, font_weight(weight));
-            return Some(Some(bridge(font)));
+        FamilyName::Monospace => {
+            return bridge(NSFont::monospacedSystemFontOfSize_weight(
+                size,
+                font_weight(weight),
+            ));
         }
         // SAFETY: immutable AppKit constants.
-        "serif" | "ui-serif" => unsafe { NSFontDescriptorSystemDesignSerif },
-        "ui-rounded" => unsafe { NSFontDescriptorSystemDesignRounded },
-        _ => return None,
+        FamilyName::Serif => unsafe { NSFontDescriptorSystemDesignSerif },
+        FamilyName::Rounded => unsafe { NSFontDescriptorSystemDesignRounded },
+        _ => return system_font(size, weight),
     };
     let base = NSFont::systemFontOfSize_weight(size, font_weight(weight));
     let descriptor = base.fontDescriptor();
@@ -199,7 +240,7 @@ fn generic_font(family: &str, size: CGFloat, weight: u16) -> Option<Option<CFRet
         .fontDescriptorWithDesign(design)
         .and_then(|d| NSFont::fontWithDescriptor_size(&d, size))
         .unwrap_or(base);
-    Some(Some(bridge(font)))
+    bridge(font)
 }
 
 /// A `NSFont` as the `CTFont` it is (toll-free bridged).
@@ -209,8 +250,8 @@ fn bridge(font: Retained<NSFont>) -> CFRetained<CTFont> {
     unsafe { CFRetained::from_raw(NonNull::new(ptr).expect("non-null font")) }
 }
 
-/// A font of an installed or registered family, or `None` (logged) if the
-/// family does not exist.
+/// A font of an installed or registered family, or `None` if the family
+/// does not exist.
 fn family_font(family: &str, size: CGFloat, weight: u16) -> Option<CFRetained<CTFont>> {
     let name = CFString::from_str(family);
     let weight = CFNumber::new_cgfloat(font_weight(weight));
@@ -231,12 +272,7 @@ fn family_font(family: &str, size: CGFloat, weight: u16) -> Option<CFRetained<CT
     // An unknown family silently resolves to a default font: detect it.
     // SAFETY: a valid font.
     let resolved = unsafe { font.family_name() }.to_string();
-    if resolved.eq_ignore_ascii_case(family) {
-        Some(font)
-    } else {
-        log::warn!("font family `{family}` is not available; using the system font");
-        None
-    }
+    resolved.eq_ignore_ascii_case(family).then_some(font)
 }
 
 /// The system font as a `CTFont`. `NSFont` is toll-free bridged with
@@ -357,27 +393,41 @@ impl CoreTextEngine {
         a: &nsh_core::TextAttachment,
         alignments: &nsh_core::AttachmentAlignments,
     ) -> (CGFloat, CGFloat, CGFloat) {
-        let font = if alignments.get(a.index) == nsh_core::VerticalAlign::Baseline {
+        let style = text
+            .span_at(a.index)
+            .map_or_else(Default::default, |s| s.style);
+        let f = self.fonts.get(&style);
+        // SAFETY: a valid font.
+        let (ascent, descent, leading, x) =
+            unsafe { (f.ascent(), f.descent(), f.leading(), f.x_height()) };
+        let align = alignments.get(a.index);
+        let font = if align == nsh_core::VerticalAlign::Baseline {
             nsh_core::FontExtent::default()
         } else {
-            let style = text
-                .span_at(a.index)
-                .map_or_else(Default::default, |s| s.style);
-            let f = self.fonts.get(&style);
-            // SAFETY: a valid font.
-            let (ascent, descent, x) = unsafe { (f.ascent(), f.descent(), f.x_height()) };
             nsh_core::FontExtent::new(
                 Points(ascent as f32),
                 Points(descent as f32),
                 Points(x as f32),
             )
         };
-        let (up, down) = a.extent(font, alignments.get(a.index));
-        (
-            a.ascent(font, alignments.get(a.index)).0 as CGFloat,
-            up.0 as CGFloat,
-            down.0 as CGFloat,
-        )
+        let top = a.ascent(font, align).0 as CGFloat;
+        let (up, down) = a.extent(font, align);
+        let (up, down) = (up.0 as CGFloat, down.0 as CGFloat);
+        // A fixed `lineHeight`: CoreText centers a line's own extent in
+        // it, so a placeholder reaching past the font on one side only
+        // would move its line's baseline (lines unevenly spaced). Its
+        // delegate reserves the font's half-leading box instead (the CSS
+        // strut), and where the attachment reaches past that box, as much
+        // again on the other side: the line grows only when it must,
+        // evenly, its text where other lines' is.
+        let line_height = line_height(text);
+        if line_height <= 0.0 {
+            return (top, up, down);
+        }
+        let half = (line_height - (ascent + descent + leading)) / 2.0;
+        let (strut_up, strut_down) = (ascent + half, descent + half);
+        let grow = (up - strut_up).max(down - strut_down).max(0.0);
+        (top, strut_up + grow, strut_down + grow)
     }
 
     /// The height a line holding the tallest attachment needs: its extent
@@ -627,6 +677,11 @@ fn attachment_points(
     points
 }
 
+/// The text's fixed `lineHeight` (its first span's; 0: none).
+fn line_height(text: &AttributedText) -> CGFloat {
+    text.spans.first().map_or(0.0, |s| s.style.line_height.0) as CGFloat
+}
+
 /// `tallest`: the height a line holding an attachment needs (see
 /// `CoreTextEngine::tallest_attachment_line`); lines may grow up to it.
 fn paragraph_style(text: &AttributedText, tallest: CGFloat) -> CFRetained<CTParagraphStyle> {
@@ -639,7 +694,7 @@ fn paragraph_style(text: &AttributedText, tallest: CGFloat) -> CFRetained<CTPara
         TextAlign::Right => CTTextAlignment::Right,
         TextAlign::Justify => CTTextAlignment::Justified,
     };
-    let line_height = text.spans.first().map_or(0.0, |s| s.style.line_height.0) as CGFloat;
+    let line_height = line_height(text);
     let setting = |spec, value: *const c_void, size| CTParagraphStyleSetting {
         spec,
         valueSize: size,
@@ -2252,6 +2307,39 @@ mod tests {
 
     use super::CoreTextEngine;
 
+    /// A `fontFamily` list sets text in the first family the Mac has, the
+    /// others it has its fallbacks for characters the first lacks; a list
+    /// of families it has none of is the system font.
+    #[test]
+    fn a_family_list_sets_text_in_its_first_installed_family() {
+        use objc2_core_foundation::CFArray;
+        let style = |family: &str| ResolvedTextStyle {
+            font_size: Points(14.0),
+            font_family: Some(nsh_core::FontFamily::new(family)),
+            ..ResolvedTextStyle::default()
+        };
+        let font = super::make_font(&style("No Such Family, Menlo, 'Courier', sans-serif"));
+        // SAFETY: valid fonts and descriptors.
+        unsafe {
+            assert_eq!(font.family_name().to_string(), "Menlo");
+            let cascade = font
+                .font_descriptor()
+                .attribute(super::kCTFontCascadeListAttribute)
+                .and_then(|list| list.downcast::<CFArray>().ok())
+                .expect("a cascade list");
+            assert_eq!(cascade.len(), 2);
+            let missing = super::make_font(&style("No Such Family, Nor This"));
+            assert_ne!(missing.family_name().to_string(), "No Such Family");
+            let single = super::make_font(&style("Menlo"));
+            assert!(
+                single
+                    .font_descriptor()
+                    .attribute(super::kCTFontCascadeListAttribute)
+                    .is_none()
+            );
+        }
+    }
+
     /// The baseline of the first line, the attachment's top and the line's
     /// extent above and below the baseline.
     fn place(align: VerticalAlign) -> (f32, f32, f32, f32) {
@@ -2339,6 +2427,67 @@ mod tests {
         assert!(top >= first_bottom - 0.5, "{top} {first_bottom}");
         assert!(top + 28.0 <= lines[2].y.0 + 0.5, "{top} {:?}", lines[2].y);
         assert!(near(size.height.0, 40.0 + lines[1].height.0), "{size:?}");
+    }
+
+    /// A `verticalAlign: "middle"` chip in text with a fixed `lineHeight`
+    /// (a mention in a chat message): its middle at the text's (half the x
+    /// height above the baseline), its line as tall as the others with its
+    /// baseline where theirs is; a chip taller than the line grows its
+    /// line by the same amount above and below.
+    #[test]
+    fn middle_attachments_center_on_the_text_and_keep_the_line_pitch() {
+        let engine = CoreTextEngine::default();
+        let style = ResolvedTextStyle {
+            font_size: Points(17.0),
+            line_height: Points(26.0),
+            ..ResolvedTextStyle::default()
+        };
+        // SAFETY: a valid font.
+        let x = unsafe { engine.fonts.get(&style).x_height() } as f32;
+        for chip in [20.0, 18.0, 34.0] {
+            let mut t = AttributedText::default();
+            t.push("Ax\nAx ", style);
+            let mut alignments = nsh_core::AttachmentAlignments::default();
+            alignments.push(
+                &mut t,
+                Size::new(Points(40.0), Points(chip)),
+                VerticalAlign::Middle,
+                style,
+            );
+            t.push(" x\nAx\nAx", style);
+            let prepared = engine.prepare_aligned(&t, &alignments);
+            let size = engine.measure(&prepared, None);
+            let layout = engine.layout(&prepared, size);
+            let lines = engine.lines(&layout);
+            assert_eq!(lines.len(), 4);
+            let baselines: Vec<f32> = lines.iter().map(|l| l.y.0 + l.ascender.0).collect();
+            let top = engine.attachments(&layout)[0].expect("shown").y.0;
+            // The chip's middle on the text's, to under a point.
+            let middle = baselines[1] - x / 2.0;
+            assert!(
+                (top + chip / 2.0 - middle).abs() < 1.0,
+                "{chip}: chip middle {} text middle {middle}",
+                top + chip / 2.0
+            );
+            let pitch: Vec<f32> = baselines.windows(2).map(|w| w[1] - w[0]).collect();
+            // Lines without the chip: exactly the line height apart.
+            assert!((pitch[2] - 26.0).abs() < 1.0, "{chip}: {pitch:?}");
+            // The chip's line: grown as much above as below (none when the
+            // chip fits).
+            assert!((pitch[0] - pitch[1]).abs() < 1.0, "{chip}: {pitch:?}");
+            let grown = lines[1].height.0 - 26.0;
+            assert!(
+                (pitch[0] - 26.0 - grown / 2.0).abs() < 1.0,
+                "{chip}: {pitch:?}"
+            );
+            if chip <= 20.0 {
+                assert!(grown.abs() < 0.5, "{chip}: {:?}", lines[1].height);
+            } else {
+                assert!(lines[1].height.0 >= chip, "{chip}: {:?}", lines[1].height);
+            }
+            assert!(top >= lines[0].y.0 + lines[0].height.0 - 0.5, "{chip}");
+            assert!(top + chip <= lines[2].y.0 + 0.5, "{chip}");
+        }
     }
 }
 

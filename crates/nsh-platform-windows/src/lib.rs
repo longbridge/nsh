@@ -74,6 +74,7 @@ pub use crate::app::set_root;
 pub use crate::{
     app::{
         AppOptions, AppSource, AppView, debug_output, fatal_error, run_app, run_app_with,
+        set_components,
         set_ui_sets,
     },
     image::AssetBase,

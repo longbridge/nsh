@@ -1,7 +1,7 @@
 //! `nsh/base/plot`: the parts charts are built from, as `gpui-base`'s
 //! `plot` module, with no look of their own. A [`Plot`] holds the rows of
 //! data, the scales of its two axes, the pointer over it and its motion;
-//! its marks ([`Line`], [`Area`], [`Bar`], [`Grid`], the radial [`Pie`],
+//! its marks ([`Line`], [`Area`], [`Bar`], [`Rule`], [`Dot`], [`Grid`], the radial [`Pie`],
 //! [`Arc`], [`RadialLine`] and [`RadialGrid`], and the [`Sankey`] of
 //! flows) draw what it holds, each a canvas filling the plot (a pie one
 //! per slice, a sankey one per node and ribbon), its [`PlotAxis`]es label
@@ -28,12 +28,14 @@ mod area;
 mod axis;
 mod bar;
 mod class;
+mod dot;
 mod grid;
 mod keys;
 mod label;
 mod line;
 mod pie;
 mod radial_line;
+mod rule;
 mod sankey;
 mod scale;
 mod series;
@@ -57,8 +59,9 @@ pub use self::{
         AxisLabelPlacement, AxisLabelStyle, AxisPlacement, PlotAxis, PlotAxisElement,
         PlotAxisProps, TickFormat, plot_axis,
     },
-    bar::{Bar, BarCornerRadii, BarElement, BarLabelStyle, BarProps, bar},
+    bar::{Bar, BarBase, BarCornerRadii, BarElement, BarLabelStyle, BarProps, bar},
     class::RowClass,
+    dot::{Dot, DotElement, DotProps, DotRadius, RadiusScale, dot},
     grid::{Grid, GridElement, GridProps, grid},
     label::{PlotLabel, PlotLabelElement, PlotLabelProps, PlotText, PlotTextAlign, plot_label},
     line::{Curve, Line, LineElement, LineProps, line},
@@ -69,6 +72,7 @@ pub use self::{
         RadialGrid, RadialGridElement, RadialGridProps, RadialLine, RadialLineElement,
         RadialLineProps, radial_grid, radial_line,
     },
+    rule::{Rule, RuleElement, RuleProps, rule},
     sankey::{
         Sankey, SankeyAlign, SankeyElement, SankeyLinkClass, SankeyLinks, SankeyProps,
         SankeyValueLabel, SankeyValueScale, sankey,
@@ -95,6 +99,8 @@ pub fn registry() -> Registry {
         .register::<Line>()
         .register::<Area>()
         .register::<Bar>()
+        .register::<Rule>()
+        .register::<Dot>()
         .register::<Grid>()
         .register::<Pie>()
         .register::<Arc>()
@@ -358,6 +364,8 @@ impl Appear {
 #[derive(Clone, Copy)]
 struct PlotContext {
     rows: Prop<Rows>,
+    /// What the plot's `x` reads of its rows (none without an `x`).
+    x_values: Signal<Option<std::sync::Arc<[f64]>>>,
     y: Prop<Option<RowAccessor>>,
     /// Where values go along the x axis.
     x_map: Memo<AxisMap>,
@@ -568,7 +576,7 @@ impl PlotContext {
 /// A plot (`gpui-base`'s `Plot`): the rows of data a chart shows, the
 /// scales of its x and y axes, its size as their range, the pointer over
 /// it and its motion. It draws nothing itself: its marks, the children
-/// (`Line`, `Area`, `Bar`, `Grid`, `Pie`, `Arc`, `RadialLine`,
+/// (`Line`, `Area`, `Bar`, `Rule`, `Dot`, `Grid`, `Pie`, `Arc`, `RadialLine`,
 /// `RadialGrid`), each fill it and draw in order over each other. It
 /// reports the row nearest to the pointer, the slice of a pie under it, or
 /// a radial line's row nearest to it by angle (`onHoverChange`), and
@@ -744,6 +752,7 @@ pub fn Plot(props: PlotProps, cx: Scope<PlotEvent>) -> impl IntoElement {
     let bars = signal(Vec::<BarEntry>::new());
     provide_context(PlotContext {
         rows: data,
+        x_values,
         y: props.y,
         x_map,
         xs,
@@ -826,6 +835,16 @@ pub fn Plot(props: PlotProps, cx: Scope<PlotEvent>) -> impl IntoElement {
         match across {
             true => to(cross.y, at),
             false => to(cross.x, at),
+        }
+        // A mark that finds its rows itself (a dot) on a band y scale: the
+        // cross line lies across the plot at the row's band.
+        if pointer_x.is_some()
+            && hover_axis.get_untracked() == Axis::Y
+            && let Some(y) = rows_at
+                .with_untracked(|rows| rows.get(index as usize).copied())
+                .filter(|y| y.is_finite())
+        {
+            to(cross.y, y);
         }
         // The dots of the series through the row (bars have none).
         if !across {
@@ -1345,7 +1364,7 @@ fn anchor(x: &impl Animated, fade: &AnimatedValue) -> View {
 /// A hover dot's place: a box the size of the dot it holds, its center at
 /// (`x`, `y`) (moved back by half its size, then by the animated point),
 /// faded by `fade`; it takes no pointer.
-fn dot_anchor(x: &impl Animated, y: &impl Animated, fade: &AnimatedValue) -> View {
+fn dot_anchor(x: &impl Animated, y: &impl Animated, fade: &impl Animated) -> View {
     view()
         .absolute()
         .left(px(0.0))

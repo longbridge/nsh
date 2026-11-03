@@ -62,7 +62,8 @@ crates/
                        the theme (`theme.rs`: shadcn/ui's tokens and their defaults, `neutral`, read from shadcn's `cssVars` theme
                        files, which the core keeps as design tokens and no component of `nsh-base` draws with)
   nsh-macros/          `#[component]`, derives of Rust components (`Props`, `PropEnum`, `Event`, `JsObject`), `#[methods]`, `#[module]`, `#[class]`,
-                       `#[native_module("…")]` (an app crate's UI set, which `rust_app.rs`'s generated code calls), `Styled`'s spacing methods;
+                       `#[native_module("…")]` (an app crate's UI set, which `rust_app.rs`'s generated code calls),
+                       `#[native_components(<platform>)]` (an app crate's native components, which the generated hosts register), `Styled`'s spacing methods;
                        `HostProps` (the host elements' props: decoding, defaults and TS), `JsOps` (recorded operations: canvas)
   nsh-js/              QuickJS host and NSH's runtime: console / timers, bytecode compilation and loading, limits (`sandbox.rs`);
                        the native modules apps import (`modules.rs`: module table and loader; docs/dev/js-modules.md), the
@@ -163,7 +164,7 @@ website/              The documentation site (Astro; guides, element / component
 examples/             Example apps (gallery: a demo index, one module per demo, `tests/` the reference for `nsh test` (storage,
                       inputs, a long list, stubbed requests, dark mode, a manual clock); gallery-rs: the same in Rust, the app's crate in `native/`,
                       TypeScript tests of its root (`*.test.tsx`, about a demo each); rust-exports: a TSX app using one of each export of its crate, the reference
-                      for exporting components, modules and classes, with Rust and TypeScript tests of the TSX entry; counter,
+                      for exporting components, modules and classes and registering native components, with Rust and TypeScript tests of the TSX entry; counter,
                       with a test; host-echo: an app calling its web page's host (`nsh`'s `host`, nsh.json `web.host`), the host
                       module and their tests; panel: a host's second window (`Panel`) opened in `run_app_with`'s setup, with an
                       app and engine of its own — `cargo run -p panel-native` (`nsh run examples/panel` mounts only its main
