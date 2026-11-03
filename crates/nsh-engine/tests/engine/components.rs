@@ -8821,6 +8821,86 @@ fn base_plot_bars_grow_and_fade_natively() {
     assert_eq!(bar_rects(&drawings[0].1.ops).len(), 3);
 }
 
+const BASE_PLOT_RANGES: &str = r##"import { mount, View } from "nsh";
+import { Bar, Plot, Rule } from "nsh/base/plot";
+
+type Candle = { o: number | null; c: number; l: number; h: number };
+
+function App() {
+  const candles: Candle[] = [
+    { o: 20, c: 40, l: 10, h: 50 },
+    { o: 40, c: 30, l: 25, h: 75 },
+    { o: null, c: 50, l: 45, h: 55 },
+  ];
+  return (
+    <View>
+      {/* Candles: bodies from the open to the close, wicks from the low to the high. */}
+      <Plot data={candles} xScale={{ type: "band" }} yScale={{ type: "linear", domain: [0, 100] }} style={{ width: 300, height: 100 }}>
+        <Bar value="c" base="o" />
+        <Rule value="h" base={(d: Candle) => d.l} class="stroke-[#0000ff]" inactiveOpacity={0.3} />
+      </Plot>
+      {/* Lollipops' stems on a point scale, from 0, which counts in the domain. */}
+      <Plot data={[{ v: 10 }, { v: 30 }]} y="v" style={{ width: 100, height: 30 }}>
+        <Rule />
+      </Plot>
+    </View>
+  );
+}
+
+mount(App);
+"##;
+
+/// `Bar`'s `base` per row and `Rule`: a candle's body spans its row's open
+/// to its close, a row without a base has none; a rule strokes a line per
+/// row from its base (the app's function, answered a turn later) to its
+/// value in the middle of the row's band, in the app's stroke, fading with
+/// the hover; on a point scale at the rows' places, from 0, which counts in
+/// the domain.
+#[test]
+fn base_plot_bars_and_rules_span_a_base_per_row() {
+    use nsh_core::{
+        Color,
+        canvas::{CanvasOp, Num, Paint},
+    };
+    let (_engine, rx) = start(BASE_PLOT_RANGES);
+    let mut all = until_drawn(&rx, |d| path_points(&d.ops).contains(&(250.0, 45.0)));
+    all.extend(until(&rx, |_| false));
+    let marks = plot_drawings(&all);
+    let [(_, body), (_, wick), (_, stem)] = &marks[..] else {
+        panic!("a bar and two rules: {marks:?}")
+    };
+    // Three bands of 100; the y scale puts a value at 100 - value.
+    assert_eq!(
+        bar_rects(&body.ops),
+        [[0.0, 60.0, 100.0, 20.0], [100.0, 60.0, 100.0, 10.0]]
+    );
+    assert_eq!(
+        path_points(&wick.ops),
+        [
+            (50.0, 90.0),
+            (50.0, 50.0),
+            (150.0, 75.0),
+            (150.0, 25.0),
+            (250.0, 55.0),
+            (250.0, 45.0)
+        ]
+    );
+    assert!(
+        wick.ops
+            .contains(&CanvasOp::StrokeStyle(Paint::Color(Color(0x0000_ffff))))
+    );
+    assert!(
+        wick.ops
+            .iter()
+            .any(|op| matches!(op, CanvasOp::GlobalAlpha(Num::Slot(_))))
+    );
+    // The stems: 0 to 30 over 30 points.
+    assert_eq!(
+        path_points(&stem.ops),
+        [(0.0, 30.0), (0.0, 20.0), (100.0, 30.0), (100.0, 0.0)]
+    );
+}
+
 const BASE_PLOT_COLOR_SCALE: &str = r##"import { mount, View } from "nsh";
 import { Area, Bar, Line, Pie, Plot } from "nsh/base/plot";
 

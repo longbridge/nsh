@@ -5,7 +5,12 @@
 // arrow keys is read out over both of its plots, capacity rings by period,
 // a donut of revenue that reports the slice under the pointer (none in its
 // hole) or the arrow keys and closes into a pie with its shares written
-// outside, sales as bars side by side or stacked, a radar of factor
+// outside, sales as bars side by side or stacked, a quarter's profit
+// bridge whose steps the arrow keys read out and whose quarters move into
+// each other, a conversion funnel that reads out the stage under the
+// pointer and changes its channel, daily candles over their volume whose
+// day under the pointer is read out from either plot and whose period
+// changes, a radar of factor
 // exposure that reads out the factor nearest the pointer and changes its
 // benchmark, a quarter's income as flows between its accounts, read out
 // under the arrow keys and moving into the next quarter's, and a
@@ -42,7 +47,7 @@ const tabTo = async (shown: string) => {
   await start(true);
   let tabs = 0;
   while (!app.shows(shown)) {
-    expect(++tabs).toBeLessThan(30);
+    expect(++tabs).toBeLessThan(40);
     await app.keyboard.press("tab");
     await app.keyboard.press("right");
     await app.wait(50);
@@ -74,10 +79,12 @@ test("the live price writes its window's high over it and tags its last price", 
   // Over the line, the high the figures under it read; at the line's end,
   // the price the card's figure reads.
   expect(app.texts()).toContain(`High ${after("HIGH")}`);
-  expect(app.texts().filter((t) => t === price()).length).toBeGreaterThanOrEqual(2);
+  const last = price();
+  expect(app.texts().filter((t) => t === last).length).toBeGreaterThanOrEqual(2);
   await app.clock!.runFor(3000);
   expect(app.texts()).toContain(`High ${after("HIGH")}`);
-  expect(app.texts().filter((t) => t === price()).length).toBeGreaterThanOrEqual(2);
+  const now = price();
+  expect(app.texts().filter((t) => t === now).length).toBeGreaterThanOrEqual(2);
 });
 
 test("the depth reads out the side under the pointer and changes its range", async () => {
@@ -172,6 +179,81 @@ test("bars stand in bands side by side or stacked, a value over each", async () 
   await app.press("role:tab[Stacked]");
   await app.waitFor("96");
   expect(app.texts()).not.toContain("63");
+});
+
+test("the profit bridge writes each step's change at its end and moves into another quarter", async () => {
+  // 4Q26: revenue down to net profit, the totals' levels and the other steps' signed changes on the bars.
+  expect(app.count("role:image[Profit bridge, 4Q26: $142.7M revenue to $33.1M net profit, a net margin of 23.2%]")).toBe(1);
+  expect(app.texts()).toContain("NET PROFIT");
+  expect(app.texts()).toContain("23.2% net margin");
+  for (const label of ["142.7", "−54.1", "88.6", "+3.9", "33.1"]) expect(app.texts()).toContain(label);
+  for (const short of ["Rev", "COGS", "Gross", "SG&A", "Net"]) expect(app.texts()).toContain(short);
+  // 3Q26: other income turns into a loss, the margins follow.
+  await app.press("role:tab[3Q26]");
+  await app.waitFor("17.1% net margin");
+  expect(app.texts()).toContain("−1.4");
+  expect(app.texts()).toContain("$22.4M");
+  expect(app.count("role:image[Profit bridge, 3Q26: $131.2M revenue to $22.4M net profit, a net margin of 17.1%]")).toBe(1);
+});
+
+test("the profit bridge reads out the step the arrow keys move to", async () => {
+  // The first Right on the bridge starts at revenue, all of itself.
+  await tabTo("100.0% of revenue");
+  expect(app.texts()).toContain("REVENUE");
+  await app.keyboard.press("right");
+  await app.waitFor("COST OF SALES");
+  expect(app.texts()).toContain("−$54.1M");
+  expect(app.texts()).toContain("37.9% of revenue");
+  await app.keyboard.press("end");
+  await app.waitFor("23.2% of revenue");
+  // Escape clears the hover: net profit and its margin again.
+  await app.keyboard.press("escape");
+  await app.waitFor("23.2% net margin");
+}, 120000);
+
+test("the funnel reads out the stage under the pointer and changes its channel", async () => {
+  // Every channel's visits to first trades: each stage's name over its
+  // count, what it keeps of the stage before, what is lost in each gap.
+  expect(app.texts()).toContain("VISITS TO FIRST TRADE");
+  expect(app.texts()).toContain("10,240 traders of 184,200 visits");
+  for (const label of ["184,200", "10,240", "23.0%", "67.1%", "52.9%", "68.2%", "−77.0%", "−32.9%", "−47.1%", "−31.8%"]) expect(app.texts()).toContain(label);
+  for (const name of ["Visits", "KYC verified", "First trade"]) expect(app.texts()).toContain(name);
+  // The biggest drop, under the bars: into sign-ups.
+  expect(app.texts()).toContain("BIGGEST DROP");
+  expect(app.texts()).toContain("Sign-ups");
+  // The pointer at the middle: the third of five stages.
+  await app.hover("label:/^Conversion funnel, All: /");
+  await app.waitFor("KYC VERIFIED");
+  expect(app.texts()).toContain("28,410");
+  expect(app.texts()).toContain("67.1% of sign-ups · 15.4% of visits");
+  // The web's stages, on the same scale.
+  await app.press("role:tab[Web]");
+  await app.waitFor("87,400");
+  expect(app.texts()).toContain("17.4%");
+  expect(app.texts()).toContain("−82.6%");
+  expect(app.count("label:/^Conversion funnel, Web: 87,400 visits to 2,410 first trades, 2.8%/")).toBe(1);
+});
+
+test("the candles read out the day under the pointer on either plot and change their period", async () => {
+  // Two months of days, the last one read out: its date, close and range.
+  expect(app.count("label:/^NSHL daily candles, 2M: 177.59 to 196.62, /")).toBe(1);
+  expect(app.texts()).toContain("OCT 30");
+  expect(app.texts()).toContain("196.62");
+  expect(app.texts()).toContain("23 / 41");
+  // The middle of the volume: the 21st of 41 days, its close and volume read out.
+  await app.hover("label:/^NSHL volume, 2M/");
+  await app.waitFor("OCT 2");
+  expect(app.texts()).toContain("181.20");
+  expect(app.texts().some((t) => t.includes("13.8M"))).toBe(true);
+  // Three months: from August, its candles drawn in again.
+  await app.press("role:tab[3M]");
+  await app.waitFor("label:/^NSHL daily candles, 3M: 167.50 to 196.62, /");
+  expect(app.texts()).toContain("36 / 61");
+  // The middle of the candles once they have drawn in (800 ms): the 31st of 61 days.
+  await app.wait(1000);
+  await app.hover("label:/^NSHL daily candles, 3M/");
+  await app.waitFor("SEP 18");
+  expect(app.texts()).toContain("177.87");
 });
 
 test("the radar reads out the factor nearest the pointer and changes its benchmark", async () => {

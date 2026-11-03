@@ -1,13 +1,13 @@
 ---
 title: Plot
-description: "nsh/base/plot 的 Plot 组件、它的图形 Line、Area、Bar、Grid、Pie、Arc、RadialLine、RadialGrid 和 Sankey，以及 PlotAxis 和 PlotLabel：根据应用的数据行原生绘制图表，负责坐标轴的比例尺和标签、数据点上的文字、指针下的数据行或扇区和动效，没有自己的外观。"
+description: "nsh/base/plot 的 Plot 组件、它的图形 Line、Area、Bar、Rule、Grid、Pie、Arc、RadialLine、RadialGrid 和 Sankey，以及 PlotAxis 和 PlotLabel：根据应用的数据行原生绘制图表，负责坐标轴的比例尺和标签、数据点上的文字、指针下的数据行或扇区和动效，没有自己的外观。"
 group: base
 demo: el-plot
 ---
 
 # Plot
 
-Plot 是图表的框架：它持有要显示的数据行、x 轴和 y 轴的比例尺、指针在它上面的位置以及动效。它的图形负责绘制这些内容：`Line` 是穿过一个系列的折线，`Area` 是系列与基线之间的区域，`Bar` 是 band 比例尺条带里每行一根的柱子，`Grid` 是横跨图表的网格线，`Pie` 是各行所占份额的饼图（中间留空即为环形图），`Arc` 是两个角度之间的一段扇形，`RadialLine` 是围绕中心的一条线，背后是 `RadialGrid` 的圆环和辐条（雷达图），`Sankey` 是各行之间的流向图；`PlotAxis` 用比例尺的刻度为一条边加上标签，`PlotLabel` 在比例尺的点上写文字。每个图形都是一个铺满 plot 的画布，根据数据行原生绘制：应用设置数据行时只读取一次，之后在 Rust 中完成缩放、录制和绘制，所以一千个点的图表也不会为每个点运行 JS。指针同样在 Rust 中跟踪：悬停的十字线、圆点和提示框由平台的动画器移动和淡入淡出，应用只会在指针移到另一行时收到通知。外观由应用决定：图形使用 CSS 中 SVG 图形的绘制属性（`stroke-*`、`fill-*`），没有设置时使用 `currentColor`；area 和柱子可以在自己的形状内显示背景（渐变，`bg-linear-*`）；悬停部件（包括每个图形自己的圆点）以及坐标轴的标签、刻度线和轴线都由应用设置样式和内容。
+Plot 是图表的框架：它持有要显示的数据行、x 轴和 y 轴的比例尺、指针在它上面的位置以及动效。它的图形负责绘制这些内容：`Line` 是穿过一个系列的折线，`Area` 是系列与基线之间的区域，`Bar` 是 band 比例尺条带里每行一根的柱子，`Rule` 是每行一条从起点到终点的线段（K 线的影线），`Grid` 是横跨图表的网格线，`Pie` 是各行所占份额的饼图（中间留空即为环形图），`Arc` 是两个角度之间的一段扇形，`RadialLine` 是围绕中心的一条线，背后是 `RadialGrid` 的圆环和辐条（雷达图），`Sankey` 是各行之间的流向图；`PlotAxis` 用比例尺的刻度为一条边加上标签，`PlotLabel` 在比例尺的点上写文字。每个图形都是一个铺满 plot 的画布，根据数据行原生绘制：应用设置数据行时只读取一次，之后在 Rust 中完成缩放、录制和绘制，所以一千个点的图表也不会为每个点运行 JS。指针同样在 Rust 中跟踪：悬停的十字线、圆点和提示框由平台的动画器移动和淡入淡出，应用只会在指针移到另一行时收到通知。外观由应用决定：图形使用 CSS 中 SVG 图形的绘制属性（`stroke-*`、`fill-*`），没有设置时使用 `currentColor`；area 和柱子可以在自己的形状内显示背景（渐变，`bg-linear-*`）；悬停部件（包括每个图形自己的圆点）以及坐标轴的标签、刻度线和轴线都由应用设置样式和内容。
 
 ```rust tabs
 use nsh_base::{
@@ -193,7 +193,7 @@ const sales = [
 | 属性 | 类型 | 默认值 | 说明 |
 |---|---|---|---|
 | `value` | `string \| (d, index) => number` | plot 的 `y` | 每根柱子显示的值。 |
-| `base` | `number` | `0` | 柱子在数值比例尺上生长的起点，计入定义域。堆叠从它的第一根柱子的 `base` 开始。 |
+| `base` | `number \| string \| (d, index) => number` | `0` | 柱子在数值比例尺上生长的起点：所有行共用一个值，或用字段、函数给每一行各自的起点，这时每根柱子从该行的起点延伸到它的值（没有起点的行没有柱子）。计入定义域。堆叠逐行从它的第一根柱子的 `base` 开始。 |
 | `stack` | `string` | 无 | 加入的堆叠：`stack` 相同的柱子按顺序堆叠（没有值的行不增加高度）。 |
 | `cornerRadii` | `number \| { topLeft?, topRight?, bottomRight?, bottomLeft? }` | `0` | 柱子每个角的半径；`{ topLeft: 4, topRight: 4 }` 让竖立的柱子顶端变圆。超过柱子一半的半径会缩小以适应柱子。 |
 | `stagger` | `number` | `0` | plot 出现时，柱子按行依次开始生长，开始时间分布在出现动效的这一比例内（0 到 0.95），每根柱子用剩下的时间长完；为 0 时一起生长。 |
@@ -215,6 +215,64 @@ band 比例尺像 d3 的 `scaleBand` 一样，按顺序为 plot 的每一行布�
 | `reverse` | `false` | 条带从另一条边开始排列：x 轴上第一行的条带在右侧，y 轴上在底部；同一条带里并排的柱子保持原来的顺序。 |
 
 柱子使用自己的 `fill` 着色（`fill-*`；像 CSS 那样从 plot 继承），没有设置时为 `currentColor`（设置 `color` 时为它的类别的颜色），没有悬停圆点。在 band 比例尺上，悬停会找到指针下的条带，plot 的十字线位于这个条带里、与条带等宽：`crossLineClass="w-full h-full bg-foreground/5"` 给条带上色，`w-px` 则在条带中间保留一条线。plot 没有设置定义域时，柱子的数值和 `base` 构成数值比例尺的定义域。plot 出现时，每根柱子从它所在堆叠的 `base` 长出；动效、变淡和滑动都在平台的动画器上运行，指针从不让柱子重绘。
+
+<a id="ranges"></a>
+
+### 区间
+
+`base` 是字段或函数时，每根柱子跨越它所在行的两个值：瀑布图的一级从它之前的累计值到之后的累计值，K 线的实体从开盘价到收盘价，一项任务从开始到结束。出现时柱子从自己的起点长出，标签位于数值末端：上升的柱子在上方，下降的柱子在下方。
+
+<!-- demo: el-plot-ranges -->
+
+```tsx
+const bridge = [
+  { step: "Revenue", from: 0, to: 120, kind: "total" },
+  { step: "Costs", from: 120, to: 72, kind: "down" },
+  { step: "Other", from: 72, to: 81, kind: "up" },
+  { step: "Profit", from: 0, to: 81, kind: "total" },
+];
+
+<Plot
+  data={bridge}
+  xScale={{ type: "band", paddingInner: 0.3 }}
+  colorScale={{ type: "ordinal", domain: ["total", "up", "down"], range: ["#64748b", "#16a34a", "#dc2626"] }}
+  class="h-40"
+>
+  <Bar value="to" base="from" color="kind" label={(d) => `${d.to - d.from}`} labelClass="text-xs pb-1" />
+</Plot>
+```
+
+漏斗图就是居中的横放柱子：在 band y 比例尺上用 `base={(d) => -d.users / 2}` 和 `value={(d) => d.users / 2}`。
+
+<a id="rule"></a>
+
+## Rule
+
+`Rule` 沿数值轴为每一行画一条直线，从 `base` 到该行的值：在 band 比例尺上位于该行条带的中间（band y 比例尺上横跨 plot），在 point 或 linear 比例尺上位于该行在 x 轴上的位置。K 线的影线、箱线图的须、误差线和棒棒糖图的杆都是 rule；K 线图就是 `Bar` 叠在 `Rule` 上：
+
+```tsx
+import { Bar, Plot, Rule } from "nsh/base/plot";
+
+<Plot
+  data={days}
+  xScale={{ type: "band", paddingInner: 0.4 }}
+  colorScale={{ type: "ordinal", domain: ["up", "down"], range: ["#16a34a", "#dc2626"] }}
+  class="h-48"
+>
+  <Rule value="high" base="low" color={(d) => (d.close >= d.open ? "up" : "down")} />
+  <Bar value="close" base="open" color={(d) => (d.close >= d.open ? "up" : "down")} />
+</Plot>
+```
+
+| 属性 | 类型 | 默认值 | 说明 |
+|---|---|---|---|
+| `value` | `string \| (d, index) => number` | plot 的 `y` | 每条线的终点。没有值的行没有线。 |
+| `base` | `number \| string \| (d, index) => number` | `0` | 每条线的起点：所有行共用一个值（棒棒糖图从零线开始的杆），或用字段、函数给每一行各自的起点（K 线的最低价）。计入定义域。 |
+| `stagger` | `number` | `0` | plot 出现时，线按行依次开始生长，开始时间分布在出现动效的这一比例内（0 到 0.95），每条线用剩下的时间从起点长完。 |
+| `inactiveOpacity` | `number` | 无 | 指针在 plot 上时，指针下那一行以外的线的不透明度，与 `Bar` 的相同。 |
+| `color` | `string \| (d, index) => string` | 无 | 每条线的类别，颜色来自 plot 的 `colorScale`：在没有任何设置时作为线的 `stroke`。 |
+
+rule 使用自己的 `stroke` 描边（`stroke-*`、`strokeWidth`、`strokeDasharray`；像 CSS 那样从 plot 继承），没有设置时为 `currentColor`，没有悬停圆点。plot 没有设置定义域时，它的数值和 `base` 构成数值比例尺的定义域；plot 出现时它从起点长出，并随比例尺定义域的变化移动，都在平台的动画器上运行。
 
 <a id="pie-and-arc"></a>
 

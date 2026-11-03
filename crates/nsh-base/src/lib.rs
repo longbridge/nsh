@@ -552,6 +552,7 @@ mod tests {
                 "PlotLabel",
                 "RadialGrid",
                 "RadialLine",
+                "Rule",
                 "Sankey"
             ]
         );

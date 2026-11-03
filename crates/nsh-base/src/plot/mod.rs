@@ -34,6 +34,7 @@ mod label;
 mod line;
 mod pie;
 mod radial_line;
+mod rule;
 mod sankey;
 mod scale;
 mod series;
@@ -57,7 +58,7 @@ pub use self::{
         AxisLabelPlacement, AxisLabelStyle, AxisPlacement, PlotAxis, PlotAxisElement,
         PlotAxisProps, TickFormat, plot_axis,
     },
-    bar::{Bar, BarCornerRadii, BarElement, BarLabelStyle, BarProps, bar},
+    bar::{Bar, BarBase, BarCornerRadii, BarElement, BarLabelStyle, BarProps, bar},
     class::RowClass,
     grid::{Grid, GridElement, GridProps, grid},
     label::{PlotLabel, PlotLabelElement, PlotLabelProps, PlotText, PlotTextAlign, plot_label},
@@ -69,6 +70,7 @@ pub use self::{
         RadialGrid, RadialGridElement, RadialGridProps, RadialLine, RadialLineElement,
         RadialLineProps, radial_grid, radial_line,
     },
+    rule::{Rule, RuleElement, RuleProps, rule},
     sankey::{
         Sankey, SankeyAlign, SankeyElement, SankeyLinkClass, SankeyLinks, SankeyProps,
         SankeyValueLabel, SankeyValueScale, sankey,
@@ -95,6 +97,7 @@ pub fn registry() -> Registry {
         .register::<Line>()
         .register::<Area>()
         .register::<Bar>()
+        .register::<Rule>()
         .register::<Grid>()
         .register::<Pie>()
         .register::<Arc>()
@@ -568,7 +571,7 @@ impl PlotContext {
 /// A plot (`gpui-base`'s `Plot`): the rows of data a chart shows, the
 /// scales of its x and y axes, its size as their range, the pointer over
 /// it and its motion. It draws nothing itself: its marks, the children
-/// (`Line`, `Area`, `Bar`, `Grid`, `Pie`, `Arc`, `RadialLine`,
+/// (`Line`, `Area`, `Bar`, `Rule`, `Grid`, `Pie`, `Arc`, `RadialLine`,
 /// `RadialGrid`), each fill it and draw in order over each other. It
 /// reports the row nearest to the pointer, the slice of a pie under it, or
 /// a radial line's row nearest to it by angle (`onHoverChange`), and

@@ -2929,6 +2929,34 @@ drawing below:parent:text:r10 fillStyle #00ff00ff
 drawing below:parent:text:r10 fillStyle #ff0000ff
 covers [props] Plot.colorScale
 covers [props] Bar.color
+# Candles: each body spans its open to its close, its label at the
+# close, above the first (growing up from 20 to 40), below the second
+# (growing down from 40 to 30).
+expect c40
+frame parent:text:c40 50 60 0 0
+frame text:c40 -10 -10 20 10
+frame parent:text:c30 150 70 0 0
+frame text:c30 -10 0 20 10
+# Each wick from its low to its high in the middle of its band, green
+# up and red down.
+drawing id:wicks moveTo 50 90
+drawing id:wicks lineTo 50 50
+drawing id:wicks moveTo 150 75
+drawing id:wicks lineTo 150 25
+drawing id:wicks strokeStyle #00ff00ff
+drawing id:wicks strokeStyle #ff0000ff
+# Over the first candle the second's wick fades to `inactiveOpacity`.
+expect candle null
+event id:candles onMouseMove position.x=50 position.y=50
+expect candle 0
+animated id:wicks slot.0 1
+animated id:wicks slot.1 0.25
+event id:candles onMouseLeave
+expect candle null
+covers [nsh/base/plot] Rule
+covers [props] Rule.base
+covers [props] Rule.color
+covers [props] Rule.inactiveOpacity
 # Reversed scales: bands from the right edge (middles 250, 150 and 50)
 # and a y scale of 0 to 40 from the top edge (2 points a value), so the
 # bars hang from the top, each label below its bar's end.

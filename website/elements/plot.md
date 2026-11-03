@@ -1,6 +1,6 @@
 ---
 title: Plot
-description: "The Plot component of nsh/base/plot, its marks Line, Area, Bar, Grid, Pie, Arc, RadialLine, RadialGrid and Sankey, its PlotAxis and PlotLabel: charts drawn natively from the app's rows, with the scales of the axes and their labels, texts at data points, the row or slice under the pointer, motion and no look of their own."
+description: "The Plot component of nsh/base/plot, its marks Line, Area, Bar, Rule, Grid, Pie, Arc, RadialLine, RadialGrid and Sankey, its PlotAxis and PlotLabel: charts drawn natively from the app's rows, with the scales of the axes and their labels, texts at data points, the row or slice under the pointer, motion and no look of their own."
 group: base
 demo: el-plot
 ---
@@ -9,7 +9,7 @@ demo: el-plot
 
 A plot is the frame of a chart: the rows of data it shows, the scales of its x and y axes, the pointer over it and its
 motion. Its marks draw what it holds: a `Line` through a series, an `Area` between a series and a baseline, a `Bar`
-per row in the bands of a band scale, a `Grid` of lines across, a `Pie` of the rows' shares (a donut with a hole), an
+per row in the bands of a band scale, a `Rule` per row from a start to an end (a candle's wick), a `Grid` of lines across, a `Pie` of the rows' shares (a donut with a hole), an
 `Arc` between two angles, and a `RadialLine` around the center with the rings and spokes of a `RadialGrid` behind it (a
 radar), and a `Sankey` of flows between the rows; a `PlotAxis` labels an edge with the ticks of its scale, and a `PlotLabel` writes texts at
 points of the scales. Each mark is one canvas filling the plot, drawn natively from the rows: the app's rows are read once when
@@ -232,7 +232,7 @@ each row's bar starting where the one before it in the stack ends:
 | Prop | Type | Default | Description |
 |---|---|---|---|
 | `value` | `string \| (d, index) => number` | the plot's `y` | What each bar shows. |
-| `base` | `number` | `0` | The value its bars grow from, on the value scale. It counts in the domain. A stack grows from its first bar's. |
+| `base` | `number \| string \| (d, index) => number` | `0` | The value its bars grow from, on the value scale: one for every row, or a field or function giving each row its own, so each bar spans its row's base to its value (a row without one has no bar). It counts in the domain. A stack grows from its first bar's, row by row. |
 | `stack` | `string` | none | The stack it joins: the bars with the same `stack` pile up in order (a row without a value adds nothing). |
 | `cornerRadii` | `number \| { topLeft?, topRight?, bottomRight?, bottomLeft? }` | `0` | The radius of each corner of its bars; `{ topLeft: 4, topRight: 4 }` rounds the tips of upright bars. A radius larger than half a bar fits it. |
 | `stagger` | `number` | `0` | With the plot's appear, the bars start one after another, row by row, over this share of it (0 to 0.95), each growing for the rest; 0 grows them together. |
@@ -259,6 +259,68 @@ that band, as wide as it: `crossLineClass="w-full h-full bg-foreground/5"` tints
 middle. The bars' values and base make the value scale's domain when the plot has none. With the plot's appear, each
 bar grows out of its stack's base; the motion, the fading and the gliding run on the platform's animator, and the
 pointer draws no bar again.
+
+### Ranges
+
+<!-- demo: el-plot-ranges -->
+
+With `base` a field or a function, each bar spans two values of its row: a waterfall's step from the running total
+before it to the one after, a candle's body from its open to its close, a task from its start to its end. A bar grows
+from its own base as it appears, and its label sits at its value end, above a bar that rises and below one that falls.
+
+```tsx
+const bridge = [
+  { step: "Revenue", from: 0, to: 120, kind: "total" },
+  { step: "Costs", from: 120, to: 72, kind: "down" },
+  { step: "Other", from: 72, to: 81, kind: "up" },
+  { step: "Profit", from: 0, to: 81, kind: "total" },
+];
+
+<Plot
+  data={bridge}
+  xScale={{ type: "band", paddingInner: 0.3 }}
+  colorScale={{ type: "ordinal", domain: ["total", "up", "down"], range: ["#64748b", "#16a34a", "#dc2626"] }}
+  class="h-40"
+>
+  <Bar value="to" base="from" color="kind" label={(d) => `${d.to - d.from}`} labelClass="text-xs pb-1" />
+</Plot>
+```
+
+A funnel is bars across, centered: `base={(d) => -d.users / 2}` and `value={(d) => d.users / 2}` on a band y scale.
+
+## Rule
+
+A `Rule` draws a straight line per row along the value axis, from `base` to the row's value: in the middle of the row's
+band on a band scale (across the plot on a band y scale), at the row's place along the x axis on a point or linear
+one. A candle's wick, a box plot's whisker, an error bar and a lollipop's stem are rules; a candlestick is a `Bar` over
+a `Rule`:
+
+```tsx
+import { Bar, Plot, Rule } from "nsh/base/plot";
+
+<Plot
+  data={days}
+  xScale={{ type: "band", paddingInner: 0.4 }}
+  colorScale={{ type: "ordinal", domain: ["up", "down"], range: ["#16a34a", "#dc2626"] }}
+  class="h-48"
+>
+  <Rule value="high" base="low" color={(d) => (d.close >= d.open ? "up" : "down")} />
+  <Bar value="close" base="open" color={(d) => (d.close >= d.open ? "up" : "down")} />
+</Plot>
+```
+
+| Prop | Type | Default | Description |
+|---|---|---|---|
+| `value` | `string \| (d, index) => number` | the plot's `y` | Where each line ends. A row without a value has no line. |
+| `base` | `number \| string \| (d, index) => number` | `0` | Where each line starts: one value for every row (a lollipop's stem from the zero line), or a field or function giving each row its own (a candle's low). It counts in the domain. |
+| `stagger` | `number` | `0` | With the plot's appear, the lines start one after another, row by row, over this share of it (0 to 0.95), each growing from its start for the rest. |
+| `inactiveOpacity` | `number` | none | The opacity of its lines away from the row under the pointer while the pointer is over the plot, as `Bar`'s. |
+| `color` | `string \| (d, index) => string` | none | Each line's category, its color from the plot's `colorScale`: the line's `stroke` where nothing sets one. |
+
+A rule strokes with its `stroke` (`stroke-*`, `strokeWidth`, `strokeDasharray`; inherited from the plot as CSS inherits
+it), `currentColor` where none is set, and shows no hover dot. Its values and base make the value scale's domain when
+the plot has none; it grows from its start with the plot's appear and moves with the scales' domains, on the
+platform's animator.
 
 ## Pie and Arc
 
