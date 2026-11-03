@@ -960,6 +960,77 @@ test("a dialog closed through its shader stops being watched for the window's si
   assert.deepEqual(unobserved, [el]);
 });
 
+/**
+ * Runs `f` with a page whose animation frames and timers run when `f`
+ * says (`frame()`, `timers()`), and a player presenting dialogs over its
+ * container; `names()` are the events it sent.
+ */
+function presenting(f) {
+  const { player, sent } = fakePlayer();
+  Object.assign(player, {
+    root: { append() {}, contains: () => false },
+    size: [320, 240],
+    scopeFocus() {},
+    syncHistorySoon() {},
+    releaseFrame() {},
+    dropLeftWith() {},
+    placeModal() {},
+    topModal: () => null,
+  });
+  let frames = [];
+  const pending = new Map();
+  let next = 1;
+  const saved = [globalThis.document, globalThis.requestAnimationFrame, globalThis.setTimeout, globalThis.clearTimeout];
+  Object.assign(globalThis, {
+    document: { activeElement: null, body: {} },
+    requestAnimationFrame: (callback) => frames.push(callback),
+    setTimeout: (callback) => (pending.set(next, callback), next++),
+    clearTimeout: (id) => pending.delete(id),
+  });
+  const frame = () => {
+    const now = frames;
+    frames = [];
+    for (const callback of now) callback();
+  };
+  const timers = () => {
+    for (const [id, callback] of [...pending]) {
+      pending.delete(id);
+      callback();
+    }
+  };
+  const dialog = { _id: 6, _modal: { animation: "slide" }, style: {}, setAttribute() {}, remove() {} };
+  try {
+    f({ player, dialog, frame, timers, names: () => sent.map(([name]) => name) });
+  } finally {
+    [globalThis.document, globalThis.requestAnimationFrame, globalThis.setTimeout, globalThis.clearTimeout] = saved;
+  }
+}
+
+test("a dialog dismissed before it came in reports it shown, then dismissed", () => {
+  presenting(({ player, dialog, frame, timers, names }) => {
+    player.present(dialog);
+    player.dismiss(dialog);
+    frame();
+    frame();
+    timers();
+    assert.deepEqual(names(), ["onShow", "onDismiss"]);
+    assert.notEqual(dialog.style.transform, "", "it stays out of sight as it leaves");
+  });
+});
+
+test("a dialog dismissed while it slides in reports it shown at once, then dismissed", () => {
+  presenting(({ player, dialog, frame, timers, names }) => {
+    player.present(dialog);
+    frame();
+    frame();
+    assert.deepEqual(names(), [], "shown once its slide ends");
+    player.dismiss(dialog);
+    assert.deepEqual(names(), ["onShow"]);
+    timers();
+    assert.deepEqual(names(), ["onShow", "onDismiss"]);
+  });
+});
+
 test("a picture of an unchanged size draws into its canvas again without reallocating it", () => {
   const { player } = fakePlayer();
   const sizes = [];

@@ -265,7 +265,9 @@ dialog's `transitionShader`) take their pictures from the DOM. `shader.rs` also 
   (`dialogs: "viewport"`) keep their own motion, and so does every page and dialog when the user asks for less
   motion (`reduceMotion()`). A push, a pop (`moveScreens`, which `goBack` goes through whatever the page's
   `animation`), a presentation or a dismissal ends a shader's change still running over the same host first
-  (`endNavShader`: its `done` settles and reports it).
+  (`endNavShader`: its `done` settles and reports it). A dismissal also ends the dialog's presentation still under
+  way, before its frames or during its own motion (`endPresentation`), so `onShow` always comes before the
+  dismissal.
 - **Shaders that cannot draw.** A view whose shader cannot draw (`shaderDraws`: no WebGL 2, a lost context, or a
   program the driver refuses) shows its background and children as they are, as the native backends show them
   without a device: an effect or a screen effect takes no `nsh-fx` (and its canvas is cleared when its new program is

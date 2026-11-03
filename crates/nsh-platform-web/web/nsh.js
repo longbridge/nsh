@@ -4895,6 +4895,9 @@ class Player {
     this.scopeFocus();
     this.syncHistorySoon();
     requestAnimationFrame(() => requestAnimationFrame(() => {
+      // Dismissed before it came in (`endPresentation` reported it shown),
+      // or presented again meanwhile: nothing more to do.
+      if (!el._entering) return;
       el._entering = false;
       if (el._navShader && !this.viewportDialogs) {
         // Through its `transitionShader` over the root: it shows at once under it.
@@ -4908,14 +4911,32 @@ class Player {
       el.style.transition = "";
       el.style.transform = "";
       el.style.opacity = "";
-      setTimeout(() => this.event(el._id, "onShow"), motion === "none" ? 0 : 350);
+      el._showTimer = setTimeout(() => {
+        el._showTimer = 0;
+        this.event(el._id, "onShow");
+      }, motion === "none" ? 0 : 350);
     }));
+  }
+
+  /**
+   * Modal `el`'s presentation, if it is still under way, ends at once,
+   * shown and reported, as a shader's does (`endNavShader`): one dismissed
+   * before it came in, or while its own motion runs, reports `onShow`
+   * before the dismissal, never after it.
+   */
+  endPresentation(el) {
+    if (!el._entering && !el._showTimer) return;
+    el._entering = false;
+    clearTimeout(el._showTimer);
+    el._showTimer = 0;
+    this.event(el._id, "onShow");
   }
 
   /** Takes modal `el` away; `onDismiss` follows unless `reported`. */
   dismiss(el, reported = el._closed) {
     if (el._leaving) return;
     this.endNavShader(this.root);
+    this.endPresentation(el);
     el._leaving = true;
     const motion = this.modalMotion(el);
     // Through its `transitionShader`: pictured as it shows, then gone under it at once.
