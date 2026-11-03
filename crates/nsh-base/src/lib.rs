@@ -289,7 +289,6 @@ pub mod parts {
         ("core", core),
         ("pickers", pickers),
         ("color_picker", color_picker),
-        ("select", select),
         ("carousel", carousel),
         ("tree", tree),
         ("fields", fields),
@@ -340,6 +339,10 @@ pub mod parts {
             .module::<Scrollbar>()
             .scrollbars_from(crate::scrollbar::built_in)
             .register::<Switch>()
+            // Lists to pick from: in every app's forms, so never apart.
+            .register::<Select>()
+            .register::<Combobox>()
+            .register::<Command>()
             .register::<Progress>()
             .register::<Tab>()
             .register::<Tabs>()
@@ -371,14 +374,6 @@ pub mod parts {
             .register::<ColorField>()
             .register::<ColorSwatch>()
             .register::<ColorEyeDropper>();
-    }
-
-    /// `Select`, `Combobox` and `Command`: lists to pick from.
-    pub fn select(registry: &mut Registry) {
-        registry
-            .register::<Select>()
-            .register::<Combobox>()
-            .register::<Command>();
     }
 
     /// `Carousel` and its parts.
