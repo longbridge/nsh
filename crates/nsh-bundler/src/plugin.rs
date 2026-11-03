@@ -827,8 +827,8 @@ mod tests {
     fn a_font_import_names_its_family_from_truetype_woff_and_woff2() {
         for data in [
             &include_bytes!("../../../tests/compat/cases/layout/fonts/Pacifico-Regular.ttf")[..],
-            &include_bytes!("../../nsh-core/tests/fonts/Pacifico-Regular.woff")[..],
-            &include_bytes!("../../nsh-core/tests/fonts/Pacifico-Regular.woff2")[..],
+            &include_bytes!("../../../tests/compat/cases/layout/fonts/Pacifico-Regular.woff")[..],
+            &include_bytes!("../../../tests/compat/cases/layout/fonts/Pacifico-Regular.woff2")[..],
         ] {
             assert_eq!(font_family(data).as_deref(), Ok("Pacifico"));
         }

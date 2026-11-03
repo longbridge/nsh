@@ -360,6 +360,28 @@ impl KeyboardMotion {
     }
 }
 
+/// Moves the content of `view` up by `shift` (through its bounds' origin,
+/// so neither its frame nor a transform the app set changes) along
+/// `motion`, the keyboard's.
+fn set_pan(view: &UIView, shift: CGFloat, motion: KeyboardMotion, mtm: MainThreadMarker) {
+    let target = view.retain();
+    let block = block2::RcBlock::new(move || {
+        let mut bounds = target.bounds();
+        bounds.origin.y = shift;
+        target.setBounds(bounds);
+    });
+    motion.aligned(view, || {
+        UIView::animateWithDuration_delay_options_animations_completion(
+            motion.duration,
+            0.0,
+            motion.options(),
+            &block,
+            None,
+            mtm,
+        )
+    });
+}
+
 /// Sets the bottom inset of `scroll` and scrolls `reveal` (a rectangle in
 /// its content) into view in one animation along `motion`, the keyboard's,
 /// so that the content moves with the keyboard.
@@ -559,6 +581,14 @@ pub(crate) struct Mounter {
     keyboard_motion: KeyboardMotion,
     /// The scroll view given a bottom inset to clear the keyboard.
     avoiding: Option<NodeId>,
+    /// The screen, modal or surface root whose content moved up to clear
+    /// the keyboard (the focused input is in no scroll view), and by how
+    /// much.
+    panned: Option<(NodeId, CGFloat)>,
+    /// The keyboard moved and the app's answer to it (a batch laying out
+    /// what reads its height) may still come: the content moves once it
+    /// came ([`Mounter::keyboard_settled`]).
+    keyboard_pending: bool,
     /// Animates the frames, insertions and removals of the current batch.
     layout_animation: Option<LayoutAnimation>,
     /// Views created by the current batch (they appear, not move).
@@ -678,6 +708,8 @@ impl Mounter {
                 ..KeyboardMotion::now(0.25)
             },
             avoiding: None,
+            panned: None,
+            keyboard_pending: false,
             layout_animation: None,
             created: Vec::new(),
             disappearing: Default::default(),
@@ -745,6 +777,12 @@ impl Mounter {
         }
         self.focused_caret_moved();
         self.settle_content_sizes();
+        // The app moved things: the focused input may be clear of the
+        // keyboard now, or covered again. (Without focus, what moved stays
+        // until the keyboard hides, to move back with it.)
+        if !self.keyboard_pending && self.keyboard > 0.0 && self.focused.is_some() {
+            self.pan_for_keyboard(self.keyboard_motion);
+        }
     }
 
     /// Narrows the content size of a vertical scroll view to its width when
@@ -1824,6 +1862,7 @@ impl Mounter {
             // Moving between fields with the keyboard up.
             if self.keyboard > 0.0 {
                 self.avoid_keyboard(KeyboardMotion::now(0.25));
+                self.pan_for_keyboard(KeyboardMotion::now(0.25));
             }
         } else if self.focused == Some(id) {
             self.focused = None;
@@ -1860,6 +1899,106 @@ impl Mounter {
         self.keyboard = height;
         self.keyboard_motion = motion;
         self.avoid_keyboard(motion);
+        if height <= 0.0 {
+            // Hiding: what moved up comes back down with the keyboard.
+            self.pan_for_keyboard(motion);
+        } else {
+            // Showing: the app may make room for the keyboard itself, in
+            // the batch it answers with ([`Mounter::keyboard_settled`]).
+            self.keyboard_pending = true;
+        }
+    }
+
+    /// The engine handled the keyboard's change: the batch the app
+    /// answered with, if any, is applied. If the focused input is in no
+    /// scroll view and still under the keyboard, its content moves up.
+    pub(crate) fn keyboard_settled(&mut self) {
+        if std::mem::take(&mut self.keyboard_pending) {
+            self.pan_for_keyboard(self.keyboard_motion);
+        }
+    }
+
+    /// Where the keyboard's top is, in window coordinates.
+    fn keyboard_top(&self) -> Option<CGFloat> {
+        let root = self.slot(nsh_core::ROOT_ID)?.native.view();
+        // The bottom of the root's bounds: its origin moves when the root
+        // itself is panned.
+        let bounds = root.bounds();
+        let bottom = root.convertPoint_toView(
+            CGPoint::new(0.0, bounds.origin.y + bounds.size.height),
+            None,
+        );
+        Some(bottom.y - self.keyboard as CGFloat)
+    }
+
+    /// The view that moves to keep input `id` clear of the keyboard when
+    /// no scroll view holds it: its screen's or modal's content, else the
+    /// surface's root (as Android's `adjustPan` moves the window).
+    fn pan_container(&self, id: NodeId) -> Option<NodeId> {
+        let mut view = self.slot(id)?.native.view().superview();
+        while let Some(v) = view {
+            if let Some(
+                slot @ Slot {
+                    native: Native::Screen(_) | Native::Modal(_) | Native::Root(_),
+                    ..
+                },
+            ) = self.slot(v.tag() as NodeId)
+                && std::ptr::eq::<UIView>(slot.native.view(), &*v)
+            {
+                return Some(v.tag() as NodeId);
+            }
+            view = v.superview();
+        }
+        Some(nsh_core::ROOT_ID)
+    }
+
+    /// Keeps the focused input clear of the keyboard when no scroll view
+    /// holds it: moves the content of its screen (or modal, or the
+    /// surface) up by what the keyboard still covers of it after the app
+    /// laid out, with a margin, along `motion`; moves it back when the
+    /// keyboard hides, the input loses focus, or the app made room itself.
+    fn pan_for_keyboard(&mut self, motion: KeyboardMotion) {
+        let target = self.focused.filter(|_| self.keyboard > 0.0).and_then(|id| {
+            let Some(Slot {
+                native: Native::Input(input),
+                ..
+            }) = self.slot(id)
+            else {
+                return None;
+            };
+            if self.scroll_around(id).is_some() {
+                return None;
+            }
+            let container = self.pan_container(id)?;
+            let view = self.slot(container)?.native.view();
+            let editor = input.editor_view();
+            let rect = editor.convertRect_toView(editor.bounds(), None);
+            // Where it would be unmoved.
+            let bottom = rect.origin.y + rect.size.height + view.bounds().origin.y;
+            let margin = 12.0;
+            let covered =
+                (bottom + margin - self.keyboard_top()?).clamp(0.0, self.keyboard as CGFloat);
+            Some((container, covered))
+        });
+        if let Some((previous, _)) = self.panned
+            && target.is_none_or(|(id, _)| id != previous)
+        {
+            self.panned = None;
+            if let Some(slot) = self.slot(previous) {
+                set_pan(slot.native.view(), 0.0, motion, self.mtm);
+            }
+        }
+        let Some((container, shift)) = target else {
+            return;
+        };
+        let Some(slot) = self.slot(container) else {
+            return;
+        };
+        let view = slot.native.view();
+        if (view.bounds().origin.y - shift).abs() > 0.5 {
+            set_pan(view, shift, motion, self.mtm);
+        }
+        self.panned = (shift > 0.0).then_some((container, shift));
     }
 
     /// Keeps the focused input visible: gives its scroll view a bottom inset
@@ -1877,22 +2016,21 @@ impl Mounter {
             let base = self.base_inset(previous).bottom;
             set_bottom_inset(view, base, None, motion, self.mtm);
         }
-        let (Some((scroll_id, scroll)), Some(root)) = (scroll, self.slot(nsh_core::ROOT_ID)) else {
+        let Some((scroll_id, scroll)) = scroll else {
             return;
         };
         if self.keyboard <= 0.0 {
             return;
         }
-        let root = root.native.view();
         let Some(parent) = scroll.superview() else {
             return;
         };
         // In window coordinates: the scroll view may be in a modal, which
         // is not inside the surface's root view.
         let frame = parent.convertRect_toView(scroll.frame(), None);
-        let root_bottom =
-            root.convertPoint_toView(CGPoint::new(0.0, root.bounds().size.height), None);
-        let keyboard_top = root_bottom.y - self.keyboard as CGFloat;
+        let Some(keyboard_top) = self.keyboard_top() else {
+            return;
+        };
         let covered = (frame.origin.y + frame.size.height - keyboard_top).max(0.0);
         let base = self.base_inset(scroll_id).bottom;
         let reveal = match self.focused.and_then(|id| self.slot(id)) {

@@ -547,6 +547,12 @@ define_class!(
             if stay {
                 false
             } else {
+                // The page goes: its keyboard hides with the pop, as a
+                // native back button's does, not once the page has left
+                // the window.
+                if press && let Some(view) = self.topViewController().and_then(|c| c.view()) {
+                    view.endEditing(true);
+                }
                 // SAFETY: calling the superclass implementation.
                 unsafe { msg_send![super(self), navigationBar: bar, shouldPopItem: item] }
             }
@@ -974,6 +980,17 @@ impl StackHost {
             if let Some(view) = self.nav.view() {
                 view.layer().addAnimation_forKey(&fade, None);
             }
+        }
+        // The page on top leaves (a pop, a replace): its keyboard hides with
+        // the transition.
+        if top_changed
+            && let Some(top) = current.lastObject()
+            && !desired
+                .iter()
+                .any(|c| std::ptr::eq::<UIViewController>(&**c, &*top))
+            && let Some(view) = top.view()
+        {
+            view.endEditing(true);
         }
         let array = NSArray::from_retained_slice(&desired);
         *self.applied.borrow_mut() = screens.iter().map(|(id, _, _)| *id).collect();
@@ -1471,6 +1488,10 @@ impl ModalHost {
         // Closed by the user already (and reported).
         if self.controller.ivars().closed.replace(false) {
             return;
+        }
+        // Its keyboard hides with it.
+        if let Some(view) = self.controller.view() {
+            view.endEditing(true);
         }
         let block = block2::RcBlock::new(done);
         let animated = self.config.animation != ModalAnimation::None && !at_once;

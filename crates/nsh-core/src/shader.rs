@@ -351,15 +351,16 @@ impl From<bool> for TransitionKey {
 
 /// A page's or a dialog's `transitionShader`: the program it comes and
 /// goes through, its uniforms and how long that takes.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq)]
+#[non_exhaustive]
 pub struct NavShaderSpec {
     /// The WGSL defining `shade`, which reads the lower side as
     /// `sample_from` and the upper as `sample_to`.
     pub source: Arc<str>,
     /// Its uniforms.
     pub uniforms: ShaderUniforms,
-    /// How long it runs in milliseconds (the platform's own duration when
-    /// absent).
+    /// How long it runs in milliseconds; 350 when absent, about as long as
+    /// the platforms' own push (an element's `ShaderTransition` takes 300).
     pub duration: Option<f32>,
 }
 
@@ -368,11 +369,11 @@ pub struct NavShaderSpec {
 /// `Modal::transition_shader`;
 /// TS: `transitionShader`): a compiled [`Shader`] defining `shade`, which
 /// reads the lower side as `sample_from` and the upper as `sample_to`.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct TransitionShader(NavShaderSpec);
 
 impl TransitionShader {
-    /// Runs `shader`, with no uniforms, for the platform's own duration.
+    /// Runs `shader`, with no uniforms, for 350 ms.
     pub fn new(shader: Shader) -> Self {
         Self(NavShaderSpec {
             source: shader.source().into(),
@@ -392,7 +393,7 @@ impl TransitionShader {
         self
     }
 
-    /// How long it runs (the platform's own duration by default).
+    /// How long it runs (350 ms by default).
     pub fn duration(mut self, duration: std::time::Duration) -> Self {
         self.0.duration = Some(duration.as_secs_f32() * 1000.0);
         self
@@ -410,18 +411,18 @@ impl From<TransitionShader> for NavShaderSpec {
 pub const PROGRESS_WORD: u32 = u32::MAX;
 
 /// The transitions' default program: a cross-fade from `sample_from` to
-/// `sample_to` over `nsh.progress`; `None` in a web runtime linked without
-/// shaders ([`set_compile`]).
+/// `sample_to` over `nsh.progress`. `None` only in a web runtime linked
+/// without shaders ([`set_compile`]), which has no transition to run it
+/// on: compiled with this module's compiler, so the cross-fade does not
+/// link naga into every web runtime.
 pub fn crossfade() -> Option<Shader> {
-    // Compiled once, its failure too: the page sets the compiler before the
-    // app runs (`nsh_feature_shader`), so a runtime without one never gets
-    // it.
     static CROSSFADE: std::sync::OnceLock<Option<Shader>> = std::sync::OnceLock::new();
     CROSSFADE
         .get_or_init(|| {
             compile_source(
                 "fn shade(uv: vec2f) -> vec4f {\n    return mix(sample_from(uv), sample_to(uv), nsh.progress);\n}\n",
             )
+            .map_err(|e| log::warn!(target: "js", "the cross-fade: {e}"))
             .ok()
         })
         .clone()
