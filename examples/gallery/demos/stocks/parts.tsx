@@ -1,7 +1,7 @@
 import { type CanvasRenderingContext2D, effect, type JSX, type PanActivation, Text, type TouchProps, untracked, View } from "nsh";
 import { Animated, createAnimatedValue, Easing, type AnimatedNode } from "nsh";
 import { PanResponder } from "nsh";
-import { alpha, colors, isDark, TERMINAL_COLUMN, TERMINAL_ROW, terminal } from "../../ui";
+import { alpha, colors, isDark, TERMINAL_COLUMN, TERMINAL_GAP, TERMINAL_ROW, terminal } from "../../ui";
 import type { Quote } from "./market";
 
 /**
@@ -210,7 +210,7 @@ export function Block(props: { title?: string; note?: JSX.Element; right?: JSX.E
       ]}
     >
       <If when={props.title}>
-        <View style={{ flexDirection: "row", alignItems: "center", gap: terminal ? 2 * TERMINAL_COLUMN : 8, minHeight: terminal ? TERMINAL_ROW : 22 }}>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: terminal ? TERMINAL_GAP : 8, minHeight: terminal ? TERMINAL_ROW : 22 }}>
           <Text style={{ flex: 1, fontSize: 15, fontWeight: "600", color: colors.text }}>{props.title}</Text>
           <If when={props.note}>
             <Text style={{ fontSize: 12, color: colors.faint, fontVariant: ["tabular-nums"] }}>{props.note}</Text>

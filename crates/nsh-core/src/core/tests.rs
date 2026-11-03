@@ -25206,6 +25206,42 @@ mod terminal_layout {
     }
 
     #[test]
+    fn a_label_at_an_axis_end_ends_there_whole() {
+        // The last tick's label along an x axis: an anchor of no width at
+        // the plot's right end, its window aligning the label to its end.
+        // The label keeps its width and ends at the tick, inside the plot,
+        // rather than being shrunk to `…` past it.
+        let mut ops = view(2, ROOT_ID, &[("alignSelf", V::Str("stretch")), ("height", V::Number(32.0))]);
+        ops.extend(view(
+            3,
+            2,
+            &[
+                ("position", V::Str("absolute")),
+                ("left", V::Number(160.0)),
+                ("top", V::Number(0.0)),
+                ("width", V::Number(0.0)),
+                ("flexDirection", V::Str("row")),
+            ],
+        ));
+        ops.extend(view(
+            4,
+            3,
+            &[
+                ("flexGrow", V::Number(1.0)),
+                ("minWidth", V::Number(0.0)),
+                ("flexDirection", V::Str("row")),
+                ("justifyContent", V::Str("flex-end")),
+            ],
+        ));
+        ops.extend(view(5, 4, &[("flexShrink", V::Number(0.0)), ("marginHorizontal", V::Str("auto"))]));
+        ops.extend(text(6, 5, "100.42"));
+        let batch = laid_out(ops);
+        let label = frame_of(&batch, 5).unwrap();
+        assert_eq!(label.size.width, px(48.0), "{label:?}");
+        assert_eq!(label.origin.x, px(-48.0), "ends at the tick: {label:?}");
+    }
+
+    #[test]
     fn a_card_has_its_border_and_no_padding_rows() {
         let mut ops = view(
             2,
@@ -26533,6 +26569,54 @@ mod terminal_layout {
             _ => None,
         });
         assert_eq!(content, Some(size_pt(320.0, 16.0)));
+    }
+
+    #[test]
+    fn a_stretched_scroll_view_s_slides_of_its_full_width_are_one_viewport_each() {
+        // A carousel's content: no width of its own (stretched by its
+        // card), its slides `width: 100%` and `flexShrink: 0`, each a
+        // paragraph that would wrap into a narrower slide.
+        let mut ops = view(2, ROOT_ID, &[("width", V::Number(240.0))]);
+        ops.extend(node(4, Tag::Scroll, 2, &[("height", V::Number(96.0))]));
+        ops.push(Op::SetProp {
+            id: 4,
+            prop: Prop::Horizontal(true),
+        });
+        for id in [6, 10, 14] {
+            ops.extend(view(
+                id,
+                4,
+                &[
+                    ("width", V::Str("100%")),
+                    ("flexShrink", V::Number(0.0)),
+                    ("alignItems", V::Str("center")),
+                    ("paddingHorizontal", V::Number(24.0)),
+                ],
+            ));
+            ops.extend(text(id + 2, id, "Capture ideas the moment they arrive, from any device."));
+        }
+        let batch = laid_out(ops);
+        assert_eq!(frame_of(&batch, 4).map(|f| f.size.width), Some(Points(240.0)));
+        for (i, id) in [6, 10, 14].into_iter().enumerate() {
+            let f = frame_of(&batch, id).unwrap();
+            assert_eq!((f.origin.x, f.size.width), (Points(240.0 * i as f32), Points(240.0)), "slide {id}");
+        }
+    }
+
+    #[test]
+    fn a_vertical_scroll_view_s_slides_of_its_full_height_are_one_viewport_each() {
+        let mut ops = view(2, ROOT_ID, &[("width", V::Number(240.0))]);
+        ops.extend(node(4, Tag::Scroll, 2, &[("height", V::Number(32.0))]));
+        for id in [6, 10, 14] {
+            ops.extend(view(id, 4, &[("height", V::Str("100%")), ("justifyContent", V::Str("center"))]));
+            ops.extend(text(id + 2, id, "A line"));
+        }
+        let batch = laid_out(ops);
+        assert_eq!(frame_of(&batch, 4).map(|f| f.size.height), Some(Points(32.0)));
+        for (i, id) in [6, 10, 14].into_iter().enumerate() {
+            let f = frame_of(&batch, id).unwrap();
+            assert_eq!((f.origin.y, f.size.height), (Points(32.0 * i as f32), Points(32.0)), "slide {id}");
+        }
     }
 
     #[test]

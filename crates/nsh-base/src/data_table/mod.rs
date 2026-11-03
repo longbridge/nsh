@@ -301,8 +301,7 @@ pub struct DataTableProps {
     /// row is one Cell, whatever this is).
     #[prop(default = Points(32.0))]
     pub row_height: Prop<Points>,
-    /// The height of a title row, in points (default the row height; in a
-    /// terminal one Cell).
+    /// The height of a title row, in points (default the row height).
     pub header_height: Prop<Option<Points>>,
     /// Labels above the columns, the lowest level first: each level spans
     /// the columns as the `span`s say (a level's spans add up to the number

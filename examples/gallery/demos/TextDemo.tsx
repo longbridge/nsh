@@ -2,7 +2,7 @@ import { Image, type JSX, signal, Text, View } from "nsh";
 import { fontScale } from "nsh";
 import pacifico from "../fonts/Pacifico-Regular.ttf";
 import logo from "../logo@2x.png";
-import { alpha, Caption, Card, colors, DemoPage, finish, isDark, mono, Press, radius, TERMINAL_COLUMN, TERMINAL_ROW, terminal, tints } from "../ui";
+import { alpha, Caption, Card, colors, DemoPage, finish, isDark, mono, Press, radius, TERMINAL_COLUMN, TERMINAL_GAP, TERMINAL_ROW, terminal, tints } from "../ui";
 
 const LOREM =
   "Native text, typeset once on the engine thread with CoreText and drawn on the main thread without any layout work.";
@@ -125,7 +125,7 @@ function Fonts() {
         </Text>
       </Specimen>
       <Specimen label="Shadows" code="textShadow">
-        <View style={{ flexDirection: "row", alignItems: "center", gap: terminal ? 2 * TERMINAL_COLUMN : 12 }}>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: terminal ? TERMINAL_GAP : 12 }}>
           <Text
             style={{
               fontSize: 26,

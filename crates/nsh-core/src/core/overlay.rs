@@ -1061,7 +1061,22 @@ impl<M: TextEngine> Core<M> {
                     available: area.size,
                 }
             }
-            None => place(anchor, framed, area, &config, self.nodes[key as usize].rtl),
+            None => {
+                // Beside its anchor (a submenu beside its item) the frame
+                // takes the rows around the anchor's: the box's first row
+                // is the anchor's (its last, aligned with the end), as a
+                // submenu's first item lines up with its item.
+                let anchor = match config.placement.is_horizontal() {
+                    true => rect(
+                        anchor.origin.x.0,
+                        anchor.origin.y.0 - ring.height.0,
+                        anchor.size.width.0,
+                        anchor.size.height.0 + ring.height.0 * 2.0,
+                    ),
+                    false => anchor,
+                };
+                place(anchor, framed, area, &config, self.nodes[key as usize].rtl)
+            }
         };
         let placed = Placed {
             origin: point(placed.origin.x + ring.width, placed.origin.y + ring.height),

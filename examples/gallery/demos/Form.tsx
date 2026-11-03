@@ -276,7 +276,7 @@ function LinkRow(props: { icon: IconName; title: string; note: string; first?: b
         }
       >
         <IconTile name={props.icon} size={34} />
-        <View style={terminal ? { flex: 1, flexDirection: "row", gap: 2 * TERMINAL_COLUMN } : { flex: 1, gap: 2 }}>
+        <View style={terminal ? { flex: 1, flexDirection: "row", gap: TERMINAL_GAP } : { flex: 1, gap: 2 }}>
           <Text style={{ flex: terminal ? 1 : undefined, fontSize: 15, fontWeight: "500", color: colors.text }}>{props.title}</Text>
           <Text style={{ numberOfLines: 1, fontSize: 12, color: colors.faint, fontFamily: mono }}>
             {props.note}
@@ -293,7 +293,7 @@ function LinkRow(props: { icon: IconName; title: string; note: string; first?: b
 /** Two items side by side, equal widths. */
 function Pair(props: { children: [JSX.Element, JSX.Element] }) {
   return (
-    <View style={{ flexDirection: "row", gap: terminal ? 2 * TERMINAL_COLUMN : 8 }}>
+    <View style={{ flexDirection: "row", gap: terminal ? TERMINAL_GAP : 8 }}>
       <View style={{ flex: 1 }}>{props.children[0]}</View>
       <View style={{ flex: 1 }}>{props.children[1]}</View>
     </View>

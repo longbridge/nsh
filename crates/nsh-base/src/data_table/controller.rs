@@ -359,15 +359,13 @@ impl Dt {
             .max(1.0)
     }
 
-    /// The height of one title row.
+    /// The height of one title row: the app's, in a terminal too, where
+    /// the titles' rule under them takes a row of its own.
     fn header_row_height(&self) -> f32 {
         self.props
             .header_height
             .get()
-            .map_or_else(
-                || self.row_height(),
-                |h| crate::terminal::row_height(h).0.max(1.0),
-            )
+            .map_or_else(|| self.props.row_height.get().0.max(1.0), |h| h.0.max(1.0))
     }
 
     /// How many title rows there are: the group levels and the titles.

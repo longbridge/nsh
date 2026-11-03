@@ -48,7 +48,8 @@ pub struct NumberInputProps {
     /// it.
     pub accessibility_label: Prop<Option<SharedString>>,
     /// Both buttons on the right of the field, the increment over the
-    /// decrement, in the `controls` part (`gpui-base`'s `controls_right`);
+    /// decrement (before it, on the field's row, in a terminal), in the
+    /// `controls` part (`gpui-base`'s `controls_right`);
     /// else the decrement before the field and the increment after it.
     /// Read when the input is made.
     #[prop(default)]
@@ -474,6 +475,9 @@ pub fn NumberInput(props: NumberInputProps, cx: Scope<NumberInputEvent>) -> impl
     if props.controls_right.get_untracked() {
         root.child(prefix).child(text_field).child(suffix).child(
             view()
+                // A terminal sets the pair side by side on the field's row,
+                // a column of them two rows high where one row is the field.
+                .when(crate::terminal::is_terminal(), |v| v.flex_row())
                 .project_disabled(props.disabled)
                 .app_class(props.controls_class)
                 .inline_style(props.controls_style)

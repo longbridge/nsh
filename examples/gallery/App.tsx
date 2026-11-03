@@ -11,7 +11,7 @@ import { TitleBar } from "./TitleBar";
 import { Toaster } from "./toast";
 import { type DemoEntry, nav, shownDemo } from "./nav";
 import { field } from "../nsh-gallery-ui/demo";
-import { Appear, colors, desktop, focusedSection, focusRing, header, hovered, IconTile, lazy, Logo, PageHeader, Press, scrollbarTheme, SIDEBAR, sidebarOpen, TERMINAL_COLUMN, TERMINAL_ROW, terminal, ThemeToggle, ToolButton } from "./ui";
+import { Appear, colors, desktop, focusedSection, focusRing, header, hovered, IconTile, lazy, Logo, PageHeader, Press, scrollbarTheme, SIDEBAR, sidebarOpen, TERMINAL_COLUMN, TERMINAL_GAP, TERMINAL_ROW, terminal, ThemeToggle, ToolButton } from "./ui";
 
 /** `nsh`'s primitives, from the simplest, in the website's order. */
 const primitives: DemoEntry[] = [
@@ -482,11 +482,11 @@ function Sidebar() {
           style={[
             { flexDirection: "row", alignItems: "center", borderTopWidth: 1, borderTopColor: colors.sidebarBorder },
             // The rule takes a whole row in the terminal: the rest of it is padding.
-            terminal ? { gap: 2 * TERMINAL_COLUMN, paddingTop: TERMINAL_ROW - 1, paddingHorizontal: TERMINAL_COLUMN } : { height: 48, gap: 10, paddingLeft: 16, paddingRight: 10 },
+            terminal ? { gap: TERMINAL_GAP, paddingTop: TERMINAL_ROW - 1, paddingHorizontal: TERMINAL_COLUMN } : { height: 48, gap: 10, paddingLeft: 16, paddingRight: 10 },
           ]}
         >
           <Logo size={22} />
-          <View style={terminal ? { flex: 1, flexDirection: "row", gap: 2 * TERMINAL_COLUMN } : { flex: 1, gap: 0 }}>
+          <View style={terminal ? { flex: 1, flexDirection: "row", gap: TERMINAL_GAP } : { flex: 1, gap: 0 }}>
             <Text style={{ fontSize: 12, fontWeight: "600", color: colors.text }}>Gallery</Text>
             <Text style={{ numberOfLines: 1, fontSize: 11, color: colors.muted }}>NSH · {osName[platform.os] ?? platform.os}</Text>
           </View>
@@ -593,7 +593,8 @@ function launch(name: string): string | null {
  * phone is back on the index. A name no demo has any more is ignored.
  *
  * `cargo run -- <demo> [--section <title>]` opens another, as GPUI Kit's
- * story does: the runner sets `NSH_GALLERY_DEMO` (a demo's name, any case),
+ * story does: the runner sets `NSH_GALLERY_DEMO` (a demo's name, any case;
+ * a group's title or a subheading opens its first demo),
  * opened instead of the last one, and `NSH_GALLERY_SECTION` (a card's
  * title), the only section of it shown (`focusedSection`), so checking a
  * demo needs no taps or scrolling. `nsh test` reads them as well.
@@ -611,7 +612,14 @@ function rememberDemo() {
     (launched != null ? Promise.resolve(launched) : Storage.getItem(LAST_DEMO))
       .then((name) => {
         const wanted = name?.toLowerCase();
-        const demo = groups.flatMap((g) => g.demos).find((d) => d.name.toLowerCase() === wanted);
+        const all = groups.flatMap((g) => g.demos);
+        // A demo by its name, else the first under a group's title or a
+        // subheading ("Primitives", "Platform"), which name no demo.
+        const demo =
+          all.find((d) => d.name.toLowerCase() === wanted) ??
+          groups.find((g) => g.title.toLowerCase() === wanted)?.demos[0] ??
+          all.find((d) => parts.get(d)?.toLowerCase() === wanted);
+        if (launched != null && !demo) console.warn(`NSH_GALLERY_DEMO: no demo or group named "${launched}"`);
         // Only on a fresh start: not over what the user already opened.
         if (demo && untracked(nav.routes).length === 1) {
           if (untracked(desktop)) selected.set(demo);

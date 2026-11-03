@@ -2,7 +2,7 @@ import { Canvas, cleanup, computed, effect, Scroll, signal, Text, untracked, Vie
 import { createAnimatedValue, Easing, LayoutAnimation } from "nsh";
 import { Icon } from "../icons";
 import { nav } from "../nav";
-import { Button, colors, desktop, finish, motion, paneWidth, Press, Segmented, TERMINAL_COLUMN, TERMINAL_ROW, terminal } from "../ui";
+import { Button, colors, desktop, finish, motion, paneWidth, Press, Segmented, TERMINAL_COLUMN, TERMINAL_GAP, TERMINAL_ROW, terminal } from "../ui";
 import { Detail, StockView } from "./stocks/Detail";
 import { createMarket, grouped, INDEX_BASE, ISSUES, type Market, percent, price, type Stock, sectors, signed, time, toneOf } from "./stocks/market";
 import { alpha, calm, SpringBar } from "./stocks/parts";
@@ -104,7 +104,7 @@ function MarketStrip(props: { market: Market }) {
   const pause = () => (running() ? props.market.stop() : props.market.start());
   return (
     <View>
-      <View style={{ flexDirection: "row", alignItems: "center", gap: terminal ? 2 * TERMINAL_COLUMN : 12, paddingHorizontal: terminal ? TERMINAL_COLUMN : 16, height }}>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: terminal ? TERMINAL_GAP : 12, paddingHorizontal: terminal ? TERMINAL_COLUMN : 16, height }}>
         <View
           onPress={toggle}
           role="button"
@@ -343,7 +343,7 @@ function TerminalStockRow(props: { stock: Stock; onPress: () => void; wide?: boo
       role="button"
       accessibilityLabel={props.stock.name}
       accessibilityState={props.wide ? { selected: !!props.active } : undefined}
-      style={{ height: TERMINAL_ROW, flexDirection: "row", alignItems: "center", gap: 2 * TERMINAL_COLUMN, paddingHorizontal: TERMINAL_COLUMN }}
+      style={{ height: TERMINAL_ROW, flexDirection: "row", alignItems: "center", gap: TERMINAL_GAP, paddingHorizontal: TERMINAL_COLUMN }}
     >
       <Text style={{ numberOfLines: 1, width: 4 * TERMINAL_COLUMN, fontSize: 16, fontWeight: "600", color: colors.text }}>
         {props.stock.code}

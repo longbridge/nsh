@@ -446,12 +446,15 @@ function titles(count: number) {
 const LABEL_WIDTH = 16 * TERMINAL_COLUMN;
 
 /** A terminal's name column for `names`: the longest of them (at least {@link LABEL_WIDTH}), so the details after it line up. */
+/** The terminal's text for each step button's icon. */
+const STEP_GLYPHS = { plus: "+", minus: "−", "chevron-up": "▴", "chevron-down": "▾" } as const;
+
 const labelColumn = (names: readonly string[]) => Math.max(LABEL_WIDTH, ...names.map((n) => n.length * TERMINAL_COLUMN));
 
 /** A label, and a quieter line under it (after it in the terminal). */
 function Label(props: { label: string; detail?: string; width?: number }) {
   return (
-    <View style={terminal ? { flex: 1, flexDirection: "row", gap: 2 * TERMINAL_COLUMN } : { flex: 1, gap: 2 }}>
+    <View style={terminal ? { flex: 1, flexDirection: "row", gap: TERMINAL_GAP } : { flex: 1, gap: 2 }}>
       <Text style={{ minWidth: terminal ? (props.width ?? LABEL_WIDTH) : undefined, flexShrink: 0, fontSize: size.label, color: colors.text }}>{props.label}</Text>
       <If when={props.detail}>
         <Text style={{ numberOfLines: 1, flexShrink: 1, fontSize: size.detail, color: colors.muted }}>{props.detail}</Text>
@@ -832,7 +835,7 @@ export type Control =
  * it for, then in other looks, sizes and states (choice cards, tiles,
  * underlined tabs, an accordion), above the last event it reported.
  */
-export function Controls(props: { show: Control }) {
+export function Controls(props: { show: Control; firsts?: Control[] }) {
   const last = signal("—");
 
   function Settings() {
@@ -1099,7 +1102,12 @@ export function Controls(props: { show: Control }) {
                 indicator={<BoxMark mark={c().required || has(c().name) ? "check" : null} />}
               >
                 <Divider show={i() !== 0} />
-                <Label label={c().required ? `${c().name} (always on)` : c().name} detail={c().detail} />
+                {/* A terminal keeps the names in one column: "always on" goes with the description. */}
+                <Label
+                  label={c().required && !terminal ? `${c().name} (always on)` : c().name}
+                  detail={c().required && terminal ? `Always on · ${c().detail}` : c().detail}
+                  width={labelColumn(COOKIES.map((k) => k.name))}
+                />
               </Checkbox>
             )}
           </Each>
@@ -1710,7 +1718,7 @@ export function Controls(props: { show: Control }) {
               cleanable
               clearButtonAccessibilityLabel="Clear the font"
               clearButtonClass="items-center justify-center rounded-full enabled:hover:bg-accent active:bg-track"
-              clearButtonStyle={{ position: "absolute", top: (size.line - size.clear) / 2, right: clearInset, width: size.clear, height: size.clear }}
+              clearButtonStyle={terminal ? undefined : { position: "absolute", top: (size.line - size.clear) / 2, right: clearInset, width: size.clear, height: size.clear }}
               clearButton={<Icon name="close" size={size.clear - 6} tint={colors.muted} />}
               trigger={<Picker title={font() === null ? "Default" : titleOf(FONTS, font())} open={fontOpen()} placeholder={font() === null} clearable={font() !== null} />}
               renderItem={(item) => <Option item={item} note={item.disabled ? "Not installed" : undefined} />}
@@ -1740,7 +1748,9 @@ export function Controls(props: { show: Control }) {
     cleanable: true,
     clearButtonAccessibilityLabel: label,
     clearButtonClass: "items-center justify-center rounded-full enabled:hover:bg-accent active:bg-track",
-    clearButtonStyle: { position: "absolute" as const, top: (size.line - size.clear) / 2, right: clearInset, width: size.clear, height: size.clear },
+    // A terminal sets the clear button after the value, in the row: placed
+    // over it, its label ("Clear the deadline") would cover the value.
+    clearButtonStyle: terminal ? undefined : { position: "absolute" as const, top: (size.line - size.clear) / 2, right: clearInset, width: size.clear, height: size.clear },
     clearButton: <Icon name="close" size={size.clear - 6} tint={colors.muted} />,
   });
 
@@ -2461,7 +2471,7 @@ export function Controls(props: { show: Control }) {
               cleanable
               clearButtonAccessibilityLabel="Clear the due date"
               clearButtonClass="items-center justify-center rounded-full enabled:hover:bg-accent active:bg-track"
-              clearButtonStyle={{ position: "absolute", top: (size.line - size.clear) / 2, right: clearInset, width: size.clear, height: size.clear }}
+              clearButtonStyle={terminal ? undefined : { position: "absolute", top: (size.line - size.clear) / 2, right: clearInset, width: size.clear, height: size.clear }}
               clearButton={<Icon name="close" size={size.clear - 6} tint={colors.muted} />}
               trigger={<Picker title={due() ? shortDate(due()!) : "No due date"} open={dueOpen()} placeholder={!due()} clearable={due() !== null} />}
             />
@@ -2910,9 +2920,13 @@ export function Controls(props: { show: Control }) {
         <Collapsible
           open={open() === props.q}
           content={
-            // A terminal's answer lines up under the question, past its mark.
-            <View style={{ ...settle(t), paddingBottom: size.padding + 4, paddingEnd: 24, paddingStart: terminal ? TERMINAL_GAP : undefined }}>
-              <Text style={{ fontSize: size.label, lineHeight: Math.round(size.label * 1.5), color: colors.muted }}>{props.a}</Text>
+            // A terminal's answer lines up under the question, past its
+            // two-column mark (a box of text takes one column of padding).
+            <View style={{ ...settle(t), paddingBottom: size.padding + 4, paddingEnd: 24, flexDirection: terminal ? "row" : undefined }}>
+              <If when={terminal}>
+                <View style={{ width: 2 * TERMINAL_COLUMN, flexShrink: 0 }} />
+              </If>
+              <Text style={{ flex: terminal ? 1 : undefined, fontSize: size.label, lineHeight: Math.round(size.label * 1.5), color: colors.muted }}>{props.a}</Text>
             </View>
           }
         >
@@ -3136,7 +3150,8 @@ export function Controls(props: { show: Control }) {
     }
     return (
       <Card title="Steps" subtitle="A setup in four steps: the bar fills to the step you are on" right={<Badge label={step() >= STEPS.length ? "Done" : `Step ${step() + 1} of ${STEPS.length}`} tone={step() >= STEPS.length ? "up" : "neutral"} />}>
-        {/* The bar runs from the first dot's middle to the last's; each label is centered under its dot. */}
+        {/* The bar runs from the first dot's middle to the last's; each label is centered under its dot
+            (a terminal's first and last start and end at theirs, off the card's border). */}
         <View style={{ height: DOT + 24, marginHorizontal: 24 }}>
           <View style={{ position: "absolute", left: DOT / 2, right: DOT / 2, top: (DOT - 4) / 2 }}>
             <Progress value={value()} accessibilityLabel="Setup" trackStyle={rail(4)} indicatorClass={glide} indicatorStyle={{ ...fillOf(4), translate: remaining(value()) }} />
@@ -3146,7 +3161,15 @@ export function Controls(props: { show: Control }) {
               {(name, i) => (
                 <View style={{ width: DOT }}>
                   <StepDot done={i() < step()} current={i() === step()} />
-                  <View style={{ position: "absolute", top: DOT + 6, left: (DOT - 64) / 2, width: 64, alignItems: "center" }}>
+                  <View
+                    style={
+                      terminal && i() === 0
+                        ? { position: "absolute", top: DOT + 6, left: 0, width: 64, alignItems: "flex-start" }
+                        : terminal && i() === STEPS.length - 1
+                          ? { position: "absolute", top: DOT + 6, right: 0, width: 64, alignItems: "flex-end" }
+                          : { position: "absolute", top: DOT + 6, left: (DOT - 64) / 2, width: 64, alignItems: "center" }
+                    }
+                  >
                     <Text style={{ fontSize: 12, fontWeight: i() === step() ? "600" : "400", color: i() <= step() ? colors.text : colors.faint }}>{name()}</Text>
                   </View>
                 </View>
@@ -3404,8 +3427,9 @@ export function Controls(props: { show: Control }) {
   });
   /** Centered between its steppers, but at the end in a terminal (as {@link field}). */
   const stepAlign = terminal ? ("right" as const) : ("center" as const);
-  /** A step button's glyph: the gallery's icon, in the muted text color. */
+  /** A step button's glyph: the gallery's icon, in the muted text color; a terminal's text glyph. */
   function Step(props: { name: "plus" | "minus" | "chevron-up" | "chevron-down"; size: number }) {
+    if (terminal) return <Text style={{ color: colors.muted }}>{STEP_GLYPHS[props.name]}</Text>;
     return <Icon name={props.name} size={props.size} tint={colors.muted} />;
   }
   /** A quantity: its label and the input at the trailing edge. */
@@ -4024,7 +4048,9 @@ export function Controls(props: { show: Control }) {
     NumberInput: [Quantities, Cart, Units],
     OtpInput: [Verify, SignIn, Pin],
   };
-  return <DemoPage cards={[...cards[props.show], Last]} />;
+  // `firsts`: the first card of each named control on one page, above one last event (the TUI host's acceptance tests).
+  const shown = props.firsts ? props.firsts.map((control) => cards[control][0]) : cards[props.show];
+  return <DemoPage cards={[...shown, Last]} />;
 }
 
 export const SwitchDemo = () => <Controls show="Switch" />;

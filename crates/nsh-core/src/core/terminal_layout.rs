@@ -968,11 +968,12 @@ pub(crate) fn compute(
     // A small box of an explicit width (an avatar, a counter) takes its
     // content's words if they are wider: its initials stay on a row. So
     // does a control (a time slot with a radio's mark before it): its label
-    // is never broken inside a word.
+    // is never broken inside a word. A box of no width is a point its
+    // content hangs from (an axis label's anchor at its tick), kept so.
     let ew = match ew {
         Some(w)
             if known_w.is_none()
-                && ((k.container && w < SMALL_BOX)
+                && ((k.container && w > 0 && w < SMALL_BOX)
                     || (role.control && !k.labelled && !k.empty && !k.measures)) =>
         {
             Some(w.max(children_words(tree, grid, node) + inset.x()))
@@ -1661,7 +1662,17 @@ fn arrange_flex(
                         |v: LengthPercentageAuto| lpa(v, parent_w).is_some_and(|m| m < 0.0);
                     negative(style.margin.left) || negative(style.margin.right)
                 },
-                basis: dim(style.flex_basis, parent_main_pt).map(|v| on_main(v).max(0)),
+                // A percentage height in a vertical scroll view is of its
+                // viewport (a vertical carousel's `h-full` slide is one view
+                // tall), with content or not, as a width's is across one.
+                basis: dim(style.flex_basis, parent_main_pt)
+                    .or_else(|| {
+                        let raw = style.size.height.into_raw();
+                        (area.unbounded && !row && raw.tag() == CompactLength::PERCENT_TAG)
+                            .then(|| dim(style.size.height, parent_main_pt))
+                            .flatten()
+                    })
+                    .map(|v| on_main(v).max(0)),
                 min_main: lpa(
                     if row {
                         style.min_size.width
@@ -1708,7 +1719,7 @@ fn arrange_flex(
         // A row of no width (a chart's point a label hangs from) holds its
         // content at the content's own width, overflowing it as CSS's: one
         // line, not a column of characters.
-        let room_main = room_main.filter(|_| !(row && known_main == Some(0)));
+        let room_main = room_main.filter(|_| !(row && known_main.is_some_and(|m| m <= 1)));
         let room = (
             room_main.map(|m| (m - ms - me).max(0)),
             known_cross.or(room_cross).map(|c| (c - cs - ce).max(0)),
@@ -1911,7 +1922,13 @@ fn split_line(
     // them below (a text wraps, the last resort), never below one Cell
     // for one with content: a box never lays a child out across its
     // border (`flexShrink` first, as ratatui's constraints give way).
+    // A box of no width or height on its main axis, or one Cell (an axis
+    // label's window hung from a point, rounded to the grid), lays its
+    // children out past its ends, as CSS does: shrunk into it they would
+    // only be cut to `…`.
+    let point = known_main.is_some_and(|m| m <= 1);
     if let Some(bound) = known_main.or(room_main)
+        && !point
         && used(items, &before) > bound
     {
         let mut over = used(items, &before) - bound;

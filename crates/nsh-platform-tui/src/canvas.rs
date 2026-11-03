@@ -2,7 +2,8 @@
 //! against a small 2D context (transform, save / restore, paints, global
 //! alpha, dashes, clips) onto a grid of 2 × 4 dots per Cell, which
 //! ratatui's `Canvas` turns into braille symbols. Fills set the dots whose
-//! centers the fill rule puts inside the path, strokes the dots along each
+//! centers the fill rule puts inside the path (a translucent one, a wash
+//! under the marks, only a sparse floor of them), strokes the dots along each
 //! segment, and text is printed on whole Cells above the dots, with the
 //! Cell before and after it cleared of dots so a label never runs into a
 //! mark.
@@ -42,6 +43,10 @@ use crate::{
 
 const DOTS_ACROSS: usize = 2;
 const DOTS_DOWN: usize = 4;
+/// Below this alpha (its paint's, times `globalAlpha`) a fill is a wash:
+/// a sparse floor of dots rather than a solid area.
+const WASH_ALPHA: f32 = 0.5;
+
 /// How far below a row's top the alphabetic baseline sits, in rows.
 const ALPHABETIC_BASELINE: f32 = 0.75;
 const BOLD_WEIGHT: u16 = 600;
@@ -488,13 +493,23 @@ impl<'a> Replay<'a> {
     }
 
     fn fill(&mut self, outline: &Outline, rule: FillRule) {
-        let Some(ink) = self.ink(&self.state.fill.clone()) else {
+        let paint = self.state.fill.clone();
+        let Some(ink) = self.ink(&paint) else {
             return;
         };
+        // A translucent fill is a wash under the marks (an area beneath
+        // its curve): solid, its dots would merge with the line drawn
+        // over it into one block. It sets a sparse floor of dots instead,
+        // one at the bottom of every other dot column, which a stroke
+        // over it still reads through.
+        let alpha = (self.canvas.color(&paint).0 & 255) as f32 / 255.0 * self.state.alpha;
+        let wash = alpha < WASH_ALPHA;
+        let width = self.dots.width;
         let mut inside = Vec::new();
         self.dots.inside(outline, rule, |index| inside.push(index));
         for index in inside {
-            if !self.clipped_out(index) {
+            let sparse = index % width % 2 == 0 && index / width % DOTS_DOWN == DOTS_DOWN - 1;
+            if !self.clipped_out(index) && (!wash || sparse) {
                 self.dots.paint(index, ink);
             }
         }

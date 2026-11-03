@@ -51,6 +51,9 @@ and offsets the table scrolls to (`scrollToRow`, revealing the selection) land o
 way on the horizontal axis. On touch devices drags move the content one to one; on the desktops dragging the bar
 reaches the whole content.
 
+In a terminal a body row is one Cell, whatever `rowHeight` is (`terminal::row_height`): rows on another step
+would land on the Cell grid unevenly. Title rows keep their height, the rule under them taking a row.
+
 ## Columns' own classes, fitting, bounce
 
 A column's `cellClass` and `headerClass` come after the part's classes (`column_parts`, `view.rs`). Two presses of a

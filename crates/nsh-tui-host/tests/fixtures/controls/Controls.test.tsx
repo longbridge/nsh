@@ -136,5 +136,15 @@ test("the official controls take mouse presses and preserve disabled and collaps
   await app.press("Reset");
   await app.waitFor("Upload: reset");
   expect(app.texts()).toContain("0%");
-  // Slider drags and hover feedback join this acceptance after ticket 09 merges.
+});
+
+test("the official Volume slider follows a mouse drag to both ends", async () => {
+  const app = await open("./App.tsx", { width: 800, height: 640, clock: {} });
+  await app.waitFor("Select all");
+  // The drag starts on the slider's middle and goes past its start: the value is the track's first Cell.
+  await app.drag("label:Volume", { x: -2000, y: 0 });
+  await app.waitFor("Volume: 0");
+  // Past its end: the last Cell, the largest value.
+  await app.drag("label:Volume", { x: 2000, y: 0 });
+  await app.waitFor("Volume: 100");
 });

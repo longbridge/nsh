@@ -1,6 +1,6 @@
 import { Canvas, computed, effect, signal, Text, untracked, View } from "nsh";
 import { LayoutAnimation } from "nsh";
-import { colors, Legend, Press, radius, TERMINAL_COLUMN, TERMINAL_ROW, terminal } from "../../ui";
+import { colors, Legend, Press, radius, TERMINAL_COLUMN, TERMINAL_GAP, TERMINAL_ROW, terminal } from "../../ui";
 import { compact, type Level, LEVELS, type Market, price, type Stock, toneOf } from "./market";
 import { alpha, Block, calm, grid, Head, hatch, SpringBar } from "./parts";
 
@@ -8,7 +8,7 @@ const ROW = terminal ? TERMINAL_ROW : 26;
 /** The book's columns: the level, its size and the running total (the price takes the rest). */
 const LEVEL_WIDTH = terminal ? 3 * TERMINAL_COLUMN : 28;
 const SIZE_WIDTH = terminal ? 8 * TERMINAL_COLUMN : 64;
-const COLUMN_GAP = terminal ? 2 * TERMINAL_COLUMN : 10;
+const COLUMN_GAP = terminal ? TERMINAL_GAP : 10;
 /** Ticks either side of the mid price the depth chart spans. */
 const SPAN = LEVELS + 2;
 

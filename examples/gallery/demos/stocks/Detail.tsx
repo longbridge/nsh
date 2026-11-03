@@ -3,7 +3,7 @@ import { createAnimatedValue } from "nsh";
 import { Dialog, NavPage } from "nsh/base";
 import { safeAreaInsets } from "nsh";
 import { Icon } from "../../icons";
-import { Button, colors, finish, header, PageHeader, Press, Sheet, Stat, TERMINAL_COLUMN, TERMINAL_ROW, terminal } from "../../ui";
+import { Button, colors, finish, header, PageHeader, Press, Sheet, Stat, TERMINAL_COLUMN, TERMINAL_GAP, TERMINAL_ROW, terminal } from "../../ui";
 import { Depth, OrderBook } from "./Book";
 import { Chart } from "./Chart";
 import { compact, type Market, percent, price, sectors, type Stock, signed, time, toneOf } from "./market";
@@ -108,7 +108,7 @@ function Quote(props: { market: Market; stock: Stock }) {
   const width = terminal ? "50%" : "25%";
   return (
     <View style={terminal ? { paddingHorizontal: TERMINAL_COLUMN, paddingBottom: TERMINAL_ROW } : { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 14, gap: 10 }}>
-      <View style={{ flexDirection: "row", alignItems: "center", gap: terminal ? 2 * TERMINAL_COLUMN : 8 }}>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: terminal ? TERMINAL_GAP : 8 }}>
         <Text style={{ numberOfLines: 1, flex: 1, fontSize: 15, color: colors.muted }}>
           {props.stock.name}
         </Text>
@@ -118,14 +118,14 @@ function Quote(props: { market: Market; stock: Stock }) {
         </If>
         <Text style={{ fontSize: 12, color: colors.muted, fontVariant: ["tabular-nums"] }}>{time(props.market.clock())}</Text>
       </View>
-      <View style={{ flexDirection: "row", alignItems: "center", gap: terminal ? 2 * TERMINAL_COLUMN : 6 }}>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: terminal ? TERMINAL_GAP : 6 }}>
         <Text style={{ fontSize: 36, fontWeight: "600", letterSpacing: -1, color: toneOf(change()), fontVariant: ["tabular-nums"] }}>{p(q().last)}</Text>
         <If when={!terminal}>
           <View style={{ rotate: turn.interpolate({ inputRange: [0, 1], outputRange: ["0deg", "180deg"] }) }}>
             <Icon name="arrow-up" size={20} tint={toneOf(change())} />
           </View>
         </If>
-        <View style={terminal ? { flex: 1, flexDirection: "row", justifyContent: "flex-end", gap: 2 * TERMINAL_COLUMN } : { flex: 1, alignItems: "flex-end", gap: 1 }}>
+        <View style={terminal ? { flex: 1, flexDirection: "row", justifyContent: "flex-end", gap: TERMINAL_GAP } : { flex: 1, alignItems: "flex-end", gap: 1 }}>
           <Text style={{ fontSize: 15, fontWeight: "600", fontVariant: ["tabular-nums"], color: toneOf(change()) }}>{signed(percent(q()))}%</Text>
           <Text style={{ fontSize: 12, fontVariant: ["tabular-nums"], color: toneOf(change()) }}>{signed(change(), props.stock.tick < 0.01 ? 3 : 2)} today</Text>
         </View>
@@ -175,14 +175,14 @@ function Ranges(props: { market: Market; stock: Stock }) {
     const column: TextStyle = { width: 10 * TERMINAL_COLUMN, textAlign: "right", fontSize: 13, fontVariant: ["tabular-nums"] };
     return (
       <Block title="Ranges" note={`low → high · last ${price(props.stock.quote().last, props.stock)}`}>
-        <View style={{ flexDirection: "row", gap: 2 * TERMINAL_COLUMN }}>
+        <View style={{ flexDirection: "row", gap: TERMINAL_GAP }}>
           <Head label="DAYS" width={5 * TERMINAL_COLUMN} />
           <Head label="LOW" width={10 * TERMINAL_COLUMN} align="right" />
           <Head label="HIGH" width={10 * TERMINAL_COLUMN} align="right" />
         </View>
         <Each of={table()}>
           {(row) => (
-            <View style={{ height: TERMINAL_ROW, flexDirection: "row", gap: 2 * TERMINAL_COLUMN }}>
+            <View style={{ height: TERMINAL_ROW, flexDirection: "row", gap: TERMINAL_GAP }}>
               <Text style={{ width: 5 * TERMINAL_COLUMN, fontSize: 13, color: colors.muted }}>{row().label}</Text>
               <Text style={[column, { color: colors.down }]}>{price(row().lo, props.stock)}</Text>
               <Text style={[column, { color: colors.up }]}>{price(row().hi, props.stock)}</Text>
@@ -394,7 +394,7 @@ export function StockView(props: { market: Market; stock: Stock; wide?: boolean;
           bottom: 0,
           flexDirection: "row",
           alignItems: "center",
-          gap: terminal ? 2 * TERMINAL_COLUMN : 10,
+          gap: terminal ? TERMINAL_GAP : 10,
           paddingHorizontal: terminal ? TERMINAL_COLUMN : 16,
           // The terminal's rule is a row of its own: the rest of it is padding.
           paddingTop: terminal ? TERMINAL_ROW - 1 : 10,
@@ -406,7 +406,7 @@ export function StockView(props: { market: Market; stock: Stock; wide?: boolean;
           borderTopColor: terminal ? colors.line : finish.glass.borderColor,
         }}
       >
-        <View style={terminal ? { flexDirection: "row", gap: 2 * TERMINAL_COLUMN } : { width: 92, gap: 1 }}>
+        <View style={terminal ? { flexDirection: "row", gap: TERMINAL_GAP } : { width: 92, gap: 1 }}>
           <Text style={{ fontSize: 15, fontWeight: "600", color: colors.text, fontVariant: ["tabular-nums"] }}>{price(props.stock.quote().last, props.stock)}</Text>
           <Text style={{ fontSize: 12, fontVariant: ["tabular-nums"], color: toneOf(percent(props.stock.quote())) }}>{signed(percent(props.stock.quote()))}%</Text>
         </View>

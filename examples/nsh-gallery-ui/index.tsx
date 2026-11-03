@@ -178,11 +178,13 @@ export const density = pointer
  */
 function SectionHead(props: { title: string; subtitle?: JSX.Element; right?: JSX.Element }) {
   // The terminal's subtitle takes the section's width under the title row:
-  // a trailing action shares the title's row, never the subtitle's.
+  // a trailing action shares the title's row, never the subtitle's. Set in
+  // by a column, the head lines up with the frame's content under it, and
+  // its action keeps clear of the next section's title.
   if (terminal) {
     return (
-      <View>
-        <View style={{ flexDirection: "row", gap: 2 * TERMINAL_COLUMN }}>
+      <View style={{ paddingHorizontal: TERMINAL_COLUMN }}>
+        <View style={{ flexDirection: "row", gap: TERMINAL_GAP }}>
           <Text style={{ flex: 1, fontSize: density.title, fontWeight: "600", color: colors.text }}>{props.title}</Text>
           {props.right}
         </View>
@@ -379,7 +381,7 @@ export function Row(props: { first?: boolean; onPress?: () => void; children: JS
         paddingVertical: terminal ? 0 : 8,
         flexDirection: "row",
         alignItems: "center",
-        gap: terminal ? 2 * TERMINAL_COLUMN : 12,
+        gap: terminal ? TERMINAL_GAP : 12,
         borderTopWidth: props.first || terminal ? 0 : 1,
         borderTopColor: colors.line,
       }}

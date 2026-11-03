@@ -1,7 +1,7 @@
 import { effect, signal, Text, untracked, View } from "nsh";
 import { Animated, createAnimatedValue, Easing, LayoutAnimation } from "nsh";
 import { Icon } from "../../icons";
-import { Button, colors, finish, isDark, Press, radius, Segmented, TERMINAL_COLUMN, TERMINAL_ROW, terminal, tints } from "../../ui";
+import { Button, colors, finish, isDark, Press, radius, Segmented, TERMINAL_COLUMN, TERMINAL_GAP, TERMINAL_ROW, terminal, tints } from "../../ui";
 import { grouped, type Stock, price } from "./market";
 
 export type Side = "buy" | "sell";
@@ -144,7 +144,7 @@ export function Ticket(props: { open: () => boolean; stock: Stock; side: () => S
             use last {p(props.stock.quote().last)}
           </Text>
         </View>
-        <View style={{ flexDirection: "row", alignItems: "center", gap: terminal ? 2 * TERMINAL_COLUMN : 10 }}>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: terminal ? TERMINAL_GAP : 10 }}>
           <Step icon="minus" label="Lower the price" onPress={() => nudge(-1)} />
           <View style={{ flex: 1, height: terminal ? TERMINAL_ROW : 44, borderRadius: radius.control, alignItems: "center", justifyContent: "center", backgroundColor: colors.inset, borderWidth: 1, borderColor: colors.border }}>
             <Text style={{ fontSize: 20, fontWeight: "600", color: colors.text, fontVariant: ["tabular-nums"] }}>{p(limit())}</Text>
@@ -157,7 +157,7 @@ export function Ticket(props: { open: () => boolean; stock: Stock; side: () => S
           <Text style={{ flex: 1, fontSize: 14, color: colors.muted }}>Quantity</Text>
           <Text style={{ fontSize: 13, color: colors.faint, fontVariant: ["tabular-nums"] }}>{grouped(quantity(), 0)} sh</Text>
         </View>
-        <View style={{ flexDirection: "row", gap: terminal ? 2 * TERMINAL_COLUMN : 8 }}>
+        <View style={{ flexDirection: "row", gap: terminal ? TERMINAL_GAP : 8 }}>
           <Each of={quantities}>
             {(q) => (
               <View style={{ flex: 1 }}>
@@ -225,7 +225,7 @@ export function Ticket(props: { open: () => boolean; stock: Stock; side: () => S
             <Line label="Fees (est.)" value={grouped(fee())} />
             <Line label="Total" value={grouped(props.side() === "buy" ? cost() + fee() : cost() - fee())} strong />
           </View>
-          <View style={{ flexDirection: "row", gap: terminal ? 2 * TERMINAL_COLUMN : 10, marginTop: terminal ? TERMINAL_ROW : 0 }}>
+          <View style={{ flexDirection: "row", gap: terminal ? TERMINAL_GAP : 10, marginTop: terminal ? TERMINAL_ROW : 0 }}>
             <View style={{ flex: 1 }}>
               <Button label="Edit" variant="secondary" onPress={() => expand(false)} />
             </View>

@@ -5,7 +5,7 @@ import { Tab, Tabs, Input } from "nsh/base";
 import { platform } from "nsh";
 import { keyboardFrame, safeAreaInsets } from "nsh";
 import { Icon, type IconName } from "../icons";
-import { alpha, Appear, Badge, bindRefresh, Button, colors, columnsFor, desktop, finish, hint, IconTile, Meter, mono, Press, radius, RoundButton, Section, Segmented, tabPress, terminal, TERMINAL_COLUMN, TERMINAL_ROW, type Tone, toneColor, toneTint } from "../ui";
+import { alpha, Appear, Badge, bindRefresh, Button, colors, columnsFor, desktop, finish, hint, IconTile, Meter, mono, Press, radius, RoundButton, Section, Segmented, tabPress, terminal, TERMINAL_COLUMN, TERMINAL_GAP, TERMINAL_ROW, type Tone, toneColor, toneTint } from "../ui";
 
 const tones: Tone[] = ["accent", "info", "warn", "up", "danger", "neutral"];
 
@@ -167,7 +167,7 @@ function Contacts() {
               <View
                 onPress={() => {}}
                 activeStyle={{ backgroundColor: colors.raised }}
-                style={{ flexDirection: "row", alignItems: "center", gap: terminal ? 2 * TERMINAL_COLUMN : 12, paddingLeft: terminal ? TERMINAL_COLUMN : 16, height: terminal ? TERMINAL_ROW : 60 }}
+                style={{ flexDirection: "row", alignItems: "center", gap: terminal ? TERMINAL_GAP : 12, paddingLeft: terminal ? TERMINAL_COLUMN : 16, height: terminal ? TERMINAL_ROW : 60 }}
               >
                 <View
                   style={{
@@ -190,7 +190,7 @@ function Contacts() {
                     flex: 1,
                     alignSelf: "stretch",
                     justifyContent: "center",
-                    gap: terminal ? 2 * TERMINAL_COLUMN : 2,
+                    gap: terminal ? TERMINAL_GAP : 2,
                     paddingRight: terminal ? TERMINAL_COLUMN : 16,
                     ...(terminal ? { flexDirection: "row", alignItems: "center", justifyContent: "flex-start" } : {}),
                     borderBottomWidth: person().end || terminal ? 0 : 1,

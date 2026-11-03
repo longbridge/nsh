@@ -1,6 +1,6 @@
 import { Canvas, computed, effect, signal, Text, type TextStyle, untracked, View } from "nsh";
 import { createAnimatedValue, Easing } from "nsh";
-import { colors, Legend, TERMINAL_COLUMN, TERMINAL_ROW, terminal, tints } from "../../ui";
+import { colors, Legend, TERMINAL_COLUMN, TERMINAL_GAP, TERMINAL_ROW, terminal, tints } from "../../ui";
 import { BLOCK, buckets, compact, type Market, price, type Stock, type Trade, time } from "./market";
 import { Block, grid, Head, SpringBar } from "./parts";
 
@@ -121,7 +121,7 @@ function TerminalTape(props: { stock: Stock; trades: Trade[] }) {
   const size: TextStyle = { width: 8 * TERMINAL_COLUMN, textAlign: "right", fontSize: 14, fontVariant: ["tabular-nums"] };
   return (
     <View style={{ marginTop: TERMINAL_ROW }}>
-      <View style={{ flexDirection: "row", gap: 2 * TERMINAL_COLUMN }}>
+      <View style={{ flexDirection: "row", gap: TERMINAL_GAP }}>
         <Head label="TIME" width={8 * TERMINAL_COLUMN} />
         <Head label="PRICE" flex={1} />
         <Head label="SIZE" width={8 * TERMINAL_COLUMN} align="right" />
@@ -130,7 +130,7 @@ function TerminalTape(props: { stock: Stock; trades: Trade[] }) {
         {(trade) => {
           const block = trade().size >= BLOCK;
           return (
-            <View style={{ height: TERMINAL_ROW, flexDirection: "row", gap: 2 * TERMINAL_COLUMN }}>
+            <View style={{ height: TERMINAL_ROW, flexDirection: "row", gap: TERMINAL_GAP }}>
               <Text style={{ width: 8 * TERMINAL_COLUMN, fontSize: 12, color: colors.faint, fontVariant: ["tabular-nums"] }}>{time(trade().t)}</Text>
               <Text style={{ flex: 1, fontSize: 14, color: trade().side > 0 ? colors.up : colors.down, fontVariant: ["tabular-nums"] }}>{price(trade().price, props.stock)}</Text>
               <If when={block}>

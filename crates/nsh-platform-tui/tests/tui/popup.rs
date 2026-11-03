@@ -412,6 +412,56 @@ fn a_framed_popup_without_room_below_ends_its_frame_above_its_trigger_s_row() {
     );
 }
 
+/// A trigger `Pick` 20 Cells wide from column 10 on row 3 and, beside it
+/// at its right aligned with its start, an overlay with a fill of its own
+/// (a submenu beside its item) of two rows, `Item` and `Next`.
+#[component]
+fn FramedBeside() -> impl IntoElement {
+    let anchor = element_ref();
+    view()
+        .flex_1()
+        .child(text("above"))
+        .child(text("more"))
+        .child(text("again"))
+        .child(
+            view()
+                .ml(px(80.0))
+                .w(px(160.0))
+                .element_ref(&anchor)
+                .child(text("Pick")),
+        )
+        .child(
+            overlay()
+                .anchor(&anchor)
+                .placement(Placement::Right)
+                .align(Align::Start)
+                .w(px(64.0))
+                .bg(nsh_core::color::rgb(0x333333))
+                .child(text("Item"))
+                .child(text("Next")),
+        )
+}
+
+#[test]
+fn a_framed_popup_beside_its_trigger_starts_its_rows_on_the_trigger_s_row() {
+    let ((_, y), terminal) = framed(Root::new::<FramedBeside>(|| ()));
+    let (x, item) = find(&terminal, "Item").unwrap();
+    assert_eq!(
+        item,
+        y,
+        "the first row on the trigger's row, the frame on the row above\n{}",
+        dump(&terminal)
+    );
+    assert!(x > 30, "beside the trigger (columns 10 to 29)\n{}", dump(&terminal));
+    let corner = find(&terminal, "╭").unwrap_or_else(|| panic!("a frame\n{}", dump(&terminal)));
+    assert_eq!(
+        corner,
+        (30, y - 1),
+        "the frame's corner after the trigger's last column, a row above it\n{}",
+        dump(&terminal)
+    );
+}
+
 /// A page with a row of `z` across the screen, under a sheet at the right
 /// with a panel 10 Cells wide: a fill, a line on its leading edge.
 #[component]

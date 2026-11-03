@@ -1,6 +1,6 @@
 import { cleanup, signal, Text, View } from "nsh";
 import { TextView, type TextViewImage } from "nsh/base";
-import { Button, Caption, Card, colors, DemoPage, Segmented } from "../ui";
+import { Button, Caption, Card, colors, DemoPage, Segmented, terminal } from "../ui";
 import { ImageViewer } from "./ImageViewer";
 import { LucideIcon } from "../icons";
 
@@ -251,7 +251,8 @@ function Markdown() {
         selectable
         classes={links}
         codeBlockActions={[{ id: "copy", label: "Copy code" }]}
-        renderMath={(math) => <Tex tex={math.tex} display={math.display} />}
+        // A terminal reads a formula as text (`TextView`'s own), not its TeX.
+        renderMath={terminal ? undefined : (math) => <Tex tex={math.tex} display={math.display} />}
         onLinkPress={({ url }) => pressed.set(url)}
         onImagePress={({ image }) => viewing.set(image)}
       />

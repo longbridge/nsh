@@ -10,7 +10,7 @@ use std::{
 use nsh_base::{
     ColorChannel, ColorPickerEvent, ColorSpace, SelectItem, TreeEntry, TreeItem, accordion,
     accordion_header, accordion_item, accordion_panel, accordion_trigger, checkbox, color_area,
-    color_picker, color_slider, color_swatch, progress, radio, radio_group, select, slider, switch,
+    color_picker, color_slider, color_swatch, number_input, progress, radio, radio_group, select, slider, switch,
     terminal::{self, PROGRESS_EIGHTHS, PROGRESS_EMPTY, SLIDER_FILL, SLIDER_TRACK},
     text_view, tree,
 };
@@ -495,6 +495,27 @@ fn a_terminals_heading_after_a_block_has_a_blank_row_before_it() {
     assert!(cell > 0.0, "{at:?}");
     // The heading two rows under the paragraph (one blank), its body right under it.
     assert_eq!(row("How it works") - row("Intro text."), 2.0 * cell, "{at:?}");
+}
+
+/// A number input with both buttons at the field's end.
+#[component]
+fn Stepper() -> impl IntoElement {
+    view().child(
+        number_input()
+            .value(2.0)
+            .controls_right(true)
+            .increment_button(text("Up"))
+            .decrement_button(text("Down")),
+    )
+}
+
+#[test]
+fn a_terminals_number_input_sets_its_end_buttons_side_by_side() {
+    let at = text_origins::<Stepper>();
+    let (up, down) = (at["Up"], at["Down"]);
+    // On the field's row, the increment first, not one over the other.
+    assert_eq!(up.1, down.1, "{at:?}");
+    assert!(up.0 < down.0, "{at:?}");
 }
 
 /// A picker of `#3b82f6` (HSB hue 217) with an area, a hue slider and a

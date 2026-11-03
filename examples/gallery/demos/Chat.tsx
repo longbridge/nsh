@@ -729,8 +729,9 @@ export function Chat() {
           </View>
         </View>
 
-        {/* Suggestions while the conversation is empty. */}
-        <If when={!messages().length}>
+        {/* Suggestions while the conversation is empty (a terminal lists
+            them in the empty state instead, one per row). */}
+        <If when={!messages().length && !terminal}>
           <Scroll horizontal scrollbar={false} keyboardShouldPersistTaps="handled" style={{ flexGrow: 0 }}>
             <View style={{ flexDirection: "row", gap: 8, paddingHorizontal: 16, paddingVertical: 8 }}>
               <Each of={chips}>

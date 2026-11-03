@@ -878,6 +878,11 @@ fn shown(tree: &Mounter, id: NodeId, label: &str) -> bool {
         })
 }
 
+/// Whether `c` is a braille pattern: a canvas's or a chart's dots.
+fn is_braille(c: char) -> bool {
+    ('\u{2800}'..='\u{28FF}').contains(&c)
+}
+
 fn focus_pane(tree: &Mounter) -> Option<NodeId> {
     let focused = tree.views.iter().position(|view| {
         view.as_ref()
@@ -1111,6 +1116,21 @@ fn text(
             break;
         }
         let y = y as u16;
+        // A row of text stands on its own over a drawing behind it (a
+        // page's canvas backdrop): the braille dots across its box are
+        // cleared with a Cell each side, as a canvas's own text clears
+        // them, so a word never touches a dot.
+        if !row.glyphs.is_empty() {
+            let area = buffer.area;
+            let from = visible.x.saturating_sub(1).max(area.x);
+            let to = visible.right().saturating_add(1).min(area.right());
+            for column in from..to {
+                let cell = &mut buffer[(column, y)];
+                if cell.symbol().chars().next().is_some_and(is_braille) {
+                    cell.set_symbol(" ");
+                }
+            }
+        }
         let mut x = bounds.left + row.indent as i32;
         let mut cut = None;
         let mut first = true;

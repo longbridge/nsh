@@ -3,7 +3,7 @@
 import type { JSX, ScrollProps } from "nsh";
 import { computed, Image, Scroll, signal, Text, View } from "nsh";
 import { platform, setColorScheme, windowSize } from "nsh";
-import { alpha, Appear, Button, colors, focusedSection, hovered, Icon, type IconName, isDark, Press, radius, TERMINAL_COLUMN, TERMINAL_ROW, terminal, Tip } from "../nsh-gallery-ui";
+import { alpha, Appear, Button, colors, focusedSection, hovered, Icon, type IconName, isDark, Press, radius, TERMINAL_COLUMN, TERMINAL_GAP, TERMINAL_ROW, terminal, Tip } from "../nsh-gallery-ui";
 import { nav, shownDemo } from "./nav";
 import logoDark from "./logo-dark.svg";
 import logoLight from "./logo-light.svg";
@@ -41,7 +41,7 @@ export function PageHeader(props: {
     // One row, then the rule on a row of its own.
     return (
       <View style={{ height: 2 * TERMINAL_ROW, borderBottomWidth: props.transparent || props.background ? 0 : 1, borderBottomColor: colors.line, backgroundColor: props.transparent ? "transparent" : (props.background ?? colors.background) }}>
-        <View style={{ height: TERMINAL_ROW, flexDirection: "row", alignItems: "center", gap: 2 * TERMINAL_COLUMN, paddingHorizontal: TERMINAL_COLUMN }}>
+        <View style={{ height: TERMINAL_ROW, flexDirection: "row", alignItems: "center", gap: TERMINAL_GAP, paddingHorizontal: TERMINAL_COLUMN }}>
           {props.left}
           <If when={back()}>
             <Button label="Back" variant="secondary" onPress={goBack} />
@@ -252,9 +252,13 @@ export function DemoPage(props: {
           return (
             <View
               style={[
-                { width: "100%", maxWidth: n === 1 ? 880 : n * 540 + 64 },
+                // A terminal's columns take the pane's width: its Cells are the
+                // density, and a cap would leave a band of blank columns.
+                { width: "100%", maxWidth: n === 1 ? 880 : terminal ? undefined : n * 540 + 64 },
+                // The scroll bar takes the last column: one more keeps a
+                // blank column before it, as on the left.
                 terminal
-                  ? { paddingHorizontal: TERMINAL_COLUMN, paddingVertical: TERMINAL_ROW, gap: TERMINAL_ROW }
+                  ? { paddingLeft: TERMINAL_COLUMN, paddingRight: 3 * TERMINAL_COLUMN, paddingVertical: TERMINAL_ROW, gap: TERMINAL_ROW }
                   : { paddingHorizontal: 32, paddingTop: 24, paddingBottom: 48, gap: 24 },
               ]}
             >

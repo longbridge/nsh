@@ -1,6 +1,6 @@
 import { Canvas, createAnimatedValue, Easing, effect, type JSX, LayoutAnimation, Path2D, platform, reduceMotion, signal, Text, View, type ViewStyle } from "nsh";
 import { Toggle, ToggleGroup } from "nsh/base";
-import { alpha, Badge, Caption, Card, chart, colors, DemoPage, finish, focusRing, hovered, mono, motion, terminal, TERMINAL_GAP, Toggle as Switch } from "../ui";
+import { alpha, Badge, Caption, Card, chart, colors, DemoPage, finish, focusRing, hovered, mono, motion, terminal, TERMINAL_GAP, TERMINAL_ROW, Toggle as Switch } from "../ui";
 import { LucideIcon, type LucideIconName } from "./RichEditorUi";
 
 // `nsh/base`'s `Toggle` owns presses, the pressed state screen readers hear
@@ -289,7 +289,7 @@ export function ToggleDemo() {
         pressed={view() === value}
         accessibilityLabel={label}
         onChange={({ pressed }) => choose(value, pressed)}
-        style={{ width: seg, height: seg - 2 * inset, alignItems: "center", justifyContent: "center", borderRadius: 7, ...transition() }}
+        style={{ width: terminal ? undefined : seg, height: terminal ? undefined : seg - 2 * inset, alignItems: "center", justifyContent: "center", borderRadius: 7, ...transition() }}
         hoverStyle={view() === value ? undefined : hovered()}
         activeStyle={{ transform: [{ scale: 0.9 }] }}
         focusStyle={focusRing(1)}
@@ -298,6 +298,31 @@ export function ToggleDemo() {
       </Toggle>
     );
     const grid = () => view() === "grid";
+    /** A file: a tile in the grid, a row in the list. */
+    const tile = (f: () => (typeof FILES)[number], i: () => number) => (
+      <View
+        style={
+          grid()
+            ? { flexGrow: 1, flexBasis: terminal ? 0 : "28%", height: pointer ? 76 : 88, padding: 10, gap: 4, borderRadius: 10, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.inset, justifyContent: "flex-end" }
+            : { flexDirection: "row", alignItems: "center", gap: 10, height: pointer ? 36 : 48, borderTopWidth: i() === 0 ? 0 : 1, borderTopColor: colors.line }
+        }
+      >
+        <View
+          style={{
+            display: terminal ? "none" : "flex",
+            width: grid() ? 22 : 20,
+            height: grid() ? 22 : 20,
+            borderRadius: 6,
+            backgroundColor: alpha(f().tone(), 0.22),
+            borderWidth: 1,
+            borderColor: alpha(f().tone(), 0.5),
+            ...(grid() ? { position: "absolute", top: 10, left: 10 } : {}),
+          }}
+        />
+        <Text style={{ flex: grid() ? undefined : 1, fontSize: pointer ? 13 : 15, fontWeight: "500", color: colors.text, numberOfLines: 1 }}>{f().name}</Text>
+        <Text style={{ fontSize: pointer ? 11 : 12, color: colors.faint, fontVariant: ["tabular-nums"] }}>{grid() ? f().kind : `${f().kind} · ${f().size}`}</Text>
+      </View>
+    );
     return (
       <Card title="View switcher" subtitle="A segmented group: the thumb springs to the one shown" right={<Badge label={`${FILES.length} items`} />}>
         <ToggleGroup
@@ -334,33 +359,23 @@ export function ToggleDemo() {
           {segment("grid", "Grid view", (tint) => <GridGlyph tint={tint} size={pointer ? 15 : 17} />)}
           {segment("list", "List view", (tint) => <LucideIcon name="list" size={pointer ? 15 : 17} tint={tint} />)}
         </ToggleGroup>
-        <View style={{ flexDirection: grid() ? "row" : "column", flexWrap: grid() ? "wrap" : "nowrap", gap: grid() ? 8 : 0 }}>
-          <Each of={FILES}>
-            {(f, i) => (
-              <View
-                style={
-                  grid()
-                    ? { flexGrow: 1, flexBasis: "28%", height: pointer ? 76 : 88, padding: 10, gap: 4, borderRadius: 10, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.inset, justifyContent: "flex-end" }
-                    : { flexDirection: "row", alignItems: "center", gap: 10, height: pointer ? 36 : 48, borderTopWidth: i() === 0 ? 0 : 1, borderTopColor: colors.line }
-                }
-              >
-                <View
-                  style={{
-                    width: grid() ? 22 : 20,
-                    height: grid() ? 22 : 20,
-                    borderRadius: 6,
-                    backgroundColor: alpha(f().tone(), 0.22),
-                    borderWidth: 1,
-                    borderColor: alpha(f().tone(), 0.5),
-                    ...(grid() ? { position: "absolute", top: 10, left: 10 } : {}),
-                  }}
-                />
-                <Text style={{ flex: grid() ? undefined : 1, fontSize: pointer ? 13 : 15, fontWeight: "500", color: colors.text, numberOfLines: 1 }}>{f().name}</Text>
-                <Text style={{ fontSize: pointer ? 11 : 12, color: colors.faint, fontVariant: ["tabular-nums"] }}>{grid() ? f().kind : `${f().kind} · ${f().size}`}</Text>
-              </View>
-            )}
-          </Each>
-        </View>
+        {/* A terminal's grid: rows of three, whole Cells each. */}
+        <If when={terminal && grid()}>
+          <View style={{ gap: TERMINAL_ROW }}>
+            <Each of={[FILES.slice(0, 3), FILES.slice(3)]}>
+              {(row, r) => (
+                <View style={{ flexDirection: "row", gap: TERMINAL_GAP }}>
+                  <Each of={row()}>{(f, j) => tile(f, () => r() * 3 + j())}</Each>
+                </View>
+              )}
+            </Each>
+          </View>
+        </If>
+        <If when={!(terminal && grid())}>
+          <View style={{ flexDirection: grid() ? "row" : "column", flexWrap: grid() ? "wrap" : "nowrap", gap: grid() ? 8 : 0 }}>
+            <Each of={FILES}>{(f, i) => tile(f, i)}</Each>
+          </View>
+        </If>
       </Card>
     );
   }
@@ -387,12 +402,16 @@ export function ToggleDemo() {
             pop.spring(1, motion.press);
           }
         }}
-        style={{ flexDirection: "row", alignItems: "center", gap: 6, height: pointer ? 28 : 36, paddingHorizontal: 8, borderRadius: 8, borderWidth: 1, borderColor: "transparent", ...transition() }}
+        style={{ flexDirection: "row", alignItems: "center", gap: 6, height: terminal ? undefined : pointer ? 28 : 36, paddingHorizontal: 8, borderRadius: 8, borderWidth: 1, borderColor: "transparent", ...transition() }}
         pressedStyle={{ backgroundColor: alpha(colors.accent, 0.12), borderColor: alpha(colors.accent, 0.3) }}
         hoverStyle={props.on ? undefined : hovered()}
         focusStyle={focusRing(1)}
       >
-        <View style={{ width: side, height: side, alignItems: "center", justifyContent: "center" }}>
+        {/* A terminal's star is a glyph, filled when on. */}
+        <If when={terminal}>
+          <Text style={{ color: props.on ? colors.accent : colors.muted }}>{props.on ? "★" : "☆"}</Text>
+        </If>
+        <View style={{ display: terminal ? "none" : "flex", width: side, height: side, alignItems: "center", justifyContent: "center" }}>
           <View
             style={{
               pointerEvents: "none",
