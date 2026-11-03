@@ -2957,6 +2957,30 @@ covers [nsh/base/plot] Rule
 covers [props] Rule.base
 covers [props] Rule.color
 covers [props] Rule.inactiveOpacity
+# Bubbles: the bigger one (cap 400, radius 20) drawn first, the other a
+# quarter of its cap, half its radius; each filled by its sector.
+drawing id:dots arc 150 60 20 0 6.283
+drawing id:dots arc 50 80 10 0 6.283
+drawing id:dots fillStyle #00ff00ff
+drawing id:dots fillStyle #ff0000ff
+# Over the big bubble, off its center: the small one fades to
+# `inactiveOpacity`.
+expect bubble null
+event id:bubbles onMouseMove position.x=140 position.y=70
+expect bubble 1
+animated id:dots slot.0 1
+animated id:dots slot.1 0.25
+# 15 past the small one's edge, within `hitRadius`; far from both, none.
+event id:bubbles onMouseMove position.x=75 position.y=80
+expect bubble 0
+event id:bubbles onMouseMove position.x=100 position.y=5
+expect bubble null
+covers [nsh/base/plot] Dot
+covers [props] Dot.r
+covers [props] Dot.rScale
+covers [props] Dot.color
+covers [props] Dot.inactiveOpacity
+covers [props] Dot.hitRadius
 # Reversed scales: bands from the right edge (middles 250, 150 and 50)
 # and a y scale of 0 to 40 from the top edge (2 points a value), so the
 # bars hang from the top, each label below its bar's end.

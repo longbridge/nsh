@@ -10,7 +10,10 @@
 // each other, a conversion funnel that reads out the stage under the
 // pointer and changes its channel, daily candles over their volume whose
 // day under the pointer is read out from either plot and whose period
-// changes, a radar of factor
+// changes, a portfolio's holdings as bubbles of risk against return
+// whose holding under the pointer or the arrow keys is read out and whose
+// period moves them, analysts' price targets as a dot plot whose stock the
+// arrow keys read out and whose list changes, a radar of factor
 // exposure that reads out the factor nearest the pointer and changes its
 // benchmark, a quarter's income as flows between its accounts, read out
 // under the arrow keys and moving into the next quarter's, and a
@@ -47,7 +50,7 @@ const tabTo = async (shown: string) => {
   await start(true);
   let tabs = 0;
   while (!app.shows(shown)) {
-    expect(++tabs).toBeLessThan(40);
+    expect(++tabs).toBeLessThan(60);
     await app.keyboard.press("tab");
     await app.keyboard.press("right");
     await app.wait(50);
@@ -255,6 +258,74 @@ test("the candles read out the day under the pointer on either plot and change t
   await app.waitFor("SEP 18");
   expect(app.texts()).toContain("177.87");
 });
+
+test("the risk-return bubbles read out the holding under the pointer and move with the period", async () => {
+  // Nothing hovered: the holdings' means over three years, the best Sharpe
+  // ratio and how many beat the index's under the plot.
+  expect(app.count("label:/^Risk and return of 17 holdings, 3Y: best Sharpe LLY, 3 ahead of the S&P 500/")).toBe(1);
+  let texts = app.texts();
+  expect(texts).toContain("PORTFOLIO · 3Y");
+  expect(texts).toContain("+12.1%");
+  expect(texts).toContain("LLY 1.23");
+  expect(texts).toContain("3 / 17");
+  // The middle of the plot once the bubbles have grown in (1000 ms): Amazon over three years.
+  await app.wait(1200);
+  await app.hover("label:/^Risk and return of 17 holdings, 3Y/");
+  await app.waitFor("AMZN · AMAZON");
+  texts = app.texts();
+  expect(texts).toContain("+11.0%");
+  expect(texts).toContain("34.0% vol · Sharpe 0.21");
+  expect(texts).toContain("Consumer · $2.4T market cap");
+  // A year: every holding's numbers change, the best Sharpe with them.
+  await app.press("role:tab[1Y]");
+  await app.waitFor("label:/^Risk and return of 17 holdings, 1Y: best Sharpe GS, 2 ahead of the S&P 500/");
+  // The pointer stays on Amazon, read out with its numbers over a year.
+  texts = app.texts();
+  expect(texts).toContain("AMZN · AMAZON");
+  expect(texts).toContain("+8.0%");
+  expect(texts).toContain("31.0% vol · Sharpe 0.13");
+  expect(texts).toContain("GS 1.31");
+});
+
+test("the risk-return bubbles step with the arrow keys from the least volatile", async () => {
+  // The first Right starts at the left end: the rows are in the order of their volatility.
+  await tabTo("JNJ · JOHNSON & JOHNSON");
+  expect(app.texts()).toContain("Healthcare · $460B market cap");
+  // The index is a row of its own, read out as the benchmark.
+  await app.keyboard.press("right");
+  await app.waitFor("S&P 500 · BENCHMARK");
+  expect(app.texts()).toContain("The index the holdings are measured against");
+  await app.keyboard.press("end");
+  await app.waitFor("NVDA · NVIDIA");
+  expect(app.texts()).toContain("+44.0%");
+  await app.keyboard.press("escape");
+  await app.waitFor("PORTFOLIO · 3Y");
+}, 120000);
+
+test("the price targets read out the stock the arrow keys step to and change their list", async () => {
+  // The first Right starts at the top row: the most upside.
+  await tabTo("NVDA · 64 ANALYSTS");
+  let texts = app.texts();
+  expect(texts).toContain("$228");
+  expect(texts).toContain("+22.6% from $186");
+  expect(texts).toContain("$140 – $300 · revised +8.6% in 3 months");
+  await app.keyboard.press("right");
+  await app.waitFor("AVGO · 41 ANALYSTS");
+  await app.keyboard.press("end");
+  await app.waitFor("INTC · 38 ANALYSTS");
+  expect(app.texts()).toContain("−5.3% from $38.00");
+  await app.keyboard.press("escape");
+  await app.waitFor("SEMIS · 6 STOCKS");
+  texts = app.texts();
+  expect(texts).toContain("5 of 6 raised in the last 3 months");
+  // The banks: their stocks and their median upside.
+  await app.press("role:tab[Banks]");
+  await app.waitFor("BANKS · 6 STOCKS");
+  texts = app.texts();
+  expect(texts).toContain("+9.0%");
+  expect(texts).toContain("C +14%");
+  expect(app.count("label:/^Analysts' price targets, Banks: a median upside of \\+9\\.0%, the most for C at \\+14\\.3%/")).toBe(1);
+}, 120000);
 
 test("the radar reads out the factor nearest the pointer and changes its benchmark", async () => {
   // Nothing hovered: the means of all six, the portfolio's (362 / 6) a

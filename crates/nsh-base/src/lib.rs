@@ -543,6 +543,7 @@ mod tests {
                 "Arc",
                 "Area",
                 "Bar",
+                "Dot",
                 "Grid",
                 "Line",
                 "Pie",
