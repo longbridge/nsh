@@ -634,14 +634,17 @@ accessibility states the components report (listbox, tree and tab rows their sel
 | `ColorArea` | a grid of such Cells, at most 32 by 8, as many as the area's size holds: the hue at each column's saturation and each row's brightness, the picked Cell `◆`; keys, presses and drags as elsewhere |
 | `ColorSwatch` | its color as such a fill, four Cells by one row unless the app sizes it; no checkerboard |
 | `Select` | the terminal's own trigger in place of `trigger`: the chosen titles, then ` ▾`, one row; ` ×` in place of `clearButton`; the list opens under it (no cover) |
-| `Combobox` | the input one row (no `inputClass` / `inputStyle`), ` ×` and ` ▾` in place of `clearButton` and `triggerButton`, on its row |
+| `Combobox` | the input one row (no `inputClass` / `inputStyle`), ` ×` and ` ▾` in place of `clearButton` and `triggerButton`, on its row; the app's `prefix` and `suffix` a Cell apart from them |
 | list rows (`Select`, `Combobox`) | each item's title, one full-width row; headers their title; no `renderItem`, `renderGroup` or row classes |
 | `Tabs` | no indicator; the tabs in a row, two Cells apart; the painter draws the selected tab bold (a band only while focused) and the others muted, from each tab's selected state |
 | `MenuItem` | a checkable item starts with `✓ ` (two spaces unchecked) in place of the indicator |
 | `Submenu` | its trigger is one menu item row: the trigger's content, then ` ›` in the theme's muted foreground |
 | `MenuSeparator` | a row of `─` across the menu |
-| `AccordionTrigger` | `▸ ` closed / `▾ ` open before the children (an app's own chevron is the app's to leave out) |
-| `Tree` | a row the tree draws (no `renderItem`): two Cells of indent a level, `▸ ` / `▾ ` on a folder, two spaces on a leaf, the label |
+| `AccordionTrigger` | `▸ ` closed / `▾ ` open, then the children in a row of their own a Cell apart (the trigger's own gap does not part them from the disclosure; an app's own chevron is the app's to leave out) |
+| `AccordionPanel` | its content after two blank Cells, under the trigger's title |
+| `Tree` | a row the tree draws (no `renderItem`): two Cells of indent a level, `▸ ` / `▾ ` on a folder, two spaces on a leaf, the label; an app's row (`renderItem`) is the app's, its folders marked by the painter in the leading columns the terminal's layout gives a disclosure |
+| `TextView` | list markers are text a Cell before the content (`1. ` right-aligned to the widest number, `• ` / `◦ ` / `▪ ` by depth), a task's the checkbox's marks; a footnote reference `[1]`; a table is rows of Cells, each column as wide as its widest cell's text, ruled `┌─┬─┐`, `│`, `├─┼─┤`, `└─┴─┘`, the header bold, scrolling when wider than the view |
+| `RichEditor` | a list marker a Cell before its item; a table's box closed on every side |
 | `Scrollbar` | nothing: the terminal draws its own scroll bars |
 
 Rows that fill a width (a slider's track, a progress bar, a separator) are `terminal::line`: a view one Cell by

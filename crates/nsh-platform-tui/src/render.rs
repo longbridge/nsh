@@ -309,10 +309,19 @@ impl Painter<'_> {
         }
         let children_pointer = pointer && view.props.pointer_events != PointerEvents::BoxOnly;
 
-        let fill = view
-            .animated
-            .background
-            .unwrap_or(view.style.background_color);
+        // What a terminal cannot show (an image, a video, a web view)
+        // keeps its box blank: its fill would read as a band of content.
+        let blank = matches!(
+            view.kind,
+            ViewKind::Image | ViewKind::Video | ViewKind::WebView
+        );
+        let fill = if blank {
+            nsh_core::Color::TRANSPARENT
+        } else {
+            view.animated
+                .background
+                .unwrap_or(view.style.background_color)
+        };
         let control = control(view);
         let emphasis = if control {
             stands_out(fill, ground)
@@ -1364,7 +1373,9 @@ fn mark_state(
             }
         }
     }
-    if selected && !inner.is_empty() {
+    // A tab the app underlines keeps its underline alone, as with colors.
+    let tab = view.props.accessibility.role == AccessibilityRole::Tab;
+    if selected && !inner.is_empty() && !(tab && underlined(buffer, inner)) {
         for y in inner.y..inner.bottom() {
             for x in inner.x..inner.right() {
                 buffer[(x, y)].modifier.insert(Modifier::REVERSED);
@@ -1410,8 +1421,9 @@ fn mark_state(
 /// view's own step and background): bands of the ramp and bold, after
 /// grok-build's look. Selected and focused items take the select band,
 /// hovered ones the hover band, pressed ones the select band; a focused
-/// field brightens its line (or sinks); tabs are bold when chosen, muted
-/// otherwise; disabled views are faint, with no band.
+/// field brightens its line (or sinks); tabs are bold when chosen and on
+/// the select band unless the app underlines them, muted otherwise;
+/// disabled views are faint, with no band.
 #[allow(clippy::too_many_arguments)]
 fn mark_surface(
     buffer: &mut Buffer,
@@ -1490,6 +1502,12 @@ fn mark_surface(
         band(buffer, visible, step(palette::RAISED), own);
     }
     if tab {
+        // The selected tab of a segmented list stands on the select band;
+        // one whose app marks it with an underline (an underlined tab
+        // strip) keeps that mark alone.
+        if selected && !underlined(buffer, inner) {
+            band(buffer, visible, step(SELECT), own);
+        }
         if selected || focused {
             drawn(buffer, inner, |cell| cell.modifier.insert(Modifier::BOLD));
         } else {
@@ -1566,6 +1584,16 @@ fn mark_disclosure(buffer: &mut Buffer, rect: Rect, open: bool, (fg, modifier): 
     cell.set_symbol(if open { "▾" } else { "▸" });
     cell.fg = fg;
     cell.modifier = (cell.modifier | modifier) - Modifier::BOLD - Modifier::REVERSED;
+}
+
+/// Whether a glyph of `rect` is underlined: the app marks the view itself.
+fn underlined(buffer: &Buffer, rect: Rect) -> bool {
+    (rect.y..rect.bottom()).any(|y| {
+        (rect.x..rect.right()).any(|x| {
+            let cell = &buffer[(x, y)];
+            cell.symbol() != " " && cell.modifier.contains(Modifier::UNDERLINED)
+        })
+    })
 }
 
 /// Changes each Cell of `rect` that shows a glyph.

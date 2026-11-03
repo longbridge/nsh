@@ -322,10 +322,12 @@ do (a text is one row per line).
   maximum `Min` and `Max`. A `flexBasis` (points, or a percentage) is the child's `Length` along the main axis either
   way, whatever it holds (a resizable panel's size), within its minimum and maximum there; a fill's basis of 0 is
   its content's where its parent's length is not known. An explicit height counts only on a box without content (a chart's canvas, a spacer) and
-  on a scroll view, as a maximum; a box with content is as tall as its content, at most its `maxHeight` (a popup bounded by the room
+  on a scroll view, as a maximum; a list's is its height (its cells are laid out apart, in the size it is given). A
+  percentage height is of a known height only, as CSS's, never of the room left below. A box with content is as tall as its content, at most its `maxHeight` (a popup bounded by the room
   below its anchor), and one with a height in points is
   not stretched across a row (a badge stays a row beside a title and its subtitle). When the children do not fit, those
-  in a row give in this order: the gaps, down to one column; icon buttons shown as their labels, down to three
+  in a row give in this order: the gaps, down to one column (before a `flexGrow` child wraps, only when that keeps it
+  on its rows: columns of sections that wrap anyway keep the gaps between them); icon buttons shown as their labels, down to three
   columns (the label cut short) and then out, the last first, and so does a row of them (a toolbar's group) nested
   in the row, as one; children with `flexShrink`, down to the longest word
   of their texts; every child down to its words; then the shrinking ones and all of them below (a text wraps, the
@@ -351,7 +353,7 @@ do (a text is one row per line).
   or more and a known background), a filled container is a surface: its fill is above 3% alpha and unlike the
   nearest opaque fill around it (the page's at the root: black in a dark app, white in a light one), by 1.5 in CIE L*
   or as a saturated color of another hue. A surface has no border Cells (mounted with none) unless the app's border
-  is at least twice as far in lightness from the backdrop as the fill, and keeps its padding: a row above and below
+  is hued or at least twice as far in lightness from the backdrop as the fill, and keeps its padding: a row above and below
   from 12pt, two columns each side from 12pt, one from 4pt. Without bands a filled box is laid out as any other.
 - **Spacing.** A gap between children in a row is one column from above 0, two from 24pt, their margins added; two controls side
   by side keep a column apart even without one when they share a band (a split button's halves on its fill) or each
@@ -369,12 +371,16 @@ do (a text is one row per line).
 - **Absolute** children take no room; their insets (nearest Cell) place them in the padding box, and both insets of
   an axis without a size along it stretch them between the two (a divider's band down a whole column). A box that holds
   only absolute children (a table's header over its cells, each of its rows) keeps its explicit height, which a box
-  of content rows otherwise takes from them: nothing in it is in flow to size it. A small label (one
+  of content rows otherwise takes from them: nothing in it is in flow to size it. A box is at least as tall as its
+  absolute labels (children with text, no control, not an overlay) placed from its top in points (a step's label
+  under its dot), up to its explicit height: rows
+  shorter than points leave less room than they were given, and they never cover what follows. A small label (one
   row, narrower than the sibling it is on, no control in it) pinned on a row of a sibling's text that is not white
   space (a badge on an avatar's initials) is left out: Cells cannot be seen through, so one of the two would be lost,
   and the content is kept. Controls (a slider's thumb), bars pinned over a scroll view and boxes over blank Cells are
   placed.
-- **Scroll views** lay their content out unbounded along their axis; **grids** take their columns from the template
+- **Scroll views** lay their content out unbounded along their axis, percentages of their viewport (a carousel's
+  `w-full` slide is one view wide); **grids** take their columns from the template
   (`fr` fills, points are Cells, the rest their content's), their rows their content's height, the items in order.
 - **Screens and modals** fill the stack or window the core sizes them to, and the padding the core gives them below
   their header converts exactly (the nearest row), not by the spacing rule above. A **native component** takes its
@@ -391,16 +397,21 @@ do (a text is one row per line).
 - A **bare overlay** with a border (a dock's drop preview) is its outline: its size is the app's, and its border is
   drawn over its outer Cells.
 - Explicit lengths round to the nearest whole Cell, an exact half down (a 300 × 200 canvas is 37 × 12 Cells).
-- What a terminal cannot show well is left out, never emulated: images, videos, web views,
-  shaders and icon-sized canvases (an explicit width and height both at most 48pt) are `display: none`, so they take
-  no Cells, no frame and no hits, and their margins and the gaps beside them go with them (`Core::grid_role`). So is
+- What a terminal cannot show well is never emulated. At an icon's size (an explicit width and height both at most
+  48pt) images, videos, web views, shaders and canvases are `display: none`, so they take no Cells, no frame and no
+  hits, and their margins and the gaps beside them go with them (`Core::grid_role`). Larger, they keep their box: a
+  canvas is drawn in braille, the others stay blank (their fill too), and the labels around them stay where the box
+  puts them instead of closing up over it. An empty box (no control) with an explicit size of two Cells or more each
+  way and a border draws its outline, as its size is its own: a code cell waiting for its digit. So is
   a view with nothing in it smaller than a row both ways and not growing (a status dot, a swatch), or a circle with
   nothing in it at most 48pt across that is no control (a radio's ring, an avatar's placeholder), which draws
   nothing in a terminal, and a view (no control, not growing) whose content is all left out (an icon's tile or
   circle). A control whose content is all left out (an icon button; a layer that grows to center its icon, as a menu
   trigger's chevron, counts as left out) shows its accessibility label in one row, one column per character, and is
   left out without one; a popup's trigger (its accessibility `expanded` set) shows one chevron, `▾` or `▴`, in one
-  column instead.
+  column instead. A disclosure (a control with `expanded` set and no `hasPopup`: a collapsible's or an accordion's
+  trigger, a tree's row) keeps at least two columns before its content (its padding counts), where the painter draws `▸` or `▾` and a space, unless
+  its first text starts with such a mark itself.
 
 The app's style is kept as given; leaving the terminal (`cell` back to `None`) lays it out with Taffy again.
 

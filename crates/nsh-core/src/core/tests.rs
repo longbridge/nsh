@@ -25334,21 +25334,29 @@ mod terminal_layout {
     }
 
     #[test]
-    fn an_image_is_left_out() {
+    fn an_image_keeps_its_box_and_an_icon_is_left_out() {
         let mut ops = node(
             2,
             Tag::Image,
             ROOT_ID,
             &[
+                ("alignSelf", V::Str("flex-start")),
                 ("width", V::Number(200.0)),
                 ("height", V::Number(100.0)),
-                ("marginBottom", V::Number(32.0)),
             ],
         );
-        ops.extend(text(3, ROOT_ID, "After"));
+        ops.extend(node(
+            3,
+            Tag::Image,
+            ROOT_ID,
+            &[("width", V::Number(16.0)), ("height", V::Number(16.0))],
+        ));
+        ops.extend(text(4, ROOT_ID, "After"));
         let batch = laid_out(ops);
-        assert!(left_out(&batch, 2));
-        assert_eq!(frame_of(&batch, 3), Some(rect(0.0, 0.0, 320.0, 16.0)));
+        // 25 columns, 6.25 rows to 6: blank, so what follows stays below it.
+        assert_eq!(frame_of(&batch, 2), Some(rect(0.0, 0.0, 200.0, 96.0)));
+        assert!(left_out(&batch, 3));
+        assert_eq!(frame_of(&batch, 4), Some(rect(0.0, 96.0, 320.0, 16.0)));
     }
 
     #[test]
@@ -26232,6 +26240,122 @@ mod terminal_layout {
     }
 
     #[test]
+    fn a_list_takes_its_explicit_height_before_its_cells_are_laid_out() {
+        // Its cells are laid out apart, in the size it is given: content
+        // of no rows would leave it none to lay them out in.
+        for horizontal in [false, true] {
+            let mut ops = view(2, ROOT_ID, &[]);
+            ops.extend(node(3, Tag::List, 2, &[("height", V::Number(128.0))]));
+            ops.push(Op::SetProp {
+                id: 3,
+                prop: Prop::EstimatedItemSize(px(232.0)),
+            });
+            ops.push(Op::SetProp {
+                id: 3,
+                prop: Prop::Count(20),
+            });
+            ops.push(Op::SetProp {
+                id: 3,
+                prop: Prop::Horizontal(horizontal),
+            });
+            let batch = laid_out(ops);
+            assert_eq!(
+                frame_of(&batch, 3).map(|f| f.size.height),
+                Some(Points(128.0)),
+                "horizontal {horizontal}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_horizontal_scroll_view_s_slides_of_its_full_width_are_one_viewport_each() {
+        let mut ops = node(2, Tag::Scroll, ROOT_ID, &[("width", V::Number(160.0))]);
+        ops.push(Op::SetProp {
+            id: 2,
+            prop: Prop::Horizontal(true),
+        });
+        for (id, label) in [(4, "Welcome"), (8, "Import")] {
+            ops.extend(view(id, 2, &[("width", V::Str("100%"))]));
+            ops.extend(text(id + 1, id, label));
+        }
+        let batch = laid_out(ops);
+        // A percentage is of the viewport, as CSS's: one slide per view.
+        assert_eq!(frame_of(&batch, 4), Some(rect(0.0, 0.0, 160.0, 16.0)));
+        assert_eq!(frame_of(&batch, 8), Some(rect(160.0, 0.0, 160.0, 16.0)));
+        let content = batch.items.iter().find_map(|i| match i {
+            MountItem::ScrollContent { id: 2, size } => Some(*size),
+            _ => None,
+        });
+        assert_eq!(content, Some(size_pt(320.0, 16.0)));
+    }
+
+    #[test]
+    fn a_box_holds_its_absolute_children_placed_from_its_top() {
+        // A step's dot (left out) with its label 24pt under it, then the
+        // buttons: the label keeps a row of its own above them.
+        let mut ops = view(2, ROOT_ID, &[]);
+        ops.extend(view(3, 2, &[("width", V::Number(18.0))]));
+        ops.extend(view(
+            4,
+            3,
+            &[
+                ("width", V::Number(18.0)),
+                ("height", V::Number(18.0)),
+                ("borderRadius", V::Number(9.0)),
+                ("borderWidth", V::Number(1.0)),
+            ],
+        ));
+        ops.extend(view(
+            6,
+            3,
+            &[
+                ("position", V::Str("absolute")),
+                ("top", V::Number(24.0)),
+                ("left", V::Number(-23.0)),
+                ("width", V::Number(64.0)),
+            ],
+        ));
+        ops.extend(text(7, 6, "Account"));
+        ops.extend(text(10, 2, "Next step"));
+        let batch = laid_out(ops);
+        let label = frame_of(&batch, 6).unwrap();
+        let next = frame_of(&batch, 10).unwrap();
+        assert!(
+            label.origin.y + label.size.height <= next.origin.y,
+            "label {label:?}, next {next:?}"
+        );
+    }
+
+    #[test]
+    fn a_disclosure_keeps_two_columns_for_its_mark() {
+        let state = |id, has_popup| Op::SetProp {
+            id,
+            prop: Prop::Accessibility(AccessibilityProp::State(crate::AccessibilityState {
+                expanded: Some(false),
+                has_popup,
+                ..Default::default()
+            })),
+        };
+        let mut ops = view(2, ROOT_ID, &[]);
+        // A collapsible's trigger: `▸ ` before its title.
+        ops.extend(pressable(3, 2, &[("flexDirection", V::Str("row"))], None));
+        ops.push(state(3, false));
+        ops.extend(text(4, 3, "Storage"));
+        // One that draws its own mark keeps none for the painter's.
+        ops.extend(pressable(6, 2, &[("flexDirection", V::Str("row"))], None));
+        ops.push(state(6, false));
+        ops.extend(text(7, 6, "▸ Privacy"));
+        // A popup's trigger is no disclosure.
+        ops.extend(pressable(9, 2, &[("flexDirection", V::Str("row"))], None));
+        ops.push(state(9, true));
+        ops.extend(text(10, 9, "Sort by"));
+        let batch = laid_out(ops);
+        assert_eq!(frame_of(&batch, 4).map(|f| f.origin.x), Some(Points(16.0)));
+        assert_eq!(frame_of(&batch, 7).map(|f| f.origin.x), Some(Points(0.0)));
+        assert_eq!(frame_of(&batch, 10).map(|f| f.origin.x), Some(Points(0.0)));
+    }
+
+    #[test]
     fn a_popup_trigger_shown_as_its_chevron_is_one_column() {
         let mut ops = view(2, ROOT_ID, &[("flexDirection", V::Str("row"))]);
         ops.extend(pressable(
@@ -26244,6 +26368,7 @@ mod terminal_layout {
             id: 3,
             prop: Prop::Accessibility(AccessibilityProp::State(crate::AccessibilityState {
                 expanded: Some(false),
+                has_popup: true,
                 ..Default::default()
             })),
         });

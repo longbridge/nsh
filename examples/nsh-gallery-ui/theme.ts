@@ -19,6 +19,11 @@ export const terminal = platform.idiom === "terminal";
 export const TERMINAL_ROW = 16;
 export const TERMINAL_COLUMN = 8;
 
+/** The gap the terminal's layout makes two columns (it makes any smaller
+ * gap one): between neighbours that are words, such as icon buttons shown
+ * as their labels, so they read apart. */
+export const TERMINAL_GAP = 24;
+
 /** A vertical space (a gap, a padding) in the terminal's whole rows: none
  * below half a row, else the nearest whole number of rows. Unchanged
  * elsewhere. */

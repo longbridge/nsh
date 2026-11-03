@@ -372,8 +372,11 @@ const ICON_ROOM = 14 + 6;
  * indicator arrives. It keeps its natural width (never truncated) and
  * reports it without the icon (`onWidth`): the same whether the icon shows
  * or not, so a row deciding on its icons by it never flips back.
+ * `underline`: a terminal marks the selected tab of an underlined strip by
+ * underlining its label, where the strip's indicator, thinner than a Cell,
+ * does not show.
  */
-function TabTitle(props: { name: string; selected: boolean; count?: number; icon?: IconName; onWidth?: (bare: number) => void }) {
+function TabTitle(props: { name: string; selected: boolean; count?: number; icon?: IconName; underline?: boolean; onWidth?: (bare: number) => void }) {
   const on = follow(() => (props.selected ? 1 : 0), motion.move);
   const away = on.interpolate({ inputRange: [0, 1], outputRange: [1, 0] });
   return (
@@ -392,7 +395,15 @@ function TabTitle(props: { name: string; selected: boolean; count?: number; icon
           </View>
         </View>
       </If>
-      <Text style={{ numberOfLines: 1, fontSize: 13, fontWeight: "500", color: on.interpolate({ inputRange: [0, 1], outputRange: [colors.muted, colors.text] }) }}>
+      <Text
+        style={{
+          numberOfLines: 1,
+          fontSize: 13,
+          fontWeight: "500",
+          color: on.interpolate({ inputRange: [0, 1], outputRange: [colors.muted, colors.text] }),
+          textDecorationLine: terminal && props.underline && props.selected ? "underline" : "none",
+        }}
+      >
         {props.name}
       </Text>
       <If when={props.count !== undefined}>
@@ -1428,7 +1439,7 @@ export function Controls(props: { show: Control }) {
                     focusStyle={focusRing()}
                     disabledStyle={dimmed}
                   >
-                    <TabTitle name={t().name} icon={icons() ? t().icon : undefined} onWidth={sized.report(i())} count={t().count} selected={tab() === t().name} />
+                    <TabTitle name={t().name} icon={icons() ? t().icon : undefined} onWidth={sized.report(i())} count={t().count} selected={tab() === t().name} underline />
                   </Tab>
                 )}
               </Each>

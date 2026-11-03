@@ -1,6 +1,6 @@
 import { Canvas, createAnimatedValue, Easing, effect, type JSX, LayoutAnimation, Path2D, platform, reduceMotion, signal, Text, View, type ViewStyle } from "nsh";
 import { Toggle, ToggleGroup } from "nsh/base";
-import { alpha, Badge, Caption, Card, chart, colors, DemoPage, finish, focusRing, hovered, mono, motion, Toggle as Switch } from "../ui";
+import { alpha, Badge, Caption, Card, chart, colors, DemoPage, finish, focusRing, hovered, mono, motion, terminal, Toggle as Switch } from "../ui";
 import { LucideIcon, type LucideIconName } from "./RichEditorUi";
 
 // `nsh/base`'s `Toggle` owns presses, the pressed state screen readers hear
@@ -302,21 +302,24 @@ export function ToggleDemo() {
             boxShadow: finish.track.boxShadow,
           }}
         >
-          <View
-            style={{
-              pointerEvents: "none",
-              position: "absolute",
-              top: inset,
-              bottom: inset,
-              left: inset,
-              width: seg,
-              borderRadius: 7,
-              borderCurve: "continuous",
-              borderWidth: 1,
-              ...finish.raised,
-              transform: [{ translateX: x }],
-            }}
-          />
+          {/* The thumb, in points: a terminal's Cells show the selected toggle as its own band instead. */}
+          <If when={!terminal}>
+            <View
+              style={{
+                pointerEvents: "none",
+                position: "absolute",
+                top: inset,
+                bottom: inset,
+                left: inset,
+                width: seg,
+                borderRadius: 7,
+                borderCurve: "continuous",
+                borderWidth: 1,
+                ...finish.raised,
+                transform: [{ translateX: x }],
+              }}
+            />
+          </If>
           {segment("grid", "Grid view", (tint) => <GridGlyph tint={tint} size={pointer ? 15 : 17} />)}
           {segment("list", "List view", (tint) => <LucideIcon name="list" size={pointer ? 15 : 17} tint={tint} />)}
         </ToggleGroup>

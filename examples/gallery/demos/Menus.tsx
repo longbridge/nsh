@@ -4,7 +4,7 @@ import { platform } from "nsh";
 import { keymap } from "nsh";
 import { Icon, LucideIcon, type LucideIconName } from "../icons";
 import { toast, updateToast } from "../toast";
-import { alpha, Badge, Button, Caption, Card, colors, DemoPage, finish, isDark, menuIndicator, MenuMark, mono, PopIn, type PopupSide, popupSurface, Row, Segmented, Tip } from "../ui";
+import { alpha, Badge, Button, Caption, Card, colors, DemoPage, finish, isDark, menuIndicator, MenuMark, mono, PopIn, type PopupSide, popupSurface, Row, Segmented, terminal, Tip } from "../ui";
 
 // The look of every menu here is the gallery's: `nsh/base` draws none.
 
@@ -434,7 +434,8 @@ export function Menus() {
                           backgroundColor: isOpen(`${file().name} ⋯`) ? token("accent") : "transparent",
                         }}
                       >
-                        <LucideIcon name="ellipsis" size={16} tint={colors.muted} />
+                        {/* The terminal draws no icons: the ellipsis as text, not a popup's ▾. */}
+                        {terminal ? <Text style={{ color: colors.muted }}>⋯</Text> : <LucideIcon name="ellipsis" size={16} tint={colors.muted} />}
                       </View>
                     }>
                       {actions(file)}

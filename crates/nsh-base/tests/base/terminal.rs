@@ -8,11 +8,11 @@ use std::{
 };
 
 use nsh_base::{
-    ColorChannel, ColorPickerEvent, ColorSpace, SelectItem, TreeItem, accordion, accordion_header,
-    accordion_item, accordion_panel, accordion_trigger, checkbox, color_area, color_picker,
-    color_slider, color_swatch, progress, radio, radio_group, select, slider, switch,
+    ColorChannel, ColorPickerEvent, ColorSpace, SelectItem, TreeEntry, TreeItem, accordion,
+    accordion_header, accordion_item, accordion_panel, accordion_trigger, checkbox, color_area,
+    color_picker, color_slider, color_swatch, progress, radio, radio_group, select, slider, switch,
     terminal::{self, PROGRESS_EIGHTHS, PROGRESS_EMPTY, SLIDER_FILL, SLIDER_TRACK},
-    tree,
+    text_view, tree,
 };
 use nsh_core::{
     MountItem, NodeId, Size,
@@ -268,6 +268,119 @@ fn triggers_disclosures_and_tree_rows_show_the_terminals_marks() {
     app.press("text:One").unwrap();
     app.wait_for("text:One details").unwrap();
     assert!(texts(&app).iter().any(|t| t == "▾ "));
+}
+
+/// An accordion item open from the start and a tree whose rows the app
+/// draws (`renderItem`), indented by depth as apps do.
+#[component]
+fn Drawn() -> impl IntoElement {
+    let open = signal(vec![SharedString::from("one")]);
+    view()
+        .child(
+            accordion()
+                .value(open)
+                .on_change(move |next: &Vec<SharedString>| open.set(next.clone()))
+                .child(
+                    accordion_item()
+                        .value("one")
+                        .child(
+                            accordion_header().child(
+                                accordion_trigger()
+                                    .gap(px(10.0))
+                                    .child(text("Shipping"))
+                                    .child(text("1 day")),
+                            ),
+                        )
+                        .child(accordion_panel().child(text("Same day before 2 pm"))),
+                ),
+        )
+        .child(
+            tree()
+                .items(vec![
+                    TreeItem::new("src", "src").child(TreeItem::new("src/lib.rs", "lib.rs")),
+                ])
+                .default_expanded(vec![SharedString::from("src")])
+                .render_item(|e: &TreeEntry| {
+                    view()
+                        .pl(px(e.depth as f32 * 14.0))
+                        .child(text(e.label.clone()))
+                })
+                .w(px(300.0))
+                .h(px(200.0)),
+        )
+}
+
+/// The text shown just before `label`.
+fn before(app: &Headless, label: &str) -> Option<String> {
+    let shown = texts(app);
+    let at = shown.iter().position(|t| t == label)?;
+    at.checked_sub(1).map(|at| shown[at].clone())
+}
+
+#[test]
+fn an_accordions_disclosure_leads_its_title_and_the_panel_lines_up_under_it() {
+    let app = start::<Drawn>(Idiom::Terminal);
+    // The trigger's disclosure, then its children a column apart: the
+    // trigger's own gap does not part the disclosure from the title.
+    assert_eq!(before(&app, "Shipping").as_deref(), Some("▾ "));
+    assert_eq!(before(&app, "1 day").as_deref(), Some("Shipping"));
+    // The panel's content past the disclosure, under the title.
+    assert_eq!(
+        before(&app, "Same day before 2 pm").as_deref(),
+        Some(terminal::DISCLOSURE_NONE)
+    );
+    // An app's row is the app's: the terminal's layout leads a folder's.
+    assert_eq!(
+        before(&app, "src").as_deref(),
+        Some("Same day before 2 pm")
+    );
+    let gui = start::<Drawn>(Idiom::Desktop);
+    assert_eq!(before(&gui, "Shipping"), None);
+    assert_eq!(before(&gui, "src").as_deref(), Some("Same day before 2 pm"));
+}
+
+/// A document with lists, tasks, a footnote and a table.
+#[component]
+fn Document() -> impl IntoElement {
+    text_view().markdown(
+        "1. First\n2. Second\n   - nested\n\n- [ ] Open task\n- [x] Done task\n\n\
+         Numbers from benchmarks[^1].\n\n\
+         | Platform | Views |\n|---|---|\n| iOS | UIKit |\n\n[^1]: A note.",
+    )
+}
+
+#[test]
+fn a_documents_markers_rules_and_notes_are_the_terminals_text() {
+    let app = start::<Document>(Idiom::Terminal);
+    let shown = joined(&app);
+    // Markers a column before their content, nested ones indented by them.
+    for row in [
+        "1. First",
+        "2. Second",
+        "◦ nested",
+        "[ ] Open task",
+        "[✓] Done task",
+    ] {
+        assert!(shown.contains(row), "{row} not in {shown:?}");
+    }
+    // The reference apart from its word.
+    assert!(shown.contains("benchmarks[1]"), "{shown:?}");
+    // The table ruled in box drawing, its cells between bars.
+    let lines = texts(&app);
+    for (start, end) in [('┌', '┐'), ('├', '┤'), ('└', '┘')] {
+        assert!(
+            lines
+                .iter()
+                .any(|l| l.starts_with(start) && l.ends_with(end) && l.contains('─')),
+            "no {start}…{end} rule in {lines:?}"
+        );
+    }
+    assert!(shown.contains("│ Platform"), "{shown:?}");
+    assert!(shown.contains("│ iOS"), "{shown:?}");
+    // Elsewhere, none of it.
+    let gui = start::<Document>(Idiom::Desktop);
+    let shown = joined(&gui);
+    assert!(!shown.contains("[ ]") && !shown.contains('┌'), "{shown:?}");
 }
 
 /// A picker of `#3b82f6` (HSB hue 217) with an area, a hue slider and a

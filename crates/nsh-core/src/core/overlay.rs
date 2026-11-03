@@ -1012,7 +1012,16 @@ impl<M: TextEngine> Core<M> {
                 insets.left.0 + m,
             ],
         );
-        let placed = match self.covering(key, config, frame.size) {
+        // A terminal frames a popup's box one Cell outside it (a rounded
+        // line, `nsh-platform-tui`): it is placed with that frame, which
+        // then sits beside the trigger, never on its row, and lines up
+        // with its start or end.
+        let ring = self.outside_frame(key);
+        let framed = Size {
+            width: frame.size.width + ring.width * 2.0,
+            height: frame.size.height + ring.height * 2.0,
+        };
+        let placed = match self.covering(key, config, framed) {
             Some(at) => {
                 // Its start on the anchor's (a list as wide as its
                 // trigger lines up with it), the cover view's middle on
@@ -1024,14 +1033,15 @@ impl<M: TextEngine> Core<M> {
                     anchor.origin.x.0,
                     area.origin.x.0,
                     area.right().0,
-                    frame.size.width.0,
+                    framed.width.0,
                 );
                 let y = keep(
                     anchor.origin.y.0 + (anchor.size.height.0 - at.size.height.0) / 2.0
-                        - at.origin.y.0,
+                        - at.origin.y.0
+                        - ring.height.0,
                     area.origin.y.0,
                     area.bottom().0,
-                    frame.size.height.0,
+                    framed.height.0,
                 );
                 Placed {
                     origin: point(Points(x), Points(y)),
@@ -1041,11 +1051,22 @@ impl<M: TextEngine> Core<M> {
             }
             None => place(
                 anchor,
-                frame.size,
+                framed,
                 area,
                 &config,
                 self.nodes[key as usize].rtl,
             ),
+        };
+        let placed = Placed {
+            origin: point(
+                placed.origin.x + ring.width,
+                placed.origin.y + ring.height,
+            ),
+            available: Size {
+                width: (placed.available.width - ring.width * 2.0).max(Points::ZERO),
+                height: (placed.available.height - ring.height * 2.0).max(Points::ZERO),
+            },
+            ..placed
         };
         let bounds = Bounds {
             origin: placed.origin,
@@ -1083,6 +1104,45 @@ impl<M: TextEngine> Core<M> {
             }),
         );
         placed.origin
+    }
+
+    /// The Cell a terminal frames overlay `key`'s box in, outside it, on
+    /// each side (none elsewhere): the painter draws a rounded line around
+    /// the first box in it that has a surface, unless the layout kept that
+    /// box's border (a card's) inside it.
+    fn outside_frame(&self, key: Key) -> Size<Points> {
+        let Some(grid) = self.layout.grid() else {
+            return Size::default();
+        };
+        let mut at = key;
+        loop {
+            let n = &self.nodes[at as usize];
+            let w = n.view_style.borders.widths;
+            let bordered = [w.top, w.right, w.bottom, w.left]
+                .iter()
+                .any(|&v| v > Points::ZERO);
+            if bordered || n.view_style.background_color.0 & 255 != 0 {
+                let kept = n.layout.is_some_and(|l| {
+                    let b = self.layout.unrounded_layout(l).border;
+                    b.top > 0.0 || b.left > 0.0
+                });
+                return if kept {
+                    Size::default()
+                } else {
+                    Size {
+                        width: Points(grid.width),
+                        height: Points(grid.height),
+                    }
+                };
+            }
+            let Some(&first) = n.children.iter().find(|&&c| {
+                let c = &self.nodes[c as usize];
+                !c.is_overlay() && c.layout.is_some()
+            }) else {
+                return Size::default();
+            };
+            at = first;
+        }
     }
 
     fn set_native_overlay_anchor(

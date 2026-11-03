@@ -671,10 +671,20 @@ pub fn Combobox(props: ComboboxProps, cx: Scope<ComboboxEvent>) -> impl IntoElem
         .element_ref(&anchor)
         .flex_row()
         .on_layout(move |frame: &Bounds<Points>| width.set(Some(frame.size.width)))
-        .child(props.prefix.place(|p| p))
+        // A terminal keeps a column between the field and the app's
+        // prefix and suffix (a `⌘K` after the ` ▾`).
+        .child(
+            props
+                .prefix
+                .place(move |p| if terminal { p.mr(px(8.0)) } else { p }),
+        )
         .child(text_field)
         .child(clear)
         .child(trigger_button)
-        .child(props.suffix.place(|s| s))
+        .child(
+            props
+                .suffix
+                .place(move |s| if terminal { s.ml(px(8.0)) } else { s }),
+        )
         .child(listbox::present(lb, anchor, width, parts, hooks))
 }

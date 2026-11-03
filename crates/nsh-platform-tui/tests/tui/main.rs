@@ -12,6 +12,7 @@ mod canvas;
 mod controls;
 mod data_table;
 mod dock;
+mod editor;
 mod focus_navigation;
 mod geometry;
 mod keyboard;

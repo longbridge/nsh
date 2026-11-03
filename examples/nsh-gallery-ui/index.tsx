@@ -177,8 +177,23 @@ export const density = pointer
  * edge (a badge, an action).
  */
 function SectionHead(props: { title: string; subtitle?: JSX.Element; right?: JSX.Element }) {
+  // The terminal's subtitle takes the section's width under the title row:
+  // a trailing action shares the title's row, never the subtitle's.
+  if (terminal) {
+    return (
+      <View>
+        <View style={{ flexDirection: "row", gap: 2 * TERMINAL_COLUMN }}>
+          <Text style={{ flex: 1, fontSize: density.title, fontWeight: "600", color: colors.text }}>{props.title}</Text>
+          {props.right}
+        </View>
+        <If when={props.subtitle}>
+          <Text style={{ fontSize: density.note, color: colors.muted }}>{props.subtitle}</Text>
+        </If>
+      </View>
+    );
+  }
   return (
-    <View style={terminal ? { flexDirection: "row", gap: 2 * TERMINAL_COLUMN } : { flexDirection: "row", alignItems: "flex-end", gap: 8, paddingHorizontal: pointer ? 2 : 4 }}>
+    <View style={{ flexDirection: "row", alignItems: "flex-end", gap: 8, paddingHorizontal: pointer ? 2 : 4 }}>
       <View style={{ flex: 1, gap: terminal ? 0 : 2 }}>
         <Text
           style={
@@ -319,7 +334,7 @@ export function Stat(props: { label: string; value: string; tone?: Tone; width?:
     <View
       style={
         terminal
-          ? { width: props.width, height: TERMINAL_ROW, flexDirection: "row", justifyContent: "space-between", gap: TERMINAL_COLUMN, paddingRight: 2 * TERMINAL_COLUMN }
+          ? { width: props.width, height: TERMINAL_ROW, flexDirection: "row", gap: TERMINAL_COLUMN }
           : { width: props.width, gap: 3, paddingVertical: 4 }
       }
     >
@@ -708,7 +723,7 @@ export function Sheet(props: { open: boolean; onClose: () => void; children: JSX
   );
 }
 
-export { Icon, type IconName } from "./icons";
+export { Icon, IconLabel, type IconName } from "./icons";
 
 /**
  * A short text as an element's `tooltip`: a `Tooltip` of `nsh/base` in a

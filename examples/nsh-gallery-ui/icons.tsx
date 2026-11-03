@@ -1,4 +1,5 @@
-import { Canvas, Image, type CanvasRenderingContext2D } from "nsh";
+import { Canvas, Image, Text, type CanvasRenderingContext2D } from "nsh";
+import { terminal } from "./theme";
 
 /** Line glyphs drawn in a 20 × 20 box with the tint as stroke. */
 export type IconName =
@@ -613,6 +614,15 @@ export function Icon(props: { name: IconName; size?: number; tint: string; weigh
       }}
     />
   );
+}
+
+/**
+ * An icon-only control's content: the icon, or in the terminal, which draws
+ * no icons, `label` as text in the icon's tint (a short word: the control's
+ * accessibility label keeps its full name).
+ */
+export function IconLabel(props: { name: IconName; label: string; size?: number; tint: string; weight?: number }) {
+  return terminal ? <Text style={{ color: props.tint }}>{props.label}</Text> : <Icon name={props.name} size={props.size} tint={props.tint} weight={props.weight} />;
 }
 
 /** The check mark as an SVG in one color, recolored by `tintColor`: the same stroke as the `check` glyph. */

@@ -1,8 +1,8 @@
 import { type AnimatedValue, cleanup, Clipboard, createAnimatedValue, Easing, effect, LayoutAnimation, openUrl, reduceMotion, signal, Text, token, View } from "nsh";
 import { Button as BaseButton, Menu, MenuItem } from "nsh/base";
 import { keymap, platform } from "nsh";
-import { Icon, type IconName } from "../icons";
-import { alpha, Badge, Button, Caption, Card, colors, DemoPage, finish, focusRing, follow, hovered, mono, motion, radius, Spinner, tints, Tip, Toggle } from "../ui";
+import { Icon, IconLabel, type IconName } from "../icons";
+import { alpha, Badge, Button, Caption, Card, colors, DemoPage, finish, focusRing, follow, hovered, mono, motion, radius, Spinner, terminal, TERMINAL_GAP, tints, Tip, Toggle } from "../ui";
 
 // `nsh/base`'s `Button` owns presses, the disabled state, keyboard focus and
 // the button role; the look is the gallery's (`Button` of `nsh-gallery-ui`):
@@ -53,7 +53,7 @@ function popOn(key: () => unknown): AnimatedValue {
  * its shortcut on desktops). `on` keeps it chosen (a toggle: a favorite),
  * its icon in the accent and popping as it turns on or off.
  */
-function IconButton(props: { icon: IconName; label: string; shortcut?: string; on?: boolean; tone?: "danger"; variant?: "ghost" | "secondary"; onPress: () => void }) {
+function IconButton(props: { icon: IconName; label: string; short?: string; shortcut?: string; on?: boolean; tone?: "danger"; variant?: "ghost" | "secondary"; onPress: () => void }) {
   const size = pointer ? 28 : 40;
   const press = createAnimatedValue(1);
   const pop = popOn(() => props.on);
@@ -72,8 +72,9 @@ function IconButton(props: { icon: IconName; label: string; shortcut?: string; o
       activeStyle={raised() ? finish.pressed : { backgroundColor: alpha(colors.text, 0.1) }}
       focusStyle={focusRing()}
       style={{
-        width: size,
-        height: size,
+        // The terminal sizes it to its label.
+        width: terminal ? undefined : size,
+        height: terminal ? undefined : size,
         alignItems: "center",
         justifyContent: "center",
         borderRadius: radius.control,
@@ -88,7 +89,7 @@ function IconButton(props: { icon: IconName; label: string; shortcut?: string; o
       }}
     >
       <View style={{ transform: [{ scale: pop }] }}>
-        <Icon name={props.icon} size={pointer ? 15 : 18} tint={tint()} />
+        <IconLabel name={props.icon} label={props.short ?? props.label} size={pointer ? 15 : 18} tint={tint()} />
       </View>
     </View>
   );
@@ -272,17 +273,17 @@ export function ButtonDemo() {
             <Text style={{ fontSize: pointer ? 14 : 16, fontWeight: "600", color: colors.text }}>Harbor at dawn.jpg</Text>
             <Text style={{ fontSize: pointer ? 12 : 13, color: colors.faint, fontVariant: ["tabular-nums"] }}>4032 × 3024 · 3.2 MB</Text>
           </View>
-          <View style={{ flexDirection: "row", alignItems: "center", gap: pointer ? 2 : 4 }}>
-            <IconButton icon="star" label={starred() ? "Remove from favorites" : "Add to favorites"} shortcut={key} on={starred()} onPress={star} />
-            <IconButton icon="share" label="Share…" onPress={() => last.set("pressed Share")} />
+          <View style={{ flexDirection: "row", alignItems: "center", gap: terminal ? TERMINAL_GAP : pointer ? 2 : 4 }}>
+            <IconButton icon="star" label={starred() ? "Remove from favorites" : "Add to favorites"} short="Favorite" shortcut={key} on={starred()} onPress={star} />
+            <IconButton icon="share" label="Share…" short="Share" onPress={() => last.set("pressed Share")} />
             <IconButton icon="download" label="Download" onPress={() => last.set("pressed Download")} />
-            <IconButton icon="trash" label="Move to the trash" tone="danger" onPress={() => last.set("pressed Move to the trash")} />
+            <IconButton icon="trash" label="Move to the trash" short="Trash" tone="danger" onPress={() => last.set("pressed Move to the trash")} />
           </View>
         </View>
-        <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
+        <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: terminal ? TERMINAL_GAP : 8 }}>
           <IconButton icon="plus" label="New file" variant="secondary" onPress={() => last.set("pressed New file")} />
           <IconButton icon="search" label="Search" variant="secondary" onPress={() => last.set("pressed Search")} />
-          <IconButton icon="sidebar" label={pinned() ? "Hide the sidebar" : "Show the sidebar"} variant="secondary" on={pinned()} onPress={() => pinned.set(!pinned())} />
+          <IconButton icon="sidebar" label={pinned() ? "Hide the sidebar" : "Show the sidebar"} short="Sidebar" variant="secondary" on={pinned()} onPress={() => pinned.set(!pinned())} />
           <View style={{ flex: 1 }} />
           <Button label="Play" icon="play" variant="secondary" onPress={() => last.set("pressed Play")} />
         </View>

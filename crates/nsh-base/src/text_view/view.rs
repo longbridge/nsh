@@ -15,7 +15,10 @@ use super::{
     ListItem, MarkdownExtension, MarkdownOptions, MarkdownPlugins, Parser, Table,
     parts::{TextViewClasses, TextViewPart as Part, TextViewParts, TextViewStyles},
 };
-use crate::theme::theme;
+use crate::{
+    terminal::{checkbox_mark, is_terminal, mark_view},
+    theme::theme,
+};
 
 /// The props of [`TextView`].
 #[derive(Debug, Clone, Copy, PartialEq, Props)]
@@ -664,9 +667,43 @@ impl Cx {
             Part::UnorderedList
         };
         let depth = self.list_depth.get();
+        let terminal = is_terminal();
+        // A terminal's numbers right-aligned to the widest, so the items'
+        // content stays in line.
+        let digits = (start as usize + n.saturating_sub(1)).to_string().len();
         let rows = items.iter().enumerate().map(|(i, item)| {
             let key = format!("{key}.{i}");
             let marker = match item.checked {
+                // The terminal's checkbox mark, a column before the content.
+                Some(checked) if terminal => {
+                    let mut parts = vec![Part::ListMarker, Part::TaskMarker];
+                    if checked {
+                        parts.push(Part::TaskMarkerChecked);
+                    }
+                    let marker = mark_view(move || checkbox_mark(checked, false))
+                        .flex_none()
+                        .role(AccessibilityRole::Checkbox)
+                        .accessibility_state(AccessibilityState {
+                            checked: Some(if checked {
+                                nsh_core::Checked::True
+                            } else {
+                                nsh_core::Checked::False
+                            }),
+                            ..AccessibilityState::default()
+                        });
+                    self.parts(marker, &parts).into_element()
+                }
+                None if terminal => {
+                    let marker = if ordered {
+                        format!("{:>digits$}. ", start as usize + i)
+                    } else {
+                        format!("{} ", bullet(depth))
+                    };
+                    let marker = text(marker)
+                        .flex_none()
+                        .text_color(move || theme().muted_foreground);
+                    self.part(marker, Part::ListMarker).into_element()
+                }
                 Some(checked) => {
                     let mut parts = vec![Part::ListMarker, Part::TaskMarker];
                     if checked {
@@ -710,13 +747,7 @@ impl Cx {
                     let marker = if ordered {
                         format!("{}.", start as usize + i)
                     } else {
-                        // A browser's markers by depth: disc, circle, square.
-                        match depth {
-                            0 => "•",
-                            1 => "◦",
-                            _ => "▪",
-                        }
-                        .to_owned()
+                        bullet(depth).to_owned()
                     };
                     // In the indent before the content, its end against
                     // it, as a browser places it: wider numbers reach
@@ -744,7 +775,9 @@ impl Cx {
                         .text_decoration_color(move || theme().muted_foreground.opacity(0.6))
                 });
             let row = view().flex_row().map(|v| {
-                if task {
+                if terminal {
+                    v
+                } else if task {
                     v.gap(px(8.0)).ps(px(1.5))
                 } else {
                     v.ps(px(LIST_INDENT))
@@ -753,7 +786,8 @@ impl Cx {
             let content = self.blocks(content, &item.children, &key, tail && i + 1 == n);
             // Before the content when a box, inside it (placed over the
             // indent) when a bullet or a number.
-            let (before, inside) = if task {
+            // In a terminal the marker is text before the content, always.
+            let (before, inside) = if task || terminal {
                 (Some(marker), None)
             } else {
                 (None, Some(marker))
@@ -898,9 +932,101 @@ impl Cx {
     /// so its classes draw backgrounds and borders; text styles go on the
     /// cells.
     fn table(&self, table: &Table, key: &str, tail: bool) -> AnyElement {
+        if is_terminal() {
+            return self.table_cells(table, key, tail);
+        }
         self.with_line(TABLE_SIZE * TABLE_LINE, || {
             self.table_grid(table, key, tail)
         })
+    }
+
+    /// A table in a terminal: its rows one after the other, each column as
+    /// many Cells wide as its widest cell's text, ruled in box drawing
+    /// (`┌─┬─┐` above, `│` between the cells, `├─┼─┤` under the header,
+    /// `└─┴─┘` below), the header bold. A cell spanning columns takes their
+    /// Cells and the rules between them. A table wider than the view
+    /// scrolls, as everywhere.
+    fn table_cells(&self, table: &Table, key: &str, tail: bool) -> AnyElement {
+        let columns = table.columns().max(1);
+        let align = |i: usize| table.align.get(i).copied().unwrap_or_default();
+        let cell = measure_text("", "0");
+        let widths = column_cells(table, |line| match cell.0 > 0.0 {
+            true => (measure_text("", line).0 / cell.0 - 0.01).ceil().max(0.0) as usize,
+            false => line.chars().count(),
+        });
+        let ruled = |line: String| {
+            text(line)
+                .number_of_lines(1u32)
+                .text_color(move || theme().border)
+                .into_element()
+        };
+        let bar = |glyph: &'static str| text(glyph).flex_none().text_color(move || theme().border);
+        let last_row = table.rows.len();
+        let mut lines = vec![ruled(table_rule(&widths, ['┌', '┬', '┐']))];
+        let rows = std::iter::once(&table.head).chain(&table.rows);
+        for (r, cells) in rows.enumerate() {
+            let head = r == 0;
+            let row_parts: &[Part] = if head {
+                &[Part::TableRow, Part::TableHead]
+            } else {
+                &[Part::TableRow]
+            };
+            let cell_parts: &[Part] = if head {
+                &[Part::TableCell, Part::TableHeaderCell]
+            } else {
+                &[Part::TableCell]
+            };
+            let mut placed = Vec::new();
+            let mut col = 0;
+            for cell in cells.iter() {
+                if col >= columns {
+                    break;
+                }
+                let span = cell.span().min(columns - col);
+                placed.push((col, span, cell.content.as_slice()));
+                col += span;
+            }
+            placed.extend((col..columns).map(|c| (c, 1, &[][..])));
+            let mut row = view().flex_row().child(bar("│ "));
+            for (n, (c, span, content)) in placed.into_iter().enumerate() {
+                if n > 0 {
+                    row = row.child(bar(" │ "));
+                }
+                let end = tail && r == last_row && c + span == columns;
+                let key = format!("{key}.{r}.{c}");
+                // The columns it spans and the ` │ ` between them.
+                let cells = widths[c..c + span].iter().sum::<usize>() + 3 * (span - 1);
+                let t = self.paragraph(content, &key, end);
+                let t = match align(c) {
+                    ColumnAlign::Center => t.text_center(),
+                    ColumnAlign::Right => t.text_right(),
+                    ColumnAlign::Left => t.text_left(),
+                    ColumnAlign::None => t,
+                };
+                let t = t.when(head, |t| t.font_weight(FontWeight::BOLD));
+                let cell = view().flex_none().w(cell * cells as f32);
+                row = row.child(self.parts(cell, cell_parts).child(t));
+            }
+            lines.push(self.parts(row.child(bar(" │")), row_parts).into_element());
+            if head {
+                lines.push(ruled(table_rule(&widths, ['├', '┼', '┤'])));
+            }
+        }
+        lines.push(ruled(table_rule(&widths, ['└', '┴', '┘'])));
+        let actions = self
+            .render_table_actions
+            .as_ref()
+            .map(|r| r.render(format!("table:{key}"), table.clone()));
+        self.part(view().flex_col(), Part::Table)
+            .child(actions)
+            .child(
+                self.part(
+                    scroll().horizontal().scrollbar(self.table_scrollbar),
+                    Part::TableScroll,
+                )
+                .child(view().flex_col().items_start().children(lines)),
+            )
+            .into_element()
     }
 
     /// A code block's action: a ghost button (its background shows while
@@ -1279,8 +1405,14 @@ impl Cx {
             Inline::FootnoteReference { label, index } => {
                 let scope = self.scope;
                 let url = SharedString::from(format!("#footnote-{label}"));
+                // A terminal has one text size: the number in brackets,
+                // apart from the word it follows.
+                let number = match is_terminal() {
+                    true => format!("[{index}]"),
+                    false => index.to_string(),
+                };
                 self.part(
-                    text(index.to_string())
+                    text(number)
                         .text_size(rems(0.75))
                         .text_color(move || theme().primary)
                         .role(AccessibilityRole::Link)
@@ -1592,6 +1724,64 @@ const BODY_LINE: f32 = 1.7;
 const CODE_SIZE: f32 = 13.0;
 /// The line height of code blocks, a multiple of [`CODE_SIZE`].
 const CODE_LINE: f32 = 1.6;
+/// How many Cells each of `table`'s columns takes in a terminal: its
+/// widest cell's widest line (`cells` measures one), at least one; a
+/// spanning cell widens its last column by what its columns and the rules
+/// between them lack.
+fn column_cells(table: &Table, cells: impl Fn(&str) -> usize) -> Vec<usize> {
+    let columns = table.columns().max(1);
+    let mut widths = vec![1; columns];
+    let mut spans = Vec::new();
+    for row in std::iter::once(&table.head).chain(&table.rows) {
+        let mut col = 0;
+        for cell in row {
+            if col >= columns {
+                break;
+            }
+            let span = cell.span().min(columns - col);
+            let mut text = String::new();
+            super::document::inline_text(&cell.content, &mut text);
+            let width = text.lines().map(&cells).max().unwrap_or(0);
+            match span {
+                1 => widths[col] = widths[col].max(width),
+                _ => spans.push((col, span, width)),
+            }
+            col += span;
+        }
+    }
+    for (col, span, width) in spans {
+        let has = widths[col..col + span].iter().sum::<usize>() + 3 * (span - 1);
+        if width > has {
+            widths[col + span - 1] += width - has;
+        }
+    }
+    widths
+}
+
+/// A table's rule in a terminal across columns `widths` Cells wide, each
+/// padded a Cell on both sides: `ends[0]`, `ends[1]` between two columns,
+/// `ends[2]`.
+fn table_rule(widths: &[usize], ends: [char; 3]) -> String {
+    let mut line = String::from(ends[0]);
+    for (i, w) in widths.iter().enumerate() {
+        if i > 0 {
+            line.push(ends[1]);
+        }
+        line.extend(std::iter::repeat_n('─', w + 2));
+    }
+    line.push(ends[2]);
+    line
+}
+
+/// A browser's list markers by depth: disc, circle, square.
+fn bullet(depth: u8) -> &'static str {
+    match depth {
+        0 => "•",
+        1 => "◦",
+        _ => "▪",
+    }
+}
+
 /// The size of footnotes' text.
 const SMALL_SIZE: f32 = 13.0;
 /// The size of tables' text.
@@ -1819,6 +2009,22 @@ mod tests {
 
     fn image(src: &str) -> Inline {
         Inline::Image(Image::new(src))
+    }
+
+    #[test]
+    fn a_terminals_table_columns_are_their_widest_cells_and_spans_widen_the_last() {
+        let cell = |t: &str| super::super::TableCell::new(vec![Inline::Text { text: t.into() }]);
+        let mut wide = cell("A cell spanning both");
+        wide.colspan = Some(2);
+        let table = Table {
+            head: vec![cell("Platform"), cell("Views")],
+            rows: vec![vec![cell("iOS"), cell("UIKit")], vec![wide]],
+            ..Table::default()
+        };
+        let widths = column_cells(&table, |l| l.chars().count());
+        // "Platform" 8; "Views" 5, widened so the span's 20 fit 8 + 3 + 9.
+        assert_eq!(widths, vec![8, 9]);
+        assert_eq!(table_rule(&[2, 1], ['┌', '┬', '┐']), "┌────┬───┐");
     }
 
     #[test]

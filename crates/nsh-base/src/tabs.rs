@@ -144,7 +144,8 @@ pub struct TabsProps {
 /// a list that scrolls is in a scroll view around the `Tabs`.
 ///
 /// In a terminal the list has no indicator and its tabs are in a row, two
-/// Cells apart: the terminal draws the selected tab bold and the others
+/// Cells apart: the terminal draws the selected tab bold on a band (its
+/// underline alone when the app underlines its label) and the others
 /// muted, from the selected state each tab reports ([`crate::terminal`]).
 #[component]
 pub fn Tabs(props: TabsProps, _cx: Scope<NoEvent>) -> impl IntoElement {

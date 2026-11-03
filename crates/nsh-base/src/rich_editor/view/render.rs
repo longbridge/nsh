@@ -539,7 +539,12 @@ fn marker(rv: Rv, item: ReadSignal<BlockItem>) -> impl IntoElement {
                 // A box wide enough for numbers, the marker at its end, as
                 // TextView places its markers.
                 .w(px(32.0))
-                .pe(px(6.0))
+                // A Cell between the marker and the content in a terminal.
+                .pe(px(if crate::terminal::is_terminal() {
+                    8.0
+                } else {
+                    6.0
+                }))
                 .text_right()
                 .pointer_events(PointerEvents::None)
                 .inline_style(move || {

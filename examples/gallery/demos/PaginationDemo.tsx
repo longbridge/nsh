@@ -242,7 +242,17 @@ export function PaginationDemo() {
       <Card
         title="Ten thousand pages"
         subtitle="An ellipsis opens the pages it hides; the same few items however many pages"
-        right={<Toggle value={offline()} onChange={(v) => offline.set(v)} label="Offline" />}
+        right={
+          // The terminal's switch is a glyph: its label beside it says what it turns on.
+          platform.idiom === "terminal" ? (
+            <View style={{ flexDirection: "row", gap: 8 }}>
+              <Text style={{ fontSize: 12, color: colors.muted }}>Offline</Text>
+              <Toggle value={offline()} onChange={(v) => offline.set(v)} label="Offline" />
+            </View>
+          ) : (
+            <Toggle value={offline()} onChange={(v) => offline.set(v)} label="Offline" />
+          )
+        }
       >
         <If when={pointer}>
           <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>

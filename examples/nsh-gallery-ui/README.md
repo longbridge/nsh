@@ -11,7 +11,7 @@ and NSH's elements; it is maintained with these examples, rather than published 
 | `index.tsx` | Shared buttons, cards, insets, badges, rows, switches, sheets and presentation helpers |
 | `popup.tsx` | The popup families' one surface and their enter motion (`PopIn`, `createPresence` for tooltips), and `MenuMark` / `menuIndicator`: a checkable menu item's check or dot and the indicator part it follows |
 | `segmented.tsx` | The segmented control shared by the gallery and demo inspectors |
-| `icons.tsx` | The common line icon set, and `CheckMark`: the check of checkboxes, selects and menus as an SVG image |
+| `icons.tsx` | The common line icon set, `IconLabel` (an icon-only control's icon, its short label as text in the terminal), and `CheckMark`: the check of checkboxes, selects and menus as an SVG image |
 | `data-table.ts` | Compact table spacing, resize separators, sort chevrons and selection feedback |
 | `scroll-area.tsx` | The scroll bar's track and thumb, and `ScrollArea`: a scroll view with that bar in place of the platform's indicator |
 | `command.tsx` | A `Command`'s parts: `commandClasses` (frame, search bar, rows with hover, highlight and disabled feedback, headings, separators), `CommandRow` (icon, label, detail, note, the shortcut's `CommandKeys`, a check), `CommandHeading`, `CommandEmpty` |

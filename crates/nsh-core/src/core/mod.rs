@@ -2497,18 +2497,17 @@ impl<M: TextEngine> Core<M> {
     /// What a terminal's layout takes from node `key` besides its style
     /// ([`terminal_layout::Role`]): whether it is a control
     /// ([`Self::is_control`]), a text, a scroll view, and whether a
-    /// terminal leaves it out: what it cannot show well is left out, never
-    /// emulated (images, videos, web views, native components, shaders,
-    /// icon-sized canvases).
+    /// terminal leaves it out: what it cannot show at an icon's size is
+    /// left out, never emulated (icon-sized images, videos, web views,
+    /// shaders and canvases); larger, they keep their box.
     fn grid_role(&self, key: Key) -> terminal_layout::Role {
         let kind = self.nodes[key as usize].kind;
         let left_out = match kind {
             // A native component draws itself where the platform
             // registered one, and is blank where it did not.
-            Kind::Image | Kind::Video | Kind::WebView | Kind::Shader => {
-                terminal_layout::LeftOut::Always
+            Kind::Image | Kind::Video | Kind::WebView | Kind::Shader | Kind::Canvas => {
+                terminal_layout::LeftOut::IfIcon
             }
-            Kind::Canvas => terminal_layout::LeftOut::IfIcon,
             _ => terminal_layout::LeftOut::No,
         };
         let control = self.is_control(key);
@@ -2549,14 +2548,36 @@ impl<M: TextEngine> Core<M> {
                     LeafContext::Text(cx) => cx.text.text.chars().any(|ch| !ch.is_whitespace()),
                     _ => false,
                 });
+        let disclosure = control
+            && self.nodes[key as usize].props.as_ref().is_some_and(|p| {
+                p.accessibility.state.expanded.is_some() && !p.accessibility.state.has_popup
+            });
+        // A text that shows a disclosure's mark itself (`▸ Storage`).
+        let marked = kind == Kind::Text
+            && node
+                .layout
+                .and_then(|l| self.layout.get_node_context(l))
+                .is_some_and(|cx| match cx {
+                    LeafContext::Text(cx) => cx
+                        .text
+                        .text
+                        .trim_start()
+                        .starts_with(['▸', '▾', '▹', '▿']),
+                    _ => false,
+                });
         terminal_layout::Role {
             control,
             label,
+            disclosure,
+            marked,
             text: matches!(kind, Kind::Text | Kind::Input),
             scroll: matches!(kind, Kind::Scroll | Kind::List),
             root: key == self.root,
             fills: matches!(kind, Kind::Screen | Kind::Modal),
-            sized: kind == Kind::Native,
+            sized: matches!(
+                kind,
+                Kind::Native | Kind::List | Kind::Image | Kind::Video | Kind::WebView | Kind::Shader
+            ),
             input: kind == Kind::Input,
             glyphs,
             radius,

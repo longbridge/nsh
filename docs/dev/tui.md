@@ -388,8 +388,8 @@ is the terminal's background: no band, and the ground the steps below it are tak
 raised, one step above its ground's step (a fill inside a raised card is lighter still); darker is sunken; a
 saturated fill (a primary button, a badge) is its color mixed 20% into the step under it, its text the accent of
 its hue (the default foreground when the app's text is light), bold on a control. A filled view has no line:
-its band is its edge, unless the app's border stands out at least twice as far from the ground as the fill
-does. A view in the image role is a swatch of its color (the terminal draws no images, so the role is free to
+its band is its edge, unless the app's border is hued or stands out at least twice as far from the ground as the
+fill does. A view in the image role is a swatch of its color (the terminal draws no images, so the role is free to
 mean that): with surfaces its fill is its own color blended over its ground, at the terminal's depth
 (truecolor, else the nearest of 256 or 16), never a step, and its text is black or white, whichever reads on it
 (`palette::swatch`, `palette::swatch_text`); the bandless look paints no fill. A color picker's swatches and
@@ -401,8 +401,9 @@ line or a fill of its own is a raised band (a search field). Bandless, fills dra
 **Nothing is drawn** for fills bandless, gradients, radii other than a border's corners, shadows,
 outlines and focus rings, opacity, filters, blend modes, backdrop effects, transforms other than translation
 (rounded to Cells), icons, images, videos, web views and native views without a terminal rendering: the
-terminal cannot show them well, so they are left out rather than imitated (the core gives images, videos and
-icon-sized canvases no Cells; the mounter logs each unsupported kind once). A view that is invisible, concealed (a screen under the top one)
+terminal cannot show them well, so they are left out rather than imitated (the core gives icon-sized images, videos,
+web views, shaders and canvases no Cells; larger ones keep their box, which the painter leaves blank, fill included,
+so the labels around them keep their places; the mounter logs each unsupported kind once). A view that is invisible, concealed (a screen under the top one)
 or nearly transparent (opacity under 0.03) draws nothing. Cells keep the terminal's default foreground and
 background (`Color::Reset`) unless something below sets them.
 
@@ -434,8 +435,9 @@ own background, so what its children filled stays, and it is at least one step a
 - a selected or current item is a select band and bold; a focused control (a button, a row) the same; a focused
   container three or more rows tall shows its line in the focus color (a hover band without a line); a focused
   text field shows its line in the focus color, or a sunken band without one, and the caret;
-- a tab is bold when selected or focused and muted otherwise, banded only when focused (select), pressed or
-  hovered;
+- a tab is bold when selected or focused and muted otherwise; a selected tab is a select band, unless the app
+  underlines its label (an underlined tab strip keeps the underline alone), and others are banded when focused
+  (select), pressed or hovered;
 - a hovered pressable view is a hover band, a pressed one a select band;
 - in a popup (an anchored overlay: a menu, a select or combobox list, a command palette) the highlighted item,
   the keyboard's (the item the list projects as focused) or the pointer's, is a full-row accent band, its text in
@@ -765,7 +767,8 @@ A focused Slider thumb installs its component's keys in the existing app keymap:
 PageUp/PageDown by a page, and Home/End move to its limits. Those bindings run before terminal navigation and
 scrolling. Tab/Shift+Tab leave the thumb; Ctrl+N/Ctrl+P remain traversal keys. Range thumbs stay within each
 other and disabled thumbs are skipped. Progress, Tabs, Checkboxes, Radios and Switches draw their own glyphs; a
-selected tab is a reversed band and a disabled control is dim.
+selected tab is a reversed band (an underline alone when the app underlines its label) and a disabled control is
+dim.
 
 Mouse presses use the same hit regions as other views when the host captures the mouse. The controls
 acceptance covers keyboard and press behavior; Slider dragging and hover feedback require the joint pointer
@@ -985,7 +988,7 @@ tests cover focus marks, backward focus-within transitions, projected value/disa
 Slider keys. The palette module checks colors as meanings at each depth (accents by hue, dim
 secondary text, the light and dark pages), translucent text and opacity, text attributes and gradients; the
 painting module checks borders (dim or accented sides, dashed, dotted, single sides), that shadows, outlines and
-rings draw nothing, scroll bars, that images and icons are left out, icon buttons labeled, tiny, round and empty boxes without borders,
+rings draw nothing, scroll bars, that images keep their box blank and icons are left out, icon buttons labeled, tiny and round boxes without borders and empty ones as their outline,
 clipping to the parent's content box with an ellipsis, selected bands, focus and disabled marks, overlays cleared
 and framed, unchanged frames and invisible views; `dialog.rs`'s unit tests check alerts' button order, keys,
 presses and drawing. These tests do not exercise hover or Slider drags yet.

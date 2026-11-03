@@ -15,10 +15,11 @@
 //!
 //! The rule, per box:
 //!
-//! - **left out** ([`LeftOut`]): what a terminal cannot show well (images,
-//!   videos, web views, shaders, icon-sized canvases, [`ICON`]) is laid
-//!   out as `display: none`, taking no Cells and no
-//!   spacing, and so are a view with nothing in it smaller than a row
+//! - **left out** ([`LeftOut`]): what a terminal cannot show at an icon's
+//!   size (icon-sized images, videos, web views, shaders and canvases,
+//!   [`ICON`]) is laid out as `display: none`, taking no Cells and no
+//!   spacing; larger ones keep their box, blank (a canvas drawn in
+//!   braille), so what is around them stays apart; and so are a view with nothing in it smaller than a row
 //!   both ways (a status dot, a swatch) and a view whose content is all
 //!   left out (an icon's tile), which would be blank Cells; a control
 //!   whose content is all left out (an icon button) is its accessibility
@@ -221,8 +222,17 @@ pub(crate) struct Role {
     /// nearest), as the root's.
     pub(crate) fills: bool,
     /// Its explicit size is its size, whatever it holds: a native
-    /// component, which draws itself in it.
+    /// component, which draws itself in it; an image, a video, a web view
+    /// or a shader, which keeps its box blank; a list, whose cells are
+    /// laid out apart, in the size it is given.
     pub(crate) sized: bool,
+    /// A disclosure: a control whose `expanded` is set and that opens no
+    /// popup (a collapsible's trigger, an accordion's, a tree's row). It
+    /// keeps at least two columns before its content for the painter's
+    /// `▸` / `▾`.
+    pub(crate) disclosure: bool,
+    /// A text that starts with a disclosure's mark (`▸`, `▾`) of its own.
+    pub(crate) marked: bool,
     /// A text input: a column after its text keeps its caret in the field
     /// when the text fills a line.
     pub(crate) input: bool,
@@ -252,16 +262,16 @@ pub(crate) enum LeftOut {
     /// It is shown.
     #[default]
     No,
-    /// Always: an image, a video, a web view, a native component, a
-    /// shader.
-    Always,
-    /// A canvas: left out when it is icon-sized ([`ICON`]), drawn (in
-    /// braille) when larger, a chart say.
+    /// An image, a video, a web view, a shader or a canvas: left out when
+    /// it is icon-sized ([`ICON`]); larger, it keeps its box (a canvas
+    /// drawn in braille, the others blank), so the labels around it do not
+    /// close up over the place it takes.
     IfIcon,
 }
 
-/// The largest explicit width and height of a canvas a terminal takes for
-/// an icon and leaves out, in points.
+/// The largest explicit width and height of an image, a video, a web view,
+/// a shader or a canvas a terminal takes for an icon and leaves out, in
+/// points.
 const ICON: f32 = 48.0;
 
 /// A tolerance for `f32` sums that stand for whole Cells or an exact half.
@@ -271,7 +281,6 @@ const EPSILON: f32 = 1.0e-4;
 pub(crate) fn left_out(style: &Style, left_out: LeftOut) -> bool {
     match left_out {
         LeftOut::No => false,
-        LeftOut::Always => true,
         LeftOut::IfIcon => {
             let icon = |d: Dimension| length(d.into_raw()).is_some_and(|v| v <= ICON);
             icon(style.size.width) && icon(style.size.height)
@@ -629,7 +638,7 @@ fn insets(
         };
         let py = |v: LengthPercentage| i32::from(lp(v, parent_width) >= 12.0 - EPSILON);
         let padding = Sides {
-            l: px(s.padding.left),
+            l: px(s.padding.left).max(disclosure_lead(tree, node)),
             r: px(s.padding.right) + i32::from(role.input),
             t: py(s.padding.top),
             b: py(s.padding.bottom),
@@ -640,7 +649,15 @@ fn insets(
     // sent for the painter to draw over its outer Cells, its size the
     // app's.
     let outline = role.overlay && kind.empty;
-    let bordered = (kind.container || outline) && !round(s, role, parent_width);
+    // An empty box of an explicit size two Cells or more each way (a code
+    // cell waiting for its digit, a framed placeholder) is its outline too:
+    // its size is its own, so the border adds no Cells.
+    let framed_empty = kind.empty && !role.control && {
+        let cells = |v: Option<f32>, to: fn(Grid, f32) -> i32| v.is_some_and(|v| to(grid, v) >= 2);
+        cells(dim(s.size.width, parent_width), Grid::cols)
+            && cells(dim(s.size.height, None), Grid::rows)
+    };
+    let bordered = (kind.container || outline || framed_empty) && !round(s, role, parent_width);
     let has = |v: LengthPercentage| i32::from(bordered && lp(v, parent_width) > 0.0);
     let border = Sides {
         l: has(s.border.left),
@@ -664,12 +681,39 @@ fn insets(
         }
     };
     let padding = Sides {
-        l: px(s.padding.left),
+        l: px(s.padding.left).max(disclosure_lead(tree, node)),
         r: px(s.padding.right) + i32::from(role.input),
         t: py(s.padding.top),
         b: py(s.padding.bottom),
     };
     (border, padding)
+}
+
+/// The columns a disclosure (a collapsible's or an accordion's trigger,
+/// a tree's row) keeps at least before its content for the painter's `▸`
+/// / `▾` and a space: 2 (its padding counts), none when its first text
+/// shows a mark of its own.
+fn disclosure_lead(tree: &impl Tree, node: NodeId) -> i32 {
+    if !tree.role(node).disclosure {
+        return 0;
+    }
+    match first_text(tree, node) {
+        Some(text) if tree.role(text).marked => 0,
+        _ => 2,
+    }
+}
+
+/// The first text shown in `node`, in tree order (`node` itself if it is
+/// one).
+fn first_text(tree: &impl Tree, node: NodeId) -> Option<NodeId> {
+    if hidden(tree, node) {
+        return None;
+    }
+    let role = tree.role(node);
+    if role.text && role.glyphs {
+        return Some(node);
+    }
+    (0..tree.child_count(node)).find_map(|i| first_text(tree, tree.child(node, i)))
 }
 
 /// Whether a box styled `s` is as round as it is small (a circle, a
@@ -699,8 +743,8 @@ const FULLY_ROUND: f32 = 1000.0;
 /// draws no border unless the app's border stands out more than the fill.
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct Surface {
-    /// It keeps its border: its color is at least twice as far from the
-    /// backdrop's lightness as the fill's.
+    /// It keeps its border: its color is hued, or at least twice as far
+    /// from the backdrop's lightness as the fill's.
     border: bool,
 }
 
@@ -721,9 +765,12 @@ fn surface(grid: Grid, role: Role, backdrop: Color) -> Option<Surface> {
         return None;
     }
     let fill_d = (lightness(shown) - lightness(backdrop)).abs();
+    // A hued border (an accent outline, a colored side) is a line of its
+    // own color, however light it is.
     let border = !role.border_color.is_transparent()
-        && (lightness(blend(role.border_color, backdrop)) - lightness(backdrop)).abs()
-            >= 2.0 * fill_d;
+        && ((lightness(blend(role.border_color, backdrop)) - lightness(backdrop)).abs()
+            >= 2.0 * fill_d
+            || saturated(role.border_color));
     Some(Surface { border })
 }
 
@@ -873,7 +920,7 @@ pub(crate) fn compute(
         ew => ew,
     };
     let fixed_w = known_w.or(ew.map(|w| clamp(w, min_w, max_w))).or(root_w);
-    let fixed_h = known_h.or(if role.scroll {
+    let fixed_h = known_h.or(if role.scroll && !role.sized {
         None
     } else {
         eh.map(|h| clamp(h, min_h, max_h))
@@ -1101,6 +1148,42 @@ pub(crate) fn compute(
     };
     if known_w.is_none() && fixed_w.is_none() {
         size.w = size.w.max(min_w.unwrap_or(0));
+    }
+    // Rows shorter than points leave a box less room than its absolute
+    // children placed from its top were given (a step's label under its
+    // dot): it holds them, up to its explicit height, so they never
+    // cover what follows it.
+    if known_h.is_none() && fixed_h.is_none() && !absolute.is_empty() {
+        let explicit = dim(tree.style(node).size.height, parent_h).map(|v| grid.rows(v).max(0));
+        let parent = (Some((size.w - border.x()).max(0)), None);
+        let mut need = 0;
+        for &(_, child) in &absolute {
+            let cs = tree.style(child);
+            let Some(top) = length(cs.inset.top.into_raw()) else {
+                continue;
+            };
+            // Labels only: an overlay is placed by the core, a control (a
+            // thumb) and a box of no text (a selection's frame, a canvas
+            // larger than the box) are drawn over what is there.
+            if !cs.inset.bottom.is_auto()
+                || tree.role(child).overlay
+                || holds_control(tree, child)
+                || first_text(tree, child).is_none()
+            {
+                continue;
+            }
+            let top = grid.rows(top);
+            if top < 0 {
+                continue;
+            }
+            let (_, h) = measure(tree, grid, child, true, (None, None), parent, parent);
+            need = need.max(top + h);
+        }
+        let need = need + border.y();
+        if need > size.h {
+            size.h = explicit.map_or(need, |e| need.min(e.max(size.h)));
+            size.h = clamp(size.h, min_h, max_h);
+        }
     }
     if perform {
         tree.set_insets(node, Insets { border, padding });
@@ -1419,12 +1502,21 @@ fn arrange_flex(
     let row = spec.row;
     let (known_main, known_cross) = wh(row, area.known.0, area.known.1);
     let (room_main, room_cross) = wh(row, area.room.0, area.room.1);
+    // What percentages are of: a scroll view's viewport along its axis
+    // too, as CSS's (a carousel's `w-full` slide is one viewport wide),
+    // though its content is unbounded along it. A height's only a known
+    // height, as CSS's: the room left below (a soft bound) would make a
+    // `50%` bar rows tall in one pass and none in another.
+    let parent = if row {
+        (known_main.or(room_main), known_cross)
+    } else {
+        (known_main, known_cross.or(room_cross))
+    };
     let (known_main, room_main) = if area.unbounded {
         (None, None)
     } else {
         (known_main, room_main)
     };
-    let parent = (known_main.or(room_main), known_cross.or(room_cross));
     let parent_w = wh(row, parent.0, parent.1).0.map(|c| grid.x(c));
     let framed = tree.framed();
     // What a percentage along the main axis is of, in points, and points

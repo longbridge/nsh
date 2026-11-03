@@ -15,7 +15,7 @@ use nsh_core::{AccessibilityState, element::Style, prelude::*};
 
 use crate::{
     collapsible::follow_open,
-    terminal::{disclosure, is_terminal},
+    terminal::{DISCLOSURE_NONE, after_lead, disclosure, is_terminal},
 };
 
 /// What an [`AccordionItem`] finds of its [`Accordion`] through context.
@@ -221,11 +221,17 @@ pub fn AccordionTrigger(props: AccordionTriggerProps, _cx: Scope<NoEvent>) -> im
                 (item.toggle)();
             }
         })
-        // The terminal's own disclosure before the app's title, in a row.
-        .when(terminal, |v| {
-            v.flex_row().child(text(move || disclosure(open.get())))
+        // The terminal's own disclosure before the app's title, in a row:
+        // the trigger's one child, so its gap does not part them, the
+        // app's children a column apart after it.
+        .child(match terminal {
+            true => after_lead(
+                move || disclosure(open.get()).into(),
+                view().flex_row().gap(px(1.0)).child(props.children),
+            )
+            .into_element(),
+            false => props.children.into_element(),
         })
-        .child(props.children)
 }
 
 /// The props of [`AccordionPanel`].
@@ -268,6 +274,8 @@ pub fn AccordionPanel(props: AccordionPanelProps, _cx: Scope<NoEvent>) -> impl I
     let (reveal, keep) = (props.reveal, props.keep_mounted);
     let region = element_ref();
     let mounted = follow_open(open.into_reactive(), reveal.into_reactive(), region);
+    let content = when(move || mounted.get() || keep.get(), move || props.children);
+    let terminal = is_terminal();
     view()
         .element_ref(&region)
         .role(AccessibilityRole::Region)
@@ -287,8 +295,9 @@ pub fn AccordionPanel(props: AccordionPanelProps, _cx: Scope<NoEvent>) -> impl I
                 (false, false) => s.h(px(0.0)).invisible(),
             }
         })
-        .child(when(
-            move || mounted.get() || keep.get(),
-            move || props.children,
-        ))
+        .child(match terminal {
+            // Under the title, past the trigger's disclosure.
+            true => after_lead(|| DISCLOSURE_NONE.into(), content).into_element(),
+            false => content.into_element(),
+        })
 }

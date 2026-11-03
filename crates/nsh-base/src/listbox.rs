@@ -1013,8 +1013,15 @@ fn content(lb: Listbox, sheet: bool, parts: Parts, hooks: Hooks) -> Vec<AnyEleme
         move || lb.shown.with(|s| s.rows.is_empty()),
         move || parts.empty.place(|e| e),
     );
+    // A terminal draws a rule under the field, as `Command` does: its
+    // border is no Cell there, and the query would run into the first row.
+    let rule = when(
+        move || field.is_some() && lb.searchable.get() && crate::terminal::is_terminal(),
+        crate::terminal::rule_line,
+    );
     let mut content = vec![
         search.into_element(),
+        rule.into_element(),
         list.into_element(),
         empty.into_element(),
     ];

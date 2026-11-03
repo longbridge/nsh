@@ -187,6 +187,22 @@ pub(crate) fn beside_mark(terminal: bool, children: Prop<Children>) -> AnyElemen
     }
 }
 
+/// `content` after `lead` (a disclosure, or blank Cells as wide), in a
+/// row: the content in a view of its own that takes the rest of it, laid
+/// out as it would be without the lead.
+pub(crate) fn after_lead(
+    lead: impl Fn() -> SharedString + 'static,
+    content: impl IntoElement,
+) -> View {
+    view().flex_row().child(text(lead)).child(
+        view()
+            .flex_grow(1.0)
+            .flex_shrink(1.0)
+            .min_w(px(0.0))
+            .child(content),
+    )
+}
+
 /// A mark in a row, its parts in their tones (tracked: `mark` follows the
 /// control's state), then [`MARK_GAP`] before the label.
 pub(crate) fn mark_view(mark: impl Fn() -> Mark + Copy + 'static) -> View {

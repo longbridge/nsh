@@ -314,7 +314,7 @@ fn Content() -> impl IntoElement {
 }
 
 #[test]
-fn images_are_left_out() {
+fn images_keep_their_box_blank() {
     let (mut view, rx) = surface();
     let mut terminal = Terminal::new(TestBackend::new(12, 4)).unwrap();
     view.load(App::Rust(Root::new::<Content>(|| ()))).unwrap();
@@ -322,6 +322,10 @@ fn images_are_left_out() {
     let buffer = terminal.backend().buffer();
     let drawn: String = buffer.content.iter().map(|cell| cell.symbol()).collect();
     assert_eq!(drawn.replace(' ', ""), "ready", "no placeholder: {drawn:?}");
+    // A row each, blank: the text is below them, and the first one's fill
+    // is not drawn.
+    let row: String = (0..12).map(|x| buffer[(x, 2)].symbol()).collect();
+    assert!(row.starts_with("ready"), "{drawn:?}");
     assert!(buffer.content.iter().all(|cell| cell.bg == Color::Reset));
 }
 
@@ -348,21 +352,25 @@ fn Small() -> impl IntoElement {
 }
 
 #[test]
-fn tiny_boxes_circles_and_empty_boxes_draw_no_border() {
+fn tiny_boxes_and_circles_draw_no_border_and_an_empty_box_its_outline() {
     let (mut view, rx) = surface();
     let mut terminal = Terminal::new(TestBackend::new(24, 6)).unwrap();
     view.load(App::Rust(Root::new::<Small>(|| ()))).unwrap();
     draw_until(&mut view, &mut terminal, &rx, "ready");
     let buffer = terminal.backend().buffer();
     let lines = "─│┌┐└┘╭╮╰╯";
+    // The tiny box (columns 0-1) and the circle (2-5) have none.
     for y in 0..6 {
-        for x in 0..24 {
+        for x in 0..6 {
             assert!(
                 !lines.contains(buffer[(x, y)].symbol()),
                 "a border fragment at {x},{y}"
             );
         }
     }
+    // The empty 6 × 4 Cells box is its outline: it waits for content.
+    assert_eq!(buffer[(6, 0)].symbol(), "┌");
+    assert_eq!(buffer[(11, 3)].symbol(), "┘");
     let drawn: String = buffer.content.iter().map(|cell| cell.symbol()).collect();
     assert!(drawn.contains('A') && drawn.contains("JD"), "{drawn:?}");
 }
@@ -747,4 +755,36 @@ fn a_disclosure_says_which_way_it_goes_and_a_popup_trigger_does_not() {
         "  Options",
         "a popup's trigger has no disclosure"
     );
+}
+
+/// Two selected tabs: one plain, one whose app underlines its label.
+#[component]
+fn SelectedTabs() -> impl IntoElement {
+    let tab = |label: &'static str, underline: bool| {
+        let title = text(label);
+        view()
+            .w(px(80.0))
+            .h(px(16.0))
+            .role(nsh_core::AccessibilityRole::Tab)
+            .accessibility_state(selected())
+            .child(if underline { title.underline() } else { title })
+    };
+    view()
+        .flex_1()
+        .child(tab("plain", false))
+        .child(tab("lined", true))
+        .child(text("ready"))
+}
+
+#[test]
+fn a_selected_tab_is_a_band_unless_its_app_underlines_it() {
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(12, 3)).unwrap();
+    view.load(App::Rust(Root::new::<SelectedTabs>(|| ())))
+        .unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "ready");
+    let buffer = terminal.backend().buffer();
+    assert!(reversed(buffer, 0, 0), "a selected tab stands out");
+    assert!(!reversed(buffer, 0, 1), "an underlined tab keeps its underline alone");
+    assert!(buffer[(0, 1)].modifier.contains(Modifier::UNDERLINED));
 }
