@@ -540,12 +540,11 @@ impl Cx {
         let el = self.block_content(block, key, tail, before);
         // A terminal's rows have no room between the blocks of a box: a
         // block after another takes a blank row before it, as a Markdown
-        // source has. Not after a heading (which leads what follows), in a
-        // list (its items' blocks stay together), nor next to an alert,
-        // whose own padding is that row.
-        let alert = matches!(block, Block::Blockquote { alert: Some(_), .. });
-        let el = if is_terminal() && self.list_depth.get() == 0 && before == Before::Block && !alert
-        {
+        // source has, alerts too (their padding inside their border is no
+        // row of the grid). Not after a heading (which leads what follows)
+        // nor in a list (its items' blocks stay together).
+        let after_block = matches!(before, Before::Block | Before::Alert);
+        let el = if is_terminal() && self.list_depth.get() == 0 && after_block {
             view()
                 .flex_col()
                 .child(view().h(crate::terminal::cell_height()))
@@ -595,7 +594,12 @@ impl Cx {
                     .text_size(px(h.size))
                     .line_height(px(h.size * h.line))
                     .letter_spacing(px(h.size * h.tracking))
-                    .mt(px(h.margin_top(before)))
+                    // A terminal's blank row before it is the one every
+                    // block after another takes (`block`).
+                    .mt(px(match is_terminal() {
+                        true => 0.0,
+                        false => h.margin_top(before),
+                    }))
                     .role(AccessibilityRole::Header);
                 self.parts(el, &[Part::Heading, part]).into_element()
             }
@@ -1877,7 +1881,7 @@ enum Before {
     Heading,
     /// Another block.
     Block,
-    /// An alert (another block, whose padding a terminal's blank row is).
+    /// An alert (another block).
     Alert,
 }
 

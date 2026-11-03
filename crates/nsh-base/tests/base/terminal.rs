@@ -356,6 +356,13 @@ fn text_origins<C: Component<Props = ()>>() -> std::collections::HashMap<String,
             window: viewport,
             os: Os::Linux,
             idiom: Idiom::Terminal,
+            // A terminal's Cells, so the core lays out on its grid as the
+            // TUI's does. The headless text engine's lines are 1.2 × the
+            // font size: the body's 18pt, a code block's 15.6, a level-3
+            // heading's 20.4 and the canvas font's 12, which components
+            // measure as a Cell, are each one row of 21pt (nearest), as a
+            // terminal's line is.
+            cell: Some(Size::new(px(8.0), px(21.0))),
             ..Environment::default()
         },
         ..EngineConfig::new(Root::of::<C>())
@@ -485,7 +492,7 @@ fn a_terminal_reads_a_formula_as_text_not_its_tex() {
 /// A paragraph, then a heading and its paragraph.
 #[component]
 fn Sections() -> impl IntoElement {
-    text_view().markdown("Intro text.\n\n## How it works\n\nBody text.")
+    text_view().markdown("Intro text.\n\n### How it works\n\nBody text.")
 }
 
 #[test]
@@ -500,6 +507,26 @@ fn a_terminals_heading_after_a_block_has_a_blank_row_before_it() {
         2.0 * cell,
         "{at:?}"
     );
+}
+
+/// Two alerts in a row, then two paragraphs.
+#[component]
+fn Alerts() -> impl IntoElement {
+    text_view().markdown("> [!TIP]\n> One.\n\n> [!WARNING]\n> Two.\n\nThree.\n\nFour.")
+}
+
+#[test]
+fn a_terminals_alerts_in_a_row_are_a_blank_row_apart_as_other_blocks() {
+    let at = text_origins::<Alerts>();
+    let row = |t: &str| at.get(t).unwrap_or_else(|| panic!("no {t} in {at:?}")).1;
+    // Two paragraphs: a line, then a blank row.
+    let cell = (row("Four.") - row("Three.")) / 2.0;
+    assert!(cell > 0.0, "{at:?}");
+    // An alert's line is between its borders: its bottom border, a blank
+    // row and the next box's top border before the next alert's line,
+    // its bottom border and a blank row before the paragraph after.
+    assert_eq!(row("Two.") - row("One."), 4.0 * cell, "{at:?}");
+    assert_eq!(row("Three.") - row("Two."), 3.0 * cell, "{at:?}");
 }
 
 /// Blocks after blocks, and a list whose items hold blocks of their own.
@@ -540,7 +567,12 @@ fn a_terminals_quote_has_a_bar_and_its_rule_is_a_row_of_lines() {
     let at = text_origins::<Quote>();
     let origin = |t: &str| *at.get(t).unwrap_or_else(|| panic!("no {t} in {at:?}"));
     let (intro, quoted, after) = (origin("Intro."), origin("Quoted"), origin("After."));
-    let bar = origin("│");
+    // The bar is one text, a `│` per row of the quote.
+    let bar = at
+        .iter()
+        .find(|(t, _)| t.starts_with('│'))
+        .map(|(_, at)| *at)
+        .unwrap_or_else(|| panic!("no quote bar in {at:?}"));
     let cell = (quoted.1 - intro.1) / 2.0;
     assert!(cell > 0.0, "{at:?}");
     assert_eq!((bar.0, bar.1), (intro.0, quoted.1), "{at:?}");
