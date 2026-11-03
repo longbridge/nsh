@@ -5,7 +5,12 @@ mod agent;
 #[path = "dev.rs"]
 mod dev;
 
-use std::{io, path::PathBuf, sync::Arc, time::Instant};
+use std::{
+    io,
+    path::PathBuf,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 use nsh_core::{Bounds, Points, ROOT_ID, Size};
 use nsh_engine::{App, AppError, Engine, EngineConfig, Environment, HostChannel, Idiom, Limits};
@@ -142,7 +147,11 @@ impl Default for AppOptions {
 type ErrorCallback = Box<dyn FnMut(&AppError)>;
 type TextErrorCallback = Box<dyn FnMut(&str)>;
 
-/// One passive NSH surface. Only rendering applies pending engine commits and invokes callbacks.
+/// How long a key waits for the engine to run a focus change before it is matched.
+const FOCUS_CATCH_UP: Duration = Duration::from_millis(100);
+
+/// One passive NSH surface. Rendering applies pending engine commits and invokes callbacks; a key
+/// right after a focus change also applies the commits that change made.
 #[non_exhaustive]
 pub struct AppView {
     options: AppOptions,
@@ -299,6 +308,7 @@ impl AppView {
             .clone()
             .unwrap_or_else(|| Arc::new(nsh_core::clipboard::MemoryClipboard::default()));
         let cells = self.options.cells;
+        self.keyboard.sync = Some((sender.clone(), self.surface.wake.clone()));
         let engine = Engine::start(
             config,
             move || CellTextEngine::new(cells),
@@ -766,6 +776,7 @@ impl AppView {
         {
             return Handled::Yes;
         }
+        self.catch_up_with_focus();
         let command_key = self.options.capabilities.command_key;
         let selecting = self.selection.is_active();
         let handled = if self
@@ -799,6 +810,44 @@ impl AppView {
             self.surface.wake.notify();
         }
         handled
+    }
+
+    fn apply_batch(&mut self, batch: nsh_core::MountBatch) {
+        #[cfg(feature = "dev")]
+        let observed = self.test.as_ref().map(|test| {
+            (
+                test.model.clone(),
+                nsh_core::MountBatch {
+                    items: batch.items.clone(),
+                },
+            )
+        });
+        self.tree.apply(batch);
+        #[cfg(feature = "dev")]
+        if let Some((model, batch)) = observed {
+            model.apply(&batch);
+        }
+    }
+
+    /// Waits a moment for the engine to run the last focus change, applying
+    /// the batches it makes: the app's bindings that hold only while a
+    /// control is focused (an editor's Tab) follow the focus in effects, so
+    /// a key sent right after the change (Escape and Tab together) is
+    /// matched against the new focus's keymap. Other messages wait for the
+    /// next draw. An engine busy past the wait leaves the keymap as it is.
+    fn catch_up_with_focus(&mut self) {
+        let deadline = Instant::now() + FOCUS_CATCH_UP;
+        while !self.keyboard.is_caught_up() {
+            match self.surface.inbox.recv_deadline(deadline) {
+                Ok(Message::Batch(batch)) => self.apply_batch(batch),
+                Ok(Message::Focused(moved)) => self.keyboard.caught_up(moved),
+                Ok(message) => self.surface.held.push_back(message),
+                Err(_) => break,
+            }
+        }
+        if !self.surface.held.is_empty() {
+            self.surface.wake.notify();
+        }
     }
 
     fn search<R>(
@@ -1084,26 +1133,17 @@ impl AppView {
             }
         }
         let mut errors = Vec::new();
-        while let Ok(message) = self.surface.inbox.try_recv() {
+        while let Some(message) = self
+            .surface
+            .held
+            .pop_front()
+            .or_else(|| self.surface.inbox.try_recv().ok())
+        {
             match message {
-                Message::Batch(batch) => {
-                    #[cfg(feature = "dev")]
-                    let observed = self.test.as_ref().map(|test| {
-                        (
-                            test.model.clone(),
-                            nsh_core::MountBatch {
-                                items: batch.items.clone(),
-                            },
-                        )
-                    });
-                    self.tree.apply(batch);
-                    #[cfg(feature = "dev")]
-                    if let Some((model, batch)) = observed {
-                        model.apply(&batch);
-                    }
-                }
+                Message::Batch(batch) => self.apply_batch(batch),
                 Message::Error(error) => errors.push(error),
                 Message::Frame => self.surface.request_frame(),
+                Message::Focused(moved) => self.keyboard.caught_up(moved),
                 #[cfg(feature = "dev")]
                 Message::Reload => {
                     if let Some(mut dev) = self.dev.take() {

@@ -18,6 +18,8 @@ pub(crate) enum Message {
     Batch(MountBatch),
     Error(AppError),
     Frame,
+    /// The engine caught up with the keyboard's focus change of this number.
+    Focused(u64),
     #[cfg(feature = "dev")]
     Reload,
 }
@@ -94,6 +96,8 @@ impl MountSink for Sink {
 pub(crate) struct Surface {
     pub(crate) engine: Option<Engine>,
     pub(crate) inbox: Receiver<Message>,
+    /// Messages a key's wait for the engine received before the draw.
+    pub(crate) held: std::collections::VecDeque<Message>,
     pub(crate) wake: Arc<Wake>,
     pub(crate) frame: Option<Instant>,
     pub(crate) animation_frame: Option<Instant>,
@@ -105,6 +109,7 @@ impl Default for Surface {
         Self {
             engine: None,
             inbox: crossbeam_channel::never(),
+            held: Default::default(),
             wake: Arc::default(),
             frame: None,
             animation_frame: None,
@@ -115,7 +120,10 @@ impl Default for Surface {
 
 impl Surface {
     pub(crate) fn deadline(&self) -> Option<Instant> {
-        if self.wake.pending.load(Ordering::Acquire) || !self.inbox.is_empty() {
+        if self.wake.pending.load(Ordering::Acquire)
+            || !self.inbox.is_empty()
+            || !self.held.is_empty()
+        {
             Some(Instant::now())
         } else {
             self.frame.into_iter().chain(self.animation_frame).min()
@@ -172,6 +180,7 @@ impl Surface {
     pub(crate) fn stop(&mut self) {
         self.engine = None;
         self.inbox = crossbeam_channel::never();
+        self.held.clear();
         self.frame = None;
         self.animation_frame = None;
         self.animation_start = Instant::now();

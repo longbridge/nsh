@@ -23,6 +23,19 @@ pub(crate) struct Keyboard {
     screens: Vec<NodeId>,
     screen_focus: Vec<(NodeId, Option<NodeId>)>,
     pending_scroll_focus: Option<ScrollFocus>,
+    /// Focus changes made here, and those the app's keymap has caught up
+    /// with: the app's bindings that hold only while a control is focused
+    /// (an editor's Tab) change in effects on its focus, so until the
+    /// engine has run them the mirrored keymap is the old focus's.
+    moved: u64,
+    caught_up: u64,
+    /// The inbox the engine tells through that it caught up with a focus
+    /// change: after the batches that change made, so the keymap they
+    /// carry is applied first.
+    pub(crate) sync: Option<(
+        crossbeam_channel::Sender<crate::surface::Message>,
+        std::sync::Arc<crate::surface::Wake>,
+    )>,
 }
 
 #[derive(Clone, Copy)]
@@ -56,7 +69,10 @@ fn sink_cursor(tree: &Mounter, geometry: &[Geometry], id: NodeId) -> Option<Posi
     if g.bounds.right > g.bounds.left {
         return None;
     }
-    let (x, y) = (u16::try_from(g.bounds.left).ok()?, u16::try_from(g.bounds.top).ok()?);
+    let (x, y) = (
+        u16::try_from(g.bounds.left).ok()?,
+        u16::try_from(g.bounds.top).ok()?,
+    );
     let at = Position::new(x, y);
     let mut parent = tree.get(id)?.parent;
     while let Some(id) = parent {
@@ -145,7 +161,11 @@ impl Keyboard {
         let old = self.focused;
         self.focused = id;
         self.search_point = None;
-        self.left = if id.is_none() { old.or(self.left) } else { None };
+        self.left = if id.is_none() {
+            old.or(self.left)
+        } else {
+            None
+        };
         if old != id {
             if let Some(field) = old
                 .and_then(|id| tree.get_mut(id))
@@ -201,7 +221,27 @@ impl Keyboard {
             if let Some(id) = id {
                 control.dispatch_event(id, EventKind::Focus, EventPayload::None);
             }
+            self.moved += 1;
+            if let Some((sender, wake)) = self.sync.clone() {
+                let moved = self.moved;
+                control.flush(move |_| {
+                    if sender.send(crate::surface::Message::Focused(moved)).is_ok() {
+                        wake.notify();
+                    }
+                });
+            } else {
+                self.caught_up = self.moved;
+            }
         }
+    }
+
+    /// The engine has run what focus change `moved` made, and its batches are applied.
+    pub(crate) fn is_caught_up(&self) -> bool {
+        self.caught_up >= self.moved
+    }
+
+    pub(crate) fn caught_up(&mut self, moved: u64) {
+        self.caught_up = self.caught_up.max(moved);
     }
 
     /// Focuses the control around a search match, or none, keeping the match's text as the search point.
@@ -629,16 +669,16 @@ impl Keyboard {
                 }
                 let current = candidates.iter().position(|g| Some(g.id) == self.focused);
                 // Out of a field with Escape, Tab goes on from it.
-                let left = current
-                    .is_none()
-                    .then(|| self.left)
-                    .flatten()
-                    .and_then(|id| candidates.iter().position(|g| g.id == id));
+                let left_id = current.is_none().then_some(self.left).flatten();
+                let left = left_id.and_then(|id| candidates.iter().position(|g| g.id == id));
                 // A plain-text search point continues to the controls beside it
-                // in tree order, so a sidebar on the same rows is not visited first.
+                // in tree order, so a sidebar on the same rows is not visited first;
+                // so does a field left that is no stop of its own (a rich
+                // editor's sink, no Cell wide: its content took the Tab).
                 let point = self
                     .search_point
                     .filter(|&id| geometry.iter().any(|g| g.id == id))
+                    .or(left_id.filter(|_| left.is_none()))
                     .and_then(|id| tree.get(id))
                     .map(|view| view.tree_order);
                 let order = |g: &&Geometry| tree.get(g.id).unwrap().tree_order;
