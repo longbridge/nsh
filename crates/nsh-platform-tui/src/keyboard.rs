@@ -16,6 +16,9 @@ pub(crate) struct Keyboard {
     pub(crate) focused: Option<NodeId>,
     /// The text of the last search match outside any control; traversal continues from it.
     pub(crate) search_point: Option<NodeId>,
+    /// The control the focus last left for none (Escape out of a field):
+    /// the next Tab continues after it, not from the top.
+    left: Option<NodeId>,
     modals: Vec<ModalFocus>,
     screens: Vec<NodeId>,
     screen_focus: Vec<(NodeId, Option<NodeId>)>,
@@ -41,6 +44,30 @@ struct ScrollFocus {
     scroll: NodeId,
     anchor: Point<i32>,
     position: FocusPosition,
+}
+
+/// The terminal cursor of an editor's sink: an editable input without a caret
+/// of its own and without columns (1 pt wide), which an `Editor` or a
+/// `RichEditor` keeps at its caret. The cursor is the Cell at its origin, while
+/// the nearest ancestor with Cells shows it.
+fn sink_cursor(tree: &Mounter, geometry: &[Geometry], id: NodeId) -> Option<Position> {
+    let find = |id: NodeId| geometry.iter().find(|g| g.id == id);
+    let g = find(id)?;
+    if g.bounds.right > g.bounds.left {
+        return None;
+    }
+    let (x, y) = (u16::try_from(g.bounds.left).ok()?, u16::try_from(g.bounds.top).ok()?);
+    let at = Position::new(x, y);
+    let mut parent = tree.get(id)?.parent;
+    while let Some(id) = parent {
+        if let Some(g) = find(id)
+            && !g.visible.is_empty()
+        {
+            return g.visible.contains(at).then_some(at);
+        }
+        parent = tree.get(id)?.parent;
+    }
+    None
 }
 
 pub(crate) fn contains(tree: &Mounter, ancestor: NodeId, mut id: NodeId) -> bool {
@@ -101,6 +128,7 @@ impl Keyboard {
         let old = self.focused;
         self.focused = id;
         self.search_point = None;
+        self.left = if id.is_none() { old.or(self.left) } else { None };
         if old != id {
             if let Some(field) = old
                 .and_then(|id| tree.get_mut(id))
@@ -178,6 +206,7 @@ impl Keyboard {
         self.focus(ancestor, tree, control);
         if ancestor.is_none() {
             self.search_point = Some(text);
+            self.left = None;
         }
     }
 
@@ -514,8 +543,11 @@ impl Keyboard {
 
     pub(crate) fn cursor(&self, tree: &Mounter, geometry: &[Geometry]) -> Option<Position> {
         let input = tree.get(self.focused?)?.input.as_ref()?;
-        if !input.editable || input.caret_hidden {
+        if !input.editable {
             return None;
+        }
+        if input.caret_hidden {
+            return sink_cursor(tree, geometry, self.focused?);
         }
         let _ = geometry
             .iter()
@@ -579,6 +611,12 @@ impl Keyboard {
                     };
                 }
                 let current = candidates.iter().position(|g| Some(g.id) == self.focused);
+                // Out of a field with Escape, Tab goes on from it.
+                let left = current
+                    .is_none()
+                    .then(|| self.left)
+                    .flatten()
+                    .and_then(|id| candidates.iter().position(|g| g.id == id));
                 // A plain-text search point continues to the controls beside it
                 // in tree order, so a sidebar on the same rows is not visited first.
                 let point = self
@@ -596,7 +634,7 @@ impl Keyboard {
                         .rposition(|g| order(g) < point)
                         .or(Some(candidates.len() - 1)),
                     (Action::Next | Action::Previous, _) => nsh_core::input::tab_stop(
-                        current,
+                        current.or(left),
                         candidates.len(),
                         matches!(action, Action::Previous),
                         true,

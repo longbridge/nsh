@@ -526,6 +526,9 @@ fn fold_hit(
                     let line = ed.st.borrow().display.row(row()).line;
                     ed.fold(line, None);
                 })
+                // The gutter's buttons are the pointer's: the keyboard folds
+                // with the editor's own keys, and Tab goes into the text.
+                .focusable(false)
         },
     )
 }
@@ -599,7 +602,8 @@ fn gutter_row(
                         .on_press({
                             let ed = ed.clone();
                             move || ed.line_number_press(row())
-                        });
+                        })
+                        .focusable(false);
                     if active {
                         parts(
                             el,
@@ -654,6 +658,7 @@ fn gutter_row(
                                         let line = ed.st.borrow().display.row(row()).line;
                                         ed.fold(line, None);
                                     })
+                                    .focusable(false)
                                     .child(chevron(size, folded)),
                             )
                         });
@@ -1283,7 +1288,8 @@ fn spans(ed: Ed, slot: ReadSignal<(usize, usize)>, content: RowContent) -> Vec<A
             .on_press(move || {
                 let line = ed.st.borrow().display.row(slot.get_untracked().1).line;
                 ed.fold(line, Some(false));
-            });
+            })
+            .focusable(false);
         out.push(part(placeholder, props, EditorPart::FoldPlaceholder).into_element());
     }
     out
@@ -1395,6 +1401,12 @@ fn carets(ed: Ed, lh: impl Fn() -> Points + Clone + 'static) -> impl IntoElement
     dynamic(move || {
         ed.text_rev.get();
         ed.sel_rev.get();
+        // A terminal's caret is the terminal's cursor, at the sink the
+        // editor keeps at the caret (`nsh-platform-tui`'s
+        // `Keyboard::cursor`): a 2-point bar has no Cells.
+        if crate::terminal::is_terminal() {
+            return Vec::new();
+        }
         let rows = ed.visible_rows();
         let (points, composing) = {
             let st = ed.st.borrow();

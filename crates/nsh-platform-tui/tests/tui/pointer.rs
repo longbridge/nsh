@@ -1,6 +1,6 @@
 #![cfg(feature = "js")]
 
-use nsh_platform_tui::{Bundle, MouseKind};
+use nsh_platform_tui::{Bundle, Handled, MouseKind};
 use ratatui_core::{backend::TestBackend, style::Color, terminal::Terminal};
 
 use super::app::{draw_until, mouse, reversed, surface};
@@ -42,6 +42,45 @@ fn hover_styles_and_events_follow_the_pointer_and_clear_outside_the_surface() {
     view.handle(mouse(MouseKind::Move, 41, 0));
     draw_until(&mut view, &mut terminal, &rx, "outside");
     assert_eq!(terminal.backend().buffer()[(1, 1)].bg, Color::Reset);
+}
+
+#[test]
+fn moving_off_a_hovered_view_onto_empty_cells_redraws_without_its_band() {
+    let code = nsh_bundler::compile_module(
+        "App.tsx",
+        r##"
+        import { mount, View, Text } from "nsh";
+        mount(() => <View>
+            <View style={{ width: 80, height: 32 }} onPress={() => {}} />
+            <Text>ready</Text>
+        </View>);
+    "##,
+        &[],
+    )
+    .unwrap();
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(40, 8)).unwrap();
+    view.load(Bundle::source(code)).unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "ready");
+    let band = Color::Rgb(26, 26, 26);
+    assert_eq!(view.handle(mouse(MouseKind::Move, 1, 0)), Handled::Yes);
+    terminal
+        .draw(|frame| view.render(frame, frame.area()))
+        .unwrap();
+    assert_eq!(terminal.backend().buffer()[(1, 0)].bg, band);
+    // Onto Cells no view claims, in the surface: the hover is gone and the
+    // move is used, so the embedder's loop draws the band away (nothing in
+    // the app changes to wake it otherwise).
+    while rx.try_recv().is_ok() {}
+    assert_eq!(view.handle(mouse(MouseKind::Move, 20, 0)), Handled::Yes);
+    assert!(rx.try_recv().is_ok(), "the move wakes the surface");
+    terminal
+        .draw(|frame| view.render(frame, frame.area()))
+        .unwrap();
+    assert_eq!(terminal.backend().buffer()[(1, 0)].bg, Color::Reset);
+    // A move that changes nothing over empty Cells stays the embedder's.
+    while rx.try_recv().is_ok() {}
+    assert_eq!(view.handle(mouse(MouseKind::Move, 21, 0)), Handled::Ignored);
 }
 
 #[test]

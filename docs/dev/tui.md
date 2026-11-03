@@ -693,7 +693,11 @@ Focus visits pressable and editable views, honoring `focusable` and disabled sta
 order within the focus scope, as NSH's other platforms do (Tab and Ctrl+N / Ctrl+P; Up / Down are spatial). A sidebar's stops stay together before the next
 panel's stops, regardless of their Cell positions. Traversal wraps at the ends; horizontal movement stays
 spatial, choosing the nearest control on overlapping row ranges. Traversal centers a control vertically when
-revealing it requires scrolling, and leaves fully visible controls in place (see Scroll content).
+revealing it requires scrolling, and leaves fully visible controls in place (see Scroll content). When the
+focus leaves a control for none (Esc out of a field, an editor's included), the next Tab or Shift+Tab continues
+from that control rather than from the ends. A text field narrower than a Cell (an editor's sink at its caret)
+is still a stop, and while it has the focus the terminal's cursor (Bar) is at its origin Cell
+(`Keyboard::cursor`): an `Editor` and a `RichEditor` keep their sink at the caret and draw no caret of their own.
 The sink opts into `MountItem::TreeOrder`: the core supplies logical document order in the same batch as
 structural changes. `Insert` retains native paint order, including `zIndex`; raising a sidebar changes its
 stacking while its focus stops retain their document order. Ordinary text and style updates keep the stored

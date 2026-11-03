@@ -396,7 +396,7 @@ fn a_terminals_quote_has_a_bar_and_its_rule_is_a_row_of_lines() {
 }
 
 #[test]
-fn a_terminals_caret_is_a_cell_holding_the_character_after_it() {
+fn a_terminal_draws_no_caret_of_its_own() {
     let started = |idiom: Idiom| {
         let mut config = EngineConfig {
             viewport: Size::new(px(800.0), px(900.0)),
@@ -416,12 +416,9 @@ fn a_terminals_caret_is_a_cell_holding_the_character_after_it() {
             .map(str::to_owned)
             .collect::<Vec<_>>()
     };
-    // The caret at the document's start holds its first character, over
-    // the text, which stays whole.
+    // The terminal's cursor is the caret, at the sink: the text is all
+    // there is, no cell over a character.
     let texts = started(Idiom::Terminal);
-    assert!(texts.iter().any(|t| t == "H"), "no caret cell in {texts:?}");
     assert!(texts.iter().any(|t| t == "Hi"), "{texts:?}");
-    // Elsewhere the caret is a bar, with no text.
-    let texts = started(Idiom::Desktop);
-    assert!(!texts.iter().any(|t| t == "H"), "{texts:?}");
+    assert!(!texts.iter().any(|t| t == "H"), "a caret cell in {texts:?}");
 }

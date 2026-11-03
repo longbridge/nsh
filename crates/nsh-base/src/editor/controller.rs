@@ -400,7 +400,12 @@ impl Ed {
                 return;
             }
             let apple = matches!(os(), Os::Ios | Os::MacOs);
-            for binding in keymap::default_bindings(apple) {
+            // Escape is bound below, only while it has carets or a
+            // selection to collapse.
+            for binding in keymap::default_bindings(apple)
+                .into_iter()
+                .filter(|b| b.command != Command::SingleSelection)
+            {
                 let e = ed.clone();
                 let command = binding.command;
                 on_key_with(
@@ -423,6 +428,28 @@ impl Ed {
             on_key_with("mod+c", always(false), move |_| e.copy());
             let e = ed.clone();
             on_key_with("mod+x", always(false), move |_| e.cut());
+        });
+        // Escape collapses several carets or a selection to one caret;
+        // with nothing to collapse it is left to the page (a dialog closes,
+        // the focus can leave the editor), so the editor is no trap.
+        let collapsible = {
+            let ed = self.clone();
+            computed(move || {
+                ed.sel_rev.get();
+                let st = ed.st.borrow();
+                let all = st.selections.all();
+                all.len() > 1 || all.iter().any(|s| !s.is_empty())
+            })
+        };
+        let ed = self.clone();
+        effect(move || {
+            if !ed.focused.get() || !collapsible.get() {
+                return;
+            }
+            let e = ed.clone();
+            on_key_with("escape", always(false), move |_| {
+                e.run(Command::SingleSelection)
+            });
         });
     }
 

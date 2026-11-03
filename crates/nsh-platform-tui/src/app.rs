@@ -1228,15 +1228,19 @@ impl AppView {
             tree: &self.tree,
         };
         self.selection.draw(scene, buffer);
-        if let Some(engine) = &self.surface.engine {
-            self.pointer.rehover(&mut crate::input::PointerContext {
+        // A view that moved under the pointer, or away from it, is drawn
+        // again in its new hover state.
+        if let Some(engine) = &self.surface.engine
+            && self.pointer.rehover(&mut crate::input::PointerContext {
                 area,
                 cells: self.options.cells,
                 hits: &self.hits,
                 geometry: &self.geometry,
                 tree: &mut self.tree,
                 control: &engine.control(),
-            });
+            })
+        {
+            self.surface.wake.notify();
         }
         if let Some(engine) = &self.surface.engine
             && self

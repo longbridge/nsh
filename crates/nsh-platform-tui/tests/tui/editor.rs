@@ -12,7 +12,7 @@ use nsh_base::{
     rich_editor::view::{RichEditorChange, rich_editor},
 };
 use nsh_core::prelude::*;
-use nsh_platform_tui::{App, AppView, Handled, Input, Modifiers, Root};
+use nsh_platform_tui::{App, AppView, CursorStyle, Handled, Input, Modifiers, Root};
 use ratatui_core::{backend::TestBackend, terminal::Terminal};
 
 use super::{
@@ -102,14 +102,14 @@ fn contents(terminal: &Terminal<TestBackend>) -> String {
 }
 
 /// Presses Tab until the buffer shows `expected` (the editor reporting its
-/// focus): the editor's rows may take Tab stops before its sink.
+/// focus), returning how many presses it took.
 fn tab_until(
     view: &mut AppView,
     terminal: &mut Terminal<TestBackend>,
     rx: &crossbeam_channel::Receiver<()>,
     expected: &str,
-) {
-    for _ in 0..12 {
+) -> usize {
+    for presses in 1..=12 {
         assert_eq!(view.handle(key("Tab")), Handled::Yes);
         let deadline = Instant::now() + Duration::from_millis(300);
         loop {
@@ -117,7 +117,7 @@ fn tab_until(
                 .draw(|frame| view.render(frame, frame.area()))
                 .unwrap();
             if contents(terminal).contains(expected) {
-                return;
+                return presses;
             }
             if rx.recv_deadline(deadline).is_err() {
                 break;
@@ -153,9 +153,120 @@ fn tab_enters_an_editor_and_typing_changes_its_text() {
     let mut terminal = Terminal::new(TestBackend::new(48, 12)).unwrap();
     view.load(App::Rust(Root::new::<Typed>(|| ()))).unwrap();
     draw_until(&mut view, &mut terminal, &rx, "let total = 42;");
-    tab_until(&mut view, &mut terminal, &rx, "focus yes");
+    // The gutter's line numbers and fold markers are no Tab stops: the
+    // first Tab is the text's.
+    let presses = tab_until(&mut view, &mut terminal, &rx, "focus yes");
+    assert_eq!(presses, 1, "Tab stops before the editor's text");
     assert_eq!(view.handle(key("Q")), Handled::Yes);
     draw_until(&mut view, &mut terminal, &rx, "typed yes");
+}
+
+/// A control reporting its focus as `focus <label>`.
+fn stop(label: &'static str, focused: Signal<&'static str>) -> impl IntoElement {
+    view()
+        .on_focus(move |_: &()| focused.set(label))
+        .on_press(|_: &()| {})
+        .child(text(label))
+}
+
+/// An editor between two controls.
+#[component]
+fn Between() -> impl IntoElement {
+    let focused = signal("none");
+    view()
+        .flex_1()
+        .child(text(move || format!("focus {}", focused.get())))
+        .child(stop("Before", focused))
+        .child(
+            editor()
+                .default_value(SharedString::from(TEXT))
+                .on_focus(move |_: &()| focused.set("editor"))
+                .h(px(64.0)),
+        )
+        .child(stop("After", focused))
+}
+
+#[test]
+fn escape_then_tab_leaves_an_editor_for_the_next_control() {
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(48, 12)).unwrap();
+    view.load(App::Rust(Root::new::<Between>(|| ()))).unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "focus none");
+    tab_until(&mut view, &mut terminal, &rx, "focus editor");
+    // With one caret and nothing selected the editor leaves Escape to
+    // the page, which takes the focus out of the field; Tab then goes on
+    // after the editor, not from the top.
+    assert_eq!(view.handle(key("Escape")), Handled::Yes);
+    assert_eq!(view.handle(key("Tab")), Handled::Yes);
+    draw_until(&mut view, &mut terminal, &rx, "focus After");
+}
+
+/// A rich editor between two controls.
+#[component]
+fn RichBetween() -> impl IntoElement {
+    let focused = signal("none");
+    view()
+        .flex_1()
+        .child(text(move || format!("focus {}", focused.get())))
+        .child(stop("Before", focused))
+        .child(
+            rich_editor()
+                .on_focus(move |_: &()| focused.set("editor"))
+                .h(px(64.0)),
+        )
+        .child(stop("After", focused))
+}
+
+#[test]
+fn escape_then_tab_leaves_a_rich_editor_for_the_next_control() {
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(48, 12)).unwrap();
+    view.load(App::Rust(Root::new::<RichBetween>(|| ())))
+        .unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "focus none");
+    tab_until(&mut view, &mut terminal, &rx, "focus editor");
+    // Escape nothing takes, with nothing selected, blurs the editor.
+    assert_eq!(view.handle(key("Escape")), Handled::Yes);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while view.handle(key("Tab")) == Handled::Yes {
+        terminal
+            .draw(|frame| view.render(frame, frame.area()))
+            .unwrap();
+        let text = contents(&terminal);
+        if text.contains("focus After") {
+            return;
+        }
+        assert!(!text.contains("focus Before"), "Tab started from the top: {text:?}");
+        assert!(Instant::now() < deadline, "Tab never left the editor: {text:?}");
+        let _ = rx.recv_deadline(Instant::now() + Duration::from_millis(100));
+    }
+    panic!("Tab was not used");
+}
+
+#[test]
+fn an_editors_caret_is_the_terminal_cursor() {
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(48, 12)).unwrap();
+    view.load(App::Rust(Root::new::<Typed>(|| ()))).unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "let total = 42;");
+    let width = terminal.backend().buffer().area.width as usize;
+    let cell = |terminal: &Terminal<TestBackend>, needle: &str| {
+        let at = contents(terminal).find(needle).unwrap();
+        ((at % width) as u16, (at / width) as u16)
+    };
+    let start = cell(&terminal, "let total");
+    tab_until(&mut view, &mut terminal, &rx, "focus yes");
+    // The sink sits at the caret, the text's start: the terminal's bar is
+    // on the `l` of `let`, and nsh-base draws no caret of its own.
+    terminal.backend_mut().assert_cursor_position(start);
+    assert_eq!(view.cursor_style(), CursorStyle::Bar);
+    assert_eq!(terminal.backend().buffer()[start].symbol(), "l");
+    // Typing moves it with the caret, after the `Q`.
+    assert_eq!(view.handle(key("Q")), Handled::Yes);
+    draw_until(&mut view, &mut terminal, &rx, "Qlet total");
+    terminal
+        .backend_mut()
+        .assert_cursor_position((start.0 + 1, start.1));
 }
 
 /// A rich editor (an empty document) reporting its focus and changes.

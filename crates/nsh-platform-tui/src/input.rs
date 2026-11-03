@@ -328,7 +328,9 @@ impl Pointer {
         ))
     }
 
-    fn set_hovered(&mut self, hovered: Vec<NodeId>, cx: &mut PointerContext<'_>) {
+    /// Hovers `hovered`, reporting whether that changed anything: a view
+    /// left or entered must be drawn again even when none is hovered now.
+    fn set_hovered(&mut self, hovered: Vec<NodeId>, cx: &mut PointerContext<'_>) -> bool {
         let (left, entered) = nsh_core::input::hover_changes(&self.hovered, &hovered);
         let changes: Vec<_> = left
             .into_iter()
@@ -339,6 +341,7 @@ impl Pointer {
                     .map(|&id| (id, true, EventKind::MouseEnter)),
             )
             .collect();
+        let changed = !changes.is_empty();
         for (id, active, event) in changes {
             let payload = self.mouse_event(id, cx);
             if let Some(view) = cx.tree.get_mut(id) {
@@ -357,9 +360,12 @@ impl Pointer {
             }
         }
         self.hovered = hovered;
+        changed
     }
 
-    pub(crate) fn rehover(&mut self, cx: &mut PointerContext<'_>) {
+    /// Hovers what is under the pointer's last position; true when the
+    /// hovered views changed.
+    pub(crate) fn rehover(&mut self, cx: &mut PointerContext<'_>) -> bool {
         if self
             .drag
             .as_ref()
@@ -368,7 +374,7 @@ impl Pointer {
             self.cancel(cx.tree, Some(cx.control));
         }
         let Some(mouse) = self.last else {
-            return;
+            return false;
         };
         let position = Position::new(mouse.column, mouse.row);
         let scope = crate::navigation::focus_scope(cx.tree);
@@ -393,7 +399,7 @@ impl Pointer {
             }
             node = if id == scope { None } else { view.parent };
         }
-        self.set_hovered(hovered, cx);
+        self.set_hovered(hovered, cx)
     }
 
     pub(crate) fn cancel(&mut self, tree: &mut Mounter, control: Option<&EngineControl>) {
@@ -436,7 +442,7 @@ impl Pointer {
 
     pub(crate) fn handle(&mut self, mouse: MouseInput, mut cx: PointerContext<'_>) -> Handled {
         self.last = Some(mouse);
-        self.rehover(&mut cx);
+        let rehovered = self.rehover(&mut cx);
         if matches!(mouse.kind, MouseKind::Move) {
             for &id in &self.hovered {
                 if cx
@@ -459,7 +465,9 @@ impl Pointer {
         } = cx;
         let scope = crate::navigation::focus_scope(tree);
         let modal = scope != nsh_core::ROOT_ID;
-        let unused = if modal || !self.hovered.is_empty() {
+        // A move off the last hovered view onto Cells no view claims is
+        // still used: the view's hover band must go.
+        let unused = if modal || rehovered || !self.hovered.is_empty() {
             Handled::Yes
         } else {
             Handled::Ignored

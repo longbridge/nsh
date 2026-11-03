@@ -142,7 +142,10 @@ controller runs itself (find next / previous, folding, `findWithSelection`, the 
 from `editor_bindings(apple)`, as the `EditorCommand`s `run` takes: VS Code's keys (`cmd+g` / `cmd+shift+g` on Apple
 platforms and `f3` / `shift+f3` everywhere, `cmd+alt+[` / `]` or `ctrl+shift+[` / `]` to fold, `cmd+e`, `cmd+u` or
 `ctrl+u`, `ctrl+shift+cmd+right` / `left` or `shift+alt+right` / `left`, `f12` to go to a definition and `mod+.` for
-code actions). Copy and cut (`mod+c`, `mod+x`) are the
+code actions). Escape (back to one caret) is bound only while there are several carets or a selection to collapse,
+so with nothing to collapse it reaches the page (a dialog closes; in a terminal the focus leaves the field and Tab
+goes on after it). The gutter's line numbers, fold markers and fold placeholders take presses but are no Tab stops
+(`focusable(false)`). Copy and cut (`mod+c`, `mod+x`) are the
 controller's, through the clipboard. `run(command)` runs the same commands from the app, plus those that have no
 default keys (fold all, sorting lines, changing case, trimming trailing whitespace, paragraph moves, paste from the
 clipboard), for the app's own bindings and menus.
@@ -383,7 +386,7 @@ The defaults are the theme's tokens (`crate::theme()`), so a theme and the dark 
 | `line` | Every row (nothing by default) |
 | `activeLine` | `muted` at 60 % behind the rows of lines with a caret |
 | `selection` | The theme's selection color: its `selection` color, else `primary` at 22 % |
-| `caret` | 2 points wide, `foreground`, blinking every 530 ms while focused |
+| `caret` | 2 points wide, `foreground`, blinking every 530 ms while focused; in a terminal none: the terminal's cursor stands at the sink, which is kept at the primary caret |
 | `composition` | Underlined, on `background` |
 | `searchMatch` / `currentSearchMatch` | Amber (`#fbbf24` / `#d97706` dark) at 25 % / 55 % |
 | `matchingBracket` | A 1 point border, `muted-foreground` at 60 %, while focused |

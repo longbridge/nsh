@@ -761,6 +761,22 @@ impl Rv {
             self.after_key(event);
             return;
         }
+        // Escape no plugin, node view or keymap took collapses a selection
+        // to its head. With nothing to collapse, a terminal's focus leaves
+        // the editor, so it is no trap there (Tab then goes on after it);
+        // the other platforms keep Escape as it was. It stays bound for the
+        // plugins' own Escape (a suggestion's).
+        if plain && event.key == "Escape" {
+            let sel = state.selection();
+            if sel.empty() {
+                if crate::terminal::is_terminal() {
+                    self.blur();
+                }
+            } else if let Ok(p) = state.doc().resolve(sel.head()) {
+                self.set_selection(Selection::near(&p, 1), false);
+            }
+            return;
+        }
         if let Some(m) = keys::movement(event) {
             self.move_caret(m);
         }
@@ -2077,29 +2093,6 @@ impl Rv {
         let state = self.st.borrow();
         let sel = state.selection();
         self.geo.borrow().caret_rect(sel.head(), sel.affinity())
-    }
-
-    /// The character after the caret in its textblock, as a terminal's
-    /// caret holds it: a space at the block's end or before what is not
-    /// text (a line break, an atom).
-    pub(crate) fn char_after_caret(&self) -> String {
-        let state = self.st.borrow();
-        let head = state.selection().head();
-        let doc = state.doc();
-        let Ok(at) = doc.resolve(head) else {
-            return " ".into();
-        };
-        let left = at
-            .parent()
-            .content()
-            .size()
-            .saturating_sub(at.parent_offset);
-        // Two units at most: a character beyond the BMP is two of UTF-16.
-        let text = doc.text_between(head, head + left.min(2), None, None);
-        match text.chars().next() {
-            Some(c) if !c.is_control() => c.to_string(),
-            _ => " ".into(),
-        }
     }
 
     /// The caret as drawn: the glyphs' height of its line.

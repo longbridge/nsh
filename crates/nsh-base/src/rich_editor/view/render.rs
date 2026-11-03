@@ -1313,25 +1313,10 @@ fn caret(rv: Rv) -> impl IntoElement {
                 0.0
             }
         };
-        // A terminal's caret is the terminal's own: one Cell in inverse
-        // colors holding the character after it (a space at a line's end),
-        // so it shows on the grid and hides no text.
+        // A terminal shows its own cursor at the sink, which sits on the
+        // caret's Cell (`sink`): nothing of the editor's is drawn there.
         if crate::terminal::is_terminal() {
-            let b = rv.caret_rect()?;
-            let after = rv.char_after_caret();
-            let width = measure_text("", &after).max(measure_text("", "0"));
-            return Some(part(
-                rect(Bounds::new(b.origin, Size::new(width, b.size.height)))
-                    .bg(move || theme().foreground)
-                    .opacity(visible)
-                    .child(
-                        text(after)
-                            .number_of_lines(1u32)
-                            .text_color(move || theme().background),
-                    ),
-                &rv,
-                Part::Caret,
-            ));
+            return None;
         }
         let b = rv.caret_glyph_rect()?;
         // On whole device pixels: a caret between pixels is drawn smeared
@@ -1366,8 +1351,13 @@ fn sink(rv: Rv) -> impl IntoElement {
             // At the bottom of the caret's line: input methods open their
             // candidates under the field's line, which would cover the
             // lower part of a taller line (a heading's).
-            let y = caret.origin.y + (caret.size.height - px(SINK_HEIGHT)).max(px(0.0))
-                - rv.scroll_y.get();
+            // A terminal's line is one row: the sink on the caret's own
+            // Cell, where the terminal draws its cursor.
+            let bottom = match crate::terminal::is_terminal() {
+                true => px(0.0),
+                false => (caret.size.height - px(SINK_HEIGHT)).max(px(0.0)),
+            };
+            let y = caret.origin.y + bottom - rv.scroll_y.get();
             Point::new(
                 caret.origin.x.min(size.width - px(1.0)).max(px(0.0)),
                 y.min(size.height - px(1.0)).max(px(0.0)),
