@@ -1012,7 +1012,7 @@ pub(crate) fn compute(
         ew => ew,
     };
     let fixed_w = known_w.or(ew.map(|w| clamp(w, min_w, max_w))).or(root_w);
-    let fixed_h = known_h.or(if role.scroll && !role.sized {
+    let mut fixed_h = known_h.or(if role.scroll && !role.sized {
         None
     } else {
         eh.map(|h| clamp(h, min_h, max_h))
@@ -1258,6 +1258,13 @@ pub(crate) fn compute(
             attempt_kind.container = false;
             (border, padding) = insets(tree, node, attempt_kind, parent_w, grid, None);
             inset = border.add(padding);
+            continue;
+        }
+        // A band stated three rows tall or more around a row (a stage, a
+        // specimen) keeps a row above and below it: it reads as a box,
+        // not a chip.
+        if tall && surface.is_some() && fixed_h.is_none() && size.h < 3 {
+            fixed_h = Some(clamp(3, None, max_h));
             continue;
         }
         break (content, size);
