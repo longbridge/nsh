@@ -1053,6 +1053,10 @@ mod tests {
     /// again: wrappers made anew around the nodes it kept draw the same.
     #[test]
     fn children_are_pictured_again_when_their_nodes_change() {
+        // GSK registers its node types when one is first asked for, not
+        // when a node is made: without this, making one before any other
+        // test initialized GTK aborts.
+        <gsk::ColorNode as glib::prelude::StaticType>::static_type();
         let rect = graphene::Rect::new(0.0, 0.0, 10.0, 10.0);
         let kept = gsk::ColorNode::new(&gdk::RGBA::RED, &rect);
         let other = gsk::ColorNode::new(&gdk::RGBA::RED, &rect);
