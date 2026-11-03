@@ -650,6 +650,9 @@ fn apply_ops(surface: &Surface, window: &mut Window, cx: &mut App) {
     if !surface.chrome.standalone.get() {
         return;
     }
+    // The size asked for so far: platforms may resize asynchronously, so a
+    // second `setFrame` in the same batch must not read the old bounds.
+    let mut size = None;
     for op in ops {
         match op {
             Op::Title(title) => window.set_window_title(&title),
@@ -679,11 +682,13 @@ fn apply_ops(surface: &Surface, window: &mut Window, cx: &mut App) {
             }
             Op::ToggleFullScreen => window.toggle_fullscreen(),
             Op::Resize(width, height) => {
-                let now = window.bounds().size;
-                window.resize(gpui::size(
+                let now = size.unwrap_or_else(|| window.bounds().size);
+                let next = gpui::size(
                     width.map_or(now.width, gpui::px),
                     height.map_or(now.height, gpui::px),
-                ));
+                );
+                window.resize(next);
+                size = Some(next);
             }
             Op::Close => {
                 if !ask_to_close(surface, CloseRequest::Close, window, cx) {

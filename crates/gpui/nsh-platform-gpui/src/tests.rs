@@ -1373,7 +1373,7 @@ fn the_app_s_state_follows_its_window_s_activation_and_visibility(cx: &mut TestA
     wait_for(&view, cx, "active");
 }
 
-/// A window the app sizes at start, and narrows from the menu.
+/// A window the app sizes at start, and resizes from the menu.
 const SIZED_WINDOW: &str = r#"
 import { mount, View } from "nsh";
 import { Input } from "nsh/base";
@@ -1386,6 +1386,14 @@ function App() {
       label: "View",
       submenu: [
         { label: "Narrow", shortcut: "mod+shift+n", onSelect: () => Window.setFrame({ size: { width: 500 } }) },
+        {
+          label: "Both",
+          shortcut: "mod+shift+b",
+          onSelect: () => {
+            Window.setFrame({ size: { width: 600 } });
+            Window.setFrame({ size: { height: 400 } });
+          },
+        },
       ],
     },
   ]);
@@ -1416,4 +1424,7 @@ fn set_frame_sizes_the_window_and_keeps_the_size_it_leaves_out(cx: &mut TestAppC
     };
     cx.simulate_keystrokes(&format!("shift-{primary}-n"));
     wait_until_window(cx, "the window at 500x480", |cx| size(cx) == (500.0, 480.0));
+    // Two calls in one callback: the second keeps the first's width.
+    cx.simulate_keystrokes(&format!("shift-{primary}-b"));
+    wait_until_window(cx, "the window at 600x400", |cx| size(cx) == (600.0, 400.0));
 }
