@@ -71,8 +71,9 @@ python3 crates/nsh-platform-web/web/browser/browser-check.py --wasm target/wasm3
 
 The second command requires Python Playwright and Chromium (`--chrome` selects its executable). It checks
 real module realms, host events queued before startup, repeated replacement/disposal, rejected startup, every
-state style (`hoverStyle` / `activeStyle` under real mouse input, `focusStyle` / `focusWithinStyle` under Tab) and a
-list's `contentClass`.
+state style (`hoverStyle` / `activeStyle` under real mouse input, `focusStyle` / `focusWithinStyle` under Tab), a
+list's `contentClass` and a scroll view's `contentStyle` / `contentClass` (where its children land, inserted before
+and after the content container is made).
 `browser-tests` contains ownership fixtures: never measure or publish that artifact. Rebuild with `browser`
 and use the supported `nsh package --target web` flow for shipping and size measurements.
 
