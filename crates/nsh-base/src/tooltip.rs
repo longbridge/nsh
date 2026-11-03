@@ -1,6 +1,8 @@
 //! `Tooltip`: the hint an element's `tooltip` shows, as GPUI's
 //! `.tooltip(..)`: a hint overlay of the core (`nsh_core::element::Overlay::hint`)
-//! with the app's look, placement, delay and events.
+//! with the app's look, placement, delay and events. The core shows it for
+//! the keyboard focus on its trigger too, in every idiom, and hides it on
+//! Escape (WAI-ARIA's tooltip pattern).
 
 use std::time::Duration;
 
@@ -32,8 +34,9 @@ pub struct TooltipProps {
     #[prop(default = Points(4.0))]
     pub margin: Prop<Points>,
     /// Milliseconds the pointer rests on the trigger before it shows
-    /// (default 500). `Infinity`: never by itself, only when the app
-    /// opens it.
+    /// (default 500); the keyboard focus shows it at once. `Infinity`:
+    /// never by itself (neither the pointer nor the focus), only when the
+    /// app opens it.
     #[prop(default = 500.0)]
     pub delay: Prop<f64>,
     /// No tooltip: it neither shows nor asks to.
@@ -64,7 +67,9 @@ pub struct TooltipProps {
 #[derive(Debug, Clone, PartialEq, Event)]
 pub enum TooltipEvent {
     /// The pointer rested on the trigger, or left or pressed it (`reason`
-    /// `"hover"`): set `open` to follow it.
+    /// `"hover"`), the keyboard focus came to it or left it (`"focus"`),
+    /// or Escape was pressed while it was shown (`"cancel"`): set `open`
+    /// to follow it.
     #[args(open, reason)]
     OpenChange(bool, OpenChangeReason),
     /// It is shown.
@@ -94,8 +99,10 @@ fn delay(ms: f64) -> Option<Duration> {
 /// (`<View tooltip={<Tooltip>…</Tooltip>}>`, Rust
 /// `.tooltip(tooltip().child(..))`), as GPUI's `.tooltip(..)`: shown on top
 /// of everything next to the element on the desktops while the pointer
-/// rests on it (after `delay`), until the pointer leaves or presses it;
-/// touch screens show it only when the app opens it (`open`). It never
+/// rests on it (after `delay`), until the pointer leaves or presses it, and
+/// in every idiom at once while the keyboard focus is on it, until the
+/// focus leaves; Escape hides it. Touch screens show it otherwise only when
+/// the app opens it (`open`). It never
 /// takes the pointer or presses, so the element works as it does without
 /// it. It looks like nothing: it is the bubble, styled with its `class` /
 /// `style`, and its children are what it says; its entrance and exit are
@@ -106,12 +113,17 @@ pub fn Tooltip(props: TooltipProps, cx: Scope<TooltipEvent>) -> impl IntoElement
     let open = OpenState::new(props.open, props.default_open);
     // A delay that never ends: the pointer never asks.
     let endless = move || delay(props.delay.get_untracked()).is_none();
-    let change = move |next: bool| {
+    let change = move |next: bool, reason: HintReason| {
+        let reason = match reason {
+            HintReason::Focus => OpenChangeReason::Focus,
+            HintReason::Escape => OpenChangeReason::Cancel,
+            _ => OpenChangeReason::Hover,
+        };
         if next && (props.disabled.get_untracked() || endless()) {
             return;
         }
         open.request(next, || {
-            cx.emit(TooltipEvent::OpenChange(next, OpenChangeReason::Hover));
+            cx.emit(TooltipEvent::OpenChange(next, reason));
         });
     };
     let shown = move || open.get() && !props.disabled.get();
@@ -146,8 +158,8 @@ pub fn Tooltip(props: TooltipProps, cx: Scope<TooltipEvent>) -> impl IntoElement
         .element_ref(&presence.popup())
         .app_class(move || presence.class())
         .state_inline_style(move || presence.style())
-        .on_hint_show(move || change(true))
-        .on_hint_hide(move || change(false))
+        .on_hint_show(move |reason: &HintReason| change(true, *reason))
+        .on_hint_hide(move |reason: &HintReason| change(false, *reason))
         .child(props.children)
 }
 

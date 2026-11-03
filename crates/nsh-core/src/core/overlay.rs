@@ -23,9 +23,13 @@
 //! while the overlay is in the view on a desktop; the pointer resting on it
 //! for the hint's delay shows the hint (a task of the components' executor
 //! wakes the engine then), the pointer leaving or pressing it hides it, as
-//! GPUI's tooltips do. The overlay hears what it asks for (`Show`,
-//! `Dismiss`), so a component owning it (`nsh-base`'s `Tooltip`) can
-//! decide instead ([`OverlayConfig::open`]). An element's `tooltip` is a
+//! GPUI's tooltips do. In every idiom the keyboard focus shows it too,
+//! as WAI-ARIA's tooltips: the focus on its anchor (or in it, outside an
+//! overlay, the nearest hint's) shows it until the focus leaves
+//! ([`Core::focus_hints`]), and Escape hides a hint that is shown
+//! ([`Core::overlay_escape`]). The overlay hears what it asks for (`Show`,
+//! `Dismiss`, with the [`HintReason`]), so a component owning it
+//! (`nsh-base`'s `Tooltip`) can decide instead ([`OverlayConfig::open`]). An element's `tooltip` is a
 //! hint overlay the core makes inside the element ([`Core::set_tooltip`]).
 
 use rustc_hash::FxHashMap;
@@ -35,7 +39,10 @@ use super::{Core, Key, Kind, NO_KEY, definite};
 use crate::{
     EventKind, EventPayload, NodeId, PayloadValue, Prop, ROOT_ID, Tag, TextEngine, TouchEvent,
     TouchPhase,
-    element::task::{Action, Task, act_after},
+    element::{
+        HintReason,
+        task::{Action, Task, act_after},
+    },
     geometry::{Bounds, Point, Points, Size, point, px, rect},
     keymap::{KeyBinding, Keystroke, When},
     mount::MountItem,
@@ -99,9 +106,21 @@ pub(super) struct OverlayState {
     pub(super) hinted: bool,
     /// A hint: the pointer is on its anchor, resting until it shows.
     pub(super) waiting: Option<HintTimer>,
+    /// A hint: the keyboard focus is on its anchor.
+    pub(super) focus_on: bool,
+    /// A hint: the keyboard focus on its anchor shows it (not since
+    /// Escape or a press hid it).
+    pub(super) focus_shown: bool,
     /// Its `cover` view's frame in it, once that was laid out, with the
     /// overlay's size and the view's origin in its parent then.
     pub(super) covered: Option<(Bounds<Points>, Size<Points>, Point<Points>)>,
+}
+
+impl OverlayState {
+    /// A hint the pointer or the keyboard focus shows.
+    fn hint_shown(&self) -> bool {
+        self.hinted || self.focus_shown
+    }
 }
 
 /// What the overlays add to the native side: the nodes listening to
@@ -115,6 +134,8 @@ pub(super) struct Overlays {
     /// A shown overlay listens to `onCancel`: Escape is bound and the back
     /// button listened to.
     pub(super) cancel: bool,
+    /// A hint is shown: Escape is bound (it hides it).
+    pub(super) hint_escape: bool,
     /// The anchors of the hints in the view listening to the pointer
     /// (desktops), checked by id.
     pub(super) hinting: Vec<(Key, NodeId)>,
@@ -148,6 +169,8 @@ impl<M: TextEngine> Core<M> {
                 native_anchor: None,
                 hinted: false,
                 waiting: None,
+                focus_on: false,
+                focus_shown: false,
                 covered: None,
             }));
         }
@@ -408,7 +431,7 @@ impl<M: TextEngine> Core<M> {
                     self.unhint(key);
                 }
                 let state = self.overlay(key).expect("overlay");
-                if !state.config.open.unwrap_or(state.hinted) {
+                if !state.config.open.unwrap_or(state.hint_shown()) {
                     target = None;
                 }
             }
@@ -455,6 +478,7 @@ impl<M: TextEngine> Core<M> {
     fn sync_overlay_listeners(&mut self, hints: &[Key]) {
         let mut watched: Vec<(Key, NodeId)> = Vec::new();
         let mut cancel = false;
+        let mut hint_escape = false;
         let watching = self.overlays.iter().any(|&k| {
             self.overlay(k).is_some_and(|s| s.host.is_some())
                 && self.nodes[k as usize]
@@ -468,6 +492,7 @@ impl<M: TextEngine> Core<M> {
             let Some(host) = state.host else { continue };
             let node = &self.nodes[key as usize];
             cancel |= node.events.contains(EventKind::Cancel);
+            hint_escape |= state.config.hint.is_some();
             if !watching {
                 continue;
             }
@@ -511,6 +536,10 @@ impl<M: TextEngine> Core<M> {
             // The root's table and back listener are made again.
             self.components.executor.keys.borrow_mut().changed = true;
             self.components.executor.back.borrow_mut().changed = true;
+        }
+        if hint_escape != self.overlay_state.hint_escape {
+            self.overlay_state.hint_escape = hint_escape;
+            self.components.executor.keys.borrow_mut().changed = true;
         }
     }
 
@@ -623,23 +652,81 @@ impl<M: TextEngine> Core<M> {
         if state.waiting.take().is_none() || state.config.hint.is_none() {
             return;
         }
+        let was = state.hint_shown();
         state.hinted = true;
-        self.hint_changed(key, true);
+        if !was {
+            self.hint_changed(key, true, HintReason::Pointer);
+        }
     }
 
-    /// Hint `key` stops waiting, and hides when the pointer had it shown.
+    /// Hint `key` stops waiting, and hides when the pointer had it shown
+    /// (and the focus does not keep it).
     fn unhint(&mut self, key: Key) {
+        self.hide_hint(key, false, HintReason::Pointer);
+    }
+
+    /// Hint `key` stops waiting and the pointer's showing ends, the
+    /// focus's too when `focus`: it asks to hide when it was shown.
+    fn hide_hint(&mut self, key: Key, focus: bool, reason: HintReason) {
         let Some(state) = self.overlay_mut(key) else {
             return;
         };
         state.waiting = None;
-        if std::mem::take(&mut state.hinted) {
-            self.hint_changed(key, false);
+        let was = state.hint_shown();
+        state.hinted = false;
+        if focus {
+            state.focus_shown = false;
+        }
+        if was && !state.hint_shown() {
+            self.hint_changed(key, false, reason);
         }
     }
 
-    /// Tells hint `key` what the pointer asks for: `Show` or `Dismiss`.
-    fn hint_changed(&mut self, key: Key, shown: bool) {
+    /// The keyboard focus moved: the hints whose anchor it came to show,
+    /// those it left hide. The focus counts for the nearest hint's anchor
+    /// on its chain, up to the overlay it is in (a popup's focus is not on
+    /// its trigger's hint).
+    pub(super) fn focus_hints(&mut self) {
+        let mut target = None;
+        for &(k, _) in &self.focus_chain {
+            if self.overlays.iter().any(|&h| {
+                self.overlay(h).is_some_and(|s| s.config.hint.is_some())
+                    && self.hint_anchor(h) == Some(k)
+            }) {
+                target = Some(k);
+                break;
+            }
+            if self.nodes[k as usize].is_overlay() {
+                break;
+            }
+        }
+        let hints: Vec<Key> = self
+            .overlays
+            .iter()
+            .copied()
+            .filter(|&k| self.overlay(k).is_some_and(|s| s.config.hint.is_some()))
+            .collect();
+        for key in hints {
+            let on = target.is_some() && self.hint_anchor(key) == target;
+            let Some(state) = self.overlay_mut(key) else {
+                continue;
+            };
+            if on == state.focus_on {
+                continue;
+            }
+            state.focus_on = on;
+            let was = state.hint_shown();
+            state.focus_shown = on;
+            let now = state.hint_shown();
+            if was != now {
+                self.hint_changed(key, now, HintReason::Focus);
+            }
+        }
+    }
+
+    /// Tells hint `key` what the pointer or the focus asks for: `Show` or
+    /// `Dismiss`, with why.
+    fn hint_changed(&mut self, key: Key, shown: bool, reason: HintReason) {
         let node = &self.nodes[key as usize];
         let kind = if shown {
             EventKind::Show
@@ -650,7 +737,10 @@ impl<M: TextEngine> Core<M> {
             self.events.push(crate::element::JsEvent::Event(
                 node.id,
                 kind,
-                EventPayload::None,
+                EventPayload::Map(vec![(
+                    "reason",
+                    PayloadValue::Str(reason.as_str().to_owned()),
+                )]),
             ));
         }
     }
@@ -663,8 +753,9 @@ impl<M: TextEngine> Core<M> {
             .iter()
             .copied()
             .filter(|&k| {
-                self.overlay(k)
-                    .is_some_and(|s| s.config.hint.is_some() && (s.hinted || s.waiting.is_some()))
+                self.overlay(k).is_some_and(|s| {
+                    s.config.hint.is_some() && (s.hint_shown() || s.waiting.is_some())
+                })
             })
             .collect();
         for key in hints {
@@ -676,7 +767,7 @@ impl<M: TextEngine> Core<M> {
                 .iter()
                 .any(|p| p.changed && p.path.contains(&anchor));
             if pressed {
-                self.unhint(key);
+                self.hide_hint(key, true, HintReason::Pointer);
             }
         }
     }
@@ -831,13 +922,41 @@ impl<M: TextEngine> Core<M> {
         let _ = self.release(made.overlay);
     }
 
-    /// Escape's binding, while an overlay listens to `onCancel`.
+    /// Escape's binding, while an overlay listens to `onCancel` or a hint
+    /// is shown.
     pub(super) fn overlay_key_binding(&self) -> Option<KeyBinding> {
-        if !self.overlay_state.cancel {
+        if !self.overlay_state.cancel && !self.overlay_state.hint_escape {
             return None;
         }
         let escape = Keystroke::parse_with("escape", false).ok()?;
         Some(KeyBinding::new(ESCAPE_BINDING, escape, When::Always, false))
+    }
+
+    /// Escape: the top shown overlay that is a hint hides (it asks to,
+    /// [`HintReason::Escape`]), else `onCancel` of the top overlay
+    /// listening to it.
+    pub(super) fn overlay_escape(&mut self) {
+        let top = self.overlays.iter().rev().copied().find(|&k| {
+            self.overlay(k).is_some_and(|s| {
+                s.host.is_some()
+                    && (s.config.hint.is_some()
+                        || self.nodes[k as usize].events.contains(EventKind::Cancel))
+            })
+        });
+        let Some(key) = top else {
+            return;
+        };
+        if self.overlay(key).is_some_and(|s| s.config.hint.is_none()) {
+            self.overlay_cancel();
+            return;
+        }
+        let state = self.overlay_mut(key).expect("overlay");
+        state.waiting = None;
+        state.hinted = false;
+        state.focus_shown = false;
+        // Shown by the app (`open`) or the pointer and focus: it asks to
+        // hide either way.
+        self.hint_changed(key, false, HintReason::Escape);
     }
 
     /// Escape or back: `onCancel` of the top overlay listening to it;

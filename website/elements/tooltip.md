@@ -9,8 +9,10 @@ demo: el-tooltip
 
 A tooltip is a short hint next to what it is about: what an icon button does, the full text of a truncated label.
 On the desktops and in desktop browsers it shows once the pointer has rested on its trigger for `delay` (500 ms), and
-hides when the pointer leaves or presses the trigger. Phones and tablets show a tooltip only when the app opens it
-(`open`). It never takes the pointer or presses, so the trigger works exactly as it does without it.
+hides when the pointer leaves or presses the trigger. On every device it also shows at once while the keyboard focus
+is on its trigger, and hides when the focus leaves or Escape is pressed, so keyboard users read the same hints. Phones
+and tablets otherwise show a tooltip only when the app opens it (`open`). It never takes the pointer or presses, so the
+trigger works exactly as it does without it.
 
 `Tooltip` from [`nsh/base`](../modules/nsh-base.md) is given as the `tooltip` prop every element has
 ([Common props](index.md#tooltips)), as GPUI's `.tooltip(..)`: the element is what the pointer rests on and what it
@@ -62,7 +64,7 @@ function SaveButton(props: { onSave: () => void }) {
 
 It goes above its trigger by default (`placement`), on the other side when there is no room, and stays inside the safe
 area. With `open` the app decides when it shows: it follows `onOpenChange`, which reports the pointer resting on the
-trigger or leaving it, and can show it on any device.
+trigger or leaving it and the keyboard focus coming and going, and can show it on any device.
 
 It comes and goes with your transitions: `startingClass` is its look in its first frame and `endingClass` its look
 once hidden, which it keeps while the `transition-*` classes of its `class` run; `onClose` follows.
@@ -87,7 +89,7 @@ once hidden, which it keeps while the `transition-*` classes of its `class` run;
 | `endingClass`, `endingStyle` | `.ending_class(..)`, `.ending_style(..)` | `string`, `StyleProp<ViewStyle>` | none | Its look once hidden: it stays while its transitions run. |
 | `open` | `.open(..)` | `boolean` | none | Shown, controlled by the app. |
 | `defaultOpen` | `.default_open(..)` | `boolean` | `false` | Shown at first, without `open`. |
-| `delay` | `.delay(..)` | `number` | `500` | Milliseconds the pointer rests on the trigger before it shows; `Infinity`: never by itself, only when the app opens it. |
+| `delay` | `.delay(..)` | `number` | `500` | Milliseconds the pointer rests on the trigger before it shows (the keyboard focus shows it at once); `Infinity`: never by itself, neither for the pointer nor the focus, only when the app opens it. |
 | `disabled` | `.disabled(..)` | `boolean` | `false` | It never shows. |
 | `placement` | `.placement(..)` | `"top" \| "bottom" \| "left" \| "right"` | `"top"` | The side of the trigger it goes on. |
 | `align` | `.align(..)` | `"start" \| "center" \| "end"` | `"center"` | How it lines up with the trigger along that side. |
@@ -98,7 +100,7 @@ once hidden, which it keeps while the `transition-*` classes of its `class` run;
 
 | Event | Rust | Description |
 |---|---|---|
-| `onOpenChange` | `.on_open_change(\|e\| ..)` | The pointer rested on the trigger, or left or pressed it (`reason` `"hover"`). |
+| `onOpenChange` | `.on_open_change(\|e\| ..)` | The pointer rested on the trigger, or left or pressed it (`reason` `"hover"`); the keyboard focus came to it or left it (`"focus"`); Escape was pressed while it showed (`"cancel"`). |
 | `onOpen` | `.on_open(\|\| ..)` | It is shown. |
 | `onClose` | `.on_close(\|\| ..)` | It is gone, after its exit; also when the app hid it. |
 

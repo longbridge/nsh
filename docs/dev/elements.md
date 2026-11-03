@@ -160,6 +160,13 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
   (`focusable={true}` on a view that takes no presses made nothing focusable before 2026-10-26; with no release
   recorded, it now means what React Native's `focusable` and the web's `tabIndex={0}` mean.) Windows, Linux and GPUI
   move the focus between fields and native components only so far; iOS and Android move it between inputs.
+  A link in text (a nested `<Text>` that takes presses, `AttributedText::links`) is a stop of its own: the core marks
+  each `TextLink` with `focus_stop` (the span's `ViewProps::focus_stop(true)`: unless `focusable={false}` or
+  disabled), Tab reaches it after its text view, in text order (nested links inside the one around them), the
+  platform reports the span's node `FOCUSED` (`set_states`, so `focus:` and `focus-within` follow) and `Focus` /
+  `Blur`, and Return presses it (`PressDown` / `PressUp` / `Press` to the span, as a click on its characters). The
+  headless driver walks links (`Screen::tab_stops`); the TUI is next; macOS, the web, Windows, Linux and GPUI follow
+  in a later change, drawing their focus cue over the link's rects.
   A ref's `focus()` on a stop moves the keyboard focus to it as Tab does (`focus:`, `onFocus`; a popup gives it back to
   its trigger), and `blur()` takes it off: `Command::Focus` / `Blur` reach the platforms for any view, and AppKit makes
   the view first responder (`input::focus_control`, past a field that edits), the browser focuses the element with
@@ -418,9 +425,17 @@ dialog around it (`Modal`). It is the one mechanism popups are built on (`nsh/ba
   is disabled). `onMouseEnter` starts a task of the components' executor (`act_after`, `Action::Hint`) that wakes the
   engine after the delay; then the hint shows in the commit (`sync_overlays` leaves a hint the pointer has not asked
   for out of its root view). `onMouseLeave`, a touch down whose path holds the anchor, or the hint leaving the view hide
-  it. The overlay hears what the pointer asks for (`Show`, `Dismiss`: `on_hint_show` / `on_hint_hide`), and
+  it. In every idiom the keyboard focus shows it too (WAI-ARIA's tooltip pattern; the focus is keyboard focus, a click
+  moves none): `Core::focus_hints`, after `update_focus_within`, shows the hint of the nearest anchor on the focus
+  chain (up to the overlay the focus is in, so a popup's focus is not on its trigger's hint) at once and hides it when
+  the focus leaves. While a hint is shown the core binds Escape (`Overlays::hint_escape`, the same `ESCAPE_BINDING`):
+  Escape hides the top shown hint, or goes to `onCancel` when the top overlay is no hint (`overlay_escape`); a hint
+  Escape or a press hid shows for the focus again only once the focus comes back. The overlay hears what the pointer
+  and the focus ask for (`Show`, `Dismiss`: `on_hint_show` / `on_hint_hide`, with a `HintReason`: `Pointer`, `Focus`,
+  `Escape`, `View`), and
   `OverlayConfig::open` (`hint_open`) decides instead when its owner does (`nsh/base`'s `Tooltip`, whose own state
-  is controlled or not). Touch screens never watch: a hint shows there only when `open` says so. The overlay should
+  is controlled or not). Touch screens never watch the pointer: a hint shows there for the focus or when `open` says
+  so. The overlay should
   not take the pointer (`pointerEvents: "none"`).
 - **`tooltip`** (every element; `Prop::Tooltip`, `TooltipContent`; Rust `Interactive::tooltip`): the core makes a hint
   overlay inside the element itself (`Core::set_tooltip`, odd ids, inserted directly so a component host's children

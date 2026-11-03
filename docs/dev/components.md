@@ -1120,7 +1120,7 @@ is for, never by replacing one popup with another everywhere:
 | `Popover` | anchored to its trigger; a press outside closes it and goes on to what is under the pointer | anchored to its trigger (what it shows belongs next to it); a press outside only closes it (a transparent backdrop overlay takes it) |
 | `Menu` | a popup at its trigger (`placement`, `align`, `offset`, `margin`); `Submenu`s cascade beside their item, on hover or press | a sheet at the bottom over a backdrop; a `Submenu` shows its items in place of its menu's, with its `back` row (the app's: no built-in strings); Escape / back return a level |
 | `ContextMenu` | the secondary button opens it at the pointer (`onContextMenu`'s `page`) | a finger held 400 ms on the trigger opens it as the menu's sheet (observed touches: the trigger's own presses and the scroll views around it go on; 10 points of movement cancel) |
-| `Tooltip` | after the pointer rests on the trigger for `delay` (500 ms); leaving or pressing hides it (resting on it again while it goes takes it back) | only when the app opens it (`open`, `defaultOpen`): no pointer to rest |
+| `Tooltip` | after the pointer rests on the trigger for `delay` (500 ms), and at once while the keyboard focus is on it; leaving or pressing hides it, and so do the focus leaving and Escape (resting on it again while it goes takes it back) | while the keyboard focus is on the trigger (a hardware keyboard), else only when the app opens it (`open`, `defaultOpen`): no pointer to rest |
 | `HoverCard` | anchored to its trigger; opens after the pointer rests on the trigger for `openDelay` (600 ms) or the keyboard focus comes to it, stays while the pointer moves between the trigger and the card, closes `closeDelay` (300 ms) after the pointer left both or the focus left the trigger; Escape and a press outside close it at once | anchored to its trigger; a press on the trigger opens and closes it (`gpui-base`'s), a press outside closes it and goes on |
 | `Sheet` | an edge panel (`side`) over a backdrop | the same |
 | `Select`, `Combobox`, `DatePicker` | a popup at its trigger (`placement`, `align`, `offset`, `margin`), at least as wide as the trigger and never taller than the room on its side (`onPosition`'s `available`); a press outside closes it and goes on, leaving the keyboard focus where it went (any other close gives it back to the trigger) | a sheet at the bottom over a backdrop, below the status bar at most, with `Menu`'s motion; its search field takes the keyboard only when pressed |
@@ -1167,7 +1167,12 @@ without it replaces the value and closes. It keeps the value as the user last le
 reaches the props a turn after its `onChange` handler set it, so toggles in a row start from what the user did and
 `onConfirm`, sent on every close, reports it. The query is a `listbox::Query`: the search field's own, each opening
 starting from `defaultQuery`, or the app's `query`, whose changes highlight the first match as typing does. The
-footer is a part of the popup after the rows (`listbox::Footer`). Mod+Return closes it with `"select"`.
+footer is a part of the popup after the rows (`listbox::Footer`). Mod+Return closes it with `"select"`. A press on
+the input opens and closes the list in every idiom, as `gpui-component`'s trigger does (`"triggerPress"`); on touch
+screens the focus a tap gives opens it, and the press of that tap is then skipped (`focus_opened`). The input reports
+the press after the focus it takes: the terminal (`docs/dev/tui.md`) and the headless driver report an `Input`'s
+`onPress` today; the other backends follow in a later change, and until then a press on the input there opens the
+list on touch screens only (through the focus).
 
 `DatePicker` (`date_picker.rs`) is `Select`'s popup (`popup::dropdown`, at least as wide as the trigger, a sheet on
 touch screens) around presets, a calendar and, with `timePrecision`, a time field. Its calendar is `calendar.rs`'s grid
@@ -1231,8 +1236,9 @@ presented by the platform (`navigation.rs`); `AlertDialog` and `nsh/desktop`'s m
 view's root, so the component's host is the overlay. It is given as an element's `tooltip` (as GPUI's
 `.tooltip(..)`), never placed among children: the core takes such an element as the hint overlay itself, in the
 element (`Core::adopt_hint_tooltips` once its view made it one; Rust: `IntoTooltip for TooltipElement`), so the
-element is what the pointer rests on and what it is placed against. The core follows the pointer on it and asks
-(`on_hint_show` / `on_hint_hide`); the tooltip's open state (`OpenState`, controlled or not, `disabled` ignoring
+element is what the pointer rests on and what it is placed against. The core follows the pointer and the keyboard
+focus on it and asks (`on_hint_show` / `on_hint_hide`, with a `HintReason`: `onOpenChange`'s `reason` `"hover"`,
+`"focus"`, or `"cancel"` for Escape); the tooltip's open state (`OpenState`, controlled or not, `disabled` ignoring
 the requests) decides, as `hint_open`. The tooltip itself is the bubble (the app's `class` / `style`), its children
 what it says; it never takes the pointer (`pointer_events(None)`). An element's `tooltip` prop (`Interactive::tooltip`,
 `Prop::Tooltip`) takes any other element too, shown as it is in a hint overlay the core makes itself
@@ -1377,7 +1383,8 @@ measures it (`onLayout`) and moves it with native animated values bound to its t
 width inset: each collapsed layer `collapsedScaleStep` narrower, centered) and opacity, driven by critically damped
 springs whose response is the motion's `duration` (`spring_of`). Distances from the edge are gpui-base's geometry
 (`stack_heights`, `distance`): collapsed `collapsedPeek` per rank, expanded the newer items' heights plus
-`expandedGap` per rank; the stack's own height is the collapsed or expanded one, so its hover area follows.
+`expandedGap` per rank (in a terminal three Cells, `expanded_gap`: the frame the terminal draws on the row outside
+each toast's box at either edge, and a blank row between); the stack's own height is the collapsed or expanded one, so its hover area follows.
 
 NSH's additions fit the same pieces: gpui-base expands the stack for hover and focus; NSH's views report no focus, and
 a finger down on the stack (observed `onTouch`) expands it as the pointer does, so a toast being read or swiped is

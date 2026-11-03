@@ -2173,6 +2173,10 @@ impl<M: TextEngine> Core<M> {
         // share untouched.
         if self.focus_moved {
             self.update_focus_within();
+            // The hints the focus came to or left.
+            if !self.overlays.is_empty() {
+                self.focus_hints();
+            }
         }
         self.sync_colors();
         self.sync_ch();

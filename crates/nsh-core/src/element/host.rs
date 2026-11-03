@@ -11,8 +11,8 @@ use super::{
     Accessible, AnyElement, Interactive, IntoReactive,
     builder::{ElNode, Element, IntoElement, IntoListener, Listener, ParentElement},
     events::{
-        self, CaretEvent, Composition, NativeEvent, OverlayPosition, Selection, VideoInfo,
-        VideoProgress, WebNavigation,
+        self, CaretEvent, Composition, HintReason, NativeEvent, OverlayPosition, Selection,
+        VideoInfo, VideoProgress, WebNavigation,
     },
 };
 use crate::{
@@ -1238,7 +1238,9 @@ impl Overlay {
 
     /// Makes it a hint (a tooltip): shown once the pointer rested on its
     /// anchor (its parent without one) for `delay`, until the pointer
-    /// leaves or presses the anchor, on the desktops only; it is placed
+    /// leaves or presses the anchor, on the desktops only, and while the
+    /// keyboard focus is on the anchor (or in it, outside an overlay), in
+    /// every idiom, until the focus leaves; Escape hides it. It is placed
     /// against the anchor and should not take the pointer
     /// ([`Interactive::pointer_events`] none). [`Self::hint_open`] decides
     /// instead of the pointer.
@@ -1254,16 +1256,26 @@ impl Overlay {
         self.bind_prop(open, |o| Prop::Overlay(OverlayProp::Open(o)))
     }
 
-    /// The pointer rested on a hint's anchor for its delay: it asks to
-    /// show (and shows, unless [`Self::hint_open`] decides).
-    pub fn on_hint_show<M>(self, listener: impl IntoListener<(), M>) -> Self {
-        self.listen(EventKind::Show, listener.into_listener(), events::unit)
+    /// The pointer rested on a hint's anchor for its delay, or the
+    /// keyboard focus came to it: it asks to show (and shows, unless
+    /// [`Self::hint_open`] decides), with why.
+    pub fn on_hint_show<M>(self, listener: impl IntoListener<HintReason, M>) -> Self {
+        self.listen(
+            EventKind::Show,
+            listener.into_listener(),
+            events::hint_reason,
+        )
     }
 
-    /// The pointer left or pressed a hint's anchor, or the hint left the
-    /// view, after it asked to show: it asks to hide.
-    pub fn on_hint_hide<M>(self, listener: impl IntoListener<(), M>) -> Self {
-        self.listen(EventKind::Dismiss, listener.into_listener(), events::unit)
+    /// The pointer left or pressed a hint's anchor, the focus left it,
+    /// Escape was pressed or the hint left the view, after it asked to
+    /// show: it asks to hide, with why.
+    pub fn on_hint_hide<M>(self, listener: impl IntoListener<HintReason, M>) -> Self {
+        self.listen(
+            EventKind::Dismiss,
+            listener.into_listener(),
+            events::hint_reason,
+        )
     }
 
     /// The core placed it against its anchor: the side it went on, its

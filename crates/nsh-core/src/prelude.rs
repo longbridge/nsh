@@ -62,6 +62,7 @@ pub use crate::element::{
     FontAsset,
     FontWeight,
     GestureEvent,
+    HintReason,
     Hsla,
     // The network.
     HttpRequest,
