@@ -1262,7 +1262,12 @@ fn draw_texture(
         (rect.width(), rect.height()),
         scale,
     );
-    snapshot.append_scaled_texture(texture, filter, rect);
+    if filter == gsk::ScalingFilter::Trilinear {
+        snapshot.append_scaled_texture(texture, filter, rect);
+    } else {
+        // Let GTK sample at the final surface scale instead of forcing linear filtering.
+        snapshot.append_texture(texture, rect);
+    }
 }
 
 /// Draws one picture (`texture`, the frame showing) with the view's mode,
