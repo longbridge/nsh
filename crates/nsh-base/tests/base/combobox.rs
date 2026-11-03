@@ -13,7 +13,7 @@ use std::{
 };
 
 use nsh_base::{ComboboxEvent, SelectEntry, SelectItem, combobox};
-use nsh_core::{AccessibilityRole, MountItem, Size, element::Root, platform::Os, prelude::*};
+use nsh_core::{AccessibilityRole, MountItem, Size, element::Root, platform::{Idiom, Os}, prelude::*};
 use nsh_engine::EngineConfig;
 use nsh_testing::Headless;
 
@@ -220,11 +220,17 @@ impl App {
 
 /// On a Mac (a pointer, Tab stops at pressables).
 fn start(props: HarnessProps) -> App {
+    start_on(Os::MacOs, Idiom::Desktop, props)
+}
+
+/// [`start`] on `os` and `idiom`.
+fn start_on(os: Os, idiom: Idiom, props: HarnessProps) -> App {
     let mut config = EngineConfig {
         viewport: Size::new(px(390.0), px(844.0)),
         ..EngineConfig::new(Root::new::<Harness>(move || props.clone()))
     };
-    config.environment.os = Os::MacOs;
+    config.environment.os = os;
+    config.environment.idiom = idiom;
     let mut app = Headless::start(config).expect("the engine starts");
     let heard = Arc::new(Mutex::new(None));
     let into = heard.clone();
@@ -543,4 +549,35 @@ fn a_toggle_restyles_its_row_and_draws_nothing() {
         assert_eq!(press, (0, 0, 0), "a press toggling an item, of {items}");
         assert_eq!(keys, (0, 0, 0), "keys moving and toggling, of {items}");
     }
+}
+
+#[test]
+fn a_press_on_the_input_opens_and_closes_the_list_on_a_desktop() {
+    let mut app = start(props());
+    app.press("role:combobox").unwrap();
+    app.wait_for("role:listbox").unwrap();
+    app.log_ends("openChange:true:TriggerPress");
+    app.press("role:combobox").unwrap();
+    app.gone("role:listbox");
+    assert!(
+        app.log().contains("openChange:false:TriggerPress"),
+        "the log: {}",
+        app.log()
+    );
+    // And again: the press toggles, the focus it kept does not matter.
+    app.press("role:combobox").unwrap();
+    app.wait_for("role:listbox").unwrap();
+}
+
+#[test]
+fn the_tap_that_focuses_the_input_on_a_phone_opens_the_list_once() {
+    let mut app = start_on(Os::Ios, Idiom::Phone, props());
+    app.press("role:combobox").unwrap();
+    app.wait_for("role:listbox").unwrap();
+    app.log_ends("openChange:true:TriggerPress");
+    // The focus opened it; the press of the same tap leaves it open (the
+    // sheet's backdrop covers the input after that).
+    app.wait(Duration::from_millis(300)).unwrap();
+    app.wait_for("role:listbox").unwrap();
+    assert_eq!(app.log().matches("openChange").count(), 1, "the log: {}", app.log());
 }

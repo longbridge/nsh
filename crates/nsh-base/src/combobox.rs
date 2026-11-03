@@ -10,8 +10,9 @@
 //!   field in the root's row, between the app's `prefix` (chips, an icon)
 //!   and `suffix`, with the clear button and the app's `triggerButton` (a
 //!   chevron) after it. Typing opens the list and filters it, Down and Up
-//!   open it, a press on the trigger button opens and closes it, a tap on
-//!   the input opens it on touch screens. With one value the input shows
+//!   open it, a press on the input or the trigger button opens and closes
+//!   it in every idiom (`gpui-component`'s trigger click); a tap that
+//!   focuses the input on a touch screen opens it once. With one value the input shows
 //!   its title, selected while it gets the focus, so typing replaces it.
 //!   The list is as wide as the root.
 //!
@@ -528,6 +529,10 @@ pub fn Combobox(props: ComboboxProps, cx: Scope<ComboboxEvent>) -> impl IntoElem
     };
     let input_change = change.clone();
     let focus_change = change.clone();
+    let press_change = change.clone();
+    // The focus a press gave opened the list (a touch screen): that
+    // press's own report does not close it again.
+    let focus_opened = stored(false);
     let terminal = is_terminal();
     let text_field = input()
         .element_ref(&field)
@@ -564,6 +569,7 @@ pub fn Combobox(props: ComboboxProps, cx: Scope<ComboboxEvent>) -> impl IntoElem
             // not, and typing or the arrow keys do.
             if !is_desktop() && !open.get_untracked() && !props.disabled.get_untracked() {
                 opening.replace(Opening::Press);
+                focus_opened.replace(true);
                 focus_change(true, OpenChangeReason::TriggerPress);
             }
             // The chosen title, selected: typing replaces it.
@@ -574,7 +580,20 @@ pub fn Combobox(props: ComboboxProps, cx: Scope<ComboboxEvent>) -> impl IntoElem
                 }
             }
         })
-        .on_blur(move || focused.set(false))
+        .on_blur(move || {
+            focused.set(false);
+            focus_opened.replace(false);
+        })
+        // A press on the input opens and closes the list in every idiom,
+        // as `gpui-component`'s trigger does (after the focus it gave,
+        // which the platforms report first).
+        .on_press(move || {
+            if focus_opened.replace(false) || props.disabled.get_untracked() {
+                return;
+            }
+            opening.replace(Opening::Press);
+            press_change(!open.get_untracked(), OpenChangeReason::TriggerPress);
+        })
         .on_change(move |text: &str| {
             // Typed after the chosen title (the caret at its end): the
             // characters typed replace it, as they would the selection.

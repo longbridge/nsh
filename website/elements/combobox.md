@@ -146,7 +146,8 @@ app's `prefix` before it (the chosen items as chips, an icon) and, after it, the
 `triggerButton` (a chevron) and `suffix`.
 
 - Typing opens the list and filters the items by title, ignoring case; `empty` shows while nothing matches. Down and
-  Up open it too, a press on the trigger button opens and closes it, and on touch screens a tap on the input opens it.
+  Up open it too, and a press on the input or the trigger button opens and closes it; on touch screens the tap that
+  focuses the input opens it.
 - With one value, the input shows the chosen item's title (`placeholder` while there is none). It is selected when
   the input gets the focus, so what is typed replaces it.
 - With `multiple`, the input shows the query; the app shows the chosen items, in `prefix` or beside the combobox.
