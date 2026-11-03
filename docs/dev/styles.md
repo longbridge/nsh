@@ -360,7 +360,8 @@ do (a text is one row per line).
   nearest opaque fill around it (the page's at the root: black in a dark app, white in a light one), by 1.5 in CIE L*
   or as a saturated color of another hue. A surface has no border Cells (mounted with none) unless the app's border
   is hued or at least twice as far in lightness from the backdrop as the fill, and keeps its padding: a row above and below
-  from 12pt, two columns each side from 12pt, one from 4pt. Without bands a filled box is laid out as any other.
+  from 12pt, two columns each side from 12pt, one from 4pt. A filled box around only a text (a popup's box, framed outside it) keeps
+  that column from 4pt too, so its text never touches the band's edge or frame. Without bands a filled box is laid out as any other.
 - **Spacing.** A gap between children in a row is one column from above 0, two from 24pt, their margins added; two controls side
   by side keep a column apart even without one when they share a band (a split button's halves on its fill) or each
   paints one, as the bands would read as one; unfilled controls (tabs) touch, their padding sets them apart. Controls side by side read as words (checkboxes
