@@ -1356,7 +1356,7 @@ fn CoveredControls() -> impl IntoElement {
 }
 
 #[test]
-fn a_control_covered_by_its_children_s_fills_shows_focus_with_an_accent_underline() {
+fn a_control_covered_by_its_children_s_fills_shows_focus_with_an_underline_that_reads_on_them() {
     let (mut view, rx) = surfaces();
     let mut terminal = Terminal::new(TestBackend::new(20, 6)).unwrap();
     view.load(App::Rust(Root::new::<CoveredControls>(|| ())))
@@ -1413,7 +1413,9 @@ fn a_control_covered_by_its_children_s_fills_shows_focus_with_an_accent_underlin
     let buffer = terminal.backend().buffer();
     let (x, y) = swatch(buffer);
     for x in x..x + 4 {
-        assert_eq!(buffer[(x, y)].underline_color, Color::Blue);
+        // Not the accent, which a blue swatch would hide: the color that
+        // reads on the green, as a chosen swatch's check.
+        assert_eq!(buffer[(x, y)].underline_color, Color::Rgb(0, 0, 0));
         assert_eq!(buffer[(x, y)].bg, color, "the swatch keeps its color");
     }
     let (x, y) = cell_of(buffer, "Jump");
@@ -1490,13 +1492,17 @@ fn a_selected_swatch_in_the_focused_pane_keeps_its_color() {
     );
     let buffer = terminal.backend().buffer();
     let (x, y) = chosen(buffer);
+    let check = buffer[(x + 1, y)].fg;
     for x in x..x + 3 {
         assert_eq!(
             buffer[(x, y)].bg,
             color,
             "the chosen swatch keeps its color in the focused pane"
         );
-        assert_eq!(buffer[(x, y)].underline_color, Color::Blue);
+        // The accent's own blue: the underline is the color that reads
+        // on it, the check's.
+        assert_eq!(buffer[(x, y)].underline_color, check);
+        assert_ne!(buffer[(x, y)].underline_color, color);
     }
 }
 

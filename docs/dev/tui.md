@@ -443,7 +443,8 @@ own background, so what its children filled stays, and it is at least one step a
   text field shows its line in the focus color, or a sunken band without one, and the caret; a framed box of any
   size (a one-time code's cell) shows focus with its line alone; a focused control whose Cells are all its
   children's fills (a swatch's color, a chip's own fill, a pagination's bar) or that holds no glyph shows it as an
-  accent underline under its Cells, its fills kept;
+  accent underline under its Cells, its fills kept (a swatch, all fill and no glyph, underlined in the color its
+  check takes, which reads on any fill, the accent's own blue included);
 - a tab is bold when selected or focused and muted otherwise; a selected tab is a select band, unless the app
   underlines its label (an underlined tab strip keeps the underline alone); a focused tab is the accent band, a
   pressed or hovered one banded (select, hover);

@@ -622,3 +622,78 @@ fn pressing_a_field_closes_an_open_popover_as_any_press_outside_it() {
     view.handle(mouse(MouseKind::Up(Left), 2, 3));
     draw_until(&mut view, &mut terminal, &rx, "closed");
 }
+
+/// A surface whose terminal reports its colors, so fills are steps of the
+/// ramp from its background (24) toward its foreground (224).
+fn ramp_surface() -> (nsh_platform_tui::AppView, crossbeam_channel::Receiver<()>) {
+    let (tx, rx) = crossbeam_channel::unbounded();
+    let mut options = nsh_platform_tui::AppOptions::default();
+    options.capabilities.colors = nsh_platform_tui::ColorDepth::TrueColor;
+    options.capabilities.background_color = Some([24; 3]);
+    options.capabilities.foreground_color = Some([224; 3]);
+    options.wake = Some(std::sync::Arc::new(move || {
+        let _ = tx.send(());
+    }));
+    options.cache = nsh_engine::CacheOptions::off();
+    (nsh_platform_tui::AppView::new(options), rx)
+}
+
+#[test]
+fn a_hover_fill_of_the_apps_own_takes_one_step_not_the_select_band() {
+    // Tabs on a raised strip, the gallery's: a faint wash while hovered.
+    let code = nsh_bundler::compile_module(
+        "App.tsx",
+        r##"
+        import { mount, signal, View, Text } from "nsh";
+        const state = signal("idle");
+        mount(() => <View>
+            <View style={{ flexDirection: "row", backgroundColor: "#27272a" }}>
+                <View style={{ width: 80 }} onPress={() => {}}
+                    hoverStyle={{ backgroundColor: "rgba(255, 255, 255, 0.05)" }}
+                    onMouseEnter={() => state.set("inside")}>
+                    <Text>One</Text>
+                </View>
+                <View style={{ width: 80 }} onPress={() => {}}><Text>Two</Text></View>
+            </View>
+            <Text>{state()}</Text>
+        </View>);
+    "##,
+        &[],
+    )
+    .unwrap();
+    let (mut view, rx) = ramp_surface();
+    let mut terminal = Terminal::new(TestBackend::new(40, 8)).unwrap();
+    view.load(Bundle::source(code)).unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "idle");
+    let find = |buffer: &ratatui_core::buffer::Buffer, word: &str| {
+        (0..buffer.area.height)
+            .find_map(|y| {
+                let row: String = (0..buffer.area.width)
+                    .map(|x| buffer[(x, y)].symbol())
+                    .collect();
+                row.find(word).map(|x| (x as u16, y))
+            })
+            .unwrap_or_else(|| panic!("{word} not drawn"))
+    };
+    let (x, y) = find(terminal.backend().buffer(), "One");
+    let rest = terminal.backend().buffer()[(x, y)].bg;
+    view.handle(mouse(MouseKind::Move, x, y));
+    draw_until(&mut view, &mut terminal, &rx, "inside");
+    // Give the hover style's commit a frame to land.
+    for _ in 0..3 {
+        let _ = rx.recv_timeout(std::time::Duration::from_millis(200));
+        terminal
+            .draw(|frame| view.render(frame, frame.area()))
+            .unwrap();
+    }
+    let buffer = terminal.backend().buffer();
+    let level = |share: f32| {
+        let c = (24.0 + share * 200.0).round() as u8;
+        Color::Rgb(c, c, c)
+    };
+    // The strip is the raised step; the hovered tab one step over it (the
+    // hover step), not two (the select band's).
+    assert_eq!(rest, level(0.07), "the strip at rest");
+    assert_eq!(buffer[(x, y)].bg, level(0.11), "the hovered tab");
+    assert_eq!(buffer[find(buffer, "Two")].bg, level(0.07), "the other tab");
+}

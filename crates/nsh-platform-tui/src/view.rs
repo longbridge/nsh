@@ -13,6 +13,10 @@ pub(crate) struct NshView {
     pub(crate) children: Vec<NodeId>,
     pub(crate) frame: Bounds<Points>,
     pub(crate) style: ViewStyle,
+    /// Its background while the pointer is not over it: what a `hover:`
+    /// fill of the app's own replaces, so the painter's hover band is a
+    /// step over the view at rest, not over that fill as well.
+    pub(crate) rest_fill: nsh_core::Color,
     pub(crate) animated: nsh_core::animation::AnimValues,
     pub(crate) props: ViewProps,
     pub(crate) events: EventMask,
@@ -45,6 +49,7 @@ impl NshView {
             children: Vec::new(),
             frame: Default::default(),
             style: Default::default(),
+            rest_fill: nsh_core::Color::TRANSPARENT,
             animated: Default::default(),
             props: Default::default(),
             events: Default::default(),

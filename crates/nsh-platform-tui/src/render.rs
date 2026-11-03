@@ -422,6 +422,20 @@ impl Painter<'_> {
                 Surface::Raised | Surface::Sunken => ramp.level(ground.level),
             };
         }
+        // The step a hover band rises from: the view at rest. A `hover:`
+        // fill of the app's own (a wash over a tab or a tree row) already
+        // lifts the view a step; the band over that as well would be two
+        // steps up, the select band's, and a hovered row would look chosen.
+        let hover_level = if parent.ramp.is_some()
+            && !page
+            && !dot
+            && view.tracked & state::HOVERED != 0
+            && view.states & state::HOVERED != 0
+        {
+            palette::step(palette::surface(view.rest_fill, parent), parent.level)
+        } else {
+            ground.level
+        };
         // A view in the image role is a picture, which keeps its colors:
         // its fill is its own color at the terminal's depth, not a step of
         // the ramp (a color picker's swatches and track Cells).
@@ -974,6 +988,7 @@ impl Painter<'_> {
                     &edges,
                     emphasis,
                     (ramp, ground.level, ground.surface),
+                    hover_level,
                     popup_item,
                     layer.modal,
                     layer.pane,
@@ -1819,8 +1834,9 @@ fn mark_state(
 /// Draws the view's state on a terminal with surfaces (`ramp`, and the
 /// view's own step and background): bands of the ramp and bold, after
 /// grok-build's look. Selected items take the select band, focused ones
-/// the accent band, hovered ones the hover band, pressed ones the select
-/// band; a focused
+/// the accent band, hovered ones the hover band (a step over the view at
+/// rest, `hover_level`, so a `hover:` fill of the app's own is not
+/// lifted twice), pressed ones the select band; a focused
 /// field brightens its line (or sinks); tabs are bold when chosen and on
 /// the select band unless the app underlines them, muted otherwise;
 /// disabled views are faint, with no band.
@@ -1834,6 +1850,7 @@ fn mark_surface(
     edges: &Edges,
     emphasis: Option<Color>,
     (ramp, level, own): (Ramp, usize, Color),
+    hover_level: usize,
     popup: bool,
     dialog: bool,
     pane: bool,
@@ -1957,7 +1974,7 @@ fn mark_surface(
         } else if focused || pressed {
             band(buffer, visible, step(SELECT), own);
         } else if hovered {
-            band(buffer, visible, step(HOVER), own);
+            band(buffer, visible, ramp.band(own, hover_level, HOVER), own);
         }
         return;
     }
@@ -2018,7 +2035,7 @@ fn mark_surface(
     } else if pressed && !selected {
         band(buffer, visible, step(SELECT), own);
     } else if hovered && !selected {
-        band(buffer, visible, step(HOVER), own);
+        band(buffer, visible, ramp.band(own, hover_level, HOVER), own);
     }
 }
 

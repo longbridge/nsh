@@ -241,6 +241,9 @@ impl Mounter {
                 MountItem::ViewStyle { id, style } => {
                     if let Some(view) = self.get_mut(id) {
                         view.style = *style;
+                        if view.states & nsh_core::tailwind::state::HOVERED == 0 {
+                            view.rest_fill = view.style.background_color;
+                        }
                     }
                 }
                 MountItem::ViewProps { id, props } => {
