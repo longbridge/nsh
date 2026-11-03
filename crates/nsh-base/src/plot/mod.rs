@@ -3,9 +3,10 @@
 //! data, the scales of its two axes (and a second y scale for dual-axis
 //! charts, the marks choosing theirs), the pointer over it and its motion;
 //! its marks ([`Line`], [`Area`], [`Bar`], [`Rule`], [`Dot`], [`Cell`], [`Grid`], the radial [`Pie`],
-//! [`Arc`], [`RadialLine`] and [`RadialGrid`], and the [`Sankey`] of
-//! flows) draw what it holds, each a canvas filling the plot (a pie one
-//! per slice, a sankey one per node and ribbon), its [`PlotAxis`]es label
+//! [`Arc`], [`RadialLine`] and [`RadialGrid`], the [`Sankey`] of flows
+//! and the [`Treemap`] of nested rectangles) draw what it holds, each a
+//! canvas filling the plot (a pie one per slice, a sankey one per node and
+//! ribbon, a treemap one per part and classes), its [`PlotAxis`]es label
 //! its edges with the ticks of its scales and its [`PlotLabel`]s write
 //! texts at values of them, natively: the rows are read once when the app
 //! sets them, scaled, recorded and drawn in Rust, so no JS runs per point,
@@ -35,12 +36,14 @@ mod grid;
 mod keys;
 mod label;
 mod line;
+mod moves;
 mod pie;
 mod radial_line;
 mod rule;
 mod sankey;
 mod scale;
 mod series;
+mod treemap;
 mod tween;
 
 use std::rc::Rc;
@@ -83,6 +86,10 @@ pub use self::{
     scale::{
         BandScale, ColorScale, DivergingScale, LinearScale, OrdinalScale, Scale, SequentialScale,
     },
+    treemap::{
+        Treemap, TreemapElement, TreemapLabelPlacement, TreemapPadding, TreemapProps, TreemapSort,
+        TreemapValueLabel, treemap,
+    },
 };
 use self::{
     bar::{BarEntry, BarLayout},
@@ -115,7 +122,8 @@ pub fn registry() -> Registry {
         .register::<RadialGrid>()
         .register::<PlotAxis>()
         .register::<PlotLabel>()
-        .register::<Sankey>();
+        .register::<Sankey>()
+        .register::<Treemap>();
     registry
 }
 
@@ -317,7 +325,8 @@ pub struct PlotProps {
     /// The colors of the marks: of the categories the marks' `color`
     /// reads of their rows (`gpui-base`'s `ScaleOrdinal`, d3's
     /// `scaleOrdinal`), `{ type: "ordinal", domain?, range, unknown? }`;
-    /// or of the numbers a `Cell`'s `value` reads, along a ramp of colors
+    /// or of the numbers a `Cell`'s `value` or a `Treemap`'s `colorValue`
+    /// reads, along a ramp of colors
     /// mixed in OKLab (d3's `scaleSequential` and `scaleDiverging`), `{
     /// type: "sequential", domain?, range, unknown? }` or `{ type:
     /// "diverging", domain?, pivot?, range, unknown? }`. A slice's, a
@@ -338,9 +347,11 @@ pub enum PlotEvent {
     /// The pointer came over another row (`gpui-base`'s
     /// `TooltipState::index`): the index of the row nearest to it along
     /// the x axis (the y axis when only that one has bands), of the slice
-    /// of a `Pie`, the dot of a `Dot` or the cell of a `Cell` under it, or
-    /// of a `RadialLine`'s row nearest to it by angle; `null` once it leaves the plot (or, over a pie, its slices;
-    /// over a radial line, its outer radius).
+    /// of a `Pie`, the dot of a `Dot`, the cell of a `Cell` or the node of
+    /// a `Treemap` under it (a leaf, or a group in its band or padding),
+    /// or of a `RadialLine`'s row nearest to it by angle; `null` once it
+    /// leaves the plot (or, over a pie, its slices; over a radial line,
+    /// its outer radius).
     #[args(index)]
     HoverChange(Option<u32>),
 }
@@ -715,9 +726,19 @@ impl PlotContext {
     /// `values`, over its domain (the app's, or the extent of the plot's
     /// cells' values); `None` without such a scale or any value.
     fn shades(&self, values: &[f64]) -> Option<std::sync::Arc<[Option<Hsla>]>> {
+        self.shades_over(values, self.cell_extent.get())
+    }
+
+    /// [`Self::shades`] over `extent`, the extent of the values a mark
+    /// colors, where the scale has no domain of its own.
+    fn shades_over(
+        &self,
+        values: &[f64],
+        extent: Option<[f64; 2]>,
+    ) -> Option<std::sync::Arc<[Option<Hsla>]>> {
         self.color_scale.with(|scale| {
             let scale = scale.as_ref()?;
-            let domain = scale.domain(self.cell_extent.get())?;
+            let domain = scale.domain(extent)?;
             Some(values.iter().map(|&v| scale.shade(v, domain)).collect())
         })
     }
@@ -759,7 +780,7 @@ fn band_categories(
 /// scales of its x and y axes, its size as their range, the pointer over
 /// it and its motion. It draws nothing itself: its marks, the children
 /// (`Line`, `Area`, `Bar`, `Rule`, `Dot`, `Cell`, `Grid`, `Pie`, `Arc`,
-/// `RadialLine`, `RadialGrid`), each fill it and draw in order over each other. It
+/// `RadialLine`, `RadialGrid`, `Sankey`, `Treemap`), each fill it and draw in order over each other. It
 /// reports the row nearest to the pointer, the slice of a pie under it, or
 /// a radial line's row nearest to it by angle (`onHoverChange`), and
 /// shows the hover's parts the app styles (`crossLineClass`, `dotClass` or
