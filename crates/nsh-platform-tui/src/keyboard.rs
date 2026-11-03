@@ -88,19 +88,34 @@ fn sink_cursor(tree: &Mounter, geometry: &[Geometry], id: NodeId) -> Option<Posi
 
 /// The view is inside an overlay anchored to another view (a menu's, a
 /// select's or a popover's popup).
-fn in_anchored_overlay(tree: &Mounter, mut id: NodeId) -> bool {
+fn in_anchored_overlay(tree: &Mounter, id: NodeId) -> bool {
+    anchored_overlay(tree, id).is_some()
+}
+
+/// The overlay anchored to another view that `id` is inside, if any.
+fn anchored_overlay(tree: &Mounter, mut id: NodeId) -> Option<NodeId> {
     loop {
-        let Some(view) = tree.get(id) else {
-            return false;
-        };
+        let view = tree.get(id)?;
         if view.props.overlay_anchor.is_some() {
-            return true;
+            return Some(id);
         }
-        let Some(parent) = view.parent else {
-            return false;
-        };
-        id = parent;
+        id = view.parent?;
     }
+}
+
+/// Whether anchored overlay `popup` hangs from a trigger: its anchor is a
+/// focus stop among `candidates`, or holds one.
+fn triggered(tree: &Mounter, popup: NodeId, candidates: &[&Geometry]) -> bool {
+    let Some(anchor) = tree
+        .get(popup)
+        .and_then(|view| view.props.overlay_anchor.as_ref())
+        .and_then(|anchor| anchor.node)
+    else {
+        return false;
+    };
+    candidates
+        .iter()
+        .any(|g| contains(tree, anchor, g.id) || contains(tree, g.id, anchor))
 }
 
 pub(crate) fn contains(tree: &Mounter, ancestor: NodeId, mut id: NodeId) -> bool {
@@ -659,7 +674,25 @@ impl Keyboard {
         match action {
             Action::Next | Action::Previous | Action::Left | Action::Right => {
                 self.pending_scroll_focus = None;
-                let candidates = self.candidates(tree, geometry);
+                let mut candidates = self.candidates(tree, geometry);
+                // Tab stays in the open popup of a trigger the focus is in
+                // (a date picker's calendar, a menu): its box covers the
+                // page's controls around the trigger, which would take the
+                // focus unseen, and it stays open until Escape or a choice
+                // closes it, which gives the focus back to the trigger. A
+                // popup anchored to no stop of its own is a part of the
+                // page, which Tab passes through, and arrows always may
+                // leave a popup for the column beside it.
+                if matches!(action, Action::Next | Action::Previous)
+                    && let Some(popup) = self
+                        .focused
+                        .and_then(|id| anchored_overlay(tree, id))
+                        .filter(|&popup| {
+                            triggered(tree, popup, &candidates)
+                        })
+                {
+                    candidates.retain(|g| contains(tree, popup, g.id));
+                }
                 if candidates.is_empty() {
                     return if crate::navigation::focus_scope(tree) == ROOT_ID {
                         Handled::Ignored

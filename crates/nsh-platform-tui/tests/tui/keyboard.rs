@@ -947,3 +947,62 @@ fn down_enters_an_open_popup_then_keeps_to_the_column() {
     assert_eq!(view.handle(key("Down", Default::default())), Handled::Yes);
     draw_until(&mut view, &mut terminal, &rx, "focus O");
 }
+
+/// A control adding its label to `seen` when it takes the focus.
+fn stop(label: &'static str, seen: Signal<String>) -> impl IntoElement {
+    view()
+        .on_focus(move |_: &()| seen.update(|s| s.push_str(&format!(" {label}"))))
+        .on_press(|_: &()| {})
+        .child(text(label))
+}
+
+/// A date picker open from the start between two controls: its calendar
+/// takes the focus as it opens.
+#[component]
+fn PickerBetween() -> impl IntoElement {
+    let seen = signal(String::new());
+    view()
+        .flex_1()
+        .child(text(move || format!("seen{}.", seen.get())))
+        .child(stop("Before", seen))
+        .child(
+            nsh_base::date_picker()
+                .accessibility_label("Due")
+                .default_open(true)
+                .trigger(
+                    view()
+                        .w(px(160.0))
+                        .on_focus(move |_: &()| seen.update(|s| s.push_str(" trigger")))
+                        .child(text("Pick")),
+                ),
+        )
+        .child(stop("After", seen))
+}
+
+#[test]
+fn tab_stays_in_an_open_popup_until_escape_closes_it() {
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(60, 24)).unwrap();
+    view.load(App::Rust(Root::new::<PickerBetween>(|| ())))
+        .unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "28");
+    // Round the calendar's controls both ways: the popup covers the page,
+    // so neither its trigger nor the page's controls take the focus unseen.
+    let shift = Modifiers {
+        shift: true,
+        ..Default::default()
+    };
+    for modifiers in [Modifiers::default(), shift] {
+        for _ in 0..16 {
+            assert_eq!(view.handle(key("Tab", modifiers)), Handled::Yes);
+            terminal
+                .draw(|frame| view.render(frame, frame.area()))
+                .unwrap();
+        }
+    }
+    // Escape closes it and gives the focus back to its trigger; Tab goes on.
+    view.handle(key("Escape", Modifiers::default()));
+    draw_until(&mut view, &mut terminal, &rx, "seen trigger.");
+    view.handle(key("Tab", Modifiers::default()));
+    draw_until(&mut view, &mut terminal, &rx, "seen trigger After.");
+}

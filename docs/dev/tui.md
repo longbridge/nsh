@@ -696,8 +696,8 @@ it owns keys and the app's field caret is hidden; closing it restores the caret 
 
 | Keys | Action |
 |---|---|
-| Ctrl+N, Tab | Next focusable view in tree order |
-| Ctrl+P, Shift+Tab | Previous focusable view in tree order |
+| Ctrl+N, Tab | Next focusable view in tree order; with the focus in the open popup of a trigger (a date picker's calendar, a menu), the next one in it, round it: its box covers the controls around the trigger, and Escape closes it and gives the trigger the focus. A popup anchored to no focusable view is passed through in tree order |
+| Ctrl+P, Shift+Tab | Previous focusable view in tree order, in the same popup as Tab |
 | Down / Up | Nearest focusable view below / above, one in an overlapping column first; with none focused, the first / last one in sight, inside an open anchored popup (a menu or select opened by a click) when one is open. One out of sight within a wheel step is revealed; one farther away is approached by a wheel step (three rows) of the innermost Scroll that can still move that way, focus then staying on a control in sight |
 | Ctrl+F, Right / Ctrl+B, Left | Nearest focusable view to the right / left on the same row |
 | Enter, Space | Press the focused view, reporting PressDown, PressUp and Press in order, at its middle |
