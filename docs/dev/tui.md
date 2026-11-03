@@ -525,7 +525,7 @@ An unchanged frame changes no Cell: ratatui's diff then writes nothing.
 
 ## System UI
 
-What the system draws on other platforms is drawn in the same look (`dialog.rs`).
+What the system draws on other platforms is drawn in the same look (`dialog.rs`, `menu.rs`).
 
 - **Alerts** (`AlertDialog.show`, `Command::Dialog`): the screen is dimmed and the dialog is a centered box (at
   most 64 Cells wide) cleared of what is under it, with a rounded dim border, the title in the top border, the
@@ -535,6 +535,17 @@ What the system draws on other platforms is drawn in the same look (`dialog.rs`)
   Space choose, Escape chooses cancel or dismisses a cancelable dialog; a press on a button chooses it, one
   outside dismisses a cancelable dialog. The answer is the `dialog` event with the dialog's `id` and the button's
   `index` (-1 when dismissed). While a dialog is shown it takes every key and press, and nothing behind it is hit.
+- **Context menus** (`Menu.popup`, `DesktopCommand::PopupMenu`): a box at the pointer's Cell (or the app's point),
+  above the pointer or moved left where it has no room, on the raised surface of an anchored popup with the
+  popover's rounded line, no backdrop. One row per item: a `✓` column when an item is checkable, the label (a role's
+  own without one), the shortcut at the right (macOS's `⌃⌥⇧⌘` on macOS, else `Ctrl+Shift+N`) or `›` on a submenu,
+  whose box opens beside its row; disabled items faint, separators a line across the box, the focused row on the
+  selection band (reversed without surfaces). Up / Down, Tab / Shift+Tab and Ctrl+N / Ctrl+P go round the items that
+  can be chosen, Home / End to the ends, a letter to the next item it starts; Right, Enter or Space opens a submenu,
+  Left closes it; Enter or Space chooses, Escape (Ctrl+G) closes a submenu, then the menu. The pointer moves the
+  focus and opens submenus; a press on an item chooses it, outside the boxes closes the menu and reaches nothing
+  behind it. A choice is the root's `Menu` event with the item's id (a `quit` or `close` role ends the app), then
+  every close `{ id: 0, closed: true }`, as Linux reports them. While a menu is open it takes every key and press.
 - **Scroll bars, selection and the caret**: as above; selected text and the Minibuffer's matches are reversed,
   a text field's caret is the terminal cursor.
 
@@ -719,6 +730,10 @@ focus leaves a control for none (Esc out of a field, an editor's included), the 
 from that control rather than from the ends. A text field narrower than a Cell (an editor's sink at its caret)
 is still a stop, and while it has the focus the terminal's cursor (Bar) is at its origin Cell
 (`Keyboard::cursor`): an `Editor` and a `RichEditor` keep their sink at the caret and draw no caret of their own.
+A text's links that are stops (`TextLink::focus_stop`: a `TextView`'s, a nested `<Text onPress>`) are stops
+right after their text, in text order, a link inside another after the one around it (`render.rs` records each
+with its Cells as `Mounter::spans`, `keyboard::Span`): the focused one's characters are reversed, it reports
+`focused` and `Focus` / `Blur` as a view does, and Return presses it as a click on its characters does.
 The sink opts into `MountItem::TreeOrder`: the core supplies logical document order in the same batch as
 structural changes. `Insert` retains native paint order, including `zIndex`; raising a sidebar changes its
 stacking while its focus stops retain their document order. Ordinary text and style updates keep the stored
@@ -814,6 +829,10 @@ terminal capture.
 A press on the Cell of a pressable span (a nested `<Text onPress>`, a `TextView` link) is the span's, as on the
 desktop backends: the innermost span around the character drawn there takes it before the views around its
 text, and it fires only when released on that span.
+
+A text field takes the pointer itself (the caret, a drag's selection), and one that listens to presses (a
+combobox's field) still reports the press: `onPressDown` as it goes down, then the focus it takes, then
+`onPressUp` and, released on the field, `onPress`, focused before or not. Return stays `onSubmit`.
 
 Presses of one button on one Cell within 500 ms count up to a triple click and start over: `Press` events carry
 the count (`clicks`), a double click in a field selects the word, a triple click its line, and selectable text
@@ -940,6 +959,7 @@ permit clipboard writes; `nsh test` uses memory and never writes to the machine'
 | Development logs and connection/build status | Append-only log file, visible in the on-demand `C-h e` panel |
 | Test screenshots | Versioned UTF-8 JSON of Cell symbols, foreground/background/underline colors and modifiers |
 | Alerts (`AlertDialog`) | A centered framed box over the dimmed screen, buttons as `< OK >`, the focused one reversed |
+| Context menus (`Menu.popup`) | A framed box at the pointer on a raised surface, one row per item, shortcuts at the right, submenus beside their row |
 | Development errors | Dismissible panel, with the mapped message and stack; cleared by the next update |
 | Colors | The terminal theme's meanings: the default foreground, dim for low contrast, or the accent of a saturated color's hue; canvases keep their colors at the terminal's depth |
 | View fills | With surfaces (256 colors or more and a known background): a band of the ramp's step over the view's frame (lighter raised, darker sunken, a saturated fill mixed 20% into the step under it), the app's page color the terminal's own background; bandless (16 colors or an unknown background): left out, Cells keep the terminal's background (Drawing, "Fills") |
@@ -1023,7 +1043,7 @@ painting module checks borders (dim or accented sides, dashed, dotted, single si
 rings draw nothing, scroll bars, that images keep their box blank and icons are left out, icon buttons labeled, tiny and round boxes without borders and empty ones as their outline,
 clipping to the parent's content box with an ellipsis, selected bands, focus and disabled marks, overlays cleared
 and framed, unchanged frames and invisible views; `dialog.rs`'s unit tests check alerts' button order, keys,
-presses and drawing. These tests do not exercise hover or Slider drags yet.
+presses and drawing, `menu.rs`'s a context menu's placement, keys and presses. These tests do not exercise hover or Slider drags yet.
 The search fixture searches forward and backward through a Scroll's rows and checks the Minibuffer row before,
 during and after the search.
 The animation module at the AppView seam checks completion, cancellation, active-frame and idle scheduling,

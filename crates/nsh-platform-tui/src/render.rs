@@ -52,6 +52,8 @@
 //!
 //! Drawing the same tree twice changes no Cell.
 
+use std::collections::HashMap;
+
 use nsh_core::{
     AccessibilityRole, BorderStyle, Bounds, Checked, CornerRadii, NodeId, Point, PointerEvents,
     Points, ROOT_ID, TransformKind, ViewKind, tailwind::state,
@@ -126,6 +128,8 @@ pub(crate) fn draw(
     let mut bars = std::mem::take(&mut tree.scroll_bars);
     bars.clear();
     let clip = area.intersection(buffer.area);
+    let mut tree_spans = std::mem::take(&mut tree.spans);
+    tree_spans.clear();
     let mut text_cells = std::mem::take(&mut tree.text_cells);
     text_cells.clear();
     text_cells.resize(buffer.content.len(), false);
@@ -144,6 +148,7 @@ pub(crate) fn draw(
         popup: false,
         pane: None,
         page: page.rgb,
+        spans: std::mem::take(&mut tree_spans),
     };
     painter.pane = focus_pane(painter.tree);
     let root = Layer::default();
@@ -172,6 +177,14 @@ pub(crate) fn draw(
     }
     painter.tree.scroll_bars = painter.bars;
     painter.tree.text_cells = std::mem::take(&mut painter.text_cells);
+    painter.tree.spans = std::mem::take(&mut painter.spans);
+    if painter.tree.menus.is_open() {
+        painter.hits.clear();
+        painter
+            .tree
+            .menus
+            .draw(painter.buffer, clip, cells, page.ramp);
+    }
     if painter.tree.dialogs.is_shown() {
         painter.hits.clear();
         painter.tree.dialogs.draw(painter.buffer, clip, page.ramp);
@@ -229,6 +242,8 @@ struct Painter<'a> {
     /// The page's color: until a view fills the whole screen with the app's
     /// own page color, the terminal's background stands for it.
     page: palette::Rgb,
+    /// The links that are stops of Tab, as their texts are drawn.
+    spans: HashMap<NodeId, crate::keyboard::Span>,
 }
 
 /// A view's borders: which sides draw and each one's style.
@@ -265,6 +280,7 @@ impl Painter<'_> {
     ) {
         let cells = self.cells;
         let area = self.area;
+        let focused_span = self.tree.focused_span;
         let icon = self
             .tree
             .get(id)
@@ -460,6 +476,49 @@ impl Painter<'_> {
             text_frame: text_bounds.map(|text| text.points(cells, area)),
             scroll_origin,
         });
+        // A text's links that are stops of Tab stand after it, each where
+        // its characters are drawn.
+        if let (Some(content), Some((layout, _)), Some(text_bounds)) =
+            (&view.text_content, &view.text, text_bounds)
+            && !view.props.accessibility.state.disabled
+            && let Some(layout) = layout.downcast::<CellLayout>()
+            && content.links.iter().any(|link| link.focus_stop)
+        {
+            let text_frame = text_bounds.points(cells, area);
+            let mut links: Vec<_> = content.links.iter().filter(|l| l.focus_stop).collect();
+            // In text order, a link inside another after the one around it.
+            links.sort_by_key(|l| (l.start, std::cmp::Reverse(l.end)));
+            for (index, link) in links.into_iter().enumerate() {
+                let Some(frame) = layout
+                    .glyphs
+                    .iter()
+                    .filter(|(_, range)| range.start < link.end && link.start < range.end)
+                    .map(|(bounds, _)| *bounds)
+                    .reduce(|a, b| a.union(&b))
+                else {
+                    continue;
+                };
+                let frame = Bounds::new(text_frame.origin + frame.origin, frame.size);
+                let link_bounds = CellBounds::new(frame, cells, area).fitted(text_bounds);
+                self.geometry.push(Geometry {
+                    id: link.node,
+                    bounds: link_bounds,
+                    visible: link_bounds.clipped(visible),
+                    frame,
+                    text_frame: None,
+                    scroll_origin: Point::default(),
+                });
+                self.spans.insert(
+                    link.node,
+                    crate::keyboard::Span {
+                        view: id,
+                        index,
+                        events: link.events,
+                        range: link.start..link.end,
+                    },
+                );
+            }
+        }
         let inner_visible = inner.clipped(clip);
         // A view that clips, scrolls or stands framed holds its children
         // inside its content box; otherwise a child placed outside it (a
@@ -666,6 +725,10 @@ impl Painter<'_> {
                     bounds: text_bounds,
                     visible,
                     scrolled: layer.scrolled,
+                    focused: focused_span
+                        .and_then(|span| self.spans.get(&span))
+                        .filter(|span| span.view == id)
+                        .map(|span| span.range.clone()),
                 };
                 text(self.buffer, &mut self.text_cells, place, view, ground);
             }
@@ -1231,6 +1294,8 @@ struct TextPlace<'a> {
     bounds: CellBounds,
     visible: Rect,
     scrolled: bool,
+    /// The characters of the link that has the keyboard focus.
+    focused: Option<std::ops::Range<u32>>,
 }
 
 /// Draws a text view's rows, as laid out, inside the place's `visible`,
@@ -1247,6 +1312,7 @@ fn text(
         bounds,
         visible,
         scrolled,
+        focused,
     } = place;
     let visible = bounds.clipped(visible);
     let single = layout.rows.len() == 1;
@@ -1302,6 +1368,14 @@ fn text(
                 None => (Color::Reset, Modifier::empty()),
             };
             modifier |= glyph.modifiers();
+            // The focused link's characters are reversed, as a focused
+            // control's label is.
+            if let Some(focused) = &focused
+                && glyph.range().start < focused.end
+                && focused.start < glyph.range().end
+            {
+                modifier = (modifier | Modifier::REVERSED) - Modifier::DIM;
+            }
             // An underline of its own color (an editor's diagnostic) keeps
             // it, as the terminal draws a colored underline under any text.
             let underline = glyph

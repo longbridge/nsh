@@ -365,7 +365,9 @@ mod linked {
                     .child(" now")
                     .on_press(move |_: &()| texts.update(|n| *n += 1)),
             )
-            .child(text(move || format!("links:{} texts:{}", links.get(), texts.get())))
+            .child(text(move || {
+                format!("links:{} texts:{}", links.get(), texts.get())
+            }))
     }
 }
 
@@ -383,6 +385,56 @@ fn a_click_on_a_rust_apps_pressable_span_presses_the_span() {
     view.handle(mouse(MouseKind::Down(Left), 16, 0));
     view.handle(mouse(MouseKind::Up(Left), 16, 0));
     draw_until(&mut view, &mut terminal, &rx, "links:1 texts:1");
+}
+
+mod pressed_field {
+    use nsh_core::prelude::*;
+
+    /// A field that listens to presses, as a combobox's does, and a log of
+    /// what it hears.
+    #[component]
+    pub(super) fn PressedField() -> impl IntoElement {
+        let log = signal(String::from("log"));
+        let note = move |what: &'static str| log.update(|log| log.push_str(what));
+        view()
+            .child(
+                nsh_base::input()
+                    .h(px(16.0))
+                    .w(px(80.0))
+                    .on_focus(move |_: &()| note(" focus"))
+                    .on_press(move |_: &()| note(" press")),
+            )
+            .child(text(move || log.get()))
+    }
+}
+
+#[test]
+fn a_press_on_a_field_that_listens_to_presses_reports_it_after_the_focus_focused_or_not() {
+    use nsh_platform_tui::{App, MouseButton::Left, Root};
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(40, 8)).unwrap();
+    view.load(App::Rust(Root::new::<pressed_field::PressedField>(|| ())))
+        .unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "log");
+    view.handle(mouse(MouseKind::Down(Left), 2, 0));
+    view.handle(mouse(MouseKind::Up(Left), 2, 0));
+    draw_until(&mut view, &mut terminal, &rx, "log focus press");
+    // Focused already: the press alone.
+    view.handle(mouse(MouseKind::Down(Left), 3, 0));
+    view.handle(mouse(MouseKind::Up(Left), 3, 0));
+    draw_until(&mut view, &mut terminal, &rx, "log focus press press");
+    // Released off the field: no press.
+    view.handle(mouse(MouseKind::Down(Left), 3, 0));
+    view.handle(mouse(MouseKind::Move, 30, 3));
+    view.handle(mouse(MouseKind::Up(Left), 30, 3));
+    view.handle(mouse(MouseKind::Down(Left), 3, 0));
+    view.handle(mouse(MouseKind::Up(Left), 3, 0));
+    draw_until(&mut view, &mut terminal, &rx, "log focus press press press");
+    assert!(
+        !super::dock::dump(&terminal).contains("press press press press"),
+        "{}",
+        super::dock::dump(&terminal)
+    );
 }
 
 #[test]
@@ -442,6 +494,70 @@ fn a_secondary_press_asks_the_nearest_listener_for_a_context_menu() {
     view.handle(mouse(MouseKind::Up(Right), 1, 0));
     // The Cell's middle: half a Cell past its corner.
     draw_until(&mut view, &mut terminal, &rx, "menu 12,8");
+}
+
+#[test]
+fn a_context_menu_opens_at_the_pointer_and_takes_keys_and_presses_until_it_closes() {
+    use nsh_platform_tui::{Input, MouseButton::Right};
+    let code = nsh_bundler::compile_module(
+        "App.tsx",
+        r#"
+        import { mount, signal, View, Text } from "nsh";
+        import { Menu } from "nsh/desktop";
+        const log = signal("none");
+        const show = () => Menu.popup([
+            { label: "Copy", onSelect: () => log.set("copy") },
+            { label: "Paste", disabled: true },
+            { type: "separator" },
+            { label: "Share", submenu: [{ label: "Mail", onSelect: () => log.set("mail") }] },
+        ]).then(() => log.set(log() + " closed"));
+        mount(() => <View>
+            <View style={{ width: 80, height: 16 }} onContextMenu={show}><Text>Area</Text></View>
+            <Text>{log()}</Text>
+        </View>);
+    "#,
+        &[],
+    )
+    .unwrap();
+    let key = |name: &str| Input::Key {
+        key: name.into(),
+        modifiers: Default::default(),
+        release: false,
+    };
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(40, 12)).unwrap();
+    view.load(Bundle::source(code)).unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "none");
+    view.handle(mouse(MouseKind::Down(Right), 2, 0));
+    view.handle(mouse(MouseKind::Up(Right), 2, 0));
+    draw_until(&mut view, &mut terminal, &rx, "Copy");
+    let buffer = terminal.backend().buffer().clone();
+    // The box's corner on the pointer's Cell, its items in rows.
+    assert_eq!(buffer[(2, 0)].symbol(), "╭");
+    assert_eq!(buffer[(4, 1)].symbol(), "C");
+    // Tab skips the disabled item and the separator; Right opens the
+    // submenu, Enter chooses in it.
+    assert_eq!(view.handle(key("Tab")), Handled::Yes);
+    assert_eq!(view.handle(key("Tab")), Handled::Yes);
+    view.handle(key("Right"));
+    draw_until(&mut view, &mut terminal, &rx, "Mail");
+    view.handle(key("Enter"));
+    draw_until(&mut view, &mut terminal, &rx, "mail closed");
+    // A press outside the box closes it and goes no further.
+    view.handle(mouse(MouseKind::Down(Right), 2, 0));
+    view.handle(mouse(MouseKind::Up(Right), 2, 0));
+    draw_until(&mut view, &mut terminal, &rx, "Copy");
+    view.handle(mouse(
+        MouseKind::Down(nsh_platform_tui::MouseButton::Left),
+        30,
+        10,
+    ));
+    view.handle(mouse(
+        MouseKind::Up(nsh_platform_tui::MouseButton::Left),
+        30,
+        10,
+    ));
+    draw_until(&mut view, &mut terminal, &rx, "mail closed closed");
 }
 
 #[test]

@@ -3,7 +3,8 @@
 //! inside it that read no state of their own (no `focus:`), and leaves
 //! with it; a ref's `on_focus_in` / `on_focus_out` hear the focus come into
 //! an element and leave it, a `Popover`'s content counting as inside the
-//! view that holds the popover.
+//! view that holds the popover. A press on a field that listens to presses
+//! focuses it first.
 
 use std::{
     collections::HashMap,
@@ -173,4 +174,31 @@ fn a_popovers_content_is_within_the_view_holding_the_popover() {
     assert!(app.app.shows("Within: in"));
     app.app.press_key("tab").unwrap();
     app.app.wait_for("Within: in out").unwrap();
+}
+
+/// A field that listens to presses, as a combobox's does, and a log of
+/// what it hears.
+#[component]
+fn PressedField() -> impl IntoElement {
+    let log = signal(String::from("log"));
+    let note = move |what: &'static str| log.update(|log| log.push_str(what));
+    view()
+        .child(
+            input()
+                .test_id("field")
+                .h(px(30.0))
+                .on_focus(move |_: &()| note(" focus"))
+                .on_press(move |_: &()| note(" press")),
+        )
+        .child(text(move || log.get()))
+}
+
+#[test]
+fn a_press_on_a_field_that_listens_to_presses_focuses_it_then_reports_the_press() {
+    let mut app = start(Root::new::<PressedField>(|| ()));
+    app.app.press("id:field").unwrap();
+    assert!(app.app.shows("log focus press"));
+    // Focused already: the press alone.
+    app.app.press("id:field").unwrap();
+    assert!(app.app.shows("log focus press press"));
 }

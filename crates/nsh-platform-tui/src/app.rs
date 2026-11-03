@@ -12,7 +12,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use nsh_core::{Bounds, Points, ROOT_ID, Size};
+use nsh_core::{Bounds, Point, Points, ROOT_ID, Size};
 use nsh_engine::{App, AppError, Engine, EngineConfig, Environment, HostChannel, Idiom, Limits};
 use ratatui_core::{buffer::Buffer, layout::Rect, terminal::Frame, widgets::Widget};
 
@@ -173,6 +173,15 @@ pub struct AppView {
     clipboard: Arc<dyn nsh_core::clipboard::ClipboardBackend>,
     kill: String,
     field_drag: Option<FieldDrag>,
+    /// The press on a text field that listens to presses (a combobox's
+    /// field): the field takes the pointer, and the press still ends as
+    /// one does, `onPress` when the pointer comes up on the field. With
+    /// the field's view origin and its Cells.
+    field_press: Option<(
+        nsh_core::input::Press<nsh_core::NodeId>,
+        Point<Points>,
+        Rect,
+    )>,
     /// The next `draw_terminal` repaints every Cell (the terminal came back to focus).
     repaint: bool,
     pointer: Pointer,
@@ -251,6 +260,7 @@ impl AppView {
             clipboard,
             kill: String::new(),
             field_drag: None,
+            field_press: None,
             repaint: false,
             pointer: Pointer::default(),
             bar_drag: None,
@@ -468,6 +478,7 @@ impl AppView {
         if !focused {
             self.minibuffer.end();
             self.field_drag = None;
+            self.field_press = None;
             self.bar_drag = None;
             self.selection.clear();
             if let Some(engine) = &self.surface.engine {
@@ -574,6 +585,15 @@ impl AppView {
         }
         if self.tree.dialogs.is_shown()
             && let Some(handled) = self.handle_dialog(&input)
+        {
+            return handled;
+        }
+        if let Input::Mouse(mouse) = &input {
+            self.tree.menus.pointer =
+                Some(ratatui_core::layout::Position::new(mouse.column, mouse.row));
+        }
+        if self.tree.menus.is_open()
+            && let Some(handled) = self.handle_menu(&input)
         {
             return handled;
         }
@@ -749,6 +769,57 @@ impl AppView {
             && let Some(engine) = &self.surface.engine
         {
             answer.dispatch(&engine.control());
+        }
+        self.surface.wake.notify();
+        Some(Handled::Yes)
+    }
+
+    /// An open context menu takes every key and press until it closes, as
+    /// a system menu does; Ctrl+C still quits, and focus reports still
+    /// reach the surface (`None`).
+    fn handle_menu(&mut self, input: &Input) -> Option<Handled> {
+        let outcome = match input {
+            Input::Focus(_) => return None,
+            Input::Key {
+                key,
+                modifiers,
+                release,
+            } => {
+                if *release || !self.focused {
+                    return Some(Handled::Ignored);
+                }
+                if let Some(stroke) = crate::key_scheme::keystroke(key, *modifiers)
+                    && let Some(crate::key_scheme::Action::Quit) =
+                        crate::key_scheme::terminal(stroke)
+                {
+                    self.tree.exit = true;
+                    return Some(Handled::Yes);
+                }
+                self.tree.menus.key(key, *modifiers)
+            }
+            Input::KeyRepeat { key, modifiers } => self.tree.menus.key(key, *modifiers),
+            Input::Mouse(mouse) => {
+                let position = ratatui_core::layout::Position::new(mouse.column, mouse.row);
+                match mouse.kind {
+                    crate::MouseKind::Down(_) => {
+                        // Views behind the menu lose a press or hover they held.
+                        self.pointer.cancel(
+                            &mut self.tree,
+                            self.surface.engine.as_ref().map(Engine::control).as_ref(),
+                        );
+                        self.tree.menus.press(position)
+                    }
+                    crate::MouseKind::Move => self.tree.menus.hover(position),
+                    _ => return Some(Handled::Yes),
+                }
+            }
+            Input::Paste(_) => return Some(Handled::Yes),
+        };
+        if let Some(outcome) = outcome
+            && let Some(engine) = &self.surface.engine
+            && outcome.dispatch(&engine.control())
+        {
+            self.tree.exit = true;
         }
         self.surface.wake.notify();
         Some(Handled::Yes)
@@ -980,6 +1051,15 @@ impl AppView {
         let control = engine.control();
         let position = Position::new(mouse.column, mouse.row);
         let scope = crate::navigation::focus_scope(&self.tree);
+        if matches!(mouse.kind, MouseKind::Up(MouseButton::Left))
+            && let Some((mut press, origin, cells)) = self.field_press.take()
+        {
+            let page = crate::input::page_point(mouse, self.area, self.options.cells);
+            let fire = self.tree.get(press.node).is_some() && cells.contains(position);
+            for event in press.press_out(fire) {
+                crate::input::dispatch(&control, &press, event, page, origin);
+            }
+        }
         if let Some(FieldDrag {
             id,
             last,
@@ -1043,8 +1123,15 @@ impl AppView {
                     control: &control,
                 },
             );
+            // A field that listens to presses keeps the one the pointer
+            // started on it: `onPressDown` went, `onPress` follows on the
+            // way up, after the focus the field takes now.
+            let press = self.pointer.take_press(id);
             self.pointer.cancel(&mut self.tree, Some(&control));
             self.keyboard.focus(Some(id), &mut self.tree, &control);
+            self.field_press = press.map(|(press, origin)| {
+                (press, origin, hit.map(|hit| hit.area).unwrap_or_default())
+            });
             let clicks = self.pointer.clicks();
             let view = self.tree.get_mut(id).unwrap();
             let field = view.field.as_mut().unwrap();
@@ -1367,6 +1454,7 @@ impl AppView {
         self.minibuffer = Default::default();
         self.kill.clear();
         self.field_drag = None;
+        self.field_press = None;
     }
 }
 

@@ -108,7 +108,7 @@ pub enum Input {
 }
 
 /// Where `mouse` is in the surface `area`, in points: the middle of its Cell.
-fn page_point(mouse: MouseInput, area: Rect, cells: CellSize) -> Point<Points> {
+pub(crate) fn page_point(mouse: MouseInput, area: Rect, cells: CellSize) -> Point<Points> {
     Point::new(
         cells.width() * (f32::from(mouse.column) - f32::from(area.x) + 0.5),
         cells.height() * (f32::from(mouse.row) - f32::from(area.y) + 0.5),
@@ -406,6 +406,21 @@ impl Pointer {
         self.set_hovered(hovered, cx)
     }
 
+    /// Takes the press the pointer holds on view `id` itself, with its
+    /// view's origin, so a text field that takes the pointer still reports
+    /// the press: [`Pointer::cancel`] leaves it to the caller.
+    pub(crate) fn take_press(&mut self, id: NodeId) -> Option<(Press<NodeId>, Point<Points>)> {
+        if self
+            .pressed
+            .as_ref()
+            .is_some_and(|(press, _)| press.view == id && press.node == id)
+        {
+            self.pressed.take()
+        } else {
+            None
+        }
+    }
+
     pub(crate) fn cancel(&mut self, tree: &mut Mounter, control: Option<&EngineControl>) {
         self.backdrop = None;
         self.release_states(tree, control);
@@ -695,8 +710,8 @@ impl Pointer {
                 };
                 // A span's press delay is its text view's.
                 let delay = tree.get(view).and_then(|view| view.props.long_press_delay);
-                let mut press = Press::new(view, id, events, delay, 0)
-                    .clicked(mouse.modifiers, self.clicks());
+                let mut press =
+                    Press::new(view, id, events, delay, 0).clicked(mouse.modifiers, self.clicks());
                 if let Some(event) = press.press_in() {
                     dispatch(control, &press, event, page, origin);
                 }
@@ -739,7 +754,11 @@ fn link_at(
         return None;
     }
     let frame = geometry.iter().rev().find(|g| g.id == id)?.text_frame?;
-    let layout = view.text.as_ref()?.0.downcast::<crate::text::CellLayout>()?;
+    let layout = view
+        .text
+        .as_ref()?
+        .0
+        .downcast::<crate::text::CellLayout>()?;
     let point = page - frame.origin;
     let (_, range) = layout
         .glyphs
@@ -750,7 +769,7 @@ fn link_at(
         .copied()
 }
 
-fn dispatch(
+pub(crate) fn dispatch(
     control: &EngineControl,
     press: &Press<NodeId>,
     event: EventKind,

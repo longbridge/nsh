@@ -67,6 +67,11 @@ pub(crate) struct Row {
 }
 
 impl Glyph {
+    /// The characters it draws (UTF-16 offsets of the text).
+    pub(crate) fn range(&self) -> std::ops::Range<u32> {
+        self.start..self.end
+    }
+
     /// Bold, italic, underline and strike-through, as the run sets them.
     pub(crate) fn modifiers(&self) -> Modifier {
         self.style.add_modifier

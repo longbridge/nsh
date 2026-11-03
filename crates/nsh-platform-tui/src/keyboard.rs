@@ -11,6 +11,43 @@ use ratatui_core::layout::Position;
 
 use crate::{Handled, key_scheme::Action, mount::Mounter, render::Geometry};
 
+/// A link of a text that is a stop of Tab (`TextLink::focus_stop`): no
+/// view of its own, it stands after its text `view` in the focus order,
+/// `index` among the text's links in text order, and takes Return as a
+/// click on its characters does.
+#[derive(Clone, Debug)]
+pub(crate) struct Span {
+    pub(crate) view: NodeId,
+    pub(crate) index: usize,
+    pub(crate) events: nsh_core::EventMask,
+    pub(crate) range: std::ops::Range<u32>,
+}
+
+/// The view `id` is, or the text view of link `id`.
+pub(crate) fn host(tree: &Mounter, id: NodeId) -> NodeId {
+    tree.spans.get(&id).map_or(id, |span| span.view)
+}
+
+/// The view around `id`: its parent, or a link's text view.
+fn parent(tree: &Mounter, id: NodeId) -> Option<NodeId> {
+    match tree.get(id) {
+        Some(view) => view.parent,
+        None => tree.spans.get(&id).map(|span| span.view),
+    }
+}
+
+/// Where stop `id` comes in the focus order: its view's place in the tree,
+/// a link right after its text, in text order.
+fn order(tree: &Mounter, id: NodeId) -> (usize, usize) {
+    match tree.spans.get(&id) {
+        Some(span) => (
+            tree.get(span.view).map_or(usize::MAX, |v| v.tree_order),
+            span.index + 1,
+        ),
+        None => (tree.get(id).map_or(usize::MAX, |v| v.tree_order), 0),
+    }
+}
+
 #[derive(Default)]
 pub(crate) struct Keyboard {
     pub(crate) focused: Option<NodeId>,
@@ -93,7 +130,8 @@ fn in_anchored_overlay(tree: &Mounter, id: NodeId) -> bool {
 }
 
 /// The overlay anchored to another view that `id` is inside, if any.
-fn anchored_overlay(tree: &Mounter, mut id: NodeId) -> Option<NodeId> {
+fn anchored_overlay(tree: &Mounter, id: NodeId) -> Option<NodeId> {
+    let mut id = host(tree, id);
     loop {
         let view = tree.get(id)?;
         if view.props.overlay_anchor.is_some() {
@@ -123,7 +161,7 @@ pub(crate) fn contains(tree: &Mounter, ancestor: NodeId, mut id: NodeId) -> bool
         if id == ancestor {
             return true;
         }
-        let Some(parent) = tree.get(id).and_then(|view| view.parent) else {
+        let Some(parent) = parent(tree, id) else {
             return false;
         };
         id = parent;
@@ -148,6 +186,12 @@ impl Keyboard {
         let mut candidates: Vec<_> = geometry
             .iter()
             .filter(|g| {
+                // A text's link: while its text is a part of the scope.
+                if let Some(span) = tree.spans.get(&g.id) {
+                    return input_scope(tree, span.view) == scope
+                        && g.bounds.right > g.bounds.left
+                        && g.bounds.bottom > g.bounds.top;
+                }
                 input_scope(tree, g.id) == scope
                     && tree.get(g.id).is_some_and(|view| {
                         let editable = view.input.as_ref().is_some_and(|config| config.editable);
@@ -163,7 +207,7 @@ impl Keyboard {
                     })
             })
             .collect();
-        candidates.sort_by_key(|g| tree.get(g.id).unwrap().tree_order);
+        candidates.sort_by_key(|g| order(tree, g.id));
         candidates
     }
 
@@ -174,6 +218,7 @@ impl Keyboard {
         control: &EngineControl,
     ) {
         let old = self.focused;
+        let old_span = tree.focused_span.filter(|&span| Some(span) == old);
         self.focused = id;
         self.search_point = None;
         self.left = if id.is_none() {
@@ -196,8 +241,9 @@ impl Keyboard {
                 field.report(id.unwrap(), control, false);
             }
         }
+        tree.focused_span = id.filter(|id| tree.spans.contains_key(id));
         if let Some(focused) = id {
-            let mut parent = Some(focused);
+            let mut parent = Some(host(tree, focused));
             while let Some(id) = parent {
                 let Some(view) = tree.get(id) else {
                     break;
@@ -227,6 +273,15 @@ impl Keyboard {
         {
             view.states &= !FOCUSED;
             control.set_states(old.unwrap(), view.states);
+        }
+        // A link has no view to hold its states: it is focused or not.
+        if old != id {
+            if let Some(old) = old_span {
+                control.set_states(old, 0);
+            }
+            if let Some(id) = id.filter(|id| tree.spans.contains_key(id)) {
+                control.set_states(id, FOCUSED);
+            }
         }
         self.sync_states(tree, control);
         if old != id {
@@ -687,9 +742,7 @@ impl Keyboard {
                     && let Some(popup) = self
                         .focused
                         .and_then(|id| anchored_overlay(tree, id))
-                        .filter(|&popup| {
-                            triggered(tree, popup, &candidates)
-                        })
+                        .filter(|&popup| triggered(tree, popup, &candidates))
                 {
                     candidates.retain(|g| contains(tree, popup, g.id));
                 }
@@ -713,8 +766,8 @@ impl Keyboard {
                     .filter(|&id| geometry.iter().any(|g| g.id == id))
                     .or(left_id.filter(|_| left.is_none()))
                     .and_then(|id| tree.get(id))
-                    .map(|view| view.tree_order);
-                let order = |g: &&Geometry| tree.get(g.id).unwrap().tree_order;
+                    .map(|view| (view.tree_order, 0));
+                let order = |g: &&Geometry| order(tree, g.id);
                 let next = match (action, point) {
                     (Action::Next, Some(point)) if current.is_none() => {
                         candidates.iter().position(|g| order(g) > point).or(Some(0))
@@ -776,10 +829,13 @@ impl Keyboard {
                         Handled::Yes
                     };
                 };
-                let Some(view) = tree.get(g.id) else {
-                    return Handled::Ignored;
+                // A link takes Return as a click on its characters does.
+                let events = match (tree.spans.get(&g.id), tree.get(g.id)) {
+                    (Some(span), _) => span.events,
+                    (None, Some(view)) => view.events,
+                    (None, None) => return Handled::Ignored,
                 };
-                if !has_press(view.events) {
+                if !has_press(events) {
                     return Handled::Ignored;
                 }
                 let position =
@@ -791,7 +847,7 @@ impl Keyboard {
                     clicks: 1,
                 });
                 for event in [EventKind::PressDown, EventKind::PressUp, EventKind::Press] {
-                    if view.events.contains(event) {
+                    if events.contains(event) {
                         control.dispatch_event(g.id, event, payload.clone());
                     }
                 }
@@ -1008,7 +1064,8 @@ impl Keyboard {
 
 /// The innermost vertical scroll view around `id` (itself included) that
 /// can still scroll down (`down`) or up.
-fn vertical_scroll(tree: &Mounter, mut id: NodeId, down: bool) -> Option<NodeId> {
+fn vertical_scroll(tree: &Mounter, id: NodeId, down: bool) -> Option<NodeId> {
+    let mut id = host(tree, id);
     loop {
         let view = tree.get(id)?;
         if let Some(scroll) = view.scroll.as_ref()
@@ -1023,7 +1080,8 @@ fn vertical_scroll(tree: &Mounter, mut id: NodeId, down: bool) -> Option<NodeId>
     }
 }
 
-fn scroll_ancestor(tree: &Mounter, mut id: NodeId) -> Option<NodeId> {
+fn scroll_ancestor(tree: &Mounter, id: NodeId) -> Option<NodeId> {
+    let mut id = host(tree, id);
     loop {
         let view = tree.get(id)?;
         if view.scroll.is_some() {
@@ -1069,7 +1127,7 @@ pub(crate) fn reveal_frame(
     frame: nsh_core::Bounds<nsh_core::Points>,
 ) {
     let mut origin = frame.origin;
-    let mut parent = tree.get(id).and_then(|view| view.parent);
+    let mut parent = parent(tree, id);
     while let Some(id) = parent {
         let view = tree.get(id).unwrap();
         parent = view.parent;
@@ -1155,7 +1213,8 @@ fn snap(
     nsh_core::Points(snapped.max(0.0))
 }
 
-pub(crate) fn input_scope(tree: &Mounter, mut id: NodeId) -> NodeId {
+pub(crate) fn input_scope(tree: &Mounter, id: NodeId) -> NodeId {
+    let mut id = host(tree, id);
     while let Some(view) = tree.get(id) {
         if view.kind == ViewKind::Modal {
             return id;

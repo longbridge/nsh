@@ -1006,3 +1006,84 @@ fn tab_stays_in_an_open_popup_until_escape_closes_it() {
     view.handle(key("Tab", Modifiers::default()));
     draw_until(&mut view, &mut terminal, &rx, "seen trigger After.");
 }
+
+/// A paragraph with two links, and a stop after it; what the links
+/// reported and where the focus came, on screen.
+#[component]
+fn DocumentLinks() -> impl IntoElement {
+    let pressed = signal(Vec::<String>::new());
+    let after = signal(false);
+    view()
+        .flex_1()
+        .child(
+            nsh_base::text_view()
+                .markdown("Read [the guide](https://example.com/guide) or [the notes](#notes).")
+                .on_link_press(move |e: &nsh_base::TextViewLinkPressEvent| {
+                    let url = e.url.to_string();
+                    pressed.update(|p| p.push(url));
+                }),
+        )
+        .child(
+            view()
+                .focusable(true)
+                .on_focus(move || after.set(true))
+                .child(text("After")),
+        )
+        .child(text(move || {
+            format!("Pressed: {}", pressed.get().join(" "))
+        }))
+        .child(text(move || format!("After focused: {}", after.get())))
+}
+
+#[test]
+fn tab_reaches_a_texts_links_in_order_shows_the_focused_one_and_return_presses_it() {
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(60, 12)).unwrap();
+    view.load(App::Rust(Root::new::<DocumentLinks>(|| ())))
+        .unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "the guide");
+    let none = Modifiers::default();
+    view.handle(key("Tab", none));
+    view.handle(key("Enter", none));
+    draw_until(
+        &mut view,
+        &mut terminal,
+        &rx,
+        "Pressed: https://example.com/guide",
+    );
+    // The focused link's characters are reversed, the other's not.
+    let (x, y) = super::dock::find(&terminal, "the guide").unwrap();
+    assert!(focus_filled(terminal.backend().buffer(), x, y));
+    let (nx, ny) = super::dock::find(&terminal, "the notes").unwrap();
+    assert!(!focus_filled(terminal.backend().buffer(), nx, ny));
+    view.handle(key("Tab", none));
+    view.handle(key("Enter", none));
+    draw_until(
+        &mut view,
+        &mut terminal,
+        &rx,
+        "Pressed: https://example.com/guide #notes",
+    );
+    assert!(focus_filled(terminal.backend().buffer(), nx, ny));
+    assert!(
+        super::dock::dump(&terminal).contains("After focused: false"),
+        "the links came first"
+    );
+    view.handle(key("Tab", none));
+    draw_until(&mut view, &mut terminal, &rx, "After focused: true");
+    // Back from the stop after it: the last link.
+    view.handle(key(
+        "Tab",
+        Modifiers {
+            shift: true,
+            ..Default::default()
+        },
+    ));
+    view.handle(key("Enter", none));
+    draw_until(
+        &mut view,
+        &mut terminal,
+        &rx,
+        "Pressed: https://example.com/guide #notes #notes",
+    );
+}

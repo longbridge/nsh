@@ -24,11 +24,19 @@ pub(crate) struct Mounter {
     pub(crate) focus_requests: Vec<(NodeId, bool)>,
     /// The system dialogs shown (`AlertDialog`), oldest first.
     pub(crate) dialogs: crate::dialog::Dialogs,
+    /// The context menu open (`Menu.popup`), and where the pointer last was.
+    pub(crate) menus: crate::menu::Menus,
     /// The scroll bars drawn in the last frame, topmost last.
     pub(crate) scroll_bars: Vec<crate::scrollbar::ScrollBar>,
     /// The Cells text was drawn on this frame (by buffer index), kept to
     /// reuse its allocation (`render.rs`).
     pub(crate) text_cells: Vec<bool>,
+    /// The links of the texts drawn last that are stops of Tab
+    /// (`TextLink::focus_stop`), by the span's node: no views of their own,
+    /// each stands after its text view in the focus order.
+    pub(crate) spans: HashMap<NodeId, crate::keyboard::Span>,
+    /// The link that has the keyboard focus, which its text shows.
+    pub(crate) focused_span: Option<NodeId>,
     unhandled: HashSet<Discriminant<MountItem>>,
     unsupported: HashSet<String>,
 }
@@ -52,7 +60,10 @@ impl Default for Mounter {
             focus_requests: Vec::new(),
             scroll_bars: Vec::new(),
             text_cells: Vec::new(),
+            spans: HashMap::new(),
+            focused_span: None,
             dialogs: Default::default(),
+            menus: Default::default(),
             unhandled: HashSet::new(),
             unsupported: HashSet::new(),
         };
@@ -116,6 +127,9 @@ impl Mounter {
         self.focus_requests.clear();
         self.scroll_bars.clear();
         self.dialogs.clear();
+        self.menus.clear();
+        self.spans.clear();
+        self.focused_span = None;
         self.views.clear();
         self.insert(ROOT_ID, NshView::new(ViewKind::View));
         self.appearance = None;
@@ -426,6 +440,18 @@ impl Mounter {
                     command: Command::Dialog(dialog),
                     ..
                 } => self.dialogs.show(*dialog),
+                MountItem::Command {
+                    command: Command::Desktop(ref desktop),
+                    ..
+                } if matches!(
+                    **desktop,
+                    nsh_core::desktop::DesktopCommand::PopupMenu { .. }
+                ) =>
+                {
+                    if let nsh_core::desktop::DesktopCommand::PopupMenu { items, at } = &**desktop {
+                        self.menus.popup(items, *at);
+                    }
+                }
                 MountItem::Command { id, ref command }
                     if self
                         .get_mut(id)
