@@ -1,6 +1,6 @@
 import { Canvas, createAnimatedValue, Easing, effect, type JSX, LayoutAnimation, Path2D, platform, reduceMotion, signal, Text, View, type ViewStyle } from "nsh";
 import { Toggle, ToggleGroup } from "nsh/base";
-import { alpha, Badge, Caption, Card, chart, colors, DemoPage, finish, focusRing, hovered, mono, motion, terminal, TERMINAL_GAP, TERMINAL_ROW, Toggle as Switch } from "../ui";
+import { alpha, Badge, Caption, Card, chart, colors, DemoPage, finish, focusRing, hovered, mono, motion, terminal, TERMINAL_GAP, Toggle as Switch } from "../ui";
 import { LucideIcon, type LucideIconName } from "./RichEditorUi";
 
 // `nsh/base`'s `Toggle` owns presses, the pressed state screen readers hear
