@@ -42,6 +42,11 @@
 // through a square root scale (`r`, `rScale`), its fill from its row's
 // category (`color`), the others fading with the hover
 // (`inactiveOpacity`), found past its edge within `hitRadius`.
+// Dual axes: marks on the plot's second y scale (`y2Scale`, a mark's
+// `scale="y2"`): a line, an area, a rule, a bar, dots, a grid line, a label
+// and a right-hand axis; automatic domains aligned in the same steps
+// (`alignTicks`), a `Grid` without values on their ticks (`ticks`), and
+// a plot that does not align.
 // Reversed scales (`reverse`): bars hanging from the top of a reversed
 // linear y scale in bands from the right edge, and bars across from the
 // right edge of a reversed x; the axis's labels and the hover follow.
@@ -173,6 +178,7 @@ function App() {
       <ColorCase />
       <RangeCase />
       <DotCase />
+      <DualCase />
       <ReverseCase />
       <RadarCase />
       <LabelCase />
@@ -524,6 +530,48 @@ function DotCase() {
         />
       </Plot>
       <Text>{`bubble ${hovered()}`}</Text>
+    </View>
+  );
+}
+
+type Dual = { v: number; p: number };
+
+const DUAL: Dual[] = [
+  { v: 100, p: 12 },
+  { v: 200, p: 27 },
+];
+
+/** Dual axes in bands of 100 of 200 by 100 plots, the y scales kept
+ * half a label (5) inside an edge a right axis's label sits on: on the
+ * app's domains (y 0 to 200, y2 0 to 40, from 100 up to 5: 12 at 71.5,
+ * 27 at 35.875, 20 at 52.5) every part that names `y2` places its values
+ * there; on automatic ones the two are aligned in two steps (y 0 to 200,
+ * y2 10 to 30, from 95 up to 5: 12 at 86), the right axis ticks every
+ * step and a `Grid` with `ticks` takes d3's; not aligned (no axis: over
+ * the whole height), the second scale is 12 to 27. */
+function DualCase() {
+  return (
+    <View>
+      <Plot testID="dual" data={DUAL} xScale={{ type: "band" }} yScale={{ type: "linear", domain: [0, 200] }} y2Scale={{ type: "linear", domain: [0, 40] }} style={{ width: 200, height: 100 }}>
+        <Grid testID="dual-grid" y={[20]} scale="y2" />
+        <Area testID="dual-area" y1="p" scale="y2" curve="linear" />
+        <Rule testID="dual-rule" value="p" scale="y2" />
+        <Bar value="p" scale="y2" label={(d: Dual) => `b${d.p}`} labelClass="h-[10px] w-[20px]" />
+        <Line testID="dual-line" y="p" scale="y2" curve="linear" />
+        <Dot testID="dual-dots" value="p" scale="y2" />
+        <PlotLabel scale="y2" texts={[{ text: "y2-label", x: 0, y: 20 }]} />
+        <PlotAxis placement="right" scale="y2" tickValues={[40]} format={(v) => `y2-r${v}`} labelStyle={{ width: 20, height: 10 }} />
+      </Plot>
+      <Plot data={DUAL} xScale={{ type: "band" }} style={{ width: 200, height: 100 }}>
+        <Grid testID="aligned-grid" ticks={4} />
+        <Bar value="v" />
+        <Line testID="aligned-line" y="p" scale="y2" curve="linear" />
+        <PlotAxis placement="right" scale="y2" format={(v) => `p${v}`} labelStyle={{ width: 20, height: 10 }} />
+      </Plot>
+      <Plot data={DUAL} xScale={{ type: "band" }} alignTicks={false} style={{ width: 200, height: 100 }}>
+        <Bar value="v" />
+        <Line testID="own-line" y="p" scale="y2" curve="linear" />
+      </Plot>
     </View>
   );
 }

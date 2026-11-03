@@ -2924,17 +2924,21 @@ frame below:parent:parent:parent:text:m0i0 175 100 0 0
 frame below:below:parent:parent:parent:text:m0i0 25 100 0 0
 frame below:below:below:parent:parent:parent:text:m0i0 0 100 200 0
 # Left of it: d3's text of the app's values, each against the edge,
-# centered on its tick, the ends' kept within the plot's top and bottom.
-frame parent:parent:parent:text:50 0 0 0 100
-frame parent:parent:text:50 -20 0 20 100
-frame parent:text:50 0 45 20 10
-frame parent:parent:text:100 -20 0 20 0
-frame parent:text:100 0 0 20 10
-frame parent:text:0 0 -10 20 10
+# centered on its tick in room as tall as the plot either way; the
+# plot keeps half a label (5) inside its top and bottom edges, so the
+# scale runs from 95 up to 5 and the ends' labels sit on their ticks
+# within it.
+frame parent:parent:parent:text:50 0 -50 0 200
+frame parent:parent:text:50 -20 0 20 200
+frame parent:text:50 0 95 20 10
+frame parent:parent:parent:text:100 0 -95 0 200
+frame parent:text:100 0 95 20 10
+frame parent:parent:parent:text:0 0 -5 0 200
+frame parent:text:0 0 95 20 10
 # Its tick marks (a style) at 100, 50 and 0, its line (classes).
-frame below:parent:parent:parent:text:0 0 0 0 0
+frame below:parent:parent:parent:text:0 0 5 0 0
 frame below:below:parent:parent:parent:text:0 0 50 0 0
-frame below:below:below:parent:parent:parent:text:0 0 100 0 0
+frame below:below:below:parent:parent:parent:text:0 0 95 0 0
 frame below:below:below:below:parent:parent:parent:text:0 0 0 0 100
 # Inside the right edge: above its grid line, against the edge.
 frame parent:parent:parent:text:in50 200 0 0 50
@@ -3013,6 +3017,44 @@ covers [props] Dot.rScale
 covers [props] Dot.color
 covers [props] Dot.inactiveOpacity
 covers [props] Dot.hitRadius
+# Dual axes on the app's domains: the line, the area's top edge, the
+# rule, the bar's end, the grid line, the label and the right axis's
+# tick on the second scale (y2 0 to 40 from 100 up to 5: the right
+# axis's one label, on the top tick, keeps half its height inside the
+# top edge).
+expect b12
+drawing id:dual-line moveTo 50 71.5
+drawing id:dual-line lineTo 150 35.875
+drawing id:dual-area lineTo 150 35.875
+drawing id:dual-rule moveTo 50 100
+drawing id:dual-rule lineTo 50 71.5
+drawing id:dual-dots arc 50 71.5 3 0 6.283
+frame parent:text:b12 50 72 0 0
+drawing id:dual-grid moveTo 0 52.5
+frame parent:text:y2-label 50 53 0 0
+frame parent:parent:parent:text:y2-r40 200 -95 0 200
+# Automatic domains aligned in two steps of each: y 0 to 200, y2 10 to
+# 30; the right axis ticks every step, the grid d3's ticks of 0 to 200.
+drawing id:aligned-line moveTo 50 86
+drawing id:aligned-line lineTo 150 18.5
+expect p10
+expect p20
+expect p30
+drawing id:aligned-grid moveTo 0 27.5
+# Not aligned: y2 is 12 to 27.
+drawing id:own-line moveTo 50 100
+drawing id:own-line lineTo 150 0
+covers [props] Plot.y2Scale
+covers [props] Plot.alignTicks
+covers [props] Line.scale
+covers [props] Area.scale
+covers [props] Rule.scale
+covers [props] Bar.scale
+covers [props] Dot.scale
+covers [props] Grid.scale
+covers [props] Grid.ticks
+covers [props] PlotLabel.scale
+covers [props] PlotAxis.scale
 # Reversed scales: bands from the right edge (middles 250, 150 and 50)
 # and a y scale of 0 to 40 from the top edge (2 points a value), so the
 # bars hang from the top, each label below its bar's end.

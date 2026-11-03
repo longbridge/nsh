@@ -81,6 +81,8 @@ mount(App);
 | `y` | `.y(..)` | `keyof T \| (d: T, index: number) => number` | 无 | 图形没有指定自己的取值时绘制的内容。 |
 | `xScale` | `.x_scale(..)` | `Scale` | `{ type: "point" }` | x 轴如何放置各行：`point`（按顺序从左边缘到右边缘均匀分布；只有一行时放在中间）、带可选 `domain` 的 `linear`，或 `band`（每行一个条带，用于柱子；见 [Bar](#bar)）。y 轴为 `band` 时默认为 `linear`，用于横向柱子。`reverse: true` 让它从右边缘开始（[反向比例尺](#反向比例尺)）。 |
 | `yScale` | `.y_scale(..)` | `Scale` | `{ type: "linear" }` | y 轴如何放置数值：定义域的最小值在底边，最大值在顶边。没有 `domain` 时取各图形所绘制数值的范围。`band` 从顶边向下每行布置一个条带，用于横放的柱子。`reverse: true` 让它反过来：最小值在顶边，各行从底边向上排列（[反向比例尺](#反向比例尺)）。 |
+| `y2Scale` | `.y2_scale(..)` | `LinearScale` | 无 | 第二个 y 比例尺 `{ type: "linear", domain?, reverse? }`，给声明 `scale="y2"` 的图形用：双轴图右侧的比例尺（[双轴](#双轴)）。没有 `domain` 时取放在它上面的值的范围。 |
+| `alignTicks` | `.align_ticks(..)` | `boolean` | `true` | 两个 y 比例尺都没有指定定义域、且两边都有图形时，把两者扩展成同样多的整齐步长，让刻度落在同一组线上（[双轴](#双轴)）。为 `false` 时各自取数据的范围。 |
 | `interactive` | `.interactive(..)` | `boolean` | `true` | plot 跟随指针和键盘：报告指针下的行并显示悬停部件；它也是 Tab 的一个停靠点，方向键移动悬停的行（[键盘](#键盘)）。为 `false` 时只绘制图形（例如列表中的迷你图），在它上面的点按交给周围的视图。plot 是否提供键盘操作，在创建时确定。 |
 | `motion` | `.motion(..)` | `PlotMotion` | 无 | 出现动效、悬停淡入淡出的时间，以及按键移动悬停时所用的弹簧（见下文）。 |
 | `appearGeneration` | `.appear_generation(..)` | `number \| string` | 无 | 启用出现动效：plot 第一次显示时图形逐渐绘出，此值每次变化时再播放一次（换一支股票、换一个周期）。在 [`PlotAppearScope`](#plotappearscope) 里，已经在其中播放完的 generation 立即完整显示。 |
@@ -121,6 +123,31 @@ mount(App);
 
 plot 出现时，折线和区域从 x 比例尺起始的那条边逐渐绘出，比例尺反向时就是右边缘。
 
+### 双轴
+
+<!-- demo: el-plot-dual -->
+
+plot 有第二个 y 比例尺，用来放单位不同的值：价格旁的成交量、营收旁的利润率。所有沿 y 方向放值的部件都接受
+`scale`：`"y"`（默认，plot 的 `yScale`）或 `"y2"`（它的 `y2Scale`）。右侧加一个 `scale="y2"` 的 `PlotAxis` 来标注它：
+
+```tsx
+<Plot data={days} xScale={{ type: "band", paddingInner: 0.3 }} class="mx-10 mb-6 h-44">
+  <Grid class="stroke-border" />
+  <Bar value="volume" class="fill-chart-2/50" />
+  <Line y="close" scale="y2" class="stroke-chart-1 stroke-2" />
+  <PlotAxis placement="left" format={(v) => `${v}M`} labelClass="pr-2 text-xs text-muted-foreground" />
+  <PlotAxis placement="right" scale="y2" labelClass="pl-2 text-xs text-muted-foreground" />
+</Plot>
+```
+
+每个比例尺有自己的定义域：app 给的 `domain`，或放在它上面的值的范围；有 `motion.update` 时各自移动到新的定义域。两个比例尺
+都没有指定定义域时，plot 把两者排成同样多的整齐步长（1、2 或 5 乘以 10 的幂，大约每 32 点高度一步）：两边都包含 0 时，0
+落在同一条线上；否则从 0 开始的比例尺（成交量）向上补步长，其他的（价格）上下各补一半。坐标轴的刻度就是这些步长，既不写 `x`
+也不写 `y` 的 `Grid` 也画在这些位置，于是一套网格同时服务两条轴。`alignTicks={false}` 关闭对齐；app 指定了 `domain` 时两个比例尺都保持原样。
+
+悬停仍找一行；每个图形的悬停点在它自己的比例尺上，读数由 app 根据 `onHoverChange` 报告的那一行读出两个值。两个比例尺上的柱子
+在每个条带里并排，`stack` 只堆叠同一比例尺上的柱子。`y2Scale` 只能是线性的：y 轴有条带的 plot 没有第二个 y 比例尺。
+
 ## Line、Area 和 Grid
 
 | 图形 | 属性 | 类型 | 默认值 | 说明 |
@@ -133,8 +160,10 @@ plot 出现时，折线和区域从 x 比例尺起始的那条边逐渐绘出，
 | `Area` | `backgroundClass`、`backgroundStyle` | `string`、`StyleProp<ViewStyle>` | 无 | 它的背景：包围其形状的盒子（从第一个点到最后一个点，从最高点到基线，带则到底边的最低点），盒子的背景（`bg-*`、`bg-linear-to-b from-… to-…`、`backgroundImage`）只在形状内显示，位于 `fill` 之下。设置背景后，`fill` 没有设置时为 `none`。 |
 | `Area` | `y1` | `string \| (d, index) => number` | plot 的 `y` | 顶边使用的取值。 |
 | `Area` | `y0` | `number \| string \| (d, index) => number` | y 比例尺低端所在的边 | 它的底边：数字是 y 比例尺上的一条基线；字段名或函数为每一行给出自己的底值，area 由此成为一条带（一天的最低价到最高价、预测的区间）。没有它时，area 闭合到 y 比例尺最小值所在的边：通常是底边，反向比例尺上是顶边（从顶部垂下的区域）。任一边没有值的行会跳过。 |
+| `Line`、`Area`、`Grid` | `scale` | `"y" \| "y2"` | `"y"` | 它的值沿哪个 y 比例尺放：plot 的 `yScale`，或第二个 `y2Scale`（[双轴](#双轴)）。 |
 | `Grid` | `x` | `number[]` | 无 | 竖线的位置，取 x 比例尺上的值（`point` 比例尺上是行的序号）。 |
-| `Grid` | `y` | `number[]` | 无 | 横线的位置，取 y 比例尺上的值。 |
+| `Grid` | `y` | `number[]` | 无 | 横线的位置，取 y 比例尺上的值。`x` 和 `y` 都不写时，横线跟随它的比例尺的刻度，即不写 `ticks` 的 `PlotAxis` 放刻度的位置（横放的柱子沿 x）。 |
+| `Grid` | `ticks` | `number` | 坐标轴的默认值 | `x` 和 `y` 都不写时大约画多少条线，同 `PlotAxis` 的 `ticks`。 |
 | `Line`、`Area` | `color` | `string \| (d, index) => string` | 无 | 它的数据行的类别，颜色来自 plot 的 `colorScale`：第一个有类别的行决定 line 的 `stroke`（area 的 `fill`），在没有任何设置时使用（见[按类别着色](#colors-by-category)）。 |
 
 每个图形都铺满 plot，使用自己的 [SVG 绘制属性](../modules/style-reference.md#svg-绘制) 绘制；像 CSS 的继承一样，自己设置的值优先于 plot 上的值：
@@ -195,6 +224,7 @@ const sales = [
 | `value` | `string \| (d, index) => number` | plot 的 `y` | 每根柱子显示的值。 |
 | `base` | `number \| string \| (d, index) => number` | `0` | 柱子在数值比例尺上生长的起点：所有行共用一个值，或用字段、函数给每一行各自的起点，这时每根柱子从该行的起点延伸到它的值（没有起点的行没有柱子）。计入定义域。堆叠逐行从它的第一根柱子的 `base` 开始。 |
 | `stack` | `string` | 无 | 加入的堆叠：`stack` 相同的柱子按顺序堆叠（没有值的行不增加高度）。 |
+| `scale` | `"y" \| "y2"` | `"y"` | 竖立柱子的值沿哪个 y 比例尺放（[双轴](#双轴)）；两个比例尺上的柱子并排，堆叠只包含同一比例尺上的柱子。 |
 | `cornerRadii` | `number \| { topLeft?, topRight?, bottomRight?, bottomLeft? }` | `0` | 柱子每个角的半径；`{ topLeft: 4, topRight: 4 }` 让竖立的柱子顶端变圆。超过柱子一半的半径会缩小以适应柱子。 |
 | `stagger` | `number` | `0` | plot 出现时，柱子按行依次开始生长，开始时间分布在出现动效的这一比例内（0 到 0.95），每根柱子用剩下的时间长完；为 0 时一起生长。 |
 | `inactiveOpacity` | `number` | 无 | 指针在 plot 上时，指针下那一行以外的柱子的不透明度，让那一行突出：随悬停淡入淡出，并随悬停从一根柱子交给下一根。 |
@@ -268,6 +298,7 @@ import { Bar, Plot, Rule } from "nsh/base/plot";
 |---|---|---|---|
 | `value` | `string \| (d, index) => number` | plot 的 `y` | 每条线的终点。没有值的行没有线。 |
 | `base` | `number \| string \| (d, index) => number` | `0` | 每条线的起点：所有行共用一个值（棒棒糖图从零线开始的杆），或用字段、函数给每一行各自的起点（K 线的最低价）。计入定义域。 |
+| `scale` | `"y" \| "y2"` | `"y"` | 它的值沿哪个 y 比例尺放（[双轴](#双轴)）。 |
 | `stagger` | `number` | `0` | plot 出现时，线按行依次开始生长，开始时间分布在出现动效的这一比例内（0 到 0.95），每条线用剩下的时间从起点长完。 |
 | `inactiveOpacity` | `number` | 无 | 指针在 plot 上时，指针下那一行以外的线的不透明度，与 `Bar` 的相同。 |
 | `color` | `string \| (d, index) => string` | 无 | 每条线的类别，颜色来自 plot 的 `colorScale`：在没有任何设置时作为线的 `stroke`。 |
@@ -347,6 +378,7 @@ plot 没有设置定义域时，圆点的数值构成数值比例尺的定义域
 | `inactiveOpacity` | `number` | 无 | 指针或按键停在一个圆点上时，其他圆点的不透明度：随悬停淡入淡出。 |
 | `color` | `string \| (d, index) => string` | 无 | 每个圆点的类别，颜色来自 plot 的 `colorScale`：在没有任何设置时作为圆点的 `fill`（[按类别着色](#colors-by-category)）。 |
 | `hitRadius` | `number` | `8` | 指针在圆点边缘之外多远仍能找到它：在这个距离之内的圆点中，取圆心离指针最近的那个（Voronoi 单元），所以叠在大气泡上的小气泡在它自己的圆心附近就能找到。点图把它设得和一行一样大，指针在一行的任何位置都能找到这一行。 |
+| `scale` | `"y" \| "y2"` | `"y"` | 它的值沿哪个 y 比例尺放（[双轴](#双轴)）；在 band y 比例尺上横向排列的圆点把值放在 x 上。 |
 | `hoverDotClass`、`hoverDotStyle` | `string`、`StyleProp<ViewStyle>` | plot 的 `dotClass`、`dotStyle` | `hoverDot` 部件：与指针下圆点同宽同高、以它为中心的视图。`rounded-full outline-2 outline-offset-1` 给它加一圈描边；`hidden` 表示这个图形不显示。 |
 
 圆点使用自己的 `fill` 填充（`fill-*`；像 CSS 那样从 plot 继承），没有设置时为 `currentColor`（设置 `color` 时为类别的颜色）；设置了 `stroke` 时用它描边（`stroke-*`、`strokeWidth`）：一圈卡片颜色的描边能让重叠的圆点彼此分开。在有圆点的 plot 上，plot 报告圆心离指针最近的圆点所在的行（远离所有圆点时为 `null`），按键按行的顺序切换（按 x 给行排序，按键就从左到右依次经过圆点），`hoverDot` 部件标出这个圆点。plot 出现时，圆点从无到有长出；有 `motion.update` 时，圆点过渡到新的数值和大小，新行的圆点长出，已移除的行的圆点缩小消失；都在平台的动画器上运行，不需要重新绘制图形。
@@ -700,7 +732,7 @@ fn funnel() -> impl IntoElement {
 
 ## PlotAxis
 
-`PlotAxis` 用某条边所对应比例尺的刻度为这条边加上标签：底边和顶边用 x 比例尺的刻度，左边和右边用 y 比例尺的刻度，就像 d3 的 `axisBottom`、`axisTop`、`axisLeft` 和 `axisRight`。刻度来自比例尺：`linear` 比例尺上是定义域内的整齐数值（1、2 或 5 乘以 10 的幂），`point` 或 `band` 比例尺上是数据行。标签是由 plot 的布局摆放的文字：应用决定它写什么、长什么样，布局负责把它放到位置上。每个标签沿边居中对齐自己的刻度，第一个和最后一个只向内移动必要的距离，从而留在 plot 的两端之内。
+`PlotAxis` 用某条边所对应比例尺的刻度为这条边加上标签：底边和顶边用 x 比例尺的刻度，左边和右边用 y 比例尺的刻度，就像 d3 的 `axisBottom`、`axisTop`、`axisLeft` 和 `axisRight`。刻度来自比例尺：`linear` 比例尺上是定义域内的整齐数值（1、2 或 5 乘以 10 的幂），`point` 或 `band` 比例尺上是数据行。标签是由 plot 的布局摆放的文字：应用决定它写什么、长什么样，布局负责把它放到位置上。每个标签沿边居中对齐自己的刻度。在底边和顶边上，第一个和最后一个只向内移动必要的距离，从而留在 plot 的两端之内；在左边和右边上，每个标签都对在自己的刻度上，读起来就是那条网格线的值；靠近两端的标签如果会超出 plot 的顶边或底边，plot 的线性 y 比例尺就从那条边向内缩进超出的距离（刻度在端点上时是标签高度的一半），所以每个标签都留在 plot 之内，对在自己的网格线上。
 
 ```tsx
 import { Area, Grid, Line, Plot, PlotAxis } from "nsh/base/plot";
@@ -731,8 +763,9 @@ const rows = [
 | 属性 | Rust | 类型 | 默认值 | 说明 |
 |---|---|---|---|---|
 | `placement` | `.placement(..)` | `"bottom" \| "top" \| "left" \| "right"` | `"bottom"` | 坐标轴所在的边：底边和顶边对应 x 比例尺的刻度，左边和右边对应 y 比例尺的刻度。 |
+| `scale` | `.scale(..)` | `"y" \| "y2"` | `"y"` | 左侧或右侧坐标轴标注哪个 y 比例尺：plot 的 `yScale`，或第二个 `y2Scale`（[双轴](#双轴)）。 |
 | `labelPlacement` | `.label_placement(..)` | `"outside" \| "inside"` | `"outside"` | 标签的位置：在边的外侧、应用在 plot 周围留出的空间里，与图形互不遮挡；或在 plot 上沿边内侧排列，plot 保持完整的尺寸（在左边或右边时，每个标签位于自己网格线的上方）。 |
-| `ticks` | `.ticks(..)` | `number` | `linear` 比例尺上为 `10`，其他比例尺上为每一行 | 大约取多少个刻度：`linear` 比例尺上是定义域内的整齐数值，大约这么多个；`point` 或 `band` 比例尺上是从第一行到最后一行均匀分布的这么多行。 |
+| `ticks` | `.ticks(..)` | `number` | `linear` 比例尺上为 `10`（对齐的比例尺上为每一步），其他比例尺上为每一行 | 大约取多少个刻度：`linear` 比例尺上是定义域内的整齐数值，大约这么多个；`point` 或 `band` 比例尺上是从第一行到最后一行均匀分布的这么多行。 |
 | `tickValues` | `.tick_values(..)` | `number[]` | 无 | 刻度的数值，代替 `ticks`：比例尺上的值，`point` 或 `band` 比例尺上是行的序号（`[0, 3, 6]` 每三行标一次）。定义域内的每个值各有一个刻度。 |
 | `format` | `.format(..)` | `(value: number, index: number) => string` | 数值本身，带上刻度间距所需的小数位，千位分组 | 每个刻度的文字：应用以刻度的数值（`point` 或 `band` 比例尺上是行的序号）和它在坐标轴刻度中的序号为参数的函数。 |
 | `labelClass`、`labelStyle` | `.label_class(..)`、`.label_style(..)` | `string`、`StyleProp<TextStyle>` | 无 | `label` 部件：每个刻度一段文字，字体、颜色和内边距由应用决定；朝向 plot 一侧的内边距就是它与边的距离（底部坐标轴用 `pt-2`）。 |
@@ -776,6 +809,7 @@ const [peak, last] = [3, rows.length - 1];
 | 属性 | Rust | 类型 | 默认值 | 说明 |
 |---|---|---|---|---|
 | `texts` | `.texts(..)` | `PlotText[]` | `[]` | 要写的文字，每段位于自己的点上。 |
+| `scale` | `.scale(..)` | `"y" \| "y2"` | `"y"` | 文字的 `y` 取哪个 y 比例尺上的值（[双轴](#双轴)）。 |
 
 每段文字是一个 `PlotText`：
 

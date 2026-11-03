@@ -203,6 +203,46 @@ impl JsValue for Scale {
     }
 }
 
+/// A linear scale on its own (TS `LinearScale`, `{ type: "linear", domain?,
+/// reverse? }`, the `linear` member of [`Scale`]): a plot's second y scale
+/// (`y2Scale`), where only a linear one has a meaning.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+#[non_exhaustive]
+pub struct LinearScale {
+    /// The values at the two ends (in either order); `None`: the extent of
+    /// what the plot draws on it.
+    pub domain: Option<[f64; 2]>,
+    /// The domain runs the other way: its smallest value at the top edge.
+    pub reverse: bool,
+}
+
+impl JsValue for LinearScale {
+    fn ts_type(types: &mut TsTypes) -> String {
+        types.declare("LinearScale", |types| {
+            // The member of `Scale` it takes.
+            Scale::ts_type(types);
+            "/** A linear scale on its own: the `linear` member of `Scale`, for a plot's second y scale (`y2Scale`). */\nexport type LinearScale = Extract<Scale, { type: \"linear\" }>;\n".to_owned()
+        })
+    }
+
+    fn from_js(value: JsIn<'_>) -> Result<Self, PropError> {
+        match Scale::from_js(value)? {
+            Scale::Linear { domain, reverse } => Ok(Self { domain, reverse }),
+            _ => Err(PropError(
+                "a linear scale, `{ type: \"linear\", domain?, reverse? }`".to_owned(),
+            )),
+        }
+    }
+
+    fn to_js<'a>(&self, host: &'a dyn JsHost) -> Result<JsOwned<'a>, PropError> {
+        Scale::Linear {
+            domain: self.domain,
+            reverse: self.reverse,
+        }
+        .to_js(host)
+    }
+}
+
 /// A linear map from a domain to a range (`ScaleLinear`): `start` to
 /// `range[0]`, `start + diff` to `range[1]`.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -210,6 +250,9 @@ pub(crate) struct Linear {
     start: f64,
     diff: f64,
     range: [f32; 2],
+    /// The step its ticks take when it is laid out in whole steps shared
+    /// with another scale (`alignTicks`).
+    step: Option<f64>,
 }
 
 impl Linear {
@@ -220,7 +263,21 @@ impl Linear {
             start: lo,
             diff: hi - lo,
             range,
+            step: None,
         }
+    }
+
+    /// The map of an aligned domain onto `range`, its ticks a step apart.
+    pub(crate) fn aligned(aligned: Aligned, range: [f32; 2]) -> Self {
+        Self {
+            step: Some(aligned.step),
+            ..Self::new(aligned.domain, range)
+        }
+    }
+
+    /// The step its ticks take, when it is aligned with another scale.
+    pub(crate) fn step(&self) -> Option<f64> {
+        self.step
     }
 
     /// Where `value` goes. A domain of one value puts it in the middle of
@@ -246,6 +303,116 @@ impl Linear {
     /// Its range.
     pub(crate) fn range(&self) -> [f32; 2] {
         self.range
+    }
+}
+
+/// A domain laid out in whole steps (nice ones: 1, 2 or 5 times a power of
+/// ten), whose ticks fall on the same places as another's (`alignTicks`).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct Aligned {
+    pub(crate) domain: [f64; 2],
+    pub(crate) step: f64,
+}
+
+/// The fewest divisions aligned scales take when they may (ai-chat's
+/// `MIN_ALIGNED_DIVISIONS`): a grid of fewer lines tells little.
+const MIN_ALIGNED_DIVISIONS: usize = 3;
+
+/// The extents `a` and `b` of two scales laid out in nice steps with the
+/// same number of divisions, at most `max`, so that their ticks fall on
+/// the same places (ai-chat's `aligned_ticks`, ECharts' `alignTicks`): when
+/// both extents hold zero, zero falls on the same place too; otherwise a
+/// domain gains its extra divisions away from zero when it starts or ends
+/// there (volumes from zero grow up) and on both sides when not (a price
+/// stays in the middle). Of the choices, those of at least
+/// [`MIN_ALIGNED_DIVISIONS`] come first, then those whose data fill the
+/// most of both domains, then those of more divisions. `None` when either
+/// extent is a single value or not finite.
+pub(crate) fn align(a: [f64; 2], b: [f64; 2], max: usize) -> Option<(Aligned, Aligned)> {
+    let max = max.max(1);
+    let valid = |[lo, hi]: [f64; 2]| lo.is_finite() && hi.is_finite() && hi > lo;
+    if !(valid(a) && valid(b)) {
+        return None;
+    }
+    let (ca, cb) = (steps(a, max), steps(b, max));
+    let zero = |[lo, hi]: [f64; 2]| lo <= 0.0 && hi >= 0.0;
+    let both_zero = zero(a) && zero(b);
+    let dense = MIN_ALIGNED_DIVISIONS.min(max);
+    let mut best: Option<(bool, f64, usize, Aligned, Aligned)> = None;
+    for &(sa, la, ha) in &ca {
+        for &(sb, lb, hb) in &cb {
+            let (ka, kb, divisions) = match both_zero {
+                true => {
+                    let (below, above) = ((-la).max(-lb), ha.max(hb));
+                    ((-below, above), (-below, above), (below + above) as usize)
+                }
+                false => {
+                    let divisions = (ha - la).max(hb - lb);
+                    (
+                        widen(la, ha, divisions),
+                        widen(lb, hb, divisions),
+                        divisions as usize,
+                    )
+                }
+            };
+            if divisions == 0 || divisions > max {
+                continue;
+            }
+            let fill =
+                (a[1] - a[0]) / (divisions as f64 * sa) + (b[1] - b[0]) / (divisions as f64 * sb);
+            let is_dense = divisions >= dense;
+            let better = match &best {
+                None => true,
+                Some((was_dense, f, d, ..)) => {
+                    (is_dense && !was_dense)
+                        || (is_dense == *was_dense
+                            && (fill > f + 1e-9 || ((fill - f).abs() <= 1e-9 && divisions > *d)))
+                }
+            };
+            if better {
+                let at = |(lo, hi): (i64, i64), step: f64| Aligned {
+                    domain: [lo as f64 * step, hi as f64 * step],
+                    step,
+                };
+                best = Some((is_dense, fill, divisions, at(ka, sa), at(kb, sb)));
+            }
+        }
+    }
+    best.map(|(.., a, b)| (a, b))
+}
+
+/// The nice steps that lay `extent` out in at most `max` divisions, each
+/// with the whole steps its ends round out to (`lo / step` down, `hi /
+/// step` up).
+fn steps([lo, hi]: [f64; 2], max: usize) -> Vec<(f64, i64, i64)> {
+    // Float division's slack (0.3 / 0.1 = 2.9999…) adds no division.
+    const EPS: f64 = 1e-9;
+    let least = (hi - lo) / max as f64;
+    let base = 10f64.powi(least.log10().floor() as i32);
+    let mut out: Vec<(f64, i64, i64)> = Vec::new();
+    for k in 0..4 {
+        for factor in [1.0, 2.0, 5.0] {
+            let step = base * 10f64.powi(k) * factor;
+            let (l, h) = (
+                (lo / step + EPS).floor() as i64,
+                (hi / step - EPS).ceil() as i64,
+            );
+            if h - l >= 1 && (h - l) as usize <= max && !out.iter().any(|(s, ..)| *s == step) {
+                out.push((step, l, h));
+            }
+        }
+    }
+    out
+}
+
+/// Whole steps `lo..hi` widened to `divisions`: up from a domain that
+/// starts at zero, down to one that ends there, evenly round others.
+fn widen(lo: i64, hi: i64, divisions: i64) -> (i64, i64) {
+    let extra = divisions - (hi - lo);
+    match (lo, hi) {
+        (0, _) => (lo, hi + extra),
+        (_, 0) => (lo - extra, hi),
+        _ => (lo - extra / 2, hi + (extra - extra / 2)),
     }
 }
 
@@ -582,6 +749,28 @@ impl JsValue for OrdinalScale {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Two scales laid out in the same nice steps (ai-chat's
+    /// `aligned_ticks`): volumes from zero grow up and a price keeps its
+    /// own range, three steps each; two extents that hold zero put it on
+    /// the same place.
+    #[test]
+    fn aligned_scales_share_their_steps() {
+        let (volume, price) = align([0.0, 280e6], [172.4, 191.8], 5).unwrap();
+        assert_eq!((volume.domain, volume.step), ([0.0, 300e6], 100e6));
+        assert_eq!((price.domain, price.step), ([170.0, 200.0], 10.0));
+
+        let (profit, margin) = align([-20.0, 100.0], [-0.05, 0.3], 6).unwrap();
+        assert_eq!((profit.domain, profit.step), ([-20.0, 100.0], 20.0));
+        assert_eq!(margin.step, 0.1);
+        let zero = |a: Aligned| -a.domain[0] / (a.domain[1] - a.domain[0]);
+        assert!((zero(profit) - zero(margin)).abs() < 1e-9);
+        let divisions = |a: Aligned| ((a.domain[1] - a.domain[0]) / a.step).round();
+        assert_eq!(divisions(profit), divisions(margin));
+
+        // A single value has no steps.
+        assert_eq!(align([5.0, 5.0], [0.0, 1.0], 5), None);
+    }
 
     #[test]
     fn scales_place_values_as_gpui_base_and_d3_do() {
