@@ -2249,6 +2249,10 @@ impl<M: TextEngine> Core<M> {
                     self.answer_host(*call, Err(error));
                     continue;
                 }
+                Command::SendInput(_) if !self.access.allows_web_input() => {
+                    self.deny("trusted web view input is not granted: add `\"input\": true` to capabilities.webview in nsh.json".into());
+                    continue;
+                }
                 Command::StatusBar(_) if !self.access.allows_status_bar() => {
                     self.deny("the status bar is not granted: add `\"statusBar\": true` to capabilities in nsh.json".into());
                     continue;
