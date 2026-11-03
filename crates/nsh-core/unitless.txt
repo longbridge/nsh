@@ -235,6 +235,8 @@ shader::NavShaderSpec.duration                                   # time (millise
 shader::builtins(scale)                                          # pixels per point, a ratio
 shader::builtins(time)                                           # time
 shape::SMOOTHING                                                 # a corner smoothing factor
+shared::SharedValue::Number.0                                    # an app's number, of any meaning (JS's number)
+shared::SharedValue::as_f64 ->                                   # an app's number, of any meaning (JS's number)
 style::Color::to_f64 ->                                          # color components
 style::LineHeight::Em.0                                          # a multiple of the element's font size
 style::LineHeight::Multiple.0                                    # a multiple of the font size
