@@ -945,6 +945,44 @@ fn a_dot_is_a_disc_in_its_color_over_what_is_under_it() {
     assert_eq!(cell.bg, chip, "on the chip's band, not one of its own");
 }
 
+/// A toggle's dot that is off, gray, before its label in a row.
+#[component]
+fn GrayKey() -> impl IntoElement {
+    view().flex_1().child(
+        view()
+            .flex_row()
+            .items_center()
+            .gap(px(8.0))
+            .child(
+                view()
+                    .w(px(6.0))
+                    .h(px(6.0))
+                    .rounded(px(3.0))
+                    .bg(nsh_core::color::rgb(0x9ca3af)),
+            )
+            .child(text("Lock")),
+    )
+}
+
+#[test]
+fn a_gray_dot_before_its_label_is_a_disc_not_a_band_cell() {
+    let (mut view, rx) = surfaces();
+    let mut terminal = Terminal::new(TestBackend::new(12, 3)).unwrap();
+    view.load(App::Rust(Root::new::<GrayKey>(|| ()))).unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "Lock");
+    let buffer = terminal.backend().buffer();
+    let row: String = (0..12).map(|x| buffer[(x, 0)].symbol()).collect();
+    let x = (0..12)
+        .find(|&x| buffer[(x, 0)].symbol() == "●")
+        .unwrap_or_else(|| panic!("no dot: {row:?}"));
+    assert_eq!(
+        buffer[(x, 0)].bg,
+        buffer[(x + 2, 0)].bg,
+        "on what is under it, no band of its own: {row:?}"
+    );
+    assert_ne!(buffer[(x, 0)].fg, Color::Reset, "in its gray: {row:?}");
+}
+
 /// A four-digit code in filled, framed cells, reporting its focus.
 #[component]
 fn FilledCode() -> impl IntoElement {
@@ -1127,6 +1165,61 @@ fn a_fade_as_light_as_its_band_reads_at_full_strength() {
         "full strength on the band"
     );
     assert_ne!(buffer[(0, page)].fg, Color::Reset, "muted on the page");
+}
+
+/// A selected row's translucent tint (the app's accent at a quarter), a
+/// faint size on it, and the same size on the page.
+#[component]
+fn FadedOnTint() -> impl IntoElement {
+    view()
+        .flex_1()
+        .child(
+            view()
+                .bg(nsh_core::color::rgba(0xc8f26d40))
+                .child(text("3.8 KB").text_color(nsh_core::color::rgb(0x52525b))),
+        )
+        .child(text("1.4 KB").text_color(nsh_core::color::rgb(0x52525b)))
+        .child(text("ready"))
+}
+
+/// CIE L* of a Cell's color, the terminal's own colors for `Reset`.
+fn cell_lightness(color: Color, reset: u8) -> f32 {
+    let [r, g, b] = match color {
+        Color::Rgb(r, g, b) => [r, g, b],
+        _ => [reset; 3],
+    };
+    let linear = |c: u8| {
+        let c = f32::from(c) / 255.0;
+        if c <= 0.04045 {
+            c / 12.92
+        } else {
+            ((c + 0.055) / 1.055).powf(2.4)
+        }
+    };
+    let y = 0.2126 * linear(r) + 0.7152 * linear(g) + 0.0722 * linear(b);
+    if y > 216.0 / 24389.0 {
+        116.0 * y.cbrt() - 16.0
+    } else {
+        y * 24389.0 / 27.0
+    }
+}
+
+#[test]
+fn a_fade_on_a_translucent_tint_reads_against_the_band_drawn_there() {
+    let (mut view, rx) = surfaces();
+    let mut terminal = Terminal::new(TestBackend::new(16, 4)).unwrap();
+    view.load(App::Rust(Root::new::<FadedOnTint>(|| ())))
+        .unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "ready");
+    let buffer = terminal.backend().buffer();
+    let band = row_of(buffer, "3.8");
+    let cell = &buffer[(0, band)];
+    assert_ne!(cell.bg, Color::Reset, "the row's tint");
+    let apart = (cell_lightness(cell.fg, 224) - cell_lightness(cell.bg, 24)).abs();
+    assert!(
+        apart >= 15.0,
+        "the size reads on its tint: {cell:?}, {apart}"
+    );
 }
 
 /// A sidebar with only its right line: its first row, the box's top,

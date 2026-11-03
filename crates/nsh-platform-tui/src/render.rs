@@ -1073,8 +1073,11 @@ fn focus_pane(tree: &Mounter) -> Option<NodeId> {
     None
 }
 
-/// Whether `view` is a dot: laid out in one Cell, round, filled with a
-/// hued color and holding no text (a presence dot, a status dot).
+/// Whether `view` is a dot: laid out in one Cell, round, filled and
+/// holding no text (a presence dot, a status dot, a toggle's dot that is
+/// off). The layout keeps a neutral dot only where it reads apart from
+/// its backdrop (a gray key before its label), so it is a `●` in its gray
+/// as a hued one is in its color, never a band Cell.
 fn dot(view: &NshView, bounds: CellBounds, fill: nsh_core::Color) -> bool {
     let size = view.frame.size;
     let radii = view.style.radii().fit(size);
@@ -1084,10 +1087,15 @@ fn dot(view: &NshView, bounds: CellBounds, fill: nsh_core::Color) -> bool {
         && view.text.is_none()
         && view.children.is_empty()
         && fill.0 & 255 > 8
-        && palette::hued(fill)
         && half > Points::ZERO
-        && radii.to_array().iter().all(|&r| r >= half * 0.99)
+        && radii.to_array().iter().all(|&r| r >= half * ROUND_SHARE)
 }
+
+/// How much of a one-Cell view's half side its corners' radii take for it
+/// to be round: its frame is the Cell (8 by 16 points), so a 6pt dot's 3pt
+/// radius is three quarters of the Cell's half width, a box's small
+/// corners (2pt) half of it.
+const ROUND_SHARE: f32 = 0.74;
 
 /// The accent the focus shows in: a box's line around it, an overlay's
 /// title, a popup's highlighted item.

@@ -224,12 +224,23 @@ pub(crate) fn ink(color: nsh_core::Color, ground: Ground) -> Style {
         (Tone::Accent(accent), _) => plain.fg(accent).remove_modifier(Modifier::DIM),
         (Tone::Default, _) => plain.fg(Color::Reset).remove_modifier(Modifier::DIM),
         // A fade as light as the band under it (a muted size on a
-        // selected row's fill) is read at the next strength up.
+        // selected row's fill) is read at the next strength up: as light
+        // as the app's fill it was designed on, or as the band drawn there
+        // (a translucent fill, a selected row's tint, is no ground of the
+        // app's, but its step is under the text).
         (Tone::Muted | Tone::Faint, Some(ramp)) => {
+            let band = match ground.surface {
+                Color::Rgb(r, g, b) => Some([r, g, b]),
+                Color::Indexed(index) if index >= 16 => Some(indexed_rgb(index)),
+                _ => None,
+            };
             let reads = |share: f32| {
                 let [r, g, b] = ramp.mix(share).map(f32::from);
-                let [ur, ug, ub] = ground.rgb.map(f32::from);
-                (lightness(r, g, b) - lightness(ur, ug, ub)).abs() >= FADE_READS
+                let apart = |under: Rgb| {
+                    let [ur, ug, ub] = under.map(f32::from);
+                    (lightness(r, g, b) - lightness(ur, ug, ub)).abs() >= FADE_READS
+                };
+                apart(ground.rgb) && band.is_none_or(apart)
             };
             let fg = if tone == Tone::Faint && reads(FAINT_SHARE) {
                 ramp.faint()
