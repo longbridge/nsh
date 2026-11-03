@@ -281,7 +281,12 @@ export function Dock() {
                     onPress={() => area.closePanel(tab.panel)}
                     accessibilityLabel={`Close ${title(tab.panel)}`}
                     class={
-                      pointer
+                      // A terminal's tab has no room at its end for the
+                      // button to fade in over: it sits beside the title,
+                      // shown while the pointer is on the tab.
+                      terminal
+                        ? "size-5 items-center justify-center opacity-0 group-hover:opacity-100"
+                        : pointer
                         ? "absolute right-1 top-2 size-5 items-center justify-center rounded-md bg-inset opacity-0 transition-opacity group-hover:opacity-100 hover:bg-raised"
                         : "-mr-1.5 size-5 items-center justify-center rounded-md active:opacity-70"
                     }
