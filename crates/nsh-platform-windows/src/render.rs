@@ -399,6 +399,22 @@ impl<'a> DrawCx<'a> {
         }
     }
 
+    /// Runs `f`, which draws a picture rather than the window (a shader's
+    /// content): the composed items (web views) it reaches are left out.
+    /// Their pages are not in the picture, so they are not placed (hidden,
+    /// [`crate::surface::Surface::composed_placed`]) and what follows
+    /// starts no layer above them.
+    pub(crate) fn uncomposed<R>(&mut self, f: impl FnOnce(&mut Self) -> R) -> R {
+        let len = self.composed.len();
+        let pending = self.split.as_ref().map(|s| s.pending);
+        let r = f(self);
+        self.composed.truncate(len);
+        if let (Some(split), Some(pending)) = (&mut self.split, pending) {
+            split.pending = pending;
+        }
+        r
+    }
+
     /// Takes the composed items a nested pass reached (in window
     /// coordinates): what follows them goes above them.
     pub(crate) fn adopt_composed(&mut self, mut composed: Vec<Composed>) {

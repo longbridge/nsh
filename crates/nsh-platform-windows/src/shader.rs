@@ -22,7 +22,8 @@
 //!   its overflow by a context of their own, and read back once a view in
 //!   them or the whole window changed since they last were (its own frames
 //!   do not count); when the pixels changed, they are the shader's
-//!   `sample_content`.
+//!   `sample_content`. Web views in them are hidden: their pages are not
+//!   in the picture.
 //! - A transition draws as an effect while one runs ([`start_transition`],
 //!   before the rest of its batch): its children drawn then are its
 //!   `sample_from`, its children as they are drawn its `sample_to`.
@@ -783,12 +784,13 @@ fn children(
     let target = readback.target(cx.dc, px, scale).ok()?;
     let image: ID2D1Image = target.cast().ok()?;
     let base = Mat4::new().translate(o, o);
-    let composed = cx.composed.len();
-    let drawn = crate::decor::layer::draw_into(cx, &image, scale, true, |inner| {
-        draw_children(inner, view, base);
+    // Web views in it are hidden: WebView2 draws a page into a visual of
+    // its own, never into the picture.
+    let drawn = cx.uncomposed(|cx| {
+        crate::decor::layer::draw_into(cx, &image, scale, true, |inner| {
+            draw_children(inner, view, base);
+        })
     });
-    // Web views in it were placed in the picture's coordinates.
-    cx.composed.truncate(composed);
     drawn.then_some(target)
 }
 

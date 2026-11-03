@@ -260,16 +260,18 @@ own push no clip, and the children of a clipping view out of sight are not drawn
 ## Not implemented, or different
 
 - **Web views** are composed (above), with these limits: a web view inside a view drawn with a projective transform
-  (perspective) is not shown (a visual takes no perspective), and one inside a filtered view is placed but not
-  filtered; ancestors' rounded clips clip it to their bounds (only its own corners are rounded); a `backdropFilter`
-  or `mixBlendMode` drawn over a page does not see it (the layer above starts transparent); the image a leaving
-  page or dialog slides out as has no page (its web view closed with its views). The layers are presented
-  unsynchronized with the window's swap chain, so for a frame NSH content above and below a page may come from
-  consecutive frames while both animate. `baseUrl` answers only the document's request: other requests
-  (images, scripts, links) go to the network, and `http(s)` base URLs are the ones WebView2 lets the app answer.
-  Touch and pen input reaches pages as pointer input when it comes from the system (swipe navigation needs it). An
-  offscreen drawing of the window has no pages (`PrintWindow`'s capture does). Without the WebView2
-  Runtime (it comes with Windows 11; Windows 10 gets it with Edge) a web view shows a neutral placeholder.
+  (perspective) is not shown (a visual takes no perspective), nor is one whose view a shader draws a picture of (in an
+  effect or a running transition, under a screen effect: WebView2 draws the page into its own visual, never into the
+  picture), and one inside a filtered view is placed but not filtered; ancestors' rounded clips clip it to their
+  bounds (only its own corners are rounded); a `backdropFilter` or `mixBlendMode` drawn over a page does not see it
+  (the layer above starts transparent); the image a leaving page or dialog slides out as has no page (its web view
+  closed with its views). The layers are presented unsynchronized with the window's swap chain, so for a frame NSH
+  content above and below a page may come from consecutive frames while both animate. `baseUrl` answers only the
+  document's request: other requests (images, scripts, links) go to the network, and `http(s)` base URLs are the ones
+  WebView2 lets the app answer. Touch and pen input reaches pages as pointer input when it comes from the system
+  (swipe navigation needs it). An offscreen drawing of the window has no pages (`PrintWindow`'s capture does). Without
+  the WebView2 Runtime (it comes with Windows 11; Windows 10 gets it with Edge) a web view shows a neutral
+  placeholder.
 - **Native components with a window of their own** (`NativeComponent::window`) stay child windows: they cover NSH
   content drawn over them and are not in offscreen drawings of the window. Hosting an arbitrary `HWND` in a composition is not
   possible (only content made for it, such as a swap chain or a WebView2 composition controller, can be a visual).
