@@ -191,7 +191,7 @@ pub(crate) fn run(
         | Target::Gpui => None,
     };
     // The host it starts connects by itself: no addresses to show.
-    let session = DevSession::start(entry, port, release, limits)?;
+    let session = DevSession::start(entry, None, port, release, limits)?;
     let host = crate::runtime::file(target.platform(), false)?;
     let mut args = vec!["--dev-server".to_owned(), session.local_url()];
     if trace {
@@ -301,7 +301,7 @@ fn run_web(
 ) -> anyhow::Result<()> {
     // Built first in a checkout: the session serves the runtime it finds.
     crate::runtime::web(crate::runtime::WebKind::Dev, true)?.context("no web runtime")?;
-    let session = DevSession::start(entry, port, release, limits)?;
+    let session = DevSession::start(entry, None, port, release, limits)?;
     session.print_web_url();
     session.watch(|| Ok(false))
 }
@@ -447,7 +447,7 @@ fn run_rust_app(
         }
         Target::Web => {
             crate::runtime::web(crate::runtime::WebKind::Dev, true)?.context("no web runtime")?;
-            let session = DevSession::start(&entry, port, false, None)?;
+            let session = DevSession::start(&entry, None, port, false, None)?;
             session.print_web_url();
             session.watch(|| Ok(false))
         }
@@ -605,7 +605,7 @@ fn run_android(
     let serial = android::device(&sdk)?;
     // As on iOS: the host of a previous session must not connect first.
     let _ = android::adb(&sdk, &serial, &["shell", "am", "force-stop", BUNDLE_ID]);
-    let session = DevSession::start(entry, port, release, limits)?;
+    let session = DevSession::start(entry, None, port, release, limits)?;
     install_android_host(&sdk, &serial, work, &crate::runtime::android(true, &[])?)?;
     // The device reaches the dev server on its own 127.0.0.1, until the
     // run ends.

@@ -232,6 +232,11 @@ enum Command {
         /// Serve hot reload to hosts you start yourself.
         #[arg(long, conflicts_with_all = ["target", "device"])]
         server_only: bool,
+        /// The address the server listens on (`--server-only`), such as
+        /// `127.0.0.1` for this machine only; every interface by default,
+        /// so devices on the network connect.
+        #[arg(long, value_name = "ADDRESS", requires = "server_only")]
+        host: Option<std::net::IpAddr>,
     },
     /// Package an installable app from the prebuilt runtime (no Rust
     /// needed). Metadata comes from `nsh.json` next to the entry, overridden
@@ -668,10 +673,11 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
             target,
             device,
             server_only,
+            host,
         } => {
             no_limits_for_rust(&entry, limits)?;
             if server_only {
-                let session = dev::DevSession::start(&entry, port, release, limits)?;
+                let session = dev::DevSession::start(&entry, host, port, release, limits)?;
                 session.print_urls();
                 session.watch(|| Ok(false))
             } else {
@@ -903,5 +909,20 @@ mod command_tests {
             }
         ));
         assert!(Cli::try_parse_from(["nsh", "dev", "--server-only", "--target", "ios"]).is_err());
+    }
+
+    #[test]
+    fn a_server_only_dev_server_listens_where_host_says() {
+        let cli =
+            Cli::try_parse_from(["nsh", "dev", "--server-only", "--host", "127.0.0.1"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Dev {
+                host: Some(host),
+                ..
+            } if host == std::net::Ipv4Addr::LOCALHOST
+        ));
+        // Only with --server-only: the hosts `nsh dev` starts reach it here.
+        assert!(Cli::try_parse_from(["nsh", "dev", "--host", "127.0.0.1"]).is_err());
     }
 }

@@ -121,7 +121,7 @@ before every `cargo run`): `✓` lines for its builds, cargo's and the tools' ou
 ## Dev server (nsh dev / nsh run)
 
 - The CLI watches sources with notify and pushes every rebuild over WebSocket (`/ws`, default port 8790, or `--port`) to all
-  connected hosts; new clients subscribe before receiving the current state, so no event is missed. Protocol: `crates/nsh-dev/src/protocol.rs`
+  connected hosts, on every interface (`nsh dev --server-only --host <ADDRESS>`: one address, and no LAN URLs printed); new clients subscribe before receiving the current state, so no event is missed. Protocol: `crates/nsh-dev/src/protocol.rs`
   (JSON text frames + binary frames).
 - `nsh run` and `nsh dev` replace the previous NSH development command on the chosen port. The CLI
   holds an OS file lock in the existing NSH cache's `dev-sessions/` directory for the entire command,

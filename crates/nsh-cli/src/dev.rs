@@ -1,7 +1,7 @@
 use std::{
     cell::Cell,
     collections::HashSet,
-    net::{Ipv4Addr, SocketAddr},
+    net::{IpAddr, Ipv4Addr, SocketAddr},
     path::{Path, PathBuf},
     sync::{
         Arc, Mutex,
@@ -43,11 +43,13 @@ pub(crate) struct DevSession {
 }
 
 impl DevSession {
-    /// Starts the server and publishes the first build (or its error).
-    /// Hosts run the app with `limits` as an embedding app that sets them
-    /// would (`--limits`), or with none, as an app on its own.
+    /// Starts the server on `host` (every interface: `None`) and publishes
+    /// the first build (or its error). Hosts run the app with `limits` as
+    /// an embedding app that sets them would (`--limits`), or with none, as
+    /// an app on its own.
     pub(crate) fn start(
         entry: &Path,
+        host: Option<IpAddr>,
         port: u16,
         release: bool,
         limits: Option<nsh_core::js::HostLimits>,
@@ -59,7 +61,7 @@ impl DevSession {
             .context("entry has no directory")?
             .to_path_buf();
         let devices = Arc::<Devices>::default();
-        let server = start_server(port, &src_dir, devices.clone())?;
+        let server = start_server(host, port, &src_dir, devices.clone())?;
         server.serve_files(crate::build::crate_assets().map(|a| (a.path, a.source)));
         server.install_commands(install_commands(&src_dir));
         server.set_limits(limits.map(|l| l.to_string()));
@@ -91,17 +93,35 @@ impl DevSession {
         self.server.local_addr().port()
     }
 
+    /// Where hosts on this machine reach the server: `127.0.0.1` when it
+    /// listens on every interface, else the address it listens on.
+    fn local_addr(&self) -> SocketAddr {
+        let addr = self.server.local_addr();
+        if addr.ip().is_unspecified() {
+            SocketAddr::new(Ipv4Addr::LOCALHOST.into(), addr.port())
+        } else {
+            addr
+        }
+    }
+
+    /// This machine's LAN addresses, where devices on the network reach
+    /// the server: none unless it listens on every interface.
+    fn lan_ips(&self) -> Vec<Ipv4Addr> {
+        if self.server.local_addr().ip().is_unspecified() {
+            lan_ips()
+        } else {
+            Vec::new()
+        }
+    }
+
     /// WebSocket URL for hosts on this machine.
     pub(crate) fn local_url(&self) -> String {
-        format!(
-            "ws://127.0.0.1:{}{WS_PATH}",
-            self.server.local_addr().port()
-        )
+        format!("ws://{}{WS_PATH}", self.local_addr())
     }
 
     /// The web host's page for browsers on this machine.
     pub(crate) fn web_url(&self) -> String {
-        format!("http://127.0.0.1:{}/", self.server.local_addr().port())
+        format!("http://{}/", self.local_addr())
     }
 
     /// Prints where hosts can connect.
@@ -112,7 +132,7 @@ impl DevSession {
         if web {
             ui::detail(format!("browsers: {}", self.web_url()));
         }
-        for ip in lan_ips() {
+        for ip in self.lan_ips() {
             ui::detail(format!(
                 "devices on this network: ws://{ip}:{port}{WS_PATH}"
             ));
@@ -127,7 +147,7 @@ impl DevSession {
     pub(crate) fn print_web_url(&self) {
         let port = self.server.local_addr().port();
         ui::note(format!("open in a browser: {}", ui::link(&self.web_url())));
-        if let Some(ip) = lan_ips().first() {
+        if let Some(ip) = self.lan_ips().first() {
             ui::detail(ui::dim(format!("on this network: http://{ip}:{port}/")));
         }
     }
@@ -420,11 +440,17 @@ fn install_commands(dir: &Path) -> Vec<(HostPlatform, String)> {
     ]
 }
 
-fn start_server(port: u16, assets_root: &Path, devices: Arc<Devices>) -> anyhow::Result<DevServer> {
+fn start_server(
+    host: Option<IpAddr>,
+    port: u16,
+    assets_root: &Path,
+    devices: Arc<Devices>,
+) -> anyhow::Result<DevServer> {
     if ui::stop_requested() {
         anyhow::bail!("development session is stopping");
     }
-    let addr = SocketAddr::from(([0, 0, 0, 0], port));
+    // Every interface: phones and simulators on the network connect.
+    let addr = SocketAddr::new(host.unwrap_or(Ipv4Addr::UNSPECIFIED.into()), port);
     DevServer::start(
         addr,
         nsh_js::BYTECODE_VERSION,
@@ -566,7 +592,7 @@ mod tests {
     fn occupied_port_fails_without_moving_or_stopping_the_listener() {
         let taken = std::net::TcpListener::bind(("0.0.0.0", 0)).unwrap();
         let port = taken.local_addr().unwrap().port();
-        let error = super::start_server(port, &std::env::temp_dir(), Default::default())
+        let error = super::start_server(None, port, &std::env::temp_dir(), Default::default())
             .err()
             .expect("must not move to another port");
         assert!(error.to_string().contains(&format!("port {port}")));
@@ -584,12 +610,27 @@ mod tests {
     #[test]
     fn zero_allocates_a_port_and_an_explicit_port_is_kept() {
         let dir = std::env::temp_dir();
-        let server = super::start_server(0, &dir, Default::default()).unwrap();
+        let server = super::start_server(None, 0, &dir, Default::default()).unwrap();
         let port = server.local_addr().port();
         assert_ne!(port, 0);
         drop(server);
-        let server = super::start_server(port, &dir, Default::default()).unwrap();
+        let server = super::start_server(None, port, &dir, Default::default()).unwrap();
         assert_eq!(server.local_addr().port(), port);
+    }
+
+    #[test]
+    fn a_host_address_keeps_the_server_on_it() {
+        let localhost = std::net::Ipv4Addr::LOCALHOST.into();
+        let server = super::start_server(
+            Some(localhost),
+            0,
+            &std::env::temp_dir(),
+            Default::default(),
+        )
+        .unwrap();
+        let addr = server.local_addr();
+        assert_eq!(addr.ip(), localhost);
+        assert!(std::net::TcpStream::connect(addr).is_ok());
     }
 
     #[test]
