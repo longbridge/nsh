@@ -10,8 +10,11 @@ use std::{
 };
 
 use nsh_core::{
+    JsonValue,
     geometry::{Size, px},
     platform::{Appearance, Locale},
+    shared::SharedStore,
+    window::{WindowId, WindowInfo, Windows, window_key},
 };
 use nsh_engine::{App, Bundle, ColorScheme, EngineConfig, Environment, Idiom, Limits, Os, Root};
 use windows::{
@@ -27,6 +30,7 @@ use windows::{
 };
 
 use crate::{
+    app_windows::AppWindows,
     image::{AssetBase, AssetReader},
     surface::Surface,
 };
@@ -191,6 +195,15 @@ pub struct AppOptions {
     /// and keeps one instance, a later launch with a URL handing it to the
     /// running one. Empty: none of that.
     pub schemes: Vec<String>,
+    /// What the embedding app gives the engines of the views made with
+    /// these options ([`nsh_engine::EngineConfig::context`]): the Rust code
+    /// of the app's UI sets reads it with `nsh_core::element::engine_context`.
+    /// [`run_app`] adds to it the app's shared store
+    /// ([`nsh_core::shared::SharedStore`]) and the window host
+    /// ([`nsh_core::window::Windows`]) of each window it opens; a view made
+    /// with [`AppView::new`] has only what is given here (so it cannot open
+    /// windows).
+    pub context: nsh_engine::EngineContext,
 }
 
 impl Default for AppOptions {
@@ -214,6 +227,7 @@ impl Default for AppOptions {
             schemes: Vec::new(),
             notifications: false,
             host: nsh_engine::HostChannel::default(),
+            context: Default::default(),
         }
     }
 }
@@ -360,7 +374,7 @@ impl AppView {
             cache: options.cache.clone(),
             storage: options.storage.clone(),
             clock: Default::default(),
-            context: Default::default(),
+            context: options.context.clone(),
             pinned: Default::default(),
             clipboard: None,
             host: options.host.clone(),
@@ -548,6 +562,22 @@ fn run_on_this_thread(source: AppSource, options: AppOptions) -> std::process::E
     {
         return std::process::ExitCode::SUCCESS;
     }
+    // The app's windows: the main window and the ones it opens share a store,
+    // and each engine reaches the host through its context.
+    let store = options
+        .context
+        .get::<SharedStore>()
+        .map_or_else(SharedStore::new, |store| (*store).clone());
+    let app_windows = AppWindows::new(&source, &options, store.clone());
+    let mut options = options;
+    options.context = options
+        .context
+        .clone()
+        .with(store.clone())
+        .with(Windows::new(
+            app_windows.clone(),
+            WindowInfo::new(WindowId(0), "", JsonValue::Null, true),
+        ));
     let view = match AppView::new(None, options.clone()) {
         Ok(view) => view,
         Err(err) => {
@@ -564,8 +594,12 @@ fn run_on_this_thread(source: AppSource, options: AppOptions) -> std::process::E
     crate::system::environment_applied(view.surface());
     crate::linking::attach(view.surface());
     install_shortcuts(&view);
+    app_windows.register_main(&view, &options.title);
     view.show();
     let code = crate::window::run_loop();
+    // Closing the main window ends the app: the other windows go with it.
+    app_windows.shutdown();
+    store.delete(window_key(WindowId(0)));
     view.stop();
     drop(view);
     // SAFETY: pairs the `OleInitialize` above; nothing on this thread uses
@@ -591,7 +625,7 @@ fn run_on_this_thread(source: AppSource, options: AppOptions) -> std::process::E
 
 /// The standalone app's window shortcuts: F11 toggles full screen, as in
 /// Windows' own apps (Alt+F4, which closes the window, is the system's).
-fn install_shortcuts(view: &AppView) {
+pub(crate) fn install_shortcuts(view: &AppView) {
     const VK_F11: u16 = 0x7A;
     let hwnd = view.hwnd();
     view.surface()

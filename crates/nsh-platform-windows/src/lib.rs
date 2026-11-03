@@ -28,6 +28,7 @@ mod agent;
 mod animation;
 mod app;
 mod app_window;
+mod app_windows;
 mod audio;
 mod canvas;
 mod chrome;

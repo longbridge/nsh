@@ -131,6 +131,13 @@ tap id:application
 expect Calls: application done, quit function, restart function
 tap id:toggles
 expect Calls: toggles done
+expect Current window: null
+tap id:windows
+expect Calls: windows: open Error
+covers [nsh/desktop] openWindow
+covers [nsh/desktop] currentWindow
+covers [nsh/desktop] focusWindow
+covers [nsh/desktop] closeWindow
 covers [nsh/desktop] isAvailable
 covers [nsh/desktop] titleBar
 covers [nsh/desktop] windowState
