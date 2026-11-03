@@ -73,6 +73,7 @@ export default function BaseDiff() {
   let files!: DiffViewRef;
   const listed = signal("none");
   const toggled = signal("none");
+  const wrapFiles = signal(false);
   let ruler!: DiffViewRef;
   const scrolled = signal("none");
   const marks = signal("none");
@@ -168,7 +169,8 @@ export default function BaseDiff() {
       <View style={{ width: 390, height: 160 }}>
         <DiffView
           ref={r => (files = r)}
-          patch={FILES}
+          patch={wrapFiles() ? FILES.replace("+BETA", `+${"x".repeat(120)}`) : FILES}
+          softWrap={wrapFiles()}
           layout="unified"
           renderFileHeader={file => (
             <View testID={`file-${file.index}`} onPress={() => files.toggleFile(file.path)}>
@@ -179,6 +181,7 @@ export default function BaseDiff() {
           style={{ flex: 1 }}
         />
       </View>
+      <View testID="wrap-files" style={{ height: 20 }} onPress={() => wrapFiles.set(!wrapFiles())} />
       <Text>{() => `Files: ${listed()}`}</Text>
       <Text>{() => `Toggled: ${toggled()}`}</Text>
       <View testID="files" style={{ height: 20 }} onPress={list} />

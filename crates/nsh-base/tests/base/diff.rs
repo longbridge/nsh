@@ -9,12 +9,14 @@
 //! reports where its rows are scrolled, gives where each change is and
 //! scrolls to an offset, as an overview ruler needs.
 
+use std::sync::{Arc, Mutex};
+
 use nsh_base::{
     DiffAnnotation, DiffChange, DiffExpand, DiffFile, DiffHunk, DiffHunkBounds, DiffLayout,
     DiffLineRange, DiffSide, DiffView, DiffViewApi, DiffViewEvent, diff_view,
 };
 use nsh_core::{
-    Size,
+    MountItem, Size,
     element::Root,
     platform::{Idiom, Os},
     prelude::*,
@@ -36,6 +38,8 @@ struct HarnessProps {
     annotations: Vec<DiffAnnotation>,
     /// The view's `softWrap`.
     soft_wrap: bool,
+    /// Use the app-provided file header.
+    custom_header: bool,
 }
 
 fn texts(old: &str, new: &str) -> HarnessProps {
@@ -46,6 +50,7 @@ fn texts(old: &str, new: &str) -> HarnessProps {
         layout: DiffLayout::Split,
         annotations: Vec::new(),
         soft_wrap: false,
+        custom_header: false,
     }
 }
 
@@ -151,6 +156,9 @@ fn Harness(props: HarnessProps) -> impl IntoElement {
         })
         .component_ref(&dv)
         .size_full();
+    if props.custom_header {
+        el = el.render_file_header(|file: &DiffFile| text(file.path.clone()));
+    }
     el = match props.patch.clone() {
         Some(patch) => el.patch(patch),
         None => el
@@ -862,4 +870,80 @@ fn the_view_reports_a_change_moved_within_rows_of_the_same_height() {
     see(&mut app, "Scrolled 0 0 800 80 300");
     app.wait(std::time::Duration::from_millis(100)).unwrap();
     assert_eq!(moves(&app), before);
+}
+
+/// Both header renderers must occupy the row immediately after the first
+/// file's change, including the extra visual rows introduced by wrapping.
+#[test]
+fn file_headers_follow_wrapped_rows() {
+    for layout in [DiffLayout::Unified, DiffLayout::Split] {
+        for custom_header in [false, true] {
+            for soft_wrap in [false, true] {
+                let long = "long text ".repeat(30);
+                let props = HarnessProps {
+                    patch: Some(format!(
+                        "diff --git a/a.rs b/a.rs\n--- a/a.rs\n+++ b/a.rs\n@@ -1 +1 @@\n-old a\n+{long}\ndiff --git a/b.rs b/b.rs\n--- a/b.rs\n+++ b/b.rs\n@@ -1 +1 @@\n-old b\n+new b\n"
+                    )),
+                    layout,
+                    soft_wrap,
+                    custom_header,
+                    ..texts("", "")
+                };
+                let mut app = Headless::start(EngineConfig {
+                    viewport: Size::new(px(900.0), px(900.0)),
+                    ..EngineConfig::new(Root::new::<Harness>(move || props.clone()))
+                })
+                .unwrap();
+                let items = Arc::new(Mutex::new(Vec::new()));
+                let into = items.clone();
+                app.observe(move |_, batch| into.lock().unwrap().extend(batch.items.clone()));
+                see(&mut app, "new b");
+                app.press("id:marks").unwrap();
+                app.wait(std::time::Duration::from_millis(100)).unwrap();
+                let bounds = marks(&app);
+                let first = bounds[0];
+                let unwrapped_height = if layout == DiffLayout::Unified {
+                    40.0
+                } else {
+                    20.0
+                };
+                if soft_wrap {
+                    assert!(first.2 > unwrapped_height, "{bounds:?}");
+                } else {
+                    assert_eq!(first.2, unwrapped_height);
+                }
+                let items = items.lock().unwrap();
+                let mut id = items
+                    .iter()
+                    .rev()
+                    .find_map(|item| match item {
+                        MountItem::Text { id, text, .. } if text.text == "b.rs" => Some(*id),
+                        _ => None,
+                    })
+                    .expect("second file title");
+                // Walk through the renderer's content to the full-width header.
+                let mut header = None;
+                while let Some(parent) = items.iter().rev().find_map(|item| match item {
+                    MountItem::Insert { parent, child, .. } if *child == id => Some(*parent),
+                    _ => None,
+                }) {
+                    id = parent;
+                    if let Some(frame) = items.iter().rev().find_map(|item| match item {
+                        MountItem::Frame { id: at, frame } if *at == id => Some(*frame),
+                        _ => None,
+                    }) && frame.size.width == px(800.0)
+                        && frame.size.height == px(20.0)
+                    {
+                        header = Some(frame);
+                    }
+                }
+                let header = header.expect("full-width header");
+                assert_eq!(
+                    header.origin.y.0,
+                    first.1 + first.2,
+                    "layout={layout:?}, custom={custom_header}, wrap={soft_wrap}"
+                );
+            }
+        }
+    }
 }

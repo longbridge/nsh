@@ -54,23 +54,11 @@ server client, log forwarding, the error overlay: `dev.rs`). The host turns on `
   no child windows. Changing a view (`changed` / `moved`) queues it on its surface and invalidates the window;
   `WM_PAINT` draws once, however many views changed, only where they changed ("Partial frames", below). Only native components that bring a window of their own are child `HWND`s, and they
   sit above everything NSH draws (the "airspace" limit, below).
-- **Window composition for web views** (`compose.rs`). A window without web views has no composition: one swap
-  chain, drawn and presented as above. The first web view makes a DirectComposition target on the window (above
-  its swap chain, below its child windows) whose root holds, bottom to top, each web view's visual (the WebView2
-  composition controller's root visual target) and after each one a layer: a composition swap chain the size of
-  the window (premultiplied alpha) with what NSH paints after that web view. The tree is still drawn in one pass:
-  reaching a web view records where it goes (`DrawCx::compose`: its transform in window pixels, its clipping
-  ancestors' clip, its own rounded corners, its opacity), and the next thing drawn first moves the context to the
-  next layer (`DrawCx::realize`: the pushed clips and opacity layers are popped, the target changes, they are
-  pushed again, as `flatten` does for backdrops). So what is painted before a web view is below it, and what is
-  painted after it (later siblings, dialogs and alerts, the dev overlay: everything the root
-  hosts later) is above it, for any number of web views. A layer nothing is drawn into is neither drawn, presented
-  nor shown; the layers are presented unsynchronized (`Present(0)`) and the window's own swap chain waits for the
-  vertical blank once for all; the root is re-arranged only when the order of its visuals changes, and a frame's
-  changes are one `Commit`. Without a composition, `realize` is one `Option` test per view: no extra surface, copy
-  or per-frame work (the cost of composing one full-window layer in DWM is not paid by windows that do not need
-  it, which is why the single swap chain path stays rather than composing every window). The composition lives as
-  long as a web view holds it (`Surface::compose`), and goes with the last one.
+- **Window composition for web views** (`compose.rs`). A window without web views has one swap chain. The first web
+  view makes a DirectComposition target on the window that layers each web view's visual between swap-chain layers
+  of what NSH paints before and after it, so later siblings, dialogs and the dev overlay draw above web views, for
+  any number of them. Windows without web views pay nothing for it; the composition lives as long as a web view
+  holds it (`Surface::compose`).
 - **Drawing a view** (`render::draw_view`): shadows and background (`decor.rs`), the content clipped to the bounds
   (text, image, canvas), the children (clipped to the rounded bounds when the view clips), the items the view hosts
   (`ViewState::natives`: text editors, alerts, overlays, videos — the `Hosted` trait), the scroll
@@ -223,31 +211,13 @@ Windows).
 ### Partial frames
 
 A frame draws only what changed since the back buffer was last drawn, and presents only what changed since the last
-frame:
-
-- **What changed** (`Surface::take_damage`): `NshView::changed` (and `moved`, which every frame, style, content,
-  animation, transition and scroll change goes through) puts the view on its surface's list. A view records where the
-  window's frame painted it (`set_painted`: its bounds out by shadows, outline and a shader's overflow, with the items
-  it hosts, clipped to what was visible; in a pass drawn offscreen for a filter or a 3D transform, that view's area).
-  The damage of a changed view is where it and its subtree were painted (`painted_subtree`) and where its subtree
-  draws now (`to_root` and `drawn_area`). A view taken out of its parent queues itself before it leaves; one inserted
-  queues itself after. The mounter queues the view of every applied item that may change what is drawn (`mount.rs`
-  `redrawn`), whatever applied it, and an item for the whole window (`Appearance`, `LayoutDirection`) invalidates all
-  of it. `Surface::invalidate` (theme, size, scale, chrome, device loss, composition) draws the whole window; so do a
-  change below a projective transform or in a subtree whose area is not known (a hosted item: text editors, alerts),
-  and the system's own `WM_PAINT` with nothing queued.
-- **What is drawn** (`render::frame`): the swap chain is `FLIP_SEQUENTIAL` with two buffers, so the back buffer
-  holds the frame of two presents ago and a frame draws its own damage and the last frame's (`SwapChain::to_draw`;
-  a new or resized chain, a window with web views and the frame after a whole one draw everything). The rectangles,
-  in pixels, are merged where they touch or their union costs nothing, then the cheapest pairs until at most 24 are
-  left (`merged`). The tree is drawn once into them: an axis-aligned clip for one, a layer masked by a geometry
-  group of rectangles for several (pushed on the context's stack, so `flatten` keeps it; `DrawCx::clip_skip` keeps
-  it out of what views record as visible), cleared to the window's background first. A view whose own area meets
-  none of the rectangles is left out with its subtree when it clips its children or has none. A shader view that
-  reads what is behind it (`sample_backdrop`) and that the rectangles meet adds its box and overflow to them, and so
-  does one the added areas meet (`with_backdrops`, the views on `Surface::backdrop_readers`): outside the
-  rectangles the back buffer holds an earlier frame, the view's own output included, which it must not read.
-- **What is presented**: `Present1` with the frame's own changed rectangles, so DWM composes only those.
+frame: changed views queue their old and new painted areas on their surface (`Surface::take_damage`, `NshView::changed`
+/ `moved`, the mounter's `redrawn`), `render::frame` draws the tree once clipped to the merged damage of this frame
+and the one before (`SwapChain::to_draw`), widened to the whole box and overflow of each shader view reading what is
+behind it that the damage meets (`with_backdrops`: the back buffer holds its own earlier output), and `Present1`
+presents only the changed rectangles.
+`Surface::invalidate` (theme, size, scale, device loss, composition) and changes it cannot bound draw the whole
+window.
 
 `render.rs`'s `a_partial_frame_draws_what_a_whole_one_does` draws a tree whole, changes it (a move, a color, a
 removal) and checks that drawing the damage over the old pixels gives the bytes a whole frame gives.

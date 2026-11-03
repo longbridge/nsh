@@ -57,6 +57,8 @@ struct HarnessProps {
     follow: bool,
     /// A `renderItem` drawing `label|shortcut`.
     custom: bool,
+    /// The search field labelled `Search commands` apart from the list.
+    search_label: bool,
 }
 
 fn props() -> HarnessProps {
@@ -68,6 +70,7 @@ fn props() -> HarnessProps {
         controlled: false,
         follow: true,
         custom: false,
+        search_label: false,
     }
 }
 
@@ -122,6 +125,9 @@ fn Harness(props: HarnessProps) -> impl IntoElement {
         .h(px(400.0));
     if props.controlled {
         el = el.query(move || Some(query.get()));
+    }
+    if props.search_label {
+        el = el.search_accessibility_label("Search commands");
     }
     if props.custom {
         el = el.render_item(|e: &CommandEntry| {
@@ -229,6 +235,25 @@ fn screen_readers_hear_a_list_box_of_options_with_their_states() {
     assert_eq!(state("Dark Theme").checked, Some(Checked::True));
     assert_eq!(state("Profile").checked, None);
     assert!(!screen.shows("No results"));
+}
+
+#[test]
+fn screen_readers_hear_the_search_field_by_its_own_label_else_the_commands() {
+    // Without its own, the search field is named as the list is.
+    let app = start(props());
+    assert_eq!(app.screen().count("label:Commands"), Ok(2));
+    assert_eq!(app.screen().count("label:Search commands"), Ok(0));
+    // With it, the field has the app's words and the list keeps its name.
+    let mut app = start(HarnessProps {
+        search_label: true,
+        ..props()
+    });
+    assert_eq!(app.screen().count("role:listbox[Commands]"), Ok(1));
+    assert_eq!(app.screen().count("label:Commands"), Ok(1));
+    app.type_text("label:Search commands", "cal").unwrap();
+    app.wait_for_gone("role:option[New File]", Duration::from_secs(5))
+        .unwrap();
+    assert_eq!(app.screen().count("role:option"), Ok(2));
 }
 
 #[test]

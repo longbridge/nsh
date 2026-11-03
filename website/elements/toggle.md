@@ -92,6 +92,7 @@ typed style methods and `.child(..)` for their content.
 | `disabled` | `.disabled(..)` | `boolean` | `false` | No presses and no press feedback; `disabled:` styles apply, and screen readers say it is dimmed. A toggle in a disabled `ToggleGroup` is disabled too. |
 | `pressedStyle` | `.pressed_style(\|s\| ..)` | `StyleProp<ViewStyle>` | none | The toggle's style while pressed and not disabled, as `aria-pressed:` classes. |
 | `accessibilityLabel` | `.accessibility_label(..)` | `string` | none | What screen readers say: what the toggle turns on, when its children have no text that says it (an icon). |
+| `hitSlop` | `.hit_slop(..)` | `number \| Partial<Edges>` | none | How far outside its bounds presses still count, in points: one number for every side, or the sides named. As a view's `hitSlop`. |
 | `children` | `.child(..)` | `JSX.Element` | none | The app's icon or label, which screen readers say. |
 | `class`, `style` | style methods | `string`, `StyleProp<ViewStyle>` | none | The toggle itself: the surface around its content. |
 | `activeStyle`, `hoverStyle`, `focusStyle`, `disabledStyle` | `.active(\|s\| ..)`, `.hover(..)`, `.focus(..)`, `.disabled_style(..)` | `StyleProp<ViewStyle>` | none | The toggle's style while a press is in progress, hovered, focused or disabled, as the `<state>:` classes. |
@@ -157,6 +158,24 @@ toggle in it, a toolbar the app locks:
     <Text>B</Text>
   </Toggle>
 </ToggleGroup>
+```
+
+## A small target with hitSlop
+
+An icon toggle can be smaller than a finger. `hitSlop` makes presses that land near it count, in points past each side,
+without changing its layout or its look: one number for every side, or the sides named (`{ top: 8, bottom: 8 }`), as a
+[view's `hitSlop`](./index.md#presses-and-feedback) takes them.
+
+```tsx
+<Toggle
+  pressed={favorite()}
+  hitSlop={12}
+  accessibilityLabel="Favorite"
+  onChange={({ pressed }) => favorite.set(pressed)}
+  class="size-5 items-center justify-center"
+>
+  <Text>★</Text>
+</Toggle>
 ```
 
 ## Accessibility

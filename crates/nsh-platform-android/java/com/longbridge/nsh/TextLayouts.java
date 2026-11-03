@@ -102,9 +102,9 @@ final class TextLayouts {
      * system's.
      */
     private static Typeface resolve(String family, int weight, boolean italic) {
-        List<String> names = families(family);
+        List<Family> names = families(family);
         for (int i = 0; i < names.size(); i++) {
-            Face face = registered(names.get(i), weight, italic);
+            Face face = registered(names.get(i).name, weight, italic);
             if (face != null) {
                 Typeface chained = chained(face, names.subList(i + 1, names.size()), weight, italic);
                 if (chained != null) return chained;
@@ -121,10 +121,11 @@ final class TextLayouts {
     /**
      * The families of a `fontFamily` list, trimmed and unquoted, in order: a
      * quoted name runs to its closing quote, commas and all (`'ACME, Inc'`),
-     * as `nsh_core::font_families` reads it.
+     * as `nsh_core::font_families` reads it. A quoted name is always a
+     * family's name, never a generic family (`"serif"`), as in CSS.
      */
-    private static List<String> families(String list) {
-        List<String> out = new ArrayList<>();
+    private static List<Family> families(String list) {
+        List<Family> out = new ArrayList<>();
         if (list == null) return out;
         int i = 0, n = list.length();
         while (i < n) {
@@ -133,7 +134,8 @@ final class TextLayouts {
             char c = list.charAt(i);
             String name;
             int comma;
-            if (c == '"' || c == '\'') {
+            boolean quoted = c == '"' || c == '\'';
+            if (quoted) {
                 // To the closing quote (or the end, unclosed); what follows it
                 // up to the next comma is not part of the name.
                 int end = list.indexOf(c, i + 1);
@@ -145,9 +147,20 @@ final class TextLayouts {
                 name = list.substring(i, comma < 0 ? n : comma).trim();
             }
             i = comma < 0 ? n : comma + 1;
-            if (!name.isEmpty()) out.add(name);
+            if (!name.isEmpty()) out.add(new Family(name, quoted));
         }
         return out;
+    }
+
+    /** A family of a `fontFamily` list; `quoted` names are never generic. */
+    private static final class Family {
+        final String name;
+        final boolean quoted;
+
+        Family(String name, boolean quoted) {
+            this.name = name;
+            this.quoted = quoted;
+        }
     }
 
     /** The registered face of `family` nearest to the weight and style, or null. */
@@ -169,9 +182,10 @@ final class TextLayouts {
     }
 
     /** A generic or installed family's typeface, or null when Android has none. */
-    private static Typeface installed(String family) {
-        // CSS generic families (`font-mono`, `font-serif`).
-        switch (family) {
+    private static Typeface installed(Family name) {
+        String family = name.name;
+        // CSS generic families (`font-mono`, `font-serif`), unquoted.
+        switch (name.quoted ? "" : family) {
             case "system-ui": case "sans-serif": case "ui-sans-serif": case "-apple-system":
             case "BlinkMacSystemFont":
                 return Typeface.DEFAULT;
@@ -180,6 +194,7 @@ final class TextLayouts {
             case "serif": case "ui-serif":
                 return Typeface.SERIF;
             default:
+                if (family.isEmpty()) return null;
                 Typeface typeface = Typeface.create(family, Typeface.NORMAL);
                 // A family Android does not have is its default typeface.
                 return typeface == null || typeface.equals(Typeface.DEFAULT) ? null : typeface;
@@ -189,20 +204,21 @@ final class TextLayouts {
     /**
      * `primary` with the registered families of `rest` as its fallbacks,
      * then the system's (the first generic family of `rest`, else
-     * sans-serif); null before Android 10, without such families, or when a
-     * font file does not load.
+     * sans-serif); null before Android 10, when there is nothing to chain
+     * (no such families and a sans-serif system fallback), or when a font
+     * file does not load.
      */
-    private static Typeface chained(Face primary, List<String> rest, int weight, boolean italic) {
+    private static Typeface chained(Face primary, List<Family> rest, int weight, boolean italic) {
         if (android.os.Build.VERSION.SDK_INT < 29 || primary.file == null) return null;
         List<Face> others = new ArrayList<>();
         String system = "sans-serif";
         boolean generic = false;
-        for (String name : rest) {
-            Face face = registered(name, weight, italic);
+        for (Family family : rest) {
+            Face face = registered(family.name, weight, italic);
             if (face != null && face.file != null && face != primary) {
                 others.add(face);
-            } else if (!generic) {
-                switch (name) {
+            } else if (!generic && !family.quoted) {
+                switch (family.name) {
                     case "monospace": case "ui-monospace": system = "monospace"; generic = true; break;
                     case "serif": case "ui-serif": system = "serif"; generic = true; break;
                     case "system-ui": case "sans-serif": case "ui-sans-serif": generic = true; break;
@@ -210,7 +226,8 @@ final class TextLayouts {
                 }
             }
         }
-        if (others.isEmpty()) return null;
+        // A trailing generic family still sets the system fallback.
+        if (others.isEmpty() && system.equals("sans-serif")) return null;
         try {
             Typeface.CustomFallbackBuilder builder = new Typeface.CustomFallbackBuilder(fontFamily(primary));
             for (Face face : others) builder.addCustomFallback(fontFamily(face));

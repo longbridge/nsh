@@ -651,6 +651,10 @@ style id:icon backgroundColor #ffffffff
 style id:busy backgroundColor #ff0000ff
 style id:checked backgroundColor #00ff00ff
 style id:selected backgroundColor #0000ffff
+# `data-*:` and `group-data-*:` are known classes; without the attribute
+# (only components' parts show them) the plain ones apply.
+style id:data backgroundColor #ccccccff
+style id:data-inner backgroundColor #ffffffff
 covers [props] pressedStyle
 # state-focus-within
 tap id:case-state-focus-within
