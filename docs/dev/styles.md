@@ -328,7 +328,8 @@ as tall as its lines at 40 columns).
   in every pass), else of the room it is given. A box with content is as tall as its content, at most its `maxHeight` (a popup bounded by the room
   below its anchor), and one with a height in points is
   not stretched across a row (a badge stays a row beside a title and its subtitle). When the children do not fit, those
-  in a row give in this order: the gaps, down to one column (before a `flexGrow` child wraps, only when that keeps it
+  in a row give in this order: texts of limited lines (`numberOfLines`) with `flexShrink`, which are cut short with
+  `…`, down to four columns (so the descriptions after a column of names stay lined up); the gaps, down to one column (before a `flexGrow` child wraps, only when that keeps it
   on its rows: columns of sections that wrap anyway keep the gaps between them); icon buttons shown as their labels, down to three
   columns (the label cut short) and then out, the last first, and so does a row of them (a toolbar's group) nested
   in the row, as one; children with `flexShrink`, down to the longest word

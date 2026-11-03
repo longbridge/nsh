@@ -239,6 +239,9 @@ pub(crate) struct Role {
     /// A text with a character that is no white space: what an absolute
     /// box over it would hide.
     pub(crate) glyphs: bool,
+    /// A text of limited lines (`numberOfLines`): cut short with `…` when
+    /// it has no room, so in a row too wide it gives before the gaps.
+    pub(crate) clamped: bool,
     /// Its largest corner radius, in points: a box as round as it is
     /// small (a circle) has no border.
     pub(crate) radius: f32,
@@ -1409,6 +1412,10 @@ fn align(keyword: A) -> Align {
     }
 }
 
+/// The columns a text cut short keeps before the gaps of its row give
+/// ([`Item::clamped`]): three of a word and its `…`.
+const CLAMPED_FLOOR: i32 = 4;
+
 /// A child of a flex split.
 struct Item {
     order: u32,
@@ -1440,6 +1447,9 @@ struct Item {
     filled: bool,
     /// Its last column is a blank text's (a mark's trailing space).
     trails: bool,
+    /// A shrinking text of limited lines ([`Role::clamped`]): made to be
+    /// cut short, it gives its columns first in a row too wide.
+    clamped: bool,
     /// Which of its margins are `auto` (left, right, top, bottom): they
     /// take the space left, as CSS's.
     auto: [bool; 4],
@@ -1713,6 +1723,7 @@ fn arrange_flex(
                 edges,
                 auto,
                 trails: row && trails(tree, node),
+                clamped: row && style.flex_shrink > 0.0 && tree.role(node).clamped,
                 order,
                 node,
                 grow: style.flex_grow,
@@ -2014,6 +2025,21 @@ fn split_line(
     {
         let mut over = used(items, &before) - bound;
         if row {
+            // A text cut short with `…` gives first, down to a word's start
+            // and its ellipsis: the gaps that line the columns up stay.
+            while over > 0 {
+                let Some(pick) = items
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, i)| i.clamped && i.main > CLAMPED_FLOOR)
+                    .max_by_key(|(_, i)| i.main)
+                    .map(|(n, _)| n)
+                else {
+                    break;
+                };
+                items[pick].main -= 1;
+                over -= 1;
+            }
             over = give_gaps_and_labels(items, &mut before, over);
             if over > 0 {
                 for item in items.iter_mut() {

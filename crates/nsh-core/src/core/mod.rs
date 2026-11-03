@@ -2552,6 +2552,15 @@ impl<M: TextEngine> Core<M> {
                     LeafContext::Text(cx) => cx.text.text.chars().any(|ch| !ch.is_whitespace()),
                     _ => false,
                 });
+        // A text of limited lines, cut short with `…` when it has no room.
+        let clamped = kind == Kind::Text
+            && node
+                .layout
+                .and_then(|l| self.layout.get_node_context(l))
+                .is_some_and(|cx| match cx {
+                    LeafContext::Text(cx) => cx.text.max_lines > 0,
+                    _ => false,
+                });
         let disclosure = control
             && self.nodes[key as usize].props.as_ref().is_some_and(|p| {
                 p.accessibility.state.expanded.is_some() && !p.accessibility.state.has_popup
@@ -2587,6 +2596,7 @@ impl<M: TextEngine> Core<M> {
             ),
             input: kind == Kind::Input,
             glyphs,
+            clamped,
             radius,
             fill: view.background_color,
             border_color,

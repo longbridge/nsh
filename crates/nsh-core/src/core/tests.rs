@@ -26848,6 +26848,45 @@ mod terminal_layout {
     }
 
     #[test]
+    fn a_text_cut_short_gives_its_columns_before_the_gaps_of_its_row() {
+        // A name column (8 columns, no shrinking), two columns, then a
+        // one-line description too long for the 20 columns left: the
+        // description is cut short, the gap stays, so the descriptions of
+        // rows like it line up.
+        let mut ops = view(
+            2,
+            ROOT_ID,
+            &[
+                ("width", V::Number(160.0)),
+                ("flexDirection", V::Str("row")),
+                ("gap", V::Number(24.0)),
+            ],
+        );
+        ops.extend(text(4, 2, "Analytic"));
+        ops.push(style_op(
+            4,
+            &[
+                ("minWidth", V::Number(64.0)),
+                ("flexShrink", V::Number(0.0)),
+            ],
+        ));
+        ops.extend(text(
+            6,
+            2,
+            "Which pages are visited, counted without who visited them",
+        ));
+        ops.push(style_op(
+            6,
+            &[
+                ("numberOfLines", V::Number(1.0)),
+                ("flexShrink", V::Number(1.0)),
+            ],
+        ));
+        let batch = laid_out(ops);
+        assert_eq!(frame_of(&batch, 6), Some(rect(80.0, 0.0, 80.0, 16.0)));
+    }
+
+    #[test]
     fn a_framed_box_stated_three_rows_tall_keeps_its_border_around_a_text() {
         // A specimen on a pressable stage: a 76pt box framed on every side
         // around one label (and a circle cut by it). It is a box, not a
