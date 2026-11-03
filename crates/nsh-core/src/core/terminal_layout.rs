@@ -1951,6 +1951,11 @@ fn split_line(
         }
     }
     let total = used(items, &before);
+    // What overflows a known main size (a negative free space) still
+    // moves the items for `end` and `center`, as CSS's unsafe alignment:
+    // an axis's end label in a window of no width ends at the window's
+    // end, inside the plot, rather than passing it.
+    let overflow = known_main.map_or(0, |b| (b - total).min(0));
     let mut free = known_main.map_or(0, |b| (b - total).max(0));
     // `auto` margins take the space left first, shared equally (a box
     // centered by `margin: auto`), as CSS's.
@@ -1974,8 +1979,8 @@ fn split_line(
     };
     // Flex: where the space left goes.
     let (lead, between, between_extra) = match spec.justify {
-        J::End | J::FlexEnd => (free, 0, 0),
-        J::Center => (free / 2, 0, 0),
+        J::End | J::FlexEnd => (free + overflow, 0, 0),
+        J::Center => (free / 2 + overflow / 2, 0, 0),
         J::SpaceBetween if n > 1 => (0, free / (n - 1), free % (n - 1)),
         J::SpaceAround => {
             let unit = free / n;
