@@ -39,6 +39,21 @@ pub(crate) fn columns_in(width: Points, cell: Points) -> usize {
 /// view's own size is one Cell, stretched by its parent (a slider's or a
 /// progress bar's width is the app's).
 pub(crate) fn line(content: impl Fn(usize) -> String + 'static) -> View {
+    line_colored(content, None)
+}
+
+/// A [`rule`] across the view's width in the theme's border color: the
+/// line a terminal draws between two parts a GUI sets apart with a border
+/// (a command's search field and its rows).
+pub(crate) fn rule_line() -> View {
+    line_colored(rule, Some(|| crate::theme::theme().border))
+}
+
+/// A [`line`], its glyphs in `color` when one is given.
+fn line_colored(
+    content: impl Fn(usize) -> String + 'static,
+    color: Option<fn() -> AdaptiveColor>,
+) -> View {
     // A Cell's width, as the terminal's text engine measures one glyph.
     let cell = measure_text("", "0");
     let columns = signal(0usize);
@@ -59,7 +74,8 @@ pub(crate) fn line(content: impl Fn(usize) -> String + 'static) -> View {
                 .right(px(0.0))
                 .number_of_lines(1u32)
                 .text_overflow(EllipsizeMode::Clip)
-                .pointer_events(PointerEvents::None),
+                .pointer_events(PointerEvents::None)
+                .when_some(color, |t, color| t.text_color(move || color())),
         )
 }
 
@@ -191,6 +207,10 @@ pub const RADIO_UNCHECKED: Mark = [("(", Tone::Muted), (" ", Tone::Muted), (")",
 pub const SWITCH_ON: Mark = [("", Tone::Text), ("━━", Tone::Accent), ("●", Tone::Strong)];
 /// An off switch: the knob at the start and the track, muted.
 pub const SWITCH_OFF: Mark = [("●", Tone::Muted), ("──", Tone::Muted), ("", Tone::Muted)];
+/// A color area's picked Cell.
+pub const AREA_PICKED: &str = "◆";
+/// A color swatch by itself: four Cells of its color.
+pub const SWATCH: &str = "    ";
 /// What separates a control's mark from its label: one Cell.
 pub const MARK_GAP: &str = " ";
 

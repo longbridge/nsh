@@ -183,6 +183,11 @@ pub struct AccessibilityState {
     /// The current item of a set (ARIA's `aria-current`): a pagination's
     /// page, a wizard's step.
     pub current: Option<AccessibilityCurrent>,
+    /// Opens a popup (ARIA's `aria-haspopup`): a menu's, a popover's or a
+    /// select's trigger, whose `expanded` says whether the popup is open;
+    /// an `expanded` element without it is a disclosure, which shows its
+    /// content in place (a collapsible's or an accordion's trigger).
+    pub has_popup: bool,
 }
 
 /// The value of a range or textual element (`accessibilityValue`).

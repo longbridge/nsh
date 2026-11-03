@@ -1063,6 +1063,13 @@ pub fn Command(props: CommandProps, cx: Scope<CommandEvent>) -> impl IntoElement
                 .child(props.search_suffix.place(|e| e))
         },
     );
+    // A terminal draws a rule under the field: the GUI's border under the
+    // search bar is no Cell there, and the query would run into the
+    // first row.
+    let rule = when(
+        move || crate::terminal::is_terminal() && props.searchable.get(),
+        crate::terminal::rule_line,
+    );
     // The field went: its focus too.
     effect(move || {
         if !props.searchable.get() {
@@ -1117,6 +1124,7 @@ pub fn Command(props: CommandProps, cx: Scope<CommandEvent>) -> impl IntoElement
         .on_blur(move || root_focused.set(false))
         .child(props.header.place(|e| e))
         .child(search)
+        .child(rule)
         .child(list)
         .child(empty)
         .child(props.footer.place(|e| e))

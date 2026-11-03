@@ -75,8 +75,12 @@ pub(crate) struct Ground {
     /// The step of the ramp under this point ([`LADDER`]'s index).
     pub(crate) level: usize,
     /// The terminal background drawn under this point: `Reset` on the
-    /// page, a step or an accent tint on a filled surface.
+    /// page, a step or an accent tint on a filled surface, a swatch's own
+    /// color.
     pub(crate) surface: Color,
+    /// Inside a swatch ([`swatch`]): text is black or white, whichever
+    /// reads on its color.
+    pub(crate) swatch: bool,
 }
 
 impl Ground {
@@ -93,6 +97,7 @@ impl Ground {
             ramp: None,
             level: 0,
             surface: Color::Reset,
+            swatch: false,
         }
     }
 
@@ -174,6 +179,9 @@ pub(crate) fn tone(color: nsh_core::Color, ground: Ground) -> Tone {
 /// foreground ([`Ramp::muted`], [`Ramp::faint`]) instead of dim.
 pub(crate) fn ink(color: nsh_core::Color, ground: Ground) -> Style {
     let plain = Style::new().remove_modifier(Modifier::HIDDEN);
+    if ground.swatch && !color.is_transparent() {
+        return plain.fg(swatch_text(ground)).remove_modifier(Modifier::DIM);
+    }
     match (tone(color, ground), ground.ramp) {
         (Tone::Hidden, _) => Style::new()
             .fg(Color::Reset)
@@ -509,6 +517,32 @@ pub(crate) fn paint(color: nsh_core::Color, ground: Ground) -> Style {
     Style::new()
         .fg(convert(rgb, ground.depth))
         .remove_modifier(Modifier::HIDDEN | Modifier::DIM)
+}
+
+/// A swatch's fill (a color picker's swatch or track Cell): its own
+/// color blended over `ground`, as an RGB triple and as the terminal color
+/// closest to it at the ground's depth. `None` when it is transparent or
+/// the terminal has no surfaces (the bandless look paints no fills).
+pub(crate) fn swatch(color: nsh_core::Color, ground: Ground) -> Option<(Rgb, Color)> {
+    if color.is_transparent() || ground.ramp.is_none() {
+        return None;
+    }
+    let [red, green, blue, alpha] = color.0.to_be_bytes();
+    let rgb = over_f32([red, green, blue], alpha, ground.rgb).map(|c| c.round() as u8);
+    Some((rgb, convert(rgb, ground.depth)))
+}
+
+/// The color text takes on a swatch (`ground.swatch`), whatever the app
+/// colored it: black on a light swatch, white on a dark one, at the
+/// terminal's depth.
+pub(crate) fn swatch_text(ground: Ground) -> Color {
+    let [red, green, blue] = ground.rgb.map(f32::from);
+    let rgb = if lightness(red, green, blue) >= 55.0 {
+        [0; 3]
+    } else {
+        [255; 3]
+    };
+    convert(rgb, ground.depth)
 }
 
 fn over_f32(top: Rgb, alpha: u8, under: Rgb) -> [f32; 3] {

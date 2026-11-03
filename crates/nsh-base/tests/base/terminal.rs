@@ -2,20 +2,24 @@
 //! terminal-native form, text the terminal draws (`nsh_base::terminal`),
 //! in place of the app's indicator parts; elsewhere they show none of it.
 
+use std::time::Duration;
+
 use nsh_base::{
-    SelectItem, TreeItem, accordion, accordion_header, accordion_item, accordion_panel,
-    accordion_trigger, checkbox, progress, radio, radio_group, select, slider, switch,
+    ColorChannel, ColorPickerEvent, ColorSpace, SelectItem, TreeItem, accordion, accordion_header,
+    accordion_item, accordion_panel, accordion_trigger, checkbox, color_area, color_picker,
+    color_slider, color_swatch, progress, radio, radio_group, select, slider, switch,
     terminal::{self, PROGRESS_EIGHTHS, PROGRESS_EMPTY, SLIDER_FILL, SLIDER_TRACK},
     tree,
 };
 use nsh_core::{
     Size,
     element::Root,
+    geometry::point,
     platform::{Environment, Idiom, Os},
     prelude::*,
 };
 use nsh_engine::EngineConfig;
-use nsh_testing::Headless;
+use nsh_testing::{Headless, Screen};
 
 fn start<C: Component<Props = ()>>(idiom: Idiom) -> Headless {
     let viewport = Size::new(px(390.0), px(844.0));
@@ -261,4 +265,107 @@ fn triggers_disclosures_and_tree_rows_show_the_terminals_marks() {
     app.press("text:One").unwrap();
     app.wait_for("text:One details").unwrap();
     assert!(texts(&app).iter().any(|t| t == "▾ "));
+}
+
+/// A picker of `#3b82f6` (HSB hue 217) with an area, a hue slider and a
+/// swatch of the picked color; the color in hex as the app keeps it.
+#[component]
+fn Colors() -> impl IntoElement {
+    let color = signal(Hsla::from(rgb(0x3b82f6)));
+    let hex = signal(String::from("#3b82f6"));
+    view()
+        .child(
+            color_picker()
+                .value(move || Some(color.get()))
+                .on_change(move |e: &ColorPickerEvent| {
+                    if let ColorPickerEvent::Change(value, formatted) = e {
+                        color.set(*value);
+                        hex.set(formatted.to_string());
+                    }
+                })
+                .child(
+                    color_area()
+                        .accessibility_label("Area")
+                        .w(px(200.0))
+                        .h(px(200.0)),
+                )
+                .child(
+                    color_slider()
+                        .color_space(ColorSpace::Hsb)
+                        .channel(ColorChannel::Hue)
+                        .accessibility_label("Hue")
+                        .w(px(200.0)),
+                )
+                .child(color_swatch().accessibility_label("Current")),
+        )
+        .child(text(move || format!("Color {}", hex.get())))
+}
+
+/// The hue slider's track, its glyphs joined from the start.
+fn hue_track(screen: &Screen) -> String {
+    screen
+        .texts()
+        .into_iter()
+        .filter(|t| !t.is_empty() && t.chars().all(|c| ['━', '●', '─'].contains(&c)))
+        .collect()
+}
+
+#[test]
+fn a_color_slider_is_a_row_of_its_colors_with_a_thumb() {
+    let mut app = start::<Colors>(Idiom::Terminal);
+    let track = hue_track(app.screen());
+    let columns = track.chars().count();
+    assert!(columns > 2, "{track:?}");
+    // One thumb, on the Cell of 217 of 360, `━` before it and `─` after.
+    let at = terminal::track_cell(Percentage(217.0 / 360.0), columns);
+    let expected: String = (0..columns)
+        .map(|i| match i.cmp(&at) {
+            std::cmp::Ordering::Less => '━',
+            std::cmp::Ordering::Equal => '●',
+            std::cmp::Ordering::Greater => '─',
+        })
+        .collect();
+    assert_eq!(track, expected);
+    // The slider is one adjustable control; its Cells are pictures hidden
+    // from screen readers.
+    assert_eq!(app.screen().count("label:Hue").unwrap(), 1);
+    // A drag to the start picks the smallest hue, its thumb on the first
+    // Cell; End the largest, on the last.
+    app.drag("label:Hue", point(px(-400.0), px(0.0))).unwrap();
+    let wait = Duration::from_secs(1);
+    app.wait_until("the thumb at the start", wait, |s| {
+        hue_track(s).starts_with('●')
+    })
+    .unwrap();
+    app.press_key("end").unwrap();
+    app.wait_until("the thumb at the end", wait, |s| {
+        hue_track(s).ends_with('●')
+    })
+    .unwrap();
+}
+
+#[test]
+fn a_color_area_is_a_grid_of_cells_with_the_picked_one_marked() {
+    let mut app = start::<Colors>(Idiom::Terminal);
+    let picked = |app: &Headless| {
+        texts(app)
+            .iter()
+            .filter(|t| t.as_str() == terminal::AREA_PICKED)
+            .count()
+    };
+    assert_eq!(picked(&app), 1, "{:?}", texts(&app));
+    // A press at the area's top left: no saturation, full brightness.
+    app.press_at("label:Area", point(px(1.0), px(1.0))).unwrap();
+    app.wait_for("text:Color #ffffff").unwrap();
+    assert_eq!(picked(&app), 1);
+    // The swatch: four Cells of the color by itself.
+    assert!(shows_exactly(&app, terminal::SWATCH), "{:?}", texts(&app));
+}
+
+#[test]
+fn outside_a_terminal_the_color_parts_draw_no_cells() {
+    let app = start::<Colors>(Idiom::Desktop);
+    let shown = joined(&app);
+    assert!(!shown.contains(terminal::AREA_PICKED), "{shown:?}");
+    assert!(!shown.contains('●'), "{shown:?}");
 }

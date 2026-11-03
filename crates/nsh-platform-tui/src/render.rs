@@ -343,6 +343,21 @@ impl Painter<'_> {
                 Surface::Raised | Surface::Sunken => ramp.level(ground.level),
             };
         }
+        // A view in the image role is a picture, which keeps its colors:
+        // its fill is its own color at the terminal's depth, not a step of
+        // the ramp (a color picker's swatches and track Cells).
+        let swatch = (view.props.accessibility.role == AccessibilityRole::Image)
+            .then(|| palette::swatch(fill, parent))
+            .flatten();
+        if filled != Surface::None {
+            ground.swatch = false;
+        }
+        if let Some((rgb, color)) = swatch {
+            ground.rgb = rgb;
+            ground.level = parent.level;
+            ground.surface = color;
+            ground.swatch = true;
+        }
         // The layout decides where a border is: the core sends a width
         // only for the sides it gave a Cell (a card's), none on controls,
         // boxes of text or small boxes. A filled surface's band is its
@@ -530,11 +545,14 @@ impl Painter<'_> {
                 let room = (inner.right - inner.left).max(0);
                 // An icon-only popup trigger (a split button's chevron, a
                 // menu's) shows which way its popup opens, set apart from
-                // a label beside it; its name stays its accessible name.
-                let label = match view.props.accessibility.state.expanded {
-                    Some(true) => "▴",
-                    Some(false) => "▾",
-                    None => label.as_str(),
+                // a label beside it, and an icon-only disclosure whether
+                // it is open; its name stays its accessible name.
+                let state = view.props.accessibility.state;
+                let label = match (state.expanded, state.has_popup) {
+                    (Some(true), true) => "▴",
+                    (Some(false), true) | (Some(true), false) => "▾",
+                    (Some(false), false) => "▸",
+                    (None, _) => label.as_str(),
                 };
                 if i32::from(x) == inner.left && i32::from(y) == inner.top {
                     let drawn = dialog::put(
@@ -676,6 +694,19 @@ impl Painter<'_> {
                     }
                 }
             }
+        }
+        // A disclosure (it expands in place, no popup) says which way it
+        // goes before its label, as the terminal's own disclosures do.
+        if let Some(open) = disclosure(view)
+            && !inner_visible.is_empty()
+        {
+            let focused = view.states & state::FOCUSED != 0;
+            let look = match (focused, ground.ramp) {
+                (true, _) => (ACCENT, Modifier::empty()),
+                (false, Some(ramp)) => (ramp.muted(), Modifier::empty()),
+                (false, None) => (Color::Reset, Modifier::DIM),
+            };
+            mark_disclosure(self.buffer, inner_visible, open, look);
         }
         if !visible.is_empty() {
             let marks = Marks {
@@ -1005,6 +1036,7 @@ fn text(
                     let style = ink(color, ground);
                     (style.fg.unwrap_or(Color::Reset), style.add_modifier)
                 }
+                None if ground.swatch => (palette::swatch_text(ground), Modifier::empty()),
                 None => (Color::Reset, Modifier::empty()),
             };
             modifier |= glyph.modifiers();
@@ -1450,7 +1482,11 @@ fn mark_surface(
         return;
     }
     // A trigger whose popup or menu is open stands raised.
-    if !popup && pressable(view) && view.props.accessibility.state.expanded == Some(true) {
+    if !popup
+        && pressable(view)
+        && view.props.accessibility.state.has_popup
+        && view.props.accessibility.state.expanded == Some(true)
+    {
         band(buffer, visible, step(palette::RAISED), own);
     }
     if tab {
@@ -1489,6 +1525,47 @@ fn mark_surface(
     } else if hovered && !selected {
         band(buffer, visible, step(HOVER), own);
     }
+}
+
+/// Whether `view` is a disclosure, and open: a pressable view whose
+/// `expanded` is set that opens no popup (a collapsible's or an
+/// accordion's trigger).
+fn disclosure(view: &NshView) -> Option<bool> {
+    let state = view.props.accessibility.state;
+    state
+        .expanded
+        .filter(|_| !state.has_popup && pressable(view))
+}
+
+/// The glyphs a disclosure starts with: a trigger that draws one of its
+/// own (`nsh-base`'s accordion and tree rows) gets no second.
+const DISCLOSURE_GLYPHS: [&str; 6] = ["▸", "▾", "▴", "▶", "▼", "▲"];
+
+/// Marks a disclosure: `▾` open, `▸` closed, in `look`, two Cells before
+/// the first glyph of its first drawn row (one when only one is free), in
+/// `rect`'s blank Cells; nothing when there is no room or the label
+/// already starts with a disclosure.
+fn mark_disclosure(buffer: &mut Buffer, rect: Rect, open: bool, (fg, modifier): (Color, Modifier)) {
+    let Some((first, y)) = (rect.y..rect.bottom()).find_map(|y| {
+        (rect.x..rect.right())
+            .find(|&x| buffer[(x, y)].symbol() != " ")
+            .map(|x| (x, y))
+    }) else {
+        return;
+    };
+    if DISCLOSURE_GLYPHS.contains(&buffer[(first, y)].symbol()) {
+        return;
+    }
+    let free = first - rect.x;
+    let x = match free {
+        0 => return,
+        1 => first - 1,
+        _ => first - 2,
+    };
+    let cell = &mut buffer[(x, y)];
+    cell.set_symbol(if open { "▾" } else { "▸" });
+    cell.fg = fg;
+    cell.modifier = (cell.modifier | modifier) - Modifier::BOLD - Modifier::REVERSED;
 }
 
 /// Changes each Cell of `rect` that shows a glyph.

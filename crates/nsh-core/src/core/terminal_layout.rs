@@ -513,7 +513,24 @@ fn decoration(tree: &impl Tree, node: NodeId) -> bool {
     }
     let style = tree.style(node);
     let small = |d: Dimension| length(d.into_raw()).is_some_and(|v| v < 16.0 - EPSILON);
-    style.flex_grow <= 0.0 && small(style.size.width) && small(style.size.height)
+    if style.flex_grow > 0.0 {
+        return false;
+    }
+    // A circle with nothing in it (a radio's ring, an avatar's
+    // placeholder): a terminal draws no circle, and its blank Cells would
+    // move what follows it by whether it holds a dot.
+    let (w, h) = (
+        length(style.size.width.into_raw()),
+        length(style.size.height.into_raw()),
+    );
+    let circle = match (w, h) {
+        (Some(w), Some(h)) => {
+            let role = tree.role(node);
+            !role.control && w.max(h) <= w.min(h) * 1.5 && role.radius * 2.0 >= w.min(h) - EPSILON
+        }
+        _ => false,
+    };
+    circle || (small(style.size.width) && small(style.size.height))
 }
 
 /// What a box is, as the algorithm sees it.

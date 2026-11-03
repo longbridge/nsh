@@ -830,6 +830,7 @@ pub fn DatePicker(props: DatePickerProps, cx: Scope<DatePickerEvent>) -> impl In
             .focusable(move || !props.disabled.get())
             .accessibility_state(move || AccessibilityState {
                 expanded: Some(open.get()),
+                has_popup: true,
                 disabled: props.disabled.get(),
                 ..AccessibilityState::default()
             })

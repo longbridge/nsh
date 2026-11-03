@@ -783,6 +783,9 @@ fn props_json(p: &ViewProps) -> String {
     if let Some(e) = a.state.expanded {
         let _ = write!(s, ",\"expanded\":{e}");
     }
+    if a.state.has_popup {
+        s.push_str(",\"hasPopup\":true");
+    }
     if let Some(p) = a.state.pressed {
         let _ = write!(s, ",\"pressed\":{}", json_str(&kebab(&format!("{p:?}"))));
     }

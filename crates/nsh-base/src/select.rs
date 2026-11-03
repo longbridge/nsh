@@ -630,6 +630,7 @@ pub fn Select(props: SelectProps, cx: Scope<SelectEvent>) -> impl IntoElement {
                 .focusable(move || !props.disabled.get())
                 .accessibility_state(move || AccessibilityState {
                     expanded: Some(open.get()),
+                    has_popup: true,
                     disabled: props.disabled.get(),
                     ..AccessibilityState::default()
                 })

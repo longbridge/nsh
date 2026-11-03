@@ -566,3 +566,98 @@ fn the_pane_holding_the_focus_shows_its_line_and_selection_in_the_accent() {
         "{rows:#?}"
     );
 }
+
+#[component]
+fn Swatches() -> impl IntoElement {
+    let swatch = |color: u32| {
+        view()
+            .w(px(16.0))
+            .h(px(16.0))
+            .role(AccessibilityRole::Image)
+            .bg(nsh_core::color::rgb(color))
+    };
+    view()
+        .flex_1()
+        .child(
+            view()
+                .flex_row()
+                .child(swatch(0xff0000))
+                .child(swatch(0x3b82f6))
+                .child(swatch(0x27272a)),
+        )
+        .child(
+            view()
+                .flex_row()
+                .child(swatch(0x1e3a8a).child(text("dk")))
+                .child(swatch(0xfde047).child(text("lt"))),
+        )
+        .child(text("ready"))
+}
+
+/// A surface with the test ramp's background and foreground that shows
+/// `depth`.
+fn surfaces_at(depth: ColorDepth) -> (AppView, crossbeam_channel::Receiver<()>) {
+    let (tx, rx) = crossbeam_channel::unbounded();
+    let mut options = AppOptions::default();
+    options.capabilities.colors = depth;
+    options.capabilities.background_color = Some([24; 3]);
+    options.capabilities.foreground_color = Some([224; 3]);
+    options.wake = Some(Arc::new(move || {
+        let _ = tx.send(());
+    }));
+    options.cache = nsh_engine::CacheOptions::off();
+    (AppView::new(options), rx)
+}
+
+fn draw_swatches(view: &mut AppView, rx: &crossbeam_channel::Receiver<()>) -> Buffer {
+    let mut terminal = Terminal::new(TestBackend::new(20, 4)).unwrap();
+    view.load(App::Rust(Root::new::<Swatches>(|| ()))).unwrap();
+    draw_until(view, &mut terminal, rx, "ready");
+    terminal.backend().buffer().clone()
+}
+
+#[test]
+fn a_swatch_is_its_own_color_with_text_in_black_or_white() {
+    let (mut view, rx) = surfaces();
+    let buffer = draw_swatches(&mut view, &rx);
+    let bgs: Vec<Color> = (0..6).map(|x| buffer[(x, 0)].bg).collect();
+    assert_eq!(
+        bgs,
+        [
+            Color::Rgb(255, 0, 0),
+            Color::Rgb(255, 0, 0),
+            Color::Rgb(59, 130, 246),
+            Color::Rgb(59, 130, 246),
+            Color::Rgb(39, 39, 42),
+            Color::Rgb(39, 39, 42),
+        ],
+        "each Cell is the app's color itself, not a ramp step or a tint"
+    );
+    let dark = row_of(&buffer, "dk");
+    assert_eq!(
+        buffer[(0, dark)].fg,
+        Color::Rgb(255, 255, 255),
+        "white on a dark swatch"
+    );
+    assert_eq!(
+        buffer[(2, dark)].fg,
+        Color::Rgb(0, 0, 0),
+        "black on a light one"
+    );
+
+    let (mut view, rx) = surfaces_at(ColorDepth::Ansi256);
+    let buffer = draw_swatches(&mut view, &rx);
+    assert_eq!(
+        buffer[(0, 0)].bg,
+        Color::Indexed(196),
+        "the nearest of 256 colors"
+    );
+
+    let (mut view, rx) = surface_with(ColorScheme::Dark, ColorDepth::TrueColor);
+    let buffer = draw_swatches(&mut view, &rx);
+    assert_eq!(
+        buffer[(0, 0)].bg,
+        Color::Reset,
+        "the bandless look paints no fill"
+    );
+}

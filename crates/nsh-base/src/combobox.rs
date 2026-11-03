@@ -546,6 +546,7 @@ pub fn Combobox(props: ComboboxProps, cx: Scope<ComboboxEvent>) -> impl IntoElem
         .optional_label(props.accessibility_label)
         .accessibility_state(move || AccessibilityState {
             expanded: Some(open.get()),
+            has_popup: true,
             disabled: props.disabled.get(),
             ..AccessibilityState::default()
         })

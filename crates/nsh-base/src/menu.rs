@@ -379,6 +379,7 @@ pub fn Menu(props: MenuProps, cx: Scope<MenuEvent>) -> impl IntoElement {
                 .element_ref(&anchor)
                 .accessibility_state(move || AccessibilityState {
                     expanded: Some(open.get()),
+                    has_popup: true,
                     ..AccessibilityState::default()
                 })
                 .on_press(move || toggle(!open.get_untracked(), OpenChangeReason::TriggerPress))
@@ -807,6 +808,7 @@ pub fn Submenu(props: SubmenuProps, cx: Scope<NoEvent>) -> impl IntoElement {
             .role(AccessibilityRole::Menuitem)
             .accessibility_state(move || AccessibilityState {
                 expanded: Some(open_sub.get() == Some(id)),
+                has_popup: true,
                 ..AccessibilityState::default()
             })
             .on_mouse_enter(move |_: &MouseEvent| open())
@@ -819,6 +821,7 @@ pub fn Submenu(props: SubmenuProps, cx: Scope<NoEvent>) -> impl IntoElement {
                 .role(AccessibilityRole::Menuitem)
                 .accessibility_state(move || AccessibilityState {
                     expanded: Some(open_sub.get() == Some(id)),
+                    has_popup: true,
                     ..AccessibilityState::default()
                 })
                 .on_mouse_enter(move |_: &MouseEvent| open())

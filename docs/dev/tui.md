@@ -369,7 +369,11 @@ draws, in order:
    component's terminal rendering; a control whose content is all left out (an icon button such as a `⋯` menu
    trigger) shows its accessibility label, trimmed, as its label: the layout gives it one row that wide, or narrower (at
    least three Cells) when its row is short of room, the label then cut and ending in `…`; an icon-only popup
-   trigger (a split button's chevron, a menu's) shows `▾` instead, `▴` while its popup is open. Content counts only when
+   trigger (a split button's chevron, a menu's: `accessibilityState.hasPopup`) shows `▾` instead, `▴` while its popup
+   is open, an icon-only disclosure `▸`, `▾` while open. A disclosure with a label (an `expanded` pressable without
+   `hasPopup`: a collapsible's trigger) gets `▸` / `▾` two Cells before its label's first glyph (one when only one is
+   free), muted, the accent while focused, unless its label starts with one (`nsh-base`'s accordion and tree rows
+   draw their own); only a popup's trigger stands raised while open. Content counts only when
    it draws: a wrapper around an icon the terminal leaves out is empty;
 5. its children, offset by a scroll view's offset (and sticky cells' shifts), clipped to the view's content box
    (inside its border) when it clips, scrolls or has a border; an anchored overlay is clipped only to the surface;
@@ -385,7 +389,13 @@ raised, one step above its ground's step (a fill inside a raised card is lighter
 saturated fill (a primary button, a badge) is its color mixed 20% into the step under it, its text the accent of
 its hue (the default foreground when the app's text is light), bold on a control. A filled view has no line:
 its band is its edge, unless the app's border stands out at least twice as far from the ground as the fill
-does. A run with its own background (a highlight, inline code) is a band the same way. A text field without a
+does. A view in the image role is a swatch of its color (the terminal draws no images, so the role is free to
+mean that): with surfaces its fill is its own color blended over its ground, at the terminal's depth
+(truecolor, else the nearest of 256 or 16), never a step, and its text is black or white, whichever reads on it
+(`palette::swatch`, `palette::swatch_text`); the bandless look paints no fill. A color picker's swatches and
+the Cells of its tracks are such views, inside the control that takes the press, so hover and focus bands leave
+the color alone. A run with its own background (a
+highlight, inline code) is a band the same way. A text field without a
 line or a fill of its own is a raised band (a search field). Bandless, fills draw nothing.
 
 **Nothing is drawn** for fills bandless, gradients, radii other than a border's corners, shadows,

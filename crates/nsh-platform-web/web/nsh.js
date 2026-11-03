@@ -2300,6 +2300,7 @@ class Player {
     set("aria-checked", p.checked);
     set("aria-busy", p.busy && "true");
     set("aria-expanded", p.expanded);
+    set("aria-haspopup", p.hasPopup && "true");
     set("aria-pressed", p.pressed);
     set("aria-current", p.current);
     set("aria-level", p.level);
