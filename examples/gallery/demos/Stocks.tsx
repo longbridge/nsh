@@ -363,13 +363,16 @@ function TerminalStockRow(props: { stock: Stock; onPress: () => void; wide?: boo
 
 /** The watchlist's width beside the stock in the desktop layout. */
 const WATCHLIST = 380;
+/** The least a terminal's stock keeps beside the watchlist: with less, the
+ * watchlist is the page and a stock is pushed over it, as on a phone. */
+const TERMINAL_DETAIL = 48 * TERMINAL_COLUMN;
 
 /** The watchlist: quotes that change every 50 ms under a one-line market
  * strip; sorted filters re-sort once a second with a layout animation. A
- * stock opens its details, pushed on phones, beside the list on desktops;
- * leaving the demo stops the market. */
+ * stock opens its details, pushed on phones and narrow terminals, beside
+ * the list on desktops; leaving the demo stops the market. */
 export function Stocks() {
-  const wide = desktop();
+  const wide = computed(() => desktop() && !(terminal && paneWidth() < WATCHLIST + TERMINAL_DETAIL));
   const market = createMarket();
   market.start();
   cleanup(() => market.stop());
@@ -426,7 +429,7 @@ export function Stocks() {
   const stats = () => market.stats();
   // Desktop: the stock beside the list.
   const shown = signal<Stock>(stocks[0]);
-  const watchlist = (
+  const watchlist = () => (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       <MarketStrip market={market} />
       <View style={terminal ? { paddingHorizontal: TERMINAL_COLUMN, paddingBottom: TERMINAL_ROW } : { paddingHorizontal: 16, paddingBottom: 6 }}>
@@ -439,18 +442,18 @@ export function Stocks() {
               terminal ? (
                 <TerminalStockRow
                   stock={stock()}
-                  onPress={() => (wide ? shown.set(stock()) : open(market, stock()))}
-                  wide={wide}
-                  active={wide && shown() === stock()}
+                  onPress={() => (wide() ? shown.set(stock()) : open(market, stock()))}
+                  wide={wide()}
+                  active={wide() && shown() === stock()}
                 />
               ) : (
                 <StockRow
                   market={market}
                   stock={stock()}
                   first={i() === 0}
-                  onPress={() => (wide ? shown.set(stock()) : open(market, stock()))}
-                  wide={wide}
-                  active={wide && shown() === stock()}
+                  onPress={() => (wide() ? shown.set(stock()) : open(market, stock()))}
+                  wide={wide()}
+                  active={wide() && shown() === stock()}
                 />
               )
             }
@@ -465,18 +468,25 @@ export function Stocks() {
       </Scroll>
     </View>
   );
-  if (!wide) return watchlist;
+  if (!desktop()) return watchlist();
   // The book and the tape go beside the chart when the stock has the room.
   const split = computed(() => paneWidth() - WATCHLIST >= 860);
+  // A terminal that narrows past the room for both keeps the list alone.
   return (
-    <View style={{ flex: 1, flexDirection: "row", backgroundColor: colors.background }}>
-      <View style={{ width: WATCHLIST, borderRightWidth: 1, borderRightColor: colors.line }}>{watchlist}</View>
-      <View style={{ flex: 1 }}>
-        {(() => {
-          const stock = shown();
-          return <StockView market={market} stock={stock} wide split={split} />;
-        })()}
-      </View>
+    <View style={{ flex: 1 }}>
+      {wide() ? (
+        <View style={{ flex: 1, flexDirection: "row", backgroundColor: colors.background }}>
+          <View style={{ width: WATCHLIST, borderRightWidth: 1, borderRightColor: colors.line }}>{watchlist()}</View>
+          <View style={{ flex: 1 }}>
+            {(() => {
+              const stock = shown();
+              return <StockView market={market} stock={stock} wide split={split} />;
+            })()}
+          </View>
+        </View>
+      ) : (
+        watchlist()
+      )}
     </View>
   );
 }
