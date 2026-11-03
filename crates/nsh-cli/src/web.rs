@@ -49,6 +49,7 @@ use crate::{
     ui,
 };
 
+mod compress;
 mod prune;
 mod split;
 
@@ -257,6 +258,8 @@ pub(crate) fn package(
         .as_deref(),
     });
     fs::write(dir.join("index.html"), html)?;
+    // What static hosts send browsers that accept it (`.br`, `.gz`).
+    compress::precompress(&dir)?;
     step.done(format!(
         "packaged {}{}",
         ui::path(&dir),
@@ -1167,6 +1170,7 @@ fn dir_size(dir: &Path) -> usize {
         .flatten()
         .map(|entry| match entry.file_type() {
             Ok(t) if t.is_dir() => dir_size(&entry.path()),
+            _ if compress::is_copy(&entry.path()) => 0,
             _ => entry.metadata().map_or(0, |m| m.len() as usize),
         })
         .sum()
