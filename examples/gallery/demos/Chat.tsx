@@ -487,6 +487,9 @@ export function Chat() {
     );
   };
 
+  // A terminal Cell is 8 pt wide.
+  const titleColumn = Math.max(...featured.map((f) => scenarios.find((x) => x.id === f.id)!.chip.length)) * 8 + 8;
+
   const empty = (
     <View style={{ ...column, flex: 1, justifyContent: "center", paddingHorizontal: 16, paddingVertical: 24, gap: 24 }}>
         <Appear>
@@ -501,6 +504,8 @@ export function Chat() {
         {/* The terminal lists the suggestions, a line each: four cards of
             a quarter's width would wrap their titles unevenly. */}
         <If when={terminal}>
+          {/* The notes in a column of their own, two Cells after the
+              longest title. */}
           <View>
             <Each of={featured}>
               {(f) => {
@@ -508,7 +513,7 @@ export function Chat() {
                 return (
                   <Press onPress={() => play(s.id)} accessibilityLabel={s.chip}>
                     <View style={{ flexDirection: "row", gap: 16 }}>
-                      <Text style={{ fontWeight: "600", color: colors.text }}>{s.chip}</Text>
+                      <Text style={{ width: titleColumn, fontWeight: "600", color: colors.text }}>{s.chip}</Text>
                       <Text style={{ flex: 1, color: colors.muted }}>{f().note}</Text>
                     </View>
                   </Press>

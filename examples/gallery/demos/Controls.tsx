@@ -445,11 +445,14 @@ function titles(count: number) {
 /** The terminal's labels' column, so the details after them line up. */
 const LABEL_WIDTH = 16 * TERMINAL_COLUMN;
 
+/** A terminal's name column for `names`: the longest of them (at least {@link LABEL_WIDTH}), so the details after it line up. */
+const labelColumn = (names: readonly string[]) => Math.max(LABEL_WIDTH, ...names.map((n) => n.length * TERMINAL_COLUMN));
+
 /** A label, and a quieter line under it (after it in the terminal). */
-function Label(props: { label: string; detail?: string }) {
+function Label(props: { label: string; detail?: string; width?: number }) {
   return (
     <View style={terminal ? { flex: 1, flexDirection: "row", gap: 2 * TERMINAL_COLUMN } : { flex: 1, gap: 2 }}>
-      <Text style={{ minWidth: terminal ? LABEL_WIDTH : undefined, flexShrink: 0, fontSize: size.label, color: colors.text }}>{props.label}</Text>
+      <Text style={{ minWidth: terminal ? (props.width ?? LABEL_WIDTH) : undefined, flexShrink: 0, fontSize: size.label, color: colors.text }}>{props.label}</Text>
       <If when={props.detail}>
         <Text style={{ numberOfLines: 1, flexShrink: 1, fontSize: size.detail, color: colors.muted }}>{props.detail}</Text>
       </If>
@@ -1829,7 +1832,7 @@ export function Controls(props: { show: Control }) {
             {(f, i) => (
               <View style={{ ...row(i() === 0), paddingVertical: 4 }}>
                 <IconTile name={f().icon} size={pointer ? 26 : 32} tint={colors.muted} />
-                <Label label={f().name} detail={detail(f())} />
+                <Label label={f().name} detail={detail(f())} width={labelColumn(DOWNLOADS.map((d) => d.name))} />
                 <Text style={{ fontSize: size.detail, color: colors.text, fontVariant: ["tabular-nums"] }}>{trailing(f())}</Text>
               </View>
             )}
@@ -3066,7 +3069,7 @@ export function Controls(props: { show: Control }) {
         >
           <View style={{ flexDirection: "row", alignItems: "center", gap: size.gap }}>
             <Icon name={props.icon} size={size.control} tint={colors.muted} />
-            <Label label={props.name} detail={props.size} />
+            <Label label={props.name} detail={props.size} width={labelColumn(FILES.map((f) => f.name))} />
             <View style={{ width: 40, height: 20, alignItems: "flex-end", justifyContent: "center" }}>
               <View style={{ ...centered, alignItems: "flex-end", opacity: away }}>
                 <Text style={{ fontSize: size.detail, color: colors.muted, fontVariant: ["tabular-nums"] }}>{`${props.value}%`}</Text>
