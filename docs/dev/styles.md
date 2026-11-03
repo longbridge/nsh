@@ -351,8 +351,8 @@ do (a text is one row per line).
   only (`Node::cell_border`), so the platform draws a border exactly where the layout reserved one; a control (a control's accessibility role, presses, a text input: `Core::is_control`) and a box of
   text never have one, nor does a round box (a circle: corners of half its explicit width or height or more, or `rounded-full`).
   Horizontal padding and margins are one Cell from 8pt and two from 24pt (at most one on a
-  control or a box of text); a side margin from 48pt is a gutter (a chart's room for its axis's labels), its width in
-  whole Cells; vertical padding is a row from 24pt, none on a control or a box of text. So a bordered
+  control or a box of text); the margins of a box of layers (all its content absolute: a chart, whose axes' labels
+  overflow it into them) are gutters of their size, whole Cells and rows, inside a bordered box too; vertical padding is a row from 24pt, none on a control or a box of text. So a bordered
   40pt button is one row, its label and a column each side, a badge is its text, and a card keeps its border without
   padding rows.
 - **Surfaces.** Where the terminal shows a fill as a band of its own color (`Environment::cell_surfaces`: 256 colors

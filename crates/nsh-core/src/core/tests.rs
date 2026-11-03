@@ -25087,15 +25087,42 @@ mod terminal_layout {
     }
 
     #[test]
-    fn a_wide_side_margin_is_a_gutter_of_its_width() {
-        // A chart 400pt wide keeping 58pt at its right for its axis's
-        // labels: seven Cells, not the two of spacing.
-        let mut ops = view(2, ROOT_ID, &[("alignSelf", V::Str("flex-start")), ("width", V::Number(400.0))]);
-        ops.extend(view(3, 2, &[("marginRight", V::Number(58.0)), ("height", V::Number(32.0))]));
-        ops.extend(view(10, 2, &[("marginRight", V::Number(24.0)), ("height", V::Number(32.0))]));
+    fn a_charts_margins_are_gutters_of_their_size() {
+        // A chart (a box of layers) 400pt wide keeping 58pt at its right
+        // and 21pt below for its axes' labels, in a bordered card: seven
+        // Cells and a row; a box of content keeps two Cells of spacing.
+        let mut ops = view(
+            2,
+            ROOT_ID,
+            &[
+                ("alignSelf", V::Str("flex-start")),
+                ("width", V::Number(400.0)),
+                ("borderWidth", V::Number(1.0)),
+            ],
+        );
+        ops.extend(view(
+            3,
+            2,
+            &[
+                ("marginRight", V::Number(58.0)),
+                ("marginBottom", V::Number(21.0)),
+                ("height", V::Number(32.0)),
+            ],
+        ));
+        ops.extend(view(
+            4,
+            3,
+            &[("position", V::Str("absolute")), ("left", V::Number(0.0)), ("top", V::Number(0.0))],
+        ));
+        ops.extend(text(5, 4, "41.83"));
+        ops.extend(view(10, 2, &[("marginRight", V::Number(58.0))]));
+        ops.extend(text(11, 10, "Below"));
         let batch = laid_out(ops);
-        assert_eq!(frame_of(&batch, 3).map(|f| f.size.width), Some(px(400.0 - 56.0)));
-        assert_eq!(frame_of(&batch, 10).map(|f| f.size.width), Some(px(400.0 - 16.0)));
+        let chart = frame_of(&batch, 3).unwrap();
+        let below = frame_of(&batch, 10).unwrap();
+        assert_eq!(chart.size.width, px(400.0 - 16.0 - 56.0), "{chart:?}");
+        assert_eq!(below.size.width, px(400.0 - 16.0 - 16.0), "{below:?}");
+        assert_eq!(below.origin.y, chart.origin.y + chart.size.height + px(16.0));
     }
 
     #[test]

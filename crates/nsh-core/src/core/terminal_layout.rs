@@ -343,10 +343,6 @@ fn nearest(value: f32) -> i32 {
     (units as i32) * if value < 0.0 { -1 } else { 1 }
 }
 
-/// A side margin from which it is a gutter, whole Cells of its width
-/// ([`margins`]), rather than spacing.
-const GUTTER: f32 = 48.0;
-
 /// Horizontal padding or margin of `points`: a Cell from 8pt, two from 24.
 fn space_x(points: f32) -> i32 {
     if points >= 24.0 - EPSILON {
@@ -680,8 +676,16 @@ fn insets(
         b: has(s.border.bottom),
     };
     let compact = !kind.container;
+    // A band of its own color around a text (a popup's box, which the
+    // painter frames outside it) keeps a column inside its edge from 4pt,
+    // as a surface does: its text never touches the band's edge or frame.
+    let band = !role.control
+        && !bordered
+        && self::surface(grid, role, tree.backdrop(node).unwrap_or(grid.page)).is_some();
     let px = |v: LengthPercentage| {
-        let c = space_x(lp(v, parent_width));
+        let p = lp(v, parent_width);
+        let c = space_x(p);
+        let c = if band && p >= 4.0 - EPSILON { c.max(1) } else { c };
         if compact { c.min(1) } else { c }
     };
     let py = |v: LengthPercentage| {
@@ -835,23 +839,46 @@ fn saturated(c: Color) -> bool {
 }
 
 /// A box's margins, in Cells (auto and negative margins are none),
-/// inside a bordered box or not (`framed`).
-fn margins(grid: Grid, style: &Style, parent_width: Option<f32>, framed: bool) -> Sides {
-    // From 48pt a side margin is a gutter (the room a chart keeps for its
-    // axis's labels beside it), not spacing: its Cells are its width.
+/// inside a bordered box or not (`framed`). Those of a box of layers (all
+/// its content absolute: a chart, whose axes' labels overflow it into its
+/// margins) are gutters, not spacing: their Cells and rows are their
+/// size, inside a bordered box too.
+fn margins(grid: Grid, style: &Style, parent_width: Option<f32>, framed: bool, layers: bool) -> Sides {
     let x = |v| {
-        lpa(v, parent_width).map_or(0, |p| match p >= GUTTER - EPSILON {
-            true => grid.cols(p),
+        lpa(v, parent_width).map_or(0, |p| match layers {
+            true => grid.cols(p).max(0),
             false => space_x(p),
         })
     };
-    let y = |v| lpa(v, parent_width).map_or(0, |p| space_between(p, framed));
+    let y = |v| {
+        lpa(v, parent_width).map_or(0, |p| match layers {
+            true => grid.rows(p).max(0),
+            false => space_between(p, framed),
+        })
+    };
     Sides {
         l: x(style.margin.left),
         r: x(style.margin.right),
         t: y(style.margin.top),
         b: y(style.margin.bottom),
     }
+}
+
+/// Whether `node` is a box of layers: it holds content, all of it
+/// absolutely placed (a chart's marks, axes and labels).
+fn layers(tree: &impl Tree, node: NodeId) -> bool {
+    let mut any = false;
+    for i in 0..tree.child_count(node) {
+        let child = tree.child(node, i);
+        if hidden(tree, child) {
+            continue;
+        }
+        if !tree.style(child).position.is_out_of_flow() {
+            return false;
+        }
+        any = true;
+    }
+    any
 }
 
 /// `value` within `min` and `max`.
@@ -1594,7 +1621,7 @@ fn arrange_flex(
             let style = tree.style(node);
             let m = style.margin;
             let auto = [m.left, m.right, m.top, m.bottom].map(|v| v.is_auto());
-            let mut margin = margins(grid, style, parent_w, framed);
+            let mut margin = margins(grid, style, parent_w, framed, layers(tree, node));
             if spec.fills
                 && let Some(t) = lpa(m.top, parent_w)
             {
@@ -2078,7 +2105,7 @@ fn place(
         }
     }
     let Insets { border, padding } = tree.insets(node);
-    let margin = margins(grid, tree.style(node), parent_w, tree.framed());
+    let margin = margins(grid, tree.style(node), parent_w, tree.framed(), layers(tree, node));
     let mut layout = Layout::with_order(order);
     layout.location = taffy::Point {
         x: grid.x(x),
@@ -2144,7 +2171,11 @@ fn place_absolute(
             Grid::rows,
         ),
     );
-    let (w, h) = measure(tree, grid, node, true, known, parent, parent);
+    // Its width fits what is beside it, its height is its content's
+    // unless both its vertical insets give one (a toast at the bottom of
+    // a stack that is as tall as its toasts measured, at first none).
+    let room = (Some(area.w), known.1);
+    let (w, h) = measure(tree, grid, node, true, known, room, parent);
     let style = tree.style(node);
     let inset = style.inset;
     let x = lpa(inset.left, pw)
