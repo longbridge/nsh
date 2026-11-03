@@ -19,6 +19,7 @@ import ModKeymap from "./mod-keymap";
 import ModMobile from "./mod-mobile";
 import ModPicker from "./mod-picker";
 import ModNotifications from "./mod-notifications";
+import ModShared from "./mod-shared";
 import ModSpeech from "./mod-speech";
 import ModStorage from "./mod-storage";
 
@@ -39,6 +40,7 @@ const cases: Record<string, () => JSX.Element> = {
   "mod-mobile": ModMobile,
   "mod-picker": ModPicker,
   "mod-notifications": ModNotifications,
+  "mod-shared": ModShared,
   "mod-speech": ModSpeech,
   "mod-storage": ModStorage,
 };

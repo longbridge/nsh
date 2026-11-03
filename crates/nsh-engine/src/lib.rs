@@ -1867,6 +1867,7 @@ impl<M: TextEngine + 'static> Driver<M> {
                             let _ = system_tx.send(Message::Wake);
                         }),
                         host: Rc::new(host_bridge),
+                        shared: driver.state.core.shared_store(),
                     }
                 };
                 #[cfg(not(any(

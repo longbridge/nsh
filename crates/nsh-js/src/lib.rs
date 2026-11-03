@@ -36,6 +36,7 @@ mod reactive;
 mod rejections;
 mod resource;
 mod sandbox;
+mod shared;
 mod standard;
 mod state;
 mod timers;

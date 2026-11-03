@@ -36,6 +36,8 @@ pub(crate) struct State {
     /// `nsh/host`: listeners, kept events and calls waiting for answers.
     pub(crate) host_channel: crate::host_channel::HostChannel,
     pub(crate) chunks: crate::chunks::Chunks,
+    /// `nsh/shared`: the store, this VM's subscriber and what it watches.
+    pub(crate) store: crate::shared::SharedJs,
     /// The native modules the context serves (the loader reads it).
     pub(crate) modules: ModuleTable,
 }
@@ -92,6 +94,7 @@ pub(crate) fn install(
             keymap: Default::default(),
             host_channel: Default::default(),
             chunks: Default::default(),
+            store: Default::default(),
             modules: ModuleTable::new(ui_sets),
         }));
         qjs::JS_SetContextOpaque(raw, state as *mut c_void);
@@ -128,6 +131,7 @@ pub(crate) fn uninstall(cx: &Ctx<'_>) {
         state.chunks.free_all();
         state.keymap.free_all();
         state.host_channel.free_all();
+        state.store.free_all();
         state.web.free_all();
         state.canvases.free_all(raw);
         state.animations.free_all(raw);

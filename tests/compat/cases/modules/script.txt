@@ -262,3 +262,35 @@ expect Calls: done
 expect Fps enabled: false
 covers [nsh] fpsEnabled
 covers [nsh] setFpsEnabled
+
+# mod-shared
+tap id:case-mod-shared
+# The surface's own store: a key and a prefix with no value yet, then each
+# change reaches the accessors at the next turn, a transaction's keys together.
+expect Count: none
+expect Rows: none
+tap id:set
+expect State: set 1 true
+expect Count: 1
+tap id:transaction
+expect State: transaction true
+expect Count: 2
+expect Rows: row/a=1,row/b=2
+tap id:remove
+expect Rows: row/b=2
+tap id:ping
+expect Heard: ping hi
+# A transaction that throws commits nothing; a function cannot be shared.
+tap id:throws
+expect State: threw no undefined
+tap id:bad
+expect State: bad TypeError
+covers [nsh/shared] signal
+covers [nsh/shared] prefix
+covers [nsh/shared] get
+covers [nsh/shared] set
+covers [nsh/shared] remove
+covers [nsh/shared] transaction
+covers [nsh/shared] version
+covers [nsh/shared] emit
+covers [nsh/shared] on

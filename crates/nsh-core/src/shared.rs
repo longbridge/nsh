@@ -693,13 +693,19 @@ struct Watched<T: 'static> {
 /// A prefix's keys and values.
 type PrefixMap = Arc<BTreeMap<Arc<str>, SharedValue>>;
 
+/// What runs with an event's value.
+type Listener = Rc<dyn Fn(&SharedValue)>;
+
+/// A topic's listeners: (id, function), oldest first.
+type Listeners = Vec<(u64, Listener)>;
+
 /// An engine's side of its store: its subscriber, the signals of what it
 /// watches, and a task the subscriber wakes, which writes them.
 pub(crate) struct Client {
     sub: Subscriber,
     keys: RefCell<FxHashMap<Arc<str>, Watched<Option<SharedValue>>>>,
     prefixes: RefCell<FxHashMap<Arc<str>, Watched<PrefixMap>>>,
-    listeners: RefCell<FxHashMap<Arc<str>, Vec<(u64, Rc<dyn Fn(&SharedValue)>)>>>,
+    listeners: RefCell<FxHashMap<Arc<str>, Listeners>>,
     next_listener: Cell<u64>,
 }
 
@@ -811,7 +817,7 @@ impl Client {
         }
     }
 
-    fn listen(&self, topic: Arc<str>, f: Rc<dyn Fn(&SharedValue)>) -> u64 {
+    fn listen(&self, topic: Arc<str>, f: Listener) -> u64 {
         let id = self.next_listener.get();
         self.next_listener.set(id + 1);
         let mut listeners = self.listeners.borrow_mut();
@@ -876,7 +882,7 @@ impl Client {
                 }
             }
         }
-        let listeners: Vec<(Rc<dyn Fn(&SharedValue)>, SharedValue)> = {
+        let listeners: Vec<(Listener, SharedValue)> = {
             let listeners = self.listeners.borrow();
             events
                 .into_iter()
