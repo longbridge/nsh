@@ -1208,6 +1208,45 @@ mod tests {
         });
     }
 
+    /// A picture of what is behind a view leaves out the widgets its
+    /// ancestors host after it (a text field, navigation's layers), as it
+    /// leaves out the views after it.
+    #[test]
+    fn what_is_behind_a_view_leaves_out_widgets_hosted_above_it() {
+        gtk_test::run(|| {
+            let surface = gtk_test::surface();
+            let parent = add(&surface, 2, ROOT_ID, frame(0.0, 0.0, 100.0, 100.0));
+            let glass = add(&surface, 4, 2, frame(10.0, 10.0, 20.0, 20.0));
+            let hosted = gtk::DrawingArea::new();
+            hosted.set_draw_func(|_, cx, _, _| {
+                cx.set_source_rgb(1.0, 0.0, 0.0);
+                let _ = cx.paint();
+            });
+            parent.set_native(&hosted, frame(60.0, 60.0, 30.0, 30.0));
+            let window = gtk_test::show(&surface);
+            assert!(
+                gtk_test::wait_until(|| hosted.width() > 0),
+                "the views are laid out"
+            );
+            let area = graphene::Rect::new(60.0, 60.0, 30.0, 30.0);
+            // Whether the surface drawn anew up to `view` (all of it for
+            // `None`), as a picture of what is behind it is, shows the
+            // hosted widget.
+            let shows = |view: Option<&NshView>| {
+                let snapshot = gtk::Snapshot::new();
+                TRACE.with(|t| *t.borrow_mut() = Some((view.cloned(), false)));
+                surface.root.draw(&snapshot);
+                TRACE.with(|t| *t.borrow_mut() = None);
+                snapshot
+                    .to_node()
+                    .is_some_and(|node| node.bounds().intersection(&area).is_some())
+            };
+            assert!(shows(None), "the whole surface");
+            assert!(!shows(Some(&glass)), "what is behind the view");
+            window.destroy();
+        });
+    }
+
     /// Without a GPU device an effect and a screen effect draw their
     /// children as they are, and so does a transition that would run.
     #[test]
