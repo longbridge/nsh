@@ -1216,6 +1216,12 @@ frame text:Italic 18 2 47 17
 prop id:bold focusable false
 tap id:lock
 frame text:Bold 38 2 31 17
+# `hitSlop`: presses count this far outside the toggle, one number for
+# every side or the sides named, following a signal; none without it.
+prop id:pin hitSlop top=12 right=12 bottom=12 left=12
+tap label:Pin
+prop id:pin hitSlop top=4 left=2
+prop id:favorite hitSlop {}
 covers [nsh/base] Toggle
 covers [nsh/base] ToggleGroup
 covers [props] Toggle.pressed
