@@ -143,8 +143,8 @@ pub(crate) fn package(
             .collect();
         let split = split::split(&linkable, &keep, &lazy)?;
         for side in &split.sides {
-            let file = side.name.strip_prefix("nsh_").unwrap_or(&side.name);
-            let url = site.add(&format!("nsh-{file}.wasm"), &side.bytes)?;
+            let file = side_file_name(&side.name);
+            let url = site.add(&format!("{file}.wasm"), &side.bytes)?;
             let mut entry = serde_json::json!({ "url": url, "needs": side.needs });
             if let Some(gate) = &side.gate {
                 entry["gate"] = gate.as_str().into();
@@ -1779,4 +1779,18 @@ mod tests {
         assert_eq!(json["display"], "standalone");
         assert_eq!(json["icons"][0]["sizes"], "192x192");
     }
+}
+
+/// The file name (without extension) of a side module named `name`: what
+/// it holds, in kebab case, without the gate's kind (`nsh_part_rich_editor`
+/// -> `mod-rich-editor`); an app's UI set keeps `app-` so it never meets one
+/// of NSH's.
+fn side_file_name(name: &str) -> String {
+    let short = ["nsh_part_", "nsh_std_", "nsh_feature_"]
+        .iter()
+        .find_map(|p| name.strip_prefix(p))
+        .map(str::to_owned)
+        .or_else(|| name.strip_prefix("nsh_ui_set_").map(|s| format!("app_{s}")))
+        .unwrap_or_else(|| name.strip_prefix("nsh_").unwrap_or(name).to_owned());
+    format!("mod-{}", short.replace('_', "-"))
 }
