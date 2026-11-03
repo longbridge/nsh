@@ -1,8 +1,8 @@
 // A case of the API's test suite (docs/dev/compatibility.md): a web view's
 // ref giving its page trusted input with `sendInput`, which the macos
 // domain's capabilities grant (`webview.input`), and `WebView.inputAvailable()`
-// saying so (macOS delivers it). A script cannot observe a ref's commands;
-// the case checks that the calls of each form are made.
+// reporting no support in the headless backend. A script cannot observe
+// a ref's commands; the case checks that the calls of each form are made.
 import { Text, View, WebView, signal } from "nsh";
 
 function App() {
