@@ -1585,9 +1585,11 @@ fn a_secondary_click_on_a_drag_area_reaches_its_on_context_menu(cx: &mut TestApp
     let code = nsh_bundler::compile_module("App.tsx", DRAG_AREA_MENU, &[]).unwrap();
     let (view, cx) = owned_view(cx, code, |_| {});
     wait_for(&view, cx, "-");
-    // Not the window menu (Linux): the view's own menu.
+    // Not the window menu (Linux): the view's own menu. The surface starts
+    // below the platform's title bar (macOS, Windows).
+    let (x, y) = view.read_with(cx, |view, _| view.surface().origin.get());
     let (position, button, modifiers) = (
-        gpui::point(gpui::px(30.0), gpui::px(25.0)),
+        gpui::point(gpui::px(x + 30.0), gpui::px(y + 25.0)),
         gpui::MouseButton::Right,
         gpui::Modifiers::default(),
     );
