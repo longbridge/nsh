@@ -2458,7 +2458,15 @@ fn split_line(
         _ => (0, 0, 0),
     };
     let extent = known_main.unwrap_or(total);
-    // Across: each child's own size at its main size, or the line's.
+    // Across: each child's own size at its main size, or the line's. A
+    // box of no size across (a label's point at a bar's end or a plot's
+    // value) lays its children out past its edges, as CSS's: they keep
+    // their own size, placed by their alignment on the point (a text
+    // above an upright bar's end ends there), rather than squeezed into
+    // no row at all.
+    let cross_point = known_cross == Some(0);
+    let known_cross = known_cross.filter(|_| !cross_point);
+    let room_cross = room_cross.filter(|_| !cross_point);
     let mut line_cross = 0;
     for item in items.iter_mut() {
         let (cs, ce) = item.margin_cross(row);
@@ -2487,11 +2495,15 @@ fn split_line(
         item.cross = cross;
         line_cross = line_cross.max(cross + cs + ce);
     }
-    let line_cross = known_cross.unwrap_or(line_cross);
+    let line_cross = if cross_point {
+        0
+    } else {
+        known_cross.unwrap_or(line_cross)
+    };
     let mut at = lead;
     for (i, item) in items.iter_mut().enumerate() {
         let (cs, ce) = item.margin_cross(row);
-        if item.stretches {
+        if item.stretches && !cross_point {
             item.cross = (line_cross - cs - ce).max(0);
         }
         let (auto_start, auto_end) = item.auto_main(row);

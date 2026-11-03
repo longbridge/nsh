@@ -25044,6 +25044,43 @@ mod terminal_layout {
     }
 
     #[test]
+    fn a_label_on_a_point_keeps_its_row() {
+        // A plot's label: a point of no size (absolute, 0 × 0) at a bar's
+        // end, a row whose text keeps its size. Its row is
+        // its own, not the point's none: above the point for an upright
+        // bar (`align-items: flex-end`), below it for a tag (`flex-start`),
+        // centered along the point as CSS's unsafe alignment.
+        let label = |align: &'static str| {
+            let mut ops = view(
+                2,
+                ROOT_ID,
+                &[("width", V::Number(320.0)), ("height", V::Number(160.0))],
+            );
+            ops.extend(view(
+                3,
+                2,
+                &[
+                    ("position", V::Str("absolute")),
+                    ("left", V::Number(80.0)),
+                    ("top", V::Number(96.0)),
+                    ("width", V::Number(0.0)),
+                    ("height", V::Number(0.0)),
+                    ("flexDirection", V::Str("row")),
+                    ("justifyContent", V::Str("center")),
+                    ("alignItems", V::Str(align)),
+                ],
+            ));
+            ops.extend(text(4, 3, "42"));
+            laid_out(ops)
+        };
+        let above = label("flex-end");
+        assert_eq!(frame_of(&above, 3), Some(rect(80.0, 96.0, 0.0, 0.0)));
+        assert_eq!(frame_of(&above, 4), Some(rect(-8.0, -16.0, 16.0, 16.0)));
+        let below = label("flex-start");
+        assert_eq!(frame_of(&below, 4), Some(rect(-8.0, 0.0, 16.0, 16.0)));
+    }
+
+    #[test]
     fn a_box_of_absolute_children_keeps_its_explicit_height() {
         // A table's header: 32pt high, its one cell absolute in it.
         let mut ops = view(
