@@ -2,6 +2,10 @@
 //! layered and inset box shadows, gradient backgrounds, outlines, a
 //! brightness veil and backdrop blur.
 //!
+//! Bottom to top, as CSS stacks them: outer shadows, the backdrop blur, the
+//! background color (moved to a fill layer above the blur: `decor`),
+//! gradients, inset shadows, the children, then the outline and the veil.
+//!
 //! CSS draws a box shadow only outside the box, so outer shadow layers are
 //! masked to everything but the box: they can sit above the view's own
 //! background (sublayers always draw over a layer's contents) without
@@ -29,6 +33,8 @@ use crate::decor::{cg_color, inset, rounded};
 
 /// Shadows sit below the background and the children.
 const SHADOW_Z: CGFloat = -2048.0;
+/// Backdrop blurs sit below the background.
+const BACKDROP_Z: CGFloat = -1024.0 - 0.5;
 /// Gradients sit above the background color, below borders.
 const GRADIENT_Z: CGFloat = -1024.0 + 0.25;
 /// Inset shadows sit above backgrounds, below borders.
@@ -139,6 +145,16 @@ fn blur_animator(
     // The material blurs by about 30 points at full strength.
     animator.setFractionComplete((spec.radius / 30.0).clamp(0.05, 1.0) as CGFloat);
     animator
+}
+
+/// Whether `style` draws a backdrop: a blur, or glass where UIKit has it.
+pub(crate) fn has_backdrop(style: &ViewStyle) -> bool {
+    (style.glass_effect != GlassEffect::None && AnyClass::get(c"UIGlassEffect").is_some())
+        || style.effects.as_ref().is_some_and(|e| {
+            e.backdrop_filters
+                .iter()
+                .any(|f| matches!(*f, Filter::Blur(r) if r.0 > 0.0))
+        })
 }
 
 /// Whether `style` has effects that draw outside the box (they need an
@@ -537,6 +553,9 @@ impl Visual {
                 None => Some(blur_animator(effect_view.clone(), spec, mtm)),
             };
             view.insertSubview_atIndex(&effect_view, 0);
+            // Below the background's fill layer and every effect, which are
+            // sublayers of the same layer.
+            effect_view.layer().setZPosition(BACKDROP_Z);
             self.backdrop = Some(Backdrop {
                 view: effect_view,
                 animator,
