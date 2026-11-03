@@ -839,10 +839,12 @@ fn visible_target(tree: &Mounter, mut id: NodeId) -> bool {
 pub(crate) struct BarDrag {
     node: NodeId,
     vertical: bool,
-    track: Rect,
-    thumb: u16,
+    /// The whole track along its axis, past the screen too (start, Cells).
+    extent: (i32, i32),
+    /// The thumb's Cells.
+    thumb: i32,
     /// Where the pointer holds the thumb, in Cells from its start.
-    grab: u16,
+    grab: i32,
 }
 
 impl BarDrag {
@@ -860,26 +862,16 @@ impl BarDrag {
         let bar = bars.iter().rev().find(|bar| {
             bar.track.contains(at) && crate::keyboard::contains(tree, scope, bar.node)
         })?;
-        let along = |rect: Rect| {
-            if bar.vertical {
-                (rect.y, rect.height)
-            } else {
-                (rect.x, rect.width)
-            }
-        };
-        let p = if bar.vertical { at.y } else { at.x };
-        let (thumb_start, thumb) = along(bar.thumb);
+        let p = i32::from(if bar.vertical { at.y } else { at.x });
+        let (thumb_start, thumb) = bar.thumb_extent;
+        let thumb = thumb.max(1);
         let on_thumb = bar.thumb.contains(at);
         let drag = BarDrag {
             node: bar.node,
             vertical: bar.vertical,
-            track: bar.track,
-            thumb: thumb.max(1),
-            grab: if on_thumb {
-                p - thumb_start
-            } else {
-                thumb.max(1) / 2
-            },
+            extent: bar.extent,
+            thumb,
+            grab: if on_thumb { p - thumb_start } else { thumb / 2 },
         };
         if !on_thumb {
             drag.moved(mouse, tree);
@@ -900,12 +892,10 @@ impl BarDrag {
         }
         let max = scroll.max(view.frame.size);
         let max = if self.vertical { max.y } else { max.x };
-        let (start, len) = if self.vertical {
-            (self.track.y, self.track.height)
-        } else {
-            (self.track.x, self.track.width)
-        };
-        let free = len.saturating_sub(self.thumb);
+        // The thumb moves along the whole track, as it is drawn: a view
+        // the screen cuts off keeps the Cells past its edge.
+        let (start, len) = self.extent;
+        let free = (len - self.thumb).max(0);
         if free == 0 || max <= Points::ZERO {
             return false;
         }
@@ -914,9 +904,8 @@ impl BarDrag {
         } else {
             mouse.column
         };
-        let moved =
-            (i32::from(p) - i32::from(start) - i32::from(self.grab)).clamp(0, i32::from(free));
-        let to = max * (moved as f32 / f32::from(free));
+        let moved = (i32::from(p) - start - self.grab).clamp(0, free);
+        let to = max * (moved as f32 / free as f32);
         crate::keyboard::move_scroll(tree, self.node, to) != Points::ZERO
     }
 }

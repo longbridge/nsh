@@ -21,6 +21,12 @@ pub(crate) struct ScrollBar {
     pub(crate) thumb: Rect,
     /// Along the vertical axis (else the horizontal one).
     pub(crate) vertical: bool,
+    /// Where the whole track starts along its axis and how many Cells it
+    /// has, clipped or not: a bar whose view runs past the screen places
+    /// its thumb on all of them, and a drag must too.
+    pub(crate) extent: (i32, i32),
+    /// Where the whole thumb starts along the axis and its Cells.
+    pub(crate) thumb_extent: (i32, i32),
 }
 
 /// The bar of the scroll view `node` (`scroll`, its view `size`) whose
@@ -98,6 +104,8 @@ pub(crate) fn bar(
         track,
         thumb: thumb.clipped(clip),
         vertical,
+        extent: (start, length),
+        thumb_extent: (thumb_start, thumb_length),
     })
 }
 
@@ -135,6 +143,19 @@ mod tests {
         assert_eq!(top.thumb, Rect::new(9, 0, 1, 3));
         let end = bar(1, &scroll(480.0), size, inner(), clip).unwrap();
         assert_eq!(end.thumb, Rect::new(9, 7, 1, 3));
+    }
+
+    #[test]
+    fn a_bar_the_screen_cuts_keeps_its_whole_track_for_drags() {
+        let size = Size::new(Points(80.0), Points(160.0));
+        // The screen shows the view's first six rows of ten.
+        let clip = Rect::new(0, 0, 10, 6);
+        let end = bar(1, &scroll(480.0), size, inner(), clip).unwrap();
+        assert_eq!(end.track, Rect::new(9, 0, 1, 6));
+        assert_eq!(end.extent, (0, 10));
+        // The thumb stands at the end of the whole track, past the screen.
+        assert_eq!(end.thumb_extent, (7, 3));
+        assert!(end.thumb.is_empty());
     }
 
     #[test]
