@@ -466,6 +466,22 @@ fn cursor_at(hit: &Hit) -> Cursor {
         .unwrap_or(Cursor::Default)
 }
 
+/// Whether `(x, y)` (root coordinates) is on a pressable link span of text
+/// view `view` that sets no cursor of its own: the pointer there wins over
+/// the I-beam of selectable text, as on the other desktops.
+fn over_link(surface: &Surface, view: &NshView, x: f32, y: f32) -> bool {
+    {
+        let s = view.state();
+        if cursor_of(s.style.cursor).is_some()
+            || s.text.as_ref().is_none_or(|t| t.text.links.is_empty())
+        {
+            return false;
+        }
+    }
+    let (lx, ly) = local(surface, view, x, y);
+    crate::text::link_at(&view.state(), lx, ly).is_some_and(|link| has_press(link.events))
+}
+
 /// Sets the cursor for the mouse at `(x, y)` (hosted views set their own).
 fn update_cursor(surface: &Surface, x: f32, y: f32) {
     set_cursor_at(surface, x, y, true);
@@ -484,7 +500,9 @@ fn set_cursor_at(surface: &Surface, x: f32, y: f32, always: bool) {
     }
     let cursor = match pick(&surface.root, x, y) {
         Some(hit) if hit.native => return,
-        Some(hit) => cursor_at(&hit),
+        Some(hit) => over_link(surface, &hit.view, x, y)
+            .then_some(Cursor::Pointer)
+            .unwrap_or_else(|| cursor_at(&hit)),
         None => Cursor::Default,
     };
     let cursor = ns_cursor(cursor);
