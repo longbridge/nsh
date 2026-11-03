@@ -690,11 +690,18 @@ impl ShaderView {
         &self.frame
     }
 
+    /// Collects a frame that came back without rendering another; `true`
+    /// when [`Self::frame`] is new. A page's or a dialog's overlay whose
+    /// transition ended shows the frames still on their way this way.
+    pub fn collect_frame(&mut self, renderer: &Renderer) -> bool {
+        let _ = renderer.device.poll(wgpu::PollType::Poll);
+        self.collect()
+    }
+
     /// Renders a frame if one is due and collects one that came back;
     /// `true` when [`Self::frame`] is new. `now` is the frame clock's time.
     pub fn render(&mut self, renderer: &Renderer, now: Instant) -> bool {
-        let _ = renderer.device.poll(wgpu::PollType::Poll);
-        let mut collected = self.collect();
+        let mut collected = self.collect_frame(renderer);
         let Some(layer) = self.layer.clone() else {
             return collected;
         };
@@ -1211,5 +1218,30 @@ mod tests {
             "left of the box: progress 1"
         );
         assert_eq!(pixel(&f, 2, 2), [0, 0, 255, 255]);
+    }
+
+    #[test]
+    fn collecting_a_frame_renders_none() {
+        let Some(renderer) = Renderer::new(PixelFormat::Rgba) else {
+            eprintln!("no GPU: skipped");
+            return;
+        };
+        let mut view = ShaderView::default();
+        view.set_size(size(px(2.0), px(2.0)), 1.0);
+        // Reads `nsh.time`: `render` draws again on every call.
+        view.set_layer(Some(layer(
+            "fn shade(uv: vec2f) -> vec4f { return vec4f(fract(nsh.time), 0.0, 0.0, 1.0); }",
+            &[],
+        )));
+        assert!(!view.render(&renderer, Instant::now()), "on its way");
+        let start = Instant::now();
+        while !view.collect_frame(&renderer) {
+            assert!(start.elapsed() < Duration::from_secs(5), "no frame");
+            let _ = renderer.device.poll(wgpu::PollType::wait_indefinitely());
+        }
+        assert_eq!((view.frame().width, view.frame().height), (2, 2));
+        assert!(!view.pending(), "no other frame was rendered");
+        assert!(!view.collect_frame(&renderer));
+        assert!(view.wants_frame(), "its time still runs");
     }
 }
