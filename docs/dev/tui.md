@@ -920,7 +920,7 @@ permit clipboard writes; `nsh test` uses memory and never writes to the machine'
 | Borders | Box drawing on each side wider than zero, one Cell, dim (an accent color kept), rounded corners where a radius is set, dashed and dotted lines |
 | Outlines and focus rings | Left out; focus shows as described in "Drawing" |
 | Box shadows | Left out |
-| Images, videos, web views, native components, shaders and icons (canvases at most 48 × 48 points) | Left out: laid out as `display: none` by the terminal layout (no Cells, frame or hits, their margins and gaps gone); larger canvases are drawn |
+| Images, videos, web views, shaders and canvases | At most 48 × 48 points (icons): left out, laid out as `display: none` by the terminal layout (no Cells, frame or hits, their margins and gaps gone). Larger: their box kept and left blank, so the content around them keeps its place; larger canvases are drawn |
 | Scroll bars | A one-Cell track `│` (dim) and thumb `┃` on the inner edge of an overflowing scroll view, unless hidden |
 | Anchored overlays | Snapped outside the anchor's Cell rect on the core-resolved placement side; cleared and framed, the label as title |
 | Gaps between texts | Positive point gaps between one-line sibling texts or canvas text runs retain at least one Cell; zero gaps keep adjacent text |

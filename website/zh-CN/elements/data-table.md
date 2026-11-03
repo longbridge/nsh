@@ -314,8 +314,8 @@ const columns: DataTableColumn[] = [
 | `rowCount` | `.row_count(..)` | `number` | 已持有的行数 | 行的总数。 |
 | `dataStart` | `.data_start(..)` | `number` | `0` | `data` 第一行对应的行号。 |
 | `rowClasses` | `.row_classes(..)` | `string[]` | `[]` | 所给各行的类名，按它们在 `data` 中的位置对应：行自己的外观，不需要每行调用 JS。 |
-| `rowHeight` | `.row_height(..)` | `number` | `32` | 表体行的高度，单位为点。 |
-| `headerHeight` | `.header_height(..)` | `number` | 行高 | 标题行的高度。 |
+| `rowHeight` | `.row_height(..)` | `number` | `32` | 表体行的高度，单位为点；在终端里一行就是一个 Cell。 |
+| `headerHeight` | `.header_height(..)` | `number` | 行高 | 标题行的高度；在终端里是一个 Cell。 |
 | `groups` | `.groups(..)` | `DataTableColumnGroup[][]` | `[]` | 列上方的标签，从最低一层开始。 |
 | `sort` | `.sort(..)` | `DataTableSort` | | 数据的排序依据，显示在标题上。 |
 | `rowSelectable` | `.row_selectable(..)` | `boolean` | `true` | 按下和按键可以选择行。 |

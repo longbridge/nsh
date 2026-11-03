@@ -340,8 +340,8 @@ parts provide the table's structure and alignment; their classes supply the appe
 | `rowCount` | `.row_count(..)` | `number` | the rows held | How many rows there are in all. |
 | `dataStart` | `.data_start(..)` | `number` | `0` | The row of the first row of `data`. |
 | `rowClasses` | `.row_classes(..)` | `string[]` | `[]` | Classes of the rows given, by their place in `data`: a row's own look, with no call into JS per row. |
-| `rowHeight` | `.row_height(..)` | `number` | `32` | The height of a body row, in points. |
-| `headerHeight` | `.header_height(..)` | `number` | the row height | The height of a title row. |
+| `rowHeight` | `.row_height(..)` | `number` | `32` | The height of a body row, in points; in a terminal a row is one Cell. |
+| `headerHeight` | `.header_height(..)` | `number` | the row height | The height of a title row; in a terminal one Cell. |
 | `groups` | `.groups(..)` | `DataTableColumnGroup[][]` | `[]` | Labels above the columns, lowest level first. |
 | `sort` | `.sort(..)` | `DataTableSort` | | What the data is sorted by, shown on the title. |
 | `rowSelectable` | `.row_selectable(..)` | `boolean` | `true` | Presses and keys select rows. |

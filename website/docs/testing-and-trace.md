@@ -523,7 +523,7 @@ A failing check says what it got and what it expected, written as JS would write
 
 ### On a real platform
 
-`nsh test --target macos` (or `linux`, `windows`, `gpui`, `web`, `ios`, `android`) runs the same tests on the platform's development host instead of headless:
+`nsh test --target macos` (or `linux`, `windows`, `gpui`, `tui`, `web`, `ios`, `android`) runs the same tests on the platform's development host instead of headless:
 each `open` starts the app in a window of its own, with a fresh data directory, and the steps act with the platform's
 own input at the views their selectors name, as Playwright does in a browser:
 
@@ -547,6 +547,7 @@ nsh test --target ios                         # in an iOS simulator
 nsh test --target android                     # on the Android device or emulator adb lists first
 nsh test --target gpui                        # in GPUI windows (macOS, Windows, Linux)
 nsh test --target web                         # in a headless Chrome, Edge or Chromium
+nsh test --target tui                         # in an in-memory terminal
 nsh test tests/form.test.tsx --target macos   # one file
 ```
 
