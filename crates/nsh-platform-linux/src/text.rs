@@ -153,15 +153,16 @@ pub(crate) fn main_font_description(style: &ResolvedTextStyle) -> pango::FontDes
 /// takes family lists).
 fn resolve_family(name: &str, ui: &str) -> String {
     let mut out = String::with_capacity(name.len());
-    for family in name.split(',') {
-        let family = family.trim().trim_matches(|c| c == '"' || c == '\'');
+    use nsh_core::FamilyName;
+    for family in nsh_core::font_families(name) {
         let family = match family {
-            "" => continue,
-            "system-ui" | "-apple-system" | "BlinkMacSystemFont" | "ui-sans-serif"
-            | "ui-rounded" | "sans-serif" => ui,
-            "ui-monospace" | "monospace" => "monospace",
-            "ui-serif" | "serif" => "serif",
-            f => f,
+            FamilyName::Monospace => "monospace",
+            FamilyName::Serif => "serif",
+            // Pango's list is comma-separated: a quoted name with a comma
+            // in it can't be one of its families.
+            FamilyName::Named(f) if f.contains(',') => continue,
+            FamilyName::Named(f) => f,
+            _ => ui,
         };
         if !out.is_empty() {
             out.push(',');
@@ -2302,6 +2303,10 @@ mod tests {
             "Fira Code,monospace,monospace"
         );
         assert_eq!(resolve_family(" , ", "X"), "X");
+        assert_eq!(
+            resolve_family("'ACME, Inc', \"serif\", Inter", "X"),
+            "serif,Inter"
+        );
     }
 
     fn text(parts: &[(&str, ResolvedTextStyle)]) -> AttributedText {

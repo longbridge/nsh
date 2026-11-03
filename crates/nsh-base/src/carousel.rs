@@ -12,9 +12,17 @@
 //! slides report where they are laid out, so the snap points are the
 //! slides' own, whatever their width (several per view, gaps, a peek of
 //! the next one). When the scroll view comes to rest the carousel reports
-//! the slide it rests on; a discrete change (previous, next, a pagination
-//! item, a key, the app's `index`) scrolls it there natively, animated
-//! unless the user asked for reduced motion.
+//! the slide it rests on, which shows until the app has answered: an app
+//! that passes `index` and keeps another slide gets it back, the content
+//! springing back to it ([`after_answer`]). A discrete change (previous,
+//! next, a pagination item, a key, the app's `index`) scrolls it there
+//! natively, animated unless the user asked for reduced motion.
+//!
+//! `onFocus` / `onBlur` are the focus coming into the carousel's view and
+//! leaving it (`ElementRef::on_focus_in` / `on_focus_out`, the core's
+//! `focus-within`): its controls, its pagination items and whatever the app
+//! made focusable in the slides are inside it, so a move between them is
+//! none.
 //!
 //! A looping carousel wraps seamlessly, as `gpui-component`'s runway does:
 //! the content gets a runway of one period (the slides and the gap after
@@ -219,8 +227,13 @@ struct Inner {
     /// The index while the app passes none.
     own: Signal<usize>,
     /// Where the user's swipe came to rest while the app has not answered
-    /// it with `index` yet: shown until the app's next `index`.
+    /// it yet: shown until the app's next `index`, or until the app has
+    /// handled the change and kept its own (`Ctl::let_go_after_answer`).
     pending: Signal<Option<usize>>,
+    /// The app handled a swipe's change while the user dragged again: the
+    /// swipe's slide is let go of where that drag rests, not under the
+    /// finger.
+    answered_in_drag: Cell<bool>,
     /// The slide shown.
     shown: Memo<usize>,
     /// The carousel's own view, which takes the keyboard focus from a
@@ -250,10 +263,11 @@ struct Inner {
     /// The user scrolls it, from the drag's start to the rest.
     dragging: Signal<bool>,
     /// How many of the carousel's views have the keyboard focus (the root,
-    /// its controls, its pagination items).
+    /// its controls, its pagination items): the keys are bound while one
+    /// has it.
     focused: Signal<u32>,
-    /// `onFocus` was reported, and no `onBlur` after it.
-    announced: Cell<bool>,
+    /// The carousel's owner: a swipe's slide is let go of under it.
+    owner: Owner,
     cx: Scope<CarouselEvent>,
 }
 
@@ -363,6 +377,7 @@ impl Ctl {
             controlled,
             own,
             pending,
+            answered_in_drag: Cell::new(false),
             shown,
             root: element_ref(),
             scroller: element_ref(),
@@ -375,7 +390,7 @@ impl Ctl {
             generation: Cell::new(0),
             dragging: signal(false),
             focused: signal(0),
-            announced: Cell::new(false),
+            owner: Owner::current(),
             cx,
         }));
         if looping {
@@ -652,7 +667,8 @@ impl Ctl {
     }
 
     /// The scroll came to rest at `offset`: back in the middle period, on a
-    /// slide, which shows, and the app hears of it.
+    /// slide, which shows, and the app hears of it. With an `index` of the
+    /// app's, the slide shows until the app has answered.
     fn settled(&self, offset: f32) {
         if self.superseded_rest(offset) {
             return;
@@ -674,17 +690,48 @@ impl Ctl {
         } else if cycle != 0 {
             self.recenter();
         }
-        let shown = self.0.shown.get_untracked();
-        if index == shown {
+        // The content rests on it, whichever slide shows next.
+        self.0.placed.set(Some(index));
+        let controlled = self.0.controlled.get_untracked();
+        if self.0.answered_in_drag.take() {
+            // The app answered the last swipe while this drag went on: its
+            // `index` shows unless this rest asks for another.
+            let count = self.0.count.get_untracked();
+            let kept = controlled.map(|c| (c as usize).min(count.saturating_sub(1)));
+            if kept == Some(index) {
+                self.0.pending.set(None);
+                return;
+            }
+        } else if index == self.0.shown.get_untracked() {
             return;
         }
-        self.0.placed.set(Some(index));
-        if self.0.controlled.get_untracked().is_some() {
+        if controlled.is_some() {
             self.0.pending.set(Some(index));
         } else {
             self.0.own.set(index);
         }
         self.0.cx.emit(CarouselEvent::Change(index as u32));
+        if controlled.is_some() {
+            self.let_go_after_answer();
+        }
+    }
+
+    /// Lets go of the swipe's slide once the app has handled its change
+    /// ([`after_answer`]): an app that followed it shows it as its `index`
+    /// already, one that kept another gets that one back, the content
+    /// springing back to it, animated (a release, as the snap is). Not
+    /// under a finger that dragged again meanwhile: where that drag rests.
+    fn let_go_after_answer(&self) {
+        let ctl = self.clone();
+        self.0.owner.run(|| {
+            after_answer(move || {
+                if ctl.0.dragging.get_untracked() {
+                    ctl.0.answered_in_drag.set(true);
+                } else {
+                    ctl.0.pending.set(None);
+                }
+            });
+        });
     }
 
     /// Moves the offset back into the middle period, without animation:
@@ -766,21 +813,22 @@ impl Ctl {
             return;
         }
         let from = from.unwrap_or(index);
-        // From the middle period, so the period next to it is in the runway.
-        self.recenter();
         let count = track.snaps.len();
         let last = first_at(&track.snaps, count - 1);
         let forward = from == last && index == 0 && (count > 2 || wrap == Some(true));
         let back = from == 0 && index == last && (count > 2 || wrap == Some(false));
-        let target = if forward {
-            rest + period
-        } else if back {
-            rest - period
-        } else {
-            rest
-        };
-        self.scroll_to(target, true);
-        if forward || back {
+        let turn = i32::from(forward) - i32::from(back);
+        // From the period the content is in (one beside the middle while a
+        // swipe across the seam has not re-centered yet), so the scroll
+        // starts where the content is; from the middle one when the slide
+        // would be past the runways.
+        let mut cycle = track.nearest(self.0.at.get()).map_or(0, |(_, _, k)| k);
+        if (cycle + turn).abs() > 1 {
+            self.recenter();
+            cycle = 0;
+        }
+        self.scroll_to(rest + period * (cycle + turn) as f32, true);
+        if cycle + turn != 0 {
             self.recenter_later();
         }
     }
@@ -820,34 +868,18 @@ impl Ctl {
         focused
     }
 
-    /// One of its views took the keyboard focus: the focus came into the
-    /// carousel unless it was in it.
+    /// One of its views (its own, a control, a pagination item) took the
+    /// keyboard focus: the keys are bound.
     fn focus_in(&self) {
-        let Some(n) = self.0.focused.try_get() else {
-            return;
-        };
-        self.0.focused.try_set(n + 1);
-        if !self.0.announced.replace(true) {
-            self.0.cx.emit(CarouselEvent::Focus);
+        if let Some(n) = self.0.focused.try_get() {
+            self.0.focused.try_set(n + 1);
         }
     }
 
-    /// One of its views lost the keyboard focus. A move between its views
-    /// blurs one before it focuses the next, so the focus left only when
-    /// none of them has it a moment later.
+    /// One of its views lost the keyboard focus.
     fn focus_out(&self) {
-        let Some(n) = self.0.focused.try_get() else {
-            return;
-        };
-        let n = n.saturating_sub(1);
-        self.0.focused.try_set(n);
-        if n == 0 {
-            let ctl = self.clone();
-            set_timeout(Duration::ZERO, move || {
-                if ctl.0.focused.get_untracked() == 0 && ctl.0.announced.replace(false) {
-                    ctl.0.cx.emit(CarouselEvent::Blur);
-                }
-            });
+        if let Some(n) = self.0.focused.try_get() {
+            self.0.focused.try_set(n.saturating_sub(1));
         }
     }
 
@@ -957,7 +989,9 @@ pub struct CarouselProps {
     /// the slides there are). The app owns it: a swipe, a control or a key
     /// reports the next one with `onChange`, and the carousel scrolls to
     /// the `index` the app passes back, animated. A swipe shows the slide
-    /// it rests on until the app passes a new `index`. With several slides
+    /// it rests on until the app has answered its `onChange`: an app that
+    /// keeps its `index` gets its slide back, the content springing back to
+    /// it, animated. With several slides
     /// per view it names the slide in the first place (those that rest
     /// with the last one show the same place). Without it the carousel
     /// keeps its own, from `defaultIndex`.
@@ -1001,12 +1035,12 @@ pub enum CarouselEvent {
     DragStart,
     /// The content the user dragged came to rest.
     DragEnd,
-    /// The keyboard focus came to the carousel's own view, its previous or
-    /// next control or a pagination item from elsewhere. Focusable views of
-    /// the app's inside the slides do not count.
+    /// The keyboard focus came into the carousel from elsewhere: to its own
+    /// view, its previous or next control, a pagination item or a focusable
+    /// view of the app's in a slide. A move between them reports nothing.
     Focus,
-    /// The keyboard focus left the carousel's own view, its controls and
-    /// its pagination items.
+    /// The keyboard focus left the carousel: its own view, its controls,
+    /// its pagination items and the slides' content.
     Blur,
 }
 
@@ -1025,9 +1059,9 @@ pub enum CarouselEvent {
 /// app's `index` scroll the content natively, animated (at once with
 /// reduced motion). Slides that move on by themselves are the app's: a
 /// timer that sets `index`, waiting while `onDragStart` / `onDragEnd`,
-/// `onFocus` / `onBlur` (the keyboard focus on the carousel, a control or
-/// a pagination item) and the pointer over a view around it say the user
-/// is at it.
+/// `onFocus` / `onBlur` (the keyboard focus in the carousel: on it, a
+/// control, a pagination item or the slides' content) and the pointer over
+/// a view around it say the user is at it.
 ///
 /// The keyboard, as `gpui-component`'s: the carousel is a stop of the
 /// keyboard focus where views are (macOS, the web), and while it, one of
@@ -1052,6 +1086,14 @@ pub fn Carousel(props: CarouselProps, cx: Scope<CarouselEvent>) -> impl IntoElem
         bind_while_directed(move || focused.get() > 0, keys, move |step| ctl.key(step));
     }
     let root = ctl.0.root;
+    {
+        // The focus coming into the carousel's view or what is inside it,
+        // and leaving: the controls, the pagination and the slides' content
+        // alike, a move between them none.
+        let (into, out) = (ctl.0.cx, ctl.0.cx);
+        root.on_focus_in(move || into.emit(CarouselEvent::Focus));
+        root.on_focus_out(move || out.emit(CarouselEvent::Blur));
+    }
     let (focus, blur) = (ctl.clone(), ctl);
     view()
         .element_ref(&root)

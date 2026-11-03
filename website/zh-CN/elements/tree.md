@@ -201,6 +201,8 @@ files?.revealItem("src/ui/tree.rs");
 
 选中项被收起的项目隐藏时（应用收起了它），按键作用于那个项目的行：Right 或 Return 展开它，Down 选中它之后的一行。
 
+在从右到左的布局里，行从右边开始，Left 和 Right 按该模式互换：Left 展开文件夹并进入，Right 收起文件夹并选中父项目。Up、Down、Home 和 End 不变。
+
 ## 平台说明
 
 - iOS、Android 和 Mac Catalyst：轻点选中一行，并展开或收起文件夹；连续轻点两次对项目执行操作（`onAction`）。

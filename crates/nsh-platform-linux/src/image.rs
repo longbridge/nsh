@@ -1250,7 +1250,11 @@ fn scaling_filter(
     }
 }
 
-/// Draws `texture` at `rect` (points) on a surface of `scale`.
+/// Draws `texture` at `rect` (points) on a surface of `scale`. Only a
+/// mipmapped texture goes through a scaled-texture node: at a fractional
+/// scale GSK renders that node offscreen at the surface's logical size and
+/// enlarges it, so an image drawn with it at 1.6x shows its 1x pixels. A
+/// plain texture node samples the texture straight at device pixels.
 fn draw_texture(
     snapshot: &gtk::Snapshot,
     texture: &gdk::Texture,
@@ -1262,7 +1266,10 @@ fn draw_texture(
         (rect.width(), rect.height()),
         scale,
     );
-    snapshot.append_scaled_texture(texture, filter, rect);
+    match filter {
+        gsk::ScalingFilter::Trilinear => snapshot.append_scaled_texture(texture, filter, rect),
+        _ => snapshot.append_texture(texture, rect),
+    }
 }
 
 /// Draws one picture (`texture`, the frame showing) with the view's mode,
@@ -1282,6 +1289,11 @@ fn draw_one(
         natural(own, source),
         (w, h),
     );
+    // On the device pixel grid (the view's origin is on it): an edge
+    // between two pixels is resampled across both.
+    let snap = |v: f32| crate::view::snap(v, scale);
+    let (x0, y0) = (snap(x), snap(y));
+    let (x, y, fw, fh) = (x0, y0, snap(x + fw) - x0, snap(y + fh) - y0);
     let mut rect = graphene::Rect::new(x, y, fw, fh);
     let blur = image.options.blur_radius.0.max(0.0);
     if blur > 0.0 {

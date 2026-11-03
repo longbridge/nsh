@@ -453,8 +453,12 @@ pub struct CommandProps {
     /// by `separatorClass`: never first, last or doubled.
     #[prop(default = true)]
     pub separator: Prop<bool>,
-    /// What screen readers call the search field and the list.
+    /// What screen readers call the list, and the search field while
+    /// `searchAccessibilityLabel` is not set.
     pub accessibility_label: Prop<Option<SharedString>>,
+    /// What screen readers call the search field (default
+    /// `accessibilityLabel`): what it searches, apart from the list's name.
+    pub search_accessibility_label: Prop<Option<SharedString>>,
     /// The classes of the search bar: the row of `searchPrefix`, the
     /// search field and `searchSuffix`.
     pub search_bar_class: Prop<Option<SharedString>>,
@@ -1043,7 +1047,12 @@ pub fn Command(props: CommandProps, cx: Scope<CommandEvent>) -> impl IntoElement
                         // A touch keyboard's return key chooses and keeps
                         // the field for the next query.
                         .submit_behavior(SubmitBehavior::Submit)
-                        .optional_label(props.accessibility_label)
+                        .optional_label(move || {
+                            props
+                                .search_accessibility_label
+                                .get()
+                                .or_else(|| props.accessibility_label.get())
+                        })
                         .app_class(props.search_class)
                         .inline_style(move || props.search_style.get())
                         .on_focus(move || field_focused.set(true))

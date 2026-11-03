@@ -1039,13 +1039,22 @@ impl MountItem {
 }
 
 /// A page's or a dialog's transition through a shader
-/// ([`MountItem::NavShader`]).
+/// ([`MountItem::NavShader`]). It has no `Default`: a layer holds a
+/// compiled program, which has none; [`NavShader::new`] makes one.
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub struct NavShader {
     /// The program and its uniforms.
     pub layer: Arc<crate::shader::ShaderLayer>,
     /// How long it runs.
     pub duration: std::time::Duration,
+}
+
+impl NavShader {
+    /// `layer` running for `duration`.
+    pub fn new(layer: Arc<crate::shader::ShaderLayer>, duration: std::time::Duration) -> Self {
+        Self { layer, duration }
+    }
 }
 
 /// All mount items produced by one commit.

@@ -251,17 +251,15 @@ pub(crate) fn ui_family() -> Arc<str> {
 /// list (DirectWrite takes one family: the first installed one is used).
 fn family_names(name: &str, ui: &str) -> Vec<String> {
     let mut out = Vec::new();
-    for family in name.split(',') {
-        let family = family.trim().trim_matches(|c| c == '"' || c == '\'');
+    use nsh_core::FamilyName;
+    for family in nsh_core::font_families(name) {
         let family = match family {
-            "" => continue,
-            "system-ui" | "-apple-system" | "BlinkMacSystemFont" | "ui-sans-serif"
-            | "ui-rounded" | "sans-serif" => ui,
-            "ui-monospace" | "monospace" => "Consolas",
-            "ui-serif" | "serif" => "Times New Roman",
-            "cursive" => "Comic Sans MS",
-            "fantasy" => "Impact",
-            f => f,
+            FamilyName::Monospace => "Consolas",
+            FamilyName::Serif => "Times New Roman",
+            FamilyName::Named("cursive") => "Comic Sans MS",
+            FamilyName::Named("fantasy") => "Impact",
+            FamilyName::Named(f) => f,
+            _ => ui,
         };
         out.push(family.to_owned());
     }
@@ -3301,6 +3299,10 @@ mod tests {
             ["Fira Code", "Consolas", "Consolas"]
         );
         assert_eq!(family_names(" , ", "X"), ["X"]);
+        assert_eq!(
+            family_names("'ACME, Inc', \"serif\"", "X"),
+            ["ACME, Inc", "serif"]
+        );
         assert_eq!(alias("Menlo"), Some("Consolas"));
     }
 

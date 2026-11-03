@@ -211,7 +211,8 @@ fn svg_size(text: &str) -> Result<(f64, f64), String> {
 }
 
 /// The family name of a font file (a WOFF or WOFF2 font's, of what it
-/// holds).
+/// holds). It reads the formats `nsh_core::font_data` does, which this
+/// crate cannot call (nsh-core depends on it): a format one reads, both do.
 fn font_family(data: &[u8]) -> Result<String, String> {
     let unwrapped = match data.get(..4) {
         Some(b"wOFF") => wuff::decompress_woff1(data),
@@ -670,8 +671,8 @@ mod tests {
     #[test]
     fn a_woff_or_woff2_font_names_the_family_it_holds() {
         for data in [
-            &include_bytes!("../../nsh-core/tests/fonts/Pacifico-Regular.woff")[..],
-            &include_bytes!("../../nsh-core/tests/fonts/Pacifico-Regular.woff2")[..],
+            &include_bytes!("../../../tests/compat/cases/layout/fonts/Pacifico-Regular.woff")[..],
+            &include_bytes!("../../../tests/compat/cases/layout/fonts/Pacifico-Regular.woff2")[..],
         ] {
             assert_eq!(font_family(data).as_deref(), Ok("Pacifico"));
         }
