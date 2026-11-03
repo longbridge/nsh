@@ -2368,14 +2368,15 @@ covers [props] Select.clearButtonAccessibilityLabel
 # `disabled`: dimmed for screen readers.
 prop label:Locked accessibilityState disabled=true expanded=false
 covers [props] disabled
-# `searchable`: a field above the items (its placeholder and look the
-# app's; on a phone the keyboard comes when it is pressed) filters them by
-# title, ignoring case, and a section without a match goes; `empty` shows
-# in the list's place while none matches.
+# `searchable`: a field above the items (its placeholder, name for screen
+# readers and look the app's; on a phone the keyboard comes when it is
+# pressed) filters them by title, ignoring case, and a section without a
+# match goes; `empty` shows in the list's place while none matches.
 tap id:find
 expect Find: true triggerPress
 expect Apple
 prop below:scroll:label:Apple placeholder Find food
+prop below:scroll:label:Apple accessibilityLabel FindField
 prop below:scroll:label:Apple autoFocus false
 style below:scroll:label:Apple backgroundColor #abcdefff
 style below:scroll:label:Apple borderRadius 4
@@ -2400,6 +2401,7 @@ expect Find: false backdropPress
 absent Apple
 covers [props] Select.searchable
 covers [props] Select.searchPlaceholder
+covers [props] Select.searchAccessibilityLabel
 covers [props] Select.searchClass
 covers [props] Select.searchStyle
 covers [props] Select.empty

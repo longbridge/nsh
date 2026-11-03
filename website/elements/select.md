@@ -200,6 +200,7 @@ keyboard, and Return chooses it. `empty` is what the list shows while nothing ma
   items={zones}
   searchable
   searchPlaceholder="Search time zones"
+  searchAccessibilityLabel="Search time zones"
   searchClass="mx-1 mb-1 rounded-md border border-input px-2 py-1.5 text-sm"
   empty={<Text class="px-2 py-6 text-center text-sm text-muted-foreground">No time zone found</Text>}
   trigger={trigger}
@@ -244,6 +245,7 @@ choice draws nothing again. `renderGroup` draws a section's header the same way:
 | `defaultOpen` | `.default_open(..)` | `boolean` | `false` | Open at first, without `open`. |
 | `searchable` | `.searchable(..)` | `boolean` | `false` | A search field above the items filters them by title. |
 | `searchPlaceholder` | `.search_placeholder(..)` | `string` | none | The search field's placeholder. |
+| `searchAccessibilityLabel` | `.search_accessibility_label(..)` | `string` | none | What screen readers call the search field: what it searches. |
 | `cleanable` | `.cleanable(..)` | `boolean` | `false` | A clear button while an item is chosen; a press clears the value (`onChange({ value: null })`). |
 | `disabled` | `.disabled(..)` | `boolean` | `false` | It stays closed: the trigger takes no presses and no keyboard focus, and `disabled:` styles apply to it. |
 | `accessibilityLabel` | `.accessibility_label(..)` | `string` | none | What screen readers call it: what the choice is about. |
@@ -301,7 +303,7 @@ In Rust they are `nsh_base::SelectItem`, `SelectEntry` and `SelectGroup`; `value
 | The clear button | the select's view, after the trigger (`cleanable`, while an item is chosen) | `clearButtonClass`, `clearButtonStyle`; its content `clearButton` |
 | The popup or sheet | over everything, at the trigger (desktops) or at the bottom (touch screens) | `popupClass`, `popupStyle` |
 | The backdrop | behind the sheet (touch screens) | `backdropClass`, `backdropStyle` |
-| The search field | the popup, first (`searchable`) | `searchClass`, `searchStyle`, `searchPlaceholder` |
+| The search field | the popup, first (`searchable`) | `searchClass`, `searchStyle`, `searchPlaceholder`, `searchAccessibilityLabel` |
 | The list | the popup, after the search field | `listClass`, `listStyle` |
 | A section's header | the list, before its items | `groupClass`, `groupStyle`, `renderGroup` |
 | An item's row | the list | `itemClass`, `itemStyle`, `renderItem` (`group-focus:`, `group-selected:`, `group-disabled:` inside, under `group` in `itemClass`) |
@@ -347,6 +349,8 @@ pointer highlights the row it moves over; the highlighted row is revealed as the
 - The trigger is a combobox for screen readers: its label is `accessibilityLabel`, its value the chosen item's title,
   and it says whether the list is expanded. `disabled` dims it.
 - The clear button is a button named by `clearButtonAccessibilityLabel`; it is no stop of Tab.
+- The search field is a text field named by `searchAccessibilityLabel`; its placeholder is a hint shown while it is
+  empty.
 - The list is a listbox and each row an option, named by its title; the chosen option is selected and a disabled one
   dimmed. Sections' headers are headers.
 - As the keys move the highlight, the screen reader's focus moves to the highlighted row; while the search field has
