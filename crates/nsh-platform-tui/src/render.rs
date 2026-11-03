@@ -1700,6 +1700,17 @@ fn mark_surface(
         || (pane && !popup && selected && !tab);
     if active {
         band(buffer, visible, ACCENT, own);
+        // Its text turns the terminal's background color, so the band is
+        // under all of it, a child's fill included (today's circle in a
+        // calendar), and under a child's fill as dark as the terminal's.
+        for y in visible.y..visible.bottom() {
+            for x in visible.x..visible.right() {
+                let cell = &mut buffer[(x, y)];
+                if cell.bg == Color::Reset || cell.symbol() != " " {
+                    cell.bg = ACCENT;
+                }
+            }
+        }
         drawn(buffer, visible, |cell| {
             cell.fg = ramp.base();
             cell.modifier -= Modifier::BOLD;
