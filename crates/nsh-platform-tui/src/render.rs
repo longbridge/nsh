@@ -575,6 +575,11 @@ impl Painter<'_> {
             if parent.ramp.is_some() && ground.surface != parent.surface {
                 self::fill(self.buffer, visible, ground.surface);
             }
+            if let Some(centre) = gradient(self.buffer, view, bounds, visible, cells, parent) {
+                ground.rgb = centre;
+                ground.surface = palette::convert(centre, parent.depth);
+                ground.swatch = true;
+            }
             if let Some((line, _)) = frame_look {
                 edges.colors = [(line, Modifier::empty()); 4];
             }
@@ -1819,6 +1824,69 @@ fn recolor_border(buffer: &mut Buffer, bounds: CellBounds, visible: Rect, color:
 }
 
 /// A band of `color` behind every Cell of `rect`, modifiers untouched.
+/// Paints `view`'s gradients (`backgroundImage`) over its fill in its
+/// `visible` Cells, each Cell the color at its center, at the terminal's
+/// depth; returns the color at the box's center, what its content reads
+/// against. Nothing where the terminal paints no fills (the bandless look)
+/// or the view has no gradient.
+fn gradient(
+    buffer: &mut Buffer,
+    view: &NshView,
+    bounds: CellBounds,
+    visible: Rect,
+    cells: CellSize,
+    parent: Ground,
+) -> Option<palette::Rgb> {
+    let effects = view.style.effects.as_deref()?;
+    if effects.background_images.is_empty()
+        || parent.ramp.is_none()
+        || visible.is_empty()
+        || matches!(view.kind, ViewKind::Image | ViewKind::Video | ViewKind::WebView)
+        || !effects.background_images.iter().any(crate::gradient::shows)
+    {
+        return None;
+    }
+    let fill = view
+        .animated
+        .background
+        .unwrap_or(view.style.background_color);
+    // A gradient over an opaque fill of the view's own is its finish (a
+    // button's top-lit sheen): the fill is the surface, a step of the ramp.
+    if fill.0 & 255 == 255 {
+        return None;
+    }
+    let (cw, ch) = (cells.width().0, cells.height().0);
+    let size = nsh_core::Size::new(
+        Points((bounds.right - bounds.left) as f32 * cw),
+        Points((bounds.bottom - bounds.top) as f32 * ch),
+    );
+    // CSS lists the top layer first.
+    let layers: Vec<crate::gradient::Sampler> = effects
+        .background_images
+        .iter()
+        .rev()
+        .filter_map(|g| crate::gradient::Sampler::new(g, size))
+        .collect();
+    if layers.is_empty() {
+        return None;
+    }
+    let [red, green, blue, alpha] = fill.0.to_be_bytes();
+    let alpha = f32::from(alpha) / 255.0;
+    let under: palette::Rgb = std::array::from_fn(|i| {
+        let top = f32::from([red, green, blue][i]);
+        (top * alpha + f32::from(parent.rgb[i]) * (1.0 - alpha)).round() as u8
+    });
+    let color_at = |point: (f32, f32)| crate::gradient::over(under, layers.iter().map(|l| l.at(point)));
+    for y in visible.y..visible.bottom() {
+        let py = (i32::from(y) - bounds.top) as f32 * ch + ch / 2.0;
+        for x in visible.x..visible.right() {
+            let px = (i32::from(x) - bounds.left) as f32 * cw + cw / 2.0;
+            buffer[(x, y)].bg = palette::convert(color_at((px, py)), parent.depth);
+        }
+    }
+    Some(color_at((size.width.0 / 2.0, size.height.0 / 2.0)))
+}
+
 fn fill(buffer: &mut Buffer, rect: Rect, color: Color) {
     for y in rect.y..rect.bottom() {
         for x in rect.x..rect.right() {

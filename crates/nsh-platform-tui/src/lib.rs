@@ -9,6 +9,7 @@ mod app;
 mod canvas;
 mod dialog;
 mod geometry;
+mod gradient;
 mod input;
 mod key_scheme;
 mod keyboard;

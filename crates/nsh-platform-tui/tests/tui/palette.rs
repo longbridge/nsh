@@ -662,3 +662,60 @@ fn a_swatch_is_its_own_color_with_text_in_black_or_white() {
         "the bandless look paints no fill"
     );
 }
+
+#[component]
+fn Ramp() -> impl IntoElement {
+    view()
+        .flex_1()
+        .child(
+            view()
+                .w(px(160.0))
+                .h(px(16.0))
+                .bg_linear_to_r()
+                .gradient_from(nsh_core::color::rgb(0x000000))
+                .gradient_to(nsh_core::color::rgb(0xffffff)),
+        )
+        .child(
+            view()
+                .w(px(160.0))
+                .h(px(16.0))
+                .bg(nsh_core::color::rgb(0x27272a))
+                .bg_linear_to_r()
+                .gradient_from(nsh_core::color::rgb(0x000000))
+                .gradient_to(nsh_core::color::rgb(0xffffff))
+                .child(text("finish")),
+        )
+        .child(text("ready"))
+}
+
+#[test]
+fn a_gradient_fills_each_cell_with_its_color_there() {
+    let (mut view, rx) = surfaces();
+    let mut terminal = Terminal::new(TestBackend::new(24, 4)).unwrap();
+    view.load(App::Rust(Root::new::<Ramp>(|| ()))).unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "ready");
+    let buffer = terminal.backend().buffer();
+    let Color::Rgb(left, ..) = buffer[(0, 0)].bg else {
+        panic!("the left Cell is filled: {:?}", buffer[(0, 0)].bg);
+    };
+    let Color::Rgb(right, ..) = buffer[(19, 0)].bg else {
+        panic!("the right Cell is filled: {:?}", buffer[(19, 0)].bg);
+    };
+    assert!(left < 20 && right > 235, "black to white: {left}, {right}");
+    assert_eq!(buffer[(20, 0)].bg, Color::Reset, "past the box");
+    let finish = row_of(buffer, "finish");
+    assert_eq!(
+        buffer[(0, finish)].bg,
+        Color::Rgb(38, 38, 38),
+        "a gradient over a fill is its finish: the fill's step"
+    );
+    assert_eq!(buffer[(19, finish)].bg, buffer[(0, finish)].bg);
+
+    let (mut view, rx) = surfaces_at(ColorDepth::Ansi256);
+    let mut terminal = Terminal::new(TestBackend::new(24, 4)).unwrap();
+    view.load(App::Rust(Root::new::<Ramp>(|| ()))).unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "ready");
+    let buffer = terminal.backend().buffer();
+    assert!(matches!(buffer[(0, 0)].bg, Color::Indexed(_)));
+    assert_ne!(buffer[(0, 0)].bg, buffer[(19, 0)].bg, "a ramp in 256 colors");
+}

@@ -405,10 +405,11 @@ function Inputs() {
   );
 }
 
-// A terminal's Cells draw no shadows, gradients or filters: those cards are left out there.
+// A terminal's Cells draw no shadows or filters: those cards are left out there. Gradients
+// fill each Cell with their color at it.
 const sections: (() => JSX.Element)[] =
   platform.idiom === "terminal"
-    ? [Hero, Stats, Buttons, Cards, Layout, Typography, Motion, Lists, Inputs, Colors]
+    ? [Hero, Stats, Buttons, Cards, Layout, Gradients, Typography, Motion, Lists, Inputs, Colors]
     : [Hero, Stats, Buttons, Cards, Layout, Shadows, Gradients, Typography, Effects, Motion, Lists, Inputs, Colors];
 
 export function Tailwind() {
