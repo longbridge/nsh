@@ -14,7 +14,6 @@
 
 use nsh_core::geometry::{Points, Size};
 use nsh_engine::{HostChannel, JsonValue};
-
 #[cfg(target_os = "linux")]
 use nsh_platform_linux as platform;
 #[cfg(target_os = "macos")]

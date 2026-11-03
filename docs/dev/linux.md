@@ -72,10 +72,10 @@ works and its runner only needs GTK.
   up, and `Panel::open` anywhere else is `PanelError::WrongThread` (it does not start GTK itself). A panel is a GTK
   window with an `NshView` and engine of its own; GTK 4 has no window positioning and no window levels, so `position`
   and `set_level` do nothing (`WindowLevel::AboveDock` leaves the stacking to the window manager), as do
-  `movable_by_background` and `nonactivating`. `hides_on_deactivate` hides the panel when it loses the focus, the
-  closest signal GTK 4 has to the app's deactivation (`hides_on_resign_key` asks for the same). `transparent` is
-  best effort: it clears the window's own background (one CSS provider for every panel, added once) and needs a
-  compositing window manager; the app's root still paints its own background.
+  `movable_by_background`, `nonactivating` and `hides_on_deactivate` (GTK 4 has no per-application activation, so a
+  panel that hides when the focus leaves it asks for `hides_on_resign_key`: losing GTK's active window is that signal).
+  `transparent` is best effort: it clears the window's own background (one CSS provider for every panel, added once)
+  and needs a compositing window manager; the app's root still paints its own background.
 
 ## How each area maps to GTK
 

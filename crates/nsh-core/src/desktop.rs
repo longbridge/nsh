@@ -212,9 +212,10 @@ pub struct PanelOptions {
     /// default). A nonactivating panel never deactivates the app, so it
     /// never fires for one: a panel that takes the keyboard without
     /// activating the app wants [`hides_on_resign_key`](Self::hides_on_resign_key)
-    /// instead. Windows has no per-panel activation to follow and ignores
-    /// it; GTK 4's active window is the one with the keyboard, so Linux
-    /// hides on the same signal as
+    /// instead. macOS follows the app's activation; Windows and Linux
+    /// ignore it, having no per-panel activation to follow (GTK 4 has no
+    /// per-application activation at all), and a panel there that hides
+    /// when the focus leaves it asks for
     /// [`hides_on_resign_key`](Self::hides_on_resign_key).
     pub hides_on_deactivate: bool,
     /// Hides the window when it loses the keyboard's focus (false by
@@ -325,6 +326,7 @@ impl Default for PanelOptions {
 }
 
 /// Why a panel window could not be opened (`Panel::open`).
+#[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PanelError {
     /// The platform does not provide panel windows.
@@ -1053,6 +1055,24 @@ mod tests {
         assert_eq!(WindowLevel::Floating.js_name(), "floating");
         assert_eq!(WindowLevel::AboveDock.js_name(), "aboveDock");
         assert_eq!(WindowLevel::DesktopIcon.js_name(), "desktopIcon");
+    }
+
+    #[test]
+    fn window_levels_are_a_string_union_in_the_declarations() {
+        use crate::element::JsValue;
+
+        let mut types = crate::element::TsTypes::default();
+        assert_eq!(WindowLevel::ts_type(&mut types), "WindowLevel");
+        let declaration = types
+            .declarations()
+            .find(|text| text.contains("type WindowLevel"))
+            .expect("the union is declared");
+        assert!(
+            declaration.ends_with(
+                "export type WindowLevel = \"normal\" | \"floating\" | \"aboveDock\" | \"desktopIcon\";"
+            ),
+            "{declaration}"
+        );
     }
 
     #[test]

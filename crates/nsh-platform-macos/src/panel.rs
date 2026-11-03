@@ -30,9 +30,11 @@ use std::{
     rc::Rc,
 };
 
-use nsh_core::desktop::WindowFrame;
 pub use nsh_core::desktop::{PanelError, PanelOptions, WindowLevel};
-use nsh_core::geometry::{Points, Size};
+use nsh_core::{
+    desktop::WindowFrame,
+    geometry::{Points, Size},
+};
 use objc2::{
     DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send, rc::Retained,
     runtime::ProtocolObject,

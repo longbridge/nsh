@@ -42,9 +42,11 @@
 
 use std::{cell::Cell, ffi::c_void, rc::Rc};
 
-use nsh_core::desktop::WindowFrame;
 pub use nsh_core::desktop::{PanelError, PanelOptions, WindowLevel};
-use nsh_core::geometry::{Point, Points, Size};
+use nsh_core::{
+    desktop::WindowFrame,
+    geometry::{Point, Points, Size},
+};
 use nsh_engine::App;
 use windows::{
     Win32::{

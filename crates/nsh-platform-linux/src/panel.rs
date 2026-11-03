@@ -28,10 +28,9 @@
 //! - [`PanelOptions::nonactivating`]: GTK 4 has no "take the keyboard
 //!   without activating the app"; the panel is a normal window.
 //! - [`PanelOptions::hides_on_deactivate`]: GTK 4 cannot observe the app's
-//!   deactivation (there is no per-application activation), so the panel
-//!   hides when it loses the focus instead: the closest signal it has.
-//!   [`PanelOptions::hides_on_resign_key`] asks for the same signal, and the
-//!   two hide the window the same way.
+//!   deactivation (there is no per-application activation), so the option
+//!   does nothing: a panel that hides when the focus leaves it asks for
+//!   [`PanelOptions::hides_on_resign_key`].
 //! - [`PanelOptions::position`]: GTK 4 has no window positioning (Wayland
 //!   forbids it and X11's is not exposed), so it is ignored and the
 //!   compositor places the window.
@@ -115,10 +114,10 @@ impl Panel {
             window.add_css_class("nsh-panel-transparent");
             register_transparent_css();
         }
-        if options.hides_on_deactivate || options.hides_on_resign_key {
-            // GTK 4 has no app deactivation: the window losing the focus is
-            // the closest it has (and the signal a nonactivating panel
-            // asks for too).
+        if options.hides_on_resign_key {
+            // GTK 4's active window is the one with the keyboard: losing it
+            // is the signal a panel asks for here. App deactivation has no
+            // GTK 4 signal (`hides_on_deactivate` does nothing on Linux).
             window.connect_is_active_notify(|window| {
                 if !window.is_active() {
                     window.set_visible(false);
