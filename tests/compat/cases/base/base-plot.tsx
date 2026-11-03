@@ -71,11 +71,18 @@
 // flows between the plot's rows, reports the node under the pointer and
 // steps through its nodes with a screen reader's increment, and moves to
 // new flows with `motion.update`; links that make a cycle draw nothing.
+// A `Treemap` (`id`, `parent`, `value`, `sort`, `ratio`, `paddingInner`,
+// `paddingOuter`, `paddingTop`, `cornerRadii`, `color`, `colorValue`,
+// `inactiveOpacity`, its `leaf`, `group` and `hover` parts, its labels:
+// `label`, `valueLabel`, `labelPlacement`, `groupLabel` and their parts)
+// tiles the plot's rows as a hierarchy, reports the node under the
+// pointer and moves to new rows with `motion.update`; a leaf of 0 takes
+// no area.
 // A `PlotAppearScope` (`id`) remembers the appears that finished in it: a
 // plot made again there shows whole at once, a new `appearGeneration` (a
 // string) and a new `id` draw it in again.
 import { Text, View, signal } from "nsh";
-import { Arc, Area, Bar, Cell, Dot, Grid, Line, Pie, Plot, PlotAppearScope, PlotAxis, PlotLabel, RadialGrid, RadialLine, Rule, Sankey } from "nsh/base/plot";
+import { Arc, Area, Bar, Cell, Dot, Grid, Line, Pie, Plot, PlotAppearScope, PlotAxis, PlotLabel, RadialGrid, RadialLine, Rule, Sankey, Treemap } from "nsh/base/plot";
 
 type Row = { t: number; price: number; avg: number };
 type Sale = { v: number; w: number };
@@ -195,6 +202,7 @@ function App() {
       <RadarCase />
       <LabelCase />
       <SankeyCase />
+      <TreemapCase />
       <StackCase />
       <ScopeCase />
     </View>
@@ -469,6 +477,78 @@ function SankeyCase() {
       </Plot>
       <Plot testID="unrelaxed" data={STEPS} style={{ width: 100, height: 100 }}>
         <Sankey links={STEP_FLOWS} iterations={0} nodeLabel="name" />
+      </Plot>
+    </View>
+  );
+}
+
+type Node = { key: string; group?: string; name: string; size?: number; chg?: number; kind?: string };
+
+const TREE: Node[] = [
+  { key: "g", name: "Grow", kind: "a" },
+  { key: "h", name: "Hold", kind: "b" },
+  { key: "a", group: "g", name: "Ant", size: 50, chg: 2, kind: "a" },
+  { key: "b", group: "g", name: "Bee", size: 30, chg: -2, kind: "a" },
+  { key: "c", group: "h", name: "Cat", size: 20, chg: 0, kind: "b" },
+  { key: "z", group: "h", name: "Zed", size: 0, chg: 1, kind: "b" },
+];
+const RETREE: Node[] = TREE.map((n) => (n.key === "b" ? { ...n, size: 60 } : n));
+
+/** Two groups of leaves on a 300 by 100 plot: `Grow` (80) on the left,
+ * `Hold` (20) right of a 4-point gap, each with a band of 20 for its
+ * name, its leaves 2 apart inside a padding of 1; colored by their change
+ * on a diverging scale, red to white to green; `Zed` (0) takes no area.
+ * At a `ratio` of 4, `Ant` lies over `Bee` (side by side by default).
+ * `Bee` grows to 60 with the next rows. A second plot tiles the same
+ * leaves in the rows' order, colored by kind, without bands. */
+function TreemapCase() {
+  const node = signal<number | null>(null);
+  const grown = signal(false);
+  return (
+    <View>
+      <Plot
+        testID="tree"
+        data={grown() ? RETREE : TREE}
+        accessibilityLabel="Tree"
+        colorScale={{ type: "diverging", domain: [-2, 2], range: ["#ff0000", "#ffffff", "#00ff00"] }}
+        motion={{ update: { duration: 200 } }}
+        onHoverChange={({ index }) => node.set(index)}
+        style={{ width: 300, height: 100 }}
+      >
+        <Treemap
+          testID="treemap"
+          id="key"
+          parent="group"
+          value="size"
+          ratio={4}
+          paddingInner={[4, 2]}
+          paddingOuter={1}
+          paddingTop={20}
+          cornerRadii={3}
+          colorValue="chg"
+          leafClass={(d: Node) => (d.key === "a" ? "stroke-[#000000]" : "stroke-[#0000ff]")}
+          leafStyle={{ opacity: 0.9 }}
+          groupClass="fill-[#eeeeee]"
+          groupStyle={{ opacity: 0.5 }}
+          inactiveOpacity={0.25}
+          label="name"
+          valueLabel={(_: Node, value: number) => `t${value}`}
+          labelPlacement="center"
+          labelClass="p-1"
+          labelStyle={{ fontSize: 10 }}
+          valueLabelClass="font-semibold"
+          valueLabelStyle={{ color: "#333333" }}
+          groupLabel="name"
+          groupLabelClass="px-1"
+          groupLabelStyle={{ fontSize: 9 }}
+          hoverClass="border"
+          hoverStyle={{ borderColor: "#ff00ff" }}
+        />
+      </Plot>
+      <Text>{`node ${node()}`}</Text>
+      <View testID="grow-tree" onPress={() => grown.set(true)} style={{ height: 20 }} />
+      <Plot testID="tree-data" data={TREE} colorScale={{ type: "ordinal", domain: ["a", "b"], range: ["#ff0000", "#00ff00"] }} style={{ width: 100, height: 100 }}>
+        <Treemap id="key" parent="group" value="size" sort="data" color="kind" label={(d: Node) => `d-${d.name}`} />
       </Plot>
     </View>
   );

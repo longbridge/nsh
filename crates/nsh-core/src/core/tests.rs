@@ -11336,6 +11336,57 @@ mod components {
         assert_eq!(shown.last().unwrap(), "heard end not-allowed");
     }
 
+    /// Shows whether a web view's ref gives trusted input here.
+    #[component]
+    fn WebInputCheck() -> impl IntoElement {
+        let available = signal(String::from("asking"));
+        spawn(async move {
+            available.set(format!("web input {}", web_input_available().await));
+        });
+        text(move || available.get())
+    }
+
+    /// What [`WebInputCheck`] shows on a platform that does (`platform`)
+    /// or does not deliver trusted web input, with the capabilities
+    /// `declared` (`None`: none declared).
+    fn web_input_available_with(platform: bool, declared: Option<serde_json::Value>) -> String {
+        let mut c = core();
+        c.set_environment(crate::element::Environment {
+            web_input: platform,
+            ..Default::default()
+        });
+        if let Some(declared) = declared {
+            c.set_access(std::sync::Arc::new(crate::access::Access {
+                declared: crate::access::Capabilities::from_json(&declared).unwrap(),
+                granted: None,
+            }));
+        }
+        c.mount_root(&crate::element::Root::new::<WebInputCheck>(|| ()));
+        let shown = run_until(&mut c, |s| s.iter().any(|t| t.starts_with("web input")));
+        shown.last().unwrap().clone()
+    }
+
+    #[test]
+    fn web_input_is_available_where_the_platform_delivers_it_and_the_app_holds_the_grant() {
+        let granted = || Some(serde_json::json!({ "webview": { "hosts": [], "input": true } }));
+        assert_eq!(web_input_available_with(true, granted()), "web input true");
+        // The platform does not deliver it.
+        assert_eq!(
+            web_input_available_with(false, granted()),
+            "web input false"
+        );
+        // Web views without `input`, or no declaration at all: not granted.
+        assert_eq!(
+            web_input_available_with(
+                true,
+                Some(serde_json::json!({ "webview": { "hosts": [] } }))
+            ),
+            "web input false"
+        );
+        assert_eq!(web_input_available_with(true, None), "web input false");
+        assert_eq!(web_input_available_with(false, None), "web input false");
+    }
+
     /// Recognizes "a b" as the user speaks; stopping it gives "a b c".
     #[derive(Default)]
     struct TestSpeech {

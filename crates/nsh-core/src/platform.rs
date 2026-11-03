@@ -255,6 +255,10 @@ pub struct Environment {
     /// [`crate::speech`]); without it, a session ends at once
     /// (`unavailable`) unless the core has a [`crate::speech::SpeechBackend`].
     pub speech: bool,
+    /// The platform gives web views trusted input
+    /// ([`crate::Command::SendInput`], macOS); without it, the command
+    /// does nothing.
+    pub web_input: bool,
 }
 
 impl Environment {
@@ -296,6 +300,7 @@ impl Default for Environment {
             screen_color: false,
             file_requests: false,
             speech: false,
+            web_input: false,
         }
     }
 }

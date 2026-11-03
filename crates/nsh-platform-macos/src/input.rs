@@ -466,6 +466,22 @@ fn cursor_at(hit: &Hit) -> Cursor {
         .unwrap_or(Cursor::Default)
 }
 
+/// Whether `(x, y)` (root coordinates) is on a pressable link span of text
+/// view `view` that sets no cursor of its own: the pointer there wins over
+/// the I-beam of selectable text, as on the other desktops.
+fn over_link(surface: &Surface, view: &NshView, x: f32, y: f32) -> bool {
+    {
+        let s = view.state();
+        if cursor_of(s.style.cursor).is_some()
+            || s.text.as_ref().is_none_or(|t| t.text.links.is_empty())
+        {
+            return false;
+        }
+    }
+    let (lx, ly) = local(surface, view, x, y);
+    crate::text::link_at(&view.state(), lx, ly).is_some_and(|link| has_press(link.events))
+}
+
 /// Sets the cursor for the mouse at `(x, y)` (hosted views set their own).
 fn update_cursor(surface: &Surface, x: f32, y: f32) {
     set_cursor_at(surface, x, y, true);
@@ -484,7 +500,13 @@ fn set_cursor_at(surface: &Surface, x: f32, y: f32, always: bool) {
     }
     let cursor = match pick(&surface.root, x, y) {
         Some(hit) if hit.native => return,
-        Some(hit) => cursor_at(&hit),
+        Some(hit) => {
+            if over_link(surface, &hit.view, x, y) {
+                Cursor::Pointer
+            } else {
+                cursor_at(&hit)
+            }
+        }
         None => Cursor::Default,
     };
     let cursor = ns_cursor(cursor);
@@ -955,12 +977,34 @@ pub(crate) fn us_key(code: u16) -> Option<char> {
 
 /// The virtual key code of the key typing `c` on the US layout (without
 /// Shift), for synthesized key events.
-#[cfg(feature = "dev")]
 pub(crate) fn us_key_code(c: char) -> Option<u16> {
     let c = u8::try_from(c.to_ascii_lowercase())
         .ok()
         .filter(|&c| c != 0)?;
     US_KEYS.iter().position(|&k| k == c).map(|i| i as u16)
+}
+
+/// A virtual key code no key has, for what no US key types: WebKit names
+/// it no key (`code` "Unidentified"), where 0 would be A.
+pub(crate) const NO_KEY: u16 = 0xffff;
+
+/// The key, and whether Shift is down, that type `c` on the US layout:
+/// letters, digits, space, Return (`\r`), Tab and punctuation, shifted ones
+/// (`A`, `!`, `?`) on their unshifted key. `None` for what no US key types.
+pub(crate) fn us_typing_key(c: char) -> Option<(u16, bool)> {
+    match c {
+        ' ' => return Some((49, false)),
+        '\r' => return Some((36, false)),
+        '\t' => return Some((48, false)),
+        _ => {}
+    }
+    if let Some(code) = us_key_code(c) {
+        return Some((code, c.is_ascii_uppercase()));
+    }
+    US_KEYS
+        .iter()
+        .position(|&k| k != 0 && nsh_core::keymap::shifted(k as char) == c)
+        .map(|i| (i as u16, true))
 }
 
 /// Where keys look for a scroll view: the mouse, or the middle.
@@ -2426,6 +2470,27 @@ pub(crate) fn file_drop_target(surface: &Surface, x: f32, y: f32) -> Option<NshV
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn typing_keys_follow_the_us_layout() {
+        // a, space, b and a shifted 1: each its own key, Shift only for "!".
+        let keys: Vec<_> = "a b!".chars().map(us_typing_key).collect();
+        assert_eq!(
+            keys,
+            [
+                Some((0, false)),
+                Some((49, false)),
+                Some((11, false)),
+                Some((18, true))
+            ]
+        );
+        assert_eq!(us_typing_key('N'), Some((45, true)));
+        assert_eq!(us_typing_key('?'), Some((44, true)));
+        assert_eq!(us_typing_key('\r'), Some((36, false)));
+        assert_eq!(us_typing_key('é'), None);
+        // Without Shift, a shifted character's key types its own.
+        assert_eq!(us_key(18), Some('1'));
+    }
 
     #[test]
     fn batches_do_not_push_the_repick_on() {
