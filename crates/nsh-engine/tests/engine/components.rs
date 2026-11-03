@@ -8901,6 +8901,147 @@ fn base_plot_bars_and_rules_span_a_base_per_row() {
     );
 }
 
+const BASE_PLOT_DOTS: &str = r##"import { mount, signal, Text, View } from "nsh";
+import { Dot, Plot } from "nsh/base/plot";
+
+type Holding = { risk: number; ret: number | null; cap: number; sector: string };
+
+function App() {
+  const hovered = signal<number | null>(null);
+  const rows: Holding[] = [
+    { risk: 10, ret: 20, cap: 100, sector: "tech" },
+    { risk: 30, ret: 40, cap: 400, sector: "energy" },
+    { risk: 20, ret: null, cap: 50, sector: "tech" },
+  ];
+  return (
+    <View>
+      {/* A bubble chart: area in proportion to the cap, color by sector. */}
+      <Plot
+        testID="bubbles"
+        data={rows}
+        x="risk"
+        xScale={{ type: "linear", domain: [0, 40] }}
+        yScale={{ type: "linear", domain: [0, 100] }}
+        colorScale={{ type: "ordinal", domain: ["tech", "energy"], range: ["#ff0000", "#00ff00"] }}
+        onHoverChange={({ index }) => hovered.set(index)}
+        style={{ width: 400, height: 100 }}
+      >
+        <Dot value="ret" r="cap" rScale={{ type: "sqrt", range: [0, 20] }} color="sector" inactiveOpacity={0.2} hoverDotClass="bg-[#0000ff]" />
+      </Plot>
+      <Text>{`hover ${hovered()}`}</Text>
+      {/* A dot plot across a band y scale, one radius for every dot. */}
+      <Plot data={[{ v: 10 }, { v: 30 }]} y="v" yScale={{ type: "band" }} xScale={{ type: "linear", domain: [0, 40] }} style={{ width: 400, height: 100 }}>
+        <Dot r={5} />
+      </Plot>
+    </View>
+  );
+}
+
+mount(App);
+"##;
+
+/// `Dot`: a dot per row at its `x` and value, a row without a value
+/// skipped; radii from a field through a square root scale (area in
+/// proportion), the bigger dot drawn first; fills from the plot's
+/// `colorScale`; the pointer finds the dot under it or nearest within the
+/// reach and the hover dot is as big as that dot; across a band y scale,
+/// the dots sit in the bands' middles with their values along x.
+#[test]
+fn base_plot_dots_place_size_and_hover() {
+    use nsh_core::{
+        Color,
+        canvas::{CanvasOp, Num, Paint},
+    };
+    let (engine, rx) = start(BASE_PLOT_DOTS);
+    let mut all = until_drawn(&rx, |d| !drawn_arcs(&d.ops).is_empty());
+    all.extend(until(&rx, |_| false));
+    let marks = plot_drawings(&all);
+    let [(_, bubbles), (_, across)] = &marks[..] else {
+        panic!("two dot marks: {marks:?}")
+    };
+    let full = (0.0, std::f32::consts::TAU);
+    // The energy holding's cap is the largest (radius 20), drawn first; the
+    // tech one's a quarter of it: half the radius.
+    assert!(
+        same_arcs(
+            &drawn_arcs(&bubbles.ops),
+            &[
+                ((300.0, 60.0), Some(20.0), full, false),
+                ((100.0, 80.0), Some(10.0), full, false),
+            ]
+        ),
+        "{:?}",
+        drawn_arcs(&bubbles.ops)
+    );
+    let fills: Vec<_> = bubbles
+        .ops
+        .iter()
+        .filter_map(|op| match op {
+            CanvasOp::FillStyle(Paint::Color(c)) => Some(*c),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(fills, [Color(0x00ff_00ff), Color(0xff00_00ff)]);
+    // The others fade with the hover: an alpha the animator reads.
+    assert!(
+        bubbles
+            .ops
+            .iter()
+            .any(|op| matches!(op, CanvasOp::GlobalAlpha(Num::Slot(_))))
+    );
+    // Across: the bands' middles down the plot, the values along x.
+    assert!(
+        same_arcs(
+            &drawn_arcs(&across.ops),
+            &[
+                ((100.0, 25.0), Some(5.0), full, false),
+                ((300.0, 75.0), Some(5.0), full, false),
+            ]
+        ),
+        "{:?}",
+        drawn_arcs(&across.ops)
+    );
+
+    let plot = test_view(&all, "bubbles");
+    let hover = |x: f32, y: f32| {
+        engine.control().dispatch_event(
+            plot,
+            EventKind::MouseMove,
+            EventPayload::Mouse(nsh_core::MouseEvent::new(
+                nsh_core::geometry::point(px(x), px(y)),
+                nsh_core::geometry::point(px(x), px(y)),
+                Default::default(),
+                None,
+            )),
+        )
+    };
+    // Inside the big bubble, far from its center.
+    hover(285.0, 70.0);
+    all.extend(until(&rx, |b| shows(b, "hover 1")));
+    all.extend(until(&rx, |_| false));
+    let dot = all
+        .iter()
+        .flat_map(|b| b.items.iter())
+        .find_map(|i| match i {
+            MountItem::ViewStyle { id, style } if style.background_color == Color(0x0000_ffff) => {
+                Some(*id)
+            }
+            _ => None,
+        })
+        .expect("the hover dot");
+    let size = frame_of(&all, dot).expect("laid out").size;
+    assert_eq!((size.width.0, size.height.0), (40.0, 40.0));
+    // Past the small one's edge, within the reach.
+    hover(115.0, 80.0);
+    all.extend(until(&rx, |b| shows(b, "hover 0")));
+    all.extend(until(&rx, |_| false));
+    let size = frame_of(&all, dot).expect("resized").size;
+    assert_eq!(size.width.0, 20.0);
+    // Far from both.
+    hover(200.0, 10.0);
+    until(&rx, |b| shows(b, "hover null"));
+}
+
 const BASE_PLOT_COLOR_SCALE: &str = r##"import { mount, View } from "nsh";
 import { Area, Bar, Line, Pie, Plot } from "nsh/base/plot";
 
