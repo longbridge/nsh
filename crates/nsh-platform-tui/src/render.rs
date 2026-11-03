@@ -352,6 +352,7 @@ impl Painter<'_> {
             ground.level = palette::step(filled, parent.level);
             ground.surface = match filled {
                 Surface::None => parent.surface,
+                Surface::Accent(rgb) if !control => ramp.tint_alpha(rgb, parent.level, fill.0 as u8),
                 Surface::Accent(rgb) => ramp.tint(rgb, parent.level),
                 Surface::Raised | Surface::Sunken => ramp.level(ground.level),
             };

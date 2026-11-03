@@ -352,7 +352,8 @@ function Shortcuts() {
           )}
         </Each>
       </View>
-      <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+      {/* A terminal's badge is its text: a wider gap keeps it apart from the count. */}
+      <View style={{ flexDirection: "row", alignItems: "center", gap: terminal ? 24 : 8 }}>
         <Badge label={on() ? "Light on" : "Light off"} tone={on() ? "up" : "neutral"} />
         <View style={{ flex: 1 }}>
           <Caption label={`Counted ${count()}`} note={last() || "–"} />

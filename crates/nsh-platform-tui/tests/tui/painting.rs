@@ -795,3 +795,36 @@ fn a_selected_tab_is_a_band_unless_its_app_underlines_it() {
     );
     assert!(buffer[(0, 1)].modifier.contains(Modifier::UNDERLINED));
 }
+
+#[component]
+fn CoveredRuns() -> impl IntoElement {
+    let at = |top: f32, left: f32, content: &'static str| {
+        view()
+            .absolute()
+            .top(px(top))
+            .left(px(left))
+            .child(text(content))
+    };
+    view()
+        .flex_1()
+        .child(at(0.0, 0.0, "━━━━━━━━━━━━"))
+        .child(at(0.0, 48.0, "●"))
+        .child(at(32.0, 0.0, "abcdefghijkl"))
+        .child(at(32.0, 48.0, "Z"))
+        .child(at(64.0, 0.0, "ready"))
+}
+
+#[test]
+fn text_covering_a_run_of_glyphs_leaves_it_whole_and_cuts_words() {
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(20, 6)).unwrap();
+    view.load(App::Rust(Root::new::<CoveredRuns>(|| ())))
+        .unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "ready");
+    let buffer = terminal.backend().buffer();
+    let lines: Vec<String> = (0..6).map(|y| row(buffer, y, 0..20)).collect();
+    let track = lines.iter().find(|line| line.contains('●')).unwrap();
+    assert!(!track.contains('…'), "a slider's track is only covered: {track:?}");
+    let words = lines.iter().find(|line| line.contains('Z')).unwrap();
+    assert!(words.contains("…Z"), "covered words read cut: {words:?}");
+}

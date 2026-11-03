@@ -284,6 +284,8 @@ const FAINT_SHARE: f32 = 0.35;
 const MUTED_SHARE: f32 = 0.50;
 /// How much of an accent a saturated fill's band takes.
 const TINT_SHARE: f32 = 0.20;
+/// How much of an accent an opaque fill's band takes, when it is no control's.
+const SOLID_TINT_SHARE: f32 = 0.50;
 /// How far a filled view's lightness must be from its ground's to count as
 /// a surface of its own.
 const FILLED_CONTRAST: f32 = 1.5;
@@ -400,6 +402,19 @@ impl Ramp {
     pub(crate) fn tint(&self, rgb: Rgb, level: usize) -> Color {
         let under = self.mix(LADDER[level.min(LADDER.len() - 1)]);
         convert(mix(under, rgb, TINT_SHARE), self.depth)
+    }
+
+    /// The band of a saturated fill of `alpha` that is no control's (a
+    /// swatch, a tinted box): the more opaque the fill, the more of its
+    /// accent the band takes, from [`TINT_SHARE`] up to a quarter's alpha
+    /// to [`SOLID_TINT_SHARE`] when opaque, so washes of one hue at
+    /// several strengths stay apart.
+    pub(crate) fn tint_alpha(&self, rgb: Rgb, level: usize, alpha: u8) -> Color {
+        let alpha = f32::from(alpha) / 255.0;
+        let share = TINT_SHARE
+            + (SOLID_TINT_SHARE - TINT_SHARE) * ((alpha - 0.25) / 0.75).clamp(0.0, 1.0);
+        let under = self.mix(LADDER[level.min(LADDER.len() - 1)]);
+        convert(mix(under, rgb, share), self.depth)
     }
 
     /// `color` faded half way into the terminal's background: what is
@@ -820,6 +835,10 @@ mod tests {
         assert_eq!(ramp.muted(), Color::Rgb(124, 124, 124));
         assert_eq!(ramp.faint(), Color::Rgb(94, 94, 94));
         assert_eq!(ramp.tint([59, 130, 246], 0), Color::Rgb(31, 45, 68));
+        assert_eq!(ramp.tint_alpha([59, 130, 246], 0, 51), ramp.tint([59, 130, 246], 0));
+        let half = ramp.tint_alpha([59, 130, 246], 0, 128);
+        let solid = ramp.tint_alpha([59, 130, 246], 0, 255);
+        assert!(half != ramp.tint([59, 130, 246], 0) && half != solid, "washes stay apart");
         assert_eq!(
             ramp.fade(Color::Rgb(224, 0, 0), true),
             Color::Rgb(124, 12, 12)
