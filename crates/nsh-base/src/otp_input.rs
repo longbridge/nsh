@@ -364,8 +364,11 @@ pub fn OtpInput(props: OtpInputProps, cx: Scope<OtpInputEvent>) -> impl IntoElem
     let group_frames = signal(Vec::new());
     let sink = computed(move || {
         let ix = parts.active();
-        let cell = parts.frames.with(|f: &Vec<Bounds<Points>>| f.get(ix).copied())?;
-        let group = group_frames.with(|f: &Vec<Bounds<Points>>| f.get(ix / per_group.get()).copied())?;
+        let cell = parts
+            .frames
+            .with(|f: &Vec<Bounds<Points>>| f.get(ix).copied())?;
+        let group =
+            group_frames.with(|f: &Vec<Bounds<Points>>| f.get(ix / per_group.get()).copied())?;
         let metrics = text_metrics("", "0");
         let (width, height) = (metrics.width, metrics.height);
         let middle = |size: Points, step: Points| {
@@ -417,51 +420,51 @@ pub fn OtpInput(props: OtpInputProps, cx: Scope<OtpInputEvent>) -> impl IntoElem
         })
         .child(cells)
         .child(
-        input()
-            .element_ref(&field_ref)
-            .absolute()
-            .when(!parts.terminal, |v| v.inset_0())
-            .when(parts.terminal, |v| {
-                let at = move || sink.get().unwrap_or_default();
-                v.left(move || Length::from(at().x))
-                    .top(move || Length::from(at().y))
-                    .w(px(0.0))
-                    .h(crate::terminal::cell_height())
-            })
-            .p_0()
-            .border(px(0.0))
-            .bg(AdaptiveColor::TRANSPARENT)
-            .text_color(AdaptiveColor::TRANSPARENT)
-            .selection_color(transparent_black())
-            .caret(false)
-            .keyboard_type(KeyboardType::Number)
-            .auto_fill(AutoFill::OneTimeCode)
-            .auto_correct(false)
-            .auto_capitalize(AutoCapitalize::None)
-            .masked(props.masked)
-            .disabled(props.disabled)
-            .optional_label(props.accessibility_label)
-            .value(move || field.get())
-            .on_change(move |text: &str| changed(text))
-            .on_selection_change(move |selection: &Selection| {
-                // The caret stays at the end: nothing is edited in the
-                // middle.
-                let end = utf16_len(&field.get_untracked());
-                if (selection.start, selection.end) != (end, end) {
-                    field_ref.set_selection(end, end);
-                }
-            })
-            .on_focus(move || {
-                focused.set(true);
-                blink.start(BLINK);
-                cx.emit(OtpInputEvent::Focus);
-            })
-            .on_blur(move || {
-                focused.set(false);
-                blink.stop();
-                cx.emit(OtpInputEvent::Blur);
-            }),
-    )
+            input()
+                .element_ref(&field_ref)
+                .absolute()
+                .when(!parts.terminal, |v| v.inset_0())
+                .when(parts.terminal, |v| {
+                    let at = move || sink.get().unwrap_or_default();
+                    v.left(move || Length::from(at().x))
+                        .top(move || Length::from(at().y))
+                        .w(px(0.0))
+                        .h(crate::terminal::cell_height())
+                })
+                .p_0()
+                .border(px(0.0))
+                .bg(AdaptiveColor::TRANSPARENT)
+                .text_color(AdaptiveColor::TRANSPARENT)
+                .selection_color(transparent_black())
+                .caret(false)
+                .keyboard_type(KeyboardType::Number)
+                .auto_fill(AutoFill::OneTimeCode)
+                .auto_correct(false)
+                .auto_capitalize(AutoCapitalize::None)
+                .masked(props.masked)
+                .disabled(props.disabled)
+                .optional_label(props.accessibility_label)
+                .value(move || field.get())
+                .on_change(move |text: &str| changed(text))
+                .on_selection_change(move |selection: &Selection| {
+                    // The caret stays at the end: nothing is edited in the
+                    // middle.
+                    let end = utf16_len(&field.get_untracked());
+                    if (selection.start, selection.end) != (end, end) {
+                        field_ref.set_selection(end, end);
+                    }
+                })
+                .on_focus(move || {
+                    focused.set(true);
+                    blink.start(BLINK);
+                    cx.emit(OtpInputEvent::Focus);
+                })
+                .on_blur(move || {
+                    focused.set(false);
+                    blink.stop();
+                    cx.emit(OtpInputEvent::Blur);
+                }),
+        )
 }
 
 /// What the cells show and read.
