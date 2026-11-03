@@ -9042,6 +9042,137 @@ fn base_plot_dots_place_size_and_hover() {
     until(&rx, |b| shows(b, "hover null"));
 }
 
+const BASE_PLOT_CELLS: &str = r##"import { mount, signal, Text, View } from "nsh";
+import { Cell, Plot, PlotAxis } from "nsh/base/plot";
+
+type Month = { year: string; month: string; ret: number | null };
+
+function App() {
+  const hovered = signal<number | null>(null);
+  const rows: Month[] = [
+    { year: "2024", month: "Jan", ret: -10 },
+    { year: "2024", month: "Feb", ret: 0 },
+    { year: "2024", month: "Mar", ret: 10 },
+    { year: "2023", month: "Jan", ret: 5 },
+    { year: "2023", month: "Mar", ret: null },
+  ];
+  return (
+    <View>
+      {/* Months from the x scale's domain (Feb 2023 has no row), years in
+          the order the cells meet them; a ramp about 0. */}
+      <Plot
+        testID="calendar"
+        data={rows}
+        xScale={{ type: "band", domain: ["Jan", "Feb", "Mar"] }}
+        yScale={{ type: "band" }}
+        colorScale={{ type: "diverging", domain: [-10, 10], range: ["#990000", "#ffffff", "#006600"] }}
+        onHoverChange={({ index }) => hovered.set(index)}
+        style={{ width: 300, height: 200 }}
+      >
+        <Cell x="month" y="year" value="ret" inactiveOpacity={0.3} label="ret" labelClass="data-dark:bg-[#0000ff]" hoverCellClass="bg-[#00ffff]" />
+        <PlotAxis placement="left" />
+        <PlotAxis placement="top" />
+      </Plot>
+      <Text>{`hover ${hovered()}`}</Text>
+    </View>
+  );
+}
+
+mount(App);
+"##;
+
+/// `Cell`: a rectangle per row in the bands of its two categories (the
+/// x scale's domain, the y scale's from the cells in the order met), its
+/// color its value's along the plot's diverging ramp, a row without a
+/// value having none; the axes write the bands' categories; a label in
+/// each cell, `data-dark` on the dark ones; the pointer finds the cell
+/// under it and the hover cell is as big as it.
+#[test]
+fn base_plot_cells_place_color_and_hover() {
+    use nsh_core::{
+        Color,
+        canvas::{CanvasOp, Paint},
+    };
+    let (engine, rx) = start(BASE_PLOT_CELLS);
+    let mut all = until_drawn(&rx, |d| !bar_rects(&d.ops).is_empty());
+    all.extend(until(&rx, |_| false));
+    let marks = plot_drawings(&all);
+    let [(_, cells)] = &marks[..] else {
+        panic!("one cell mark: {marks:?}")
+    };
+    assert_eq!(
+        bar_rects(&cells.ops),
+        [
+            [0.0, 0.0, 100.0, 100.0],
+            [100.0, 0.0, 100.0, 100.0],
+            [200.0, 0.0, 100.0, 100.0],
+            [0.0, 100.0, 100.0, 100.0],
+        ]
+    );
+    let fills: Vec<_> = cells
+        .ops
+        .iter()
+        .filter_map(|op| match op {
+            CanvasOp::FillStyle(Paint::Color(c)) => Some(*c),
+            _ => None,
+        })
+        .collect();
+    // -10, 0 and 10 at the ramp's ends and middle; 5 halfway from white to
+    // green, mixed in OKLab.
+    assert_eq!(
+        fills[..3],
+        [Color(0x9900_00ff), Color(0xffff_ffff), Color(0x0066_00ff)]
+    );
+    let mid = nsh_core::Hsla::from(Color(0xffff_ffff)).mix_oklab(Color(0x0066_00ff).into(), 0.5);
+    assert_eq!(fills[3], Color::from(mid));
+    // The axes' labels: the categories.
+    for text in ["Jan", "Feb", "Mar", "2024", "2023"] {
+        assert!(all.iter().any(|b| shows(b, text)), "{text}");
+    }
+    // The dark red and green cells' labels are light on them: their
+    // `data-dark:` class applies; the white and pale ones' do not.
+    let blue = all
+        .iter()
+        .flat_map(|b| b.items.iter())
+        .filter(|i| matches!(i, MountItem::ViewStyle { style, .. } if style.background_color == Color(0x0000_ffff)))
+        .count();
+    assert_eq!(blue, 2, "the red and green cells' labels");
+
+    let plot = test_view(&all, "calendar");
+    let hover = |x: f32, y: f32| {
+        engine.control().dispatch_event(
+            plot,
+            EventKind::MouseMove,
+            EventPayload::Mouse(nsh_core::MouseEvent::new(
+                nsh_core::geometry::point(px(x), px(y)),
+                nsh_core::geometry::point(px(x), px(y)),
+                Default::default(),
+                None,
+            )),
+        )
+    };
+    hover(150.0, 50.0);
+    all.extend(until(&rx, |b| shows(b, "hover 1")));
+    all.extend(until(&rx, |_| false));
+    let cell = all
+        .iter()
+        .flat_map(|b| b.items.iter())
+        .find_map(|i| match i {
+            MountItem::ViewStyle { id, style } if style.background_color == Color(0x00ff_ffff) => {
+                Some(*id)
+            }
+            _ => None,
+        })
+        .expect("the hover cell");
+    let size = frame_of(&all, cell).expect("laid out").size;
+    assert_eq!((size.width.0, size.height.0), (100.0, 100.0));
+    hover(50.0, 150.0);
+    all.extend(until(&rx, |b| shows(b, "hover 3")));
+    // Feb 2023 has no cell: the nearest within the gap's reach is none.
+    hover(150.0, 150.0);
+    until(&rx, |b| shows(b, "hover null"));
+}
+
 const BASE_PLOT_COLOR_SCALE: &str = r##"import { mount, View } from "nsh";
 import { Area, Bar, Line, Pie, Plot } from "nsh/base/plot";
 
@@ -10428,4 +10559,167 @@ fn base_plot_reversed_scales_run_from_the_other_edge() {
         EventPayload::Map(vec![("actionName", PayloadValue::Str("increment".into()))]),
     );
     all.extend(until(&rx, |b| shows(b, "hover 2")));
+}
+
+const BASE_PLOT_TREEMAP: &str = r##"import { mount, signal, Text, View } from "nsh";
+import { Plot, Treemap } from "nsh/base/plot";
+
+type Node = { id: string; parent?: string; name: string; cap?: number };
+
+const rows: Node[] = [
+  { id: "tech", name: "Tech" },
+  { id: "fin", name: "Finance" },
+  { id: "AAPL", parent: "tech", name: "Apple", cap: 60 },
+  { id: "MSFT", parent: "tech", name: "Microsoft", cap: 20 },
+  { id: "JPM", parent: "fin", name: "JPMorgan", cap: 20 },
+  { id: "ZERO", parent: "fin", name: "Zero", cap: 0 },
+  { id: "LOSS", parent: "fin", name: "Loss", cap: -5 },
+];
+
+function App() {
+  const hovered = signal<number | null>(null);
+  return (
+    <View>
+      <Plot
+        testID="plot"
+        data={rows}
+        onHoverChange={({ index }) => hovered.set(index)}
+        style={{ width: 300, height: 100 }}
+      >
+        <Treemap
+          id="id"
+          parent="parent"
+          value="cap"
+          paddingInner={[2, 1]}
+          paddingTop={20}
+          label="name"
+          valueLabel={(_: Node, value: number) => `v${value}`}
+          groupLabel="name"
+          inactiveOpacity={0.4}
+          hoverClass="outline-2"
+        />
+      </Plot>
+      <Text>{`hover ${hovered()}`}</Text>
+    </View>
+  );
+}
+
+mount(App);
+"##;
+
+/// `nsh/base/plot`'s `Treemap` (d3's `treemap` of a `stratify`
+/// hierarchy, squarified): the leaves' areas follow their values, a
+/// group's is its leaves' sum, the gaps run between siblings only, a leaf
+/// of 0 or below 0 takes no area, and the bands at the groups' tops hold
+/// their names. The pointer finds the leaf under it, and the group in its
+/// band; the arrows step to the leaf beside on the screen.
+#[test]
+fn base_plot_treemap_lays_out_hovers_and_steps() {
+    use nsh_core::{
+        canvas::{CanvasOp, Num, PathOp},
+        geometry::point,
+        keymap::{KeyMatch, Keymap, Keystroke},
+        platform::Os,
+    };
+    let environment = Environment {
+        os: Os::MacOs,
+        ..Environment::default()
+    };
+    let (engine, rx) = start_in(BASE_PLOT_TREEMAP, environment);
+    let mut all = until(&rx, |b| shows(b, "v60"));
+    all.extend(until(&rx, |_| false));
+    // One canvas of leaves: Apple, Microsoft and JPMorgan, none for the
+    // leaves of 0 and below.
+    let rects: Vec<[f32; 4]> = plot_drawings(&all)
+        .iter()
+        .flat_map(|(_, d)| d.ops.iter())
+        .filter_map(|op| match op {
+            CanvasOp::Path(PathOp::Rect(r)) => Some(r.map(|n| match n {
+                Num::Const(v) => v,
+                _ => f32::NAN,
+            })),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(rects.len(), 3, "{rects:?}");
+    // Tech (80) on the left, Finance (20) right of a 2-point gap; each
+    // group's band of 20 above its leaves.
+    let area = |r: &[f32; 4]| r[2] * r[3];
+    let total: f32 = rects.iter().map(area).sum();
+    assert!(rects.iter().all(|r| r[1] >= 20.0), "{rects:?}");
+    let apple = rects
+        .iter()
+        .copied()
+        .fold([0.0; 4], |a, r| match area(&r) > area(&a) {
+            true => r,
+            false => a,
+        });
+    assert_eq!((apple[0], apple[1]), (0.0, 20.0), "{rects:?}");
+    assert!(total > 0.0 && area(&apple) / total > 0.55, "{rects:?}");
+    for text in ["Tech", "Finance", "Apple", "Microsoft", "JPMorgan", "v60"] {
+        assert!(all.iter().any(|b| text_ids(b, text).is_some()), "{text}");
+    }
+    assert!(!all.iter().any(|b| text_ids(b, "Zero").is_some()));
+
+    let plot = test_view(&all, "plot");
+    let hover = |x: f32, y: f32| {
+        engine.control().dispatch_event(
+            plot,
+            EventKind::MouseMove,
+            EventPayload::Mouse(nsh_core::MouseEvent::new(
+                point(px(x), px(y)),
+                point(px(x), px(y)),
+                Default::default(),
+                None,
+            )),
+        )
+    };
+    // In Tech's band: the group; over Apple: its row.
+    hover(10.0, 5.0);
+    all.extend(until(&rx, |b| shows(b, "hover 0")));
+    hover(apple[0] + 5.0, apple[1] + 5.0);
+    all.extend(until(&rx, |b| shows(b, "hover 2")));
+    engine.control().dispatch_event(
+        plot,
+        EventKind::MouseLeave,
+        EventPayload::Mouse(nsh_core::MouseEvent::default()),
+    );
+    all.extend(until(&rx, |b| shows(b, "hover null")));
+
+    // The keys: Home to the first leaf (Apple), Right to the leaf beside
+    // it, End to the last.
+    let keymap = |all: &[MountBatch]| -> Option<std::sync::Arc<Keymap>> {
+        all.iter()
+            .flat_map(|b| b.items.iter())
+            .filter_map(|i| match i {
+                MountItem::Keymap(k) => Some(k.clone()),
+                _ => None,
+            })
+            .next_back()
+    };
+    let press = |all: &[MountBatch], key: &str| {
+        let found = keymap(all).map_or(KeyMatch::None, |k| {
+            k.find(Keystroke::parse(key, Os::MacOs).unwrap(), false, false)
+        });
+        let KeyMatch::Fire(id) = found else {
+            panic!("{key} is not bound")
+        };
+        engine.control().dispatch_event(
+            ROOT_ID,
+            EventKind::KeyCommand,
+            EventPayload::Value(PayloadValue::Number(f64::from(id))),
+        );
+    };
+    engine
+        .control()
+        .dispatch_event(plot, EventKind::Focus, EventPayload::None);
+    all.extend(until(&rx, |b| {
+        b.items.iter().any(|i| matches!(i, MountItem::Keymap(_)))
+    }));
+    press(&all, "home");
+    all.extend(until(&rx, |b| shows(b, "hover 2")));
+    press(&all, "end");
+    all.extend(until(&rx, |b| shows(b, "hover 4")));
+    press(&all, "left");
+    all.extend(until(&rx, |b| shows(b, "hover 2") || shows(b, "hover 3")));
 }

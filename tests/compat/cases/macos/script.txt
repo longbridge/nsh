@@ -163,3 +163,10 @@ covers [nsh] Clipboard
 covers [nsh] Picker
 covers [nsh] openUrl
 covers [nsh] Image
+# web-send-input
+tap id:case-web-send-input
+# The headless backend selects macOS props but delivers no trusted input.
+expect Input available: false
+tap id:send
+expect Sent input
+covers [nsh] WebView
