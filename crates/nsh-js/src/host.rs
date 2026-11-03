@@ -2430,6 +2430,66 @@ const report = (v) => text(String(v));
     }
 
     #[test]
+    fn an_interrupt_inside_find_keeps_the_elements_alive() {
+        // QuickJS's `find` family released the element of the iteration
+        // before an interrupt a second time (quickjs-ng #1826): an element
+        // only arrays held was freed while they still held it, and a later
+        // call crashed the VM. With no budget left, the first check of the
+        // handler stops the call. QuickJS checks every 10 000 polls, and an
+        // iteration polls twice (the method, then the call of the callback):
+        // after an interrupt (`views[0]`), the handler stops either every
+        // method's poll or every call's, and one call more before the method
+        // stops the other.
+        let mut host = sandboxed(Limits {
+            call_budget: Duration::ZERO,
+            ..Limits::default()
+        });
+        let errors = Rc::new(RefCell::new(Vec::new()));
+        let seen = errors.clone();
+        host.set_error_handler(Box::new(move |e| seen.borrow_mut().push(e.message.clone())));
+        host.eval_source(
+            r#"import { element, prop } from "nsh:rt";
+            const methods = ["find", "findIndex", "findLast", "findLastIndex"];
+            globalThis.kept = methods.map(() => ({}));
+            globalThis.weak = kept.map((element) => new WeakRef(element));
+            globalThis.items = kept.map((element) => new Array(100000).fill(element));
+            const press = (handler) => {
+                const view = element("view");
+                prop(view, "onPress", handler);
+                return view;
+            };
+            const nothing = () => {};
+            globalThis.views = [press(() => { for (;;) {} })];
+            methods.forEach((method, i) => {
+                views.push(press(() => items[i][method](() => false)));
+                views.push(press(() => (nothing(), items[i][method](() => false))));
+            });"#,
+        )
+        .unwrap();
+        ops(&host);
+        // Views 2 (the loop), then 4 to 18: two per method.
+        for view in (4..=18).step_by(2) {
+            host.dispatch_event(2, EventKind::Press, &EventPayload::None);
+            host.dispatch_event(view, EventKind::Press, &EventPayload::None);
+        }
+        let errors = errors.borrow().clone();
+        assert_eq!(errors.len(), 16, "{errors:?}");
+        assert!(
+            errors.iter().all(|e| e.contains("budget of 0 ms")),
+            "{errors:?}"
+        );
+        // The arrays let their elements go; `kept` still holds them.
+        host.eval_source("items = null;").unwrap();
+        host.collect_garbage();
+        host.eval_source(&format!(
+            "{REPORT}report(weak.map((w, i) => w.deref() === kept[i]).join());"
+        ))
+        .unwrap();
+        assert_eq!(reported(&host), ["true,true,true,true"]);
+        assert!(host.fatal().is_none());
+    }
+
+    #[test]
     fn running_out_of_memory_stops_the_vm() {
         let host = sandboxed(Limits {
             memory_bytes: 16 << 20,

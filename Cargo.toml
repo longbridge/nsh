@@ -210,12 +210,12 @@ tokio = { version = "1", default-features = false }
 # The same QuickJS binding and standard modules run on every platform; the JIT
 # stays disabled on wasm, preserving the native compiler's bytecode format.
 # `full` is avoided on purpose: it enables `dyn-load` (dlopen2), which does not build for iOS / Catalyst.
-rquickjs = { package = "quickjs-jit", version = "=0.14.1", default-features = false, features = ["std", "futures", "loader", "macro"] }
+rquickjs = { package = "quickjs-jit", version = "=0.14.2", default-features = false, features = ["std", "futures", "loader", "macro"] }
 
 # The standard modules `buffer`, `crypto`, `path`, `url` and `zlib` (all targets): LLRT d9fd873e,
 # vendored by quickjs-jit-stdlib, on NSH's exact QuickJS VM. Privileged I/O stays behind NSH grants.
 # `crypto` and `zlib` are `nsh-js`'s features of those names.
-quickjs-jit-stdlib = { version = "=0.14.1", default-features = false, features = ["buffer", "path"] }
+quickjs-jit-stdlib = { version = "=0.14.2", default-features = false, features = ["buffer", "path"] }
 getrandom-stdlib = { package = "getrandom", version = "0.4", default-features = false }
 cap-std = "4.0.3"
 futures-util = { version = "0.3", features = ["sink"] }
