@@ -400,11 +400,11 @@ impl State {
             }
         }
         if self.action_rows {
-            for row in 0..self.rows.len() {
+            for (row, height) in extra.iter_mut().enumerate().take(self.rows.len()) {
                 if let Some(Row::Line { hunk: Some(h), .. }) = self.rows.get(row) {
                     let ends = !matches!(self.rows.get(row + 1), Some(Row::Line { hunk: Some(n), .. }) if n == h);
                     if ends {
-                        extra[row] += self.font.line_height;
+                        *height += self.font.line_height;
                     }
                 }
             }

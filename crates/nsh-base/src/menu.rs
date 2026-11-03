@@ -116,7 +116,7 @@ impl Items {
                         .filter(|e| e.level == 0 && !e.disabled.get_untracked());
                     match how {
                         Keyed::First => enabled.next().copied(),
-                        Keyed::Last => enabled.last().copied(),
+                        Keyed::Last => enabled.next_back().copied(),
                     }
                 };
                 if let Some(entry) = pick {

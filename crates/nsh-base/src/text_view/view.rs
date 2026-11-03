@@ -662,7 +662,7 @@ impl Cx {
                             .bg(move || theme().muted)
                             .child(
                                 text(match is_terminal() {
-                                    true => super::math::tex_text(tex).into(),
+                                    true => super::math::tex_text(tex),
                                     false => tex.clone(),
                                 })
                                 .font_family(mono_font)
