@@ -419,7 +419,7 @@ covers [events] NavPage.onBackPress
 covers [events] NavPage.onDismiss
 # base-nav-stack
 tap id:case-base-nav-stack
-# on screen headless (no platform hides the covered ones).
+# Only the top page is on screen; the controls sit outside the stack.
 expect Routes: home
 expect Depth: 1
 expect Renders: 1
@@ -435,7 +435,6 @@ expect Renders: 2
 tap text:Push
 expect Page p2 at 2
 expect Routes: home > p1 > p2
-expect Bumps of home: 1
 # pop: one page.
 tap text:Pop
 expect Routes: home > p1
@@ -445,7 +444,6 @@ expect Renders: 3
 # The same route twice is two pages; remove takes the topmost.
 tap text:Push twice
 expect Routes: home > p1 > twice > twice
-expect Page twice at 2
 expect Page twice at 3
 expect Renders: 5
 tap text:Remove twice
@@ -486,7 +484,6 @@ expect Cleanups: p1 p2 p3 p4 p5 twice twice
 # setRoutes: all pages.
 tap text:Set routes
 expect Routes: home > a > b
-expect Page a at 1
 expect Page b at 2
 absent Page swapped at 1
 # remove below: the pages above follow with their index.

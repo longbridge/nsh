@@ -211,6 +211,9 @@ expect Success, information, a warning and an error, each with what to do next
 tap text:Copy the link
 expect Copied
 expect The link is on the clipboard (1)
+# The toasts' layer takes a back first: dismissed, the demo's page goes.
+tap text:Dismiss all
+absent Copied
 back
 tap text:Dock
 expect main.rs: 0 edits
