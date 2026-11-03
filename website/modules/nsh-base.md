@@ -485,8 +485,8 @@ See [ColorPicker](../elements/color-picker.md).
 A fixed-length numeric one-time code, with no look: one native text field over the cells takes the keyboard, so
 typing, paste, the number pad and the system's code autofill are the platform's, and screen readers find one text
 field. Digits only go in, up to `length`; Backspace removes the last. The app owns `value` (or gives `defaultValue`)
-and hears `onChange` and `onComplete`; it styles the cells (`focus:` on the one that takes the next digit), their
-groups and the caret. See [OtpInput](../elements/otp-input.md).
+and hears `onChange` and `onComplete`; it styles the cells (`focus:` on the one that takes the next digit, `data-filled:`
+on those that hold a digit), their groups and the caret. See [OtpInput](../elements/otp-input.md).
 
 ### Pagination
 

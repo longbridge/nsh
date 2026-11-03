@@ -681,7 +681,7 @@ it changes, and they are resolved again when the tokens change (`Components::app
   `.project_data("range-start", is_start)` (`Prop::ProjectedData`) applies the part's `data-range-start:` classes and,
   with `group`, the `group-data-range-start:` ones inside it, as Tailwind's `data-*` variants; a view whose classes
   read none sends nothing when its attributes change. A component names its attributes in its docs, as a calendar's
-  days do.
+  days do (`data-range-start`, `data-today`, ...) and a code input's cells (`data-filled`).
 - What never changes is plain Rust, decided when the view is made: `.when(variant == Variant::Ghost, |v| ..)`.
 - The app's `class` / `classList` on a component (Tailwind) is merged after the root's rules; at equal rank it wins.
   The styles a view gives a nested component element merge the same way (bound ones too: `Patch::Nested`).
