@@ -2636,7 +2636,7 @@ class Player {
   op_sht([, id, ms]) {
     const el = this.view(id);
     const s = el?._shader;
-    if (!s || (s.layer.role !== 2 && s.layer.role !== 4) || !this.shaderDraws(s.layer)) return;
+    if (!s || (s.layer.role !== 2 && s.layer.role !== 4) || s.failed || !this.shaderDraws(s.layer)) return;
     const host = this.shaderHost(el);
     const box = this.shaderBox(el);
     if (!box) return;
@@ -2656,8 +2656,8 @@ class Player {
     s.fresh[3] = true;
     s.stale |= 8;
     host.classList.add("nsh-fx");
-    this.renderShader(el, performance.now());
-    this.shaderDirty(el);
+    if (this.renderShader(el, performance.now())) this.shaderDirty(el);
+    else this.shaderFailed(el);
   }
 
   /** A page's or a dialog's `transitionShader` (`layer`, `ms`), or none. */
@@ -2674,10 +2674,10 @@ class Player {
    * alone its `sample_from`, and `nsh.progress` how much of the upper side
    * shows: 0 to 1, or 1 to 0 when `reverse`. The views are where they end
    * at once under it. Calls `done` when it ends; false where it cannot run
-   * (`shaderDraws`) and when the user asks for less motion: the page's or
-   * the dialog's own motion runs then. One that still runs over `host`
-   * ends first (its `done` runs), so the new one starts from where it
-   * ends.
+   * (`shaderDraws`, or a first frame the browser refuses) and when the
+   * user asks for less motion: the page's or the dialog's own motion runs
+   * then. One that still runs over `host` ends first (its `done` runs), so
+   * the new one starts from where it ends.
    */
   shaderNav(host, upper, nav, reverse, done) {
     this.endNavShader(host);
@@ -2724,9 +2724,13 @@ class Player {
     const to = this.pictureCanvas(o, 3, [r.width, r.height, 0]);
     this.paintHost(to.cx, host, r, null, null);
     host.append(o);
+    if (!this.renderShader(o, performance.now())) {
+      o.remove();
+      this.freeTextures(o._shader);
+      return false;
+    }
     host._navOverlay = o;
     this.shaderViews.add(o);
-    this.renderShader(o, performance.now());
     this.shaderDirty(o);
     return true;
   }
@@ -2984,7 +2988,9 @@ class Player {
       if (child.tagName === "IMG") {
         if (child.complete && child.naturalWidth && this.paintable(child)) this.paintImage(cx, child, cs, x, y, w, h, radii);
       } else if (child.tagName === "CANVAS") {
-        if (child.width && child.height) {
+        // One a cross-origin image tainted (`draw`) would taint the
+        // picture, which WebGL then refuses to upload.
+        if (child.width && child.height && !child._tainted) {
           // A fill's canvas inherits its view's rounded corners.
           cx.save();
           shape();
@@ -3012,10 +3018,13 @@ class Player {
     return false;
   }
 
-  /** Whether an image can be painted without tainting the picture (same origin or CORS). */
+  /** Whether an image can be painted without tainting the picture (same origin, `data:` or CORS). */
   paintable(img) {
+    const src = img.currentSrc || img.src;
+    // A `data:` URL's origin reads "null", but its image never taints.
+    if (src.startsWith("data:")) return true;
     try {
-      return new URL(img.currentSrc || img.src, location.href).origin === location.origin || img.crossOrigin != null;
+      return new URL(src, location.href).origin === location.origin || img.crossOrigin != null;
     } catch {
       return false;
     }
@@ -3105,9 +3114,12 @@ class Player {
       if (!el._shaderVisible || !(s.dirty || runs || s.stale)) continue;
       s.dirty = false;
       // One that cannot draw paints no pictures and takes no frames.
-      if (!this.shaderDraws(s.layer)) continue;
+      if (s.failed || !this.shaderDraws(s.layer)) continue;
       if (s.stale) this.paintInputs(el);
-      this.renderShader(el, now);
+      if (!this.renderShader(el, now)) {
+        this.shaderFailed(el);
+        continue;
+      }
       again ||= runs;
     }
     if (again) {
@@ -3127,9 +3139,20 @@ class Player {
     if (!canvas || canvas.hidden === !shown) return;
     canvas.hidden = !shown;
     if (el._shader.layer.role !== 3) return;
-    if (shown && this.shaderDraws(el._shader.layer)) this.screenShader = el;
+    if (shown && !el._shader.failed && this.shaderDraws(el._shader.layer)) this.screenShader = el;
     else if (this.screenShader === el) this.screenShader = null;
     this.root.classList.toggle("nsh-fx", Boolean(this.screenShader));
+  }
+
+  /**
+   * A view whose frame the browser refused (`renderShader`) shows its
+   * children as they are, as one that cannot draw, until its next layer
+   * (`op_sh`) tries again; a page's or a dialog's change ends at once.
+   */
+  shaderFailed(el) {
+    el._shader.failed = true;
+    if (this.screenShader === el) this.screenShader = null;
+    this.endTransition(el);
   }
 
   /**
@@ -3236,7 +3259,7 @@ class Player {
       s.textures = [null, null, null, null];
       s.stale |= s.reads;
       const role = s.layer.role;
-      if ((role === 1 || role === 3) && el.isConnected && this.shaderDraws(s.layer)) {
+      if ((role === 1 || role === 3) && !s.failed && el.isConnected && this.shaderDraws(s.layer)) {
         if (role === 3) this.screenShader = el;
         this.shaderHost(el).classList.add("nsh-fx");
       }
@@ -3306,8 +3329,12 @@ class Player {
     if (s.fresh[input]) {
       s.fresh[input] = false;
       gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, picture);
-      gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
+      try {
+        // Throws for a tainted picture (`renderShader`).
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, picture);
+      } finally {
+        gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
+      }
       for (const [k, v] of [[gl.TEXTURE_MIN_FILTER, gl.LINEAR], [gl.TEXTURE_MAG_FILTER, gl.LINEAR], [gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE], [gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE]]) {
         gl.texParameteri(gl.TEXTURE_2D, k, v);
       }
@@ -3315,7 +3342,24 @@ class Player {
     return t;
   }
 
+  /**
+   * Draws a view's frame: false when the browser refuses it, as WebGL
+   * refuses to upload a tainted picture (a canvas a cross-origin image
+   * tainted where `paintTree` could not tell). The caller shows the
+   * children then (`shaderFailed`), and the frame, or the batch it was
+   * drawn in, goes on with the other views.
+   */
   renderShader(el, t) {
+    try {
+      this.drawShader(el, t);
+      return true;
+    } catch (err) {
+      console.warn("[nsh] shader:", err);
+      return false;
+    }
+  }
+
+  drawShader(el, t) {
     const s = el._shader;
     const gl = this.shaderGl();
     if (!gl) return;
@@ -4140,6 +4184,10 @@ class Player {
         } else if (name === "drawImage") {
           const img = this.canvasImage(args[0], el);
           if (!img) continue;
+          // A cross-origin image without CORS taints the canvas for good
+          // (the browser never clears the flag): shaders' pictures leave
+          // it out (`paintTree`).
+          if (!this.paintable(img)) canvas._tainted = true;
           const dest = args.slice(2).map(v);
           if (args[1]) cx.drawImage(img, ...args[1], ...dest);
           else cx.drawImage(img, ...dest);

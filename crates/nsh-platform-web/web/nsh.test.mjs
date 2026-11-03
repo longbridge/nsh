@@ -1056,3 +1056,135 @@ test("a picture taken again reads the styles of what changed only", () => {
     globalThis.getComputedStyle = saved;
   }
 });
+
+test("a canvas that drew a cross-origin image is left out of shaders' pictures", () => {
+  const { player } = fakePlayer();
+  const image = (src, crossOrigin = null) => [src, { img: { src, currentSrc: src, crossOrigin }, ready: true, waiting: new Set() }];
+  const cx = new Proxy({}, { get: () => () => {} });
+  const canvasOf = (src) => ({
+    _frame: [0, 0, 10, 10],
+    _slots: [],
+    _ops: [["drawImage", src, null, 0, 0, 10, 10]],
+    _canvas: { width: 0, height: 0, getContext: () => cx },
+  });
+  Object.assign(player, {
+    asset: (uri) => uri,
+    zoomOf: () => 1,
+    images: new Map([
+      image("https://cdn.example/a.png"),
+      image("https://cdn.example/cors.png", "anonymous"),
+      image("https://app.example/b.png"),
+      image("data:image/png;base64,AAAA"),
+    ]),
+  });
+  const saved = [globalThis.location, globalThis.devicePixelRatio];
+  globalThis.location = { href: "https://app.example/", origin: "https://app.example" };
+  globalThis.devicePixelRatio = 1;
+  try {
+    const foreign = canvasOf("https://cdn.example/a.png");
+    const cors = canvasOf("https://cdn.example/cors.png");
+    const own = canvasOf("https://app.example/b.png");
+    const inline = canvasOf("data:image/png;base64,AAAA");
+    for (const el of [foreign, cors, own, inline]) player.draw(el);
+    assert.equal(foreign._canvas._tainted, true);
+    assert.ok(!cors._canvas._tainted);
+    assert.ok(!own._canvas._tainted);
+    assert.ok(!inline._canvas._tainted);
+  } finally {
+    [globalThis.location, globalThis.devicePixelRatio] = saved;
+  }
+  const drawn = [];
+  const picture = new Proxy({}, { get: (_, name) => (name === "drawImage" ? (c) => drawn.push(c.name) : () => {}) });
+  const canvas = (name, tainted) => ({
+    name,
+    tagName: "CANVAS",
+    width: 10,
+    height: 10,
+    _tainted: tainted,
+    children: [],
+    classList: { contains: () => false },
+    contains: () => false,
+    getBoundingClientRect: () => ({ left: 0, top: 0, width: 10, height: 10 }),
+  });
+  const host = { children: [canvas("tainted", true), canvas("clean", false)] };
+  const savedStyle = globalThis.getComputedStyle;
+  globalThis.getComputedStyle = () => ({ display: "block", opacity: "1", visibility: "visible", backgroundColor: "transparent", borderTopWidth: "0px" });
+  player.paintGen = player.paintReset = 0;
+  try {
+    player.paintTree(picture, host, { left: 0, top: 0 }, 1, null, null, 0);
+  } finally {
+    globalThis.getComputedStyle = savedStyle;
+  }
+  assert.deepEqual(drawn, ["clean"]);
+});
+
+test("a frame the browser refuses shows the view's children, and the frame goes on with the others", () => {
+  const refuse = () => {
+    throw new Error("SecurityError: the canvas has been tainted by cross-origin data");
+  };
+  const gl = new Proxy(
+    { isContextLost: () => false, canvas: { width: 0, height: 0 }, texImage2D: refuse },
+    { get: (gl, name) => (name in gl ? gl[name] : () => {}) },
+  );
+  const { player, el } = shaderPlayer({ gl, program: (layer) => ({ samplers: layer.key === 1 ? [["content", 0]] : [] }) });
+  withCanvases(() => player.op_sh(["sh", 2, shaderLayer(1)]));
+  assert.ok(el.classList.contains("nsh-fx"));
+  el.isConnected = true;
+  el._shader.pictures[0] = {};
+  const other = {
+    isConnected: true,
+    _frame: [0, 0, 10, 10],
+    _shaderVisible: true,
+    _shader: { layer: shaderLayer(0, 2), words: new Uint32Array(0), kept: 0, since: null, progress: 0, dirty: true, stale: 0, pictures: [], textures: [] },
+    _shaderCanvas: { width: 0, height: 0, getContext: () => ({ clearRect() {}, drawImage() {} }) },
+  };
+  player.shaderViews.add(other);
+  const drawn = [];
+  const render = player.renderShader;
+  player.renderShader = (view, t) => {
+    const ok = render.call(player, view, t);
+    drawn.push([view === el ? "effect" : "other", ok]);
+    return ok;
+  };
+  const saved = [console.warn, globalThis.devicePixelRatio];
+  console.warn = () => {};
+  globalThis.devicePixelRatio = 1;
+  try {
+    player.shaderFrame(0);
+    assert.deepEqual(drawn, [["effect", false], ["other", true]]);
+    assert.ok(!el.classList.contains("nsh-fx"), "children shown");
+    assert.equal(el._shaderCanvas.width, 0, "without a frame over them");
+    drawn.length = 0;
+    el._shader.dirty = other._shader.dirty = true;
+    player.shaderFrame(0);
+    assert.deepEqual(drawn, [["other", true]], "not tried again for this layer");
+  } finally {
+    [console.warn, globalThis.devicePixelRatio] = saved;
+  }
+});
+
+test("a page's shader whose first frame the browser refuses leaves the change to its own motion", () => {
+  const gl = new Proxy(
+    { isContextLost: () => false, canvas: { width: 0, height: 0 }, texImage2D: () => { throw new Error("SecurityError"); } },
+    { get: (gl, name) => (name in gl ? gl[name] : () => {}) },
+  );
+  const { player } = shaderPlayer({ gl, program: () => ({ samplers: [["from", 2], ["to", 3]] }) });
+  player.pictureCanvas = (view, input) => {
+    view._shader.pictures[input] = {};
+    return { canvas: {}, cx: {} };
+  };
+  const stack = { getBoundingClientRect: () => ({ width: 390, height: 844 }), append(o) { o.removed = false; } };
+  const saved = [globalThis.document, console.warn, globalThis.devicePixelRatio];
+  globalThis.document = { createElement: () => ({ style: {}, append() {}, remove() { this.removed = true; } }) };
+  console.warn = () => {};
+  globalThis.devicePixelRatio = 1;
+  let ended = false;
+  try {
+    assert.equal(player.shaderNav(stack, {}, { layer: shaderLayer(2), ms: 350 }, false, () => (ended = true)), false);
+  } finally {
+    [globalThis.document, console.warn, globalThis.devicePixelRatio] = saved;
+  }
+  assert.equal(stack._navOverlay ?? null, null);
+  assert.equal(player.shaderViews.size, 0);
+  assert.equal(ended, false, "the caller's own motion calls it");
+});

@@ -233,7 +233,8 @@ dialog's `transitionShader`) take their pictures from the DOM. `shader.rs` also 
 - **Pictures.** `paintTree` paints a view's children into a 2D canvas in points (backgrounds, rounded corners,
   uniform borders, images fitted by `object-fit`, canvases, other shaders' pictures among them, text runs, clipping
   and opacity; no rotations, gradients or shadows; cross-origin images without CORS are left out so the canvas stays
-  readable). Pictures cover the box plus `overflow` on each side and are uploaded premultiplied
+  readable, and so are the app's canvases that drew one, which `draw` marks `_tainted` for good, as the browser never
+  clears its own flag). Pictures cover the box plus `overflow` on each side and are uploaded premultiplied
   (`UNPACK_PREMULTIPLY_ALPHA_WEBGL`), linear and clamped, to the program's sampler uniforms; an input without a
   picture reads a transparent texture. What each element paints with from its computed style is kept
   (`paintStyle`) until a change reaches it: one `MutationObserver` on the root (`watchPaint`) stamps each element a
@@ -270,6 +271,11 @@ dialog's `transitionShader`) take their pictures from the DOM. `shader.rs` also 
   without a device: an effect or a screen effect takes no `nsh-fx` (and its canvas is cleared when its new program is
   refused), a transition starts no run, a page's or a dialog's `transitionShader` leaves the change to its own
   motion, and `shaderFrame` paints no pictures and takes no frames for it.
+- **A refused frame.** `renderShader` catches what drawing a frame throws (`drawShader`; WebGL refuses to upload a
+  tainted picture, from a canvas `paintTree` could not tell was tainted), so the frame, or the batch that started a
+  transition, goes on with the other views. The view shows its children as one that cannot draw (`shaderFailed`)
+  until its next layer (`op_sh`) tries again; a page's or a dialog's change whose first frame is refused takes its own
+  motion, and one refused later ends at once, settled and reported.
 - **A lost context.** When the browser takes the context away (a GPU reset, a tab it evicts: `webglcontextlost`, or
   `isContextLost()` at the next `shaderFrame` where the event has not come), the programs and textures go with it
   and every view shows its children (`shaderLost`): effects and screen effects lose `nsh-fx` and their last frame, a
