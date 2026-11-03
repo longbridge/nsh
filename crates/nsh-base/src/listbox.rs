@@ -45,7 +45,11 @@
 //!   search field), the selected ones `selected:` (and selected for screen
 //!   readers; [`Hooks::selected`] says which: the select's one value, the
 //!   combobox's set), a disabled one `disabled:`; a footer part below the
-//!   rows (the combobox's, [`Footer`]).
+//!   rows (the combobox's, [`Footer`]). The app's `renderItem` gets what
+//!   an item is ([`SelectEntry`]), never its state, so a row's drawing is
+//!   made once per item and a move of the highlight or a choice draws
+//!   nothing again (the content follows the row's states with `group-*:`
+//!   classes).
 //!
 //! Choosing is the component's ([`Hooks::choose`]): the select closes, a
 //! combobox of several values toggles the item and stays open.
@@ -67,7 +71,7 @@ use rustc_hash::FxHasher;
 
 use crate::{
     popup::{self, DropdownFrame, OpenChangeReason, Presence},
-    select::{SelectGroup, SelectItem, SelectItemState},
+    select::{SelectEntry, SelectGroup, SelectItem},
 };
 
 /// How long typeahead keeps what was typed before it starts again.
@@ -875,7 +879,7 @@ pub(crate) struct Parts {
     /// (`Select`'s); none when the component's own field searches
     /// (`Combobox`'s input).
     pub(crate) search: Option<SearchField>,
-    pub(crate) render_item: Prop<Option<Renderer<SelectItemState>>>,
+    pub(crate) render_item: Prop<Option<Renderer<SelectEntry>>>,
     pub(crate) render_group: Prop<Option<Renderer<SelectGroup>>>,
     pub(crate) empty: Prop<Option<Slot>>,
     /// The content below the rows, in a part of its own (`Combobox`'s
@@ -893,6 +897,8 @@ pub(crate) struct SearchField {
     pub(crate) class: Prop<Option<SharedString>>,
     pub(crate) style: Prop<InputPartStyle>,
     pub(crate) placeholder: Prop<Option<SharedString>>,
+    /// What screen readers call it.
+    pub(crate) accessibility_label: Prop<Option<SharedString>>,
 }
 
 /// The part below the rows and what it holds.
@@ -968,6 +974,7 @@ fn content(lb: Listbox, sheet: bool, parts: Parts, hooks: Hooks) -> Vec<AnyEleme
                         .map(|p| p.to_string())
                         .unwrap_or_default()
                 })
+                .optional_label(field.accessibility_label)
                 // The desktops type into it at once; a touch screen's
                 // keyboard comes when the user asks.
                 .auto_focus(!sheet)
@@ -1075,6 +1082,12 @@ fn item_row(lb: Listbox, entry: Memo<Option<Row>>, parts: Parts, hooks: Hooks) -
             .get()
             .and_then(|i| lb.items.with(|items| items.get(i).cloned()))
     });
+    // What `renderItem` draws: the item, never its state, so a move of the
+    // highlight or a choice draws nothing again.
+    let entry = computed(move || {
+        let i = index.get()?;
+        item.with(|it| it.as_ref().map(|it| SelectEntry::of(it, i)))
+    });
     let disabled = computed(move || item.with(|i| i.as_ref().is_some_and(|i| i.disabled)));
     let highlighted = computed(move || index.get().is_some_and(|i| lb.is_highlighted(i)));
     let is_selected = hooks.selected.clone();
@@ -1145,17 +1158,8 @@ fn item_row(lb: Listbox, entry: Memo<Option<Row>>, parts: Parts, hooks: Hooks) -
             if custom.get() {
                 return dynamic(move || {
                     let render = parts.render_item.get()?;
-                    let (i, it) = (index.get()?, item.get()?);
-                    let state = SelectItemState {
-                        value: it.value,
-                        title: it.title,
-                        disabled: it.disabled,
-                        selected: selected.get(),
-                        highlighted: highlighted.get(),
-                        index: i as u32,
-                        group: it.group,
-                    };
-                    Some(render.render(format!("item:{i}"), state))
+                    let entry = entry.get()?;
+                    Some(render.render(format!("item:{}", entry.index), entry))
                 });
             }
             text(move || item.with(|i| i.as_ref().map(|i| i.title.clone()).unwrap_or_default()))

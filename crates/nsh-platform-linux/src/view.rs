@@ -303,7 +303,7 @@ fn placement(x: f32, y: f32, transform: Option<gsk::Transform>, scale: f32) -> g
 }
 
 /// `v` (points) rounded to the nearest device pixel at `scale` pixels a point.
-fn snap(v: f32, scale: f32) -> f32 {
+pub(crate) fn snap(v: f32, scale: f32) -> f32 {
     if scale <= 0.0 {
         return v.round();
     }

@@ -1729,10 +1729,8 @@ mod tests {
         )
         .expect("a shader");
         let layer = nsh_core::shader::ShaderLayer::new(shader, &[], &mut Vec::new());
-        let shader = nsh_core::NavShader {
-            layer: std::sync::Arc::new(layer),
-            duration: Duration::from_millis(500),
-        };
+        let shader =
+            nsh_core::NavShader::new(std::sync::Arc::new(layer), Duration::from_millis(500));
         (surface, stack, shader)
     }
 
