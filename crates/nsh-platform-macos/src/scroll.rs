@@ -442,6 +442,9 @@ fn apply_offset(surface: &Rc<Surface>, view: &NshView) {
     let origin = bounds_origin(view);
     let committed = view.container_bounds_origin();
     view.set_layer_scroll(committed.0 - origin.0, committed.1 - origin.1);
+    // What it shows moved without a view moving: the effects around it
+    // (and a screen effect reading the surface) picture it again.
+    crate::shader::ui_changed(view);
     arm_commit(surface, view);
 }
 
