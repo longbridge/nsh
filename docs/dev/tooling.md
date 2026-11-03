@@ -531,9 +531,11 @@ so selectors resolve the same everywhere; the `Agent` takes each step on a threa
 selector on the model, scrolls the view into view when it is not (the innermost scroll view around it that hides it,
 a gesture at a time; on a touch screen the finger lands clear of the views inside that take a drag themselves,
 `Scene::drag_takers`: responders and pans, whose app would answer, a moment later, whether the scroll view keeps
-the gesture; between gestures it waits only for the view to stop moving, `Agent::stopped`, and once it is in
-view for the app to settle, so a page that is never quiet, a ticking timer, costs one settling per step rather than
-one per gesture), asks the platform where it is (`Native::bounds`; a span of a text (`Scene::span`) is pressed on its
+the gesture; it lands at the scroll view's middle, and after a gesture that moved nothing (what is there scrolls by
+itself, a text area, or the gesture was undone) a quarter of the way from the edge the finger moves away from, where
+it has the most room, then a quarter of the way from the other; between gestures it waits only for the view to stop
+moving, `Agent::stopped`, and once it is in view for the app to settle, so a page that is never quiet, a ticking
+timer, costs one settling per step rather than one per gesture), asks the platform where it is (`Native::bounds`; a span of a text (`Scene::span`) is pressed on its
 characters' first line, `Native::text_bounds`, the rectangles each platform highlights a selection with, and the
 platform's own hit testing gives the press to the span; a press of a view inside the one that takes it, a cell's
 text in a row, lands on the match's middle, `Scene::match_inside`, as headless) and acts there with synthesized input

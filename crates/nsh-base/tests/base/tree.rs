@@ -2,9 +2,10 @@
 //! expanded and selected states); a press selects a row and expands or
 //! collapses a folder; the tree is one stop of the keyboard focus whose
 //! arrows move the selection past disabled items (Right and Left expand,
-//! collapse, and go to the first child and the parent), Home and End go to
-//! the ends, Return and Space expand and collapse, letters select by
-//! typeahead; the state is the app's when it sets it; `revealItem`
+//! collapse, and go to the first child and the parent; they trade places
+//! in a right-to-left layout), Home and End go to the ends, Return and
+//! Space expand and collapse, letters select by typeahead; the state is
+//! the app's when it sets it; `revealItem`
 //! expands what is above an item; the keys act on the row a hidden
 //! selection is under, and the keyboard's focus shows on the first row
 //! while nothing is selected; screen readers' focus follows the keys;
@@ -185,12 +186,18 @@ fn launch(root: Root) -> Headless {
 }
 
 fn launch_with(root: Root, screen_reader: bool) -> Headless {
+    launch_in(root, screen_reader, false)
+}
+
+/// [`launch_with`] in a right-to-left layout with `rtl`.
+fn launch_in(root: Root, screen_reader: bool, rtl: bool) -> Headless {
     let mut config = EngineConfig {
         viewport: Size::new(px(800.0), px(844.0)),
         ..EngineConfig::new(root)
     };
     config.environment.os = Os::MacOs;
     config.environment.screen_reader = screen_reader;
+    config.environment.rtl = rtl;
     let mut app = Headless::start(config).unwrap();
     app.first_render().unwrap();
     app
@@ -202,6 +209,13 @@ fn start(props: HarnessProps) -> Headless {
 
 fn start_with(props: HarnessProps, screen_reader: bool) -> Headless {
     let mut app = launch_with(Root::new::<Harness>(move || props.clone()), screen_reader);
+    app.wait_for("role:treeitem[src]").unwrap();
+    app
+}
+
+/// [`start`] in a right-to-left layout.
+fn start_rtl(props: HarnessProps) -> Headless {
+    let mut app = launch_in(Root::new::<Harness>(move || props.clone()), false, true);
     app.wait_for("role:treeitem[src]").unwrap();
     app
 }
@@ -422,6 +436,42 @@ fn right_expands_then_enters_and_left_collapses_then_leaves() {
     app.wait_for_gone("role:treeitem[lib.rs]", Duration::from_secs(5))
         .unwrap();
     see(&mut app, "expanded:");
+}
+
+#[test]
+fn right_to_left_left_expands_then_enters_and_right_collapses_then_leaves() {
+    let mut app = start_rtl(props());
+    enter(&mut app);
+    key(&mut app, "down");
+    key(&mut app, "down");
+    key(&mut app, "down");
+    see(&mut app, "selected:src/ui");
+    // The rows run from the right: Left expands, then goes to the first
+    // child.
+    key(&mut app, "left");
+    app.wait_for("role:treeitem[tree.rs]").unwrap();
+    see(&mut app, "selected:src/ui");
+    key(&mut app, "left");
+    see(&mut app, "selected:src/ui/tree.rs");
+    // Right goes to the parent, then collapses it.
+    key(&mut app, "right");
+    see(&mut app, "selected:src/ui");
+    key(&mut app, "right");
+    app.wait_for_gone("role:treeitem[tree.rs]", Duration::from_secs(5))
+        .unwrap();
+    // Up and Down keep theirs.
+    key(&mut app, "up");
+    see(&mut app, "selected:src/lib.rs");
+    key(&mut app, "down");
+    see(&mut app, "selected:src/ui");
+    // The direction changes while the tree has the focus: the keys follow.
+    app.set_environment("ltr", |env| env.rtl = false).unwrap();
+    key(&mut app, "right");
+    app.wait_for("role:treeitem[tree.rs]").unwrap();
+    key(&mut app, "left");
+    app.wait_for_gone("role:treeitem[tree.rs]", Duration::from_secs(5))
+        .unwrap();
+    see(&mut app, "selected:src/ui");
 }
 
 #[test]
