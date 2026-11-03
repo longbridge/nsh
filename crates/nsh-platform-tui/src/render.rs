@@ -284,6 +284,15 @@ impl Painter<'_> {
                     .as_deref()
                     .is_some_and(|label| shown(self.tree, id, label))
         });
+        // A popup holding a list (a select's, a combobox's, a menu) with
+        // no box of the app's is a surface all the same, framed around its
+        // own box: the layout keeps that frame's Cells (`Core::framed_box`).
+        let list_popup = self
+            .tree
+            .get(id)
+            .is_some_and(|view| view.props.overlay_anchor.is_some())
+            && !has_box(self.tree, id)
+            && holds_list(self.tree, id, 3);
         let Some(view) = self
             .tree
             .views
@@ -378,8 +387,12 @@ impl Painter<'_> {
             && !layer.overlay
             && fill.0 & 255 == 255
             && visible == self.screen;
+        // A dot (a presence dot: a round box of a hued fill the layout
+        // pins to one Cell) is `●` in its color over what is under it,
+        // not a band.
+        let dot = dot(view, bounds, fill);
         let filled = match parent.ramp {
-            Some(_) if !page => palette::surface(fill, parent),
+            Some(_) if !page && !dot => palette::surface(fill, parent),
             _ => Surface::None,
         };
         if let Some(ramp) = parent.ramp {
@@ -409,22 +422,10 @@ impl Painter<'_> {
             ground.swatch = true;
         }
         // The layout decides where a border is: the core sends a width
-        // only for the sides it gave a Cell (a card's), none on controls,
-        // boxes of text or small boxes. A filled surface's band is its
-        // edge: its line shows only where it stands out far more.
+        // only for the sides it gave a Cell (a card's, a framed filled
+        // cell's), none on controls, boxes of text or small boxes, so a
+        // side with a width draws, on a filled surface too.
         let mut edges = edges(view, parent);
-        // The same rule as the terminal layout's: the first side with a
-        // width gives the border's color.
-        let first_border = (0..4)
-            .find(|&side| edges.widths[side])
-            .map(|side| view.style.borders.colors[side]);
-        if filled != Surface::None
-            && let Some(color) = first_border
-            && palette::gap(color, parent) < 2.0 * palette::gap(fill, parent)
-            && !palette::hued(color)
-        {
-            edges.sides = [false; 4];
-        }
         // A one-row text field without a line or a fill of its own is a
         // raised band, as terminal search fields are.
         if let Some(ramp) = parent.ramp
@@ -489,7 +490,10 @@ impl Painter<'_> {
                 .clone()
                 .filter(|_| !label_shown);
         }
-        let surface = edges.any() || fill.0 & 255 == 255 || filled != Surface::None;
+        // An anchored list is a surface in a terminal whether or not the
+        // app filled it (`nsh-base`'s lists carry no look of their own): a
+        // list over the page without a frame does not read as one.
+        let surface = edges.any() || fill.0 & 255 == 255 || filled != Surface::None || list_popup;
         let mut framed = None;
         let mut frame_look = None;
         // Where the overlay's title is: an accent chip while the focus is
@@ -580,7 +584,7 @@ impl Painter<'_> {
         if !visible.is_empty() {
             // An opaque fill covers what was drawn under it before: a card
             // over a canvas's dots shows the card, not the dots through it.
-            if fill.0 & 255 == 255 && !page {
+            if fill.0 & 255 == 255 && !page && !dot {
                 clear_symbols(self.buffer, visible);
                 for y in visible.y..visible.bottom() {
                     for x in visible.x..visible.right() {
@@ -619,6 +623,11 @@ impl Painter<'_> {
                     Modifier::BOLD,
                 );
                 title_at = Some(Rect::new(visible.x + offset, visible.y, drawn, 1));
+            }
+            if dot {
+                let cell = &mut self.buffer[(visible.x, visible.y)];
+                cell.set_symbol("●");
+                cell.fg = palette::ink(fill, parent).fg.unwrap_or(Color::Reset);
             }
             if let Some((layout, _)) = &view.text
                 && let Some(layout) = layout.downcast::<CellLayout>()
@@ -865,6 +874,7 @@ impl Painter<'_> {
                     emphasis,
                     (ramp, ground.level, ground.surface),
                     popup_item,
+                    layer.modal,
                     layer.pane,
                 ),
                 None => mark_state(
@@ -886,8 +896,8 @@ impl Painter<'_> {
                 && edges.any()
                 && (!self.popup || layer.overlay)
                 && !visible.is_empty()
+                && recolor_border(self.buffer, bounds, visible, &edges, ACCENT)
             {
-                recolor_border(self.buffer, bounds, visible, ACCENT);
                 self.focus = Focus::Shown;
             }
             let chip = self.focus != Focus::None && title_at.is_some();
@@ -970,6 +980,22 @@ fn focus_pane(tree: &Mounter) -> Option<NodeId> {
         at = view.parent;
     }
     None
+}
+
+/// Whether `view` is a dot: laid out in one Cell, round, filled with a
+/// hued color and holding no text (a presence dot, a status dot).
+fn dot(view: &NshView, bounds: CellBounds, fill: nsh_core::Color) -> bool {
+    let size = view.frame.size;
+    let radii = view.style.radii().fit(size);
+    let half = size.width.min(size.height) * 0.5;
+    bounds.right - bounds.left == 1
+        && bounds.bottom - bounds.top == 1
+        && view.text.is_none()
+        && view.children.is_empty()
+        && fill.0 & 255 > 8
+        && palette::hued(fill)
+        && half > Points::ZERO
+        && radii.to_array().iter().all(|&r| r >= half * 0.99)
 }
 
 /// The accent the focus shows in: a box's line around it, an overlay's
@@ -1683,6 +1709,7 @@ fn mark_surface(
     emphasis: Option<Color>,
     (ramp, level, own): (Ramp, usize, Color),
     popup: bool,
+    dialog: bool,
     pane: bool,
 ) {
     // A part shows its control's states as its own (a list's highlighted
@@ -1712,12 +1739,8 @@ fn mark_surface(
         return;
     }
     if field {
-        if focused {
-            if edges.any() {
-                recolor_border(buffer, bounds, visible, ramp.focus_line());
-            } else {
-                band(buffer, visible, step(HOVER), own);
-            }
+        if focused && !recolor_border(buffer, bounds, visible, edges, ramp.focus_line()) {
+            band(buffer, visible, step(HOVER), own);
         }
         return;
     }
@@ -1728,30 +1751,50 @@ fn mark_surface(
     // a slider's track) takes no marks for focus.
     let adjustable = view.props.accessibility.role == AccessibilityRole::Adjustable;
     if focused && adjustable {
-        // A focused slider's (a color channel's) thumb is reversed: the
-        // track already shows the value, the thumb shows the keys go here.
+        // A focused slider's (a color channel's) thumb is reversed, and a
+        // color area's picked Cell (`◆`): the track or the grid already
+        // shows the value, the mark shows the keys go here.
         drawn(buffer, visible, |cell| {
-            if cell.symbol() == "●" {
+            if matches!(cell.symbol(), "●" | "◆") {
                 cell.modifier.insert(Modifier::REVERSED | Modifier::BOLD);
             }
         });
     }
     let focused = focused && !adjustable;
-    // The same for the selected row of a list in the pane the keys go to
-    // (lazygit's): elsewhere selection is the gray select band.
+    // The same for the item a list highlights for the keys (a command's
+    // inline list, a palette in a dialog) where the keys go: in a dialog or
+    // the pane holding the focus, so two lists never band at once; and for
+    // the selected row of a list in that pane (lazygit's): elsewhere
+    // selection is the gray select band.
+    // Only a list's item: a one-time code's next cell, focused the same
+    // way, shows focus its own way.
+    let highlighted = view.projected & state::FOCUSED != 0
+        && matches!(
+            view.props.accessibility.role,
+            AccessibilityRole::Option
+                | AccessibilityRole::Menuitem
+                | AccessibilityRole::MenuItemCheckbox
+                | AccessibilityRole::MenuItemRadio
+                | AccessibilityRole::Row
+                | AccessibilityRole::TreeItem
+        );
+    // A control whose Cells are all its children's fills (a swatch's
+    // color, a chip's raised fill, a pagination's bar) leaves a band
+    // nowhere to show: the selected one keeps its fill, not the accent.
+    let covered = !(visible.y..visible.bottom())
+        .any(|y| (visible.x..visible.right()).any(|x| buffer[(x, y)].bg == own));
     let active = (popup && (focused || hovered || pressed) && pressable(view))
-        || (pane && !popup && selected && !tab);
+        || ((dialog || pane) && !popup && highlighted)
+        || (pane && !popup && selected && !tab && !covered);
     if active {
         band(buffer, visible, ACCENT, own);
         // Its text turns the terminal's background color, so the band is
-        // under all of it, a child's fill included (today's circle in a
-        // calendar), and under a child's fill as dark as the terminal's.
+        // under all of it, over the whole row: a child's fill (a shortcut's
+        // key chip, today's circle in a calendar) takes the row's band, no
+        // fill of its own beside it.
         for y in visible.y..visible.bottom() {
             for x in visible.x..visible.right() {
-                let cell = &mut buffer[(x, y)];
-                if cell.bg == Color::Reset || cell.symbol() != " " {
-                    cell.bg = ACCENT;
-                }
+                buffer[(x, y)].bg = ACCENT;
             }
         }
         drawn(buffer, visible, |cell| {
@@ -1800,31 +1843,94 @@ fn mark_surface(
         return;
     }
     let container = inner.height >= CONTAINER_ROWS;
+    // A framed box shows focus with its line, whatever its size (a
+    // one-time code's next cell): nothing is filled over its frame. A box
+    // whose row has no room for its line (a button's focus ring) is banded.
+    let framed = focused && recolor_border(buffer, bounds, visible, edges, ramp.focus_line());
+    // A covered control, and one with no glyph no label to underline:
+    // its focus is an accent underline under its Cells.
+    let glyphs = (inner.y..inner.bottom())
+        .any(|y| (inner.x..inner.right()).any(|x| buffer[(x, y)].symbol() != " "));
+    let marked = focused && !framed && !container && (covered || !glyphs);
+    if marked {
+        focus_underline(buffer, visible);
+    }
     if selected {
         band(buffer, visible, step(SELECT), own);
         drawn(buffer, inner, |cell| cell.modifier.insert(Modifier::BOLD));
         // Focused as well as chosen (the page of a pagination, a
         // segment): the label is underlined, as the band alone is the
         // selection's.
-        if focused && !container {
+        if focused && !container && !marked {
             drawn(buffer, inner, |cell| {
                 cell.modifier.insert(Modifier::UNDERLINED)
             });
         }
     }
-    if focused && container {
-        if edges.any() {
-            recolor_border(buffer, bounds, visible, ramp.focus_line());
-        } else if !selected {
+    if framed {
+        // The line shows it.
+    } else if focused && container {
+        if !selected {
             band(buffer, visible, step(HOVER), own);
         }
-    } else if focused {
+    } else if focused && !covered {
         band(buffer, visible, step(SELECT), own);
+        drawn(buffer, inner, |cell| cell.modifier.insert(Modifier::BOLD));
+    } else if focused {
         drawn(buffer, inner, |cell| cell.modifier.insert(Modifier::BOLD));
     } else if pressed && !selected {
         band(buffer, visible, step(SELECT), own);
     } else if hovered && !selected {
         band(buffer, visible, step(HOVER), own);
+    }
+}
+
+/// Whether `id` or a view down its first children has a fill or a border:
+/// the box a terminal frames in an overlay, as the layout finds it.
+fn has_box(tree: &Mounter, id: NodeId) -> bool {
+    let mut at = id;
+    loop {
+        let Some(view) = tree.get(at) else {
+            return false;
+        };
+        let widths = view.style.borders.widths.to_array();
+        if widths.iter().any(|w| *w > nsh_core::Points::ZERO)
+            || view.style.background_color.0 & 255 != 0
+        {
+            return true;
+        }
+        let Some(&first) = view.children.first() else {
+            return false;
+        };
+        at = first;
+    }
+}
+
+/// Whether `id` or a view `depth` levels below it is a list of options or
+/// a menu.
+fn holds_list(tree: &Mounter, id: NodeId, depth: usize) -> bool {
+    let Some(view) = tree.get(id) else {
+        return false;
+    };
+    matches!(
+        view.props.accessibility.role,
+        AccessibilityRole::Listbox | AccessibilityRole::Menu
+    ) || (depth > 0
+        && view
+            .children
+            .iter()
+            .any(|&child| holds_list(tree, child, depth - 1)))
+}
+
+/// The accent underline under every Cell of `rect`: the focus of a
+/// control a band cannot show.
+fn focus_underline(buffer: &mut Buffer, rect: Rect) {
+    for y in rect.y..rect.bottom() {
+        for x in rect.x..rect.right() {
+            let cell = &mut buffer[(x, y)];
+            cell.modifier.insert(Modifier::UNDERLINED);
+            cell.underline_color = ACCENT;
+        }
     }
 }
 
@@ -1925,24 +2031,42 @@ fn band(buffer: &mut Buffer, rect: Rect, color: Color, own: Color) {
     }
 }
 
-/// A focused box's line in `color`.
-fn recolor_border(buffer: &mut Buffer, bounds: CellBounds, visible: Rect, color: Color) {
+/// A focused box's line in `color`: the line glyphs on the sides that
+/// draw one, never a text the box's row holds (a one-row bar with only a
+/// bottom line, a button whose ring the row has no room for). Whether
+/// there was a line to recolor.
+fn recolor_border(
+    buffer: &mut Buffer,
+    bounds: CellBounds,
+    visible: Rect,
+    edges: &Edges,
+    color: Color,
+) -> bool {
+    let [top, right, bottom, left] = edges.sides;
+    let mut any = false;
     for y in visible.y..visible.bottom() {
         for x in visible.x..visible.right() {
             let (cx, cy) = (i32::from(x), i32::from(y));
-            if cx == bounds.left
-                || cx == bounds.right - 1
-                || cy == bounds.top
-                || cy == bounds.bottom - 1
+            if (top && cy == bounds.top)
+                || (right && cx == bounds.right - 1)
+                || (bottom && cy == bounds.bottom - 1)
+                || (left && cx == bounds.left)
             {
                 let cell = &mut buffer[(x, y)];
-                if cell.symbol() != " " {
+                if cell
+                    .symbol()
+                    .chars()
+                    .next()
+                    .is_some_and(|c| ('\u{2500}'..='\u{257f}').contains(&c))
+                {
                     cell.fg = color;
                     cell.modifier -= Modifier::DIM;
+                    any = true;
                 }
             }
         }
     }
+    any
 }
 
 /// A band of `color` behind every Cell of `rect`, modifiers untouched.

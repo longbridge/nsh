@@ -50,7 +50,9 @@ pub(super) fn draw_until(
         );
         // A passive surface wakes for the engine's batches; its animation
         // frames are deadlines the embedder draws at, as the runner does.
-        let due = view.next_frame_deadline().map_or(deadline, |due| due.min(deadline));
+        let due = view
+            .next_frame_deadline()
+            .map_or(deadline, |due| due.min(deadline));
         let _ = rx.recv_deadline(due);
     }
 }

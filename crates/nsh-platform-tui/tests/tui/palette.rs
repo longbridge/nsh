@@ -288,8 +288,8 @@ fn fills_are_steps_of_the_terminals_own_background() {
     let accent = row_of(buffer, "accent");
     assert_eq!(
         buffer[(0, accent)].bg,
-        Color::Rgb(31, 45, 68),
-        "the accent tinted in"
+        Color::Rgb(42, 77, 135),
+        "the accent tinted in, opaque: the solid share"
     );
     let muted = row_of(buffer, "muted");
     assert_eq!(
@@ -479,8 +479,16 @@ fn a_popup_is_raised_framed_brighter_and_casts_no_shadow() {
     );
     assert!(rows[usize::from(y) - 1].contains("─ Menu ─"), "{rows:#?}");
     // Nothing around the frame changes: no shadow covers what is there.
-    assert_eq!(buffer[(x + 11, y)].bg, Color::Reset, "right of the frame: {rows:#?}");
-    assert_eq!(buffer[(x + 4, y + 2)].bg, Color::Reset, "below the frame: {rows:#?}");
+    assert_eq!(
+        buffer[(x + 11, y)].bg,
+        Color::Reset,
+        "right of the frame: {rows:#?}"
+    );
+    assert_eq!(
+        buffer[(x + 4, y + 2)].bg,
+        Color::Reset,
+        "below the frame: {rows:#?}"
+    );
 }
 
 fn pane(name: &'static str) -> impl IntoElement {
@@ -745,5 +753,683 @@ fn a_scaled_fill_takes_the_cells_of_its_scaled_box() {
         buffer[(10, 0)].bg,
         Color::Reset,
         "the other half is not filled"
+    );
+}
+
+/// A cell framed on every side, filled a step above the page, its border
+/// close to its fill: one-time code cells.
+#[component]
+fn FramedCell() -> impl IntoElement {
+    view()
+        .flex_1()
+        .child(
+            view()
+                .w(px(40.0))
+                .h(px(48.0))
+                .border_1()
+                .border_color(nsh_core::color::rgb(0x2e2e2e))
+                .rounded(px(6.0))
+                .bg(nsh_core::color::rgb(0x262626))
+                .child(text("7")),
+        )
+        .child(text("ready"))
+}
+
+#[test]
+fn a_filled_framed_cell_keeps_the_border_its_layout_gave_it() {
+    let (mut view, rx) = surfaces();
+    let mut terminal = Terminal::new(TestBackend::new(12, 6)).unwrap();
+    view.load(App::Rust(Root::new::<FramedCell>(|| ())))
+        .unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "ready");
+    let buffer = terminal.backend().buffer();
+    let rows: Vec<String> = (0..6)
+        .map(|y| (0..12).map(|x| buffer[(x, y)].symbol()).collect())
+        .collect();
+    let top = rows
+        .iter()
+        .position(|row| row.contains('╭'))
+        .unwrap_or_else(|| panic!("no top corners: {rows:#?}"));
+    assert!(rows[top].contains('╮'), "{rows:#?}");
+    assert!(
+        rows.iter()
+            .any(|row| row.contains('╰') && row.contains('╯')),
+        "{rows:#?}"
+    );
+}
+
+/// A command in a framed card: its inline list highlights an item for the
+/// keys typed in its search field.
+#[component]
+fn CardCommand() -> impl IntoElement {
+    view()
+        .flex_1()
+        .child(
+            view()
+                .border_1()
+                .border_color(nsh_core::color::rgb(0x3f3f46))
+                .py(px(16.0))
+                .child(
+                    nsh_base::command()
+                        .items(vec![
+                            nsh_base::CommandItem::new("a", "Alpha"),
+                            nsh_base::CommandItem::new("b", "Beta"),
+                        ])
+                        .placeholder("Find")
+                        .accessibility_label("Commands"),
+                ),
+        )
+        .child(text("ready"))
+}
+
+#[test]
+fn a_command_s_highlighted_item_in_the_focused_pane_is_a_full_row_accent_band() {
+    let (mut view, rx) = surfaces();
+    let mut terminal = Terminal::new(TestBackend::new(40, 10)).unwrap();
+    view.load(App::Rust(Root::new::<CardCommand>(|| ())))
+        .unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "ready");
+    let at = |buffer: &Buffer, word: &str| {
+        let y = row_of(buffer, word);
+        let row: String = (0..buffer.area.width)
+            .map(|x| buffer[(x, y)].symbol())
+            .collect();
+        (row[..row.find(word).unwrap()].chars().count() as u16, y)
+    };
+    {
+        let buffer = terminal.backend().buffer();
+        let (x, y) = at(buffer, "Alpha");
+        assert_ne!(
+            buffer[(x, y)].bg,
+            Color::Blue,
+            "no band before the focus comes"
+        );
+    }
+    view.handle(nsh_platform_tui::Input::Key {
+        key: "Tab".into(),
+        modifiers: Default::default(),
+        release: false,
+    });
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        terminal
+            .draw(|frame| view.render(frame, frame.area()))
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        let (x, y) = at(buffer, "Alpha");
+        if buffer[(x, y)].bg == Color::Blue {
+            break;
+        }
+        assert!(
+            rx.recv_deadline(deadline).is_ok(),
+            "the highlighted item's band"
+        );
+    }
+    let buffer = terminal.backend().buffer();
+    let rows: Vec<String> = (0..10)
+        .map(|y| (0..40).map(|x| buffer[(x, y)].symbol()).collect())
+        .collect();
+    let (_, y) = at(buffer, "Alpha");
+    // The band runs to the frame's line and stops there: no Cell of it on
+    // the line.
+    let line = rows[usize::from(y)].rfind('│').unwrap();
+    let line = rows[usize::from(y)][..line].chars().count() as u16;
+    assert_eq!(
+        buffer[(line - 1, y)].bg,
+        Color::Blue,
+        "to the frame: {rows:#?}"
+    );
+    assert_ne!(
+        buffer[(line, y)].bg,
+        Color::Blue,
+        "not on the frame: {rows:#?}"
+    );
+    let (bx, by) = at(buffer, "Beta");
+    assert_ne!(buffer[(bx, by)].bg, Color::Blue, "one band: {rows:#?}");
+}
+
+/// An avatar's presence dot: a round 10pt box of a green fill pinned to
+/// its corner, over a raised chip.
+#[component]
+fn Presence() -> impl IntoElement {
+    view()
+        .flex_1()
+        .child(
+            view().flex_row().child(
+                view()
+                    .w(px(32.0))
+                    .h(px(32.0))
+                    .rounded(px(16.0))
+                    .items_center()
+                    .justify_center()
+                    .bg(nsh_core::color::rgb(0x333333))
+                    .child(text("MC"))
+                    .child(
+                        view()
+                            .absolute()
+                            .right(px(-1.0))
+                            .bottom(px(-1.0))
+                            .w(px(10.0))
+                            .h(px(10.0))
+                            .rounded(px(5.0))
+                            .bg(nsh_core::color::rgb(0x22c55e)),
+                    ),
+            ),
+        )
+        .child(text("ready"))
+}
+
+#[test]
+fn a_dot_is_a_disc_in_its_color_over_what_is_under_it() {
+    let (mut view, rx) = surfaces();
+    let mut terminal = Terminal::new(TestBackend::new(12, 4)).unwrap();
+    view.load(App::Rust(Root::new::<Presence>(|| ()))).unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "ready");
+    let buffer = terminal.backend().buffer();
+    let rows: Vec<String> = (0..4)
+        .map(|y| (0..12).map(|x| buffer[(x, y)].symbol()).collect())
+        .collect();
+    let (x, y) = (0..4)
+        .flat_map(|y| (0..12).map(move |x| (x, y)))
+        .find(|&(x, y)| buffer[(x, y)].symbol() == "●")
+        .unwrap_or_else(|| panic!("no dot: {rows:#?}"));
+    let cell = &buffer[(x, y)];
+    assert_eq!(cell.fg, Color::Green, "in its color: {rows:#?}");
+    let chip = buffer[(0, row_of(buffer, "MC"))].bg;
+    assert_eq!(cell.bg, chip, "on the chip's band, not one of its own");
+}
+
+/// A four-digit code in filled, framed cells, reporting its focus.
+#[component]
+fn FilledCode() -> impl IntoElement {
+    let focused = signal("no");
+    view()
+        .flex_1()
+        .child(text(move || format!("focus {}", focused.get())))
+        .child(
+            view().flex_row().child(
+                nsh_base::otp_input()
+                    .length(4u32)
+                    .group_class("flex-row gap-2")
+                    .cell_class(
+                        "w-12 h-12 rounded-lg border border-zinc-700 bg-zinc-800 items-center \
+                         justify-center",
+                    )
+                    .on_focus(move || focused.set("yes")),
+            ),
+        )
+}
+
+#[test]
+fn a_codes_next_cell_shows_focus_with_its_frame_and_no_band() {
+    let (mut view, rx) = surfaces();
+    let mut terminal = Terminal::new(TestBackend::new(48, 8)).unwrap();
+    view.load(App::Rust(Root::new::<FilledCode>(|| ())))
+        .unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "focus no");
+    view.handle(nsh_platform_tui::Input::Key {
+        key: "Tab".into(),
+        modifiers: Default::default(),
+        release: false,
+    });
+    draw_until(&mut view, &mut terminal, &rx, "focus yes");
+    let corners = |buffer: &Buffer| -> Vec<(u16, u16)> {
+        (0..buffer.area.height)
+            .flat_map(|y| (0..buffer.area.width).map(move |x| (x, y)))
+            .filter(|&(x, y)| buffer[(x, y)].symbol() == "╭")
+            .collect()
+    };
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        terminal
+            .draw(|frame| view.render(frame, frame.area()))
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        let at = corners(buffer);
+        if at.len() == 4 && buffer[at[0]].fg != buffer[at[1]].fg {
+            break;
+        }
+        assert!(
+            rx.recv_deadline(deadline).is_ok(),
+            "the next cell's frame in the focus color\n{}",
+            super::dock::dump(&terminal)
+        );
+    }
+    let buffer = terminal.backend().buffer();
+    let at = corners(buffer);
+    assert_eq!(at.len(), 4, "every cell keeps its frame");
+    let (x, y) = at[0];
+    for dx in 0..3 {
+        assert_ne!(
+            buffer[(x + dx, y + 1)].bg,
+            Color::Blue,
+            "nothing filled in the accent\n{}",
+            super::dock::dump(&terminal)
+        );
+    }
+    assert_eq!(
+        buffer[(x + 1, y + 1)].bg,
+        buffer[(at[1].0 + 1, at[1].1 + 1)].bg,
+        "the same fill as the other cells"
+    );
+}
+
+/// A pane whose selected row holds a shortcut's key chip, a fill of its own.
+#[component]
+fn ChipRow() -> impl IntoElement {
+    view()
+        .flex_1()
+        .child(
+            view()
+                .w(px(160.0))
+                .border_1()
+                .border_color(nsh_core::color::rgb(0x3f3f46))
+                .py(px(16.0))
+                .child(
+                    view()
+                        .flex_row()
+                        .justify_between()
+                        .accessibility_state(selected())
+                        .child(text("Inbox"))
+                        .child(
+                            view()
+                                .px(px(4.0))
+                                .bg(nsh_core::color::rgb(0x333333))
+                                .child(text("K1")),
+                        ),
+                )
+                .child(view().on_press(|_: &()| {}).child(text("go"))),
+        )
+        .child(text("ready"))
+}
+
+#[test]
+fn an_accent_band_spans_its_whole_row_over_a_child_s_fill() {
+    let (mut view, rx) = surfaces();
+    let mut terminal = Terminal::new(TestBackend::new(30, 8)).unwrap();
+    view.load(App::Rust(Root::new::<ChipRow>(|| ()))).unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "ready");
+    view.handle(nsh_platform_tui::Input::Key {
+        key: "Tab".into(),
+        modifiers: Default::default(),
+        release: false,
+    });
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        terminal
+            .draw(|frame| view.render(frame, frame.area()))
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        let y = row_of(buffer, "Inbox");
+        let row: String = (0..buffer.area.width)
+            .map(|x| buffer[(x, y)].symbol())
+            .collect();
+        let x = row[..row.find("Inbox").unwrap()].chars().count() as u16;
+        if buffer[(x, y)].bg == Color::Blue {
+            break;
+        }
+        assert!(
+            rx.recv_deadline(deadline).is_ok(),
+            "the selected row's band"
+        );
+    }
+    let buffer = terminal.backend().buffer();
+    let y = row_of(buffer, "Inbox");
+    let row: Vec<&str> = (0..buffer.area.width)
+        .map(|x| buffer[(x, y)].symbol())
+        .collect();
+    let left = row.iter().position(|&s| s == "│").unwrap() as u16;
+    let right = row.iter().rposition(|&s| s == "│").unwrap() as u16;
+    for x in left + 1..right {
+        assert_eq!(
+            buffer[(x, y)].bg,
+            Color::Blue,
+            "column {x} of the row on the band: {row:?}"
+        );
+    }
+}
+
+/// A selected row's olive fill as light as the muted gray, a muted size on
+/// it, and the same size on the page.
+#[component]
+fn FadedOnBand() -> impl IntoElement {
+    view()
+        .flex_1()
+        .child(
+            view()
+                .bg(nsh_core::color::rgb(0x565f44))
+                .child(text("3.8 KB").text_color(nsh_core::color::rgb(0x71717a))),
+        )
+        .child(text("1.4 KB").text_color(nsh_core::color::rgb(0x71717a)))
+        .child(text("ready"))
+}
+
+#[test]
+fn a_fade_as_light_as_its_band_reads_at_full_strength() {
+    let (mut view, rx) = surfaces();
+    let mut terminal = Terminal::new(TestBackend::new(16, 4)).unwrap();
+    view.load(App::Rust(Root::new::<FadedOnBand>(|| ())))
+        .unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "ready");
+    let buffer = terminal.backend().buffer();
+    let band = row_of(buffer, "3.8");
+    let page = row_of(buffer, "1.4");
+    assert_ne!(buffer[(0, band)].bg, Color::Reset, "the row's band");
+    assert_eq!(
+        buffer[(0, band)].fg,
+        Color::Reset,
+        "full strength on the band"
+    );
+    assert_ne!(buffer[(0, page)].fg, Color::Reset, "muted on the page");
+}
+
+/// A sidebar with only its right line: its first row, the box's top,
+/// holds a selected toggle button (the gallery's "Sidebar").
+#[component]
+fn SidebarToggle() -> impl IntoElement {
+    view()
+        .flex_1()
+        .flex_row()
+        .child(
+            view()
+                .w(px(120.0))
+                .border_r_1()
+                .border_color(nsh_core::color::rgb(0x3f3f46))
+                .child(
+                    view()
+                        .on_press(|_: &()| {})
+                        .accessibility_state(selected())
+                        .child(text("Sidebar")),
+                )
+                .child(text("Inbox")),
+        )
+        .child(text("ready"))
+}
+
+#[test]
+fn a_selected_button_on_the_accent_band_reads_in_the_band_s_contrast() {
+    let (mut view, rx) = surfaces();
+    let mut terminal = Terminal::new(TestBackend::new(30, 6)).unwrap();
+    view.load(App::Rust(Root::new::<SidebarToggle>(|| ())))
+        .unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "ready");
+    view.handle(nsh_platform_tui::Input::Key {
+        key: "Tab".into(),
+        modifiers: Default::default(),
+        release: false,
+    });
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    let at = |buffer: &Buffer| {
+        let y = row_of(buffer, "Sidebar");
+        let row: String = (0..buffer.area.width)
+            .map(|x| buffer[(x, y)].symbol())
+            .collect();
+        (
+            row[..row.find("Sidebar").unwrap()].chars().count() as u16,
+            y,
+        )
+    };
+    loop {
+        terminal
+            .draw(|frame| view.render(frame, frame.area()))
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        if buffer[at(buffer)].bg == Color::Blue {
+            break;
+        }
+        assert!(rx.recv_deadline(deadline).is_ok(), "the button's band");
+    }
+    let buffer = terminal.backend().buffer();
+    let (x, y) = at(buffer);
+    for x in x..x + 7 {
+        assert_eq!(buffer[(x, y)].bg, Color::Blue);
+        assert_ne!(
+            buffer[(x, y)].fg,
+            Color::Blue,
+            "column {x}: the label reads on its band"
+        );
+    }
+}
+
+/// Tabs once and draws until `shown` holds of the buffer.
+fn tab_until(
+    view: &mut AppView,
+    terminal: &mut Terminal<TestBackend>,
+    rx: &crossbeam_channel::Receiver<()>,
+    what: &str,
+    shown: impl Fn(&Buffer) -> bool,
+) {
+    view.handle(nsh_platform_tui::Input::Key {
+        key: "Tab".into(),
+        modifiers: Default::default(),
+        release: false,
+    });
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        terminal
+            .draw(|frame| view.render(frame, frame.area()))
+            .unwrap();
+        if shown(terminal.backend().buffer()) {
+            return;
+        }
+        assert!(rx.recv_deadline(deadline).is_ok(), "{what}");
+    }
+}
+
+/// The Cell where `word` starts.
+fn cell_of(buffer: &Buffer, word: &str) -> (u16, u16) {
+    let y = row_of(buffer, word);
+    let row: String = (0..buffer.area.width)
+        .map(|x| buffer[(x, y)].symbol())
+        .collect();
+    (row[..row.find(word).unwrap()].chars().count() as u16, y)
+}
+
+/// A pressable whose only child is a chip of its own fill (the list
+/// demo's "Jump to 60"), and a swatch: a pressable holding nothing but a
+/// color.
+#[component]
+fn CoveredControls() -> impl IntoElement {
+    view()
+        .flex_1()
+        .bg(nsh_core::color::rgb(0x222222))
+        .child(
+            view().on_press(|_: &()| {}).child(
+                view()
+                    .flex_row()
+                    .px(px(8.0))
+                    .bg(nsh_core::color::rgb(0x3a3a3a))
+                    .child(text("Jump")),
+            ),
+        )
+        .child(
+            view().flex_row().child(text("color ")).child(
+                view().on_press(|_: &()| {}).child(
+                    view()
+                        .w(px(32.0))
+                        .h(px(16.0))
+                        .role(AccessibilityRole::Image)
+                        .bg(nsh_core::color::rgb(0x22c55e)),
+                ),
+            ),
+        )
+        .child(text("ready"))
+}
+
+#[test]
+fn a_control_covered_by_its_children_s_fills_shows_focus_with_an_accent_underline() {
+    let (mut view, rx) = surfaces();
+    let mut terminal = Terminal::new(TestBackend::new(20, 6)).unwrap();
+    view.load(App::Rust(Root::new::<CoveredControls>(|| ())))
+        .unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "ready");
+    let chip = {
+        let buffer = terminal.backend().buffer();
+        let at = cell_of(buffer, "Jump");
+        assert!(
+            !buffer[at].modifier.contains(Modifier::UNDERLINED),
+            "unfocused, the chip is plain"
+        );
+        buffer[at].bg
+    };
+    tab_until(
+        &mut view,
+        &mut terminal,
+        &rx,
+        "the chip's focus",
+        |buffer| {
+            buffer[cell_of(buffer, "Jump")]
+                .modifier
+                .contains(Modifier::UNDERLINED)
+        },
+    );
+    let buffer = terminal.backend().buffer();
+    let (x, y) = cell_of(buffer, "Jump");
+    for x in x..x + 4 {
+        assert_eq!(buffer[(x, y)].underline_color, Color::Blue);
+        assert_eq!(buffer[(x, y)].bg, chip, "the chip keeps its fill");
+    }
+    // The swatch: a color and no glyph, underlined under each of its Cells.
+    let swatch = |buffer: &Buffer| {
+        let (x, y) = cell_of(buffer, "color ");
+        (x + 6, y)
+    };
+    let color = buffer[swatch(buffer)].bg;
+    assert!(
+        !buffer[swatch(buffer)]
+            .modifier
+            .contains(Modifier::UNDERLINED)
+    );
+    tab_until(
+        &mut view,
+        &mut terminal,
+        &rx,
+        "the swatch's focus",
+        |buffer| {
+            buffer[swatch(buffer)]
+                .modifier
+                .contains(Modifier::UNDERLINED)
+        },
+    );
+    let buffer = terminal.backend().buffer();
+    let (x, y) = swatch(buffer);
+    for x in x..x + 4 {
+        assert_eq!(buffer[(x, y)].underline_color, Color::Blue);
+        assert_eq!(buffer[(x, y)].bg, color, "the swatch keeps its color");
+    }
+    let (x, y) = cell_of(buffer, "Jump");
+    assert!(
+        !buffer[(x, y)].modifier.contains(Modifier::UNDERLINED),
+        "the chip's focus left with it"
+    );
+}
+
+/// A framed box of swatches: the chosen one (selected) first.
+#[component]
+fn ChosenSwatch() -> impl IntoElement {
+    let swatch = |color: u32| {
+        view().on_press(|_: &()| {}).child(
+            view()
+                .w(px(24.0))
+                .h(px(16.0))
+                .role(AccessibilityRole::Image)
+                .bg(nsh_core::color::rgb(color)),
+        )
+    };
+    view()
+        .flex_1()
+        .child(
+            view()
+                .border_1()
+                .border_color(nsh_core::color::rgb(0x3f3f46))
+                .flex_row()
+                .child(text("color "))
+                .child(swatch(0x3b82f6).accessibility_state(selected()))
+                .child(text(" "))
+                .child(swatch(0x22c55e)),
+        )
+        .child(text("ready"))
+}
+
+#[test]
+fn a_selected_swatch_in_the_focused_pane_keeps_its_color() {
+    let (mut view, rx) = surfaces();
+    let mut terminal = Terminal::new(TestBackend::new(24, 6)).unwrap();
+    view.load(App::Rust(Root::new::<ChosenSwatch>(|| ())))
+        .unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "ready");
+    let chosen = |buffer: &Buffer| {
+        let (x, y) = cell_of(buffer, "color ");
+        (x + 6, y)
+    };
+    let color = terminal.backend().buffer()[chosen(terminal.backend().buffer())].bg;
+    assert_ne!(color, Color::Blue, "its own color, not the accent");
+    tab_until(
+        &mut view,
+        &mut terminal,
+        &rx,
+        "the chosen swatch's focus",
+        |buffer| {
+            buffer[chosen(buffer)]
+                .modifier
+                .contains(Modifier::UNDERLINED)
+        },
+    );
+    let buffer = terminal.backend().buffer();
+    let (x, y) = chosen(buffer);
+    for x in x..x + 3 {
+        assert_eq!(
+            buffer[(x, y)].bg,
+            color,
+            "the chosen swatch keeps its color in the focused pane"
+        );
+        assert_eq!(buffer[(x, y)].underline_color, Color::Blue);
+    }
+}
+
+/// A color area's grid: an adjustable view whose picked Cell is `◆` on a
+/// color.
+#[component]
+fn AreaMark() -> impl IntoElement {
+    view()
+        .flex_1()
+        .child(
+            view()
+                .focusable(true)
+                .accessible(true)
+                .role(AccessibilityRole::Adjustable)
+                .flex_row()
+                .child(
+                    view()
+                        .w(px(8.0))
+                        .role(AccessibilityRole::Image)
+                        .bg(nsh_core::color::rgb(0x3b82f6))
+                        .child(text(" ")),
+                )
+                .child(
+                    view()
+                        .w(px(8.0))
+                        .role(AccessibilityRole::Image)
+                        .bg(nsh_core::color::rgb(0x2563eb))
+                        .child(text("◆")),
+                ),
+        )
+        .child(text("ready"))
+}
+
+#[test]
+fn a_color_area_s_picked_cell_is_reversed_while_it_has_the_focus() {
+    let (mut view, rx) = surfaces();
+    let mut terminal = Terminal::new(TestBackend::new(12, 4)).unwrap();
+    view.load(App::Rust(Root::new::<AreaMark>(|| ()))).unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "ready");
+    let mark = |buffer: &Buffer| buffer[cell_of(buffer, "◆")].modifier;
+    assert!(!mark(terminal.backend().buffer()).contains(Modifier::REVERSED));
+    tab_until(
+        &mut view,
+        &mut terminal,
+        &rx,
+        "the picked Cell's focus",
+        |buffer| mark(buffer).contains(Modifier::REVERSED),
     );
 }

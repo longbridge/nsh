@@ -223,11 +223,30 @@ pub(crate) fn ink(color: nsh_core::Color, ground: Ground) -> Style {
             .remove_modifier(Modifier::DIM),
         (Tone::Accent(accent), _) => plain.fg(accent).remove_modifier(Modifier::DIM),
         (Tone::Default, _) => plain.fg(Color::Reset).remove_modifier(Modifier::DIM),
-        (Tone::Muted, Some(ramp)) => plain.fg(ramp.muted()).remove_modifier(Modifier::DIM),
-        (Tone::Faint, Some(ramp)) => plain.fg(ramp.faint()).remove_modifier(Modifier::DIM),
+        // A fade as light as the band under it (a muted size on a
+        // selected row's fill) is read at the next strength up.
+        (Tone::Muted | Tone::Faint, Some(ramp)) => {
+            let reads = |share: f32| {
+                let [r, g, b] = ramp.mix(share).map(f32::from);
+                let [ur, ug, ub] = ground.rgb.map(f32::from);
+                (lightness(r, g, b) - lightness(ur, ug, ub)).abs() >= FADE_READS
+            };
+            let fg = if tone == Tone::Faint && reads(FAINT_SHARE) {
+                ramp.faint()
+            } else if reads(MUTED_SHARE) {
+                ramp.muted()
+            } else {
+                Color::Reset
+            };
+            plain.fg(fg).remove_modifier(Modifier::DIM)
+        }
         (Tone::Muted | Tone::Faint, None) => plain.fg(Color::Reset).add_modifier(Modifier::DIM),
     }
 }
+
+/// How far (in L*) a fade of the foreground must be from its ground's
+/// lightness to read.
+const FADE_READS: f32 = 15.0;
 
 /// How far a fill's lightness is from its ground's for the fill to stand
 /// out (a primary button on its page).
@@ -536,14 +555,6 @@ pub(crate) fn surface(fill: nsh_core::Color, ground: Ground) -> Surface {
 pub(crate) fn hued(color: nsh_core::Color) -> bool {
     let [r, g, b, _] = color.0.to_be_bytes();
     r.max(g).max(b) - r.min(g).min(b) >= 51
-}
-
-/// How far `color`, blended over `ground`, is in lightness from it.
-pub(crate) fn gap(color: nsh_core::Color, ground: Ground) -> f32 {
-    let [red, green, blue, alpha] = color.0.to_be_bytes();
-    let [r, g, b] = over_f32([red, green, blue], alpha, ground.rgb);
-    let [ur, ug, ub] = ground.rgb.map(f32::from);
-    (lightness(r, g, b) - lightness(ur, ug, ub)).abs()
 }
 
 /// The step a surface takes over one at `level`.

@@ -389,7 +389,9 @@ raised, one step above its ground's step (a fill inside a raised card is lighter
 saturated fill (a primary button, a badge) is its color mixed 20% into the step under it, its text the accent of
 its hue (the default foreground when the app's text is light), bold on a control. A filled view has no line:
 its band is its edge, unless the app's border is hued or stands out at least twice as far from the ground as the
-fill does. A view in the image role is a swatch of its color (the terminal draws no images, so the role is free to
+fill does, or the box is framed with corners (a one-time code's cell): the terminal layout decides, and the painter
+draws every side it gave a width. A dot (a round box of a hued fill, holding no text, that the layout pins to one
+Cell: an avatar's presence dot) is `●` in its fill's color over what is under it, no band of its own. A view in the image role is a swatch of its color (the terminal draws no images, so the role is free to
 mean that): with surfaces its fill is its own color blended over its ground, at the terminal's depth
 (truecolor, else the nearest of 256 or 16), never a step, and its text is black or white, whichever reads on it
 (`palette::swatch`, `palette::swatch_text`); the bandless look paints no fill. A color picker's swatches and
@@ -436,7 +438,10 @@ own background, so what its children filled stays, and it is at least one step a
 
 - a selected or current item is a select band and bold; a focused control (a button, a row) the same; a focused
   container three or more rows tall shows its line in the focus color (a hover band without a line); a focused
-  text field shows its line in the focus color, or a sunken band without one, and the caret;
+  text field shows its line in the focus color, or a sunken band without one, and the caret; a framed box of any
+  size (a one-time code's cell) shows focus with its line alone; a focused control whose Cells are all its
+  children's fills (a swatch's color, a chip's own fill, a pagination's bar) or that holds no glyph shows it as an
+  accent underline under its Cells, its fills kept;
 - a tab is bold when selected or focused and muted otherwise; a selected tab is a select band, unless the app
   underlines its label (an underlined tab strip keeps the underline alone), and others are banded when focused
   (select), pressed or hovered;
@@ -446,14 +451,18 @@ own background, so what its children filled stays, and it is at least one step a
   `MountSink::needs_projected_states`; the view keeps them apart from the states it reports, so they never go
   back to the core) or the pointer's, is a full-row accent band, its text in
   the terminal's background color; a selected item that is not highlighted keeps the select band;
+- the item a list outside a popup highlights for the keys (a command's inline list, a palette in a dialog) is the
+  same full-row accent band inside a dialog or the pane holding the focus, so two lists never band at once;
 - the selected row of a list or tree inside the pane holding the focus (the innermost box with a line around the
   focused view, or the overlay holding it) is the same accent band, as lazygit's: the list the keys go to; the
-  same selection in another pane keeps the select band;
+  same selection in another pane keeps the select band; a selected control covered by its children's fills (the
+  chosen swatch) keeps its fill;
 - a trigger whose popup or menu is open (`expanded`) stands on a raised band;
 - an `adjustable` view (a slider's track, a resize handle's line) shows focus its own way and takes no focus
-  marks;
+  marks; a slider's thumb `●` and a color area's picked Cell `◆` are reversed while it has the focus;
 - the innermost box with a line around the focused view shows its line in the accent (blue), a popup's only while
-  one is shown; a focused overlay's title, and a system dialog's, is an accent chip;
+  one is shown: the line glyphs of the sides that draw one, never a text on the box's row (a sidebar's first row
+  under only its right line); a focused overlay's title, and a system dialog's, is an accent chip;
 - a disabled view is faint, never bold, with no band.
 
 Bandless:
