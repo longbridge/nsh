@@ -736,9 +736,22 @@ impl Keyboard {
                 // focus unseen, and it stays open until Escape or a choice
                 // closes it, which gives the focus back to the trigger. A
                 // popup anchored to no stop of its own is a part of the
-                // page, which Tab passes through, and arrows always may
-                // leave a popup for the column beside it.
-                if matches!(action, Action::Next | Action::Previous)
+                // page, which Tab passes through, and arrows may leave a
+                // popup for the column beside it, but for a menu's: Left
+                // and Right on an item its menu does not take (no
+                // submenu) would leave the menu open behind the focus.
+                let in_menu = self
+                    .focused
+                    .and_then(|id| tree.get(id))
+                    .is_some_and(|view| {
+                        matches!(
+                            view.props.accessibility.role,
+                            nsh_core::AccessibilityRole::Menuitem
+                                | nsh_core::AccessibilityRole::MenuItemCheckbox
+                                | nsh_core::AccessibilityRole::MenuItemRadio
+                        )
+                    });
+                if (matches!(action, Action::Next | Action::Previous) || in_menu)
                     && let Some(popup) = self
                         .focused
                         .and_then(|id| anchored_overlay(tree, id))

@@ -1007,6 +1007,62 @@ fn tab_stays_in_an_open_popup_until_escape_closes_it() {
     draw_until(&mut view, &mut terminal, &rx, "seen trigger After.");
 }
 
+/// A menu whose trigger has a tall stop beside it, level with the menu's
+/// items; what took the focus or was chosen, on screen.
+#[component]
+fn MenuBeside() -> impl IntoElement {
+    let seen = signal(String::new());
+    view()
+        .flex_1()
+        .child(text(move || format!("seen{}.", seen.get())))
+        .child(
+            view()
+                .flex_row()
+                .child(
+                    nsh_base::menu()
+                        .trigger(view().w(px(80.0)).child(text("File")))
+                        .child(
+                            nsh_base::menu_item()
+                                .on_select(move || seen.update(|s| s.push_str(" chose New")))
+                                .child(text("New")),
+                        )
+                        .child(nsh_base::menu_item().child(text("Open"))),
+                )
+                .child(view().w(px(80.0)))
+                .child(
+                    view()
+                        .h(px(200.0))
+                        .on_focus(move |_: &()| seen.update(|s| s.push_str(" Beside")))
+                        .on_press(|_: &()| {})
+                        .child(text("Beside")),
+                ),
+        )
+}
+
+#[test]
+fn left_and_right_stay_in_an_open_menu() {
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(60, 16)).unwrap();
+    view.load(App::Rust(Root::new::<MenuBeside>(|| ())))
+        .unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "Beside");
+    let none = Modifiers::default();
+    // Return on the trigger opens the menu, its first item focused.
+    view.handle(key("Tab", none));
+    view.handle(key("Enter", none));
+    draw_until(&mut view, &mut terminal, &rx, "Open");
+    // The stop beside the items is level with them: Right and Left on an
+    // item with no submenu leave the focus on it, the menu open.
+    for name in ["Right", "Left", "Right"] {
+        view.handle(key(name, none));
+        terminal
+            .draw(|frame| view.render(frame, frame.area()))
+            .unwrap();
+    }
+    view.handle(key("Enter", none));
+    draw_until(&mut view, &mut terminal, &rx, "seen chose New.");
+}
+
 /// A paragraph with two links, and a stop after it; what the links
 /// reported and where the focus came, on screen.
 #[component]
