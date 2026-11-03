@@ -1263,6 +1263,9 @@ pub(crate) fn compute(
         // A band stated three rows tall or more around a row (a stage, a
         // specimen) keeps a row above and below it: it reads as a box,
         // not a chip.
+        if tall && std::env::var_os("NSH_TL_DEBUG").is_some() {
+            log::warn!(target: "nsh::tl", "TALL {node:?} border={border:?} cont={} kcont={} surf={} fixed_h={fixed_h:?} known_h={known_h:?} size={size:?} content={content:?} ctrl={} mode={:?}", attempt_kind.container, k.container, surface.is_some(), role.control, inputs.run_mode);
+        }
         if tall && surface.is_some() && fixed_h.is_none() && size.h < 3 {
             fixed_h = Some(clamp(3, None, max_h));
             continue;

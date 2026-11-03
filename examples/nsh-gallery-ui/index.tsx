@@ -425,7 +425,7 @@ const buttonSizes = pointer
  * `large` 34 / 48); one row, its label and no glyph in the terminal, which
  * brackets it. `primary` and `accent` are the citrus fill (the main
  * action), `secondary` a raised neutral, `ghost` bare until the pointer is
- * over it, `danger` a destructive action: the danger tone's tint, edge and
+ * over it (in the terminal, a faint `secondary` band), `danger` a destructive action: the danger tone's tint, edge and
  * text on the raised finish's drop, as quiet as `secondary`. A `color`
  * fills it with that color instead. Under the pointer a raised button
  * lightens, pressed it sinks (an inner shade, and 3% smaller). `busy`
@@ -486,7 +486,12 @@ export function Button(props: {
             boxShadow: finish.raised.boxShadow,
           }
       : variant() === "ghost"
-        ? { backgroundColor: props.selected ? token("accent") : "transparent", borderColor: "transparent" }
+        ? {
+            // A terminal shows no hover until the pointer is there and has
+            // no outline to hint at one: a faint band reads as pressable.
+            backgroundColor: props.selected ? token("accent") : terminal ? token("secondary") : "transparent",
+            borderColor: "transparent",
+          }
         : filled()
           ? { ...finish.accent, opacity: props.selected ? 0.88 : 1 }
           : props.selected
