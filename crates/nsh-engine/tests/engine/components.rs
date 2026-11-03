@@ -9265,12 +9265,14 @@ fn base_plot_axis_labels_the_ticks_of_its_scale() {
 
     // Left, outside: d3's ticks of 0 to 100, about 5 (a step of 20),
     // written as d3 writes them; each right of the edge's left, centered
-    // on its tick, the ends kept within the plot's top and bottom.
+    // on its tick; the plot keeps half a label (5) inside its top and
+    // bottom edges, so the ends' labels sit on their ticks within it (the
+    // scale over 90, from 95 up to 5).
     near(&all, "100", "linear", (-20.0, 0.0));
-    near(&all, "80", "linear", (-20.0, 15.0));
-    near(&all, "60", "linear", (-20.0, 35.0));
-    near(&all, "40", "linear", (-20.0, 55.0));
-    near(&all, "20", "linear", (-20.0, 75.0));
+    near(&all, "80", "linear", (-20.0, 18.0));
+    near(&all, "60", "linear", (-20.0, 36.0));
+    near(&all, "40", "linear", (-20.0, 54.0));
+    near(&all, "20", "linear", (-20.0, 72.0));
     near(&all, "0", "linear", (-20.0, 90.0));
     // Its tick marks: one per tick, from the edge toward the labels.
     let red = all
@@ -9291,7 +9293,7 @@ fn base_plot_axis_labels_the_ticks_of_its_scale() {
     }
     // Right, inside: the app's values and texts, above each grid line,
     // against the right edge.
-    near(&all, "0%", "linear", (180.0, 90.0));
+    near(&all, "0%", "linear", (180.0, 85.0));
     near(&all, "50%", "linear", (180.0, 40.0));
     // Bottom: the app's function of each value and index, the first and
     // last labels kept within the plot's ends; the line along the edge.
@@ -9327,8 +9329,119 @@ fn base_plot_axis_labels_the_ticks_of_its_scale() {
     all.extend(until(&rx, |b| shows(b, "10")));
     all.extend(until(&rx, |_| false));
     near(&all, "10", "linear", (-20.0, 0.0));
-    near(&all, "4", "linear", (-20.0, 55.0));
-    near(&all, "0%", "linear", (180.0, 90.0));
+    near(&all, "4", "linear", (-20.0, 54.0));
+    near(&all, "0%", "linear", (180.0, 85.0));
+}
+
+const BASE_PLOT_DUAL_AXES: &str = r##"import { mount, signal, View } from "nsh";
+import { Bar, Dot, Grid, Line, Plot, PlotAxis } from "nsh/base/plot";
+
+const rows = [{ v: 100, p: 12 }, { v: 200, p: 27 }];
+
+function App() {
+  const top = signal(40);
+  return (
+    <View>
+      {/* The app's domains: the line on the second scale, which moves alone. */}
+      <Plot data={rows} xScale={{ type: "band" }} yScale={{ type: "linear", domain: [0, 200] }} y2Scale={{ type: "linear", domain: [0, top()] }} motion={{ update: { duration: 200 } }} style={{ width: 300, height: 100 }}>
+        <Bar value="v" />
+        <Line y="p" scale="y2" curve="linear" />
+        <Dot value="p" scale="y2" />
+      </Plot>
+      {/* Automatic domains, aligned: two steps of 100 on y, two of 10 on y2. */}
+      <Plot data={rows} xScale={{ type: "band" }} style={{ width: 300, height: 100 }}>
+        <Grid />
+        <Bar value="v" />
+        <Line y="p" scale="y2" curve="linear" />
+        <PlotAxis placement="right" scale="y2" format={(v) => `p${v}`} labelStyle={{ width: 20, height: 10 }} />
+      </Plot>
+      {/* Not aligned: each scale the extent of its values. */}
+      <Plot data={rows} xScale={{ type: "band" }} alignTicks={false} style={{ width: 300, height: 100 }}>
+        <Bar value="v" />
+        <Line y="p" scale="y2" curve="linear" />
+      </Plot>
+      <View testID="top" onPress={() => top.set(80)} style={{ height: 20 }} />
+    </View>
+  );
+}
+
+mount(App);
+"##;
+
+/// A dual-axis plot (`y2Scale`, a mark's `scale`): bars on the y scale and
+/// a line on the second one, each placed by its own domain; with automatic
+/// domains the two are widened to the same nice steps (`alignTicks`), which
+/// the second scale's axis labels and a `Grid` without values follows; not
+/// aligned, each is its values' extent. A new domain of the second scale
+/// moves its marks alone.
+#[test]
+fn base_plot_marks_go_on_a_second_y_scale() {
+    use nsh_core::canvas::CanvasOp;
+    let (engine, rx) = start(BASE_PLOT_DUAL_AXES);
+    let mut all = until(&rx, |b| shows(b, "p30"));
+    all.extend(until(&rx, |_| false));
+    let marks = plot_drawings(&all);
+    let [
+        (_, bars),
+        (line_id, line),
+        (_, dots),
+        (_, grid),
+        (_, aligned_bars),
+        (_, aligned),
+        (_, own_bars),
+        (_, own),
+    ] = &marks[..]
+    else {
+        panic!("eight marks: {marks:?}")
+    };
+    // Bands of 150; 0 to 200 over 100 points on y, and over 90 inside the
+    // insets of the axis's labels (5, half their height).
+    for b in [bars, own_bars] {
+        assert_eq!(
+            bar_rects(&b.ops),
+            [[0.0, 50.0, 150.0, 50.0], [150.0, 0.0, 150.0, 100.0]]
+        );
+    }
+    assert_eq!(
+        bar_rects(&aligned_bars.ops),
+        [[0.0, 50.0, 150.0, 45.0], [150.0, 5.0, 150.0, 90.0]]
+    );
+    // 12 and 27 of 0 to 40.
+    assert_eq!(path_points(&line.ops), [(75.0, 70.0), (225.0, 32.5)]);
+    let centers: Vec<_> = drawn_arcs(&dots.ops).iter().map(|a| a.0).collect();
+    assert_eq!(centers, [(75.0, 70.0), (225.0, 32.5)]);
+    // Aligned: 10 to 30, two steps as y's 0 to 200.
+    assert_eq!(path_points(&aligned.ops), [(75.0, 86.0), (225.0, 18.5)]);
+    for text in ["p10", "p20", "p30"] {
+        assert!(all.iter().any(|b| shows(b, text)), "{text}");
+    }
+    assert!(!all.iter().any(|b| shows(b, "p15")));
+    // A line at each of y's three ticks, across the plot.
+    let lines = path_points(&grid.ops);
+    assert_eq!(lines.len(), 6, "{lines:?}");
+    assert!(lines.iter().all(|(x, _)| *x == 0.0 || *x == 300.0));
+    // Not aligned: 12 to 27.
+    assert_eq!(path_points(&own.ops), [(75.0, 100.0), (225.0, 0.0)]);
+
+    // The second scale's new domain moves the line through the transform;
+    // the bars stay.
+    let top = test_view(&all, "top");
+    engine
+        .control()
+        .dispatch_event(top, EventKind::Press, EventPayload::None);
+    let after = until(&rx, |b| {
+        b.items.iter().any(|i| {
+            matches!(i, MountItem::Canvas { id, drawing } if id == line_id
+                && drawing.ops.iter().any(|op| matches!(op, CanvasOp::Transform(_))))
+        })
+    });
+    let redrawn = plot_canvases(&after);
+    assert!(
+        !redrawn.iter().any(|(id, d)| id != line_id
+            && !bar_rects(&d.ops).is_empty()
+            && d.ops.iter().any(|op| matches!(op, CanvasOp::Transform(_)))),
+        "the bars, on the first scale, stay"
+    );
 }
 
 const NAMED_CARD: &str = r#"import { mount, signal, Text } from "nsh";
@@ -10176,20 +10289,21 @@ fn base_plot_reversed_scales_run_from_the_other_edge() {
     else {
         panic!("seven marks: {marks:?}")
     };
-    // A reversed y (0 to 40 over 80, from the top): bars from 0 at the top
-    // edge down to their values; the area from the top edge to its line.
+    // A reversed y (0 to 40 from the top, over 70 between the axis's
+    // insets of 5, half its labels): bars from 0 near the top edge down to
+    // their values; the area from there to its line.
     assert_eq!(
         bar_rects(&down.ops),
-        [[0.0, 0.0, 100.0, 20.0], [100.0, 0.0, 100.0, 60.0]]
+        [[0.0, 5.0, 100.0, 17.5], [100.0, 5.0, 100.0, 52.5]]
     );
     assert_eq!(
         path_points(&area.ops)[..4],
-        [(50.0, 20.0), (150.0, 60.0), (150.0, 0.0), (50.0, 0.0)]
+        [(50.0, 22.5), (150.0, 57.5), (150.0, 5.0), (50.0, 5.0)]
     );
-    // The grid line at 10, 20 down (on the middle of a device pixel).
+    // The grid line at 10, 22.5 down (on the middle of a device pixel).
     let at = path_points(&grid.ops);
     assert!(
-        at.len() == 2 && at.iter().all(|&(_, y)| (y - 20.0).abs() <= 0.5),
+        at.len() == 2 && at.iter().all(|&(_, y)| (y - 22.5).abs() <= 0.5),
         "{at:?}"
     );
     // A reversed x (0 to 40 over 200, from the right): bars across grow

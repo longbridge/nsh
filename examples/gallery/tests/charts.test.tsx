@@ -13,7 +13,11 @@
 // changes, a portfolio's holdings as bubbles of risk against return
 // whose holding under the pointer or the arrow keys is read out and whose
 // period moves them, analysts' price targets as a dot plot whose stock the
-// arrow keys read out and whose list changes, a radar of factor
+// arrow keys read out and whose list changes, volume and price on two y
+// scales aligned in the same steps whose row under the pointer reads out
+// both and whose period changes, revenue and margin whose scales put zero
+// on one line for a segment that loses money and move to another segment,
+// a radar of factor
 // exposure that reads out the factor nearest the pointer and changes its
 // benchmark, a quarter's income as flows between its accounts, read out
 // under the arrow keys and moving into the next quarter's, and a
@@ -326,6 +330,45 @@ test("the price targets read out the stock the arrow keys step to and change the
   expect(texts).toContain("C +14%");
   expect(app.count("label:/^Analysts' price targets, Banks: a median upside of \\+9\\.0%, the most for C at \\+14\\.3%/")).toBe(1);
 }, 120000);
+
+test("volume and price read out both values on scales aligned in the same steps, and change their period", async () => {
+  // Six months by week, the last one read out; neither scale names a
+  // domain, so both take the same steps: four ticks on each side.
+  expect(app.count("label:/^ORBX volume and close, 6M: \\+30\\.3%/")).toBe(1);
+  let texts = app.texts();
+  for (const t of ["WEEK TO OCT 30", "$214.08", "Volume 244M", "0", "100M", "200M", "300M", "160", "180", "200", "220"]) expect(texts).toContain(t);
+  // The middle of the weeks once they have drawn in: its close and volume.
+  await app.wait(1000);
+  await app.hover("label:/^ORBX volume and close/");
+  await app.waitFor("WEEK TO JUL 31");
+  texts = app.texts();
+  expect(texts).toContain("Volume 243M");
+  expect(texts).toContain("Close $188.44");
+  // Two years by month: both scales move to their new steps.
+  await app.press("role:tab[2Y]");
+  await app.waitFor("label:/^ORBX volume and close, 2Y: \\+87\\.9%/");
+  texts = app.texts();
+  for (const t of ["500M", "1B", "1.5B", "100", "150", "250", "AVG / MONTH"]) expect(texts).toContain(t);
+});
+
+test("revenue and margin put zero on one line for a segment that loses money, and move to another segment", async () => {
+  // Devices: losses below zero on the right scale, zero on the same grid
+  // line on the left one, which writes no value under it.
+  let texts = app.texts();
+  for (const t of ["$0", "$6B", "−10%", "0%", "15%", "5 / 8"]) expect(texts).toContain(t);
+  expect(texts).not.toContain("$−2B");
+  expect(texts).not.toContain("$0B");
+  // The quarter under the pointer once the bars have grown in.
+  await app.wait(1000);
+  await app.hover("label:/^Devices revenue and net margin/");
+  await app.waitFor("Revenue $4.6B");
+  expect(app.texts()).toContain("Net margin +5.8%");
+  // Cloud: both scales move to the segment's values.
+  await app.press("role:tab[Cloud]");
+  await app.waitFor("$10B");
+  texts = app.texts();
+  for (const t of ["18%", "28%", "0 / 8", "+27.1%"]) expect(texts).toContain(t);
+});
 
 test("the radar reads out the factor nearest the pointer and changes its benchmark", async () => {
   // Nothing hovered: the means of all six, the portfolio's (362 / 6) a
