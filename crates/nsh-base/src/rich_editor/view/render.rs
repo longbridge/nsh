@@ -29,7 +29,7 @@ use super::{
 use crate::{
     input,
     rich_editor::{
-        model::{Mark, Node, utf16_len},
+        model::{DomOutputSpec, Mark, Node, utf16_len},
         state::{Decoration, DecorationKind},
         tables::{CellSelection, TableRole, table_role},
     },
@@ -237,6 +237,15 @@ fn block(rv: Rv, item: ReadSignal<BlockItem>) -> AnyElement {
         None => Kind::Container,
     };
     let props = rv.props;
+    let terminal = crate::terminal::is_terminal();
+    // A terminal's rule is a row of `─` across the editor: the app's
+    // hairline (`h-px`) has no row there, so its look stays out.
+    if terminal && matches!(kind, Kind::Atom) && dom_tag(&first.node) == Some("hr") {
+        return view()
+            .on_layout(move |b: &Bounds<Points>| rv.set_frame(id, Some(parent), *b))
+            .child(crate::terminal::rule_line())
+            .into_element();
+    }
     let (class_rv, style_rv, layout_rv) = (rv.clone(), rv.clone(), rv.clone());
     let wrapper = view()
         .on_layout(move |b: &Bounds<Points>| layout_rv.set_frame(id, Some(parent), *b))
@@ -276,7 +285,6 @@ fn block(rv: Rv, item: ReadSignal<BlockItem>) -> AnyElement {
     // A list's item carries its marker, placed in the indent before it;
     // a terminal's goes in flow before the content instead, as TextView
     // sets its markers, since its Cells round the indent down.
-    let terminal = crate::terminal::is_terminal();
     let marked = list_marker(&rv, &first).is_some();
     let wrapper = match marked {
         true if terminal => wrapper.flex_row().child(marker(rv.clone(), item, true)),
@@ -296,6 +304,11 @@ fn block(rv: Rv, item: ReadSignal<BlockItem>) -> AnyElement {
         Kind::Text => Some(text_block(rv.clone(), item, id).into_element()),
         Kind::Image => Some(dynamic(move || image_of(&item.get().node)).into_element()),
         Kind::Atom => None,
+        // A terminal's quote has a bar of `│` down its left side, as a
+        // Markdown source's `>`: the app's one-sided border has no Cell.
+        Kind::Container if terminal && dom_tag(&first.node) == Some("blockquote") => {
+            Some(crate::terminal::quoted(blocks(rv.clone(), id)).into_element())
+        }
         Kind::Container => Some(blocks(rv.clone(), id).into_element()),
     };
     // A task item is a row: its checkbox, then its content (Tiptap's
@@ -314,6 +327,15 @@ fn block(rv: Rv, item: ReadSignal<BlockItem>) -> AnyElement {
             .into_element();
     }
     wrapper.children(content).into_element()
+}
+
+/// The tag of the element the node's spec renders as (`to_dom`), when it
+/// is a fixed one: `blockquote`, `hr`.
+fn dom_tag(node: &Node) -> Option<&str> {
+    match node.ty().spec().to_dom.as_ref()? {
+        DomOutputSpec::Element { tag, .. } => Some(tag),
+        _ => None,
+    }
 }
 
 /// How the view renders a node without a node view: its spec's

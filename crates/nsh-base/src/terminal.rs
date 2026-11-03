@@ -66,6 +66,48 @@ pub(crate) fn rule_line() -> View {
     line_colored(rule, Some(|| crate::theme::theme().border))
 }
 
+/// A column of [`QUOTE_BAR`]s as tall as the view its parent stretches it
+/// to (a row's height): one glyph a row, in the theme's muted foreground.
+/// By itself it is one Cell, so it never makes its row taller.
+pub(crate) fn quote_bar() -> View {
+    let cell = cell_height();
+    let rows = signal(0usize);
+    view()
+        .flex_none()
+        .overflow_hidden()
+        .on_layout(move |frame: &Bounds<Points>| {
+            let n = columns_in(frame.size.height, cell);
+            if rows.get_untracked() != n {
+                rows.set(n);
+            }
+        })
+        .child(text(" "))
+        .child(
+            text(move || {
+                SharedString::from(vec![QUOTE_BAR.to_string(); rows.get().max(1)].join("\n"))
+            })
+            .absolute()
+            .top(px(0.0))
+            .left(px(0.0))
+            .bottom(px(0.0))
+            .text_overflow(EllipsizeMode::Clip)
+            .pointer_events(PointerEvents::None)
+            .text_color(|| crate::theme::theme().muted_foreground),
+        )
+}
+
+/// `content` after a [`quote_bar`] down its left side and a Cell's gap: a
+/// quote's terminal form.
+pub(crate) fn quoted(content: impl IntoElement) -> View {
+    view().flex_row().gap(px(1.0)).child(quote_bar()).child(
+        view()
+            .flex_grow(1.0)
+            .flex_shrink(1.0)
+            .min_w(px(0.0))
+            .child(content),
+    )
+}
+
 /// A [`line`], its glyphs in `color` when one is given.
 fn line_colored(
     content: impl Fn(usize) -> String + 'static,
@@ -299,6 +341,9 @@ pub const DIVIDER_VERTICAL: char = '│';
 pub const DIVIDER_HORIZONTAL: char = '─';
 /// The glyph of a separator row (a menu's), repeated across its width.
 pub const RULE: char = '─';
+/// The bar down a quote's left side, one per row of its text (a Markdown
+/// quote's `>`): TextView's and RichEditor's blockquotes.
+pub const QUOTE_BAR: char = '│';
 
 /// Before a closed disclosure (an accordion item's trigger, a collapsible's
 /// trigger, a tree item with children).

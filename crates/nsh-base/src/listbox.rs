@@ -1090,7 +1090,14 @@ fn header_row(entry: Memo<Option<Row>>, parts: Parts) -> AnyElement {
                 });
                 return content;
             }
-            text(move || group.get().map(|(title, _)| title).unwrap_or_default()).into_element()
+            // A terminal's header reads apart from the rows under it:
+            // bold, in the muted foreground.
+            text(move || group.get().map(|(title, _)| title).unwrap_or_default())
+                .when(terminal, |t| {
+                    t.font_weight(FontWeight::BOLD)
+                        .text_color(|| crate::theme::theme().muted_foreground)
+                })
+                .into_element()
         }))
         .into_element()
 }

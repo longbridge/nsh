@@ -606,12 +606,23 @@ impl Cx {
                 let column = view()
                     .flex_col()
                     .gap(px(BLOCK_GAP))
-                    .border_l(px(2.0))
-                    .border_color(strong_border)
-                    .ps(px(BODY_SIZE * 0.9))
                     .text_color(move || theme().foreground.opacity(0.8));
-                self.part(self.blocks(column, children, key, tail), Part::Blockquote)
-                    .into_element()
+                // A terminal's quote is a bar of `│` down its left side, a
+                // Cell before its text, as a Markdown source's `>`: a
+                // one-sided border has no Cell of its own there.
+                let quote = match is_terminal() {
+                    true => crate::terminal::quoted(self.blocks(column, children, key, tail)),
+                    false => self.blocks(
+                        column
+                            .border_l(px(2.0))
+                            .border_color(strong_border)
+                            .ps(px(BODY_SIZE * 0.9)),
+                        children,
+                        key,
+                        tail,
+                    ),
+                };
+                self.part(quote, Part::Blockquote).into_element()
             }
             Block::Blockquote {
                 children,
@@ -660,6 +671,11 @@ impl Cx {
                     .into_element(),
             },
             Block::Table(table) => self.table(table, key, tail),
+            // A terminal's rule is a row of `─`: a hairline has no row
+            // there. The blank rows around it are the blocks'.
+            Block::Rule if is_terminal() => self
+                .part(crate::terminal::rule_line(), Part::Rule)
+                .into_element(),
             Block::Rule => self
                 .part(
                     view()

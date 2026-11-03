@@ -360,3 +360,37 @@ fn a_terminals_markers_are_in_flow_their_numbers_right_aligned() {
         assert!(texts.contains(&marker), "{marker:?} in {texts:?}");
     }
 }
+
+#[test]
+fn a_terminals_quote_has_a_bar_and_its_rule_is_a_row_of_lines() {
+    let started = |idiom: Idiom| {
+        let mut config = EngineConfig {
+            viewport: Size::new(px(800.0), px(900.0)),
+            ..EngineConfig::new(Root::new::<Harness>(|| HarnessProps {
+                session: Some(session(json!({"type": "doc", "content": [
+                    {"type": "blockquote", "content": [
+                        {"type": "paragraph", "content": [{"type": "text", "text": "Quoted"}]},
+                    ]},
+                    {"type": "horizontalRule"},
+                    {"type": "paragraph", "content": [{"type": "text", "text": "After"}]},
+                ]}))),
+            }))
+        };
+        config.environment.os = Os::Linux;
+        config.environment.idiom = idiom;
+        let mut app = Headless::start(config).expect("the engine starts");
+        app.wait_for("text:Ready").unwrap();
+        app.screen()
+            .texts()
+            .into_iter()
+            .map(str::to_owned)
+            .collect::<Vec<_>>()
+    };
+    let rule = |t: &String| !t.is_empty() && t.chars().all(|c| c == '─');
+    let texts = started(Idiom::Terminal);
+    assert!(texts.iter().any(|t| t == "│"), "no quote bar in {texts:?}");
+    assert!(texts.iter().any(rule), "no rule in {texts:?}");
+    // Elsewhere the app's border and hairline draw them.
+    let texts = started(Idiom::Desktop);
+    assert!(!texts.iter().any(|t| t == "│" || rule(t)), "{texts:?}");
+}

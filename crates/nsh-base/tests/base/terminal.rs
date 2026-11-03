@@ -522,6 +522,36 @@ fn a_terminals_blocks_are_a_blank_row_apart_but_a_lists_are_not() {
     assert_eq!(row("first") - row("Two."), 2.0 * cell, "{at:?}");
 }
 
+/// A quote between two paragraphs, a rule after it.
+#[component]
+fn Quote() -> impl IntoElement {
+    text_view().markdown("Intro.\n\n> Quoted\n\n---\n\nAfter.")
+}
+
+#[test]
+fn a_terminals_quote_has_a_bar_and_its_rule_is_a_row_of_lines() {
+    let app = start::<Quote>(Idiom::Terminal);
+    let lines = texts(&app);
+    let rule = |t: &String| !t.is_empty() && t.chars().all(|c| c == '─');
+    assert!(lines.iter().any(|t| t == "│"), "no quote bar in {lines:?}");
+    assert!(lines.iter().any(rule), "no rule in {lines:?}");
+    // The bar a Cell before the quote's text; the rule a row of its own,
+    // a blank row on each side.
+    let at = text_origins::<Quote>();
+    let origin = |t: &str| *at.get(t).unwrap_or_else(|| panic!("no {t} in {at:?}"));
+    let (intro, quoted, after) = (origin("Intro."), origin("Quoted"), origin("After."));
+    let bar = origin("│");
+    let cell = (quoted.1 - intro.1) / 2.0;
+    assert!(cell > 0.0, "{at:?}");
+    assert_eq!((bar.0, bar.1), (intro.0, quoted.1), "{at:?}");
+    assert!(quoted.0 > bar.0, "{at:?}");
+    assert_eq!(after.1 - quoted.1, 4.0 * cell, "{at:?}");
+    // Elsewhere, the border and the hairline.
+    let gui = start::<Quote>(Idiom::Desktop);
+    let lines = texts(&gui);
+    assert!(!lines.iter().any(|t| t == "│" || rule(t)), "{lines:?}");
+}
+
 /// An image alone in its paragraph, between two paragraphs.
 #[component]
 fn Picture() -> impl IntoElement {
