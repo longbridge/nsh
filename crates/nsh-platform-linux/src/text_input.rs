@@ -478,6 +478,7 @@ impl Ctx {
             return;
         }
         *input.composition.borrow_mut() = Some(text.to_owned());
+        input.set_composing(true);
         self.send_composition(true, text);
     }
 
@@ -491,6 +492,7 @@ impl Ctx {
         if input.composition.borrow_mut().take().is_none() {
             return;
         }
+        input.set_composing(false);
         let c = self.clone();
         glib::idle_add_local_once(move || {
             let Some((_, view, input)) = c.get() else {
@@ -591,9 +593,27 @@ impl Drop for InputState {
 }
 
 impl InputState {
+    /// The placeholder shows while there is no text, nor an input
+    /// method's composition (GTK draws its preedit text outside the text).
     fn update_placeholder(&self) {
-        let shown = !self.config.borrow().placeholder.is_empty() && self.editor.borrow().is_empty();
+        let shown = !self.config.borrow().placeholder.is_empty()
+            && self.editor.borrow().is_empty()
+            && self.composition.borrow().is_none();
         self.placeholder.set_visible(shown);
+    }
+
+    /// Marks the editor composing: GTK places its caret at the start of the
+    /// preedit text rather than at the input method's cursor in it, so the
+    /// caret is hidden until the composition ends (`nsh-composing`, the
+    /// input's style sheet), as the candidates show where typing goes.
+    fn set_composing(&self, composing: bool) {
+        let widget = self.editor.borrow().widget();
+        if composing {
+            widget.add_css_class("nsh-composing");
+        } else {
+            widget.remove_css_class("nsh-composing");
+        }
+        self.update_placeholder();
     }
 
     /// Sets the text without reporting it, keeping the caret where it
@@ -1189,7 +1209,9 @@ fn css(config: &InputConfig) -> String {
          background: none; border: none; box-shadow: none; outline: none; padding: 0; \
          margin: 0; min-height: 0; min-width: 0; color: {color}; caret-color: {caret}; \
          -gtk-secondary-caret-color: {caret}; {font} }}\n\
-         label.nsh-placeholder {{ color: {placeholder}; opacity: 1; }}\n"
+         label.nsh-placeholder {{ color: {placeholder}; opacity: 1; }}\n\
+         text.nsh-composing, textview.nsh-composing > text {{ caret-color: transparent; \
+         -gtk-secondary-caret-color: transparent; }}\n"
     );
     // Always set: GTK themes draw the selection with the background this
     // sheet clears, and hide it while the window is in the backdrop. iOS

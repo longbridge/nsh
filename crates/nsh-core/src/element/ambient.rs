@@ -637,6 +637,17 @@ pub fn speech_available() -> Answer<bool> {
     answer
 }
 
+/// Whether a web view's ref gives its page trusted input here (TS:
+/// `WebView.inputAvailable()`, [`ElementRef::send_input`](super::ElementRef::send_input)):
+/// the platform delivers it (macOS) and the app's capabilities grant
+/// `webview.input`. Elsewhere `send_input` does nothing. To await in a
+/// task.
+pub fn web_input_available() -> Answer<bool> {
+    let (answer, slot) = Answer::new();
+    act(Action::WebInputAvailable(slot));
+    answer
+}
+
 /// Starts recognizing what the user says (dictation; TS: `Speech.start`),
 /// as `request` asks: the session's events come from
 /// [`SpeechRecognition::next`], in a task. One session runs at a time:
