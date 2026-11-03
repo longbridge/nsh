@@ -1,6 +1,6 @@
 //! The runtime's modules written in Rust: `nsh/android`'s `BackHandler`,
 //! `nsh/accessibility`'s commands, `nsh/device`'s `openUrl`, `nsh`'s
-//! `Image` functions, all of `nsh/clipboard`, `nsh/picker`, `nsh`'s
+//! `Image` and `WebView` functions, all of `nsh/clipboard`, `nsh/picker`, `nsh`'s
 //! `Speech` and `nsh/storage`,
 //! `nsh/desktop`'s `Window`, the surface-independent `os` metadata,
 //! `net`'s sockets, `websocket`'s connections, `fs/promises`' files and
@@ -28,6 +28,7 @@ mod process;
 mod speech;
 mod storage;
 mod websocket;
+mod webview;
 
 /// The [`crate::element::Quotas`] kind WebSockets count under: the `websocket`
 /// module's connections and the global `WebSocket`'s (`nsh-js`) share
@@ -52,6 +53,7 @@ pub fn registries() -> &'static [Registry] {
             .module::<clipboard::Clipboard>()
             .module::<picker::Picker>()
             .module::<speech::Speech>()
+            .module::<webview::WebView>()
             .module::<storage::Storage>()
             .module::<host::Host>()
             // The environment's accessors and hooks, made by `nsh-js`.

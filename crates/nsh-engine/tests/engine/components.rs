@@ -9042,6 +9042,137 @@ fn base_plot_dots_place_size_and_hover() {
     until(&rx, |b| shows(b, "hover null"));
 }
 
+const BASE_PLOT_CELLS: &str = r##"import { mount, signal, Text, View } from "nsh";
+import { Cell, Plot, PlotAxis } from "nsh/base/plot";
+
+type Month = { year: string; month: string; ret: number | null };
+
+function App() {
+  const hovered = signal<number | null>(null);
+  const rows: Month[] = [
+    { year: "2024", month: "Jan", ret: -10 },
+    { year: "2024", month: "Feb", ret: 0 },
+    { year: "2024", month: "Mar", ret: 10 },
+    { year: "2023", month: "Jan", ret: 5 },
+    { year: "2023", month: "Mar", ret: null },
+  ];
+  return (
+    <View>
+      {/* Months from the x scale's domain (Feb 2023 has no row), years in
+          the order the cells meet them; a ramp about 0. */}
+      <Plot
+        testID="calendar"
+        data={rows}
+        xScale={{ type: "band", domain: ["Jan", "Feb", "Mar"] }}
+        yScale={{ type: "band" }}
+        colorScale={{ type: "diverging", domain: [-10, 10], range: ["#990000", "#ffffff", "#006600"] }}
+        onHoverChange={({ index }) => hovered.set(index)}
+        style={{ width: 300, height: 200 }}
+      >
+        <Cell x="month" y="year" value="ret" inactiveOpacity={0.3} label="ret" labelClass="data-dark:bg-[#0000ff]" hoverCellClass="bg-[#00ffff]" />
+        <PlotAxis placement="left" />
+        <PlotAxis placement="top" />
+      </Plot>
+      <Text>{`hover ${hovered()}`}</Text>
+    </View>
+  );
+}
+
+mount(App);
+"##;
+
+/// `Cell`: a rectangle per row in the bands of its two categories (the
+/// x scale's domain, the y scale's from the cells in the order met), its
+/// color its value's along the plot's diverging ramp, a row without a
+/// value having none; the axes write the bands' categories; a label in
+/// each cell, `data-dark` on the dark ones; the pointer finds the cell
+/// under it and the hover cell is as big as it.
+#[test]
+fn base_plot_cells_place_color_and_hover() {
+    use nsh_core::{
+        Color,
+        canvas::{CanvasOp, Paint},
+    };
+    let (engine, rx) = start(BASE_PLOT_CELLS);
+    let mut all = until_drawn(&rx, |d| !bar_rects(&d.ops).is_empty());
+    all.extend(until(&rx, |_| false));
+    let marks = plot_drawings(&all);
+    let [(_, cells)] = &marks[..] else {
+        panic!("one cell mark: {marks:?}")
+    };
+    assert_eq!(
+        bar_rects(&cells.ops),
+        [
+            [0.0, 0.0, 100.0, 100.0],
+            [100.0, 0.0, 100.0, 100.0],
+            [200.0, 0.0, 100.0, 100.0],
+            [0.0, 100.0, 100.0, 100.0],
+        ]
+    );
+    let fills: Vec<_> = cells
+        .ops
+        .iter()
+        .filter_map(|op| match op {
+            CanvasOp::FillStyle(Paint::Color(c)) => Some(*c),
+            _ => None,
+        })
+        .collect();
+    // -10, 0 and 10 at the ramp's ends and middle; 5 halfway from white to
+    // green, mixed in OKLab.
+    assert_eq!(
+        fills[..3],
+        [Color(0x9900_00ff), Color(0xffff_ffff), Color(0x0066_00ff)]
+    );
+    let mid = nsh_core::Hsla::from(Color(0xffff_ffff)).mix_oklab(Color(0x0066_00ff).into(), 0.5);
+    assert_eq!(fills[3], Color::from(mid));
+    // The axes' labels: the categories.
+    for text in ["Jan", "Feb", "Mar", "2024", "2023"] {
+        assert!(all.iter().any(|b| shows(b, text)), "{text}");
+    }
+    // The dark red and green cells' labels are light on them: their
+    // `data-dark:` class applies; the white and pale ones' do not.
+    let blue = all
+        .iter()
+        .flat_map(|b| b.items.iter())
+        .filter(|i| matches!(i, MountItem::ViewStyle { style, .. } if style.background_color == Color(0x0000_ffff)))
+        .count();
+    assert_eq!(blue, 2, "the red and green cells' labels");
+
+    let plot = test_view(&all, "calendar");
+    let hover = |x: f32, y: f32| {
+        engine.control().dispatch_event(
+            plot,
+            EventKind::MouseMove,
+            EventPayload::Mouse(nsh_core::MouseEvent::new(
+                nsh_core::geometry::point(px(x), px(y)),
+                nsh_core::geometry::point(px(x), px(y)),
+                Default::default(),
+                None,
+            )),
+        )
+    };
+    hover(150.0, 50.0);
+    all.extend(until(&rx, |b| shows(b, "hover 1")));
+    all.extend(until(&rx, |_| false));
+    let cell = all
+        .iter()
+        .flat_map(|b| b.items.iter())
+        .find_map(|i| match i {
+            MountItem::ViewStyle { id, style } if style.background_color == Color(0x00ff_ffff) => {
+                Some(*id)
+            }
+            _ => None,
+        })
+        .expect("the hover cell");
+    let size = frame_of(&all, cell).expect("laid out").size;
+    assert_eq!((size.width.0, size.height.0), (100.0, 100.0));
+    hover(50.0, 150.0);
+    all.extend(until(&rx, |b| shows(b, "hover 3")));
+    // Feb 2023 has no cell: the nearest within the gap's reach is none.
+    hover(150.0, 150.0);
+    until(&rx, |b| shows(b, "hover null"));
+}
+
 const BASE_PLOT_COLOR_SCALE: &str = r##"import { mount, View } from "nsh";
 import { Area, Bar, Line, Pie, Plot } from "nsh/base/plot";
 

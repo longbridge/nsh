@@ -47,6 +47,15 @@
 // and a right-hand axis; automatic domains aligned in the same steps
 // (`alignTicks`), a `Grid` without values on their ticks (`ticks`), and
 // a plot that does not align.
+// Heatmaps: a `Cell` per row in the bands of its two categories (`x`,
+// `y`), the x scale's bands in the order of its `domain`, the y scale's
+// in the order the cells name them, which the `PlotAxis`es write; colored
+// by its `value` along a diverging `colorScale` about its `pivot` (a value
+// past the `domain` at its end, a row without one `unknown`), along a
+// sequential one, or by its `color` category through an ordinal one; its
+// corners round (`cornerRadii`), a `label` in each cell (`labelClass`,
+// `labelStyle`) light on dark cells (`data-dark:`), the others fading with
+// the hover (`inactiveOpacity`).
 // Reversed scales (`reverse`): bars hanging from the top of a reversed
 // linear y scale in bands from the right edge, and bars across from the
 // right edge of a reversed x; the axis's labels and the hover follow.
@@ -66,7 +75,7 @@
 // plot made again there shows whole at once, a new `appearGeneration` (a
 // string) and a new `id` draw it in again.
 import { Text, View, signal } from "nsh";
-import { Arc, Area, Bar, Dot, Grid, Line, Pie, Plot, PlotAppearScope, PlotAxis, PlotLabel, RadialGrid, RadialLine, Rule, Sankey } from "nsh/base/plot";
+import { Arc, Area, Bar, Cell, Dot, Grid, Line, Pie, Plot, PlotAppearScope, PlotAxis, PlotLabel, RadialGrid, RadialLine, Rule, Sankey } from "nsh/base/plot";
 
 type Row = { t: number; price: number; avg: number };
 type Sale = { v: number; w: number };
@@ -178,6 +187,9 @@ function App() {
       <ColorCase />
       <RangeCase />
       <DotCase />
+      <CellCase />
+      <CellColorCase />
+      <CellRampCase />
       <DualCase />
       <ReverseCase />
       <RadarCase />
@@ -531,6 +543,105 @@ function DotCase() {
       </Plot>
       <Text>{`bubble ${hovered()}`}</Text>
     </View>
+  );
+}
+
+type Heat = { col: string; line: string; v: number | null };
+
+const HEAT: Heat[] = [
+  { col: "col-a", line: "row-a", v: -15 },
+  { col: "col-b", line: "row-a", v: 5 },
+  { col: "col-a", line: "row-b", v: 45 },
+  { col: "col-b", line: "row-b", v: null },
+];
+
+/** Four cells of a 200 by 100 plot, in two bands of 100 across and two of
+ * 50 down: the columns in the order of the x scale's `domain` (`col-b` at
+ * the left), the lines in the order the cells name them (`row-a` at the
+ * top). Colored along a ramp from dark red through white to dark green
+ * over -15 to 25, white at 5 (`pivot`), 45 past the domain at its green
+ * end and the row without a value navy (`unknown`); round corners of 4; a
+ * label in each, black, or white on the dark cells; the other cells'
+ * labels fading to 0.25 with the hover. */
+function CellCase() {
+  const hovered = signal<number | null>(null);
+  return (
+    <View>
+      <Plot
+        testID="heat"
+        data={HEAT}
+        xScale={{ type: "band", domain: ["col-b", "col-a"] }}
+        yScale={{ type: "band" }}
+        colorScale={{ type: "diverging", domain: [-15, 25], pivot: 5, range: ["#990000", "#ffffff", "#006600"], unknown: "#000080" }}
+        onHoverChange={({ index }) => hovered.set(index)}
+        style={{ width: 200, height: 100 }}
+      >
+        <Cell
+          x="col"
+          y="line"
+          value="v"
+          cornerRadii={4}
+          inactiveOpacity={0.25}
+          label={(d: Heat) => (d.v == null ? "vnone" : `v${d.v}`)}
+          labelClass="text-[#000000] data-dark:text-[#ffffff]"
+          labelStyle={{ fontSize: 9 }}
+        />
+        <PlotAxis placement="top" labelClass="h-[10px] w-[40px]" />
+        <PlotAxis placement="left" labelClass="h-[10px] w-[40px]" />
+      </Plot>
+      <Text>{`cell ${hovered()}`}</Text>
+    </View>
+  );
+}
+
+type Tagged = { col: string; tag: string };
+
+const TAGGED: Tagged[] = [
+  { col: "tag-a", tag: "q" },
+  { col: "tag-b", tag: "p" },
+];
+
+/** Two square cells of 100 by 50 in one line, colored by their category
+ * through an ordinal scale: `q` green, `p` red. */
+function CellColorCase() {
+  return (
+    <Plot
+      data={TAGGED}
+      xScale={{ type: "band" }}
+      yScale={{ type: "band" }}
+      colorScale={{ type: "ordinal", domain: ["p", "q"], range: ["#ff0000", "#00ff00"] }}
+      interactive={false}
+      style={{ width: 200, height: 50 }}
+    >
+      <Cell x="col" y={() => "all"} color="tag" label="col" labelClass="h-[10px] w-[30px]" />
+    </Plot>
+  );
+}
+
+type Level = { at: string; v: number | null };
+
+const LEVELS: Level[] = [
+  { at: "lv-a", v: 0 },
+  { at: "lv-b", v: 10 },
+  { at: "lv-c", v: 40 },
+  { at: "lv-d", v: null },
+];
+
+/** Four cells of 50 by 20 colored along a sequential ramp from white
+ * through gray to black over 0 to 20: 0 white, 10 gray, 40 past the domain
+ * black, the row without a value magenta (`unknown`). */
+function CellRampCase() {
+  return (
+    <Plot
+      data={LEVELS}
+      xScale={{ type: "band" }}
+      yScale={{ type: "band" }}
+      colorScale={{ type: "sequential", domain: [0, 20], range: ["#ffffff", "#808080", "#000000"], unknown: "#ff00ff" }}
+      interactive={false}
+      style={{ width: 200, height: 20 }}
+    >
+      <Cell x="at" y={() => "level"} value="v" label="at" labelClass="h-[10px] w-[30px]" />
+    </Plot>
   );
 }
 
