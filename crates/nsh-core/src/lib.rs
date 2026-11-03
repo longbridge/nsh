@@ -67,6 +67,7 @@ mod transform;
 pub mod transition;
 pub mod url_scheme;
 pub mod websocket;
+pub mod window;
 
 // The derive macros name `::nsh_core`, also in this crate's own tests.
 extern crate self as nsh_core;
