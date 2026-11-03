@@ -2449,18 +2449,18 @@ mod tests {
                 _ => None,
             })
         };
-        let screen = screen().transition_shader(wipe.clone()).0;
-        assert_eq!(spec(&screen.resolved_attrs()), Some(Some(expected.clone())));
-        let modal = modal().transition_shader(wipe.clone()).0;
-        assert_eq!(spec(&modal.resolved_attrs()), Some(Some(expected.clone())));
+        let page = screen().transition_shader(wipe.clone()).0;
+        assert_eq!(spec(&page.resolved_attrs()), Some(Some(expected.clone())));
+        let dialog = modal().transition_shader(wipe.clone()).0;
+        assert_eq!(spec(&dialog.resolved_attrs()), Some(Some(expected.clone())));
         // A binding goes back to the page's or the dialog's own animation.
         let on = signal(true);
-        let screen = screen()
+        let bound = screen()
             .transition_shader(move || on.get().then(|| wipe.clone()))
             .0;
-        assert_eq!(spec(&screen.resolved_attrs()), Some(Some(expected)));
+        assert_eq!(spec(&bound.resolved_attrs()), Some(Some(expected)));
         on.set(false);
-        assert_eq!(spec(&screen.resolved_attrs()), Some(None));
+        assert_eq!(spec(&bound.resolved_attrs()), Some(None));
     }
 
     #[test]
