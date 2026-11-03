@@ -462,7 +462,7 @@ import { Image, View } from "nsh";
 ```
 
 `Highlighted` and `MathView` (`highlighted` and `math_view` in Rust) stand for the app's own components (a
-highlighter, a formula renderer, or a component of its Rust crate). Without `renderMath` `TextView` typesets a formula itself (`math` and `mathBlock` parts): the TeX documents commonly write (symbols and Greek letters, scripts, fractions, roots, big operators with limits, `\left` / `\right`, accents, `\mathbb` and the other fonts, `\text`, matrices, `cases` and `aligned`), in the text's color with the system's serif font; TeX outside that shows as its source in monospace.
+highlighter, a formula renderer, or a component of its Rust crate). Without `renderMath` `TextView` typesets a formula itself (`math` and `mathBlock` parts) with KaTeX's TeX support and fonts, in the text's color, the same on every platform; TeX it cannot read shows as its source in monospace.
 
 ## Markdown extensions
 

@@ -415,7 +415,7 @@ import { Image, View } from "nsh";
 />
 ```
 
-`Highlighted` 和 `MathView`（Rust 中是 `highlighted` 和 `math_view`）代表应用自己的组件（高亮器、公式渲染器，或应用 Rust crate 中的组件）。没有 `renderMath` 时，`TextView` 自己排版公式（`math` 和 `mathBlock` 部件）：支持文档中常见的 TeX（符号和希腊字母、上下标、分式、根式、带上下限的大型运算符、`\left` / `\right`、重音、`\mathbb` 等字体、`\text`、矩阵、`cases` 和 `aligned`），使用文本颜色和系统衬线字体；超出这些的 TeX 以等宽字体显示其源码。
+`Highlighted` 和 `MathView`（Rust 中是 `highlighted` 和 `math_view`）代表应用自己的组件（高亮器、公式渲染器，或应用 Rust crate 中的组件）。没有 `renderMath` 时，`TextView` 自己排版公式（`math` 和 `mathBlock` 部件）：支持 KaTeX 的 TeX 语法并使用 KaTeX 字体，颜色跟随文本，在各平台上效果一致；无法解析的 TeX 以等宽字体显示其源码。
 
 <a id="markdown-extensions"></a>
 

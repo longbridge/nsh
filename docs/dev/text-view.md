@@ -16,7 +16,7 @@ colored with the theme's tokens; the app restyles each part over it.
 | `markdown/` | Markdown into the model (markdown-rs's mdast); `container.rs`: `:::` containers, split out before parsing (markdown-rs has no such syntax); `streaming.rs`: streaming repair |
 | `html/` | HTML into the model (html5ever, as a reader mode reads a page) |
 | `common.rs` | What both parsers share: `pattern` extensions on inline content, headings' anchors |
-| `math.rs` | Formulas without a `renderMath`: a TeX parser (KaTeX's common subset) into a small tree, typeset with views and texts |
+| `math.rs` | Formulas without a `renderMath`: RaTeX's parse and layout, drawn on a canvas with the embedded KaTeX fonts (`fonts/katex`) |
 
 ## How it works
 
@@ -63,21 +63,16 @@ colored with the theme's tokens; the app restyles each part over it.
   in and fades back after 1.6 s); a press reports `onCodeBlockAction`. Each render has a key of the block's position (`code:3`,
   `math:2.0.1`, ...); content rendered for a key stays while the value is equal, so a streamed reply renders the app's
   code blocks again only while they are being written.
-- **Formulas are typeset** when the app gives no `renderMath` (`math.rs`). `parse` reads the TeX documents commonly
-  write into a tree (`Node`): glyphs with TeX's atom classes (spacing: thin before a function's argument, medium
-  around binary operators, thick around relations, none in scripts; a binary operator with nothing on its left is a
-  sign), scripts, fractions, roots, big operators (limits over and under in display, beside in text; integrals
-  never), `\left` / `\right` and `\big`, accents (combining marks on one letter, a mark or rule over a longer body),
-  `\mathbb` / `\mathcal` / `\mathfrak` / `\mathbf` as Unicode's math alphabets, `\text`, and the environments
-  `matrix` (and `p`/`b`/`B`/`v`/`V`), `cases`, `aligned` and `gathered`. Unknown TeX fails the parse (nesting is
-  bounded at 64) and the formula shows as its TeX, as before. Layout needs no glyph metrics: every row is a flex row
-  centering its atoms on one line, the math axis; a fraction (and an operator's limits, two scripts) is a grid of
-  `1fr auto 1fr` rows, so its halves are equal and the bar is on the axis; a single script is raised or lowered by
-  a margin (a centered box's margin moves it by half); stretchy delimiters and radicals are glyphs sized from an
-  estimate of the height they enclose (`Node::extent`). Glyphs use `serif` and inherit the text's color; rules
-  (bars, roots, overlines) draw in the theme's `foreground`. An inline formula is an attachment centered on the
-  line (`align-middle`); a block one is centered and scrolls sideways when wider than the view. Both carry their
-  TeX as the accessibility label.
+- **Formulas are typeset** when the app gives no `renderMath` (`math.rs`), by RaTeX (`ratex-parser`,
+  `ratex-layout`: KaTeX's parser and layout ported to Rust, about 660 commands). Its display list (glyphs of KaTeX's
+  fonts, rules and paths, in ems) is drawn on a canvas: each glyph is its outline, read with `ttf-parser` from the
+  KaTeX fonts embedded in `nsh-base` (`fonts/katex`, OFL; `include_bytes!`, so nothing is read at run time and every
+  platform draws the same), so no font is installed or registered. Glyphs and rules fill with the view's
+  `currentColor` (the text's color), except where the TeX sets a color of its own (`\color`). TeX RaTeX rejects (its
+  parser and layout bound nesting and output) shows as its source, as before. An inline formula is laid out in
+  `Text` style and padded so its box's middle is its math axis (0.25 em above its baseline), which `align-middle`
+  puts at the middle of the text's x height; a display one is laid out in `Display` style, centered, and scrolls
+  sideways when wider than the view. Both carry their TeX as the accessibility label.
 - **Links report presses**: `onLinkPress({ url })`; a heading's anchor is `#<slug>` (GitHub's slugs, `common.rs`), a
   footnote reference `#footnote-<label>`. By default nothing opens a URL: the app decides. `links="open"`
   (`TextViewLinks::Open`, opt-in) also opens a link with a scheme after reporting it (`nsh_core::element::open_url`,

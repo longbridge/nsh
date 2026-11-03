@@ -608,7 +608,7 @@ impl Cx {
                     .into_element(),
                 // Typeset, centered, scrolling sideways when wider than
                 // the view.
-                None if let Ok(node) = super::math::parse(tex) => self
+                None if let Some(formula) = super::math::typeset(tex, true) => self
                     .part(
                         scroll().horizontal().scrollbar(false).child(
                             view()
@@ -617,7 +617,7 @@ impl Cx {
                                 .min_w(relative(1.0))
                                 .py(px(BODY_SIZE * 0.25))
                                 .label(tex.clone())
-                                .child(super::math::render(&node, BODY_SIZE * 1.1, true)),
+                                .child(super::math::render(&formula, BODY_SIZE * 1.1, true)),
                         ),
                         Part::MathBlock,
                     )
@@ -1288,18 +1288,18 @@ impl Cx {
                     )
                     .into_element(),
                 // Typeset in the line, its middle on the text's.
-                None => match super::math::parse(tex) {
-                    Ok(node) => self
+                None => match super::math::typeset(tex, false) {
+                    Some(formula) => self
                         .part(
                             view()
                                 .flex_row()
                                 .align_middle()
                                 .label(tex.clone())
-                                .child(super::math::render(&node, BODY_SIZE, false)),
+                                .child(super::math::render(&formula, BODY_SIZE, false)),
                             Part::Math,
                         )
                         .into_element(),
-                    Err(_) => self
+                    None => self
                         .part(code_span(text(tex.clone())), Part::Math)
                         .into_element(),
                 },

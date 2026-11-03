@@ -58,6 +58,11 @@ imagesize = "0.15"
 # system fonts or raster images, so an SVG never reads files or fonts.
 resvg = { version = "0.46", default-features = false }
 ttf-parser = "0.25"
+# TeX formulas (`TextView`): KaTeX's parser and layout, ported to Rust.
+ratex-parser = "0.1.15"
+ratex-layout = "0.1.15"
+ratex-types = "0.1.15"
+ratex-font = "0.1.15"
 # WOFF and WOFF2 fonts, decompressed to the TrueType / OpenType data the
 # text engines register (`nsh-core`'s `text::font_data`).
 wuff = "0.2.9"
