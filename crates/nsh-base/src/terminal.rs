@@ -24,6 +24,12 @@ pub fn is_terminal() -> bool {
     idiom() == Idiom::Terminal
 }
 
+/// The height of one Cell, as the terminal's text engine measures one
+/// glyph: a row of text in a terminal (a code view's line).
+pub(crate) fn cell_height() -> Points {
+    text_metrics("", "0").height
+}
+
 /// How many whole Cells `width` holds, Cells `cell` wide.
 pub(crate) fn columns_in(width: Points, cell: Points) -> usize {
     match cell.0 > 0.0 {

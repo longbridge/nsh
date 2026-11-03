@@ -1,6 +1,6 @@
 import { Canvas, cleanup, computed, createAnimatedValue, Easing, effect, type JSX, LayoutAnimation, Path2D, platform, reduceMotion, signal, Text, token, View, type ViewStyle } from "nsh";
 import { Button as BaseButton, Link, Menu, MenuItem, MenuSeparator, Popover, Slider, Toggle, ToggleGroup, Toolbar, ToolbarGroup, ToolbarSeparator } from "nsh/base";
-import { alpha, Badge, Caption, Card, chart, colors, DemoPage, finish, focusRing, hovered, menuIndicator, MenuMark, mono, motion, PopIn, popupSurface, sliderFill, sliderLook, Tip, Toggle as Switch } from "../ui";
+import { alpha, Badge, Caption, Card, chart, colors, DemoPage, finish, focusRing, hovered, menuIndicator, MenuMark, mono, motion, PopIn, popupSurface, sliderFill, sliderLook, terminal, TERMINAL_GAP, Tip, Toggle as Switch } from "../ui";
 import { Field } from "./OverlayUi";
 import { LucideIcon, type LucideIconName } from "./RichEditorUi";
 
@@ -17,6 +17,9 @@ const pointer = platform.idiom === "desktop";
 /** A tool's side and its icon's: compact with a pointer, roomier on a touch screen. */
 const TOOL = pointer ? { side: 28, icon: 16, text: 13 } : { side: 38, icon: 18, text: 15 };
 
+/** The gap between a toolbar's tools: two columns in a terminal, where each tool is its label. */
+const GAP = terminal ? TERMINAL_GAP : 2;
+
 /** The fades and the sink every tool shares; nothing moves with reduced motion. */
 const transition = (): ViewStyle => ({
   transitionProperty: "background-color, border-color, box-shadow, transform, opacity",
@@ -30,8 +33,10 @@ type Look = { style: ViewStyle; hoverStyle?: ViewStyle; activeStyle: ViewStyle; 
 
 const toolLook = (on: boolean, wide = false): Look => ({
   style: {
-    minWidth: TOOL.side,
-    height: TOOL.side,
+    // The terminal sizes a tool to its label, which it never breaks: a bar too narrow for its tools wraps them.
+    minWidth: terminal ? undefined : TOOL.side,
+    height: terminal ? undefined : TOOL.side,
+    flexShrink: terminal ? 0 : undefined,
     paddingHorizontal: wide ? 8 : 0,
     flexDirection: "row",
     alignItems: "center",
@@ -54,7 +59,8 @@ const toolLook = (on: boolean, wide = false): Look => ({
 const track = (): ViewStyle => ({
   alignItems: "center",
   alignSelf: "stretch",
-  gap: 2,
+  gap: GAP,
+  flexWrap: terminal ? "wrap" : undefined,
   padding: 3,
   borderRadius: 10,
   borderCurve: "continuous",
@@ -109,7 +115,12 @@ function Glyph(props: { name: GlyphName; size?: number; tint: string }) {
 
 type Icon = { icon?: LucideIconName; glyph?: GlyphName };
 
-function ToolIcon(props: Icon & { tint: string; size?: number }) {
+/**
+ * A tool's icon, or its glyph. A terminal draws no icons: there it is the tool's `short` label (its `label` when
+ * unset), as text.
+ */
+function ToolIcon(props: Icon & { tint: string; size?: number; label: string; short?: string }) {
+  if (terminal) return <Text style={{ fontSize: TOOL.text, color: props.tint }}>{props.short ?? props.label}</Text>;
   return (
     <>
       <If when={props.icon}>
@@ -123,10 +134,12 @@ function ToolIcon(props: Icon & { tint: string; size?: number }) {
 }
 
 /** A command of a toolbar: a `Button`, its label what screen readers say and, with a pointer, its tooltip. */
-function Command(props: Icon & { label: string; text?: string; shortcut?: string; disabled?: boolean; on?: boolean; onPress: () => void }) {
+function Command(props: Icon & { label: string; short?: string; text?: string; shortcut?: string; disabled?: boolean; on?: boolean; onPress: () => void }) {
   return (
     <BaseButton accessibilityLabel={props.label} disabled={props.disabled} tooltip={<Tip label={props.label} shortcut={props.shortcut} />} onPress={props.onPress} {...toolLook(!!props.on, !!props.text)}>
-      <ToolIcon icon={props.icon} glyph={props.glyph} tint={props.on ? colors.text : colors.muted} />
+      <If when={!(terminal && props.text)}>
+        <ToolIcon icon={props.icon} glyph={props.glyph} label={props.label} short={props.short} tint={props.on ? colors.text : colors.muted} />
+      </If>
       <If when={props.text}>
         <Text style={{ fontSize: TOOL.text, fontWeight: "500", color: colors.text }}>{props.text}</Text>
       </If>
@@ -147,7 +160,7 @@ function Trigger(props: { label: string; open: boolean; wide?: boolean; tip: JSX
 }
 
 /** An on / off tool of a toolbar: a `Toggle`, raised while pressed. */
-function Mark(props: Icon & { label: string; shortcut?: string; pressed: boolean; disabled?: boolean; onChange: (pressed: boolean) => void }) {
+function Mark(props: Icon & { label: string; short?: string; shortcut?: string; pressed: boolean; disabled?: boolean; onChange: (pressed: boolean) => void }) {
   return (
     <Toggle
       pressed={props.pressed}
@@ -159,7 +172,7 @@ function Mark(props: Icon & { label: string; shortcut?: string; pressed: boolean
       pressedStyle={finish.pill}
       hoverStyle={props.pressed ? undefined : hovered()}
     >
-      <ToolIcon icon={props.icon} glyph={props.glyph} tint={props.pressed ? colors.text : colors.muted} />
+      <ToolIcon icon={props.icon} glyph={props.glyph} label={props.label} short={props.short} tint={props.pressed ? colors.text : colors.muted} />
     </Toggle>
   );
 }
@@ -190,16 +203,16 @@ function AlignGlyph(props: { align: Align; tint: string }) {
   );
 }
 
-const MARKS: { value: string; icon: LucideIconName; label: string; shortcut: string }[] = [
+const MARKS: { value: string; icon: LucideIconName; label: string; short?: string; shortcut: string }[] = [
   { value: "bold", icon: "bold", label: "Bold", shortcut: "⌘B" },
   { value: "italic", icon: "italic", label: "Italic", shortcut: "⌘I" },
   { value: "underline", icon: "underline", label: "Underline", shortcut: "⌘U" },
-  { value: "strike", icon: "strikethrough", label: "Strikethrough", shortcut: "⌘⇧X" },
+  { value: "strike", icon: "strikethrough", label: "Strikethrough", short: "Strike", shortcut: "⌘⇧X" },
 ];
-const ALIGNS: { value: Align; label: string }[] = [
-  { value: "left", label: "Align left" },
-  { value: "center", label: "Align center" },
-  { value: "right", label: "Align right" },
+const ALIGNS: { value: Align; label: string; short?: string }[] = [
+  { value: "left", label: "Align left", short: "Left" },
+  { value: "center", label: "Align center", short: "Center" },
+  { value: "right", label: "Align right", short: "Right" },
   { value: "justify", label: "Justify" },
 ];
 const BLOCKS: { value: Block; icon: LucideIconName }[] = [
@@ -306,7 +319,8 @@ export function ToolbarDemo() {
     // A narrow pane folds the alignment into the overflow menu; a narrower one (a phone) folds more, a tool at a
     // time, until the bar fits: "⋯" stays in reach at any width.
     const width = signal(0);
-    const compact = () => width() > 0 && width() < (pointer ? 470 : 520);
+    // A terminal's bar wraps its labels instead (the widths here are the icons').
+    const compact = () => !terminal && width() > 0 && width() < (pointer ? 470 : 520);
     const folds = computed(() => {
       if (!compact()) return 0;
       let n = 0;
@@ -334,7 +348,7 @@ export function ToolbarDemo() {
       <Card title="Text formatting" subtitle="History, a block menu, marks, alignment and a link: one stop of Tab" right={<Badge label={`${past().length} edits`} />}>
         <Toolbar accessibilityLabel="Formatting" style={track()} onLayout={({ bounds }) => width.set(bounds.size.width)}>
           <If when={!folded("undo")}>
-            <ToolbarGroup accessibilityLabel="History" style={{ gap: 2 }}>
+            <ToolbarGroup accessibilityLabel="History" style={{ gap: GAP }}>
               <Command icon="undo-2" label="Undo" shortcut="⌘Z" disabled={past().length === 0} onPress={undo} />
               <If when={!folded("redo")}>
                 <Command icon="redo-2" label="Redo" shortcut="⌘⇧Z" disabled={future().length === 0} onPress={redo} />
@@ -351,7 +365,7 @@ export function ToolbarDemo() {
             trigger={
               <Trigger label={`Block: ${block()}`} tip={<Tip label="Turn into" />} open={blockOpen()} wide>
                 <LucideIcon name={BLOCKS.find((b) => b.value === block())!.icon} size={TOOL.icon} tint={colors.text} />
-                <If when={!compact()}>
+                <If when={!compact() || terminal}>
                   <Text style={{ fontSize: TOOL.text, color: colors.text }}>{block()}</Text>
                 </If>
                 <View style={{ transform: [{ rotate: blockOpen() ? "180deg" : "0deg" }], ...transition() }}>
@@ -368,14 +382,14 @@ export function ToolbarDemo() {
           </Menu>
           <Rule />
           {/* A toggle group inside the toolbar is one of its groups: its toggles are the toolbar's items. */}
-          <ToggleGroup style={{ flexDirection: "row", gap: 2 }}>
+          <ToggleGroup style={{ flexDirection: "row", gap: GAP }}>
             <Each of={MARKS.filter((m) => !folded(m.value))}>
-              {(m) => <Mark icon={m().icon} label={m().label} shortcut={m().shortcut} pressed={has(m().value)} onChange={(on) => toggleMark(m(), on)} />}
+              {(m) => <Mark icon={m().icon} label={m().label} short={m().short} shortcut={m().shortcut} pressed={has(m().value)} onChange={(on) => toggleMark(m(), on)} />}
             </Each>
           </ToggleGroup>
           <If when={!compact()}>
             <Rule />
-            <ToolbarGroup accessibilityLabel="Alignment" style={{ gap: 2 }}>
+            <ToolbarGroup accessibilityLabel="Alignment" style={{ gap: GAP }}>
               <Each of={ALIGNS}>
                 {(a) => (
                   <Toggle
@@ -387,7 +401,9 @@ export function ToolbarDemo() {
                     pressedStyle={finish.pill}
                     hoverStyle={state().align === a().value ? undefined : hovered()}
                   >
-                    <AlignGlyph align={a().value} tint={state().align === a().value ? colors.text : colors.muted} />
+                    <If when={terminal} else={<AlignGlyph align={a().value} tint={state().align === a().value ? colors.text : colors.muted} />}>
+                      <Text style={{ fontSize: TOOL.text, color: state().align === a().value ? colors.text : colors.muted }}>{a().short ?? a().label}</Text>
+                    </If>
                   </Toggle>
                 )}
               </Each>
@@ -406,7 +422,7 @@ export function ToolbarDemo() {
             margin={8}
             trigger={
               <Trigger label="Link" tip={<Tip label="Link" shortcut="⌘K" />} open={linkOpen() || !!state().link}>
-                <LucideIcon name="link" size={TOOL.icon} tint={state().link ? colors.accent : colors.muted} />
+                <ToolIcon icon="link" label="Link" tint={state().link ? colors.accent : colors.muted} />
               </Trigger>
             }
           >
@@ -433,7 +449,7 @@ export function ToolbarDemo() {
             onOpenChange={({ open }) => moreOpen.set(open)}
             trigger={
               <Trigger label="More formatting" tip={<Tip label="More" />} open={moreOpen()}>
-                <LucideIcon name="ellipsis" size={TOOL.icon} tint={colors.muted} />
+                <ToolIcon icon="ellipsis" label="More formatting" short="⋯" tint={colors.muted} />
               </Trigger>
             }
           >
@@ -582,33 +598,33 @@ export function ToolbarDemo() {
             <Text style={{ fontSize: 11, color: colors.faint, fontFamily: mono }}>-{time(track().length - elapsed())}</Text>
           </View>
         </View>
-        <Toolbar accessibilityLabel="Playback" style={{ alignItems: "center", gap: pointer ? 4 : 8, flexWrap: "wrap" }}>
+        <Toolbar accessibilityLabel="Playback" style={{ alignItems: "center", gap: terminal ? TERMINAL_GAP : pointer ? 4 : 8, flexWrap: "wrap" }}>
           <Mark glyph="shuffle" label="Shuffle" pressed={shuffle()} onChange={(on) => {
             shuffle.set(on);
             last.set(`Shuffle: ${on ? "on" : "off"}`);
           }} />
-          <ToolbarGroup accessibilityLabel="Transport" style={{ alignItems: "center", gap: pointer ? 4 : 8 }}>
+          <ToolbarGroup accessibilityLabel="Transport" style={{ alignItems: "center", gap: terminal ? TERMINAL_GAP : pointer ? 4 : 8 }}>
             <Command glyph="skip-back" label="Previous" onPress={previous} />
             <BaseButton
               accessibilityLabel={playing() ? "Pause" : "Play"}
               tooltip={<Tip label={playing() ? "Pause" : "Play"} shortcut="Space" />}
               onPress={play}
-              style={{ width: big, height: big, borderRadius: big / 2, alignItems: "center", justifyContent: "center", backgroundColor: colors.light, ...transition() }}
+              style={{ width: terminal ? undefined : big, height: terminal ? undefined : big, borderRadius: big / 2, alignItems: "center", justifyContent: "center", backgroundColor: colors.light, ...transition() }}
               hoverStyle={{ opacity: 0.9 }}
               activeStyle={{ transform: [{ scale: 0.9 }] }}
               focusStyle={focusRing(2)}
             >
               <View style={{ transform: [{ scale: pop }] }}>
-                <If when={playing()} else={<LucideIcon name="play" size={pointer ? 18 : 22} tint={colors.onLight} />}>
-                  <LucideIcon name="pause" size={pointer ? 18 : 22} tint={colors.onLight} />
+                <If when={playing()} else={<ToolIcon icon="play" label="Play" size={pointer ? 18 : 22} tint={colors.onLight} />}>
+                  <ToolIcon icon="pause" label="Pause" size={pointer ? 18 : 22} tint={colors.onLight} />
                 </If>
               </View>
             </BaseButton>
             <Command glyph="skip-forward" label="Next" onPress={() => next()} />
           </ToolbarGroup>
-          <Command glyph={repeat() === "one" ? "repeat-1" : "repeat"} label={`Repeat: ${repeat()}`} on={repeat() !== "off"} onPress={cycle} />
+          <Command glyph={repeat() === "one" ? "repeat-1" : "repeat"} label={`Repeat: ${repeat()}`} short="Repeat" on={repeat() !== "off"} onPress={cycle} />
           <View style={{ flex: 1 }} />
-          <ToolbarGroup accessibilityLabel="Volume" style={{ alignItems: "center", gap: 6 }}>
+          <ToolbarGroup accessibilityLabel="Volume" style={{ alignItems: "center", gap: terminal ? TERMINAL_GAP : 6 }}>
             <Mark glyph={muted() || volume() === 0 ? "volume-x" : "volume-2"} label="Mute" pressed={muted()} onChange={(on) => {
               muted.set(on);
               last.set(on ? "Muted" : "Unmuted");
@@ -654,9 +670,12 @@ export function ToolbarDemo() {
     const current = () => TOOLS[at()];
     return (
       <Card title="Tool palette" subtitle="A vertical toolbar: ↑ ↓ move, ← → are left alone">
-        <View style={{ flexDirection: "row", gap: 12, alignItems: "stretch" }}>
-          <Toolbar axis="vertical" accessibilityLabel="Tools" style={{ ...track(), alignSelf: "flex-start", gap: 2 }}>
-            <View style={{ pointerEvents: "none", position: "absolute", top: 3, left: 3, width: TOOL.side, height: TOOL.side, borderRadius: TOOL.side / 4 + 1, borderWidth: 1, ...finish.raised, transform: [{ translateY: y }] }} />
+        <View style={{ flexDirection: "row", gap: terminal ? TERMINAL_GAP : 12, alignItems: "stretch" }}>
+          {/* A terminal's column of labels lines up at the start; the chosen one is its own band there. */}
+          <Toolbar axis="vertical" accessibilityLabel="Tools" style={{ ...track(), alignSelf: "flex-start", gap: 2, ...(terminal ? { alignItems: "flex-start" } : {}) }}>
+            <If when={!terminal}>
+              <View style={{ pointerEvents: "none", position: "absolute", top: 3, left: 3, width: TOOL.side, height: TOOL.side, borderRadius: TOOL.side / 4 + 1, borderWidth: 1, ...finish.raised, transform: [{ translateY: y }] }} />
+            </If>
             <Each of={TOOLS}>
               {(t) => (
                 <Toggle
@@ -670,9 +689,10 @@ export function ToolbarDemo() {
                     last.set(`Tool: ${t().label}`);
                   }}
                   {...toolLook(false)}
+                  pressedStyle={terminal ? finish.pill : undefined}
                   hoverStyle={tool() === t().value ? undefined : hovered()}
                 >
-                  <ToolIcon icon={t().icon} glyph={t().glyph} tint={tool() === t().value ? colors.text : colors.muted} />
+                  <ToolIcon icon={t().icon} glyph={t().glyph} label={t().label} tint={tool() === t().value ? colors.text : colors.muted} />
                 </Toggle>
               )}
             </Each>
@@ -712,14 +732,14 @@ export function ToolbarDemo() {
             approved.set(!approved());
             last.set(approved() ? "Approved" : "Approval withdrawn");
           }} />
-          <Mark icon="message-circle" label="Show comments" pressed={comments()} onChange={(on) => {
+          <Mark icon="message-circle" label="Show comments" short="Comments" pressed={comments()} onChange={(on) => {
             comments.set(on);
             last.set(`Comments: ${on ? "shown" : "hidden"}`);
           }} />
           <Rule />
-          <ToolbarGroup accessibilityLabel="Share" disabled style={{ gap: 2 }}>
-            <Command icon="share-2" label="Share (needs edit access)" onPress={() => {}} />
-            <Command icon="download" label="Download (needs edit access)" onPress={() => {}} />
+          <ToolbarGroup accessibilityLabel="Share" disabled style={{ gap: GAP }}>
+            <Command icon="share-2" label="Share (needs edit access)" short="Share" onPress={() => {}} />
+            <Command icon="download" label="Download (needs edit access)" short="Download" onPress={() => {}} />
           </ToolbarGroup>
           <View style={{ flex: 1 }} />
           <Link

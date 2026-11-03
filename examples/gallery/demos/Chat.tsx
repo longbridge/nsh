@@ -53,6 +53,7 @@ export function Chat() {
   const messages = signal<Msg[]>([]);
   const model = signal<Model>("Swift");
   const native = platform.desktop && platform.os !== "web";
+  const terminal = platform.idiom === "terminal";
   const provider = signal<Provider>("Codex");
   let cancelLocal: (() => void) | undefined;
   const draft = signal("");
@@ -497,7 +498,26 @@ export function Chat() {
             </Text>
           </View>
         </Appear>
-        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 12 }}>
+        {/* The terminal lists the suggestions, a line each: four cards of
+            a quarter's width would wrap their titles unevenly. */}
+        <If when={terminal}>
+          <View>
+            <Each of={featured}>
+              {(f) => {
+                const s = scenarios.find((x) => x.id === f().id)!;
+                return (
+                  <Press onPress={() => play(s.id)} accessibilityLabel={s.chip}>
+                    <View style={{ flexDirection: "row", gap: 16 }}>
+                      <Text style={{ fontWeight: "600", color: colors.text }}>{s.chip}</Text>
+                      <Text style={{ flex: 1, color: colors.muted }}>{f().note}</Text>
+                    </View>
+                  </Press>
+                );
+              }}
+            </Each>
+          </View>
+        </If>
+        <View style={{ display: terminal ? "none" : "flex", flexDirection: "row", flexWrap: "wrap", gap: 12 }}>
           <Each of={featured}>
             {(f, i) => {
               const s = scenarios.find((x) => x.id === f().id)!;
@@ -744,7 +764,8 @@ export function Chat() {
           </If>
           <View
             style={{
-              borderRadius: 24,
+              // Square in the terminal, framed as its cards are.
+              borderRadius: terminal ? 0 : 24,
               borderCurve: "continuous",
               // Glass like the menu above it, without the blur: nothing scrolls under it.
               ...finish.menu,

@@ -4,7 +4,7 @@ import { Dialog, Input, type InputProps, NavPage } from "nsh/base";
 import { Keyboard, keyboardFrame, platform, safeAreaInsets } from "nsh";
 import { Icon, type IconName } from "../icons";
 import { nav } from "../nav";
-import { alpha, Appear, Badge, Button, Caption, Card, colors, DemoPage, finish, focusRing, follow, header, hint, IconTile, Inset, Meter, mono, PageHeader, Press, radius, RoundButton, Section, Segmented, Spinner, terminal, TERMINAL_COLUMN, TERMINAL_ROW, tints, type Tone, toneColor } from "../ui";
+import { alpha, Appear, Badge, Button, Caption, Card, colors, DemoPage, finish, focusRing, follow, header, hint, IconTile, Inset, Meter, mono, PageHeader, Press, radius, RoundButton, Section, Segmented, Spinner, terminal, TERMINAL_COLUMN, TERMINAL_GAP, TERMINAL_ROW, tints, type Tone, toneColor } from "../ui";
 
 /** A pointer and a keyboard: desktop density. */
 const pointer = platform.desktop;
@@ -216,9 +216,10 @@ function Field(
 /**
  * A small button inside a field (show the password, clear the text): its
  * name for screen readers, faint until the pointer is over it; it sinks
- * while pressed. `show` false shrinks and fades it out, untouchable.
+ * while pressed. `show` false shrinks and fades it out, untouchable. A
+ * terminal draws no icons: it shows `short` there, as text.
  */
-function FieldButton(props: { icon: IconName; label: string; show?: boolean; onPress: () => void }) {
+function FieldButton(props: { icon: IconName; label: string; short: string; show?: boolean; onPress: () => void }) {
   const size = pointer ? 22 : 36;
   const shown = follow(() => (props.show === false ? 0 : 1));
   return (
@@ -232,8 +233,11 @@ function FieldButton(props: { icon: IconName; label: string; show?: boolean; onP
       hoverStyle={{ backgroundColor: alpha(colors.text, 0.06) }}
       activeStyle={{ backgroundColor: alpha(colors.text, 0.12), transform: [{ scale: 0.9 }] }}
       style={{
-        width: size,
-        height: size,
+        // The terminal sizes it to its text, and keeps no columns for it
+        // while it is hidden: its field's band then reaches the end.
+        display: terminal && props.show === false ? "none" : "flex",
+        width: terminal ? undefined : size,
+        height: terminal ? undefined : size,
         borderRadius: size / 2,
         alignItems: "center",
         justifyContent: "center",
@@ -243,7 +247,9 @@ function FieldButton(props: { icon: IconName; label: string; show?: boolean; onP
         transitionDuration: 120,
       }}
     >
-      <Icon name={props.icon} size={pointer ? 13 : 17} tint={colors.muted} />
+      <If when={terminal} else={<Icon name={props.icon} size={pointer ? 13 : 17} tint={colors.muted} />}>
+        <Text style={{ color: colors.muted }}>{props.short}</Text>
+      </If>
     </View>
   );
 }
@@ -356,14 +362,18 @@ function Strength(props: { password: string }) {
           {strengthLabel[score()]}
         </Text>
       </View>
-      <View style={{ flexDirection: "row", flexWrap: "wrap", rowGap: 6, columnGap: 14 }}>
+      <View style={{ flexDirection: "row", flexWrap: "wrap", rowGap: 6, columnGap: terminal ? TERMINAL_GAP : 14 }}>
         <Each of={rules}>
           {(rule) => {
             const met = () => rule().test(props.password);
             const t = follow(() => (met() ? 1 : 0));
             return (
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 6, minWidth: pointer ? 150 : 140 }}>
-                <View style={{ width: 14, height: 14, alignItems: "center", justifyContent: "center" }}>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 6, minWidth: terminal ? undefined : pointer ? 150 : 140 }}>
+                {/* A terminal's mark is text: a check once met, a dot until then. */}
+                <If when={terminal}>
+                  <Text style={{ color: met() ? colors.up : colors.faint }}>{met() ? "✓" : "·"}</Text>
+                </If>
+                <View style={{ display: terminal ? "none" : "flex", width: 14, height: 14, alignItems: "center", justifyContent: "center" }}>
                   <View style={{ position: "absolute", width: 5, height: 5, borderRadius: 3, backgroundColor: colors.faint, opacity: t.interpolate({ inputRange: [0, 1], outputRange: [1, 0] }) }} />
                   <View style={{ opacity: t, transform: [{ scale: t.interpolate({ inputRange: [0, 1], outputRange: [0.4, 1] }) }] }}>
                     <Icon name="check" size={14} tint={colors.up} weight={2.2} />
@@ -478,6 +488,7 @@ function Search() {
             <FieldButton
               icon="close"
               label="Clear the search"
+              short="×"
               show={query().length > 0}
               onPress={() => {
                 change("");
@@ -638,7 +649,7 @@ export function Form() {
                 autoComplete="new-password"
                 placeholder="At least 8 characters"
                 leading={<Icon name="lock" size={pointer ? 13 : 16} tint={colors.faint} />}
-                trailing={<FieldButton icon={reveal() ? "eye-off" : "eye"} label={reveal() ? "Hide the password" : "Show the password"} onPress={() => reveal.set(!reveal())} />}
+                trailing={<FieldButton icon={reveal() ? "eye-off" : "eye"} label={reveal() ? "Hide the password" : "Show the password"} short={reveal() ? "Hide" : "Show"} onPress={() => reveal.set(!reveal())} />}
               />
               <Strength password={password()} />
             </View>

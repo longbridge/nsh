@@ -488,7 +488,7 @@ const drafting = signal<DiffLineRange | null>(null);
 | `background` | `.background(..)` | `boolean` | `true` | 改动的行带底色。 |
 | `fontFamily` | `.font_family(..)` | `string` | 主题的 `font-mono` | 文本的字体。 |
 | `fontSize` | `.font_size(..)` | `number` | `13` | 字号，单位为点。 |
-| `lineHeight` | `.line_height(..)` | `number` | `20` | 一行的高度，单位为点。 |
+| `lineHeight` | `.line_height(..)` | `number` | `20` | 一行的高度，单位为点；在终端里一行就是一个 Cell。 |
 | `renderSeparator` | `.render_separator(..)` | `(separator: DiffSeparator) => JSX.Element` | | 绘制折叠行的分隔行。 |
 | `renderHunkActions` | `.render_hunk_actions(..)` | `(hunk: DiffHunk) => JSX.Element` | | 应用在每处改动上的操作。 |
 | `softWrap` | `.soft_wrap(..)` | `boolean` | `false` | 长行在这一侧的宽度处换行。 |

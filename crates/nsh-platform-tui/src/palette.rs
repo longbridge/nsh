@@ -466,6 +466,13 @@ pub(crate) fn surface(fill: nsh_core::Color, ground: Ground) -> Surface {
     }
 }
 
+/// Whether `color` is hued (its channels 51 or more apart), the terminal
+/// layout's rule: a hued border keeps its line on a filled view.
+pub(crate) fn hued(color: nsh_core::Color) -> bool {
+    let [r, g, b, _] = color.0.to_be_bytes();
+    r.max(g).max(b) - r.min(g).min(b) >= 51
+}
+
 /// How far `color`, blended over `ground`, is in lightness from it.
 pub(crate) fn gap(color: nsh_core::Color, ground: Ground) -> f32 {
     let [red, green, blue, alpha] = color.0.to_be_bytes();

@@ -3,7 +3,9 @@
 //! alpha, dashes, clips) onto a grid of 2 × 4 dots per Cell, which
 //! ratatui's `Canvas` turns into braille symbols. Fills set the dots whose
 //! centers the fill rule puts inside the path, strokes the dots along each
-//! segment, and text is printed on whole Cells above the dots.
+//! segment, and text is printed on whole Cells above the dots, with the
+//! Cell before and after it cleared of dots so a label never runs into a
+//! mark.
 //!
 //! Only the part of the canvas inside its visible Cells is replayed onto,
 //! so a canvas partly scrolled away keeps its dots where they were. A Cell
@@ -149,6 +151,24 @@ pub(crate) fn draw(
     for index in order {
         labels[index].run = labels[index].run.separated(placed.iter());
         placed.push(labels[index].run);
+    }
+    // A label stands apart from the marks: the Cell before and after it
+    // shows no dots, so its digits never read as part of a line.
+    for label in &labels {
+        let row = label.run.cells.top;
+        let width: i32 = label.text.graphemes(true).map(|g| g.width() as i32).sum();
+        let left = label.run.cells.left;
+        for column in [left - 1, left + width] {
+            if (0..i32::from(visible.width)).contains(&column)
+                && (0..i32::from(visible.height)).contains(&row)
+            {
+                let (x, y) = (column as u16, row as u16);
+                // Only its own dots: what lies under the canvas stays.
+                if scratch[(x, y)].symbol() != " " {
+                    buffer[(visible.x + x, visible.y + y)].set_symbol(" ");
+                }
+            }
+        }
     }
     for label in labels {
         let row = label.run.cells.top as u16;

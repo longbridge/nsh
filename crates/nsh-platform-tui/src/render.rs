@@ -380,6 +380,7 @@ impl Painter<'_> {
         if filled != Surface::None
             && let Some(color) = first_border
             && palette::gap(color, parent) < 2.0 * palette::gap(fill, parent)
+            && !palette::hued(color)
         {
             edges.sides = [false; 4];
         }
@@ -1100,6 +1101,11 @@ fn text(
             .iter()
             .any(|glyph| glyph.text.chars().any(char::is_alphanumeric));
         let drawn_end = x.min(i32::from(visible.right()));
+        if words {
+            let row_start = bounds.left + row.indent as i32;
+            clear_dots(buffer, text_cells, row_start - 1, y);
+            clear_dots(buffer, text_cells, drawn_end, y);
+        }
         last_row = Some((y, drawn_end, row_index, words));
         // A line cut at the box's right edge ends in an ellipsis; one a
         // scroll view's viewport cuts is only cut (it scrolls into view),
@@ -1584,6 +1590,26 @@ fn mark_disclosure(buffer: &mut Buffer, rect: Rect, open: bool, (fg, modifier): 
     cell.set_symbol(if open { "▾" } else { "▸" });
     cell.fg = fg;
     cell.modifier = (cell.modifier | modifier) - Modifier::BOLD - Modifier::REVERSED;
+}
+
+/// Clears a canvas's dot at Cell (`x`, `y`) beside a text over the canvas
+/// (a chart's value on its bar): the label stands apart from the marks, as
+/// a canvas's own text does.
+fn clear_dots(buffer: &mut Buffer, text_cells: &[bool], x: i32, y: u16) {
+    let area = buffer.area;
+    if x < i32::from(area.x) || x >= i32::from(area.right()) {
+        return;
+    }
+    let at = buffer.index_of(x as u16, y);
+    let cell = &mut buffer.content[at];
+    let braille = cell
+        .symbol()
+        .chars()
+        .next()
+        .is_some_and(|c| ('\u{2801}'..='\u{28ff}').contains(&c));
+    if braille && !text_cells[at] {
+        cell.set_symbol(" ");
+    }
 }
 
 /// Whether a glyph of `rect` is underlined: the app marks the view itself.

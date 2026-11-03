@@ -763,6 +763,37 @@ fn the_view_reports_where_its_rows_are_scrolled() {
     assert!(shown.ends_with(" 800 340 300"), "{shown}");
 }
 
+/// In a terminal a row is one Cell, as the text engine measures a line,
+/// whatever the app's `lineHeight`: rows on another step would land on
+/// the Cell grid unevenly, a blank row every few lines.
+#[test]
+fn in_a_terminal_a_row_is_one_line_of_the_grid() {
+    let mut app = start_on(two_far_changes(), Os::Linux, Idiom::Terminal);
+    see(&mut app, "line fifty");
+    let height = |app: &Headless| -> f32 {
+        let shown = app
+            .screen()
+            .texts()
+            .iter()
+            .find_map(|t| t.trim().strip_prefix("Scrolled ").map(str::to_string))
+            .unwrap();
+        shown.split(' ').nth(3).unwrap().parse().unwrap()
+    };
+    app.wait(std::time::Duration::from_millis(100)).unwrap();
+    // 17 rows collapsed, 60 expanded, on one step that is not the
+    // default 20.
+    let collapsed = height(&app);
+    app.press("id:expand-all").unwrap();
+    app.wait(std::time::Duration::from_millis(100)).unwrap();
+    let expanded = height(&app);
+    let cell = expanded / 60.0;
+    assert!((cell - 20.0).abs() > 0.1, "{expanded}");
+    assert!(
+        (collapsed - cell * 17.0).abs() < 0.1,
+        "{collapsed} {expanded}"
+    );
+}
+
 #[test]
 fn the_ref_scrolls_to_an_offset_at_once() {
     let mut app = start(two_far_changes());

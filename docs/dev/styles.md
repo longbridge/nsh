@@ -323,7 +323,8 @@ do (a text is one row per line).
   way, whatever it holds (a resizable panel's size), within its minimum and maximum there; a fill's basis of 0 is
   its content's where its parent's length is not known. An explicit height counts only on a box without content (a chart's canvas, a spacer) and
   on a scroll view, as a maximum; a list's is its height (its cells are laid out apart, in the size it is given). A
-  percentage height is of a known height only, as CSS's, never of the room left below. A box with content is as tall as its content, at most its `maxHeight` (a popup bounded by the room
+  percentage height is of a known height, else of the box's own explicit height (kept or not, so a `50%` bar is as tall
+  in every pass), else of the room it is given. A box with content is as tall as its content, at most its `maxHeight` (a popup bounded by the room
   below its anchor), and one with a height in points is
   not stretched across a row (a badge stays a row beside a title and its subtitle). When the children do not fit, those
   in a row give in this order: the gaps, down to one column (before a `flexGrow` child wraps, only when that keeps it
@@ -381,7 +382,8 @@ do (a text is one row per line).
   placed.
 - **Scroll views** lay their content out unbounded along their axis, percentages of their viewport (a carousel's
   `w-full` slide is one view wide); **grids** take their columns from the template
-  (`fr` fills, points are Cells, the rest their content's), their rows their content's height, the items in order.
+  (`fr` fills, points are Cells, the rest their content's), their rows their content's height, stretched to share a
+  known height (a dock panel's one cell fills it), the items in order.
 - **Screens and modals** fill the stack or window the core sizes them to, and the padding the core gives them below
   their header converts exactly (the nearest row), not by the spacing rule above. A **native component** takes its
   explicit size: the platform draws a component registered with it there and leaves the Cells of others blank. A
@@ -401,8 +403,9 @@ do (a text is one row per line).
   48pt) images, videos, web views, shaders and canvases are `display: none`, so they take no Cells, no frame and no
   hits, and their margins and the gaps beside them go with them (`Core::grid_role`). Larger, they keep their box: a
   canvas is drawn in braille, the others stay blank (their fill too), and the labels around them stay where the box
-  puts them instead of closing up over it. An empty box (no control) with an explicit size of two Cells or more each
-  way and a border draws its outline, as its size is its own: a code cell waiting for its digit. So is
+  puts them instead of closing up over it. An empty box in flow (no control) with an explicit size of two Cells or
+  more each way and a border draws its outline, as its size is its own: a code cell waiting for its digit (an absolute
+  one, a selection's box over its items, draws none). So is
   a view with nothing in it smaller than a row both ways and not growing (a status dot, a swatch), or a circle with
   nothing in it at most 48pt across that is no control (a radio's ring, an avatar's placeholder), which draws
   nothing in a terminal, and a view (no control, not growing) whose content is all left out (an icon's tile or
@@ -410,7 +413,7 @@ do (a text is one row per line).
   trigger's chevron, counts as left out) shows its accessibility label in one row, one column per character, and is
   left out without one; a popup's trigger (its accessibility `expanded` set) shows one chevron, `▾` or `▴`, in one
   column instead. A disclosure (a control with `expanded` set and no `hasPopup`: a collapsible's or an accordion's
-  trigger, a tree's row) keeps at least two columns before its content (its padding counts), where the painter draws `▸` or `▾` and a space, unless
+  trigger, a tree's row) keeps at least two columns before its content (its padding or a leading empty box two columns wide counts), where the painter draws `▸` or `▾` and a space, unless
   its first text starts with such a mark itself.
 
 The app's style is kept as given; leaving the terminal (`cell` back to `None`) lays it out with Taffy again.

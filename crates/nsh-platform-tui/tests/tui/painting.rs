@@ -785,6 +785,9 @@ fn a_selected_tab_is_a_band_unless_its_app_underlines_it() {
     draw_until(&mut view, &mut terminal, &rx, "ready");
     let buffer = terminal.backend().buffer();
     assert!(reversed(buffer, 0, 0), "a selected tab stands out");
-    assert!(!reversed(buffer, 0, 1), "an underlined tab keeps its underline alone");
+    assert!(
+        !reversed(buffer, 0, 1),
+        "an underlined tab keeps its underline alone"
+    );
     assert!(buffer[(0, 1)].modifier.contains(Modifier::UNDERLINED));
 }

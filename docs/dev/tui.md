@@ -657,7 +657,9 @@ drawn on.
 - **Text** (`fillText` / `strokeText`) is printed on whole Cells above the dots, one row tall: `textAlign` places
   it by its width in Cells, and `textBaseline` puts its row's top at `y` (`top`, `hanging`), half a row above
   (`middle`), three quarters of a row above (`alphabetic`) or a whole row above (`ideographic`, `bottom`). A weight
-  of 600 or more is bold; `maxWidth` cuts it to the Cells that fit.
+  of 600 or more is bold; `maxWidth` cuts it to the Cells that fit. The Cell before and after it shows no dots,
+  so a label stands apart from the marks it names; a text view drawn over a canvas (a chart's value on its bar)
+  clears the dot Cell before and after each of its rows the same way.
 
 A drawing's nodes (`Drawing::nodes`) are pressed as a pointer at their center presses: the agent's model finds the
 node, the canvas reports its Cells like any view, and the press goes to whatever takes presses under that Cell, the
@@ -948,7 +950,7 @@ permit clipboard writes; `nsh test` uses memory and never writes to the machine'
 | Scroll | Children translated by the current offset and clipped to the viewport |
 | Stack, Screen and HeaderItem | The top screen and its selected header, clipped and styled by the app |
 | Modal | A surface-sized root above the page, with its own focus scope; what is behind it dimmed, its box cleared and framed |
-| Canvas | Braille dots (2 × 4 per Cell) for fills and strokes, text on whole Cells above them |
+| Canvas | Braille dots (2 × 4 per Cell) for fills and strokes, text on whole Cells above them, a Cell clear of dots each side |
 | Canvas line widths, caps, joins and miters | Decorative features left out: every stroke is one dot wide |
 | Canvas shadows, compositing (`globalCompositeOperation`) and images (`drawImage`) | Decorative features left out silently |
 | Canvas gradients | The gradient's middle stop as a flat color |

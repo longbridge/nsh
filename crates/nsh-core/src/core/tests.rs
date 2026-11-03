@@ -24960,6 +24960,48 @@ mod terminal_layout {
     }
 
     #[test]
+    fn a_grids_one_row_stretches_over_its_known_height() {
+        // A dock's panel: a slot 96pt high, the panel a grid of one cell
+        // over all of it (inset 0), the cell a box whose content is all
+        // absolute (an editor's layers).
+        let mut ops = view(
+            10,
+            ROOT_ID,
+            &[
+                ("alignSelf", V::Str("stretch")),
+                ("height", V::Number(96.0)),
+            ],
+        );
+        ops.extend(view(
+            2,
+            10,
+            &[
+                ("position", V::Str("absolute")),
+                ("left", V::Number(0.0)),
+                ("right", V::Number(0.0)),
+                ("top", V::Number(0.0)),
+                ("bottom", V::Number(0.0)),
+                ("display", V::Str("grid")),
+                ("gridTemplateColumns", V::Str("1fr")),
+                ("gridTemplateRows", V::Str("1fr")),
+            ],
+        ));
+        ops.extend(view(3, 2, &[]));
+        ops.extend(view(
+            4,
+            3,
+            &[
+                ("position", V::Str("absolute")),
+                ("left", V::Number(0.0)),
+                ("top", V::Number(0.0)),
+            ],
+        ));
+        ops.extend(text(20, 4, "let total"));
+        let batch = laid_out(ops);
+        assert_eq!(frame_of(&batch, 3).map(|f| f.size.height), Some(px(96.0)));
+    }
+
+    #[test]
     fn a_card_has_its_border_and_no_padding_rows() {
         let mut ops = view(
             2,
@@ -26349,10 +26391,16 @@ mod terminal_layout {
         ops.extend(pressable(9, 2, &[("flexDirection", V::Str("row"))], None));
         ops.push(state(9, true));
         ops.extend(text(10, 9, "Sort by"));
+        // One whose leading spacer already keeps the two columns.
+        ops.extend(pressable(12, 2, &[("flexDirection", V::Str("row"))], None));
+        ops.push(state(12, false));
+        ops.extend(view(14, 12, &[("width", V::Number(16.0))]));
+        ops.extend(text(15, 12, "Options"));
         let batch = laid_out(ops);
         assert_eq!(frame_of(&batch, 4).map(|f| f.origin.x), Some(Points(16.0)));
         assert_eq!(frame_of(&batch, 7).map(|f| f.origin.x), Some(Points(0.0)));
         assert_eq!(frame_of(&batch, 10).map(|f| f.origin.x), Some(Points(0.0)));
+        assert_eq!(frame_of(&batch, 15).map(|f| f.origin.x), Some(Points(16.0)));
     }
 
     #[test]

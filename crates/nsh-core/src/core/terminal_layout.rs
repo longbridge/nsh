@@ -649,10 +649,12 @@ fn insets(
     // sent for the painter to draw over its outer Cells, its size the
     // app's.
     let outline = role.overlay && kind.empty;
-    // An empty box of an explicit size two Cells or more each way (a code
-    // cell waiting for its digit, a framed placeholder) is its outline too:
-    // its size is its own, so the border adds no Cells.
-    let framed_empty = kind.empty && !role.control && {
+    // An empty box in flow of an explicit size two Cells or more each way
+    // (a code cell waiting for its digit, a framed placeholder) is its
+    // outline too: its size is its own, so the border adds no Cells. An
+    // absolute one (a selection's or an indicator's box over its items)
+    // would frame what it lies over, so it takes none.
+    let framed_empty = kind.empty && !role.control && !s.position.is_out_of_flow() && {
         let cells = |v: Option<f32>, to: fn(Grid, f32) -> i32| v.is_some_and(|v| to(grid, v) >= 2);
         cells(dim(s.size.width, parent_width), Grid::cols)
             && cells(dim(s.size.height, None), Grid::rows)
@@ -695,6 +697,18 @@ fn insets(
 /// shows a mark of its own.
 fn disclosure_lead(tree: &impl Tree, node: NodeId) -> i32 {
     if !tree.role(node).disclosure {
+        return 0;
+    }
+    // A leading empty box two Cells or wider already keeps the columns
+    // the mark is drawn in.
+    let lead = (0..tree.child_count(node))
+        .map(|i| tree.child(node, i))
+        .find(|&c| !hidden(tree, c) && !tree.style(c).position.is_out_of_flow());
+    if let Some(lead) = lead
+        && tree.child_count(lead) == 0
+        && !tree.role(lead).text
+        && length(tree.style(lead).size.width.into_raw()).is_some_and(|w| w >= 16.0)
+    {
         return 0;
     }
     match first_text(tree, node) {
@@ -1118,9 +1132,15 @@ pub(crate) fn compute(
         let room_w = inner(fixed_w.or(avail_w), inset.x());
         let room_h = inner(fixed_h.or(avail_h), inset.y());
         let origin = (inset.l, inset.t);
+        // A percentage of this box's height is of its explicit height
+        // when the layout does not keep it (a histogram's bars in a 36pt
+        // row): the same in every pass, measured or placed.
+        let stated_h =
+            dim(tree.style(node).size.height, parent_h).map(|v| (grid.rows(v) - inset.y()).max(0));
         let area = Area {
             known: (content_w, content_h),
             room: (room_w, room_h),
+            stated_h,
             // A scroll view's content is unbounded along its axis.
             unbounded: role.scroll,
         };
@@ -1245,6 +1265,9 @@ struct Spec {
 struct Area {
     known: (Option<i32>, Option<i32>),
     room: (Option<i32>, Option<i32>),
+    /// Its explicit height in rows, kept or not: what its children's
+    /// percentage heights are of before the room left.
+    stated_h: Option<i32>,
     unbounded: bool,
 }
 
@@ -1504,13 +1527,20 @@ fn arrange_flex(
     let (room_main, room_cross) = wh(row, area.room.0, area.room.1);
     // What percentages are of: a scroll view's viewport along its axis
     // too, as CSS's (a carousel's `w-full` slide is one viewport wide),
-    // though its content is unbounded along it. A height's only a known
-    // height, as CSS's: the room left below (a soft bound) would make a
-    // `50%` bar rows tall in one pass and none in another.
+    // though its content is unbounded along it. A height's is the box's
+    // explicit height before the room left (a soft bound), which a pass
+    // that measures may not have: a `50%` bar would be rows tall in one
+    // pass and none in another.
     let parent = if row {
-        (known_main.or(room_main), known_cross)
+        (
+            known_main.or(room_main),
+            known_cross.or(area.stated_h).or(room_cross),
+        )
     } else {
-        (known_main, known_cross.or(room_cross))
+        (
+            known_main.or(area.stated_h).or(room_main),
+            known_cross.or(room_cross),
+        )
     };
     let (known_main, room_main) = if area.unbounded {
         (None, None)
@@ -1629,6 +1659,10 @@ fn arrange_flex(
             item.main = clamp(basis, item.min_main, item.max_main);
             continue;
         }
+        // A row of no width (a chart's point a label hangs from) holds its
+        // content at the content's own width, overflowing it as CSS's: one
+        // line, not a column of characters.
+        let room_main = room_main.filter(|_| !(row && known_main == Some(0)));
         let room = (
             room_main.map(|m| (m - ms - me).max(0)),
             known_cross.or(room_cross).map(|c| (c - cs - ce).max(0)),
@@ -1792,7 +1826,10 @@ fn split_line(
         // (a column of sections, its texts longer than any row) keeps the
         // gaps around it.
         if over > 0 {
-            let (gaps, mains) = (before.clone(), items.iter().map(|i| i.main).collect::<Vec<_>>());
+            let (gaps, mains) = (
+                before.clone(),
+                items.iter().map(|i| i.main).collect::<Vec<_>>(),
+            );
             if give_gaps_and_labels(items, &mut before, over) > 0 {
                 before = gaps;
                 for (item, main) in items.iter_mut().zip(mains) {
@@ -2368,28 +2405,49 @@ fn arrange_grid(
         }
     }
     let total_w = widths.iter().sum::<i32>() + col_gap * (cols as i32 - 1).max(0);
+    let mut heights: Vec<i32> = flow
+        .chunks(cols)
+        .map(|cells| {
+            cells
+                .iter()
+                .enumerate()
+                .map(|(c, &(_, node))| {
+                    measure(
+                        tree,
+                        grid,
+                        node,
+                        true,
+                        (Some(widths[c]), None),
+                        (Some(widths[c]), None),
+                        parent,
+                    )
+                    .1
+                })
+                .max()
+                .unwrap_or(0)
+        })
+        .collect();
+    // Rows stretch over a known height, as CSS's auto rows: a panel's one
+    // cell (a dock's) fills it, whatever its content's own height (an
+    // editor's layers, all absolute).
+    if let Some(known) = area.known.1
+        && !heights.is_empty()
+    {
+        let count = heights.len() as i32;
+        let used = heights.iter().sum::<i32>() + row_gap * (count - 1);
+        let free = known - used;
+        if free > 0 {
+            for (r, h) in heights.iter_mut().enumerate() {
+                *h += free / count + i32::from((r as i32) < free % count);
+            }
+        }
+    }
     let mut y = 0;
     for (r, cells) in flow.chunks(cols).enumerate() {
         if r > 0 {
             y += row_gap;
         }
-        let height = cells
-            .iter()
-            .enumerate()
-            .map(|(c, &(_, node))| {
-                measure(
-                    tree,
-                    grid,
-                    node,
-                    true,
-                    (Some(widths[c]), None),
-                    (Some(widths[c]), None),
-                    parent,
-                )
-                .1
-            })
-            .max()
-            .unwrap_or(0);
+        let height = heights[r];
         if perform {
             let mut x = 0;
             for (c, &(order, node)) in cells.iter().enumerate() {

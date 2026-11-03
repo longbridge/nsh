@@ -97,7 +97,8 @@ point ending the echo).
 
 Rows are not of one height: `Geometry` keeps every row's top (a prefix sum), found by binary search for the rows in
 view and a press's row. A row is its lines (one, or with `softWrap` the wrapped lines of its line, in a split row the
-taller side's) times `lineHeight`, plus the annotations under it. Soft wrap counts columns, as widths do: the text box's
+taller side's) times `lineHeight`, plus the annotations under it. In a terminal a line is one Cell, whatever
+`lineHeight` is (`controller::row_height`): rows on another step would land on the Cell grid unevenly. Soft wrap counts columns, as widths do: the text box's
 width (the new side's horizontal scroll view, reported by its layout) less the room around the text, in columns of
 `0`, each line broken after its last whitespace that fits, else at the edge, whitespace hanging past it
 (`geometry::wrap_starts`); the view draws each wrapped line as a `Text` of its spans, so rows' heights and what they

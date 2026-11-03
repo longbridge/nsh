@@ -701,12 +701,22 @@ pub(crate) struct Dv {
     rows_window: crate::window::RowWindow,
 }
 
+/// The height of a row: the app's `line_height`, or one Cell in a
+/// terminal, where a row is one line of the grid (a height of another
+/// step would land rows on Cells unevenly, leaving blank rows between).
+fn row_height(line_height: Points) -> Points {
+    match crate::terminal::is_terminal() {
+        true => crate::terminal::cell_height(),
+        false => line_height,
+    }
+}
+
 impl Dv {
     pub(crate) fn new(props: DiffViewProps, cx: Scope<DiffViewEvent>) -> Dv {
         let font = Font {
             family: font_family(props.font_family.get_untracked()),
             size: props.font_size.get_untracked(),
-            line_height: props.line_height.get_untracked(),
+            line_height: row_height(props.line_height.get_untracked()),
         };
         let dv = Dv {
             st: Rc::new(RefCell::new(State::new(font))),
@@ -751,7 +761,7 @@ impl Dv {
             let font = Font {
                 family: font_family(dv.props.font_family.get()),
                 size: dv.props.font_size.get(),
-                line_height: dv.props.line_height.get(),
+                line_height: row_height(dv.props.line_height.get()),
             };
             {
                 let mut st = dv.st.borrow_mut();

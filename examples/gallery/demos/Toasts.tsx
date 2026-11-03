@@ -107,7 +107,7 @@ export function Toasts() {
                     <Text style={{ numberOfLines: 1, fontSize: pointer ? 13 : 15, fontWeight: "500", color: colors.text }}>{m().from}</Text>
                     <Text style={{ numberOfLines: 1, fontSize: pointer ? 12 : 13, color: colors.muted }}>{m().subject}</Text>
                   </View>
-                  <Trigger icon="archive" variant="ghost" accessibilityLabel={`Archive ${m().subject}`} tip={<Tip label="Archive" />} onPress={() => void archive(m())} />
+                  <Trigger icon="archive" variant="ghost" accessibilityLabel={`Archive ${m().subject}`} short="Archive" tip={<Tip label="Archive" />} onPress={() => void archive(m())} />
                 </Row>
               )}
             </Each>

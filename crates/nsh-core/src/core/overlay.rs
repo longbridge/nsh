@@ -996,8 +996,20 @@ impl<M: TextEngine> Core<M> {
             }
         };
         let Some(anchor) = anchor else {
-            self.set_native_overlay_anchor(key, None);
-            return frame.origin;
+            // A terminal stacks an overlay's boxes over the page by its
+            // placement (they clear the Cells behind them): one placed by
+            // its insets (a sheet's panel, a toast) is its own anchor.
+            let origin = self.framed_within(key, frame, host);
+            let own = self.layout.grid().map(|_| crate::overlay::PlacedAnchor {
+                bounds: Bounds {
+                    origin,
+                    size: frame.size,
+                },
+                node: None,
+                placement: config.placement,
+            });
+            self.set_native_overlay_anchor(key, own);
+            return origin;
         };
         let Some((size, insets)) = self.overlay_host_size(host) else {
             return frame.origin;
@@ -1049,19 +1061,10 @@ impl<M: TextEngine> Core<M> {
                     available: area.size,
                 }
             }
-            None => place(
-                anchor,
-                framed,
-                area,
-                &config,
-                self.nodes[key as usize].rtl,
-            ),
+            None => place(anchor, framed, area, &config, self.nodes[key as usize].rtl),
         };
         let placed = Placed {
-            origin: point(
-                placed.origin.x + ring.width,
-                placed.origin.y + ring.height,
-            ),
+            origin: point(placed.origin.x + ring.width, placed.origin.y + ring.height),
             available: Size {
                 width: (placed.available.width - ring.width * 2.0).max(Points::ZERO),
                 height: (placed.available.height - ring.height * 2.0).max(Points::ZERO),
@@ -1106,27 +1109,78 @@ impl<M: TextEngine> Core<M> {
         placed.origin
     }
 
+    /// Where unanchored overlay `key`, laid out at `frame` in host
+    /// `host`, goes: in a terminal moved so the frame drawn outside its box
+    /// (`outside_frame`) stays on the screen, as the box would at its edge
+    /// (a toast at the bottom); where it is.
+    fn framed_within(&self, key: Key, frame: Bounds<Points>, host: NodeId) -> Point<Points> {
+        let (Some((ring, inner)), Some((size, _))) =
+            (self.framed_box(key), self.overlay_host_size(host))
+        else {
+            return frame.origin;
+        };
+        let fit = |at: Points, offset: Points, extent: Points, ring: Points, room: Points| {
+            let start = at + offset - ring;
+            let end = at + offset + extent + ring;
+            if extent + ring * 2.0 > room {
+                at
+            } else if start < Points::ZERO {
+                at - start
+            } else if end > room {
+                at - (end - room)
+            } else {
+                at
+            }
+        };
+        point(
+            fit(
+                frame.origin.x,
+                inner.origin.x,
+                inner.size.width,
+                ring.width,
+                size.width,
+            ),
+            fit(
+                frame.origin.y,
+                inner.origin.y,
+                inner.size.height,
+                ring.height,
+                size.height,
+            ),
+        )
+    }
+
     /// The Cell a terminal frames overlay `key`'s box in, outside it, on
     /// each side (none elsewhere): the painter draws a rounded line around
     /// the first box in it that has a surface, unless the layout kept that
     /// box's border (a card's) inside it.
     fn outside_frame(&self, key: Key) -> Size<Points> {
-        let Some(grid) = self.layout.grid() else {
-            return Size::default();
-        };
+        self.framed_box(key)
+            .map_or_else(Size::default, |(ring, _)| ring)
+    }
+
+    /// The frame [`Self::outside_frame`] is around in a terminal, and
+    /// that box's bounds in overlay `key`.
+    fn framed_box(&self, key: Key) -> Option<(Size<Points>, Bounds<Points>)> {
+        let grid = self.layout.grid()?;
         let mut at = key;
+        let mut origin = Point::default();
         loop {
             let n = &self.nodes[at as usize];
+            let layout = n.layout.map(|l| self.layout.unrounded_layout(l));
+            if at != key
+                && let Some(l) = layout
+            {
+                origin.x += Points(l.location.x);
+                origin.y += Points(l.location.y);
+            }
             let w = n.view_style.borders.widths;
             let bordered = [w.top, w.right, w.bottom, w.left]
                 .iter()
                 .any(|&v| v > Points::ZERO);
             if bordered || n.view_style.background_color.0 & 255 != 0 {
-                let kept = n.layout.is_some_and(|l| {
-                    let b = self.layout.unrounded_layout(l).border;
-                    b.top > 0.0 || b.left > 0.0
-                });
-                return if kept {
+                let kept = layout.is_some_and(|l| l.border.top > 0.0 || l.border.left > 0.0);
+                let ring = if kept {
                     Size::default()
                 } else {
                     Size {
@@ -1134,13 +1188,16 @@ impl<M: TextEngine> Core<M> {
                         height: Points(grid.height),
                     }
                 };
+                let size = layout.map_or_else(Size::default, |l| Size {
+                    width: Points(l.size.width),
+                    height: Points(l.size.height),
+                });
+                return Some((ring, Bounds { origin, size }));
             }
-            let Some(&first) = n.children.iter().find(|&&c| {
+            let &first = n.children.iter().find(|&&c| {
                 let c = &self.nodes[c as usize];
                 !c.is_overlay() && c.layout.is_some()
-            }) else {
-                return Size::default();
-            };
+            })?;
             at = first;
         }
     }
@@ -1266,7 +1323,9 @@ impl<M: TextEngine> Core<M> {
             let anchored = self.overlay(key).is_some_and(|s| s.host.is_some())
                 && self.resolved_anchor(key) != OverlayAnchor::None;
             let frame = self.nodes[key as usize].frame;
-            if !anchored {
+            // In a terminal an unanchored one is its own anchor
+            // (`overlay_origin`), which its layout set.
+            if !anchored && self.layout.grid().is_none() {
                 self.set_native_overlay_anchor(key, None);
             }
             if !anchored || !self.nodes[key as usize].created || frame.size.width.0.is_nan() {

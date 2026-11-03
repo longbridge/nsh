@@ -246,3 +246,52 @@ fn a_press_at_a_canvas_nodes_center_reaches_the_canvas() {
     view.handle(mouse(MouseKind::Up(MouseButton::Left), column, row));
     draw_until(&mut view, &mut terminal, &rx, "Pressed 1");
 }
+
+/// A line through the row of a label on it.
+#[component]
+fn Labelled() -> impl IntoElement {
+    view()
+        .flex_1()
+        .child(
+            canvas(
+                Painter::new()
+                    .stroke_color(nsh_core::color::rgb(GREEN))
+                    .begin_path()
+                    .move_to(0.0, 6.0)
+                    .line_to(160.0, 6.0)
+                    .stroke()
+                    .fill_color(nsh_core::color::rgb(RED))
+                    .text_align(CanvasTextAlign::Center)
+                    .text_baseline(CanvasTextBaseline::Top)
+                    .fill_text("20", 80.0, 0.0),
+            )
+            .label("chart")
+            .w(px(160.0))
+            .h(px(32.0)),
+        )
+        .child(text("drawn"))
+}
+
+#[test]
+fn a_canvas_label_keeps_a_cell_clear_of_dots_each_side() {
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(24, 4)).unwrap();
+    view.load(App::Rust(Root::new::<Labelled>(|| ()))).unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "drawn");
+    let buffer = terminal.backend().buffer();
+    let line = row(buffer, 0, 0..20);
+    let at = line.find("20").expect("the label is drawn");
+    let at = line[..at].chars().count() as u16;
+    assert_eq!(buffer[(at - 1, 0)].symbol(), " ", "{line}");
+    assert_eq!(buffer[(at + 2, 0)].symbol(), " ", "{line}");
+    assert_ne!(
+        buffer[(at - 2, 0)].symbol(),
+        " ",
+        "the line goes on: {line}"
+    );
+    assert_ne!(
+        buffer[(at + 3, 0)].symbol(),
+        " ",
+        "the line goes on: {line}"
+    );
+}

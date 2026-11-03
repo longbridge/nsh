@@ -2558,11 +2558,9 @@ impl<M: TextEngine> Core<M> {
                 .layout
                 .and_then(|l| self.layout.get_node_context(l))
                 .is_some_and(|cx| match cx {
-                    LeafContext::Text(cx) => cx
-                        .text
-                        .text
-                        .trim_start()
-                        .starts_with(['▸', '▾', '▹', '▿']),
+                    LeafContext::Text(cx) => {
+                        cx.text.text.trim_start().starts_with(['▸', '▾', '▹', '▿'])
+                    }
                     _ => false,
                 });
         terminal_layout::Role {
@@ -2576,7 +2574,12 @@ impl<M: TextEngine> Core<M> {
             fills: matches!(kind, Kind::Screen | Kind::Modal),
             sized: matches!(
                 kind,
-                Kind::Native | Kind::List | Kind::Image | Kind::Video | Kind::WebView | Kind::Shader
+                Kind::Native
+                    | Kind::List
+                    | Kind::Image
+                    | Kind::Video
+                    | Kind::WebView
+                    | Kind::Shader
             ),
             input: kind == Kind::Input,
             glyphs,

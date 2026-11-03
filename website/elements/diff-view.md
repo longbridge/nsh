@@ -536,7 +536,7 @@ set with `fontFamily`, `fontSize` and `lineHeight`.
 | `background` | `.background(..)` | `boolean` | `true` | Changed lines are tinted. |
 | `fontFamily` | `.font_family(..)` | `string` | the theme's `font-mono` | The font of the text. |
 | `fontSize` | `.font_size(..)` | `number` | `13` | The font size, in points. |
-| `lineHeight` | `.line_height(..)` | `number` | `20` | The height of a row, in points. |
+| `lineHeight` | `.line_height(..)` | `number` | `20` | The height of a row, in points; in a terminal a row is one Cell. |
 | `renderSeparator` | `.render_separator(..)` | `(separator: DiffSeparator) => JSX.Element` | | Draws the separators of collapsed lines. |
 | `renderHunkActions` | `.render_hunk_actions(..)` | `(hunk: DiffHunk) => JSX.Element` | | The app's actions on each change. |
 | `softWrap` | `.soft_wrap(..)` | `boolean` | `false` | Long lines wrap at the side's width. |

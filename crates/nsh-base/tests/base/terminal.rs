@@ -330,13 +330,79 @@ fn an_accordions_disclosure_leads_its_title_and_the_panel_lines_up_under_it() {
         Some(terminal::DISCLOSURE_NONE)
     );
     // An app's row is the app's: the terminal's layout leads a folder's.
-    assert_eq!(
-        before(&app, "src").as_deref(),
-        Some("Same day before 2 pm")
-    );
+    assert_eq!(before(&app, "src").as_deref(), Some("Same day before 2 pm"));
     let gui = start::<Drawn>(Idiom::Desktop);
     assert_eq!(before(&gui, "Shipping"), None);
     assert_eq!(before(&gui, "src").as_deref(), Some("Same day before 2 pm"));
+}
+
+/// Where each text starts across the window in a terminal, from the
+/// frames and parents the batches set.
+fn text_starts<C: Component<Props = ()>>() -> std::collections::HashMap<String, f32> {
+    let viewport = Size::new(px(390.0), px(844.0));
+    let config = EngineConfig {
+        viewport,
+        environment: Environment {
+            window: viewport,
+            os: Os::Linux,
+            idiom: Idiom::Terminal,
+            ..Environment::default()
+        },
+        ..EngineConfig::new(Root::of::<C>())
+    };
+    let mut app = Headless::start(config).unwrap();
+    type Seen = (
+        std::collections::HashMap<NodeId, String>,
+        std::collections::HashMap<NodeId, Bounds<Points>>,
+        std::collections::HashMap<NodeId, NodeId>,
+    );
+    let seen = Arc::new(Mutex::new(Seen::default()));
+    let into = seen.clone();
+    app.observe(move |_, batch| {
+        let mut seen = into.lock().unwrap();
+        for item in &batch.items {
+            match item {
+                MountItem::Text { id, text, .. } => {
+                    seen.0.insert(*id, text.text.to_string());
+                }
+                MountItem::Frame { id, frame } => {
+                    seen.1.insert(*id, *frame);
+                }
+                MountItem::Insert { parent, child, .. } => {
+                    seen.2.insert(*child, *parent);
+                }
+                _ => {}
+            }
+        }
+    });
+    app.first_render().unwrap();
+    let seen = seen.lock().unwrap();
+    let x = |mut id: NodeId| {
+        let mut x = 0.0;
+        loop {
+            x += seen.1.get(&id).map_or(0.0, |f| f.origin.x.0);
+            match seen.2.get(&id) {
+                Some(parent) => id = *parent,
+                None => return x,
+            }
+        }
+    };
+    seen.0.iter().map(|(id, t)| (t.clone(), x(*id))).collect()
+}
+
+#[test]
+fn an_accordion_triggers_own_mark_takes_no_disclosure_lead_of_the_cores() {
+    // The trigger is a disclosure (a button with `expanded`), but its first
+    // text is its mark: the core keeps no columns before it, so the mark
+    // starts where the panel's lead does, and the title under the panel's.
+    let starts = text_starts::<Drawn>();
+    let at = |label: &str| {
+        *starts
+            .get(label)
+            .unwrap_or_else(|| panic!("no {label:?} in {starts:?}"))
+    };
+    assert_eq!(at("▾ "), at(terminal::DISCLOSURE_NONE), "{starts:?}");
+    assert_eq!(at("Shipping"), at("Same day before 2 pm"), "{starts:?}");
 }
 
 /// A document with lists, tasks, a footnote and a table.

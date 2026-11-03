@@ -3,7 +3,7 @@ import { Button as BaseButton, type CalendarEntry, Checkbox, Collapsible, Combob
 import { reduceMotion } from "nsh";
 import { platform, windowSize } from "nsh";
 import { Icon, type IconName } from "../icons";
-import { alpha, Badge, Button, Caption, Card, colors, DemoPage, finish, focusRing, follow, hovered, IconTile, mono, motion, radius, Segmented, sliderFill, sliderLook, switchLook, terminal, TERMINAL_COLUMN, TERMINAL_ROW, tints, type Tone, toneColor, toneTint } from "../ui";
+import { alpha, Badge, Button, Caption, Card, colors, DemoPage, finish, focusRing, follow, hovered, IconTile, mono, motion, radius, Segmented, sliderFill, sliderLook, switchLook, terminal, TERMINAL_COLUMN, TERMINAL_GAP, TERMINAL_ROW, tints, type Tone, toneColor, toneTint } from "../ui";
 
 // `nsh/base`'s controls own presses, keys, the disabled state and what
 // screen readers say; every value is the app's, and so is the look: the
@@ -306,7 +306,7 @@ function Chip(props: { label: string; lead: JSX.Element; remove: string; onRemov
         flexDirection: "row",
         alignItems: "center",
         gap: 6,
-        height: h,
+        height: terminal ? undefined : h,
         // The lead (a face, a dot) close to the start.
         paddingLeft: 3,
         paddingRight: 3,
@@ -324,11 +324,13 @@ function Chip(props: { label: string; lead: JSX.Element; remove: string; onRemov
         accessibilityLabel={props.remove}
         onPress={props.onRemove}
         class="items-center justify-center rounded-full enabled:hover:bg-accent active:bg-track"
-        // Nearly the chip's height under a finger.
-        style={{ width: pointer ? h - 8 : h - 4, height: pointer ? h - 8 : h - 4 }}
+        // Nearly the chip's height under a finger; a terminal's is its mark, as text.
+        style={terminal ? undefined : { width: pointer ? h - 8 : h - 4, height: pointer ? h - 8 : h - 4 }}
         focusStyle={focusRing()}
       >
-        <Icon name="close" size={pointer ? 10 : 12} tint={colors.muted} />
+        <If when={terminal} else={<Icon name="close" size={pointer ? 10 : 12} tint={colors.muted} />}>
+          <Text style={{ color: colors.muted }}>×</Text>
+        </If>
       </BaseButton>
     </View>
   );
@@ -2088,10 +2090,10 @@ export function Controls(props: { show: Control }) {
             prefix={
               <>
               <FieldRing within />
-              {/* The faces overlap, each ringed in the card's color. */}
+              {/* The faces overlap, each ringed in the card's color; a terminal's initials stand a Cell apart, then a gap. */}
               <If when={people().length}>
-                <View style={{ flexDirection: "row", marginRight: 6 }}>
-                  <Each of={people().slice(0, 3)}>{(v, i) => <View style={{ marginLeft: i() ? -6 : 0 }}><Avatar name={person(v()).title} tone={person(v()).tone} size={pointer ? 20 : 24} ring /></View>}</Each>
+                <View style={{ flexDirection: "row", marginRight: terminal ? TERMINAL_GAP : 6 }}>
+                  <Each of={people().slice(0, 3)}>{(v, i) => <View style={{ marginLeft: i() ? (terminal ? TERMINAL_COLUMN : -6) : 0 }}><Avatar name={person(v()).title} tone={person(v()).tone} size={pointer ? 20 : 24} ring /></View>}</Each>
                 </View>
               </If>
               </>
@@ -2239,7 +2241,7 @@ export function Controls(props: { show: Control }) {
           }
           suffix={
             <If when={pointer}>
-              <Text style={{ marginHorizontal: 4, paddingHorizontal: 5, borderRadius: 4, borderWidth: 1, borderColor: colors.line, fontSize: 11, color: colors.muted }}>⌘K</Text>
+              <Text style={{ marginHorizontal: terminal ? TERMINAL_COLUMN : 4, paddingHorizontal: 5, borderRadius: 4, borderWidth: 1, borderColor: colors.line, fontSize: 11, color: colors.muted }}>⌘K</Text>
             </If>
           }
           empty={<Empty label="No command matches" />}

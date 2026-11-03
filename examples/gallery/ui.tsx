@@ -259,7 +259,9 @@ export function DemoPage(props: {
               ]}
             >
               <DemoHead />
-              <View style={{ flexDirection: "row", alignItems: "flex-start", gap: terminal ? 2 * TERMINAL_COLUMN : 20 }}>
+              {/* Two columns between cards in the terminal (from 24pt): a
+                  card's header caption is not read as the next card's. */}
+              <View style={{ flexDirection: "row", alignItems: "flex-start", gap: terminal ? 3 * TERMINAL_COLUMN : 20 }}>
                 {Array.from({ length: n }, (_, column) => (
                   <View style={{ flex: 1, minWidth: 0, gap: terminal ? TERMINAL_ROW : 24 }}>{props.cards.map((body, i) => (i % n === column ? card(body, i) : null))}</View>
                 ))}
