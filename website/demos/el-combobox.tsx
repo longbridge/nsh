@@ -1,6 +1,6 @@
 import { type JSX, mount, signal, Text, View } from "nsh";
-import { Combobox, type OpenChangeReason, type SelectGroup, type SelectItemState } from "nsh/base";
-import { CheckMark, desktop, Icon, Log, Panel, size, Split, tint, ui } from "./palette";
+import { Combobox, type OpenChangeReason, type SelectEntry, type SelectGroup } from "nsh/base";
+import { CheckMark, desktop, Icon, Log, Panel, size, Split, ui } from "./palette";
 
 // Two comboboxes in a card: labels for an issue, several picked in one go
 // from a searchable list with sections, a clear button and a footer; and
@@ -72,28 +72,24 @@ function Chevron(props: { open: boolean }) {
   );
 }
 
-/** A row: the title, the check in its own lane. */
-function Row(props: { item: SelectItemState }) {
+/**
+ * A row's look, on the row itself (`itemClass`): the accent tint while
+ * highlighted (the keys or the pointer, as the menus' rows), dimmed while
+ * disabled. The states are the row's classes (`group`), so the list draws a
+ * row's content once per item and the highlight moves without drawing.
+ */
+const rowClass =
+  "group rounded-lg border border-transparent transition-colors duration-100 motion-reduce:transition-none " +
+  "focus:border-brand/30 focus:bg-brand-tint active:opacity-70 disabled:opacity-40";
+
+/** A row's content: the title, the check in its own lane (`group-selected:`). */
+function Row(props: { item: SelectEntry }) {
   return (
-    <View
-      style={{
-        height: size.rowSm,
-        flexDirection: "row",
-        alignItems: "center",
-        gap: 8,
-        paddingHorizontal: 8,
-        borderRadius: 8,
-        borderWidth: 1,
-        borderColor: "transparent",
-        opacity: props.item.disabled ? 0.4 : 1,
-        ...(props.item.highlighted ? { backgroundColor: tint(ui().accent, 0.08), borderColor: tint(ui().accent, 0.24) } : {}),
-      }}
-    >
+    // The row's 1-point border on each side.
+    <View style={{ height: size.rowSm - 2, flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 7 }}>
       <Text style={{ numberOfLines: 1, flex: 1, fontSize: controlText, color: ui().text }}>{props.item.title}</Text>
-      <View style={{ width: 16 }}>
-        <If when={props.item.selected}>
-          <CheckMark size={16} tint={ui().accent} />
-        </If>
+      <View class="opacity-0 group-selected:opacity-100" style={{ width: 16 }}>
+        <CheckMark size={16} tint={ui().accent} />
       </View>
     </View>
   );
@@ -174,7 +170,7 @@ function App() {
               margin={8}
               popupStyle={surface()}
               backdropStyle={backdrop}
-              itemClass="active:opacity-70"
+              itemClass={rowClass}
               cleanable
               clearButtonAccessibilityLabel="Clear the labels"
               clearButtonClass="items-center justify-center rounded-full enabled:hover:opacity-70"
@@ -204,7 +200,7 @@ function App() {
               margin={8}
               popupStyle={surface()}
               backdropStyle={backdrop}
-              itemClass="active:opacity-70"
+              itemClass={rowClass}
               style={fieldStyle(assigneeOpen())}
               placeholder="Assign someone"
               inputClass={inputClass()}

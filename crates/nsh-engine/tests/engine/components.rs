@@ -4745,7 +4745,7 @@ function App() {
         }}
         accessibilityLabel="Controlled"
         trigger={<View><Text>Pick</Text></View>}
-        renderItem={(item) => <Text>{`${item.title}${item.selected ? " chosen" : ""}!`}</Text>}
+        renderItem={(item) => <Text>{`${item.title}!`}</Text>}
         renderGroup={(group) => <Text>{`[${group.title}]`}</Text>}
       />
       <Select
@@ -4859,7 +4859,7 @@ function App() {
         onConfirm={({ value: next }) => confirmed.set(next.join(","))}
         accessibilityLabel="Tags"
         triggerButton={<View accessibilityLabel="Toggle"><Text>Pick</Text></View>}
-        renderItem={(item) => <Text>{`${item.title}${item.selected ? " on" : ""}!`}</Text>}
+        renderItem={(item) => <Text>{`${item.title}!`}</Text>}
         footer={<Text>Footer</Text>}
       />
       <Text>{`Value: ${value().join(",")}`}</Text>
@@ -4914,7 +4914,9 @@ fn a_base_combobox_toggles_the_apps_array_and_confirms_it_on_close() {
         .control()
         .dispatch_event(button, EventKind::Press, EventPayload::None);
     let opened = until(&rx, |b| shows(b, "Swift!"));
-    assert!(opened.iter().any(|b| shows(b, "Go on!")));
+    // The rows draw what the items are; the selection is the option's state.
+    let (_, go) = find(&opened, "Go", AccessibilityRole::Option).expect("an option");
+    assert!(go.accessibility.state.selected);
     assert!(opened.iter().any(|b| shows(b, "Footer")));
     let (swift, _) = find(&opened, "Swift", AccessibilityRole::Option).expect("an option");
 
@@ -4923,7 +4925,11 @@ fn a_base_combobox_toggles_the_apps_array_and_confirms_it_on_close() {
         .control()
         .dispatch_event(swift, EventKind::Press, EventPayload::None);
     let toggled = until(&rx, |b| shows(b, "Value: go,swift"));
-    assert!(toggled.iter().any(|b| shows(b, "Swift on!")));
+    let selected = |batches: &[MountBatch], label: &str| {
+        find(batches, label, AccessibilityRole::Option)
+            .is_some_and(|(_, p)| p.accessibility.state.selected)
+    };
+    assert!(selected(&toggled, "Swift"));
     assert!(!toggled.iter().any(|b| shows(b, "Confirmed: go,swift")));
 
     // Closing confirms the array.
@@ -4947,7 +4953,7 @@ function App() {
         disabledMatcher={(date) => date.endsWith("-14")}
         accessibilityLabel="Due"
         trigger={<View><Text>Pick</Text></View>}
-        renderItem={(item) => <Text>{item.kind === "day" ? `${item.date}${item.active ? "*" : ""}` : `${item.kind}`}</Text>}
+        renderItem={(item) => <Text>{item.kind === "day" ? `${item.date}` : `${item.kind}`}</Text>}
       />
       <DatePicker
         range
@@ -4968,8 +4974,8 @@ mount(App);
 
 /// `nsh/base`'s `DatePicker` through its JS face: an ISO date the app owns
 /// (`onChange({ value })` with the string), the app's function of a date
-/// disabling days in the next turn, `renderItem`'s state with the day's
-/// date; a range picker's preset reporting `[start, end]`.
+/// disabling days in the next turn, `renderItem` drawing the day's date
+/// and the selected day its button's state; a range picker's preset reporting `[start, end]`.
 #[test]
 fn a_base_date_picker_reports_iso_dates_and_asks_the_apps_matcher() {
     use nsh_core::AccessibilityRole;
@@ -5006,7 +5012,14 @@ fn a_base_date_picker_reports_iso_dates_and_asks_the_apps_matcher() {
     engine
         .control()
         .dispatch_event(due, EventKind::Press, EventPayload::None);
-    let opened = until(&rx, |b| shows(b, "2026-10-10*"));
+    let opened = until(&rx, |b| {
+        find(
+            std::slice::from_ref(b),
+            "2026-10-10",
+            AccessibilityRole::Button,
+        )
+        .is_some_and(|(_, p)| p.accessibility.state.selected)
+    });
     // The app's function disables the 14th, a turn later.
     let disabled = until(&rx, |b| {
         find(
@@ -8808,6 +8821,227 @@ fn base_plot_bars_grow_and_fade_natively() {
     assert_eq!(bar_rects(&drawings[0].1.ops).len(), 3);
 }
 
+const BASE_PLOT_RANGES: &str = r##"import { mount, View } from "nsh";
+import { Bar, Plot, Rule } from "nsh/base/plot";
+
+type Candle = { o: number | null; c: number; l: number; h: number };
+
+function App() {
+  const candles: Candle[] = [
+    { o: 20, c: 40, l: 10, h: 50 },
+    { o: 40, c: 30, l: 25, h: 75 },
+    { o: null, c: 50, l: 45, h: 55 },
+  ];
+  return (
+    <View>
+      {/* Candles: bodies from the open to the close, wicks from the low to the high. */}
+      <Plot data={candles} xScale={{ type: "band" }} yScale={{ type: "linear", domain: [0, 100] }} style={{ width: 300, height: 100 }}>
+        <Bar value="c" base="o" />
+        <Rule value="h" base={(d: Candle) => d.l} class="stroke-[#0000ff]" inactiveOpacity={0.3} />
+      </Plot>
+      {/* Lollipops' stems on a point scale, from 0, which counts in the domain. */}
+      <Plot data={[{ v: 10 }, { v: 30 }]} y="v" style={{ width: 100, height: 30 }}>
+        <Rule />
+      </Plot>
+    </View>
+  );
+}
+
+mount(App);
+"##;
+
+/// `Bar`'s `base` per row and `Rule`: a candle's body spans its row's open
+/// to its close, a row without a base has none; a rule strokes a line per
+/// row from its base (the app's function, answered a turn later) to its
+/// value in the middle of the row's band, in the app's stroke, fading with
+/// the hover; on a point scale at the rows' places, from 0, which counts in
+/// the domain.
+#[test]
+fn base_plot_bars_and_rules_span_a_base_per_row() {
+    use nsh_core::{
+        Color,
+        canvas::{CanvasOp, Num, Paint},
+    };
+    let (_engine, rx) = start(BASE_PLOT_RANGES);
+    let mut all = until_drawn(&rx, |d| path_points(&d.ops).contains(&(250.0, 45.0)));
+    all.extend(until(&rx, |_| false));
+    let marks = plot_drawings(&all);
+    let [(_, body), (_, wick), (_, stem)] = &marks[..] else {
+        panic!("a bar and two rules: {marks:?}")
+    };
+    // Three bands of 100; the y scale puts a value at 100 - value.
+    assert_eq!(
+        bar_rects(&body.ops),
+        [[0.0, 60.0, 100.0, 20.0], [100.0, 60.0, 100.0, 10.0]]
+    );
+    assert_eq!(
+        path_points(&wick.ops),
+        [
+            (50.0, 90.0),
+            (50.0, 50.0),
+            (150.0, 75.0),
+            (150.0, 25.0),
+            (250.0, 55.0),
+            (250.0, 45.0)
+        ]
+    );
+    assert!(
+        wick.ops
+            .contains(&CanvasOp::StrokeStyle(Paint::Color(Color(0x0000_ffff))))
+    );
+    assert!(
+        wick.ops
+            .iter()
+            .any(|op| matches!(op, CanvasOp::GlobalAlpha(Num::Slot(_))))
+    );
+    // The stems: 0 to 30 over 30 points.
+    assert_eq!(
+        path_points(&stem.ops),
+        [(0.0, 30.0), (0.0, 20.0), (100.0, 30.0), (100.0, 0.0)]
+    );
+}
+
+const BASE_PLOT_DOTS: &str = r##"import { mount, signal, Text, View } from "nsh";
+import { Dot, Plot } from "nsh/base/plot";
+
+type Holding = { risk: number; ret: number | null; cap: number; sector: string };
+
+function App() {
+  const hovered = signal<number | null>(null);
+  const rows: Holding[] = [
+    { risk: 10, ret: 20, cap: 100, sector: "tech" },
+    { risk: 30, ret: 40, cap: 400, sector: "energy" },
+    { risk: 20, ret: null, cap: 50, sector: "tech" },
+  ];
+  return (
+    <View>
+      {/* A bubble chart: area in proportion to the cap, color by sector. */}
+      <Plot
+        testID="bubbles"
+        data={rows}
+        x="risk"
+        xScale={{ type: "linear", domain: [0, 40] }}
+        yScale={{ type: "linear", domain: [0, 100] }}
+        colorScale={{ type: "ordinal", domain: ["tech", "energy"], range: ["#ff0000", "#00ff00"] }}
+        onHoverChange={({ index }) => hovered.set(index)}
+        style={{ width: 400, height: 100 }}
+      >
+        <Dot value="ret" r="cap" rScale={{ type: "sqrt", range: [0, 20] }} color="sector" inactiveOpacity={0.2} hoverDotClass="bg-[#0000ff]" />
+      </Plot>
+      <Text>{`hover ${hovered()}`}</Text>
+      {/* A dot plot across a band y scale, one radius for every dot. */}
+      <Plot data={[{ v: 10 }, { v: 30 }]} y="v" yScale={{ type: "band" }} xScale={{ type: "linear", domain: [0, 40] }} style={{ width: 400, height: 100 }}>
+        <Dot r={5} />
+      </Plot>
+    </View>
+  );
+}
+
+mount(App);
+"##;
+
+/// `Dot`: a dot per row at its `x` and value, a row without a value
+/// skipped; radii from a field through a square root scale (area in
+/// proportion), the bigger dot drawn first; fills from the plot's
+/// `colorScale`; the pointer finds the dot under it or nearest within the
+/// reach and the hover dot is as big as that dot; across a band y scale,
+/// the dots sit in the bands' middles with their values along x.
+#[test]
+fn base_plot_dots_place_size_and_hover() {
+    use nsh_core::{
+        Color,
+        canvas::{CanvasOp, Num, Paint},
+    };
+    let (engine, rx) = start(BASE_PLOT_DOTS);
+    let mut all = until_drawn(&rx, |d| !drawn_arcs(&d.ops).is_empty());
+    all.extend(until(&rx, |_| false));
+    let marks = plot_drawings(&all);
+    let [(_, bubbles), (_, across)] = &marks[..] else {
+        panic!("two dot marks: {marks:?}")
+    };
+    let full = (0.0, std::f32::consts::TAU);
+    // The energy holding's cap is the largest (radius 20), drawn first; the
+    // tech one's a quarter of it: half the radius.
+    assert!(
+        same_arcs(
+            &drawn_arcs(&bubbles.ops),
+            &[
+                ((300.0, 60.0), Some(20.0), full, false),
+                ((100.0, 80.0), Some(10.0), full, false),
+            ]
+        ),
+        "{:?}",
+        drawn_arcs(&bubbles.ops)
+    );
+    let fills: Vec<_> = bubbles
+        .ops
+        .iter()
+        .filter_map(|op| match op {
+            CanvasOp::FillStyle(Paint::Color(c)) => Some(*c),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(fills, [Color(0x00ff_00ff), Color(0xff00_00ff)]);
+    // The others fade with the hover: an alpha the animator reads.
+    assert!(
+        bubbles
+            .ops
+            .iter()
+            .any(|op| matches!(op, CanvasOp::GlobalAlpha(Num::Slot(_))))
+    );
+    // Across: the bands' middles down the plot, the values along x.
+    assert!(
+        same_arcs(
+            &drawn_arcs(&across.ops),
+            &[
+                ((100.0, 25.0), Some(5.0), full, false),
+                ((300.0, 75.0), Some(5.0), full, false),
+            ]
+        ),
+        "{:?}",
+        drawn_arcs(&across.ops)
+    );
+
+    let plot = test_view(&all, "bubbles");
+    let hover = |x: f32, y: f32| {
+        engine.control().dispatch_event(
+            plot,
+            EventKind::MouseMove,
+            EventPayload::Mouse(nsh_core::MouseEvent::new(
+                nsh_core::geometry::point(px(x), px(y)),
+                nsh_core::geometry::point(px(x), px(y)),
+                Default::default(),
+                None,
+            )),
+        )
+    };
+    // Inside the big bubble, far from its center.
+    hover(285.0, 70.0);
+    all.extend(until(&rx, |b| shows(b, "hover 1")));
+    all.extend(until(&rx, |_| false));
+    let dot = all
+        .iter()
+        .flat_map(|b| b.items.iter())
+        .find_map(|i| match i {
+            MountItem::ViewStyle { id, style } if style.background_color == Color(0x0000_ffff) => {
+                Some(*id)
+            }
+            _ => None,
+        })
+        .expect("the hover dot");
+    let size = frame_of(&all, dot).expect("laid out").size;
+    assert_eq!((size.width.0, size.height.0), (40.0, 40.0));
+    // Past the small one's edge, within the reach.
+    hover(115.0, 80.0);
+    all.extend(until(&rx, |b| shows(b, "hover 0")));
+    all.extend(until(&rx, |_| false));
+    let size = frame_of(&all, dot).expect("resized").size;
+    assert_eq!(size.width.0, 20.0);
+    // Far from both.
+    hover(200.0, 10.0);
+    until(&rx, |b| shows(b, "hover null"));
+}
+
 const BASE_PLOT_COLOR_SCALE: &str = r##"import { mount, View } from "nsh";
 import { Area, Bar, Line, Pie, Plot } from "nsh/base/plot";
 
@@ -9031,12 +9265,14 @@ fn base_plot_axis_labels_the_ticks_of_its_scale() {
 
     // Left, outside: d3's ticks of 0 to 100, about 5 (a step of 20),
     // written as d3 writes them; each right of the edge's left, centered
-    // on its tick, the ends kept within the plot's top and bottom.
+    // on its tick; the plot keeps half a label (5) inside its top and
+    // bottom edges, so the ends' labels sit on their ticks within it (the
+    // scale over 90, from 95 up to 5).
     near(&all, "100", "linear", (-20.0, 0.0));
-    near(&all, "80", "linear", (-20.0, 15.0));
-    near(&all, "60", "linear", (-20.0, 35.0));
-    near(&all, "40", "linear", (-20.0, 55.0));
-    near(&all, "20", "linear", (-20.0, 75.0));
+    near(&all, "80", "linear", (-20.0, 18.0));
+    near(&all, "60", "linear", (-20.0, 36.0));
+    near(&all, "40", "linear", (-20.0, 54.0));
+    near(&all, "20", "linear", (-20.0, 72.0));
     near(&all, "0", "linear", (-20.0, 90.0));
     // Its tick marks: one per tick, from the edge toward the labels.
     let red = all
@@ -9057,7 +9293,7 @@ fn base_plot_axis_labels_the_ticks_of_its_scale() {
     }
     // Right, inside: the app's values and texts, above each grid line,
     // against the right edge.
-    near(&all, "0%", "linear", (180.0, 90.0));
+    near(&all, "0%", "linear", (180.0, 85.0));
     near(&all, "50%", "linear", (180.0, 40.0));
     // Bottom: the app's function of each value and index, the first and
     // last labels kept within the plot's ends; the line along the edge.
@@ -9093,8 +9329,119 @@ fn base_plot_axis_labels_the_ticks_of_its_scale() {
     all.extend(until(&rx, |b| shows(b, "10")));
     all.extend(until(&rx, |_| false));
     near(&all, "10", "linear", (-20.0, 0.0));
-    near(&all, "4", "linear", (-20.0, 55.0));
-    near(&all, "0%", "linear", (180.0, 90.0));
+    near(&all, "4", "linear", (-20.0, 54.0));
+    near(&all, "0%", "linear", (180.0, 85.0));
+}
+
+const BASE_PLOT_DUAL_AXES: &str = r##"import { mount, signal, View } from "nsh";
+import { Bar, Dot, Grid, Line, Plot, PlotAxis } from "nsh/base/plot";
+
+const rows = [{ v: 100, p: 12 }, { v: 200, p: 27 }];
+
+function App() {
+  const top = signal(40);
+  return (
+    <View>
+      {/* The app's domains: the line on the second scale, which moves alone. */}
+      <Plot data={rows} xScale={{ type: "band" }} yScale={{ type: "linear", domain: [0, 200] }} y2Scale={{ type: "linear", domain: [0, top()] }} motion={{ update: { duration: 200 } }} style={{ width: 300, height: 100 }}>
+        <Bar value="v" />
+        <Line y="p" scale="y2" curve="linear" />
+        <Dot value="p" scale="y2" />
+      </Plot>
+      {/* Automatic domains, aligned: two steps of 100 on y, two of 10 on y2. */}
+      <Plot data={rows} xScale={{ type: "band" }} style={{ width: 300, height: 100 }}>
+        <Grid />
+        <Bar value="v" />
+        <Line y="p" scale="y2" curve="linear" />
+        <PlotAxis placement="right" scale="y2" format={(v) => `p${v}`} labelStyle={{ width: 20, height: 10 }} />
+      </Plot>
+      {/* Not aligned: each scale the extent of its values. */}
+      <Plot data={rows} xScale={{ type: "band" }} alignTicks={false} style={{ width: 300, height: 100 }}>
+        <Bar value="v" />
+        <Line y="p" scale="y2" curve="linear" />
+      </Plot>
+      <View testID="top" onPress={() => top.set(80)} style={{ height: 20 }} />
+    </View>
+  );
+}
+
+mount(App);
+"##;
+
+/// A dual-axis plot (`y2Scale`, a mark's `scale`): bars on the y scale and
+/// a line on the second one, each placed by its own domain; with automatic
+/// domains the two are widened to the same nice steps (`alignTicks`), which
+/// the second scale's axis labels and a `Grid` without values follows; not
+/// aligned, each is its values' extent. A new domain of the second scale
+/// moves its marks alone.
+#[test]
+fn base_plot_marks_go_on_a_second_y_scale() {
+    use nsh_core::canvas::CanvasOp;
+    let (engine, rx) = start(BASE_PLOT_DUAL_AXES);
+    let mut all = until(&rx, |b| shows(b, "p30"));
+    all.extend(until(&rx, |_| false));
+    let marks = plot_drawings(&all);
+    let [
+        (_, bars),
+        (line_id, line),
+        (_, dots),
+        (_, grid),
+        (_, aligned_bars),
+        (_, aligned),
+        (_, own_bars),
+        (_, own),
+    ] = &marks[..]
+    else {
+        panic!("eight marks: {marks:?}")
+    };
+    // Bands of 150; 0 to 200 over 100 points on y, and over 90 inside the
+    // insets of the axis's labels (5, half their height).
+    for b in [bars, own_bars] {
+        assert_eq!(
+            bar_rects(&b.ops),
+            [[0.0, 50.0, 150.0, 50.0], [150.0, 0.0, 150.0, 100.0]]
+        );
+    }
+    assert_eq!(
+        bar_rects(&aligned_bars.ops),
+        [[0.0, 50.0, 150.0, 45.0], [150.0, 5.0, 150.0, 90.0]]
+    );
+    // 12 and 27 of 0 to 40.
+    assert_eq!(path_points(&line.ops), [(75.0, 70.0), (225.0, 32.5)]);
+    let centers: Vec<_> = drawn_arcs(&dots.ops).iter().map(|a| a.0).collect();
+    assert_eq!(centers, [(75.0, 70.0), (225.0, 32.5)]);
+    // Aligned: 10 to 30, two steps as y's 0 to 200.
+    assert_eq!(path_points(&aligned.ops), [(75.0, 86.0), (225.0, 18.5)]);
+    for text in ["p10", "p20", "p30"] {
+        assert!(all.iter().any(|b| shows(b, text)), "{text}");
+    }
+    assert!(!all.iter().any(|b| shows(b, "p15")));
+    // A line at each of y's three ticks, across the plot.
+    let lines = path_points(&grid.ops);
+    assert_eq!(lines.len(), 6, "{lines:?}");
+    assert!(lines.iter().all(|(x, _)| *x == 0.0 || *x == 300.0));
+    // Not aligned: 12 to 27.
+    assert_eq!(path_points(&own.ops), [(75.0, 100.0), (225.0, 0.0)]);
+
+    // The second scale's new domain moves the line through the transform;
+    // the bars stay.
+    let top = test_view(&all, "top");
+    engine
+        .control()
+        .dispatch_event(top, EventKind::Press, EventPayload::None);
+    let after = until(&rx, |b| {
+        b.items.iter().any(|i| {
+            matches!(i, MountItem::Canvas { id, drawing } if id == line_id
+                && drawing.ops.iter().any(|op| matches!(op, CanvasOp::Transform(_))))
+        })
+    });
+    let redrawn = plot_canvases(&after);
+    assert!(
+        !redrawn.iter().any(|(id, d)| id != line_id
+            && !bar_rects(&d.ops).is_empty()
+            && d.ops.iter().any(|op| matches!(op, CanvasOp::Transform(_)))),
+        "the bars, on the first scale, stay"
+    );
 }
 
 const NAMED_CARD: &str = r#"import { mount, signal, Text } from "nsh";
@@ -9942,20 +10289,21 @@ fn base_plot_reversed_scales_run_from_the_other_edge() {
     else {
         panic!("seven marks: {marks:?}")
     };
-    // A reversed y (0 to 40 over 80, from the top): bars from 0 at the top
-    // edge down to their values; the area from the top edge to its line.
+    // A reversed y (0 to 40 from the top, over 70 between the axis's
+    // insets of 5, half its labels): bars from 0 near the top edge down to
+    // their values; the area from there to its line.
     assert_eq!(
         bar_rects(&down.ops),
-        [[0.0, 0.0, 100.0, 20.0], [100.0, 0.0, 100.0, 60.0]]
+        [[0.0, 5.0, 100.0, 17.5], [100.0, 5.0, 100.0, 52.5]]
     );
     assert_eq!(
         path_points(&area.ops)[..4],
-        [(50.0, 20.0), (150.0, 60.0), (150.0, 0.0), (50.0, 0.0)]
+        [(50.0, 22.5), (150.0, 57.5), (150.0, 5.0), (50.0, 5.0)]
     );
-    // The grid line at 10, 20 down (on the middle of a device pixel).
+    // The grid line at 10, 22.5 down (on the middle of a device pixel).
     let at = path_points(&grid.ops);
     assert!(
-        at.len() == 2 && at.iter().all(|&(_, y)| (y - 20.0).abs() <= 0.5),
+        at.len() == 2 && at.iter().all(|&(_, y)| (y - 22.5).abs() <= 0.5),
         "{at:?}"
     );
     // A reversed x (0 to 40 over 200, from the right): bars across grow

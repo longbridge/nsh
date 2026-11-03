@@ -177,6 +177,8 @@ final class ModalHost {
     void dismiss() {
         if (dialog == null || closing) return;
         closing = true;
+        // Its keyboard hides with it, not once the dialog's window is gone.
+        mounter.hideKeyboardIn(container);
         Dialog d = dialog;
         Runnable done = () -> {
             d.dismiss();

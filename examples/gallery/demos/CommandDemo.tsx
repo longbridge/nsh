@@ -144,6 +144,7 @@ export function CommandDemo() {
             autoFocus
             placeholder="Type a command or search…"
             accessibilityLabel="Commands"
+            searchAccessibilityLabel="Search commands"
             onSelect={({ id }) => run(id)}
             onHighlightChange={({ highlighted: next }) => highlighted.set(next)}
             class={commandClasses.root}
@@ -189,6 +190,7 @@ export function CommandDemo() {
           searchable={searchable()}
           placeholder="Move to folder…"
           accessibilityLabel="Folders"
+          searchAccessibilityLabel="Search folders"
           onSelect={({ id }) => {
             folder.set(id);
             last.set(`Moved to ${FOLDERS.find((f) => f.id === id)!.label}`);
@@ -223,6 +225,7 @@ export function CommandDemo() {
           items={FILES}
           placeholder="Search files by name or extension…"
           accessibilityLabel="Files"
+          searchAccessibilityLabel="Search files"
           // The ref's methods answer once the query is applied.
           onQueryChange={async () => count.set((await palette?.matchedCount()) ?? 0)}
           onSelect={({ id }) => last.set(`Opened ${FILES[Number(id.slice(1))].label}`)}
@@ -281,6 +284,7 @@ export function CommandDemo() {
           onQueryChange={({ query: next }) => search(next)}
           placeholder="Search people…"
           accessibilityLabel="People"
+          searchAccessibilityLabel="Search people"
           onSelect={({ id }) => last.set(`Messaged ${PEOPLE[Number(id.slice(1))]}`)}
           class={commandClasses.root}
           searchBarClass={commandClasses.searchBar}

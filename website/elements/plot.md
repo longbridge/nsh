@@ -1,6 +1,6 @@
 ---
 title: Plot
-description: "The Plot component of nsh/base/plot, its marks Line, Area, Bar, Grid, Pie, Arc, RadialLine, RadialGrid and Sankey, its PlotAxis and PlotLabel: charts drawn natively from the app's rows, with the scales of the axes and their labels, texts at data points, the row or slice under the pointer, motion and no look of their own."
+description: "The Plot component of nsh/base/plot, its marks Line, Area, Bar, Rule, Dot, Grid, Pie, Arc, RadialLine, RadialGrid and Sankey, its PlotAxis and PlotLabel: charts drawn natively from the app's rows, with the scales of the axes and their labels, texts at data points, the row or slice under the pointer, motion and no look of their own."
 group: base
 demo: el-plot
 ---
@@ -9,7 +9,7 @@ demo: el-plot
 
 A plot is the frame of a chart: the rows of data it shows, the scales of its x and y axes, the pointer over it and its
 motion. Its marks draw what it holds: a `Line` through a series, an `Area` between a series and a baseline, a `Bar`
-per row in the bands of a band scale, a `Grid` of lines across, a `Pie` of the rows' shares (a donut with a hole), an
+per row in the bands of a band scale, a `Rule` per row from a start to an end (a candle's wick), a `Dot` per row where two of its values meet (a scatter's points, a bubble chart's bubbles), a `Grid` of lines across, a `Pie` of the rows' shares (a donut with a hole), an
 `Arc` between two angles, and a `RadialLine` around the center with the rings and spokes of a `RadialGrid` behind it (a
 radar), and a `Sankey` of flows between the rows; a `PlotAxis` labels an edge with the ticks of its scale, and a `PlotLabel` writes texts at
 points of the scales. Each mark is one canvas filling the plot, drawn natively from the rows: the app's rows are read once when
@@ -81,7 +81,7 @@ function App() {
 mount(App);
 ```
 
-`Plot`, `Line`, `Area`, `Bar`, `Grid`, `Pie`, `Arc`, `RadialLine`, `RadialGrid`, `Sankey`, `PlotAxis` and `PlotLabel` come from `nsh/base/plot`, a module of [`nsh/base`](../modules/nsh-base.md) of their
+`Plot`, `Line`, `Area`, `Bar`, `Rule`, `Dot`, `Grid`, `Pie`, `Arc`, `RadialLine`, `RadialGrid`, `Sankey`, `PlotAxis` and `PlotLabel` come from `nsh/base/plot`, a module of [`nsh/base`](../modules/nsh-base.md) of their
 own (in Rust, `nsh_base::plot`). In TypeScript a plot's props are generic over the type of its rows: field names are
 checked against them, and a function of a row gets the row's type. In Rust, `plot()` makes one with a setter per prop,
 the rows a `Rows` (columns of numbers by key), the values a `RowAccessor` (a key or a function of the row's index), and
@@ -96,13 +96,15 @@ the marks take the typed paint methods (`.stroke_color(..)`, `.fill_color(..)`, 
 | `y` | `.y(..)` | `keyof T \| (d: T, index: number) => number` | none | What the marks draw unless they name their own. |
 | `xScale` | `.x_scale(..)` | `Scale` | `{ type: "point" }` | How the x axis places rows: `point` (in order, evenly from the left edge to the right one; one row in the middle), `linear` with an optional `domain`, or `band` (a band per row, for bars; [Bar](#bar)). With a `band` y scale it defaults to `linear`, for bars across. `reverse: true` runs it from the right edge ([Reversed scales](#reversed-scales)). |
 | `yScale` | `.y_scale(..)` | `Scale` | `{ type: "linear" }` | How the y axis places values: the domain's smallest value at the bottom edge, its largest at the top. Without a `domain`, the extent of what the marks draw. `band` lays a band per row from the top edge down, for bars across. `reverse: true` runs it the other way: the smallest value at the top edge, the rows from the bottom edge up ([Reversed scales](#reversed-scales)). |
+| `y2Scale` | `.y2_scale(..)` | `LinearScale` | none | A second y scale, `{ type: "linear", domain?, reverse? }`, for the marks that name it (`scale="y2"`): a dual-axis chart's right-hand scale ([Dual axes](#dual-axes)). Without a `domain`, the extent of the values on it. |
+| `alignTicks` | `.align_ticks(..)` | `boolean` | `true` | While neither y scale names a domain and marks are on both, both are widened to the same round steps so their ticks fall on the same lines ([Dual axes](#dual-axes)). `false` keeps each the extent of its values. |
 | `interactive` | `.interactive(..)` | `boolean` | `true` | The plot follows the pointer and the keyboard: it reports the row under it and shows the hover's parts, and it is a stop of Tab whose arrow keys move the hover ([Keyboard](#keyboard)). `false` draws the marks only (a sparkline in a list), and presses on it go to the views around it. Whether the plot offers the keyboard at all is set when it is made. |
 | `motion` | `.motion(..)` | `PlotMotion` | none | The timing of the appear, the hover's fade in and out, and the spring the hover glides on when the keys move it (below). |
 | `appearGeneration` | `.appear_generation(..)` | `number \| string` | none | Opts in to the appear: the marks draw in when the plot is first shown, and again whenever this changes (another symbol, another period). Inside a [`PlotAppearScope`](#plotappearscope), a generation that finished there shows whole at once. |
 | `accessibilityLabel` | `.accessibility_label(..)` | `string` | none | What screen readers say of the chart: what it shows and what stands out. |
 | `accessibilityValue` | `.accessibility_value(..)` | `{ min?, max?, now?, text? }` | none | What screen readers hear as its value: the app's words for the row under the pointer. |
 | `crossLineClass`, `crossLineStyle` | `.cross_line_class(..)`, `.cross_line_style(..)` | `string`, `StyleProp<ViewStyle>` | none | The cross line: a view as tall as the plot, centered on the row under the pointer. On a band scale it sits in the row's band, as wide as the band (across the plot on a band y scale). |
-| `dotClass`, `dotStyle` | `.dot_class(..)`, `.dot_style(..)` | `string`, `StyleProp<ViewStyle>` | none | The hover's dots: a view per `Line`, `Area` and `RadialLine`, centered on its point at the row under the pointer. A mark's `hoverDotClass` / `hoverDotStyle` replace them for its own dot. |
+| `dotClass`, `dotStyle` | `.dot_class(..)`, `.dot_style(..)` | `string`, `StyleProp<ViewStyle>` | none | The hover's dots: a view per `Line`, `Area` and `RadialLine`, centered on its point at the row under the pointer, and a `Dot`'s as big as its dot under the pointer. A mark's `hoverDotClass` / `hoverDotStyle` replace them for its own dot. |
 | `tooltipContent` | `.tooltip_content(..)` | `JSX.Element` | none | The app's tooltip, placed by `tooltipPlacement` and moved and faded with the cross line. |
 | `tooltipPlacement` | `.tooltip_placement(..)` | `"top" \| "pointer"` | `"top"` | Where the tooltip goes: at the top of the plot, centered on the cross line; or beside the pointer, on the side of the cross line toward the plot's middle and below the pointer in the upper half, above it in the lower one. At the top it stays between the plot's left and right edges (its offset from the top edge is the app's: a tag under the plot takes the plot's height and more); beside the pointer it stays inside the plot. With the keyboard, it goes beside the first line's or area's point at the row (the middle of a bar's band, the middle of a pie's slice). |
 | `tooltipOffset` | `.tooltip_offset(..)` | `number` | `0` | The distance between the tooltip and what places it: the top edge for `"top"`, the cross line and the pointer for `"pointer"`. |
@@ -112,7 +114,7 @@ the marks take the typed paint methods (`.stroke_color(..)`, `.fill_color(..)`, 
 
 | Event | Rust | Payload | When |
 |---|---|---|---|
-| `onHoverChange` | `.on_hover_change(..)` | `{ index: number \| null }` | The pointer came over another row: the index of the row nearest to it along the x axis (along the y axis when only it has bands), of the [pie](#pie-and-arc)'s slice under it, or of a [radial line](#radialline-and-radialgrid)'s row nearest to it by angle; `null` once it leaves the plot (over a pie, its slices; over a radial line, its outer radius). |
+| `onHoverChange` | `.on_hover_change(..)` | `{ index: number \| null }` | The pointer came over another row: the index of the row nearest to it along the x axis (along the y axis when only it has bands), of the [pie](#pie-and-arc)'s slice under it, of the [dot](#dot) whose center is nearest to it, or of a [radial line](#radialline-and-radialgrid)'s row nearest to it by angle; `null` once it leaves the plot (over a pie, its slices; over a radial line, its outer radius). |
 
 `Scale` is `{ type: "point"; reverse? } | { type: "linear"; domain?: [number, number]; reverse? } | { type: "band";
 paddingInner?; paddingOuter?; maxBandWidth?; bandCount?; groupPadding?; reverse? }`. A `domain` is the extent of its
@@ -147,6 +149,35 @@ scale:
 With the plot's appear, lines and areas draw in from the edge the x scale starts at, the right one when it is
 reversed.
 
+### Dual axes
+
+<!-- demo: el-plot-dual -->
+
+A plot has a second y scale for values of other units: volumes beside a price, revenue beside a margin. Every part
+that places values along y takes `scale`: `"y"` (the default, the plot's `yScale`) or `"y2"` (its `y2Scale`). A
+`PlotAxis` on the right with `scale="y2"` labels it:
+
+```tsx
+<Plot data={days} xScale={{ type: "band", paddingInner: 0.3 }} class="mx-10 mb-6 h-44">
+  <Grid class="stroke-border" />
+  <Bar value="volume" class="fill-chart-2/50" />
+  <Line y="close" scale="y2" class="stroke-chart-1 stroke-2" />
+  <PlotAxis placement="left" format={(v) => `${v}M`} labelClass="pr-2 text-xs text-muted-foreground" />
+  <PlotAxis placement="right" scale="y2" labelClass="pl-2 text-xs text-muted-foreground" />
+</Plot>
+```
+
+Each scale's domain is its own: the app's `domain`, or the extent of the values on it, and each moves to a new one
+with `motion.update`. While neither scale names a domain, the plot lays both out in the same number of round steps (1,
+2 or 5 times a power of ten, a step for about every 32 points of height): when both hold zero, zero falls on the same
+line on both; otherwise a scale that starts at zero (volumes) gains its extra steps upward and another (a price) on
+both sides. The axes' ticks are those steps, and a `Grid` with neither `x` nor `y` draws its lines at them, so one
+grid serves both axes. `alignTicks={false}` turns this off; a `domain` the app names leaves both scales as they are.
+
+The hover finds one row; each mark's dot sits on its own scale, and the read-out is the app's, which reads both values
+of the row `onHoverChange` reports. Bars on both scales stand side by side in each band, and a `stack` piles only the
+bars on its scale. `y2Scale` is linear: a plot whose y axis has bands has no second y scale.
+
 ## Line, Area and Grid
 
 | Mark | Prop | Type | Default | Description |
@@ -159,8 +190,10 @@ reversed.
 | `Area` | `backgroundClass`, `backgroundStyle` | `string`, `StyleProp<ViewStyle>` | none | Its background: a box around its shape (from its first point to its last, from its highest point to its baseline, or to its bottom edge's lowest point on a band) whose background (`bg-*`, `bg-linear-to-b from-… to-…`, `backgroundImage`) shows only inside the shape, under its `fill`. With one, `fill` is `none` where none is set. |
 | `Area` | `y1` | `string \| (d, index) => number` | the plot's `y` | What makes its top edge. |
 | `Area` | `y0` | `number \| string \| (d, index) => number` | the y scale's low edge | Its bottom edge: a number is a baseline on the y scale; a field or a function gives each row its own bottom value, which makes the area a band (a day's low to its high, a forecast's range). Without one, the area closes to the edge where the y scale's smallest values are: the bottom edge, the top one on a reversed scale (an area hanging from the top). A row without a value at either edge is skipped. |
+| `Line`, `Area`, `Grid` | `scale` | `"y" \| "y2"` | `"y"` | The y scale its values go along: the plot's `yScale` or its second one, `y2Scale` ([Dual axes](#dual-axes)). |
 | `Grid` | `x` | `number[]` | none | Where its vertical lines go, as values of the x scale (row indices on a `point` scale). |
-| `Grid` | `y` | `number[]` | none | Where its horizontal lines go, as values of the y scale. |
+| `Grid` | `y` | `number[]` | none | Where its horizontal lines go, as values of the y scale. With neither `x` nor `y`, the lines follow the ticks of its scale, where a `PlotAxis` without `ticks` puts them (along x for bars across). |
+| `Grid` | `ticks` | `number` | the axis' default | About how many lines it draws with neither `x` nor `y`, as a `PlotAxis`'s `ticks`. |
 | `Line`, `Area` | `color` | `string \| (d, index) => string` | none | The category of its rows, its color from the plot's `colorScale`: its first row's category gives the line's `stroke` (the area's `fill`) where nothing sets one ([Colors by category](#colors-by-category)). |
 
 Each mark fills the plot and paints with its [SVG paint properties](../modules/style-reference.md#svg-paint), its own
@@ -232,8 +265,9 @@ each row's bar starting where the one before it in the stack ends:
 | Prop | Type | Default | Description |
 |---|---|---|---|
 | `value` | `string \| (d, index) => number` | the plot's `y` | What each bar shows. |
-| `base` | `number` | `0` | The value its bars grow from, on the value scale. It counts in the domain. A stack grows from its first bar's. |
+| `base` | `number \| string \| (d, index) => number` | `0` | The value its bars grow from, on the value scale: one for every row, or a field or function giving each row its own, so each bar spans its row's base to its value (a row without one has no bar). It counts in the domain. A stack grows from its first bar's, row by row. |
 | `stack` | `string` | none | The stack it joins: the bars with the same `stack` pile up in order (a row without a value adds nothing). |
+| `scale` | `"y" \| "y2"` | `"y"` | The y scale its upright bars' values go along ([Dual axes](#dual-axes)); bars on both stand side by side, and a stack piles only the bars on its scale. |
 | `cornerRadii` | `number \| { topLeft?, topRight?, bottomRight?, bottomLeft? }` | `0` | The radius of each corner of its bars; `{ topLeft: 4, topRight: 4 }` rounds the tips of upright bars. A radius larger than half a bar fits it. |
 | `stagger` | `number` | `0` | With the plot's appear, the bars start one after another, row by row, over this share of it (0 to 0.95), each growing for the rest; 0 grows them together. |
 | `inactiveOpacity` | `number` | none | The opacity of its bars away from the row under the pointer while the pointer is over the plot, so that row stands out: it fades in and out with the hover and passes from bar to bar with it. |
@@ -259,6 +293,164 @@ that band, as wide as it: `crossLineClass="w-full h-full bg-foreground/5"` tints
 middle. The bars' values and base make the value scale's domain when the plot has none. With the plot's appear, each
 bar grows out of its stack's base; the motion, the fading and the gliding run on the platform's animator, and the
 pointer draws no bar again.
+
+### Ranges
+
+<!-- demo: el-plot-ranges -->
+
+With `base` a field or a function, each bar spans two values of its row: a waterfall's step from the running total
+before it to the one after, a candle's body from its open to its close, a task from its start to its end. A bar grows
+from its own base as it appears, and its label sits at its value end, above a bar that rises and below one that falls.
+
+```tsx
+const bridge = [
+  { step: "Revenue", from: 0, to: 120, kind: "total" },
+  { step: "Costs", from: 120, to: 72, kind: "down" },
+  { step: "Other", from: 72, to: 81, kind: "up" },
+  { step: "Profit", from: 0, to: 81, kind: "total" },
+];
+
+<Plot
+  data={bridge}
+  xScale={{ type: "band", paddingInner: 0.3 }}
+  colorScale={{ type: "ordinal", domain: ["total", "up", "down"], range: ["#64748b", "#16a34a", "#dc2626"] }}
+  class="h-40"
+>
+  <Bar value="to" base="from" color="kind" label={(d) => `${d.to - d.from}`} labelClass="text-xs pb-1" />
+</Plot>
+```
+
+A funnel is bars across, centered: `base={(d) => -d.users / 2}` and `value={(d) => d.users / 2}` on a band y scale.
+
+## Rule
+
+A `Rule` draws a straight line per row along the value axis, from `base` to the row's value: in the middle of the row's
+band on a band scale (across the plot on a band y scale), at the row's place along the x axis on a point or linear
+one. A candle's wick, a box plot's whisker, an error bar and a lollipop's stem are rules; a candlestick is a `Bar` over
+a `Rule`:
+
+```tsx
+import { Bar, Plot, Rule } from "nsh/base/plot";
+
+<Plot
+  data={days}
+  xScale={{ type: "band", paddingInner: 0.4 }}
+  colorScale={{ type: "ordinal", domain: ["up", "down"], range: ["#16a34a", "#dc2626"] }}
+  class="h-48"
+>
+  <Rule value="high" base="low" color={(d) => (d.close >= d.open ? "up" : "down")} />
+  <Bar value="close" base="open" color={(d) => (d.close >= d.open ? "up" : "down")} />
+</Plot>
+```
+
+| Prop | Type | Default | Description |
+|---|---|---|---|
+| `value` | `string \| (d, index) => number` | the plot's `y` | Where each line ends. A row without a value has no line. |
+| `base` | `number \| string \| (d, index) => number` | `0` | Where each line starts: one value for every row (a lollipop's stem from the zero line), or a field or function giving each row its own (a candle's low). It counts in the domain. |
+| `scale` | `"y" \| "y2"` | `"y"` | The y scale its values go along ([Dual axes](#dual-axes)). |
+| `stagger` | `number` | `0` | With the plot's appear, the lines start one after another, row by row, over this share of it (0 to 0.95), each growing from its start for the rest. |
+| `inactiveOpacity` | `number` | none | The opacity of its lines away from the row under the pointer while the pointer is over the plot, as `Bar`'s. |
+| `color` | `string \| (d, index) => string` | none | Each line's category, its color from the plot's `colorScale`: the line's `stroke` where nothing sets one. |
+
+A rule strokes with its `stroke` (`stroke-*`, `strokeWidth`, `strokeDasharray`; inherited from the plot as CSS inherits
+it), `currentColor` where none is set, and shows no hover dot. Its values and base make the value scale's domain when
+the plot has none; it grows from its start with the plot's appear and moves with the scales' domains, on the
+platform's animator.
+
+## Dot
+
+<!-- demo: el-plot-dots -->
+
+A `Dot` draws a dot per row where two values of the row meet: its `x` along a `linear` x scale and its `value` up the
+y axis make a scatter plot; on a band x scale each dot sits in the middle of its row's band; across a band y scale
+(the x scale `linear`), its value runs along x and its row's band down the plot, a dot plot. Its radius `r` is one
+number for every dot, or a value of each row that `rScale` turns into a radius, a bubble chart. A row without a value
+has no dot.
+
+```tsx
+import { Dot, Grid, Plot } from "nsh/base/plot";
+import { token } from "nsh";
+
+const sessions = [
+  { minutes: 12, trades: 5, platform: "iOS" },
+  { minutes: 8, trades: 3, platform: "Android" },
+  { minutes: 26, trades: 11, platform: "Web" },
+  { minutes: 17, trades: 8, platform: "iOS" },
+];
+
+<Plot
+  data={sessions}
+  x="minutes"
+  xScale={{ type: "linear", domain: [0, 40] }}
+  yScale={{ type: "linear", domain: [0, 20] }}
+  colorScale={{ type: "ordinal", domain: ["iOS", "Android", "Web"], range: [token("chart-1"), token("chart-2"), token("chart-3")] }}
+  class="h-48"
+>
+  <Grid x={[10, 20, 30]} y={[5, 10, 15]} class="stroke-border" />
+  <Dot
+    value="trades"
+    r={4}
+    color="platform"
+    inactiveOpacity={0.3}
+    class="stroke-card stroke-2"
+    hoverDotClass="rounded-full outline-2 outline-offset-1 outline-foreground"
+  />
+</Plot>
+```
+
+With `r` a field or a function, each row's value sizes its dot. `rScale={{ type: "sqrt", range: [min, max] }}` maps
+the square roots of the values onto radii in points, as d3's `scaleSqrt` does, so with a range from 0 a bubble's
+area is in proportion to its value; a range from more than 0 keeps the smallest bubbles in sight. The domain is 0 to
+the largest value unless the scale names one. The bigger dots draw first, so the smaller ones stay in sight over them:
+
+```tsx
+<Plot
+  data={countries}
+  x="gdp"
+  xScale={{ type: "linear", domain: [-10, 95] }}
+  yScale={{ type: "linear", domain: [48, 90] }}
+  colorScale={{ type: "ordinal", range: [token("chart-1"), token("chart-2"), token("chart-3"), token("chart-4")] }}
+  class="h-56"
+>
+  <Dot value="life" r="population" rScale={{ type: "sqrt", range: [3, 24] }} color="region" class="stroke-card" />
+</Plot>
+```
+
+A dot's values make the value scale's domain when the plot has none, without reaching for 0, so a scatter's axes fit
+its points. Give the plot `domain`s with some room around the values when the dots are big: a bubble at the edge of
+the domain is drawn across the plot's edge.
+
+Two marks in the same bands make the charts that compare two values of a row: a lollipop is a `Rule` from 0 under a
+`Dot` at its value, and a dumbbell is a `Rule` from one value to the other with a `Dot` at each end, across a band y
+scale:
+
+```tsx
+<Plot data={stocks} yScale={{ type: "band", paddingInner: 0.3 }} xScale={{ type: "linear", domain: [-50, 80] }} class="h-48">
+  <Rule value="high" base="low" class="stroke-border stroke-2" />
+  <Dot value="before" r={3.5} class="fill-card stroke-muted-foreground" hoverDotClass="hidden" />
+  <Dot value="now" r={5} class="fill-chart-1 stroke-card stroke-2" hitRadius={24} />
+</Plot>
+```
+
+| Prop | Type | Default | Description |
+|---|---|---|---|
+| `value` | `string \| (d, index) => number` | the plot's `y` | Where each dot goes along the value axis: up the y axis, or along x across a band y scale. A row without a value has no dot. |
+| `r` | `number \| string \| (d, index) => number` | `3` | The dots' radius in points, or a field or function giving each row a value that `rScale` makes a radius (the value is the radius without one). A row whose value is missing has no dot. |
+| `rScale` | `{ type: "sqrt"; domain?: [number, number]; range: [number, number] }` | none | How the values of `r` become radii: their square roots over the `domain` (0 to the largest value without one) onto the `range` of radii, so a range from 0 makes each dot's area in proportion to its value. Values outside the domain take the range's ends. |
+| `stagger` | `number` | `0` | With the plot's appear, the dots start growing one after another, row by row, over this share of it (0 to 0.95); 0 grows them together. |
+| `inactiveOpacity` | `number` | none | The opacity of its other dots while one is under the pointer or the keys: they fade in and out with the hover. |
+| `color` | `string \| (d, index) => string` | none | Each dot's category, its color from the plot's `colorScale`: the dot's `fill` where nothing sets one ([Colors by category](#colors-by-category)). |
+| `hitRadius` | `number` | `8` | How far past a dot's edge the pointer still finds it: of the dots within this distance, the pointer finds the one whose center is nearest to it (Voronoi's cells), so a small bubble over a big one is found around its own center. A dot plot's row is found from anywhere along it with a radius as large as a row. |
+| `scale` | `"y" \| "y2"` | `"y"` | The y scale its values go along ([Dual axes](#dual-axes)); dots across a band y scale put their values along x. |
+| `hoverDotClass`, `hoverDotStyle` | `string`, `StyleProp<ViewStyle>` | the plot's `dotClass`, `dotStyle` | The `hoverDot` part: a view as wide and tall as the dot under the pointer, centered on it. `rounded-full outline-2 outline-offset-1` rings it; `hidden` shows none for this mark. |
+
+A dot fills with its `fill` (`fill-*`; inherited from the plot as CSS inherits it), `currentColor` where none is set
+(its category's color with `color`), and strokes with its `stroke` where one is set (`stroke-*`, `strokeWidth`): a ring
+in the card's color keeps overlapping dots apart. Over a plot with dots, the plot reports the row of the dot whose
+center is nearest to the pointer (`null` away from every dot), the keys step through the rows in their order (sort the rows by
+x, and the keys walk the dots from left to right), and the `hoverDot` part marks the dot. With the plot's appear, the
+dots grow from nothing; with `motion.update`, they move to their new values and sizes, a new row's dot grows in and the
+dot of a row that is gone shrinks away; all on the platform's animator, with no mark drawn again.
 
 ## Pie and Arc
 
@@ -419,7 +611,7 @@ const regions = [
 </Plot>
 ```
 
-A slice and a bar take their row's color; a `Line` and an `Area` are one series each and take their first row's,
+A slice, a bar and a dot take their row's color; a `Line` and an `Area` are one series each and take their first row's,
 so a line of rows of its own (`data`) is in its rows' color, and one scale keeps a category's color the same across
 a pie, bars and lines. The color is the mark's `fill` (a line's `stroke`) where nothing sets one, in the place of
 `currentColor`: the app's classes and styles come first, the part's (`sliceClass`, `sliceStyle`), the mark's and
@@ -675,8 +867,11 @@ A `PlotAxis` labels an edge of the plot with the ticks of the scale that edge ca
 scale's, the left and right ones the y scale's, as d3's `axisBottom`, `axisTop`, `axisLeft` and `axisRight`. Its ticks
 come from the scale: round values on a `linear` one (1, 2 or 5 times a power of ten, inside the domain), rows on a
 `point` or `band` one. Its labels are texts the plot's layout places, so the app says what they read and how they
-look, and the layout puts them in place: each label is centered on its tick along the edge, and the first and last
-move inward just as far as they need to stay within the plot's ends.
+look, and the layout puts them in place: each label is centered on its tick along the edge. Along the bottom and top
+edges, the first and last move inward just as far as they need to stay within the plot's ends; beside the left and
+right edges, every label stays on its tick, so it reads as its grid line's, and where a label near an end would pass
+the plot's top or bottom edge, the plot's linear y scales start that far in from it (half the label's height for a tick
+at the end), so every label stays within the plot, on its grid line.
 
 ```tsx
 import { Area, Grid, Line, Plot, PlotAxis } from "nsh/base/plot";
@@ -707,8 +902,9 @@ const rows = [
 | Prop | Rust | Type | Default | Description |
 |---|---|---|---|---|
 | `placement` | `.placement(..)` | `"bottom" \| "top" \| "left" \| "right"` | `"bottom"` | The edge it runs along: the bottom and top edges carry the x scale's ticks, the left and right ones the y scale's. |
+| `scale` | `.scale(..)` | `"y" \| "y2"` | `"y"` | The y scale a left or right axis labels: the plot's `yScale` or its second one, `y2Scale` ([Dual axes](#dual-axes)). |
 | `labelPlacement` | `.label_placement(..)` | `"outside" \| "inside"` | `"outside"` | Where its labels sit: past the edge, in the room the app leaves around the plot, where they stay clear of the marks; or over the plot along the edge, so the plot keeps its whole size (beside a left or right edge, each label sits on its grid line's upper side). |
-| `ticks` | `.ticks(..)` | `number` | `10` on a `linear` scale, every row on the others | About how many ticks it takes: on a `linear` scale, round values inside the domain, about this many; on a `point` or `band` scale, this many rows spread evenly from the first to the last. |
+| `ticks` | `.ticks(..)` | `number` | `10` on a `linear` scale (every step of aligned scales), every row on the others | About how many ticks it takes: on a `linear` scale, round values inside the domain, about this many; on a `point` or `band` scale, this many rows spread evenly from the first to the last. |
 | `tickValues` | `.tick_values(..)` | `number[]` | none | The values of its ticks, in place of `ticks`: values of the scale, row indices on a `point` or `band` scale (`[0, 3, 6]` labels every third row). The values inside the domain each get a tick. |
 | `format` | `.format(..)` | `(value: number, index: number) => string` | the value, with the decimals the step between ticks needs, thousands grouped | The text of each tick: the app's function of its value (a row's index on a `point` or `band` scale) and its index among the axis' ticks. |
 | `labelClass`, `labelStyle` | `.label_class(..)`, `.label_style(..)` | `string`, `StyleProp<TextStyle>` | none | The `label` part: a text per tick, its font, color and padding the app's; its padding toward the plot is its distance from the edge (`pt-2` under a bottom axis). |
@@ -762,6 +958,7 @@ const [peak, last] = [3, rows.length - 1];
 | Prop | Rust | Type | Default | Description |
 |---|---|---|---|---|
 | `texts` | `.texts(..)` | `PlotText[]` | `[]` | The texts it writes, each at its own point. |
+| `scale` | `.scale(..)` | `"y" \| "y2"` | `"y"` | The y scale its texts' `y` are values of ([Dual axes](#dual-axes)). |
 
 Each text is a `PlotText`:
 
@@ -788,8 +985,8 @@ Motion is the app's, and none by default: everything shows at once. `motion` tak
 
 | Key | Type | What moves |
 |---|---|---|
-| `appear` | timing | The marks draw in, with an `appearGeneration`: lines and areas from the leading edge, bars growing out of their base (one after another with a bar's `stagger`); a pie's and an arc's ring sweeps in clockwise from its start; a radial line grows out of its inner radius, its dots with it; a sankey's nodes and ribbons from the leading edge, its labels fading in. |
-| `update` | timing | Marks move to the new shape when the app changes it: a pie's and an arc's radii, so a donut's hole opens and closes, and their angles, so a gauge or a slice sweeps round to its new value (d3's `arcTween`: the angles move, not the outline; a new slice opens from where the one before it ends; a change while one moves goes on from where it is drawn); a radial line's points to their new values, angles and radii (a new row growing out of the inner radius), a radial grid's rings with them; and a linear scale's domain, the app's `domain` or the extent of the marks' values as rows come, which glides from the old one to the new one, the marks, the grid lines, the `PlotAxis`es and the `PlotLabel`s with it; and a sankey's nodes, ribbons and labels, from the old flows' layout to the new one, a change while they move going on from where they are drawn. |
+| `appear` | timing | The marks draw in, with an `appearGeneration`: lines and areas from the leading edge, bars growing out of their base (one after another with a bar's `stagger`); dots growing from nothing (one after another with a dot's `stagger`); a pie's and an arc's ring sweeps in clockwise from its start; a radial line grows out of its inner radius, its dots with it; a sankey's nodes and ribbons from the leading edge, its labels fading in. |
+| `update` | timing | Marks move to the new shape when the app changes it: dots to their new values and sizes, a new row's dot growing in and a gone row's shrinking away; a pie's and an arc's radii, so a donut's hole opens and closes, and their angles, so a gauge or a slice sweeps round to its new value (d3's `arcTween`: the angles move, not the outline; a new slice opens from where the one before it ends; a change while one moves goes on from where it is drawn); a radial line's points to their new values, angles and radii (a new row growing out of the inner radius), a radial grid's rings with them; and a linear scale's domain, the app's `domain` or the extent of the marks' values as rows come, which glides from the old one to the new one, the marks, the grid lines, the `PlotAxis`es and the `PlotLabel`s with it; and a sankey's nodes, ribbons and labels, from the old flows' layout to the new one, a change while they move going on from where they are drawn. |
 | `enter` | timing | The hover's parts fade in when the pointer comes over the plot. |
 | `exit` | timing | They fade out after it leaves. |
 | `pointer` | spring | They glide from one row to the next when the keys or a screen reader step the hover; a pie's slice lifts on it. |
@@ -1044,6 +1241,9 @@ See [Accessibility](../docs/accessibility.md) for labels and roles in general.
 - A radial line's row under the pointer is found in Rust from its points' angles; its hover dot is a view the animator
   places on the row under the pointer (gliding on the `pointer` spring as the keys step), and while it appears or moves to new values its points are numbers the animator moves
   from where they were, so the line is recorded once per change.
+- A dot mark is drawn in one canvas; the dot under the pointer is found in Rust from the dots' centers and radii, and
+  its hover dot is a view the animator places on it, as big as it; the appear's growth, a change's moves and the hover's
+  fade are values the animator moves, so the dots are recorded once per change.
 - An axis' labels, tick marks and line are the platform's own texts and views, placed by the layout in Rust from the
   plot's size and scales: they move with the marks when the plot's size changes, and a new domain writes the labels
   again.

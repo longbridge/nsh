@@ -2,10 +2,14 @@
 //! `defaultIndex`); previous / next stop at the ends unless it loops; a
 //! pagination item moves to its slide and is selected while it shows; a
 //! swipe reports the slide it rests on, between `onDragStart` and
-//! `onDragEnd`, and stays where the app follows it; the rest of a scroll
-//! the carousel replaced reports nothing; the keys move while
-//! it has the focus (Left and Right traded in a right-to-left layout), which `onFocus` / `onBlur` report for the carousel as
-//! a whole and which a control turning disabled hands to the carousel;
+//! `onDragEnd`, and stays where the app follows it, and springs back to the
+//! app's slide, animated, once an app that keeps its `index` has answered
+//! (back across the seam the way it came while looping); the rest of a scroll
+//! the carousel replaced reports nothing; the keys move while it has the
+//! focus (Left and Right traded in a right-to-left layout), which
+//! `onFocus` / `onBlur` report for the carousel as a whole, focusable views
+//! in its slides included, and which a control turning disabled hands to
+//! the carousel;
 //! reduced motion scrolls at once; several slides per view rest with the
 //! last at the end of the range; a vertical carousel moves along its
 //! axis; slides inserted, removed or moved by a keyed list settle at once,
@@ -41,6 +45,10 @@ const WIDTH: f32 = 300.0;
 struct HarnessProps {
     /// The app passes `index` (else the carousel keeps its own).
     controlled: bool,
+    /// The app keeps its `index` whatever the user asks.
+    refusing: bool,
+    /// The first slide holds a view Tab stops at (`Open`).
+    field: bool,
     looping: bool,
     /// The slides follow each other vertically, in a content 100 wide and
     /// 300 high.
@@ -60,7 +68,8 @@ struct HarnessProps {
 /// 20 (`Pad`), and ones that put a new slide before the others
 /// (`Prepend`), remove the first (`Drop`) and move the last before the
 /// others (`Rotate`). The app's index as `index:…`, the number of changes
-/// as `changes:…`, the drag and focus events as `events:…`.
+/// as `changes:…`, the drag and focus events as `events:…`. A refusing app
+/// counts the changes and keeps its index.
 #[component]
 fn Harness(props: HarnessProps) -> impl IntoElement {
     let index = signal(props.start);
@@ -71,6 +80,7 @@ fn Harness(props: HarnessProps) -> impl IntoElement {
     let slides = signal((1..=SLIDES).collect::<Vec<u32>>());
     let length = WIDTH / props.per_view.max(1) as f32;
     let vertical = props.vertical;
+    let (refusing, field) = (props.refusing, props.field);
     let carousel = carousel()
         .default_index(props.start)
         .looping(props.looping)
@@ -78,7 +88,9 @@ fn Harness(props: HarnessProps) -> impl IntoElement {
         .accessibility_label("Photos")
         .on_change(move |i: &u32| {
             changes.update(|n| *n += 1);
-            index.set(*i);
+            if !refusing {
+                index.set(*i);
+            }
         })
         .on_drag_start(move || log("dragStart"))
         .on_drag_end(move || log("dragEnd"))
@@ -122,6 +134,9 @@ fn Harness(props: HarnessProps) -> impl IntoElement {
                     item.w(px(length)).h(px(100.0))
                 };
                 item.child(text(format!("Slide {n}")))
+                    .when(field && n == 1, |i| {
+                        i.child(view().on_press(|| {}).child(text("Open")))
+                    })
             },
         ));
     view()
@@ -500,6 +515,43 @@ fn focus_and_blur_report_the_carousel_as_a_whole() {
 }
 
 #[test]
+fn focus_in_the_slides_is_focus_in_the_carousel() {
+    let mut app = start(
+        HarnessProps {
+            field: true,
+            ..HarnessProps::default()
+        },
+        false,
+    );
+    // "Before", then the carousel.
+    app.press_key("tab").unwrap();
+    app.press_key("tab").unwrap();
+    app.run_for(Duration::from_millis(50)).unwrap();
+    app.wait_for("text:events:focus").unwrap();
+    // Into the first slide's view, then on to next (previous is disabled):
+    // the focus stays in the carousel, nothing.
+    app.press_key("tab").unwrap();
+    app.run_for(Duration::from_millis(50)).unwrap();
+    app.wait_for("text:events:focus").unwrap();
+    app.press_key("tab").unwrap();
+    app.run_for(Duration::from_millis(50)).unwrap();
+    app.wait_for("text:events:focus").unwrap();
+    // Back into the slide, then out before the carousel: one blur.
+    app.press_key("shift+tab").unwrap();
+    app.run_for(Duration::from_millis(50)).unwrap();
+    app.wait_for("text:events:focus").unwrap();
+    app.press_key("shift+tab").unwrap();
+    app.press_key("shift+tab").unwrap();
+    app.run_for(Duration::from_millis(50)).unwrap();
+    app.wait_for("text:events:focus,blur").unwrap();
+    // Back in, on to the slide's view: the focus comes in once.
+    app.press_key("tab").unwrap();
+    app.press_key("tab").unwrap();
+    app.run_for(Duration::from_millis(50)).unwrap();
+    app.wait_for("text:events:focus,blur,focus").unwrap();
+}
+
+#[test]
 fn reduced_motion_scrolls_at_once() {
     let mut app = start(HarnessProps::default(), true);
     let items = app.press_button("Next");
@@ -728,6 +780,101 @@ fn a_swipe_the_app_accepts_stays() {
     app.run_for(Duration::from_millis(50)).unwrap();
     // Landed on the slide; the app's answer is the slide shown.
     assert_eq!(scrolls(&app.take()), [(300.0, true)]);
+    assert!(app.screen().selected("role:button[Go to 2]").unwrap());
+}
+
+fn refusing() -> HarnessProps {
+    HarnessProps {
+        controlled: true,
+        refusing: true,
+        ..HarnessProps::default()
+    }
+}
+
+#[test]
+fn a_rest_the_app_refuses_springs_back_once_it_answered() {
+    let mut app = start(refusing(), false);
+    let content = content_of(&app.take());
+    // The platform rests the content on the second slide (a wheel's
+    // scroll): the app hears of it and keeps the first.
+    rest(&mut app, content, 300.0);
+    app.wait_for("text:changes:1").unwrap();
+    app.run_for(Duration::from_millis(50)).unwrap();
+    // Back to the app's slide, animated (a release, not the pointer).
+    assert_eq!(scrolls(&app.take()), [(0.0, true)]);
+    assert!(app.screen().selected("role:button[Go to 1]").unwrap());
+    app.wait_for("text:index:0").unwrap();
+    // Its rest is no slide of the user's.
+    rest(&mut app, content, 0.0);
+    app.wait_for("text:changes:1").unwrap();
+}
+
+#[test]
+fn a_swipe_the_app_refuses_springs_back() {
+    let mut app = start(refusing(), false);
+    app.take();
+    app.scroll("text:Slide 1", px(200.0)).unwrap();
+    app.wait_for("text:changes:1").unwrap();
+    app.run_for(Duration::from_millis(50)).unwrap();
+    // Landed on the second slide, then back to the first.
+    assert_eq!(scrolls(&app.take()), [(300.0, true), (0.0, true)]);
+    assert!(app.screen().selected("role:button[Go to 1]").unwrap());
+    app.wait_for("text:events:dragStart,dragEnd").unwrap();
+    // The same swipe again asks again.
+    app.scroll("text:Slide 1", px(200.0)).unwrap();
+    app.wait_for("text:changes:2").unwrap();
+    app.run_for(Duration::from_millis(50)).unwrap();
+    assert_eq!(scrolls(&app.take()), [(300.0, true), (0.0, true)]);
+}
+
+#[test]
+fn a_swipe_the_app_refuses_with_reduced_motion_springs_back_at_once() {
+    let mut app = start(refusing(), true);
+    app.take();
+    app.scroll("text:Slide 1", px(200.0)).unwrap();
+    app.wait_for("text:changes:1").unwrap();
+    app.run_for(Duration::from_millis(50)).unwrap();
+    assert_eq!(scrolls(&app.take()), [(300.0, false), (0.0, false)]);
+}
+
+#[test]
+fn a_swipe_across_the_seam_the_app_refuses_springs_back_the_way_it_came() {
+    let mut app = start(
+        HarnessProps {
+            looping: true,
+            ..refusing()
+        },
+        false,
+    );
+    app.take();
+    // Back past the seam onto the last slide, in the period before; the
+    // app keeps the first: forward across the seam again, from where the
+    // content is, with no jump into the middle period before it.
+    app.scroll("text:Slide 1", px(-200.0)).unwrap();
+    app.wait_for("text:changes:1").unwrap();
+    app.run_for(Duration::from_millis(50)).unwrap();
+    assert_eq!(scrolls(&app.take()), [(1200.0, true), (1500.0, true)]);
+    // It rests in the middle period: nothing to re-center.
+    assert_eq!(scrolls(&app.after_wrap()), []);
+    assert!(app.screen().selected("role:button[Go to 1]").unwrap());
+    app.wait_for("text:changes:1").unwrap();
+}
+
+#[test]
+fn an_app_answering_with_another_slide_shows_that_one() {
+    let mut app = start(
+        HarnessProps {
+            controlled: true,
+            ..HarnessProps::default()
+        },
+        false,
+    );
+    let content = content_of(&app.take());
+    rest(&mut app, content, 300.0);
+    app.wait_for("text:index:1").unwrap();
+    app.run_for(Duration::from_millis(50)).unwrap();
+    // Followed: it stays, no scroll.
+    assert_eq!(scrolls(&app.take()), []);
     assert!(app.screen().selected("role:button[Go to 2]").unwrap());
 }
 

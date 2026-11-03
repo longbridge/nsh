@@ -43,11 +43,8 @@
   default); the view takes keyboard focus only while it has a selection, for Ctrl+C (and Ctrl+Insert), Ctrl+A and
   Escape, and a press anywhere else or losing focus ends it; a finished drag also sets the primary selection.
   Touchscreen drags scroll instead; there is no context menu. GPUI (`nsh-platform-gpui` `text.rs`): the same selection
-  (Cmd instead of Ctrl on macOS), plus a right-click menu (Copy, Select All: `chrome::popup_actions`). Its engine
-  shapes each paragraph once with GPUI's text system, in segments of one bidi level and font size, and does the rest
-  itself: lines break at UAX #14 opportunities (`unicode-linebreak`), measuring at another width only re-breaks, and
-  each line's clusters are ordered by their bidi levels (`unicode-bidi`); a blurred text shadow is the glyphs painted
-  faintly around the blur radius (GPUI blurs no glyphs). GPUI loads variable fonts at their default weight only, so on
+  (Cmd instead of Ctrl on macOS), plus a right-click menu (Copy, Select All: `chrome::popup_actions`). Its text engine is
+  built on GPUI's text system (`nsh-platform-gpui` `text.rs`). GPUI loads variable fonts at their default weight only, so on
   Linux the UI font is the first of a list that GPUI can set in bold (GNOME's Adwaita Sans is variable: Noto Sans or
   DejaVu Sans take its place, with Adwaita Sans's ascent and descent, so lines are as tall as GTK's). Symbols that are
   text by default (♥, ✓) take a text font when the fallback would draw them as color emoji, so the text's color applies.
@@ -98,8 +95,8 @@
   it wraps with the text. Its style key `verticalAlign` (`VerticalAlign`, CSS `vertical-align` of a replaced inline
   box, `align-*` classes; a node field like `zIndex`, a change rebuilds the block) places it in its line:
   `AttachmentAlignments` keeps alignment separately from the legacy `TextAttachment` and
-  `AttributedText` structs. The core stores it in its private text context and includes it in measurement-cache
-  keys; `TextEngine::prepare_aligned` accepts it, with a default that calls `prepare` for existing engines.
+  `AttributedText` structs; `TextEngine::prepare_aligned` accepts it, with a default that calls `prepare` for existing
+  engines.
   `TextAttachment::ascent(font, align)` is how far its top is above the baseline (`baseline` the height, the default and the only
   value before; `text-top` the font's ascent, `text-bottom` the height minus the descent, `middle` half the height
   plus the x height), `extent` what the line reserves above and below (each at least 0), both from the
