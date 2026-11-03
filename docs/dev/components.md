@@ -1210,8 +1210,10 @@ with no scrolling of its own:
   start along the axis; several resting where the last does (the end of the range with several per view) are one
   stop, the first of them, for previous, next and the keys.
 - **The slide shown** is a memo: a swipe's slide while the app has not answered it (`pending`, cleared by the next
-  `index`: an app that does not follow it shows the swiped slide until it passes one), else the app's `index`, else
-  the carousel's own (from `defaultIndex`). An effect scrolls the content to
+  `index`, and by `after_answer` once the app has handled the `onChange`: an app that kept its `index` shows it again,
+  the content springing back to it, animated, as a release; `Ctl::let_go_after_answer`), else the app's `index`, else
+  the carousel's own (from `defaultIndex`). An answer that comes while the user drags again lets go of the swipe's
+  slide where that drag rests, never under the finger (`answered_in_drag`). An effect scrolls the content to
   its snap point when it changes (animated unless `reduce_motion()`) and when the snap points move (at once: a resize
   keeps the slide); it sends nothing while the content rests there (`Ctl::at`).
 - **The user's scroll** is reported where the platform reports it come to rest (`on_scroll_end`): the nearest snap
@@ -1222,11 +1224,11 @@ with no scrolling of its own:
   the carousel keeps the target in flight and the few it replaced (`Ctl::superseded_rest`), ignores a rest at a
   replaced one, and drops them all on a drag's start or any other rest (a mouse wheel's starts no drag).
 - **What the app pauses its own rotation by**: `onDragStart` from `on_scroll_drag_start`, `onDragEnd` where that
-  scroll comes to rest; `onFocus` / `onBlur` for the carousel as a whole, from a count of its views with the keyboard
-  focus: its own view, previous, next and the pagination items (a move between them blurs one before it focuses the
-  next, so `onBlur` waits a zero-delay timer and fires only if none of them has it then). Focusable views inside the
-  slides are not counted; the core's focus-within can count them (`ElementRef::on_focus_in` / `on_focus_out` on the
-  carousel's view, in place of the count and its timer). A control or pagination item that turns disabled while it
+  scroll comes to rest; `onFocus` / `onBlur` for the carousel as a whole: the core's focus-within of the carousel's
+  view (`ElementRef::on_focus_in` / `on_focus_out`), so its controls, its pagination items and the app's focusable
+  views in the slides are all in it, and a move between them (a blur and a focus in one batch) reports nothing. The
+  keys are bound while the carousel's own view, a control or a pagination item has the focus (a count of them), not
+  while a view of the app's in a slide has it (an input there keeps its arrows). A control or pagination item that turns disabled while it
   has the focus gives it to the carousel's view first (`Ctl::keep_focus`), where the platform would move it out
   (AppKit to the window). Slides that move on by themselves are the app's timer setting `index`
   (`api-naming.md`).

@@ -1464,13 +1464,18 @@ expect Events: dragStart,dragEnd
 expect Changes: 4
 expect Index: 2
 prop id:dot-2 accessibilityState selected=true
-# The keyboard focus coming to the carousel and leaving it.
+# The keyboard focus coming into the carousel and leaving it, as the
+# platform reports it: on the carousel's view, then on a view in a slide
+# (still in it: nothing), then on none.
 listens id:carousel onFocus
 listens id:carousel onBlur
-event id:carousel onFocus
+state id:carousel focused
 expect Events: dragStart,dragEnd,focus
-event id:carousel onBlur
+state id:open focused
+state id:carousel none
 wait 50
+expect Events: dragStart,dragEnd,focus
+state id:open none
 expect Events: dragStart,dragEnd,focus,blur
 # Its own index from `defaultIndex`: the second slide's item is selected.
 # Along a vertical `axis`, the slides follow each other down the content.
@@ -1479,6 +1484,15 @@ prop id:v-dot-1 accessibilityState selected=true
 prop id:v-dot-0 accessibilityState {}
 frame id:v-slide-0 0 0 100 50
 frame id:v-slide-1 0 50 100 50
+# An app that keeps its `index`: a rest on the second slide asks for it
+# (`onChange`), and once the app has answered, its own slide shows again,
+# the content springing back to it.
+prop id:k-dot-0 accessibilityState selected=true
+listens id:kept-content onScrollEnd
+event id:kept-content onScrollEnd x=100 y=0
+expect Asks: 1
+prop id:k-dot-0 accessibilityState selected=true
+prop id:k-dot-1 accessibilityState {}
 covers [nsh/base] Carousel
 covers [nsh/base] CarouselContent
 covers [nsh/base] CarouselItem
