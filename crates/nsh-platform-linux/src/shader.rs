@@ -141,7 +141,7 @@ impl ShaderState {
 thread_local! {
     /// Shader views out of sight with a frame to render.
     static HIDDEN: RefCell<Vec<glib::WeakRef<NshView>>> = RefCell::default();
-    /// Shader views that read what is behind them.
+    /// Shader views that read what is behind them, each once ([`set`]).
     static BACKDROPS: RefCell<Vec<glib::WeakRef<NshView>>> = RefCell::default();
     /// While a picture of what is behind a view is drawn: the view (none:
     /// all of it is drawn), and whether the drawing reached it.
@@ -229,9 +229,16 @@ pub(crate) fn set(surface: &Rc<Surface>, view: &NshView, layer: Option<Arc<Shade
         shader.children = None;
         shader.drawn = None;
         shader.view.set_layer(layer);
-        if shader.reads(ShaderInput::Backdrop) {
-            BACKDROPS.with(|b| b.borrow_mut().push(target.downgrade()));
-        }
+        // Listed once while it reads what is behind it: the core sends the
+        // layer again for every change of it, a uniform's included.
+        let reads = shader.reads(ShaderInput::Backdrop);
+        BACKDROPS.with(|b| {
+            let mut b = b.borrow_mut();
+            b.retain(|w| w.upgrade().is_some_and(|v| v != target));
+            if reads {
+                b.push(target.downgrade());
+            }
+        });
     }
     mark(&target);
     target.changed();
@@ -1102,6 +1109,44 @@ mod tests {
             mount(&surface, 2, layer(ShaderRole::Screen));
             surface.mounter.borrow_mut().clear();
             assert_eq!(root_layer(&surface), (None, false));
+        });
+    }
+
+    /// A view that reads what is behind it is listed once however often
+    /// its layer comes (the core sends it again for every change of it, a
+    /// uniform's included), and no longer once it stops reading it.
+    #[test]
+    fn a_backdrop_reader_is_listed_once() {
+        gtk_test::run(|| {
+            let surface = gtk_test::surface();
+            let glass = shading(ShaderRole::Fill, "sample_backdrop(uv)");
+            let view = mount(&surface, 2, glass.clone());
+            for _ in 0..5 {
+                apply(
+                    &surface,
+                    &[MountItem::Shader {
+                        id: 2,
+                        layer: Some(glass.clone()),
+                    }],
+                );
+            }
+            let listed = || {
+                BACKDROPS.with(|b| {
+                    b.borrow()
+                        .iter()
+                        .filter(|w| w.upgrade().as_ref() == Some(&view))
+                        .count()
+                })
+            };
+            assert_eq!(listed(), 1);
+            apply(
+                &surface,
+                &[MountItem::Shader {
+                    id: 2,
+                    layer: Some(layer(ShaderRole::Fill)),
+                }],
+            );
+            assert_eq!(listed(), 0);
         });
     }
 
