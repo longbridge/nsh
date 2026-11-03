@@ -1991,9 +1991,11 @@ type label:Commands zz
 expect Query: calzz
 expect NoCommands
 expect Lit: none
-# The field's own query starts from `defaultQuery`, and filters.
+# The field's own query starts from `defaultQuery`, and filters; the
+# field has its own name for screen readers.
 expect Remote Two
 absent Remote One
+prop label:SearchRemote placeholder FindRemote
 # A search the app answers: its query filters nothing, and while it is
 # `loading` the list is busy and `empty` waits.
 expect Server A
@@ -2007,6 +2009,7 @@ covers [nsh/base] Command
 covers [props] Command.items
 covers [props] Command.query
 covers [props] Command.defaultQuery
+covers [props] Command.searchAccessibilityLabel
 covers [props] Command.filterable
 covers [props] Command.loading
 covers [props] placeholder

@@ -6,7 +6,8 @@
 // (`query`, `onQueryChange`) filtering by label, a press choosing
 // (`onSelect`), the slots (`header`, `footer`, `empty`, `searchPrefix`),
 // every part in the app's look, `renderItem` and `renderGroup`; the field's
-// own query from `defaultQuery`, a search the app answers
+// own query from `defaultQuery`, the search field's own name for screen
+// readers (`searchAccessibilityLabel`), a search the app answers
 // (`filterable={false}`, `loading`), and a command without a search field
 // (`searchable={false}`).
 import { Text, View, signal } from "nsh";
@@ -64,6 +65,7 @@ function App() {
         items={REMOTE}
         defaultQuery="Two"
         placeholder="FindRemote"
+        searchAccessibilityLabel="SearchRemote"
         style={{ height: 80 }}
       />
       <Command
