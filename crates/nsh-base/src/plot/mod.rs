@@ -1,6 +1,7 @@
 //! `nsh/base/plot`: the parts charts are built from, as `gpui-base`'s
 //! `plot` module, with no look of their own. A [`Plot`] holds the rows of
-//! data, the scales of its two axes, the pointer over it and its motion;
+//! data, the scales of its two axes (and a second y scale for dual-axis
+//! charts, the marks choosing theirs), the pointer over it and its motion;
 //! its marks ([`Line`], [`Area`], [`Bar`], [`Rule`], [`Dot`], [`Grid`], the radial [`Pie`],
 //! [`Arc`], [`RadialLine`] and [`RadialGrid`], and the [`Sankey`] of
 //! flows) draw what it holds, each a canvas filling the plot (a pie one
@@ -77,7 +78,7 @@ pub use self::{
         Sankey, SankeyAlign, SankeyElement, SankeyLinkClass, SankeyLinks, SankeyProps,
         SankeyValueLabel, SankeyValueScale, sankey,
     },
-    scale::{BandScale, OrdinalScale, Scale},
+    scale::{BandScale, LinearScale, OrdinalScale, Scale},
 };
 use self::{
     bar::{BarEntry, BarLayout},
@@ -221,6 +222,28 @@ pub struct PlotProps {
     /// grow down from it, `gpui-base`'s `BarAlignment::Top`), the rows
     /// from the bottom edge up.
     pub y_scale: Prop<Option<Scale>>,
+    /// A second scale along the y axis, for the values of the marks that
+    /// name it (`scale: "y2"`), as dual-axis charts put a series of other
+    /// units (a price beside volumes, a margin beside revenue) on a scale
+    /// of its own, its axis on the right (`<PlotAxis placement="right"
+    /// scale="y2">`): `{ type: "linear", domain?, reverse? }`, its domain
+    /// the extent of the values on it without one, moving to a new one as
+    /// the y scale's does (`motion.update`). Without it, marks that name
+    /// `y2` go on a linear scale of their values' extent. It shares the y
+    /// scale's range (the plot's height) and has no meaning when the y
+    /// axis has bands.
+    pub y2_scale: Prop<Option<LinearScale>>,
+    /// The ticks of the y scale and the second one fall on the same places
+    /// (ECharts' `alignTicks`; true by default): while both domains are
+    /// automatic (neither `yScale` nor `y2Scale` names one) and marks are
+    /// on both, each is widened to nice steps (1, 2 or 5 times a power of
+    /// ten), the same number of them on both, zero on the same place when
+    /// both hold it, a step for about every 32 points of the plot's
+    /// height (2 to 10 of them); the axes' default ticks and a `Grid` without values
+    /// take those steps, so one grid serves both axes. False keeps each
+    /// domain the extent of its values.
+    #[prop(default = true)]
+    pub align_ticks: Prop<bool>,
     /// The plot follows the pointer (`gpui-base`'s `Plot::interactive`;
     /// default true): it reports the row under it and shows the hover's
     /// parts. It is also a stop of the keyboard focus whose keys move the
@@ -311,11 +334,38 @@ pub enum PlotEvent {
     HoverChange(Option<u32>),
 }
 
-/// An axis of a plot.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// The scale along the y axis a part places its values on (TS `"y" |
+/// "y2"`): the plot's `yScale`, or its second one, `y2Scale` (a dual-axis
+/// chart's right-hand scale).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, PropEnum)]
+pub enum ValueScale {
+    /// The plot's y scale (`yScale`).
+    #[default]
+    Y,
+    /// The plot's second y scale (`y2Scale`).
+    Y2,
+}
+
+/// The height an aligned step of the y scales takes at least, in points
+/// (`alignTicks`: ai-chat's tick pitch): from 2 to 10 steps, as the plot's
+/// height allows.
+const ALIGNED_PITCH: Points = Points(32.0);
+
+/// An axis of a plot's scales: x, y, or the second y scale.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum Axis {
     X,
     Y,
+    Y2,
+}
+
+impl From<ValueScale> for Axis {
+    fn from(scale: ValueScale) -> Self {
+        match scale {
+            ValueScale::Y => Axis::Y,
+            ValueScale::Y2 => Axis::Y2,
+        }
+    }
 }
 
 /// The appear's time, on the platform's animator: linear from 0 to 1 over
@@ -373,9 +423,12 @@ struct PlotContext {
     xs: Memo<std::sync::Arc<[f32]>>,
     /// Where values go along the y axis.
     y_map: Memo<AxisMap>,
+    /// Where values go along the second y scale (`y2Scale`).
+    y2_map: Memo<AxisMap>,
     /// The moves of the linear axes to new domains (`motion.update`).
     x_tween: Tween,
     y_tween: Tween,
+    y2_tween: Tween,
     /// The plot's size.
     size: Signal<Size<Points>>,
     /// Its marks that count in a domain and may show a hover dot.
@@ -406,6 +459,9 @@ struct PlotContext {
     /// pointer: its parts may glide to the row on `motion.pointer`. What
     /// the pointer drives follows it in the same frame.
     keyed: Stored<bool>,
+    /// What the y axes' labels need kept inside the plot's top and bottom
+    /// edges (top, bottom), while each lives.
+    insets: Signal<Vec<(u64, Memo<[f32; 2]>)>>,
     /// The radial marks' tests of the row under a point (a pie's slice):
     /// with any, the pointer is over what they find, not the row nearest
     /// along the x axis.
@@ -452,6 +508,31 @@ impl PlotContext {
         size.width.0 > 0.0 && size.height.0 > 0.0
     }
 
+    /// Where values go along the y scale `scale` names.
+    fn y_map_of(&self, scale: ValueScale) -> AxisMap {
+        match scale {
+            ValueScale::Y => self.y_map.get(),
+            ValueScale::Y2 => self.y2_map.get(),
+        }
+    }
+
+    /// The move of the y scale `scale` names to a new domain.
+    fn y_tween_of(&self, scale: ValueScale) -> Tween {
+        match scale {
+            ValueScale::Y => self.y_tween,
+            ValueScale::Y2 => self.y2_tween,
+        }
+    }
+
+    /// The move of `axis`'s scale to a new domain.
+    fn tween_of(&self, axis: Axis) -> Tween {
+        match axis {
+            Axis::X => self.x_tween,
+            Axis::Y => self.y_tween,
+            Axis::Y2 => self.y2_tween,
+        }
+    }
+
     /// The plot a mark is in (`None`: a mark outside any).
     fn of(mark: &str) -> Option<Self> {
         let plot = use_context::<PlotContext>();
@@ -474,6 +555,22 @@ impl PlotContext {
             }
         });
         key
+    }
+
+    /// Keeps `need` (top, bottom) inside the plot's top and bottom edges
+    /// while the current owner lives: the linear y scales' range starts and
+    /// ends that far in (an axis's labels centered on ticks near its ends).
+    fn add_inset(&self, need: Memo<[f32; 2]>) {
+        let key = self.next.get();
+        self.next.replace(key + 1);
+        let insets = self.insets;
+        insets.update(|all| all.push((key, need)));
+        cleanup(move || {
+            if let Some(mut all) = insets.try_get() {
+                all.retain(|(k, _)| *k != key);
+                insets.try_set(all);
+            }
+        });
     }
 
     /// Tests what is under the pointer with `at` while the current owner
@@ -529,18 +626,20 @@ impl PlotContext {
     }
 
     /// Records what `trace` adds to the path where the moving scales show
-    /// it (along x if `x`, along y if `y`): through the moves' transform
-    /// while one runs, as it is otherwise. The path keeps its points after
-    /// the transform is undone, so its stroke is not scaled.
+    /// it (along x if `x`, along y if it names a y scale): through the
+    /// moves' transform while one runs, as it is otherwise. The path keeps
+    /// its points after the transform is undone, so its stroke is not
+    /// scaled.
     fn traced(
         &self,
         p: Painter,
         x: bool,
-        y: bool,
+        y: Option<ValueScale>,
         trace: impl FnOnce(Painter) -> Painter,
     ) -> Painter {
+        let y_tween = self.y_tween_of(y.unwrap_or_default());
         let x = x && self.x_tween.moving.get();
-        let y = y && self.y_tween.moving.get();
+        let y = y.is_some() && y_tween.moving.get();
         if !(x || y) {
             return trace(p);
         }
@@ -552,7 +651,7 @@ impl PlotContext {
             }
             false => (Num::Const(1.0), Num::Const(0.0)),
         };
-        let ((sx, ox), (sy, oy)) = (along(self.x_tween, x), along(self.y_tween, y));
+        let ((sx, ox), (sy, oy)) = (along(self.x_tween, x), along(y_tween, y));
         let none = Num::Const(0.0);
         let p = p.op(CanvasOp::Transform([sx, none, none, sy, ox, oy]));
         trace(p).restore()
@@ -597,7 +696,19 @@ impl PlotContext {
 pub fn Plot(props: PlotProps, cx: Scope<PlotEvent>) -> impl IntoElement {
     let size = signal(Size::<Points>::default());
     let marks = signal(Vec::<Mark>::new());
+    // How far in from the top and bottom edges the linear y scales' range
+    // runs: what the y axes beside the plot need, so their labels on ticks
+    // near the ends stay inside it.
+    let insets = signal(Vec::<(u64, Memo<[f32; 2]>)>::new());
+    let inset = computed(move || {
+        insets.with(|all| {
+            all.iter()
+                .filter_map(|(_, need)| need.try_get())
+                .fold([0.0_f32; 2], |[t, b], [nt, nb]| [t.max(nt), b.max(nb)])
+        })
+    });
     let (data, x, x_scale, y_scale) = (props.data, props.x, props.x_scale, props.y_scale);
+    let y2_scale = props.y2_scale;
     let motion = props.motion;
     // A row's value along the x axis: its `x` on a linear scale, else its
     // index.
@@ -657,15 +768,36 @@ pub fn Plot(props: PlotProps, cx: Scope<PlotEvent>) -> impl IntoElement {
         let len = data.with(|rows| rows.len());
         x_map.get().ticks(len, x_values.get().as_deref())
     });
+    // The y scales laid out in the same steps (`alignTicks`), while both
+    // domains are the marks' and marks are on both.
+    let align_ticks = props.align_ticks;
+    let aligned = computed(move || {
+        if !align_ticks.get() {
+            return None;
+        }
+        let y_auto = matches!(
+            y_scale.get(),
+            None | Some(Scale::Linear { domain: None, .. })
+        );
+        if !y_auto || y2_scale.with(|s| s.is_some_and(|s| s.domain.is_some())) {
+            return None;
+        }
+        let (y, y2) = (extent_on(Axis::Y)?, extent_on(Axis::Y2)?);
+        let [top, bottom] = inset.get();
+        let room = size.get().height.0 - top - bottom;
+        let steps = (room / ALIGNED_PITCH.0).floor() as usize;
+        scale::align(y, y2, steps.clamp(2, 10))
+    });
     let y_map = computed(move || {
         let height = size.get().height.0;
         let len = data.with(|rows| rows.len());
         let scale = y_scale.get();
-        // Rows from the top edge down, values from the bottom edge up;
-        // reversed, the other way.
+        // Rows from the top edge down, values from the bottom edge up (the
+        // axes' labels' inset in from both); reversed, the other way.
+        let [top, bottom] = inset.get();
         let (down, up) = match scale.is_some_and(|s| s.reversed()) {
-            true => ([height, 0.0], [0.0, height]),
-            false => ([0.0, height], [height, 0.0]),
+            true => ([height, 0.0], [top, height - bottom]),
+            false => ([0.0, height], [height - bottom, top]),
         };
         match scale {
             Some(Scale::Point { .. }) => AxisMap::Point { len, range: down },
@@ -674,8 +806,33 @@ pub fn Plot(props: PlotProps, cx: Scope<PlotEvent>) -> impl IntoElement {
                 domain: Some(domain),
                 ..
             }) => AxisMap::Linear(Linear::new(domain, up)),
-            _ => AxisMap::Linear(Linear::new(extent_on(Axis::Y).unwrap_or([0.0, 0.0]), up)),
+            _ => match aligned.get() {
+                Some((y, _)) => AxisMap::Linear(Linear::aligned(y, up)),
+                None => AxisMap::Linear(Linear::new(extent_on(Axis::Y).unwrap_or([0.0, 0.0]), up)),
+            },
         }
+    });
+    // The second y scale: linear, over the same range as the y scale's
+    // values.
+    let warned = stored(false);
+    let y2_map = computed(move || {
+        let height = size.get().height.0;
+        let scale = y2_scale.get();
+        if scale.is_some() && band_axis.get() == Some(Axis::Y) && !warned.get() {
+            warned.replace(true);
+            log::warn!("`y2Scale` places values along y: the y axis has bands");
+        }
+        let scale = scale.unwrap_or_default();
+        let [top, bottom] = inset.get();
+        let range = match scale.reverse {
+            true => [top, height - bottom],
+            false => [height - bottom, top],
+        };
+        if let (None, Some((_, y2))) = (scale.domain, aligned.get()) {
+            return AxisMap::Linear(Linear::aligned(y2, range));
+        }
+        let domain = scale.domain.or_else(|| extent_on(Axis::Y2));
+        AxisMap::Linear(Linear::new(domain.unwrap_or([0.0, 0.0]), range))
     });
     let hover_axis = computed(move || match band_axis.get() {
         Some(Axis::Y) => Axis::Y,
@@ -684,7 +841,7 @@ pub fn Plot(props: PlotProps, cx: Scope<PlotEvent>) -> impl IntoElement {
     // Where each row is along the axis the hover finds rows along.
     let rows_at = computed(move || match hover_axis.get() {
         Axis::X => xs.get(),
-        Axis::Y => y_map.get().ticks(data.with(|rows| rows.len()), None),
+        Axis::Y | Axis::Y2 => y_map.get().ticks(data.with(|rows| rows.len()), None),
     });
 
     // The appear: from the first frame with a size, and again for each new
@@ -737,10 +894,11 @@ pub fn Plot(props: PlotProps, cx: Scope<PlotEvent>) -> impl IntoElement {
     });
 
     // The linear axes' moves to new domains, over `motion.update`.
-    let (x_tween, y_tween) = (Tween::new(), Tween::new());
+    let (x_tween, y_tween, y2_tween) = (Tween::new(), Tween::new(), Tween::new());
     let update = move || untracked(|| motion.get().and_then(|m| m.update));
     effect(move || x_tween.follow(x_map.get(), update()));
     effect(move || y_tween.follow(y_map.get(), update()));
+    effect(move || y2_tween.follow(y2_map.get(), update()));
 
     // The hover: the row under the pointer, where its parts are and how
     // far they have faded in.
@@ -757,8 +915,10 @@ pub fn Plot(props: PlotProps, cx: Scope<PlotEvent>) -> impl IntoElement {
         x_map,
         xs,
         y_map,
+        y2_map,
         x_tween,
         y_tween,
+        y2_tween,
         size,
         marks,
         next: stored(0),
@@ -772,6 +932,7 @@ pub fn Plot(props: PlotProps, cx: Scope<PlotEvent>) -> impl IntoElement {
         hovered,
         keyed,
         hits,
+        insets,
         interactive: props.interactive,
         dot: HoverDot {
             class: props.dot_class,
@@ -939,7 +1100,7 @@ pub fn Plot(props: PlotProps, cx: Scope<PlotEvent>) -> impl IntoElement {
                     .map_or(size.height.0 / 2.0, |p| p.y.0);
                 place.pointer_at(y);
             }
-            Axis::Y => {
+            Axis::Y | Axis::Y2 => {
                 let x = size.width.0 / 2.0;
                 cross.x.set(x);
                 place.row_at(x);
@@ -1072,7 +1233,7 @@ pub fn Plot(props: PlotProps, cx: Scope<PlotEvent>) -> impl IntoElement {
                 let band = move || {
                     match hover_axis.get() {
                         Axis::X => x_map.get().band(),
-                        Axis::Y => y_map.get().band(),
+                        Axis::Y | Axis::Y2 => y_map.get().band(),
                     }
                     .map_or(0.0, |b| b.width())
                 };
@@ -1111,11 +1272,23 @@ pub fn Plot(props: PlotProps, cx: Scope<PlotEvent>) -> impl IntoElement {
         .child(when(
             move || interactive.get(),
             move || {
+                // Keyed by the scale too: a mark that moves to the other y
+                // scale gets a dot that moves with that one's domain.
                 each(
-                    move || marks.get(),
-                    |m| m.key,
+                    move || {
+                        marks.with(|all| {
+                            all.iter()
+                                .map(|m| (*m, m.value_axis.get()))
+                                .collect::<Vec<_>>()
+                        })
+                    },
+                    |(m, axis)| (m.key, *axis),
                     move |mark, _| {
-                        let m = mark.get_untracked();
+                        let (m, axis) = mark.get_untracked();
+                        let y_tween = match axis {
+                            Axis::Y2 => y2_tween,
+                            _ => y_tween,
+                        };
                         let own: Option<HoverDot> = m.dot;
                         let own_style =
                             move || own.is_some_and(|o| o.style.with(|s| *s != Style::default()));

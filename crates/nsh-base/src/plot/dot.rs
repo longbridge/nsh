@@ -13,7 +13,7 @@ use nsh_core::{
 };
 
 use super::{
-    Axis, PlotContext, STROKE_ROOM,
+    Axis, PlotContext, STROKE_ROOM, ValueScale,
     bar::grown,
     dot_anchor, layer, mark_canvas,
     pie::{Pose, Update, Var},
@@ -247,6 +247,12 @@ pub struct DotProps {
     /// points by default.
     #[prop(default = Points(8.0))]
     pub hit_radius: Prop<Points>,
+    /// The y scale its values go along: `"y"` (the default, the plot's
+    /// `yScale`) or `"y2"` (its second one, `y2Scale`: a dual-axis chart's
+    /// right-hand scale). Dots across a band y scale put their values
+    /// along x whatever this says.
+    #[prop(default)]
+    pub scale: Prop<ValueScale>,
     /// The Tailwind classes of its hover dot, the `hoverDot` part: a view
     /// as big as the dot under the pointer (its diameter wide and tall),
     /// centered on it, its corners, border, outline and background the
@@ -323,10 +329,11 @@ struct Placed {
     r: f32,
 }
 
-/// Where the rows of `pose` go on the plot's scales, in drawing order: the
-/// bigger dots first.
-fn placed(plot: PlotContext, pose: &DotPose) -> Vec<Placed> {
+/// Where the rows of `pose` go on the plot's scales (their values on the y
+/// scale `scale` names), in drawing order: the bigger dots first.
+fn placed(plot: PlotContext, pose: &DotPose, scale: ValueScale) -> Vec<Placed> {
     let (x_map, y_map) = (plot.x_map.get(), plot.y_map.get());
+    let values_y = plot.y_map_of(scale);
     let across = matches!(y_map, AxisMap::Band(_)) && !matches!(x_map, AxisMap::Band(_));
     let mut out: Vec<Placed> = pose
         .0
@@ -340,7 +347,7 @@ fn placed(plot: PlotContext, pose: &DotPose) -> Vec<Placed> {
             };
             let (x, y) = match across {
                 true => (x_map.tick(s.value)?, along(y_map)?),
-                false => (along(x_map)?, y_map.tick(s.value)?),
+                false => (along(x_map)?, values_y.tick(s.value)?),
             };
             Some(Placed { row, x, y, r: s.r })
         })
@@ -390,14 +397,14 @@ pub fn Dot(props: DotProps, _cx: Scope<NoEvent>) -> impl IntoElement {
     let Some(plot) = PlotContext::of("Dot") else {
         return layer();
     };
-    let (accessor, r, r_scale) = (props.value, props.r, props.r_scale);
+    let (accessor, r, r_scale, scale) = (props.value, props.r, props.r_scale, props.scale);
     let rows = move || plot.rows.get();
     let values = series::values(rows, move || accessor.get().or_else(|| plot.y.get()));
     let sizes = series::values(rows, move || r.with(DotRadius::row));
     // Along the axis without bands.
     let value_axis = computed(move || match plot.band_axis.get() {
         Some(Axis::Y) => Axis::X,
-        _ => Axis::Y,
+        _ => Axis::from(scale.get()),
     });
     plot.add(move |key| Mark {
         key,
@@ -456,7 +463,7 @@ pub fn Dot(props: DotProps, _cx: Scope<NoEvent>) -> impl IntoElement {
         if !plot.is_sized() {
             return Arc::from([]);
         }
-        update.shown().0.with_placed(plot)
+        update.shown().0.with_placed(plot, scale.get())
     });
     let hit = props.hit_radius;
     plot.add_hit(
@@ -499,15 +506,18 @@ pub fn Dot(props: DotProps, _cx: Scope<NoEvent>) -> impl IntoElement {
                 Some(_) => p,
             };
             let (to, from) = update.shown();
-            let to_at = to.with_placed(plot);
-            let from_at = from.as_ref().map(|(f, q)| (f.with_placed(plot), q));
+            let to_at = to.with_placed(plot, scale.get());
+            let from_at = from
+                .as_ref()
+                .map(|(f, q)| (f.with_placed(plot, scale.get()), q));
             let len = to.0.len().max(from.as_ref().map_or(0, |(f, _)| f.0.len()));
             let appearing = plot.appearing.get();
             let dim = inactive
                 .get()
                 .map(|o| 1.0 - o.0.clamp(0.0, 1.0))
                 .filter(|d| *d > 0.0 && plot.interactive.get());
-            let (x_moving, y_moving) = (plot.x_tween.moving.get(), plot.y_tween.moving.get());
+            let y_tween = plot.y_tween_of(scale.get());
+            let (x_moving, y_moving) = (plot.x_tween.moving.get(), y_tween.moving.get());
             let shown = |tween: super::tween::Tween, moving: bool, at: Var| match moving {
                 true => {
                     let (scale, offset) = tween.transform();
@@ -548,7 +558,7 @@ pub fn Dot(props: DotProps, _cx: Scope<NoEvent>) -> impl IntoElement {
                 };
                 let (x, y) = (
                     shown(plot.x_tween, x_moving, x),
-                    shown(plot.y_tween, y_moving, y),
+                    shown(y_tween, y_moving, y),
                 );
                 if let Some(dim) = dim {
                     // `1 - fade * dim` away from the hovered row.
@@ -573,13 +583,15 @@ pub fn Dot(props: DotProps, _cx: Scope<NoEvent>) -> impl IntoElement {
         class: props.hover_dot_class,
         style: props.hover_dot_style,
     };
-    layer().child(canvas).child(hover_dot_view(plot, rest, own))
+    layer()
+        .child(canvas)
+        .child(hover_dot_view(plot, rest, own, scale))
 }
 
 impl DotPose {
     /// [`placed`] of this pose.
-    fn with_placed(&self, plot: PlotContext) -> Arc<[Placed]> {
-        placed(plot, self).into()
+    fn with_placed(&self, plot: PlotContext, scale: ValueScale) -> Arc<[Placed]> {
+        placed(plot, self, scale).into()
     }
 }
 
@@ -588,7 +600,12 @@ impl DotPose {
 /// spring when the keys step there and moving with the pointer in the same
 /// frame, faded with the hover; styled by the dot (`hoverDotClass`) or the
 /// plot (`dotClass`), none where neither styles one.
-fn hover_dot_view(plot: PlotContext, rest: Memo<Arc<[Placed]>>, own: HoverDot) -> impl IntoElement {
+fn hover_dot_view(
+    plot: PlotContext,
+    rest: Memo<Arc<[Placed]>>,
+    own: HoverDot,
+    scale: Prop<ValueScale>,
+) -> impl IntoElement {
     let (x, y) = (animated_value(0.0), animated_value(0.0));
     let diameter = signal(0.0_f32);
     // Shown while the hovered row is one of this mark's dots: a plot of two
@@ -629,19 +646,28 @@ fn hover_dot_view(plot: PlotContext, rest: Memo<Arc<[Placed]>>, own: HoverDot) -
     when(
         move || plot.interactive.get() && (own.is_set() || plot.dot.is_set()),
         move || {
-            let (sx, sy) = (plot.x_tween.shown(&x), plot.y_tween.shown(&y));
-            dot_anchor(&sx, &sy, &plot.fade.mul(&mine)).child(
-                view()
-                    .flex_none()
-                    .style_with(move |s| {
-                        let d = px(diameter.get());
-                        s.w(d).h(d)
-                    })
-                    .app_class(move || own.class.get().or_else(|| plot.dot.class.get()))
-                    .inline_style(move || match styled() {
-                        true => own.style.get(),
-                        false => plot.dot.style.get(),
-                    }),
+            // Made again on the other y scale: it moves with that one's
+            // domain.
+            each(
+                move || vec![scale.get()],
+                |scale| *scale,
+                move |scale, _| {
+                    let y_tween = plot.y_tween_of(scale.get_untracked());
+                    let (sx, sy) = (plot.x_tween.shown(&x), y_tween.shown(&y));
+                    dot_anchor(&sx, &sy, &plot.fade.mul(&mine)).child(
+                        view()
+                            .flex_none()
+                            .style_with(move |s| {
+                                let d = px(diameter.get());
+                                s.w(d).h(d)
+                            })
+                            .app_class(move || own.class.get().or_else(|| plot.dot.class.get()))
+                            .inline_style(move || match styled() {
+                                true => own.style.get(),
+                                false => plot.dot.style.get(),
+                            }),
+                    )
+                },
             )
         },
     )
