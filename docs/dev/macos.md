@@ -25,6 +25,13 @@ server client, log forwarding, the error overlay: `dev.rs`). The runtime needs m
 
 ## Architecture
 
+Web view downloads (`native.rs`) are opt-in through `onDownload`. Response policy uses WebKit's MIME support
+flag when it does not select a download, preserving the default cancellation of unshowable types. A response
+converted into a download suppresses only its own `WebKitErrorDomain` 102 navigation failure. Downloads are
+tracked from adoption through completion or failure; dropping `WebHost` cancels all active `WKDownload`s and
+removes their directories in cancellation completion handlers, after WebKit stops writing. Completed files
+belong to the app, which owns retention and its storage budget.
+
 - **One view per node.** Each node is an `NshView` (`view.rs`, a flipped, layer-backed `NSView` subclass holding the
   node's `ViewState`). The core lays everything out: a view sits at its frame (`place()`: the origin, a sticky shift,
   mirrored lists), and its transform, opacity and visibility are its layer's. AppKit resets a layer-backed view's

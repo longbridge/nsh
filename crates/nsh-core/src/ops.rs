@@ -251,6 +251,7 @@ events! {
     ScreenColor = "onScreenColor": "A [`Command::PickScreenColor`] request finished (root only; payload: `id`, `color`: the color picked, packed `0xRRGGBBAA`, absent when cancelled).",
     FileRequest = "onFileRequest": "A [`Command::FileRequest`] finished (root only; payload: [`EventPayload::FileRequest`]).",
     Speech = "onSpeech": "A speech recognition session reported (root only; payload: [`EventPayload::Speech`]).",
+    Download = "onDownload": "A web view's download started, finished or failed (payload: `state`, `id`, `url`, `filename`, `path`; `bytes` once finished, `message` when it failed).",
 
 }
 
@@ -2364,6 +2365,13 @@ pub enum Prop {
     /// components (`Interactive::project_checked`, `project_indeterminate`,
     /// `project_disabled`), never by JS.
     ProjectedStates(u16),
+    /// The boolean `data-*` attributes a part of a component shows, by
+    /// name without `data-` and sorted: its `data-<name>:` classes apply,
+    /// and with `group` the `group-data-<name>:` classes inside it (a
+    /// calendar's day at the start of a range, `data-range-start`). They
+    /// tell screen readers nothing. Set by components
+    /// (`Interactive::project_data`), never by JS.
+    ProjectedData(Box<[&'static str]>),
     /// `headerStyle` of a page: `backgroundColor`, `color` (the title's) and
     /// `tintColor` (the buttons') of its header.
     HeaderStyle(Option<std::rc::Rc<StylePatch>>),

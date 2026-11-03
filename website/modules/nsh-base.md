@@ -10,7 +10,7 @@ demo: ui-navigation
 `nsh/base` is the base component layer of an app's UI: unstyled components that own behavior, state, focus and
 accessibility, on every platform. It sits between the primitives (`nsh`, `nsh/mobile` and `nsh/desktop`) and the
 app's own component library, as `gpui-base` sits between `gpui` and a styled library in GPUI Kit (see
-[Modules](./index.md#three-layers)). It provides controls (`Button`, `Link`, `Checkbox`, `ColorPicker` with its `ColorArea`, `ColorSlider`, `ColorField`, `ColorSwatch` and `ColorEyeDropper`, `NumberInput`, `Radio` in a `RadioGroup`, `Slider`, `Switch`, `Tab` in `Tabs`, `Toggle` in a `ToggleGroup`, `Select`, `Combobox`, `Calendar`, `TimeField`, `DatePicker`), command palettes (`Command`), bars of controls (`Toolbar` with its `ToolbarGroup` and `ToolbarSeparator`), scroll bars of the app's own look (`Scrollbar`), regions that expand and collapse (`Collapsible`, and `Accordion` with its `AccordionItem`, `AccordionHeader`, `AccordionTrigger` and `AccordionPanel`), a progress bar (`Progress`), one-time codes (`OtpInput`), the pages of a set (`Pagination`), items that hold items (`Tree`), the parts charts are built from (`Plot` with `Line`, `Area`, `Bar`, `Grid`, `Pie` and `Arc`, in `nsh/base/plot`), workspaces the user arranges (`ResizablePanel`s in a
+[Modules](./index.md#three-layers)). It provides controls (`Button`, `Link`, `Checkbox`, `ColorPicker` with its `ColorArea`, `ColorSlider`, `ColorField`, `ColorSwatch` and `ColorEyeDropper`, `NumberInput`, `Radio` in a `RadioGroup`, `Slider`, `Switch`, `Tab` in `Tabs`, `Toggle` in a `ToggleGroup`, `Select`, `Combobox`, `Calendar`, `TimeField`, `DatePicker`), command palettes (`Command`), bars of controls (`Toolbar` with its `ToolbarGroup` and `ToolbarSeparator`), scroll bars of the app's own look (`Scrollbar`), regions that expand and collapse (`Collapsible`, and `Accordion` with its `AccordionItem`, `AccordionHeader`, `AccordionTrigger` and `AccordionPanel`), a progress bar (`Progress`), one-time codes (`OtpInput`), the pages of a set (`Pagination`), items that hold items (`Tree`), the parts charts are built from (`Plot` with `Line`, `Area`, `Bar`, `Rule`, `Grid`, `Pie` and `Arc`, in `nsh/base/plot`), workspaces the user arranges (`ResizablePanel`s in a
 `ResizablePanelGroup`, and `DockArea`'s splits, tab groups and docks), carousels (`Carousel` and its parts), documents of Markdown or HTML (`TextView`), a code editor (`Editor`) the changes between texts (`DiffView`) and tables of rows and columns (`Table` and its parts, `DataTable`), text inputs
 (`Input`), popups shown on top of everything (`Popover`, `Menu` and `ContextMenu` with their `MenuItem`,
 `MenuSeparator` and `Submenu`, `Tooltip`, `Sheet`), toasts (`Toast` in a `ToastStack`, their lifecycle in a `ToastManager`), navigation (a `NavStack` of `NavPage`s driven
@@ -190,9 +190,9 @@ import type {
   RadioGroupProps,
   RadioProps,
   NumberInputProps,
+  SelectEntry,
   SelectGroup,
   SelectItem,
-  SelectItemState,
   SelectProps,
   ComboboxProps,
   CommandEntry,
@@ -372,7 +372,7 @@ groups and separators. See [Toolbar](../elements/toolbar.md).
 One value chosen from a list of items given as data (`items`: a value and a title each, optionally disabled or in a
 section), with no look. The app's trigger opens the list: a popup at the trigger on the desktops, a sheet at the
 bottom on phones and tablets. The select owns the keyboard (Up, Down, Home, End, Page Up and Down, typeahead, Return
-and Escape), search (`searchable`), the highlighted row (`focus:` on `itemClass`, `highlighted` in `renderItem`) and
+and Escape), search (`searchable`), the highlighted row (`focus:` on `itemClass`; `renderItem` gets what an item is, never its state) and
 the combobox, listbox and option roles for screen readers. The app owns the value (`value`, `onChange`) or leaves it
 to the select (`defaultValue`), and styles each part or draws the rows. See [Select](../elements/select.md).
 
@@ -391,7 +391,9 @@ A date, or with `range` a range of dates, picked from months of days, with no lo
 (`numberOfMonths`) show side by side; the header turns them and opens a view of the months or a page of years. The
 value is an ISO date (`"2026-10-28"`) or `[start, end]` the app owns (`value`, `onChange`) or leaves to the calendar
 (`defaultValue`); `disabledMatcher` keeps days from being picked, and the days take the keyboard as one stop of Tab.
-The app styles the parts and draws the items (`renderItem`). See [Calendar](../elements/calendar.md).
+The app styles the parts and draws the items (`renderItem`, given what an item is; its states are its classes, a
+range's days `selected:` with `data-range-start:`, `data-range-middle:` and `data-range-end:`). See
+[Calendar](../elements/calendar.md).
 
 ### TimeField
 
