@@ -184,6 +184,11 @@ const OVER: CGFloat = 1.0e6;
 /// AppKit lays out and draws what navigation just showed over these.
 const SETTLING_FRAMES: u32 = 3;
 
+/// How long a [`NavOverlay`] stays after its shader's run: the one or two
+/// frames rendered last come back from the GPU a frame or two late, and
+/// show before it goes (the motion under it already ended).
+pub(crate) const LINGER: std::time::Duration = std::time::Duration::from_millis(50);
+
 thread_local! {
     /// The keys of the surfaces with views in [`Shaders::pictured`] (no
     /// views: those are the surfaces').
@@ -401,6 +406,11 @@ pub(crate) fn ui_changed(view: &NshView) {
 }
 
 fn ui_changed_in(surface: &Rc<Surface>, view: &NshView) {
+    // Another surface's view (an app embedding two): none of this one's
+    // pictures holds it.
+    if !view.ns().isDescendantOf(surface.root.ns()) {
+        return;
+    }
     // A page's or a dialog's overlay pictures its side again.
     for mark in surface.shaders.overlays.borrow().iter() {
         if let Some(mark) = mark.upgrade()
@@ -409,13 +419,12 @@ fn ui_changed_in(surface: &Rc<Surface>, view: &NshView) {
             mark.dirty.set(true);
         }
     }
-    let views = surface.shaders.pictured.borrow().clone();
-    if views.is_empty() {
-        return;
-    }
+    let views = surface.shaders.pictured.borrow();
     let mut marked = false;
-    for v in views {
-        if &v == view {
+    // Marking takes no other borrow of `pictured` ([`tick_due`] adds to
+    // `views`), so it is walked in place, not copied on every change.
+    for v in views.iter() {
+        if v == view {
             continue;
         }
         let Some(mut state) = v.try_state_mut() else {
@@ -441,9 +450,10 @@ fn ui_changed_in(surface: &Rc<Surface>, view: &NshView) {
         if inside || backdrop {
             marked = true;
             drop(state);
-            tick_due(&v);
+            tick_due(v);
         }
     }
+    drop(views);
     // While the animator writes, [`wake`] starts them once it is done.
     if marked && surface.anim.try_borrow_mut().is_ok() {
         start(surface);
@@ -540,6 +550,7 @@ fn children_picture<'a>(
         layer.renderInContext(context);
         over.iter().for_each(|l| l.setHidden(false));
         if let Some(c) = &container {
+            // SAFETY: the container's own mask, cleared above, set back.
             unsafe { c.setMask(mask.as_deref()) };
         }
     }))
@@ -807,7 +818,8 @@ pub(crate) fn shown(view: &NshView) {
         shader.hidden = false;
         shader.surface.upgrade()
     };
-    if tick(view)
+    // A picture that fell due while it was out of sight is taken now.
+    if tick_due(view)
         && let Some(surface) = surface
     {
         start(&surface);
@@ -1055,7 +1067,7 @@ fn rgba_image<'a>(
 /// going: the other is what left): on the next few frames, while what just
 /// showed is laid out and drawn, then only after a view under the host
 /// changed ([`Mark`]). Navigation keeps the views at rest under it and ends
-/// it with its motion.
+/// it with its motion, [`LINGER`] after the shader's run.
 pub(crate) struct NavOverlay {
     view: RefCell<ShaderView>,
     layer: Retained<CALayer>,
@@ -1215,7 +1227,9 @@ impl NavOverlay {
     }
 
     /// One display frame: pictures the sides that are due ([`Self::due`]),
-    /// renders and shows a frame that came back.
+    /// renders and shows a frame that came back. Once the shader's own
+    /// clock ended it renders nothing more and shows the frames still on
+    /// their way ([`LINGER`] keeps it up for them).
     pub(crate) fn tick(&self, surface: &Surface) {
         let Some(renderer) = surface.shaders.renderer() else {
             return;
@@ -1223,9 +1237,19 @@ impl NavOverlay {
         let frame = self.frames.get();
         self.frames.set(frame.saturating_add(1));
         let first = frame == 0;
+        let mut view = self.view.borrow_mut();
+        let now = Instant::now();
+        if !first && !view.transitioning(now) {
+            if view.collect_frame(renderer) {
+                let image = frame_image(view.frame());
+                let contents = image.as_deref().map(crate::decor::image_object);
+                // SAFETY: a CGImage is a valid `contents` object.
+                crate::surface::quiet(|| unsafe { self.layer.setContents(contents.as_deref()) });
+            }
+            return;
+        }
         let dirty = self.mark.dirty.replace(false);
         let mut canvas = self.canvas.borrow_mut();
-        let mut view = self.view.borrow_mut();
         for input in Self::due(frame, self.backwards, dirty) {
             let picture = self.side(&mut canvas, input == ShaderInput::To);
             view.set_input(renderer, input, picture);
@@ -1233,14 +1257,13 @@ impl NavOverlay {
         // Picturing draws views due to draw, which may mark it again.
         self.mark.dirty.set(false);
         if first {
-            let now = Instant::now();
             if self.backwards {
                 view.start_transition_backwards(self.duration, now);
             } else {
                 view.start_transition(self.duration, now);
             }
         }
-        if view.render(renderer, Instant::now()) {
+        if view.render(renderer, now) {
             let image = frame_image(view.frame());
             let contents = image.as_deref().map(crate::decor::image_object);
             // SAFETY: a CGImage is a valid `contents` object.

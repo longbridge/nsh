@@ -156,7 +156,10 @@ its `from` when it starts and takes `to` again as its children change. Each pict
 keeps (`Canvas`), made again only when its size changes. A page's or a dialog's overlay (`NavOverlay`) pictures both
 sides on its first display frame; its live side (the upper one coming, the lower going) again on the next three,
 while AppKit lays out and draws what navigation just showed, and after that only when a view under its host changed
-(`Mark`, set by `ui_changed`).
+(`Mark`, set by `ui_changed`, which looks only at the surface the changed view is in). Its run is the shader's own
+clock; the motion under it ends `LINGER` (50 ms) later, so the frames still on their way back from the GPU show before
+it goes. A view that comes back into sight takes the pictures that fell due while it was out of it (`shown`). What
+pictures cost on the main thread is in [macos.md](macos.md) "Shader pictures".
 `renderInContext:` draws no video or web page, nor backdrop blur or glass. The pictures of views AppKit has just shown
 again (navigation hides the screens under the top one) wait for the next display frame: until AppKit displays the
 window their layers are out of the tree, where they draw y up.

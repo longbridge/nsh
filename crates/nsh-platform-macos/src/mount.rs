@@ -190,6 +190,9 @@ impl Mounter {
                         crate::transition::deleted(&view);
                         self.detach(surface, &view);
                     }
+                    // After the detach: a dialog closing through its shader
+                    // has read it.
+                    crate::navigation::deleted(surface, &view);
                 }
             }
             MountItem::Frame { id, frame } => {

@@ -889,7 +889,7 @@ impl Nav {
             None => motion,
         };
         let duration = match (&motion, shader) {
-            (Motion::Shader { .. }, Some(shader)) => shader.duration,
+            (Motion::Shader { .. }, Some(shader)) => shader.duration + crate::shader::LINGER,
             _ => {
                 let Some(duration) = own else {
                     self.end(surface, motion);
@@ -1465,6 +1465,15 @@ pub(crate) fn set_shader(
         Some(shader) => nav.shaders.insert(view.id(), shader),
         None => nav.shaders.remove(&view.id()),
     };
+}
+
+/// `view` is deleted: a dialog's `transitionShader` goes with it (a
+/// page's leaves in [`Nav::reconcile`], which reads it first when the page
+/// was the one on top).
+pub(crate) fn deleted(surface: &Surface, view: &NshView) {
+    if view.kind() == ViewKind::Modal {
+        surface.nav.borrow_mut().shaders.remove(&view.id());
+    }
 }
 
 /// A modal was inserted: present it.

@@ -376,3 +376,22 @@ newer one leaving the focus alone, and the newer one's Escape returning it to
 the stack's trigger. Still to check natively: Shift+Tab, mixed inputs and
 buttons, disabling or deleting a focused control, repeat suppression, modifier
 shortcuts, screen-reader focus and window deactivation.
+
+## Shader pictures
+
+Effects, transitions, screen shaders and pages' and dialogs' overlays read pictures of views: `renderInContext:` of
+the host's layer tree, on the main thread, at the window's backing scale, into a bitmap context the shader view keeps
+(`Canvas`, made again only for a new size), then copied into the renderer's texture. The work grows with the pixels
+pictured: a whole 1440 × 900 point window at 2x is 2880 × 1800 pixels, about 20 MB to rasterize and copy, and a
+screen effect on a 5K display pictures nearly three times that. So pictures are taken only when what they show changed:
+
+- a shader whose program reads its children (`sample_content`, `sample_to`) pictures them on the display frame after
+  the core marks them (`MountItem::ShaderInput`) or a view in them changed, at most once per frame; one that only
+  draws over them, from `nsh.time` and its uniforms, never pictures them again;
+- a backdrop reader pictures the window behind it after any change in its surface;
+- a screen effect reading the surface pictures the whole window after any change in it, so one over a spinner or a
+  list that animates pictures every frame the animation runs: what it costs is the cost of that full picture each
+  frame;
+- a page's or a dialog's overlay pictures both sides once, the live side on the next three frames and after a view
+  under its host changed.
+
