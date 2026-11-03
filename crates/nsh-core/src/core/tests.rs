@@ -24936,7 +24936,10 @@ mod terminal_layout {
         let mut ops = view(
             2,
             ROOT_ID,
-            &[("alignSelf", V::Str("stretch")), ("height", V::Number(32.0))],
+            &[
+                ("alignSelf", V::Str("stretch")),
+                ("height", V::Number(32.0)),
+            ],
         );
         ops.extend(view(
             3,

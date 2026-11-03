@@ -1696,8 +1696,17 @@ fn split_line(
             })
             .sum();
         let over = used(items, &before) + want - bound;
+        // Only when that keeps the fills whole: a fill that wraps anyway
+        // (a column of sections, its texts longer than any row) keeps the
+        // gaps around it.
         if over > 0 {
-            give_gaps_and_labels(items, &mut before, over);
+            let (gaps, mains) = (before.clone(), items.iter().map(|i| i.main).collect::<Vec<_>>());
+            if give_gaps_and_labels(items, &mut before, over) > 0 {
+                before = gaps;
+                for (item, main) in items.iter_mut().zip(mains) {
+                    item.main = main;
+                }
+            }
         }
     }
     if let Some(bound) = known_main

@@ -736,10 +736,15 @@ fn Disclosures() -> impl IntoElement {
 fn a_disclosure_says_which_way_it_goes_and_a_popup_trigger_does_not() {
     let (mut view, rx) = surface();
     let mut terminal = Terminal::new(TestBackend::new(20, 5)).unwrap();
-    view.load(App::Rust(Root::new::<Disclosures>(|| ()))).unwrap();
+    view.load(App::Rust(Root::new::<Disclosures>(|| ())))
+        .unwrap();
     draw_until(&mut view, &mut terminal, &rx, "ready");
     let buffer = terminal.backend().buffer();
     assert_eq!(row(buffer, 0, 0..9), "▸ Storage");
     assert_eq!(row(buffer, 1, 0..10), "▾ Advanced");
-    assert_eq!(row(buffer, 2, 0..9), "  Options", "a popup's trigger has no disclosure");
+    assert_eq!(
+        row(buffer, 2, 0..9),
+        "  Options",
+        "a popup's trigger has no disclosure"
+    );
 }

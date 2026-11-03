@@ -84,8 +84,8 @@ fn a_dropdown_goes_on_the_rows_below_its_trigger_as_tall_as_its_rows() {
     view.load(App::Rust(Root::new::<DropdownBelow>(|| ())))
         .unwrap();
     draw_until(&mut view, &mut terminal, &rx, "Swift");
-    let (_, trigger) = find(&terminal, "Pick")
-        .unwrap_or_else(|| panic!("the trigger shows\n{}", dump(&terminal)));
+    let (_, trigger) =
+        find(&terminal, "Pick").unwrap_or_else(|| panic!("the trigger shows\n{}", dump(&terminal)));
     let rows = rows_of(&terminal, &["Rust", "Go", "Ruby", "Swift", "Done"]);
     assert!(
         rows[0] > trigger && rows[0] <= trigger + 2,
@@ -102,8 +102,8 @@ fn a_dropdown_without_room_below_goes_above_its_trigger() {
     view.load(App::Rust(Root::new::<DropdownAbove>(|| ())))
         .unwrap();
     draw_until(&mut view, &mut terminal, &rx, "Swift");
-    let (_, trigger) = find(&terminal, "Pick")
-        .unwrap_or_else(|| panic!("the trigger shows\n{}", dump(&terminal)));
+    let (_, trigger) =
+        find(&terminal, "Pick").unwrap_or_else(|| panic!("the trigger shows\n{}", dump(&terminal)));
     let rows = rows_of(&terminal, &["Rust", "Go", "Ruby", "Swift", "Done"]);
     let last = *rows.last().unwrap();
     assert!(
@@ -160,7 +160,8 @@ fn OpenPicker() -> impl IntoElement {
 fn a_date_picker_s_calendar_shows_its_days_below_its_trigger() {
     let (mut view, rx) = surface();
     let mut terminal = Terminal::new(TestBackend::new(60, 24)).unwrap();
-    view.load(App::Rust(Root::new::<OpenPicker>(|| ()))).unwrap();
+    view.load(App::Rust(Root::new::<OpenPicker>(|| ())))
+        .unwrap();
     draw_until(&mut view, &mut terminal, &rx, "28");
     let rows = rows_of(&terminal, &["Pick", "‹", "28"]);
     assert!(
@@ -207,7 +208,11 @@ fn a_dialog_s_popup_with_auto_margins_is_centered_below_its_top_margin() {
     );
     // 12% of 640 points is 76.8: about 5 rows, not the one row a margin
     // between two boxes of a column takes.
-    assert!((4..=7).contains(&y), "below its margin: y {y}\n{}", dump(&terminal));
+    assert!(
+        (4..=7).contains(&y),
+        "below its margin: y {y}\n{}",
+        dump(&terminal)
+    );
 }
 
 /// A command over two items with its search field `Find`.
@@ -239,7 +244,12 @@ fn a_command_s_search_field_has_a_rule_under_it() {
         "a rule under the field\n{}",
         dump(&terminal)
     );
-    assert_eq!(rows[0], field + 2, "the rows under the rule\n{}", dump(&terminal));
+    assert_eq!(
+        rows[0],
+        field + 2,
+        "the rows under the rule\n{}",
+        dump(&terminal)
+    );
 }
 
 /// A dropdown's frame without a component: an overlay under `Pick` holding
@@ -288,6 +298,9 @@ fn a_popup_s_virtualized_list_is_as_tall_as_its_rows() {
     let mut terminal = Terminal::new(TestBackend::new(40, 20)).unwrap();
     view.load(App::Rust(Root::new::<BarePopup>(|| ()))).unwrap();
     draw_until(&mut view, &mut terminal, &rx, "row 3");
-    let rows = rows_of(&terminal, &["Pick", "row 0", "row 1", "row 2", "row 3", "Done"]);
+    let rows = rows_of(
+        &terminal,
+        &["Pick", "row 0", "row 1", "row 2", "row 3", "Done"],
+    );
     consecutive(&terminal, &rows);
 }

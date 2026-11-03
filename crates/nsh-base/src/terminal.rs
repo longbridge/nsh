@@ -75,7 +75,7 @@ fn line_colored(
                 .number_of_lines(1u32)
                 .text_overflow(EllipsizeMode::Clip)
                 .pointer_events(PointerEvents::None)
-                .when_some(color, |t, color| t.text_color(move || color())),
+                .when_some(color, |t, color| t.text_color(color)),
         )
 }
 

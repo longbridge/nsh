@@ -132,10 +132,13 @@ impl<M: TextEngine> Core<M> {
         // size is its size: the wrapper's is its host's, the box the
         // overlay's room is measured in (without it, 0 rows, and the
         // overlay's content shrinks to a row apiece).
-        self.layout.set_role(wrapper, super::terminal_layout::Role {
-            sized: true,
-            ..Default::default()
-        });
+        self.layout.set_role(
+            wrapper,
+            super::terminal_layout::Role {
+                sized: true,
+                ..Default::default()
+            },
+        );
         if let Some(root) = self.nodes[key as usize].root.as_mut() {
             root.overlay = Some(Box::new(OverlayState {
                 config: OverlayConfig::default(),
