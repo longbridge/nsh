@@ -1,6 +1,6 @@
 import { platform, signal, Text, View } from "nsh";
 import { Menu, MenuItem, Pagination, type PaginationItemState } from "nsh/base";
-import { Appear, Button, Caption, Card, colors, DemoPage, density, Icon, mono, PopIn, popupSurface, Segmented, Toggle } from "../ui";
+import { Appear, Button, Caption, Card, colors, DemoPage, density, Icon, mono, PopIn, popupSurface, Segmented, terminal, Toggle } from "../ui";
 
 // `nsh/base`'s `Pagination` owns which pages show (the first and the last,
 // the current one's neighbours, ellipses for the rest), the presses,
@@ -232,6 +232,8 @@ export function PaginationDemo() {
     const draw = (item: PaginationItemState) => {
       if (item.kind === "ellipsis") return <JumpMenu start={item.start!} end={item.end!} current={page()} onPick={go} />;
       if (item.kind === "page") return <Text style={{ fontVariant: ["tabular-nums"] }}>{grouped(item.page)}</Text>;
+      // A terminal draws no icons: the chevrons are glyphs.
+      if (terminal) return <Text style={{ color: colors.muted }}>{item.kind === "previous" ? "‹" : "›"}</Text>;
       return (
         <View style={item.kind === "previous" ? { transform: [{ rotate: "180deg" }] } : undefined}>
           <Icon name="chevron" size={14} tint={colors.muted} />

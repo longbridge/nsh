@@ -436,6 +436,27 @@ impl Sides {
     }
 }
 
+/// The Cells that splitters among `absolute` (a box's absolute children)
+/// pinned on its edges take: one on each edge a splitter across it sits
+/// at (`right: 0` for a column's, `bottom: 0` for a row's).
+fn pinned_splitters(tree: &impl Tree, absolute: &[(u32, NodeId)]) -> Sides {
+    let mut sides = Sides::default();
+    let at_zero =
+        |v: LengthPercentageAuto| length(v.into_raw()).is_some_and(|v| v.abs() <= EPSILON);
+    for &(_, child) in absolute {
+        let s = tree.style(child);
+        let i = s.inset;
+        match tree.role(child).splitter {
+            Splitter::Columns if at_zero(i.right) && i.left.is_auto() => sides.r = 1,
+            Splitter::Columns if at_zero(i.left) && i.right.is_auto() => sides.l = 1,
+            Splitter::Rows if at_zero(i.bottom) && i.top.is_auto() => sides.b = 1,
+            Splitter::Rows if at_zero(i.top) && i.bottom.is_auto() => sides.t = 1,
+            _ => {}
+        }
+    }
+    sides
+}
+
 /// Whether `node` is out of the layout: `display: none`, left out, or a
 /// decoration.
 fn hidden(tree: &impl Tree, node: NodeId) -> bool {
@@ -685,7 +706,11 @@ fn insets(
     let px = |v: LengthPercentage| {
         let p = lp(v, parent_width);
         let c = space_x(p);
-        let c = if band && p >= 4.0 - EPSILON { c.max(1) } else { c };
+        let c = if band && p >= 4.0 - EPSILON {
+            c.max(1)
+        } else {
+            c
+        };
         if compact { c.min(1) } else { c }
     };
     let py = |v: LengthPercentage| {
@@ -843,7 +868,13 @@ fn saturated(c: Color) -> bool {
 /// its content absolute: a chart, whose axes' labels overflow it into its
 /// margins) are gutters, not spacing: their Cells and rows are their
 /// size, inside a bordered box too.
-fn margins(grid: Grid, style: &Style, parent_width: Option<f32>, framed: bool, layers: bool) -> Sides {
+fn margins(
+    grid: Grid,
+    style: &Style,
+    parent_width: Option<f32>,
+    framed: bool,
+    layers: bool,
+) -> Sides {
     let x = |v| {
         lpa(v, parent_width).map_or(0, |p| match layers {
             true => grid.cols(p).max(0),
@@ -1032,8 +1063,15 @@ pub(crate) fn compute(
     }
     if k.measures {
         let known = (inner(fixed_w, inset.x()), inner(fixed_h, inset.y()));
+        // A text breaks its lines within its maximum width, as CSS's: the
+        // room it measures in is no wider (a centered `maxWidth: 320`
+        // paragraph is as tall as its lines at 40 columns).
+        let room_w = fixed_w
+            .or(avail_w)
+            .map(|w| max_w.map_or(w, |m| w.min(m)))
+            .or(max_w);
         let avail = (
-            inner(fixed_w.or(avail_w), inset.x()),
+            inner(room_w, inset.x()),
             inner(fixed_h.or(avail_h), inset.y()),
         );
         let mut mi = input(inputs.run_mode, known, avail, (None, None), grid);
@@ -1098,6 +1136,9 @@ pub(crate) fn compute(
     }
     let outer_framed = tree.framed();
     let divided = absolute.iter().any(|&(_, c)| holds_splitter(tree, c));
+    // A splitter pinned on an edge (a column header's resize handle) is
+    // that edge's line: its Cell is out of the content, as a border's.
+    let pinned = pinned_splitters(tree, &absolute);
     let (mut border, mut padding) = (border, padding);
     let mut inset = inset;
     // A frame around one frame and nothing else, with no padding of its
@@ -1174,16 +1215,17 @@ pub(crate) fn compute(
             banded: surface.is_some(),
             fills: role.fills,
         };
-        let content_w = inner(fixed_w, inset.x());
-        let content_h = inner(fixed_h, inset.y());
-        let room_w = inner(fixed_w.or(avail_w), inset.x());
-        let room_h = inner(fixed_h.or(avail_h), inset.y());
-        let origin = (inset.l, inset.t);
+        let edges = inset.add(pinned);
+        let content_w = inner(fixed_w, edges.x());
+        let content_h = inner(fixed_h, edges.y());
+        let room_w = inner(fixed_w.or(avail_w), edges.x());
+        let room_h = inner(fixed_h.or(avail_h), edges.y());
+        let origin = (edges.l, edges.t);
         // A percentage of this box's height is of its explicit height
         // when the layout does not keep it (a histogram's bars in a 36pt
         // row): the same in every pass, measured or placed.
         let stated_h =
-            dim(tree.style(node).size.height, parent_h).map(|v| (grid.rows(v) - inset.y()).max(0));
+            dim(tree.style(node).size.height, parent_h).map(|v| (grid.rows(v) - edges.y()).max(0));
         let area = Area {
             known: (content_w, content_h),
             room: (room_w, room_h),
@@ -1199,9 +1241,9 @@ pub(crate) fn compute(
             arrange_flex(tree, grid, &flow, &spec, area, perform, origin)
         };
         let size = Cells {
-            w: fixed_w.unwrap_or_else(|| clamp(content.w + inset.x(), min_w, max_w)),
+            w: fixed_w.unwrap_or_else(|| clamp(content.w + edges.x(), min_w, max_w)),
             h: fixed_h.unwrap_or_else(|| {
-                let h = content.h + inset.y();
+                let h = content.h + edges.y();
                 clamp(eh.map_or(h, |e| h.min(e)), min_h, max_h)
             }),
         };
@@ -1706,7 +1748,9 @@ fn arrange_flex(
         } else {
             None
         };
-        if item.grow > 0.0 && known_main.is_some() {
+        // A wrapping row breaks its lines at its fills' bases (or
+        // contents) as CSS's, before they grow on their line.
+        if item.grow > 0.0 && known_main.is_some() && !spec.wrap {
             continue;
         }
         // A basis is a `Length` (a resizable panel's size), whatever the
@@ -1757,6 +1801,12 @@ fn arrange_flex(
         lines.push(start..items.len());
     } else {
         lines.push(0..items.len());
+    }
+    // Each line's fills then take what is left on it, by weight.
+    if spec.wrap && known_main.is_some() {
+        for item in items.iter_mut().filter(|i| i.grow > 0.0) {
+            item.main = 0;
+        }
     }
     let single = lines.len() == 1;
     let mut extent_main = 0;
@@ -2127,7 +2177,13 @@ fn place(
         }
     }
     let Insets { border, padding } = tree.insets(node);
-    let margin = margins(grid, tree.style(node), parent_w, tree.framed(), layers(tree, node));
+    let margin = margins(
+        grid,
+        tree.style(node),
+        parent_w,
+        tree.framed(),
+        layers(tree, node),
+    );
     let mut layout = Layout::with_order(order);
     layout.location = taffy::Point {
         x: grid.x(x),
@@ -2406,7 +2462,13 @@ fn tracks(style: &Style, grid: Grid, width: Option<i32>) -> Vec<Track> {
 fn grid_span(line: &Line<taffy::GridPlacement<String>>, count: Option<usize>) -> usize {
     use taffy::GridPlacement as P;
     let lines = count.map_or(1, |n| n as i32 + 1);
-    let at = |n: i16| if n < 0 { lines + 1 + i32::from(n) } else { i32::from(n) };
+    let at = |n: i16| {
+        if n < 0 {
+            lines + 1 + i32::from(n)
+        } else {
+            i32::from(n)
+        }
+    };
     let span = match (&line.start, &line.end) {
         (P::Span(n), _) | (_, P::Span(n)) => i32::from(*n),
         // Lines past the explicit tracks (rows, which are as many as the
@@ -2552,7 +2614,16 @@ fn arrange_grid(
     let mut item_h = Vec::with_capacity(flow.len());
     for (&(_, node), &(r, c, rs, cs)) in flow.iter().zip(&places) {
         let w = span(&widths, c, cs, col_gap);
-        let h = measure(tree, grid, node, true, (Some(w), None), (Some(w), None), parent).1;
+        let h = measure(
+            tree,
+            grid,
+            node,
+            true,
+            (Some(w), None),
+            (Some(w), None),
+            parent,
+        )
+        .1;
         if rs == 1 {
             heights[r] = heights[r].max(h);
         }
@@ -2584,9 +2655,8 @@ fn arrange_grid(
         }
     }
     if perform {
-        let start = |sizes: &[i32], at: usize, gap: i32| {
-            sizes[..at].iter().sum::<i32>() + gap * at as i32
-        };
+        let start =
+            |sizes: &[i32], at: usize, gap: i32| sizes[..at].iter().sum::<i32>() + gap * at as i32;
         for (&(order, node), &(r, c, rs, cs)) in flow.iter().zip(&places) {
             place(
                 tree,
@@ -2606,7 +2676,10 @@ fn arrange_grid(
         }
     }
     let total_h = heights.iter().sum::<i32>() + row_gap * (rows as i32 - 1).max(0);
-    Cells { w: total_w, h: total_h }
+    Cells {
+        w: total_w,
+        h: total_h,
+    }
 }
 
 #[cfg(test)]

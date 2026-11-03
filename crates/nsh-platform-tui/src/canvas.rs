@@ -93,11 +93,32 @@ impl CanvasView {
     }
 }
 
+/// Whether Cell (`x`, `y`) holds a text's glyph or stands beside one on
+/// its row: a dot there would touch the word.
+fn by_text(buffer: &Buffer, text_cells: &[bool], x: u16, y: u16) -> bool {
+    let area = buffer.area;
+    let glyph = |x: u16| {
+        let at = buffer.index_of(x, y);
+        text_cells.get(at).copied().unwrap_or(false)
+            && buffer.content[at]
+                .symbol()
+                .chars()
+                .any(|c| !c.is_whitespace())
+    };
+    let at = buffer.index_of(x, y);
+    text_cells.get(at).copied().unwrap_or(false)
+        || (x > area.x && glyph(x - 1))
+        || (x + 1 < area.right() && glyph(x + 1))
+}
+
 /// Draws `canvas` into the `visible` Cells of a view whose Cells are
-/// `bounds`, in the paints' own colors over `ground`.
+/// `bounds`, in the paints' own colors over `ground`. A text drawn before
+/// it (a value in a ring's middle) keeps its Cells and a Cell clear each
+/// side, as the canvas's own labels do.
 pub(crate) fn draw(
     canvas: &CanvasView,
     buffer: &mut Buffer,
+    text_cells: &[bool],
     bounds: CellBounds,
     visible: Rect,
     cells: CellSize,
@@ -124,7 +145,7 @@ pub(crate) fn draw(
     for y in 0..visible.height {
         for x in 0..visible.width {
             let dot = &scratch[(x, y)];
-            if dot.symbol() != " " {
+            if dot.symbol() != " " && !by_text(buffer, text_cells, visible.x + x, visible.y + y) {
                 let symbol = dot.symbol().to_owned();
                 let cell = &mut buffer[(visible.x + x, visible.y + y)];
                 cell.set_symbol(&symbol);

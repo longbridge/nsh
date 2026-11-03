@@ -314,7 +314,8 @@ algorithm of its own, the way ratatui apps are laid out (`core::terminal_layout`
 in `Environment::cell` (`None` on every other surface; the terminal backend sets it from its points per Cell, 8 × 16
 by default). Lengths are whole Cells inside (x the Cell's width, y its height); the layouts written back are in
 points, so frames, hits, overlays, scroll views and `onLayout` work as anywhere else. Leaves measure as they always
-do (a text is one row per line).
+do (a text is one row per line), its lines broken within its `maxWidth` (a centered paragraph at most 320pt wide is
+as tall as its lines at 40 columns).
 
 - **Splits.** A box's content box is split among its children along `flexDirection` (reversed for the `-reverse`
   ones; `display: block` is a column), as ratatui's `Layout` splits a `Rect`: `flexGrow` is `Fill(grow)`, every other
@@ -387,7 +388,8 @@ do (a text is one row per line).
   and the content is kept. Controls (a slider's thumb), bars pinned over a scroll view and boxes over blank Cells are
   placed.
 - **Scroll views** lay their content out unbounded along their axis, percentages of their viewport (a carousel's
-  `w-full` slide is one view wide); **grids** take their columns from the template
+  `w-full` slide is one view wide, a vertical one's `h-full` slide one view tall), a component's whose root is a
+scroll view too; **grids** take their columns from the template
   (`fr` fills, points are Cells, the rest their content's), their rows their content's height, stretched to share a
   known height (a dock panel's one cell fills it), the items in order.
 - **Screens and modals** fill the stack or window the core sizes them to, and the padding the core gives them below

@@ -1141,9 +1141,9 @@ fn item_row(lb: Listbox, entry: Memo<Option<Row>>, parts: Parts, hooks: Hooks) -
         }
     };
     let (down, tap) = (hooks.clone(), hooks);
-    // A terminal's row is the item's title, one full-width row the terminal
-    // marks while highlighted or chosen (`crate::terminal`): neither the
-    // app's drawing nor its row style.
+    // A terminal's row is the item's title after the chosen mark, one
+    // full-width row the terminal marks while highlighted
+    // (`crate::terminal`): neither the app's drawing nor its row style.
     let terminal = is_terminal();
     let custom = computed(move || !terminal && parts.render_item.with(Option::is_some));
     view()
@@ -1199,7 +1199,11 @@ fn item_row(lb: Listbox, entry: Memo<Option<Row>>, parts: Parts, hooks: Hooks) -
                     // menu's checked items do: the highlight is elsewhere
                     // once a key moves it.
                     true => {
-                        let mark = if selected.get() { MENU_CHECK } else { MENU_UNCHECKED };
+                        let mark = if selected.get() {
+                            MENU_CHECK
+                        } else {
+                            MENU_UNCHECKED
+                        };
                         SharedString::from(format!("{mark}{title}"))
                     }
                     false => title,

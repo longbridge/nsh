@@ -322,5 +322,48 @@ fn a_translucent_fill_is_a_sparse_floor_of_dots() {
     draw_until(&mut view, &mut terminal, &rx, "drawn");
     let buffer = terminal.backend().buffer();
     let first = row(buffer, 0, 0..4);
-    assert!(first.chars().all(|c| c == '⡀'), "one dot per Cell, not a block: {first:?}");
+    assert!(
+        first.chars().all(|c| c == '⡀'),
+        "one dot per Cell, not a block: {first:?}"
+    );
+}
+
+/// A label under a canvas drawn after it, as a ring's value in its middle.
+#[component]
+fn Under() -> impl IntoElement {
+    view()
+        .flex_1()
+        .child(
+            view()
+                .w(px(160.0))
+                .h(px(32.0))
+                .child(text("49").absolute().top(px(0.0)).left(px(64.0)))
+                .child(
+                    canvas(
+                        Painter::new()
+                            .fill_color(nsh_core::color::rgb(GREEN))
+                            .fill_rect(0.0, 0.0, 160.0, 16.0),
+                    )
+                    .label("ring")
+                    .absolute()
+                    .top(px(0.0))
+                    .left(px(0.0))
+                    .w(px(160.0))
+                    .h(px(32.0)),
+                ),
+        )
+        .child(text("drawn"))
+}
+
+#[test]
+fn a_canvas_over_a_text_leaves_it_and_a_cell_each_side_clear() {
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(24, 4)).unwrap();
+    view.load(App::Rust(Root::new::<Under>(|| ()))).unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "drawn");
+    let buffer = terminal.backend().buffer();
+    let line = row(buffer, 0, 0..20);
+    assert_eq!(row(buffer, 0, 7..11), " 49 ", "{line}");
+    assert_eq!(row(buffer, 0, 5..7), "⣿⣿", "the fill goes on: {line}");
+    assert_eq!(row(buffer, 0, 11..13), "⣿⣿", "the fill goes on: {line}");
 }

@@ -452,7 +452,11 @@ fn a_framed_popup_beside_its_trigger_starts_its_rows_on_the_trigger_s_row() {
         "the first row on the trigger's row, the frame on the row above\n{}",
         dump(&terminal)
     );
-    assert!(x > 30, "beside the trigger (columns 10 to 29)\n{}", dump(&terminal));
+    assert!(
+        x > 30,
+        "beside the trigger (columns 10 to 29)\n{}",
+        dump(&terminal)
+    );
     let corner = find(&terminal, "╭").unwrap_or_else(|| panic!("a frame\n{}", dump(&terminal)));
     assert_eq!(
         corner,
@@ -592,5 +596,97 @@ fn a_searchable_select_s_search_field_has_a_rule_under_it() {
         field + 2,
         "the rows under the rule\n{}",
         dump(&terminal)
+    );
+}
+
+/// An open select of four tags at its natural width, `Go` chosen: its
+/// trigger `Go ▾` is narrower than the other titles.
+#[component]
+fn ChosenSelect() -> impl IntoElement {
+    view().flex_1().child(text("above")).child(
+        view().flex_row().child(
+            select()
+                .items(tags())
+                .default_value(SharedString::from("go"))
+                .accessibility_label("Tags")
+                .default_open(true),
+        ),
+    )
+}
+
+#[test]
+fn a_select_s_chosen_row_has_a_check_and_its_list_fits_the_widest_title() {
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(40, 20)).unwrap();
+    view.load(App::Rust(Root::new::<ChosenSelect>(|| ())))
+        .unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "Swift");
+    let (mark, chosen) = find(&terminal, "✓ Go")
+        .unwrap_or_else(|| panic!("the chosen row's check\n{}", dump(&terminal)));
+    let (swift, row) = find(&terminal, "Swift").unwrap();
+    assert_eq!(
+        swift,
+        mark + 2,
+        "the other titles after two spaces, in the chosen title's column\n{}",
+        dump(&terminal)
+    );
+    assert!(
+        row > chosen,
+        "Swift on a row of its own\n{}",
+        dump(&terminal)
+    );
+    let end = terminal.backend().buffer()[(swift + 5, row)]
+        .symbol()
+        .to_owned();
+    assert_eq!(
+        end,
+        "│",
+        "Swift whole, the frame right after the widest row\n{}",
+        dump(&terminal)
+    );
+}
+
+/// A box in an overlay over rows of page text it cuts across.
+#[component]
+fn OverWords() -> impl IntoElement {
+    let mut page = view().flex_1();
+    for _ in 0..6 {
+        page = page.child(text("alpha bravo charlie delta echo foxtrot"));
+    }
+    page.child(
+        overlay().left_0().right_0().top_0().child(
+            view()
+                .mt(px(32.0))
+                .ml(px(80.0))
+                .w(px(120.0))
+                .bg(nsh_core::color::rgb(0x333333))
+                .child(text("Box")),
+        ),
+    )
+}
+
+#[test]
+fn an_overlay_s_box_leaves_out_the_words_it_cuts_at_its_sides() {
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(40, 8)).unwrap();
+    view.load(App::Rust(Root::new::<OverWords>(|| ()))).unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "Box");
+    let (_, y) = find(&terminal, "Box").unwrap();
+    let buffer = terminal.backend().buffer();
+    let line: String = (0..40).map(|x| buffer[(x, y)].symbol()).collect();
+    let cells: Vec<&str> = (0..40).map(|x| buffer[(x, y)].symbol()).collect();
+    let first = cells.iter().position(|c| *c == "│").expect(&line) as u16;
+    let last = cells.iter().rposition(|c| *c == "│").expect(&line) as u16;
+    assert!(first > 0 && last + 1 < 40, "{line}");
+    for x in [first - 1, last + 1] {
+        assert_eq!(
+            buffer[(x, y)].symbol(),
+            " ",
+            "no half word on the frame: {line}"
+        );
+    }
+    assert!(
+        line.starts_with("alpha"),
+        "whole words before it stay: {line}"
     );
 }

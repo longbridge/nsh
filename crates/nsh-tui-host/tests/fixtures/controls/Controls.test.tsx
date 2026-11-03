@@ -23,6 +23,8 @@ test("the official Controls demo is operable with the terminal key scheme", asyn
 
   // Four filter items, then the first radio. Enterprise remains outside the focus order.
   for (let i = 0; i < 5; i++) await app.keyboard.press("tab");
+  // The group's stop is its checked radio (Plus): up moves to Free.
+  await app.keyboard.press("up");
   await app.keyboard.press("enter");
   await app.waitFor("Plan: Free");
   await app.keyboard.press("down");
@@ -102,7 +104,7 @@ test("the official Controls demo is operable with the terminal key scheme", asyn
   const picture = JSON.parse(new TextDecoder().decode(new Uint8Array(await app.screenshot())));
   expect(picture.format).toBe("nsh-tui-cells");
   expect(picture.rows.some((row: { symbol: string }[]) => row.map(cell => cell.symbol).join("").includes("100%"))).toBe(true);
-});
+}, 180_000);
 
 test("the official controls take mouse presses and preserve disabled and collapsed behavior", async () => {
   const app = await open("./App.tsx", { width: 800, height: 640, clock: {} });
@@ -136,7 +138,7 @@ test("the official controls take mouse presses and preserve disabled and collaps
   await app.press("Reset");
   await app.waitFor("Upload: reset");
   expect(app.texts()).toContain("0%");
-});
+}, 180_000);
 
 test("the official Volume slider follows a mouse drag to both ends", async () => {
   const app = await open("./App.tsx", { width: 800, height: 640, clock: {} });

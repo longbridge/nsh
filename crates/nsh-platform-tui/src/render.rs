@@ -378,7 +378,9 @@ impl Painter<'_> {
             ground.level = palette::step(filled, parent.level);
             ground.surface = match filled {
                 Surface::None => parent.surface,
-                Surface::Accent(rgb) if !control => ramp.tint_alpha(rgb, parent.level, fill.0 as u8),
+                Surface::Accent(rgb) if !control => {
+                    ramp.tint_alpha(rgb, parent.level, fill.0 as u8)
+                }
                 Surface::Accent(rgb) => ramp.tint(rgb, parent.level),
                 Surface::Raised | Surface::Sunken => ramp.level(ground.level),
             };
@@ -488,10 +490,36 @@ impl Painter<'_> {
         let mut title_at = None;
         if layer.overlay && surface && !visible.is_empty() {
             dialog::clear(self.buffer, visible);
+            // A word behind it that the box cuts at its sides (or the
+            // frame drawn a Cell around it) is left out whole: no half of
+            // it is glued to the frame.
+            let area = self.buffer.area;
+            let (left, right) = (i32::from(visible.x), i32::from(visible.right()));
+            let starts = [(left - 1, -1), (left - 2, -1), (right, 1), (right + 1, 1)];
+            let rows =
+                visible.y.saturating_sub(1)..visible.bottom().saturating_add(1).min(area.bottom());
+            for y in rows {
+                for (start, step) in starts {
+                    let mut column = start;
+                    while column >= i32::from(area.x) && column < i32::from(area.right()) {
+                        let at = self.buffer.index_of(column as u16, y);
+                        let word = self.text_cells[at]
+                            && self.buffer.content[at]
+                                .symbol()
+                                .chars()
+                                .any(|c| !c.is_whitespace());
+                        if !word {
+                            break;
+                        }
+                        self.buffer.content[at].set_symbol(" ");
+                        self.text_cells[at] = false;
+                        column += step;
+                    }
+                }
+            }
             // What was behind holds no text any more, under the box or its
             // frame a Cell around it: text drawn next to it is not cut
             // short by it (no `…` on the frame).
-            let area = self.buffer.area;
             let ring = Rect::new(
                 visible.x.saturating_sub(1),
                 visible.y.saturating_sub(1),
@@ -601,7 +629,15 @@ impl Painter<'_> {
             if let Some(canvas) = &view.canvas
                 && !inner_visible.is_empty()
             {
-                crate::canvas::draw(canvas, self.buffer, bounds, inner_visible, cells, ground);
+                crate::canvas::draw(
+                    canvas,
+                    self.buffer,
+                    &self.text_cells,
+                    bounds,
+                    inner_visible,
+                    cells,
+                    ground,
+                );
             }
             if let Some(component) = &mut view.component {
                 component.render(inner_visible, self.buffer);
@@ -1190,7 +1226,10 @@ fn text(
                 if text_cells[at] && start > i32::from(buffer.area.x) {
                     let before = buffer.index_of(start as u16 - 1, y);
                     if text_cells[before]
-                        && buffer.content[before].symbol().chars().any(char::is_alphanumeric)
+                        && buffer.content[before]
+                            .symbol()
+                            .chars()
+                            .any(char::is_alphanumeric)
                     {
                         buffer.content[before].set_symbol("…");
                     }

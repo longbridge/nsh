@@ -25128,7 +25128,10 @@ mod terminal_layout {
         ops.extend(text(9, 2, "c"));
         ops.extend(text(10, 2, "d"));
         let batch = laid_out(ops);
-        let at = |id| frame_of(&batch, id).map(|f| (f.origin.x.0, f.origin.y.0, f.size.width.0, f.size.height.0));
+        let at = |id| {
+            frame_of(&batch, id)
+                .map(|f| (f.origin.x.0, f.origin.y.0, f.size.width.0, f.size.height.0))
+        };
         assert_eq!(at(3), Some((0.0, 0.0, 160.0, 16.0)));
         assert_eq!(at(5), Some((160.0, 0.0, 80.0, 16.0)));
         assert_eq!(at(6), Some((0.0, 16.0, 80.0, 32.0)));
@@ -25164,7 +25167,11 @@ mod terminal_layout {
         ops.extend(view(
             4,
             3,
-            &[("position", V::Str("absolute")), ("left", V::Number(0.0)), ("top", V::Number(0.0))],
+            &[
+                ("position", V::Str("absolute")),
+                ("left", V::Number(0.0)),
+                ("top", V::Number(0.0)),
+            ],
         ));
         ops.extend(text(5, 4, "41.83"));
         ops.extend(view(10, 2, &[("marginRight", V::Number(58.0))]));
@@ -25174,14 +25181,24 @@ mod terminal_layout {
         let below = frame_of(&batch, 10).unwrap();
         assert_eq!(chart.size.width, px(400.0 - 16.0 - 56.0), "{chart:?}");
         assert_eq!(below.size.width, px(400.0 - 16.0 - 16.0), "{below:?}");
-        assert_eq!(below.origin.y, chart.origin.y + chart.size.height + px(16.0));
+        assert_eq!(
+            below.origin.y,
+            chart.origin.y + chart.size.height + px(16.0)
+        );
     }
 
     #[test]
     fn an_anchor_of_no_width_keeps_its_height_to_center_its_label_in() {
         // An axis's tick label: an absolute line of no width 64pt high
         // (four rows), its label centered in it by automatic margins.
-        let mut ops = view(2, ROOT_ID, &[("alignSelf", V::Str("stretch")), ("height", V::Number(96.0))]);
+        let mut ops = view(
+            2,
+            ROOT_ID,
+            &[
+                ("alignSelf", V::Str("stretch")),
+                ("height", V::Number(96.0)),
+            ],
+        );
         ops.extend(view(
             3,
             2,
@@ -25201,7 +25218,10 @@ mod terminal_layout {
         assert_eq!(frame_of(&batch, 3).map(|f| f.size.height), Some(px(64.0)));
         let label = frame_of(&batch, 5).unwrap();
         // Rows 1 or 2 of the four: centered, not at the anchor's top.
-        assert!(label.origin.y == px(16.0) || label.origin.y == px(32.0), "{label:?}");
+        assert!(
+            label.origin.y == px(16.0) || label.origin.y == px(32.0),
+            "{label:?}"
+        );
         assert_eq!(label.size.width, px(40.0), "{label:?}");
     }
 
@@ -25211,7 +25231,14 @@ mod terminal_layout {
         // the plot's right end, its window aligning the label to its end.
         // The label keeps its width and ends at the tick, inside the plot,
         // rather than being shrunk to `…` past it.
-        let mut ops = view(2, ROOT_ID, &[("alignSelf", V::Str("stretch")), ("height", V::Number(32.0))]);
+        let mut ops = view(
+            2,
+            ROOT_ID,
+            &[
+                ("alignSelf", V::Str("stretch")),
+                ("height", V::Number(32.0)),
+            ],
+        );
         ops.extend(view(
             3,
             2,
@@ -25233,7 +25260,14 @@ mod terminal_layout {
                 ("justifyContent", V::Str("flex-end")),
             ],
         ));
-        ops.extend(view(5, 4, &[("flexShrink", V::Number(0.0)), ("marginHorizontal", V::Str("auto"))]));
+        ops.extend(view(
+            5,
+            4,
+            &[
+                ("flexShrink", V::Number(0.0)),
+                ("marginHorizontal", V::Str("auto")),
+            ],
+        ));
         ops.extend(text(6, 5, "100.42"));
         let batch = laid_out(ops);
         let label = frame_of(&batch, 5).unwrap();
@@ -26593,13 +26627,24 @@ mod terminal_layout {
                     ("paddingHorizontal", V::Number(24.0)),
                 ],
             ));
-            ops.extend(text(id + 2, id, "Capture ideas the moment they arrive, from any device."));
+            ops.extend(text(
+                id + 2,
+                id,
+                "Capture ideas the moment they arrive, from any device.",
+            ));
         }
         let batch = laid_out(ops);
-        assert_eq!(frame_of(&batch, 4).map(|f| f.size.width), Some(Points(240.0)));
+        assert_eq!(
+            frame_of(&batch, 4).map(|f| f.size.width),
+            Some(Points(240.0))
+        );
         for (i, id) in [6, 10, 14].into_iter().enumerate() {
             let f = frame_of(&batch, id).unwrap();
-            assert_eq!((f.origin.x, f.size.width), (Points(240.0 * i as f32), Points(240.0)), "slide {id}");
+            assert_eq!(
+                (f.origin.x, f.size.width),
+                (Points(240.0 * i as f32), Points(240.0)),
+                "slide {id}"
+            );
         }
     }
 
@@ -26608,15 +26653,198 @@ mod terminal_layout {
         let mut ops = view(2, ROOT_ID, &[("width", V::Number(240.0))]);
         ops.extend(node(4, Tag::Scroll, 2, &[("height", V::Number(32.0))]));
         for id in [6, 10, 14] {
-            ops.extend(view(id, 4, &[("height", V::Str("100%")), ("justifyContent", V::Str("center"))]));
+            ops.extend(view(
+                id,
+                4,
+                &[
+                    ("height", V::Str("100%")),
+                    ("justifyContent", V::Str("center")),
+                ],
+            ));
             ops.extend(text(id + 2, id, "A line"));
         }
         let batch = laid_out(ops);
-        assert_eq!(frame_of(&batch, 4).map(|f| f.size.height), Some(Points(32.0)));
+        assert_eq!(
+            frame_of(&batch, 4).map(|f| f.size.height),
+            Some(Points(32.0))
+        );
         for (i, id) in [6, 10, 14].into_iter().enumerate() {
             let f = frame_of(&batch, id).unwrap();
-            assert_eq!((f.origin.y, f.size.height), (Points(32.0 * i as f32), Points(32.0)), "slide {id}");
+            assert_eq!(
+                (f.origin.y, f.size.height),
+                (Points(32.0 * i as f32), Points(32.0)),
+                "slide {id}"
+            );
         }
+    }
+
+    /// A Rust component whose root is a horizontal scroll view holding
+    /// its JSX children (a carousel's content).
+    #[derive(Clone, Copy, PartialEq, crate::element::Props)]
+    struct StripProps {
+        children: crate::element::Children,
+    }
+
+    #[crate::prelude::component]
+    fn Strip(props: StripProps) -> impl crate::prelude::IntoElement {
+        use crate::prelude::*;
+        crate::element::scroll().horizontal().child(props.children)
+    }
+
+    #[test]
+    fn a_component_s_scroll_view_root_lays_its_slides_out_as_a_scroll_view() {
+        // The host becomes the scroll view when it expands: its slides of
+        // its full width are one viewport each, as a scroll view's.
+        let mut c = core();
+        terminal(&mut c, true);
+        let mut registry = crate::element::Registry::new();
+        registry.register::<Strip>();
+        c.set_components(registry);
+        let mut ops = view(2, ROOT_ID, &[("width", V::Number(240.0))]);
+        ops.extend([
+            Op::Create {
+                id: 4,
+                tag: Tag::View,
+            },
+            Op::SetProp {
+                id: 4,
+                prop: Prop::Component(std::any::type_name::<Strip>().into()),
+            },
+            style_op(4, &[("height", V::Number(96.0))]),
+            Op::Insert {
+                parent: 2,
+                child: 4,
+                before: None,
+            },
+        ]);
+        for id in [6, 10, 14] {
+            ops.extend(view(
+                id,
+                4,
+                &[("width", V::Str("100%")), ("flexShrink", V::Number(0.0))],
+            ));
+            ops.extend(text(
+                id + 2,
+                id,
+                "Capture ideas the moment they arrive, from any device.",
+            ));
+        }
+        apply(&mut c, ops);
+        let batch = c.commit().unwrap();
+        assert_eq!(
+            frame_of(&batch, 4).map(|f| f.size.width),
+            Some(Points(240.0))
+        );
+        for (i, id) in [6, 10, 14].into_iter().enumerate() {
+            let f = frame_of(&batch, id).unwrap();
+            assert_eq!(
+                (f.origin.x, f.size.width),
+                (Points(240.0 * i as f32), Points(240.0)),
+                "slide {id}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_text_breaks_its_lines_within_its_maximum_width() {
+        // A centered paragraph of 54 characters, at most 320pt (40
+        // columns) wide in a 400pt column: two rows, and its column as
+        // tall.
+        let mut ops = view(
+            2,
+            ROOT_ID,
+            &[
+                ("width", V::Number(400.0)),
+                ("alignItems", V::Str("center")),
+            ],
+        );
+        ops.extend(text(
+            6,
+            2,
+            "Capture ideas the moment they arrive, from any device.",
+        ));
+        ops.push(style_op(6, &[("maxWidth", V::Number(320.0))]));
+        let batch = laid_out(ops);
+        let f = frame_of(&batch, 6).unwrap();
+        assert_eq!((f.size.width, f.size.height), (Points(320.0), Points(32.0)));
+        assert_eq!(
+            frame_of(&batch, 2).map(|f| f.size.height),
+            Some(Points(32.0))
+        );
+    }
+
+    #[test]
+    fn a_wrapping_row_breaks_its_lines_at_its_fills_bases() {
+        // Six tiles `flexGrow: 1` at `flexBasis: 28%` in a 320pt (40
+        // columns) row that wraps: three on a line, as CSS's, each a
+        // third of it, not six squeezed into one.
+        let mut ops = view(
+            2,
+            ROOT_ID,
+            &[
+                ("width", V::Number(320.0)),
+                ("flexDirection", V::Str("row")),
+                ("flexWrap", V::Str("wrap")),
+                ("gap", V::Number(8.0)),
+            ],
+        );
+        let tiles = [4, 8, 12, 16, 20, 24];
+        for id in tiles {
+            ops.extend(view(
+                id,
+                2,
+                &[("flexGrow", V::Number(1.0)), ("flexBasis", V::Str("28%"))],
+            ));
+            ops.extend(text(id + 2, id, "Interview"));
+        }
+        let batch = laid_out(ops);
+        let frames: Vec<_> = tiles
+            .iter()
+            .map(|&id| frame_of(&batch, id).unwrap())
+            .collect();
+        let (first, second) = (frames[0].origin.y, frames[3].origin.y);
+        assert!(second > first, "{frames:?}");
+        for (i, f) in frames.iter().enumerate() {
+            assert_eq!(
+                f.origin.y,
+                if i < 3 { first } else { second },
+                "tile {i}: {frames:?}"
+            );
+            // A third of the line less its gaps: 12 or 13 columns.
+            assert!(f.size.width >= Points(96.0), "tile {i}: {frames:?}");
+        }
+    }
+
+    #[test]
+    fn a_splitter_pinned_on_a_box_s_edge_takes_its_cell_out_of_the_content() {
+        // A column header: its title right-aligned, its resize handle (a
+        // `col-resize` band, absolute at `right: 0`) one Cell over its
+        // end: the title ends before it, whole.
+        let mut ops = view(
+            2,
+            ROOT_ID,
+            &[
+                ("width", V::Number(96.0)),
+                ("flexDirection", V::Str("row")),
+                ("justifyContent", V::Str("flex-end")),
+            ],
+        );
+        ops.extend(text(4, 2, "Price"));
+        ops.extend(view(
+            6,
+            2,
+            &[
+                ("position", V::Str("absolute")),
+                ("top", V::Number(0.0)),
+                ("bottom", V::Number(0.0)),
+                ("right", V::Number(0.0)),
+                ("width", V::Number(8.0)),
+                ("cursor", V::Str("col-resize")),
+            ],
+        ));
+        let batch = laid_out(ops);
+        assert_eq!(frame_of(&batch, 4), Some(rect(48.0, 0.0, 40.0, 16.0)));
+        assert_eq!(frame_of(&batch, 6).map(|f| f.origin.x), Some(Points(88.0)));
     }
 
     #[test]

@@ -411,8 +411,8 @@ impl Ramp {
     /// several strengths stay apart.
     pub(crate) fn tint_alpha(&self, rgb: Rgb, level: usize, alpha: u8) -> Color {
         let alpha = f32::from(alpha) / 255.0;
-        let share = TINT_SHARE
-            + (SOLID_TINT_SHARE - TINT_SHARE) * ((alpha - 0.25) / 0.75).clamp(0.0, 1.0);
+        let share =
+            TINT_SHARE + (SOLID_TINT_SHARE - TINT_SHARE) * ((alpha - 0.25) / 0.75).clamp(0.0, 1.0);
         let under = self.mix(LADDER[level.min(LADDER.len() - 1)]);
         convert(mix(under, rgb, share), self.depth)
     }
@@ -835,10 +835,16 @@ mod tests {
         assert_eq!(ramp.muted(), Color::Rgb(124, 124, 124));
         assert_eq!(ramp.faint(), Color::Rgb(94, 94, 94));
         assert_eq!(ramp.tint([59, 130, 246], 0), Color::Rgb(31, 45, 68));
-        assert_eq!(ramp.tint_alpha([59, 130, 246], 0, 51), ramp.tint([59, 130, 246], 0));
+        assert_eq!(
+            ramp.tint_alpha([59, 130, 246], 0, 51),
+            ramp.tint([59, 130, 246], 0)
+        );
         let half = ramp.tint_alpha([59, 130, 246], 0, 128);
         let solid = ramp.tint_alpha([59, 130, 246], 0, 255);
-        assert!(half != ramp.tint([59, 130, 246], 0) && half != solid, "washes stay apart");
+        assert!(
+            half != ramp.tint([59, 130, 246], 0) && half != solid,
+            "washes stay apart"
+        );
         assert_eq!(
             ramp.fade(Color::Rgb(224, 0, 0), true),
             Color::Rgb(124, 12, 12)

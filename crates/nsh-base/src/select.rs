@@ -409,9 +409,9 @@ enum Opening {
 /// In a terminal the select shows the terminal's own trigger in place of
 /// the app's `trigger`: the chosen title (titles, comma separated), then
 /// ` ▾`, one row; with `cleanable` a ` ×` after it clears the value, in
-/// place of `clearButton`. The list's rows are the items' titles, one
-/// full-width row each, which the terminal marks while highlighted or
-/// chosen (no `renderItem`, `renderGroup` or row classes there)
+/// place of `clearButton`. The list's rows are the items' titles, after
+/// `✓ ` while chosen, one full-width row each, which the terminal marks
+/// while highlighted (no `renderItem`, `renderGroup` or row classes there)
 /// ([`crate::terminal`]).
 #[component]
 pub fn Select(props: SelectProps, cx: Scope<SelectEvent>) -> impl IntoElement {

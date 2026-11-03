@@ -2694,6 +2694,9 @@ impl<M: TextEngine> Core<M> {
         self.layout.set_node_context(layout, leaf_context(kind));
         let style = self.layout.style(layout).clone();
         self.became(key, style);
+        // What a terminal's layout takes from its kind (a scroll view's
+        // unbounded content), as if it had been made one.
+        self.sync_grid_role(key);
         if let Some((parent, before)) = at {
             let _ = self.insert(parent, id, before);
         }
