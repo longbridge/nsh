@@ -3,7 +3,8 @@
 //! closed, it stays with its ending look for as long as its transitions
 //! then run, and `onClose` comes after; opened again on its way out it is
 //! taken back; with reduced motion, or no ending look, it goes at once and
-//! nothing more is sent. On a manual clock: time moves only as the test
+//! nothing more is sent. A tooltip's `delay` of `Infinity` never ends and
+//! one of `NaN` is none. On a manual clock: time moves only as the test
 //! says.
 
 use std::{
@@ -396,4 +397,63 @@ fn a_tooltip_stays_with_its_ending_look_until_its_exit_ran() {
     app.app.run_for(Duration::from_millis(150)).unwrap();
     assert!(!app.app.shows("Tip"));
     app.app.wait_for("Closed: true").unwrap();
+}
+
+#[derive(Clone, PartialEq, Props)]
+struct DelayProps {
+    /// The tooltip's `delay`.
+    delay: f64,
+}
+
+/// A trigger whose tooltip shows after `delay`, and a place away from it.
+#[component]
+fn DelayScreen(props: DelayProps) -> impl IntoElement {
+    view()
+        .pt(px(100.0))
+        .pl(px(40.0))
+        .child(
+            view()
+                .test_id("trigger")
+                .w(px(80.0))
+                .h(px(30.0))
+                .tooltip(tooltip().delay(props.delay).child(text("Tip")))
+                .child(text("Trigger")),
+        )
+        .child(view().test_id("away").h(px(200.0)).child(text("Away")))
+}
+
+fn delay_app(delay: f64) -> App {
+    start(
+        Root::new::<DelayScreen>(move || DelayProps { delay }),
+        false,
+    )
+}
+
+#[test]
+fn a_tooltip_delay_of_infinity_never_shows_it() {
+    let mut app = delay_app(f64::INFINITY);
+    app.app.hover("id:trigger").unwrap();
+    app.app.run_for(Duration::from_secs(10)).unwrap();
+    assert!(!app.app.shows("Tip"));
+    app.app.hover("id:away").unwrap();
+    app.app.run_for(Duration::from_millis(50)).unwrap();
+    assert!(!app.app.shows("Tip"));
+}
+
+#[test]
+fn a_tooltip_delay_of_nan_is_none() {
+    let mut app = delay_app(f64::NAN);
+    app.app.hover("id:trigger").unwrap();
+    app.app.run_for(Duration::from_millis(20)).unwrap();
+    assert!(app.app.shows("Tip"), "shown at once");
+}
+
+#[test]
+fn a_tooltip_shows_once_the_pointer_rested_for_its_delay() {
+    let mut app = delay_app(300.0);
+    app.app.hover("id:trigger").unwrap();
+    app.app.run_for(Duration::from_millis(250)).unwrap();
+    assert!(!app.app.shows("Tip"), "not before 300 ms");
+    app.app.run_for(Duration::from_millis(100)).unwrap();
+    assert!(app.app.shows("Tip"));
 }

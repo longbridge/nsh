@@ -131,7 +131,8 @@ view.load(Bundle::source(code).into());
 ```
 
 The view is a child window: your message loop runs it, and you place it with `MoveWindow` on its `hwnd()` when the
-parent resizes. `AppView::load` replaces whatever ran; `stop` (or destroying the window) ends the app. `asset_base`
+parent resizes. Make it on the thread of the window it is in: its lifecycle follows that window's top-level
+window, the one it was made under. `AppView::load` replaces whatever ran; `stop` (or destroying the window) ends the app. `asset_base`
 tells it where `asset:/` URIs resolve (`AssetBase::Directory` or `AssetBase::Http`). Bytecode bundles (`bundle.nshc`)
 load with `unsafe { Bundle::bytecode(bytes) }` (or `Bundle::read_trusted(path)`, unsafe too): QuickJS bytecode is trusted input, so
 only load it from your own app's files. A standalone window is `nsh_platform_windows::run_app(source, options)`, with

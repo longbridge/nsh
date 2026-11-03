@@ -9,13 +9,13 @@ demo: el-select
 
 选择框从一组条目中选出一个值：一项设置、一个筛选条件、一个国家、一个时区。应用提供的触发元素打开列表，并按每种设备的习惯呈现：
 
-- 在桌面平台和桌面浏览器中，它是触发元素处的弹出层，至少与触发元素一样宽，高度随行数增长，最多占满触发元素旁边的空间；键盘可以在条目间移动并选中一个。
+- 在桌面平台和桌面浏览器中，它是盖在触发元素上的弹出层，已选的行正好叠在触发元素上，所以已选的标题停在原处（shadcn/ui 的 `item-aligned` 定位），与触发元素一样宽（应用的 `popupStyle` / `popupClass` 设置宽度时用它的，和 `gpui-component` 的 `menu_width` 一样），高度随行数增长，最多占满屏幕上的空间；没有已选条目时它在触发元素下方打开。键盘可以在条目间移动并选中一个。
 - 在手机和平板上，它是屏幕底部、覆盖在背景层之上的 sheet。
 
 选择框负责行为：值（应用持有的，或它自己保存的）、打开状态、键盘、输入跳转、搜索、分组、高亮的行以及屏幕阅读器听到的内容。外观由应用决定：应用为触发元素、弹出层、列表、行、分组标题和搜索框设置样式，或者自己绘制行。
 
 ```rust tabs
-use nsh_base::{SelectItem, SelectItemState, select, theme};
+use nsh_base::{SelectEntry, SelectItem, select, theme};
 use nsh_core::prelude::*;
 
 const FRUITS: [(&str, &str); 5] = [
@@ -56,7 +56,7 @@ fn fruit_select() -> impl IntoElement {
                 .text_color(move || theme().popover_foreground)
                 .shadow_md()
         })
-        .item_style(|s| s.rounded_md().overflow_hidden())
+        .item_class("rounded-md focus:bg-accent selected:font-medium disabled:opacity-50")
         .trigger(
             view()
                 .h_9()
@@ -72,17 +72,13 @@ fn fruit_select() -> impl IntoElement {
                 .child(text(title))
                 .child(text("▾").text_color(move || theme().muted_foreground)),
         )
-        .render_item(|item: &SelectItemState| {
+        .render_item(|item: &SelectEntry| {
             view()
                 .flex_row()
                 .items_center()
-                .justify_between()
                 .px_2()
                 .py_1p5()
-                .when(item.highlighted, |v| v.bg(move || theme().accent))
-                .when(item.disabled, |v| v.opacity(0.5))
                 .child(text(item.title.clone()).text_sm())
-                .when(item.selected, |v| v.child(text("✓").text_sm()))
         })
 }
 ```
@@ -169,7 +165,7 @@ mount(App);
 />
 ```
 
-触发元素是应用自己的元素，所以它可以按应用的需要显示选中的条目：标题、图标，或者在没有选中时显示占位文字。在 TSX 中，触发元素就是你传入的元素：它本身就是组合框，按压、键盘焦点、展开状态和 `disabled` 都在它自己身上，所以它自己的 `active:`、`focus:` 和 `disabled:` 类会跟随选择框，它自己的 `onPress` 也照常运行；列表相对它放置，并且至少与它一样宽。
+触发元素是应用自己的元素，所以它可以按应用的需要显示选中的条目：标题、图标，或者在没有选中时显示占位文字。在 TSX 中，触发元素就是你传入的元素：它本身就是组合框，按压、键盘焦点、展开状态和 `disabled` 都在它自己身上，所以它自己的 `active:`、`focus:` 和 `disabled:` 类会跟随选择框，它自己的 `onPress` 也照常运行；列表相对它放置，并且与它一样宽。
 
 <a id="open-state"></a>
 
@@ -200,16 +196,16 @@ mount(App);
 
 ## 应用绘制的行
 
-`itemClass` 为每个条目的行设置样式，行中显示条目的标题，提供 `renderItem` 时改由它绘制：`focus:` 作用于高亮的行（按键或指针所在的行），`selected:` 作用于选中的行，`disabled:` 作用于禁用的行。要自己绘制行，传入 `renderItem`：它收到条目及其状态（[`SelectItemState`](#types)），返回行的内容，只为可见的行调用。`renderGroup` 以同样的方式绘制分组标题：
+`itemClass` 为每个条目的行设置样式，行中显示条目的标题，提供 `renderItem` 时改由它绘制：`focus:` 作用于高亮的行（按键或指针所在的行），`selected:` 作用于选中的行，`disabled:` 作用于禁用的行。要自己绘制行，传入 `renderItem`：它收到条目本身（[`SelectEntry`](#types)），返回行的内容，只为可见的行调用。它从不收到行的状态：在 `itemClass` 里加上 `group`，内容就用 `group-focus:`、`group-selected:`、`group-disabled:` 类跟随行的状态，所以每个条目只绘制一次，高亮移动或选中时不再重新绘制。`renderGroup` 以同样的方式绘制分组标题：
 
 ```tsx
 <Select
   items={fonts}
-  itemClass="rounded-md focus:bg-accent"
+  itemClass="group rounded-md focus:bg-accent disabled:opacity-50"
   renderItem={(item) => (
     <View class="flex-row items-center gap-2 px-2 py-1.5">
       <Text class="flex-1 text-sm" style={{ fontFamily: item.value }}>{item.title}</Text>
-      <Text class="w-4 text-right text-sm">{item.selected ? "✓" : ""}</Text>
+      <Text class="w-4 text-right text-sm opacity-0 group-selected:opacity-100">✓</Text>
     </View>
   )}
   renderGroup={(group) => <Text class="px-2 pt-2 text-xs font-medium text-muted-foreground">{group.title}</Text>}
@@ -248,7 +244,7 @@ mount(App);
 | `clearButtonAccessibilityLabel` | `.clear_button_accessibility_label(..)` | `string` | 无 | 屏幕阅读器对清除按钮的称呼。 |
 | `trigger` | `.trigger(..)` | `JSX.Element` | 无 | 按下时打开列表的元素；列表依它定位。 |
 | `empty` | `.empty(..)` | `JSX.Element` | 无 | 没有任何条目显示时（搜索没有匹配项）列表显示的内容。 |
-| `renderItem` | `.render_item(..)` | `(item: SelectItemState) => JSX.Element` | 无 | 由应用绘制的条目行；不提供时显示条目的标题。 |
+| `renderItem` | `.render_item(..)` | `(item: SelectEntry) => JSX.Element` | 无 | 由应用根据条目本身绘制的条目行（状态是行的类）；不提供时显示条目的标题。 |
 | `renderGroup` | `.render_group(..)` | `(group: SelectGroup) => JSX.Element` | 无 | 由应用绘制的分组标题；不提供时显示分组名称。 |
 | `class`、`style` | 样式方法 | `string`、`StyleProp<ViewStyle>` | 无 | 触发元素外面的视图。 |
 
@@ -273,10 +269,10 @@ mount(App);
 | 类型 | 成员 | 说明 |
 |---|---|---|
 | `SelectItem` | `value: string`、`title: string`、`disabled?: boolean`、`group?: string` | `items` 中的一个条目。 |
-| `SelectItemState` | `value`、`title`、`disabled`、`group?`（条目的）、`selected: boolean`、`highlighted: boolean`、`index: number` | `renderItem` 收到的内容：条目本身、它是否是选中的条目、按键或指针是否在它上面（Return 或按压会选中它），以及它在 `items` 中的序号。 |
+| `SelectEntry` | `value`、`title`、`disabled`、`group?`（条目的）、`index: number` | `renderItem` 收到的内容：条目本身和它在 `items` 中的序号，从不包含状态（状态是行的 `focus:`、`selected:` 和 `disabled:`）。 |
 | `SelectGroup` | `title: string` | `renderGroup` 收到的内容：分组的 `group`。 |
 
-在 Rust 中它们是 `nsh_base::SelectItem`、`SelectItemState` 和 `SelectGroup`；`value` 是 `SelectValue`（一个值为 `Controlled(Some(..))`，`null` 为 `Controlled(None)`），`.value(..)` 可以从 `Option<SharedString>` 或字符串创建它。
+在 Rust 中它们是 `nsh_base::SelectItem`、`SelectEntry` 和 `SelectGroup`；`value` 是 `SelectValue`（一个值为 `Controlled(Some(..))`，`null` 为 `Controlled(None)`），`.value(..)` 可以从 `Option<SharedString>` 或字符串创建它。
 
 <a id="parts"></a>
 
@@ -291,7 +287,7 @@ mount(App);
 | 搜索框 | 弹出层中的第一个（`searchable`） | `searchClass`、`searchStyle`、`searchPlaceholder` |
 | 列表 | 弹出层中，搜索框之后 | `listClass`、`listStyle` |
 | 分组标题 | 列表中，分组的条目之前 | `groupClass`、`groupStyle`、`renderGroup` |
-| 条目的行 | 列表中 | `itemClass`、`itemStyle`、`renderItem` |
+| 条目的行 | 列表中 | `itemClass`、`itemStyle`、`renderItem`（其中用 `group-focus:`、`group-selected:`、`group-disabled:`，`itemClass` 里加 `group`） |
 | 空状态 | 弹出层中，没有条目显示时 | 它自己的元素（`empty`） |
 
 弹出层是一列：它的高度随搜索框和各行变化，所以在 `popupClass` 上加 `max-h-*` 可以限制它的高度，列表在其中滚动。
@@ -320,7 +316,7 @@ mount(App);
 
 | | 桌面平台和桌面浏览器 | 手机和平板 |
 | --- | --- | --- |
-| 列表 | 触发元素处的弹出层（`placement`、`align`、`offset`、`margin`），至少与触发元素一样宽，高度随行数增长，最多占满触发元素旁边的空间 | 屏幕底部、覆盖在背景层之上的 sheet，高度随行数增长，最高到状态栏 |
+| 列表 | 盖在触发元素上的弹出层，已选的行在它上面（没有已选条目时在它下方），与触发元素一样宽，除非 `popupStyle` 设置了宽度，高度随行数增长，最多占满屏幕上的空间 | 屏幕底部、覆盖在背景层之上的 sheet，高度随行数增长，最高到状态栏 |
 | 关闭 | 一次选择、Escape、外部按压（按压继续作用于指针下的元素） | 一次选择、背景层、Android 返回键 |
 | 搜索 | 列表打开时搜索框获得键盘焦点 | 按下搜索框时键盘弹出 |
 | 选择 | 鼠标键按下时就选中，搜索框保持键盘焦点 | 轻点 |
