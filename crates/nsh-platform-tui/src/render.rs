@@ -505,7 +505,10 @@ impl Painter<'_> {
             // frame drawn a Cell around it) is left out whole: no half of
             // it is glued to the frame. A longer run (a URL, a path) would
             // leave nothing of itself: it keeps what shows, ending in `…`
-            // by the frame.
+            // by the frame. Only the overlay's outer box meets the page:
+            // a surface inside it (a tooltip's avatar chip) stands on the
+            // overlay's own content, which it never cuts.
+            let outer = !layer.boxed;
             let area = self.buffer.area;
             let (left, right) = (i32::from(visible.x), i32::from(visible.right()));
             let rows =
@@ -520,7 +523,7 @@ impl Painter<'_> {
                             .any(|c| !c.is_whitespace())
                 }
             };
-            for y in rows {
+            for y in rows.filter(|_| outer) {
                 // The frame's Cell, else the one beyond it (a word touching
                 // the frame).
                 for (frame, step) in [(left - 1, -1), (right, 1)] {
@@ -562,7 +565,7 @@ impl Painter<'_> {
                 visible.width + 2,
                 visible.height + 2,
             )
-            .intersection(area);
+            .intersection(if outer { area } else { Rect::default() });
             for y in ring.y..ring.bottom() {
                 for x in ring.x..ring.right() {
                     let at = self.buffer.index_of(x, y);

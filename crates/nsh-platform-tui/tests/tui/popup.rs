@@ -834,3 +834,37 @@ fn an_overlay_s_box_keeps_the_shown_part_of_a_long_run_it_cuts_with_an_ellipsis(
         "the part after the box stays: {line}"
     );
 }
+
+/// An overlay whose box holds a filled chip before a name (a tooltip's
+/// avatar and reviewer).
+#[component]
+fn ChipInOverlay() -> impl IntoElement {
+    view().flex_1().child(text("page")).child(
+        overlay().left_0().right_0().top_0().child(
+            view().mt(px(32.0)).flex_row().justify_center().child(
+                view()
+                    .bg(nsh_core::color::rgb(0x333333))
+                    .flex_row()
+                    .child(
+                        view()
+                            .bg(nsh_core::color::rgb(0x555555))
+                            .child(text("MC")),
+                    )
+                    .child(text(" Mira Chen")),
+            ),
+        ),
+    )
+}
+
+#[test]
+fn a_surface_inside_an_overlay_cuts_no_word_of_the_overlay_s_own() {
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(40, 8)).unwrap();
+    view.load(App::Rust(Root::new::<ChipInOverlay>(|| ())))
+        .unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "Chen");
+    let (_, y) = find(&terminal, "Chen").unwrap();
+    let buffer = terminal.backend().buffer();
+    let line: String = (0..40).map(|x| buffer[(x, y)].symbol()).collect();
+    assert!(line.contains("MC Mira Chen"), "the name stays whole: {line}");
+}
