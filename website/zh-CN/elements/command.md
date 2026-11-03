@@ -62,6 +62,7 @@ function App() {
       items={commands}
       placeholder="Type a command or search…"
       accessibilityLabel="Commands"
+      searchAccessibilityLabel="Search commands"
       autoFocus
       onSelect={({ id }) => chosen.set(id)}
       class="w-96 overflow-hidden rounded-lg border border-border bg-popover"
@@ -116,7 +117,8 @@ mount(App);
 | `placeholder` | `.placeholder(..)` | `string` | 无 | 搜索框的占位文字。 |
 | `autoFocus` | `.auto_focus(..)` | `boolean` | `false` | 搜索框显示后获得键盘焦点：打开即可输入的面板。 |
 | `separator` | `.separator(..)` | `boolean` | `true` | 在两个显示出来的分区之间放一个分隔行，样式由 `separatorClass` 设置；不会出现在开头、结尾，也不会连续出现。 |
-| `accessibilityLabel` | `.accessibility_label(..)` | `string` | 无 | 屏幕阅读器对搜索框和列表的称呼（"Commands"）。 |
+| `accessibilityLabel` | `.accessibility_label(..)` | `string` | 无 | 屏幕阅读器对列表的称呼（"Commands"）；未设置 `searchAccessibilityLabel` 时也是搜索框的称呼。 |
+| `searchAccessibilityLabel` | `.search_accessibility_label(..)` | `string` | `accessibilityLabel` | 屏幕阅读器对搜索框的称呼：它搜索的是什么（"Search commands"）。 |
 | `header`、`footer` | `.header(..)`、`.footer(..)` | `JSX.Element` | 无 | 显示在搜索框上方（标题）和行下方（按键提示、计数）的内容。 |
 | `empty` | `.empty(..)` | `JSX.Element` | 无 | 没有任何项目显示时的内容：查询词没有匹配，或没有项目。 |
 | `searchPrefix`、`searchSuffix` | `.search_prefix(..)`、`.search_suffix(..)` | `JSX.Element` | 无 | 搜索栏里搜索框前后的内容：搜索图标、`loading` 时的加载指示。 |
@@ -213,6 +215,7 @@ keymap.bind("mod+k", () => open.set(!open()));
 ## 无障碍
 
 - 列表的角色是 `"listbox"`，名称来自 `accessibilityLabel`；每一行是一个 `"option"`，名称是项目的标签，勾选和禁用状态与项目一致；分区标题是 `"header"`，分隔行对屏幕阅读器隐藏。
+- 搜索框是一个文本框，名称来自 `searchAccessibilityLabel`（未设置时为 `accessibilityLabel`）；占位文字是它为空时显示的提示。
 - 方向键移动高亮时键盘焦点留在搜索框里，屏幕阅读器读出高亮项的标签。没有搜索框时，高亮的行获得屏幕阅读器的焦点。
 - `loading` 期间列表处于忙碌状态。
 

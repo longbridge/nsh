@@ -37,7 +37,8 @@ use nsh_core::{
 use objc2::{
     AnyThread, DefinedClass, MainThreadMarker, MainThreadOnly, Message, define_class, msg_send,
     rc::Retained,
-    runtime::{AnyObject, ProtocolObject},
+    runtime::{AnyObject, ProtocolObject, Sel},
+    sel,
 };
 use objc2_app_kit::{
     NSDragOperation, NSDraggingDestination, NSDraggingInfo, NSEvent, NSEventType, NSResponder,
@@ -697,6 +698,29 @@ define_class!(
             if !handled {
                 // SAFETY: NSResponder's own handling (beeps at the end).
                 unsafe { msg_send![super(self), keyDown: event] }
+            }
+        }
+
+        // `AXPress`: what accessibility clients press a button with.
+        #[unsafe(method(accessibilityPerformPress))]
+        fn accessibility_perform_press(&self) -> bool {
+            self.keyboard_surface().is_some_and(|surface| {
+                crate::input::accessibility_press(&surface, &NshView(self.retain()))
+            })
+        }
+
+        // AppKit offers `AXPress` on every view that implements it: only
+        // on the views it presses.
+        #[unsafe(method(isAccessibilitySelectorAllowed:))]
+        fn is_accessibility_selector_allowed(&self, selector: Sel) -> bool {
+            if selector == sel!(accessibilityPerformPress) {
+                self.ivars().state.try_borrow().is_ok()
+                    && self.keyboard_surface().is_some_and(|surface| {
+                        crate::input::takes_accessibility_press(&surface, &NshView(self.retain()))
+                    })
+            } else {
+                // SAFETY: NSView's own answer.
+                unsafe { msg_send![super(self), isAccessibilitySelectorAllowed: selector] }
             }
         }
 

@@ -140,8 +140,10 @@ impl std::fmt::Debug for FontFamily {
     }
 }
 
-/// A family of a `fontFamily` list ([`font_families`]).
+/// A family of a `fontFamily` list ([`font_families`]). More generic
+/// families (`cursive`, `fantasy`) may be added: match with a `_` arm.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum FamilyName<'a> {
     /// The system font: `system-ui`, `sans-serif`, `ui-sans-serif`,
     /// `-apple-system`, `BlinkMacSystemFont`.

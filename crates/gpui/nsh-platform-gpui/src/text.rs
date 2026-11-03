@@ -201,18 +201,15 @@ const FANTASY: &[&str] = &["Impact", "Papyrus"];
 /// comma-separated stack, CSS generic names and Apple's font names as fonts
 /// this platform has; `""` is the UI font.
 fn family_candidates(name: &str) -> Vec<&str> {
+    use nsh_core::FamilyName;
     let mut out = Vec::new();
-    for family in name.split(',') {
-        let family = family.trim().trim_matches(|c| c == '"' || c == '\'');
+    for family in nsh_core::font_families(name) {
         match family {
-            "" => {}
-            "system-ui" | "-apple-system" | "BlinkMacSystemFont" | "ui-sans-serif"
-            | "ui-rounded" | "sans-serif" => out.push(""),
-            "ui-monospace" | "monospace" => out.extend_from_slice(MONOSPACE),
-            "ui-serif" | "serif" => out.extend_from_slice(SERIF),
-            "cursive" => out.extend_from_slice(CURSIVE),
-            "fantasy" => out.extend_from_slice(FANTASY),
-            f => {
+            FamilyName::Monospace => out.extend_from_slice(MONOSPACE),
+            FamilyName::Serif => out.extend_from_slice(SERIF),
+            FamilyName::Named("cursive") => out.extend_from_slice(CURSIVE),
+            FamilyName::Named("fantasy") => out.extend_from_slice(FANTASY),
+            FamilyName::Named(f) => {
                 out.push(f);
                 // What apps written for Apple platforms name, as what
                 // this platform has (when it lacks the font itself).
@@ -223,6 +220,8 @@ fn family_candidates(name: &str) -> Vec<&str> {
                     _ => &[],
                 });
             }
+            // The system font, and its rounded design (which GPUI lacks).
+            _ => out.push(""),
         }
     }
     if out.is_empty() {
@@ -3171,6 +3170,12 @@ mod tests {
         assert_eq!(stack[0], "Fira Code");
         assert_eq!(&stack[1..], MONOSPACE);
         assert_eq!(&family_candidates("Menlo")[1..], MONOSPACE);
+        // A quoted name runs to its closing quote, commas and all, and is
+        // never a generic family.
+        assert_eq!(
+            family_candidates("'ACME, Inc', \"serif\""),
+            ["ACME, Inc", "serif"]
+        );
     }
 
     #[test]
@@ -3965,6 +3970,22 @@ mod tests {
         let list = fallbacks.fallback_list();
         assert!(!list.iter().any(|f| f == "Pacifico"), "{list:?}");
         assert!(!list.is_empty());
+
+        // The list's second installed family is the first fallback.
+        let names = system().all_font_names();
+        let Some(other) = names.iter().find(|n| *n != "Pacifico" && !n.contains(',')) else {
+            return;
+        };
+        let listed = ResolvedTextStyle {
+            font_family: Some(nsh_core::FontFamily::new(&format!(
+                "No Such Family, Pacifico, \"{other}\", monospace"
+            ))),
+            ..style
+        };
+        let font = engine.font(&listed);
+        assert_eq!(&*font.family, "Pacifico");
+        let list = font.fallbacks.expect("fallbacks").fallback_list().to_vec();
+        assert_eq!(list.first(), Some(other), "{list:?}");
     }
 
     #[test]
