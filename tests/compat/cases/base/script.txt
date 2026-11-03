@@ -1082,6 +1082,12 @@ tap label:Team plan
 expect Changes: 2
 expect Plan: team
 prop id:team accessibilityState selected=true checked=true
+# `hitSlop`: presses count this far outside the radio, one number for
+# every side or the sides named, following a signal; none without it.
+prop id:solo hitSlop top=12 right=12 bottom=12 left=12
+tap label:Solo
+prop id:solo hitSlop top=4 left=2
+prop id:basic hitSlop {}
 covers [nsh/base] Radio
 covers [nsh/base] RadioGroup
 covers [props] Radio.checked
