@@ -26896,6 +26896,117 @@ mod terminal_layout {
     }
 
     #[test]
+    fn a_card_around_an_image_that_fills_it_keeps_its_height() {
+        // A photo's card: 200 x 150pt, framed and filled, its image
+        // `flex: 1` (no size of its own, so none it gives the card).
+        let mut ops = view(
+            2,
+            ROOT_ID,
+            &[
+                ("alignSelf", V::Str("flex-start")),
+                ("width", V::Number(200.0)),
+                ("height", V::Number(150.0)),
+                ("borderWidth", V::Number(1.0)),
+                ("borderColor", V::Str("#888888")),
+                ("backgroundColor", V::Str("#333333")),
+            ],
+        );
+        ops.extend(node(3, Tag::Image, 2, &[("flex", V::Number(1.0))]));
+        let batch = laid_out_on_surfaces(ops);
+        // Nine rows, the image in what its frame leaves.
+        assert_eq!(
+            frame_of(&batch, 2).map(|f| f.size),
+            Some(size_pt(200.0, 144.0))
+        );
+        let image = frame_of(&batch, 3).unwrap();
+        assert!(image.size.height >= Points(112.0), "{image:?}");
+    }
+
+    #[test]
+    fn a_bar_of_its_own_color_thinner_than_a_row_keeps_one() {
+        // A media player's track over its time: 4pt high, filled.
+        let mut ops = view(2, ROOT_ID, &[("gap", V::Number(4.0))]);
+        ops.extend(view(
+            3,
+            2,
+            &[
+                ("height", V::Number(4.0)),
+                ("backgroundColor", V::Str("#555555")),
+            ],
+        ));
+        ops.extend(text(4, 2, "0:00"));
+        // A hairline (a divider) takes none.
+        ops.extend(view(
+            6,
+            2,
+            &[
+                ("height", V::Number(1.0)),
+                ("backgroundColor", V::Str("#555555")),
+            ],
+        ));
+        ops.extend(text(7, 2, "End"));
+        let batch = laid_out_on_surfaces(ops);
+        assert_eq!(
+            frame_of(&batch, 3).map(|f| f.size.height),
+            Some(Points(16.0))
+        );
+        assert_eq!(frame_of(&batch, 4).map(|f| f.origin.y), Some(Points(16.0)));
+        assert_eq!(frame_of(&batch, 7).map(|f| f.origin.y), Some(Points(32.0)));
+    }
+
+    #[test]
+    fn a_bar_pinned_under_a_row_of_text_before_it_is_placed() {
+        // A stepper: its bar absolute before the row of its dots' marks,
+        // which is drawn over it; a badge after a text is still left out.
+        let mut ops = view(2, ROOT_ID, &[("height", V::Number(40.0))]);
+        ops.extend(view(
+            3,
+            2,
+            &[
+                ("position", V::Str("absolute")),
+                ("left", V::Number(8.0)),
+                ("right", V::Number(8.0)),
+                ("top", V::Number(0.0)),
+            ],
+        ));
+        ops.extend(view(
+            4,
+            3,
+            &[
+                ("height", V::Number(4.0)),
+                ("backgroundColor", V::Str("#555555")),
+            ],
+        ));
+        ops.extend(view(
+            5,
+            2,
+            &[
+                ("flexDirection", V::Str("row")),
+                ("justifyContent", V::Str("space-between")),
+            ],
+        ));
+        ops.extend(text(6, 5, "1"));
+        ops.extend(text(8, 5, "2"));
+        ops.extend(view(
+            10,
+            2,
+            &[
+                ("position", V::Str("absolute")),
+                ("left", V::Number(0.0)),
+                ("top", V::Number(0.0)),
+            ],
+        ));
+        ops.extend(text(11, 10, "9"));
+        let batch = laid_out_on_surfaces(ops);
+        assert_eq!(
+            frame_of(&batch, 3).map(|f| f.size.height),
+            Some(Points(16.0))
+        );
+        assert!(!left_out(&batch, 4));
+        assert!(left_out(&batch, 10));
+    }
+
+    #[test]
     fn a_framed_box_stated_three_rows_tall_keeps_its_border_around_a_text() {
         // A specimen on a pressable stage: a 76pt box framed on every side
         // around one label (and a circle cut by it). It is a box, not a

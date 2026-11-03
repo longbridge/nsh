@@ -2607,6 +2607,9 @@ impl<M: TextEngine> Core<M> {
             },
             left_out,
             overlay: kind == Kind::Overlay,
+            meter: node.props.as_ref().is_some_and(|p| {
+                p.accessibility.role == crate::element::AccessibilityRole::Progressbar
+            }),
         }
     }
 

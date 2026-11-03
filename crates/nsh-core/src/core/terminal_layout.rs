@@ -256,6 +256,9 @@ pub(crate) struct Role {
     /// An overlay: one with nothing in it (a drop preview) keeps its
     /// border, which the painter draws over its outer Cells.
     pub(crate) overlay: bool,
+    /// A progress bar (its accessibility role `progressbar`): pinned under
+    /// a row drawn over it, it is placed ([`place_absolute`]).
+    pub(crate) meter: bool,
 }
 
 /// Whether a terminal leaves a box out: what it cannot show is laid out as
@@ -588,8 +591,8 @@ struct Kind {
     /// It holds views that are not only texts, and is no control: it
     /// may have a border.
     container: bool,
-    /// Its explicit height counts (empty, all its content absolute, an
-    /// anchor of no width, or a scroll view's maximum).
+    /// Its explicit height counts (empty, all its content absolute or
+    /// filling it, an anchor of no width, or a scroll view's maximum).
     honors_height: bool,
 }
 
@@ -599,13 +602,20 @@ fn kind(tree: &impl Tree, node: NodeId) -> Kind {
     let mut visible = false;
     let mut in_flow = false;
     let mut boxes = false;
+    // Every box in flow is one that keeps its box blank or draws itself
+    // and states no height (an image filling a card): it gives no rows.
+    let mut fillers = true;
     for i in 0..count {
         let child = tree.child(node, i);
         if hidden(tree, child) {
             continue;
         }
         visible = true;
-        in_flow |= !tree.style(child).position.is_out_of_flow();
+        if !tree.style(child).position.is_out_of_flow() {
+            in_flow = true;
+            fillers &= tree.role(child).sized
+                && length(tree.style(child).size.height.into_raw()).is_none();
+        }
         // Texts, bare views (spacers, bars) and views whose content is all
         // left out (an icon's circle) make no box of it.
         boxes |= !tree.role(child).text && !bare(tree, child) && !hollow(tree, child);
@@ -630,9 +640,12 @@ fn kind(tree: &impl Tree, node: NodeId) -> Kind {
         // A box whose content is all absolute (a table's header over its
         // cells, a row of them) has no rows of content to size it: its
         // explicit height is what its children are placed in.
+        // So does one whose content in flow only fills it (a photo's card
+        // around its image): what it holds is as tall as it is.
         honors_height: empty
             || anchor
             || (visible && !in_flow)
+            || (in_flow && fillers)
             || role.scroll
             || role.root
             || role.fills
@@ -932,6 +945,33 @@ fn layers(tree: &impl Tree, node: NodeId) -> bool {
     any
 }
 
+/// The thinnest bar a terminal keeps a row for, in points: a quarter of a
+/// row (a progress line, a track). A hairline (a divider) takes none.
+const THIN_BAR: f32 = 4.0;
+
+/// Whether `node`, `height` points high, is a bar: thinner than a row
+/// from [`THIN_BAR`], wider than high, no control, holding nothing but
+/// views with nothing in them (a track and its fill), of a fill that
+/// shows as a band or with an outline of its own.
+fn bar(tree: &impl Tree, node: NodeId, grid: Grid, parent_w: Option<f32>, height: f32) -> bool {
+    let role = tree.role(node);
+    let style = tree.style(node);
+    let outlined = !role.border_color.is_transparent() && {
+        let b = style.border;
+        [b.left, b.right, b.top, b.bottom]
+            .iter()
+            .any(|&v| length(v.into_raw()).is_some_and(|v| v > 0.0))
+    };
+    (THIN_BAR - EPSILON..16.0 - EPSILON).contains(&height)
+        && !role.control
+        && !role.text
+        && !tree.measures(node)
+        && role.left_out == LeftOut::No
+        && (0..tree.child_count(node)).all(|i| bare(tree, tree.child(node, i)))
+        && dim(style.size.width, parent_w).is_none_or(|w| w > height)
+        && (outlined || surface(grid, role, tree.backdrop(node).unwrap_or(grid.page)).is_some())
+}
+
 /// `value` within `min` and `max`.
 fn clamp(value: i32, min: Option<i32>, max: Option<i32>) -> i32 {
     let v = max.map_or(value, |m| value.min(m));
@@ -1006,6 +1046,13 @@ pub(crate) fn compute(
         )
     } else {
         (None, None)
+    };
+    // A bar thinner than a row (a track, its fill, a progress line) is
+    // one row, which the painter fills to its thickness: rounded to
+    // none, it would be gone.
+    let eh = match dim(s.size.height, parent_h) {
+        Some(v) if eh.is_none_or(|h| h == 0) && bar(tree, node, grid, parent_w, v) => Some(1),
+        _ => eh,
     };
     // A maximum adds no rows, so it holds for any box: a popup bounded by
     // the room below its anchor.
@@ -2325,12 +2372,18 @@ fn place_absolute(
     // an avatar's initials) would crowd or hide it, as Cells cannot be
     // seen through: it is left out and the text kept. Controls (a
     // slider's thumb), bars pinned over a scroll view and boxes over
-    // blank Cells are placed.
+    // blank Cells are placed, and so is a box with no text or a progress
+    // bar before the sibling (a stepper's bar under its dots): the
+    // sibling is drawn over it, its text kept.
     let at = (origin.0 + x, origin.1 + y, w, h);
+    let under = !holds_glyphs(tree, node) || holds_meter(tree, node);
     let hides = w > 0
         && h == 1
         && !holds_control(tree, node)
-        && flow.iter().any(|&(_, sibling)| {
+        && flow.iter().any(|&(sibling_order, sibling)| {
+            if under && order < sibling_order {
+                return false;
+            }
             let (sx, sy, sw, sh) = cells_of(grid, &tree.placed(sibling));
             w < sw
                 && at.0 < sx + sw
@@ -2470,6 +2523,20 @@ fn glyphs_on(tree: &impl Tree, grid: Grid, node: NodeId, top: i32, row: i32) -> 
         let (_, y, ..) = cells_of(grid, &tree.placed(child));
         glyphs_on(tree, grid, child, top + y, row)
     })
+}
+
+/// Whether `node` is a progress bar or holds one.
+fn holds_meter(tree: &impl Tree, node: NodeId) -> bool {
+    tree.role(node).meter
+        || (0..tree.child_count(node)).any(|i| holds_meter(tree, tree.child(node, i)))
+}
+
+/// Whether `node` or what it holds is a text with characters other than
+/// white space.
+fn holds_glyphs(tree: &impl Tree, node: NodeId) -> bool {
+    let role = tree.role(node);
+    (role.text && role.glyphs)
+        || (0..tree.child_count(node)).any(|i| holds_glyphs(tree, tree.child(node, i)))
 }
 
 /// A grid column.

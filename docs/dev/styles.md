@@ -323,7 +323,12 @@ as tall as its lines at 40 columns).
   maximum `Min` and `Max`. A `flexBasis` (points, or a percentage) is the child's `Length` along the main axis either
   way, whatever it holds (a resizable panel's size), within its minimum and maximum there; a fill's basis of 0 is
   its content's where its parent's length is not known. An explicit height counts only on a box without content (a chart's canvas, a spacer) and
-  on a scroll view, as a maximum; a list's is its height (its cells are laid out apart, in the size it is given). A
+  on a scroll view, as a maximum; a list's is its height (its cells are laid out apart, in the size it is given). So
+  does one whose content in flow is only images, videos, web views, shaders, lists or native components with no
+  height in points (a photo's card around its `flex: 1` image): what it holds is as tall as it is. A bar thinner than
+  a row, from 4pt (a quarter of one) and wider than high, no control, holding nothing but views with nothing in them
+  (a track and its fill), of a fill that shows as a band or with an outline of its own, is one row, which the painter
+  fills to its thickness; a hairline (a divider) takes none. A
   percentage height is of a known height, else of the box's own explicit height (kept or not, so a `50%` bar is as tall
   in every pass), else of the room it is given. A box with content is as tall as its content, at most its `maxHeight` (a popup bounded by the room
   below its anchor), and one with a height in points is
@@ -389,8 +394,9 @@ as tall as its lines at 40 columns).
   shorter than points leave less room than they were given, and they never cover what follows. A small label (one
   row, narrower than the sibling it is on, no control in it) pinned on a row of a sibling's text that is not white
   space (a badge on an avatar's initials) is left out: Cells cannot be seen through, so one of the two would be lost,
-  and the content is kept. Controls (a slider's thumb), bars pinned over a scroll view and boxes over blank Cells are
-  placed.
+  and the content is kept. Controls (a slider's thumb), bars pinned over a scroll view, boxes over blank Cells and a
+  box with no text or a progress bar before the sibling in tree order (a stepper's bar under its dots, which are drawn
+  over it) are placed.
 - **Scroll views** lay their content out unbounded along their axis, percentages of their viewport (a carousel's
   `w-full` slide is one view wide, a vertical one's `h-full` slide one view tall), a component's whose root is a
 scroll view too; **grids** take their columns from the template
