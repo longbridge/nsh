@@ -3082,6 +3082,66 @@ covers [props] Grid.scale
 covers [props] Grid.ticks
 covers [props] PlotLabel.scale
 covers [props] PlotAxis.scale
+# Heatmaps: four cells of 100 by 50, `col-b` left of `col-a` (the x
+# scale's `domain`), `row-a` over `row-b` (the order the cells name them),
+# each label's box its cell's; the axes write the bands' categories.
+expect col-a
+expect col-b
+expect row-a
+expect row-b
+frame parent:text:v-15 150 25 0 0
+frame parent:text:v5 50 25 0 0
+frame parent:text:v45 150 75 0 0
+frame parent:text:vnone 50 75 0 0
+# Round corners (the canvas: the sibling below the first label). Colors
+# along the diverging ramp over -15 to 25: -15 at its dark red end, 5 at
+# its white middle (`pivot`), 45 past the domain at its dark green end,
+# the row without a value navy (`unknown`).
+drawing below:parent:text:v-15 roundRect 100 0 100 50 4 4 4 4
+drawing below:parent:text:v-15 roundRect 0 50 100 50 4 4 4 4
+drawing below:parent:text:v-15 fillStyle #990000ff
+drawing below:parent:text:v-15 fillStyle #ffffffff
+drawing below:parent:text:v-15 fillStyle #006600ff
+drawing below:parent:text:v-15 fillStyle #000080ff
+# The labels: black, white on the dark cells (`data-dark`), 9 points.
+style text:v5 color #000000ff
+style text:v-15 color #ffffffff
+style text:v45 color #ffffffff
+style text:vnone color #ffffffff
+style text:v5 fontSize 9
+# Over the first cell: the others' labels fade to `inactiveOpacity`.
+expect cell null
+event id:heat onMouseMove position.x=150 position.y=25
+expect cell 0
+animated parent:text:v-15 opacity 1
+animated parent:text:v5 opacity 0.25
+event id:heat onMouseMove position.x=50 position.y=75
+expect cell 3
+event id:heat onMouseLeave
+expect cell null
+# Cells colored by category through an ordinal scale, square, the x
+# scale's bands in the order the cells name them.
+frame parent:text:tag-a 50 25 0 0
+frame parent:text:tag-b 150 25 0 0
+drawing below:parent:text:tag-a rect 0 0 100 50
+drawing below:parent:text:tag-a fillStyle #00ff00ff
+drawing below:parent:text:tag-a fillStyle #ff0000ff
+# Along a sequential ramp over 0 to 20: 0 white, 10 gray, 40 past the
+# domain black, the row without a value magenta (`unknown`).
+frame parent:text:lv-c 125 10 0 0
+drawing below:parent:text:lv-a fillStyle #ffffffff
+drawing below:parent:text:lv-a fillStyle #808080ff
+drawing below:parent:text:lv-a fillStyle #000000ff
+drawing below:parent:text:lv-a fillStyle #ff00ffff
+covers [nsh/base/plot] Cell
+covers [props] Cell.x
+covers [props] Cell.y
+covers [props] Cell.color
+covers [props] Cell.cornerRadii
+covers [props] Cell.inactiveOpacity
+covers [props] Cell.label
+covers [props] Cell.labelClass
+covers [props] Cell.labelStyle
 # Reversed scales: bands from the right edge (middles 250, 150 and 50)
 # and a y scale of 0 to 40 from the top edge (2 points a value), so the
 # bars hang from the top, each label below its bar's end.
