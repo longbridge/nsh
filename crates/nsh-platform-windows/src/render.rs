@@ -1347,8 +1347,13 @@ pub(crate) fn frame(surface: &Rc<Surface>) {
         .filter(|_| composition.is_none())
         .map(|rects| merged(pixel_rects(&rects, scale, size)))
         .filter(|rects| !rects.is_empty());
-    // What the back buffer, two presents old, needs drawn again.
-    let redraw = chain.to_draw(changed.as_deref()).map(merged);
+    // What the back buffer, two presents old, needs drawn again, with
+    // the whole area of each shader reading what is behind it that this
+    // meets: what it reads is then all this frame's.
+    let redraw = chain.to_draw(changed.as_deref()).map(|rects| {
+        let readers = crate::shader::backdrop_areas(surface);
+        with_backdrops(merged(rects), &pixel_rects(&readers, scale, size))
+    });
     let areas: Option<Vec<D2D_RECT_F>> = redraw.as_ref().map(|rects| {
         rects
             .iter()
@@ -1515,6 +1520,30 @@ fn merged(mut rects: Vec<RECT>) -> Vec<RECT> {
 /// True when `a` and `b` overlap or share an edge.
 fn touching(a: &RECT, b: &RECT) -> bool {
     a.left <= b.right && b.left <= a.right && a.top <= b.bottom && b.top <= a.bottom
+}
+
+/// `rects` (what a partial frame draws, in pixels) with every reader's
+/// area (where a shader reads what is behind it) that they meet, again
+/// until they meet no more: outside the rectangles the back buffer still
+/// holds an earlier frame, the reader's own output of it included.
+fn with_backdrops(mut rects: Vec<RECT>, readers: &[RECT]) -> Vec<RECT> {
+    let mut added = vec![false; readers.len()];
+    let mut grew = true;
+    while grew {
+        grew = false;
+        for (reader, done) in readers.iter().zip(added.iter_mut()) {
+            if !*done && rects.iter().any(|r| overlap(r, reader)) {
+                rects.push(*reader);
+                *done = true;
+                grew = true;
+            }
+        }
+    }
+    if added.contains(&true) {
+        merged(rects)
+    } else {
+        rects
+    }
 }
 
 fn device_lost(surface: &Rc<Surface>) {
@@ -1889,6 +1918,36 @@ mod tests {
         // Never more than MAX_AREAS.
         let many: Vec<RECT> = (0..20).map(|i| r(i * 50, 0, 10, 10)).collect();
         assert!(merged(many).len() <= MAX_AREAS);
+    }
+
+    #[test]
+    fn a_partial_frame_draws_a_backdrop_reader_whole() {
+        let r = |l, t, w, h| RECT {
+            left: l,
+            top: t,
+            right: l + w,
+            bottom: t + h,
+        };
+        // A spinner behind part of a panel that reads what is behind it,
+        // another reader over the panel's edge, and one far from both.
+        let spinner = r(100, 100, 20, 20);
+        let panel = r(110, 90, 200, 100);
+        let over = r(300, 150, 100, 100);
+        let far = r(600, 600, 50, 50);
+        let drawn = with_backdrops(vec![spinner], &[far, over, panel]);
+        let covered = |a: &RECT| {
+            drawn.iter().any(|d| {
+                d.left <= a.left && d.top <= a.top && d.right >= a.right && d.bottom >= a.bottom
+            })
+        };
+        assert!(
+            covered(&spinner) && covered(&panel) && covered(&over),
+            "{drawn:?}"
+        );
+        assert!(!drawn.iter().any(|d| overlap(d, &far)), "{drawn:?}");
+        // Rectangles that meet no reader stay as they are.
+        let alone = vec![r(0, 0, 10, 10)];
+        assert_eq!(with_backdrops(alone.clone(), &[panel, far]), alone);
     }
 
     #[test]

@@ -30,7 +30,9 @@
 //!   it, its children (pages, dialogs, overlays) its content.
 //!
 //! What is behind a view (`sample_backdrop`) is read back from the window's
-//! target before the view draws ([`take_backdrop`]).
+//! target before the view draws ([`take_backdrop`]); a partial frame that
+//! meets such a view draws all of its box and overflow
+//! ([`backdrop_areas`]), so it never reads its own earlier output.
 //!
 //! Pages and dialogs that come and go through a shader draw recordings of
 //! their two sides through a [`NavItem`] hosted over the stack (the root
@@ -64,7 +66,7 @@ use windows::{
     Win32::Graphics::{
         Direct2D::{
             Common::{
-                D2D_RECT_U, D2D_SIZE_U, D2D1_ALPHA_MODE_PREMULTIPLIED,
+                D2D_RECT_F, D2D_RECT_U, D2D_SIZE_U, D2D1_ALPHA_MODE_PREMULTIPLIED,
                 D2D1_COMPOSITE_MODE_SOURCE_OVER, D2D1_PIXEL_FORMAT,
             },
             D2D1_BITMAP_OPTIONS_NONE, D2D1_BITMAP_PROPERTIES1, D2D1_INTERPOLATION_MODE_LINEAR,
@@ -339,7 +341,7 @@ pub(crate) fn set(surface: &Rc<Surface>, view: &NshView, layer: Option<Arc<Shade
     } else {
         view.clone()
     };
-    {
+    let backdrop = {
         let mut state = target.state_mut();
         if layer.is_none() && state.shader.is_none() {
             return;
@@ -358,6 +360,14 @@ pub(crate) fn set(surface: &Rc<Surface>, view: &NshView, layer: Option<Arc<Shade
         shader.given = [None; 4];
         shader.pictured = None;
         shader.view.set_layer(layer);
+        let reads = shader.reads(ShaderInput::Backdrop);
+        reads.then_some(state.id)
+    };
+    if let Some(id) = backdrop {
+        let mut readers = surface.backdrop_readers.borrow_mut();
+        if !readers.contains(&id) {
+            readers.push(id);
+        }
     }
     target.changed();
     tick(&target);
@@ -809,6 +819,52 @@ fn give(view: &NshView, input: ShaderInput, pixels: &Pixels) {
     tick(view);
 }
 
+/// Where the views whose shader reads what is behind them read it
+/// ([`take_backdrop`]), in the window's DIPs. A partial frame that meets
+/// one draws all of it ([`crate::render::frame`]): what it reads is then
+/// this frame's, never its own output of an earlier frame that the rest
+/// of the back buffer still holds. Views that no longer read it leave
+/// the surface's list.
+pub(crate) fn backdrop_areas(surface: &Surface) -> Vec<D2D_RECT_F> {
+    let mut areas = Vec::new();
+    surface.backdrop_readers.borrow_mut().retain(|&id| {
+        let Some(view) = surface.view(id) else {
+            return false;
+        };
+        let reads = view
+            .state()
+            .shader
+            .as_ref()
+            .is_some_and(|s| s.renderer.is_some() && s.reads(ShaderInput::Backdrop));
+        if reads && let Some(area) = backdrop_area(&view) {
+            areas.push(area);
+        }
+        reads
+    });
+    areas
+}
+
+/// Where `view` reads what is behind it: its box and overflow in the
+/// window's DIPs, a point out for the pixels the read rounds to. `None`
+/// when it reads nothing (out of sight, or drawn offscreen under a
+/// projective transform).
+fn backdrop_area(view: &NshView) -> Option<D2D_RECT_F> {
+    if !in_sight(view) {
+        return None;
+    }
+    let world = view.to_root()?;
+    if !world.is_affine() {
+        return None;
+    }
+    let s = view.state();
+    let o = overflow(&s) + 1.0;
+    let (w, h) = (s.frame.size.width.0, s.frame.size.height.0);
+    Some(crate::compose::map_bounds(
+        &world.to_3x2(),
+        &rect_f(-o, -o, w + 2.0 * o, h + 2.0 * o),
+    ))
+}
+
 /// Reads what the pass drew so far under `view`'s box and overflow (what is
 /// behind it) back for its shader when it reads it, before the view draws
 /// anything: its own background is not behind it. Transparent where the
@@ -1179,6 +1235,28 @@ mod tests {
         drop(s);
         mount(&surface, 6, ShaderRole::Screen);
         assert!(!effect(&surface.root.state()));
+    }
+
+    /// A partial frame that meets a view reading what is behind it draws
+    /// all of where it reads: its box and overflow in the window.
+    #[test]
+    fn a_backdrop_reader_reads_its_box_and_overflow() {
+        let surface = surface();
+        let shader =
+            Shader::compile("fn shade(uv: vec2f) -> vec4f {\n    return sample_backdrop(uv);\n}\n")
+                .expect("a valid shader");
+        let layer = ShaderLayer::new(shader, &[], &mut Vec::new()).with_overflow(Points(4.0));
+        let panel = mount(&surface, 2, ShaderRole::Fill);
+        panel.state_mut().frame = crate::geom::rect(10.0, 20.0, 30.0, 40.0);
+        set(&surface, &panel, Some(Arc::new(layer)));
+        assert!(surface.backdrop_readers.borrow().contains(&2));
+        let a = backdrop_area(&panel).expect("in sight");
+        assert_eq!((a.left, a.top, a.right, a.bottom), (5.0, 15.0, 45.0, 65.0));
+        panel.state_mut().style.hidden = true;
+        assert!(backdrop_area(&panel).is_none(), "hidden: it reads nothing");
+        // Without a GPU device nothing is read: it leaves the list.
+        assert!(backdrop_areas(&surface).is_empty());
+        assert!(surface.backdrop_readers.borrow().is_empty());
     }
 
     /// What [`draw_effect`] does with an effect's children each time the
