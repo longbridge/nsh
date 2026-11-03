@@ -564,8 +564,8 @@ struct Kind {
     /// It holds views that are not only texts, and is no control: it
     /// may have a border.
     container: bool,
-    /// Its explicit height counts (empty, all its content absolute, or a
-    /// scroll view's maximum).
+    /// Its explicit height counts (empty, all its content absolute, an
+    /// anchor of no width, or a scroll view's maximum).
     honors_height: bool,
 }
 
