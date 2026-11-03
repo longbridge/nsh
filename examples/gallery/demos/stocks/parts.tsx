@@ -210,8 +210,10 @@ export function Block(props: { title?: string; note?: JSX.Element; right?: JSX.E
       ]}
     >
       <If when={props.title}>
-        <View style={{ flexDirection: "row", alignItems: "center", gap: terminal ? TERMINAL_GAP : 8, minHeight: terminal ? TERMINAL_ROW : 22 }}>
-          <Text style={{ flex: 1, fontSize: 15, fontWeight: "600", color: colors.text }}>{props.title}</Text>
+        {/* A terminal keeps the title whole: a note with no room beside it
+            goes to the row below. */}
+        <View style={{ flexDirection: "row", flexWrap: terminal ? "wrap" : "nowrap", alignItems: "center", ...(terminal ? { columnGap: TERMINAL_GAP } : { gap: 8 }), minHeight: terminal ? TERMINAL_ROW : 22 }}>
+          <Text style={{ flexGrow: 1, flexShrink: terminal ? 0 : 1, flexBasis: terminal ? "auto" : 0, fontSize: 15, fontWeight: "600", color: colors.text }}>{props.title}</Text>
           <If when={props.note}>
             <Text style={{ fontSize: 12, color: colors.faint, fontVariant: ["tabular-nums"] }}>{props.note}</Text>
           </If>

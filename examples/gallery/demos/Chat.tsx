@@ -505,16 +505,17 @@ export function Chat() {
             a quarter's width would wrap their titles unevenly. */}
         <If when={terminal}>
           {/* The notes in a column of their own, two Cells after the
-              longest title. */}
+              longest title; with less than 16 Cells left beside it, a
+              note goes under its title. */}
           <View>
             <Each of={featured}>
               {(f) => {
                 const s = scenarios.find((x) => x.id === f().id)!;
                 return (
                   <Press onPress={() => play(s.id)} accessibilityLabel={s.chip}>
-                    <View style={{ flexDirection: "row", gap: 16 }}>
-                      <Text style={{ width: titleColumn, fontWeight: "600", color: colors.text }}>{s.chip}</Text>
-                      <Text style={{ flex: 1, color: colors.muted }}>{f().note}</Text>
+                    <View style={{ flexDirection: "row", flexWrap: "wrap", columnGap: 16 }}>
+                      <Text style={{ width: titleColumn, flexShrink: 0, fontWeight: "600", color: colors.text }}>{s.chip}</Text>
+                      <Text style={{ flexGrow: 1, flexShrink: 1, flexBasis: 16 * 8, color: colors.muted }}>{f().note}</Text>
                     </View>
                   </Press>
                 );
