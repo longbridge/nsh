@@ -654,8 +654,21 @@ fn a_select_s_chosen_row_has_a_check_and_its_list_fits_the_widest_title() {
 #[test]
 fn a_select_s_highlighted_row_is_an_accent_band() {
     // The option is focused only as a part of the list (the keys stay
-    // with the select): the core mounts that for the terminal to mark.
-    let (mut view, rx) = surface();
+    // with the select): the core mounts that for the terminal to mark. The
+    // accent band is the look with surfaces (the terminal's background
+    // known); bandless, the row is reversed.
+    let (mut view, rx) = {
+        let (tx, rx) = crossbeam_channel::unbounded();
+        let mut options = nsh_platform_tui::AppOptions::default();
+        options.capabilities.colors = nsh_platform_tui::ColorDepth::TrueColor;
+        options.capabilities.background_color = Some([24; 3]);
+        options.capabilities.foreground_color = Some([224; 3]);
+        options.wake = Some(std::sync::Arc::new(move || {
+            let _ = tx.send(());
+        }));
+        options.cache = nsh_engine::CacheOptions::off();
+        (nsh_platform_tui::AppView::new(options), rx)
+    };
     let mut terminal = Terminal::new(TestBackend::new(40, 20)).unwrap();
     view.load(App::Rust(Root::new::<ChosenSelect>(|| ())))
         .unwrap();

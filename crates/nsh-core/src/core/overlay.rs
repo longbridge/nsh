@@ -1209,12 +1209,50 @@ impl<M: TextEngine> Core<M> {
                 });
                 return Some((ring, Bounds { origin, size }));
             }
-            let &first = n.children.iter().find(|&&c| {
+            let Some(&first) = n.children.iter().find(|&&c| {
                 let c = &self.nodes[c as usize];
                 !c.is_overlay() && c.layout.is_some()
-            })?;
+            }) else {
+                // No box of the app's: a popup holding a list (a select's,
+                // a menu) is framed around its own box all the same, a
+                // terminal's surface for the list.
+                if !self.holds_list(key, 3) {
+                    return None;
+                }
+                let n = &self.nodes[key as usize];
+                let size = n.layout.map_or_else(Size::default, |l| {
+                    let l = self.layout.unrounded_layout(l);
+                    Size {
+                        width: Points(l.size.width),
+                        height: Points(l.size.height),
+                    }
+                });
+                let ring = Size {
+                    width: Points(grid.width),
+                    height: Points(grid.height),
+                };
+                return Some((
+                    ring,
+                    Bounds {
+                        origin: Point::default(),
+                        size,
+                    },
+                ));
+            };
             at = first;
         }
+    }
+
+    /// Whether `key` or a view `depth` levels below it is a list of
+    /// options or a menu (`nsh-platform-tui` frames the same popups).
+    fn holds_list(&self, key: Key, depth: usize) -> bool {
+        let n = &self.nodes[key as usize];
+        n.props.as_ref().is_some_and(|p| {
+            matches!(
+                p.accessibility.role,
+                crate::AccessibilityRole::Listbox | crate::AccessibilityRole::Menu
+            )
+        }) || (depth > 0 && n.children.iter().any(|&c| self.holds_list(c, depth - 1)))
     }
 
     fn set_native_overlay_anchor(
