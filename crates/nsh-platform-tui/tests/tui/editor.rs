@@ -136,7 +136,14 @@ fn Typed() -> impl IntoElement {
         .flex_1()
         .child(text(move || format!("focus {}", focused.get())))
         .child(text(move || {
-            format!("typed {}", if value.get().contains('Q') { "yes" } else { "no" })
+            format!(
+                "typed {}",
+                if value.get().contains('Q') {
+                    "yes"
+                } else {
+                    "no"
+                }
+            )
         }))
         .child(
             editor()
@@ -248,8 +255,14 @@ fn escape_then_tab_leaves_a_rich_editor_for_the_next_control() {
         if text.contains("focus After") {
             return;
         }
-        assert!(!text.contains("focus Before"), "Tab started from the top: {text:?}");
-        assert!(Instant::now() < deadline, "Tab never left the editor: {text:?}");
+        assert!(
+            !text.contains("focus Before"),
+            "Tab started from the top: {text:?}"
+        );
+        assert!(
+            Instant::now() < deadline,
+            "Tab never left the editor: {text:?}"
+        );
         let _ = rx.recv_deadline(Instant::now() + Duration::from_millis(100));
     }
     panic!("Tab was not used");
@@ -308,7 +321,9 @@ fn RichTyped() -> impl IntoElement {
     let changes = signal(0u32);
     view()
         .flex_1()
-        .child(text(move || format!("focus {} changes {}", focused.get(), changes.get())))
+        .child(text(move || {
+            format!("focus {} changes {}", focused.get(), changes.get())
+        }))
         .child(
             rich_editor()
                 .on_focus(move |_: &()| focused.set("yes"))
@@ -321,8 +336,7 @@ fn RichTyped() -> impl IntoElement {
 fn tab_enters_a_rich_editor_and_typing_changes_its_document() {
     let (mut view, rx) = surface();
     let mut terminal = Terminal::new(TestBackend::new(48, 12)).unwrap();
-    view.load(App::Rust(Root::new::<RichTyped>(|| ())))
-        .unwrap();
+    view.load(App::Rust(Root::new::<RichTyped>(|| ()))).unwrap();
     draw_until(&mut view, &mut terminal, &rx, "focus no changes 0");
     tab_until(&mut view, &mut terminal, &rx, "focus yes");
     assert_eq!(view.handle(key("Q")), Handled::Yes);
@@ -370,7 +384,10 @@ fn a_codes_next_cell_holds_the_terminal_cursor() {
     );
     let second = terminal.backend_mut().get_cursor_position().unwrap();
     assert_eq!(second.y, first.y);
-    assert!(second.x > first.x + 1, "on the next cell: {first:?} {second:?}");
+    assert!(
+        second.x > first.x + 1,
+        "on the next cell: {first:?} {second:?}"
+    );
     assert_eq!(view.handle(key("7")), Handled::Yes);
     draw_until(&mut view, &mut terminal, &rx, "7");
     assert_eq!(
@@ -391,14 +408,23 @@ fn a_click_on_a_codes_cells_gives_it_the_keys() {
     draw_until(&mut view, &mut terminal, &rx, "focus no");
     // The last cell's frame: its field is a Cell wide, at the first cell,
     // so the press lands on the cells alone.
-    let width = terminal.backend().buffer().area.width as usize;
-    let at = contents(&terminal).rfind('╭').expect("the cells' frames");
+    let buffer = terminal.backend().buffer();
+    let width = buffer.area.width as usize;
+    // A Cell's index, not a byte's: the frames' corners are wider in UTF-8.
+    let at = buffer
+        .content
+        .iter()
+        .rposition(|c| matches!(c.symbol(), "╭" | "┌"))
+        .expect("the cells' frames");
     let (x, y) = ((at % width) as u16 + 1, (at / width) as u16 + 1);
     view.handle(mouse(MouseKind::Down(Left), x, y));
     view.handle(mouse(MouseKind::Up(Left), x, y));
     draw_until(&mut view, &mut terminal, &rx, "focus yes");
     let cursor = terminal.backend_mut().get_cursor_position().unwrap();
-    assert!(cursor.x < x, "on the first cell, the next to fill: {cursor:?}");
+    assert!(
+        cursor.x < x,
+        "on the first cell, the next to fill: {cursor:?}"
+    );
     assert_eq!(view.handle(key("5")), Handled::Yes);
     draw_until(&mut view, &mut terminal, &rx, "5");
 }

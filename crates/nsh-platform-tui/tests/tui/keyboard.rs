@@ -556,12 +556,22 @@ fn focus_visits_editable_fields_and_skips_disabled_or_opted_out_views() {
     view.handle(ctrl("n"));
     draw_until(&mut view, &mut terminal, &rx, "focus input");
     terminal.backend_mut().assert_cursor_position((0, 1));
+    // Enter submits and leaves the field; Tab goes on from it, past the
+    // opted-out view, to the button.
     assert_eq!(view.handle(key("Enter", Default::default())), Handled::Yes);
-    view.handle(key("Tab", Default::default()));
-    draw_until(&mut view, &mut terminal, &rx, "focus input");
     view.handle(key("Tab", Default::default()));
     draw_until(&mut view, &mut terminal, &rx, "focus button");
     assert!(!terminal.backend().cursor_visible());
+    // Back to the field, past the disabled view at the top.
+    view.handle(key(
+        "Tab",
+        Modifiers {
+            shift: true,
+            ..Default::default()
+        },
+    ));
+    draw_until(&mut view, &mut terminal, &rx, "focus input");
+    terminal.backend_mut().assert_cursor_position((0, 1));
 }
 
 #[component]

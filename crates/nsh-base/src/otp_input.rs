@@ -536,9 +536,12 @@ impl Cells {
                 )
                 .otherwise(move || {
                     // Mounted while the cell takes the next digit; it
-                    // blinks natively.
+                    // blinks natively. A terminal's caret is its own
+                    // cursor, at the field (the sink above): a caret view
+                    // there would be a box of no Cells that costs the
+                    // cell its middle row.
                     when(
-                        move || self.focused.get() && self.active() == ix,
+                        move || !self.terminal && self.focused.get() && self.active() == ix,
                         move || {
                             view()
                                 .app_class(self.caret_class)
