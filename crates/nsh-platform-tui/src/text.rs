@@ -33,6 +33,8 @@ pub(crate) struct Glyph {
     style: Style,
     color: Option<nsh_core::Color>,
     background: Option<nsh_core::Color>,
+    /// The underline's own color (`textDecorationColor`), when underlined.
+    decoration: Option<nsh_core::Color>,
     attachment: Option<Attachment>,
 }
 
@@ -73,6 +75,11 @@ impl Glyph {
     /// The run's color.
     pub(crate) fn color(&self) -> Option<nsh_core::Color> {
         self.color
+    }
+
+    /// The color of the run's underline, when it has one of its own.
+    pub(crate) fn decoration(&self) -> Option<nsh_core::Color> {
+        self.decoration
     }
 
     /// The run's own background.
@@ -142,6 +149,9 @@ fn glyphs(text: &AttributedText, cells: CellSize, alignments: &AttachmentAlignme
                 background: span
                     .and_then(|span| span.style.background)
                     .map(|background| background.color),
+                decoration: span
+                    .filter(|span| span.style.decoration.underline)
+                    .and_then(|span| span.style.decoration_color),
                 attachment,
             }
         })
@@ -427,6 +437,7 @@ fn ellipsize(row: &mut Vec<Glyph>, columns: usize, mode: EllipsizeMode) {
             style: at.map_or_else(Style::default, |g| g.style),
             color: at.and_then(|g| g.color),
             background: at.and_then(|g| g.background),
+            decoration: at.and_then(|g| g.decoration),
             attachment: None,
         });
     }

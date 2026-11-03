@@ -1243,6 +1243,12 @@ fn text(
                 None => (Color::Reset, Modifier::empty()),
             };
             modifier |= glyph.modifiers();
+            // An underline of its own color (an editor's diagnostic) keeps
+            // it, as the terminal draws a colored underline under any text.
+            let underline = glyph
+                .decoration()
+                .and_then(|color| ink(color, ground).fg)
+                .filter(|&color| color != Color::Reset);
             let mut bg = None;
             // A run on its own background is a band: a step of the ramp, an
             // accent tinted into it, or reverse video without surfaces.
@@ -1291,6 +1297,9 @@ fn text(
                 cell.set_symbol(if offset == 0 { &glyph.text } else { " " });
                 cell.fg = fg;
                 cell.modifier = modifier;
+                if let Some(underline) = underline {
+                    cell.underline_color = underline;
+                }
                 if let Some(bg) = bg {
                     cell.bg = bg;
                 }
@@ -1515,7 +1524,10 @@ fn pressable(view: &NshView) -> bool {
 /// show what it holds). It draws nothing: no band, no text, no state.
 fn hidden_input(view: &NshView) -> bool {
     view.input.as_ref().is_some_and(|config| {
-        view.animated.color.unwrap_or(config.style.color).is_transparent()
+        view.animated
+            .color
+            .unwrap_or(config.style.color)
+            .is_transparent()
             && view
                 .animated
                 .background
@@ -1769,7 +1781,9 @@ fn mark_surface(
         if selected || focused {
             drawn(buffer, inner, |cell| cell.modifier.insert(Modifier::BOLD));
             if selected && focused {
-                drawn(buffer, inner, |cell| cell.modifier.insert(Modifier::UNDERLINED));
+                drawn(buffer, inner, |cell| {
+                    cell.modifier.insert(Modifier::UNDERLINED)
+                });
             }
         } else {
             drawn(buffer, inner, |cell| {
@@ -1793,7 +1807,9 @@ fn mark_surface(
         // segment): the label is underlined, as the band alone is the
         // selection's.
         if focused && !container {
-            drawn(buffer, inner, |cell| cell.modifier.insert(Modifier::UNDERLINED));
+            drawn(buffer, inner, |cell| {
+                cell.modifier.insert(Modifier::UNDERLINED)
+            });
         }
     }
     if focused && container {

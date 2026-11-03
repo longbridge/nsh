@@ -831,3 +831,41 @@ fn text_covering_a_run_of_glyphs_leaves_it_whole_and_cuts_words() {
     let words = lines.iter().find(|line| line.contains('Z')).unwrap();
     assert!(words.contains("…Z"), "covered words read cut: {words:?}");
 }
+
+#[component]
+fn ColoredUnderline() -> impl IntoElement {
+    view()
+        .flex_1()
+        .child(
+            text("flagged")
+                .underline()
+                .text_decoration_color(nsh_core::color::rgb(0xff0000)),
+        )
+        .child(text("plain").underline())
+}
+
+#[test]
+fn an_underline_of_its_own_color_keeps_it() {
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(20, 4)).unwrap();
+    view.load(App::Rust(Root::new::<ColoredUnderline>(|| ())))
+        .unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "plain");
+    let buffer = terminal.backend().buffer();
+    let flagged = &buffer[(0, 0)];
+    assert_eq!(flagged.symbol(), "f");
+    assert!(flagged.modifier.contains(Modifier::UNDERLINED));
+    assert_ne!(
+        flagged.underline_color,
+        Color::Reset,
+        "a diagnostic's underline keeps its color"
+    );
+    let plain = &buffer[(0, 1)];
+    assert_eq!(plain.symbol(), "p");
+    assert!(plain.modifier.contains(Modifier::UNDERLINED));
+    assert_eq!(
+        plain.underline_color,
+        Color::Reset,
+        "a plain underline takes the text's"
+    );
+}
