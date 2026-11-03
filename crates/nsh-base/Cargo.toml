@@ -28,6 +28,7 @@ regex.workspace = true
 ropey.workspace = true
 unicode-segmentation.workspace = true
 imara-diff.workspace = true
+unicode-width.workspace = true
 log.workspace = true
 syntect = { workspace = true, optional = true }
 
