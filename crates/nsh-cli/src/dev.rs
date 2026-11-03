@@ -1,7 +1,7 @@
 use std::{
     cell::Cell,
     collections::HashSet,
-    net::{IpAddr, Ipv4Addr, SocketAddr},
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     path::{Path, PathBuf},
     sync::{
         Arc, Mutex,
@@ -93,21 +93,15 @@ impl DevSession {
         self.server.local_addr().port()
     }
 
-    /// Where hosts on this machine reach the server: `127.0.0.1` when it
-    /// listens on every interface, else the address it listens on.
+    /// Where hosts on this machine reach the server.
     fn local_addr(&self) -> SocketAddr {
-        let addr = self.server.local_addr();
-        if addr.ip().is_unspecified() {
-            SocketAddr::new(Ipv4Addr::LOCALHOST.into(), addr.port())
-        } else {
-            addr
-        }
+        local_addr(self.server.local_addr())
     }
 
     /// This machine's LAN addresses, where devices on the network reach
-    /// the server: none unless it listens on every interface.
+    /// the server: its IPv4 ones, when it listens on every IPv4 interface.
     fn lan_ips(&self) -> Vec<Ipv4Addr> {
-        if self.server.local_addr().ip().is_unspecified() {
+        if lists_lan_ips(self.server.local_addr()) {
             lan_ips()
         } else {
             Vec::new()
@@ -440,6 +434,27 @@ fn install_commands(dir: &Path) -> Vec<(HostPlatform, String)> {
     ]
 }
 
+/// Where hosts on this machine reach a server listening on `addr`: the
+/// loopback address of its family when it listens on every interface
+/// (`::` may accept IPv6 only, as on Windows), else `addr` itself.
+fn local_addr(addr: SocketAddr) -> SocketAddr {
+    match addr.ip() {
+        IpAddr::V4(ip) if ip.is_unspecified() => {
+            SocketAddr::new(Ipv4Addr::LOCALHOST.into(), addr.port())
+        }
+        IpAddr::V6(ip) if ip.is_unspecified() => {
+            SocketAddr::new(Ipv6Addr::LOCALHOST.into(), addr.port())
+        }
+        _ => addr,
+    }
+}
+
+/// Whether a server listening on `addr` is reached at this machine's IPv4
+/// LAN addresses: only on every IPv4 interface (`::` may not take IPv4).
+fn lists_lan_ips(addr: SocketAddr) -> bool {
+    addr.ip() == IpAddr::V4(Ipv4Addr::UNSPECIFIED)
+}
+
 fn start_server(
     host: Option<IpAddr>,
     port: u16,
@@ -631,6 +646,19 @@ mod tests {
         let addr = server.local_addr();
         assert_eq!(addr.ip(), localhost);
         assert!(std::net::TcpStream::connect(addr).is_ok());
+    }
+
+    #[test]
+    fn local_hosts_reach_the_loopback_of_the_listener_s_family() {
+        let at = |addr: &str| super::local_addr(addr.parse().unwrap()).to_string();
+        assert_eq!(at("0.0.0.0:7000"), "127.0.0.1:7000");
+        assert_eq!(at("[::]:7000"), "[::1]:7000");
+        assert_eq!(at("192.168.1.5:7000"), "192.168.1.5:7000");
+        assert_eq!(at("[fe80::1]:7000"), "[fe80::1]:7000");
+        let lists = |addr: &str| super::lists_lan_ips(addr.parse().unwrap());
+        assert!(lists("0.0.0.0:7000"));
+        assert!(!lists("[::]:7000"));
+        assert!(!lists("127.0.0.1:7000"));
     }
 
     #[test]
