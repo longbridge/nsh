@@ -1049,6 +1049,8 @@ class Player {
     // What side modules import (`main`): the instance's own exports.
     this.mainExports = instance.exports;
     this.sideLoads = new Map();
+    // Side modules compiled ahead (`prefetchSides`), by name.
+    this.sideModules = new Map();
     this.trapped = false;
     // The glue's own setup (its view of the memory, wasm-bindgen's tables)
     // before any of the app's code runs.
@@ -1086,6 +1088,46 @@ class Player {
     return Promise.all((names ?? []).map((name) => this.loadSide(name, table)));
   }
 
+  /**
+   * Downloads and compiles every side module of `table` in the background,
+   * at a low priority, so the main module and the app's first screen come
+   * first. Failures here are left to the load that needs the module,
+   * which tries again. `preloadSides` then instantiates them.
+   */
+  prefetchSides(table) {
+    const names = Object.keys(table ?? {});
+    for (const name of names) {
+      if (this.sideModules.has(name) || this.sideLoads.has(name)) continue;
+      const compiled = this.compileSide(table[name].url, { priority: "low" });
+      compiled.catch(() => this.sideModules.delete(name));
+      this.sideModules.set(name, compiled);
+    }
+  }
+
+  /**
+   * Instantiates every side module of `table` once the browser is idle
+   * (call it after the app started), so a screen that needs one finds its
+   * components registered.
+   */
+  preloadSides(table) {
+    const names = Object.keys(table ?? {});
+    if (!names.length) return;
+    const idle = globalThis.requestIdleCallback ?? ((f) => setTimeout(f, 200));
+    idle(() => this.loadSides(names, table).catch((err) => console.warn(`[nsh] preloading side modules: ${err?.message ?? err}`)));
+  }
+
+  async compileSide(url, init) {
+    try {
+      return await WebAssembly.compileStreaming(fetch(url, init));
+    } catch (err) {
+      // Served without `application/wasm`: compiled from its bytes.
+      if (!(err instanceof TypeError)) throw err;
+      const response = await fetch(url, init);
+      if (!response.ok) throw new Error(`${url}: HTTP ${response.status}`);
+      return WebAssembly.compile(await response.arrayBuffer());
+    }
+  }
+
   /** The exports of side module `name`, once it and what it needs loaded. */
   loadSide(name, table) {
     if (!this.sideLoads.has(name)) {
@@ -1100,16 +1142,11 @@ class Player {
     const imports = { main: this.mainExports };
     const from = await Promise.all((needs ?? []).map((need) => this.loadSide(need, table)));
     (needs ?? []).forEach((need, i) => { imports[need] = from[i]; });
-    let instance;
-    try {
-      ({ instance } = await WebAssembly.instantiateStreaming(fetch(url), imports));
-    } catch (err) {
-      // Served without `application/wasm`: compiled from its bytes.
-      if (!(err instanceof TypeError)) throw err;
-      const response = await fetch(url);
-      if (!response.ok) throw new Error(`${url}: HTTP ${response.status}`);
-      ({ instance } = await WebAssembly.instantiate(await response.arrayBuffer(), imports));
-    }
+    // Compiled ahead when it was prefetched; else now, at full priority.
+    const ahead = this.sideModules.get(name);
+    this.sideModules.delete(name);
+    const module = await (ahead?.catch(() => null) ?? null) ?? await this.compileSide(url);
+    const instance = await WebAssembly.instantiate(module, imports);
     if (gate) {
       const register = instance.exports[gate];
       if (typeof register !== "function") throw new Error(`${url} exports no ${gate}`);
