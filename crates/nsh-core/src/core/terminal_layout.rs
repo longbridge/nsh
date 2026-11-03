@@ -259,6 +259,21 @@ pub(crate) struct Role {
     /// A progress bar (its accessibility role `progressbar`): pinned under
     /// a row drawn over it, it is placed ([`place_absolute`]).
     pub(crate) meter: bool,
+    /// A scroll view's indicator, which a terminal draws as a bar in a
+    /// column (or row) of its own.
+    pub(crate) indicator: Indicator,
+}
+
+/// A scroll view's indicator ([`Role::indicator`]).
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub(crate) enum Indicator {
+    /// None: no scroll view, or one that hides its indicator.
+    #[default]
+    No,
+    /// A vertical bar, at its right.
+    Vertical,
+    /// A horizontal bar, at its bottom.
+    Horizontal,
 }
 
 /// Whether a terminal leaves a box out: what it cannot show is laid out as
@@ -326,6 +341,8 @@ pub(crate) trait Tree {
     fn backdrop(&self, node: NodeId) -> Option<Color>;
     /// Where its last layout placed it, relative to its parent.
     fn placed(&self, node: NodeId) -> Layout;
+    /// The box it is laid out in, `None` for a root.
+    fn parent(&self, node: NodeId) -> Option<NodeId>;
 }
 
 /// A box's border and padding in Cells, as its last full layout gave it:
@@ -945,6 +962,84 @@ fn layers(tree: &impl Tree, node: NodeId) -> bool {
     any
 }
 
+/// The side a scroll view `node` of `size` keeps for its bar, its content
+/// `content` within `edges`: a column at its right when its content is
+/// taller than it, a row at its bottom when wider, as a classic scroll bar
+/// takes. None when it hides its indicator, has one Cell across its bar,
+/// or fills its parent up to a right line without padding, where the
+/// painter draws its vertical bar on that line.
+#[allow(clippy::too_many_arguments)]
+fn bar_room(
+    tree: &impl Tree,
+    node: NodeId,
+    role: Role,
+    content: Cells,
+    size: Cells,
+    edges: Sides,
+    parent_w: Option<f32>,
+    grid: Grid,
+) -> Option<Sides> {
+    let (w, h) = (size.w - edges.x(), size.h - edges.y());
+    match role.indicator {
+        Indicator::No => None,
+        Indicator::Vertical
+            if w > 1 && content.h > h && !on_line(tree, node, size, parent_w, grid) =>
+        {
+            Some(Sides {
+                r: 1,
+                ..Sides::default()
+            })
+        }
+        Indicator::Horizontal if h > 1 && content.w > w => Some(Sides {
+            b: 1,
+            ..Sides::default()
+        }),
+        _ => None,
+    }
+}
+
+/// Whether scroll view `node`, `size` wide, spans its parent's content up
+/// to its right border, with no padding between: its bar is that line.
+fn on_line(tree: &impl Tree, node: NodeId, size: Cells, parent_w: Option<f32>, grid: Grid) -> bool {
+    let Some(parent) = tree.parent(node) else {
+        return false;
+    };
+    let insets = tree.insets(parent);
+    insets.border.r > 0
+        && insets.padding.r == 0
+        && parent_w.is_some_and(|w| grid.fit_cols(w) == size.w)
+}
+
+/// The room list `role`, laid out at `own`, leaves its scroll bar when its
+/// content overflows, in points: a Cell's column at its right (a row at its
+/// bottom when `horizontal`) by the rule of [`bar_room`]. `parent` is its
+/// parent's insets and width, in points.
+pub(crate) fn list_bar_room(
+    role: Role,
+    own: Layout,
+    parent: Option<(Insets, f32)>,
+    horizontal: bool,
+    grid: Grid,
+) -> f32 {
+    let (w, h) = (
+        grid.fit_cols(own.size.width),
+        grid.fit_rows(own.size.height),
+    );
+    match role.indicator {
+        Indicator::Vertical if !horizontal && w > 1 => {
+            let on_line = parent.is_some_and(|(insets, width)| {
+                insets.border.r > 0
+                    && insets.padding.r == 0
+                    && grid.fit_cols(own.location.x + own.size.width)
+                        == grid.fit_cols(width) - insets.border.r
+            });
+            if on_line { 0.0 } else { grid.width }
+        }
+        Indicator::Horizontal if horizontal && h > 1 => grid.height,
+        _ => 0.0,
+    }
+}
+
 /// The thinnest bar a terminal keeps a row for, in points: a quarter of a
 /// row (a progress line, a track). A hairline (a divider) takes none.
 const THIN_BAR: f32 = 4.0;
@@ -1246,6 +1341,9 @@ pub(crate) fn compute(
         (border, padding) = insets(tree, node, attempt_kind, parent_w, grid, None);
         inset = border.add(padding);
     }
+    // The column (or row) a scroll view's bar takes once its content
+    // overflows it, as a classic scroll bar does.
+    let mut gutter = Sides::default();
     let (content, mut size) = loop {
         let framed = outer_framed || border != Sides::default();
         tree.set_framed(framed);
@@ -1285,7 +1383,12 @@ pub(crate) fn compute(
             banded: surface.is_some(),
             fills: role.fills,
         };
-        let edges = inset.add(pinned);
+        // Its children see its border and padding as they are laid out
+        // (a scroll view on its right line, [`on_line`]).
+        if perform {
+            tree.set_insets(node, Insets { border, padding });
+        }
+        let edges = inset.add(pinned).add(gutter);
         let content_w = inner(fixed_w, edges.x());
         let content_h = inner(fixed_h, edges.y());
         let room_w = inner(fixed_w.or(avail_w), edges.x());
@@ -1332,6 +1435,12 @@ pub(crate) fn compute(
             && size.h < 3
         {
             fixed_h = Some(clamp(3, None, max_h));
+            continue;
+        }
+        if gutter == Sides::default()
+            && let Some(side) = bar_room(tree, node, role, content, size, edges, parent_w, grid)
+        {
+            gutter = side;
             continue;
         }
         break (content, size);

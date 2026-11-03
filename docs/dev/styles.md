@@ -328,7 +328,11 @@ as tall as its lines at 40 columns).
   height in points (a photo's card around its `flex: 1` image): what it holds is as tall as it is. A bar thinner than
   a row, from 4pt (a quarter of one) and wider than high, no control, holding nothing but views with nothing in them
   (a track and its fill), of a fill that shows as a band or with an outline of its own, is one row, which the painter
-  fills to its thickness; a hairline (a divider) takes none. A
+  fills to its thickness; a hairline (a divider) takes none. A scroll view or a list that shows its indicator
+  (`scrollbar` not `false`, no built-in bar) and whose content overflows leaves its bar a Cell of its own: its
+  content is laid out a column narrower (a row lower when horizontal), as a classic scroll bar takes its width; none
+  when it is a Cell wide (a row high), and none for a vertical one that reaches its parent's right border with no
+  padding between, whose bar the painter draws on that line. A
   percentage height is of a known height, else of the box's own explicit height (kept or not, so a `50%` bar is as tall
   in every pass), else of the room it is given. A box with content is as tall as its content, at most its `maxHeight` (a popup bounded by the room
   below its anchor), and one with a height in points is

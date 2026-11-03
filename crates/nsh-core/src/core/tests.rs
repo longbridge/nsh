@@ -27006,6 +27006,76 @@ mod terminal_layout {
         assert!(left_out(&batch, 10));
     }
 
+    /// A vertical scroll view 160pt (20 Cells) wide and 64pt high in a
+    /// view of `parent` styles, holding a row whose text is at its right and
+    /// a view `tall` points high; `scrollbar` set when given.
+    fn scroll_with_a_right_text(
+        parent: &[(&str, V<'_>)],
+        tall: f32,
+        scrollbar: Option<crate::ScrollbarSetting>,
+    ) -> MountBatch {
+        let mut ops = view(2, ROOT_ID, parent);
+        ops.extend(node(
+            3,
+            Tag::Scroll,
+            2,
+            &[("width", V::Number(160.0)), ("height", V::Number(64.0))],
+        ));
+        if let Some(setting) = scrollbar {
+            ops.push(Op::SetProp {
+                id: 3,
+                prop: Prop::Scrollbar(setting),
+            });
+        }
+        ops.extend(view(
+            4,
+            3,
+            &[
+                ("flexDirection", V::Str("row")),
+                ("justifyContent", V::Str("flex-end")),
+            ],
+        ));
+        ops.extend(text(5, 4, "end"));
+        ops.extend(view(7, 3, &[("height", V::Number(tall))]));
+        laid_out(ops)
+    }
+
+    fn right_of(batch: &MountBatch, id: NodeId) -> Option<f32> {
+        frame_of(batch, id).map(|f| (f.origin.x + f.size.width).0)
+    }
+
+    #[test]
+    fn an_overflowing_scroll_view_keeps_a_column_for_its_bar() {
+        // Its content is a Cell narrower: the text's last Cell is the one
+        // before the bar's.
+        let batch = scroll_with_a_right_text(&[], 200.0, None);
+        assert_eq!(right_of(&batch, 4), Some(152.0));
+        assert_eq!(right_of(&batch, 5), Some(152.0));
+    }
+
+    #[test]
+    fn a_scroll_view_keeps_no_column_when_it_fits_or_hides_its_bar() {
+        let fits = scroll_with_a_right_text(&[], 16.0, None);
+        assert_eq!(right_of(&fits, 4), Some(160.0));
+        let hidden = scroll_with_a_right_text(&[], 200.0, Some(crate::ScrollbarSetting::Hidden));
+        assert_eq!(right_of(&hidden, 4), Some(160.0));
+    }
+
+    #[test]
+    fn a_scroll_view_on_its_parents_right_line_keeps_no_column() {
+        // Framed with no padding: the painter draws the bar on that line.
+        let batch = scroll_with_a_right_text(
+            &[
+                ("borderWidth", V::Number(1.0)),
+                ("borderColor", V::Str("#888888")),
+                ("alignSelf", V::Str("flex-start")),
+            ],
+            200.0,
+            None,
+        );
+        assert_eq!(right_of(&batch, 4), Some(160.0));
+    }
+
     #[test]
     fn a_framed_box_stated_three_rows_tall_keeps_its_border_around_a_text() {
         // A specimen on a pressable stage: a 76pt box framed on every side

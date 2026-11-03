@@ -198,6 +198,23 @@ impl<C> LayoutTree<C> {
         true
     }
 
+    /// The room a list laid out in a terminal leaves its scroll bar across
+    /// its cells, in points: a column (a row when horizontal) when it shows
+    /// its indicator, as a scroll view's content does
+    /// ([`terminal_layout::bar_room`]); none elsewhere.
+    pub(crate) fn list_bar_room(&self, node: NodeId, horizontal: bool) -> f32 {
+        let Some(grid) = self.grid else {
+            return 0.0;
+        };
+        let n = &self.nodes[key(node)];
+        let own = n.unrounded;
+        let parent = n.parent.map(|p| {
+            let p = &self.nodes[key(p)];
+            (p.insets, p.unrounded.size.width)
+        });
+        terminal_layout::list_bar_room(n.role, own, parent, horizontal, grid)
+    }
+
     /// What the core knows of `node` (`Core::grid_role`): in a terminal a
     /// control has no border and what a terminal cannot show is left out.
     /// Returns whether its layout changed.
@@ -698,6 +715,10 @@ where
 
     fn placed(&self, node: NodeId) -> Layout {
         *self.tree.unrounded_layout(node)
+    }
+
+    fn parent(&self, node: NodeId) -> Option<NodeId> {
+        self.tree.parent(node)
     }
 }
 

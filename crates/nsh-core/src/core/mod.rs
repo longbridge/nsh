@@ -1881,7 +1881,8 @@ impl<M: TextEngine> Core<M> {
                         AccessibilityProp::Role(_)
                             | AccessibilityProp::Label(_)
                             | AccessibilityProp::State(_)
-                    )
+                    ) | Prop::Scrollbar(_)
+                        | Prop::Horizontal(_)
                 );
                 let result = self.set_prop(id, prop);
                 if role && let Ok(key) = self.key(id) {
@@ -2610,6 +2611,21 @@ impl<M: TextEngine> Core<M> {
             meter: node.props.as_ref().is_some_and(|p| {
                 p.accessibility.role == crate::element::AccessibilityRole::Progressbar
             }),
+            // The platform's indicator: none where the app hides it or
+            // its own built-in bar takes its place.
+            indicator: match node.scroll.as_deref() {
+                Some(scroll)
+                    if scroll.scrollbar != crate::ScrollbarSetting::Hidden
+                        && scroll.bar.is_none() =>
+                {
+                    if scroll.horizontal {
+                        terminal_layout::Indicator::Horizontal
+                    } else {
+                        terminal_layout::Indicator::Vertical
+                    }
+                }
+                _ => terminal_layout::Indicator::No,
+            },
         }
     }
 
@@ -6493,6 +6509,23 @@ impl<M: TextEngine> Core<M> {
             } else {
                 (size.width - l.border.left - l.border.right - l.padding.left - l.padding.right)
                     .max(0.0)
+            };
+            // In a terminal its scroll bar takes a column (a row) of its own
+            // once the content overflows, as a scroll view's does.
+            let cross = if state.parent {
+                cross
+            } else {
+                let main = if horizontal {
+                    size.width - l.border.left - l.border.right - l.padding.left - l.padding.right
+                } else {
+                    size.height - l.border.top - l.border.bottom - l.padding.top - l.padding.bottom
+                };
+                let room = self.layout.list_bar_room(list_layout, horizontal);
+                if room > 0.0 && state.content_len() > main + 0.5 {
+                    (cross - room).max(0.0)
+                } else {
+                    cross
+                }
             };
             let item_cross = state.column(cross, 0).1;
             let extra_cross = state.full_width(cross).1;
