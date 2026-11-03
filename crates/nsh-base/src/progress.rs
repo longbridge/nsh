@@ -81,7 +81,7 @@ pub fn Progress(props: ProgressProps, _cx: Scope<NoEvent>) -> impl IntoElement {
         })
         .child(match is_terminal() {
             // The terminal's own bar, in place of the track and indicator.
-            true => terminal_bar(clamped, indeterminate).into_element(),
+            true => terminal_bar(clamped, indeterminate, props.indicator_style).into_element(),
             false => view()
                 .app_class(props.track_class)
                 .inline_style(props.track_style)
@@ -103,7 +103,11 @@ pub fn Progress(props: ProgressProps, _cx: Scope<NoEvent>) -> impl IntoElement {
 const STEP: Duration = Duration::from_millis(120);
 
 /// A progress bar's terminal form.
-fn terminal_bar(clamped: impl Fn() -> f32 + Copy + 'static, indeterminate: Prop<bool>) -> View {
+fn terminal_bar(
+    clamped: impl Fn() -> f32 + Copy + 'static,
+    indeterminate: Prop<bool>,
+    indicator: Prop<Style>,
+) -> View {
     let step = signal(0usize);
     // The segment moves only while indeterminate and motion is welcome:
     // no ticks otherwise.
@@ -119,6 +123,12 @@ fn terminal_bar(clamped: impl Fn() -> f32 + Copy + 'static, indeterminate: Prop<
             true => progress_indeterminate(columns, step.get()),
             false => progress_bar(Percentage(clamped() / MAX), columns),
         },
-        ACCENT,
+        // The app's indicator color (a level's danger), else the
+        // terminal's accent.
+        move || {
+            indicator
+                .with(Style::background_color)
+                .unwrap_or_else(|| ACCENT.into())
+        },
     )
 }

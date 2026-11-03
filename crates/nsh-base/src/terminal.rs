@@ -30,6 +30,12 @@ pub(crate) fn cell_height() -> Points {
     text_metrics("", "0").height
 }
 
+/// The width of one Cell: the grid's the core lays out on, else as the
+/// terminal's text engine measures one glyph.
+pub(crate) fn cell_width() -> Points {
+    nsh_core::element::cell_size().map_or_else(|| text_metrics("", "0").width, |c| c.width)
+}
+
 /// The height of a code view's row (an editor's, a diff's): the app's
 /// `line_height`, or one Cell in a terminal, where a row is one line of
 /// the grid (a height of another step would land rows on Cells unevenly,
@@ -142,7 +148,10 @@ fn line_colored(
 /// is split around its run of glyphs other than [`PROGRESS_EMPTY`] (a
 /// progress bar's filled part, an indeterminate bar's segment), which takes
 /// `color`; the empty track around it keeps the text's color.
-pub(crate) fn filled_line(content: impl Fn(usize) -> String + 'static, color: Hsla) -> View {
+pub(crate) fn filled_line(
+    content: impl Fn(usize) -> String + 'static,
+    color: impl Fn() -> AdaptiveColor + 'static,
+) -> View {
     let cell = measure_text("", "0");
     let columns = signal(0usize);
     let parts = computed(move || split_filled(&content(columns.get())));

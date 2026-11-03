@@ -271,6 +271,41 @@ fn triggers_disclosures_and_tree_rows_show_the_terminals_marks() {
     assert!(texts(&app).iter().any(|t| t == "▾ "));
 }
 
+/// A select with nothing chosen and a `placeholder`, and one whose trigger
+/// the app makes.
+#[component]
+fn Placeholder() -> impl IntoElement {
+    let items = || {
+        vec![
+            SelectItem::new("design", "Design"),
+            SelectItem::new("build", "Build"),
+        ]
+    };
+    view()
+        .child(select().items(items()).placeholder("Choose a team"))
+        .child(
+            select()
+                .items(items())
+                .value("build")
+                .trigger(view().child(text("Owner: Build team"))),
+        )
+}
+
+#[test]
+fn a_terminals_select_shows_its_placeholder_or_the_apps_trigger() {
+    let app = start::<Placeholder>(Idiom::Terminal);
+    let shown = texts(&app);
+    assert!(shown.iter().any(|t| t == "Choose a team"), "{shown:?}");
+    assert!(shown.iter().any(|t| t == "Owner: Build team"), "{shown:?}");
+    // The app's trigger, not the chosen title.
+    assert!(!shown.iter().any(|t| t == "Build"), "{shown:?}");
+    let arrows = shown
+        .iter()
+        .filter(|t| *t == terminal::SELECT_ARROW)
+        .count();
+    assert_eq!(arrows, 2, "{shown:?}");
+}
+
 /// An accordion item open from the start and a tree whose rows the app
 /// draws (`renderItem`), indented by depth as apps do.
 #[component]
@@ -394,20 +429,37 @@ fn text_origins<C: Component<Props = ()>>() -> std::collections::HashMap<String,
     });
     app.first_render().unwrap();
     let seen = seen.lock().unwrap();
+    // Where a view is, and whether it shows: a view never laid out (hidden
+    // from the start, as a calendar's sixth week or a pagination's spare
+    // ellipsis) or inside an empty one does not.
     let at = |mut id: NodeId| {
         let (mut x, mut y) = (0.0, 0.0);
+        let mut shows = seen.1.contains_key(&id);
         loop {
             if let Some(f) = seen.1.get(&id) {
                 x += f.origin.x.0;
                 y += f.origin.y.0;
+                shows &= f.size.width.0 > 0.0 && f.size.height.0 > 0.0;
             }
             match seen.2.get(&id) {
                 Some(parent) => id = *parent,
-                None => return (x, y),
+                None => return ((x, y), shows),
             }
         }
     };
-    seen.0.iter().map(|(id, t)| (t.clone(), at(*id))).collect()
+    // A text shown twice (a day of two months) is where it shows.
+    let mut origins = std::collections::HashMap::new();
+    let mut shown = std::collections::HashSet::new();
+    for (id, t) in &seen.0 {
+        let (origin, shows) = at(*id);
+        if shows || !shown.contains(t) {
+            origins.insert(t.clone(), origin);
+            if shows {
+                shown.insert(t.clone());
+            }
+        }
+    }
+    origins
 }
 
 #[test]
@@ -903,4 +955,146 @@ fn a_terminals_command_rows_leave_the_highlight_to_the_terminal() {
         !terminal.contains(&RED) && !terminal.contains(&GREEN),
         "{terminal:?}"
     );
+}
+
+/// November 2026 (it starts on a Sunday), its days drawn by the app as
+/// `d<n>`.
+#[component]
+fn Month() -> impl IntoElement {
+    let day = chrono::NaiveDate::from_ymd_opt(2026, 11, 6);
+    nsh_base::calendar()
+        .default_value(nsh_base::Date::Single(day))
+        .item_class("p-4 m-2")
+        .render_item(|e: &nsh_base::CalendarEntry| match e.kind {
+            nsh_base::CalendarItemKind::Day => text(format!("d{}", e.value)),
+            _ => text(format!("k{}", e.value)),
+        })
+}
+
+#[test]
+fn a_terminals_calendar_is_a_grid_of_right_aligned_numbers() {
+    // `cal`'s month: the calendar draws the days as their numbers, two
+    // Cells each, right-aligned, two blank Cells apart (controls side by
+    // side read as words); the app's item look and drawings are left out.
+    let at = text_starts::<Month>();
+    assert!(!at.keys().any(|t| t.starts_with('d')), "{at:?}");
+    let x = |t: &str| *at.get(t).unwrap_or_else(|| panic!("no {t:?}: {at:?}"));
+    // A day column is four Cells (32pt) from the next.
+    assert_eq!(x("9") - x("8"), 32.0);
+    assert_eq!(x("16"), x("23"));
+    // Two digits take the column's both Cells, one its last.
+    assert_eq!(x("10"), x("9") + 24.0);
+    // A week is seven columns.
+    assert_eq!(x("15"), x("22"));
+    assert_eq!(x("21") - x("15"), 6.0 * 32.0);
+}
+
+/// Page 1 of 24, its items in the app's padded boxes.
+#[component]
+fn Pages() -> impl IntoElement {
+    nsh_base::pagination()
+        .page(1u32)
+        .total_pages(24u32)
+        .previous_accessibility_label("Previous")
+        .next_accessibility_label("Next")
+        .item_class("px-6 border")
+}
+
+#[test]
+fn a_terminals_pagination_is_a_row_of_words_two_cells_apart() {
+    // Previous  1  2  3  …  24  Next: the app's item boxes are left out,
+    // the pages and the ellipsis two blank Cells apart.
+    let at = text_starts::<Pages>();
+    let x = |t: &str| *at.get(t).unwrap_or_else(|| panic!("no {t:?}: {at:?}"));
+    assert_eq!(x("1") - x("Previous"), (8.0 + 2.0) * 8.0);
+    assert_eq!(x("2") - x("1"), 3.0 * 8.0);
+    assert_eq!(x("3") - x("2"), 3.0 * 8.0);
+    assert_eq!(x("…") - x("3"), 3.0 * 8.0);
+    assert_eq!(x("24") - x("…"), 3.0 * 8.0);
+    assert_eq!(x("Next") - x("24"), 4.0 * 8.0);
+}
+
+/// A progress bar whose indicator the app colors red, as a level low on
+/// charge.
+#[component]
+fn Low() -> impl IntoElement {
+    let red = nsh_core::Color(0xff0000ff);
+    view().child(
+        progress()
+            .value(50.0)
+            .indicator_style(move |s| s.bg(red))
+            .w(px(200.0)),
+    )
+}
+
+#[test]
+fn a_terminals_progress_bar_takes_the_indicators_color() {
+    let glyphs: Vec<char> = PROGRESS_EIGHTHS
+        .into_iter()
+        .chain([PROGRESS_EMPTY])
+        .collect();
+    let filled = |app: &Headless| {
+        let run: String = row_of(app, &glyphs)
+            .chars()
+            .filter(|&c| c != PROGRESS_EMPTY)
+            .collect();
+        app.screen()
+            .span_style(&format!("text:{run}"))
+            .unwrap()
+            .color
+    };
+    let red = start::<Low>(Idiom::Terminal);
+    assert_eq!(filled(&red), nsh_core::Color(0xff0000ff));
+    // Without one, the terminal's accent.
+    let plain = start::<Bar>(Idiom::Terminal);
+    assert_eq!(filled(&plain), terminal::ACCENT.into());
+}
+
+/// A diff of a long line left as it was and one changed.
+#[component]
+fn LongDiff() -> impl IntoElement {
+    nsh_base::diff_view()
+        .old_value("/** Formats a number for the badge beside the title */\nconst STEP = 1;\n")
+        .new_value("/** Formats a number for the badge beside the title */\nconst STEP = 2;\n")
+        .w(px(240.0))
+        .h(px(200.0))
+}
+
+#[test]
+fn a_terminals_diff_cuts_every_line_alike() {
+    // Changed and unchanged lines alike are one line cut short with `…`
+    // at their side's edge (no side scrolls across in a terminal).
+    let viewport = Size::new(px(390.0), px(844.0));
+    let config = EngineConfig {
+        viewport,
+        environment: Environment {
+            window: viewport,
+            os: Os::Linux,
+            idiom: Idiom::Terminal,
+            cell: Some(Size::new(px(8.0), px(16.0))),
+            ..Environment::default()
+        },
+        ..EngineConfig::new(Root::of::<LongDiff>())
+    };
+    let mut app = Headless::start(config).unwrap();
+    let lines = Arc::new(Mutex::new(std::collections::HashMap::new()));
+    let into = lines.clone();
+    app.observe(move |_, batch| {
+        for item in &batch.items {
+            if let MountItem::Text { id, text, .. } = item {
+                into.lock()
+                    .unwrap()
+                    .insert(*id, (text.text.to_string(), text.max_lines));
+            }
+        }
+    });
+    app.first_render().unwrap();
+    app.idle(Duration::from_millis(50)).unwrap();
+    let lines = lines.lock().unwrap();
+    let limits: Vec<_> = lines
+        .values()
+        .filter(|(t, _)| t.contains("Formats") || t.contains("STEP"))
+        .collect();
+    assert!(limits.len() >= 4, "{lines:?}");
+    assert!(limits.iter().all(|(_, max)| *max == 1), "{limits:?}");
 }

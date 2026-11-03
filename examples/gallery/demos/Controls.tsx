@@ -2524,7 +2524,7 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
               presetClass="enabled:hover:bg-accent active:opacity-70"
               calendarStyle={calendar}
               headerStyle={header}
-              bodyStyle={{ gap: monthGap }}
+              bodyStyle={terminal ? undefined : { gap: monthGap }}
               itemClass={calendarItemClass}
               renderItem={(item) => <CalendarItem item={item} months={twoMonths() ? 2 : 1} />}
               trigger={<Picker title={tripTitle()} open={tripOpen()} placeholder={!trip()} />}
@@ -2644,7 +2644,7 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
           numberOfMonths={twoMonths() ? 2 : 1}
           disabledMatcher={closed}
           {...calendarProps("start")}
-          bodyStyle={{ gap: monthGap }}
+          bodyStyle={terminal ? undefined : { gap: monthGap }}
           renderItem={(item) => <CalendarItem item={item} months={twoMonths() ? 2 : 1} />}
           trigger={
             // Both ends in one field, parted by a hairline; the whole field opens the calendar.

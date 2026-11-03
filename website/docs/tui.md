@@ -179,8 +179,10 @@ accent. The app's focus styles still apply on top.
 | `Switch` | `━━●` on, `●──` off |
 | `Slider` | a row of `─`, filled with `━` up to the value, a `●` per thumb |
 | `Progress` | a bar of `█` with eighths at its end, then `░` |
-| `Select`, `Combobox` | the value and ` ▾`, the list opening under it |
+| `Select`, `Combobox` | the value (a `Select`'s `placeholder` while none is chosen, or the app's `trigger`) and ` ▾`, the list opening under it |
 | `Tabs` | the tabs in a row, the selected one bold |
+| `Calendar`, `DatePicker` | `cal`'s month: the days' numbers right-aligned in columns, today bold, the selected days banded |
+| `Pagination` | Previous, the pages, `…` and Next as words in a row, the current page banded |
 | `MenuItem`, `Submenu` | `✓ ` on a checked item, ` ›` on a submenu's trigger |
 | `Accordion`, `Collapsible`, `Tree` | `▸` closed, `▾` open |
 | `Scrollbar` | the terminal's own scroll bar |

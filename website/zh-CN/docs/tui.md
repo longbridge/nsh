@@ -155,8 +155,10 @@ Escape 或 Ctrl+G 把焦点和滚动位置恢复到搜索之前。
 | `Switch` | 开为 `━━●`，关为 `●──` |
 | `Slider` | 一行 `─`，到当前值为止用 `━` 填充，每个滑块一个 `●` |
 | `Progress` | 一条 `█` 组成的进度条，末端按八分之一显示，其后为 `░` |
-| `Select`、`Combobox` | 当前值加 ` ▾`，列表在它下方展开 |
+| `Select`、`Combobox` | 当前值（`Select` 未选中时是 `placeholder`，或应用的 `trigger`）加 ` ▾`，列表在它下方展开 |
 | `Tabs` | 标签页排成一行，选中的为粗体 |
+| `Calendar`、`DatePicker` | 像 `cal` 的月历：日期数字按列右对齐，今天为粗体，选中的日期显示为色带 |
+| `Pagination` | 上一页、页码、`…` 和下一页作为一行中的词，当前页显示为色带 |
 | `MenuItem`、`Submenu` | 勾选的菜单项前为 `✓ `，子菜单的触发项后为 ` ›` |
 | `Accordion`、`Collapsible`、`Tree` | 收起为 `▸`，展开为 `▾` |
 | `Scrollbar` | 终端自己的滚动条 |

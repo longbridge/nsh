@@ -513,7 +513,9 @@ fn content(dv: Dv, column: Column, rows: Memo<Vec<usize>>) -> impl IntoElement {
         let dv = dv.clone();
         move || {
             dv.rev.get();
-            if props.soft_wrap.get() {
+            // A terminal's side is as wide as its box, its lines cut
+            // short with `…` at its edge ([`line_row`]).
+            if props.soft_wrap.get() || crate::terminal::is_terminal() {
                 return Length::from(relative(1.0));
             }
             let st = dv.st.borrow();
@@ -589,6 +591,7 @@ fn line_row(
             // The columns lines wrap at change with the box's width (`rev`),
             // the cell staying as it was.
             wrap.rev.get();
+            let wrapped = wrap.st.borrow().wrap_columns.is_some();
             let lines = match wrap.st.borrow().wrap_columns {
                 Some(columns) => {
                     let joined: String = cell.spans.iter().map(|s| s.text.as_str()).collect();
@@ -611,14 +614,20 @@ fn line_row(
                     .map(|span| span_view(props, span, tint))
                     .collect::<Vec<_>>();
                 let lh = lh.clone();
-                el = el.child(
-                    text("")
-                        .selection_color(selection_color)
-                        .absolute()
-                        .top(move || Length::from(lh() * index as f32))
-                        .left(px(PAD))
-                        .children(spans),
-                );
+                let line = text("")
+                    .selection_color(selection_color)
+                    .absolute()
+                    .top(move || Length::from(lh() * index as f32))
+                    .left(px(PAD))
+                    .children(spans);
+                // In a terminal every line, changed or not, ends in `…`
+                // where the side cuts it, as a terminal's diff shows a
+                // line too long for its pane (its side is as wide as its
+                // box: [`content`]).
+                el = el.child(match !wrapped && crate::terminal::is_terminal() {
+                    true => line.right(px(PAD)).truncate(),
+                    false => line,
+                });
             }
             Some(el)
         }))
