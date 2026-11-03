@@ -6,6 +6,7 @@ mod avatar;
 mod button;
 mod calendar;
 mod carousel;
+mod checkbox;
 mod collapsible;
 mod color_picker;
 mod combobox;
