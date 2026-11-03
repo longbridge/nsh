@@ -463,7 +463,7 @@ impl Pointer {
             area,
             cells,
             hits,
-            geometry: _,
+            geometry,
             tree,
             control,
         } = cx;
@@ -481,7 +481,7 @@ impl Pointer {
         if self
             .pressed
             .as_ref()
-            .is_some_and(|(press, _)| !crate::keyboard::contains(tree, scope, press.node))
+            .is_some_and(|(press, _)| !crate::keyboard::contains(tree, scope, press.view))
         {
             self.cancel(tree, Some(control));
         }
@@ -672,18 +672,30 @@ impl Pointer {
                         self.drag = Some(drag);
                     }
                 }
-                let Some((id, origin)) = hit.and_then(|hit| hit.target.map(|id| (id, hit.origin)))
-                else {
+                // A pressable span (a nested `<Text onPress>`, a link) under
+                // the pointer takes the press before the views around it.
+                // The span is no view of its own: its text view (`view`)
+                // stands for it in the tree.
+                let link = hit.and_then(|hit| {
+                    link_at(tree, geometry, hit.node, page).map(|link| (link, hit))
+                });
+                let target = link
+                    .map(|(link, hit)| (hit.node, link.node, link.events, hit.node_origin))
+                    .or_else(|| {
+                        let (id, origin) =
+                            hit.and_then(|hit| hit.target.map(|id| (id, hit.origin)))?;
+                        Some((id, id, tree.get(id)?.events, origin))
+                    });
+                let Some((view, id, events, origin)) = target else {
                     return if self.drag.is_some() {
                         Handled::Yes
                     } else {
                         unused
                     };
                 };
-                let Some(view) = tree.get(id) else {
-                    return unused;
-                };
-                let mut press = Press::new(id, id, view.events, view.props.long_press_delay, 0)
+                // A span's press delay is its text view's.
+                let delay = tree.get(view).and_then(|view| view.props.long_press_delay);
+                let mut press = Press::new(view, id, events, delay, 0)
                     .clicked(mouse.modifiers, self.clicks());
                 if let Some(event) = press.press_in() {
                     dispatch(control, &press, event, page, origin);
@@ -695,10 +707,14 @@ impl Pointer {
                 let Some((mut press, origin)) = self.pressed.take() else {
                     return unused;
                 };
-                if tree.get(press.node).is_none() {
+                let link = hit.and_then(|hit| link_at(tree, geometry, hit.node, page));
+                if tree.get(press.view).is_none() {
                     return unused;
                 }
-                let fire = hit.is_some_and(|hit| hit.target == Some(press.node));
+                let fire = match link {
+                    Some(link) => link.node == press.node,
+                    None => hit.is_some_and(|hit| hit.target == Some(press.node)),
+                };
                 for event in press.press_out(fire) {
                     dispatch(control, &press, event, page, origin);
                 }
@@ -707,6 +723,31 @@ impl Pointer {
             _ => unused,
         }
     }
+}
+
+/// The pressable span (a nested `<Text onPress>`) of text view `id` on the
+/// Cell at `page`: the innermost one around the character drawn there.
+fn link_at(
+    tree: &Mounter,
+    geometry: &[Geometry],
+    id: NodeId,
+    page: Point<Points>,
+) -> Option<nsh_core::TextLink> {
+    let view = tree.get(id)?;
+    let text = view.text_content.as_ref()?;
+    if text.links.is_empty() {
+        return None;
+    }
+    let frame = geometry.iter().rev().find(|g| g.id == id)?.text_frame?;
+    let layout = view.text.as_ref()?.0.downcast::<crate::text::CellLayout>()?;
+    let point = page - frame.origin;
+    let (_, range) = layout
+        .glyphs
+        .iter()
+        .find(|(bounds, range)| !range.is_empty() && bounds.contains(&point))?;
+    text.link_at(range.start)
+        .filter(|link| nsh_core::input::has_press(link.events))
+        .copied()
 }
 
 fn dispatch(

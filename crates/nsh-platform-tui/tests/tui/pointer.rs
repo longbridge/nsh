@@ -323,6 +323,69 @@ fn selectable_text_still_presses_on_a_click_and_only_copies_after_a_drag() {
 }
 
 #[test]
+fn a_click_on_a_pressable_span_presses_the_span_not_its_text() {
+    use nsh_platform_tui::MouseButton::Left;
+    let (mut view, rx) = surface();
+    let code = nsh_bundler::compile_module("App.tsx", r#"
+        import { mount, signal, View, Text } from "nsh";
+        const links = signal(0);
+        const texts = signal(0);
+        mount(() => <View>
+            <Text onPress={() => texts.set(texts() + 1)}>read <Text onPress={() => links.set(links() + 1)}>the guide</Text> now</Text>
+            <Text>links:{links()} texts:{texts()}</Text>
+        </View>);
+    "#, &[]).unwrap();
+    let mut terminal = Terminal::new(TestBackend::new(40, 8)).unwrap();
+    view.load(Bundle::source(code)).unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "links:0 texts:0");
+    // "read the guide now": the span covers columns 5 to 13.
+    view.handle(mouse(MouseKind::Down(Left), 7, 0));
+    view.handle(mouse(MouseKind::Up(Left), 7, 0));
+    draw_until(&mut view, &mut terminal, &rx, "links:1 texts:0");
+    // Released off the span, its press does not fire; the text's does.
+    view.handle(mouse(MouseKind::Down(Left), 9, 0));
+    view.handle(mouse(MouseKind::Up(Left), 1, 0));
+    view.handle(mouse(MouseKind::Down(Left), 16, 0));
+    view.handle(mouse(MouseKind::Up(Left), 16, 0));
+    draw_until(&mut view, &mut terminal, &rx, "links:1 texts:1");
+}
+
+/// The same as a Rust app: a sentence that takes presses, with a link in it.
+mod linked {
+    use nsh_core::prelude::*;
+
+    #[component]
+    pub(super) fn Linked() -> impl IntoElement {
+        let links = signal(0);
+        let texts = signal(0);
+        view()
+            .child(
+                text("read ")
+                    .child(text("the guide").on_press(move |_: &()| links.update(|n| *n += 1)))
+                    .child(" now")
+                    .on_press(move |_: &()| texts.update(|n| *n += 1)),
+            )
+            .child(text(move || format!("links:{} texts:{}", links.get(), texts.get())))
+    }
+}
+
+#[test]
+fn a_click_on_a_rust_apps_pressable_span_presses_the_span() {
+    use nsh_platform_tui::{App, MouseButton::Left, Root};
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(40, 8)).unwrap();
+    view.load(App::Rust(Root::new::<linked::Linked>(|| ())))
+        .unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "links:0 texts:0");
+    view.handle(mouse(MouseKind::Down(Left), 7, 0));
+    view.handle(mouse(MouseKind::Up(Left), 7, 0));
+    draw_until(&mut view, &mut terminal, &rx, "links:1 texts:0");
+    view.handle(mouse(MouseKind::Down(Left), 16, 0));
+    view.handle(mouse(MouseKind::Up(Left), 16, 0));
+    draw_until(&mut view, &mut terminal, &rx, "links:1 texts:1");
+}
+
+#[test]
 fn concealing_a_hovered_view_clears_hover_without_more_mouse_motion() {
     use nsh_platform_tui::MouseButton::Left;
     let code = nsh_bundler::compile_module(

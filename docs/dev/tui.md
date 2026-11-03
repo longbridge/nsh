@@ -808,6 +808,10 @@ terminal emulator and its own text selection. An embedder owns this transport ch
 `Input::Mouse`; AppView never changes terminal modes. The test agent forwards the same input independently of
 terminal capture.
 
+A press on the Cell of a pressable span (a nested `<Text onPress>`, a `TextView` link) is the span's, as on the
+desktop backends: the innermost span around the character drawn there takes it before the views around its
+text, and it fires only when released on that span.
+
 Presses of one button on one Cell within 500 ms count up to a triple click and start over: `Press` events carry
 the count (`clicks`), a double click in a field selects the word, a triple click its line, and selectable text
 selects its word and paragraph the same way. Dragging after a double or triple click extends the selection by
