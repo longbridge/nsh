@@ -152,6 +152,11 @@ pub(crate) struct Surface {
     /// next paint, or the keys for the field go to whatever element of the
     /// embedding app had it ([`crate::events::install`]).
     pub(crate) window_focus_requested: Cell<bool>,
+    /// The surface's window is not presented (minimized, on another
+    /// workspace, a suspended Wayland toplevel): its caret does not blink
+    /// ([`crate::text_input::window_visibility`]). Kept across the app's
+    /// reloads, which do not change the window's visibility.
+    pub(crate) window_hidden: Cell<bool>,
     /// The environment the engine was last told about.
     pub(crate) environment: Cell<Environment>,
     /// The app's appearance (`nsh.json`, `setColorScheme`): the color
@@ -241,6 +246,7 @@ impl Surface {
             input_pressed: Cell::new(0),
             input_hovered: Cell::new(false),
             window_focus_requested: Cell::new(false),
+            window_hidden: Cell::new(false),
             environment: Cell::new(environment),
             appearance: Cell::default(),
             js_frame: Cell::new(false),

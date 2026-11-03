@@ -644,15 +644,11 @@ enum Held {
 }
 
 /// A surface's focused field, and whether the surface has the window's
-/// focus and its window is presented.
+/// focus.
 #[derive(Default)]
 struct Focus {
     view: Option<NshView>,
     inactive: bool,
-    /// The surface's window is not presented (minimized, on another
-    /// workspace, a suspended Wayland toplevel): it may keep the keyboard,
-    /// but nobody sees its caret, which stops blinking.
-    hidden: bool,
     /// Text typed after an action that can move focus, and the editing
     /// keys typed after that text. The field that has the keyboard when
     /// the engine catches up takes them, in order.
@@ -1056,15 +1052,10 @@ pub(crate) fn window_focus(surface: &Rc<Surface>, has_focus: bool) -> bool {
 /// caret: the timer, the view's notify and GPUI's frame request woke the
 /// process twice a second for nothing. Shown again, the caret shows at
 /// once and blinks from there.
+/// The state is the surface's, not its focus entry's, so a reload while
+/// hidden (which forgets the focus) keeps the caret still.
 pub(crate) fn window_visibility(surface: &Rc<Surface>, visible: bool) {
-    let changed = FOCUS.with(|f| {
-        let mut f = f.borrow_mut();
-        let entry = f.entry(surface.key()).or_default();
-        let changed = entry.hidden == visible;
-        entry.hidden = !visible;
-        changed
-    });
-    if !changed {
+    if surface.window_hidden.replace(!visible) == !visible {
         return;
     }
     if visible
@@ -2413,7 +2404,9 @@ mod blink {
         FOCUS.with(|f| {
             f.borrow()
                 .iter()
-                .filter(|(key, f)| !f.inactive && !f.hidden && Surface::by_key(**key).is_some())
+                .filter(|(key, f)| {
+                    !f.inactive && Surface::by_key(**key).is_some_and(|s| !s.window_hidden.get())
+                })
                 .filter_map(|(_, f)| f.view.clone())
                 .collect()
         })
@@ -2604,10 +2597,36 @@ mod tests {
         assert!(blink::carets().is_empty());
         // The field keeps the focus.
         assert!(FOCUS.with(|f| f.borrow()[&surface.key()].view.is_some()));
-        // Shown again, it blinks (the test's field, never mounted, is then
-        // dropped as a removed one would be: only the window's state is left).
+        // Shown again, it blinks.
         window_visibility(&surface, true);
-        assert!(FOCUS.with(|f| !f.borrow()[&surface.key()].hidden));
+        assert!(!surface.window_hidden.get());
+        surface_stopped(surface.key());
+    }
+
+    /// A reload while the window is hidden forgets the focus but not the
+    /// window's visibility: the field the reloaded app focuses (autoFocus)
+    /// does not blink until the window is shown.
+    #[test]
+    fn a_reload_while_hidden_keeps_the_caret_still() {
+        let surface = Surface::new(nsh_engine::Environment::default());
+        window_visibility(&surface, false);
+        // `Surface::stop` (a reload) forgets the surface's focus.
+        surface_stopped(surface.key());
+        let view = NshView::new(3, nsh_core::ViewKind::Input);
+        FOCUS.with(|f| {
+            f.borrow_mut().insert(
+                surface.key(),
+                Focus {
+                    view: Some(view),
+                    ..Default::default()
+                },
+            )
+        });
+        assert!(blink::carets().is_empty());
+        // Shown again, it blinks (the test's field, never mounted, is then
+        // dropped as a removed one would be).
+        window_visibility(&surface, true);
+        assert!(!surface.window_hidden.get());
         surface_stopped(surface.key());
     }
 
