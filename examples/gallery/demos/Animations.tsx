@@ -178,9 +178,11 @@ function PresetTile(props: { name: MotionName; tone: string; onPlay: (status: st
     <BaseButton
       onPress={press}
       accessibilityLabel={props.name}
+      // In a terminal a tile is its name in a column of names, not grown,
+      // so the rows line up: no card or icon to center it in.
       style={{
         flexBasis: "30%",
-        flexGrow: 1,
+        flexGrow: terminal ? 0 : 1,
         borderRadius: 14,
         borderCurve: "continuous",
         backgroundColor: colors.raised,
@@ -196,7 +198,7 @@ function PresetTile(props: { name: MotionName; tone: string; onPlay: (status: st
       <View
         style={{
           height: 92,
-          alignItems: "center",
+          alignItems: terminal ? "flex-start" : "center",
           justifyContent: "center",
           gap: 12,
         }}
