@@ -269,15 +269,20 @@ fn draw(list: &DisplayList, size: f32, top: f32) -> Painter {
 /// `axis_height`, KaTeX's 0.25): where an inline formula's middle goes.
 const AXIS: f64 = 0.25;
 
+/// Room above and below a formula's box, in ems. The box comes from KaTeX's
+/// metrics, which leave out how far round glyphs like `0` and `6` overshoot
+/// the baseline and cap height, and the canvas clips what leaves it.
+const OVERSHOOT: f64 = 0.05;
+
 /// `formula` drawn at `size` points per em. Inline (not `display`), the box
 /// is padded so its middle is the formula's math axis, which
 /// `align-middle` puts at the middle of the text's x height.
 fn render(formula: &Formula, size: f32, display: bool) -> AnyElement {
     let list = &formula.list;
     let (above, below) = if display {
-        (list.height, list.depth)
+        (list.height + OVERSHOOT, list.depth + OVERSHOOT)
     } else {
-        let half = (list.height - AXIS).max(list.depth + AXIS);
+        let half = (list.height - AXIS).max(list.depth + AXIS) + OVERSHOOT;
         (half + AXIS, half - AXIS)
     };
     let top = ((above - list.height) as f32) * size;
@@ -314,6 +319,49 @@ mod tests {
             let formula = typeset(tex, true).unwrap_or_else(|| panic!("{tex}"));
             assert!(formula.list.width > 0.0, "{tex}");
             assert!(!formula.list.items.is_empty(), "{tex}");
+        }
+    }
+
+    #[test]
+    fn glyphs_stay_inside_the_padded_box() {
+        for tex in [
+            "\\tfrac{1000}{60}",
+            "\\frac{1000}{60}",
+            "x^2",
+            "\\int_0^\\infty e^{-x^2}\\,dx = \\frac{\\sqrt{\\pi}}{2}",
+            "\\sum_{n=1}^{\\infty} \\frac{1}{n^2} = \\frac{\\pi^2}{6}",
+            "\\begin{pmatrix} 1 & 2 \\\\ 3 & 4 \\end{pmatrix}",
+        ] {
+            let list = typeset(tex, true).unwrap_or_else(|| panic!("{tex}")).list;
+            for item in &list.items {
+                let DisplayItem::GlyphPath {
+                    y,
+                    scale,
+                    font,
+                    char_code,
+                    ..
+                } = item
+                else {
+                    continue;
+                };
+                let face = face(font).expect("font");
+                let id = FontId::parse(font).unwrap_or(FontId::MainRegular);
+                let ch = ratex_font::katex_ttf_glyph_char(id, *char_code);
+                let Some(bounds) = face
+                    .glyph_index(ch)
+                    .and_then(|glyph| face.glyph_bounding_box(glyph))
+                else {
+                    continue;
+                };
+                let em = *scale / f64::from(face.units_per_em());
+                let top = *y - f64::from(bounds.y_max) * em;
+                let bottom = *y - f64::from(bounds.y_min) * em;
+                assert!(top >= -OVERSHOOT, "{tex}: {ch:?} top {top}");
+                assert!(
+                    bottom <= list.height + list.depth + OVERSHOOT,
+                    "{tex}: {ch:?} bottom {bottom}"
+                );
+            }
         }
     }
 
