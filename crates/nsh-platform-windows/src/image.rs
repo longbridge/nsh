@@ -1610,10 +1610,15 @@ fn effect_scale(frame: (f32, f32), bitmap: (f32, f32), dpi: f32) -> (f32, f32) {
     (frame.0 / bitmap.0 * dpi, frame.1 / bitmap.1 * dpi)
 }
 
-/// Gaussian sigma in source pixels for a point-based blur radius.
-fn effect_blur_sigma(radius: f32, scale: (f32, f32), dpi: f32) -> f32 {
-    radius / 2.0 * dpi / scale.0.min(scale.1).max(1e-6)
+/// The Gaussian blur effect's deviation for a blur radius in points, under
+/// the world-transform scale of [`effect_scale`]. A radius is twice the
+/// deviation (GSK's and CSS's reading). The effect takes DIPs and applies the
+/// context's DPI itself, which `scale`'s own DPI cancels on the way to the
+/// screen.
+fn effect_blur_sigma(radius: f32, scale: (f32, f32)) -> f32 {
+    radius / 2.0 / scale.0.min(scale.1).max(1e-6)
 }
+
 /// Draws one picture with the view's mode, tint and blur.
 fn draw_one(
     cx: &mut DrawCx<'_>,
@@ -1661,8 +1666,8 @@ fn draw_one(
         return;
     }
     let saved = cx.transform;
-    // Effects draw in the image's own pixels (one DIP each): mapped onto
-    // the rectangle by the world transform.
+    // Effects draw in the image's own pixels, one device pixel each whatever
+    // the context's DPI: mapped onto the rectangle by the world transform.
     let (sx, sy) = effect_scale((fw, fh), (bw, bh), cx.scale);
     cx.set_transform(Mat4::new().translate(x, y).scale(sx, sy).then(&saved));
     with_effects(cx.dc, |effects| {
@@ -1687,9 +1692,7 @@ fn draw_one(
                 }
             }
             if blur > 0.0 {
-                // A blur radius is twice the standard deviation (GSK's and
-                // CSS's reading), in points: in image pixels here.
-                let sigma = effect_blur_sigma(blur, (sx, sy), cx.scale);
+                let sigma = effect_blur_sigma(blur, (sx, sy));
                 let _ = effects.blur.SetValue(
                     D2D1_GAUSSIANBLUR_PROP_STANDARD_DEVIATION.0 as u32,
                     D2D1_PROPERTY_TYPE_FLOAT,
@@ -2026,12 +2029,13 @@ mod tests {
         assert_eq!(one_x, (0.5, 0.5));
         assert_eq!(two_x, (1.0, 1.0));
 
-        // The same point-based blur radius uses the same source-pixel sigma.
-        assert_eq!(effect_blur_sigma(10.0, one_x, 1.0), 10.0);
-        assert_eq!(effect_blur_sigma(10.0, two_x, 2.0), 10.0);
+        // A radius of 10 is a deviation of 5 points at every DPI: the value
+        // times the world scale, the DPI being the effect's own to apply.
+        assert_eq!(effect_blur_sigma(10.0, one_x), 10.0);
+        assert_eq!(effect_blur_sigma(10.0, two_x), 5.0);
 
         let stretched = effect_scale((100.0, 100.0), (200.0, 100.0), 2.0);
-        assert_eq!(effect_blur_sigma(10.0, stretched, 2.0), 10.0);
+        assert_eq!(effect_blur_sigma(10.0, stretched), 5.0);
     }
 
     #[test]
