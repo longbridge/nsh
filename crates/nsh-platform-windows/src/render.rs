@@ -1362,8 +1362,13 @@ pub(crate) fn frame(surface: &Rc<Surface>) {
     let damage = surface.take_damage();
     let changed = damage
         .filter(|_| composition.is_none())
-        .map(|rects| merged(pixel_rects(&rects, scale, size)))
-        .filter(|rects| !rects.is_empty());
+        .map(|rects| merged(pixel_rects(&rects, scale, size)));
+    // All of it outside the window (an animation scrolled away): the window
+    // already shows this frame, and drawing it whole would cost every frame.
+    if changed.as_ref().is_some_and(Vec::is_empty) && chain.shows_a_frame() {
+        return;
+    }
+    let changed = changed.filter(|rects| !rects.is_empty());
     // What the back buffer, two presents old, needs drawn again, with
     // the whole area of each shader reading what is behind it that this
     // meets: what it reads is then all this frame's.
@@ -1918,6 +1923,19 @@ mod tests {
         assert!(read(&gfx, &back, size) == read(&gfx, &fresh, size));
         // Nothing changed since: nothing to draw.
         assert!(surface.take_damage().is_none_or(|d| d.is_empty()));
+    }
+
+    /// A change wholly outside the window leaves nothing to draw, which
+    /// `frame` tells apart from `None`, the whole window.
+    #[test]
+    fn changes_outside_the_window_leave_no_pixels() {
+        let outside = D2D_RECT_F {
+            left: 10.0,
+            top: 900.0,
+            right: 50.0,
+            bottom: 940.0,
+        };
+        assert!(merged(pixel_rects(&[outside], 1.5, (300, 300))).is_empty());
     }
 
     #[test]

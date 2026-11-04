@@ -173,7 +173,7 @@ nsh package App.tsx --target web --run
 
 ### 运行时大小
 
-打包时为每个应用链接一个专属的 `nsh.<digest>.wasm`：其中包含引擎，以及应用首屏导入的 `nsh/base` 组件、标准模块和着色器。应用其他页面导入的部分在首屏显示后于后台下载。以下数据由 `nsh package --target web` 实测（MB 按 10^6 字节计）：
+打包时为每个应用链接一个专属的 `nsh.<digest>.wasm`：其中包含引擎，以及应用首屏导入的 `nsh/base` 组件、标准模块和着色器。应用其他页面导入的部分在首屏显示后于后台下载。应用的 crate [在 Rust 中调用浏览器 API](#在-rust-中使用浏览器-api) 时，它的 `nsh.<digest>.wasm` 包含整个运行时以及它自己的 crate。以下数据由 `nsh package --target web` 实测（MB 按 10^6 字节计）：
 
 | 应用 | 用到的功能 | `nsh.<digest>.wasm` | gzip | Brotli |
 |---|---|---|---|---|
