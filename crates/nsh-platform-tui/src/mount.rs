@@ -127,7 +127,7 @@ impl Mounter {
         self.focus_requests.clear();
         self.scroll_bars.clear();
         self.dialogs.clear();
-        self.menus.clear();
+        self.menus.reset();
         self.spans.clear();
         self.focused_span = None;
         self.views.clear();
@@ -449,10 +449,21 @@ impl Mounter {
                 } if matches!(
                     **desktop,
                     nsh_core::desktop::DesktopCommand::PopupMenu { .. }
+                        | nsh_core::desktop::DesktopCommand::SetMenu(_)
+                        | nsh_core::desktop::DesktopCommand::SetMenuBar(_)
                 ) =>
                 {
-                    if let nsh_core::desktop::DesktopCommand::PopupMenu { items, at } = &**desktop {
-                        self.menus.popup(items, *at);
+                    match &**desktop {
+                        nsh_core::desktop::DesktopCommand::PopupMenu { items, at } => {
+                            self.menus.popup(items, *at);
+                        }
+                        nsh_core::desktop::DesktopCommand::SetMenu(items) => {
+                            self.menus.set_application_menu(items.as_deref());
+                        }
+                        nsh_core::desktop::DesktopCommand::SetMenuBar(mode) => {
+                            self.menus.set_menu_bar(*mode);
+                        }
+                        _ => {}
                     }
                 }
                 MountItem::Command { id, ref command }

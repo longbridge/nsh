@@ -18,10 +18,28 @@
 //! further. A chosen item is reported as [`EventKind::Menu`] with its id
 //! (an item with a role closing the window ends the app), then the menu's
 //! closing as `{ id: 0, closed: true }`, which settles the app's promise.
+//!
+//! The application menu (`Menu.setApplicationMenu`,
+//! [`nsh_core::desktop::DesktopCommand::SetMenu`]) is a menu bar on the
+//! surface's top row, as a terminal program's (Midnight Commander's,
+//! htop's): its menus' titles on the raised surface, the app laid out in
+//! the rows below (with `Window.setMenuBar("autoHide")` it takes no row and
+//! shows over the app's top row while it has the keys). F10 gives it the
+//! keys: Left / Right move between the titles, Down, Enter, Space or a
+//! title's initial open its menu below it (the same box as a context
+//! menu's), Escape closes the menu and then leaves the bar, F10 leaves it
+//! at once. With a menu open, Left and Right open the menu beside it
+//! (Right opens a submenu first). A press on a title opens its menu, one
+//! on the open menu's title or outside it closes it; the pointer over
+//! another title opens that one's. A chosen item is reported as a context
+//! menu's, with no closing after it (no promise waits for it); its
+//! shortcut chooses it from the keyboard too (`AppView`'s keys). The
+//! items of roles a terminal has no use for (macOS's app menu's, the
+//! window's) are left out.
 
 use nsh_core::{
     EventKind, EventPayload, PayloadValue, Point, Points, ROOT_ID,
-    desktop::{MenuAction, MenuItem, MenuRole, Shortcut},
+    desktop::{MenuAction, MenuBarMode, MenuItem, MenuRole, Shortcut},
     keymap::{Key, Modifiers},
 };
 use ratatui_core::{
@@ -34,6 +52,7 @@ use unicode_width::UnicodeWidthStr;
 use crate::{
     CellSize,
     dialog::{clear, put},
+    render::ACCENT,
     key_scheme::{self, Action},
     palette::{RAISED, Ramp, SELECT},
 };
@@ -45,6 +64,8 @@ enum Anchor {
     Cell(Position),
     /// The app's point (the surface's coordinates).
     Point(Point<Points>),
+    /// Below the menu bar's title `index`.
+    Title(usize),
 }
 
 /// One box: the root menu or an open submenu.
@@ -121,6 +142,9 @@ pub(crate) enum Outcome {
     Taken,
     /// The menu closed, with the item chosen if any: its id and role.
     Closed(Option<(u32, Option<MenuRole>)>),
+    /// The menu bar let the keys go, with the item chosen in its menus if
+    /// any: no promise waits for its closing.
+    Left(Option<(u32, Option<MenuRole>)>),
 }
 
 impl Outcome {
@@ -128,8 +152,10 @@ impl Outcome {
     /// Returns whether the chosen item ends the app (its role closes the
     /// window).
     pub(crate) fn dispatch(&self, control: &nsh_engine::EngineControl) -> bool {
-        let Outcome::Closed(chosen) = self else {
-            return false;
+        let (chosen, bar) = match self {
+            Outcome::Taken => return false,
+            Outcome::Closed(chosen) => (chosen, false),
+            Outcome::Left(chosen) => (chosen, true),
         };
         if let Some((id, _)) = chosen
             && *id != 0
@@ -139,6 +165,9 @@ impl Outcome {
                 EventKind::Menu,
                 EventPayload::Map(vec![("id", PayloadValue::Number(f64::from(*id)))]),
             );
+        }
+        if bar {
+            return matches!(chosen, Some((_, Some(MenuRole::Quit | MenuRole::Close))));
         }
         control.dispatch_event(
             ROOT_ID,
@@ -152,7 +181,8 @@ impl Outcome {
     }
 }
 
-/// The context menu open, if any, and where the pointer last was.
+/// The context menu open, if any, the application menu's bar, and where
+/// the pointer last was.
 #[derive(Default)]
 pub(crate) struct Menus {
     anchor: Option<Anchor>,
@@ -161,6 +191,130 @@ pub(crate) struct Menus {
     /// The pointer's last Cell: where a menu without a point of its own
     /// opens.
     pub(crate) pointer: Option<Position>,
+    bar: Bar,
+}
+
+/// The application menu's bar.
+#[derive(Default)]
+struct Bar {
+    /// Its menus (the application menu's top-level items).
+    menus: Vec<MenuItem>,
+    mode: MenuBarMode,
+    /// The row it is drawn on.
+    row: Rect,
+    /// The title that has the keys (its menu open when `levels` holds
+    /// one): the bar has them while it is `Some`.
+    active: Option<usize>,
+}
+
+impl Bar {
+    fn enabled(&self, index: usize) -> bool {
+        match &self.menus[index] {
+            MenuItem::Action(action) => action.enabled,
+            MenuItem::Submenu { enabled, .. } => *enabled,
+            MenuItem::Separator => false,
+        }
+    }
+
+    /// The title after (`forward`) or before `from`, round the bar.
+    fn next(&self, from: Option<usize>, forward: bool) -> Option<usize> {
+        let count = self.menus.len();
+        (1..=count)
+            .map(|step| match (from, forward) {
+                (Some(at), true) => (at + step) % count,
+                (Some(at), false) => (at + count - step % count) % count,
+                (None, true) => step - 1,
+                (None, false) => count - step,
+            })
+            .find(|&i| self.enabled(i))
+    }
+
+    /// The next title after the active one whose label starts with `c`.
+    fn typed(&self, c: char) -> Option<usize> {
+        let count = self.menus.len();
+        let from = self.active.unwrap_or(count - 1);
+        let c = c.to_lowercase().next()?;
+        (1..=count).map(|step| (from + step) % count).find(|&i| {
+            self.enabled(i)
+                && label(&self.menus[i])
+                    .chars()
+                    .next()
+                    .and_then(|first| first.to_lowercase().next())
+                    == Some(c)
+        })
+    }
+
+    /// Each title's Cells on the row: ` File `, one after the other from
+    /// the row's second Cell, as many as fit.
+    fn titles(&self) -> Vec<Rect> {
+        let mut x = self.row.x.saturating_add(1);
+        let mut titles = Vec::with_capacity(self.menus.len());
+        for item in &self.menus {
+            let w = width(label(item)).saturating_add(2);
+            let w = w.min(self.row.right().saturating_sub(x));
+            titles.push(Rect::new(x, self.row.y, w, 1));
+            x = x.saturating_add(w);
+        }
+        titles
+    }
+
+    fn title_at(&self, position: Position) -> Option<usize> {
+        self.titles()
+            .iter()
+            .position(|title| title.width > 0 && title.contains(position))
+    }
+}
+
+/// Whether the terminal leaves out items of `role`: macOS's app menu's and
+/// the window's, which a terminal has no use for.
+fn left_out(role: Option<MenuRole>) -> bool {
+    matches!(
+        role,
+        Some(
+            MenuRole::About
+                | MenuRole::Hide
+                | MenuRole::HideOthers
+                | MenuRole::ShowAll
+                | MenuRole::Minimize
+                | MenuRole::Zoom
+                | MenuRole::ToggleFullScreen
+        )
+    )
+}
+
+/// `items` without the items [`left_out`], the separators they leave
+/// around or doubled dropped, and the submenus they empty.
+fn kept(items: &[MenuItem]) -> Vec<MenuItem> {
+    let mut out: Vec<MenuItem> = Vec::with_capacity(items.len());
+    for item in items {
+        match item {
+            MenuItem::Action(action) if left_out(action.role) => {}
+            MenuItem::Separator => {
+                if out.last().is_some_and(|last| !matches!(last, MenuItem::Separator)) {
+                    out.push(MenuItem::Separator);
+                }
+            }
+            MenuItem::Submenu {
+                label,
+                enabled,
+                items,
+            } => {
+                let items = kept(items);
+                if !items.is_empty() {
+                    out.push(MenuItem::Submenu {
+                        label: label.clone(),
+                        enabled: *enabled,
+                        items,
+                    });
+                }
+            }
+            item => out.push(item.clone()),
+        }
+    }
+    if matches!(out.last(), Some(MenuItem::Separator)) {
+        out.pop();
+    }
+    out
 }
 
 impl Menus {
@@ -172,21 +326,166 @@ impl Menus {
             None => Anchor::Cell(self.pointer.unwrap_or_default()),
         });
         self.levels = vec![Level::new(items.to_vec(), false)];
+        self.bar.active = None;
     }
 
-    /// Whether a menu is open (and takes all input).
+    /// Whether a menu is open or the menu bar has the keys (and takes all
+    /// input).
     pub(crate) fn is_open(&self) -> bool {
-        !self.levels.is_empty()
+        !self.levels.is_empty() || self.bar.active.is_some()
     }
 
+    /// Closes the open menu and gives the menu bar's keys back.
     pub(crate) fn clear(&mut self) {
         self.levels.clear();
         self.anchor = None;
+        self.bar.active = None;
+    }
+
+    /// Closes everything and forgets the application menu (the app
+    /// stopped).
+    pub(crate) fn reset(&mut self) {
+        self.clear();
+        self.bar = Bar::default();
     }
 
     fn close(&mut self, chosen: Option<(u32, Option<MenuRole>)>) -> Outcome {
+        let bar = self.bar.active.is_some();
         self.clear();
-        Outcome::Closed(chosen)
+        if bar {
+            Outcome::Left(chosen)
+        } else {
+            Outcome::Closed(chosen)
+        }
+    }
+
+    /// The application menu (`None`: the app set none, or took it away).
+    pub(crate) fn set_application_menu(&mut self, items: Option<&[MenuItem]>) {
+        if self.bar.active.is_some() {
+            self.clear();
+        }
+        self.bar.menus = items.map(kept).unwrap_or_default();
+    }
+
+    /// When the menu bar shows (`Window.setMenuBar`).
+    pub(crate) fn set_menu_bar(&mut self, mode: MenuBarMode) {
+        self.bar.mode = mode;
+    }
+
+    /// The app has an application menu: F10 gives its bar the keys.
+    pub(crate) fn has_bar(&self) -> bool {
+        !self.bar.menus.is_empty()
+    }
+
+    /// The menu bar takes the surface's top row from the app.
+    pub(crate) fn reserves_row(&self) -> bool {
+        self.has_bar() && self.bar.mode == MenuBarMode::Shown
+    }
+
+    /// The menu bar shows: always, or while it has the keys.
+    pub(crate) fn bar_shown(&self) -> bool {
+        self.has_bar() && (self.bar.mode == MenuBarMode::Shown || self.bar.active.is_some())
+    }
+
+    /// The row the menu bar is drawn on, for its titles and their menus.
+    pub(crate) fn set_bar_row(&mut self, row: Rect) {
+        self.bar.row = row;
+    }
+
+    /// Whether a press at `position` is the menu bar's.
+    pub(crate) fn on_bar(&self, position: Position) -> bool {
+        self.bar_shown() && self.bar.row.contains(position)
+    }
+
+    /// F10: the menu bar takes the keys, its first title active, or lets
+    /// them go when it has them.
+    pub(crate) fn toggle_bar(&mut self) -> Option<Outcome> {
+        if self.bar.active.is_some() {
+            return Some(self.close(None));
+        }
+        if !self.has_bar() {
+            return None;
+        }
+        self.clear();
+        self.bar.active = self.bar.next(None, true);
+        self.bar.active.map(|_| Outcome::Taken)
+    }
+
+    /// Opens title `index`'s menu below it, its first item focused when
+    /// `focus`; a title that is an item of its own is chosen.
+    fn open_title(&mut self, index: usize, focus: bool) -> Outcome {
+        self.levels.clear();
+        self.bar.active = Some(index);
+        match &self.bar.menus[index] {
+            MenuItem::Submenu {
+                enabled: true,
+                items,
+                ..
+            } => {
+                self.anchor = Some(Anchor::Title(index));
+                self.levels.push(Level::new(items.clone(), focus));
+                Outcome::Taken
+            }
+            MenuItem::Action(MenuAction {
+                id,
+                role,
+                enabled: true,
+                ..
+            }) => {
+                let chosen = (*id, *role);
+                self.close(Some(chosen))
+            }
+            _ => Outcome::Taken,
+        }
+    }
+
+    /// A key while the menu bar has the keys: `None` leaves it to the open
+    /// menu.
+    fn bar_key(&mut self, key: Key, shift: bool) -> Option<Outcome> {
+        let active = self.bar.active?;
+        if self.levels.is_empty() {
+            match key {
+                Key::Left => self.bar.active = self.bar.next(Some(active), false),
+                Key::Right => self.bar.active = self.bar.next(Some(active), true),
+                Key::Tab => self.bar.active = self.bar.next(Some(active), !shift),
+                Key::Home => self.bar.active = self.bar.next(None, true),
+                Key::End => self.bar.active = self.bar.next(None, false),
+                Key::Down | Key::Enter | Key::Char(' ') => return Some(self.open_title(active, true)),
+                Key::Escape => return Some(self.close(None)),
+                Key::Char(c) if !c.is_control() => {
+                    if let Some(index) = self.bar.typed(c) {
+                        return Some(self.open_title(index, true));
+                    }
+                }
+                _ => {}
+            }
+            return Some(Outcome::Taken);
+        }
+        if self.levels.len() > 1 {
+            return None;
+        }
+        let level = &self.levels[0];
+        let submenu = matches!(
+            level.focused.map(|i| &level.items[i]),
+            Some(MenuItem::Submenu { enabled: true, .. })
+        );
+        match key {
+            Key::Left => {
+                let to = self.bar.next(Some(active), false)?;
+                Some(self.open_title(to, true))
+            }
+            Key::Right if !submenu => {
+                let to = self.bar.next(Some(active), true)?;
+                Some(self.open_title(to, true))
+            }
+            // The menu closes; the bar keeps the keys.
+            Key::Escape => {
+                self.levels.clear();
+                self.anchor = None;
+                Some(Outcome::Taken)
+            }
+            _ => None,
+        }
     }
 
     /// Opens the submenu of the focused item of the innermost box, its
@@ -254,6 +553,12 @@ impl Menus {
         if m.ctrl || m.alt || m.cmd {
             return Some(Outcome::Taken);
         }
+        if key == Key::F(10) && self.bar.active.is_some() {
+            return Some(self.close(None));
+        }
+        if let Some(outcome) = self.bar_key(key, m.shift) {
+            return Some(outcome);
+        }
         let depth = self.levels.len() - 1;
         let level = self.levels.last_mut()?;
         match key {
@@ -304,6 +609,21 @@ impl Menus {
             return None;
         }
         self.pointer = Some(position);
+        // With a menu of the bar open, the pointer over another title
+        // opens that one's.
+        if self.bar.active.is_some()
+            && !self.levels.is_empty()
+            && self.on_bar(position)
+            && let Some(index) = self.bar.title_at(position)
+        {
+            if self.bar.active != Some(index)
+                && self.bar.enabled(index)
+                && let MenuItem::Submenu { .. } = self.bar.menus[index]
+            {
+                self.open_title(index, false);
+            }
+            return Some(Outcome::Taken);
+        }
         if let Some((depth, Some(index))) = self.hit(position) {
             let level = &self.levels[depth];
             // The item whose submenu is open keeps it.
@@ -319,8 +639,24 @@ impl Menus {
 
     /// Hands a press at `position` to the menu; `None` when none is open.
     pub(crate) fn press(&mut self, position: Position) -> Option<Outcome> {
+        if self.on_bar(position) {
+            let title = self.bar.title_at(position);
+            return Some(match title {
+                // A press on the open menu's title closes it.
+                Some(index) if self.bar.active == Some(index) && !self.levels.is_empty() => {
+                    self.close(None)
+                }
+                // A context menu open closes first.
+                _ if !self.levels.is_empty() && self.bar.active.is_none() => self.close(None),
+                Some(index) if self.bar.enabled(index) => self.open_title(index, false),
+                _ => Outcome::Taken,
+            });
+        }
         if !self.is_open() {
             return None;
+        }
+        if self.levels.is_empty() {
+            return Some(self.close(None));
         }
         Some(match self.hit(position) {
             Some((depth, Some(index))) => self.choose(depth, index),
@@ -344,6 +680,10 @@ impl Menus {
         };
         let at = match anchor {
             Anchor::Cell(at) => at,
+            Anchor::Title(index) => {
+                let title = self.bar.titles().get(index).copied().unwrap_or_default();
+                Position::new(title.x, self.bar.row.bottom())
+            }
             Anchor::Point(at) => Position::new(
                 area.x
                     .saturating_add((at.x / cells.width()).floor().max(0.0) as u16),
@@ -506,6 +846,67 @@ impl Menus {
                 .and_then(|i| level.rows.get(i))
                 .map(|row| (rect, row.y));
         }
+    }
+}
+
+impl Menus {
+    /// Draws the menu bar on its row: the titles on the raised surface,
+    /// the active one on the accent (reversed without surfaces), a
+    /// disabled one faint.
+    pub(crate) fn draw_bar(&self, buffer: &mut Buffer, ramp: Option<Ramp>) {
+        let row = self.bar.row.intersection(buffer.area);
+        if !self.bar_shown() || row.is_empty() {
+            return;
+        }
+        clear(buffer, row);
+        if let Some(ramp) = ramp {
+            for x in row.x..row.right() {
+                buffer[(x, row.y)].bg = ramp.level(RAISED);
+            }
+        }
+        for (index, title) in self.bar.titles().into_iter().enumerate() {
+            let title = title.intersection(row);
+            if title.is_empty() {
+                continue;
+            }
+            let active = self.bar.active == Some(index);
+            let (color, modifier) = match (self.bar.enabled(index), ramp) {
+                (false, Some(ramp)) => (ramp.faint(), Modifier::empty()),
+                (false, None) => (Color::Reset, Modifier::DIM),
+                (true, Some(ramp)) if active => (ramp.base(), Modifier::empty()),
+                (true, _) => (Color::Reset, Modifier::empty()),
+            };
+            if active {
+                for x in title.x..title.right() {
+                    let cell = &mut buffer[(x, title.y)];
+                    match ramp {
+                        Some(_) => cell.bg = ACCENT,
+                        None => cell.modifier = Modifier::REVERSED,
+                    }
+                }
+            }
+            let modifier = if active && ramp.is_none() {
+                modifier | Modifier::REVERSED
+            } else {
+                modifier
+            };
+            put(
+                buffer,
+                title.x + 1,
+                title.y,
+                label(&self.bar.menus[index]),
+                title.width.saturating_sub(2),
+                color,
+                modifier,
+            );
+        }
+    }
+
+    /// The action a shortcut chooses in the application menu: its id, its
+    /// role and whether it fires while a text field is being edited.
+    pub(crate) fn shortcut(&self, pressed: &Shortcut) -> Option<(u32, Option<MenuRole>, bool)> {
+        MenuItem::find_shortcut(&self.bar.menus, pressed)
+            .map(|action| (action.id, action.role, action.fires_while_editing()))
     }
 }
 

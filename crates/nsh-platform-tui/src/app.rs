@@ -595,7 +595,11 @@ impl AppView {
             self.tree.menus.pointer =
                 Some(ratatui_core::layout::Position::new(mouse.column, mouse.row));
         }
-        if self.tree.menus.is_open()
+        // A press on the menu bar is the bar's, open or not.
+        let on_bar = matches!(&input, Input::Mouse(mouse)
+            if matches!(mouse.kind, crate::MouseKind::Down(_))
+                && self.tree.menus.on_bar(ratatui_core::layout::Position::new(mouse.column, mouse.row)));
+        if (self.tree.menus.is_open() || on_bar)
             && let Some(handled) = self.handle_menu(&input)
         {
             return handled;
@@ -818,14 +822,94 @@ impl AppView {
             }
             Input::Paste(_) => return Some(Handled::Yes),
         };
-        if let Some(outcome) = outcome
-            && let Some(engine) = &self.surface.engine
-            && outcome.dispatch(&engine.control())
-        {
-            self.tree.exit = true;
+        if let Some(outcome) = outcome {
+            self.menu_chosen(&outcome);
         }
         self.surface.wake.notify();
         Some(Handled::Yes)
+    }
+
+    /// Reports what a menu closed with, and carries out a chosen item's
+    /// role: a quit or close role ends the app, an editing one is the
+    /// focused field's (or the selection's) as its key is.
+    fn menu_chosen(&mut self, outcome: &crate::menu::Outcome) {
+        let Some(engine) = &self.surface.engine else {
+            return;
+        };
+        if outcome.dispatch(&engine.control()) {
+            self.tree.exit = true;
+        }
+        let (crate::menu::Outcome::Closed(Some((_, Some(role))))
+        | crate::menu::Outcome::Left(Some((_, Some(role))))) = outcome
+        else {
+            return;
+        };
+        self.edit_role(*role);
+    }
+
+    /// An editing role (`copy`, `paste`, ...) chosen from a menu: the key
+    /// a field or the selection takes for it, Command's.
+    fn edit_role(&mut self, role: nsh_core::desktop::MenuRole) {
+        use nsh_core::desktop::MenuRole;
+        let (key, shift) = match role {
+            MenuRole::Undo => ("z", false),
+            MenuRole::Redo => ("z", true),
+            MenuRole::Cut => ("x", false),
+            MenuRole::Copy => ("c", false),
+            MenuRole::Paste => ("v", false),
+            MenuRole::SelectAll => ("a", false),
+            _ => return,
+        };
+        let modifiers = crate::Modifiers {
+            cmd: true,
+            shift,
+            ..Default::default()
+        };
+        self.handle_key(key, modifiers, false);
+    }
+
+    /// A shortcut of the application menu's items, after the app's own
+    /// bindings: it chooses its item, unless a field being edited uses the
+    /// keystroke itself.
+    fn menu_shortcut(&mut self, stroke: nsh_core::keymap::Keystroke, repeat: bool) -> bool {
+        use nsh_core::{desktop::Key, keymap::Key as K};
+        let key = match stroke.key {
+            K::Char(' ') => Key::Space,
+            K::Char(c) => Key::Char(c),
+            K::Enter => Key::Enter,
+            K::Escape => Key::Escape,
+            K::Tab => Key::Tab,
+            K::Backspace => Key::Backspace,
+            K::Delete => Key::Delete,
+            K::Insert => Key::Insert,
+            K::Up => Key::Up,
+            K::Down => Key::Down,
+            K::Left => Key::Left,
+            K::Right => Key::Right,
+            K::Home => Key::Home,
+            K::End => Key::End,
+            K::PageUp => Key::PageUp,
+            K::PageDown => Key::PageDown,
+            K::F(n) => Key::F(n),
+        };
+        let m = stroke.modifiers;
+        let pressed = nsh_core::desktop::Shortcut {
+            key,
+            ctrl: m.ctrl,
+            alt: m.alt,
+            shift: m.shift,
+            meta: m.cmd,
+        };
+        let Some((id, role, fires)) = self.tree.menus.shortcut(&pressed) else {
+            return false;
+        };
+        if !fires && self.editing_field().is_some() {
+            return false;
+        }
+        if !repeat {
+            self.menu_chosen(&crate::menu::Outcome::Left(Some((id, role))));
+        }
+        true
     }
 
     fn handle_key(&mut self, key: &str, modifiers: crate::Modifiers, repeat: bool) -> Handled {
@@ -850,12 +934,22 @@ impl AppView {
         {
             return Handled::Yes;
         }
+        // F10 gives the menu bar the keys (the open bar takes the next).
+        if stroke.key == nsh_core::keymap::Key::F(10)
+            && stroke.modifiers == nsh_core::keymap::Modifiers::default()
+            && let Some(outcome) = self.tree.menus.toggle_bar()
+        {
+            self.menu_chosen(&outcome);
+            self.surface.wake.notify();
+            return Handled::Yes;
+        }
         self.catch_up_with_focus();
         let command_key = self.options.capabilities.command_key;
         let selecting = self.selection.is_active();
         let handled = if self
             .keyboard
             .shortcut(&self.tree, stroke, repeat, command_key, &control)
+            || self.menu_shortcut(stroke, repeat)
             || self.handle_field_key(key, stroke, &control)
             || self.selection.key(
                 key,
@@ -1199,6 +1293,17 @@ impl AppView {
 
     fn draw(&mut self, area: Rect, buffer: &mut Buffer) {
         let started = self.perf.as_ref().map(|_| Instant::now());
+        // The application menu's bar is the top row; the app has the rows
+        // below it (all of them while the bar hides itself).
+        let reserved = self.tree.menus.reserves_row() && area.height > 1;
+        self.tree
+            .menus
+            .set_bar_row(Rect::new(area.x, area.y, area.width, area.height.min(1)));
+        let area = if reserved {
+            Rect::new(area.x, area.y + 1, area.width, area.height - 1)
+        } else {
+            area
+        };
         self.surface.begin_frame();
         #[cfg(feature = "dev")]
         if let Some(mut dev) = self.dev.take() {
@@ -1242,6 +1347,10 @@ impl AppView {
                     }
                 }
             }
+        }
+        if self.tree.menus.reserves_row() != reserved {
+            // The bar came or went: the app is laid out again for its rows.
+            self.surface.wake.notify();
         }
         self.selection.autoscroll(
             &mut self.tree,
@@ -1414,6 +1523,7 @@ impl AppView {
                 field.report(id, &control, false);
             }
         }
+        self.tree.menus.draw_bar(buffer, ramp);
         self.minibuffer
             .draw(&self.tree, &self.geometry, self.options.cells, area, buffer);
         #[cfg(feature = "dev")]

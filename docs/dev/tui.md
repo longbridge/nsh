@@ -553,6 +553,22 @@ What the system draws on other platforms is drawn in the same look (`dialog.rs`,
   focus and opens submenus; a press on an item chooses it, outside the boxes closes the menu and reaches nothing
   behind it. A choice is the root's `Menu` event with the item's id (a `quit` or `close` role ends the app), then
   every close `{ id: 0, closed: true }`, as Linux reports them. While a menu is open it takes every key and press.
+- **The application menu** (`Menu.setApplicationMenu`, `DesktopCommand::SetMenu` / `SetMenuBar`; `menu.rs`'s `Bar`): a
+  menu bar on the surface's top row, as mc's and htop's, the titles ` File ` ` Edit ` from the second Cell on the
+  raised surface, the app laid out in the rows below (its area, environment and hit tests start there). With no
+  application menu the bar takes no row; with the menu bar mode `"autoHide"` it takes none either and is drawn over the app's
+  top row only while it has the keys. F10 gives the bar the keys (the first enabled title marked with the accent);
+  Left / Right, Tab and Home / End move between the titles, Down, Enter, Space or a title's initial opens its menu
+  below the title (the context menu's box and keys), Left / Right in an open menu go to the neighboring title's (Right
+  opens a focused submenu first), Escape closes the menu and then leaves the bar, F10 leaves it at once. A press on a
+  title opens its menu or closes it when open; while one is open the pointer over another title opens that one. A
+  top-level item without a submenu is chosen at once. A choice is the `Menu` event with the item's id, as the context
+  menu's, without the close event. The items' shortcuts are matched after the keymap's
+  bindings and the focused component's, as the GPUI backend matches them (`MenuItem::find_shortcut`, a shortcut that
+  needs no modifier not while a field is edited); the edit roles (`undo`, `redo`, `cut`, `copy`, `paste`,
+  `selectAll`) act as their Cmd keys on the focused field, and the roles of a window or app the terminal has none of
+  (`about`, `hide`, `hideOthers`, `showAll`, `minimize`, `zoom`, `toggleFullScreen`) are left out, with the separators
+  and submenus they leave empty.
 - **Scroll bars, selection and the caret**: as above; selected text and the Minibuffer's matches are reversed,
   a text field's caret is the terminal cursor.
 
@@ -967,6 +983,7 @@ permit clipboard writes; `nsh test` uses memory and never writes to the machine'
 | Test screenshots | Versioned UTF-8 JSON of Cell symbols, foreground/background/underline colors and modifiers |
 | Alerts (`AlertDialog`) | A centered framed box over the dimmed screen, buttons as `< OK >`, the focused one reversed |
 | Context menus (`Menu.popup`) | A framed box at the pointer on a raised surface, one row per item, shortcuts at the right, submenus beside their row |
+| Application menu (`Menu.setApplicationMenu`) | A menu bar on the top row (none without a menu; over the app's top row while active with `"autoHide"`): F10, the arrows, a title's initial and presses open its menus; item shortcuts work with the bar closed |
 | Development errors | Dismissible panel, with the mapped message and stack; cleared by the next update |
 | Colors | The terminal theme's meanings: the default foreground, dim for low contrast, or the accent of a saturated color's hue; canvases keep their colors at the terminal's depth |
 | View fills | With surfaces (256 colors or more and a known background): a band of the ramp's step over the view's frame (lighter raised, darker sunken, a saturated fill mixed 20% into the step under it), the app's page color the terminal's own background; bandless (16 colors or an unknown background): left out, Cells keep the terminal's background (Drawing, "Fills") |
@@ -1050,7 +1067,10 @@ painting module checks borders (dim or accented sides, dashed, dotted, single si
 rings draw nothing, scroll bars, that images keep their box blank and icons are left out, icon buttons labeled, tiny and round boxes without borders and empty ones as their outline,
 clipping to the parent's content box with an ellipsis, selected bands, focus and disabled marks, overlays cleared
 and framed, unchanged frames and invisible views; `dialog.rs`'s unit tests check alerts' button order, keys,
-presses and drawing, `menu.rs`'s a context menu's placement, keys and presses. These tests do not exercise hover or Slider drags yet.
+presses and drawing, `menu.rs`'s a context menu's placement, keys and presses. The menu bar module checks the
+application menu's row above the app (and none without one), F10 and the arrows between titles and menus, the roles
+left out, shortcuts at the right, initials, Escape, presses and hover on titles and an item's shortcut with the bar
+closed. These tests do not exercise hover or Slider drags yet.
 The search fixture searches forward and backward through a Scroll's rows and checks the Minibuffer row before,
 during and after the search.
 The animation module at the AppView seam checks completion, cancellation, active-frame and idle scheduling,

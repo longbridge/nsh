@@ -14,7 +14,8 @@ NSH 应用也能在终端里运行。终端后端用 [ratatui](https://ratatui.r
 终端是一种独立的设备形态，和手机、桌面并列：`idiom()` 为 `Idiom::Terminal`（`nsh_core::platform::Idiom`；TSX 中
 `platform.idiom` 为 `"terminal"`），而 `os()`（`platform.os`）是本机自己的系统：macOS、Windows 或 Linux，因此
 `fs/promises` 和 `process` 的行为与在该桌面上一致。桌面行为在终端里同样适用：`desktop={{…}}` 属性、`platform.select`
-的 `desktop` 键、`platform.desktop`、键盘快捷键、悬停、工具提示和右键菜单。
+的 `desktop` 键、`platform.desktop`、键盘快捷键、悬停、工具提示和右键菜单。应用菜单（`Menu.setApplicationMenu`）是屏幕顶上一行的
+菜单栏，和 mc、htop 的一样：按 F10 或点击标题打开它的菜单，菜单栏收起时菜单项的快捷键照样可用。
 
 ## 运行应用
 
@@ -77,6 +78,7 @@ nsh run App.tsx --target tui --points-per-cell 10x20
 | Home、Alt+< / End、Alt+> | 该滚动视图的第一个 / 最后一个控件 |
 | Ctrl+S / Ctrl+R | 向前 / 向后搜索屏幕上的文本 |
 | Ctrl+C | 复制选中内容；没有选中内容时退出 |
+| F10 | 应用菜单的菜单栏：Left / Right 在标题间移动，Down、Enter 或标题的首字母打开它的菜单，Escape 先关闭菜单，再离开菜单栏 |
 
 应用自己的快捷键（[`keymap`](../modules/nsh.md#keymap)）最先匹配，获得焦点的组件绑定的按键（滑块的方向键、列表的按键）也是
 如此，所以组件会先于焦点移动拿到它的按键。支持 kitty 键盘协议的终端会把 Ctrl+I、Ctrl+M 和 Ctrl+[ 与 Tab、Enter 和 Escape

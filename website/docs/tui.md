@@ -16,7 +16,9 @@ as on a phone.
 The terminal is a device form of its own, as a phone and a desktop are: `idiom()` is `Idiom::Terminal`
 (`nsh_core::platform::Idiom`; `platform.idiom` is `"terminal"` in TSX), and `os()` (`platform.os`) is the machine's own system, macOS, Windows or
 Linux, so `fs/promises` and `process` work as on that desktop. Desktop behavior applies: `desktop={{…}}` props,
-`platform.select`'s `desktop` key, `platform.desktop`, keyboard shortcuts, hover, tooltips and context menus.
+`platform.select`'s `desktop` key, `platform.desktop`, keyboard shortcuts, hover, tooltips and context menus. The
+application menu (`Menu.setApplicationMenu`) is a menu bar on the top row, as in mc and htop: F10 or a click on a title
+opens its menu, and its items' shortcuts work with the bar closed.
 
 ## Running an app
 
@@ -88,6 +90,7 @@ backdrop, Tab stays in it, and closing it gives the focus back to the control it
 | Home, Alt+< / End, Alt+> | The first / last control of that scroll view |
 | Ctrl+S / Ctrl+R | Search the text on screen forward / backward |
 | Ctrl+C | Copy the selection; with none, quit |
+| F10 | The application menu's bar: Left / Right between the titles, Down, Enter or a title's initial opens its menu, Escape closes it, then leaves the bar |
 
 The app's own shortcuts ([`keymap`](../modules/nsh.md#keymap)) come first, and so do the keys a focused component
 binds (a slider's arrows, a list's), so a component gets its keys before they move the focus. Terminals that speak

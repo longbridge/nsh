@@ -16,6 +16,7 @@ mod editor;
 mod focus_navigation;
 mod geometry;
 mod keyboard;
+mod menu_bar;
 mod modal_focus;
 mod navigation;
 mod painting;
