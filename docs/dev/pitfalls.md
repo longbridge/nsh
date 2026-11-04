@@ -358,6 +358,11 @@ Things that were found the hard way. Read the section of the area you change bef
 - **AT-SPI reads widgets, not what NSH draws**: a view `snapshot` skips (`visibility: hidden`) is still presented, with
   its subtree, until its accessible state is `Hidden` (`access.rs`); GTK's AT-SPI bridge then leaves out the widget
   and its subtree (`gtk_accessible_should_present`; checked with an AT-SPI client on GTK 4.14).
+- **A text view ignores CSS `line-height`**: only labels apply it. An `Input`'s lines get their height from the view's
+  `pixels-above-lines`, `pixels-below-lines` and `pixels-inside-wrap` (`text_input.rs`'s `set_line_box`), which also keep
+  the caret at the font's height. These are added to a line's own height, so a line in a taller fallback font (CJK) comes
+  out taller than `lineHeight` by the difference.
+
 - **A widget's accessible role is effectively fixed** once its AT context is realized: GTK refuses to change it (with a
   critical), and nothing tells whether it is. Roles are decided when the view is created, from the batch that creates
   it (`access::prepare`); a later change detaches the view and puts it back.

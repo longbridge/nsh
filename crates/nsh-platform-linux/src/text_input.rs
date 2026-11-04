@@ -44,7 +44,7 @@ use std::{
 use gtk4::{self as gtk, glib, prelude::*};
 use nsh_core::{
     AutoCapitalize, Bounds, EventKind, EventPayload, InputConfig, KeyboardType, PayloadValue,
-    Points, SubmitBehavior, TextAlign,
+    Points, ResolvedTextStyle, SubmitBehavior, TextAlign,
     geometry::{Point, Size, point, px, size},
     tailwind::state,
 };
@@ -958,6 +958,9 @@ pub(crate) fn config(_surface: &Rc<Surface>, view: &NshView, config: &InputConfi
             view.set_direction(direction);
         }
     }
+    if let Editor::Area { view, .. } = &editor {
+        set_line_box(view, &config.style);
+    }
     let label = &input.placeholder;
     label.set_label(&config.placeholder);
     label.set_xalign(xalign);
@@ -1120,7 +1123,10 @@ fn place(view: &NshView, input: &InputState) {
             };
             scroller.set_can_target(!invisible);
             let content = if invisible {
-                let line = text.create_pango_layout(Some("Ag")).pixel_size().1 as f32;
+                let line = text.create_pango_layout(Some("Ag")).pixel_size().1
+                    + text.pixels_above_lines()
+                    + text.pixels_below_lines();
+                let line = line as f32;
                 Bounds {
                     size: Size::new(
                         content.size.width.max(Points(line * 2.0)),
@@ -1134,6 +1140,28 @@ fn place(view: &NshView, input: &InputState) {
             view.set_native(scroller, content);
         }
     }
+}
+
+/// Gives a text view's lines the configured height: it ignores CSS's
+/// `line-height`. The extra space goes around the text rather than in the
+/// line, as the caret is as tall as the text between these pixels: half
+/// above and below a line, all of it between a line's wrapped parts.
+fn set_line_box(view: &gtk::TextView, style: &ResolvedTextStyle) {
+    let layout = view.create_pango_layout(Some("Ag"));
+    layout.set_font_description(Some(&crate::text::main_font_description(style)));
+    // Rounded as the text view rounds its lines (`pixel_size` rounds up).
+    let font = (layout.size().1 as f32 / gtk::pango::SCALE as f32).round() as i32;
+    let (above, below) = line_box(style.line_height.0, font);
+    view.set_pixels_above_lines(above);
+    view.set_pixels_below_lines(below);
+    view.set_pixels_inside_wrap(above + below);
+}
+
+/// The whole pixels above and below a line of a font `font` high to make it
+/// `line_height` high: none without a line height or if the font is taller.
+fn line_box(line_height: f32, font: i32) -> (i32, i32) {
+    let extra = (line_height.round() as i32 - font).max(0);
+    (extra / 2, extra - extra / 2)
 }
 
 /// The horizontal alignment of the text (0: left, 1: right).
@@ -1228,7 +1256,7 @@ fn css(config: &InputConfig) -> String {
     if s.line_height.0 > 0.0 {
         let _ = writeln!(
             css,
-            "textview > text, label.nsh-placeholder {{ line-height: {}px; }}",
+            "label.nsh-placeholder {{ line-height: {}px; }}",
             s.line_height.0
         );
     }
@@ -1437,6 +1465,41 @@ fn clip_utf16(s: &str, max: usize) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn line_boxes() {
+        assert_eq!(line_box(24.0, 18), (3, 3));
+        assert_eq!(line_box(25.0, 18), (3, 4));
+        assert_eq!(line_box(0.0, 18), (0, 0));
+        assert_eq!(line_box(12.0, 18), (0, 0));
+    }
+
+    /// The caret is the font's height, centered in a line of the configured
+    /// height.
+    #[test]
+    fn a_line_height_keeps_the_caret_at_the_fonts_height() {
+        crate::gtk_test::run(|| {
+            let view = gtk::TextView::new();
+            view.buffer().set_text("one\ntwo");
+            let style = ResolvedTextStyle {
+                font_size: Points(15.0),
+                line_height: Points(24.0),
+                ..Default::default()
+            };
+            set_line_box(&view, &style);
+            let window = gtk::Window::new();
+            window.set_child(Some(&view));
+            window.present();
+            crate::gtk_test::wait_until(|| view.height() > 0);
+            let buffer = view.buffer();
+            let (first, _) = view.cursor_locations(Some(&buffer.start_iter()));
+            let (second, _) = view.cursor_locations(Some(&buffer.end_iter()));
+            window.destroy();
+            assert_eq!(second.y() - first.y(), 24);
+            assert!(first.height() < 24, "caret {}", first.height());
+            assert_eq!(first.y(), (24 - first.height()) / 2);
+        });
+    }
 
     #[test]
     fn utf16_offsets() {
