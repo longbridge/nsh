@@ -107,6 +107,7 @@ const groups: { title: string; demos: DemoEntry[] }[] = [
     demos: [
       { name: "System", detail: "Status bar, alerts, action sheets, environment, timers, fetch", icon: "system", screen: lazy(() => import("./demos/System").then((m) => m.System)) },
       { name: "Storage", detail: "nsh/storage: a launch count, a note saved as you type, the stored keys", icon: "storage", screen: lazy(() => import("./demos/Storage").then((m) => m.StorageDemo)) },
+      { name: "Update", detail: "nsh/update: ask for a newer version, download it, replace the app", icon: "system", screen: lazy(() => import("./demos/Update").then((m) => m.UpdateDemo)) },
       { name: "Standard APIs", detail: "Files, processes, TCP, WebSockets, buffers, crypto and utilities", icon: "terminal", screen: lazy(() => import("./demos/Standard").then((m) => m.StandardDemo)) },
     ],
   },

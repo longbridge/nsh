@@ -27,7 +27,7 @@ WORKFLOWS = {
     "core.yml": {
         "packages": [
             "nsh-core", "nsh-macros", "nsh-js", "nsh-engine",
-            "nsh-bundler", "nsh-package", "nsh-base", "nsh-testing",
+            "nsh-bundler", "nsh-package", "nsh-update", "nsh-base", "nsh-testing",
         ],
         # The fonts nsh-core's, nsh-macros' and nsh-bundler's tests read.
         "files": [

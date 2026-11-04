@@ -29,6 +29,7 @@ unicode-bidi = "0.3.18"
 unicode-linebreak = "0.1.5"
 nsh-core = { version = "0.4.0", path = "crates/nsh-core" }
 nsh-package = { version = "0.4.0", path = "crates/nsh-package" }
+nsh-update = { version = "0.4.0", path = "crates/nsh-update" }
 # Without `highlight`: the platforms turn it on, the CLI and the bundler leave it off.
 nsh-base = { version = "0.4.0", path = "crates/nsh-base", default-features = false }
 nsh-macros = { version = "0.4.0", path = "crates/nsh-macros" }

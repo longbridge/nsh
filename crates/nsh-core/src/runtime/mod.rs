@@ -27,8 +27,11 @@ mod picker;
 mod process;
 mod speech;
 mod storage;
+mod update;
 mod websocket;
 mod webview;
+
+pub use update::{UpdateHost, UpdateSink};
 
 /// The [`crate::element::Quotas`] kind WebSockets count under: the `websocket`
 /// module's connections and the global `WebSocket`'s (`nsh-js`) share
@@ -77,7 +80,11 @@ pub fn registries() -> &'static [Registry] {
             websocket.module::<websocket::WebSocket>();
             websocket
         };
-        vec![nsh, desktop, mobile, os, net, process, fs, websocket]
+        let mut update = Registry::runtime("nsh/update");
+        update.module::<update::Update>();
+        vec![
+            nsh, desktop, mobile, os, net, process, fs, websocket, update,
+        ]
     })
 }
 

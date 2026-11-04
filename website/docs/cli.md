@@ -241,6 +241,14 @@ nsh keygen <NAME>
 
 Creates an Ed25519 key pair: `<NAME>.secret` and `<NAME>.pub` (e.g. `nsh keygen keys/root`). Keep a root's `.secret` offline; apps trust its `.pub`.
 
+### nsh update-manifest
+
+```sh
+nsh update-manifest <ARCHIVE>... [--entry <DIR>] [--key <FILE>] [--notes <FILE>] [--link ios=<URL>] [--link android=<URL>] [--base-url <URL>] [-o <DIR>]
+```
+
+Writes `latest.json` (and `latest.json.sig` with `--key`) for the archives `nsh package` made on each platform: see [App Updates](/docs/app-updates).
+
 ### nsh certify
 
 ```sh

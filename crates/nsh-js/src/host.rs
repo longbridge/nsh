@@ -58,6 +58,7 @@ pub(crate) struct Shared {
     pub(crate) system_access: RefCell<nsh_core::access::Access>,
     pub(crate) system_filesystem:
         RefCell<Option<std::sync::Arc<dyn nsh_core::filesystem::FileSystem>>>,
+    pub(crate) system_update: RefCell<Option<std::sync::Arc<dyn nsh_core::runtime::UpdateHost>>>,
     pub(crate) system_data_dir: RefCell<Option<std::path::PathBuf>>,
     pub(crate) system_paths: RefCell<nsh_core::access::TrustedPaths>,
     /// The VM's counts of limited resources for Rust modules (`net`'s
@@ -704,6 +705,11 @@ impl Host {
         filesystem: Option<std::sync::Arc<dyn nsh_core::filesystem::FileSystem>>,
     ) {
         *self.shared.system_filesystem.borrow_mut() = filesystem;
+    }
+
+    /// Installs what `nsh/update` runs on.
+    pub fn set_update(&self, update: Option<std::sync::Arc<dyn nsh_core::runtime::UpdateHost>>) {
+        *self.shared.system_update.borrow_mut() = update;
     }
 
     /// Installs the host WebSocket transport.

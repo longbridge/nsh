@@ -624,6 +624,71 @@ pub trait FetchTask: Send {
     fn cancel(self: Box<Self>);
 }
 
+/// `nsh/update` on the engine's network and assets: the platform's HTTP stack
+/// (so its TLS and proxies), and the file `nsh package` left among the assets.
+struct UpdateOverNetwork {
+    network: Arc<dyn Network>,
+    assets: Arc<dyn Assets>,
+}
+
+impl UpdateOverNetwork {
+    /// `None` without both (nothing to update from).
+    #[cfg_attr(
+        not(any(feature = "js-core", all(feature = "browser", target_arch = "wasm32"))),
+        allow(dead_code)
+    )]
+    fn host(
+        network: Option<Arc<dyn Network>>,
+        assets: Option<Arc<dyn Assets>>,
+    ) -> Option<Arc<dyn nsh_core::runtime::UpdateHost>> {
+        Some(Arc::new(UpdateOverNetwork {
+            network: network?,
+            assets: assets?,
+        }))
+    }
+}
+
+impl nsh_core::runtime::UpdateHost for UpdateOverNetwork {
+    fn config(&self) -> Option<Vec<u8>> {
+        // Only a package has it; a dev server answers nothing for it.
+        self.assets.read("asset:/nsh-update.json").ok()
+    }
+
+    fn get(&self, url: &str, sink: nsh_core::runtime::UpdateSink<'_>) -> Result<(), String> {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let events: FetchEvents = Box::new(move |event| {
+            let _ = tx.send(event);
+        });
+        let task = self.network.fetch(HttpRequest::new("GET", url), events);
+        let mut total = None;
+        let result = loop {
+            match rx.recv() {
+                Ok(FetchEvent::Head(head)) => {
+                    if !(200..300).contains(&head.status) {
+                        break Err(format!("HTTP {}", head.status));
+                    }
+                    total = head
+                        .headers
+                        .iter()
+                        .find(|(name, _)| name.eq_ignore_ascii_case("content-length"))
+                        .and_then(|(_, value)| value.parse().ok());
+                }
+                Ok(FetchEvent::Data(chunk)) => {
+                    if let Err(e) = sink(&chunk, total) {
+                        break Err(e);
+                    }
+                }
+                Ok(FetchEvent::End) => return Ok(()),
+                Ok(FetchEvent::Failed(e)) => break Err(e),
+                Ok(FetchEvent::BodyWanted) => {}
+                Err(_) => break Err("the network stack went away".to_owned()),
+            }
+        };
+        task.cancel();
+        result
+    }
+}
+
 /// The platform's HTTP stack, used by JS `fetch`.
 pub trait Network: Send + Sync + 'static {
     /// Starts `request`: its response head, then its body in chunks as they
@@ -1650,6 +1715,10 @@ impl<M: TextEngine + 'static> Driver<M> {
                         websocket: config.websocket.clone(),
                         refuse_connections: config.refuse_connections.clone(),
                         filesystem: config.filesystem.clone(),
+                        update: UpdateOverNetwork::host(
+                            config.network.clone(),
+                            config.assets.clone(),
+                        ),
                         data_dir: config
                             .data_dir
                             .as_ref()

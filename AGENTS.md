@@ -82,6 +82,7 @@ crates/
                        feature `shader`: the native backends' shader renderer (`shader.rs`: shader views' WGSL rendered with
                        wgpu offscreen, read back asynchronously, never blocking the main thread; docs/dev/shaders.md)
   nsh-package/         Signed packages (`.nshpkg`): Ed25519 keys, release-key certificates, revocation lists, the trust store
+  nsh-update/          App self-update: manifests and their signatures, verified downloads, replacing the installed app on the desktop (docs/dev/update.md); `nsh-core`'s `runtime/update.rs` is its JS face, `nsh/update`
   nsh-bundler/         Bundler: rolldown + Oxc (TS stripping) + NSH's JSX compiler (`jsx.rs`, docs/dev/native-pipeline.md) + source maps;
                        imports of the native modules stay imports (`plugin.rs`), so a bundle holds only the app's code;
                        the app's themes (nsh.json `tailwind` / `theme`, checked, handed to the renderer by the entry) and the

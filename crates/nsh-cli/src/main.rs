@@ -24,6 +24,7 @@ mod test_host;
 mod test_ios;
 mod test_web;
 mod ui;
+mod update;
 mod web;
 mod windows;
 
@@ -296,6 +297,32 @@ enum Command {
         /// Path and name of the key files, e.g. `keys/root`.
         name: PathBuf,
     },
+    /// Write an app's update manifest (`latest.json`, signed with `--key`)
+    /// from the archives `nsh package` made for each platform; publish them
+    /// together.
+    UpdateManifest {
+        /// The archives named `<name>-<version>-<os>-<arch>.<ext>`.
+        #[arg(required = true)]
+        archives: Vec<PathBuf>,
+        /// The app's directory or entry, whose `nsh.json` has the id and version.
+        #[arg(long, default_value = ".")]
+        entry: PathBuf,
+        /// The secret key (`nsh keygen`'s `.secret`) of the app's `update.publicKey`.
+        #[arg(long)]
+        key: Option<PathBuf>,
+        /// A text file with what changed.
+        #[arg(long)]
+        notes: Option<PathBuf>,
+        /// Where iOS or Android users get it: `ios=<url>`, `android=<url>` (repeatable).
+        #[arg(long = "link")]
+        links: Vec<String>,
+        /// Prefix of the archives' URLs (default: next to the manifest).
+        #[arg(long)]
+        base_url: Option<String>,
+        /// The directory the manifest is written to.
+        #[arg(short, long, default_value = ".")]
+        out: PathBuf,
+    },
     /// Certify a release key with a root key, for some app ids and a time
     /// window; packages carry the certificate.
     Certify {
@@ -472,6 +499,7 @@ impl Command {
             Command::Package(args) => Some(&mut args.entry),
             Command::Init { .. }
             | Command::Keygen { .. }
+            | Command::UpdateManifest { .. }
             | Command::Certify { .. }
             | Command::Verify { .. }
             | Command::Symbolicate { .. }
@@ -795,6 +823,23 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
             )
         }
         Command::Keygen { name } => sign::keygen(&name),
+        Command::UpdateManifest {
+            archives,
+            entry,
+            key,
+            notes,
+            links,
+            base_url,
+            out,
+        } => update::manifest(update::ManifestOptions {
+            archives: &archives,
+            entry: &entry,
+            key: key.as_deref(),
+            notes: notes.as_deref(),
+            links: &links,
+            base_url: base_url.as_deref(),
+            out: &out,
+        }),
         Command::Certify {
             root,
             key,
