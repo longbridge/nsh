@@ -84,6 +84,7 @@ nsh dev App.tsx
 | Flag | Description |
 |---|---|
 | `--port <port>` | Dev server port. Default 8790 (the next free one if taken). |
+| `--host <address>` | The address the server listens on, such as `127.0.0.1` for hosts on this machine only. Default: every interface, with the LAN URLs printed. |
 | `--release` | Serve release builds. |
 
 Connect hosts to the printed URL:
