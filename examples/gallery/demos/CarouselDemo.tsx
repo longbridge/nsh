@@ -1,6 +1,6 @@
 import { cleanup, createAnimatedValue, effect, Image, platform, reduceMotion, signal, Text, View, type ViewStyle } from "nsh";
 import { Carousel, CarouselContent, CarouselItem, CarouselNext, CarouselPagination, CarouselPaginationItem, CarouselPrevious } from "nsh/base";
-import { alpha, Badge, Button, Caption, Card, chart, colors, DemoPage, finish, focusRing, mono, Press, radius } from "../ui";
+import { alpha, Badge, Button, Caption, Card, chart, colors, DemoPage, finish, focusRing, mono, photoUrl, type PhotoName, Press, radius } from "../ui";
 import { LucideIcon, type LucideIconName } from "../icons";
 
 // `nsh/base`'s `Carousel` owns the scrolling (the platform's own: the
@@ -88,20 +88,20 @@ const STEPS: { icon: LucideIconName; title: string; body: string; tone: () => st
   { icon: "bell", title: "Stay in the loop", body: "Get a nudge when someone mentions you or a task is due.", tone: () => colors.warn },
 ];
 
-const PHOTOS = [
-  { id: 1036, caption: "Front, natural light" },
-  { id: 1039, caption: "Detail of the weave" },
-  { id: 1043, caption: "In the living room" },
-  { id: 1044, caption: "Side profile" },
-  { id: 1050, caption: "Folded for travel" },
-  { id: 1067, caption: "Packaging" },
+const PHOTOS: { name: PhotoName; caption: string }[] = [
+  { name: "rays", caption: "On the pad at dusk" },
+  { name: "fairing", caption: "Fairing, close up" },
+  { name: "day", caption: "At the tower by day" },
+  { name: "rollout", caption: "Rolled out at night" },
+  { name: "transporter", caption: "On the transporter" },
+  { name: "liftoff", caption: "Liftoff" },
 ];
 
-const BANNERS: { tag: string; title: string; body: string; from: string; to: string }[] = [
-  { tag: "New", title: "Autumn collection", body: "Layers for the first cold mornings", from: "#2f4a3a", to: "#7d9a5b" },
-  { tag: "Sale", title: "Up to 40% off", body: "Selected outdoor gear, this week only", from: "#4a2f3d", to: "#b5677d" },
-  { tag: "Event", title: "Repair café, Saturday", body: "Bring a broken thing, leave with a fixed one", from: "#2f3a4a", to: "#5b7d9a" },
-  { tag: "Members", title: "Free returns, always", body: "Join in a minute, cancel any time", from: "#4a422f", to: "#a8925b" },
+const BANNERS: { tag: string; title: string; body: string; name: PhotoName }[] = [
+  { tag: "New", title: "Launch season", body: "Watch the next flights from the beach", name: "arc" },
+  { tag: "Sale", title: "Up to 40% off", body: "Viewing seats, this week only", name: "sunrise" },
+  { tag: "Event", title: "Open pad day, Saturday", body: "Walk the pad and meet the crews", name: "silver" },
+  { tag: "Members", title: "Front row, always", body: "Join in a minute, cancel any time", name: "booster" },
 ];
 
 const COLLECTIONS: { name: string; count: number; icon: LucideIconName; tone: () => string }[] = [
@@ -137,7 +137,7 @@ function arrow(glass: boolean): ViewStyle {
 
 /**
  * Carousel and its parts: an onboarding the app steps through with its own
- * buttons, a product's photos with thumbnails and arrows, banners that
+ * buttons, a launch pad's photos with thumbnails and arrows, banners that
  * roll on by themselves and wait under the pointer, a row of cards three to
  * a view, and a vertical ticker.
  */
@@ -273,9 +273,9 @@ export function CarouselDemo() {
   function Product() {
     const photo = signal(0);
     return (
-      <Card title="Product photos" subtitle="Thumbnails pick a photo; arrows over its edges" right={<Badge label={`${photo() + 1} / ${PHOTOS.length}`} />}>
+      <Card title="Photos" subtitle="Thumbnails pick a photo; arrows over its edges" right={<Badge label={`${photo() + 1} / ${PHOTOS.length}`} />}>
         <Carousel
-          accessibilityLabel="Photos of the Linen throw"
+          accessibilityLabel="Photos of the launch pad"
           onChange={({ index }) => {
             photo.set(index);
             last.set(`Photo: ${PHOTOS[index].caption}`);
@@ -287,7 +287,7 @@ export function CarouselDemo() {
               <Each of={PHOTOS}>
                 {(p, i) => (
                   <CarouselItem accessibilityLabel={`${i() + 1} of ${PHOTOS.length}: ${p().caption}`} style={{ width: "100%", height: "100%" }}>
-                    <Image src={`https://picsum.photos/id/${p().id}/960/720`} style={{ width: "100%", height: "100%", backgroundColor: colors.raised }} />
+                    <Image src={photoUrl(p().name)} style={{ width: "100%", height: "100%", backgroundColor: colors.raised }} />
                   </CarouselItem>
                 )}
               </Each>
@@ -338,15 +338,15 @@ export function CarouselDemo() {
                   activeStyle={{ transform: [{ scale: 0.94 }] }}
                   focusStyle={focusRing(1)}
                 >
-                  <Image src={`https://picsum.photos/id/${p().id}/160/120`} style={{ flex: 1, borderRadius: 5, backgroundColor: colors.raised }} />
+                  <Image src={photoUrl(p().name, "360x360")} style={{ flex: 1, borderRadius: 5, backgroundColor: colors.raised }} />
                 </CarouselPaginationItem>
               )}
             </Each>
           </CarouselPagination>
         </Carousel>
         <View style={{ flexDirection: "row", alignItems: "baseline", gap: 8 }}>
-          <Text style={{ flex: 1, fontSize: size.title, fontWeight: "600", color: colors.text }}>Linen throw</Text>
-          <Text style={{ fontSize: size.title, fontWeight: "600", color: colors.text, fontVariant: ["tabular-nums"] }}>$89</Text>
+          <Text style={{ flex: 1, fontSize: size.title, fontWeight: "600", color: colors.text }}>Starbase</Text>
+          <Text style={{ fontSize: size.title, fontWeight: "600", color: colors.text, fontVariant: ["tabular-nums"] }}>6 photos</Text>
         </View>
         <Caption label={PHOTOS[photo()].caption} note={pointer ? "← → while focused, or the touchpad" : "Swipe, or tap a thumbnail"} />
       </Card>
@@ -387,10 +387,11 @@ export function CarouselDemo() {
                     padding: pointer ? 18 : 20,
                     justifyContent: "flex-end",
                     gap: 4,
-                    backgroundColor: b().from,
-                    backgroundImage: `linear-gradient(120deg, ${b().from} 0%, ${b().to} 100%)`,
+                    backgroundColor: colors.raised,
                   }}
                 >
+                  <Image src={photoUrl(b().name)} style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, objectFit: "cover" }} />
+                  <View style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, backgroundImage: "linear-gradient(90deg, rgba(0,0,0,0.66) 0%, rgba(0,0,0,0.28) 58%, rgba(0,0,0,0) 100%)" }} />
                   <View style={{ position: "absolute", top: 14, left: pointer ? 18 : 20, paddingHorizontal: 8, height: 20, borderRadius: 10, justifyContent: "center", backgroundColor: alpha("#ffffff", 0.18) }}>
                     <Text style={{ fontSize: 11, fontWeight: "600", color: "#ffffff", letterSpacing: 0.4 }}>{b().tag.toUpperCase()}</Text>
                   </View>
