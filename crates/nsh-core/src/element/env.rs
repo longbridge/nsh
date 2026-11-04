@@ -61,6 +61,9 @@ pub struct Environment {
     /// The platform recognizes speech
     /// ([`crate::platform::Environment::speech`]).
     pub speech: bool,
+    /// The platform shows notifications
+    /// ([`crate::platform::Environment::notifications`]).
+    pub notifications: bool,
     /// The Cell size of a grid surface (a terminal): the core lays out in
     /// its Cells ([`crate::platform::Environment::cell`]); `None` elsewhere.
     pub cell: Option<Size<Points>>,
@@ -94,6 +97,7 @@ impl Default for Environment {
             screen_color: false,
             file_requests: false,
             speech: false,
+            notifications: false,
             cell: None,
             web_input: false,
         }

@@ -691,6 +691,34 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
                     | Command::Speech(_)
                     // Trusted web view input is macOS's for now.
                     | Command::SendInput(_) => e.int(-1),
+                    Command::Notification(command) => {
+                        use nsh_core::notifications::NotificationCommand as N;
+                        e.int(44);
+                        match command {
+                            N::Permission { id, ask } => {
+                                e.int(0);
+                                e.int(id as i32);
+                                e.bool(ask);
+                            }
+                            N::Show { id, notification } => {
+                                e.int(1);
+                                e.int(id as i32);
+                                e.string(notification.id);
+                                e.string(notification.title);
+                                e.string(notification.body);
+                            }
+                            N::Close(id) => {
+                                e.int(2);
+                                e.string(id);
+                            }
+                            N::Listen => e.int(3),
+                            N::SetBadge(count) => {
+                                e.int(4);
+                                e.int(count as i32);
+                            }
+                            _ => e.int(-1),
+                        }
+                    }
                     // `SystemUi.dialog` draws alerts and action sheets in
                     // them: each of `DIALOG_TOKENS`, light then dark (0: the
                     // system's). An app without a theme of its own (its

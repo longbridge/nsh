@@ -170,6 +170,8 @@ pub(crate) struct Apk<'a> {
     pub(crate) activity: &'a str,
     /// Development builds: debuggable, cleartext HTTP (the dev server).
     pub(crate) dev: bool,
+    /// The app may show notifications: `POST_NOTIFICATIONS` is declared.
+    pub(crate) notifications: bool,
     /// A Rust app: its `libnsh.so` has the root, which `AppActivity` runs
     /// instead of a bundle (manifest meta-data `com.longbridge.nsh.RUST`).
     pub(crate) rust: bool,
@@ -282,10 +284,15 @@ fn manifest_xml(apk: &Apk<'_>) -> String {
         .replace('&', "&amp;")
         .replace('"', "&quot;")
         .replace('<', "&lt;");
+    let post_notifications = if apk.notifications {
+        "\n    <uses-permission android:name=\"android.permission.POST_NOTIFICATIONS\" />"
+    } else {
+        ""
+    };
     format!(
         r#"<?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android" package="{package}">
-    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.INTERNET" />{post_notifications}
     <application android:label="{label}"{icon}{cleartext}
         android:extractNativeLibs="false"
         android:enableOnBackInvokedCallback="true"

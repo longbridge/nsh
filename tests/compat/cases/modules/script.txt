@@ -76,6 +76,16 @@ tap id:start
 expect Refused: threw RangeError
 expect Speech: end unavailable "" true
 covers [nsh] Speech
+# mod-notifications
+tap id:case-mod-notifications
+# nothing shows notifications there: the permission is unavailable and nothing
+# shows, the badge and close do nothing, and bad arguments reject.
+expect Permission: unknown
+tap id:notify
+expect Permission: unavailable unavailable
+expect Refused: RangeError RangeError
+expect Shown: false
+covers [nsh] Notifications
 # mod-desktop
 tap id:case-mod-desktop
 # no title bar area, the window and menu functions do nothing, and a popup
