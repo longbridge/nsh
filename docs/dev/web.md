@@ -417,6 +417,10 @@ mount item. Views are absolutely positioned at the core's frames; borders are an
 the content the core placed. Native animation items stay in Rust (`src/animation.rs`); bound properties are applied
 after each batch and each `requestAnimationFrame` tick.
 
+Shader views (`["sh", id, layer]`) draw with one WebGL 2 context (`docs/dev/shaders.md`, "The web"); effects and
+transitions (`["sht"]`, `["shi"]`, `["shn"]`) take pictures of the DOM with a 2D canvas (`paintTree`), and pages and
+dialogs come and go through their shaders on an overlay (`shaderNav`): `docs/dev/shaders.md`, "On the web".
+
 ## Animation
 
 What moves on the web follows the Linux backend (`nsh-platform-linux` `transition.rs`, `navigation.rs`), which was

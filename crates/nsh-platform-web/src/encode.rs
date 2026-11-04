@@ -1225,10 +1225,26 @@ pub(crate) fn encode(out: &mut Out, item: &MountItem) {
                 .raw(&crate::canvas::encode(drawing))
                 .end();
         }
-        // Effects and transitions: this platform does not draw them yet.
-        MountItem::ShaderTransition { .. }
-        | MountItem::ShaderInput { .. }
-        | MountItem::NavShader { .. } => {}
+        MountItem::ShaderTransition { id, duration } => {
+            out.item("sht")
+                .num(*id)
+                .num(duration.as_secs_f64() * 1000.0)
+                .end();
+        }
+        MountItem::ShaderInput { id } => {
+            out.item("shi").num(*id).end();
+        }
+        MountItem::NavShader { id, shader } => {
+            let layer = shader.as_ref().map(|s| &*s.layer);
+            let ms = shader
+                .as_ref()
+                .map_or(0.0, |s| s.duration.as_secs_f64() * 1000.0);
+            out.item("shn")
+                .num(*id)
+                .raw(&crate::shader::encode_layer(layer))
+                .num(ms)
+                .end();
+        }
         MountItem::Shader { id, layer } => {
             out.item("sh")
                 .num(*id)
