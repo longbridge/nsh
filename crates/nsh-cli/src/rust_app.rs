@@ -248,13 +248,25 @@ impl Nsh {
         if let Some(dir) = nsh.source() {
             let version = checkout_version(dir)?;
             if version != VERSION {
-                bail!(
-                    "the app's crates take nsh from {}, which is nsh {version}, and this nsh is {VERSION}: run the nsh built in that checkout",
-                    dir.display()
-                );
+                bail!("{}", nsh.another_version(dir, &version));
             }
         }
         Ok(nsh)
+    }
+
+    /// The error for a checkout `dir` at `version`, not this nsh's, with the
+    /// fix for where the checkout comes from.
+    fn another_version(&self, dir: &Path, version: &str) -> String {
+        let fix = match self {
+            Nsh::Git { .. } => format!(
+                "set the app's nsh dependencies to {VERSION} in Cargo.toml, or install nsh {version} (curl -fsSL https://nsh.dev/install.sh | NSH_VERSION=v{version} sh)"
+            ),
+            _ => "run the nsh built in that checkout".to_owned(),
+        };
+        format!(
+            "the app's crates take nsh from {}, which is nsh {version}, and this nsh is {VERSION}: {fix}",
+            dir.display()
+        )
     }
 
     /// The checkout, if it is one.
@@ -2972,6 +2984,26 @@ mod tests {
         // No nsh at all: crates.io (the build then asks for the entry).
         assert_eq!(of(&[("a", "serde = \"1\"\n".into())]), Ok(Nsh::Registry));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn another_version_says_what_to_do_for_where_nsh_comes_from() {
+        let dir = Path::new("/nsh");
+        let git = Nsh::Git {
+            checkout: dir.into(),
+            url: "https://example.com/nsh.git".into(),
+        };
+        let error = git.another_version(dir, "0.0.1");
+        assert!(
+            error.contains(&format!("dependencies to {} in Cargo.toml", super::VERSION)),
+            "{error}"
+        );
+        assert!(error.contains("NSH_VERSION=v0.0.1"), "{error}");
+        let error = Nsh::Source(dir.into()).another_version(dir, "0.0.1");
+        assert!(
+            error.contains("run the nsh built in that checkout"),
+            "{error}"
+        );
     }
 
     #[test]
