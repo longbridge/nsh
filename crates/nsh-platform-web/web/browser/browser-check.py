@@ -14,6 +14,52 @@ import threading
 from playwright.async_api import TimeoutError, async_playwright
 
 
+async def check_scroll_content(page):
+    """A scroll view's contentStyle / contentClass style a container its children go into."""
+    from playwright.async_api import TimeoutError
+    warnings = []
+    listen = lambda message: warnings.append(message.text)
+    page.on("console", listen)
+    await page.evaluate("errors.length=0; player.options.onError=e=>errors.push(e); player.runModule('./scroll.js')")
+    await page.locator("[data-testid=first]").wait_for()
+    offset = lambda test_id: page.evaluate('''id=>{
+      const el=document.querySelector(`[data-testid=${id}]`);
+      if(!el) return null;
+      const box=el.getBoundingClientRect(), scroll=document.querySelector('[data-testid=scroll]').getBoundingClientRect();
+      return [box.left-scroll.left, box.top-scroll.top];
+    }''', test_id)
+    # Set after its first child was added: that child moves into the container.
+    # Waits for the padding to show; without it the assertion below says where the child is.
+    try:
+        await page.wait_for_function(
+            "document.querySelector('[data-testid=first]').getBoundingClientRect().left > 0", timeout=2000)
+    except TimeoutError:
+        pass
+    seen = {"first": await offset("first"), "last": await offset("last")}
+    # Added once the container exists, before a child already in it: it goes into the container, in order.
+    await page.evaluate("document.querySelector('iframe').contentWindow.toggleExtra()")
+    await page.locator("[data-testid=extra]").wait_for()
+    seen["extra"] = await offset("extra")
+    seen["last (extra shown)"] = await offset("last")
+    await page.evaluate("document.querySelector('iframe').contentWindow.toggleExtra()")
+    await page.locator("[data-testid=extra]").wait_for(state="detached")
+    seen["removed"] = await offset("extra")
+    seen["last (extra removed)"] = await offset("last")
+    page.remove_listener("console", listen)
+    # Padding 30, gap-4 (16) between children 10 high.
+    assert seen == {
+        "first": [30, 30],
+        "last": [30, 56],
+        "extra": [30, 56],
+        "last (extra shown)": [30, 82],
+        "removed": None,
+        "last (extra removed)": [30, 56],
+    }, seen
+    assert not [w for w in warnings if "unsupported prop" in w], warnings
+    assert await page.evaluate("errors.length") == 0, await page.evaluate("errors.map(String)")
+    await page.evaluate("player.stop()")
+
+
 async def check(wasm, chrome):
     with tempfile.TemporaryDirectory(prefix="nsh-browser-") as directory:
         root = pathlib.Path(directory)
@@ -49,6 +95,18 @@ result.promiseBrand=Menu.popup([]) instanceof Promise;
 result.bufferBrand=Buffer.from('abc') instanceof Uint8Array;
 mount(()=>{const value=signal(1);cleanup(()=>result.cleaned++);result.read=value;return null;});
 result.runs++;
+''')
+        (root / "scroll.js").write_text('''import {mount,signal} from 'nsh';
+import {element,prop,append,insert} from 'nsh:rt';
+mount(()=>{const root=element('view');const scroll=element('scroll');
+prop(scroll,'testID','scroll');prop(scroll,'style',{position:'absolute',left:0,top:0,width:200,height:200});
+const first=element('view');prop(first,'testID','first');prop(first,'style',{width:50,height:10});append(scroll,first);
+prop(scroll,'contentStyle',{padding:30});prop(scroll,'contentClass','gap-4');
+const last=element('view');prop(last,'testID','last');prop(last,'style',{width:50,height:10});append(scroll,last);
+const show=signal(false);window.toggleExtra=()=>show.set(!show());
+const extra=element('view');prop(extra,'testID','extra');prop(extra,'style',{width:50,height:10});
+insert(scroll,()=>show()?extra:null,last);
+append(root,scroll);return root;});
 ''')
         (root / "bad.js").write_text("import {mount,cleanup} from 'nsh'; mount(()=>{cleanup(()=>parent.result.failedCleaned++);return null;}); throw new Error('startup failed');")
         (root / "slow.js").write_text("await new Promise(resolve=>setTimeout(resolve,300)); parent.result.late=true;")
@@ -176,6 +234,7 @@ append(root,trigger);return root;});
                 await check_other_states(page)
                 await check_tooltip_function(page)
                 print(result)
+                await check_scroll_content(page)
                 await browser.close()
         finally:
             server.shutdown()
