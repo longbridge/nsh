@@ -188,7 +188,7 @@ view()
 - **宽度和颜色**可按边设置：`borderTopWidth`、`borderRightWidth`……`borderTopColor`……，它们在两个方向上都保持各自的一侧；以及跟随[布局方向](./layout.md)的 `borderStartWidth`、`borderEndWidth`、`borderStartColor`、`borderEndColor`（Rust 中的 `.border_t(..)`、`.border_t_color(..)`、`.border_s(..)`、`.border_e_color(..)` 等）。
 - **颜色**：设置了宽度而没有设置颜色的边，用文字颜色绘制，与 CSS 的 `currentColor` 相同：`{ borderWidth: 1, color: "#0969da" }` 画出蓝色边框。
 - **圆角半径**可按角设置：`borderTopLeftRadius`、`borderTopRightRadius`、`borderBottomRightRadius`、`borderBottomLeftRadius`，以及跟随[布局方向](./layout.md)的 `borderTopStartRadius` / `borderTopEndRadius` / `borderBottomStartRadius` / `borderBottomEndRadius`（顶部起始、顶部结束、底部起始、底部结束；Rust 中的 `.rounded_tl(..)` 等、`.rounded_ss(..)`、`.rounded_se(..)`、`.rounded_es(..)`、`.rounded_ee(..)`，以及预设 `.rounded_lg()`、`.rounded_full()` 等）。
-- **`borderCurve: "continuous"`**（`.border_curve(BorderCurve::Continuous)`，类名 `corner-squircle`）绘制超椭圆圆角，曲率平滑过渡到边，就像 iOS 应用图标：iOS、Android、macOS 支持，Web 上在浏览器支持 CSS `corner-shape` 时生效（Chromium）；其他情况下是相同半径的圆角。胶囊形状（`borderRadius` 为高度一半）仍是胶囊。
+- **`borderCurve: "continuous"`**（`.border_curve(BorderCurve::Continuous)`，类名 `corner-squircle`）绘制超椭圆圆角，曲率平滑过渡到边，就像 iOS 应用图标：iOS、Android、macOS、Linux 支持，Web 上在浏览器支持 CSS `corner-shape` 时生效（Chromium）；其他情况下是相同半径的圆角。胶囊形状（`borderRadius` 为高度一半）仍是胶囊。
 - **`overflow: "hidden"`**（`.overflow_hidden()`）把子视图裁剪到圆角形状内。裁掉的部分在布局上同样被裁掉：它不会进入外层滚动视图的内容尺寸，所以一个盒子把子视图按更大的尺寸排版、再用 `transform` 缩小（transform 不影响布局）时，不会让滚动视图多出可滚动的范围。
 
 超过边长一半的半径会被截断，所以 `borderRadius: 9999`（`.rounded_full()`）会得到圆形或胶囊。

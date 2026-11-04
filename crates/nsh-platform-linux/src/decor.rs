@@ -10,10 +10,19 @@
 //! Not drawn: `mixBlendMode` and `backdropFilter` need what lies behind the
 //! view, which a widget's snapshot does not have (GTK 4.22's copy / paste
 //! nodes could provide it, but the bindings are built for 4.14 and the
-//! copy would force an offscreen pass over the whole window); the
+//! copy would force an offscreen pass over the whole window; measured in
+//! `website/docs/linux.md`, five layers take a frame's budget and more); the
 //! background color still draws, so frosted bars stay readable.
-//! `borderCurve: "continuous"` draws circular corners, matching the clip of
-//! the children. Android's `elevation` is Android only.
+//! Android's `elevation` is Android only.
+//!
+//! `borderCurve: "continuous"` draws everything rounded through a path
+//! ([`Shape`], the outline of `nsh_core::shape`), since GSK's rounded
+//! rectangles only have elliptical corners. Views with circular corners keep
+//! GSK's rounded nodes, which are cheaper.
+//!
+//! `maskImage` ([`push_mask`]) draws the topmost gradient of the list, as iOS
+//! and macOS do: its alpha masks the view's box, so what overflows the box
+//! is masked out, as in CSS.
 //!
 //! Drawing allocates nothing of its own: gradient stops are resolved into
 //! thread-local buffers reused across draws. Dashed borders build a GSK path
@@ -24,7 +33,8 @@ use std::cell::RefCell;
 use gtk4::{self as gtk, gdk, graphene, gsk, prelude::*};
 use nsh_core::{
     BorderStyle, Color, Filter, Gradient, GradientKind, GradientSize,
-    geometry::{Percentage, Points, Radians, Size, deg},
+    geometry::{Corners, Percentage, Points, Radians, Size, bounds, deg, point, size},
+    shape::{self, Segment},
 };
 
 use crate::view::{ViewState, rounded};
@@ -50,6 +60,172 @@ pub(crate) fn backface_away(state: &ViewState) -> bool {
         && state
             .transform()
             .is_some_and(|t| t.to_matrix().value(2, 2) < 0.0)
+}
+
+/// A rounded box as a path: `continuous` corners ease into the edges.
+#[derive(Clone, Copy)]
+struct Shape {
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
+    /// Each corner's radii along its horizontal and vertical edge (top left,
+    /// top right, bottom right, bottom left).
+    radii: [(f32, f32); 4],
+    continuous: bool,
+}
+
+impl Shape {
+    /// A box whose corners have one radius each.
+    fn new(rect: (f32, f32, f32, f32), radii: [f32; 4], continuous: bool) -> Self {
+        let (x, y, w, h) = rect;
+        Self {
+            x,
+            y,
+            w,
+            h,
+            radii: radii.map(|r| (r.max(0.0), r.max(0.0))),
+            continuous,
+        }
+    }
+
+    /// The view's bounds, when its corners are continuous: other views use
+    /// GSK's cheaper rounded nodes.
+    fn of(state: &ViewState) -> Option<Self> {
+        let radii = state.radii();
+        (state.style.continuous_corners && radii.iter().any(|&r| r > 0.0)).then(|| {
+            let (w, h) = (state.frame.size.width.0, state.frame.size.height.0);
+            Self::new((0.0, 0.0, w, h), radii, true)
+        })
+    }
+
+    fn add_to(&self, path: &gsk::PathBuilder) {
+        let corner = |(w, h): (f32, f32)| size(Points(w), Points(h));
+        let [tl, tr, br, bl] = self.radii;
+        let rect = bounds(
+            point(Points(self.x), Points(self.y)),
+            size(Points(self.w), Points(self.h)),
+        );
+        let corners = Corners {
+            top_left: corner(tl),
+            top_right: corner(tr),
+            bottom_right: corner(br),
+            bottom_left: corner(bl),
+        };
+        shape::rounded_rect(rect, corners, self.continuous, false, &mut |s| match s {
+            Segment::Move(p) => path.move_to(p.x.0, p.y.0),
+            Segment::Line(p) => path.line_to(p.x.0, p.y.0),
+            Segment::Cubic([a, b, c]) => path.cubic_to(a.x.0, a.y.0, b.x.0, b.y.0, c.x.0, c.y.0),
+            Segment::Close => path.close(),
+        });
+    }
+
+    fn path(&self) -> gsk::Path {
+        let path = gsk::PathBuilder::new();
+        self.add_to(&path);
+        path.to_path()
+    }
+
+    /// This box moved by `(dx, dy)` and grown by `d` (shrunk when negative);
+    /// only rounded corners change, as a CSS shadow's do.
+    fn moved(&self, dx: f32, dy: f32, d: f32) -> Self {
+        let r = |v: f32| if v > 0.0 { (v + d).max(0.0) } else { 0.0 };
+        Self {
+            x: self.x + dx - d,
+            y: self.y + dy - d,
+            w: (self.w + 2.0 * d).max(0.0),
+            h: (self.h + 2.0 * d).max(0.0),
+            radii: self.radii.map(|(a, b)| (r(a), r(b))),
+            continuous: self.continuous,
+        }
+    }
+
+    /// The area between this box and `inner`.
+    fn ring(&self, inner: &Self) -> gsk::Path {
+        let path = gsk::PathBuilder::new();
+        self.add_to(&path);
+        inner.add_to(&path);
+        path.to_path()
+    }
+}
+
+/// Clips what follows to the view's rounded bounds, until the matching pop.
+pub(crate) fn push_clip(snapshot: &gtk::Snapshot, state: &ViewState) {
+    match Shape::of(state) {
+        Some(shape) => snapshot.push_fill(&shape.path(), gsk::FillRule::Winding),
+        None => snapshot.push_rounded_clip(&state.rounded_bounds()),
+    }
+}
+
+/// Masks what follows with the view's `maskImage`, until the matching pop;
+/// false if it has none (nothing to pop).
+pub(crate) fn push_mask(snapshot: &gtk::Snapshot, state: &ViewState) -> bool {
+    let Some(mask) = state
+        .style
+        .effects
+        .as_deref()
+        .and_then(|e| e.mask_images.first())
+    else {
+        return false;
+    };
+    let (w, h) = (state.frame.size.width.0, state.frame.size.height.0);
+    snapshot.push_mask(gsk::MaskMode::Alpha);
+    if w > 0.0 && h > 0.0 {
+        draw_gradient(snapshot, mask, w, h);
+    }
+    snapshot.pop();
+    true
+}
+
+/// An outer shadow of a continuous `shape`: the moved and spread shape
+/// blurred, masked to outside `shape` as CSS paints outer shadows.
+fn continuous_outset_shadow(
+    snapshot: &gtk::Snapshot,
+    shape: &Shape,
+    color: &gdk::RGBA,
+    (dx, dy, spread, blur): (f32, f32, f32, f32),
+) {
+    snapshot.push_mask(gsk::MaskMode::InvertedAlpha);
+    snapshot.append_fill(&shape.path(), gsk::FillRule::Winding, &gdk::RGBA::WHITE);
+    snapshot.pop();
+    if blur > 0.0 {
+        snapshot.push_blur(blur as f64);
+    }
+    let moved = shape.moved(dx, dy, spread);
+    snapshot.append_fill(&moved.path(), gsk::FillRule::Winding, color);
+    if blur > 0.0 {
+        snapshot.pop();
+    }
+    snapshot.pop();
+}
+
+/// An inset shadow of a continuous padding box: outside the moved and
+/// shrunk box, blurred and clipped to the padding box.
+fn continuous_inset_shadow(
+    snapshot: &gtk::Snapshot,
+    padding: &Shape,
+    color: &gdk::RGBA,
+    (dx, dy, spread, blur): (f32, f32, f32, f32),
+) {
+    snapshot.push_fill(&padding.path(), gsk::FillRule::Winding);
+    if blur > 0.0 {
+        snapshot.push_blur(blur as f64);
+    }
+    // Far enough out that the blur brings no edge into the box.
+    let m = 2.0 * blur + dx.abs() + dy.abs() + spread.abs() + 1.0;
+    let path = gsk::PathBuilder::new();
+    path.add_rect(&graphene::Rect::new(
+        padding.x - m,
+        padding.y - m,
+        padding.w + 2.0 * m,
+        padding.h + 2.0 * m,
+    ));
+    padding.moved(dx, dy, -spread).add_to(&path);
+    snapshot.append_fill(&path.to_path(), gsk::FillRule::EvenOdd, color);
+    if blur > 0.0 {
+        snapshot.pop();
+    }
+    snapshot.pop();
 }
 
 /// True if the view's outer shadows must be drawn as blurred shapes
@@ -137,11 +313,17 @@ pub(crate) fn draw_background(snapshot: &gtk::Snapshot, state: &ViewState, soft:
     let radii = state.radii();
     let outline = rounded(rect, radii);
     let effects = state.style.effects.as_deref();
+    let shape = Shape::of(state);
 
     if let Some(e) = effects {
         // CSS lists the top layer first.
         for b in e.box_shadows.iter().rev() {
             if !b.inset && b.is_visible() {
+                if let Some(shape) = &shape {
+                    let params = (b.offset_x.0, b.offset_y.0, b.spread.0, b.blur.0.max(0.0));
+                    continuous_outset_shadow(snapshot, shape, &rgba(b.color), params);
+                    continue;
+                }
                 outset_shadow(
                     snapshot,
                     &outline,
@@ -160,7 +342,9 @@ pub(crate) fn draw_background(snapshot: &gtk::Snapshot, state: &ViewState, soft:
     let gradients = effects.map_or(&[][..], |e| &e.background_images[..]);
     if !bg.is_transparent() || !gradients.is_empty() {
         let round = radii.iter().any(|&r| r > 0.0);
-        if round {
+        if let Some(shape) = &shape {
+            snapshot.push_fill(&shape.path(), gsk::FillRule::Winding);
+        } else if round {
             snapshot.push_rounded_clip(&outline);
         }
         if !bg.is_transparent() {
@@ -169,7 +353,7 @@ pub(crate) fn draw_background(snapshot: &gtk::Snapshot, state: &ViewState, soft:
         for g in gradients.iter().rev() {
             draw_gradient(snapshot, g, w, h);
         }
-        if round {
+        if round || shape.is_some() {
             snapshot.pop();
         }
     }
@@ -177,14 +361,16 @@ pub(crate) fn draw_background(snapshot: &gtk::Snapshot, state: &ViewState, soft:
     if let Some(e) = effects
         && e.box_shadows.iter().any(|b| b.inset && b.is_visible())
     {
-        let padding = padding_box(
-            w,
-            h,
-            radii,
-            state.style.borders.widths.to_array().map(|w| w.0),
-        );
+        let widths = state.style.borders.widths.to_array().map(|w| w.0);
+        let padding = padding_box(w, h, radii, widths);
+        let continuous = shape.map(|_| padding_shape(w, h, radii, widths));
         for b in e.box_shadows.iter().rev() {
             if b.inset && b.is_visible() {
+                if let Some(padding) = &continuous {
+                    let params = (b.offset_x.0, b.offset_y.0, b.spread.0, b.blur.0.max(0.0));
+                    continuous_inset_shadow(snapshot, padding, &rgba(b.color), params);
+                    continue;
+                }
                 snapshot.append_inset_shadow(
                     &padding,
                     &rgba(b.color),
@@ -213,6 +399,7 @@ pub(crate) fn draw_border(snapshot: &gtk::Snapshot, state: &ViewState) {
         return;
     }
     let radii = state.radii();
+    let continuous = Shape::of(state).is_some();
     if border {
         let outline = rounded(graphene::Rect::new(0.0, 0.0, w, h), radii);
         draw_borders(snapshot, state, &outline);
@@ -226,15 +413,24 @@ pub(crate) fn draw_border(snapshot: &gtk::Snapshot, state: &ViewState) {
             return;
         }
         let rect = graphene::Rect::new(-d, -d, ow, oh);
-        if o.style == BorderStyle::Solid {
+        if o.style == BorderStyle::Solid && continuous {
+            let outer = Shape::new((-d, -d, ow, oh), radii.map(|r| grown(r, d)), true);
+            let inner = Shape::new(
+                (-d + width, -d + width, ow - 2.0 * width, oh - 2.0 * width),
+                radii.map(|r| grown(r, d - width)),
+                true,
+            );
+            snapshot.append_fill(&outer.ring(&inner), gsk::FillRule::EvenOdd, &rgba(o.color));
+        } else if o.style == BorderStyle::Solid {
             let c = rgba(o.color);
             let outer = rounded(rect, radii.map(|r| grown(r, d)));
             snapshot.append_border(&outer, &[width; 4], &[c, c, c, c]);
         } else {
             let half = width / 2.0;
-            let line = rounded(
-                graphene::Rect::new(-d + half, -d + half, ow - width, oh - width),
+            let line = Shape::new(
+                (-d + half, -d + half, ow - width, oh - width),
                 radii.map(|r| grown(r, d - half)),
+                continuous,
             );
             stroke(snapshot, &line, width, o.style, &rgba(o.color));
         }
@@ -266,36 +462,34 @@ fn padding_box(w: f32, h: f32, radii: [f32; 4], widths: [f32; 4]) -> gsk::Rounde
     )
 }
 
-/// The view's borders along `outline` (its rounded bounds).
-fn draw_borders(snapshot: &gtk::Snapshot, state: &ViewState, outline: &gsk::RoundedRect) {
-    let b = &state.borders();
-    if !b.is_visible() {
-        return;
+/// [`padding_box`] as a continuous [`Shape`].
+fn padding_shape(w: f32, h: f32, radii: [f32; 4], widths: [f32; 4]) -> Shape {
+    let [top, right, bottom, left] = widths;
+    let c = |r: f32, x: f32, y: f32| ((r - x).max(0.0), (r - y).max(0.0));
+    Shape {
+        x: left,
+        y: top,
+        w: (w - left - right).max(0.0),
+        h: (h - top - bottom).max(0.0),
+        radii: [
+            c(radii[0], left, top),
+            c(radii[1], right, top),
+            c(radii[2], right, bottom),
+            c(radii[3], left, bottom),
+        ],
+        continuous: true,
     }
-    if b.style == BorderStyle::Solid {
-        snapshot.append_border(
-            outline,
-            &b.widths.to_array().map(|w| w.0),
-            &b.colors.map(rgba),
-        );
-        return;
-    }
-    let (w, h) = (state.frame.size.width.0, state.frame.size.height.0);
-    let radii = state.radii();
-    let line = |bw: f32| {
-        let half = bw / 2.0;
-        rounded(
-            graphene::Rect::new(half, half, (w - bw).max(0.0), (h - bw).max(0.0)),
-            radii.map(|r| (r - half).max(0.0)),
-        )
-    };
-    if let Some((bw, c)) = b.uniform() {
-        let bw = bw.0;
-        stroke(snapshot, &line(bw), bw, b.style, &rgba(c));
-        return;
-    }
-    // Sides that differ: the whole outline stroked with each side's width
-    // and color, clipped to that side's trapezoid (corners split at 45°).
+}
+
+/// Draws each side of a border in turn: `draw` with the side's width and
+/// color, clipped to its trapezoid (corners split at 45°).
+fn each_side(
+    snapshot: &gtk::Snapshot,
+    b: &nsh_core::Borders,
+    w: f32,
+    h: f32,
+    mut draw: impl FnMut(f32, Color),
+) {
     let m = w.min(h) / 2.0;
     for side in 0..4 {
         let (bw, c) = (b.width(side).0, b.colors[side]);
@@ -315,21 +509,69 @@ fn draw_borders(snapshot: &gtk::Snapshot, state: &ViewState, outline: &gsk::Roun
         }
         p.close();
         snapshot.push_fill(&p.to_path(), gsk::FillRule::Winding);
-        stroke(snapshot, &line(bw), bw, b.style, &rgba(c));
+        draw(bw, c);
         snapshot.pop();
     }
+}
+
+/// The view's borders along `outline` (its rounded bounds).
+fn draw_borders(snapshot: &gtk::Snapshot, state: &ViewState, outline: &gsk::RoundedRect) {
+    let b = &state.borders();
+    if !b.is_visible() {
+        return;
+    }
+    let (w, h) = (state.frame.size.width.0, state.frame.size.height.0);
+    let radii = state.radii();
+    let continuous = Shape::of(state).is_some();
+    if b.style == BorderStyle::Solid {
+        if !continuous {
+            snapshot.append_border(
+                outline,
+                &b.widths.to_array().map(|w| w.0),
+                &b.colors.map(rgba),
+            );
+            return;
+        }
+        let outer = Shape::new((0.0, 0.0, w, h), radii, true);
+        let inner = padding_shape(w, h, radii, b.widths.to_array().map(|w| w.0));
+        let ring = outer.ring(&inner);
+        if let Some((_, c)) = b.uniform() {
+            snapshot.append_fill(&ring, gsk::FillRule::EvenOdd, &rgba(c));
+        } else {
+            each_side(snapshot, b, w, h, |_, c| {
+                snapshot.append_fill(&ring, gsk::FillRule::EvenOdd, &rgba(c));
+            });
+        }
+        return;
+    }
+    let line = |bw: f32| {
+        let half = bw / 2.0;
+        Shape::new(
+            (half, half, (w - bw).max(0.0), (h - bw).max(0.0)),
+            radii.map(|r| (r - half).max(0.0)),
+            continuous,
+        )
+    };
+    if let Some((bw, c)) = b.uniform() {
+        let bw = bw.0;
+        stroke(snapshot, &line(bw), bw, b.style, &rgba(c));
+        return;
+    }
+    // Sides that differ: the whole outline stroked with each side's width
+    // and color, clipped to that side's trapezoid.
+    each_side(snapshot, b, w, h, |bw, c| {
+        stroke(snapshot, &line(bw), bw, b.style, &rgba(c));
+    });
 }
 
 /// Strokes `line`, `width` wide, dashed or dotted as `style` says.
 fn stroke(
     snapshot: &gtk::Snapshot,
-    line: &gsk::RoundedRect,
+    line: &Shape,
     width: f32,
     style: BorderStyle,
     color: &gdk::RGBA,
 ) {
-    let p = gsk::PathBuilder::new();
-    p.add_rounded_rect(line);
     let s = gsk::Stroke::new(width);
     match style {
         BorderStyle::Solid => {}
@@ -340,7 +582,7 @@ fn stroke(
             s.set_line_cap(gsk::LineCap::Round);
         }
     }
-    snapshot.append_stroke(&p.to_path(), &s, color);
+    snapshot.append_stroke(&line.path(), &s, color);
 }
 
 /// Pushes the view's filters around everything it draws; returns how many
@@ -696,6 +938,23 @@ mod tests {
 
     fn close(a: f32, b: f32) -> bool {
         (a - b).abs() < 1e-3
+    }
+
+    #[test]
+    fn continuous_corners_ease_into_the_edges() {
+        let inside = |continuous, x, y| {
+            Shape::new((0.0, 0.0, 200.0, 100.0), [20.0; 4], continuous)
+                .path()
+                .in_fill(&graphene::Point::new(x, y), gsk::FillRule::Winding)
+        };
+        // Just inside the top edge, where a quarter circle has already met it
+        // and the continuous curve is still coming down to it.
+        assert!(inside(false, 16.5, 0.5));
+        assert!(!inside(true, 16.5, 0.5));
+        // The middle of an edge and the box's center are the same.
+        assert!(inside(true, 100.0, 0.5));
+        assert!(inside(true, 100.0, 50.0));
+        assert!(!inside(true, 0.5, 0.5));
     }
 
     #[test]
