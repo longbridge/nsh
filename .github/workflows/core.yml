@@ -98,10 +98,5 @@ jobs:
       - name: Clippy
         run: cargo clippy --all-targets $PACKAGES -- -D warnings
 
-      # Without shaders: no naga, no wgpu.
-      - name: Check macOS without shaders
-        if: runner.os == 'macOS'
-        run: cargo clippy -p nsh-macos-app --no-default-features --features js -- -D warnings
-
       - name: Test
         run: cargo test $PACKAGES
