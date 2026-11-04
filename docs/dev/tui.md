@@ -6,12 +6,14 @@ embedding app's thread; the app owns the terminal, its event loop and the area g
 when it exits. It loads source bundles directly or connects to the CLI's development server.
 
 ```sh
-cargo build -p nsh-cli -p nsh-tui-host
-./target/debug/nsh run examples/gallery --target tui
-./target/debug/nsh run examples/counter --target tui --points-per-cell 8x16
+cargo run -- --target tui                                   # the gallery; rebuilt and restarted on Rust changes
+cargo run -- accordion --target tui                         # the gallery opened at one demo
+cargo run -- examples/counter --target tui                  # another app
+./target/debug/nsh run examples/counter --target tui --points-per-cell 8x16   # nsh run's own options
 ```
 
-The CLI serves and watches the app in its own process. It builds `nsh-tui-host` in a checkout, using the CLI's
+`cargo run` leaves `nsh run` in the terminal's foreground process group, unlike the other targets: the kernel stops a
+background group's process when it touches the terminal. The CLI serves and watches the app in its own process. It builds `nsh-tui-host` in a checkout, using the CLI's
 profile, and starts it with inherited stdin/stdout. CLI diagnostics, the host's stderr and the host logger append
 to the app's `.nsh/tui.log`, including verbose tool output. The host alone writes the terminal UI. Ctrl+C copies a selection and otherwise exits;
 Unix stop signals and Windows console breaks ask the host loop to exit so its terminal guard can restore the

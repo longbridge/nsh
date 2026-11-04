@@ -1,7 +1,7 @@
 //! `cargo run` (the workspace's default task): runs an example app, the
 //! gallery by default, on the machine's own desktop backend (the AppKit
 //! host on macOS, the GTK host on Linux, the Win32 host on Windows; an
-//! Android device or emulator elsewhere) with hot reload (`nsh run`), and rebuilds and restarts it when the runtime's sources
+//! Android device or emulator elsewhere) or the `--target` it is given, with hot reload (`nsh run`), and rebuilds and restarts it when the runtime's sources
 //! under `crates/` change: components and modules are Rust and live in the
 //! host, so only JS and TSX reload in place.
 
@@ -34,8 +34,8 @@ pub(crate) struct RunArgs {
     #[arg(long)]
     section: Option<String>,
     /// Where to run: `macos` (the AppKit host), `catalyst`, `ios` (a
-    /// simulator), `android`, `linux`, `windows` or `gpui` (the GPUI host);
-    /// default: the machine's own backend (`macos` on macOS, `linux` on
+    /// simulator), `android`, `linux`, `windows`, `gpui` (the GPUI host) or
+    /// `tui` (this terminal); default: the machine's own backend (`macos` on macOS, `linux` on
     /// Linux, `windows` on Windows), else `android`.
     #[arg(long)]
     target: Option<String>,
@@ -47,9 +47,9 @@ pub(crate) struct RunArgs {
     trace: bool,
 }
 
-/// Set by SIGINT / SIGTERM: the app runs in its own process group (so a
-/// restart can stop `nsh run` and the host it launched together), which
-/// does not see the terminal's Ctrl-C.
+/// Set by SIGINT / SIGTERM: the app usually runs in its own process group
+/// (so a restart can stop `nsh run` and the host it launched together),
+/// which does not see the terminal's Ctrl-C.
 static STOP: AtomicBool = AtomicBool::new(false);
 
 extern "C" fn on_signal(_: libc::c_int) {
@@ -141,13 +141,17 @@ fn build_cli(root: &Path) -> anyhow::Result<()> {
 /// `nsh run`, started by [`launch`].
 struct App {
     child: Child,
+    /// Whether `nsh run` leads a process group of its own.
+    #[cfg(unix)]
+    own_group: bool,
     /// Ends `nsh run` and the host with xtask, however xtask ends.
     #[cfg(windows)]
     _job: Option<win::Job>,
 }
 
 /// Starts `nsh run`, which builds the host it needs, in a process group of
-/// its own.
+/// its own, except on the terminal: a background group's host would be
+/// stopped by the kernel the moment it touches the terminal it draws on.
 fn launch(root: &Path, args: &RunArgs) -> anyhow::Result<App> {
     let nsh = format!("target/debug/nsh{}", std::env::consts::EXE_SUFFIX);
     let mut cmd = Command::new(root.join(&nsh));
@@ -172,7 +176,8 @@ fn launch(root: &Path, args: &RunArgs) -> anyhow::Result<App> {
     } else {
         "android"
     };
-    cmd.args(["--target", args.target.as_deref().unwrap_or(default)]);
+    let target = args.target.as_deref().unwrap_or(default);
+    cmd.args(["--target", target]);
     if let Some(device) = &args.device {
         cmd.args(["--device", device]);
     }
@@ -183,7 +188,9 @@ fn launch(root: &Path, args: &RunArgs) -> anyhow::Result<App> {
         cmd.arg("--verbose");
     }
     #[cfg(unix)]
-    {
+    let own_group = target != "tui";
+    #[cfg(unix)]
+    if own_group {
         use std::os::unix::process::CommandExt as _;
         cmd.process_group(0);
     }
@@ -194,6 +201,8 @@ fn launch(root: &Path, args: &RunArgs) -> anyhow::Result<App> {
     }
     let child = cmd.spawn().with_context(|| format!("launch {nsh}"))?;
     Ok(App {
+        #[cfg(unix)]
+        own_group,
         #[cfg(windows)]
         _job: win::Job::assign(&child),
         child,
@@ -201,24 +210,35 @@ fn launch(root: &Path, args: &RunArgs) -> anyhow::Result<App> {
 }
 
 /// Stops `nsh run` and everything it started (the Catalyst, macOS or Linux
-/// host).
+/// host through their group; `nsh run` stops the terminal host itself, which
+/// restores the terminal).
 #[cfg(unix)]
 fn stop(app: &mut App) {
+    let own_group = app.own_group;
     let app = &mut app.child;
-    let Ok(pgid) = libc::pid_t::try_from(app.id()) else {
+    let Ok(pid) = libc::pid_t::try_from(app.id()) else {
         let _ = app.kill();
         return;
     };
-    // SAFETY: plain syscalls on the process group `launch` created.
-    unsafe { libc::killpg(pgid, libc::SIGTERM) };
+    let signal = |signal| {
+        // SAFETY: plain syscalls on the child `launch` started, not yet
+        // reaped, or the process group it created.
+        unsafe {
+            if own_group {
+                libc::killpg(pid, signal);
+            } else {
+                libc::kill(pid, signal);
+            }
+        }
+    };
+    signal(libc::SIGTERM);
     for _ in 0..30 {
         if matches!(app.try_wait(), Ok(Some(_))) {
             return;
         }
         std::thread::sleep(Duration::from_millis(100));
     }
-    // SAFETY: as above.
-    unsafe { libc::killpg(pgid, libc::SIGKILL) };
+    signal(libc::SIGKILL);
     let _ = app.wait();
 }
 

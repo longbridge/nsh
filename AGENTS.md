@@ -240,10 +240,10 @@ to, put the details in nsh-docs and the summary here. Before changing an area, r
 ## Commands
 
 ```sh
-cargo run [-- <app>] [-- --target catalyst|ios|android|gpui]                       # the gallery on this machine's backend (AppKit / GTK / Win32), hot reload; rebuilt and restarted on Rust changes
+cargo run [-- <app>] [-- --target catalyst|ios|android|gpui|tui]                       # the gallery on this machine's backend (AppKit / GTK / Win32), hot reload; rebuilt and restarted on Rust changes
 cargo run -- accordion [--section settings]                                        # the gallery opened at one demo (by name), only its section with that title: no taps or scrolling
 NSH_GALLERY_DEMO=accordion NSH_GALLERY_SECTION=settings ./target/debug/nsh test examples/gallery/App.tsx --target linux   # the same under nsh test (steps on stdin)
-cargo xtask [<app>] [--target catalyst|ios|android|gpui] [-v]                      # the same without cargo's own two lines; -v (any nsh / xtask command): all output
+cargo xtask [<app>] [--target catalyst|ios|android|gpui|tui] [-v]                      # the same without cargo's own two lines; -v (any nsh / xtask command): all output
 cargo build -p nsh-cli                                                             # build the nsh CLI
 ./target/debug/nsh init my-app --template ts|rust|mixed                            # new app: TSX, Rust (a Cargo project, "root"), or TSX that is also a crate ("rust": "."); asks on a terminal without --template
 cargo build -p nsh-ios-host --target aarch64-apple-ios-macabi                          # the Catalyst development host (nsh run builds it in a checkout)

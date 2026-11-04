@@ -195,6 +195,7 @@ cargo run -- examples/counter                  # another app: its directory (App
 cargo run -- --target catalyst                 # in the Mac Catalyst window (UIKit, phone-style)
 cargo run -- --target ios                      # in an iOS simulator
 cargo run -- --target android                  # on an Android device or emulator
+cargo run -- --target tui                      # in this terminal
 ```
 
 `nsh run` itself works too; in a checkout it builds the host it needs first:
