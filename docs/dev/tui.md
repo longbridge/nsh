@@ -494,7 +494,9 @@ the title in the top border, bold, set off by the line with surfaces (`╭─ Ti
 overlay's box is raised and framed in the brighter popup line, with no shadow: what is around it stays as it
 is; a modal's box is the terminal's background. A box without a border of its own gets the
 frame one Cell outside it; so does a popup holding a list or menu with no box of the app's, its own box,
-and the layout keeps the frame's Cells (`Core::framed_box`). A word behind the box that it or its frame cuts is
+and the layout keeps the frame's Cells (`Core::framed_box`), moving an unanchored box in from the screen's edge so
+its frame shows (a toast at the bottom); a box across the whole screen (a bottom sheet as wide as it, a drawer as
+tall) stays docked to the edge it is flush with, its frame's side there off the screen (`Core::framed_within`). A word behind the box that it or its frame cuts is
 left out whole, no half of it glued to the frame; a run longer than 12 Cells (a URL, a path) keeps the part that
 shows, ending in `…` by the frame. Before each visible modal the Cells already drawn are faded half way into the
 terminal's background with surfaces (`dialog::backdrop`), dimmed bandless; anchored overlays leave what is

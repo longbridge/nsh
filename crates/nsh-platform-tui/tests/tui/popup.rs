@@ -643,6 +643,53 @@ fn a_toast_at_the_bottom_shows_with_its_whole_frame() {
     );
 }
 
+/// A bottom sheet as wide as the screen in an overlay of its own, as a
+/// compact `DockArea` presents its bottom dock: a fill, rounded top
+/// corners and a line along its top only.
+#[component]
+fn BottomSheet() -> impl IntoElement {
+    view().flex_1().child(text("page")).child(
+        overlay()
+            .left_0()
+            .right_0()
+            .bottom_0()
+            .rounded_t(px(16.0))
+            .border_t_1()
+            .bg(nsh_core::color::rgb(0x333333))
+            .child(text("Sheet")),
+    )
+}
+
+#[test]
+fn a_sheet_as_wide_as_the_screen_stays_on_its_bottom_edge_with_no_line_under_it() {
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(40, 12)).unwrap();
+    view.load(App::Rust(Root::new::<BottomSheet>(|| ())))
+        .unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "Sheet");
+    let (_, sheet) = find(&terminal, "Sheet").unwrap();
+    let buffer = terminal.backend().buffer();
+    let row = |y: u16| (0..40).map(|x| buffer[(x, y)].symbol()).collect::<String>();
+    // Docked to the bottom edge: its last row is the screen's, and the
+    // frame's bottom side is off the screen, so no line is drawn under it.
+    assert_eq!(
+        sheet,
+        11,
+        "the sheet on the screen's last row\n{}",
+        dump(&terminal)
+    );
+    assert!(
+        !row(11).contains('─'),
+        "no line under the sheet\n{}",
+        dump(&terminal)
+    );
+    assert!(
+        !row(10).trim().is_empty() && row(10).trim().chars().all(|c| c == '─'),
+        "a line along its top\n{}",
+        dump(&terminal)
+    );
+}
+
 /// Two toasts in a stack at the top of the screen, each framed by the
 /// terminal outside its box.
 #[component]

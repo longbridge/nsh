@@ -1246,17 +1246,27 @@ impl<M: TextEngine> Core<M> {
     /// Where unanchored overlay `key`, laid out at `frame` in host
     /// `host`, goes: in a terminal moved so the frame drawn outside its box
     /// (`outside_frame`) stays on the screen, as the box would at its edge
-    /// (a toast at the bottom); where it is.
+    /// (a toast at the bottom); where it is. A box across the whole screen
+    /// (a bottom sheet as wide as it, a drawer as tall) is docked to the
+    /// edge it is flush with: it stays there, the frame's side on that edge
+    /// off the screen, rather than leave a row for a line under it.
     fn framed_within(&self, key: Key, frame: Bounds<Points>, host: NodeId) -> Point<Points> {
         let (Some((ring, inner)), Some((size, _))) =
             (self.framed_box(key), self.overlay_host_size(host))
         else {
             return frame.origin;
         };
-        let fit = |at: Points, offset: Points, extent: Points, ring: Points, room: Points| {
-            let start = at + offset - ring;
-            let end = at + offset + extent + ring;
-            if extent + ring * 2.0 > room {
+        let spans = |extent: Points, ring: Points, room: Points| extent + ring * 2.0 > room;
+        let fit = |at: Points,
+                   offset: Points,
+                   extent: Points,
+                   ring: Points,
+                   room: Points,
+                   docked: bool| {
+            let (first, last) = (at + offset, at + offset + extent);
+            let flush = docked && (first.0.abs() < 0.5 || (room - last).0.abs() < 0.5);
+            let (start, end) = (first - ring, last + ring);
+            if spans(extent, ring, room) || flush {
                 at
             } else if start < Points::ZERO {
                 at - start
@@ -1273,6 +1283,7 @@ impl<M: TextEngine> Core<M> {
                 inner.size.width,
                 ring.width,
                 size.width,
+                spans(inner.size.height, ring.height, size.height),
             ),
             fit(
                 frame.origin.y,
@@ -1280,6 +1291,7 @@ impl<M: TextEngine> Core<M> {
                 inner.size.height,
                 ring.height,
                 size.height,
+                spans(inner.size.width, ring.width, size.width),
             ),
         )
     }
