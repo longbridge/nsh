@@ -15,6 +15,44 @@ import { createComponents } from "./components.js";
 
 const path = process.env.NSH_BROWSER_WASM;
 
+test("platform props set the props of the web's and the desktop's objects and ignore the others", () => {
+  const values = new Values();
+  const calls = [];
+  const dom = createDom((op, args) => calls.push([op, args]), values, { getOwner: () => null }, () => true, () => {});
+  const platform = { os: "web", desktop: true };
+  dom.setPlatform(platform);
+  const view = values.makeNode(2);
+  const props = () => calls.filter(([op]) => op === 303).map(([, [, name, value]]) => [name, value]);
+
+  dom.rt.prop(view, "ios", { style: { opacity: 0.1 } });
+  dom.rt.prop(view, "android", { style: { opacity: 0.2 } });
+  assert.deepEqual(props(), []);
+
+  dom.rt.prop(view, "web", { style: { opacity: 0.5 }, class: "p-2" });
+  dom.rt.prop(view, "desktop", { cursor: "pointer" });
+  assert.deepEqual(props(), [["style", { opacity: 0.5 }], ["class", "p-2"], ["cursor", "pointer"]]);
+
+  // A key the new object no longer has is unset.
+  calls.length = 0;
+  dom.rt.prop(view, "web", { style: { opacity: 1 } });
+  assert.deepEqual(props(), [["class", undefined], ["style", { opacity: 1 }]]);
+
+  // A handler inside the object listens as one on the element; a value that is not an object unsets it all.
+  calls.length = 0;
+  dom.rt.prop(view, "web", { style: { opacity: 1 }, onPress: () => {} });
+  assert.deepEqual(calls.filter(([op]) => op === 305).map(([, [, name, on]]) => [name, on]), [["onPress", true]]);
+  calls.length = 0;
+  dom.rt.prop(view, "web", null);
+  assert.deepEqual(props(), [["style", undefined]]);
+  assert.deepEqual(calls.filter(([op]) => op === 305).map(([, [, name, on]]) => [name, on]), [["onPress", false]]);
+
+  // Not the desktop idiom: `desktop` applies nothing.
+  calls.length = 0;
+  platform.desktop = false;
+  dom.rt.prop(view, "desktop", { cursor: "default" });
+  assert.deepEqual(props(), []);
+});
+
 test("browser web view refs forward sendInput to the command bridge", () => {
   const values = new Values();
   const calls = [];

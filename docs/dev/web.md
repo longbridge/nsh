@@ -70,9 +70,15 @@ python3 crates/nsh-platform-web/web/browser/browser-check.py --wasm target/wasm3
 ```
 
 The second command requires Python Playwright and Chromium (`--chrome` selects its executable). It checks
-real module realms, host events queued before startup, repeated replacement/disposal and rejected startup.
+real module realms, host events queued before startup, repeated replacement/disposal, rejected startup, every
+state style (`hoverStyle` / `activeStyle` under real mouse input, `focusStyle` / `focusWithinStyle` under Tab) and a
+list's `contentClass`.
 `browser-tests` contains ownership fixtures: never measure or publish that artifact. Rebuild with `browser`
 and use the supported `nsh package --target web` flow for shipping and size measurements.
+
+`browser-check.py` also mounts a view with all four platform props and checks that only the web's and, in the
+desktop idiom (Playwright's Chromium has a fine, hovering pointer, and the check's page is 1280 wide), the desktop's
+apply.
 
 Measure the supported CLI package with `node crates/nsh-platform-web/web/browser/package-size.mjs SITE
 --require-browser`. It reports raw bytes, gzip level 9 and Brotli quality 11 independently for every Wasm,
@@ -163,7 +169,9 @@ build to the same file) and takes `nsh.js` from the crate.
 
 A published app's runtime holds only what the app uses, and what only later screens use is downloaded apart
 from it. `nsh package --target web` makes these modules from `nsh-browser.wasm` (feature `linkable`) without a
-Rust toolchain or a linker; how is in the module docs of `crates/nsh-cli/src/web/`. A runtime with every
+Rust toolchain or a linker; how is in the module docs of `crates/nsh-cli/src/web/`. A runtime wasm-bindgen ran on
+(`crates/nsh-cli/src/bindgen.rs`) is published whole (`web::link`): wasm-bindgen rewrites the module and keeps the
+`linking` and `reloc.*` sections of the one it read, which no longer describe it. A runtime with every
 component (the website's, the development host's) serves every app.
 
 ### Historical QuickJS package sizes
@@ -412,6 +420,10 @@ A commit becomes one batch (`src/encode.rs`) that `nsh.js` applies item by item,
 mount item. Views are absolutely positioned at the core's frames; borders are an overlay element so they never move
 the content the core placed. Native animation items stay in Rust (`src/animation.rs`); bound properties are applied
 after each batch and each `requestAnimationFrame` tick.
+
+Shader views (`["sh", id, layer]`) draw with one WebGL 2 context (`docs/dev/shaders.md`, "The web"); effects and
+transitions (`["sht"]`, `["shi"]`, `["shn"]`) take pictures of the DOM with a 2D canvas (`paintTree`), and pages and
+dialogs come and go through their shaders on an overlay (`shaderNav`): `docs/dev/shaders.md`, "On the web".
 
 ## Animation
 

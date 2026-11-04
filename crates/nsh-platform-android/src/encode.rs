@@ -68,6 +68,9 @@ const ACCESSIBILITY_LABEL: i32 = 32;
 const APPEARANCE: i32 = 33;
 const COMPONENT_PROP_SLOTS: i32 = 34;
 const SHADER: i32 = 35;
+const SHADER_TRANSITION: i32 = 36;
+const SHADER_INPUT: i32 = 37;
+const NAV_SHADER: i32 = 38;
 
 /// An entry of the object table.
 pub(crate) enum Obj {
@@ -330,17 +333,40 @@ pub(crate) fn encode(batch: MountBatch) -> Encoded {
                 e.int(id as i32);
                 canvas(&mut e, &drawing);
             }
-            // Effects and transitions: this platform does not draw them yet.
-            MountItem::ShaderTransition { .. }
-            | MountItem::ShaderInput { .. }
-            | MountItem::NavShader { .. } => {}
             MountItem::Shader { id, layer } => {
-                // Java learns only whether the view shows a shader; the
+                // Java learns what the view shows (whether a shader, its
+                // role, how far it overflows, which pictures it reads); the
                 // layer goes to the UI-thread renderer (`crate::shader`).
                 e.int(SHADER);
                 e.int(id as i32);
                 e.bool(layer.is_some());
+                let l = layer.as_deref();
+                e.int(l.map_or(0, |l| l.role as i32));
+                e.float(l.map_or(0.0, |l| l.overflow.0));
+                e.int(l.map_or(0, |l| {
+                    l.shader
+                        .inputs()
+                        .iter()
+                        .fold(0, |bits, i| bits | 1 << i.index())
+                }));
                 e.animation.push(MountItem::Shader { id, layer });
+            }
+            MountItem::ShaderTransition { id, duration } => {
+                e.int(SHADER_TRANSITION);
+                e.int(id as i32);
+                e.float(duration.as_secs_f32() * 1000.0);
+            }
+            MountItem::ShaderInput { id } => {
+                e.int(SHADER_INPUT);
+                e.int(id as i32);
+            }
+            MountItem::NavShader { id, shader } => {
+                // Java learns whether the page or dialog has one; the layer
+                // waits in the renderer until it comes or goes.
+                e.int(NAV_SHADER);
+                e.int(id as i32);
+                e.bool(shader.is_some());
+                e.animation.push(MountItem::NavShader { id, shader });
             }
             MountItem::Overflow { id, extent } => {
                 e.int(OVERFLOW);

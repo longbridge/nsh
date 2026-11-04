@@ -121,6 +121,7 @@ export function createBrowserHost(player) {
         const hot = app.hot = createHot(reactive, report);
         dom.setHot(hot);
         const env = createEnvironment(reactive, call, dom);
+        dom.setPlatform(env.api.platform);
         const gestures = createGestures(call, values, reactive, dom, active, requestPump);
         dom.setTouches(gestures);
         dom.rt.setup = env.setup;
