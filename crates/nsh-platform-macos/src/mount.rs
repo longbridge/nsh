@@ -8,7 +8,11 @@ use std::{cell::RefCell, rc::Rc};
 use nsh_core::{Command, LayoutAnimation, MountItem, NodeId, ROOT_ID, ViewKind, canvas::Damage};
 use rustc_hash::FxHashMap;
 
-use crate::{surface::Surface, view::NshView};
+use crate::{
+    sight::Sights,
+    surface::Surface,
+    view::{NshView, Views},
+};
 
 /// The views of a surface.
 pub(crate) struct Mounter {
@@ -24,6 +28,9 @@ pub(crate) struct Mounter {
     /// Views whose drawing changed while they could not be seen
     /// ([`Mounter::draw_when_shown`]).
     stale: RefCell<Vec<NshView>>,
+    /// The ancestors [`Mounter::revisit`] resolved (kept for the
+    /// allocations; cleared on each pass).
+    sights: RefCell<Sights<NshView>>,
 }
 
 impl Mounter {
@@ -36,6 +43,7 @@ impl Mounter {
             layout_animation: None,
             rtl: false,
             stale: RefCell::default(),
+            sights: RefCell::default(),
         }
     }
 
@@ -61,6 +69,12 @@ impl Mounter {
     /// rows out of sight, and a pulse on each of them would otherwise
     /// redraw them all on every frame.
     pub(crate) fn draw_when_shown(&self, view: &NshView, damage: Damage) {
+        // Already waiting: it was out of sight, and anything that could
+        // show it since (a move, a batch) has the frame revisit it. Charts
+        // below the fold get new values on every frame of their appear.
+        if view.is_stale() {
+            return;
+        }
         if view.shown() {
             match damage {
                 Damage::Rect(r) => view.redraw_rect(r),
@@ -74,17 +88,29 @@ impl Mounter {
     /// Draws the views [`Mounter::draw_when_shown`] put off that can be
     /// seen now (after scrolls, batches and frames). Views out of the tree
     /// wait (their content is drawn once they show); deleted ones are
-    /// dropped.
-    pub(crate) fn revisit(&self) {
+    /// dropped. Whether the pass ran (it does not while one runs).
+    ///
+    /// The views it keeps share their ancestors: each ancestor's visible
+    /// part is resolved once per pass ([`Sights`]), which keeps a pass
+    /// over the hundreds of out-of-sight views of a long page cheap.
+    pub(crate) fn revisit(&self) -> bool {
         let Ok(mut stale) = self.stale.try_borrow_mut() else {
-            return;
+            return false;
         };
         if stale.is_empty() {
-            return;
+            return true;
         }
+        let Ok(mut sights) = self.sights.try_borrow_mut() else {
+            return false;
+        };
+        // Nothing moves while the pass decides (drawing comes after), so
+        // what it resolves stays true until it ends.
+        sights.clear();
         let shown: Vec<NshView> = stale
-            .extract_if(.., |v| !self.alive(v) || v.shown())
+            .extract_if(.., |v| !self.alive(v) || sights.shows(&Views, v))
             .collect();
+        sights.clear();
+        drop(sights);
         drop(stale);
         for view in shown {
             view.set_stale(false);
@@ -93,6 +119,7 @@ impl Mounter {
                 crate::shader::shown(&view);
             }
         }
+        true
     }
 
     /// Whether `view` is still mounted (not deleted).

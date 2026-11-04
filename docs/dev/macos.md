@@ -66,8 +66,9 @@ belong to the app, which owns retention and its storage budget.
   layer moves, so shadows and inset shadows avoid masks where their background allows.
 - **Out-of-sight content is not drawn** (`Mounter::draw_when_shown`): text and canvases whose content changes (a
   canvas's animated values on every frame while they run) are drawn only if some of the view can be seen, else when it
-  shows (after scrolls, batches and frames; a view out of the tree waits until it is inserted and shows). Seen is
-  `NshView::shown`'s walk up the tree, not AppKit's `visibleRect`: only ancestors that clip their children (`overflow:
+  shows (after scrolls, batches and the frames in which a view moved, was hidden or shown, or a scroll offset changed:
+  `sight.rs`; a view out of the tree waits until it is inserted and shows). Seen is `NshView::shown`'s walk up the
+  tree (`sight.rs`; a pass over many views shares what it found of their ancestors), not AppKit's `visibleRect`: only ancestors that clip their children (`overflow:
   hidden`, scroll views, stacks, images, inputs) and the root cut a view off, and what overflows any other ancestor
   shows, as in CSS (a label centered on a zero-width anchor: cut at every ancestor, as `visibleRect` cuts, its text was
   never drawn while its background, a layer property, showed). Lists keep rows out of sight, hidden screens stay
