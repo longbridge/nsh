@@ -260,6 +260,28 @@ Effects, transitions and page shaders sit on the same program, layer and rendere
   `Native.navTransition` declines, so a page moves with its own animation (`StackBox`) and a dialog with its
   `animation` (`ModalHost`).
 
+- **Windows.** Effects and running transitions (screen ones on the root) draw their last frame instead of their
+  children, which are drawn into a target bitmap by a context of their own as the window draws them (their hosted
+  items take their places; web views in them are hidden, their pages not in the picture: `DrawCx::uncomposed`) and
+  read back (`render::Readback`) only once a view in them changed since the last picture (`NshView::changed` stamps
+  the view and every view it is in, `NshView::changes`, and a `ShaderInput` item stamps the shader's view; a shader's
+  own frame only `redraw`s, which stamps the views it is in) or the whole window was asked to draw again
+  (`Surface::whole_change`: a video's frame, a native component, the theme), and given to the shader when their pixels
+  changed. A shader reading `nsh.time` over still children reads them once
+  (`shader.rs`'s `an_effect_reads_its_children_back_only_after_a_change`). The target and the CPU-readable bitmap
+  they are read through, and the pixels, are kept while the size, the scale and the device stay; Direct2D maps the
+  readable bitmap once the GPU has copied into it. A transition's `from` is drawn offscreen when it starts
+  (`render::draw_offscreen`). A backdrop is read back from the window's target before the view draws, into kept
+  bitmaps and pixels; a partial frame whose areas meet a view that reads it draws all of the view's box and overflow
+  (`shader::backdrop_areas`, `render::with_backdrops`), so it reads this frame's pixels, never its own output of an
+  earlier frame that the rest of the back buffer holds. Pages and dialogs: recordings (`ID2D1CommandList`) of the
+  host without and with the upper side, drawn into bitmaps and read back once by a hosted `NavItem` over the stack
+  or the root, its shader on its own transition clock (`start_transition`, backwards when it goes); a lost device
+  ends them at once in the window that finds it lost, and one of another window draws no recording of the lost
+  device (`NavItem`'s generation), only its shader's frames. Without a GPU device an effect draws its children as
+  they are, a transition starts no run and a page or a dialog comes with its own motion, as it does when the user
+  asks for less motion. A screen layer leaves the root when the view that mounted it is deleted (unless another
+  screen effect's took its place) or the app stops.
 ## Pages and dialogs
 
 What every platform does with a page's or a dialog's `MountItem::NavShader`, so an app sees the same thing
