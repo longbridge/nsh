@@ -299,6 +299,8 @@ Effects, transitions and page shaders sit on the same program, layer and rendere
   as it does when the user asks for less motion. A screen layer leaves the root when the view that mounted it is
   deleted (unless another screen effect's took its place) or the app stops; a page's or a dialog's shader goes with
   it at the end of the batch that deletes it, so its leave in that batch still goes through it.
+- **GPUI.** Fills only: an effect's or a transition's children show as they are, a screen layer draws nothing, pages
+  and dialogs come and go without their shader.
 
 ## Pages and dialogs
 

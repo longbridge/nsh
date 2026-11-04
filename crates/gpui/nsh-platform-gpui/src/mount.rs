@@ -314,13 +314,19 @@ impl Mounter {
                     crate::canvas::set(surface, view, drawing.clone());
                 }
             }
-            // Effects and transitions: this platform does not draw them yet.
+            // Only fills draw: an effect's or a transition's children show as
+            // they are (a transition changes them at once), a screen effect
+            // draws nothing, pages and dialogs come and go as they would
+            // without a shader.
             MountItem::ShaderTransition { .. }
             | MountItem::ShaderInput { .. }
             | MountItem::NavShader { .. } => {}
             MountItem::Shader { id, layer } => {
                 if let Some(view) = &self.get(*id) {
-                    crate::shader::set(surface, view, layer.clone());
+                    let fill = layer
+                        .clone()
+                        .filter(|l| l.role == nsh_core::shader::ShaderRole::Fill);
+                    crate::shader::set(surface, view, fill);
                 }
             }
             MountItem::Gestures { id, values } => {
