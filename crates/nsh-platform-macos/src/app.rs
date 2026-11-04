@@ -197,6 +197,15 @@ pub struct AppOptions {
     /// their calls and posts ([`AppView::host`]). One for every app the view
     /// loads; a new one by default.
     pub host: nsh_engine::HostChannel,
+    /// What the embedding app gives the engines of the views made with
+    /// these options ([`nsh_engine::EngineConfig::context`]): the Rust code
+    /// of the app's UI sets reads it with `nsh_core::element::engine_context`.
+    /// [`run_app`] adds to it the app's shared store
+    /// ([`nsh_core::shared::SharedStore`]) and the window host
+    /// ([`nsh_core::window::Windows`]) of each window it opens; a view made
+    /// with [`AppView::new`] has only what is given here (so it cannot open
+    /// windows).
+    pub context: nsh_engine::EngineContext,
 }
 
 impl Default for AppOptions {
@@ -221,6 +230,7 @@ impl Default for AppOptions {
             storage: None,
             notifications: false,
             host: nsh_engine::HostChannel::default(),
+            context: Default::default(),
         }
     }
 }
@@ -374,7 +384,7 @@ impl AppView {
             cache: options.cache.clone(),
             storage: options.storage.clone(),
             clock: Default::default(),
-            context: Default::default(),
+            context: options.context.clone(),
             pinned: Default::default(),
             clipboard: None,
             host: options.host.clone(),
@@ -727,6 +737,8 @@ fn finish_running(app: &NSApplication) {
 
 /// Stops the standalone app's engine (its window closes).
 fn stop_running() {
+    // Closing the main window ends the app: the other windows go with it.
+    crate::app_windows::shutdown();
     if let Some(running) = RUNNING.with(|r| r.borrow_mut().take()) {
         running.view.stop();
         drop(running.window);
@@ -764,6 +776,22 @@ fn name_app(name: &str) {
 pub fn run_app(source: AppSource, mut options: AppOptions) -> std::process::ExitCode {
     options.notifications = true;
     let mtm = MainThreadMarker::new().expect("run_app must be called on the main thread");
+    // The app's windows: the main window and the ones it opens share a store,
+    // and each engine reaches the host through its context.
+    let store = options
+        .context
+        .get::<nsh_core::shared::SharedStore>()
+        .map_or_else(nsh_core::shared::SharedStore::new, |store| (*store).clone());
+    let app_windows = crate::app_windows::AppWindows::new(store.clone());
+    let mut options = options;
+    options.context = options
+        .context
+        .clone()
+        .with(store)
+        .with(nsh_core::window::Windows::new(
+            app_windows.clone(),
+            crate::app_windows::main_info(),
+        ));
     let app = NSApplication::sharedApplication(mtm);
     // A background app is Prohibited: AppKit does not activate it. An
     // Accessory app is not guaranteed to stay inactive when its window
@@ -824,6 +852,7 @@ pub fn run_app(source: AppSource, mut options: AppOptions) -> std::process::Exit
     if let Some(display) = options.display {
         center_on_display(&window, display);
     }
+    app_windows.register_main(&source, &options, &window);
     match source {
         AppSource::Rust(root) => view.load(App::Rust(root)),
         AppSource::Bundle(bundle) => view.load(App::Js(bundle)),

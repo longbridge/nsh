@@ -306,6 +306,40 @@ AppKit makes of a posted event), so the user's mouse, and the enters and exits A
 is, never change what a test hovers, locked or not, and the user may go on using it while tests run. Lock the screen with `pmset displaysleepnow` (with a
 password required right after sleep) to run tests that way.
 
+## Windows of an app
+
+`run_app` gives the app a window host (`app_windows.rs`, `nsh_core::window::WindowHost`) that an engine reaches with
+`openWindow` / `nsh_core::window`: its `EngineConfig::context` (`AppOptions::context`) holds the app's `SharedStore` and
+a `Windows`. Each window is an `AppView` with an engine of its own (its JS and layout on that engine's thread); AppKit
+keeps every window, view and event on the **main thread**, which all windows share. So a window whose engine stalls
+keeps no other window from taking input, animating and drawing, but one window's main-thread work (its batches, its
+drawing) takes the main thread's time of all of them: the platform's difference from Windows, which gives each window
+a UI thread of its own.
+
+- **Engines never wait for the main thread**: `open` takes the next id from the host's table (a mutex: id and name,
+  the only state that crosses threads with the store) and returns it; the window is made in a block on the main queue
+  (`dispatch2`), as `focus` (deminiaturize, `makeKeyAndOrderFront`, activate) and `close` (`NSWindow::close`) are.
+  What a block needs (the app's source and options, the main window, the open windows) is in the main thread's
+  `MAIN`. Closing window 0 is `quit_app`.
+- **A new window** is an `NSWindow` (titled, closable, miniaturizable; resizable unless `resizable: false`) with a
+  delegate of its own (`NshAppWindowDelegate`, keyed by the window's id): its `windowWillClose:` leaves AppKit's
+  callback (a main-queue block, see pitfalls) before it stops the engine and forgets the window. It loads the app's
+  source again (`WindowContent::App`: the bundle, the Rust root or the dev server) or a Rust root.
+- **Options**: `size` and `position` are points (`position` from the primary screen's top left, as `Window.setFrame`;
+  a missing one cascades in 24 pt steps from the main window's top left), `min_size` is `contentMinSize`,
+  `focus: false` orders it front without making it key, `single` focuses the open window of that name. The options of
+  the main window are the base: a window carries its native components (`AppOptions::components`, all on the main
+  thread); each gets its own `HostChannel`.
+- **The store** lists open windows under `nsh/windows/<id>` (`{ name, title }`; the main window is 0), published when
+  a window is made and deleted when it closes.
+- **Closing the main window ends the app**: `stop_running` first closes every other window (their delegates removed,
+  their engines stopped) and empties `MAIN`.
+- **Not per window yet**: the menu bar is the app's (a surface's `setApplicationMenu` replaces `NSApp.mainMenu`, the
+  last one wins); `ExitApp` from another window closes that window only; a dev-server source gives each window a
+  connection of its own, and the last one is the client the logger forwards to.
+- A view an embedding app makes with `AppView::new` has only `AppOptions::context` and no window host, so opening
+  windows there fails with a reason.
+
 ## Not implemented, or different
 
 - **Zooming scroll views**: `zoomTo` and the zoom props are ignored (as on Linux).
