@@ -550,7 +550,12 @@ fn content(dv: Dv, column: Column, rows: Memo<Vec<usize>>) -> impl IntoElement {
     }
     el.child(
         part(
+            // Each side's text is a selectable area of its own: a drag
+            // selects the code across its rows, never into the other side
+            // of a split view, and the gutter's numbers and signs, the
+            // separators and the app's controls (all outside it) stay out.
             view()
+                .selectable(true)
                 .relative()
                 .min_w(relative(1.0))
                 .w(width)
@@ -614,8 +619,12 @@ fn line_row(
                     .map(|span| span_view(props, span, tint))
                     .collect::<Vec<_>>();
                 let lh = lh.clone();
+                // The code's lines select across rows in the side's area
+                // ([`content`]); a filler (no line on this side) stays out,
+                // so a copy has no blank line for it.
                 let line = text("")
                     .selection_color(selection_color)
+                    .when(tint != Tint::Filler, |t| t.select_text())
                     .absolute()
                     .top(move || Length::from(lh() * index as f32))
                     .left(px(PAD))

@@ -1018,3 +1018,23 @@ fn file_headers_follow_wrapped_rows() {
         }
     }
 }
+
+#[test]
+fn the_code_is_selectable_text_and_the_numbers_and_separators_are_not() {
+    let mut app = start(one_change());
+    see(&mut app, "line ten");
+    let screen = app.screen();
+    // Both sides' code is in a selectable area (each side its own).
+    assert_eq!(screen.in_selectable_view("text:line 10"), Ok(true));
+    assert_eq!(screen.in_selectable_view("text:line ten"), Ok(true));
+    // The separators sit outside the sides' text.
+    assert_eq!(screen.in_selectable_view("text:⋯ 6"), Ok(false));
+
+    // A line number only the new side has (the gutter is outside the
+    // text's area).
+    let mut app = start(texts("keep\nold\n", "keep\nnew\nmore\n"));
+    see(&mut app, "more");
+    let screen = app.screen();
+    assert_eq!(screen.in_selectable_view("text:more"), Ok(true));
+    assert_eq!(screen.in_selectable_view("text:3"), Ok(false));
+}

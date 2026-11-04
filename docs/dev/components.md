@@ -627,7 +627,7 @@ accessibility states the components report (listbox, tree and tab rows their sel
 |---|---|
 | `Checkbox` | `[✓]` (the `✓` in the accent), `[ ]` (muted) or `[–]` (the dash in the accent) and a space in place of the indicator, then the children in a view of their own beside it (a column: a choice card's title over its description) |
 | `Radio` | `(●)` (the dot in the accent) or `( )` (muted) and a space before the children, in a row (an app's own dot among its children is the app's to leave out) |
-| `Switch` | three Cells and a space in place of the track and thumb: on `━━●` (the track in the accent, the knob bold), off `●──` (muted); the knob's side tells them apart without colors |
+| `Switch` | a checkbox's mark and a space in place of the track and thumb: on `[✓]`, off `[ ]`, as terminal apps show an on / off setting (a knob on a track would read as a slider); the role stays a switch for screen readers |
 | `Slider` | one row of `─` as wide as the slider, `━` from `min` to the value (a range: between its thumbs) in the accent, the rest muted, a `●` view per thumb on its value's Cell (focus, keys, drags and screen readers as elsewhere); vertical: a column of `│` / `┃` |
 | `Progress` | one row as wide as the bar: full Cells `█`, the partial Cell by eighths `▏▎▍▌▋▊▉`, then `░`, the filled Cells in the accent; indeterminate: a four-Cell segment moving one Cell every 120 ms (only while indeterminate; reduced motion: `░` only) |
 | `ColorSlider` | one row of Cells over the slider's width, each filled with the channel's color at that point of the track (role `Image`, hidden from screen readers: the terminal paints it as the color itself, quantized at 256 colors, no fill where it paints none) and carrying `━` up to the value, the thumb `●` on its Cell and `─` after; the slider is the focusable adjustable control, keys as elsewhere, a press or a drag on a Cell picks its value (`color_picker/tui.rs`) |
@@ -638,11 +638,11 @@ accessibility states the components report (listbox, tree and tab rows their sel
 | `NumberInput` | with `controlsRight`, the increment and decrement side by side on the field's row, not one over the other |
 | `Select` | one row: the app's `trigger` content, or without one the chosen titles (the app's `placeholder`, muted, while nothing is chosen), then ` ▾`; ` ×` in place of `clearButton`; the list opens under it (no cover) |
 | `Combobox` | the input one row (no `inputClass` / `inputStyle`), ` ×` and ` ▾` in place of `clearButton` and `triggerButton`, on its row; the app's `prefix` and `suffix` a Cell apart from them |
-| list rows (`Select`, `Combobox`) | each item's title after `✓ ` while chosen (two spaces while not), one full-width row; headers their title, bold and muted; the list as wide as its widest row, at least the trigger's width; no `renderItem`, `renderGroup` or row classes |
+| list rows (`Select`, `Combobox`) | each item's title from the row's start, `✓` at the row's end while chosen (a blank Cell while not, a blank Cell before it), one full-width row; headers their title, bold and muted; the list as wide as its widest row, at least the trigger's width; no `renderItem`, `renderGroup` or row classes |
 | `Command` rows | the app's `renderItem` content, without `itemClass` or `itemStyle`: the terminal marks the highlighted row (its projected `focus:`) as one band over the whole row |
 | `OtpInput` | its field (`caret(false)`) is no wider than a Cell and stands on the middle Cell of the cell that takes the next digit, so the terminal's own cursor shows where it goes |
 | `Tabs` | no indicator; the tabs in a row, two Cells apart; the painter draws the selected tab bold (a band only while focused) and the others muted, from each tab's selected state |
-| `MenuItem` | a checkable item starts with `✓ ` (two spaces unchecked) in place of the indicator |
+| `MenuItem` | a checkable item is its content from the row's start, then the mark at the row's end in place of the indicator: `✓` checked, `●` on a checked `menuitemradio` item, a blank Cell unchecked, so the titles start in one column and the marks line up at the right |
 | `Submenu` | its trigger is one menu item row: the trigger's content, then ` ›` in the theme's muted foreground |
 | `MenuSeparator` | a row of `─` across the menu |
 | `AccordionTrigger` | `▸ ` closed / `▾ ` open, then the children in a row of their own a Cell apart (the trigger's own gap does not part them from the disclosure; an app's own chevron is the app's to leave out) |

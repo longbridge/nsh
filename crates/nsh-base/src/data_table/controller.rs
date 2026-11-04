@@ -55,6 +55,12 @@ pub(crate) struct Geo {
     /// The content offsets (the scroll offsets, scaled).
     pub(crate) cx: f64,
     pub(crate) cy: f64,
+    /// The width the vertical scroll bar takes at the right: a terminal's
+    /// column of Cells once the rows overflow, where the core lays the
+    /// scroll view's content out beside its bar; the cells leave it free,
+    /// as the bar is not drawn over content. Elsewhere none, the bar lying
+    /// over the rows.
+    pub(crate) bar: f32,
 }
 
 /// The state that is not a signal.
@@ -95,6 +101,9 @@ pub(crate) struct Dt {
     pub(crate) scroll_x: Signal<Points>,
     pub(crate) scroll_y: Signal<Points>,
     pub(crate) viewport: Signal<Size<Points>>,
+    /// The width of the hit layer's content, inside its scroll view: less
+    /// than the viewport's by the column a terminal's bar takes.
+    pub(crate) rows_width: Signal<Option<Points>>,
     pub(crate) hover: Signal<Option<usize>>,
     pub(crate) focused: Signal<bool>,
     pub(crate) column_drag: Signal<Option<MoveDrag>>,
@@ -146,6 +155,7 @@ impl Dt {
             scroll_x: signal(Points::ZERO),
             scroll_y: signal(Points::ZERO),
             viewport: signal(Size::default()),
+            rows_width: signal(None),
             hover: signal(None),
             focused: signal(false),
             column_drag: signal(None),
@@ -432,7 +442,13 @@ impl Dt {
             rows as f64 * row_height as f64,
             (height - header).max(0.0) as f64,
         );
-        let x = Axis::new(scroll_width, (width - lead - fixed).max(0.0) as f64);
+        // What the hit layer's scroll view keeps beside its content for its
+        // bar (a terminal's column): none until laid out.
+        let bar = self
+            .rows_width
+            .get()
+            .map_or(0.0, |rows| (width - rows.0).max(0.0));
+        let x = Axis::new(scroll_width, (width - lead - fixed - bar).max(0.0) as f64);
         let cx = self.offset_on(&x, self.scroll_x.get(), self.anchor_x);
         let cy = self.offset_on(&y, self.scroll_y.get(), self.anchor_y);
         Geo {
@@ -444,6 +460,7 @@ impl Dt {
             x,
             cx,
             cy,
+            bar,
         }
     }
 

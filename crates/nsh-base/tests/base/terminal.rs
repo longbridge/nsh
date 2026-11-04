@@ -112,16 +112,19 @@ fn checkboxes_radios_and_switches_show_the_terminals_marks() {
     let mut app = start::<Marks>(Idiom::Terminal);
     // Agree unchecked, All mixed, Free checked, Pro not, Wi-Fi off.
     let shown = joined(&app);
-    for row in ["[ ] Agree", "[–] All", "(●) Free", "( ) Pro", "●── Wi-Fi"] {
+    for row in ["[ ] Agree", "[–] All", "(●) Free", "( ) Pro", "[ ] Wi-Fi"] {
         assert!(shown.contains(row), "{row} not in {shown:?}");
     }
     app.press("text:Agree").unwrap();
     app.press("text:All").unwrap();
     app.press("text:Pro").unwrap();
     app.press("text:Wi-Fi").unwrap();
-    app.wait_for("text:━━").unwrap();
+    app.wait_until("Wi-Fi on", Duration::from_secs(5), |s| {
+        s.texts().concat().contains("[✓] Wi-Fi")
+    })
+    .unwrap();
     let shown = joined(&app);
-    for row in ["[✓] Agree", "[✓] All", "( ) Free", "(●) Pro", "━━● Wi-Fi"] {
+    for row in ["[✓] Agree", "[✓] All", "( ) Free", "(●) Pro", "[✓] Wi-Fi"] {
         assert!(shown.contains(row), "{row} not in {shown:?}");
     }
 }
@@ -150,7 +153,7 @@ fn the_marks_take_the_accent_when_on_and_are_muted_when_off() {
 fn outside_a_terminal_the_controls_show_no_marks() {
     let app = start::<Marks>(Idiom::Desktop);
     let shown = joined(&app);
-    for mark in ["[ ]", "[–]", "(●)", "( )", "●──"] {
+    for mark in ["[ ]", "[–]", "(●)", "( )", "[ ]"] {
         assert!(!shown.contains(mark), "{mark} in {shown:?}");
     }
     assert!(app.screen().shows("Agree"));

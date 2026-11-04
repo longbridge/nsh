@@ -1,6 +1,6 @@
 ---
 title: DiffView
-description: "The DiffView component: the changes between two texts or of a patch, side by side or unified, with the words changed within lines highlighted, unchanged lines collapsed into separators that expand, syntax highlighting, soft wrap, per-change actions, line selection and review annotations."
+description: "The DiffView component: the changes between two texts or of a patch, side by side or unified, with the words changed within lines highlighted, unchanged lines collapsed into separators that expand, syntax highlighting, soft wrap, per-change actions, selectable code, line selection and review annotations."
 group: base
 demo: el-diff-view
 ---
@@ -436,6 +436,15 @@ const follow = (pageY: number) => diff.setScrollOffset({ x: 0, y: (pageY - ruler
 
 A mark's `index` is the change's in `hunks()`, whose `oldLines` and `newLines` tell an added change (no old lines)
 from a deleted one (no new lines), to color its mark.
+
+## Selecting the code
+
+The code is selectable text: dragging over it selects across lines, a double click selects a word and a triple click a
+line, Shift extends the selection, and the platform's copy (Cmd+C or Ctrl+C; Ctrl+Shift+C in a terminal) copies it.
+Each side of a split view selects on its own, so a selection stays on the side it starts on; a unified view's column
+is one text. The line numbers, the `+` / `−` marks and bars, the separators, the file headers and the app's controls
+and annotations stay out of the selection, so a copy holds only code. Selecting lines on the line numbers works as
+below, beside it.
 
 ## Review comments
 

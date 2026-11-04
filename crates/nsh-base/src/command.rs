@@ -172,7 +172,7 @@ impl CommandEntry {
         let shortcut_label = item.shortcut.as_deref().and_then(|keys| {
             let apple = apple_keys();
             match Keystroke::parse_with(keys, apple) {
-                Ok(k) => Some(SharedString::from(k.label(os(), apple))),
+                Ok(k) => Some(SharedString::from(keystroke_label(k))),
                 Err(e) => {
                     log::warn!("Command: the shortcut of `{}`: {e}", item.id);
                     None

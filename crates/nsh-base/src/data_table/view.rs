@@ -259,6 +259,14 @@ fn hit_layer(dt: Dt, lead: Lead) -> impl IntoElement {
                 .flex_row()
                 .items_stretch()
                 .h(move || Length::from(px(height_dt.geo().y.extent() as f32)))
+                .on_layout({
+                    let dt = dt.clone();
+                    move |b: &Bounds<Points>| {
+                        if dt.rows_width.get_untracked() != Some(b.size.width) {
+                            dt.rows_width.set(Some(b.size.width));
+                        }
+                    }
+                })
                 .child(
                     scroll()
                         .horizontal()
@@ -503,10 +511,13 @@ fn body(dt: Dt, custom: bool) -> impl IntoElement {
     let w = windows(&dt);
     let top_dt = dt.clone();
     let (lead_dt, fixed_dt, scroll_dt) = (dt.clone(), dt.clone(), dt.clone());
+    let right_dt = dt.clone();
     view()
         .absolute()
         .left_0()
-        .right_0()
+        // Clear of a terminal's scroll bar column, whose bar is not drawn
+        // over content.
+        .right(move || Length::from(px(right_dt.geo().bar)))
         .bottom_0()
         .top(move || Length::from(px(top_dt.geo().header)))
         .overflow_hidden()
@@ -1046,14 +1057,15 @@ fn group_cells(dt: &Dt, scroll: bool, window: &[usize], origin: usize) -> Vec<Gr
 fn header(dt: Dt, custom: bool) -> impl IntoElement {
     let props = dt.props;
     let w = windows(&dt);
-    let height_dt = dt.clone();
+    let (height_dt, right_dt) = (dt.clone(), dt.clone());
     let (corner_dt, fixed_dt, scroll_dt) = (dt.clone(), dt.clone(), dt.clone());
     part(
         view()
             .absolute()
             .top_0()
             .left_0()
-            .right_0()
+            // As wide as the body, its columns over the body's.
+            .right(move || Length::from(px(right_dt.geo().bar)))
             .h(move || Length::from(px(height_dt.geo().header)))
             .overflow_hidden(),
         props,

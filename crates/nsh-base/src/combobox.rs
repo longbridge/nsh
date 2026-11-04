@@ -270,8 +270,8 @@ enum Opening {
 /// In a terminal the input is one row as wide as the room left (no
 /// `inputClass` / `inputStyle`), then the terminal's own ` ×` in place of
 /// `clearButton` and ` ▾` in place of `triggerButton`, on the input's row;
-/// the list's rows are the items' titles, after `✓ ` while chosen, one
-/// full-width row each, which the terminal marks while highlighted (no
+/// the list's rows are the items' titles from the row's start, with `✓` at
+/// the row's end while chosen, one full-width row each, which the terminal marks while highlighted (no
 /// `renderItem`, `renderGroup` or row classes there) ([`crate::terminal`]).
 #[component]
 pub fn Combobox(props: ComboboxProps, cx: Scope<ComboboxEvent>) -> impl IntoElement {

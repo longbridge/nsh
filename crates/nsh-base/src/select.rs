@@ -414,8 +414,9 @@ enum Opening {
 /// In a terminal the trigger is one row: the app's `trigger` content, or
 /// without one the chosen title (titles, comma separated) or, while nothing
 /// is chosen, the app's `placeholder`, muted; then ` ▾`; with `cleanable` a ` ×` after it clears the value, in
-/// place of `clearButton`. The list's rows are the items' titles, after
-/// `✓ ` while chosen, one full-width row each, which the terminal marks
+/// place of `clearButton`. The list's rows are the items' titles from the
+/// row's start, with `✓` at the row's end while chosen, one full-width row
+/// each, which the terminal marks
 /// while highlighted (no `renderItem`, `renderGroup` or row classes there)
 /// ([`crate::terminal`]).
 #[component]

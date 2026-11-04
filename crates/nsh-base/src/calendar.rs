@@ -516,7 +516,8 @@ pub enum CalendarItemKind {
     YearToggle,
     /// The next month, or page of years.
     Next,
-    /// A day of the week over the days.
+    /// A day of the week over the days: its column's header (a column
+    /// header for screen readers), which takes no press.
     Weekday,
     /// A day.
     #[default]
@@ -531,8 +532,9 @@ pub enum CalendarItemKind {
 /// `CalendarItemState` without its states), so the drawing is made once
 /// and kept while the item's state changes. The states are the item's
 /// classes: `selected:` (the date, every day of a range, the shown month
-/// or year, the open view's toggle), `disabled:` (what takes no press),
-/// `focus:` (the day with the keyboard), and on the days the `data-*`
+/// or year, the open view's toggle), `disabled:` (a day, an arrow that
+/// takes no press; the weekdays and the months' titles are labels, never
+/// disabled), `focus:` (the day with the keyboard), and on the days the `data-*`
 /// attributes `data-range-start`, `data-range-end`, `data-range-middle`,
 /// `data-today` and `data-outside` (`group-selected:`,
 /// `group-data-range-start:`, ... inside, under `group` in `itemClass`).
@@ -618,10 +620,11 @@ pub struct CalendarProps {
     pub row_style: Prop<Style>,
     /// The classes of each item: `selected:` while selected (the date,
     /// every day of a range, the shown month or year, the open view's
-    /// toggle), `disabled:` while it takes no press, `focus:` with the
-    /// keyboard on it; on the days `data-range-start:`,
-    /// `data-range-end:`, `data-range-middle:` (a range's days), `data-today:`
-    /// and `data-outside:` (a day of the months around); with `group`, the
+    /// toggle), `disabled:` while a day or an arrow takes no press (the
+    /// weekdays and the months' titles are labels, never disabled),
+    /// `focus:` with the keyboard on it; on the days `data-range-start:`,
+    /// `data-range-end:`, `data-range-middle:` (a range's days),
+    /// `data-today:` and `data-outside:` (a day of the months around); with `group`, the
     /// content follows them (`group-selected:`, `group-data-today:`, ...).
     pub item_class: Prop<Option<SharedString>>,
     /// The inline style of each item, over its classes: its text styles
@@ -1280,19 +1283,25 @@ fn page_at(grid: Grid, offset: u32) -> NaiveDate {
 }
 
 /// An item's states, which its classes read: `selected` and `disabled`
-/// (screen readers hear them too).
+/// (screen readers hear them too), and what screen readers call it.
 #[derive(Clone, Copy)]
 struct States {
     selected: Memo<bool>,
     disabled: Memo<bool>,
+    /// A button, but for the labels that take no press.
+    role: AccessibilityRole,
 }
 
 impl States {
-    /// States that do not change.
-    fn fixed(selected: bool, disabled: bool) -> Self {
+    /// A label that takes no press, `role` for screen readers (a weekday
+    /// heads its column, a month's title its month): neither selected nor
+    /// disabled, as nothing about it is unavailable (screen readers, and
+    /// terminals without colors, would call a disabled one so).
+    fn label(role: AccessibilityRole) -> Self {
         Self {
-            selected: computed(move || selected),
-            disabled: computed(move || disabled),
+            selected: computed(|| false),
+            disabled: computed(|| false),
+            role,
         }
     }
 }
@@ -1328,9 +1337,13 @@ fn item(
     let label = Rc::new(label);
     let content = content.unwrap_or_else(|| label.clone());
     let key = Rc::new(key);
-    let States { selected, disabled } = states;
+    let States {
+        selected,
+        disabled,
+        role,
+    } = states;
     view()
-        .role(AccessibilityRole::Button)
+        .role(role)
         .disabled(disabled)
         .accessibility_state(move || AccessibilityState {
             selected: selected.get(),
@@ -1382,6 +1395,7 @@ fn nav(grid: Grid, kind: CalendarItemKind) -> AnyElement {
     let states = States {
         selected: computed(|| false),
         disabled,
+        role: AccessibilityRole::Button,
     };
     let label = if previous {
         config.previous_accessibility_label
@@ -1450,6 +1464,7 @@ fn toggle(grid: Grid, kind: CalendarItemKind) -> AnyElement {
     let states = States {
         selected: computed(move || grid.view.get() == opens),
         disabled: computed(|| false),
+        role: AccessibilityRole::Button,
     };
     let key: SharedString = if month { "month-toggle" } else { "year-toggle" }.into();
     item(
@@ -1485,7 +1500,8 @@ fn toggle(grid: Grid, kind: CalendarItemKind) -> AnyElement {
 }
 
 /// The title of month `offset` of a calendar of several: a month toggle
-/// that takes no press (`gpui-base` shows each month's label there).
+/// that takes no press, its month's header (`gpui-base` shows each month's
+/// label there).
 fn title(grid: Grid, offset: u32) -> AnyElement {
     let entry = computed(move || {
         let page = page_at(grid, offset);
@@ -1502,7 +1518,7 @@ fn title(grid: Grid, offset: u32) -> AnyElement {
         grid,
         move || key.clone(),
         entry,
-        States::fixed(false, true),
+        States::label(AccessibilityRole::Header),
         move || entry.with(|e| format!("{} {}", e.month, e.year).into()),
         None,
         None,
@@ -1557,6 +1573,7 @@ fn picker_item(grid: Grid, kind: CalendarItemKind, at: usize) -> AnyElement {
             }
         }),
         disabled: computed(|| false),
+        role: AccessibilityRole::Button,
     };
     let key: SharedString = format!("{}-{at}", if is_month { "month" } else { "year" }).into();
     item(
@@ -1656,7 +1673,7 @@ fn weekday(grid: Grid, offset: u32, at: u32) -> AnyElement {
         grid,
         move || key.clone(),
         entry,
-        States::fixed(false, true),
+        States::label(AccessibilityRole::ColumnHeader),
         move || day.get().to_string().into(),
         None,
         None,
@@ -1761,6 +1778,7 @@ fn day(grid: Grid, cell: Cell, changed: Rc<dyn Fn(Date)>) -> AnyElement {
     let states = States {
         selected: computed(move || marks.get().selected),
         disabled,
+        role: AccessibilityRole::Button,
     };
     let me = element_ref();
     let laid_out = signal(false);

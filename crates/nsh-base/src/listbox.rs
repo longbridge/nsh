@@ -1002,14 +1002,15 @@ fn content(lb: Listbox, sheet: bool, parts: Parts, hooks: Hooks) -> Vec<AnyEleme
         .on_viewable_items_change(move |v: &ViewableItems| lb.viewable(v))
         .element_ref(&lb.list)
     };
-    // A terminal's rows are whole titles after their mark, one row each:
+    // A terminal's rows are whole titles, a blank Cell and their mark, one
+    // row each:
     // the list is as wide as the widest (its rows are made as they come
     // into view, so they tell no width), and the popup with it.
     let widest = move || {
         lb.items.with(|items| {
             items
                 .iter()
-                .map(|i| measure_text("", &format!("{MENU_CHECK}{}", i.title)))
+                .map(|i| measure_text("", &format!("{} {MENU_CHECK}", i.title)))
                 .fold(Points::ZERO, Points::max)
         })
     };
@@ -1199,24 +1200,33 @@ fn item_row(lb: Listbox, entry: Memo<Option<Row>>, parts: Parts, hooks: Hooks) -
                     Some(render.render(format!("item:{}", entry.index), entry))
                 });
             }
-            text(move || {
-                let title = item.with(|i| i.as_ref().map(|i| i.title.clone()).unwrap_or_default());
-                match terminal {
-                    // The chosen rows start with the terminal's check, as a
-                    // menu's checked items do: the highlight is elsewhere
-                    // once a key moves it.
-                    true => {
-                        let mark = if selected.get() {
-                            MENU_CHECK
-                        } else {
-                            MENU_UNCHECKED
-                        };
-                        SharedString::from(format!("{mark}{title}"))
-                    }
-                    false => title,
-                }
-            })
-            .into_element()
+            let title = text(move || {
+                item.with(|i| i.as_ref().map(|i| i.title.clone()).unwrap_or_default())
+            });
+            match terminal {
+                // The title from the row's start, the terminal's check at
+                // its end on the chosen rows, as a menu's checked items:
+                // the highlight is elsewhere once a key moves it. The mark
+                // is a Cell of its own after a blank one, blank itself on
+                // the other rows, so every title starts in one column.
+                true => view()
+                    .flex_row()
+                    .flex_grow(1.0)
+                    .child(title)
+                    .child(
+                        text(move || {
+                            let mark = if selected.get() {
+                                MENU_CHECK
+                            } else {
+                                MENU_UNCHECKED
+                            };
+                            SharedString::from(format!(" {mark}"))
+                        })
+                        .ml(auto()),
+                    )
+                    .into_element(),
+                false => title.into_element(),
+            }
         }))
         // The selected row as the popup opens: a view over it, which the
         // popup lays over the trigger.

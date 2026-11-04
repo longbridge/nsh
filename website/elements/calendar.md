@@ -160,7 +160,7 @@ months and the years. Each is drawn in a part styled by `itemClass` and `itemSty
 | Variant | The item |
 |---|---|
 | `selected:` | Is selected: the date, every day of a complete range (its ends included, as React Aria's range calendar), a half range's start, the shown month or year, the open view's toggle. Screen readers hear it selected. |
-| `disabled:` | Takes no press: a disabled date, a weekday, a month's title, Previous and Next in the month view or at the ends of the years. |
+| `disabled:` | Is unavailable: a disabled date, Previous and Next in the month view or at the ends of the years. The weekdays and the months' titles are labels, which screen readers hear as column headers and headers: they take no press and keep their own look. |
 | `focus:` | Has the keyboard. |
 | `data-range-start:`, `data-range-end:` | Is a complete range's first or last day (a range of one day is both). |
 | `data-range-middle:` | Is a day inside a complete range, not an end. |

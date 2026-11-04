@@ -302,11 +302,11 @@ pub const CHECKBOX_MIXED: Mark = [("[", Tone::Text), ("–", Tone::Accent), ("]"
 pub const RADIO_CHECKED: Mark = [("(", Tone::Text), ("●", Tone::Accent), (")", Tone::Text)];
 /// An unselected radio: muted parentheses.
 pub const RADIO_UNCHECKED: Mark = [("(", Tone::Muted), (" ", Tone::Muted), (")", Tone::Muted)];
-/// An on switch, three Cells: the track in [`ACCENT`], the knob at its
-/// end, bold.
-pub const SWITCH_ON: Mark = [("", Tone::Text), ("━━", Tone::Accent), ("●", Tone::Strong)];
-/// An off switch: the knob at the start and the track, muted.
-pub const SWITCH_OFF: Mark = [("●", Tone::Muted), ("──", Tone::Muted), ("", Tone::Muted)];
+/// An on switch: a checked checkbox, as terminal apps show an on / off
+/// setting (a knob on a track would read as a slider).
+pub const SWITCH_ON: Mark = CHECKBOX_CHECKED;
+/// An off switch: an unchecked checkbox.
+pub const SWITCH_OFF: Mark = CHECKBOX_UNCHECKED;
 /// A color area's picked Cell.
 pub const AREA_PICKED: &str = "◆";
 /// A color swatch by itself: four Cells of its color.
@@ -337,11 +337,14 @@ pub const SELECT_ARROW: &str = " ▾";
 pub const CLEAR: &str = " ×";
 /// After a menu item that opens a submenu.
 pub const SUBMENU_ARROW: &str = " ›";
-/// Before a checked menu item.
-pub const MENU_CHECK: &str = "✓ ";
-/// Before an unchecked menu item of a menu whose items check: as wide as
-/// [`MENU_CHECK`], so the labels line up.
-pub const MENU_UNCHECKED: &str = "  ";
+/// At the end of a checked menu item, and of a select's or a combobox's
+/// chosen row.
+pub const MENU_CHECK: &str = "✓";
+/// At the end of a checked radio menu item (`"menuitemradio"`).
+pub const MENU_RADIO: &str = "●";
+/// At the end of an unchecked item of a menu whose items check, and of a
+/// list's other rows: as wide as [`MENU_CHECK`], so the marks line up.
+pub const MENU_UNCHECKED: &str = " ";
 /// The line of a resize handle between two panes side by side, one per
 /// row of its Cell column (`ResizablePanelGroup`'s, `DockArea`'s).
 pub const DIVIDER_VERTICAL: char = '│';
@@ -497,8 +500,8 @@ mod tests {
         assert_eq!(t(checkbox_mark(true, true)), "[–]");
         assert_eq!(t(radio_mark(true)), "(●)");
         assert_eq!(t(radio_mark(false)), "( )");
-        assert_eq!(t(switch_mark(true)), "━━●");
-        assert_eq!(t(switch_mark(false)), "●──");
+        assert_eq!(t(switch_mark(true)), "[✓]");
+        assert_eq!(t(switch_mark(false)), "[ ]");
         // On is the accent, off is muted.
         assert_eq!(checkbox_mark(true, false)[1].1, Tone::Accent);
         assert!(
@@ -506,8 +509,7 @@ mod tests {
                 .iter()
                 .all(|p| p.1 == Tone::Muted)
         );
-        assert_eq!(switch_mark(true)[1], ("━━", Tone::Accent));
-        assert_eq!(switch_mark(true)[2], ("●", Tone::Strong));
+        assert_eq!(switch_mark(true)[1], ("✓", Tone::Accent));
         assert!(switch_mark(false).iter().all(|p| p.1 == Tone::Muted));
     }
 

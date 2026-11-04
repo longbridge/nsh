@@ -30,7 +30,7 @@ use nsh_core::{
 use crate::{
     popup::{OpenChangeReason, OpenState, PopupPresence, SheetMotion, StateLooks, lifecycle},
     roving::{bar_trigger, leave_bar, popup_bar},
-    terminal::{MENU_CHECK, MENU_UNCHECKED, SUBMENU_ARROW, is_terminal, line, rule},
+    terminal::{MENU_CHECK, MENU_RADIO, MENU_UNCHECKED, SUBMENU_ARROW, is_terminal, line, rule},
 };
 
 /// How long a finger stays on a context menu's trigger before it opens
@@ -789,9 +789,10 @@ pub enum MenuItemEvent {
 /// `"menuitemradio"`), as `gpui-component`'s `PopupMenuItem::checked`. Its
 /// look is the app's: `class`, `style`, the `active:`, `hover:`,
 /// `disabled:` and `checked:` states, and the `indicator` it shows checked
-/// with. In a terminal a checkable item starts with the terminal's own
-/// `✓ ` (two spaces unchecked) in place of the indicator, in a row with its
-/// content ([`crate::terminal`]).
+/// with. In a terminal a checkable item is a row of its content from the
+/// row's start and the terminal's own mark at its end, in place of the
+/// indicator: `✓` checked (`●` on a `"menuitemradio"` item), a blank Cell
+/// unchecked ([`crate::terminal`]).
 #[component]
 pub fn MenuItem(props: MenuItemProps, cx: Scope<MenuItemEvent>) -> impl IntoElement {
     let menu = use_context::<MenuContext>();
@@ -803,7 +804,7 @@ pub fn MenuItem(props: MenuItemProps, cx: Scope<MenuItemEvent>) -> impl IntoElem
     if let Some(m) = &hover {
         m.items.add(node, m.level, disabled);
     }
-    let (indicator, children) = (props.indicator, props.children);
+    let (indicator, children, role) = (props.indicator, props.children, props.role);
     let (indicator_class, indicator_style) = (props.indicator_class, props.indicator_style);
     // The indicator is a part that takes the item's states, as
     // `Checkbox`'s: it is no checkable element of its own for screen
@@ -811,23 +812,21 @@ pub fn MenuItem(props: MenuItemProps, cx: Scope<MenuItemEvent>) -> impl IntoElem
     let terminal = is_terminal();
     let parts = move || {
         let mark = match terminal {
-            // The terminal's own check before a checkable item's content,
-            // in place of the app's indicator.
+            // The terminal's own mark at a checkable item's end, in place
+            // of the app's indicator: `✓` (`●` on a radio item), a blank
+            // Cell unchecked, so the content starts in one column on every
+            // row and the marks line up at the right.
             true => when(
                 move || checked.get().is_some(),
                 move || {
-                    // The check and its space apart: the space is a blank
-                    // text, which the item's own gap takes as its first
-                    // column, as it does the unchecked item's blank mark,
-                    // so the labels line up whatever the gap.
-                    let (check, space) = MENU_CHECK.split_at(MENU_CHECK.len() - 1);
-                    view()
-                        .flex_row()
-                        .child(text(move || match checked.get() {
-                            Some(true) => check,
-                            _ => &MENU_UNCHECKED[..1],
-                        }))
-                        .child(text(space))
+                    text(move || match checked.get() {
+                        Some(true) if role.get() == Some(AccessibilityRole::MenuItemRadio) => {
+                            MENU_RADIO
+                        }
+                        Some(true) => MENU_CHECK,
+                        _ => MENU_UNCHECKED,
+                    })
+                    .ml(auto())
                 },
             ),
             // A view of its own, as `Checkbox`'s indicator: the projected
@@ -845,7 +844,10 @@ pub fn MenuItem(props: MenuItemProps, cx: Scope<MenuItemEvent>) -> impl IntoElem
                 },
             ),
         };
-        vec![mark.into_element(), children.into_element()]
+        match terminal {
+            true => vec![children.into_element(), mark.into_element()],
+            false => vec![mark.into_element(), children.into_element()],
+        }
     };
     let content = match sheet.clone() {
         // Only the items of the level shown are there (for screen readers
@@ -855,7 +857,7 @@ pub fn MenuItem(props: MenuItemProps, cx: Scope<MenuItemEvent>) -> impl IntoElem
     };
     view()
         .role(move || {
-            props.role.get().unwrap_or(if checked.get().is_some() {
+            role.get().unwrap_or(if checked.get().is_some() {
                 AccessibilityRole::MenuItemCheckbox
             } else {
                 AccessibilityRole::Menuitem
