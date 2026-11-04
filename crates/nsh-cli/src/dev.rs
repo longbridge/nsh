@@ -83,6 +83,11 @@ impl DevSession {
             rust_root,
         };
         session.rebuild();
+        // A Rust app's hosts that connect (the terminal's) run the root
+        // they were built with: the server tells them so.
+        if session.rust_root {
+            session.server.publish_root();
+        }
         Ok(session)
     }
 

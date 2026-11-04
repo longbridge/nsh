@@ -245,7 +245,9 @@
         send({ type: "step_done", id: message.id, outcome: player.testStep(message.step) });
         break;
       case "root":
-        // The app is this runtime's own Rust root (a test session's).
+        // The app is this runtime's own Rust root. Outside a test session
+        // `hello` has started it already: it runs once.
+        if (running) break;
         running = { session, version: 0 };
         showStatus("");
         player.runRust();
