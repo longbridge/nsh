@@ -355,6 +355,21 @@ enum Command {
         #[arg(long, value_name = "VERSION")]
         min_runtime: Option<String>,
     },
+    /// Sign a package (`.nshpkg`) again with another release key: only its
+    /// certificate, signing time and signature change.
+    Resign {
+        /// The package to sign again.
+        package: PathBuf,
+        /// The release key's secret key (`.secret`).
+        #[arg(long)]
+        key: PathBuf,
+        /// Its certificate (`nsh certify`).
+        #[arg(long)]
+        cert: PathBuf,
+        /// The package to write (may be the one read).
+        #[arg(short, long)]
+        out: PathBuf,
+    },
     /// Map the positions in a reported error stack (`bundle.js:LINE:COL`)
     /// to the app's sources, with a package's source map.
     Symbolicate {
@@ -469,6 +484,7 @@ impl Command {
             Command::Init { .. }
             | Command::Keygen { .. }
             | Command::Certify { .. }
+            | Command::Resign { .. }
             | Command::Verify { .. }
             | Command::Symbolicate { .. }
             | Command::Revoke { .. } => None,
@@ -795,6 +811,12 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
                 strip_debug,
             })
         }
+        Command::Resign {
+            package,
+            key,
+            cert,
+            out,
+        } => sign::resign(&package, &key, &cert, &out),
         Command::Symbolicate { map, input } => sign::symbolicate(&map, input.as_deref()),
         Command::Verify {
             package,

@@ -145,7 +145,7 @@ crates/
   nsh-ios-host/        Development host app (Catalyst / iOS simulator); connects to a dev server or runs a local bundle
   nsh-ios-app/         Release runner: the executable of iOS apps built by `nsh package`
   nsh-cli/             The `nsh` command line (a binary): init / build / test / check / dev / run / package; keygen /
-                       certify / publish / verify / revoke; apps with Rust components of their own (`rust_app.rs`: each crate
+                       certify / publish / resign / verify / revoke; apps with Rust components of their own (`rust_app.rs`: each crate
                        nsh.json `"rust"` names, one or a list, has a `#[native_module("…")]` fn; a generated workspace in `.nsh/rust`
                        with a `describe` program, which prints the sets as data for the CLI to bundle, compile and declare with, the
                        hosts and runners, and the headless runner of `nsh test`; it takes nsh's crates where the app's crates do:
@@ -282,6 +282,7 @@ cargo xtask dist                                                                
 ./target/debug/nsh keygen keys/root && ./target/debug/nsh keygen keys/release      # signing keys (.secret / .pub)
 ./target/debug/nsh certify --root keys/root.secret --key keys/release.pub --apps 'com.example.*' -o keys/release.cert
 ./target/debug/nsh publish examples/counter --key keys/release.secret --cert keys/release.cert --build 2
+./target/debug/nsh resign ci.nshpkg --key keys/platform.secret --cert keys/platform.cert -o out.nshpkg   # signed again by another release key, contents kept
 ./target/debug/nsh verify out/com.example.counter-2.nshpkg --root keys/root.pub     # as a device would check it
 ./target/debug/nsh revoke --root keys/root.secret --sequence 1 --package <sha256> -o revocations.json
 

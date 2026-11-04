@@ -1,6 +1,6 @@
 ---
 title: CLI
-description: Every NSH subcommand and flag - init, build, test, check, dev, run, package, and the signing commands keygen, certify, publish, verify, symbolicate and revoke.
+description: Every NSH subcommand and flag - init, build, test, check, dev, run, package, and the signing commands keygen, certify, publish, resign, verify, symbolicate and revoke.
 order: 6
 group: start
 ---
@@ -22,6 +22,7 @@ nsh <COMMAND>
   keygen       Create a signing key
   certify      Certify a release key with a root key
   publish      Build an app in release mode and sign it into a package (.nshpkg)
+  resign       Sign a package again with another release key
   verify       Verify a package
   symbolicate  Map the positions in a reported error stack to the app's sources
   revoke       Sign a revocation list
@@ -277,6 +278,22 @@ Builds the app in release mode and signs it into a package. Metadata comes from 
 | `--source-map <WHERE>` | Where the source map goes: `package` (default), `file` (`<package>.map` next to the package) or `none` ([Signed packages](./signed-packages.md#errors-from-published-packages)). |
 | `--strip-debug` | Leave the line and column tables out of the bytecode: smaller, but error stacks have no positions. |
 | `--min-runtime <VERSION>` | The lowest runtime that runs the package, e.g. `0.2.0`; older runtimes refuse it. Default: this CLI's version ([Signed packages](./signed-packages.md#which-runtimes-run-a-package)). |
+
+### nsh resign
+
+```sh
+nsh resign <PACKAGE> --key <KEY.secret> --cert <CERT> -o <OUT>
+```
+
+Signs a package again with another release key, as a platform does that signs the packages of its apps with one key
+of its own. The package's files and header stay as they are; its certificate, signing time and signature become the
+new key's ([Signed packages](./signed-packages.md#sign-a-package-again)).
+
+| Flag | Description |
+|---|---|
+| `--key <KEY>` | The release key's secret key. |
+| `--cert <CERT>` | Its certificate (`nsh certify`). |
+| `-o, --out <OUT>` | The package to write; it may be the package read. |
 
 ### nsh verify
 
