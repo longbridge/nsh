@@ -250,7 +250,8 @@ fn Player() -> impl IntoElement {
                 .muted(true)
                 .repeat(true)
                 .controls(system_controls)
-                .h(px(200.0))
+                .w_full()
+                .aspect_ratio(16.0 / 9.0)
                 .bg(rgb(0x000000))
                 .on_load(move |e: &VideoInfo| duration.set(e.duration))
                 .on_buffer(move |b: &bool| buffering.set(*b))
@@ -363,5 +364,5 @@ pub(crate) fn WebViewPage() -> impl IntoElement {
 /// The Video demo's page: a player and what it tells the app.
 #[component]
 pub(crate) fn VideoPage() -> impl IntoElement {
-    DemoPage::new().card(player)
+    DemoPage::new().columns(1).card(player)
 }

@@ -2,7 +2,7 @@ import { Image, type JSX, signal, Text, View } from "nsh";
 import { fontScale } from "nsh";
 import pacifico from "../fonts/Pacifico-Regular.ttf";
 import logo from "../logo@2x.png";
-import { alpha, Caption, Card, colors, DemoPage, finish, isDark, mono, Press, radius, tints } from "../ui";
+import { alpha, Caption, Card, colors, DemoPage, finish, isDark, mono, photoUrl, type PhotoName, Press, radius, tints } from "../ui";
 
 const LOREM =
   "Native text, typeset once on the engine thread with CoreText and drawn on the main thread without any layout work.";
@@ -119,46 +119,22 @@ function Fonts() {
       </Specimen>
       <Specimen label="Shadows" code="textShadow">
         <View style={{ flexDirection: "row", gap: 12 }}>
-          <View style={{ flex: 1, height: 72, alignItems: "center", justifyContent: "center", borderRadius: radius.control, borderCurve: "continuous", backgroundColor: "#10130c" }}>
-            <Text
-              style={{
-                fontSize: 24,
-                fontWeight: "600",
-                letterSpacing: 0.5,
-                paddingHorizontal: 24,
-                paddingVertical: 14,
-                color: "#e4ffa3",
-                textShadow: "0 0 14px rgba(200,242,109,0.75)",
-              }}
-            >
-              Glow
-            </Text>
-          </View>
-          <View
-            style={{
-              flex: 1,
-              height: 72,
-              alignItems: "center",
-              justifyContent: "center",
-              borderRadius: radius.control,
-              borderCurve: "continuous",
-              backgroundImage: "linear-gradient(135deg, #1f6fa8 0%, #5fb2d9 100%)",
-            }}
-          >
-            <Text
-              style={{
-                fontSize: 24,
-                fontWeight: "600",
-                color: "#ffffff",
-                textShadow: "0 2px 6px rgba(6,28,48,0.55)",
-              }}
-            >
-              Drop shadow
-            </Text>
-          </View>
+          <ShadowPhoto photo="booster" label="Glow" color="#ffe9c7" shadow="0 0 12px rgba(255,150,60,1)" />
+          <ShadowPhoto photo="day" label="Drop shadow" color="#ffffff" shadow="0 1px 8px rgba(5,25,45,0.75)" />
         </View>
       </Specimen>
     </Card>
+  );
+}
+
+/** A line of text over a photo, where a text shadow does its work. */
+function ShadowPhoto(props: { photo: PhotoName; label: string; color: string; shadow: string }) {
+  return (
+    <View style={{ flex: 1, height: 96, borderRadius: radius.control, borderCurve: "continuous", overflow: "hidden", backgroundColor: colors.raised }}>
+      <Image src={photoUrl(props.photo, "small")} style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, objectFit: "cover" }} />
+      {/* The padding keeps the shadow inside the text's own box. */}
+      <Text style={{ numberOfLines: 1, padding: 14, fontSize: 19, fontWeight: "600", color: props.color, textShadow: props.shadow }}>{props.label}</Text>
+    </View>
   );
 }
 

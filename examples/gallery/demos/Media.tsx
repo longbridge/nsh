@@ -146,7 +146,7 @@ function Player() {
         muted
         repeat
         controls={controls() === "system"}
-        style={{ height: 200, backgroundColor: "#000000", ...frame() }}
+        style={{ width: "100%", aspectRatio: 16 / 9, backgroundColor: "#000000", ...frame() }}
         onLoad={(e) => duration.set(e.duration)}
         onError={() => failed.set(true)}
         onBuffer={(e) => buffering.set(e.isBuffering)}
@@ -185,5 +185,5 @@ export function WebViewDemo() {
 }
 
 export function VideoDemo() {
-  return <DemoPage cards={[Player]} />;
+  return <DemoPage cards={[Player]} columns={1} />;
 }

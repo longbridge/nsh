@@ -580,6 +580,13 @@ fn ridges() -> Vec<Vec<f32>> {
         .collect()
 }
 
+/// Day `d`'s color, its hue around the wheel from the theme's citrus.
+fn day_color(d: usize, dark: bool) -> Hsla {
+    const HUES: [f32; 7] = [78.0, 140.0, 175.0, 205.0, 232.0, 268.0, 322.0];
+    let (saturation, lightness) = if dark { (0.78, 0.68) } else { (0.62, 0.40) };
+    hsla(HUES[d] / 360.0, saturation, lightness, 1.0)
+}
+
 /// The ridgeline, its curves clipped to `sweep`.
 fn draw_ridges(c: Palette, width: f32, height: f32, sweep: &AnimatedValue) -> Painter {
     let font = sans(11.0, 400);
@@ -622,7 +629,7 @@ fn draw_ridges(c: Palette, width: f32, height: f32, sweep: &AnimatedValue) -> Pa
             }
             p.line_to(x(24.0), y(series[24]))
         };
-        let tone = if d >= 5 { c.info } else { c.accent };
+        let tone = day_color(d, c.dark);
         // Occlude the ridge behind, then a fill that fades to the baseline.
         p = curve(p.begin_path())
             .line_to(x(24.0), base)
@@ -631,9 +638,10 @@ fn draw_ridges(c: Palette, width: f32, height: f32, sweep: &AnimatedValue) -> Pa
             .fill_color(c.inset)
             .fill()
             .fill_style(
-                CanvasGradient::linear(pt(0.0, base - amp), pt(0.0, base))
-                    .add_color_stop(percentage(0.0), alpha(tone, 0.36))
-                    .add_color_stop(percentage(1.0), alpha(tone, 0.04)),
+                // A short fade below the crests, so the curves stay what reads.
+                CanvasGradient::linear(pt(0.0, base - amp), pt(0.0, base - amp * 0.3))
+                    .add_color_stop(percentage(0.0), alpha(tone, 0.34))
+                    .add_color_stop(percentage(1.0), alpha(tone, 0.0)),
             )
             .fill()
             .stroke_color(tone)
@@ -654,9 +662,11 @@ fn draw_ridges(c: Palette, width: f32, height: f32, sweep: &AnimatedValue) -> Pa
         (x(14.0), height - bottom),
         alpha(c.muted, 0.35),
     );
-    p = p.restore().fill_color(c.muted);
+    p = p.restore();
     for (d, day) in DAYS.iter().enumerate() {
-        p = p.fill_text(day, 0.0, top + d as f32 * step - 2.0);
+        p = p
+            .fill_color(day_color(d, c.dark))
+            .fill_text(day, 0.0, top + d as f32 * step - 2.0);
     }
     p
 }
@@ -677,10 +687,6 @@ fn Ridgeline() -> impl IntoElement {
         .child(measured(height, move |c, width| {
             draw_ridges(c, width, height, &sweep)
         }))
-        .child(legends([
-            (colors::ACCENT, "Weekday"),
-            (colors::INFO, "Weekend"),
-        ]))
 }
 
 // ---------------------------------------------------------------------------

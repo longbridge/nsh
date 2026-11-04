@@ -8,8 +8,8 @@ import { alpha, Appear, Badge, Button, Caption, Card, colors, DemoPage, Meter, m
 
 // The one picture the demos of a single image compare themselves on.
 const launch = photoUrl("arc");
-// A remote SVG (the W3C's SVG logo).
-const remoteSvg = "https://www.w3.org/Icons/SVG/svg-logo.svg";
+// A remote SVG (Twemoji's rocket, CC BY 4.0).
+const remoteSvg = "https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/svg/1f680.svg";
 
 /** Every photo's frame: rounded, a hairline border, a raised fill while it loads. */
 const frame = () => ({ borderRadius: radius.control, borderCurve: "continuous", borderWidth: 1, borderColor: colors.border, backgroundColor: colors.raised }) as const;
@@ -118,10 +118,10 @@ function Assets() {
   );
 }
 
-/** SVG images: a one-color star tinted at three sizes and as drawn, a
- * two-color logo fitted two ways (`objectFit`), and an SVG from a URL. */
+/** SVG images: a spark tinted at three sizes and with its own gradient, a
+ * night launch fitted two ways (`objectFit`), and an SVG from a URL. */
 function Svg() {
-  const sizes = [18, 36, 72];
+  const sizes = [18, 32, 56];
   const modes = ["contain", "cover"] as const;
   return (
     <Card icon="star" title="SVG images" subtitle="star.svg, mark.svg and a remote SVG, sharp at every size">

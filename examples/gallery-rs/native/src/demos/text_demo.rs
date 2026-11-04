@@ -8,6 +8,7 @@ use nsh_core::{
     prelude::*,
 };
 
+use super::spacex;
 use crate::{
     assets::{LOGO, PACIFICO},
     ui::{
@@ -243,53 +244,62 @@ fn fonts() -> Card {
             view()
                 .flex_row()
                 .gap_3()
-                .child(
-                    view()
-                        .flex_1()
-                        .h(px(72.0))
-                        .items_center()
-                        .justify_center()
-                        .rounded(px(radius::CONTROL))
-                        .border_curve(BorderCurve::Continuous)
-                        .bg(rgb(0x10130c))
-                        .child(
-                            text("Glow")
-                                .text_size(px(24.0))
-                                .font_weight(FontWeight::SEMIBOLD)
-                                .letter_spacing(px(0.5))
-                                .text_color(rgb(0xe4ffa3))
-                                .text_shadow([TextShadow {
-                                    radius: px(14.0),
-                                    ..TextShadow::default()
-                                }])
-                                .text_shadow_color(rgb_a(0xc8f26d, 0.75)),
-                        ),
-                )
-                .child(
-                    view()
-                        .flex_1()
-                        .h(px(72.0))
-                        .items_center()
-                        .justify_center()
-                        .rounded(px(radius::CONTROL))
-                        .border_curve(BorderCurve::Continuous)
-                        .bg_linear_to_br()
-                        .gradient_from(rgb(0x1f6fa8))
-                        .gradient_to(rgb(0x5fb2d9))
-                        .child(
-                            text("Drop shadow")
-                                .text_size(px(24.0))
-                                .font_weight(FontWeight::SEMIBOLD)
-                                .text_color(rgb(0xffffff))
-                                .text_shadow([TextShadow {
-                                    offset_y: px(2.0),
-                                    radius: px(6.0),
-                                    ..TextShadow::default()
-                                }])
-                                .text_shadow_color(rgb_a(0x061c30, 0.55)),
-                        ),
-                ),
+                .child(shadow_photo(
+                    spacex::BOOSTER,
+                    "Glow",
+                    rgb(0xffe9c7),
+                    TextShadow {
+                        radius: px(12.0),
+                        ..TextShadow::default()
+                    },
+                    rgb_a(0xff963c, 1.0),
+                ))
+                .child(shadow_photo(
+                    spacex::DAY,
+                    "Drop shadow",
+                    rgb(0xffffff),
+                    TextShadow {
+                        offset_y: px(1.0),
+                        radius: px(8.0),
+                        ..TextShadow::default()
+                    },
+                    rgb_a(0x05192d, 0.75),
+                )),
         ))
+}
+
+/// A line of text over a photo, where a text shadow does its work.
+fn shadow_photo(
+    photo: &str,
+    label: &'static str,
+    ink: Rgba,
+    shadow: TextShadow,
+    color: Rgba,
+) -> impl IntoElement {
+    view()
+        .flex_1()
+        .h(px(96.0))
+        .rounded(px(radius::CONTROL))
+        .border_curve(BorderCurve::Continuous)
+        .overflow_hidden()
+        .bg(colors::RAISED)
+        .child(
+            image(spacex::url(photo, "small"))
+                .absolute()
+                .inset_0()
+                .object_fit(ResizeMode::Cover),
+        )
+        // The padding keeps the shadow inside the text's own box.
+        .child(
+            text(label)
+                .number_of_lines(1)
+                .p(px(14.0))
+                .text_size(px(19.0))
+                .font_weight(FontWeight::SEMIBOLD)
+                .text_color(ink)
+                .text_shadow([shadow])
+                .text_shadow_color(color),
+        )
 }
 
 /// The system text size and its limits.

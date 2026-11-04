@@ -313,6 +313,10 @@ const ridges = days.map((_, d) => {
 
 const ridgePeak = Math.max(...ridges.flat());
 
+/** Each day's hue, around the wheel from the theme's citrus. */
+const dayHues = [78, 140, 175, 205, 232, 268, 322];
+const dayColor = (d: number, a = 1) => `hsla(${dayHues[d]}, ${isDark() ? 78 : 62}%, ${isDark() ? 68 : 40}%, ${a})`;
+
 function Ridgeline() {
   const sweep = reveal(1400);
   return (
@@ -356,8 +360,6 @@ function Ridgeline() {
               }
               cx.lineTo(x(24), y(series[24]));
             };
-            const weekend = d >= 5;
-            const tint = weekend ? infoA : accentA;
             cx.beginPath();
             curve();
             cx.lineTo(x(24), base);
@@ -366,12 +368,13 @@ function Ridgeline() {
             // Occlude the ridge behind, then a fill that fades to the baseline.
             cx.fillStyle = colors.inset;
             cx.fill();
-            const fade = cx.createLinearGradient(0, base - amp, 0, base);
-            fade.addColorStop(0, tint(0.36));
-            fade.addColorStop(1, tint(0.04));
+            // A short fade below the crests, so the curves stay what reads.
+            const fade = cx.createLinearGradient(0, base - amp, 0, base - amp * 0.3);
+            fade.addColorStop(0, dayColor(d, 0.34));
+            fade.addColorStop(1, dayColor(d, 0));
             cx.fillStyle = fade;
             cx.fill();
-            cx.strokeStyle = weekend ? colors.info : colors.accent;
+            cx.strokeStyle = dayColor(d);
             cx.lineWidth = 1.5;
             cx.lineJoin = "round";
             cx.beginPath();
@@ -382,14 +385,12 @@ function Ridgeline() {
           dashed(cx, x(12), 0, x(12), height - bottom, alpha(colors.muted, 0.35));
           dashed(cx, x(14), 0, x(14), height - bottom, alpha(colors.muted, 0.35));
           cx.restore();
-          cx.fillStyle = colors.muted;
-          days.forEach((day, d) => cx.fillText(day, 0, top + d * step - 2));
+          days.forEach((day, d) => {
+            cx.fillStyle = dayColor(d);
+            cx.fillText(day, 0, top + d * step - 2);
+          });
         }}
       />
-      <View style={{ flexDirection: "row", gap: 16 }}>
-        <Legend color={colors.accent} label="Weekday" />
-        <Legend color={colors.info} label="Weekend" />
-      </View>
     </Card>
   );
 }
