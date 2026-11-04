@@ -735,9 +735,22 @@ export { Icon, IconLabel, type IconName } from "./icons";
  * A short text as an element's `tooltip`: a `Tooltip` of `nsh/base` in a
  * small bubble of the theme's `popover` tokens that comes in with `popIn`
  * from its side (`placement`, default above), with the keys of a
- * `shortcut` after the text.
+ * `shortcut` after the text. In the terminal the tooltip is a line of the
+ * status line: the text and its keys, no bubble.
  */
 export function Tip(props: { label: string; shortcut?: string; placement?: PopupSide; delay?: number }) {
+  if (terminal) {
+    return (
+      <Tooltip delay={props.delay}>
+        <View style={{ flexDirection: "row", gap: TERMINAL_COLUMN, paddingHorizontal: TERMINAL_COLUMN }}>
+          <Text class="text-foreground">{props.label}</Text>
+          <If when={props.shortcut}>
+            <Text class="text-muted-foreground">{props.shortcut}</Text>
+          </If>
+        </View>
+      </Tooltip>
+    );
+  }
   const presence = createPresence(props.placement ?? "top");
   return (
     <Tooltip placement={props.placement} delay={props.delay} onOpen={presence.show} onClose={presence.hide}>

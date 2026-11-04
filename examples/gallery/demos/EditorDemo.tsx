@@ -793,7 +793,8 @@ export function EditorDemo() {
                         </View>
                       </View>
                     </View>
-                    <View class="flex-row flex-wrap gap-1.5 pl-4">
+                    {/* A terminal starts its fixes' bands at the card's first column, as the code block's below. */}
+                    <View class="flex-row flex-wrap gap-1.5 pl-4" style={terminal ? { paddingLeft: 0 } : undefined}>
                       <Each of={fixesFor(d())}>
                         {(fix) => (
                           <Button

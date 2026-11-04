@@ -218,9 +218,12 @@ function Field(
  * A small button inside a field (show the password, clear the text): its
  * name for screen readers, faint until the pointer is over it; it sinks
  * while pressed. `show` false shrinks and fades it out, untouchable. A
- * terminal draws no icons: it shows `short` there, as text.
+ * terminal draws no icons: it shows `short` there, as text, in a slot with
+ * a blank Cell each side (` × `) that all takes the press; the text turns
+ * the accent while the pointer is over the slot or presses it, no band.
  */
 function FieldButton(props: { icon: IconName; label: string; short: string; show?: boolean; onPress: () => void }) {
+  if (terminal) return <TerminalFieldButton {...props} />;
   const size = pointer ? 22 : 36;
   const shown = follow(() => (props.show === false ? 0 : 1));
   return (
@@ -248,9 +251,40 @@ function FieldButton(props: { icon: IconName; label: string; short: string; show
         transitionDuration: 120,
       }}
     >
-      <If when={terminal} else={<Icon name={props.icon} size={pointer ? 13 : 17} tint={colors.muted} />}>
-        <Text style={{ color: colors.muted }}>{props.short}</Text>
-      </If>
+      <Icon name={props.icon} size={pointer ? 13 : 17} tint={colors.muted} />
+    </View>
+  );
+}
+
+/** `FieldButton` in a terminal: a slot of three Cells around a one-Cell
+ * mark, as `nsh/base`'s triggers' `▾` and `×`, a word with a blank Cell
+ * each side, and no columns at all while it is hidden. A word's blanks are
+ * its text's own: a terminal keeps no padding on a box with no fill. A Tab stop,
+ * as everywhere: what the pointer does the keys do. */
+function TerminalFieldButton(props: { label: string; short: string; show?: boolean; onPress: () => void }) {
+  const over = signal(false);
+  const held = signal(false);
+  return (
+    <View
+      onPress={props.onPress}
+      onPressDown={() => held.set(true)}
+      onPressUp={() => held.set(false)}
+      onMouseEnter={() => over.set(true)}
+      onMouseLeave={() => over.set(false)}
+      role="button"
+      accessibilityLabel={props.label}
+      disabled={props.show === false}
+      style={{
+        display: props.show === false ? "none" : "flex",
+        // A mark of one Cell is the middle of a slot three wide.
+        width: [...props.short].length === 1 ? 3 * TERMINAL_COLUMN : undefined,
+        height: TERMINAL_ROW,
+        flexShrink: 0,
+        alignItems: "center",
+        justifyContent: "center",
+      }}
+    >
+      <Text style={{ color: over() || held() ? colors.accent : colors.muted }}>{[...props.short].length === 1 ? props.short : ` ${props.short} `}</Text>
     </View>
   );
 }

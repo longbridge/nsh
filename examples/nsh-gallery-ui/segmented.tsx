@@ -9,7 +9,8 @@ import { colors, finish, TERMINAL_ROW, terminal } from "./theme";
  * labels (30 points high, 12-point type, the thumb's corners 6 and the
  * track's 9); on a touch screen, or with `fill`, it spans the row and its
  * segments share it equally, their labels centered. The terminal shows the
- * segments on one row, the selected one as its selection, without the track.
+ * segments on one row as wide as their words (`fill` too), the selected one
+ * as its selection, without the track.
  *
  * The thumb is the list's indicator: the core places it on the selected
  * tab and springs it to the next one natively, as its own frame alone, so
@@ -38,7 +39,7 @@ export function Segmented<T extends string>(props: {
               onPress={() => {
                 if (option().value !== props.value) props.onChange(option().value);
               }}
-              style={{ flex: props.fill ? 1 : undefined, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8 }}
+              style={{ flexDirection: "row", alignItems: "center", gap: 8 }}
             >
               <Text style={{ numberOfLines: 1, fontSize: 13, fontWeight: "500", color: props.value === option().value ? colors.text : colors.muted }}>
                 {option().label}

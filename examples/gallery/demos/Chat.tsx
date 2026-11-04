@@ -489,6 +489,9 @@ export function Chat() {
 
   // A terminal Cell is 8 pt wide.
   const titleColumn = Math.max(...featured.map((f) => scenarios.find((x) => x.id === f.id)!.chip.length)) * 8 + 8;
+  /** The list's width: the titles' column, the gap and the longest note, so
+   * the list centers as a block and its notes keep their lines. */
+  const listWidth = titleColumn + 16 + Math.max(...featured.map((f) => f.note.length)) * 8;
 
   const empty = (
     <View style={{ ...column, flex: 1, justifyContent: "center", paddingHorizontal: 16, paddingVertical: 24, gap: 24 }}>
@@ -506,8 +509,9 @@ export function Chat() {
         <If when={terminal}>
           {/* The notes in a column of their own, two Cells after the
               longest title; with less than 16 Cells left beside it, a
-              note goes under its title. */}
-          <View>
+              note goes under its title. Centered as a block under the
+              centered heading, its rows still aligned with each other. */}
+          <View style={{ alignSelf: "center", width: listWidth, maxWidth: "100%" }}>
             <Each of={featured}>
               {(f) => {
                 const s = scenarios.find((x) => x.id === f().id)!;

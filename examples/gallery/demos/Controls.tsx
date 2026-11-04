@@ -449,7 +449,7 @@ const DETAIL_WIDTH = 24 * TERMINAL_COLUMN;
 
 /** A terminal's name column for `names`: the longest of them (at least {@link LABEL_WIDTH}), so the details after it line up. */
 /** The terminal's text for each step button's icon. */
-const STEP_GLYPHS = { plus: "+", minus: "−", "chevron-up": "▴", "chevron-down": "▾" } as const;
+const STEP_GLYPHS = { plus: "+", minus: "−" } as const;
 
 const labelColumn = (names: readonly string[]) => Math.max(LABEL_WIDTH, ...names.map((n) => n.length * TERMINAL_COLUMN));
 
@@ -1540,8 +1540,9 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
           // Room for the list's rows, which are as wide as the trigger.
           minWidth: pointer ? 180 : undefined,
           paddingLeft: 10,
-          // Room for the clear button, which goes over the trigger's end in place of the chevron.
-          paddingRight: props.clearable ? clearInset + size.clear + 8 : 10,
+          // Room for the clear button, which goes over the trigger's end in place of the chevron. In the terminal the
+          // select's own marks go over the end, each in a slot of three Cells: ` ▾ `, or ` ×  ▾ `.
+          paddingRight: terminal ? (props.clearable ? 6 : 3) * TERMINAL_COLUMN : props.clearable ? clearInset + size.clear + 8 : 10,
           borderRadius: radius.control,
           borderWidth: 1,
           borderColor: props.error ? colors.danger : props.open ? colors.faint : colors.border,
@@ -1559,7 +1560,8 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
       >
         {props.lead}
         <Text style={{ flex: 1, numberOfLines: 1, fontSize: size.label, color: props.placeholder ? colors.faint : colors.text }}>{props.title}</Text>
-        <Chevron open={props.open} hidden={props.clearable} />
+        {/* The terminal's select draws its own `▾` there. */}
+        <Chevron open={props.open} hidden={props.clearable || terminal} />
         <FieldRing error={props.error} />
       </View>
     );
@@ -1827,7 +1829,10 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
               >
                 <Text style={{ fontSize: size.detail, color: colors.muted }}>Sort by</Text>
                 <Text style={{ fontSize: size.detail, fontWeight: "500", color: colors.text }}>{sortTitle()}</Text>
-                <Chevron open={open()} />
+                {/* In the terminal, room after the gap for the select's own `▾` and the blank after it, two Cells (a bare trigger takes no padding there). */}
+                <If when={terminal} else={<Chevron open={open()} />}>
+                  <View style={{ width: TERMINAL_COLUMN + 1 }} />
+                </If>
               </View>
             }
             renderItem={(item) => <Option item={item} />}
@@ -1928,7 +1933,7 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
     const file = () => {
       if (team() === null) {
         tried.set(true);
-        shake.play("shake");
+        if (!terminal) shake.play("shake");
         last.set("Issue: a team is required");
         return;
       }
@@ -2266,7 +2271,7 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
           }
           suffix={
             <If when={pointer}>
-              <Text style={{ marginHorizontal: terminal ? TERMINAL_COLUMN : 4, paddingHorizontal: 5, borderRadius: 4, borderWidth: 1, borderColor: colors.line, fontSize: 11, color: colors.muted }}>⌘K</Text>
+              <Text style={{ ...(terminal ? { marginRight: TERMINAL_COLUMN } : { marginHorizontal: 4 }), paddingHorizontal: 5, borderRadius: 4, borderWidth: 1, borderColor: colors.line, fontSize: 11, color: colors.muted }}>⌘K</Text>
             </If>
           }
           empty={<Empty label="No command matches" />}
@@ -2658,6 +2663,8 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
                 borderWidth: 1,
                 borderColor: open() ? colors.faint : colors.border,
                 backgroundColor: colors.raised,
+                // Room for the date picker's ` ▾ ` over the field's end in the terminal.
+                paddingRight: terminal ? 3 * TERMINAL_COLUMN : 0,
                 ...finish.raised,
                 transitionProperty: "border-color",
                 transitionDuration: reduceMotion() ? 0 : 120,
@@ -3439,12 +3446,64 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
   // the buttons light up under the pointer and while pressed (still with
   // reduced motion) and fade where a step does nothing (at the minimum
   // or maximum) or while the input is locked, without their hover.
-  const frame = [
-    pointer ? "h-8 rounded-md" : "h-11 rounded-lg",
-    "flex-row items-stretch overflow-hidden border border-input bg-field",
-    "enabled:hover:border-faint focus-within:outline-2 focus-within:outline-info",
-  ].join(" ");
-  const press = "items-center justify-center transition-colors duration-100 motion-reduce:transition-none enabled:hover:bg-accent active:bg-track disabled:opacity-35";
+  //
+  // In a terminal an input is one band a row high, as a select's trigger:
+  // a column inside its start, the prefix, the value at the end of the
+  // field, then a column (the caret's), the suffix, and − and + at the
+  // band's end, each a mark in a slot of three Cells that all take the
+  // press (` − ` ` + `, touching; the last slot's blank Cell is the
+  // band's end column). Every input has its steppers there, and a suffix
+  // takes the width of the widest, so the values and the suffixes of
+  // inputs stacked one above another line up. A band is its own edge, so
+  // no border, and nothing inside it is filled again; a disabled input
+  // dims all of it.
+  const frame = terminal
+    ? "h-4 flex-row items-stretch bg-field pl-2 disabled:opacity-50"
+    : [
+        pointer ? "h-8 rounded-md" : "h-11 rounded-lg",
+        "flex-row items-stretch overflow-hidden border border-input bg-field",
+        "enabled:hover:border-faint focus-within:outline-2 focus-within:outline-info",
+      ].join(" ");
+  const press = terminal
+    ? "justify-center disabled:opacity-35"
+    : "items-center justify-center transition-colors duration-100 motion-reduce:transition-none enabled:hover:bg-accent active:bg-track disabled:opacity-35";
+  /** − before the field and + after it. */
+  const stepBefore = (w: string) => `${w} ${press} border-r border-line`;
+  const stepAfter = (w: string) => `${w} ${press} border-l border-line`;
+  /** A pair at the well's end: the increment over the decrement. */
+  const pairClass = (w: string) => `${w} border-l border-line`;
+  const pairButton = (top: boolean) => `flex-1 ${press}${top ? " border-b border-line" : ""}`;
+  /**
+   * The step buttons: − before the field and + after it (`split`), or a pair of chevrons at the well's end (`pair`);
+   * in a terminal always − and + at the band's end, each in a slot of three Cells (as `nsh-base`'s `mark_slot`).
+   */
+  const steps = (kind: "split" | "pair", w: string, icon: number) =>
+    terminal
+      ? {
+          controlsRight: true,
+          controlsClass: "flex-row",
+          decrementButtonClass: `w-6 shrink-0 flex-row items-center ${press}`,
+          incrementButtonClass: `w-6 shrink-0 flex-row items-center ${press}`,
+          decrementButton: <Step name="minus" size={icon} />,
+          incrementButton: <Step name="plus" size={icon} />,
+        }
+      : kind === "split"
+        ? {
+            decrementButtonClass: stepBefore(w),
+            incrementButtonClass: stepAfter(w),
+            decrementButton: <Step name="minus" size={icon} />,
+            incrementButton: <Step name="plus" size={icon} />,
+          }
+        : {
+            controlsRight: true,
+            controlsClass: pairClass(w),
+            incrementButtonClass: pairButton(true),
+            decrementButtonClass: pairButton(false),
+            incrementButton: <Step name="chevron-up" size={icon - 2} />,
+            decrementButton: <Step name="chevron-down" size={icon - 2} />,
+          };
+  /** The field's own spacing besides {@link field}'s. A terminal's field keeps {@link field}'s column before its value and none after it: the caret's column is the column after the value. */
+  const spaced = (style: { paddingLeft?: number; paddingRight?: number; paddingHorizontal?: number }) => (terminal ? { paddingRight: 0 } : style);
   const field = () => ({
     flex: 1,
     minWidth: 0,
@@ -3460,7 +3519,7 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
   const stepAlign = terminal ? ("right" as const) : ("center" as const);
   /** A step button's glyph: the gallery's icon, in the muted text color; a terminal's text glyph. */
   function Step(props: { name: "plus" | "minus" | "chevron-up" | "chevron-down"; size: number }) {
-    if (terminal) return <Text style={{ color: colors.muted }}>{STEP_GLYPHS[props.name]}</Text>;
+    if (terminal && (props.name === "plus" || props.name === "minus")) return <Text style={{ color: colors.muted }}>{STEP_GLYPHS[props.name]}</Text>;
     return <Icon name={props.name} size={props.size} tint={colors.muted} />;
   }
   /** A quantity: its label and the input at the trailing edge. */
@@ -3471,7 +3530,7 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
           <Text style={{ fontSize: size.label, color: colors.text }}>{props.label}</Text>
           {props.detail}
         </View>
-        <View style={{ width: pointer ? 132 : 152 }}>{props.children}</View>
+        <View style={{ width: terminal ? 18 * TERMINAL_COLUMN : pointer ? 132 : 152 }}>{props.children}</View>
       </View>
     );
   }
@@ -3482,7 +3541,17 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
   /** A unit or a currency in a number input's well, before or after its field. */
   function Affix(props: { label: string; end?: boolean }) {
     return (
-      <View style={{ height: "100%", justifyContent: "center", paddingLeft: props.end ? 0 : 10, paddingRight: props.end ? 8 : 0 }}>
+      <View
+        style={
+          terminal
+            ? // A prefix at the band's start; a suffix after the field's caret column, after the value, as wide as the
+              // widest (three Cells); the steppers' slots keep their own blank Cell after it.
+              props.end
+              ? { justifyContent: "center", width: 3 * TERMINAL_COLUMN }
+              : { justifyContent: "center" }
+            : { height: "100%", justifyContent: "center", paddingLeft: props.end ? 0 : 10, paddingRight: props.end ? 8 : 0 }
+        }
+      >
         <Text style={{ fontSize: size.label, color: colors.muted, transform: [{ translateY: -1 }] }}>{props.label}</Text>
       </View>
     );
@@ -3508,11 +3577,8 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
                 last.set(`Seats: ${show(next)}`);
               }}
               class={`${frame} disabled:opacity-50`}
-              inputStyle={{ ...field(), textAlign: stepAlign }}
-              decrementButtonClass={`${pointer ? "w-8" : "w-11"} ${press} border-r border-line`}
-              incrementButtonClass={`${pointer ? "w-8" : "w-11"} ${press} border-l border-line`}
-              decrementButton={<Step name="minus" size={pointer ? 14 : 16} />}
-              incrementButton={<Step name="plus" size={pointer ? 14 : 16} />}
+              inputStyle={{ ...field(), ...spaced({}), textAlign: stepAlign }}
+              {...steps("split", pointer ? "w-8" : "w-11", pointer ? 14 : 16)}
             />
           </Amount>
           <Amount label="Price" detail={<Detail>Steps of 0.5</Detail>}>
@@ -3522,18 +3588,13 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
               step={0.5}
               placeholder="Free"
               accessibilityLabel="Price"
-              controlsRight
               onChange={({ value: next }) => {
                 price.set(next);
                 last.set(`Price: ${show(next)}`);
               }}
               class={frame}
-              inputStyle={{ ...field(), paddingLeft: 4 }}
-              controlsClass={`${pointer ? "w-6" : "w-9"} border-l border-line`}
-              incrementButtonClass={`flex-1 ${press} border-b border-line`}
-              decrementButtonClass={`flex-1 ${press}`}
-              incrementButton={<Step name="chevron-up" size={pointer ? 12 : 14} />}
-              decrementButton={<Step name="chevron-down" size={pointer ? 12 : 14} />}
+              inputStyle={{ ...field(), ...spaced({ paddingLeft: 4 }) }}
+              {...steps("pair", pointer ? "w-6" : "w-9", pointer ? 14 : 16)}
               prefix={<Affix label="$" />}
             />
           </Amount>
@@ -3575,7 +3636,7 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
             <Text style={{ numberOfLines: 1, fontSize: size.label, color: colors.text }}>{item.name}</Text>
             <Message label={atStock() ? `Only ${item.stock} left` : `${item.detail} · ${money(item.price)}`} tone={atStock() ? "warn" : undefined} />
           </View>
-          <View style={{ width: pointer ? 92 : 108 }}>
+          <View style={{ width: terminal ? 13 * TERMINAL_COLUMN : pointer ? 92 : 108 }}>
             <NumberInput
               value={n()}
               min={1}
@@ -3588,11 +3649,8 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
                 last.set(`${item.name}: ${value ?? "none"}`);
               }}
               class={frame}
-              inputStyle={{ ...field(), paddingHorizontal: 2, textAlign: stepAlign }}
-              decrementButtonClass={`${pointer ? "w-7" : "w-9"} ${press} border-r border-line`}
-              incrementButtonClass={`${pointer ? "w-7" : "w-9"} ${press} border-l border-line`}
-              decrementButton={<Step name="minus" size={pointer ? 12 : 14} />}
-              incrementButton={<Step name="plus" size={pointer ? 12 : 14} />}
+              inputStyle={{ ...field(), ...spaced({ paddingHorizontal: 2 }), textAlign: stepAlign }}
+              {...steps("split", pointer ? "w-7" : "w-9", pointer ? 12 : 14)}
             />
           </View>
           <View style={{ width: pointer ? 64 : 70 }}>
@@ -3645,14 +3703,7 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
       return c < 19 ? { label: "Cool", tone: "info" } : c <= 24 ? { label: "Comfortable", tone: "up" } : { label: "Warm", tone: "warn" };
     };
     /** The buttons at the well's end, the increment over the decrement (new glyphs for each input). */
-    const right = () => ({
-      controlsRight: true,
-      controlsClass: `${pointer ? "w-6" : "w-9"} border-l border-line`,
-      incrementButtonClass: `flex-1 ${press} border-b border-line`,
-      decrementButtonClass: `flex-1 ${press}`,
-      incrementButton: <Step name="chevron-up" size={pointer ? 12 : 14} />,
-      decrementButton: <Step name="chevron-down" size={pointer ? 12 : 14} />,
-    });
+    const right = () => steps("pair", pointer ? "w-6" : "w-9", pointer ? 14 : 16);
     return (
       <Card title="Units and limits" subtitle="A percentage, a currency with its code, a temperature in half degrees, a read-only rate">
         <View>
@@ -3677,7 +3728,7 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
                 last.set(`Tip: ${value ?? "none"}%`);
               }}
               class={frame}
-              inputStyle={{ ...field(), textAlign: "right", paddingRight: 2 }}
+              inputStyle={{ ...field(), textAlign: "right", ...spaced({ paddingRight: 2 }) }}
               suffix={<Affix label="%" end />}
               {...right()}
             />
@@ -3697,7 +3748,7 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
               class={frame}
               // Over the balance, the well is edged in the danger tone.
               style={over() ? { borderColor: colors.danger } : undefined}
-              inputStyle={{ ...field(), paddingLeft: 4, paddingRight: 2 }}
+              inputStyle={{ ...field(), ...spaced({ paddingLeft: 4, paddingRight: 2 }) }}
               prefix={<Affix label="$" />}
               suffix={<Affix label="USD" end />}
               {...right()}
@@ -3723,7 +3774,7 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
                 last.set(`Thermostat: ${value ?? "none"}`);
               }}
               class={frame}
-              inputStyle={{ ...field(), textAlign: "right", paddingRight: 2 }}
+              inputStyle={{ ...field(), textAlign: "right", ...spaced({ paddingRight: 2 }) }}
               suffix={<Affix label="°C" end />}
               {...right()}
             />
@@ -3734,7 +3785,7 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
               readonly
               accessibilityLabel="Interest rate"
               class={frame}
-              inputStyle={{ ...field(), textAlign: "right", paddingRight: 2, color: colors.muted }}
+              inputStyle={{ ...field(), textAlign: "right", ...spaced({ paddingRight: 2 }), color: colors.muted }}
               suffix={<Affix label="%" end />}
               {...right()}
             />
@@ -3750,9 +3801,28 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
   // that holds a digit (a bullet too) lifts out of its well, a card's fill
   // under a firmer edge (`data-filled:`). A verdict edges and tints them
   // all in its tone, over that; each change fades (`transition-colors`).
+  //
+  // In a terminal a cell is a framed box, three rows high and three Cells inside, its digit in the middle: its line
+  // only, no fill. The cell that takes the next digit has its line in the accent, a verdict's tone edges them all, a
+  // disabled code dims.
   const cellClass = (cells: string) =>
-    `${cells} items-center justify-center rounded-lg border border-line bg-inset font-semibold text-foreground transition-colors motion-reduce:transition-none data-filled:border-input data-filled:bg-card focus:outline-2 focus:outline-info focus:-outline-offset-2 disabled:opacity-50`;
-  const cellStyle = (tone?: Tone) => (tone ? { ...finish.inset, backgroundColor: toneTint(tone), borderColor: toneColor(tone) } : finish.inset);
+    terminal
+      ? "w-10 h-12 items-center justify-center border border-line font-semibold text-foreground focus:border-info disabled:opacity-50"
+      : `${cells} items-center justify-center rounded-lg border border-line bg-inset font-semibold text-foreground transition-colors motion-reduce:transition-none data-filled:border-input data-filled:bg-card focus:outline-2 focus:outline-info focus:-outline-offset-2 disabled:opacity-50`;
+  const cellStyle = (tone?: Tone) =>
+    terminal ? (tone ? { borderColor: toneColor(tone) } : {}) : tone ? { ...finish.inset, backgroundColor: toneTint(tone), borderColor: toneColor(tone) } : finish.inset;
+  /** The codes' groups: three Cells apart in a terminal (a Cell's gap and a Cell of margin each side), their cells one. */
+  const codeClass = terminal ? "flex-row items-center gap-2" : "flex-row items-center gap-3";
+  const groupClass = terminal ? "flex-row gap-2 mx-2" : "flex-row gap-1.5";
+  /**
+   * A blank row between a code's framed cells and the caption above or the message below them in a terminal (a
+   * card's gaps take no row there: its border sets its content apart).
+   */
+  const CodeSpace = () => (
+    <If when={terminal}>
+      <View style={{ height: TERMINAL_ROW }} />
+    </If>
+  );
   const sixCells = pointer ? "w-9 h-11 text-lg" : "w-11 h-13 text-xl";
 
   function Verify() {
@@ -3764,7 +3834,7 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
     cleanup(() => shake.stop());
     const tone = (): Tone | undefined => (verdict() === "Verified" ? "up" : verdict() ? "danger" : undefined);
     return (
-      <Card icon="controls" title="One-time code" subtitle="Six digits: type or paste them; a wrong code shakes">
+      <Card icon="controls" title="One-time code" subtitle={terminal ? "Six digits: type or paste them; a wrong code marks the cells" : "Six digits: type or paste them; a wrong code shakes"}>
         <View style={{ alignItems: "center", gap: size.gap, paddingVertical: size.padding }}>
           <View style={shake.style}>
             <OtpInput
@@ -3778,18 +3848,19 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
               }}
               onComplete={({ value }) => {
                 verdict.set(value === CODE ? "Verified" : "That code is not right");
-                if (value !== CODE) shake.play("shake");
+                if (value !== CODE && !terminal) shake.play("shake");
                 last.set(`Code complete: ${value}`);
               }}
               accessibilityLabel="Verification code, 6 digits"
-              class="flex-row items-center gap-3"
-              groupClass="flex-row gap-1.5"
+              class={codeClass}
+              groupClass={groupClass}
               cellClass={cellClass(sixCells)}
               cellStyle={cellStyle(tone())}
               caretClass="w-0.5 h-6 rounded-full"
               caretStyle={{ backgroundColor: colors.text }}
             />
           </View>
+          <CodeSpace />
           <Message label={verdict() || `The code is ${CODE}`} tone={tone()} />
           <Button
             label="Clear"
@@ -3863,7 +3934,7 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
         const rest = tries() - 1;
         tries.set(rest);
         code.set("");
-        shake.play("shake");
+        if (!terminal) shake.play("shake");
         phase.set(rest === 0 ? "locked" : "wrong");
         last.set(rest === 0 ? "Sign-in: locked" : `Sign-in: wrong code, ${rest} left`);
         if (rest > 0) input?.focus();
@@ -3898,7 +3969,7 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
       );
     }
     return (
-      <Card title="Sign in" subtitle="Send a code, then wait to resend it; a wrong one shakes, three lock the cells">
+      <Card title="Sign in" subtitle={terminal ? "Send a code, then wait to resend it; a wrong one empties the cells, three lock them" : "Send a code, then wait to resend it; a wrong one shakes, three lock the cells"}>
         <View style={{ alignItems: "center", gap: size.gap, paddingVertical: size.padding }}>
           <View style={shake.style}>
             <OtpInput
@@ -3916,14 +3987,15 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
                 verify(value);
               }}
               accessibilityLabel="Sign-in code, 6 digits"
-              class="flex-row items-center gap-3"
-              groupClass="flex-row gap-1.5"
+              class={codeClass}
+              groupClass={groupClass}
               cellClass={cellClass(sixCells)}
               cellStyle={cellStyle(tone())}
               caretClass="w-0.5 h-6 rounded-full"
               caretStyle={{ backgroundColor: colors.text }}
             />
           </View>
+          <CodeSpace />
           <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
             <If when={phase() === "done"}>
               <Signed />
@@ -3979,9 +4051,10 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
     const done = () => (step() === "confirm" ? 1 : step() === "set" ? 2 : 0);
     const pinCells = pointer ? "w-11 h-11 text-xl" : "w-13 h-13 text-2xl";
     return (
-      <Card title="PIN" subtitle="Four masked digits, entered twice: a mismatch shakes and starts over" right={<Badge label={step() === "set" ? "Set" : `Step ${done() + 1} of 2`} tone={step() === "set" ? "up" : "neutral"} />}>
+      <Card title="PIN" subtitle={terminal ? "Four masked digits, entered twice: a mismatch starts over" : "Four masked digits, entered twice: a mismatch shakes and starts over"} right={<Badge label={step() === "set" ? "Set" : `Step ${done() + 1} of 2`} tone={step() === "set" ? "up" : "neutral"} />}>
         <View style={{ alignItems: "center", gap: size.gap, paddingVertical: size.padding }}>
-          <View style={{ flexDirection: "row", gap: 6 }}>
+          {/* The steps' bars; a terminal shows the step in the badge alone. */}
+          <View style={{ flexDirection: "row", gap: 6, display: terminal ? "none" : "flex" }}>
             <Each of={[0, 1]}>
               {(i) => (
                 <View
@@ -3998,6 +4071,7 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
             </Each>
           </View>
           <Message label={message().label} tone={message().tone} />
+          <CodeSpace />
           <View style={shake.style}>
             <OtpInput
               length={4}
@@ -4015,7 +4089,7 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
                   step.set("set");
                   last.set("PIN: set");
                 } else {
-                  shake.play("shake");
+                  if (!terminal) shake.play("shake");
                   step.set("mismatch");
                   last.set("PIN: no match");
                 }
@@ -4029,6 +4103,7 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
               caretStyle={{ backgroundColor: colors.text }}
             />
           </View>
+          <CodeSpace />
           <View style={{ flexDirection: "row", gap: size.gap }}>
             <Button
               label={shown() ? "Hide digits" : "Show digits"}
