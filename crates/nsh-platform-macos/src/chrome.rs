@@ -355,9 +355,18 @@ pub(crate) fn command(surface: &Rc<Surface>, command: &DesktopCommand) {
             }
         }
         DesktopCommand::Close => {
-            if let Some(window) = window(surface) {
-                window.performClose(None);
-            }
+            // Close after the batch, as Windows posts WM_CLOSE and GTK
+            // waits for idle: performClose runs windowWillClose: at once,
+            // which stops the surface while this batch still holds its
+            // mounter.
+            let key = surface.key();
+            DispatchQueue::main().exec_async(move || {
+                if let Some(surface) = Surface::with_key(key)
+                    && let Some(window) = window(&surface)
+                {
+                    window.performClose(None);
+                }
+            });
         }
         DesktopCommand::SetMenu(items) => set_menu(surface, items.as_deref()),
         // The menu bar is the system's.

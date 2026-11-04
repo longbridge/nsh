@@ -67,7 +67,7 @@ The archives (`nsh-macos-arm64.tar.gz`, `nsh-linux-x86_64.tar.gz`, `nsh-windows-
 
 ## For apps written in Rust
 
-Install Rust through [rustup](https://rustup.rs). `nsh` builds a Rust app's runner for each target with Cargo, from your crate and NSH's crates on crates.io at the CLI's version, so add the Rust targets of the platforms you run on:
+Install Rust through [rustup](https://rustup.rs). [huacnlee/cargo](#building-from-a-checkout) is recommended for development. `nsh` builds a Rust app's runner for each target with Cargo, from your crate and NSH's crates on crates.io at the CLI's version, so add the Rust targets of the platforms you run on:
 
 ```sh
 rustup target add aarch64-apple-ios-sim aarch64-apple-ios aarch64-apple-ios-macabi   # iOS simulator, devices, Mac Catalyst
@@ -119,6 +119,12 @@ The installer keeps the checkout in `~/.nsh/source`, builds the release CLI and 
 ## Building from a checkout
 
 You need Rust through [rustup](https://rustup.rs). The repository's `rust-toolchain.toml` selects the stable toolchain and installs the iOS and Android targets on first use.
+
+For development we recommend [huacnlee/cargo](https://github.com/huacnlee/cargo), a drop-in Cargo fork: your Git worktrees share one build directory that stays under a size limit on its own, with nothing to configure. It replaces `~/.cargo/bin/cargo`, keeps `rust-toolchain.toml` and `cargo +nightly` working, and updates itself; its README says how to put rustup's back.
+
+```sh
+curl -fsSL https://huacnlee.github.io/cargo/install.sh | sh     # Windows: irm https://huacnlee.github.io/cargo/install.ps1 | iex
+```
 
 ```sh
 git clone https://github.com/longbridge/nsh.git

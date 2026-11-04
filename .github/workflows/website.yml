@@ -140,6 +140,7 @@ jobs:
           NSH_REQUIRE_SHOWCASES: "1"
           SHOWCASES_DIR: ${{ github.workspace }}/.showcases
           AR_wasm32_unknown_unknown: llvm-ar
+          GITHUB_TOKEN: ${{ github.token }}
         run: bun run build
 
       - name: Test website
@@ -168,6 +169,8 @@ jobs:
           NSH_REQUIRE_SHOWCASES: "1"
           SHOWCASES_DIR: ${{ github.workspace }}/.showcases
           AR_wasm32_unknown_unknown: llvm-ar
+          NSH_REQUIRE_RELEASES: "1"
+          GITHUB_TOKEN: ${{ github.token }}
         run: bun scripts/versions.js
 
       - name: Save the releases' builds

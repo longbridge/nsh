@@ -11,6 +11,7 @@ test("the Editor demo finds, replaces and switches samples", async () => {
   const app = await open("../App.tsx");
   await app.press("role:button[Editor]");
   // The language menu (a sheet on a phone) chooses the sample.
+  await app.waitFor("label:Language");
   await app.press("label:Language");
   await app.press("Rust");
   // The Rust sample, a row per line, with its warning.

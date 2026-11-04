@@ -11,7 +11,7 @@ import { colors, DemoPage } from "../ui";
  * and depth (`finish` in ui.tsx) are gradients and arbitrary shadows with
  * `dark:` variants, everything else is stock Tailwind.
  */
-const photo = "https://picsum.photos/seed/nsh-tailwind/600/400";
+const photo = "https://pbs.twimg.com/media/HS6UGjvXkAAyHtp?format=jpg&name=small";
 
 /** The finishes of ui.tsx as classes: a top-lit gradient, a highlight along the top edge, a soft shadow. */
 const finish = {
