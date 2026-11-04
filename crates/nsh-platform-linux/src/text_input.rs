@@ -1779,6 +1779,13 @@ mod tests {
                 assert!(crate::gtk_test::wait_until(|| height() == 24));
                 let main = font_line(&view, &font, "Ag");
                 let centered = ((24 - main.1.round() as i32) / 2) as f32 + main.0;
+                // Without a CJK font on the machine no fallback font lowers the
+                // baseline, so there is nothing to keep still.
+                let fallback = font_line(&view, &font, "\u{7684}");
+                if paragraph_box(24, main, fallback).shrink == 1.0 {
+                    window.destroy();
+                    continue;
+                }
                 for text in ["NSH\u{7684}", "\u{7684}\u{7684}"] {
                     set(text);
                     assert!(
