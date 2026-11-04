@@ -435,10 +435,13 @@ monitor measures the real writer. Apply + draw excludes the monitor's formatting
 
 | Workload (200 × 60 Cells) | Apply + draw median / p95 | Apply / draw / flush means | Bytes / Cells per frame |
 |---|---|---|---|
-| Terminal Long list, 500 rows | 0.538 / 0.623 ms | 0.074 / 0.474 / 0.136 ms | 5,979 B / 958 Cells |
-| DataTable, 10,000 × 24 | 2.035 / 2.404 ms | 0.284 / 1.765 / 0.153 ms | 7,429 B / 1,038 Cells |
+| Terminal Long list, 500 rows | 1.144 / 2.242 ms | 0.128 / 1.177 / 0.193 ms | 3,674 B / 959 Cells |
+| DataTable, 10,000 × 24 | 1.103 / 2.592 ms | 0.169 / 1.189 / 0.205 ms | 7,446 B / 1,052 Cells |
 
-Measured on Apple M4 Max, macOS 27.0.1, revision 4799709f, 240 frames each: both workloads pass the budget. Tickets changing terminal rendering, input or layout
+Measured on Apple M4 Max, macOS 27.0.1, on the `tui-backend` branch after the terminal's surfaces, borders and
+focus bands, 240 frames each: both workloads pass the budget. Drawing each surface's fill, frame and marks raised
+the Long list's draw from 0.474 to 1.177 ms; the DataTable's fell from 1.765 to 1.189 ms.
+Tickets changing terminal rendering, input or layout
 bring before / after runs of this command on the same machine and workload, plus the existing `nsh test --trace`
 commit timings and mount-item counts. An unchanged workload and profile are essential for comparing results.
 

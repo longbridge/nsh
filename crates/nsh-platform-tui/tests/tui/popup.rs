@@ -6,7 +6,8 @@
 //! searchable select's. A popup the terminal frames outside its box is
 //! placed with that frame: beside its trigger, never on its row, lined up
 //! with its start or end. A sheet is a solid panel the height of the
-//! screen over a cleared page; a toast at the bottom shows its whole frame.
+//! screen over a cleared page; a toast shows on the status line, the
+//! bottom row, the newest alone.
 
 use nsh_base::{
     Anchor, CommandItem, SelectItem, combobox, command, date_picker, menu, menu_item, select,
@@ -17,11 +18,11 @@ use nsh_core::{
     overlay::{Align, Placement},
     prelude::*,
 };
-use nsh_platform_tui::{App, MouseKind, Root};
+use nsh_platform_tui::{App, Input, Modifiers, MouseKind, Root};
 use ratatui_core::{backend::TestBackend, terminal::Terminal};
 
 use super::{
-    app::{draw_until, draw_until_still, mouse, surface},
+    app::{draw_until, draw_until_gone, draw_until_still, mouse, surface},
     dock::{dump, find},
 };
 
@@ -59,6 +60,33 @@ fn DropdownAbove() -> impl IntoElement {
         .child(text("above"))
         .child(view().flex_1())
         .child(tag_box())
+}
+
+/// The combobox of tags 20 Cells wide after a margin of two Cells, its
+/// list aligned with the field's `align` edge.
+fn aligned_box(align: Align) -> impl IntoElement {
+    view().flex_1().child(text("above")).child(
+        view().flex_row().child(view().w(px(16.0))).child(
+            combobox()
+                .items(tags())
+                .placeholder("Pick")
+                .accessibility_label("Tags")
+                .default_open(true)
+                .footer(text("Done"))
+                .align(align)
+                .w(px(160.0)),
+        ),
+    )
+}
+
+#[component]
+fn DropdownStart() -> impl IntoElement {
+    aligned_box(Align::Start)
+}
+
+#[component]
+fn DropdownEnd() -> impl IntoElement {
+    aligned_box(Align::End)
 }
 
 /// The rows of `words`, in order: where each first shows.
@@ -101,6 +129,33 @@ fn a_dropdown_goes_on_the_rows_below_its_trigger_as_tall_as_its_rows() {
         dump(&terminal)
     );
     consecutive(&terminal, &rows);
+}
+
+#[test]
+fn a_dropdowns_frame_runs_from_its_triggers_first_column_to_its_last() {
+    // The terminal draws the list's line a Cell outside its box: the list
+    // is two Cells narrower than its field, so its frame, lines included,
+    // is the field's columns whichever edge the app aligns it on.
+    for root in [
+        Root::new::<DropdownStart>(|| ()),
+        Root::new::<DropdownEnd>(|| ()),
+    ] {
+        let (mut view, rx) = surface();
+        let mut terminal = Terminal::new(TestBackend::new(40, 20)).unwrap();
+        view.load(App::Rust(root)).unwrap();
+        draw_until(&mut view, &mut terminal, &rx, "Swift");
+        let (x, y) = find(&terminal, "Pick")
+            .unwrap_or_else(|| panic!("the trigger shows\n{}", dump(&terminal)));
+        assert_eq!(x, 2, "the field after its margin\n{}", dump(&terminal));
+        let start = find(&terminal, "╭").unwrap_or_else(|| panic!("a frame\n{}", dump(&terminal)));
+        let end = find(&terminal, "╮").unwrap_or_else(|| panic!("a frame\n{}", dump(&terminal)));
+        assert_eq!(
+            (start, end),
+            ((x, y + 1), (x + 19, y + 1)),
+            "the frame's corners in the field's first and last columns, on the row after it\n{}",
+            dump(&terminal)
+        );
+    }
 }
 
 #[test]
@@ -366,6 +421,117 @@ fn a_date_picker_s_calendar_shows_its_days_below_its_trigger() {
         "its days below its header: {rows:?}\n{}",
         dump(&terminal)
     );
+}
+
+/// The Cells of row `y` from `from` to `to` (both kept), as text.
+fn cells_of(terminal: &Terminal<TestBackend>, y: u16, from: u16, to: u16) -> String {
+    let buffer = terminal.backend().buffer();
+    (from..=to).map(|x| buffer[(x, y)].symbol()).collect()
+}
+
+/// Draws until the row under the calendar's header shows something else
+/// than `before`, then until it is still.
+fn draw_until_changed(
+    view: &mut nsh_platform_tui::AppView,
+    terminal: &mut Terminal<TestBackend>,
+    rx: &crossbeam_channel::Receiver<()>,
+    (y, from, to): (u16, u16, u16),
+    before: &str,
+) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        draw_until_still(view, terminal, rx);
+        if cells_of(terminal, y, from, to) != before {
+            return;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the view never changed\n{}",
+            dump(terminal)
+        );
+        let _ = rx.recv_timeout(std::time::Duration::from_millis(20));
+    }
+}
+
+/// The first and the last Cell with a glyph on row `y` between `from` and
+/// `to`.
+fn ink(terminal: &Terminal<TestBackend>, y: u16, from: u16, to: u16) -> (u16, u16) {
+    let buffer = terminal.backend().buffer();
+    let inked: Vec<u16> = (from..=to)
+        .filter(|&x| buffer[(x, y)].symbol() != " ")
+        .collect();
+    (
+        *inked
+            .first()
+            .unwrap_or_else(|| panic!("row {y} blank\n{}", dump(terminal))),
+        *inked.last().unwrap(),
+    )
+}
+
+#[test]
+fn a_date_picker_s_month_and_year_views_are_centered_in_its_days_width() {
+    use nsh_platform_tui::MouseButton;
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(60, 24)).unwrap();
+    view.load(App::Rust(Root::new::<OpenPicker>(|| ())))
+        .unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "28");
+    draw_until_still(&mut view, &mut terminal, &rx);
+    let (start, header) = find(&terminal, "‹").unwrap();
+    let (end, _) = find(&terminal, "›").unwrap();
+    // The days span the header, its arrows over their first and last
+    // columns (a day of one digit on its column's last Cell).
+    let days = ink(&terminal, header + 2, start, end);
+    assert!(
+        days.0 <= start + 1 && days.1 == end,
+        "the days under the header: {days:?}\n{}",
+        dump(&terminal)
+    );
+    let click = |view: &mut nsh_platform_tui::AppView, x: u16, y: u16| {
+        view.handle(mouse(MouseKind::Down(MouseButton::Left), x, y));
+        view.handle(mouse(MouseKind::Up(MouseButton::Left), x, y));
+    };
+    // The header's toggles (numbers without `renderItem`): the month's,
+    // then the year's.
+    let (month, year) = ink(&terminal, header, start + 1, end - 1);
+    let below = (header + 1, start, end);
+    let centered = |terminal: &Terminal<TestBackend>, what: &str| {
+        assert_eq!(
+            (find(terminal, "‹").unwrap(), find(terminal, "›").unwrap().0),
+            ((start, header), end),
+            "the header as wide as the days, its arrows at the ends: {what}\n{}",
+            dump(terminal)
+        );
+        let (first, last) = ink(terminal, header + 1, start, end);
+        let (left, right) = (first - start, end - last);
+        assert!(
+            left.abs_diff(right) <= 1 && left > 1,
+            "the {what} centered under the header: {left} and {right} blank Cells\n{}",
+            dump(terminal)
+        );
+    };
+    let before = cells_of(&terminal, below.0, below.1, below.2);
+    click(&mut view, year, header);
+    draw_until_changed(&mut view, &mut terminal, &rx, below, &before);
+    centered(&terminal, "years");
+    // Four years a row, two blank Cells apart.
+    let row = cells_of(&terminal, header + 1, start, end);
+    assert_eq!(
+        row.split_whitespace().count(),
+        4,
+        "four years a row: {row:?}\n{}",
+        dump(&terminal)
+    );
+    // A year chosen goes back to the days; the month toggle opens the
+    // months.
+    let before = cells_of(&terminal, below.0, below.1, below.2);
+    let (first, _) = ink(&terminal, header + 1, start, end);
+    click(&mut view, first, header + 1);
+    draw_until_changed(&mut view, &mut terminal, &rx, below, &before);
+    let before = cells_of(&terminal, below.0, below.1, below.2);
+    click(&mut view, month, header);
+    draw_until_changed(&mut view, &mut terminal, &rx, below, &before);
+    centered(&terminal, "months");
 }
 
 /// A dialog whose popup is 30 Cells wide, centered by `auto` side
@@ -713,8 +879,7 @@ fn a_sheet_is_a_solid_panel_the_height_of_the_screen_over_a_cleared_page() {
 }
 
 /// A toast in a stack at the bottom right of the screen, in an overlay
-/// along the bottom edge: a fill, no border, so the terminal frames it
-/// outside its box.
+/// along the bottom edge, with a fill the desktops would show.
 #[component]
 fn BottomToast() -> impl IntoElement {
     view().flex_1().child(text("page")).child(
@@ -733,23 +898,30 @@ fn BottomToast() -> impl IntoElement {
 }
 
 #[test]
-fn a_toast_at_the_bottom_shows_with_its_whole_frame() {
+fn a_toast_shows_on_the_status_line_with_no_frame() {
     let (mut view, rx) = surface();
     let mut terminal = Terminal::new(TestBackend::new(40, 12)).unwrap();
     view.load(App::Rust(Root::new::<BottomToast>(|| ())))
         .unwrap();
     draw_until(&mut view, &mut terminal, &rx, "Saved");
     let (_, saved) = find(&terminal, "Saved").unwrap();
-    let (_, top) = find(&terminal, "╭").unwrap_or_else(|| panic!("a frame\n{}", dump(&terminal)));
-    let (_, bottom) =
-        find(&terminal, "╰").unwrap_or_else(|| panic!("the frame's bottom\n{}", dump(&terminal)));
+    assert_eq!(
+        saved,
+        11,
+        "the toast on the bottom row\n{}",
+        dump(&terminal)
+    );
     assert!(
-        top < saved && saved < bottom && bottom <= 11,
-        "the toast inside its frame, on the screen: {top} {saved} {bottom}\n{}",
+        find(&terminal, "╭").is_none() && find(&terminal, "┌").is_none(),
+        "no frame around it\n{}",
+        dump(&terminal)
+    );
+    assert!(
+        find(&terminal, "page").is_some(),
+        "the page above it\n{}",
         dump(&terminal)
     );
 }
-
 /// A bottom sheet as wide as the screen in an overlay of its own, as a
 /// compact `DockArea` presents its bottom dock: a fill, rounded top
 /// corners and a line along its top only.
@@ -797,17 +969,11 @@ fn a_sheet_as_wide_as_the_screen_stays_on_its_bottom_edge_with_no_line_under_it(
     );
 }
 
-/// Two toasts in a stack at the top of the screen, each framed by the
-/// terminal outside its box.
+/// Two toasts in a stack at the top of the screen, the newer last.
 #[component]
 fn TwoToasts() -> impl IntoElement {
-    let item = |label: &'static str| {
-        toast()
-            .bg(nsh_core::color::rgb(0x333333))
-            .px(px(8.0))
-            .child(text(label))
-    };
-    view().flex_1().child(
+    let item = |label: &'static str| toast().child(text(label));
+    view().flex_1().child(text("page")).child(
         overlay().left_0().right_0().top_0().items_start().child(
             toast_stack()
                 .placement(Anchor::TopLeft)
@@ -819,24 +985,81 @@ fn TwoToasts() -> impl IntoElement {
 }
 
 #[test]
-fn expanded_toasts_keep_a_blank_row_between_their_frames() {
+fn the_newer_toast_takes_the_status_line_and_nothing_expands() {
     let (mut view, rx) = surface();
     let mut terminal = Terminal::new(TestBackend::new(40, 16)).unwrap();
     view.load(App::Rust(Root::new::<TwoToasts>(|| ()))).unwrap();
     draw_until(&mut view, &mut terminal, &rx, "Newer");
-    view.handle(mouse(MouseKind::Move, 4, 1));
-    draw_until(&mut view, &mut terminal, &rx, "Older");
-    draw_until_still(&mut view, &mut terminal, &rx);
-    let buffer = terminal.backend().buffer();
-    let rows = |corner: &str| -> Vec<u16> {
-        (0..buffer.area.height)
-            .filter(|&y| (0..buffer.area.width).any(|x| buffer[(x, y)].symbol() == corner))
-            .collect()
-    };
-    let (tops, bottoms) = (rows("╭"), rows("╰"));
+    let (_, newer) = find(&terminal, "Newer").unwrap();
+    assert_eq!(
+        newer,
+        15,
+        "the newer on the bottom row\n{}",
+        dump(&terminal)
+    );
     assert!(
-        tops.len() == 2 && bottoms.len() == 2 && tops[1] == bottoms[0] + 2,
-        "two frames, a blank row between them: {tops:?} {bottoms:?}\n{}",
+        find(&terminal, "Older").is_none(),
+        "the older hidden\n{}",
+        dump(&terminal)
+    );
+    // The pointer where a desktop's stack would be, and on the line.
+    view.handle(mouse(MouseKind::Move, 4, 1));
+    view.handle(mouse(MouseKind::Move, 4, 15));
+    draw_until_still(&mut view, &mut terminal, &rx);
+    assert!(
+        find(&terminal, "Older").is_none() && find(&terminal, "Newer").is_some(),
+        "still one toast, nothing spread\n{}",
+        dump(&terminal)
+    );
+}
+
+/// Two toasts the app keeps in a list, the newest closed on Escape (the
+/// stack's `Cancel`).
+#[component]
+fn CancelledToasts() -> impl IntoElement {
+    let shown = signal(vec!["Older", "Newer"]);
+    view().flex_1().child(text("page")).child(
+        toast_stack()
+            .on_cancel(move || {
+                shown.update(|v| {
+                    v.pop();
+                })
+            })
+            .child(each(
+                shown,
+                |label| *label,
+                |label, _| toast().child(text(move || label.get())),
+            )),
+    )
+}
+
+#[test]
+fn escape_closes_the_toast_on_the_line_and_the_one_before_takes_it() {
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(40, 12)).unwrap();
+    view.load(App::Rust(Root::new::<CancelledToasts>(|| ())))
+        .unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "Newer");
+    view.handle(Input::Key {
+        key: "Escape".into(),
+        modifiers: Modifiers::default(),
+        release: false,
+    });
+    draw_until(&mut view, &mut terminal, &rx, "Older");
+    assert!(
+        find(&terminal, "Newer").is_none(),
+        "the newer closed\n{}",
+        dump(&terminal)
+    );
+    view.handle(Input::Key {
+        key: "Escape".into(),
+        modifiers: Modifiers::default(),
+        release: false,
+    });
+    draw_until_gone(&mut view, &mut terminal, &rx, "Older");
+    assert!(
+        find(&terminal, "Older").is_none() && find(&terminal, "page").is_some(),
+        "no toast left, the line the page's again\n{}",
         dump(&terminal)
     );
 }
@@ -1066,6 +1289,90 @@ fn an_overlay_s_box_keeps_the_shown_part_of_a_long_run_it_cuts_with_an_ellipsis(
     );
 }
 
+/// A box in an overlay over rows of a rule drawn in text (a split's `─`).
+#[component]
+fn OverRule() -> impl IntoElement {
+    let mut page = view().flex_1();
+    for _ in 0..6 {
+        page = page.child(text("────────────────────────────────────────"));
+    }
+    page.child(
+        overlay().left_0().right_0().top_0().child(
+            view().mt(px(32.0)).flex_row().justify_center().child(
+                view()
+                    .w(px(80.0))
+                    .bg(nsh_core::color::rgb(0x333333))
+                    .child(text("Box")),
+            ),
+        ),
+    )
+}
+
+#[test]
+fn an_overlay_s_box_covers_a_rule_it_meets_without_an_ellipsis() {
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(40, 8)).unwrap();
+    view.load(App::Rust(Root::new::<OverRule>(|| ()))).unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "Box");
+    let (_, y) = find(&terminal, "Box").unwrap();
+    let buffer = terminal.backend().buffer();
+    let line: String = (0..40).map(|x| buffer[(x, y)].symbol()).collect();
+    assert!(!line.contains('…'), "a line is no word to cut: {line}");
+    assert!(
+        line.starts_with("────") && line.ends_with("────"),
+        "the rule stays up to the box on both sides: {line}"
+    );
+}
+
+/// A page with a badge the overlay's box covers but for its end (a count
+/// beside a section's title under an open list).
+#[component]
+fn OverBadge() -> impl IntoElement {
+    view()
+        .flex_1()
+        .child(
+            view()
+                .absolute()
+                .left(px(176.0))
+                .top(px(32.0))
+                .px(px(8.0))
+                .bg(nsh_core::color::rgb(0x3f3f46))
+                .child(text("2 of 4")),
+        )
+        .child(
+            overlay().left_0().right_0().top_0().child(
+                view().mt(px(32.0)).flex_row().justify_center().child(
+                    view()
+                        .w(px(80.0))
+                        .bg(nsh_core::color::rgb(0x333333))
+                        .child(text("Box")),
+                ),
+            ),
+        )
+}
+
+#[test]
+fn an_overlay_s_box_leaves_out_a_badge_it_cuts_with_its_fill() {
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(40, 8)).unwrap();
+    view.load(App::Rust(Root::new::<OverBadge>(|| ()))).unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "Box");
+    let (_, y) = find(&terminal, "Box").unwrap();
+    let buffer = terminal.backend().buffer();
+    let line: String = (0..40).map(|x| buffer[(x, y)].symbol()).collect();
+    let right = line.rfind('│').map(|at| line[..at].chars().count() as u16);
+    let right = right.unwrap_or_else(|| panic!("framed: {line}"));
+    // Past the frame: none of the badge, neither its words nor its fill.
+    for x in right + 1..40 {
+        let cell = &buffer[(x, y)];
+        assert_eq!(
+            (cell.symbol(), cell.bg),
+            (" ", ratatui_core::style::Color::Reset),
+            "({x}, {y}) of the cut badge: {line}"
+        );
+    }
+}
+
 /// An overlay whose box holds a filled chip before a name (a tooltip's
 /// avatar and reviewer).
 #[component]
@@ -1096,5 +1403,635 @@ fn a_surface_inside_an_overlay_cuts_no_word_of_the_overlay_s_own() {
     assert!(
         line.contains("MC Mira Chen"),
         "the name stays whole: {line}"
+    );
+}
+
+/// A select, a combobox and a button after them, each reporting the
+/// keyboard focus, and the lists' last open changes.
+#[component]
+fn FieldsThenNext() -> impl IntoElement {
+    let focused = signal("none");
+    let changed = signal(String::from("-"));
+    view()
+        .flex_1()
+        .child(text(move || {
+            format!("focused {} {}", focused.get(), changed.get())
+        }))
+        .child(
+            view().flex_row().child(
+                select()
+                    .items(tags())
+                    .placeholder("Lang")
+                    .accessibility_label("Lang")
+                    .on_open_change(move |e: &nsh_base::SelectEvent| {
+                        if let nsh_base::SelectEvent::OpenChange(open, reason) = e {
+                            changed.set(format!("select {open} {reason:?}"));
+                        }
+                    }),
+            ),
+        )
+        .child(
+            combobox()
+                .items(tags())
+                .placeholder("Pick")
+                .accessibility_label("Tags")
+                .on_open_change(move |e: &nsh_base::ComboboxEvent| {
+                    if let nsh_base::ComboboxEvent::OpenChange(open, reason) = e {
+                        changed.set(format!("combobox {open} {reason:?}"));
+                    }
+                })
+                .w(px(160.0)),
+        )
+        .child(
+            view()
+                .on_focus(move |_: &()| focused.set("Next"))
+                .on_press(|_: &()| {})
+                .child(text("Next")),
+        )
+}
+
+fn press_key(view: &mut nsh_platform_tui::AppView, name: &str, shift: bool) {
+    view.handle(nsh_platform_tui::Input::Key {
+        key: name.into(),
+        modifiers: nsh_platform_tui::Modifiers {
+            shift,
+            ..Default::default()
+        },
+        release: false,
+    });
+}
+
+#[test]
+fn tab_out_of_an_open_select_or_combobox_closes_its_list() {
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(40, 16)).unwrap();
+    view.load(App::Rust(Root::new::<FieldsThenNext>(|| ())))
+        .unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "focused none -");
+
+    // The select: focused, opened with Down, then Tab goes on to the
+    // combobox and the list closes for the focus.
+    press_key(&mut view, "tab", false);
+    press_key(&mut view, "down", false);
+    draw_until(&mut view, &mut terminal, &rx, "Swift");
+    press_key(&mut view, "tab", false);
+    draw_until(&mut view, &mut terminal, &rx, "select false Focus");
+    draw_until_gone(&mut view, &mut terminal, &rx, "Swift");
+
+    // The combobox, now focused: opened with Down, then Tab goes on to
+    // the button, and the focus stays there.
+    press_key(&mut view, "down", false);
+    draw_until(&mut view, &mut terminal, &rx, "Swift");
+    press_key(&mut view, "tab", false);
+    draw_until(
+        &mut view,
+        &mut terminal,
+        &rx,
+        "focused Next combobox false Focus",
+    );
+    draw_until_gone(&mut view, &mut terminal, &rx, "Swift");
+    super::app::draw_until_still(&mut view, &mut terminal, &rx);
+    assert!(
+        dump(&terminal).contains("focused Next"),
+        "the focus stays where Tab took it\n{}",
+        dump(&terminal)
+    );
+}
+
+/// An open menu whose panel is the app's line (a terminal popup's look), a
+/// separator between its two items filled in the app's line color, as
+/// the gallery's.
+#[component]
+fn SeparatedMenu() -> impl IntoElement {
+    let line = nsh_base::theme().border;
+    view().flex_1().child(text("above")).child(
+        menu()
+            .default_open(true)
+            .trigger(view().child(text("View")))
+            .child(
+                view()
+                    .border(px(1.0))
+                    .border_color(line)
+                    .p(px(4.0))
+                    .child(
+                        menu_item()
+                            .accessibility_label("About")
+                            .child(text("About")),
+                    )
+                    .child(nsh_base::menu_separator().h(px(1.0)).bg(line))
+                    .child(menu_item().accessibility_label("Quit").child(text("Quit"))),
+            ),
+    )
+}
+
+/// A dark terminal whose own colors are known: its fills are steps of
+/// them.
+fn known_colors() -> (nsh_platform_tui::AppView, crossbeam_channel::Receiver<()>) {
+    let (tx, rx) = crossbeam_channel::unbounded();
+    let mut options = nsh_platform_tui::AppOptions::default();
+    options.capabilities.colors = nsh_platform_tui::ColorDepth::TrueColor;
+    options.capabilities.background_color = Some([24; 3]);
+    options.capabilities.foreground_color = Some([224; 3]);
+    options.wake = Some(std::sync::Arc::new(move || {
+        let _ = tx.send(());
+    }));
+    options.cache = nsh_engine::CacheOptions::off();
+    (nsh_platform_tui::AppView::new(options), rx)
+}
+
+#[test]
+fn a_menu_s_separator_is_a_line_of_the_menu_s_frame_joined_with_it_on_no_band() {
+    let (mut view, rx) = known_colors();
+    let mut terminal = Terminal::new(TestBackend::new(40, 20)).unwrap();
+    view.load(App::Rust(Root::new::<SeparatedMenu>(|| ())))
+        .unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "Quit");
+    let rows = rows_of(&terminal, &["About", "Quit"]);
+    let buffer = terminal.backend().buffer();
+    // The menu's frame: its left and right columns, on About's row.
+    let (left, right) = {
+        let lines: Vec<u16> = (0..buffer.area.width)
+            .filter(|&x| buffer[(x, rows[0])].symbol() == "│")
+            .collect();
+        assert!(lines.len() >= 2, "the menu is framed\n{}", dump(&terminal));
+        (lines[0], lines[lines.len() - 1])
+    };
+    let separator = (rows[0] + 1..rows[1])
+        .find(|&y| buffer[(left + 1, y)].symbol() == "─")
+        .unwrap_or_else(|| panic!("a row of ─ between the items\n{}", dump(&terminal)));
+    let row: String = (left..=right)
+        .map(|x| buffer[(x, separator)].symbol())
+        .collect();
+    let inner = "─".repeat(usize::from(right - left - 1));
+    assert_eq!(
+        row,
+        format!("├{inner}┤"),
+        "the separator runs across the menu and joins its frame\n{}",
+        dump(&terminal)
+    );
+    // In the frame's color, on the menu's own ground: the line is no
+    // band.
+    let frame = buffer[(left, rows[0])].fg;
+    let ground = buffer[(left, rows[0])].bg;
+    for x in left + 1..right {
+        let cell = &buffer[(x, separator)];
+        assert_eq!(cell.fg, frame, "({x}, {separator})\n{}", dump(&terminal));
+        assert_eq!(cell.bg, ground, "({x}, {separator})\n{}", dump(&terminal));
+    }
+}
+
+/// A page of text on a raised panel, and a dialog Ctrl+O opens: the app's
+/// backdrop (a translucent black across the screen, as the gallery's
+/// `bg-black/50`) and a framed card in the middle.
+#[component]
+fn ScrimDialog() -> impl IntoElement {
+    let open = signal(false);
+    on_key("ctrl+o", move |_| open.set(true));
+    view()
+        .flex_1()
+        .bg(nsh_core::color::rgb(0x27272a))
+        .child(text(move || format!("open {}", open.get())))
+        .children((0..8).map(|n| text(format!("line {n} of the page behind"))))
+        .child(when(open, move || {
+            nsh_base::dialog()
+                .child(
+                    view()
+                        .absolute()
+                        .top(px(0.0))
+                        .left(px(0.0))
+                        .right(px(0.0))
+                        .bottom(px(0.0))
+                        .bg(nsh_core::color::rgba(0x00000080)),
+                )
+                .child(
+                    view()
+                        .absolute()
+                        .top(px(96.0))
+                        .left(px(96.0))
+                        .w(px(160.0))
+                        .border(px(1.0))
+                        .border_color(nsh_base::theme().border)
+                        .bg(nsh_core::color::rgb(0x18181b))
+                        .child(text("Card")),
+                )
+        }))
+}
+
+#[test]
+fn a_modal_leaves_the_page_around_it_as_it_was() {
+    let (mut view, rx) = known_colors();
+    let mut terminal = Terminal::new(TestBackend::new(48, 16)).unwrap();
+    view.load(App::Rust(Root::new::<ScrimDialog>(|| ())))
+        .unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "line 7");
+    draw_until_still(&mut view, &mut terminal, &rx);
+    let before = terminal.backend().buffer().clone();
+    view.handle(nsh_platform_tui::Input::Key {
+        key: "o".into(),
+        modifiers: nsh_platform_tui::Modifiers {
+            ctrl: true,
+            ..Default::default()
+        },
+        release: false,
+    });
+    draw_until(&mut view, &mut terminal, &rx, "Card");
+    draw_until_still(&mut view, &mut terminal, &rx);
+    let after = terminal.backend().buffer();
+    let (x, y) = find(&terminal, "Card").unwrap();
+    // The card: the box its frame draws around its text, found from the
+    // corner up and to the left of it. Everything else is the page,
+    // untouched: no scrim, no fade, no band.
+    let symbol = |column: u16, row: u16| after[(column, row)].symbol();
+    let (left, top) = (0..y)
+        .rev()
+        .find_map(|row| {
+            (0..=x)
+                .rev()
+                .find(|&c| symbol(c, row) == "╭")
+                .map(|c| (c, row))
+        })
+        .unwrap_or_else(|| panic!("the card is framed\n{}", dump(&terminal)));
+    let right = (left..after.area.width)
+        .find(|&c| symbol(c, top) == "╮")
+        .unwrap();
+    let bottom = (top..after.area.height)
+        .find(|&r| symbol(left, r) == "╰")
+        .unwrap();
+    let card_x = left..=right;
+    let card_y = top..=bottom;
+    for row in 0..after.area.height {
+        for column in 0..after.area.width {
+            if row == 0 || (card_x.contains(&column) && card_y.contains(&row)) {
+                continue;
+            }
+            let (old, new) = (&before[(column, row)], &after[(column, row)]);
+            assert_eq!(
+                (old.symbol(), old.fg, old.bg, old.modifier),
+                (new.symbol(), new.fg, new.bg, new.modifier),
+                "({column}, {row}) is as it was\n{}",
+                dump(&terminal)
+            );
+        }
+    }
+}
+
+/// A page of text and a sheet at its right edge Ctrl+O opens, over the
+/// app's backdrop (the gallery's `rgba(0,0,0,0.45)`), which covers only
+/// what the panel leaves.
+#[component]
+fn ScrimSheet() -> impl IntoElement {
+    let open = signal(false);
+    on_key("ctrl+o", move |_| open.set(true));
+    view()
+        .flex_1()
+        .child(text(move || format!("open {}", open.get())))
+        .children((0..8).map(|n| text(format!("line {n} of the page behind"))))
+        .child(
+            nsh_base::sheet()
+                .open(move || Some(open.get()))
+                .side(nsh_core::overlay::Placement::Right)
+                .on_open_change(move |_: &nsh_base::SheetEvent| open.set(false))
+                .backdrop_style(|s| s.bg(nsh_core::color::rgba(0x00000073)))
+                .popup_style(|s| {
+                    s.w(px(120.0))
+                        .border_l(px(1.0))
+                        .border_color(nsh_base::theme().border)
+                        .bg(nsh_core::color::rgb(0x222222))
+                })
+                .child(text("Panel")),
+        )
+}
+
+#[test]
+fn a_sheet_leaves_the_page_beside_it_as_it_was_under_the_pointer_too() {
+    let (mut view, rx) = known_colors();
+    let mut terminal = Terminal::new(TestBackend::new(48, 12)).unwrap();
+    view.load(App::Rust(Root::new::<ScrimSheet>(|| ())))
+        .unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "line 7");
+    draw_until_still(&mut view, &mut terminal, &rx);
+    let before = terminal.backend().buffer().clone();
+    view.handle(nsh_platform_tui::Input::Key {
+        key: "o".into(),
+        modifiers: nsh_platform_tui::Modifiers {
+            ctrl: true,
+            ..Default::default()
+        },
+        release: false,
+    });
+    draw_until(&mut view, &mut terminal, &rx, "Panel");
+    // The pointer over the backdrop: it takes presses, but shows no hover.
+    view.handle(mouse(MouseKind::Move, 2, 4));
+    draw_until_still(&mut view, &mut terminal, &rx);
+    let after = terminal.backend().buffer();
+    let (panel, _) = find(&terminal, "Panel").unwrap();
+    // Left of the panel's line, everything is the page as it was: no
+    // scrim, no band, no recolored text.
+    let edge = panel.saturating_sub(2);
+    for row in 1..after.area.height {
+        for column in 0..edge {
+            let (old, new) = (&before[(column, row)], &after[(column, row)]);
+            assert_eq!(
+                (old.symbol(), old.fg, old.bg, old.modifier),
+                (new.symbol(), new.fg, new.bg, new.modifier),
+                "({column}, {row}) is as it was\n{}",
+                dump(&terminal)
+            );
+        }
+    }
+}
+
+/// A dialog's palette, as the gallery's command palette: a framed card
+/// whose search row has a rule of `─` under it, over a list of 20 commands that
+/// scrolls, inside the card's padding and a box of its own.
+#[component]
+fn ScrollingPalette() -> impl IntoElement {
+    let line = nsh_base::theme().border;
+    view().flex_1().child(text("page")).child(
+        nsh_base::dialog().child(
+            view()
+                .mx(auto())
+                .mt(px(16.0))
+                .w(px(240.0))
+                .border(px(1.0))
+                .border_color(line)
+                .child(view().child(text("Search")))
+                // A terminal's rule under the field, as `nsh-base`'s
+                // command draws it: a box of text has no border Cell.
+                .child(
+                    view().child(text(" ")).child(
+                        text("─".repeat(80))
+                            .absolute()
+                            .top(px(0.0))
+                            .left(px(0.0))
+                            .right(px(0.0))
+                            .number_of_lines(1u32)
+                            .text_overflow(nsh_core::EllipsizeMode::Clip)
+                            .text_color(line),
+                    ),
+                )
+                .child(
+                    view()
+                        .pr(px(8.0))
+                        .child(scroll().h(px(96.0)).children((0..20).map(|n| {
+                            view()
+                                .h(px(16.0))
+                                .flex_shrink_0()
+                                .child(text(format!("Command {n}")))
+                        }))),
+                ),
+        ),
+    )
+}
+
+#[test]
+fn a_modal_s_list_draws_its_bar_on_the_frame_and_its_rule_joins_the_frame() {
+    let (mut view, rx) = known_colors();
+    let mut terminal = Terminal::new(TestBackend::new(50, 16)).unwrap();
+    view.load(App::Rust(Root::new::<ScrollingPalette>(|| ())))
+        .unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "Command 0");
+    draw_until_still(&mut view, &mut terminal, &rx);
+    let buffer = terminal.backend().buffer();
+    let (_, search) = find(&terminal, "Search").unwrap();
+    let (_, first) = find(&terminal, "Command 0").unwrap();
+    // The frame's sides, on the search row.
+    let sides: Vec<u16> = (0..buffer.area.width)
+        .filter(|&x| buffer[(x, search)].symbol() == "│")
+        .collect();
+    assert_eq!(sides.len(), 2, "the card is framed\n{}", dump(&terminal));
+    let (left, right) = (sides[0], sides[1]);
+    // The rule under the search row reaches the frame and joins it.
+    let rule = (search + 1..first)
+        .find(|&y| buffer[(left + 1, y)].symbol() == "─")
+        .unwrap_or_else(|| panic!("a rule under the search row\n{}", dump(&terminal)));
+    assert_eq!(
+        (
+            buffer[(left, rule)].symbol(),
+            buffer[(right, rule)].symbol()
+        ),
+        ("├", "┤"),
+        "the rule joins the frame\n{}",
+        dump(&terminal)
+    );
+    // The list's bar is on the frame's right line, its thumb over it at
+    // the top, and takes no column inside the frame.
+    assert_eq!(
+        buffer[(right, first)].symbol(),
+        "┃",
+        "the thumb is on the line\n{}",
+        dump(&terminal)
+    );
+    for y in first..first + 6 {
+        assert_ne!(
+            buffer[(right - 1, y)].symbol(),
+            "┃",
+            "no bar inside the frame ({y})\n{}",
+            dump(&terminal)
+        );
+        assert_ne!(buffer[(right - 2, y)].symbol(), "┃");
+    }
+}
+
+/// A box overlay: an outline of the accent, rows 2 to 5, columns 0 to 19,
+/// laid out where the drop indicator of a dock area is (a translucent
+/// fill, pointer events none).
+fn outline_overlay() -> Overlay {
+    overlay()
+        .pointer_events(PointerEvents::None)
+        .focusable(false)
+        .left(px(0.0))
+        .top(px(32.0))
+        .w(px(160.0))
+        .h(px(64.0))
+        .border(px(1.0))
+        .border_color(nsh_base::terminal::ACCENT)
+        .bg(nsh_base::terminal::ACCENT.alpha(0.12))
+        .rounded(px(4.0))
+}
+
+/// A label overlay on the outline's top row (row 2, from column 4), as a
+/// dock area's drag preview is: at the origin, moved by a translation.
+fn label_overlay() -> impl IntoElement {
+    overlay()
+        .pointer_events(PointerEvents::None)
+        .focusable(false)
+        .left(px(0.0))
+        .top(px(0.0))
+        .translate_x(px(32.0))
+        .translate_y(px(32.0))
+        .child(text("LABEL"))
+}
+
+/// `open`, pressed, shows the second overlay; `first` is there from the
+/// start.
+fn opened_in_turn(first: AnyElement, later: fn() -> AnyElement) -> impl IntoElement {
+    let second = signal(false);
+    view()
+        .flex_1()
+        .child(
+            view()
+                .on_press(move || second.set(true))
+                .child(text("open")),
+        )
+        .child(first)
+        .child(when(move || second.get(), later))
+}
+
+/// The outline, then the label.
+#[component]
+fn OutlineThenLabel() -> impl IntoElement {
+    opened_in_turn(outline_overlay().into_element(), || {
+        label_overlay().into_element()
+    })
+}
+
+/// The label, then the outline.
+#[component]
+fn LabelThenOutline() -> impl IntoElement {
+    opened_in_turn(label_overlay().into_element(), || {
+        outline_overlay().into_element()
+    })
+}
+
+fn paint_two(label_first: bool) -> (Terminal<TestBackend>, String) {
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(40, 10)).unwrap();
+    let root = match label_first {
+        true => Root::new::<LabelThenOutline>(|| ()),
+        false => Root::new::<OutlineThenLabel>(|| ()),
+    };
+    view.load(App::Rust(root)).unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "open");
+    view.handle(mouse(
+        MouseKind::Down(nsh_platform_tui::MouseButton::Left),
+        1,
+        0,
+    ));
+    view.handle(mouse(
+        MouseKind::Up(nsh_platform_tui::MouseButton::Left),
+        1,
+        0,
+    ));
+    // Both shown: the outline's corner and the label's text, or the
+    // outline's top row where the label would be.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        terminal
+            .draw(|frame| view.render(frame, frame.area()))
+            .unwrap();
+        let shown = find(&terminal, "╭").is_some()
+            && (label_first
+                || find(&terminal, "LABEL").is_some()
+                || std::time::Instant::now() > deadline);
+        if shown {
+            break;
+        }
+        let _ = rx.recv_deadline(deadline);
+        if std::time::Instant::now() > deadline {
+            break;
+        }
+    }
+    // A few more frames: what opens in a later commit is in.
+    for _ in 0..5 {
+        let _ = rx.recv_timeout(std::time::Duration::from_millis(50));
+        terminal
+            .draw(|frame| view.render(frame, frame.area()))
+            .unwrap();
+    }
+    let row: String = (0..40)
+        .map(|x| terminal.backend().buffer()[(x, 2)].symbol())
+        .collect();
+    (terminal, row)
+}
+
+/// Overlays opened one after the other: the one opened later is painted
+/// above the other where they meet (its text over the outline's line).
+#[test]
+fn an_overlay_opened_later_is_painted_above_one_opened_before() {
+    let (terminal, row) = paint_two(false);
+    assert!(
+        row.contains("LABEL"),
+        "the label opened after the outline is under it: {row:?}\n{}",
+        dump(&terminal)
+    );
+}
+
+/// The other way around: the outline opened after the label covers it.
+#[test]
+fn an_outline_opened_after_a_label_covers_it() {
+    let (terminal, row) = paint_two(true);
+    assert!(
+        !row.contains("LABEL"),
+        "the outline opened after the label is under it: {row:?}\n{}",
+        dump(&terminal)
+    );
+}
+
+/// As a dock area's drag: the label is shown first, the outline opens
+/// later, and once the outline is laid out the label is mounted again (a
+/// row keyed by the outline's openings: a new node, opened after it).
+#[component]
+fn LabelRemountedOverOutline() -> impl IntoElement {
+    let outlined = signal(false);
+    let laid_out = signal(0u32);
+    view()
+        .flex_1()
+        .child(
+            view()
+                .on_press(move || outlined.set(true))
+                .child(text("open")),
+        )
+        .child(each(
+            move || vec![laid_out.get()],
+            |&opened: &u32| opened,
+            |_, _| label_overlay(),
+        ))
+        .child(when(
+            move || outlined.get(),
+            move || {
+                let opened = std::cell::Cell::new(false);
+                outline_overlay().on_layout(move |_: &Bounds<Points>| {
+                    if !opened.replace(true) {
+                        laid_out.update(|n| *n += 1);
+                    }
+                })
+            },
+        ))
+}
+
+/// An overlay mounted again after another opened (a new node for it) is
+/// painted above that one, though it first opened before it.
+#[test]
+fn a_remounted_overlay_paints_above() {
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(40, 10)).unwrap();
+    view.load(App::Rust(Root::new::<LabelRemountedOverOutline>(|| ())))
+        .unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "LABEL");
+    view.handle(mouse(
+        MouseKind::Down(nsh_platform_tui::MouseButton::Left),
+        1,
+        0,
+    ));
+    view.handle(mouse(
+        MouseKind::Up(nsh_platform_tui::MouseButton::Left),
+        1,
+        0,
+    ));
+    draw_until(&mut view, &mut terminal, &rx, "╭");
+    for _ in 0..10 {
+        let _ = rx.recv_timeout(std::time::Duration::from_millis(50));
+        terminal
+            .draw(|frame| view.render(frame, frame.area()))
+            .unwrap();
+    }
+    let row: String = (0..40)
+        .map(|x| terminal.backend().buffer()[(x, 2)].symbol())
+        .collect();
+    assert!(
+        row.contains("LABEL"),
+        "the label mounted again is under the outline: {row:?}\n{}",
+        dump(&terminal)
     );
 }

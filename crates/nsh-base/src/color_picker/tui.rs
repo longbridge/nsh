@@ -1,14 +1,16 @@
 //! The terminal forms of a [`ColorPicker`](super::ColorPicker)'s parts
 //! ([`crate::terminal`]): a slider is one row of Cells, each filled with the
-//! channel's color at that point of the track and carrying a glyph of it
-//! (`━` up to the value, the thumb `●` on its Cell, `─` after), and the
-//! area a grid of Cells colored by saturation (across) and brightness
-//! (down), the picked Cell marked `◆`. The Cells' fills are pictures of
-//! colors (role `Image`, hidden from screen readers): the terminal paints
-//! them as the colors themselves (quantized where it has fewer), and where
-//! it paints no fills the glyphs alone show the value. The part takes the
-//! keyboard focus and is the adjustable control screen readers hear, with
-//! the keys of its GUI form; a press or a drag on a Cell picks its value.
+//! channel's color at that point of the track, the thumb a `│` on the Cell
+//! of the value ([`terminal::COLOR_THUMB`]), bold on the accent while the
+//! slider has the focus; the area a grid of Cells
+//! colored by saturation (across) and brightness (down) filling the area's
+//! whole Cells, the picked Cell marked `◆`. The Cells' fills are pictures
+//! of colors (role `Image`, hidden from screen readers): the terminal
+//! paints them as the colors themselves (quantized where it has fewer),
+//! and where it paints no fills the thumb's and the picked Cell's glyphs
+//! show the value. The part takes the keyboard focus and is the adjustable
+//! control screen readers hear, with the keys of its GUI form; a press or
+//! a drag on a Cell picks its value.
 
 use nsh_core::{AccessibilityValue, Color, element::layout_rtl, prelude::*};
 
@@ -18,21 +20,19 @@ use crate::{
     terminal::{self, columns_in, track_cell},
 };
 
-/// The most Cells an area's grid has across: wider areas keep the grid at
-/// their start.
-pub(super) const AREA_COLUMNS: usize = 32;
+/// The most Cells an area's grid has across (wider than any terminal's
+/// card): wider areas keep the grid at their start.
+pub(super) const AREA_COLUMNS: usize = 240;
 /// The most rows of an area's grid.
-pub(super) const AREA_ROWS: usize = 8;
+pub(super) const AREA_ROWS: usize = 64;
 
-/// A color track's Cells up to the value ([`terminal::SLIDER_FILL`]).
-const FILL: &str = "━";
-/// A color track's Cells after the value ([`terminal::SLIDER_TRACK`]).
-const TRACK: &str = "─";
-
-/// One Cell's size, as the terminal's text engine measures one glyph.
+/// One Cell's size: the grid's the core lays out on, else as the
+/// terminal's text engine measures one glyph.
 fn cell_size() -> Size<Points> {
-    let metrics = text_metrics("", "0");
-    Size::new(metrics.width, metrics.height)
+    nsh_core::element::cell_size().unwrap_or_else(|| {
+        let metrics = text_metrics("", "0");
+        Size::new(metrics.width, metrics.height)
+    })
 }
 
 /// A Cell of `color` showing `glyph`: a picture of the color, which the
@@ -74,7 +74,7 @@ fn cell_at(x: f64, width: Points, n: usize) -> usize {
 }
 
 /// A color slider's terminal form ([`super::ColorSlider`]): the track as a
-/// row of colored Cells over the slider's width, the thumb a glyph on the
+/// row of colored Cells over the slider's width, the thumb a `│` on the
 /// Cell of the value, the slider itself the focusable adjustable control.
 pub(super) fn slider(
     ctl: SliderCtl,
@@ -108,21 +108,21 @@ pub(super) fn slider(
         |shown: &usize| *shown,
         move |shown: ReadSignal<usize>, _| {
             let at = move || logical(shown.get());
-            color_cell(
-                cell,
-                move || {
-                    let (i, thumb) = (at(), thumb.get());
-                    match i.cmp(&thumb) {
-                        std::cmp::Ordering::Less => FILL,
-                        std::cmp::Ordering::Equal => terminal::SLIDER_THUMB,
-                        std::cmp::Ordering::Greater => TRACK,
-                    }
-                },
-                move || {
-                    let i = at();
-                    colors.with(|c| c.get(i).map_or_else(black, |&c| Hsla::from(Color(c))))
-                },
-            )
+            let color = move || {
+                let i = at();
+                colors.with(|c| c.get(i).map_or_else(black, |&c| Hsla::from(Color(c))))
+            };
+            view()
+                .w(cell.width)
+                .h(cell.height)
+                .flex_shrink(0.0)
+                .overflow_hidden()
+                .role(AccessibilityRole::Image)
+                .style_with(move |s| s.bg(AdaptiveColor::from(color())))
+                .child(
+                    when(move || at() == thumb.get(), move || thumb_mark(cell))
+                        .otherwise(|| text(" ")),
+                )
         },
     );
     let track = view()
@@ -152,6 +152,8 @@ pub(super) fn slider(
         );
     view()
         .flex_row()
+        // The thumb's mark follows the slider's focus (`thumb_mark`).
+        .group()
         .disabled(move || ctl.disabled())
         .accessible(true)
         .role(AccessibilityRole::Adjustable)
@@ -191,11 +193,26 @@ pub(super) fn slider(
         .into_element()
 }
 
+/// A color slider's thumb, [`terminal::COLOR_THUMB`] on its Cell: while
+/// the slider has the focus it stands on the accent, in the background's
+/// color and bold, as the terminal marks a focused slider's thumb, so the
+/// track keeps showing the value and the mark shows the keys go here.
+fn thumb_mark(cell: Size<Points>) -> View {
+    view()
+        .w(cell.width)
+        .h(cell.height)
+        .group_focus_within(|s| s.bg(terminal::ACCENT))
+        .child(text(terminal::COLOR_THUMB).group_focus_within(|s| {
+            s.text_color(|| crate::theme::theme().background)
+                .font_weight(FontWeight::BOLD)
+        }))
+}
+
 /// A color area's terminal form ([`super::ColorArea`]): a grid of Cells
-/// (at most [`AREA_COLUMNS`] by [`AREA_ROWS`], as many as the area's size
-/// holds), the color's hue at the saturation of each column and the
-/// brightness of each row, the picked color's Cell marked `◆`. Nothing is
-/// drawn where the area holds no Cell.
+/// as many as the area's size holds (it fills the area's width and its
+/// whole rows; at most [`AREA_COLUMNS`] by [`AREA_ROWS`]), the color's hue
+/// at the saturation of each column and the brightness of each row, the
+/// picked color's Cell marked `◆`.
 pub(super) fn area(
     picker: Picker,
     disabled: impl Fn() -> bool + Copy + 'static,

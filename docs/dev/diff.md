@@ -122,10 +122,13 @@ it).
 
 **Text selection.** Each side's text box (the `content` part, inside the side's horizontal scroll view) is a
 selectable view (`Element::selectable`, `nsh_core::selection`), and every line's `Text` but a filler's carries
-`userSelect: "text"`, so the code selects as any selectable text does on each platform: a drag across rows, a double
+`userSelect: "text"` and the platform's own highlight (no `selectionColor`, so it stays apart from the line
+selection's tint), so the code selects as any selectable text does on each platform: a drag across rows, a double
 click a word, a triple click a line, Shift to extend, the platform's copy (Ctrl / Cmd+C, the terminal's Ctrl+Shift+C).
 The gutter (numbers, signs, bars), the separators, file headers, hunk actions and annotations are outside those boxes,
-so a copy holds only code, its lines joined by line breaks. A split view has two areas, one per side, so a selection
+so a copy holds only code, its lines joined by line breaks; a tab copies as the spaces the line shows it as (`expand_tabs`).
+With `softWrap`, a wrapped line's later rows continue its first (`Element::continues_text`): a copy gives the line
+whole, with no break where the wrap cut it, and a triple click selects all of its rows. A split view has two areas, one per side, so a selection
 stays on the side it began on; a unified view has one. Line selection on the gutter is independent of it. Rows leaving
 the row window take their texts with them, as for any selectable view whose texts go: a selection whose end leaves
 is cleared.

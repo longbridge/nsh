@@ -14,7 +14,9 @@
 //!   it in every idiom (`gpui-component`'s trigger click); a tap that
 //!   focuses the input on a touch screen opens it once. With one value the input shows
 //!   its title, selected while it gets the focus, so typing replaces it.
-//!   The list is as wide as the root.
+//!   Tab or Shift+Tab while the list is open closes it with `"focus"`, and
+//!   the focus moves on as the key moves it (as `Select`'s). The list is as
+//!   wide as the root.
 //!
 //! - **The value is a list** (`value: string[]`). With `multiple`, a
 //!   choice toggles the item in it and the list stays open; without, it
@@ -40,7 +42,7 @@ use crate::{
     SelectEntry, SelectGroup, SelectItem,
     listbox::{self, Footer, Hooks, Listbox, Move, Parts, Query, Shown},
     popup::{DropdownFrame, OpenChangeReason, OpenState},
-    terminal::{CLEAR, SELECT_ARROW, is_terminal},
+    terminal::{CLEAR, SELECT_ARROW, is_terminal, mark_slot},
 };
 
 /// The props of [`Combobox`].
@@ -429,6 +431,7 @@ pub fn Combobox(props: ComboboxProps, cx: Scope<ComboboxEvent>) -> impl IntoElem
                 KeyOptions {
                     when: When::Always,
                     repeat: false,
+                    ..Default::default()
                 },
                 move |_| change(false, OpenChangeReason::Select),
             );
@@ -451,6 +454,7 @@ pub fn Combobox(props: ComboboxProps, cx: Scope<ComboboxEvent>) -> impl IntoElem
                     KeyOptions {
                         when: When::Always,
                         repeat: false,
+                        ..Default::default()
                     },
                     move |_| {
                         opening.replace(how);
@@ -475,7 +479,15 @@ pub fn Combobox(props: ComboboxProps, cx: Scope<ComboboxEvent>) -> impl IntoElem
                 return;
             }
             cx.emit(ComboboxEvent::Close);
-            if is_desktop() && closed_by.replace(None) != Some(OpenChangeReason::PressOutside) {
+            // Back to the input, unless a press outside or Tab took the
+            // keyboard somewhere else.
+            let by = closed_by.replace(None);
+            if is_desktop()
+                && !matches!(
+                    by,
+                    Some(OpenChangeReason::PressOutside | OpenChangeReason::Focus)
+                )
+            {
                 field.focus();
             }
         }),
@@ -646,8 +658,10 @@ pub fn Combobox(props: ComboboxProps, cx: Scope<ComboboxEvent>) -> impl IntoElem
                     field.focus();
                 })
                 .map(|v| match terminal {
-                    // The terminal's own ` ×`, in place of the app's button.
-                    true => v.child(text(CLEAR)),
+                    // The terminal's own `×`, in place of the app's button:
+                    // a mark in a slot of three Cells (`mark_slot`), muted
+                    // or lit as the `▾`.
+                    true => mark_slot(v, CLEAR.trim_start(), move || focused.get() || open.get()),
                     false => v
                         .app_class(props.clear_button_class)
                         .inline_style(props.clear_button_style)
@@ -657,6 +671,14 @@ pub fn Combobox(props: ComboboxProps, cx: Scope<ComboboxEvent>) -> impl IntoElem
     );
     // The input says whether the list is open: the button is hidden from
     // screen readers, and leaves the keyboard on the input.
+    // Tab past the input closes the list and moves the focus on.
+    {
+        let change = change.clone();
+        listbox::bind_tab_out(
+            move || open.get(),
+            Rc::new(move || change(false, OpenChangeReason::Focus)),
+        );
+    }
     let toggle = change;
     let press = move || {
         let toggle = toggle.clone();
@@ -669,15 +691,18 @@ pub fn Combobox(props: ComboboxProps, cx: Scope<ComboboxEvent>) -> impl IntoElem
         }
     };
     let trigger_button = match terminal {
-        // The terminal's own button, in place of the app's: ` ▾`.
-        true => view()
-            .role(AccessibilityRole::Button)
-            .focusable(false)
-            .accessibility_elements_hidden(true)
-            .disabled(props.disabled)
-            .on_press(press())
-            .child(text(SELECT_ARROW))
-            .into_element(),
+        // The terminal's own button, in place of the app's: `▾` in a slot
+        // of three Cells (`mark_slot`).
+        true => mark_slot(
+            view()
+                .role(AccessibilityRole::Button)
+                .accessibility_elements_hidden(true)
+                .disabled(props.disabled)
+                .on_press(press()),
+            SELECT_ARROW.trim_start(),
+            move || focused.get() || open.get(),
+        )
+        .into_element(),
         false => props.trigger_button.place(move |t| {
             t.role(AccessibilityRole::Button)
                 .focusable(false)

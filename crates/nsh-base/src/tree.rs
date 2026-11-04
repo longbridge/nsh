@@ -920,6 +920,7 @@ pub fn Tree(props: TreeProps, cx: Scope<TreeEvent>) -> impl IntoElement {
                 KeyOptions {
                     when: When::NotEditing,
                     repeat,
+                    ..Default::default()
                 },
                 move |_| f(),
             );

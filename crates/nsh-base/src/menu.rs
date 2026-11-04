@@ -65,15 +65,30 @@ struct MenuContext {
     /// Every level's items, which an opening from the keyboard focuses
     /// one of.
     items: Items,
+    /// Desktops: inside a submenu, closes it and puts the keyboard focus
+    /// back on its trigger (Left on one of its items, Escape); `None` in
+    /// the menu itself.
+    leave: Option<Rc<dyn Fn()>>,
 }
 
 /// Which item an opening from the keyboard focuses, as WAI-ARIA's menu
 /// button and `gpui-base`'s menus do: the first enabled one (Return,
-/// Space, Down on the trigger) or the last (Up).
+/// Space, Down on the trigger) or the last (Up); for a submenu opened from
+/// its trigger (Right, Return, Space), the first enabled one of its items.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Keyed {
     First,
     Last,
+    Submenu(u32),
+}
+
+/// What a submenu trigger's keys do while it has the keyboard focus.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SubmenuKey {
+    /// Right, Return, Space: open it with the focus on its first item.
+    Enter,
+    /// Left: leave the submenu the trigger is in.
+    Leave,
 }
 
 /// An item of a menu, or a submenu's trigger among its menu's items.
@@ -93,6 +108,7 @@ struct Items {
     list: Rc<RefCell<Vec<Entry>>>,
     next: Rc<Cell<u64>>,
     order: Rc<OrderWatch>,
+    keyed: Stored<Option<Keyed>>,
 }
 
 impl Items {
@@ -111,12 +127,17 @@ impl Items {
                     let Some(how) = keyed.get() else {
                         return;
                     };
+                    let (level, last) = match how {
+                        Keyed::First => (0, false),
+                        Keyed::Last => (0, true),
+                        Keyed::Submenu(level) => (level, false),
+                    };
                     let mut enabled = list
                         .iter()
-                        .filter(|e| e.level == 0 && !e.disabled.get_untracked());
-                    match how {
-                        Keyed::First => enabled.next().copied(),
-                        Keyed::Last => enabled.next_back().copied(),
+                        .filter(|e| e.level == level && !e.disabled.get_untracked());
+                    match last {
+                        false => enabled.next().copied(),
+                        true => enabled.next_back().copied(),
                     }
                 };
                 if let Some(entry) = pick {
@@ -129,7 +150,15 @@ impl Items {
             list,
             next: Rc::new(Cell::new(0)),
             order: Rc::new(order),
+            keyed,
         }
+    }
+
+    /// Focuses the first enabled item of submenu `level` once its items
+    /// are there (now, when they already are).
+    fn focus_first(&self, level: u32) {
+        self.keyed.replace(Some(Keyed::Submenu(level)));
+        self.order.invalidate();
     }
 
     /// Adds an item of submenu `level`, which the menu forgets when the
@@ -236,6 +265,7 @@ fn surface(
         looks: parts.looks(),
         popup: presence.popup(),
         items: Items::new(keyed),
+        leave: None,
     });
     // An attempt to close it: reported, then it closes (none while it
     // goes).
@@ -533,6 +563,7 @@ pub fn Menu(props: MenuProps, cx: Scope<MenuEvent>) -> impl IntoElement {
                     KeyOptions {
                         when: When::NotEditing,
                         repeat: false,
+                        ..Default::default()
                     },
                     move |_| {
                         keyed.replace(Some(how));
@@ -804,6 +835,15 @@ pub fn MenuItem(props: MenuItemProps, cx: Scope<MenuItemEvent>) -> impl IntoElem
     if let Some(m) = &hover {
         m.items.add(node, m.level, disabled);
     }
+    // In a submenu, Left on the item leaves it for its trigger.
+    let focused = signal(false);
+    if let Some(leave) = hover.as_ref().and_then(|m| m.leave.clone()) {
+        crate::keys::bind_while(
+            move || focused.get(),
+            &[("left", false, ())],
+            move |()| leave(),
+        );
+    }
     let (indicator, children, role) = (props.indicator, props.children, props.role);
     let (indicator_class, indicator_style) = (props.indicator_class, props.indicator_style);
     // The indicator is a part that takes the item's states, as
@@ -873,6 +913,8 @@ pub fn MenuItem(props: MenuItemProps, cx: Scope<MenuItemEvent>) -> impl IntoElem
         .checked_style(props.checked_style)
         .disabled(disabled)
         .optional_label(props.accessibility_label)
+        .on_focus(move || focused.set(true))
+        .on_blur(move || focused.set(false))
         .when(terminal, |v| v.flex_row())
         .when_some(sheet, |v, m| {
             v.style_when(move || !m.shown(), |s| s.hidden())
@@ -940,6 +982,10 @@ pub struct SubmenuProps {
 /// menu's `popupClass` / `popupStyle` and its states' looks
 /// (`popupStartingClass`, `popupEndingClass`, ...). In a terminal its
 /// trigger is a row that ends with ` ›` ([`crate::terminal`]).
+/// On the desktops and in a terminal, Right, Return or Space on its
+/// focused trigger open it with the keyboard focus on its first enabled
+/// item; Left on one of its items, or Escape, closes it with the focus
+/// back on its trigger, as WAI-ARIA's menus do.
 #[component]
 pub fn Submenu(props: SubmenuProps, cx: Scope<NoEvent>) -> impl IntoElement {
     let _ = cx;
@@ -956,11 +1002,19 @@ pub fn Submenu(props: SubmenuProps, cx: Scope<NoEvent>) -> impl IntoElement {
     // closing the menu closes it, no state written.
     let sub_open = computed(move || around.get() && open_sub.get() == Some(id));
     let presence = PopupPresence::new(move || sub_open.get(), menu.looks);
+    let anchor = element_ref();
+    // Left on one of its items, or Escape: it closes and the keyboard
+    // focus goes back to its trigger, as WAI-ARIA's menus do.
+    let leave: Rc<dyn Fn()> = Rc::new(move || {
+        open_sub.set(None);
+        anchor.focus();
+    });
     let inner = MenuContext {
         level: id,
         popup: presence.popup(),
         open_sub: signal(None),
         open: sub_open,
+        leave: (!menu.sheet).then(|| leave.clone()),
         ..menu.clone()
     };
     provide_context(inner.clone());
@@ -1002,12 +1056,56 @@ pub fn Submenu(props: SubmenuProps, cx: Scope<NoEvent>) -> impl IntoElement {
             ))
             .into_element();
     }
-    let anchor = element_ref();
     menu.items.add(anchor, menu.level, props.disabled);
     let edges = menu.popup;
     let open = move || {
         if !props.disabled.get_untracked() {
             open_sub.set(Some(id));
+        }
+    };
+    // The trigger's keys while it has the keyboard focus: Right, Return
+    // and Space open it with the focus on its first enabled item (it may
+    // be open already, from the pointer); Left leaves the submenu the
+    // trigger is in.
+    let focused = signal(false);
+    {
+        let (items, up) = (menu.items.clone(), menu.leave.clone());
+        crate::keys::bind_while(
+            move || focused.get(),
+            &[
+                ("right", false, SubmenuKey::Enter),
+                ("enter", false, SubmenuKey::Enter),
+                ("space", false, SubmenuKey::Enter),
+                ("left", false, SubmenuKey::Leave),
+            ],
+            move |key| match key {
+                SubmenuKey::Enter if !props.disabled.get_untracked() => {
+                    open_sub.set(Some(id));
+                    items.focus_first(id);
+                }
+                SubmenuKey::Enter => {}
+                SubmenuKey::Leave => {
+                    if let Some(up) = &up {
+                        up();
+                    }
+                }
+            },
+        );
+    }
+    // Escape closes it (the top overlay); the focus inside goes back to
+    // the trigger.
+    let inside = stored(false);
+    presence.popup().on_focus_in(move || {
+        inside.replace(true);
+    });
+    presence.popup().on_focus_out(move || {
+        inside.replace(false);
+    });
+    let cancel = move || {
+        if inside.replace(false) {
+            leave();
+        } else {
+            open_sub.set(None);
         }
     };
     let trigger = match is_terminal() {
@@ -1022,6 +1120,8 @@ pub fn Submenu(props: SubmenuProps, cx: Scope<NoEvent>) -> impl IntoElement {
                 has_popup: true,
                 ..AccessibilityState::default()
             })
+            .on_focus(move || focused.set(true))
+            .on_blur(move || focused.set(false))
             .on_mouse_enter(move |_: &MouseEvent| open())
             .on_press(open)
             .child(props.trigger.place(|t| t.flex_grow(1.0)))
@@ -1035,6 +1135,8 @@ pub fn Submenu(props: SubmenuProps, cx: Scope<NoEvent>) -> impl IntoElement {
                     has_popup: true,
                     ..AccessibilityState::default()
                 })
+                .on_focus(move || focused.set(true))
+                .on_blur(move || focused.set(false))
                 .on_mouse_enter(move |_: &MouseEvent| open())
                 .on_press(open)
         }),
@@ -1053,7 +1155,7 @@ pub fn Submenu(props: SubmenuProps, cx: Scope<NoEvent>) -> impl IntoElement {
                     .element_ref(&presence.popup())
                     .app_class(move || presence.class())
                     .state_inline_style(move || presence.style())
-                    .on_cancel(move || open_sub.set(None))
+                    .on_cancel(cancel.clone())
                     .child(props.children)
             },
         ))

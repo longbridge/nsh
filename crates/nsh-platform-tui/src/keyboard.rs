@@ -108,6 +108,25 @@ fn layer(tree: &Mounter, id: NodeId) -> Option<NodeId> {
     }
 }
 
+/// The covering layer (`covering_layer`) over `id`'s layer in its root
+/// view, if any: the root view's child above `id`'s that takes it out of
+/// reach.
+fn covering_root(tree: &Mounter, geometry: &[Geometry], id: NodeId) -> Option<NodeId> {
+    let own = layer(tree, id)?;
+    let scope = tree.get(own)?.parent?;
+    let cover = covering_layer(tree, geometry, scope)?;
+    let own_order = tree.get(own)?.tree_order;
+    (cover > own_order)
+        .then(|| {
+            tree.get(scope)?
+                .children
+                .iter()
+                .copied()
+                .find(|&child| tree.get(child).is_some_and(|v| v.tree_order == cover))
+        })
+        .flatten()
+}
+
 /// The tree order of the topmost layer of `scope`'s root view that covers
 /// the page under it and takes presses (a sheet's or a dialog's backdrop),
 /// if any: the stops of the layers below it are out of reach.
@@ -389,6 +408,26 @@ impl Keyboard {
         self.caught_up = self.caught_up.max(moved);
     }
 
+    /// The stop a pointer's press on `node` gives the focus to: `node`
+    /// or its nearest ancestor that Tab stops at, as terminal apps move
+    /// the focus to what is clicked (`None`: the press is on no stop).
+    pub(crate) fn pressed_stop(
+        &self,
+        node: NodeId,
+        tree: &Mounter,
+        geometry: &[Geometry],
+    ) -> Option<NodeId> {
+        let candidates = self.candidates(tree, geometry);
+        let mut ancestor = Some(node);
+        while let Some(id) = ancestor {
+            if candidates.iter().any(|g| g.id == id) {
+                return Some(id);
+            }
+            ancestor = tree.get(id).and_then(|view| view.parent);
+        }
+        None
+    }
+
     /// Focuses the control around a search match, or none, keeping the match's text as the search point.
     pub(crate) fn focus_match(
         &mut self,
@@ -511,7 +550,26 @@ impl Keyboard {
             let restored = (!contains(tree, ROOT_ID, focused))
                 .then(|| self.layer_restore(tree, geometry))
                 .flatten();
+            // Covered by a backdrop (a sheet opened from it): the layer
+            // over it gives it back when it goes, whether the focus went
+            // into that layer or Escape closed it first.
+            if restored.is_none()
+                && contains(tree, ROOT_ID, focused)
+                && let Some(cover) = covering_root(tree, geometry, focused)
+            {
+                self.layers.retain(|entry| entry.layer != cover);
+                self.layers.push(LayerFocus {
+                    layer: cover,
+                    restore: focused,
+                });
+            }
             self.focus(restored, tree, control);
+        } else if self.focused.is_none()
+            && let Some(restored) = self.layer_restore(tree, geometry)
+        {
+            // The layer gone took no focus of its own (closed by Escape
+            // with none in it): the stop it covered still takes it back.
+            self.focus(Some(restored), tree, control);
         }
         self.layers
             .retain(|entry| contains(tree, ROOT_ID, entry.layer));
@@ -809,7 +867,7 @@ impl Keyboard {
             command.modifiers.cmd = true;
             found = tree.keymap.find(command, editing, repeat);
         }
-        if let KeyMatch::Fire(id) = found {
+        if let Some(id) = found.fired() {
             control.dispatch_event(
                 ROOT_ID,
                 EventKind::KeyCommand,

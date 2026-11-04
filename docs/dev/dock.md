@@ -102,9 +102,10 @@ view's coordinates in one task, answered with the next commit. Each move resolve
 a tab bar, the slot between the tabs the pointer is past (counted without the dragged tab); over a content frame, its
 middle merges and its outer 35% on each side splits (`split_placement_at`), except back onto its own group when that would change
 nothing. The drop indicator part covers what the panel would take in the target group
-(`DropPlaceholderBounds::for_placement`): it is one overlay in the root view, placed with the content frame the drag
-measured, so it draws above the handles, whose lines lie over the edges of the groups beside them, and no frame clips
-it, and the release applies one move (`PaneTree::move_panel` within a tree,
+(`DropPlaceholderBounds::for_placement`): it is one overlay in the root view, under the drag preview (overlays stack
+in the order they open, and the indicator opens once the drag has a target, so the preview is mounted again after it, a
+row keyed by `AreaCx::indicator_shown`: a region run again keeps its node and its place), placed with the content frame the drag measured, so it draws above the handles, whose lines lie over
+the edges of the groups beside them, and no frame clips it, and the release applies one move (`PaneTree::move_panel` within a tree,
 detach and insert across trees) and one `onLayoutChange`. A gesture the system takes away drops nothing.
 In a terminal a press on a tab arms its drag at once, as on the desktops (a terminal's pointer is a mouse), and the
 area grows into its parent's room (`flex-grow: 1`: a terminal keeps no percentage height for a box of content); a
@@ -210,7 +211,8 @@ panel where it was, and the app persists one layout.
   `on_drag_end(offset)`; the dock's edges use it.
 - In a terminal a band is one Cell across, its line the terminal's own: `│` down a horizontal handle's column,
   `─` along a vertical one's row (`terminal::DIVIDER_VERTICAL` / `DIVIDER_HORIZONTAL`), muted, in the accent while
-  the pointer is over it, holds it or the keyboard focus is on it. A group's panes are a Cell apart (8 points of gap
+  the pointer is over it, holds it or the keyboard focus is on it: only the line's color changes, nothing is
+  filled under it. A group's panes are a Cell apart (8 points of gap
   in a row, 24 in a column) and the band sits in that Cell. A drag follows the pointer Cell by Cell; the band is a
   stop of the keyboard focus whose arrows along its axis move it one Cell, each step one drag (`resize_handle.rs`
   `terminal_band`).

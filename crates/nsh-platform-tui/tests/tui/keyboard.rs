@@ -1063,6 +1063,97 @@ fn left_and_right_stay_in_an_open_menu() {
     draw_until(&mut view, &mut terminal, &rx, "seen chose New.");
 }
 
+/// A menu with a submenu `Recent` of two items between `New` and `Quit`;
+/// what was chosen, on screen in lower case (so the items' names show only
+/// in the menu).
+#[component]
+fn MenuWithSubmenu() -> impl IntoElement {
+    let seen = signal(String::new());
+    let item = move |name: &'static str| {
+        nsh_base::menu_item()
+            .on_select(move || {
+                seen.update(|s| s.push_str(&format!(" chose {}", name.to_lowercase())))
+            })
+            .child(text(name))
+    };
+    view()
+        .flex_1()
+        .child(text(move || format!("seen{}.", seen.get())))
+        .child(
+            nsh_base::menu()
+                .trigger(view().w(px(80.0)).child(text("File")))
+                .child(item("New"))
+                .child(
+                    nsh_base::submenu()
+                        .trigger(view().child(text("Recent")))
+                        .child(item("Alpha"))
+                        .child(item("Beta")),
+                )
+                .child(item("Quit")),
+        )
+}
+
+#[test]
+fn right_and_return_open_a_submenu_at_its_first_item_and_left_and_escape_leave_it() {
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(60, 16)).unwrap();
+    view.load(App::Rust(Root::new::<MenuWithSubmenu>(|| ())))
+        .unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "File");
+    let none = Modifiers::default();
+    let press =
+        |view: &mut nsh_platform_tui::AppView, terminal: &mut Terminal<TestBackend>, name: &str| {
+            view.handle(key(name, none));
+            terminal
+                .draw(|frame| view.render(frame, frame.area()))
+                .unwrap();
+        };
+    // The menu opens at `New`; Down reaches the submenu's trigger, Right
+    // opens it with the focus on `Alpha`, which Return chooses.
+    view.handle(key("Tab", none));
+    view.handle(key("Enter", none));
+    draw_until(&mut view, &mut terminal, &rx, "Quit");
+    press(&mut view, &mut terminal, "Down");
+    view.handle(key("Right", none));
+    draw_until(&mut view, &mut terminal, &rx, "Alpha");
+    view.handle(key("Enter", none));
+    draw_until(&mut view, &mut terminal, &rx, "seen chose alpha.");
+    super::app::draw_until_gone(&mut view, &mut terminal, &rx, "Quit");
+    // Return on the trigger opens it too; Left closes it with the focus
+    // back on the trigger, the menu open, so Right opens it again.
+    view.handle(key("Enter", none));
+    draw_until(&mut view, &mut terminal, &rx, "Quit");
+    press(&mut view, &mut terminal, "Down");
+    view.handle(key("Enter", none));
+    draw_until(&mut view, &mut terminal, &rx, "Alpha");
+    view.handle(key("Left", none));
+    super::app::draw_until_gone(&mut view, &mut terminal, &rx, "Alpha");
+    assert!(
+        super::dock::find(&terminal, "Quit").is_some(),
+        "the menu stays open"
+    );
+    view.handle(key("Right", none));
+    draw_until(&mut view, &mut terminal, &rx, "Alpha");
+    // Escape closes only the submenu, the focus back on its trigger:
+    // Return opens it again, Down and Return choose `Beta`.
+    view.handle(key("Escape", none));
+    super::app::draw_until_gone(&mut view, &mut terminal, &rx, "Alpha");
+    assert!(
+        super::dock::find(&terminal, "Quit").is_some(),
+        "the menu stays open"
+    );
+    view.handle(key("Enter", none));
+    draw_until(&mut view, &mut terminal, &rx, "Alpha");
+    press(&mut view, &mut terminal, "Down");
+    view.handle(key("Enter", none));
+    draw_until(
+        &mut view,
+        &mut terminal,
+        &rx,
+        "seen chose alpha chose beta.",
+    );
+}
+
 /// A paragraph with two links, and a stop after it; what the links
 /// reported and where the focus came, on screen.
 #[component]

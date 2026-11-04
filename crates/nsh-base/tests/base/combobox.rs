@@ -557,6 +557,41 @@ fn a_toggle_restyles_its_row_and_draws_nothing() {
 }
 
 #[test]
+fn tab_closes_the_list_and_the_focus_moves_on() {
+    let mut app = start(props());
+    app.press("role:combobox").unwrap();
+    app.wait_for("role:listbox").unwrap();
+    app.key("tab");
+    app.gone("role:listbox");
+    app.log_ends("openChange:false:Focus confirm:none");
+    // It went on: the input's Down opens nothing.
+    app.key("down");
+    app.wait(Duration::from_millis(100)).unwrap();
+    assert_eq!(app.screen().count("role:listbox").unwrap(), 0);
+    // Shift+Tab comes back to the input, and from the open list closes it.
+    app.key("shift+tab");
+    app.key("down");
+    app.wait_for("role:listbox").unwrap();
+    app.key("shift+tab");
+    app.gone("role:listbox");
+    app.log_ends("openChange:false:Focus confirm:none");
+}
+
+#[test]
+fn a_press_on_an_item_chooses_it_while_the_input_has_the_keyboard() {
+    let mut app = start(HarnessProps {
+        controlled: true,
+        ..props()
+    });
+    app.press("role:combobox").unwrap();
+    app.wait_for("role:listbox").unwrap();
+    app.press("role:option[Ruby]").unwrap();
+    app.gone("role:listbox");
+    app.see("Value: ruby");
+    app.log_ends("change:ruby openChange:false:Select confirm:ruby");
+}
+
+#[test]
 fn a_press_on_the_input_opens_and_closes_the_list_on_a_desktop() {
     let mut app = start(props());
     app.press("role:combobox").unwrap();

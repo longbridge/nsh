@@ -1468,17 +1468,30 @@ fn sort_button(
 
 /// The original pair of Lucide chevrons. Paint follows the app's inherited
 /// stroke/text color; each direction exposes its selected state for styling.
-/// In a terminal, a glyph of the direction (`↑`, `↓`, `↕` unsorted).
+/// In a terminal, one glyph: `▲` ascending, `▼` descending, `↕` unsorted,
+/// each the part of its direction (an unsorted column's `↕` the ascending
+/// part's, not selected: as faint as an unsorted chevron).
 fn sort_icon(props: DataTableProps, sorted: Memo<Option<DataTableSortDirection>>) -> AnyElement {
-    // A terminal draws no chevrons: the direction is a glyph, the pair's
-    // when the column is not sorted.
+    // A terminal draws no chevrons: the direction is one Cell's glyph.
     if crate::terminal::is_terminal() {
-        return text(move || match sorted.get() {
-            Some(DataTableSortDirection::Ascending) => "↑",
-            Some(DataTableSortDirection::Descending) => "↓",
-            None => "↕",
+        return dynamic(move || {
+            let (glyph, which) = match sorted.get() {
+                Some(DataTableSortDirection::Ascending) => ("▲", DataTablePart::SortAscending),
+                Some(DataTableSortDirection::Descending) => ("▼", DataTablePart::SortDescending),
+                None => ("↕", DataTablePart::SortAscending),
+            };
+            Some(part(
+                text(glyph)
+                    .number_of_lines(1)
+                    .accessible(false)
+                    .accessibility_state(move || AccessibilityState {
+                        selected: sorted.get().is_some(),
+                        ..AccessibilityState::default()
+                    }),
+                props,
+                which,
+            ))
         })
-        .number_of_lines(1)
         .into_element();
     }
     const K: f32 = 12.0 / 24.0;

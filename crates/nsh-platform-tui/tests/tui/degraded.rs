@@ -340,3 +340,192 @@ fn at_sixteen_colors_a_frames_canvas_series_take_distinct_entries() {
     assert_ne!(colors[1], colors[2], "{colors:?}");
     assert_ne!(colors[0], colors[2], "{colors:?}");
 }
+
+/// Draws until `done` holds for the buffer, else fails with its rows.
+fn draw_while(
+    view: &mut AppView,
+    terminal: &mut Terminal<TestBackend>,
+    rx: &crossbeam_channel::Receiver<()>,
+    mut done: impl FnMut(&Buffer) -> bool,
+) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        terminal
+            .draw(|frame| view.render(frame, frame.area()))
+            .unwrap();
+        if done(terminal.backend().buffer()) {
+            return;
+        }
+        assert!(
+            rx.recv_deadline(deadline).is_ok(),
+            "{:?}",
+            terminal.backend().buffer()
+        );
+    }
+}
+
+#[test]
+fn a_chosen_control_the_keys_are_on_is_reversed_in_the_accent_not_as_its_choice() {
+    let (mut view, rx, mut terminal) = load(ColorDepth::Ansi16);
+    let bold = at(terminal.backend().buffer(), "Bold");
+    let chosen = terminal.backend().buffer()[bold].clone();
+    assert!(chosen.modifier.contains(Modifier::REVERSED));
+    assert_eq!(chosen.fg, Color::Reset, "the choice is plain reverse video");
+    // The first Tab goes to the chosen toggle.
+    view.handle(tab());
+    draw_while(&mut view, &mut terminal, &rx, |buffer| {
+        buffer[bold].fg != Color::Reset
+    });
+    let focused = &terminal.backend().buffer()[bold];
+    assert_eq!(focused.fg, Color::Blue, "the accent's reverse");
+    assert!(
+        focused.modifier.contains(Modifier::REVERSED),
+        "{:?}",
+        focused.modifier
+    );
+}
+
+/// A combobox of two tags, 20 columns wide: room past each label.
+#[nsh_core::prelude::component]
+fn OpenTags() -> impl nsh_core::prelude::IntoElement {
+    use nsh_core::prelude::*;
+    view().flex_1().child(
+        nsh_base::combobox()
+            .items(vec![
+                nsh_base::SelectItem::new("rust", "Rust"),
+                nsh_base::SelectItem::new("go", "Go"),
+            ])
+            .placeholder("Pick")
+            .accessibility_label("Tags")
+            .w(px(160.0)),
+    )
+}
+
+#[test]
+fn at_sixteen_colors_a_popup_s_highlighted_item_is_reversed_across_its_row() {
+    let (mut view, rx) = surface_at(ColorDepth::Ansi16);
+    let mut terminal = Terminal::new(TestBackend::new(40, 12)).unwrap();
+    view.load(nsh_platform_tui::App::Rust(nsh_platform_tui::Root::new::<
+        OpenTags,
+    >(|| ())))
+        .unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "Pick");
+    // Focused, then opened (and an item highlighted) with Down.
+    view.handle(tab());
+    view.handle(Input::Key {
+        key: "down".into(),
+        modifiers: Default::default(),
+        release: false,
+    });
+    draw_until(&mut view, &mut terminal, &rx, "Go");
+    let reversed = |buffer: &Buffer, x: u16, y: u16| {
+        let cell = &buffer[(x, y)];
+        cell.modifier.contains(Modifier::REVERSED) && cell.fg == Color::Blue
+    };
+    let mut highlighted = None;
+    for _ in 0..50 {
+        terminal
+            .draw(|frame| view.render(frame, frame.area()))
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        let rows = ["Rust", "Go"].map(|word| at(buffer, word));
+        if let Some(&(x, y)) = rows.iter().find(|&&(x, y)| reversed(buffer, x, y)) {
+            highlighted = Some((x, y));
+            break;
+        }
+        let _ = rx.recv_timeout(std::time::Duration::from_millis(100));
+        // Down again, in case the first only opened the list.
+        if highlighted.is_none() {
+            view.handle(Input::Key {
+                key: "down".into(),
+                modifiers: Default::default(),
+                release: false,
+            });
+        }
+    }
+    let (x, y) = highlighted.expect("an item is highlighted");
+    let buffer = terminal.backend().buffer();
+    // Past its label (four Cells at most), as far as the row goes.
+    assert!(
+        reversed(buffer, x + 6, y),
+        "the highlight spans the row past its label"
+    );
+}
+
+/// A neutral chip (a gray fill, its text muted), a card a few rows tall
+/// of the same gray and a primary button's blue: surfaces, a fill and no
+/// line, at every depth.
+const SURFACES: &str = r##"
+    import { mount, View, Text } from "nsh";
+    mount(() => <View style={{ gap: 16 }}>
+        <View style={{ flexDirection: "row", gap: 16 }}>
+            <View style={{ backgroundColor: "#3f3f46", paddingHorizontal: 8 }}>
+                <Text style={{ color: "#a1a1aa" }}>chip</Text>
+            </View>
+            <View role="button" onPress={() => {}}
+                style={{ backgroundColor: "#2563eb", paddingHorizontal: 8 }}>
+                <Text style={{ color: "#ffffff" }}>Save</Text>
+            </View>
+        </View>
+        <View style={{ backgroundColor: "#3f3f46", padding: 16, width: 160 }}>
+            <Text>card</Text>
+            <Text>second</Text>
+            <Text>third</Text>
+        </View>
+        <Text>ready</Text>
+    </View>);
+"##;
+
+fn bandless_surfaces(depth: ColorDepth) -> Terminal<TestBackend> {
+    let code = nsh_bundler::compile_module("App.tsx", SURFACES, &[]).unwrap();
+    let (mut view, rx) = surface_at(depth);
+    let mut terminal = Terminal::new(TestBackend::new(40, 12)).unwrap();
+    view.load(Bundle::source(code)).unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "ready");
+    terminal
+}
+
+#[test]
+fn at_sixteen_colors_a_small_surface_is_filled_in_the_standard_colors() {
+    let terminal = bandless_surfaces(ColorDepth::Ansi16);
+    let buffer = terminal.backend().buffer();
+    let (x, y) = at(buffer, "chip");
+    // Its padding Cell before the text and the text itself: the gray.
+    for at in [x - 1, x] {
+        assert_eq!(buffer[(at, y)].bg, Color::DarkGray, "the chip at {at}");
+    }
+    let text = &buffer[(x, y)];
+    assert_ne!(text.fg, Color::DarkGray, "its muted text reads on it");
+    // The button in its blue: its fill, or reversed in it.
+    let (sx, sy) = at(buffer, "Save");
+    let save = &buffer[(sx - 1, sy)];
+    assert!(
+        save.bg == Color::Blue
+            || save.modifier.contains(Modifier::REVERSED) && save.fg == Color::Blue,
+        "the primary button in its color: {save:?}"
+    );
+    // The card is a panel: no fill (one gray across a panel would put
+    // each muted label on a patch of its own) and no line around it.
+    let (cx, cy) = at(buffer, "card");
+    for (px, py) in [(cx - 1, cy), (cx + 8, cy + 1)] {
+        assert_eq!(buffer[(px, py)].bg, Color::Reset, "the card at {px},{py}");
+    }
+    let above: String = (0..40).map(|x| buffer[(x, cy - 1)].symbol()).collect();
+    assert!(!above.contains('─'), "no line: {above:?}");
+}
+
+#[test]
+fn without_colors_a_small_surface_is_reversed() {
+    let terminal = bandless_surfaces(ColorDepth::Monochrome);
+    let buffer = terminal.backend().buffer();
+    let (x, y) = at(buffer, "chip");
+    for at in [x - 1, x] {
+        assert!(
+            buffer[(at, y)].modifier.contains(Modifier::REVERSED),
+            "the chip at {at}"
+        );
+    }
+    // A panel a few rows tall is not reversed: it would bury its text.
+    let (cx, cy) = at(buffer, "card");
+    assert!(!buffer[(cx, cy)].modifier.contains(Modifier::REVERSED));
+}

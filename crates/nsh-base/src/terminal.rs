@@ -73,7 +73,7 @@ pub(crate) fn rule_line() -> View {
 }
 
 /// A column of [`QUOTE_BAR`]s as tall as the view its parent stretches it
-/// to (a row's height): one glyph a row, in the theme's muted foreground.
+/// to (a row's height): one glyph a row, in the [`ACCENT`].
 /// By itself it is one Cell, so it never makes its row taller.
 pub(crate) fn quote_bar() -> View {
     let cell = cell_height();
@@ -98,7 +98,7 @@ pub(crate) fn quote_bar() -> View {
             .bottom(px(0.0))
             .text_overflow(EllipsizeMode::Clip)
             .pointer_events(PointerEvents::None)
-            .text_color(|| crate::theme::theme().muted_foreground),
+            .text_color(ACCENT),
         )
 }
 
@@ -119,8 +119,7 @@ fn line_colored(
     content: impl Fn(usize) -> String + 'static,
     color: Option<fn() -> AdaptiveColor>,
 ) -> View {
-    // A Cell's width, as the terminal's text engine measures one glyph.
-    let cell = measure_text("", "0");
+    let cell = cell_width();
     let columns = signal(0usize);
     view()
         .on_layout(move |frame: &Bounds<Points>| {
@@ -147,12 +146,12 @@ fn line_colored(
 /// A [`line`] whose filled glyphs are drawn in `color`: `content`'s row
 /// is split around its run of glyphs other than [`PROGRESS_EMPTY`] (a
 /// progress bar's filled part, an indeterminate bar's segment), which takes
-/// `color`; the empty track around it keeps the text's color.
+/// `color`; the empty track around it is in the theme's line color.
 pub(crate) fn filled_line(
     content: impl Fn(usize) -> String + 'static,
     color: impl Fn() -> AdaptiveColor + 'static,
 ) -> View {
-    let cell = measure_text("", "0");
+    let cell = cell_width();
     let columns = signal(0usize);
     let parts = computed(move || split_filled(&content(columns.get())));
     let part = |at: usize| {
@@ -177,9 +176,9 @@ pub(crate) fn filled_line(
                 .flex_row()
                 .overflow_hidden()
                 .pointer_events(PointerEvents::None)
-                .child(part(0))
+                .child(part(0).text_color(|| crate::theme::theme().border))
                 .child(part(1).text_color(color))
-                .child(part(2)),
+                .child(part(2).text_color(|| crate::theme::theme().border)),
         )
 }
 
@@ -237,6 +236,86 @@ pub(crate) fn tone_color(tone: Tone) -> AdaptiveColor {
         Tone::Muted => crate::theme::theme().muted_foreground,
         Tone::Accent => ACCENT.into(),
     }
+}
+
+/// The marks at the right end of a trigger's band in a terminal (a
+/// select's, a combobox's, a date picker's): `clear` (the `×`'s slot while
+/// there is a value to clear, or nothing) and the [`SELECT_ARROW`]'s slot
+/// ([`mark_slot`]), side by side over the band's last Cells: the arrow on
+/// the one before the last, the band's last Cell blank as its first is,
+/// the `×` three Cells before it. The app's trigger leaves those Cells
+/// free (three, six with the clear: [`trigger_marks_width`]), as it leaves
+/// room for its own chevron elsewhere; the band and its padding stay the
+/// app's. The marks are muted, in the accent while `lit` (the trigger
+/// focused or its list open) or under the pointer; a disabled trigger dims
+/// them with the rest of its band. A press anywhere on the arrow's slot is
+/// `press` (it opens or closes the list, as the trigger does), which also
+/// keeps the marks a control the terminal's layout places over the band's
+/// text.
+pub(crate) fn trigger_marks(
+    clear: impl IntoElement,
+    lit: impl Fn() -> bool + Copy + 'static,
+    press: impl Fn() + 'static,
+) -> View {
+    view()
+        .absolute()
+        .top(px(0.0))
+        .bottom(px(0.0))
+        .right(px(0.0))
+        .flex_row()
+        .items_center()
+        .child(clear)
+        .child(mark_slot(
+            view()
+                .role(AccessibilityRole::Button)
+                .accessibility_elements_hidden(true)
+                .on_press(press),
+            SELECT_ARROW.trim_start(),
+            lit,
+        ))
+}
+
+/// How many Cells wide a terminal's [`mark_slot`] is: the mark and a blank
+/// Cell either side.
+pub const MARK_SLOT: usize = 3;
+
+/// The group a [`mark_slot`]'s mark follows the pointer of.
+const MARK_GROUP: &str = "nsh-mark-slot";
+
+/// A pressable mark of a terminal (a trigger's `▾`, a clear button's
+/// `×`): `button`, the press target, made a slot [`MARK_SLOT`] Cells wide
+/// and one row high with `glyph` in its middle, so a press on any of its
+/// Cells is a press on the mark, and two slots side by side keep a blank
+/// Cell either side of each mark. The mark is muted, in the accent while
+/// `lit`, while the pointer is over the slot and while it is pressed; the
+/// slot itself has no band. It is never a stop of Tab.
+pub(crate) fn mark_slot(
+    button: View,
+    glyph: &'static str,
+    lit: impl Fn() -> bool + 'static,
+) -> View {
+    button
+        .group_named(MARK_GROUP)
+        .focusable(false)
+        .flex_shrink_0()
+        .w(cell_width() * MARK_SLOT as f32)
+        .h(cell_height())
+        .flex_row()
+        .items_center()
+        .justify_center()
+        .child(
+            text(glyph)
+                .text_color(tone_color(Tone::Muted))
+                .style_when(lit, |s| s.text_color(ACCENT))
+                .group_hover_named(MARK_GROUP, |s| s.text_color(ACCENT))
+                .group_active_named(MARK_GROUP, |s| s.text_color(ACCENT)),
+        )
+}
+
+/// How many Cells a trigger's [`trigger_marks`] take: the arrow's slot,
+/// and the clear's too.
+pub(crate) fn trigger_marks_width(clear: bool) -> Points {
+    cell_width() * (MARK_SLOT * if clear { 2 } else { 1 }) as f32
 }
 
 /// A control's children after its mark: in a terminal, in a view of
@@ -309,6 +388,9 @@ pub const SWITCH_ON: Mark = CHECKBOX_CHECKED;
 pub const SWITCH_OFF: Mark = CHECKBOX_UNCHECKED;
 /// A color area's picked Cell.
 pub const AREA_PICKED: &str = "◆";
+/// A color slider's thumb: a bar on the Cell of the value, over the
+/// channel's color there (the other Cells are the colors alone).
+pub const COLOR_THUMB: &str = "│";
 /// A color swatch by itself: four Cells of its color.
 pub const SWATCH: &str = "    ";
 /// What separates a control's mark from its label: one Cell.
@@ -322,11 +404,12 @@ pub const SLIDER_FILL: char = '━';
 /// A slider's thumb.
 pub const SLIDER_THUMB: &str = "●";
 
-/// A progress bar's partly filled Cell, by eighths (`[0]` is one eighth,
-/// `[7]` a full Cell).
-pub const PROGRESS_EIGHTHS: [char; 8] = ['▏', '▎', '▍', '▌', '▋', '▊', '▉', '█'];
-/// A progress bar's empty Cell (also an indeterminate bar's track).
-pub const PROGRESS_EMPTY: char = '░';
+/// A progress bar's filled Cell (also an indeterminate bar's segment): a
+/// heavy line, as ratatui's `LineGauge` draws one.
+pub const PROGRESS_FILL: char = '━';
+/// A progress bar's empty Cell (also an indeterminate bar's track): a
+/// light line, which reads apart from the fill without colors too.
+pub const PROGRESS_EMPTY: char = '─';
 /// How many Cells the segment of an indeterminate progress bar is.
 pub const PROGRESS_SEGMENT: usize = 4;
 
@@ -353,9 +436,16 @@ pub const DIVIDER_VERTICAL: char = '│';
 pub const DIVIDER_HORIZONTAL: char = '─';
 /// The glyph of a separator row (a menu's), repeated across its width.
 pub const RULE: char = '─';
+/// What an empty cell of a one-time code shows, muted: the slot a digit
+/// goes in (`OtpInput`'s).
+pub const OTP_EMPTY: &str = "·";
+/// What a one-time code's filled cell shows while `masked`: a dot a whole
+/// Cell wide, as the terminal's password prompts' bullets read.
+pub const OTP_MASK: &str = "●";
 /// The bar down a quote's left side, one per row of its text (a Markdown
-/// quote's `>`): TextView's and RichEditor's blockquotes.
-pub const QUOTE_BAR: char = '│';
+/// quote's `>`), a Cell before the text: TextView's and RichEditor's
+/// blockquotes.
+pub const QUOTE_BAR: char = '▎';
 
 /// Before a closed disclosure (an accordion item's trigger, a collapsible's
 /// trigger, a tree item with children).
@@ -431,8 +521,8 @@ pub fn slider_track(columns: usize, from: usize, to: usize) -> String {
 }
 
 /// A determinate progress bar `columns` Cells wide at `fraction` (0 to 1):
-/// full Cells, then the partly filled one by eighths, then
-/// [`PROGRESS_EMPTY`].
+/// [`PROGRESS_FILL`] up to the nearest whole Cell, then
+/// [`PROGRESS_EMPTY`], the two contiguous.
 pub fn progress_bar(fraction: Percentage, columns: usize) -> String {
     let fraction = fraction.0;
     let fraction = if fraction.is_nan() {
@@ -440,22 +530,18 @@ pub fn progress_bar(fraction: Percentage, columns: usize) -> String {
     } else {
         fraction.clamp(0.0, 1.0)
     };
-    let eighths = (fraction * columns as f32 * 8.0).round() as usize;
-    let (full, part) = (eighths / 8, eighths % 8);
-    let mut bar = String::with_capacity(columns * 3);
-    for cell in 0..columns {
-        bar.push(match cell {
-            c if c < full => PROGRESS_EIGHTHS[7],
-            c if c == full && part > 0 => PROGRESS_EIGHTHS[part - 1],
-            _ => PROGRESS_EMPTY,
-        });
-    }
-    bar
+    let full = (fraction * columns as f32).round() as usize;
+    (0..columns)
+        .map(|cell| match cell < full {
+            true => PROGRESS_FILL,
+            false => PROGRESS_EMPTY,
+        })
+        .collect()
 }
 
 /// An indeterminate progress bar `columns` Cells wide at animation step
-/// `step`: a [`PROGRESS_SEGMENT`]-Cell segment of full Cells that moves
-/// one Cell a step and comes back in at the start, over
+/// `step`: a [`PROGRESS_SEGMENT`]-Cell segment of [`PROGRESS_FILL`] that
+/// moves one Cell a step and comes back in at the start, over
 /// [`PROGRESS_EMPTY`].
 pub fn progress_indeterminate(columns: usize, step: usize) -> String {
     if columns == 0 {
@@ -466,7 +552,7 @@ pub fn progress_indeterminate(columns: usize, step: usize) -> String {
     let at = step % (columns + segment);
     (0..columns)
         .map(|cell| match cell + segment > at && cell < at {
-            true => PROGRESS_EIGHTHS[7],
+            true => PROGRESS_FILL,
             false => PROGRESS_EMPTY,
         })
         .collect()
@@ -479,16 +565,16 @@ mod tests {
     #[test]
     fn bars_split_around_their_filled_run() {
         assert_eq!(
-            split_filled("█▎░░"),
-            ["".to_string(), "█▎".into(), "░░".into()]
+            split_filled("━━──"),
+            ["".to_string(), "━━".into(), "──".into()]
         );
         assert_eq!(
-            split_filled("░░███░"),
-            ["░░".to_string(), "███".into(), "░".into()]
+            split_filled("──━━━─"),
+            ["──".to_string(), "━━━".into(), "─".into()]
         );
         assert_eq!(
-            split_filled("░░░"),
-            ["░░░".to_string(), "".into(), "".into()]
+            split_filled("───"),
+            ["───".to_string(), "".into(), "".into()]
         );
     }
 
@@ -514,23 +600,25 @@ mod tests {
     }
 
     #[test]
-    fn progress_bars_fill_by_eighths() {
-        assert_eq!(progress_bar(Percentage(0.0), 4), "░░░░");
-        assert_eq!(progress_bar(Percentage(1.0), 4), "████");
-        assert_eq!(progress_bar(Percentage(0.5), 4), "██░░");
-        // 0.3 of 4 Cells is 9.6 eighths: one full Cell, then 2 eighths.
-        assert_eq!(progress_bar(Percentage(0.3), 4), "█▎░░");
-        assert_eq!(progress_bar(Percentage(f32::NAN), 2), "░░");
+    fn progress_bars_fill_whole_cells() {
+        assert_eq!(progress_bar(Percentage(0.0), 4), "────");
+        assert_eq!(progress_bar(Percentage(1.0), 4), "━━━━");
+        assert_eq!(progress_bar(Percentage(0.5), 4), "━━──");
+        // 0.3 of 4 Cells is 1.2: one Cell.
+        assert_eq!(progress_bar(Percentage(0.3), 4), "━───");
+        // 0.4 of 4 Cells is 1.6: two.
+        assert_eq!(progress_bar(Percentage(0.4), 4), "━━──");
+        assert_eq!(progress_bar(Percentage(f32::NAN), 2), "──");
         assert_eq!(progress_bar(Percentage(0.5), 0), "");
     }
 
     #[test]
     fn indeterminate_bars_move() {
-        assert_eq!(progress_indeterminate(6, 0), "░░░░░░");
-        assert_eq!(progress_indeterminate(6, 2), "██░░░░");
-        assert_eq!(progress_indeterminate(6, 5), "░░███░");
-        assert_eq!(progress_indeterminate(6, 7), "░░░░██");
-        assert_eq!(progress_indeterminate(6, 10), "░░░░░░");
+        assert_eq!(progress_indeterminate(6, 0), "──────");
+        assert_eq!(progress_indeterminate(6, 2), "━━────");
+        assert_eq!(progress_indeterminate(6, 5), "──━━━─");
+        assert_eq!(progress_indeterminate(6, 7), "────━━");
+        assert_eq!(progress_indeterminate(6, 10), "──────");
     }
 
     #[test]

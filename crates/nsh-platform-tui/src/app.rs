@@ -185,6 +185,10 @@ pub struct AppView {
         Point<Points>,
         Rect,
     )>,
+    /// The stop a primary press went down on (or inside), which takes the
+    /// focus as the press comes up: while it is held the view shows the
+    /// press, not the focus.
+    press_focus: Option<nsh_core::NodeId>,
     /// The next `draw_terminal` repaints every Cell (the terminal came back to focus).
     repaint: bool,
     pointer: Pointer,
@@ -226,14 +230,6 @@ impl AppView {
                 options.cells.width(),
                 options.cells.height(),
             )),
-            // Fills are surfaces (bands, padded, no line) where the painter
-            // has a ramp for them: the same condition as `Ramp::new`.
-            cell_surfaces: crate::palette::Ramp::new(
-                options.capabilities.colors,
-                options.capabilities.background_color,
-                options.capabilities.foreground_color,
-            )
-            .is_some(),
             // Without the kitty keyboard protocol a macOS terminal cannot
             // report Command: Ctrl stands in for it, and labels say so.
             ctrl_for_command: OS == nsh_core::platform::Os::MacOs
@@ -272,6 +268,7 @@ impl AppView {
             kill: String::new(),
             field_drag: None,
             field_press: None,
+            press_focus: None,
             repaint: false,
             pointer: Pointer::default(),
             bar_drag: None,
@@ -490,6 +487,7 @@ impl AppView {
             self.minibuffer.end();
             self.field_drag = None;
             self.field_press = None;
+            self.press_focus = None;
             self.bar_drag = None;
             self.selection.clear();
             if let Some(engine) = &self.surface.engine {
@@ -1227,6 +1225,20 @@ impl AppView {
                 crate::input::dispatch(&control, &press, event, page, origin);
             }
         }
+        // The stop pressed takes the focus as the press comes up, before
+        // the press reaches it (what it opens gives the focus back there).
+        if matches!(mouse.kind, MouseKind::Up(MouseButton::Left))
+            && let Some(stop) = self.press_focus.take()
+            && self.keyboard.focused != Some(stop)
+            && self
+                .keyboard
+                .candidates(&self.tree, &self.geometry)
+                .iter()
+                .any(|g| g.id == stop)
+        {
+            self.keyboard.focus(Some(stop), &mut self.tree, &control);
+            self.surface.wake.notify();
+        }
         if let Some(FieldDrag {
             id,
             last,
@@ -1276,6 +1288,7 @@ impl AppView {
                     && !view.props.accessibility.state.disabled
             })
         });
+        self.press_focus = None;
         if let Some(id) = id {
             // The press still goes down as a touch, so open popovers hear a
             // press outside them, then the field takes the pointer.
@@ -1317,7 +1330,27 @@ impl AppView {
             });
             true
         } else {
-            if self.editing_field().is_some() {
+            // A press on a stop, or on what is inside one, gives it the
+            // focus as it comes up (Tab goes on from there), as a click
+            // does in terminal apps; one on nothing Tab stops at leaves a
+            // field.
+            // The view on top first, then what is under it: a stop over
+            // the view pressed (a table's hit layer over its rows) is the
+            // one under the pointer too.
+            let stop = self
+                .hits
+                .iter()
+                .rev()
+                .filter(|hit| {
+                    hit.area.contains(position)
+                        && crate::keyboard::contains(&self.tree, scope, hit.node)
+                })
+                .find_map(|hit| {
+                    self.keyboard
+                        .pressed_stop(hit.node, &self.tree, &self.geometry)
+                });
+            self.press_focus = stop;
+            if stop.is_none() && self.editing_field().is_some() {
                 self.keyboard.focus(None, &mut self.tree, &control);
                 self.surface.wake.notify();
             }
@@ -1647,6 +1680,7 @@ impl AppView {
         self.kill.clear();
         self.field_drag = None;
         self.field_press = None;
+        self.press_focus = None;
     }
 }
 

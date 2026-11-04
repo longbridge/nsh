@@ -55,6 +55,7 @@ mod select;
 mod sheet;
 mod slider;
 mod sort;
+mod status_line;
 mod switch;
 mod syntax;
 mod table;

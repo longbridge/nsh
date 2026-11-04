@@ -28,3 +28,4 @@ mod pointer;
 mod popup;
 mod scroll;
 mod search;
+mod tooltip;

@@ -19,6 +19,8 @@ by the secondary button (a right click) at the pointer, or by a finger held on i
 
 Return, Space or Down on the focused trigger opens the menu with the keyboard focus on its first enabled item, and Up
 with it on its last; the arrow keys then move between the items. A press opens it with no item focused.
+On the desktops and in a terminal, Right, Return or Space on a `Submenu`'s item opens it with the keyboard focus on
+its first enabled item; Left on one of its items, or Escape, closes it and puts the focus back on its item.
 
 ```rust tabs
 use nsh_base::{menu, menu_item, menu_separator, submenu};

@@ -443,8 +443,9 @@ The code is selectable text: dragging over it selects across lines, a double cli
 line, Shift extends the selection, and the platform's copy (Cmd+C or Ctrl+C; Ctrl+Shift+C in a terminal) copies it.
 Each side of a split view selects on its own, so a selection stays on the side it starts on; a unified view's column
 is one text. The line numbers, the `+` / `−` marks and bars, the separators, the file headers and the app's controls
-and annotations stay out of the selection, so a copy holds only code. Selecting lines on the line numbers works as
-below, beside it.
+and annotations stay out of the selection, so a copy holds only code. With `softWrap`, a wrapped line copies whole,
+without a line break where it wraps, and a triple click selects all of its rows. Selecting lines on the line numbers
+works as below, beside it.
 
 ## Review comments
 

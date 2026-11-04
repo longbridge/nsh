@@ -2,11 +2,17 @@
 //! `.tooltip(..)`: a hint overlay of the core (`nsh_core::element::Overlay::hint`)
 //! with the app's look, placement, delay and events. The core shows it for
 //! the keyboard focus on its trigger too, in every idiom, and hides it on
-//! Escape (WAI-ARIA's tooltip pattern).
+//! Escape (WAI-ARIA's tooltip pattern). In a terminal it is a line, not a
+//! bubble: what it says shows at once on the status line
+//! ([`crate::status_line`]) while the focus or the pointer is on its
+//! trigger.
 
 use std::time::Duration;
 
-use nsh_core::{element::Style, prelude::*};
+use nsh_core::{
+    element::{Overlay, Style, StyleRefinement},
+    prelude::*,
+};
 
 use crate::popup::{OpenChangeReason, OpenState, PopupPresence, StateLooks, lifecycle};
 
@@ -107,9 +113,14 @@ fn delay(ms: f64) -> Option<Duration> {
 /// it. It looks like nothing: it is the bubble, styled with its `class` /
 /// `style`, and its children are what it says; its entrance and exit are
 /// the app's `transition` classes between its look and its starting and
-/// ending looks (`startingClass`, `endingClass`).
+/// ending looks (`startingClass`, `endingClass`). In a terminal it shows
+/// at once (no delay but an endless one) and in one frame on the bottom
+/// row of the viewport, the line a toast's message takes while one shows,
+/// with the terminal's colors rather than its look: the keyboard focus and
+/// the pointer on the trigger show it alike.
 #[component]
 pub fn Tooltip(props: TooltipProps, cx: Scope<TooltipEvent>) -> impl IntoElement {
+    let terminal = crate::terminal::is_terminal();
     let open = OpenState::new(props.open, props.default_open);
     // A delay that never ends: the pointer never asks.
     let endless = move || delay(props.delay.get_untracked()).is_none();
@@ -127,6 +138,9 @@ pub fn Tooltip(props: TooltipProps, cx: Scope<TooltipEvent>) -> impl IntoElement
         });
     };
     let shown = move || open.get() && !props.disabled.get();
+    if terminal {
+        return terminal_tooltip(props, cx, change, shown);
+    }
     // Its own `class` and `style` are the core's to give its root.
     let presence = PopupPresence::new(
         shown,
@@ -161,6 +175,45 @@ pub fn Tooltip(props: TooltipProps, cx: Scope<TooltipEvent>) -> impl IntoElement
         .on_hint_show(move |reason: &HintReason| change(true, *reason))
         .on_hint_hide(move |reason: &HintReason| change(false, *reason))
         .child(props.children)
+}
+
+/// A terminal's tooltip: the core's hint follows the focus and the pointer
+/// on the trigger and asks, at once. The hint overlay shows only while the
+/// tooltip has the status line, and takes no Cell by the trigger (no size,
+/// whatever the app's look gives the bubble): it only holds the line, an
+/// overlay of the root view, with what the tooltip says.
+fn terminal_tooltip(
+    props: TooltipProps,
+    cx: Scope<TooltipEvent>,
+    change: impl Fn(bool, HintReason) + Copy + 'static,
+    shown: impl Fn() -> bool + Copy + 'static,
+) -> Overlay {
+    lifecycle(
+        shown,
+        move || cx.emit(TooltipEvent::Open),
+        move || cx.emit(TooltipEvent::Close),
+    );
+    let on_line = crate::status_line::claim(crate::status_line::Claim::Hint, shown);
+    overlay()
+        .hint(move || match delay(props.delay.get()) {
+            Some(_) => Duration::ZERO,
+            None => LONGEST,
+        })
+        .hint_open(move || Some(on_line.get()))
+        .pointer_events(PointerEvents::None)
+        .focusable(false)
+        .state_inline_style(|| {
+            Style::from(
+                StyleRefinement::default()
+                    .size_0()
+                    .p_0()
+                    .m_0()
+                    .border(Points(0.0)),
+            )
+        })
+        .on_hint_show(move |reason: &HintReason| change(true, *reason))
+        .on_hint_hide(move |reason: &HintReason| change(false, *reason))
+        .child(crate::status_line::line(on_line, props.children))
 }
 
 /// As an element's `tooltip`, it is the hint overlay itself.

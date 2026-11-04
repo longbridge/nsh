@@ -74,6 +74,41 @@ or verified-package path, owned by the packaging work. Direct hosts without `--l
 the engine's timing logs; app `console.log` output is recorded with or without it. `--data-dir` selects persistent
 app data. A source-bundle failure exits after terminal restoration; a development session stays open for a fix.
 
+## Interaction
+
+Mobile, the desktops and the terminal are three interaction models, and a component's terminal behavior is
+designed for the terminal rather than scaled down from the desktop's. In a terminal nothing stacks, expands on
+hover or animates in and out: a notice is one line in a fixed place that the next one replaces, overlays appear
+and disappear in one frame, and everything a pointer reveals is also reachable from the keyboard. What terminal
+apps (ratatui's, gitui, MS Edit) do is the reference; the desktop look and motion are not. `nsh-base`'s
+components branch on `terminal::is_terminal()` for this, so the desktops and mobile keep their own behavior.
+
+The viewport's bottom row is the status line (`crates/nsh-base/src/status_line.rs`): a toast's message and the
+tooltip of what the focus or the pointer is on show there, one at a time. The components claim it (`claim`) and draw
+it (`line`) through that module, so they share its place and its rule: a toast wins over a hint, and of two claims of a
+kind the newer shows.
+
+A pressable mark of one Cell (a trigger's `▾`, a field's clear `×`, a mask toggle, a stepper's `−` / `+`) takes a slot
+of three Cells, ` ▾ `, and the whole slot takes the press, so a pointer need not land on the glyph itself. Slots
+stand side by side with no gap (` ×  ▾ `); at a band's end the last slot's blank Cell matches the blank Cell before
+the band's text. The mark is muted, the accent while its control is focused or open, while it is pressed and while
+the pointer is over its slot (its color alone, no band, as a resize handle lights). `nsh-base`'s triggers make them
+with `terminal::mark_slot` (`MARK_SLOT` Cells wide; `trigger_marks` places `▾` and the clear at the band's end,
+`trigger_marks_width` is the room they take); an app's own mark is a pressable view three Cells wide and
+a row high with its glyph centered (the gallery's NumberInput steppers: a Cell inside the band's start, the prefix,
+the value at the field's end, its caret's Cell, the suffix as wide as the widest, then the `−` and `+` slots, whose
+last blank Cell is the band's end). With `controlsRight`, `NumberInput` sets them side by side in a terminal, the
+decrement first.
+
+Tab always moves the focus on in a terminal: a component that takes Tab for itself elsewhere (a `DataTable`'s Tab
+moving its selection, as gpui-component's) leaves it to the focus there and moves with the arrows.
+
+A primary press gives the focus to what it went down on as it comes up (while it is held the view shows the press):
+the focusable view under the pointer, or the nearest one around it (a card around the text pressed), and Tab goes
+on from there, as in MS Edit or lazygit. A press on nothing Tab
+stops at leaves a field and keeps the focus elsewhere where it is (`Keyboard::pressed_stop`; the headless driver
+does the same in the terminal idiom). The desktops keep theirs: a click on a button there gives it no focus.
+
 ## Performance monitor and frame budget
 
 ```sh
@@ -319,6 +354,12 @@ common boundary for view frames and content boxes; input content boxes follow th
 boxes. The painter records each view's Cells (`render::Geometry`: clipped `visible`, unclipped `bounds`) and the
 views that take the pointer (`render::Hit`) for input, focus, search and the test agent.
 
+In a row, controls read as words: two blank columns between their texts (a checkbox and its label), one beside a
+mark of one column (a field's `×` and `▾`, and what follows them), none between two marks alone in their box (a
+stepper's `▴▾`); a mark's slot (a control of no fill and no words, three Cells or more wide, its mark in the middle)
+has a blank column of its own each side, so slots of a mark touch (` ×  ▾ `). A box that shows nothing in flow (a field's
+prefix holding only its focus ring) keeps none of its margins (`shows_nothing`).
+
 `CellTextEngine` counts Unicode display width: wide characters take two Cells and grapheme clusters stay whole.
 Ordinary text occupies one row at any font size. Inline attachments reserve their width in whole Cells
 and grow the line to hold their height; baseline, text-top, text-bottom and middle alignment use Cell font metrics.
@@ -356,23 +397,40 @@ terminal's own background (`Color::Reset`) is never painted, so its color and tr
 | faint / muted | 35% / 50% | disabled text, placeholders / secondary text |
 | focus line | 40% | a focused field's or container's line |
 
-Elsewhere (a 16-color terminal, an unknown background) the look is **bandless**: no fills, dim secondary text and
-lines, reverse video for selection, as described with each rule below. Focus is reverse video in the accent
+Elsewhere (a 16-color terminal, an unknown background) the look is **bandless**: no ramp of bands, dim secondary
+text and lines, reverse video for selection, as described with each rule below. Focus is reverse video in the accent
 (reversed and underlined without colors), so it is never mistaken for a selection; a hover is the standard dark
 gray band at 16 colors, on controls only and with its text undimmed; a text field without its line is underlined
 along its last row, the row reversed in the accent while it has the focus; where dim is the only gray (16 colors,
 none) a disabled control's label is also struck through, so it is told from muted text; and there a small box of
 a tone (a price tag, a meter's filled segment: a saturated fill under three rows) is reversed in its color, as a
-progress bar's fill is, rather than left out with the other fills. The app's design decides what is there and where it is; it is not reproduced Cell by
+progress bar's fill is. A filled box is still a surface (the layout is the same at every depth: its fill, no
+line), so a small one (under three rows: a chip, a tag, a button) keeps an edge in the standard colors
+(`palette::bandless_fill`): a tone fill (a primary button, a badge) in its color at the depth, any other fill (a
+chip) the standard dark gray, a glyph in the fill's own color taking the default foreground; without colors a small
+one holding text is reversed. A panel or a card of three rows or more is left unfilled, set apart by its space,
+its lines and scroll bars: one gray across a sidebar would put each muted label on a patch of its own. An
+overlay's own box is its frame at every depth, and a field keeps its underline.
+The app's design decides what is there and where it is; it is not reproduced Cell by
 Cell. Views draw in tree order (the core orders siblings by `zIndex`), modals after the root, and each view
 draws, in order:
 
 1. when it is the first surface (a border or a fill) of an overlay: its box cleared of what is under it; with
    surfaces an anchored overlay's box is then raised and a modal's stays base;
-2. with surfaces, its fill as a band over its whole frame (below). A framed fill inside a frame (an inset palette
-   in a padded card) leaves its line to the frame's and is laid out against that line, across the frame's padding
-   (`band_reach`): one line and one fill read as one panel, and its rows' text starts in the column where the
-   frame's other content (a caption under it) does;
+2. with surfaces, its fill as a band over its whole frame (below). A face is a line or a fill, never both: a
+   filled box has no border Cells, at every color depth (the layout never depends on it: at 16 colors the box is
+   laid out as with surfaces, a small one's fill in the standard colors), and a fill inside a frame (an
+   inset palette in a padded card) is laid out against the frame's line, across its padding (`band_reach`), its
+   rows' text in the column where the frame's other content (a caption under it) starts. A popup's panel (the
+   first face in an anchored overlay: a popover, a hover card, a menu, a tooltip; the overlay itself when the app
+   styles it, as a select's popup, and then nothing in it is a panel) keeps a column each side and no rows, filled
+   or framed from 4pt (`popup_panel`); its rows (a menu's items, a list's options, a palette's commands) reach its
+   line across that padding whether filled now or not, so a hover's band runs line to line, and keep at least that
+   padding inside, so their text starts where the panel's other content (a group's title, a search field) does. A
+   list's cells are its rows: the list, or the scroll view around it, reaches the line and keeps none, and each
+   cell, laid out apart, keeps what its list reached across (`rows_reach`), which the row in it (an option)
+   reaches across in turn. A popup is its line at every depth of color: its frame takes a Cell
+   around its panel (`Core::framed_box`), and the app's fill of the panel is the popup itself, not painted again;
 3. its borders in box drawing on each side wider than zero, one Cell whatever the width: `─` and `│`, `╭╮╰╯` at
    a corner whose radius is above zero and `┌┐└┘` at a square one, dashed `╌╎`, dotted `┈┊`; a border on one
    side only is that side's line. Borders draw only where the layout gave them a Cell: in a terminal the core
@@ -414,17 +472,18 @@ draws every side it gave a width. A dot (a round box of a hued fill, holding no 
 Cell: an avatar's presence dot) is `●` in its fill's color over what is under it, no band of its own. A view in the image role is a swatch of its color (the terminal draws no images, so the role is free to
 mean that): with surfaces its fill is its own color blended over its ground, at the terminal's depth
 (truecolor, else the nearest of 256 or 16), never a step, and its text is black or white, whichever reads on it
-(`palette::swatch`, `palette::swatch_text`); the bandless look paints no fill. A color picker's swatches and
+(`palette::swatch`, `palette::swatch_text`); bandless it is its color at the depth (`palette::bandless_fill`). A color picker's swatches and
 the Cells of its tracks are such views, inside the control that takes the press, so hover and focus bands leave
 the color alone. A run with its own background (a
 highlight, inline code) is a band the same way. A text field without a
 line or a fill of its own is a raised band (a search field); an input group, a one-row box of an opaque fill
 holding a field with something beside it (a prefix or suffix, chips, a clear button, a chevron), is that band as
-a whole, the field raised with it rather than a step of its own (`input_group`). Bandless, fills draw nothing.
+a whole, the field raised with it rather than a step of its own (`input_group`). Bandless, a fill is the standard
+colors' (above).
 
 A view's gradient over no fill of its own is a fill of its first stop, a band as any fill is.
 
-**Nothing is drawn** for fills bandless, radii other than a border's corners, shadows,
+**Nothing is drawn** for radii other than a border's corners, shadows,
 outlines and focus rings, opacity, filters, blend modes, backdrop effects, transforms other than translation
 (rounded to Cells), icons, images, videos, web views and native views without a terminal rendering: the
 terminal cannot show them well, so they are left out rather than imitated (the core gives icon-sized images, videos,
@@ -475,6 +534,9 @@ own background, so what its children filled stays, and it is at least one step a
   underlines its label (an underlined tab strip keeps the underline alone); a focused tab is the accent band, a
   pressed or hovered one banded (select, hover);
 - a hovered pressable view is a hover band, a pressed one a select band;
+- an interactive view drawn in lines or marks alone, no letter or digit (a resize handle's `│` or `─`), shows
+  its states in its foreground alone: hovered, held, dragged or focused, the same glyphs turn the accent on the
+  ground they rest on, with no band under them and no weight, as a terminal's split line lights;
 - in a popup (an anchored overlay: a menu, a select or combobox list, a command palette) the highlighted item,
   the keyboard's (the item the list projects as focused, which the sink opts into as `MountItem::ProjectStates`:
   `MountSink::needs_projected_states`; the view keeps them apart from the states it reports, so they never go
@@ -491,10 +553,19 @@ own background, so what its children filled stays, and it is at least one step a
 - a trigger whose popup or menu is open (`expanded`) stands on a raised band;
 - an `adjustable` view (a slider's track, a resize handle's line) shows focus its own way and takes no focus
   marks; a slider's thumb `●` and a color area's picked Cell `◆` are reversed while it has the focus;
-- the innermost box with a line around the focused view shows its line in the accent (blue), a popup's only while
-  one is shown: the line glyphs of the sides that draw one, never a text on the box's row (a sidebar's first row
-  under only its right line); a focused overlay's title, and a system dialog's, is an accent chip;
-- a disabled view is faint, never bold, with no band.
+- a divider (a row of `─` alone, as a menu's separator draws, or a resize handle's column of `│`) is a line of
+  the box it splits: in the frame's color (a popup's line color in a popup), lit only in its accent, its box's
+  fill (the app's line color on a hairline) no band; where it ends on another line (a frame's side, another
+  divider) the two are joined, `├ ┤ ┬ ┴ ┼` (`render::join_lines`), and so are the ends of a box's lone line across
+  (a search field's rule under it, a footer's over it), in a modal too;
+- a framed box that is itself the focused stop, or the part showing its control's focus (a one-time code's next
+  cell), shows its line in the accent (blue), bold: the line glyphs of the sides that draw one, never a text on
+  the box's row (a sidebar's first row under only its right line); so does a pane holding the focus, the
+  innermost framed box around it whose own content holds a scroll view or a selected item (lazygit's: the keys
+  go to its rows); any other box holding the focus (a card around a focused button, a menu bar's) keeps its
+  line as it rests, and a focused overlay's title, and a system dialog's, is an accent chip;
+- a disabled view is faint, never bold, with no band; a glyph already fainter than faint (a box's resting line)
+  goes a step nearer the background still, so disabling never brightens a glyph and always shows.
 
 Bandless:
 
@@ -514,25 +585,33 @@ Bandless:
   drawn;
 - a disabled view is dim and never bold.
 
-**Overlays**: an anchored overlay (a popover, menu, tooltip) or a modal clears its box and frames it with a
-rounded line, in the border step with surfaces (dim bandless); the accessibility label of its first surface is
-the title in the top border, bold, set off by the line with surfaces (`╭─ Title ─`). With surfaces an anchored
-overlay's box is raised and framed in the brighter popup line, with no shadow: what is around it stays as it
-is; a modal's box is the terminal's background. A box without a border of its own gets the
+**Overlays**: an anchored overlay (a popover, menu, tooltip) or a modal is its line alone, the same at every
+depth, as ratatui's `Clear` and `Block`: its box is cleared to the page's background, whatever the app filled it
+with (a box is its line or its fill), and framed with a rounded line in the border step (dim bandless); the
+line's Cells are cleared as the box's are, so nothing of the page (a band, a fill, a field) shows beside the line
+or inside it, and nothing is drawn around it (no shadow).
+The accessibility label of its first surface is the title in the top border, bold, set off by the line with
+surfaces (`╭─ Title ─`). Inside it a menu's highlighted row is still a band across the inner width. A box without a border of its own gets the
 frame one Cell outside it; so does a popup holding a list or menu with no box of the app's, its own box,
 and the layout keeps the frame's Cells (`Core::framed_box`), moving an unanchored box in from the screen's edge so
-its frame shows (a toast at the bottom); a box across the whole screen (a bottom sheet as wide as it, a drawer as
-tall) stays docked to the edge it is flush with, its frame's side there off the screen (`Core::framed_within`). A word behind the box that it or its frame cuts is
+its frame shows (a popover by the screen's edge); a box across the whole screen (a bottom sheet as wide as it, a drawer as
+tall) stays docked to the edge it is flush with, its frame's side there off the screen (`Core::framed_within`). A
+dropdown's list (a select's, a combobox's, a date picker's calendar: `popup::dropdown`) is at least as wide as its
+trigger less two Cells, so its frame, lines included, runs from the trigger's first column to its last, whichever edge the
+app aligns it on. A word behind the box that it or its frame cuts is
 left out whole, no half of it glued to the frame; a run longer than 12 Cells (a URL, a path) keeps the part that
-shows, ending in `…` by the frame. Before each visible modal the Cells already drawn are faded half way into the
-terminal's background with surfaces (`dialog::backdrop`), dimmed bandless; anchored overlays leave what is
-behind them as it is, so a tooltip does not dim the screen. A system dialog (`AlertDialog`) is drawn the same
-way; its buttons are `Cancel  OK` with surfaces, the default one bold and the focused one a select band and
+shows, ending in `…` by the frame. A fill the frame cuts goes with its words the same way when it is one row of a
+band of its own up to 12 Cells past the frame (a badge, a chip); a taller band (a panel's) goes on past it. A modal shows the page behind it as it is: a terminal
+has no scrim, so nothing is faded or dimmed, and the app's backdrop (a translucent fill of a modal's layer across
+the whole screen, `bg-black/50`) draws no fill, while it still takes presses (closing on a press outside) and
+keeps the focus in the modal. A system dialog (`AlertDialog`) is drawn the same way, framed over the page; its buttons are `Cancel  OK` with surfaces, the default one bold and the focused one a select band and
 bold, and `< Cancel >  < OK >` bandless, the focused one reversed.
 
 **Scroll bars**: a scroll view whose content overflows along its axis shows a one-Cell bar on its inner right
-edge (bottom edge when it scrolls horizontally), or on its parent's right line when a vertical scroll view reaches
-it (a pane filled by its list, as lazygit's: the thumb over the line, no column of its own), unless its `scrollbar` is off, it is a single Cell across, or
+edge (bottom edge when it scrolls horizontally), or on the right line of the framed box it fills when a vertical
+scroll view reaches it, directly or through boxes that run to the line, up to one padding Cell before it, a popup's
+frame drawn around its box too (a pane filled by its list, as lazygit's, a command palette's list: the thumb over the
+line, no column of its own), unless its `scrollbar` is off, it is a single Cell across, or
 its content drew a glyph in the column (row) the bar would take (the layout keeps none for it, and content wins):
 the track `│` (`─`) in the border step (dim bandless), the thumb `┃` (`━`) muted (the default foreground
 bandless; the accent while the scroll view has the focus, its keys scrolling it), as long as the share of the content in
@@ -766,7 +845,7 @@ it owns keys and the app's field caret is hidden; closing it restores the caret 
 
 | Keys | Action |
 |---|---|
-| Ctrl+N, Tab | Next focusable view in tree order; with the focus in the open popup of a trigger (a date picker's calendar, a menu), the next one in it, round it: its box covers the controls around the trigger, and Escape closes it and gives the trigger the focus. A popup anchored to no focusable view is passed through in tree order; one over a backdrop that covers the page (a dialog, a sheet) keeps the focus inside it (`covering_layer`), and closing it gives the focus back |
+| Ctrl+N, Tab | Next focusable view in tree order; with the focus in the open popup of a trigger (a date picker's calendar, a menu), the next one in it, round it: its box covers the controls around the trigger, and Escape closes it and gives the trigger the focus. A popup anchored to no focusable view is passed through in tree order; one over a backdrop that covers the page (a dialog, a sheet) keeps the focus inside it (`covering_layer`), and closing it gives the focus back to the stop it covered, also when Escape closes it before the focus went in |
 | Ctrl+P, Shift+Tab | Previous focusable view in tree order, in the same popup as Tab |
 | Down / Up | Nearest focusable view below / above, one in an overlapping column first; with none focused, the first / last one in sight, inside an open anchored popup (a menu or select opened by a click) when one is open. One out of sight within a wheel step is revealed; one farther away is approached by a wheel step (three rows) of the innermost Scroll that can still move that way, focus then staying on a control in sight |
 | Ctrl+F, Right / Ctrl+B, Left | Nearest focusable view to the right / left on the same row |
@@ -1023,7 +1102,7 @@ permit clipboard writes; `nsh test` uses memory and never writes to the machine'
 | Application menu (`Menu.setApplicationMenu`) | A menu bar on the top row (none without a menu; over the app's top row while active with `"autoHide"`): F10, the arrows, a title's initial and presses open its menus; item shortcuts work with the bar closed |
 | Development errors | Dismissible panel, with the mapped message and stack; cleared by the next update |
 | Colors | The terminal theme's meanings: the default foreground, dim for low contrast, or the accent of a saturated color's hue; canvases keep their colors at the terminal's depth |
-| View fills | With surfaces (256 colors or more and a known background): a band of the ramp's step over the view's frame (lighter raised, darker sunken, a saturated fill mixed 20% into the step under it), the app's page color the terminal's own background; bandless (16 colors or an unknown background): left out, Cells keep the terminal's background (Drawing, "Fills") |
+| View fills | With surfaces (256 colors or more and a known background): a band of the ramp's step over the view's frame (lighter raised, darker sunken, a saturated fill mixed 20% into the step under it), the app's page color the terminal's own background; bandless (16 colors or an unknown background): a small box's (under three rows) tone fill in its color at the depth, any other the standard dark gray, reversed without colors when it holds text; panels and cards unfilled (Drawing, "Fills") |
 | Opacity | Left out (a view under 0.03 is not shown) |
 | Selected, focused, pressed, hovered and disabled views | A reversed band, a reversed label (a bold border on large containers; an underlined text field), a faint background band (the dark gray at 16 colors), dim (struck through at 16 colors and none) |
 | Borders | Box drawing on each side wider than zero, one Cell, dim (an accent color kept), rounded corners where a radius is set, dashed and dotted lines |

@@ -1038,3 +1038,54 @@ fn the_code_is_selectable_text_and_the_numbers_and_separators_are_not() {
     assert_eq!(screen.in_selectable_view("text:more"), Ok(true));
     assert_eq!(screen.in_selectable_view("text:3"), Ok(false));
 }
+
+#[test]
+fn a_wrapped_lines_later_parts_continue_its_first_for_a_copy() {
+    let long = "long text ".repeat(30);
+    let mut app = Headless::start(EngineConfig {
+        viewport: Size::new(px(900.0), px(900.0)),
+        ..EngineConfig::new(Root::new::<Harness>({
+            let long = long.clone();
+            move || HarnessProps {
+                soft_wrap: true,
+                ..texts("short\n", &format!("short\n{long}\n"))
+            }
+        }))
+    })
+    .unwrap();
+    let items = Arc::new(Mutex::new(Vec::new()));
+    let into = items.clone();
+    app.observe(move |_, batch| into.lock().unwrap().extend(batch.items.clone()));
+    see(&mut app, "short");
+    app.wait(std::time::Duration::from_millis(100)).unwrap();
+    let items = items.lock().unwrap();
+    // The parts of the long line, in order, each with whether it
+    // continues the one before.
+    let mut parts: Vec<(nsh_core::NodeId, String)> = Vec::new();
+    for item in items.iter() {
+        let MountItem::Text { id, text, .. } = item else {
+            continue;
+        };
+        let part = text.text.trim();
+        if part.is_empty() || !long.contains(part) {
+            continue;
+        }
+        match parts.iter_mut().find(|(at, _)| at == id) {
+            Some(known) => known.1 = text.text.clone(),
+            None => parts.push((*id, text.text.clone())),
+        }
+    }
+    assert!(parts.len() > 1, "the line wraps: {parts:?}");
+    let continues = |id: nsh_core::NodeId| {
+        items.iter().rev().find_map(|item| match item {
+            MountItem::ViewProps { id: at, props } if *at == id => Some(props.continues_text),
+            _ => None,
+        })
+    };
+    assert!(!continues(parts[0].0).unwrap_or(false), "{parts:?}");
+    for (id, _) in &parts[1..] {
+        assert_eq!(continues(*id), Some(true), "{parts:?}");
+    }
+    let joined: String = parts.iter().map(|(_, t)| t.as_str()).collect();
+    assert_eq!(joined.trim_end(), long.trim_end());
+}

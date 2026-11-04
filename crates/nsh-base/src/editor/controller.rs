@@ -414,6 +414,7 @@ impl Ed {
                     KeyOptions {
                         when: When::Always,
                         repeat: binding.repeat,
+                        ..Default::default()
                     },
                     move |_| e.run(command),
                 );
@@ -1604,6 +1605,7 @@ fn always(repeat: bool) -> KeyOptions {
     KeyOptions {
         when: When::Always,
         repeat,
+        ..Default::default()
     }
 }
 

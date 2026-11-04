@@ -76,6 +76,45 @@ pub(super) fn draw_until_still(
     }
 }
 
+/// Draws until `done` holds for the screen, else fails with `what` and the
+/// screen's dump: what an input does reaches the screen a commit later,
+/// which a still frame before it does not wait for.
+pub(super) fn draw_until_true(
+    view: &mut AppView,
+    terminal: &mut Terminal<TestBackend>,
+    rx: &crossbeam_channel::Receiver<()>,
+    what: &str,
+    mut done: impl FnMut(&Terminal<TestBackend>) -> bool,
+) {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        terminal
+            .draw(|frame| view.render(frame, frame.area()))
+            .unwrap();
+        if done(terminal) {
+            return;
+        }
+        assert!(
+            rx.recv_deadline(deadline).is_ok(),
+            "{what}:\n{}",
+            super::dock::dump(terminal)
+        );
+    }
+}
+
+/// Draws until nothing on screen reads `gone` ([`draw_until_true`]).
+pub(super) fn draw_until_gone(
+    view: &mut AppView,
+    terminal: &mut Terminal<TestBackend>,
+    rx: &crossbeam_channel::Receiver<()>,
+    gone: &str,
+) {
+    let what = format!("`{gone}` still shows");
+    draw_until_true(view, terminal, rx, &what, |t| {
+        !super::dock::dump(t).contains(gone)
+    });
+}
+
 #[test]
 fn a_surface_draws_a_rust_app_into_the_embedders_buffer() {
     let (mut view, rx) = surface();
@@ -350,7 +389,6 @@ fn Bordered() -> impl IntoElement {
             .py(px(16.0))
             .border_1()
             .rounded(px(8.0))
-            .bg(nsh_core::color::rgb(0x123456))
             .border_color(nsh_core::color::rgb(0xffffff))
             .child(view().child(text(" "))),
     )

@@ -268,6 +268,27 @@ pub(crate) fn ink(color: nsh_core::Color, ground: Ground) -> Style {
     }
 }
 
+/// Whether text in `color` on its own fill, whose ground is `ground`, is
+/// the fill's reverse (a label in the page's color on a line-colored
+/// chip, a code block's language): the text lies beyond its fill, away
+/// from the page's foreground, so drawn as a fade it would not read.
+pub(crate) fn inverted(color: nsh_core::Color, ground: Ground) -> bool {
+    let [red, green, blue, alpha] = color.0.to_be_bytes();
+    if alpha == 0 {
+        return false;
+    }
+    let [r, g, b] = over_f32([red, green, blue], alpha, ground.rgb);
+    let [fr, fg, fb] = ground.foreground.map(f32::from);
+    let [ur, ug, ub] = ground.rgb.map(f32::from);
+    let foreground = lightness(fr, fg, fb);
+    (lightness(r, g, b) - foreground).abs()
+        > (lightness(ur, ug, ub) - foreground).abs() + INVERTED_APART
+}
+
+/// How much farther (in L*) from the foreground than its fill a text is
+/// for it to be the fill's reverse.
+const INVERTED_APART: f32 = 5.0;
+
 /// How far (in L*) a fade of the foreground must be from its ground's
 /// lightness to read.
 const FADE_READS: f32 = 15.0;
@@ -373,6 +394,11 @@ const FAINT_SHARE: f32 = 0.35;
 const MUTED_SHARE: f32 = 0.50;
 /// How much of an accent a saturated fill's band takes.
 const TINT_SHARE: f32 = 0.20;
+/// How much of the accent a focused field's band takes ([`Ramp::focus_band`]).
+const FOCUS_TINT_SHARE: f32 = 0.18;
+/// The accent's color as a focused field's band mixes it: the terminal's
+/// blue ([`STANDARD`]'s).
+const FOCUS_RGB: Rgb = [0, 0, 238];
 /// How much of an accent an opaque fill's band takes, when it is no control's.
 const SOLID_TINT_SHARE: f32 = 0.50;
 /// How far a filled view's lightness must be from its ground's to count as
@@ -390,6 +416,21 @@ pub(crate) struct Ramp {
     background: Rgb,
     foreground: Rgb,
     depth: ColorDepth,
+    /// Its fixed colors, quantized once: every view's lines and bands
+    /// read them, and a 256-color pick per view adds up.
+    colors: RampColors,
+}
+
+/// A [`Ramp`]'s colors that do not depend on what is drawn.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+struct RampColors {
+    steps: [Color; LADDER.len()],
+    border: Color,
+    focus_line: Color,
+    popover_line: Color,
+    base: Color,
+    muted: Color,
+    faint: Color,
 }
 
 impl Ramp {
@@ -413,10 +454,27 @@ impl Ramp {
                 [255; 3]
             }
         });
+        let color = |share: f32| convert(mix(background, foreground, share), depth);
+        let colors = RampColors {
+            steps: std::array::from_fn(|level| {
+                if level == 0 {
+                    Color::Reset
+                } else {
+                    color(LADDER[level])
+                }
+            }),
+            border: color(BORDER_SHARE),
+            focus_line: color(FOCUS_LINE_SHARE),
+            popover_line: color(POPOVER_LINE_SHARE),
+            base: convert(background, depth),
+            muted: color(MUTED_SHARE),
+            faint: color(FAINT_SHARE),
+        };
         Some(Self {
             background,
             foreground,
             depth,
+            colors,
         })
     }
 
@@ -425,18 +483,10 @@ impl Ramp {
         mix(self.background, self.foreground, share)
     }
 
-    fn color(&self, share: f32) -> Color {
-        convert(self.mix(share), self.depth)
-    }
-
     /// The color of step `level` ([`LADDER`]); the terminal's own
     /// background (`Reset`) at 0.
     pub(crate) fn level(&self, level: usize) -> Color {
-        if level == 0 {
-            Color::Reset
-        } else {
-            self.color(LADDER[level.min(LADDER.len() - 1)])
-        }
+        self.colors.steps[level.min(LADDER.len() - 1)]
     }
 
     /// The band of `target` over a view whose own surface at `level` is
@@ -472,32 +522,80 @@ impl Ramp {
 
     /// Box lines.
     pub(crate) fn border(&self) -> Color {
-        self.color(BORDER_SHARE)
+        self.colors.border
     }
 
     /// A focused field's or container's line.
     pub(crate) fn focus_line(&self) -> Color {
-        self.color(FOCUS_LINE_SHARE)
+        self.colors.focus_line
     }
 
     /// A popover's or menu's line.
     pub(crate) fn popover_line(&self) -> Color {
-        self.color(POPOVER_LINE_SHARE)
+        self.colors.popover_line
     }
 
     /// The terminal's own background as a color: text on an accent band.
     pub(crate) fn base(&self) -> Color {
-        convert(self.background, self.depth)
+        self.colors.base
     }
 
     /// Secondary text.
     pub(crate) fn muted(&self) -> Color {
-        self.color(MUTED_SHARE)
+        self.colors.muted
     }
 
     /// Faint text: disabled, placeholders.
     pub(crate) fn faint(&self) -> Color {
-        self.color(FAINT_SHARE)
+        self.colors.faint
+    }
+
+    /// A disabled glyph drawn in `fg`: faint, or, where `fg` is already
+    /// nearer the background than faint (a box's resting line), `fg`
+    /// halfway to the background, a step dimmer still: dimming never
+    /// brightens a glyph, and always shows.
+    pub(crate) fn disabled(&self, fg: Color) -> Color {
+        let rgb = match fg {
+            Color::Rgb(r, g, b) => [r, g, b],
+            Color::Indexed(index) if index >= 16 => indexed_rgb(index),
+            _ => return self.faint(),
+        };
+        let faint = self.mix(FAINT_SHARE);
+        if distance(rgb, self.background) >= distance(faint, self.background) {
+            return self.faint();
+        }
+        // The nearest color of the terminal's depth that differs from the
+        // glyph's, going toward the background.
+        [0.5, 0.75, 1.0]
+            .into_iter()
+            .map(|share| convert(mix(rgb, self.background, share), self.depth))
+            .find(|&dim| dim != fg)
+            .unwrap_or(fg)
+    }
+
+    /// A focused field's band over step `level`: the accent (the
+    /// terminal's blue, as the focus shows elsewhere) mixed
+    /// [`FOCUS_TINT_SHARE`] into the step above it, so the field the keys
+    /// go to reads at a glance, in the focus's own hue.
+    pub(crate) fn focus_band(&self, level: usize) -> Color {
+        let step = Self::above(level, level + 1);
+        let under = self.mix(LADDER[step.min(LADDER.len() - 1)]);
+        keep_hue(
+            mix(under, FOCUS_RGB, FOCUS_TINT_SHARE),
+            FOCUS_RGB,
+            self.depth,
+        )
+    }
+
+    /// A mark's band over step `level` (a drop preview's: a translucent
+    /// fill laid over content that stays readable under it): the band
+    /// [`Self::tint_alpha`] takes, kept in `rgb`'s hue at 256 colors.
+    pub(crate) fn wash(&self, rgb: Rgb, level: usize, alpha: u8) -> Color {
+        let alpha = f32::from(alpha) / 255.0;
+        let share =
+            TINT_SHARE + (SOLID_TINT_SHARE - TINT_SHARE) * ((alpha - 0.25) / 0.75).clamp(0.0, 1.0);
+        let under = self.mix(LADDER[level.min(LADDER.len() - 1)]);
+        keep_hue(mix(under, rgb, share), rgb, self.depth)
     }
 
     /// A saturated fill's band over step `level`: the accent `rgb` mixed
@@ -511,29 +609,14 @@ impl Ramp {
     /// swatch, a tinted box): the more opaque the fill, the more of its
     /// accent the band takes, from [`TINT_SHARE`] up to a quarter's alpha
     /// to [`SOLID_TINT_SHARE`] when opaque, so washes of one hue at
-    /// several strengths stay apart.
+    /// several strengths stay apart. At 256 colors it keeps `rgb`'s hue
+    /// (an alert's wash stays the alert's color, never a gray).
     pub(crate) fn tint_alpha(&self, rgb: Rgb, level: usize, alpha: u8) -> Color {
         let alpha = f32::from(alpha) / 255.0;
         let share =
             TINT_SHARE + (SOLID_TINT_SHARE - TINT_SHARE) * ((alpha - 0.25) / 0.75).clamp(0.0, 1.0);
         let under = self.mix(LADDER[level.min(LADDER.len() - 1)]);
-        convert(mix(under, rgb, share), self.depth)
-    }
-
-    /// `color` faded half way into the terminal's background: what is
-    /// behind a modal. `foreground` says whether it is a text color (the
-    /// default one fades to [`Self::muted`]) or a background (the default
-    /// one stays).
-    pub(crate) fn fade(&self, color: Color, foreground: bool) -> Color {
-        let rgb = match color {
-            Color::Reset if foreground => return self.muted(),
-            Color::Reset => return Color::Reset,
-            Color::Rgb(r, g, b) => [r, g, b],
-            Color::Indexed(index) if index >= 16 => indexed_rgb(index),
-            _ if foreground => return self.muted(),
-            _ => return color,
-        };
-        convert(mix(rgb, self.background, 0.5), self.depth)
+        keep_hue(mix(under, rgb, share), rgb, self.depth)
     }
 }
 
@@ -619,6 +702,23 @@ pub(crate) fn tone_fill(fill: nsh_core::Color, depth: ColorDepth) -> Option<Colo
     })
 }
 
+/// The background a fill takes on a terminal without surfaces (16 colors,
+/// or a background it cannot tell), where the layout still makes the box
+/// a surface (a fill, no line): a tone fill in its color at the depth
+/// (a primary button's, a badge's), any other the standard colors' gray,
+/// so the box keeps an edge. `None` where it shows no fill (one the color
+/// of its ground) and without colors, where the box is reversed instead.
+pub(crate) fn bandless_fill(fill: nsh_core::Color, ground: Ground) -> Option<Color> {
+    if ground.depth == ColorDepth::Monochrome {
+        return None;
+    }
+    match surface(fill, ground) {
+        Surface::None => None,
+        Surface::Accent(_) => Some(tone_fill(fill, ground.depth).unwrap_or(Color::DarkGray)),
+        Surface::Raised | Surface::Sunken => Some(Color::DarkGray),
+    }
+}
+
 /// Whether `color` is one of the 16 standard colors' hues (not a gray or
 /// the default).
 pub(crate) fn standard_hue(color: Color) -> bool {
@@ -690,6 +790,54 @@ fn mix(from: Rgb, to: Rgb, share: f32) -> Rgb {
         (a + (b - a) * share).round() as u8
     })
 }
+
+/// `tinted` at `depth`, keeping the hue of `hue` it was tinted with: 256
+/// colors have no gray of a slight hue, so the nearest entry is a gray and
+/// the tint is lost; the nearest entry of the cube whose strongest channel
+/// is `hue`'s keeps it.
+fn keep_hue(tinted: Rgb, hue: Rgb, depth: ColorDepth) -> Color {
+    if depth != ColorDepth::Ansi256 {
+        return convert(tinted, depth);
+    }
+    let strongest = (0..3).max_by_key(|&channel| hue[channel]).unwrap_or(2);
+    let distance = |rgb: Rgb| {
+        rgb.iter()
+            .zip(tinted)
+            .map(|(&a, b)| (i32::from(a) - i32::from(b)).pow(2))
+            .sum::<i32>()
+    };
+    // The hue's angle, and an entry's when it has one: an amber wash is
+    // an olive entry, not the red its strongest channel would pick.
+    let angle = |rgb: Rgb| {
+        let [r, g, b] = rgb.map(f32::from);
+        let (max, min) = (r.max(g).max(b), r.min(g).min(b));
+        (max > min).then(|| self::hue(r, g, b, max, min))
+    };
+    let near = |index: u8| {
+        let (Some(own), Some(entry)) = (angle(hue), angle(indexed_rgb(index))) else {
+            return false;
+        };
+        let apart = (own - entry).abs();
+        apart.min(360.0 - apart) <= HUE_KEPT
+    };
+    let index = (16..232u8)
+        .filter(|&index| near(index))
+        .min_by_key(|&index| distance(indexed_rgb(index)))
+        .or_else(|| {
+            (16..232u8)
+                .filter(|&index| {
+                    let rgb = indexed_rgb(index);
+                    (0..3).all(|channel| channel == strongest || rgb[strongest] > rgb[channel])
+                })
+                .min_by_key(|&index| distance(indexed_rgb(index)))
+        })
+        .unwrap_or_else(|| nearest_256(tinted));
+    Color::Indexed(index)
+}
+
+/// How far (in degrees) an entry's hue may be from a tint's for
+/// [`keep_hue`] to take it.
+const HUE_KEPT: f32 = 30.0;
 
 /// The RGB of a 256-color palette entry above the 16 themable ones.
 fn indexed_rgb(index: u8) -> Rgb {
@@ -937,16 +1085,21 @@ pub(crate) fn convert(rgb: Rgb, depth: ColorDepth) -> Color {
 /// The levels of the xterm 6 × 6 × 6 color cube.
 const CUBE: [u8; 6] = [0, 95, 135, 175, 215, 255];
 
+/// The index of the [`CUBE`] level nearest `channel`, the lower one of two
+/// as near: the midpoints between the levels, worked out (every Cell's
+/// colors go through it).
+fn cube_level(channel: u8) -> usize {
+    match channel {
+        0..=47 => 0,
+        48..=115 => 1,
+        _ => usize::from(channel - 116) / 40 + 2,
+    }
+}
+
 /// The nearest entry of the 256-color palette above the 16 themable ones:
 /// the color cube (16–231) or the gray ramp (232–255).
 fn nearest_256(rgb: Rgb) -> u8 {
-    let level = |channel: u8| {
-        CUBE.iter()
-            .enumerate()
-            .min_by_key(|(_, level)| (i32::from(**level) - i32::from(channel)).abs())
-            .map_or(0, |(index, _)| index)
-    };
-    let [r, g, b] = rgb.map(level);
+    let [r, g, b] = rgb.map(cube_level);
     let cube = [CUBE[r], CUBE[g], CUBE[b]];
     let average = (u32::from(rgb[0]) + u32::from(rgb[1]) + u32::from(rgb[2])) / 3;
     let step = ((average.saturating_sub(3)) / 10).min(23) as u8;
@@ -1242,11 +1395,56 @@ mod tests {
             half != ramp.tint([59, 130, 246], 0) && half != solid,
             "washes stay apart"
         );
-        assert_eq!(
-            ramp.fade(Color::Rgb(224, 0, 0), true),
-            Color::Rgb(124, 12, 12)
+    }
+
+    #[test]
+    fn a_tinted_box_keeps_its_hue_at_256_colors() {
+        let ramp = Ramp::new(ColorDepth::Ansi256, Some([24; 3]), Some([224; 3])).unwrap();
+        // An alert's washes: blue (a note), green (a tip), amber (a
+        // warning, which is no red).
+        for (rgb, low, high) in [
+            ([59, 130, 246], 190.0, 250.0),
+            ([34, 197, 94], 100.0, 170.0),
+            ([245, 158, 11], 15.0, 70.0),
+        ] {
+            let Color::Indexed(index) = ramp.tint_alpha(rgb, 0, 26) else {
+                panic!("an entry of the palette");
+            };
+            let [r, g, b] = super::indexed_rgb(index).map(f32::from);
+            let (max, min) = (r.max(g).max(b), r.min(g).min(b));
+            assert!(max > min, "{rgb:?}: a gray, {index}");
+            let angle = super::hue(r, g, b, max, min);
+            assert!(
+                (low..=high).contains(&angle),
+                "{rgb:?}'s hue: {index} at {angle}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_mark_s_wash_keeps_its_hue_at_256_colors() {
+        let ramp = Ramp::new(ColorDepth::Ansi256, Some([24; 3]), Some([224; 3])).unwrap();
+        let tint = ramp.tint_alpha([59, 130, 246], 1, 31);
+        let Color::Indexed(index) = ramp.wash([59, 130, 246], 1, 31) else {
+            panic!("an entry of the palette");
+        };
+        let [r, g, b] = super::indexed_rgb(index);
+        assert!(
+            b > r && b > g,
+            "blue: {index} ({r}, {g}, {b}), the tint {tint:?}"
         );
-        assert_eq!(ramp.fade(Color::Reset, false), Color::Reset);
+    }
+
+    #[test]
+    fn a_channel_s_cube_level_is_the_nearest_one() {
+        for channel in 0..=255u8 {
+            let nearest = super::CUBE
+                .iter()
+                .enumerate()
+                .min_by_key(|(_, level)| (i32::from(**level) - i32::from(channel)).abs())
+                .map_or(0, |(index, _)| index);
+            assert_eq!(super::cube_level(channel), nearest, "channel {channel}");
+        }
     }
 
     #[test]

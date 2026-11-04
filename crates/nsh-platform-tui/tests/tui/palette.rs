@@ -50,7 +50,7 @@ fn Card() -> impl IntoElement {
 }
 
 #[test]
-fn colors_are_the_terminals_meanings_at_every_depth_and_nothing_is_filled() {
+fn colors_are_the_terminals_meanings_at_every_depth_and_a_fill_shows_without_surfaces() {
     for depth in [
         ColorDepth::TrueColor,
         ColorDepth::Ansi256,
@@ -63,9 +63,17 @@ fn colors_are_the_terminals_meanings_at_every_depth_and_nothing_is_filled() {
         let buffer = terminal.backend().buffer();
         assert_eq!(buffer[(0, 0)].symbol(), "i");
         assert_eq!(buffer[(0, 0)].fg, Color::Green, "an accent, {depth:?}");
-        for x in [0, 9, 10] {
-            assert_eq!(buffer[(x, 0)].bg, Color::Reset, "no fill at {x}, {depth:?}");
+        // The blue card is a surface (a fill, no line) whatever the depth:
+        // without a ramp its fill in the terminal's colors, and nothing
+        // past it.
+        for x in [0, 9] {
+            assert_ne!(
+                buffer[(x, 0)].bg,
+                Color::Reset,
+                "its fill at {x}, {depth:?}"
+            );
         }
+        assert_eq!(buffer[(10, 0)].bg, Color::Reset, "past it, {depth:?}");
         assert_eq!(buffer[(0, 1)].fg, Color::Reset, "the body, {depth:?}");
         assert!(!dim(buffer, 0, 1), "{depth:?}");
         assert_eq!(buffer[(0, 1)].bg, Color::Reset);
@@ -158,7 +166,8 @@ fn translucent_text_reads_over_its_ground_and_opacity_changes_no_color() {
         "black read on its white fill"
     );
     assert!(!dim(buffer, 0, 1), "opacity is not a tint");
-    assert_eq!(buffer[(0, 1)].bg, Color::Reset);
+    // Without surfaces the small box is its fill in a standard color.
+    assert_ne!(buffer[(0, 1)].bg, Color::Reset, "the fill shows");
     assert!(
         buffer[(0, 2)].modifier.contains(Modifier::HIDDEN),
         "a transparent color hides its text"
@@ -434,6 +443,80 @@ fn selection_is_a_select_band_and_bold_and_focus_the_accent_on_surfaces() {
     );
 }
 
+/// A framed card holding a button, as a menu bar's or a form's.
+#[component]
+fn FramedCard() -> impl IntoElement {
+    view()
+        .flex_1()
+        .child(
+            view()
+                .w(px(160.0))
+                .border_1()
+                .border_color(nsh_core::color::rgb(0x3f3f46))
+                .py(px(16.0))
+                .child(text("card"))
+                .child(
+                    view()
+                        .w(px(80.0))
+                        .h(px(16.0))
+                        .on_press(|_: &()| {})
+                        .child(text("go")),
+                ),
+        )
+        .child(text("ready"))
+}
+
+/// The accent marks the focused stop alone: a card whose button has the
+/// focus keeps its own line, the button showing the focus.
+#[test]
+fn a_card_holding_the_focused_button_keeps_its_line_out_of_the_accent() {
+    let (mut view, rx) = surfaces();
+    let mut terminal = Terminal::new(TestBackend::new(24, 8)).unwrap();
+    view.load(App::Rust(Root::new::<FramedCard>(|| ())))
+        .unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "ready");
+    let frame = |buffer: &Buffer| {
+        (0..buffer.area.height)
+            .flat_map(|y| (0..buffer.area.width).map(move |x| (x, y)))
+            .filter(|&at| {
+                buffer[at]
+                    .symbol()
+                    .chars()
+                    .next()
+                    .is_some_and(|c| ('\u{2500}'..='\u{257f}').contains(&c))
+            })
+            .map(|at| (at, buffer[at].fg, buffer[at].modifier))
+            .collect::<Vec<_>>()
+    };
+    let rest = frame(terminal.backend().buffer());
+    assert!(!rest.is_empty(), "the card draws its line");
+    view.handle(nsh_platform_tui::Input::Key {
+        key: "Tab".into(),
+        modifiers: Default::default(),
+        release: false,
+    });
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        terminal
+            .draw(|frame| view.render(frame, frame.area()))
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        let go = (0..buffer.area.height)
+            .flat_map(|y| (0..buffer.area.width).map(move |x| (x, y)))
+            .find(|&at| buffer[at].symbol() == "g");
+        if go.is_some_and(|at| buffer[at].bg == Color::Blue) {
+            break;
+        }
+        assert!(rx.recv_deadline(deadline).is_ok(), "focus did not show");
+    }
+    let focused = frame(terminal.backend().buffer());
+    for ((at, fg, _), (_, rest_fg, _)) in focused.iter().zip(&rest) {
+        assert_ne!(*fg, Color::Blue, "the card's line at {at:?} in the accent");
+        assert_eq!(fg, rest_fg, "the card's line at {at:?} changed");
+    }
+    assert_eq!(focused, rest, "the card's line as it rests");
+}
+
 /// A pagination: the current dot in the accent, the others gray; a
 /// chosen thumbnail with a neutral label beside them.
 #[component]
@@ -546,67 +629,172 @@ fn an_input_group_is_one_field_band_its_prefix_and_chevron_inside_it() {
     );
 }
 
-#[component]
-fn Raised() -> impl IntoElement {
-    let anchor = element_ref();
-    view()
-        .flex_1()
-        .child(view().w(px(8.0)).h(px(16.0)).element_ref(&anchor))
-        .child(text("behind behind behind"))
-        .child(text("behind behind behind"))
-        .child(text("behind behind behind"))
-        .child(
-            overlay()
-                .anchor(&anchor)
-                .placement(nsh_core::overlay::Placement::Bottom)
-                .align(nsh_core::overlay::Align::Start)
-                .child(
-                    view()
-                        .w(px(80.0))
-                        .h(px(32.0))
-                        .bg(nsh_core::color::rgb(0x18181b))
-                        .label("Menu")
-                        .child(text("pop")),
-                ),
-        )
-        .child(text("ready"))
+#[test]
+fn a_focused_input_group_is_its_whole_band_brighter_in_the_accent_with_no_line_under_it() {
+    let (mut view, rx) = surfaces();
+    let mut terminal = Terminal::new(TestBackend::new(24, 4)).unwrap();
+    view.load(App::Rust(Root::new::<Group>(|| ()))).unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "ready");
+    let rest = terminal.backend().buffer()[(0, 0)].bg;
+    let lone = terminal.backend().buffer()[(0, 1)].bg;
+    tab_until(
+        &mut view,
+        &mut terminal,
+        &rx,
+        "the group's focus",
+        |buffer| buffer[(0, 0)].bg != rest,
+    );
+    let buffer = terminal.backend().buffer();
+    let focus = buffer[(0, 0)].bg;
+    let light = |color: Color| match color {
+        Color::Rgb(r, g, b) => u16::from(r) + u16::from(g) + u16::from(b),
+        other => panic!("an RGB band, not {other:?}"),
+    };
+    assert!(
+        light(focus) > light(rest),
+        "brighter: {focus:?} over {rest:?}"
+    );
+    assert!(
+        matches!(focus, Color::Rgb(r, g, b) if b > r + 20 && b > g + 20),
+        "in the focus's blue: {focus:?}"
+    );
+    let chevron = (0..24).find(|&x| buffer[(x, 0)].symbol() == "v").unwrap();
+    for x in 0..=chevron {
+        let cell = &buffer[(x, 0)];
+        assert_eq!(cell.bg, focus, "the whole group: {x}");
+        assert!(
+            !cell.modifier.contains(Modifier::UNDERLINED),
+            "no underline: {x}"
+        );
+    }
+    assert_eq!(buffer[(0, 1)].bg, lone, "the other field stays at rest");
 }
 
-#[test]
-fn a_popup_is_raised_framed_brighter_and_casts_no_shadow() {
-    let (mut view, rx) = surfaces();
+/// A filled popup labeled "Menu" over three rows of text, its box 10
+/// Cells wide and 2 rows tall; on a raised panel 22 Cells wide with
+/// `panel`.
+fn popup_page(panel: bool) -> impl IntoElement {
+    let anchor = element_ref();
+    view().flex_1().child(
+        view()
+            .w(px(176.0))
+            .when(panel, |v| v.bg(nsh_core::color::rgb(0x262626)))
+            .child(view().w(px(8.0)).h(px(16.0)).element_ref(&anchor))
+            .child(text("behind behind behind"))
+            .child(text("behind behind behind"))
+            .child(text("behind behind behind"))
+            .child(
+                overlay()
+                    .anchor(&anchor)
+                    .placement(nsh_core::overlay::Placement::Bottom)
+                    .align(nsh_core::overlay::Align::Start)
+                    .child(
+                        view()
+                            .w(px(80.0))
+                            .h(px(32.0))
+                            .bg(nsh_core::color::rgb(0x18181b))
+                            .label("Menu")
+                            .child(text("pop")),
+                    ),
+            )
+            .child(text("ready")),
+    )
+}
+
+#[component]
+fn Raised() -> impl IntoElement {
+    popup_page(false)
+}
+
+#[component]
+fn RaisedOverPanel() -> impl IntoElement {
+    popup_page(true)
+}
+
+/// Draws `root` on a 24 × 8 terminal until its popup shows: the rows, and
+/// the popup's first Cell.
+fn popup_on(
+    (mut view, rx): (AppView, crossbeam_channel::Receiver<()>),
+    root: Root,
+) -> (Terminal<TestBackend>, Vec<String>, (u16, u16)) {
     let mut terminal = Terminal::new(TestBackend::new(24, 8)).unwrap();
-    view.load(App::Rust(Root::new::<Raised>(|| ()))).unwrap();
+    view.load(App::Rust(root)).unwrap();
     draw_until(&mut view, &mut terminal, &rx, "pop");
     let buffer = terminal.backend().buffer();
-    let y = row_of(buffer, "pop");
     let rows: Vec<String> = (0..8)
         .map(|y| (0..24).map(|x| buffer[(x, y)].symbol()).collect())
         .collect();
+    let y = row_of(buffer, "pop");
     let row = &rows[usize::from(y)];
     let x = row[..row.find("pop").unwrap()].chars().count() as u16;
+    (terminal, rows, (x, y))
+}
+
+/// The Cell of the first `symbol` in the buffer.
+fn glyph_at(buffer: &Buffer, symbol: &str) -> Option<(u16, u16)> {
+    (0..buffer.area.height).find_map(|y| {
+        (0..buffer.area.width)
+            .find(|&x| buffer[(x, y)].symbol() == symbol)
+            .map(|x| (x, y))
+    })
+}
+
+#[test]
+fn a_filled_popup_is_its_frame_alone_over_the_page_s_ground() {
+    let (terminal, rows, _) = popup_on(surfaces(), Root::new::<Raised>(|| ()));
+    let buffer = terminal.backend().buffer();
+    let (left, top) = glyph_at(buffer, "╭").unwrap_or_else(|| panic!("framed: {rows:#?}"));
+    let (right, bottom) = glyph_at(buffer, "╯").unwrap_or_else(|| panic!("framed: {rows:#?}"));
+    // A box is its line or its fill: the app's fill is left out, the box
+    // cleared to the page's ground, its line too, and nothing around it.
+    for y in top..=bottom {
+        for x in left..=right {
+            assert_eq!(buffer[(x, y)].bg, Color::Reset, "({x}, {y}): {rows:#?}");
+        }
+    }
+    if right + 1 < buffer.area.width {
+        assert_eq!(buffer[(right + 1, top)].bg, Color::Reset, "{rows:#?}");
+    }
+    if bottom + 1 < buffer.area.height {
+        assert_eq!(buffer[(left, bottom + 1)].bg, Color::Reset, "{rows:#?}");
+    }
+}
+
+#[test]
+fn a_popup_s_frame_over_a_raised_panel_covers_the_panel() {
+    let (terminal, rows, _) = popup_on(surfaces(), Root::new::<RaisedOverPanel>(|| ()));
+    let buffer = terminal.backend().buffer();
+    let (left, top) = glyph_at(buffer, "╭").unwrap_or_else(|| panic!("framed: {rows:#?}"));
+    // The panel's step, where the popup leaves it: its last column.
+    let panel = buffer[(21, top)].bg;
+    assert_ne!(panel, Color::Reset, "the panel is raised: {rows:#?}");
+    // The frame is the box's edge: cleared as the box is, nothing of the
+    // panel under it showing beside its line.
+    let (right, bottom) = glyph_at(buffer, "╯").unwrap_or_else(|| panic!("framed: {rows:#?}"));
+    for (x, y) in [(left, top), (right, top), (left, bottom), (right, top + 1)] {
+        assert_eq!(buffer[(x, y)].bg, Color::Reset, "({x}, {y}): {rows:#?}");
+    }
     assert_eq!(
-        buffer[(x, y)].bg,
-        Color::Rgb(38, 38, 38),
-        "raised: {rows:#?}"
-    );
-    assert_eq!(
-        buffer[(x + 10, y)].fg,
-        Color::Rgb(114, 114, 114),
-        "the popup's line"
-    );
-    assert!(rows[usize::from(y) - 1].contains("─ Menu ─"), "{rows:#?}");
-    // Nothing around the frame changes: no shadow covers what is there.
-    assert_eq!(
-        buffer[(x + 11, y)].bg,
+        buffer[(left + 1, top + 1)].bg,
         Color::Reset,
-        "right of the frame: {rows:#?}"
+        "the box is cleared to the page's ground: {rows:#?}"
     );
-    assert_eq!(
-        buffer[(x + 4, y + 2)].bg,
-        Color::Reset,
-        "below the frame: {rows:#?}"
-    );
+}
+
+#[test]
+fn a_filled_popup_is_framed_the_same_at_every_depth() {
+    for depth in [
+        ColorDepth::TrueColor,
+        ColorDepth::Ansi256,
+        ColorDepth::Ansi16,
+        ColorDepth::Monochrome,
+    ] {
+        let (_, rows, _) = popup_on(surfaces_at(depth), Root::new::<Raised>(|| ()));
+        assert!(
+            rows.iter().any(|row| row.contains('╭')) && rows.iter().any(|row| row.contains('╯')),
+            "{depth:?}: framed: {rows:#?}"
+        );
+    }
 }
 
 fn pane(name: &'static str) -> impl IntoElement {
@@ -775,8 +963,8 @@ fn a_swatch_is_its_own_color_with_text_in_black_or_white() {
     let buffer = draw_swatches(&mut view, &rx);
     assert_eq!(
         buffer[(0, 0)].bg,
-        Color::Reset,
-        "the bandless look paints no fill"
+        Color::Rgb(255, 0, 0),
+        "without surfaces a swatch is still its own color"
     );
 }
 
@@ -875,7 +1063,7 @@ fn a_scaled_fill_takes_the_cells_of_its_scaled_box() {
 }
 
 /// A cell framed on every side, filled a step above the page, its border
-/// close to its fill: one-time code cells.
+/// close to its fill: one-time code cells drawn as tiles.
 #[component]
 fn FramedCell() -> impl IntoElement {
     view()
@@ -893,8 +1081,10 @@ fn FramedCell() -> impl IntoElement {
         .child(text("ready"))
 }
 
+/// A face is a line or a fill, never both: a filled cell with a border is
+/// its band, without a frame drawn around it.
 #[test]
-fn a_filled_framed_cell_keeps_the_border_its_layout_gave_it() {
+fn a_filled_framed_cell_is_its_band_without_a_frame() {
     let (mut view, rx) = surfaces();
     let mut terminal = Terminal::new(TestBackend::new(12, 6)).unwrap();
     view.load(App::Rust(Root::new::<FramedCell>(|| ())))
@@ -904,15 +1094,23 @@ fn a_filled_framed_cell_keeps_the_border_its_layout_gave_it() {
     let rows: Vec<String> = (0..6)
         .map(|y| (0..12).map(|x| buffer[(x, y)].symbol()).collect())
         .collect();
-    let top = rows
-        .iter()
-        .position(|row| row.contains('╭'))
-        .unwrap_or_else(|| panic!("no top corners: {rows:#?}"));
-    assert!(rows[top].contains('╮'), "{rows:#?}");
     assert!(
-        rows.iter()
-            .any(|row| row.contains('╰') && row.contains('╯')),
+        !rows
+            .iter()
+            .any(|row| row.contains(['╭', '╮', '╰', '╯', '│', '─'])),
         "{rows:#?}"
+    );
+    let seven = (0..6u16)
+        .find_map(|y| {
+            (0..12u16)
+                .find(|&x| buffer[(x, y)].symbol() == "7")
+                .map(|x| (x, y))
+        })
+        .expect("the digit");
+    assert_ne!(
+        buffer[seven].bg,
+        ratatui_core::style::Color::Reset,
+        "the digit on its band: {rows:#?}"
     );
 }
 
@@ -1095,78 +1293,286 @@ fn a_gray_dot_before_its_label_is_a_disc_not_a_band_cell() {
     assert_ne!(buffer[(x, 0)].fg, Color::Reset, "in its gray: {row:?}");
 }
 
-/// A four-digit code in filled, framed cells, reporting its focus.
-#[component]
-fn FilledCode() -> impl IntoElement {
+/// A four-digit code in two groups of framed cells (a line, no fill),
+/// three Cells inside and a row high inside, a Cell apart within a group
+/// and three between the groups, reporting its focus; and a disabled one
+/// under it (`disabled`).
+fn code_pair(disabled: bool) -> impl IntoElement {
     let focused = signal("no");
+    let code = |disabled: bool| {
+        nsh_base::otp_input()
+            .length(4u32)
+            .groups(2u32)
+            .disabled(disabled)
+            .app_class("flex-row gap-2")
+            .group_class("flex-row gap-2 mx-2")
+            .cell_class("w-10 h-12 border border-zinc-700 items-center justify-center")
+    };
     view()
         .flex_1()
         .child(text(move || format!("focus {}", focused.get())))
         .child(
-            view().flex_row().child(
-                nsh_base::otp_input()
-                    .length(4u32)
-                    .group_class("flex-row gap-2")
-                    .cell_class(
-                        "w-12 h-12 rounded-lg border border-zinc-700 bg-zinc-800 items-center \
-                         justify-center",
-                    )
-                    .on_focus(move || focused.set("yes")),
-            ),
+            view()
+                .flex_row()
+                .p(px(8.0))
+                .child(code(false).on_focus(move || focused.set("yes"))),
         )
+        .when(disabled, |v| {
+            v.child(view().flex_row().p(px(8.0)).child(code(true)))
+        })
+}
+
+#[component]
+fn FramedCode() -> impl IntoElement {
+    code_pair(false)
+}
+
+#[component]
+fn FramedCodes() -> impl IntoElement {
+    code_pair(true)
+}
+
+/// The Cells of the empty cells' slots (`·`), top to bottom, left to right.
+fn slots(buffer: &Buffer) -> Vec<(u16, u16)> {
+    (0..buffer.area.height)
+        .flat_map(|y| (0..buffer.area.width).map(move |x| (x, y)))
+        .filter(|&at| buffer[at].symbol() == "·")
+        .collect()
 }
 
 #[test]
-fn a_codes_next_cell_shows_focus_with_its_frame_and_no_band() {
+fn a_codes_cells_are_framed_boxes_with_the_digit_in_the_middle() {
+    use ratatui_core::backend::Backend;
     let (mut view, rx) = surfaces();
-    let mut terminal = Terminal::new(TestBackend::new(48, 8)).unwrap();
-    view.load(App::Rust(Root::new::<FilledCode>(|| ())))
+    let mut terminal = Terminal::new(TestBackend::new(40, 8)).unwrap();
+    view.load(App::Rust(Root::new::<FramedCode>(|| ())))
         .unwrap();
     draw_until(&mut view, &mut terminal, &rx, "focus no");
+    draw_until(&mut view, &mut terminal, &rx, "·");
+    super::app::draw_until_still(&mut view, &mut terminal, &rx);
+    let dump = super::dock::dump(&terminal);
+    // The empty cells' slots: one row, each in the middle of its box,
+    // six Cells from the next in a group (five of the box, one apart) and
+    // eight across the groups (three apart).
+    let buffer = terminal.backend().buffer();
+    let page = buffer[(0, 0)].bg;
+    let at = slots(buffer);
+    assert_eq!(at.len(), 4, "{dump}");
+    let y = at[0].1;
+    assert!(at.iter().all(|&(_, sy)| sy == y), "one row: {at:?}\n{dump}");
+    let steps: Vec<u16> = at.windows(2).map(|p| p[1].0 - p[0].0).collect();
+    assert_eq!(
+        steps,
+        [6, 8, 6],
+        "a Cell apart, three across the groups\n{dump}"
+    );
+    for &(x, y) in &at {
+        let glyph = |dx: i32, dy: i32| {
+            buffer[((x as i32 + dx) as u16, (y as i32 + dy) as u16)]
+                .symbol()
+                .to_owned()
+        };
+        let frame = [
+            [
+                glyph(-2, -1),
+                glyph(-1, -1),
+                glyph(0, -1),
+                glyph(1, -1),
+                glyph(2, -1),
+            ],
+            [
+                glyph(-2, 0),
+                glyph(-1, 0),
+                glyph(0, 0),
+                glyph(1, 0),
+                glyph(2, 0),
+            ],
+            [
+                glyph(-2, 1),
+                glyph(-1, 1),
+                glyph(0, 1),
+                glyph(1, 1),
+                glyph(2, 1),
+            ],
+        ]
+        .map(|row| row.concat());
+        assert_eq!(frame, ["┌───┐", "│ · │", "└───┘"], "a framed box\n{dump}");
+        for dx in [-1i32, 0, 1] {
+            assert_eq!(
+                buffer[((x as i32 + dx) as u16, y)].bg,
+                page,
+                "its line only, no fill\n{dump}"
+            );
+        }
+    }
+    // Focused, the cursor is in the middle of the next cell; a digit typed
+    // lands there, and the cursor moves on to the next slot.
     view.handle(nsh_platform_tui::Input::Key {
         key: "Tab".into(),
         modifiers: Default::default(),
         release: false,
     });
     draw_until(&mut view, &mut terminal, &rx, "focus yes");
+    let cursor = terminal.backend_mut().get_cursor_position().unwrap();
+    assert_eq!((cursor.x, cursor.y), at[0], "the cursor on the slot");
+    view.handle(nsh_platform_tui::Input::Key {
+        key: "4".into(),
+        modifiers: Default::default(),
+        release: false,
+    });
+    draw_until(&mut view, &mut terminal, &rx, "4");
+    let buffer = terminal.backend().buffer();
+    assert_eq!(
+        buffer[at[0]].symbol(),
+        "4",
+        "{}",
+        super::dock::dump(&terminal)
+    );
+    assert_eq!(buffer[(at[0].0 - 1, y)].symbol(), " ");
+    assert_eq!(buffer[(at[0].0 + 1, y)].symbol(), " ");
+    let cursor = terminal.backend_mut().get_cursor_position().unwrap();
+    assert_eq!((cursor.x, cursor.y), at[1], "on the next slot");
+}
+
+#[test]
+fn a_codes_next_cell_shows_focus_with_its_frame_in_the_accent() {
+    let (mut view, rx) = surfaces();
+    let mut terminal = Terminal::new(TestBackend::new(40, 8)).unwrap();
+    view.load(App::Rust(Root::new::<FramedCode>(|| ())))
+        .unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "·");
     let corners = |buffer: &Buffer| -> Vec<(u16, u16)> {
         (0..buffer.area.height)
             .flat_map(|y| (0..buffer.area.width).map(move |x| (x, y)))
-            .filter(|&(x, y)| buffer[(x, y)].symbol() == "╭")
+            .filter(|&(x, y)| buffer[(x, y)].symbol() == "┌")
             .collect()
     };
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-    loop {
-        terminal
-            .draw(|frame| view.render(frame, frame.area()))
-            .unwrap();
-        let buffer = terminal.backend().buffer();
-        let at = corners(buffer);
-        if at.len() == 4 && buffer[at[0]].fg != buffer[at[1]].fg {
-            break;
-        }
-        assert!(
-            rx.recv_deadline(deadline).is_ok(),
-            "the next cell's frame in the focus color\n{}",
-            super::dock::dump(&terminal)
-        );
-    }
+    let rest = terminal.backend().buffer()[corners(terminal.backend().buffer())[0]].fg;
+    view.handle(nsh_platform_tui::Input::Key {
+        key: "Tab".into(),
+        modifiers: Default::default(),
+        release: false,
+    });
+    draw_until(&mut view, &mut terminal, &rx, "focus yes");
+    super::app::draw_until_still(&mut view, &mut terminal, &rx);
+    let dump = super::dock::dump(&terminal);
     let buffer = terminal.backend().buffer();
     let at = corners(buffer);
-    assert_eq!(at.len(), 4, "every cell keeps its frame");
+    assert_eq!(at.len(), 4, "every cell keeps its frame\n{dump}");
     let (x, y) = at[0];
-    for dx in 0..3 {
+    // The whole frame of the next cell, its four sides, in the accent.
+    for cell in [
+        (x, y),
+        (x + 2, y),
+        (x + 4, y),
+        (x, y + 1),
+        (x + 4, y + 1),
+        (x + 2, y + 2),
+    ] {
+        assert_eq!(
+            buffer[cell].fg,
+            Color::Blue,
+            "the next cell's line in the accent\n{dump}"
+        );
+    }
+    for &other in &at[1..] {
+        assert_eq!(
+            buffer[other].fg, rest,
+            "the others' lines as at rest\n{dump}"
+        );
+    }
+    for dx in 1..4 {
         assert_ne!(
             buffer[(x + dx, y + 1)].bg,
             Color::Blue,
-            "nothing filled in the accent\n{}",
+            "nothing filled in the accent\n{dump}"
+        );
+    }
+}
+
+#[test]
+fn a_disabled_codes_frames_and_slots_are_dimmer_than_at_rest() {
+    let (mut view, rx) = surfaces();
+    let mut terminal = Terminal::new(TestBackend::new(40, 12)).unwrap();
+    view.load(App::Rust(Root::new::<FramedCodes>(|| ())))
+        .unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "·");
+    super::app::draw_until_still(&mut view, &mut terminal, &rx);
+    let dump = super::dock::dump(&terminal);
+    let buffer = terminal.backend().buffer();
+    let at = slots(buffer);
+    assert_eq!(at.len(), 8, "two codes of four\n{dump}");
+    let (on, off) = (at[0], at[4]);
+    assert!(off.1 > on.1, "the disabled code under the other\n{dump}");
+    let light = |c: Color| match c {
+        Color::Rgb(r, g, b) => u32::from(r) + u32::from(g) + u32::from(b),
+        other => panic!("a color of the ramp: {other:?}\n{dump}"),
+    };
+    for (what, dy) in [("line", -1i32), ("slot", 0)] {
+        let cell = |(x, y): (u16, u16)| {
+            let at = if dy == 0 {
+                (x, y)
+            } else {
+                (x - 2, (y as i32 + dy) as u16)
+            };
+            buffer[at].fg
+        };
+        assert_ne!(cell(off), cell(on), "the disabled {what} dims\n{dump}");
+        assert!(
+            light(cell(off)) <= light(cell(on)),
+            "the disabled {what} no brighter than at rest\n{dump}"
+        );
+    }
+}
+
+#[test]
+fn a_codes_hidden_field_draws_none_of_what_is_typed() {
+    let (mut view, rx) = surfaces();
+    let mut terminal = Terminal::new(TestBackend::new(40, 8)).unwrap();
+    view.load(App::Rust(Root::new::<FramedCode>(|| ())))
+        .unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "focus no");
+    let key = |key: &str| nsh_platform_tui::Input::Key {
+        key: key.into(),
+        modifiers: Default::default(),
+        release: false,
+    };
+    view.handle(key("Tab"));
+    draw_until(&mut view, &mut terminal, &rx, "focus yes");
+    for digit in ["4", "7"] {
+        view.handle(key(digit));
+    }
+    draw_until(&mut view, &mut terminal, &rx, "7");
+    super::app::draw_until_still(&mut view, &mut terminal, &rx);
+    // Each digit once, in its cell: the field under the next cell, which
+    // holds the code too, shows none of it (not even as hidden Cells).
+    let buffer = terminal.backend().buffer();
+    for digit in ["4", "7"] {
+        let at: Vec<(u16, u16)> = (0..buffer.area.height)
+            .flat_map(|y| (0..buffer.area.width).map(move |x| (x, y)))
+            .filter(|&at| buffer[at].symbol() == digit)
+            .collect();
+        assert_eq!(
+            at.len(),
+            1,
+            "{digit} once, in its cell: {at:?}\n{}",
             super::dock::dump(&terminal)
         );
     }
+    let hidden = (0..buffer.area.height)
+        .flat_map(|y| (0..buffer.area.width).map(move |x| (x, y)))
+        .filter(|&at| {
+            buffer[at]
+                .modifier
+                .contains(ratatui_core::style::Modifier::HIDDEN)
+                && buffer[at].symbol() != " "
+        })
+        .count();
     assert_eq!(
-        buffer[(x + 1, y + 1)].bg,
-        buffer[(at[1].0 + 1, at[1].1 + 1)].bg,
-        "the same fill as the other cells"
+        hidden,
+        0,
+        "no hidden glyphs\n{}",
+        super::dock::dump(&terminal)
     );
 }
 
@@ -1467,8 +1873,12 @@ fn CoveredControls() -> impl IntoElement {
         .child(text("ready"))
 }
 
+/// A control all of whose Cells are its children's fills shows focus on
+/// them: a chip with a label takes the focus band, a swatch (a color, no
+/// glyph) a `◆` in its middle in the color that reads on it. Neither is
+/// underlined.
 #[test]
-fn a_control_covered_by_its_children_s_fills_shows_focus_with_an_underline_that_reads_on_them() {
+fn a_control_covered_by_its_children_s_fills_shows_focus_on_them() {
     let (mut view, rx) = surfaces();
     let mut terminal = Terminal::new(TestBackend::new(20, 6)).unwrap();
     view.load(App::Rust(Root::new::<CoveredControls>(|| ())))
@@ -1476,63 +1886,55 @@ fn a_control_covered_by_its_children_s_fills_shows_focus_with_an_underline_that_
     draw_until(&mut view, &mut terminal, &rx, "ready");
     let chip = {
         let buffer = terminal.backend().buffer();
-        let at = cell_of(buffer, "Jump");
-        assert!(
-            !buffer[at].modifier.contains(Modifier::UNDERLINED),
-            "unfocused, the chip is plain"
-        );
-        buffer[at].bg
+        buffer[cell_of(buffer, "Jump")].bg
     };
     tab_until(
         &mut view,
         &mut terminal,
         &rx,
         "the chip's focus",
-        |buffer| {
-            buffer[cell_of(buffer, "Jump")]
-                .modifier
-                .contains(Modifier::UNDERLINED)
-        },
+        |buffer| buffer[cell_of(buffer, "Jump")].bg != chip,
     );
     let buffer = terminal.backend().buffer();
     let (x, y) = cell_of(buffer, "Jump");
+    let band = buffer[(x, y)].bg;
+    assert_ne!(band, Color::Reset, "the chip's focus band");
     for x in x..x + 4 {
-        assert_eq!(buffer[(x, y)].underline_color, Color::Blue);
-        assert_eq!(buffer[(x, y)].bg, chip, "the chip keeps its fill");
+        assert_eq!(buffer[(x, y)].bg, band, "one band under the label");
+        assert!(!buffer[(x, y)].modifier.contains(Modifier::UNDERLINED));
     }
-    // The swatch: a color and no glyph, underlined under each of its Cells.
+    // The swatch: a color and no glyph, its focus a mark in its middle.
     let swatch = |buffer: &Buffer| {
         let (x, y) = cell_of(buffer, "color ");
         (x + 6, y)
     };
     let color = buffer[swatch(buffer)].bg;
-    assert!(
-        !buffer[swatch(buffer)]
-            .modifier
-            .contains(Modifier::UNDERLINED)
-    );
+    let middle = |buffer: &Buffer| {
+        let (x, y) = swatch(buffer);
+        (x + 1, y)
+    };
+    assert_eq!(buffer[middle(buffer)].symbol(), " ");
     tab_until(
         &mut view,
         &mut terminal,
         &rx,
         "the swatch's focus",
-        |buffer| {
-            buffer[swatch(buffer)]
-                .modifier
-                .contains(Modifier::UNDERLINED)
-        },
+        |buffer| buffer[middle(buffer)].symbol() == "◆",
     );
     let buffer = terminal.backend().buffer();
+    let mark = &buffer[middle(buffer)];
+    // Not the accent, which a blue swatch would hide: the color that
+    // reads on the green, as a chosen swatch's check.
+    assert_eq!(mark.fg, Color::Rgb(0, 0, 0));
+    assert!(mark.modifier.contains(Modifier::BOLD));
     let (x, y) = swatch(buffer);
     for x in x..x + 4 {
-        // Not the accent, which a blue swatch would hide: the color that
-        // reads on the green, as a chosen swatch's check.
-        assert_eq!(buffer[(x, y)].underline_color, Color::Rgb(0, 0, 0));
         assert_eq!(buffer[(x, y)].bg, color, "the swatch keeps its color");
+        assert!(!buffer[(x, y)].modifier.contains(Modifier::UNDERLINED));
     }
-    let (x, y) = cell_of(buffer, "Jump");
-    assert!(
-        !buffer[(x, y)].modifier.contains(Modifier::UNDERLINED),
+    assert_eq!(
+        buffer[cell_of(buffer, "Jump")].bg,
+        chip,
         "the chip's focus left with it"
     );
 }
@@ -1701,21 +2103,27 @@ fn AreaMark() -> impl IntoElement {
         .child(text("ready"))
 }
 
+/// The picked Cell of a focused color area stands on the accent, bold:
+/// the focus's one look, not a reversed mark.
 #[test]
-fn a_color_area_s_picked_cell_is_reversed_while_it_has_the_focus() {
+fn a_color_area_s_picked_cell_stands_on_the_accent_while_it_has_the_focus() {
     let (mut view, rx) = surfaces();
     let mut terminal = Terminal::new(TestBackend::new(12, 4)).unwrap();
     view.load(App::Rust(Root::new::<AreaMark>(|| ()))).unwrap();
     draw_until(&mut view, &mut terminal, &rx, "ready");
-    let mark = |buffer: &Buffer| buffer[cell_of(buffer, "◆")].modifier;
-    assert!(!mark(terminal.backend().buffer()).contains(Modifier::REVERSED));
+    let mark = |buffer: &Buffer| buffer[cell_of(buffer, "◆")].clone();
+    assert_ne!(mark(terminal.backend().buffer()).bg, Color::Blue);
     tab_until(
         &mut view,
         &mut terminal,
         &rx,
         "the picked Cell's focus",
-        |buffer| mark(buffer).contains(Modifier::REVERSED),
+        |buffer| mark(buffer).bg == Color::Blue,
     );
+    let cell = mark(terminal.backend().buffer());
+    assert!(cell.modifier.contains(Modifier::BOLD));
+    assert!(!cell.modifier.contains(Modifier::REVERSED));
+    assert_ne!(cell.fg, Color::Blue, "the mark reads on the accent");
 }
 
 /// A palette row of pale tints (Tailwind's `red-100` and `sky-100`, leaf
@@ -1844,4 +2252,122 @@ fn a_selected_container_shows_focus_with_its_label_underlined() {
         },
     );
     assert!(!underlined(terminal.backend().buffer(), "Two"));
+}
+
+/// A panel of its own color over the whole screen with an open popup of `kind`
+/// under a trigger: a combobox's list, a select's, a menu, a calendar.
+fn open_over_panel(kind: &str) -> AnyElement {
+    let items = || {
+        vec![
+            nsh_base::SelectItem::new("rust", "Rust"),
+            nsh_base::SelectItem::new("go", "Go"),
+        ]
+    };
+    let popup: AnyElement = match kind {
+        "combobox" => nsh_base::combobox()
+            .items(items())
+            .placeholder("Pick")
+            .accessibility_label("Tags")
+            .default_open(true)
+            .w(px(160.0))
+            .into_element(),
+        "select" => nsh_base::select()
+            .items(items())
+            .accessibility_label("Tags")
+            .default_open(true)
+            .w(px(160.0))
+            .into_element(),
+        "menu" => nsh_base::menu()
+            .default_open(true)
+            .trigger(view().child(text("View")))
+            .child(
+                nsh_base::menu_item()
+                    .accessibility_label("About")
+                    .child(text("About")),
+            )
+            .into_element(),
+        // The app's panel for its popup, as the lists' are: a box the
+        // terminal frames.
+        _ => nsh_base::date_picker()
+            .accessibility_label("Due")
+            .default_open(true)
+            .popup_class("bg-[#18181b]")
+            .trigger(view().w(px(160.0)).child(text("Pick")))
+            .into_element(),
+    };
+    // One row short of the screen: a fill over all of it is the app's
+    // page, the terminal's background, never a raised panel.
+    let mut panel = view()
+        .flex_1()
+        .mb(px(16.0))
+        .bg(nsh_core::color::rgb(0x402020))
+        .child(popup);
+    // Rows of the panel's text under where the popup opens.
+    for _ in 0..12 {
+        panel = panel.child(text("behind behind behind behind behind behind"));
+    }
+    panel.into_element()
+}
+
+#[component]
+fn ComboboxOverPanel() -> impl IntoElement {
+    open_over_panel("combobox")
+}
+
+#[component]
+fn SelectOverPanel() -> impl IntoElement {
+    open_over_panel("select")
+}
+
+#[component]
+fn MenuOverPanel() -> impl IntoElement {
+    open_over_panel("menu")
+}
+
+#[component]
+fn PickerOverPanel() -> impl IntoElement {
+    open_over_panel("picker")
+}
+
+#[test]
+fn every_cell_of_a_popup_s_box_and_frame_covers_the_page_under_it() {
+    for (name, root, shown) in [
+        ("combobox", Root::new::<ComboboxOverPanel>(|| ()), "Go"),
+        ("select", Root::new::<SelectOverPanel>(|| ()), "Go"),
+        ("menu", Root::new::<MenuOverPanel>(|| ()), "About"),
+        ("date picker", Root::new::<PickerOverPanel>(|| ()), "28"),
+    ] {
+        let (mut view, rx) = surfaces();
+        let mut terminal = Terminal::new(TestBackend::new(60, 24)).unwrap();
+        view.load(App::Rust(root)).unwrap();
+        draw_until(&mut view, &mut terminal, &rx, shown);
+        let buffer = terminal.backend().buffer();
+        let rows: Vec<String> = (0..24)
+            .map(|y| (0..60).map(|x| buffer[(x, y)].symbol()).collect())
+            .collect();
+        let (left, top) =
+            glyph_at(buffer, "╭").unwrap_or_else(|| panic!("{name}: framed: {rows:#?}"));
+        let (right, bottom) =
+            glyph_at(buffer, "╯").unwrap_or_else(|| panic!("{name}: framed: {rows:#?}"));
+        assert_ne!(
+            buffer[(59, 22)].bg,
+            Color::Reset,
+            "{name}: the panel is raised: {rows:#?}"
+        );
+        // Its line and the Cells inside it, the last column by the line
+        // included: the terminal's background where the box shows no
+        // band of its own, never the panel's.
+        for y in top..=bottom {
+            for x in left..=right {
+                let cell = &buffer[(x, y)];
+                if cell.symbol() == " " || x == left || x == right || y == top || y == bottom {
+                    assert_ne!(
+                        cell.bg,
+                        buffer[(59, 22)].bg,
+                        "{name}: ({x}, {y}) shows the panel under it: {rows:#?}"
+                    );
+                }
+            }
+        }
+    }
 }

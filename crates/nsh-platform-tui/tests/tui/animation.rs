@@ -13,7 +13,7 @@ use super::app::{mouse, surface};
 /// What the app's red and green read as: the terminal's accents.
 const RED: Color = Color::Red;
 const GREEN: Color = Color::Green;
-/// A canvas's red and green, drawn in their own colors.
+/// A canvas's red and green, and a fill's in truecolor: their own colors.
 const CANVAS_RED: Color = Color::Rgb(255, 0, 0);
 const CANVAS_GREEN: Color = Color::Rgb(0, 255, 0);
 
@@ -117,7 +117,7 @@ fn bound_colors_override_styles_and_unbinding_restores_them() {
             const color = value.interpolate({ inputRange: [0, 1], outputRange: ["#ff0000", "#00ff00"] });
             return <View>
                 <View onPress={() => bound.set(false)}><Text>Unbind</Text></View>
-                <View style={{ width: 80, paddingVertical: 16, borderWidth: 8, backgroundColor: bound() ? color : "#ff0000",
+                <View style={{ width: 80, borderWidth: 8, backgroundColor: bound() ? color : "#ff0000",
                     borderColor: bound() ? color : "#ff0000" }}><View><Text> </Text></View></View>
                 <Text style={{ color: bound() ? color : "#ff0000" }}>Color</Text>
                 <Input value="Field" style={{ width: 80, height: 16, color: bound() ? color : "#ff0000" }} />
@@ -128,20 +128,28 @@ fn bound_colors_override_styles_and_unbinding_restores_them() {
     render_until(&mut view, &mut terminal, &wake, |buffer, _| {
         contents(buffer).contains("Field")
     });
+    // A filled box is a surface (its fill, no line) at every depth:
+    // without surfaces a small one (a chip's row) is its fill at the
+    // terminal's depth (here truecolor: the color itself), or reversed
+    // in it.
+    let filled = |buffer: &Buffer, x: u16, y: u16, color: Color| {
+        let cell = &buffer[(x, y)];
+        cell.bg == color || cell.modifier.contains(Modifier::REVERSED) && cell.fg == color
+    };
     let buffer = terminal.backend().buffer();
-    assert_eq!(buffer[(0, 1)].symbol(), "┌");
-    assert_eq!(buffer[(0, 1)].fg, GREEN, "the border");
-    assert_eq!(buffer[(1, 2)].bg, Color::Reset, "fills draw nothing");
-    assert_eq!(buffer[(0, 4)].fg, GREEN, "the text");
-    assert_eq!(buffer[(0, 5)].fg, GREEN, "the field's text");
+    assert_ne!(buffer[(0, 1)].symbol(), "┌", "no line on a filled box");
+    assert!(filled(buffer, 0, 1, CANVAS_GREEN), "the fill");
+    assert!(filled(buffer, 4, 1, CANVAS_GREEN), "the fill, inside");
+    assert_eq!(buffer[(0, 2)].fg, GREEN, "the text");
+    assert_eq!(buffer[(0, 3)].fg, GREEN, "the field's text");
     press(&mut view, "Tab");
     press(&mut view, "Enter");
     render_until(&mut view, &mut terminal, &wake, |buffer, _| {
-        buffer[(0, 4)].fg == RED
+        buffer[(0, 2)].fg == RED
     });
     let buffer = terminal.backend().buffer();
-    assert_eq!(buffer[(0, 1)].fg, RED);
-    assert_eq!(buffer[(0, 5)].fg, RED);
+    assert!(filled(buffer, 0, 1, CANVAS_RED), "the fill, unbound");
+    assert_eq!(buffer[(0, 3)].fg, RED);
 }
 
 #[test]
@@ -254,7 +262,9 @@ fn animated_fills_change_only_what_text_is_read_against() {
     });
     let buffer = terminal.backend().buffer();
     assert_eq!(buffer[(0, 1)].symbol(), "P");
-    assert_eq!(buffer[(0, 1)].bg, Color::Reset, "fills draw nothing");
+    // White over the terminal's dark background: a surface, in the
+    // standard colors' gray (the layout gives a filled box no line).
+    assert_eq!(buffer[(0, 1)].bg, Color::DarkGray, "the fill in the gray");
 }
 
 #[test]

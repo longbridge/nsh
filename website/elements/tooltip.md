@@ -66,6 +66,13 @@ It goes above its trigger by default (`placement`), on the other side when there
 area. With `open` the app decides when it shows: it follows `onOpenChange`, which reports the pointer resting on the
 trigger or leaving it and the keyboard focus coming and going, and can show it on any device.
 
+In a terminal a tooltip is a line, as terminal apps show a hint: what it says shows at once on the bottom row of
+the screen, in the terminal's own colors, while the keyboard focus or the pointer is on its trigger, and the row clears
+when they leave. The pointer's hint shows over the focus's while the pointer is on its trigger; a toast's message takes
+the row while it shows. `delay` is not waited for there (`Infinity` still keeps it to the app's `open`), and the
+tooltip's own look and transitions apply only to the bubble the other devices show; its children, a shortcut's `Kbd`
+included, show as they are.
+
 It comes and goes with your transitions: `startingClass` is its look in its first frame and `endingClass` its look
 once hidden, which it keeps while the `transition-*` classes of its `class` run; `onClose` follows.
 

@@ -171,7 +171,7 @@ mount(App);
 
 ## 打开状态
 
-没有 `open` 时，选择框自己保存打开状态（初始为 `defaultOpen`）。有 `open` 时，状态由应用持有，并在 `onOpenChange({ open, reason })` 中修改它，原因为 `"triggerPress"`（按下触发元素，或它的某个按键）、`"select"`（一次选择）、`"pressOutside"`、`"backdropPress"` 或 `"cancel"`（Escape 或返回）。`onOpen` 和 `onClose` 表示列表已显示和已消失（sheet 在完全进入和完全离开之后），`onCancel` 表示用户没有选择就关闭了它。
+没有 `open` 时，选择框自己保存打开状态（初始为 `defaultOpen`）。有 `open` 时，状态由应用持有，并在 `onOpenChange({ open, reason })` 中修改它，原因为 `"triggerPress"`（按下触发元素，或它的某个按键）、`"select"`（一次选择）、`"pressOutside"`、`"backdropPress"`、`"cancel"`（Escape 或返回）或 `"focus"`（列表打开时用 Tab 或 Shift+Tab 把键盘焦点移走）。`onOpen` 和 `onClose` 表示列表已显示和已消失（sheet 在完全进入和完全离开之后），`onCancel` 表示用户没有选择就关闭了它。
 
 <a id="search"></a>
 
@@ -310,8 +310,9 @@ mount(App);
 | Space | 选中高亮的条目（没有搜索框时）。 |
 | 字母、数字 | 下一个标题以最近一秒内输入内容开头的条目（没有搜索框时）。 |
 | Escape | 不选择，关闭列表。 |
+| Tab、Shift+Tab | 关闭列表（`reason: "focus"`），焦点移到下一个或上一个控件。 |
 
-列表关闭后，键盘焦点回到触发元素，除非一次外部按压把它带到了别处。指针移过的行会被高亮；按键移动到的高亮行会滚动到可见位置。
+列表关闭后，键盘焦点回到触发元素，除非一次外部按压或 Tab 把它带到了别处。指针移过的行会被高亮；按键移动到的高亮行会滚动到可见位置。
 
 <a id="on-each-device"></a>
 

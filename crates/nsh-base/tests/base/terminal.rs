@@ -12,7 +12,7 @@ use nsh_base::{
     accordion_header, accordion_item, accordion_panel, accordion_trigger, checkbox, color_area,
     color_picker, color_slider, color_swatch, number_input, progress, radio, radio_group, select,
     slider, switch,
-    terminal::{self, PROGRESS_EIGHTHS, PROGRESS_EMPTY, SLIDER_FILL, SLIDER_TRACK},
+    terminal::{self, PROGRESS_EMPTY, PROGRESS_FILL, SLIDER_FILL, SLIDER_TRACK},
     text_view, tree,
 };
 use nsh_core::{
@@ -179,16 +179,13 @@ fn row_of(app: &Headless, glyphs: &[char]) -> String {
 }
 
 #[test]
-fn a_progress_bar_is_a_row_of_eighth_blocks() {
+fn a_progress_bar_is_a_heavy_line_over_a_light_one() {
     let mut app = start::<Bar>(Idiom::Terminal);
-    let glyphs: Vec<char> = PROGRESS_EIGHTHS
-        .into_iter()
-        .chain([PROGRESS_EMPTY])
-        .collect();
+    let glyphs = [PROGRESS_FILL, PROGRESS_EMPTY];
     let bar = row_of(&app, &glyphs);
     let columns = bar.chars().count();
     assert!(columns > 2, "{bar:?}");
-    // Half the Cells are full, as the terminal's own bar draws it.
+    // Half the Cells are the heavy line, as the terminal's own bar draws it.
     assert_eq!(bar, terminal::progress_bar(Percentage(0.5), columns));
     app.press_key("f5").unwrap();
     assert_eq!(
@@ -261,7 +258,9 @@ fn triggers_disclosures_and_tree_rows_show_the_terminals_marks() {
     let mut app = start::<Lists>(Idiom::Terminal);
     let shown = texts(&app);
     assert!(
-        shown.iter().any(|t| t == terminal::SELECT_ARROW),
+        shown
+            .iter()
+            .any(|t| t == terminal::SELECT_ARROW.trim_start()),
         "{shown:?}"
     );
     assert!(shown.iter().any(|t| t == "▸ "), "{shown:?}");
@@ -304,7 +303,7 @@ fn a_terminals_select_shows_its_placeholder_or_the_apps_trigger() {
     assert!(!shown.iter().any(|t| t == "Build"), "{shown:?}");
     let arrows = shown
         .iter()
-        .filter(|t| *t == terminal::SELECT_ARROW)
+        .filter(|t| *t == terminal::SELECT_ARROW.trim_start())
         .count();
     assert_eq!(arrows, 2, "{shown:?}");
 }
@@ -384,9 +383,22 @@ fn text_starts<C: Component<Props = ()>>() -> std::collections::HashMap<String, 
         .collect()
 }
 
+/// A row of [`text_bounds`]'s terminal, in points.
+const CELL: f32 = 21.0;
+/// A column of [`text_bounds`]'s terminal, in points.
+const COLUMN: f32 = 8.0;
+
 /// Where each text starts in the window in a terminal (x, y), from the
 /// frames and parents the batches set.
 fn text_origins<C: Component<Props = ()>>() -> std::collections::HashMap<String, (f32, f32)> {
+    text_bounds::<C>()
+        .into_iter()
+        .map(|(t, b)| (t, (b.origin.x.0, b.origin.y.0)))
+        .collect()
+}
+
+/// Where each text is in the window in a terminal, its size with it.
+fn text_bounds<C: Component<Props = ()>>() -> std::collections::HashMap<String, Bounds<Points>> {
     let viewport = Size::new(px(390.0), px(844.0));
     let config = EngineConfig {
         viewport,
@@ -437,6 +449,7 @@ fn text_origins<C: Component<Props = ()>>() -> std::collections::HashMap<String,
     // ellipsis) or inside an empty one does not.
     let at = |mut id: NodeId| {
         let (mut x, mut y) = (0.0, 0.0);
+        let size = seen.1.get(&id).map_or_else(Size::default, |f| f.size);
         let mut shows = seen.1.contains_key(&id);
         loop {
             if let Some(f) = seen.1.get(&id) {
@@ -446,7 +459,15 @@ fn text_origins<C: Component<Props = ()>>() -> std::collections::HashMap<String,
             }
             match seen.2.get(&id) {
                 Some(parent) => id = *parent,
-                None => return ((x, y), shows),
+                None => {
+                    return (
+                        Bounds {
+                            origin: point(px(x), px(y)),
+                            size,
+                        },
+                        shows,
+                    );
+                }
             }
         }
     };
@@ -499,8 +520,8 @@ fn a_documents_markers_rules_and_notes_are_the_terminals_text() {
         "1. First",
         "2. Second",
         "◦ nested",
-        "[ ] Open task",
-        "[✓] Done task",
+        "☐ Open task",
+        "☑ Done task",
     ] {
         assert!(shown.contains(row), "{row} not in {shown:?}");
     }
@@ -521,7 +542,7 @@ fn a_documents_markers_rules_and_notes_are_the_terminals_text() {
     // Elsewhere, none of it.
     let gui = start::<Document>(Idiom::Desktop);
     let shown = joined(&gui);
-    assert!(!shown.contains("[ ]") && !shown.contains('┌'), "{shown:?}");
+    assert!(!shown.contains('☐') && !shown.contains('┌'), "{shown:?}");
 }
 
 /// A paragraph with a formula in it and a display formula.
@@ -551,15 +572,18 @@ fn Sections() -> impl IntoElement {
 }
 
 #[test]
-fn a_terminals_heading_after_a_block_has_a_blank_row_before_it() {
+fn a_terminals_heading_is_a_blank_row_from_the_blocks_around_it() {
     let at = text_origins::<Sections>();
     let row = |t: &str| at.get(t).unwrap_or_else(|| panic!("no {t} in {at:?}")).1;
-    let cell = row("Body text.") - row("How it works");
-    assert!(cell > 0.0, "{at:?}");
-    // The heading two rows under the paragraph (one blank), its body right under it.
+    // One blank row before the heading and one after it, as any block.
     assert_eq!(
         row("How it works") - row("Intro text."),
-        2.0 * cell,
+        2.0 * CELL,
+        "{at:?}"
+    );
+    assert_eq!(
+        row("Body text.") - row("How it works"),
+        2.0 * CELL,
         "{at:?}"
     );
 }
@@ -572,16 +596,47 @@ fn Alerts() -> impl IntoElement {
 
 #[test]
 fn a_terminals_alerts_in_a_row_are_a_blank_row_apart_as_other_blocks() {
-    let at = text_origins::<Alerts>();
-    let row = |t: &str| at.get(t).unwrap_or_else(|| panic!("no {t} in {at:?}")).1;
-    // Two paragraphs: a line, then a blank row.
-    let cell = (row("Four.") - row("Three.")) / 2.0;
-    assert!(cell > 0.0, "{at:?}");
-    // An alert's line is between its borders: its bottom border, a blank
-    // row and the next box's top border before the next alert's line,
-    // its bottom border and a blank row before the paragraph after.
-    assert_eq!(row("Two.") - row("One."), 4.0 * cell, "{at:?}");
-    assert_eq!(row("Three.") - row("Two."), 3.0 * cell, "{at:?}");
+    // An alert of one line is one row, its band no rows taller, so one
+    // blank row lies between it and each block around it.
+    let at = text_bounds::<Alerts>();
+    let row = |t: &str| {
+        at.get(t)
+            .unwrap_or_else(|| panic!("no {t} in {at:?}"))
+            .origin
+            .y
+            .0
+    };
+    assert_eq!(row("Two.") - row("One."), 2.0 * CELL, "{at:?}");
+    assert_eq!(row("Three.") - row("Two."), 2.0 * CELL, "{at:?}");
+    assert_eq!(row("Four.") - row("Three."), 2.0 * CELL, "{at:?}");
+}
+
+/// A paragraph, then an alert.
+#[component]
+fn Tip() -> impl IntoElement {
+    text_view().markdown("Intro.\n\n> [!TIP]\n> Long-press to copy.")
+}
+
+#[test]
+fn a_terminals_alert_is_its_icon_and_its_text_in_a_band_from_the_texts_edge() {
+    // Its band from the text's left edge, a Cell of padding, the icon and
+    // the text right after it.
+    let at = text_bounds::<Tip>();
+    let x = |t: &str| {
+        at.get(t)
+            .unwrap_or_else(|| panic!("no {t} in {at:?}"))
+            .origin
+            .x
+            .0
+    };
+    assert_eq!(x("✓") - x("Intro."), COLUMN, "{at:?}");
+    // Right after the icon, whatever the text engine measures it as.
+    let icon = at["✓"];
+    assert_eq!(
+        x("Long-press to copy.") - x("✓"),
+        icon.size.width.0,
+        "{at:?}"
+    );
 }
 
 /// Blocks after blocks, and a list whose items hold blocks of their own.
@@ -611,32 +666,40 @@ fn Quote() -> impl IntoElement {
 }
 
 #[test]
-fn a_terminals_quote_has_a_bar_and_its_rule_is_a_row_of_lines() {
+fn a_terminals_quote_has_a_bar_and_its_rule_draws_nothing() {
     let app = start::<Quote>(Idiom::Terminal);
     let lines = texts(&app);
     let rule = |t: &String| !t.is_empty() && t.chars().all(|c| c == '─');
-    assert!(lines.iter().any(|t| t == "│"), "no quote bar in {lines:?}");
-    assert!(lines.iter().any(rule), "no rule in {lines:?}");
-    // The bar a Cell before the quote's text; the rule a row of its own,
-    // a blank row on each side.
+    assert!(lines.iter().any(|t| t == "▎"), "no quote bar in {lines:?}");
+    assert!(!lines.iter().any(rule), "a rule in {lines:?}");
+    // The bar a Cell before the quote's text; the rule no row, the blank
+    // row between the quote and the paragraph the only one.
     let at = text_origins::<Quote>();
     let origin = |t: &str| *at.get(t).unwrap_or_else(|| panic!("no {t} in {at:?}"));
     let (intro, quoted, after) = (origin("Intro."), origin("Quoted"), origin("After."));
-    // The bar is one text, a `│` per row of the quote.
-    let bar = at
-        .iter()
-        .find(|(t, _)| t.starts_with('│'))
-        .map(|(_, at)| *at)
+    // The bar is one text, a `▎` per row of the quote, its Cells as wide
+    // as the text engine measures the glyph.
+    let bar = text_bounds::<Quote>()
+        .into_iter()
+        .find(|(t, _)| t.starts_with('▎'))
+        .map(|(_, b)| b)
         .unwrap_or_else(|| panic!("no quote bar in {at:?}"));
-    let cell = (quoted.1 - intro.1) / 2.0;
-    assert!(cell > 0.0, "{at:?}");
-    assert_eq!((bar.0, bar.1), (intro.0, quoted.1), "{at:?}");
-    assert!(quoted.0 > bar.0, "{at:?}");
-    assert_eq!(after.1 - quoted.1, 4.0 * cell, "{at:?}");
+    assert_eq!(quoted.1 - intro.1, 2.0 * CELL, "{at:?}");
+    assert_eq!(
+        (bar.origin.x.0, bar.origin.y.0),
+        (intro.0, quoted.1),
+        "{at:?}"
+    );
+    assert_eq!(
+        quoted.0 - bar.origin.x.0,
+        bar.size.width.0 + COLUMN,
+        "{at:?}"
+    );
+    assert_eq!(after.1 - quoted.1, 2.0 * CELL, "{at:?}");
     // Elsewhere, the border and the hairline.
     let gui = start::<Quote>(Idiom::Desktop);
     let lines = texts(&gui);
-    assert!(!lines.iter().any(|t| t == "│" || rule(t)), "{lines:?}");
+    assert!(!lines.iter().any(|t| t == "▎" || rule(t)), "{lines:?}");
 }
 
 /// An image alone in its paragraph, between two paragraphs.
@@ -674,6 +737,165 @@ fn a_terminal_leaves_out_an_image_without_alt_text_and_its_row() {
     );
 }
 
+/// A heading of each level after the document's title, a paragraph and a
+/// rule between them.
+#[component]
+fn Outline() -> impl IntoElement {
+    text_view().markdown(
+        "# Native *Shell*\n\nIntro.\n\n---\n\n## Two\n\n### Three\n\n#### Four `x`\n\nAfter.",
+    )
+}
+
+#[test]
+fn a_terminals_headings_drop_their_marks_and_only_the_title_is_ruled() {
+    let app = start::<Outline>(Idiom::Terminal);
+    let lines = texts(&app);
+    // Each heading one text, its inline styles given way to its own.
+    for heading in ["Native Shell", "Two", "Three", "Four x"] {
+        assert!(
+            lines.iter().any(|t| t == heading),
+            "no {heading:?} in {lines:?}"
+        );
+    }
+    assert!(!lines.iter().any(|t| t.contains('#')), "{lines:?}");
+    let rule = |t: &String| !t.is_empty() && t.chars().all(|c| c == '─');
+    assert_eq!(lines.iter().filter(|t| rule(t)).count(), 1, "{lines:?}");
+    let at = text_bounds::<Outline>();
+    let bounds = |t: &str| *at.get(t).unwrap_or_else(|| panic!("no {t} in {at:?}"));
+    let row = |t: &str| bounds(t).origin.y.0;
+    // The title's rule under it across the text's width, a blank row, the
+    // paragraph; the rule between the paragraph and `Two` no row: one
+    // blank row between every two blocks.
+    let (title, ruled) = at
+        .iter()
+        .find(|(t, _)| rule(t))
+        .map(|(t, b)| (bounds("Native Shell"), (t.chars().count(), *b)))
+        .unwrap();
+    assert_eq!(ruled.1.origin.y.0 - title.origin.y.0, CELL, "{at:?}");
+    assert_eq!(ruled.1.origin.x, title.origin.x, "{at:?}");
+    assert_eq!(ruled.0 as f32 * COLUMN, ruled.1.size.width.0, "{at:?}");
+    assert_eq!(row("Intro.") - row("Native Shell"), 3.0 * CELL, "{at:?}");
+    for (a, b) in [
+        ("Intro.", "Two"),
+        ("Two", "Three"),
+        ("Three", "Four x"),
+        ("Four x", "After."),
+    ] {
+        assert_eq!(row(b) - row(a), 2.0 * CELL, "{a} to {b}: {at:?}");
+    }
+}
+
+/// A paragraph, then a code block in TypeScript, one with a line too long
+/// for the view, and one of the first's longest line alone.
+#[component]
+fn Listing() -> impl IntoElement {
+    text_view().markdown(
+        "Intro.\n\n```ts\nlet a = 1;\nconst longer = a;\n```\n\nThen a long one.\n\n\
+         ```\nconst a = \"one two three four five six seven eight nine ten eleven twelve\";\n```\n\n\
+         ```\nconst longer = a;\n```",
+    )
+}
+
+#[test]
+fn a_terminals_code_block_is_a_band_as_wide_as_its_longest_line_under_its_language() {
+    let at = text_bounds::<Listing>();
+    let bounds = |t: &str| {
+        *at.iter()
+            .find(|(k, _)| k.starts_with(t))
+            .unwrap_or_else(|| panic!("no {t} in {at:?}"))
+            .1
+    };
+    let intro = bounds("Intro.");
+    // Its language reversed on its own row, from the text's left edge, a
+    // blank row after the paragraph.
+    let language = bounds(" ts ");
+    assert_eq!(language.origin.x, intro.origin.x, "{at:?}");
+    assert_eq!(language.origin.y.0 - intro.origin.y.0, 2.0 * CELL, "{at:?}");
+    // The code a Cell into its band, right under it, no rows of padding.
+    let code = bounds("let a = 1;");
+    assert_eq!(code.origin.x.0 - intro.origin.x.0, COLUMN, "{at:?}");
+    assert_eq!(code.origin.y.0 - language.origin.y.0, CELL, "{at:?}");
+    // As wide as its longest line: as the block of that line alone.
+    assert_eq!(code.size.width, bounds("const longer").size.width, "{at:?}");
+    assert!(code.size.width.0 < 390.0 - 2.0 * COLUMN, "{at:?}");
+    assert_eq!(code.size.height.0, 2.0 * CELL, "{at:?}");
+    assert_eq!(
+        bounds("Then a long one.").origin.y.0 - code.origin.y.0,
+        3.0 * CELL,
+        "{at:?}"
+    );
+    // A line longer than the view wraps inside its band, a Cell before
+    // the view's end: 390pt is 49 columns on the grid (392pt).
+    let long = bounds("const a");
+    let view = (390.0 / COLUMN).ceil() * COLUMN;
+    assert!(long.size.height.0 >= 2.0 * CELL, "{at:?}");
+    assert!(
+        long.origin.x.0 + long.size.width.0 <= view - COLUMN,
+        "{at:?}"
+    );
+}
+
+/// A table too wide for the view: a short column and a long one.
+#[component]
+fn WideTable() -> impl IntoElement {
+    text_view().markdown(
+        "| Name | Description |\n|---|---|\n\
+         | iOS | UIKit views laid out by Taffy and drawn by Core Animation layers |",
+    )
+}
+
+/// A table that cannot fit: ten columns of ten letters.
+#[component]
+fn HugeTable() -> impl IntoElement {
+    let row = ["abcdefghij"; 10].join(" | ");
+    text_view().markdown(format!("| {row} |\n|{}\n| {row} |", "---|".repeat(10)))
+}
+
+#[test]
+fn a_terminals_table_narrows_its_widest_column_to_fit_and_wraps_its_cells() {
+    // 390pt is 49 columns on the grid (392pt): the description narrows to
+    // what the rules and the name leave (49 - 7 - 4), wrapping over two
+    // rows.
+    let at = text_bounds::<WideTable>();
+    let top = at
+        .keys()
+        .find(|t| t.starts_with('┌'))
+        .unwrap_or_else(|| panic!("no top rule in {at:?}"));
+    assert_eq!(top.chars().count(), 49, "{top}");
+    let cell = at
+        .iter()
+        .find(|(t, _)| t.starts_with("UIKit"))
+        .map(|(_, b)| *b)
+        .unwrap_or_else(|| panic!("no description in {at:?}"));
+    assert_eq!(cell.size.height.0, 2.0 * CELL, "{at:?}");
+    // Columns narrow to 6 Cells at most: past that the table scrolls.
+    let at = text_bounds::<HugeTable>();
+    let top = at.keys().find(|t| t.starts_with('┌')).unwrap();
+    assert_eq!(top.chars().count(), 1 + 10 * (6 + 2) + 9 + 1, "{top}");
+}
+
+/// An item whose text wraps in a narrow view.
+#[component]
+fn Narrow() -> impl IntoElement {
+    view()
+        .w(px(96.0))
+        .child(text_view().markdown("1. alpha beta gamma delta epsilon"))
+}
+
+#[test]
+fn a_terminals_list_marker_stays_on_its_items_first_row() {
+    let at = text_bounds::<Narrow>();
+    let at_ = |t: &str| *at.get(t).unwrap_or_else(|| panic!("no {t} in {at:?}"));
+    let (marker, item) = (at_("1. "), at_("alpha beta gamma delta epsilon"));
+    assert_eq!(marker.origin.y, item.origin.y, "{at:?}");
+    // The text right after the marker's Cells.
+    assert_eq!(
+        item.origin.x.0 - marker.origin.x.0,
+        marker.size.width.0,
+        "{at:?}"
+    );
+}
+
 /// A number input with both buttons at the field's end.
 #[component]
 fn Stepper() -> impl IntoElement {
@@ -690,9 +912,9 @@ fn Stepper() -> impl IntoElement {
 fn a_terminals_number_input_sets_its_end_buttons_side_by_side() {
     let at = text_origins::<Stepper>();
     let (up, down) = (at["Up"], at["Down"]);
-    // On the field's row, the increment first, not one over the other.
+    // On the field's row, − then + as a row reads, not one over the other.
     assert_eq!(up.1, down.1, "{at:?}");
-    assert!(up.0 < down.0, "{at:?}");
+    assert!(down.0 < up.0, "{at:?}");
 }
 
 /// A picker of `#3b82f6` (HSB hue 217) with an area, a hue slider and a
@@ -731,29 +953,57 @@ fn Colors() -> impl IntoElement {
         .child(text(move || format!("Color {}", hex.get())))
 }
 
-/// The hue slider's track, its glyphs joined from the start.
+/// A picker of `#3b82f6` (HSB hue 217) with a hue slider alone, the color
+/// in hex as the app keeps it.
+#[component]
+fn Hue() -> impl IntoElement {
+    let color = signal(Hsla::from(rgb(0x3b82f6)));
+    let hex = signal(String::from("#3b82f6"));
+    view()
+        .child(
+            color_picker()
+                .value(move || Some(color.get()))
+                .on_change(move |e: &ColorPickerEvent| {
+                    if let ColorPickerEvent::Change(value, formatted) = e {
+                        color.set(*value);
+                        hex.set(formatted.to_string());
+                    }
+                })
+                .child(
+                    color_slider()
+                        .color_space(ColorSpace::Hsb)
+                        .channel(ColorChannel::Hue)
+                        .accessibility_label("Hue")
+                        .w(px(200.0))
+                        // What shows the slider has the keyboard focus.
+                        .focus(|s| s.opacity(0.5)),
+                ),
+        )
+        .child(text(move || format!("Color {}", hex.get())))
+}
+
+/// The hue slider's track, its Cells' glyphs joined from the start: a
+/// blank Cell of each color but the thumb's. The track's own blank text,
+/// which makes it one row tall, comes before its Cells.
 fn hue_track(screen: &Screen) -> String {
     screen
         .texts()
         .into_iter()
-        .filter(|t| !t.is_empty() && t.chars().all(|c| ['━', '●', '─'].contains(&c)))
+        .filter(|t| *t == " " || *t == terminal::COLOR_THUMB)
+        .skip(1)
         .collect()
 }
 
 #[test]
 fn a_color_slider_is_a_row_of_its_colors_with_a_thumb() {
-    let mut app = start::<Colors>(Idiom::Terminal);
+    let mut app = start::<Hue>(Idiom::Terminal);
     let track = hue_track(app.screen());
     let columns = track.chars().count();
     assert!(columns > 2, "{track:?}");
-    // One thumb, on the Cell of 217 of 360, `━` before it and `─` after.
+    // One thumb, a bar on the Cell of 217 of 360, no line along the track.
     let at = terminal::track_cell(Percentage(217.0 / 360.0), columns);
     let expected: String = (0..columns)
-        .map(|i| match i.cmp(&at) {
-            std::cmp::Ordering::Less => '━',
-            std::cmp::Ordering::Equal => '●',
-            std::cmp::Ordering::Greater => '─',
-        })
+        .map(|i| if i == at { '│' } else { ' ' })
         .collect();
     assert_eq!(track, expected);
     // The slider is one adjustable control; its Cells are pictures hidden
@@ -764,12 +1014,12 @@ fn a_color_slider_is_a_row_of_its_colors_with_a_thumb() {
     app.drag("label:Hue", point(px(-400.0), px(0.0))).unwrap();
     let wait = Duration::from_secs(1);
     app.wait_until("the thumb at the start", wait, |s| {
-        hue_track(s).starts_with('●')
+        hue_track(s).starts_with('│')
     })
     .unwrap();
     // A drag gives no keyboard focus: Tab to the slider (its `focus:`
     // style says when it has it), then End: the largest hue, on the last
-    // Cell, `━` before it.
+    // Cell.
     let slider = app
         .screen()
         .press_target("label:Hue")
@@ -801,10 +1051,51 @@ fn a_color_slider_is_a_row_of_its_colors_with_a_thumb() {
     app.press_key("end").unwrap();
     let at_end = |s: &Screen| {
         let track = hue_track(s);
-        track.ends_with('●') && track.chars().filter(|&c| c == '━').count() == columns - 1
+        track.ends_with('│') && track.chars().filter(|&c| c == ' ').count() == columns - 1
     };
     app.wait_until("the thumb at the end", wait, at_end)
         .unwrap();
+}
+
+#[test]
+fn a_focused_color_sliders_thumb_stands_bold_on_the_accent() {
+    let mut app = start::<Hue>(Idiom::Terminal);
+    let thumb = format!("text:{}", terminal::COLOR_THUMB);
+    let at_rest = app.screen().span_style(&thumb).unwrap();
+    assert_ne!(at_rest.font_weight, 700, "not bold at rest");
+    // The views the slider's focus fills from here on.
+    let fills = Arc::new(Mutex::new(Vec::new()));
+    let into = fills.clone();
+    app.observe(move |_, batch| {
+        for item in &batch.items {
+            if let MountItem::ViewStyle { style, .. } = item {
+                into.lock().unwrap().push(style.background_color);
+            }
+        }
+    });
+    let bold = |s: &Screen| {
+        s.span_style(&format!("text:{}", terminal::COLOR_THUMB))
+            .is_ok_and(|style| style.font_weight == 700)
+    };
+    let mut tabs = 0;
+    while !bold(app.screen()) {
+        assert!(tabs < 3, "Tab never reached the slider");
+        app.press_key("tab").unwrap();
+        let _ = app.wait_until("Tab moves the focus", Duration::from_millis(200), bold);
+        tabs += 1;
+    }
+    let focused = app.screen().span_style(&thumb).unwrap();
+    assert_ne!(
+        focused.color, at_rest.color,
+        "the thumb in the background's color"
+    );
+    assert!(
+        fills
+            .lock()
+            .unwrap()
+            .contains(&nsh_core::Color::from(terminal::ACCENT)),
+        "the thumb's Cell on the accent"
+    );
 }
 
 #[test]
@@ -830,7 +1121,45 @@ fn outside_a_terminal_the_color_parts_draw_no_cells() {
     let app = start::<Colors>(Idiom::Desktop);
     let shown = joined(&app);
     assert!(!shown.contains(terminal::AREA_PICKED), "{shown:?}");
-    assert!(!shown.contains('●'), "{shown:?}");
+    assert!(!shown.contains(terminal::COLOR_THUMB), "{shown:?}");
+}
+
+/// A color area 380 points wide and 210 high, as a card's content.
+#[component]
+fn WideArea() -> impl IntoElement {
+    color_picker()
+        .default_value(Hsla::from(rgb(0x3b82f6)))
+        .child(
+            color_area()
+                .accessibility_label("Area")
+                .w(px(380.0))
+                .h(px(210.0)),
+        )
+}
+
+#[test]
+fn a_color_area_fills_its_width_and_its_rows_with_cells() {
+    let viewport = Size::new(px(390.0), px(844.0));
+    let config = EngineConfig {
+        viewport,
+        environment: Environment {
+            window: viewport,
+            os: Os::Linux,
+            idiom: Idiom::Terminal,
+            // Cells of 8 × 21 points, as `text_origins`: the area holds 47
+            // of them across and 10 down.
+            cell: Some(Size::new(px(8.0), px(21.0))),
+            ..Environment::default()
+        },
+        ..EngineConfig::new(Root::of::<WideArea>())
+    };
+    let mut app = Headless::start(config).unwrap();
+    app.first_render().unwrap();
+    let cells = texts(&app)
+        .iter()
+        .filter(|t| *t == " " || *t == terminal::AREA_PICKED)
+        .count();
+    assert_eq!(cells, 47 * 10, "{:?}", texts(&app));
 }
 
 /// A choice card: a checkbox whose children are a title over a
@@ -990,6 +1319,11 @@ fn a_terminals_calendar_is_a_grid_of_right_aligned_numbers() {
     // A week is seven columns.
     assert_eq!(x("15"), x("22"));
     assert_eq!(x("21") - x("15"), 6.0 * 32.0);
+    // The weekdays (the app's `k<n>`, labels, not buttons) head their
+    // columns: Sunday over the 8th, each four Cells from the next.
+    assert_eq!(x("k0"), x("8") - 8.0);
+    assert_eq!(x("k1") - x("k0"), 32.0);
+    assert_eq!(x("k6") - x("k0"), 6.0 * 32.0);
 }
 
 /// Page 1 of 24, its items in the app's padded boxes.
@@ -1032,10 +1366,7 @@ fn Low() -> impl IntoElement {
 
 #[test]
 fn a_terminals_progress_bar_takes_the_indicators_color() {
-    let glyphs: Vec<char> = PROGRESS_EIGHTHS
-        .into_iter()
-        .chain([PROGRESS_EMPTY])
-        .collect();
+    let glyphs = [PROGRESS_FILL, PROGRESS_EMPTY];
     let filled = |app: &Headless| {
         let run: String = row_of(app, &glyphs)
             .chars()
@@ -1051,6 +1382,18 @@ fn a_terminals_progress_bar_takes_the_indicators_color() {
     // Without one, the terminal's accent.
     let plain = start::<Bar>(Idiom::Terminal);
     assert_eq!(filled(&plain), terminal::ACCENT.into());
+    // The track beside the fill, in a color of its own (the line's).
+    let track: String = row_of(&red, &glyphs)
+        .chars()
+        .filter(|&c| c == PROGRESS_EMPTY)
+        .collect();
+    assert!(!track.is_empty());
+    let track = red
+        .screen()
+        .span_style(&format!("text:{track}"))
+        .unwrap()
+        .color;
+    assert_ne!(track, filled(&red), "the track reads apart from the fill");
 }
 
 /// A diff of a long line left as it was and one changed.
@@ -1100,4 +1443,33 @@ fn a_terminals_diff_cuts_every_line_alike() {
         .collect();
     assert!(limits.len() >= 4, "{lines:?}");
     assert!(limits.iter().all(|(_, max)| *max == 1), "{limits:?}");
+}
+
+/// A masked one-time code holding two digits of four.
+#[component]
+fn MaskedCode() -> impl IntoElement {
+    view().child(
+        nsh_base::otp_input()
+            .length(4u32)
+            .masked(true)
+            .default_value("12"),
+    )
+}
+
+#[test]
+fn a_terminals_masked_code_shows_a_dot_a_digit_and_a_slot_an_empty_cell() {
+    let app = start::<MaskedCode>(Idiom::Terminal);
+    let shown = texts(&app);
+    let count = |glyph: &str| shown.iter().filter(|t| *t == glyph).count();
+    assert_eq!(count(terminal::OTP_MASK), 2, "{shown:?}");
+    assert_eq!(count(terminal::OTP_EMPTY), 2, "{shown:?}");
+    assert!(!shown.iter().any(|t| t == "1" || t == "2"), "{shown:?}");
+    // Elsewhere the platforms' bullet.
+    let app = start::<MaskedCode>(Idiom::Desktop);
+    let shown = texts(&app);
+    assert_eq!(
+        shown.iter().filter(|t| *t == "\u{2022}").count(),
+        2,
+        "{shown:?}"
+    );
 }

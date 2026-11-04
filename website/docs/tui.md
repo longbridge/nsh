@@ -77,7 +77,9 @@ frame is whole Cells, and spacing designed in points for a screen becomes the Ce
 Every control is reachable from the keyboard. Tab and Shift+Tab visit pressable and editable views in document order,
 as on the desktops; the arrows move to the nearest control in that direction, scrolling to reach it. A control
 scrolled into view by the keyboard is centered in its scroll view. While a dialog or a sheet is open over its
-backdrop, Tab stays in it, and closing it gives the focus back to the control it came from.
+backdrop, Tab stays in it, and closing it gives the focus back to the control it came from. Tab always moves to the
+next control: in a `DataTable` it leaves the table, and the arrows move between its columns. A click gives the focus
+to the control it is on, or the one around it, and Tab goes on from there.
 
 | Keys | Do |
 |---|---|
@@ -179,7 +181,8 @@ The app's colors are read as meanings, so an app designed for screens reads well
 With 256 colors or more and a known background, fills are **surfaces**: steps of the terminal's own background mixed
 toward its foreground, so a card, a sidebar or a selected row stands on a band a shade lighter or darker than what is
 around it, and the page itself is the terminal's background, transparency included. On a 16-color terminal the same
-app is drawn in lines, bold, dim and reverse video.
+app, laid out the same, is drawn in lines, bold, dim and reverse video, and its small fills in the standard colors:
+a chip or a tag on the dark gray, a primary button in its color; panels and cards are set apart by their space.
 
 The terminal shows state in its own way: a selected row and a focused control are a highlighted band and bold, a
 hovered control a lighter band, a disabled one faint; the selected row of the pane that has the focus is in the
@@ -195,27 +198,40 @@ accent. The app's focus styles still apply on top.
 | `Radio` | `(●)` or `( )`, then its label |
 | `Switch` | `[✓]` on, `[ ]` off, as a checkbox |
 | `Slider` | a row of `─`, filled with `━` up to the value, a `●` per thumb |
-| `Progress` | a bar of `█` with eighths at its end, then `░` |
-| `Select`, `Combobox` | the value (a `Select`'s `placeholder` while none is chosen, or the app's `trigger`) and ` ▾`, the list opening under it |
+| `Progress` | a heavy line `━` in the indicator's color, then a light `─` in the line color |
+| `Select`, `Combobox`, `DatePicker` | the value (a `Select`'s `placeholder` while none is chosen, or the app's `trigger`) with `▾` near the right end of its band, a blank Cell after it as before the text, and `×` before it while there is a value to clear, muted, in the accent while focused or open; the list opens under it. An app's own `trigger` leaves the band's last three Cells free for them (six with `×`) |
 | `Tabs` | the tabs in a row, the selected one bold |
-| `Calendar`, `DatePicker` | `cal`'s month: the days' numbers right-aligned in columns, today bold, the selected days banded |
+| `Calendar`, `DatePicker` | `cal`'s month: the days' numbers right-aligned in columns, today bold, the selected days banded; the months and the years to pick centered in the month's width |
+| `OtpInput` | the cells in a row, the terminal's cursor in the middle of the cell that takes the next digit; an empty cell shows `·`, muted, a masked digit `●`; a cell with a border and no fill is a framed box (`┌───┐`), its digit in the middle, the next cell's line in the accent |
 | `Pagination` | Previous, the pages, `…` and Next as words in a row, the current page banded |
 | `MenuItem`, `Submenu` | the title from the row's start; `✓` at the row's end on a checked item (`●` on a radio item), ` ›` on a submenu's trigger |
 | `Select`, `Combobox` lists | each title from the row's start, `✓` at the end of the chosen row |
 | `Accordion`, `Collapsible`, `Tree` | `▸` closed, `▾` open |
 | `Scrollbar` | the terminal's own scroll bar |
+| `TextView` | a terminal reader's document: blocks a blank row apart, headings without `#` in bold (h1 ruled), quotes behind `▎`, code in a band under its language, alerts as one tinted band with their icon, tables in box lines fitted to the view, tasks `☐` / `☑` |
 
-**Popups** (popovers, menus, tooltips, a select's list, a command palette) open beside their anchor, framed by a
+**Popups** (popovers, menus, a select's list, a command palette) open beside their anchor, framed by a
 rounded line, with the label of their first surface as a title in the top border (`╭─ Title ─`). With surfaces they
 stand raised on a band and cast a one-Cell shadow; the item under the keyboard or the pointer is a full-row band in
 the accent. **Dialogs** center a framed box and fade what is behind them; focus stays inside the newest one, Escape
 asks it to close, and closing it gives the focus back to the control that opened it. `AlertDialog` is drawn
 the same way, its buttons `Cancel  OK` in a row (`< Cancel >  < OK >` on 16 colors).
 
+**Toasts** show on the status line, the screen's bottom row, one at a time: the newest toast's content in a row, and a
+new toast takes the line from the last. Nothing stacks or animates; Escape closes the toast there, as its own buttons
+and its timeout do. A tooltip shares the line and shows there while no toast does.
+
 **Scroll views** that overflow show a one-Cell scroll bar, `│` with a `┃` thumb, on their inner edge, or on the line of
 the pane they fill. **Canvases** draw in braille dots, two across and four down per Cell, with text on whole Cells;
 chart demos and drawings keep their shapes. An **icon button** (a button whose content is an icon) shows its
 accessibility label as its text, and a popup's trigger shows `▾`.
+
+**Marks you press** (a trigger's `▾`, a clear `×`, a stepper's `−` / `+`) each take a slot of three Cells with the
+mark in the middle, ` ▾ `, and a press anywhere in the slot counts. Slots sit side by side (` ×  ▾ `), so the mark at a
+band's end has a blank Cell after it. The mark is muted and turns the accent while its control is focused or open,
+while it is pressed and while the pointer is over its slot. For a mark of your own, make a pressable `View`
+three Cells wide and one Cell high (24 × 16 points at the default size) with the glyph centered. With `controlsRight`,
+`NumberInput` sets its steppers side by side in a terminal, the decrement first (` −  + `).
 
 **Media elements keep their space in the layout.** An `Image`, `Video`, `WebView` or shader view larger than an icon
 keeps its box, so the text and controls around it stay where the design puts them; the terminal shows text and

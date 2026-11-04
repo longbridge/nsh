@@ -245,7 +245,9 @@ const VERTICAL_KEYS: &[(&str, bool, Step)] =
 /// [`crate::terminal::DIVIDER_HORIZONTAL`]), muted, in the accent while the
 /// pointer is over it, has it, or the keyboard focus is on it. It is a stop
 /// of the keyboard focus, and its arrows move it a Cell at a time, as one
-/// drag each.
+/// drag each. One kept to the pointer ([`PointerOnly`]: a table's column
+/// handles) is blank until the pointer is on it, muted then, so columns
+/// stand apart by their spaces, and in the accent while dragged.
 fn terminal_band(
     band: View,
     axis: Axis,
@@ -277,16 +279,28 @@ fn terminal_band(
         Axis::Horizontal => crate::keys::bind_while_directed(move || focused.get(), keys, step),
         Axis::Vertical => crate::keys::bind_while(move || focused.get(), keys, step),
     }
+    let pointer_only = use_context::<PointerOnly>().is_some();
     let line = text(move || {
         let n = cells.get();
+        let (vertical, horizontal) = match pointer_only && state.get() == ResizeHandleState::Idle {
+            true => (' ', ' '),
+            false => (DIVIDER_VERTICAL, DIVIDER_HORIZONTAL),
+        };
         SharedString::from(match axis {
-            Axis::Horizontal => vec![DIVIDER_VERTICAL.to_string(); n].join("\n"),
-            Axis::Vertical => std::iter::repeat_n(DIVIDER_HORIZONTAL, n).collect::<String>(),
+            Axis::Horizontal => vec![vertical.to_string(); n].join("\n"),
+            Axis::Vertical => std::iter::repeat_n(horizontal, n).collect::<String>(),
         })
     })
     .text_overflow(nsh_core::EllipsizeMode::Clip)
     .style_with(move |s| {
-        let lit = focused.get() || state.get() != ResizeHandleState::Idle;
+        let lit = match pointer_only {
+            // Shown only under the pointer: muted there, lit while held.
+            true => matches!(
+                state.get(),
+                ResizeHandleState::Pressed | ResizeHandleState::Dragging
+            ),
+            false => focused.get() || state.get() != ResizeHandleState::Idle,
+        };
         s.text_color(tone_color(if lit && !disabled.get() {
             Tone::Accent
         } else {

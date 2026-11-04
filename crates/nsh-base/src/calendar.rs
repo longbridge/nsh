@@ -53,7 +53,10 @@
 //!   the arrows as text and leaves out `itemClass` / `itemStyle` (the app's
 //!   `renderItem` still draws the weekdays and the header's labels); today
 //!   is bold and the days of the months around muted, and the painter
-//!   bands the selected days from their state.
+//!   bands the selected days from their state. The weekdays head their
+//!   columns. The month and the year views (four years a row) are centered
+//!   in the days' width, so the calendar, and a date picker's popup, keeps
+//!   its width as the view changes.
 
 use std::{collections::HashSet, rc::Rc};
 
@@ -78,6 +81,9 @@ const YEARS_PER_PAGE: usize = 20;
 const MONTHS_PER_ROW: usize = 3;
 /// How many years a row of the year view has.
 const YEARS_PER_ROW: usize = 5;
+/// How many years a row of a terminal's year view has: four years two
+/// blank Cells apart fit in the width of a month of days, which five do not.
+const TERMINAL_YEARS_PER_ROW: usize = 4;
 /// The most weeks a month shows: a month's grid has this many rows, those
 /// it does not use hidden, so that a turn changes what the cells show and
 /// makes none.
@@ -1070,6 +1076,7 @@ impl Grid {
                     KeyOptions {
                         when: When::NotEditing,
                         repeat: true,
+                        ..Default::default()
                     },
                     by(f, skip),
                 );
@@ -1081,6 +1088,7 @@ impl Grid {
                     KeyOptions {
                         when: When::NotEditing,
                         repeat: false,
+                        ..Default::default()
                     },
                     move |_| {
                         let day = untracked(|| self.stop());
@@ -1154,16 +1162,38 @@ pub(crate) fn calendar_view(grid: Grid, changed: Rc<dyn Fn(Date)>) -> Vec<AnyEle
                 )
                 .into_element()
         }
-        Mode::Month => rows(
+        Mode::Month => centered(
             grid,
-            (1..=12)
-                .map(|m| picker_item(grid, CalendarItemKind::Month, m as usize))
-                .collect(),
-            MONTHS_PER_ROW,
+            rows(
+                grid,
+                (1..=12)
+                    .map(|m| picker_item(grid, CalendarItemKind::Month, m as usize))
+                    .collect(),
+                MONTHS_PER_ROW,
+            ),
         ),
-        Mode::Year => year_view(grid),
+        Mode::Year => centered(grid, year_view(grid)),
     });
     vec![header.into_element(), body]
+}
+
+/// The month or the year view, in a terminal centered in the width of the
+/// day view's months: the calendar (a date picker's popup with it) keeps
+/// its width as the view changes, and the header its arrows at the ends.
+fn centered(grid: Grid, body: AnyElement) -> AnyElement {
+    match grid.terminal {
+        true => {
+            let months = grid.months() as usize;
+            let width = months * MONTH_CELLS + months.saturating_sub(1) * 2 * MONTH_GAP_CELLS;
+            view()
+                .w(cells(width))
+                .flex_none()
+                .items_center()
+                .child(body)
+                .into_element()
+        }
+        false => body,
+    }
 }
 
 /// `items` in rows of `per_row`: the month view.
@@ -1194,21 +1224,26 @@ fn rows(grid: Grid, items: Vec<AnyElement>, per_row: usize) -> AnyElement {
         .into_element()
 }
 
-/// The year view: a page of years in rows of [`YEARS_PER_ROW`], each place
-/// showing the year it holds on the page (a turn of the pages changes the
-/// numbers); places past the last year are empty, and rows of them go.
+/// The year view: a page of years in rows of [`YEARS_PER_ROW`] (in a
+/// terminal [`TERMINAL_YEARS_PER_ROW`]), each place showing the year it
+/// holds on the page (a turn of the pages changes the numbers); places past
+/// the last year are empty, and rows of them go.
 fn year_view(grid: Grid) -> AnyElement {
     let config = grid.config;
+    let per_row = match grid.terminal {
+        true => TERMINAL_YEARS_PER_ROW,
+        false => YEARS_PER_ROW,
+    };
     let end = computed(move || grid.years().end);
     let holds = move |at: usize| grid.year_page.get() + (at as i32) < end.get();
     let row = move |r: usize| {
-        let first = r * YEARS_PER_ROW;
+        let first = r * per_row;
         view()
             .flex_row()
             .app_class(config.row_class)
             .inline_style(config.row_style)
             .children(
-                (first..first + YEARS_PER_ROW)
+                (first..first + per_row)
                     .map(|at| {
                         // A short last row keeps the columns of the others.
                         when(
@@ -1225,11 +1260,11 @@ fn year_view(grid: Grid) -> AnyElement {
         .app_class(config.body_class)
         .inline_style(config.body_style)
         .children(
-            (0..YEARS_PER_PAGE / YEARS_PER_ROW)
+            (0..YEARS_PER_PAGE.div_ceil(per_row))
                 .map(|r| match r {
                     // A page starts at a year of the range.
                     0 => row(r).into_element(),
-                    _ => when(move || holds(r * YEARS_PER_ROW), move || row(r)).into_element(),
+                    _ => when(move || holds(r * per_row), move || row(r)).into_element(),
                 })
                 .collect::<Vec<_>>(),
         )
@@ -1586,6 +1621,12 @@ fn picker_item(grid: Grid, kind: CalendarItemKind, at: usize) -> AnyElement {
         None,
     )
     .when(!grid.terminal, |v| v.flex_1())
+    // A terminal's month numbers (without the app's labels) are right-aligned
+    // in two Cells, as the days are: the rows are as wide as each other and
+    // center as a block, `10 11 12` under `1 2 3`.
+    .when(grid.terminal && is_month, |v| {
+        v.min_w(cells(DAY_CELLS)).items_end()
+    })
     .on_press(move || {
         let value = untracked(value);
         grid.page.update(|p| {
@@ -1617,7 +1658,10 @@ fn month(grid: Grid, offset: u32, changed: Rc<dyn Fn(Date)>) -> AnyElement {
             .app_class(config.row_class)
             .inline_style(config.row_style)
     };
-    let weekdays = row().children(
+    // The weekdays are labels, which the terminal's layout keeps no
+    // blank Cells between as it does the days' buttons: a gap of 24pt (two
+    // columns) keeps them over their days.
+    let weekdays = row().when(grid.terminal, |v| v.gap(cells(3))).children(
         (0..7)
             .map(|at| weekday(grid, offset, at))
             .collect::<Vec<_>>(),

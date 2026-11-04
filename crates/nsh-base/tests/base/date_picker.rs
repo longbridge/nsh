@@ -561,21 +561,33 @@ fn on_a_phone_the_calendar_spans_the_sheet() {
     assert!((width.0 - 800.0 / 7.0).abs() <= 1.0, "a day {width:?} wide");
 }
 
-/// A date picker with a date chosen and a clear button `Clear`.
+/// A date picker with a date chosen, cleanable, its trigger `Deadline` on
+/// a band 14 Cells wide, which leaves six Cells free at its end for the
+/// terminal's marks, a slot of three each. The band's width is its own (a
+/// terminal keeps two Cells at most of a padding, so padding cannot leave
+/// six), and the page holds it at that width rather than the window's.
 #[component]
 fn ClearableDate() -> impl IntoElement {
-    date_picker()
-        .accessibility_label("Deadline")
-        .default_value(DateTime::Single(Some(
-            d(2026, 11, 6).and_hms_opt(0, 0, 0).unwrap(),
-        )))
-        .cleanable(true)
-        .clear_button(text("Clear"))
-        .trigger(view().child(text("Deadline")))
+    view().items_start().child(
+        date_picker()
+            .accessibility_label("Deadline")
+            .default_value(DateTime::Single(Some(
+                d(2026, 11, 6).and_hms_opt(0, 0, 0).unwrap(),
+            )))
+            .cleanable(true)
+            .clear_button(text("Clear"))
+            .trigger(
+                view()
+                    .flex_row()
+                    .w(px(112.0))
+                    .bg(nsh_core::color::rgb(0x333333))
+                    .child(text("Deadline")),
+            ),
+    )
 }
 
 #[test]
-fn a_terminals_date_picker_has_its_clear_button_after_its_value_in_its_row() {
+fn a_terminals_date_picker_shows_its_clear_and_arrow_at_its_band_s_end() {
     let viewport = Size::new(px(390.0), px(844.0));
     let config = EngineConfig {
         viewport,
@@ -637,7 +649,39 @@ fn a_terminals_date_picker_has_its_clear_button_after_its_value_in_its_row() {
             }
         }
     };
-    let (value, clear) = (at("Deadline"), at("Clear"));
+    // The terminal's own marks in place of the app's `Clear`, on the
+    // band's row: `× ▾`, each the middle of a slot of three Cells, `▾` on
+    // the Cell before the band's last (`Deadline` is 8 Cells, the band 14).
+    assert!(
+        !seen.texts.values().any(|t| t == "Clear"),
+        "the terminal's × in place of the app's clear button: {:?}",
+        seen.texts
+    );
+    let (value, clear, arrow) = (at("Deadline"), at("×"), at("▾"));
+    // The bounds of each and of the views around them, for a failure.
+    let chain = |t: &str| {
+        let (id, _) = seen.texts.iter().find(|(_, s)| s.as_str() == t).unwrap();
+        let mut id = *id;
+        let mut out = format!("{t}:");
+        loop {
+            out += &format!(" {id:?}={:?}", seen.frames.get(&id));
+            match seen.parents.get(&id) {
+                Some(parent) => id = *parent,
+                None => return out,
+            }
+        }
+    };
+    let bounds = format!("{}\n{}\n{}", chain("Deadline"), chain("×"), chain("▾"));
     assert_eq!(clear.1, value.1, "one row: {value:?} {clear:?}");
-    assert!(clear.0 > value.0, "after the value: {value:?} {clear:?}");
+    assert_eq!(arrow.1, value.1, "one row: {value:?} {arrow:?}");
+    assert_eq!(
+        arrow.0 - value.0,
+        12.0 * 8.0,
+        "▾ before the band's last Cell\n{bounds}"
+    );
+    assert_eq!(
+        arrow.0 - clear.0,
+        3.0 * 8.0,
+        "× three Cells before ▾\n{bounds}"
+    );
 }

@@ -1,13 +1,17 @@
 //! `DataTable` with rows a Rust app makes a column at a time, each of one
 //! type: the texts, numbers and booleans the table shows; its column
-//! handles are the pointer's alone, in a terminal too.
+//! handles are the pointer's alone, in a terminal too, and draw no line
+//! there until the pointer is on them; a title's sort is one glyph there.
 
 use std::{
     collections::HashMap,
     sync::{Arc, Mutex},
 };
 
-use nsh_base::{DataTableColumn, DataTableRows, data_table, resize_handle};
+use nsh_base::{
+    DataTableColumn, DataTableRows, DataTableSort, DataTableSortDirection, data_table,
+    resize_handle,
+};
 use nsh_core::{
     MountItem, NodeId, Size,
     element::Root,
@@ -130,4 +134,136 @@ fn a_terminals_column_handles_are_no_stops_of_tab() {
             "the {key} column's handle is the pointer's"
         );
     }
+}
+
+/// Two quote tables in a terminal, every column sortable: the first sorted
+/// by symbol ascending, the second by its last price descending.
+#[component]
+fn Sorted() -> impl IntoElement {
+    let table = |key: &str, direction| {
+        let mut sort = DataTableSort::default();
+        sort.key = key.to_owned().into();
+        sort.direction = direction;
+        let rows = DataTableRows::new(1)
+            .texts("symbol", ["AAPL"])
+            .numbers("last", [231.5]);
+        let sortable = |key: &str| {
+            let mut c = column(key);
+            c.sortable = true;
+            c
+        };
+        data_table()
+            .h(px(64.0))
+            .columns(vec![sortable("symbol"), sortable("last")])
+            .data(rows)
+            .sort(Some(sort))
+    };
+    view()
+        .child(table("symbol", DataTableSortDirection::Ascending))
+        .child(table("last", DataTableSortDirection::Descending))
+}
+
+#[test]
+fn a_terminals_titles_show_their_sort_in_one_glyph_and_no_lines_between() {
+    let viewport = Size::new(px(600.0), px(300.0));
+    let config = EngineConfig {
+        viewport,
+        environment: Environment {
+            window: viewport,
+            os: Os::Linux,
+            idiom: Idiom::Terminal,
+            cell: Some(Size::new(px(8.0), px(16.0))),
+            ..Environment::default()
+        },
+        ..EngineConfig::new(Root::of::<Sorted>())
+    };
+    let mut app = Headless::start(config).unwrap();
+    app.first_render().unwrap();
+    app.wait_for("AAPL").unwrap();
+    // A sorted title's direction is one glyph, an unsorted one's a faint
+    // pair's: no chevrons, no arrows of two Cells.
+    for glyph in ["▲", "▼", "↕"] {
+        assert!(app.shows(glyph), "a title shows {glyph}");
+    }
+    for gone in ["↑", "↓"] {
+        assert!(!app.shows(gone), "no title shows {gone}");
+    }
+    // The columns' handles draw no line until the pointer is on them: the
+    // titles stand apart by their spaces.
+    assert!(
+        !app.screen().texts().iter().any(|t| t.contains('│')),
+        "no column line between the titles"
+    );
+}
+
+/// [`Quotes`] whose cells are chosen, the chosen cell and where the focus
+/// is written under it, then a view Tab stops at.
+#[component]
+fn TabOut() -> impl IntoElement {
+    let rows = DataTableRows::new(2)
+        .texts("symbol", ["AAPL", "MSFT"])
+        .numbers("last", [231.5, 412.0]);
+    let chosen = signal(String::from("none"));
+    let next = signal(false);
+    view()
+        .child(
+            data_table()
+                .h(px(120.0))
+                .cell_selectable(true)
+                .columns(vec![column("symbol"), column("last")])
+                .data(rows)
+                .on_selection_change(move |s: &Option<nsh_base::DataTableSelection>| {
+                    if let Some(s) = s {
+                        chosen.set(format!("{:?}:{:?}", s.row, s.column));
+                    }
+                }),
+        )
+        .child(
+            view()
+                .focusable(true)
+                .on_press(|| {})
+                .on_focus(move || next.set(true))
+                .child(text("Next")),
+        )
+        .child(text(move || {
+            format!("Chosen {} next {}", chosen.get(), next.get())
+        }))
+}
+
+fn tab_out_on(idiom: Idiom) -> Headless {
+    let viewport = Size::new(px(600.0), px(300.0));
+    let config = EngineConfig {
+        viewport,
+        environment: Environment {
+            window: viewport,
+            os: Os::Linux,
+            idiom,
+            ..Environment::default()
+        },
+        ..EngineConfig::new(Root::of::<TabOut>())
+    };
+    let mut app = Headless::start(config).unwrap();
+    app.first_render().unwrap();
+    // A press on a cell chooses it and gives the table the keyboard.
+    app.press("text:AAPL").unwrap();
+    app.wait_for("Chosen Some(0):Some(0) next false").unwrap();
+    app
+}
+
+#[test]
+fn a_terminals_tab_leaves_the_table_and_the_arrows_move_between_columns() {
+    let mut app = tab_out_on(Idiom::Terminal);
+    app.press_key("right").unwrap();
+    app.wait_for("Chosen Some(0):Some(1) next false").unwrap();
+    app.press_key("left").unwrap();
+    app.wait_for("Chosen Some(0):Some(0) next false").unwrap();
+    app.press_key("tab").unwrap();
+    app.wait_for("Chosen Some(0):Some(0) next true").unwrap();
+}
+
+#[test]
+fn a_desktops_tab_moves_the_chosen_cell_to_the_next_column() {
+    let mut app = tab_out_on(Idiom::Desktop);
+    app.press_key("tab").unwrap();
+    app.wait_for("Chosen Some(0):Some(1) next false").unwrap();
 }

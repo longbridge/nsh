@@ -531,6 +531,13 @@ impl Field {
         } else {
             color.unwrap_or(config.style.color)
         };
+        // A field whose text is transparent keeps its text to itself (a
+        // one-time code's field under its cells): no glyph of it lands on
+        // the grid, where a hidden attribute would still leave it in the
+        // Cells, but the cursor stays where it types.
+        if color.is_transparent() {
+            return;
+        }
         let mut style = crate::palette::ink(color, ground);
         if placeholder {
             // A placeholder is secondary text, whatever its color.

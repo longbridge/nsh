@@ -193,12 +193,11 @@ impl SystemDialog {
         }
     }
 
-    /// Draws the dialog centered in `area`, over a faded backdrop, on the
-    /// terminal's surfaces `ramp` (`None`: the bandless look, its buttons
+    /// Draws the dialog centered in `area`, over the page as it is (a
+    /// terminal shows no scrim), on the terminal's surfaces `ramp` (`None`: the bandless look, its buttons
     /// in angle brackets).
     fn draw(&mut self, buffer: &mut Buffer, area: Rect, ramp: Option<Ramp>) {
         let area = area.intersection(buffer.area);
-        backdrop(buffer, area, ramp);
         if area.width < 6 || area.height < 3 {
             self.rect = Rect::default();
             self.buttons.clear();
@@ -381,42 +380,6 @@ impl Dialogs {
     pub(crate) fn draw(&mut self, buffer: &mut Buffer, area: Rect, ramp: Option<Ramp>) {
         if let Some(dialog) = self.shown.first_mut() {
             dialog.draw(buffer, area, ramp);
-        }
-    }
-}
-
-/// What is behind a modal in `area`: faded half way into the terminal's
-/// background where it has surfaces (`ramp`), else dim.
-pub(crate) fn backdrop(buffer: &mut Buffer, area: Rect, ramp: Option<Ramp>) {
-    let Some(ramp) = ramp else {
-        return dim(buffer, area);
-    };
-    for y in area.y..area.bottom() {
-        for x in area.x..area.right() {
-            let cell = &mut buffer[(x, y)];
-            let reversed = cell.modifier.contains(Modifier::REVERSED);
-            let (fg, bg) = if reversed {
-                (cell.bg, cell.fg)
-            } else {
-                (cell.fg, cell.bg)
-            };
-            cell.fg = ramp.fade(fg, true);
-            // A reverse-video band keeps a band: the select step.
-            cell.bg = match bg {
-                Color::Reset if reversed => ramp.level(SELECT),
-                bg => ramp.fade(bg, false),
-            };
-            cell.modifier -= Modifier::REVERSED | Modifier::DIM | Modifier::BOLD;
-        }
-    }
-}
-
-/// Dims what is drawn in `area`: what is behind a modal.
-fn dim(buffer: &mut Buffer, area: Rect) {
-    for y in area.y..area.bottom() {
-        for x in area.x..area.right() {
-            let cell = &mut buffer[(x, y)];
-            cell.modifier = Modifier::DIM;
         }
     }
 }
@@ -605,7 +568,9 @@ mod tests {
         buffer.set_string(0, 0, "behind", ratatui_core::style::Style::default());
         let area = buffer.area;
         dialogs.draw(&mut buffer, area, None);
-        assert!(buffer[(0, 0)].modifier.contains(Modifier::DIM));
+        // No scrim: the page around the box is left as it was.
+        assert_eq!(buffer[(0, 0)].symbol(), "b");
+        assert_eq!(buffer[(0, 0)].modifier, Modifier::empty());
         let rows: Vec<String> = (0..9).map(|y| text(&buffer, y)).collect();
         let top = rows.iter().position(|r| r.contains("╭")).unwrap();
         assert!(rows[top].contains(" Delete file "), "{rows:#?}");
@@ -683,7 +648,7 @@ mod tests {
     }
 
     #[test]
-    fn on_surfaces_an_alert_fades_its_backdrop_and_bands_its_focused_button() {
+    fn on_surfaces_an_alert_leaves_the_page_and_bands_its_focused_button() {
         let ramp =
             crate::palette::Ramp::new(crate::ColorDepth::TrueColor, Some([24; 3]), Some([224; 3]));
         let mut dialogs = Dialogs::default();
@@ -692,8 +657,12 @@ mod tests {
         buffer.set_string(0, 0, "behind", ratatui_core::style::Style::default());
         let area = buffer.area;
         dialogs.draw(&mut buffer, area, ramp);
-        assert!(!buffer[(0, 0)].modifier.contains(Modifier::DIM));
-        assert_eq!(buffer[(0, 0)].fg, ramp.unwrap().muted(), "faded, not dim");
+        assert_eq!(buffer[(0, 0)].modifier, Modifier::empty());
+        assert_eq!(
+            buffer[(0, 0)].fg,
+            ratatui_core::style::Color::Reset,
+            "the page keeps its look"
+        );
         let rows: Vec<String> = (0..9).map(|y| text(&buffer, y)).collect();
         let top = rows.iter().position(|r| r.contains("╭")).unwrap();
         assert!(rows[top].contains("╭─ Delete file ─"), "{rows:#?}");

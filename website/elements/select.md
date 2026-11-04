@@ -186,7 +186,7 @@ follow the select, its own `onPress` runs too, and the list is placed against it
 
 Without `open`, the select keeps its own open state (from `defaultOpen`). With `open`, the app owns it and changes it
 in `onOpenChange({ open, reason })`: `"triggerPress"` (a press of the trigger, or one of its keys), `"select"` (a choice),
-`"pressOutside"`, `"backdropPress"` or `"cancel"` (Escape or back). `onOpen` and `onClose` tell when the list is
+`"pressOutside"`, `"backdropPress"`, `"cancel"` (Escape or back) or `"focus"` (Tab or Shift+Tab moving the keyboard focus on from the open list). `onOpen` and `onClose` tell when the list is
 shown and gone (a sheet once it came in and once it went), `onCancel` that the user closed it without choosing.
 
 ## Search
@@ -329,8 +329,9 @@ open:
 | Space | Chooses the highlighted item (without a search field). |
 | Letters, digits | The next item whose title starts with what was typed in the last second (without a search field). |
 | Escape | Closes the list without choosing. |
+| Tab, Shift+Tab | Closes the list (`reason: "focus"`) and moves the focus to the next or previous control. |
 
-Once the list closes, the keyboard focus returns to the trigger, unless a press outside took it elsewhere. The
+Once the list closes, the keyboard focus returns to the trigger, unless a press outside or Tab took it elsewhere. The
 pointer highlights the row it moves over; the highlighted row is revealed as the keys move to it.
 
 ## On each device

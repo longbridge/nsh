@@ -192,17 +192,24 @@ fn animate_indicator(fade: bool) {
     });
 }
 
+/// The alpha of the accent band under a terminal's drop indicator: as
+/// faint as the terminal's bands go.
+const DROP_WASH: f32 = 0.12;
+
 /// The drop indicator: while a drag would land on a group, over the part
 /// of its content frame the panel would take (all of it to merge, a half
-/// to split). It is an overlay in the root view, placed with the frame
-/// the drag measured, so it is drawn above everything in the area: the
-/// handles' lines, which lie over the edges of the groups beside them,
-/// never cover its edges, and no frame clips it. It moves from place to
+/// to split). It is an overlay in the root view, under the drag preview
+/// (mounted again after it, `dock_area.rs` `drag_preview`), placed with
+/// the frame the drag measured, so it is drawn above everything in the
+/// area: the handles' lines, which lie over the edges of the groups beside
+/// them, never cover its edges, and no frame clips it. It moves from place to
 /// place, across groups too. The compact presentation has none.
 ///
-/// In a terminal it is the region's outline, one Cell in the accent around
-/// it over what the region shows, which stays as it is: no fill, none of
-/// the app's parts, and it jumps from Cell to Cell.
+/// In a terminal it is the region's outline, one Cell in the accent (the
+/// hue of the focus ring) around it, over a faint band of the accent: a
+/// mark laid over what the region shows, whose text stays readable under
+/// it, not a surface. None of the app's parts are drawn, and it jumps from
+/// Cell to Cell.
 pub(crate) fn drop_indicator(a: AreaCx) -> AnyElement {
     let terminal = crate::terminal::is_terminal();
     let target = computed(move || {
@@ -233,7 +240,16 @@ pub(crate) fn drop_indicator(a: AreaCx) -> AnyElement {
                     animate_indicator(before.is_none());
                 }
             });
+            // Once its overlay is shown (laid out, so opened in a commit
+            // before): the drag preview is mounted again, in a later commit,
+            // above it.
+            let opened = Cell::new(false);
             overlay()
+                .on_layout(move |_: &Bounds<Points>| {
+                    if !opened.replace(true) {
+                        a.indicator_shown.update(|n| *n = n.wrapping_add(1));
+                    }
+                })
                 .pointer_events(PointerEvents::None)
                 .focusable(false)
                 .style_with(move |s| match place() {
@@ -248,6 +264,7 @@ pub(crate) fn drop_indicator(a: AreaCx) -> AnyElement {
                     true => v
                         .border(px(1.0))
                         .border_color(crate::terminal::ACCENT)
+                        .bg(crate::terminal::ACCENT.alpha(DROP_WASH))
                         .rounded(px(4.0)),
                     false => v
                         .app_class(a.props.drop_indicator_class)

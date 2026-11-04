@@ -120,7 +120,7 @@ mount(App);
 - 在 `multiple` 时，按压、Return 或 Space 切换高亮的条目：不在值里就加入，在就移出。列表保持打开。
 - 不设 `multiple` 时，一次选择把值替换为该条目的值并关闭列表；再次选择已选的条目只会关闭列表。
 
-`onConfirm({ value })` 在列表关闭时告知当时的值：每次打开报告一次，不论怎样关闭（一次选择、Escape、在外面按压、按触发按钮），值是用户离开时的样子。Mac 上的 Cmd+Return（其他平台为 Ctrl+Return）关闭列表并确认。
+`onConfirm({ value })` 在列表关闭时告知当时的值：每次打开报告一次，不论怎样关闭（一次选择、Escape、在外面按压、按触发按钮、列表打开时按 Tab 或 Shift+Tab，`reason: "focus"`），值是用户离开时的样子。Mac 上的 Cmd+Return（其他平台为 Ctrl+Return）关闭列表并确认。
 
 `cleanable` 会在有已选条目时加一个清除按钮：按下它会清空值（`onChange({ value: [] })`）。这个按钮在输入框之后、触发按钮之前，按它不会打开列表；由应用填充内容，和[选择框的清除按钮](./select.md#value)一样。
 
@@ -218,7 +218,7 @@ mount(App);
 
 ## 键盘
 
-输入框保持焦点时，按键与选择框的相同（见[键盘](./select.md#keyboard)），区别在于：字母和数字输入到输入框中并筛选列表，而不是输入跳转；Down 和 Up 打开关闭着的列表；在 `multiple` 时，Return 切换高亮的条目并保持列表打开；Mac 上的 Cmd+Return（其他平台为 Ctrl+Return）关闭列表并确认。在桌面平台上列表关闭时，焦点留在输入框。
+输入框保持焦点时，按键与选择框的相同（见[键盘](./select.md#keyboard)），区别在于：字母和数字输入到输入框中并筛选列表，而不是输入跳转；Down 和 Up 打开关闭着的列表；在 `multiple` 时，Return 切换高亮的条目并保持列表打开；Mac 上的 Cmd+Return（其他平台为 Ctrl+Return）关闭列表并确认。Tab 和 Shift+Tab 关闭打开的列表，焦点移到下一个或上一个控件。在桌面平台上列表以其他方式关闭时，焦点留在输入框。
 
 <a id="accessibility"></a>
 

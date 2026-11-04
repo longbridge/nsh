@@ -552,3 +552,59 @@ fn the_cursor_is_a_bar_while_a_field_is_edited() {
     assert_eq!(view.cursor_style(), CursorStyle::Default);
     assert_eq!(changes.take(), [CursorStyle::Bar, CursorStyle::Default]);
 }
+
+/// A field with a clear `×` and a mask toggle after its text, each in a
+/// slot as the gallery's field buttons are in a terminal: one Cell blank
+/// each side of the mark (` × `, ` Show `), the whole slot pressable.
+const FIELD_MARKS: &str = r##"
+    import { mount, signal, View, Text } from "nsh";
+    import { Input } from "nsh/base";
+    const value = signal("Ada"), shown = signal(false);
+    function Mark(props: { text: string; label: string; onPress: () => void }) {
+        return (
+            <View role="button" accessibilityLabel={props.label} onPress={props.onPress}
+                style={{ width: props.text.length === 1 ? 24 : undefined, height: 16, flexShrink: 0,
+                    alignItems: "center", justifyContent: "center" }}>
+                <Text>{props.text.length === 1 ? props.text : ` ${props.text} `}</Text>
+            </View>
+        );
+    }
+    mount(() => <View style={{ width: 320 }}>
+        <View style={{ flexDirection: "row", alignItems: "center", backgroundColor: "#333333" }}>
+            <Input value={value()} masked={!shown()} style={{ flex: 1, height: 16 }}
+                onChange={({ value: text }) => value.set(text)} />
+            <Mark text="×" label="Clear" onPress={() => value.set("")} />
+            <Mark text={shown() ? "Hide" : "Show"} label="Reveal" onPress={() => shown.set(!shown())} />
+        </View>
+        <Text>{`value:${value()} shown:${shown()}`}</Text>
+    </View>);
+"##;
+
+/// A press on `(x, y)` with the left button.
+fn press_cell(view: &mut nsh_platform_tui::AppView, x: u16, y: u16) {
+    use nsh_platform_tui::{MouseButton, MouseKind};
+    view.handle(super::app::mouse(MouseKind::Down(MouseButton::Left), x, y));
+    view.handle(super::app::mouse(MouseKind::Up(MouseButton::Left), x, y));
+}
+
+#[test]
+fn a_field_s_clear_and_mask_marks_take_a_press_on_the_blank_cells_beside_them() {
+    let code = nsh_bundler::compile_module("Marks.tsx", FIELD_MARKS, &[]).unwrap();
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(48, 6)).unwrap();
+    view.load(Bundle::source(code)).unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "value:Ada shown:false");
+    let dump = super::dock::dump(&terminal);
+    let (clear, y) = super::dock::find(&terminal, "×").expect(&dump);
+    let (show, _) = super::dock::find(&terminal, "Show").expect(&dump);
+    // The blank Cell after `Show` reveals the text.
+    press_cell(&mut view, show + 4, y);
+    draw_until(&mut view, &mut terminal, &rx, "shown:true");
+    // The blank Cell before `Hide` masks it again.
+    let (hide, _) = super::dock::find(&terminal, "Hide").unwrap();
+    press_cell(&mut view, hide - 1, y);
+    draw_until(&mut view, &mut terminal, &rx, "shown:false");
+    // The blank Cells either side of `×` clear the field.
+    press_cell(&mut view, clear + 1, y);
+    draw_until(&mut view, &mut terminal, &rx, "value: shown:false");
+}

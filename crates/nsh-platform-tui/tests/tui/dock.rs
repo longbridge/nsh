@@ -15,7 +15,7 @@ use ratatui_core::{
     terminal::Terminal,
 };
 
-use super::app::{draw_until, mouse, surface};
+use super::app::{draw_until, draw_until_true, mouse, surface};
 
 /// The row of the panes (the status is on row 0).
 const ROW: u16 = 2;
@@ -214,6 +214,54 @@ fn hovering_the_handle_lights_its_line() {
     }
 }
 
+/// The handle's states change its line's color alone: hovered, held and
+/// focused it is the same line in the accent on the ground it rests on,
+/// no band under it and no weight.
+#[test]
+fn a_lit_handle_changes_its_lines_color_and_nothing_under_it() {
+    let (mut view, mut terminal, rx) = open();
+    let idle = terminal.backend().buffer()[(10, ROW)].clone();
+    let lit = |t: &Terminal<TestBackend>| {
+        let cell = &t.backend().buffer()[(10, ROW)];
+        cell.fg != idle.fg && !cell.modifier.contains(Modifier::DIM)
+    };
+    let check = |t: &Terminal<TestBackend>, state: &str| {
+        let cell = t.backend().buffer()[(10, ROW)].clone();
+        assert_eq!(cell.symbol(), "│", "{state}: the line\n{}", dump(t));
+        assert_eq!(
+            cell.bg,
+            idle.bg,
+            "{state}: a band under the line\n{}",
+            dump(t)
+        );
+        assert!(
+            !cell.modifier.contains(Modifier::BOLD),
+            "{state}: the line is bold\n{}",
+            dump(t)
+        );
+        cell.fg
+    };
+    // Hovered.
+    view.handle(mouse(MouseKind::Move, 10, ROW));
+    draw_until_true(&mut view, &mut terminal, &rx, "hover lit the line", lit);
+    let accent = check(&terminal, "hovered");
+    // Held, then dragged.
+    view.handle(mouse(MouseKind::Down(MouseButton::Left), 10, ROW));
+    draw_until_true(&mut view, &mut terminal, &rx, "the press lit the line", lit);
+    assert_eq!(check(&terminal, "pressed"), accent);
+    view.handle(mouse(MouseKind::Up(MouseButton::Left), 10, ROW));
+    view.handle(mouse(MouseKind::Move, 30, ROW));
+    // The release gave it the focus: off the pointer it stays lit.
+    draw_until_true(
+        &mut view,
+        &mut terminal,
+        &rx,
+        "the line stays lit while focused",
+        lit,
+    );
+    assert_eq!(check(&terminal, "focused"), accent);
+}
+
 /// A dock layout as text: `h(..)` / `v(..)` of its children, a tab group
 /// `[a *b]` with its displayed tab starred.
 fn node_text(node: &DockNode) -> String {
@@ -379,6 +427,76 @@ fn a_tab_dragged_to_a_group_s_right_edge_outlines_the_half_and_splits_there() {
     }
 }
 
+/// The dragged tab's label is drawn over the drop preview's outline, not
+/// under it: with the label on the outline's bottom row, every character
+/// of it stays (the outline through it read "dr─g a").
+#[test]
+fn the_dragged_tabs_label_stays_whole_over_the_drop_preview() {
+    dragged_label_over_the_outline(12);
+}
+
+/// The same with the outline's bottom row above the screen's last one.
+#[test]
+fn the_dragged_tabs_label_stays_whole_over_the_drop_preview_on_a_tall_screen() {
+    dragged_label_over_the_outline(40);
+}
+
+fn dragged_label_over_the_outline(rows: u16) {
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(80, rows)).unwrap();
+    view.load(App::Rust(Root::new::<Docked>(|| ()))).unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "Panel c");
+    let (tab_x, tab_y) = find(&terminal, "Tab a").expect("tab a is drawn");
+    let (panel_x, panel_y) = find(&terminal, "Panel c").expect("c's panel is drawn");
+    view.handle(mouse(MouseKind::Down(MouseButton::Left), tab_x + 1, tab_y));
+    for x in (tab_x + 2..=panel_x + 3).step_by(4).chain([panel_x + 3]) {
+        view.handle(mouse(MouseKind::Move, x, panel_y + 1));
+    }
+    draw_until_true(
+        &mut view,
+        &mut terminal,
+        &rx,
+        "the drop preview's outline did not show",
+        |t| outline_corner(t).is_some(),
+    );
+    // The preview opened again over the indicator: the label is drawn
+    // beside the pointer, inside the outline.
+    draw_until_true(
+        &mut view,
+        &mut terminal,
+        &rx,
+        &format!(
+            "the label shows by the pointer at {:?}",
+            (panel_x + 3, panel_y + 1)
+        ),
+        |t| find(t, "drag a").is_some(),
+    );
+    // The outline around all of c's content: its middle column and its
+    // bottom row.
+    let (right, top) = outline_corner(&terminal).expect("the outline's corner");
+    let buffer = terminal.backend().buffer();
+    let bottom = (top + 1..buffer.area.height)
+        .find(|&y| matches!(buffer[(right, y)].symbol(), "╯" | "┘"))
+        .expect("the outline's bottom corner");
+    let left = (0..right)
+        .rev()
+        .find(|&x| matches!(buffer[(x, top)].symbol(), "╭" | "┌"))
+        .expect("the outline's left corner");
+    let middle = (left + right) / 2;
+    // A pointer is at its Cell's middle, so the preview's corner is the
+    // Cell below and to the right of it: the label lies on the outline's
+    // bottom row with the pointer on the row above.
+    view.handle(mouse(MouseKind::Move, middle, bottom - 1));
+    let what = format!(
+        "the label is whole on the outline's row {bottom} (pointer at {:?}, outline {left}..={right}, rows {top}..={bottom})",
+        (middle, bottom - 1)
+    );
+    draw_until_true(&mut view, &mut terminal, &rx, &what, |t| {
+        find(t, "drag a").is_some_and(|(_, y)| y == bottom)
+    });
+    view.handle(mouse(MouseKind::Up(MouseButton::Left), middle, bottom - 1));
+}
+
 #[test]
 fn a_tab_dragged_onto_a_group_s_tabs_outlines_it_over_what_it_shows() {
     let (mut view, rx) = surface();
@@ -480,4 +598,297 @@ fn a_bottom_dock_keeps_its_size_in_rows() {
     // The center takes the rest above it.
     assert!(center < tab, "{}", dump(&terminal));
     assert!(find(&terminal, "more").is_some_and(|(_, y)| y == center + 1));
+}
+
+/// A surface on a dark terminal whose own colors are known, so its frames
+/// and fills are steps of them.
+fn surfaces() -> (nsh_platform_tui::AppView, crossbeam_channel::Receiver<()>) {
+    let (tx, rx) = crossbeam_channel::unbounded();
+    let mut options = nsh_platform_tui::AppOptions::default();
+    options.capabilities.colors = nsh_platform_tui::ColorDepth::TrueColor;
+    options.capabilities.background_color = Some([24; 3]);
+    options.capabilities.foreground_color = Some([224; 3]);
+    options.wake = Some(std::sync::Arc::new(move || {
+        let _ = tx.send(());
+    }));
+    options.cache = nsh_engine::CacheOptions::off();
+    (nsh_platform_tui::AppView::new(options), rx)
+}
+
+/// Two groups one above the other in a frame: `a`, its panel longer than
+/// its place, over `b`.
+#[component]
+fn Stacked() -> impl IntoElement {
+    let layout = signal(DockAreaLayout::new(
+        DockLayout::v_split()
+            .child(DockLayout::tabs().panel("a"), Some(px(96.0)))
+            .child(DockLayout::tabs().panel("b"), None),
+    ));
+    let rows: String = (1..=30)
+        .map(|row| format!("row {row}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    view().flex_1().p(px(8.0)).child(
+        view()
+            .flex_1()
+            .border(px(1.0))
+            .border_color(nsh_base::theme().border)
+            .child(
+                dock_area()
+                    .layout(move || layout.get())
+                    .compact(Some(false))
+                    .tab_bar_class("flex-row gap-2")
+                    .render_tab(|tab: &DockTab| text(format!("Tab {}", tab.panel)))
+                    .render_panel(move |panel: &nsh_base::dock::DockPanel| {
+                        let body = match panel.id.as_ref() {
+                            "a" => rows.clone(),
+                            _ => format!("Panel {}", panel.id),
+                        };
+                        view().flex_1().overflow_hidden().child(text(body))
+                    })
+                    .on_layout_change(move |next: &DockAreaLayout| layout.set(next.clone()))
+                    .size_full(),
+            ),
+    )
+}
+
+#[test]
+fn the_line_between_stacked_groups_has_no_blank_rows_and_is_the_frame_s_color() {
+    let (mut view, rx) = surfaces();
+    let mut terminal = Terminal::new(TestBackend::new(60, 24)).unwrap();
+    view.load(App::Rust(Root::new::<Stacked>(|| ()))).unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "Panel b");
+    let (tab_x, tab_y) = find(&terminal, "Tab b").expect("b's tab is drawn");
+    let buffer = terminal.backend().buffer();
+    let line = (tab_x, tab_y - 1);
+    // The line is right above b's tab, and a's rows run down to it.
+    assert_eq!(
+        buffer[line].symbol(),
+        "─",
+        "the line is the row above b's tab\n{}",
+        dump(&terminal)
+    );
+    let above: String = (0..buffer.area.width)
+        .map(|x| buffer[(x, tab_y - 2)].symbol())
+        .collect();
+    assert!(
+        above.contains("row "),
+        "a's rows reach the line: no blank row above it\n{}",
+        dump(&terminal)
+    );
+    // The frame's top left corner, drawn in the border's step: the line
+    // between the groups is drawn in it too.
+    let corner = (0..buffer.area.height)
+        .find_map(|y| {
+            (0..buffer.area.width)
+                .find(|&x| matches!(buffer[(x, y)].symbol(), "╭" | "┌"))
+                .map(|x| (x, y))
+        })
+        .expect("the frame is drawn");
+    assert_eq!(
+        buffer[line].fg,
+        buffer[corner].fg,
+        "the line is the frame's color\n{}",
+        dump(&terminal)
+    );
+}
+
+/// A dock area's handle as a group's: hovered, its line turns the accent
+/// on the ground it rests on, no band under it.
+#[test]
+fn a_hovered_dock_handle_changes_its_lines_color_and_nothing_under_it() {
+    let (mut view, rx) = surfaces();
+    let mut terminal = Terminal::new(TestBackend::new(80, 12)).unwrap();
+    view.load(App::Rust(Root::new::<Docked>(|| ()))).unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "Panel c");
+    let (panel_x, panel_y) = find(&terminal, "Panel c").expect("c's panel is drawn");
+    let buffer = terminal.backend().buffer();
+    let line = (0..panel_x)
+        .rev()
+        .find(|&x| buffer[(x, panel_y)].symbol() == "│")
+        .expect("the handle's line is drawn");
+    let idle = buffer[(line, panel_y)].clone();
+    view.handle(mouse(MouseKind::Move, line, panel_y));
+    draw_until_true(&mut view, &mut terminal, &rx, "hover lit the line", |t| {
+        t.backend().buffer()[(line, panel_y)].fg != idle.fg
+    });
+    let cell = terminal.backend().buffer()[(line, panel_y)].clone();
+    assert_eq!(cell.symbol(), "│", "{}", dump(&terminal));
+    assert_eq!(
+        cell.bg,
+        idle.bg,
+        "a band under the line\n{}",
+        dump(&terminal)
+    );
+    assert!(
+        !cell.modifier.contains(Modifier::BOLD),
+        "{}",
+        dump(&terminal)
+    );
+}
+
+#[test]
+fn a_drop_preview_is_an_accent_line_over_a_faint_accent_band() {
+    let (mut view, rx) = surfaces();
+    let mut terminal = Terminal::new(TestBackend::new(80, 12)).unwrap();
+    view.load(App::Rust(Root::new::<Docked>(|| ()))).unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "Panel c");
+    let (tab_x, tab_y) = find(&terminal, "Tab a").expect("tab a is drawn");
+    let (c_x, c_y) = find(&terminal, "Tab c").expect("tab c is drawn");
+    let (panel_x, panel_y) = find(&terminal, "Panel c").expect("c's panel is drawn");
+    // The accent, as the terminal draws it: the handle's line while the
+    // pointer is over it.
+    let buffer = terminal.backend().buffer();
+    let line = (0..panel_x)
+        .rev()
+        .find(|&x| buffer[(x, panel_y)].symbol() == "│")
+        .expect("the handle's line is drawn");
+    let idle = buffer[(line, panel_y)].fg;
+    view.handle(mouse(MouseKind::Move, line, panel_y));
+    draw_until_true(&mut view, &mut terminal, &rx, "hover lit the line", |t| {
+        t.backend().buffer()[(line, panel_y)].fg != idle
+    });
+    let accent = terminal.backend().buffer()[(line, panel_y)].fg;
+    view.handle(mouse(MouseKind::Move, panel_x + 10, panel_y + 1));
+    draw_until_true(&mut view, &mut terminal, &rx, "the line stayed lit", |t| {
+        t.backend().buffer()[(line, panel_y)].fg == idle
+    });
+    let inner = (panel_x + 1, panel_y + 1);
+    let ground = terminal.backend().buffer()[inner].bg;
+    // Over c's tabs the drop merges into c: the preview is around all of
+    // c's content.
+    view.handle(mouse(MouseKind::Down(MouseButton::Left), tab_x + 1, tab_y));
+    for x in (tab_x + 2..=c_x + 4).step_by(4).chain([c_x + 4]) {
+        view.handle(mouse(MouseKind::Move, x, c_y));
+    }
+    draw_until_true(
+        &mut view,
+        &mut terminal,
+        &rx,
+        "the drop preview's outline did not show",
+        |t| outline_corner(t).is_some(),
+    );
+    let buffer = terminal.backend().buffer();
+    let corner = outline_corner(&terminal).unwrap();
+    assert_eq!(
+        buffer[corner].fg,
+        accent,
+        "the outline is in the accent\n{}",
+        dump(&terminal)
+    );
+    // Inside it, c's text stays over a band of the accent: a mark laid
+    // over the content, its Cells keeping their symbols.
+    let inside: String = (panel_x + 1..panel_x + 4)
+        .map(|x| buffer[(x, panel_y + 1)].symbol())
+        .collect();
+    assert_eq!(inside, "ore", "{}", dump(&terminal));
+    assert_ne!(
+        buffer[inner].bg,
+        ground,
+        "the preview bands its Cells\n{}",
+        dump(&terminal)
+    );
+    view.handle(mouse(MouseKind::Up(MouseButton::Left), c_x + 4, c_y));
+    draw_until(&mut view, &mut terminal, &rx, "Layout h([*b] [");
+}
+
+/// A framed workspace whose lines meet: `a` beside `b` over `c`, and a
+/// bottom dock `t` under them all.
+#[component]
+fn Crossing() -> impl IntoElement {
+    let mut bottom = DockRegion::new(DockLayout::tabs().panel("t"));
+    bottom.size = Some(px(64.0));
+    let layout = signal(
+        DockAreaLayout::new(
+            DockLayout::h_split()
+                .child(DockLayout::tabs().panel("a"), Some(px(160.0)))
+                .child(
+                    DockLayout::v_split()
+                        .child(DockLayout::tabs().panel("b"), Some(px(80.0)))
+                        .child(DockLayout::tabs().panel("c"), None),
+                    None,
+                ),
+        )
+        .with_dock(DockPlacement::Bottom, bottom),
+    );
+    view().flex_1().child(
+        view()
+            .flex_1()
+            .border(px(1.0))
+            .border_color(nsh_base::theme().border)
+            .child(
+                dock_area()
+                    .layout(move || layout.get())
+                    .compact(Some(false))
+                    .tab_bar_class("flex-row gap-2")
+                    .render_tab(|tab: &DockTab| text(format!("Tab {}", tab.panel)))
+                    .render_panel(|panel: &nsh_base::dock::DockPanel| {
+                        view().flex_1().child(text(format!("Panel {}", panel.id)))
+                    })
+                    .on_layout_change(move |next: &DockAreaLayout| layout.set(next.clone()))
+                    .size_full(),
+            ),
+    )
+}
+
+#[test]
+fn lines_that_meet_are_joined_with_each_other_and_with_the_frame() {
+    let (mut view, rx) = surfaces();
+    let mut terminal = Terminal::new(TestBackend::new(70, 24)).unwrap();
+    view.load(App::Rust(Root::new::<Crossing>(|| ()))).unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "Panel t");
+    let buffer = terminal.backend().buffer();
+    let symbol = |x: u16, y: u16| buffer[(x, y)].symbol().to_string();
+    // The frame's corners: its left and right columns, its top row.
+    let (left, top) = (0..buffer.area.height)
+        .find_map(|y| {
+            (0..buffer.area.width)
+                .find(|&x| matches!(buffer[(x, y)].symbol(), "╭" | "┌"))
+                .map(|x| (x, y))
+        })
+        .expect("the frame is drawn");
+    let right = (left + 1..buffer.area.width)
+        .rev()
+        .find(|&x| matches!(buffer[(x, top)].symbol(), "╮" | "┐"))
+        .expect("the frame's top right corner is drawn");
+    // a's line down the workspace, b's and c's across the right column,
+    // the dock's across it all.
+    let (a_x, a_y) = find(&terminal, "Panel a").expect("a is drawn");
+    let column = (a_x..right)
+        .find(|&x| buffer[(x, a_y)].symbol() == "│")
+        .expect("the line beside a is drawn");
+    let (_, c_tab) = find(&terminal, "Tab c").expect("c's tab is drawn");
+    let between = c_tab - 1;
+    let (_, t_tab) = find(&terminal, "Tab t").expect("the dock's tab is drawn");
+    let dock = t_tab - 1;
+    let joins = [
+        // a's line meets the frame's top, b's and c's line, the dock's.
+        ((column, top), "┬"),
+        ((column, between), "├"),
+        ((column, dock), "┴"),
+        // b's and c's line meets the frame's right side.
+        ((right, between), "┤"),
+        // The dock's line meets the frame's sides.
+        ((left, dock), "├"),
+        ((right, dock), "┤"),
+    ];
+    let wrong: Vec<String> = joins
+        .iter()
+        .filter(|&&((x, y), join)| symbol(x, y) != join)
+        .map(|&((x, y), join)| format!("({x}, {y}) is {:?}, not {join:?}", symbol(x, y)))
+        .collect();
+    assert!(
+        wrong.is_empty(),
+        "lines that meet are joined: {wrong:?}\n{}",
+        dump(&terminal)
+    );
+    // The line beside a runs down to the dock's line: no gap between
+    // them.
+    for y in top + 1..dock {
+        assert!(
+            matches!(symbol(column, y).as_str(), "│" | "├"),
+            "the line beside a reaches the dock's ({column}, {y})\n{}",
+            dump(&terminal)
+        );
+    }
 }

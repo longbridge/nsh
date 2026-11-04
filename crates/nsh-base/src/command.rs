@@ -933,7 +933,15 @@ pub fn Command(props: CommandProps, cx: Scope<CommandEvent>) -> impl IntoElement
             When::NotEditing
         };
         let bind = |keys: &str, when: When, repeat: bool, f: Rc<dyn Fn()>| {
-            on_key_with(keys, KeyOptions { when, repeat }, move |_| f());
+            on_key_with(
+                keys,
+                KeyOptions {
+                    when,
+                    repeat,
+                    ..Default::default()
+                },
+                move |_| f(),
+            );
         };
         let moves = [
             ("up", Move::Previous, when),
@@ -988,6 +996,7 @@ pub fn Command(props: CommandProps, cx: Scope<CommandEvent>) -> impl IntoElement
             KeyOptions {
                 when: When::Always,
                 repeat: false,
+                ..Default::default()
             },
             move |_| {
                 let has_query = props.searchable.get_untracked()

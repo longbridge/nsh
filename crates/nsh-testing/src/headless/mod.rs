@@ -1422,9 +1422,16 @@ impl Headless {
     /// press), as the platforms count them. `None` when the view has no
     /// bounds.
     fn press_payload(&mut self, view: NodeId, at: Option<Point<Points>>) -> EventPayload {
-        // A pointer's press takes the keyboard focus off the view Tab
-        // gave it to.
-        if self.screen.key_focus().is_some_and(|id| id != view) {
+        // In a terminal a press gives the stop it is on (or in) the
+        // focus, as terminal apps do, and Tab goes on from there.
+        let stop = (self.environment.idiom == nsh_core::platform::Idiom::Terminal)
+            .then(|| self.screen.stop_around(view))
+            .flatten();
+        if let Some(stop) = stop {
+            self.move_focus(Some(stop));
+        } else if self.screen.key_focus().is_some_and(|id| id != view) {
+            // A pointer's press takes the keyboard focus off the view Tab
+            // gave it to.
             self.move_focus(None);
         }
         let Some(bounds) = self.screen.bounds_in_root(view) else {

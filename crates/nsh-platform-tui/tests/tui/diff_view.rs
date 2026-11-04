@@ -94,3 +94,103 @@ fn a_drag_selects_one_sides_code_across_rows_and_copies_it() {
     });
     assert_eq!(clipboard.text().as_deref(), Some("alpha\nbeta\ngamma"));
 }
+
+const LONG: &str = "one two three four five six seven eight nine ten";
+
+#[component]
+fn Wrapped() -> impl IntoElement {
+    view().flex_1().child(
+        diff_view()
+            .old_value(SharedString::from("x\n"))
+            .new_value(SharedString::from(format!("{LONG}\n")))
+            .layout(nsh_base::DiffLayout::Unified)
+            .soft_wrap(true)
+            .flex_1(),
+    )
+}
+
+/// A wrapped line's rows copy as the one line they show: no line break
+/// where the wrap cut it.
+#[test]
+fn a_wrapped_line_copies_whole() {
+    let clipboard = Arc::new(MemoryClipboard::default());
+    let (tx, rx) = crossbeam_channel::unbounded();
+    let mut options = AppOptions::default();
+    options.clipboard = Some(clipboard.clone());
+    options.cache = nsh_platform_tui::CacheOptions::off();
+    options.wake = Some(Arc::new(move || {
+        let _ = tx.send(());
+    }));
+    let mut view = AppView::new(options);
+    let mut terminal = Terminal::new(TestBackend::new(30, 8)).unwrap();
+    view.load(App::Rust(Root::new::<Wrapped>(|| ()))).unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "one");
+
+    let start = find(&terminal, "one", 0);
+    let buffer = terminal.backend().buffer().clone();
+    let last = (0..buffer.area.height)
+        .rev()
+        .find(|&y| (start.0..buffer.area.width).any(|x| !buffer[(x, y)].symbol().trim().is_empty()))
+        .unwrap();
+    assert!(last > start.1, "the line wraps:\n{buffer:?}");
+    view.handle(mouse(MouseKind::Down(Left), start.0, start.1));
+    view.handle(mouse(MouseKind::Move, buffer.area.width - 1, last));
+    view.handle(mouse(MouseKind::Up(Left), buffer.area.width - 1, last));
+    terminal
+        .draw(|frame| view.render(frame, frame.area()))
+        .unwrap();
+
+    view.handle(Input::Key {
+        key: "c".into(),
+        modifiers: Modifiers {
+            ctrl: true,
+            shift: true,
+            ..Default::default()
+        },
+        release: false,
+    });
+    assert_eq!(clipboard.text().as_deref(), Some(LONG));
+}
+
+#[component]
+fn Blank() -> impl IntoElement {
+    view().flex_1().child(
+        diff_view()
+            .old_value(SharedString::from("alpha\n\ngamma\n"))
+            .new_value(SharedString::from("alpha\n\nGAMMA\n"))
+            .flex_1(),
+    )
+}
+
+/// A blank line inside the selection stays in the copy.
+#[test]
+fn a_copy_keeps_a_blank_line() {
+    let clipboard = Arc::new(MemoryClipboard::default());
+    let (tx, rx) = crossbeam_channel::unbounded();
+    let mut options = AppOptions::default();
+    options.clipboard = Some(clipboard.clone());
+    options.cache = nsh_platform_tui::CacheOptions::off();
+    options.wake = Some(Arc::new(move || {
+        let _ = tx.send(());
+    }));
+    let mut view = AppView::new(options);
+    let mut terminal = Terminal::new(TestBackend::new(60, 6)).unwrap();
+    view.load(App::Rust(Root::new::<Blank>(|| ()))).unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "GAMMA");
+
+    let start = find(&terminal, "alpha", 0);
+    let end = find(&terminal, "gamma", 0);
+    view.handle(mouse(MouseKind::Down(Left), start.0, start.1));
+    view.handle(mouse(MouseKind::Move, end.0 + 5, end.1));
+    view.handle(mouse(MouseKind::Up(Left), end.0 + 5, end.1));
+    view.handle(Input::Key {
+        key: "c".into(),
+        modifiers: Modifiers {
+            ctrl: true,
+            shift: true,
+            ..Default::default()
+        },
+        release: false,
+    });
+    assert_eq!(clipboard.text().as_deref(), Some("alpha\n\ngamma"));
+}

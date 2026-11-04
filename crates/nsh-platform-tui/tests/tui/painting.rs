@@ -52,8 +52,21 @@ fn Borders() -> impl IntoElement {
                 .border_r_color(nsh_core::color::rgb(0x00ff00))
                 .border_b_color(nsh_core::color::rgb(0x0000ff))
                 .border_l_color(nsh_core::color::rgb(0xffffff))
-                .bg(nsh_core::color::rgb(0x123456))
                 .py(px(16.0))
+                .child(blank_row()),
+        )
+        // Filled as well as bordered: a surface, its fill alone (a box is
+        // its line or its fill, at every depth of color).
+        .child(
+            view()
+                .absolute()
+                .left(px(96.0))
+                .top(px(64.0))
+                .w(px(48.0))
+                .h(px(16.0))
+                .border_1()
+                .border_color(nsh_core::color::rgb(0xffffff))
+                .bg(nsh_core::color::rgb(0x123456))
                 .child(blank_row()),
         )
         .child(
@@ -115,6 +128,27 @@ fn borders_draw_box_lines_dim_or_in_the_accent_of_each_side() {
     assert!(!dim(buffer, 2, 0), "an accent is not");
     for (x, y) in [(0, 0), (2, 0), (0, 1), (2, 1), (5, 2)] {
         assert_eq!(buffer[(x, y)].bg, Color::Reset, "no fill at {x},{y}");
+    }
+}
+
+#[test]
+fn a_filled_and_bordered_box_is_its_fill_alone() {
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(24, 8)).unwrap();
+    view.load(App::Rust(Root::new::<Borders>(|| ()))).unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "ready");
+    let buffer = terminal.backend().buffer();
+    for y in 3..=5 {
+        assert_eq!(
+            row(buffer, y, 12..18),
+            "      ",
+            "no line: {:?}",
+            row(buffer, y, 0..24)
+        );
+    }
+    // A row's box: a small surface, its fill shown at 16 colors too.
+    for (x, y) in [(12, 4), (14, 4), (17, 4)] {
+        assert_ne!(buffer[(x, y)].bg, Color::Reset, "its fill at {x},{y}");
     }
 }
 
@@ -189,10 +223,14 @@ fn shadows_draw_nothing() {
     view.load(App::Rust(Root::new::<Shadows>(|| ()))).unwrap();
     draw_until(&mut view, &mut terminal, &rx, "ready");
     let buffer = terminal.backend().buffer();
+    // The boxes are small surfaces, their fills shown at 16 colors too;
+    // nothing around them: no offset, no blur.
     for y in 0..4 {
         for x in 0..20 {
             let cell = &buffer[(x, y)];
-            assert_eq!((cell.symbol(), cell.bg), (" ", Color::Reset), "{x},{y}");
+            let boxed = y == 1 && ((2..6).contains(&x) || (12..16).contains(&x));
+            assert_eq!(cell.symbol(), " ", "{x},{y}");
+            assert_eq!(cell.bg != Color::Reset, boxed, "{x},{y}");
         }
     }
 }
@@ -507,7 +545,7 @@ fn Buttons() -> impl IntoElement {
 }
 
 #[test]
-fn controls_are_their_label_rows_and_a_standing_out_fill_is_bold_in_its_accent() {
+fn controls_are_their_label_rows_and_their_fills_at_the_terminal_s_depth() {
     let (mut view, rx) = surface();
     let mut terminal = Terminal::new(TestBackend::new(12, 4)).unwrap();
     view.load(App::Rust(Root::new::<Buttons>(|| ()))).unwrap();
@@ -519,12 +557,25 @@ fn controls_are_their_label_rows_and_a_standing_out_fill_is_bold_in_its_accent()
         "no border on a control"
     );
     assert_eq!(row(buffer, 1, 0..10), "Cancel    ");
-    assert_eq!(buffer[(0, 0)].fg, Color::Blue, "the fill's accent");
-    assert!(buffer[(0, 0)].modifier.contains(Modifier::BOLD));
+    // A button's row is a small surface: without surfaces its fill at the
+    // terminal's depth (here truecolor: its own color; a quiet one the
+    // standard dark gray), its label read on it.
+    for x in [0, 9] {
+        assert_eq!(
+            buffer[(x, 0)].bg,
+            Color::Rgb(0x25, 0x63, 0xeb),
+            "the fill's accent at {x}"
+        );
+        assert_eq!(buffer[(x, 1)].bg, Color::DarkGray, "a quiet fill at {x}");
+    }
     assert!(!reversed(buffer, 0, 0), "distinct from focus");
-    assert_eq!(buffer[(0, 0)].bg, Color::Reset);
-    assert_eq!(buffer[(0, 1)].fg, Color::Reset, "a quiet fill");
-    assert!(!buffer[(0, 1)].modifier.contains(Modifier::BOLD));
+    assert_ne!(
+        buffer[(0, 0)].fg,
+        Color::Rgb(0x25, 0x63, 0xeb),
+        "the label reads on its fill"
+    );
+    assert_ne!(buffer[(0, 1)].fg, Color::DarkGray);
+    assert_eq!(buffer[(10, 0)].bg, Color::Reset, "nothing past the button");
 }
 
 #[test]

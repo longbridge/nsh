@@ -622,9 +622,13 @@ fn line_row(
                 // The code's lines select across rows in the side's area
                 // ([`content`]); a filler (no line on this side) stays out,
                 // so a copy has no blank line for it.
+                // The platform's own highlight: the line selection's tint is
+                // the theme's selection color, and the two stay apart.
                 let line = text("")
-                    .selection_color(selection_color)
                     .when(tint != Tint::Filler, |t| t.select_text())
+                    // A wrapped line's later parts continue its first:
+                    // a copy gives the line whole.
+                    .when(index > 0, |t| t.continues_text(true))
                     .absolute()
                     .top(move || Length::from(lh() * index as f32))
                     .left(px(PAD))
@@ -641,16 +645,6 @@ fn line_row(
             Some(el)
         }))
         .child(tint_el)
-}
-
-/// The highlight of the code's selected text: the lines' selection color.
-fn selection_color() -> Hsla {
-    let color = theme().selection();
-    if nsh_core::element::dark() {
-        color.dark
-    } else {
-        color.light
-    }
 }
 
 fn span_view(props: DiffViewProps, span: Span, tint: Tint) -> AnyElement {

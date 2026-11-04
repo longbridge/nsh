@@ -371,9 +371,14 @@ impl Dt {
             .max(1.0)
     }
 
-    /// The height of one title row: the app's, in a terminal too, where
-    /// the titles' rule under them takes a row of its own.
+    /// The height of one title row: the app's, or in a terminal one Cell,
+    /// as a body row's: the titles stand apart by their band (a face is its
+    /// fill or its line, so a row for their rule would be blank) and their
+    /// type, right over the first row.
     fn header_row_height(&self) -> f32 {
+        if crate::terminal::is_terminal() {
+            return crate::terminal::cell_height().0.max(1.0);
+        }
         self.props
             .header_height
             .get()
@@ -658,6 +663,9 @@ impl Dt {
 
     fn bind_keys(&self) {
         let dt = self.clone();
+        // A terminal's Tab moves the focus on, out of the table, as Tab does
+        // everywhere in a terminal; the arrows move between the columns.
+        let tab = !crate::terminal::is_terminal();
         effect(move || {
             if !dt.focused.get() {
                 return;
@@ -675,12 +683,16 @@ impl Dt {
                 ("end", Move::Last, true),
             ];
             for (keys, movement, repeat) in moves {
+                if !tab && keys.ends_with("tab") {
+                    continue;
+                }
                 let dt = dt.clone();
                 on_key_with(
                     keys,
                     KeyOptions {
                         when: When::NotEditing,
                         repeat,
+                        ..Default::default()
                     },
                     move |_| dt.key_move(movement),
                 );
@@ -701,6 +713,7 @@ impl Dt {
                 KeyOptions {
                     when: When::NotEditing,
                     repeat: false,
+                    ..Default::default()
                 },
                 move |_| copy.copy_selection(),
             );

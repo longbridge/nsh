@@ -388,11 +388,11 @@ fn a_terminals_quote_has_a_bar_and_its_rule_is_a_row_of_lines() {
     };
     let rule = |t: &String| !t.is_empty() && t.chars().all(|c| c == '─');
     let texts = started(Idiom::Terminal);
-    assert!(texts.iter().any(|t| t == "│"), "no quote bar in {texts:?}");
+    assert!(texts.iter().any(|t| t == "▎"), "no quote bar in {texts:?}");
     assert!(texts.iter().any(rule), "no rule in {texts:?}");
     // Elsewhere the app's border and hairline draw them.
     let texts = started(Idiom::Desktop);
-    assert!(!texts.iter().any(|t| t == "│" || rule(t)), "{texts:?}");
+    assert!(!texts.iter().any(|t| t == "▎" || rule(t)), "{texts:?}");
 }
 
 #[test]

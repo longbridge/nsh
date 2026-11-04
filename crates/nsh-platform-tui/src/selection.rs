@@ -108,6 +108,11 @@ impl SelectionTexts for Texts<'_> {
     fn frame(&self, i: usize) -> Bounds<Points> {
         self.geometry[i].text_frame.expect("text geometry")
     }
+    fn continues(&self, i: usize) -> bool {
+        self.tree
+            .get(self.geometry[i].id)
+            .is_some_and(|view| view.props.continues_text)
+    }
     fn offset_at(&self, i: usize, point: Point<Points>) -> u32 {
         let point = point - self.frame(i).origin;
         let glyphs = &self.layout(i).glyphs;

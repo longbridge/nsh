@@ -397,3 +397,64 @@ fn escape_in_a_sheet_gives_the_focus_back_to_where_it_came_from() {
         "seen opener inside opener after.",
     );
 }
+
+#[test]
+fn escape_closing_a_sheet_before_the_focus_went_in_gives_it_back_to_the_opener() {
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(100, 20)).unwrap();
+    view.load(App::Rust(Root::new::<SheetFocus>(|| ())))
+        .unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "after");
+    key(&mut view, "Tab", false);
+    draw_until(&mut view, &mut terminal, &rx, "seen opener.");
+    key(&mut view, "Enter", false);
+    draw_until(&mut view, &mut terminal, &rx, "inside");
+    draw_until_still(&mut view, &mut terminal, &rx);
+    // Closed at once: the backdrop covered the opener, which takes the
+    // focus back as the sheet goes, and Enter opens it again.
+    key(&mut view, "Escape", false);
+    draw_until(&mut view, &mut terminal, &rx, "seen opener opener.");
+    key(&mut view, "Enter", false);
+    draw_until(&mut view, &mut terminal, &rx, "inside");
+}
+
+#[test]
+fn a_press_on_a_stop_focuses_it_and_tab_goes_on_from_there() {
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(100, 20)).unwrap();
+    view.load(App::Rust(Root::new::<SheetFocus>(|| ())))
+        .unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "after");
+    // The press is on the stop's text: the stop around it takes the focus.
+    let (x, y) = {
+        let buffer = terminal.backend().buffer();
+        let width = buffer.area.width;
+        let cells: Vec<&str> = buffer.content.iter().map(|c| c.symbol()).collect();
+        let row = (0..buffer.area.height)
+            .find(|&y| {
+                let line: String = cells[(y * width) as usize..((y + 1) * width) as usize].concat();
+                line.trim_start().starts_with("after")
+            })
+            .expect("the stop after");
+        let line: String = cells[(row * width) as usize..((row + 1) * width) as usize].concat();
+        let x = line.find("after").unwrap() as u16;
+        (x + 1, row)
+    };
+    for kind in [
+        MouseKind::Down(MouseButton::Left),
+        MouseKind::Up(MouseButton::Left),
+    ] {
+        view.handle(mouse(kind, x, y));
+    }
+    draw_until(&mut view, &mut terminal, &rx, "seen after.");
+    // Shift+Tab goes back from it, not from the end of the page.
+    view.handle(Input::Key {
+        key: "Tab".into(),
+        modifiers: Modifiers {
+            shift: true,
+            ..Default::default()
+        },
+        release: false,
+    });
+    draw_until(&mut view, &mut terminal, &rx, "seen after opener.");
+}

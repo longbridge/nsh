@@ -28,6 +28,9 @@ fn hover_styles_and_events_follow_the_pointer_and_clear_outside_the_surface() {
     let mut terminal = Terminal::new(TestBackend::new(40, 8)).unwrap();
     view.load(Bundle::source(code)).unwrap();
     draw_until(&mut view, &mut terminal, &rx, "idle");
+    // Without surfaces the small box is its fill in a standard color.
+    let rest = terminal.backend().buffer()[(1, 1)].bg;
+    assert_ne!(rest, Color::Reset, "the fill at rest");
     view.handle(mouse(MouseKind::Move, 1, 0));
     draw_until(&mut view, &mut terminal, &rx, "inside");
     // A hovered pressable view is a faint band: the terminal's background
@@ -41,7 +44,7 @@ fn hover_styles_and_events_follow_the_pointer_and_clear_outside_the_surface() {
     assert_eq!(terminal.backend().buffer()[(10, 0)].bg, Color::Reset);
     view.handle(mouse(MouseKind::Move, 41, 0));
     draw_until(&mut view, &mut terminal, &rx, "outside");
-    assert_eq!(terminal.backend().buffer()[(1, 1)].bg, Color::Reset);
+    assert_eq!(terminal.backend().buffer()[(1, 1)].bg, rest, "back at rest");
 }
 
 #[test]
@@ -625,7 +628,7 @@ fn pressing_a_field_closes_an_open_popover_as_any_press_outside_it() {
 
 /// A surface whose terminal reports its colors, so fills are steps of the
 /// ramp from its background (24) toward its foreground (224).
-fn ramp_surface() -> (nsh_platform_tui::AppView, crossbeam_channel::Receiver<()>) {
+pub(super) fn ramp_surface() -> (nsh_platform_tui::AppView, crossbeam_channel::Receiver<()>) {
     let (tx, rx) = crossbeam_channel::unbounded();
     let mut options = nsh_platform_tui::AppOptions::default();
     options.capabilities.colors = nsh_platform_tui::ColorDepth::TrueColor;
@@ -889,7 +892,7 @@ fn a_bar_filled_out_of_a_sunken_track_stands_apart_from_the_box_around_it() {
 }
 
 #[test]
-fn a_focused_one_row_field_whose_line_has_no_room_is_underlined_in_the_accent() {
+fn a_focused_one_row_field_is_its_band_brighter_with_no_line_under_it() {
     use nsh_platform_tui::MouseButton::Left;
     // Hopper's: the app shows focus with its border's color, which a box
     // one row tall cannot draw.
@@ -914,24 +917,54 @@ fn a_focused_one_row_field_whose_line_has_no_room_is_underlined_in_the_accent() 
     view.load(Bundle::source(code)).unwrap();
     draw_until(&mut view, &mut terminal, &rx, "blurred");
     let (x, y) = word_at(&terminal, "120");
-    assert!(
-        !terminal.backend().buffer()[(x, y)]
-            .modifier
-            .contains(ratatui_core::style::Modifier::UNDERLINED),
-        "no mark at rest"
-    );
+    let rest = {
+        let buffer = terminal.backend().buffer();
+        assert!(
+            !buffer[(x, y)]
+                .modifier
+                .contains(ratatui_core::style::Modifier::UNDERLINED),
+            "no mark at rest"
+        );
+        [buffer[(x, y)].bg, buffer[(x + 10, y)].bg]
+    };
     view.handle(mouse(MouseKind::Down(Left), x, y));
     view.handle(mouse(MouseKind::Up(Left), x, y));
     draw_until(&mut view, &mut terminal, &rx, "focused");
     let buffer = terminal.backend().buffer();
-    // The whole row, the text and the blank Cells after it.
-    for at in [x, x + 10] {
+    let light = |color: Color| match color {
+        Color::Rgb(r, g, b) => u16::from(r) + u16::from(g) + u16::from(b),
+        other => panic!("an RGB band, not {other:?}"),
+    };
+    // The whole row, the text and the blank Cells after it: a brighter
+    // band, no line under it and no ring around it.
+    for (at, rest) in [x, x + 10].into_iter().zip(rest) {
         let cell = &buffer[(at, y)];
         assert!(
-            cell.modifier
-                .contains(ratatui_core::style::Modifier::UNDERLINED),
-            "underlined at {at}"
+            light(cell.bg) > light(rest),
+            "brighter at {at}: {:?} over {rest:?}",
+            cell.bg
         );
-        assert_eq!(cell.underline_color, Color::Blue, "in the accent at {at}");
+        assert!(
+            !cell
+                .modifier
+                .contains(ratatui_core::style::Modifier::UNDERLINED),
+            "no underline at {at}"
+        );
     }
+    let row: String = (0..40).map(|x| buffer[(x, y)].symbol()).collect();
+    assert!(
+        !row.contains(['│', '─', '▁', '_']),
+        "no line or ring: {row:?}"
+    );
+    for row in [y.saturating_sub(1), y + 1] {
+        let line: String = (0..40).map(|x| buffer[(x, row)].symbol()).collect();
+        assert!(!line.contains(['─', '▔', '▁']), "no line beside: {line:?}");
+    }
+    // The caret shows where the keys go: the terminal's cursor, on the
+    // field's row.
+    assert!(terminal.backend().cursor_visible(), "the cursor is drawn");
+    let caret =
+        ratatui_core::backend::Backend::get_cursor_position(terminal.backend_mut()).unwrap();
+    assert_eq!(caret.y, y, "on the field's row");
+    assert!((x..x + 20).contains(&caret.x), "in the field: {caret:?}");
 }

@@ -1828,6 +1828,26 @@ impl Screen {
             .collect()
     }
 
+    /// The stop a press on `id` gives the focus to in a terminal: `id` or
+    /// its nearest ancestor that Tab stops at (`tab_stops`), else the
+    /// topmost stop over the press's point (a table's hit layer over its
+    /// rows), as a terminal finds what is under the pointer.
+    pub(crate) fn stop_around(&self, id: NodeId) -> Option<NodeId> {
+        let stops = self.tab_stops();
+        let mut at = Some(id);
+        while let Some(id) = at {
+            if stops.contains(&id) {
+                return Some(id);
+            }
+            at = self.nodes.get(&id).and_then(|v| v.parent);
+        }
+        let point = self.bounds_in_root(id)?.center();
+        stops.iter().rev().copied().find(|&stop| {
+            self.bounds_in_root(stop)
+                .is_some_and(|bounds| bounds.contains(&point))
+        })
+    }
+
     pub(crate) fn scroll(&self, id: NodeId) -> Option<&Scroll> {
         self.nodes.get(&id)?.scroll.as_ref()
     }

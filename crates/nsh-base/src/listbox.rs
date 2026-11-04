@@ -792,7 +792,15 @@ impl Listbox {
                 When::NotEditing
             };
             let bind = |keys: &str, when: When, repeat: bool, f: Rc<dyn Fn()>| {
-                on_key_with(keys, KeyOptions { when, repeat }, move |_| f());
+                on_key_with(
+                    keys,
+                    KeyOptions {
+                        when,
+                        repeat,
+                        ..Default::default()
+                    },
+                    move |_| f(),
+                );
             };
             let moves = [
                 ("up", Move::Previous, when),
@@ -854,12 +862,40 @@ pub(crate) fn bind_typeahead(active: impl Fn() -> bool + 'static, typed: Rc<dyn 
                 KeyOptions {
                     when: When::NotEditing,
                     repeat: false,
+                    ..Default::default()
                 },
                 move |key| {
                     if let Some(c) = key.chars().next() {
                         typed(c);
                     }
                 },
+            );
+        }
+    });
+}
+
+/// Binds Tab and Shift+Tab while the list is `open`, wherever the focus
+/// is (the trigger, an input, a search field): `close` closes the list
+/// without taking the focus back, and the key goes on, so the focus moves
+/// to the next or previous control as Tab moves it (ARIA's combobox). The
+/// list would cover where the focus went. A key, not the focus leaving:
+/// on macOS the popup is a window of its own, and a press on it takes the
+/// key window from the trigger's before the press chooses.
+pub(crate) fn bind_tab_out(open: impl Fn() -> bool + 'static, close: Rc<dyn Fn()>) {
+    effect(move || {
+        if !open() {
+            return;
+        }
+        for key in ["tab", "shift+tab"] {
+            let close = close.clone();
+            on_key_with(
+                key,
+                KeyOptions {
+                    when: When::Always,
+                    repeat: false,
+                    pass_through: true,
+                },
+                move |_| close(),
             );
         }
     });

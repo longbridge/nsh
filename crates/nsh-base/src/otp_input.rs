@@ -28,7 +28,11 @@
 //!   while it is empty (`gpui-base`'s `BlinkCursor`: 500 ms, held for 300 ms
 //!   after an edit; steady with reduced motion). A cell that holds a digit
 //!   has the attribute `data-filled` (`data-filled:` classes, and
-//!   `group-data-filled:` inside a `group` cell), masked or not.
+//!   `group-data-filled:` inside a `group` cell), masked or not. In a
+//!   terminal an empty cell shows its slot, `·` muted
+//!   ([`crate::terminal::OTP_EMPTY`]), a masked digit `●`
+//!   ([`crate::terminal::OTP_MASK`]), and the terminal's own cursor is the
+//!   caret, in the middle Cell of the cell that takes the next digit.
 
 use std::time::Duration;
 
@@ -203,11 +207,12 @@ impl Blink {
     }
 
     /// Shows the caret, then blinks it after `hold` (none with reduced
-    /// motion): hidden for `BLINK`, shown for `BLINK`, and so on.
+    /// motion, nor in a terminal, whose own cursor stands for the caret):
+    /// hidden for `BLINK`, shown for `BLINK`, and so on.
     fn start(self, hold: Duration) {
         self.stop();
         self.opacity.set(1.0);
-        if untracked(reduce_motion) {
+        if untracked(reduce_motion) || crate::terminal::is_terminal() {
             return;
         }
         let ms = |d: Duration| d.as_secs_f32() * 1000.0;
@@ -531,26 +536,41 @@ impl Cells {
                     move || digit().is_some(),
                     move || {
                         text(move || match digit() {
-                            Some(_) if self.masked.get() => MASK.to_owned(),
+                            Some(_) if self.masked.get() => match self.terminal {
+                                true => crate::terminal::OTP_MASK.to_owned(),
+                                false => MASK.to_owned(),
+                            },
                             Some(c) => c.to_string(),
                             None => String::new(),
                         })
                     },
                 )
                 .otherwise(move || {
+                    // A terminal's empty cell shows its slot, muted; its
+                    // caret is the terminal's own cursor, at the field (the
+                    // sink above), over the slot's Cell.
+                    if self.terminal {
+                        return Some(
+                            text(crate::terminal::OTP_EMPTY)
+                                .text_color(crate::terminal::tone_color(
+                                    crate::terminal::Tone::Muted,
+                                ))
+                                .into_element(),
+                        );
+                    }
                     // Mounted while the cell takes the next digit; it
-                    // blinks natively. A terminal's caret is its own
-                    // cursor, at the field (the sink above): a caret view
-                    // there would be a box of no Cells that costs the
-                    // cell its middle row.
-                    when(
-                        move || !self.terminal && self.focused.get() && self.active() == ix,
-                        move || {
-                            view()
-                                .app_class(self.caret_class)
-                                .inline_style(self.caret_style)
-                                .bind_opacity(&self.blink.opacity)
-                        },
+                    // blinks natively.
+                    Some(
+                        when(
+                            move || !self.terminal && self.focused.get() && self.active() == ix,
+                            move || {
+                                view()
+                                    .app_class(self.caret_class)
+                                    .inline_style(self.caret_style)
+                                    .bind_opacity(&self.blink.opacity)
+                            },
+                        )
+                        .into_element(),
                     )
                 }),
             )

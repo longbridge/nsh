@@ -54,10 +54,10 @@ pub struct ProgressProps {
 /// `indicatorClass` / `indicatorStyle` the parts.
 ///
 /// In a terminal it shows the terminal's bar in place of the track and
-/// indicator: one row as wide as the progress bar, filled by eighths of a
-/// Cell (`▏` to `█`) over `░`; while indeterminate a segment of full Cells
-/// moves along it (still with reduced motion: `░` only)
-/// ([`crate::terminal`]).
+/// indicator: one row as wide as the progress bar, a heavy line `━` in the
+/// indicator's color to the nearest whole Cell, then a light `─` in the
+/// theme's line color; while indeterminate a segment of `━` moves along
+/// it (still with reduced motion: `─` only) ([`crate::terminal`]).
 #[component]
 pub fn Progress(props: ProgressProps, _cx: Scope<NoEvent>) -> impl IntoElement {
     let (value, indeterminate) = (props.value, props.indeterminate);
