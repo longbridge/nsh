@@ -63,6 +63,9 @@ final class Mounter {
     private static final int APPEARANCE = 33;
     private static final int COMPONENT_PROP_SLOTS = 34;
     private static final int SHADER = 35;
+    private static final int SHADER_TRANSITION = 36;
+    private static final int SHADER_INPUT = 37;
+    private static final int NAV_SHADER = 38;
     /** The surface lays out right to left: native widgets mirror. */
     boolean rtl;
     /** The app's appearance (`nsh_core::platform::Appearance`): 0 the system's, 1 light, 2 dark. */
@@ -182,6 +185,8 @@ final class Mounter {
     private final SparseArray<ModalHost> modals = new SparseArray<>();
     /** Screens' options, applied once the batch's stacks are settled. */
     private final SparseArray<ScreenOptions> screenOptions = new SparseArray<>();
+    /** The pages and dialogs that come and go through a shader (`transitionShader`; libnsh has it). */
+    final android.util.SparseBooleanArray navShaders = new android.util.SparseBooleanArray();
     /** Parents of screens, header items and modals (not their superviews). */
     private final android.util.SparseIntArray hosts = new android.util.SparseIntArray();
     private final java.util.LinkedHashSet<Integer> dirtyStacks = new java.util.LinkedHashSet<>();
@@ -539,7 +544,27 @@ final class Mounter {
                     // The layer stays in libnsh, which renders it (`shader.rs`).
                     View v = views.get(b.getInt());
                     boolean on = b.getInt() != 0;
-                    if (v instanceof Box) ((Box) v).setShader(on);
+                    int role = b.getInt();
+                    float overflow = b.getFloat();
+                    int inputs = b.getInt();
+                    if (v instanceof Box) ((Box) v).setShader(on, role, overflow, inputs);
+                    break;
+                }
+                case SHADER_TRANSITION: {
+                    View v = views.get(b.getInt());
+                    float ms = b.getFloat();
+                    if (v instanceof Box) ((Box) v).startTransition(ms);
+                    break;
+                }
+                case SHADER_INPUT: {
+                    View v = views.get(b.getInt());
+                    if (v instanceof Box) ((Box) v).picturesChanged();
+                    break;
+                }
+                case NAV_SHADER: {
+                    int id = b.getInt();
+                    if (b.getInt() != 0) navShaders.put(id, true);
+                    else navShaders.delete(id);
                     break;
                 }
                 case COMPONENT_PROP_SLOTS: {
@@ -690,6 +715,20 @@ final class Mounter {
             View v = views.valueAt(i);
             if (v instanceof ComponentBox) ((ComponentBox) v).destroy();
         }
+    }
+
+    /**
+     * The app stopped: its shader views stop picturing and drawing frames
+     * libnsh no longer renders (a screen shader gives the surface back), and
+     * its pages and dialogs no longer go through a shader. No {@code DELETE}
+     * follows for them.
+     */
+    void dropShaders() {
+        for (int i = 0; i < views.size(); i++) {
+            View v = views.valueAt(i);
+            if (v instanceof Box) ((Box) v).dropShader();
+        }
+        navShaders.clear();
     }
 
     /** Makes registered component {@code name} in box {@code id}. */
@@ -843,6 +882,8 @@ final class Mounter {
             selectableViews.remove(id);
         }
         screenOptions.remove(id);
+        navShaders.delete(id);
+        if (v instanceof Box) ((Box) v).dropShader();
         Animator running = layoutAnimators.get(id);
         if (running != null) running.cancel();
         detach(v);
