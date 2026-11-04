@@ -233,6 +233,27 @@ message or a due timer (7, none between pastes).
   median ~5µs vs ~14µs in JS, commit ~15µs vs ~22µs. Scrolling a 1000-row `List` (avatar, two texts, a bound color)
   6000 pt: ~77µs vs ~150µs of JS per rebinding frame, commit ~205µs vs ~276µs.
 
+## Shader pictures on Linux
+
+What the GTK backend reads back for shaders' pictures (`nsh-platform-linux` `shader.rs`, `docs/dev/shaders.md`), and
+when. A picture is drawn, rendered by the window's GSK renderer into a texture and downloaded synchronously on the
+main thread, so the work is held by counts the backend's tests check on Xvfb, not by timings of one machine:
+
+- An effect or a running transition pictures its children only when GTK drew one of them again since the last
+  picture (`same_nodes` over the render nodes GTK kept) or the core marked them (`ShaderInput`). An effect that reads
+  `nsh.time` draws itself on every frame, which takes the children's kept nodes and compares them, without rendering
+  or downloading: ten frames over unchanged children are one picture, a child drawn again one more
+  (`an_effect_renders_its_children_again_only_after_they_change`). Before, every frame rendered and downloaded the
+  box and its overflow (400 × 400 points at 2× is 2.5 MB a frame).
+- A view that reads `sample_backdrop` takes what is behind it again (the surface's views drawn anew up to it,
+  rendered, downloaded and hashed) at most once per painted frame: after a batch (the core marks every backdrop
+  reader once anything changed, `ShaderInput`) and after a view that draws before it changed on the UI thread (an
+  ancestor's own drawing, or a view drawn earlier); a change on the UI thread in it, above it or in a shader's own
+  frame takes nothing. A picture whose pixels hash as the last one's is not given to the shader, which then renders
+  no frame for it: a change that leaves the view's box as it was costs the drawing, the readback and the hash, not
+  an upload and a shader frame. Each reader is listed once, however often its layer is sent (every uniform update
+  sends it). Before, any change on the UI thread took every reader's backdrop again and gave it to its shader.
+
 ## The browser engine (published web apps)
 
 Headless Chromium over CDP, a published package (`nsh package --target web`), 2026-10-28:
