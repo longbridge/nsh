@@ -81,8 +81,8 @@ pub use crate::{
     image::ImageData,
     mount::{
         AudioSession, ImageOptions, InputConfig, ModalConfig, MountBatch, MountItem,
-        NO_NATIVE_HEADER, NativeProps, ScreenConfig, ScrollBehavior, StickyCell, VideoProps,
-        ViewKind, WebProps,
+        NO_NATIVE_HEADER, NativeProps, NavShader, ScreenConfig, ScrollBehavior, StickyCell,
+        VideoProps, ViewKind, WebProps,
     },
     ops::{
         AutoCapitalize, AutoFill, CellSlot, Command, ContextMenuEvent, Dialog, DialogButton,
@@ -93,7 +93,7 @@ pub use crate::{
         PasteBehavior, PasteEvent, PastedFile, PayloadValue, PressEvent, Prop, ROOT_ID, ResizeMode,
         ReturnKeyType, ScreenAnimation, ScreenProp, ScrollProp, ScrollbarSetting, SnapAlignment,
         StatusBarConfig, StatusBarSetting, StatusBarStyle, SubmitBehavior, Tag, TouchEvent,
-        TouchPhase, TouchPoint, TransitionFallback, Viewability, WebSource,
+        TouchPhase, TouchPoint, TransitionFallback, Viewability, WebInput, WebKey, WebSource,
     },
     props::{
         Accessibility, AccessibilityActionDef, AccessibilityCurrent, AccessibilityProp,

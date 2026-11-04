@@ -222,6 +222,9 @@ On the desktops and the web, where Tab reaches the views that take presses, a `T
 While the selection is hidden under a collapsed item (the app collapsed it), the keys act on that item's row: Right
 or Return expands it, Down selects the row after it.
 
+In a right-to-left layout the rows run from the right, so Left and Right trade places, as the pattern says: Left
+expands a folder and enters it, Right collapses it and selects the parent. Up, Down, Home and End keep theirs.
+
 ## Platform notes
 
 - iOS, Android and Mac Catalyst: a tap selects a row and expands or collapses a folder; a double tap acts on the item

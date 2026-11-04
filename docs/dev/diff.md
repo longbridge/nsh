@@ -30,17 +30,12 @@ user-facing page is `website/elements/diff-view.md`; how each module works insid
   then `postprocess_lines`, git's indent heuristic: a hunk that could start at several places slides to the one that
   keeps whole blocks together (a function added after another starts at its own first line, not inside the one
   before). The hunks are in order and never touch: equal lines separate them.
-- **Pairing.** Within a hunk, each deleted line is paired with the added line most like it, in order (`align`: a
-  weighted longest common subsequence over a similarity from 0 to 1, the better of the common prefix and suffix over
-  the longer line, ignoring indentation, which finds an edit in place, and the Dice coefficient of their word tokens,
-  which finds words moved). Lines less alike than 0.4 do not pair by similarity; the lines left between two pairs are
-  paired in order as far as both sides have lines (as split views show them side by side), and the rest stand alone.
-  A hunk of more than 64 lines on a side pairs in order (the alignment is quadratic).
-- **Inline changes.** A pair's changed ranges (`DiffModel::inline`) come from a Myers diff of its tokens: words for
-  `word` and `wordAlt` (letter, digit and `_` runs, whitespace runs, any other grapheme alone; CJK ideographs, kana
-  and hangul are a word each, so a changed character marks only itself), graphemes for `char`. `wordAlt` (the default)
-  joins changed words one character apart, so a phrase reads as one change. When more than 70 % of either line
-  changed, the line's tint says enough and no ranges are marked; lines over 10 000 bytes get none.
+- **Pairing.** Within a hunk, each deleted line is paired with the added line most like it, in order (`align`); lines
+  not alike enough are paired in order as split views show them side by side, and the rest stand alone.
+- **Inline changes.** A pair's changed ranges (`DiffModel::inline`) come from a diff of its tokens: words for `word`
+  and `wordAlt` (CJK ideographs, kana and hangul are a word each), graphemes for `char`. `wordAlt` (the default) joins
+  changed words one character apart, so a phrase reads as one change. Lines that changed almost entirely, and very
+  long lines, get no ranges: the line's tint says enough.
 - **Reverting and accepting** a hunk splice lines between the texts (`revert_hunk`: its old lines back into the new
   text; `accept_hunk`: its new lines into the old text), keeping each side's line breaks. The view shows the result at
   once and reports both texts with `onChange`; the app setting them back as props changes nothing more.
@@ -96,7 +91,7 @@ one for `unified`), each a gutter of line numbers (two columns in `unified`: old
 a viewport (at least 16 rows) on each side, with at least 40 rows' height before the viewport is known, in a window
 that stays put while it covers the rows in view (`RowWindow`, as the `Editor`'s); `each` keeps the rows that stay in
 it. A row's text is one `Text` of spans per wrapped line: runs of one syntax token and one inline state
-(`controller::spans`). Widths are columns of the font's `0` (tabs as 4 columns); the split sides are as wide as the
+(`controller::spans`). Widths are columns of the font's `0` (tabs as 4 columns, wide characters, CJK, fullwidth forms and emoji, as 2: their East Asian Width, so a side's box is never narrower than its text, which would wrap over the rows below; a line number's column is rounded up to a whole point and a half more, as the platforms round a text's measured width up); the split sides are as wide as the
 wider side's widest line and scroll sideways together (each side's `onScroll` scrolls the other, a move of under half a
 point ending the echo).
 
@@ -182,6 +177,6 @@ time (after a frame on WebAssembly). A patch's files each have a highlighter per
 
 ## Limits
 
-- Widths are columns of the font's `0`: exact for monospaced fonts. Soft wrap counts characters as columns, so wide
-  characters (CJK) wrap later than they fill the line.
+- Widths are columns of the font's `0`: exact for monospaced fonts. Wide characters count as two columns, which fonts
+  draw them about as wide as (a little less with a narrow `0`), so a line of them may end short of the box's edge.
 - Text is shown, not edited: changes revert or keep a hunk at a time.

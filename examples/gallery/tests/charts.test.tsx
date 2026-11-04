@@ -13,10 +13,21 @@
 // changes, a portfolio's holdings as bubbles of risk against return
 // whose holding under the pointer or the arrow keys is read out and whose
 // period moves them, analysts' price targets as a dot plot whose stock the
-// arrow keys read out and whose list changes, a radar of factor
+// arrow keys read out and whose list changes, volume and price on two y
+// scales aligned in the same steps whose row under the pointer reads out
+// both and whose period changes, revenue and margin whose scales put zero
+// on one line for a segment that loses money and move to another segment,
+// heatmaps: a correlation matrix whose pair under the pointer or the arrow
+// keys is read out and whose lookback changes, a calendar of monthly
+// returns whose month under the pointer is read out and whose symbol
+// changes, and a week of trades per half hour whose cells the arrow keys
+// step across and whose market changes, a radar of factor
 // exposure that reads out the factor nearest the pointer and changes its
 // benchmark, a quarter's income as flows between its accounts, read out
-// under the arrow keys and moving into the next quarter's, and a
+// under the arrow keys and moving into the next quarter's, a market map
+// of stocks by sector that reads out the stock or sector under the pointer
+// or the arrow keys and recolors with the period, a portfolio's allocation
+// by asset class that moves to a year ago, and a
 // watchlist whose sparklines come with their rows as its list scrolls and
 // show each period.
 import { beforeEach, expect, open, test } from "nsh/test";
@@ -28,6 +39,16 @@ const start = async (reducedMotion = false) => {
   app = await open("../App.tsx", { platform: "macos", width: 1200, height: 1700, clock: {}, reducedMotion });
   await app.press("role:button[Plot]");
   await app.waitFor("Live price");
+  // The page makes its charts as they scroll near: down until the last one
+  // (the watchlist) is made, then back to the top, so every test finds its
+  // chart. The page's first screen is made with it.
+  expect(app.shows("id:watchlist")).toBe(false);
+  let pages = 0;
+  while (!app.shows("id:watchlist")) {
+    expect(++pages).toBeLessThan(12);
+    await app.scroll("Live price", 1200);
+  }
+  await app.scroll("Live price", -1200 * pages);
 };
 beforeEach(() => start());
 
@@ -279,12 +300,17 @@ test("the risk-return bubbles read out the holding under the pointer and move wi
   // A year: every holding's numbers change, the best Sharpe with them.
   await app.press("role:tab[1Y]");
   await app.waitFor("label:/^Risk and return of 17 holdings, 1Y: best Sharpe GS, 2 ahead of the S&P 500/");
-  // The pointer stays on Amazon, read out with its numbers over a year.
+  expect(app.texts()).toContain("GS 1.31");
+  // Back over the middle of the plot once the bubbles have moved (pressing
+  // the period took the pointer off the plot in a real window): Eli Lilly
+  // is there over a year, read out with its numbers.
+  await app.wait(1200);
+  await app.hover("label:/^Risk and return of 17 holdings, 1Y/");
+  await app.waitFor("LLY · ELI LILLY");
   texts = app.texts();
-  expect(texts).toContain("AMZN · AMAZON");
-  expect(texts).toContain("+8.0%");
-  expect(texts).toContain("31.0% vol · Sharpe 0.13");
-  expect(texts).toContain("GS 1.31");
+  expect(texts).toContain("+12.0%");
+  expect(texts).toContain("33.0% vol · Sharpe 0.24");
+  expect(texts).toContain("Healthcare · $820B market cap");
 });
 
 test("the risk-return bubbles step with the arrow keys from the least volatile", async () => {
@@ -327,6 +353,160 @@ test("the price targets read out the stock the arrow keys step to and change the
   expect(app.count("label:/^Analysts' price targets, Banks: a median upside of \\+9\\.0%, the most for C at \\+14\\.3%/")).toBe(1);
 }, 120000);
 
+test("volume and price read out both values on scales aligned in the same steps, and change their period", async () => {
+  // Six months by week, the last one read out; neither scale names a
+  // domain, so both take the same steps: four ticks on each side.
+  expect(app.count("label:/^ORBX volume and close, 6M: \\+30\\.3%/")).toBe(1);
+  let texts = app.texts();
+  for (const t of ["WEEK TO OCT 30", "$214.08", "Volume 244M", "0", "100M", "200M", "300M", "160", "180", "200", "220"]) expect(texts).toContain(t);
+  // The middle of the weeks once they have drawn in: its close and volume.
+  await app.wait(1000);
+  await app.hover("label:/^ORBX volume and close/");
+  await app.waitFor("WEEK TO JUL 31");
+  texts = app.texts();
+  expect(texts).toContain("Volume 243M");
+  expect(texts).toContain("Close $188.44");
+  // Two years by month: both scales move to their new steps.
+  await app.press("role:tab[2Y]");
+  await app.waitFor("label:/^ORBX volume and close, 2Y: \\+87\\.9%/");
+  texts = app.texts();
+  for (const t of ["500M", "1B", "1.5B", "100", "150", "250", "AVG / MONTH"]) expect(texts).toContain(t);
+});
+
+test("revenue and margin put zero on one line for a segment that loses money, and move to another segment", async () => {
+  // Devices: losses below zero on the right scale, zero on the same grid
+  // line on the left one, which writes no value under it.
+  let texts = app.texts();
+  for (const t of ["$0", "$6B", "−10%", "0%", "15%", "5 / 8"]) expect(texts).toContain(t);
+  expect(texts).not.toContain("$−2B");
+  expect(texts).not.toContain("$0B");
+  // The quarter under the pointer once the bars have grown in.
+  await app.wait(1000);
+  await app.hover("label:/^Devices revenue and net margin/");
+  await app.waitFor("Revenue $4.6B");
+  expect(app.texts()).toContain("Net margin +5.8%");
+  // Cloud: both scales move to the segment's values.
+  await app.press("role:tab[Cloud]");
+  await app.waitFor("$10B");
+  texts = app.texts();
+  for (const t of ["18%", "28%", "0 / 8", "+27.1%"]) expect(texts).toContain(t);
+});
+
+test("the correlation matrix reads out the pair under the pointer and glides to another lookback", async () => {
+  // Nothing hovered: the mean of the 28 pairs over a year, the closest
+  // pair and the best hedge under the matrix.
+  expect(app.count("label:/^Correlation of 8 holdings over 1Y: closest NVDA and AMD at 0\\.83, best hedge MSFT and GLD at −0\\.18/")).toBe(1);
+  let texts = app.texts();
+  expect(texts).toContain("8 HOLDINGS · 1Y");
+  expect(texts).toContain("0.24");
+  expect(texts).toContain("NVDA·AMD 0.83");
+  expect(texts).toContain("MSFT·GLD −0.18");
+  // Each coefficient written in its cell, both sides of the diagonal.
+  expect(app.count("label:/^Correlation of 8 holdings/ >> text:0.83")).toBe(2);
+  expect(app.count("label:/^Correlation of 8 holdings/ >> text:1.00")).toBe(8);
+  // NVDA's line, AMD's column, once the cells have grown in (900 ms).
+  await app.wait(1200);
+  await app.hover("label:/^Correlation of 8 holdings/ >> text:0.83 >> nth=0");
+  await app.waitFor("NVDA × AMD");
+  expect(app.texts()).toContain("Move together closely");
+  // Three years: the closest pair and the best hedge change; the pair read
+  // out with its new coefficient (hovered again: on a real platform the
+  // press moved the pointer away).
+  await app.press("role:tab[3 years]");
+  await app.waitFor("label:/^Correlation of 8 holdings over 3Y: closest NVDA and AMD at 0\\.76, best hedge JPM and GLD at −0\\.01/");
+  await app.hover("label:/^Correlation of 8 holdings/ >> text:0.76 >> nth=0");
+  await app.waitFor("NVDA × AMD");
+  texts = app.texts();
+  expect(texts).toContain("NVDA × AMD");
+  expect(texts).toContain("0.76");
+  expect(texts).toContain("Daily returns over three years");
+  // Gold against JPMorgan: barely related over three years.
+  await app.hover("label:/^Correlation of 8 holdings/ >> text:−0.01 >> nth=0");
+  await app.waitFor("JPM × GLD");
+  expect(app.texts()).toContain("Barely related");
+}, 120000);
+
+test("the correlation matrix's arrow keys step across its grid", async () => {
+  // The first Right starts at the top left cell: NVDA against itself.
+  await tabTo("NVDA × NVDA");
+  expect(app.texts()).toContain("A holding against itself");
+  // Right along NVDA's line, Down AMD's column, End to the line's last cell.
+  await app.keyboard.press("right");
+  await app.waitFor("NVDA × AMD");
+  await app.keyboard.press("down");
+  await app.waitFor("AMD × AMD");
+  await app.keyboard.press("end");
+  await app.waitFor("AMD × GLD");
+  expect(app.texts()).toContain("−0.16");
+  await app.keyboard.press("escape");
+  await app.waitFor("8 HOLDINGS · 1Y");
+}, 120000);
+
+test("the monthly returns read out the month under the pointer and change their symbol", async () => {
+  // Nothing hovered: the S&P 500's months compounded, its best and worst
+  // months and how many were up; each year's return beside its line, the
+  // ramp's ends the largest move either way.
+  expect(app.count("label:/^S&P 500 monthly returns since 2020: best Apr 2020 at \\+12\\.7%, worst Mar 2020 at −12\\.5%/")).toBe(1);
+  let texts = app.texts();
+  expect(texts).toContain("S&P 500 · 2020–2026");
+  expect(texts).toContain("+141.3%");
+  expect(texts).toContain("Apr 2020 +12.7%");
+  expect(texts).toContain("Mar 2020 −12.5%");
+  expect(texts).toContain("53 / 82");
+  expect(texts).toContain("+36.2%");
+  expect(texts).toContain("−16.1%");
+  expect(texts).toContain("−12.7%");
+  expect(texts).toContain("+12.7%");
+  // The months along the top, the years down the left: the bands' categories.
+  for (const label of ["Jan", "Jun", "Dec", "2020", "2026"]) expect(texts).toContain(label);
+  // November 2023, once the cells have grown in (1000 ms).
+  await app.wait(1200);
+  await app.hover("label:/^S&P 500 monthly returns/ >> text:8.9");
+  await app.waitFor("NOV 2023");
+  texts = app.texts();
+  expect(texts).toContain("+8.9%");
+  expect(texts).toContain("S&P 500 · 2023 +27.2%");
+  // NVIDIA: its years and its ramp's ends; then its best month under the
+  // pointer (hovered again: on a real platform the press moved it away).
+  await app.press("role:tab[NVDA]");
+  await app.waitFor("label:/^NVDA monthly returns since 2020: best May 2023 at \\+36\\.3%, worst Sep 2022 at −19\\.6%/");
+  texts = app.texts();
+  expect(texts).toContain("+156.5%");
+  expect(texts).toContain("+36.3%");
+  // May 2023.
+  await app.hover("label:/^NVDA monthly returns/ >> text:36");
+  await app.waitFor("MAY 2023");
+  expect(app.texts()).toContain("NVDA · 2023 +148.0%");
+}, 120000);
+
+test("the trading activity's arrow keys step across the week and its market changes", async () => {
+  // The first Right starts at Monday's open.
+  await tabTo("MON 9:30–10:00");
+  expect(app.texts()).toContain("45.2k");
+  await app.keyboard.press("down");
+  await app.waitFor("TUE 9:30–10:00");
+  expect(app.texts()).toContain("42.8k");
+  await app.keyboard.press("end");
+  await app.waitFor("TUE 15:30–16:00");
+  expect(app.texts()).toContain("51.9k");
+  await app.keyboard.press("escape");
+  await app.waitFor("US · TRADES PER HALF HOUR");
+  let texts = app.texts();
+  expect(texts).toContain("361.9k");
+  expect(texts).toContain("Fri 9:30");
+  expect(texts).toContain("Mon 13:00");
+  expect(texts).toContain("2.3×");
+  // Hong Kong: fewer trades and a lunch break.
+  await app.press("role:tab[HK]");
+  await app.waitFor("HK · TRADES PER HALF HOUR");
+  texts = app.texts();
+  expect(texts).toContain("146.9k");
+  expect(texts).toContain("Thu 14:00");
+  expect(texts).toContain("2.1×");
+  expect(texts).toContain("9:30 to 16:00, closed 12:00 to 13:00 for lunch");
+  expect(app.count("label:/^Trades per half hour in HK: busiest Fri at 9:30 with 23\\.7k, quietest Thu at 14:00/")).toBe(1);
+}, 120000);
+
 test("the radar reads out the factor nearest the pointer and changes its benchmark", async () => {
   // Nothing hovered: the means of all six, the portfolio's (362 / 6) a
   // figure of its own, and its spread over the index's (327 / 6 = 54.5).
@@ -341,7 +521,23 @@ test("the radar reads out the factor nearest the pointer and changes its benchma
   // of it), its name read out.
   await app.hover("label:/^Factor exposure against the peers/");
   await app.waitFor("text:/^(VALUE|MOMENTUM|QUALITY|SIZE|LOW VOL|YIELD)$/");
-});
+}, 120000);
+
+test("the radar reads out the factor nearest the pointer and changes its benchmark", async () => {
+  // Nothing hovered: the means of all six, the portfolio's (362 / 6) a
+  // figure of its own, and its spread over the index's (327 / 6 = 54.5).
+  expect(app.texts()).toContain("ALL SIX FACTORS");
+  expect(app.texts()).toContain("60.3");
+  expect(app.texts()).toContain("+5.8");
+  // Against the peers (371 / 6): the spread turns negative.
+  await app.press("role:tab[vs Peers]");
+  await app.waitFor("−1.5");
+  // The middle of the radar: the factor whose spoke is nearest the pointer's
+  // angle there (which one depends on where the pointer lands within a point
+  // of it), its name read out.
+  await app.hover("label:/^Factor exposure against the peers/");
+  await app.waitFor("text:/^(VALUE|MOMENTUM|QUALITY|SIZE|LOW VOL|YIELD)$/");
+}, 120000);
 
 test("a quarter's income flows from its segments to net income, and into the next quarter's", async () => {
   // The flows are one image, named with what they show; each account named beside its node (once they have drawn in), the margins under them.
@@ -369,6 +565,60 @@ test("the flows read out the account the arrow keys step to", async () => {
   await app.wait(100);
   expect(app.texts()).not.toContain("TAX");
 }, 120000);
+
+test("the market map reads out the stock or sector under the pointer and recolors with the period", async () => {
+  // Nothing hovered: the cap-weighted change of the day and how many rose.
+  expect(app.count("label:/^Market map of 32 stocks in 6 sectors, 1D: 15 up/")).toBe(1);
+  let texts = app.texts();
+  expect(texts).toContain("S&P 500 · TOP 32 · 1D");
+  expect(texts).toContain("+0.29%");
+  // Each stock's ticker and change on its tile, each sector's name over its stocks.
+  expect(texts).toContain("NVDA");
+  expect(texts).toContain("+2.41%");
+  expect(texts).toContain("Healthcare");
+  // The middle of the map once the tiles have grown in: Broadcom.
+  await app.wait(1200);
+  await app.hover("label:/^Market map of 32 stocks/");
+  await app.waitFor("AVGO · BROADCOM");
+  expect(app.texts()).toContain("Technology · $1.6T market cap");
+  // A month: the tiles' changes and the count of risers follow.
+  await app.press("role:tab[Month]");
+  await app.waitFor("label:/^Market map of 32 stocks in 6 sectors, 1M: 20 up/");
+  texts = app.texts();
+  expect(texts).toContain("+14.80%");
+  expect(texts).toContain("+12%");
+});
+
+test("the market map steps across its stocks with the arrow keys", async () => {
+  // The first Right starts at the largest stock, at the top left.
+  await tabTo("NVDA · NVIDIA");
+  expect(app.texts()).toContain("Technology · $4.4T market cap");
+  await app.keyboard.press("down");
+  await app.waitFor("MSFT · MICROSOFT");
+  await app.keyboard.press("escape");
+  await app.waitFor("S&P 500 · TOP 32 · 1D");
+}, 120000);
+
+test("the allocation names its asset classes over their positions and moves to a year ago", async () => {
+  expect(app.count("label:/^Allocation of \\$620k across 4 asset classes/")).toBe(1);
+  let texts = app.texts();
+  // The classes' weights over the map, their names in their bands, the positions' weights on them.
+  expect(texts).toContain("60.8%");
+  expect(texts).toContain("Equities");
+  expect(texts).toContain("VOO");
+  expect(texts).toContain("29.4%");
+  expect(texts).toContain("TLT");
+  expect(texts).not.toContain("ARKK");
+  // A year ago: Treasuries not yet bought, the innovation fund still held.
+  await app.press("role:tab[A year ago]");
+  await app.waitFor("label:/^Allocation of \\$514k/");
+  await app.wait(800);
+  texts = app.texts();
+  expect(texts).toContain("55.8%");
+  expect(texts).toContain("13.6%");
+  expect(texts).toContain("ARKK");
+  expect(texts).not.toContain("TLT");
+});
 
 test("the watchlist's sparklines come with their rows and show each period", async () => {
   await app.waitFor("label:/^AAPL, 1D: /");

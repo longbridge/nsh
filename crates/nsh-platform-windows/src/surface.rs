@@ -38,7 +38,13 @@ enum Message {
     Error(String),
     Frame,
     HotUpdateFailed,
+    /// The engine laid the app out at this size ([`MountSink::resized`]).
+    Resized(Size<Points>),
 }
+
+/// How long the main thread waits for the layout at a new window size
+/// (a frame at 60 Hz): see [`Surface::resized`].
+const RESIZE_WAIT: std::time::Duration = std::time::Duration::from_millis(16);
 
 thread_local! {
     /// The surfaces of this (main) thread, by key.
@@ -81,6 +87,10 @@ impl MountSink for Sink {
 
     fn hot_update_failed(&self) {
         self.send(Message::HotUpdateFailed);
+    }
+
+    fn resized(&self, size: Size<Points>) {
+        self.send(Message::Resized(size));
     }
 }
 
@@ -133,6 +143,9 @@ pub(crate) struct Surface {
     invalid: Cell<bool>,
     /// The next frame draws the whole window ([`Surface::invalidate`]).
     full_damage: Cell<bool>,
+    /// The change stamp of the last request to draw the whole window
+    /// ([`Surface::whole_change`]).
+    whole_change: Cell<u64>,
     /// Views that changed since the last frame
     /// ([`Surface::invalidate_view`]).
     dirty: RefCell<Vec<NshView>>,
@@ -168,6 +181,9 @@ pub(crate) struct Surface {
     /// The GPU device shader views render with, opened when the first
     /// shader is mounted (`None` inside: there is none).
     shader_renderer: std::cell::OnceCell<Option<Rc<nsh_engine::shader::Renderer>>>,
+    /// The views whose shader reads what is behind them (`sample_backdrop`),
+    /// or did ([`crate::shader::backdrop_areas`] leaves those out).
+    pub(crate) backdrop_readers: RefCell<Vec<NodeId>>,
     /// Where `asset:/` image URIs resolve ([`crate::image::set_asset_base`]).
     pub(crate) asset_base: RefCell<Option<crate::image::AssetBase>>,
     /// The disk cache of downloaded images ([`crate::image::set_disk_cache`]).
@@ -186,6 +202,9 @@ pub(crate) struct Surface {
     pub(crate) chrome: crate::chrome::Chrome,
     /// Called after the surface is resized (development overlays).
     pub(crate) on_resized: RefCell<Vec<ResizeHandler>>,
+    /// The engine missed the deadline of a resize ([`RESIZE_WAIT`]): later
+    /// resizes do not wait until it reports one done.
+    resize_late: Cell<bool>,
     /// Keys the window takes before anything focused sees them (the
     /// standalone app's full screen, the dev host's reload).
     pub(crate) shortcuts: RefCell<Vec<ShortcutHandler>>,
@@ -219,6 +238,7 @@ impl Surface {
             invalid: Cell::new(false),
             // The first frame draws everything.
             full_damage: Cell::new(true),
+            whole_change: Cell::new(0),
             dirty: RefCell::default(),
             environment: Cell::new(environment),
             appearance: Cell::default(),
@@ -234,6 +254,7 @@ impl Surface {
             on_error: RefCell::new(None),
             on_hot_update_failed: RefCell::new(None),
             shader_renderer: std::cell::OnceCell::new(),
+            backdrop_readers: RefCell::default(),
             asset_base: RefCell::new(None),
             image_cache: RefCell::new(None),
             native: Default::default(),
@@ -242,6 +263,7 @@ impl Surface {
             composition: RefCell::default(),
             composed: RefCell::default(),
             on_resized: RefCell::default(),
+            resize_late: Cell::new(false),
             shortcuts: RefCell::default(),
             chrome: Default::default(),
         });
@@ -264,6 +286,13 @@ impl Surface {
                     .map(Rc::new)
             })
             .clone()
+    }
+
+    /// Settles [`Surface::shader_renderer`] as opened without a device, as
+    /// on a machine with none (tests open no GPU device).
+    #[cfg(test)]
+    pub(crate) fn without_shader_renderer(&self) {
+        let _ = self.shader_renderer.set(None);
     }
 
     /// The surface with `key`, if it is alive.
@@ -392,6 +421,7 @@ impl Surface {
         crate::input::reset(self);
         crate::keymap::clear(self);
         self.js_frame.set(false);
+        self.resize_late.set(false);
         self.frame_clients.borrow_mut().clear();
         self.invalidate();
     }
@@ -462,14 +492,62 @@ impl Surface {
         for f in self.on_resized.borrow().iter() {
             f(width, height);
         }
+        self.await_layout(Size::new(Points(width), Points(height)));
         self.invalidate();
+    }
+
+    /// Waits for the engine's layout at `size` and applies what it sent
+    /// meanwhile, so the frame `WM_SIZE` draws shows the app at the window's
+    /// new size rather than growing around stale content. The one place the
+    /// main thread waits for the engine: at most [`RESIZE_WAIT`], and an
+    /// engine that misses it (JS busy) is not waited for again until it
+    /// reports a resize done, so a busy app resizes as before.
+    fn await_layout(self: &Rc<Self>, size: Size<Points>) {
+        if self.resize_late.get()
+            || size.width.0 <= 0.0
+            || size.height.0 <= 0.0
+            || self.mounter.try_borrow_mut().is_err()
+            || self.control.borrow().is_none()
+        {
+            return;
+        }
+        let Some(rx) = self.rx.borrow().clone() else {
+            return;
+        };
+        let deadline = std::time::Instant::now() + RESIZE_WAIT;
+        let mut applied = false;
+        loop {
+            let Ok(message) = rx.recv_deadline(deadline) else {
+                self.resize_late.set(true);
+                break;
+            };
+            let done = matches!(message, Message::Resized(s) if s == size);
+            applied |= self.handle(message);
+            if done {
+                break;
+            }
+        }
+        if applied {
+            self.write_animations();
+            self.ensure_ticking();
+        }
     }
 
     /// Asks for the whole window to be drawn again (once, however often
     /// asked before it is).
     pub(crate) fn invalidate(&self) {
         self.full_damage.set(true);
+        self.whole_change.set(crate::view::next_change_stamp());
         self.request_paint();
+    }
+
+    /// The change stamp of the last request to draw the whole window
+    /// ([`Surface::invalidate`]). What such a request redraws may have
+    /// changed without a view saying so (a video's frame, a native
+    /// component, the theme): a shader's picture of its children taken
+    /// before it is taken again.
+    pub(crate) fn whole_change(&self) -> u64 {
+        self.whole_change.get()
     }
 
     /// Asks for `view` and its subtree to be drawn again: where it was
@@ -630,28 +708,7 @@ impl Surface {
         };
         let mut applied = false;
         for message in messages {
-            match message {
-                Message::Batch(batch) => {
-                    self.apply(&batch);
-                    applied = true;
-                }
-                Message::Error(message) => {
-                    log::error!("{message}");
-                    #[cfg(feature = "dev")]
-                    if let Some(model) = &*self.test_model.borrow() {
-                        model.error(message.to_string());
-                    }
-                    if let Some(f) = &*self.on_error.borrow() {
-                        f(&message);
-                    }
-                }
-                Message::Frame => self.js_frame.set(true),
-                Message::HotUpdateFailed => {
-                    if let Some(f) = &*self.on_hot_update_failed.borrow() {
-                        f();
-                    }
-                }
-            }
+            applied |= self.handle(message);
         }
         if applied {
             self.write_animations();
@@ -660,6 +717,34 @@ impl Surface {
         if let (Some(started), Some(fps)) = (started, self.fps()) {
             fps.drained(started.elapsed(), applied);
         }
+    }
+
+    /// Handles what the engine sent; true when it applied a batch.
+    fn handle(self: &Rc<Self>, message: Message) -> bool {
+        match message {
+            Message::Batch(batch) => {
+                self.apply(&batch);
+                return true;
+            }
+            Message::Error(message) => {
+                log::error!("{message}");
+                #[cfg(feature = "dev")]
+                if let Some(model) = &*self.test_model.borrow() {
+                    model.error(message.to_string());
+                }
+                if let Some(f) = &*self.on_error.borrow() {
+                    f(&message);
+                }
+            }
+            Message::Frame => self.js_frame.set(true),
+            Message::HotUpdateFailed => {
+                if let Some(f) = &*self.on_hot_update_failed.borrow() {
+                    f();
+                }
+            }
+            Message::Resized(_) => self.resize_late.set(false),
+        }
+        false
     }
 
     fn apply(self: &Rc<Self>, batch: &MountBatch) {

@@ -49,7 +49,7 @@ crates/
                        the standard modules among them (`runtime/fs.rs`: `fs/promises`, `runtime/process.rs`, `runtime/net.rs`,
                        `runtime/websocket.rs`, `runtime/os.rs`) on the `System` their calls get (capabilities, data directory, quotas, per-VM state)
   nsh-base/            `nsh/base`, NSH's `gpui-base`: unstyled base components (behavior, state, focus, accessibility; the look is the
-                       app's): navigation (`NavStack`, `NavPage`), `Dialog`, `AlertDialog`, `Button`, `Link`, `Checkbox`, `Radio` / `RadioGroup`, `Switch`, `Tab` / `Tabs`, `Carousel` and its parts (slides on a native scroll view snapping to the slides' laid-out starts, previous / next, a pagination with a followed indicator, keys, a seamless loop of runways and translations the animation graph computes from the scroll offset: `carousel.rs`), `Avatar` / `AvatarGroup` (`avatar.rs`: a picture with its image status tracked natively and a row that places its first `limit`), `Toggle` / `ToggleGroup` (a toggle button and a toolbar of them: `toggle.rs`), `Toolbar` / `ToolbarGroup` / `ToolbarSeparator` (a bar of buttons, toggles and links: `toolbar.rs`; `roving.rs` the roving focus `Tabs`, `RadioGroup`, `ToggleGroup` and `Toolbar` share, its items in tree order through the core's `watch_order`), `Select` and `Combobox` (`select.rs`, `combobox.rs` on `listbox.rs`, the list's state machine they share), `Calendar` (`calendar.rs`: views, disabled dates, the days' keys), `TimeField` (`time_field.rs`: segments over one native text field), `DatePicker` (`date_picker.rs`: a calendar and time field in a popup; `popup.rs`'s `dropdown` is the popup `Select`, `Combobox` and `DatePicker` share), `Collapsible`, `Accordion` and its parts (`accordion.rs`: items open by the app's `value`, one at a time or several, panels revealed as `Collapsible`'s), `Progress`, `Command` (a command palette: a search field over commands filtered natively, virtualized: `command.rs`), `Tree` (items that hold items, virtualized, one Tab stop: `tree.rs`), `Slider` (a value or a range along a track: `slider.rs`, numbers' rules in `numeric.rs`, a focused control's keys in `keys.rs`), `Scrollbar` (a bar of the app's own over a scroll view or list it names: `scrollbar.rs`, on the core's `watch_scroll`), `NumberInput` (a number typed or stepped: `number_input.rs`), `ColorPicker` and its parts `ColorArea`, `ColorSlider`, `ColorField`, `ColorSwatch`, `ColorEyeDropper` (a color in RGB, HSL, HSB or OKLCH: `color_picker/`), `OtpInput`, `Table` and its parts (`table.rs`: a table's roles, the look the app's), the charts' parts in the submodule `nsh/base/plot` (`Plot`, `Line`, `Area`, `Grid`, `Pie`, `Arc`), `Input` (a native text input, made by `nsh-js`), the status
+                       app's): navigation (`NavStack`, `NavPage`), `Dialog`, `AlertDialog`, `Button`, `Link`, `Checkbox`, `Radio` / `RadioGroup`, `Switch`, `Tab` / `Tabs`, `Carousel` and its parts (slides on a native scroll view snapping to the slides' laid-out starts, previous / next, a pagination with a followed indicator, keys, a seamless loop of runways and translations the animation graph computes from the scroll offset: `carousel.rs`), `Avatar` / `AvatarGroup` (`avatar.rs`: a picture with its image status tracked natively and a row that places its first `limit`), `Toggle` / `ToggleGroup` (a toggle button and a toolbar of them: `toggle.rs`), `Toolbar` / `ToolbarGroup` / `ToolbarSeparator` (a bar of buttons, toggles and links: `toolbar.rs`; `roving.rs` the roving focus `Tabs`, `RadioGroup`, `ToggleGroup` and `Toolbar` share, its items in tree order through the core's `watch_order`), `Select` and `Combobox` (`select.rs`, `combobox.rs` on `listbox.rs`, the list's state machine they share), `Calendar` (`calendar.rs`: views, disabled dates, the days' keys), `TimeField` (`time_field.rs`: segments over one native text field), `DatePicker` (`date_picker.rs`: a calendar and time field in a popup; `popup.rs`'s `dropdown` is the popup `Select`, `Combobox` and `DatePicker` share), `Collapsible`, `Accordion` and its parts (`accordion.rs`: items open by the app's `value`, one at a time or several, panels revealed as `Collapsible`'s), `Progress`, `Command` (a command palette: a search field over commands filtered natively, virtualized: `command.rs`), `Tree` (items that hold items, virtualized, one Tab stop: `tree.rs`), `Slider` (a value or a range along a track: `slider.rs`, numbers' rules in `numeric.rs`, a focused control's keys in `keys.rs`), `Scrollbar` (a bar of the app's own over a scroll view or list it names: `scrollbar.rs`, on the core's `watch_scroll`), `NumberInput` (a number typed or stepped: `number_input.rs`), `ColorPicker` and its parts `ColorArea`, `ColorSlider`, `ColorField`, `ColorSwatch`, `ColorEyeDropper` (a color in RGB, HSL, HSB or OKLCH: `color_picker/`), `OtpInput`, `Table` and its parts (`table.rs`: a table's roles, the look the app's), the charts' parts in the submodule `nsh/base/plot` (`Plot`, `Line`, `Area`, `Grid`, `Pie`, `Arc`, `Treemap`: `plot/treemap/`), `Input` (a native text input, made by `nsh-js`), the status
                        bar, `TextView` (Markdown / HTML documents: `text_view/`, docs/dev/text-view.md), `ResizablePanelGroup` / `ResizablePanel` (`resizable/`), `DockArea` (a dockable workspace: splits, tab groups and edge docks whose layout is
                        data, `dock/`, docs/dev/dock.md), `Editor` (a code editor: highlighting, several carets, folds, search, diagnostics;
                        `editor/`, docs/dev/editor.md), `DiffView` (the changes between two texts or of a patch, split or unified: `diff/`,
@@ -222,10 +222,27 @@ including the user-facing pages in `website/` (English and `zh-CN`). User-facing
 positive terms: what a platform or feature is and does, never what it is not or lacks, and name the product Native
 Shell in formal places and NSH elsewhere (`nsh` only in code) ("Writing documentation" in `website/README.md`).
 
+Two homes for documentation. This repository's documentation (`docs/dev/`, `website/`, module docs, pull request
+text) describes NSH at the level every contributor needs: the direction, concepts, which component does what,
+rules, code locations, commands and verification. The core design record lives in the private repository
+[`longbridge/nsh-docs`](https://github.com/longbridge/nsh-docs), checked out beside this one at `../nsh-docs`
+(`gh repo clone longbridge/nsh-docs ../nsh-docs`): the design thinking behind NSH's architecture and the details of
+its core mechanisms — key algorithms, inner data structures and protocols, formats and ABIs, tuning and
+thresholds, and the reasoning and alternatives behind them.
+
+When the core developers (`huacnlee`, `sunli829`, `madcodelife`) design or change something at that level with
+you, write the details to nsh-docs (its `dev/<page>.md`, the full version of `docs/dev/<page>.md`, or a design
+note such as `web/runtime-split.md`; commit and push to its `main`), and give this repository only the summary a
+contributor needs: what the part does and where its code is. If you are unsure which side something belongs
+to, put the details in nsh-docs and the summary here. Before changing an area, read its nsh-docs page as well as
+`docs/dev/` when you have access; without it, `docs/dev/` and the code's module docs are enough to work from.
+
 ## Commands
 
 ```sh
 cargo run [-- <app>] [-- --target catalyst|ios|android|gpui]                       # the gallery on this machine's backend (AppKit / GTK / Win32), hot reload; rebuilt and restarted on Rust changes
+cargo run -- accordion [--section settings]                                        # the gallery opened at one demo (by name), only its section with that title: no taps or scrolling
+NSH_GALLERY_DEMO=accordion NSH_GALLERY_SECTION=settings ./target/debug/nsh test examples/gallery/App.tsx --target linux   # the same under nsh test (steps on stdin)
 cargo xtask [<app>] [--target catalyst|ios|android|gpui] [-v]                      # the same without cargo's own two lines; -v (any nsh / xtask command): all output
 cargo build -p nsh-cli                                                             # build the nsh CLI
 ./target/debug/nsh init my-app --template ts|rust|mixed                            # new app: TSX, Rust (a Cargo project, "root"), or TSX that is also a crate ("rust": "."); asks on a terminal without --template
@@ -265,6 +282,7 @@ cargo xtask dist                                                                
 ./target/debug/nsh keygen keys/root && ./target/debug/nsh keygen keys/release      # signing keys (.secret / .pub)
 ./target/debug/nsh certify --root keys/root.secret --key keys/release.pub --apps 'com.example.*' -o keys/release.cert
 ./target/debug/nsh publish examples/counter --key keys/release.secret --cert keys/release.cert --build 2
+./target/debug/nsh publish ci.nshpkg --key keys/platform.secret --cert keys/platform.cert -o out.nshpkg   # a package signed again by another release key, contents kept
 ./target/debug/nsh verify out/com.example.counter-2.nshpkg --root keys/root.pub     # as a device would check it
 ./target/debug/nsh revoke --root keys/root.secret --sequence 1 --package <sha256> -o revocations.json
 
@@ -355,7 +373,7 @@ repository's `target/`; dependencies only it uses are declared in `crates/gpui/C
   read forever. The record
   and its checks live in that repository, never here: a change to NSH cannot rewrite them, and the only removals are
   security closures in its `closed.txt`. No release is recorded yet, so nothing is frozen: what is on `main` may still
-  change until the first release recorded, which is not chosen yet (0.3.0 is not recorded). A new API lands with its test, a case in
+  change until the first release recorded, which is not chosen yet (0.3.0 and 0.4.0 are not recorded). A new API lands with its test, a case in
   `tests/compat/cases/<domain>/` whose script checks it (`cargo xtask compat`; `docs/dev/compatibility.md`).
 - **Native views and interaction, app-owned design.** Common controls have one cross-platform home in `nsh/base`.
   A system-styled version of a common control does not justify another public component in a platform module.

@@ -202,6 +202,22 @@ define_class!(
             // Another window may be another scene, in another state.
             self.ivars().lifecycle.set(self.scene_state());
             self.publish_environment();
+            let Some(mounter) = self
+                .ivars()
+                .running
+                .borrow()
+                .as_ref()
+                .map(|r| r.mounter.clone())
+            else {
+                return;
+            };
+            // On the next turn: a batch being applied may hold the mounter.
+            DispatchQueue::main().exec_async(move || {
+                let mtm = MainThreadMarker::new().expect("main queue");
+                if let Some(m) = mounter.get(mtm).borrow_mut().as_mut() {
+                    m.window_changed();
+                }
+            });
         }
 
         #[unsafe(method(safeAreaInsetsDidChange))]

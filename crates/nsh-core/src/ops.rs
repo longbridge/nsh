@@ -1611,6 +1611,54 @@ pub enum OverlayProp {
     Cover(Option<NodeId>),
 }
 
+/// Input for a web view's page, delivered as the user's hands give it: the
+/// page's events are trusted (`isTrusted`), which scripts it injects cannot
+/// make (`WebView`'s `sendInput`). Needs `capabilities.webview.input`.
+#[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
+pub enum WebInput {
+    /// A primary click at a point of the page's viewport: CSS pixels, which
+    /// are points at the page's own zoom (what `getBoundingClientRect()`
+    /// reports).
+    Click {
+        /// From the viewport's left edge.
+        x: Points,
+        /// From the viewport's top edge.
+        y: Points,
+    },
+    /// Text typed into what has the page's keyboard focus.
+    Text(String),
+    /// A key pressed and released.
+    Key(WebKey),
+}
+
+/// A key `WebInput::Key` presses.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum WebKey {
+    /// Return: submits a form, confirms a field.
+    Enter,
+    /// Moves the focus forward.
+    Tab,
+    /// Escape.
+    Escape,
+    /// Deletes backward.
+    Backspace,
+}
+
+impl WebKey {
+    /// The key a DOM `KeyboardEvent.key` names (`"Enter"`, ...).
+    pub fn from_name(name: &str) -> Option<Self> {
+        Some(match name {
+            "Enter" => Self::Enter,
+            "Tab" => Self::Tab,
+            "Escape" => Self::Escape,
+            "Backspace" => Self::Backspace,
+            _ => return None,
+        })
+    }
+}
+
 /// An imperative call on a native view (`ref.focus()` and the like).
 #[derive(Debug, Clone, PartialEq)]
 pub enum Command {
@@ -1649,6 +1697,8 @@ pub enum Command {
     InjectJavaScript(String),
     /// Send a message to a web view's page (`window.onmessage` data).
     PostMessage(String),
+    /// Give a web view's page input as the user's own (trusted events).
+    SendInput(WebInput),
     /// Seek a video to a time in seconds.
     Seek(f64),
     /// Scroll a list to an item (resolved by the core into `ScrollTo`).
@@ -2067,6 +2117,12 @@ pub enum Prop {
     /// `fallback` (shader transitions): what runs without a `source`.
     #[prop(js = "fallback", on = TRANSITION)]
     TransitionFallback(TransitionFallback),
+    /// `transitionShader` (pages and dialogs): `{ source, uniforms,
+    /// duration }`, a shader the page or dialog comes and goes through
+    /// (the lower side `sample_from`, the upper `sample_to`) instead of its
+    /// `animation`, for `duration` milliseconds (350 by default).
+    #[prop(js = "transitionShader", on = SCREEN | MODAL)]
+    TransitionShader(Option<crate::shader::NavShaderSpec>),
     /// `src`: a URL, `asset:/path`, or an imported asset.
     #[prop(js = "src", on = IMAGE, shared)]
     Source(Option<ImageSource>),

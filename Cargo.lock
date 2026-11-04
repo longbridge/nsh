@@ -1424,7 +1424,18 @@ dependencies = [
 
 [[package]]
 name = "example-embed-gpui"
-version = "0.3.0"
+version = "0.4.0"
+
+[[package]]
+name = "fancy-regex"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6e24cb5a94bcae1e5408b0effca5cd7172ea3c5755049c5f3af4cd283a165298"
+dependencies = [
+ "bit-set 0.8.0",
+ "regex-automata",
+ "regex-syntax",
+]
 
 [[package]]
 name = "fancy-regex"
@@ -1688,7 +1699,7 @@ dependencies = [
 
 [[package]]
 name = "gallery-native"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "env_logger",
  "log",
@@ -3176,7 +3187,7 @@ dependencies = [
 
 [[package]]
 name = "nsh-base"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "chrono",
  "html5ever",
@@ -3187,19 +3198,26 @@ dependencies = [
  "nsh-core",
  "nsh-engine",
  "nsh-testing",
+ "ratex-font",
+ "ratex-layout",
+ "ratex-parser",
+ "ratex-types",
  "regex",
  "ropey",
  "rustc-hash 2.1.3",
  "serde",
  "serde_json",
  "syntect",
+ "ttf-parser",
  "two-face",
  "unicode-segmentation",
+ "unicode-width",
+ "zstd",
 ]
 
 [[package]]
 name = "nsh-bundler"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "dunce",
@@ -3223,10 +3241,11 @@ dependencies = [
 
 [[package]]
 name = "nsh-cli"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
+ "brotli",
  "clap",
  "crossbeam-channel",
  "dunce",
@@ -3259,7 +3278,7 @@ dependencies = [
 
 [[package]]
 name = "nsh-core"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "cap-std",
  "crc32fast",
@@ -3295,7 +3314,7 @@ dependencies = [
 
 [[package]]
 name = "nsh-dev"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "axum",
  "base64 0.22.1",
@@ -3310,7 +3329,7 @@ dependencies = [
 
 [[package]]
 name = "nsh-engine"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "crossbeam-channel",
  "libc",
@@ -3334,7 +3353,7 @@ dependencies = [
 
 [[package]]
 name = "nsh-ios-app"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "log",
  "nsh-platform-ios",
@@ -3342,7 +3361,7 @@ dependencies = [
 
 [[package]]
 name = "nsh-ios-host"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "log",
  "nsh-dev",
@@ -3352,7 +3371,7 @@ dependencies = [
 
 [[package]]
 name = "nsh-js"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "brotli",
  "flate2",
@@ -3377,7 +3396,7 @@ dependencies = [
 
 [[package]]
 name = "nsh-linux-app"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "log",
  "nsh-platform-linux",
@@ -3386,7 +3405,7 @@ dependencies = [
 
 [[package]]
 name = "nsh-linux-host"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "log",
  "nsh-dev",
@@ -3396,7 +3415,7 @@ dependencies = [
 
 [[package]]
 name = "nsh-macos-app"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "log",
  "nsh-platform-macos",
@@ -3405,7 +3424,7 @@ dependencies = [
 
 [[package]]
 name = "nsh-macos-host"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "log",
  "nsh-dev",
@@ -3415,7 +3434,7 @@ dependencies = [
 
 [[package]]
 name = "nsh-macros"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "imagesize 0.15.0",
  "nsh-core",
@@ -3428,7 +3447,7 @@ dependencies = [
 
 [[package]]
 name = "nsh-package"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "base64 0.22.1",
  "ed25519-dalek 2.2.0",
@@ -3442,7 +3461,7 @@ dependencies = [
 
 [[package]]
 name = "nsh-platform-android"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "jni",
  "libc",
@@ -3459,7 +3478,7 @@ dependencies = [
 
 [[package]]
 name = "nsh-platform-ios"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "block2",
  "dispatch2",
@@ -3484,7 +3503,7 @@ dependencies = [
 
 [[package]]
 name = "nsh-platform-linux"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "crossbeam-channel",
  "gtk4",
@@ -3505,7 +3524,7 @@ dependencies = [
 
 [[package]]
 name = "nsh-platform-macos"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "block2",
  "crossbeam-channel",
@@ -3532,7 +3551,7 @@ dependencies = [
 
 [[package]]
 name = "nsh-platform-web"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "brotli",
  "crc32c",
@@ -3560,7 +3579,7 @@ dependencies = [
 
 [[package]]
 name = "nsh-platform-windows"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "crossbeam-channel",
  "image",
@@ -3582,7 +3601,7 @@ dependencies = [
 
 [[package]]
 name = "nsh-testing"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "base64 0.22.1",
  "crossbeam-channel",
@@ -3604,7 +3623,7 @@ dependencies = [
 
 [[package]]
 name = "nsh-windows-app"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "log",
  "nsh-platform-windows",
@@ -3613,7 +3632,7 @@ dependencies = [
 
 [[package]]
 name = "nsh-windows-host"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "log",
  "nsh-dev",
@@ -4489,6 +4508,7 @@ version = "0.11.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1fd6780a80ae0c52cc120a26a1a42c1ae51b247a253e4e06113d23d2c2edd078"
 dependencies = [
+ "phf_macros 0.11.3",
  "phf_shared 0.11.3",
 ]
 
@@ -4498,7 +4518,7 @@ version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "010378780309880b08997fae13be7834dba947d36393bd372f2b1556deb2a2f6"
 dependencies = [
- "phf_macros",
+ "phf_macros 0.14.0",
  "phf_shared 0.14.0",
  "serde",
 ]
@@ -4531,6 +4551,19 @@ checksum = "aeb62e0959d5a1bebc965f4d15d9e2b7cea002b6b0f5ba8cde6cc26738467100"
 dependencies = [
  "fastrand",
  "phf_shared 0.14.0",
+]
+
+[[package]]
+name = "phf_macros"
+version = "0.11.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f84ac04429c13a7ff43785d75ad27569f2951ce0ffd30a3321230db2fc727216"
+dependencies = [
+ "phf_generator 0.11.3",
+ "phf_shared 0.11.3",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
 ]
 
 [[package]]
@@ -5082,6 +5115,66 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ca45419789ae5a7899559e9512e58ca889e41f04f1f2445e9f4b290ceccd1d08"
 
 [[package]]
+name = "ratex-font"
+version = "0.1.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e4373503a1068c9f7d07862583bbd897ac4d2bdf89d42ac8c65870c33135bf6f"
+dependencies = [
+ "phf 0.11.3",
+ "ratex-types",
+]
+
+[[package]]
+name = "ratex-layout"
+version = "0.1.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "33c14e7af0d1c60da19e67df1fe08186eb91d0d04e0c6482ae90a8318ec7bb0a"
+dependencies = [
+ "ratex-font",
+ "ratex-parser",
+ "ratex-types",
+ "serde_json",
+]
+
+[[package]]
+name = "ratex-lexer"
+version = "0.1.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2f50074761e3e048f432fd1653f132a333883f02ecccf272599917bf1043a8cd"
+dependencies = [
+ "ratex-types",
+ "serde",
+ "thiserror 1.0.69",
+]
+
+[[package]]
+name = "ratex-parser"
+version = "0.1.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "51f3c0d7744db2b9b4c0034d3983264543e701cda5268392e5829b2e24bc7624"
+dependencies = [
+ "fancy-regex 0.14.0",
+ "ratex-font",
+ "ratex-lexer",
+ "ratex-types",
+ "regex",
+ "regex-lite",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "unicode-normalization",
+]
+
+[[package]]
+name = "ratex-types"
+version = "0.1.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ae81208192f9898cbd2424aa42fd4472bd79c44a52092673b101cdca72c89b7c"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "raw-window-handle"
 version = "0.6.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5170,6 +5263,12 @@ dependencies = [
  "memchr",
  "regex-syntax",
 ]
+
+[[package]]
+name = "regex-lite"
+version = "0.1.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cab834c73d247e67f4fae452806d17d3c7501756d98c8808d7c9c7aa7d18f973"
 
 [[package]]
 name = "regex-syntax"
@@ -5718,7 +5817,7 @@ dependencies = [
 
 [[package]]
 name = "rust-exports-native"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "nsh-base",
  "nsh-core",
@@ -6321,7 +6420,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "656b45c05d95a5704399aeef6bd0ddec7b2b3531b7c9e900abbf7c4d2190c925"
 dependencies = [
  "bincode",
- "fancy-regex",
+ "fancy-regex 0.16.2",
  "flate2",
  "fnv",
  "once_cell",
@@ -6531,6 +6630,12 @@ dependencies = [
  "serde_core",
  "zerovec",
 ]
+
+[[package]]
+name = "tinyvec"
+version = "1.13.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fd3ca314f692efd6c868f8408f53fe444634a845f96c028b97d35f6a1f79f0ee"
 
 [[package]]
 name = "tokio"
@@ -6868,6 +6973,15 @@ name = "unicode-linebreak"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3b09c83c3c29d37506a3e260c08c03743a6bb66a9cd432c6934ab501a190571f"
+
+[[package]]
+name = "unicode-normalization"
+version = "0.1.26"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "75cd3fb03d5288b3ba9a1ee103ac7e9cbb59f0b03d64f8ddfcc04dd42758a85d"
+dependencies = [
+ "tinyvec",
+]
 
 [[package]]
 name = "unicode-properties"
@@ -7854,7 +7968,7 @@ checksum = "ec7a2a501ed189703dba8b08142f057e887dfc4b2cc4db2d343ac6376ba3e0b9"
 
 [[package]]
 name = "xtask"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "clap",

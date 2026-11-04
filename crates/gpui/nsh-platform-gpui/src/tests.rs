@@ -187,6 +187,7 @@ fn windows(cx: &mut TestAppContext) {
     compositions_are_reported_and_hold_values_until_they_end(cx);
     menu_shortcuts_leave_a_focused_field_the_keys_it_uses(cx);
     presses_carry_where_the_pointer_was(cx);
+    files_dropped_from_outside_reach_the_view_under_them(cx);
     presses_carry_the_modifier_keys_and_click_count(cx);
     mouse_events_carry_the_position_button_and_modifiers(cx);
     an_embedded_surface_takes_the_keyboard_when_its_app_focuses_a_field(cx);
@@ -200,6 +201,7 @@ fn windows(cx: &mut TestAppContext) {
     asset_uris_resolve_in_the_first_directory_that_has_the_file(cx);
     releasing_shift_before_alt_keeps_the_auto_hidden_menu_bar_hidden(cx);
     the_app_s_state_follows_its_window_s_activation_and_visibility(cx);
+    set_frame_sizes_the_window_and_keeps_the_size_it_leaves_out(cx);
 }
 
 fn keys_reach_the_fields_of_a_surface_showing_a_native_component(cx: &mut TestAppContext) {
@@ -754,6 +756,132 @@ mod press_point {
                     .h(px(30.0)),
             )
     }
+}
+
+fn files_dropped_from_outside_reach_the_view_under_them(cx: &mut TestAppContext) {
+    let source = r#"
+import { mount, signal, View } from "nsh";
+import { Input } from "nsh/base";
+const log = signal<string[]>([]);
+const add = (entry: string) => log.set([...log(), entry]);
+mount(() => <View style={{ flex: 1 }}>
+  <View
+    onFileDragEnter={() => add("enter outer")}
+    onFileDragLeave={() => add("leave outer")}
+    onFileDrop={(e) => add("drop outer " + e.uris.join(";"))}
+    style={{ height: 100 }}
+  >
+    <View
+      onFileDragEnter={() => add("enter inner")}
+      onFileDragLeave={() => add("leave inner")}
+      onFileDrop={(e) => add("drop inner " + e.uris.join(";"))}
+      style={{ height: 40 }}
+    />
+  </View>
+  <View style={{ height: 100 }} />
+  <Input autoFocus readonly value={log().join(", ") || "none"} style={{ height: 30 }} />
+</View>);
+"#;
+    let code = nsh_bundler::compile_module("App.tsx", source, &[]).unwrap();
+    let (view, cx) =
+        cx.add_window_view(|window, cx| AppView::new(AppOptions::default(), window, cx));
+    view.update(cx, |view, _| view.load(App::Js(Bundle::source(code))));
+    cx.update(|window, cx| window.focus(&view.focus_handle(cx), cx));
+    wait_for(&view, cx, "none");
+    let origin = view.read_with(cx, |view, _| view.surface().origin.get());
+    let at = |y: f32| gpui::point(gpui::px(origin.0 + 10.0), gpui::px(origin.1 + y));
+    let send = |cx: &mut VisualTestContext, event: gpui::FileDropEvent| {
+        cx.update(|window, cx| {
+            window.dispatch_event(gpui::PlatformInput::FileDrop(event), cx);
+        });
+        cx.run_until_parked();
+    };
+    let enter = |cx: &mut VisualTestContext, y: f32, paths: &[String]| {
+        let paths = gpui::ExternalPaths(paths.iter().map(std::path::PathBuf::from).collect());
+        send(
+            cx,
+            gpui::FileDropEvent::Entered {
+                position: at(y),
+                paths,
+            },
+        );
+        // The platform's next report, once the drag's frame has laid the
+        // drop layer over the surface.
+        send(cx, gpui::FileDropEvent::Pending { position: at(y) });
+    };
+    // The innermost listener under the drag is the destination; moving
+    // leaves it for the next one, and the drop goes there, without the
+    // relative path.
+    let dropped = crate::file_drop::test_url("a%20b.txt");
+    enter(
+        cx,
+        20.0,
+        &[crate::file_drop::test_path("a b.txt"), "b.txt".into()],
+    );
+    wait_for(&view, cx, "enter inner");
+    send(cx, gpui::FileDropEvent::Pending { position: at(70.0) });
+    wait_for(&view, cx, "enter inner, leave inner, enter outer");
+    send(cx, gpui::FileDropEvent::Submit { position: at(70.0) });
+    wait_for(
+        &view,
+        cx,
+        &format!("enter inner, leave inner, enter outer, drop outer {dropped}, leave outer"),
+    );
+    // Leaving the window leaves the destination.
+    enter(cx, 20.0, &[crate::file_drop::test_path("c.txt")]);
+    send(cx, gpui::FileDropEvent::Exited);
+    wait_for(
+        &view,
+        cx,
+        &format!(
+            "enter inner, leave inner, enter outer, drop outer {dropped}, leave outer, \
+             enter inner, leave inner"
+        ),
+    );
+    // Where no view listens, the drop goes nowhere.
+    enter(cx, 150.0, &[crate::file_drop::test_path("d.txt")]);
+    send(
+        cx,
+        gpui::FileDropEvent::Submit {
+            position: at(150.0),
+        },
+    );
+    wait_for(
+        &view,
+        cx,
+        &format!(
+            "enter inner, leave inner, enter outer, drop outer {dropped}, leave outer, \
+             enter inner, leave inner"
+        ),
+    );
+    // A drag that ended schedules one clear of its destination, however
+    // often the window redraws before the clear runs.
+    enter(cx, 20.0, &[crate::file_drop::test_path("e.txt")]);
+    wait_for(
+        &view,
+        cx,
+        &format!(
+            "enter inner, leave inner, enter outer, drop outer {dropped}, leave outer, \
+             enter inner, leave inner, enter inner"
+        ),
+    );
+    view.update(cx, |view, cx| {
+        let surface = view.surface();
+        assert!(crate::file_drop::take_needs_clear(surface));
+        assert!(!crate::file_drop::take_needs_clear(surface));
+        crate::file_drop::clear(surface);
+        assert!(!crate::file_drop::take_needs_clear(surface));
+        crate::rt::flush(cx);
+    });
+    send(cx, gpui::FileDropEvent::Exited);
+    wait_for(
+        &view,
+        cx,
+        &format!(
+            "enter inner, leave inner, enter outer, drop outer {dropped}, leave outer, \
+             enter inner, leave inner, enter inner, leave inner"
+        ),
+    );
 }
 
 fn presses_carry_where_the_pointer_was(cx: &mut TestAppContext) {
@@ -1370,4 +1498,62 @@ fn the_app_s_state_follows_its_window_s_activation_and_visibility(cx: &mut TestA
     wait_for(&view, cx, "inactive");
     cx.update(|window, _| window.activate_window());
     wait_for(&view, cx, "active");
+}
+
+/// A window the app sizes at start, and resizes from the menu.
+const SIZED_WINDOW: &str = r#"
+import { mount, View } from "nsh";
+import { Input } from "nsh/base";
+import { Menu, Window } from "nsh/desktop";
+
+function App() {
+  Window.setFrame({ size: { width: 640, height: 480 } });
+  Menu.setApplicationMenu([
+    {
+      label: "View",
+      submenu: [
+        { label: "Narrow", shortcut: "mod+shift+n", onSelect: () => Window.setFrame({ size: { width: 500 } }) },
+        {
+          label: "Both",
+          shortcut: "mod+shift+b",
+          onSelect: () => {
+            Window.setFrame({ size: { width: 600 } });
+            Window.setFrame({ size: { height: 400 } });
+          },
+        },
+      ],
+    },
+  ]);
+  return (
+    <View style={{ flex: 1 }}>
+      <Input autoFocus value="sized" style={{ height: 30 }} />
+    </View>
+  );
+}
+mount(App);
+"#;
+
+fn set_frame_sizes_the_window_and_keeps_the_size_it_leaves_out(cx: &mut TestAppContext) {
+    let code = nsh_bundler::compile_module("App.tsx", SIZED_WINDOW, &[]).unwrap();
+    let (view, cx) = owned_view(cx, code, |_| {});
+    wait_for(&view, cx, "sized");
+    let size = |cx: &mut VisualTestContext| {
+        cx.update(|window, _| {
+            let size = window.bounds().size;
+            (f32::from(size.width), f32::from(size.height))
+        })
+    };
+    wait_until_window(cx, "the window at 640x480", |cx| size(cx) == (640.0, 480.0));
+    let primary = if cfg!(target_os = "macos") {
+        "cmd"
+    } else {
+        "ctrl"
+    };
+    cx.simulate_keystrokes(&format!("shift-{primary}-n"));
+    wait_until_window(cx, "the window at 500x480", |cx| size(cx) == (500.0, 480.0));
+    // Two calls in one callback: the second keeps the first's width, which
+    // GPUI's test platform applies at once (`chrome::frame_size` takes the
+    // platforms that do not).
+    cx.simulate_keystrokes(&format!("shift-{primary}-b"));
+    wait_until_window(cx, "the window at 600x400", |cx| size(cx) == (600.0, 400.0));
 }

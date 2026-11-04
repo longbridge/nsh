@@ -7,8 +7,8 @@
 // render function running once per push, a page keeping its state while
 // covered and its cleanups running when its route leaves. A route that
 // renders no `NavPage` is wrapped in a page. The controls sit outside the
-// stack, whose pages all stay on screen headless. Its script checks
-// each.
+// stack, whose top page is on screen; a covered page's state is checked
+// once it is on top again. Its script checks each.
 import { type Accessor, Text, View, cleanup, signal } from "nsh";
 import { Button, NavPage, NavStack, createNavStack } from "nsh/base";
 

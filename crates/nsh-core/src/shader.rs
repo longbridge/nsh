@@ -349,20 +349,83 @@ impl From<bool> for TransitionKey {
     }
 }
 
+/// A page's or a dialog's `transitionShader`: the program it comes and
+/// goes through, its uniforms and how long that takes.
+#[derive(Debug, Clone, Default, PartialEq)]
+#[non_exhaustive]
+pub struct NavShaderSpec {
+    /// The WGSL defining `shade`, which reads the lower side as
+    /// `sample_from` and the upper as `sample_to`.
+    pub source: Arc<str>,
+    /// Its uniforms.
+    pub uniforms: ShaderUniforms,
+    /// How long it runs in milliseconds; 350 when absent, about as long as
+    /// the platforms' own push (an element's `ShaderTransition` takes 300).
+    pub duration: Option<f32>,
+}
+
+/// A page's or a dialog's transition program, built in Rust
+/// (`Screen::transition_shader`,
+/// `Modal::transition_shader`;
+/// TS: `transitionShader`): a compiled [`Shader`] defining `shade`, which
+/// reads the lower side as `sample_from` and the upper as `sample_to`.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct TransitionShader(NavShaderSpec);
+
+impl TransitionShader {
+    /// Runs `shader`, with no uniforms, for 350 ms.
+    pub fn new(shader: Shader) -> Self {
+        Self(NavShaderSpec {
+            source: shader.source().into(),
+            uniforms: ShaderUniforms::default(),
+            duration: None,
+        })
+    }
+
+    /// Sets the member `name` of the shader's `struct Uniforms` to `value`:
+    /// a number, a color or a list (a vector, an array of `vec4f`).
+    pub fn uniform(mut self, name: &str, value: impl Into<UniformValue>) -> Self {
+        let value = value.into();
+        match self.0.uniforms.0.iter_mut().find(|(n, _)| &**n == name) {
+            Some(entry) => entry.1 = value,
+            None => self.0.uniforms.0.push((name.into(), value)),
+        }
+        self
+    }
+
+    /// How long it runs (350 ms by default).
+    pub fn duration(mut self, duration: std::time::Duration) -> Self {
+        self.0.duration = Some(duration.as_secs_f32() * 1000.0);
+        self
+    }
+}
+
+impl From<TransitionShader> for NavShaderSpec {
+    fn from(shader: TransitionShader) -> Self {
+        shader.0
+    }
+}
+
 /// The word a progress slot writes ([`ShaderLayer::slots`]): not one of the
 /// uniforms, the built-in `nsh.progress`.
 pub const PROGRESS_WORD: u32 = u32::MAX;
 
 /// The transitions' default program: a cross-fade from `sample_from` to
-/// `sample_to` over `nsh.progress`.
-pub fn crossfade() -> Shader {
-    static CROSSFADE: std::sync::LazyLock<Shader> = std::sync::LazyLock::new(|| {
-        Shader::compile(
-            "fn shade(uv: vec2f) -> vec4f {\n    return mix(sample_from(uv), sample_to(uv), nsh.progress);\n}\n",
-        )
-        .expect("the cross-fade compiles")
-    });
-    CROSSFADE.clone()
+/// `sample_to` over `nsh.progress`. `None` only in a web runtime linked
+/// without shaders ([`set_compile`]), which has no transition to run it
+/// on: compiled with this module's compiler, so the cross-fade does not
+/// link naga into every web runtime.
+pub fn crossfade() -> Option<Shader> {
+    static CROSSFADE: std::sync::OnceLock<Option<Shader>> = std::sync::OnceLock::new();
+    CROSSFADE
+        .get_or_init(|| {
+            compile_source(
+                "fn shade(uv: vec2f) -> vec4f {\n    return mix(sample_from(uv), sample_to(uv), nsh.progress);\n}\n",
+            )
+            .map_err(|e| log::warn!(target: "js", "the cross-fade: {e}"))
+            .ok()
+        })
+        .clone()
 }
 
 /// Why a shader did not compile: what is wrong and where in the app's

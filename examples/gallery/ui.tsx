@@ -1,9 +1,9 @@
 // Gallery shell and navigation. Reusable components and visual rules live
 // in the repository's internal nsh-gallery-ui layer.
-import type { JSX, ScrollProps } from "nsh";
+import type { Bounds, JSX, ScrollProps } from "nsh";
 import { computed, Image, Scroll, signal, Text, View } from "nsh";
 import { platform, setColorScheme, windowSize } from "nsh";
-import { alpha, Appear, colors, hovered, Icon, type IconName, isDark, Press, radius, Tip } from "../nsh-gallery-ui";
+import { alpha, Appear, colors, focusedSection, hovered, Icon, type IconName, isDark, Press, radius, Tip } from "../nsh-gallery-ui";
 import { nav, shownDemo } from "./nav";
 import logoDark from "./logo-dark.svg";
 import logoLight from "./logo-light.svg";
@@ -170,9 +170,20 @@ function DemoHead() {
  * columns as fit the pane (at least 360 pt each, `columns` at most), on
  * 32 pt gutters with 20 pt between columns and 24 between sections.
  * `children` follow the sections inside the scroll view (a demo's modals).
+ *
+ * With `lazy` (a long page of heavy sections) a section is made only once it
+ * comes near the screen, a quarter of the screen ahead of it, and fades in
+ * then; below that it is a space of `estimatedCardHeight`. Once made it
+ * stays, so it keeps its state, its timers run on and nothing draws in
+ * again when it scrolls back. One section shown (`focusedSection`) makes it
+ * at once, as without `lazy`.
  */
 export function DemoPage(props: {
   cards: (() => JSX.Element)[];
+  /** Whether the sections are made as they scroll near (default false). */
+  lazy?: boolean;
+  /** The space a section takes before it is made, with `lazy` (default 360). */
+  estimatedCardHeight?: number;
   /** The most columns on a desktop (default 2). */
   columns?: number;
   /** Space under the last section on phones (default 40). */
@@ -193,12 +204,17 @@ export function DemoPage(props: {
     );
   const wide = desktop();
   // Read in the layout below: it is rebuilt only when the count changes.
-  const columns = computed(() => columnsFor(360, props.columns ?? 2));
+  // One section shown (`focusedSection`) takes the pane's width.
+  const columns = computed(() => (focusedSection() == null ? columnsFor(360, props.columns ?? 2) : 1));
+  const defer = props.lazy === true && focusedSection() == null ? deferred(props.cards.length, wide ? columns() : 1, props.estimatedCardHeight ?? 360, wide ? 24 : 28) : null;
+  const slot = (Body: () => JSX.Element, index: number) => (defer ? defer.slot(index, (stagger) => card(Body, stagger)) : card(Body, index));
   return (
     <Scroll
       style={{ flex: 1, backgroundColor: colors.background }}
       keyboardDismissMode={props.keyboardDismissMode}
       keyboardShouldPersistTaps={props.keyboardShouldPersistTaps}
+      onLayout={defer?.onViewport}
+      onScroll={defer?.onScroll}
     >
       <If
         when={wide}
@@ -207,7 +223,7 @@ export function DemoPage(props: {
             <View style={{ paddingHorizontal: 4 }}>
               <DemoHead />
             </View>
-            <Each of={props.cards}>{(body, i) => card(body(), i())}</Each>
+            <Each of={props.cards}>{(body, i) => slot(body(), i())}</Each>
           </View>
         }
       >
@@ -218,9 +234,9 @@ export function DemoPage(props: {
           return (
             <View style={{ paddingHorizontal: 32, paddingTop: 24, paddingBottom: 48, gap: 24, width: "100%", maxWidth: n === 1 ? 880 : n * 540 + 64 }}>
               <DemoHead />
-              <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 20 }}>
+              <View onLayout={defer?.onColumns} style={{ flexDirection: "row", alignItems: "flex-start", gap: 20 }}>
                 {Array.from({ length: n }, (_, column) => (
-                  <View style={{ flex: 1, minWidth: 0, gap: 24 }}>{props.cards.map((body, i) => (i % n === column ? card(body, i) : null))}</View>
+                  <View style={{ flex: 1, minWidth: 0, gap: 24 }}>{props.cards.map((body, i) => (i % n === column ? slot(body, i) : null))}</View>
                 ))}
               </View>
             </View>
@@ -230,6 +246,70 @@ export function DemoPage(props: {
       {props.children}
     </Scroll>
   );
+}
+
+/**
+ * What `DemoPage`'s `lazy` keeps: which sections are made, and where the
+ * others lie against the screen. A section's place is its slot's top in
+ * its column (the page's content on phones), plus the columns' top on the
+ * desktop. Each scroll and layout report makes the sections that came
+ * within a quarter of the screen of its bottom, in order; those made
+ * together fade in one after another, as the page's first ones do.
+ */
+function deferred(count: number, columns: number, estimate: number, gap: number) {
+  // Null while not made, then the index its fade waits for.
+  const made = Array.from({ length: count }, () => signal<number | null>(null));
+  const tops: (number | undefined)[] = new Array(count).fill(undefined);
+  let base = 0;
+  let offset = 0;
+  let viewport = windowSize().height;
+  let left = count;
+  // The first screen is made with the page, from the estimate: rows of
+  // `columns` sections, `estimate` tall, from the top.
+  for (let i = 0; i < count; i++) {
+    if (Math.floor(i / columns) * (estimate + gap) < viewport) {
+      made[i].set(i);
+      left--;
+    }
+  }
+  const check = () => {
+    if (left === 0) return;
+    const limit = offset + viewport * 1.25;
+    let batch = 0;
+    for (let i = 0; i < count; i++) {
+      const top = tops[i];
+      if (top === undefined || made[i]() != null) continue;
+      if (base + top < limit) {
+        made[i].set(batch++);
+        left--;
+      }
+    }
+  };
+  return {
+    onViewport: ({ bounds }: { bounds: Bounds }) => {
+      viewport = bounds.size.height;
+      check();
+    },
+    onScroll: (e: { offset: { y: number } }) => {
+      offset = e.offset.y;
+      check();
+    },
+    onColumns: ({ bounds }: { bounds: Bounds }) => {
+      base = bounds.origin.y;
+      check();
+    },
+    slot: (index: number, render: (stagger: number) => JSX.Element) => (
+      <View
+        onLayout={({ bounds }) => {
+          tops[index] = bounds.origin.y;
+          check();
+        }}
+        style={{ height: made[index]() == null ? estimate : undefined }}
+      >
+        <If when={made[index]() != null}>{render(made[index]()!)}</If>
+      </View>
+    ),
+  };
 }
 
 /**
