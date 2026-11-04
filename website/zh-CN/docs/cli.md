@@ -1,6 +1,6 @@
 ---
 title: 命令行
-description: NSH 的全部子命令与参数：init、build、test、dev、run、package，以及签名相关的 keygen、certify、publish、resign、verify、symbolicate 和 revoke。
+description: NSH 的全部子命令与参数：init、build、test、dev、run、package，以及签名相关的 keygen、certify、publish、verify、symbolicate 和 revoke。
 order: 6
 group: start
 ---
@@ -22,7 +22,6 @@ nsh <COMMAND>
   keygen       Create a signing key
   certify      Certify a release key with a root key
   publish      Build an app in release mode and sign it into a package (.nshpkg)
-  resign       Sign a package again with another release key
   verify       Verify a package
   symbolicate  Map the positions in a reported error stack to the app's sources
   revoke       Sign a revocation list
@@ -264,6 +263,10 @@ nsh publish [ENTRY] --key <KEY.secret> --cert <CERT> [-o <OUT>] [--id <ID>] [--a
 
 以 release 模式构建应用并签名为一个包。元数据来自 `nsh.json`，可被参数覆盖。
 
+如果给的是一个包（`ENTRY` 是 `.nshpkg` 文件），则用这个密钥为它重新签名，适合用自己的一个密钥为旗下应用统一签名的平台。包的文件和头
+保持原样，证书、签名时间和签名换成新密钥的（[签名包](./signed-packages.md#重新签名包)）。`-o` 可以就是读入的那个包，此时只有 `--key`、
+`--cert` 和 `-o` 适用。
+
 | 参数 | 说明 |
 |---|---|
 | `--key <KEY>` | release 密钥的私钥。 |
@@ -275,21 +278,6 @@ nsh publish [ENTRY] --key <KEY.secret> --cert <CERT> [-o <OUT>] [--id <ID>] [--a
 | `--source-map <WHERE>` | source map 放在哪里：`package`（默认）、`file`（包旁边的 `<package>.map`）或 `none`（[签名包](./signed-packages.md#已发布包的报错)）。 |
 | `--strip-debug` | 字节码中不保留行号和列号表：更小，但报错调用栈里没有位置。 |
 | `--min-runtime <VERSION>` | 能运行该包的最低运行时版本，例如 `0.2.0`；更旧的运行时会拒绝它。默认：本 CLI 的版本（[签名包](./signed-packages.md#哪些运行时能运行包)）。 |
-
-### nsh resign
-
-```sh
-nsh resign <PACKAGE> --key <KEY.secret> --cert <CERT> -o <OUT>
-```
-
-用另一个 release 密钥重新签名一个包，适合用自己的一个密钥为旗下应用统一签名的平台。包的文件和头保持原样，证书、签名时间和签名
-换成新密钥的（[签名包](./signed-packages.md#重新签名包)）。
-
-| 参数 | 说明 |
-|---|---|
-| `--key <KEY>` | release 密钥的私钥。 |
-| `--cert <CERT>` | 它的证书（`nsh certify`）。 |
-| `-o, --out <OUT>` | 要写入的包；可以就是读入的那个包。 |
 
 ### nsh verify
 

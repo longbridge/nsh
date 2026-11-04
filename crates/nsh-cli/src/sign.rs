@@ -187,7 +187,7 @@ pub(crate) fn publish(options: PublishOptions<'_>) -> anyhow::Result<()> {
     let bytes = build(&contents, &key, &cert)?;
     let out = options
         .out
-        .unwrap_or_else(|| PathBuf::from(".nsh/out").join(format!("{id}-{build_number}.nshpkg")));
+        .unwrap_or_else(|| default_out(&id, build_number));
     write(&out, &bytes)?;
     if let Some(map) = &separate_map {
         let path = map_path(&out);
@@ -215,9 +215,24 @@ pub(crate) fn publish(options: PublishOptions<'_>) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// `nsh resign`: `package` signed again with another release key, its
-/// contents unchanged (`nsh_package::resign`).
-pub(crate) fn resign(package: &Path, key: &Path, cert: &Path, out: &Path) -> anyhow::Result<()> {
+/// Whether `nsh publish` was given a package to sign again, not an app.
+pub(crate) fn is_package(entry: &Path) -> bool {
+    entry.extension().is_some_and(|e| e == "nshpkg")
+}
+
+/// Where `nsh publish` writes a package unless told otherwise.
+fn default_out(id: &str, build: impl std::fmt::Display) -> PathBuf {
+    PathBuf::from(".nsh/out").join(format!("{id}-{build}.nshpkg"))
+}
+
+/// `nsh publish <package>`: `package` signed again with another release key,
+/// its contents unchanged (`nsh_package::resign`).
+pub(crate) fn resign(
+    package: &Path,
+    key: &Path,
+    cert: &Path,
+    out: Option<PathBuf>,
+) -> anyhow::Result<()> {
     let bytes = fs::read(package).with_context(|| format!("read {}", package.display()))?;
     let key = read_secret(key)?;
     let cert = Certificate::from_json(
@@ -225,9 +240,10 @@ pub(crate) fn resign(package: &Path, key: &Path, cert: &Path, out: &Path) -> any
     )?;
     let signed = nsh_package::resign(&bytes, &key, &cert)
         .with_context(|| format!("{}", package.display()))?;
-    write(out, &signed)?;
     let header = verify_signature(&signed)?;
     let app = header.app();
+    let out = out.unwrap_or_else(|| default_out(&app.id, app.build));
+    write(&out, &signed)?;
     println!(
         "{}: {} {} (build {}), signed again by {}, for runtime {} or newer",
         out.display(),
@@ -422,7 +438,7 @@ mod tests {
             &input,
             &dir.join("platform.secret"),
             &dir.join("platform.cert"),
-            &out,
+            Some(out.clone()),
         )
         .unwrap();
 

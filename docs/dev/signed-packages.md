@@ -25,7 +25,7 @@ For code an app downloads (first-party updates, third-party mini apps): `nsh_pac
   links against that CLI's native modules, so only it is known to run it. `nsh publish --min-runtime` / `nsh.json`
   `minRuntime` lowers it (`MAJOR.MINOR.PATCH`, never above the signer's; suffixes are ignored when comparing).
   `nsh publish` refuses to sign what a device would refuse (the certificate must cover the app and the time).
-- **Signing again** (`nsh_package::resign`, `nsh resign`): CI builds and signs with keys of its own (test apps trust
+- **Signing again** (`nsh_package::resign`, `nsh publish <package>`): CI builds and signs with keys of its own (test apps trust
   their root), a platform signs the package again with the key production apps trust. Only the header's
   `certificate` and `createdAt` and the signature change: the header is rewritten as JSON, not through `Header`,
   which drops the fields this runtime does not know (dropping one `critical` names would lift its restriction on
