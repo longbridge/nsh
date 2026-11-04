@@ -1077,7 +1077,8 @@ fn content_of(cx: *mut JsContext, parent: JsValue, child: JsValue) -> JsValue {
 /// `contentStyle` / `contentClass` (React Native's
 /// content container: `flexGrow: 1` with `justifyContent: "center"`
 /// centers what is shorter than the viewport and still scrolls what is
-/// longer).
+/// longer). The browser runtime's renderer has its own
+/// (`nsh-platform-web`'s `browser/dom.rs`): a change here goes there too.
 fn scroll_content(cx: *mut JsContext, node: JsValue) -> Result<JsValue, JsValue> {
     let p = node_ptr(cx, node);
     // SAFETY: live node data, read briefly.
@@ -1256,40 +1257,28 @@ fn set_prop(
             };
             return set_prop(cx, content, name, value, prev);
         }
-        "activeStyle" | "hoverStyle" | "focusStyle" | "disabledStyle" | "selectedStyle"
-        | "checkedStyle" | "indeterminateStyle" | "expandedStyle" | "pressedStyle"
-        | "focusWithinStyle" | "headerStyle" => {
-            let patch = part_style(cx, name, value)?;
-            let prop = match name {
-                "activeStyle" => nsh_core::Prop::ActiveStyle(patch),
-                "hoverStyle" => nsh_core::Prop::HoverStyle(patch),
-                "focusStyle" => nsh_core::Prop::FocusStyle(patch),
-                "disabledStyle" => nsh_core::Prop::DisabledStyle(patch),
-                "selectedStyle" => nsh_core::Prop::SelectedStyle(patch),
-                "checkedStyle" => nsh_core::Prop::CheckedStyle(patch),
-                "indeterminateStyle" => nsh_core::Prop::IndeterminateStyle(patch),
-                "expandedStyle" => nsh_core::Prop::ExpandedStyle(patch),
-                "pressedStyle" => nsh_core::Prop::PressedStyle(patch),
-                "focusWithinStyle" => nsh_core::Prop::FocusWithinStyle(patch),
-                _ => nsh_core::Prop::HeaderStyle(patch),
-            };
-            return dom(cx).push(cx, Op::SetProp { id, prop });
-        }
-        "headerClass" | "contentClass" => {
-            // SAFETY: an inline tag check.
-            let names: Box<str> = if unsafe { qjs::JS_IsString(value) } {
-                string_arg(cx, value).unwrap_or_default().into()
-            } else {
-                Box::default()
-            };
-            let prop = match name {
-                "headerClass" => nsh_core::Prop::HeaderClass(names),
-                _ => nsh_core::Prop::ListContentClass(names),
-            };
-            return dom(cx).push(cx, Op::SetProp { id, prop });
-        }
         "tooltip" if followed(cx, name, value) => return bind_prop_with(cx, node, name, value),
         _ => {}
+    }
+    if let Some(prop) = nsh_core::js::host::style_patch_prop(name) {
+        let prop = prop(part_style(cx, name, value)?);
+        return dom(cx).push(cx, Op::SetProp { id, prop });
+    }
+    // SAFETY: live node data.
+    if let Some(prop) = nsh_core::js::host::part_class_prop(name, unsafe { (*p).tag }) {
+        // SAFETY: an inline tag check.
+        let names: Box<str> = if unsafe { qjs::JS_IsString(value) } {
+            string_arg(cx, value).unwrap_or_default().into()
+        } else {
+            Box::default()
+        };
+        return dom(cx).push(
+            cx,
+            Op::SetProp {
+                id,
+                prop: prop(names),
+            },
+        );
     }
     if let Some(prop) = crate::touch::touch_prop(name) {
         return set_touch(cx, p, prop, value);

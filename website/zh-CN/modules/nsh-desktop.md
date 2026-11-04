@@ -68,7 +68,7 @@ Rust 列给出 `nsh_core::element::desktop` 中的函数。
 | `orderFront()` | `order_front()` | 把窗口提升到其所在层级的最前并聚焦（应用随之激活；macOS 会解除最小化，Windows 会恢复最小化的窗口并置于前台，GTK 会 present）。窗口保持原有层级。macOS 的桌面层级窗口保持在其他窗口之后。GPUI 激活其窗口；Linux 上的前台请求由窗口管理器决定。 |
 | `close()` | `close_window()` | 关闭窗口，应用随之结束。 |
 
-窗口尺寸调整适用于 macOS、Windows 和 Linux；窗口定位和层级控制适用于 macOS 和 Windows。Linux 的窗口位置和层级由窗口管理器决定。GPUI 窗口的尺寸、位置和层级由宿主在创建窗口时配置。
+窗口尺寸调整适用于 macOS、Windows 和 Linux；窗口定位和层级控制适用于 macOS 和 Windows。Linux 的窗口位置和层级由窗口管理器决定。在 GPUI 应用中，`setFrame` 设置窗口尺寸，窗口位置由平台决定；GPUI 窗口的位置和层级由宿主在创建窗口时配置。
 
 使用 `onLayout` 测量内容后调整窗口大小时，在 macOS 和 Windows 上应为窗口装饰预留空间。`width` 和 `height` 接受正有限数值；`x` 和 `y` 接受有限数值。无效字段保留原值。
 

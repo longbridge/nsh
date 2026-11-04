@@ -29,6 +29,8 @@ pub mod dev;
 mod file_drop;
 mod file_requests;
 mod fps;
+#[cfg(test)]
+mod gtk_test;
 mod image;
 mod input;
 mod keymap;

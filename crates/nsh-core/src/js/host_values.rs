@@ -695,6 +695,39 @@ impl HostValue for crate::shader::ShaderUniforms {
     }
 }
 
+/// A page's or a dialog's `transitionShader`: `{ source, uniforms?,
+/// duration? }`.
+impl HostValue for crate::shader::NavShaderSpec {
+    fn decode<I: HostInput>(input: &I, cx: &mut HostCx) -> Option<Self> {
+        if !input.is_object() {
+            return None;
+        }
+        let mut source = None;
+        let mut uniforms = crate::shader::ShaderUniforms::default();
+        let mut duration = None;
+        for (name, value) in input.entries() {
+            match name.as_str() {
+                "source" => source = value.as_string(),
+                "uniforms" => {
+                    uniforms = crate::shader::ShaderUniforms::decode(&value, cx).unwrap_or_default()
+                }
+                "duration" => duration = value.as_number().map(|d| d as f32),
+                _ => {}
+            }
+        }
+        Some(crate::shader::NavShaderSpec {
+            source: source?.as_str().into(),
+            uniforms,
+            duration,
+        })
+    }
+
+    fn ts_type(types: &mut TsTypes) -> String {
+        let uniforms = crate::shader::ShaderUniforms::ts_type(types);
+        format!("{{ source: string; uniforms?: {uniforms}; duration?: number }}")
+    }
+}
+
 /// An effect's `progress`: a number or an animated value.
 impl HostValue for crate::shader::ShaderProgress {
     fn decode<I: HostInput>(input: &I, _: &mut HostCx) -> Option<Self> {

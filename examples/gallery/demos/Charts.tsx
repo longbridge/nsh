@@ -422,8 +422,11 @@ const WORST_RUN = EQUITY.slice(PEAK.day, TROUGH.day + 1);
 const RECOVERED = EQUITY.find((d) => d.day > TROUGH.day && d.value >= PEAK.value);
 const UNDERWATER = EQUITY.filter((d) => d.drawdown < -0.05).length / EQUITY.length;
 const EQUITY_HEIGHT = 140;
-const WATER_HEIGHT = 64;
-const DD_FLOOR = Math.floor(TROUGH.drawdown / 5) * 5 - 2;
+const WATER_HEIGHT = 72;
+/** The room the low's label takes under its dot: a gap, then a line of `axis` text. */
+const TROUGH_LABEL = 5 + 13;
+/** The underwater plot's floor: deep enough that the low's label fits between its dot and the floor. */
+const DD_FLOOR = Math.floor((TROUGH.drawdown * WATER_HEIGHT) / (WATER_HEIGHT - TROUGH_LABEL));
 const VALUE_LO = Math.min(...EQUITY.map((d) => d.value)) * 0.97;
 const VALUE_HI = Math.max(...EQUITY.map((d) => d.value)) * 1.03;
 /** Where day `i` is across both plots (their rows are evenly spread). */
@@ -532,8 +535,9 @@ function Drawdown() {
           <PlotAxis placement="left" labelPlacement="inside" tickValues={[DD_FLOOR]} format={(v) => `${v}%`} labelStyle={{ ...axis, paddingBottom: 2 }} />
           <View style={{ position: "absolute", left: across(TROUGH.day), top: (TROUGH.drawdown / DD_FLOOR) * WATER_HEIGHT, width: 0, height: 0, pointerEvents: "none" }}>
             <View style={{ position: "absolute", left: -3.5, top: -3.5, width: 7, height: 7, borderRadius: 3.5, borderWidth: 1.5, borderColor: colors.inset, backgroundColor: toneColor("danger") }} />
-            {/* A width of its own: the zero-width anchor would wrap it at every break. */}
-            <Text style={{ ...axis, position: "absolute", left: 8, top: -6, width: 64, color: toneColor("danger") }}>{`${signed(TROUGH.drawdown, 1)}%`}</Text>
+            {/* Under the dot, where the curve never is (the low is its lowest point); a width of
+                its own, centered on the dot: the zero-width anchor would wrap it at every break. */}
+            <Text style={{ ...axis, lineHeight: 13, position: "absolute", left: -32, top: 5, width: 64, textAlign: "center", color: toneColor("danger") }}>{`${signed(TROUGH.drawdown, 1)}%`}</Text>
           </View>
           {mark("water", "danger")}
           {/* The days under both plots: the first, then every 30th. */}
@@ -3281,5 +3285,5 @@ function Allocation() {
  * grids hairlines, tooltips floating cards with a caps title.
  */
 export function Charts() {
-  return <DemoPage cards={[Live, Depth, Drawdown, Capacity, Revenue, Sales, Bridge, Funnel, Candles, RiskReturn, Targets, VolumePrice, Margins, Correlation, Seasonality, Activity, Factors, Flows, MarketMap, Allocation, Watchlist]} />;
+  return <DemoPage lazy cards={[Live, Depth, Drawdown, Capacity, Revenue, Sales, Bridge, Funnel, Candles, RiskReturn, Targets, VolumePrice, Margins, Correlation, Seasonality, Activity, Factors, Flows, MarketMap, Allocation, Watchlist]} />;
 }

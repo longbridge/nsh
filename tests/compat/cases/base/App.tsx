@@ -54,6 +54,7 @@ import BaseToggle from "./base-toggle";
 import BaseToolbar from "./base-toolbar";
 import BaseTree from "./base-tree";
 import BaseToken from "./base-token";
+import BaseTransitionShader from "./base-transition-shader";
 
 const cases: Record<string, () => JSX.Element> = {
   "base-status-bar": BaseStatusBar,
@@ -107,6 +108,7 @@ const cases: Record<string, () => JSX.Element> = {
   "base-table": BaseTable,
   "base-toast": BaseToast,
   "base-token": BaseToken,
+  "base-transition-shader": BaseTransitionShader,
 };
 const shown = signal("");
 
