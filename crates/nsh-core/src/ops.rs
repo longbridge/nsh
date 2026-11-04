@@ -971,6 +971,17 @@ impl ImageSource {
         }
     }
 
+    /// This source for a screen of `pixel_ratio` device pixels per point:
+    /// the [`Self::uri_for`] the core picks for what it mounts, for what
+    /// goes around it (a menu item's icon).
+    #[must_use]
+    pub fn at_pixel_ratio(&self, pixel_ratio: f32) -> ImageSource {
+        ImageSource {
+            uri: self.uri_for(pixel_ratio),
+            ..self.clone()
+        }
+    }
+
     /// The scale of the variant loaded at `pixel_ratio`, when it is not
     /// [`Self::uri`] itself. A query or a fragment is no part of a file
     /// name the bundler wrote, so such a URI is loaded as it is.

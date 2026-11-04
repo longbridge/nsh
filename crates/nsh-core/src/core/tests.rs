@@ -17524,6 +17524,33 @@ mod rust_menus {
         (wrap.id, wrap.checked)
     }
 
+    /// A menu with an icon of each source Rust gives.
+    #[component]
+    fn IconMenus() -> impl IntoElement {
+        const LOGO: ImageAsset = ImageAsset {
+            url: "asset:/@app/logo.png",
+            size: crate::geometry::Size {
+                width: Points(16.0),
+                height: Points(16.0),
+            },
+            scales: &[1.0, 2.0],
+        };
+        set_application_menu(vec![
+            MenuItem::submenu(
+                "File",
+                [
+                    MenuItem::new("New").icon("data:image/svg+xml,%3Csvg/%3E"),
+                    MenuItem::new("Logo").icon(LOGO),
+                    MenuItem::new("Empty").icon(""),
+                    MenuItem::new("None"),
+                    MenuItem::role(MenuRole::Quit).icon("asset:/quit.svg"),
+                ],
+            )
+            .icon("asset:/file.svg"),
+        ]);
+        view()
+    }
+
     fn menu_event(c: &mut Core<FakeEngine>, fields: Vec<(&'static str, PayloadValue)>) -> bool {
         c.component_event(ROOT_ID, EventKind::Menu, &EventPayload::Map(fields))
     }
@@ -17645,6 +17672,52 @@ mod rust_menus {
             vec![("id", PayloadValue::Number(f64::from(rename)))]
         ));
         assert!(texts_of(&c.commit().unwrap()).contains(&"rename false".to_owned()));
+    }
+
+    #[test]
+    fn rust_menu_items_carry_their_icons() {
+        let mut c = core();
+        c.set_environment(crate::element::Environment {
+            os: Os::Windows,
+            ..Default::default()
+        });
+        c.mount_root(&Root::of::<IconMenus>());
+        let batch = c.commit().unwrap();
+        let menu = batch
+            .items
+            .iter()
+            .filter_map(desktop)
+            .find_map(|c| match c {
+                DesktopCommand::SetMenu(Some(items)) => Some(items.clone()),
+                _ => None,
+            })
+            .expect("the application menu");
+        let Item::Submenu { icon, items, .. } = &menu[0] else {
+            panic!("a submenu: {menu:?}");
+        };
+        assert_eq!(icon.as_ref().map(|i| &*i.uri), Some("asset:/file.svg"));
+        let icons: Vec<_> = items
+            .iter()
+            .map(|item| match item {
+                Item::Action(action) => action.icon.clone(),
+                other => panic!("an action: {other:?}"),
+            })
+            .collect();
+        // A `data:` URI has its bytes in hand, as an `<Image>`'s has.
+        let inline = icons[0].as_ref().expect("the data URI");
+        assert_eq!(inline.data.as_deref(), Some(&b"<svg/>"[..]));
+        // An asset has its size and scales.
+        let logo = icons[1].as_ref().expect("the asset");
+        assert_eq!(&*logo.uri, "asset:/@app/logo.png");
+        assert_eq!(logo.size, Some(crate::geometry::size_pt(16.0, 16.0)));
+        assert_eq!(logo.uri_for(2.0).as_ref(), "asset:/@app/logo@2x.png");
+        assert_eq!(
+            logo.at_pixel_ratio(2.0).uri.as_ref(),
+            "asset:/@app/logo@2x.png"
+        );
+        assert_eq!(icons[2], None, "an empty URL is no image");
+        assert_eq!(icons[3], None);
+        assert_eq!(icons[4].as_ref().map(|i| &*i.uri), Some("asset:/quit.svg"));
     }
 
     #[test]
