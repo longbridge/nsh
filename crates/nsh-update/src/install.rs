@@ -215,14 +215,42 @@ fn unpack(archive: &Path, into: &Path) -> Result<(), Error> {
         [0x1f, 0x8b] => {
             let mut tar = tar::Archive::new(flate2::read::GzDecoder::new(file));
             tar.set_preserve_permissions(true);
-            tar.unpack(into)
-                .map_err(|e| Error::Install(format!("unpack: {e}")))
+            unpack_tar(&mut tar, into).map_err(|e| Error::Install(format!("unpack: {e}")))
         }
         b"PK" => zip::ZipArchive::new(file)
             .and_then(|mut zip| zip.extract(into))
             .map_err(|e| Error::Install(format!("unpack: {e}"))),
         _ => Err(Error::Install("not a .tar.gz or .zip".into())),
     }
+}
+
+/// As [`tar::Archive::unpack`], without the AppleDouble files (`._<name>`)
+/// macOS's `tar` adds for a file's extended attributes, every file having
+/// some there: beside the app they are a second entry, in it they break its
+/// signature.
+fn unpack_tar<R: std::io::Read>(tar: &mut tar::Archive<R>, into: &Path) -> std::io::Result<()> {
+    let mut directories = Vec::new();
+    for entry in tar.entries()? {
+        let mut entry = entry?;
+        let path = entry.path()?;
+        if path
+            .file_name()
+            .is_some_and(|name| name.to_string_lossy().starts_with("._"))
+        {
+            continue;
+        }
+        if entry.header().entry_type().is_dir() {
+            directories.push(entry);
+        } else {
+            entry.unpack_in(into)?;
+        }
+    }
+    // Last and deepest first: a directory's mode may not let files in.
+    directories.sort_by(|a, b| b.path_bytes().cmp(&a.path_bytes()));
+    for mut directory in directories {
+        directory.unpack_in(into)?;
+    }
+    Ok(())
 }
 
 /// The one directory an archive holds (`<name>/`, `<name>.app/`).
@@ -359,6 +387,38 @@ mod tests {
         (root, exe)
     }
 
+    /// The version in a package's `app.json`.
+    fn version(root: &Path) -> String {
+        let text = fs::read_to_string(resources(root).join("app.json")).unwrap();
+        let info: serde_json::Value = serde_json::from_str(&text).unwrap();
+        info["version"].as_str().unwrap().to_owned()
+    }
+
+    /// Makes the package runnable as far as `codesign` is concerned, as `nsh
+    /// package` does; elsewhere there is nothing to do.
+    fn sign(root: &Path) {
+        if !cfg!(target_os = "macos") {
+            return;
+        }
+        fs::copy("/usr/bin/true", root.join("Contents/MacOS/App")).unwrap();
+        fs::write(
+            root.join("Contents/Info.plist"),
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<plist version="1.0"><dict>
+<key>CFBundleExecutable</key><string>App</string>
+<key>CFBundleIdentifier</key><string>com.example.app</string>
+<key>CFBundlePackageType</key><string>APPL</string>
+</dict></plist>"#,
+        )
+        .unwrap();
+        let output = Command::new("/usr/bin/codesign")
+            .args(["--force", "--sign", "-", "--timestamp=none"])
+            .arg(root)
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{output:?}");
+    }
+
     fn tar_gz(dir: &Path, root: &Path, archive: &str) -> PathBuf {
         let path = dir.join(archive);
         let gz = flate2::write::GzEncoder::new(
@@ -392,23 +452,22 @@ mod tests {
         assert!(Installation::of(&bare.join("host"), "com.example.app", CONFIG).is_none());
     }
 
-    // Replacing an `.app` needs `codesign` to accept the fixture.
-    #[cfg(not(target_os = "macos"))]
     #[test]
     fn an_archive_replaces_the_app() {
         let dir = TempDir::new();
-        let (_, exe) = package(dir.path(), name(), "com.example.app", "1.0.0");
+        let (root, exe) = package(dir.path(), name(), "com.example.app", "1.0.0");
         let build = dir.path().join("build");
         let (new, _) = package(&build, name(), "com.example.app", "2.0.0");
-        fs::write(new.join("added"), "x").unwrap();
+        fs::write(resources(&new).join("added"), "x").unwrap();
+        sign(&new);
         let archive = tar_gz(&build, &new, "new.tar.gz");
 
         let installation = Installation::of(&exe, "com.example.app", CONFIG).unwrap();
         assert!(installation.can_install());
         installation.install(&archive).unwrap();
 
-        assert_eq!(fs::read_to_string(&exe).unwrap(), "2.0.0");
-        assert!(exe.with_file_name("added").exists());
+        assert_eq!(version(&root), "2.0.0");
+        assert!(resources(&root).join("added").exists());
         // Nothing is left beside it.
         let left: Vec<_> = fs::read_dir(dir.path())
             .unwrap()
@@ -417,6 +476,62 @@ mod tests {
             .filter(|n| n.contains(".nsh-update"))
             .collect();
         assert_eq!(left, Vec::<String>::new());
+    }
+
+    /// `tar -czf` on a Mac, as the guide has a developer archive an app they
+    /// signed themselves.
+    #[test]
+    fn apple_double_files_are_not_installed() {
+        let dir = TempDir::new();
+        let (root, exe) = package(dir.path(), name(), "com.example.app", "1.0.0");
+        let build = dir.path().join("build");
+        let (new, _) = package(&build, name(), "com.example.app", "2.0.0");
+        sign(&new);
+        let path = build.join("new.tar.gz");
+        let gz = flate2::write::GzEncoder::new(
+            fs::File::create(&path).unwrap(),
+            flate2::Compression::fast(),
+        );
+        let mut tar = tar::Builder::new(gz);
+        let double = |tar: &mut tar::Builder<_>, path: String| {
+            let mut header = tar::Header::new_gnu();
+            header.set_size(1);
+            header.set_mode(0o644);
+            header.set_cksum();
+            tar.append_data(&mut header, path, &b"x"[..]).unwrap();
+        };
+        double(&mut tar, format!("._{}", name()));
+        double(&mut tar, format!("{}/._inner", name()));
+        tar.append_dir_all(name(), &new).unwrap();
+        tar.into_inner().unwrap().finish().unwrap();
+
+        let installation = Installation::of(&exe, "com.example.app", CONFIG).unwrap();
+        installation.install(&path).unwrap();
+
+        assert_eq!(version(&root), "2.0.0");
+        assert!(!root.join("._inner").exists());
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn an_app_codesign_refuses_changes_nothing() {
+        let dir = TempDir::new();
+        let (root, exe) = package(dir.path(), name(), "com.example.app", "1.0.0");
+        let build = dir.path().join("build");
+        let (new, _) = package(&build, name(), "com.example.app", "2.0.0");
+        sign(&new);
+        // Changed after signing.
+        fs::write(
+            resources(&new).join("app.json"),
+            r#"{"id":"com.example.app","version":"3.0.0"}"#,
+        )
+        .unwrap();
+        let archive = tar_gz(&build, &new, "new.tar.gz");
+
+        let installation = Installation::of(&exe, "com.example.app", CONFIG).unwrap();
+        let error = installation.install(&archive).unwrap_err().to_string();
+        assert!(error.contains("code signature"), "{error}");
+        assert_eq!(version(&root), "1.0.0");
     }
 
     #[test]

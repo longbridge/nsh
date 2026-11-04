@@ -102,7 +102,8 @@ pub(crate) fn copy_archive(
 
 /// Archives a macOS `.app` under its release name, for an app with
 /// `"update"`. `tar` keeps the bundle's links and modes, which its
-/// signature covers.
+/// signature covers; `COPYFILE_DISABLE` keeps out the AppleDouble files
+/// (`._<name>`) it would add for extended attributes, which it does not.
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub(crate) fn archive_macos_app(
     config: &AppConfig,
@@ -115,6 +116,7 @@ pub(crate) fn archive_macos_app(
     }
     let release = out.join(archive_name(name, version(config), "tar.gz"));
     let output = Command::new("tar")
+        .env("COPYFILE_DISABLE", "1")
         .arg("-czf")
         .arg(&release)
         .arg("-C")
@@ -273,5 +275,39 @@ mod tests {
             archive_platform(&name, "1.2.0").as_deref(),
             Some(nsh_update::platform().as_str())
         );
+    }
+
+    /// `com.apple.provenance` is on all a Mac writes, so without this every
+    /// archive has them, `tar -t` hiding them.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_archives_hold_no_apple_double_files() {
+        let dir = std::env::temp_dir().join(format!("nsh-update-archive-{}", std::process::id()));
+        let contents = dir.join("App.app/Contents");
+        fs::create_dir_all(&contents).unwrap();
+        let file = contents.join("Info.plist");
+        fs::write(&file, "x").unwrap();
+        let status = Command::new("/usr/bin/xattr")
+            .args(["-w", "dev.nsh.test", "1"])
+            .arg(&file)
+            .status()
+            .unwrap();
+        assert!(status.success());
+        let config: AppConfig =
+            serde_json::from_str(r#"{ "version": "1.2.0", "update": {} }"#).unwrap();
+
+        archive_macos_app(&config, "App", &dir.join("App.app"), &dir).unwrap();
+
+        let archive = dir.join(archive_name("App", "1.2.0", "tar.gz"));
+        let gz = flate2::read::GzDecoder::new(fs::File::open(archive).unwrap());
+        let mut tar = tar::Archive::new(gz);
+        let names: Vec<String> = tar
+            .entries()
+            .unwrap()
+            .map(|e| e.unwrap().path().unwrap().to_string_lossy().into_owned())
+            .collect();
+        let _ = fs::remove_dir_all(&dir);
+        assert!(names.iter().any(|n| n.ends_with("Info.plist")), "{names:?}");
+        assert!(!names.iter().any(|n| n.contains("._")), "{names:?}");
     }
 }
