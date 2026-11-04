@@ -529,12 +529,18 @@ impl State {
     /// The width of a number column.
     pub(crate) fn number_width(&self) -> Points {
         let last = self.old.last_number().max(self.new.last_number());
-        let digits = (last.max(1).ilog10() as usize + 1).max(2);
-        // `column` is an average with a fraction; the platforms round a
-        // text's measured width up, so the column holds its number with a
-        // point to spare (exactly `digits` columns cut the number off).
-        (self.column * digits as f32 + px(0.5)).ceil()
+        number_column(self.column, last)
     }
+}
+
+/// The width of a number column up to the number `last`, at least two digits
+/// wide, in columns of `column`.
+fn number_column(column: Points, last: usize) -> Points {
+    let digits = (last.max(1).ilog10() as usize + 1).max(2);
+    // `column` is an average with a fraction; the platforms round a text's
+    // measured width up, so the column holds its number with a point to spare
+    // (exactly `digits` columns cut the number off).
+    (column * digits as f32 + px(0.5)).ceil()
 }
 
 /// The cell of `line` of `side`.
@@ -1236,6 +1242,23 @@ mod tests {
         assert_eq!(expand_tabs("中\tb"), "中  b");
         let side = Side::new("中文\nab\n".to_string(), Vec::new());
         assert_eq!(side.columns, 4);
+    }
+
+    #[test]
+    fn a_number_column_holds_its_number_with_room_to_spare() {
+        // Menlo's `0` at 12 points: 7.2, which the numbers below would just
+        // not fit in, as #804 showed on iOS, at exactly their digits' columns.
+        for (last, digits, width) in [
+            (9, 2, 15.0),
+            (11, 2, 15.0),
+            (101, 3, 23.0),
+            (1001, 4, 30.0),
+            (10001, 5, 37.0),
+        ] {
+            let got = number_column(px(7.2), last);
+            assert_eq!(got, px(width), "up to {last}");
+            assert!(got >= px(7.2) * digits as f32 + px(0.5), "up to {last}");
+        }
     }
 
     #[test]
