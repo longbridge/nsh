@@ -5098,6 +5098,7 @@ dependencies = [
  "ttf-parser",
  "two-face",
  "unicode-segmentation",
+ "unicode-width",
  "zstd",
 ]
 

@@ -3313,6 +3313,82 @@ covers [props] Sankey.nodeLabelStyle
 covers [props] Sankey.valueLabelClass
 covers [props] Sankey.valueLabelStyle
 covers [props] Sankey.hoverDim
+# A treemap fills its plot: `Grow` (80 of 100) left, `Hold` right of a
+# gap of 4 (`paddingInner`'s first level), their corners on whole points;
+# each with a band of 20 (`paddingTop`) for its name, its leaves 2 apart
+# (the second level) inside a padding of 1 (`paddingOuter`), `Ant` (50)
+# over `Bee` (30) at `ratio` 4 (side by side at the default). The labels come after the canvases: the
+# leaves' (by their classes: `Bee` and `Cat` outlined blue, `Ant` black),
+# then the groups' (`groupClass`'s fill, `groupStyle`'s opacity). Each
+# leaf is colored by its change (`colorValue`) on the plot's diverging
+# scale, its corners `cornerRadii`; `Zed` (0) takes no area.
+drawing below:parent:parent:text:Grow roundRect 1 71 237 28 3 3 3 3
+drawing below:parent:parent:text:Grow roundRect 244 21 55 78 3 3 3 3
+drawing below:parent:parent:text:Grow fillStyle #ff0000ff
+drawing below:parent:parent:text:Grow fillStyle #ffffffff
+drawing below:parent:parent:text:Grow strokeStyle #0000ffff
+style below:parent:parent:text:Grow opacity 0.9
+drawing below:below:parent:parent:text:Grow roundRect 1 21 237 48 3 3 3 3
+drawing below:below:parent:parent:text:Grow fillStyle #00ff00ff
+drawing below:below:parent:parent:text:Grow strokeStyle #000000ff
+drawing below:below:below:parent:parent:text:Grow roundRect 0 0 239 100 3 3 3 3
+drawing below:below:below:parent:parent:text:Grow roundRect 243 0 57 100 3 3 3 3
+drawing below:below:below:parent:parent:text:Grow fillStyle #eeeeeeff
+style below:below:below:parent:parent:text:Grow opacity 0.5
+absent Zed
+# The labels: a leaf's box as big as it, padded by `labelClass`, its
+# name and value (`valueLabel`, of its value) centered in it; a group's
+# name in its band (a group writes no value).
+frame parent:parent:text:Ant 1 21 237 48
+frame parent:parent:text:Grow 0 0 239 20
+style text:Ant fontSize 10
+style text:t50 fontWeight 600
+style text:t50 color #333333ff
+style text:Grow fontSize 9
+expect Hold
+prop id:tree accessibilityLabel Tree
+frame id:treemap 0 0 300 100
+# The pointer over `Ant` reports its row, and the other nodes' labels
+# fade to `inactiveOpacity`; in `Grow`'s band, the group.
+expect node null
+event id:tree onMouseMove position.x=50 position.y=50
+expect node 2
+animated parent:parent:text:Bee opacity 0.25
+animated parent:parent:text:Ant opacity 1
+event id:tree onMouseMove position.x=50 position.y=10
+expect node 0
+event id:tree onMouseLeave
+expect node null
+# `Bee` grows to 60 and moves to its new box; its label follows.
+tap id:grow-tree
+expect t60
+absent t30
+# The rows' order (`sort="data"`), colored by kind (`color`): `Grow`'s
+# leaves in its fill, `Hold`'s in the other.
+expect d-Ant
+expect d-Cat
+covers [nsh/base/plot] Treemap
+covers [props] Treemap.id
+covers [props] Treemap.parent
+covers [props] Treemap.ratio
+covers [props] Treemap.paddingInner
+covers [props] Treemap.paddingOuter
+covers [props] Treemap.paddingTop
+covers [props] Treemap.cornerRadii
+covers [props] Treemap.colorValue
+covers [props] Treemap.leafClass
+covers [props] Treemap.leafStyle
+covers [props] Treemap.groupClass
+covers [props] Treemap.groupStyle
+covers [props] Treemap.inactiveOpacity
+covers [props] Treemap.label
+covers [props] Treemap.valueLabel
+covers [props] Treemap.labelClass
+covers [props] Treemap.labelStyle
+covers [props] Treemap.valueLabelClass
+covers [props] Treemap.valueLabelStyle
+covers [props] Treemap.groupLabel
+covers [props] Treemap.groupLabelStyle
 # A plot inside a `PlotAppearScope`, shown and taken away, its period
 # and the scope's `id` changed. Its line's clip is read as the animation
 # graph runs it: 100 wide once drawn in, 0 at the start of an appear of

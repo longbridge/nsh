@@ -33,6 +33,7 @@ regex.workspace = true
 ropey.workspace = true
 unicode-segmentation.workspace = true
 imara-diff.workspace = true
+unicode-width.workspace = true
 log.workspace = true
 syntect = { workspace = true, optional = true }
 ratex-parser = { workspace = true, optional = true }
@@ -49,6 +50,8 @@ chrono = { workspace = true, features = ["clock"] }
 two-face = { workspace = true, optional = true }
 
 [dev-dependencies]
+# The declarations tests read the specs' text (nsh-core `declarations`).
+nsh-core = { workspace = true, features = ["declarations"] }
 # The components' tests run them headless (`tests/base`), without QuickJS.
 # Path only, unlike the workspace's entries: `cargo publish` drops a
 # dev-dependency without a version, and these two depend on nsh-js, which

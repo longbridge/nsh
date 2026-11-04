@@ -6,11 +6,14 @@
 // content (`contentStyle`, `contentClass`); the rows of the overscan around
 // the viewport, rendered once the frames after the first bind them. Its
 // script checks each.
-import { Scroll, Text, View, signal } from "nsh";
+import { Canvas, Scroll, Text, View, cleanup, signal } from "nsh";
 import { List } from "nsh";
 
 function App() {
   const items = signal(["Apple", "Banana", "Cherry"]);
+  const color = signal("#ff0000");
+  const cleaned = signal(0);
+  let separators = 0;
   return (
     <View testID="root" style={{ flex: 1, paddingTop: 64 }}>
       <View testID="add" onPress={() => items.set([...items(), `Item ${items().length + 1}`])}>
@@ -19,11 +22,21 @@ function App() {
       <List
         testID="list"
         each={items()}
+        keyExtractor={item => item}
         style={{ height: 300 }}
         contentStyle={{ paddingHorizontal: 10 }}
         header={<Text>Fruits</Text>}
         footer={() => <Text>End of fruits</Text>}
-        separator={() => <View testID="sep" style={{ height: 2 }} />}
+        separator={() => {
+          const id = separators++;
+          cleanup(() => cleaned.set(cleaned() + 1));
+          return (
+            <Canvas testID={`sep-${id}`} style={{ height: 2 }} draw={(cx, size) => {
+              cx.fillStyle = color();
+              cx.fillRect(0, 0, size.width, size.height);
+            }} />
+          );
+        }}
       >
         {(item, index) => (
           <View testID={`row-${index()}`} style={{ height: 40 }}>
@@ -55,6 +68,17 @@ function App() {
       <Scroll testID="scroll2" style={{ height: 80 }} contentClass="p-2">
         <View testID="inner2" style={{ height: 20 }} />
       </Scroll>
+      <View
+        testID="reload"
+        style={{ position: "absolute", left: 0, top: 4, width: 1, height: 1 }}
+        onPress={() => items.set([...items()])}
+      />
+      <View
+        testID="theme"
+        style={{ position: "absolute", left: 2, top: 4, width: 1, height: 1 }}
+        onPress={() => color.set("#0000ff")}
+      />
+      <Text style={{ position: "absolute", top: 8 }}>Separator cleanups: {cleaned()}</Text>
       <List testID="long" each={Array.from({ length: 30 }, (_, i) => i)} style={{ height: 100 }}>
         {(item) => (
           <View style={{ height: 40 }}>
