@@ -93,7 +93,7 @@ function Transformable() {
             transform: [{ translateX: x }, { translateY: y }, { scale }, { rotate: angle }],
           }}
         >
-          <Image src="https://picsum.photos/seed/nsh-card/400/300" style={{ flex: 1 }} />
+          <Image src="https://pbs.twimg.com/media/HS7_82eXsAAa-Hx?format=jpg&name=small" style={{ flex: 1 }} />
         </View>
       </View>
       <View style={{ flexDirection: "row" }}>

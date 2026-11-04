@@ -13,6 +13,7 @@ test("the Editor demo finds, replaces and switches samples", async () => {
   // The demo's module loads when first shown: its toolbar comes after the press.
   await app.waitFor("label:Language");
   // The language menu (a sheet on a phone) chooses the sample.
+  await app.waitFor("label:Language");
   await app.press("label:Language");
   await app.press("Rust");
   // The Rust sample, a row per line, with its warning.

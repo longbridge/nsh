@@ -11,6 +11,7 @@ import { createPresence, type PopupSide } from "./popup";
 import { alpha, colors, finish, focusRing, ghostFill, hovered, isDark, mono, motion, radius, TERMINAL_COLUMN, TERMINAL_GAP, TERMINAL_ROW, terminal, tints, toneColor, toneTint, type Tone, wholeRows } from "./theme";
 
 export * from "./theme";
+export * from "./photos";
 export { Segmented } from "./segmented";
 export * from "./popup";
 export * from "./data-table";

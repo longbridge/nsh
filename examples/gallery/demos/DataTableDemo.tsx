@@ -111,7 +111,7 @@ function opening(id: number): Float64Array {
 }
 
 const right = { align: "end" as const, width: 110 };
-const tone = { positiveClass: "text-green-600", negativeClass: "text-red-600" };
+const tone = { positiveClass: "text-up", negativeClass: "text-down" };
 const columns: DataTableColumn[] = [
   { key: "id", title: "ID", width: 90, align: "end" as const, fixed: true, sortable: true },
   { key: "symbol", title: "Symbol", width: 110, fixed: true },

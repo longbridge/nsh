@@ -3473,6 +3473,7 @@ dependencies = [
  "libc",
  "log",
  "naga",
+ "nsh-core",
  "nsh-macros",
  "ordered-float",
  "resvg",

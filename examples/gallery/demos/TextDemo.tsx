@@ -2,7 +2,7 @@ import { Image, type JSX, signal, Text, View } from "nsh";
 import { fontScale } from "nsh";
 import pacifico from "../fonts/Pacifico-Regular.ttf";
 import logo from "../logo@2x.png";
-import { alpha, Caption, Card, colors, DemoPage, finish, isDark, mono, Press, radius, TERMINAL_COLUMN, TERMINAL_GAP, TERMINAL_ROW, terminal, tints } from "../ui";
+import { alpha, Caption, Card, colors, DemoPage, finish, isDark, mono, photoUrl, type PhotoName, Press, radius, TERMINAL_COLUMN, TERMINAL_GAP, TERMINAL_ROW, terminal, tints } from "../ui";
 
 const LOREM =
   "Native text, typeset once on the engine thread with CoreText and drawn on the main thread without any layout work.";
@@ -125,44 +125,26 @@ function Fonts() {
         </Text>
       </Specimen>
       <Specimen label="Shadows" code="textShadow">
-        <View style={{ flexDirection: "row", alignItems: "center", gap: terminal ? TERMINAL_GAP : 12 }}>
-          <Text
-            style={{
-              fontSize: 26,
-              fontWeight: "800",
-              color: colors.accent,
-              textShadow: `0 0 10px ${alpha(colors.accent, isDark() ? 0.6 : 0.3)}`,
-            }}
-          >
-            Glow
-          </Text>
-          <View
-            style={{
-              height: terminal ? TERMINAL_ROW : 48,
-              paddingHorizontal: terminal ? 0 : 14,
-              justifyContent: "center",
-              borderRadius: radius.control,
-              borderCurve: "continuous",
-              backgroundColor: colors.raised,
-              ...finish.raised,
-              borderWidth: 1,
-              borderColor: colors.border,
-            }}
-          >
-            <Text
-              style={{
-                fontSize: 26,
-                fontWeight: "800",
-                color: colors.info,
-                textShadow: isDark() ? "2px 3px 3px rgba(0,0,0,0.9)" : "2px 3px 3px rgba(20,20,10,0.22)",
-              }}
-            >
-              Drop shadow
-            </Text>
-          </View>
+        <View style={{ flexDirection: "row", gap: terminal ? TERMINAL_GAP : 12 }}>
+          <ShadowPhoto photo="booster" label="Glow" color="#ffe9c7" shadow="0 0 12px rgba(255,150,60,1)" />
+          <ShadowPhoto photo="day" label="Drop shadow" color="#ffffff" shadow="0 1px 8px rgba(5,25,45,0.75)" />
         </View>
       </Specimen>
     </Card>
+  );
+}
+
+/** A line of text over a photo, where a text shadow does its work. */
+function ShadowPhoto(props: { photo: PhotoName; label: string; color: string; shadow: string }) {
+  return (
+    <View style={{ flex: 1, height: terminal ? TERMINAL_ROW : 96, borderRadius: radius.control, borderCurve: "continuous", overflow: "hidden", backgroundColor: colors.raised }}>
+      {/* A terminal has no photo to set the text on, so the line uses its own color. */}
+      <If when={!terminal}>
+        <Image src={photoUrl(props.photo, "small")} style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, objectFit: "cover" }} />
+      </If>
+      {/* The padding keeps the shadow inside the text's own box. */}
+      <Text style={{ numberOfLines: 1, padding: terminal ? 0 : 14, fontSize: 19, fontWeight: "600", color: terminal ? colors.text : props.color, textShadow: props.shadow }}>{props.label}</Text>
+    </View>
   );
 }
 

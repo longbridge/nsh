@@ -3,7 +3,7 @@ import { createAnimatedValue } from "nsh";
 import { platform } from "nsh";
 import logo from "../logo@2x.png";
 import { Icon } from "../icons";
-import { Badge, bindRefresh, Button, colors, columnsFor, desktop, finish, paneWidth, Press, radius, scrollbarTheme, Stat, TERMINAL_COLUMN, TERMINAL_ROW, terminal, type Tone, toneColor } from "../ui";
+import { Badge, bindRefresh, Button, colors, columnsFor, desktop, finish, paneWidth, photoNames, photoUrl, Press, radius, scrollbarTheme, Stat, TERMINAL_COLUMN, TERMINAL_ROW, terminal, type Tone, toneColor } from "../ui";
 
 /** The gallery's scroll bar, starting below the compact bar laid over the list's top. */
 const belowBar = {
@@ -40,7 +40,7 @@ function PhotoRow(props: { photo: Photo }) {
     <Press scale={0.985} accessibilityLabel={props.photo.title}>
       <View style={{ flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 16, height: 76 }}>
         <Image
-          src={`https://picsum.photos/seed/${props.photo.id}/112/112`}
+          src={photoUrl(photoNames[props.photo.id % photoNames.length], "360x360")}
           style={{
             width: 56,
             height: 56,
@@ -75,7 +75,7 @@ function PhotoTile(props: { photo: Photo }) {
     <Press scale={0.97} accessibilityLabel={props.photo.title}>
       <View class="hover:bg-card" style={{ padding: 6, gap: 8, borderRadius: radius.card, borderCurve: "continuous", cursor: "pointer" }}>
         <Image
-          src={`https://picsum.photos/seed/${props.photo.id}/480/360`}
+          src={photoUrl(photoNames[props.photo.id % photoNames.length], "small")}
           style={{
             width: "100%",
             aspectRatio: 4 / 3,
