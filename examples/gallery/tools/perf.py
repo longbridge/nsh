@@ -34,7 +34,7 @@ GALLERY = Path(__file__).resolve().parent.parent
 DEMOS = [
     "Stocks", "AI Chat", "Photos", "Lists", "Scrolling", "Navigation", "Form", "Resizable", "Dock",
     "Gestures", "Physics", "Animations", "Canvas", "Styles", "Tailwind", "Text", "Text View", "Images",
-    "Components", "Overlays", "Menus", "Controls", "Web and video", "System", "Standard APIs", "Storage",
+    "Components", "Overlays", "Menus", "Controls", "WebView", "Video", "System", "Standard APIs", "Storage",
 ]
 
 # One second's `nsh::perf` line: the fields both desktops log, and between

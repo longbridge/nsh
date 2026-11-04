@@ -173,7 +173,12 @@ fn Transformable() -> impl IntoElement {
                         .bind_translate_y(&y)
                         .bind_scale(&scale)
                         .bind_rotate(&angle)
-                        .child(image("https://picsum.photos/seed/nsh-card/400/300").flex_1()),
+                        .child(
+                            image(
+                                "https://pbs.twimg.com/media/HS7_82eXsAAa-Hx?format=jpg&name=small",
+                            )
+                            .flex_1(),
+                        ),
                 ),
         )
         .child(

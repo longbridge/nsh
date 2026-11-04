@@ -42,7 +42,8 @@ nsh init my-app --template rust
 | `README.md` | How to run, test and package the app, and how to add a TSX entry later |
 | `.gitignore` | Ignores `.nsh/` and `target/` |
 
-Rust development needs a Rust toolchain ([rustup](https://rustup.rs)); the `nsh` commands build the app's runners
+Rust development needs a Rust toolchain ([rustup](https://rustup.rs), and we recommend
+[huacnlee/cargo](https://github.com/huacnlee/cargo) for building); the `nsh` commands build the app's runners
 from NSH's crates on crates.io, at the CLI's version.
 
 ### In TSX

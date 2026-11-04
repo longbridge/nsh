@@ -21,8 +21,8 @@ const primitives: DemoEntry[] = [
   { name: "List", detail: "Columns, sticky sections, a chat, horizontal lists", icon: "lists", screen: lazy(() => import("./demos/Lists").then((m) => m.Lists)) },
   { name: "Canvas", detail: "2D context: paths, gradients, text, images, native animation", icon: "canvas", screen: lazy(() => import("./demos/CanvasDemo").then((m) => m.CanvasDemo)) },
   { name: "Shader", detail: "WGSL shaders on the GPU: noise, gradients, animated uniforms", icon: "spark", screen: lazy(() => import("./demos/Shaders").then((m) => m.Shaders)) },
-  { name: "WebView and Video", detail: "WKWebView / WebView, AVPlayer / MediaPlayer", icon: "media", screen: lazy(() => import("./demos/Media").then((m) => m.Media)) },
-  { name: "Overlay", detail: "Content on top of the screen, outside the box that clips it", icon: "layers", screen: lazy(() => import("./demos/Overlays").then((m) => m.OverlayDemo)) },
+  { name: "WebView", detail: "Inline HTML with messages both ways, a web site and its navigation", icon: "media", screen: lazy(() => import("./demos/Media").then((m) => m.WebViewDemo)) },
+  { name: "Video", detail: "A player: play, seek, volume and what it reports", icon: "media", screen: lazy(() => import("./demos/Media").then((m) => m.VideoDemo)) },
 ];
 
 /** `nsh/base`'s components, by name, as the website lists them
@@ -69,8 +69,28 @@ const components: DemoEntry[] = [
   { name: "Tree", detail: "A project explorer, a settings sidebar, 10 100 items that stay fast, a read-only outline", icon: "tree", screen: lazy(() => import("./demos/TreeDemo").then((m) => m.TreeDemo)) },
 ];
 
+/** The subheadings Elements lists `nsh/base`'s demos under, by what each is for. */
+const purposes: [string, string[]][] = [
+  ["Actions", ["Button", "Link", "Toggle", "Toolbar", "Command"]],
+  ["Inputs", ["Input", "NumberInput", "OtpInput", "Checkbox", "Radio", "Switch", "Slider", "Select", "Combobox", "DatePicker", "ColorPicker"]],
+  ["Navigation", ["NavStack", "Tabs", "Pagination", "Accordion", "Collapsible", "Carousel", "Tree"]],
+  ["Overlays", ["Popover", "HoverCard", "Menu", "Tooltip", "Sheet", "Toast"]],
+  ["Data", ["Avatar", "Progress", "DataTable", "Plot", "DiffView"]],
+  ["Documents and workspaces", ["TextView", "Editor", "RichEditor", "Dock", "Resizable"]],
+];
+
+const byName = new Map(components.map((d) => [d.name, d]));
+/** `components`, in the order of their subheadings. */
+const byPurpose = purposes.flatMap(([, names]) => names.map((name) => byName.get(name)!));
+
+/** The subheadings Elements lists its demos under. */
+const parts = new Map<DemoEntry, string>([
+  ...primitives.map((d) => [d, "Primitives"] as const),
+  ...purposes.flatMap(([title, names]) => names.map((name) => [byName.get(name)!, title] as const)),
+]);
+
 /** The demos: the apps built on NSH, then one demo per element in the
- * website's order (`nsh`'s primitives, then `nsh/base`'s components), styling,
+ * purpose's order (`nsh`'s primitives, then `nsh/base`'s components), styling,
  * motion and the platform's APIs. Each module loads when first shown (`lazy`). */
 const groups: { title: string; demos: DemoEntry[] }[] = [
   {
@@ -83,7 +103,7 @@ const groups: { title: string; demos: DemoEntry[] }[] = [
   },
   {
     title: "Elements",
-    demos: [...primitives, ...components],
+    demos: [...primitives, ...byPurpose],
   },
   {
     title: "Styling",
@@ -112,9 +132,6 @@ const groups: { title: string; demos: DemoEntry[] }[] = [
     ],
   },
 ];
-
-/** The subheadings Elements lists its demos under. */
-const parts = new Map<DemoEntry, string>([...primitives.map((d) => [d, "Primitives"] as const), ...components.map((d) => [d, "Components"] as const)]);
 
 /** A group's demos (all of them, or those the search found) in runs under
  * their subheadings: one run without a subheading outside Elements. */

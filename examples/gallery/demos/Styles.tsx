@@ -178,7 +178,7 @@ function Shadows() {
         </Tile>
         <Tile label="Image corners" note="Two radii and a shadow">
           <Image
-            src="https://picsum.photos/seed/nsh/300/220"
+            src="https://pbs.twimg.com/media/HS8AFH2WsAASxLk?format=jpg&name=small"
             style={{
               width: 112,
               height: 76,
