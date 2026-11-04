@@ -222,6 +222,8 @@ memory (~28 MB for the Rust app) at a much higher CPU cost for animated content.
   feature a `WebView` shows a neutral placeholder and ignores its commands.
 - **Video**: GTK streams have no playback rate, so `rate` is ignored (warned once); a looping video never ends, so
   `onEnd` only comes for videos that do not loop. Which formats play depends on the installed GStreamer plugins.
+  Freeing a stream on Wayland under GTK before 4.24.2 would terminate GTK's own EGL display and stop the window
+  drawing, so there a closed video's stream stays paused until the process exits (`closing_ends_gtk_egl`).
 - **Zooming scroll views**: `zoomTo` and the zoom props are ignored.
 - **`mixBlendMode` and `backdropFilter`** are not drawn: they need what lies behind the view, which a widget's snapshot
   does not have (the background color still draws). `borderCurve: "continuous"` draws circular corners.

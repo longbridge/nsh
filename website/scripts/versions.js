@@ -11,8 +11,9 @@
 // A release's built pages are kept in `.versions/` (CI caches it) under the
 // tag and a digest of this checkout's site, and its player under the tag
 // alone: a release is built once, and again only when the site changes. The
-// latest's is also kept under the catalog's commit, since only it has App Stories
-// and the catalog changes apart from releases.
+// latest's is also kept under the catalog's commit and a digest of the release
+// notes, since only it has App Stories and the notes, which change apart from
+// releases.
 //
 //   bun scripts/play.js && bun scripts/versions.js     (`bun run build:versions`)
 //
@@ -22,6 +23,7 @@ import { createHash } from 'node:crypto';
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { fetchReleases, releasesDigest } from '../src/lib/releases.js';
 
 const website = fileURLToPath(new URL('..', import.meta.url));
 const root = resolve(website, '..');
@@ -84,6 +86,9 @@ if (!catalog && process.env.NSH_REQUIRE_SHOWCASES) {
   console.error(`[versions] no App Stories catalog commit at ${showcases}`);
   process.exit(1);
 }
+
+// The release notes: an edited note has to reach the root's page too.
+const notes = releasesDigest(await fetchReleases());
 
 // On the file system of `dist` (Astro moves its output there, which fails
 // across file systems) and outside `website/`, which each version copies.
@@ -161,10 +166,10 @@ function build(version, copy, out) {
       SHOWCASES_DIR: showcases,
     },
   });
-  // App Stories are the latest's alone: the catalog changes apart from
-  // releases, so other versions link to the root's.
+  // App Stories and the release notes are the latest's alone: both change
+  // apart from a version's content, so other versions link to the root's.
   if (version !== latest) {
-    for (const dir of ['apps', 'zh-CN/apps']) rmSync(join(out, dir), { recursive: true, force: true });
+    for (const dir of ['apps', 'zh-CN/apps', 'releases', 'zh-CN/releases']) rmSync(join(out, dir), { recursive: true, force: true });
   }
   run('bunx', ['pagefind', '--site', out]);
 }
@@ -175,7 +180,7 @@ const order = [latest, ...versions.map((v) => v.id).filter((id) => id !== latest
 for (const version of order) {
   if (only && !only.includes(version)) continue;
   const out = version === latest ? dist : join(dist, 'versions', version);
-  const cached = join(cache, version, version === latest ? `${siteDigest}-${catalog}` : siteDigest);
+  const cached = join(cache, version, version === latest ? `${siteDigest}-${catalog}-${notes}` : siteDigest);
   if (version !== 'main' && existsSync(join(cached, 'index.html'))) {
     console.log(`[versions] reusing ${version}`);
     cpSync(cached, out, { recursive: true });

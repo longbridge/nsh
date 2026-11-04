@@ -39,7 +39,7 @@ nsh init my-app --template rust
 | `README.md` | 如何运行、测试和打包应用，以及之后如何添加 TSX 入口 |
 | `.gitignore` | 忽略 `.nsh/` 和 `target/` |
 
-Rust 开发需要 Rust 工具链（[rustup](https://rustup.rs)）；`nsh` 命令使用 crates.io 上与 CLI 同版本的 NSH crate 构建应用的运行器。
+Rust 开发需要 Rust 工具链（[rustup](https://rustup.rs)，构建时推荐使用 [huacnlee/cargo](https://github.com/huacnlee/cargo)）；`nsh` 命令使用 crates.io 上与 CLI 同版本的 NSH crate 构建应用的运行器。
 
 ### 用 TSX
 

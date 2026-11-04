@@ -30,8 +30,10 @@ const activeSection = rest.replace(/^zh-CN(\/|$)/, '').split('/')[0];
 const pagePath = versionPath(currentPath, BASE);
 const currentLabel = siteVersions.find((version) => version.id === currentVersion)?.label ?? currentVersion;
 const appsHref = isLatestVersion ? url(isZh ? 'zh-CN/apps' : 'apps') : isZh ? '/zh-CN/apps' : '/apps';
-// App Stories are the same in every version: the menu there stays on them.
-const onApps = /^\/(zh-CN\/)?apps(\/|$)/.test(pagePath);
+const releasesHref = isLatestVersion ? url(isZh ? 'zh-CN/releases' : 'releases') : isZh ? '/zh-CN/releases' : '/releases';
+// App Stories and the release notes are the same in every version: the menu
+// there stays on them.
+const onRootPage = /^\/(zh-CN\/)?(apps|releases)(\/|$)/.test(pagePath);
 ---
 
 <header class="site-nav">
@@ -90,6 +92,13 @@ const onApps = /^\/(zh-CN\/)?apps(\/|$)/.test(pagePath);
       >
         {isZh ? '应用案例' : 'App Stories'}
       </a>
+      <a
+        href={releasesHref}
+        class:list={['site-nav__link', { active: activeSection === 'releases' }]}
+        aria-current={activeSection === 'releases' ? 'true' : undefined}
+      >
+        {isZh ? '版本发布' : 'Releases'}
+      </a>
     </nav>
 
     <div class="site-nav__actions">
@@ -102,7 +111,7 @@ const onApps = /^\/(zh-CN\/)?apps(\/|$)/.test(pagePath);
           <div class="site-nav__versions-menu" aria-label={isZh ? '版本' : 'Versions'}>
             {siteVersions.map((version) => (
               <a
-                href={onApps ? pagePath : versionHref(version, pagePath)}
+                href={onRootPage ? pagePath : versionHref(version, pagePath)}
                 data-version-link
                 data-version-home={versionHref(version, isZh ? '/zh-CN' : '/')}
                 class:list={{ 'is-current': version.id === currentVersion }}
