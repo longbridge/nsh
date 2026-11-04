@@ -247,8 +247,8 @@ Some nodes are several parts, which apply in order: a level 2 heading is `headin
 | `superscript`, `subscript` | `Superscript`, `Subscript` | Superscript and subscript (smaller). |
 | `link` | `Link` | Links (in the theme's `primary` color, underlined). |
 | `image` | `Image` | Images. |
-| `math` | `Math` | Formulas in text, shown as their TeX in monospace when there is no `renderMath`. |
-| `mathBlock` | `MathBlock` | Formula blocks, shown as their TeX in monospace when there is no `renderMath`. |
+| `math` | `Math` | Formulas in text, typeset when there is no `renderMath`. |
+| `mathBlock` | `MathBlock` | Formula blocks, typeset and centered when there is no `renderMath`. |
 | `table` | `Table` | Tables: `renderTableActions`' content, then the scroll view of the cells. |
 | `tableScroll` | `TableScroll` | The horizontal scroll view of a table's cells: columns fit their content when there is room, wrap down to a floor when the view is narrower, and past that the table scrolls. |
 | `tableRow` | `TableRow` | Every row of a table: a view behind its cells, for backgrounds and borders (text styles go on `tableCell`). |
@@ -463,7 +463,7 @@ import { Image, View } from "nsh";
 ```
 
 `Highlighted` and `MathView` (`highlighted` and `math_view` in Rust) stand for the app's own components (a
-highlighter, a formula renderer, or a component of its Rust crate). Without `renderMath` a formula shows as its TeX in monospace (`math` and `mathBlock` parts).
+highlighter, a formula renderer, or a component of its Rust crate). Without `renderMath` `TextView` typesets a formula itself (`math` and `mathBlock` parts) with KaTeX's TeX support and fonts, in the text's color, the same on every platform; TeX it cannot read shows as its source in monospace.
 
 ## Markdown extensions
 

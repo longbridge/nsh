@@ -795,7 +795,7 @@ impl Element for SurfaceElement {
             Some(theme) => theme.background.light.into(),
             None => crate::system::window_background(&surface),
         };
-        if background.0 & 0xff != 0 {
+        if background.0 & 0xff != 0 && !surface.transparent.get() {
             window.paint_quad(gpui::fill(bounds, hsla(background)));
         }
         // Before the tree: painting a native component's element leaves its

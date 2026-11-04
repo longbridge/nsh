@@ -24,8 +24,9 @@
 - **Carousels** (`nsh/base`'s `Carousel`, `docs/dev/components.md` "Carousels"): a horizontal or vertical scroll view
   whose `snapToOffsets` are its slides' laid-out starts, with `disableIntervalMomentum`; the slide is read where the
   scroll comes to rest (`onScrollEnd`) and discrete changes are `ScrollTo`s.
-- **Content container** (`<Scroll>`): `contentStyle` / `contentClass` are the renderer's
-  (`dom.rs` `scroll_content`): the first one set makes a view the scroll view's children move into (also the ones
+- **Content container** (`<Scroll>`): `contentStyle` / `contentClass` are the renderers', each with a
+  `scroll_content` (QuickJS' in `nsh-js`'s `dom.rs`, the browser runtime's in `nsh-platform-web`'s `browser/dom.rs`;
+  a change to one goes to both): the first one set makes a view the scroll view's children move into (also the ones
   already there; later inserts and removals go to it), and styles it. The core lays a scroll view's children out in
   the scroll view itself, so without it nothing changes (no extra view).
 - **Zooming** (`<Scroll>`, not lists): `maximumZoomScale` above `minimumZoomScale` makes the content zoomable; `zoomScale`

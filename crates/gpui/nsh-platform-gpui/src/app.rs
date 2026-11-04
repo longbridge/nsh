@@ -11,7 +11,7 @@ use std::{
 
 use gpui::{
     App as GpuiApp, AppContext, Context, Entity, FocusHandle, Focusable, InteractiveElement,
-    IntoElement, ParentElement, Render, Styled, Window,
+    IntoElement, ParentElement, Render, Styled, Window, prelude::FluentBuilder as _,
 };
 use nsh_base::{Theme, ThemeError};
 use nsh_core::platform::{Appearance, Locale};
@@ -159,6 +159,11 @@ pub struct AppOptions {
     /// their calls and posts ([`AppView::host`]). One for every app the view
     /// loads; a new one by default.
     pub host: nsh_engine::HostChannel,
+    /// A see-through window: the view draws no window background and
+    /// [`open_app_window`] asks for a transparent one, so what the app
+    /// leaves unpainted shows what is behind the window (desktop widgets,
+    /// overlays). False by default.
+    pub transparent: bool,
 }
 
 impl Default for AppOptions {
@@ -178,6 +183,7 @@ impl Default for AppOptions {
             storage: None,
             context: Default::default(),
             host: nsh_engine::HostChannel::default(),
+            transparent: false,
         }
     }
 }
@@ -273,6 +279,7 @@ impl AppView {
         bind_keys(cx);
         let surface = Surface::new(initial_environment());
         surface.appearance.set(options.appearance);
+        surface.transparent.set(options.transparent);
         if options.fps {
             *surface.stats.borrow_mut() = Some(Default::default());
         }
@@ -557,6 +564,37 @@ impl AppView {
         &self.surface
     }
 
+    /// Files dragged in from another application moved over the window
+    /// (`render`'s drop layer, [`crate::file_drop`]).
+    fn drag_files(
+        &mut self,
+        event: &gpui::DragMoveEvent<gpui::ExternalPaths>,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let (x, y) = self.root_point(event.event.position);
+        crate::file_drop::update(&self.surface, x, y);
+        crate::rt::flush(cx);
+    }
+
+    /// Files dragged in from another application were dropped.
+    fn drop_files(
+        &mut self,
+        paths: &gpui::ExternalPaths,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let (x, y) = self.root_point(window.mouse_position());
+        crate::file_drop::perform(&self.surface, x, y, paths.paths());
+        crate::rt::flush(cx);
+    }
+
+    /// A window point in the surface's root points.
+    fn root_point(&self, position: gpui::Point<gpui::Pixels>) -> (f32, f32) {
+        let (ox, oy) = self.surface.origin.get();
+        (f32::from(position.x) - ox, f32::from(position.y) - oy)
+    }
+
     /// Tab: the surface's next text field; past its last one, the window's
     /// next tab stop (the embedding app's widgets), or the first field again
     /// when there is none.
@@ -786,6 +824,16 @@ impl Render for AppView {
         let surface = crate::dev::wrap(self, surface.into_any_element(), cx);
         // The window's chrome (title bar, menu bar) goes around the surface.
         let content = crate::chrome::render(&self.surface, surface, window, cx);
+        let dragging = cx.has_active_drag();
+        // A file drag that left the window, or ended without a drop, leaves
+        // its destination (GPUI redraws the window as it ends).
+        if !dragging && crate::file_drop::take_needs_clear(&self.surface) {
+            let surface = self.surface.clone();
+            cx.defer(move |cx| {
+                crate::file_drop::clear(&surface);
+                crate::rt::flush(cx);
+            });
+        }
         // The div registers the view's tab stop, which only GPUI's own
         // elements can.
         gpui::div()
@@ -795,6 +843,21 @@ impl Render for AppView {
             .on_action(cx.listener(Self::focus_prev))
             .size_full()
             .child(content)
+            // While something is dragged, a layer over the surface follows
+            // and takes files from other applications: the surface's hitbox
+            // blocks the mouse for the elements behind it, this div included.
+            // GPUI does not tell what is dragged, so the layer comes with any
+            // drag; it listens only to `ExternalPaths`, and its hitbox does
+            // not block the mouse, so the surface under it stays hovered.
+            .when(dragging, |div| {
+                div.child(
+                    gpui::div()
+                        .absolute()
+                        .inset_0()
+                        .on_drag_move(cx.listener(Self::drag_files))
+                        .on_drop(cx.listener(Self::drop_files)),
+                )
+            })
     }
 }
 
@@ -838,6 +901,11 @@ pub fn open_app_window(
         // run at the display's rate wherever the keyboard is, as in the
         // other backends.
         inactive_frame_interval: None,
+        window_background: if options.transparent {
+            gpui::WindowBackgroundAppearance::Transparent
+        } else {
+            gpui::WindowBackgroundAppearance::Opaque
+        },
         ..Default::default()
     };
     let handle = cx.open_window(window_options, move |window, cx| {

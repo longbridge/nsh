@@ -111,6 +111,8 @@ mod dirty {
     pub(super) const LABEL: u32 = 1 << 18;
     /// Emit [`crate::MountItem::Shader`].
     pub(super) const SHADER: u32 = 1 << 19;
+    /// Emit [`crate::MountItem::NavShader`].
+    pub(super) const NAV_SHADER: u32 = 1 << 20;
 }
 
 /// A layout root other than the surface's: screens, modals and header
@@ -131,6 +133,8 @@ struct RootState {
     screen: ScreenConfig,
     /// Modal options (modals).
     modal: ModalConfig,
+    /// `transitionShader` (screens and modals), as the platform gets it.
+    nav_shader: Option<crate::NavShader>,
     /// Where a header item goes (header items).
     slot: HeaderSlot,
     /// `nativeID` (input accessories).
@@ -463,6 +467,9 @@ struct ShaderNode {
 
 /// How long a shader transition runs by default.
 const DEFAULT_TRANSITION_MS: f32 = 300.0;
+
+/// How long a page's or a dialog's `transitionShader` runs by default.
+const DEFAULT_NAV_SHADER_MS: f32 = 350.0;
 
 /// The role of a shader element's layer.
 fn shader_role(tag: Tag) -> Option<crate::shader::ShaderRole> {
@@ -3168,7 +3175,13 @@ impl<M: TextEngine> Core<M> {
         }
         if text_changed || flipped {
             match self.nodes[key as usize].kind {
-                Kind::Text => self.mark_text_block(key),
+                Kind::Text => {
+                    self.mark_text_block(key);
+                    // Texts inside its attachments take its color.
+                    if color_passed {
+                        self.mark_inheriting_text(key);
+                    }
+                }
                 Kind::Input => {
                     self.measure_input(key);
                     self.mark(key, dirty::INPUT);
@@ -3468,6 +3481,65 @@ impl<M: TextEngine> Core<M> {
         }
     }
 
+    /// `source` compiled, once per source while the cache keeps it (its
+    /// error too): views that share a source, a source set again and the
+    /// pages and dialogs that come through it use the compiled shader.
+    fn compile(
+        &mut self,
+        source: &str,
+    ) -> Result<crate::shader::Shader, crate::shader::ShaderError> {
+        let hash = crate::shader::source_hash(source);
+        let cached = self.shaders.get(&hash).filter(|c| match c {
+            Ok(shader) => shader.source() == source,
+            Err(_) => true,
+        });
+        if let Some(compiled) = cached {
+            return compiled.clone();
+        }
+        let compiled = crate::shader::compile_source(source);
+        // Bounded: an app making sources on the fly does not keep them all.
+        if self.shaders.len() >= 64 {
+            self.shaders.clear();
+        }
+        self.shaders.insert(hash, compiled.clone());
+        compiled
+    }
+
+    /// A page's or a dialog's `transitionShader`: compiled (once per source)
+    /// into the layer the platform draws its coming and going through.
+    fn set_nav_shader(&mut self, key: Key, spec: Option<crate::shader::NavShaderSpec>) {
+        let id = self.nodes[key as usize].id;
+        if self.nodes[key as usize].root.is_none() {
+            log::warn!(target: "js", "`transitionShader` is a page's or a dialog's; node {id} is neither");
+            return;
+        }
+        let shader = spec.and_then(|spec| {
+            let shader = self
+                .compile(&spec.source)
+                .map_err(|e| log::warn!(target: "js", "the transitionShader of node {id}: {e}"))
+                .ok()?;
+            let mut warnings = Vec::new();
+            let layer = crate::shader::ShaderLayer::new(shader, &spec.uniforms.0, &mut warnings)
+                .with_role(crate::shader::ShaderRole::Transition);
+            for warning in warnings {
+                log::warn!(target: "js", "the transitionShader of node {id}: {warning}");
+            }
+            let ms = spec.duration.unwrap_or(DEFAULT_NAV_SHADER_MS).max(0.0);
+            Some(crate::NavShader {
+                layer: Arc::new(layer),
+                duration: std::time::Duration::from_micros((f64::from(ms) * 1000.0).round() as u64),
+            })
+        });
+        let root = self.nodes[key as usize]
+            .root
+            .as_mut()
+            .expect("checked above");
+        if root.nav_shader != shader {
+            root.nav_shader = shader;
+            self.mark(key, dirty::NAV_SHADER);
+        }
+    }
+
     /// Tells the platform which shaders' pictures this commit changed
     /// ([`MountItem::ShaderInput`]): the effects and transitions with a
     /// changed view in their subtree (themselves included) or one that left
@@ -3555,28 +3627,10 @@ impl<M: TextEngine> Core<M> {
                 if state.source == source {
                     return;
                 }
-                state.source = source;
+                state.source = source.clone();
                 state.shader = None;
-                if let Some(source) = &state.source {
-                    let hash = crate::shader::source_hash(source);
-                    let compiled = self
-                        .shaders
-                        .get(&hash)
-                        .filter(|c| match c {
-                            Ok(shader) => shader.source() == &**source,
-                            Err(_) => true,
-                        })
-                        .cloned();
-                    let compiled = compiled.unwrap_or_else(|| {
-                        let compiled = crate::shader::compile_source(source);
-                        // Bounded: an app making sources on the fly does not
-                        // keep them all.
-                        if self.shaders.len() >= 64 {
-                            self.shaders.clear();
-                        }
-                        self.shaders.insert(hash, compiled.clone());
-                        compiled
-                    });
+                if let Some(source) = source {
+                    let compiled = self.compile(&source);
                     let state = self.nodes[key as usize]
                         .shader
                         .as_mut()
@@ -3712,6 +3766,10 @@ impl<M: TextEngine> Core<M> {
         | Prop::TransitionFallback(_) = prop
         {
             self.set_shader_prop(key, prop);
+            return Ok(());
+        }
+        if let Prop::TransitionShader(spec) = prop {
+            self.set_nav_shader(key, spec);
             return Ok(());
         }
         if let Prop::Screen(ScreenProp::StatusBar(setting)) = prop {
@@ -5603,6 +5661,12 @@ impl<M: TextEngine> Core<M> {
                 let config = root.modal;
                 self.mount.push(MountItem::ModalConfig { id, config });
             }
+            if flags & dirty::NAV_SHADER != 0
+                && let Some(root) = &node.root
+            {
+                let shader = root.nav_shader.clone();
+                self.mount.push(MountItem::NavShader { id, shader });
+            }
             if let Some(input) = &node.input {
                 if flags & dirty::INPUT != 0 {
                     let mut config = input.config.clone();
@@ -5733,12 +5797,22 @@ impl<M: TextEngine> Core<M> {
         }
     }
 
+    /// Texts and spans around `key` (it is inside an attachment) pass on
+    /// their color only, as `currentColor` reaches the attachment's view:
+    /// the attachment takes the color of the text it sits in, while its
+    /// font and line height stay its own, which size the box its line
+    /// makes room for.
     fn inherited_text_style(&self, key: Key) -> ResolvedTextStyle {
         let mut chain: Vec<Key> = Vec::new();
         let mut k = self.nodes[key as usize].parent;
         while k != NO_KEY {
             let node = &self.nodes[k as usize];
-            if node.kind != Kind::Text && node.text_style != TextStyle::default() {
+            let passes = if node.kind == Kind::Text {
+                node.text_style.color.is_some()
+            } else {
+                node.text_style != TextStyle::default()
+            };
+            if passes {
                 chain.push(k);
             }
             k = node.parent;
@@ -5747,7 +5821,15 @@ impl<M: TextEngine> Core<M> {
             .iter()
             .rev()
             .fold(self.base_text_style(), |style, &k| {
-                style.inherit(&self.nodes[k as usize].text_style)
+                let node = &self.nodes[k as usize];
+                if node.kind == Kind::Text {
+                    ResolvedTextStyle {
+                        color: node.text_style.color.unwrap_or(style.color),
+                        ..style
+                    }
+                } else {
+                    style.inherit(&node.text_style)
+                }
             })
     }
 
@@ -5790,7 +5872,13 @@ impl<M: TextEngine> Core<M> {
         let mut stack: Vec<Key> = self.nodes[key as usize].children.clone();
         while let Some(k) = stack.pop() {
             match self.nodes[k as usize].kind {
-                Kind::Text => self.mark_text_block(k),
+                // The texts inside its attachments inherit too.
+                Kind::Text => {
+                    if !self.nodes[k as usize].inline {
+                        self.mark_text_block(k);
+                    }
+                    stack.extend_from_slice(&self.nodes[k as usize].children);
+                }
                 Kind::Input => {
                     self.measure_input(k);
                     self.mark(k, dirty::INPUT);

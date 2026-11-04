@@ -3291,5 +3291,5 @@ function Allocation() {
  * grids hairlines, tooltips floating cards with a caps title.
  */
 export function Charts() {
-  return <DemoPage cards={[Live, Depth, Drawdown, Capacity, Revenue, Sales, Bridge, Funnel, Candles, RiskReturn, Targets, VolumePrice, Margins, Correlation, Seasonality, Activity, Factors, Flows, MarketMap, Allocation, Watchlist]} />;
+  return <DemoPage lazy cards={[Live, Depth, Drawdown, Capacity, Revenue, Sales, Bridge, Funnel, Candles, RiskReturn, Targets, VolumePrice, Margins, Correlation, Seasonality, Activity, Factors, Flows, MarketMap, Allocation, Watchlist]} />;
 }

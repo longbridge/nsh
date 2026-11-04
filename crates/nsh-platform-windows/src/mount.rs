@@ -74,6 +74,9 @@ impl Mounter {
                 view.unparent();
             }
         }
+        // A screen effect's or transition's layer is the root's: it goes
+        // with the views that mounted it.
+        root.state_mut().shader = None;
         self.views.insert(ROOT_ID, root);
         self.layout_animation = None;
     }
@@ -169,6 +172,8 @@ impl Mounter {
                 if let Some(view) = self.views.remove(*id) {
                     crate::navigation::removing(surface, &view);
                     crate::native::deleted(surface, &view);
+                    crate::shader::deleted(surface, &view);
+                    crate::navigation::deleted(surface, &view);
                     // A removal animation detaches the view when it ends.
                     if !crate::transition::removing(surface, &view, self.layout_animation.as_ref())
                     {
@@ -326,12 +331,20 @@ impl Mounter {
                     crate::canvas::set(surface, view, drawing.clone());
                 }
             }
-            // Effects and transitions: this platform does not draw them yet.
-            MountItem::ShaderTransition { .. } | MountItem::ShaderInput { .. } => {}
             MountItem::Shader { id, layer } => {
                 if let Some(view) = &self.get(*id) {
                     crate::shader::set(surface, view, layer.clone());
                 }
+            }
+            // A shader's pictures are taken as the window draws.
+            MountItem::ShaderInput { .. } => {}
+            MountItem::ShaderTransition { id, duration } => {
+                if let Some(view) = &self.get(*id) {
+                    crate::shader::start_transition(surface, view, *duration);
+                }
+            }
+            MountItem::NavShader { id, shader } => {
+                crate::navigation::nav_shader(surface, *id, shader.clone());
             }
             MountItem::Gestures { id, values } => {
                 if let Some(view) = &self.get(*id) {
@@ -504,9 +517,7 @@ fn redrawn(item: &MountItem) -> Redraw {
         | MountItem::ComponentPropSlots { .. }
         | MountItem::TreeOrder(_)
         | MountItem::ProjectStates { .. }
-        // Effects and transitions: this platform does not draw them yet.
-        | MountItem::ShaderTransition { .. }
-        | MountItem::ShaderInput { .. } => Redraw::Nothing,
+        | MountItem::NavShader { .. } => Redraw::Nothing,
         MountItem::Frame { id, .. }
         | MountItem::ViewStyle { id, .. }
         | MountItem::Text { id, .. }
@@ -520,6 +531,8 @@ fn redrawn(item: &MountItem) -> Redraw {
         | MountItem::Refreshing { id, .. }
         | MountItem::Canvas { id, .. }
         | MountItem::Shader { id, .. }
+        | MountItem::ShaderInput { id }
+        | MountItem::ShaderTransition { id, .. }
         | MountItem::ViewProps { id, .. }
         | MountItem::Input { id, .. }
         | MountItem::InputValue { id, .. }

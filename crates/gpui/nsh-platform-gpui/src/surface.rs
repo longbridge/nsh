@@ -126,6 +126,8 @@ pub(crate) struct Surface {
     pub(crate) nav: RefCell<crate::navigation::Nav>,
     /// Pointer input state ([`crate::input`]).
     pub(crate) input: crate::input::Input,
+    /// The destination of a file dragged in from another application.
+    pub(crate) file_drop: crate::file_drop::State,
     engine: RefCell<Option<Engine>>,
     control: RefCell<Option<EngineControl>>,
     rx: RefCell<Option<Receiver<Message>>>,
@@ -152,6 +154,11 @@ pub(crate) struct Surface {
     /// next paint, or the keys for the field go to whatever element of the
     /// embedding app had it ([`crate::events::install`]).
     pub(crate) window_focus_requested: Cell<bool>,
+    /// The surface's window is not presented (minimized, on another
+    /// workspace, a suspended Wayland toplevel): its caret does not blink
+    /// ([`crate::text_input::window_visibility`]). Kept across the app's
+    /// reloads, which do not change the window's visibility.
+    pub(crate) window_hidden: Cell<bool>,
     /// The environment the engine was last told about.
     pub(crate) environment: Cell<Environment>,
     /// The app's appearance (`nsh.json`, `setColorScheme`): the color
@@ -207,6 +214,9 @@ pub(crate) struct Surface {
     /// The embedding app's theme ([`crate::AppView::set_theme`]): sent to
     /// every engine the surface starts, before its first frame.
     pub(crate) host_theme: RefCell<Option<nsh_base::Theme>>,
+    /// The window is see-through where the app draws nothing
+    /// ([`crate::AppOptions::transparent`]): no window background.
+    pub(crate) transparent: Cell<bool>,
     /// The embedding app's appearance (dark or not), standing in for the
     /// window's ([`crate::AppView::set_appearance`]).
     pub(crate) host_dark: Cell<Option<bool>>,
@@ -229,6 +239,7 @@ impl Surface {
             anim: RefCell::new(UiAnimation::default()),
             nav: RefCell::default(),
             input: Default::default(),
+            file_drop: Default::default(),
             engine: RefCell::new(None),
             control: RefCell::new(None),
             rx: RefCell::new(None),
@@ -241,6 +252,7 @@ impl Surface {
             input_pressed: Cell::new(0),
             input_hovered: Cell::new(false),
             window_focus_requested: Cell::new(false),
+            window_hidden: Cell::new(false),
             environment: Cell::new(environment),
             appearance: Cell::default(),
             js_frame: Cell::new(false),
@@ -268,6 +280,7 @@ impl Surface {
             events_handled: Cell::new(0),
             chrome: Default::default(),
             host_theme: RefCell::new(None),
+            transparent: Cell::new(false),
             host_dark: Cell::new(None),
             host_environment: Cell::default(),
         });

@@ -111,13 +111,20 @@
   Java with `Paint.getFontMetrics` and the bounds of `x`; Pango a shape whose logical rectangle is the extent and ink
   the box; DirectWrite and GPUI their line boxes; the web its line box, taking the extents only when an attachment
   reaches below the baseline so baseline-only lines keep their height) and places its top `ascent` above the
-  baseline, so a line grows where an attachment reaches past the font, as Android's `ImageSpan` grows it. CSS's
+  baseline, so a line grows where an attachment reaches past the font, as Android's `ImageSpan` grows it. With a fixed
+  `lineHeight` a line holding an attachment is at least as tall as its text's lines (the font with the line height
+  spread around it, CSS's strut) and grows only where the attachment reaches past that box, on every engine: the
+  line height is never a cap that cuts an attachment to the line. CSS's
   `top` / `bottom` (the line box's) and `sub` / `super` / lengths are not offered: the engines size placeholders
   before lines exist. The headless engine's font is its line (ascent 1.2 em, descent 0, x height 0.5 em). After the final layout the core places its native view, a child of the text view (Android's
   `TextBox` is a ViewGroup for this), on the placeholder (`TextEngine::attachments`); attachments cut off by the line limit or
   an ellipsis move out of sight. Their own children are normal layout children; a text inside them built after the block
   resizes them and builds the block again (`check_attachments`). They take presses of their own; copying leaves the
-  placeholders out.
+  placeholders out. Text inside an attachment takes the color of the text around it (the nearest color set on its
+  spans, its block or the views around, as CSS's `color` reaches an inline block and `currentColor` reaches the
+  attachment's view), unless it sets its own; the rest of its text style (font, size, line height) is not passed in,
+  so the attachment's box is sized by its own content (`Core::inherited_text_style`). A color change on the text
+  rebuilds the texts inside its attachments.
 
 - **Rust components** nest texts the same way: `text("a ").child(text("b").underline().on_press(..)).child(view())` is
   one block; a plain string child is a raw text node (as JS's strings), a text's own content its first piece

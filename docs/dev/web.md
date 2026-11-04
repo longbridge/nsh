@@ -71,10 +71,15 @@ python3 crates/nsh-platform-web/web/browser/browser-check.py --wasm target/wasm3
 
 The second command requires Python Playwright and Chromium (`--chrome` selects its executable). It checks
 real module realms, host events queued before startup, repeated replacement/disposal, rejected startup, every
-state style (`hoverStyle` / `activeStyle` under real mouse input, `focusStyle` / `focusWithinStyle` under Tab) and a
-list's `contentClass`.
+state style (`hoverStyle` / `activeStyle` under real mouse input, `focusStyle` / `focusWithinStyle` under Tab), a
+list's `contentClass` and a scroll view's `contentStyle` / `contentClass` (where its children land, inserted before
+and after the content container is made).
 `browser-tests` contains ownership fixtures: never measure or publish that artifact. Rebuild with `browser`
 and use the supported `nsh package --target web` flow for shipping and size measurements.
+
+`browser-check.py` also mounts a view with all four platform props and checks that only the web's and, in the
+desktop idiom (Playwright's Chromium has a fine, hovering pointer, and the check's page is 1280 wide), the desktop's
+apply.
 
 Measure the supported CLI package with `node crates/nsh-platform-web/web/browser/package-size.mjs SITE
 --require-browser`. It reports raw bytes, gzip level 9 and Brotli quality 11 independently for every Wasm,
@@ -83,6 +88,9 @@ observed during a cold navigation and separates initial code from optional code.
 are excluded and must be accounted for separately when discussing total page transfer. The website CI guards
 Gallery's total compressed code at 4,000,000 Brotli bytes; this is a regression ceiling, not the original
 1,000,000-byte product goal.
+
+`browser-check.py` also gives a view a `tooltip` by a function, as a development bundle gives an app's component, and
+checks under real hover that the element the function gives shows and follows it.
 
 Run `python3 crates/nsh-platform-web/web/browser/packaged-check.py URL` against a served, freshly packaged
 Gallery to exercise standard utilities/files/environment, lists, dialogs, form input, table virtualization,
@@ -416,6 +424,10 @@ A commit becomes one batch (`src/encode.rs`) that `nsh.js` applies item by item,
 mount item. Views are absolutely positioned at the core's frames; borders are an overlay element so they never move
 the content the core placed. Native animation items stay in Rust (`src/animation.rs`); bound properties are applied
 after each batch and each `requestAnimationFrame` tick.
+
+Shader views (`["sh", id, layer]`) draw with one WebGL 2 context (`docs/dev/shaders.md`, "The web"); effects and
+transitions (`["sht"]`, `["shi"]`, `["shn"]`) take pictures of the DOM with a 2D canvas (`paintTree`), and pages and
+dialogs come and go through their shaders on an overlay (`shaderNav`): `docs/dev/shaders.md`, "On the web".
 
 ## Animation
 

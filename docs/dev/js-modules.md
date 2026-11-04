@@ -61,8 +61,9 @@ the chunks of a split bundle (`Screen.js`: a name that is no native module, with
 - **Platform-only props** are grouped: `ios={{…}}` / `android={{…}}` / `web={{…}}` / `desktop={{…}}` (macOS, Windows, Linux, browsers in the desktop idiom, and terminals) on
   elements and components (`IOSProps` / `AndroidProps` / `DesktopProps` in `types.d.ts`, each extending its
   generated `IOSHostProps` / `AndroidHostProps` / `DesktopHostProps`, and extended per element with its own
-  `IOS…HostProps` / `Desktop…HostProps`; a test holds every `…HostProps` to an element's props). The renderer
-  (`platform_props` in `dom.rs`) sends only the current platform's object, each key as a prop of its own (keys removed
+  `IOS…HostProps` / `Desktop…HostProps`; a test holds every `…HostProps` to an element's props). The renderers
+  (`platform_props` in `nsh-js`'s `dom.rs`, `platformProps` in the browser runtime's `browser/dom.js`; a change to one
+  goes to both) send only the current platform's object, each key as a prop of its own (keys removed
   from the object are cleared); the core knows them by those names. Android: `ripple`, `elevation`,
   `accessibilityLiveRegion`, Dialog `statusBarTranslucent`. iOS: `backdropMaterial` (the system material of a
   backdrop blur), input `inputAccessoryViewID` / `textContentType` / `keyboardAppearance`, Dialog

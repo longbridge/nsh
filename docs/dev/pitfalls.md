@@ -366,6 +366,14 @@ Things that were found the hard way. Read the section of the area you change bef
 - **AT-SPI reads widgets, not what NSH draws**: a view `snapshot` skips (`visibility: hidden`) is still presented, with
   its subtree, until its accessible state is `Hidden` (`access.rs`); GTK's AT-SPI bridge then leaves out the widget
   and its subtree (`gtk_accessible_should_present`; checked with an AT-SPI client on GTK 4.14).
+- **A text view ignores CSS `line-height`**: only labels apply it. An `Input`'s lines get their height from the view's
+  `pixels-above-lines`, `pixels-below-lines` and `pixels-inside-wrap` (`text_input.rs`'s `set_line_box`), which also keep
+  the caret at the font's height. These are added to a line's own height, so a line in a taller fallback font (CJK) comes
+  out taller than `lineHeight` by the difference. In a label a fallback font moves the line's baseline down instead, so
+  a multiline placeholder is placed by its baseline (`placeholder_lift`).
+- **A text view draws its caret with its own node's `caret-color`**, not its `text` child's: a rule that hides the caret
+  has to name `textview` as well (`nsh-composing`).
+
 - **A widget's accessible role is effectively fixed** once its AT context is realized: GTK refuses to change it (with a
   critical), and nothing tells whether it is. Roles are decided when the view is created, from the batch that creates
   it (`access::prepare`); a later change detaches the view and puts it back.
@@ -584,6 +592,14 @@ Things that were found the hard way. Read the section of the area you change bef
   one width) keeps its `kern` pairs, so Arial (macOS) and Liberation Sans, Chrome's `sans-serif` on Linux, draw `11`
   1.48 px narrower than two `1`s at 20 px (Chrome 156: `$1,111.11` summed 89 from its characters, drawn 84.53). A
   figure's width adds each adjacent pair's kerning to its characters' (`css::figure_width`).
+- **Marking text tells an `NSTextView`'s delegate nothing but the selection** (macOS 27, `setMarkedText:`): no
+  `textDidChange:`, also for a field's editor, though `shouldChangeText` and `didChangeText` run. What follows the text
+  has to look on selection changes too (`text_input.rs`, `composition_changed`), or a label placeholder stays under the
+  composition and `onCompositionChange` never fires. Dropping marked text is the same, and so is its `editing` flag.
+- **AppKit's caret is as tall as a line fragment**, and a fragment with a minimum line height holds the extra space above
+  the text (15 pt system font, 24 pt lines: `NSTextInsertionIndicator` 24 tall, text 18 tall at the fragment's bottom). A
+  fragment of the font's height with `lineSpacing`, and half of it as the container's inset, gives a caret as tall as
+  the text and text in the middle of the same 24 pt lines (`LineBox`).
 
 ## Testing on simulators and emulators
 

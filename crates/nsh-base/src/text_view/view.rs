@@ -230,6 +230,7 @@ pub fn TextView(props: TextViewProps, cx: Scope<TextViewEvent>) -> impl IntoElem
     let footnotes = computed(move || document.with(|d| d.footnotes.clone()));
     let plugins = Rc::new(plugins);
     let row_plugins = plugins.clone();
+    let math_loaded = signal(false);
     view()
         .flex_col()
         .gap(px(BLOCK_GAP))
@@ -273,7 +274,7 @@ pub fn TextView(props: TextViewProps, cx: Scope<TextViewEvent>) -> impl IntoElem
                 // A node as the row's root: an `Each` keeps rows by their
                 // root's key, which a region has none of.
                 view().child(dynamic(move || {
-                    let cx = Cx::read(&props, cx, plugins.clone());
+                    let cx = Cx::read(&props, cx, plugins.clone(), math_loaded);
                     let (i, block) = item.get();
                     cx.block(&block, &i.to_string(), last.get(), before.get())
                 }))
@@ -284,7 +285,7 @@ pub fn TextView(props: TextViewProps, cx: Scope<TextViewEvent>) -> impl IntoElem
             if notes.is_empty() {
                 return None;
             }
-            let cx = Cx::read(&props, cx, plugins.clone());
+            let cx = Cx::read(&props, cx, plugins.clone(), math_loaded);
             // A terminal's blank row before them, as before a block.
             let footnotes = view()
                 .flex_col()
@@ -389,6 +390,8 @@ struct Cx {
     render_math: Option<Renderer<TextViewMath>>,
     render_image: Option<Renderer<Image>>,
     plugins: Rc<MarkdownPlugins>,
+    /// Set when the formula typesetter finished loading (`formula.rs`).
+    math_loaded: Signal<bool>,
     typed: TextViewParts,
     /// Whether the caret is placed in this run.
     caret_placed: Rc<std::cell::Cell<bool>>,
@@ -411,6 +414,7 @@ impl Cx {
         props: &TextViewProps,
         scope: Scope<TextViewEvent>,
         plugins: Rc<MarkdownPlugins>,
+        math_loaded: Signal<bool>,
     ) -> Self {
         Self {
             classes: props.classes.get(),
@@ -427,6 +431,7 @@ impl Cx {
             render_math: props.render_math.get(),
             render_image: props.render_image.get(),
             plugins,
+            math_loaded,
             typed: use_context::<TextViewParts>().unwrap_or_default(),
             highlighter: use_context::<CodeHighlighter>(),
             caret_placed: Rc::default(),
@@ -436,6 +441,14 @@ impl Cx {
             links: props.links.get(),
             scope,
         }
+    }
+
+    /// `tex` typeset, when it can be now.
+    fn formula(&self, tex: &str, display: bool, size: f32) -> Option<AnyElement> {
+        if !super::formula::ready(self.math_loaded) {
+            return None;
+        }
+        super::formula::formula(tex, display, size)
     }
 
     /// What a press on a link to `url` does: reported, and opened outside
@@ -662,7 +675,7 @@ impl Cx {
                     .part(
                         view().flex_col().items_start().child(
                             terminal_band(
-                                text(super::math::tex_text(tex))
+                                text(super::tex_text::tex_text(tex))
                                     .font_family(mono_font)
                                     .when(self.selectable, |t| t.select_text()),
                             )
@@ -671,8 +684,24 @@ impl Cx {
                         Part::MathBlock,
                     )
                     .into_element(),
-                // Its TeX in a box as a code block's, as gpui-kit shows a
-                // formula it has no renderer for.
+                // Typeset, centered, scrolling sideways when wider than
+                // the view.
+                None if let Some(formula) = self.formula(tex, true, BODY_SIZE * 1.1) => self
+                    .part(
+                        scroll().horizontal().scrollbar(false).child(
+                            view()
+                                .flex_row()
+                                .justify_center()
+                                .min_w(relative(1.0))
+                                .py(px(BODY_SIZE * 0.25))
+                                .label(tex.clone())
+                                .child(formula),
+                        ),
+                        Part::MathBlock,
+                    )
+                    .into_element(),
+                // TeX it cannot read: in a box as a code block's, as gpui-kit
+                // shows a formula it has no renderer for.
                 None => self
                     .part(
                         view()
@@ -1581,11 +1610,24 @@ impl Cx {
                 // A terminal reads the formula as text (`16.7 ms`), not
                 // its source.
                 None if is_terminal() => self
-                    .part(text(super::math::tex_text(tex)), Part::Math)
+                    .part(text(super::tex_text::tex_text(tex)), Part::Math)
                     .into_element(),
-                None => self
-                    .part(code_span(text(tex.clone())), Part::Math)
-                    .into_element(),
+                // Typeset in the line, its middle on the text's.
+                None => match self.formula(tex, false, BODY_SIZE) {
+                    Some(formula) => self
+                        .part(
+                            view()
+                                .flex_row()
+                                .align_middle()
+                                .label(tex.clone())
+                                .child(formula),
+                            Part::Math,
+                        )
+                        .into_element(),
+                    None => self
+                        .part(code_span(text(tex.clone())), Part::Math)
+                        .into_element(),
+                },
             },
             Inline::Break => text("\n").into_element(),
             Inline::FootnoteReference { label, index } => {

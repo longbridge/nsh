@@ -442,8 +442,11 @@ dialog around it (`Modal`). It is the one mechanism popups are built on (`nsh/ba
 - **`tooltip`** (every element; `Prop::Tooltip`, `TooltipContent`; Rust `Interactive::tooltip`): the core makes a hint
   overlay inside the element itself (`Core::set_tooltip`, odd ids, inserted directly so a component host's children
   placement never moves it), placed on top with a 4 pt gap, holding the element JS made (retained by the node, moved
-  into the overlay, detached again when the prop changes). The prop takes elements only: the core draws no bubble, the
-  look is the app's. An element that is a hint overlay itself (`nsh/base`'s `Tooltip`, once its view
+  into the overlay, detached again when the prop changes). The core takes elements only: it draws no bubble, the look
+  is the app's. A function given as the prop (in a development bundle an app's component is its hot proxy's memo) is
+  followed by each renderer with a binding of its own (`followed` in nsh-js' `dom.rs`, `prop` in the browser runtime's
+  `browser/dom.js`), so the core gets the element it gives, again whenever that changes. An element that is a hint
+  overlay itself (`nsh/base`'s `Tooltip`, once its view
   made its root one) replaces the core's overlay, with its own placement, delay, look and events
   (`adopt_hint_tooltips`, each commit before the overlays are shown). Released with the element. It counts for nothing else: text skips overlays, and
   positional classes (`first:`, `last:`) skip a tooltip's overlay. Rust's element tooltips are an overlay child of the

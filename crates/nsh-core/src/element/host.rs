@@ -1076,6 +1076,18 @@ impl Screen {
         self.bind_prop(animation, |a| Prop::Screen(ScreenProp::Animation(a)))
     }
 
+    /// The program it comes and goes through instead of its
+    /// [`Self::animation`] (TS: `transitionShader`); `None` (a binding can
+    /// go back to it) leaves the change to the animation.
+    pub fn transition_shader(
+        self,
+        shader: impl IntoReactive<Option<crate::shader::TransitionShader>>,
+    ) -> Self {
+        self.bind_prop(shader, |s: Option<crate::shader::TransitionShader>| {
+            Prop::TransitionShader(s.map(Into::into))
+        })
+    }
+
     /// What the status bar shows while the screen is up (iOS and Android;
     /// TS: `statusBar`): over the screens below it and the app's default,
     /// field by field, as a view controller's `preferredStatusBarStyle`.
@@ -1294,6 +1306,18 @@ impl Modal {
     pub fn animation(self, animation: impl IntoReactive<ModalAnimation>) -> Self {
         self.bind_prop(animation, |animation: ModalAnimation| {
             Prop::Modal(ModalProp::Animation(animation))
+        })
+    }
+
+    /// The program it comes and goes through instead of its
+    /// [`Self::animation`] (TS: `transitionShader`); `None` (a binding can
+    /// go back to it) leaves the change to the animation.
+    pub fn transition_shader(
+        self,
+        shader: impl IntoReactive<Option<crate::shader::TransitionShader>>,
+    ) -> Self {
+        self.bind_prop(shader, |s: Option<crate::shader::TransitionShader>| {
+            Prop::TransitionShader(s.map(Into::into))
         })
     }
 
@@ -2364,6 +2388,13 @@ impl From<Drawing> for Painter {
 
 crate::static_reactive!(ScreenAnimation: ScreenAnimation);
 
+/// A program where an optional one goes (`.transition_shader(wipe)`).
+impl IntoReactive<Option<crate::shader::TransitionShader>> for crate::shader::TransitionShader {
+    fn into_reactive(self) -> super::Reactive<Option<crate::shader::TransitionShader>> {
+        super::Reactive::Static(Some(self))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2406,6 +2437,42 @@ mod tests {
         u.0.iter()
             .find(|(n, _)| &**n == name)
             .map(|(_, v)| v.clone())
+    }
+
+    #[test]
+    fn screens_and_modals_take_a_transition_shader() {
+        let runtime = Runtime::default();
+        let _entered = runtime.enter();
+        let source = "struct Uniforms { edge: f32 }\n\
+            fn shade(uv: vec2f) -> vec4f {\n    \
+            return select(sample_from(uv), sample_to(uv), uv.x < nsh.progress * uniforms.edge);\n}\n";
+        let shader = crate::shader::Shader::compile(source).expect("compiles");
+        let wipe = crate::shader::TransitionShader::new(shader)
+            .uniform("edge", 1.0_f32)
+            .duration(std::time::Duration::from_millis(400));
+        let expected = crate::shader::NavShaderSpec {
+            source: source.into(),
+            uniforms: ShaderUniforms(vec![("edge".into(), UniformValue::Number(1.0))]),
+            duration: Some(400.0),
+        };
+        let spec = |attrs: &super::super::builder::Attrs| {
+            attrs.props.iter().find_map(|p| match p {
+                Prop::TransitionShader(s) => Some(s.clone()),
+                _ => None,
+            })
+        };
+        let page = screen().transition_shader(wipe.clone()).0;
+        assert_eq!(spec(&page.resolved_attrs()), Some(Some(expected.clone())));
+        let dialog = modal().transition_shader(wipe.clone()).0;
+        assert_eq!(spec(&dialog.resolved_attrs()), Some(Some(expected.clone())));
+        // A binding goes back to the page's or the dialog's own animation.
+        let on = signal(true);
+        let bound = screen()
+            .transition_shader(move || on.get().then(|| wipe.clone()))
+            .0;
+        assert_eq!(spec(&bound.resolved_attrs()), Some(Some(expected)));
+        on.set(false);
+        assert_eq!(spec(&bound.resolved_attrs()), Some(None));
     }
 
     #[test]

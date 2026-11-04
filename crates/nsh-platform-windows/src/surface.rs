@@ -143,6 +143,9 @@ pub(crate) struct Surface {
     invalid: Cell<bool>,
     /// The next frame draws the whole window ([`Surface::invalidate`]).
     full_damage: Cell<bool>,
+    /// The change stamp of the last request to draw the whole window
+    /// ([`Surface::whole_change`]).
+    whole_change: Cell<u64>,
     /// Views that changed since the last frame
     /// ([`Surface::invalidate_view`]).
     dirty: RefCell<Vec<NshView>>,
@@ -178,6 +181,9 @@ pub(crate) struct Surface {
     /// The GPU device shader views render with, opened when the first
     /// shader is mounted (`None` inside: there is none).
     shader_renderer: std::cell::OnceCell<Option<Rc<nsh_engine::shader::Renderer>>>,
+    /// The views whose shader reads what is behind them (`sample_backdrop`),
+    /// or did ([`crate::shader::backdrop_areas`] leaves those out).
+    pub(crate) backdrop_readers: RefCell<Vec<NodeId>>,
     /// Where `asset:/` image URIs resolve ([`crate::image::set_asset_base`]).
     pub(crate) asset_base: RefCell<Option<crate::image::AssetBase>>,
     /// The disk cache of downloaded images ([`crate::image::set_disk_cache`]).
@@ -232,6 +238,7 @@ impl Surface {
             invalid: Cell::new(false),
             // The first frame draws everything.
             full_damage: Cell::new(true),
+            whole_change: Cell::new(0),
             dirty: RefCell::default(),
             environment: Cell::new(environment),
             appearance: Cell::default(),
@@ -247,6 +254,7 @@ impl Surface {
             on_error: RefCell::new(None),
             on_hot_update_failed: RefCell::new(None),
             shader_renderer: std::cell::OnceCell::new(),
+            backdrop_readers: RefCell::default(),
             asset_base: RefCell::new(None),
             image_cache: RefCell::new(None),
             native: Default::default(),
@@ -278,6 +286,13 @@ impl Surface {
                     .map(Rc::new)
             })
             .clone()
+    }
+
+    /// Settles [`Surface::shader_renderer`] as opened without a device, as
+    /// on a machine with none (tests open no GPU device).
+    #[cfg(test)]
+    pub(crate) fn without_shader_renderer(&self) {
+        let _ = self.shader_renderer.set(None);
     }
 
     /// The surface with `key`, if it is alive.
@@ -522,7 +537,17 @@ impl Surface {
     /// asked before it is).
     pub(crate) fn invalidate(&self) {
         self.full_damage.set(true);
+        self.whole_change.set(crate::view::next_change_stamp());
         self.request_paint();
+    }
+
+    /// The change stamp of the last request to draw the whole window
+    /// ([`Surface::invalidate`]). What such a request redraws may have
+    /// changed without a view saying so (a video's frame, a native
+    /// component, the theme): a shader's picture of its children taken
+    /// before it is taken again.
+    pub(crate) fn whole_change(&self) -> u64 {
+        self.whole_change.get()
     }
 
     /// Asks for `view` and its subtree to be drawn again: where it was

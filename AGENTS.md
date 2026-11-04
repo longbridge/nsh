@@ -282,6 +282,7 @@ cargo xtask dist                                                                
 ./target/debug/nsh keygen keys/root && ./target/debug/nsh keygen keys/release      # signing keys (.secret / .pub)
 ./target/debug/nsh certify --root keys/root.secret --key keys/release.pub --apps 'com.example.*' -o keys/release.cert
 ./target/debug/nsh publish examples/counter --key keys/release.secret --cert keys/release.cert --build 2
+./target/debug/nsh publish ci.nshpkg --key keys/platform.secret --cert keys/platform.cert -o out.nshpkg   # a package signed again by another release key, contents kept
 ./target/debug/nsh verify out/com.example.counter-2.nshpkg --root keys/root.pub     # as a device would check it
 ./target/debug/nsh revoke --root keys/root.secret --sequence 1 --package <sha256> -o revocations.json
 
@@ -372,7 +373,7 @@ repository's `target/`; dependencies only it uses are declared in `crates/gpui/C
   read forever. The record
   and its checks live in that repository, never here: a change to NSH cannot rewrite them, and the only removals are
   security closures in its `closed.txt`. No release is recorded yet, so nothing is frozen: what is on `main` may still
-  change until the first release recorded, which is not chosen yet (0.3.0 is not recorded). A new API lands with its test, a case in
+  change until the first release recorded, which is not chosen yet (0.3.0 and 0.4.0 are not recorded). A new API lands with its test, a case in
   `tests/compat/cases/<domain>/` whose script checks it (`cargo xtask compat`; `docs/dev/compatibility.md`).
 - **Native views and interaction, app-owned design.** Common controls have one cross-platform home in `nsh/base`.
   A system-styled version of a common control does not justify another public component in a platform module.

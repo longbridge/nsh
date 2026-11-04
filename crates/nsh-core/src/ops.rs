@@ -2117,6 +2117,12 @@ pub enum Prop {
     /// `fallback` (shader transitions): what runs without a `source`.
     #[prop(js = "fallback", on = TRANSITION)]
     TransitionFallback(TransitionFallback),
+    /// `transitionShader` (pages and dialogs): `{ source, uniforms,
+    /// duration }`, a shader the page or dialog comes and goes through
+    /// (the lower side `sample_from`, the upper `sample_to`) instead of its
+    /// `animation`, for `duration` milliseconds (350 by default).
+    #[prop(js = "transitionShader", on = SCREEN | MODAL)]
+    TransitionShader(Option<crate::shader::NavShaderSpec>),
     /// `src`: a URL, `asset:/path`, or an imported asset.
     #[prop(js = "src", on = IMAGE, shared)]
     Source(Option<ImageSource>),
