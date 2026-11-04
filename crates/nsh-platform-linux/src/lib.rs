@@ -37,6 +37,7 @@ mod menu_style;
 mod mount;
 mod native;
 mod navigation;
+mod notifications;
 mod scroll;
 mod selectable_view;
 mod shader;
