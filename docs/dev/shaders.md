@@ -236,6 +236,29 @@ Effects, transitions and page shaders sit on the same program, layer and rendere
   In Rust, `screen()` / `modal()` take `.transition_shader(TransitionShader::new(shader).uniform(..).duration(..))`
   (`nsh_core::shader::TransitionShader`, a compiled `Shader`), which sets the same prop. Sources compile once in
   `Core::compile`, the cache `Shader`'s `source` uses too ("Pages and dialogs" below says what the platforms do).
+- **Android** (API 29 and later; Android 9 shows the children as they are). `Pictures.java` records the children
+  into a `RenderNode`, renders it with a `HardwareRenderer` into an `ImageReader` and hands the rows to
+  `Native.shaderInput` (rows `stride` apart, the last one without its padding, as the engine takes them). `Box.java`
+  takes the role, overflow and inputs from the `SHADER` opcode: an effect pictures its children only after they drew
+  anew (`onDescendantInvalidated`) or the core marks them (`SHADER_INPUT`), and draws its frame in `dispatchDraw`
+  instead of them (touches and accessibility still reach them); a screen layer pictures the surface only after a view
+  in it drew anew (`NshView.onDescendantInvalidated`) or the core marks it; a backdrop is pictured before every draw
+  (`Backdrop.behind`), and `libnsh` drops one equal to the last; a transition pictures `from` before the batch
+  (`SHADER_TRANSITION`) and shows it until the first frame. Screen layers draw over the app's view (`NshView`);
+  dialogs, their own windows, are outside. Pages and dialogs (`NAV_SHADER`): `StackBox` and `ModalHost` run a
+  `NavTransition.java` overlay over pictures of the two sides taken once; `nsh.progress` runs on the view's
+  transition clock (`start_transition`, backwards on pop and dismiss); the overlay gets only the frames that came back
+  and, once its clock ends, one that replaces nothing, which settles the change, or, when no frame came back by then,
+  starts the page's or the dialog's own animation (until the first frame, what it covers shows as it is). A change
+  that starts while one runs ends it first (`NavTransition.finish`: its `done` runs, `Native.navTransitionEnd` stops
+  its run); with "Remove animations" on (`ValueAnimator.areAnimatorsEnabled`, `Environment::reduce_motion`) none runs,
+  and the page's own animation is at once, as the system's animator scale makes it. An app that stops takes its
+  overlays and screen layer with it (`NshView.endShaders`). A screen layer draws over the surface while its view is in
+  the window: detached, deleted or turned off, it gives the surface back and redraws it, unless another screen layer
+  took its place. A view leaving the window lets its `Pictures` go (a `HardwareRenderer` and an `ImageReader` each)
+  and takes its pictures again once it is back. Without a GPU device `Native.shaderTransition` starts no run (the children show as they are) and
+  `Native.navTransition` declines, so a page moves with its own animation (`StackBox`) and a dialog with its
+  `animation` (`ModalHost`).
 
 ## Pages and dialogs
 
@@ -251,7 +274,9 @@ everywhere:
   says, `"none"` included. `animation` is what runs where the shader does not: without a GPU device, with a source
   that did not compile (the core sends `shader: None`), or where the platform cannot take the pictures or put the
   frames over the change. Such a change takes the page's or the dialog's own motion, at once for `"none"`, never
-  another motion for the shader's duration.
+  another motion for the shader's duration. So does a change none of whose frames came back by the time it was to
+  end (a slow GPU, a program compiled at its first frame): it takes its own motion from there instead of cutting to
+  its end.
 - **Less motion.** When the user asks for less motion (`Environment::reduce_motion`), the shader does not run: the
   change takes the page's or the dialog's own `animation` as reduced motion makes it
   (`nsh_core::navigation::screen_motion` and `modal_motion` with `reduce_motion`: a slide becomes a 200 ms fade,
@@ -278,5 +303,7 @@ everywhere:
 - **Premultiplied alpha.** `shade` returns straight alpha; the core premultiplies and the renderers draw with blending
   off, so frames are premultiplied (GPUI's images are straight: its backend converts). Do not premultiply again on a
   platform.
+- **A first frame is not an end.** A run's first frame comes back one or two display frames after it starts, and
+  `ShaderView::frame()` is empty until then: a page's or a dialog's run ends on its clock, never on an empty frame.
 - **Readback latency.** Native frames arrive one or two display frames after `render`; a backend must keep ticking
   while `ShaderView::pending()` is true, or the last frame of a change never shows.
