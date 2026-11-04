@@ -29,7 +29,10 @@ use nsh_core::{
 };
 use rustc_hash::FxHashMap;
 
-use crate::view::{NshView, ViewState};
+use crate::{
+    surface::Surface,
+    view::{NshView, ViewState},
+};
 
 /// Pango units per point.
 const SCALE: f32 = pango::SCALE as f32;
@@ -1195,6 +1198,7 @@ pub(crate) struct DrawnText {
 
 /// A text view's new content.
 pub(crate) fn set(
+    surface: &Surface,
     view: &NshView,
     text: &Arc<AttributedText>,
     layout: &TextLayout,
@@ -1225,7 +1229,7 @@ pub(crate) fn set(
     });
     if was != text.is_selectable() {
         // The I-beam.
-        crate::input::style_changed(view);
+        crate::input::style_changed(surface, view);
     }
     view.changed();
 }

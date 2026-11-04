@@ -123,7 +123,7 @@ impl Mounter {
                 }
                 crate::selectable_view::touched(surface, child);
                 // An attachment's cursor depends on its text's.
-                crate::input::style_changed(child);
+                crate::input::style_changed(surface, child);
             }
             MountItem::Remove { id } => {
                 if let Some(view) = self.get(*id) {
@@ -193,7 +193,7 @@ impl Mounter {
             MountItem::ViewStyle { id, style } => {
                 let Some(view) = self.get(*id) else { return };
                 let old = std::mem::replace(&mut view.state_mut().style, style.clone());
-                crate::input::style_changed(view);
+                crate::input::style_changed(surface, view);
                 crate::transition::style_changed(surface, view, &old);
                 crate::access::style_changed(view, &old);
                 view.moved();
@@ -206,7 +206,7 @@ impl Mounter {
             } => {
                 if let Some(view) = self.get(*id) {
                     let old = view.state().text.as_ref().map(|t| t.text.clone());
-                    crate::text::set(view, text, layout, *content);
+                    crate::text::set(surface, view, text, layout, *content);
                     // Its spans' cursors, before or after.
                     if text.has_cursors() || old.as_ref().is_some_and(|o| o.has_cursors()) {
                         crate::input::text_changed(surface, view);

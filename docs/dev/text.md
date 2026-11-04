@@ -95,9 +95,10 @@
   goes by the characters, as presses do: each desktop backend looks up the character under it (`char_at`) and shows
   its span's cursor (`AttributedText::cursor_at`) before the pointer over a pressable link and the view chain's
   cursors (macOS and GPUI `text_cursor`, Windows `cursor`; Linux sets the GTK widget's cursor from the span under the
-  mouse on each move and new text, `text_cursor`). The web writes it into the run's class, where the browser takes it
-  from the run under the pointer, and as `--nsh-span-cursor`, which the pointer of a link inside the run (`.nsh-link`)
-  gives way to. An inline view inside a span keeps its own cursor.
+  mouse on each move and when the text's content, style or events change, and its own while the mouse is on a view
+  inside it, which shows it where it sets none: `text_cursor`, `update_cursor`). The web writes it into the run's
+  class, where the browser takes it from the run under the pointer, and as `--nsh-span-cursor`, which the pointer of
+  a link inside the run (`.nsh-link`) gives way to. An inline view inside a span keeps its own cursor.
 - **Inline attachments**: any other element inside a `<Text>` (also inside its spans) is an attachment: laid out as its own
   layout root at its content size (`update_attachments`), it becomes an object replacement character (U+FFFC,
   `AttributedText::attachments`) that the engine sizes to it (CTRunDelegate; Android a `ReplacementSpan`), so

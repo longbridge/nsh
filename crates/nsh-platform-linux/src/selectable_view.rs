@@ -305,7 +305,7 @@ pub(crate) fn end_batch(surface: &Rc<Surface>) {
         let texts = collect(&view);
         // The I-beam, for texts that came in with no cursor of their own.
         for item in texts.items.iter().filter(|i| i.view.cursor().is_none()) {
-            crate::input::style_changed(&item.view);
+            crate::input::style_changed(surface, &item.view);
         }
         // Highlights follow the texts even when the model stays as it was
         // (a text inserted before the selection moves it to the next).

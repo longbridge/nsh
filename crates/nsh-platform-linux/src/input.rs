@@ -325,7 +325,7 @@ pub(crate) fn gestures(surface: &Rc<Surface>, view: &NshView, values: GestureVal
 /// next mouse move).
 pub(crate) fn events_changed(surface: &Rc<Surface>, view: &NshView) {
     update_hover_tracking(surface, view);
-    update_cursor(view);
+    update_cursor(surface, view);
 }
 
 /// The view's props changed.
@@ -334,8 +334,8 @@ pub(crate) fn props_changed(_surface: &Rc<Surface>, _view: &NshView) {
 }
 
 /// The view's style changed (cursor).
-pub(crate) fn style_changed(view: &NshView) {
-    update_cursor(view);
+pub(crate) fn style_changed(surface: &Surface, view: &NshView) {
+    update_cursor(surface, view);
 }
 
 /// `SetJsResponder` / `ClearJsResponder`. Runs while the mounter applies a
@@ -393,8 +393,16 @@ fn cursor_name(cursor: Cursor) -> Option<&'static str> {
     })
 }
 
-fn update_cursor(view: &NshView) {
-    set_cursor(view, None, false);
+/// Sets the cursor of `view` for the mouse where it rests: on a text with
+/// spans that pick its cursor ([`has_cursor_spans`]), as a move there
+/// would ([`text_cursor`]), so a change of its style, events or content
+/// keeps the span's under a resting mouse; elsewhere its own.
+fn update_cursor(surface: &Surface, view: &NshView) {
+    let rest = surface.input.last.get().filter(|_| has_cursor_spans(view));
+    match rest.and_then(|(x, y)| Some((pick(&surface.root, x, y)?, x, y))) {
+        Some((hit, x, y)) => text_cursor(surface, view, &hit.view, x, y),
+        None => set_cursor(view, None, false),
+    }
 }
 
 /// The cursor name of `view`, `over_link` when the mouse is on one of its
@@ -959,34 +967,49 @@ fn chain(view: &NshView) -> Vec<NshView> {
     out
 }
 
-/// A point in root coordinates in `view`'s.
-/// The cursor is per widget: a text with pressable link spans or spans
-/// that set a cursor shows, while the mouse at `(x, y)` (root coordinates)
-/// is on one, the span's cursor or the pointer, its own cursor elsewhere.
+/// The cursor is per widget: a text with spans that pick its cursor
+/// ([`has_cursor_spans`]) shows, while the mouse at `(x, y)` (root
+/// coordinates) is on one, the span's cursor or the pointer, its own
+/// cursor elsewhere, and on the views inside it, which show their text
+/// widget's cursor where they set none.
 fn link_cursor(surface: &Surface, x: f32, y: f32) {
     let Some(hit) = pick(&surface.root, x, y) else {
         return;
     };
-    let spans = hit
-        .view
-        .state()
-        .text
-        .as_ref()
-        .is_some_and(|t| !t.text.links.is_empty() || t.text.has_cursors());
-    if spans {
-        text_cursor(surface, &hit.view, x, y);
+    // The text under the mouse, or the one around the attachment it is on.
+    let mut view = Some(hit.view.clone());
+    while let Some(v) = view {
+        if has_cursor_spans(&v) {
+            text_cursor(surface, &v, &hit.view, x, y);
+            return;
+        }
+        view = v.parent_view();
     }
 }
 
+/// Whether `view` is a text with spans that pick its cursor under the
+/// mouse: pressable links (the pointer) or nested texts that set one.
+fn has_cursor_spans(view: &NshView) -> bool {
+    view.state()
+        .text
+        .as_ref()
+        .is_some_and(|t| !t.text.links.is_empty() || t.text.has_cursors())
+}
+
 /// Sets the cursor of text view `view` for the mouse at `(x, y)` (root
-/// coordinates): the cursor of the span under it, the pointer on a
-/// pressable link span, its own elsewhere.
-fn text_cursor(surface: &Surface, view: &NshView, x: f32, y: f32) {
+/// coordinates) on `hit`: the cursor of the span under it, the pointer on
+/// a pressable link span, its own elsewhere and on the views inside it.
+fn text_cursor(surface: &Surface, view: &NshView, hit: &NshView, x: f32, y: f32) {
     let (span, over) = {
         let s = view.state();
         let Some(text) = &s.text else { return };
-        let (lx, ly) = local(surface, view, x, y);
-        match crate::text::char_at(&s, lx, ly) {
+        let at = if hit == view {
+            let (lx, ly) = local(surface, view, x, y);
+            crate::text::char_at(&s, lx, ly)
+        } else {
+            None
+        };
+        match at {
             Some(i) => (
                 cursor_name(text.text.cursor_at(i)),
                 text.text.link_at(i).is_some_and(|l| has_press(l.events)),
@@ -1000,12 +1023,10 @@ fn text_cursor(surface: &Surface, view: &NshView, x: f32, y: f32) {
 /// The view's text changed, and its spans set cursors or did: the cursor
 /// for the mouse where it is.
 pub(crate) fn text_changed(surface: &Surface, view: &NshView) {
-    match surface.input.last.get() {
-        Some((x, y)) => text_cursor(surface, view, x, y),
-        None => update_cursor(view),
-    }
+    update_cursor(surface, view);
 }
 
+/// A point in root coordinates in `view`'s.
 fn local(surface: &Surface, view: &NshView, x: f32, y: f32) -> (f32, f32) {
     surface
         .root
