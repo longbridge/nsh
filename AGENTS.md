@@ -282,6 +282,7 @@ cargo xtask dist                                                                
 ./target/debug/nsh keygen keys/root && ./target/debug/nsh keygen keys/release      # signing keys (.secret / .pub)
 ./target/debug/nsh certify --root keys/root.secret --key keys/release.pub --apps 'com.example.*' -o keys/release.cert
 ./target/debug/nsh publish examples/counter --key keys/release.secret --cert keys/release.cert --build 2
+./target/debug/nsh publish ci.nshpkg --key keys/platform.secret --cert keys/platform.cert -o out.nshpkg   # a package signed again by another release key, contents kept
 ./target/debug/nsh verify out/com.example.counter-2.nshpkg --root keys/root.pub     # as a device would check it
 ./target/debug/nsh revoke --root keys/root.secret --sequence 1 --package <sha256> -o revocations.json
 
