@@ -21,7 +21,7 @@ use crate::{surface::Surface, view::NshView};
 #[derive(Default)]
 pub(crate) struct State {
     target: RefCell<Option<NshView>>,
-    /// A [`clear`] is scheduled for a drag that ended ([`needs_clear`]).
+    /// A [`clear`] is scheduled for a drag that ended ([`take_needs_clear`]).
     clearing: Cell<bool>,
 }
 
@@ -50,7 +50,7 @@ fn set_target(surface: &Surface, target: Option<NshView>) {
 /// No drag is active: whether the last one still has a destination for
 /// which no [`clear`] is scheduled yet. Answering yes counts the clear as
 /// scheduled, so a window redrawn again before it runs schedules no other.
-pub(crate) fn needs_clear(surface: &Surface) -> bool {
+pub(crate) fn take_needs_clear(surface: &Surface) -> bool {
     let state = &surface.file_drop;
     if state.clearing.get() || state.target.borrow().is_none() {
         return false;

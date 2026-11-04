@@ -841,6 +841,34 @@ mount(() => <View style={{ flex: 1 }}>
              enter inner, leave inner"
         ),
     );
+    // A drag that ended schedules one clear of its destination, however
+    // often the window redraws before the clear runs.
+    enter(cx, 20.0, &[crate::file_drop::test_path("e.txt")]);
+    wait_for(
+        &view,
+        cx,
+        &format!(
+            "enter inner, leave inner, enter outer, drop outer {dropped}, leave outer, \
+             enter inner, leave inner, enter inner"
+        ),
+    );
+    view.update(cx, |view, cx| {
+        let surface = view.surface();
+        assert!(crate::file_drop::take_needs_clear(surface));
+        assert!(!crate::file_drop::take_needs_clear(surface));
+        crate::file_drop::clear(surface);
+        assert!(!crate::file_drop::take_needs_clear(surface));
+        crate::rt::flush(cx);
+    });
+    send(cx, gpui::FileDropEvent::Exited);
+    wait_for(
+        &view,
+        cx,
+        &format!(
+            "enter inner, leave inner, enter outer, drop outer {dropped}, leave outer, \
+             enter inner, leave inner, enter inner, leave inner"
+        ),
+    );
 }
 
 fn presses_carry_where_the_pointer_was(cx: &mut TestAppContext) {

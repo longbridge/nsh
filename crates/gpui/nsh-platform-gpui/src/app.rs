@@ -819,7 +819,7 @@ impl Render for AppView {
         let dragging = cx.has_active_drag();
         // A file drag that left the window, or ended without a drop, leaves
         // its destination (GPUI redraws the window as it ends).
-        if !dragging && crate::file_drop::needs_clear(&self.surface) {
+        if !dragging && crate::file_drop::take_needs_clear(&self.surface) {
             let surface = self.surface.clone();
             cx.defer(move |cx| {
                 crate::file_drop::clear(&surface);
