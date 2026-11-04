@@ -12,20 +12,23 @@ repository.workspace = true
 workspace = true
 
 [features]
-default = ["js"]
+default = ["js", "shader"]
 # JS apps (bundles, signed packages, the embedding API's loaders); without
 # it, a Rust app links no QuickJS.
 js = ["nsh-engine/js"]
 # Development host support: dev-server client, log forwarding, error overlay.
-dev = ["js", "dep:nsh-dev", "dep:nsh-testing"]
+dev = ["js", "shader", "dep:nsh-dev", "dep:nsh-testing"]
 # The C ABI the NativeShell Swift module is built on (`embed`), exported for
 # the static library `cargo xtask dist` builds with `cargo rustc --crate-type
 # staticlib`. Off for nsh-ios-host / nsh-ios-app, so they export nothing.
 embed = ["js"]
+# Shaders (`Shader`, `ShaderEffect`, `ShaderTransition`, the shader transitions
+# of pages and dialogs), on naga and wgpu. Without it they draw nothing.
+shader = ["nsh-engine/shader"]
 
 [dependencies]
 nsh-core = { workspace = true, features = ["svg"] }
-nsh-engine = { workspace = true, features = ["shader"] }
+nsh-engine.workspace = true
 nsh-base = { workspace = true, features = ["highlight", "math"] }
 serde_json.workspace = true
 log.workspace = true

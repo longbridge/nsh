@@ -391,8 +391,7 @@ impl GatePlan {
 
     /// Every gate some chunk loads later, each once, sorted.
     fn lazy(&self) -> Vec<&str> {
-        let mut set: BTreeSet<&str> =
-            self.chunks.values().flatten().map(String::as_str).collect();
+        let mut set: BTreeSet<&str> = self.chunks.values().flatten().map(String::as_str).collect();
         // `TextView`'s formulas: asked for by the first one, wherever the
         // view is.
         if set.contains(TEXT_VIEW_GATE) || self.main.iter().any(|g| g == TEXT_VIEW_GATE) {
@@ -1882,4 +1881,3 @@ mod tests {
         assert_eq!(json["icons"][0]["sizes"], "192x192");
     }
 }
-

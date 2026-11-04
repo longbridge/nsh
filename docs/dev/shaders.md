@@ -6,6 +6,15 @@ checked and wrapped in Rust (`nsh_core::shader`), rendered by wgpu on the native
 WebGL 2 on the web, from GLSL ES the core translates it into. The module docs of `crates/nsh-core/src/shader.rs` and
 `crates/nsh-engine/src/shader.rs` are the reference; this page is the overview.
 
+## Feature `shader`
+
+The platform crates' feature `shader` (`nsh-platform-*`, `nsh-*-app`; on by default, and always with `dev`) is what links
+naga and wgpu. Off, `Shader::compile` refuses every source (`nsh-core`), `nsh_engine::shader::Renderer::new` is `None`
+(`shader_off.rs`), shader views draw nothing and shader transitions end at once. The rest of the API stays. It is for
+Rust apps and embedders; the prebuilt runners an app without Rust crates ships have it on. The web links its compiler
+by what the app imports (`docs/dev/browser-js-size.md`), and GPUI always has it. A crate with `default-features = false`
+names the feature to keep shaders: `features = ["shader"]`.
+
 ## The contract
 
 An app writes one function and whatever helpers and constants it needs:

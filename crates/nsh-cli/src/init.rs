@@ -296,7 +296,7 @@ nsh-platform-{platform} = {}
 "#,
                 dep(
                     &format!("nsh-platform-{platform}"),
-                    ", default-features = false"
+                    ", default-features = false, features = [\"shader\"]"
                 )
             ));
         }
@@ -675,7 +675,7 @@ mod tests {
             "{published}"
         );
         assert!(published.contains(&format!(
-            "nsh-platform-macos = {{ version = {version:?}, default-features = false }}"
+            "nsh-platform-macos = {{ version = {version:?}, default-features = false, features = [\"shader\"] }}"
         )));
         let checkout =
             dunce::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")).unwrap();
@@ -690,7 +690,7 @@ mod tests {
                 "{local}"
             );
             assert_eq!(
-                local.contains("default-features = false }"),
+                local.contains("default-features = false, features = [\"shader\"] }"),
                 desktop,
                 "{local}"
             );

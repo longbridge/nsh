@@ -16,10 +16,12 @@ name = "nsh-ios-app"
 path = "src/main.rs"
 
 [features]
-default = ["js"]
+default = ["js", "shader"]
 # JS apps (the bundle in the app). Without it the runner runs a Rust app
 # only (`run_rust`) and links no QuickJS.
 js = ["nsh-platform-ios/js"]
+# Shaders, on naga and wgpu. Without them, the runner links neither.
+shader = ["nsh-platform-ios/shader"]
 
 [dependencies]
 log.workspace = true

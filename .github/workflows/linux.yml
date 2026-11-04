@@ -106,6 +106,13 @@ jobs:
       - name: Clippy (without WebKitGTK)
         run: cargo clippy --all-targets -p nsh-platform-linux -- -D warnings
 
+      # Without shaders: no naga, no wgpu.
+      - name: Check without shaders
+        run: cargo clippy -p nsh-linux-app --no-default-features --features js -- -D warnings
+
+      - name: Test without shaders
+        run: xvfb-run -a cargo test -p nsh-platform-linux --no-default-features --features js --lib without_the_feature
+
       # The backend's tests that make GTK widgets (`gtk_test`) run where a
       # display opens: the second run has a virtual one, with a session bus
       # of its own, as the examples' tests below.

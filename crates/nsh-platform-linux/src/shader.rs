@@ -1247,6 +1247,20 @@ mod tests {
         });
     }
 
+    /// A build without the feature `shader` refuses shaders, saying why,
+    /// and has no renderer.
+    #[cfg(not(feature = "shader"))]
+    #[test]
+    fn without_the_feature_there_are_no_shaders() {
+        let error = Shader::compile("fn shade(uv: vec2f) -> vec4f { return vec4f(1.0); }")
+            .expect_err("no compiler");
+        assert!(error.to_string().contains("feature `shader`"), "{error}");
+        assert!(Renderer::new(nsh_engine::shader::PixelFormat::Rgba).is_none());
+        let mut view = ShaderView::default();
+        assert!(!view.wants_frame());
+        assert!(!view.replaces_children(Instant::now()));
+    }
+
     /// Without a GPU device an effect and a screen effect draw their
     /// children as they are, and so does a transition that would run.
     #[test]

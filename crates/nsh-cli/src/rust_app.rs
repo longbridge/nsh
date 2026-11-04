@@ -1129,8 +1129,10 @@ panic = \"abort\"
                 self.android_lib(true),
                 self.nsh.dep("nsh-core", ""),
                 self.nsh.dep("nsh-base", HIGHLIGHT),
-                self.nsh
-                    .dep("nsh-platform-android", ", default-features = false"),
+                self.nsh.dep(
+                    "nsh-platform-android",
+                    ", default-features = false, features = [\"shader\"]"
+                ),
             ),
         )?;
         write(
@@ -1223,7 +1225,10 @@ panic = \"abort\"
                 self.nsh.dep(lib, ", default-features = false"),
                 self.nsh.dep("nsh-core", ""),
                 self.nsh.dep("nsh-base", HIGHLIGHT),
-                self.nsh.dep(platform, ", default-features = false"),
+                self.nsh.dep(
+                    platform,
+                    ", default-features = false, features = [\"shader\"]"
+                ),
             ),
         )?;
         let lib = lib.replace('-', "_");

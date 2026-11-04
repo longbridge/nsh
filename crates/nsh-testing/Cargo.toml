@@ -31,7 +31,8 @@ bundle = ["js", "dep:nsh-bundler", "dep:nsh-js"]
 
 [dependencies]
 nsh-bundler = { workspace = true, features = ["bundle"], optional = true }
-nsh-core.workspace = true
+# Tests compile shaders.
+nsh-core = { workspace = true, features = ["shader"] }
 nsh-engine.workspace = true
 nsh-js = { workspace = true, optional = true, features = ["zlib", "crypto"] }
 nsh-dev = { workspace = true, optional = true }

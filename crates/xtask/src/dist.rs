@@ -86,6 +86,10 @@ pub(crate) fn dist() -> anyhow::Result<()> {
             let mut args = vec!["build", "--release", "-p", package];
             if !webkit {
                 args.push("--no-default-features");
+                // Without web views only: the release runner keeps the rest.
+                if package == "nsh-linux-app" {
+                    args.extend(["--features", "js,shader"]);
+                }
             }
             cargo(&args, what)?;
             copy(

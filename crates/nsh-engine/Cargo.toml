@@ -24,8 +24,9 @@ browser = []
 # `net`: the HTTP stack behind `fetch` on ureq, which the Windows, Linux and
 # GPUI backends hand their engines.
 net = ["dep:ureq"]
-# `shader`: the native backends' shader renderer (`shader`), on wgpu.
-shader = ["dep:wgpu", "dep:pollster"]
+# `shader`: the native backends' shader renderer (`shader`), on wgpu. Without
+# it `shader` has the same API and finds no GPU, so shader views draw nothing.
+shader = ["dep:wgpu", "dep:pollster", "nsh-core/shader"]
 
 [dependencies]
 rustc-hash.workspace = true

@@ -12,10 +12,12 @@ repository.workspace = true
 workspace = true
 
 [features]
-default = ["js"]
+default = ["js", "shader"]
 # JS apps (the bundle in the package). Without it the runner runs a Rust
 # app only (`run_rust`) and links no QuickJS.
 js = ["nsh-platform-windows/js"]
+# Shaders, on naga and wgpu. Without them, the runner links neither.
+shader = ["nsh-platform-windows/shader"]
 
 [dependencies]
 log.workspace = true
