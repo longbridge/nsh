@@ -645,7 +645,7 @@ final class Decor extends Drawable {
         return false;
     }
 
-    private boolean uniformBorder() {
+    boolean uniformBorder() {
         for (int i = 1; i < 4; i++) {
             if (borderWidths[i] != borderWidths[0] || borderColors[i] != borderColors[0]) return false;
         }
