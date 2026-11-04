@@ -7,7 +7,7 @@ group: delivery
 
 # 应用更新
 
-`nsh/update` 让打包后的应用检查新版本、下载并替换自己。界面由你自己画，模块只提供状态和动作。它更新的是整个应用；如果只想给宿主应用下发 NSH 界面，请看[签名包](/zh-CN/docs/signed-packages)。
+`nsh/updater` 让打包后的应用检查新版本、下载并替换自己。界面由你自己画，模块只提供状态和动作。它更新的是整个应用；如果只想给宿主应用下发 NSH 界面，请看[签名包](/zh-CN/docs/signed-packages)。
 
 | 平台 | 行为 |
 | --- | --- |
@@ -20,7 +20,7 @@ group: delivery
 从 GitHub Releases 更新，写在 `nsh.json`：
 
 ```json
-{ "version": "1.2.0", "update": { "github": "owner/repo" } }
+{ "version": "1.2.0", "updater": { "github": "owner/repo" } }
 ```
 
 从自己的服务器更新必须配签名密钥，否则谁控制了服务器，谁就控制了应用运行的代码（`nsh keygen keys/update`，`.secret` 不要放进仓库）：
@@ -28,7 +28,7 @@ group: delivery
 ```json
 {
   "version": "1.2.0",
-  "update": {
+  "updater": {
     "url": "https://dl.example.com/app/latest.json",
     "publicKey": "<keys/update.pub 的内容>"
   }
@@ -40,7 +40,7 @@ group: delivery
 ## 使用
 
 ```tsx
-import { checkForUpdate, downloadUpdate, installAndRestart } from "nsh/update";
+import { checkForUpdate, downloadUpdate, installAndRestart } from "nsh/updater";
 import { openUrl } from "nsh";
 
 const update = await checkForUpdate(); // 已是最新时为 null
@@ -58,7 +58,7 @@ if (update?.canInstall) {
 
 ## 发布新版本
 
-`nsh.json` 的 `version` 必须符合 [semver](https://semver.org)，并且每次发布都要增大。设置 `"update"` 后，`nsh package` 还会写出一个以平台命名的压缩包。在各平台分别打包，然后生成清单：
+`nsh.json` 的 `version` 必须符合 [semver](https://semver.org)，并且每次发布都要增大。设置 `"updater"` 后，`nsh package` 还会写出一个以平台命名的压缩包。在各平台分别打包，然后生成清单：
 
 ```sh
 nsh package --target linux   # My-App-1.3.0-linux-x86_64.tar.gz

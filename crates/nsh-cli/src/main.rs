@@ -24,7 +24,7 @@ mod test_host;
 mod test_ios;
 mod test_web;
 mod ui;
-mod update;
+mod updater;
 mod web;
 mod windows;
 
@@ -312,7 +312,7 @@ enum Command {
         /// The app's directory or entry, whose `nsh.json` has the id and version.
         #[arg(long, default_value = ".")]
         entry: PathBuf,
-        /// The secret key (`nsh keygen`'s `.secret`) of the app's `update.publicKey`.
+        /// The secret key (`nsh keygen`'s `.secret`) of the app's `updater.publicKey`.
         #[arg(long)]
         key: Option<PathBuf>,
         /// A text file with what changed.
@@ -861,7 +861,7 @@ fn dispatch(command: Command) -> anyhow::Result<()> {
             links,
             base_url,
             out,
-        } => update::manifest(update::ManifestOptions {
+        } => updater::manifest(updater::ManifestOptions {
             archives: &archives,
             entry: &entry,
             key: key.as_deref(),

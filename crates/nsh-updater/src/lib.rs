@@ -1,4 +1,4 @@
-//! Self-update of packaged nsh apps (`docs/dev/update.md`).
+//! Self-update of packaged nsh apps (`docs/dev/updater.md`).
 //!
 //! An app publishes a manifest, `latest.json`: a version and an asset per
 //! `<os>-<arch>`. It comes from GitHub Releases
@@ -8,7 +8,7 @@
 //! manifest's bytes whether there is a newer version, [`Download`] checks
 //! the asset as it arrives and [`install`] replaces the installed app.
 //!
-//! No network here: the caller brings the bytes (the JS module `nsh/update`
+//! No network here: the caller brings the bytes (the JS module `nsh/updater`
 //! over the platform's HTTP stack, or a Rust app over its own), and no UI.
 
 use std::collections::BTreeMap;
@@ -26,10 +26,10 @@ pub const MANIFEST: &str = "latest.json";
 /// The name of the manifest's detached signature.
 pub const SIGNATURE: &str = "latest.json.sig";
 /// The package's file holding the [`Config`], an asset of the app.
-pub const CONFIG_ASSET: &str = "nsh-update.json";
+pub const CONFIG_ASSET: &str = "nsh-updater.json";
 /// Keeps a signature over a manifest from being valid as any other signed
 /// thing made with the same key (`nsh keygen`'s keys sign packages too).
-const CONTEXT: &[u8] = b"nsh-update-manifest\0";
+const CONTEXT: &[u8] = b"nsh-updater-manifest\0";
 
 /// Why an update cannot go on. Messages are for people.
 #[derive(Debug, thiserror::Error)]
@@ -52,7 +52,7 @@ pub enum Error {
 }
 
 /// Where an app finds its updates, and what it is now: `nsh.json`'s
-/// `"update"` with the app's id and version, as `nsh package` writes it.
+/// `"updater"` with the app's id and version, as `nsh package` writes it.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Config {

@@ -7,7 +7,7 @@ group: delivery
 
 # App Updates
 
-`nsh/update` lets a packaged app check for a newer version, download it and replace itself. The UI is yours: the module
+`nsh/updater` lets a packaged app check for a newer version, download it and replace itself. The UI is yours: the module
 gives you the state and the actions. It updates the whole app; to deliver only NSH screens to a host app, see
 [Signed Packages](/docs/signed-packages).
 
@@ -22,7 +22,7 @@ gives you the state and the actions. It updates the whole app; to deliver only N
 From GitHub Releases, in `nsh.json`:
 
 ```json
-{ "version": "1.2.0", "update": { "github": "owner/repo" } }
+{ "version": "1.2.0", "updater": { "github": "owner/repo" } }
 ```
 
 From your own host, which needs a signing key, because whoever controls the host would otherwise control what your app
@@ -31,7 +31,7 @@ runs (`nsh keygen keys/update`, keep the `.secret` out of your repository):
 ```json
 {
   "version": "1.2.0",
-  "update": {
+  "updater": {
     "url": "https://dl.example.com/app/latest.json",
     "publicKey": "<contents of keys/update.pub>"
   }
@@ -43,7 +43,7 @@ runs (`nsh keygen keys/update`, keep the `.secret` out of your repository):
 ## Use it
 
 ```tsx
-import { checkForUpdate, downloadUpdate, installAndRestart } from "nsh/update";
+import { checkForUpdate, downloadUpdate, installAndRestart } from "nsh/updater";
 import { openUrl } from "nsh";
 
 const update = await checkForUpdate(); // null when up to date
@@ -63,7 +63,7 @@ resolves `null`.
 
 ## Publish a release
 
-`version` in `nsh.json` must be [semver](https://semver.org) and grow with each release. With `"update"` set,
+`version` in `nsh.json` must be [semver](https://semver.org) and grow with each release. With `"updater"` set,
 `nsh package` also writes an archive named for its platform. Package on each platform, then write the manifest:
 
 ```sh

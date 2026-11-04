@@ -1,5 +1,5 @@
-//! The toolchain's side of app updates (`docs/dev/update.md`): `nsh.json`'s
-//! `"update"` goes into the package, packages also leave an archive named
+//! The toolchain's side of app updates (`docs/dev/updater.md`): `nsh.json`'s
+//! `"updater"` goes into the package, packages also leave an archive named
 //! for their platform, and `nsh update-manifest` writes the manifest
 //! describing the archives of one version.
 
@@ -10,15 +10,15 @@ use std::{
 };
 
 use anyhow::{Context as _, bail};
-use nsh_update::{Asset, CONFIG_ASSET, Config, MANIFEST, Manifest, SIGNATURE};
+use nsh_updater::{Asset, CONFIG_ASSET, Config, MANIFEST, Manifest, SIGNATURE};
 use serde::Deserialize;
 
 use crate::{package::AppConfig, ui};
 
-/// `nsh.json`'s `"update"`.
+/// `nsh.json`'s `"updater"`.
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct UpdateConfig {
+pub(crate) struct UpdaterConfig {
     /// `owner/repo`: updates from its GitHub Releases.
     pub(crate) github: Option<String>,
     /// The manifest's URL on a host of the app's own.
@@ -32,23 +32,23 @@ fn version(config: &AppConfig) -> &str {
     config.version.as_deref().unwrap_or("1.0.0")
 }
 
-/// The checked configuration of an app with `"update"`.
+/// The checked configuration of an app with `"updater"`.
 fn runtime_config(config: &AppConfig, id: &str) -> anyhow::Result<Option<Config>> {
-    let Some(update) = &config.update else {
+    let Some(updater) = &config.updater else {
         return Ok(None);
     };
     let runtime = Config {
         id: id.to_owned(),
         version: version(config).to_owned(),
-        github: update.github.clone(),
-        url: update.url.clone(),
-        public_key: update.public_key.clone(),
+        github: updater.github.clone(),
+        url: updater.url.clone(),
+        public_key: updater.public_key.clone(),
     };
     runtime.validate().context("nsh.json")?;
     Ok(Some(runtime))
 }
 
-/// Adds the configuration to the package's assets, where `nsh/update` reads
+/// Adds the configuration to the package's assets, where `nsh/updater` reads
 /// it on every platform.
 pub(crate) fn add_config(
     config: &AppConfig,
@@ -76,18 +76,18 @@ fn archive_name(name: &str, version: &str, extension: &str) -> String {
         .chars()
         .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
         .collect();
-    format!("{name}-{version}-{}.{extension}", nsh_update::platform())
+    format!("{name}-{version}-{}.{extension}", nsh_updater::platform())
 }
 
 /// Copies the package's archive under its release name, for an app with
-/// `"update"`.
+/// `"updater"`.
 pub(crate) fn copy_archive(
     config: &AppConfig,
     name: &str,
     archive: &Path,
     out: &Path,
 ) -> anyhow::Result<()> {
-    if config.update.is_none() {
+    if config.updater.is_none() {
         return Ok(());
     }
     let extension = match archive.extension().and_then(|e| e.to_str()) {
@@ -101,7 +101,7 @@ pub(crate) fn copy_archive(
 }
 
 /// Archives a macOS `.app` under its release name, for an app with
-/// `"update"`. `tar` keeps the bundle's links and modes, which its
+/// `"updater"`. `tar` keeps the bundle's links and modes, which its
 /// signature covers; `COPYFILE_DISABLE` keeps out the AppleDouble files
 /// (`._<name>`) it would add for extended attributes, which it does not.
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
@@ -111,7 +111,7 @@ pub(crate) fn archive_macos_app(
     app: &Path,
     out: &Path,
 ) -> anyhow::Result<()> {
-    if config.update.is_none() {
+    if config.updater.is_none() {
         return Ok(());
     }
     let release = out.join(archive_name(name, version(config), "tar.gz"));
@@ -168,7 +168,7 @@ pub(crate) fn manifest(options: ManifestOptions<'_>) -> anyhow::Result<()> {
     let config = crate::package::read_config(&entry)?;
     let (_, id) = crate::package::release_name_and_id(&entry, &config)?;
     let Some(runtime) = runtime_config(&config, &id)? else {
-        bail!("nsh.json has no \"update\"");
+        bail!("nsh.json has no \"updater\"");
     };
     let version = version(&config);
     let mut platforms = std::collections::BTreeMap::new();
@@ -191,7 +191,7 @@ pub(crate) fn manifest(options: ManifestOptions<'_>) -> anyhow::Result<()> {
             platform,
             Asset {
                 url,
-                sha256: Some(nsh_update::sha256(&bytes)),
+                sha256: Some(nsh_updater::sha256(&bytes)),
                 size: Some(bytes.len() as u64),
             },
         );
@@ -229,18 +229,18 @@ pub(crate) fn manifest(options: ManifestOptions<'_>) -> anyhow::Result<()> {
         (Some(key), Some(public)) => {
             let secret =
                 fs::read_to_string(key).with_context(|| format!("read {}", key.display()))?;
-            let signature = nsh_update::sign(&secret, &bytes)?;
+            let signature = nsh_updater::sign(&secret, &bytes)?;
             // Signed with the wrong key, every app would refuse the release.
-            nsh_update::verify(public, &bytes, signature.as_bytes())
-                .context("--key is not the key of nsh.json's update.publicKey")?;
+            nsh_updater::verify(public, &bytes, signature.as_bytes())
+                .context("--key is not the key of nsh.json's updater.publicKey")?;
             let path = options.out.join(SIGNATURE);
             fs::write(&path, format!("{signature}\n"))?;
             ui::done(format!("wrote {}", ui::path(&path)));
         }
         (None, Some(_)) => {
-            bail!("nsh.json has update.publicKey: pass --key, or apps refuse this manifest")
+            bail!("nsh.json has updater.publicKey: pass --key, or apps refuse this manifest")
         }
-        (Some(_), None) => bail!("--key without update.publicKey in nsh.json: apps check nothing"),
+        (Some(_), None) => bail!("--key without updater.publicKey in nsh.json: apps check nothing"),
         (None, None) => {}
     }
     Ok(())
@@ -273,7 +273,7 @@ mod tests {
         assert!(name.starts_with("My-App-1.2.0-"), "{name}");
         assert_eq!(
             archive_platform(&name, "1.2.0").as_deref(),
-            Some(nsh_update::platform().as_str())
+            Some(nsh_updater::platform().as_str())
         );
     }
 
@@ -282,7 +282,7 @@ mod tests {
     #[cfg(target_os = "macos")]
     #[test]
     fn macos_archives_hold_no_apple_double_files() {
-        let dir = std::env::temp_dir().join(format!("nsh-update-archive-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("nsh-updater-archive-{}", std::process::id()));
         let contents = dir.join("App.app/Contents");
         fs::create_dir_all(&contents).unwrap();
         let file = contents.join("Info.plist");
@@ -294,7 +294,7 @@ mod tests {
             .unwrap();
         assert!(status.success());
         let config: AppConfig =
-            serde_json::from_str(r#"{ "version": "1.2.0", "update": {} }"#).unwrap();
+            serde_json::from_str(r#"{ "version": "1.2.0", "updater": {} }"#).unwrap();
 
         archive_macos_app(&config, "App", &dir.join("App.app"), &dir).unwrap();
 

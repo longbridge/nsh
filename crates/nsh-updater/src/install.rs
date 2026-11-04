@@ -22,8 +22,8 @@ use std::{
 use crate::Error;
 
 /// Names what this code leaves next to the app or in it.
-const STAGING: &str = ".nsh-update-";
-const OLD: &str = ".nsh-update-old-";
+const STAGING: &str = ".nsh-updater-";
+const OLD: &str = ".nsh-updater-old-";
 
 /// The app on disk.
 #[derive(Debug, Clone)]
@@ -346,7 +346,7 @@ mod tests {
         fn new() -> TempDir {
             static NEXT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
             let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            let dir = std::env::temp_dir().join(format!("nsh-update-{}-{n}", std::process::id()));
+            let dir = std::env::temp_dir().join(format!("nsh-updater-{}-{n}", std::process::id()));
             fs::create_dir_all(&dir).unwrap();
             TempDir(dir)
         }
@@ -473,7 +473,7 @@ mod tests {
             .unwrap()
             .flatten()
             .map(|e| e.file_name().to_string_lossy().into_owned())
-            .filter(|n| n.contains(".nsh-update"))
+            .filter(|n| n.contains(".nsh-updater"))
             .collect();
         assert_eq!(left, Vec::<String>::new());
     }

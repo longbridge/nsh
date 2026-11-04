@@ -110,7 +110,7 @@ pub(crate) struct AppConfig {
     #[serde(default)]
     pub(crate) web: WebConfig,
     /// Where the app finds its updates (`update.rs`).
-    pub(crate) update: Option<crate::update::UpdateConfig>,
+    pub(crate) updater: Option<crate::updater::UpdaterConfig>,
     /// Terminal layout options.
     #[serde(default)]
     pub(crate) tui: TuiConfig,
@@ -327,7 +327,7 @@ pub(crate) fn package(options: PackageOptions<'_>) -> anyhow::Result<()> {
         built
     };
     if options.target != PackageTarget::Web {
-        crate::update::add_config(config, &id, options.out, &mut built)?;
+        crate::updater::add_config(config, &id, options.out, &mut built)?;
     }
     let platform = match options.target {
         PackageTarget::Ios => Platform::IphoneOs,
@@ -671,7 +671,7 @@ fn package_linux(
             String::from_utf8_lossy(&output.stderr).trim()
         );
     }
-    crate::update::copy_archive(config, name, &archive, options.out)?;
+    crate::updater::copy_archive(config, name, &archive, options.out)?;
     step.done(format!(
         "packaged {} and {}",
         ui::path(&dir),
@@ -763,7 +763,7 @@ fn package_macos(
             String::from_utf8_lossy(&output.stderr).trim()
         );
     }
-    crate::update::archive_macos_app(config, name, &app, options.out)?;
+    crate::updater::archive_macos_app(config, name, &app, options.out)?;
     step.done(format!("packaged {}", ui::path(&app)));
     if options.run {
         let status = Command::new("open")

@@ -637,14 +637,14 @@ pub trait FetchTask: Send {
     fn cancel(self: Box<Self>);
 }
 
-/// `nsh/update` on the engine's network and assets: the platform's HTTP stack
+/// `nsh/updater` on the engine's network and assets: the platform's HTTP stack
 /// (so its TLS and proxies), and the file `nsh package` left among the assets.
-struct UpdateOverNetwork {
+struct UpdaterOverNetwork {
     network: Arc<dyn Network>,
     assets: Arc<dyn Assets>,
 }
 
-impl UpdateOverNetwork {
+impl UpdaterOverNetwork {
     /// `None` without both (nothing to update from).
     #[cfg_attr(
         not(any(feature = "js-core", all(feature = "browser", target_arch = "wasm32"))),
@@ -653,21 +653,21 @@ impl UpdateOverNetwork {
     fn host(
         network: Option<Arc<dyn Network>>,
         assets: Option<Arc<dyn Assets>>,
-    ) -> Option<Arc<dyn nsh_core::runtime::UpdateHost>> {
-        Some(Arc::new(UpdateOverNetwork {
+    ) -> Option<Arc<dyn nsh_core::runtime::UpdaterHost>> {
+        Some(Arc::new(UpdaterOverNetwork {
             network: network?,
             assets: assets?,
         }))
     }
 }
 
-impl nsh_core::runtime::UpdateHost for UpdateOverNetwork {
+impl nsh_core::runtime::UpdaterHost for UpdaterOverNetwork {
     fn config(&self) -> Option<Vec<u8>> {
         // Only a package has it; a dev server answers nothing for it.
-        self.assets.read("asset:/nsh-update.json").ok()
+        self.assets.read("asset:/nsh-updater.json").ok()
     }
 
-    fn get(&self, url: &str, sink: nsh_core::runtime::UpdateSink<'_>) -> Result<(), String> {
+    fn get(&self, url: &str, sink: nsh_core::runtime::UpdaterSink<'_>) -> Result<(), String> {
         let (tx, rx) = std::sync::mpsc::channel();
         let events: FetchEvents = Box::new(move |event| {
             let _ = tx.send(event);
@@ -1730,7 +1730,7 @@ impl<M: TextEngine + 'static> Driver<M> {
                         websocket: config.websocket.clone(),
                         refuse_connections: config.refuse_connections.clone(),
                         filesystem: config.filesystem.clone(),
-                        update: UpdateOverNetwork::host(
+                        updater: UpdaterOverNetwork::host(
                             config.network.clone(),
                             config.assets.clone(),
                         ),

@@ -90,7 +90,7 @@ fn projected_values(public: &str, name: &str) -> BTreeSet<String> {
 fn every_public_standard_value_is_declared_and_every_declared_value_exists() {
     let files = type_definitions(&[]);
     // Registry-generated modules are external files (for example os.d.ts or
-    // nsh/update.d.ts), while LLRT adapters use ambient modules in
+    // nsh/updater.d.ts), while LLRT adapters use ambient modules in
     // standard/index.d.ts. Wrapping the former keeps each file's exports from
     // landing in the module before it. Inspect
     // the complete generated output so both paths obey the same exact catalog.

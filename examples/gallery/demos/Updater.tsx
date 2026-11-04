@@ -1,15 +1,15 @@
 import { openUrl, signal, Text } from "nsh";
-import { checkForUpdate, downloadUpdate, installAndRestart } from "nsh/update";
-import type { AppUpdate } from "nsh/update";
+import { checkForUpdate, downloadUpdate, installAndRestart } from "nsh/updater";
+import type { AppUpdate } from "nsh/updater";
 import { Button, Card, colors, DemoPage } from "../ui";
 
 /**
- * nsh/update: asks the source in nsh.json's "update" for a newer version,
+ * nsh/updater: asks the source in nsh.json's "updater" for a newer version,
  * then downloads it and replaces the app, or sends the user to its link
  * where the app cannot replace itself. The gallery names no source, so here
  * the check answers that there is nothing to install.
  */
-export function UpdateDemo() {
+export function UpdaterDemo() {
   const status = signal("Not checked yet");
   const update = signal<AppUpdate | null>(null);
 

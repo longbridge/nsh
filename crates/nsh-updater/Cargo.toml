@@ -1,5 +1,5 @@
 [package]
-name = "nsh-update"
+name = "nsh-updater"
 description = "Self-update of packaged nsh apps: signed manifests, verified downloads, replacing the installed app."
 version.workspace = true
 edition.workspace = true

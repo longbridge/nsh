@@ -1,19 +1,19 @@
 # App updates
 
-`nsh/update` lets a packaged app replace itself. The rules are in `crates/nsh-update` (no network, no UI), the JS face
-in `crates/nsh-core/src/runtime/update.rs`, the toolchain's side in `crates/nsh-cli/src/update.rs`; the user guide is
+`nsh/updater` lets a packaged app replace itself. The rules are in `crates/nsh-updater` (no network, no UI), the JS face
+in `crates/nsh-core/src/runtime/updater.rs`, the toolchain's side in `crates/nsh-cli/src/updater.rs`; the user guide is
 `website/docs/app-updates.md`.
 
 ## Flow
 
-1. `nsh.json`'s `"update"` (`github` or `url`, `publicKey`) is checked by `nsh package`, which adds it with the app's
-   id and version to the package's assets as `nsh-update.json`, and leaves `<name>-<version>-<os>-<arch>.<ext>`.
+1. `nsh.json`'s `"updater"` (`github` or `url`, `publicKey`) is checked by `nsh package`, which adds it with the app's
+   id and version to the package's assets as `nsh-updater.json`, and leaves `<name>-<version>-<os>-<arch>.<ext>`.
 2. `nsh update-manifest` writes `latest.json` and `latest.json.sig` for one version's archives.
 3. `checkForUpdate` reads the asset, gets the manifest, checks the signature, the id and that the version is newer.
 4. `downloadUpdate` streams the asset into `<data dir>/updates`, checking its size and SHA-256.
 5. `installAndRestart` unpacks next to the app, checks the new app, swaps it in, starts it and exits.
 
-HTTP is the platform's `Network`, as `fetch`'s, through `UpdateHost`, which the engine gives `System`: no second HTTP
+HTTP is the platform's `Network`, as `fetch`'s, through `UpdaterHost`, which the engine gives `System`: no second HTTP
 or TLS stack, and it works on iOS and Android, where `ureq` is not linked. These requests are not subject to the app's
 `capabilities.network`: the app's code cannot choose where they go.
 
@@ -22,7 +22,7 @@ or TLS stack, and it works on iOS and Android, where `ureq` is not linked. These
 - **The source comes from the package, not the caller.** Otherwise app code, or a plugin, could point the update at
   anything.
 - **A plugin cannot replace its host.** `Installation::current` needs the executable beside an `app.json` of the id and
-  a `nsh-update.json` with the same bytes the module read. A plugin has other assets, and if it had the same bytes it
+  a `nsh-updater.json` with the same bytes the module read. A plugin has other assets, and if it had the same bytes it
   would only update from the host's own source.
 - **Signing.** `SHA-256` in the manifest does not help if the host is compromised, since the manifest comes from the
   same place. A custom host therefore needs `publicKey`; GitHub may have one. The signature has its own context, so a
@@ -34,10 +34,10 @@ or TLS stack, and it works on iOS and Android, where `ureq` is not linked. These
   by entry, undoes on failure, and the next check removes what was still in use.
 - **macOS** checks the new app with `codesign --verify --deep --strict` and launches with `open -n`. Whether Gatekeeper
   accepts it is the developer's signing and notarization.
-- **No Cargo feature.** `zip`, `tar`, `semver` and `nsh-update` add about 125 KB to a 51 MB Linux runner (`nm -S`), and
-  `sha2`, `ed25519-dalek` and `flate2` are linked already. `nsh-update` is not a dependency in WebAssembly, where
+- **No Cargo feature.** `zip`, `tar`, `semver` and `nsh-updater` add about 125 KB to a 51 MB Linux runner (`nm -S`), and
+  `sha2`, `ed25519-dalek` and `flate2` are linked already. `nsh-updater` is not a dependency in WebAssembly, where
   `checkForUpdate` resolves `null`.
-- **Rust apps** (`nsh.json` `"root"`) have no JS modules: they use `nsh-update` directly and bring their own HTTP.
+- **Rust apps** (`nsh.json` `"root"`) have no JS modules: they use `nsh-updater` directly and bring their own HTTP.
 
 ## Limits
 

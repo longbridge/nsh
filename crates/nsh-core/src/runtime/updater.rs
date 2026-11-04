@@ -1,6 +1,6 @@
-//! `nsh/update`: the app updates itself (`docs/dev/update.md`). The rules
-//! are `nsh-update`'s; this module is its JS face over the platform's HTTP
-//! stack ([`UpdateHost`]). The source comes from the package, never from
+//! `nsh/updater`: the app updates itself (`docs/dev/updater.md`). The rules
+//! are `nsh-updater`'s; this module is its JS face over the platform's HTTP
+//! stack ([`UpdaterHost`]). The source comes from the package, never from
 //! the caller, so what the app's code can do is ask, not point it elsewhere.
 //!
 //! Needs no capability: the developer named the source in `nsh.json`, and a
@@ -12,18 +12,18 @@ use std::{cell::RefCell, path::PathBuf, rc::Rc, sync::Arc};
 use crate::element::{Callback, JsError, JsObject, Later, System, codes, module};
 
 /// Takes a piece of a body and the total size if known; an error stops it.
-pub type UpdateSink<'a> = &'a mut dyn FnMut(&[u8], Option<u64>) -> Result<(), String>;
+pub type UpdaterSink<'a> = &'a mut dyn FnMut(&[u8], Option<u64>) -> Result<(), String>;
 
 /// What the platform gives the module: the package's update configuration
 /// and HTTP. Both block, and are called off the engine thread.
-pub trait UpdateHost: Send + Sync + 'static {
+pub trait UpdaterHost: Send + Sync + 'static {
     /// The package's configuration file; `None` when it has none (a
-    /// development run, an app without `"update"` in `nsh.json`).
+    /// development run, an app without `"updater"` in `nsh.json`).
     fn config(&self) -> Option<Vec<u8>>;
 
     /// Gets `url`, following redirects, handing each piece of the body and
     /// the total size if known to `sink`, until it fails or the body ends.
-    fn get(&self, url: &str, sink: UpdateSink<'_>) -> Result<(), String>;
+    fn get(&self, url: &str, sink: UpdaterSink<'_>) -> Result<(), String>;
 }
 
 /// Bytes downloaded, as `downloadUpdate`'s callback gets them.
@@ -55,13 +55,13 @@ pub(crate) struct AppUpdate {
 
 /// Checking for a newer version of the app and installing it.
 #[module]
-pub(crate) struct Update;
+pub(crate) struct Updater;
 
 #[module(flat)]
-impl Update {
-    /// Asks the source in `nsh.json`'s `"update"` for a newer version.
+impl Updater {
+    /// Asks the source in `nsh.json`'s `"updater"` for a newer version.
     /// Resolves with the update, or `null` when the app is up to date, has
-    /// no `"update"`, or runs where apps do not update (the web, a
+    /// no `"updater"`, or runs where apps do not update (the web, a
     /// development run). Rejects when the source cannot be reached or its
     /// manifest is not acceptable: a bad signature, another app's id, a
     /// URL that is not HTTPS.
@@ -101,7 +101,7 @@ fn unavailable() -> JsError {
 
 #[cfg(not(target_arch = "wasm32"))]
 mod native {
-    use nsh_update::{Available, Config, Download};
+    use nsh_updater::{Available, Config, Download};
 
     use super::*;
 
@@ -112,13 +112,13 @@ mod native {
     impl crate::element::Local for Found {}
 
     struct Pending {
-        host: Arc<dyn UpdateHost>,
+        host: Arc<dyn UpdaterHost>,
         config: Config,
         available: Available,
         dir: PathBuf,
         archive: RefCell<Option<PathBuf>>,
         #[cfg(any(target_os = "linux", target_os = "macos", windows))]
-        installation: nsh_update::install::Installation,
+        installation: nsh_updater::install::Installation,
     }
 
     /// Runs `work` off the engine thread.
@@ -131,7 +131,7 @@ mod native {
     pub(super) async fn check(sys: System) -> Result<Option<AppUpdate>, JsError> {
         let found = sys.locals.get::<Found>();
         *found.0.borrow_mut() = None;
-        let Some(host) = sys.update.clone() else {
+        let Some(host) = sys.updater.clone() else {
             return Ok(None);
         };
         let worker = host.clone();
@@ -146,7 +146,7 @@ mod native {
                 None => None,
             };
             let available = config
-                .check(&manifest, signature.as_deref(), &nsh_update::platform())
+                .check(&manifest, signature.as_deref(), &nsh_updater::platform())
                 .map_err(|e| e.to_string())?;
             Ok(available.map(|available| (bytes, config, available)))
         })
@@ -164,7 +164,7 @@ mod native {
         {
             let id = config.id.clone();
             let installation = blocking(move || {
-                Ok(nsh_update::install::Installation::current(&id, &bytes)
+                Ok(nsh_updater::install::Installation::current(&id, &bytes)
                     .inspect(|installation| installation.remove_leftovers())
                     .filter(|installation| installation.can_install()))
             })
@@ -191,7 +191,7 @@ mod native {
     }
 
     /// A small file, whole. A manifest is a few kilobytes.
-    fn get_all(host: &dyn UpdateHost, url: &str) -> Result<Vec<u8>, String> {
+    fn get_all(host: &dyn UpdaterHost, url: &str) -> Result<Vec<u8>, String> {
         const MAX: usize = 1 << 20;
         let mut bytes = Vec::new();
         host.get(url, &mut |chunk, _| {

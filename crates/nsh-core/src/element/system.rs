@@ -56,8 +56,8 @@ pub struct System {
     /// only when the test asks (`nsh test`'s `network: "live"`). `None`:
     /// they connect. `fetch` goes through the host's network instead.
     pub refuse_connections: Option<RefuseConnections>,
-    /// What `nsh/update` runs on; `None`: the app does not update.
-    pub update: Option<Arc<dyn crate::runtime::UpdateHost>>,
+    /// What `nsh/updater` runs on; `None`: the app does not update.
+    pub updater: Option<Arc<dyn crate::runtime::UpdaterHost>>,
 }
 
 /// What a host refuses the app's connections with
@@ -85,7 +85,7 @@ impl System {
             filesystem: None,
             os: crate::platform::Os::default(),
             refuse_connections: None,
-            update: None,
+            updater: None,
         }
     }
 
@@ -117,9 +117,9 @@ impl System {
     }
 
     /// Uses the host virtual filesystem.
-    /// Sets what `nsh/update` runs on.
-    pub fn with_update(mut self, update: Option<Arc<dyn crate::runtime::UpdateHost>>) -> Self {
-        self.update = update;
+    /// Sets what `nsh/updater` runs on.
+    pub fn with_updater(mut self, updater: Option<Arc<dyn crate::runtime::UpdaterHost>>) -> Self {
+        self.updater = updater;
         self
     }
 

@@ -79,7 +79,7 @@ pub(crate) fn package(
     }
     let archive = options.out.join(format!("{name}.zip"));
     zip_dir(&dir, name, &archive).with_context(|| format!("create {}", archive.display()))?;
-    crate::update::copy_archive(config, name, &archive, options.out)?;
+    crate::updater::copy_archive(config, name, &archive, options.out)?;
     step.done(format!(
         "packaged {} and {}",
         ui::path(&dir),
