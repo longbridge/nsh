@@ -922,7 +922,7 @@ fn drag_area(surface: &Rc<Surface>) -> impl IntoElement {
                     // hears the click instead)
                     MouseButton::Right
                         if PLATFORM == Platform::Linux
-                            && !crate::input::hears_context_menu(&surface, x - ox, y - oy) =>
+                            && !crate::input::hears_context_menu(&surface.root, x - ox, y - oy) =>
                     {
                         window.show_window_menu(e.position);
                     }
