@@ -1024,6 +1024,13 @@ pub(crate) fn encode(out: &mut Out, item: &MountItem) {
                 Some(c) => out.str(&css_color(c)),
                 None => out.raw("null"),
             };
+            // `borderCurve: "continuous"`: `nsh.js`'s `placeCorners` draws
+            // them, by the frame too.
+            if style.continuous_corners {
+                let radii = style.corner_radius.to_array();
+                let [a, b, c, d] = radii.map(|r| r.unwrap_or(style.border_radius).0);
+                out.num(a).num(b).num(c).num(d);
+            }
             out.end();
         }
         MountItem::Text {

@@ -511,6 +511,12 @@ class Box extends ViewGroup implements Node, NshView.ShaderFrames {
     }
 
     @Override
+    public void draw(Canvas canvas) {
+        if (decor.masks.length == 0) super.draw(canvas);
+        else decor.drawMasked(canvas, this, () -> super.draw(canvas));
+    }
+
+    @Override
     protected void dispatchDraw(Canvas canvas) {
         // An effect, or a running transition, shows its frame instead (the
         // children still take touches and stay accessible).
