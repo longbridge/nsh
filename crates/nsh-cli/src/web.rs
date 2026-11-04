@@ -128,7 +128,7 @@ pub(crate) fn package(
     let mut published = BTreeSet::new();
     // An app with Rust components of its own has a runtime built for it,
     // linkable as nsh's own, with a gate per UI set (`nsh_ui_set_*`).
-    let linked = {
+    let (linked, has_math) = {
         let plan = GatePlan::of(built);
         let exports = prune::exports(&linkable)?;
         let keep: Vec<&str> = exports
@@ -141,7 +141,7 @@ pub(crate) fn package(
             .into_iter()
             .filter(|gate| exports.iter().any(|e| e == gate))
             .collect();
-        let split = split::split(&linkable, &keep, &lazy)?;
+        let split = link(&linkable, runtime.glue.is_some(), &keep, &lazy)?;
         for side in &split.sides {
             let file = side_file_name(&side.gates);
             let url = site.add(&format!("{file}.wasm"), &side.bytes)?;
@@ -156,10 +156,12 @@ pub(crate) fn package(
             sides.insert(side.name.clone(), entry);
         }
         chunk_sides = plan.chunk_sides(&published);
-        split.main
+        // A runtime published whole has the typesetter in its main module.
+        let has_math = published.contains(MATH_GATE)
+            || (split.sides.is_empty() && exports.iter().any(|e| e == MATH_GATE));
+        (split.main, has_math)
     };
     let wasm = site.add("nsh.wasm", &linked)?;
-    let has_math = published.contains(MATH_GATE);
     // What the runtime fetches when it first needs it: the syntaxes it
     // highlights code with, which every page would download otherwise.
     let mut data = serde_json::Map::new();
@@ -286,6 +288,26 @@ const TEXT_VIEW_GATE: &str = "nsh_part_text_view";
 const MATH_GATE: &str = "nsh_feature_math";
 /// The KaTeX fonts of the typesetter, which the page fetches with its code.
 const MATH_FONTS_FILE: &str = "nsh-math.bin";
+
+/// The modules published for an app from its linkable runtime: the main
+/// module with `keep` and side modules for `lazy` ([`split::split`]). A
+/// runtime wasm-bindgen ran on (`bindgen`) is published whole, every gate
+/// in it: wasm-bindgen rewrites the module and keeps the `linking` and
+/// `reloc.*` sections of the one it read, which no longer describe it.
+pub(crate) fn link(
+    linkable: &[u8],
+    bindgen: bool,
+    keep: &[&str],
+    lazy: &[&str],
+) -> anyhow::Result<prune::split::Split> {
+    if bindgen {
+        return Ok(prune::split::Split {
+            main: prune::unlinked(linkable)?,
+            sides: Vec::new(),
+        });
+    }
+    split::split(linkable, keep, lazy)
+}
 
 /// Whether `name` is the export of a part of `nsh/base`, of a standard
 /// module, of a feature (shaders) or of one of the app's own UI sets
@@ -1364,6 +1386,33 @@ mod tests {
         computed.computed_import = true;
         assert_eq!(linked_gates(Some(&computed)).len(), every);
         assert_eq!(linked_gates(None).len(), every);
+    }
+
+    #[test]
+    fn a_runtime_wasm_bindgen_ran_on_is_published_whole() {
+        // `run`, a function `() -> ()` that returns at once.
+        let mut module = b"\0asm\x01\0\0\0".to_vec();
+        module.extend([1, 4, 1, 0x60, 0, 0]);
+        module.extend([3, 2, 1, 0]);
+        module.extend([7, 7, 1, 3, b'r', b'u', b'n', 0, 0]);
+        module.extend([10, 4, 1, 2, 0, 0x0b]);
+        // The linker's sections of the module wasm-bindgen read, which it
+        // keeps: their symbol names function 7, which it removed.
+        let mut runtime = module.clone();
+        runtime.extend([0, 19, 7]);
+        runtime.extend(b"linking");
+        runtime.extend([2, 8, 8, 1, 0, 0, 7, 3, b'r', b'u', b'n']);
+        runtime.extend([0, 13, 10]);
+        runtime.extend(b"reloc.CODE");
+        runtime.extend([3, 0]);
+        let error = link(&runtime, false, &["run"], &[]).err().unwrap();
+        assert_eq!(
+            error.to_string(),
+            "a symbol names function 7, which the web runtime does not have"
+        );
+        let published = link(&runtime, true, &["run"], &[]).unwrap();
+        assert_eq!(published.main, module);
+        assert!(published.sides.is_empty());
     }
 
     #[test]

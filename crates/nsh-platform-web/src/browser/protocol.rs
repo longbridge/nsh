@@ -406,6 +406,22 @@ pub(crate) fn decode_prop<'js>(
         let (style, patch) = decode_style(entries, warnings)?;
         return Ok(Some(Op::SetStyle { id, style, patch }));
     }
+    if let Some(prop) = nsh_core::js::host::style_patch_prop(name) {
+        let patch = style_patch(&value, warnings)?;
+        let prop = prop((!patch.is_empty()).then(|| std::rc::Rc::new(patch)));
+        return Ok(Some(Op::SetProp { id, prop }));
+    }
+    if let Some(prop) = nsh_core::js::host::part_class_prop(name, tag) {
+        let names: Box<str> = value
+            .as_string()
+            .and_then(|s| s.to_string().ok())
+            .unwrap_or_default()
+            .into();
+        return Ok(Some(Op::SetProp {
+            id,
+            prop: prop(names),
+        }));
+    }
     let mut cx = tag.map_or_else(HostCx::default, HostCx::for_element);
     let input = Js(value);
     let decoded = <Prop as HostProps>::decode(name, &input, &mut cx);
