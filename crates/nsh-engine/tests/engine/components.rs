@@ -1990,7 +1990,7 @@ Menu.setApplicationMenu([
 
 let wrong = "accepted";
 try {
-  Menu.popup([{ label: "Bad", icon: 12 }]);
+  Menu.setApplicationMenu([{ label: "File", submenu: [{ label: "Bad", icon: 12 }] }]);
 } catch (e) {
   wrong = e.message;
 }
@@ -2068,7 +2068,13 @@ fn menu_icons_reach_the_platform_as_image_sources() {
     );
     let logo = icons[1].as_ref().expect("the imported image");
     assert_eq!(&*logo.uri, "asset:/logo.png");
-    assert_eq!(logo.size, Some(nsh_core::geometry::size(nsh_core::Points(16.0), nsh_core::Points(16.0))));
+    assert_eq!(
+        logo.size,
+        Some(nsh_core::geometry::size(
+            nsh_core::Points(16.0),
+            nsh_core::Points(16.0)
+        ))
+    );
     assert_eq!(logo.scales, [1.0, 2.0].into_iter().collect::<ImageScales>());
     assert_eq!(logo.data, None);
     let blob = icons[2].as_ref().expect("the blob's URL");
