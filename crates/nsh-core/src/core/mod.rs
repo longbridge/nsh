@@ -2884,7 +2884,13 @@ impl<M: TextEngine> Core<M> {
         }
         if text_changed || flipped {
             match self.nodes[key as usize].kind {
-                Kind::Text => self.mark_text_block(key),
+                Kind::Text => {
+                    self.mark_text_block(key);
+                    // Texts inside its attachments take its color.
+                    if color_passed {
+                        self.mark_inheriting_text(key);
+                    }
+                }
                 Kind::Input => {
                     self.measure_input(key);
                     self.mark(key, dirty::INPUT);
@@ -5479,12 +5485,22 @@ impl<M: TextEngine> Core<M> {
         }
     }
 
+    /// Texts and spans around `key` (it is inside an attachment) pass on
+    /// their color only, as `currentColor` reaches the attachment's view:
+    /// the attachment takes the color of the text it sits in, while its
+    /// font and line height stay its own, which size the box its line
+    /// makes room for.
     fn inherited_text_style(&self, key: Key) -> ResolvedTextStyle {
         let mut chain: Vec<Key> = Vec::new();
         let mut k = self.nodes[key as usize].parent;
         while k != NO_KEY {
             let node = &self.nodes[k as usize];
-            if node.kind != Kind::Text && node.text_style != TextStyle::default() {
+            let passes = if node.kind == Kind::Text {
+                node.text_style.color.is_some()
+            } else {
+                node.text_style != TextStyle::default()
+            };
+            if passes {
                 chain.push(k);
             }
             k = node.parent;
@@ -5493,7 +5509,15 @@ impl<M: TextEngine> Core<M> {
             .iter()
             .rev()
             .fold(self.base_text_style(), |style, &k| {
-                style.inherit(&self.nodes[k as usize].text_style)
+                let node = &self.nodes[k as usize];
+                if node.kind == Kind::Text {
+                    ResolvedTextStyle {
+                        color: node.text_style.color.unwrap_or(style.color),
+                        ..style
+                    }
+                } else {
+                    style.inherit(&node.text_style)
+                }
             })
     }
 
@@ -5536,7 +5560,13 @@ impl<M: TextEngine> Core<M> {
         let mut stack: Vec<Key> = self.nodes[key as usize].children.clone();
         while let Some(k) = stack.pop() {
             match self.nodes[k as usize].kind {
-                Kind::Text => self.mark_text_block(k),
+                // The texts inside its attachments inherit too.
+                Kind::Text => {
+                    if !self.nodes[k as usize].inline {
+                        self.mark_text_block(k);
+                    }
+                    stack.extend_from_slice(&self.nodes[k as usize].children);
+                }
                 Kind::Input => {
                     self.measure_input(k);
                     self.mark(k, dirty::INPUT);
