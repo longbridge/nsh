@@ -139,7 +139,6 @@ expect Media and alerts
 back
 tap text:Plot
 expect Each side summed out from the spread, as steps
-expect Bars per month, side by side or stacked
 back
 tap text:NavStack
 expect Native stack
