@@ -1340,7 +1340,11 @@ impl Painter<'_> {
                     crate::ColorDepth::Ansi16 | crate::ColorDepth::Monochrome
                 ),
                 popup: popup_item,
+                holds_selection: false,
             };
+            // Only a focused view asks: its subtree is walked once a frame.
+            let holds_selection =
+                view.states & state::FOCUSED != 0 && holds_selected(self.tree, id);
             match ground.ramp {
                 Some(ramp) => mark_surface(
                     self.buffer,
@@ -1355,6 +1359,7 @@ impl Painter<'_> {
                     popup_item,
                     layer.modal,
                     layer.pane,
+                    holds_selection,
                 ),
                 None => mark_state(
                     self.buffer,
@@ -1363,7 +1368,10 @@ impl Painter<'_> {
                     visible,
                     inner_visible,
                     &edges,
-                    marks,
+                    Marks {
+                        holds_selection,
+                        ..marks
+                    },
                 ),
             }
         }
@@ -1526,6 +1534,23 @@ fn holds_rows(tree: &Mounter, pane: NodeId) -> bool {
         if !lined {
             stack.extend(view.children.iter().copied());
         }
+    }
+    false
+}
+
+/// Whether a view inside `container` is a selected item.
+fn holds_selected(tree: &Mounter, container: NodeId) -> bool {
+    let mut stack: Vec<NodeId> = tree
+        .get(container)
+        .map_or_else(Vec::new, |view| view.children.clone());
+    while let Some(id) = stack.pop() {
+        let Some(view) = tree.get(id) else {
+            continue;
+        };
+        if view.props.accessibility.state.selected {
+            return true;
+        }
+        stack.extend(view.children.iter().copied());
     }
     false
 }
@@ -2479,6 +2504,8 @@ struct Marks {
     /// The view is an item of a popup (a list's option, a menu's item):
     /// its focus spans its row, as a selected item's reverse does.
     popup: bool,
+    /// The view is focused and holds a selected item ([`holds_selected`]).
+    holds_selection: bool,
 }
 
 /// Draws the view's state over its drawn Cells (its subtree's included):
@@ -2593,6 +2620,8 @@ fn mark_state(
             label(buffer, inner, Modifier::BOLD | Modifier::UNDERLINED);
         } else if inner.height >= CONTAINER_ROWS && edges.any() {
             emphasize_border(buffer, bounds, visible);
+        } else if inner.height >= CONTAINER_ROWS && marks.holds_selection {
+            // Its selected item already shows where the keys act.
         } else if inner.height >= CONTAINER_ROWS {
             label(buffer, inner, Modifier::BOLD | Modifier::UNDERLINED);
         } else if view.kind == ViewKind::Scroll && !marks.mono {
@@ -2660,6 +2689,7 @@ fn mark_surface(
     popup: bool,
     dialog: bool,
     pane: bool,
+    holds_selection: bool,
 ) {
     // A part shows its control's states as its own (a list's highlighted
     // option is focused while the keys stay in the search field).
@@ -2891,6 +2921,10 @@ fn mark_surface(
     }
     if framed {
         // The line shows it.
+    } else if focused && container && holds_selection {
+        // A list holding the focus: its selected row and its pane's line
+        // show where the keys act; a rail and a band would mark the rows
+        // the keys do not.
     } else if focused && container {
         // A step up alone reads as one more raised surface: an accent
         // rail down its leading column marks it, as a focused pane's

@@ -856,6 +856,56 @@ fn a_pressable_container_keeps_its_texts_weights_and_shows_focus_with_a_rail() {
 }
 
 #[test]
+fn a_focused_list_holding_a_selected_row_shows_no_rail_or_band_of_its_own() {
+    // A focusable list of rows, as a sidebar's: one selected, and a text
+    // that says when the focus has arrived.
+    let code = nsh_bundler::compile_module(
+        "App.tsx",
+        r##"
+        import { mount, signal, View, Text } from "nsh";
+        const focused = signal(false);
+        mount(() => <View>
+            <Text>{focused() ? "focused" : "resting"}</Text>
+            <View focusable={true} onFocus={() => focused.set(true)} style={{ paddingHorizontal: 8 }}>
+                <View onPress={() => {}} accessibilityState={{ selected: true }}><Text>Chosen</Text></View>
+                <View onPress={() => {}}><Text>Second</Text></View>
+                <View onPress={() => {}}><Text>Third</Text></View>
+                <View onPress={() => {}}><Text>Fourth</Text></View>
+            </View>
+        </View>);
+    "##,
+        &[],
+    )
+    .unwrap();
+    let (mut view, rx) = ramp_surface();
+    let mut terminal = Terminal::new(TestBackend::new(30, 8)).unwrap();
+    view.load(Bundle::source(code)).unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "resting");
+    let at = word_at(&terminal, "Second");
+    let chosen = word_at(&terminal, "Chosen");
+    let resting_bg = terminal.backend().buffer()[at].bg;
+    let chosen_bg = terminal.backend().buffer()[chosen].bg;
+    view.handle(nsh_platform_tui::Input::Key {
+        key: "Tab".into(),
+        modifiers: Default::default(),
+        release: false,
+    });
+    draw_until(&mut view, &mut terminal, &rx, "focused");
+    let buffer = terminal.backend().buffer();
+    assert!(
+        (0..8).all(|y| (0..30).all(|x| buffer[(x, y)].symbol() != "▎")),
+        "no rail\n{}",
+        super::dock::dump(&terminal)
+    );
+    assert_eq!(buffer[at].bg, resting_bg, "the other rows take no band");
+    assert_eq!(
+        buffer[chosen].bg, chosen_bg,
+        "the selected row keeps its band"
+    );
+    assert_ne!(chosen_bg, resting_bg, "the selected row stands on a band");
+}
+
+#[test]
 fn a_bar_filled_out_of_a_sunken_track_stands_apart_from_the_box_around_it() {
     // A gauge's track, darker than the gauge, and its fill, lighter than
     // the track: a step back up would be the gauge's own.

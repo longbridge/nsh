@@ -525,7 +525,8 @@ own background, so what its children filled stays, and it is at least one step a
   focused control (a button, a row, a tab) is the accent band, its text in the terminal's background color, bold
   when it is also selected, so focus is the accent and on or chosen a gray step wherever they meet; a focused
   container three or more rows tall shows its line in the focus color (without a line, a hover band and an accent
-`▎` rail down its leading column); a focused
+`▎` rail down its leading column), unless it holds a selected item (a sidebar's list), whose band and the pane's
+  line show where the keys act; a focused
   text field shows its line in the focus color and the caret; one whose box has no room for its line (one row tall)
   is a hover band with an accent underline along its row instead, a step alone being too faint to find; a framed box of any
   size (a one-time code's cell) shows focus with its line alone; a focused control whose Cells are all its
