@@ -361,7 +361,10 @@ Things that were found the hard way. Read the section of the area you change bef
 - **A text view ignores CSS `line-height`**: only labels apply it. An `Input`'s lines get their height from the view's
   `pixels-above-lines`, `pixels-below-lines` and `pixels-inside-wrap` (`text_input.rs`'s `set_line_box`), which also keep
   the caret at the font's height. These are added to a line's own height, so a line in a taller fallback font (CJK) comes
-  out taller than `lineHeight` by the difference.
+  out taller than `lineHeight` by the difference. In a label a fallback font moves the line's baseline down instead, so
+  a multiline placeholder is placed by its baseline (`placeholder_lift`).
+- **A text view draws its caret with its own node's `caret-color`**, not its `text` child's: a rule that hides the caret
+  has to name `textview` as well (`nsh-composing`).
 
 - **A widget's accessible role is effectively fixed** once its AT context is realized: GTK refuses to change it (with a
   critical), and nothing tells whether it is. Roles are decided when the view is created, from the batch that creates

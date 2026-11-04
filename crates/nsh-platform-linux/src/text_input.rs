@@ -1103,11 +1103,12 @@ fn place(view: &NshView, input: &InputState) {
             }
             let width = content.size.width.0.max(0.0) as i32;
             let height = label.measure(gtk::Orientation::Vertical, width).0 as f32;
+            let lift = placeholder_lift(text, label, &input.config.borrow(), width);
             view.set_native(
                 label,
                 Bounds {
+                    origin: Point::new(content.origin.x, content.origin.y + Points(lift as f32)),
                     size: Size::new(content.size.width, content.size.height.max(Points(height))),
-                    ..content
                 },
             );
             // A field that shows nothing (an editor's own text sink) may be
@@ -1155,6 +1156,37 @@ fn set_line_box(view: &gtk::TextView, style: &ResolvedTextStyle) {
     view.set_pixels_above_lines(above);
     view.set_pixels_below_lines(below);
     view.set_pixels_inside_wrap(above + below);
+}
+
+/// How far to move a multiline placeholder for its first line to stand on
+/// the first typed line's baseline. A label's line with a fallback font
+/// (CJK in a Latin font) sits lower than the font's own: each run is
+/// centered in the line height around its own font, and the line starts at
+/// the highest of them. Measured from the config, as the label only takes
+/// the style sheet's font and line height on its next frame.
+fn placeholder_lift(
+    text: &gtk::TextView,
+    label: &gtk::Label,
+    config: &InputConfig,
+    width: i32,
+) -> i32 {
+    let font = crate::text::main_font_description(&config.style);
+    let baseline = |layout: gtk::pango::Layout| {
+        layout.set_font_description(Some(&font));
+        layout.baseline() as f32 / gtk::pango::SCALE as f32
+    };
+    let typed = baseline(text.create_pango_layout(Some("Ag")));
+    let layout = label.create_pango_layout(Some(&config.placeholder));
+    layout.set_width(width.saturating_mul(gtk::pango::SCALE));
+    layout.set_wrap(gtk::pango::WrapMode::WordChar);
+    if config.style.line_height.0 > 0.0 {
+        let attrs = gtk::pango::AttrList::new();
+        attrs.insert(gtk::pango::AttrInt::new_line_height_absolute(
+            (config.style.line_height.0 * gtk::pango::SCALE as f32) as i32,
+        ));
+        layout.set_attributes(Some(&attrs));
+    }
+    (typed + text.pixels_above_lines() as f32 - baseline(layout)).round() as i32
 }
 
 /// The whole pixels above and below a line of a font `font` high to make it
@@ -1238,7 +1270,8 @@ fn css(config: &InputConfig) -> String {
          margin: 0; min-height: 0; min-width: 0; color: {color}; caret-color: {caret}; \
          -gtk-secondary-caret-color: {caret}; {font} }}\n\
          label.nsh-placeholder {{ color: {placeholder}; opacity: 1; }}\n\
-         text.nsh-composing, textview.nsh-composing > text {{ caret-color: transparent; \
+         text.nsh-composing, textview.nsh-composing, textview.nsh-composing > text {{ \
+         caret-color: transparent; \
          -gtk-secondary-caret-color: transparent; }}\n"
     );
     // Always set: GTK themes draw the selection with the background this
@@ -1503,6 +1536,66 @@ mod tests {
             assert_eq!(second.y() - first.y(), 24);
             assert!(first.height() < 24, "caret {}", first.height());
             assert_eq!(first.y(), (24 - first.height()) / 2);
+        });
+    }
+
+    /// Whether `view` draws something red: the caret of the test below.
+    fn draws_red(window: &gtk::Window, view: &gtk::TextView) -> bool {
+        let paintable = gtk::WidgetPaintable::new(Some(view));
+        let snapshot = gtk::Snapshot::new();
+        let (w, h) = (view.width() as f32, view.height() as f32);
+        paintable.snapshot(&snapshot, f64::from(w), f64::from(h));
+        let bounds = gtk::graphene::Rect::new(0.0, 0.0, w, h);
+        let Some(node) = snapshot.to_node() else {
+            return false;
+        };
+        let texture = window
+            .renderer()
+            .expect("a shown window has a renderer")
+            .render_texture(&node, Some(&bounds));
+        let mut downloader = gtk::gdk::TextureDownloader::new(&texture);
+        downloader.set_format(gtk::gdk::MemoryFormat::R8g8b8a8Premultiplied);
+        let (bytes, _) = downloader.download_bytes();
+        bytes
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .any(|p| p[0] > 160 && p[1] < 80 && p[2] < 80 && p[3] > 160)
+    }
+
+    /// GTK draws an area's caret at the start of the preedit text.
+    #[test]
+    fn a_composing_area_hides_its_caret() {
+        crate::gtk_test::run(|| {
+            let view = gtk::TextView::new();
+            view.buffer().set_text("one");
+            let config = InputConfig {
+                caret_color: Some(nsh_core::Color(0xff0000ff)),
+                ..Default::default()
+            };
+            let provider = gtk::CssProvider::new();
+            provider.load_from_string(&css(&config));
+            add_provider(&view, &provider);
+            let window = gtk::Window::new();
+            window.set_child(Some(&view));
+            window.present();
+            crate::gtk_test::wait_until(|| view.height() > 0);
+            view.grab_focus();
+            view.set_cursor_visible(true);
+            let shown = crate::gtk_test::wait_until(|| draws_red(&window, &view));
+            view.add_css_class("nsh-composing");
+            // The caret blinks: it has to stay away for longer than a blink.
+            let settled = std::time::Instant::now() + std::time::Duration::from_millis(200);
+            crate::gtk_test::wait_until(|| std::time::Instant::now() >= settled);
+            let until = std::time::Instant::now() + std::time::Duration::from_millis(2500);
+            let mut hidden = true;
+            crate::gtk_test::wait_until(|| {
+                hidden &= !draws_red(&window, &view);
+                std::time::Instant::now() >= until
+            });
+            window.destroy();
+            assert!(shown, "the caret shows before composing");
+            assert!(hidden, "the caret hides while composing");
         });
     }
 
