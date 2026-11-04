@@ -90,6 +90,11 @@ pub fn toggle_full_screen() {
 /// growing down. Sizing works on macOS, Windows and Linux; positioning on
 /// macOS and Windows. Widths and heights take positive finite numbers, `x`
 /// and `y` finite ones: other values keep the field's value.
+///
+/// A GPUI window sizes its content (each side at least 1 point), ignores
+/// the origin and `animated`, and keeps its size while maximized or full
+/// screen; on a tiling compositor the compositor decides a tiled window's
+/// size.
 pub fn set_frame(frame: WindowFrame) {
     super::desktop_command(DesktopCommand::SetFrame(WindowFrame {
         x: frame.x.filter(|v| v.is_finite()),

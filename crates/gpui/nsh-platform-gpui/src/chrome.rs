@@ -170,6 +170,8 @@ struct AskedSize {
 /// one left out keeps the window's, or the size asked last while the platform
 /// has not applied it. Once the window has changed (to that size, a size the
 /// platform allowed, or one the user dragged it to) its own size counts.
+/// Each side is at least 1 point: Wayland's viewport rejects a size under 1
+/// as a fatal protocol error.
 fn frame_size(
     current: Size<Pixels>,
     asked: Option<AskedSize>,
@@ -179,9 +181,10 @@ fn frame_size(
     let kept = asked
         .filter(|asked| asked.from == current)
         .map_or(current, |asked| asked.size);
+    let side = |side: f32| gpui::px(side.max(1.0));
     gpui::size(
-        width.map_or(kept.width, gpui::px),
-        height.map_or(kept.height, gpui::px),
+        width.map_or(kept.width, side),
+        height.map_or(kept.height, side),
     )
 }
 
@@ -708,6 +711,10 @@ fn apply_ops(surface: &Surface, window: &mut Window, cx: &mut App) {
                 }
             }
             Op::ToggleFullScreen => window.toggle_fullscreen(),
+            // A maximized or full-screen window keeps the size the platform
+            // gave it. (A tiling compositor's tiles cannot be told apart with
+            // server-side decorations: there the compositor decides.)
+            Op::Resize(..) if window.is_maximized() || window.is_fullscreen() => {}
             Op::Resize(width, height) => {
                 let chrome = &surface.chrome;
                 let from = window.bounds().size;
@@ -1535,6 +1542,18 @@ mod tests {
             frame_size(size(700.0, 500.0), asked, None, Some(400.0)),
             size(700.0, 400.0)
         );
+    }
+
+    #[test]
+    fn set_frame_sizes_each_side_at_least_one_point() {
+        let size = |width: f32, height: f32| gpui::size(gpui::px(width), gpui::px(height));
+        let current = size(800.0, 600.0);
+        assert_eq!(
+            frame_size(current, None, Some(0.4), Some(0.4)),
+            size(1.0, 1.0)
+        );
+        assert_eq!(frame_size(current, None, None, Some(0.0)), size(800.0, 1.0));
+        assert_eq!(frame_size(current, None, Some(1.5), None), size(1.5, 600.0));
     }
 
     #[gpui::test]
