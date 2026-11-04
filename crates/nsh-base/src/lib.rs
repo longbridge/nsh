@@ -60,6 +60,14 @@ mod syntax;
 mod table;
 mod tabs;
 pub mod text_view;
+
+/// The KaTeX fonts `TextView` draws formulas with, in one file,
+/// zstd-compressed (about 230 kB of 500 kB; license in
+/// `fonts/katex.LICENSE.txt`). The native runtimes embed them; `nsh` publishes
+/// them next to a web runtime, which fetches them for its first formula.
+#[cfg(not(target_arch = "wasm32"))]
+#[doc(hidden)]
+pub const MATH_FONTS: &[u8] = include_bytes!("../fonts/katex.pack.zst");
 mod theme;
 mod time_field;
 mod toast;

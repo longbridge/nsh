@@ -168,8 +168,9 @@ works from any directory of any host (`https://example.com/apps/counter/`).
 
 Packaging links each app its own `nsh.<digest>.wasm`, holding the engine and the `nsh/base` components, standard
 modules and shaders the app's first screen imports. What the app's other screens import is downloaded in the
-background once the first screen shows. Measured with `nsh package --target web` (MB = 10^6
-bytes):
+background once the first screen shows. An app whose crates call [browser APIs from Rust](#browser-apis-from-rust)
+gets the whole runtime, its crates included, in its `nsh.<digest>.wasm`. Measured with `nsh package --target web`
+(MB = 10^6 bytes):
 
 | App | Uses | `nsh.<digest>.wasm` | gzip | Brotli |
 |---|---|---|---|---|

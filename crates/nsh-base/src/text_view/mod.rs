@@ -8,6 +8,9 @@ mod extension;
 mod highlight;
 mod html;
 mod markdown;
+mod formula;
+#[cfg(feature = "math")]
+mod math;
 mod parts;
 mod view;
 
@@ -27,3 +30,9 @@ pub use self::{
         text_view,
     },
 };
+
+/// Makes formulas typeset in a web runtime: the gate of its side module
+/// (`nsh_feature_math`), which holds what this reaches and nothing else does.
+#[cfg(all(feature = "math", target_arch = "wasm32"))]
+#[doc(hidden)]
+pub use self::formula::install as install_math;

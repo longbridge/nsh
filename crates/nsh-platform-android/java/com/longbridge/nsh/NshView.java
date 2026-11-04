@@ -95,6 +95,10 @@ public class NshView extends FrameLayout {
     private final Object hostLock = new Object();
     private float density;
     private final Box root;
+    /** The screen effect or transition drawing over the surface, if any. */
+    Box screen;
+    /** The page and dialog transitions through a shader running, by stack or dialog id. */
+    final android.util.SparseArray<ShaderFrames> navFrames = new android.util.SparseArray<>();
     private final Mounter mounter;
     private final TouchTracker touches;
 
@@ -585,21 +589,54 @@ public class NshView extends FrameLayout {
         // Joining the engine needs no Java lock.
         if (taken != 0) Native.destroy(taken);
         mounter.destroyComponents();
+        endShaders();
     }
 
     /**
      * Called by the native side when the running app stopped because another
      * one replaced it ({@code Host::load}). Batches the old app sent before
-     * are already queued, so its components go after them and before the
-     * new app's first batch.
+     * are already queued, so its components and shaders go after them and
+     * before the new app's first batch.
      */
     void appStopped() {
-        main.post(mounter::destroyComponents);
+        main.post(() -> {
+            mounter.destroyComponents();
+            endShaders();
+        });
+    }
+
+    /**
+     * The app stopped: libnsh forgot its shaders, so the frames they left go
+     * too (its page and dialog transitions, its screen shader's, its
+     * effects'), and none stays frozen over the next app.
+     */
+    private void endShaders() {
+        for (int i = navFrames.size() - 1; i >= 0; i--) {
+            ShaderFrames frames = navFrames.valueAt(i);
+            if (frames instanceof NavTransition) ((NavTransition) frames).cancel();
+        }
+        navFrames.clear();
+        mounter.dropShaders();
+    }
+
+    /**
+     * A view in the surface draws anew (its own invalidation brings the
+     * window frame): a screen shader pictures the surface again before it.
+     * The screen shader's own frames invalidate this view, not a descendant.
+     */
+    @Override
+    public void onDescendantInvalidated(View child, View target) {
+        super.onDescendantInvalidated(child, target);
+        if (screen != null) screen.surfaceChanged();
     }
 
     @Override
     protected void onSizeChanged(int w, int h, int oldw, int oldh) {
         super.onSizeChanged(w, h, oldw, oldh);
+        if (screen != null) {
+            screen.shaderSize();
+            screen.picturesChanged();
+        }
         // The environment follows in onLayout.
         if (handle != 0 && w > 0 && h > 0) Native.resize(handle, w / density, h / density);
     }
@@ -935,14 +972,37 @@ public class NshView extends FrameLayout {
         if (handle != 0) Native.frame(handle);
     };
 
+    /** Where a shader's frames show. */
+    interface ShaderFrames {
+        /**
+         * A new frame: {@code pixels} (null for an empty frame) are only valid
+         * during the call; whether it {@code replaces} what it covers, how far
+         * it reaches beyond the box ({@code overflow}, points).
+         */
+        void shaderFrame(java.nio.ByteBuffer pixels, int width, int height, boolean replaces, float overflow);
+    }
+
     /**
      * A shader view's new frame, called by libnsh on the UI thread during
-     * {@link Native#tick}: {@code pixels} (null for an empty frame) are only
-     * valid during the call.
+     * {@link Native#tick}.
      */
-    void shaderFrame(int id, java.nio.ByteBuffer pixels, int width, int height) {
-        View v = mounter.view(id);
-        if (v instanceof Box) ((Box) v).shaderFrame(pixels, width, height);
+    void shaderFrame(int id, java.nio.ByteBuffer pixels, int width, int height, boolean replaces, float overflow) {
+        ShaderFrames nav = navFrames.get(id);
+        View v = nav == null ? mounter.view(id) : null;
+        if (nav == null && v instanceof ShaderFrames) nav = (ShaderFrames) v;
+        if (nav != null) nav.shaderFrame(pixels, width, height, replaces, overflow);
+    }
+
+    /** A screen shader's frame where it replaces the surface. */
+    @Override
+    protected void dispatchDraw(android.graphics.Canvas canvas) {
+        if (screen != null && screen.drawScreen(canvas)) return;
+        super.dispatchDraw(canvas);
+    }
+
+    /** The surface as it is (a screen shader's picture). */
+    void drawSurface(android.graphics.Canvas canvas) {
+        super.dispatchDraw(canvas);
     }
 
     /** JS waits for a display frame (`requestAnimationFrame`). */

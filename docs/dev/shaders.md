@@ -130,6 +130,55 @@ is. Views out of sight stop rendering until they show again.
 | GPUI | a frame client of its surface | a GPUI image (BGRA, straight, the view's opacity multiplied in, as canvases' pixmaps), whose replaced image leaves GPUI's atlases | views not drawn in the last frame |
 | Web | `requestAnimationFrame` | a `<canvas>` under the children (an effect's and a running transition's over them) | `IntersectionObserver` |
 
+### Effects and transitions
+
+Effects (`ShaderEffect`, `ScreenEffect`), transitions (`ShaderTransition`, `ScreenTransition`) and pages' and
+dialogs' `transitionShader` read pictures the platform takes of views (`ShaderView::set_input`). The table says how
+each platform that draws them does it; the others ignore `MountItem::ShaderTransition`, `ShaderInput` and `NavShader`
+(the children show as they are, pages and dialogs come with their `animation`).
+
+| Platform | Pictures | Hides the children, keeps their input | Over them | Pages and dialogs |
+|---|---|---|---|---|
+| macOS (AppKit) | `renderInContext:` of the children's container (`NshView::ensure_container`) without its mask, at the window's backing scale (a screen's: all the root shows but the frames over it); the backdrop: the root with the view's layer hidden | an empty `mask` on the container's layer (AppKit hit-tests views), which the decoration's clipping leaves in place until they show again (`decor::hide_children`); the root's while any screen shader hides it | the frames' sublayer at `zPosition` 1e6, `overflow` points beyond the box; a screen's on the root, which it leaves when its view is deleted or the app stops | the motion drawn through a layer over the stack (the root for a dialog) from pictures of it without and with the upper side (a page or dialog that left: its last image), taken on the first display frame, the live side again on the next three and after a view under it changed; the views at rest under it until it ends (`navigation::Motion::Shader`); popping and dismissing run backwards |
+| iOS | `renderInContext:` of a view holding the children (`Decor::set_effect`, the view children are added to) without its mask, at the screen's scale; the backdrop: the window with the view's layer at opacity 0 | an empty `mask` on that view's layer (UIKit hit-tests views); the root view's while any screen shader hides it | the frames' sublayer at `zPosition` 1e6, `overflow` points beyond the box; a screen's on the root view (dialogs, presented by UIKit above it, are outside) | the screens change and the dialog is presented or dismissed at once, under a layer over the window's part where the surface (the stack) is, from pictures before the change (taken when the app removes the page or the dialog, before its views go: `Shaders::hold`) and after it (the first tick, the window laid out first), every other overlay left out of both; it stays until the frames on their way when the run ends have shown; a change of the same stack (of the surface, for a dialog) that starts while one runs ends that one first; popping and dismissing run backwards |
+
+macOS retakes an effect's pictures on the display frame after the core says they changed (`MountItem::ShaderInput`) or
+the platform changed a view in them (`NshView::changed`, `moved`, `redraw_rect`, a scroll view's offset), at most once
+per frame, and only those its program reads (`ShaderState::reads_children`: a screen effect that never calls
+`sample_content` does not picture the surface again when a view in it moves); a transition pictures its children (or its
+running frame) as its `from` when it starts and takes `to` again as its children change. Each picture draws into a
+bitmap context it keeps (`Canvas`), made again only when its size changes. A page's or a dialog's overlay (`NavOverlay`)
+pictures both sides on its first display frame; its live side (the upper one coming, the lower going) again on the next
+three, while AppKit lays out and draws what navigation just showed, and after that only when a view under its host
+changed (`Mark`, set by `ui_changed`, which looks only at the surface the changed view is in). Its run is the shader's
+own clock; the motion under it ends `LINGER` (50 ms) later, so the frames still on their way back from the GPU show
+before it goes. A view that comes back into sight takes the pictures that fell due while it was out of it (`shown`).
+What pictures cost on the main thread is in [macos.md](macos.md) "Shader pictures". `renderInContext:` draws no video or
+web page, nor backdrop blur or glass. The pictures of views AppKit has just shown again (navigation hides the screens
+under the top one) wait for the next display frame: until AppKit displays the window their layers are out of the tree,
+where they draw y up.
+
+Where there is no GPU device (`Renderer::new` is `None`) macOS masks no children: an effect or a screen effect
+shows them as they are, a transition starts no run, and a page's or a dialog's `transitionShader` leaves the change
+to its own `animation`.
+
+iOS retakes an effect's pictures on the display frame after the core says they changed (`MountItem::ShaderInput`) or
+the platform changed a view in them (animated values, scrolling, image loads), at most once per frame, and only those
+its program reads (`reads_children`: a screen effect that never calls `sample_content` does not picture the root again
+when a view in it changes); a transition pictures its children (or its running frame) as its `from` when it starts
+and takes `to` again as its children change. Each picture draws into a bitmap context it keeps (`Canvas`), made again
+only when its size changes. `renderInContext:` draws no video or web page, nor backdrop blur or glass. A shader view
+outside any window keeps its pictures due and takes them once a page shows again or the surface moves to a window
+(`Shaders::revisit`). The app usually releases a page or a dialog it removes in the same batch: the mounter keeps the
+page's shader and animation and the picture of what showed from the removal on (`Mounter::remove_hosted`), and a
+dialog released while it shows closes through its shader too. The overlays leave the window when the app stops or
+reloads (`Shaders` drops them), and the root's children leave the view screen shaders draw them from
+(`Decor::set_effect`) when the last screen shader goes.
+
+Where there is no GPU device (`Renderer::new` is `None`) iOS masks no children: an effect or a screen effect shows
+them as they are, a transition starts no run, and a page's or a dialog's `transitionShader` leaves the change to
+its own `animation`, as it does when Reduce Motion is on.
+
 On Android the layer stays in `libnsh`: the encoder sends Java only whether a view shows a shader (opcode `SHADER`,
 35, in `encode.rs` ↔ `Mounter.java`), Java reports the size in pixels (`Native.shaderSize`), and the layer goes to
 the UI-thread renderer with the animation items. On Windows animated uniforms are written while the animation graph
@@ -187,6 +236,29 @@ Effects, transitions and page shaders sit on the same program, layer and rendere
   In Rust, `screen()` / `modal()` take `.transition_shader(TransitionShader::new(shader).uniform(..).duration(..))`
   (`nsh_core::shader::TransitionShader`, a compiled `Shader`), which sets the same prop. Sources compile once in
   `Core::compile`, the cache `Shader`'s `source` uses too ("Pages and dialogs" below says what the platforms do).
+- **Android** (API 29 and later; Android 9 shows the children as they are). `Pictures.java` records the children
+  into a `RenderNode`, renders it with a `HardwareRenderer` into an `ImageReader` and hands the rows to
+  `Native.shaderInput` (rows `stride` apart, the last one without its padding, as the engine takes them). `Box.java`
+  takes the role, overflow and inputs from the `SHADER` opcode: an effect pictures its children only after they drew
+  anew (`onDescendantInvalidated`) or the core marks them (`SHADER_INPUT`), and draws its frame in `dispatchDraw`
+  instead of them (touches and accessibility still reach them); a screen layer pictures the surface only after a view
+  in it drew anew (`NshView.onDescendantInvalidated`) or the core marks it; a backdrop is pictured before every draw
+  (`Backdrop.behind`), and `libnsh` drops one equal to the last; a transition pictures `from` before the batch
+  (`SHADER_TRANSITION`) and shows it until the first frame. Screen layers draw over the app's view (`NshView`);
+  dialogs, their own windows, are outside. Pages and dialogs (`NAV_SHADER`): `StackBox` and `ModalHost` run a
+  `NavTransition.java` overlay over pictures of the two sides taken once; `nsh.progress` runs on the view's
+  transition clock (`start_transition`, backwards on pop and dismiss); the overlay gets only the frames that came back
+  and, once its clock ends, one that replaces nothing, which settles the change, or, when no frame came back by then,
+  starts the page's or the dialog's own animation (until the first frame, what it covers shows as it is). A change
+  that starts while one runs ends it first (`NavTransition.finish`: its `done` runs, `Native.navTransitionEnd` stops
+  its run); with "Remove animations" on (`ValueAnimator.areAnimatorsEnabled`, `Environment::reduce_motion`) none runs,
+  and the page's own animation is at once, as the system's animator scale makes it. An app that stops takes its
+  overlays and screen layer with it (`NshView.endShaders`). A screen layer draws over the surface while its view is in
+  the window: detached, deleted or turned off, it gives the surface back and redraws it, unless another screen layer
+  took its place. A view leaving the window lets its `Pictures` go (a `HardwareRenderer` and an `ImageReader` each)
+  and takes its pictures again once it is back. Without a GPU device `Native.shaderTransition` starts no run (the children show as they are) and
+  `Native.navTransition` declines, so a page moves with its own animation (`StackBox`) and a dialog with its
+  `animation` (`ModalHost`).
 
 ## Pages and dialogs
 
@@ -202,7 +274,9 @@ everywhere:
   says, `"none"` included. `animation` is what runs where the shader does not: without a GPU device, with a source
   that did not compile (the core sends `shader: None`), or where the platform cannot take the pictures or put the
   frames over the change. Such a change takes the page's or the dialog's own motion, at once for `"none"`, never
-  another motion for the shader's duration.
+  another motion for the shader's duration. So does a change none of whose frames came back by the time it was to
+  end (a slow GPU, a program compiled at its first frame): it takes its own motion from there instead of cutting to
+  its end.
 - **Less motion.** When the user asks for less motion (`Environment::reduce_motion`), the shader does not run: the
   change takes the page's or the dialog's own `animation` as reduced motion makes it
   (`nsh_core::navigation::screen_motion` and `modal_motion` with `reduce_motion`: a slide becomes a 200 ms fade,
@@ -292,5 +366,7 @@ dialog's `transitionShader`) take their pictures from the DOM. `shader.rs` also 
 - **Premultiplied alpha.** `shade` returns straight alpha; the core premultiplies and the renderers draw with blending
   off, so frames are premultiplied (GPUI's images are straight: its backend converts). Do not premultiply again on a
   platform.
+- **A first frame is not an end.** A run's first frame comes back one or two display frames after it starts, and
+  `ShaderView::frame()` is empty until then: a page's or a dialog's run ends on its clock, never on an empty frame.
 - **Readback latency.** Native frames arrive one or two display frames after `render`; a backend must keep ticking
   while `ShaderView::pending()` is true, or the last frame of a change never shows.

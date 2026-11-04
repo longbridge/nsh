@@ -77,6 +77,10 @@ server client, log forwarding, the error overlay: `dev.rs`). The host turns on `
   input and hosted items find views by id while a batch is being applied. Worker threads (image decoding, media
   callbacks, the dev client) run code on the main thread with `window::invoke` (a message-only dispatcher window) and
   find their surface by key in a thread-local map; no globals are shared between surfaces.
+- **Resizes wait for the layout** (`Surface::resized`, the one place the main thread waits for the engine, as on
+  macOS): `WM_SIZE` waits for the layout at the new size (`MountSink::resized`), at most 16 ms, and applies it before
+  it draws. An engine that misses the deadline (JS busy, a costly layout) is not waited for again until it reports a
+  resize done; the area the window grew by then shows the window's background until the layout arrives.
 - **Text is typeset on the engine thread** with DirectWrite's shared, free-threaded factory; the final layout is plain
   data (glyph runs recorded through a text renderer of NSH's own), which the main thread only draws and hit-tests
   (`text.rs`).
@@ -214,7 +218,7 @@ frame: changed views queue their old and new painted areas on their surface (`Su
 / `moved`, the mounter's `redrawn`), `render::frame` draws the tree once clipped to the merged damage of this frame
 and the one before (`SwapChain::to_draw`), and `Present1` presents only the changed rectangles.
 `Surface::invalidate` (theme, size, scale, device loss, composition) and changes it cannot bound draw the whole
-window.
+window. Changes wholly outside the window (an animation scrolled out of it) draw and present nothing.
 
 `render.rs`'s `a_partial_frame_draws_what_a_whole_one_does` draws a tree whole, changes it (a move, a color, a
 removal) and checks that drawing the damage over the old pixels gives the bytes a whole frame gives.
