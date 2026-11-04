@@ -169,7 +169,7 @@ fn the_capability_refuses() {
     app.policy.declared = Some(Capabilities::from_json(&serde_json::json!({})).unwrap());
     let mut config = config(app);
     config.environment.notifications = true;
-    let (text, commands) = play(
+    let (_, commands) = play(
         config,
         "ERR_ACCESS_DENIED/notifications ERR_ACCESS_DENIED/notifications ERR_ACCESS_DENIED/notifications",
     );
