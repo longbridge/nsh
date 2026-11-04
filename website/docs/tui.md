@@ -74,7 +74,8 @@ frame is whole Cells, and spacing designed in points for a screen becomes the Ce
 
 Every control is reachable from the keyboard. Tab and Shift+Tab visit pressable and editable views in document order,
 as on the desktops; the arrows move to the nearest control in that direction, scrolling to reach it. A control
-scrolled into view by the keyboard is centered in its scroll view.
+scrolled into view by the keyboard is centered in its scroll view. While a dialog or a sheet is open over its
+backdrop, Tab stays in it, and closing it gives the focus back to the control it came from.
 
 | Keys | Do |
 |---|---|

@@ -2,7 +2,7 @@ use nsh_core::prelude::*;
 use nsh_platform_tui::{App, AppView, Handled, Input, Modifiers, MouseButton, MouseKind, Root};
 use ratatui_core::{backend::TestBackend, terminal::Terminal};
 
-use super::app::{draw_until, mouse, surface};
+use super::app::{draw_until, draw_until_still, mouse, surface};
 
 fn key(view: &mut AppView, name: &str, ctrl: bool) -> Handled {
     view.handle(Input::Key {
@@ -326,4 +326,69 @@ fn system_dialogs_are_answered_with_keys_and_presses() {
     view.handle(mouse(MouseKind::Down(MouseButton::Left), x, y));
     view.handle(mouse(MouseKind::Up(MouseButton::Left), x, y));
     draw_until(&mut view, &mut terminal, &rx, "a cancel b copy c done");
+}
+
+/// A page with an opener, a sheet it opens with a stop inside, and a stop
+/// after; the stops the focus came to, on screen.
+#[component]
+fn SheetFocus() -> impl IntoElement {
+    let open = signal(false);
+    let seen = signal(String::new());
+    let stop = move |name: &'static str| {
+        view()
+            .h(px(16.0))
+            .on_focus(move |_: &()| seen.update(|s| s.push_str(&format!(" {name}"))))
+            .on_press(move |_: &()| {
+                if name == "opener" {
+                    open.set(true);
+                }
+            })
+            .child(text(name))
+    };
+    view()
+        .flex_1()
+        .child(text(move || format!("seen{}.", seen.get())))
+        .child(stop("opener"))
+        .child(stop("after"))
+        .child(
+            nsh_base::sheet()
+                .open(move || Some(open.get()))
+                .side(nsh_core::overlay::Placement::Right)
+                .on_open_change(move |_: &nsh_base::SheetEvent| open.set(false))
+                .popup_style(|s| s.w(px(160.0)))
+                .child(stop("inside")),
+        )
+}
+
+#[test]
+fn escape_in_a_sheet_gives_the_focus_back_to_where_it_came_from() {
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(100, 20)).unwrap();
+    view.load(App::Rust(Root::new::<SheetFocus>(|| ())))
+        .unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "after");
+    key(&mut view, "Tab", false);
+    draw_until(&mut view, &mut terminal, &rx, "seen opener.");
+    key(&mut view, "Enter", false);
+    draw_until(&mut view, &mut terminal, &rx, "inside");
+    // Its backdrop covers the page: Tab goes into the sheet and stays in
+    // it, as in a modal.
+    key(&mut view, "Tab", false);
+    draw_until(&mut view, &mut terminal, &rx, "seen opener inside.");
+    key(&mut view, "Tab", false);
+    draw_until_still(&mut view, &mut terminal, &rx);
+    let screen: String = terminal
+        .backend()
+        .buffer()
+        .content
+        .iter()
+        .map(|c| c.symbol())
+        .collect();
+    assert!(screen.contains("seen opener inside."), "{screen:?}");
+    // The sheet goes with the focus in it: the opener has it again, and
+    // Tab goes on from there.
+    key(&mut view, "Escape", false);
+    draw_until(&mut view, &mut terminal, &rx, "seen opener inside opener.");
+    key(&mut view, "Tab", false);
+    draw_until(&mut view, &mut terminal, &rx, "seen opener inside opener after.");
 }

@@ -57,6 +57,11 @@ pub(crate) struct Keyboard {
     /// the next Tab continues after it, not from the top.
     left: Option<NodeId>,
     modals: Vec<ModalFocus>,
+    /// The layers the focus went into (a root view's children: the page,
+    /// a sheet's panel, any overlay), each with the stop it came from: a
+    /// layer that goes with the focus in it gives it back there, as a
+    /// modal does.
+    layers: Vec<LayerFocus>,
     screens: Vec<NodeId>,
     screen_focus: Vec<(NodeId, Option<NodeId>)>,
     pending_scroll_focus: Option<ScrollFocus>,
@@ -81,6 +86,52 @@ struct ModalFocus {
     parent: NodeId,
     restore: Option<NodeId>,
     initial: bool,
+}
+
+#[derive(Clone, Copy)]
+struct LayerFocus {
+    layer: NodeId,
+    restore: NodeId,
+}
+
+/// The layer `id` is in: the child of its root view (the surface, or the
+/// modal it is in) around it. An overlay's view is one of these, shown in
+/// its root view whatever its place in the app.
+fn layer(tree: &Mounter, id: NodeId) -> Option<NodeId> {
+    let mut id = host(tree, id);
+    loop {
+        let parent = tree.get(id)?.parent?;
+        if parent == ROOT_ID || tree.get(parent)?.kind == ViewKind::Modal {
+            return Some(id);
+        }
+        id = parent;
+    }
+}
+
+/// The tree order of the topmost layer of `scope`'s root view that covers
+/// the page under it and takes presses (a sheet's or a dialog's backdrop),
+/// if any: the stops of the layers below it are out of reach.
+fn covering_layer(tree: &Mounter, geometry: &[Geometry], scope: NodeId) -> Option<usize> {
+    let root = tree.get(scope)?;
+    let bounds = |id: NodeId| {
+        geometry
+            .iter()
+            .find(|g| g.id == id && !g.visible.is_empty())
+            .map(|g| g.bounds)
+    };
+    let page = root.children.first().and_then(|&id| bounds(id))?;
+    root.children.iter().skip(1).rev().find_map(|&id| {
+        let view = tree.get(id)?;
+        let covers = bounds(id)?;
+        (has_press(view.events)
+            && view.props.pointer_events != nsh_core::PointerEvents::None
+            && !view.style.hidden
+            && covers.left <= page.left
+            && covers.top <= page.top
+            && covers.right >= page.right
+            && covers.bottom >= page.bottom)
+            .then_some(view.tree_order)
+    })
 }
 
 #[derive(Clone, Copy)]
@@ -208,6 +259,17 @@ impl Keyboard {
             })
             .collect();
         candidates.sort_by_key(|g| order(tree, g.id));
+        // A backdrop over the page (a sheet's, a dialog's) takes what is
+        // under it out of reach: Tab stays in the layers above it, as in
+        // a modal, and enters them first.
+        if let Some(cover) = covering_layer(tree, geometry, scope) {
+            let above = |id: NodeId| {
+                layer(tree, id)
+                    .and_then(|l| tree.get(l))
+                    .is_some_and(|l| l.tree_order > cover)
+            };
+            candidates.retain(|g| above(g.id));
+        }
         candidates
     }
 
@@ -218,6 +280,7 @@ impl Keyboard {
         control: &EngineControl,
     ) {
         let old = self.focused;
+        let left = self.left;
         let old_span = tree.focused_span.filter(|&span| Some(span) == old);
         self.focused = id;
         self.search_point = None;
@@ -242,6 +305,18 @@ impl Keyboard {
             }
         }
         tree.focused_span = id.filter(|id| tree.spans.contains_key(id));
+        // Into a layer from none (the stop a backdrop just covered, or
+        // the field Escape left): it gives the focus back to that stop.
+        if let (Some(old), Some(new)) = (old.or(left), id)
+            && let (Some(from), Some(into)) = (layer(tree, old), layer(tree, new))
+            && from != into
+        {
+            self.layers.retain(|entry| entry.layer != into);
+            self.layers.push(LayerFocus {
+                layer: into,
+                restore: old,
+            });
+        }
         if let Some(focused) = id {
             let mut parent = Some(host(tree, focused));
             while let Some(id) = parent {
@@ -424,12 +499,19 @@ impl Keyboard {
                 }
             }
         }
-        if self
-            .focused
-            .is_some_and(|id| !self.candidates(tree, geometry).iter().any(|g| g.id == id))
+        if let Some(focused) = self.focused
+            && !self.candidates(tree, geometry).iter().any(|g| g.id == focused)
         {
-            self.focus(None, tree, control);
+            // Gone with its layer (a sheet closed, an overlay let go): the
+            // focus goes back to where it came into that layer from, or
+            // from the layer that one was in, as a modal gives it back.
+            let restored = (!contains(tree, ROOT_ID, focused))
+                .then(|| self.layer_restore(tree, geometry))
+                .flatten();
+            self.focus(restored, tree, control);
         }
+        self.layers
+            .retain(|entry| contains(tree, ROOT_ID, entry.layer));
         if self.focused.is_none()
             && self.modals.last().is_some_and(|modal| modal.initial)
             && let Some(id) = self.candidates(tree, geometry).first().map(|g| g.id)
@@ -488,6 +570,18 @@ impl Keyboard {
             .retain(|(screen, _)| tree.get(*screen).is_some());
         self.sync_states(tree, control);
         old_focus != self.focused || !tree.scrolled.is_empty()
+    }
+
+    /// The stop the latest layer gone from the tree took the focus from,
+    /// walking back while that stop went too.
+    fn layer_restore(&self, tree: &Mounter, geometry: &[Geometry]) -> Option<NodeId> {
+        let candidates = self.candidates(tree, geometry);
+        self.layers
+            .iter()
+            .rev()
+            .filter(|entry| !contains(tree, ROOT_ID, entry.layer))
+            .map(|entry| entry.restore)
+            .find(|&id| candidates.iter().any(|g| g.id == id && !g.visible.is_empty()))
     }
 
     fn queue_scroll_focus(
