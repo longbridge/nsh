@@ -137,7 +137,8 @@ The terminal reports the mouse at Cell precision, and NSH turns each Cell into t
   - the handle lines of a `ResizablePanelGroup` or `DockArea` resize their panes, and a `DockArea` tab dragged over a
     group outlines where it lands;
   - text in selectable views and fields is selected; Shift+click extends the selection, and Ctrl+C, Ctrl+Shift+C or
-    Cmd+C copies it;
+    Cmd+C copies it; a selection held past the edge of its scroll view (or on the terminal's own edge row) scrolls it
+    row by row, faster the farther past the pointer is;
   - content that nothing else claims scrolls with the drag, and the app's gestures (`panActivation`, the responder
     system) get every move; a drag keeps its target while the pointer is outside the app.
 

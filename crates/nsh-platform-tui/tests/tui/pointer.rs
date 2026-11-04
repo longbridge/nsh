@@ -697,3 +697,83 @@ fn a_hover_fill_of_the_apps_own_takes_one_step_not_the_select_band() {
     assert_eq!(buffer[(x, y)].bg, level(0.11), "the hovered tab");
     assert_eq!(buffer[find(buffer, "Two")].bg, level(0.07), "the other tab");
 }
+
+#[test]
+fn a_selection_dragged_past_its_scroll_views_edge_scrolls_it_and_extends() {
+    use std::{
+        sync::Arc,
+        time::{Duration, Instant},
+    };
+
+    use nsh_core::clipboard::{ClipboardBackend, MemoryClipboard};
+    use nsh_platform_tui::{AppOptions, AppView, Input, Modifiers, MouseButton::Left};
+    let clipboard = Arc::new(MemoryClipboard::default());
+    let (tx, rx) = crossbeam_channel::unbounded();
+    let mut options = AppOptions::default();
+    options.clipboard = Some(clipboard.clone());
+    options.cache = nsh_platform_tui::CacheOptions::off();
+    options.wake = Some(Arc::new(move || {
+        let _ = tx.send(());
+    }));
+    let mut view = AppView::new(options);
+    let code = nsh_bundler::compile_module(
+        "App.tsx",
+        r#"
+        import { mount, signal, Scroll, View, Text } from "nsh";
+        const offset = signal(0);
+        mount(() => <View>
+            <Scroll style={{ width: 160, height: 48 }} onScroll={e => offset.set(e.offset.y)}>
+                <View selectable>
+                    <Text>one</Text><Text>two</Text><Text>three</Text>
+                    <Text>four</Text><Text>five</Text><Text>six</Text>
+                </View>
+            </Scroll>
+            <Text>offset:{offset()}</Text>
+        </View>);
+    "#,
+        &[],
+    )
+    .unwrap();
+    let mut terminal = Terminal::new(TestBackend::new(40, 8)).unwrap();
+    view.load(Bundle::source(code)).unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "offset:0");
+    // Held below the Scroll's last row, the pointer sends nothing more: the
+    // surface scrolls on its own, row by row, until the end.
+    view.handle(mouse(MouseKind::Down(Left), 1, 0));
+    view.handle(mouse(MouseKind::Move, 5, 3));
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        terminal
+            .draw(|frame| view.render(frame, frame.area()))
+            .unwrap();
+        let contents: String = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|c| c.symbol())
+            .collect();
+        if contents.contains("offset:48") {
+            break;
+        }
+        assert!(Instant::now() < deadline, "no autoscroll: {contents}");
+        let due = view
+            .next_frame_deadline()
+            .expect("a held selection drag past the edge keeps scrolling");
+        let _ = rx.recv_deadline(due.max(Instant::now()));
+    }
+    assert_eq!(terminal.backend().buffer()[(0, 2)].symbol(), "s");
+    view.handle(mouse(MouseKind::Up(Left), 5, 3));
+    view.handle(Input::Key {
+        key: "c".into(),
+        modifiers: Modifiers {
+            ctrl: true,
+            ..Default::default()
+        },
+        release: false,
+    });
+    assert_eq!(
+        clipboard.text().as_deref(),
+        Some("ne\ntwo\nthree\nfour\nfive\nsix")
+    );
+}

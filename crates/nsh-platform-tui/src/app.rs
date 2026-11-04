@@ -535,6 +535,9 @@ impl AppView {
     /// Earliest requested render, or no deadline while idle. Pending commits are due now.
     pub fn next_frame_deadline(&self) -> Option<Instant> {
         let mut deadline = self.surface.deadline();
+        if let Some(due) = self.selection.deadline() {
+            deadline = Some(deadline.map_or(due, |other| other.min(due)));
+        }
         if let Some(refresh) = self.perf.as_ref().and_then(|p| p.refresh) {
             deadline = Some(deadline.map_or(refresh, |due| due.min(refresh)));
         }
@@ -1240,6 +1243,12 @@ impl AppView {
                 }
             }
         }
+        self.selection.autoscroll(
+            &mut self.tree,
+            self.area,
+            self.options.cells,
+            &self.geometry,
+        );
         if let Some(engine) = &self.surface.engine {
             let control = engine.control();
             for &id in &self.tree.scrolled {

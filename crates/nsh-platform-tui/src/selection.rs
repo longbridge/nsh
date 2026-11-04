@@ -1,5 +1,7 @@
 //! A surface's selection uses the core range model and the exact glyphs painted on Cells.
 
+use std::time::{Duration, Instant};
+
 use nsh_core::{
     Bounds, NodeId, Point, Points,
     selection::{SelectionModel, SelectionTexts},
@@ -37,7 +39,18 @@ pub(crate) struct Selection {
     dragging: bool,
     taking: bool,
     start: Point<Points>,
+    /// Where a drag last was, in points and in the terminal's Cells.
+    point: Point<Points>,
+    cell: Position,
+    /// When a drag held past its scroll view's edge scrolls it again.
+    next: Option<Instant>,
+    /// The scroll moved under the drag: extend it at `point` once laid out again.
+    follow: bool,
 }
+
+/// How often a drag held past a scroll view's edge scrolls it, by as many
+/// Cells as the pointer is past the edge.
+const AUTOSCROLL_INTERVAL: Duration = Duration::from_millis(50);
 
 struct Texts<'a> {
     tree: &'a Mounter,
@@ -163,6 +176,8 @@ impl Selection {
                 MouseKind::Move | MouseKind::Up(MouseButton::Left)
             )
         {
+            self.point = point;
+            self.cell = position;
             let delta = point - self.start;
             if !self.taking && delta.x.abs().max(delta.y.abs()) > nsh_core::input::PRESS_SLOP {
                 self.taking = true;
@@ -235,8 +250,97 @@ impl Selection {
             .press(&texts, point, clicks.max(1), mouse.modifiers.shift);
         self.dragging = true;
         self.start = point;
+        self.point = point;
+        self.cell = position;
         self.taking = hit.is_none_or(|hit| hit.target.is_none());
         self.taking
+    }
+
+    /// When a drag held past its scroll view's edge scrolls it next.
+    pub(crate) fn deadline(&self) -> Option<Instant> {
+        self.next
+    }
+
+    /// Scrolls the nearest scroll view around the selection that a held drag
+    /// is past the edge of, by whole Cells: the terminal reports no motion
+    /// while the pointer rests, so the surface keeps scrolling on its own
+    /// until the drag ends, comes back inside or the view can go no further.
+    /// At the surface's own edge, where the pointer can go no further, the
+    /// edge row or column counts as past it. `geometry` is the last frame's.
+    pub(crate) fn autoscroll(
+        &mut self,
+        tree: &mut Mounter,
+        area: Rect,
+        cells: CellSize,
+        geometry: &[Geometry],
+    ) {
+        let Some(root) = self.root.filter(|_| self.dragging && self.taking) else {
+            self.next = None;
+            return;
+        };
+        let now = Instant::now();
+        if self.next.is_some_and(|due| due > now) {
+            return;
+        }
+        self.next = None;
+        let past = |cell: u16, start: u16, end: u16, first: u16, last: u16| -> i32 {
+            let (cell, start, end) = (i32::from(cell), i32::from(start), i32::from(end));
+            if cell < start {
+                cell - start
+            } else if cell >= end {
+                cell - end + 1
+            } else if cell == start && start == i32::from(first) {
+                -1
+            } else if cell == end - 1 && end == i32::from(last) {
+                1
+            } else {
+                0
+            }
+        };
+        let mut id = Some(root);
+        while let Some(node) = id {
+            let Some(view) = tree.get(node) else {
+                break;
+            };
+            id = view.parent;
+            let Some(scroll) = &view.scroll else {
+                continue;
+            };
+            let Some(visible) = geometry.iter().find(|g| g.id == node).map(|g| g.visible) else {
+                continue;
+            };
+            if visible.is_empty() {
+                continue;
+            }
+            let (steps, cell, to) = if scroll.horizontal {
+                let steps = past(
+                    self.cell.x,
+                    visible.x,
+                    visible.right(),
+                    area.x,
+                    area.right(),
+                );
+                (steps, cells.width(), scroll.x)
+            } else {
+                let steps = past(
+                    self.cell.y,
+                    visible.y,
+                    visible.bottom(),
+                    area.y,
+                    area.bottom(),
+                );
+                (steps, cells.height(), scroll.y)
+            };
+            if steps == 0 {
+                continue;
+            }
+            let to = to + cell * steps as f32;
+            if crate::keyboard::move_scroll(tree, node, to) != Points::ZERO {
+                self.follow = true;
+                self.next = Some(now + AUTOSCROLL_INTERVAL);
+                return;
+            }
+        }
     }
 
     pub(crate) fn key(
@@ -296,6 +400,9 @@ impl Selection {
         }
         let texts = Texts::new(tree, geometry, root);
         self.model.texts_changed(&texts);
+        if std::mem::take(&mut self.follow) {
+            self.model.drag(&texts, self.point);
+        }
         for (i, range) in self.model.ranges(&texts) {
             let origin = texts.frame(i).origin;
             let geometry = texts.geometry[i];
