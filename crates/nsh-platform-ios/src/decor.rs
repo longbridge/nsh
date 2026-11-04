@@ -696,8 +696,13 @@ impl Decor {
                 let content = UIView::new(mtm);
                 let children = view.subviews();
                 view.addSubview(&content);
+                // The backdrop blur is the view's own, below its background:
+                // in the content view it would cover the background.
+                let backdrop = self.visual.backdrop_view();
                 for child in children.iter() {
-                    content.addSubview(&child);
+                    if !backdrop.is_some_and(|b| std::ptr::eq(b, &*child)) {
+                        content.addSubview(&child);
+                    }
                 }
                 self.content = Some(content);
             }
