@@ -81,8 +81,8 @@ pub use crate::{
     image::ImageData,
     mount::{
         AudioSession, ImageOptions, InputConfig, ModalConfig, MountBatch, MountItem,
-        NO_NATIVE_HEADER, NativeProps, ScreenConfig, ScrollBehavior, StickyCell, VideoProps,
-        ViewKind, WebProps,
+        NO_NATIVE_HEADER, NativeProps, NavShader, ScreenConfig, ScrollBehavior, StickyCell,
+        VideoProps, ViewKind, WebProps,
     },
     ops::{
         AutoCapitalize, AutoFill, CellSlot, Command, ContextMenuEvent, Dialog, DialogButton,

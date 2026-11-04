@@ -87,6 +87,7 @@
         host: app.host ? { call: (name, args) => host.call(name, args) } : undefined,
         assets: app.assets,
         data: app.data,
+        sides: app.sides,
         readAsset: (uri) => fonts.get(path(uri)) ?? null,
         // The chunk's fonts and the side modules of the runtime it needs.
         prepareChunk: (id) => Promise.all([

@@ -128,7 +128,7 @@ pub(crate) fn package(
     let mut published = BTreeSet::new();
     // An app with Rust components of its own has a runtime built for it,
     // linkable as nsh's own, with a gate per UI set (`nsh_ui_set_*`).
-    let linked = {
+    let (linked, has_math) = {
         let plan = GatePlan::of(built);
         let exports = prune::exports(&linkable)?;
         let keep: Vec<&str> = exports
@@ -148,12 +148,18 @@ pub(crate) fn package(
             let mut entry = serde_json::json!({ "url": url, "needs": side.needs });
             if let Some(gate) = &side.gate {
                 entry["gate"] = gate.as_str().into();
+                if gate == MATH_GATE {
+                    entry["onDemand"] = true.into();
+                }
                 published.insert(gate.clone());
             }
             sides.insert(side.name.clone(), entry);
         }
         chunk_sides = plan.chunk_sides(&published);
-        split.main
+        // A runtime published whole has the typesetter in its main module.
+        let has_math = published.contains(MATH_GATE)
+            || (split.sides.is_empty() && exports.iter().any(|e| e == MATH_GATE));
+        (split.main, has_math)
     };
     let wasm = site.add("nsh.wasm", &linked)?;
     // What the runtime fetches when it first needs it: the syntaxes it
@@ -164,6 +170,12 @@ pub(crate) fn package(
         data.insert(
             "syntaxes".into(),
             site.add(runtime::SYNTAXES, &bytes)?.into(),
+        );
+    }
+    if has_math {
+        data.insert(
+            "math".into(),
+            site.add(MATH_FONTS_FILE, nsh_base::MATH_FONTS)?.into(),
         );
     }
     // The wasm-bindgen glue of a runtime whose crates call JS through
@@ -271,6 +283,12 @@ pub(crate) fn package(
     Ok(())
 }
 
+const TEXT_VIEW_GATE: &str = "nsh_part_text_view";
+/// The gate of `TextView`'s formula typesetter; no chunk names it.
+const MATH_GATE: &str = "nsh_feature_math";
+/// The KaTeX fonts of the typesetter, which the page fetches with its code.
+const MATH_FONTS_FILE: &str = "nsh-math.bin";
+
 /// The modules published for an app from its linkable runtime: the main
 /// module with `keep` and side modules for `lazy` ([`split::split`]). A
 /// runtime wasm-bindgen ran on (`bindgen`) is published whole, every gate
@@ -373,7 +391,13 @@ impl GatePlan {
 
     /// Every gate some chunk loads later, each once, sorted.
     fn lazy(&self) -> Vec<&str> {
-        let set: BTreeSet<&str> = self.chunks.values().flatten().map(String::as_str).collect();
+        let mut set: BTreeSet<&str> =
+            self.chunks.values().flatten().map(String::as_str).collect();
+        // `TextView`'s formulas: asked for by the first one, wherever the
+        // view is.
+        if set.contains(TEXT_VIEW_GATE) || self.main.iter().any(|g| g == TEXT_VIEW_GATE) {
+            set.insert(MATH_GATE);
+        }
         set.into_iter().collect()
     }
 
@@ -403,9 +427,10 @@ impl GatePlan {
 /// the native modules keeps: `nsh/base`'s core, the part of each other
 /// name it imports from `nsh/base` (`nsh/base/plot` is the plot part's),
 /// `zlib`'s operations when it imports `zlib`, and shaders when it may
-/// make a shader view (`NativeUse::shader`, or an import of `Shader`). What the bundler cannot
-/// tell apart (no analysis, `import * as`, an `import()` of a computed
-/// specifier) keeps everything, so a runtime never lacks what an app needs.
+/// make a shader view (`NativeUse::shader`, or an import of one of
+/// [`SHADER_EXPORTS`]). What the bundler cannot tell apart (no analysis,
+/// `import * as`, an `import()` of a computed specifier) keeps everything,
+/// so a runtime never lacks what an app needs.
 /// An app's own UI sets (`nsh.json` `"rust"`) keep the gate of each one it
 /// imports ([`ui_set_gate`]).
 pub(crate) fn linked_gates(uses: Option<&nsh_bundler::NativeUse>) -> Vec<String> {
@@ -472,7 +497,7 @@ fn linked_gates_of(uses: Option<&nsh_bundler::NativeUse>, app_sets: &[String]) -
     for (module, imported) in &uses.imports {
         match module.as_str() {
             "zlib" => add("nsh_std_zlib".into()),
-            // Shaders are `nsh`'s `Shader` element.
+            // Shaders are `nsh`'s shader elements.
             "nsh" => match imported {
                 nsh_bundler::Imported::All => add("nsh_feature_shader".into()),
                 nsh_bundler::Imported::Names(names) => {
@@ -758,6 +783,7 @@ pub(crate) fn dev_host(runtime: &WebRuntime, rust: bool) -> anyhow::Result<(Stri
     if let Some(syntaxes) = syntaxes {
         files.push((runtime::SYNTAXES.to_owned(), syntaxes));
     }
+    files.push((MATH_FONTS_FILE.to_owned(), nsh_base::MATH_FONTS.to_vec()));
     Ok((page, files))
 }
 
@@ -1438,7 +1464,10 @@ mod tests {
                 ),
             ])
         );
-        assert_eq!(plan.lazy(), ["nsh_part_editor", "nsh_part_text_view"]);
+        assert_eq!(
+            plan.lazy(),
+            ["nsh_feature_math", "nsh_part_editor", "nsh_part_text_view"]
+        );
         // The page's map: only gates with a published side module.
         let published = BTreeSet::from(["nsh_part_editor".to_owned()]);
         assert_eq!(
@@ -1553,7 +1582,10 @@ mod tests {
         let (plain, plain_files) = dev_host(&runtime, false).unwrap();
         assert!(plain.contains("const GLUE = null;"), "{plain}");
         let names = |files: &Files| files.iter().map(|(p, _)| p.clone()).collect::<Vec<_>>();
-        assert_eq!(names(&plain_files), ["nsh.js", "nsh.wasm", "nsh.version"]);
+        assert_eq!(
+            names(&plain_files),
+            ["nsh.js", "nsh.wasm", "nsh.version", MATH_FONTS_FILE]
+        );
         let glue = dir.join("nsh-dev-bindgen.js");
         fs::write(&glue, "export {};").unwrap();
         let snippet = crate::bindgen::output_dir(&glue).join("snippets/app-1/inline0.js");
@@ -1574,7 +1606,8 @@ mod tests {
                 "nsh.wasm",
                 "nsh.version",
                 "nsh-bindgen.js",
-                "snippets/app-1/inline0.js"
+                "snippets/app-1/inline0.js",
+                MATH_FONTS_FILE
             ]
         );
         // Another glue is another runtime: an open page loads again.

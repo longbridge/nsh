@@ -1077,7 +1077,8 @@ fn content_of(cx: *mut JsContext, parent: JsValue, child: JsValue) -> JsValue {
 /// `contentStyle` / `contentClass` (React Native's
 /// content container: `flexGrow: 1` with `justifyContent: "center"`
 /// centers what is shorter than the viewport and still scrolls what is
-/// longer).
+/// longer). The browser runtime's renderer has its own
+/// (`nsh-platform-web`'s `browser/dom.rs`): a change here goes there too.
 fn scroll_content(cx: *mut JsContext, node: JsValue) -> Result<JsValue, JsValue> {
     let p = node_ptr(cx, node);
     // SAFETY: live node data, read briefly.

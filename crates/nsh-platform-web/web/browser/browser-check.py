@@ -14,12 +14,70 @@ import threading
 from playwright.async_api import TimeoutError, async_playwright
 
 
+async def check_scroll_content(page):
+    """A scroll view's contentStyle / contentClass style a container its children go into."""
+    from playwright.async_api import TimeoutError
+    warnings = []
+    listen = lambda message: warnings.append(message.text)
+    page.on("console", listen)
+    await page.evaluate("errors.length=0; player.options.onError=e=>errors.push(e); player.runModule('./scroll.js')")
+    await page.locator("[data-testid=first]").wait_for()
+    offset = lambda test_id: page.evaluate('''id=>{
+      const el=document.querySelector(`[data-testid=${id}]`);
+      if(!el) return null;
+      const box=el.getBoundingClientRect(), scroll=document.querySelector('[data-testid=scroll]').getBoundingClientRect();
+      return [box.left-scroll.left, box.top-scroll.top];
+    }''', test_id)
+    # Set after its first child was added: that child moves into the container.
+    # Waits for the padding to show; without it the assertion below says where the child is.
+    try:
+        await page.wait_for_function(
+            "document.querySelector('[data-testid=first]').getBoundingClientRect().left > 0", timeout=2000)
+    except TimeoutError:
+        pass
+    seen = {"first": await offset("first"), "last": await offset("last")}
+    # Added once the container exists, before a child already in it: it goes into the container, in order.
+    await page.evaluate("document.querySelector('iframe').contentWindow.toggleExtra()")
+    await page.locator("[data-testid=extra]").wait_for()
+    seen["extra"] = await offset("extra")
+    seen["last (extra shown)"] = await offset("last")
+    await page.evaluate("document.querySelector('iframe').contentWindow.toggleExtra()")
+    await page.locator("[data-testid=extra]").wait_for(state="detached")
+    seen["removed"] = await offset("extra")
+    seen["last (extra removed)"] = await offset("last")
+    page.remove_listener("console", listen)
+    # Padding 30, gap-4 (16) between children 10 high.
+    assert seen == {
+        "first": [30, 30],
+        "last": [30, 56],
+        "extra": [30, 56],
+        "last (extra shown)": [30, 82],
+        "removed": None,
+        "last (extra removed)": [30, 56],
+    }, seen
+    assert not [w for w in warnings if "unsupported prop" in w], warnings
+    assert await page.evaluate("errors.length") == 0, await page.evaluate("errors.map(String)")
+    await page.evaluate("player.stop()")
+
+
 async def check(wasm, chrome):
     with tempfile.TemporaryDirectory(prefix="nsh-browser-") as directory:
         root = pathlib.Path(directory)
         source = pathlib.Path(__file__).resolve().parent.parent
         shutil.copytree(source, root, dirs_exist_ok=True)
         shutil.copyfile(wasm, root / "nsh.wasm")
+        (root / "platform.js").write_text('''import {mount,signal} from 'nsh';
+import {element,prop,bindProp,append} from 'nsh:rt';
+mount(()=>{const root=element('view');const view=element('view');prop(view,'testID','platform');
+// A platform object replaces the element's prop, it does not merge with it: each sets the whole style.
+const style=backgroundColor=>({width:60,height:20,backgroundColor});
+const web=signal({style:style('#00ff00')});window.dropWebStyle=()=>web.set({});
+bindProp(view,'web',()=>web());prop(view,'desktop',{accessibilityLabel:'desktop'});
+// Set last, so either would override the web's style if it applied.
+prop(view,'ios',{style:style('#ff0000'),accessibilityLabel:'ios'});
+prop(view,'android',{style:style('#ff0000'),accessibilityLabel:'android'});
+append(root,view);return root;});
+''')
         (root / "index.html").write_text('''<!doctype html><style>html,body,#app{height:100%;margin:0}</style><div id="app"></div><script type="module">
 import {createPlayer} from './nsh.js';
 window.errors=[]; window.player=await createPlayer(document.querySelector('#app'),{wasm:'./nsh.wasm',onError:e=>errors.push(e)});
@@ -37,6 +95,18 @@ result.promiseBrand=Menu.popup([]) instanceof Promise;
 result.bufferBrand=Buffer.from('abc') instanceof Uint8Array;
 mount(()=>{const value=signal(1);cleanup(()=>result.cleaned++);result.read=value;return null;});
 result.runs++;
+''')
+        (root / "scroll.js").write_text('''import {mount,signal} from 'nsh';
+import {element,prop,append,insert} from 'nsh:rt';
+mount(()=>{const root=element('view');const scroll=element('scroll');
+prop(scroll,'testID','scroll');prop(scroll,'style',{position:'absolute',left:0,top:0,width:200,height:200});
+const first=element('view');prop(first,'testID','first');prop(first,'style',{width:50,height:10});append(scroll,first);
+prop(scroll,'contentStyle',{padding:30});prop(scroll,'contentClass','gap-4');
+const last=element('view');prop(last,'testID','last');prop(last,'style',{width:50,height:10});append(scroll,last);
+const show=signal(false);window.toggleExtra=()=>show.set(!show());
+const extra=element('view');prop(extra,'testID','extra');prop(extra,'style',{width:50,height:10});
+insert(scroll,()=>show()?extra:null,last);
+append(root,scroll);return root;});
 ''')
         (root / "bad.js").write_text("import {mount,cleanup} from 'nsh'; mount(()=>{cleanup(()=>parent.result.failedCleaned++);return null;}); throw new Error('startup failed');")
         (root / "slow.js").write_text("await new Promise(resolve=>setTimeout(resolve,300)); parent.result.late=true;")
@@ -71,6 +141,16 @@ const holder=element('view');prop(holder,'testID','list');append(holder,list);ap
 const screen=element('screen');prop(screen,'headerStyle',{backgroundColor:'#ff0000'});prop(screen,'headerClass','bg-red-500');
 return root;});
 ''')
+        (root / "tooltip.js").write_text('''import {mount,signal} from 'nsh';
+import {element,prop,append,text} from 'nsh:rt';
+mount(()=>{const root=element('view');const trigger=element('view');prop(trigger,'testID','trigger');
+prop(trigger,'style',{position:'absolute',left:40,top:120,width:120,height:40,backgroundColor:'#cccccc'});
+const hint=label=>{const view=element('view');const words=element('text');append(words,text(label));append(view,words);return view;};
+const first=hint('first hint'),second=hint('second hint');const shown=signal(first);window.showSecond=()=>shown.set(second);
+// A function, as a development bundle gives an app's component (its hot proxy's memo).
+prop(trigger,'tooltip',()=>shown());
+append(root,trigger);return root;});
+''')
         (root / "cleanup.js").write_text("import {mount,cleanup} from 'nsh'; mount(()=>{cleanup(()=>{throw new Error('cleanup failed');});return null;});")
         handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=directory)
         server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
@@ -78,9 +158,38 @@ return root;});
         try:
             async with async_playwright() as playwright:
                 browser = await playwright.chromium.launch(executable_path=chrome, args=["--no-sandbox"])
-                page = await browser.new_page()
+                # A mouse and a viewport at least 600 wide: the desktop idiom, which the platform props check needs.
+                page = await browser.new_page(viewport={"width": 1280, "height": 720})
                 await page.goto(f"http://127.0.0.1:{server.server_port}/index.html")
                 await page.wait_for_function("window.ready")
+                # The web's and, in the desktop idiom, the desktop's platform props apply; iOS' and Android's do not.
+                from playwright.async_api import TimeoutError as PlaywrightTimeoutError
+                warnings = []
+                listen = lambda message: warnings.append(message.text)
+                page.on("console", listen)
+                await page.evaluate("player.runModule('./platform.js')")
+                view = page.locator("[data-testid=platform]")
+                # Attached, not visible: without the web's style it has no size.
+                await view.wait_for(state="attached")
+                read = lambda: view.evaluate("el => [getComputedStyle(el).backgroundColor, el.getAttribute('aria-label')]")
+                seen = {"set": await read()}
+                # A key the new object no longer has is unset.
+                await page.evaluate("document.querySelector('iframe').contentWindow.dropWebStyle()")
+                try:
+                    await page.wait_for_function(
+                        "getComputedStyle(document.querySelector('[data-testid=platform]')).backgroundColor !== 'rgb(0, 255, 0)'",
+                        timeout=2000)
+                except PlaywrightTimeoutError:
+                    pass  # The assertion below says what it read.
+                seen["web emptied"] = await read()
+                page.remove_listener("console", listen)
+                assert seen == {
+                    "set": ["rgb(0, 255, 0)", "desktop"],
+                    "web emptied": ["rgba(0, 0, 0, 0)", "desktop"],
+                }, seen
+                assert not [w for w in warnings if "unsupported prop" in w], warnings
+                assert await page.evaluate("errors.length") == 0, await page.evaluate("errors.map(String)")
+                await page.evaluate("player.stop()")
                 result = await page.evaluate('''async()=>{
                   window.result={events:[],runs:0,cleaned:0,failedCleaned:0};
                   for(let i=0;i<3;i++) {
@@ -123,7 +232,9 @@ return root;});
                 assert reentrant == {"reports": 1, "frames": 0}, reentrant
                 await check_state_styles(page)
                 await check_other_states(page)
+                await check_tooltip_function(page)
                 print(result)
+                await check_scroll_content(page)
                 await browser.close()
         finally:
             server.shutdown()
@@ -229,6 +340,39 @@ async def check_other_states(page):
         "row offset": 11,
     }, seen
     assert not [w for w in warnings if "unsupported prop" in w], warnings
+    assert await page.evaluate("errors.length") == 0, await page.evaluate("errors.map(String)")
+    await page.evaluate("player.stop()")
+
+
+async def check_tooltip_function(page):
+    """A tooltip given by a function shows the element it gives and follows it."""
+    await page.evaluate("errors.length=0; player.options.onError=e=>errors.push(e); player.runModule('./tooltip.js')")
+    trigger = page.locator("[data-testid=trigger]")
+    await trigger.wait_for()
+
+    async def hover(expected):
+        # No hint left from before; then a tooltip shows once the pointer has rested on its element for 500 ms.
+        await page.mouse.move(1000, 700)
+        try:
+            await page.wait_for_function("!/(first|second) hint/.test(document.body.innerText)", timeout=3000)
+        except TimeoutError:
+            shown = await page.evaluate("document.body.innerText")
+            raise AssertionError(f"a hint still shows before hovering for {expected!r}: {shown!r}")
+        box = await trigger.bounding_box()
+        await page.mouse.move(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+        # Without the fix no hint shows: the assertion below says so.
+        try:
+            await page.wait_for_function("t => document.body.innerText.includes(t)", arg=expected, timeout=3000)
+        except TimeoutError:
+            pass
+        shown = await page.evaluate("document.body.innerText")
+        return [label for label in ["first hint", "second hint"] if label in shown]
+
+    seen = {"first": await hover("first hint")}
+    await page.evaluate("document.querySelector('iframe').contentWindow.showSecond()")
+    seen["second"] = await hover("second hint")
+    await page.mouse.move(1000, 700)
+    assert seen == {"first": ["first hint"], "second": ["second hint"]}, seen
     assert await page.evaluate("errors.length") == 0, await page.evaluate("errors.map(String)")
     await page.evaluate("player.stop()")
 

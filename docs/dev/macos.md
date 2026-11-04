@@ -66,8 +66,9 @@ belong to the app, which owns retention and its storage budget.
   layer moves, so shadows and inset shadows avoid masks where their background allows.
 - **Out-of-sight content is not drawn** (`Mounter::draw_when_shown`): text and canvases whose content changes (a
   canvas's animated values on every frame while they run) are drawn only if some of the view can be seen, else when it
-  shows (after scrolls, batches and frames; a view out of the tree waits until it is inserted and shows). Seen is
-  `NshView::shown`'s walk up the tree, not AppKit's `visibleRect`: only ancestors that clip their children (`overflow:
+  shows (after scrolls, batches and the frames in which a view moved, was hidden or shown, or a scroll offset changed:
+  `sight.rs`; a view out of the tree waits until it is inserted and shows). Seen is `NshView::shown`'s walk up the
+  tree (`sight.rs`; a pass over many views shares what it found of their ancestors), not AppKit's `visibleRect`: only ancestors that clip their children (`overflow:
   hidden`, scroll views, stacks, images, inputs) and the root cut a view off, and what overflows any other ancestor
   shows, as in CSS (a label centered on a zero-width anchor: cut at every ancestor, as `visibleRect` cuts, its text was
   never drawn while its background, a layer property, showed). Lists keep rows out of sight, hidden screens stay
@@ -127,6 +128,7 @@ belong to the app, which owns retention and its storage budget.
 | Text inputs | `text_input.rs` | `NSTextField` / `NSSecureTextField`, multiline `NSTextView` in an `NSScrollView`, hosted at the content box in a view that fills the input (`InputPad`: a click on the padding, or beside a field's line, goes to the editor at the nearest point), borderless (the view draws the decoration); edit counts drop stale JS values; offsets are `NSString`'s UTF-16; a click outside a field that edits leaves the focus in it (the root refuses first responder during a mouse press), `blur()` and Escape hand it over; return does what `submitBehavior` says (see "Keyboard") |
 | Navigation | `navigation.rs` | The decisions shared with the other desktops (`nsh_core::navigation`: the screens a stack shows and the user popped, transitions' timing, easing and offsets, what going back acts on); pages are child views, only the top one (and the one below during a transition) visible; NSH draws no header: a page's `header` (the app's view) is a child of the page that the core places at its top, as wide as the page, with the content below it and kept above it (the system header's items of iOS and Android stay hidden); each page has an opaque backdrop in the window's color under the app's content; a page the app removes leaves as an image (`renderInContext`), since the core empties it in the next batches, and so does a dialog; the rendering has no web page or video in it (other processes draw them), so their live views are lent to the image where they were, clipped to a rectangle (`native::lend`), and given back or let go when it is gone; Escape (unless a field or a web view has the focus: then it hands the keyboard to the root), Option+Left, Cmd+[ and the mouse's back button send `onBackPress` to the top page when the app listens and pop natively unless its `popOnBack` is false (a stack inside the newest dialog first, else that dialog gets the close attempt, `"cancel"`, and closes when `closeOnEscape`; without a dialog, the app's back listeners hear it before the stacks, and `Command::Back` goes on when none takes it); a focused page sees these keys first, and they reach the root only when it does not use them (WebKit sends unused keys up the responder chain) |
 | Dialogs (`Dialog`) | `navigation.rs` | Children of the root above the app's views, at the size of the surface, sliding up or fading in: transparent layers with no look of their own, showing only the app's popup and backdrop (`presentation` is ignored) |
+| Shaders | `shader.rs` | `Shader` frames as a sublayer's `CGImage` under the children; effects and transitions draw their children through the shader from `renderInContext:` pictures of their container, masked while the frames show over it; a page's or a dialog's `transitionShader` as a layer over the stack or the root (`NavOverlay`); see [shaders.md](shaders.md) |
 | Transitions | `transition.rs` | `LayoutAnimation`, style transitions and keyframes on frame callbacks (Linux's); curves, interpolation and timing are `nsh_core::transition`'s, and native animation values are written through `nsh_core::animation` (`animation.rs`), as on the other desktops |
 | Alerts (`AlertDialog`) | `system.rs` | `NSAlert` as a sheet on the window. NSAlert puts two buttons in a row, its first rightmost, and stacks more, its first on top but the Return button moved above all: up to two alert buttons are added in reverse with the cancel button last (they read in order, cancel leftmost) and the last regular one is the default; more, and action sheets' options, are added in order with the cancel button last and no default (iOS's order). Cancel is Escape; destructive buttons have `hasDestructiveAction`. |
 | Video | `native.rs` | AVFoundation (loaded at run time, as on iOS): an `AVPlayerLayer` in a view that lets the mouse through, or AVKit's `AVPlayerView` with `controls` |
@@ -347,3 +349,30 @@ newer one leaving the focus alone, and the newer one's Escape returning it to
 the stack's trigger. Still to check natively: Shift+Tab, mixed inputs and
 buttons, disabling or deleting a focused control, repeat suppression, modifier
 shortcuts, screen-reader focus and window deactivation.
+
+## Shader pictures
+
+Effects, transitions, screen shaders and pages' and dialogs' overlays read pictures of views: `renderInContext:` of
+the host's layer tree, on the main thread, at the window's backing scale, into a bitmap context the shader view keeps
+(`Canvas`, made again only for a new size), then copied into the renderer's texture. Measured with `nsh test --target
+macos` on an Apple silicon Mac (debug build, the gallery's 390 × 844 point window at 2x, 780 × 1688 pixels):
+
+| What | Pictures | Main thread |
+|---|---|---|
+| A whole-window picture (a screen effect reading the surface) | one | 14 ms median (13.7 to 27), upload 0.6 to 1.7 ms |
+| A screen effect running on `nsh.time` over still content, 3 s | none after the first, 363 frames shown | its frames only |
+| Scrolling under a screen effect reading the surface | one per frame (50 for 52 frames) | about 14 ms a frame |
+| A page pushed through its `transitionShader` (350 ms) | both sides on the first frame (27.7 ms), the live side on the next 11 (about 17 ms each, three settling frames and eight after views under the stack changed), none after | about 215 ms in all |
+| The page leaving | both sides, then the live side twice | about 59 ms in all |
+
+The work grows with the pixels pictured, so a larger window costs about as much more as it has pixels. Pictures are
+taken only when what they show changed:
+
+- a shader whose program reads its children (`sample_content`, `sample_to`) pictures them on the display frame after
+  the core marks them (`MountItem::ShaderInput`) or a view in them changed or scrolled, at most once per frame; one
+  that only draws over them, from `nsh.time` and its uniforms, never pictures them again;
+- a backdrop reader pictures the window behind it after any change in its surface;
+- a screen effect reading the surface pictures the whole window after any change in it, so one over a spinner, a list
+  that animates or a scroll pictures every frame that runs;
+- a page's or a dialog's overlay pictures both sides once, the live side on the next three frames and after a view
+  under its host changed. Before, it pictured the whole stack on every frame of the run.

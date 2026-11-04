@@ -4184,6 +4184,25 @@ expect BubbleMenu
 covers [props] RichEditor.bubbleMenu
 expect CellA
 expect CellD
+# base-transition-shader
+tap id:case-base-transition-shader
+# Pages and a dialog with a `transitionShader` come and go as without one:
+# the headless runtime presents nothing and renders no pixels. Each prop
+# reaches the core, which warns of the uniform its program does not
+# declare.
+expect Page home
+tap text:Push details
+expect Page details
+log uniform `pageTint`
+tap text:Open dialog
+expect Shader dialog
+log uniform `dialogTint`
+tap text:Close dialog
+absent Shader dialog
+tap text:Pop
+expect Page home
+absent Page details
+covers [props] transitionShader
 # base-hover-card
 tap id:case-base-hover-card
 # `defaultOpen`: open at first; a press outside closes it.
