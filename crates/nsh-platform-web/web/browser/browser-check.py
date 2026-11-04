@@ -83,6 +83,16 @@ const holder=element('view');prop(holder,'testID','list');append(holder,list);ap
 const screen=element('screen');prop(screen,'headerStyle',{backgroundColor:'#ff0000'});prop(screen,'headerClass','bg-red-500');
 return root;});
 ''')
+        (root / "tooltip.js").write_text('''import {mount,signal} from 'nsh';
+import {element,prop,append,text} from 'nsh:rt';
+mount(()=>{const root=element('view');const trigger=element('view');prop(trigger,'testID','trigger');
+prop(trigger,'style',{position:'absolute',left:40,top:120,width:120,height:40,backgroundColor:'#cccccc'});
+const hint=label=>{const view=element('view');const words=element('text');append(words,text(label));append(view,words);return view;};
+const first=hint('first hint'),second=hint('second hint');const shown=signal(first);window.showSecond=()=>shown.set(second);
+// A function, as a development bundle gives an app's component (its hot proxy's memo).
+prop(trigger,'tooltip',()=>shown());
+append(root,trigger);return root;});
+''')
         (root / "cleanup.js").write_text("import {mount,cleanup} from 'nsh'; mount(()=>{cleanup(()=>{throw new Error('cleanup failed');});return null;});")
         handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=directory)
         server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
@@ -164,6 +174,7 @@ return root;});
                 assert reentrant == {"reports": 1, "frames": 0}, reentrant
                 await check_state_styles(page)
                 await check_other_states(page)
+                await check_tooltip_function(page)
                 print(result)
                 await browser.close()
         finally:
@@ -270,6 +281,39 @@ async def check_other_states(page):
         "row offset": 11,
     }, seen
     assert not [w for w in warnings if "unsupported prop" in w], warnings
+    assert await page.evaluate("errors.length") == 0, await page.evaluate("errors.map(String)")
+    await page.evaluate("player.stop()")
+
+
+async def check_tooltip_function(page):
+    """A tooltip given by a function shows the element it gives and follows it."""
+    await page.evaluate("errors.length=0; player.options.onError=e=>errors.push(e); player.runModule('./tooltip.js')")
+    trigger = page.locator("[data-testid=trigger]")
+    await trigger.wait_for()
+
+    async def hover(expected):
+        # No hint left from before; then a tooltip shows once the pointer has rested on its element for 500 ms.
+        await page.mouse.move(1000, 700)
+        try:
+            await page.wait_for_function("!/(first|second) hint/.test(document.body.innerText)", timeout=3000)
+        except TimeoutError:
+            shown = await page.evaluate("document.body.innerText")
+            raise AssertionError(f"a hint still shows before hovering for {expected!r}: {shown!r}")
+        box = await trigger.bounding_box()
+        await page.mouse.move(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+        # Without the fix no hint shows: the assertion below says so.
+        try:
+            await page.wait_for_function("t => document.body.innerText.includes(t)", arg=expected, timeout=3000)
+        except TimeoutError:
+            pass
+        shown = await page.evaluate("document.body.innerText")
+        return [label for label in ["first hint", "second hint"] if label in shown]
+
+    seen = {"first": await hover("first hint")}
+    await page.evaluate("document.querySelector('iframe').contentWindow.showSecond()")
+    seen["second"] = await hover("second hint")
+    await page.mouse.move(1000, 700)
+    assert seen == {"first": ["first hint"], "second": ["second hint"]}, seen
     assert await page.evaluate("errors.length") == 0, await page.evaluate("errors.map(String)")
     await page.evaluate("player.stop()")
 
