@@ -10,7 +10,9 @@
 //
 // A release's built pages are kept in `.versions/` (CI caches it) under the
 // tag and a digest of this checkout's site, and its player under the tag
-// alone: a release is built once, and again only when the site changes.
+// alone: a release is built once, and again only when the site changes. The
+// latest's is also kept under the catalog's commit, since only it has App Stories
+// and the catalog changes apart from releases.
 //
 //   bun scripts/play.js && bun scripts/versions.js     (`bun run build:versions`)
 //
@@ -25,6 +27,7 @@ const website = fileURLToPath(new URL('..', import.meta.url));
 const root = resolve(website, '..');
 const dist = join(website, 'dist');
 const cache = process.env.NSH_SITE_VERSION_CACHE ?? join(website, '.versions');
+const showcases = process.env.SHOWCASES_DIR ?? resolve(root, '..', 'nsh-showcases');
 
 /** What a release takes from its tag; everything else is this checkout's. */
 const CONTENT = ['docs', 'elements', 'modules', 'zh-CN', 'demos'];
@@ -74,6 +77,13 @@ const siteDigest = (() => {
   }
   return hash.digest('hex').slice(0, 16);
 })();
+
+// The catalog's commit: a merged app has to reach the root's App Stories.
+const catalog = spawnSync('git', ['-C', showcases, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).stdout?.trim() ?? '';
+if (!catalog && process.env.NSH_REQUIRE_SHOWCASES) {
+  console.error(`[versions] no App Stories catalog commit at ${showcases}`);
+  process.exit(1);
+}
 
 // On the file system of `dist` (Astro moves its output there, which fails
 // across file systems) and outside `website/`, which each version copies.
@@ -148,7 +158,7 @@ function build(version, copy, out) {
       PUBLIC_SITE_LATEST_VERSION: latest,
       PUBLIC_SITE_VERSIONS: JSON.stringify(versions),
       SITE_OUT_DIR: out,
-      SHOWCASES_DIR: process.env.SHOWCASES_DIR ?? resolve(root, '..', 'nsh-showcases'),
+      SHOWCASES_DIR: showcases,
     },
   });
   // App Stories are the latest's alone: the catalog changes apart from
@@ -165,7 +175,7 @@ const order = [latest, ...versions.map((v) => v.id).filter((id) => id !== latest
 for (const version of order) {
   if (only && !only.includes(version)) continue;
   const out = version === latest ? dist : join(dist, 'versions', version);
-  const cached = join(cache, version, siteDigest);
+  const cached = join(cache, version, version === latest ? `${siteDigest}-${catalog}` : siteDigest);
   if (version !== 'main' && existsSync(join(cached, 'index.html'))) {
     console.log(`[versions] reusing ${version}`);
     cpSync(cached, out, { recursive: true });
