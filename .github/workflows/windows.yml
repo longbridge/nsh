@@ -101,6 +101,10 @@ jobs:
           -p nsh-cli -p nsh-dev -p xtask
           -- -D warnings
 
+      # Without shaders: no naga, no wgpu.
+      - name: Check without shaders
+        run: cargo clippy -p nsh-windows-app --no-default-features --features js -- -D warnings
+
       # Tests need no display: they open no window.
       - name: Test
         run: cargo test -p nsh-platform-windows -p nsh-windows-host -p nsh-windows-app -p nsh-cli -p nsh-dev -p xtask
