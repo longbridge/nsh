@@ -29,6 +29,33 @@ test("browser web view refs forward sendInput to the command bridge", () => {
   assert.deepEqual(calls, inputs.map(input => [314, [2, "sendInput", input]]));
 });
 
+test("a tooltip given by a function is the element the function gives", () => {
+  const values = new Values();
+  const calls = [];
+  const effects = [];
+  const reactive = { getOwner: () => null, renderEffect: fn => { effects.push(fn); fn(); } };
+  const dom = createDom((op, args) => calls.push([op, args]), values, reactive, () => true, () => {});
+  const view = values.makeNode(2), first = values.makeNode(4), second = values.makeNode(6);
+  const tooltips = () => calls.filter(([op, [, name]]) => op === 303 && name === "tooltip").map(([, [, , value]]) => value);
+
+  // A development bundle's component: a memo of the element, here a memo of a memo.
+  let hint = first;
+  dom.rt.prop(view, "tooltip", () => () => hint);
+  assert.equal(tooltips().length, 1);
+  assert.equal(tooltips()[0], first);
+
+  // The binding follows the function: run again, it sets what it gives now.
+  calls.length = 0;
+  hint = second;
+  effects[0]();
+  assert.deepEqual(tooltips(), [second]);
+
+  // An element is set as it is.
+  calls.length = 0;
+  dom.rt.prop(view, "tooltip", first);
+  assert.deepEqual(tooltips(), [first]);
+});
+
 async function fixture() {
   const module = await WebAssembly.compile(await readFile(path));
   let bridge;

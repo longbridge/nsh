@@ -44,6 +44,10 @@ export function createDom(invoke, values, reactive, live, wake) {
     if (touches?.isProp(name)) { touches.set(node,name,value); return; }
     if (name === "panActivation") touches?.gate(node,value);
     if (name === "ref") { ref(value, node); return; }
+    // A `tooltip` given by a function (in a development bundle an app's
+    // component is its hot proxy's memo) follows what it gives, as QuickJS'
+    // renderer does (`followed` in nsh-js' `dom.rs`).
+    if (name === "tooltip" && typeof value === "function") { bindProp(node, name, value); return; }
     if (/^on[A-Z]/.test(name)) {
       let events = handlers.get(node);
       if (!events) handlers.set(node, events = new Map());

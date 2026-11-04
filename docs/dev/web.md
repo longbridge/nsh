@@ -84,6 +84,9 @@ are excluded and must be accounted for separately when discussing total page tra
 Gallery's total compressed code at 4,000,000 Brotli bytes; this is a regression ceiling, not the original
 1,000,000-byte product goal.
 
+`browser-check.py` also gives a view a `tooltip` by a function, as a development bundle gives an app's component, and
+checks under real hover that the element the function gives shows and follows it.
+
 Run `python3 crates/nsh-platform-web/web/browser/packaged-check.py URL` against a served, freshly packaged
 Gallery to exercise standard utilities/files/environment, lists, dialogs, form input, table virtualization,
 animation, press events and editor input. Its report does not claim exhaustive API or device coverage.
