@@ -322,9 +322,14 @@ fn is_gate(name: &str) -> bool {
 /// What the app imports by name from each native module: the browser host
 /// declares these names at start (`nativeExports`), so a chunk importing a
 /// name a side module registers later still links. More than the app
-/// gets is harmless: a name nothing registers stays `undefined`.
+/// gets is harmless: a name nothing registers stays `undefined`. The
+/// host makes these modules with only these names, so an app that loads a
+/// module by a computed specifier (`import(name)`) declares none.
 fn native_exports(uses: Option<&nsh_bundler::NativeUse>) -> serde_json::Value {
     let mut out = serde_json::Map::new();
+    if uses.is_some_and(|u| u.computed_import) {
+        return out.into();
+    }
     for (module, imported) in uses.map(|u| &u.imports).into_iter().flatten() {
         if let nsh_bundler::Imported::Names(names) = imported
             && !names.is_empty()
@@ -1305,6 +1310,14 @@ mod tests {
             uses.imports.insert(module.to_string(), imported);
         }
         uses
+    }
+
+    #[test]
+    fn native_exports_are_the_names_imported_unless_a_specifier_is_computed() {
+        let mut app = uses(&[("nsh", Some(&["View"])), ("nsh/base", None)]);
+        assert_eq!(native_exports(Some(&app)), serde_json::json!({ "nsh": ["View"] }));
+        app.computed_import = true;
+        assert_eq!(native_exports(Some(&app)), serde_json::json!({}));
     }
 
     #[test]
