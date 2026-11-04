@@ -223,6 +223,8 @@ pub struct Attrs {
     pub(crate) class: Option<SharedString>,
     /// The view is a selectable view ([`crate::selection`]).
     pub(crate) selectable_view: bool,
+    /// The text continues the one before it ([`Element::continues_text`]).
+    pub(crate) continues_text: bool,
     /// The states it shows as its control's part
     /// ([`Interactive::project_checked`]).
     pub(crate) projected_states: u16,
@@ -282,6 +284,9 @@ impl Attrs {
         }
         if self.selectable_view != old.selectable_view {
             out.push(Prop::SelectableView(self.selectable_view));
+        }
+        if self.continues_text != old.continues_text {
+            out.push(Prop::ContinuesText(self.continues_text));
         }
         if self.projected_states != old.projected_states {
             out.push(Prop::ProjectedStates(self.projected_states));
@@ -887,6 +892,19 @@ pub trait Element: IntoElement + Sized {
     fn selectable(mut self, area: impl IntoReactive<bool>) -> Self {
         self.node()
             .bind_attr(area, |a, area| a.selectable_view = area);
+        self
+    }
+
+    /// Marks a text as the continuation of the text before it in document
+    /// order: a long line a component draws as several texts, one per
+    /// wrapped part (`DiffView`'s soft wrap). In a selectable view
+    /// ([`Self::selectable`]) a copy joins the parts with nothing between
+    /// them, as the one line they are, and a double or triple click
+    /// selects a word or the whole line across them
+    /// ([`crate::selection::SelectionTexts::continues`]). Off by default.
+    fn continues_text(mut self, continues: impl IntoReactive<bool>) -> Self {
+        self.node()
+            .bind_attr(continues, |a, continues| a.continues_text = continues);
         self
     }
 

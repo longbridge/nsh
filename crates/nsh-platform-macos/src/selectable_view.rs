@@ -75,6 +75,10 @@ impl SelectionTexts for Texts {
     fn key(&self, i: usize) -> u64 {
         u64::from(self.views[i].id())
     }
+
+    fn continues(&self, i: usize) -> bool {
+        self.views[i].state().props.continues_text
+    }
 }
 
 /// Lists the texts of `area`'s subtree.

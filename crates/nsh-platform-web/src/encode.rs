@@ -826,6 +826,10 @@ fn props_json(p: &ViewProps) -> String {
     if p.selectable_view {
         s.push_str(",\"selectableView\":true");
     }
+    // A wrapped line's later part: a copy joins it to the part before.
+    if p.continues_text {
+        s.push_str(",\"continuesText\":true");
+    }
     s.push('}');
     s
 }

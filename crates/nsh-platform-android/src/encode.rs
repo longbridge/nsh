@@ -1147,6 +1147,7 @@ fn view_props(e: &mut Encoded, p: &ViewProps) {
         None => e.int(0),
     }
     e.bool(p.selectable_view);
+    e.bool(p.continues_text);
 }
 
 /// Index of `role` in `A11y.java`'s class name table.

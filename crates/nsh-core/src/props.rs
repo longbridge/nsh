@@ -356,6 +356,12 @@ pub struct ViewProps {
     /// selection, from text to text ([`crate::selection`]); an area inside
     /// another is part of the outer one. Texts outside areas select alone.
     pub selectable_view: bool,
+    /// The text continues the text before it in document order, as a long
+    /// line's next wrapped part (`Element::continues_text`): in a
+    /// selectable view a copy joins the two with nothing between them,
+    /// and a double or triple click selects across them
+    /// ([`crate::selection::SelectionTexts::continues`]).
+    pub continues_text: bool,
 }
 
 impl ViewProps {
