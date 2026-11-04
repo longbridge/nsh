@@ -150,6 +150,7 @@ impl Mounter {
             MountItem::Remove { id } => {
                 if let Some(view) = &self.get(*id) {
                     crate::text_input::removing(surface, view);
+                    crate::file_drop::invalidate(surface, *id);
                     crate::navigation::removing(surface, view);
                     // A removal animation detaches the view when it ends.
                     if !crate::transition::removing(surface, view, self.layout_animation.as_ref()) {
@@ -160,6 +161,7 @@ impl Mounter {
             MountItem::Delete { id } => {
                 if let Some(view) = self.views.remove(*id) {
                     crate::text_input::removing(surface, &view);
+                    crate::file_drop::invalidate(surface, *id);
                     crate::navigation::removing(surface, &view);
                     crate::native::deleted(surface, &view);
                     // A removal animation detaches the view when it ends.
@@ -238,6 +240,7 @@ impl Mounter {
                     view.state_mut().events = *events;
                     crate::input::events_changed(surface, view);
                     crate::access::events_changed(view);
+                    crate::file_drop::events_changed(surface, view);
                 }
             }
             MountItem::Image {
