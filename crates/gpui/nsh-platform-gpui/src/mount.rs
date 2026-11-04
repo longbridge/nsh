@@ -315,7 +315,9 @@ impl Mounter {
                 }
             }
             // Effects and transitions: this platform does not draw them yet.
-            MountItem::ShaderTransition { .. } | MountItem::ShaderInput { .. } => {}
+            MountItem::ShaderTransition { .. }
+            | MountItem::ShaderInput { .. }
+            | MountItem::NavShader { .. } => {}
             MountItem::Shader { id, layer } => {
                 if let Some(view) = &self.get(*id) {
                     crate::shader::set(surface, view, layer.clone());

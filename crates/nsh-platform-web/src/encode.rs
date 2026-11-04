@@ -1226,7 +1226,9 @@ pub(crate) fn encode(out: &mut Out, item: &MountItem) {
                 .end();
         }
         // Effects and transitions: this platform does not draw them yet.
-        MountItem::ShaderTransition { .. } | MountItem::ShaderInput { .. } => {}
+        MountItem::ShaderTransition { .. }
+        | MountItem::ShaderInput { .. }
+        | MountItem::NavShader { .. } => {}
         MountItem::Shader { id, layer } => {
             out.item("sh")
                 .num(*id)

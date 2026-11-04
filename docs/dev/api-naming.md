@@ -356,6 +356,7 @@ and `Input`'s React Native names follow the rules as well.
 | `animationType` | `animation` | none (`NavStack::transition` not followed) | Same prop as NavPage's; values stay. `transition` is a style key (style transitions), and `gpui-base`'s `Transition` is timing, not a preset |
 | `transparent` | (dropped) | `Dialog::backdrop` / `Dialog::popup` own no look (*AGENTS* "Base controls are no-style") | Nothing NSH draws has a background; the app styles the popup and the backdrop |
 | `ios` / `desktop` / `web` `presentationStyle` | `presentation` | none (UIKit `modalPresentationStyle`) | Top-level; `Style` is reserved for style objects |
+| (new) | `transitionShader` (Rust `Modal::transition_shader(TransitionShader)`) | none | Named for what it gives the dialog, as `animation` names its motion: a transition, made by a shader. The element `ShaderTransition` is the other way round, a component (`Shader` + role, as `ShaderEffect`) that runs a transition of its children; the value keeps the prop's word order, so `transitionShader` in TS is `TransitionShader` in Rust. Below the API, `NavShaderSpec` (the decoded prop) and `NavShader` / `MountItem::NavShader` (what the platforms get) cover pages and dialogs alike: the platforms present both from their navigation code (`navigation.rs`) |
 | (new) | `class` / `style` style the popup; `backdropClass` / `backdropStyle` | `Dialog::popup`, `Dialog::backdrop` (`DialogPopup`, `DialogBackdrop`) | `Sheet`'s `overlay` / `surface` are the same parts; `Dialog`'s names win as the primary modal host |
 | **Screen** | | | |
 | `headerTintColor`, `headerBackgroundColor`, `headerTitleColor` | `headerStyle={{ backgroundColor, color, tintColor }}`, `headerClass` | `gpui-component` `Settings::header_style` | `color` is the title's, `tintColor` the buttons'; only these keys |
@@ -366,6 +367,7 @@ and `Input`'s React Native names follow the rules as well.
 | `onBackRequest` | `onBackPress` | `DialogChangeReason::*Press`; `BackHandler`'s `"hardwareBackPress"` | Fires on every back press, before the pop when `popOnBack` allows it |
 | `gestureEnabled` | `popOnSwipe` (default `true`) | `Dialog::close_on_backdrop_press` | By analogy; the interactive gesture only, the buttons still pop |
 | `animation` | unchanged | | As Dialog's |
+| (new) | `transitionShader` (Rust `Screen::transition_shader(TransitionShader)`) | none | As Dialog's |
 | (new, desktop / web header) | `header` | *guides* named slots (`header`, `footer`) | Top-level slot: the whole bar where NSH draws it |
 | **Navigator** | | | |
 | `push`, `pop(count?)`, `replace` | unchanged | `NavStackState::push` / `pop` / `replace` | |

@@ -152,6 +152,69 @@ inserted first among the view's children and inherits its `border-radius`. `shad
 `requestAnimationFrame` for views that are connected, in sight (an `IntersectionObserver`) and dirty or running;
 animated values arrive as `op_a`'s `canvas:N` props and are written by `shaderSlot`.
 
+## Effects, transitions and pictures
+
+Effects, transitions and page shaders sit on the same program, layer and renderer (`ShaderRole` on the layer):
+
+- **Pictures.** `BUILTINS` declares a sampler at `@binding(2)` and four `texture_2d<f32>` at `@binding(3)` to
+  `@binding(6)` with `sample_content`, `sample_backdrop`, `sample_from` and `sample_to`, which map the box's `uv` into
+  the picture (it covers the box and `nsh.overflow` points beyond each side), unpremultiply, and read transparent
+  outside it. `Shader::inputs` reflects which of their textures `nsh_fragment` uses (naga's `FunctionInfo`, which
+  follows calls, so a helper of any name counts and one `shade` never calls does not); a program that reads none
+  takes upstream's two bind group layouts, one that reads any the two with the pictures
+  (`nsh_engine::shader::layout_index`). The web reads the pictures' sampler uniforms from `GlslProgram::pictures`.
+- **Built-ins.** `struct Nsh` is 32 bytes: `size`, `time`, `scale`, `progress`, `overflow`, which `@size(12)` pads
+  (wgpu refuses a uniform struct whose size is no multiple of 16 where the device lacks
+  `BUFFER_BINDINGS_NOT_16_BYTE_ALIGNED`, as GLES on an arm64 Android emulator does). The vertex stage maps the target
+  to `uv` from `-overflow / size` to `1 + overflow / size`, so binding 0 is visible to both stages.
+- **Elements.** `ShaderEffect`, `ShaderTransition`, `ScreenEffect` and `ScreenTransition` are `Kind::Shader` nodes
+  whose `ShaderNode::role` comes from their tag; the screen ones are absolutely positioned and 0 × 0. `progress` is a
+  number or an animated value (one more slot whose word is `PROGRESS_WORD`, written into the built-in by
+  `ShaderView::set_slot`), `maxSampleOffset` the layer's `overflow`. A transition without `source` takes
+  `crossfade()` unless `fallback` is `"none"`.
+- **Starts.** When a transition's `value` changes (not its first), `set_shader_prop` queues
+  `MountItem::ShaderTransition { id, duration }` and `commit` puts the queue first in the batch, so the platform takes
+  the `from` picture before applying the batch. `ShaderView::start_transition` runs `nsh.progress` from 0 to 1; once
+  it ends (`transitioning`) the `from` picture goes and the children show as they are (`replaces_children`).
+- **Marks.** `Core::pictured` holds the views whose layers read pictures or cover the screen. After a commit,
+  `mark_shader_inputs` sends `MountItem::ShaderInput` for every effect or transition with a view of the batch in its
+  subtree (`MountItem::view`) or a parent a view left (`Core::unlinked_from`, as a removed view has no parent left to
+  walk up from), and for every backdrop reader and screen layer once anything changed; the platforms
+  take those pictures again, and notice what changes on their UI thread themselves.
+- **Pages and dialogs.** `transitionShader` (`NavShaderSpec`) compiles into a `Transition` layer sent as
+  `MountItem::NavShader { id, shader }` (350 ms by default); the platform draws a push, pop, presentation or dismissal
+  through it, the lower side `from` and the upper `to`.
+  In Rust, `screen()` / `modal()` take `.transition_shader(TransitionShader::new(shader).uniform(..).duration(..))`
+  (`nsh_core::shader::TransitionShader`, a compiled `Shader`), which sets the same prop. Sources compile once in
+  `Core::compile`, the cache `Shader`'s `source` uses too ("Pages and dialogs" below says what the platforms do).
+
+## Pages and dialogs
+
+What every platform does with a page's or a dialog's `MountItem::NavShader`, so an app sees the same thing
+everywhere:
+
+- **The sides.** The lower side, `sample_from`, is the page under the one that comes or goes (the surface without the
+  dialog); the upper, `sample_to`, the page that comes or goes (the surface with the dialog). `nsh.progress` runs from 0
+  to 1 as the page is pushed or the dialog presented, and from 1 to 0 as it is popped or dismissed
+  (`ShaderView::start_transition_backwards`): one program draws both ways. Under the frames the views are where the
+  change ends; the frames show over them until the last one.
+- **It replaces `animation`.** A page or dialog with a shader comes and goes through it whatever its `animation`
+  says, `"none"` included. `animation` is what runs where the shader does not: without a GPU device, with a source
+  that did not compile (the core sends `shader: None`), or where the platform cannot take the pictures or put the
+  frames over the change. Such a change takes the page's or the dialog's own motion, at once for `"none"`, never
+  another motion for the shader's duration.
+- **Less motion.** When the user asks for less motion (`Environment::reduce_motion`), the shader does not run: the
+  change takes the page's or the dialog's own `animation` as reduced motion makes it
+  (`nsh_core::navigation::screen_motion` and `modal_motion` with `reduce_motion`: a slide becomes a 200 ms fade,
+  `"none"` stays at once).
+- **Interruptions.** A push, pop, presentation or dismissal that starts while a shader's change of the same stack (a
+  page's) or of the surface (a dialog's) still runs ends that one first, at once: its views settle where it ends, its
+  events go out (`onShow`, `onDismiss`; a page that left is removed), its frames go. The new change starts from there,
+  so its pictures never hold the frames of the one before. The desktops' own motion does the same (`finish` before
+  `reconcile`).
+- **No fallback prop.** `ShaderTransition`'s `fallback` says what runs without a `source`; a `transitionShader`
+  always has one, and where it cannot run the page's `animation` is that fallback.
+
 ## Pitfalls
 
 - **The y direction on the web.** The GLSL is written without `WriterFlags::ADJUST_COORDINATE_SPACE`: the shared

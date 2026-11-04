@@ -427,9 +427,10 @@ impl GatePlan {
 /// the native modules keeps: `nsh/base`'s core, the part of each other
 /// name it imports from `nsh/base` (`nsh/base/plot` is the plot part's),
 /// `zlib`'s operations when it imports `zlib`, and shaders when it may
-/// make a shader view (`NativeUse::shader`, or an import of `Shader`). What the bundler cannot
-/// tell apart (no analysis, `import * as`, an `import()` of a computed
-/// specifier) keeps everything, so a runtime never lacks what an app needs.
+/// make a shader view (`NativeUse::shader`, or an import of one of
+/// [`SHADER_EXPORTS`]). What the bundler cannot tell apart (no analysis,
+/// `import * as`, an `import()` of a computed specifier) keeps everything,
+/// so a runtime never lacks what an app needs.
 /// An app's own UI sets (`nsh.json` `"rust"`) keep the gate of each one it
 /// imports ([`ui_set_gate`]).
 pub(crate) fn linked_gates(uses: Option<&nsh_bundler::NativeUse>) -> Vec<String> {
@@ -496,7 +497,7 @@ fn linked_gates_of(uses: Option<&nsh_bundler::NativeUse>, app_sets: &[String]) -
     for (module, imported) in &uses.imports {
         match module.as_str() {
             "zlib" => add("nsh_std_zlib".into()),
-            // Shaders are `nsh`'s `Shader` element.
+            // Shaders are `nsh`'s shader elements.
             "nsh" => match imported {
                 nsh_bundler::Imported::All => add("nsh_feature_shader".into()),
                 nsh_bundler::Imported::Names(names) => {
