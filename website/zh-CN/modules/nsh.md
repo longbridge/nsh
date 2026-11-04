@@ -2194,13 +2194,14 @@ const keymap: {
 interface KeyBindingOptions {
   when?: "always" | "notEditing";
   repeat?: boolean;
+  passThrough?: boolean;
 }
 ```
 
 | TS | Rust |
 |---|---|
 | `keymap.bind(keystroke, handler)` | `on_key(keystroke, handler)` |
-| `keymap.bind(keystroke, handler, { when, repeat })` | `on_key_with(keystroke, KeyOptions { when, repeat }, handler)`；`when` 是 `nsh_core::keymap::When`（`Auto`、`Always`、`NotEditing`） |
+| `keymap.bind(keystroke, handler, { when, repeat, passThrough })` | `on_key_with(keystroke, KeyOptions { when, repeat, pass_through }, handler)`；`when` 是 `nsh_core::keymap::When`（`Auto`、`Always`、`NotEditing`） |
 | `keymap.bind({ … })` | 每个按键组合一次 `on_key` |
 | `keymap.label(keystroke)` | `key_label(keystroke)` |
 
@@ -2352,7 +2353,7 @@ keymap.bind("mod+e", archive, { when: "notEditing" });
 
 ### 运行哪个绑定
 
-触发了绑定的按键会被消耗：它不会被输入，系统不会发出提示音，NSH 自己的按键处理也看不到它（Escape 返回、Tab 移动焦点、方向键滚动）。当多个绑定的按键组合相同时，运行最新的那个可以触发的绑定，所以对话框可以把 Escape 绑定在屏幕的绑定之上，对话框的绑定移除后屏幕的绑定又会生效。按下按键的那一刻，绑定就在原生代码中完成匹配；处理函数随后运行，Rust 在引擎线程上，TSX 在 JS 线程上。
+触发了绑定的按键会被消耗（设置了 `passThrough` 的绑定会让按键传下去，见下文）：它不会被输入，系统不会发出提示音，NSH 自己的按键处理也看不到它（Escape 返回、Tab 移动焦点、方向键滚动）。当多个绑定的按键组合相同时，运行最新的那个可以触发的绑定，所以对话框可以把 Escape 绑定在屏幕的绑定之上，对话框的绑定移除后屏幕的绑定又会生效。按下按键的那一刻，绑定就在原生代码中完成匹配；处理函数随后运行，Rust 在引擎线程上，TSX 在 JS 线程上。
 
 按住一个键只触发一次绑定，直到松开为止；设置 `repeat: true` 后，每次自动重复都会再次触发（例如在列表中逐项移动）：
 
@@ -2362,6 +2363,16 @@ on_key_with("alt+down", KeyOptions { repeat: true, ..KeyOptions::default() }, mo
 
 ```tsx tabs
 keymap.bind("alt+down", nextItem, { repeat: true });
+```
+
+设置 `passThrough: true` 后，绑定照常运行，按键也照常传下去，就像没有绑定一样：Tab 仍会移动焦点，文本输入框仍会输入字符。弹出层要在 Tab 离开时关闭，就这样绑定 Tab，焦点随后移到下一个控件：
+
+```rust tabs
+on_key_with("tab", KeyOptions { pass_through: true, ..KeyOptions::default() }, move |_| close());
+```
+
+```tsx tabs
+keymap.bind("tab", close, { passThrough: true });
 ```
 
 菜单快捷键会让位给相同按键组合的绑定：所有桌面平台上的应用菜单（[`nsh/desktop`](./nsh-desktop)），以及 macOS 上的内置菜单（Cmd+W、Cmd+C 等）。使用 `nsh run` 开发时，即使应用绑定了 `mod+r`，Cmd+R / Ctrl+R 也总是重新加载应用；打包后的应用可以绑定它。

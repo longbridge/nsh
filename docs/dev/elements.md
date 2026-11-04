@@ -270,7 +270,9 @@ misses the deadline is not waited for again until it catches up (`docs/dev/macos
 - **Keyboard shortcuts** (`nsh`'s `keymap`): the root's `Prop::Keymap` mounts the surface's whole table
   (`MountItem::Keymap`); the platform matches a key against it on the spot, consumes it and reports the root's
   `KeyCommand` (the binding's id), so the main thread never waits for JS (`docs/dev/js-modules.md`, the macOS and
-  Linux pages' "Keyboard"). iOS and Android match a hardware keyboard's keys: iOS in `pressesBegan:` of its text
+  Linux pages' "Keyboard"). A binding that passes its key through (`passThrough`, Rust's
+  `KeyOptions::pass_through`; `KeyMatch::Notify`) is reported and the key goes on as if nothing were bound: Tab
+  still moves the focus, which is how `Select` and `Combobox` close an open list on Tab. iOS and Android match a hardware keyboard's keys: iOS in `pressesBegan:` of its text
   inputs (before UIKit's text system) and of the root view (presses nothing inside handled), keys named by their HID
   usage (`Key::from_hid_usage`) and the character they type, a `repeat` binding firing on a timer of its own while
   the key is held (UIKit sends a held key's press once); Android in `NshView.dispatchKeyEvent` (before the focused

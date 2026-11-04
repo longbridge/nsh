@@ -334,6 +334,12 @@ img.nsh-fill { pointer-events: none; }
 /** An Apple keyboard: Command is the shortcut key, Option+Left moves by word. */
 const APPLE = /mac|iphone|ipad/i.test(navigator.userAgentData?.platform ?? navigator.platform);
 
+/**
+ * Whether `nsh_key`'s answer consumes the key: a binding that fires (not one
+ * passing the key through, `-3 - id`) or a held key's repeat.
+ */
+const consumedShortcut = (found) => found >= 0 || found === -2;
+
 /** `nsh_key`'s codes of the keys that are not characters. */
 const NAMED_KEYS = {
   Enter: 256, Escape: 257, Tab: 258, Backspace: 259, Delete: 260, Insert: 261, ArrowUp: 262, ArrowDown: 263,
@@ -3669,7 +3675,7 @@ class Player {
       // A key a shortcut takes (`keyDown`, after this) is the shortcut's
       // alone, as on the native platforms, where the field never sees it: a
       // RichEditor would delete twice on Backspace.
-      if (el._events.has("onKeyPress") && this.shortcut(e, true) === -1) {
+      if (el._events.has("onKeyPress") && !consumedShortcut(this.shortcut(e, true))) {
         const key = e.key === "Backspace" || e.key === "Enter" || e.key === "Escape" ? e.key : e.key.length === 1 ? e.key : null;
         if (key) this.event(el._id, "onKeyPress", { key });
       }
@@ -5556,7 +5562,8 @@ class Player {
   /**
    * The app's shortcut (`nsh/keymap`) key `e` fires, matched natively
    * against the mounted table: its binding, -2 for a held key whose binding
-   * does not repeat, -1 for none.
+   * does not repeat, -1 for none, `-3 - id` for binding `id` that passes the
+   * key through (reported, then the key goes on).
    */
   shortcut(e, editing) {
     const code = e.isComposing ? -1 : keyCode(e);
@@ -5574,7 +5581,10 @@ class Player {
     // The app's shortcuts first, where the focus is (`nsh/keymap`), then
     // reported.
     const found = this.shortcut(e, editing);
-    if (found !== -1) {
+    if (found <= -3) {
+      const id = -3 - found;
+      this.call((w) => w.nsh_key_command(id));
+    } else if (found !== -1) {
       e.preventDefault();
       e.stopPropagation();
       if (found >= 0) this.call((w) => w.nsh_key_command(found));
@@ -5640,8 +5650,10 @@ class Player {
    * line's break after its last run (`_after`) and a newline between
    * texts; absolutely placed runs would each be a line of their own. In a
    * selectable view, texts on one row (their boxes overlap vertically: a
-   * table's cells) are joined by a tab instead, and attachments (U+FFFC)
-   * are left out, as the native platforms copy. */
+   * table's cells) are joined by a tab instead, a text that continues the
+   * one before it (`continuesText`: a wrapped line's later part) by
+   * nothing, and attachments (U+FFFC) are left out, as the native
+   * platforms copy. */
   copyText(e) {
     const sel = getSelection();
     if (e.target.closest?.(".nsh-field")) return;
@@ -5665,7 +5677,9 @@ class Player {
       const area = this.areaOf(run.parentNode);
       if (last !== run.parentNode) {
         const box = area ? run.parentNode.getBoundingClientRect() : null;
-        if (last && area && area === lastArea && box.top < lastBox.bottom && lastBox.top < box.bottom) {
+        if (last && area && area === lastArea && run.parentNode._props?.continuesText) {
+          out = out.replace(/\n$/, "");
+        } else if (last && area && area === lastArea && box.top < lastBox.bottom && lastBox.top < box.bottom) {
           out = out.replace(/\n$/, "") + "\t";
         } else if (last && !out.endsWith("\n")) out += "\n";
         last = run.parentNode;

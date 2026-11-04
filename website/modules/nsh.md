@@ -2226,13 +2226,14 @@ const keymap: {
 interface KeyBindingOptions {
   when?: "always" | "notEditing";
   repeat?: boolean;
+  passThrough?: boolean;
 }
 ```
 
 | TS | Rust |
 |---|---|
 | `keymap.bind(keystroke, handler)` | `on_key(keystroke, handler)` |
-| `keymap.bind(keystroke, handler, { when, repeat })` | `on_key_with(keystroke, KeyOptions { when, repeat }, handler)`; `when` is `nsh_core::keymap::When` (`Auto`, `Always`, `NotEditing`) |
+| `keymap.bind(keystroke, handler, { when, repeat, passThrough })` | `on_key_with(keystroke, KeyOptions { when, repeat, pass_through }, handler)`; `when` is `nsh_core::keymap::When` (`Auto`, `Always`, `NotEditing`) |
 | `keymap.bind({ … })` | one `on_key` per keystroke |
 | `keymap.label(keystroke)` | `key_label(keystroke)` |
 
@@ -2384,7 +2385,7 @@ On iOS and Android, a key an input method is composing with (choosing a candidat
 
 ### Which binding runs
 
-A key that fires a binding is consumed: it is not typed, the system does not beep, and NSH's own keys do not see it (Escape going back, Tab moving the focus, the arrows scrolling). When several bindings have the same keystroke, the newest one that may fire runs, so a dialog can bind Escape over the screen's binding and the screen's comes back when the dialog's goes. Bindings are checked natively the moment the key is pressed; the handler runs right after, on the engine thread (Rust) or the JS thread (TSX).
+A key that fires a binding is consumed (a binding with `passThrough` lets it go on, below): it is not typed, the system does not beep, and NSH's own keys do not see it (Escape going back, Tab moving the focus, the arrows scrolling). When several bindings have the same keystroke, the newest one that may fire runs, so a dialog can bind Escape over the screen's binding and the screen's comes back when the dialog's goes. Bindings are checked natively the moment the key is pressed; the handler runs right after, on the engine thread (Rust) or the JS thread (TSX).
 
 Holding a key down fires its binding once, until the key is released; with `repeat: true` it fires again on every auto-repeat (to step through a list, say):
 
@@ -2394,6 +2395,16 @@ on_key_with("alt+down", KeyOptions { repeat: true, ..KeyOptions::default() }, mo
 
 ```tsx tabs
 keymap.bind("alt+down", nextItem, { repeat: true });
+```
+
+With `passThrough: true` the binding runs and the key goes on as if nothing were bound: Tab still moves the focus, a text input still types. A popup that closes when Tab leaves it binds Tab this way, and the focus moves to the next control:
+
+```rust tabs
+on_key_with("tab", KeyOptions { pass_through: true, ..KeyOptions::default() }, move |_| close());
+```
+
+```tsx tabs
+keymap.bind("tab", close, { passThrough: true });
 ```
 
 Menu shortcuts give way to a binding of the same keystroke: the application menu's ([`nsh/desktop`](./nsh-desktop)) on every desktop, and on macOS the built-in menus' too (Cmd+W, Cmd+C, ...). While you develop with `nsh run`, Cmd+R / Ctrl+R always reloads the app, even if it binds `mod+r`; a packaged app can bind it.

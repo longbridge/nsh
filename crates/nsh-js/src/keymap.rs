@@ -32,9 +32,16 @@ struct Binding {
     /// The keystroke as the app wrote it (what the handler gets).
     text: String,
     keystroke: Keystroke,
+    options: Options,
+    handler: V,
+}
+
+/// How a binding fires: `keymap.bind`'s options.
+#[derive(Clone, Copy, Default)]
+struct Options {
     when: When,
     repeat: bool,
-    handler: V,
+    pass_through: bool,
 }
 
 /// A context's bindings, oldest first.
@@ -80,19 +87,24 @@ fn make(cx: Ctx) -> Raw {
     made.map_or(qjs::JS_EXCEPTION, V::take)
 }
 
-/// The options: `when` (`undefined`, `"always"` or `"notEditing"`) and
-/// `repeat`.
-fn parse_options(cx: Ctx, options: Raw) -> R<(When, bool)> {
+/// The options: `when` (`undefined`, `"always"` or `"notEditing"`),
+/// `repeat` and `passThrough`.
+fn parse_options(cx: Ctx, options: Raw) -> R<Options> {
     if js::is_nullish(options) {
-        return Ok((When::Auto, false));
+        return Ok(Options::default());
     }
     if !js::is_object(options) {
         return Err(type_error(cx, "keymap.bind: options must be an object"));
     }
     let repeat = js::to_bool(cx, js::get(cx, options, "repeat")?.raw());
+    let pass_through = js::to_bool(cx, js::get(cx, options, "passThrough")?.raw());
     let value = js::get(cx, options, "when")?;
     if value.is_undefined() {
-        return Ok((When::Auto, repeat));
+        return Ok(Options {
+            when: When::Auto,
+            repeat,
+            pass_through,
+        });
     }
     let when = match js::to_string(cx, value.raw())?.as_str() {
         "always" => When::Always,
@@ -104,7 +116,11 @@ fn parse_options(cx: Ctx, options: Raw) -> R<(When, bool)> {
             ));
         }
     };
-    Ok((when, repeat))
+    Ok(Options {
+        when,
+        repeat,
+        pass_through,
+    })
 }
 
 native! {
@@ -138,7 +154,7 @@ native! {
             };
             (vec![(text, V::dup(cx, args.get(1)))], args.get(2))
         };
-        let (when, repeat) = parse_options(cx, options)?;
+        let options = parse_options(cx, options)?;
         let (os, apple) = (os(cx), apple(cx));
         // Every binding is checked before any is made.
         let mut parsed = Vec::with_capacity(pairs.len());
@@ -169,8 +185,7 @@ native! {
                 id: first_id + i as u32,
                 text,
                 keystroke,
-                when,
-                repeat,
+                options,
                 handler,
             },
         ));
@@ -229,7 +244,10 @@ fn send(cx: Ctx) -> R<()> {
         .bindings
         .borrow()
         .iter()
-        .map(|b| KeyBinding::new(b.id, b.keystroke, b.when, b.repeat))
+        .map(|b| {
+            KeyBinding::new(b.id, b.keystroke, b.options.when, b.options.repeat)
+                .passing_through(b.options.pass_through)
+        })
         .collect();
     let op = Op::SetProp {
         id: ROOT_ID,
@@ -288,6 +306,10 @@ pub(crate) const TYPES: &str = r#"export interface KeyBindingOptions {
   /** Fire again on the auto-repeats of a held key (default false: once until
    * the key is released). */
   repeat?: boolean;
+  /** Let the key go on after the handler runs, as if nothing were bound
+   * (default false: the platform consumes the key). A binding of `"tab"`
+   * that closes a popup lets the focus move on as Tab moves it. */
+  passThrough?: boolean;
 }
 
 /** The app's keyboard shortcuts: on the desktops, the web, and iOS and
@@ -303,7 +325,7 @@ pub(crate) const TYPES: &str = r#"export interface KeyBindingOptions {
  * `up`, `down`, `left`, `right`, `home`, `end`, `pageup`, `pagedown`, `f1` to
  * `f24`; they match on any keyboard layout, and menu shortcuts
  * (`nsh/desktop`) take the same. The platform consumes a key that fires a
- * binding; when several bindings have its keystroke, the newest that may
+ * binding, unless the binding passes it through (`passThrough`); when several bindings have its keystroke, the newest that may
  * fire runs. */
 export interface Keymap {
   /** Runs `handler` when `keystroke` is pressed (it gets `{ keystroke }`,
