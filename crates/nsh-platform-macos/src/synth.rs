@@ -195,6 +195,10 @@ pub(crate) fn key(surface: &Rc<Surface>, window: &NSWindow, name: &str) {
             && let Some(n) = f[1..].parse::<u16>().ok().filter(|n| (1..=12).contains(n)) =>
         {
             const CODES: [u16; 12] = [122, 120, 99, 118, 96, 97, 98, 100, 101, 109, 103, 111];
+            // With the Function flag, as a keyboard's function keys have it:
+            // without it AppKit does not match one to a menu item's key
+            // equivalent.
+            flags |= NSEventModifierFlags::Function;
             let c = char::from_u32(0xf703 + u32::from(n)).unwrap_or('\0');
             (c.to_string(), CODES[usize::from(n - 1)])
         }
