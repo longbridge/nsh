@@ -739,6 +739,9 @@ define_class!(
         fn set_frame_size(&self, size: CGSize) {
             // SAFETY: NSView's own resize.
             unsafe { msg_send![super(self), setFrameSize: size] }
+            // The root resized by its window or host (the rest also moves
+            // in [`NshView::place`]).
+            crate::sight::moved();
             if let Some(surface) = self.surface() {
                 surface.resized(size.width as f32, size.height as f32);
             }
@@ -763,6 +766,7 @@ define_class!(
 
         #[unsafe(method(viewDidMoveToSuperview))]
         fn view_did_move_to_superview(&self) {
+            crate::sight::moved();
             // AppKit resets the layer's geometry when it attaches the
             // view: views placed before they were inserted lose their
             // transforms.
@@ -771,12 +775,29 @@ define_class!(
 
         #[unsafe(method(viewDidMoveToWindow))]
         fn view_did_move_to_window(&self) {
+            crate::sight::moved();
             NshView(self.retain()).set_layer_geometry();
             NshView(self.retain()).rescale();
             if let Some(surface) = self.surface() {
                 self.install_tracking();
                 crate::system::window_changed(&surface);
             }
+        }
+
+        // Hidden or shown, itself or with an ancestor (AppKit tells every
+        // view under it): what was out of sight under it may show.
+        #[unsafe(method(viewDidHide))]
+        fn view_did_hide(&self) {
+            crate::sight::moved();
+            // SAFETY: NSView's own handling.
+            unsafe { msg_send![super(self), viewDidHide] }
+        }
+
+        #[unsafe(method(viewDidUnhide))]
+        fn view_did_unhide(&self) {
+            crate::sight::moved();
+            // SAFETY: NSView's own handling.
+            unsafe { msg_send![super(self), viewDidUnhide] }
         }
 
         #[unsafe(method(viewDidChangeEffectiveAppearance))]
@@ -1215,6 +1236,12 @@ impl NshView {
         self.ivars().stale.replace(stale) != stale
     }
 
+    /// Whether its content changed out of sight and waits to show
+    /// ([`crate::mount::Mounter::draw_when_shown`]).
+    pub(crate) fn is_stale(&self) -> bool {
+        self.ivars().stale.get()
+    }
+
     /// Draws its content (text, canvas) again, if it draws any.
     pub(crate) fn redraw(&self) {
         // A view that stopped drawing clears what it drew.
@@ -1303,29 +1330,20 @@ impl NshView {
     /// off: what overflows any other ancestor shows, as in CSS (a label
     /// centered on a zero-width anchor).
     pub(crate) fn shown(&self) -> bool {
-        let ns = self.ns();
-        if ns.window().is_none() || ns.isHiddenOrHasHiddenAncestor() {
-            return false;
+        thread_local! {
+            /// Kept for its allocations: animated canvases in sight ask on
+            /// every frame.
+            static SIGHTS: RefCell<crate::sight::Sights<NshView>> = RefCell::default();
         }
-        // `visibleRect` follows the bounds as AppKit has them committed;
-        // while a scroll offset shows as a layer transform the truth is
-        // the scroll state, so the clip is each ancestor's effective
-        // viewport — the same walk, scroll-state origins instead
-        // ([`crate::scroll::bounds_origin`]; a plain view's is (0, 0)).
-        // Ancestor transforms are not applied: nearly all are identity,
-        // and a transformed clip at most defers or draws early.
-        // Placed frames (`ns().frame()`: a sticky shift and mirroring
-        // applied), not the logical ones, for the view and its ancestors
-        // alike: the clip spaces are the ancestors' containers'.
-        let ancestors = std::iter::successors(self.parent_view(), NshView::parent_view).map(|p| {
-            let clips = p.state().clips() || p.state().id == ROOT_ID;
-            (
-                placed(p.ns().frame()),
-                crate::scroll::bounds_origin(&p),
-                clips,
-            )
-        });
-        clip_shows(placed(ns.frame()), ancestors)
+        SIGHTS.with(|sights| match sights.try_borrow_mut() {
+            Ok(mut sights) => {
+                sights.clear();
+                let shown = sights.shows(&Views, self);
+                sights.clear();
+                shown
+            }
+            Err(_) => crate::sight::Sights::default().shows(&Views, self),
+        })
     }
 
     /// Its frame, transform or shift changed: places it again.
@@ -1360,6 +1378,9 @@ impl NshView {
         };
         if !root && self.ns().frame() != rect {
             self.ns().setFrame(rect);
+            // A transform or opacity alone (an endless animation) does
+            // not count: views out of sight stay so ([`crate::sight`]).
+            crate::sight::moved();
             self.size_container();
             crate::native::resized(self);
             self.place_natives();
@@ -1511,96 +1532,58 @@ impl NshView {
     }
 }
 
-/// A rectangle as `(x0, y0, x1, y1)`.
-type Span = (f32, f32, f32, f32);
+/// The views as [`crate::sight`] reads them ([`NshView::shown`],
+/// [`crate::mount::Mounter::revisit`]).
+///
+/// `visibleRect` follows the bounds as AppKit has them committed; while a
+/// scroll offset shows as a layer transform the truth is the scroll state,
+/// so each ancestor's content shows from its scroll-state origin
+/// ([`crate::scroll::bounds_origin`]; a plain view's is (0, 0)). Ancestor
+/// transforms are not applied: nearly all are identity, and a transformed
+/// clip at most defers or draws early. Frames are the placed ones
+/// (`ns().frame()`: a sticky shift and mirroring applied), not the logical
+/// ones, for the view and its ancestors alike: the clip spaces are the
+/// ancestors' containers'. Hidden views are AppKit's (a screen under the
+/// top one), looked at once per view a pass resolves; the containers
+/// between a view and its parent are never hidden.
+pub(crate) struct Views;
 
-fn placed(f: NSRect) -> Span {
-    let (x, y) = (f.origin.x as f32, f.origin.y as f32);
-    (x, y, x + f.size.width as f32, y + f.size.height as f32)
-}
+impl crate::sight::Tree for Views {
+    type Node = NshView;
 
-/// Whether `rect` (in its parent's content space) is not clipped away by
-/// `ancestors`, innermost first: each one's placed frame (in its own
-/// parent's content space), the origin its content shows from (a scroll
-/// view's offset, (0, 0) otherwise) and whether it clips its children (an
-/// ancestor that does not only moves `rect` into its parent's space).
-fn clip_shows(rect: Span, ancestors: impl IntoIterator<Item = (Span, (f32, f32), bool)>) -> bool {
-    let (mut x0, mut y0, mut x1, mut y1) = rect;
-    for (frame, (ox, oy), clips) in ancestors {
-        if clips {
-            let (w, h) = (frame.2 - frame.0, frame.3 - frame.1);
-            x0 = x0.max(ox);
-            y0 = y0.max(oy);
-            x1 = x1.min(ox + w);
-            y1 = y1.min(oy + h);
-            if x1 <= x0 || y1 <= y0 {
-                return false;
-            }
-        }
-        // Into the grandparent's content space: the offset origin shows
-        // at the frame's origin.
-        x0 += frame.0 - ox;
-        x1 += frame.0 - ox;
-        y0 += frame.1 - oy;
-        y1 += frame.1 - oy;
+    fn key(&self, node: &NshView) -> usize {
+        Retained::as_ptr(&node.0) as usize
     }
-    true
+
+    fn parent(&self, node: &NshView) -> Option<NshView> {
+        node.parent_view()
+    }
+
+    fn hidden(&self, node: &NshView) -> bool {
+        node.ns().isHidden()
+    }
+
+    fn top_shown(&self, node: &NshView) -> bool {
+        let ns = node.ns();
+        ns.window().is_some() && !ns.isHiddenOrHasHiddenAncestor()
+    }
+
+    fn frame(&self, node: &NshView) -> crate::sight::Span {
+        crate::sight::placed(node.ns().frame())
+    }
+
+    fn content(&self, node: &NshView) -> ((f32, f32), bool) {
+        let clips = {
+            let s = node.state();
+            s.clips() || s.id == ROOT_ID
+        };
+        (crate::scroll::bounds_origin(node), clips)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn a_row_shows_through_the_scroll_offset() {
-        let screen = ((0.0, 0.0, 400.0, 800.0), (0.0, 0.0), true);
-        let row = (0.0, 0.0, 400.0, 40.0);
-        let list = |y| ((0.0, 0.0, 400.0, 600.0), (0.0, y), true);
-        assert!(clip_shows(row, [list(0.0), screen]));
-        assert!(!clip_shows(row, [list(1000.0), screen]));
-    }
-
-    #[test]
-    fn a_text_in_a_pinned_sticky_header_shows() {
-        // The header's logical frame is at the top of the content; scrolled
-        // 1000 points, it is placed (shifted) at 1000, where the list shows.
-        let text = (8.0, 8.0, 200.0, 32.0);
-        let header = ((0.0, 1000.0, 400.0, 1040.0), (0.0, 0.0), false);
-        let list = ((0.0, 0.0, 400.0, 600.0), (0.0, 1000.0), true);
-        assert!(clip_shows(text, [header, list]));
-        let logical = ((0.0, 0.0, 400.0, 40.0), (0.0, 0.0), false);
-        assert!(!clip_shows(text, [logical, list]));
-    }
-
-    #[test]
-    fn a_text_in_a_mirrored_cell_shows() {
-        // A 400-point mirrored list scrolled 500 points: its bounds origin is
-        // -500, and the cell at logical x 600 is placed at 400 - 600 - 90.
-        let text = (10.0, 10.0, 80.0, 70.0);
-        let list = ((0.0, 0.0, 400.0, 80.0), (-500.0, 0.0), true);
-        let cell = ((-290.0, 0.0, -200.0, 80.0), (0.0, 0.0), false);
-        assert!(clip_shows(text, [cell, list]));
-        let logical = ((600.0, 0.0, 690.0, 80.0), (0.0, 0.0), false);
-        assert!(!clip_shows(text, [logical, list]));
-    }
-
-    #[test]
-    fn a_text_overflowing_an_ancestor_that_does_not_clip_shows() {
-        // A label centered on a zero-width anchor (`position: absolute`,
-        // `width: 0`): its box overflows the anchor on both sides, as in
-        // CSS, and shows, unless an ancestor clips it away.
-        let text = (4.0, 4.0, 40.0, 20.0);
-        let label = ((-22.0, 0.0, 22.0, 24.0), (0.0, 0.0), false);
-        let anchor = |clips| ((50.0, 0.0, 50.0, 24.0), (0.0, 0.0), clips);
-        let row = ((16.0, 60.0, 316.0, 120.0), (0.0, 0.0), false);
-        let screen = ((0.0, 0.0, 400.0, 800.0), (0.0, 0.0), true);
-        assert!(clip_shows(text, [label, anchor(false), row, screen]));
-        // `overflow: hidden` on the anchor still clips it away.
-        assert!(!clip_shows(text, [label, anchor(true), row, screen]));
-        // Moved out of the window, it no longer shows.
-        let below = ((16.0, 900.0, 316.0, 960.0), (0.0, 0.0), false);
-        assert!(!clip_shows(text, [label, anchor(false), below, screen]));
-    }
 
     #[test]
     fn scripted_wheels_are_the_event_handled() {
