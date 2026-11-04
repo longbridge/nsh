@@ -536,7 +536,7 @@ impl Hosted for InputState {
             && (!model.has_selection() || composing);
         if caret_shown {
             let pos = model.display_caret(secure);
-            let (x, y, ch) = layout.caret(pos);
+            let (x, y, ch) = layout.drawn_caret(pos);
             // On whole pixels, so that the caret stays sharp.
             let snap = |v: f32| (v * cx.scale).round() / cx.scale;
             let x = snap(ox + x);
