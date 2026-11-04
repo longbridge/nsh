@@ -201,6 +201,13 @@ pub(crate) fn filter_opacity(style: &ViewStyle) -> f32 {
 }
 
 impl Visual {
+    /// The backdrop blur's view: a subview of the view itself, below its
+    /// background, which stays there when the children move into a view of
+    /// their own.
+    pub(crate) fn backdrop_view(&self) -> Option<&UIView> {
+        self.backdrop.as_ref().map(|b| &**b.view)
+    }
+
     /// Shapes the effect layers of `view` (its own `layer`, or the content
     /// view's when it clips its children) after `style`.
     #[allow(clippy::too_many_arguments)]
