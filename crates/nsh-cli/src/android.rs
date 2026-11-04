@@ -530,15 +530,15 @@ pub(crate) fn adb(sdk: &Sdk, serial: &str, args: &[&str]) -> anyhow::Result<Stri
 
 #[cfg(test)]
 mod tests {
-    #[test]
-    fn a_rust_app_runs_its_root() {
-        let apk = |rust| super::Apk {
+    fn apk(rust: bool, notifications: bool) -> super::Apk<'static> {
+        super::Apk {
             package: "com.example.app",
             label: "App",
             version_name: "1.0",
             version_code: 1,
             activity: "com.longbridge.nsh.AppActivity",
             dev: false,
+            notifications,
             rust,
             dark: false,
             runtime: std::path::Path::new("."),
@@ -546,15 +546,26 @@ mod tests {
             icon: None,
             assets: Vec::new(),
             signing: super::Signing::Debug,
-        };
+        }
+    }
+
+    #[test]
+    fn a_rust_app_runs_its_root() {
         // `AppActivity` reads it from the application's meta-data.
         let flag = r#"<meta-data android:name="com.longbridge.nsh.RUST" android:value="true" />"#;
-        let manifest = super::manifest_xml(&apk(true));
+        let manifest = super::manifest_xml(&apk(true, false));
         assert!(manifest.contains(flag), "{manifest}");
         let application = manifest.find("<application").unwrap();
         let activity = manifest.find("<activity").unwrap();
         let at = manifest.find(flag).unwrap();
         assert!(application < at && at < activity, "{manifest}");
-        assert!(!super::manifest_xml(&apk(false)).contains("com.longbridge.nsh.RUST"));
+        assert!(!super::manifest_xml(&apk(false, false)).contains("com.longbridge.nsh.RUST"));
+    }
+
+    #[test]
+    fn only_an_app_granted_notifications_declares_their_permission() {
+        let permission = "android.permission.POST_NOTIFICATIONS";
+        assert!(super::manifest_xml(&apk(false, true)).contains(permission));
+        assert!(!super::manifest_xml(&apk(false, false)).contains(permission));
     }
 }
