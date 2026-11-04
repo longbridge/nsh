@@ -64,9 +64,6 @@ pub struct Environment {
     /// The Cell size of a grid surface (a terminal): the core lays out in
     /// its Cells ([`crate::platform::Environment::cell`]); `None` elsewhere.
     pub cell: Option<Size<Points>>,
-    /// A grid surface shows a filled box as a band of its own color
-    /// ([`crate::platform::Environment::cell_surfaces`]).
-    pub cell_surfaces: bool,
     /// The platform gives web views trusted input
     /// ([`crate::platform::Environment::web_input`]).
     pub web_input: bool,
@@ -98,7 +95,6 @@ impl Default for Environment {
             file_requests: false,
             speech: false,
             cell: None,
-            cell_surfaces: false,
             web_input: false,
         }
     }

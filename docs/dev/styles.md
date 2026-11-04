@@ -374,14 +374,15 @@ as tall as its lines at 40 columns).
   overflow it into them) are gutters of their size, whole Cells and rows, inside a bordered box too; vertical padding is a row from 24pt, none on a control or a box of text. So a bordered
   40pt button is one row, its label and a column each side, a badge is its text, and a card keeps its border without
   padding rows.
-- **Surfaces.** Where the terminal shows a fill as a band of its own color (`Environment::cell_surfaces`: 256 colors
-  or more and a known background), a filled container is a surface: its fill is above 3% alpha and unlike the
+- **Surfaces.** A filled container is a surface, at every color depth: where the terminal shows a fill as a band of
+  its own color (256 colors or more and a known background) the band is its face, and elsewhere it is laid out the
+  same, so the color depth never moves anything. Its fill is above 3% alpha and unlike the
   nearest opaque fill around it (the page's at the root: black in a dark app, white in a light one), by 1.5 in CIE L*
   or as a saturated color of another hue. A surface has no border Cells (mounted with none) unless the app's border
   is hued or at least twice as far in lightness from the backdrop as the fill, or it is a framed box that is not round (a
   specimen, a code's cell: its border is what it shows, empty or not), and keeps its padding: a row above and below
   from 12pt, two columns each side from 12pt, one from 4pt. A filled box around only a text (a popup's box, framed outside it) keeps
-  that column from 4pt too, so its text never touches the band's edge or frame. Without bands a filled box is laid out as any other.
+  that column from 4pt too, so its text never touches the band's edge or frame.
 - **Spacing.** A gap between children in a row is one column from above 0, two from 24pt, their margins added; two controls side
   by side keep a column apart even without one when they share a band (a split button's halves on its fill) or each
   paints one, as the bands would read as one; unfilled controls (tabs) touch, their padding sets them apart. Controls side by side read as words (checkboxes

@@ -18939,6 +18939,60 @@ mod rust_selectable_view {
     }
 }
 
+mod rust_continues_text {
+    use std::cell::Cell;
+
+    use super::*;
+    use crate::{element::Root, prelude::*};
+
+    thread_local! {
+        static CONTINUES: Cell<Option<Signal<bool>>> = const { Cell::new(None) };
+    }
+
+    #[component]
+    fn Wrapped() -> impl IntoElement {
+        let continues = signal(true);
+        CONTINUES.set(Some(continues));
+        view().selectable(true).children([
+            text("a long li").select_text(),
+            text("ne wrapped")
+                .select_text()
+                .continues_text(move || continues.get()),
+        ])
+    }
+
+    /// `Element::continues_text` reaches the platform in the text's view
+    /// props and follows its signal; the part it continues gets none.
+    #[test]
+    fn a_continued_text_is_a_view_prop() {
+        let mut c = core();
+        c.mount_root(&Root::of::<Wrapped>());
+        let batch = c.commit().unwrap();
+        let parts: Vec<_> = batch
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                MountItem::ViewProps { id, props } if props.continues_text => Some(*id),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(parts.len(), 1, "{:?}", batch.items);
+        let second = batch.items.iter().find_map(|item| match item {
+            MountItem::Text { id, text, .. } if text.text == "ne wrapped" => Some(*id),
+            _ => None,
+        });
+        assert_eq!(second, Some(parts[0]), "{:?}", batch.items);
+        {
+            let _entered = c.components.runtime.enter();
+            CONTINUES.get().unwrap().set(false);
+        }
+        let batch = c.commit().unwrap();
+        assert!(batch.items.iter().any(
+            |item| matches!(item, MountItem::ViewProps { id, props } if *id == parts[0] && !props.continues_text)
+        ));
+    }
+}
+
 /// Creates `id` of `tag` with `style`, in `parent`.
 fn add(
     c: &mut Core<FakeEngine>,
@@ -26130,12 +26184,11 @@ mod terminal_layout {
         })
     }
 
-    /// Laid out in a dark terminal that shows filled boxes as bands.
+    /// Laid out in a dark terminal (its page black).
     fn laid_out_on_surfaces(ops: Vec<Op>) -> MountBatch {
         let mut c = core();
         c.set_environment(crate::element::Environment {
             cell: Some(size_pt(8.0, 16.0)),
-            cell_surfaces: true,
             dark: true,
             ..Default::default()
         });
@@ -26275,7 +26328,7 @@ mod terminal_layout {
     }
 
     #[test]
-    fn a_filled_box_keeps_a_border_that_stands_out() {
+    fn a_filled_box_draws_no_border_however_it_stands_out() {
         let mut ops = view(
             2,
             ROOT_ID,
@@ -26290,12 +26343,34 @@ mod terminal_layout {
         ops.extend(view(5, 2, &[]));
         ops.extend(text(6, 5, "Body"));
         let batch = laid_out_on_surfaces(ops);
-        // Its border Cell, then a surface's padding.
+        // A face is a line or a fill, never both: a surface's padding, no
+        // border Cell, however its line stands out.
         assert_eq!(
             frame_of(&batch, 3).map(|f| f.origin),
-            Some(point(Points(24.0), Points(32.0)))
+            Some(point(Points(16.0), Points(16.0)))
         );
-        assert_eq!(widths(&batch, 2), Some(Edges::all(Points(1.0))));
+        assert_eq!(widths(&batch, 2), Some(Edges::all(Points::ZERO)));
+        // Where fills are not bands it is laid out the same: the color
+        // depth never moves anything.
+        let mut ops = view(
+            2,
+            ROOT_ID,
+            &[
+                ("backgroundColor", V::Str("#1a1a1a")),
+                ("borderWidth", V::Number(1.0)),
+                ("borderColor", V::Str("#ffffff")),
+                ("padding", V::Number(16.0)),
+            ],
+        );
+        ops.extend(text(3, 2, "Title"));
+        ops.extend(view(5, 2, &[]));
+        ops.extend(text(6, 5, "Body"));
+        let batch = laid_out(ops);
+        assert_eq!(
+            frame_of(&batch, 3).map(|f| f.origin),
+            Some(point(Points(16.0), Points(16.0)))
+        );
+        assert_eq!(widths(&batch, 2), Some(Edges::all(Points::ZERO)));
     }
 
     #[test]
@@ -26431,6 +26506,43 @@ mod terminal_layout {
     }
 
     #[test]
+    fn a_steppers_pair_of_marks_reads_as_one_and_marks_beside_more_keep_a_column() {
+        // A number input's steppers: `▴` and `▾` alone in their box, and
+        // the same two marks with a third (a clear `×`) in another.
+        let marks = |id: NodeId, parent: NodeId, glyphs: &[&str]| {
+            let mut ops = view(
+                id,
+                parent,
+                &[
+                    ("flexDirection", V::Str("row")),
+                    ("alignSelf", V::Str("flex-start")),
+                ],
+            );
+            for (i, glyph) in glyphs.iter().enumerate() {
+                let button = id + 2 + 4 * i as NodeId;
+                ops.extend(pressable(button, id, &[], None));
+                ops.extend(text(button + 2, button, glyph));
+            }
+            ops
+        };
+        let mut ops = marks(2, ROOT_ID, &["▴", "▾"]);
+        ops.extend(marks(20, ROOT_ID, &["×", "▴", "▾"]));
+        let batch = laid_out_on_surfaces(ops);
+        let x = |id: NodeId| frame_of(&batch, id).map(|f| f.origin.x);
+        // The pair: side by side, two columns in all.
+        assert_eq!((x(4), x(8)), (Some(Points::ZERO), Some(Points(8.0))));
+        assert_eq!(
+            frame_of(&batch, 2).map(|f| f.size.width),
+            Some(Points(16.0))
+        );
+        // Three marks: a column between each.
+        assert_eq!(
+            (x(22), x(26), x(30)),
+            (Some(Points::ZERO), Some(Points(16.0)), Some(Points(32.0)))
+        );
+    }
+
+    #[test]
     fn a_filled_split_button_is_one_row_where_fills_are_not_bands() {
         // The gallery's: a filled, framed pill of the main action, a
         // divider and the menu's trigger in the menu's view, in a terminal
@@ -26492,7 +26604,7 @@ mod terminal_layout {
     }
 
     #[test]
-    fn a_card_around_an_inset_well_takes_no_column_for_padding_under_a_cell() {
+    fn a_filled_card_around_an_inset_well_draws_no_line() {
         // The gallery's Dock: a framed card padded 5pt around an inset well
         // with a line of its own, drawn as one frame where fills are bands.
         let framed_card = |ops: &mut Vec<Op>| {
@@ -26526,10 +26638,11 @@ mod terminal_layout {
         ops.extend(view(4, 3, &[("paddingLeft", V::Number(12.0))]));
         ops.extend(text(5, 4, "Files"));
         let batch = laid_out_on_surfaces(ops);
-        assert_eq!(widths(&batch, 2), Some(Edges::all(Points(1.0))));
-        // The well drops its line and lies against the card's: no blank
-        // column between them on either side.
+        // A face is a line or a fill, never both: the filled card and the
+        // well inside it draw no line, their colors set them apart.
+        assert!(widths(&batch, 2).is_none_or(|w| w == Edges::all(Points::ZERO)));
         assert!(widths(&batch, 3).is_none_or(|w| w == Edges::all(Points::ZERO)));
+        // The card's 5pt is a column each side, the well's edge.
         let (card, well) = (frame_of(&batch, 2).unwrap(), frame_of(&batch, 3).unwrap());
         assert_eq!(well.origin.x, Points(8.0));
         assert_eq!(
@@ -26537,14 +26650,14 @@ mod terminal_layout {
             Points(8.0)
         );
         // A text right in the card (beside a box: a card of texts alone is
-        // a one-row chip) keeps its column off the line.
+        // a one-row chip) keeps that column off its band's edge.
         let mut ops = Vec::new();
         framed_card(&mut ops);
         ops.extend(text(3, 2, "Files"));
         ops.extend(view(5, 2, &[]));
         ops.extend(text(6, 5, "Open"));
         let batch = laid_out_on_surfaces(ops);
-        assert_eq!(frame_of(&batch, 3).map(|f| f.origin.x), Some(Points(16.0)));
+        assert_eq!(frame_of(&batch, 3).map(|f| f.origin.x), Some(Points(8.0)));
     }
 
     #[test]
@@ -26601,12 +26714,79 @@ mod terminal_layout {
             Points(0.0)
         );
         assert_eq!(frame_of(&batch, 11).map(|f| f.origin.x), Some(Points(0.0)));
-        // Where fills are left out the palette is a frame of its own,
-        // inside the card's padding.
+        // Laid out the same where fills are left out: the color depth
+        // never moves anything.
         let mut all = Vec::new();
         ops(&mut all);
         let batch = laid_out(all);
-        assert_eq!(frame_of(&batch, 4).map(|f| f.origin.x), Some(Points(0.0)));
+        assert!(widths(&batch, 4).is_none_or(|w| w == Edges::all(Points::ZERO)));
+        assert_eq!(frame_of(&batch, 4).map(|f| f.origin.x), Some(Points(-8.0)));
+    }
+
+    #[test]
+    fn a_fields_marks_and_suffix_keep_one_column_apart() {
+        // A combobox's row in a terminal: the field, its `×` and `▾`, and
+        // the app's `⌘K` a margin after them.
+        let mut ops = view(
+            2,
+            ROOT_ID,
+            &[
+                ("flexDirection", V::Str("row")),
+                ("width", V::Number(400.0)),
+            ],
+        );
+        ops.extend(node(4, Tag::Input, 2, &[("flexGrow", V::Number(1.0))]));
+        ops.extend(pressable(6, 2, &[], None));
+        ops.extend(text(8, 6, "×"));
+        ops.extend(pressable(10, 2, &[], None));
+        ops.extend(text(12, 10, "▾"));
+        ops.extend(text(14, 2, "⌘K"));
+        ops.push(style_op(14, &[("marginLeft", V::Number(8.0))]));
+        let batch = laid_out(ops);
+        let (clear, toggle, keys) = (
+            frame_of(&batch, 6).unwrap(),
+            frame_of(&batch, 10).unwrap(),
+            frame_of(&batch, 14).unwrap(),
+        );
+        assert_eq!(clear.size.width, Points(8.0));
+        assert_eq!(
+            toggle.origin.x - (clear.origin.x + clear.size.width),
+            Points(8.0)
+        );
+        assert_eq!(
+            keys.origin.x - (toggle.origin.x + toggle.size.width),
+            Points(8.0)
+        );
+    }
+
+    #[test]
+    fn a_prefix_showing_nothing_spaces_nothing_before_the_field() {
+        // A field's prefix holding only its focus ring (its icon left out
+        // in a terminal), with the column the field keeps after a prefix.
+        let mut ops = view(
+            2,
+            ROOT_ID,
+            &[
+                ("flexDirection", V::Str("row")),
+                ("width", V::Number(400.0)),
+            ],
+        );
+        ops.extend(view(4, 2, &[("marginRight", V::Number(8.0))]));
+        ops.extend(view(
+            6,
+            4,
+            &[
+                ("position", V::Str("absolute")),
+                ("top", V::Number(0.0)),
+                ("left", V::Number(0.0)),
+                ("right", V::Number(0.0)),
+                ("bottom", V::Number(0.0)),
+                ("borderWidth", V::Number(1.0)),
+            ],
+        ));
+        ops.extend(node(8, Tag::Input, 2, &[("flexGrow", V::Number(1.0))]));
+        let batch = laid_out(ops);
+        assert_eq!(frame_of(&batch, 8).map(|f| f.origin.x), Some(Points(0.0)));
     }
 
     #[test]
@@ -27849,7 +28029,7 @@ mod terminal_layout {
     }
 
     #[test]
-    fn a_code_cell_keeps_its_frame_with_its_digit() {
+    fn a_code_cell_keeps_its_size_with_its_digit() {
         // A one-time code's cells, 36 × 44pt and framed: the one that holds
         // a digit is the same box as the empty one, three rows with its
         // border, its digit on the middle row.
@@ -27884,7 +28064,8 @@ mod terminal_layout {
         assert_eq!(widths(&filled, 3), Some(Edges::all(Points(1.0))));
         assert_eq!(frame_of(&filled, 4).map(|f| f.origin.y), Some(Points(16.0)));
         // On a band of its own (a filled cell's fill, unlike the empty
-        // ones') it keeps its frame as well.
+        // ones') it is the same box, its band in place of its line: a face
+        // is a line or a fill, never both.
         let mut ops = view(2, ROOT_ID, &[("flexDirection", V::Str("row"))]);
         ops.extend(view(
             3,
@@ -27905,9 +28086,8 @@ mod terminal_layout {
             frame_of(&banded, 3).map(|f| f.size),
             Some(size_pt(32.0, 48.0))
         );
-        assert_eq!(widths(&banded, 3), Some(Edges::all(Points(1.0))));
-        // In a card, an inset well whose line stands out: a band inside a
-        // frame drops its line, a code's cell keeps it.
+        assert!(widths(&banded, 3).is_none_or(|w| w == Edges::all(Points::ZERO)));
+        // In a card, too.
         let mut ops = view(
             2,
             ROOT_ID,
@@ -27941,7 +28121,7 @@ mod terminal_layout {
             frame_of(&carded, 3).map(|f| f.size),
             Some(size_pt(32.0, 48.0))
         );
-        assert_eq!(widths(&carded, 3), Some(Edges::all(Points(1.0))));
+        assert!(widths(&carded, 3).is_none_or(|w| w == Edges::all(Points::ZERO)));
         // A round one on its band (an avatar's ring around its initials) is
         // the band alone, its initials on its first row with its badge
         // under them.
@@ -28123,8 +28303,9 @@ mod terminal_layout {
         ops.extend(text(6, 5, "Files"));
         ops.extend(text(8, 3, "Preview"));
         let batch = laid_out_on_surfaces(ops);
-        // The card keeps its line; the well in it is its band alone.
-        assert_eq!(widths(&batch, 2), Some(Edges::all(Points(1.0))));
+        // A face is a line or a fill, never both: the filled card is its
+        // band, and the well in it is its own band, with no line between.
+        assert_eq!(widths(&batch, 2), Some(Edges::all(Points::ZERO)));
         assert_eq!(widths(&batch, 3), Some(Edges::all(Points::ZERO)));
     }
 
@@ -28173,6 +28354,330 @@ mod terminal_layout {
         assert_eq!(frame_of(&batch, 2), Some(rect(80.0, 32.0, 160.0, 96.0)));
         assert_eq!(widths(&batch, 2), Some(Edges::all(Points(1.0))));
         assert!(!left_out(&batch, 2));
+    }
+
+    #[test]
+    fn a_popups_panel_is_its_band_or_its_line_close_around_its_content() {
+        // A hover card's panel in its overlay: filled, framed, padded 16pt,
+        // a name over a box of figures.
+        let popup = || {
+            let mut ops = node(
+                2,
+                Tag::Overlay,
+                ROOT_ID,
+                &[("left", V::Number(80.0)), ("top", V::Number(32.0))],
+            );
+            ops.extend(view(
+                3,
+                2,
+                &[
+                    ("width", V::Number(240.0)),
+                    ("padding", V::Number(16.0)),
+                    ("borderWidth", V::Number(1.0)),
+                    ("borderRadius", V::Number(12.0)),
+                    ("borderColor", V::Str("#b0b0b0")),
+                    ("backgroundColor", V::Str("#262626")),
+                ],
+            ));
+            ops.extend(text(4, 3, "Mira Chen"));
+            ops.extend(view(6, 3, &[]));
+            ops.extend(text(7, 6, "Design lead"));
+            ops
+        };
+        // Its band alone, a column each side, no rows: its first text on
+        // its first row; laid out the same where fills are not bands, as
+        // the color depth never moves anything.
+        for batch in [laid_out_on_surfaces(popup()), laid_out(popup())] {
+            assert!(widths(&batch, 3).is_none_or(|w| w == Edges::all(Points::ZERO)));
+            assert_eq!(
+                frame_of(&batch, 4).map(|f| f.origin),
+                Some(point(Points(8.0), Points::ZERO))
+            );
+            let panel = frame_of(&batch, 3).unwrap();
+            assert_eq!(panel.size.height, Points(32.0));
+        }
+    }
+
+    #[test]
+    fn a_menu_whose_panel_the_app_filled_is_framed_a_cell_out_and_padded_a_column() {
+        // A trigger, and a menu under it: its list holds the app's filled
+        // and bordered panel, and an item in that.
+        let menu = || {
+            let mut ops = view(
+                2,
+                ROOT_ID,
+                &[
+                    ("width", V::Number(80.0)),
+                    ("height", V::Number(16.0)),
+                    ("alignSelf", V::Str("flex-start")),
+                ],
+            );
+            ops.extend(node(4, Tag::Overlay, ROOT_ID, &[]));
+            ops.extend(view(6, 4, &[]));
+            ops.push(Op::SetProp {
+                id: 6,
+                prop: Prop::Accessibility(AccessibilityProp::Role(crate::AccessibilityRole::Menu)),
+            });
+            ops.extend(view(
+                8,
+                6,
+                &[
+                    ("width", V::Number(160.0)),
+                    ("padding", V::Number(4.0)),
+                    ("borderWidth", V::Number(1.0)),
+                    ("borderColor", V::Str("#36383c")),
+                    ("backgroundColor", V::Str("#25262a")),
+                ],
+            ));
+            ops.extend(text(10, 8, "New document"));
+            ops.extend([
+                overlay_prop(
+                    4,
+                    crate::OverlayProp::Anchor(crate::overlay::OverlayAnchor::Node(2)),
+                ),
+                overlay_prop(
+                    4,
+                    crate::OverlayProp::Placement(crate::overlay::Placement::Bottom),
+                ),
+                overlay_prop(4, crate::OverlayProp::Align(crate::overlay::Align::Start)),
+            ]);
+            ops
+        };
+        // Its panel's fill is the popup itself, its line a Cell outside it
+        // at every depth of color: a Cell clear of the trigger's row, its
+        // panel's own border no Cells, its item a column in on its first
+        // row.
+        for batch in [laid_out_on_surfaces(menu()), laid_out(menu())] {
+            assert_eq!(frame_of(&batch, 4).map(|f| f.origin.y), Some(Points(32.0)));
+        }
+        let batch = laid_out_on_surfaces(menu());
+        assert!(widths(&batch, 8).is_none_or(|w| w == Edges::all(Points::ZERO)));
+        assert_eq!(
+            frame_of(&batch, 10).map(|f| f.origin),
+            Some(point(Points(8.0), Points::ZERO))
+        );
+    }
+
+    #[test]
+    fn a_popups_line_starts_on_the_row_under_its_trigger_whatever_its_offset() {
+        // A menu 4pt below its trigger (the app's gap in a GUI): rounded
+        // up to a Cell it would leave a blank row between the trigger and
+        // the line, over the page's text there.
+        let menu = |offset: f32| {
+            let mut ops = view(
+                2,
+                ROOT_ID,
+                &[
+                    ("width", V::Number(80.0)),
+                    ("height", V::Number(16.0)),
+                    ("alignSelf", V::Str("flex-start")),
+                ],
+            );
+            ops.extend(node(4, Tag::Overlay, ROOT_ID, &[]));
+            ops.extend(view(
+                8,
+                4,
+                &[
+                    ("width", V::Number(160.0)),
+                    ("padding", V::Number(4.0)),
+                    ("borderWidth", V::Number(1.0)),
+                    ("borderColor", V::Str("#36383c")),
+                ],
+            ));
+            ops.extend(text(10, 8, "New document"));
+            ops.extend([
+                overlay_prop(
+                    4,
+                    crate::OverlayProp::Anchor(crate::overlay::OverlayAnchor::Node(2)),
+                ),
+                overlay_prop(
+                    4,
+                    crate::OverlayProp::Placement(crate::overlay::Placement::Bottom),
+                ),
+                overlay_prop(4, crate::OverlayProp::Offset(Points(offset))),
+            ]);
+            ops
+        };
+        // The trigger is row 0, the line row 1, the item row 2, whether
+        // the line is the panel's own border or a ring outside its box.
+        for offset in [0.0, 4.0, 12.0] {
+            for batch in [laid_out_on_surfaces(menu(offset)), laid_out(menu(offset))] {
+                let y = |id| frame_of(&batch, id).map_or(Points::ZERO, |f| f.origin.y);
+                assert_eq!(y(4) + y(8) + y(10), Points(32.0), "offset {offset}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_menus_rows_reach_its_line_and_keep_their_text_a_column_in() {
+        // A menu's panel (padded 4pt, bordered, filled by the app or not)
+        // holds a group's title, an item the pointer is on (filled) and
+        // one it is not.
+        let menu = |filled: bool| {
+            let mut ops = view(
+                2,
+                ROOT_ID,
+                &[
+                    ("width", V::Number(80.0)),
+                    ("height", V::Number(16.0)),
+                    ("alignSelf", V::Str("flex-start")),
+                ],
+            );
+            ops.extend(node(4, Tag::Overlay, ROOT_ID, &[]));
+            ops.extend(view(6, 4, &[]));
+            ops.push(Op::SetProp {
+                id: 6,
+                prop: Prop::Accessibility(AccessibilityProp::Role(crate::AccessibilityRole::Menu)),
+            });
+            ops.extend(view(
+                8,
+                6,
+                &[
+                    ("width", V::Number(160.0)),
+                    ("padding", V::Number(4.0)),
+                    ("borderWidth", V::Number(1.0)),
+                    ("borderColor", V::Str("#36383c")),
+                    (
+                        "backgroundColor",
+                        V::Str(if filled { "#25262a" } else { "transparent" }),
+                    ),
+                ],
+            ));
+            ops.extend(text(10, 8, "Sort by"));
+            ops.extend(view(12, 8, &[("backgroundColor", V::Str("#36383c"))]));
+            ops.extend(text(14, 12, "Name"));
+            ops.extend(view(16, 8, &[]));
+            ops.extend(text(18, 16, "Date"));
+            ops.extend([
+                overlay_prop(
+                    4,
+                    crate::OverlayProp::Anchor(crate::overlay::OverlayAnchor::Node(2)),
+                ),
+                overlay_prop(
+                    4,
+                    crate::OverlayProp::Placement(crate::overlay::Placement::Bottom),
+                ),
+                overlay_prop(4, crate::OverlayProp::Align(crate::overlay::Align::Start)),
+            ]);
+            ops
+        };
+        // Each row's band runs from the first column inside the line to
+        // the last (filled or not: its fill follows the pointer), and its
+        // text, as the title's, starts a column in. A filled panel is the
+        // popup (its line a Cell outside it); an unfilled one keeps its own
+        // line, a Cell inside its box.
+        for filled in [true, false] {
+            let batch = laid_out_on_surfaces(menu(filled));
+            let line = if filled { 0.0 } else { 8.0 };
+            for row in [12, 16] {
+                let f = frame_of(&batch, row).unwrap();
+                assert_eq!(
+                    (f.origin.x, f.size.width),
+                    (Points(line), Points(160.0 - 2.0 * line)),
+                    "row {row}, filled {filled}"
+                );
+            }
+            assert_eq!(
+                frame_of(&batch, 10).map(|f| f.origin.x),
+                Some(Points(line + 8.0))
+            );
+            for label in [14, 18] {
+                assert_eq!(
+                    frame_of(&batch, label).map(|f| f.origin.x),
+                    Some(Points(8.0)),
+                    "label {label}, filled {filled}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_lists_rows_in_a_popup_styled_on_its_overlay_reach_its_line() {
+        // A select's list: its popup's own box filled, framed and padded
+        // 6pt (the app's popup style on the overlay), a scroll view in it
+        // holding the list of options.
+        let mut c = core();
+        c.set_environment(crate::element::Environment {
+            cell: Some(size_pt(8.0, 16.0)),
+            dark: true,
+            ..Default::default()
+        });
+        let mut ops = node(
+            2,
+            Tag::Overlay,
+            ROOT_ID,
+            &[
+                ("left", V::Number(80.0)),
+                ("top", V::Number(32.0)),
+                ("width", V::Number(160.0)),
+                ("padding", V::Number(6.0)),
+                ("borderWidth", V::Number(1.0)),
+                ("borderColor", V::Str("#36383c")),
+                ("backgroundColor", V::Str("#25262a")),
+            ],
+        );
+        ops.extend(node(4, Tag::Scroll, 2, &[("height", V::Number(32.0))]));
+        ops.extend([
+            Op::Create {
+                id: 6,
+                tag: Tag::List,
+            },
+            Op::SetProp {
+                id: 6,
+                prop: Prop::ListViewport(crate::ListViewport::Parent),
+            },
+            Op::SetProp {
+                id: 6,
+                prop: Prop::EstimatedItemSize(px(16.0)),
+            },
+            Op::SetProp {
+                id: 6,
+                prop: Prop::Count(2),
+            },
+            Op::Insert {
+                parent: 4,
+                child: 6,
+                before: None,
+            },
+        ]);
+        apply(&mut c, ops);
+        let first = c.commit().unwrap();
+        let (mut next, mut cells) = (100, Vec::new());
+        render_binds(&mut c, &mut next, &mut cells, 16.0);
+        assert!(!cells.is_empty());
+        // Each cell holds the option's row, its text in it.
+        let row = |i: usize| 300 + 4 * i as NodeId;
+        for (i, &cell) in cells.iter().enumerate() {
+            let mut ops = view(row(i), cell, &[]);
+            ops.extend(text(row(i) + 2, row(i), "Name"));
+            apply(&mut c, ops);
+        }
+        let batch = c.commit().unwrap();
+        // The scroll view lies against the line across the panel's
+        // padding, so each row's band runs line to line (its fill follows
+        // the highlight); its text keeps the padding, a column in.
+        assert_eq!(
+            frame_of(&first, 4).map(|f| (f.origin.x, f.size.width)),
+            Some((Points::ZERO, Points(160.0)))
+        );
+        for (i, &cell) in cells.iter().enumerate() {
+            let span = |id| frame_of(&batch, id).map(|f| (f.origin.x, f.size.width));
+            assert_eq!(
+                span(cell),
+                Some((Points::ZERO, Points(160.0))),
+                "cell {cell}"
+            );
+            assert_eq!(
+                span(row(i)),
+                Some((Points::ZERO, Points(160.0))),
+                "cell {cell}"
+            );
+            assert_eq!(
+                frame_of(&batch, row(i) + 2).map(|f| f.origin.x),
+                Some(Points(8.0)),
+                "cell {cell}"
+            );
+        }
     }
 
     #[test]

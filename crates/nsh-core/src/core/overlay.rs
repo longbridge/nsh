@@ -1185,14 +1185,30 @@ impl<M: TextEngine> Core<M> {
                 // takes the rows around the anchor's: the box's first row
                 // is the anchor's (its last, aligned with the end), as a
                 // submenu's first item lines up with its item.
+                // The frame is a ring outside the box or the panel's own
+                // line inside it: a row either way.
+                let line = match self.layout.grid() {
+                    Some(grid) if self.framed_box(key).is_some() => grid.height,
+                    _ => ring.height.0,
+                };
                 let anchor = match config.placement.is_horizontal() {
                     true => rect(
                         anchor.origin.x.0,
-                        anchor.origin.y.0 - ring.height.0,
+                        anchor.origin.y.0 - line,
                         anchor.size.width.0,
-                        anchor.size.height.0 + ring.height.0 * 2.0,
+                        anchor.size.height.0 + line * 2.0,
                     ),
                     false => anchor,
+                };
+                // A terminal's frame is the gap: it starts on the row (or
+                // the column) after the trigger's, as rounding an offset
+                // up to a Cell would leave a blank row between them.
+                let config = match self.layout.grid() {
+                    Some(_) => OverlayConfig {
+                        offset: Points::ZERO,
+                        ..config
+                    },
+                    None => config,
                 };
                 place(anchor, framed, area, &config, self.nodes[key as usize].rtl)
             }
@@ -1309,6 +1325,13 @@ impl<M: TextEngine> Core<M> {
     /// that box's bounds in overlay `key`.
     fn framed_box(&self, key: Key) -> Option<(Size<Points>, Bounds<Points>)> {
         let grid = self.layout.grid()?;
+        // A popup is its line, at every depth of color: the frame around
+        // its box takes a Cell each side, and the app's fill of its panel
+        // is the popup itself, which the painter does not paint again.
+        let ring = Size {
+            width: Points(grid.width),
+            height: Points(grid.height),
+        };
         let mut at = key;
         let mut origin = Point::default();
         loop {
@@ -1326,14 +1349,7 @@ impl<M: TextEngine> Core<M> {
                 .any(|&v| v > Points::ZERO);
             if bordered || n.view_style.background_color.0 & 255 != 0 {
                 let kept = layout.is_some_and(|l| l.border.top > 0.0 || l.border.left > 0.0);
-                let ring = if kept {
-                    Size::default()
-                } else {
-                    Size {
-                        width: Points(grid.width),
-                        height: Points(grid.height),
-                    }
-                };
+                let ring = if kept { Size::default() } else { ring };
                 let size = layout.map_or_else(Size::default, |l| Size {
                     width: Points(l.size.width),
                     height: Points(l.size.height),
@@ -1358,6 +1374,12 @@ impl<M: TextEngine> Core<M> {
                 if !self.holds_list(key, 3) {
                     return None;
                 }
+                // The layout's own line around the list (a popup's panel
+                // takes a Cell each side for it) is the frame already.
+                let ring = match self.lined_panel(at, 3) {
+                    true => Size::default(),
+                    false => ring,
+                };
                 let n = &self.nodes[key as usize];
                 let size = n.layout.map_or_else(Size::default, |l| {
                     let l = self.layout.unrounded_layout(l);
@@ -1366,10 +1388,6 @@ impl<M: TextEngine> Core<M> {
                         height: Points(l.size.height),
                     }
                 });
-                let ring = Size {
-                    width: Points(grid.width),
-                    height: Points(grid.height),
-                };
                 return Some((
                     ring,
                     Bounds {
@@ -1380,6 +1398,26 @@ impl<M: TextEngine> Core<M> {
             };
             at = first;
         }
+    }
+
+    /// Whether `key` or its first view down to `depth` levels below it has
+    /// a line of the layout's (a popup's panel a Cell each side): the
+    /// popup's frame already, drawn inside its box.
+    fn lined_panel(&self, key: Key, depth: usize) -> bool {
+        let n = &self.nodes[key as usize];
+        let lined = n.layout.is_some_and(|l| {
+            let l = self.layout.unrounded_layout(l);
+            l.border.top > 0.0 || l.border.left > 0.0
+        });
+        lined
+            || (depth > 0
+                && n.children
+                    .iter()
+                    .find(|&&c| {
+                        let c = &self.nodes[c as usize];
+                        !c.is_overlay() && c.layout.is_some()
+                    })
+                    .is_some_and(|&c| self.lined_panel(c, depth - 1)))
     }
 
     /// Whether `key` or a view `depth` levels below it is a list of

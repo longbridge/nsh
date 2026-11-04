@@ -35,17 +35,17 @@
 //!   wrappers of one control, filled or not) ([`Insets`]; the
 //!   core mounts the other sides without a border); controls, boxes of
 //!   text and round boxes (a circle: corners of half its explicit side or
-//!   more) never have one. Where the terminal shows fills as bands
-//!   ([`Grid::surfaces`]), a filled container ([`Surface`]: a fill above
+//!   more) never have one. A filled container ([`Surface`]: a fill above
 //!   3% alpha unlike the nearest opaque fill around it, or the page) is a
-//!   surface instead: no border unless the app's stands out twice as far
-//!   as its fill, a row of padding above and below from 12pt, two columns
-//!   each side from 12pt and one from 4pt (from 8pt for a framed one holding
-//!   only boxes, which lie against its line). A framed surface inside a
-//!   frame drops its line and reaches across the padding of that frame to
-//!   its line, through wrappers of no insets in a column ([`band_reach`]:
-//!   an inset palette in a padded card), so its text starts where the
-//!   frame's other content does. Horizontal padding and margins are one
+//!   surface instead, at every color depth (the layout is the same whether
+//!   the terminal shows the fill as a band or not): a face is a line or a fill, never both, so it has no
+//!   border; a row of padding above and below from 12pt, two columns each
+//!   side from 12pt and one from 4pt; a popup's panel (an anchored
+//!   overlay's first face, [`popup_panel`]) a column each side from 4pt
+//!   and no rows, framed or filled. A surface inside a frame reaches
+//!   across the padding of that frame to its line, through wrappers of no
+//!   insets in a column ([`band_reach`]: an inset palette in a padded
+//!   card), so its text starts where the frame's other content does. Horizontal padding and margins are one
 //!   Cell from 8pt, two from 24pt (at most one on a control or a box of
 //!   text), one from 4pt against a parent's border with no padding of the
 //!   parent's there ([`framing`]: a tree's list in its box); vertical padding a row from 24pt (none on a control or a box
@@ -113,10 +113,6 @@ pub(crate) struct Grid {
     pub(crate) width: f32,
     /// A Cell's height: the unit of the y axis.
     pub(crate) height: f32,
-    /// The terminal shows a filled box as a band of its own color
-    /// (`Environment::cell_surfaces`): a filled container is a surface,
-    /// with no border ([`Surface`]).
-    pub(crate) surfaces: bool,
     /// The page's color, behind the root: black in a dark app, white in a
     /// light one.
     pub(crate) page: Color,
@@ -129,16 +125,13 @@ impl Grid {
         (width.is_finite() && height.is_finite() && width > 0.0 && height > 0.0).then_some(Grid {
             width,
             height,
-            surfaces: false,
             page: Color::BLACK,
         })
     }
 
-    /// This grid, showing filled boxes as bands (`surfaces`) on a dark
-    /// page or a light one.
-    pub(crate) fn with_surfaces(self, surfaces: bool, dark: bool) -> Grid {
+    /// This grid on a dark page or a light one.
+    pub(crate) fn with_page(self, dark: bool) -> Grid {
         Grid {
-            surfaces,
             page: if dark {
                 Color::BLACK
             } else {
@@ -255,6 +248,8 @@ pub(crate) struct Role {
     /// A text with a character that is no white space: what an absolute
     /// box over it would hide.
     pub(crate) glyphs: bool,
+    /// A text with a letter or a digit: a word, not a mark (`×`, `▾`, `+`).
+    pub(crate) worded: bool,
     /// A text of limited lines (`numberOfLines`): cut short with `…` when
     /// it has no room, so in a row too wide it gives before the gaps.
     pub(crate) clamped: bool,
@@ -366,6 +361,8 @@ pub(crate) trait Tree {
     fn placed(&self, node: NodeId) -> Layout;
     /// The box it is laid out in, `None` for a root.
     fn parent(&self, node: NodeId) -> Option<NodeId>;
+    /// The list a root is a cell of, `None` for any other node.
+    fn host(&self, node: NodeId) -> Option<NodeId>;
 }
 
 /// A box's border and padding in Cells, as its last full layout gave it:
@@ -590,6 +587,24 @@ fn blank(tree: &impl Tree, node: NodeId) -> bool {
         && !tree.measures(node)
         && count > 0
         && (0..count).all(|i| blank(tree, tree.child(node, i)))
+}
+
+/// Whether `node` is a box of no width of its own holding nothing that
+/// shows in flow: its children are blank ([`blank`]) or placed out of flow
+/// (a field's prefix holding only its focus ring).
+fn shows_nothing(tree: &impl Tree, node: NodeId) -> bool {
+    let role = tree.role(node);
+    let count = tree.child_count(node);
+    !role.control
+        && !role.text
+        && !role.scroll
+        && !tree.measures(node)
+        && count > 0
+        && tree.style(node).size.width.is_auto()
+        && (0..count).all(|i| {
+            let child = tree.child(node, i);
+            blank(tree, child) || tree.style(child).position.is_out_of_flow()
+        })
 }
 
 /// An icon control without a label: nothing of it would show, so it is left
@@ -828,8 +843,27 @@ fn framed_box(s: &Style, role: Role) -> bool {
 }
 
 /// A box's border and padding, in Cells, within a parent `parent_width`
-/// points wide.
+/// points wide. A row that reaches across a popup panel's padding to its
+/// line ([`reach`]: a menu's item) keeps at least that padding inside:
+/// its band reaches, its text stays where the panel's other content
+/// starts.
 fn insets(
+    tree: &impl Tree,
+    node: NodeId,
+    kind: Kind,
+    parent_width: Option<f32>,
+    grid: Grid,
+    surface: Option<Surface>,
+) -> (Sides, Sides) {
+    let (border, mut padding) = own_insets(tree, node, kind, parent_width, grid, surface);
+    let ((_, l), (_, r)) = reach(tree, grid, node, parent_width);
+    padding.l = padding.l.max(l);
+    padding.r = padding.r.max(r);
+    (border, padding)
+}
+
+/// A box's border and padding as its own style and role give them.
+fn own_insets(
     tree: &impl Tree,
     node: NodeId,
     kind: Kind,
@@ -839,39 +873,27 @@ fn insets(
 ) -> (Sides, Sides) {
     let s = tree.style(node);
     let role = tree.role(node);
-    if let Some(surface) = surface {
-        // A band of its color is its edge: a row of padding above and
-        // below from 12pt, two columns each side from 12pt, one from 4pt.
-        // A framed box with corners (a specimen, a code's cell) keeps its
-        // border on its band: the border is what it shows, and the same
-        // box empty, no band of content, has it (a code's filled cell
-        // beside its empty ones). A round one (an avatar's ring) is its
-        // band, as any surface.
-        let framed = surface.border || (framed_box(s, role) && !round(s, role, parent_width));
-        let has = |v: LengthPercentage| i32::from(framed && lp(v, parent_width) > 0.0);
-        let border = Sides {
-            l: has(s.border.left),
-            r: has(s.border.right),
-            t: has(s.border.top),
-            b: has(s.border.bottom),
-        };
-        // A column from 4pt keeps its text off the band's edge. A framed
-        // band holding only boxes (a card around an inset well whose own
-        // line it omits) leaves them against its line instead: each spaces
-        // itself there (`framing`), and less than a Cell between the two
-        // frames drawn as one takes none.
-        let sub_cell = !(framed && !holds_text(tree, node));
+    if surface.is_some() {
+        // A band of its color is its edge: a face is a line or a fill,
+        // never both, so a surface has no border (a framed specimen, a
+        // hued outline included); its color sets it apart. A row of
+        // padding above and below from 12pt, two columns each side from
+        // 12pt, one from 4pt; a popup's panel (an anchored overlay's first
+        // face) a column each side from 4pt and no rows, its band all the
+        // frame it needs.
+        let border = Sides::default();
+        let popup = popup_panel(tree, node);
         let px = |v: LengthPercentage| {
             let p = lp(v, parent_width);
-            if p >= 12.0 - EPSILON {
+            if popup {
+                i32::from(p >= 4.0 - EPSILON)
+            } else if p >= 12.0 - EPSILON {
                 2
-            } else if p >= 8.0 - EPSILON {
-                1
             } else {
-                i32::from(sub_cell && p >= 4.0 - EPSILON)
+                i32::from(p >= 4.0 - EPSILON)
             }
         };
-        let py = |v: LengthPercentage| i32::from(lp(v, parent_width) >= 12.0 - EPSILON);
+        let py = |v: LengthPercentage| i32::from(!popup && lp(v, parent_width) >= 12.0 - EPSILON);
         let padding = Sides {
             l: px(s.padding.left).max(disclosure_lead(tree, node)),
             r: px(s.padding.right) + i32::from(role.input),
@@ -910,7 +932,7 @@ fn insets(
     // as a surface does: its text never touches the band's edge or frame.
     let band = !role.control
         && !bordered
-        && self::surface(grid, role, tree.backdrop(node).unwrap_or(grid.page)).is_some();
+        && self::surface(role, tree.backdrop(node).unwrap_or(grid.page)).is_some();
     // A box against a frame's line with no padding of the frame's own
     // there (a tree's list inside its bordered box) keeps a column from
     // 4pt too: its rows never start or end on the line.
@@ -941,7 +963,53 @@ fn insets(
         t: py(s.padding.top),
         b: py(s.padding.bottom),
     };
+    // A framed popup's panel keeps a column each side inside its line from
+    // 4pt (a menu's usual padding), no more, and no rows.
+    if bordered && popup_panel(tree, node) {
+        let col = |v: LengthPercentage| i32::from(lp(v, parent_width) >= 4.0 - EPSILON);
+        let padding = Sides {
+            l: col(s.padding.left).max(disclosure_lead(tree, node)),
+            r: col(s.padding.right) + i32::from(role.input),
+            t: 0,
+            b: 0,
+        };
+        return (border, padding);
+    }
     (border, padding)
+}
+
+/// Whether `node` is a popup's panel: the first box with a fill or a line
+/// inside an anchored overlay (a popover's, a hover card's, a menu's, a
+/// tooltip's; a modal dialog is no overlay), or the overlay itself. An
+/// overlay with a fill or a line of its own (a select's list styled on its
+/// popup) is that first box: what is in it is no panel, as what is in a
+/// panel inside a bare overlay is not.
+fn popup_panel(tree: &impl Tree, node: NodeId) -> bool {
+    if tree.role(node).overlay {
+        return true;
+    }
+    let mut at = node;
+    while let Some(parent) = tree.parent(at) {
+        let role = tree.role(parent);
+        let face = face(tree, parent);
+        if role.overlay {
+            return !face;
+        }
+        if face || role.root {
+            return false;
+        }
+        at = parent;
+    }
+    false
+}
+
+/// Whether `node` shows a face: a line on a side or a fill.
+fn face(tree: &impl Tree, node: NodeId) -> bool {
+    let b = tree.style(node).border;
+    let lined = [b.left, b.right, b.top, b.bottom]
+        .iter()
+        .any(|&v| length(v.into_raw()).is_some_and(|v| v > 0.0));
+    lined || tree.role(node).fill.to_f64().3 as f32 > FILL_ALPHA
 }
 
 /// Whether `node` lies against its parent's left and right lines with no
@@ -976,34 +1044,84 @@ fn framing(tree: &impl Tree, node: NodeId) -> (bool, bool) {
     (l, r)
 }
 
-/// The columns `node`, a band whose line its frame leaves out (an inset
-/// palette in a card), reaches out on the left and right across the
-/// padding of the frame it lies in: its color is the frame's inside
-/// then, against the frame's line, and its text one column in, where the
-/// frame's other content (a caption under it) starts. Two insets, the
-/// frame's and the band's, would set its text two columns in and its
-/// band apart from both the line and that content. Only through boxes
-/// of no insets, no fill and no clip, in columns, where it spans the
-/// width; none where its own margin on the side is the app's.
+/// The columns `node`, a band (a filled box: an inset palette in a card)
+/// inside a frame, reaches out on the left and right across the padding of
+/// that frame: its color sets it apart, so it lies against the frame's
+/// line, and its text one column in, where the frame's other content (a
+/// caption under it) starts. Two insets, the frame's and the band's, would
+/// set its text two columns in and its band apart from both the line and
+/// that content. Only through boxes of no insets, no fill and no clip, in
+/// columns, where it spans the width; none where its own margin on the
+/// side is the app's, and none in a filled box, whose padding is its edge.
 fn band_reach(tree: &impl Tree, grid: Grid, node: NodeId, parent_w: Option<f32>) -> (i32, i32) {
+    let ((l, _), (r, _)) = reach(tree, grid, node, parent_w);
+    (l, r)
+}
+
+/// [`band_reach`]'s columns on the left and on the right, each with the
+/// padding the box keeps inside at least: a row in a popup's panel (a
+/// menu's item) keeps the panel's, so its text starts where the panel's
+/// other content does; a row of bands or controls (a card's buttons, a
+/// group of items) keeps none, its bands reaching the line themselves.
+fn reach(
+    tree: &impl Tree,
+    grid: Grid,
+    node: NodeId,
+    parent_w: Option<f32>,
+) -> ((i32, i32), (i32, i32)) {
+    let none = ((0, 0), (0, 0));
+    // A list's cell (laid out apart, a root) is a row of its list, which
+    // it spans: where the list's box reached a popup's line (a select's
+    // options), the row lies there too and keeps what that box reached
+    // across, so its band runs line to line and its text starts where the
+    // panel's other content (a search field) does.
+    if tree.parent(node).is_none()
+        && let Some(list) = tree.host(node)
+    {
+        let (l, r) = rows_reach(tree, grid, list);
+        return ((0, l), (0, r));
+    }
     let s = tree.style(node);
     let role = tree.role(node);
-    let drops_line = tree.framed()
-        && kind(tree, node).container
-        && !(framed_box(s, role) && !round(s, role, parent_w))
-        && surface(grid, role, tree.backdrop(node).unwrap_or(grid.page)).is_some_and(|s| s.border);
-    if !drops_line || s.position.is_out_of_flow() {
-        return (0, 0);
+    if !tree.framed() || s.position.is_out_of_flow() {
+        return none;
     }
-    let side = |border: fn(&Style) -> LengthPercentage,
-                margin: fn(&Style) -> LengthPercentageAuto,
-                inset: fn(&Insets) -> (i32, i32)| {
-        // The app's line it leaves out, and no margin of its own.
-        let own = tree.style(node);
-        if lp(border(own), parent_w) <= EPSILON
-            || lpa(margin(own), parent_w).is_some_and(|m| m.abs() > EPSILON)
-        {
-            return 0;
+    let band = kind(tree, node).container
+        && surface(role, tree.backdrop(node).unwrap_or(grid.page)).is_some();
+    // A row in a popup's panel (a menu's item, a list's option, a
+    // command) reaches its panel's line whether it is filled now or not:
+    // its fill comes and goes with the pointer, and its text stays where
+    // its padding (at least the panel's) sets it.
+    // So does a list, or a box of lists (a select's listbox in its
+    // popup), in a popup's panel: its cells are its rows.
+    let rows = holds_rows(tree, node);
+    let row = !role.text && (rows || !popup_panel(tree, node));
+    if !band && !row {
+        return none;
+    }
+    // What it keeps of the panel's padding: none when what it holds are
+    // bands or controls of their own, which reach the line in turn, or rows
+    // of a list, which keep it themselves.
+    let of_bands = rows || {
+        let count = tree.child_count(node);
+        count > 0
+            && (0..count).all(|i| {
+                let c = tree.child(node, i);
+                let r = tree.role(c);
+                r.control
+                    || (kind(tree, c).container
+                        && surface(r, tree.backdrop(c).unwrap_or(grid.page)).is_some())
+            })
+    };
+    let keeps = |p: i32| if of_bands { 0 } else { p };
+    // Picks one side's pair out of a box's (horizontal, vertical) insets.
+    type Pick = fn(((i32, i32), (i32, i32))) -> (i32, i32);
+    let side = |margin: fn(&Style) -> LengthPercentageAuto,
+                inset: fn(&Insets) -> (i32, i32),
+                pick: Pick| {
+        // No margin of its own: that is the app's spacing.
+        if lpa(margin(tree.style(node)), parent_w).is_some_and(|m| m.abs() > EPSILON) {
+            return (0, 0);
         }
         let mut child = node;
         while let Some(parent) = tree.parent(child) {
@@ -1020,11 +1138,38 @@ fn band_reach(tree: &impl Tree, grid: Grid, node: NodeId, parent_w: Option<f32>)
                     || align(cs.align_self.map_or(ps.align_items.keyword, |a| a.keyword))
                         == Align::Stretch);
             if !column || !stretched {
-                return 0;
+                return (0, 0);
             }
             let (b, p) = inset(&tree.insets(parent));
+            // A list's cell keeps what its list reached across
+            // ([`rows_reach`]): the row in it (a select's option, through
+            // the holder of the app's rows) reaches across that, so its band
+            // runs line to line, its text kept where the cell's padding is.
+            if p > 0 && tree.parent(parent).is_none() && tree.host(parent).is_some() {
+                return (p, keeps(p));
+            }
+            if p > 0 && popup_panel(tree, parent) {
+                // Through a row that reached the line already (a group of
+                // items keeping none of the padding): it lies there.
+                return if child == node {
+                    (p, keeps(p))
+                } else {
+                    (0, keeps(p))
+                };
+            }
             if b > 0 {
-                return p;
+                return (if band { p } else { 0 }, 0);
+            }
+            // A band, a control or a row of them in a row that reached a
+            // popup's line and kept its padding (a code block in a hover
+            // card's document, an item under a group's title, a card's
+            // buttons under its message) reaches across that padding too.
+            if p > 0
+                && child == node
+                && (band || role.control || of_bands)
+                && pick(reach(tree, grid, parent, None)).0 > 0
+            {
+                return (p, keeps(p));
             }
             let prole = tree.role(parent);
             if p > 0
@@ -1032,26 +1177,52 @@ fn band_reach(tree: &impl Tree, grid: Grid, node: NodeId, parent_w: Option<f32>)
                 || lpa(margin(ps), None).is_some_and(|m| m.abs() > EPSILON)
                 || prole.scroll
                 || tree.is_root(parent)
-                || surface(grid, prole, tree.backdrop(parent).unwrap_or(grid.page)).is_some()
+                || surface(prole, tree.backdrop(parent).unwrap_or(grid.page)).is_some()
             {
-                return 0;
+                return (0, 0);
             }
             child = parent;
         }
-        0
+        (0, 0)
     };
     (
-        side(
-            |s| s.border.left,
-            |s| s.margin.left,
-            |i| (i.border.l, i.padding.l),
-        ),
-        side(
-            |s| s.border.right,
-            |s| s.margin.right,
-            |i| (i.border.r, i.padding.r),
-        ),
+        side(|s| s.margin.left, |i| (i.border.l, i.padding.l), |r| r.0),
+        side(|s| s.margin.right, |i| (i.border.r, i.padding.r), |r| r.1),
     )
+}
+
+/// Whether `node` is a list or a box holding only lists (a scroll view
+/// around a list of a popup's options).
+fn holds_rows(tree: &impl Tree, node: NodeId) -> bool {
+    let list = |r: Role| r.scroll && r.sized;
+    let role = tree.role(node);
+    if list(role) {
+        return true;
+    }
+    let count = tree.child_count(node);
+    count > 0 && (0..count).all(|i| list(tree.role(tree.child(node, i))))
+}
+
+/// The columns on the left and the right a list's cells keep: what the
+/// list's box reached across ([`reach`]), the list's own or that of the
+/// box of lists it is in, as their last layout placed them (cells are laid
+/// out after their list). The reach is the only margin there: a box with
+/// a margin of the app's reaches nowhere.
+fn rows_reach(tree: &impl Tree, grid: Grid, list: NodeId) -> (i32, i32) {
+    let reached = |m: f32| if m < 0.0 { grid.cols(-m) } else { 0 };
+    let mut at = Some(list);
+    while let Some(node) = at {
+        if !holds_rows(tree, node) {
+            break;
+        }
+        let m = tree.placed(node).margin;
+        let (l, r) = (reached(m.left), reached(m.right));
+        if l > 0 || r > 0 {
+            return (l, r);
+        }
+        at = tree.parent(node);
+    }
+    (0, 0)
 }
 
 /// The columns a disclosure (a collapsible's or an accordion's trigger,
@@ -1127,23 +1298,19 @@ const SMALL_BOX: i32 = 6;
 /// A corner radius that rounds any box fully (`rounded-full` is 9999).
 const FULLY_ROUND: f32 = 1000.0;
 
-/// A filled box (a band of its own color in a terminal that shows them,
-/// [`Grid::surfaces`]): it keeps its padding, in rows and columns, and
-/// draws no border unless the app's border stands out more than the fill.
+/// A filled box (a band of its own color in a terminal that shows them;
+/// laid out the same where it cannot): it keeps its padding, in rows and columns, and
+/// draws no border: a face is a line or a fill, never both.
 #[derive(Debug, Clone, Copy, PartialEq)]
-struct Surface {
-    /// It keeps its border: its color is hued, or at least twice as far
-    /// from the backdrop's lightness as the fill's.
-    border: bool,
-}
+struct Surface;
 
 /// The alpha above which a fill counts (8 / 255).
 const FILL_ALPHA: f32 = 0.03;
 
 /// Whether a box of role `role` over `backdrop` is a surface.
-fn surface(grid: Grid, role: Role, backdrop: Color) -> Option<Surface> {
+fn surface(role: Role, backdrop: Color) -> Option<Surface> {
     let (.., a) = role.fill.to_f64();
-    if !grid.surfaces || a as f32 <= FILL_ALPHA {
+    if a as f32 <= FILL_ALPHA {
         return None;
     }
     let shown = blend(role.fill, backdrop);
@@ -1153,14 +1320,7 @@ fn surface(grid: Grid, role: Role, backdrop: Color) -> Option<Surface> {
     if !differs {
         return None;
     }
-    let fill_d = (lightness(shown) - lightness(backdrop)).abs();
-    // A hued border (an accent outline, a colored side) is a line of its
-    // own color, however light it is.
-    let border = !role.border_color.is_transparent()
-        && ((lightness(blend(role.border_color, backdrop)) - lightness(backdrop)).abs()
-            >= 2.0 * fill_d
-            || saturated(role.border_color));
-    Some(Surface { border })
+    Some(Surface)
 }
 
 /// `top` over the opaque `under`.
@@ -1353,7 +1513,7 @@ fn bar(tree: &impl Tree, node: NodeId, grid: Grid, parent_w: Option<f32>, height
         && role.left_out == LeftOut::No
         && (0..tree.child_count(node)).all(|i| bare(tree, tree.child(node, i)))
         && dim(style.size.width, parent_w).is_none_or(|w| w > height)
-        && (outlined || surface(grid, role, tree.backdrop(node).unwrap_or(grid.page)).is_some())
+        && (outlined || surface(role, tree.backdrop(node).unwrap_or(grid.page)).is_some())
 }
 
 /// `value` within `min` and `max`.
@@ -1415,7 +1575,7 @@ pub(crate) fn compute(
     let parent_h = inputs.parent_size.height;
     let surface = k
         .container
-        .then(|| surface(grid, role, tree.backdrop(node).unwrap_or(grid.page)))
+        .then(|| surface(role, tree.backdrop(node).unwrap_or(grid.page)))
         .flatten();
     let (border, padding) = insets(tree, node, k, parent_w, grid, surface);
     let inset = border.add(padding);
@@ -1635,17 +1795,6 @@ pub(crate) fn compute(
         (border, padding) = (Sides::default(), Sides::default());
         inset = Sides::default();
     }
-    // A band inside a frame (an inset well in a card) is set apart by its
-    // color: its line would be a second frame around the same content.
-    // A framed box with corners (a code's cell) keeps it: its border is
-    // what it shows, as the same box empty does.
-    if surface.is_some_and(|s| s.border)
-        && tree.framed()
-        && !(tall && !round(tree.style(node), role, parent_w))
-    {
-        border = Sides::default();
-        inset = border.add(padding);
-    }
     let mut attempt_kind = k;
     // A group of controls (a split button, a toolbar, a tab list, a
     // segmented control) is one row of labels: never a card, its fill a
@@ -1659,8 +1808,19 @@ pub(crate) fn compute(
     // The column (or row) a scroll view's bar takes once its content
     // overflows it, as a classic scroll bar does.
     let mut gutter = Sides::default();
+    // A popup's panel is framed by the line its overlay draws a Cell
+    // outside it (`Core::framed_box`), whether its own border takes Cells:
+    // a box in a bare overlay, or the overlay itself when it shows a face.
+    let panel = popup_panel(tree, node) && (!tree.role(node).overlay || face(tree, node));
+    // So is a list's cell whose list reached a popup's line: a row of that
+    // panel, laid out apart.
+    let panel = panel
+        || (tree.parent(node).is_none()
+            && tree
+                .host(node)
+                .is_some_and(|list| rows_reach(tree, grid, list) != (0, 0)));
     let (content, mut size) = loop {
-        let framed = outer_framed || border != Sides::default();
+        let framed = outer_framed || border != Sides::default() || panel;
         tree.set_framed(framed);
         let s = tree.style(node);
         let row = matches!(
@@ -1741,7 +1901,10 @@ pub(crate) fn compute(
                 clamp(eh.map_or(h, |e| h.min(e)), min_h, max_h)
             }),
         };
-        if !card && !tall && border != Sides::default() && content.h < 2 {
+        // A line down one side only (an alert's or a quote's bar where
+        // a terminal shows no bands) is no frame around the row: it stays.
+        let bar = border.t == 0 && border.b == 0 && (border.l == 0) != (border.r == 0);
+        if !card && !tall && !bar && border != Sides::default() && content.h < 2 {
             attempt_kind.container = false;
             (border, padding) = insets(tree, node, attempt_kind, parent_w, grid, None);
             inset = border.add(padding);
@@ -2109,16 +2272,6 @@ fn give_gaps_and_labels(items: &mut [Item], before: &mut [i32], mut over: i32) -
     over
 }
 
-/// Whether `node` holds a text in flow among its children.
-fn holds_text(tree: &impl Tree, node: NodeId) -> bool {
-    (0..tree.child_count(node)).any(|i| {
-        let child = tree.child(node, i);
-        tree.role(child).text
-            && !hidden(tree, child)
-            && !tree.style(child).position.is_out_of_flow()
-    })
-}
-
 /// Whether the boxes in flow `flow` are a group of controls: controls, a
 /// divider between them (a bare view) and wrappers holding one control
 /// (a menu's trigger in its view), at least one of them a control.
@@ -2262,6 +2415,16 @@ fn arrange_flex(
             let m = style.margin;
             let auto = [m.left, m.right, m.top, m.bottom].map(|v| v.is_auto());
             let mut margin = margins(grid, style, parent_w, framed, layers(tree, node));
+            // A box that shows nothing in a row (a field's prefix holding
+            // only its focus ring, its icon left out) spaces nothing.
+            if row && shows_nothing(tree, node) {
+                if !auto[0] {
+                    margin.l = 0;
+                }
+                if !auto[1] {
+                    margin.r = 0;
+                }
+            }
             if !row {
                 let (l, r) = band_reach(tree, grid, node, parent_w);
                 margin.l -= l;
@@ -2296,12 +2459,8 @@ fn arrange_flex(
                 floor: 0,
                 labels: labels_held(tree, node),
                 control: tree.role(node).control,
-                filled: surface(
-                    grid,
-                    tree.role(node),
-                    tree.backdrop(node).unwrap_or(grid.page),
-                )
-                .is_some(),
+                filled: surface(tree.role(node), tree.backdrop(node).unwrap_or(grid.page))
+                    .is_some(),
                 overlaps: row && {
                     let negative =
                         |v: LengthPercentageAuto| lpa(v, parent_w).is_some_and(|m| m < 0.0);
@@ -2487,10 +2646,25 @@ fn split_line(
                     // Controls read as words (a checkbox and its label, an
                     // icon button shown as its label): two blank columns
                     // between their texts, theirs included (one when the
-                    // row is short).
+                    // row is short). A mark of one column (a field's `×`, its
+                    // `▾`; no letter or digit, unlike a page's `1`) is no
+                    // word: one blank column sets it apart.
                     let words =
                         (item.control || item.labels > 0) && (prev.control || prev.labels > 0);
-                    let need = 2 - prev.edges.1 - item.edges.0;
+                    let mark = |i: &Item| {
+                        i.control && i.grow <= 0.0 && i.main == 1 && !holds_words(tree, i.node)
+                    };
+                    // Two marks alone in their box (a stepper's `▴▾`) read as
+                    // one: nothing between them.
+                    let pair = items.len() == 2 && mark(item) && mark(prev);
+                    let apart = if pair {
+                        0
+                    } else if mark(item) || mark(prev) {
+                        1
+                    } else {
+                        2
+                    };
+                    let need = apart - prev.edges.1 - item.edges.0;
                     base.max(i32::from(pulled))
                         .max(if words { need } else { 0 })
                 } else {
@@ -2987,7 +3161,7 @@ fn frames_one_frame(tree: &impl Tree, node: NodeId, grid: Grid, parent_w: Option
         if !k.container || role.control || role.fills {
             return false;
         }
-        let surface = surface(grid, role, tree.backdrop(child).unwrap_or(grid.page));
+        let surface = surface(role, tree.backdrop(child).unwrap_or(grid.page));
         let (border, padding) = insets(tree, child, k, parent_w, grid, surface);
         if border != Sides::default() {
             return true;
@@ -3011,7 +3185,7 @@ fn blank_edges(
     let role = tree.role(node);
     let surface = k
         .container
-        .then(|| surface(grid, role, tree.backdrop(node).unwrap_or(grid.page)))
+        .then(|| surface(role, tree.backdrop(node).unwrap_or(grid.page)))
         .flatten();
     let (b, p) = insets(tree, node, k, parent_w, grid, surface);
     let (l, r) = (b.l + p.l, b.r + p.r + i32::from(trails(tree, node)));
@@ -3020,7 +3194,20 @@ fn blank_edges(
     let wide = k.labelled
         && dim(tree.style(node).size.width, parent_w)
             .is_some_and(|w| grid.cols(w) > i32::from(role.label) + l + r);
-    if wide { (l.max(1), r.max(1)) } else { (l, r) }
+    // A mark's slot (a trigger's `▾`, a field's `×`: a control of no fill
+    // and no words three Cells or more wide, its mark in the middle) has
+    // its own blank column each side, so slots side by side touch.
+    let slot = role.control
+        && role.fill.0 & 0xff == 0
+        && !role.animated_fill
+        && holds_glyphs(tree, node)
+        && !holds_words(tree, node)
+        && dim(tree.style(node).size.width, parent_w).is_some_and(|w| grid.cols(w) >= 3);
+    if wide || slot {
+        (l.max(1), r.max(1))
+    } else {
+        (l, r)
+    }
 }
 
 /// Whether the last thing `node` shows along a row is a blank text (the
@@ -3095,6 +3282,14 @@ fn glyphs_at(
 fn holds_meter(tree: &impl Tree, node: NodeId) -> bool {
     tree.role(node).meter
         || (0..tree.child_count(node)).any(|i| holds_meter(tree, tree.child(node, i)))
+}
+
+/// Whether `node` is or holds a text with a letter or a digit ([`Role::worded`]):
+/// a page's `1` is a word, a stepper's `+` a mark.
+fn holds_words(tree: &impl Tree, node: NodeId) -> bool {
+    let role = tree.role(node);
+    (role.text && role.worded)
+        || (0..tree.child_count(node)).any(|i| holds_words(tree, tree.child(node, i)))
 }
 
 /// Whether `node` or what it holds is a text with characters other than

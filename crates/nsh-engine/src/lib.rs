@@ -2858,7 +2858,6 @@ fn ui_environment(env: &Environment, window: Size<Points>) -> nsh_core::element:
         file_requests: env.file_requests,
         speech: env.speech,
         cell: env.cell,
-        cell_surfaces: env.cell_surfaces,
         web_input: env.web_input,
     }
 }

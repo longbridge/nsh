@@ -2575,6 +2575,15 @@ impl<M: TextEngine> Core<M> {
                     LeafContext::Text(cx) => cx.text.text.chars().any(|ch| !ch.is_whitespace()),
                     _ => false,
                 });
+        // A text with a letter or a digit: a word, not a mark.
+        let worded = kind == Kind::Text
+            && node
+                .layout
+                .and_then(|l| self.layout.get_node_context(l))
+                .is_some_and(|cx| match cx {
+                    LeafContext::Text(cx) => cx.text.text.chars().any(char::is_alphanumeric),
+                    _ => false,
+                });
         // A text of limited lines, cut short with `…` when it has no room.
         let clamped = kind == Kind::Text
             && node
@@ -2619,6 +2628,7 @@ impl<M: TextEngine> Core<M> {
             ),
             input: kind == Kind::Input,
             glyphs,
+            worded,
             clamped,
             radius,
             fill: view.background_color,
@@ -4244,6 +4254,13 @@ impl<M: TextEngine> Core<M> {
                 let props = node.props.get_or_insert_default();
                 if props.selectable_view != value {
                     props.selectable_view = value;
+                    flags |= dirty::VIEW_PROPS;
+                }
+            }
+            Prop::ContinuesText(value) => {
+                let props = node.props.get_or_insert_default();
+                if props.continues_text != value {
+                    props.continues_text = value;
                     flags |= dirty::VIEW_PROPS;
                 }
             }
@@ -6167,10 +6184,10 @@ impl<M: TextEngine> Core<M> {
     /// The surface's Cell size is now `cell` (`None`: it is no grid):
     /// styles are put on the grid, or taken off it, and everything is laid
     /// out again ([`grid`]).
-    fn cell_changed(&mut self, cell: Option<Size<Points>>, surfaces: bool, dark: bool) {
+    fn cell_changed(&mut self, cell: Option<Size<Points>>, dark: bool) {
         let grid = cell
             .and_then(terminal_layout::Grid::new)
-            .map(|g| g.with_surfaces(surfaces, dark));
+            .map(|g| g.with_page(dark));
         let cell = grid.map(|g| Size::new(Points(g.width), Points(g.height)));
         if self.measure_cache.set_cell(cell) {
             self.fonts_changed();
@@ -6601,6 +6618,7 @@ impl<M: TextEngine> Core<M> {
                     Some(CellSlot::Item(_)) | None => item_cross,
                     Some(_) => extra_cross,
                 };
+                self.layout.set_host(cell_layout, list_layout);
                 if resized || self.layout.dirty(cell_layout) {
                     self.layout_root(cell_layout, available(c));
                     self.nodes[cell as usize].relaid = true;

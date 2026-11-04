@@ -995,7 +995,8 @@ mod estimate {
 
 /// A deterministic, platform-free [`TextEngine`] for headless runs and
 /// tests: every character is `0.55 × font size` wide and lines are
-/// `1.2 × font size` tall, their baseline at the bottom (the font's ascent
+/// `1.2 × font size` tall; a text with line breaks measures as wide as its
+/// widest line and as tall as its lines (each wrapped on its own), their baseline at the bottom (the font's ascent
 /// is the line, its descent 0, its x height `0.5 × font size`), where
 /// attachments are placed by [`TextAttachment::ascent`] on the first line.
 #[derive(Debug, Default, Clone, Copy)]
@@ -1003,8 +1004,16 @@ pub struct ApproxTextEngine;
 
 impl TextEngine for ApproxTextEngine {
     /// `(character count, font size, max lines, attachments, the indices of
-    /// the characters two UTF-16 units long)`.
-    type Prepared = (usize, Points, u32, Vec<TextAttachment>, Vec<u32>);
+    /// the characters two UTF-16 units long, each line's character count
+    /// when the text has line breaks)`.
+    type Prepared = (
+        usize,
+        Points,
+        u32,
+        Vec<TextAttachment>,
+        Vec<u32>,
+        Vec<usize>,
+    );
 
     fn prepare(&self, text: &AttributedText) -> Self::Prepared {
         self.prepare_aligned(text, &AttachmentAlignments::default())
@@ -1024,6 +1033,11 @@ impl TextEngine for ApproxTextEngine {
             .filter(|(_, c)| c.len_utf16() == 2)
             .filter_map(|(i, _)| u32::try_from(i).ok())
             .collect();
+        // Empty (no allocation) for a text of one line.
+        let lines = match text.text.contains('\n') {
+            true => text.text.split('\n').map(|l| l.chars().count()).collect(),
+            false => Vec::new(),
+        };
         (
             text.text.chars().count(),
             size,
@@ -1039,20 +1053,30 @@ impl TextEngine for ApproxTextEngine {
                 })
                 .collect(),
             astral,
+            lines,
         )
     }
 
     fn measure(
         &self,
-        &(chars, font, max_lines, ..): &Self::Prepared,
+        &(chars, font, max_lines, _, _, ref breaks): &Self::Prepared,
         max_width: Option<Points>,
     ) -> Size<Points> {
         // The order of the products is kept: it decides the last bit.
-        let width = Points(chars as f32 * font.0 * 0.55);
+        let wrap = |chars: usize| {
+            let width = Points(chars as f32 * font.0 * 0.55);
+            match max_width {
+                Some(max) if width > max && max > Points::ZERO => (max, (width / max).ceil()),
+                _ => (width, 1.0),
+            }
+        };
         let line = font * 1.2;
-        let (width, mut lines) = match max_width {
-            Some(max) if width > max && max > Points::ZERO => (max, (width / max).ceil()),
-            _ => (width, 1.0),
+        let (width, mut lines) = match breaks.is_empty() {
+            true => wrap(chars),
+            false => breaks.iter().fold((Points::ZERO, 0.0), |(w, n), &c| {
+                let (lw, ln) = wrap(c);
+                (w.max(lw), n + ln)
+            }),
         };
         if max_lines > 0 {
             lines = lines.min(max_lines as f32);
@@ -1062,7 +1086,7 @@ impl TextEngine for ApproxTextEngine {
 
     fn layout(&self, prepared: &Self::Prepared, size: Size<Points>) -> TextLayout {
         // On one line, each character as wide as the others.
-        let (chars, font, _, attachments, astral) = prepared;
+        let (chars, font, _, attachments, astral, _) = prepared;
         let line = *font * 1.2;
         let advance = *font * 0.55;
         let attachments = attachments

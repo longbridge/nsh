@@ -62,6 +62,9 @@ struct LayoutNode<C> {
     /// ([`terminal_layout::Insets`]).
     insets: terminal_layout::Insets,
     parent: Option<NodeId>,
+    /// The list a cell is a row of: a cell is laid out apart, a root
+    /// ([`LayoutTree::set_host`]).
+    host: Option<NodeId>,
     children: Vec<NodeId>,
     cache: Cache,
     unrounded: Layout,
@@ -102,6 +105,7 @@ impl<C> LayoutNode<C> {
             role: Role::default(),
             insets: terminal_layout::Insets::default(),
             parent: None,
+            host: None,
             children: Vec::new(),
             cache: Cache::new(),
             unrounded: Layout::new(),
@@ -266,6 +270,18 @@ impl<C> LayoutTree<C> {
     /// `node`'s style.
     pub(crate) fn style(&self, node: NodeId) -> &Style {
         &self.nodes[key(node)].style
+    }
+
+    /// Records that `cell`, laid out apart (a root), is a row of `list`: in
+    /// a terminal it keeps the padding its list's box reached across (a
+    /// select's options in their popup's panel). Its cache is cleared when
+    /// that changes.
+    pub(crate) fn set_host(&mut self, cell: NodeId, list: NodeId) {
+        let n = &mut self.nodes[key(cell)];
+        if n.host != Some(list) {
+            n.host = Some(list);
+            n.clear_cache();
+        }
     }
 
     /// Records that `node` holds the app's JSX in a Rust component's tree:
@@ -723,6 +739,10 @@ where
 
     fn parent(&self, node: NodeId) -> Option<NodeId> {
         self.tree.parent(node)
+    }
+
+    fn host(&self, node: NodeId) -> Option<NodeId> {
+        self.node(node).host
     }
 }
 

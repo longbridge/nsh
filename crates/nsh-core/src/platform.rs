@@ -267,12 +267,6 @@ pub struct Environment {
     /// is one Cell and every frame is whole Cells (`docs/dev/styles.md`
     /// "Layout in a terminal").
     pub cell: Option<Size<Points>>,
-    /// A grid surface shows a filled box as a band of its own color (a
-    /// terminal with 256 colors or more whose background it knows): there
-    /// a filled container is a surface, padded and with no border; without
-    /// it a filled box is laid out as any other (`docs/dev/styles.md`
-    /// "Layout in a terminal").
-    pub cell_surfaces: bool,
     /// The platform gives web views trusted input
     /// ([`crate::Command::SendInput`], macOS); without it, the command
     /// does nothing.
@@ -320,7 +314,6 @@ impl Default for Environment {
             file_requests: false,
             speech: false,
             cell: None,
-            cell_surfaces: false,
             web_input: false,
         }
     }

@@ -1075,6 +1075,11 @@ pub struct KeyOptions {
     /// Fires again on the auto-repeats of a held key (default: once until
     /// the key is released).
     pub repeat: bool,
+    /// Lets the key go on after the handler runs, as if nothing were bound
+    /// (default: the platform consumes it). Tab still moves the focus: a
+    /// component closes its popup on Tab and the focus moves on as it
+    /// would ([`crate::keymap::KeyMatch::Notify`]).
+    pub pass_through: bool,
 }
 
 /// Whether shortcuts follow Apple's conventions here (`mod` is Command):
@@ -1126,7 +1131,10 @@ pub fn on_key_with(keystroke: &str, options: KeyOptions, handler: impl Fn(&str) 
     let handler: super::keys::KeyHandler = Rc::new(move |k: &str| owner.run(|| handler(k)));
     let keys = executor().keys.clone();
     let id = keys.borrow_mut().add(
-        |id| crate::keymap::KeyBinding::new(id, parsed, options.when, options.repeat),
+        |id| {
+            crate::keymap::KeyBinding::new(id, parsed, options.when, options.repeat)
+                .passing_through(options.pass_through)
+        },
         keystroke.into(),
         handler,
     );

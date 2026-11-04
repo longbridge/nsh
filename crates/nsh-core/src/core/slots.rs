@@ -103,6 +103,7 @@ pub(super) fn split(attrs: &Attrs) -> (Attrs, Attrs) {
         src: attrs.src.clone(),
         drawing: attrs.drawing.clone(),
         selectable_view: attrs.selectable_view,
+        continues_text: attrs.continues_text,
         render: attrs.render.clone(),
         ..Attrs::default()
     };
