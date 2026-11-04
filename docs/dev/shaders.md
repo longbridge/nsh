@@ -130,6 +130,37 @@ is. Views out of sight stop rendering until they show again.
 | GPUI | a frame client of its surface | a GPUI image (BGRA, straight, the view's opacity multiplied in, as canvases' pixmaps), whose replaced image leaves GPUI's atlases | views not drawn in the last frame |
 | Web | `requestAnimationFrame` | a `<canvas>` under the children | `IntersectionObserver` |
 
+### Effects and transitions
+
+Effects (`ShaderEffect`, `ScreenEffect`), transitions (`ShaderTransition`, `ScreenTransition`) and pages' and
+dialogs' `transitionShader` read pictures the platform takes of views (`ShaderView::set_input`). The table says how
+each platform that draws them does it; the others ignore `MountItem::ShaderTransition`, `ShaderInput` and `NavShader`
+(the children show as they are, pages and dialogs come with their `animation`).
+
+| Platform | Pictures | Hides the children, keeps their input | Over them | Pages and dialogs |
+|---|---|---|---|---|
+| macOS (AppKit) | `renderInContext:` of the children's container (`NshView::ensure_container`) without its mask, at the window's backing scale (a screen's: all the root shows but the frames over it); the backdrop: the root with the view's layer hidden | an empty `mask` on the container's layer (AppKit hit-tests views), which the decoration's clipping leaves in place until they show again (`decor::hide_children`); the root's while any screen shader hides it | the frames' sublayer at `zPosition` 1e6, `overflow` points beyond the box; a screen's on the root, which it leaves when its view is deleted or the app stops | the motion drawn through a layer over the stack (the root for a dialog) from pictures of it without and with the upper side (a page or dialog that left: its last image), taken on the first display frame, the live side again on the next three and after a view under it changed; the views at rest under it until it ends (`navigation::Motion::Shader`); popping and dismissing run backwards |
+
+macOS retakes an effect's pictures on the display frame after the core says they changed (`MountItem::ShaderInput`) or
+the platform changed a view in them (`NshView::changed`, `moved`, `redraw_rect`, a scroll view's offset), at most once
+per frame, and only those its program reads (`ShaderState::reads_children`: a screen effect that never calls
+`sample_content` does not picture the surface again when a view in it moves); a transition pictures its children (or its
+running frame) as its `from` when it starts and takes `to` again as its children change. Each picture draws into a
+bitmap context it keeps (`Canvas`), made again only when its size changes. A page's or a dialog's overlay (`NavOverlay`)
+pictures both sides on its first display frame; its live side (the upper one coming, the lower going) again on the next
+three, while AppKit lays out and draws what navigation just showed, and after that only when a view under its host
+changed (`Mark`, set by `ui_changed`, which looks only at the surface the changed view is in). Its run is the shader's
+own clock; the motion under it ends `LINGER` (50 ms) later, so the frames still on their way back from the GPU show
+before it goes. A view that comes back into sight takes the pictures that fell due while it was out of it (`shown`).
+What pictures cost on the main thread is in [macos.md](macos.md) "Shader pictures". `renderInContext:` draws no video or
+web page, nor backdrop blur or glass. The pictures of views AppKit has just shown again (navigation hides the screens
+under the top one) wait for the next display frame: until AppKit displays the window their layers are out of the tree,
+where they draw y up.
+
+Where there is no GPU device (`Renderer::new` is `None`) macOS masks no children: an effect or a screen effect
+shows them as they are, a transition starts no run, and a page's or a dialog's `transitionShader` leaves the change
+to its own `animation`.
+
 On Android the layer stays in `libnsh`: the encoder sends Java only whether a view shows a shader (opcode `SHADER`,
 35, in `encode.rs` ↔ `Mounter.java`), Java reports the size in pixels (`Native.shaderSize`), and the layer goes to
 the UI-thread renderer with the animation items. On Windows animated uniforms are written while the animation graph
