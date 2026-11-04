@@ -8,6 +8,15 @@ prop id:bar desktop.windowDrag true
 prop id:body windowDrag false
 covers [props] desktop
 covers [props] desktop.windowDrag
+# mod-keymap-pass
+tap id:case-mod-keymap-pass
+expect Passed: 0 Focus: none
+# The binding hears Tab and the focus still moves, to the first view and on.
+key tab
+expect Passed: 1 Focus: first
+key tab
+expect Passed: 2 Focus: second
+covers [nsh] keymap
 # mod-standard-system
 tap id:case-mod-standard-system
 expect console.identity=true

@@ -959,8 +959,10 @@ pub enum Key {
 /// Called from the agent's thread; each call does its work on the host's
 /// main thread and returns once it is done (input posted, not answered).
 pub trait Native: Send + Sync {
-    /// The view `id`'s bounds in the window's content, in points from its
-    /// top-left (`None`: it has no native view on screen).
+    /// The view `id`'s unclipped bounds in the window's content, in points
+    /// from its top-left. Mounted views outside a Scroll or the window
+    /// retain their bounds so the agent can scroll them into view;
+    /// `None` means the platform has no displayed view for this node.
     fn bounds(&self, id: NodeId) -> Option<Bounds<Points>>;
     /// Where the characters `start..end` (UTF-16 units) of text view
     /// `text` are on screen: the part on their first line, in the
@@ -1077,7 +1079,7 @@ pub trait Native: Send + Sync {
     /// Whether a native animation runs now that ends by itself: one that
     /// loops forever (a spinner) does not count, or no step would settle.
     fn animating(&self) -> bool;
-    /// A picture of the window, as a PNG.
+    /// A picture of the window: PNG bytes, or UTF-8 Cell JSON on the terminal target.
     fn screenshot(&self) -> Result<Vec<u8>, String>;
     /// Makes the window `size` points.
     fn resize(&self, width: Points, height: Points) -> Result<(), String>;

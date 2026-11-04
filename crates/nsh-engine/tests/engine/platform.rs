@@ -1,9 +1,10 @@
 //! The OS the platform reports decides `platform` and which platform-only
 //! props (`ios={{…}}`, `android={{…}}`, `desktop={{…}}`, `web={{…}}`)
-//! apply; on the web, the idiom decides between mobile and desktop.
-//! `platform.desktop`, the `desktop` idiom, `select`'s `desktop` and
-//! `desktop={{…}}` all follow the one definition of desktop
-//! (`Environment::desktop`), whatever idiom the platform set.
+//! apply; on the web, the idiom decides between mobile and desktop, and
+//! the terminal idiom behaves as a desktop. `platform.desktop`, the
+//! `desktop` idiom, `select`'s `desktop` and `desktop={{…}}` all follow the
+//! one definition of desktop (`Environment::desktop`), whatever idiom the
+//! platform set.
 
 use std::time::Duration;
 
@@ -146,5 +147,13 @@ fn platform_props_and_select_follow_the_os() {
         Idiom::Desktop,
         "web desktop true false d -",
         &["desktop", "web"],
+    );
+    // A terminal reports the real OS and behaves as a desktop, in an idiom
+    // of its own.
+    frame(
+        Os::Linux,
+        Idiom::Terminal,
+        "linux terminal true false d n",
+        &["desktop"],
     );
 }

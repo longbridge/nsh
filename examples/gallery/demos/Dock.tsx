@@ -3,7 +3,7 @@ import { signal, Text, untracked, View } from "nsh";
 import { Button, DockArea, type DockAreaLayout, type DockAreaRef } from "nsh/base";
 import { platform, windowSize } from "nsh";
 import { Icon } from "../icons";
-import { colors, desktop, finish, handleThumb, hint, IconTile, radius } from "../ui";
+import { colors, desktop, finish, handleThumb, hint, IconTile, radius, terminal } from "../ui";
 
 // `nsh/base`'s `DockArea` owns the workspace's behavior: tab drags into
 // another group, to a group's edge (a new split) or along a tab bar, all
@@ -281,7 +281,12 @@ export function Dock() {
                     onPress={() => area.closePanel(tab.panel)}
                     accessibilityLabel={`Close ${title(tab.panel)}`}
                     class={
-                      pointer
+                      // A terminal's tab has no room at its end for the
+                      // button to fade in over: it sits beside the title,
+                      // shown while the pointer is on the tab.
+                      terminal
+                        ? "size-5 items-center justify-center opacity-0 group-hover:opacity-100"
+                        : pointer
                         ? "absolute right-1 top-2 size-5 items-center justify-center rounded-md bg-inset opacity-0 transition-opacity group-hover:opacity-100 hover:bg-raised"
                         : "-mr-1.5 size-5 items-center justify-center rounded-md active:opacity-70"
                     }
@@ -325,7 +330,8 @@ export function Dock() {
             )}
           />
         </View>
-        <View class="flex-row flex-wrap gap-x-5 gap-y-1 px-2.5 pb-1 pt-0.5">
+        {/* Two columns apart in a terminal (gap-x-6, 24 pt), so each status reads on its own. */}
+        <View class={`flex-row flex-wrap ${terminal ? "gap-x-6" : "gap-x-5"} gap-y-1 px-2.5 pb-1 pt-0.5`}>
           <Status strong>{`Center: ${describe(layout().center)}`}</Status>
           <Status>{`First slot: ${firstSlot(layout().center)}`}</Status>
           <Status>{describeDock("Left", layout().left)}</Status>

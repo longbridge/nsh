@@ -783,6 +783,9 @@ fn props_json(p: &ViewProps) -> String {
     if let Some(e) = a.state.expanded {
         let _ = write!(s, ",\"expanded\":{e}");
     }
+    if a.state.has_popup {
+        s.push_str(",\"hasPopup\":true");
+    }
     if let Some(p) = a.state.pressed {
         let _ = write!(s, ",\"pressed\":{}", json_str(&kebab(&format!("{p:?}"))));
     }
@@ -822,6 +825,10 @@ fn props_json(p: &ViewProps) -> String {
     }
     if p.selectable_view {
         s.push_str(",\"selectableView\":true");
+    }
+    // A wrapped line's later part: a copy joins it to the part before.
+    if p.continues_text {
+        s.push_str(",\"continuesText\":true");
     }
     s.push('}');
     s
@@ -1360,6 +1367,8 @@ pub(crate) fn encode(out: &mut Out, item: &MountItem) {
         MountItem::ComponentProps { .. }
         | MountItem::ComponentPropSlots { .. }
         | MountItem::Keymap(_)
+        | MountItem::TreeOrder(_)
+        | MountItem::ProjectStates { .. }
         | MountItem::Overflow { .. }
         | MountItem::AnimationBindings { .. }
         | MountItem::Animation(_) => {}

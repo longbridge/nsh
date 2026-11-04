@@ -842,6 +842,12 @@ Reach for `requestAnimationFrame` (a global in TSX, following the display) only 
 
 ## Reduced motion
 
+On the terminal target (`--target tui`), the host advances animated values and composites on its frames and
+delivers their completion callbacks. Opacity, colors and two-dimensional transforms project to the Cell grid;
+text keeps upright terminal glyphs, and canvas paths use braille dots. The terminal reports reduced motion:
+motions, navigation, modal, layout and style transitions settle immediately, while explicit animated-value
+drivers and `Animated` composites play as written.
+
 When the user asks for less motion (iOS "Reduce Motion", Android "Remove animations"), `reduce_motion()` in Rust and `reduceMotion()` from `nsh` in TSX are `true`, and the `motion-reduce:` / `motion-safe:` Tailwind variants apply.
 
 [Motions](#motion) follow the setting on their own: `play` and `enter` land where the motion ends at once, without moving, and the answer is that it finished (`true`), as for a motion that played. An exit still ends hidden, an entrance still ends at rest. Pass `ignoreReduceMotion: true` (`play_ignoring_reduce_motion` in Rust) for a motion that carries meaning the user needs, such as a progress spinner.

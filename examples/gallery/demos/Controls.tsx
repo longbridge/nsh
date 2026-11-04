@@ -3,7 +3,7 @@ import { Button as BaseButton, type CalendarEntry, Checkbox, Collapsible, Combob
 import { reduceMotion } from "nsh";
 import { platform, windowSize } from "nsh";
 import { Icon, type IconName } from "../icons";
-import { alpha, Badge, Button, Caption, Card, colors, DemoPage, finish, focusRing, follow, hovered, IconTile, mono, motion, radius, Segmented, sliderFill, sliderLook, switchLook, tints, type Tone, toneColor, toneTint } from "../ui";
+import { alpha, Badge, Button, Caption, Card, colors, DemoPage, finish, focusRing, follow, hovered, IconTile, mono, motion, radius, Segmented, sliderFill, sliderLook, switchLook, terminal, TERMINAL_COLUMN, TERMINAL_GAP, TERMINAL_ROW, tints, type Tone, toneColor, toneTint } from "../ui";
 
 // `nsh/base`'s controls own presses, keys, the disabled state and what
 // screen readers say; every value is the app's, and so is the look: the
@@ -16,10 +16,13 @@ import { alpha, Badge, Button, Caption, Card, colors, DemoPage, finish, focusRin
 /**
  * The sizes of the page. Touch screens take the standard tier (44 pt and
  * more to press); a pointer the compact one desktops' settings and filters
- * use: smaller controls, rows and type, whatever the window's width.
+ * use: smaller controls, rows and type, whatever the window's width. The
+ * terminal's rows are one Cell row each, an indicator's box three Cells wide
+ * for its glyph (`[x]`).
  */
-const size =
-  platform.desktop
+const size = terminal
+  ? { row: TERMINAL_ROW, padding: 0, gap: TERMINAL_COLUMN, label: 14, detail: 12, control: 3 * TERMINAL_COLUMN, corner: 0, check: 12, dot: 6, tabs: TERMINAL_ROW, line: TERMINAL_ROW, clear: 2 * TERMINAL_COLUMN, switch: "small" as const }
+  : platform.desktop
     ? { row: 40, padding: 6, gap: 10, label: 14, detail: 12, control: 16, corner: 5, check: 12, dot: 6, tabs: 30, line: 32, clear: 16, switch: "small" as const }
     : { row: 56, padding: 8, gap: 12, label: 15, detail: 13, control: 22, corner: 7, check: 16, dot: 8, tabs: 40, line: 44, clear: 20, switch: "regular" as const };
 const pointer = platform.desktop;
@@ -31,7 +34,7 @@ const row = (first: boolean) => ({
   alignItems: "center" as const,
   gap: size.gap,
   paddingVertical: size.padding,
-  borderTopWidth: first ? 0 : 1,
+  borderTopWidth: first || terminal ? 0 : 1,
   borderTopColor: colors.line,
 });
 /** How far a row's hover fill reaches past its content on each side, and its corners. */
@@ -49,14 +52,15 @@ const hoverRow = (first: boolean, start = 0) => ({
   marginHorizontal: -BLEED,
   paddingStart: BLEED + start,
   paddingEnd: BLEED,
-  paddingTop: size.padding + (first ? 0 : 1),
+  paddingTop: size.padding + (first || terminal ? 0 : 1),
   borderRadius: BLEED,
 });
 
-/** The hairline above a `hoverRow` that is not the first. */
+/** The hairline above a `hoverRow` that is not the first (none in the
+ * terminal, whose rows are one row each). */
 function Divider(props: { show: boolean }) {
   return (
-    <If when={props.show}>
+    <If when={props.show && !terminal}>
       <View style={{ position: "absolute", top: 0, left: BLEED, right: BLEED, height: 1, backgroundColor: colors.line }} />
     </If>
   );
@@ -85,15 +89,22 @@ const centered = { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, a
 
 type Mark = "check" | "dash" | null;
 
-/** A box's or ring's size: `scale` times the page's (0.8 small, 1.25 large). */
-const dims = (scale = 1) => ({ control: Math.round(size.control * scale), check: Math.round(size.check * scale), corner: Math.round(size.corner * scale), dot: Math.round(size.dot * scale) });
+/** A box's or ring's size: `scale` times the page's (0.8 small, 1.25 large);
+ * one row high in the terminal, where it is a glyph three Cells wide. */
+const dims = (scale = 1) => ({
+  control: Math.round(size.control * scale),
+  height: terminal ? TERMINAL_ROW : Math.round(size.control * scale),
+  check: Math.round(size.check * scale),
+  corner: Math.round(size.corner * scale),
+  dot: Math.round(size.dot * scale),
+});
 
 /** A checkbox's box: its frame, empty; `BoxMark` fills it. `round`: a circle (a task's, as reminders draw it). */
 const box = (scale = 1, round = false) => {
   const d = dims(scale);
   return {
     width: d.control,
-    height: d.control,
+    height: d.height,
     borderRadius: round ? d.control / 2 : d.corner,
     alignItems: "center" as const,
     justifyContent: "center" as const,
@@ -136,7 +147,7 @@ function BoxMark(props: { mark: Mark; scale?: number; round?: boolean }) {
   // "Children, slots and rows"), so layers placed only absolutely made it
   // 0 × 0 and the fill a speck at the box's middle.
   return (
-    <View style={{ width: d.control - 2, height: d.control - 2 }}>
+    <View style={{ width: d.control - 2, height: d.height - 2 }}>
       <Lit on={on} radius={props.round ? d.control / 2 : d.corner} />
       {glyph(check, "check")}
       {glyph(dash, "minus")}
@@ -151,7 +162,7 @@ function Ring(props: { on: boolean; scale?: number }) {
   return (
     <View
       class={sink}
-      style={{ width: d.control, height: d.control, borderRadius: d.control / 2, alignItems: "center", justifyContent: "center", borderWidth: 1, ...empty() }}
+      style={{ width: d.control, height: d.height, borderRadius: d.control / 2, alignItems: "center", justifyContent: "center", borderWidth: 1, ...empty() }}
     >
       <Lit on={on} radius={d.control / 2} />
       <View
@@ -295,7 +306,7 @@ function Chip(props: { label: string; lead: JSX.Element; remove: string; onRemov
         flexDirection: "row",
         alignItems: "center",
         gap: 6,
-        height: h,
+        height: terminal ? undefined : h,
         // The lead (a face, a dot) close to the start.
         paddingLeft: 3,
         paddingRight: 3,
@@ -313,11 +324,13 @@ function Chip(props: { label: string; lead: JSX.Element; remove: string; onRemov
         accessibilityLabel={props.remove}
         onPress={props.onRemove}
         class="items-center justify-center rounded-full enabled:hover:bg-accent active:bg-track"
-        // Nearly the chip's height under a finger.
-        style={{ width: pointer ? h - 8 : h - 4, height: pointer ? h - 8 : h - 4 }}
+        // Nearly the chip's height under a finger; a terminal's is its mark, as text.
+        style={terminal ? undefined : { width: pointer ? h - 8 : h - 4, height: pointer ? h - 8 : h - 4 }}
         focusStyle={focusRing()}
       >
-        <Icon name="close" size={pointer ? 10 : 12} tint={colors.muted} />
+        <If when={terminal} else={<Icon name="close" size={pointer ? 10 : 12} tint={colors.muted} />}>
+          <Text style={{ color: colors.muted }}>×</Text>
+        </If>
       </BaseButton>
     </View>
   );
@@ -361,8 +374,11 @@ const ICON_ROOM = 14 + 6;
  * indicator arrives. It keeps its natural width (never truncated) and
  * reports it without the icon (`onWidth`): the same whether the icon shows
  * or not, so a row deciding on its icons by it never flips back.
+ * `underline`: a terminal marks the selected tab of an underlined strip by
+ * underlining its label, where the strip's indicator, thinner than a Cell,
+ * does not show.
  */
-function TabTitle(props: { name: string; selected: boolean; count?: number; icon?: IconName; onWidth?: (bare: number) => void }) {
+function TabTitle(props: { name: string; selected: boolean; count?: number; icon?: IconName; underline?: boolean; onWidth?: (bare: number) => void }) {
   const on = follow(() => (props.selected ? 1 : 0), motion.move);
   const away = on.interpolate({ inputRange: [0, 1], outputRange: [1, 0] });
   return (
@@ -381,7 +397,15 @@ function TabTitle(props: { name: string; selected: boolean; count?: number; icon
           </View>
         </View>
       </If>
-      <Text style={{ numberOfLines: 1, fontSize: 13, fontWeight: "500", color: on.interpolate({ inputRange: [0, 1], outputRange: [colors.muted, colors.text] }) }}>
+      <Text
+        style={{
+          numberOfLines: 1,
+          fontSize: 13,
+          fontWeight: "500",
+          color: on.interpolate({ inputRange: [0, 1], outputRange: [colors.muted, colors.text] }),
+          textDecorationLine: terminal && props.underline && props.selected ? "underline" : "none",
+        }}
+      >
         {props.name}
       </Text>
       <If when={props.count !== undefined}>
@@ -418,13 +442,28 @@ function titles(count: number) {
   };
 }
 
-/** A label, and a quieter line under it. */
-function Label(props: { label: string; detail?: string }) {
+/** The terminal's labels' column, so the details after them line up. */
+const LABEL_WIDTH = 16 * TERMINAL_COLUMN;
+/** The least a terminal's detail keeps beside its label: narrower, it wraps under it. */
+const DETAIL_WIDTH = 24 * TERMINAL_COLUMN;
+
+/** A terminal's name column for `names`: the longest of them (at least {@link LABEL_WIDTH}), so the details after it line up. */
+/** The terminal's text for each step button's icon. */
+const STEP_GLYPHS = { plus: "+", minus: "−" } as const;
+
+const labelColumn = (names: readonly string[]) => Math.max(LABEL_WIDTH, ...names.map((n) => n.length * TERMINAL_COLUMN));
+
+/** A label, and a quieter line under it (after it in the terminal). */
+function Label(props: { label: string; detail?: string; width?: number }) {
   return (
-    <View style={{ flex: 1, gap: 2 }}>
-      <Text style={{ fontSize: size.label, color: colors.text }}>{props.label}</Text>
+    // A terminal's gap is in the label's column: a row's gaps give first
+    // when its detail wraps, which would move the details off their column.
+    <View style={terminal ? { flex: 1, flexDirection: "row", flexWrap: "wrap" } : { flex: 1, gap: 2 }}>
+      <Text style={{ minWidth: terminal ? (props.width ?? LABEL_WIDTH) + TERMINAL_GAP : undefined, flexShrink: 0, fontSize: size.label, color: colors.text }}>{props.label}</Text>
       <If when={props.detail}>
-        <Text style={{ fontSize: size.detail, color: colors.muted }}>{props.detail}</Text>
+        {/* Beside the label in a terminal, it wraps rather than lose its end to `…`;
+            with less than DETAIL_WIDTH beside it, it goes under the label, as on a phone. */}
+        <Text style={{ numberOfLines: terminal ? undefined : 1, flexShrink: 1, ...(terminal ? { flexGrow: 1, flexBasis: DETAIL_WIDTH } : {}), fontSize: size.detail, color: colors.muted }}>{props.detail}</Text>
       </If>
     </View>
   );
@@ -802,7 +841,7 @@ export type Control =
  * it for, then in other looks, sizes and states (choice cards, tiles,
  * underlined tabs, an accordion), above the last event it reported.
  */
-export function Controls(props: { show: Control }) {
+export function Controls(props: { show: Control; firsts?: Control[] }) {
   const last = signal("—");
 
   function Settings() {
@@ -1069,7 +1108,12 @@ export function Controls(props: { show: Control }) {
                 indicator={<BoxMark mark={c().required || has(c().name) ? "check" : null} />}
               >
                 <Divider show={i() !== 0} />
-                <Label label={c().required ? `${c().name} (always on)` : c().name} detail={c().detail} />
+                {/* A terminal keeps the names in one column: "always on" goes with the description. */}
+                <Label
+                  label={c().required && !terminal ? `${c().name} (always on)` : c().name}
+                  detail={c().required && terminal ? `Always on · ${c().detail}` : c().detail}
+                  width={labelColumn(COOKIES.map((k) => k.name))}
+                />
               </Checkbox>
             )}
           </Each>
@@ -1414,7 +1458,7 @@ export function Controls(props: { show: Control }) {
                     focusStyle={focusRing()}
                     disabledStyle={dimmed}
                   >
-                    <TabTitle name={t().name} icon={icons() ? t().icon : undefined} onWidth={sized.report(i())} count={t().count} selected={tab() === t().name} />
+                    <TabTitle name={t().name} icon={icons() ? t().icon : undefined} onWidth={sized.report(i())} count={t().count} selected={tab() === t().name} underline />
                   </Tab>
                 )}
               </Each>
@@ -1496,8 +1540,9 @@ export function Controls(props: { show: Control }) {
           // Room for the list's rows, which are as wide as the trigger.
           minWidth: pointer ? 180 : undefined,
           paddingLeft: 10,
-          // Room for the clear button, which goes over the trigger's end in place of the chevron.
-          paddingRight: props.clearable ? clearInset + size.clear + 8 : 10,
+          // Room for the clear button, which goes over the trigger's end in place of the chevron. In the terminal the
+          // select's own marks go over the end, each in a slot of three Cells: ` ▾ `, or ` ×  ▾ `.
+          paddingRight: terminal ? (props.clearable ? 6 : 3) * TERMINAL_COLUMN : props.clearable ? clearInset + size.clear + 8 : 10,
           borderRadius: radius.control,
           borderWidth: 1,
           borderColor: props.error ? colors.danger : props.open ? colors.faint : colors.border,
@@ -1515,7 +1560,8 @@ export function Controls(props: { show: Control }) {
       >
         {props.lead}
         <Text style={{ flex: 1, numberOfLines: 1, fontSize: size.label, color: props.placeholder ? colors.faint : colors.text }}>{props.title}</Text>
-        <Chevron open={props.open} hidden={props.clearable} />
+        {/* The terminal's select draws its own `▾` there. */}
+        <Chevron open={props.open} hidden={props.clearable || terminal} />
         <FieldRing error={props.error} />
       </View>
     );
@@ -1680,8 +1726,8 @@ export function Controls(props: { show: Control }) {
               cleanable
               clearButtonAccessibilityLabel="Clear the font"
               clearButtonClass="items-center justify-center rounded-full enabled:hover:bg-accent active:bg-track"
-              clearButtonStyle={{ position: "absolute", top: (size.line - size.clear) / 2, right: clearInset, width: size.clear, height: size.clear }}
-              clearButton={<Icon name="close" size={size.clear - 6} tint={colors.muted} />}
+              clearButtonStyle={terminal ? undefined : { position: "absolute", top: (size.line - size.clear) / 2, right: clearInset, width: size.clear, height: size.clear }}
+              clearButton={clearGlyph()}
               trigger={<Picker title={font() === null ? "Default" : titleOf(FONTS, font())} open={fontOpen()} placeholder={font() === null} clearable={font() !== null} />}
               renderItem={(item) => <Option item={item} note={item.disabled ? "Not installed" : undefined} />}
               renderGroup={(group) => <Header group={group} />}
@@ -1706,12 +1752,16 @@ export function Controls(props: { show: Control }) {
     itemClass: optionClass,
   });
   /** A clear button over the trigger's end, in place of its chevron (`Picker`'s `clearable`). */
+  /** A clear button's mark: an × in a terminal, which draws no icons. */
+  const clearGlyph = () => (terminal ? <Text style={{ color: colors.muted }}>×</Text> : <Icon name="close" size={size.clear - 6} tint={colors.muted} />);
   const clearProps = (label: string) => ({
     cleanable: true,
     clearButtonAccessibilityLabel: label,
     clearButtonClass: "items-center justify-center rounded-full enabled:hover:bg-accent active:bg-track",
-    clearButtonStyle: { position: "absolute" as const, top: (size.line - size.clear) / 2, right: clearInset, width: size.clear, height: size.clear },
-    clearButton: <Icon name="close" size={size.clear - 6} tint={colors.muted} />,
+    // A terminal sets the clear button after the value, in the row: placed
+    // over it, its label ("Clear the deadline") would cover the value.
+    clearButtonStyle: terminal ? undefined : { position: "absolute" as const, top: (size.line - size.clear) / 2, right: clearInset, width: size.clear, height: size.clear },
+    clearButton: clearGlyph(),
   });
 
   function Downloads() {
@@ -1779,7 +1829,10 @@ export function Controls(props: { show: Control }) {
               >
                 <Text style={{ fontSize: size.detail, color: colors.muted }}>Sort by</Text>
                 <Text style={{ fontSize: size.detail, fontWeight: "500", color: colors.text }}>{sortTitle()}</Text>
-                <Chevron open={open()} />
+                {/* In the terminal, room after the gap for the select's own `▾` and the blank after it, two Cells (a bare trigger takes no padding there). */}
+                <If when={terminal} else={<Chevron open={open()} />}>
+                  <View style={{ width: TERMINAL_COLUMN + 1 }} />
+                </If>
               </View>
             }
             renderItem={(item) => <Option item={item} />}
@@ -1802,7 +1855,7 @@ export function Controls(props: { show: Control }) {
             {(f, i) => (
               <View style={{ ...row(i() === 0), paddingVertical: 4 }}>
                 <IconTile name={f().icon} size={pointer ? 26 : 32} tint={colors.muted} />
-                <Label label={f().name} detail={detail(f())} />
+                <Label label={f().name} detail={detail(f())} width={labelColumn(DOWNLOADS.map((d) => d.name))} />
                 <Text style={{ fontSize: size.detail, color: colors.text, fontVariant: ["tabular-nums"] }}>{trailing(f())}</Text>
               </View>
             )}
@@ -1880,7 +1933,7 @@ export function Controls(props: { show: Control }) {
     const file = () => {
       if (team() === null) {
         tried.set(true);
-        shake.play("shake");
+        if (!terminal) shake.play("shake");
         last.set("Issue: a team is required");
         return;
       }
@@ -1989,8 +2042,8 @@ export function Controls(props: { show: Control }) {
               clearButtonAccessibilityLabel="Clear the topics"
               clearButtonClass="items-center justify-center rounded-full enabled:hover:bg-accent active:bg-track"
               clearButtonStyle={{ width: size.clear, height: size.clear }}
-              clearButton={<Icon name="close" size={size.clear - 6} tint={colors.muted} />}
-              footerStyle={{ marginTop: 6, paddingTop: 6, paddingHorizontal: 9, borderTopWidth: 1, borderColor: colors.border }}
+              clearButton={clearGlyph()}
+              footerStyle={{ marginTop: 6, paddingTop: 6, paddingHorizontal: terminal ? 0 : 9, borderTopWidth: 1, borderColor: colors.border }}
               footer={<Text style={{ fontSize: 12, color: colors.muted }}>{`${topics().length} selected`}</Text>}
               renderItem={(item) => <Option item={item} note={item.disabled ? "Archived" : undefined} />}
               renderGroup={(group) => <Header group={group} />}
@@ -2029,7 +2082,8 @@ export function Controls(props: { show: Control }) {
   }
 
   /** The chips of a combobox's values, under its row: they pop in, and the others close up as one goes. */
-  const chips = { flexDirection: "row" as const, flexWrap: "wrap" as const, gap: 6 };
+  // A terminal keeps two Cells between the chips, whose × is pressed.
+  const chips = { flexDirection: "row" as const, flexWrap: "wrap" as const, gap: terminal ? TERMINAL_GAP : 6 };
 
   function People() {
     const people = signal<string[]>(["ada", "grace"]);
@@ -2063,17 +2117,17 @@ export function Controls(props: { show: Control }) {
             prefix={
               <>
               <FieldRing within />
-              {/* The faces overlap, each ringed in the card's color. */}
+              {/* The faces overlap, each ringed in the card's color; a terminal's initials stand a Cell apart, then a gap. */}
               <If when={people().length}>
-                <View style={{ flexDirection: "row", marginRight: 6 }}>
-                  <Each of={people().slice(0, 3)}>{(v, i) => <View style={{ marginLeft: i() ? -6 : 0 }}><Avatar name={person(v()).title} tone={person(v()).tone} size={pointer ? 20 : 24} ring /></View>}</Each>
+                <View style={{ flexDirection: "row", marginRight: terminal ? TERMINAL_GAP : 6 }}>
+                  <Each of={people().slice(0, 3)}>{(v, i) => <View style={{ marginLeft: i() ? (terminal ? TERMINAL_COLUMN : -6) : 0 }}><Avatar name={person(v()).title} tone={person(v()).tone} size={pointer ? 20 : 24} ring /></View>}</Each>
                 </View>
               </If>
               </>
             }
             empty={<Empty label="Nobody by that name" />}
             {...listProps()}
-            footerStyle={{ marginTop: 6, paddingTop: 6, paddingHorizontal: 9, borderTopWidth: 1, borderColor: colors.border }}
+            footerStyle={{ marginTop: 6, paddingTop: 6, paddingHorizontal: terminal ? 0 : 9, borderTopWidth: 1, borderColor: colors.border }}
             footer={<Text style={{ fontSize: 12, color: colors.muted }}>{full() ? "Four assigned: take one off to add another" : `${MAX_PEOPLE - people().length} more can be added`}</Text>}
             renderItem={(item) => (
               <Option
@@ -2209,12 +2263,15 @@ export function Controls(props: { show: Control }) {
           prefix={
             <>
               <FieldRing within />
-              <View style={{ marginRight: 8 }}><Icon name="search" size={size.check} tint={colors.faint} /></View>
+              {/* A terminal shows no icons: the placeholder says what the field does. */}
+              <If when={!terminal}>
+                <View style={{ marginRight: 8 }}><Icon name="search" size={size.check} tint={colors.faint} /></View>
+              </If>
             </>
           }
           suffix={
             <If when={pointer}>
-              <Text style={{ marginHorizontal: 4, paddingHorizontal: 5, borderRadius: 4, borderWidth: 1, borderColor: colors.line, fontSize: 11, color: colors.muted }}>⌘K</Text>
+              <Text style={{ ...(terminal ? { marginRight: TERMINAL_COLUMN } : { marginHorizontal: 4 }), paddingHorizontal: 5, borderRadius: 4, borderWidth: 1, borderColor: colors.line, fontSize: 11, color: colors.muted }}>⌘K</Text>
             </If>
           }
           empty={<Empty label="No command matches" />}
@@ -2274,6 +2331,18 @@ export function Controls(props: { show: Control }) {
    */
   function CalendarItem(props: { item: CalendarEntry; months?: number }) {
     const kind = props.item.kind;
+    if (terminal) {
+      // The terminal's calendar draws its days, years and arrows itself, on its grid of two-Cell columns: the
+      // labels are plain text at their own size (the painter bands the open view's toggle, from its state).
+      if (kind === "weekday") return <Text style={{ color: colors.faint }}>{WEEKDAYS[props.item.value]}</Text>;
+      if (kind === "month") return <Text>{MONTHS[props.item.value - 1].slice(0, 3)}</Text>;
+      const title = kind === "monthToggle" && (props.months ?? 1) > 1;
+      return (
+        <Text style={{ fontWeight: "600" }}>
+          {title ? `${MONTHS[props.item.value - 1]} ${props.item.year}` : kind === "monthToggle" ? MONTHS[props.item.value - 1] : String(props.item.value)}
+        </Text>
+      );
+    }
     if (kind === "previous" || kind === "next") {
       return (
         <View class="group-disabled:opacity-30" style={{ width: cell, height: cell, alignItems: "center", justifyContent: "center" }}>
@@ -2431,8 +2500,8 @@ export function Controls(props: { show: Control }) {
               cleanable
               clearButtonAccessibilityLabel="Clear the due date"
               clearButtonClass="items-center justify-center rounded-full enabled:hover:bg-accent active:bg-track"
-              clearButtonStyle={{ position: "absolute", top: (size.line - size.clear) / 2, right: clearInset, width: size.clear, height: size.clear }}
-              clearButton={<Icon name="close" size={size.clear - 6} tint={colors.muted} />}
+              clearButtonStyle={terminal ? undefined : { position: "absolute", top: (size.line - size.clear) / 2, right: clearInset, width: size.clear, height: size.clear }}
+              clearButton={clearGlyph()}
               trigger={<Picker title={due() ? shortDate(due()!) : "No due date"} open={dueOpen()} placeholder={!due()} clearable={due() !== null} />}
             />
           </View>
@@ -2461,7 +2530,7 @@ export function Controls(props: { show: Control }) {
               presetClass="enabled:hover:bg-accent active:opacity-70"
               calendarStyle={calendar}
               headerStyle={header}
-              bodyStyle={{ gap: monthGap }}
+              bodyStyle={terminal ? undefined : { gap: monthGap }}
               itemClass={calendarItemClass}
               renderItem={(item) => <CalendarItem item={item} months={twoMonths() ? 2 : 1} />}
               trigger={<Picker title={tripTitle()} open={tripOpen()} placeholder={!trip()} />}
@@ -2581,7 +2650,7 @@ export function Controls(props: { show: Control }) {
           numberOfMonths={twoMonths() ? 2 : 1}
           disabledMatcher={closed}
           {...calendarProps("start")}
-          bodyStyle={{ gap: monthGap }}
+          bodyStyle={terminal ? undefined : { gap: monthGap }}
           renderItem={(item) => <CalendarItem item={item} months={twoMonths() ? 2 : 1} />}
           trigger={
             // Both ends in one field, parted by a hairline; the whole field opens the calendar.
@@ -2594,6 +2663,8 @@ export function Controls(props: { show: Control }) {
                 borderWidth: 1,
                 borderColor: open() ? colors.faint : colors.border,
                 backgroundColor: colors.raised,
+                // Room for the date picker's ` ▾ ` over the field's end in the terminal.
+                paddingRight: terminal ? 3 * TERMINAL_COLUMN : 0,
                 ...finish.raised,
                 transitionProperty: "border-color",
                 transitionDuration: reduceMotion() ? 0 : 120,
@@ -2707,7 +2778,8 @@ export function Controls(props: { show: Control }) {
     const free = () => (day() ? SLOTS.filter((_, i) => !slotTaken(day()!, i)).length : 0);
     /** A time's chip: raised while free, in the accent while chosen (faded), struck through while taken. */
     const chip = (on: boolean) => ({
-      width: pointer ? 62 : ("31.5%" as const),
+      // A terminal's chips are as wide as their text, two Cells apart.
+      width: terminal ? undefined : pointer ? 62 : ("31.5%" as const),
       height: pointer ? 30 : 40,
       alignItems: "center" as const,
       justifyContent: "center" as const,
@@ -2740,7 +2812,7 @@ export function Controls(props: { show: Control }) {
           />
         </View>
         <View style={settle(t)}>
-          <RadioGroup style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, justifyContent: pointer ? "flex-start" : "space-between" }}>
+          <RadioGroup style={{ flexDirection: "row", flexWrap: "wrap", gap: terminal ? TERMINAL_GAP : 6, justifyContent: pointer ? "flex-start" : "space-between" }}>
             <Each of={SLOTS}>
               {(s, i) => (
                 <Radio
@@ -2880,8 +2952,13 @@ export function Controls(props: { show: Control }) {
         <Collapsible
           open={open() === props.q}
           content={
-            <View style={{ ...settle(t), paddingBottom: size.padding + 4, paddingEnd: 24 }}>
-              <Text style={{ fontSize: size.label, lineHeight: Math.round(size.label * 1.5), color: colors.muted }}>{props.a}</Text>
+            // A terminal's answer lines up under the question, past its
+            // two-column mark (a box of text takes one column of padding).
+            <View style={{ ...settle(t), paddingBottom: size.padding + 4, paddingEnd: 24, flexDirection: terminal ? "row" : undefined }}>
+              <If when={terminal}>
+                <View style={{ width: 2 * TERMINAL_COLUMN, flexShrink: 0 }} />
+              </If>
+              <Text style={{ flex: terminal ? 1 : undefined, fontSize: size.label, lineHeight: Math.round(size.label * 1.5), color: colors.muted }}>{props.a}</Text>
             </View>
           }
         >
@@ -3039,7 +3116,7 @@ export function Controls(props: { show: Control }) {
         >
           <View style={{ flexDirection: "row", alignItems: "center", gap: size.gap }}>
             <Icon name={props.icon} size={size.control} tint={colors.muted} />
-            <Label label={props.name} detail={props.size} />
+            <Label label={props.name} detail={props.size} width={labelColumn(FILES.map((f) => f.name))} />
             <View style={{ width: 40, height: 20, alignItems: "flex-end", justifyContent: "center" }}>
               <View style={{ ...centered, alignItems: "flex-end", opacity: away }}>
                 <Text style={{ fontSize: size.detail, color: colors.muted, fontVariant: ["tabular-nums"] }}>{`${props.value}%`}</Text>
@@ -3105,7 +3182,8 @@ export function Controls(props: { show: Control }) {
     }
     return (
       <Card title="Steps" subtitle="A setup in four steps: the bar fills to the step you are on" right={<Badge label={step() >= STEPS.length ? "Done" : `Step ${step() + 1} of ${STEPS.length}`} tone={step() >= STEPS.length ? "up" : "neutral"} />}>
-        {/* The bar runs from the first dot's middle to the last's; each label is centered under its dot. */}
+        {/* The bar runs from the first dot's middle to the last's; each label is centered under its dot
+            (a terminal's first and last start and end at theirs, off the card's border). */}
         <View style={{ height: DOT + 24, marginHorizontal: 24 }}>
           <View style={{ position: "absolute", left: DOT / 2, right: DOT / 2, top: (DOT - 4) / 2 }}>
             <Progress value={value()} accessibilityLabel="Setup" trackStyle={rail(4)} indicatorClass={glide} indicatorStyle={{ ...fillOf(4), translate: remaining(value()) }} />
@@ -3114,8 +3192,19 @@ export function Controls(props: { show: Control }) {
             <Each of={STEPS}>
               {(name, i) => (
                 <View style={{ width: DOT }}>
-                  <StepDot done={i() < step()} current={i() === step()} />
-                  <View style={{ position: "absolute", top: DOT + 6, left: (DOT - 64) / 2, width: 64, alignItems: "center" }}>
+                  {/* A terminal shows the steps by their labels: a dot would sit on the bar's row. */}
+                  <If when={!terminal}>
+                    <StepDot done={i() < step()} current={i() === step()} />
+                  </If>
+                  <View
+                    style={
+                      terminal && i() === 0
+                        ? { position: "absolute", top: DOT + 6, left: 0, width: 64, alignItems: "flex-start" }
+                        : terminal && i() === STEPS.length - 1
+                          ? { position: "absolute", top: DOT + 6, right: 0, width: 64, alignItems: "flex-end" }
+                          : { position: "absolute", top: DOT + 6, left: (DOT - 64) / 2, width: 64, alignItems: "center" }
+                    }
+                  >
                     <Text style={{ fontSize: 12, fontWeight: i() === step() ? "600" : "400", color: i() <= step() ? colors.text : colors.faint }}>{name()}</Text>
                   </View>
                 </View>
@@ -3239,24 +3328,27 @@ export function Controls(props: { show: Control }) {
             </View>
           </Level>
           <Level label="Price" detail={`${listings(price())} listings between the two`} value={`$${price()[0]} – $${price()[1]}`}>
-            {/* How many listings each price has: the bars in the range light up as the thumbs move. */}
-            <View style={{ flexDirection: "row", alignItems: "flex-end", gap: 2, height: 36, paddingHorizontal: pointer ? 7 : 10, marginBottom: -4 }}>
-              <Each of={HISTOGRAM}>
-                {(n, i) => (
-                  <View
-                    class="transition-colors duration-150 motion-reduce:transition-none"
-                    style={{
-                      flex: 1,
-                      height: `${Math.round((n() / HISTOGRAM_MAX) * 100)}%`,
-                      minHeight: 2,
-                      borderTopLeftRadius: 2,
-                      borderTopRightRadius: 2,
-                      backgroundColor: inRange(i(), price()) ? colors.accentFill : colors.track,
-                    }}
-                  />
-                )}
-              </Each>
-            </View>
+            {/* How many listings each price has: the bars in the range light up as the thumbs move.
+                A terminal's two rows would draw them as blank Cells: the count in the label says it. */}
+            <If when={!terminal}>
+              <View style={{ flexDirection: "row", alignItems: "flex-end", gap: 2, height: 36, paddingHorizontal: pointer ? 7 : 10, marginBottom: -4 }}>
+                <Each of={HISTOGRAM}>
+                  {(n, i) => (
+                    <View
+                      class="transition-colors duration-150 motion-reduce:transition-none"
+                      style={{
+                        flex: 1,
+                        height: `${Math.round((n() / HISTOGRAM_MAX) * 100)}%`,
+                        minHeight: 2,
+                        borderTopLeftRadius: 2,
+                        borderTopRightRadius: 2,
+                        backgroundColor: inRange(i(), price()) ? colors.accentFill : colors.track,
+                      }}
+                    />
+                  )}
+                </Each>
+              </View>
+            </If>
             <Slider
               value={price()}
               min={0}
@@ -3297,6 +3389,31 @@ export function Controls(props: { show: Control }) {
     };
     return (
       <Card title="Vertical" subtitle="An equalizer: five bands from −12 to +12 dB, and presets" right={<Segmented options={EQ_PRESETS} value={preset()} onChange={apply} size="small" />}>
+        {/* A terminal's controls are one row each: a band a row, its name, its slider across, its value. */}
+        <If when={terminal}>
+          <View style={{ gap: 4 }}>
+            {BANDS.map((name, i) => (
+              <View style={{ flexDirection: "row", alignItems: "center", gap: TERMINAL_GAP }}>
+                <Text style={{ width: 3 * TERMINAL_COLUMN, textAlign: "right", fontSize: size.detail, color: colors.muted }}>{name}</Text>
+                <Slider
+                  value={bands[i]()}
+                  min={-12}
+                  max={12}
+                  accessibilityLabel={`${name} band`}
+                  onChange={({ value }) => bands[i].set(value as number)}
+                  onChangeEnd={({ value }) => last.set(`${name}: ${value} dB`)}
+                  rangeStyle={sliderFill(0, (bands[i]() + 12) / 24)}
+                  {...sliderLook()}
+                  style={{ flex: 1 }}
+                />
+                <Text style={{ width: 3 * TERMINAL_COLUMN, textAlign: "right", fontSize: size.detail, color: bands[i]() === 0 ? colors.faint : colors.text, fontVariant: ["tabular-nums"] }}>
+                  {`${bands[i]() > 0 ? "+" : ""}${bands[i]()}`}
+                </Text>
+              </View>
+            ))}
+          </View>
+        </If>
+        <If when={!terminal}>
         <View style={{ flexDirection: "row", justifyContent: "space-around", paddingTop: 4 }}>
           {BANDS.map((name, i) => (
             <View style={{ alignItems: "center", gap: 6 }}>
@@ -3318,6 +3435,7 @@ export function Controls(props: { show: Control }) {
             </View>
           ))}
         </View>
+        </If>
       </Card>
     );
   }
@@ -3328,12 +3446,64 @@ export function Controls(props: { show: Control }) {
   // the buttons light up under the pointer and while pressed (still with
   // reduced motion) and fade where a step does nothing (at the minimum
   // or maximum) or while the input is locked, without their hover.
-  const frame = [
-    pointer ? "h-8 rounded-md" : "h-11 rounded-lg",
-    "flex-row items-stretch overflow-hidden border border-input bg-field",
-    "enabled:hover:border-faint focus-within:outline-2 focus-within:outline-info",
-  ].join(" ");
-  const press = "items-center justify-center transition-colors duration-100 motion-reduce:transition-none enabled:hover:bg-accent active:bg-track disabled:opacity-35";
+  //
+  // In a terminal an input is one band a row high, as a select's trigger:
+  // a column inside its start, the prefix, the value at the end of the
+  // field, then a column (the caret's), the suffix, and − and + at the
+  // band's end, each a mark in a slot of three Cells that all take the
+  // press (` − ` ` + `, touching; the last slot's blank Cell is the
+  // band's end column). Every input has its steppers there, and a suffix
+  // takes the width of the widest, so the values and the suffixes of
+  // inputs stacked one above another line up. A band is its own edge, so
+  // no border, and nothing inside it is filled again; a disabled input
+  // dims all of it.
+  const frame = terminal
+    ? "h-4 flex-row items-stretch bg-field pl-2 disabled:opacity-50"
+    : [
+        pointer ? "h-8 rounded-md" : "h-11 rounded-lg",
+        "flex-row items-stretch overflow-hidden border border-input bg-field",
+        "enabled:hover:border-faint focus-within:outline-2 focus-within:outline-info",
+      ].join(" ");
+  const press = terminal
+    ? "justify-center disabled:opacity-35"
+    : "items-center justify-center transition-colors duration-100 motion-reduce:transition-none enabled:hover:bg-accent active:bg-track disabled:opacity-35";
+  /** − before the field and + after it. */
+  const stepBefore = (w: string) => `${w} ${press} border-r border-line`;
+  const stepAfter = (w: string) => `${w} ${press} border-l border-line`;
+  /** A pair at the well's end: the increment over the decrement. */
+  const pairClass = (w: string) => `${w} border-l border-line`;
+  const pairButton = (top: boolean) => `flex-1 ${press}${top ? " border-b border-line" : ""}`;
+  /**
+   * The step buttons: − before the field and + after it (`split`), or a pair of chevrons at the well's end (`pair`);
+   * in a terminal always − and + at the band's end, each in a slot of three Cells (as `nsh-base`'s `mark_slot`).
+   */
+  const steps = (kind: "split" | "pair", w: string, icon: number) =>
+    terminal
+      ? {
+          controlsRight: true,
+          controlsClass: "flex-row",
+          decrementButtonClass: `w-6 shrink-0 flex-row items-center ${press}`,
+          incrementButtonClass: `w-6 shrink-0 flex-row items-center ${press}`,
+          decrementButton: <Step name="minus" size={icon} />,
+          incrementButton: <Step name="plus" size={icon} />,
+        }
+      : kind === "split"
+        ? {
+            decrementButtonClass: stepBefore(w),
+            incrementButtonClass: stepAfter(w),
+            decrementButton: <Step name="minus" size={icon} />,
+            incrementButton: <Step name="plus" size={icon} />,
+          }
+        : {
+            controlsRight: true,
+            controlsClass: pairClass(w),
+            incrementButtonClass: pairButton(true),
+            decrementButtonClass: pairButton(false),
+            incrementButton: <Step name="chevron-up" size={icon - 2} />,
+            decrementButton: <Step name="chevron-down" size={icon - 2} />,
+          };
+  /** The field's own spacing besides {@link field}'s. A terminal's field keeps {@link field}'s column before its value and none after it: the caret's column is the column after the value. */
+  const spaced = (style: { paddingLeft?: number; paddingRight?: number; paddingHorizontal?: number }) => (terminal ? { paddingRight: 0 } : style);
   const field = () => ({
     flex: 1,
     minWidth: 0,
@@ -3342,9 +3512,14 @@ export function Controls(props: { show: Control }) {
     color: colors.text,
     placeholderColor: colors.faint,
     fontVariant: ["tabular-nums" as const],
+    // A terminal sets every number at the end, as a column of numbers reads.
+    ...(terminal ? { textAlign: "right" as const } : {}),
   });
-  /** A step button's glyph: the gallery's icon, in the muted text color. */
+  /** Centered between its steppers, but at the end in a terminal (as {@link field}). */
+  const stepAlign = terminal ? ("right" as const) : ("center" as const);
+  /** A step button's glyph: the gallery's icon, in the muted text color; a terminal's text glyph. */
   function Step(props: { name: "plus" | "minus" | "chevron-up" | "chevron-down"; size: number }) {
+    if (terminal && (props.name === "plus" || props.name === "minus")) return <Text style={{ color: colors.muted }}>{STEP_GLYPHS[props.name]}</Text>;
     return <Icon name={props.name} size={props.size} tint={colors.muted} />;
   }
   /** A quantity: its label and the input at the trailing edge. */
@@ -3355,7 +3530,7 @@ export function Controls(props: { show: Control }) {
           <Text style={{ fontSize: size.label, color: colors.text }}>{props.label}</Text>
           {props.detail}
         </View>
-        <View style={{ width: pointer ? 132 : 152 }}>{props.children}</View>
+        <View style={{ width: terminal ? 18 * TERMINAL_COLUMN : pointer ? 132 : 152 }}>{props.children}</View>
       </View>
     );
   }
@@ -3366,7 +3541,17 @@ export function Controls(props: { show: Control }) {
   /** A unit or a currency in a number input's well, before or after its field. */
   function Affix(props: { label: string; end?: boolean }) {
     return (
-      <View style={{ height: "100%", justifyContent: "center", paddingLeft: props.end ? 0 : 10, paddingRight: props.end ? 8 : 0 }}>
+      <View
+        style={
+          terminal
+            ? // A prefix at the band's start; a suffix after the field's caret column, after the value, as wide as the
+              // widest (three Cells); the steppers' slots keep their own blank Cell after it.
+              props.end
+              ? { justifyContent: "center", width: 3 * TERMINAL_COLUMN }
+              : { justifyContent: "center" }
+            : { height: "100%", justifyContent: "center", paddingLeft: props.end ? 0 : 10, paddingRight: props.end ? 8 : 0 }
+        }
+      >
         <Text style={{ fontSize: size.label, color: colors.muted, transform: [{ translateY: -1 }] }}>{props.label}</Text>
       </View>
     );
@@ -3392,11 +3577,8 @@ export function Controls(props: { show: Control }) {
                 last.set(`Seats: ${show(next)}`);
               }}
               class={`${frame} disabled:opacity-50`}
-              inputStyle={{ ...field(), textAlign: "center" }}
-              decrementButtonClass={`${pointer ? "w-8" : "w-11"} ${press} border-r border-line`}
-              incrementButtonClass={`${pointer ? "w-8" : "w-11"} ${press} border-l border-line`}
-              decrementButton={<Step name="minus" size={pointer ? 14 : 16} />}
-              incrementButton={<Step name="plus" size={pointer ? 14 : 16} />}
+              inputStyle={{ ...field(), ...spaced({}), textAlign: stepAlign }}
+              {...steps("split", pointer ? "w-8" : "w-11", pointer ? 14 : 16)}
             />
           </Amount>
           <Amount label="Price" detail={<Detail>Steps of 0.5</Detail>}>
@@ -3406,18 +3588,13 @@ export function Controls(props: { show: Control }) {
               step={0.5}
               placeholder="Free"
               accessibilityLabel="Price"
-              controlsRight
               onChange={({ value: next }) => {
                 price.set(next);
                 last.set(`Price: ${show(next)}`);
               }}
               class={frame}
-              inputStyle={{ ...field(), paddingLeft: 4 }}
-              controlsClass={`${pointer ? "w-6" : "w-9"} border-l border-line`}
-              incrementButtonClass={`flex-1 ${press} border-b border-line`}
-              decrementButtonClass={`flex-1 ${press}`}
-              incrementButton={<Step name="chevron-up" size={pointer ? 12 : 14} />}
-              decrementButton={<Step name="chevron-down" size={pointer ? 12 : 14} />}
+              inputStyle={{ ...field(), ...spaced({ paddingLeft: 4 }) }}
+              {...steps("pair", pointer ? "w-6" : "w-9", pointer ? 14 : 16)}
               prefix={<Affix label="$" />}
             />
           </Amount>
@@ -3459,7 +3636,7 @@ export function Controls(props: { show: Control }) {
             <Text style={{ numberOfLines: 1, fontSize: size.label, color: colors.text }}>{item.name}</Text>
             <Message label={atStock() ? `Only ${item.stock} left` : `${item.detail} · ${money(item.price)}`} tone={atStock() ? "warn" : undefined} />
           </View>
-          <View style={{ width: pointer ? 92 : 108 }}>
+          <View style={{ width: terminal ? 13 * TERMINAL_COLUMN : pointer ? 92 : 108 }}>
             <NumberInput
               value={n()}
               min={1}
@@ -3472,11 +3649,8 @@ export function Controls(props: { show: Control }) {
                 last.set(`${item.name}: ${value ?? "none"}`);
               }}
               class={frame}
-              inputStyle={{ ...field(), paddingHorizontal: 2, textAlign: "center" }}
-              decrementButtonClass={`${pointer ? "w-7" : "w-9"} ${press} border-r border-line`}
-              incrementButtonClass={`${pointer ? "w-7" : "w-9"} ${press} border-l border-line`}
-              decrementButton={<Step name="minus" size={pointer ? 12 : 14} />}
-              incrementButton={<Step name="plus" size={pointer ? 12 : 14} />}
+              inputStyle={{ ...field(), ...spaced({ paddingHorizontal: 2 }), textAlign: stepAlign }}
+              {...steps("split", pointer ? "w-7" : "w-9", pointer ? 12 : 14)}
             />
           </View>
           <View style={{ width: pointer ? 64 : 70 }}>
@@ -3529,14 +3703,7 @@ export function Controls(props: { show: Control }) {
       return c < 19 ? { label: "Cool", tone: "info" } : c <= 24 ? { label: "Comfortable", tone: "up" } : { label: "Warm", tone: "warn" };
     };
     /** The buttons at the well's end, the increment over the decrement (new glyphs for each input). */
-    const right = () => ({
-      controlsRight: true,
-      controlsClass: `${pointer ? "w-6" : "w-9"} border-l border-line`,
-      incrementButtonClass: `flex-1 ${press} border-b border-line`,
-      decrementButtonClass: `flex-1 ${press}`,
-      incrementButton: <Step name="chevron-up" size={pointer ? 12 : 14} />,
-      decrementButton: <Step name="chevron-down" size={pointer ? 12 : 14} />,
-    });
+    const right = () => steps("pair", pointer ? "w-6" : "w-9", pointer ? 14 : 16);
     return (
       <Card title="Units and limits" subtitle="A percentage, a currency with its code, a temperature in half degrees, a read-only rate">
         <View>
@@ -3561,7 +3728,7 @@ export function Controls(props: { show: Control }) {
                 last.set(`Tip: ${value ?? "none"}%`);
               }}
               class={frame}
-              inputStyle={{ ...field(), textAlign: "right", paddingRight: 2 }}
+              inputStyle={{ ...field(), textAlign: "right", ...spaced({ paddingRight: 2 }) }}
               suffix={<Affix label="%" end />}
               {...right()}
             />
@@ -3581,7 +3748,7 @@ export function Controls(props: { show: Control }) {
               class={frame}
               // Over the balance, the well is edged in the danger tone.
               style={over() ? { borderColor: colors.danger } : undefined}
-              inputStyle={{ ...field(), paddingLeft: 4, paddingRight: 2 }}
+              inputStyle={{ ...field(), ...spaced({ paddingLeft: 4, paddingRight: 2 }) }}
               prefix={<Affix label="$" />}
               suffix={<Affix label="USD" end />}
               {...right()}
@@ -3607,7 +3774,7 @@ export function Controls(props: { show: Control }) {
                 last.set(`Thermostat: ${value ?? "none"}`);
               }}
               class={frame}
-              inputStyle={{ ...field(), textAlign: "right", paddingRight: 2 }}
+              inputStyle={{ ...field(), textAlign: "right", ...spaced({ paddingRight: 2 }) }}
               suffix={<Affix label="°C" end />}
               {...right()}
             />
@@ -3618,7 +3785,7 @@ export function Controls(props: { show: Control }) {
               readonly
               accessibilityLabel="Interest rate"
               class={frame}
-              inputStyle={{ ...field(), textAlign: "right", paddingRight: 2, color: colors.muted }}
+              inputStyle={{ ...field(), textAlign: "right", ...spaced({ paddingRight: 2 }), color: colors.muted }}
               suffix={<Affix label="%" end />}
               {...right()}
             />
@@ -3634,9 +3801,28 @@ export function Controls(props: { show: Control }) {
   // that holds a digit (a bullet too) lifts out of its well, a card's fill
   // under a firmer edge (`data-filled:`). A verdict edges and tints them
   // all in its tone, over that; each change fades (`transition-colors`).
+  //
+  // In a terminal a cell is a framed box, three rows high and three Cells inside, its digit in the middle: its line
+  // only, no fill. The cell that takes the next digit has its line in the accent, a verdict's tone edges them all, a
+  // disabled code dims.
   const cellClass = (cells: string) =>
-    `${cells} items-center justify-center rounded-lg border border-line bg-inset font-semibold text-foreground transition-colors motion-reduce:transition-none data-filled:border-input data-filled:bg-card focus:outline-2 focus:outline-info focus:-outline-offset-2 disabled:opacity-50`;
-  const cellStyle = (tone?: Tone) => (tone ? { ...finish.inset, backgroundColor: toneTint(tone), borderColor: toneColor(tone) } : finish.inset);
+    terminal
+      ? "w-10 h-12 items-center justify-center border border-line font-semibold text-foreground focus:border-info disabled:opacity-50"
+      : `${cells} items-center justify-center rounded-lg border border-line bg-inset font-semibold text-foreground transition-colors motion-reduce:transition-none data-filled:border-input data-filled:bg-card focus:outline-2 focus:outline-info focus:-outline-offset-2 disabled:opacity-50`;
+  const cellStyle = (tone?: Tone) =>
+    terminal ? (tone ? { borderColor: toneColor(tone) } : {}) : tone ? { ...finish.inset, backgroundColor: toneTint(tone), borderColor: toneColor(tone) } : finish.inset;
+  /** The codes' groups: three Cells apart in a terminal (a Cell's gap and a Cell of margin each side), their cells one. */
+  const codeClass = terminal ? "flex-row items-center gap-2" : "flex-row items-center gap-3";
+  const groupClass = terminal ? "flex-row gap-2 mx-2" : "flex-row gap-1.5";
+  /**
+   * A blank row between a code's framed cells and the caption above or the message below them in a terminal (a
+   * card's gaps take no row there: its border sets its content apart).
+   */
+  const CodeSpace = () => (
+    <If when={terminal}>
+      <View style={{ height: TERMINAL_ROW }} />
+    </If>
+  );
   const sixCells = pointer ? "w-9 h-11 text-lg" : "w-11 h-13 text-xl";
 
   function Verify() {
@@ -3648,7 +3834,7 @@ export function Controls(props: { show: Control }) {
     cleanup(() => shake.stop());
     const tone = (): Tone | undefined => (verdict() === "Verified" ? "up" : verdict() ? "danger" : undefined);
     return (
-      <Card icon="controls" title="One-time code" subtitle="Six digits: type or paste them; a wrong code shakes">
+      <Card icon="controls" title="One-time code" subtitle={terminal ? "Six digits: type or paste them; a wrong code marks the cells" : "Six digits: type or paste them; a wrong code shakes"}>
         <View style={{ alignItems: "center", gap: size.gap, paddingVertical: size.padding }}>
           <View style={shake.style}>
             <OtpInput
@@ -3662,18 +3848,19 @@ export function Controls(props: { show: Control }) {
               }}
               onComplete={({ value }) => {
                 verdict.set(value === CODE ? "Verified" : "That code is not right");
-                if (value !== CODE) shake.play("shake");
+                if (value !== CODE && !terminal) shake.play("shake");
                 last.set(`Code complete: ${value}`);
               }}
               accessibilityLabel="Verification code, 6 digits"
-              class="flex-row items-center gap-3"
-              groupClass="flex-row gap-1.5"
+              class={codeClass}
+              groupClass={groupClass}
               cellClass={cellClass(sixCells)}
               cellStyle={cellStyle(tone())}
               caretClass="w-0.5 h-6 rounded-full"
               caretStyle={{ backgroundColor: colors.text }}
             />
           </View>
+          <CodeSpace />
           <Message label={verdict() || `The code is ${CODE}`} tone={tone()} />
           <Button
             label="Clear"
@@ -3747,7 +3934,7 @@ export function Controls(props: { show: Control }) {
         const rest = tries() - 1;
         tries.set(rest);
         code.set("");
-        shake.play("shake");
+        if (!terminal) shake.play("shake");
         phase.set(rest === 0 ? "locked" : "wrong");
         last.set(rest === 0 ? "Sign-in: locked" : `Sign-in: wrong code, ${rest} left`);
         if (rest > 0) input?.focus();
@@ -3782,7 +3969,7 @@ export function Controls(props: { show: Control }) {
       );
     }
     return (
-      <Card title="Sign in" subtitle="Send a code, then wait to resend it; a wrong one shakes, three lock the cells">
+      <Card title="Sign in" subtitle={terminal ? "Send a code, then wait to resend it; a wrong one empties the cells, three lock them" : "Send a code, then wait to resend it; a wrong one shakes, three lock the cells"}>
         <View style={{ alignItems: "center", gap: size.gap, paddingVertical: size.padding }}>
           <View style={shake.style}>
             <OtpInput
@@ -3800,14 +3987,15 @@ export function Controls(props: { show: Control }) {
                 verify(value);
               }}
               accessibilityLabel="Sign-in code, 6 digits"
-              class="flex-row items-center gap-3"
-              groupClass="flex-row gap-1.5"
+              class={codeClass}
+              groupClass={groupClass}
               cellClass={cellClass(sixCells)}
               cellStyle={cellStyle(tone())}
               caretClass="w-0.5 h-6 rounded-full"
               caretStyle={{ backgroundColor: colors.text }}
             />
           </View>
+          <CodeSpace />
           <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
             <If when={phase() === "done"}>
               <Signed />
@@ -3863,9 +4051,10 @@ export function Controls(props: { show: Control }) {
     const done = () => (step() === "confirm" ? 1 : step() === "set" ? 2 : 0);
     const pinCells = pointer ? "w-11 h-11 text-xl" : "w-13 h-13 text-2xl";
     return (
-      <Card title="PIN" subtitle="Four masked digits, entered twice: a mismatch shakes and starts over" right={<Badge label={step() === "set" ? "Set" : `Step ${done() + 1} of 2`} tone={step() === "set" ? "up" : "neutral"} />}>
+      <Card title="PIN" subtitle={terminal ? "Four masked digits, entered twice: a mismatch starts over" : "Four masked digits, entered twice: a mismatch shakes and starts over"} right={<Badge label={step() === "set" ? "Set" : `Step ${done() + 1} of 2`} tone={step() === "set" ? "up" : "neutral"} />}>
         <View style={{ alignItems: "center", gap: size.gap, paddingVertical: size.padding }}>
-          <View style={{ flexDirection: "row", gap: 6 }}>
+          {/* The steps' bars; a terminal shows the step in the badge alone. */}
+          <View style={{ flexDirection: "row", gap: 6, display: terminal ? "none" : "flex" }}>
             <Each of={[0, 1]}>
               {(i) => (
                 <View
@@ -3882,6 +4071,7 @@ export function Controls(props: { show: Control }) {
             </Each>
           </View>
           <Message label={message().label} tone={message().tone} />
+          <CodeSpace />
           <View style={shake.style}>
             <OtpInput
               length={4}
@@ -3899,7 +4089,7 @@ export function Controls(props: { show: Control }) {
                   step.set("set");
                   last.set("PIN: set");
                 } else {
-                  shake.play("shake");
+                  if (!terminal) shake.play("shake");
                   step.set("mismatch");
                   last.set("PIN: no match");
                 }
@@ -3913,6 +4103,7 @@ export function Controls(props: { show: Control }) {
               caretStyle={{ backgroundColor: colors.text }}
             />
           </View>
+          <CodeSpace />
           <View style={{ flexDirection: "row", gap: size.gap }}>
             <Button
               label={shown() ? "Hide digits" : "Show digits"}
@@ -3963,7 +4154,9 @@ export function Controls(props: { show: Control }) {
     NumberInput: [Quantities, Cart, Units],
     OtpInput: [Verify, SignIn, Pin],
   };
-  return <DemoPage cards={[...cards[props.show], Last]} />;
+  // `firsts`: the first card of each named control on one page, above one last event (the TUI host's acceptance tests).
+  const shown = props.firsts ? props.firsts.map((control) => cards[control][0]) : cards[props.show];
+  return <DemoPage cards={[...shown, Last]} />;
 }
 
 export const SwitchDemo = () => <Controls show="Switch" />;

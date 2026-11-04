@@ -407,7 +407,7 @@ one: a selector matching several fails the step, and the error says how to narro
 | `await app.setViewport(width, height)` | Resizes the viewport, as rotating the device or resizing a window does (`windowSize()`). |
 | `await app.setColorScheme(scheme)` | Switches the system's appearance to `"light"` or `"dark"`, as the user does. |
 | `await app.setLifecycle(state)` | Moves the app to `"background"`, `"inactive"` or `"active"`, as the system does when the user leaves it, switches to another app or window and comes back (`lifecycle()`). Headless runs only. |
-| `await app.screenshot(path?)` | A picture of the app's window as a PNG (a `Uint8Array`), also saved at `path` on this machine when given (relative to the current directory). Only a real platform draws the app: see [On a real platform](#on-a-real-platform). |
+| `await app.screenshot(path?)` | A picture of the app as a `Uint8Array`: PNG of its window on graphical targets, UTF-8 Cell JSON on `tui`, also saved at `path` on this machine when given (relative to the current directory). Only a real platform draws the app: see [On a real platform](#on-a-real-platform). |
 
 A step resolves once the app rendered nothing for 100 ms and no native animation runs that ends by itself (2 s at
 most, for apps that render all the time; on a manual clock, also 2 s of the app's time), so what it changed is on
@@ -523,7 +523,7 @@ A failing check says what it got and what it expected, written as JS would write
 
 ### On a real platform
 
-`nsh test --target macos` (or `linux`, `windows`, `gpui`, `web`, `ios`, `android`) runs the same tests on the platform's development host instead of headless:
+`nsh test --target macos` (or `linux`, `windows`, `gpui`, `tui`, `web`, `ios`, `android`) runs the same tests on the platform's development host instead of headless:
 each `open` starts the app in a window of its own, with a fresh data directory, and the steps act with the platform's
 own input at the views their selectors name, as Playwright does in a browser:
 
@@ -547,6 +547,7 @@ nsh test --target ios                         # in an iOS simulator
 nsh test --target android                     # on the Android device or emulator adb lists first
 nsh test --target gpui                        # in GPUI windows (macOS, Windows, Linux)
 nsh test --target web                         # in a headless Chrome, Edge or Chromium
+nsh test --target tui                         # in an in-memory terminal
 nsh test tests/form.test.tsx --target macos   # one file
 ```
 
@@ -571,6 +572,15 @@ desktop target and the web, as that target's platform and always as a desktop: i
 desktop idiom whatever its width, where without a `platform` (or with `"web"`) it measures its idiom as a browser does
 (a desktop from 600 points wide). An app with Rust crates of its own runs in a development host built with its crates, which NSH
 builds for the platform; a Rust app's host runs its root, so `open(".")` starts it there as it does headless.
+
+`nsh test --target tui` runs the tests against the terminal renderer in an in-memory terminal, suitable for CI.
+Each `open` uses its own surface and data directory. Set its point dimensions with `open(entry, { width, height })`;
+they round up to whole Cells at the app's `nsh.json` `tui.pointsPerCell` scale (8 × 16 points by default).
+`app.screenshot("cells.json")` returns and saves UTF-8 JSON: `format: "nsh-tui-cells"`, `version: 1`, `width`,
+`height`, and `rows[y][x]` containing each Cell's `symbol`, `fg`, `bg`, `underline` and `modifiers`. Colors use `reset`, lowercase
+ratatui color names, `#rrggbb` or `indexed:N`; modifiers are arrays of active style names such as `bold`, `italic`
+and `underlined`. Decode the returned bytes with `new TextDecoder().decode(bytes)` and parse the JSON for Cell
+snapshot assertions.
 
 On the web, the apps run in the development host's page in a headless Chrome, Edge or Chromium: the one installed
 on this machine, or the executable `--browser <PATH>` names (a browser is needed: `nsh test` says where it looked

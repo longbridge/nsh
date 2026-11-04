@@ -50,8 +50,8 @@ impl Headless {
     /// The step `keyboard.press(<keys>)`: presses `keys`, a keystroke as
     /// `nsh/keymap` names it (`"mod+k"`, `"shift+tab"`, `"escape"`; `mod` is
     /// the app's platform's command key). A binding of the app's keymap
-    /// that fires where the focus is hears it (`onKeyCommand`); else the
-    /// focused input takes a character, Backspace or the return key, and
+    /// that fires where the focus is hears it (`onKeyCommand`), and takes
+    /// the key unless it passes it through; else the focused input takes a character, Backspace or the return key, and
     /// Escape goes back as the desktops' back key does when there is
     /// something to go back from.
     pub fn press_key(&mut self, keys: &str) -> Result<(), String> {
@@ -64,12 +64,16 @@ impl Headless {
             Some(keymap) => keymap.find(stroke, editing, false),
             None => KeyMatch::None,
         };
-        if let KeyMatch::Fire(id) = found {
+        if let Some(id) = found.fired() {
             self.engine.control().dispatch_event(
                 ROOT_ID,
                 EventKind::KeyCommand,
                 EventPayload::Value(PayloadValue::Number(f64::from(id))),
             );
+        }
+        // A binding passing the key through leaves it to what follows, as a
+        // platform does: on the screen as it is when the key comes.
+        if found.consumed() {
             return self.done();
         }
         let m = stroke.modifiers;
@@ -114,10 +118,11 @@ impl Headless {
         self.done()
     }
 
-    /// Whether Tab stops at views (not only inputs), as on macOS and the
-    /// web (the other platforms move it between fields only).
+    /// Whether Tab stops at views (not only inputs), as on macOS, the web
+    /// and in a terminal (the other platforms move it between fields only).
     fn tabs_to_views(&self) -> bool {
         matches!(self.environment.os, Os::MacOs | Os::Web)
+            || self.environment.idiom == nsh_core::platform::Idiom::Terminal
     }
 
     /// Tab (`back`: Shift+Tab): the keyboard focus moves to the next stop

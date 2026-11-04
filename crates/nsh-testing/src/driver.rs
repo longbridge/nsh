@@ -120,7 +120,7 @@ pub(crate) trait Driver: Send {
     /// The URLs the app opened, in order (`app.openedUrls`): recorded,
     /// never opened.
     fn opened_urls(&mut self) -> Result<Vec<String>, String>;
-    /// A picture of the app's window, as a PNG.
+    /// A picture of the app: PNG bytes, or UTF-8 Cell JSON on the terminal target.
     fn screenshot(&mut self) -> Result<Vec<u8>, String>;
     /// The app's storage's entries, as a host keeps them (a headless
     /// engine's `App` reads its storage itself).

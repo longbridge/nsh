@@ -334,8 +334,8 @@ Rust 中的 `os()`、`os_version()`、`idiom()`、`is_desktop()` 和 `is_catalys
 |---|---|---|
 | `os()` | `platform.os` | `Os::Ios`、`Os::Android`、`Os::MacOs`、`Os::Windows`、`Os::Linux` 或 `Os::Web`（`os().name()` 即 TSX 的字符串）。Mac Catalyst 为 iOS。 |
 | `os_version()` | `platform.version` | 主版本号和次版本号；Android 上为 API 级别和 0。 |
-| `idiom()` | `platform.idiom` | `Idiom::Phone`、`Pad`、`Mac`、`Tv` 或 `Desktop`；`is_desktop()` 成立时恰好是 `Desktop`。 |
-| `is_desktop()` | `platform.desktop` | macOS、Windows 或 Linux，或桌面浏览器（[桌面与移动端](./platform-specific.md#桌面与移动端)）。 |
+| `idiom()` | `platform.idiom` | `Idiom::Phone`、`Pad`、`Mac`、`Tv`、`Desktop` 或 `Terminal`；在终端中为 `Terminal`，否则 `is_desktop()` 成立时恰好是 `Desktop`。 |
+| `is_desktop()` | `platform.desktop` | macOS、Windows 或 Linux、桌面浏览器或终端（[桌面与移动端](./platform-specific.md#桌面与移动端)）。 |
 | `is_catalyst()` | `platform.catalyst` | Mac Catalyst，无论哪种界面风格。 |
 
 TSX 的 `platform` 完整成员：
@@ -344,8 +344,8 @@ TSX 的 `platform` 完整成员：
 |---|---|
 | `platform.os` | `"ios"`、`"android"`、`"macos"`、`"windows"`、`"linux"` 或 `"web"`。Mac Catalyst 报告 `"ios"`。 |
 | `platform.version` | 字符串：iOS 和桌面平台为系统版本（`"17.5"`）；Android 为 API 级别（`"35"`）；Web 为 `"0.0"`。 |
-| `platform.idiom` | `"phone"`、`"pad"`、`"mac"`、`"tv"` 或 `"desktop"`。`platform.desktop` 为 `true` 时恰好是 `"desktop"`。`"mac"` 是 Mac Catalyst 下 UIKit 的 Mac 界面风格，属于移动端界面风格。 |
-| `platform.desktop` | 适用桌面行为：macOS、Windows、Linux 和桌面浏览器。`desktop={{…}}` 属性和 `platform.select({ desktop })` 以它为准。 |
+| `platform.idiom` | `"phone"`、`"pad"`、`"mac"`、`"tv"`、`"desktop"` 或 `"terminal"`。在终端中为 `"terminal"`，否则 `platform.desktop` 为 `true` 时恰好是 `"desktop"`。`"mac"` 是 Mac Catalyst 下 UIKit 的 Mac 界面风格，属于移动端界面风格。 |
+| `platform.desktop` | 适用桌面行为：macOS、Windows、Linux、桌面浏览器和终端。`desktop={{…}}` 属性和 `platform.select({ desktop })` 以它为准。 |
 | `platform.catalyst` | 应用运行在 Mac Catalyst 下（`os` 为 `"ios"`），无论是 Mac 还是 iPad 界面风格。 |
 | `platform.select(spec)` | 当前平台对应的值；见[平台特定代码](./platform-specific.md#platformselect)。 |
 
@@ -379,6 +379,9 @@ const hapticsSupported = platform.os === "ios" || (platform.os === "android" && 
 在浏览器中（[Web 运行时](./web.md)），`platform.os` 为 `"web"`，`platform.version` 为 `"0.0"`。有鼠标且窗口宽度至少 600 点时界面风格为
 `"desktop"`，平板上为 `"pad"`，手机上为 `"phone"`，在应用启动时确定。区域设置、`reduceMotion()`、
 `fontScale()`（浏览器的文字大小）、`pixelRatio()`、安全区域和键盘高度都来自浏览器，并实时跟随。
+
+在终端中（[终端后端](./tui.md)），`platform.idiom` 为 `"terminal"`，`platform.desktop` 为 `true`，`platform.os` 是本机自己的系统。
+`colorScheme()` 跟随终端的背景色，`reduceMotion()` 为 `true`，安全区域和键盘高度为 0。
 
 ## 像素密度
 

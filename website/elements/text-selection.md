@@ -106,6 +106,9 @@ import { TextView } from "nsh/base";
 - **Single texts**: a text with `userSelect: "text"` in no selectable view selects on its own, as
   [Text](./text.md#props) describes.
 - **The look** is the platform's highlight in each text's `selectionColor` (`selection:text-*`).
+- **A line in several texts**: a Rust component that lays one line out as several texts (a soft-wrapped line of
+  code) marks the later parts with `.continues_text(true)`; a copy then gives the line whole, with no line break where
+  it was cut, and a triple click selects all of its parts. [`DiffView`](./diff-view.md) does this for its wrapped lines.
 - **Lists**: in a virtualized [List](./list.md), a selection covers the rows that are mounted; rows recycled out of
   view leave it.
 

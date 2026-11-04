@@ -594,6 +594,7 @@ impl Screen {
                 View {
                     parent: Some(parent),
                     events: link.events,
+                    focusable: Some(link.focus_stop),
                     span: Some(Span {
                         view: id,
                         text: utf16_slice(&text.text, link.start, link.end),
@@ -1811,16 +1812,40 @@ impl Screen {
                 if let Some(input) = &v.input {
                     return input.config.editable && !self.disabled_from(id, None);
                 }
+                // A link in a text view is a stop after it, in text order
+                // (`TextLink::focus_stop`).
+                if v.span.is_some() {
+                    return v.focusable == Some(true) && !self.disabled_from(id, None);
+                }
                 // Disabled is the ancestors' too here (`disabled_from`).
                 let props = nsh_core::ViewProps {
                     focusable: v.focusable,
                     ..Default::default()
                 };
-                v.span.is_none()
-                    && props.focus_stop(v.events.contains(EventKind::Press))
+                props.focus_stop(v.events.contains(EventKind::Press))
                     && !self.disabled_from(id, None)
             })
             .collect()
+    }
+
+    /// The stop a press on `id` gives the focus to in a terminal: `id` or
+    /// its nearest ancestor that Tab stops at (`tab_stops`), else the
+    /// topmost stop over the press's point (a table's hit layer over its
+    /// rows), as a terminal finds what is under the pointer.
+    pub(crate) fn stop_around(&self, id: NodeId) -> Option<NodeId> {
+        let stops = self.tab_stops();
+        let mut at = Some(id);
+        while let Some(id) = at {
+            if stops.contains(&id) {
+                return Some(id);
+            }
+            at = self.nodes.get(&id).and_then(|v| v.parent);
+        }
+        let point = self.bounds_in_root(id)?.center();
+        stops.iter().rev().copied().find(|&stop| {
+            self.bounds_in_root(stop)
+                .is_some_and(|bounds| bounds.contains(&point))
+        })
     }
 
     pub(crate) fn scroll(&self, id: NodeId) -> Option<&Scroll> {
@@ -2175,6 +2200,7 @@ mod tests {
             end,
             node,
             events,
+            focus_stop: true,
         };
         let linked = |links: Vec<nsh_core::TextLink>| MountItem::Text {
             id: 4,

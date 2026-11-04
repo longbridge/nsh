@@ -1235,8 +1235,9 @@ fn key_of(code: u32) -> Option<Key> {
 /// it, `modifiers` bits 1 Ctrl, 2 Alt, 4 Shift, 8 Meta (Command, the
 /// Windows key), `editing` when a text field has the focus, `repeat` for
 /// an auto-repeat. Returns the binding that fires, -1 for none (the key
-/// goes on) or -2 for a held key's repeat (consumed, nothing fires). JS
-/// reports a firing binding with [`nsh_key_command`].
+/// goes on), -2 for a held key's repeat (consumed, nothing fires) or
+/// `-3 - id` for binding `id` passing the key through (it fires, then the
+/// key goes on). JS reports a firing binding with [`nsh_key_command`].
 ///
 /// `f64` keeps every `u32` binding ID positive in JS, including Rust
 /// shortcuts (`1 << 31` and up) and overlay Escape (`u32::MAX`), while
@@ -1262,6 +1263,7 @@ pub extern "C" fn nsh_key(key: u32, modifiers: u32, editing: u32, repeat: u32) -
         KeyMatch::None => -1.0,
         KeyMatch::Held => -2.0,
         KeyMatch::Fire(id) => id as f64,
+        KeyMatch::Notify(id) => -3.0 - id as f64,
     }
 }
 

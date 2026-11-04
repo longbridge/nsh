@@ -74,6 +74,8 @@ struct Entry {
     text: std::sync::Arc<AttributedText>,
     /// The content box, in the area's coordinates.
     frame: Bounds<Points>,
+    /// It continues the text before it (`ViewProps::continues_text`).
+    continues: bool,
 }
 
 /// The texts of an area as the model sees them.
@@ -117,6 +119,10 @@ impl SelectionTexts for AreaTexts {
         // The text's node id.
         self.entries[i].view.tag() as u64
     }
+
+    fn continues(&self, i: usize) -> bool {
+        self.entries[i].continues
+    }
 }
 
 impl AreaTexts {
@@ -151,6 +157,7 @@ impl AreaTexts {
                     };
                     let r = text.convertRect_toView(rect, Some(area));
                     out.push(Entry {
+                        continues: text.continues_text(),
                         view: text.retain(),
                         text: content,
                         frame: bounds(
