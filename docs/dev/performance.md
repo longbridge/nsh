@@ -11,6 +11,15 @@ Initial commits measured 1164 → 1139 µs; press commits 380 → 329 µs. These
 counts on the counter's unchanged-cursor path. A batch compares cursor values while applying view styles, then
 refreshes once if any changed; other batches skip the cursor hit test.
 
+GPUI idle wakeups (Linux x86_64, debug `nsh-gpui-host --bundle`, lavapipe, a headless Wayland compositor answering
+frame callbacks at 60 Hz; voluntary context switches per second, all threads, over 10 s; against main `da3f1683`):
+static text 4.1 → 4.2 (the `blocking` pool's two threads; no frame drawn); an `autoFocus` field while it blinks
+64 → 63; the same field 14–24 s after it was focused 68 → 2.1 (the caret stays shown after GTK's 10 s); the field's
+window suspended while it keeps the keyboard 13.7 → 2.1 (the blink timer stopped); unfocused 2.1 → 2.1; after a 1 s
+fade ended 2.1 → 2.1. Each blink drew a frame, about 30 wakeups under lavapipe (the four `llvmpipe` threads and the
+renderer's). Under X11 (Xvfb) GPUI's refresh timer keeps the main thread at ~64 a second whatever the app does
+(`docs/dev/gpui.md` "Idle windows").
+
 
 Span test-id metadata (macOS arm64, debug CLI, three runs per revision against `e02b40f8`):
 `echo 'await app.press("Rename ID")' | nsh test crates/nsh-testing/tests/testing/queries/Spans.tsx --trace`.
