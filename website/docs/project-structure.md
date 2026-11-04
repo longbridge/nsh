@@ -206,6 +206,10 @@ import strings from "./strings.json";
 
 All of them are bundled into one script. JSON files import as their parsed value.
 
+### Leaving parts out of the binary
+
+If you build your own executable with Cargo (embedding NSH, or your own `main`), you can leave optional parts out: the platform crates turn all of them on by default, so set `default-features = false` on the platform crate (and on `nsh-base`) and name what you keep from `js`, `shader`, `editor` (with `DiffView`), `rich-editor`, `plot`, `highlight`, `math`, `zlib` and `crypto`. An app that imports a part its build left out fails when it loads. What `nsh package` builds always includes everything.
+
 ### Loading code on demand
 
 `import()` of one of the app's modules returns a promise of its exports, as in a browser:
