@@ -106,6 +106,8 @@ struct Transform {
 /// Pointer state of one surface.
 #[derive(Default)]
 pub(crate) struct Input {
+    /// The view pressed while a draggable background waits for a click or drag.
+    window_press: RefCell<Option<NshView>>,
     /// The mouse, while its left button is down.
     pointer: RefCell<Option<Pointer>>,
     /// A trackpad pinch.
@@ -244,6 +246,7 @@ struct Wheel {
 pub(crate) fn reset(surface: &Surface) {
     crate::file_drop::reset(surface);
     let input = &surface.input;
+    input.window_press.borrow_mut().take();
     input.pointer.borrow_mut().take();
     input.pinch.borrow_mut().take();
     input.rotation.borrow_mut().take();
@@ -1493,7 +1496,11 @@ fn window_press(surface: &Rc<Surface>, event: &NSEvent, x: f32, y: f32, time: f6
     let Some(window) = surface.root.ns().window() else {
         return false;
     };
+    let Some(hit) = pick(&surface.root, x, y) else {
+        return false;
+    };
     cancel_pointer(surface);
+    *surface.input.window_press.borrow_mut() = Some(hit.view);
     let start = event.locationInWindow();
     // SAFETY: AppKit's immutable mouse-tracking run-loop mode.
     let mode = unsafe { NSEventTrackingRunLoopMode };
@@ -1503,15 +1510,23 @@ fn window_press(surface: &Rc<Surface>, event: &NSEvent, x: f32, y: f32, time: f6
         mode,
         true,
     ) {
+        if surface.input.window_press.borrow().is_none() {
+            return true;
+        }
         let point = next.locationInWindow();
         let distance = (point.x - start.x).hypot(point.y - start.y);
         if distance >= WINDOW_DRAG_SLOP && next.r#type() == NSEventType::LeftMouseDragged {
+            surface.input.window_press.borrow_mut().take();
             // AppKit expects the original mouse-down event for native dragging.
             crate::chrome::mouse_down(surface, event, x, y);
             return true;
         }
         if next.r#type() == NSEventType::LeftMouseUp {
-            if distance < WINDOW_DRAG_SLOP {
+            let pressed = surface.input.window_press.borrow_mut().take();
+            let same_view = pressed.is_some_and(|pressed| {
+                pick(&surface.root, x, y).is_some_and(|hit| hit.view == pressed)
+            });
+            if distance < WINDOW_DRAG_SLOP && same_view && window_drag(surface, x, y) {
                 surface.input.last.set(Some((x, y)));
                 down(surface, x, y, time, 1, event.modifierFlags());
                 up(surface, x, y, next.timestamp() * 1000.0);
@@ -1519,6 +1534,7 @@ fn window_press(surface: &Rc<Surface>, event: &NSEvent, x: f32, y: f32, time: f6
             return true;
         }
     }
+    surface.input.window_press.borrow_mut().take();
     true
 }
 

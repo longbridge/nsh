@@ -100,11 +100,19 @@ enum Key {
     Touch(usize),
 }
 
+/// A background press tied to the native view where it began.
+struct WindowPress {
+    event: gdk::Event,
+    x: f32,
+    y: f32,
+    view: NshView,
+}
+
 /// Pointer state of one surface.
 #[derive(Default)]
 pub(crate) struct Input {
     /// A draggable background press waiting to become a click or native drag.
-    window_press: RefCell<Option<(gdk::Event, f32, f32)>>,
+    window_press: RefCell<Option<WindowPress>>,
     /// The pointers that are down.
     pointers: RefCell<Vec<Pointer>>,
     /// Two fingers pinching / rotating on the touchscreen.
@@ -567,7 +575,13 @@ fn dispatch(surface: &Rc<Surface>, event: &gdk::Event) -> glib::Propagation {
         }
         T::ButtonPress if button() == Some(gdk::BUTTON_PRIMARY) && window_drag(surface, x, y) => {
             up(surface, Key::Mouse, x, y, time, true);
-            *surface.input.window_press.borrow_mut() = Some((event.clone(), x, y));
+            *surface.input.window_press.borrow_mut() =
+                pick(&surface.root, x, y).map(|hit| WindowPress {
+                    event: event.clone(),
+                    x,
+                    y,
+                    view: hit.view,
+                });
             return glib::Propagation::Stop;
         }
         T::ButtonPress if button() == Some(gdk::BUTTON_PRIMARY) => {
@@ -581,14 +595,19 @@ fn dispatch(surface: &Rc<Surface>, event: &gdk::Event) -> glib::Propagation {
         }
         T::ButtonRelease if button() == Some(gdk::BUTTON_PRIMARY) => {
             let pending = surface.input.window_press.borrow_mut().take();
-            if let Some((press, px, py)) = pending {
+            if let Some(press) = pending {
+                let same_view =
+                    pick(&surface.root, press.x, press.y).is_some_and(|hit| hit.view == press.view);
+                if !same_view || !window_drag(surface, press.x, press.y) {
+                    return glib::Propagation::Stop;
+                }
                 down(
                     surface,
                     Key::Mouse,
-                    px,
-                    py,
-                    press.time() as f64,
-                    press.modifier_state(),
+                    press.x,
+                    press.y,
+                    press.event.time() as f64,
+                    press.event.modifier_state(),
                 );
                 up(surface, Key::Mouse, x, y, time, false);
                 return glib::Propagation::Stop;
@@ -597,15 +616,17 @@ fn dispatch(surface: &Rc<Surface>, event: &gdk::Event) -> glib::Propagation {
         }
         T::MotionNotify => {
             let pending = surface.input.window_press.borrow_mut().take();
-            if let Some((press, px, py)) = pending {
-                if surface
-                    .root
-                    .drag_check_threshold(px as i32, py as i32, x as i32, y as i32)
-                {
-                    crate::chrome::begin_move(surface, &press);
+            if let Some(press) = pending {
+                if surface.root.drag_check_threshold(
+                    press.x as i32,
+                    press.y as i32,
+                    x as i32,
+                    y as i32,
+                ) {
+                    crate::chrome::begin_move(surface, &press.event);
                     release_buttons(surface);
                 } else {
-                    *surface.input.window_press.borrow_mut() = Some((press, px, py));
+                    *surface.input.window_press.borrow_mut() = Some(press);
                 }
                 return glib::Propagation::Stop;
             }
