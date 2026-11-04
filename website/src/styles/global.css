@@ -445,7 +445,7 @@ html[lang^="zh"] :is(h1, h2, h3, h4) { letter-spacing: -0.01em; }
   .site-nav__search-btn { width: 9.5rem; }
 }
 
-@media (max-width: 860px) {
+@media (max-width: 940px) {
   .site-nav__inner { gap: 1rem; }
   .site-nav__projects { margin-left: -0.5rem; }
   .site-nav__burger { display: inline-flex; }
