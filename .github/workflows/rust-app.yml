@@ -103,8 +103,9 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Clippy
         run: cargo clippy -p gallery-native --all-targets --locked -- -D warnings
-      # Without shaders: no naga, no wgpu.
-      - name: Check macOS without shaders
+      # Without the optional features: no naga, wgpu, syntect, RaTeX, ropey,
+      # imara-diff; no `zlib` or `crypto` module.
+      - name: Check macOS without optional features
         if: runner.os == 'macOS'
         run: cargo clippy -p nsh-macos-app --locked --no-default-features --features js -- -D warnings
       # The crate's unit tests; the app's tests are TypeScript (`nsh test`,

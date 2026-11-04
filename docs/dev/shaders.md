@@ -13,7 +13,7 @@ naga and wgpu. Off, `Shader::compile` refuses every source (`nsh-core`), `nsh_en
 (`shader_off.rs`), shader views draw nothing and shader transitions end at once. The rest of the API stays. It is for
 Rust apps and embedders; the prebuilt runners an app without Rust crates ships have it on. The web links its compiler
 by what the app imports (`docs/dev/browser-js-size.md`), and GPUI always has it. A crate with `default-features = false`
-names the feature to keep shaders: `features = ["shader"]`.
+names the feature to keep shaders: `features = ["shader"]`. The other optional parts are in [features.md](features.md).
 
 ## The contract
 
