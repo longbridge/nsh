@@ -919,7 +919,8 @@ impl Drop for IconBitmaps {
 #[derive(Default)]
 struct MenuIcons {
     loads: Vec<crate::image::Load>,
-    bitmaps: Rc<RefCell<IconBitmaps>>,
+    /// Held for the menu, dropped after `loads`.
+    _bitmaps: Rc<RefCell<IconBitmaps>>,
 }
 
 /// An item whose icon is to load.
@@ -1166,7 +1167,10 @@ fn show_menu_bar(surface: &Surface) {
     }
     let bitmaps = Rc::default();
     let loads = load_icons(surface, icons, &bitmaps);
-    *c.bar_icons.borrow_mut() = MenuIcons { loads, bitmaps };
+    *c.bar_icons.borrow_mut() = MenuIcons {
+        loads,
+        _bitmaps: bitmaps,
+    };
     // The bar's entries; the shortcuts are matched on the whole menu.
     *c.entries.borrow_mut() = entries;
 }

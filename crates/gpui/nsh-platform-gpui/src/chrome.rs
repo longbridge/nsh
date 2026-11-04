@@ -1422,6 +1422,7 @@ fn set_native_menus(surface: &Surface, cx: &mut App) {
                 label,
                 enabled,
                 items,
+                ..
             } => Some(gpui::Menu {
                 name: label.clone().into(),
                 items: native_items(surface.key(), items, &mut entries, &mut bindings),

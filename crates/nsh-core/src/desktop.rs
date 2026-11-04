@@ -13,6 +13,7 @@ use crate::{
     keymap::{self, Keystroke, Modifiers, When},
 };
 
+#[cfg(not(target_arch = "wasm32"))]
 pub mod menu_icon;
 
 /// How the window's title bar looks (`Window.setTitleBar`).
