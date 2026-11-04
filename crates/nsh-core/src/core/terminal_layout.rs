@@ -31,7 +31,8 @@
 //!   card: a container (a box holding views with content that are not
 //!   only texts: spacers and bars do not count) padded 12pt or more above
 //!   or below, or around two rows of content or more, not a group of
-//!   controls (a split button, a toolbar) ([`Insets`]; the
+//!   controls (a split button, a toolbar: controls, their dividers and
+//!   wrappers of one control, filled or not) ([`Insets`]; the
 //!   core mounts the other sides without a border); controls, boxes of
 //!   text and round boxes (a circle: corners of half its explicit side or
 //!   more) never have one. Where the terminal shows fills as bands
@@ -39,7 +40,12 @@
 //!   3% alpha unlike the nearest opaque fill around it, or the page) is a
 //!   surface instead: no border unless the app's stands out twice as far
 //!   as its fill, a row of padding above and below from 12pt, two columns
-//!   each side from 12pt and one from 4pt. Horizontal padding and margins are one
+//!   each side from 12pt and one from 4pt (from 8pt for a framed one holding
+//!   only boxes, which lie against its line). A framed surface inside a
+//!   frame drops its line and reaches across the padding of that frame to
+//!   its line, through wrappers of no insets in a column ([`band_reach`]:
+//!   an inset palette in a padded card), so its text starts where the
+//!   frame's other content does. Horizontal padding and margins are one
 //!   Cell from 8pt, two from 24pt (at most one on a control or a box of
 //!   text), one from 4pt against a parent's border with no padding of the
 //!   parent's there ([`framing`]: a tree's list in its box); vertical padding a row from 24pt (none on a control or a box
@@ -849,12 +855,20 @@ fn insets(
             t: has(s.border.top),
             b: has(s.border.bottom),
         };
+        // A column from 4pt keeps its text off the band's edge. A framed
+        // band holding only boxes (a card around an inset well whose own
+        // line it omits) leaves them against its line instead: each spaces
+        // itself there (`framing`), and less than a Cell between the two
+        // frames drawn as one takes none.
+        let sub_cell = !(framed && !holds_text(tree, node));
         let px = |v: LengthPercentage| {
             let p = lp(v, parent_width);
             if p >= 12.0 - EPSILON {
                 2
+            } else if p >= 8.0 - EPSILON {
+                1
             } else {
-                i32::from(p >= 4.0 - EPSILON)
+                i32::from(sub_cell && p >= 4.0 - EPSILON)
             }
         };
         let py = |v: LengthPercentage| i32::from(lp(v, parent_width) >= 12.0 - EPSILON);
@@ -960,6 +974,84 @@ fn framing(tree: &impl Tree, node: NodeId) -> (bool, bool) {
         r &= end;
     }
     (l, r)
+}
+
+/// The columns `node`, a band whose line its frame leaves out (an inset
+/// palette in a card), reaches out on the left and right across the
+/// padding of the frame it lies in: its color is the frame's inside
+/// then, against the frame's line, and its text one column in, where the
+/// frame's other content (a caption under it) starts. Two insets, the
+/// frame's and the band's, would set its text two columns in and its
+/// band apart from both the line and that content. Only through boxes
+/// of no insets, no fill and no clip, in columns, where it spans the
+/// width; none where its own margin on the side is the app's.
+fn band_reach(tree: &impl Tree, grid: Grid, node: NodeId, parent_w: Option<f32>) -> (i32, i32) {
+    let s = tree.style(node);
+    let role = tree.role(node);
+    let drops_line = tree.framed()
+        && kind(tree, node).container
+        && !(framed_box(s, role) && !round(s, role, parent_w))
+        && surface(grid, role, tree.backdrop(node).unwrap_or(grid.page)).is_some_and(|s| s.border);
+    if !drops_line || s.position.is_out_of_flow() {
+        return (0, 0);
+    }
+    let side = |border: fn(&Style) -> LengthPercentage,
+                margin: fn(&Style) -> LengthPercentageAuto,
+                inset: fn(&Insets) -> (i32, i32)| {
+        // The app's line it leaves out, and no margin of its own.
+        let own = tree.style(node);
+        if lp(border(own), parent_w) <= EPSILON
+            || lpa(margin(own), parent_w).is_some_and(|m| m.abs() > EPSILON)
+        {
+            return 0;
+        }
+        let mut child = node;
+        while let Some(parent) = tree.parent(child) {
+            let ps = tree.style(parent);
+            let cs = tree.style(child);
+            let block = ps.display == Display::Block;
+            let column = block
+                || matches!(
+                    ps.flex_direction,
+                    FlexDirection::Column | FlexDirection::ColumnReverse
+                );
+            let stretched = cs.size.width.is_auto()
+                && (block
+                    || align(cs.align_self.map_or(ps.align_items.keyword, |a| a.keyword))
+                        == Align::Stretch);
+            if !column || !stretched {
+                return 0;
+            }
+            let (b, p) = inset(&tree.insets(parent));
+            if b > 0 {
+                return p;
+            }
+            let prole = tree.role(parent);
+            if p > 0
+                || ps.position.is_out_of_flow()
+                || lpa(margin(ps), None).is_some_and(|m| m.abs() > EPSILON)
+                || prole.scroll
+                || tree.is_root(parent)
+                || surface(grid, prole, tree.backdrop(parent).unwrap_or(grid.page)).is_some()
+            {
+                return 0;
+            }
+            child = parent;
+        }
+        0
+    };
+    (
+        side(
+            |s| s.border.left,
+            |s| s.margin.left,
+            |i| (i.border.l, i.padding.l),
+        ),
+        side(
+            |s| s.border.right,
+            |s| s.margin.right,
+            |i| (i.border.r, i.padding.r),
+        ),
+    )
 }
 
 /// The columns a disclosure (a collapsible's or an accordion's trigger,
@@ -1556,8 +1648,10 @@ pub(crate) fn compute(
     }
     let mut attempt_kind = k;
     // A group of controls (a split button, a toolbar, a tab list, a
-    // segmented control) is one row of labels: never a card.
-    if surface.is_none() && !flow.is_empty() && flow.iter().all(|&(_, c)| tree.role(c).control) {
+    // segmented control) is one row of labels: never a card, its fill a
+    // band or not (a terminal showing no bands keeps a filled box's
+    // border, but not a group's).
+    if surface.is_none() && controls_group(tree, &flow) {
         attempt_kind.container = false;
         (border, padding) = insets(tree, node, attempt_kind, parent_w, grid, None);
         inset = border.add(padding);
@@ -2015,6 +2109,45 @@ fn give_gaps_and_labels(items: &mut [Item], before: &mut [i32], mut over: i32) -
     over
 }
 
+/// Whether `node` holds a text in flow among its children.
+fn holds_text(tree: &impl Tree, node: NodeId) -> bool {
+    (0..tree.child_count(node)).any(|i| {
+        let child = tree.child(node, i);
+        tree.role(child).text
+            && !hidden(tree, child)
+            && !tree.style(child).position.is_out_of_flow()
+    })
+}
+
+/// Whether the boxes in flow `flow` are a group of controls: controls, a
+/// divider between them (a bare view) and wrappers holding one control
+/// (a menu's trigger in its view), at least one of them a control.
+fn controls_group(tree: &impl Tree, flow: &[(u32, NodeId)]) -> bool {
+    let control = |c: NodeId| {
+        tree.role(c).control || {
+            let role = tree.role(c);
+            let held: Vec<NodeId> = (0..tree.child_count(c))
+                .map(|i| tree.child(c, i))
+                .filter(|&k| !hidden(tree, k) && !tree.style(k).position.is_out_of_flow())
+                .collect();
+            !role.text
+                && !role.scroll
+                && !tree.measures(c)
+                && held.len() == 1
+                && tree.role(held[0]).control
+        }
+    };
+    let mut any = false;
+    for &(_, c) in flow {
+        if control(c) {
+            any = true;
+        } else if !bare(tree, c) {
+            return false;
+        }
+    }
+    any
+}
+
 /// How many icon controls shown as their labels `node` is (1), or holds
 /// and nothing else, in a row or one wrapper deep (a toolbar's group, a
 /// button in its tooltip's view): they give their columns as one. 0 for
@@ -2129,6 +2262,11 @@ fn arrange_flex(
             let m = style.margin;
             let auto = [m.left, m.right, m.top, m.bottom].map(|v| v.is_auto());
             let mut margin = margins(grid, style, parent_w, framed, layers(tree, node));
+            if !row {
+                let (l, r) = band_reach(tree, grid, node, parent_w);
+                margin.l -= l;
+                margin.r -= r;
+            }
             if spec.fills
                 && let Some(t) = lpa(m.top, parent_w)
             {
@@ -2669,13 +2807,16 @@ fn place(
         }
     }
     let Insets { border, padding } = tree.insets(node);
-    let margin = margins(
+    let mut margin = margins(
         grid,
         tree.style(node),
         parent_w,
         tree.framed(),
         layers(tree, node),
     );
+    let (l, r) = band_reach(tree, grid, node, parent_w);
+    margin.l -= l;
+    margin.r -= r;
     let mut layout = Layout::with_order(order);
     layout.location = taffy::Point {
         x: grid.x(x),

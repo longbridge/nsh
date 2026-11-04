@@ -71,6 +71,9 @@ pub enum ColorDepth {
     Ansi256,
     /// The 16 named colors.
     Ansi16,
+    /// No colors (`NO_COLOR`): states and marks are drawn with reverse
+    /// video, bold, underline and dim alone.
+    Monochrome,
 }
 
 impl Default for TerminalCapabilities {
@@ -231,6 +234,10 @@ impl AppView {
                 options.capabilities.foreground_color,
             )
             .is_some(),
+            // Without the kitty keyboard protocol a macOS terminal cannot
+            // report Command: Ctrl stands in for it, and labels say so.
+            ctrl_for_command: OS == nsh_core::platform::Os::MacOs
+                && !options.capabilities.command_key,
             ..Default::default()
         };
         let clipboard = options
@@ -254,7 +261,11 @@ impl AppView {
             #[cfg(feature = "dev")]
             test: None,
             surface,
-            tree: Mounter::default(),
+            tree: {
+                let mut tree = Mounter::default();
+                tree.menus.ctrl_for_command = environment.ctrl_for_command;
+                tree
+            },
             area: Rect::default(),
             focused: true,
             clipboard,
@@ -802,6 +813,26 @@ impl AppView {
                     self.tree.exit = true;
                     return Some(Handled::Yes);
                 }
+                if self.tree.menus.bar_active()
+                    && let Some(stroke) = crate::key_scheme::keystroke(key, *modifiers)
+                {
+                    let m = stroke.modifiers;
+                    // tmux joins two quick Escapes into Alt+Escape.
+                    if stroke.key == nsh_core::keymap::Key::Escape && m.alt && !m.ctrl && !m.cmd {
+                        let outcome = self.tree.menus.key("Escape", Default::default());
+                        if let Some(outcome) = outcome {
+                            self.menu_chosen(&outcome);
+                        }
+                        self.surface.wake.notify();
+                        return Some(Handled::Yes);
+                    }
+                    // A shortcut with a modifier chooses its item while the
+                    // bar has the keys (a letter alone is a title's initial).
+                    if (m.ctrl || m.alt || m.cmd) && self.menu_shortcut(stroke, false, true) {
+                        self.surface.wake.notify();
+                        return Some(Handled::Yes);
+                    }
+                }
                 self.tree.menus.key(key, *modifiers)
             }
             Input::KeyRepeat { key, modifiers } => self.tree.menus.key(key, *modifiers),
@@ -871,7 +902,12 @@ impl AppView {
     /// A shortcut of the application menu's items, after the app's own
     /// bindings: it chooses its item, unless a field being edited uses the
     /// keystroke itself.
-    fn menu_shortcut(&mut self, stroke: nsh_core::keymap::Keystroke, repeat: bool) -> bool {
+    fn menu_shortcut(
+        &mut self,
+        stroke: nsh_core::keymap::Keystroke,
+        repeat: bool,
+        bar: bool,
+    ) -> bool {
         use nsh_core::{desktop::Key, keymap::Key as K};
         let key = match stroke.key {
             K::Char(' ') => Key::Space,
@@ -900,13 +936,47 @@ impl AppView {
             shift: m.shift,
             meta: m.cmd,
         };
-        let Some((id, role, fires)) = self.tree.menus.shortcut(&pressed) else {
+        // A terminal that cannot report Cmd sends Ctrl for it on macOS, as
+        // the keymap's `mod+` bindings take it (`Keyboard::shortcut`).
+        let command = (!self.options.capabilities.command_key
+            && OS == nsh_core::platform::Os::MacOs
+            && pressed.ctrl
+            && !pressed.meta)
+            .then_some(nsh_core::desktop::Shortcut {
+                ctrl: false,
+                meta: true,
+                ..pressed
+            });
+        let Some((id, role, fires)) = self
+            .tree
+            .menus
+            .shortcut(&pressed)
+            .or_else(|| command.and_then(|command| self.tree.menus.shortcut(&command)))
+        else {
             return false;
         };
-        if !fires && self.editing_field().is_some() {
+        // The edit roles' keys stay the field's and the selection's own
+        // (Ctrl+C copies, or quits with nothing selected).
+        if role.is_some_and(|role| {
+            use nsh_core::desktop::MenuRole;
+            matches!(
+                role,
+                MenuRole::Undo
+                    | MenuRole::Redo
+                    | MenuRole::Cut
+                    | MenuRole::Copy
+                    | MenuRole::Paste
+                    | MenuRole::SelectAll
+            )
+        }) {
+            return false;
+        }
+        if !bar && !fires && self.editing_field().is_some() {
             return false;
         }
         if !repeat {
+            // Chosen from the bar, it folds the bar up.
+            self.tree.menus.clear();
             self.menu_chosen(&crate::menu::Outcome::Left(Some((id, role))));
         }
         true
@@ -949,7 +1019,7 @@ impl AppView {
         let handled = if self
             .keyboard
             .shortcut(&self.tree, stroke, repeat, command_key, &control)
-            || self.menu_shortcut(stroke, repeat)
+            || self.menu_shortcut(stroke, repeat, false)
             || self.handle_field_key(key, stroke, &control)
             || self.selection.key(
                 key,
@@ -1528,6 +1598,9 @@ impl AppView {
             .draw(&self.tree, &self.geometry, self.options.cells, area, buffer);
         #[cfg(feature = "dev")]
         self.diagnostics.draw(area, buffer);
+        if self.options.capabilities.colors == ColorDepth::Monochrome {
+            crate::palette::strip_colors(buffer, area);
+        }
         if let (Some(drawing), Some(perf)) = (drawing, &mut self.perf) {
             perf.pending.draw = drawing.elapsed();
             perf.draw(area, buffer);

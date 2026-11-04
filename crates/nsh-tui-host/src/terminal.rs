@@ -392,7 +392,8 @@ fn parse_color(value: &str) -> Option<[u8; 3]> {
 }
 
 /// The capabilities from the startup answers and the environment: `NSH_TUI_COLORS`
-/// (`truecolor`, `256` or `16`) wins, then `COLORTERM`, then `TERM`.
+/// (`truecolor`, `256`, `16` or `mono`) wins, then `NO_COLOR` (no colors at
+/// all, as no-color.org asks), then `COLORTERM`, then `TERM`.
 pub(crate) fn capabilities(
     replies: &Replies,
     var: impl Fn(&str) -> Option<String>,
@@ -421,6 +422,8 @@ pub(crate) fn capabilities(
         Some("truecolor" | "24bit") => ColorDepth::TrueColor,
         Some("256") => ColorDepth::Ansi256,
         Some("16") => ColorDepth::Ansi16,
+        Some("mono" | "none") => ColorDepth::Monochrome,
+        _ if var("NO_COLOR").is_some_and(|value| !value.is_empty()) => ColorDepth::Monochrome,
         _ => {
             if lower("COLORTERM").is_some_and(|c| c == "truecolor" || c == "24bit")
                 || truecolor_brand(&var)
@@ -709,6 +712,32 @@ mod tests {
             capabilities(
                 &Replies::default(),
                 env(&[("COLORTERM", "truecolor"), ("NSH_TUI_COLORS", "16")])
+            )
+            .colors,
+            ColorDepth::Ansi16
+        );
+        // NO_COLOR takes every color away, whatever the terminal draws;
+        // NSH_TUI_COLORS still names a depth.
+        assert_eq!(
+            capabilities(
+                &Replies::default(),
+                env(&[("COLORTERM", "truecolor"), ("NO_COLOR", "1")])
+            )
+            .colors,
+            ColorDepth::Monochrome
+        );
+        assert_eq!(
+            capabilities(
+                &Replies::default(),
+                env(&[("NO_COLOR", "1"), ("NSH_TUI_COLORS", "256")])
+            )
+            .colors,
+            ColorDepth::Ansi256
+        );
+        assert_eq!(
+            capabilities(
+                &Replies::default(),
+                env(&[("NO_COLOR", ""), ("TERM", "xterm")])
             )
             .colors,
             ColorDepth::Ansi16

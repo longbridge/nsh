@@ -149,6 +149,7 @@ pub(crate) fn draw(
         pane: None,
         page: page.rgb,
         spans: std::mem::take(&mut tree_spans),
+        hues: palette::Hues::default(),
     };
     painter.pane = focus_pane(painter.tree);
     let root = Layer::default();
@@ -167,10 +168,11 @@ pub(crate) fn draw(
                 modal: true,
                 boxed: false,
                 title: None,
-                scrolled: false,
+                viewport: None,
                 disabled: false,
                 pane: false,
                 right_line: None,
+                field_group: false,
             };
             painter.view(modal, Point::default(), clip, 1.0, page, layer, true, None);
         }
@@ -204,9 +206,10 @@ struct Layer {
     boxed: bool,
     /// The overlay's accessibility label, its frame's title.
     title: Option<std::sync::Arc<str>>,
-    /// The clip comes from a scroll view's viewport: text it cuts scrolls
-    /// into view, so it ends in no `…`.
-    scrolled: bool,
+    /// The visible part of the innermost scroll view's viewport around
+    /// the view: text cut at its edge scrolls into view, so it ends in no
+    /// `…`, whatever boxes stand between them.
+    viewport: Option<Rect>,
     /// Inside a disabled view: drawn faint (dim) whatever the view's own
     /// frame, as its content may stand outside it.
     disabled: bool,
@@ -217,6 +220,9 @@ struct Layer {
     /// content (`inner.right`) and the parent's visible Cells. A scroll
     /// view that reaches it draws its bar on that line, as lazygit does.
     right_line: Option<(i32, Rect)>,
+    /// Inside an input group's band ([`input_group`]): its field is
+    /// raised with it, not a step of its own.
+    field_group: bool,
 }
 
 struct Painter<'a> {
@@ -244,6 +250,8 @@ struct Painter<'a> {
     page: palette::Rgb,
     /// The links that are stops of Tab, as their texts are drawn.
     spans: HashMap<NodeId, crate::keyboard::Span>,
+    /// The canvas colors drawn this frame, kept apart at 16 colors.
+    hues: palette::Hues,
 }
 
 /// A view's borders: which sides draw and each one's style.
@@ -309,6 +317,14 @@ impl Painter<'_> {
             .is_some_and(|view| view.props.overlay_anchor.is_some())
             && !has_box(self.tree, id)
             && holds_list(self.tree, id, 3);
+        // Only a one-row box of an opaque fill is looked into.
+        let holds_field = !layer.field_group
+            && self.tree.get(id).is_some_and(|view| {
+                view.input.is_none()
+                    && view.style.background_color.0 & 255 == 255
+                    && view.frame.size.height <= self.cells.height()
+            })
+            && input_group(self.tree, id);
         let Some(view) = self
             .tree
             .views
@@ -470,9 +486,18 @@ impl Painter<'_> {
         // side with a width draws, on a filled surface too.
         let mut edges = edges(view, parent);
         // A one-row text field without a line or a fill of its own is a
-        // raised band, as terminal search fields are.
+        // raised band, as terminal search fields are; an input group (the
+        // app's field box holding it with its prefix, chips, clear button
+        // or chevron) is that band as a whole, the field raised with it.
+        let group = parent.ramp.is_some()
+            && !layer.field_group
+            && view.input.is_none()
+            && !page
+            && bounds.bottom - bounds.top == 1
+            && fill.0 & 255 == 255
+            && holds_field;
         if let Some(ramp) = parent.ramp
-            && view.input.is_some()
+            && (view.input.is_some() && !layer.field_group || group)
             && filled == Surface::None
             && !edges.any()
             && !hidden
@@ -759,7 +784,7 @@ impl Painter<'_> {
                     layout,
                     bounds: text_bounds,
                     visible,
-                    scrolled: layer.scrolled,
+                    viewport: layer.viewport,
                     focused: focused_span
                         .and_then(|span| self.spans.get(&span))
                         .filter(|span| span.view == id)
@@ -796,6 +821,7 @@ impl Painter<'_> {
                     inner_visible,
                     cells,
                     ground,
+                    &mut self.hues,
                 );
             }
             if let Some(component) = &mut view.component {
@@ -809,6 +835,7 @@ impl Painter<'_> {
                 // a label beside it, and an icon-only disclosure whether
                 // it is open; its name stays its accessible name.
                 let state = view.props.accessibility.state;
+                let arrow = state.expanded.is_some();
                 let label = match (state.expanded, state.has_popup) {
                     (Some(true), true) => "▴",
                     (Some(false), true) | (Some(true), false) => "▾",
@@ -826,12 +853,22 @@ impl Painter<'_> {
                     _ => label,
                 };
                 if i32::from(x) == inner.left && i32::from(y) == inner.top {
+                    // An arrow stands in the middle of its box: a trigger
+                    // padded each side (a split button's) keeps it off
+                    // the edge beside the main action.
+                    let x = if arrow {
+                        let width = unicode_width::UnicodeWidthStr::width(label) as i32;
+                        let shift = ((room - width) / 2).max(0);
+                        x + shift.min(i32::from(inner_visible.width) - 1).max(0) as u16
+                    } else {
+                        x
+                    };
                     let drawn = dialog::put(
                         self.buffer,
                         x,
                         y,
                         label,
-                        inner_visible.width,
+                        inner_visible.right() - x,
                         Color::Reset,
                         Modifier::empty(),
                     );
@@ -862,14 +899,13 @@ impl Painter<'_> {
         let mut child_layer = layer.clone();
         child_layer.disabled |= own_disabled;
         if view.kind == ViewKind::Scroll {
-            child_layer.scrolled = true;
-        } else if holds {
-            child_layer.scrolled = false;
+            child_layer.viewport = Some(children_clip);
         }
         if self.pane == Some(id) {
             child_layer.pane = true;
         }
         child_layer.right_line = edges.sides[1].then_some((inner.right, visible));
+        child_layer.field_group |= group;
         let mut index = 0;
         while let Some(child) = self
             .tree
@@ -951,6 +987,41 @@ impl Painter<'_> {
             );
             self.bars.push(bar);
         }
+        // At 16 colors or none, a small box of a tone (a price tag, a
+        // meter's filled segment) is drawn as a progress bar's fill is,
+        // reversed in its color: left out with the other fills, it would
+        // vanish, and its text in the fill's contrast color with it. Text
+        // of a hue of its own reads without the fill, and keeps its color.
+        let hued_text = || {
+            (visible.y..visible.bottom()).any(|y| {
+                (visible.x..visible.right()).any(|x| {
+                    let cell = &self.buffer[(x, y)];
+                    cell.symbol() != " " && palette::standard_hue(cell.fg)
+                })
+            })
+        };
+        if parent.ramp.is_none()
+            && matches!(
+                parent.depth,
+                crate::ColorDepth::Ansi16 | crate::ColorDepth::Monochrome
+            )
+            && !page
+            && !dot
+            && !control
+            && !layer.disabled
+            && bounds.bottom - bounds.top < i32::from(CONTAINER_ROWS)
+            && let Some(color) = palette::tone_fill(fill, parent.depth)
+            && !hued_text()
+        {
+            for y in visible.y..visible.bottom() {
+                for x in visible.x..visible.right() {
+                    let cell = &mut self.buffer[(x, y)];
+                    cell.modifier = (cell.modifier | Modifier::REVERSED) - Modifier::DIM;
+                    cell.fg = color;
+                    cell.bg = Color::Reset;
+                }
+            }
+        }
         let popup_item = layer.overlay && !layer.modal;
         // Content of a disabled view drawn outside its frame is disabled too.
         if layer.disabled && !visible.is_empty() {
@@ -988,6 +1059,11 @@ impl Painter<'_> {
             let marks = Marks {
                 bands: self.bands,
                 emphasis,
+                mono: ground.depth == crate::ColorDepth::Monochrome,
+                few: matches!(
+                    ground.depth,
+                    crate::ColorDepth::Ansi16 | crate::ColorDepth::Monochrome
+                ),
             };
             match ground.ramp {
                 Some(ramp) => mark_surface(
@@ -1333,12 +1409,13 @@ fn lines(
 }
 
 /// Where a text view's rows go: its `layout` at `bounds`, drawn inside
-/// `visible`, and whether a scroll view moved it (`scrolled`).
+/// `visible`, and the visible part of the scroll view's viewport around
+/// it (`viewport`).
 struct TextPlace<'a> {
     layout: &'a CellLayout,
     bounds: CellBounds,
     visible: Rect,
-    scrolled: bool,
+    viewport: Option<Rect>,
     /// The characters of the link that has the keyboard focus.
     focused: Option<std::ops::Range<u32>>,
 }
@@ -1356,10 +1433,17 @@ fn text(
         layout,
         bounds,
         visible,
-        scrolled,
+        viewport,
         focused,
     } = place;
     let visible = bounds.clipped(visible);
+    // Where the scroll view's viewport, not the text's own box or a box
+    // that clips it, cuts the text: what is cut there scrolls into view.
+    let viewport_cuts_right = viewport
+        .is_some_and(|v| i32::from(visible.right()) < bounds.right && visible.right() >= v.right());
+    let viewport_cuts_bottom = viewport.is_some_and(|v| {
+        i32::from(visible.bottom()) < bounds.bottom && visible.bottom() >= v.bottom()
+    });
     let single = layout.rows.len() == 1;
     // The end of the last row drawn: where a text cut below ends in `…`.
     let mut last_row = None;
@@ -1502,16 +1586,16 @@ fn text(
             && cut.is_some()
             && !visible.is_empty()
             && i32::from(visible.right()) <= bounds.right
-            && (!scrolled || i32::from(visible.right()) == bounds.right)
+            && !viewport_cuts_right
         {
             let last = visible.right() - 1;
             buffer[(last, y)].set_symbol("…");
         }
     }
-    // Rows past the bottom of a box that does not scroll: the last one
-    // shown ends in `…`.
+    // Rows past the bottom of the text's own box, or of a box that clips
+    // it inside the viewport: the last one shown ends in `…`.
     if let Some((y, end, index, true)) = last_row
-        && !scrolled
+        && !viewport_cuts_bottom
         && index + 1 < layout.rows.len()
         && !visible.is_empty()
     {
@@ -1730,6 +1814,25 @@ fn control(view: &NshView) -> bool {
         )
 }
 
+/// Whether the view is an input group: a text field among the views it
+/// holds (a prefix, chips, a clear button, a chevron), within a few
+/// levels, with something beside the field.
+fn input_group(tree: &Mounter, id: NodeId) -> bool {
+    fn field_in(tree: &Mounter, id: NodeId, depth: usize) -> bool {
+        tree.get(id).is_some_and(|view| {
+            view.input.is_some()
+                || depth > 0
+                    && view
+                        .children
+                        .iter()
+                        .any(|&child| field_in(tree, child, depth - 1))
+        })
+    }
+    tree.get(id).is_some_and(|view| {
+        view.children.len() > 1 && view.children.iter().any(|&child| field_in(tree, child, 3))
+    })
+}
+
 /// What state marks draw with besides modifiers.
 #[derive(Clone, Copy)]
 struct Marks {
@@ -1738,6 +1841,14 @@ struct Marks {
     /// The color of a control whose fill stands out (a primary button):
     /// its accent, or the default foreground.
     emphasis: Option<Color>,
+    /// The terminal shows no colors (`NO_COLOR`): focus is reversed and
+    /// underlined, set apart from a selection's plain reverse video by the
+    /// line rather than by the accent.
+    mono: bool,
+    /// The terminal has no grays between dim and full text (16 colors or
+    /// none): a disabled control's label is struck through as well as dim,
+    /// so it is not taken for a muted one.
+    few: bool,
 }
 
 /// Draws the view's state over its drawn Cells (its subtree's included):
@@ -1784,6 +1895,9 @@ fn mark_state(
                 }
             }
         }
+        if marks.few && control(view) && inner.height < CONTAINER_ROWS {
+            strike(buffer, inner.intersection(visible));
+        }
         return;
     }
     // As with surfaces: a pressable container's text keeps its weights.
@@ -1809,8 +1923,28 @@ fn mark_state(
             }
         }
     }
+    // A field shows its extent with no fill to show it (its fill is a
+    // ramp's step, which a bandless terminal has not): an underline along
+    // its last row, unless its line is drawn (a box three rows tall).
+    let lined = edges.any() && bounds.bottom - bounds.top >= 3;
+    let row = (!inner.is_empty())
+        .then(|| Rect::new(inner.x, inner.bottom() - 1, inner.width, 1).intersection(visible))
+        .filter(|row| !row.is_empty());
+    if field
+        && !lined
+        && let Some(row) = row
+    {
+        underline(buffer, row);
+    }
     if focused && field {
+        // Its whole row, the caret's blank Cells included, as the accent
+        // band of surfaces: reversed in the accent (reversed and
+        // underlined without colors), so the field the keys go to is not
+        // mistaken for a selected item.
         label(buffer, inner, Modifier::UNDERLINED);
+        if let Some(row) = row {
+            focus_reverse(buffer, row, marks.mono, false);
+        }
     } else if focused {
         if selected {
             label(buffer, inner, Modifier::BOLD | Modifier::UNDERLINED);
@@ -1818,8 +1952,13 @@ fn mark_state(
             emphasize_border(buffer, bounds, visible);
         } else if inner.height >= CONTAINER_ROWS {
             label(buffer, inner, Modifier::BOLD | Modifier::UNDERLINED);
-        } else {
+        } else if view.kind == ViewKind::Scroll && !marks.mono {
+            // A scroll view's bar says it has the focus, its thumb in the
+            // accent; its track keeps its look.
             label(buffer, inner, Modifier::REVERSED);
+        } else {
+            // Reversed in the accent: a selection is plain reverse video.
+            focus_reverse(buffer, inner, marks.mono, true);
         }
     } else if pressed && !selected {
         match marks.bands.press {
@@ -1829,8 +1968,15 @@ fn mark_state(
     } else if hovered
         && !selected
         && let Some(band) = marks.bands.hover
+        // The standard colors' gray is no faint step: it marks a control
+        // (a button, a row), never a whole pressable panel (a table).
+        && (band != Color::DarkGray || inner.height < CONTAINER_ROWS)
     {
         fill(buffer, visible, band);
+        // Dim text on that gray would barely read.
+        if band == Color::DarkGray {
+            drawn(buffer, visible, |_| {});
+        }
     }
     if disabled {
         for y in visible.y..visible.bottom() {
@@ -1880,6 +2026,18 @@ fn mark_surface(
     let pressed = flags & state::PRESSED != 0 && !disabled;
     let hovered = flags & state::HOVERED != 0 && !disabled && pressable(view);
     let step = |target: usize| ramp.band(own, level, target);
+    // A chosen control whose every glyph is in a hue of the app's (a
+    // pagination's current dot in the accent) already tells itself from
+    // the others: no select band under it. Read before an emphasis
+    // recolors its label.
+    let hued_label = {
+        let mut glyphs = (inner.y..inner.bottom())
+            .flat_map(|y| (inner.x..inner.right()).map(move |x| (x, y)))
+            .map(|at| &buffer[at])
+            .filter(|cell| cell.symbol() != " ")
+            .peekable();
+        glyphs.peek().is_some() && glyphs.all(|cell| palette::standard_hue(cell.fg))
+    };
     // A control's own fill that stands out makes its label bold (a
     // primary button's); a pressable container (a card, a gauge) holds
     // text of its own weights, which it leaves as they are.
@@ -2019,7 +2177,9 @@ fn mark_surface(
         focus_underline(buffer, visible, covered && !glyphs);
     }
     if selected {
-        band(buffer, visible, step(SELECT), own);
+        if !hued_label {
+            band(buffer, visible, step(SELECT), own);
+        }
         drawn(buffer, inner, |cell| cell.modifier.insert(Modifier::BOLD));
         // A chosen control all of whose Cells are its fill (a swatch) has
         // no band or label to show it: a check sits in its middle, in
@@ -2416,6 +2576,68 @@ fn label(buffer: &mut Buffer, rect: Rect, modifier: Modifier) {
             .unwrap_or(first);
         for x in first..=last {
             buffer[(x, y)].modifier.insert(modifier);
+        }
+    }
+}
+
+/// Strikes the words of `rect` through: its glyphs and the single spaces
+/// between them, never the runs of blank Cells between a label and what
+/// is beside it (a radio's note).
+fn strike(buffer: &mut Buffer, rect: Rect) {
+    for y in rect.y..rect.bottom() {
+        let glyph = |buffer: &Buffer, x: u16| buffer[(x, y)].symbol() != " ";
+        for x in rect.x..rect.right() {
+            let word = glyph(buffer, x)
+                || (x > rect.x
+                    && x + 1 < rect.right()
+                    && glyph(buffer, x - 1)
+                    && glyph(buffer, x + 1));
+            if word {
+                buffer[(x, y)].modifier.insert(Modifier::CROSSED_OUT);
+            }
+        }
+    }
+}
+
+/// Underlines every Cell of `rect`.
+fn underline(buffer: &mut Buffer, rect: Rect) {
+    for y in rect.y..rect.bottom() {
+        for x in rect.x..rect.right() {
+            buffer[(x, y)].modifier.insert(Modifier::UNDERLINED);
+        }
+    }
+}
+
+/// The bandless focus of a control: its Cells reversed in the accent (the
+/// accent behind, its text in the terminal's background), or reversed and
+/// underlined on a terminal without colors. Only the label's span (its first
+/// glyph to its last) when `label`, else every Cell of `rect`.
+fn focus_reverse(buffer: &mut Buffer, rect: Rect, mono: bool, label: bool) {
+    let modifier = if mono {
+        Modifier::REVERSED | Modifier::UNDERLINED
+    } else {
+        Modifier::REVERSED
+    };
+    for y in rect.y..rect.bottom() {
+        let drawn = |x: u16| buffer[(x, y)].symbol() != " ";
+        let (first, last) = if label {
+            let Some(first) = (rect.x..rect.right()).find(|&x| drawn(x)) else {
+                continue;
+            };
+            let last = (rect.x..rect.right())
+                .rev()
+                .find(|&x| drawn(x))
+                .unwrap_or(first);
+            (first, last)
+        } else {
+            (rect.x, rect.right() - 1)
+        };
+        for x in first..=last {
+            let cell = &mut buffer[(x, y)];
+            cell.modifier = (cell.modifier | modifier) - Modifier::DIM;
+            if !mono {
+                cell.fg = ACCENT;
+            }
         }
     }
 }

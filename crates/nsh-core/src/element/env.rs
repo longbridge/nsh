@@ -43,6 +43,9 @@ pub struct Environment {
     /// conventions ([`crate::keymap::apple_keys`]); the other OSes imply
     /// theirs.
     pub apple_keyboard: bool,
+    /// Ctrl stands in for Command: labels show Command as Ctrl
+    /// ([`crate::platform::Environment::ctrl_for_command`]).
+    pub ctrl_for_command: bool,
     /// The embedding app answers `nsh/host`'s calls
     /// ([`crate::platform::Environment::host`]).
     pub host: bool,
@@ -88,6 +91,7 @@ impl Default for Environment {
             idiom: Idiom::Phone,
             locale: Locale::EN_US,
             apple_keyboard: false,
+            ctrl_for_command: false,
             host: false,
             lifecycle: Lifecycle::Active,
             screen_color: false,

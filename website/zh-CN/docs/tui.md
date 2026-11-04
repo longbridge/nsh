@@ -77,32 +77,43 @@ nsh run App.tsx --target tui --points-per-cell 10x20
 | Page Down、Ctrl+V / Page Up、Alt+V | 把焦点所在的滚动视图滚动一页 |
 | Home、Alt+< / End、Alt+> | 该滚动视图的第一个 / 最后一个控件 |
 | Ctrl+S / Ctrl+R | 向前 / 向后搜索屏幕上的文本 |
-| Ctrl+C | 复制选中内容；没有选中内容时退出 |
+| Ctrl+C | 复制选中内容（Ctrl+Shift+C、Cmd+C、Ctrl+Insert 和 Alt+W 也复制）；没有选中内容时退出 |
+| Ctrl+A、Cmd+A | 已有选中文本时，选中所在可选择视图的全部文本 |
 | F10 | 应用菜单的菜单栏：Left / Right 在标题间移动，Down、Enter 或标题的首字母打开它的菜单，Escape 先关闭菜单，再离开菜单栏 |
 
 应用自己的快捷键（[`keymap`](../modules/nsh.md#keymap)）最先匹配，获得焦点的组件绑定的按键（滑块的方向键、列表的按键）也是
 如此，所以组件会先于焦点移动拿到它的按键。支持 kitty 键盘协议的终端会把 Ctrl+I、Ctrl+M 和 Ctrl+[ 与 Tab、Enter 和 Escape
 区分开，报告按键重复和松开，并把 Super 作为 Cmd 报告，因此 `cmd+` 快捷键在这些终端里可用；在不支持该协议的 macOS 终端里，
-没有绑定接收的 Ctrl 快捷键会再作为 Cmd 匹配一次。
+没有绑定接收的 Ctrl 快捷键会再作为 Cmd 匹配一次，菜单和提示（`keymap.label`、`Command`）也把这些快捷键显示为 Ctrl，
+即在这里要按的键（`mod+o` 显示为 `⌃O`）。
 
 **搜索。** Ctrl+S 和 Ctrl+R 像 readline 和 Emacs 那样随输入搜索屏幕上的文本。查询显示在最底一行，前面是 `/`（向前）或
-`?`（向后），匹配处高亮，焦点移到匹配所属的控件。Ctrl+S / Ctrl+R 跳到下一个 / 上一个匹配，Enter 在当前匹配处结束搜索，
-Escape 或 Ctrl+G 把焦点和滚动位置恢复到搜索之前。
+`?`（向后），匹配处高亮，焦点移到匹配所属的控件。Ctrl+S / Ctrl+R 跳到下一个 / 上一个匹配，Backspace 或 Ctrl+H 撤回上一个
+按键，Enter 在当前匹配处结束搜索，Escape 或 Ctrl+G 把焦点和滚动位置恢复到搜索之前。
 
 **文本框** 支持 readline 的按键，也支持桌面的按键：
 
 | 文本框中的按键 | 作用 |
 |---|---|
 | Ctrl+A / Ctrl+E、Home / End | 行首 / 行尾 |
+| Ctrl+Home / Ctrl+End、Alt+< / Alt+> | 文本开头 / 结尾 |
 | Ctrl+F / Ctrl+B、Alt+F / Alt+B | 向前 / 向后一个字符、一个单词 |
-| Ctrl+K / Ctrl+U、Ctrl+W、Alt+D | 删除到行尾 / 行首、向后删除一个单词、向前删除一个单词 |
+| Ctrl+Right / Ctrl+Left、Alt+Right / Alt+Left | 向前 / 向后一个单词，与桌面一致 |
+| Ctrl+N / Ctrl+P、Down / Up | 多行输入框中的下一行 / 上一行 |
+| Ctrl+K / Ctrl+U、Ctrl+W、Alt+Backspace、Alt+D | 删除到行尾 / 行首、向后删除一个单词、向前删除一个单词 |
 | Ctrl+Y | 插入最近删除的文本 |
+| Ctrl+T | 交换插入点两侧的字符 |
 | Ctrl+D、Delete / Ctrl+H、Backspace | 向前 / 向后删除 |
+| Ctrl+Delete / Ctrl+Backspace | 向前 / 向后删除一个单词 |
 | Shift 加移动键 | 扩展选区 |
-| Ctrl+Z / Ctrl+Shift+Z | 撤销 / 重做 |
-| Ctrl+Shift+C / Ctrl+Shift+X、Ctrl+V | 复制 / 剪切、粘贴 |
+| Ctrl+Shift+A、Cmd+A | 全选 |
+| Ctrl+Z / Ctrl+Shift+Z、Cmd+Z / Cmd+Shift+Z | 撤销 / 重做 |
+| Ctrl+Shift+C、Cmd+C、Ctrl+Insert、Alt+W | 复制 |
+| Ctrl+Shift+X、Cmd+X、Shift+Delete | 剪切 |
+| Ctrl+V、Ctrl+Shift+V、Cmd+V、Shift+Insert | 粘贴 |
 | Enter | 按 `submitBehavior`：提交、提交并离开，或换行 |
 | Shift+Enter、Alt+Enter | 在按 Enter 提交的多行输入框中换行 |
+| Escape、Ctrl+G | 离开输入框 |
 
 编辑输入框时，终端光标是插入点处的竖线。输入法在终端模拟器中组字，提交的文本进入输入框；一次粘贴是一次插入。复制的文本
 通过终端写入系统剪贴板（OSC 52，终端允许时在 SSH 中同样可用）。
@@ -133,7 +144,8 @@ Escape 或 Ctrl+G 把焦点和滚动位置恢复到搜索之前。
 
 应用用终端自己的主题绘制。启动时，宿主向终端询问它的默认前景色和背景色，应用的浅色或深色模式跟随背景色（终端没有回答时为
 深色）。色深来自环境变量：`COLORTERM=truecolor`（或已知支持 24 位色的终端）为真彩色，`TERM` 含 `256color` 为 256 色，其余为
-16 种标准色。`NSH_TUI_COLORS=truecolor`、`256` 或 `16` 可直接指定。
+16 种标准色。设置 `NO_COLOR` 时不用颜色绘制：状态以反显、下划线、加粗和删除线表示。`NSH_TUI_COLORS=truecolor`、`256`、`16`
+或 `mono` 可直接指定。
 
 应用的颜色按含义读取，所以为屏幕设计的应用在任何终端主题下都清晰可读：
 
@@ -156,14 +168,15 @@ Escape 或 Ctrl+G 把焦点和滚动位置恢复到搜索之前。
 |---|---|
 | `Checkbox` | `[✓]`、`[ ]` 或 `[–]`，后接标签 |
 | `Radio` | `(●)` 或 `( )`，后接标签 |
-| `Switch` | 开为 `━━●`，关为 `●──` |
+| `Switch` | 开为 `[✓]`，关为 `[ ]`，与复选框相同 |
 | `Slider` | 一行 `─`，到当前值为止用 `━` 填充，每个滑块一个 `●` |
 | `Progress` | 一条 `█` 组成的进度条，末端按八分之一显示，其后为 `░` |
 | `Select`、`Combobox` | 当前值（`Select` 未选中时是 `placeholder`，或应用的 `trigger`）加 ` ▾`，列表在它下方展开 |
 | `Tabs` | 标签页排成一行，选中的为粗体 |
 | `Calendar`、`DatePicker` | 像 `cal` 的月历：日期数字按列右对齐，今天为粗体，选中的日期显示为色带 |
 | `Pagination` | 上一页、页码、`…` 和下一页作为一行中的词，当前页显示为色带 |
-| `MenuItem`、`Submenu` | 勾选的菜单项前为 `✓ `，子菜单的触发项后为 ` ›` |
+| `MenuItem`、`Submenu` | 标题从行首开始；勾选的菜单项行尾为 `✓`（单选项为 `●`），子菜单的触发项后为 ` ›` |
+| `Select`、`Combobox` 的列表 | 标题从行首开始，选中的行行尾为 `✓` |
 | `Accordion`、`Collapsible`、`Tree` | 收起为 `▸`，展开为 `▾` |
 | `Scrollbar` | 终端自己的滚动条 |
 

@@ -122,6 +122,7 @@ fn by_text(buffer: &Buffer, text_cells: &[bool], x: u16, y: u16) -> bool {
 /// `bounds`, in the paints' own colors over `ground`. A text drawn before
 /// it (a value in a ring's middle) keeps its Cells and a Cell clear each
 /// side, as the canvas's own labels do.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn draw(
     canvas: &CanvasView,
     buffer: &mut Buffer,
@@ -130,17 +131,23 @@ pub(crate) fn draw(
     visible: Rect,
     cells: CellSize,
     ground: Ground,
+    hues: &mut palette::Hues,
 ) {
     if visible.is_empty() {
         return;
     }
     let mut replay = Replay::new(canvas, bounds, visible, cells, ground);
+    replay.hues = std::mem::take(hues);
     for op in &canvas.drawing.ops {
         replay.op(op);
     }
     let Replay {
-        dots, mut labels, ..
+        dots,
+        mut labels,
+        hues: kept,
+        ..
     } = replay;
+    *hues = kept;
     let mut scratch = Buffer::empty(Rect::new(0, 0, visible.width, visible.height));
     Canvas::default()
         .marker(Marker::Braille)
@@ -485,6 +492,8 @@ struct Replay<'a> {
     state: State,
     saved: Vec<State>,
     path: Outline,
+    /// The frame's canvas colors at 16 colors, kept apart.
+    hues: palette::Hues,
 }
 
 impl<'a> Replay<'a> {
@@ -526,6 +535,7 @@ impl<'a> Replay<'a> {
             state: State::default(),
             saved: Vec::new(),
             path: Outline::default(),
+            hues: palette::Hues::default(),
         }
     }
 
@@ -543,10 +553,13 @@ impl<'a> Replay<'a> {
 
     /// A paint's color at the terminal's depth, its alpha including `globalAlpha`; `None`
     /// draws nothing.
-    fn ink(&self, paint: &Paint) -> Option<Style> {
+    fn ink(&mut self, paint: &Paint) -> Option<Style> {
         let color = self.canvas.color(paint);
         let alpha = ((color.0 & 255) as f32 * self.state.alpha).round() as u32;
-        (alpha > 0).then(|| palette::paint(nsh_core::Color(color.0 & !255 | alpha), self.ground))
+        (alpha > 0).then(|| {
+            self.hues
+                .paint(nsh_core::Color(color.0 & !255 | alpha), self.ground)
+        })
     }
 
     fn clipped_out(&self, index: usize) -> bool {
@@ -627,11 +640,15 @@ impl<'a> Replay<'a> {
         // its Cells, so it never buries the marks over it.
         let under = alpha < TEXTURE_ALPHA;
         let ink = if under { self.faint() } else { ink };
+        // Its dashes and gaps two dots long at least, so it reads as
+        // dashes, not as a dotted line.
+        let dot = self.dots.step[0].max(self.dots.step[1]);
         let dash = Dash::new(
             &self.state.dash,
             self.state.dash_offset,
             mean_scale(&self.state.matrix),
-        );
+        )
+        .map(|dash| dash.at_least(2.0 * dot));
         self.trace(outline, ink, dash, under);
     }
 

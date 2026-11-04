@@ -89,34 +89,45 @@ backdrop, Tab stays in it, and closing it gives the focus back to the control it
 | Page Down, Ctrl+V / Page Up, Alt+V | Scroll the scroll view around the focused control by a page |
 | Home, Alt+< / End, Alt+> | The first / last control of that scroll view |
 | Ctrl+S / Ctrl+R | Search the text on screen forward / backward |
-| Ctrl+C | Copy the selection; with none, quit |
+| Ctrl+C | Copy the selection (so do Ctrl+Shift+C, Cmd+C, Ctrl+Insert and Alt+W); with none, quit |
+| Ctrl+A, Cmd+A | With text selected, select all the text of its selectable view |
 | F10 | The application menu's bar: Left / Right between the titles, Down, Enter or a title's initial opens its menu, Escape closes it, then leaves the bar |
 
 The app's own shortcuts ([`keymap`](../modules/nsh.md#keymap)) come first, and so do the keys a focused component
 binds (a slider's arrows, a list's), so a component gets its keys before they move the focus. Terminals that speak
 the kitty keyboard protocol report Ctrl+I, Ctrl+M and Ctrl+[ apart from Tab, Enter and Escape, key repeats and
 releases, and Super as Cmd, so `cmd+` shortcuts work there; on macOS terminals without it, a Ctrl shortcut that no
-binding takes is tried again as Cmd.
+binding takes is tried again as Cmd, and menus and hints (`keymap.label`, `Command`) show those shortcuts with
+Ctrl, the key to press there (`⌃O` for `mod+o`).
 
 **Search.** Ctrl+S and Ctrl+R search the text on screen as you type, as readline and Emacs do. The query shows on the
 bottom row after `/` (forward) or `?` (backward), the match is highlighted and focus moves to the control it belongs
-to. Ctrl+S / Ctrl+R go to the next / previous match, Enter ends the search there, and Escape or Ctrl+G puts focus and
-scrolling back as they were.
+to. Ctrl+S / Ctrl+R go to the next / previous match, Backspace or Ctrl+H takes back the last key, Enter ends the
+search there, and Escape or Ctrl+G puts focus and scrolling back as they were.
 
 **Text fields** take readline's keys as well as the desktop's:
 
 | Keys in a field | Do |
 |---|---|
 | Ctrl+A / Ctrl+E, Home / End | Start / end of the line |
+| Ctrl+Home / Ctrl+End, Alt+< / Alt+> | Start / end of the text |
 | Ctrl+F / Ctrl+B, Alt+F / Alt+B | A character, a word forward / back |
-| Ctrl+K / Ctrl+U, Ctrl+W, Alt+D | Kill to the end / start of the line, a word back, a word forward |
+| Ctrl+Right / Ctrl+Left, Alt+Right / Alt+Left | A word forward / back, as on the desktops |
+| Ctrl+N / Ctrl+P, Down / Up | The next / previous line of a multiline field |
+| Ctrl+K / Ctrl+U, Ctrl+W, Alt+Backspace, Alt+D | Kill to the end / start of the line, a word back, a word forward |
 | Ctrl+Y | Insert the last killed text |
+| Ctrl+T | Swap the characters beside the caret |
 | Ctrl+D, Delete / Ctrl+H, Backspace | Delete forward / back |
+| Ctrl+Delete / Ctrl+Backspace | Delete a word forward / back |
 | Shift with the movement keys | Extend the selection |
-| Ctrl+Z / Ctrl+Shift+Z | Undo / redo |
-| Ctrl+Shift+C / Ctrl+Shift+X, Ctrl+V | Copy / cut, paste |
+| Ctrl+Shift+A, Cmd+A | Select all |
+| Ctrl+Z / Ctrl+Shift+Z, Cmd+Z / Cmd+Shift+Z | Undo / redo |
+| Ctrl+Shift+C, Cmd+C, Ctrl+Insert, Alt+W | Copy |
+| Ctrl+Shift+X, Cmd+X, Shift+Delete | Cut |
+| Ctrl+V, Ctrl+Shift+V, Cmd+V, Shift+Insert | Paste |
 | Enter | What `submitBehavior` says: submit, submit and leave, or a new line |
 | Shift+Enter, Alt+Enter | A new line in a multiline field that submits on Enter |
+| Escape, Ctrl+G | Leave the field |
 
 While a field is edited, the terminal's cursor is a bar at the caret. Input methods compose in the terminal
 emulator, and the committed text enters the field; a paste is one insertion. Copied text goes to the system clipboard
@@ -153,8 +164,9 @@ The terminal reports the mouse at Cell precision, and NSH turns each Cell into t
 The app is drawn in the terminal's own theme. When it starts, the host asks the terminal for its default foreground
 and background, and the app's light or dark mode follows the background (dark when the terminal does not say). The
 color depth comes from the environment: `COLORTERM=truecolor` (or a terminal known for 24-bit color) is true color, a
-`TERM` with `256color` is 256 colors, and anything else is the 16 standard colors. `NSH_TUI_COLORS=truecolor`, `256`
-or `16` sets it.
+`TERM` with `256color` is 256 colors, and anything else is the 16 standard colors. `NO_COLOR` draws without colors:
+states are shown with reverse video, underlines, bold and strike-through. `NSH_TUI_COLORS=truecolor`, `256`, `16`
+or `mono` sets it.
 
 The app's colors are read as meanings, so an app designed for screens reads well on any terminal theme:
 
@@ -181,14 +193,15 @@ accent. The app's focus styles still apply on top.
 |---|---|
 | `Checkbox` | `[✓]`, `[ ]` or `[–]`, then its label |
 | `Radio` | `(●)` or `( )`, then its label |
-| `Switch` | `━━●` on, `●──` off |
+| `Switch` | `[✓]` on, `[ ]` off, as a checkbox |
 | `Slider` | a row of `─`, filled with `━` up to the value, a `●` per thumb |
 | `Progress` | a bar of `█` with eighths at its end, then `░` |
 | `Select`, `Combobox` | the value (a `Select`'s `placeholder` while none is chosen, or the app's `trigger`) and ` ▾`, the list opening under it |
 | `Tabs` | the tabs in a row, the selected one bold |
 | `Calendar`, `DatePicker` | `cal`'s month: the days' numbers right-aligned in columns, today bold, the selected days banded |
 | `Pagination` | Previous, the pages, `…` and Next as words in a row, the current page banded |
-| `MenuItem`, `Submenu` | `✓ ` on a checked item, ` ›` on a submenu's trigger |
+| `MenuItem`, `Submenu` | the title from the row's start; `✓` at the row's end on a checked item (`●` on a radio item), ` ›` on a submenu's trigger |
+| `Select`, `Combobox` lists | each title from the row's start, `✓` at the end of the chosen row |
 | `Accordion`, `Collapsible`, `Tree` | `▸` closed, `▾` open |
 | `Scrollbar` | the terminal's own scroll bar |
 

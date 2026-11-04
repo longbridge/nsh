@@ -114,7 +114,8 @@ native! {
         let text = js::to_string(cx, args.get(0))?;
         let keystroke = Keystroke::parse_with(&text, apple(cx))
             .map_err(|e| type_error(cx, &format!("keymap.label: {e}")))?;
-        js::string(cx, &keystroke.label(os(cx), apple(cx)))
+        let ctrl = crate::env::current(cx).ctrl_for_command;
+        js::string(cx, &keystroke.pressed(ctrl).label(os(cx), apple(cx)))
     }
 }
 
@@ -316,7 +317,8 @@ export interface Keymap {
   bind(bindings: Record<string, (e: { keystroke: string }) => void>, options?: KeyBindingOptions): () => void;
   /** `keystroke` as menus and hints show it where the app runs: `"⇧⌘L"` on
    * Apple platforms (and in a browser on one), `"Ctrl+Shift+L"` elsewhere,
-   * for `"mod+shift+l"`. Throws on an invalid keystroke. */
+   * for `"mod+shift+l"`; `"⌃⇧L"` in a macOS terminal that cannot report
+   * Command, where Ctrl stands in for it. Throws on an invalid keystroke. */
   label(keystroke: string): string;
 }
 "#;

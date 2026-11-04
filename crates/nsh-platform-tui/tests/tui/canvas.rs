@@ -679,3 +679,86 @@ fn fills_smaller_than_a_dot_take_the_dots_under_them() {
         "the rule shows in every Cell: {rule:?}"
     );
 }
+
+/// A guide's dashes of 3 points, gaps of 5: under a dot each, as the
+/// physics demo's crosshair draws them.
+#[component]
+fn FineDashes() -> impl IntoElement {
+    view()
+        .flex_1()
+        .child(
+            canvas(
+                Painter::new()
+                    .stroke_color(nsh_core::color::rgb(GREEN))
+                    .line_dash(&[px(3.0), px(5.0)])
+                    .begin_path()
+                    .move_to(22.0, 0.0)
+                    .line_to(22.0, 44.0)
+                    .move_to(40.0, 22.0)
+                    .line_to(160.0, 22.0)
+                    .stroke(),
+            )
+            .label("drawing")
+            .w(px(160.0))
+            .h(px(48.0)),
+        )
+        .child(text("drawn"))
+}
+
+/// Whether the braille Cell's dot at `column` (0, 1) and `row` (0 to 3)
+/// is set.
+fn braille_dot(symbol: &str, column: usize, row: usize) -> bool {
+    const BITS: [[u32; 4]; 2] = [[0x01, 0x02, 0x04, 0x40], [0x08, 0x10, 0x20, 0x80]];
+    let code = symbol.chars().next().map_or(0, u32::from);
+    (0x2800..=0x28ff).contains(&code) && (code - 0x2800) & BITS[column][row] != 0
+}
+
+/// The lengths of the runs of set and unset dots in `dots`, from its first
+/// set one to its last.
+fn runs(dots: &[bool]) -> (Vec<usize>, Vec<usize>) {
+    let first = dots.iter().position(|&d| d).unwrap();
+    let last = dots.iter().rposition(|&d| d).unwrap();
+    let (mut on, mut off) = (Vec::new(), Vec::new());
+    let mut at = first;
+    while at <= last {
+        let lit = dots[at];
+        let length = dots[at..=last].iter().take_while(|&&d| d == lit).count();
+        if lit {
+            on.push(length)
+        } else {
+            off.push(length)
+        }
+        at += length;
+    }
+    (on, off)
+}
+
+#[test]
+fn dashes_shorter_than_a_dot_draw_as_dashes_not_as_a_dotted_line() {
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(24, 6)).unwrap();
+    view.load(App::Rust(Root::new::<FineDashes>(|| ())))
+        .unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "drawn");
+    let buffer = terminal.backend().buffer();
+    // Along the row at y = 22 (Cell row 1, dot row 1) from x = 40, and the
+    // column at x = 22 (Cell 2, its right dots) to y = 44.
+    let across: Vec<bool> = (10..40)
+        .map(|dot| braille_dot(buffer[(dot / 2, 1)].symbol(), dot as usize % 2, 1))
+        .collect();
+    let down: Vec<bool> = (0..12)
+        .map(|dot| braille_dot(buffer[(2, dot / 4)].symbol(), 1, dot as usize % 4))
+        .collect();
+    for (line, dots) in [("across", across), ("down", down)] {
+        let (on, off) = runs(&dots);
+        assert!(on.len() >= 2, "{line}: several dashes: {dots:?}");
+        assert!(
+            on.iter().all(|&length| length >= 2),
+            "{line}: each dash two dots at least: {on:?}"
+        );
+        assert!(
+            off.iter().all(|&length| length >= 2),
+            "{line}: and each gap: {off:?}"
+        );
+    }
+}

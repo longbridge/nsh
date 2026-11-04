@@ -565,3 +565,32 @@ fn apps_read_the_terminal_idiom_the_real_os_and_the_desktop_module() {
     view.load(nsh_platform_tui::Bundle::source(code)).unwrap();
     draw_until(&mut view, &mut terminal, &rx, expected);
 }
+
+/// A label in the theme's `primary`, read from the tokens.
+#[component]
+fn Primary() -> impl IntoElement {
+    view().child(text("Brand").text_color(|| {
+        nsh_core::element::tokens()
+            .color("primary")
+            .unwrap_or_default()
+    }))
+}
+
+#[test]
+fn a_rust_roots_theme_tokens_color_its_views() {
+    let red = nsh_core::color::rgb(0xd43a4a);
+    let mut tokens = nsh_core::element::Tokens::default();
+    tokens.set_color("primary", red.into());
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(20, 2)).unwrap();
+    view.load(App::Rust(Root::new::<Primary>(|| ()).tokens(tokens)))
+        .unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "Brand");
+    // The tokens' red is the accent of its hue; the default theme's
+    // `primary` is a near-black ink, the terminal's own foreground.
+    assert_eq!(
+        terminal.backend().buffer()[(0, 0)].fg,
+        ratatui_core::style::Color::Red
+    );
+    view.stop();
+}

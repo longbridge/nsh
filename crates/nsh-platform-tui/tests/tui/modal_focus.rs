@@ -390,5 +390,10 @@ fn escape_in_a_sheet_gives_the_focus_back_to_where_it_came_from() {
     key(&mut view, "Escape", false);
     draw_until(&mut view, &mut terminal, &rx, "seen opener inside opener.");
     key(&mut view, "Tab", false);
-    draw_until(&mut view, &mut terminal, &rx, "seen opener inside opener after.");
+    draw_until(
+        &mut view,
+        &mut terminal,
+        &rx,
+        "seen opener inside opener after.",
+    );
 }

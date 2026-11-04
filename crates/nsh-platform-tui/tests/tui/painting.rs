@@ -869,3 +869,54 @@ fn an_underline_of_its_own_color_keeps_it() {
         "a plain underline takes the text's"
     );
 }
+
+#[component]
+fn PaddedTrigger() -> impl IntoElement {
+    view()
+        .flex_1()
+        .child(
+            view()
+                .flex_row()
+                .child(
+                    // A split button's chevron: a popup trigger padded each
+                    // side.
+                    view()
+                        .label("More")
+                        .px(px(8.0))
+                        .accessibility_state(AccessibilityState {
+                            expanded: Some(false),
+                            has_popup: true,
+                            ..AccessibilityState::default()
+                        })
+                        .on_press(|_: &()| {})
+                        .child(
+                            canvas(Painter::new().fill_rect(0.0, 0.0, 16.0, 16.0))
+                                .w(px(16.0))
+                                .h(px(16.0)),
+                        ),
+                )
+                .child(text("Merge")),
+        )
+        .child(text("ready"))
+}
+
+#[test]
+fn a_padded_popup_triggers_arrow_stands_in_its_middle() {
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(16, 3)).unwrap();
+    view.load(App::Rust(Root::new::<PaddedTrigger>(|| ())))
+        .unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "ready");
+    let buffer = terminal.backend().buffer();
+    let first = row(buffer, 0, 0..16);
+    let arrow = first
+        .chars()
+        .position(|c| c == '▾')
+        .unwrap_or_else(|| panic!("{first:?}"));
+    assert!(arrow >= 1, "off the box's leading edge: {first:?}");
+    assert!(first.starts_with(' '), "its padding before it: {first:?}");
+    assert!(
+        first.chars().nth(arrow + 1) == Some(' '),
+        "and after it: {first:?}"
+    );
+}

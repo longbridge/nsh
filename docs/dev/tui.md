@@ -30,6 +30,8 @@ apart from Tab, Enter and Esc, repeats and releases are reported, and Super arri
 (`TerminalCapabilities::command_key`). The flags are not pushed in Apple Terminal, VS Code's terminal, VTE
 terminals (`VTE_VERSION`) or tmux before 3.3, whose answers are not to be relied on. Without the protocol on
 macOS, a Ctrl keystroke no app binding matches is matched again as Cmd, so `cmd+` bindings stay reachable.
+There the environment's `ctrl_for_command` is set, and labels show such shortcuts with Ctrl, the key to press
+(`Keystroke::pressed`: `keymap.label`, `Command`'s hints, the menus' right column).
 Every mode is restored on exit, on errors, on a panic and on a stop signal, the kitty flags popped first.
 When the terminal reports focus coming back, the host turns bracketed paste, focus reports and mouse capture on
 again (another program in the same terminal may have turned them off) and the next frame repaints every Cell;
@@ -45,7 +47,9 @@ default foreground and background (`rgb:RRRR/GGGG/BBBB`, one to four hex digits 
 `TerminalCapabilities::foreground_color` / `background_color`, and the background's relative luminance (above
 0.4 is light) its `background` scheme. The color depth comes from the environment: `COLORTERM=truecolor` or
 `24bit` is 24-bit, a `TERM` with `256color` the 256-color palette, anything else the 16 colors;
-`NSH_TUI_COLORS=truecolor|256|16` overrides both.
+a non-empty `NO_COLOR` none (`ColorDepth::Monochrome`, before `COLORTERM`); `NSH_TUI_COLORS=truecolor|256|16|mono`
+overrides them all. Without colors every color of the frame is reset after drawing (`palette::strip_colors`): a
+Cell with a background is reversed, accent text bold.
 
 `C-h e` toggles the logs and errors panel. Escape, `C-g` or `q` closes it; arrows and PageUp/PageDown scroll,
 Home/End select the start/end, and `r` reloads the latest build. Errors open the panel automatically and the next
@@ -330,7 +334,10 @@ Alignment becomes a whole-Cell indent. Line geometry reports UTF-16 offsets and 
 
 `render.rs` draws the retained view tree in the terminal's own look, as terminal apps such as grok-build look:
 the user's terminal theme gives the colors, depth comes from steps of the terminal's own background, and
-box-drawing lines and bold give the rest of the structure and state.
+box-drawing lines and bold give the rest of the structure and state. The app's design tokens reach its views
+through the core, which resolves them into the styles it sends; `Command::Tokens`, which colors other platforms'
+own controls (Linux's menus, mobile alerts), changes nothing here: the terminal's own controls (menus, the menu
+bar, system dialogs, the focus) keep the terminal theme's colors.
 
 **Two looks.** A terminal whose background is known (OSC 11, `TerminalCapabilities::background_color`) and that
 shows 256 colors or more has **surfaces** (`palette::Ramp`): steps of its background mixed toward its foreground
@@ -350,20 +357,31 @@ terminal's own background (`Color::Reset`) is never painted, so its color and tr
 | focus line | 40% | a focused field's or container's line |
 
 Elsewhere (a 16-color terminal, an unknown background) the look is **bandless**: no fills, dim secondary text and
-lines, reverse video for selection and focus, as described with each rule below. The app's design decides what is there and where it is; it is not reproduced Cell by
+lines, reverse video for selection, as described with each rule below. Focus is reverse video in the accent
+(reversed and underlined without colors), so it is never mistaken for a selection; a hover is the standard dark
+gray band at 16 colors, on controls only and with its text undimmed; a text field without its line is underlined
+along its last row, the row reversed in the accent while it has the focus; where dim is the only gray (16 colors,
+none) a disabled control's label is also struck through, so it is told from muted text; and there a small box of
+a tone (a price tag, a meter's filled segment: a saturated fill under three rows) is reversed in its color, as a
+progress bar's fill is, rather than left out with the other fills. The app's design decides what is there and where it is; it is not reproduced Cell by
 Cell. Views draw in tree order (the core orders siblings by `zIndex`), modals after the root, and each view
 draws, in order:
 
 1. when it is the first surface (a border or a fill) of an overlay: its box cleared of what is under it; with
    surfaces an anchored overlay's box is then raised and a modal's stays base;
-2. with surfaces, its fill as a band over its whole frame (below);
+2. with surfaces, its fill as a band over its whole frame (below). A framed fill inside a frame (an inset palette
+   in a padded card) leaves its line to the frame's and is laid out against that line, across the frame's padding
+   (`band_reach`): one line and one fill read as one panel, and its rows' text starts in the column where the
+   frame's other content (a caption under it) does;
 3. its borders in box drawing on each side wider than zero, one Cell whatever the width: `─` and `│`, `╭╮╰╯` at
    a corner whose radius is above zero and `┌┐└┘` at a square one, dashed `╌╎`, dotted `┈┊`; a border on one
    side only is that side's line. Borders draw only where the layout gave them a Cell: in a terminal the core
    sends a border width only for those sides (`Node::cell_border`), which only cards have (a container with
    vertical padding of 12 points or two rows of content). A control (a button, link, tab, menu item, option,
    checkbox, radio, switch, slider, combobox, text field or other pressable view) is its label row, a box of
-   text and a small box have none; a tab's indicator bar takes no Cells, and the selected tab is a reversed
+   text and a small box have none, nor has a group of controls (a split button, a toolbar: controls, the dividers
+   between them and wrappers of one control, such as a menu's trigger in its view), filled or not, with bands or
+   without (`controls_group`); a tab's indicator bar takes no Cells, and the selected tab is a reversed
    band instead;
 4. its content: text runs (below); a text field; a canvas (below; icon-sized ones take no Cells); a native
    component's terminal rendering; a control whose content is all left out (an icon button such as a `⋯` menu
@@ -400,7 +418,9 @@ mean that): with surfaces its fill is its own color blended over its ground, at 
 the Cells of its tracks are such views, inside the control that takes the press, so hover and focus bands leave
 the color alone. A run with its own background (a
 highlight, inline code) is a band the same way. A text field without a
-line or a fill of its own is a raised band (a search field). Bandless, fills draw nothing.
+line or a fill of its own is a raised band (a search field); an input group, a one-row box of an opaque fill
+holding a field with something beside it (a prefix or suffix, chips, a clear button, a chevron), is that band as
+a whole, the field raised with it rather than a step of its own (`input_group`). Bandless, fills draw nothing.
 
 A view's gradient over no fill of its own is a fill of its first stop, a band as any fill is.
 
@@ -438,7 +458,9 @@ draw nothing.
 With surfaces (`render::mark_surface`) states are bands and bold; a band replaces only the Cells on the view's
 own background, so what its children filled stays, and it is at least one step above the view's own:
 
-- a selected or current item (a toggle that is on included) is a select band and bold, never the accent; a
+- a selected or current item (a toggle that is on included) is a select band and bold, never the accent; one
+  whose every glyph is in a hue of the app's (a pagination's current dot in the accent) is only bold, its color
+  telling it apart already; a
   focused control (a button, a row, a tab) is the accent band, its text in the terminal's background color, bold
   when it is also selected, so focus is the accent and on or chosen a gray step wherever they meet; a focused
   container three or more rows tall shows its line in the focus color (without a line, a hover band and an accent
@@ -544,9 +566,11 @@ What the system draws on other platforms is drawn in the same look (`dialog.rs`,
   `index` (-1 when dismissed). While a dialog is shown it takes every key and press, and nothing behind it is hit.
 - **Context menus** (`Menu.popup`, `DesktopCommand::PopupMenu`): a box at the pointer's Cell (or the app's point),
   above the pointer or moved left where it has no room, on the raised surface of an anchored popup with the
-  popover's rounded line, no backdrop. One row per item: a `✓` column when an item is checkable, the label (a role's
-  own without one), the shortcut at the right (macOS's `⌃⌥⇧⌘` on macOS, else `Ctrl+Shift+N`) or `›` on a submenu,
-  whose box opens beside its row; disabled items faint, separators a line across the box, the focused row on the
+  popover's rounded line, no backdrop. One row per item: the label from the first Cell inside the line (a role's own
+  without one), the shortcut at the right (macOS's `⌃⌥⇧⌘` on macOS, else `Ctrl+Shift+N`) or `›` on a submenu,
+  whose box opens beside its row; a box with a checkable item keeps a one-Cell column at its rows' right end, a
+  Cell inside the line and a Cell after the shortcuts, for the `✓` of a checked item and a submenu's `›`, as
+  `nsh/base`'s `Menu`, `Select` and `Combobox` place their marks; disabled items faint, separators a line across the box, the focused row on the
   selection band (reversed without surfaces). Up / Down, Tab / Shift+Tab and Ctrl+N / Ctrl+P go round the items that
   can be chosen, Home / End to the ends, a letter to the next item it starts; Right, Enter or Space opens a submenu,
   Left closes it; Enter or Space chooses, Escape (Ctrl+G) closes a submenu, then the menu. The pointer moves the
@@ -565,7 +589,10 @@ What the system draws on other platforms is drawn in the same look (`dialog.rs`,
   top-level item without a submenu is chosen at once. A choice is the `Menu` event with the item's id, as the context
   menu's, without the close event. The items' shortcuts are matched after the keymap's
   bindings and the focused component's, as the GPUI backend matches them (`MenuItem::find_shortcut`, a shortcut that
-  needs no modifier not while a field is edited); the edit roles (`undo`, `redo`, `cut`, `copy`, `paste`,
+  needs no modifier not while a field is edited, Ctrl tried as Cmd where Ctrl stands in for it; while the bar has the
+  keys a shortcut with Ctrl, Alt or Cmd still chooses its item and folds the bar up, a letter alone stays a title's
+  initial, and Alt+Escape, two quick Escapes as tmux joins them, is Escape; the edit roles' keys stay the field's and
+  the selection's own, so Ctrl+C still copies or quits); the edit roles (`undo`, `redo`, `cut`, `copy`, `paste`,
   `selectAll`) act as their Cmd keys on the focused field, and the roles of a window or app the terminal has none of
   (`about`, `hide`, `hideOthers`, `showAll`, `minimize`, `zoom`, `toggleFullScreen`) are left out, with the separators
   and submenus they leave empty.
@@ -701,11 +728,17 @@ drawn on.
   passes through, one dot wide; `strokeRect` strokes a rectangle. `clearRect` empties dots.
 - **Clips** are masks of dots, each new one intersected with those in effect; fills, strokes and text stay inside.
 - **Dashes** are sampled at each dot's center along its subpath, in user-space lengths scaled by the transform; an
-  odd pattern repeats, and every subpath starts the pattern again.
+  odd pattern repeats, and every subpath starts the pattern again. A pattern whose shortest dash or gap is under
+  two dots (a guide's 3 on, 5 off at 4-point dots) is scaled up in proportion until it is two (`Dash::at_least`):
+  sampled as it is it would alternate single dots, a dotted line that reads as a denser row of a dot grid.
 - **Colors**: a gradient draws its middle stop, and an animated color (`Paint::Slot`) its current value from the
   canvas arguments the native animator writes (transparent until it has one; numbers read 0). A paint's alpha
   times `globalAlpha` is part of its color, blended over the page of the appearance and drawn at the terminal's
-  color depth; the view's opacity is not. A Cell shows one
+  color depth; the view's opacity is not. At 16 colors the canvases of one frame share their entries
+  (`palette::Hues`), so the app's distinct colors stay apart where nearest-color quantizing would merge them: a
+  hued color takes its hue's accent (as text of that color does), else the nearest hue still free; a gray the
+  nearest of Black, DarkGray, Gray and White still free; none takes the entry of the ground it is on. Colors share
+  an entry only once every one is taken (a fifth gray series). A Cell shows one
   ink: that of its most recently painted dot. A fill under half opaque is a wash, a sparse floor of dots;
   under 15% (a ring's track, hatching) a fill is its outline and a stroke its path, both a hairline in the faintest
   gray, drawn only where no other dot is and never the ink of a Cell another mark shares, so a track still shows
@@ -733,7 +766,7 @@ it owns keys and the app's field caret is hidden; closing it restores the caret 
 
 | Keys | Action |
 |---|---|
-| Ctrl+N, Tab | Next focusable view in tree order; with the focus in the open popup of a trigger (a date picker's calendar, a menu), the next one in it, round it: its box covers the controls around the trigger, and Escape closes it and gives the trigger the focus. A popup anchored to no focusable view is passed through in tree order |
+| Ctrl+N, Tab | Next focusable view in tree order; with the focus in the open popup of a trigger (a date picker's calendar, a menu), the next one in it, round it: its box covers the controls around the trigger, and Escape closes it and gives the trigger the focus. A popup anchored to no focusable view is passed through in tree order; one over a backdrop that covers the page (a dialog, a sheet) keeps the focus inside it (`covering_layer`), and closing it gives the focus back |
 | Ctrl+P, Shift+Tab | Previous focusable view in tree order, in the same popup as Tab |
 | Down / Up | Nearest focusable view below / above, one in an overlapping column first; with none focused, the first / last one in sight, inside an open anchored popup (a menu or select opened by a click) when one is open. One out of sight within a wheel step is revealed; one farther away is approached by a wheel step (three rows) of the innermost Scroll that can still move that way, focus then staying on a control in sight |
 | Ctrl+F, Right / Ctrl+B, Left | Nearest focusable view to the right / left on the same row |
@@ -743,6 +776,8 @@ it owns keys and the app's field caret is hidden; closing it restores the caret 
 | Alt+<, Home / Alt+>, End | In that Scroll, focus the first / last control in tree order; center it when a vertical reveal must scroll, or scroll to the endpoint when there are no controls |
 | Ctrl+S / Ctrl+R | Search the text on screen forward / backward in the Minibuffer |
 | Ctrl+C | Copy the selection; with none, quit |
+| F10 | The application menu's bar (System UI above): the arrows, Tab, Home / End, Down / Enter / Space, a title's initial, Escape / Alt+Escape |
+| Ctrl+H, E / Ctrl+H, P | Outside fields: the diagnostics panel / the performance line |
 
 Focus visits pressable and editable views, honoring `focusable` and disabled state, in depth-first document
 order within the focus scope, as NSH's other platforms do (Tab and Ctrl+N / Ctrl+P; Up / Down are spatial). A sidebar's stops stay together before the next
@@ -928,17 +963,19 @@ App shortcuts run before editing, with the existing `When::Editing` policy.
 | C-a / C-e, Home / End | Start / end of the logical line |
 | C-f / C-b, Right / Left | Forward / back one core character boundary |
 | M-f / M-b | End of the next / start of the previous alphanumeric word (readline) |
-| Ctrl+Right / Ctrl+Left | Core desktop word boundaries, including trailing / leading whitespace |
+| Ctrl+Right / Ctrl+Left, M-Right / M-Left | Core desktop word boundaries, including trailing / leading whitespace |
 | Shift+arrows, Shift+Home/End | Extend the selection |
 | C-n / C-p, Down / Up (multiline) | Next / previous visual line |
 | C-d / Delete, C-h / Backspace | Delete forward / back |
 | C-k / C-u | Kill to line end / start; C-k at line end also kills the newline |
 | C-w / M-d | Kill back to the whitespace boundary / forward to the end of the next alphanumeric word |
+| M-Backspace | Kill back to the start of the previous alphanumeric word |
+| Ctrl+Backspace / Ctrl+Delete | Delete back / forward to the core's desktop word boundary |
 | C-y | Insert the last killed text, shared between fields of this surface |
 | C-t | Transpose the characters beside the caret, or the last two at the end |
 | Ctrl+Shift+C / Ctrl+Shift+X, Cmd+C / Cmd+X | Copy / cut the selection |
 | Ctrl+Insert / Shift+Delete, M-w | Copy / cut; M-w copies |
-| Ctrl+V, Cmd+V, Shift+Insert | Paste the clipboard text |
+| Ctrl+V, Ctrl+Shift+V, Cmd+V, Shift+Insert | Paste the clipboard text |
 | Ctrl+Shift+A, Cmd+A | Select all; the test agent's clear step uses Ctrl+Shift+A |
 | Ctrl+Z / Ctrl+Shift+Z, Cmd+Z / Cmd+Shift+Z | Undo / redo |
 | Ctrl+Home / Ctrl+End, M-< / M-> | Start / end of the text |
@@ -988,7 +1025,7 @@ permit clipboard writes; `nsh test` uses memory and never writes to the machine'
 | Colors | The terminal theme's meanings: the default foreground, dim for low contrast, or the accent of a saturated color's hue; canvases keep their colors at the terminal's depth |
 | View fills | With surfaces (256 colors or more and a known background): a band of the ramp's step over the view's frame (lighter raised, darker sunken, a saturated fill mixed 20% into the step under it), the app's page color the terminal's own background; bandless (16 colors or an unknown background): left out, Cells keep the terminal's background (Drawing, "Fills") |
 | Opacity | Left out (a view under 0.03 is not shown) |
-| Selected, focused, pressed, hovered and disabled views | A reversed band, a reversed label (a bold border on large containers; an underlined text field), a faint background band (none at 16 colors), dim |
+| Selected, focused, pressed, hovered and disabled views | A reversed band, a reversed label (a bold border on large containers; an underlined text field), a faint background band (the dark gray at 16 colors), dim (struck through at 16 colors and none) |
 | Borders | Box drawing on each side wider than zero, one Cell, dim (an accent color kept), rounded corners where a radius is set, dashed and dotted lines |
 | Outlines and focus rings | Left out; focus shows as described in "Drawing" |
 | Box shadows | Left out |
@@ -1001,7 +1038,7 @@ permit clipboard writes; `nsh test` uses memory and never writes to the machine'
 | Slider dragging and control hover | A primary press on a slider's track moves the nearest thumb there and a drag moves it Cell by Cell, through the responder events the Touch path feeds (`nsh-base`'s `Slider`); hover reports `HOVERED` (`hover:` styles) and HoverIn/Out/Move on the Cell hit regions (Mouse and text selection) |
 | Border width | One Cell whatever the width |
 | Text | The run's color as a meaning, an accent background reversed, bold at weight 600 and above, italic, underline and strikethrough |
-| Hover and pressed states | With surfaces the ramp's hover and select steps; bandless a faint band (10% and 18% toward the terminal's foreground, none at 16 colors); hover events on the Cell hit regions |
+| Hover and pressed states | With surfaces the ramp's hover and select steps; bandless a faint band (10% and 18% toward the terminal's foreground; at 16 colors the dark gray for hover, none for press); hover events on the Cell hit regions |
 | Mouse drags | Native pan values, responder moves and bounded content scrolling |
 | Selectable text | Reversed grapheme Cells; copies use the shared clipboard and OSC 52 |
 | Pointer precision | One terminal Cell, converted to its center in points |

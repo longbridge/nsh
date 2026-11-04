@@ -434,6 +434,118 @@ fn selection_is_a_select_band_and_bold_and_focus_the_accent_on_surfaces() {
     );
 }
 
+/// A pagination: the current dot in the accent, the others gray; a
+/// chosen thumbnail with a neutral label beside them.
+#[component]
+fn Dots() -> impl IntoElement {
+    let dot = |symbol: &'static str, current: bool| {
+        let mark = text(symbol);
+        view()
+            .w(px(16.0))
+            .h(px(16.0))
+            .role(nsh_core::AccessibilityRole::Button)
+            .on_press(|_: &()| {})
+            .accessibility_state(nsh_core::AccessibilityState {
+                selected: current,
+                ..Default::default()
+            })
+            .child(if current {
+                mark.text_color(nsh_core::color::rgb(0x22c55e))
+            } else {
+                mark.text_color(nsh_core::color::rgb(0x71717a))
+            })
+    };
+    view()
+        .flex_1()
+        .child(
+            view()
+                .flex_row()
+                .child(dot("○", false))
+                .child(dot("●", true))
+                .child(dot("○", false)),
+        )
+        .child(
+            view()
+                .w(px(80.0))
+                .h(px(16.0))
+                .role(nsh_core::AccessibilityRole::Button)
+                .on_press(|_: &()| {})
+                .accessibility_state(selected())
+                .child(text("Photo 1")),
+        )
+        .child(text("ready"))
+}
+
+#[test]
+fn a_chosen_control_its_hue_already_tells_apart_takes_no_select_band() {
+    let (mut view, rx) = surfaces();
+    let mut terminal = Terminal::new(TestBackend::new(12, 4)).unwrap();
+    view.load(App::Rust(Root::new::<Dots>(|| ()))).unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "ready");
+    let buffer = terminal.backend().buffer();
+    let x = (0..12)
+        .find(|&x| buffer[(x, 0)].symbol() == "●")
+        .unwrap_or_else(|| {
+            let row: String = (0..12).map(|x| buffer[(x, 0)].symbol()).collect();
+            panic!("the current dot is drawn: {row:?}")
+        });
+    let current = &buffer[(x, 0)];
+    assert_eq!(current.fg, Color::Green, "in its accent");
+    assert_eq!(current.bg, Color::Reset, "no band under the current dot");
+    assert!(current.modifier.contains(Modifier::BOLD));
+    assert_eq!(
+        buffer[(0, 1)].bg,
+        Color::Rgb(56, 56, 56),
+        "a chosen label of no hue keeps its select band"
+    );
+}
+
+/// An input group: the app's field box, a prefix, the field and a
+/// chevron in one row; and a bare field below it.
+#[component]
+fn Group() -> impl IntoElement {
+    view()
+        .flex_1()
+        .child(
+            view()
+                .w(px(160.0))
+                .h(px(16.0))
+                .flex_row()
+                .items_center()
+                .bg(nsh_core::color::rgb(0x18181b))
+                .child(text("$"))
+                .child(nsh_base::input().flex_1().h(px(16.0)))
+                .child(text("v")),
+        )
+        .child(nsh_base::input().w(px(80.0)).h(px(16.0)))
+        .child(text("ready"))
+}
+
+#[test]
+fn an_input_group_is_one_field_band_its_prefix_and_chevron_inside_it() {
+    let (mut view, rx) = surfaces();
+    let mut terminal = Terminal::new(TestBackend::new(24, 4)).unwrap();
+    view.load(App::Rust(Root::new::<Group>(|| ()))).unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "ready");
+    let buffer = terminal.backend().buffer();
+    let band = buffer[(5, 0)].bg;
+    assert_ne!(band, Color::Reset, "the group is a band");
+    assert_eq!(buffer[(0, 0)].symbol(), "$");
+    let chevron = (0..24).find(|&x| buffer[(x, 0)].symbol() == "v").unwrap();
+    for x in 0..=chevron {
+        assert_eq!(
+            buffer[(x, 0)].bg,
+            band,
+            "one band, its field no step of its own: {x}"
+        );
+    }
+    assert_eq!(
+        buffer[(0, 1)].bg,
+        band,
+        "a field alone is the same raised band"
+    );
+}
+
 #[component]
 fn Raised() -> impl IntoElement {
     let anchor = element_ref();
@@ -1712,14 +1824,24 @@ fn a_selected_container_shows_focus_with_its_label_underlined() {
     };
     // The selected one already stands on the select band: the focus
     // underlines its label.
-    tab_until(&mut view, &mut terminal, &rx, "the selected one's focus", |buffer| {
-        underlined(buffer, "One")
-    });
+    tab_until(
+        &mut view,
+        &mut terminal,
+        &rx,
+        "the selected one's focus",
+        |buffer| underlined(buffer, "One"),
+    );
     let buffer = terminal.backend().buffer();
     assert_eq!(buffer[cell_of(buffer, "One")].bg, at_rest, "its band stays");
     // The other takes a band of its own: no underline.
-    tab_until(&mut view, &mut terminal, &rx, "the other one's focus", |buffer| {
-        !underlined(buffer, "One") && buffer[cell_of(buffer, "Two")].bg != buffer[(19, 0)].bg
-    });
+    tab_until(
+        &mut view,
+        &mut terminal,
+        &rx,
+        "the other one's focus",
+        |buffer| {
+            !underlined(buffer, "One") && buffer[cell_of(buffer, "Two")].bg != buffer[(19, 0)].bg
+        },
+    );
     assert!(!underlined(terminal.backend().buffer(), "Two"));
 }

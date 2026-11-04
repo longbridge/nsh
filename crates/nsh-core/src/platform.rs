@@ -233,6 +233,11 @@ pub struct Environment {
     /// Command, labels use ⌘). Only read for [`Os::Web`]; the other OSes
     /// imply theirs.
     pub apple_keyboard: bool,
+    /// Ctrl stands in for Command: the keyboard cannot report Command (a
+    /// terminal on macOS without the kitty keyboard protocol), so a
+    /// `mod+` / `cmd+` shortcut takes Ctrl and labels show it as Ctrl
+    /// ([`crate::keymap::Keystroke::pressed`]).
+    pub ctrl_for_command: bool,
     /// The user's locale (number and date formats: `Intl`'s default).
     pub locale: Locale,
     /// The app embedding NSH answers `nsh/host`'s calls
@@ -307,6 +312,7 @@ impl Default for Environment {
             os_version: (0, 0),
             idiom: Idiom::Phone,
             apple_keyboard: false,
+            ctrl_for_command: false,
             locale: Locale::EN_US,
             host: false,
             lifecycle: Lifecycle::Active,

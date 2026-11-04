@@ -593,6 +593,19 @@ pub fn apple_keys(os: Os, apple_keyboard: bool) -> bool {
 }
 
 impl Keystroke {
+    /// The keys pressed for this keystroke: where Ctrl stands in for
+    /// Command (`ctrl_for_command`, a terminal on macOS that cannot report
+    /// Command: [`crate::platform::Environment::ctrl_for_command`]), its
+    /// Command is Ctrl, so a label shows the key to press (`⌃O` for
+    /// `mod+o`). A keystroke with both keeps them.
+    pub fn pressed(mut self, ctrl_for_command: bool) -> Keystroke {
+        if ctrl_for_command && self.modifiers.cmd && !self.modifiers.ctrl {
+            self.modifiers.cmd = false;
+            self.modifiers.ctrl = true;
+        }
+        self
+    }
+
     /// The keystroke as menus and hints show it: `⌃⌥⇧⌘K` with Apple's
     /// conventions ([`apple_keys`]), else `Ctrl+Alt+Shift+K` (the Command
     /// modifier is `Win` on Windows, `Meta` in a browser, `Super`
@@ -951,6 +964,16 @@ mod tests {
         assert_eq!(label("cmd+space", Os::Windows, false), "Win+Space");
         assert_eq!(label("f5", Os::Web, true), "F5");
         assert_eq!(label("mod+/", Os::Web, false), "Ctrl+/");
+        // Where Ctrl stands in for Command, the label shows Ctrl.
+        let pressed = |t| {
+            Keystroke::parse_with(t, true)
+                .unwrap()
+                .pressed(true)
+                .label(Os::MacOs, true)
+        };
+        assert_eq!(pressed("mod+o"), "⌃O");
+        assert_eq!(pressed("mod+shift+t"), "⌃⇧T");
+        assert_eq!(pressed("ctrl+cmd+f"), "⌃⌘F");
     }
 
     #[test]

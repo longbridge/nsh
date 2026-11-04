@@ -231,6 +231,7 @@ fn animated_fills_change_only_what_text_is_read_against() {
             const color = value.interpolate({ inputRange: [0, 1], outputRange: ["#000000", "#ffffff"] });
             return <View style={{ backgroundColor: color }}>
                 <View onPress={() => value.set(1)}><Text style={{ color: "#f0f0f0" }}>Change page</Text></View>
+                <Text style={{ color: "#f0f0f0" }}>Page text</Text>
             </View>;
         });
     "##,
@@ -239,19 +240,21 @@ fn animated_fills_change_only_what_text_is_read_against() {
         contents(buffer).contains("Change page")
     });
     let buffer = terminal.backend().buffer();
-    assert_eq!(buffer[(0, 0)].bg, Color::Reset);
+    assert_eq!(buffer[(0, 1)].bg, Color::Reset);
     assert!(
-        !buffer[(0, 0)].modifier.contains(Modifier::DIM),
+        !buffer[(0, 1)].modifier.contains(Modifier::DIM),
         "light text on black"
     );
+    // Pressed from the keyboard, the button keeps the focus, whose mark
+    // is never dim: the page's own text shows the change.
     press(&mut view, "Tab");
     press(&mut view, "Enter");
     render_until(&mut view, &mut terminal, &wake, |buffer, _| {
-        buffer[(0, 0)].modifier.contains(Modifier::DIM)
+        buffer[(0, 1)].modifier.contains(Modifier::DIM)
     });
     let buffer = terminal.backend().buffer();
-    assert_eq!(buffer[(0, 0)].symbol(), "C");
-    assert_eq!(buffer[(0, 0)].bg, Color::Reset, "fills draw nothing");
+    assert_eq!(buffer[(0, 1)].symbol(), "P");
+    assert_eq!(buffer[(0, 1)].bg, Color::Reset, "fills draw nothing");
 }
 
 #[test]

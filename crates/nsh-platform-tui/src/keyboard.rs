@@ -500,7 +500,10 @@ impl Keyboard {
             }
         }
         if let Some(focused) = self.focused
-            && !self.candidates(tree, geometry).iter().any(|g| g.id == focused)
+            && !self
+                .candidates(tree, geometry)
+                .iter()
+                .any(|g| g.id == focused)
         {
             // Gone with its layer (a sheet closed, an overlay let go): the
             // focus goes back to where it came into that layer from, or
@@ -581,7 +584,11 @@ impl Keyboard {
             .rev()
             .filter(|entry| !contains(tree, ROOT_ID, entry.layer))
             .map(|entry| entry.restore)
-            .find(|&id| candidates.iter().any(|g| g.id == id && !g.visible.is_empty()))
+            .find(|&id| {
+                candidates
+                    .iter()
+                    .any(|g| g.id == id && !g.visible.is_empty())
+            })
     }
 
     fn queue_scroll_focus(

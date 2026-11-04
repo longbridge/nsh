@@ -30,7 +30,11 @@
 //! 16 standard colors.
 
 use nsh_core::platform::ColorScheme;
-use ratatui_core::style::{Color, Modifier, Style};
+use ratatui_core::{
+    buffer::Buffer,
+    layout::Rect,
+    style::{Color, Modifier, Style},
+};
 
 use crate::ColorDepth;
 
@@ -293,7 +297,8 @@ pub(crate) fn stands_out(fill: nsh_core::Color, ground: Ground) -> Option<Color>
     (contrast >= STANDS_OUT).then_some(Color::Reset)
 }
 
-/// The backgrounds of hovered and pressed controls; none at 16 colors.
+/// The backgrounds of hovered and pressed controls: the standard bright
+/// black for hover at 16 colors, none without colors.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub(crate) struct Bands {
     pub(crate) hover: Option<Color>,
@@ -310,6 +315,15 @@ impl Bands {
         background: Option<Rgb>,
         foreground: Option<Rgb>,
     ) -> Self {
+        if depth == ColorDepth::Ansi16 {
+            // The standard colors have no step between the background and
+            // the text: a hovered control is on the bright black (gray) one,
+            // a pressed one reversed.
+            return Self {
+                hover: Some(Color::DarkGray),
+                press: None,
+            };
+        }
         if !matches!(depth, ColorDepth::TrueColor | ColorDepth::Ansi256) {
             return Self::default();
         }
@@ -579,6 +593,55 @@ pub(crate) fn pale_tint(color: nsh_core::Color) -> bool {
     alpha >= FILLED_ALPHA && (PALE_CHROMA..SATURATED_CHROMA).contains(&chroma)
 }
 
+/// The color of a tone fill (a saturated, mostly opaque one: a price
+/// tag's green, a strength meter's segment) at the terminal's depth, which
+/// a terminal without surfaces draws in reverse video so it does not
+/// vanish with the fills it leaves out; `None` for any other fill.
+pub(crate) fn tone_fill(fill: nsh_core::Color, depth: ColorDepth) -> Option<Color> {
+    let [r, g, b, alpha] = fill.0.to_be_bytes();
+    let chroma = f32::from(r.max(g).max(b) - r.min(g).min(b));
+    if alpha < TONE_ALPHA || chroma < SATURATED_CHROMA {
+        return None;
+    }
+    // At 16 colors its hue's accent, as a text or a chart's line of that
+    // color is drawn.
+    Some(match depth {
+        ColorDepth::Ansi16 => {
+            let [red, green, blue] = [r, g, b].map(f32::from);
+            let (max, min) = (red.max(green).max(blue), red.min(green).min(blue));
+            let angle = hue(red, green, blue, max, min);
+            HUE_BANDS
+                .iter()
+                .find(|(bound, _)| angle < *bound)
+                .map_or(Color::Red, |(_, accent)| *accent)
+        }
+        _ => convert([r, g, b], depth),
+    })
+}
+
+/// Whether `color` is one of the 16 standard colors' hues (not a gray or
+/// the default).
+pub(crate) fn standard_hue(color: Color) -> bool {
+    matches!(
+        color,
+        Color::Red
+            | Color::Green
+            | Color::Yellow
+            | Color::Blue
+            | Color::Magenta
+            | Color::Cyan
+            | Color::LightRed
+            | Color::LightGreen
+            | Color::LightYellow
+            | Color::LightBlue
+            | Color::LightMagenta
+            | Color::LightCyan
+    )
+}
+
+/// The opacity from which a hued fill is a tone, not a tint behind text.
+const TONE_ALPHA: u8 = 153;
+
 /// Whether `color` is hued (its channels 51 or more apart), the terminal
 /// layout's rule: a hued border keeps its line on a filled view.
 pub(crate) fn hued(color: nsh_core::Color) -> bool {
@@ -653,6 +716,112 @@ pub(crate) fn paint(color: nsh_core::Color, ground: Ground) -> Style {
     Style::new()
         .fg(convert(rgb, ground.depth))
         .remove_modifier(Modifier::HIDDEN | Modifier::DIM)
+}
+
+/// The canvas colors of one frame at 16 colors: the app's distinct colors
+/// kept apart, where nearest-color quantizing would merge them (two series
+/// a hue apart, the grays of a chart's lines). A hued color takes its hue's
+/// band ([`HUE_BANDS`], as text does), else the nearest band still free; a
+/// gray one the nearest of the four grays still free. None takes the entry
+/// of the ground it is drawn on, where it would vanish. Colors share an
+/// entry only once every one is taken. Other depths quantize as [`paint`].
+#[derive(Default)]
+pub(crate) struct Hues {
+    /// Each color met this frame (blended over its ground) and its entry.
+    taken: Vec<(Rgb, Color)>,
+}
+
+/// The four grays of the 16 standard colors, darkest first.
+const GRAYS: [Color; 4] = [Color::Black, Color::DarkGray, Color::Gray, Color::White];
+
+/// Each hue band's middle (degrees), in [`HUE_BANDS`]'s order, and its
+/// light variant.
+const BAND_MIDDLES: [(f32, Color); 6] = [
+    (355.0, Color::LightRed),
+    (45.0, Color::LightYellow),
+    (120.0, Color::LightGreen),
+    (182.5, Color::LightCyan),
+    (232.5, Color::LightBlue),
+    (300.0, Color::LightMagenta),
+];
+
+impl Hues {
+    /// `color` drawn over `ground`, as [`paint`] draws it.
+    pub(crate) fn paint(&mut self, color: nsh_core::Color, ground: Ground) -> Style {
+        if ground.depth != ColorDepth::Ansi16 || color.is_transparent() {
+            return paint(color, ground);
+        }
+        let [red, green, blue, alpha] = color.0.to_be_bytes();
+        let rgb = over_f32([red, green, blue], alpha, ground.rgb).map(|c| c.round() as u8);
+        Style::new()
+            .fg(self.entry(rgb, nearest_16(ground.rgb)))
+            .remove_modifier(Modifier::HIDDEN | Modifier::DIM)
+    }
+
+    fn entry(&mut self, rgb: Rgb, under: Color) -> Color {
+        if let Some(&(_, entry)) = self.taken.iter().find(|(seen, _)| *seen == rgb) {
+            return entry;
+        }
+        let used = |entry: Color| self.taken.iter().any(|&(_, taken)| taken == entry);
+        let [r, g, b] = rgb.map(f32::from);
+        let (max, min) = (r.max(g).max(b), r.min(g).min(b));
+        let entry = if max - min >= 51.0 {
+            let angle = hue(r, g, b, max, min);
+            let own = HUE_BANDS
+                .iter()
+                .position(|(bound, _)| angle < *bound)
+                .unwrap_or(0);
+            // Its own band first, then the others by how far their middles
+            // are around the circle.
+            let mut bands: Vec<usize> = (0..HUE_BANDS.len()).collect();
+            bands.sort_by(|&a, &b| {
+                let apart = |band: usize| {
+                    let d = (BAND_MIDDLES[band].0 - angle).rem_euclid(360.0);
+                    d.min(360.0 - d)
+                };
+                (a != own)
+                    .cmp(&(b != own))
+                    .then(apart(a).total_cmp(&apart(b)))
+            });
+            let variant = |band: usize| {
+                let (normal, light) = (HUE_BANDS[band].1, BAND_MIDDLES[band].1);
+                let far = |entry: Color| {
+                    STANDARD
+                        .iter()
+                        .find(|(_, standard)| *standard == entry)
+                        .map_or(u32::MAX, |(value, _)| distance(rgb, *value))
+                };
+                let mut pair = [normal, light];
+                pair.sort_by_key(|&entry| far(entry));
+                pair.into_iter().find(|&entry| entry != under)
+            };
+            let free = |band: usize| !used(HUE_BANDS[band].1) && !used(BAND_MIDDLES[band].1);
+            bands
+                .iter()
+                .find(|&&band| free(band))
+                .or(bands.first())
+                .and_then(|&band| variant(band))
+                .unwrap_or(Color::Reset)
+        } else {
+            let value = |entry: Color| {
+                STANDARD
+                    .iter()
+                    .find(|(_, standard)| *standard == entry)
+                    .map_or(0, |(value, _)| value[0])
+            };
+            let mut grays: Vec<Color> = GRAYS.into_iter().filter(|&gray| gray != under).collect();
+            let level = (u32::from(rgb[0]) + u32::from(rgb[1]) + u32::from(rgb[2])) / 3;
+            grays.sort_by_key(|&gray| (i32::from(value(gray)) - level as i32).abs());
+            grays
+                .iter()
+                .find(|&&gray| !used(gray))
+                .or(grays.first())
+                .copied()
+                .unwrap_or(Color::Reset)
+        };
+        self.taken.push((rgb, entry));
+        entry
+    }
 }
 
 /// A swatch's fill (a color picker's swatch or track Cell): its own
@@ -735,11 +904,32 @@ fn lightness(red: f32, green: f32, blue: f32) -> f32 {
     }
 }
 
+/// Takes every color out of `area` of `buffer` for a terminal that shows
+/// none (`NO_COLOR`), keeping what the colors said: a background the
+/// platform drew (a band, a chip) turns reverse video, a line or text in
+/// the accent (a focused box's line) bold.
+pub(crate) fn strip_colors(buffer: &mut Buffer, area: Rect) {
+    for y in area.y..area.bottom() {
+        for x in area.x..area.right() {
+            let cell = &mut buffer[(x, y)];
+            if cell.bg != Color::Reset && !cell.modifier.contains(Modifier::REVERSED) {
+                cell.modifier.insert(Modifier::REVERSED);
+            } else if cell.fg == crate::render::ACCENT {
+                cell.modifier = (cell.modifier | Modifier::BOLD) - Modifier::DIM;
+            }
+            cell.fg = Color::Reset;
+            cell.bg = Color::Reset;
+            cell.underline_color = Color::Reset;
+        }
+    }
+}
+
 /// The terminal color closest to `rgb` that `depth` can show.
 pub(crate) fn convert(rgb: Rgb, depth: ColorDepth) -> Color {
     match depth {
         ColorDepth::Ansi256 => Color::Indexed(nearest_256(rgb)),
         ColorDepth::Ansi16 => nearest_16(rgb),
+        ColorDepth::Monochrome => Color::Reset,
         _ => Color::Rgb(rgb[0], rgb[1], rgb[2]),
     }
 }
@@ -811,10 +1001,78 @@ mod tests {
     use ratatui_core::style::{Color, Modifier};
 
     use super::{
-        Bands, Ground, RAISED, Ramp, SELECT, SUNKEN, Surface, Tone, convert, ink, paint, step,
-        surface, tone,
+        Bands, Ground, Hues, RAISED, Ramp, SELECT, SUNKEN, Surface, Tone, convert, ink, paint,
+        step, surface, tone,
     };
     use crate::ColorDepth;
+
+    fn hues(colors: &[u32], scheme: ColorScheme, depth: ColorDepth) -> Vec<Color> {
+        let mut hues = Hues::default();
+        let ground = Ground::page(scheme, depth);
+        colors
+            .iter()
+            .map(|&color| hues.paint(Rgba(color), ground).fg.unwrap())
+            .collect()
+    }
+
+    #[test]
+    fn at_sixteen_colors_a_frames_hued_canvas_colors_take_distinct_hues() {
+        // Two greens and two blues a few degrees apart: quantized alone,
+        // each pair would be one entry.
+        let drawn = hues(
+            &[0x16a34aff, 0x22c55eff, 0x2563ebff, 0x3b82f6ff, 0x16a34aff],
+            ColorScheme::Dark,
+            ColorDepth::Ansi16,
+        );
+        assert_eq!(drawn[0], Color::Green);
+        assert_eq!(drawn[4], drawn[0], "a color met again keeps its entry");
+        let bases = |color: Color| match color {
+            Color::LightGreen => Color::Green,
+            Color::LightBlue => Color::Blue,
+            Color::LightCyan => Color::Cyan,
+            Color::LightYellow => Color::Yellow,
+            Color::LightMagenta => Color::Magenta,
+            Color::LightRed => Color::Red,
+            other => other,
+        };
+        let mut seen: Vec<Color> = drawn[..4].iter().map(|&c| bases(c)).collect();
+        seen.sort_by_key(|c| format!("{c:?}"));
+        seen.dedup();
+        assert_eq!(seen.len(), 4, "four hues for four colors: {drawn:?}");
+    }
+
+    #[test]
+    fn at_sixteen_colors_grays_are_told_apart_and_none_takes_the_grounds_own() {
+        // The gallery's dark chart grays: the darkest is nearest Black,
+        // the page itself.
+        let drawn = hues(
+            &[0xe4e5e8ff, 0x9ea2aaff, 0x686c74ff, 0x43464cff],
+            ColorScheme::Dark,
+            ColorDepth::Ansi16,
+        );
+        assert!(!drawn.contains(&Color::Black), "{drawn:?}");
+        let mut first: Vec<_> = drawn[..3].to_vec();
+        first.dedup();
+        assert_eq!(first.len(), 3, "three grays free on a dark page: {drawn:?}");
+        let light = hues(
+            &[0xdcdee2ff, 0x3a3d43ff],
+            ColorScheme::Light,
+            ColorDepth::Ansi16,
+        );
+        assert!(!light.contains(&Color::White), "{light:?}");
+        assert_ne!(light[0], light[1]);
+    }
+
+    #[test]
+    fn other_depths_quantize_canvas_colors_one_by_one() {
+        let ground = Ground::page(ColorScheme::Dark, ColorDepth::Ansi256);
+        for color in [0x16a34aff, 0x22c55eff, 0x43464cff] {
+            assert_eq!(
+                hues(&[0x16a34aff, color], ColorScheme::Dark, ColorDepth::Ansi256)[1],
+                paint(Rgba(color), ground).fg.unwrap()
+            );
+        }
+    }
 
     fn page(scheme: ColorScheme) -> Ground {
         Ground::page(scheme, ColorDepth::TrueColor)
@@ -899,10 +1157,11 @@ mod tests {
         assert_eq!(known.hover, Some(Color::Rgb(0x26, 0x35, 0x43)));
         let light = Bands::new(ColorScheme::Light, ColorDepth::Ansi256, None, None);
         assert!(matches!(light.hover, Some(Color::Indexed(_))));
-        assert_eq!(
-            Bands::new(ColorScheme::Dark, ColorDepth::Ansi16, None, None),
-            Bands::default()
-        );
+        // The 16 colors have no faint step: a hover is their dark gray,
+        // a press has no band (reverse video).
+        let few = Bands::new(ColorScheme::Dark, ColorDepth::Ansi16, None, None);
+        assert_eq!(few.hover, Some(Color::DarkGray));
+        assert_eq!(few.press, None);
     }
 
     #[test]

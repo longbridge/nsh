@@ -26431,6 +26431,185 @@ mod terminal_layout {
     }
 
     #[test]
+    fn a_filled_split_button_is_one_row_where_fills_are_not_bands() {
+        // The gallery's: a filled, framed pill of the main action, a
+        // divider and the menu's trigger in the menu's view, in a terminal
+        // that shows no bands (16 colors, no colors).
+        let mut ops = view(
+            2,
+            ROOT_ID,
+            &[
+                ("flexDirection", V::Str("row")),
+                ("alignSelf", V::Str("flex-start")),
+                ("alignItems", V::Str("stretch")),
+                ("borderWidth", V::Number(1.0)),
+                ("borderRadius", V::Number(8.0)),
+                ("backgroundColor", V::Str("#2563eb")),
+            ],
+        );
+        ops.extend(pressable(
+            3,
+            2,
+            &[
+                ("height", V::Number(40.0)),
+                ("paddingHorizontal", V::Number(16.0)),
+            ],
+            None,
+        ));
+        ops.extend(text(4, 3, "Squash and merge"));
+        ops.extend(view(
+            6,
+            2,
+            &[
+                ("width", V::Number(1.0)),
+                ("backgroundColor", V::Str("#ffffff")),
+            ],
+        ));
+        ops.extend(view(8, 2, &[]));
+        ops.extend(pressable(
+            10,
+            8,
+            &[("width", V::Number(40.0)), ("height", V::Number(40.0))],
+            Some("Merge options"),
+        ));
+        ops.extend(node(
+            12,
+            Tag::Canvas,
+            10,
+            &[("width", V::Number(14.0)), ("height", V::Number(14.0))],
+        ));
+        let batch = laid_out(ops);
+        // One row, no border, its label whole.
+        assert_eq!(
+            frame_of(&batch, 2).map(|f| f.size.height),
+            Some(Points(16.0))
+        );
+        assert_eq!(widths(&batch, 2), Some(Edges::all(Points::ZERO)));
+        assert_eq!(
+            frame_of(&batch, 4).map(|f| f.size),
+            Some(size_pt(128.0, 16.0))
+        );
+    }
+
+    #[test]
+    fn a_card_around_an_inset_well_takes_no_column_for_padding_under_a_cell() {
+        // The gallery's Dock: a framed card padded 5pt around an inset well
+        // with a line of its own, drawn as one frame where fills are bands.
+        let framed_card = |ops: &mut Vec<Op>| {
+            ops.extend(view(
+                2,
+                ROOT_ID,
+                &[
+                    ("flex", V::Number(1.0)),
+                    ("padding", V::Number(5.0)),
+                    ("gap", V::Number(5.0)),
+                    ("borderWidth", V::Number(1.0)),
+                    ("borderRadius", V::Number(12.0)),
+                    ("borderColor", V::Str("#b0b0b0")),
+                    ("backgroundColor", V::Str("#262626")),
+                ],
+            ));
+        };
+        let mut ops = Vec::new();
+        framed_card(&mut ops);
+        ops.extend(view(
+            3,
+            2,
+            &[
+                ("flex", V::Number(1.0)),
+                ("borderWidth", V::Number(1.0)),
+                ("borderRadius", V::Number(8.0)),
+                ("borderColor", V::Str("#b0b0b0")),
+                ("backgroundColor", V::Str("#0a0a0a")),
+            ],
+        ));
+        ops.extend(view(4, 3, &[("paddingLeft", V::Number(12.0))]));
+        ops.extend(text(5, 4, "Files"));
+        let batch = laid_out_on_surfaces(ops);
+        assert_eq!(widths(&batch, 2), Some(Edges::all(Points(1.0))));
+        // The well drops its line and lies against the card's: no blank
+        // column between them on either side.
+        assert!(widths(&batch, 3).is_none_or(|w| w == Edges::all(Points::ZERO)));
+        let (card, well) = (frame_of(&batch, 2).unwrap(), frame_of(&batch, 3).unwrap());
+        assert_eq!(well.origin.x, Points(8.0));
+        assert_eq!(
+            card.size.width - (well.origin.x + well.size.width),
+            Points(8.0)
+        );
+        // A text right in the card (beside a box: a card of texts alone is
+        // a one-row chip) keeps its column off the line.
+        let mut ops = Vec::new();
+        framed_card(&mut ops);
+        ops.extend(text(3, 2, "Files"));
+        ops.extend(view(5, 2, &[]));
+        ops.extend(text(6, 5, "Open"));
+        let batch = laid_out_on_surfaces(ops);
+        assert_eq!(frame_of(&batch, 3).map(|f| f.origin.x), Some(Points(16.0)));
+    }
+
+    #[test]
+    fn a_band_whose_line_a_padded_card_leaves_out_lies_against_the_cards_line() {
+        // The gallery's inline command palette: a card padded a Cell inside
+        // its line, holding (through a wrapper of no insets) a framed,
+        // filled palette and a caption under it.
+        let ops = |ops: &mut Vec<Op>| {
+            ops.extend(view(
+                2,
+                ROOT_ID,
+                &[
+                    ("borderWidth", V::Number(1.0)),
+                    ("borderColor", V::Str("#b0b0b0")),
+                    ("paddingHorizontal", V::Number(15.0)),
+                    ("paddingVertical", V::Number(15.0)),
+                ],
+            ));
+            ops.extend(view(3, 2, &[]));
+            ops.extend(view(
+                4,
+                3,
+                &[
+                    ("borderWidth", V::Number(1.0)),
+                    ("borderRadius", V::Number(12.0)),
+                    ("borderColor", V::Str("#b0b0b0")),
+                    ("backgroundColor", V::Str("#262626")),
+                    ("overflow", V::Str("hidden")),
+                ],
+            ));
+            ops.extend(view(5, 4, &[("paddingHorizontal", V::Number(8.0))]));
+            ops.extend(text(6, 5, "Inbox"));
+            ops.extend(view(8, 4, &[("paddingHorizontal", V::Number(8.0))]));
+            ops.extend(text(9, 8, "Archive"));
+            ops.extend(text(11, 3, "In Inbox"));
+        };
+        let mut all = Vec::new();
+        ops(&mut all);
+        let batch = laid_out_on_surfaces(all);
+        let wrapper = frame_of(&batch, 3).unwrap();
+        let palette = frame_of(&batch, 4).unwrap();
+        // The palette drops its line and reaches across the card's padding
+        // to its line on both sides.
+        assert!(widths(&batch, 4).is_none_or(|w| w == Edges::all(Points::ZERO)));
+        assert_eq!(wrapper.origin.x, Points(16.0));
+        assert_eq!(palette.origin.x, Points(-8.0));
+        assert_eq!(palette.size.width, wrapper.size.width + Points(16.0));
+        // Its rows' text starts where the caption under it does: one column
+        // inside the card's line, once.
+        let row = frame_of(&batch, 5).unwrap();
+        let label = frame_of(&batch, 6).unwrap();
+        assert_eq!(
+            palette.origin.x + row.origin.x + label.origin.x,
+            Points(0.0)
+        );
+        assert_eq!(frame_of(&batch, 11).map(|f| f.origin.x), Some(Points(0.0)));
+        // Where fills are left out the palette is a frame of its own,
+        // inside the card's padding.
+        let mut all = Vec::new();
+        ops(&mut all);
+        let batch = laid_out(all);
+        assert_eq!(frame_of(&batch, 4).map(|f| f.origin.x), Some(Points(0.0)));
+    }
+
+    #[test]
     fn a_filled_split_buttons_halves_keep_a_column_apart() {
         let mut ops = view(
             2,

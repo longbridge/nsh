@@ -11,6 +11,8 @@ mod app;
 mod canvas;
 mod controls;
 mod data_table;
+mod degraded;
+mod diff_view;
 mod dock;
 mod editor;
 mod focus_navigation;

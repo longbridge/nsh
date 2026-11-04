@@ -43,3 +43,49 @@ fn a_tables_header_and_rows_are_drawn_inside_its_border() {
         draw_until(&mut view, &mut terminal, &rx, shown);
     }
 }
+
+/// Forty rows in a table whose second column runs past its right edge.
+#[component]
+fn Overflowing() -> impl IntoElement {
+    let names: Vec<String> = (0..40)
+        .map(|i| format!("Company number {i} incorporated"))
+        .collect();
+    let mut name = column("name", "Name");
+    name.width = Some(px(320.0));
+    let mut symbol = column("symbol", "Symbol");
+    symbol.width = Some(px(80.0));
+    view().flex_1().child(text("Wide")).child(
+        data_table().flex_1().columns(vec![symbol, name]).data(
+            DataTableRows::new(40)
+                .texts("symbol", (0..40).map(|i| format!("S{i}")))
+                .texts("name", names),
+        ),
+    )
+}
+
+#[test]
+fn a_column_past_the_right_edge_leaves_the_scroll_bar_its_column() {
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(30, 12)).unwrap();
+    view.load(App::Rust(Root::new::<Overflowing>(|| ())))
+        .unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "Company");
+    let buffer = terminal.backend().buffer();
+    let rows: Vec<String> = (0..12)
+        .map(|y| {
+            (0..30)
+                .map(|x| buffer[(x, y)].symbol().to_string())
+                .collect()
+        })
+        .collect();
+    let first = rows
+        .iter()
+        .position(|r| r.contains("S0"))
+        .expect("the first row");
+    // The rows' cells stop a Cell short of the edge, where the bar is
+    // drawn on every row: a cell under it would hide it.
+    for row in &rows[first..] {
+        let last = row.chars().last().unwrap();
+        assert!(matches!(last, '│' | '┃'), "{rows:#?}");
+    }
+}

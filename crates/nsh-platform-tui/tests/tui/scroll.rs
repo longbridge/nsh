@@ -630,3 +630,45 @@ fn a_focused_scroll_view_shows_its_thumb_in_the_accent() {
     );
     assert_ne!(buffer[(10, 2)].fg, Color::Blue, "the track keeps its look");
 }
+
+#[component]
+fn CutByViewport() -> impl IntoElement {
+    view()
+        .flex_1()
+        .child(
+            scroll().w(px(112.0)).h(px(48.0)).child(
+                // A framed card inside the scroll view: its own clip stands
+                // between the viewport and the text. It holds a box (a
+                // bordered box of texts alone is a one-row chip).
+                view()
+                    .flex_shrink_0()
+                    .border_1()
+                    .border_color(nsh_core::color::rgb(0xffffff))
+                    .child(text("top"))
+                    .child(view().child(text("one two three four"))),
+            ),
+        )
+        .child(text("ready"))
+}
+
+#[test]
+fn a_text_the_viewport_cuts_below_ends_in_no_ellipsis_inside_a_card() {
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(20, 6)).unwrap();
+    view.load(App::Rust(Root::new::<CutByViewport>(|| ())))
+        .unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "ready");
+    let buffer = terminal.backend().buffer();
+    let rows: Vec<String> = (0..4)
+        .map(|y| {
+            (0..14)
+                .map(|x| buffer[(x, y)].symbol().to_string())
+                .collect()
+        })
+        .collect();
+    assert!(rows[1].contains("top"), "{rows:#?}");
+    // The text's second row is below the viewport: it scrolls into view,
+    // so the row shown is only cut, never ended in `…`.
+    assert!(rows[2].contains("one two"), "{rows:#?}");
+    assert!(!rows[2].contains('…'), "{rows:#?}");
+}

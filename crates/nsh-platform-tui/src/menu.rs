@@ -3,9 +3,11 @@
 //! own look as the desktop backends show the system's (`NSMenu`,
 //! `TrackPopupMenuEx`, GTK's `PopoverMenu`): a box of rows at the pointer
 //! (or the point the app gives), on the raised surface of an anchored popup
-//! with the popover's line, a check mark column when an item is checkable,
-//! shortcuts at the right and `›` on a submenu, whose box opens beside its
-//! row. Disabled items are faint; separators are lines across the box.
+//! with the popover's line: labels from the first Cell, shortcuts at the
+//! right and `›` on a submenu, whose box opens beside its row. A box with
+//! a checkable item keeps a column for the `✓` at its rows' right end, a
+//! Cell inside the line and a Cell after the shortcuts; a submenu's `›`
+//! takes that column there. Disabled items are faint; separators are lines across the box.
 //! Every label is the app's.
 //!
 //! An open menu takes every key and press until it closes. Up / Down and
@@ -33,7 +35,11 @@
 //! on the open menu's title or outside it closes it; the pointer over
 //! another title opens that one's. A chosen item is reported as a context
 //! menu's, with no closing after it (no promise waits for it); its
-//! shortcut chooses it from the keyboard too (`AppView`'s keys). The
+//! shortcut chooses it from the keyboard too (`AppView`'s keys), even
+//! while the bar has the keys when it has a modifier (folding the bar
+//! up; a letter alone is a title's initial there), and Alt+Escape, two
+//! quick Escapes as tmux joins them, is Escape. The edit roles' keys stay
+//! the focused field's and the selection's. The
 //! items of roles a terminal has no use for (macOS's app menu's, the
 //! window's) are left out.
 
@@ -52,9 +58,9 @@ use unicode_width::UnicodeWidthStr;
 use crate::{
     CellSize,
     dialog::{clear, put},
-    render::ACCENT,
     key_scheme::{self, Action},
     palette::{RAISED, Ramp, SELECT},
+    render::ACCENT,
 };
 
 /// Where a menu's top left corner goes.
@@ -192,6 +198,9 @@ pub(crate) struct Menus {
     /// opens.
     pub(crate) pointer: Option<Position>,
     bar: Bar,
+    /// Ctrl stands in for Command (a macOS terminal that cannot report
+    /// it): shortcuts show Ctrl, the key to press.
+    pub(crate) ctrl_for_command: bool,
 }
 
 /// The application menu's bar.
@@ -290,7 +299,10 @@ fn kept(items: &[MenuItem]) -> Vec<MenuItem> {
         match item {
             MenuItem::Action(action) if left_out(action.role) => {}
             MenuItem::Separator => {
-                if out.last().is_some_and(|last| !matches!(last, MenuItem::Separator)) {
+                if out
+                    .last()
+                    .is_some_and(|last| !matches!(last, MenuItem::Separator))
+                {
                     out.push(MenuItem::Separator);
                 }
             }
@@ -372,6 +384,11 @@ impl Menus {
         self.bar.mode = mode;
     }
 
+    /// The bar has the keys (F10 or a press on a title gave them).
+    pub(crate) fn bar_active(&self) -> bool {
+        self.bar.active.is_some()
+    }
+
     /// The app has an application menu: F10 gives its bar the keys.
     pub(crate) fn has_bar(&self) -> bool {
         !self.bar.menus.is_empty()
@@ -450,7 +467,9 @@ impl Menus {
                 Key::Tab => self.bar.active = self.bar.next(Some(active), !shift),
                 Key::Home => self.bar.active = self.bar.next(None, true),
                 Key::End => self.bar.active = self.bar.next(None, false),
-                Key::Down | Key::Enter | Key::Char(' ') => return Some(self.open_title(active, true)),
+                Key::Down | Key::Enter | Key::Char(' ') => {
+                    return Some(self.open_title(active, true));
+                }
                 Key::Escape => return Some(self.close(None)),
                 Key::Char(c) if !c.is_control() => {
                     if let Some(index) = self.bar.typed(c) {
@@ -698,8 +717,19 @@ impl Menus {
                 .items
                 .iter()
                 .any(|i| matches!(i, MenuItem::Action(a) if a.checked.is_some()));
-            let mark = if checks { 2 } else { 0 };
-            let rights: Vec<String> = level.items.iter().map(|i| right(i, mac)).collect();
+            // A level with an item to check keeps a column for the mark
+            // at its rows' right end, after the shortcuts (with a Cell
+            // between them); a submenu's `›` takes that column too.
+            let mark = u16::from(checks);
+            let ctrl = self.ctrl_for_command;
+            let rights: Vec<String> = level
+                .items
+                .iter()
+                .map(|i| match i {
+                    MenuItem::Submenu { .. } if checks => String::new(),
+                    _ => right(i, mac, ctrl),
+                })
+                .collect();
             let labels = level
                 .items
                 .iter()
@@ -707,8 +737,9 @@ impl Menus {
                 .max()
                 .unwrap_or(0);
             let widest_right = rights.iter().map(|r| width(r)).max().unwrap_or(0);
-            let gap = if widest_right > 0 { 3 } else { 0 };
-            let inner = (mark + labels + gap + widest_right).max(8);
+            let tail = widest_right + mark + u16::from(widest_right > 0 && checks);
+            let gap = if tail > 0 { 3 } else { 0 };
+            let inner = (labels + gap + tail).max(8);
             let w = (inner + 4).min(area.width);
             let h = (level.items.len() as u16 + 2).min(area.height);
             let (x, y) = match beside {
@@ -815,30 +846,30 @@ impl Menus {
                         }
                     }
                 }
-                if let MenuItem::Action(MenuAction {
-                    checked: Some(true),
-                    ..
-                }) = item
-                {
-                    put(buffer, text_x, y, "✓", room, color, modifier);
-                }
-                put(
-                    buffer,
-                    text_x + mark,
-                    y,
-                    label(item),
-                    room.saturating_sub(mark),
-                    color,
-                    modifier,
-                );
+                put(buffer, text_x, y, label(item), room, color, modifier);
+                // The shortcut ends a Cell before the mark's column.
+                let end = room.saturating_sub(if checks { 2 } else { 0 });
                 let right = &rights[index];
                 if !right.is_empty() {
-                    let rw = width(right).min(room);
+                    let rw = width(right).min(end);
                     let muted = match (enabled, ramp) {
                         (true, Some(ramp)) => ramp.muted(),
                         _ => color,
                     };
-                    put(buffer, text_x + room - rw, y, right, rw, muted, modifier);
+                    put(buffer, text_x + end - rw, y, right, rw, muted, modifier);
+                }
+                let symbol = match item {
+                    MenuItem::Action(MenuAction {
+                        checked: Some(true),
+                        ..
+                    }) => Some("✓"),
+                    MenuItem::Submenu { .. } if checks => Some("›"),
+                    _ => None,
+                };
+                if let Some(symbol) = symbol
+                    && room > 0
+                {
+                    put(buffer, text_x + room - 1, y, symbol, 1, color, modifier);
                 }
             }
             beside = level
@@ -923,12 +954,19 @@ fn label(item: &MenuItem) -> &str {
 }
 
 /// What an item shows at its right: its shortcut, or a submenu's `›`.
-fn right(item: &MenuItem, mac: bool) -> String {
+fn right(item: &MenuItem, mac: bool, ctrl_for_command: bool) -> String {
     match item {
         MenuItem::Action(action) => action
             .shortcut
             .or_else(|| action.role.and_then(|role| role.shortcut(mac)))
-            .map(|s| shortcut(&s, mac))
+            .map(|mut s| {
+                // The key to press: Ctrl where it stands in for Command.
+                if ctrl_for_command && s.meta && !s.ctrl {
+                    s.meta = false;
+                    s.ctrl = true;
+                }
+                shortcut(&s, mac)
+            })
             .unwrap_or_default(),
         MenuItem::Submenu { .. } => "›".into(),
         MenuItem::Separator => String::new(),
@@ -1106,6 +1144,74 @@ mod tests {
         assert_eq!(
             menus.press(Position::new(30, 10)),
             Some(Outcome::Closed(None))
+        );
+    }
+
+    #[test]
+    fn checks_stand_at_the_rows_right_end_after_the_shortcuts() {
+        let checkable = |id, label: &str, checked, shortcut: Option<&str>| {
+            MenuItem::Action(MenuAction {
+                id,
+                label: label.into(),
+                shortcut: shortcut.map(|s| nsh_core::desktop::Shortcut::parse(s, false).unwrap()),
+                enabled: true,
+                checked: Some(checked),
+                role: None,
+                when: Default::default(),
+            })
+        };
+        let items = vec![
+            checkable(1, "Wrap", true, Some("ctrl+w")),
+            checkable(2, "Ruler", false, None),
+            checkable(3, "Minimap", true, None),
+            action(4, "Plain", true),
+            MenuItem::Submenu {
+                label: "More".into(),
+                enabled: true,
+                items: vec![action(5, "Mail", true)],
+            },
+        ];
+        let mut menus = Menus {
+            pointer: Some(Position::new(0, 0)),
+            ..Menus::default()
+        };
+        menus.popup(&items, None);
+        let mut buffer = Buffer::empty(Rect::new(0, 0, 40, 12));
+        draw(&mut menus, &mut buffer);
+        let rows = rows(&buffer);
+        let mac = crate::app::OS == nsh_core::platform::Os::MacOs;
+        let keys = super::shortcut(
+            &nsh_core::desktop::Shortcut::parse("ctrl+w", false).unwrap(),
+            mac,
+        );
+        let row = |y: usize| rows[y].trim_end().to_owned();
+        // Labels from the first Cell inside the line, checked or not.
+        for (y, label) in [
+            (1, "│ Wrap"),
+            (2, "│ Ruler"),
+            (3, "│ Minimap"),
+            (4, "│ Plain"),
+            (5, "│ More"),
+        ] {
+            assert!(row(y).starts_with(label), "{rows:#?}");
+        }
+        // The mark in the last column but one: a Cell, then the line; a
+        // shortcut a Cell before it; the submenu's `›` in the mark's column.
+        assert!(row(1).ends_with(&format!("{keys} ✓ │")), "{rows:#?}");
+        assert!(row(2).ends_with("    │"), "{rows:#?}");
+        assert!(row(3).ends_with(" ✓ │"), "{rows:#?}");
+        assert!(row(4).ends_with("    │"), "{rows:#?}");
+        assert!(row(5).ends_with(" › │"), "{rows:#?}");
+        let mark = rows[1].chars().position(|c| c == '✓').unwrap();
+        assert_eq!(
+            rows[3].chars().position(|c| c == '✓'),
+            Some(mark),
+            "{rows:#?}"
+        );
+        assert_eq!(
+            rows[5].chars().position(|c| c == '›'),
+            Some(mark),
+            "{rows:#?}"
         );
     }
 

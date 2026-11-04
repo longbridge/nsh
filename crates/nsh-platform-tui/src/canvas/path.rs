@@ -458,6 +458,29 @@ impl Dash {
         })
     }
 
+    /// The pattern scaled up, in proportion, until its shortest dash or
+    /// gap is `length` (none shorter is left as it is). Sampled at dot
+    /// centers, a dash or gap shorter than two dots alternates single
+    /// dots: a dotted line, which reads as a denser row of a dot grid
+    /// rather than as dashes.
+    pub(crate) fn at_least(mut self, length: f32) -> Self {
+        let shortest = self
+            .pattern
+            .iter()
+            .copied()
+            .filter(|&s| s > 0.0)
+            .fold(f32::INFINITY, f32::min);
+        if shortest < length && length.is_finite() {
+            let scale = length / shortest;
+            for s in &mut self.pattern {
+                *s *= scale;
+            }
+            self.period *= scale;
+            self.offset *= scale;
+        }
+        self
+    }
+
     /// Whether the point `along` points into a subpath is in a dash.
     pub(crate) fn is_on(&self, along: f32) -> bool {
         let mut position = (along + self.offset).rem_euclid(self.period);
@@ -682,5 +705,25 @@ mod tests {
         assert!(odd.is_on(5.0) && !odd.is_on(7.0) && odd.is_on(13.0));
         assert!(Dash::new(&[], 0.0, 1.0).is_none());
         assert!(Dash::new(&[Points(0.0), Points(0.0)], 0.0, 1.0).is_none());
+    }
+
+    #[test]
+    fn dashes_shorter_than_two_dots_are_scaled_up_in_proportion() {
+        // 3 on, 5 off at 4pt dots: 8 on, 13⅓ off, the offset with them.
+        let dash = Dash::new(&[Points(3.0), Points(5.0)], 1.5, 1.0)
+            .unwrap()
+            .at_least(8.0);
+        assert!(dash.is_on(0.0) && dash.is_on(3.9));
+        assert!(!dash.is_on(4.1) && !dash.is_on(17.0));
+        assert!(dash.is_on(17.4));
+        // A short gap scales the pattern as well; long ones keep theirs.
+        let gap = Dash::new(&[Points(8.0), Points(2.0)], 0.0, 1.0)
+            .unwrap()
+            .at_least(8.0);
+        assert!(gap.is_on(31.0) && !gap.is_on(33.0) && gap.is_on(40.5));
+        let long = Dash::new(&[Points(10.0), Points(9.0)], 0.0, 1.0)
+            .unwrap()
+            .at_least(8.0);
+        assert!(long.is_on(9.9) && !long.is_on(10.1) && long.is_on(19.1));
     }
 }

@@ -212,20 +212,127 @@ fn CheckedMenu() -> impl IntoElement {
     )
 }
 
+/// An open menu of a group of radio choices, as [`CheckedMenu`]'s: the
+/// first checked.
+#[component]
+fn RadioMenu() -> impl IntoElement {
+    let item = |label: &'static str, on: bool| {
+        menu_item()
+            .checked(Some(on))
+            .role(Some(AccessibilityRole::MenuItemRadio))
+            .accessibility_label(label)
+            .flex_row()
+            .gap(px(8.0))
+            .child(text(label))
+    };
+    view().flex_1().child(text("above")).child(
+        menu()
+            .default_open(true)
+            .trigger(view().child(text("Block")))
+            .child(item("Paragraph", true))
+            .child(item("Heading", false)),
+    )
+}
+
+/// The column of the frame's right line on row `y`, the first after `x`.
+fn frame_after(terminal: &Terminal<TestBackend>, x: u16, y: u16) -> u16 {
+    let buffer = terminal.backend().buffer();
+    (x..buffer.area.width)
+        .find(|&c| buffer[(c, y)].symbol() == "│")
+        .unwrap_or_else(|| panic!("no frame after ({x}, {y})\n{}", dump(terminal)))
+}
+
+/// The first occurrence of `word` below row `after`.
+fn find_below(terminal: &Terminal<TestBackend>, word: &str, after: u16) -> Option<(u16, u16)> {
+    let buffer = terminal.backend().buffer();
+    (after + 1..buffer.area.height).find_map(|y| {
+        let line: String = (0..buffer.area.width)
+            .map(|x| buffer[(x, y)].symbol())
+            .collect();
+        line.find(word)
+            .map(|byte| (line[..byte].chars().count() as u16, y))
+    })
+}
+
+/// A list's or a menu's marks: the titles start in one column on every row,
+/// nothing before them, and the chosen row's `mark` is its last Cell inside
+/// the frame, the other row blank there.
+fn marks_at_the_rows_end(
+    terminal: &Terminal<TestBackend>,
+    (chosen, chosen_row): (u16, u16),
+    (other, other_row): (u16, u16),
+    mark: &str,
+) -> u16 {
+    let buffer = terminal.backend().buffer();
+    assert_eq!(
+        chosen,
+        other,
+        "the titles in one column\n{}",
+        dump(terminal)
+    );
+    for (x, y) in [(chosen, chosen_row), (other, other_row)] {
+        let before = buffer[(x - 1, y)].symbol();
+        assert!(
+            before == " " || before == "│",
+            "no mark before a title: {before:?}\n{}",
+            dump(terminal)
+        );
+    }
+    let frame = frame_after(terminal, chosen, chosen_row);
+    assert_eq!(
+        frame_after(terminal, other, other_row),
+        frame,
+        "one frame\n{}",
+        dump(terminal)
+    );
+    let end = (chosen..frame)
+        .rev()
+        .find(|&x| buffer[(x, chosen_row)].symbol() != " ")
+        .unwrap();
+    assert_eq!(
+        buffer[(end, chosen_row)].symbol(),
+        mark,
+        "the mark is the chosen row's last Cell\n{}",
+        dump(terminal)
+    );
+    assert_eq!(
+        buffer[(end, other_row)].symbol(),
+        " ",
+        "the other row blank in the mark's column\n{}",
+        dump(terminal)
+    );
+    end
+}
+
 #[test]
-fn a_menu_s_checked_and_unchecked_labels_line_up() {
+fn a_menu_s_checks_are_at_the_rows_end_and_its_labels_line_up() {
     let (mut view, rx) = surface();
     let mut terminal = Terminal::new(TestBackend::new(40, 20)).unwrap();
     view.load(App::Rust(Root::new::<CheckedMenu>(|| ())))
         .unwrap();
     draw_until(&mut view, &mut terminal, &rx, "Heading");
-    let (check, _) = find(&terminal, "✓ Paragraph")
-        .unwrap_or_else(|| panic!("the check, a space, the label\n{}", dump(&terminal)));
-    let (heading, _) = find(&terminal, "Heading").unwrap();
-    assert_eq!(
-        heading,
-        check + 2,
-        "the labels in one column, the gap after the mark's space\n{}",
+    let paragraph = find(&terminal, "Paragraph").unwrap();
+    let heading = find(&terminal, "Heading").unwrap();
+    let mark = marks_at_the_rows_end(&terminal, paragraph, heading, "✓");
+    assert!(
+        mark > paragraph.0 + "Paragraph".len() as u16,
+        "after the label\n{}",
+        dump(&terminal)
+    );
+}
+
+#[test]
+fn a_menu_s_radio_items_show_a_dot_at_the_rows_end() {
+    let (mut view, rx) = surface();
+    let mut terminal = Terminal::new(TestBackend::new(40, 20)).unwrap();
+    view.load(App::Rust(Root::new::<RadioMenu>(|| ()))).unwrap();
+    draw_until(&mut view, &mut terminal, &rx, "Heading");
+    let paragraph = find(&terminal, "Paragraph").unwrap();
+    let heading = find(&terminal, "Heading").unwrap();
+    marks_at_the_rows_end(&terminal, paragraph, heading, "●");
+    assert!(
+        find(&terminal, "✓").is_none(),
+        "no check\n{}",
         dump(&terminal)
     );
 }
@@ -788,33 +895,27 @@ fn ChosenSelect() -> impl IntoElement {
 }
 
 #[test]
-fn a_select_s_chosen_row_has_a_check_and_its_list_fits_the_widest_title() {
+fn a_select_s_chosen_row_has_a_check_at_its_end_and_its_list_fits_the_widest_title() {
     let (mut view, rx) = surface();
     let mut terminal = Terminal::new(TestBackend::new(40, 20)).unwrap();
     view.load(App::Rust(Root::new::<ChosenSelect>(|| ())))
         .unwrap();
     draw_until(&mut view, &mut terminal, &rx, "Swift");
-    let (mark, chosen) = find(&terminal, "✓ Go")
-        .unwrap_or_else(|| panic!("the chosen row's check\n{}", dump(&terminal)));
-    let (swift, row) = find(&terminal, "Swift").unwrap();
-    assert_eq!(
-        swift,
-        mark + 2,
-        "the other titles after two spaces, in the chosen title's column\n{}",
-        dump(&terminal)
-    );
+    // The trigger `Go ▾` first, then the list's rows.
+    let (_, trigger) = find(&terminal, "Go").unwrap();
+    let go = find_below(&terminal, "Go", trigger)
+        .unwrap_or_else(|| panic!("the chosen row\n{}", dump(&terminal)));
+    let swift = find(&terminal, "Swift").unwrap();
     assert!(
-        row > chosen,
+        swift.1 > go.1,
         "Swift on a row of its own\n{}",
         dump(&terminal)
     );
-    let end = terminal.backend().buffer()[(swift + 5, row)]
-        .symbol()
-        .to_owned();
+    let mark = marks_at_the_rows_end(&terminal, go, swift, "✓");
     assert_eq!(
-        end,
-        "│",
-        "Swift whole, the frame right after the widest row\n{}",
+        (mark, frame_after(&terminal, swift.0, swift.1)),
+        (swift.0 + 6, swift.0 + 7),
+        "the list as wide as its widest title, a blank Cell and the mark\n{}",
         dump(&terminal)
     );
 }
@@ -844,7 +945,7 @@ fn a_select_s_highlighted_row_is_an_accent_band() {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
     loop {
         // The row's title, not the trigger's above it.
-        let (x, y) = find(&terminal, "✓ Go").unwrap();
+        let (x, y) = find(&terminal, "✓").unwrap();
         if terminal.backend().buffer()[(x, y)].bg == ratatui_core::style::Color::Blue {
             break;
         }

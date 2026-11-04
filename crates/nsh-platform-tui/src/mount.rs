@@ -146,6 +146,9 @@ impl Mounter {
     }
 
     pub(crate) fn apply(&mut self, batch: MountBatch) {
+        // The scroll views whose viewport or content changed: their offset
+        // is pulled back within the content once the batch is applied.
+        let mut resized: Vec<NodeId> = Vec::new();
         for item in batch.items {
             self.animator.apply(&item);
             match item {
@@ -235,6 +238,12 @@ impl Mounter {
                 }
                 MountItem::Frame { id, frame } => {
                     if let Some(view) = self.get_mut(id) {
+                        if view.scroll.is_some()
+                            && view.frame.size != frame.size
+                            && !resized.contains(&id)
+                        {
+                            resized.push(id);
+                        }
                         view.frame = frame;
                     }
                 }
@@ -356,6 +365,9 @@ impl Mounter {
                 MountItem::ScrollContent { id, size } => {
                     if let Some(scroll) = self.get_mut(id).and_then(|view| view.scroll.as_mut()) {
                         scroll.content = size;
+                        if !resized.contains(&id) {
+                            resized.push(id);
+                        }
                     }
                 }
                 MountItem::ScrollBehavior { id, behavior } => {
@@ -439,6 +451,17 @@ impl Mounter {
                     command: Command::ExitApp,
                     ..
                 } => self.exit = true,
+                // The app's design tokens, for the platform's own controls
+                // (Linux's menus, iOS's and Android's alerts). The
+                // terminal's own controls (menus, the menu bar, system
+                // dialogs, the focus) are drawn in the terminal theme's
+                // colors, as its other programs are, and the app's views
+                // already have the tokens resolved in the core: there is
+                // nothing left for them to change here.
+                MountItem::Command {
+                    command: Command::Tokens(_),
+                    ..
+                } => {}
                 MountItem::Command {
                     command: Command::Dialog(dialog),
                     ..
@@ -492,6 +515,33 @@ impl Mounter {
                 }
             }
         }
+        for id in resized {
+            self.pull_back(id);
+        }
         crate::navigation::end_batch(self);
+    }
+
+    /// Scroll view `id` past the end of its content (the viewport grew, a
+    /// terminal made taller, or the content shrank) is pulled back to it,
+    /// as the GUI platforms' scroll views clamp their offset: no blank rows
+    /// below the content's end. After the whole batch, so the `ScrollBy`
+    /// that keeps the visible content in place is applied first.
+    fn pull_back(&mut self, id: NodeId) {
+        let Some(view) = self.get_mut(id) else {
+            return;
+        };
+        let size = view.frame.size;
+        let Some(scroll) = view.scroll.as_mut() else {
+            return;
+        };
+        let max = scroll.max(size);
+        let moved = if scroll.horizontal {
+            (scroll.x > max.x).then(|| scroll.x = max.x)
+        } else {
+            (scroll.y > max.y).then(|| scroll.y = max.y)
+        };
+        if moved.is_some() && !self.scrolled.contains(&id) {
+            self.scrolled.push(id);
+        }
     }
 }

@@ -1291,10 +1291,25 @@ fn add_watch(target: Rc<dyn Fn() -> Option<NodeId>>, handler: super::watch::Scro
 /// On a keystroke that is not one.
 #[track_caller]
 pub fn key_label(keystroke: &str) -> String {
-    let apple = apple_keys();
-    crate::keymap::Keystroke::parse_with(keystroke, apple)
-        .unwrap_or_else(|e| panic!("key_label: {e}"))
-        .label(os(), apple)
+    let parsed = crate::keymap::Keystroke::parse_with(keystroke, apple_keys())
+        .unwrap_or_else(|e| panic!("key_label: {e}"));
+    keystroke_label(parsed)
+}
+
+/// A parsed keystroke as menus and hints show it here ([`key_label`]):
+/// the keys to press, Ctrl for Command where Ctrl stands in for it
+/// ([`crate::platform::Environment::ctrl_for_command`]).
+pub fn keystroke_label(keystroke: crate::keymap::Keystroke) -> String {
+    let (os, apple, ctrl) = with_data(|d| d.ambient.env.as_ref().map(|e| e.env))
+        .expect("the core sets the environment")
+        .with_untracked(|e| {
+            (
+                e.os,
+                crate::keymap::apple_keys(e.os, e.apple_keyboard),
+                e.ctrl_for_command,
+            )
+        });
+    keystroke.pressed(ctrl).label(os, apple)
 }
 
 /// Listens to the Android back button while the current owner lives (TS:
