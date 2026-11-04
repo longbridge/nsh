@@ -293,7 +293,17 @@ pub fn PlotAxis(props: PlotAxisProps, _cx: Scope<NoEvent>) -> impl IntoElement {
                 })
                 .collect()
         });
-        if shares.with_untracked(|was| *was != now) {
+        // A share does not change with the inset it feeds, but recomputed
+        // over the inset's new range it differs in its last bits: compared
+        // exactly, each change would move the inset again, without end.
+        let moved = |was: &Vec<(usize, f32)>| {
+            was.len() != now.len()
+                || was
+                    .iter()
+                    .zip(&now)
+                    .any(|(a, b)| a.0 != b.0 || (a.1 - b.1).abs() > SHARE_EPSILON)
+        };
+        if shares.with_untracked(moved) {
             shares.set(now);
         }
     });
@@ -448,6 +458,11 @@ pub fn PlotAxis(props: PlotAxisProps, _cx: Scope<NoEvent>) -> impl IntoElement {
         },
     ))
 }
+
+/// How far a label's share of the range moves before the insets follow
+/// it: far above f32's rounding of a share recomputed over a new range,
+/// far below a share any tick moves by.
+const SHARE_EPSILON: f32 = 1e-4;
 
 /// How far in from a plot `height` tall its y scale's range must start
 /// and end (top, bottom) for labels of `heights`, centered on ticks at
