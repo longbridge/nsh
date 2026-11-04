@@ -293,7 +293,10 @@ and Windows.
 ### Programmatic window frame and level
 
 The host chooses window bounds and level when opening a GPUI window.
-`Window.setFrame` and `Window.setLevel` commands leave those host settings intact.
+`Window.setFrame` resizes a standalone window (`Window::resize`; a size it
+leaves out keeps the window's) and ignores the origin: GPUI cannot move a
+window, and Wayland windows cannot place themselves. `Window.setLevel` leaves
+the host's level intact. Embedded views leave their host's window alone.
 
 `Window.orderFront` activates a standalone window through a main-thread
 window update, including while it is minimized and no frames are drawn. macOS
