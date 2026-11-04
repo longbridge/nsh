@@ -499,6 +499,27 @@ test("list cells keep their items when items are inserted before them", { skip: 
   close();
 });
 
+test("list header, footer and empty that are one If or Each follow their conditions", { skip: !path }, async () => {
+  const { createLists } = await import("./list.js");
+  const { api, invoke, values, dom, close } = await fixture();
+  const lists = createLists(invoke, values, api, dom, () => true, () => {});
+  const on = api.signal(false), shown = [];
+  const reader = name => () => () => { shown.push(name); return name; };
+  let dispose;
+  api.root(stop => {
+    dispose = stop;
+    lists.render({ each: [], children: () => null,
+      get header() { return dom.rt.cond(() => on(), reader("header")); },
+      get footer() { return dom.rt.each(() => on() ? ["footer"] : [], item => reader(item())()); },
+      get empty() { return dom.rt.cond(() => on(), reader("empty")); } });
+  });
+  assert.deepEqual(shown, []);
+  on.set(true);
+  assert.deepEqual(shown.sort(), ["empty", "footer", "header"]);
+  dispose();
+  close();
+});
+
 test("resources cancel superseded loads, retain values, and ignore settlement after disposal", { skip: !path }, async () => {
   const { createResource } = await import("./resource.js");
   const { api, invoke, close } = await fixture();

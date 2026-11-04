@@ -4,7 +4,8 @@ export const itemsProps = ["each", "children", "keyExtractor", "stickyHeaderIndi
 const own = new Set([...itemsProps.filter(k => !["stickyHeaderIndices", "viewabilityConfig", "refreshing", "onRefresh", "onLoadMore"].includes(k)), "ref", "estimatedItemSize", "loadMoreAtStartThreshold", "separator"]);
 export function createLists(invoke, values, reactive, dom, live, wake) {
   const lists = new Map(), rt = dom.rt;
-  const slot = value => typeof value === "function" ? reactive.untracked(() => value({})) : value;
+  // `<If>` and `<Each>` are memos, the insert's to track (as QuickJS's `slot`).
+  const slot = value => typeof value === "function" && !values.signals.has(value) && !values.memos.has(value) ? reactive.untracked(() => value({})) : value;
   const remove = (parent, entry) => { invoke(306, [parent, entry.node]); entry.dispose(); };
   const render = (props = {}) => {
     const node = rt.element("list"), id = values.nodeIds.get(node);
