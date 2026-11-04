@@ -131,6 +131,9 @@ expect Media and alerts
 back
 tap text:Plot
 expect Each side summed out from the spread, as steps
+# The page makes its charts as they scroll near.
+scroll scroll:text:"Live price" 0 2400
+expect Bars per month, side by side or stacked
 back
 tap text:NavStack
 expect Native stack

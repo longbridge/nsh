@@ -12,10 +12,21 @@ repository.workspace = true
 workspace = true
 
 [features]
-default = ["js"]
+default = ["js", "shader", "editor", "highlight", "math", "plot", "rich-editor", "zlib", "crypto"]
 # JS apps (the bundle in the package). Without it the runner runs a Rust
 # app only (`run_rust`) and links no QuickJS.
 js = ["nsh-platform-windows/js"]
+# Shaders, on naga and wgpu. Without them, the runner links neither.
+shader = ["nsh-platform-windows/shader"]
+# The large parts of `nsh/base` and the standard JS modules
+# (`docs/dev/features.md`).
+editor = ["nsh-platform-windows/editor"]
+rich-editor = ["nsh-platform-windows/rich-editor"]
+plot = ["nsh-platform-windows/plot"]
+highlight = ["nsh-platform-windows/highlight"]
+math = ["nsh-platform-windows/math"]
+zlib = ["nsh-platform-windows/zlib"]
+crypto = ["nsh-platform-windows/crypto"]
 
 [dependencies]
 log.workspace = true

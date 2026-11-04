@@ -15,17 +15,21 @@ workspace = true
 default = ["js"]
 # JS apps: the QuickJS VM, source maps, signed packages, and every standard
 # module.
-js = ["js-core", "nsh-js/zlib", "nsh-js/crypto"]
+js = ["js-core", "zlib", "crypto"]
 # The VM without the standard modules `zlib` and `crypto` (and the global
 # `crypto`): a runtime for apps that use neither (the web's lite runtime).
 js-core = ["dep:nsh-js", "dep:nsh-package", "dep:oxc_sourcemap"]
+# The standard modules on their own, for a runtime that picks them.
+zlib = ["js-core", "nsh-js/zlib"]
+crypto = ["js-core", "nsh-js/crypto"]
 # A host supplied by the browser; it executes source outside WebAssembly.
 browser = []
 # `net`: the HTTP stack behind `fetch` on ureq, which the Windows, Linux and
 # GPUI backends hand their engines.
 net = ["dep:ureq"]
-# `shader`: the native backends' shader renderer (`shader`), on wgpu.
-shader = ["dep:wgpu", "dep:pollster"]
+# `shader`: the native backends' shader renderer (`shader`), on wgpu. Without
+# it `shader` has the same API and finds no GPU, so shader views draw nothing.
+shader = ["dep:wgpu", "dep:pollster", "nsh-core/shader"]
 
 [dependencies]
 rustc-hash.workspace = true
@@ -56,7 +60,7 @@ windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_System_
 [dev-dependencies]
 # The typed API check reads the crate's public API.
 syn = { workspace = true, features = ["visit"] }
-nsh-base.workspace = true
+nsh-base = { workspace = true, features = ["editor", "highlight", "plot", "rich-editor"] }
 # The host's shared data in `nativeModule`'s tests.
 tokio = { workspace = true, features = ["sync"] }
 nsh-bundler = { workspace = true, features = ["bundle"] }

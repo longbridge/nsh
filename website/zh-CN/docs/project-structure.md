@@ -205,6 +205,10 @@ import strings from "./strings.json";
 
 它们都会被打包进同一个脚本。JSON 文件导入后就是解析后的值。
 
+### 从二进制中去掉部分功能
+
+如果你用 Cargo 自己构建可执行文件（嵌入 NSH，或自己写 `main`），可以去掉可选功能：平台 crate 默认全部开启，在平台 crate（以及 `nsh-base`）上设置 `default-features = false`，再从 `js`、`shader`、`editor`（含 `DiffView`）、`rich-editor`、`plot`、`highlight`、`math`、`zlib`、`crypto` 中列出要保留的项。应用导入了构建时去掉的功能，会在加载时报错。`nsh package` 构建的应用始终包含全部功能。
+
 ### 按需加载代码
 
 对应用自己的模块调用 `import()`，会得到一个兑现为其导出的 promise，和浏览器里一样：

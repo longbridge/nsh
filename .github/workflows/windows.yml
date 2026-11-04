@@ -101,6 +101,11 @@ jobs:
           -p nsh-cli -p nsh-dev -p xtask
           -- -D warnings
 
+      # Without the optional features: no naga, wgpu, syntect, RaTeX, ropey,
+      # imara-diff; no `zlib` or `crypto` module.
+      - name: Check without optional features
+        run: cargo clippy -p nsh-windows-app --no-default-features --features js -- -D warnings
+
       # Tests need no display: they open no window.
       - name: Test
         run: cargo test -p nsh-platform-windows -p nsh-windows-host -p nsh-windows-app -p nsh-cli -p nsh-dev -p xtask

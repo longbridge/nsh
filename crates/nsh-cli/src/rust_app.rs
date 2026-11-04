@@ -279,6 +279,9 @@ impl Nsh {
     }
 }
 
+/// What a generated crate names of a platform crate's features: all but `js`
+/// and the standard JS modules, which a Rust app does not run.
+pub(crate) const RUST_APP_PLATFORM: &str = ", default-features = false, features = [\"shader\", \"editor\", \"highlight\", \"math\", \"plot\", \"rich-editor\"]";
 /// `nsh-base`'s features the hosts and runners name: they show TextView's
 /// code blocks highlighted, whatever `nsh-base`'s defaults are.
 const HIGHLIGHT: &str = ", features = [\"highlight\"]";
@@ -1129,8 +1132,7 @@ panic = \"abort\"
                 self.android_lib(true),
                 self.nsh.dep("nsh-core", ""),
                 self.nsh.dep("nsh-base", HIGHLIGHT),
-                self.nsh
-                    .dep("nsh-platform-android", ", default-features = false"),
+                self.nsh.dep("nsh-platform-android", RUST_APP_PLATFORM),
             ),
         )?;
         write(
@@ -1223,7 +1225,7 @@ panic = \"abort\"
                 self.nsh.dep(lib, ", default-features = false"),
                 self.nsh.dep("nsh-core", ""),
                 self.nsh.dep("nsh-base", HIGHLIGHT),
-                self.nsh.dep(platform, ", default-features = false"),
+                self.nsh.dep(platform, RUST_APP_PLATFORM),
             ),
         )?;
         let lib = lib.replace('-', "_");
