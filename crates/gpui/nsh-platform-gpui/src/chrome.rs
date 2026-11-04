@@ -60,7 +60,7 @@ use std::{
 use gpui::{
     AnyElement, AnyWindowHandle, App, Bounds, CursorStyle, DispatchPhase, Hitbox, HitboxBehavior,
     IntoElement, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement, Pixels,
-    ResizeEdge, Styled, Window, WindowControlArea, canvas, div, prelude::*, px,
+    ResizeEdge, Size, Styled, Window, WindowControlArea, canvas, div, prelude::*, px,
 };
 // Text fields' and selectable text's context menus (`text_input.rs`,
 // `text.rs`) show their items with these.
@@ -157,6 +157,34 @@ enum Op {
 /// ([`crate::AppView::on_close_request`]).
 type CloseHandler = Rc<dyn Fn(CloseRequest, &mut Window, &mut App)>;
 
+/// A size asked of the platform, which may apply it some time later.
+#[derive(Clone, Copy)]
+struct AskedSize {
+    size: Size<Pixels>,
+    /// The window's size when it was asked: while the window still has it,
+    /// the platform has not answered, and `size` is what the window will be.
+    from: Size<Pixels>,
+}
+
+/// The size `setFrame`'s `width` and `height` make of a window now `current`:
+/// one left out keeps the window's, or the size asked last while the platform
+/// has not applied it. Once the window has changed (to that size, a size the
+/// platform allowed, or one the user dragged it to) its own size counts.
+fn frame_size(
+    current: Size<Pixels>,
+    asked: Option<AskedSize>,
+    width: Option<f32>,
+    height: Option<f32>,
+) -> Size<Pixels> {
+    let kept = asked
+        .filter(|asked| asked.from == current)
+        .map_or(current, |asked| asked.size);
+    gpui::size(
+        width.map_or(kept.width, gpui::px),
+        height.map_or(kept.height, gpui::px),
+    )
+}
+
 /// A surface's chrome.
 #[derive(Default)]
 pub(crate) struct Chrome {
@@ -178,6 +206,8 @@ pub(crate) struct Chrome {
     entries: RefCell<Vec<(u32, Option<MenuRole>)>>,
     /// Window operations to carry out.
     ops: RefCell<Vec<Op>>,
+    /// The last size `setFrame` asked for.
+    asked_size: Cell<Option<AskedSize>>,
     /// The menu open (drawn), if any.
     open: RefCell<Option<menus::Open>>,
     /// The menu bar's items, in window coordinates (from the last frame).
@@ -650,9 +680,6 @@ fn apply_ops(surface: &Surface, window: &mut Window, cx: &mut App) {
     if !surface.chrome.standalone.get() {
         return;
     }
-    // The size asked for so far: platforms may resize asynchronously, so a
-    // second `setFrame` in the same batch must not read the old bounds.
-    let mut size = None;
     for op in ops {
         match op {
             Op::Title(title) => window.set_window_title(&title),
@@ -682,13 +709,11 @@ fn apply_ops(surface: &Surface, window: &mut Window, cx: &mut App) {
             }
             Op::ToggleFullScreen => window.toggle_fullscreen(),
             Op::Resize(width, height) => {
-                let now = size.unwrap_or_else(|| window.bounds().size);
-                let next = gpui::size(
-                    width.map_or(now.width, gpui::px),
-                    height.map_or(now.height, gpui::px),
-                );
-                window.resize(next);
-                size = Some(next);
+                let chrome = &surface.chrome;
+                let from = window.bounds().size;
+                let size = frame_size(from, chrome.asked_size.get(), width, height);
+                window.resize(size);
+                chrome.asked_size.set(Some(AskedSize { size, from }));
             }
             Op::Close => {
                 if !ask_to_close(surface, CloseRequest::Close, window, cx) {
@@ -1486,6 +1511,31 @@ mod tests {
     use nsh_core::desktop::{Key, Shortcut};
 
     use super::*;
+
+    #[test]
+    fn set_frame_keeps_the_size_asked_until_the_window_changes() {
+        let size = |width: f32, height: f32| gpui::size(gpui::px(width), gpui::px(height));
+        let current = size(800.0, 600.0);
+        // Nothing asked yet: a size left out is the window's.
+        assert_eq!(
+            frame_size(current, None, Some(640.0), None),
+            size(640.0, 600.0)
+        );
+        // The platform has not applied the last size: a size left out is that one's.
+        let asked = Some(AskedSize {
+            size: size(640.0, 600.0),
+            from: current,
+        });
+        assert_eq!(
+            frame_size(current, asked, None, Some(400.0)),
+            size(640.0, 400.0)
+        );
+        // It has (or the user has dragged the window): the window's own size counts.
+        assert_eq!(
+            frame_size(size(700.0, 500.0), asked, None, Some(400.0)),
+            size(700.0, 400.0)
+        );
+    }
 
     #[gpui::test]
     fn order_front_activates_without_rendering_and_leaves_embedded_windows_alone(

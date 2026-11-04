@@ -1424,7 +1424,9 @@ fn set_frame_sizes_the_window_and_keeps_the_size_it_leaves_out(cx: &mut TestAppC
     };
     cx.simulate_keystrokes(&format!("shift-{primary}-n"));
     wait_until_window(cx, "the window at 500x480", |cx| size(cx) == (500.0, 480.0));
-    // Two calls in one callback: the second keeps the first's width.
+    // Two calls in one callback: the second keeps the first's width, which
+    // GPUI's test platform applies at once (`chrome::frame_size` takes the
+    // platforms that do not).
     cx.simulate_keystrokes(&format!("shift-{primary}-b"));
     wait_until_window(cx, "the window at 600x400", |cx| size(cx) == (600.0, 400.0));
 }
