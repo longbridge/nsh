@@ -707,8 +707,9 @@ impl Ed {
             let mut sink = self.sink.borrow_mut();
             let base = match sink.emptied.take() {
                 // The platform dropped the empty value: the text still
-                // extends what it held.
-                Some(old) if text.starts_with(old.as_str()) => old,
+                // extends what it held. Platforms report only changes: the
+                // old text again was typed into the emptied sink.
+                Some(old) if text != old && text.starts_with(old.as_str()) => old,
                 Some(_) => String::new(),
                 None => std::mem::take(&mut sink.text),
             };
