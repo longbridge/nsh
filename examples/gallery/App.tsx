@@ -72,7 +72,7 @@ const components: DemoEntry[] = [
 /** The demos: the apps built on NSH, then one demo per element in the
  * website's order (`nsh`'s primitives, then `nsh/base`'s components), styling,
  * motion and the platform's APIs. Each module loads when first shown (`lazy`). */
-const groups: { title: string; demos: DemoEntry[] }[] = [
+const allGroups: { title: string; demos: DemoEntry[] }[] = [
   {
     title: "Apps",
     demos: [
@@ -111,6 +111,12 @@ const groups: { title: string; demos: DemoEntry[] }[] = [
     ],
   },
 ];
+
+/** The demos a terminal has nothing to show for (pictures, GPU shaders, web
+ * views and video), left out of its index. */
+const TERMINAL_HIDDEN = new Set(["Image", "Shader", "WebView and Video", "Photos"]);
+
+const groups = terminal ? allGroups.map((g) => ({ ...g, demos: g.demos.filter((demo) => !TERMINAL_HIDDEN.has(demo.name)) })) : allGroups;
 
 /** The subheadings Elements lists its demos under. */
 const parts = new Map<DemoEntry, string>([...primitives.map((d) => [d, "Primitives"] as const), ...components.map((d) => [d, "Components"] as const)]);
@@ -265,7 +271,7 @@ function SidebarRow(props: { demo: DemoEntry; focused: boolean; onLayout: (bound
         accessibilityState={{ selected: active() }}
         style={{ height: TERMINAL_ROW, flexDirection: "row", alignItems: "center", paddingHorizontal: TERMINAL_COLUMN }}
       >
-        <Text style={{ numberOfLines: 1, flex: 1, fontSize: 14, fontWeight: active() ? "600" : "400", color: active() ? colors.text : colors.muted }}>
+        <Text style={{ numberOfLines: 1, flex: 1, fontSize: 14, fontWeight: active() ? "600" : "400", color: colors.text }}>
           {props.demo.name}
         </Text>
       </View>
@@ -394,12 +400,19 @@ function DemoList() {
     >
       <View focusable={true} onFocus={() => focused.set(true)} onBlur={() => focused.set(false)} style={{ paddingBottom: terminal ? 0 : 12 }}>
         <Each of={found()}>
-          {(group) => (
+          {(group, g) => (
+            // In the terminal a blank row parts the groups (a row of its own: the
+            // sidebar's edge is a border, inside which margins take no rows), titles
+            // and subheadings are faint (a subheading italic too), so neither
+            // reads as one more demo.
             <View onLayout={({ bounds }) => groupTops.set(group().title, bounds.origin.y)} style={{ gap: terminal ? 0 : 1 }}>
+              <If when={terminal && g() > 0}>
+                <View style={{ height: TERMINAL_ROW }} />
+              </If>
               <Text
                 style={[
                   { fontSize: 11, fontWeight: "600", color: colors.muted, letterSpacing: 0.4 },
-                  terminal ? { height: TERMINAL_ROW, paddingHorizontal: TERMINAL_COLUMN } : { paddingHorizontal: 20, paddingTop: 14, paddingBottom: 4 },
+                  terminal ? { height: TERMINAL_ROW, paddingHorizontal: TERMINAL_COLUMN, fontWeight: "400", color: colors.faint } : { paddingHorizontal: 20, paddingTop: 14, paddingBottom: 4 },
                 ]}
               >
                 {group().title.toUpperCase()}
@@ -407,12 +420,15 @@ function DemoList() {
               <Each of={runs(group().demos)}>
                 {(run, r) => (
                   <>
+                    <If when={terminal && r() > 0 && run().title}>
+                      <View style={{ height: TERMINAL_ROW }} />
+                    </If>
                     <If when={run().title}>
                       {(title) => (
                         <Text
                           style={[
                             { fontSize: 12, fontWeight: "500", color: colors.faint },
-                            terminal ? { height: TERMINAL_ROW, paddingHorizontal: TERMINAL_COLUMN } : { paddingHorizontal: 20, paddingTop: r() === 0 ? 2 : 10, paddingBottom: 3 },
+                            terminal ? { height: TERMINAL_ROW, paddingHorizontal: TERMINAL_COLUMN, fontStyle: "italic" } : { paddingHorizontal: 20, paddingTop: r() === 0 ? 2 : 10, paddingBottom: 3 },
                           ]}
                         >
                           {title()}

@@ -2077,7 +2077,8 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
   }
 
   /** The chips of a combobox's values, under its row: they pop in, and the others close up as one goes. */
-  const chips = { flexDirection: "row" as const, flexWrap: "wrap" as const, gap: 6 };
+  // A terminal keeps two Cells between the chips, whose × is pressed.
+  const chips = { flexDirection: "row" as const, flexWrap: "wrap" as const, gap: terminal ? TERMINAL_GAP : 6 };
 
   function People() {
     const people = signal<string[]>(["ada", "grace"]);
@@ -2770,7 +2771,8 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
     const free = () => (day() ? SLOTS.filter((_, i) => !slotTaken(day()!, i)).length : 0);
     /** A time's chip: raised while free, in the accent while chosen (faded), struck through while taken. */
     const chip = (on: boolean) => ({
-      width: pointer ? 62 : ("31.5%" as const),
+      // A terminal's chips are as wide as their text, two Cells apart.
+      width: terminal ? undefined : pointer ? 62 : ("31.5%" as const),
       height: pointer ? 30 : 40,
       alignItems: "center" as const,
       justifyContent: "center" as const,
@@ -2803,7 +2805,7 @@ export function Controls(props: { show: Control; firsts?: Control[] }) {
           />
         </View>
         <View style={settle(t)}>
-          <RadioGroup style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, justifyContent: pointer ? "flex-start" : "space-between" }}>
+          <RadioGroup style={{ flexDirection: "row", flexWrap: "wrap", gap: terminal ? TERMINAL_GAP : 6, justifyContent: pointer ? "flex-start" : "space-between" }}>
             <Each of={SLOTS}>
               {(s, i) => (
                 <Radio

@@ -126,8 +126,10 @@ pub(crate) fn StockView(props: StockViewProps, cx: Scope<NoEvent>) -> impl IntoE
     .px_4()
     .pt_2()
     .pb(move || {
+        // Room for the trade bar over the content (a terminal's is below
+        // it).
         if terminal() {
-            px(3.0 * TERMINAL_ROW)
+            px(0.0)
         } else {
             px(96.0 + bottom())
         }
@@ -183,12 +185,10 @@ pub(crate) fn StockView(props: StockViewProps, cx: Scope<NoEvent>) -> impl IntoE
             .child(footer)
     };
     let change = computed(move || quote.get().percent());
-    // The trade bar, over the content.
+    // The trade bar, over the content; below it in a terminal, which draws
+    // nothing through it.
     let bar = view()
-        .absolute()
-        .left_0()
-        .right_0()
-        .bottom_0()
+        .when(!terminal(), |v| v.absolute().left_0().right_0().bottom_0())
         .flex_row()
         .items_center()
         .when(!terminal(), |v| {
@@ -201,8 +201,8 @@ pub(crate) fn StockView(props: StockViewProps, cx: Scope<NoEvent>) -> impl IntoE
                 .finish(Finish::Glass)
                 .when_some(Finish::Glass.border_color(), |v, c| v.border_t_color(c))
         })
-        // The terminal blurs nothing: the bar hides what scrolls under it,
-        // and its rule is a row of its own (the rest of it is padding).
+        // Its rule is a row of its own in a terminal (the rest of it is
+        // padding).
         .when(terminal(), |v| {
             v.gap(px(2.0 * TERMINAL_COLUMN))
                 .px(px(TERMINAL_COLUMN))

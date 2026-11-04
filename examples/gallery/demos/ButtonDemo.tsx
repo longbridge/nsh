@@ -179,9 +179,11 @@ function FillButton(props: {
   );
 }
 
-/** The menu's popup on desktops (one edge, a soft shadow), a sheet at the bottom on touch screens. */
+/** The menu's popup on desktops (one edge, a soft shadow), a sheet at the bottom on touch screens; in a terminal its frame alone, the items a Cell from it. */
 const menuSurface = () =>
-  pointer
+  terminal
+    ? { borderRadius: 10, borderWidth: 1, ...finish.menu }
+    : pointer
     ? { borderRadius: 10, borderWidth: 1, padding: 4, minWidth: 260, ...finish.menu }
     : { backgroundColor: colors.surface, borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingHorizontal: 10, paddingTop: 10, paddingBottom: 34 };
 
@@ -363,7 +365,7 @@ export function ButtonDemo() {
                   hoverStyle={{ backgroundColor: alpha("#ffffff", 0.12) }}
                   activeStyle={{ backgroundColor: alpha("#000000", 0.08) }}
                   focusStyle={focusRing(-2)}
-                  style={{ ...half, width: pointer ? 26 : 40, backgroundColor: open() ? alpha("#000000", 0.1) : "transparent" }}
+                  style={{ ...half, ...(terminal ? { paddingHorizontal: 8 } : { width: pointer ? 26 : 40 }), backgroundColor: open() ? alpha("#000000", 0.1) : "transparent" }}
                 >
                   <View style={{ alignSelf: "stretch", flexGrow: 1, alignItems: "center", justifyContent: "center", transform: [{ rotate: open() ? "180deg" : "0deg" }], transitionProperty: "transform", transitionDuration: reduceMotion() ? 0 : 180 }}>
                     <Icon name="chevron-down" size={pointer ? 12 : 14} tint={state() === "done" ? colors.up : colors.onAccent} weight={2} />
@@ -381,14 +383,14 @@ export function ButtonDemo() {
                     }}
                     hoverStyle={{ backgroundColor: token("accent") }}
                     activeStyle={{ backgroundColor: alpha(colors.text, 0.1) }}
-                    style={{ flexDirection: "row", alignItems: "flex-start", gap: 10, paddingHorizontal: 8, paddingVertical: pointer ? 6 : 10, borderRadius: pointer ? 6 : 10 }}
+                    style={{ flexDirection: "row", alignItems: "flex-start", gap: terminal ? 8 : 10, paddingHorizontal: terminal ? 0 : 8, paddingVertical: pointer ? 6 : 10, borderRadius: pointer ? 6 : 10 }}
                   >
-                    <View style={{ flexGrow: 1, flexShrink: 1, gap: 2 }}>
+                    <View style={{ flexGrow: 1, flexShrink: 1, gap: 2, paddingLeft: terminal ? 8 : 0 }}>
                       <Text style={{ fontSize: pointer ? 13 : 16, fontWeight: "500", color: colors.text }}>{s().label}</Text>
                       <Text style={{ fontSize: pointer ? 12 : 14, color: colors.muted }}>{s().note}</Text>
                     </View>
                     {/* The check at the trailing edge, as every menu's. */}
-                    <View style={{ width: 16, paddingTop: 1, alignItems: "center" }}>
+                    <View style={{ width: 16, paddingTop: terminal ? 0 : 1, paddingRight: terminal ? 8 : 0, alignItems: "center" }}>
                       <If when={strategy().value === s().value}>
                         <Icon name="check" size={14} tint={colors.accent} weight={2} />
                       </If>
@@ -635,7 +637,8 @@ export function ButtonDemo() {
     );
   }
 
-  return <DemoPage cards={[Kinds, Split, Loading, Icons, Hold, Copy, Sizes, Disabled, Last]} />;
+  // A terminal's buttons are all one row, so it has no sizes to show.
+  return <DemoPage cards={terminal ? [Kinds, Split, Loading, Icons, Hold, Copy, Disabled, Last] : [Kinds, Split, Loading, Icons, Hold, Copy, Sizes, Disabled, Last]} />;
 }
 
 /** A label and its switch. */

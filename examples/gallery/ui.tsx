@@ -225,6 +225,10 @@ export function DemoPage(props: {
       </Appear>
     );
   const wide = desktop();
+  // The desktop's cards are made once and moved between the columns when
+  // their count changes (a window resized), so what they hold (an open
+  // sheet, a field's text, a list's scroll) stays.
+  const made = wide ? props.cards.map((body, i) => card(body, i)) : [];
   // Read in the layout below: it is rebuilt only when the count changes.
   // One section shown (`focusedSection`) takes the pane's width.
   const columns = computed(() => (focusedSection() == null ? columnsFor(360, props.columns ?? 2) : 1));
@@ -267,7 +271,7 @@ export function DemoPage(props: {
                   card's header caption is not read as the next card's. */}
               <View style={{ flexDirection: "row", alignItems: "flex-start", gap: terminal ? 3 * TERMINAL_COLUMN : 20 }}>
                 {Array.from({ length: n }, (_, column) => (
-                  <View style={{ flex: 1, minWidth: 0, gap: terminal ? TERMINAL_ROW : 24 }}>{props.cards.map((body, i) => (i % n === column ? card(body, i) : null))}</View>
+                  <View style={{ flex: 1, minWidth: 0, gap: terminal ? TERMINAL_ROW : 24 }}>{made.map((element, i) => (i % n === column ? element : null))}</View>
                 ))}
               </View>
             </View>

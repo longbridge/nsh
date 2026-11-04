@@ -43,11 +43,14 @@ function Grid() {
   const last = signal(-1);
   let list!: ListRef;
   const wide = desktop();
-  const grid = (columns: number) => (
+  // Changed in place when a resize fits more or fewer: the list keeps its
+  // scroll and its items.
+  const columns = wide ? computed(() => columnsFor(130, 10, undefined, 12)) : () => 3;
+  return (
     <List
       ref={list}
       each={items}
-      numColumns={columns}
+      numColumns={columns()}
       estimatedItemSize={110}
       style={{ flex: 1 }}
       contentStyle={terminal ? { paddingHorizontal: TERMINAL_COLUMN, paddingBottom: TERMINAL_ROW, gap: TERMINAL_ROW } : wide ? { padding: 24, gap: 12 } : { padding: 16, gap: 8 }}
@@ -81,7 +84,7 @@ function Grid() {
                 </Text>
               </Text>
             </View>
-            <Text style={{ fontSize: 13, color: colors.faint, paddingBottom: terminal ? 0 : 6 }}>{`90 items, ${columns} columns`}</Text>
+            <Text style={{ fontSize: 13, color: colors.faint, paddingBottom: terminal ? 0 : 6 }}>{`90 items, ${columns()} columns`}</Text>
           </View>
           <Meter value={last() < 0 ? 0 : (last() + 1) / items.length} />
           <View style={{ flexDirection: "row", gap: 8, marginTop: terminal ? TERMINAL_ROW : 0 }}>
@@ -117,10 +120,6 @@ function Grid() {
       )}
     </List>
   );
-  if (!wide) return grid(3);
-  // Rebuilt when the number of columns changes.
-  const columns = computed(() => columnsFor(130, 10, undefined, 12));
-  return <View style={{ flex: 1 }}>{(() => grid(columns()))()}</View>;
 }
 
 const people = [

@@ -8,7 +8,7 @@ import { Text, View } from "nsh";
 import type { CommandEntry, CommandGroup } from "nsh/base";
 import { desktop, size } from "./demo";
 import { Icon, type IconName } from "./icons";
-import { colors } from "./theme";
+import { colors, terminal } from "./theme";
 
 /**
  * The classes of a palette's parts. The highlight is a tint and an inner
@@ -18,12 +18,19 @@ import { colors } from "./theme";
 export const commandClasses = {
   /** The palette's frame. */
   root: "overflow-hidden rounded-xl border border-border bg-card",
-  /** The row of the search icon, the field and the spinner. */
-  searchBar: "flex-row items-center gap-2 border-b border-border px-3",
+  /**
+   * The row of the search icon, the field and the spinner. A terminal's
+   * field is a raised band: the band spans the row, as the rows' do, and
+   * its own padding sets its text where theirs starts.
+   */
+  searchBar: `flex-row items-center gap-2 border-b border-border ${terminal ? "" : "px-3"}`,
   /** The search field. */
-  search: `flex-1 ${desktop ? "h-11 text-sm" : "h-12 text-base"} text-foreground placeholder:text-faint`,
-  /** The scroll view of the rows. */
-  list: "p-1.5",
+  search: `flex-1 ${terminal ? "px-2 " : ""}${desktop ? "h-11 text-sm" : "h-12 text-base"} text-foreground placeholder:text-faint`,
+  /**
+   * The scroll view of the rows. A terminal's rows set their text off
+   * the edge with their own padding, as the field does.
+   */
+  list: terminal ? "" : "p-1.5",
   /** A section's header. */
   group: "px-2 pt-2.5 pb-1",
   /** Between two sections. */

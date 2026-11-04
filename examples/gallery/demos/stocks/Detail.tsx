@@ -319,8 +319,8 @@ export function StockView(props: { market: Market; stock: Stock; wide?: boolean;
       style={{
         paddingHorizontal: terminal ? TERMINAL_COLUMN : 16,
         paddingTop: terminal ? 0 : 8,
-        // Room for the trade bar over the content.
-        paddingBottom: terminal ? 3 * TERMINAL_ROW : 96 + insets().bottom,
+        // Room for the trade bar over the content (a terminal's is below it).
+        paddingBottom: terminal ? 0 : 96 + insets().bottom,
         fontSize: 12,
         color: colors.faint,
         fontVariant: ["tabular-nums"],
@@ -386,10 +386,11 @@ export function StockView(props: { market: Market; stock: Stock; wide?: boolean;
           <If when={!terminal}>{footer}</If>
         </Scroll>
       </If>
-      {/* The trade bar, over the content. */}
+      {/* The trade bar, over the content; below it in a terminal, which
+          draws nothing through it. */}
       <View
         style={{
-          position: "absolute",
+          position: terminal ? "relative" : "absolute",
           left: 0,
           right: 0,
           bottom: 0,
