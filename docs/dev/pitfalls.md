@@ -576,6 +576,14 @@ Things that were found the hard way. Read the section of the area you change bef
   one width) keeps its `kern` pairs, so Arial (macOS) and Liberation Sans, Chrome's `sans-serif` on Linux, draw `11`
   1.48 px narrower than two `1`s at 20 px (Chrome 156: `$1,111.11` summed 89 from its characters, drawn 84.53). A
   figure's width adds each adjacent pair's kerning to its characters' (`css::figure_width`).
+- **Marking text tells an `NSTextView`'s delegate nothing but the selection** (macOS 27, `setMarkedText:`): no
+  `textDidChange:`, also for a field's editor, though `shouldChangeText` and `didChangeText` run. What follows the text
+  has to look on selection changes too (`text_input.rs`, `composition_changed`), or a label placeholder stays under the
+  composition and `onCompositionChange` never fires. Dropping marked text is the same, and so is its `editing` flag.
+- **AppKit's caret is as tall as a line fragment**, and a fragment with a minimum line height holds the extra space above
+  the text (15 pt system font, 24 pt lines: `NSTextInsertionIndicator` 24 tall, text 18 tall at the fragment's bottom). A
+  fragment of the font's height with `lineSpacing`, and half of it as the container's inset, gives a caret as tall as
+  the text and text in the middle of the same 24 pt lines (`LineBox`).
 
 ## Testing on simulators and emulators
 
