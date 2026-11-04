@@ -477,7 +477,8 @@ function Sidebar() {
           left: 0,
           width: SIDEBAR,
           translate: [slide, 0],
-          backgroundColor: colors.sidebar,
+          // The terminal's sidebar stands on the page's own ground, parted by its line.
+          backgroundColor: terminal ? colors.background : colors.sidebar,
           borderRightWidth: 1,
           borderRightColor: colors.sidebarBorder,
         }}
